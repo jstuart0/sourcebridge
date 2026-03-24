@@ -1,0 +1,17 @@
+{{- if .Values.surrealdb.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-surrealdb
+  labels:
+    {{- include "sourcebridge.surrealdb.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.surrealdb.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "sourcebridge.surrealdb.selectorLabels" . | nindent 4 }}
+{{- end }}

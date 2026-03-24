@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-api
+  labels:
+    {{- include "sourcebridge.api.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "sourcebridge.api.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sourcebridge.api.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.api.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ .Values.api.port | quote }}
+            {{- if .Values.surrealdb.enabled }}
+            - name: SURREALDB_URL
+              value: {{ include "sourcebridge.surrealdb.url" . }}
+            {{- end }}
+            {{- if .Values.redis.enabled }}
+            - name: REDIS_URL
+              value: {{ include "sourcebridge.redis.url" . }}
+            {{- end }}
+            {{- if .Values.secrets.create }}
+            - name: SURREALDB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sourcebridge.fullname" . }}-secrets
+                  key: surrealdb-user
+            - name: SURREALDB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sourcebridge.fullname" . }}-secrets
+                  key: surrealdb-password
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sourcebridge.fullname" . }}-secrets
+                  key: api-key
+                  optional: true
+            {{- end }}
+            {{- range $key, $value := .Values.api.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "sourcebridge.fullname" . }}-config
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}

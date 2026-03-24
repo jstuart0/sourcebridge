@@ -1,0 +1,32 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+linters-settings:
+  errcheck:
+    # Ignore unchecked errors from HTTP response writers (rarely fail, noisy to check)
+    exclude-functions:
+      - (net/http.ResponseWriter).Write
+      - (*encoding/json.Encoder).Encode
+      - (*encoding/csv.Writer).Write
+      - io.WriteString
+  staticcheck:
+    checks: ["all", "-SA1019"]  # Suppress deprecation warnings for now
+
+issues:
+  exclude-dirs:
+    - gen
+    - tests/fixtures
+  exclude-rules:
+    # Test files: relax errcheck — test helpers often ignore setup errors
+    - path: _test\.go
+      linters:
+        - errcheck

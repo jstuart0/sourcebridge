@@ -1,0 +1,85 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: "1.25"
+  NODE_VERSION: "22"
+  PYTHON_VERSION: "3.12"
+  REGISTRY: 192.168.10.222:30500
+
+jobs:
+  # Run tests first (gate deployment on passing tests)
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Test Go
+        run: go test -race ./...
+
+      - name: Test Python workers
+        working-directory: workers
+        run: |
+          uv sync --dev
+          uv run pytest -v
+
+      - name: Test Web
+        working-directory: web
+        run: |
+          npm ci
+          npm test
+
+  # Build and push images via Tekton webhook
+  # The actual build happens on-cluster via Tekton pipeline triggered by
+  # the GitHub webhook on push to main. This job just verifies the tests pass.
+  #
+  # If you need to build images from GitHub Actions directly (e.g., for
+  # a self-hosted runner with access to the local registry), uncomment below:
+  #
+  # build-and-push:
+  #   needs: test
+  #   runs-on: [self-hosted, homelab]  # Requires a self-hosted runner on the network
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Build and push API image
+  #       run: |
+  #         TAG=sha-$(git rev-parse --short HEAD)
+  #         docker build -f deploy/docker/Dockerfile.sourcebridge -t ${{ env.REGISTRY }}/sourcebridge-api:${TAG} -t ${{ env.REGISTRY }}/sourcebridge-api:latest .
+  #         docker push ${{ env.REGISTRY }}/sourcebridge-api:${TAG}
+  #         docker push ${{ env.REGISTRY }}/sourcebridge-api:latest
+  #     - name: Build and push Web image
+  #       run: |
+  #         TAG=sha-$(git rev-parse --short HEAD)
+  #         docker build -f deploy/docker/Dockerfile.web -t ${{ env.REGISTRY }}/sourcebridge-web:${TAG} -t ${{ env.REGISTRY }}/sourcebridge-web:latest .
+  #         docker push ${{ env.REGISTRY }}/sourcebridge-web:${TAG}
+  #         docker push ${{ env.REGISTRY }}/sourcebridge-web:latest
+  #     - name: Build and push Worker image
+  #       run: |
+  #         TAG=sha-$(git rev-parse --short HEAD)
+  #         docker build -f deploy/docker/Dockerfile.worker -t ${{ env.REGISTRY }}/sourcebridge-worker:${TAG} -t ${{ env.REGISTRY }}/sourcebridge-worker:latest .
+  #         docker push ${{ env.REGISTRY }}/sourcebridge-worker:${TAG}
+  #         docker push ${{ env.REGISTRY }}/sourcebridge-worker:latest
+
+  notify:
+    needs: test
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Report status
+        run: |
+          echo "Tests: ${{ needs.test.result }}"
+          echo "Tekton pipeline will handle build/push/deploy via webhook"

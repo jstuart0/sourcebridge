@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package sourcebridge.requirements.v1;
+
+option go_package = "github.com/sourcebridge/sourcebridge/gen/go/requirements/v1;requirementsv1";
+
+import "common/v1/types.proto";
+
+// RequirementsService handles requirement parsing and management
+service RequirementsService {
+  // ParseDocument extracts requirements from a document
+  rpc ParseDocument(ParseDocumentRequest) returns (ParseDocumentResponse);
+
+  // ParseCSV extracts requirements from a CSV file
+  rpc ParseCSV(ParseCSVRequest) returns (ParseCSVResponse);
+
+  // EnrichRequirement adds LLM-generated metadata to a requirement
+  rpc EnrichRequirement(EnrichRequirementRequest) returns (EnrichRequirementResponse);
+}
+
+message ParseDocumentRequest {
+  string content = 1;
+  string format = 2; // "markdown", "text", "jira", "linear"
+  string source_path = 3;
+}
+
+message ParseDocumentResponse {
+  repeated sourcebridge.common.v1.Requirement requirements = 1;
+  int32 total_found = 2;
+  repeated string warnings = 3;
+}
+
+message ParseCSVRequest {
+  string content = 1;
+  map<string, string> column_mapping = 2; // maps CSV columns to requirement fields
+  string source_path = 3;
+}
+
+message ParseCSVResponse {
+  repeated sourcebridge.common.v1.Requirement requirements = 1;
+  int32 total_found = 2;
+  int32 skipped = 3;
+  repeated string warnings = 4;
+}
+
+message EnrichRequirementRequest {
+  sourcebridge.common.v1.Requirement requirement = 1;
+}
+
+message EnrichRequirementResponse {
+  sourcebridge.common.v1.Requirement enriched = 1;
+  repeated string suggested_tags = 2;
+  string suggested_priority = 3;
+  sourcebridge.common.v1.LLMUsage usage = 4;
+}

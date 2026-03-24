@@ -1,0 +1,28 @@
+{
+  "links": [
+    {"requirement": "REQ-001", "entity": "go/main.go:StartServer", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-003", "entity": "typescript/src/api.ts:createItem", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-003", "entity": "typescript/src/api.ts:getItem", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-003", "entity": "typescript/src/api.ts:listItems", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-003", "entity": "typescript/src/api.ts:deleteItem", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-004", "entity": "typescript/src/api.ts:handleRequest", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-005", "entity": "go/payment/processor.go:validate", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-006", "entity": "typescript/src/api.ts:listItems", "type": "partially_implements", "source": "comment"},
+    {"requirement": "REQ-006", "entity": "java/src/main/java/com/example/Service.java:list", "type": "partially_implements", "source": "comment"},
+    {"requirement": "REQ-008", "entity": "typescript/src/utils.ts:isValidEmail", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-008", "entity": "rust/src/lib.rs:is_valid_identifier", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-009", "entity": "rust/src/lib.rs:normalize", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-010", "entity": "python/auth.py:AuthService", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-010", "entity": "python/auth.py:hash_password", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-011", "entity": "python/auth.py:login", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-012", "entity": "python/auth.py:register_user", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-013", "entity": "python/auth.py:validate_session", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-014", "entity": "java/src/main/java/com/example/Service.java:ingest", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-014", "entity": "java/src/main/java/com/example/Service.java:process", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-015", "entity": "java/src/main/java/com/example/Service.java:ingest", "type": "partially_implements", "source": "comment"},
+    {"requirement": "REQ-015", "entity": "rust/src/lib.rs:checksum", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-042", "entity": "go/payment/processor.go:ProcessPayment", "type": "implements", "source": "comment"},
+    {"requirement": "REQ-017", "entity": "go/payment/processor.go:ProcessPayment", "type": "partially_implements", "source": "comment"},
+    {"requirement": "REQ-043", "entity": "go/payment/processor.go:charge", "type": "implements", "source": "comment"}
+  ]
+}

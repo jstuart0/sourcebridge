@@ -1,0 +1,51 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Your release is named: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+== Components Deployed ==
+
+  API Server:    {{ include "sourcebridge.fullname" . }}-api
+  Web Frontend:  {{ include "sourcebridge.fullname" . }}-web
+  Worker:        {{ include "sourcebridge.fullname" . }}-worker
+{{- if .Values.surrealdb.enabled }}
+  SurrealDB:     {{ include "sourcebridge.fullname" . }}-surrealdb
+{{- end }}
+{{- if .Values.redis.enabled }}
+  Redis:         {{ include "sourcebridge.fullname" . }}-redis
+{{- end }}
+
+== Accessing SourceBridge.ai ==
+
+{{- if .Values.ingress.enabled }}
+
+SourceBridge.ai is available at:
+{{- if .Values.global.tls.enabled }}
+  https://{{ .Values.global.domain }}
+{{- else }}
+  http://{{ .Values.global.domain }}
+{{- end }}
+
+{{- else }}
+
+To access SourceBridge.ai, set up port forwarding:
+
+  # Web UI
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "sourcebridge.fullname" . }}-web {{ .Values.web.service.port }}:{{ .Values.web.service.port }}
+
+  # API
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "sourcebridge.fullname" . }}-api {{ .Values.api.service.port }}:{{ .Values.api.service.port }}
+
+Then open http://localhost:{{ .Values.web.service.port }} in your browser.
+
+{{- end }}
+
+== Configuration ==
+
+To view the current configuration:
+  helm get values {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+To upgrade the release:
+  helm upgrade {{ .Release.Name }} sourcebridge/ -n {{ .Release.Namespace }} -f my-values.yaml
+
+For more information, visit: https://github.com/sourcebridge/sourcebridge

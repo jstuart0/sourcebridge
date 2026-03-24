@@ -1,0 +1,28 @@
+{
+  "go/main.go": {
+    "structs": ["Config"],
+    "functions": ["NewConfig", "Validate", "StartServer", "main"]
+  },
+  "go/payment/processor.go": {
+    "structs": ["Order", "Receipt"],
+    "functions": ["ProcessPayment", "validate", "requireApproval", "charge"]
+  },
+  "python/auth.py": {
+    "classes": ["User", "Session", "AuthService"],
+    "functions": ["hash_password", "verify_password", "register_user", "login", "validate_session", "logout"]
+  },
+  "typescript/src/api.ts": {
+    "interfaces": ["ApiRequest", "ApiResponse", "Item"],
+    "functions": ["createItem", "getItem", "listItems", "deleteItem", "handleRequest"]
+  },
+  "typescript/src/utils.ts": {
+    "functions": ["formatDate", "isValidEmail", "slugify", "truncate"]
+  },
+  "java/src/main/java/com/example/Service.java": {
+    "classes": ["Service", "Record"],
+    "functions": ["ingest", "process", "get", "list"]
+  },
+  "rust/src/lib.rs": {
+    "functions": ["is_valid_identifier", "normalize", "checksum"]
+  }
+}

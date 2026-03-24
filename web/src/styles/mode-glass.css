@@ -1,0 +1,23 @@
+:root[data-ui-mode="glass"] {
+  --panel-radius: 28px;
+  --control-radius: 16px;
+
+  --panel-bg: color-mix(in oklab, var(--bg-surface) 70%, transparent);
+  --panel-bg-elevated: color-mix(in oklab, var(--bg-elevated) 72%, transparent);
+  --panel-bg-glass: color-mix(in oklab, var(--bg-surface) 48%, transparent);
+  --panel-border: color-mix(in oklab, var(--text-primary) 10%, var(--border-default));
+  --panel-border-strong: color-mix(in oklab, var(--text-primary) 15%, var(--border-strong));
+  --panel-shadow: 0 18px 46px rgba(15, 23, 42, 0.16);
+  --panel-shadow-soft: 0 12px 30px rgba(15, 23, 42, 0.12);
+  --panel-shadow-strong: 0 24px 60px rgba(15, 23, 42, 0.22);
+  --panel-blur: 18px;
+
+  --nav-bg: color-mix(in oklab, var(--bg-surface) 66%, transparent);
+  --nav-item-bg-active: color-mix(in oklab, var(--accent-primary) 20%, transparent);
+  --nav-item-border: color-mix(in oklab, var(--text-primary) 18%, transparent);
+
+  --shell-backdrop:
+    radial-gradient(circle at 15% 20%, color-mix(in oklab, var(--accent-primary) 18%, transparent), transparent 24%),
+    radial-gradient(circle at 85% 12%, color-mix(in oklab, var(--text-primary) 8%, transparent), transparent 22%),
+    linear-gradient(180deg, var(--bg-base) 0%, var(--bg-base-alt) 100%);
+}

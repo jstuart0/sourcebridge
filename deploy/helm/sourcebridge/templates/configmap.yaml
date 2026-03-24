@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-config
+  labels:
+    {{- include "sourcebridge.labels" . | nindent 4 }}
+data:
+  SOURCEBRIDGE_SERVER_HTTP_PORT: {{ .Values.api.port | quote }}
+  SOURCEBRIDGE_SERVER_PUBLIC_BASE_URL: "https://{{ .Values.global.domain }}"
+  {{- if .Values.surrealdb.enabled }}
+  SOURCEBRIDGE_STORAGE_SURREAL_MODE: "external"
+  SOURCEBRIDGE_STORAGE_SURREAL_URL: "ws://{{ include "sourcebridge.fullname" . }}-surrealdb:{{ .Values.surrealdb.port }}"
+  SOURCEBRIDGE_STORAGE_SURREAL_NAMESPACE: "sourcebridge"
+  SOURCEBRIDGE_STORAGE_SURREAL_DATABASE: "main"
+  {{- end }}
+  {{- if .Values.redis.enabled }}
+  SOURCEBRIDGE_STORAGE_REDIS_MODE: "external"
+  SOURCEBRIDGE_STORAGE_REDIS_URL: "redis://{{ include "sourcebridge.fullname" . }}-redis:{{ .Values.redis.port }}"
+  {{- else }}
+  SOURCEBRIDGE_STORAGE_REDIS_MODE: "memory"
+  {{- end }}
+  SOURCEBRIDGE_WORKER_GRPC_ADDRESS: "{{ include "sourcebridge.fullname" . }}-worker:50051"
+  {{- range $key, $value := .Values.worker.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}

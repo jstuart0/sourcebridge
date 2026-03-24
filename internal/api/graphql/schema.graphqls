@@ -1,0 +1,745 @@
+# CodeAware GraphQL Schema
+# Phase 1: Foundation types and queries
+# Subsequent phases add fields and resolvers
+
+scalar Time
+
+type Query {
+  # Phase 1: Health and meta
+  health: HealthStatus!
+  version: VersionInfo!
+
+  # Phase 1: Feature flags
+  features: Features!
+  ideCapabilities: IDECapabilities!
+
+  # Phase 2: Repositories (stubs in Phase 1)
+  repositories: [Repository!]!
+  repository(id: ID!): Repository
+
+  # Phase 2: Code symbols (stubs in Phase 1)
+  symbols(repositoryId: ID!, query: String, filePath: String, kind: SymbolKind, limit: Int, offset: Int): SymbolConnection!
+
+  # Phase 3: Requirements (stubs in Phase 1)
+  requirements(repositoryId: ID!, limit: Int, offset: Int): RequirementConnection!
+  requirement(id: ID!): Requirement
+
+  # Phase 4: Traceability
+  search(query: String!, repositoryId: ID, limit: Int): [SearchResult!]!
+  traceabilityMatrix(repositoryId: ID!): TraceabilityMatrix!
+  requirementToCode(requirementId: ID!): [RequirementLink!]!
+  codeToRequirements(symbolId: ID!): [RequirementLink!]!
+  sourceFile(repositoryId: ID!, filePath: String!): SourceFileResult!
+
+  # Knowledge engine queries
+  knowledgeArtifacts(repositoryId: ID!, scopeType: KnowledgeScopeType, scopePath: String): [KnowledgeArtifact!]!
+  knowledgeArtifact(id: ID!): KnowledgeArtifact
+  knowledgeScopeChildren(
+    repositoryId: ID!
+    scopeType: KnowledgeScopeType!
+    scopePath: String!
+    audience: KnowledgeAudience
+    depth: KnowledgeDepth
+  ): [ScopeChild!]!
+  executionEntryPoints(repositoryId: ID!): [ExecutionEntryPoint!]!
+  executionPath(input: ExecutionPathInput!): ExecutionPathResult
+
+  # AI-generated code detection
+  aiGeneratedFiles(repositoryId: ID!, minScore: Float): [File!]!
+
+  # Understanding score
+  understandingScore(repositoryId: ID!): UnderstandingScore!
+
+  # Change impact analysis
+  latestImpactReport(repositoryId: ID!): ImpactReport
+  impactReports(repositoryId: ID!, limit: Int): [ImpactReport!]!
+
+  # Phase 17: Analytics
+  llmUsage(repositoryId: ID, limit: Int): [LLMUsageEntry!]!
+  platformStats: PlatformStats!
+}
+
+type Mutation {
+  # Phase 2: Repository management
+  addRepository(input: AddRepositoryInput!): Repository!
+  removeRepository(id: ID!): Boolean!
+  reindexRepository(id: ID!): Repository!
+
+  # Phase 3: Requirement import (stubs in Phase 1)
+  importRequirements(input: ImportRequirementsInput!): ImportResult!
+
+  # Phase 4: Link management
+  verifyLink(linkId: ID!, verified: Boolean!): RequirementLink!
+  createManualLink(input: CreateManualLinkInput!): RequirementLink!
+
+  # Phase 5: AI-powered operations
+  analyzeSymbol(repositoryId: ID!, symbolId: ID!): AnalysisResult!
+  discussCode(input: DiscussCodeInput!): DiscussionResult!
+  reviewCode(input: ReviewCodeInput!): ReviewResult!
+  autoLinkRequirements(repositoryId: ID!, minConfidence: Float): AutoLinkResult!
+  enrichRequirement(requirementId: ID!): Requirement!
+
+  # Knowledge engine mutations
+  generateCliffNotes(input: GenerateCliffNotesInput!): KnowledgeArtifact!
+  generateLearningPath(input: GenerateLearningPathInput!): KnowledgeArtifact!
+  generateCodeTour(input: GenerateCodeTourInput!): KnowledgeArtifact!
+  generateWorkflowStory(input: GenerateWorkflowStoryInput!): KnowledgeArtifact!
+  explainSystem(input: ExplainSystemInput!): ExplainSystemResult!
+  refreshKnowledgeArtifact(id: ID!): KnowledgeArtifact!
+}
+
+# Health and system types
+
+type HealthStatus {
+  status: String!
+  services: [ServiceHealth!]!
+}
+
+type ServiceHealth {
+  name: String!
+  status: String!
+}
+
+type VersionInfo {
+  version: String!
+  commit: String!
+  buildDate: String!
+}
+
+type Features {
+  multiTenant: Boolean!
+  sso: Boolean!
+  linearConnector: Boolean!
+  jiraConnector: Boolean!
+  githubApp: Boolean!
+  gitlabApp: Boolean!
+  auditLog: Boolean!
+  webhooks: Boolean!
+  customTemplates: Boolean!
+  billing: Boolean!
+  # Knowledge engine features
+  cliffNotes: Boolean!
+  learningPaths: Boolean!
+  codeTours: Boolean!
+  systemExplain: Boolean!
+  symbolScopedAnalysis: Boolean!
+  multiAudienceKnowledge: Boolean!
+  customKnowledgeTemplates: Boolean!
+  advancedLearningPaths: Boolean!
+  slideGeneration: Boolean!
+  podcastGeneration: Boolean!
+  knowledgeScheduling: Boolean!
+  knowledgeExport: Boolean!
+}
+
+type IDECapabilities {
+  repoKnowledge: Boolean!
+  scopedKnowledge: Boolean!
+  scopedExplain: Boolean!
+  impactReports: Boolean!
+  discussCode: Boolean!
+  reviewCode: Boolean!
+  vscode: Boolean!
+  jetbrains: Boolean!
+}
+
+# Repository types
+
+type Repository {
+  id: ID!
+  name: String!
+  path: String!
+  remoteUrl: String
+  commitSha: String
+  branch: String
+  hasAuth: Boolean!
+  status: RepositoryStatus!
+  fileCount: Int!
+  functionCount: Int!
+  classCount: Int!
+  requirementCount: Int!
+  lastIndexedAt: Time
+  createdAt: Time!
+  files(limit: Int, offset: Int, path: String): FileConnection!
+  modules: [Module!]!
+  understandingScore: UnderstandingScore
+}
+
+enum RepositoryStatus {
+  PENDING
+  INDEXING
+  READY
+  ERROR
+}
+
+type File {
+  id: ID!
+  path: String!
+  language: Language!
+  lineCount: Int!
+  aiScore: Float!
+  aiSignals: [String!]!
+  symbols: [CodeSymbol!]!
+}
+
+type SourceFile {
+  repositoryId: ID!
+  filePath: String!
+  language: Language!
+  lineCount: Int!
+  content: String!
+  contentHash: String
+}
+
+type SourceFileResult {
+  ok: Boolean!
+  errorCode: String
+  message: String
+  file: SourceFile
+}
+
+type Module {
+  id: ID!
+  name: String!
+  path: String!
+  fileCount: Int!
+}
+
+# Symbol types
+
+type CodeSymbol {
+  id: ID!
+  name: String!
+  qualifiedName: String!
+  kind: SymbolKind!
+  language: Language!
+  filePath: String!
+  startLine: Int!
+  endLine: Int!
+  signature: String
+  docComment: String
+  callers: [CodeSymbol!]!
+  callees: [CodeSymbol!]!
+  requirements: [RequirementLink!]!
+}
+
+type SymbolConnection {
+  nodes: [CodeSymbol!]!
+  totalCount: Int!
+}
+
+type FileConnection {
+  nodes: [File!]!
+  totalCount: Int!
+}
+
+enum SymbolKind {
+  FUNCTION
+  METHOD
+  CLASS
+  STRUCT
+  INTERFACE
+  ENUM
+  CONSTANT
+  VARIABLE
+  MODULE
+  PACKAGE
+  TYPE
+  TEST
+}
+
+enum Language {
+  GO
+  PYTHON
+  TYPESCRIPT
+  JAVASCRIPT
+  JAVA
+  RUST
+  CSHARP
+  CPP
+  RUBY
+  PHP
+  UNKNOWN
+}
+
+# Requirement types
+
+type Requirement {
+  id: ID!
+  externalId: String
+  title: String!
+  description: String!
+  source: String!
+  priority: String
+  tags: [String!]!
+  links: [RequirementLink!]!
+  createdAt: Time!
+  updatedAt: Time
+}
+
+type RequirementConnection {
+  nodes: [Requirement!]!
+  totalCount: Int!
+}
+
+type RequirementLink {
+  id: ID!
+  requirementId: ID!
+  symbolId: ID!
+  confidence: Confidence!
+  rationale: String
+  verified: Boolean!
+  verifiedBy: String
+  symbol: CodeSymbol
+  requirement: Requirement
+  createdAt: Time!
+}
+
+enum Confidence {
+  LOW
+  MEDIUM
+  HIGH
+  VERIFIED
+}
+
+# Traceability types
+
+type TraceabilityMatrix {
+  requirements: [Requirement!]!
+  symbols: [CodeSymbol!]!
+  links: [RequirementLink!]!
+  coverage: Float!
+}
+
+# Input types
+
+input AddRepositoryInput {
+  name: String!
+  path: String!
+  token: String
+}
+
+input ImportRequirementsInput {
+  repositoryId: ID!
+  content: String!
+  format: RequirementFormat!
+  sourcePath: String
+}
+
+input CreateManualLinkInput {
+  repositoryId: ID!
+  requirementId: ID!
+  symbolId: ID!
+  rationale: String
+}
+
+input GenerateCliffNotesInput {
+  repositoryId: ID!
+  audience: KnowledgeAudience
+  depth: KnowledgeDepth
+  scopeType: KnowledgeScopeType
+  scopePath: String
+}
+
+input GenerateLearningPathInput {
+  repositoryId: ID!
+  audience: KnowledgeAudience
+  depth: KnowledgeDepth
+  focusArea: String
+}
+
+input GenerateCodeTourInput {
+  repositoryId: ID!
+  audience: KnowledgeAudience
+  depth: KnowledgeDepth
+  theme: String
+}
+
+input GenerateWorkflowStoryInput {
+  repositoryId: ID!
+  audience: KnowledgeAudience
+  depth: KnowledgeDepth
+  scopeType: KnowledgeScopeType
+  scopePath: String
+  anchorLabel: String
+  executionPathJson: String
+}
+
+input ExplainSystemInput {
+  repositoryId: ID!
+  audience: KnowledgeAudience
+  question: String
+  scopeType: KnowledgeScopeType
+  scopePath: String
+}
+
+input ExecutionPathInput {
+  repositoryId: ID!
+  entryKind: ExecutionEntryKind!
+  entryValue: String!
+  maxDepth: Int
+}
+
+type ExplainSystemResult {
+  explanation: String!
+  model: String
+  inputTokens: Int
+  outputTokens: Int
+}
+
+type ExecutionEntryPoint {
+  kind: ExecutionEntryKind!
+  label: String!
+  value: String!
+  filePath: String
+  lineStart: Int
+  lineEnd: Int
+  symbolId: ID
+  summary: String
+}
+
+type ExecutionPathResult {
+  entryKind: ExecutionEntryKind!
+  entryLabel: String!
+  message: String
+  trustQualified: Boolean!
+  observedStepCount: Int!
+  inferredStepCount: Int!
+  steps: [ExecutionPathStep!]!
+}
+
+type ExecutionPathStep {
+  orderIndex: Int!
+  kind: String!
+  label: String!
+  explanation: String!
+  confidence: String!
+  observed: Boolean!
+  reason: String
+  filePath: String
+  lineStart: Int
+  lineEnd: Int
+  symbolId: ID
+  symbolName: String
+}
+
+enum RequirementFormat {
+  MARKDOWN
+  CSV
+}
+
+enum ExecutionEntryKind {
+  ROUTE
+  FILE
+  SYMBOL
+}
+
+type ImportResult {
+  imported: Int!
+  skipped: Int!
+  warnings: [String!]!
+}
+
+# AI input types
+
+input DiscussCodeInput {
+  repositoryId: ID!
+  question: String!
+  filePath: String       # repository-relative POSIX path
+  code: String           # selected code snippet (preferred over filePath)
+  language: Language
+  artifactId: ID
+  symbolId: ID
+  conversationHistory: [String!]
+}
+
+input ReviewCodeInput {
+  repositoryId: ID!
+  filePath: String!      # repository-relative POSIX path
+  template: String!      # security, solid, performance, reliability, maintainability
+  code: String           # current editor contents (preferred over server file read)
+  language: Language
+}
+
+# AI result types
+
+type AnalysisResult {
+  summary: String!
+  purpose: String!
+  concerns: [String!]!
+  suggestions: [String!]!
+  model: String
+  inputTokens: Int
+  outputTokens: Int
+}
+
+type DiscussionResult {
+  answer: String!
+  references: [String!]!
+  relatedRequirements: [String!]!
+  model: String
+  inputTokens: Int
+  outputTokens: Int
+}
+
+type ReviewFinding {
+  category: String!
+  severity: String!
+  message: String!
+  filePath: String
+  startLine: Int
+  endLine: Int
+  suggestion: String
+}
+
+type ReviewResult {
+  template: String!
+  findings: [ReviewFinding!]!
+  score: Float!
+  model: String
+  inputTokens: Int
+  outputTokens: Int
+}
+
+type AutoLinkResult {
+  linksCreated: Int!
+  requirementsProcessed: Int!
+  links: [RequirementLink!]!
+}
+
+type SearchResult {
+  type: String!
+  id: ID!
+  title: String!
+  description: String
+  filePath: String
+  line: Int
+  repositoryId: ID!
+  repositoryName: String!
+}
+
+# Understanding score types
+
+type UnderstandingScore {
+  overall: Float!
+  traceabilityCoverage: Float!
+  documentationCoverage: Float!
+  reviewCoverage: Float!
+  testCoverage: Float!
+  knowledgeFreshness: Float!
+  aiCodeRatio: Float!
+  computedAt: Time!
+}
+
+# Analytics types
+
+type LLMUsageEntry {
+  id: ID!
+  provider: String!
+  model: String!
+  operation: String!
+  inputTokens: Int!
+  outputTokens: Int!
+  createdAt: Time!
+}
+
+type PlatformStats {
+  repositories: Int!
+  files: Int!
+  symbols: Int!
+  requirements: Int!
+  links: Int!
+  totalInputTokens: Int!
+  totalOutputTokens: Int!
+}
+
+# ---------------------------------------------------------------------------
+# Knowledge Engine types
+# ---------------------------------------------------------------------------
+
+enum KnowledgeArtifactType {
+  CLIFF_NOTES
+  LEARNING_PATH
+  CODE_TOUR
+  WORKFLOW_STORY
+}
+
+enum KnowledgeArtifactStatus {
+  PENDING
+  GENERATING
+  READY
+  FAILED
+  STALE
+}
+
+enum KnowledgeAudience {
+  BEGINNER
+  DEVELOPER
+}
+
+enum KnowledgeDepth {
+  SUMMARY
+  MEDIUM
+  DEEP
+}
+
+enum KnowledgeScopeType {
+  REPOSITORY
+  MODULE
+  FILE
+  SYMBOL
+}
+
+enum KnowledgeConfidence {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum EvidenceSourceType {
+  REPOSITORY
+  FILE
+  SYMBOL
+  REQUIREMENT
+  LINK
+  TEST
+  COMMIT
+  DOCUMENTATION
+}
+
+type SourceRevision {
+  commitSha: String
+  branch: String
+  contentFingerprint: String
+  docsFingerprint: String
+}
+
+type KnowledgeArtifact {
+  id: ID!
+  repositoryId: ID!
+  type: KnowledgeArtifactType!
+  audience: KnowledgeAudience!
+  depth: KnowledgeDepth!
+  scope: KnowledgeScope!
+  status: KnowledgeArtifactStatus!
+  progress: Float!
+  sourceRevision: SourceRevision!
+  stale: Boolean!
+  generatedAt: Time
+  createdAt: Time!
+  updatedAt: Time!
+  sections: [KnowledgeSection!]!
+}
+
+type KnowledgeScope {
+  scopeType: KnowledgeScopeType!
+  scopePath: String!
+  modulePath: String
+  filePath: String
+  symbolName: String
+}
+
+type ScopeChild {
+  scopeType: KnowledgeScopeType!
+  label: String!
+  scopePath: String!
+  hasArtifact: Boolean!
+  summary: String
+}
+
+type KnowledgeSection {
+  id: ID!
+  artifactId: ID!
+  title: String!
+  content: String!
+  summary: String
+  confidence: KnowledgeConfidence!
+  inferred: Boolean!
+  orderIndex: Int!
+  evidence: [KnowledgeEvidence!]!
+}
+
+type KnowledgeEvidence {
+  id: ID!
+  sectionId: ID!
+  sourceType: EvidenceSourceType!
+  sourceId: ID!
+  filePath: String
+  lineStart: Int
+  lineEnd: Int
+  rationale: String
+  metadata: String
+}
+
+type LearningPathStep {
+  title: String!
+  description: String!
+  targetFiles: [String!]!
+  targetSymbols: [String!]!
+  difficulty: String!
+  orderIndex: Int!
+  evidence: [KnowledgeEvidence!]!
+}
+
+type CodeTourStop {
+  title: String!
+  description: String!
+  filePath: String!
+  lineStart: Int!
+  lineEnd: Int!
+  orderIndex: Int!
+  evidence: [KnowledgeEvidence!]!
+}
+
+# Change Impact Analysis types
+
+enum DiffStatus { ADDED MODIFIED DELETED RENAMED }
+enum SymbolChangeType { ADDED MODIFIED REMOVED }
+
+type FileDiff {
+  path: String!
+  oldPath: String
+  status: DiffStatus!
+  additions: Int!
+  deletions: Int!
+}
+
+type SymbolChange {
+  symbolId: String
+  name: String!
+  filePath: String!
+  changeType: SymbolChangeType!
+  oldSignature: String
+  newSignature: String
+}
+
+type ImpactAffectedLink {
+  linkId: String!
+  requirementId: String!
+  symbolId: String!
+  impact: String!
+  confidence: Float!
+}
+
+type ImpactAffectedRequirement {
+  requirementId: String!
+  externalId: String!
+  title: String!
+  affectedLinks: Int!
+  totalLinks: Int!
+}
+
+type ImpactReport {
+  id: ID!
+  repositoryId: String!
+  oldCommitSha: String
+  newCommitSha: String
+  filesChanged: [FileDiff!]!
+  symbolsAdded: [SymbolChange!]!
+  symbolsModified: [SymbolChange!]!
+  symbolsRemoved: [SymbolChange!]!
+  affectedLinks: [ImpactAffectedLink!]!
+  affectedRequirements: [ImpactAffectedRequirement!]!
+  staleArtifacts: [String!]!
+  computedAt: Time!
+}

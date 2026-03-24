@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package sourcebridge.common.v1;
+
+option go_package = "github.com/sourcebridge/sourcebridge/gen/go/common/v1;commonv1";
+
+import "google/protobuf/timestamp.proto";
+
+// Language represents a programming language
+enum Language {
+  LANGUAGE_UNSPECIFIED = 0;
+  LANGUAGE_GO = 1;
+  LANGUAGE_PYTHON = 2;
+  LANGUAGE_TYPESCRIPT = 3;
+  LANGUAGE_JAVASCRIPT = 4;
+  LANGUAGE_JAVA = 5;
+  LANGUAGE_RUST = 6;
+  LANGUAGE_CSHARP = 7;
+  LANGUAGE_CPP = 8;
+  LANGUAGE_RUBY = 9;
+  LANGUAGE_PHP = 10;
+}
+
+// SymbolKind represents the type of code symbol
+enum SymbolKind {
+  SYMBOL_KIND_UNSPECIFIED = 0;
+  SYMBOL_KIND_FUNCTION = 1;
+  SYMBOL_KIND_METHOD = 2;
+  SYMBOL_KIND_CLASS = 3;
+  SYMBOL_KIND_STRUCT = 4;
+  SYMBOL_KIND_INTERFACE = 5;
+  SYMBOL_KIND_ENUM = 6;
+  SYMBOL_KIND_CONSTANT = 7;
+  SYMBOL_KIND_VARIABLE = 8;
+  SYMBOL_KIND_MODULE = 9;
+  SYMBOL_KIND_PACKAGE = 10;
+  SYMBOL_KIND_TYPE = 11;
+  SYMBOL_KIND_TEST = 12;
+}
+
+// Confidence represents how confident a link or analysis result is
+enum Confidence {
+  CONFIDENCE_UNSPECIFIED = 0;
+  CONFIDENCE_LOW = 1;
+  CONFIDENCE_MEDIUM = 2;
+  CONFIDENCE_HIGH = 3;
+  CONFIDENCE_VERIFIED = 4;
+}
+
+// FileLocation represents a position in a source file
+message FileLocation {
+  string path = 1;
+  int32 start_line = 2;
+  int32 end_line = 3;
+  int32 start_column = 4;
+  int32 end_column = 5;
+}
+
+// CodeSymbol represents a discovered code symbol
+message CodeSymbol {
+  string id = 1;
+  string name = 2;
+  string qualified_name = 3;
+  SymbolKind kind = 4;
+  Language language = 5;
+  FileLocation location = 6;
+  string signature = 7;
+  string doc_comment = 8;
+  repeated string annotations = 9;
+}
+
+// Requirement represents a parsed requirement
+message Requirement {
+  string id = 1;
+  string external_id = 2;
+  string title = 3;
+  string description = 4;
+  string source = 5;
+  string priority = 6;
+  repeated string tags = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+// RequirementLink represents a link between a requirement and code
+message RequirementLink {
+  string id = 1;
+  string requirement_id = 2;
+  string symbol_id = 3;
+  Confidence confidence = 4;
+  string rationale = 5;
+  bool verified = 6;
+  string verified_by = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+// Embedding represents a vector embedding
+message Embedding {
+  string id = 1;
+  string source_id = 2;
+  string source_type = 3;
+  repeated float vector = 4;
+  string model = 5;
+  int32 dimensions = 6;
+}
+
+// LLMUsage tracks token usage for a request
+message LLMUsage {
+  string model = 1;
+  int32 input_tokens = 2;
+  int32 output_tokens = 3;
+  float latency_ms = 4;
+  string operation = 5;
+}

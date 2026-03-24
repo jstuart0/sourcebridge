@@ -1,0 +1,82 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 SourceBridge Contributors
+
+package cli
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+
+	"github.com/spf13/cobra"
+)
+
+var askImplCmd = &cobra.Command{
+	Use:   "ask [question]",
+	Short: "Ask a question about your code",
+	Long:  "Start an interactive discussion about code using AI.",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAsk,
+}
+
+var (
+	askRepoPath string
+	askJSON     bool
+)
+
+func init() {
+	askImplCmd.Flags().StringVar(&askRepoPath, "repo", ".", "Repository path")
+	askImplCmd.Flags().BoolVar(&askJSON, "json", false, "Output results as JSON")
+}
+
+func runAsk(cmd *cobra.Command, args []string) error {
+	question := args[0]
+
+	absRepo, err := filepath.Abs(askRepoPath)
+	if err != nil {
+		return fmt.Errorf("resolving repo path: %w", err)
+	}
+
+	pyCmd := exec.CommandContext(cmd.Context(), "uv", "run", "python", "cli_ask.py", question)
+	pyCmd.Dir = findWorkersDir()
+	pyCmd.Env = append(os.Environ(), "SOURCEBRIDGE_REPO_PATH="+absRepo)
+
+	output, err := pyCmd.Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Python AI worker unavailable for code discussion.\n")
+		fmt.Fprintf(os.Stderr, "Install the Python worker: cd workers && uv sync\n")
+		return fmt.Errorf("python worker required for code discussion")
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(output, &result); err != nil {
+		return fmt.Errorf("parsing worker response: %w", err)
+	}
+
+	if askJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+
+	answer := result["answer"]
+	fmt.Fprintf(os.Stdout, "\n%s\n", answer)
+
+	if refs, ok := result["references"].([]interface{}); ok && len(refs) > 0 {
+		fmt.Fprintf(os.Stdout, "\nReferences:\n")
+		for _, r := range refs {
+			fmt.Fprintf(os.Stdout, "  - %s\n", r)
+		}
+	}
+
+	if reqs, ok := result["related_requirements"].([]interface{}); ok && len(reqs) > 0 {
+		fmt.Fprintf(os.Stdout, "\nRelated Requirements:\n")
+		for _, r := range reqs {
+			fmt.Fprintf(os.Stdout, "  - %s\n", r)
+		}
+	}
+
+	return nil
+}

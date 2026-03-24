@@ -1,0 +1,174 @@
+{
+  "name": "sourcebridge",
+  "displayName": "SourceBridge.ai",
+  "description": "SourceBridge.ai — Codebase field guide and context layer for VS Code. Explain, review, and connect specs to code when needed.",
+  "version": "0.1.0",
+  "publisher": "sourcebridge",
+  "license": "AGPL-3.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:go",
+    "onLanguage:python",
+    "onLanguage:typescript",
+    "onLanguage:javascript",
+    "onLanguage:java",
+    "onLanguage:rust",
+    "onLanguage:cpp",
+    "onLanguage:c",
+    "onLanguage:csharp"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sourcebridge.discussCode",
+        "title": "SourceBridge: Discuss This Code"
+      },
+      {
+        "command": "sourcebridge.runReview",
+        "title": "SourceBridge: Run Review"
+      },
+      {
+        "command": "sourcebridge.showRequirements",
+        "title": "SourceBridge: Show Requirements"
+      },
+      {
+        "command": "sourcebridge.configure",
+        "title": "SourceBridge: Configure Server"
+      },
+      {
+        "command": "sourcebridge.signIn",
+        "title": "SourceBridge: Sign In"
+      },
+      {
+        "command": "sourcebridge.signOut",
+        "title": "SourceBridge: Sign Out"
+      },
+      {
+        "command": "sourcebridge.explainSystem",
+        "title": "SourceBridge: Explain This Repository"
+      },
+      {
+        "command": "sourcebridge.explainFile",
+        "title": "SourceBridge: Explain This File"
+      },
+      {
+        "command": "sourcebridge.explainSymbol",
+        "title": "SourceBridge: Explain This Symbol"
+      },
+      {
+        "command": "sourcebridge.generateCliffNotes",
+        "title": "SourceBridge: Generate Field Guide"
+      },
+      {
+        "command": "sourcebridge.generateCliffNotesForFile",
+        "title": "SourceBridge: Generate Field Guide for This File"
+      },
+      {
+        "command": "sourcebridge.generateCliffNotesForSymbol",
+        "title": "SourceBridge: Generate Field Guide for This Symbol"
+      },
+      {
+        "command": "sourcebridge.generateLearningPath",
+        "title": "SourceBridge: Generate Learning Path"
+      },
+      {
+        "command": "sourcebridge.generateCodeTour",
+        "title": "SourceBridge: Generate Code Tour"
+      },
+      {
+        "command": "sourcebridge.showKnowledge",
+        "title": "SourceBridge: Open Field Guide"
+      },
+      {
+        "command": "sourcebridge.showLinkedRequirements",
+        "title": "SourceBridge: Show Linked Requirements"
+      },
+      {
+        "command": "sourcebridge.switchRepository",
+        "title": "SourceBridge: Switch Repository"
+      },
+      {
+        "command": "sourcebridge.setKnowledgeLens",
+        "title": "SourceBridge: Set Knowledge Lens"
+      },
+      {
+        "command": "sourcebridge.refreshKnowledge",
+        "title": "SourceBridge: Refresh Knowledge"
+      },
+      {
+        "command": "sourcebridge.showImpactReport",
+        "title": "SourceBridge: Show Change Risk"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sourcebridge",
+          "title": "SourceBridge",
+          "icon": "$(checklist)"
+        }
+      ]
+    },
+    "views": {
+      "sourcebridge": [
+        {
+          "id": "sourcebridge.requirements",
+          "name": "Requirements"
+        },
+        {
+          "id": "sourcebridge.discussion",
+          "name": "Discussion"
+        },
+        {
+          "id": "sourcebridge.knowledge",
+          "name": "Field Guide"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "SourceBridge",
+      "properties": {
+        "sourcebridge.apiUrl": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "URL of the SourceBridge.ai API server"
+        },
+        "sourcebridge.token": {
+          "type": "string",
+          "default": "",
+          "description": "Deprecated. Tokens are migrated to secure storage; use SourceBridge: Configure Server.",
+          "deprecationMessage": "SourceBridge.ai now stores tokens in secure storage. Use SourceBridge: Configure Server to update the token."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "jest --passWithNoTests",
+    "package": "npx vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "graphql": "^16.13.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.57.1",
+    "@typescript-eslint/parser": "^8.57.1",
+    "@vscode/vsce": "^3.0.0",
+    "eslint": "^10.1.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
+    "typescript": "^5.8.0"
+  }
+}

@@ -1,0 +1,36 @@
+# Dependencies (installed inside containers)
+web/node_modules
+workers/.venv
+
+# Git
+.git
+.github
+
+# IDE and editor
+.claude
+.vscode
+.idea
+*.swp
+*.swo
+
+# Build artifacts
+bin/
+
+# Documentation (not needed in images)
+docs/
+*.md
+LICENSE
+
+# Local configs
+thoughts/
+.golangci.yml
+gqlgen.yml
+Makefile
+config.toml.example
+
+# Test files
+tests/
+
+# Plugins source (not needed at runtime)
+plugins/
+proto/

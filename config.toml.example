@@ -1,0 +1,38 @@
+# SourceBridge.ai configuration — copy to config.toml and adjust as needed.
+#
+# Environment variables override file values. The env prefix is SOURCEBRIDGE_
+# with nested keys joined by underscores, e.g. SOURCEBRIDGE_LLM_BASE_URL.
+
+# ─── Cloud mode (Anthropic) ─────────────────────────────────────────
+# [llm]
+# provider = "anthropic"
+# base_url = ""                          # leave empty for SDK default
+# summary_model = "claude-sonnet-4-20250514"
+# review_model  = "claude-sonnet-4-20250514"
+# ask_model     = "claude-sonnet-4-20250514"
+
+# ─── Local mode (Ollama on Mac Studio 2) ────────────────────────────
+[llm]
+provider = "ollama"
+base_url = "http://192.168.10.108:11434/v1"
+summary_model = "qwen3:32b"
+review_model  = "qwen3:32b"
+ask_model     = "qwen3:32b"
+
+# ─── Local mode (vLLM) ──────────────────────────────────────────────
+# [llm]
+# provider = "vllm"
+# base_url = "http://localhost:8000/v1"
+# summary_model = "Qwen/Qwen2.5-32B-Instruct"
+# review_model  = "Qwen/Qwen2.5-32B-Instruct"
+# ask_model     = "Qwen/Qwen2.5-32B-Instruct"
+
+[server]
+http_port = 8080
+grpc_port = 50051
+
+[storage]
+surreal_mode = "embedded"
+
+[security]
+mode = "oss"

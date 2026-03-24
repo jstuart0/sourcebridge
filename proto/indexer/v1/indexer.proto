@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package sourcebridge.indexer.v1;
+
+option go_package = "github.com/sourcebridge/sourcebridge/gen/go/indexer/v1;indexerv1";
+
+import "common/v1/types.proto";
+
+// IndexerService handles code parsing and symbol extraction
+service IndexerService {
+  // IndexRepository indexes all files in a repository
+  rpc IndexRepository(IndexRepositoryRequest) returns (IndexRepositoryResponse);
+
+  // IndexFile indexes a single file
+  rpc IndexFile(IndexFileRequest) returns (IndexFileResponse);
+
+  // GetSymbols retrieves symbols matching a query
+  rpc GetSymbols(GetSymbolsRequest) returns (GetSymbolsResponse);
+}
+
+message IndexRepositoryRequest {
+  string repository_id = 1;
+  string root_path = 2;
+  repeated string include_patterns = 3;
+  repeated string exclude_patterns = 4;
+  bool incremental = 5;
+  string commit_hash = 6;
+}
+
+message IndexRepositoryResponse {
+  int32 files_processed = 1;
+  int32 symbols_found = 2;
+  int32 relations_found = 3;
+  repeated string errors = 4;
+  float duration_ms = 5;
+}
+
+message IndexFileRequest {
+  string repository_id = 1;
+  string file_path = 2;
+  string content = 3;
+  sourcebridge.common.v1.Language language = 4;
+}
+
+message IndexFileResponse {
+  repeated sourcebridge.common.v1.CodeSymbol symbols = 1;
+  repeated SymbolRelation relations = 2;
+  repeated string errors = 3;
+}
+
+message GetSymbolsRequest {
+  string repository_id = 1;
+  string query = 2;
+  sourcebridge.common.v1.SymbolKind kind_filter = 3;
+  sourcebridge.common.v1.Language language_filter = 4;
+  int32 limit = 5;
+  int32 offset = 6;
+}
+
+message GetSymbolsResponse {
+  repeated sourcebridge.common.v1.CodeSymbol symbols = 1;
+  int32 total_count = 2;
+}
+
+// SymbolRelation represents a relationship between two symbols
+message SymbolRelation {
+  string source_id = 1;
+  string target_id = 2;
+  RelationType type = 3;
+}
+
+enum RelationType {
+  RELATION_TYPE_UNSPECIFIED = 0;
+  RELATION_TYPE_CALLS = 1;
+  RELATION_TYPE_IMPORTS = 2;
+  RELATION_TYPE_EXTENDS = 3;
+  RELATION_TYPE_IMPLEMENTS = 4;
+  RELATION_TYPE_CONTAINS = 5;
+  RELATION_TYPE_USES = 6;
+  RELATION_TYPE_TESTS = 7;
+}

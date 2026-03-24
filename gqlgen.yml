@@ -1,0 +1,37 @@
+# gqlgen configuration
+# https://gqlgen.com/config/
+
+schema:
+  - internal/api/graphql/schema.graphqls
+
+exec:
+  filename: internal/api/graphql/generated.go
+  package: graphql
+
+model:
+  filename: internal/api/graphql/models_gen.go
+  package: graphql
+
+resolver:
+  layout: follow-schema
+  dir: internal/api/graphql
+  package: graphql
+  filename_template: "{name}.resolvers.go"
+
+skip_mod_tidy: true
+
+autobind: []
+
+models:
+  ID:
+    model:
+      - github.com/99designs/gqlgen/graphql.ID
+  Time:
+    model:
+      - github.com/99designs/gqlgen/graphql.Time
+  Repository:
+    fields:
+      files:
+        resolver: true
+      understandingScore:
+        resolver: true

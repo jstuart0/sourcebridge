@@ -1,0 +1,12 @@
+{
+  "files": 7,
+  "functions": 27,
+  "classes": 6,
+  "modules": 5,
+  "relationships": {
+    "contains": 33,
+    "calls": 4,
+    "imports": 1,
+    "part_of": 7
+  }
+}

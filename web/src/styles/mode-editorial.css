@@ -1,0 +1,18 @@
+:root[data-ui-mode="editorial"],
+:root:not([data-ui-mode]) {
+  --content-max-width: 86rem;
+  --panel-radius: 24px;
+  --control-radius: 14px;
+
+  --panel-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+  --panel-shadow-soft: 0 6px 18px rgba(15, 23, 42, 0.04);
+  --panel-shadow-strong: 0 18px 40px rgba(15, 23, 42, 0.1);
+
+  --nav-bg: color-mix(in oklab, var(--bg-surface) 88%, var(--bg-base));
+  --nav-item-bg-active: color-mix(in oklab, var(--accent-primary) 12%, var(--bg-surface));
+  --nav-item-border: color-mix(in oklab, var(--accent-primary) 20%, transparent);
+
+  --shell-backdrop:
+    radial-gradient(circle at top left, color-mix(in oklab, var(--accent-primary) 8%, transparent), transparent 28%),
+    linear-gradient(180deg, var(--bg-base) 0%, var(--bg-base-alt) 100%);
+}

@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 SourceBridge Contributors
+
+package events
+
+import "time"
+
+// Event types
+const (
+	EventRepoIndexStarted   = "repo.index.started"
+	EventRepoIndexCompleted = "repo.index.completed"
+	EventRepoIndexFailed    = "repo.index.failed"
+	EventRepoIndexProgress  = "repo.index.progress"
+
+	EventRequirementImported = "requirement.imported"
+	EventRequirementLinked   = "requirement.linked"
+
+	EventLinkVerified = "link.verified"
+	EventLinkRejected = "link.rejected"
+
+	EventReviewCompleted = "review.completed"
+)
+
+// Event represents a domain event.
+type Event struct {
+	Type      string                 `json:"type"`
+	Timestamp time.Time              `json:"timestamp"`
+	Data      map[string]interface{} `json:"data"`
+}
+
+// NewEvent creates a new event.
+func NewEvent(eventType string, data map[string]interface{}) Event {
+	return Event{
+		Type:      eventType,
+		Timestamp: time.Now(),
+		Data:      data,
+	}
+}

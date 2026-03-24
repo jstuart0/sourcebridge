@@ -1,0 +1,91 @@
+# Go
+/sourcebridge
+bin/
+*.exe
+*.exe~
+*.dll
+*.dylib
+*.test
+*.out
+vendor/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+web/.next/
+web/out/
+web/node_modules/
+plugins/vscode/node_modules/
+plugins/vscode/out/
+*.vsix
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Gradle / JetBrains Plugin
+.gradle/
+.intellijPlatform/
+**/build/
+gradle/wrapper/gradle-wrapper.jar
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Data
+surrealdb-data/
+*.db
+
+# Generated (proto stubs in proto/ dir — gen/ stubs are committed)
+proto/**/*.pb.go
+proto/**/v1/*_grpc.pb.go
+workers/common/proto/
+
+# Secrets
+secrets/*.yaml
+!secrets/templates/
+
+# Thoughts (managed by hlyr, never committed)
+thoughts/
+
+# Go workspace (local dev config, not committed)
+go.work
+go.work.sum
+
+# Build artifacts
+web/tsconfig.tsbuildinfo
+
+# Claude Code local settings
+.claude/settings.local.json

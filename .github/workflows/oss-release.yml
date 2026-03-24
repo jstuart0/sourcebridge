@@ -1,0 +1,111 @@
+name: OSS Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  GO_VERSION: "1.24"
+
+jobs:
+  build-binaries:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          BINARY_NAME=sourcebridge
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            BINARY_NAME=sourcebridge.exe
+          fi
+          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
+            -o dist/${BINARY_NAME} ./cmd/sourcebridge
+      - name: Package
+        run: |
+          cd dist
+          ARCHIVE_NAME=sourcebridge-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip ${ARCHIVE_NAME}.zip sourcebridge.exe
+          else
+            tar czf ${ARCHIVE_NAME}.tar.gz sourcebridge
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.tar.gz
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.goos }}-${{ matrix.goarch }}-zip
+          path: dist/*.zip
+          if-no-files-found: ignore
+
+  build-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.sourcebridge
+          push: true
+          tags: ghcr.io/${{ github.repository }}/sourcebridge:${{ github.ref_name }}
+
+  build-vscode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - working-directory: plugins/vscode
+        run: |
+          npm ci
+          npx vsce package --no-dependencies
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension
+          path: plugins/vscode/*.vsix
+
+  release:
+    needs: [build-binaries, build-docker, build-vscode]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true

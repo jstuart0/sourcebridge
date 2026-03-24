@@ -1,0 +1,5 @@
+id,title,description,priority,acceptance_criteria
+REQ-001,System Startup,The system must start and listen on the configured port.,High,Server binds to configured port;Health check endpoint responds within 5 seconds;Graceful shutdown on SIGTERM
+REQ-003,REST API CRUD,The system must provide REST API endpoints for CRUD operations on items.,High,POST /items creates a new item;GET /items/:id returns item details;GET /items returns paginated list;DELETE /items/:id removes item
+REQ-004,Request Validation,All API requests must be validated before processing.,High,Required fields are checked;Invalid input returns 400 with error message;Central error handling for all routes
+REQ-010,User Authentication,Users must authenticate with secure password handling.,Critical,Passwords hashed with HMAC-SHA256;Salt used for each password;Constant-time comparison

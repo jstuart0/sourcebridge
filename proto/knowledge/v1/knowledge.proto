@@ -1,0 +1,146 @@
+syntax = "proto3";
+
+package sourcebridge.knowledge.v1;
+
+option go_package = "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1;knowledgev1";
+
+import "common/v1/types.proto";
+
+// KnowledgeService handles LLM-powered codebase knowledge generation.
+service KnowledgeService {
+  // GenerateCliffNotes produces a structured cliff-notes report for a repository.
+  rpc GenerateCliffNotes(GenerateCliffNotesRequest) returns (GenerateCliffNotesResponse);
+
+  // GenerateLearningPath produces a guided learning path for a repository.
+  rpc GenerateLearningPath(GenerateLearningPathRequest) returns (GenerateLearningPathResponse);
+
+  // GenerateWorkflowStory produces a grounded narrative for how a workflow is used.
+  rpc GenerateWorkflowStory(GenerateWorkflowStoryRequest) returns (GenerateWorkflowStoryResponse);
+
+  // ExplainSystem produces a transient whole-system explanation.
+  rpc ExplainSystem(ExplainSystemRequest) returns (ExplainSystemResponse);
+
+  // GenerateCodeTour produces a guided code tour for a repository.
+  rpc GenerateCodeTour(GenerateCodeTourRequest) returns (GenerateCodeTourResponse);
+}
+
+// GenerateCliffNotesRequest carries the assembled repository snapshot for the
+// Python worker to synthesize into cliff notes. The Go API side assembles the
+// snapshot from the graph store and serializes it as JSON.
+message GenerateCliffNotesRequest {
+  string repository_id = 1;
+  string repository_name = 2;
+  string audience = 3;       // "beginner" or "developer"
+  string depth = 4;          // "summary", "medium", or "deep"
+  string snapshot_json = 5;  // JSON-serialized KnowledgeSnapshot
+  string scope_type = 6;     // "repository", "module", "file", "symbol"
+  string scope_path = 7;     // canonical scope path
+}
+
+message GenerateCliffNotesResponse {
+  repeated KnowledgeSection sections = 1;
+  sourcebridge.common.v1.LLMUsage usage = 2;
+}
+
+// GenerateLearningPathRequest carries the snapshot for learning path generation.
+message GenerateLearningPathRequest {
+  string repository_id = 1;
+  string repository_name = 2;
+  string audience = 3;
+  string depth = 4;
+  string snapshot_json = 5;
+  string focus_area = 6;     // optional area to focus the learning path on
+}
+
+message GenerateLearningPathResponse {
+  repeated LearningStep steps = 1;
+  sourcebridge.common.v1.LLMUsage usage = 2;
+}
+
+message GenerateWorkflowStoryRequest {
+  string repository_id = 1;
+  string repository_name = 2;
+  string audience = 3;
+  string depth = 4;
+  string snapshot_json = 5;
+  string scope_type = 6;          // "repository", "module", "file", "symbol"
+  string scope_path = 7;          // canonical scope path
+  string anchor_label = 8;        // optional plain-language anchor for the story
+  string execution_path_json = 9; // optional JSON-serialized execution steps
+}
+
+message GenerateWorkflowStoryResponse {
+  repeated KnowledgeSection sections = 1;
+  sourcebridge.common.v1.LLMUsage usage = 2;
+}
+
+message LearningStep {
+  int32 order = 1;
+  string title = 2;
+  string objective = 3;
+  string content = 4;         // markdown
+  repeated string file_paths = 5;
+  repeated string symbol_ids = 6;
+  string estimated_time = 7;  // e.g. "15 minutes"
+}
+
+// ExplainSystemRequest carries the snapshot for transient whole-system explanation.
+message ExplainSystemRequest {
+  string repository_id = 1;
+  string repository_name = 2;
+  string audience = 3;
+  string question = 4;        // optional focusing question
+  string snapshot_json = 5;
+  string scope_type = 6;      // "repository", "module", "file", "symbol"
+  string scope_path = 7;      // canonical scope path
+}
+
+message ExplainSystemResponse {
+  string explanation = 1;      // markdown
+  repeated KnowledgeEvidence evidence = 2;
+  sourcebridge.common.v1.LLMUsage usage = 3;
+}
+
+// GenerateCodeTourRequest carries the snapshot for code tour generation.
+message GenerateCodeTourRequest {
+  string repository_id = 1;
+  string repository_name = 2;
+  string audience = 3;
+  string depth = 4;
+  string snapshot_json = 5;
+  string theme = 6;            // optional theme/focus for the tour
+}
+
+message GenerateCodeTourResponse {
+  repeated CodeTourStop stops = 1;
+  sourcebridge.common.v1.LLMUsage usage = 2;
+}
+
+message CodeTourStop {
+  int32 order = 1;
+  string title = 2;
+  string description = 3;      // markdown
+  string file_path = 4;
+  int32 line_start = 5;
+  int32 line_end = 6;
+}
+
+// KnowledgeSection is a structured section of a knowledge artifact.
+message KnowledgeSection {
+  string title = 1;
+  string content = 2;          // markdown body
+  string summary = 3;          // one-line summary
+  string confidence = 4;       // "high", "medium", "low"
+  bool inferred = 5;           // true if LLM-inferred rather than directly evidenced
+  repeated KnowledgeEvidence evidence = 6;
+}
+
+// KnowledgeEvidence links a knowledge section to a source artifact.
+message KnowledgeEvidence {
+  string source_type = 1;      // "file", "symbol", "requirement", "doc"
+  string source_id = 2;
+  string file_path = 3;
+  int32 line_start = 4;
+  int32 line_end = 5;
+  string rationale = 6;
+}

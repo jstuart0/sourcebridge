@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package sourcebridge.linking.v1;
+
+option go_package = "github.com/sourcebridge/sourcebridge/gen/go/linking/v1;linkingv1";
+
+import "common/v1/types.proto";
+
+// LinkingService handles requirement-to-code linking
+service LinkingService {
+  // LinkRequirement finds code symbols that implement a requirement
+  rpc LinkRequirement(LinkRequirementRequest) returns (LinkRequirementResponse);
+
+  // BatchLink links multiple requirements at once
+  rpc BatchLink(BatchLinkRequest) returns (BatchLinkResponse);
+
+  // ValidateLink checks if a requirement link is still valid
+  rpc ValidateLink(ValidateLinkRequest) returns (ValidateLinkResponse);
+}
+
+// CandidateSymbol wraps a CodeSymbol with source content for semantic linking.
+// Source content is assembled API-side and sent to the worker; the worker must
+// not read repository source from disk or query the database.
+message CandidateSymbol {
+  sourcebridge.common.v1.CodeSymbol symbol = 1;
+  string content = 2;     // source body for the symbol's line range
+}
+
+message LinkRequirementRequest {
+  sourcebridge.common.v1.Requirement requirement = 1;
+  string repository_id = 2;
+  repeated CandidateSymbol candidate_symbols = 3;
+  float min_confidence = 4;
+}
+
+message LinkRequirementResponse {
+  repeated sourcebridge.common.v1.RequirementLink links = 1;
+  sourcebridge.common.v1.LLMUsage usage = 2;
+}
+
+message BatchLinkRequest {
+  repeated sourcebridge.common.v1.Requirement requirements = 1;
+  string repository_id = 2;
+  float min_confidence = 3;
+}
+
+message BatchLinkResponse {
+  repeated sourcebridge.common.v1.RequirementLink links = 1;
+  int32 requirements_processed = 2;
+  int32 links_found = 3;
+  sourcebridge.common.v1.LLMUsage usage = 4;
+}
+
+message ValidateLinkRequest {
+  sourcebridge.common.v1.RequirementLink link = 1;
+  sourcebridge.common.v1.CodeSymbol current_symbol = 2;
+}
+
+message ValidateLinkResponse {
+  bool still_valid = 1;
+  sourcebridge.common.v1.Confidence new_confidence = 2;
+  string reason = 3;
+  sourcebridge.common.v1.LLMUsage usage = 4;
+}

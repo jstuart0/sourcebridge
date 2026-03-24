@@ -1,0 +1,22 @@
+:root[data-ui-mode="control"] {
+  --content-max-width: 96rem;
+  --panel-radius: 18px;
+  --control-radius: 12px;
+
+  --panel-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+  --panel-shadow-soft: 0 4px 14px rgba(15, 23, 42, 0.06);
+  --panel-shadow-strong: 0 16px 34px rgba(15, 23, 42, 0.14);
+
+  --nav-item-bg-active: color-mix(in oklab, var(--accent-primary) 9%, var(--bg-surface));
+  --nav-item-border: color-mix(in oklab, var(--border-strong) 80%, transparent);
+  --shell-backdrop:
+    linear-gradient(180deg, color-mix(in oklab, var(--bg-base) 92%, black) 0%, var(--bg-base-alt) 100%);
+}
+
+:root[data-edition="enterprise"][data-ui-mode="control"] {
+  --panel-shadow: 0 10px 24px rgba(3, 12, 16, 0.22);
+  --panel-shadow-soft: 0 6px 18px rgba(3, 12, 16, 0.16);
+  --panel-shadow-strong: 0 20px 40px rgba(3, 12, 16, 0.28);
+  --nav-item-bg-active: color-mix(in oklab, var(--accent-primary) 14%, var(--bg-surface));
+  --nav-item-border: color-mix(in oklab, var(--accent-primary) 30%, var(--border-strong));
+}

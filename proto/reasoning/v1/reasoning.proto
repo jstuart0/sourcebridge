@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package sourcebridge.reasoning.v1;
+
+option go_package = "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1;reasoningv1";
+
+import "common/v1/types.proto";
+
+// ReasoningService handles LLM-powered code analysis
+service ReasoningService {
+  // AnalyzeSymbol provides deep analysis of a code symbol
+  rpc AnalyzeSymbol(AnalyzeSymbolRequest) returns (AnalyzeSymbolResponse);
+
+  // ExplainRelationship explains the relationship between symbols
+  rpc ExplainRelationship(ExplainRelationshipRequest) returns (ExplainRelationshipResponse);
+
+  // AnswerQuestion answers a natural language question about the codebase
+  rpc AnswerQuestion(AnswerQuestionRequest) returns (AnswerQuestionResponse);
+
+  // ReviewFile performs a template-based code review of a file
+  rpc ReviewFile(ReviewFileRequest) returns (ReviewFileResponse);
+
+  // GenerateEmbedding creates an embedding vector for text
+  rpc GenerateEmbedding(GenerateEmbeddingRequest) returns (GenerateEmbeddingResponse);
+}
+
+message AnalyzeSymbolRequest {
+  sourcebridge.common.v1.CodeSymbol symbol = 1;
+  string surrounding_context = 2;
+  string repository_id = 3;
+}
+
+message AnalyzeSymbolResponse {
+  string summary = 1;
+  string purpose = 2;
+  repeated string concerns = 3;
+  repeated string suggestions = 4;
+  sourcebridge.common.v1.LLMUsage usage = 5;
+}
+
+message ExplainRelationshipRequest {
+  sourcebridge.common.v1.CodeSymbol source = 1;
+  sourcebridge.common.v1.CodeSymbol target = 2;
+  string relationship_type = 3;
+}
+
+message ExplainRelationshipResponse {
+  string explanation = 1;
+  sourcebridge.common.v1.Confidence confidence = 2;
+  sourcebridge.common.v1.LLMUsage usage = 3;
+}
+
+message AnswerQuestionRequest {
+  string question = 1;
+  string repository_id = 2;
+  repeated sourcebridge.common.v1.CodeSymbol context_symbols = 3;
+  int32 max_tokens = 4;
+  string context_code = 5;
+  string file_path = 6;
+  sourcebridge.common.v1.Language language = 7;
+}
+
+message AnswerQuestionResponse {
+  string answer = 1;
+  repeated sourcebridge.common.v1.CodeSymbol referenced_symbols = 2;
+  sourcebridge.common.v1.LLMUsage usage = 3;
+}
+
+message ReviewFileRequest {
+  string repository_id = 1;
+  string file_path = 2;
+  sourcebridge.common.v1.Language language = 3;
+  string content = 4;
+  string template = 5; // security, solid, performance, reliability, maintainability
+}
+
+message ReviewFileResponse {
+  string template = 1;
+  repeated ReviewFinding findings = 2;
+  float score = 3;
+  sourcebridge.common.v1.LLMUsage usage = 4;
+}
+
+message ReviewFinding {
+  string category = 1;
+  string severity = 2; // critical, high, medium, low, info
+  string message = 3;
+  string file_path = 4;
+  int32 start_line = 5;
+  int32 end_line = 6;
+  string suggestion = 7;
+}
+
+message GenerateEmbeddingRequest {
+  string text = 1;
+  string model = 2;
+}
+
+message GenerateEmbeddingResponse {
+  sourcebridge.common.v1.Embedding embedding = 1;
+  sourcebridge.common.v1.LLMUsage usage = 2;
+}
