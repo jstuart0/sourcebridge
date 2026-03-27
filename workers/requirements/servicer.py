@@ -9,6 +9,7 @@ import structlog
 from common.v1 import types_pb2
 from requirements.v1 import requirements_pb2, requirements_pb2_grpc
 
+from workers.common.grpc_metadata import resolve_model_override
 from workers.common.llm.provider import LLMProvider
 from workers.requirements.csv_parser import parse_csv
 from workers.requirements.markdown import parse_markdown
@@ -121,29 +122,33 @@ class RequirementsServicer(requirements_pb2_grpc.RequirementsServiceServicer):
             "appropriate priority and classification tags. Return ONLY valid JSON."
         )
 
+        model_override = resolve_model_override(context)
         try:
-            response = await self._llm.complete(prompt, system=system, temperature=0.1)
+            response = await self._llm.complete(prompt, system=system, temperature=0.1, model=model_override)
         except Exception as exc:
             log.error("enrich_requirement_failed", error=str(exc))
             await context.abort(grpc.StatusCode.INTERNAL, f"Enrichment failed: {exc}")
 
-        # Parse LLM response
-        try:
-            data = json.loads(response.content)
-        except json.JSONDecodeError:
-            # Try extracting from markdown code block
-            raw = response.content
-            if "```" in raw:
-                start = raw.index("```") + 3
-                if raw[start:].startswith("json"):
-                    start += 4
-                end = raw.index("```", start)
-                data = json.loads(raw[start:end].strip())
-            else:
-                data = {}
+        # Parse LLM response — strip <think> blocks and code fences
+        from workers.common.llm.parse import parse_json_response
+
+        data = parse_json_response(response.content)
+        if data is None or not isinstance(data, dict):
+            log.warning("enrich_parse_failed", raw_preview=response.content[:500])
+            data = {}
 
         suggested_priority = data.get("suggested_priority", "medium")
         suggested_tags = data.get("suggested_tags", [])
+        if not isinstance(suggested_tags, list):
+            suggested_tags = []
+
+        log.info(
+            "enrich_result",
+            id=req.id,
+            suggested_priority=suggested_priority,
+            suggested_tags=suggested_tags,
+            rationale=data.get("rationale", ""),
+        )
 
         # Build enriched copy of the requirement
         enriched = types_pb2.Requirement(
@@ -168,4 +173,62 @@ class RequirementsServicer(requirements_pb2_grpc.RequirementsServiceServicer):
             suggested_tags=suggested_tags,
             suggested_priority=suggested_priority,
             usage=usage,
+        )
+
+    async def ExtractSpecs(  # noqa: N802
+        self,
+        request: requirements_pb2.ExtractSpecsRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> requirements_pb2.ExtractSpecsResponse:
+        """Extract implicit specifications from source files."""
+        log.info(
+            "extract_specs",
+            repo_id=request.repository_id,
+            file_count=len(request.files),
+            skip_llm=request.skip_llm_refinement,
+        )
+
+        from workers.requirements.spec_extraction import extract_specs_pipeline
+
+        try:
+            result = await extract_specs_pipeline(
+                files=request.files,
+                llm_provider=self._llm if not request.skip_llm_refinement else None,
+            )
+        except Exception as exc:
+            log.error("extract_specs_failed", error=str(exc))
+            await context.abort(grpc.StatusCode.INTERNAL, f"Extraction failed: {exc}")
+
+        proto_specs = [
+            requirements_pb2.DiscoveredSpec(
+                source=spec.source,
+                source_file=spec.source_file,
+                source_line=spec.source_line,
+                source_files=spec.source_files,
+                text=spec.text,
+                raw_text=spec.raw_text,
+                group_key=spec.group_key,
+                language=spec.language,
+                keywords=spec.keywords,
+                confidence=spec.confidence,
+                llm_refined=spec.llm_refined,
+            )
+            for spec in result.specs
+        ]
+
+        usage = None
+        if result.usage:
+            usage = types_pb2.LLMUsage(
+                model=result.usage.model,
+                input_tokens=result.usage.input_tokens,
+                output_tokens=result.usage.output_tokens,
+                operation="spec_extraction",
+            )
+
+        return requirements_pb2.ExtractSpecsResponse(
+            specs=proto_specs,
+            total_candidates=result.total_candidates,
+            total_refined=len(proto_specs),
+            usage=usage,
+            warnings=result.warnings,
         )

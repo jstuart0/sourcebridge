@@ -138,7 +138,7 @@ export default function LoginPage() {
         <div className="grid gap-4 md:grid-cols-3">
           {[
             { label: "Field Guide", value: "Repo → file → symbol understanding" },
-            { label: "Change Risk", value: "See affected areas faster" },
+            { label: "Change Impact", value: "See what recent commits affect" },
             { label: "Specs", value: "Optional links from intent to code" },
           ].map((item) => (
             <div

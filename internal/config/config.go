@@ -24,6 +24,7 @@ type Config struct {
 	Security  SecurityConfig  `mapstructure:"security"`
 	Worker    WorkerConfig    `mapstructure:"worker"`
 	Git       GitConfig       `mapstructure:"git"`
+	MCP       MCPConfig       `mapstructure:"mcp"`
 }
 
 // GitConfig holds git credentials for cloning private repositories.
@@ -71,13 +72,44 @@ type IndexingConfig struct {
 
 // LLMConfig holds AI/LLM provider settings.
 type LLMConfig struct {
-	Provider      string `mapstructure:"provider"`
-	BaseURL       string `mapstructure:"base_url"`
-	APIKey        string `mapstructure:"api_key"`
-	SummaryModel  string `mapstructure:"summary_model"`
-	ReviewModel   string `mapstructure:"review_model"`
-	AskModel      string `mapstructure:"ask_model"`
-	TimeoutSecs   int    `mapstructure:"timeout_seconds"`
+	Provider       string `mapstructure:"provider"`
+	BaseURL        string `mapstructure:"base_url"`
+	APIKey         string `mapstructure:"api_key"`
+	SummaryModel   string `mapstructure:"summary_model"`   // default model (used for analysis in advanced mode)
+	ReviewModel    string `mapstructure:"review_model"`     // review operations
+	AskModel       string `mapstructure:"ask_model"`        // discussion/Q&A operations
+	KnowledgeModel string `mapstructure:"knowledge_model"`  // knowledge generation (cliffNotes, codeTour, etc.)
+	DraftModel     string `mapstructure:"draft_model"`      // LM Studio only: sent as draft_model per request
+	TimeoutSecs    int    `mapstructure:"timeout_seconds"`
+	AdvancedMode   bool   `mapstructure:"advanced_mode"`    // when true, per-operation models are active
+}
+
+// ModelForOperation returns the model to use for a given operation group.
+// In advanced mode, returns the per-operation model if configured.
+// In simple mode (or if the per-operation model is empty), returns SummaryModel.
+func (l *LLMConfig) ModelForOperation(group string) string {
+	if !l.AdvancedMode {
+		return l.SummaryModel
+	}
+	switch group {
+	case "analysis":
+		if l.SummaryModel != "" {
+			return l.SummaryModel
+		}
+	case "review":
+		if l.ReviewModel != "" {
+			return l.ReviewModel
+		}
+	case "discussion":
+		if l.AskModel != "" {
+			return l.AskModel
+		}
+	case "knowledge":
+		if l.KnowledgeModel != "" {
+			return l.KnowledgeModel
+		}
+	}
+	return l.SummaryModel
 }
 
 // LinkingConfig holds requirement linking settings.
@@ -119,6 +151,15 @@ type OIDCConfig struct {
 // WorkerConfig holds gRPC worker connection settings.
 type WorkerConfig struct {
 	Address string `mapstructure:"address"`
+}
+
+// MCPConfig holds Model Context Protocol (MCP) server settings.
+type MCPConfig struct {
+	Enabled     bool   `mapstructure:"enabled"`
+	Repos       string `mapstructure:"repos"`        // comma-separated repo IDs (empty = all)
+	SessionTTL  int    `mapstructure:"session_ttl"`   // seconds before idle session is reaped
+	Keepalive   int    `mapstructure:"keepalive"`      // seconds between SSE keepalive pings
+	MaxSessions int    `mapstructure:"max_sessions"`   // max concurrent MCP sessions (0 = unlimited)
 }
 
 // Defaults returns a Config with all default values.
@@ -174,6 +215,12 @@ func Defaults() *Config {
 		Worker: WorkerConfig{
 			Address: "localhost:50051",
 		},
+		MCP: MCPConfig{
+			Enabled:     false,
+			SessionTTL:  3600,  // 1 hour
+			Keepalive:   30,    // 30 seconds
+			MaxSessions: 100,
+		},
 	}
 }
 
@@ -224,6 +271,11 @@ func Load() (*Config, error) {
 	v.SetDefault("worker.address", cfg.Worker.Address)
 	v.SetDefault("git.default_token", "")
 	v.SetDefault("git.ssh_key_path", "")
+	v.SetDefault("mcp.enabled", cfg.MCP.Enabled)
+	v.SetDefault("mcp.repos", cfg.MCP.Repos)
+	v.SetDefault("mcp.session_ttl", cfg.MCP.SessionTTL)
+	v.SetDefault("mcp.keepalive", cfg.MCP.Keepalive)
+	v.SetDefault("mcp.max_sessions", cfg.MCP.MaxSessions)
 
 	// Try reading config file (not required)
 	if err := v.ReadInConfig(); err != nil {
@@ -258,11 +310,11 @@ func (c *Config) Validate() error {
 	if c.Storage.RedisMode != "memory" && c.Storage.RedisMode != "external" {
 		return fmt.Errorf("invalid Redis mode: %s (must be 'memory' or 'external')", c.Storage.RedisMode)
 	}
-	validProviders := map[string]bool{"anthropic": true, "openai": true, "ollama": true, "vllm": true}
+	validProviders := map[string]bool{"anthropic": true, "openai": true, "ollama": true, "vllm": true, "llama-cpp": true, "sglang": true, "lmstudio": true, "gemini": true, "openrouter": true}
 	if !validProviders[c.LLM.Provider] {
 		return fmt.Errorf("invalid LLM provider: %s", c.LLM.Provider)
 	}
-	if (c.LLM.Provider == "ollama" || c.LLM.Provider == "vllm") && c.LLM.BaseURL == "" {
+	if (c.LLM.Provider == "ollama" || c.LLM.Provider == "vllm" || c.LLM.Provider == "llama-cpp" || c.LLM.Provider == "sglang" || c.LLM.Provider == "lmstudio") && c.LLM.BaseURL == "" {
 		return fmt.Errorf("llm.base_url is required when provider is %s", c.LLM.Provider)
 	}
 	return nil

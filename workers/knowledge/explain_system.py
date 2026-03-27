@@ -32,12 +32,14 @@ async def explain_system(
     audience: str,
     question: str,
     snapshot_json: str,
+    depth: str = "medium",
+    model_override: str | None = None,
 ) -> tuple[ExplainResult, LLMUsageRecord]:
     """Generate a whole-system explanation from a repository snapshot."""
-    prompt = build_explain_system_prompt(repository_name, audience, question, snapshot_json)
+    prompt = build_explain_system_prompt(repository_name, audience, question, snapshot_json, depth)
 
     response: LLMResponse = await provider.complete(
-        prompt, system=EXPLAIN_SYSTEM_SYSTEM, temperature=0.0
+        prompt, system=EXPLAIN_SYSTEM_SYSTEM, temperature=0.0, model=model_override,
     )
 
     usage = LLMUsageRecord(

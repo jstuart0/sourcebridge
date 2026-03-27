@@ -193,6 +193,8 @@ func executionStepsFromSymbolPath(store graphstore.GraphStore, repoID, repoRoot,
 			explanation = "This step appears downstream of the previous code step."
 		} else if node.Reason == "Observed in same-file source call" {
 			explanation = "This helper is called directly inside the focused code step."
+		} else if node.Reason == "Observed in source call (cross-file)" {
+			explanation = "This function is called from the focused code step in another file."
 		}
 		steps = append(steps, &ExecutionPathStep{
 			OrderIndex:  i,
@@ -254,6 +256,8 @@ func inferSourceHelperNodes(store graphstore.GraphStore, repoID, repoRoot string
 		end = minInt(len(lines), start+120)
 	}
 	body := strings.Join(lines[start:end], "\n")
+
+	// Build lookup from same-file symbols
 	sameFile := store.GetSymbolsByFile(repoID, symbol.FilePath)
 	byName := make(map[string]*graphstore.StoredSymbol, len(sameFile))
 	for _, candidate := range sameFile {
@@ -264,6 +268,19 @@ func inferSourceHelperNodes(store graphstore.GraphStore, repoID, repoRoot string
 			byName[candidate.Name] = candidate
 		}
 	}
+
+	// Build cross-file lookup for names not found in same file
+	allSymbols, _ := store.GetSymbols(repoID, nil, nil, 0, 0)
+	allByName := make(map[string]*graphstore.StoredSymbol, len(allSymbols))
+	for _, sym := range allSymbols {
+		if sym == nil || sym.ID == symbol.ID || sym.IsTest {
+			continue
+		}
+		if _, exists := allByName[sym.Name]; !exists {
+			allByName[sym.Name] = sym
+		}
+	}
+
 	ignored := map[string]bool{
 		"if": true, "for": true, "switch": true, "return": true, "make": true, "len": true,
 		"append": true, "delete": true, "close": true, "copy": true, "new": true, "panic": true,
@@ -278,7 +295,13 @@ func inferSourceHelperNodes(store graphstore.GraphStore, repoID, repoRoot string
 		if ignored[name] || seen[name] {
 			continue
 		}
+		// Prefer same-file match, fall back to cross-file
 		candidate := byName[name]
+		reason := "Observed in same-file source call"
+		if candidate == nil {
+			candidate = allByName[name]
+			reason = "Observed in source call (cross-file)"
+		}
 		if candidate == nil {
 			continue
 		}
@@ -290,7 +313,7 @@ func inferSourceHelperNodes(store graphstore.GraphStore, repoID, repoRoot string
 			StartLine:  candidate.StartLine,
 			EndLine:    candidate.EndLine,
 			Observed:   true,
-			Reason:     "Observed in same-file source call",
+			Reason:     reason,
 		})
 		if len(results) >= maxDepth {
 			break

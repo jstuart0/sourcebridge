@@ -41,10 +41,19 @@ def _is_placeholder_content(content: str) -> bool:
     return (
         not text
         or text.startswith("{")
+        or text.startswith("[")
         or "insufficient data" in text
         or "insufficient structured content" in text
         or "could not be fully structured" in text
         or "not enough grounded evidence" in text
+        or "to be determined" in text
+        or "placeholder" in text
+        or "n/a" == text
+        or "tbd" == text
+        or "use the focused scope" in text
+        or "the story is grounded in the focused scope" in text
+        or "start with the focused scope" in text
+        or "check the anchored step first" in text
     )
 
 
@@ -107,7 +116,25 @@ def _gather_scope_evidence(snapshot: dict[str, Any], limit: int = 4) -> list[Evi
 
 
 def _title_lookup(sections: list[CliffNotesSection]) -> dict[str, CliffNotesSection]:
-    return {section.title: section for section in sections}
+    """Build a lookup mapping required section titles to LLM sections.
+
+    Uses exact match first, then falls back to case-insensitive prefix matching
+    so that LLM-generated titles like "Key Branches" still map to the required
+    "Key Branches or Failure Points".
+    """
+    exact = {section.title: section for section in sections}
+    result: dict[str, CliffNotesSection] = {}
+    for required in REQUIRED_WORKFLOW_STORY_SECTIONS:
+        if required in exact:
+            result[required] = exact[required]
+            continue
+        req_lower = required.lower()
+        for section in sections:
+            title_lower = section.title.strip().rstrip(":").lower()
+            if title_lower == req_lower or req_lower.startswith(title_lower) or title_lower.startswith(req_lower):
+                result[required] = section
+                break
+    return result
 
 
 def _build_workflow_fallbacks(
@@ -155,7 +182,30 @@ def _build_workflow_fallbacks(
         main_steps = "\n".join(step_lines)
     else:
         focus_summary = _normalize_text(scope.get("focus_summary"))
-        main_steps = focus_summary or "Use the focused scope and its nearby symbols to trace the likely happy path."
+        if focus_summary:
+            main_steps = focus_summary
+        else:
+            # Build steps from snapshot entry points and public API
+            entry_points = snapshot.get("entry_points", [])
+            public_api = snapshot.get("public_api", [])
+            step_sources = entry_points[:4] or public_api[:4]
+            if step_sources:
+                step_lines = []
+                for idx, sym in enumerate(step_sources, start=1):
+                    if not isinstance(sym, dict):
+                        continue
+                    name = _normalize_text(sym.get("qualified_name") or sym.get("name"))
+                    fp = _normalize_text(sym.get("file_path"))
+                    kind = _normalize_text(sym.get("kind"))
+                    label = f"`{name}`" if name else f"Step {idx}"
+                    detail = f" in `{fp}`" if fp else ""
+                    kind_hint = f" ({kind})" if kind else ""
+                    step_lines.append(f"{idx}. Start at {label}{kind_hint}{detail}.")
+                main_steps = "\n".join(step_lines) if step_lines else (
+                    f"Explore the entry points and public API of {repository_name} to trace the main execution flow."
+                )
+            else:
+                main_steps = f"Explore the entry points and public API of {repository_name} to trace the main execution flow."
 
     behind_parts = []
     if path_steps:
@@ -175,16 +225,40 @@ def _build_workflow_fallbacks(
         behind_parts.append(f"The focused code lives in `{_normalize_text(target_file.get('path'))}`.")
     if path_files:
         behind_parts.append("Key files on this path: " + ", ".join(f"`{path}`" for path in path_files[:4]) + ".")
+    if not behind_parts:
+        # Build from snapshot metadata when no execution path or scope targets
+        languages = snapshot.get("languages", [])
+        modules = snapshot.get("modules", [])
+        if languages or modules:
+            lang_names = [_normalize_text(lang.get("name")) for lang in languages[:3] if isinstance(lang, dict)]
+            mod_names = [_normalize_text(mod.get("path")) for mod in modules[:4] if isinstance(mod, dict)]
+            if lang_names:
+                behind_parts.append(f"The codebase uses {', '.join(lang_names)}.")
+            if mod_names:
+                behind_parts.append("Key modules: " + ", ".join(f"`{m}`" for m in mod_names) + ".")
     behind_the_scenes = " ".join(part for part in behind_parts if part) or (
-        "The story is grounded in the focused scope and its nearby code relationships."
+        f"The internals of {repository_name} are best understood by tracing its entry points through the module structure."
     )
 
-    branches = (
-        "Check the anchored step first, then inspect any downstream helpers or handoffs if the behavior diverges. "
-        "If the traced path is short, treat missing steps as unknown rather than assumed."
-    )
     if execution_path.get("message"):
         branches = _normalize_text(execution_path.get("message"))
+    elif path_steps:
+        branches = (
+            "Follow the traced execution path and inspect any downstream helpers or handoffs if the behavior diverges. "
+            "If the traced path is short, treat missing steps as unknown rather than assumed."
+        )
+    else:
+        # Build from snapshot complexity signals
+        complex_symbols = snapshot.get("complex_symbols", [])
+        if complex_symbols:
+            complex_names = [_normalize_text(sym.get("qualified_name") or sym.get("name"))
+                            for sym in complex_symbols[:3] if isinstance(sym, dict)]
+            branches = (
+                "Potential complexity hotspots: " + ", ".join(f"`{n}`" for n in complex_names if n) + ". "
+                "These symbols have high cyclomatic complexity and may contain branching logic or error handling."
+            ) if complex_names else f"No execution path is available. Inspect entry points of {repository_name} for branching logic."
+        else:
+            branches = f"No execution path is available. Inspect entry points of {repository_name} for branching logic and error handling."
 
     inspect_targets = []
     if target_file:
@@ -195,10 +269,19 @@ def _build_workflow_fallbacks(
             inspect_targets.append(formatted)
     if target_symbol:
         inspect_targets.append(f"`{_normalize_text(target_symbol.get('name'))}`")
+    if not inspect_targets:
+        # Populate from snapshot entry points when no scope targets
+        entry_points = snapshot.get("entry_points", [])
+        for ep in entry_points[:4]:
+            if isinstance(ep, dict) and ep.get("file_path"):
+                fp = _normalize_text(ep["file_path"])
+                formatted = f"`{fp}`"
+                if formatted not in inspect_targets:
+                    inspect_targets.append(formatted)
     inspect = (
         "Start with " + ", ".join(inspect_targets[:5]) + "."
         if inspect_targets
-        else "Start with the focused scope and its immediate neighbors."
+        else f"Start with the entry points and main modules of {repository_name}."
     )
 
     shared_evidence = _gather_execution_evidence(execution_path) or _gather_scope_evidence(snapshot)
@@ -293,8 +376,12 @@ async def generate_workflow_story(
     scope_path: str = "",
     anchor_label: str = "",
     execution_path_json: str = "",
+    model_override: str | None = None,
 ) -> tuple[CliffNotesResult, LLMUsageRecord]:
     """Generate a workflow story from a repository snapshot."""
+    snapshot = _load_json(snapshot_json)
+    execution_path = _load_json(execution_path_json)
+
     prompt = build_workflow_story_prompt(
         repository_name=repository_name,
         audience=audience,
@@ -306,55 +393,61 @@ async def generate_workflow_story(
         execution_path_json=execution_path_json,
     )
 
-    response: LLMResponse = await provider.complete(
-        prompt,
-        system=WORKFLOW_STORY_SYSTEM,
-        temperature=0.0,
-        max_tokens=8192,
-    )
-
-    try:
-        raw_sections = _parse_sections(response.content)
-    except (json.JSONDecodeError, ValueError, TypeError) as exc:
-        log.warning("workflow_story_parse_fallback", error=str(exc))
-        raw_sections = [
-            {
-                "title": "Goal",
-                "content": response.content,
-                "summary": "The workflow story could not be fully structured.",
-                "confidence": "low",
-                "inferred": True,
-                "evidence": [],
-            }
-        ]
-
     sections: list[CliffNotesSection] = []
-    seen_titles: set[str] = set()
+    llm_failed = False
+    try:
+        response: LLMResponse = await provider.complete(
+            prompt,
+            system=WORKFLOW_STORY_SYSTEM,
+            temperature=0.0,
+            max_tokens=8192,
+            model=model_override,
+        )
+    except Exception as exc:
+        log.warning("workflow_story_llm_failed_using_fallbacks", error=str(exc))
+        llm_failed = True
+        response = None
 
-    for index, raw in enumerate(raw_sections):
-        fallback_title = (
-            REQUIRED_WORKFLOW_STORY_SECTIONS[index]
-            if index < len(REQUIRED_WORKFLOW_STORY_SECTIONS)
-            else f"Section {index + 1}"
-        )
-        normalized = _coerce_section(raw, fallback_title=fallback_title)
-        title = str(normalized.get("title", fallback_title))
-        evidence = normalized.get("evidence", [])
-        if not isinstance(evidence, list):
-            evidence = []
-        seen_titles.add(title)
-        sections.append(
-            CliffNotesSection(
-                title=title,
-                content=str(normalized.get("content", "")),
-                summary=str(normalized.get("summary", "")),
-                confidence=str(normalized.get("confidence", "medium")),
-                inferred=bool(normalized.get("inferred", False)),
-                evidence=_parse_evidence(evidence),
+    if response is not None:
+        try:
+            raw_sections = _parse_sections(response.content)
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            log.warning("workflow_story_parse_fallback", error=str(exc),
+                        response_preview=response.content[:2000] if response.content else "(empty)")
+            raw_sections = [
+                {
+                    "title": "Goal",
+                    "content": response.content,
+                    "summary": "The workflow story could not be fully structured.",
+                    "confidence": "low",
+                    "inferred": True,
+                    "evidence": [],
+                }
+            ]
+
+        seen_titles: set[str] = set()
+        for index, raw in enumerate(raw_sections):
+            fallback_title = (
+                REQUIRED_WORKFLOW_STORY_SECTIONS[index]
+                if index < len(REQUIRED_WORKFLOW_STORY_SECTIONS)
+                else f"Section {index + 1}"
             )
-        )
-    snapshot = _load_json(snapshot_json)
-    execution_path = _load_json(execution_path_json)
+            normalized = _coerce_section(raw, fallback_title=fallback_title)
+            title = str(normalized.get("title", fallback_title))
+            evidence = normalized.get("evidence", [])
+            if not isinstance(evidence, list):
+                evidence = []
+            seen_titles.add(title)
+            sections.append(
+                CliffNotesSection(
+                    title=title,
+                    content=str(normalized.get("content", "")),
+                    summary=str(normalized.get("summary", "")),
+                    confidence=str(normalized.get("confidence", "medium")),
+                    inferred=bool(normalized.get("inferred", False)),
+                    evidence=_parse_evidence(evidence),
+                )
+            )
     fallback_sections = _build_workflow_fallbacks(
         repository_name=repository_name,
         scope_type=scope_type or "repository",
@@ -365,11 +458,42 @@ async def generate_workflow_story(
     )
     sections = _merge_with_fallbacks(sections, fallback_sections)
 
+    # --- Baseline quality instrumentation ---
+    evidence_by_type: dict[str, int] = {}
+    total_evidence = 0
+    sections_with_content = 0
+    placeholder_sections = 0
+    for sec in sections:
+        content = sec.content or ""
+        if content and content != "*Insufficient data to generate this section.*":
+            if any(p in content.lower() for p in ["placeholder", "to be determined", "tbd", "lorem ipsum"]):
+                placeholder_sections += 1
+            else:
+                sections_with_content += 1
+        for ev in sec.evidence:
+            evidence_by_type[ev.source_type] = evidence_by_type.get(ev.source_type, 0) + 1
+            total_evidence += 1
+
+    log.info(
+        "workflow_story_quality_metrics",
+        scope_type=scope_type or "repository",
+        scope_path=scope_path,
+        repository=repository_name,
+        depth=depth,
+        total_sections=len(sections),
+        sections_with_content=sections_with_content,
+        placeholder_sections=placeholder_sections,
+        total_evidence=total_evidence,
+        evidence_by_type=evidence_by_type,
+        has_execution_path=bool(execution_path_json),
+        execution_path_steps=len(execution_path.get("steps", [])) if isinstance(execution_path, dict) else 0,
+    )
+
     usage = LLMUsageRecord(
         provider="llm",
-        model=response.model,
-        input_tokens=response.input_tokens,
-        output_tokens=response.output_tokens,
+        model=response.model if response else "fallback",
+        input_tokens=response.input_tokens if response else 0,
+        output_tokens=response.output_tokens if response else 0,
         operation="workflow_story",
         entity_name=repository_name,
     )

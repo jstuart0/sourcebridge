@@ -34,9 +34,6 @@ out/
 web/.next/
 web/out/
 web/node_modules/
-plugins/vscode/node_modules/
-plugins/vscode/out/
-*.vsix
 
 # Environment variables
 .env
@@ -50,7 +47,7 @@ plugins/vscode/out/
 *.swo
 *~
 
-# Gradle / JetBrains Plugin
+# Gradle
 .gradle/
 .intellijPlatform/
 **/build/
@@ -67,6 +64,7 @@ logs/
 # Data
 surrealdb-data/
 *.db
+repo-cache/
 
 # Generated (proto stubs in proto/ dir — gen/ stubs are committed)
 proto/**/*.pb.go
@@ -77,8 +75,8 @@ workers/common/proto/
 secrets/*.yaml
 !secrets/templates/
 
-# Thoughts (managed by hlyr, never committed)
-thoughts/
+# Enterprise module (separate repo)
+sourcebridge-enterprise/
 
 # Go workspace (local dev config, not committed)
 go.work
@@ -89,3 +87,5 @@ web/tsconfig.tsbuildinfo
 
 # Claude Code local settings
 .claude/settings.local.json
+.mcp.json
+codeaware

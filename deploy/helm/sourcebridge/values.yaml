@@ -1,3 +1,17 @@
+# SourceBridge Helm Chart — values.yaml
+#
+# Minimal required configuration for a fresh install:
+#   1. Set secrets.llmApiKey (or use Ollama for local inference)
+#   2. Optionally set global.domain and ingress.enabled
+#
+# Secrets (jwtSecret, grpcAuthSecret, surrealdbPassword) are auto-generated
+# on first install if left empty. To pin them, set explicit values.
+
+# -- Override the chart name
+nameOverride: ""
+# -- Override the full release name
+fullnameOverride: ""
+
 # Global configuration
 global:
   domain: sourcebridge.example.com
@@ -5,10 +19,47 @@ global:
     enabled: false
     secretName: ""
 
-# API server configuration
+# -- Top-level LLM configuration (convenience — also settable per-component via worker.env)
+# These map to SOURCEBRIDGE_WORKER_LLM_* environment variables on the worker.
+llm:
+  # Provider: "anthropic", "openai", "ollama", "lmstudio"
+  provider: anthropic
+  # Model name (provider-specific)
+  model: claude-sonnet-4-20250514
+  # Base URL override (leave empty for cloud providers; set for Ollama/LM Studio)
+  baseUrl: ""
+
+# -- Top-level embedding configuration
+embedding:
+  provider: ollama
+  model: nomic-embed-text
+  dimension: "768"
+  baseUrl: ""
+
+# Service account
+serviceAccount:
+  # -- Whether to create a ServiceAccount
+  create: true
+  # -- Annotations to add to the ServiceAccount
+  annotations: {}
+  # -- The name of the ServiceAccount (auto-generated if empty)
+  name: ""
+
+# Pod-level security context (applied to all pods)
+podSecurityContext:
+  fsGroup: 1000
+
+# Container-level security context (applied to api/worker/web containers)
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+
+# ─── API Server ──────────────────────────────────────────────────────
 api:
   image:
-    repository: sourcebridge/api
+    repository: ghcr.io/sourcebridge/sourcebridge-api
     tag: latest
     pullPolicy: IfNotPresent
   replicas: 1
@@ -20,6 +71,7 @@ api:
     limits:
       cpu: "1"
       memory: 1Gi
+  # -- Extra environment variables (map of NAME: value)
   env: {}
   service:
     type: ClusterIP
@@ -28,10 +80,10 @@ api:
   tolerations: []
   affinity: {}
 
-# Web frontend configuration
+# ─── Web Frontend ────────────────────────────────────────────────────
 web:
   image:
-    repository: sourcebridge/web
+    repository: ghcr.io/sourcebridge/sourcebridge-web
     tag: latest
     pullPolicy: IfNotPresent
   replicas: 1
@@ -50,13 +102,14 @@ web:
   tolerations: []
   affinity: {}
 
-# Worker configuration
+# ─── Worker (Python gRPC) ───────────────────────────────────────────
 worker:
   image:
-    repository: sourcebridge/worker
+    repository: ghcr.io/sourcebridge/sourcebridge-worker
     tag: latest
     pullPolicy: IfNotPresent
   replicas: 1
+  port: 50051
   resources:
     requests:
       cpu: 500m
@@ -64,30 +117,27 @@ worker:
     limits:
       cpu: "2"
       memory: 2Gi
-  env:
-    SOURCEBRIDGE_WORKER_LLM_PROVIDER: "ollama"
-    SOURCEBRIDGE_WORKER_LLM_MODEL: "qwen3:32b"
-    SOURCEBRIDGE_WORKER_LLM_BASE_URL: "http://localhost:11434/v1"
-    SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER: "ollama"
-    SOURCEBRIDGE_WORKER_EMBEDDING_MODEL: "nomic-embed-text"
-    SOURCEBRIDGE_WORKER_EMBEDDING_DIMENSION: "768"
-    SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL: "http://localhost:11434"
+  # -- Extra environment variables passed to the worker container.
+  # The top-level `llm` and `embedding` sections are the recommended way
+  # to configure LLM/embedding providers. Use this map only for overrides
+  # or additional worker-specific settings.
+  env: {}
   nodeSelector: {}
   tolerations: []
   affinity: {}
 
-# SurrealDB configuration
+# ─── SurrealDB ───────────────────────────────────────────────────────
 surrealdb:
   enabled: true
   image:
     repository: surrealdb/surrealdb
-    tag: latest
+    tag: v2.2.1
     pullPolicy: IfNotPresent
   port: 8000
   persistence:
     enabled: true
     storageClass: ""
-    size: 1Gi
+    size: 5Gi
     accessMode: ReadWriteOnce
   resources:
     requests:
@@ -100,7 +150,7 @@ surrealdb:
   tolerations: []
   affinity: {}
 
-# Redis configuration
+# ─── Redis ───────────────────────────────────────────────────────────
 redis:
   enabled: true
   image:
@@ -124,20 +174,50 @@ redis:
   tolerations: []
   affinity: {}
 
-# Ingress configuration
+# ─── Ingress ─────────────────────────────────────────────────────────
 ingress:
   enabled: false
-  className: traefik
+  # -- Ingress class name: "nginx", "traefik", or any installed controller
+  className: ""
   annotations: {}
+  #   # Example for nginx:
+  #   nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+  #   # Example for traefik:
+  #   traefik.ingress.kubernetes.io/router.entrypoints: websecure
+  #   # Example for cert-manager:
+  #   cert-manager.io/cluster-issuer: letsencrypt-production
   tls: []
+  #   - hosts:
+  #       - sourcebridge.example.com
+  #     secretName: sourcebridge-tls
 
-# Secrets configuration
+# ─── Secrets ─────────────────────────────────────────────────────────
 secrets:
-  # Set to true to create secrets from values below
-  create: false
-  # API keys and credentials
-  apiKey: ""
+  # -- Set to true to have the chart create a Secret resource.
+  # When false, you must create the secret manually or use an external
+  # secret manager (e.g. External Secrets Operator, Vault).
+  create: true
+
+  # -- JWT signing secret for API authentication.
+  # Auto-generated (32 chars) on first install if left empty.
+  jwtSecret: ""
+
+  # -- Shared secret for API <-> Worker gRPC authentication.
+  # Auto-generated (32 chars) on first install if left empty.
+  grpcAuthSecret: ""
+
+  # -- SurrealDB root credentials.
   surrealdbUser: "root"
+  # Auto-generated (24 chars) on first install if left empty.
   surrealdbPassword: ""
+
+  # -- Redis password (optional — left empty means no auth).
   redisPassword: ""
+
+  # -- LLM API key (e.g. Anthropic, OpenAI).
+  # Required when llm.provider is a cloud provider.
+  # Not needed for Ollama or other local providers.
   llmApiKey: ""
+
+  # -- Embedding API key (e.g. Voyage AI).
+  embeddingApiKey: ""

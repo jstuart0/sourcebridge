@@ -24,6 +24,7 @@ const (
 	ReasoningService_AnswerQuestion_FullMethodName      = "/sourcebridge.reasoning.v1.ReasoningService/AnswerQuestion"
 	ReasoningService_ReviewFile_FullMethodName          = "/sourcebridge.reasoning.v1.ReasoningService/ReviewFile"
 	ReasoningService_GenerateEmbedding_FullMethodName   = "/sourcebridge.reasoning.v1.ReasoningService/GenerateEmbedding"
+	ReasoningService_SimulateChange_FullMethodName      = "/sourcebridge.reasoning.v1.ReasoningService/SimulateChange"
 )
 
 // ReasoningServiceClient is the client API for ReasoningService service.
@@ -42,6 +43,8 @@ type ReasoningServiceClient interface {
 	ReviewFile(ctx context.Context, in *ReviewFileRequest, opts ...grpc.CallOption) (*ReviewFileResponse, error)
 	// GenerateEmbedding creates an embedding vector for text
 	GenerateEmbedding(ctx context.Context, in *GenerateEmbeddingRequest, opts ...grpc.CallOption) (*GenerateEmbeddingResponse, error)
+	// SimulateChange resolves symbols affected by a hypothetical change description
+	SimulateChange(ctx context.Context, in *SimulateChangeRequest, opts ...grpc.CallOption) (*SimulateChangeResponse, error)
 }
 
 type reasoningServiceClient struct {
@@ -102,6 +105,16 @@ func (c *reasoningServiceClient) GenerateEmbedding(ctx context.Context, in *Gene
 	return out, nil
 }
 
+func (c *reasoningServiceClient) SimulateChange(ctx context.Context, in *SimulateChangeRequest, opts ...grpc.CallOption) (*SimulateChangeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SimulateChangeResponse)
+	err := c.cc.Invoke(ctx, ReasoningService_SimulateChange_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ReasoningServiceServer is the server API for ReasoningService service.
 // All implementations must embed UnimplementedReasoningServiceServer
 // for forward compatibility.
@@ -118,6 +131,8 @@ type ReasoningServiceServer interface {
 	ReviewFile(context.Context, *ReviewFileRequest) (*ReviewFileResponse, error)
 	// GenerateEmbedding creates an embedding vector for text
 	GenerateEmbedding(context.Context, *GenerateEmbeddingRequest) (*GenerateEmbeddingResponse, error)
+	// SimulateChange resolves symbols affected by a hypothetical change description
+	SimulateChange(context.Context, *SimulateChangeRequest) (*SimulateChangeResponse, error)
 	mustEmbedUnimplementedReasoningServiceServer()
 }
 
@@ -142,6 +157,9 @@ func (UnimplementedReasoningServiceServer) ReviewFile(context.Context, *ReviewFi
 }
 func (UnimplementedReasoningServiceServer) GenerateEmbedding(context.Context, *GenerateEmbeddingRequest) (*GenerateEmbeddingResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GenerateEmbedding not implemented")
+}
+func (UnimplementedReasoningServiceServer) SimulateChange(context.Context, *SimulateChangeRequest) (*SimulateChangeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SimulateChange not implemented")
 }
 func (UnimplementedReasoningServiceServer) mustEmbedUnimplementedReasoningServiceServer() {}
 func (UnimplementedReasoningServiceServer) testEmbeddedByValue()                          {}
@@ -254,6 +272,24 @@ func _ReasoningService_GenerateEmbedding_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ReasoningService_SimulateChange_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SimulateChangeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ReasoningServiceServer).SimulateChange(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ReasoningService_SimulateChange_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ReasoningServiceServer).SimulateChange(ctx, req.(*SimulateChangeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ReasoningService_ServiceDesc is the grpc.ServiceDesc for ReasoningService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -280,6 +316,10 @@ var ReasoningService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GenerateEmbedding",
 			Handler:    _ReasoningService_GenerateEmbedding_Handler,
+		},
+		{
+			MethodName: "SimulateChange",
+			Handler:    _ReasoningService_SimulateChange_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

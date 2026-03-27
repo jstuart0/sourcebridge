@@ -45,6 +45,7 @@ type GraphStore interface {
 	// Symbol operations
 	GetSymbols(repoID string, query *string, kind *string, limit, offset int) ([]*StoredSymbol, int)
 	GetSymbol(id string) *StoredSymbol
+	GetSymbolsByIDs(ids []string) map[string]*StoredSymbol
 	GetSymbolsByFile(repoID string, filePath string) []*StoredSymbol
 
 	// Module operations
@@ -67,11 +68,13 @@ type GraphStore interface {
 	StoreRequirements(repoID string, reqs []*StoredRequirement) int
 	GetRequirements(repoID string, limit, offset int) ([]*StoredRequirement, int)
 	GetRequirement(id string) *StoredRequirement
+	GetRequirementsByIDs(ids []string) map[string]*StoredRequirement
 	GetRequirementByExternalID(repoID, externalID string) *StoredRequirement
 	UpdateRequirement(id string, priority string, tags []string) *StoredRequirement
 
 	// Link operations
 	StoreLink(repoID string, link *StoredLink) *StoredLink
+	StoreLinks(repoID string, links []*StoredLink) int
 	GetLink(id string) *StoredLink
 	GetLinksForRequirement(reqID string, includeRejected bool) []*StoredLink
 	GetLinksForSymbol(symID string, includeRejected bool) []*StoredLink
@@ -101,6 +104,31 @@ type GraphStore interface {
 	StoreImpactReport(repoID string, report *ImpactReport)
 	GetLatestImpactReport(repoID string) *ImpactReport
 	GetImpactReports(repoID string, limit int) ([]*ImpactReport, int)
+
+	// Discovered requirement operations (spec extraction)
+	StoreDiscoveredRequirement(repoID string, req *DiscoveredRequirement)
+	StoreDiscoveredRequirements(repoID string, reqs []*DiscoveredRequirement) int
+	GetDiscoveredRequirements(repoID string, status *string, confidence *string, limit, offset int) ([]*DiscoveredRequirement, int)
+	GetDiscoveredRequirement(id string) *DiscoveredRequirement
+	PromoteDiscoveredRequirement(id string, requirementID string) *DiscoveredRequirement
+	DismissDiscoveredRequirement(id string, dismissedBy string, reason string) *DiscoveredRequirement
+	DeleteDiscoveredRequirementsByRepo(repoID string) int
+
+	// Cross-repo federation (OSS)
+	LinkRepos(sourceRepoID, targetRepoID string) (*RepoLink, error)
+	UnlinkRepos(linkID string) error
+	GetRepoLinks(repoID string) ([]*RepoLink, error)
+
+	StoreCrossRepoRef(ref *CrossRepoRef) error
+	StoreCrossRepoRefs(refs []*CrossRepoRef) int
+	GetCrossRepoRefs(repoID string, refType *string, limit int) ([]*CrossRepoRef, error)
+	GetSymbolCrossRepoRefs(symbolID string) ([]*CrossRepoRef, error)
+	DeleteCrossRepoRefsForRepo(repoID string) error
+	DeleteCrossRepoRefsBetweenRepos(repoA, repoB string) error
+
+	StoreAPIContract(contract *APIContract) error
+	GetAPIContracts(repoID string) ([]*APIContract, error)
+	DeleteAPIContractsForRepo(repoID string) error
 }
 
 // Verify at compile time that *Store satisfies GraphStore.

@@ -16,6 +16,10 @@ class LLMResponse:
     input_tokens: int = 0
     output_tokens: int = 0
     stop_reason: str = ""
+    tokens_per_second: float | None = None
+    generation_time_ms: float | None = None
+    acceptance_rate: float | None = None
+    provider_name: str | None = None
 
 
 class LLMProvider(Protocol):
@@ -28,8 +32,9 @@ class LLMProvider(Protocol):
         system: str = "",
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        model: str | None = None,
     ) -> LLMResponse:
-        """Generate a completion."""
+        """Generate a completion. If model is provided, it overrides the default."""
         ...
 
     async def stream(
@@ -39,6 +44,7 @@ class LLMProvider(Protocol):
         system: str = "",
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        model: str | None = None,
     ) -> AsyncIterator[str]:
         """Stream a completion token by token."""
         ...

@@ -34,12 +34,15 @@ def _estimated_tokens(text: str) -> int:
 def condense_snapshot(
     snapshot_json: str,
     max_tokens: int = _DEFAULT_MAX_TOKENS,
+    scope_type: str = "repository",
 ) -> str:
     """Progressively condense a snapshot JSON to fit within a token budget.
 
     Reduction strategy (applied in order until the snapshot fits):
       1. Strip doc_comment from symbol refs (verbose, rarely useful in bulk)
       2. Strip full content from docs (keep paths only)
+      2b. For file/symbol scopes: strip requirements early (code context
+          is more valuable than requirements at narrow scope)
       3. Cap links at 200, sorted by confidence
       4. Cap each symbol list at 100
       5. Cap each symbol list at 50
@@ -48,7 +51,9 @@ def condense_snapshot(
       8. Remove all symbol lists, keep only counts
 
     At every stage the structural metadata (languages, modules, counts,
-    requirements, coverage_ratio) is preserved in full.
+    coverage_ratio) is preserved in full. Requirements are preserved in
+    full for repository/module scopes but may be stripped early for
+    file/symbol scopes where code-local context is more important.
     """
     budget_chars = int((max_tokens - _OVERHEAD_TOKENS) * _CHARS_PER_TOKEN)
 
@@ -89,6 +94,29 @@ def condense_snapshot(
         log.info("snapshot_condensed", strategy="strip_doc_content",
                  original_tokens=original_tokens, result_tokens=_estimated_tokens(result))
         return result
+
+    # Step 2b: for requirement scope, strip docs — the requirement
+    # description and linked code are the valuable context
+    if scope_type == "requirement":
+        snap["docs"] = []
+        result = _compact()
+        if len(result) <= budget_chars:
+            log.info("snapshot_condensed", strategy="strip_docs_requirement_scope",
+                     scope_type=scope_type,
+                     original_tokens=original_tokens, result_tokens=_estimated_tokens(result))
+            return result
+
+    # Step 2c: for file/symbol scopes, strip requirements early —
+    # code-local context (symbols, callers, callees) is more valuable
+    # than requirements evidence at narrow scopes
+    if scope_type in ("file", "symbol"):
+        snap["requirements"] = []
+        result = _compact()
+        if len(result) <= budget_chars:
+            log.info("snapshot_condensed", strategy="strip_requirements_narrow_scope",
+                     scope_type=scope_type,
+                     original_tokens=original_tokens, result_tokens=_estimated_tokens(result))
+            return result
 
     # Step 3: cap links at 200, highest confidence first
     links = snap.get("links", [])

@@ -39,8 +39,8 @@ spec:
             {{- end }}
             - --bind
             - "0.0.0.0:{{ .Values.surrealdb.port }}"
-          {{- if .Values.secrets.create }}
           env:
+            {{- if .Values.secrets.create }}
             - name: SURREAL_USER
               valueFrom:
                 secretKeyRef:
@@ -51,7 +51,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "sourcebridge.fullname" . }}-secrets
                   key: surrealdb-password
-          {{- end }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.surrealdb.port }}

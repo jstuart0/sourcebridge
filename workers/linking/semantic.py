@@ -18,6 +18,7 @@ class RequirementText:
 
     id: str
     text: str  # title + description + acceptance criteria
+    label: str = ""  # human-readable ID (e.g., CA-REQ-001) for rationale
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -35,6 +36,7 @@ async def extract_semantic_links(
     entities: list[CodeEntity],
     embedding_provider: EmbeddingProvider,
     threshold: float = 0.6,
+    cached_entity_embeddings: list[list[float]] | None = None,
 ) -> LinkResult:
     """Find semantic links between requirements and code entities.
 
@@ -46,6 +48,8 @@ async def extract_semantic_links(
         entities: Code entities with content.
         embedding_provider: Provider for generating embeddings.
         threshold: Minimum cosine similarity to create a link.
+        cached_entity_embeddings: Pre-computed entity embeddings to avoid
+            re-embedding the same symbols across multiple requirements.
 
     Returns:
         LinkResult with discovered links.
@@ -57,17 +61,21 @@ async def extract_semantic_links(
 
     # Build texts for embedding
     req_texts = [r.text for r in requirements]
-    entity_texts = [_entity_text(e) for e in entities]
 
-    # Generate embeddings
+    # Generate embeddings — reuse cached entity embeddings if provided
     req_embeddings = await embedding_provider.embed(req_texts)
-    entity_embeddings = await embedding_provider.embed(entity_texts)
+    if cached_entity_embeddings is not None:
+        entity_embeddings = cached_entity_embeddings
+    else:
+        entity_texts = [entity_text(e) for e in entities]
+        entity_embeddings = await embedding_provider.embed(entity_texts)
 
     # Compare all pairs
     for i, req in enumerate(requirements):
         for j, entity in enumerate(entities):
             sim = cosine_similarity(req_embeddings[i], entity_embeddings[j])
             if sim >= threshold:
+                display_id = req.label or req.id
                 result.links.append(
                     Link(
                         requirement_id=req.id,
@@ -75,14 +83,14 @@ async def extract_semantic_links(
                         source=LinkSource.SEMANTIC,
                         link_type=LinkType.IMPLEMENTS,
                         confidence=min(sim, 0.85),  # Cap semantic confidence
-                        rationale=f"Semantic similarity {sim:.2f} between '{req.id}' and '{entity.name}'",
+                        rationale=f"Semantic similarity {sim:.2f} between '{display_id}' and '{entity.name}'",
                     )
                 )
 
     return result
 
 
-def _entity_text(entity: CodeEntity) -> str:
+def entity_text(entity: CodeEntity) -> str:
     """Build text representation of an entity for embedding."""
     parts = [entity.name]
     if entity.doc_comment:

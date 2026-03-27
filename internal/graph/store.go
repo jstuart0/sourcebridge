@@ -115,6 +115,30 @@ type StoredRequirement struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
+// DiscoveredRequirement represents a spec inferred from code analysis.
+type DiscoveredRequirement struct {
+	ID              string    `json:"id"`
+	RepoID          string    `json:"repo_id"`
+	Source          string    `json:"source"`           // "test", "schema", "comment"
+	SourceFile      string    `json:"source_file"`
+	SourceLine      int       `json:"source_line"`
+	SourceFiles     []string  `json:"source_files"`     // additional files (from dedup merge)
+	Text            string    `json:"text"`              // refined requirement text
+	RawText         string    `json:"raw_text"`          // original extraction
+	GroupKey        string    `json:"group_key"`
+	Language        string    `json:"language"`
+	Keywords        []string  `json:"keywords"`
+	Confidence      string    `json:"confidence"`        // "high", "medium", "low"
+	Status          string    `json:"status"`            // "discovered", "promoted", "dismissed"
+	LLMRefined      bool      `json:"llm_refined"`
+	PromotedTo      string    `json:"promoted_to,omitempty"`
+	DismissedBy     string    `json:"dismissed_by,omitempty"`
+	DismissedReason string    `json:"dismissed_reason,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	DismissedAt     time.Time `json:"dismissed_at,omitempty"`
+	PromotedAt      time.Time `json:"promoted_at,omitempty"`
+}
+
 // LLMUsageRecord tracks a single LLM API call for cost/usage monitoring.
 type LLMUsageRecord struct {
 	ID           string    `json:"id"`
@@ -186,7 +210,9 @@ type Store struct {
 	llmUsage         []LLMUsageRecord
 	embeddings       map[string]*EmbeddingRecord   // targetID -> EmbeddingRecord
 	reviewResults    map[string]*ReviewResultRecord // reviewID -> ReviewResultRecord
-	impactReports    map[string][]*ImpactReport     // repoID -> []*ImpactReport
+	impactReports           map[string][]*ImpactReport          // repoID -> []*ImpactReport
+	discoveredRequirements  map[string]*DiscoveredRequirement   // discReqID -> DiscoveredRequirement
+	repoDiscoveredReqs      map[string][]string                 // repoID -> []discReqID
 }
 
 // NewStore creates a new in-memory graph store.
@@ -210,7 +236,9 @@ func NewStore() *Store {
 		fileSymbols:      make(map[string][]string),
 		embeddings:       make(map[string]*EmbeddingRecord),
 		reviewResults:    make(map[string]*ReviewResultRecord),
-		impactReports:    make(map[string][]*ImpactReport),
+		impactReports:           make(map[string][]*ImpactReport),
+		discoveredRequirements:  make(map[string]*DiscoveredRequirement),
+		repoDiscoveredReqs:      make(map[string][]string),
 	}
 }
 
@@ -889,6 +917,24 @@ func (s *Store) StoreLink(repoID string, link *StoredLink) *StoredLink {
 	return link
 }
 
+// StoreLinks adds multiple links at once.
+func (s *Store) StoreLinks(repoID string, links []*StoredLink) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	for _, link := range links {
+		link.ID = uuid.New().String()
+		link.RepoID = repoID
+		link.CreatedAt = now
+		s.links[link.ID] = link
+		s.repoLinks[repoID] = append(s.repoLinks[repoID], link.ID)
+		s.reqLinks[link.RequirementID] = append(s.reqLinks[link.RequirementID], link.ID)
+		s.symLinks[link.SymbolID] = append(s.symLinks[link.SymbolID], link.ID)
+	}
+	return len(links)
+}
+
 // GetLink returns a link by ID.
 func (s *Store) GetLink(id string) *StoredLink {
 	s.mu.RLock()
@@ -1060,6 +1106,19 @@ func (s *Store) GetRequirement(id string) *StoredRequirement {
 	return s.requirements[id]
 }
 
+// GetRequirementsByIDs returns requirements by a list of IDs in a single lookup.
+func (s *Store) GetRequirementsByIDs(ids []string) map[string]*StoredRequirement {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[string]*StoredRequirement, len(ids))
+	for _, id := range ids {
+		if req, ok := s.requirements[id]; ok {
+			result[id] = req
+		}
+	}
+	return result
+}
+
 // GetRequirementByExternalID returns a requirement by external ID within a repo.
 func (s *Store) GetRequirementByExternalID(repoID, externalID string) *StoredRequirement {
 	s.mu.RLock()
@@ -1115,6 +1174,19 @@ func (s *Store) GetSymbol(id string) *StoredSymbol {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.symbols[id]
+}
+
+// GetSymbolsByIDs returns symbols by a list of IDs in a single lookup.
+func (s *Store) GetSymbolsByIDs(ids []string) map[string]*StoredSymbol {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[string]*StoredSymbol, len(ids))
+	for _, id := range ids {
+		if sym, ok := s.symbols[id]; ok {
+			result[id] = sym
+		}
+	}
+	return result
 }
 
 // GetSymbolsByFile returns all symbols in a repository for a given file path.
@@ -1329,4 +1401,204 @@ func (s *Store) GetImpactReports(repoID string, limit int) ([]*ImpactReport, int
 		result[i] = reports[total-1-i]
 	}
 	return result, total
+}
+
+// ---------------------------------------------------------------------------
+// Discovered Requirement operations (spec extraction)
+// ---------------------------------------------------------------------------
+
+// StoreDiscoveredRequirement adds a single discovered requirement.
+func (s *Store) StoreDiscoveredRequirement(repoID string, req *DiscoveredRequirement) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	req.ID = uuid.New().String()
+	req.RepoID = repoID
+	if req.CreatedAt.IsZero() {
+		req.CreatedAt = time.Now()
+	}
+	if req.Status == "" {
+		req.Status = "discovered"
+	}
+
+	s.discoveredRequirements[req.ID] = req
+	s.repoDiscoveredReqs[repoID] = append(s.repoDiscoveredReqs[repoID], req.ID)
+}
+
+// StoreDiscoveredRequirements adds multiple discovered requirements and returns the count stored.
+func (s *Store) StoreDiscoveredRequirements(repoID string, reqs []*DiscoveredRequirement) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	count := 0
+	for _, req := range reqs {
+		req.ID = uuid.New().String()
+		req.RepoID = repoID
+		if req.CreatedAt.IsZero() {
+			req.CreatedAt = now
+		}
+		if req.Status == "" {
+			req.Status = "discovered"
+		}
+
+		s.discoveredRequirements[req.ID] = req
+		s.repoDiscoveredReqs[repoID] = append(s.repoDiscoveredReqs[repoID], req.ID)
+		count++
+	}
+	return count
+}
+
+// GetDiscoveredRequirements returns discovered requirements with optional filters and pagination.
+func (s *Store) GetDiscoveredRequirements(repoID string, status *string, confidence *string, limit, offset int) ([]*DiscoveredRequirement, int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	ids := s.repoDiscoveredReqs[repoID]
+	var filtered []*DiscoveredRequirement
+	for _, id := range ids {
+		req := s.discoveredRequirements[id]
+		if req == nil {
+			continue
+		}
+		if status != nil && req.Status != *status {
+			continue
+		}
+		if confidence != nil && req.Confidence != *confidence {
+			continue
+		}
+		filtered = append(filtered, req)
+	}
+
+	// Sort by confidence (high first), then by creation time (newest first)
+	sort.Slice(filtered, func(i, j int) bool {
+		ci := confidenceRank(filtered[i].Confidence)
+		cj := confidenceRank(filtered[j].Confidence)
+		if ci != cj {
+			return ci > cj
+		}
+		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+	})
+
+	total := len(filtered)
+	if offset >= total {
+		return nil, total
+	}
+	filtered = filtered[offset:]
+	if limit > 0 && limit < len(filtered) {
+		filtered = filtered[:limit]
+	}
+	return filtered, total
+}
+
+func confidenceRank(c string) int {
+	switch c {
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// GetDiscoveredRequirement returns a single discovered requirement by ID.
+func (s *Store) GetDiscoveredRequirement(id string) *DiscoveredRequirement {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.discoveredRequirements[id]
+}
+
+// PromoteDiscoveredRequirement marks a discovered requirement as promoted.
+func (s *Store) PromoteDiscoveredRequirement(id string, requirementID string) *DiscoveredRequirement {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	req := s.discoveredRequirements[id]
+	if req == nil {
+		return nil
+	}
+	req.Status = "promoted"
+	req.PromotedTo = requirementID
+	req.PromotedAt = time.Now()
+	return req
+}
+
+// DismissDiscoveredRequirement marks a discovered requirement as dismissed.
+func (s *Store) DismissDiscoveredRequirement(id string, dismissedBy string, reason string) *DiscoveredRequirement {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	req := s.discoveredRequirements[id]
+	if req == nil {
+		return nil
+	}
+	req.Status = "dismissed"
+	req.DismissedBy = dismissedBy
+	req.DismissedReason = reason
+	req.DismissedAt = time.Now()
+	return req
+}
+
+// DeleteDiscoveredRequirementsByRepo removes all discovered requirements for a repo.
+// Only deletes requirements with status "discovered"; promoted/dismissed are preserved.
+func (s *Store) DeleteDiscoveredRequirementsByRepo(repoID string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ids := s.repoDiscoveredReqs[repoID]
+	deleted := 0
+	var remaining []string
+	for _, id := range ids {
+		req := s.discoveredRequirements[id]
+		if req != nil && req.Status == "discovered" {
+			delete(s.discoveredRequirements, id)
+			deleted++
+		} else {
+			remaining = append(remaining, id)
+		}
+	}
+	s.repoDiscoveredReqs[repoID] = remaining
+	return deleted
+}
+
+// --- Cross-Repo Federation (in-memory stubs) ---
+
+func (s *Store) LinkRepos(sourceRepoID, targetRepoID string) (*RepoLink, error) {
+	return nil, fmt.Errorf("federation not supported in in-memory store")
+}
+func (s *Store) UnlinkRepos(linkID string) error {
+	return fmt.Errorf("federation not supported in in-memory store")
+}
+func (s *Store) GetRepoLinks(repoID string) ([]*RepoLink, error) {
+	return nil, nil
+}
+func (s *Store) StoreCrossRepoRef(ref *CrossRepoRef) error {
+	return fmt.Errorf("federation not supported in in-memory store")
+}
+func (s *Store) StoreCrossRepoRefs(refs []*CrossRepoRef) int {
+	return 0
+}
+func (s *Store) GetCrossRepoRefs(repoID string, refType *string, limit int) ([]*CrossRepoRef, error) {
+	return nil, nil
+}
+func (s *Store) GetSymbolCrossRepoRefs(symbolID string) ([]*CrossRepoRef, error) {
+	return nil, nil
+}
+func (s *Store) DeleteCrossRepoRefsForRepo(repoID string) error {
+	return nil
+}
+func (s *Store) DeleteCrossRepoRefsBetweenRepos(repoA, repoB string) error {
+	return nil
+}
+func (s *Store) StoreAPIContract(contract *APIContract) error {
+	return fmt.Errorf("federation not supported in in-memory store")
+}
+func (s *Store) GetAPIContracts(repoID string) ([]*APIContract, error) {
+	return nil, nil
+}
+func (s *Store) DeleteAPIContractsForRepo(repoID string) error {
+	return nil
 }

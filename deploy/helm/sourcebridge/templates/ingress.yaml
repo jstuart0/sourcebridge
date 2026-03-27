@@ -29,6 +29,7 @@ spec:
     - host: {{ .Values.global.domain }}
       http:
         paths:
+          # API routes — order matters: more specific paths first
           - path: /api
             pathType: Prefix
             backend:
@@ -37,6 +38,13 @@ spec:
                 port:
                   number: {{ .Values.api.service.port }}
           - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "sourcebridge.fullname" . }}-api
+                port:
+                  number: {{ .Values.api.service.port }}
+          - path: /graphql
             pathType: Prefix
             backend:
               service:
@@ -64,6 +72,7 @@ spec:
                 name: {{ include "sourcebridge.fullname" . }}-api
                 port:
                   number: {{ .Values.api.service.port }}
+          # Catch-all — web frontend
           - path: /
             pathType: Prefix
             backend:

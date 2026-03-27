@@ -1,9 +1,11 @@
-Thank you for installing {{ .Chart.Name }}!
 
-Your release is named: {{ .Release.Name }}
-Namespace: {{ .Release.Namespace }}
+  SourceBridge has been deployed!
 
-== Components Deployed ==
+  Release:   {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Version:   {{ .Chart.AppVersion }}
+
+== Components ==
 
   API Server:    {{ include "sourcebridge.fullname" . }}-api
   Web Frontend:  {{ include "sourcebridge.fullname" . }}-web
@@ -15,37 +17,63 @@ Namespace: {{ .Release.Namespace }}
   Redis:         {{ include "sourcebridge.fullname" . }}-redis
 {{- end }}
 
-== Accessing SourceBridge.ai ==
-
+== Access ==
 {{- if .Values.ingress.enabled }}
 
-SourceBridge.ai is available at:
-{{- if .Values.global.tls.enabled }}
-  https://{{ .Values.global.domain }}
+  SourceBridge is available at:
+  {{- if .Values.global.tls.enabled }}
+    https://{{ .Values.global.domain }}
+  {{- else }}
+    http://{{ .Values.global.domain }}
+  {{- end }}
+
+  API endpoint:
+  {{- if .Values.global.tls.enabled }}
+    https://{{ .Values.global.domain }}/api
+  {{- else }}
+    http://{{ .Values.global.domain }}/api
+  {{- end }}
 {{- else }}
-  http://{{ .Values.global.domain }}
-{{- end }}
 
-{{- else }}
+  No ingress is enabled. Use port-forwarding to access SourceBridge:
 
-To access SourceBridge.ai, set up port forwarding:
-
-  # Web UI
+  # Web UI (open http://localhost:3000 in your browser)
   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "sourcebridge.fullname" . }}-web {{ .Values.web.service.port }}:{{ .Values.web.service.port }}
 
-  # API
+  # API server (http://localhost:8080)
   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "sourcebridge.fullname" . }}-api {{ .Values.api.service.port }}:{{ .Values.api.service.port }}
 
-Then open http://localhost:{{ .Values.web.service.port }} in your browser.
-
+  # Health check
+  curl http://localhost:{{ .Values.api.service.port }}/healthz
 {{- end }}
 
-== Configuration ==
+== LLM Configuration ==
 
-To view the current configuration:
+  Provider: {{ .Values.llm.provider }}
+  Model:    {{ .Values.llm.model }}
+{{- if and (ne .Values.llm.provider "ollama") (not .Values.secrets.llmApiKey) }}
+
+  WARNING: No LLM API key is configured. The worker will not be able to
+  perform AI operations. Set secrets.llmApiKey in your values file:
+
+    helm upgrade {{ .Release.Name }} sourcebridge/ \
+      --set secrets.llmApiKey=sk-your-api-key \
+      -n {{ .Release.Namespace }}
+{{- end }}
+
+== Useful Commands ==
+
+  # View logs
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=api -f
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=worker -f
+
+  # Check pod status
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+  # View current configuration
   helm get values {{ .Release.Name }} -n {{ .Release.Namespace }}
 
-To upgrade the release:
-  helm upgrade {{ .Release.Name }} sourcebridge/ -n {{ .Release.Namespace }} -f my-values.yaml
+  # Run connection test
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
 
-For more information, visit: https://github.com/sourcebridge/sourcebridge
+For documentation: https://github.com/sourcebridge/sourcebridge

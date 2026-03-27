@@ -1,0 +1,89 @@
+# Example: llama-server with speculative decoding
+# Requires: model files on a PVC or downloaded at startup
+# Adjust GPU resources, model paths, and draft-max for your hardware
+#
+# For n-gram speculation (no extra model/VRAM needed):
+#   Replace --model-draft/--draft-max with:
+#   --spec-type ngram-simple --spec-ngram-min 2
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-server
+  namespace: sourcebridge
+  labels:
+    app: llama-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llama-server
+  template:
+    metadata:
+      labels:
+        app: llama-server
+    spec:
+      containers:
+      - name: llama-server
+        image: ghcr.io/ggml-org/llama.cpp:server
+        args:
+          - "--model"
+          - "/models/target-model.gguf"
+          - "--model-draft"
+          - "/models/draft-model.gguf"
+          - "--draft-max"
+          - "8"
+          - "--draft-p-min"
+          - "0.9"
+          - "--host"
+          - "0.0.0.0"
+          - "--port"
+          - "8080"
+          - "--ctx-size"
+          - "8192"
+          - "--n-gpu-layers"
+          - "99"
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        volumeMounts:
+        - name: models
+          mountPath: /models
+          readOnly: true
+        resources:
+          requests:
+            memory: "8Gi"
+          limits:
+            memory: "16Gi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: llm-models  # Create PVC with your model files
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-server
+  namespace: sourcebridge
+  labels:
+    app: llama-server
+spec:
+  selector:
+    app: llama-server
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+  type: ClusterIP

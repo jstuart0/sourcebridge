@@ -198,12 +198,13 @@ func (x *LinkRequirementResponse) GetUsage() *v1.LLMUsage {
 }
 
 type BatchLinkRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Requirements  []*v1.Requirement      `protobuf:"bytes,1,rep,name=requirements,proto3" json:"requirements,omitempty"`
-	RepositoryId  string                 `protobuf:"bytes,2,opt,name=repository_id,json=repositoryId,proto3" json:"repository_id,omitempty"`
-	MinConfidence float32                `protobuf:"fixed32,3,opt,name=min_confidence,json=minConfidence,proto3" json:"min_confidence,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Requirements     []*v1.Requirement      `protobuf:"bytes,1,rep,name=requirements,proto3" json:"requirements,omitempty"`
+	RepositoryId     string                 `protobuf:"bytes,2,opt,name=repository_id,json=repositoryId,proto3" json:"repository_id,omitempty"`
+	MinConfidence    float32                `protobuf:"fixed32,3,opt,name=min_confidence,json=minConfidence,proto3" json:"min_confidence,omitempty"`
+	CandidateSymbols []*CandidateSymbol     `protobuf:"bytes,4,rep,name=candidate_symbols,json=candidateSymbols,proto3" json:"candidate_symbols,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *BatchLinkRequest) Reset() {
@@ -255,6 +256,13 @@ func (x *BatchLinkRequest) GetMinConfidence() float32 {
 		return x.MinConfidence
 	}
 	return 0
+}
+
+func (x *BatchLinkRequest) GetCandidateSymbols() []*CandidateSymbol {
+	if x != nil {
+		return x.CandidateSymbols
+	}
+	return nil
 }
 
 type BatchLinkResponse struct {
@@ -460,11 +468,12 @@ const file_linking_v1_linking_proto_rawDesc = "" +
 	"\x0emin_confidence\x18\x04 \x01(\x02R\rminConfidence\"\x90\x01\n" +
 	"\x17LinkRequirementResponse\x12=\n" +
 	"\x05links\x18\x01 \x03(\v2'.sourcebridge.common.v1.RequirementLinkR\x05links\x126\n" +
-	"\x05usage\x18\x02 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"\xa7\x01\n" +
+	"\x05usage\x18\x02 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"\xfe\x01\n" +
 	"\x10BatchLinkRequest\x12G\n" +
 	"\frequirements\x18\x01 \x03(\v2#.sourcebridge.common.v1.RequirementR\frequirements\x12#\n" +
 	"\rrepository_id\x18\x02 \x01(\tR\frepositoryId\x12%\n" +
-	"\x0emin_confidence\x18\x03 \x01(\x02R\rminConfidence\"\xe2\x01\n" +
+	"\x0emin_confidence\x18\x03 \x01(\x02R\rminConfidence\x12U\n" +
+	"\x11candidate_symbols\x18\x04 \x03(\v2(.sourcebridge.linking.v1.CandidateSymbolR\x10candidateSymbols\"\xe2\x01\n" +
 	"\x11BatchLinkResponse\x12=\n" +
 	"\x05links\x18\x01 \x03(\v2'.sourcebridge.common.v1.RequirementLinkR\x05links\x125\n" +
 	"\x16requirements_processed\x18\x02 \x01(\x05R\x15requirementsProcessed\x12\x1f\n" +
@@ -519,23 +528,24 @@ var file_linking_v1_linking_proto_depIdxs = []int32{
 	9,  // 3: sourcebridge.linking.v1.LinkRequirementResponse.links:type_name -> sourcebridge.common.v1.RequirementLink
 	10, // 4: sourcebridge.linking.v1.LinkRequirementResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
 	8,  // 5: sourcebridge.linking.v1.BatchLinkRequest.requirements:type_name -> sourcebridge.common.v1.Requirement
-	9,  // 6: sourcebridge.linking.v1.BatchLinkResponse.links:type_name -> sourcebridge.common.v1.RequirementLink
-	10, // 7: sourcebridge.linking.v1.BatchLinkResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	9,  // 8: sourcebridge.linking.v1.ValidateLinkRequest.link:type_name -> sourcebridge.common.v1.RequirementLink
-	7,  // 9: sourcebridge.linking.v1.ValidateLinkRequest.current_symbol:type_name -> sourcebridge.common.v1.CodeSymbol
-	11, // 10: sourcebridge.linking.v1.ValidateLinkResponse.new_confidence:type_name -> sourcebridge.common.v1.Confidence
-	10, // 11: sourcebridge.linking.v1.ValidateLinkResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	1,  // 12: sourcebridge.linking.v1.LinkingService.LinkRequirement:input_type -> sourcebridge.linking.v1.LinkRequirementRequest
-	3,  // 13: sourcebridge.linking.v1.LinkingService.BatchLink:input_type -> sourcebridge.linking.v1.BatchLinkRequest
-	5,  // 14: sourcebridge.linking.v1.LinkingService.ValidateLink:input_type -> sourcebridge.linking.v1.ValidateLinkRequest
-	2,  // 15: sourcebridge.linking.v1.LinkingService.LinkRequirement:output_type -> sourcebridge.linking.v1.LinkRequirementResponse
-	4,  // 16: sourcebridge.linking.v1.LinkingService.BatchLink:output_type -> sourcebridge.linking.v1.BatchLinkResponse
-	6,  // 17: sourcebridge.linking.v1.LinkingService.ValidateLink:output_type -> sourcebridge.linking.v1.ValidateLinkResponse
-	15, // [15:18] is the sub-list for method output_type
-	12, // [12:15] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	0,  // 6: sourcebridge.linking.v1.BatchLinkRequest.candidate_symbols:type_name -> sourcebridge.linking.v1.CandidateSymbol
+	9,  // 7: sourcebridge.linking.v1.BatchLinkResponse.links:type_name -> sourcebridge.common.v1.RequirementLink
+	10, // 8: sourcebridge.linking.v1.BatchLinkResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	9,  // 9: sourcebridge.linking.v1.ValidateLinkRequest.link:type_name -> sourcebridge.common.v1.RequirementLink
+	7,  // 10: sourcebridge.linking.v1.ValidateLinkRequest.current_symbol:type_name -> sourcebridge.common.v1.CodeSymbol
+	11, // 11: sourcebridge.linking.v1.ValidateLinkResponse.new_confidence:type_name -> sourcebridge.common.v1.Confidence
+	10, // 12: sourcebridge.linking.v1.ValidateLinkResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	1,  // 13: sourcebridge.linking.v1.LinkingService.LinkRequirement:input_type -> sourcebridge.linking.v1.LinkRequirementRequest
+	3,  // 14: sourcebridge.linking.v1.LinkingService.BatchLink:input_type -> sourcebridge.linking.v1.BatchLinkRequest
+	5,  // 15: sourcebridge.linking.v1.LinkingService.ValidateLink:input_type -> sourcebridge.linking.v1.ValidateLinkRequest
+	2,  // 16: sourcebridge.linking.v1.LinkingService.LinkRequirement:output_type -> sourcebridge.linking.v1.LinkRequirementResponse
+	4,  // 17: sourcebridge.linking.v1.LinkingService.BatchLink:output_type -> sourcebridge.linking.v1.BatchLinkResponse
+	6,  // 18: sourcebridge.linking.v1.LinkingService.ValidateLink:output_type -> sourcebridge.linking.v1.ValidateLinkResponse
+	16, // [16:19] is the sub-list for method output_type
+	13, // [13:16] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_linking_v1_linking_proto_init() }

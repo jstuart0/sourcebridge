@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -64,6 +65,21 @@ func WithLLMConfigStore(store LLMConfigStore) ServerOption {
 	return func(s *Server) { s.llmConfigStore = store }
 }
 
+// WithMCPPermissionChecker sets the enterprise MCP permission checker.
+func WithMCPPermissionChecker(pc MCPPermissionChecker) ServerOption {
+	return func(s *Server) { s.mcpPermChecker = pc }
+}
+
+// WithMCPAuditLogger sets the enterprise MCP audit logger.
+func WithMCPAuditLogger(al MCPAuditLogger) ServerOption {
+	return func(s *Server) { s.mcpAuditLogger = al }
+}
+
+// WithMCPToolExtender sets the enterprise MCP tool extender.
+func WithMCPToolExtender(te MCPToolExtender) ServerOption {
+	return func(s *Server) { s.mcpToolExtender = te }
+}
+
 // Server is the HTTP API server.
 type Server struct {
 	cfg            *config.Config
@@ -79,8 +95,12 @@ type Server struct {
 	desktopAuth    DesktopAuthSessionStore
 	gitConfigStore GitConfigStore               // persists git tokens/SSH config across restarts
 	llmConfigStore LLMConfigStore               // persists LLM provider/model config across restarts
-	enterpriseDB   interface{}                  // *surrealdb.DB when available, type-asserted in enterprise_routes.go
-	repoChecker    middleware.RepoAccessChecker // set by enterprise build to enable tenant repo filtering
+	enterpriseDB    interface{}                  // *surrealdb.DB when available, type-asserted in enterprise_routes.go
+	repoChecker     middleware.RepoAccessChecker // set by enterprise build to enable tenant repo filtering
+	mcp             *mcpHandler                  // MCP protocol handler (nil when disabled)
+	mcpPermChecker  MCPPermissionChecker         // deferred to mcp handler at setup
+	mcpAuditLogger  MCPAuditLogger               // deferred to mcp handler at setup
+	mcpToolExtender MCPToolExtender              // deferred to mcp handler at setup
 }
 
 // getStore returns a tenant-filtered store when RepoAccessMiddleware has
@@ -227,6 +247,7 @@ func (s *Server) setupRouter() {
 		// LLM configuration
 		r.Get("/api/v1/admin/llm-config", s.handleGetLLMConfig)
 		r.Put("/api/v1/admin/llm-config", s.handleUpdateLLMConfig)
+		r.Get("/api/v1/admin/llm-models", s.handleListLLMModels)
 
 		// Git configuration
 		r.Get("/api/v1/admin/git-config", s.handleGetGitConfig)
@@ -247,6 +268,37 @@ func (s *Server) setupRouter() {
 		r.Get("/api/v1/export/symbols", s.handleExportSymbols)
 		r.Get("/api/v1/export/knowledge/{id}", s.handleExportKnowledgeArtifact)
 	})
+
+	// MCP (Model Context Protocol) routes
+	if s.cfg.MCP.Enabled {
+		sessionTTL := time.Duration(s.cfg.MCP.SessionTTL) * time.Second
+		keepalive := time.Duration(s.cfg.MCP.Keepalive) * time.Second
+		s.mcp = newMCPHandler(s.store, s.knowledgeStore, s.worker, s.cfg.MCP.Repos, sessionTTL, keepalive, s.cfg.MCP.MaxSessions)
+		// Wire enterprise extensions if provided via server options
+		if s.mcpPermChecker != nil {
+			s.mcp.permChecker = s.mcpPermChecker
+		}
+		if s.mcpAuditLogger != nil {
+			s.mcp.auditLogger = s.mcpAuditLogger
+		}
+		if s.mcpToolExtender != nil {
+			s.mcp.toolExtender = s.mcpToolExtender
+		}
+		// SSE endpoint: behind auth (JWT or API token)
+		r.Group(func(r chi.Router) {
+			r.Use(auth.MiddlewareWithTokens(s.jwtMgr, s.tokenStore))
+			r.Get("/api/v1/mcp/sse", s.mcp.handleSSE)
+		})
+		// Message endpoint: session-based auth (no JWT middleware — session owns auth)
+		r.Post("/api/v1/mcp/message", s.mcp.handleMessage)
+		// Streamable HTTP transport: auth on every request (for Codex, etc.)
+		r.Group(func(r chi.Router) {
+			r.Use(auth.MiddlewareWithTokens(s.jwtMgr, s.tokenStore))
+			r.Post("/api/v1/mcp/http", s.mcp.handleStreamableHTTP)
+			r.Delete("/api/v1/mcp/http", s.mcp.handleStreamableHTTPDelete)
+		})
+		slog.Info("mcp server enabled", "max_sessions", s.cfg.MCP.MaxSessions, "session_ttl", sessionTTL, "keepalive", keepalive)
+	}
 
 	// Enterprise routes (no-op in OSS builds, registered when built with -tags enterprise)
 	s.registerEnterpriseRoutes(r)

@@ -183,13 +183,44 @@ async def retrieve_relevant_snapshot(
     return result
 
 
-def build_overview_query(repository_name: str, action: str) -> str:
-    """Build a synthetic query for broad-coverage actions like cliff notes.
+def build_overview_query(
+    repository_name: str,
+    action: str,
+    scope_type: str = "repository",
+    scope_path: str = "",
+) -> str:
+    """Build a synthetic query for snapshot retrieval.
 
-    For actions that need comprehensive coverage rather than targeted
-    retrieval, we use a broad query that selects a representative sample
-    of symbols across all modules and roles.
+    For repository scope, uses a broad query for comprehensive coverage.
+    For file/symbol scopes, uses a targeted query so retrieval selects
+    symbols relevant to the specific scope rather than a generic overview.
     """
+    # Scoped queries — narrow retrieval to the target context
+    if scope_type == "symbol" and scope_path:
+        parts = scope_path.rsplit("#", 1)
+        file_part = parts[0] if parts else scope_path
+        symbol_part = parts[1] if len(parts) > 1 else scope_path
+        return (
+            f"Symbol {symbol_part} in {file_part} callers callees "
+            f"dependencies side effects usage patterns of {repository_name}"
+        )
+    if scope_type == "file" and scope_path:
+        return (
+            f"File {scope_path} symbols responsibilities dependencies "
+            f"patterns usage of {repository_name}"
+        )
+    if scope_type == "requirement" and scope_path:
+        return (
+            f"Requirement {scope_path} implementation linked symbols files "
+            f"cross-cutting behavior traceability {repository_name}"
+        )
+    if scope_type == "module" and scope_path:
+        return (
+            f"Module {scope_path} components files API boundaries "
+            f"patterns of {repository_name}"
+        )
+
+    # Broad queries for repository scope
     queries = {
         "cliff_notes": (
             f"Overview architecture structure main components modules entry points "
@@ -202,6 +233,10 @@ def build_overview_query(repository_name: str, action: str) -> str:
         "code_tour": (
             f"Entry point request flow data model API handler middleware "
             f"database configuration deployment of {repository_name}"
+        ),
+        "workflow_story": (
+            f"Request flow execution path handler middleware worker pipeline "
+            f"data processing error handling lifecycle of {repository_name}"
         ),
     }
     return queries.get(action, f"Architecture overview of {repository_name}")

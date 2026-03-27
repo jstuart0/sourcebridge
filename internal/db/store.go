@@ -1316,6 +1316,29 @@ func (s *SurrealStore) GetRequirement(id string) *graph.StoredRequirement {
 	return rows[0].toStoredRequirement()
 }
 
+// GetRequirementsByIDs returns requirements for a batch of IDs in a single query.
+func (s *SurrealStore) GetRequirementsByIDs(ids []string) map[string]*graph.StoredRequirement {
+	db := s.client.DB()
+	if db == nil || len(ids) == 0 {
+		return nil
+	}
+
+	rows, err := queryOne[[]surrealRequirement](ctx(), db,
+		"SELECT * FROM ca_requirement WHERE id IN $ids.map(|$v| type::thing('ca_requirement', $v))",
+		map[string]any{"ids": ids})
+	if err != nil {
+		slog.Warn("failed to batch fetch requirements", "error", err, "count", len(ids))
+		return nil
+	}
+
+	result := make(map[string]*graph.StoredRequirement, len(rows))
+	for i := range rows {
+		req := rows[i].toStoredRequirement()
+		result[req.ID] = req
+	}
+	return result
+}
+
 // GetRequirementByExternalID returns a requirement by external ID within a repo.
 func (s *SurrealStore) GetRequirementByExternalID(repoID, externalID string) *graph.StoredRequirement {
 	db := s.client.DB()
@@ -1389,6 +1412,73 @@ func (s *SurrealStore) StoreLink(repoID string, link *graph.StoredLink) *graph.S
 	return link
 }
 
+// StoreLinks bulk-inserts links in batches using a single SurrealQL query per batch.
+func (s *SurrealStore) StoreLinks(repoID string, links []*graph.StoredLink) int {
+	db := s.client.DB()
+	if db == nil {
+		return 0
+	}
+
+	const batchSize = 500
+	stored := 0
+
+	for i := 0; i < len(links); i += batchSize {
+		end := i + batchSize
+		if end > len(links) {
+			end = len(links)
+		}
+		batch := links[i:end]
+
+		// Build an array of link objects and use FOR to upsert them.
+		linkData := make([]map[string]any, 0, len(batch))
+		for _, link := range batch {
+			lid := linkID(repoID, link.RequirementID, link.SymbolID)
+			linkData = append(linkData, map[string]any{
+				"lid":         lid,
+				"repo_id":     repoID,
+				"req_id":      link.RequirementID,
+				"sym_id":      link.SymbolID,
+				"confidence":  link.Confidence,
+				"source":      link.Source,
+				"link_type":   link.LinkType,
+				"rationale":   link.Rationale,
+				"verified":    link.Verified,
+				"verified_by": link.VerifiedBy,
+				"rejected":    link.Rejected,
+			})
+		}
+
+		_, err := surrealdb.Query[interface{}](ctx(), db,
+			`FOR $item IN $links {
+				UPSERT type::thing('ca_link', $item.lid) SET
+					repo_id = $item.repo_id,
+					requirement_id = $item.req_id,
+					symbol_id = $item.sym_id,
+					confidence = $item.confidence,
+					source = $item.source,
+					link_type = $item.link_type,
+					rationale = $item.rationale,
+					verified = $item.verified,
+					verified_by = $item.verified_by,
+					rejected = $item.rejected,
+					created_at = time::now();
+			}`,
+			map[string]any{"links": linkData})
+		if err != nil {
+			slog.Warn("failed to store link batch", "error", err, "batch_start", i, "batch_size", len(batch))
+			continue
+		}
+		stored += len(batch)
+
+		if (i/batchSize+1)%10 == 0 {
+			slog.Info("store_links_progress", "stored", stored, "total", len(links))
+		}
+	}
+
+	slog.Info("store_links_complete", "stored", stored, "total", len(links))
+	return stored
+}
+
 // GetLink returns a link by ID.
 func (s *SurrealStore) GetLink(id string) *graph.StoredLink {
 	db := s.client.DB()
@@ -1416,6 +1506,7 @@ func (s *SurrealStore) GetLinksForRequirement(reqID string, includeRejected bool
 	if !includeRejected {
 		sql += " AND rejected = false"
 	}
+	sql += " ORDER BY confidence DESC"
 
 	rows, err := queryOne[[]surrealLink](ctx(), db, sql,
 		map[string]any{"req_id": reqID})
@@ -1563,6 +1654,30 @@ func (s *SurrealStore) GetSymbol(id string) *graph.StoredSymbol {
 		return nil
 	}
 	return rows[0].toStoredSymbol()
+}
+
+// GetSymbolsByIDs returns symbols for a batch of IDs in a single query.
+func (s *SurrealStore) GetSymbolsByIDs(ids []string) map[string]*graph.StoredSymbol {
+	db := s.client.DB()
+	if db == nil || len(ids) == 0 {
+		return nil
+	}
+
+	// Use $ids.map(|$v| type::thing('ca_symbol', $v)) to convert string IDs to record IDs.
+	rows, err := queryOne[[]surrealSymbol](ctx(), db,
+		"SELECT * FROM ca_symbol WHERE id IN $ids.map(|$v| type::thing('ca_symbol', $v))",
+		map[string]any{"ids": ids})
+	if err != nil {
+		slog.Warn("failed to batch fetch symbols", "error", err, "count", len(ids))
+		return nil
+	}
+
+	result := make(map[string]*graph.StoredSymbol, len(rows))
+	for i := range rows {
+		sym := rows[i].toStoredSymbol()
+		result[sym.ID] = sym
+	}
+	return result
 }
 
 // GetSymbolsByFile returns all symbols in a repository for a given file path.
@@ -2081,4 +2196,239 @@ func (s *SurrealStore) GetImpactReports(repoID string, limit int) ([]*graph.Impa
 		})
 	}
 	return out, len(out)
+}
+
+// ---------------------------------------------------------------------------
+// Discovered Requirement operations (spec extraction)
+// ---------------------------------------------------------------------------
+
+func (s *SurrealStore) StoreDiscoveredRequirement(repoID string, req *graph.DiscoveredRequirement) {
+	db := s.client.DB()
+	if db == nil {
+		return
+	}
+	reqID := uuid.New().String()
+	if req.Status == "" {
+		req.Status = "discovered"
+	}
+	sourceFiles := req.SourceFiles
+	if sourceFiles == nil {
+		sourceFiles = []string{}
+	}
+	keywords := req.Keywords
+	if keywords == nil {
+		keywords = []string{}
+	}
+
+	_, err := surrealdb.Query[interface{}](ctx(), db,
+		`CREATE ca_discovered_requirement SET
+			id = type::thing('ca_discovered_requirement', $rid),
+			repo_id = $repo_id,
+			source = $source,
+			source_file = $source_file,
+			source_line = $source_line,
+			source_files = $source_files,
+			text = $text,
+			raw_text = $raw_text,
+			group_key = $group_key,
+			language = $language,
+			keywords = $keywords,
+			confidence = $confidence,
+			status = $status,
+			llm_refined = $llm_refined,
+			created_at = time::now()`,
+		map[string]any{
+			"rid": reqID, "repo_id": repoID,
+			"source": req.Source, "source_file": req.SourceFile,
+			"source_line": req.SourceLine, "source_files": sourceFiles,
+			"text": req.Text, "raw_text": req.RawText,
+			"group_key": req.GroupKey, "language": req.Language,
+			"keywords": keywords, "confidence": req.Confidence,
+			"status": req.Status, "llm_refined": req.LLMRefined,
+		})
+	if err != nil {
+		slog.Error("store_discovered_requirement", "error", err)
+		return
+	}
+	req.ID = "ca_discovered_requirement:" + reqID
+}
+
+func (s *SurrealStore) StoreDiscoveredRequirements(repoID string, reqs []*graph.DiscoveredRequirement) int {
+	count := 0
+	for _, req := range reqs {
+		s.StoreDiscoveredRequirement(repoID, req)
+		if req.ID != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func (s *SurrealStore) GetDiscoveredRequirements(repoID string, status *string, confidence *string, limit, offset int) ([]*graph.DiscoveredRequirement, int) {
+	db := s.client.DB()
+	if db == nil {
+		return nil, 0
+	}
+
+	type discRow struct {
+		ID              string      `json:"id"`
+		RepoID          string      `json:"repo_id"`
+		Source          string      `json:"source"`
+		SourceFile      string      `json:"source_file"`
+		SourceLine      int         `json:"source_line"`
+		SourceFiles     []string    `json:"source_files"`
+		Text            string      `json:"text"`
+		RawText         string      `json:"raw_text"`
+		GroupKey        string      `json:"group_key"`
+		Language        string      `json:"language"`
+		Keywords        []string    `json:"keywords"`
+		Confidence      string      `json:"confidence"`
+		Status          string      `json:"status"`
+		LLMRefined      bool        `json:"llm_refined"`
+		PromotedTo      string      `json:"promoted_to"`
+		DismissedBy     string      `json:"dismissed_by"`
+		DismissedReason string      `json:"dismissed_reason"`
+		CreatedAt       surrealTime `json:"created_at"`
+	}
+
+	where := "WHERE repo_id = $repo_id"
+	vars := map[string]any{"repo_id": repoID}
+	if status != nil {
+		where += " AND status = $status"
+		vars["status"] = *status
+	}
+	if confidence != nil {
+		where += " AND confidence = $confidence"
+		vars["confidence"] = *confidence
+	}
+
+	// Count
+	countRows, err := queryOne[[]map[string]interface{}](ctx(), db,
+		"SELECT count() AS total FROM ca_discovered_requirement "+where+" GROUP ALL", vars)
+	total := 0
+	if err == nil && len(countRows) > 0 {
+		if v, ok := countRows[0]["total"]; ok {
+			switch vt := v.(type) {
+			case float64:
+				total = int(vt)
+			case int:
+				total = vt
+			case uint64:
+				total = int(vt)
+			}
+		}
+	}
+
+	q := "SELECT * FROM ca_discovered_requirement " + where + " ORDER BY confidence DESC, created_at DESC"
+	if limit > 0 {
+		q += fmt.Sprintf(" LIMIT %d", limit)
+	}
+	if offset > 0 {
+		q += fmt.Sprintf(" START %d", offset)
+	}
+
+	rows, err := queryOne[[]discRow](ctx(), db, q, vars)
+	if err != nil {
+		return nil, total
+	}
+
+	var result []*graph.DiscoveredRequirement
+	for _, r := range rows {
+		result = append(result, &graph.DiscoveredRequirement{
+			ID: r.ID, RepoID: r.RepoID, Source: r.Source,
+			SourceFile: r.SourceFile, SourceLine: r.SourceLine, SourceFiles: r.SourceFiles,
+			Text: r.Text, RawText: r.RawText, GroupKey: r.GroupKey,
+			Language: r.Language, Keywords: r.Keywords, Confidence: r.Confidence,
+			Status: r.Status, LLMRefined: r.LLMRefined,
+			PromotedTo: r.PromotedTo, DismissedBy: r.DismissedBy,
+			DismissedReason: r.DismissedReason, CreatedAt: r.CreatedAt.Time,
+		})
+	}
+	return result, total
+}
+
+func (s *SurrealStore) GetDiscoveredRequirement(id string) *graph.DiscoveredRequirement {
+	db := s.client.DB()
+	if db == nil {
+		return nil
+	}
+	type discRow struct {
+		ID              string      `json:"id"`
+		RepoID          string      `json:"repo_id"`
+		Source          string      `json:"source"`
+		SourceFile      string      `json:"source_file"`
+		SourceLine      int         `json:"source_line"`
+		SourceFiles     []string    `json:"source_files"`
+		Text            string      `json:"text"`
+		RawText         string      `json:"raw_text"`
+		GroupKey        string      `json:"group_key"`
+		Language        string      `json:"language"`
+		Keywords        []string    `json:"keywords"`
+		Confidence      string      `json:"confidence"`
+		Status          string      `json:"status"`
+		LLMRefined      bool        `json:"llm_refined"`
+		PromotedTo      string      `json:"promoted_to"`
+		DismissedBy     string      `json:"dismissed_by"`
+		DismissedReason string      `json:"dismissed_reason"`
+		CreatedAt       surrealTime `json:"created_at"`
+	}
+	rows, err := queryOne[[]discRow](ctx(), db, "SELECT * FROM $id", map[string]any{"id": id})
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	r := rows[0]
+	return &graph.DiscoveredRequirement{
+		ID: r.ID, RepoID: r.RepoID, Source: r.Source,
+		SourceFile: r.SourceFile, SourceLine: r.SourceLine, SourceFiles: r.SourceFiles,
+		Text: r.Text, RawText: r.RawText, GroupKey: r.GroupKey,
+		Language: r.Language, Keywords: r.Keywords, Confidence: r.Confidence,
+		Status: r.Status, LLMRefined: r.LLMRefined,
+		PromotedTo: r.PromotedTo, DismissedBy: r.DismissedBy,
+		DismissedReason: r.DismissedReason, CreatedAt: r.CreatedAt.Time,
+	}
+}
+
+func (s *SurrealStore) PromoteDiscoveredRequirement(id string, requirementID string) *graph.DiscoveredRequirement {
+	db := s.client.DB()
+	if db == nil {
+		return nil
+	}
+	_, err := surrealdb.Query[interface{}](ctx(), db,
+		`UPDATE $id SET status = 'promoted', promoted_to = $req_id, promoted_at = time::now()`,
+		map[string]any{"id": id, "req_id": requirementID})
+	if err != nil {
+		slog.Error("promote_discovered_requirement", "error", err)
+		return nil
+	}
+	return s.GetDiscoveredRequirement(id)
+}
+
+func (s *SurrealStore) DismissDiscoveredRequirement(id string, dismissedBy string, reason string) *graph.DiscoveredRequirement {
+	db := s.client.DB()
+	if db == nil {
+		return nil
+	}
+	_, err := surrealdb.Query[interface{}](ctx(), db,
+		`UPDATE $id SET status = 'dismissed', dismissed_by = $by, dismissed_reason = $reason, dismissed_at = time::now()`,
+		map[string]any{"id": id, "by": dismissedBy, "reason": reason})
+	if err != nil {
+		slog.Error("dismiss_discovered_requirement", "error", err)
+		return nil
+	}
+	return s.GetDiscoveredRequirement(id)
+}
+
+func (s *SurrealStore) DeleteDiscoveredRequirementsByRepo(repoID string) int {
+	db := s.client.DB()
+	if db == nil {
+		return 0
+	}
+	_, err := surrealdb.Query[interface{}](ctx(), db,
+		`DELETE FROM ca_discovered_requirement WHERE repo_id = $repo_id AND status = 'discovered'`,
+		map[string]any{"repo_id": repoID})
+	if err != nil {
+		slog.Error("delete_discovered_requirements", "error", err)
+		return 0
+	}
+	return -1 // SurrealDB DELETE doesn't return count easily
 }

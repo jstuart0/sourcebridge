@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useQuery, useMutation } from "urql";
+import { useClient, useQuery, useMutation } from "urql";
 import {
   REPOSITORY_QUERY,
   SYMBOLS_QUERY,
@@ -26,6 +26,11 @@ import {
   EXPLAIN_SYSTEM_MUTATION,
   REFRESH_KNOWLEDGE_ARTIFACT_MUTATION,
   LATEST_IMPACT_REPORT_QUERY,
+  DISCOVERED_REQUIREMENTS_QUERY,
+  TRIGGER_SPEC_EXTRACTION_MUTATION,
+  PROMOTE_DISCOVERED_REQUIREMENT_MUTATION,
+  DISMISS_DISCOVERED_REQUIREMENT_MUTATION,
+  DISMISS_ALL_DISCOVERED_REQUIREMENTS_MUTATION,
 } from "@/lib/graphql/queries";
 import { useFeatures } from "@/lib/features";
 import { Button } from "@/components/ui/button";
@@ -41,15 +46,19 @@ import {
   sourceTargetFromSearchParams,
   type SourceTarget,
 } from "@/lib/source-target";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { cn } from "@/lib/utils";
 import { LazyScoreBreakdown } from "@/components/understanding-score";
 import { ImpactReportPanel } from "@/components/impact-report";
+import { ChangeSimulationPanel } from "@/components/change-simulation";
+import { ArchitectureDiagram } from "@/components/architecture/ArchitectureDiagram";
+import { RelatedReposPanel } from "@/components/federation/RelatedReposPanel";
 import { SymbolTree } from "@/components/source/SymbolTree";
 import { SymbolList } from "@/components/source/SymbolList";
 import { kindBadgeClass, kindLabel, SYMBOL_KINDS } from "@/components/source/symbol-kind";
 import { trackEvent } from "@/lib/telemetry";
 
-type Tab = "files" | "symbols" | "requirements" | "analysis" | "impact" | "knowledge" | "settings";
+type Tab = "files" | "symbols" | "requirements" | "specs" | "analysis" | "impact" | "architecture" | "related" | "knowledge" | "settings";
 type SymbolDetailTab = "source" | "cliff-notes" | "chat";
 
 interface FileNode {
@@ -187,7 +196,7 @@ export default function RepositoryDetailPage() {
   const searchParams = useSearchParams();
   const repoId = params.id as string;
   const urlTab = searchParams.get("tab");
-  const tab: Tab = (urlTab && ["files", "symbols", "requirements", "analysis", "impact", "knowledge", "settings"].includes(urlTab))
+  const tab: Tab = (urlTab && ["files", "symbols", "requirements", "specs", "analysis", "impact", "architecture", "related", "knowledge", "settings"].includes(urlTab))
     ? (urlTab as Tab)
     : "files";
   const [symbolQuery, setSymbolQuery] = useState("");
@@ -206,6 +215,9 @@ export default function RepositoryDetailPage() {
   const [linkResult, setLinkResult] = useState<string | null>(null);
   const [symbolChatQuestion, setSymbolChatQuestion] = useState("");
   const [symbolChatByScope, setSymbolChatByScope] = useState<Record<string, SymbolChatMessage[]>>({});
+  const [specExtracting, setSpecExtracting] = useState(false);
+  const [specExtractionResult, setSpecExtractionResult] = useState<string | null>(null);
+  const [specConfidenceFilter, setSpecConfidenceFilter] = useState<string | null>(null);
 
   const [repoResult] = useQuery({ query: REPOSITORY_QUERY, variables: { id: repoId } });
   const [symbolsResult] = useQuery({
@@ -215,8 +227,14 @@ export default function RepositoryDetailPage() {
   });
   const [reqsResult] = useQuery({
     query: REQUIREMENTS_QUERY,
-    variables: { repositoryId: repoId },
+    variables: { repositoryId: repoId, limit: 50 },
     pause: tab !== "requirements",
+  });
+
+  const [discoveredReqsResult, reexecuteDiscoveredReqs] = useQuery({
+    query: DISCOVERED_REQUIREMENTS_QUERY,
+    variables: { repositoryId: repoId, limit: 100 },
+    pause: tab !== "specs",
   });
 
   const [impactResult] = useQuery({
@@ -303,11 +321,54 @@ export default function RepositoryDetailPage() {
   const [, generateWorkflowStory] = useMutation(GENERATE_WORKFLOW_STORY_MUTATION);
   const [, explainSystem] = useMutation(EXPLAIN_SYSTEM_MUTATION);
   const [, refreshArtifact] = useMutation(REFRESH_KNOWLEDGE_ARTIFACT_MUTATION);
+  const [, triggerSpecExtraction] = useMutation(TRIGGER_SPEC_EXTRACTION_MUTATION);
+  const [, promoteDiscoveredReq] = useMutation(PROMOTE_DISCOVERED_REQUIREMENT_MUTATION);
+  const [, dismissDiscoveredReq] = useMutation(DISMISS_DISCOVERED_REQUIREMENT_MUTATION);
+  const [, dismissAllDiscoveredReqs] = useMutation(DISMISS_ALL_DISCOVERED_REQUIREMENTS_MUTATION);
 
   const repo = repoResult.data?.repository;
   const files: FileNode[] = repo?.files?.nodes || [];
   const symbols: SymbolNode[] = symbolsResult.data?.symbols?.nodes || [];
-  const reqs: ReqNode[] = reqsResult.data?.requirements?.nodes || [];
+  // Requirements: load first 50 fast, lazy-load the rest
+  const urqlClient = useClient();
+  const initialReqs: ReqNode[] = reqsResult.data?.requirements?.nodes || [];
+  const reqsTotalCount: number = reqsResult.data?.requirements?.totalCount ?? 0;
+  const [extraReqs, setExtraReqs] = useState<ReqNode[]>([]);
+  const [loadingMoreReqs, setLoadingMoreReqs] = useState(false);
+
+  useEffect(() => {
+    if (tab !== "requirements" || initialReqs.length < 50 || initialReqs.length >= reqsTotalCount) {
+      return;
+    }
+    let cancelled = false;
+    setLoadingMoreReqs(true);
+
+    (async () => {
+      const allExtra: ReqNode[] = [];
+      let offset = 50;
+      const batchSize = 200;
+
+      while (!cancelled) {
+        const result = await urqlClient
+          .query(REQUIREMENTS_QUERY, { repositoryId: repoId, limit: batchSize, offset })
+          .toPromise();
+        const batch: ReqNode[] = result.data?.requirements?.nodes || [];
+        if (batch.length === 0) break;
+        allExtra.push(...batch);
+        offset += batch.length;
+        if (batch.length < batchSize) break;
+      }
+
+      if (!cancelled) {
+        setExtraReqs(allExtra);
+        setLoadingMoreReqs(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [tab, initialReqs.length, reqsTotalCount, repoId, urqlClient]);
+
+  const reqs: ReqNode[] = [...initialReqs, ...extraReqs];
   const knowledgeArtifacts: KnowledgeArtifact[] = knowledgeResult.data?.knowledgeArtifacts || [];
   const scopeChildren: ScopeChild[] = scopeChildrenResult.data?.knowledgeScopeChildren || [];
   const executionEntries: ExecutionEntryPoint[] = useMemo(
@@ -324,6 +385,7 @@ export default function RepositoryDetailPage() {
   const [tourStopIndex, setTourStopIndex] = useState(0);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [expandedWorkflowSection, setExpandedWorkflowSection] = useState<string | null>(null);
+  const [openCategory, setOpenCategory] = useState<"guide" | "ask" | "execution" | "workflow" | "explore" | null>("guide");
   const sourceTarget = useMemo(
     () => sourceTargetFromSearchParams(new URLSearchParams(searchParams.toString())),
     [searchParams]
@@ -340,6 +402,11 @@ export default function RepositoryDetailPage() {
   const currentWorkflowStory = knowledgeArtifacts.find(
     (a) => a.type === "WORKFLOW_STORY" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
   );
+
+  // Reset tour stop index when code tour changes (e.g. after refresh with different stop count)
+  const codeTourId = currentCodeTour?.id;
+  useEffect(() => { setTourStopIndex(0); }, [codeTourId]);
+
   const availableLenses = knowledgeArtifacts
     .filter((a) => a.type === "CLIFF_NOTES")
     .map((a) => `${a.audience}:${a.depth}`)
@@ -369,8 +436,11 @@ export default function RepositoryDetailPage() {
     { key: "files", label: "Files", visible: true },
     { key: "symbols", label: "Symbols", visible: true },
     { key: "requirements", label: "Requirements", visible: true },
+    { key: "specs", label: "Discovered Specs", visible: true },
     { key: "analysis", label: "Analysis", visible: true },
-    { key: "impact", label: "Change Risk", visible: true },
+    { key: "impact", label: "Change Impact", visible: true },
+    { key: "architecture", label: "Architecture", visible: true },
+    { key: "related", label: "Related", visible: true },
     { key: "knowledge", label: "Field Guide", visible: true },
     { key: "settings", label: "Settings", visible: true },
   ];
@@ -380,9 +450,12 @@ export default function RepositoryDetailPage() {
     trackEvent({ event: "analyze_symbol_used", repositoryId: repoId, metadata: { symbolId: symId } });
     setAiLoading(true);
     setAnalysisResult(null);
-    const res = await analyzeSymbol({ repositoryId: repoId, symbolId: symId });
-    if (res.data?.analyzeSymbol) setAnalysisResult(res.data.analyzeSymbol);
-    setAiLoading(false);
+    try {
+      const res = await analyzeSymbol({ repositoryId: repoId, symbolId: symId });
+      if (res.data?.analyzeSymbol) setAnalysisResult(res.data.analyzeSymbol);
+    } finally {
+      setAiLoading(false);
+    }
   }
 
   async function handleDiscuss() {
@@ -390,9 +463,12 @@ export default function RepositoryDetailPage() {
     trackEvent({ event: "discuss_code_used", repositoryId: repoId, metadata: { questionLength: discussQuestion.trim().length } });
     setAiLoading(true);
     setDiscussResult(null);
-    const res = await discussCode({ input: { repositoryId: repoId, question: discussQuestion } });
-    if (res.data?.discussCode) setDiscussResult(res.data.discussCode);
-    setAiLoading(false);
+    try {
+      const res = await discussCode({ input: { repositoryId: repoId, question: discussQuestion } });
+      if (res.data?.discussCode) setDiscussResult(res.data.discussCode);
+    } finally {
+      setAiLoading(false);
+    }
   }
 
   async function handleReview() {
@@ -400,9 +476,12 @@ export default function RepositoryDetailPage() {
     trackEvent({ event: "review_code_used", repositoryId: repoId, metadata: { template: reviewTemplate, filePath: reviewFile } });
     setAiLoading(true);
     setReviewResult(null);
-    const res = await reviewCode({ input: { repositoryId: repoId, filePath: reviewFile, template: reviewTemplate } });
-    if (res.data?.reviewCode) setReviewResult(res.data.reviewCode);
-    setAiLoading(false);
+    try {
+      const res = await reviewCode({ input: { repositoryId: repoId, filePath: reviewFile, template: reviewTemplate } });
+      if (res.data?.reviewCode) setReviewResult(res.data.reviewCode);
+    } finally {
+      setAiLoading(false);
+    }
   }
 
   async function handleAutoLink() {
@@ -428,6 +507,39 @@ export default function RepositoryDetailPage() {
     setImportContent("");
   }
 
+  async function handleExtractSpecs() {
+    trackEvent({ event: "spec_extraction_triggered", repositoryId: repoId });
+    setSpecExtracting(true);
+    setSpecExtractionResult(null);
+    try {
+      const res = await triggerSpecExtraction({ input: { repositoryId: repoId } });
+      if (res.data?.triggerSpecExtraction) {
+        const r = res.data.triggerSpecExtraction;
+        setSpecExtractionResult(`Discovered ${r.discovered} specs from ${r.totalCandidates} candidates`);
+      } else if (res.error) {
+        setSpecExtractionResult(`Extraction failed: ${res.error.message}`);
+      }
+      reexecuteDiscoveredReqs({ requestPolicy: "network-only" });
+    } finally {
+      setSpecExtracting(false);
+    }
+  }
+
+  async function handlePromoteSpec(id: string) {
+    await promoteDiscoveredReq({ id });
+    reexecuteDiscoveredReqs({ requestPolicy: "network-only" });
+  }
+
+  async function handleDismissSpec(id: string) {
+    await dismissDiscoveredReq({ id });
+    reexecuteDiscoveredReqs({ requestPolicy: "network-only" });
+  }
+
+  async function handleDismissAllSpecs() {
+    await dismissAllDiscoveredReqs({ repositoryId: repoId });
+    reexecuteDiscoveredReqs({ requestPolicy: "network-only" });
+  }
+
   async function handleGenerateCliffNotesFor(scopeType = knowledgeScopeType, scopePath = knowledgeScopePath) {
     trackEvent({
       event: "field_guide_generated",
@@ -435,18 +547,21 @@ export default function RepositoryDetailPage() {
       metadata: { scopeType, scopePath: scopePath || null, audience: knowledgeAudience, depth: knowledgeDepth },
     });
     setKnowledgeLoading(true);
-    await generateCliffNotes({
-      input: {
-        repositoryId: repoId,
-        audience: knowledgeAudience,
-        depth: knowledgeDepth,
-        scopeType,
-        scopePath: scopeType === "REPOSITORY" ? undefined : scopePath,
-      },
-    });
-    reexecuteKnowledge({ requestPolicy: "network-only" });
-    reexecuteScopeChildren({ requestPolicy: "network-only" });
-    setKnowledgeLoading(false);
+    try {
+      await generateCliffNotes({
+        input: {
+          repositoryId: repoId,
+          audience: knowledgeAudience,
+          depth: knowledgeDepth,
+          scopeType,
+          scopePath: scopeType === "REPOSITORY" ? undefined : scopePath,
+        },
+      });
+      reexecuteKnowledge({ requestPolicy: "network-only" });
+      reexecuteScopeChildren({ requestPolicy: "network-only" });
+    } finally {
+      setKnowledgeLoading(false);
+    }
   }
 
   async function handleGenerateCliffNotes() {
@@ -456,71 +571,86 @@ export default function RepositoryDetailPage() {
   async function handleGenerateScopedCliffNotes() {
     if (!symbolScopeType) return;
     setKnowledgeLoading(true);
-    await generateCliffNotes({
-      input: {
-        repositoryId: repoId,
-        audience: "DEVELOPER",
-        depth: "MEDIUM",
-        scopeType: symbolScopeType,
-        scopePath: symbolScopePath,
-      },
-    });
-    reexecuteSymbolKnowledge({ requestPolicy: "network-only" });
-    reexecuteSymbolChildren({ requestPolicy: "network-only" });
-    setKnowledgeLoading(false);
+    try {
+      await generateCliffNotes({
+        input: {
+          repositoryId: repoId,
+          audience: "DEVELOPER",
+          depth: "MEDIUM",
+          scopeType: symbolScopeType,
+          scopePath: symbolScopePath,
+        },
+      });
+      reexecuteSymbolKnowledge({ requestPolicy: "network-only" });
+      reexecuteSymbolChildren({ requestPolicy: "network-only" });
+    } finally {
+      setKnowledgeLoading(false);
+    }
   }
 
   async function handleRefreshScopedArtifact() {
     if (!currentScopedCliffNotes) return;
     setKnowledgeLoading(true);
-    await refreshArtifact({ id: currentScopedCliffNotes.id });
-    reexecuteSymbolKnowledge({ requestPolicy: "network-only" });
-    reexecuteSymbolChildren({ requestPolicy: "network-only" });
-    setKnowledgeLoading(false);
+    try {
+      await refreshArtifact({ id: currentScopedCliffNotes.id });
+      reexecuteSymbolKnowledge({ requestPolicy: "network-only" });
+      reexecuteSymbolChildren({ requestPolicy: "network-only" });
+    } finally {
+      setKnowledgeLoading(false);
+    }
   }
 
   async function handleScopedFollowUp() {
     if (!currentScopedCliffNotes || !symbolChatQuestion.trim()) return;
     setKnowledgeLoading(true);
-    const question = symbolChatQuestion.trim();
-    const historyPayload = symbolChatMessages.map((message) =>
-      `${message.role === "user" ? "User" : "Assistant"}: ${message.text}`
-    );
-    const res = await discussCode({
-      input: {
-        repositoryId: repoId,
-        question,
-        artifactId: currentScopedCliffNotes.id,
-        symbolId: selectedSymbolNode?.id,
-        conversationHistory: historyPayload,
-      },
-    });
-    if (res.data?.discussCode?.answer) {
-      setSymbolChatByScope((current) => ({
-        ...current,
-        [symbolChatScopeKey]: [
-          ...(current[symbolChatScopeKey] || []),
-          { role: "user", text: question },
-          { role: "assistant", text: res.data.discussCode.answer },
-        ],
-      }));
-      setSymbolChatQuestion("");
+    try {
+      const question = symbolChatQuestion.trim();
+      const historyPayload = symbolChatMessages.map((message) =>
+        `${message.role === "user" ? "User" : "Assistant"}: ${message.text}`
+      );
+      const res = await discussCode({
+        input: {
+          repositoryId: repoId,
+          question,
+          artifactId: currentScopedCliffNotes.id,
+          symbolId: selectedSymbolNode?.id,
+          conversationHistory: historyPayload,
+        },
+      });
+      if (res.data?.discussCode?.answer) {
+        setSymbolChatByScope((current) => ({
+          ...current,
+          [symbolChatScopeKey]: [
+            ...(current[symbolChatScopeKey] || []),
+            { role: "user", text: question },
+            { role: "assistant", text: res.data.discussCode.answer },
+          ],
+        }));
+        setSymbolChatQuestion("");
+      }
+    } finally {
+      setKnowledgeLoading(false);
     }
-    setKnowledgeLoading(false);
   }
 
   async function handleGenerateLearningPath() {
     setKnowledgeLoading(true);
-    await generateLearningPath({ input: { repositoryId: repoId, audience: knowledgeAudience, depth: knowledgeDepth } });
-    reexecuteKnowledge({ requestPolicy: "network-only" });
-    setKnowledgeLoading(false);
+    try {
+      await generateLearningPath({ input: { repositoryId: repoId, audience: knowledgeAudience, depth: knowledgeDepth } });
+      reexecuteKnowledge({ requestPolicy: "network-only" });
+    } finally {
+      setKnowledgeLoading(false);
+    }
   }
 
   async function handleGenerateCodeTour() {
     setKnowledgeLoading(true);
-    await generateCodeTour({ input: { repositoryId: repoId, audience: knowledgeAudience, depth: knowledgeDepth } });
-    reexecuteKnowledge({ requestPolicy: "network-only" });
-    setKnowledgeLoading(false);
+    try {
+      await generateCodeTour({ input: { repositoryId: repoId, audience: knowledgeAudience, depth: knowledgeDepth } });
+      reexecuteKnowledge({ requestPolicy: "network-only" });
+    } finally {
+      setKnowledgeLoading(false);
+    }
   }
 
   function workflowStoryAnchorLabel() {
@@ -544,31 +674,37 @@ export default function RepositoryDetailPage() {
       metadata: { scopeType: knowledgeScopeType, scopePath: knowledgeScopePath || null },
     });
     setKnowledgeLoading(true);
-    await generateWorkflowStory({
-      input: {
-        repositoryId: repoId,
-        audience: knowledgeAudience,
-        depth: knowledgeDepth,
-        scopeType: knowledgeScopeType,
-        scopePath: knowledgeScopeType === "REPOSITORY" ? undefined : knowledgeScopePath,
-        anchorLabel: workflowStoryAnchorLabel(),
-        executionPathJson: executionPath?.trustQualified ? JSON.stringify(executionPath.steps) : undefined,
-      },
-    });
-    reexecuteKnowledge({ requestPolicy: "network-only" });
-    setKnowledgeLoading(false);
+    try {
+      await generateWorkflowStory({
+        input: {
+          repositoryId: repoId,
+          audience: knowledgeAudience,
+          depth: knowledgeDepth,
+          scopeType: knowledgeScopeType,
+          scopePath: knowledgeScopeType === "REPOSITORY" ? undefined : knowledgeScopePath,
+          anchorLabel: workflowStoryAnchorLabel(),
+          executionPathJson: executionPath?.trustQualified ? JSON.stringify(executionPath.steps) : undefined,
+        },
+      });
+      reexecuteKnowledge({ requestPolicy: "network-only" });
+    } finally {
+      setKnowledgeLoading(false);
+    }
   }
 
   async function handleRefreshArtifact(artifactId: string) {
     setKnowledgeLoading(true);
-    await refreshArtifact({ id: artifactId });
-    reexecuteKnowledge({ requestPolicy: "network-only" });
-    reexecuteScopeChildren({ requestPolicy: "network-only" });
-    setKnowledgeLoading(false);
+    try {
+      await refreshArtifact({ id: artifactId });
+      reexecuteKnowledge({ requestPolicy: "network-only" });
+      reexecuteScopeChildren({ requestPolicy: "network-only" });
+    } finally {
+      setKnowledgeLoading(false);
+    }
   }
 
   async function handleExplainSystem() {
-    if (!explainQuestion.trim()) return;
+    if (!explainQuestion.trim() || knowledgeLoading) return;
     trackEvent({
       event: "explain_scope_used",
       repositoryId: repoId,
@@ -576,17 +712,21 @@ export default function RepositoryDetailPage() {
     });
     setKnowledgeLoading(true);
     setExplainResult(null);
-    const res = await explainSystem({
-      input: {
-        repositoryId: repoId,
-        audience: knowledgeAudience,
-        question: explainQuestion,
-        scopeType: knowledgeScopeType,
-        scopePath: knowledgeScopeType === "REPOSITORY" ? undefined : knowledgeScopePath,
-      },
-    });
-    if (res.data?.explainSystem) setExplainResult(res.data.explainSystem);
-    setKnowledgeLoading(false);
+    try {
+      const res = await explainSystem({
+        input: {
+          repositoryId: repoId,
+          audience: knowledgeAudience,
+          depth: knowledgeDepth,
+          question: explainQuestion,
+          scopeType: knowledgeScopeType,
+          scopePath: knowledgeScopeType === "REPOSITORY" ? undefined : knowledgeScopePath,
+        },
+      });
+      if (res.data?.explainSystem) setExplainResult(res.data.explainSystem);
+    } finally {
+      setKnowledgeLoading(false);
+    }
   }
 
   async function handleTraceExecution() {
@@ -703,7 +843,7 @@ export default function RepositoryDetailPage() {
               <div className="mt-4 rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
                 <p className="mb-2 text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Evidence</p>
                 <div className="space-y-2">
-                  {section.evidence.slice(0, 3).map((ev) => (
+                  {section.evidence.map((ev) => (
                     <div key={ev.id} className="text-xs text-[var(--text-secondary)]">
                       {ev.filePath ? (
                         <SourceRefLink
@@ -794,6 +934,7 @@ export default function RepositoryDetailPage() {
   );
   const scopedArtifactNeedsImpactRefresh =
     currentScopedCliffNotes?.scope.scopeType === "SYMBOL" &&
+    currentScopedCliffNotes.status === "READY" &&
     !currentScopedCliffNotes.sections.some((section) => section.title === "Impact Analysis");
   const symbolHasReadyArtifactPaths = new Set<string>(
     (symbolChildrenResult.data?.knowledgeScopeChildren || [])
@@ -828,19 +969,16 @@ export default function RepositoryDetailPage() {
 
   return (
     <PageFrame>
-      <div className="text-sm text-[var(--text-secondary)]">
-        <Link href="/repositories" className="hover:text-[var(--accent-primary)]">
-          Repositories
-        </Link>
-        <span className="mx-2">/</span>
-        <span className="font-medium text-[var(--text-primary)]">{repo?.name || "…"}</span>
-      </div>
+      <Breadcrumb items={[
+        { label: "Repositories", href: "/repositories" },
+        { label: repo?.name || "..." },
+      ]} />
 
       <div className="grid gap-6 lg:grid-cols-[1fr_auto]">
         <PageHeader
           eyebrow="Repository Workspace"
           title={repo?.name || "Repository"}
-          description={repo?.path || "Explore the codebase through files, symbols, field guides, reviews, and change risk."}
+          description={repo?.path || "Explore the codebase through files, symbols, field guides, reviews, and change impact."}
         />
         {repo && (
           <Panel className="w-full lg:w-72">
@@ -1243,14 +1381,14 @@ export default function RepositoryDetailPage() {
           </div>
           <Panel>
             <h3 className="mb-4 text-lg font-semibold text-[var(--text-primary)]">
-              Specs & Requirements ({reqsResult.data?.requirements?.totalCount ?? "..."})
+              Specs & Requirements ({reqs.length}{loadingMoreReqs ? "+" : ""} of {reqsTotalCount || "..."})
             </h3>
             {reqs.length === 0 ? (
               <div className="space-y-2 text-sm text-[var(--text-secondary)]">
                 <p>No specs or requirements imported yet.</p>
                 <p>
                   This is optional. SourceBridge.ai can still explain the codebase, generate field guides, and review files without it.
-                  Importing specs later unlocks intent-to-code links, coverage visibility, and richer change risk.
+                  Importing specs later unlocks intent-to-code links, coverage visibility, and richer change impact analysis.
                 </p>
               </div>
             ) : (
@@ -1258,7 +1396,7 @@ export default function RepositoryDetailPage() {
                 {reqs.map((req) => (
                   <Link
                     key={req.id}
-                    href={`/requirements/${req.id}`}
+                    href={`/requirements/${req.id}?repoId=${repoId}&repoName=${encodeURIComponent(repo?.name || "")}`}
                     className={`${listRowClass} block cursor-pointer rounded-[var(--control-radius)] px-3 transition-colors hover:bg-[var(--bg-hover)]`}
                   >
                     <div className="flex items-center justify-between gap-4">
@@ -1274,6 +1412,99 @@ export default function RepositoryDetailPage() {
                     </div>
                     <div className="mt-1 text-[var(--text-secondary)]">{req.title}</div>
                   </Link>
+                ))}
+              </div>
+            )}
+          </Panel>
+        </div>
+      )}
+
+      {/* Discovered Specs Tab */}
+      {tab === "specs" && (
+        <div>
+          <div className="mb-4 flex items-center gap-4">
+            <Button onClick={handleExtractSpecs} disabled={specExtracting}>
+              {specExtracting ? "Extracting..." : "Extract Specs from Code"}
+            </Button>
+            {(discoveredReqsResult.data?.discoveredRequirements?.totalCount ?? 0) > 0 && (
+              <Button variant="secondary" onClick={handleDismissAllSpecs}>
+                Dismiss All
+              </Button>
+            )}
+            <select
+              value={specConfidenceFilter || ""}
+              onChange={(e) => setSpecConfidenceFilter(e.target.value || null)}
+              className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-2 py-2 text-sm text-[var(--text-primary)]"
+            >
+              <option value="">All Confidence</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+          {specExtractionResult && (
+            <div className={`mb-4 rounded-[var(--control-radius)] border px-3 py-2 text-sm ${specExtractionResult.startsWith("Extraction failed") ? "border-red-500/30 bg-red-500/10 text-red-500" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"}`}>
+              {specExtractionResult}
+            </div>
+          )}
+          <Panel>
+            <h3 className="mb-4 text-lg font-semibold text-[var(--text-primary)]">
+              Discovered Specs ({discoveredReqsResult.data?.discoveredRequirements?.totalCount ?? 0})
+            </h3>
+            {discoveredReqsResult.fetching ? (
+              <p className="text-sm text-[var(--text-secondary)]">Loading...</p>
+            ) : (discoveredReqsResult.data?.discoveredRequirements?.nodes?.length ?? 0) === 0 ? (
+              <div className="space-y-2 text-sm text-[var(--text-secondary)]">
+                <p>No discovered specs yet.</p>
+                <p>
+                  Click &ldquo;Extract Specs from Code&rdquo; to scan test files, API schemas, and doc comments
+                  for implicit specifications that can be promoted to tracked requirements.
+                </p>
+              </div>
+            ) : (
+              <div className={listContainerClass}>
+                {(discoveredReqsResult.data?.discoveredRequirements?.nodes ?? [])
+                  .filter((spec: { confidence: string }) => !specConfidenceFilter || spec.confidence === specConfidenceFilter)
+                  .map((spec: { id: string; text: string; source: string; sourceFile: string; sourceLine: number; confidence: string; language: string; keywords: string[]; llmRefined: boolean; status: string }) => (
+                  <div
+                    key={spec.id}
+                    className={`${listRowClass} rounded-[var(--control-radius)] px-3`}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-[var(--text-primary)]">{spec.text}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                            spec.confidence === "high" ? "bg-emerald-500/10 text-emerald-500" :
+                            spec.confidence === "medium" ? "bg-amber-500/10 text-amber-500" :
+                            "bg-gray-500/10 text-gray-400"
+                          }`}>
+                            {spec.confidence}
+                          </span>
+                          <span className="rounded-full bg-[var(--bg-hover)] px-2 py-0.5">{spec.source}</span>
+                          <span>{spec.sourceFile}{spec.sourceLine > 0 ? `:${spec.sourceLine}` : ""}</span>
+                          {spec.llmRefined && <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-blue-400">AI-refined</span>}
+                        </div>
+                        {spec.keywords.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {spec.keywords.map((kw: string) => (
+                              <span key={kw} className="rounded bg-[var(--bg-hover)] px-1.5 py-0.5 text-xs text-[var(--text-tertiary)]">{kw}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      {spec.status === "discovered" && (
+                        <div className="flex shrink-0 gap-2">
+                          <Button variant="secondary" size="sm" onClick={() => handlePromoteSpec(spec.id)}>
+                            Promote
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleDismissSpec(spec.id)}>
+                            Dismiss
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
@@ -1418,7 +1649,25 @@ export default function RepositoryDetailPage() {
 
       {/* Impact Tab */}
       {tab === "impact" && (
-        <ImpactReportPanel report={impactResult.data?.latestImpactReport} />
+        <div className="space-y-6">
+          <ChangeSimulationPanel repositoryId={repoId} />
+          <ImpactReportPanel report={impactResult.data?.latestImpactReport} repositoryId={repoId} />
+        </div>
+      )}
+
+      {/* Architecture Tab */}
+      {tab === "architecture" && (
+        <ArchitectureDiagram
+          repositoryId={repoId}
+          onModuleClick={(_path) => {
+            setActiveTab("files");
+          }}
+        />
+      )}
+
+      {/* Related Tab */}
+      {tab === "related" && (
+        <RelatedReposPanel repositoryId={repoId} />
       )}
 
       {/* Knowledge Tab */}
@@ -1514,421 +1763,565 @@ export default function RepositoryDetailPage() {
             </div>
 
             <div className="grid gap-6 px-6 py-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-              <div className="space-y-6">
-                {!currentCliffNotes && !knowledgeResult.fetching && (
-                  <div className="rounded-[var(--control-radius)] border border-dashed border-[var(--border-default)] bg-[var(--bg-base)] p-6">
-                    <p className="text-sm font-medium text-[var(--text-primary)]">No field guide for this view yet.</p>
-                    <p className="mt-2 text-sm text-[var(--text-secondary)]">
-                      Generate a grounded guide for {scopeTitle()} to get oriented fast. Requirements are optional and can be layered in later.
-                    </p>
-                    <div className="mt-4">
-                      <Button onClick={handleGenerateCliffNotes} disabled={knowledgeLoading || !features.cliffNotes}>
-                        {knowledgeLoading ? "Generating..." : "Generate field guide"}
-                      </Button>
-                    </div>
-                    {!features.cliffNotes ? (
-                      <p className="mt-3 text-xs text-[var(--text-tertiary)]">
-                        Field-guide generation is not enabled on this server. This view stays visible so you always know where guided understanding will appear.
+              <div className="space-y-2">
+                {/* Category 1: Field Guide */}
+                <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => setOpenCategory(openCategory === "guide" ? null : "guide")}
+                    className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-[var(--text-primary)]">Field Guide</p>
+                      <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+                        {currentCliffNotes
+                          ? `${currentCliffNotes.sections.length} section${currentCliffNotes.sections.length !== 1 ? "s" : ""}${currentCliffNotes.generatedAt ? ` · Generated ${formatGeneratedAt(currentCliffNotes.generatedAt)}` : ""}`
+                          : "Not generated yet"}
                       </p>
-                    ) : null}
-                  </div>
-                )}
-
-                {currentCliffNotes && (
-                  <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] p-5">
-                    <div className="mb-4 flex items-center justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          {currentCliffNotes.status === "GENERATING" || currentCliffNotes.status === "PENDING" ? (
-                            <span className={artifactStatusClass}>Refreshing this view</span>
-                          ) : null}
-                          {currentCliffNotes.stale ? <span className={artifactStatusClass}>Stale</span> : null}
-                          {currentCliffNotes.status === "FAILED" ? <span className={artifactStatusClass}>Refresh failed</span> : null}
-                        </div>
-                        <p className="mt-2 text-xs text-[var(--text-tertiary)]">
-                          {formatGeneratedAt(currentCliffNotes.generatedAt)
-                            ? `Generated ${formatGeneratedAt(currentCliffNotes.generatedAt)}`
-                            : "Generated after the latest successful field-guide run."}
-                          {currentCliffNotes.sourceRevision?.commitSha
-                            ? ` · revision ${currentCliffNotes.sourceRevision.commitSha.slice(0, 7)}`
-                            : ""}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="secondary" size="sm" onClick={handleGenerateCliffNotes} disabled={knowledgeLoading}>
-                          Generate this lens
-                        </Button>
-                        <Button variant="secondary" size="sm" onClick={() => handleRefreshArtifact(currentCliffNotes.id)} disabled={knowledgeLoading}>
-                          Refresh
-                        </Button>
-                      </div>
                     </div>
-                    {currentCliffNotes.status === "GENERATING" || currentCliffNotes.status === "PENDING" ? (
-                      <div className="mb-5">
-                        <progress
-                          className="h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--bg-hover)] [&::-webkit-progress-value]:bg-[var(--accent-primary)] [&::-moz-progress-bar]:bg-[var(--accent-primary)]"
-                          max={100}
-                          value={Math.max(currentCliffNotes.progress * 100, 5)}
-                        />
-                      </div>
-                    ) : null}
-                    {currentCliffNotes.sections
-                      .slice()
-                      .sort((a, b) => a.orderIndex - b.orderIndex)
-                      .map((section) => (
-                        <div key={section.id} className="border-t border-[var(--border-subtle)] py-4 first:border-t-0 first:pt-0">
-                          <div
-                            onClick={() => setExpandedSection(expandedSection === section.id ? null : section.id)}
-                            className="flex cursor-pointer items-start justify-between gap-4"
-                          >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("shrink-0 text-[var(--text-tertiary)] transition-transform duration-200", openCategory === "guide" && "rotate-180")}><path d="m6 9 6 6 6-6"/></svg>
+                  </button>
+                  {openCategory === "guide" && (
+                    <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
+                      {!currentCliffNotes && !knowledgeResult.fetching && (
+                        <div className="rounded-[var(--radius-sm)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] p-5">
+                          <p className="text-sm font-medium text-[var(--text-primary)]">No field guide for this view yet.</p>
+                          <p className="mt-2 text-sm text-[var(--text-secondary)]">
+                            Generate a grounded guide for {scopeTitle()} to get oriented fast. Requirements are optional and can be layered in later.
+                          </p>
+                          <div className="mt-4">
+                            <Button onClick={handleGenerateCliffNotes} disabled={knowledgeLoading || !features.cliffNotes}>
+                              {knowledgeLoading ? "Generating..." : "Generate field guide"}
+                            </Button>
+                          </div>
+                          {!features.cliffNotes ? (
+                            <p className="mt-3 text-xs text-[var(--text-tertiary)]">
+                              Field-guide generation is not enabled on this server. This view stays visible so you always know where guided understanding will appear.
+                            </p>
+                          ) : null}
+                        </div>
+                      )}
+                      {currentCliffNotes && (
+                        <>
+                          <div className="mb-4 flex items-center justify-between">
                             <div>
-                              <h3 className="text-base font-semibold text-[var(--text-primary)]">{section.title}</h3>
-                              {section.summary && expandedSection !== section.id ? (
-                                <p className="mt-1 text-sm text-[var(--text-secondary)]">{section.summary}</p>
-                              ) : null}
+                              <div className="flex items-center gap-2">
+                                {currentCliffNotes.status === "GENERATING" || currentCliffNotes.status === "PENDING" ? (
+                                  <span className={artifactStatusClass}>Refreshing this view</span>
+                                ) : null}
+                                {currentCliffNotes.stale ? <span className={artifactStatusClass}>Stale</span> : null}
+                                {currentCliffNotes.status === "FAILED" ? <span className={artifactStatusClass}>Refresh failed</span> : null}
+                              </div>
+                              <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+                                {formatGeneratedAt(currentCliffNotes.generatedAt)
+                                  ? `Generated ${formatGeneratedAt(currentCliffNotes.generatedAt)}`
+                                  : "Generated after the latest successful field-guide run."}
+                                {currentCliffNotes.sourceRevision?.commitSha
+                                  ? ` · revision ${currentCliffNotes.sourceRevision.commitSha.slice(0, 7)}`
+                                  : ""}
+                              </p>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <span className={confidenceClass(section.confidence)}>{section.confidence}</span>
-                              {section.inferred ? <span className="text-xs text-[var(--text-tertiary)]">inferred</span> : null}
+                            <div className="flex gap-2">
+                              <Button variant="secondary" size="sm" onClick={handleGenerateCliffNotes} disabled={knowledgeLoading}>
+                                Generate this lens
+                              </Button>
+                              <Button variant="secondary" size="sm" onClick={() => handleRefreshArtifact(currentCliffNotes.id)} disabled={knowledgeLoading}>
+                                Refresh
+                              </Button>
                             </div>
                           </div>
-                          {expandedSection === section.id && (
-                            <div className="mt-3">
-                              <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--text-secondary)]">{section.content}</p>
-                              {section.evidence.length > 0 && (
-                                <div className="mt-4 rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
-                                  <p className="mb-2 text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Evidence</p>
-                                  <div className="space-y-2">
-                                    {section.evidence.slice(0, 3).map((ev) => (
-                                      <div key={ev.id} className="text-xs text-[var(--text-secondary)]">
-                                        {ev.filePath ? (
-                                          <SourceRefLink
-                                            repositoryId={repoId}
-                                            target={{
-                                              tab: "files",
-                                              filePath: ev.filePath,
-                                              line: ev.lineStart ?? undefined,
-                                              endLine: ev.lineEnd ?? undefined,
-                                            }}
-                                            className="text-xs"
-                                          >
-                                            {ev.filePath}{ev.lineStart ? `:${ev.lineStart}` : ""}{ev.lineEnd && ev.lineEnd !== ev.lineStart ? `-${ev.lineEnd}` : ""}
-                                          </SourceRefLink>
-                                        ) : null}
-                                        {ev.rationale ? <span className="ml-2">{ev.rationale}</span> : null}
-                                      </div>
-                                    ))}
+                          {currentCliffNotes.status === "GENERATING" || currentCliffNotes.status === "PENDING" ? (
+                            <div className="mb-5">
+                              <progress
+                                className="h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--bg-hover)] [&::-webkit-progress-value]:bg-[var(--accent-primary)] [&::-moz-progress-bar]:bg-[var(--accent-primary)]"
+                                max={100}
+                                value={Math.max(currentCliffNotes.progress * 100, 5)}
+                              />
+                            </div>
+                          ) : null}
+                          {currentCliffNotes.sections
+                            .slice()
+                            .sort((a, b) => a.orderIndex - b.orderIndex)
+                            .map((section) => (
+                              <div key={section.id} className="border-t border-[var(--border-subtle)] py-4 first:border-t-0 first:pt-0">
+                                <div
+                                  onClick={() => setExpandedSection(expandedSection === section.id ? null : section.id)}
+                                  className="flex cursor-pointer items-start justify-between gap-4"
+                                >
+                                  <div>
+                                    <h3 className="text-base font-semibold text-[var(--text-primary)]">{section.title}</h3>
+                                    {section.summary && expandedSection !== section.id ? (
+                                      <p className="mt-1 text-sm text-[var(--text-secondary)]">{section.summary}</p>
+                                    ) : null}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className={confidenceClass(section.confidence)}>{section.confidence}</span>
+                                    {section.inferred ? <span className="text-xs text-[var(--text-tertiary)]">inferred</span> : null}
                                   </div>
                                 </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                  </div>
-                )}
+                                {expandedSection === section.id && (
+                                  <div className="mt-3">
+                                    <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--text-secondary)]">{section.content}</p>
+                                    {section.evidence.length > 0 && (
+                                      <div className="mt-4 rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
+                                        <p className="mb-2 text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Evidence</p>
+                                        <div className="space-y-2">
+                                          {section.evidence.map((ev) => (
+                                            <div key={ev.id} className="text-xs text-[var(--text-secondary)]">
+                                              {ev.filePath ? (
+                                                <SourceRefLink
+                                                  repositoryId={repoId}
+                                                  target={{
+                                                    tab: "files",
+                                                    filePath: ev.filePath,
+                                                    line: ev.lineStart ?? undefined,
+                                                    endLine: ev.lineEnd ?? undefined,
+                                                  }}
+                                                  className="text-xs"
+                                                >
+                                                  {ev.filePath}{ev.lineStart ? `:${ev.lineStart}` : ""}{ev.lineEnd && ev.lineEnd !== ev.lineStart ? `-${ev.lineEnd}` : ""}
+                                                </SourceRefLink>
+                                              ) : null}
+                                              {ev.rationale ? <span className="ml-2">{ev.rationale}</span> : null}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
 
+                {/* Category 2: Ask About This Scope */}
                 {features.systemExplain && (
-                  <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] p-5">
-                    <div className="mb-3">
-                      <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Ask About This Scope</p>
-                      <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                        Ask focused questions about {scopeTitle()} without leaving this view.
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={explainQuestion}
-                        onChange={(e) => setExplainQuestion(e.target.value)}
-                        placeholder={`Ask about ${scopeTitle()}...`}
-                        onKeyDown={(e) => { if (e.key === "Enter") handleExplainSystem(); }}
-                        className={`${inputClass} flex-1`}
-                      />
-                      <Button onClick={handleExplainSystem} disabled={knowledgeLoading || !explainQuestion.trim()}>
-                        {knowledgeLoading ? "Thinking..." : "Ask"}
-                      </Button>
-                    </div>
-                    {explainResult && (
-                      <div className="mt-4 whitespace-pre-wrap text-sm leading-7 text-[var(--text-secondary)]">
-                        {explainResult.explanation}
+                  <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] overflow-hidden transition-all">
+                    <button
+                      type="button"
+                      onClick={() => setOpenCategory(openCategory === "ask" ? null : "ask")}
+                      className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-[var(--text-primary)]">Ask About This Scope</p>
+                        <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+                          {explainResult ? "Has answer" : "Ask focused questions"}
+                        </p>
+                      </div>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("shrink-0 text-[var(--text-tertiary)] transition-transform duration-200", openCategory === "ask" && "rotate-180")}><path d="m6 9 6 6 6-6"/></svg>
+                    </button>
+                    {openCategory === "ask" && (
+                      <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
+                        <p className="mb-3 text-sm text-[var(--text-secondary)]">
+                          Ask focused questions about {scopeTitle()} without leaving this view.
+                        </p>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={explainQuestion}
+                            onChange={(e) => setExplainQuestion(e.target.value)}
+                            placeholder={`Ask about ${scopeTitle()}...`}
+                            onKeyDown={(e) => { if (e.key === "Enter") handleExplainSystem(); }}
+                            className={`${inputClass} flex-1`}
+                          />
+                          <Button onClick={handleExplainSystem} disabled={knowledgeLoading || !explainQuestion.trim()}>
+                            {knowledgeLoading ? "Thinking..." : "Ask"}
+                          </Button>
+                        </div>
+                        {explainResult && (
+                          <div className="mt-4 whitespace-pre-wrap text-sm leading-7 text-[var(--text-secondary)]">
+                            {explainResult.explanation}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
                 )}
 
-                <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] p-5">
-                  <div className="mb-4 flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">How This Works</p>
-                      <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                        Follow the likely backend flow step by step. Observed steps come from indexed relationships; inferred steps are marked clearly.
+                {/* Category 3: How This Works */}
+                <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => setOpenCategory(openCategory === "execution" ? null : "execution")}
+                    className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-[var(--text-primary)]">How This Works</p>
+                      <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+                        {executionPath
+                          ? `${executionPath.steps.length} step${executionPath.steps.length !== 1 ? "s" : ""} · ${executionPath.observedStepCount} observed`
+                          : "Trace execution paths"}
                       </p>
                     </div>
-                    <Button variant="secondary" size="sm" onClick={() => setExecutionCompact((value) => !value)}>
-                      {executionCompact ? "Guided view" : "Compact view"}
-                    </Button>
-                  </div>
-
-                  {knowledgeScopeType === "REPOSITORY" ? (
-                    <div className="mb-4 flex flex-col gap-3 md:flex-row">
-                      <select
-                        value={selectedExecutionEntry}
-                        onChange={(e) => setSelectedExecutionEntry(e.target.value)}
-                        className={`${inputClass} md:flex-1`}
-                      >
-                        {executionEntries.length === 0 ? <option value="">No backend entry points found yet</option> : null}
-                        {executionEntries.map((entry) => (
-                          <option key={entry.value} value={entry.value}>
-                            {entry.label}
-                          </option>
-                        ))}
-                      </select>
-                      <Button onClick={handleTraceExecution} disabled={!executionInput || executionResult.fetching}>
-                        {executionResult.fetching ? "Tracing..." : "Trace execution"}
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
-                      <div>
-                        <p className="text-sm font-medium text-[var(--text-primary)]">Trace from {scopeTitle()}</p>
-                        <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                          Use the current {knowledgeScopeType === "SYMBOL" ? "symbol" : "file"} as the anchor and follow the most likely backend path.
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("shrink-0 text-[var(--text-tertiary)] transition-transform duration-200", openCategory === "execution" && "rotate-180")}><path d="m6 9 6 6 6-6"/></svg>
+                  </button>
+                  {openCategory === "execution" && (
+                    <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
+                      <div className="mb-4 flex items-start justify-between gap-3">
+                        <p className="text-sm text-[var(--text-secondary)]">
+                          Follow the likely backend flow step by step. Observed steps come from indexed relationships; inferred steps are marked clearly.
                         </p>
+                        <Button variant="secondary" size="sm" onClick={() => setExecutionCompact((value) => !value)}>
+                          {executionCompact ? "Guided view" : "Compact view"}
+                        </Button>
                       </div>
-                      <Button onClick={handleTraceExecution} disabled={!executionInput || executionResult.fetching}>
-                        {executionResult.fetching ? "Tracing..." : "Trace execution"}
-                      </Button>
+
+                      {knowledgeScopeType === "REPOSITORY" ? (
+                        <div className="mb-4 flex flex-col gap-3 md:flex-row">
+                          <select
+                            value={selectedExecutionEntry}
+                            onChange={(e) => setSelectedExecutionEntry(e.target.value)}
+                            className={`${inputClass} md:flex-1`}
+                          >
+                            {executionEntries.length === 0 ? <option value="">No backend entry points found yet</option> : null}
+                            {executionEntries.map((entry) => (
+                              <option key={entry.value} value={entry.value}>
+                                {entry.label}
+                              </option>
+                            ))}
+                          </select>
+                          <Button onClick={handleTraceExecution} disabled={!executionInput || executionResult.fetching}>
+                            {executionResult.fetching ? "Tracing..." : "Trace execution"}
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
+                          <div>
+                            <p className="text-sm font-medium text-[var(--text-primary)]">Trace from {scopeTitle()}</p>
+                            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                              Use the current {knowledgeScopeType === "SYMBOL" ? "symbol" : "file"} as the anchor and follow the most likely backend path.
+                            </p>
+                          </div>
+                          <Button onClick={handleTraceExecution} disabled={!executionInput || executionResult.fetching}>
+                            {executionResult.fetching ? "Tracing..." : "Trace execution"}
+                          </Button>
+                        </div>
+                      )}
+
+                      {!executionRequested ? (
+                        <p className="text-sm text-[var(--text-secondary)]">
+                          Start from a concrete route, file, or symbol. This stays intentionally scoped so it remains readable for someone new to the codebase.
+                        </p>
+                      ) : executionPath && !executionPath.trustQualified ? (
+                        <div className="rounded-[var(--radius-sm)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                          <p className="text-sm font-medium text-[var(--text-primary)]">
+                            {executionPath.message || "This path is not well enough understood yet."}
+                          </p>
+                          <p className="mt-2 text-sm text-[var(--text-secondary)]">
+                            Use the Field Guide for this scope first, then try again from a more concrete route or symbol.
+                          </p>
+                        </div>
+                      ) : executionPath ? (
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-tertiary)]">
+                            <span className={artifactStatusClass}>{executionPath.observedStepCount} observed</span>
+                            <span className={artifactStatusClass}>{executionPath.inferredStepCount} inferred</span>
+                            <span className={artifactStatusClass}>{executionPath.entryLabel}</span>
+                          </div>
+                          {executionPath.steps.map((step) => (
+                            <div key={`${step.orderIndex}-${step.label}`} className="rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+                                    Step {step.orderIndex + 1} · {step.kind}
+                                  </p>
+                                  <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{step.label}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className={confidenceClass(step.confidence.toUpperCase())}>{step.confidence}</span>
+                                  {!step.observed ? <span className="text-xs text-[var(--text-tertiary)]">inferred</span> : null}
+                                </div>
+                              </div>
+                              <p className={cn("mt-2 text-sm text-[var(--text-secondary)]", executionCompact ? "leading-6" : "leading-7")}>
+                                {step.explanation}
+                              </p>
+                              {!executionCompact && step.reason ? (
+                                <p className="mt-2 text-xs text-[var(--text-tertiary)]">{step.reason}</p>
+                              ) : null}
+                              {step.filePath ? (
+                                <div className="mt-3">
+                                  <SourceRefLink
+                                    repositoryId={repoId}
+                                    target={{
+                                      tab: "files",
+                                      filePath: step.filePath,
+                                      line: step.lineStart ?? undefined,
+                                      endLine: step.lineEnd ?? undefined,
+                                    }}
+                                    className="text-xs"
+                                  >
+                                    {step.filePath}{step.lineStart ? `:${step.lineStart}` : ""}
+                                  </SourceRefLink>
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   )}
-
-                  {!executionRequested ? (
-                    <p className="text-sm text-[var(--text-secondary)]">
-                      Start from a concrete route, file, or symbol. This stays intentionally scoped so it remains readable for someone new to the codebase.
-                    </p>
-                  ) : executionPath && !executionPath.trustQualified ? (
-                    <div className="rounded-[var(--radius-sm)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
-                      <p className="text-sm font-medium text-[var(--text-primary)]">
-                        {executionPath.message || "This path is not well enough understood yet."}
-                      </p>
-                      <p className="mt-2 text-sm text-[var(--text-secondary)]">
-                        Use the Field Guide for this scope first, then try again from a more concrete route or symbol.
-                      </p>
-                    </div>
-                  ) : executionPath ? (
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-tertiary)]">
-                        <span className={artifactStatusClass}>{executionPath.observedStepCount} observed</span>
-                        <span className={artifactStatusClass}>{executionPath.inferredStepCount} inferred</span>
-                        <span className={artifactStatusClass}>{executionPath.entryLabel}</span>
-                      </div>
-                      {executionPath.steps.map((step) => (
-                        <div key={`${step.orderIndex}-${step.label}`} className="rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-                                Step {step.orderIndex + 1} · {step.kind}
-                              </p>
-                              <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{step.label}</p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className={confidenceClass(step.confidence.toUpperCase())}>{step.confidence}</span>
-                              {!step.observed ? <span className="text-xs text-[var(--text-tertiary)]">inferred</span> : null}
-                            </div>
-                          </div>
-                          <p className={cn("mt-2 text-sm text-[var(--text-secondary)]", executionCompact ? "leading-6" : "leading-7")}>
-                            {step.explanation}
-                          </p>
-                          {!executionCompact && step.reason ? (
-                            <p className="mt-2 text-xs text-[var(--text-tertiary)]">{step.reason}</p>
-                          ) : null}
-                          {step.filePath ? (
-                            <div className="mt-3">
-                              <SourceRefLink
-                                repositoryId={repoId}
-                                target={{
-                                  tab: "files",
-                                  filePath: step.filePath,
-                                  line: step.lineStart ?? undefined,
-                                  endLine: step.lineEnd ?? undefined,
-                                }}
-                                className="text-xs"
-                              >
-                                {step.filePath}{step.lineStart ? `:${step.lineStart}` : ""}
-                              </SourceRefLink>
-                            </div>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
                 </div>
 
-                <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] p-5">
-                  <div className="mb-4 flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Workflow Story</p>
-                      <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                        See how someone is likely to experience this workflow, what usually happens next, and where to inspect the implementation.
+                {/* Category 4: Workflow Story */}
+                <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => setOpenCategory(openCategory === "workflow" ? null : "workflow")}
+                    className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-[var(--text-primary)]">Workflow Story</p>
+                      <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+                        {currentWorkflowStory && (currentWorkflowStory.status === "READY" || currentWorkflowStory.status === "STALE")
+                          ? `${currentWorkflowStory.sections.length} section${currentWorkflowStory.sections.length !== 1 ? "s" : ""}`
+                          : currentWorkflowStory && (currentWorkflowStory.status === "GENERATING" || currentWorkflowStory.status === "PENDING")
+                            ? "Generating..."
+                            : "Not generated yet"}
                       </p>
                     </div>
-                    <div className="flex gap-2">
-                      {!currentWorkflowStory ? (
-                        <Button variant="secondary" size="sm" onClick={handleGenerateWorkflowStory} disabled={knowledgeLoading}>
-                          Generate story
-                        </Button>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("shrink-0 text-[var(--text-tertiary)] transition-transform duration-200", openCategory === "workflow" && "rotate-180")}><path d="m6 9 6 6 6-6"/></svg>
+                  </button>
+                  {openCategory === "workflow" && (
+                    <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
+                      <div className="mb-4 flex items-start justify-between gap-3">
+                        <p className="text-sm text-[var(--text-secondary)]">
+                          See how someone is likely to experience this workflow, what usually happens next, and where to inspect the implementation.
+                        </p>
+                        <div className="flex shrink-0 gap-2">
+                          {!currentWorkflowStory ? (
+                            <Button variant="secondary" size="sm" onClick={handleGenerateWorkflowStory} disabled={knowledgeLoading}>
+                              Generate story
+                            </Button>
+                          ) : null}
+                          {currentWorkflowStory ? (
+                            <Button variant="secondary" size="sm" onClick={() => handleRefreshArtifact(currentWorkflowStory.id)} disabled={knowledgeLoading}>
+                              Refresh
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {!currentWorkflowStory && !knowledgeLoading ? (
+                        <div className="rounded-[var(--radius-sm)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                          <p className="text-sm font-medium text-[var(--text-primary)]">No workflow story for this view yet.</p>
+                          <p className="mt-2 text-sm text-[var(--text-secondary)]">
+                            Generate a grounded story that explains who is trying to do what here, what the happy path looks like, and where to inspect the code when you need to change it.
+                          </p>
+                        </div>
                       ) : null}
-                      {currentWorkflowStory ? (
-                        <Button variant="secondary" size="sm" onClick={() => handleRefreshArtifact(currentWorkflowStory.id)} disabled={knowledgeLoading}>
-                          Refresh
-                        </Button>
+
+                      {currentWorkflowStory && (currentWorkflowStory.status === "GENERATING" || currentWorkflowStory.status === "PENDING") ? (
+                        <div className="space-y-3">
+                          <span className={artifactStatusClass}>Generating workflow story</span>
+                          <progress
+                            className="h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--bg-hover)] [&::-webkit-progress-value]:bg-[var(--accent-primary)] [&::-moz-progress-bar]:bg-[var(--accent-primary)]"
+                            max={100}
+                            value={Math.max(currentWorkflowStory.progress * 100, 5)}
+                          />
+                        </div>
                       ) : null}
-                    </div>
-                  </div>
 
-                  {!currentWorkflowStory && !knowledgeLoading ? (
-                    <div className="rounded-[var(--radius-sm)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
-                      <p className="text-sm font-medium text-[var(--text-primary)]">No workflow story for this view yet.</p>
-                      <p className="mt-2 text-sm text-[var(--text-secondary)]">
-                        Generate a grounded story that explains who is trying to do what here, what the happy path looks like, and where to inspect the code when you need to change it.
-                      </p>
-                    </div>
-                  ) : null}
-
-                  {currentWorkflowStory && (currentWorkflowStory.status === "GENERATING" || currentWorkflowStory.status === "PENDING") ? (
-                    <div className="space-y-3">
-                      <span className={artifactStatusClass}>Generating workflow story</span>
-                      <progress
-                        className="h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--bg-hover)] [&::-webkit-progress-value]:bg-[var(--accent-primary)] [&::-moz-progress-bar]:bg-[var(--accent-primary)]"
-                        max={100}
-                        value={Math.max(currentWorkflowStory.progress * 100, 5)}
-                      />
-                    </div>
-                  ) : null}
-
-                  {currentWorkflowStory && currentWorkflowStory.status === "READY" ? (
-                    <div className="space-y-3">
-                      {currentWorkflowStory.sections
-                        .slice()
-                        .sort((a, b) => a.orderIndex - b.orderIndex)
-                        .map((section) => (
-                          <div key={section.id} className="rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
-                            <button
-                              type="button"
-                              onClick={() => setExpandedWorkflowSection(expandedWorkflowSection === section.id ? null : section.id)}
-                              className="flex w-full items-start justify-between gap-3 text-left"
-                            >
-                              <div>
-                                <p className="text-sm font-semibold text-[var(--text-primary)]">{section.title}</p>
-                                {section.summary ? <p className="mt-1 text-sm text-[var(--text-secondary)]">{section.summary}</p> : null}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className={confidenceClass(section.confidence)}>{section.confidence}</span>
-                                {section.inferred ? <span className="text-xs text-[var(--text-tertiary)]">inferred</span> : null}
-                              </div>
-                            </button>
-                            {expandedWorkflowSection === section.id ? (
-                              <div className="mt-3">
-                                <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--text-secondary)]">{section.content}</p>
-                                {section.evidence.length > 0 ? (
-                                  <div className="mt-4 rounded-[var(--radius-sm)] bg-[var(--bg-base)] p-3">
-                                    <p className="mb-2 text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Evidence</p>
-                                    <div className="space-y-2">
-                                      {section.evidence.slice(0, 3).map((ev) => (
-                                        <div key={ev.id} className="text-xs text-[var(--text-secondary)]">
-                                          {ev.filePath ? (
-                                            <SourceRefLink
-                                              repositoryId={repoId}
-                                              target={{
-                                                tab: "files",
-                                                filePath: ev.filePath,
-                                                line: ev.lineStart ?? undefined,
-                                                endLine: ev.lineEnd ?? undefined,
-                                              }}
-                                              className="text-xs"
-                                            >
-                                              {ev.filePath}{ev.lineStart ? `:${ev.lineStart}` : ""}
-                                            </SourceRefLink>
-                                          ) : null}
-                                          {ev.rationale ? <span className="ml-2">{ev.rationale}</span> : null}
+                      {currentWorkflowStory && (currentWorkflowStory.status === "READY" || currentWorkflowStory.status === "STALE") ? (
+                        <div className="space-y-3">
+                          {currentWorkflowStory.sections
+                            .slice()
+                            .sort((a, b) => a.orderIndex - b.orderIndex)
+                            .map((section) => (
+                              <div key={section.id} className="rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedWorkflowSection(expandedWorkflowSection === section.id ? null : section.id)}
+                                  className="flex w-full items-start justify-between gap-3 text-left"
+                                >
+                                  <div>
+                                    <p className="text-sm font-semibold text-[var(--text-primary)]">{section.title}</p>
+                                    {section.summary ? <p className="mt-1 text-sm text-[var(--text-secondary)]">{section.summary}</p> : null}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className={confidenceClass(section.confidence)}>{section.confidence}</span>
+                                    {section.inferred ? <span className="text-xs text-[var(--text-tertiary)]">inferred</span> : null}
+                                  </div>
+                                </button>
+                                {expandedWorkflowSection === section.id ? (
+                                  <div className="mt-3">
+                                    <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--text-secondary)]">{section.content}</p>
+                                    {section.evidence.length > 0 ? (
+                                      <div className="mt-4 rounded-[var(--radius-sm)] bg-[var(--bg-base)] p-3">
+                                        <p className="mb-2 text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Evidence</p>
+                                        <div className="space-y-2">
+                                          {section.evidence.map((ev) => (
+                                            <div key={ev.id} className="text-xs text-[var(--text-secondary)]">
+                                              {ev.filePath ? (
+                                                <SourceRefLink
+                                                  repositoryId={repoId}
+                                                  target={{
+                                                    tab: "files",
+                                                    filePath: ev.filePath,
+                                                    line: ev.lineStart ?? undefined,
+                                                    endLine: ev.lineEnd ?? undefined,
+                                                  }}
+                                                  className="text-xs"
+                                                >
+                                                  {ev.filePath}{ev.lineStart ? `:${ev.lineStart}` : ""}
+                                                </SourceRefLink>
+                                              ) : null}
+                                              {ev.rationale ? <span className="ml-2">{ev.rationale}</span> : null}
+                                            </div>
+                                          ))}
                                         </div>
-                                      ))}
-                                    </div>
+                                      </div>
+                                    ) : null}
                                   </div>
                                 ) : null}
                               </div>
-                            ) : null}
-                          </div>
-                        ))}
+                            ))}
+                        </div>
+                      ) : null}
                     </div>
-                  ) : null}
+                  )}
                 </div>
 
+                {/* Category 5: More Ways To Explore */}
                 {knowledgeScopeType === "REPOSITORY" && (currentLearningPath || currentCodeTour || features.learningPaths || features.codeTours) && (
-                  <Panel>
-                    <div className="mb-4 flex items-center justify-between">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">More Ways To Explore</p>
-                        <h3 className="mt-1 text-lg font-semibold text-[var(--text-primary)]">Learning aids</h3>
+                  <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] overflow-hidden transition-all">
+                    <button
+                      type="button"
+                      onClick={() => setOpenCategory(openCategory === "explore" ? null : "explore")}
+                      className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-[var(--text-primary)]">More Ways To Explore</p>
+                        <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+                          {[
+                            currentLearningPath ? `Learning path (${currentLearningPath.sections.length} steps)` : null,
+                            currentCodeTour ? `Code tour (${currentCodeTour.sections.length} stops)` : null,
+                          ].filter(Boolean).join(" · ") || "Learning paths & code tours"}
+                        </p>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {features.learningPaths && (
-                          <Button variant="secondary" size="sm" onClick={handleGenerateLearningPath} disabled={knowledgeLoading}>
-                            {currentLearningPath ? "Refresh learning path" : "Generate learning path"}
-                          </Button>
-                        )}
-                        {features.codeTours && (
-                          <Button variant="secondary" size="sm" onClick={handleGenerateCodeTour} disabled={knowledgeLoading}>
-                            {currentCodeTour ? "Refresh code tour" : "Generate code tour"}
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                    {currentLearningPath && (
-                      <div className="mb-5">
-                        <h4 className="text-sm font-semibold text-[var(--text-primary)]">Learning Path</h4>
-                        <div className="mt-3 space-y-3">
-                          {currentLearningPath.sections.slice().sort((a, b) => a.orderIndex - b.orderIndex).map((step, idx) => (
-                            <div key={step.id} className="flex gap-4 rounded-[var(--radius-sm)] bg-[var(--bg-base)] p-3">
-                              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--accent-primary)] text-xs font-semibold text-[var(--accent-contrast)]">{idx + 1}</div>
-                              <div>
-                                <p className="text-sm font-medium text-[var(--text-primary)]">{step.title}</p>
-                                {step.summary ? <p className="mt-1 text-xs text-[var(--text-secondary)]">{step.summary}</p> : null}
-                              </div>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("shrink-0 text-[var(--text-tertiary)] transition-transform duration-200", openCategory === "explore" && "rotate-180")}><path d="m6 9 6 6 6-6"/></svg>
+                    </button>
+                    {openCategory === "explore" && (
+                      <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
+                        <div className="mb-4 flex flex-wrap gap-2">
+                          {features.learningPaths && (
+                            <Button variant="secondary" size="sm" onClick={handleGenerateLearningPath} disabled={knowledgeLoading}>
+                              {currentLearningPath ? "Refresh learning path" : "Generate learning path"}
+                            </Button>
+                          )}
+                          {features.codeTours && (
+                            <Button variant="secondary" size="sm" onClick={handleGenerateCodeTour} disabled={knowledgeLoading}>
+                              {currentCodeTour ? "Refresh code tour" : "Generate code tour"}
+                            </Button>
+                          )}
+                        </div>
+                        {currentLearningPath && (
+                          <div className="mb-5">
+                            <h4 className="text-sm font-semibold text-[var(--text-primary)]">Learning Path</h4>
+                            <div className="mt-3 space-y-3">
+                              {currentLearningPath.sections.slice().sort((a, b) => a.orderIndex - b.orderIndex).map((step, idx) => (
+                                <div key={step.id} className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
+                                  <div
+                                    onClick={() => setExpandedSection(expandedSection === step.id ? null : step.id)}
+                                    className="flex cursor-pointer gap-4"
+                                  >
+                                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--accent-primary)] text-xs font-semibold text-[var(--accent-contrast)]">{idx + 1}</div>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-sm font-medium text-[var(--text-primary)]">{step.title}</p>
+                                      {step.summary && expandedSection !== step.id ? <p className="mt-1 text-xs text-[var(--text-secondary)]">{step.summary}</p> : null}
+                                    </div>
+                                  </div>
+                                  {expandedSection === step.id && step.content && (
+                                    <div className="mt-3 pl-11">
+                                      <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--text-secondary)]">{step.content}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
                             </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {currentCodeTour && (
-                      <div>
-                        <h4 className="text-sm font-semibold text-[var(--text-primary)]">Code Tour</h4>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {currentCodeTour.sections.slice().sort((a, b) => a.orderIndex - b.orderIndex).map((stop, idx) => (
-                            <button
-                              key={stop.id}
-                              type="button"
-                              onClick={() => setTourStopIndex(idx)}
-                              className={cn(
-                                "rounded-full border px-3 py-1.5 text-xs transition-colors",
-                                idx === tourStopIndex
-                                  ? "border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--accent-contrast)]"
-                                  : "border-[var(--border-default)] bg-[var(--bg-base)] text-[var(--text-secondary)]"
-                              )}
-                            >
-                              {idx + 1}. {stop.title}
-                            </button>
-                          ))}
-                        </div>
-                        {currentCodeTour.sections[tourStopIndex] && (
-                          <div className="mt-4 rounded-[var(--radius-sm)] bg-[var(--bg-base)] p-4">
-                            <p className="text-sm font-medium text-[var(--text-primary)]">{currentCodeTour.sections[tourStopIndex].title}</p>
-                            <p className="mt-2 text-sm text-[var(--text-secondary)]">{currentCodeTour.sections[tourStopIndex].content}</p>
+                          </div>
+                        )}
+                        {currentCodeTour && (
+                          <div>
+                            <h4 className="text-sm font-semibold text-[var(--text-primary)]">Code Tour</h4>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {currentCodeTour.sections.slice().sort((a, b) => a.orderIndex - b.orderIndex).map((stop, idx) => (
+                                <button
+                                  key={stop.id}
+                                  type="button"
+                                  onClick={() => setTourStopIndex(idx)}
+                                  className={cn(
+                                    "rounded-full border px-3 py-1.5 text-xs transition-colors",
+                                    idx === tourStopIndex
+                                      ? "border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--accent-contrast)]"
+                                      : "border-[var(--border-default)] bg-[var(--bg-base)] text-[var(--text-secondary)]"
+                                  )}
+                                >
+                                  {idx + 1}. {stop.title}
+                                </button>
+                              ))}
+                            </div>
+                            {currentCodeTour.sections[tourStopIndex] && (() => {
+                              const stop = currentCodeTour.sections[tourStopIndex];
+                              return (
+                                <div className="mt-4 rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-4">
+                                  <div className="flex items-start justify-between gap-4">
+                                    <p className="text-sm font-medium text-[var(--text-primary)]">{stop.title}</p>
+                                    <span className={confidenceClass(stop.confidence)}>{stop.confidence}</span>
+                                  </div>
+                                  <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-[var(--text-secondary)]">{stop.content}</p>
+                                  {stop.evidence.length > 0 && (
+                                    <div className="mt-3 rounded-[var(--radius-sm)] bg-[var(--bg-base)] p-3">
+                                      <p className="mb-2 text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">References</p>
+                                      <div className="space-y-2">
+                                        {stop.evidence.map((ev) => (
+                                          <div key={ev.id} className="text-xs text-[var(--text-secondary)]">
+                                            {ev.filePath ? (
+                                              <SourceRefLink
+                                                repositoryId={repoId}
+                                                target={{
+                                                  tab: "files",
+                                                  filePath: ev.filePath,
+                                                  line: ev.lineStart ?? undefined,
+                                                  endLine: ev.lineEnd ?? undefined,
+                                                }}
+                                                className="text-xs"
+                                              >
+                                                {ev.filePath}{ev.lineStart ? `:${ev.lineStart}` : ""}{ev.lineEnd && ev.lineEnd !== ev.lineStart ? `-${ev.lineEnd}` : ""}
+                                              </SourceRefLink>
+                                            ) : null}
+                                            {ev.rationale ? <span className="ml-2">{ev.rationale}</span> : null}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         )}
                       </div>
                     )}
-                  </Panel>
+                  </div>
                 )}
               </div>
 

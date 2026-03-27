@@ -1,0 +1,36 @@
+# IngressRoute to expose the Tekton webhook event listener
+# This allows GitHub webhooks to trigger Tekton pipeline runs.
+#
+# GitHub webhook URL: https://webhook.example.com/tekton/sourcebridge
+# Content type: application/json
+# Secret: (same as github-webhook-secret in tekton-builds namespace)
+# Events: Just the push event
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: tekton-sourcebridge-stripprefix
+  namespace: tekton-builds
+spec:
+  stripPrefix:
+    prefixes:
+      - /tekton/sourcebridge
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: sourcebridge-tekton-webhook
+  namespace: tekton-builds
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`webhook.example.com`) && PathPrefix(`/tekton/sourcebridge`)
+      kind: Rule
+      middlewares:
+        - name: tekton-sourcebridge-stripprefix
+          namespace: tekton-builds
+      services:
+        - name: el-sourcebridge-webhook
+          port: 8080
+  tls:
+    secretName: webhook-tls

@@ -25,42 +25,42 @@ _sym_db = _symbol_database.Default()
 from common.v1 import types_pb2 as common_dot_v1_dot_types__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1cknowledge/v1/knowledge.proto\x12\x16\x63odeaware.knowledge.v1\x1a\x15\x63ommon/v1/types.proto\"\xab\x01\n\x19GenerateCliffNotesRequest\x12\x15\n\rrepository_id\x18\x01 \x01(\t\x12\x17\n\x0frepository_name\x18\x02 \x01(\t\x12\x10\n\x08\x61udience\x18\x03 \x01(\t\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\t\x12\x15\n\rsnapshot_json\x18\x05 \x01(\t\x12\x12\n\nscope_type\x18\x06 \x01(\t\x12\x12\n\nscope_path\x18\x07 \x01(\t\"\x86\x01\n\x1aGenerateCliffNotesResponse\x12:\n\x08sections\x18\x01 \x03(\x0b\x32(.codeaware.knowledge.v1.KnowledgeSection\x12,\n\x05usage\x18\x02 \x01(\x0b\x32\x1d.codeaware.common.v1.LLMUsage\"\x99\x01\n\x1bGenerateLearningPathRequest\x12\x15\n\rrepository_id\x18\x01 \x01(\t\x12\x17\n\x0frepository_name\x18\x02 \x01(\t\x12\x10\n\x08\x61udience\x18\x03 \x01(\t\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\t\x12\x15\n\rsnapshot_json\x18\x05 \x01(\t\x12\x12\n\nfocus_area\x18\x06 \x01(\t\"\x81\x01\n\x1cGenerateLearningPathResponse\x12\x33\n\x05steps\x18\x01 \x03(\x0b\x32$.codeaware.knowledge.v1.LearningStep\x12,\n\x05usage\x18\x02 \x01(\x0b\x32\x1d.codeaware.common.v1.LLMUsage\"\xe1\x01\n\x1cGenerateWorkflowStoryRequest\x12\x15\n\rrepository_id\x18\x01 \x01(\t\x12\x17\n\x0frepository_name\x18\x02 \x01(\t\x12\x10\n\x08\x61udience\x18\x03 \x01(\t\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\t\x12\x15\n\rsnapshot_json\x18\x05 \x01(\t\x12\x12\n\nscope_type\x18\x06 \x01(\t\x12\x12\n\nscope_path\x18\x07 \x01(\t\x12\x14\n\x0c\x61nchor_label\x18\x08 \x01(\t\x12\x1b\n\x13\x65xecution_path_json\x18\t \x01(\t\"\x89\x01\n\x1dGenerateWorkflowStoryResponse\x12:\n\x08sections\x18\x01 \x03(\x0b\x32(.codeaware.knowledge.v1.KnowledgeSection\x12,\n\x05usage\x18\x02 \x01(\x0b\x32\x1d.codeaware.common.v1.LLMUsage\"\x90\x01\n\x0cLearningStep\x12\r\n\x05order\x18\x01 \x01(\x05\x12\r\n\x05title\x18\x02 \x01(\t\x12\x11\n\tobjective\x18\x03 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x04 \x01(\t\x12\x12\n\nfile_paths\x18\x05 \x03(\t\x12\x12\n\nsymbol_ids\x18\x06 \x03(\t\x12\x16\n\x0e\x65stimated_time\x18\x07 \x01(\t\"\xa9\x01\n\x14\x45xplainSystemRequest\x12\x15\n\rrepository_id\x18\x01 \x01(\t\x12\x17\n\x0frepository_name\x18\x02 \x01(\t\x12\x10\n\x08\x61udience\x18\x03 \x01(\t\x12\x10\n\x08question\x18\x04 \x01(\t\x12\x15\n\rsnapshot_json\x18\x05 \x01(\t\x12\x12\n\nscope_type\x18\x06 \x01(\t\x12\x12\n\nscope_path\x18\x07 \x01(\t\"\x97\x01\n\x15\x45xplainSystemResponse\x12\x13\n\x0b\x65xplanation\x18\x01 \x01(\t\x12;\n\x08\x65vidence\x18\x02 \x03(\x0b\x32).codeaware.knowledge.v1.KnowledgeEvidence\x12,\n\x05usage\x18\x03 \x01(\x0b\x32\x1d.codeaware.common.v1.LLMUsage\"\x90\x01\n\x17GenerateCodeTourRequest\x12\x15\n\rrepository_id\x18\x01 \x01(\t\x12\x17\n\x0frepository_name\x18\x02 \x01(\t\x12\x10\n\x08\x61udience\x18\x03 \x01(\t\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\t\x12\x15\n\rsnapshot_json\x18\x05 \x01(\t\x12\r\n\x05theme\x18\x06 \x01(\t\"}\n\x18GenerateCodeTourResponse\x12\x33\n\x05stops\x18\x01 \x03(\x0b\x32$.codeaware.knowledge.v1.CodeTourStop\x12,\n\x05usage\x18\x02 \x01(\x0b\x32\x1d.codeaware.common.v1.LLMUsage\"z\n\x0c\x43odeTourStop\x12\r\n\x05order\x18\x01 \x01(\x05\x12\r\n\x05title\x18\x02 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x03 \x01(\t\x12\x11\n\tfile_path\x18\x04 \x01(\t\x12\x12\n\nline_start\x18\x05 \x01(\x05\x12\x10\n\x08line_end\x18\x06 \x01(\x05\"\xa6\x01\n\x10KnowledgeSection\x12\r\n\x05title\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\x12\x0f\n\x07summary\x18\x03 \x01(\t\x12\x12\n\nconfidence\x18\x04 \x01(\t\x12\x10\n\x08inferred\x18\x05 \x01(\x08\x12;\n\x08\x65vidence\x18\x06 \x03(\x0b\x32).codeaware.knowledge.v1.KnowledgeEvidence\"\x87\x01\n\x11KnowledgeEvidence\x12\x13\n\x0bsource_type\x18\x01 \x01(\t\x12\x11\n\tsource_id\x18\x02 \x01(\t\x12\x11\n\tfile_path\x18\x03 \x01(\t\x12\x12\n\nline_start\x18\x04 \x01(\x05\x12\x10\n\x08line_end\x18\x05 \x01(\x05\x12\x11\n\trationale\x18\x06 \x01(\t2\xff\x04\n\x10KnowledgeService\x12{\n\x12GenerateCliffNotes\x12\x31.codeaware.knowledge.v1.GenerateCliffNotesRequest\x1a\x32.codeaware.knowledge.v1.GenerateCliffNotesResponse\x12\x81\x01\n\x14GenerateLearningPath\x12\x33.codeaware.knowledge.v1.GenerateLearningPathRequest\x1a\x34.codeaware.knowledge.v1.GenerateLearningPathResponse\x12\x84\x01\n\x15GenerateWorkflowStory\x12\x34.codeaware.knowledge.v1.GenerateWorkflowStoryRequest\x1a\x35.codeaware.knowledge.v1.GenerateWorkflowStoryResponse\x12l\n\rExplainSystem\x12,.codeaware.knowledge.v1.ExplainSystemRequest\x1a-.codeaware.knowledge.v1.ExplainSystemResponse\x12u\n\x10GenerateCodeTour\x12/.codeaware.knowledge.v1.GenerateCodeTourRequest\x1a\x30.codeaware.knowledge.v1.GenerateCodeTourResponseB@Z>github.com/codeaware/codeaware/gen/go/knowledge/v1;knowledgev1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1cknowledge/v1/knowledge.proto\x12\x19sourcebridge.knowledge.v1\x1a\x15\x63ommon/v1/types.proto\"\xab\x01\n\x19GenerateCliffNotesRequest\x12\x15\n\rrepository_id\x18\x01 \x01(\t\x12\x17\n\x0frepository_name\x18\x02 \x01(\t\x12\x10\n\x08\x61udience\x18\x03 \x01(\t\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\t\x12\x15\n\rsnapshot_json\x18\x05 \x01(\t\x12\x12\n\nscope_type\x18\x06 \x01(\t\x12\x12\n\nscope_path\x18\x07 \x01(\t\"\x8c\x01\n\x1aGenerateCliffNotesResponse\x12=\n\x08sections\x18\x01 \x03(\x0b\x32+.sourcebridge.knowledge.v1.KnowledgeSection\x12/\n\x05usage\x18\x02 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage\"\x99\x01\n\x1bGenerateLearningPathRequest\x12\x15\n\rrepository_id\x18\x01 \x01(\t\x12\x17\n\x0frepository_name\x18\x02 \x01(\t\x12\x10\n\x08\x61udience\x18\x03 \x01(\t\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\t\x12\x15\n\rsnapshot_json\x18\x05 \x01(\t\x12\x12\n\nfocus_area\x18\x06 \x01(\t\"\x87\x01\n\x1cGenerateLearningPathResponse\x12\x36\n\x05steps\x18\x01 \x03(\x0b\x32\'.sourcebridge.knowledge.v1.LearningStep\x12/\n\x05usage\x18\x02 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage\"\xe1\x01\n\x1cGenerateWorkflowStoryRequest\x12\x15\n\rrepository_id\x18\x01 \x01(\t\x12\x17\n\x0frepository_name\x18\x02 \x01(\t\x12\x10\n\x08\x61udience\x18\x03 \x01(\t\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\t\x12\x15\n\rsnapshot_json\x18\x05 \x01(\t\x12\x12\n\nscope_type\x18\x06 \x01(\t\x12\x12\n\nscope_path\x18\x07 \x01(\t\x12\x14\n\x0c\x61nchor_label\x18\x08 \x01(\t\x12\x1b\n\x13\x65xecution_path_json\x18\t \x01(\t\"\x8f\x01\n\x1dGenerateWorkflowStoryResponse\x12=\n\x08sections\x18\x01 \x03(\x0b\x32+.sourcebridge.knowledge.v1.KnowledgeSection\x12/\n\x05usage\x18\x02 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage\"\x90\x01\n\x0cLearningStep\x12\r\n\x05order\x18\x01 \x01(\x05\x12\r\n\x05title\x18\x02 \x01(\t\x12\x11\n\tobjective\x18\x03 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x04 \x01(\t\x12\x12\n\nfile_paths\x18\x05 \x03(\t\x12\x12\n\nsymbol_ids\x18\x06 \x03(\t\x12\x16\n\x0e\x65stimated_time\x18\x07 \x01(\t\"\xb8\x01\n\x14\x45xplainSystemRequest\x12\x15\n\rrepository_id\x18\x01 \x01(\t\x12\x17\n\x0frepository_name\x18\x02 \x01(\t\x12\x10\n\x08\x61udience\x18\x03 \x01(\t\x12\x10\n\x08question\x18\x04 \x01(\t\x12\x15\n\rsnapshot_json\x18\x05 \x01(\t\x12\x12\n\nscope_type\x18\x06 \x01(\t\x12\x12\n\nscope_path\x18\x07 \x01(\t\x12\r\n\x05\x64\x65pth\x18\x08 \x01(\t\"\x9d\x01\n\x15\x45xplainSystemResponse\x12\x13\n\x0b\x65xplanation\x18\x01 \x01(\t\x12>\n\x08\x65vidence\x18\x02 \x03(\x0b\x32,.sourcebridge.knowledge.v1.KnowledgeEvidence\x12/\n\x05usage\x18\x03 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage\"\x90\x01\n\x17GenerateCodeTourRequest\x12\x15\n\rrepository_id\x18\x01 \x01(\t\x12\x17\n\x0frepository_name\x18\x02 \x01(\t\x12\x10\n\x08\x61udience\x18\x03 \x01(\t\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\t\x12\x15\n\rsnapshot_json\x18\x05 \x01(\t\x12\r\n\x05theme\x18\x06 \x01(\t\"\x83\x01\n\x18GenerateCodeTourResponse\x12\x36\n\x05stops\x18\x01 \x03(\x0b\x32\'.sourcebridge.knowledge.v1.CodeTourStop\x12/\n\x05usage\x18\x02 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage\"z\n\x0c\x43odeTourStop\x12\r\n\x05order\x18\x01 \x01(\x05\x12\r\n\x05title\x18\x02 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x03 \x01(\t\x12\x11\n\tfile_path\x18\x04 \x01(\t\x12\x12\n\nline_start\x18\x05 \x01(\x05\x12\x10\n\x08line_end\x18\x06 \x01(\x05\"\xa9\x01\n\x10KnowledgeSection\x12\r\n\x05title\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\x12\x0f\n\x07summary\x18\x03 \x01(\t\x12\x12\n\nconfidence\x18\x04 \x01(\t\x12\x10\n\x08inferred\x18\x05 \x01(\x08\x12>\n\x08\x65vidence\x18\x06 \x03(\x0b\x32,.sourcebridge.knowledge.v1.KnowledgeEvidence\"\x87\x01\n\x11KnowledgeEvidence\x12\x13\n\x0bsource_type\x18\x01 \x01(\t\x12\x11\n\tsource_id\x18\x02 \x01(\t\x12\x11\n\tfile_path\x18\x03 \x01(\t\x12\x12\n\nline_start\x18\x04 \x01(\x05\x12\x10\n\x08line_end\x18\x05 \x01(\x05\x12\x11\n\trationale\x18\x06 \x01(\t2\x9e\x05\n\x10KnowledgeService\x12\x81\x01\n\x12GenerateCliffNotes\x12\x34.sourcebridge.knowledge.v1.GenerateCliffNotesRequest\x1a\x35.sourcebridge.knowledge.v1.GenerateCliffNotesResponse\x12\x87\x01\n\x14GenerateLearningPath\x12\x36.sourcebridge.knowledge.v1.GenerateLearningPathRequest\x1a\x37.sourcebridge.knowledge.v1.GenerateLearningPathResponse\x12\x8a\x01\n\x15GenerateWorkflowStory\x12\x37.sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest\x1a\x38.sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse\x12r\n\rExplainSystem\x12/.sourcebridge.knowledge.v1.ExplainSystemRequest\x1a\x30.sourcebridge.knowledge.v1.ExplainSystemResponse\x12{\n\x10GenerateCodeTour\x12\x32.sourcebridge.knowledge.v1.GenerateCodeTourRequest\x1a\x33.sourcebridge.knowledge.v1.GenerateCodeTourResponseBFZDgithub.com/sourcebridge/sourcebridge/gen/go/knowledge/v1;knowledgev1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'knowledge.v1.knowledge_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'Z>github.com/codeaware/codeaware/gen/go/knowledge/v1;knowledgev1'
-  _globals['_GENERATECLIFFNOTESREQUEST']._serialized_start=80
-  _globals['_GENERATECLIFFNOTESREQUEST']._serialized_end=251
-  _globals['_GENERATECLIFFNOTESRESPONSE']._serialized_start=254
-  _globals['_GENERATECLIFFNOTESRESPONSE']._serialized_end=388
-  _globals['_GENERATELEARNINGPATHREQUEST']._serialized_start=391
-  _globals['_GENERATELEARNINGPATHREQUEST']._serialized_end=544
-  _globals['_GENERATELEARNINGPATHRESPONSE']._serialized_start=547
-  _globals['_GENERATELEARNINGPATHRESPONSE']._serialized_end=676
-  _globals['_GENERATEWORKFLOWSTORYREQUEST']._serialized_start=679
-  _globals['_GENERATEWORKFLOWSTORYREQUEST']._serialized_end=904
-  _globals['_GENERATEWORKFLOWSTORYRESPONSE']._serialized_start=907
-  _globals['_GENERATEWORKFLOWSTORYRESPONSE']._serialized_end=1044
-  _globals['_LEARNINGSTEP']._serialized_start=1047
-  _globals['_LEARNINGSTEP']._serialized_end=1191
-  _globals['_EXPLAINSYSTEMREQUEST']._serialized_start=1194
-  _globals['_EXPLAINSYSTEMREQUEST']._serialized_end=1363
-  _globals['_EXPLAINSYSTEMRESPONSE']._serialized_start=1366
-  _globals['_EXPLAINSYSTEMRESPONSE']._serialized_end=1517
-  _globals['_GENERATECODETOURREQUEST']._serialized_start=1520
-  _globals['_GENERATECODETOURREQUEST']._serialized_end=1664
-  _globals['_GENERATECODETOURRESPONSE']._serialized_start=1666
-  _globals['_GENERATECODETOURRESPONSE']._serialized_end=1791
-  _globals['_CODETOURSTOP']._serialized_start=1793
-  _globals['_CODETOURSTOP']._serialized_end=1915
-  _globals['_KNOWLEDGESECTION']._serialized_start=1918
-  _globals['_KNOWLEDGESECTION']._serialized_end=2084
-  _globals['_KNOWLEDGEEVIDENCE']._serialized_start=2087
-  _globals['_KNOWLEDGEEVIDENCE']._serialized_end=2222
-  _globals['_KNOWLEDGESERVICE']._serialized_start=2225
-  _globals['_KNOWLEDGESERVICE']._serialized_end=2864
+  _globals['DESCRIPTOR']._serialized_options = b'ZDgithub.com/sourcebridge/sourcebridge/gen/go/knowledge/v1;knowledgev1'
+  _globals['_GENERATECLIFFNOTESREQUEST']._serialized_start=83
+  _globals['_GENERATECLIFFNOTESREQUEST']._serialized_end=254
+  _globals['_GENERATECLIFFNOTESRESPONSE']._serialized_start=257
+  _globals['_GENERATECLIFFNOTESRESPONSE']._serialized_end=397
+  _globals['_GENERATELEARNINGPATHREQUEST']._serialized_start=400
+  _globals['_GENERATELEARNINGPATHREQUEST']._serialized_end=553
+  _globals['_GENERATELEARNINGPATHRESPONSE']._serialized_start=556
+  _globals['_GENERATELEARNINGPATHRESPONSE']._serialized_end=691
+  _globals['_GENERATEWORKFLOWSTORYREQUEST']._serialized_start=694
+  _globals['_GENERATEWORKFLOWSTORYREQUEST']._serialized_end=919
+  _globals['_GENERATEWORKFLOWSTORYRESPONSE']._serialized_start=922
+  _globals['_GENERATEWORKFLOWSTORYRESPONSE']._serialized_end=1065
+  _globals['_LEARNINGSTEP']._serialized_start=1068
+  _globals['_LEARNINGSTEP']._serialized_end=1212
+  _globals['_EXPLAINSYSTEMREQUEST']._serialized_start=1215
+  _globals['_EXPLAINSYSTEMREQUEST']._serialized_end=1399
+  _globals['_EXPLAINSYSTEMRESPONSE']._serialized_start=1402
+  _globals['_EXPLAINSYSTEMRESPONSE']._serialized_end=1559
+  _globals['_GENERATECODETOURREQUEST']._serialized_start=1562
+  _globals['_GENERATECODETOURREQUEST']._serialized_end=1706
+  _globals['_GENERATECODETOURRESPONSE']._serialized_start=1709
+  _globals['_GENERATECODETOURRESPONSE']._serialized_end=1840
+  _globals['_CODETOURSTOP']._serialized_start=1842
+  _globals['_CODETOURSTOP']._serialized_end=1964
+  _globals['_KNOWLEDGESECTION']._serialized_start=1967
+  _globals['_KNOWLEDGESECTION']._serialized_end=2136
+  _globals['_KNOWLEDGEEVIDENCE']._serialized_start=2139
+  _globals['_KNOWLEDGEEVIDENCE']._serialized_end=2274
+  _globals['_KNOWLEDGESERVICE']._serialized_start=2277
+  _globals['_KNOWLEDGESERVICE']._serialized_end=2947
 # @@protoc_insertion_point(module_scope)

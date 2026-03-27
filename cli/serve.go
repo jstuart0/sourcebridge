@@ -158,10 +158,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 			if rec.AskModel != "" {
 				cfg.LLM.AskModel = rec.AskModel
 			}
+			if rec.KnowledgeModel != "" {
+				cfg.LLM.KnowledgeModel = rec.KnowledgeModel
+			}
+			if rec.DraftModel != "" {
+				cfg.LLM.DraftModel = rec.DraftModel
+			}
 			if rec.TimeoutSecs > 0 {
 				cfg.LLM.TimeoutSecs = rec.TimeoutSecs
 			}
-			slog.Info("loaded LLM config from database", "provider", cfg.LLM.Provider)
+			cfg.LLM.AdvancedMode = rec.AdvancedMode
+			slog.Info("loaded LLM config from database", "provider", cfg.LLM.Provider, "advanced_mode", cfg.LLM.AdvancedMode)
 		}
 	}
 	if tokenStore == nil {
@@ -332,24 +339,30 @@ func (a *llmConfigAdapter) LoadLLMConfig() (*rest.LLMConfigRecord, error) {
 		return nil, err
 	}
 	return &rest.LLMConfigRecord{
-		Provider:     rec.Provider,
-		BaseURL:      rec.BaseURL,
-		APIKey:       rec.APIKey,
-		SummaryModel: rec.SummaryModel,
-		ReviewModel:  rec.ReviewModel,
-		AskModel:     rec.AskModel,
-		TimeoutSecs:  rec.TimeoutSecs,
+		Provider:       rec.Provider,
+		BaseURL:        rec.BaseURL,
+		APIKey:         rec.APIKey,
+		SummaryModel:   rec.SummaryModel,
+		ReviewModel:    rec.ReviewModel,
+		AskModel:       rec.AskModel,
+		KnowledgeModel: rec.KnowledgeModel,
+		DraftModel:     rec.DraftModel,
+		TimeoutSecs:    rec.TimeoutSecs,
+		AdvancedMode:   rec.AdvancedMode,
 	}, nil
 }
 
 func (a *llmConfigAdapter) SaveLLMConfig(rec *rest.LLMConfigRecord) error {
 	return a.store.SaveLLMConfig(&db.LLMConfigRecord{
-		Provider:     rec.Provider,
-		BaseURL:      rec.BaseURL,
-		APIKey:       rec.APIKey,
-		SummaryModel: rec.SummaryModel,
-		ReviewModel:  rec.ReviewModel,
-		AskModel:     rec.AskModel,
-		TimeoutSecs:  rec.TimeoutSecs,
+		Provider:       rec.Provider,
+		BaseURL:        rec.BaseURL,
+		APIKey:         rec.APIKey,
+		SummaryModel:   rec.SummaryModel,
+		ReviewModel:    rec.ReviewModel,
+		AskModel:       rec.AskModel,
+		KnowledgeModel: rec.KnowledgeModel,
+		DraftModel:     rec.DraftModel,
+		TimeoutSecs:    rec.TimeoutSecs,
+		AdvancedMode:   rec.AdvancedMode,
 	})
 }

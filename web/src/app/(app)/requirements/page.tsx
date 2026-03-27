@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { useMutation, useQuery } from "urql";
+import { useEffect, useState } from "react";
+import { useClient, useMutation, useQuery } from "urql";
 import {
   AUTO_LINK_MUTATION,
   REPOSITORIES_LIGHT_QUERY as REPOSITORIES,
@@ -68,11 +68,54 @@ export default function RequirementsPage() {
   const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null);
   const repoId = selectedRepoId || repos[0]?.id || "";
 
+  const client = useClient();
   const [reqsResult, reexecuteReqs] = useQuery({
     query: REQUIREMENTS,
-    variables: { repositoryId: repoId },
+    variables: { repositoryId: repoId, limit: 50, offset: 0 },
     pause: !repoId,
   });
+
+  // Lazy-load remaining requirements after the initial 50
+  const [extraReqs, setExtraReqs] = useState<Requirement[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const initialReqs: Requirement[] = reqsResult.data?.requirements?.nodes || [];
+  const totalCount: number = reqsResult.data?.requirements?.totalCount ?? 0;
+
+  useEffect(() => {
+    if (initialReqs.length < 50 || initialReqs.length >= totalCount) {
+      setExtraReqs([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingMore(true);
+
+    (async () => {
+      const allExtra: Requirement[] = [];
+      let offset = 50;
+      const batchSize = 200;
+
+      while (!cancelled) {
+        const result = await client
+          .query(REQUIREMENTS, { repositoryId: repoId, limit: batchSize, offset })
+          .toPromise();
+        const batch: Requirement[] = result.data?.requirements?.nodes || [];
+        if (batch.length === 0) break;
+        allExtra.push(...batch);
+        offset += batch.length;
+        if (batch.length < batchSize) break;
+      }
+
+      if (!cancelled) {
+        setExtraReqs(allExtra);
+        setLoadingMore(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [initialReqs.length, totalCount, repoId, client]);
+
+  // Reset extra reqs when repo changes
+  useEffect(() => { setExtraReqs([]); }, [repoId]);
 
   const [, autoLink] = useMutation(AUTO_LINK_MUTATION);
   const [linking, setLinking] = useState(false);
@@ -86,7 +129,7 @@ export default function RequirementsPage() {
     pause: !selectedReq,
   });
 
-  const reqs: Requirement[] = reqsResult.data?.requirements?.nodes || [];
+  const reqs: Requirement[] = [...initialReqs, ...extraReqs];
   const links: ReqLink[] = linksResult.data?.requirementToCode || [];
   const activeRequirement = reqs.find((req) => req.id === selectedReq) || null;
 
@@ -158,7 +201,7 @@ export default function RequirementsPage() {
           <Panel className="min-w-0 max-h-[70vh] overflow-y-auto">
             <div className="space-y-1 pb-4">
               <h2 className="text-xl font-semibold tracking-[-0.03em] text-[var(--text-primary)]">
-                Requirements
+                Requirements{totalCount > 0 ? ` (${reqs.length}${loadingMore ? "+" : ""} of ${totalCount})` : ""}
               </h2>
               <p className="text-sm text-[var(--text-secondary)]">
                 Select a requirement to inspect linked symbols.

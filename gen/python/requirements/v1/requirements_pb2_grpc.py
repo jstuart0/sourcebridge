@@ -36,19 +36,24 @@ class RequirementsServiceStub(object):
             channel: A grpc.Channel.
         """
         self.ParseDocument = channel.unary_unary(
-                '/codeaware.requirements.v1.RequirementsService/ParseDocument',
+                '/sourcebridge.requirements.v1.RequirementsService/ParseDocument',
                 request_serializer=requirements_dot_v1_dot_requirements__pb2.ParseDocumentRequest.SerializeToString,
                 response_deserializer=requirements_dot_v1_dot_requirements__pb2.ParseDocumentResponse.FromString,
                 _registered_method=True)
         self.ParseCSV = channel.unary_unary(
-                '/codeaware.requirements.v1.RequirementsService/ParseCSV',
+                '/sourcebridge.requirements.v1.RequirementsService/ParseCSV',
                 request_serializer=requirements_dot_v1_dot_requirements__pb2.ParseCSVRequest.SerializeToString,
                 response_deserializer=requirements_dot_v1_dot_requirements__pb2.ParseCSVResponse.FromString,
                 _registered_method=True)
         self.EnrichRequirement = channel.unary_unary(
-                '/codeaware.requirements.v1.RequirementsService/EnrichRequirement',
+                '/sourcebridge.requirements.v1.RequirementsService/EnrichRequirement',
                 request_serializer=requirements_dot_v1_dot_requirements__pb2.EnrichRequirementRequest.SerializeToString,
                 response_deserializer=requirements_dot_v1_dot_requirements__pb2.EnrichRequirementResponse.FromString,
+                _registered_method=True)
+        self.ExtractSpecs = channel.unary_unary(
+                '/sourcebridge.requirements.v1.RequirementsService/ExtractSpecs',
+                request_serializer=requirements_dot_v1_dot_requirements__pb2.ExtractSpecsRequest.SerializeToString,
+                response_deserializer=requirements_dot_v1_dot_requirements__pb2.ExtractSpecsResponse.FromString,
                 _registered_method=True)
 
 
@@ -77,6 +82,14 @@ class RequirementsServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ExtractSpecs(self, request, context):
+        """ExtractSpecs scans source files and extracts implicit specifications
+        from tests, API schemas, and doc comments.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_RequirementsServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -95,11 +108,16 @@ def add_RequirementsServiceServicer_to_server(servicer, server):
                     request_deserializer=requirements_dot_v1_dot_requirements__pb2.EnrichRequirementRequest.FromString,
                     response_serializer=requirements_dot_v1_dot_requirements__pb2.EnrichRequirementResponse.SerializeToString,
             ),
+            'ExtractSpecs': grpc.unary_unary_rpc_method_handler(
+                    servicer.ExtractSpecs,
+                    request_deserializer=requirements_dot_v1_dot_requirements__pb2.ExtractSpecsRequest.FromString,
+                    response_serializer=requirements_dot_v1_dot_requirements__pb2.ExtractSpecsResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'codeaware.requirements.v1.RequirementsService', rpc_method_handlers)
+            'sourcebridge.requirements.v1.RequirementsService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('codeaware.requirements.v1.RequirementsService', rpc_method_handlers)
+    server.add_registered_method_handlers('sourcebridge.requirements.v1.RequirementsService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
@@ -121,7 +139,7 @@ class RequirementsService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.requirements.v1.RequirementsService/ParseDocument',
+            '/sourcebridge.requirements.v1.RequirementsService/ParseDocument',
             requirements_dot_v1_dot_requirements__pb2.ParseDocumentRequest.SerializeToString,
             requirements_dot_v1_dot_requirements__pb2.ParseDocumentResponse.FromString,
             options,
@@ -148,7 +166,7 @@ class RequirementsService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.requirements.v1.RequirementsService/ParseCSV',
+            '/sourcebridge.requirements.v1.RequirementsService/ParseCSV',
             requirements_dot_v1_dot_requirements__pb2.ParseCSVRequest.SerializeToString,
             requirements_dot_v1_dot_requirements__pb2.ParseCSVResponse.FromString,
             options,
@@ -175,9 +193,36 @@ class RequirementsService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.requirements.v1.RequirementsService/EnrichRequirement',
+            '/sourcebridge.requirements.v1.RequirementsService/EnrichRequirement',
             requirements_dot_v1_dot_requirements__pb2.EnrichRequirementRequest.SerializeToString,
             requirements_dot_v1_dot_requirements__pb2.EnrichRequirementResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ExtractSpecs(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/sourcebridge.requirements.v1.RequirementsService/ExtractSpecs',
+            requirements_dot_v1_dot_requirements__pb2.ExtractSpecsRequest.SerializeToString,
+            requirements_dot_v1_dot_requirements__pb2.ExtractSpecsResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -241,6 +241,140 @@ async def test_cliff_notes_flattens_nested_content_objects() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cliff_notes_handles_nested_content_with_string_evidence() -> None:
+    """Nested content dict where evidence is a string must not crash."""
+    provider = StaticLLMProvider(json.dumps([
+        {
+            "title": "Purpose",
+            "content": {
+                "content": "Handles authentication.",
+                "evidence": "see handlers/auth.go",
+            },
+            "summary": "",
+            "confidence": "medium",
+            "inferred": False,
+            "evidence": [],
+        },
+    ]))
+
+    result, _ = await generate_cliff_notes(
+        provider=provider,
+        repository_name="test-repo",
+        audience="developer",
+        depth="medium",
+        snapshot_json=SAMPLE_SNAPSHOT,
+        scope_type="symbol",
+        scope_path="auth.go#handleLogin",
+    )
+
+    assert result.sections[0].content == "Handles authentication."
+    assert result.sections[0].evidence == []
+
+
+@pytest.mark.asyncio
+async def test_cliff_notes_handles_evidence_as_non_list() -> None:
+    """Evidence field as a string instead of list must not crash."""
+    provider = StaticLLMProvider(json.dumps([
+        {
+            "title": "Purpose",
+            "content": "Handles auth.",
+            "summary": "Auth handler.",
+            "confidence": "high",
+            "inferred": False,
+            "evidence": "auth.go handles login",
+        },
+    ]))
+
+    result, _ = await generate_cliff_notes(
+        provider=provider,
+        repository_name="test-repo",
+        audience="developer",
+        depth="medium",
+        snapshot_json=SAMPLE_SNAPSHOT,
+        scope_type="symbol",
+        scope_path="auth.go#handleLogin",
+    )
+
+    assert result.sections[0].evidence == []
+
+
+def test_parse_sections_handles_think_tags() -> None:
+    """_parse_sections must strip <think> blocks from Qwen-style models."""
+    from workers.knowledge.cliff_notes import _parse_sections
+
+    raw = '<think>Let me analyze this...</think>\n[{"title":"Purpose","content":"Handles auth."}]'
+    result = _parse_sections(raw)
+    assert len(result) == 1
+    assert result[0]["title"] == "Purpose"
+
+
+def test_parse_sections_handles_object_wrapper() -> None:
+    """_parse_sections must extract array from object-wrapped responses."""
+    from workers.knowledge.cliff_notes import _parse_sections
+
+    raw = '{"sections": [{"title":"Purpose","content":"Auth handler."}]}'
+    result = _parse_sections(raw)
+    assert len(result) == 1
+    assert result[0]["title"] == "Purpose"
+
+
+def test_parse_sections_handles_preamble_text() -> None:
+    """_parse_sections must extract JSON array from text with preamble."""
+    from workers.knowledge.cliff_notes import _parse_sections
+
+    raw = 'Here is the JSON array:\n[{"title":"Purpose","content":"Auth handler."}]'
+    result = _parse_sections(raw)
+    assert len(result) == 1
+    assert result[0]["title"] == "Purpose"
+
+
+def test_parse_sections_handles_keyed_dict() -> None:
+    """_parse_sections must convert title-keyed dicts to array."""
+    from workers.knowledge.cliff_notes import _parse_sections
+
+    raw = '{"Purpose": {"content": "Auth handler."}, "Architecture": {"content": "Layered."}}'
+    result = _parse_sections(raw)
+    assert len(result) == 2
+    titles = {r["title"] for r in result}
+    assert "Purpose" in titles
+    assert "Architecture" in titles
+
+
+def test_parse_sections_handles_string_valued_dict() -> None:
+    """_parse_sections must handle dict where values are content strings."""
+    from workers.knowledge.cliff_notes import _parse_sections
+
+    raw = '{"Goal": "Understand the system.", "Trigger": "User opens the page."}'
+    result = _parse_sections(raw)
+    assert len(result) == 2
+    assert result[0]["title"] == "Goal"
+    assert result[0]["content"] == "Understand the system."
+
+
+def test_parse_sections_handles_nested_wrapper() -> None:
+    """_parse_sections must unwrap single-key nested wrappers."""
+    from workers.knowledge.cliff_notes import _parse_sections
+
+    raw = '{"workflow_story": {"Goal": {"content": "Understand it."}, "Trigger": {"content": "Click."}}}'
+    result = _parse_sections(raw)
+    assert len(result) == 2
+    titles = {r["title"] for r in result}
+    assert "Goal" in titles
+    assert "Trigger" in titles
+
+
+def test_parse_sections_handles_single_section_object() -> None:
+    """_parse_sections must wrap a bare section object in a list."""
+    from workers.knowledge.cliff_notes import _parse_sections
+
+    raw = '{"title": "Goal", "content": "Understand the system.", "confidence": "high"}'
+    result = _parse_sections(raw)
+    assert len(result) == 1
+    assert result[0]["title"] == "Goal"
+    assert result[0]["content"] == "Understand the system."
+
+
+@pytest.mark.asyncio
 async def test_symbol_cliff_notes_require_impact_analysis_section() -> None:
     provider = StaticLLMProvider(json.dumps([
         {
@@ -265,3 +399,23 @@ async def test_symbol_cliff_notes_require_impact_analysis_section() -> None:
 
     titles = [section.title for section in result.sections]
     assert "Impact Analysis" in titles
+
+
+def test_parse_sections_handles_fenced_json_with_language_hint() -> None:
+    """_parse_sections must strip ```json fences correctly."""
+    from workers.knowledge.cliff_notes import _parse_sections
+
+    raw = '```json\n[{"title":"Purpose","content":"Auth handler."}]\n```'
+    result = _parse_sections(raw)
+    assert len(result) == 1
+    assert result[0]["title"] == "Purpose"
+
+
+def test_parse_sections_handles_fenced_json_with_trailing_whitespace() -> None:
+    """_parse_sections must strip fences even with trailing whitespace."""
+    from workers.knowledge.cliff_notes import _parse_sections
+
+    raw = '```json\n[{"title":"Purpose","content":"Auth handler."}]\n```  \n'
+    result = _parse_sections(raw)
+    assert len(result) == 1
+    assert result[0]["title"] == "Purpose"

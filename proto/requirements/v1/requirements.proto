@@ -16,6 +16,10 @@ service RequirementsService {
 
   // EnrichRequirement adds LLM-generated metadata to a requirement
   rpc EnrichRequirement(EnrichRequirementRequest) returns (EnrichRequirementResponse);
+
+  // ExtractSpecs scans source files and extracts implicit specifications
+  // from tests, API schemas, and doc comments.
+  rpc ExtractSpecs(ExtractSpecsRequest) returns (ExtractSpecsResponse);
 }
 
 message ParseDocumentRequest {
@@ -52,4 +56,42 @@ message EnrichRequirementResponse {
   repeated string suggested_tags = 2;
   string suggested_priority = 3;
   sourcebridge.common.v1.LLMUsage usage = 4;
+}
+
+// FileEntry represents a source file to scan for spec extraction.
+message FileEntry {
+  string path = 1;           // Repository-relative path
+  string content = 2;        // File content (UTF-8)
+  string language = 3;       // Detected language
+  int32 line_count = 4;
+}
+
+message ExtractSpecsRequest {
+  string repository_id = 1;
+  string repository_name = 2;
+  repeated FileEntry files = 3;
+  bool skip_llm_refinement = 4;  // Force structural-only extraction
+}
+
+// DiscoveredSpec represents a single specification inferred from source code.
+message DiscoveredSpec {
+  string source = 1;             // "test", "schema", "comment"
+  string source_file = 2;
+  int32 source_line = 3;
+  repeated string source_files = 4;  // Additional files (dedup merge)
+  string text = 5;               // Refined requirement text
+  string raw_text = 6;           // Original extraction
+  string group_key = 7;
+  string language = 8;
+  repeated string keywords = 9;
+  string confidence = 10;        // "high", "medium", "low"
+  bool llm_refined = 11;
+}
+
+message ExtractSpecsResponse {
+  repeated DiscoveredSpec specs = 1;
+  int32 total_candidates = 2;    // Before dedup
+  int32 total_refined = 3;       // After dedup
+  sourcebridge.common.v1.LLMUsage usage = 4;
+  repeated string warnings = 5;
 }

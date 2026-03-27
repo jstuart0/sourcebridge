@@ -18,6 +18,7 @@ class WorkerConfig(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "claude-sonnet-4-20250514"
     llm_base_url: str = ""
+    llm_draft_model: str = ""  # LM Studio only: sent as draft_model in request body
     llm_timeout: int = 30
 
     # Embedding provider

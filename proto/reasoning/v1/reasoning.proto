@@ -22,6 +22,9 @@ service ReasoningService {
 
   // GenerateEmbedding creates an embedding vector for text
   rpc GenerateEmbedding(GenerateEmbeddingRequest) returns (GenerateEmbeddingResponse);
+
+  // SimulateChange resolves symbols affected by a hypothetical change description
+  rpc SimulateChange(SimulateChangeRequest) returns (SimulateChangeResponse);
 }
 
 message AnalyzeSymbolRequest {
@@ -99,4 +102,31 @@ message GenerateEmbeddingRequest {
 message GenerateEmbeddingResponse {
   sourcebridge.common.v1.Embedding embedding = 1;
   sourcebridge.common.v1.LLMUsage usage = 2;
+}
+
+message SimulateChangeRequest {
+  string repository_id = 1;
+  string description = 2;                              // Natural language change description
+  string anchor_file = 3;                              // Optional: narrow to a file
+  string anchor_symbol = 4;                            // Optional: narrow to a symbol
+  repeated sourcebridge.common.v1.CodeSymbol symbols = 5;  // All indexed symbols for the repo
+  int32 top_n = 6;                                     // Max symbols to resolve (default 10)
+  float confidence_threshold = 7;                       // Min similarity (default 0.35)
+}
+
+message SimulatedSymbolMatch {
+  string symbol_id = 1;
+  string name = 2;
+  string qualified_name = 3;
+  string kind = 4;
+  string file_path = 5;
+  float similarity = 6;      // Cosine similarity score
+  bool is_anchor = 7;        // True if this was the explicitly anchored symbol
+}
+
+message SimulateChangeResponse {
+  repeated SimulatedSymbolMatch resolved_symbols = 1;
+  string description_embedding_model = 2;              // Which model generated the embeddings
+  int32 symbols_evaluated = 3;                         // Total symbols considered
+  sourcebridge.common.v1.LLMUsage usage = 4;           // Token/compute usage
 }

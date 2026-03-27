@@ -5,7 +5,8 @@ import { useQuery } from "urql";
 import {
   LLM_USAGE_QUERY,
   PLATFORM_STATS_QUERY,
-  REPOSITORIES_QUERY as REPOSITORIES,
+  REPOSITORIES_LIGHT_QUERY as REPOSITORIES,
+  REPOSITORIES_QUERY as REPOSITORIES_WITH_SCORES,
   TRACEABILITY_MATRIX_QUERY as TRACEABILITY_MATRIX,
 } from "@/lib/graphql/queries";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,9 @@ interface RepoNode {
   fileCount: number;
   functionCount: number;
   classCount: number;
+}
+
+interface RepoWithScore extends RepoNode {
   understandingScore?: {
     overall: number;
   } | null;
@@ -58,7 +62,13 @@ interface LLMUsageEntry {
 }
 
 export default function DashboardPage() {
+  // Fast initial load — no understanding score computation
   const [reposResult] = useQuery({ query: REPOSITORIES });
+  // Lazy-load scores in the background (triggers expensive computation)
+  const [scoresResult] = useQuery({
+    query: REPOSITORIES_WITH_SCORES,
+    pause: !reposResult.data?.repositories?.length,
+  });
   const [matrixResult] = useQuery({
     query: TRACEABILITY_MATRIX,
     variables: { repositoryId: reposResult.data?.repositories?.[0]?.id || "" },
@@ -68,6 +78,15 @@ export default function DashboardPage() {
   const [usageResult] = useQuery({ query: LLM_USAGE_QUERY, variables: { limit: 10 } });
 
   const repos: RepoNode[] = reposResult.data?.repositories || [];
+  // Merge in scores once they arrive
+  const scoreMap = new Map<string, number>();
+  if (scoresResult.data?.repositories) {
+    for (const r of scoresResult.data.repositories as RepoWithScore[]) {
+      if (r.understandingScore?.overall != null) {
+        scoreMap.set(r.id, r.understandingScore.overall);
+      }
+    }
+  }
   const tmData = matrixResult.data?.traceabilityMatrix;
   const tmRequirements: TMRequirement[] = tmData?.requirements || [];
   const tmLinks: TMLink[] = tmData?.links || [];
@@ -120,11 +139,13 @@ export default function DashboardPage() {
 
       {statsResult.data?.platformStats && repos.length > 0 ? (
         <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
-          <StatCard label="Linked Specs" value={statsResult.data.platformStats.links} />
-          <StatCard label="Requirements Imported" value={tmRequirements.length} />
           <StatCard
-            label="Coverage"
-            value={coverage !== undefined && tmRequirements.length > 0 ? `${Math.round(coverage * 100)}%` : "Add specs"}
+            label="Understanding Score"
+            value={
+              scoreMap.size > 0
+                ? `${Math.round(repos.reduce((sum, r) => sum + (scoreMap.get(r.id) ?? 0), 0) / repos.length)}`
+                : scoresResult.fetching ? "..." : "—"
+            }
           />
           <StatCard
             label="LLM Tokens Used"
@@ -133,6 +154,15 @@ export default function DashboardPage() {
               statsResult.data.platformStats.totalOutputTokens
             ).toLocaleString()}
           />
+          {tmRequirements.length > 0 ? (
+            <>
+              <StatCard label="Linked Specs" value={statsResult.data.platformStats.links} />
+              <StatCard
+                label="Coverage"
+                value={coverage !== undefined ? `${Math.round(coverage * 100)}%` : "—"}
+              />
+            </>
+          ) : null}
         </div>
       ) : null}
 
@@ -158,9 +188,35 @@ export default function DashboardPage() {
                     {repo.name}
                   </span>
                   <span className="text-[var(--text-secondary)]">
-                    {repo.fileCount} files · {repo.functionCount + repo.classCount} structural nodes · score {Math.round(repo.understandingScore?.overall ?? 0)}
+                    {repo.fileCount} files · {repo.functionCount + repo.classCount} structural nodes{scoreMap.has(repo.id) ? ` · score ${Math.round(scoreMap.get(repo.id)!)}` : ""}
                   </span>
                 </Link>
+              ))}
+            </div>
+          </Panel>
+        ) : null}
+
+        {(usageResult.data?.llmUsage?.length ?? 0) > 0 ? (
+          <Panel variant="elevated" className="space-y-4">
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+                AI Activity
+              </p>
+              <h2 className="text-xl font-semibold tracking-[-0.03em] text-[var(--text-primary)]">
+                Recent Operations
+              </h2>
+            </div>
+            <div className="divide-y divide-[var(--border-subtle)]">
+              {(usageResult.data?.llmUsage as LLMUsageEntry[])?.map((entry: LLMUsageEntry) => (
+                <div
+                  key={entry.id}
+                  className="flex flex-col gap-2 py-3 text-sm md:flex-row md:items-center md:justify-between"
+                >
+                  <span className="font-medium text-[var(--text-primary)]">{entry.operation}</span>
+                  <span className="text-[var(--text-secondary)]">
+                    {entry.model} — {(entry.inputTokens + entry.outputTokens).toLocaleString()} tokens
+                  </span>
+                </div>
               ))}
             </div>
           </Panel>
@@ -188,32 +244,6 @@ export default function DashboardPage() {
                   <span className="text-[var(--text-secondary)]">
                     {entry.symbol?.name || entry.symbolId} — {entry.confidence}
                     {entry.verified ? " (verified)" : ""}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </Panel>
-        ) : null}
-
-        {(usageResult.data?.llmUsage?.length ?? 0) > 0 ? (
-          <Panel variant="elevated" className="space-y-4">
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
-                AI Activity
-              </p>
-              <h2 className="text-xl font-semibold tracking-[-0.03em] text-[var(--text-primary)]">
-                Recent Operations
-              </h2>
-            </div>
-            <div className="divide-y divide-[var(--border-subtle)]">
-              {(usageResult.data?.llmUsage as LLMUsageEntry[])?.map((entry: LLMUsageEntry) => (
-                <div
-                  key={entry.id}
-                  className="flex flex-col gap-2 py-3 text-sm md:flex-row md:items-center md:justify-between"
-                >
-                  <span className="font-medium text-[var(--text-primary)]">{entry.operation}</span>
-                  <span className="text-[var(--text-secondary)]">
-                    {entry.model} — {(entry.inputTokens + entry.outputTokens).toLocaleString()} tokens
                   </span>
                 </div>
               ))}

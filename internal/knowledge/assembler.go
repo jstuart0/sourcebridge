@@ -53,11 +53,14 @@ func (a *Assembler) Assemble(repoID string, repoSourcePath string) (*KnowledgeSn
 	return snap, nil
 }
 
-// AssembleScoped builds a narrower snapshot for a module/file/symbol scope.
+// AssembleScoped builds a narrower snapshot for a module/file/symbol/requirement scope.
 func (a *Assembler) AssembleScoped(repoID string, repoSourcePath string, scope ArtifactScope) (*KnowledgeSnapshot, error) {
 	scope = scope.Normalize()
 	if scope.ScopeType == ScopeRepository {
 		return a.Assemble(repoID, repoSourcePath)
+	}
+	if scope.ScopeType == ScopeRequirement {
+		return a.AssembleRequirement(repoID, repoSourcePath, scope)
 	}
 
 	full, err := a.Assemble(repoID, repoSourcePath)
@@ -156,6 +159,154 @@ func (a *Assembler) AssembleScoped(repoID string, repoSourcePath string, scope A
 	}
 
 	filtered.ScopeContext = a.buildScopeContext(repoID, scope, allowedSymbols, fileByPath)
+
+	return &filtered, nil
+}
+
+// AssembleRequirement builds a requirement-scoped snapshot. The flow is
+// inverted relative to other scopes: requirement → linked symbols → files.
+func (a *Assembler) AssembleRequirement(repoID string, repoSourcePath string, scope ArtifactScope) (*KnowledgeSnapshot, error) {
+	full, err := a.Assemble(repoID, repoSourcePath)
+	if err != nil {
+		return nil, err
+	}
+
+	requirementID := scope.ScopePath
+
+	// Fetch the requirement for context.
+	req := a.store.GetRequirement(requirementID)
+	if req == nil {
+		return nil, fmt.Errorf("requirement %s not found", requirementID)
+	}
+
+	// Get all non-rejected links for this requirement.
+	links := a.store.GetLinksForRequirement(requirementID, false)
+
+	// Budget cap: limit to 200 highest-confidence linked symbols.
+	const maxLinkedSymbols = 200
+	if len(links) > maxLinkedSymbols {
+		sort.Slice(links, func(i, j int) bool {
+			return links[i].Confidence > links[j].Confidence
+		})
+		links = links[:maxLinkedSymbols]
+	}
+
+	// Build the directly linked symbol set (no caller/callee expansion).
+	linkedSymbolIDs := make(map[string]bool, len(links))
+	for _, link := range links {
+		linkedSymbolIDs[link.SymbolID] = true
+	}
+
+	// Batch fetch linked symbols.
+	ids := make([]string, 0, len(linkedSymbolIDs))
+	for id := range linkedSymbolIDs {
+		ids = append(ids, id)
+	}
+	symMap := a.store.GetSymbolsByIDs(ids)
+
+	// Build allowed files from linked symbols.
+	allowedFiles := make(map[string]bool)
+	var linkedSymbols []*graph.StoredSymbol
+	for _, sym := range symMap {
+		if sym == nil {
+			continue
+		}
+		allowedFiles[sym.FilePath] = true
+		linkedSymbols = append(linkedSymbols, sym)
+	}
+
+	// Filter full snapshot.
+	filtered := *full
+	filtered.Modules = nil
+	filtered.TestCount = 0
+	filtered.EntryPoints = nil
+	filtered.PublicAPI = nil
+	filtered.TestSymbols = nil
+	filtered.ComplexSymbols = nil
+	filtered.HighFanOutSymbols = nil
+	filtered.HighFanInSymbols = nil
+	filtered.Docs = nil // strip docs for requirement scope
+	filtered.Requirements = nil
+	filtered.Links = nil
+
+	filtered.FileCount = len(allowedFiles)
+	filtered.SymbolCount = len(linkedSymbols)
+
+	// Keep only the target requirement.
+	filtered.Requirements = []RequirementRef{{
+		ID:          req.ID,
+		ExternalID:  req.ExternalID,
+		Title:       req.Title,
+		Priority:    req.Priority,
+		LinkedCount: len(links),
+	}}
+
+	// Keep only links for this requirement.
+	for _, link := range full.Links {
+		if link.RequirementID == requirementID && linkedSymbolIDs[link.SymbolID] {
+			filtered.Links = append(filtered.Links, link)
+		}
+	}
+
+	// Populate symbols by role.
+	allowedSet := make(map[string]bool, len(linkedSymbols))
+	for _, sym := range linkedSymbols {
+		allowedSet[sym.ID] = true
+		ref := SymbolRef{
+			ID: sym.ID, Name: sym.Name, QualifiedName: sym.QualifiedName,
+			Kind: sym.Kind, FilePath: sym.FilePath,
+			StartLine: sym.StartLine, EndLine: sym.EndLine,
+			DocComment: sym.DocComment, LineCount: sym.EndLine - sym.StartLine + 1,
+		}
+		filtered.ComplexSymbols = append(filtered.ComplexSymbols, ref)
+		if isPublicAPI(sym) {
+			filtered.PublicAPI = append(filtered.PublicAPI, ref)
+		}
+	}
+
+	// Keep matching high-fan symbols.
+	for _, sym := range full.HighFanOutSymbols {
+		if allowedSet[sym.ID] {
+			filtered.HighFanOutSymbols = append(filtered.HighFanOutSymbols, sym)
+		}
+	}
+	for _, sym := range full.HighFanInSymbols {
+		if allowedSet[sym.ID] {
+			filtered.HighFanInSymbols = append(filtered.HighFanInSymbols, sym)
+		}
+	}
+
+	// Build linked file refs for scope context.
+	fileByPath := make(map[string]*graph.File)
+	for _, file := range a.store.GetFiles(repoID) {
+		fileByPath[file.Path] = file
+	}
+	var linkedFileRefs []FileRef
+	for filePath := range allowedFiles {
+		if ref := fileRefFromStored(fileByPath[filePath]); ref != nil {
+			linkedFileRefs = append(linkedFileRefs, *ref)
+		}
+	}
+
+	// Build scope context with full requirement description.
+	filtered.ScopeContext = &ScopeContext{
+		ScopeType: "requirement",
+		ScopePath: requirementID,
+		FocusSummary: fmt.Sprintf(
+			"Requirement implementation guide for %s: %s",
+			req.ExternalID, req.Title,
+		),
+		TargetRequirement: &RequirementContext{
+			ID:          req.ID,
+			ExternalID:  req.ExternalID,
+			Title:       req.Title,
+			Description: req.Description,
+			Priority:    req.Priority,
+			Tags:        req.Tags,
+		},
+		KeySymbols:  limitSymbolRefs(symbolRefsFromStored(linkedSymbols), 20),
+		LinkedFiles: linkedFileRefs,
+	}
 
 	return &filtered, nil
 }

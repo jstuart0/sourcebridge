@@ -11,17 +11,11 @@ from workers.reasoning.types import Finding, LLMUsageRecord, ReviewResult
 
 def _parse_review(raw: str, template: str) -> ReviewResult:
     """Parse LLM response into a ReviewResult."""
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        if "```" in raw:
-            start = raw.index("```") + 3
-            if raw[start:].startswith("json"):
-                start += 4
-            end = raw.index("```", start)
-            data = json.loads(raw[start:end].strip())
-        else:
-            return ReviewResult(template=template)
+    from workers.common.llm.parse import parse_json_response
+
+    data = parse_json_response(raw)
+    if data is None or not isinstance(data, dict):
+        return ReviewResult(template=template)
 
     findings = []
     for f in data.get("findings", []):
@@ -48,6 +42,7 @@ async def review_code(
     language: str,
     content: str,
     template: str = "security",
+    model_override: str | None = None,
 ) -> tuple[ReviewResult, LLMUsageRecord]:
     """Run a structured code review using the specified template."""
     if template not in TEMPLATE_SYSTEMS:
@@ -56,7 +51,7 @@ async def review_code(
     system = TEMPLATE_SYSTEMS[template]
     prompt = build_review_prompt(file_path, language, content)
 
-    response = await provider.complete(prompt, system=system, temperature=0.0)
+    response = await provider.complete(prompt, system=system, temperature=0.0, model=model_override)
 
     result = _parse_review(response.content, template)
 

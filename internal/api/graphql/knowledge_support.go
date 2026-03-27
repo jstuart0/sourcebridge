@@ -35,6 +35,8 @@ func artifactScopeFromInput(scopeType *KnowledgeScopeType, scopePath *string) (k
 			scope.ScopeType = knowledgepkg.ScopeFile
 		case KnowledgeScopeTypeSymbol:
 			scope.ScopeType = knowledgepkg.ScopeSymbol
+		case KnowledgeScopeTypeRequirement:
+			scope.ScopeType = knowledgepkg.ScopeRequirement
 		default:
 			scope.ScopeType = knowledgepkg.ScopeRepository
 		}
@@ -99,6 +101,8 @@ func scopeTypeToGraph(scopeType KnowledgeScopeType) knowledgepkg.ScopeType {
 		return knowledgepkg.ScopeFile
 	case KnowledgeScopeTypeSymbol:
 		return knowledgepkg.ScopeSymbol
+	case KnowledgeScopeTypeRequirement:
+		return knowledgepkg.ScopeRequirement
 	default:
 		return knowledgepkg.ScopeRepository
 	}
@@ -113,6 +117,8 @@ func buildScopeChildren(store graphstore.GraphStore, repoID string, scope knowle
 		return moduleChildScopes(store, repoID, scope.ScopePath)
 	case knowledgepkg.ScopeFile:
 		return fileChildScopes(store, repoID, scope.ScopePath)
+	case knowledgepkg.ScopeRequirement:
+		return []knowledgepkg.ArtifactScope{}
 	default:
 		return []knowledgepkg.ArtifactScope{}
 	}
@@ -232,6 +238,11 @@ func scopeLabel(scope knowledgepkg.ArtifactScope) string {
 		}
 		_, symbol, _ := strings.Cut(scope.ScopePath, "#")
 		return symbol
+	case knowledgepkg.ScopeRequirement:
+		if scope.SymbolName != "" {
+			return scope.SymbolName
+		}
+		return scope.ScopePath
 	default:
 		return "Repository"
 	}

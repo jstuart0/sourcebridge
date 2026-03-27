@@ -16,19 +16,46 @@ def create_llm_provider(config: WorkerConfig) -> LLMProvider:
 
     if config.llm_provider == "anthropic":
         return AnthropicProvider(api_key=config.llm_api_key, model=config.llm_model)
-    elif config.llm_provider in ("openai", "ollama", "vllm"):
+    elif config.llm_provider == "lmstudio":
+        lmstudio_url = config.llm_base_url or "http://localhost:1234/v1"
+        return OpenAICompatProvider(
+            api_key=config.llm_api_key,
+            model=config.llm_model,
+            base_url=lmstudio_url,
+            draft_model=config.llm_draft_model or None,
+            provider_name="lmstudio",
+        )
+    elif config.llm_provider in ("openai", "ollama", "vllm", "llama-cpp", "sglang", "gemini", "openrouter"):
         if config.llm_base_url:
             base_url: str | None = config.llm_base_url
         elif config.llm_provider == "ollama":
             base_url = "http://localhost:11434/v1"
         elif config.llm_provider == "vllm":
             base_url = "http://localhost:8000/v1"
+        elif config.llm_provider == "llama-cpp":
+            base_url = "http://localhost:8080/v1"
+        elif config.llm_provider == "sglang":
+            base_url = "http://localhost:30000/v1"
+        elif config.llm_provider == "gemini":
+            base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+        elif config.llm_provider == "openrouter":
+            base_url = "https://openrouter.ai/api/v1"
         else:
             base_url = None
+
+        extra_headers: dict[str, str] | None = None
+        if config.llm_provider == "openrouter":
+            extra_headers = {
+                "HTTP-Referer": "https://sourcebridge.dev",
+                "X-Title": "SourceBridge",
+            }
+
         return OpenAICompatProvider(
             api_key=config.llm_api_key,
             model=config.llm_model,
             base_url=base_url,
+            extra_headers=extra_headers,
+            provider_name=config.llm_provider,
         )
     else:
         raise ValueError(f"Unknown LLM provider: {config.llm_provider}")

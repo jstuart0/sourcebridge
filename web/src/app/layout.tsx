@@ -8,7 +8,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 export const metadata: Metadata = {
   title: "SourceBridge.ai — Understand Any Codebase, Fast",
   description:
-    "A codebase field guide and context layer for unfamiliar systems: explain code, review changes, see change risk, and connect specs to implementation when you need it.",
+    "A codebase field guide and context layer for unfamiliar systems: explain code, review changes, see change impact, and connect specs to implementation when you need it.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

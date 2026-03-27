@@ -36,27 +36,27 @@ class KnowledgeServiceStub(object):
             channel: A grpc.Channel.
         """
         self.GenerateCliffNotes = channel.unary_unary(
-                '/codeaware.knowledge.v1.KnowledgeService/GenerateCliffNotes',
+                '/sourcebridge.knowledge.v1.KnowledgeService/GenerateCliffNotes',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesRequest.SerializeToString,
                 response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesResponse.FromString,
                 _registered_method=True)
         self.GenerateLearningPath = channel.unary_unary(
-                '/codeaware.knowledge.v1.KnowledgeService/GenerateLearningPath',
+                '/sourcebridge.knowledge.v1.KnowledgeService/GenerateLearningPath',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathRequest.SerializeToString,
                 response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathResponse.FromString,
                 _registered_method=True)
         self.GenerateWorkflowStory = channel.unary_unary(
-                '/codeaware.knowledge.v1.KnowledgeService/GenerateWorkflowStory',
+                '/sourcebridge.knowledge.v1.KnowledgeService/GenerateWorkflowStory',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryRequest.SerializeToString,
                 response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryResponse.FromString,
                 _registered_method=True)
         self.ExplainSystem = channel.unary_unary(
-                '/codeaware.knowledge.v1.KnowledgeService/ExplainSystem',
+                '/sourcebridge.knowledge.v1.KnowledgeService/ExplainSystem',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemRequest.SerializeToString,
                 response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemResponse.FromString,
                 _registered_method=True)
         self.GenerateCodeTour = channel.unary_unary(
-                '/codeaware.knowledge.v1.KnowledgeService/GenerateCodeTour',
+                '/sourcebridge.knowledge.v1.KnowledgeService/GenerateCodeTour',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourRequest.SerializeToString,
                 response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourResponse.FromString,
                 _registered_method=True)
@@ -131,9 +131,9 @@ def add_KnowledgeServiceServicer_to_server(servicer, server):
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'codeaware.knowledge.v1.KnowledgeService', rpc_method_handlers)
+            'sourcebridge.knowledge.v1.KnowledgeService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('codeaware.knowledge.v1.KnowledgeService', rpc_method_handlers)
+    server.add_registered_method_handlers('sourcebridge.knowledge.v1.KnowledgeService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
@@ -155,7 +155,7 @@ class KnowledgeService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.knowledge.v1.KnowledgeService/GenerateCliffNotes',
+            '/sourcebridge.knowledge.v1.KnowledgeService/GenerateCliffNotes',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesRequest.SerializeToString,
             knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesResponse.FromString,
             options,
@@ -182,7 +182,7 @@ class KnowledgeService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.knowledge.v1.KnowledgeService/GenerateLearningPath',
+            '/sourcebridge.knowledge.v1.KnowledgeService/GenerateLearningPath',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathRequest.SerializeToString,
             knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathResponse.FromString,
             options,
@@ -209,7 +209,7 @@ class KnowledgeService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.knowledge.v1.KnowledgeService/GenerateWorkflowStory',
+            '/sourcebridge.knowledge.v1.KnowledgeService/GenerateWorkflowStory',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryRequest.SerializeToString,
             knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryResponse.FromString,
             options,
@@ -236,7 +236,7 @@ class KnowledgeService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.knowledge.v1.KnowledgeService/ExplainSystem',
+            '/sourcebridge.knowledge.v1.KnowledgeService/ExplainSystem',
             knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemRequest.SerializeToString,
             knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemResponse.FromString,
             options,
@@ -263,7 +263,7 @@ class KnowledgeService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.knowledge.v1.KnowledgeService/GenerateCodeTour',
+            '/sourcebridge.knowledge.v1.KnowledgeService/GenerateCodeTour',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourRequest.SerializeToString,
             knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourResponse.FromString,
             options,

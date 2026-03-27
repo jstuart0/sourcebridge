@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sourcebridge-config
+  namespace: sourcebridge
+data:
+  SOURCEBRIDGE_SERVER_HTTP_PORT: "8080"
+  SOURCEBRIDGE_STORAGE_SURREAL_MODE: "external"
+  SOURCEBRIDGE_STORAGE_SURREAL_URL: "ws://surrealdb.sourcebridge.svc.cluster.local:8000"
+  SOURCEBRIDGE_STORAGE_SURREAL_NAMESPACE: "sourcebridge"
+  SOURCEBRIDGE_STORAGE_SURREAL_DATABASE: "main"
+  SOURCEBRIDGE_STORAGE_REDIS_MODE: "memory"
+  SOURCEBRIDGE_STORAGE_REPO_CACHE_PATH: "/data/repo-cache"
+  # Worker gRPC address
+  SOURCEBRIDGE_WORKER_ADDRESS: "worker.sourcebridge.svc.cluster.local:50051"
+  # Public URL — change to your domain
+  SOURCEBRIDGE_SERVER_PUBLIC_BASE_URL: "https://sourcebridge.example.com"
+  # OIDC SSO — configure with your identity provider (optional)
+  SOURCEBRIDGE_SECURITY_OIDC_ISSUER_URL: "https://auth.example.com/application/o/sourcebridge/"
+  SOURCEBRIDGE_SECURITY_OIDC_REDIRECT_URL: "https://sourcebridge.example.com/auth/oidc/callback"
+  # LLM settings — configure for your provider
+  # Option A: Cloud (Anthropic) — set API key in secrets.yaml
+  # SOURCEBRIDGE_LLM_PROVIDER: "anthropic"
+  # SOURCEBRIDGE_LLM_BASE_URL: ""
+  # SOURCEBRIDGE_LLM_SUMMARY_MODEL: "claude-sonnet-4-20250514"
+  # Option B: Local (Ollama)
+  SOURCEBRIDGE_LLM_PROVIDER: "ollama"
+  SOURCEBRIDGE_LLM_BASE_URL: "http://localhost:11434/v1"
+  SOURCEBRIDGE_LLM_SUMMARY_MODEL: "qwen3:32b"
+  # Worker LLM settings
+  SOURCEBRIDGE_WORKER_LLM_PROVIDER: "ollama"
+  SOURCEBRIDGE_WORKER_LLM_BASE_URL: "http://localhost:11434/v1"
+  SOURCEBRIDGE_WORKER_LLM_MODEL: "qwen3:32b"
+  # Worker embedding settings
+  SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER: "ollama"
+  SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL: "http://localhost:11434"
+  SOURCEBRIDGE_WORKER_EMBEDDING_MODEL: "nomic-embed-text"
+  SOURCEBRIDGE_WORKER_EMBEDDING_DIMENSION: "768"

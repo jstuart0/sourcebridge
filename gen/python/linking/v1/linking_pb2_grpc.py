@@ -36,17 +36,17 @@ class LinkingServiceStub(object):
             channel: A grpc.Channel.
         """
         self.LinkRequirement = channel.unary_unary(
-                '/codeaware.linking.v1.LinkingService/LinkRequirement',
+                '/sourcebridge.linking.v1.LinkingService/LinkRequirement',
                 request_serializer=linking_dot_v1_dot_linking__pb2.LinkRequirementRequest.SerializeToString,
                 response_deserializer=linking_dot_v1_dot_linking__pb2.LinkRequirementResponse.FromString,
                 _registered_method=True)
         self.BatchLink = channel.unary_unary(
-                '/codeaware.linking.v1.LinkingService/BatchLink',
+                '/sourcebridge.linking.v1.LinkingService/BatchLink',
                 request_serializer=linking_dot_v1_dot_linking__pb2.BatchLinkRequest.SerializeToString,
                 response_deserializer=linking_dot_v1_dot_linking__pb2.BatchLinkResponse.FromString,
                 _registered_method=True)
         self.ValidateLink = channel.unary_unary(
-                '/codeaware.linking.v1.LinkingService/ValidateLink',
+                '/sourcebridge.linking.v1.LinkingService/ValidateLink',
                 request_serializer=linking_dot_v1_dot_linking__pb2.ValidateLinkRequest.SerializeToString,
                 response_deserializer=linking_dot_v1_dot_linking__pb2.ValidateLinkResponse.FromString,
                 _registered_method=True)
@@ -97,9 +97,9 @@ def add_LinkingServiceServicer_to_server(servicer, server):
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'codeaware.linking.v1.LinkingService', rpc_method_handlers)
+            'sourcebridge.linking.v1.LinkingService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('codeaware.linking.v1.LinkingService', rpc_method_handlers)
+    server.add_registered_method_handlers('sourcebridge.linking.v1.LinkingService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
@@ -121,7 +121,7 @@ class LinkingService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.linking.v1.LinkingService/LinkRequirement',
+            '/sourcebridge.linking.v1.LinkingService/LinkRequirement',
             linking_dot_v1_dot_linking__pb2.LinkRequirementRequest.SerializeToString,
             linking_dot_v1_dot_linking__pb2.LinkRequirementResponse.FromString,
             options,
@@ -148,7 +148,7 @@ class LinkingService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.linking.v1.LinkingService/BatchLink',
+            '/sourcebridge.linking.v1.LinkingService/BatchLink',
             linking_dot_v1_dot_linking__pb2.BatchLinkRequest.SerializeToString,
             linking_dot_v1_dot_linking__pb2.BatchLinkResponse.FromString,
             options,
@@ -175,7 +175,7 @@ class LinkingService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.linking.v1.LinkingService/ValidateLink',
+            '/sourcebridge.linking.v1.LinkingService/ValidateLink',
             linking_dot_v1_dot_linking__pb2.ValidateLinkRequest.SerializeToString,
             linking_dot_v1_dot_linking__pb2.ValidateLinkResponse.FromString,
             options,

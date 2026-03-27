@@ -53,6 +53,52 @@ func TestMemoryAPITokenStoreValidateAndRevoke(t *testing.T) {
 	}
 }
 
+func TestMemoryAPITokenStoreExpiredTokenDoesNotValidate(t *testing.T) {
+	store := NewAPITokenStore()
+	expiry := time.Now().Add(-1 * time.Hour)
+	rawToken, _, err := store.CreateToken(context.Background(), CreateTokenInput{
+		Name:       "Expired Token",
+		UserID:     "user-1",
+		Kind:       TokenKindIDESession,
+		ClientType: "desktop_ide",
+		AuthMethod: AuthMethodLocalPassword,
+		ExpiresAt:  &expiry,
+	})
+	if err != nil {
+		t.Fatalf("CreateToken() error: %v", err)
+	}
+
+	validated, err := store.ValidateToken(context.Background(), rawToken)
+	if err != nil {
+		t.Fatalf("ValidateToken() error: %v", err)
+	}
+	if validated != nil {
+		t.Fatal("expired token should not validate")
+	}
+}
+
+func TestMemoryAPITokenStoreWrongTokenDoesNotValidate(t *testing.T) {
+	store := NewAPITokenStore()
+	_, _, err := store.CreateToken(context.Background(), CreateTokenInput{
+		Name:       "Real Token",
+		UserID:     "user-1",
+		Kind:       TokenKindIDESession,
+		ClientType: "desktop_ide",
+		AuthMethod: AuthMethodLocalPassword,
+	})
+	if err != nil {
+		t.Fatalf("CreateToken() error: %v", err)
+	}
+
+	validated, err := store.ValidateToken(context.Background(), "ca_fake_token_that_does_not_exist")
+	if err != nil {
+		t.Fatalf("ValidateToken() error: %v", err)
+	}
+	if validated != nil {
+		t.Fatal("wrong token should not validate")
+	}
+}
+
 func TestMemoryOIDCStateStoreConsumesOnlyOnce(t *testing.T) {
 	store := NewMemoryOIDCStateStore()
 	if err := store.SaveState(context.Background(), "state-1", time.Now().Add(5*time.Minute)); err != nil {

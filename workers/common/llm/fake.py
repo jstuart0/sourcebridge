@@ -183,6 +183,11 @@ class FakeLLMProvider:
         },
     ])
 
+    @property
+    def default_model(self) -> str:
+        """Return the default model ID."""
+        return "fake-test-model"
+
     async def complete(
         self,
         prompt: str,
@@ -190,6 +195,7 @@ class FakeLLMProvider:
         system: str = "",
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        model: str | None = None,
     ) -> LLMResponse:
         """Return deterministic fixture response based on prompt content."""
         content = self.SUMMARY_RESPONSE
@@ -221,6 +227,7 @@ class FakeLLMProvider:
         system: str = "",
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        model: str | None = None,
     ) -> AsyncIterator[str]:
         """Stream deterministic response word by word."""
         response = await self.complete(prompt, system=system, max_tokens=max_tokens, temperature=temperature)

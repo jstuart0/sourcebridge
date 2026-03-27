@@ -131,11 +131,11 @@ app.kubernetes.io/component: redis
 {{- end }}
 
 {{/*
-SurrealDB connection URL
+SurrealDB WebSocket connection URL (used by Go API and Python worker)
 */}}
 {{- define "sourcebridge.surrealdb.url" -}}
 {{- if .Values.surrealdb.enabled }}
-{{- printf "http://%s-surrealdb:%d" (include "sourcebridge.fullname" .) (.Values.surrealdb.port | int) }}
+{{- printf "ws://%s-surrealdb:%d/rpc" (include "sourcebridge.fullname" .) (.Values.surrealdb.port | int) }}
 {{- end }}
 {{- end }}
 
@@ -145,5 +145,16 @@ Redis connection URL
 {{- define "sourcebridge.redis.url" -}}
 {{- if .Values.redis.enabled }}
 {{- printf "redis://%s-redis:%d" (include "sourcebridge.fullname" .) (.Values.redis.port | int) }}
+{{- end }}
+{{- end }}
+
+{{/*
+ServiceAccount name
+*/}}
+{{- define "sourcebridge.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "sourcebridge.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}

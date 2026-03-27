@@ -25,36 +25,42 @@ _sym_db = _symbol_database.Default()
 from common.v1 import types_pb2 as common_dot_v1_dot_types__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1creasoning/v1/reasoning.proto\x12\x16\x63odeaware.reasoning.v1\x1a\x15\x63ommon/v1/types.proto\"{\n\x14\x41nalyzeSymbolRequest\x12/\n\x06symbol\x18\x01 \x01(\x0b\x32\x1f.codeaware.common.v1.CodeSymbol\x12\x1b\n\x13surrounding_context\x18\x02 \x01(\t\x12\x15\n\rrepository_id\x18\x03 \x01(\t\"\x8e\x01\n\x15\x41nalyzeSymbolResponse\x12\x0f\n\x07summary\x18\x01 \x01(\t\x12\x0f\n\x07purpose\x18\x02 \x01(\t\x12\x10\n\x08\x63oncerns\x18\x03 \x03(\t\x12\x13\n\x0bsuggestions\x18\x04 \x03(\t\x12,\n\x05usage\x18\x05 \x01(\x0b\x32\x1d.codeaware.common.v1.LLMUsage\"\x99\x01\n\x1a\x45xplainRelationshipRequest\x12/\n\x06source\x18\x01 \x01(\x0b\x32\x1f.codeaware.common.v1.CodeSymbol\x12/\n\x06target\x18\x02 \x01(\x0b\x32\x1f.codeaware.common.v1.CodeSymbol\x12\x19\n\x11relationship_type\x18\x03 \x01(\t\"\x95\x01\n\x1b\x45xplainRelationshipResponse\x12\x13\n\x0b\x65xplanation\x18\x01 \x01(\t\x12\x33\n\nconfidence\x18\x02 \x01(\x0e\x32\x1f.codeaware.common.v1.Confidence\x12,\n\x05usage\x18\x03 \x01(\x0b\x32\x1d.codeaware.common.v1.LLMUsage\"\xe8\x01\n\x15\x41nswerQuestionRequest\x12\x10\n\x08question\x18\x01 \x01(\t\x12\x15\n\rrepository_id\x18\x02 \x01(\t\x12\x38\n\x0f\x63ontext_symbols\x18\x03 \x03(\x0b\x32\x1f.codeaware.common.v1.CodeSymbol\x12\x12\n\nmax_tokens\x18\x04 \x01(\x05\x12\x14\n\x0c\x63ontext_code\x18\x05 \x01(\t\x12\x11\n\tfile_path\x18\x06 \x01(\t\x12/\n\x08language\x18\x07 \x01(\x0e\x32\x1d.codeaware.common.v1.Language\"\x93\x01\n\x16\x41nswerQuestionResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t\x12;\n\x12referenced_symbols\x18\x02 \x03(\x0b\x32\x1f.codeaware.common.v1.CodeSymbol\x12,\n\x05usage\x18\x03 \x01(\x0b\x32\x1d.codeaware.common.v1.LLMUsage\"\x91\x01\n\x11ReviewFileRequest\x12\x15\n\rrepository_id\x18\x01 \x01(\t\x12\x11\n\tfile_path\x18\x02 \x01(\t\x12/\n\x08language\x18\x03 \x01(\x0e\x32\x1d.codeaware.common.v1.Language\x12\x0f\n\x07\x63ontent\x18\x04 \x01(\t\x12\x10\n\x08template\x18\x05 \x01(\t\"\x9c\x01\n\x12ReviewFileResponse\x12\x10\n\x08template\x18\x01 \x01(\t\x12\x37\n\x08\x66indings\x18\x02 \x03(\x0b\x32%.codeaware.reasoning.v1.ReviewFinding\x12\r\n\x05score\x18\x03 \x01(\x02\x12,\n\x05usage\x18\x04 \x01(\x0b\x32\x1d.codeaware.common.v1.LLMUsage\"\x91\x01\n\rReviewFinding\x12\x10\n\x08\x63\x61tegory\x18\x01 \x01(\t\x12\x10\n\x08severity\x18\x02 \x01(\t\x12\x0f\n\x07message\x18\x03 \x01(\t\x12\x11\n\tfile_path\x18\x04 \x01(\t\x12\x12\n\nstart_line\x18\x05 \x01(\x05\x12\x10\n\x08\x65nd_line\x18\x06 \x01(\x05\x12\x12\n\nsuggestion\x18\x07 \x01(\t\"7\n\x18GenerateEmbeddingRequest\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\r\n\x05model\x18\x02 \x01(\t\"|\n\x19GenerateEmbeddingResponse\x12\x31\n\tembedding\x18\x01 \x01(\x0b\x32\x1e.codeaware.common.v1.Embedding\x12,\n\x05usage\x18\x02 \x01(\x0b\x32\x1d.codeaware.common.v1.LLMUsage2\xd0\x04\n\x10ReasoningService\x12l\n\rAnalyzeSymbol\x12,.codeaware.reasoning.v1.AnalyzeSymbolRequest\x1a-.codeaware.reasoning.v1.AnalyzeSymbolResponse\x12~\n\x13\x45xplainRelationship\x12\x32.codeaware.reasoning.v1.ExplainRelationshipRequest\x1a\x33.codeaware.reasoning.v1.ExplainRelationshipResponse\x12o\n\x0e\x41nswerQuestion\x12-.codeaware.reasoning.v1.AnswerQuestionRequest\x1a..codeaware.reasoning.v1.AnswerQuestionResponse\x12\x63\n\nReviewFile\x12).codeaware.reasoning.v1.ReviewFileRequest\x1a*.codeaware.reasoning.v1.ReviewFileResponse\x12x\n\x11GenerateEmbedding\x12\x30.codeaware.reasoning.v1.GenerateEmbeddingRequest\x1a\x31.codeaware.reasoning.v1.GenerateEmbeddingResponseB@Z>github.com/codeaware/codeaware/gen/go/reasoning/v1;reasoningv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1creasoning/v1/reasoning.proto\x12\x19sourcebridge.reasoning.v1\x1a\x15\x63ommon/v1/types.proto\"~\n\x14\x41nalyzeSymbolRequest\x12\x32\n\x06symbol\x18\x01 \x01(\x0b\x32\".sourcebridge.common.v1.CodeSymbol\x12\x1b\n\x13surrounding_context\x18\x02 \x01(\t\x12\x15\n\rrepository_id\x18\x03 \x01(\t\"\x91\x01\n\x15\x41nalyzeSymbolResponse\x12\x0f\n\x07summary\x18\x01 \x01(\t\x12\x0f\n\x07purpose\x18\x02 \x01(\t\x12\x10\n\x08\x63oncerns\x18\x03 \x03(\t\x12\x13\n\x0bsuggestions\x18\x04 \x03(\t\x12/\n\x05usage\x18\x05 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage\"\x9f\x01\n\x1a\x45xplainRelationshipRequest\x12\x32\n\x06source\x18\x01 \x01(\x0b\x32\".sourcebridge.common.v1.CodeSymbol\x12\x32\n\x06target\x18\x02 \x01(\x0b\x32\".sourcebridge.common.v1.CodeSymbol\x12\x19\n\x11relationship_type\x18\x03 \x01(\t\"\x9b\x01\n\x1b\x45xplainRelationshipResponse\x12\x13\n\x0b\x65xplanation\x18\x01 \x01(\t\x12\x36\n\nconfidence\x18\x02 \x01(\x0e\x32\".sourcebridge.common.v1.Confidence\x12/\n\x05usage\x18\x03 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage\"\xee\x01\n\x15\x41nswerQuestionRequest\x12\x10\n\x08question\x18\x01 \x01(\t\x12\x15\n\rrepository_id\x18\x02 \x01(\t\x12;\n\x0f\x63ontext_symbols\x18\x03 \x03(\x0b\x32\".sourcebridge.common.v1.CodeSymbol\x12\x12\n\nmax_tokens\x18\x04 \x01(\x05\x12\x14\n\x0c\x63ontext_code\x18\x05 \x01(\t\x12\x11\n\tfile_path\x18\x06 \x01(\t\x12\x32\n\x08language\x18\x07 \x01(\x0e\x32 .sourcebridge.common.v1.Language\"\x99\x01\n\x16\x41nswerQuestionResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t\x12>\n\x12referenced_symbols\x18\x02 \x03(\x0b\x32\".sourcebridge.common.v1.CodeSymbol\x12/\n\x05usage\x18\x03 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage\"\x94\x01\n\x11ReviewFileRequest\x12\x15\n\rrepository_id\x18\x01 \x01(\t\x12\x11\n\tfile_path\x18\x02 \x01(\t\x12\x32\n\x08language\x18\x03 \x01(\x0e\x32 .sourcebridge.common.v1.Language\x12\x0f\n\x07\x63ontent\x18\x04 \x01(\t\x12\x10\n\x08template\x18\x05 \x01(\t\"\xa2\x01\n\x12ReviewFileResponse\x12\x10\n\x08template\x18\x01 \x01(\t\x12:\n\x08\x66indings\x18\x02 \x03(\x0b\x32(.sourcebridge.reasoning.v1.ReviewFinding\x12\r\n\x05score\x18\x03 \x01(\x02\x12/\n\x05usage\x18\x04 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage\"\x91\x01\n\rReviewFinding\x12\x10\n\x08\x63\x61tegory\x18\x01 \x01(\t\x12\x10\n\x08severity\x18\x02 \x01(\t\x12\x0f\n\x07message\x18\x03 \x01(\t\x12\x11\n\tfile_path\x18\x04 \x01(\t\x12\x12\n\nstart_line\x18\x05 \x01(\x05\x12\x10\n\x08\x65nd_line\x18\x06 \x01(\x05\x12\x12\n\nsuggestion\x18\x07 \x01(\t\"7\n\x18GenerateEmbeddingRequest\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\r\n\x05model\x18\x02 \x01(\t\"\x82\x01\n\x19GenerateEmbeddingResponse\x12\x34\n\tembedding\x18\x01 \x01(\x0b\x32!.sourcebridge.common.v1.Embedding\x12/\n\x05usage\x18\x02 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage\"\xd1\x01\n\x15SimulateChangeRequest\x12\x15\n\rrepository_id\x18\x01 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x02 \x01(\t\x12\x13\n\x0b\x61nchor_file\x18\x03 \x01(\t\x12\x15\n\ranchor_symbol\x18\x04 \x01(\t\x12\x33\n\x07symbols\x18\x05 \x03(\x0b\x32\".sourcebridge.common.v1.CodeSymbol\x12\r\n\x05top_n\x18\x06 \x01(\x05\x12\x1c\n\x14\x63onfidence_threshold\x18\x07 \x01(\x02\"\x97\x01\n\x14SimulatedSymbolMatch\x12\x11\n\tsymbol_id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x16\n\x0equalified_name\x18\x03 \x01(\t\x12\x0c\n\x04kind\x18\x04 \x01(\t\x12\x11\n\tfile_path\x18\x05 \x01(\t\x12\x12\n\nsimilarity\x18\x06 \x01(\x02\x12\x11\n\tis_anchor\x18\x07 \x01(\x08\"\xd4\x01\n\x16SimulateChangeResponse\x12I\n\x10resolved_symbols\x18\x01 \x03(\x0b\x32/.sourcebridge.reasoning.v1.SimulatedSymbolMatch\x12#\n\x1b\x64\x65scription_embedding_model\x18\x02 \x01(\t\x12\x19\n\x11symbols_evaluated\x18\x03 \x01(\x05\x12/\n\x05usage\x18\x04 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage2\xe6\x05\n\x10ReasoningService\x12r\n\rAnalyzeSymbol\x12/.sourcebridge.reasoning.v1.AnalyzeSymbolRequest\x1a\x30.sourcebridge.reasoning.v1.AnalyzeSymbolResponse\x12\x84\x01\n\x13\x45xplainRelationship\x12\x35.sourcebridge.reasoning.v1.ExplainRelationshipRequest\x1a\x36.sourcebridge.reasoning.v1.ExplainRelationshipResponse\x12u\n\x0e\x41nswerQuestion\x12\x30.sourcebridge.reasoning.v1.AnswerQuestionRequest\x1a\x31.sourcebridge.reasoning.v1.AnswerQuestionResponse\x12i\n\nReviewFile\x12,.sourcebridge.reasoning.v1.ReviewFileRequest\x1a-.sourcebridge.reasoning.v1.ReviewFileResponse\x12~\n\x11GenerateEmbedding\x12\x33.sourcebridge.reasoning.v1.GenerateEmbeddingRequest\x1a\x34.sourcebridge.reasoning.v1.GenerateEmbeddingResponse\x12u\n\x0eSimulateChange\x12\x30.sourcebridge.reasoning.v1.SimulateChangeRequest\x1a\x31.sourcebridge.reasoning.v1.SimulateChangeResponseBFZDgithub.com/sourcebridge/sourcebridge/gen/go/reasoning/v1;reasoningv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'reasoning.v1.reasoning_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'Z>github.com/codeaware/codeaware/gen/go/reasoning/v1;reasoningv1'
-  _globals['_ANALYZESYMBOLREQUEST']._serialized_start=79
-  _globals['_ANALYZESYMBOLREQUEST']._serialized_end=202
-  _globals['_ANALYZESYMBOLRESPONSE']._serialized_start=205
-  _globals['_ANALYZESYMBOLRESPONSE']._serialized_end=347
-  _globals['_EXPLAINRELATIONSHIPREQUEST']._serialized_start=350
-  _globals['_EXPLAINRELATIONSHIPREQUEST']._serialized_end=503
-  _globals['_EXPLAINRELATIONSHIPRESPONSE']._serialized_start=506
-  _globals['_EXPLAINRELATIONSHIPRESPONSE']._serialized_end=655
-  _globals['_ANSWERQUESTIONREQUEST']._serialized_start=658
-  _globals['_ANSWERQUESTIONREQUEST']._serialized_end=890
-  _globals['_ANSWERQUESTIONRESPONSE']._serialized_start=893
-  _globals['_ANSWERQUESTIONRESPONSE']._serialized_end=1040
-  _globals['_REVIEWFILEREQUEST']._serialized_start=1043
-  _globals['_REVIEWFILEREQUEST']._serialized_end=1188
-  _globals['_REVIEWFILERESPONSE']._serialized_start=1191
-  _globals['_REVIEWFILERESPONSE']._serialized_end=1347
-  _globals['_REVIEWFINDING']._serialized_start=1350
-  _globals['_REVIEWFINDING']._serialized_end=1495
-  _globals['_GENERATEEMBEDDINGREQUEST']._serialized_start=1497
-  _globals['_GENERATEEMBEDDINGREQUEST']._serialized_end=1552
-  _globals['_GENERATEEMBEDDINGRESPONSE']._serialized_start=1554
-  _globals['_GENERATEEMBEDDINGRESPONSE']._serialized_end=1678
-  _globals['_REASONINGSERVICE']._serialized_start=1681
-  _globals['_REASONINGSERVICE']._serialized_end=2273
+  _globals['DESCRIPTOR']._serialized_options = b'ZDgithub.com/sourcebridge/sourcebridge/gen/go/reasoning/v1;reasoningv1'
+  _globals['_ANALYZESYMBOLREQUEST']._serialized_start=82
+  _globals['_ANALYZESYMBOLREQUEST']._serialized_end=208
+  _globals['_ANALYZESYMBOLRESPONSE']._serialized_start=211
+  _globals['_ANALYZESYMBOLRESPONSE']._serialized_end=356
+  _globals['_EXPLAINRELATIONSHIPREQUEST']._serialized_start=359
+  _globals['_EXPLAINRELATIONSHIPREQUEST']._serialized_end=518
+  _globals['_EXPLAINRELATIONSHIPRESPONSE']._serialized_start=521
+  _globals['_EXPLAINRELATIONSHIPRESPONSE']._serialized_end=676
+  _globals['_ANSWERQUESTIONREQUEST']._serialized_start=679
+  _globals['_ANSWERQUESTIONREQUEST']._serialized_end=917
+  _globals['_ANSWERQUESTIONRESPONSE']._serialized_start=920
+  _globals['_ANSWERQUESTIONRESPONSE']._serialized_end=1073
+  _globals['_REVIEWFILEREQUEST']._serialized_start=1076
+  _globals['_REVIEWFILEREQUEST']._serialized_end=1224
+  _globals['_REVIEWFILERESPONSE']._serialized_start=1227
+  _globals['_REVIEWFILERESPONSE']._serialized_end=1389
+  _globals['_REVIEWFINDING']._serialized_start=1392
+  _globals['_REVIEWFINDING']._serialized_end=1537
+  _globals['_GENERATEEMBEDDINGREQUEST']._serialized_start=1539
+  _globals['_GENERATEEMBEDDINGREQUEST']._serialized_end=1594
+  _globals['_GENERATEEMBEDDINGRESPONSE']._serialized_start=1597
+  _globals['_GENERATEEMBEDDINGRESPONSE']._serialized_end=1727
+  _globals['_SIMULATECHANGEREQUEST']._serialized_start=1730
+  _globals['_SIMULATECHANGEREQUEST']._serialized_end=1939
+  _globals['_SIMULATEDSYMBOLMATCH']._serialized_start=1942
+  _globals['_SIMULATEDSYMBOLMATCH']._serialized_end=2093
+  _globals['_SIMULATECHANGERESPONSE']._serialized_start=2096
+  _globals['_SIMULATECHANGERESPONSE']._serialized_end=2308
+  _globals['_REASONINGSERVICE']._serialized_start=2311
+  _globals['_REASONINGSERVICE']._serialized_end=3053
 # @@protoc_insertion_point(module_scope)

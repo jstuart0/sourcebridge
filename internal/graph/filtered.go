@@ -188,6 +188,13 @@ func (f *TenantFilteredStore) StoreLink(repoID string, link *StoredLink) *Stored
 	return f.inner.StoreLink(repoID, link)
 }
 
+func (f *TenantFilteredStore) StoreLinks(repoID string, links []*StoredLink) int {
+	if !f.hasAccess(repoID) {
+		return 0
+	}
+	return f.inner.StoreLinks(repoID, links)
+}
+
 func (f *TenantFilteredStore) GetLinksForRepo(repoID string) []*StoredLink {
 	if !f.hasAccess(repoID) {
 		return nil
@@ -216,6 +223,10 @@ func (f *TenantFilteredStore) GetSymbol(id string) *StoredSymbol {
 	return f.inner.GetSymbol(id)
 }
 
+func (f *TenantFilteredStore) GetSymbolsByIDs(ids []string) map[string]*StoredSymbol {
+	return f.inner.GetSymbolsByIDs(ids)
+}
+
 func (f *TenantFilteredStore) GetCallers(symbolID string) []string {
 	return f.inner.GetCallers(symbolID)
 }
@@ -234,6 +245,10 @@ func (f *TenantFilteredStore) Stats() map[string]int {
 
 func (f *TenantFilteredStore) GetRequirement(id string) *StoredRequirement {
 	return f.inner.GetRequirement(id)
+}
+
+func (f *TenantFilteredStore) GetRequirementsByIDs(ids []string) map[string]*StoredRequirement {
+	return f.inner.GetRequirementsByIDs(ids)
 }
 
 func (f *TenantFilteredStore) UpdateRequirement(id string, priority string, tags []string) *StoredRequirement {
@@ -323,6 +338,105 @@ func (f *TenantFilteredStore) GetImpactReports(repoID string, limit int) ([]*Imp
 		return nil, 0
 	}
 	return f.inner.GetImpactReports(repoID, limit)
+}
+
+// --- Discovered Requirement operations ---
+
+func (f *TenantFilteredStore) StoreDiscoveredRequirement(repoID string, req *DiscoveredRequirement) {
+	if !f.hasAccess(repoID) {
+		return
+	}
+	f.inner.StoreDiscoveredRequirement(repoID, req)
+}
+
+func (f *TenantFilteredStore) StoreDiscoveredRequirements(repoID string, reqs []*DiscoveredRequirement) int {
+	if !f.hasAccess(repoID) {
+		return 0
+	}
+	return f.inner.StoreDiscoveredRequirements(repoID, reqs)
+}
+
+func (f *TenantFilteredStore) GetDiscoveredRequirements(repoID string, status *string, confidence *string, limit, offset int) ([]*DiscoveredRequirement, int) {
+	if !f.hasAccess(repoID) {
+		return nil, 0
+	}
+	return f.inner.GetDiscoveredRequirements(repoID, status, confidence, limit, offset)
+}
+
+func (f *TenantFilteredStore) GetDiscoveredRequirement(id string) *DiscoveredRequirement {
+	return f.inner.GetDiscoveredRequirement(id)
+}
+
+func (f *TenantFilteredStore) PromoteDiscoveredRequirement(id string, requirementID string) *DiscoveredRequirement {
+	return f.inner.PromoteDiscoveredRequirement(id, requirementID)
+}
+
+func (f *TenantFilteredStore) DismissDiscoveredRequirement(id string, dismissedBy string, reason string) *DiscoveredRequirement {
+	return f.inner.DismissDiscoveredRequirement(id, dismissedBy, reason)
+}
+
+func (f *TenantFilteredStore) DeleteDiscoveredRequirementsByRepo(repoID string) int {
+	if !f.hasAccess(repoID) {
+		return 0
+	}
+	return f.inner.DeleteDiscoveredRequirementsByRepo(repoID)
+}
+
+// --- Cross-Repo Federation ---
+
+func (f *TenantFilteredStore) LinkRepos(sourceRepoID, targetRepoID string) (*RepoLink, error) {
+	if !f.hasAccess(sourceRepoID) || !f.hasAccess(targetRepoID) {
+		return nil, fmt.Errorf("access denied")
+	}
+	return f.inner.LinkRepos(sourceRepoID, targetRepoID)
+}
+func (f *TenantFilteredStore) UnlinkRepos(linkID string) error {
+	return f.inner.UnlinkRepos(linkID)
+}
+func (f *TenantFilteredStore) GetRepoLinks(repoID string) ([]*RepoLink, error) {
+	if !f.hasAccess(repoID) {
+		return nil, nil
+	}
+	return f.inner.GetRepoLinks(repoID)
+}
+func (f *TenantFilteredStore) StoreCrossRepoRef(ref *CrossRepoRef) error {
+	return f.inner.StoreCrossRepoRef(ref)
+}
+func (f *TenantFilteredStore) StoreCrossRepoRefs(refs []*CrossRepoRef) int {
+	return f.inner.StoreCrossRepoRefs(refs)
+}
+func (f *TenantFilteredStore) GetCrossRepoRefs(repoID string, refType *string, limit int) ([]*CrossRepoRef, error) {
+	if !f.hasAccess(repoID) {
+		return nil, nil
+	}
+	return f.inner.GetCrossRepoRefs(repoID, refType, limit)
+}
+func (f *TenantFilteredStore) GetSymbolCrossRepoRefs(symbolID string) ([]*CrossRepoRef, error) {
+	return f.inner.GetSymbolCrossRepoRefs(symbolID)
+}
+func (f *TenantFilteredStore) DeleteCrossRepoRefsForRepo(repoID string) error {
+	if !f.hasAccess(repoID) {
+		return fmt.Errorf("access denied")
+	}
+	return f.inner.DeleteCrossRepoRefsForRepo(repoID)
+}
+func (f *TenantFilteredStore) DeleteCrossRepoRefsBetweenRepos(repoA, repoB string) error {
+	return f.inner.DeleteCrossRepoRefsBetweenRepos(repoA, repoB)
+}
+func (f *TenantFilteredStore) StoreAPIContract(contract *APIContract) error {
+	return f.inner.StoreAPIContract(contract)
+}
+func (f *TenantFilteredStore) GetAPIContracts(repoID string) ([]*APIContract, error) {
+	if !f.hasAccess(repoID) {
+		return nil, nil
+	}
+	return f.inner.GetAPIContracts(repoID)
+}
+func (f *TenantFilteredStore) DeleteAPIContractsForRepo(repoID string) error {
+	if !f.hasAccess(repoID) {
+		return fmt.Errorf("access denied")
+	}
+	return f.inner.DeleteAPIContractsForRepo(repoID)
 }
 
 // Verify at compile time that *TenantFilteredStore satisfies GraphStore.

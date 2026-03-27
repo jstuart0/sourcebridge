@@ -198,6 +198,26 @@ export const REQUIREMENT_QUERY = gql`
   }
 `;
 
+export const REQUIREMENT_LINKS_QUERY = gql`
+  query RequirementLinks($requirementId: ID!, $limit: Int, $offset: Int) {
+    requirementLinks(requirementId: $requirementId, limit: $limit, offset: $offset) {
+      id
+      confidence
+      symbolId
+      rationale
+      verified
+      symbol {
+        id
+        name
+        filePath
+        kind
+        startLine
+        endLine
+      }
+    }
+  }
+`;
+
 export const TRACEABILITY_MATRIX_QUERY = gql`
   query TraceabilityMatrix($repositoryId: ID!) {
     traceabilityMatrix(repositoryId: $repositoryId) {
@@ -839,6 +859,289 @@ export const REFRESH_KNOWLEDGE_ARTIFACT_MUTATION = gql`
           lineStart
           lineEnd
           rationale
+        }
+      }
+    }
+  }
+`;
+
+export const REQUIREMENT_KNOWLEDGE_QUERY = gql`
+  query RequirementKnowledge($repositoryId: ID!, $requirementId: ID!) {
+    knowledgeArtifacts(
+      repositoryId: $repositoryId
+      scopeType: REQUIREMENT
+      scopePath: $requirementId
+    ) {
+      id
+      status
+      progress
+      stale
+      generatedAt
+      scope {
+        scopeType
+        scopePath
+      }
+      sections {
+        id
+        title
+        content
+        summary
+        confidence
+        inferred
+        orderIndex
+        evidence {
+          id
+          sourceType
+          sourceId
+          filePath
+          lineStart
+          lineEnd
+          rationale
+        }
+      }
+    }
+  }
+`;
+
+// --- Change Simulation ---
+
+export const SIMULATE_CHANGE_MUTATION = gql`
+  mutation SimulateChange($input: SimulateChangeInput!) {
+    simulateChange(input: $input) {
+      id
+      simulated
+      description
+      anchorFile
+      anchorSymbol
+      resolvedSymbols {
+        symbolId
+        name
+        qualifiedName
+        kind
+        filePath
+        similarity
+        isAnchor
+      }
+      report {
+        id
+        repositoryId
+        filesChanged { path status additions deletions }
+        symbolsAdded { symbolId name filePath changeType newSignature }
+        symbolsModified { symbolId name filePath changeType oldSignature newSignature }
+        symbolsRemoved { symbolId name filePath changeType oldSignature }
+        affectedLinks { linkId requirementId symbolId impact confidence }
+        affectedRequirements { requirementId externalId title affectedLinks totalLinks }
+        staleArtifacts
+        computedAt
+      }
+      computedAt
+    }
+  }
+`;
+
+// --- Discovered Requirements (Spec Extraction) ---
+
+export const DISCOVERED_REQUIREMENTS_QUERY = gql`
+  query DiscoveredRequirements($repositoryId: ID!, $status: String, $confidence: String, $limit: Int, $offset: Int) {
+    discoveredRequirements(repositoryId: $repositoryId, status: $status, confidence: $confidence, limit: $limit, offset: $offset) {
+      nodes {
+        id
+        repoId
+        source
+        sourceFile
+        sourceLine
+        sourceFiles
+        text
+        rawText
+        groupKey
+        language
+        keywords
+        confidence
+        status
+        llmRefined
+        promotedTo
+        dismissedBy
+        dismissedReason
+        createdAt
+      }
+      totalCount
+    }
+  }
+`;
+
+export const TRIGGER_SPEC_EXTRACTION_MUTATION = gql`
+  mutation TriggerSpecExtraction($input: TriggerSpecExtractionInput!) {
+    triggerSpecExtraction(input: $input) {
+      discovered
+      totalCandidates
+      warnings
+      model
+      inputTokens
+      outputTokens
+    }
+  }
+`;
+
+export const PROMOTE_DISCOVERED_REQUIREMENT_MUTATION = gql`
+  mutation PromoteDiscoveredRequirement($id: ID!, $title: String, $description: String) {
+    promoteDiscoveredRequirement(id: $id, title: $title, description: $description) {
+      requirement {
+        id
+        title
+        description
+        source
+        priority
+        tags
+      }
+      discoveredRequirement {
+        id
+        status
+        promotedTo
+      }
+    }
+  }
+`;
+
+export const DISMISS_DISCOVERED_REQUIREMENT_MUTATION = gql`
+  mutation DismissDiscoveredRequirement($id: ID!, $reason: String) {
+    dismissDiscoveredRequirement(id: $id, reason: $reason) {
+      id
+      status
+      dismissedBy
+      dismissedReason
+    }
+  }
+`;
+
+export const DISMISS_ALL_DISCOVERED_REQUIREMENTS_MUTATION = gql`
+  mutation DismissAllDiscoveredRequirements($repositoryId: ID!) {
+    dismissAllDiscoveredRequirements(repositoryId: $repositoryId)
+  }
+`;
+
+// ---------------------------------------------------------------------------
+// Multi-Repo Federation
+// ---------------------------------------------------------------------------
+
+export const REPO_LINKS_QUERY = gql`
+  query RepoLinks($repoId: ID!) {
+    repoLinks(repoId: $repoId) {
+      id
+      sourceRepoId
+      targetRepoId
+      linkType
+      createdAt
+    }
+  }
+`;
+
+export const CROSS_REPO_REFS_QUERY = gql`
+  query CrossRepoRefs($repoId: ID!, $refType: CrossRepoRefType, $limit: Int) {
+    crossRepoRefs(repoId: $repoId, refType: $refType, limit: $limit) {
+      id
+      sourceSymbolId
+      targetSymbolId
+      sourceRepoId
+      targetRepoId
+      refType
+      confidence
+      contractFile
+      consumerFile
+      evidence
+      createdAt
+    }
+  }
+`;
+
+export const SYMBOL_CROSS_REPO_REFS_QUERY = gql`
+  query SymbolCrossRepoRefs($symbolId: ID!) {
+    symbolCrossRepoRefs(symbolId: $symbolId) {
+      id
+      sourceSymbolId
+      targetSymbolId
+      sourceRepoId
+      targetRepoId
+      refType
+      confidence
+      contractFile
+      consumerFile
+      evidence
+      createdAt
+    }
+  }
+`;
+
+export const API_CONTRACTS_QUERY = gql`
+  query APIContracts($repoId: ID!) {
+    apiContracts(repoId: $repoId) {
+      id
+      repoId
+      filePath
+      contractType
+      endpointCount
+      version
+      detectedAt
+    }
+  }
+`;
+
+export const LINK_REPOS_MUTATION = gql`
+  mutation LinkRepos($sourceRepoId: ID!, $targetRepoId: ID!, $linkType: String) {
+    linkRepos(sourceRepoId: $sourceRepoId, targetRepoId: $targetRepoId, linkType: $linkType) {
+      id
+      sourceRepoId
+      targetRepoId
+      linkType
+      createdAt
+    }
+  }
+`;
+
+export const UNLINK_REPOS_MUTATION = gql`
+  mutation UnlinkRepos($linkId: ID!) {
+    unlinkRepos(linkId: $linkId)
+  }
+`;
+
+export const DETECT_CONTRACTS_MUTATION = gql`
+  mutation DetectContracts($repoId: ID!) {
+    detectContracts(repoId: $repoId)
+  }
+`;
+
+// ---------------------------------------------------------------------------
+// Architecture Diagrams
+// ---------------------------------------------------------------------------
+
+export const ARCHITECTURE_DIAGRAM_QUERY = gql`
+  query ArchitectureDiagram(
+    $repoId: ID!
+    $level: DiagramLevel!
+    $moduleFilter: String
+    $moduleDepth: Int
+    $maxNodes: Int
+  ) {
+    architectureDiagram(
+      repoId: $repoId
+      level: $level
+      moduleFilter: $moduleFilter
+      moduleDepth: $moduleDepth
+      maxNodes: $maxNodes
+    ) {
+      mermaidSource
+      level
+      totalModules
+      shownModules
+      truncated
+      modules {
+        path
+        symbolCount
+        fileCount
+        requirementLinkCount
+        inboundEdgeCount
+        outboundEdges {
+          targetPath
+          callCount
         }
       }
     }

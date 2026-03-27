@@ -25,30 +25,38 @@ _sym_db = _symbol_database.Default()
 from common.v1 import types_pb2 as common_dot_v1_dot_types__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\"requirements/v1/requirements.proto\x12\x19\x63odeaware.requirements.v1\x1a\x15\x63ommon/v1/types.proto\"L\n\x14ParseDocumentRequest\x12\x0f\n\x07\x63ontent\x18\x01 \x01(\t\x12\x0e\n\x06\x66ormat\x18\x02 \x01(\t\x12\x13\n\x0bsource_path\x18\x03 \x01(\t\"v\n\x15ParseDocumentResponse\x12\x36\n\x0crequirements\x18\x01 \x03(\x0b\x32 .codeaware.common.v1.Requirement\x12\x13\n\x0btotal_found\x18\x02 \x01(\x05\x12\x10\n\x08warnings\x18\x03 \x03(\t\"\xc4\x01\n\x0fParseCSVRequest\x12\x0f\n\x07\x63ontent\x18\x01 \x01(\t\x12U\n\x0e\x63olumn_mapping\x18\x02 \x03(\x0b\x32=.codeaware.requirements.v1.ParseCSVRequest.ColumnMappingEntry\x12\x13\n\x0bsource_path\x18\x03 \x01(\t\x1a\x34\n\x12\x43olumnMappingEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\x82\x01\n\x10ParseCSVResponse\x12\x36\n\x0crequirements\x18\x01 \x03(\x0b\x32 .codeaware.common.v1.Requirement\x12\x13\n\x0btotal_found\x18\x02 \x01(\x05\x12\x0f\n\x07skipped\x18\x03 \x01(\x05\x12\x10\n\x08warnings\x18\x04 \x03(\t\"Q\n\x18\x45nrichRequirementRequest\x12\x35\n\x0brequirement\x18\x01 \x01(\x0b\x32 .codeaware.common.v1.Requirement\"\xb1\x01\n\x19\x45nrichRequirementResponse\x12\x32\n\x08\x65nriched\x18\x01 \x01(\x0b\x32 .codeaware.common.v1.Requirement\x12\x16\n\x0esuggested_tags\x18\x02 \x03(\t\x12\x1a\n\x12suggested_priority\x18\x03 \x01(\t\x12,\n\x05usage\x18\x04 \x01(\x0b\x32\x1d.codeaware.common.v1.LLMUsage2\xee\x02\n\x13RequirementsService\x12r\n\rParseDocument\x12/.codeaware.requirements.v1.ParseDocumentRequest\x1a\x30.codeaware.requirements.v1.ParseDocumentResponse\x12\x63\n\x08ParseCSV\x12*.codeaware.requirements.v1.ParseCSVRequest\x1a+.codeaware.requirements.v1.ParseCSVResponse\x12~\n\x11\x45nrichRequirement\x12\x33.codeaware.requirements.v1.EnrichRequirementRequest\x1a\x34.codeaware.requirements.v1.EnrichRequirementResponseBFZDgithub.com/codeaware/codeaware/gen/go/requirements/v1;requirementsv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\"requirements/v1/requirements.proto\x12\x1csourcebridge.requirements.v1\x1a\x15\x63ommon/v1/types.proto\"L\n\x14ParseDocumentRequest\x12\x0f\n\x07\x63ontent\x18\x01 \x01(\t\x12\x0e\n\x06\x66ormat\x18\x02 \x01(\t\x12\x13\n\x0bsource_path\x18\x03 \x01(\t\"y\n\x15ParseDocumentResponse\x12\x39\n\x0crequirements\x18\x01 \x03(\x0b\x32#.sourcebridge.common.v1.Requirement\x12\x13\n\x0btotal_found\x18\x02 \x01(\x05\x12\x10\n\x08warnings\x18\x03 \x03(\t\"\xc7\x01\n\x0fParseCSVRequest\x12\x0f\n\x07\x63ontent\x18\x01 \x01(\t\x12X\n\x0e\x63olumn_mapping\x18\x02 \x03(\x0b\x32@.sourcebridge.requirements.v1.ParseCSVRequest.ColumnMappingEntry\x12\x13\n\x0bsource_path\x18\x03 \x01(\t\x1a\x34\n\x12\x43olumnMappingEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\x85\x01\n\x10ParseCSVResponse\x12\x39\n\x0crequirements\x18\x01 \x03(\x0b\x32#.sourcebridge.common.v1.Requirement\x12\x13\n\x0btotal_found\x18\x02 \x01(\x05\x12\x0f\n\x07skipped\x18\x03 \x01(\x05\x12\x10\n\x08warnings\x18\x04 \x03(\t\"T\n\x18\x45nrichRequirementRequest\x12\x38\n\x0brequirement\x18\x01 \x01(\x0b\x32#.sourcebridge.common.v1.Requirement\"\xb7\x01\n\x19\x45nrichRequirementResponse\x12\x35\n\x08\x65nriched\x18\x01 \x01(\x0b\x32#.sourcebridge.common.v1.Requirement\x12\x16\n\x0esuggested_tags\x18\x02 \x03(\t\x12\x1a\n\x12suggested_priority\x18\x03 \x01(\t\x12/\n\x05usage\x18\x04 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage\"P\n\tFileEntry\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\x12\x10\n\x08language\x18\x03 \x01(\t\x12\x12\n\nline_count\x18\x04 \x01(\x05\"\x9a\x01\n\x13\x45xtractSpecsRequest\x12\x15\n\rrepository_id\x18\x01 \x01(\t\x12\x17\n\x0frepository_name\x18\x02 \x01(\t\x12\x36\n\x05\x66iles\x18\x03 \x03(\x0b\x32\'.sourcebridge.requirements.v1.FileEntry\x12\x1b\n\x13skip_llm_refinement\x18\x04 \x01(\x08\"\xe0\x01\n\x0e\x44iscoveredSpec\x12\x0e\n\x06source\x18\x01 \x01(\t\x12\x13\n\x0bsource_file\x18\x02 \x01(\t\x12\x13\n\x0bsource_line\x18\x03 \x01(\x05\x12\x14\n\x0csource_files\x18\x04 \x03(\t\x12\x0c\n\x04text\x18\x05 \x01(\t\x12\x10\n\x08raw_text\x18\x06 \x01(\t\x12\x11\n\tgroup_key\x18\x07 \x01(\t\x12\x10\n\x08language\x18\x08 \x01(\t\x12\x10\n\x08keywords\x18\t \x03(\t\x12\x12\n\nconfidence\x18\n \x01(\t\x12\x13\n\x0bllm_refined\x18\x0b \x01(\x08\"\xc7\x01\n\x14\x45xtractSpecsResponse\x12;\n\x05specs\x18\x01 \x03(\x0b\x32,.sourcebridge.requirements.v1.DiscoveredSpec\x12\x18\n\x10total_candidates\x18\x02 \x01(\x05\x12\x15\n\rtotal_refined\x18\x03 \x01(\x05\x12/\n\x05usage\x18\x04 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage\x12\x10\n\x08warnings\x18\x05 \x03(\t2\xf8\x03\n\x13RequirementsService\x12x\n\rParseDocument\x12\x32.sourcebridge.requirements.v1.ParseDocumentRequest\x1a\x33.sourcebridge.requirements.v1.ParseDocumentResponse\x12i\n\x08ParseCSV\x12-.sourcebridge.requirements.v1.ParseCSVRequest\x1a..sourcebridge.requirements.v1.ParseCSVResponse\x12\x84\x01\n\x11\x45nrichRequirement\x12\x36.sourcebridge.requirements.v1.EnrichRequirementRequest\x1a\x37.sourcebridge.requirements.v1.EnrichRequirementResponse\x12u\n\x0c\x45xtractSpecs\x12\x31.sourcebridge.requirements.v1.ExtractSpecsRequest\x1a\x32.sourcebridge.requirements.v1.ExtractSpecsResponseBLZJgithub.com/sourcebridge/sourcebridge/gen/go/requirements/v1;requirementsv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'requirements.v1.requirements_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'ZDgithub.com/codeaware/codeaware/gen/go/requirements/v1;requirementsv1'
+  _globals['DESCRIPTOR']._serialized_options = b'ZJgithub.com/sourcebridge/sourcebridge/gen/go/requirements/v1;requirementsv1'
   _globals['_PARSECSVREQUEST_COLUMNMAPPINGENTRY']._loaded_options = None
   _globals['_PARSECSVREQUEST_COLUMNMAPPINGENTRY']._serialized_options = b'8\001'
-  _globals['_PARSEDOCUMENTREQUEST']._serialized_start=88
-  _globals['_PARSEDOCUMENTREQUEST']._serialized_end=164
-  _globals['_PARSEDOCUMENTRESPONSE']._serialized_start=166
-  _globals['_PARSEDOCUMENTRESPONSE']._serialized_end=284
-  _globals['_PARSECSVREQUEST']._serialized_start=287
-  _globals['_PARSECSVREQUEST']._serialized_end=483
-  _globals['_PARSECSVREQUEST_COLUMNMAPPINGENTRY']._serialized_start=431
-  _globals['_PARSECSVREQUEST_COLUMNMAPPINGENTRY']._serialized_end=483
-  _globals['_PARSECSVRESPONSE']._serialized_start=486
-  _globals['_PARSECSVRESPONSE']._serialized_end=616
-  _globals['_ENRICHREQUIREMENTREQUEST']._serialized_start=618
-  _globals['_ENRICHREQUIREMENTREQUEST']._serialized_end=699
-  _globals['_ENRICHREQUIREMENTRESPONSE']._serialized_start=702
-  _globals['_ENRICHREQUIREMENTRESPONSE']._serialized_end=879
-  _globals['_REQUIREMENTSSERVICE']._serialized_start=882
-  _globals['_REQUIREMENTSSERVICE']._serialized_end=1248
+  _globals['_PARSEDOCUMENTREQUEST']._serialized_start=91
+  _globals['_PARSEDOCUMENTREQUEST']._serialized_end=167
+  _globals['_PARSEDOCUMENTRESPONSE']._serialized_start=169
+  _globals['_PARSEDOCUMENTRESPONSE']._serialized_end=290
+  _globals['_PARSECSVREQUEST']._serialized_start=293
+  _globals['_PARSECSVREQUEST']._serialized_end=492
+  _globals['_PARSECSVREQUEST_COLUMNMAPPINGENTRY']._serialized_start=440
+  _globals['_PARSECSVREQUEST_COLUMNMAPPINGENTRY']._serialized_end=492
+  _globals['_PARSECSVRESPONSE']._serialized_start=495
+  _globals['_PARSECSVRESPONSE']._serialized_end=628
+  _globals['_ENRICHREQUIREMENTREQUEST']._serialized_start=630
+  _globals['_ENRICHREQUIREMENTREQUEST']._serialized_end=714
+  _globals['_ENRICHREQUIREMENTRESPONSE']._serialized_start=717
+  _globals['_ENRICHREQUIREMENTRESPONSE']._serialized_end=900
+  _globals['_FILEENTRY']._serialized_start=902
+  _globals['_FILEENTRY']._serialized_end=982
+  _globals['_EXTRACTSPECSREQUEST']._serialized_start=985
+  _globals['_EXTRACTSPECSREQUEST']._serialized_end=1139
+  _globals['_DISCOVEREDSPEC']._serialized_start=1142
+  _globals['_DISCOVEREDSPEC']._serialized_end=1366
+  _globals['_EXTRACTSPECSRESPONSE']._serialized_start=1369
+  _globals['_EXTRACTSPECSRESPONSE']._serialized_end=1568
+  _globals['_REQUIREMENTSSERVICE']._serialized_start=1571
+  _globals['_REQUIREMENTSSERVICE']._serialized_end=2075
 # @@protoc_insertion_point(module_scope)

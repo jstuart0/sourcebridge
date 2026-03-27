@@ -64,38 +64,56 @@ func (s *SurrealAPITokenStore) CreateToken(ctx context.Context, input CreateToke
 	}
 	now := time.Now()
 
+	// SurrealDB SCHEMAFULL tables reject Go nil (serialised as JSON null)
+	// for option<T> fields — they require the SurrealQL literal NONE.
+	// Only include optional fields as parameters when they have real values;
+	// otherwise substitute NONE directly in the query string.
+	params := map[string]any{
+		"id":         id,
+		"name":       input.Name,
+		"prefix":     prefix,
+		"token_hash": hashStr,
+		"token_kind": string(normalizeTokenKind(input.Kind)),
+		"created_at": now,
+	}
+	setParam := func(key, value string) string {
+		if value == "" {
+			return key + ": NONE"
+		}
+		params[key] = value
+		return key + ": $" + key
+	}
+	userClause := "user_id: $user_id"
+	params["user_id"] = input.UserID
+	tenantClause := setParam("tenant_id", input.TenantID)
+	clientClause := setParam("client_type", input.ClientType)
+	authClause := setParam("auth_method", string(input.AuthMethod))
+	deviceClause := setParam("device_label", input.DeviceLabel)
+	metadataClause := setParam("metadata", input.Metadata)
+	expiresClause := "expires_at: NONE"
+	if input.ExpiresAt != nil {
+		expiresClause = "expires_at: $expires_at"
+		params["expires_at"] = *input.ExpiresAt
+	}
+
 	_, err = surrealdb.Query[interface{}](ctx, db, `
 		CREATE type::thing('ca_api_token', $id) CONTENT {
 			name: $name,
 			prefix: $prefix,
 			token_hash: $token_hash,
-			user_id: $user_id,
-			tenant_id: $tenant_id,
+			`+userClause+`,
+			`+tenantClause+`,
 			token_kind: $token_kind,
-			client_type: $client_type,
-			auth_method: $auth_method,
-			device_label: $device_label,
-			metadata: $metadata,
+			`+clientClause+`,
+			`+authClause+`,
+			`+deviceClause+`,
+			`+metadataClause+`,
 			created_at: $created_at,
-			expires_at: $expires_at,
+			`+expiresClause+`,
 			last_used_at: NONE,
 			revoked_at: NONE
 		}
-	`, map[string]any{
-		"id":           id,
-		"name":         input.Name,
-		"prefix":       prefix,
-		"token_hash":   hashStr,
-		"user_id":      input.UserID,
-		"tenant_id":    emptyToNil(input.TenantID),
-		"token_kind":   string(normalizeTokenKind(input.Kind)),
-		"client_type":  emptyToNil(input.ClientType),
-		"auth_method":  emptyToNil(string(input.AuthMethod)),
-		"device_label": emptyToNil(input.DeviceLabel),
-		"metadata":     emptyToNil(input.Metadata),
-		"created_at":   now,
-		"expires_at":   input.ExpiresAt,
-	})
+	`, params)
 	if err != nil {
 		return "", nil, fmt.Errorf("persisting token: %w", err)
 	}
@@ -259,11 +277,4 @@ func tokenFromSurreal(record surrealAPIToken) *APIToken {
 		LastUsedAt:  record.LastUsedAt,
 		RevokedAt:   record.RevokedAt,
 	}
-}
-
-func emptyToNil(value string) any {
-	if value == "" {
-		return nil
-	}
-	return value
 }

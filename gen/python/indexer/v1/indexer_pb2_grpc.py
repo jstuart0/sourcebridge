@@ -36,17 +36,17 @@ class IndexerServiceStub(object):
             channel: A grpc.Channel.
         """
         self.IndexRepository = channel.unary_unary(
-                '/codeaware.indexer.v1.IndexerService/IndexRepository',
+                '/sourcebridge.indexer.v1.IndexerService/IndexRepository',
                 request_serializer=indexer_dot_v1_dot_indexer__pb2.IndexRepositoryRequest.SerializeToString,
                 response_deserializer=indexer_dot_v1_dot_indexer__pb2.IndexRepositoryResponse.FromString,
                 _registered_method=True)
         self.IndexFile = channel.unary_unary(
-                '/codeaware.indexer.v1.IndexerService/IndexFile',
+                '/sourcebridge.indexer.v1.IndexerService/IndexFile',
                 request_serializer=indexer_dot_v1_dot_indexer__pb2.IndexFileRequest.SerializeToString,
                 response_deserializer=indexer_dot_v1_dot_indexer__pb2.IndexFileResponse.FromString,
                 _registered_method=True)
         self.GetSymbols = channel.unary_unary(
-                '/codeaware.indexer.v1.IndexerService/GetSymbols',
+                '/sourcebridge.indexer.v1.IndexerService/GetSymbols',
                 request_serializer=indexer_dot_v1_dot_indexer__pb2.GetSymbolsRequest.SerializeToString,
                 response_deserializer=indexer_dot_v1_dot_indexer__pb2.GetSymbolsResponse.FromString,
                 _registered_method=True)
@@ -97,9 +97,9 @@ def add_IndexerServiceServicer_to_server(servicer, server):
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'codeaware.indexer.v1.IndexerService', rpc_method_handlers)
+            'sourcebridge.indexer.v1.IndexerService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('codeaware.indexer.v1.IndexerService', rpc_method_handlers)
+    server.add_registered_method_handlers('sourcebridge.indexer.v1.IndexerService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
@@ -121,7 +121,7 @@ class IndexerService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.indexer.v1.IndexerService/IndexRepository',
+            '/sourcebridge.indexer.v1.IndexerService/IndexRepository',
             indexer_dot_v1_dot_indexer__pb2.IndexRepositoryRequest.SerializeToString,
             indexer_dot_v1_dot_indexer__pb2.IndexRepositoryResponse.FromString,
             options,
@@ -148,7 +148,7 @@ class IndexerService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.indexer.v1.IndexerService/IndexFile',
+            '/sourcebridge.indexer.v1.IndexerService/IndexFile',
             indexer_dot_v1_dot_indexer__pb2.IndexFileRequest.SerializeToString,
             indexer_dot_v1_dot_indexer__pb2.IndexFileResponse.FromString,
             options,
@@ -175,7 +175,7 @@ class IndexerService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.indexer.v1.IndexerService/GetSymbols',
+            '/sourcebridge.indexer.v1.IndexerService/GetSymbols',
             indexer_dot_v1_dot_indexer__pb2.GetSymbolsRequest.SerializeToString,
             indexer_dot_v1_dot_indexer__pb2.GetSymbolsResponse.FromString,
             options,

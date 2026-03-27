@@ -138,3 +138,51 @@ class GenerateEmbeddingResponse(_message.Message):
     embedding: _types_pb2.Embedding
     usage: _types_pb2.LLMUsage
     def __init__(self, embedding: _Optional[_Union[_types_pb2.Embedding, _Mapping]] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ...) -> None: ...
+
+class SimulateChangeRequest(_message.Message):
+    __slots__ = ("repository_id", "description", "anchor_file", "anchor_symbol", "symbols", "top_n", "confidence_threshold")
+    REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    ANCHOR_FILE_FIELD_NUMBER: _ClassVar[int]
+    ANCHOR_SYMBOL_FIELD_NUMBER: _ClassVar[int]
+    SYMBOLS_FIELD_NUMBER: _ClassVar[int]
+    TOP_N_FIELD_NUMBER: _ClassVar[int]
+    CONFIDENCE_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
+    repository_id: str
+    description: str
+    anchor_file: str
+    anchor_symbol: str
+    symbols: _containers.RepeatedCompositeFieldContainer[_types_pb2.CodeSymbol]
+    top_n: int
+    confidence_threshold: float
+    def __init__(self, repository_id: _Optional[str] = ..., description: _Optional[str] = ..., anchor_file: _Optional[str] = ..., anchor_symbol: _Optional[str] = ..., symbols: _Optional[_Iterable[_Union[_types_pb2.CodeSymbol, _Mapping]]] = ..., top_n: _Optional[int] = ..., confidence_threshold: _Optional[float] = ...) -> None: ...
+
+class SimulatedSymbolMatch(_message.Message):
+    __slots__ = ("symbol_id", "name", "qualified_name", "kind", "file_path", "similarity", "is_anchor")
+    SYMBOL_ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    QUALIFIED_NAME_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    FILE_PATH_FIELD_NUMBER: _ClassVar[int]
+    SIMILARITY_FIELD_NUMBER: _ClassVar[int]
+    IS_ANCHOR_FIELD_NUMBER: _ClassVar[int]
+    symbol_id: str
+    name: str
+    qualified_name: str
+    kind: str
+    file_path: str
+    similarity: float
+    is_anchor: bool
+    def __init__(self, symbol_id: _Optional[str] = ..., name: _Optional[str] = ..., qualified_name: _Optional[str] = ..., kind: _Optional[str] = ..., file_path: _Optional[str] = ..., similarity: _Optional[float] = ..., is_anchor: bool = ...) -> None: ...
+
+class SimulateChangeResponse(_message.Message):
+    __slots__ = ("resolved_symbols", "description_embedding_model", "symbols_evaluated", "usage")
+    RESOLVED_SYMBOLS_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_EMBEDDING_MODEL_FIELD_NUMBER: _ClassVar[int]
+    SYMBOLS_EVALUATED_FIELD_NUMBER: _ClassVar[int]
+    USAGE_FIELD_NUMBER: _ClassVar[int]
+    resolved_symbols: _containers.RepeatedCompositeFieldContainer[SimulatedSymbolMatch]
+    description_embedding_model: str
+    symbols_evaluated: int
+    usage: _types_pb2.LLMUsage
+    def __init__(self, resolved_symbols: _Optional[_Iterable[_Union[SimulatedSymbolMatch, _Mapping]]] = ..., description_embedding_model: _Optional[str] = ..., symbols_evaluated: _Optional[int] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ...) -> None: ...

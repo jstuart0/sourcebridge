@@ -568,6 +568,7 @@ type ExplainSystemRequest struct {
 	SnapshotJson   string                 `protobuf:"bytes,5,opt,name=snapshot_json,json=snapshotJson,proto3" json:"snapshot_json,omitempty"`
 	ScopeType      string                 `protobuf:"bytes,6,opt,name=scope_type,json=scopeType,proto3" json:"scope_type,omitempty"` // "repository", "module", "file", "symbol"
 	ScopePath      string                 `protobuf:"bytes,7,opt,name=scope_path,json=scopePath,proto3" json:"scope_path,omitempty"` // canonical scope path
+	Depth          string                 `protobuf:"bytes,8,opt,name=depth,proto3" json:"depth,omitempty"`                          // "summary", "medium", "deep"
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -647,6 +648,13 @@ func (x *ExplainSystemRequest) GetScopeType() string {
 func (x *ExplainSystemRequest) GetScopePath() string {
 	if x != nil {
 		return x.ScopePath
+	}
+	return ""
+}
+
+func (x *ExplainSystemRequest) GetDepth() string {
+	if x != nil {
+		return x.Depth
 	}
 	return ""
 }
@@ -1155,7 +1163,7 @@ const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"file_paths\x18\x05 \x03(\tR\tfilePaths\x12\x1d\n" +
 	"\n" +
 	"symbol_ids\x18\x06 \x03(\tR\tsymbolIds\x12%\n" +
-	"\x0eestimated_time\x18\a \x01(\tR\restimatedTime\"\xff\x01\n" +
+	"\x0eestimated_time\x18\a \x01(\tR\restimatedTime\"\x95\x02\n" +
 	"\x14ExplainSystemRequest\x12#\n" +
 	"\rrepository_id\x18\x01 \x01(\tR\frepositoryId\x12'\n" +
 	"\x0frepository_name\x18\x02 \x01(\tR\x0erepositoryName\x12\x1a\n" +
@@ -1165,7 +1173,8 @@ const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"\n" +
 	"scope_type\x18\x06 \x01(\tR\tscopeType\x12\x1d\n" +
 	"\n" +
-	"scope_path\x18\a \x01(\tR\tscopePath\"\xbb\x01\n" +
+	"scope_path\x18\a \x01(\tR\tscopePath\x12\x14\n" +
+	"\x05depth\x18\b \x01(\tR\x05depth\"\xbb\x01\n" +
 	"\x15ExplainSystemResponse\x12 \n" +
 	"\vexplanation\x18\x01 \x01(\tR\vexplanation\x12H\n" +
 	"\bevidence\x18\x02 \x03(\v2,.sourcebridge.knowledge.v1.KnowledgeEvidenceR\bevidence\x126\n" +

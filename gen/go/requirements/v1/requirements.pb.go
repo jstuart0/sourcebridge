@@ -382,6 +382,344 @@ func (x *EnrichRequirementResponse) GetUsage() *v1.LLMUsage {
 	return nil
 }
 
+// FileEntry represents a source file to scan for spec extraction.
+type FileEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`         // Repository-relative path
+	Content       string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`   // File content (UTF-8)
+	Language      string                 `protobuf:"bytes,3,opt,name=language,proto3" json:"language,omitempty"` // Detected language
+	LineCount     int32                  `protobuf:"varint,4,opt,name=line_count,json=lineCount,proto3" json:"line_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FileEntry) Reset() {
+	*x = FileEntry{}
+	mi := &file_requirements_v1_requirements_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileEntry) ProtoMessage() {}
+
+func (x *FileEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_requirements_v1_requirements_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileEntry.ProtoReflect.Descriptor instead.
+func (*FileEntry) Descriptor() ([]byte, []int) {
+	return file_requirements_v1_requirements_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *FileEntry) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *FileEntry) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *FileEntry) GetLanguage() string {
+	if x != nil {
+		return x.Language
+	}
+	return ""
+}
+
+func (x *FileEntry) GetLineCount() int32 {
+	if x != nil {
+		return x.LineCount
+	}
+	return 0
+}
+
+type ExtractSpecsRequest struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	RepositoryId      string                 `protobuf:"bytes,1,opt,name=repository_id,json=repositoryId,proto3" json:"repository_id,omitempty"`
+	RepositoryName    string                 `protobuf:"bytes,2,opt,name=repository_name,json=repositoryName,proto3" json:"repository_name,omitempty"`
+	Files             []*FileEntry           `protobuf:"bytes,3,rep,name=files,proto3" json:"files,omitempty"`
+	SkipLlmRefinement bool                   `protobuf:"varint,4,opt,name=skip_llm_refinement,json=skipLlmRefinement,proto3" json:"skip_llm_refinement,omitempty"` // Force structural-only extraction
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ExtractSpecsRequest) Reset() {
+	*x = ExtractSpecsRequest{}
+	mi := &file_requirements_v1_requirements_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExtractSpecsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExtractSpecsRequest) ProtoMessage() {}
+
+func (x *ExtractSpecsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_requirements_v1_requirements_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExtractSpecsRequest.ProtoReflect.Descriptor instead.
+func (*ExtractSpecsRequest) Descriptor() ([]byte, []int) {
+	return file_requirements_v1_requirements_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ExtractSpecsRequest) GetRepositoryId() string {
+	if x != nil {
+		return x.RepositoryId
+	}
+	return ""
+}
+
+func (x *ExtractSpecsRequest) GetRepositoryName() string {
+	if x != nil {
+		return x.RepositoryName
+	}
+	return ""
+}
+
+func (x *ExtractSpecsRequest) GetFiles() []*FileEntry {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+func (x *ExtractSpecsRequest) GetSkipLlmRefinement() bool {
+	if x != nil {
+		return x.SkipLlmRefinement
+	}
+	return false
+}
+
+// DiscoveredSpec represents a single specification inferred from source code.
+type DiscoveredSpec struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Source        string                 `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"` // "test", "schema", "comment"
+	SourceFile    string                 `protobuf:"bytes,2,opt,name=source_file,json=sourceFile,proto3" json:"source_file,omitempty"`
+	SourceLine    int32                  `protobuf:"varint,3,opt,name=source_line,json=sourceLine,proto3" json:"source_line,omitempty"`
+	SourceFiles   []string               `protobuf:"bytes,4,rep,name=source_files,json=sourceFiles,proto3" json:"source_files,omitempty"` // Additional files (dedup merge)
+	Text          string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`                                  // Refined requirement text
+	RawText       string                 `protobuf:"bytes,6,opt,name=raw_text,json=rawText,proto3" json:"raw_text,omitempty"`             // Original extraction
+	GroupKey      string                 `protobuf:"bytes,7,opt,name=group_key,json=groupKey,proto3" json:"group_key,omitempty"`
+	Language      string                 `protobuf:"bytes,8,opt,name=language,proto3" json:"language,omitempty"`
+	Keywords      []string               `protobuf:"bytes,9,rep,name=keywords,proto3" json:"keywords,omitempty"`
+	Confidence    string                 `protobuf:"bytes,10,opt,name=confidence,proto3" json:"confidence,omitempty"` // "high", "medium", "low"
+	LlmRefined    bool                   `protobuf:"varint,11,opt,name=llm_refined,json=llmRefined,proto3" json:"llm_refined,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DiscoveredSpec) Reset() {
+	*x = DiscoveredSpec{}
+	mi := &file_requirements_v1_requirements_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DiscoveredSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DiscoveredSpec) ProtoMessage() {}
+
+func (x *DiscoveredSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_requirements_v1_requirements_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DiscoveredSpec.ProtoReflect.Descriptor instead.
+func (*DiscoveredSpec) Descriptor() ([]byte, []int) {
+	return file_requirements_v1_requirements_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *DiscoveredSpec) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *DiscoveredSpec) GetSourceFile() string {
+	if x != nil {
+		return x.SourceFile
+	}
+	return ""
+}
+
+func (x *DiscoveredSpec) GetSourceLine() int32 {
+	if x != nil {
+		return x.SourceLine
+	}
+	return 0
+}
+
+func (x *DiscoveredSpec) GetSourceFiles() []string {
+	if x != nil {
+		return x.SourceFiles
+	}
+	return nil
+}
+
+func (x *DiscoveredSpec) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *DiscoveredSpec) GetRawText() string {
+	if x != nil {
+		return x.RawText
+	}
+	return ""
+}
+
+func (x *DiscoveredSpec) GetGroupKey() string {
+	if x != nil {
+		return x.GroupKey
+	}
+	return ""
+}
+
+func (x *DiscoveredSpec) GetLanguage() string {
+	if x != nil {
+		return x.Language
+	}
+	return ""
+}
+
+func (x *DiscoveredSpec) GetKeywords() []string {
+	if x != nil {
+		return x.Keywords
+	}
+	return nil
+}
+
+func (x *DiscoveredSpec) GetConfidence() string {
+	if x != nil {
+		return x.Confidence
+	}
+	return ""
+}
+
+func (x *DiscoveredSpec) GetLlmRefined() bool {
+	if x != nil {
+		return x.LlmRefined
+	}
+	return false
+}
+
+type ExtractSpecsResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Specs           []*DiscoveredSpec      `protobuf:"bytes,1,rep,name=specs,proto3" json:"specs,omitempty"`
+	TotalCandidates int32                  `protobuf:"varint,2,opt,name=total_candidates,json=totalCandidates,proto3" json:"total_candidates,omitempty"` // Before dedup
+	TotalRefined    int32                  `protobuf:"varint,3,opt,name=total_refined,json=totalRefined,proto3" json:"total_refined,omitempty"`          // After dedup
+	Usage           *v1.LLMUsage           `protobuf:"bytes,4,opt,name=usage,proto3" json:"usage,omitempty"`
+	Warnings        []string               `protobuf:"bytes,5,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ExtractSpecsResponse) Reset() {
+	*x = ExtractSpecsResponse{}
+	mi := &file_requirements_v1_requirements_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExtractSpecsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExtractSpecsResponse) ProtoMessage() {}
+
+func (x *ExtractSpecsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_requirements_v1_requirements_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExtractSpecsResponse.ProtoReflect.Descriptor instead.
+func (*ExtractSpecsResponse) Descriptor() ([]byte, []int) {
+	return file_requirements_v1_requirements_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ExtractSpecsResponse) GetSpecs() []*DiscoveredSpec {
+	if x != nil {
+		return x.Specs
+	}
+	return nil
+}
+
+func (x *ExtractSpecsResponse) GetTotalCandidates() int32 {
+	if x != nil {
+		return x.TotalCandidates
+	}
+	return 0
+}
+
+func (x *ExtractSpecsResponse) GetTotalRefined() int32 {
+	if x != nil {
+		return x.TotalRefined
+	}
+	return 0
+}
+
+func (x *ExtractSpecsResponse) GetUsage() *v1.LLMUsage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
+}
+
+func (x *ExtractSpecsResponse) GetWarnings() []string {
+	if x != nil {
+		return x.Warnings
+	}
+	return nil
+}
+
 var File_requirements_v1_requirements_proto protoreflect.FileDescriptor
 
 const file_requirements_v1_requirements_proto_rawDesc = "" +
@@ -417,11 +755,47 @@ const file_requirements_v1_requirements_proto_rawDesc = "" +
 	"\benriched\x18\x01 \x01(\v2#.sourcebridge.common.v1.RequirementR\benriched\x12%\n" +
 	"\x0esuggested_tags\x18\x02 \x03(\tR\rsuggestedTags\x12-\n" +
 	"\x12suggested_priority\x18\x03 \x01(\tR\x11suggestedPriority\x126\n" +
-	"\x05usage\x18\x04 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage2\x81\x03\n" +
+	"\x05usage\x18\x04 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"t\n" +
+	"\tFileEntry\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\tR\acontent\x12\x1a\n" +
+	"\blanguage\x18\x03 \x01(\tR\blanguage\x12\x1d\n" +
+	"\n" +
+	"line_count\x18\x04 \x01(\x05R\tlineCount\"\xd2\x01\n" +
+	"\x13ExtractSpecsRequest\x12#\n" +
+	"\rrepository_id\x18\x01 \x01(\tR\frepositoryId\x12'\n" +
+	"\x0frepository_name\x18\x02 \x01(\tR\x0erepositoryName\x12=\n" +
+	"\x05files\x18\x03 \x03(\v2'.sourcebridge.requirements.v1.FileEntryR\x05files\x12.\n" +
+	"\x13skip_llm_refinement\x18\x04 \x01(\bR\x11skipLlmRefinement\"\xd2\x02\n" +
+	"\x0eDiscoveredSpec\x12\x16\n" +
+	"\x06source\x18\x01 \x01(\tR\x06source\x12\x1f\n" +
+	"\vsource_file\x18\x02 \x01(\tR\n" +
+	"sourceFile\x12\x1f\n" +
+	"\vsource_line\x18\x03 \x01(\x05R\n" +
+	"sourceLine\x12!\n" +
+	"\fsource_files\x18\x04 \x03(\tR\vsourceFiles\x12\x12\n" +
+	"\x04text\x18\x05 \x01(\tR\x04text\x12\x19\n" +
+	"\braw_text\x18\x06 \x01(\tR\arawText\x12\x1b\n" +
+	"\tgroup_key\x18\a \x01(\tR\bgroupKey\x12\x1a\n" +
+	"\blanguage\x18\b \x01(\tR\blanguage\x12\x1a\n" +
+	"\bkeywords\x18\t \x03(\tR\bkeywords\x12\x1e\n" +
+	"\n" +
+	"confidence\x18\n" +
+	" \x01(\tR\n" +
+	"confidence\x12\x1f\n" +
+	"\vllm_refined\x18\v \x01(\bR\n" +
+	"llmRefined\"\xfe\x01\n" +
+	"\x14ExtractSpecsResponse\x12B\n" +
+	"\x05specs\x18\x01 \x03(\v2,.sourcebridge.requirements.v1.DiscoveredSpecR\x05specs\x12)\n" +
+	"\x10total_candidates\x18\x02 \x01(\x05R\x0ftotalCandidates\x12#\n" +
+	"\rtotal_refined\x18\x03 \x01(\x05R\ftotalRefined\x126\n" +
+	"\x05usage\x18\x04 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\x12\x1a\n" +
+	"\bwarnings\x18\x05 \x03(\tR\bwarnings2\xf8\x03\n" +
 	"\x13RequirementsService\x12x\n" +
 	"\rParseDocument\x122.sourcebridge.requirements.v1.ParseDocumentRequest\x1a3.sourcebridge.requirements.v1.ParseDocumentResponse\x12i\n" +
 	"\bParseCSV\x12-.sourcebridge.requirements.v1.ParseCSVRequest\x1a..sourcebridge.requirements.v1.ParseCSVResponse\x12\x84\x01\n" +
-	"\x11EnrichRequirement\x126.sourcebridge.requirements.v1.EnrichRequirementRequest\x1a7.sourcebridge.requirements.v1.EnrichRequirementResponseBLZJgithub.com/sourcebridge/sourcebridge/gen/go/requirements/v1;requirementsv1b\x06proto3"
+	"\x11EnrichRequirement\x126.sourcebridge.requirements.v1.EnrichRequirementRequest\x1a7.sourcebridge.requirements.v1.EnrichRequirementResponse\x12u\n" +
+	"\fExtractSpecs\x121.sourcebridge.requirements.v1.ExtractSpecsRequest\x1a2.sourcebridge.requirements.v1.ExtractSpecsResponseBLZJgithub.com/sourcebridge/sourcebridge/gen/go/requirements/v1;requirementsv1b\x06proto3"
 
 var (
 	file_requirements_v1_requirements_proto_rawDescOnce sync.Once
@@ -435,7 +809,7 @@ func file_requirements_v1_requirements_proto_rawDescGZIP() []byte {
 	return file_requirements_v1_requirements_proto_rawDescData
 }
 
-var file_requirements_v1_requirements_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_requirements_v1_requirements_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_requirements_v1_requirements_proto_goTypes = []any{
 	(*ParseDocumentRequest)(nil),      // 0: sourcebridge.requirements.v1.ParseDocumentRequest
 	(*ParseDocumentResponse)(nil),     // 1: sourcebridge.requirements.v1.ParseDocumentResponse
@@ -443,28 +817,37 @@ var file_requirements_v1_requirements_proto_goTypes = []any{
 	(*ParseCSVResponse)(nil),          // 3: sourcebridge.requirements.v1.ParseCSVResponse
 	(*EnrichRequirementRequest)(nil),  // 4: sourcebridge.requirements.v1.EnrichRequirementRequest
 	(*EnrichRequirementResponse)(nil), // 5: sourcebridge.requirements.v1.EnrichRequirementResponse
-	nil,                               // 6: sourcebridge.requirements.v1.ParseCSVRequest.ColumnMappingEntry
-	(*v1.Requirement)(nil),            // 7: sourcebridge.common.v1.Requirement
-	(*v1.LLMUsage)(nil),               // 8: sourcebridge.common.v1.LLMUsage
+	(*FileEntry)(nil),                 // 6: sourcebridge.requirements.v1.FileEntry
+	(*ExtractSpecsRequest)(nil),       // 7: sourcebridge.requirements.v1.ExtractSpecsRequest
+	(*DiscoveredSpec)(nil),            // 8: sourcebridge.requirements.v1.DiscoveredSpec
+	(*ExtractSpecsResponse)(nil),      // 9: sourcebridge.requirements.v1.ExtractSpecsResponse
+	nil,                               // 10: sourcebridge.requirements.v1.ParseCSVRequest.ColumnMappingEntry
+	(*v1.Requirement)(nil),            // 11: sourcebridge.common.v1.Requirement
+	(*v1.LLMUsage)(nil),               // 12: sourcebridge.common.v1.LLMUsage
 }
 var file_requirements_v1_requirements_proto_depIdxs = []int32{
-	7, // 0: sourcebridge.requirements.v1.ParseDocumentResponse.requirements:type_name -> sourcebridge.common.v1.Requirement
-	6, // 1: sourcebridge.requirements.v1.ParseCSVRequest.column_mapping:type_name -> sourcebridge.requirements.v1.ParseCSVRequest.ColumnMappingEntry
-	7, // 2: sourcebridge.requirements.v1.ParseCSVResponse.requirements:type_name -> sourcebridge.common.v1.Requirement
-	7, // 3: sourcebridge.requirements.v1.EnrichRequirementRequest.requirement:type_name -> sourcebridge.common.v1.Requirement
-	7, // 4: sourcebridge.requirements.v1.EnrichRequirementResponse.enriched:type_name -> sourcebridge.common.v1.Requirement
-	8, // 5: sourcebridge.requirements.v1.EnrichRequirementResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	0, // 6: sourcebridge.requirements.v1.RequirementsService.ParseDocument:input_type -> sourcebridge.requirements.v1.ParseDocumentRequest
-	2, // 7: sourcebridge.requirements.v1.RequirementsService.ParseCSV:input_type -> sourcebridge.requirements.v1.ParseCSVRequest
-	4, // 8: sourcebridge.requirements.v1.RequirementsService.EnrichRequirement:input_type -> sourcebridge.requirements.v1.EnrichRequirementRequest
-	1, // 9: sourcebridge.requirements.v1.RequirementsService.ParseDocument:output_type -> sourcebridge.requirements.v1.ParseDocumentResponse
-	3, // 10: sourcebridge.requirements.v1.RequirementsService.ParseCSV:output_type -> sourcebridge.requirements.v1.ParseCSVResponse
-	5, // 11: sourcebridge.requirements.v1.RequirementsService.EnrichRequirement:output_type -> sourcebridge.requirements.v1.EnrichRequirementResponse
-	9, // [9:12] is the sub-list for method output_type
-	6, // [6:9] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	11, // 0: sourcebridge.requirements.v1.ParseDocumentResponse.requirements:type_name -> sourcebridge.common.v1.Requirement
+	10, // 1: sourcebridge.requirements.v1.ParseCSVRequest.column_mapping:type_name -> sourcebridge.requirements.v1.ParseCSVRequest.ColumnMappingEntry
+	11, // 2: sourcebridge.requirements.v1.ParseCSVResponse.requirements:type_name -> sourcebridge.common.v1.Requirement
+	11, // 3: sourcebridge.requirements.v1.EnrichRequirementRequest.requirement:type_name -> sourcebridge.common.v1.Requirement
+	11, // 4: sourcebridge.requirements.v1.EnrichRequirementResponse.enriched:type_name -> sourcebridge.common.v1.Requirement
+	12, // 5: sourcebridge.requirements.v1.EnrichRequirementResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	6,  // 6: sourcebridge.requirements.v1.ExtractSpecsRequest.files:type_name -> sourcebridge.requirements.v1.FileEntry
+	8,  // 7: sourcebridge.requirements.v1.ExtractSpecsResponse.specs:type_name -> sourcebridge.requirements.v1.DiscoveredSpec
+	12, // 8: sourcebridge.requirements.v1.ExtractSpecsResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	0,  // 9: sourcebridge.requirements.v1.RequirementsService.ParseDocument:input_type -> sourcebridge.requirements.v1.ParseDocumentRequest
+	2,  // 10: sourcebridge.requirements.v1.RequirementsService.ParseCSV:input_type -> sourcebridge.requirements.v1.ParseCSVRequest
+	4,  // 11: sourcebridge.requirements.v1.RequirementsService.EnrichRequirement:input_type -> sourcebridge.requirements.v1.EnrichRequirementRequest
+	7,  // 12: sourcebridge.requirements.v1.RequirementsService.ExtractSpecs:input_type -> sourcebridge.requirements.v1.ExtractSpecsRequest
+	1,  // 13: sourcebridge.requirements.v1.RequirementsService.ParseDocument:output_type -> sourcebridge.requirements.v1.ParseDocumentResponse
+	3,  // 14: sourcebridge.requirements.v1.RequirementsService.ParseCSV:output_type -> sourcebridge.requirements.v1.ParseCSVResponse
+	5,  // 15: sourcebridge.requirements.v1.RequirementsService.EnrichRequirement:output_type -> sourcebridge.requirements.v1.EnrichRequirementResponse
+	9,  // 16: sourcebridge.requirements.v1.RequirementsService.ExtractSpecs:output_type -> sourcebridge.requirements.v1.ExtractSpecsResponse
+	13, // [13:17] is the sub-list for method output_type
+	9,  // [9:13] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_requirements_v1_requirements_proto_init() }
@@ -478,7 +861,7 @@ func file_requirements_v1_requirements_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_requirements_v1_requirements_proto_rawDesc), len(file_requirements_v1_requirements_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

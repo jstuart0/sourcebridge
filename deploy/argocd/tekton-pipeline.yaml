@@ -1,0 +1,111 @@
+# Full CI/CD pipeline: clone -> build api -> build web -> build worker -> rollout restart
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: sourcebridge-build-deploy
+  namespace: tekton-builds
+spec:
+  params:
+    - name: repo-url
+      type: string
+      default: https://github.com/sourcebridge/sourcebridge.git
+    - name: revision
+      type: string
+      default: main
+    - name: registry
+      type: string
+      default: ghcr.io/sourcebridge
+  workspaces:
+    - name: shared-workspace
+    - name: git-credentials
+
+  tasks:
+    # 1. Clone the repository
+    - name: clone
+      taskRef:
+        name: git-clone
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+        - name: git-credentials
+          workspace: git-credentials
+      params:
+        - name: repo-url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.revision)
+
+    # 2. Build API image (Go backend)
+    - name: build-api
+      runAfter: ["clone"]
+      taskRef:
+        name: kaniko-build
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      params:
+        - name: image
+          value: $(params.registry)/sourcebridge-api
+        - name: tag
+          value: sha-$(tasks.clone.results.COMMIT_SHA)
+        - name: context
+          value: .
+        - name: dockerfile
+          value: deploy/docker/Dockerfile.sourcebridge
+        - name: extra-args
+          value:
+            - --build-arg=GO_BASE_IMAGE=golang:1.25-alpine
+            - --build-arg=RUNTIME_BASE_IMAGE=alpine:3.20
+
+    # 3. Build web image (Next.js frontend) - sequential due to RWO PVC
+    - name: build-web
+      runAfter: ["build-api"]
+      taskRef:
+        name: kaniko-build
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      params:
+        - name: image
+          value: $(params.registry)/sourcebridge-web
+        - name: tag
+          value: sha-$(tasks.clone.results.COMMIT_SHA)
+        - name: context
+          value: .
+        - name: dockerfile
+          value: deploy/docker/Dockerfile.web
+        - name: extra-args
+          value:
+            - --build-arg=NODE_BASE_IMAGE=node:22-alpine
+
+    # 4. Build worker image (Python workers)
+    - name: build-worker
+      runAfter: ["build-web"]
+      taskRef:
+        name: kaniko-build
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      params:
+        - name: image
+          value: $(params.registry)/sourcebridge-worker
+        - name: tag
+          value: sha-$(tasks.clone.results.COMMIT_SHA)
+        - name: context
+          value: .
+        - name: dockerfile
+          value: deploy/docker/Dockerfile.worker
+        - name: extra-args
+          value:
+            - --build-arg=PYTHON_BASE_IMAGE=python:3.12-slim
+
+    # 5. Rollout restart deployments
+    - name: deploy
+      runAfter: ["build-worker"]
+      taskRef:
+        name: rollout-restart
+      params:
+        - name: deployments
+          value: "sourcebridge-api sourcebridge-web sourcebridge-worker"
+        - name: namespace
+          value: sourcebridge

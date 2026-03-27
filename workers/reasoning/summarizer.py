@@ -23,23 +23,16 @@ def _content_hash(text: str) -> str:
 
 def _parse_summary(raw: str, level: str, entity_name: str, content_hash: str) -> Summary:
     """Parse LLM response into a Summary, tolerating minor formatting issues."""
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        # Try to extract JSON from markdown code blocks
-        if "```" in raw:
-            start = raw.index("```") + 3
-            if raw[start:].startswith("json"):
-                start += 4
-            end = raw.index("```", start)
-            data = json.loads(raw[start:end].strip())
-        else:
-            return Summary(
-                purpose=raw.strip(),
-                level=level,
-                entity_name=entity_name,
-                content_hash=content_hash,
-            )
+    from workers.common.llm.parse import parse_json_response, strip_llm_wrapping
+
+    data = parse_json_response(raw)
+    if data is None or not isinstance(data, dict):
+        return Summary(
+            purpose=strip_llm_wrapping(raw),
+            level=level,
+            entity_name=entity_name,
+            content_hash=content_hash,
+        )
 
     return Summary(
         purpose=data.get("purpose", ""),
@@ -61,13 +54,14 @@ async def summarize_function(
     language: str,
     content: str,
     doc_comment: str = "",
+    model_override: str | None = None,
 ) -> tuple[Summary, LLMUsageRecord]:
     """Generate a function-level summary."""
     prompt = build_function_prompt(name, language, content, doc_comment)
     ch = _content_hash(content)
 
     response: LLMResponse = await provider.complete(
-        prompt, system=FUNCTION_SUMMARY_SYSTEM, temperature=0.0
+        prompt, system=FUNCTION_SUMMARY_SYSTEM, temperature=0.0, model=model_override,
     )
 
     summary = _parse_summary(response.content, SummaryLevel.FUNCTION, name, ch)

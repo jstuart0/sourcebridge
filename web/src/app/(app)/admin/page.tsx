@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useMutation } from "urql";
 import { HEALTH_QUERY, REPOSITORIES_LIGHT_QUERY as REPOSITORIES_QUERY, REINDEX_REPOSITORY_MUTATION } from "@/lib/graphql/queries";
 import { Button } from "@/components/ui/button";
@@ -76,7 +76,10 @@ interface LLMConfigState {
   summary_model: string;
   review_model: string;
   ask_model: string;
+  knowledge_model: string;
+  draft_model: string;
   timeout_secs: number;
+  advanced_mode: boolean;
 }
 
 interface GitConfigState {
@@ -147,15 +150,73 @@ export default function AdminPage() {
   const [llmSummaryModel, setLlmSummaryModel] = useState("");
   const [llmReviewModel, setLlmReviewModel] = useState("");
   const [llmAskModel, setLlmAskModel] = useState("");
+  const [llmKnowledgeModel, setLlmKnowledgeModel] = useState("");
   const [llmTimeoutSecs, setLlmTimeoutSecs] = useState(30);
+  const [llmAdvancedMode, setLlmAdvancedMode] = useState(false);
+  const [llmDraftModel, setLlmDraftModel] = useState("");
   const [llmSaving, setLlmSaving] = useState(false);
   const [llmMessage, setLlmMessage] = useState<string | null>(null);
   const [llmSuccess, setLlmSuccess] = useState(false);
+  const [llmModels, setLlmModels] = useState<{ id: string; name?: string; context_window?: number; max_output?: number; price_tier?: string }[]>([]);
+  const [llmModelFilter, setLlmModelFilter] = useState("");
+  const [llmModelsLoading, setLlmModelsLoading] = useState(false);
+  const [llmModelsError, setLlmModelsError] = useState<string | null>(null);
   const [gitToken, setGitToken] = useState("");
   const [gitSSHKeyPath, setGitSSHKeyPath] = useState("");
   const [gitSaving, setGitSaving] = useState(false);
   const [gitMessage, setGitMessage] = useState<string | null>(null);
   const [gitSuccess, setGitSuccess] = useState(false);
+
+  const providerDefaults: Record<string, { baseURL: string; model: string }> = {
+    openai: { baseURL: "https://api.openai.com/v1", model: "gpt-4o" },
+    anthropic: { baseURL: "https://api.anthropic.com", model: "claude-sonnet-4-20250514" },
+    ollama: { baseURL: "http://localhost:11434", model: "" },
+    vllm: { baseURL: "http://localhost:8000/v1", model: "" },
+    "llama-cpp": { baseURL: "http://localhost:8080/v1", model: "" },
+    sglang: { baseURL: "http://localhost:30000/v1", model: "" },
+    lmstudio: { baseURL: "http://localhost:1234/v1", model: "" },
+    gemini: { baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/", model: "gemini-2.5-flash" },
+    openrouter: { baseURL: "https://openrouter.ai/api/v1", model: "google/gemini-2.5-flash" },
+  };
+
+  const fetchModels = useCallback(async (provider: string, baseURL: string) => {
+    setLlmModelsLoading(true);
+    setLlmModelsError(null);
+    try {
+      const token = localStorage.getItem(TOKEN_KEY);
+      const params = new URLSearchParams();
+      if (provider) params.set("provider", provider);
+      if (baseURL) params.set("base_url", baseURL);
+      const res = await fetch(`/api/v1/admin/llm-models?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await handleApiError(res));
+      const data = await res.json();
+      setLlmModels(data.models || []);
+      if (data.error) setLlmModelsError(data.error);
+    } catch (e) {
+      setLlmModels([]);
+      setLlmModelsError((e as Error).message);
+    }
+    setLlmModelsLoading(false);
+  }, []);
+
+  const filteredModels = llmModelFilter
+    ? llmModels.filter((m) =>
+        m.id.toLowerCase().includes(llmModelFilter.toLowerCase()) ||
+        (m.name && m.name.toLowerCase().includes(llmModelFilter.toLowerCase()))
+      )
+    : llmModels;
+
+  function formatCtx(n?: number) {
+    if (!n) return "";
+    if (n >= 1000000) return `${Math.round(n / 1000)}K ctx`;
+    if (n >= 1000) return `${Math.round(n / 1000)}K ctx`;
+    return `${n} ctx`;
+  }
+
+  // Track whether initial load from server config has happened
+  const initialLoadDone = useRef(false);
 
   useEffect(() => {
     if (llmConfig) {
@@ -164,9 +225,30 @@ export default function AdminPage() {
       setLlmSummaryModel(llmConfig.summary_model || "");
       setLlmReviewModel(llmConfig.review_model || "");
       setLlmAskModel(llmConfig.ask_model || "");
+      setLlmKnowledgeModel(llmConfig.knowledge_model || "");
       setLlmTimeoutSecs(llmConfig.timeout_secs || 30);
+      setLlmAdvancedMode(llmConfig.advanced_mode || false);
+      setLlmDraftModel(llmConfig.draft_model || "");
+      initialLoadDone.current = true;
+      // Fetch models for the configured provider
+      fetchModels(llmConfig.provider || "ollama", llmConfig.base_url || "");
     }
-  }, [llmConfig]);
+  }, [llmConfig, fetchModels]);
+
+  function handleProviderChange(newProvider: string) {
+    setLlmProvider(newProvider);
+    const defaults = providerDefaults[newProvider];
+    if (defaults) {
+      setLlmBaseURL(defaults.baseURL);
+      if (defaults.model) {
+        setLlmSummaryModel(defaults.model);
+        setLlmReviewModel(defaults.model);
+        setLlmAskModel(defaults.model);
+        setLlmKnowledgeModel(defaults.model);
+      }
+      fetchModels(newProvider, defaults.baseURL);
+    }
+  }
 
   useEffect(() => {
     if (gitConfig) {
@@ -187,7 +269,10 @@ export default function AdminPage() {
         summary_model: llmSummaryModel,
         review_model: llmReviewModel,
         ask_model: llmAskModel,
+        knowledge_model: llmKnowledgeModel,
+        draft_model: llmDraftModel,
         timeout_secs: llmTimeoutSecs,
+        advanced_mode: llmAdvancedMode,
       };
       if (llmAPIKey) body.api_key = llmAPIKey;
       const res = await fetch("/api/v1/admin/llm-config", {
@@ -244,6 +329,10 @@ export default function AdminPage() {
     const res = await fetch(path, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
     const data = await res.json();
     setTestResult(JSON.stringify(data, null, 2));
+  }
+
+  function isLocalProvider(provider: string): boolean {
+    return ["ollama", "vllm", "llama-cpp", "sglang", "lmstudio"].includes(provider);
   }
 
   const tabs: { key: Tab; label: string }[] = [
@@ -387,33 +476,58 @@ export default function AdminPage() {
                 <label className={labelClass}>Provider</label>
                 <select
                   value={llmProvider}
-                  onChange={(e) => setLlmProvider(e.target.value)}
+                  onChange={(e) => handleProviderChange(e.target.value)}
                   className={selectClass}
                 >
-                  <option value="ollama">Ollama / llama.cpp (Local)</option>
+                  <option value="ollama">Ollama (Local)</option>
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic</option>
                   <option value="vllm">vLLM (Local)</option>
+                  <option value="llama-cpp">llama.cpp (Local)</option>
+                  <option value="sglang">SGLang (Local)</option>
+                  <option value="lmstudio">LM Studio (Local)</option>
+                  <option value="gemini">Google Gemini</option>
+                  <option value="openrouter">OpenRouter</option>
                 </select>
               </div>
 
               <div className={fieldWrapClass}>
                 <label className={labelClass}>Base URL</label>
-                <input
-                  type="text"
-                  value={llmBaseURL}
-                  onChange={(e) => setLlmBaseURL(e.target.value)}
-                  placeholder={llmProvider === "anthropic" ? "https://api.anthropic.com" : llmProvider === "openai" ? "https://api.openai.com/v1" : "http://localhost:11434"}
-                  className={monoInputClass}
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={llmBaseURL}
+                    onChange={(e) => setLlmBaseURL(e.target.value)}
+                    placeholder={providerDefaults[llmProvider]?.baseURL || "http://localhost:11434"}
+                    className={`flex-1 ${monoInputClass}`}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => fetchModels(llmProvider, llmBaseURL)}
+                    disabled={llmModelsLoading}
+                  >
+                    {llmModelsLoading ? "Loading..." : "Refresh models"}
+                  </Button>
+                </div>
                 <p className={helpTextClass}>
                   {llmProvider === "ollama" || llmProvider === "vllm"
-                    ? "Required for local providers. Include /v1 suffix for llama.cpp endpoints."
-                    : "Leave empty for the default API endpoint, or enter a custom/proxy URL."}
+                    ? "Required for local providers. Include /v1 suffix for OpenAI-compatible endpoints."
+                    : llmProvider === "llama-cpp"
+                      ? "llama.cpp server with OpenAI-compatible API. Supports speculative decoding when launched with --model-draft."
+                      : llmProvider === "sglang"
+                        ? "SGLang server with OpenAI-compatible API. Supports EAGLE-based speculative decoding at launch."
+                        : llmProvider === "lmstudio"
+                          ? "LM Studio with OpenAI-compatible API. Supports per-request speculative decoding via draft model."
+                          : llmProvider === "openrouter"
+                          ? "OpenRouter uses the OpenAI-compatible API. Models from 300+ providers available."
+                          : llmProvider === "gemini"
+                            ? "Google Gemini uses an OpenAI-compatible endpoint. Default URL works for most setups."
+                            : "Default URL for this provider. Change it to use a custom proxy or endpoint."}
                 </p>
               </div>
 
-              {(llmProvider === "anthropic" || llmProvider === "openai") && (
+              {(llmProvider === "anthropic" || llmProvider === "openai" || llmProvider === "gemini" || llmProvider === "openrouter") && (
                 <div className={fieldWrapClass}>
                   <label className={labelClass}>API Key</label>
                   <div className="flex items-center gap-2">
@@ -421,7 +535,7 @@ export default function AdminPage() {
                       type="password"
                       value={llmAPIKey}
                       onChange={(e) => setLlmAPIKey(e.target.value)}
-                      placeholder={llmConfig?.api_key_set ? "Key is configured (enter new to replace)" : llmProvider === "anthropic" ? "sk-ant-..." : "sk-..."}
+                      placeholder={llmConfig?.api_key_set ? "Key is configured (enter new to replace)" : llmProvider === "anthropic" ? "sk-ant-..." : llmProvider === "gemini" ? "AIza..." : "sk-..."}
                       className={`flex-1 ${monoInputClass}`}
                     />
                     {llmConfig?.api_key_set && (
@@ -430,26 +544,170 @@ export default function AdminPage() {
                       </span>
                     )}
                   </div>
+                  <p className={helpTextClass}>
+                    Required for cloud providers. After saving a new key, click &quot;Refresh models&quot; to load the model list.
+                  </p>
+                </div>
+              )}
+
+              {llmProvider === "lmstudio" && (
+                <div className={fieldWrapClass}>
+                  <label className={labelClass}>Draft Model (Speculative Decoding)</label>
+                  <input
+                    type="text"
+                    value={llmDraftModel}
+                    onChange={(e) => setLlmDraftModel(e.target.value)}
+                    placeholder="e.g. lmstudio-community/Qwen2.5-0.5B-Instruct-GGUF"
+                    className={monoInputClass}
+                  />
+                  <p className={helpTextClass}>
+                    Optional. Smaller model used for speculative decoding. LM Studio sends candidate tokens from this model
+                    and verifies them with the main model in a single pass, improving throughput 1.5-3x.
+                  </p>
                 </div>
               )}
 
               <div className={fieldWrapClass}>
-                <label className={labelClass}>Model</label>
-                <input
-                  type="text"
-                  value={llmSummaryModel}
-                  onChange={(e) => {
-                    setLlmSummaryModel(e.target.value);
-                    setLlmReviewModel(e.target.value);
-                    setLlmAskModel(e.target.value);
-                  }}
-                  placeholder={llmProvider === "anthropic" ? "claude-sonnet-4-20250514" : llmProvider === "openai" ? "gpt-4o" : "default_model"}
-                  className={monoInputClass}
-                />
+                <label className={labelClass}>Model {llmAdvancedMode && "(Analysis / Default)"}</label>
+                {llmModels.length > 0 ? (
+                  <div className="space-y-2">
+                    {llmModels.length > 20 && (
+                      <input
+                        type="text"
+                        value={llmModelFilter}
+                        onChange={(e) => setLlmModelFilter(e.target.value)}
+                        placeholder="Filter models..."
+                        className={inputClass}
+                      />
+                    )}
+                    <select
+                      value={llmModels.some((m) => m.id === llmSummaryModel) ? llmSummaryModel : "__custom__"}
+                      onChange={(e) => {
+                        if (e.target.value !== "__custom__") {
+                          setLlmSummaryModel(e.target.value);
+                          if (!llmAdvancedMode) {
+                            setLlmReviewModel(e.target.value);
+                            setLlmAskModel(e.target.value);
+                            setLlmKnowledgeModel(e.target.value);
+                          }
+                        }
+                      }}
+                      className={selectClass}
+                    >
+                      {!llmModels.some((m) => m.id === llmSummaryModel) && llmSummaryModel && (
+                        <option value="__custom__">{llmSummaryModel} (custom)</option>
+                      )}
+                      {filteredModels.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name ? `${m.name} (${m.id})` : m.id}{m.context_window ? ` [${formatCtx(m.context_window)}]` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      value={llmSummaryModel}
+                      onChange={(e) => {
+                        setLlmSummaryModel(e.target.value);
+                        if (!llmAdvancedMode) {
+                          setLlmReviewModel(e.target.value);
+                          setLlmAskModel(e.target.value);
+                          setLlmKnowledgeModel(e.target.value);
+                        }
+                      }}
+                      placeholder="Or type a model ID manually"
+                      className={monoInputClass}
+                    />
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={llmSummaryModel}
+                    onChange={(e) => {
+                      setLlmSummaryModel(e.target.value);
+                      if (!llmAdvancedMode) {
+                        setLlmReviewModel(e.target.value);
+                        setLlmAskModel(e.target.value);
+                        setLlmKnowledgeModel(e.target.value);
+                      }
+                    }}
+                    placeholder={providerDefaults[llmProvider]?.model || "model name"}
+                    className={monoInputClass}
+                  />
+                )}
                 <p className={helpTextClass}>
-                  Used for code summaries, reviews, and chat. All three tasks use the same model by default.
+                  {llmModelsLoading
+                    ? "Loading available models..."
+                    : llmModelsError
+                      ? `Could not load models: ${llmModelsError}`
+                      : llmModels.length > 0
+                        ? `${llmModels.length} model${llmModels.length !== 1 ? "s" : ""} available. Select from the list or type a custom model ID.`
+                        : "Used for code summaries, reviews, and chat. All three tasks use the same model by default."}
                 </p>
               </div>
+
+              <div className="flex items-center gap-3">
+                <label className="relative inline-flex cursor-pointer items-center">
+                  <input
+                    type="checkbox"
+                    checked={llmAdvancedMode}
+                    onChange={(e) => setLlmAdvancedMode(e.target.checked)}
+                    className="peer sr-only"
+                  />
+                  <div className="peer h-5 w-9 rounded-full bg-[var(--border-default)] after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-[hsl(var(--accent-hue,250),60%,60%)] peer-checked:after:translate-x-full peer-checked:after:border-white" />
+                </label>
+                <div>
+                  <span className={labelClass}>Advanced: Per-operation models</span>
+                  <p className={helpTextClass}>Use different models for different operation types based on token weight and quality needs.</p>
+                </div>
+              </div>
+
+              {llmAdvancedMode && (
+                <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-raised)] p-4 space-y-4">
+                  <p className="text-sm text-[var(--text-secondary)]">
+                    Assign models to operation groups. The default model above is used for Analysis. Empty fields fall back to the default.
+                  </p>
+
+                  {([
+                    { label: "Code Review", key: "review", value: llmReviewModel, setter: setLlmReviewModel, badge: "Medium ~5K tok", help: "reviewCode (all templates)" },
+                    { label: "Discussion & Q&A", key: "discussion", value: llmAskModel, setter: setLlmAskModel, badge: "Medium ~1-5K tok", help: "discussCode, answerQuestion" },
+                    { label: "Knowledge Generation", key: "knowledge", value: llmKnowledgeModel, setter: setLlmKnowledgeModel, badge: "High ~10-37K tok", help: "cliffNotes, learningPath, codeTour, workflowStory, explainSystem" },
+                  ] as const).map((group) => (
+                    <div key={group.key} className={fieldWrapClass}>
+                      <div className="flex items-center gap-2">
+                        <label className={labelClass}>{group.label}</label>
+                        <span className="rounded-full bg-[var(--bg-base)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-secondary)] border border-[var(--border-subtle)]">
+                          {group.badge}
+                        </span>
+                      </div>
+                      {llmModels.length > 0 ? (
+                        <select
+                          value={llmModels.some((m) => m.id === group.value) ? group.value : "__custom__"}
+                          onChange={(e) => { if (e.target.value !== "__custom__") group.setter(e.target.value); }}
+                          className={selectClass}
+                        >
+                          {!llmModels.some((m) => m.id === group.value) && group.value && (
+                            <option value="__custom__">{group.value} (custom)</option>
+                          )}
+                          {filteredModels.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name ? `${m.name} (${m.id})` : m.id}{m.context_window ? ` [${formatCtx(m.context_window)}]` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={group.value}
+                          onChange={(e) => group.setter(e.target.value)}
+                          placeholder={llmSummaryModel || "same as default"}
+                          className={monoInputClass}
+                        />
+                      )}
+                      <p className={helpTextClass}>{group.help}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <div className={fieldWrapClass}>
                 <label className={labelClass}>Timeout (seconds)</label>
@@ -481,6 +739,26 @@ export default function AdminPage() {
               )}
             </div>
           </Panel>
+
+          {isLocalProvider(llmProvider) && (
+            <Panel>
+              <h3 className="mb-2 text-base font-semibold text-[var(--text-primary)]">Speculative Decoding</h3>
+              <p className="text-sm text-[var(--text-secondary)]">
+                {llmProvider === "lmstudio"
+                  ? "LM Studio supports per-request speculative decoding via the Draft Model field above. Configure a smaller draft model for 1.5-3x throughput improvement."
+                  : llmProvider === "llama-cpp"
+                    ? "llama.cpp supports speculative decoding when launched with --model-draft. Performance metrics (tokens/sec, acceptance rate) appear in operation results."
+                    : llmProvider === "sglang"
+                      ? "SGLang supports EAGLE-based speculative decoding configured at server launch. Performance metrics appear in operation results."
+                      : llmProvider === "vllm"
+                        ? "vLLM supports EAGLE3 speculative decoding configured at server launch. Performance metrics appear in operation results."
+                        : "Performance metrics (tokens/sec) from your local inference server appear in operation results when available."}
+              </p>
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                Tip: Higher tokens/sec indicates speculative decoding is working. Acceptance rate below 60% means the draft model is a poor match for the target model.
+              </p>
+            </Panel>
+          )}
 
           {config && (
             <Panel>

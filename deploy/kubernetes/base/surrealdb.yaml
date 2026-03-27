@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: surrealdb
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/name: surrealdb
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: database
+spec:
+  serviceName: surrealdb
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: surrealdb
+      app.kubernetes.io/part-of: sourcebridge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: surrealdb
+        app.kubernetes.io/part-of: sourcebridge
+        app.kubernetes.io/component: database
+    spec:
+      containers:
+        - name: surrealdb
+          image: surrealdb/surrealdb:v2.2.1
+          args: ["start", "--log", "info", "--user", "$(SURREAL_USER)", "--pass", "$(SURREAL_PASS)", "--bind", "0.0.0.0:8000", "file:/data/sourcebridge.db"]
+          env:
+            - name: SURREAL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: sourcebridge-secrets
+                  key: SOURCEBRIDGE_STORAGE_SURREAL_USER
+            - name: SURREAL_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: sourcebridge-secrets
+                  key: SOURCEBRIDGE_STORAGE_SURREAL_PASS
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: surrealdb-data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: surrealdb-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: surrealdb
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/name: surrealdb
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: database
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: surrealdb
+    app.kubernetes.io/part-of: sourcebridge
+  ports:
+    - port: 8000
+      targetPort: http
+      protocol: TCP
+      name: http

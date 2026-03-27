@@ -16,6 +16,11 @@ class AnthropicProvider:
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
         self.model = model
 
+    @property
+    def default_model(self) -> str:
+        """Return the default model ID."""
+        return self.model
+
     async def complete(
         self,
         prompt: str,
@@ -23,10 +28,12 @@ class AnthropicProvider:
         system: str = "",
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        model: str | None = None,
     ) -> LLMResponse:
         """Generate a completion via Anthropic API."""
+        use_model = model or self.model
         message = await self.client.messages.create(
-            model=self.model,
+            model=use_model,
             max_tokens=max_tokens,
             temperature=temperature,
             system=system if system else anthropic.NOT_GIVEN,
@@ -34,7 +41,7 @@ class AnthropicProvider:
         )
         return LLMResponse(
             content=message.content[0].text if message.content else "",
-            model=self.model,
+            model=use_model,
             input_tokens=message.usage.input_tokens,
             output_tokens=message.usage.output_tokens,
             stop_reason=message.stop_reason or "",
@@ -47,10 +54,12 @@ class AnthropicProvider:
         system: str = "",
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        model: str | None = None,
     ) -> AsyncIterator[str]:
         """Stream a completion via Anthropic API."""
+        use_model = model or self.model
         async with self.client.messages.stream(
-            model=self.model,
+            model=use_model,
             max_tokens=max_tokens,
             temperature=temperature,
             system=system if system else anthropic.NOT_GIVEN,

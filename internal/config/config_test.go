@@ -64,7 +64,7 @@ func TestValidate(t *testing.T) {
 			name: "ollama with base_url",
 			modify: func(c *Config) {
 				c.LLM.Provider = "ollama"
-				c.LLM.BaseURL = "http://192.168.10.108:11434/v1"
+				c.LLM.BaseURL = "http://localhost:11434/v1"
 			},
 			wantErr: false,
 		},

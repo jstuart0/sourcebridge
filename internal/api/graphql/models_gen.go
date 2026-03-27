@@ -10,6 +10,16 @@ import (
 	"time"
 )
 
+type APIContract struct {
+	ID            string    `json:"id"`
+	RepoID        string    `json:"repoId"`
+	FilePath      string    `json:"filePath"`
+	ContractType  string    `json:"contractType"`
+	EndpointCount int       `json:"endpointCount"`
+	Version       *string   `json:"version,omitempty"`
+	DetectedAt    time.Time `json:"detectedAt"`
+}
+
 type AddRepositoryInput struct {
 	Name  string  `json:"name"`
 	Path  string  `json:"path"`
@@ -65,6 +75,69 @@ type CreateManualLinkInput struct {
 	Rationale     *string `json:"rationale,omitempty"`
 }
 
+type CrossRepoRef struct {
+	ID             string           `json:"id"`
+	SourceSymbolID string           `json:"sourceSymbolId"`
+	TargetSymbolID string           `json:"targetSymbolId"`
+	SourceRepoID   string           `json:"sourceRepoId"`
+	TargetRepoID   string           `json:"targetRepoId"`
+	RefType        CrossRepoRefType `json:"refType"`
+	Confidence     float64          `json:"confidence"`
+	ContractFile   *string          `json:"contractFile,omitempty"`
+	ConsumerFile   *string          `json:"consumerFile,omitempty"`
+	Evidence       *string          `json:"evidence,omitempty"`
+	CreatedAt      time.Time        `json:"createdAt"`
+}
+
+type DiagramEdge struct {
+	TargetPath string `json:"targetPath"`
+	CallCount  int    `json:"callCount"`
+}
+
+type DiagramModule struct {
+	Path                 string         `json:"path"`
+	SymbolCount          int            `json:"symbolCount"`
+	FileCount            int            `json:"fileCount"`
+	RequirementLinkCount int            `json:"requirementLinkCount"`
+	InboundEdgeCount     int            `json:"inboundEdgeCount"`
+	OutboundEdges        []*DiagramEdge `json:"outboundEdges"`
+}
+
+type DiagramOutput struct {
+	MermaidSource string           `json:"mermaidSource"`
+	Modules       []*DiagramModule `json:"modules"`
+	Level         DiagramLevel     `json:"level"`
+	TotalModules  int              `json:"totalModules"`
+	ShownModules  int              `json:"shownModules"`
+	Truncated     bool             `json:"truncated"`
+}
+
+type DiscoveredRequirement struct {
+	ID              string    `json:"id"`
+	RepoID          string    `json:"repoId"`
+	Source          string    `json:"source"`
+	SourceFile      string    `json:"sourceFile"`
+	SourceLine      int       `json:"sourceLine"`
+	SourceFiles     []string  `json:"sourceFiles"`
+	Text            string    `json:"text"`
+	RawText         string    `json:"rawText"`
+	GroupKey        string    `json:"groupKey"`
+	Language        string    `json:"language"`
+	Keywords        []string  `json:"keywords"`
+	Confidence      string    `json:"confidence"`
+	Status          string    `json:"status"`
+	LlmRefined      bool      `json:"llmRefined"`
+	PromotedTo      *string   `json:"promotedTo,omitempty"`
+	DismissedBy     *string   `json:"dismissedBy,omitempty"`
+	DismissedReason *string   `json:"dismissedReason,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+}
+
+type DiscoveredRequirementConnection struct {
+	Nodes      []*DiscoveredRequirement `json:"nodes"`
+	TotalCount int                      `json:"totalCount"`
+}
+
 type DiscussCodeInput struct {
 	RepositoryID        string    `json:"repositoryId"`
 	Question            string    `json:"question"`
@@ -73,6 +146,7 @@ type DiscussCodeInput struct {
 	Language            *Language `json:"language,omitempty"`
 	ArtifactID          *string   `json:"artifactId,omitempty"`
 	SymbolID            *string   `json:"symbolId,omitempty"`
+	RequirementID       *string   `json:"requirementId,omitempty"`
 	ConversationHistory []string  `json:"conversationHistory,omitempty"`
 }
 
@@ -131,6 +205,7 @@ type ExecutionPathStep struct {
 type ExplainSystemInput struct {
 	RepositoryID string              `json:"repositoryId"`
 	Audience     *KnowledgeAudience  `json:"audience,omitempty"`
+	Depth        *KnowledgeDepth     `json:"depth,omitempty"`
 	Question     *string             `json:"question,omitempty"`
 	ScopeType    *KnowledgeScopeType `json:"scopeType,omitempty"`
 	ScopePath    *string             `json:"scopePath,omitempty"`
@@ -372,7 +447,20 @@ type PlatformStats struct {
 	TotalOutputTokens int `json:"totalOutputTokens"`
 }
 
+type PromoteResult struct {
+	Requirement           *Requirement           `json:"requirement"`
+	DiscoveredRequirement *DiscoveredRequirement `json:"discoveredRequirement"`
+}
+
 type Query struct {
+}
+
+type RepoLink struct {
+	ID           string    `json:"id"`
+	SourceRepoID string    `json:"sourceRepoId"`
+	TargetRepoID string    `json:"targetRepoId"`
+	LinkType     string    `json:"linkType"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 type Repository struct {
@@ -426,6 +514,16 @@ type RequirementLink struct {
 	CreatedAt     time.Time    `json:"createdAt"`
 }
 
+type ResolvedSymbol struct {
+	SymbolID      string  `json:"symbolId"`
+	Name          string  `json:"name"`
+	QualifiedName string  `json:"qualifiedName"`
+	Kind          string  `json:"kind"`
+	FilePath      string  `json:"filePath"`
+	Similarity    float64 `json:"similarity"`
+	IsAnchor      bool    `json:"isAnchor"`
+}
+
 type ReviewCodeInput struct {
 	RepositoryID string    `json:"repositoryId"`
 	FilePath     string    `json:"filePath"`
@@ -477,6 +575,24 @@ type ServiceHealth struct {
 	Status string `json:"status"`
 }
 
+type SimulateChangeInput struct {
+	RepositoryID string  `json:"repositoryId"`
+	Description  string  `json:"description"`
+	AnchorFile   *string `json:"anchorFile,omitempty"`
+	AnchorSymbol *string `json:"anchorSymbol,omitempty"`
+}
+
+type SimulatedImpactReport struct {
+	ID              string            `json:"id"`
+	Simulated       bool              `json:"simulated"`
+	Description     string            `json:"description"`
+	AnchorFile      *string           `json:"anchorFile,omitempty"`
+	AnchorSymbol    *string           `json:"anchorSymbol,omitempty"`
+	ResolvedSymbols []*ResolvedSymbol `json:"resolvedSymbols"`
+	Report          *ImpactReport     `json:"report"`
+	ComputedAt      time.Time         `json:"computedAt"`
+}
+
 type SourceFile struct {
 	RepositoryID string   `json:"repositoryId"`
 	FilePath     string   `json:"filePath"`
@@ -500,6 +616,15 @@ type SourceRevision struct {
 	DocsFingerprint    *string `json:"docsFingerprint,omitempty"`
 }
 
+type SpecExtractionResult struct {
+	Discovered      int      `json:"discovered"`
+	TotalCandidates int      `json:"totalCandidates"`
+	Warnings        []string `json:"warnings"`
+	Model           *string  `json:"model,omitempty"`
+	InputTokens     *int     `json:"inputTokens,omitempty"`
+	OutputTokens    *int     `json:"outputTokens,omitempty"`
+}
+
 type SymbolChange struct {
 	SymbolID     *string          `json:"symbolId,omitempty"`
 	Name         string           `json:"name"`
@@ -519,6 +644,11 @@ type TraceabilityMatrix struct {
 	Symbols      []*CodeSymbol      `json:"symbols"`
 	Links        []*RequirementLink `json:"links"`
 	Coverage     float64            `json:"coverage"`
+}
+
+type TriggerSpecExtractionInput struct {
+	RepositoryID      string `json:"repositoryId"`
+	SkipLlmRefinement *bool  `json:"skipLlmRefinement,omitempty"`
 }
 
 type UnderstandingScore struct {
@@ -592,6 +722,122 @@ func (e *Confidence) UnmarshalJSON(b []byte) error {
 }
 
 func (e Confidence) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type CrossRepoRefType string
+
+const (
+	CrossRepoRefTypeAPIEndpoint     CrossRepoRefType = "API_ENDPOINT"
+	CrossRepoRefTypeProtobufService CrossRepoRefType = "PROTOBUF_SERVICE"
+	CrossRepoRefTypeGraphqlType     CrossRepoRefType = "GRAPHQL_TYPE"
+	CrossRepoRefTypeImport          CrossRepoRefType = "IMPORT"
+	CrossRepoRefTypeTypeReference   CrossRepoRefType = "TYPE_REFERENCE"
+)
+
+var AllCrossRepoRefType = []CrossRepoRefType{
+	CrossRepoRefTypeAPIEndpoint,
+	CrossRepoRefTypeProtobufService,
+	CrossRepoRefTypeGraphqlType,
+	CrossRepoRefTypeImport,
+	CrossRepoRefTypeTypeReference,
+}
+
+func (e CrossRepoRefType) IsValid() bool {
+	switch e {
+	case CrossRepoRefTypeAPIEndpoint, CrossRepoRefTypeProtobufService, CrossRepoRefTypeGraphqlType, CrossRepoRefTypeImport, CrossRepoRefTypeTypeReference:
+		return true
+	}
+	return false
+}
+
+func (e CrossRepoRefType) String() string {
+	return string(e)
+}
+
+func (e *CrossRepoRefType) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = CrossRepoRefType(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid CrossRepoRefType", str)
+	}
+	return nil
+}
+
+func (e CrossRepoRefType) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *CrossRepoRefType) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e CrossRepoRefType) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type DiagramLevel string
+
+const (
+	DiagramLevelModule DiagramLevel = "MODULE"
+	DiagramLevelFile   DiagramLevel = "FILE"
+)
+
+var AllDiagramLevel = []DiagramLevel{
+	DiagramLevelModule,
+	DiagramLevelFile,
+}
+
+func (e DiagramLevel) IsValid() bool {
+	switch e {
+	case DiagramLevelModule, DiagramLevelFile:
+		return true
+	}
+	return false
+}
+
+func (e DiagramLevel) String() string {
+	return string(e)
+}
+
+func (e *DiagramLevel) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = DiagramLevel(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid DiagramLevel", str)
+	}
+	return nil
+}
+
+func (e DiagramLevel) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *DiagramLevel) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e DiagramLevel) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	e.MarshalGQL(&buf)
 	return buf.Bytes(), nil
@@ -1072,10 +1318,11 @@ func (e KnowledgeDepth) MarshalJSON() ([]byte, error) {
 type KnowledgeScopeType string
 
 const (
-	KnowledgeScopeTypeRepository KnowledgeScopeType = "REPOSITORY"
-	KnowledgeScopeTypeModule     KnowledgeScopeType = "MODULE"
-	KnowledgeScopeTypeFile       KnowledgeScopeType = "FILE"
-	KnowledgeScopeTypeSymbol     KnowledgeScopeType = "SYMBOL"
+	KnowledgeScopeTypeRepository  KnowledgeScopeType = "REPOSITORY"
+	KnowledgeScopeTypeModule      KnowledgeScopeType = "MODULE"
+	KnowledgeScopeTypeFile        KnowledgeScopeType = "FILE"
+	KnowledgeScopeTypeSymbol      KnowledgeScopeType = "SYMBOL"
+	KnowledgeScopeTypeRequirement KnowledgeScopeType = "REQUIREMENT"
 )
 
 var AllKnowledgeScopeType = []KnowledgeScopeType{
@@ -1083,11 +1330,12 @@ var AllKnowledgeScopeType = []KnowledgeScopeType{
 	KnowledgeScopeTypeModule,
 	KnowledgeScopeTypeFile,
 	KnowledgeScopeTypeSymbol,
+	KnowledgeScopeTypeRequirement,
 }
 
 func (e KnowledgeScopeType) IsValid() bool {
 	switch e {
-	case KnowledgeScopeTypeRepository, KnowledgeScopeTypeModule, KnowledgeScopeTypeFile, KnowledgeScopeTypeSymbol:
+	case KnowledgeScopeTypeRepository, KnowledgeScopeTypeModule, KnowledgeScopeTypeFile, KnowledgeScopeTypeSymbol, KnowledgeScopeTypeRequirement:
 		return true
 	}
 	return false

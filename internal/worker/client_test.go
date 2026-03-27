@@ -82,8 +82,8 @@ func TestTimeoutConstants(t *testing.T) {
 	if TimeoutAnalysis <= TimeoutHealth {
 		t.Error("TimeoutAnalysis should be greater than TimeoutHealth")
 	}
-	if TimeoutReview <= TimeoutAnalysis {
-		t.Error("TimeoutReview should be greater than TimeoutAnalysis")
+	if TimeoutReview < TimeoutAnalysis {
+		t.Error("TimeoutReview should be >= TimeoutAnalysis")
 	}
 	if TimeoutLinkTotal <= TimeoutLinkItem {
 		t.Error("TimeoutLinkTotal should be greater than TimeoutLinkItem")

@@ -13,7 +13,7 @@ from workers.common.embedding.provider import EmbeddingProvider
 from workers.common.llm.provider import LLMProvider
 from workers.linking.comment import extract_comment_links
 from workers.linking.confidence import score_links
-from workers.linking.semantic import RequirementText, cosine_similarity, extract_semantic_links
+from workers.linking.semantic import RequirementText, cosine_similarity, entity_text, extract_semantic_links
 from workers.linking.types import CodeEntity, Link
 
 log = structlog.get_logger()
@@ -52,6 +52,7 @@ def _candidate_to_entity(candidate: linking_pb2.CandidateSymbol) -> CodeEntity:
         content=candidate.content,
         doc_comment=sym.doc_comment,
         language=_language_name(sym.language),
+        id=sym.id,
     )
 
 
@@ -95,10 +96,12 @@ def _language_name(proto_lang: int) -> str:
 
 def _link_to_proto(link: Link) -> types_pb2.RequirementLink:
     """Convert an internal Link to a proto RequirementLink message."""
+    # Use the original symbol UUID if available, fall back to file:name
+    symbol_id = link.entity.id or f"{link.entity.file_path}:{link.entity.name}"
     return types_pb2.RequirementLink(
         id=str(uuid.uuid4()),
         requirement_id=link.requirement_id,
-        symbol_id=f"{link.entity.file_path}:{link.entity.name}",
+        symbol_id=symbol_id,
         confidence=_float_to_confidence_enum(link.confidence),
         rationale=link.rationale,
     )
@@ -142,7 +145,11 @@ class LinkingServicer(linking_pb2_grpc.LinkingServiceServicer):
         if req_text and entities:
             try:
                 semantic_result = await extract_semantic_links(
-                    requirements=[RequirementText(id=req.id, text=req_text)],
+                    requirements=[RequirementText(
+                        id=req.id,
+                        text=req_text,
+                        label=req.external_id or req.id,
+                    )],
                     entities=entities,
                     embedding_provider=self._embedding,
                     threshold=max(min_confidence, 0.5),
@@ -168,10 +175,86 @@ class LinkingServicer(linking_pb2_grpc.LinkingServiceServicer):
         request: linking_pb2.BatchLinkRequest,
         context: grpc.aio.ServicerContext,
     ) -> linking_pb2.BatchLinkResponse:
-        """Not implemented -- callers should use repeated LinkRequirement calls."""
-        await context.abort(
-            grpc.StatusCode.UNIMPLEMENTED,
-            "BatchLink is not implemented; use repeated LinkRequirement calls from the API layer",
+        """Link multiple requirements at once with shared entity embeddings.
+
+        Computes entity embeddings once and reuses them across all requirements,
+        avoiding the O(N) redundant embedding calls of repeated LinkRequirement.
+        """
+        min_confidence = request.min_confidence or 0.0
+        reqs = list(request.requirements)
+        candidates = list(request.candidate_symbols)
+        log.info("batch_link", requirements=len(reqs), candidates=len(candidates))
+
+        if not reqs or not candidates:
+            return linking_pb2.BatchLinkResponse(
+                links=[], requirements_processed=0, links_found=0,
+            )
+
+        # Convert candidates to internal entities once
+        entities = [_candidate_to_entity(c) for c in candidates]
+
+        # Comment-based linking (runs once for all entities, no embeddings needed)
+        comment_result = extract_comment_links(entities)
+
+        # Pre-compute entity embeddings ONCE for all requirements
+        entity_texts_list = [entity_text(e) for e in entities]
+        try:
+            cached_embeddings = await self._embedding.embed(entity_texts_list)
+        except Exception as exc:
+            log.error("batch_embed_failed", error=str(exc))
+            await context.abort(grpc.StatusCode.INTERNAL, f"Embedding failed: {exc}")
+
+        log.info("batch_link_embeddings_cached", entity_count=len(cached_embeddings))
+
+        all_proto_links = []
+        processed = 0
+
+        for req in reqs:
+            processed += 1
+            req_text = f"{req.title} {req.description}".strip()
+
+            # Filter comment links for this requirement
+            req_comment_links = [
+                lk for lk in comment_result.links
+                if lk.requirement_id == req.id or lk.requirement_id == req.external_id
+            ]
+
+            # Semantic linking with cached embeddings
+            semantic_links: list[Link] = []
+            if req_text and entities:
+                try:
+                    semantic_result = await extract_semantic_links(
+                        requirements=[RequirementText(
+                            id=req.id,
+                            text=req_text,
+                            label=req.external_id or req.id,
+                        )],
+                        entities=entities,
+                        embedding_provider=self._embedding,
+                        threshold=max(min_confidence, 0.5),
+                        cached_entity_embeddings=cached_embeddings,
+                    )
+                    semantic_links = semantic_result.links
+                except Exception as exc:
+                    log.warning("batch_semantic_failed", req_id=req.id, error=str(exc))
+
+            # Merge and score
+            all_links = req_comment_links + semantic_links
+            scored = score_links(all_links)
+            if min_confidence > 0:
+                scored = [lk for lk in scored if lk.confidence >= min_confidence]
+
+            all_proto_links.extend(_link_to_proto(lk) for lk in scored)
+
+            if processed % 10 == 0:
+                log.info("batch_link_progress", processed=processed, total=len(reqs), links_so_far=len(all_proto_links))
+
+        log.info("batch_link_complete", processed=processed, total_links=len(all_proto_links))
+
+        return linking_pb2.BatchLinkResponse(
+            links=all_proto_links,
+            requirements_processed=processed,
+            links_found=len(all_proto_links),
         )
 
     async def ValidateLink(  # noqa: N802

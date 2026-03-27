@@ -8,6 +8,7 @@ from common.v1 import types_pb2
 from reasoning.v1 import reasoning_pb2, reasoning_pb2_grpc
 
 from workers.common.embedding.provider import EmbeddingProvider
+from workers.common.grpc_metadata import resolve_model_override
 from workers.common.llm.provider import LLMProvider
 from workers.reasoning.discussion import discuss_code
 from workers.reasoning.reviewer import review_code
@@ -70,6 +71,7 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
         # Build content from signature + surrounding_context
         content = request.surrounding_context or symbol.signature or ""
 
+        model_override = resolve_model_override(context)
         try:
             summary, usage = await summarize_function(
                 provider=self._llm,
@@ -77,10 +79,12 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
                 language=language,
                 content=content,
                 doc_comment=symbol.doc_comment,
+                model_override=model_override,
             )
         except Exception as exc:
             log.error("analyze_symbol_failed", error=str(exc), name=symbol.name)
             await context.abort(grpc.StatusCode.INTERNAL, f"Analysis failed: {exc}")
+            return  # type: ignore[return-value]
 
         # Map concerns from summary.risks, suggestions from summary.side_effects
         return reasoning_pb2.AnalyzeSymbolResponse(
@@ -134,15 +138,18 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
 
         context_code = "\n\n".join(context_parts) if context_parts else "(no code context provided)"
 
+        model_override = resolve_model_override(context)
         try:
             answer, usage = await discuss_code(
                 provider=self._llm,
                 question=request.question,
                 context_code=context_code,
+                model_override=model_override,
             )
         except Exception as exc:
             log.error("answer_question_failed", error=str(exc))
             await context.abort(grpc.StatusCode.INTERNAL, f"Question answering failed: {exc}")
+            return  # type: ignore[return-value]
 
         # Map referenced_symbols from answer.references -- these are strings like
         # "main.go:10-25", not full CodeSymbol messages, so we return empty symbols
@@ -167,6 +174,7 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
         template = request.template or "security"
         log.info("review_file", file_path=request.file_path, template=template)
 
+        model_override = resolve_model_override(context)
         try:
             result, usage = await review_code(
                 provider=self._llm,
@@ -174,12 +182,15 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
                 language=language,
                 content=request.content,
                 template=template,
+                model_override=model_override,
             )
         except ValueError as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+            return  # type: ignore[return-value]
         except Exception as exc:
             log.error("review_file_failed", error=str(exc))
             await context.abort(grpc.StatusCode.INTERNAL, f"Review failed: {exc}")
+            return  # type: ignore[return-value]
 
         findings = []
         for f in result.findings:
@@ -213,6 +224,7 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
         except Exception as exc:
             log.error("generate_embedding_failed", error=str(exc))
             await context.abort(grpc.StatusCode.INTERNAL, f"Embedding failed: {exc}")
+            return  # type: ignore[return-value]
 
         vector = vectors[0]
 
@@ -225,4 +237,95 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
 
         return reasoning_pb2.GenerateEmbeddingResponse(
             embedding=embedding_msg,
+        )
+
+    async def SimulateChange(  # noqa: N802
+        self,
+        request: reasoning_pb2.SimulateChangeRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> reasoning_pb2.SimulateChangeResponse:
+        """Resolve symbols affected by a hypothetical change description."""
+        from workers.reasoning.simulation import SymbolInfo, resolve_symbols
+
+        log.info(
+            "simulate_change",
+            repo_id=request.repository_id,
+            description_len=len(request.description),
+            symbol_count=len(request.symbols),
+            anchor_file=request.anchor_file or None,
+            anchor_symbol=request.anchor_symbol or None,
+        )
+
+        if not request.description.strip():
+            await context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "Description must be non-empty.",
+            )
+            return  # type: ignore[return-value]
+
+        if len(request.description) > 2000:
+            await context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "Description must be 2000 characters or fewer.",
+            )
+            return  # type: ignore[return-value]
+
+        if not request.symbols:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Repository has no indexed symbols. Please index the repository first.",
+            )
+            return  # type: ignore[return-value]
+
+        # Convert proto symbols to SymbolInfo
+        symbols = [
+            SymbolInfo(
+                id=s.id,
+                name=s.name,
+                qualified_name=s.qualified_name,
+                kind=s.kind.name if hasattr(s.kind, "name") else str(s.kind),
+                file_path=s.location.path if s.location else "",
+                signature=s.signature,
+                doc_comment=s.doc_comment,
+            )
+            for s in request.symbols
+        ]
+
+        top_n = request.top_n if request.top_n > 0 else 10
+        threshold = request.confidence_threshold if request.confidence_threshold > 0 else 0.35
+
+        try:
+            resolved = await resolve_symbols(
+                description=request.description,
+                symbols=symbols,
+                anchor_file=request.anchor_file or None,
+                anchor_symbol=request.anchor_symbol or None,
+                embedding_provider=self._embedding,
+                top_n=top_n,
+                confidence_threshold=threshold,
+            )
+        except ValueError as exc:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+            return  # type: ignore[return-value]
+        except Exception as exc:
+            log.error("simulate_change_failed", error=str(exc))
+            await context.abort(grpc.StatusCode.INTERNAL, f"Simulation failed: {exc}")
+            return  # type: ignore[return-value]
+
+        proto_matches = [
+            reasoning_pb2.SimulatedSymbolMatch(
+                symbol_id=r.symbol_id,
+                name=r.name,
+                qualified_name=r.qualified_name,
+                kind=r.kind,
+                file_path=r.file_path,
+                similarity=r.similarity,
+                is_anchor=r.is_anchor,
+            )
+            for r in resolved
+        ]
+
+        return reasoning_pb2.SimulateChangeResponse(
+            resolved_symbols=proto_matches,
+            symbols_evaluated=len(symbols),
         )

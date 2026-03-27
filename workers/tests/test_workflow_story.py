@@ -206,3 +206,50 @@ async def test_workflow_story_fills_missing_sections_from_execution_path() -> No
     assert "Post /auth/login" in main_steps.content
     assert "internal/api/rest/auth.go" in inspect.content
     assert len(main_steps.evidence) > 0
+
+
+@pytest.mark.asyncio
+async def test_workflow_story_replaces_placeholder_sections() -> None:
+    """Sections with placeholder content should be replaced by grounded fallbacks."""
+    provider = StaticLLMProvider(json.dumps([
+        {
+            "title": "Goal",
+            "content": "Understand the login flow.",
+            "summary": "Login flow.",
+            "confidence": "high",
+            "inferred": False,
+            "evidence": [],
+        },
+        {
+            "title": "Likely Actor",
+            "content": "To be determined based on further analysis.",
+            "summary": "",
+            "confidence": "low",
+            "inferred": True,
+            "evidence": [],
+        },
+        {
+            "title": "Trigger",
+            "content": '{"nested": "json that was not parsed"}',
+            "summary": "",
+            "confidence": "low",
+            "inferred": True,
+            "evidence": [],
+        },
+    ]))
+
+    result, _ = await generate_workflow_story(
+        provider=provider,
+        repository_name="test-repo",
+        audience="developer",
+        depth="medium",
+        snapshot_json=SAMPLE_SNAPSHOT,
+        scope_type="repository",
+    )
+
+    actor = next(s for s in result.sections if s.title == "Likely Actor")
+    trigger = next(s for s in result.sections if s.title == "Trigger")
+    # Both should have been replaced with grounded fallback content
+    assert "to be determined" not in actor.content.lower()
+    assert not trigger.content.startswith("{")
+    assert trigger.content != ""

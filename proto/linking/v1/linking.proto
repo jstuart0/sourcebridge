@@ -42,6 +42,7 @@ message BatchLinkRequest {
   repeated sourcebridge.common.v1.Requirement requirements = 1;
   string repository_id = 2;
   float min_confidence = 3;
+  repeated CandidateSymbol candidate_symbols = 4;
 }
 
 message BatchLinkResponse {

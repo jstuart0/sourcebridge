@@ -12,9 +12,20 @@ import (
 	"unicode/utf8"
 
 	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
+	"github.com/sourcebridge/sourcebridge/internal/architecture"
+	"github.com/sourcebridge/sourcebridge/internal/auth"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 )
+
+// clientTypeFromContext returns the client type for the current request.
+// API tokens (VS Code, JetBrains) carry client_type; JWT sessions (web) do not.
+func clientTypeFromContext(ctx context.Context) string {
+	if tok := auth.GetAPIToken(ctx); tok != nil && tok.ClientType != "" {
+		return tok.ClientType
+	}
+	return "web"
+}
 
 func isGitURL(path string) bool {
 	return strings.HasPrefix(path, "http://") ||
@@ -80,12 +91,14 @@ func gitPullCmd(ctx context.Context, repoDir, token, sshKeyPath string) *exec.Cm
 	cmd.Stderr = os.Stderr
 
 	if token != "" {
-		// Set credential helper to return the stored token
+		// Set credential helper to return the stored token.
+		// Shell-quote the token to prevent injection via special characters.
+		quoted := "'" + strings.ReplaceAll(token, "'", "'\\''") + "'"
 		cmd.Env = append(os.Environ(),
 			"GIT_ASKPASS=echo",
 			"GIT_CONFIG_COUNT=1",
 			"GIT_CONFIG_KEY_0=credential.helper",
-			fmt.Sprintf("GIT_CONFIG_VALUE_0=!f() { echo password=%s; }; f", token),
+			fmt.Sprintf("GIT_CONFIG_VALUE_0=!f() { echo password=%s; }; f", quoted),
 		)
 	}
 	if sshKeyPath != "" {
@@ -114,6 +127,13 @@ func resolveRepoSourcePath(repo *graphstore.Repository) (string, error) {
 			info, err := os.Stat(repo.ClonePath)
 			if err == nil && info.IsDir() {
 				return repo.ClonePath, nil
+			}
+		}
+		// Fallback: try computed cache path from repo name (matches IndexRepository logic)
+		for _, cacheBase := range []string{"./repo-cache", "/data/repo-cache"} {
+			computed := filepath.Join(cacheBase, "repos", sanitizeRepoName(repo.Name))
+			if info, err := os.Stat(computed); err == nil && info.IsDir() {
+				return computed, nil
 			}
 		}
 		return "", fmt.Errorf("repository source unavailable: remote repo has no persisted clone")
@@ -451,6 +471,60 @@ func mapLink(l *graphstore.StoredLink) *RequirementLink {
 	}
 }
 
+// mapLinkWithRelations maps a StoredLink and populates both Symbol and Requirement.
+func mapLinkWithRelations(l *graphstore.StoredLink, store graphstore.GraphStore) *RequirementLink {
+	rl := mapLink(l)
+	if store == nil {
+		return rl
+	}
+	if req := store.GetRequirement(l.RequirementID); req != nil {
+		rl.Requirement = mapRequirement(req)
+	}
+	if sym := store.GetSymbol(l.SymbolID); sym != nil {
+		rl.Symbol = mapSymbol(sym)
+	}
+	return rl
+}
+
+// mapLinksWithRelationsBatch maps a slice of StoredLinks with batch-fetched symbols and requirements.
+func mapLinksWithRelationsBatch(links []*graphstore.StoredLink, store graphstore.GraphStore) []*RequirementLink {
+	if len(links) == 0 {
+		return []*RequirementLink{}
+	}
+
+	// Collect unique IDs
+	symIDs := make([]string, 0, len(links))
+	reqIDs := make([]string, 0, len(links))
+	seenSym := map[string]bool{}
+	seenReq := map[string]bool{}
+	for _, l := range links {
+		if !seenSym[l.SymbolID] {
+			symIDs = append(symIDs, l.SymbolID)
+			seenSym[l.SymbolID] = true
+		}
+		if !seenReq[l.RequirementID] {
+			reqIDs = append(reqIDs, l.RequirementID)
+			seenReq[l.RequirementID] = true
+		}
+	}
+
+	symMap := store.GetSymbolsByIDs(symIDs)
+	reqMap := store.GetRequirementsByIDs(reqIDs)
+
+	result := make([]*RequirementLink, 0, len(links))
+	for _, l := range links {
+		rl := mapLink(l)
+		if sym := symMap[l.SymbolID]; sym != nil {
+			rl.Symbol = mapSymbol(sym)
+		}
+		if req := reqMap[l.RequirementID]; req != nil {
+			rl.Requirement = mapRequirement(req)
+		}
+		result = append(result, rl)
+	}
+	return result
+}
+
 // populateRepositoryDetails fills in the files and modules for a repository.
 func populateRepositoryDetails(repo *Repository, store graphstore.GraphStore) {
 	if store == nil {
@@ -524,19 +598,29 @@ func populateSymbolRelations(sym *CodeSymbol, store graphstore.GraphStore) {
 }
 
 // populateRequirementLinks fills in the links for a requirement.
+// Links are already sorted by confidence DESC from the store; we cap at 50
+// for the UI detail view to avoid slow responses with thousands of links.
 func populateRequirementLinks(req *Requirement, store graphstore.GraphStore) {
 	if store == nil {
 		return
 	}
 	links := store.GetLinksForRequirement(req.ID, false)
+	if len(links) > 50 {
+		links = links[:50]
+	}
+
+	// Batch-fetch all symbols in one query instead of N individual lookups.
+	symIDs := make([]string, 0, len(links))
+	for _, l := range links {
+		symIDs = append(symIDs, l.SymbolID)
+	}
+	symMap := store.GetSymbolsByIDs(symIDs)
+
 	req.Links = make([]*RequirementLink, 0, len(links))
 	for _, l := range links {
 		rl := mapLink(l)
-		// Populate the symbol reference
-		sym := store.GetSymbol(l.SymbolID)
-		if sym != nil {
-			mapped := mapSymbol(sym)
-			rl.Symbol = mapped
+		if sym := symMap[l.SymbolID]; sym != nil {
+			rl.Symbol = mapSymbol(sym)
 		}
 		req.Links = append(req.Links, rl)
 	}
@@ -728,6 +812,8 @@ func mapScopeType(scopeType knowledgepkg.ScopeType) KnowledgeScopeType {
 		return KnowledgeScopeTypeFile
 	case knowledgepkg.ScopeSymbol:
 		return KnowledgeScopeTypeSymbol
+	case knowledgepkg.ScopeRequirement:
+		return KnowledgeScopeTypeRequirement
 	default:
 		return KnowledgeScopeTypeRepository
 	}
@@ -943,4 +1029,105 @@ func newKnowledgeFreshnessProvider(store knowledgepkg.KnowledgeStore) graphstore
 		return nil
 	}
 	return &knowledgeFreshnessAdapter{store: store}
+}
+
+func mapDiscoveredRequirement(d *graphstore.DiscoveredRequirement) *DiscoveredRequirement {
+	if d == nil {
+		return nil
+	}
+	sourceFiles := d.SourceFiles
+	if sourceFiles == nil {
+		sourceFiles = []string{}
+	}
+	keywords := d.Keywords
+	if keywords == nil {
+		keywords = []string{}
+	}
+	var promotedTo, dismissedBy, dismissedReason *string
+	if d.PromotedTo != "" {
+		promotedTo = &d.PromotedTo
+	}
+	if d.DismissedBy != "" {
+		dismissedBy = &d.DismissedBy
+	}
+	if d.DismissedReason != "" {
+		dismissedReason = &d.DismissedReason
+	}
+	return &DiscoveredRequirement{
+		ID:              d.ID,
+		RepoID:          d.RepoID,
+		Source:          d.Source,
+		SourceFile:      d.SourceFile,
+		SourceLine:      d.SourceLine,
+		SourceFiles:     sourceFiles,
+		Text:            d.Text,
+		RawText:         d.RawText,
+		GroupKey:        d.GroupKey,
+		Language:        d.Language,
+		Keywords:        keywords,
+		Confidence:      d.Confidence,
+		Status:          d.Status,
+		LlmRefined:      d.LLMRefined,
+		PromotedTo:      promotedTo,
+		DismissedBy:     dismissedBy,
+		DismissedReason: dismissedReason,
+		CreatedAt:       d.CreatedAt,
+	}
+}
+
+func mapCrossRepoRefs(refs []*graphstore.CrossRepoRef) []*CrossRepoRef {
+	result := make([]*CrossRepoRef, 0, len(refs))
+	for _, r := range refs {
+		ref := &CrossRepoRef{
+			ID:             r.ID,
+			SourceSymbolID: r.SourceSymbolID,
+			TargetSymbolID: r.TargetSymbolID,
+			SourceRepoID:   r.SourceRepoID,
+			TargetRepoID:   r.TargetRepoID,
+			RefType:        CrossRepoRefType(r.RefType),
+			Confidence:     r.Confidence,
+			CreatedAt:      r.CreatedAt,
+		}
+		if r.ContractFile != "" {
+			ref.ContractFile = &r.ContractFile
+		}
+		if r.ConsumerFile != "" {
+			ref.ConsumerFile = &r.ConsumerFile
+		}
+		if r.Evidence != "" {
+			ref.Evidence = &r.Evidence
+		}
+		result = append(result, ref)
+	}
+	return result
+}
+
+func mapDiagramOutput(r *architecture.DiagramResult) *DiagramOutput {
+	level := DiagramLevel(r.Level)
+	modules := make([]*DiagramModule, 0, len(r.Modules))
+	for _, m := range r.Modules {
+		edges := make([]*DiagramEdge, 0, len(m.OutboundEdges))
+		for _, e := range m.OutboundEdges {
+			edges = append(edges, &DiagramEdge{
+				TargetPath: e.TargetPath,
+				CallCount:  e.CallCount,
+			})
+		}
+		modules = append(modules, &DiagramModule{
+			Path:                 m.Path,
+			SymbolCount:          m.SymbolCount,
+			FileCount:            m.FileCount,
+			RequirementLinkCount: m.RequirementLinkCount,
+			InboundEdgeCount:     m.InboundEdgeCount,
+			OutboundEdges:        edges,
+		})
+	}
+	return &DiagramOutput{
+		MermaidSource: r.MermaidSource,
+		Modules:       modules,
+		Level:         level,
+		TotalModules:  r.TotalModules,
+		ShownModules:  r.ShownModules,
+		Truncated:     r.Truncated,
+	}
 }

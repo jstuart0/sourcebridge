@@ -36,14 +36,16 @@ class LinkRequirementResponse(_message.Message):
     def __init__(self, links: _Optional[_Iterable[_Union[_types_pb2.RequirementLink, _Mapping]]] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ...) -> None: ...
 
 class BatchLinkRequest(_message.Message):
-    __slots__ = ("requirements", "repository_id", "min_confidence")
+    __slots__ = ("requirements", "repository_id", "min_confidence", "candidate_symbols")
     REQUIREMENTS_FIELD_NUMBER: _ClassVar[int]
     REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
     MIN_CONFIDENCE_FIELD_NUMBER: _ClassVar[int]
+    CANDIDATE_SYMBOLS_FIELD_NUMBER: _ClassVar[int]
     requirements: _containers.RepeatedCompositeFieldContainer[_types_pb2.Requirement]
     repository_id: str
     min_confidence: float
-    def __init__(self, requirements: _Optional[_Iterable[_Union[_types_pb2.Requirement, _Mapping]]] = ..., repository_id: _Optional[str] = ..., min_confidence: _Optional[float] = ...) -> None: ...
+    candidate_symbols: _containers.RepeatedCompositeFieldContainer[CandidateSymbol]
+    def __init__(self, requirements: _Optional[_Iterable[_Union[_types_pb2.Requirement, _Mapping]]] = ..., repository_id: _Optional[str] = ..., min_confidence: _Optional[float] = ..., candidate_symbols: _Optional[_Iterable[_Union[CandidateSymbol, _Mapping]]] = ...) -> None: ...
 
 class BatchLinkResponse(_message.Message):
     __slots__ = ("links", "requirements_processed", "links_found", "usage")

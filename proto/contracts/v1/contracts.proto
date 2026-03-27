@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package sourcebridge.contracts.v1;
+
+option go_package = "github.com/sourcebridge/sourcebridge/gen/go/contracts/v1;contractsv1";
+
+import "common/v1/types.proto";
+
+// ContractsService detects API contracts (OpenAPI, Protobuf, GraphQL schemas)
+// in a repository and matches consumers to those contracts.
+service ContractsService {
+  // DetectContracts scans repository files for API contract definitions.
+  rpc DetectContracts(DetectContractsRequest) returns (DetectContractsResponse);
+
+  // MatchConsumers finds code that consumes detected API contracts.
+  rpc MatchConsumers(MatchConsumersRequest) returns (MatchConsumersResponse);
+}
+
+message ContractFile {
+  string file_path = 1;
+  string contract_type = 2;   // openapi, protobuf, graphql
+  string version = 3;         // e.g. "3.0.1" for OpenAPI, "proto3" for protobuf
+  string content_hash = 4;
+  repeated ContractEndpoint endpoints = 5;
+}
+
+message ContractEndpoint {
+  string path = 1;             // e.g. "/api/users" or "UserService.GetUser"
+  string method = 2;           // HTTP method or RPC
+  string description = 3;
+}
+
+message DetectContractsRequest {
+  string repository_id = 1;
+  repeated FileContent files = 2;   // Files to scan (pre-filtered by caller)
+}
+
+message FileContent {
+  string path = 1;
+  string content = 2;
+  sourcebridge.common.v1.Language language = 3;
+}
+
+message DetectContractsResponse {
+  repeated ContractFile contracts = 1;
+  sourcebridge.common.v1.LLMUsage usage = 2;
+}
+
+message ConsumerMatch {
+  string consumer_file = 1;      // File that consumes the contract
+  string contract_file = 2;      // Contract being consumed
+  string endpoint_path = 3;      // Specific endpoint being called
+  float confidence = 4;          // Match confidence 0.0-1.0
+  string evidence = 5;           // Code snippet or explanation
+}
+
+message MatchConsumersRequest {
+  string repository_id = 1;
+  repeated ContractFile contracts = 2;
+  repeated FileContent source_files = 3;   // Source files to scan for consumers
+}
+
+message MatchConsumersResponse {
+  repeated ConsumerMatch matches = 1;
+  sourcebridge.common.v1.LLMUsage usage = 2;
+}

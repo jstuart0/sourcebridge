@@ -78,10 +78,11 @@ func IsValidDepth(d Depth) bool {
 type ScopeType string
 
 const (
-	ScopeRepository ScopeType = "repository"
-	ScopeModule     ScopeType = "module"
-	ScopeFile       ScopeType = "file"
-	ScopeSymbol     ScopeType = "symbol"
+	ScopeRepository  ScopeType = "repository"
+	ScopeModule      ScopeType = "module"
+	ScopeFile        ScopeType = "file"
+	ScopeSymbol      ScopeType = "symbol"
+	ScopeRequirement ScopeType = "requirement"
 )
 
 // ArtifactScope identifies a repo/module/file/symbol target for an artifact.
@@ -117,6 +118,11 @@ func (s ArtifactScope) Normalize() ArtifactScope {
 	case ScopeSymbol:
 		out.FilePath, out.SymbolName = splitSymbolScopePath(out.ScopePath)
 		out.ModulePath = modulePathForFile(out.FilePath)
+	case ScopeRequirement:
+		// ScopePath is the requirement ID.
+		out.ModulePath = ""
+		out.FilePath = ""
+		out.SymbolName = ""
 	}
 	return out
 }
@@ -173,7 +179,7 @@ func (k ArtifactKey) Validate() error {
 	switch norm.Scope.ScopeType {
 	case ScopeRepository:
 		return nil
-	case ScopeModule, ScopeFile, ScopeSymbol:
+	case ScopeModule, ScopeFile, ScopeSymbol, ScopeRequirement:
 		if norm.Scope.ScopePath == "" {
 			return fmt.Errorf("scope path is required for scope type %s", norm.Scope.ScopeType)
 		}
@@ -274,11 +280,19 @@ func normalizeScopePath(scopeType ScopeType, scopePath string) string {
 }
 
 func splitSymbolScopePath(scopePath string) (string, string) {
+	// Support both # and : as file/symbol separators.
+	// Try # first (canonical), then fall back to : only if the part
+	// after : doesn't look like a file path (i.e., doesn't contain /
+	// or end with a known extension).
 	filePath, symbolName, found := strings.Cut(scopePath, "#")
-	if !found {
-		return scopePath, ""
+	if found {
+		return filePath, symbolName
 	}
-	return filePath, symbolName
+	filePath, symbolName, found = strings.Cut(scopePath, ":")
+	if found && !strings.Contains(symbolName, "/") && !strings.Contains(symbolName, ".") {
+		return filePath, symbolName
+	}
+	return scopePath, ""
 }
 
 func modulePathForFile(filePath string) string {

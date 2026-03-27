@@ -31,6 +31,9 @@ config.toml.example
 # Test files
 tests/
 
+# Enterprise (separate build if needed)
+sourcebridge-enterprise/
+
 # Plugins source (not needed at runtime)
 plugins/
 proto/

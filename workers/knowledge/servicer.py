@@ -11,6 +11,7 @@ from common.v1 import types_pb2
 from knowledge.v1 import knowledge_pb2, knowledge_pb2_grpc
 
 from workers.common.embedding.provider import EmbeddingProvider
+from workers.common.grpc_metadata import resolve_model_override
 from workers.common.llm.provider import LLMProvider
 from workers.knowledge.cliff_notes import generate_cliff_notes
 from workers.knowledge.code_tour import generate_code_tour
@@ -51,6 +52,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         self,
         snapshot_json: str,
         query: str,
+        scope_type: str = "repository",
     ) -> str:
         """Select the best context-building strategy for the snapshot.
 
@@ -74,7 +76,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 log.warn("retrieval_failed_falling_back", error=str(exc))
 
         # Fall back to condensation
-        return condense_snapshot(snapshot_json)
+        return condense_snapshot(snapshot_json, scope_type=scope_type)
 
     async def GenerateCliffNotes(  # noqa: N802
         self,
@@ -96,12 +98,20 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 grpc.StatusCode.INVALID_ARGUMENT,
                 "snapshot_json is required",
             )
+            return  # type: ignore[return-value]  # abort raises but mypy doesn't know
 
         audience = request.audience or "developer"
         depth = request.depth or "medium"
-        query = build_overview_query(request.repository_name, "cliff_notes")
-        snapshot = await self._prepare_snapshot(request.snapshot_json, query)
+        scope_type = request.scope_type or "repository"
+        query = build_overview_query(
+            request.repository_name,
+            "cliff_notes",
+            scope_type=scope_type,
+            scope_path=request.scope_path,
+        )
+        snapshot = await self._prepare_snapshot(request.snapshot_json, query, scope_type=scope_type)
 
+        model_override = resolve_model_override(context)
         try:
             result, usage = await generate_cliff_notes(
                 provider=self._llm,
@@ -111,6 +121,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 scope_type=request.scope_type or "repository",
                 scope_path=request.scope_path,
                 snapshot_json=snapshot,
+                model_override=model_override,
             )
         except Exception as exc:
             log.error("generate_cliff_notes_failed", error=str(exc))
@@ -167,6 +178,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 grpc.StatusCode.INVALID_ARGUMENT,
                 "snapshot_json is required",
             )
+            return  # type: ignore[return-value]  # abort raises but mypy doesn't know
 
         audience = request.audience or "developer"
         depth = request.depth or "medium"
@@ -175,6 +187,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             query = f"{request.focus_area} {query}"
         snapshot = await self._prepare_snapshot(request.snapshot_json, query)
 
+        model_override = resolve_model_override(context)
         try:
             result, usage = await generate_learning_path(
                 provider=self._llm,
@@ -183,6 +196,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 depth=depth,
                 snapshot_json=snapshot,
                 focus_area=request.focus_area,
+                model_override=model_override,
             )
         except Exception as exc:
             log.error("generate_learning_path_failed", error=str(exc))
@@ -230,24 +244,28 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 grpc.StatusCode.INVALID_ARGUMENT,
                 "snapshot_json is required",
             )
+            return  # type: ignore[return-value]  # abort raises but mypy doesn't know
 
         audience = request.audience or "developer"
         depth = request.depth or "medium"
+        scope_type = request.scope_type or "repository"
         query = build_overview_query(request.repository_name, "workflow_story")
         if request.anchor_label:
             query = f"{request.anchor_label} {query}"
-        snapshot = await self._prepare_snapshot(request.snapshot_json, query)
+        snapshot = await self._prepare_snapshot(request.snapshot_json, query, scope_type=scope_type)
 
+        model_override = resolve_model_override(context)
         try:
             result, usage = await generate_workflow_story(
                 provider=self._llm,
                 repository_name=request.repository_name,
                 audience=audience,
                 depth=depth,
-                scope_type=request.scope_type or "repository",
+                scope_type=scope_type,
                 scope_path=request.scope_path,
                 anchor_label=request.anchor_label,
                 execution_path_json=request.execution_path_json,
+                model_override=model_override,
                 snapshot_json=snapshot,
             )
         except Exception as exc:
@@ -304,21 +322,26 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 grpc.StatusCode.INVALID_ARGUMENT,
                 "snapshot_json is required",
             )
+            return  # type: ignore[return-value]  # abort raises but mypy doesn't know
 
         audience = request.audience or "developer"
+        depth = request.depth or "medium"
         # For Q&A, use the actual question for retrieval
         query = request.question or build_overview_query(
             request.repository_name, "explain"
         )
         snapshot = await self._prepare_snapshot(request.snapshot_json, query)
 
+        model_override = resolve_model_override(context)
         try:
             result, usage = await explain_system(
                 provider=self._llm,
                 repository_name=request.repository_name,
                 audience=audience,
+                depth=depth,
                 question=request.question,
                 snapshot_json=snapshot,
+                model_override=model_override,
             )
         except Exception as exc:
             log.error("explain_system_failed", error=str(exc))
@@ -351,6 +374,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 grpc.StatusCode.INVALID_ARGUMENT,
                 "snapshot_json is required",
             )
+            return  # type: ignore[return-value]  # abort raises but mypy doesn't know
 
         audience = request.audience or "developer"
         depth = request.depth or "medium"
@@ -359,6 +383,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             query = f"{request.theme} {query}"
         snapshot = await self._prepare_snapshot(request.snapshot_json, query)
 
+        model_override = resolve_model_override(context)
         try:
             result, usage = await generate_code_tour(
                 provider=self._llm,
@@ -367,6 +392,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 depth=depth,
                 snapshot_json=snapshot,
                 theme=request.theme,
+                model_override=model_override,
             )
         except Exception as exc:
             log.error("generate_code_tour_failed", error=str(exc))

@@ -2,7 +2,7 @@ export interface SourceTarget {
   filePath: string;
   line?: number;
   endLine?: number;
-  tab?: "files" | "symbols" | "requirements" | "analysis" | "knowledge" | "settings";
+  tab?: "files" | "symbols" | "requirements" | "analysis" | "impact" | "knowledge" | "settings";
 }
 
 export function buildRepositorySourceHref(

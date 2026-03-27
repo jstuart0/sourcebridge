@@ -52,48 +52,111 @@ def _normalize_text(raw: object) -> str:
 
 def _normalize_section_object(raw: dict[str, object]) -> dict[str, object]:
     """Flatten nested section-shaped objects into the expected top-level shape."""
-    content = raw.get("content")
-    if isinstance(content, dict):
-        nested = content
-        merged = dict(nested)
-        merged.setdefault("title", raw.get("title"))
-        merged.setdefault("summary", raw.get("summary", ""))
-        merged.setdefault("confidence", raw.get("confidence", "medium"))
-        merged.setdefault("inferred", raw.get("inferred", False))
-        merged.setdefault("evidence", raw.get("evidence", nested.get("evidence", [])))
-        raw = merged
+    try:
+        content = raw.get("content")
+        if isinstance(content, dict):
+            nested = content
+            merged = dict(nested)
+            merged.setdefault("title", raw.get("title"))
+            merged.setdefault("summary", raw.get("summary", ""))
+            merged.setdefault("confidence", raw.get("confidence", "medium"))
+            merged.setdefault("inferred", raw.get("inferred", False))
+            # Safely extract evidence — nested.get("evidence") may be a string
+            outer_ev = raw.get("evidence", [])
+            inner_ev = nested.get("evidence", [])
+            fallback_ev = outer_ev if isinstance(outer_ev, list) else (inner_ev if isinstance(inner_ev, list) else [])
+            merged.setdefault("evidence", fallback_ev)
+            raw = merged
 
-    evidence = raw.get("evidence", [])
-    if not isinstance(evidence, list):
-        evidence = []
+        evidence = raw.get("evidence", [])
+        if not isinstance(evidence, list):
+            evidence = []
 
-    content_text = _normalize_text(raw.get("content", ""))
-    summary_text = _normalize_text(raw.get("summary", ""))
-    if not summary_text and content_text:
-        summary_text = content_text.splitlines()[0][:160]
+        content_text = _normalize_text(raw.get("content", ""))
+        summary_text = _normalize_text(raw.get("summary", ""))
+        if not summary_text and content_text:
+            summary_text = content_text.splitlines()[0][:160]
 
-    return {
-        "title": _normalize_text(raw.get("title", "")),
-        "content": content_text,
-        "summary": summary_text,
-        "confidence": _normalize_text(raw.get("confidence", "medium")) or "medium",
-        "inferred": bool(raw.get("inferred", False)),
-        "evidence": evidence,
-    }
+        return {
+            "title": _normalize_text(raw.get("title", "")),
+            "content": content_text,
+            "summary": summary_text,
+            "confidence": _normalize_text(raw.get("confidence", "medium")) or "medium",
+            "inferred": bool(raw.get("inferred", False)),
+            "evidence": evidence,
+        }
+    except (AttributeError, TypeError, KeyError) as exc:
+        log.warning("section_normalize_failed", error=str(exc), raw_type=type(raw).__name__)
+        return {
+            "title": "",
+            "content": _normalize_text(raw) if raw else "",
+            "summary": "",
+            "confidence": "low",
+            "inferred": True,
+            "evidence": [],
+        }
 
 
 def _parse_sections(raw: str) -> list[dict[str, object]]:
-    """Parse JSON array from LLM response, tolerating markdown fences."""
+    """Parse JSON array from LLM response, tolerating common LLM quirks.
+
+    Handles: <think> blocks, markdown fences, object-wrapped arrays,
+    and preamble/postamble text around JSON.
+    """
+    import re
+
     text = raw.strip()
 
-    # Strip markdown code fences if present
+    # Strip <think>...</think> blocks (Qwen and other reasoning models)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+    # Strip markdown code fences if present (handles ```json, ``` json, etc.)
     if text.startswith("```"):
-        first_newline = text.index("\n")
-        text = text[first_newline + 1 :]
+        first_newline = text.find("\n")
+        if first_newline != -1:
+            text = text[first_newline + 1 :]
+        else:
+            text = text[3:]
+        text = text.rstrip()
         if text.endswith("```"):
             text = text[: -3].rstrip()
 
-    parsed = json.loads(text)
+    # Try direct parse first
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        # Try to extract a JSON array from the text (LLM added preamble/postamble)
+        match = re.search(r"\[.*\]", text, flags=re.DOTALL)
+        if match:
+            parsed = json.loads(match.group())
+        else:
+            raise
+
+    # If parsed is a dict, try to extract a list from known keys
+    if isinstance(parsed, dict):
+        for key in ("sections", "data", "items", "results", "steps", "stops"):
+            if key in parsed and isinstance(parsed[key], list):
+                return parsed[key]  # type: ignore[no-any-return]
+        # Check for single nested key wrapping the real content
+        if len(parsed) == 1:
+            sole_value = next(iter(parsed.values()))
+            if isinstance(sole_value, list):
+                return sole_value  # type: ignore[no-any-return]
+            if isinstance(sole_value, dict):
+                # e.g. {"workflow_story": {"Goal": {...}, "Trigger": {...}}}
+                if all(isinstance(v, dict) for v in sole_value.values()):
+                    return [{"title": k, **v} for k, v in sole_value.items()]
+        # If it looks like a single section object (has "title" and "content"), wrap it
+        if "title" in parsed and "content" in parsed:
+            return [parsed]
+        # If all values are dicts (keyed by section title), convert to list
+        if all(isinstance(v, dict) for v in parsed.values()):
+            return [{"title": k, **v} for k, v in parsed.items()]
+        # If all values are strings (keyed by section title), wrap as content
+        if all(isinstance(v, str) for v in parsed.values()):
+            return [{"title": k, "content": v} for k, v in parsed.items()]
+        raise ValueError("expected a JSON array of sections")
+
     if not isinstance(parsed, list):
         raise ValueError("expected a JSON array of sections")
     return parsed  # type: ignore[no-any-return]
@@ -150,6 +213,7 @@ async def generate_cliff_notes(
     snapshot_json: str,
     scope_type: str = "repository",
     scope_path: str = "",
+    model_override: str | None = None,
 ) -> tuple[CliffNotesResult, LLMUsageRecord]:
     """Generate cliff notes from a repository snapshot.
 
@@ -162,7 +226,7 @@ async def generate_cliff_notes(
     )
 
     response: LLMResponse = await provider.complete(
-        prompt, system=CLIFF_NOTES_SYSTEM, temperature=0.0, max_tokens=8192
+        prompt, system=CLIFF_NOTES_SYSTEM, temperature=0.0, max_tokens=8192, model=model_override,
     )
 
     try:
@@ -217,6 +281,36 @@ async def generate_cliff_notes(
                     inferred=True,
                 )
             )
+
+    # --- Baseline quality instrumentation ---
+    evidence_by_type: dict[str, int] = {}
+    total_evidence = 0
+    sections_with_content = 0
+    for sec in sections:
+        if sec.content and sec.content != "*Insufficient data to generate this section.*":
+            sections_with_content += 1
+        for ev in sec.evidence:
+            evidence_by_type[ev.source_type] = evidence_by_type.get(ev.source_type, 0) + 1
+            total_evidence += 1
+
+    log.info(
+        "cliff_notes_quality_metrics",
+        scope_type=effective_scope,
+        scope_path=scope_path,
+        repository=repository_name,
+        depth=depth,
+        total_sections=len(sections),
+        required_sections=len(required_sections),
+        sections_with_content=sections_with_content,
+        stub_sections=len(sections) - sections_with_content,
+        total_evidence=total_evidence,
+        evidence_by_type=evidence_by_type,
+        high_confidence=sum(1 for s in sections if s.confidence == "high"),
+        medium_confidence=sum(1 for s in sections if s.confidence == "medium"),
+        low_confidence=sum(1 for s in sections if s.confidence == "low"),
+        inferred_sections=sum(1 for s in sections if s.inferred),
+        avg_content_length=sum(len(s.content) for s in sections) // max(len(sections), 1),
+    )
 
     usage = LLMUsageRecord(
         provider="llm",

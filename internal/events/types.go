@@ -14,6 +14,7 @@ const (
 
 	EventRequirementImported = "requirement.imported"
 	EventRequirementLinked   = "requirement.linked"
+	EventSpecExtraction      = "spec.extraction.completed"
 
 	EventLinkVerified = "link.verified"
 	EventLinkRejected = "link.rejected"

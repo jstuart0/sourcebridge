@@ -5,13 +5,14 @@ metadata:
   labels:
     {{- include "sourcebridge.labels" . | nindent 4 }}
 data:
+  # ─── API server config ─────────────────────────────────────────────
   SOURCEBRIDGE_SERVER_HTTP_PORT: {{ .Values.api.port | quote }}
-  SOURCEBRIDGE_SERVER_PUBLIC_BASE_URL: "https://{{ .Values.global.domain }}"
+  SOURCEBRIDGE_SERVER_PUBLIC_BASE_URL: "{{ if .Values.global.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.global.domain }}"
   {{- if .Values.surrealdb.enabled }}
   SOURCEBRIDGE_STORAGE_SURREAL_MODE: "external"
-  SOURCEBRIDGE_STORAGE_SURREAL_URL: "ws://{{ include "sourcebridge.fullname" . }}-surrealdb:{{ .Values.surrealdb.port }}"
+  SOURCEBRIDGE_STORAGE_SURREAL_URL: "ws://{{ include "sourcebridge.fullname" . }}-surrealdb:{{ .Values.surrealdb.port }}/rpc"
   SOURCEBRIDGE_STORAGE_SURREAL_NAMESPACE: "sourcebridge"
-  SOURCEBRIDGE_STORAGE_SURREAL_DATABASE: "main"
+  SOURCEBRIDGE_STORAGE_SURREAL_DATABASE: "sourcebridge"
   {{- end }}
   {{- if .Values.redis.enabled }}
   SOURCEBRIDGE_STORAGE_REDIS_MODE: "external"
@@ -19,7 +20,28 @@ data:
   {{- else }}
   SOURCEBRIDGE_STORAGE_REDIS_MODE: "memory"
   {{- end }}
-  SOURCEBRIDGE_WORKER_GRPC_ADDRESS: "{{ include "sourcebridge.fullname" . }}-worker:50051"
+  SOURCEBRIDGE_WORKER_ADDRESS: "{{ include "sourcebridge.fullname" . }}-worker:50051"
+
+  # ─── Worker config ─────────────────────────────────────────────────
+  SOURCEBRIDGE_WORKER_GRPC_PORT: "50051"
+  {{- if .Values.surrealdb.enabled }}
+  SOURCEBRIDGE_WORKER_SURREAL_URL: "ws://{{ include "sourcebridge.fullname" . }}-surrealdb:{{ .Values.surrealdb.port }}/rpc"
+  SOURCEBRIDGE_WORKER_SURREAL_NAMESPACE: "sourcebridge"
+  SOURCEBRIDGE_WORKER_SURREAL_DATABASE: "sourcebridge"
+  {{- end }}
+  SOURCEBRIDGE_WORKER_LLM_PROVIDER: {{ .Values.llm.provider | quote }}
+  SOURCEBRIDGE_WORKER_LLM_MODEL: {{ .Values.llm.model | quote }}
+  {{- if .Values.llm.baseUrl }}
+  SOURCEBRIDGE_WORKER_LLM_BASE_URL: {{ .Values.llm.baseUrl | quote }}
+  {{- end }}
+  SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER: {{ .Values.embedding.provider | quote }}
+  SOURCEBRIDGE_WORKER_EMBEDDING_MODEL: {{ .Values.embedding.model | quote }}
+  SOURCEBRIDGE_WORKER_EMBEDDING_DIMENSION: {{ .Values.embedding.dimension | quote }}
+  {{- if .Values.embedding.baseUrl }}
+  SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL: {{ .Values.embedding.baseUrl | quote }}
+  {{- end }}
+
+  # ─── Extra worker env overrides ────────────────────────────────────
   {{- range $key, $value := .Values.worker.env }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}

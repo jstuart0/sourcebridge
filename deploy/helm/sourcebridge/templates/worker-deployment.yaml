@@ -13,7 +13,15 @@ spec:
     metadata:
       labels:
         {{- include "sourcebridge.worker.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
     spec:
+      serviceAccountName: {{ include "sourcebridge.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.worker.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -30,37 +38,10 @@ spec:
         - name: worker
           image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
           imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
-          env:
-            {{- if .Values.surrealdb.enabled }}
-            - name: SURREALDB_URL
-              value: {{ include "sourcebridge.surrealdb.url" . }}
-            {{- end }}
-            {{- if .Values.redis.enabled }}
-            - name: REDIS_URL
-              value: {{ include "sourcebridge.redis.url" . }}
-            {{- end }}
-            {{- if .Values.secrets.create }}
-            - name: SURREALDB_USER
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "sourcebridge.fullname" . }}-secrets
-                  key: surrealdb-user
-            - name: SURREALDB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "sourcebridge.fullname" . }}-secrets
-                  key: surrealdb-password
-            - name: LLM_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "sourcebridge.fullname" . }}-secrets
-                  key: llm-api-key
-                  optional: true
-            {{- end }}
-            {{- range $key, $value := .Values.worker.env }}
-            - name: {{ $key }}
-              value: {{ $value | quote }}
-            {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: grpc
               containerPort: 50051
@@ -68,6 +49,40 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "sourcebridge.fullname" . }}-config
+          env:
+            {{- if .Values.secrets.create }}
+            - name: SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sourcebridge.fullname" . }}-secrets
+                  key: grpc-auth-secret
+            - name: SOURCEBRIDGE_WORKER_SURREAL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sourcebridge.fullname" . }}-secrets
+                  key: surrealdb-user
+            - name: SOURCEBRIDGE_WORKER_SURREAL_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sourcebridge.fullname" . }}-secrets
+                  key: surrealdb-password
+            - name: SOURCEBRIDGE_WORKER_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sourcebridge.fullname" . }}-secrets
+                  key: llm-api-key
+                  optional: true
+            - name: SOURCEBRIDGE_WORKER_EMBEDDING_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sourcebridge.fullname" . }}-secrets
+                  key: embedding-api-key
+                  optional: true
+            {{- end }}
+            {{- range $key, $value := .Values.worker.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
           readinessProbe:
             grpc:
               port: 50051

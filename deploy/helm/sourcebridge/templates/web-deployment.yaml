@@ -13,7 +13,14 @@ spec:
     metadata:
       labels:
         {{- include "sourcebridge.web.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
+      serviceAccountName: {{ include "sourcebridge.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.web.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -30,16 +37,19 @@ spec:
         - name: web
           image: "{{ .Values.web.image.repository }}:{{ .Values.web.image.tag }}"
           imagePullPolicy: {{ .Values.web.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.web.port }}
               protocol: TCP
           env:
-            - name: API_URL
+            - name: NEXT_PUBLIC_API_URL
               value: "http://{{ include "sourcebridge.fullname" . }}-api:{{ .Values.api.service.port }}"
-          envFrom:
-            - configMapRef:
-                name: {{ include "sourcebridge.fullname" . }}-config
+            - name: SOURCEBRIDGE_WEB_DEV_PROXY
+              value: "http://{{ include "sourcebridge.fullname" . }}-api:{{ .Values.api.service.port }}"
           livenessProbe:
             httpGet:
               path: /

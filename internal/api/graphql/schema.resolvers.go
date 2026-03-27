@@ -12,12 +12,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
+	contractsv1 "github.com/sourcebridge/sourcebridge/gen/go/contracts/v1"
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
 	linkingv1 "github.com/sourcebridge/sourcebridge/gen/go/linking/v1"
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 	requirementsv1 "github.com/sourcebridge/sourcebridge/gen/go/requirements/v1"
+	"github.com/sourcebridge/sourcebridge/internal/architecture"
 	"github.com/sourcebridge/sourcebridge/internal/events"
 	"github.com/sourcebridge/sourcebridge/internal/git"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
@@ -371,7 +374,7 @@ func (r *mutationResolver) VerifyLink(ctx context.Context, linkID string, verifi
 	} else {
 		r.Resolver.publishEvent(events.EventLinkRejected, map[string]interface{}{"link_id": linkID})
 	}
-	return mapLink(link), nil
+	return mapLinkWithRelations(link, r.getStore(ctx)), nil
 }
 
 // CreateManualLink is the resolver for the createManualLink field.
@@ -393,13 +396,19 @@ func (r *mutationResolver) CreateManualLink(ctx context.Context, input CreateMan
 		Verified:      true,
 		VerifiedBy:    "graphql-user",
 	})
-	return mapLink(link), nil
+	if link == nil {
+		return nil, fmt.Errorf("failed to create link")
+	}
+	return mapLinkWithRelations(link, r.getStore(ctx)), nil
 }
 
 // AnalyzeSymbol is the resolver for the analyzeSymbol field.
 func (r *mutationResolver) AnalyzeSymbol(ctx context.Context, repositoryID string, symbolID string) (*AnalysisResult, error) {
 	if r.Worker == nil {
 		return nil, fmt.Errorf("AI features are unavailable: worker not connected")
+	}
+	if r.getStore(ctx) == nil {
+		return nil, fmt.Errorf("store not initialized")
 	}
 
 	sym := r.getStore(ctx).GetSymbol(symbolID)
@@ -420,6 +429,7 @@ func (r *mutationResolver) AnalyzeSymbol(ctx context.Context, repositoryID strin
 
 	symbolContext := extractSymbolContext(fileContent, sym.StartLine, sym.EndLine)
 
+	ctx = r.withModelMetadata(ctx, "analysis")
 	resp, err := r.Worker.AnalyzeSymbol(ctx, &reasoningv1.AnalyzeSymbolRequest{
 		RepositoryId: repositoryID,
 		Symbol: &commonv1.CodeSymbol{
@@ -468,6 +478,13 @@ func (r *mutationResolver) DiscussCode(ctx context.Context, input DiscussCodeInp
 		return nil, fmt.Errorf("AI features are unavailable: worker not connected")
 	}
 
+	slog.Info("discuss_code_request",
+		"repository_id", input.RepositoryID,
+		"client_type", clientTypeFromContext(ctx),
+		"has_requirement_id", input.RequirementID != nil && *input.RequirementID != "",
+		"has_artifact_id", input.ArtifactID != nil && *input.ArtifactID != "",
+	)
+
 	contextParts := make([]string, 0, 4)
 	if input.ConversationHistory != nil && len(input.ConversationHistory) > 0 {
 		contextParts = append(contextParts, "Recent follow-up context:\n"+strings.Join(input.ConversationHistory, "\n\n"))
@@ -475,6 +492,14 @@ func (r *mutationResolver) DiscussCode(ctx context.Context, input DiscussCodeInp
 	if input.ArtifactID != nil && *input.ArtifactID != "" && r.KnowledgeStore != nil {
 		if artifact := r.KnowledgeStore.GetKnowledgeArtifact(*input.ArtifactID); artifact != nil {
 			contextParts = append(contextParts, discussionContextFromArtifact(artifact))
+		}
+	}
+	if input.RequirementID != nil && *input.RequirementID != "" {
+		if req := r.getStore(ctx).GetRequirement(*input.RequirementID); req != nil {
+			contextParts = append(contextParts, fmt.Sprintf(
+				"Requirement context:\nID: %s\nTitle: %s\nDescription: %s",
+				req.ExternalID, req.Title, req.Description,
+			))
 		}
 	}
 
@@ -489,6 +514,17 @@ func (r *mutationResolver) DiscussCode(ctx context.Context, input DiscussCodeInp
 			if input.FilePath == nil || *input.FilePath == "" {
 				filePath := sym.FilePath
 				input.FilePath = &filePath
+			}
+			// Also read the actual source file so the LLM has full code context, not just metadata.
+			if input.FilePath != nil && *input.FilePath != "" {
+				repo := r.getStore(ctx).GetRepository(input.RepositoryID)
+				repoRoot, err := resolveRepoSourcePath(repo)
+				if err == nil {
+					content, err := readSourceFile(repoRoot, *input.FilePath)
+					if err == nil && content != "" {
+						contextParts = append(contextParts, content)
+					}
+				}
 			}
 		}
 	}
@@ -534,6 +570,7 @@ func (r *mutationResolver) DiscussCode(ctx context.Context, input DiscussCodeInp
 		}
 	}
 
+	ctx = r.withModelMetadata(ctx, "discussion")
 	resp, err := r.Worker.AnswerQuestion(ctx, &reasoningv1.AnswerQuestionRequest{
 		Question:       input.Question,
 		RepositoryId:   input.RepositoryID,
@@ -558,15 +595,43 @@ func (r *mutationResolver) DiscussCode(ctx context.Context, input DiscussCodeInp
 		RelatedRequirements: []string{},
 	}
 	for _, sym := range resp.ReferencedSymbols {
-		result.References = append(result.References, sym.Name)
+		ref := sym.QualifiedName
+		if ref == "" {
+			ref = sym.Name
+		}
+		if ref != "" {
+			result.References = append(result.References, ref)
+		}
 	}
+
+	// Populate relatedRequirements from linked requirements for context symbols.
+	seenReqs := map[string]bool{}
+	store := r.getStore(ctx)
+	for _, cs := range contextSymbols {
+		for _, link := range store.GetLinksForSymbol(cs.Id, false) {
+			if seenReqs[link.RequirementID] {
+				continue
+			}
+			seenReqs[link.RequirementID] = true
+			if req := store.GetRequirement(link.RequirementID); req != nil {
+				label := req.ExternalID
+				if label == "" {
+					label = req.Title
+				}
+				if label != "" {
+					result.RelatedRequirements = append(result.RelatedRequirements, label)
+				}
+			}
+		}
+	}
+
 	if resp.Usage != nil {
 		result.Model = &resp.Usage.Model
 		inTok := int(resp.Usage.InputTokens)
 		outTok := int(resp.Usage.OutputTokens)
 		result.InputTokens = &inTok
 		result.OutputTokens = &outTok
-		r.getStore(ctx).StoreLLMUsage(&graphstore.LLMUsageRecord{
+		store.StoreLLMUsage(&graphstore.LLMUsageRecord{
 			RepoID: input.RepositoryID, Provider: resp.Usage.Model, Model: resp.Usage.Model,
 			Operation: "discuss_code", InputTokens: int(resp.Usage.InputTokens), OutputTokens: int(resp.Usage.OutputTokens),
 		})
@@ -602,6 +667,7 @@ func (r *mutationResolver) ReviewCode(ctx context.Context, input ReviewCodeInput
 		lang = languageToProto(input.Language.String())
 	}
 
+	ctx = r.withModelMetadata(ctx, "review")
 	resp, err := r.Worker.ReviewFile(ctx, &reasoningv1.ReviewFileRequest{
 		RepositoryId: input.RepositoryID,
 		FilePath:     input.FilePath,
@@ -725,62 +791,60 @@ func (r *mutationResolver) AutoLinkRequirements(ctx context.Context, repositoryI
 		})
 	}
 
-	var allLinks []*RequirementLink
-	processed := 0
-
-	// Process each requirement via repeated LinkRequirement calls
+	// Build proto requirements for the batch call
+	protoReqs := make([]*commonv1.Requirement, 0, len(reqs))
 	for _, req := range reqs {
-		processed++
-
-		protoReq := &commonv1.Requirement{
+		protoReqs = append(protoReqs, &commonv1.Requirement{
 			Id:          req.ID,
 			ExternalId:  req.ExternalID,
 			Title:       req.Title,
 			Description: req.Description,
 			Priority:    req.Priority,
 			Tags:        req.Tags,
-		}
-
-		resp, err := r.Worker.LinkRequirement(ctx, &linkingv1.LinkRequirementRequest{
-			Requirement:      protoReq,
-			RepositoryId:     repositoryID,
-			CandidateSymbols: candidates,
-			MinConfidence:    minConf,
 		})
-		if err != nil {
-			slog.Warn("auto-link failed for requirement", "req_id", req.ID, "error", err)
-			continue
-		}
-
-		for _, link := range resp.Links {
-			conf := protoConfidenceToFloat(link.Confidence)
-			stored := r.getStore(ctx).StoreLink(repositoryID, &graphstore.StoredLink{
-				RequirementID: link.RequirementId,
-				SymbolID:      link.SymbolId,
-				Confidence:    conf,
-				Source:        "semantic",
-				LinkType:      "implements",
-				Rationale:     link.Rationale,
-			})
-			if stored != nil {
-				allLinks = append(allLinks, mapLink(stored))
-			}
-		}
 	}
 
-	if allLinks == nil {
-		allLinks = []*RequirementLink{}
+	slog.Info("auto-link: starting batch link", "requirements", len(protoReqs), "candidates", len(candidates))
+
+	// Use BatchLink for a single gRPC call — entity embeddings are computed once
+	// and reused across all requirements by the worker.
+	resp, err := r.Worker.BatchLink(context.Background(), &linkingv1.BatchLinkRequest{
+		Requirements:     protoReqs,
+		RepositoryId:     repositoryID,
+		MinConfidence:    minConf,
+		CandidateSymbols: candidates,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("batch link failed: %w", err)
 	}
+
+	// Convert proto links to StoredLink objects for bulk insert
+	storedLinks := make([]*graphstore.StoredLink, 0, len(resp.Links))
+	for _, link := range resp.Links {
+		storedLinks = append(storedLinks, &graphstore.StoredLink{
+			RequirementID: link.RequirementId,
+			SymbolID:      link.SymbolId,
+			Confidence:    protoConfidenceToFloat(link.Confidence),
+			Source:        "semantic",
+			LinkType:      "implements",
+			Rationale:     link.Rationale,
+		})
+	}
+
+	slog.Info("auto-link: storing links", "count", len(storedLinks))
+	store := r.getStore(ctx)
+	stored := store.StoreLinks(repositoryID, storedLinks)
+	slog.Info("auto-link: storage complete", "stored", stored)
 
 	r.Resolver.publishEvent(events.EventRequirementLinked, map[string]interface{}{
-		"repo_id": repositoryID, "links_created": len(allLinks),
-		"requirements_processed": processed,
+		"repo_id": repositoryID, "links_created": stored,
+		"requirements_processed": int(resp.RequirementsProcessed),
 	})
 
 	return &AutoLinkResult{
-		LinksCreated:          len(allLinks),
-		RequirementsProcessed: processed,
-		Links:                 allLinks,
+		LinksCreated:          stored,
+		RequirementsProcessed: int(resp.RequirementsProcessed),
+		Links:                 []*RequirementLink{},
 	}, nil
 }
 
@@ -795,6 +859,7 @@ func (r *mutationResolver) EnrichRequirement(ctx context.Context, requirementID 
 		return nil, fmt.Errorf("requirement not found: %s", requirementID)
 	}
 
+	ctx = r.withModelMetadata(ctx, "analysis")
 	resp, err := r.Worker.EnrichRequirement(ctx, &requirementsv1.EnrichRequirementRequest{
 		Requirement: &commonv1.Requirement{
 			Id:          req.ID,
@@ -837,6 +902,405 @@ func (r *mutationResolver) EnrichRequirement(ctx context.Context, requirementID 
 	return mapRequirement(updated), nil
 }
 
+// SimulateChange is the resolver for the simulateChange field.
+func (r *mutationResolver) SimulateChange(ctx context.Context, input SimulateChangeInput) (*SimulatedImpactReport, error) {
+	if r.Worker == nil {
+		return nil, fmt.Errorf("AI features are unavailable: worker not connected")
+	}
+
+	store := r.getStore(ctx)
+	repo := store.GetRepository(input.RepositoryID)
+	if repo == nil {
+		return nil, fmt.Errorf("repository not found: %s", input.RepositoryID)
+	}
+
+	desc := strings.TrimSpace(input.Description)
+	if desc == "" {
+		return nil, fmt.Errorf("description must be non-empty")
+	}
+	if len(desc) > 2000 {
+		return nil, fmt.Errorf("description must be 2000 characters or fewer")
+	}
+
+	// Load all symbols for the repo
+	allSyms, _ := store.GetSymbols(input.RepositoryID, nil, nil, 10000, 0)
+	if len(allSyms) == 0 {
+		return nil, fmt.Errorf("repository has no indexed symbols")
+	}
+
+	// Build proto symbols
+	protoSymbols := make([]*commonv1.CodeSymbol, 0, len(allSyms))
+	for _, sym := range allSyms {
+		protoSymbols = append(protoSymbols, &commonv1.CodeSymbol{
+			Id:            sym.ID,
+			Name:          sym.Name,
+			QualifiedName: sym.QualifiedName,
+			Kind:          commonv1.SymbolKind(commonv1.SymbolKind_value["SYMBOL_KIND_"+strings.ToUpper(sym.Kind)]),
+			Language:      languageToProto(sym.Language),
+			Location: &commonv1.FileLocation{
+				Path:      sym.FilePath,
+				StartLine: int32(sym.StartLine),
+				EndLine:   int32(sym.EndLine),
+			},
+			Signature:  sym.Signature,
+			DocComment: sym.DocComment,
+		})
+	}
+
+	anchorFile := ""
+	if input.AnchorFile != nil {
+		anchorFile = *input.AnchorFile
+	}
+	anchorSymbol := ""
+	if input.AnchorSymbol != nil {
+		anchorSymbol = *input.AnchorSymbol
+	}
+
+	slog.Info("simulate-change: resolving symbols", "repo", repo.Name, "symbols", len(protoSymbols), "descLen", len(desc))
+
+	resp, err := r.Worker.SimulateChange(ctx, &reasoningv1.SimulateChangeRequest{
+		RepositoryId: input.RepositoryID,
+		Description:  desc,
+		AnchorFile:   anchorFile,
+		AnchorSymbol: anchorSymbol,
+		Symbols:      protoSymbols,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("simulation failed: %w", err)
+	}
+
+	// Determine call graph expansion depth
+	maxDepth := 2
+	if len(allSyms) > 50000 {
+		maxDepth = 1
+	}
+
+	// Expand via call graph and compute impact
+	expandedChanges := graphstore.ExpandViaCallGraph(store, resp.ResolvedSymbols, maxDepth)
+	fileDiffs, _ := graphstore.BuildSimulatedChanges(resp.ResolvedSymbols)
+	report := graphstore.ComputeImpact(store, input.RepositoryID, fileDiffs, expandedChanges)
+
+	// Mark as simulated
+	report.ID = fmt.Sprintf("sim-%s-%d", input.RepositoryID, time.Now().UnixMilli())
+	report.OldCommitSHA = ""
+	report.NewCommitSHA = ""
+
+	// Build resolved symbols for the response
+	resolvedSymbols := make([]*ResolvedSymbol, 0, len(resp.ResolvedSymbols))
+	for _, rs := range resp.ResolvedSymbols {
+		resolvedSymbols = append(resolvedSymbols, &ResolvedSymbol{
+			SymbolID:      rs.SymbolId,
+			Name:          rs.Name,
+			QualifiedName: rs.QualifiedName,
+			Kind:          rs.Kind,
+			FilePath:      rs.FilePath,
+			Similarity:    float64(rs.Similarity),
+			IsAnchor:      rs.IsAnchor,
+		})
+	}
+
+	now := time.Now().UTC()
+	return &SimulatedImpactReport{
+		ID:              report.ID,
+		Simulated:       true,
+		Description:     desc,
+		AnchorFile:      input.AnchorFile,
+		AnchorSymbol:    input.AnchorSymbol,
+		ResolvedSymbols: resolvedSymbols,
+		Report:          mapImpactReport(report),
+		ComputedAt:      now,
+	}, nil
+}
+
+// TriggerSpecExtraction is the resolver for the triggerSpecExtraction field.
+func (r *mutationResolver) TriggerSpecExtraction(ctx context.Context, input TriggerSpecExtractionInput) (*SpecExtractionResult, error) {
+	if r.Worker == nil {
+		return nil, fmt.Errorf("AI features are unavailable: worker not connected")
+	}
+
+	store := r.getStore(ctx)
+	repo := store.GetRepository(input.RepositoryID)
+	if repo == nil {
+		return nil, fmt.Errorf("repository not found: %s", input.RepositoryID)
+	}
+
+	repoRoot, err := resolveRepoSourcePath(repo)
+	if err != nil {
+		return nil, fmt.Errorf("source unavailable: %w", err)
+	}
+
+	// Gather source files suitable for spec extraction
+	files := store.GetFiles(input.RepositoryID)
+	var protoFiles []*requirementsv1.FileEntry
+	for _, f := range files {
+		content, err := readSourceFileLimited(repoRoot, f.Path, 512*1024) // 512KB limit
+		if err != nil {
+			continue
+		}
+		protoFiles = append(protoFiles, &requirementsv1.FileEntry{
+			Path:      f.Path,
+			Content:   content,
+			Language:  f.Language,
+			LineCount: int32(f.LineCount),
+		})
+	}
+
+	if len(protoFiles) == 0 {
+		return &SpecExtractionResult{Warnings: []string{"no readable source files found"}}, nil
+	}
+
+	skipLLM := input.SkipLlmRefinement != nil && *input.SkipLlmRefinement
+
+	slog.Info("spec-extraction: starting", "repo", repo.Name, "files", len(protoFiles), "skipLLM", skipLLM)
+
+	resp, err := r.Worker.ExtractSpecs(ctx, &requirementsv1.ExtractSpecsRequest{
+		RepositoryId:      input.RepositoryID,
+		RepositoryName:    repo.Name,
+		Files:             protoFiles,
+		SkipLlmRefinement: skipLLM,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("spec extraction failed: %w", err)
+	}
+
+	// Store discovered specs
+	var toStore []*graphstore.DiscoveredRequirement
+	for _, spec := range resp.Specs {
+		sourceFiles := spec.SourceFiles
+		if sourceFiles == nil {
+			sourceFiles = []string{}
+		}
+		keywords := spec.Keywords
+		if keywords == nil {
+			keywords = []string{}
+		}
+		toStore = append(toStore, &graphstore.DiscoveredRequirement{
+			RepoID:      input.RepositoryID,
+			Source:      spec.Source,
+			SourceFile:  spec.SourceFile,
+			SourceLine:  int(spec.SourceLine),
+			SourceFiles: sourceFiles,
+			Text:        spec.Text,
+			RawText:     spec.RawText,
+			GroupKey:    spec.GroupKey,
+			Language:    spec.Language,
+			Keywords:    keywords,
+			Confidence:  spec.Confidence,
+			Status:      "discovered",
+			LLMRefined:  spec.LlmRefined,
+		})
+	}
+	stored := store.StoreDiscoveredRequirements(input.RepositoryID, toStore)
+
+	slog.Info("spec-extraction: complete", "discovered", stored, "candidates", resp.TotalCandidates)
+
+	r.Resolver.publishEvent(events.EventSpecExtraction, map[string]interface{}{
+		"repo_id": input.RepositoryID, "discovered": stored,
+		"total_candidates": int(resp.TotalCandidates),
+	})
+
+	result := &SpecExtractionResult{
+		Discovered:      stored,
+		TotalCandidates: int(resp.TotalCandidates),
+		Warnings:        resp.Warnings,
+	}
+	if result.Warnings == nil {
+		result.Warnings = []string{}
+	}
+	if resp.Usage != nil {
+		result.Model = &resp.Usage.Model
+		in := int(resp.Usage.InputTokens)
+		out := int(resp.Usage.OutputTokens)
+		result.InputTokens = &in
+		result.OutputTokens = &out
+	}
+	return result, nil
+}
+
+// PromoteDiscoveredRequirement is the resolver for the promoteDiscoveredRequirement field.
+func (r *mutationResolver) PromoteDiscoveredRequirement(ctx context.Context, id string, title *string, description *string) (*PromoteResult, error) {
+	store := r.getStore(ctx)
+	disc := store.GetDiscoveredRequirement(id)
+	if disc == nil {
+		return nil, fmt.Errorf("discovered requirement not found: %s", id)
+	}
+	if disc.Status != "discovered" {
+		return nil, fmt.Errorf("cannot promote: status is %s", disc.Status)
+	}
+
+	// Build a stored requirement from the discovered spec
+	reqTitle := disc.Text
+	if title != nil && *title != "" {
+		reqTitle = *title
+	}
+	reqDesc := disc.RawText
+	if description != nil && *description != "" {
+		reqDesc = *description
+	}
+
+	req := &graphstore.StoredRequirement{
+		Title:       reqTitle,
+		Description: reqDesc,
+		Source:      "spec-extraction:" + disc.Source,
+		Priority:    "medium",
+		Tags:        disc.Keywords,
+	}
+	store.StoreRequirement(disc.RepoID, req)
+
+	// Mark the discovered requirement as promoted
+	updated := store.PromoteDiscoveredRequirement(id, req.ID)
+
+	return &PromoteResult{
+		Requirement:           mapRequirement(req),
+		DiscoveredRequirement: mapDiscoveredRequirement(updated),
+	}, nil
+}
+
+// DismissDiscoveredRequirement is the resolver for the dismissDiscoveredRequirement field.
+func (r *mutationResolver) DismissDiscoveredRequirement(ctx context.Context, id string, reason *string) (*DiscoveredRequirement, error) {
+	store := r.getStore(ctx)
+	disc := store.GetDiscoveredRequirement(id)
+	if disc == nil {
+		return nil, fmt.Errorf("discovered requirement not found: %s", id)
+	}
+
+	dismissReason := ""
+	if reason != nil {
+		dismissReason = *reason
+	}
+	updated := store.DismissDiscoveredRequirement(id, "user", dismissReason)
+	if updated == nil {
+		return nil, fmt.Errorf("failed to dismiss discovered requirement")
+	}
+	return mapDiscoveredRequirement(updated), nil
+}
+
+// DismissAllDiscoveredRequirements is the resolver for the dismissAllDiscoveredRequirements field.
+func (r *mutationResolver) DismissAllDiscoveredRequirements(ctx context.Context, repositoryID string) (int, error) {
+	store := r.getStore(ctx)
+	deleted := store.DeleteDiscoveredRequirementsByRepo(repositoryID)
+	return deleted, nil
+}
+
+// LinkRepos is the resolver for the linkRepos field.
+func (r *mutationResolver) LinkRepos(ctx context.Context, sourceRepoID string, targetRepoID string, linkType *string) (*RepoLink, error) {
+	store := r.getStore(ctx)
+	if store == nil {
+		return nil, fmt.Errorf("store not initialized")
+	}
+	link, err := store.LinkRepos(sourceRepoID, targetRepoID)
+	if err != nil {
+		return nil, err
+	}
+	return &RepoLink{
+		ID:           link.ID,
+		SourceRepoID: link.SourceRepoID,
+		TargetRepoID: link.TargetRepoID,
+		LinkType:     link.LinkType,
+		CreatedAt:    link.CreatedAt,
+	}, nil
+}
+
+// UnlinkRepos is the resolver for the unlinkRepos field.
+func (r *mutationResolver) UnlinkRepos(ctx context.Context, linkID string) (bool, error) {
+	store := r.getStore(ctx)
+	if store == nil {
+		return false, fmt.Errorf("store not initialized")
+	}
+	err := store.UnlinkRepos(linkID)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// DetectContracts is the resolver for the detectContracts field.
+func (r *mutationResolver) DetectContracts(ctx context.Context, repoID string) (bool, error) {
+	if r.Worker == nil {
+		return false, fmt.Errorf("AI features are unavailable — worker not connected")
+	}
+	store := r.getStore(ctx)
+	if store == nil {
+		return false, fmt.Errorf("store not initialized")
+	}
+
+	repo := store.GetRepository(repoID)
+	if repo == nil {
+		return false, fmt.Errorf("repository %s not found", repoID)
+	}
+
+	// Gather contract-candidate files (OpenAPI, Protobuf, GraphQL schemas)
+	files := store.GetFiles(repoID)
+	var protoFiles []*contractsv1.FileContent
+	for _, f := range files {
+		ext := strings.ToLower(filepath.Ext(f.Path))
+		isCandidate := ext == ".proto" || ext == ".graphql" || ext == ".graphqls" || ext == ".gql"
+		if !isCandidate {
+			lp := strings.ToLower(f.Path)
+			isCandidate = strings.Contains(lp, "openapi") || strings.Contains(lp, "swagger") ||
+				((ext == ".yaml" || ext == ".yml" || ext == ".json") &&
+					(strings.Contains(lp, "api") || strings.Contains(lp, "spec")))
+		}
+		if !isCandidate {
+			continue
+		}
+		repoRoot, err := resolveRepoSourcePath(repo)
+		if err != nil {
+			continue
+		}
+		content, err := readSourceFileLimited(repoRoot, f.Path, 1024*1024)
+		if err != nil {
+			continue
+		}
+		protoFiles = append(protoFiles, &contractsv1.FileContent{
+			Path:    f.Path,
+			Content: content,
+		})
+	}
+
+	if len(protoFiles) == 0 {
+		return true, nil
+	}
+
+	resp, err := r.Worker.DetectContracts(ctx, &contractsv1.DetectContractsRequest{
+		RepositoryId: repoID,
+		Files:        protoFiles,
+	})
+	if err != nil {
+		return false, fmt.Errorf("contract detection failed: %w", err)
+	}
+
+	// Clear old contracts and store new ones
+	_ = store.DeleteAPIContractsForRepo(repoID)
+	for _, c := range resp.GetContracts() {
+		endpointsJSON := "[]"
+		if len(c.GetEndpoints()) > 0 {
+			eps := make([]map[string]string, 0, len(c.GetEndpoints()))
+			for _, ep := range c.GetEndpoints() {
+				eps = append(eps, map[string]string{
+					"path":        ep.GetPath(),
+					"method":      ep.GetMethod(),
+					"description": ep.GetDescription(),
+				})
+			}
+			if data, err := json.Marshal(eps); err == nil {
+				endpointsJSON = string(data)
+			}
+		}
+		_ = store.StoreAPIContract(&graphstore.APIContract{
+			RepoID:       repoID,
+			FilePath:     c.GetFilePath(),
+			ContractType: c.GetContractType(),
+			Endpoints:    endpointsJSON,
+			Version:      c.GetVersion(),
+			ContentHash:  c.GetContentHash(),
+		})
+	}
+
+	slog.Info("contracts detected", "repo", repoID, "count", len(resp.GetContracts()))
+	return true, nil
+}
+
 // GenerateCliffNotes is the resolver for the generateCliffNotes field.
 func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input GenerateCliffNotesInput) (*KnowledgeArtifact, error) {
 	if r.Worker == nil {
@@ -857,6 +1321,17 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 	audience := string(key.Audience)
 	depth := string(key.Depth)
 	scope := key.Scope.Normalize()
+
+	// For requirement scope, store the display name so scopeLabel can resolve it.
+	if scope.ScopeType == knowledgepkg.ScopeRequirement {
+		if req := r.getStore(ctx).GetRequirement(scope.ScopePath); req != nil {
+			scope.SymbolName = req.ExternalID
+			if scope.SymbolName == "" {
+				scope.SymbolName = req.Title
+			}
+			key.Scope = scope
+		}
+	}
 
 	existing := r.KnowledgeStore.GetArtifactByKey(key)
 	if existing != nil {
@@ -910,9 +1385,22 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 	// Run LLM generation async — return immediately so the proxy doesn't timeout.
 	// The UI polls knowledgeArtifacts to check status and progress.
 	store := r.getStore(ctx)
+	snapshotSizeBytes := len(snapJSON)
+	truncated := scope.ScopeType == knowledgepkg.ScopeRequirement && snap.SymbolCount >= 200
+	clientType := clientTypeFromContext(ctx)
+	slog.Info("cliff_notes_generation_started",
+		"artifact_id", artifact.ID,
+		"scope_type", string(scope.ScopeType),
+		"scope_path", scope.ScopePath,
+		"client_type", clientType,
+		"linked_symbol_count", snap.SymbolCount,
+		"snapshot_size_bytes", snapshotSizeBytes,
+		"truncated", truncated,
+	)
 	go func() {
+		genStart := time.Now()
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifact.ID, 0.1) // snapshot ready
-		bgCtx := context.Background()
+		bgCtx := r.withModelMetadata(context.Background(), "knowledge")
 		resp, err := r.Worker.GenerateCliffNotes(bgCtx, &knowledgev1.GenerateCliffNotesRequest{
 			RepositoryId:   repo.ID,
 			RepositoryName: repo.Name,
@@ -923,7 +1411,14 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 			SnapshotJson:   string(snapJSON),
 		})
 		if err != nil {
-			slog.Error("cliff notes generation failed", "artifact_id", artifact.ID, "error", err)
+			slog.Error("cliff_notes_generation_failed",
+				"artifact_id", artifact.ID,
+				"scope_type", string(scope.ScopeType),
+				"scope_path", scope.ScopePath,
+				"client_type", clientType,
+				"duration_ms", time.Since(genStart).Milliseconds(),
+				"error", err,
+			)
 			_ = r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusFailed)
 			return
 		}
@@ -984,7 +1479,15 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 		if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
 			slog.Error("failed to mark cliff notes ready", "artifact_id", artifact.ID, "error", err)
 		}
-		slog.Info("cliff notes generation complete", "artifact_id", artifact.ID)
+		slog.Info("cliff_notes_generation_completed",
+			"artifact_id", artifact.ID,
+			"scope_type", string(scope.ScopeType),
+			"scope_path", scope.ScopePath,
+			"client_type", clientType,
+			"duration_ms", time.Since(genStart).Milliseconds(),
+			"snapshot_size_bytes", snapshotSizeBytes,
+			"section_count", len(resp.Sections),
+		)
 	}()
 
 	// Return immediately with GENERATING status
@@ -1063,7 +1566,7 @@ func (r *mutationResolver) GenerateLearningPath(ctx context.Context, input Gener
 	store := r.getStore(ctx)
 	go func() {
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifact.ID, 0.1)
-		bgCtx := context.Background()
+		bgCtx := r.withModelMetadata(context.Background(), "knowledge")
 		resp, err := r.Worker.GenerateLearningPath(bgCtx, &knowledgev1.GenerateLearningPathRequest{
 			RepositoryId:   repo.ID,
 			RepositoryName: repo.Name,
@@ -1210,7 +1713,7 @@ func (r *mutationResolver) GenerateCodeTour(ctx context.Context, input GenerateC
 	store := r.getStore(ctx)
 	go func() {
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifact.ID, 0.1)
-		bgCtx := context.Background()
+		bgCtx := r.withModelMetadata(context.Background(), "knowledge")
 		resp, err := r.Worker.GenerateCodeTour(bgCtx, &knowledgev1.GenerateCodeTourRequest{
 			RepositoryId:   repo.ID,
 			RepositoryName: repo.Name,
@@ -1239,9 +1742,14 @@ func (r *mutationResolver) GenerateCodeTour(ctx context.Context, input GenerateC
 
 		sections := make([]knowledgepkg.Section, len(resp.Stops))
 		for i, stop := range resp.Stops {
+			summary := stop.Description
+			if len(summary) > 160 {
+				summary = summary[:160]
+			}
 			sections[i] = knowledgepkg.Section{
 				Title:      stop.Title,
 				Content:    stop.Description,
+				Summary:    summary,
 				Confidence: knowledgepkg.ConfidenceMedium,
 			}
 		}
@@ -1353,7 +1861,7 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 	store := r.getStore(ctx)
 	go func() {
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifact.ID, 0.1)
-		bgCtx := context.Background()
+		bgCtx := r.withModelMetadata(context.Background(), "knowledge")
 		resp, err := r.Worker.GenerateWorkflowStory(bgCtx, &knowledgev1.GenerateWorkflowStoryRequest{
 			RepositoryId:      repo.ID,
 			RepositoryName:    repo.Name,
@@ -1433,6 +1941,10 @@ func (r *mutationResolver) ExplainSystem(ctx context.Context, input ExplainSyste
 	if input.Audience != nil {
 		audience = strings.ToLower(string(*input.Audience))
 	}
+	depth := "medium"
+	if input.Depth != nil {
+		depth = strings.ToLower(string(*input.Depth))
+	}
 	question := ""
 	if input.Question != nil {
 		question = *input.Question
@@ -1462,7 +1974,11 @@ func (r *mutationResolver) ExplainSystem(ctx context.Context, input ExplainSyste
 		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
 	}
 
-	resp, err := r.Worker.ExplainSystem(ctx, &knowledgev1.ExplainSystemRequest{
+	// Use a detached context so that a proxy/client disconnect does not cancel the LLM call.
+	bgCtx, bgCancel := context.WithTimeout(context.Background(), 600*time.Second)
+	defer bgCancel()
+	bgCtx = r.withModelMetadata(bgCtx, "knowledge")
+	resp, err := r.Worker.ExplainSystem(bgCtx, &knowledgev1.ExplainSystemRequest{
 		RepositoryId:   repo.ID,
 		RepositoryName: repo.Name,
 		Audience:       audience,
@@ -1470,6 +1986,7 @@ func (r *mutationResolver) ExplainSystem(ctx context.Context, input ExplainSyste
 		ScopeType:      string(scope.ScopeType),
 		ScopePath:      scope.ScopePath,
 		SnapshotJson:   string(snapJSON),
+		Depth:          depth,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("system explanation failed: %w", err)
@@ -1505,6 +2022,9 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 	if r.KnowledgeStore == nil {
 		return nil, fmt.Errorf("knowledge store not configured")
 	}
+	if r.Worker == nil {
+		return nil, fmt.Errorf("AI features are not available")
+	}
 
 	existing := r.KnowledgeStore.GetKnowledgeArtifact(id)
 	if existing == nil {
@@ -1532,6 +2052,12 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 	}
 
 	go func(existing *knowledgepkg.Artifact) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("refresh panic", "artifact_id", existing.ID, "panic", rec)
+				_ = r.KnowledgeStore.UpdateKnowledgeArtifactStatus(existing.ID, knowledgepkg.StatusFailed)
+			}
+		}()
 		var (
 			snap *knowledgepkg.KnowledgeSnapshot
 			err  error
@@ -1556,7 +2082,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 
 		switch existing.Type {
 		case knowledgepkg.ArtifactCliffNotes:
-			resp, err := r.Worker.GenerateCliffNotes(context.Background(), &knowledgev1.GenerateCliffNotesRequest{
+			resp, err := r.Worker.GenerateCliffNotes(r.withModelMetadata(context.Background(), "knowledge"), &knowledgev1.GenerateCliffNotesRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -1566,6 +2092,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				SnapshotJson:   string(snapJSON),
 			})
 			if err != nil {
+				slog.Error("refresh cliff notes failed", "artifact_id", existing.ID, "error", err)
 				_ = r.KnowledgeStore.UpdateKnowledgeArtifactStatus(existing.ID, knowledgepkg.StatusFailed)
 				return
 			}
@@ -1585,7 +2112,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				return
 			}
 		case knowledgepkg.ArtifactLearningPath:
-			resp, err := r.Worker.GenerateLearningPath(context.Background(), &knowledgev1.GenerateLearningPathRequest{
+			resp, err := r.Worker.GenerateLearningPath(r.withModelMetadata(context.Background(), "knowledge"), &knowledgev1.GenerateLearningPathRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -1593,6 +2120,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				SnapshotJson:   string(snapJSON),
 			})
 			if err != nil {
+				slog.Error("refresh learning path failed", "artifact_id", existing.ID, "error", err)
 				_ = r.KnowledgeStore.UpdateKnowledgeArtifactStatus(existing.ID, knowledgepkg.StatusFailed)
 				return
 			}
@@ -1610,7 +2138,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				return
 			}
 		case knowledgepkg.ArtifactCodeTour:
-			resp, err := r.Worker.GenerateCodeTour(context.Background(), &knowledgev1.GenerateCodeTourRequest{
+			resp, err := r.Worker.GenerateCodeTour(r.withModelMetadata(context.Background(), "knowledge"), &knowledgev1.GenerateCodeTourRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -1618,21 +2146,27 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				SnapshotJson:   string(snapJSON),
 			})
 			if err != nil {
+				slog.Error("refresh code tour failed", "artifact_id", existing.ID, "error", err)
 				_ = r.KnowledgeStore.UpdateKnowledgeArtifactStatus(existing.ID, knowledgepkg.StatusFailed)
 				return
 			}
 			sections := make([]knowledgepkg.Section, len(resp.Stops))
 			for i, stop := range resp.Stops {
+				summary := stop.Description
+				if len(summary) > 160 {
+					summary = summary[:160]
+				}
 				sections[i] = knowledgepkg.Section{
 					Title:      stop.Title,
 					Content:    stop.Description,
-					Summary:    stop.FilePath,
+					Summary:    summary,
 					Confidence: knowledgepkg.ConfidenceMedium,
 					Evidence: []knowledgepkg.Evidence{{
 						SourceType: knowledgepkg.EvidenceFile,
 						FilePath:   stop.FilePath,
 						LineStart:  int(stop.LineStart),
 						LineEnd:    int(stop.LineEnd),
+						Rationale:  "Code tour stop location",
 					}},
 				}
 			}
@@ -1641,7 +2175,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				return
 			}
 		case knowledgepkg.ArtifactWorkflowStory:
-			resp, err := r.Worker.GenerateWorkflowStory(context.Background(), &knowledgev1.GenerateWorkflowStoryRequest{
+			resp, err := r.Worker.GenerateWorkflowStory(r.withModelMetadata(context.Background(), "knowledge"), &knowledgev1.GenerateWorkflowStoryRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -1651,6 +2185,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				SnapshotJson:   string(snapJSON),
 			})
 			if err != nil {
+				slog.Error("refresh workflow story failed", "artifact_id", existing.ID, "error", err)
 				_ = r.KnowledgeStore.UpdateKnowledgeArtifactStatus(existing.ID, knowledgepkg.StatusFailed)
 				return
 			}
@@ -1676,6 +2211,9 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 	}(existing)
 
 	updated := r.KnowledgeStore.GetKnowledgeArtifact(id)
+	if updated == nil {
+		return nil, fmt.Errorf("artifact %s not found after refresh", id)
+	}
 	return mapKnowledgeArtifact(updated), nil
 }
 
@@ -1971,20 +2509,22 @@ func (r *queryResolver) TraceabilityMatrix(ctx context.Context, repositoryID str
 		gqlReqs = append(gqlReqs, mapRequirement(req))
 	}
 
-	var gqlLinks []*RequirementLink
+	// Use batch fetch instead of N+1 individual lookups
+	gqlLinks := mapLinksWithRelationsBatch(links, r.getStore(ctx))
+
+	// Collect unique linked symbols via batch fetch
 	symbolSet := make(map[string]bool)
 	for _, l := range links {
-		gqlLinks = append(gqlLinks, mapLink(l))
 		symbolSet[l.SymbolID] = true
 	}
-
-	// Collect unique linked symbols
-	var gqlSyms []*CodeSymbol
-	syms, _ := r.getStore(ctx).GetSymbols(repositoryID, nil, nil, 10000, 0)
-	for _, s := range syms {
-		if symbolSet[s.ID] {
-			gqlSyms = append(gqlSyms, mapSymbol(s))
-		}
+	symIDs := make([]string, 0, len(symbolSet))
+	for id := range symbolSet {
+		symIDs = append(symIDs, id)
+	}
+	symMap := r.getStore(ctx).GetSymbolsByIDs(symIDs)
+	gqlSyms := make([]*CodeSymbol, 0, len(symMap))
+	for _, s := range symMap {
+		gqlSyms = append(gqlSyms, mapSymbol(s))
 	}
 
 	// Coverage = requirements with at least one link / total requirements
@@ -2015,36 +2555,66 @@ func (r *queryResolver) TraceabilityMatrix(ctx context.Context, repositoryID str
 	}, nil
 }
 
-// RequirementToCode is the resolver for the requirementToCode field.
-func (r *queryResolver) RequirementToCode(ctx context.Context, requirementID string) ([]*RequirementLink, error) {
-	if r.getStore(ctx) == nil {
+// RequirementLinks is the resolver for the requirementLinks field.
+func (r *queryResolver) RequirementLinks(ctx context.Context, requirementID string, limit *int, offset *int) ([]*RequirementLink, error) {
+	store := r.getStore(ctx)
+	if store == nil {
+		return nil, fmt.Errorf("store not initialized")
+	}
+
+	allLinks := store.GetLinksForRequirement(requirementID, false)
+
+	// Apply offset
+	off := 0
+	if offset != nil && *offset > 0 {
+		off = *offset
+	}
+	if off >= len(allLinks) {
 		return []*RequirementLink{}, nil
 	}
-	links := r.getStore(ctx).GetLinksForRequirement(requirementID, false)
-	var result []*RequirementLink
-	for _, l := range links {
-		result = append(result, mapLink(l))
+	allLinks = allLinks[off:]
+
+	// Apply limit
+	if limit != nil && *limit > 0 && *limit < len(allLinks) {
+		allLinks = allLinks[:*limit]
 	}
-	if result == nil {
-		result = []*RequirementLink{}
+
+	// Batch-fetch symbols
+	symIDs := make([]string, 0, len(allLinks))
+	for _, l := range allLinks {
+		symIDs = append(symIDs, l.SymbolID)
+	}
+	symMap := store.GetSymbolsByIDs(symIDs)
+
+	result := make([]*RequirementLink, 0, len(allLinks))
+	for _, l := range allLinks {
+		rl := mapLink(l)
+		if sym := symMap[l.SymbolID]; sym != nil {
+			rl.Symbol = mapSymbol(sym)
+		}
+		result = append(result, rl)
 	}
 	return result, nil
 }
 
-// CodeToRequirements is the resolver for the codeToRequirements field.
-func (r *queryResolver) CodeToRequirements(ctx context.Context, symbolID string) ([]*RequirementLink, error) {
-	if r.getStore(ctx) == nil {
+// RequirementToCode is the resolver for the requirementToCode field.
+func (r *queryResolver) RequirementToCode(ctx context.Context, requirementID string) ([]*RequirementLink, error) {
+	store := r.getStore(ctx)
+	if store == nil {
 		return []*RequirementLink{}, nil
 	}
-	links := r.getStore(ctx).GetLinksForSymbol(symbolID, false)
-	var result []*RequirementLink
-	for _, l := range links {
-		result = append(result, mapLink(l))
+	links := store.GetLinksForRequirement(requirementID, false)
+	return mapLinksWithRelationsBatch(links, store), nil
+}
+
+// CodeToRequirements is the resolver for the codeToRequirements field.
+func (r *queryResolver) CodeToRequirements(ctx context.Context, symbolID string) ([]*RequirementLink, error) {
+	store := r.getStore(ctx)
+	if store == nil {
+		return []*RequirementLink{}, nil
 	}
-	if result == nil {
-		result = []*RequirementLink{}
-	}
-	return result, nil
+	links := store.GetLinksForSymbol(symbolID, false)
+	return mapLinksWithRelationsBatch(links, store), nil
 }
 
 // SourceFile is the resolver for the sourceFile field.
@@ -2315,9 +2885,166 @@ func (r *queryResolver) ImpactReports(ctx context.Context, repositoryID string, 
 	return result, nil
 }
 
+// DiscoveredRequirements is the resolver for the discoveredRequirements field.
+func (r *queryResolver) DiscoveredRequirements(ctx context.Context, repositoryID string, status *string, confidence *string, limit *int, offset *int) (*DiscoveredRequirementConnection, error) {
+	l, o := 50, 0
+	if limit != nil {
+		l = *limit
+	}
+	if offset != nil {
+		o = *offset
+	}
+	items, total := r.getStore(ctx).GetDiscoveredRequirements(repositoryID, status, confidence, l, o)
+	nodes := make([]*DiscoveredRequirement, 0, len(items))
+	for _, item := range items {
+		nodes = append(nodes, mapDiscoveredRequirement(item))
+	}
+	return &DiscoveredRequirementConnection{Nodes: nodes, TotalCount: total}, nil
+}
+
+// DiscoveredRequirement is the resolver for the discoveredRequirement field.
+func (r *queryResolver) DiscoveredRequirement(ctx context.Context, id string) (*DiscoveredRequirement, error) {
+	disc := r.getStore(ctx).GetDiscoveredRequirement(id)
+	if disc == nil {
+		return nil, nil
+	}
+	return mapDiscoveredRequirement(disc), nil
+}
+
+// SimulatedImpactReport is the resolver for the simulatedImpactReport field.
+func (r *queryResolver) SimulatedImpactReport(ctx context.Context, id string) (*SimulatedImpactReport, error) {
+	// V1: no persistent cache — simulated reports are not stored.
+	// This query exists for future caching support.
+	return nil, nil
+}
+
+// ArchitectureDiagram is the resolver for the architectureDiagram field.
+func (r *queryResolver) ArchitectureDiagram(ctx context.Context, repoID string, level DiagramLevel, moduleFilter *string, moduleDepth *int, maxNodes *int) (*DiagramOutput, error) {
+	store := r.getStore(ctx)
+	if store == nil {
+		return nil, fmt.Errorf("store not initialized")
+	}
+
+	depth := 1
+	if moduleDepth != nil && *moduleDepth >= 1 && *moduleDepth <= 5 {
+		depth = *moduleDepth
+	}
+	limit := 30
+	if maxNodes != nil && *maxNodes >= 1 && *maxNodes <= 200 {
+		limit = *maxNodes
+	}
+
+	opts := architecture.DiagramOpts{
+		RepoID:       repoID,
+		Level:        string(level),
+		ModuleFilter: moduleFilter,
+		ModuleDepth:  depth,
+		MaxNodes:     limit,
+	}
+
+	result, err := architecture.BuildDiagram(store, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	return mapDiagramOutput(result), nil
+}
+
+// RepoLinks is the resolver for the repoLinks field.
+func (r *queryResolver) RepoLinks(ctx context.Context, repoID string) ([]*RepoLink, error) {
+	store := r.getStore(ctx)
+	if store == nil {
+		return nil, fmt.Errorf("store not initialized")
+	}
+	links, err := store.GetRepoLinks(repoID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*RepoLink, 0, len(links))
+	for _, l := range links {
+		result = append(result, &RepoLink{
+			ID:           l.ID,
+			SourceRepoID: l.SourceRepoID,
+			TargetRepoID: l.TargetRepoID,
+			LinkType:     l.LinkType,
+			CreatedAt:    l.CreatedAt,
+		})
+	}
+	return result, nil
+}
+
+// CrossRepoRefs is the resolver for the crossRepoRefs field.
+func (r *queryResolver) CrossRepoRefs(ctx context.Context, repoID string, refType *CrossRepoRefType, limit *int) ([]*CrossRepoRef, error) {
+	store := r.getStore(ctx)
+	if store == nil {
+		return nil, fmt.Errorf("store not initialized")
+	}
+	var refTypeStr *string
+	if refType != nil {
+		s := string(*refType)
+		refTypeStr = &s
+	}
+	lim := 50
+	if limit != nil && *limit > 0 {
+		lim = *limit
+	}
+	refs, err := store.GetCrossRepoRefs(repoID, refTypeStr, lim)
+	if err != nil {
+		return nil, err
+	}
+	return mapCrossRepoRefs(refs), nil
+}
+
+// SymbolCrossRepoRefs is the resolver for the symbolCrossRepoRefs field.
+func (r *queryResolver) SymbolCrossRepoRefs(ctx context.Context, symbolID string) ([]*CrossRepoRef, error) {
+	store := r.getStore(ctx)
+	if store == nil {
+		return nil, fmt.Errorf("store not initialized")
+	}
+	refs, err := store.GetSymbolCrossRepoRefs(symbolID)
+	if err != nil {
+		return nil, err
+	}
+	return mapCrossRepoRefs(refs), nil
+}
+
+// APIContracts is the resolver for the apiContracts field.
+func (r *queryResolver) APIContracts(ctx context.Context, repoID string) ([]*APIContract, error) {
+	store := r.getStore(ctx)
+	if store == nil {
+		return nil, fmt.Errorf("store not initialized")
+	}
+	contracts, err := store.GetAPIContracts(repoID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*APIContract, 0, len(contracts))
+	for _, c := range contracts {
+		epCount := 0
+		if c.Endpoints != "" {
+			// Count endpoint entries in JSON array
+			epCount = strings.Count(c.Endpoints, `"path"`)
+		}
+		var version *string
+		if c.Version != "" {
+			version = &c.Version
+		}
+		result = append(result, &APIContract{
+			ID:            c.ID,
+			RepoID:        c.RepoID,
+			FilePath:      c.FilePath,
+			ContractType:  c.ContractType,
+			EndpointCount: epCount,
+			Version:       version,
+			DetectedAt:    c.DetectedAt,
+		})
+	}
+	return result, nil
+}
+
 // LlmUsage is the resolver for the llmUsage field.
 func (r *queryResolver) LlmUsage(ctx context.Context, repositoryID *string, limit *int) ([]*LLMUsageEntry, error) {
-	panic(fmt.Errorf("not implemented: LlmUsage - llmUsage"))
+	return []*LLMUsageEntry{}, nil
 }
 
 // PlatformStats is the resolver for the platformStats field.

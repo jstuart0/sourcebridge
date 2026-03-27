@@ -1,5 +1,6 @@
 # Build stage
 ARG GO_BASE_IMAGE=golang:1.25-alpine
+ARG RUNTIME_BASE_IMAGE=alpine:3.20
 FROM ${GO_BASE_IMAGE} AS builder
 
 WORKDIR /app
@@ -20,7 +21,7 @@ RUN GOWORK=off CGO_ENABLED=1 GOOS=linux go build -o /bin/sourcebridge ./cmd/sour
 RUN GOWORK=off CGO_ENABLED=1 GOOS=linux go build -o /bin/migrate ./cmd/migrate
 
 # Runtime stage
-ARG RUNTIME_BASE_IMAGE=alpine:3.20
+ARG RUNTIME_BASE_IMAGE
 FROM ${RUNTIME_BASE_IMAGE}
 
 RUN apk add --no-cache ca-certificates curl git

@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 import structlog
 
 from workers.common.llm.provider import LLMProvider, LLMResponse
+from workers.knowledge.cliff_notes import _parse_sections
 from workers.knowledge.prompts.learning_path import (
     LEARNING_PATH_SYSTEM,
     build_learning_path_prompt,
@@ -41,14 +42,8 @@ class LearningPathResult:
 
 
 def _parse_steps(raw: str) -> list[dict[str, object]]:
-    """Parse JSON array from LLM response, tolerating markdown fences."""
-    text = raw.strip()
-    if text.startswith("```"):
-        first_newline = text.index("\n")
-        text = text[first_newline + 1 :]
-        if text.endswith("```"):
-            text = text[: -3].rstrip()
-    return json.loads(text)  # type: ignore[no-any-return]
+    """Parse JSON array from LLM response using the shared robust parser."""
+    return _parse_sections(raw)
 
 
 async def generate_learning_path(
@@ -58,17 +53,18 @@ async def generate_learning_path(
     depth: str,
     snapshot_json: str,
     focus_area: str = "",
+    model_override: str | None = None,
 ) -> tuple[LearningPathResult, LLMUsageRecord]:
     """Generate a learning path from a repository snapshot."""
     prompt = build_learning_path_prompt(repository_name, audience, depth, snapshot_json, focus_area)
 
     response: LLMResponse = await provider.complete(
-        prompt, system=LEARNING_PATH_SYSTEM, temperature=0.0
+        prompt, system=LEARNING_PATH_SYSTEM, temperature=0.0, model=model_override,
     )
 
     try:
         raw_steps = _parse_steps(response.content)
-    except (json.JSONDecodeError, ValueError) as exc:
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
         log.warning("learning_path_parse_fallback", error=str(exc))
         raw_steps = [
             {
@@ -84,6 +80,8 @@ async def generate_learning_path(
 
     steps: list[LearningStep] = []
     for raw in raw_steps:
+        if not isinstance(raw, dict):
+            raw = {"title": str(raw)[:160], "content": str(raw)}
         steps.append(
             LearningStep(
                 order=raw.get("order", len(steps) + 1),

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Build, push, and deploy SourceBridge to thor cluster
+# Build, push, and deploy SourceBridge to a Kubernetes cluster
 # Usage: ./scripts/build-and-deploy.sh [component] [--no-deploy]
 #
 # Examples:
@@ -10,8 +10,14 @@ set -euo pipefail
 #   ./scripts/build-and-deploy.sh web      # Build only web, deploy
 #   ./scripts/build-and-deploy.sh worker   # Build only worker, deploy
 #   ./scripts/build-and-deploy.sh --no-deploy  # Build all, skip deploy
+#
+# Environment variables:
+#   REGISTRY    — Container registry (default: ghcr.io/sourcebridge)
+#   KUBE_CONTEXT — kubectl context to use (default: current context)
+#   NAMESPACE   — Kubernetes namespace (default: sourcebridge)
 
-REGISTRY="192.168.10.222:30500"
+REGISTRY="${REGISTRY:-ghcr.io/sourcebridge}"
+NAMESPACE="${NAMESPACE:-sourcebridge}"
 TAG="sha-$(git rev-parse --short HEAD)"
 COMPONENT="${1:-all}"
 NO_DEPLOY=false
@@ -26,18 +32,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "=== SourceBridge Build & Deploy ==="
-echo "Registry: ${REGISTRY}"
-echo "Tag:      ${TAG}"
+echo "Registry:  ${REGISTRY}"
+echo "Tag:       ${TAG}"
 echo "Component: ${COMPONENT}"
+echo "Namespace: ${NAMESPACE}"
 echo "Repo root: ${REPO_ROOT}"
 echo ""
 
-# Verify kubectl context
-CONTEXT=$(kubectl config current-context)
-if [ "$CONTEXT" != "thor" ]; then
-  echo "ERROR: kubectl context is '${CONTEXT}', expected 'thor'"
-  echo "Run: kubectl config use-context thor"
-  exit 1
+# Verify kubectl context if KUBE_CONTEXT is set
+if [ -n "${KUBE_CONTEXT:-}" ]; then
+  CONTEXT=$(kubectl config current-context)
+  if [ "$CONTEXT" != "$KUBE_CONTEXT" ]; then
+    echo "ERROR: kubectl context is '${CONTEXT}', expected '${KUBE_CONTEXT}'"
+    echo "Run: kubectl config use-context ${KUBE_CONTEXT}"
+    exit 1
+  fi
 fi
 
 build_api() {
@@ -115,8 +124,8 @@ for DEPLOY in $DEPLOYMENTS; do
     worker) [ "$DEPLOY" != "sourcebridge-worker" ] && continue ;;
   esac
 
-  echo "Restarting deployment/${DEPLOY} in sourcebridge"
-  kubectl -n sourcebridge rollout restart "deployment/${DEPLOY}" 2>/dev/null || \
+  echo "Restarting deployment/${DEPLOY} in ${NAMESPACE}"
+  kubectl -n "${NAMESPACE}" rollout restart "deployment/${DEPLOY}" 2>/dev/null || \
     echo "  Warning: deployment/${DEPLOY} not found (may not be deployed yet)"
 done
 
@@ -130,11 +139,10 @@ for DEPLOY in $DEPLOYMENTS; do
     worker) [ "$DEPLOY" != "sourcebridge-worker" ] && continue ;;
   esac
 
-  kubectl -n sourcebridge rollout status "deployment/${DEPLOY}" --timeout=300s 2>/dev/null || \
+  kubectl -n "${NAMESPACE}" rollout status "deployment/${DEPLOY}" --timeout=300s 2>/dev/null || \
     echo "  Warning: rollout status check failed for ${DEPLOY}"
 done
 
 echo ""
 echo "=== Deploy complete ==="
 echo "Images: ${REGISTRY}/sourcebridge-{api,web,worker}:${TAG}"
-echo "ArgoCD will reconcile any manifest changes automatically."

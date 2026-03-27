@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
@@ -22,6 +23,10 @@ export default function EnterpriseAdminPage() {
   if (!isEnterprise) {
     return (
       <PageFrame>
+        <Breadcrumb items={[
+          { label: "Admin", href: "/admin" },
+          { label: "Enterprise" },
+        ]} />
         <PageHeader
           eyebrow="Enterprise"
           title="Enterprise admin"

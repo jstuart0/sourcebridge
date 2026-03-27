@@ -106,7 +106,7 @@ class LearningStep(_message.Message):
     def __init__(self, order: _Optional[int] = ..., title: _Optional[str] = ..., objective: _Optional[str] = ..., content: _Optional[str] = ..., file_paths: _Optional[_Iterable[str]] = ..., symbol_ids: _Optional[_Iterable[str]] = ..., estimated_time: _Optional[str] = ...) -> None: ...
 
 class ExplainSystemRequest(_message.Message):
-    __slots__ = ("repository_id", "repository_name", "audience", "question", "snapshot_json", "scope_type", "scope_path")
+    __slots__ = ("repository_id", "repository_name", "audience", "question", "snapshot_json", "scope_type", "scope_path", "depth")
     REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
     REPOSITORY_NAME_FIELD_NUMBER: _ClassVar[int]
     AUDIENCE_FIELD_NUMBER: _ClassVar[int]
@@ -114,6 +114,7 @@ class ExplainSystemRequest(_message.Message):
     SNAPSHOT_JSON_FIELD_NUMBER: _ClassVar[int]
     SCOPE_TYPE_FIELD_NUMBER: _ClassVar[int]
     SCOPE_PATH_FIELD_NUMBER: _ClassVar[int]
+    DEPTH_FIELD_NUMBER: _ClassVar[int]
     repository_id: str
     repository_name: str
     audience: str
@@ -121,7 +122,8 @@ class ExplainSystemRequest(_message.Message):
     snapshot_json: str
     scope_type: str
     scope_path: str
-    def __init__(self, repository_id: _Optional[str] = ..., repository_name: _Optional[str] = ..., audience: _Optional[str] = ..., question: _Optional[str] = ..., snapshot_json: _Optional[str] = ..., scope_type: _Optional[str] = ..., scope_path: _Optional[str] = ...) -> None: ...
+    depth: str
+    def __init__(self, repository_id: _Optional[str] = ..., repository_name: _Optional[str] = ..., audience: _Optional[str] = ..., question: _Optional[str] = ..., snapshot_json: _Optional[str] = ..., scope_type: _Optional[str] = ..., scope_path: _Optional[str] = ..., depth: _Optional[str] = ...) -> None: ...
 
 class ExplainSystemResponse(_message.Message):
     __slots__ = ("explanation", "evidence", "usage")

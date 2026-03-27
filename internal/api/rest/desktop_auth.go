@@ -6,6 +6,7 @@ package rest
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -194,6 +195,7 @@ func (s *Server) handleDesktopLocalLogin(w http.ResponseWriter, r *http.Request)
 		DeviceLabel: r.UserAgent(),
 	})
 	if err != nil {
+		slog.Error("failed to create IDE session token", "error", err, "user_id", user.ID)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create IDE session"})
 		return
 	}

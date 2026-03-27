@@ -93,6 +93,7 @@ message ExplainSystemRequest {
   string snapshot_json = 5;
   string scope_type = 6;      // "repository", "module", "file", "symbol"
   string scope_path = 7;      // canonical scope path
+  string depth = 8;           // "summary", "medium", "deep"
 }
 
 message ExplainSystemResponse {

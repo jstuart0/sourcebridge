@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
+	contractsv1 "github.com/sourcebridge/sourcebridge/gen/go/contracts/v1"
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
 	linkingv1 "github.com/sourcebridge/sourcebridge/gen/go/linking/v1"
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
@@ -23,14 +24,17 @@ import (
 const (
 	TimeoutHealth     = 3 * time.Second
 	TimeoutEmbedding  = 10 * time.Second
-	TimeoutAnalysis   = 60 * time.Second
-	TimeoutDiscussion = 60 * time.Second
-	TimeoutReview     = 90 * time.Second
+	TimeoutAnalysis   = 120 * time.Second
+	TimeoutDiscussion = 120 * time.Second
+	TimeoutReview     = 120 * time.Second
 	TimeoutLinkItem   = 30 * time.Second
-	TimeoutLinkTotal  = 300 * time.Second
+	TimeoutLinkTotal  = 600 * time.Second
 	TimeoutParse      = 60 * time.Second
-	TimeoutEnrich     = 60 * time.Second
-	TimeoutKnowledge  = 600 * time.Second
+	TimeoutEnrich     = 120 * time.Second
+	TimeoutExtraction  = 300 * time.Second
+	TimeoutSimulation  = 30 * time.Second
+	TimeoutKnowledge   = 600 * time.Second
+	TimeoutContracts   = 120 * time.Second
 )
 
 // Client wraps gRPC connections to the Python worker and exposes typed service
@@ -42,6 +46,7 @@ type Client struct {
 	Linking      linkingv1.LinkingServiceClient
 	Requirements requirementsv1.RequirementsServiceClient
 	Knowledge    knowledgev1.KnowledgeServiceClient
+	Contracts    contractsv1.ContractsServiceClient
 	Health       healthpb.HealthClient
 }
 
@@ -68,6 +73,7 @@ func New(address string) (*Client, error) {
 		Linking:      linkingv1.NewLinkingServiceClient(conn),
 		Requirements: requirementsv1.NewRequirementsServiceClient(conn),
 		Knowledge:    knowledgev1.NewKnowledgeServiceClient(conn),
+		Contracts:    contractsv1.NewContractsServiceClient(conn),
 		Health:       healthpb.NewHealthClient(conn),
 	}
 	return c, nil
@@ -141,6 +147,13 @@ func (c *Client) LinkRequirement(ctx context.Context, req *linkingv1.LinkRequire
 	return c.Linking.LinkRequirement(ctx, req)
 }
 
+// BatchLink calls the linking worker to link all requirements at once with shared embeddings.
+func (c *Client) BatchLink(ctx context.Context, req *linkingv1.BatchLinkRequest) (*linkingv1.BatchLinkResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, TimeoutLinkTotal)
+	defer cancel()
+	return c.Linking.BatchLink(ctx, req)
+}
+
 // ValidateLink calls the linking worker to validate an existing link.
 func (c *Client) ValidateLink(ctx context.Context, req *linkingv1.ValidateLinkRequest) (*linkingv1.ValidateLinkResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, TimeoutLinkItem)
@@ -167,6 +180,20 @@ func (c *Client) EnrichRequirement(ctx context.Context, req *requirementsv1.Enri
 	ctx, cancel := context.WithTimeout(ctx, TimeoutEnrich)
 	defer cancel()
 	return c.Requirements.EnrichRequirement(ctx, req)
+}
+
+// ExtractSpecs calls the requirements worker to extract specs from source files.
+func (c *Client) ExtractSpecs(ctx context.Context, req *requirementsv1.ExtractSpecsRequest) (*requirementsv1.ExtractSpecsResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, TimeoutExtraction)
+	defer cancel()
+	return c.Requirements.ExtractSpecs(ctx, req)
+}
+
+// SimulateChange calls the reasoning worker to resolve symbols for a hypothetical change.
+func (c *Client) SimulateChange(ctx context.Context, req *reasoningv1.SimulateChangeRequest) (*reasoningv1.SimulateChangeResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, TimeoutSimulation)
+	defer cancel()
+	return c.Reasoning.SimulateChange(ctx, req)
 }
 
 // GenerateCliffNotes calls the knowledge worker to generate cliff notes.
@@ -202,6 +229,20 @@ func (c *Client) GenerateCodeTour(ctx context.Context, req *knowledgev1.Generate
 	ctx, cancel := context.WithTimeout(ctx, TimeoutKnowledge)
 	defer cancel()
 	return c.Knowledge.GenerateCodeTour(ctx, req)
+}
+
+// DetectContracts calls the contracts worker to detect API contracts in files.
+func (c *Client) DetectContracts(ctx context.Context, req *contractsv1.DetectContractsRequest) (*contractsv1.DetectContractsResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, TimeoutContracts)
+	defer cancel()
+	return c.Contracts.DetectContracts(ctx, req)
+}
+
+// MatchConsumers calls the contracts worker to match consumers to contracts.
+func (c *Client) MatchConsumers(ctx context.Context, req *contractsv1.MatchConsumersRequest) (*contractsv1.MatchConsumersResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, TimeoutContracts)
+	defer cancel()
+	return c.Contracts.MatchConsumers(ctx, req)
 }
 
 // LogStatus logs the current worker connection state.

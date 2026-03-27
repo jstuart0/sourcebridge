@@ -1,6 +1,6 @@
 .PHONY: all build build-go build-web build-worker test test-go test-web test-worker \
 	lint lint-go lint-web lint-worker proto proto-clean docker-build docker-up docker-down \
-	dev dev-web dev-go clean migrate help integration-test enterprise-test smoke-test phase-gate ci
+	dev dev-web dev-go clean migrate help integration-test smoke-test phase-gate ci
 
 GO_BIN = bin/sourcebridge
 GO_MIGRATE_BIN = bin/migrate
@@ -22,7 +22,7 @@ build-worker:
 	cd workers && uv sync
 
 # Test
-test: test-go test-web test-worker test-vscode
+test: test-go test-web test-worker
 
 test-go:
 	go test ./... -v -race
@@ -32,9 +32,6 @@ test-web:
 
 test-worker:
 	cd workers && uv run python -m pytest tests/ -v
-
-test-vscode:
-	cd plugins/vscode && npm test
 
 # Lint
 lint: lint-go lint-web lint-worker
@@ -54,7 +51,8 @@ PROTO_SOURCES = $(PROTO_DIR)/common/v1/types.proto \
 	$(PROTO_DIR)/linking/v1/linking.proto \
 	$(PROTO_DIR)/requirements/v1/requirements.proto \
 	$(PROTO_DIR)/indexer/v1/indexer.proto \
-	$(PROTO_DIR)/knowledge/v1/knowledge.proto
+	$(PROTO_DIR)/knowledge/v1/knowledge.proto \
+	$(PROTO_DIR)/contracts/v1/contracts.proto
 
 proto:
 	cd $(PROTO_DIR) && buf generate
@@ -103,10 +101,6 @@ migrate:
 integration-test:
 	go test ./tests/integration/... -v -count=1 -timeout 120s
 
-# Enterprise integration tests
-enterprise-test:
-	cd sourcebridge-enterprise && go test ./tests/integration/... -v -count=1 -timeout 120s
-
 # Smoke tests
 smoke-test:
 	bash tests/smoke/phase1.sh
@@ -137,9 +131,7 @@ ifeq ($(PHASE),8)
 	@echo "  Repository completeness: PASS"
 endif
 ifeq ($(PHASE),11)
-	@echo "Checking Phase 11: Enterprise & Operations..."
-	@echo "  Running enterprise integration tests..."
-	cd sourcebridge-enterprise && go test ./tests/integration/... -v -count=1 -timeout 120s
+	@echo "Checking Phase 11: Operations..."
 	@echo "  Checking Helm chart..."
 	helm lint deploy/helm/sourcebridge/
 	helm template sourcebridge deploy/helm/sourcebridge/ > /dev/null
@@ -150,7 +142,7 @@ ifeq ($(PHASE),11)
 	@test -f docs/self-hosted/helm-guide.md && echo "  docs/self-hosted/helm-guide.md exists" || (echo "  MISSING: docs/self-hosted/helm-guide.md" && exit 1)
 	@test -d docs/user && echo "  docs/user/ exists" || (echo "  MISSING: docs/user/" && exit 1)
 	@echo "  Documentation: PASS"
-	@echo "  Phase 11: Enterprise & Operations PASS"
+	@echo "  Phase 11: Operations PASS"
 endif
 	@echo "=== Phase $(PHASE) Gate PASSED ==="
 

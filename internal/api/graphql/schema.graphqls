@@ -27,6 +27,7 @@ type Query {
   # Phase 4: Traceability
   search(query: String!, repositoryId: ID, limit: Int): [SearchResult!]!
   traceabilityMatrix(repositoryId: ID!): TraceabilityMatrix!
+  requirementLinks(requirementId: ID!, limit: Int, offset: Int): [RequirementLink!]!
   requirementToCode(requirementId: ID!): [RequirementLink!]!
   codeToRequirements(symbolId: ID!): [RequirementLink!]!
   sourceFile(repositoryId: ID!, filePath: String!): SourceFileResult!
@@ -54,6 +55,28 @@ type Query {
   latestImpactReport(repositoryId: ID!): ImpactReport
   impactReports(repositoryId: ID!, limit: Int): [ImpactReport!]!
 
+  # Discovered requirements (spec extraction)
+  discoveredRequirements(repositoryId: ID!, status: String, confidence: String, limit: Int, offset: Int): DiscoveredRequirementConnection!
+  discoveredRequirement(id: ID!): DiscoveredRequirement
+
+  # Change simulation
+  simulatedImpactReport(id: ID!): SimulatedImpactReport
+
+  # Architecture diagrams
+  architectureDiagram(
+    repoId: ID!
+    level: DiagramLevel!
+    moduleFilter: String
+    moduleDepth: Int
+    maxNodes: Int
+  ): DiagramOutput!
+
+  # Multi-repo federation (OSS)
+  repoLinks(repoId: ID!): [RepoLink!]!
+  crossRepoRefs(repoId: ID!, refType: CrossRepoRefType, limit: Int): [CrossRepoRef!]!
+  symbolCrossRepoRefs(symbolId: ID!): [CrossRepoRef!]!
+  apiContracts(repoId: ID!): [APIContract!]!
+
   # Phase 17: Analytics
   llmUsage(repositoryId: ID, limit: Int): [LLMUsageEntry!]!
   platformStats: PlatformStats!
@@ -78,6 +101,20 @@ type Mutation {
   reviewCode(input: ReviewCodeInput!): ReviewResult!
   autoLinkRequirements(repositoryId: ID!, minConfidence: Float): AutoLinkResult!
   enrichRequirement(requirementId: ID!): Requirement!
+
+  # Change simulation
+  simulateChange(input: SimulateChangeInput!): SimulatedImpactReport!
+
+  # Spec extraction mutations
+  triggerSpecExtraction(input: TriggerSpecExtractionInput!): SpecExtractionResult!
+  promoteDiscoveredRequirement(id: ID!, title: String, description: String): PromoteResult!
+  dismissDiscoveredRequirement(id: ID!, reason: String): DiscoveredRequirement!
+  dismissAllDiscoveredRequirements(repositoryId: ID!): Int!
+
+  # Multi-repo federation (OSS)
+  linkRepos(sourceRepoId: ID!, targetRepoId: ID!, linkType: String): RepoLink!
+  unlinkRepos(linkId: ID!): Boolean!
+  detectContracts(repoId: ID!): Boolean!
 
   # Knowledge engine mutations
   generateCliffNotes(input: GenerateCliffNotesInput!): KnowledgeArtifact!
@@ -368,6 +405,7 @@ input GenerateWorkflowStoryInput {
 input ExplainSystemInput {
   repositoryId: ID!
   audience: KnowledgeAudience
+  depth: KnowledgeDepth
   question: String
   scopeType: KnowledgeScopeType
   scopePath: String
@@ -450,6 +488,7 @@ input DiscussCodeInput {
   language: Language
   artifactId: ID
   symbolId: ID
+  requirementId: ID
   conversationHistory: [String!]
 }
 
@@ -588,6 +627,7 @@ enum KnowledgeScopeType {
   MODULE
   FILE
   SYMBOL
+  REQUIREMENT
 }
 
 enum KnowledgeConfidence {
@@ -742,4 +782,155 @@ type ImpactReport {
   affectedRequirements: [ImpactAffectedRequirement!]!
   staleArtifacts: [String!]!
   computedAt: Time!
+}
+
+# ---------------------------------------------------------------------------
+# Discovered Requirements (Spec Extraction)
+# ---------------------------------------------------------------------------
+
+type DiscoveredRequirement {
+  id: ID!
+  repoId: ID!
+  source: String!
+  sourceFile: String!
+  sourceLine: Int!
+  sourceFiles: [String!]!
+  text: String!
+  rawText: String!
+  groupKey: String!
+  language: String!
+  keywords: [String!]!
+  confidence: String!
+  status: String!
+  llmRefined: Boolean!
+  promotedTo: String
+  dismissedBy: String
+  dismissedReason: String
+  createdAt: Time!
+}
+
+type DiscoveredRequirementConnection {
+  nodes: [DiscoveredRequirement!]!
+  totalCount: Int!
+}
+
+input TriggerSpecExtractionInput {
+  repositoryId: ID!
+  skipLlmRefinement: Boolean
+}
+
+type SpecExtractionResult {
+  discovered: Int!
+  totalCandidates: Int!
+  warnings: [String!]!
+  model: String
+  inputTokens: Int
+  outputTokens: Int
+}
+
+type PromoteResult {
+  requirement: Requirement!
+  discoveredRequirement: DiscoveredRequirement!
+}
+
+# ---------------------------------------------------------------------------
+# Change Simulation
+# ---------------------------------------------------------------------------
+
+input SimulateChangeInput {
+  repositoryId: ID!
+  description: String!
+  anchorFile: String
+  anchorSymbol: String
+}
+
+type SimulatedImpactReport {
+  id: ID!
+  simulated: Boolean!
+  description: String!
+  anchorFile: String
+  anchorSymbol: String
+  resolvedSymbols: [ResolvedSymbol!]!
+  report: ImpactReport!
+  computedAt: Time!
+}
+
+type ResolvedSymbol {
+  symbolId: ID!
+  name: String!
+  qualifiedName: String!
+  kind: String!
+  filePath: String!
+  similarity: Float!
+  isAnchor: Boolean!
+}
+
+# Architecture diagram types
+enum DiagramLevel {
+  MODULE
+  FILE
+}
+
+type DiagramEdge {
+  targetPath: String!
+  callCount: Int!
+}
+
+type DiagramModule {
+  path: String!
+  symbolCount: Int!
+  fileCount: Int!
+  requirementLinkCount: Int!
+  inboundEdgeCount: Int!
+  outboundEdges: [DiagramEdge!]!
+}
+
+type DiagramOutput {
+  mermaidSource: String!
+  modules: [DiagramModule!]!
+  level: DiagramLevel!
+  totalModules: Int!
+  shownModules: Int!
+  truncated: Boolean!
+}
+
+# Multi-repo federation types
+type RepoLink {
+  id: ID!
+  sourceRepoId: ID!
+  targetRepoId: ID!
+  linkType: String!
+  createdAt: Time!
+}
+
+enum CrossRepoRefType {
+  API_ENDPOINT
+  PROTOBUF_SERVICE
+  GRAPHQL_TYPE
+  IMPORT
+  TYPE_REFERENCE
+}
+
+type CrossRepoRef {
+  id: ID!
+  sourceSymbolId: ID!
+  targetSymbolId: ID!
+  sourceRepoId: ID!
+  targetRepoId: ID!
+  refType: CrossRepoRefType!
+  confidence: Float!
+  contractFile: String
+  consumerFile: String
+  evidence: String
+  createdAt: Time!
+}
+
+type APIContract {
+  id: ID!
+  repoId: ID!
+  filePath: String!
+  contractType: String!
+  endpointCount: Int!
+  version: String
+  detectedAt: Time!
 }

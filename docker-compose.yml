@@ -1,13 +1,25 @@
-version: "3.8"
+# SourceBridge Docker Compose
+#
+# Quick start:
+#   cp .env.example .env    # (optional) customize LLM provider, API keys
+#   docker compose up -d
+#
+# By default the worker uses Ollama for LLM inference (no API key required).
+# To use Anthropic or another cloud provider, set the variables in .env or
+# export them in your shell before running `docker compose up`.
+#
+# See docs/installation.md for full configuration reference.
 
 services:
+  # SurrealDB — embedded document/graph database
   surrealdb:
     image: surrealdb/surrealdb:v2.2.1
     command: start --user root --pass root --log info file:/data/database.db
     ports:
-      - "8000:8000"
+      - "${SOURCEBRIDGE_SURREALDB_PORT:-8000}:8000"
     volumes:
       - surrealdb-data:/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 5s
@@ -15,13 +27,13 @@ services:
       retries: 10
       start_period: 5s
 
+  # SourceBridge API — Go HTTP/GraphQL server
   sourcebridge:
-    image: 192.168.10.222:30500/sourcebridge-api:latest
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile.sourcebridge
     ports:
-      - "8080:8080"
+      - "${SOURCEBRIDGE_API_PORT:-8080}:8080"
     environment:
       - SOURCEBRIDGE_STORAGE_SURREAL_MODE=external
       - SOURCEBRIDGE_STORAGE_SURREAL_URL=ws://surrealdb:8000/rpc
@@ -36,6 +48,7 @@ services:
     depends_on:
       surrealdb:
         condition: service_healthy
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 5s
@@ -43,32 +56,48 @@ services:
       retries: 10
       start_period: 10s
 
+  # SourceBridge Worker — Python gRPC service for AI reasoning
   worker:
-    image: 192.168.10.222:30500/sourcebridge-worker:latest
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile.worker
     ports:
-      - "50051:50051"
+      - "${SOURCEBRIDGE_WORKER_PORT:-50051}:50051"
     environment:
       - SOURCEBRIDGE_WORKER_GRPC_PORT=50051
       - SOURCEBRIDGE_WORKER_SURREAL_URL=ws://surrealdb:8000/rpc
+      - SOURCEBRIDGE_WORKER_SURREAL_NAMESPACE=sourcebridge
+      - SOURCEBRIDGE_WORKER_SURREAL_DATABASE=sourcebridge
+      - SOURCEBRIDGE_WORKER_SURREAL_USER=root
+      - SOURCEBRIDGE_WORKER_SURREAL_PASS=root
       - SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET=${SOURCEBRIDGE_GRPC_SECRET:-dev-shared-secret}
-      # --- LLM: Local Ollama on Mac Studio 2 (default) ---
-      - SOURCEBRIDGE_WORKER_LLM_PROVIDER=${SOURCEBRIDGE_LLM_PROVIDER:-ollama}
-      - SOURCEBRIDGE_WORKER_LLM_BASE_URL=${SOURCEBRIDGE_LLM_BASE_URL:-http://192.168.10.108:11434/v1}
-      - SOURCEBRIDGE_WORKER_LLM_MODEL=${SOURCEBRIDGE_LLM_MODEL:-qwen3:32b}
-      - SOURCEBRIDGE_WORKER_LLM_API_KEY=${SOURCEBRIDGE_LLM_API_KEY:-not-needed}
-      # --- LLM: Cloud Anthropic (uncomment and set env vars) ---
+
+      # ─── LLM Provider Configuration ──────────────────────────────────
+      #
+      # Option A: Cloud — Anthropic (recommended for best quality)
+      #   Set ANTHROPIC_API_KEY in your environment or .env file.
+      #
       # - SOURCEBRIDGE_WORKER_LLM_PROVIDER=anthropic
       # - SOURCEBRIDGE_WORKER_LLM_BASE_URL=
       # - SOURCEBRIDGE_WORKER_LLM_MODEL=claude-sonnet-4-20250514
       # - SOURCEBRIDGE_WORKER_LLM_API_KEY=${ANTHROPIC_API_KEY}
+      #
+      # Option B: Local — Ollama (default, no API key needed)
+      #   Requires Ollama running locally: https://ollama.com
+      #   Pull a model first: ollama pull qwen3:32b
+      #
+      - SOURCEBRIDGE_WORKER_LLM_PROVIDER=${SOURCEBRIDGE_LLM_PROVIDER:-ollama}
+      - SOURCEBRIDGE_WORKER_LLM_BASE_URL=${SOURCEBRIDGE_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      - SOURCEBRIDGE_WORKER_LLM_MODEL=${SOURCEBRIDGE_LLM_MODEL:-qwen3:32b}
+      - SOURCEBRIDGE_WORKER_LLM_API_KEY=${SOURCEBRIDGE_LLM_API_KEY:-not-needed}
+
+      # ─── Embedding Provider ──────────────────────────────────────────
       - SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER=${SOURCEBRIDGE_EMBEDDING_PROVIDER:-voyage}
       - SOURCEBRIDGE_WORKER_EMBEDDING_API_KEY=${VOYAGE_API_KEY:-}
     depends_on:
       surrealdb:
         condition: service_healthy
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import grpc; ch = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=2)"]
       interval: 5s
@@ -76,19 +105,26 @@ services:
       retries: 10
       start_period: 10s
 
+  # SourceBridge Web — Next.js dashboard
   web:
-    image: 192.168.10.222:30500/sourcebridge-web:latest
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile.web
     ports:
-      - "3000:3000"
+      - "${SOURCEBRIDGE_WEB_PORT:-3000}:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://sourcebridge:8080
       - SOURCEBRIDGE_WEB_DEV_PROXY=http://sourcebridge:8080
     depends_on:
       sourcebridge:
         condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
 
 volumes:
   surrealdb-data:

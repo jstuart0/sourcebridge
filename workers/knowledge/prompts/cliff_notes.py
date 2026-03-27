@@ -82,6 +82,15 @@ REQUIRED_SECTIONS_BY_SCOPE = {
         "Usage Examples",
         "Related Symbols",
     ],
+    "requirement": [
+        "Requirement Intent",
+        "Implementation Summary",
+        "Key Implementation Files",
+        "Key Symbols",
+        "Integration Points",
+        "Coverage Assessment",
+        "Change Impact",
+    ],
 }
 
 REQUIRED_SECTIONS = REQUIRED_SECTIONS_BY_SCOPE["repository"]
@@ -90,7 +99,13 @@ _SCOPE_INSTRUCTIONS = {
     "repository": (
         "Treat this like an onboarding field guide for a new maintainer. "
         "Explain what the system is for, where to start, what is risky, and when "
-        "requirements actually matter. Do not default to a requirements-first lens."
+        "requirements actually matter. Do not default to a requirements-first lens.\n"
+        "Focus on:\n"
+        "- What the system does and who it serves (one paragraph, not a product brief)\n"
+        "- The critical paths a maintainer would trace first\n"
+        "- Where complexity hides and what to watch out for\n"
+        "- Concrete starting points (files, entry points) not abstract layers\n"
+        "Avoid architecture-summary voice. Write as if handing the repo to a colleague."
     ),
     "module": (
         "Treat this like a guided handoff for one area of the codebase. "
@@ -99,14 +114,46 @@ _SCOPE_INSTRUCTIONS = {
     "file": (
         "Treat this like a maintainer note for a specific file. "
         "Explain why the file exists, what state or behavior it owns, how to read it, "
-        "what changes here tend to affect, and where a maintainer should edit carefully."
+        "what changes here tend to affect, and where a maintainer should edit carefully.\n"
+        "Focus on:\n"
+        "- What this file is responsible for (not just what it imports)\n"
+        "- The state it manages or transforms\n"
+        "- Which edits are safe vs which have downstream ripple effects\n"
+        "- Concrete symbol names and their roles, not generic 'depends on X' narration\n"
+        "Avoid stock AI phrases like 'acts as a control panel' or 'serves as the backbone'."
     ),
     "symbol": (
         "Treat this like a change-safety note for a single symbol. "
         "Explain its purpose, inputs and outputs, main decisions, "
         "side effects, caller/callee impact, blast radius, and what someone "
-        "should verify before changing it. If parameter types, side effects, or downstream "
-        "systems are not explicitly shown in the snapshot, say that they are not shown rather than inventing them."
+        "should verify before changing it.\n"
+        "STRICT GROUNDING RULES for symbol scope:\n"
+        "- Only describe parameter types, return types, and signatures that appear literally in the snapshot.\n"
+        "- If parameter types or signatures are not shown, write 'Parameter types not available in snapshot' — do not guess.\n"
+        "- Do not invent runtime infrastructure (databases, caches, queues, HTTP clients) unless the snapshot "
+        "shows explicit references to them.\n"
+        "- Do not describe what happens 'downstream' beyond the direct callees listed in scope_context.\n"
+        "- The 'Signature & Parameters' section must only contain information from the snapshot's "
+        "target_symbol and scope_context fields. If those fields lack type info, say so.\n"
+        "- Stay local: every claim must trace back to a symbol name, file path, or caller/callee "
+        "relationship visible in the snapshot."
+    ),
+    "requirement": (
+        "Treat this like an implementation trace for a single requirement. "
+        "The snapshot's scope_context.target_requirement describes what was asked for "
+        "including its full description; the linked symbols and files show how it was built.\n"
+        "Focus on:\n"
+        "- What the requirement asks for and why it matters (from the requirement description, "
+        "not just the title)\n"
+        "- How the implementation is spread across files and symbols — the cross-cutting shape\n"
+        "- Which symbols carry the core logic vs which are supporting glue\n"
+        "- Integration points: how do the implementing files connect to each other "
+        "and to the rest of the system?\n"
+        "- Gaps: linked symbols that seem tangential, or expected coverage that is missing\n"
+        "- What a developer would need to change if this requirement evolved\n"
+        "Avoid restating the requirement verbatim. Explain how the code realizes it.\n"
+        "If there are very few linked symbols (< 5), focus on depth over breadth — "
+        "explain the implementation in detail rather than trying to find cross-cutting patterns."
     ),
 }
 

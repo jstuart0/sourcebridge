@@ -37,7 +37,7 @@ func TraceLikelyExecutionPath(store GraphStore, repoID, symbolID string, maxDept
 	}
 
 	steps := make([]ExecutionNode, 0, maxDepth+2)
-	callerChain := traceCallerChain(store, byID, fanOut, current.ID, 2)
+	callerChain := traceCallerChain(store, byID, fanOut, current.ID, 4)
 	for i := len(callerChain) - 1; i >= 0; i-- {
 		steps = append(steps, callerChain[i])
 	}

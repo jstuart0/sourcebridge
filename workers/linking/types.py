@@ -33,6 +33,7 @@ class CodeEntity:
     content: str = ""
     doc_comment: str = ""
     language: str = ""
+    id: str = ""  # original symbol UUID from the store
 
 
 @dataclass

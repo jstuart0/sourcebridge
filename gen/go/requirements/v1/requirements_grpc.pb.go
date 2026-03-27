@@ -22,6 +22,7 @@ const (
 	RequirementsService_ParseDocument_FullMethodName     = "/sourcebridge.requirements.v1.RequirementsService/ParseDocument"
 	RequirementsService_ParseCSV_FullMethodName          = "/sourcebridge.requirements.v1.RequirementsService/ParseCSV"
 	RequirementsService_EnrichRequirement_FullMethodName = "/sourcebridge.requirements.v1.RequirementsService/EnrichRequirement"
+	RequirementsService_ExtractSpecs_FullMethodName      = "/sourcebridge.requirements.v1.RequirementsService/ExtractSpecs"
 )
 
 // RequirementsServiceClient is the client API for RequirementsService service.
@@ -36,6 +37,9 @@ type RequirementsServiceClient interface {
 	ParseCSV(ctx context.Context, in *ParseCSVRequest, opts ...grpc.CallOption) (*ParseCSVResponse, error)
 	// EnrichRequirement adds LLM-generated metadata to a requirement
 	EnrichRequirement(ctx context.Context, in *EnrichRequirementRequest, opts ...grpc.CallOption) (*EnrichRequirementResponse, error)
+	// ExtractSpecs scans source files and extracts implicit specifications
+	// from tests, API schemas, and doc comments.
+	ExtractSpecs(ctx context.Context, in *ExtractSpecsRequest, opts ...grpc.CallOption) (*ExtractSpecsResponse, error)
 }
 
 type requirementsServiceClient struct {
@@ -76,6 +80,16 @@ func (c *requirementsServiceClient) EnrichRequirement(ctx context.Context, in *E
 	return out, nil
 }
 
+func (c *requirementsServiceClient) ExtractSpecs(ctx context.Context, in *ExtractSpecsRequest, opts ...grpc.CallOption) (*ExtractSpecsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExtractSpecsResponse)
+	err := c.cc.Invoke(ctx, RequirementsService_ExtractSpecs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RequirementsServiceServer is the server API for RequirementsService service.
 // All implementations must embed UnimplementedRequirementsServiceServer
 // for forward compatibility.
@@ -88,6 +102,9 @@ type RequirementsServiceServer interface {
 	ParseCSV(context.Context, *ParseCSVRequest) (*ParseCSVResponse, error)
 	// EnrichRequirement adds LLM-generated metadata to a requirement
 	EnrichRequirement(context.Context, *EnrichRequirementRequest) (*EnrichRequirementResponse, error)
+	// ExtractSpecs scans source files and extracts implicit specifications
+	// from tests, API schemas, and doc comments.
+	ExtractSpecs(context.Context, *ExtractSpecsRequest) (*ExtractSpecsResponse, error)
 	mustEmbedUnimplementedRequirementsServiceServer()
 }
 
@@ -106,6 +123,9 @@ func (UnimplementedRequirementsServiceServer) ParseCSV(context.Context, *ParseCS
 }
 func (UnimplementedRequirementsServiceServer) EnrichRequirement(context.Context, *EnrichRequirementRequest) (*EnrichRequirementResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EnrichRequirement not implemented")
+}
+func (UnimplementedRequirementsServiceServer) ExtractSpecs(context.Context, *ExtractSpecsRequest) (*ExtractSpecsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExtractSpecs not implemented")
 }
 func (UnimplementedRequirementsServiceServer) mustEmbedUnimplementedRequirementsServiceServer() {}
 func (UnimplementedRequirementsServiceServer) testEmbeddedByValue()                             {}
@@ -182,6 +202,24 @@ func _RequirementsService_EnrichRequirement_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RequirementsService_ExtractSpecs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExtractSpecsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RequirementsServiceServer).ExtractSpecs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RequirementsService_ExtractSpecs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RequirementsServiceServer).ExtractSpecs(ctx, req.(*ExtractSpecsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RequirementsService_ServiceDesc is the grpc.ServiceDesc for RequirementsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -200,6 +238,10 @@ var RequirementsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EnrichRequirement",
 			Handler:    _RequirementsService_EnrichRequirement_Handler,
+		},
+		{
+			MethodName: "ExtractSpecs",
+			Handler:    _RequirementsService_ExtractSpecs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

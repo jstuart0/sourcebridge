@@ -40,15 +40,28 @@ type KnowledgeSnapshot struct {
 
 // ScopeContext captures the focused scope details for scoped artifacts.
 type ScopeContext struct {
-	ScopeType      string      `json:"scope_type"`
-	ScopePath      string      `json:"scope_path"`
-	FocusSummary   string      `json:"focus_summary,omitempty"`
-	TargetFile     *FileRef    `json:"target_file,omitempty"`
-	TargetSymbol   *SymbolRef  `json:"target_symbol,omitempty"`
-	KeySymbols     []SymbolRef `json:"key_symbols,omitempty"`
-	SiblingSymbols []SymbolRef `json:"sibling_symbols,omitempty"`
-	Callers        []SymbolRef `json:"callers,omitempty"`
-	Callees        []SymbolRef `json:"callees,omitempty"`
+	ScopeType         string              `json:"scope_type"`
+	ScopePath         string              `json:"scope_path"`
+	FocusSummary      string              `json:"focus_summary,omitempty"`
+	TargetFile        *FileRef            `json:"target_file,omitempty"`
+	TargetSymbol      *SymbolRef          `json:"target_symbol,omitempty"`
+	TargetRequirement *RequirementContext `json:"target_requirement,omitempty"`
+	KeySymbols        []SymbolRef         `json:"key_symbols,omitempty"`
+	LinkedFiles       []FileRef           `json:"linked_files,omitempty"`
+	SiblingSymbols    []SymbolRef         `json:"sibling_symbols,omitempty"`
+	Callers           []SymbolRef         `json:"callers,omitempty"`
+	Callees           []SymbolRef         `json:"callees,omitempty"`
+}
+
+// RequirementContext is the full requirement context for requirement-scoped artifacts.
+// Separate from RequirementRef to include Description without bloating repo-scope snapshots.
+type RequirementContext struct {
+	ID          string   `json:"id"`
+	ExternalID  string   `json:"external_id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Priority    string   `json:"priority,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
 }
 
 // LanguageSummary captures per-language file/symbol counts.

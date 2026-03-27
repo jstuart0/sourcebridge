@@ -36,29 +36,34 @@ class ReasoningServiceStub(object):
             channel: A grpc.Channel.
         """
         self.AnalyzeSymbol = channel.unary_unary(
-                '/codeaware.reasoning.v1.ReasoningService/AnalyzeSymbol',
+                '/sourcebridge.reasoning.v1.ReasoningService/AnalyzeSymbol',
                 request_serializer=reasoning_dot_v1_dot_reasoning__pb2.AnalyzeSymbolRequest.SerializeToString,
                 response_deserializer=reasoning_dot_v1_dot_reasoning__pb2.AnalyzeSymbolResponse.FromString,
                 _registered_method=True)
         self.ExplainRelationship = channel.unary_unary(
-                '/codeaware.reasoning.v1.ReasoningService/ExplainRelationship',
+                '/sourcebridge.reasoning.v1.ReasoningService/ExplainRelationship',
                 request_serializer=reasoning_dot_v1_dot_reasoning__pb2.ExplainRelationshipRequest.SerializeToString,
                 response_deserializer=reasoning_dot_v1_dot_reasoning__pb2.ExplainRelationshipResponse.FromString,
                 _registered_method=True)
         self.AnswerQuestion = channel.unary_unary(
-                '/codeaware.reasoning.v1.ReasoningService/AnswerQuestion',
+                '/sourcebridge.reasoning.v1.ReasoningService/AnswerQuestion',
                 request_serializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionRequest.SerializeToString,
                 response_deserializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionResponse.FromString,
                 _registered_method=True)
         self.ReviewFile = channel.unary_unary(
-                '/codeaware.reasoning.v1.ReasoningService/ReviewFile',
+                '/sourcebridge.reasoning.v1.ReasoningService/ReviewFile',
                 request_serializer=reasoning_dot_v1_dot_reasoning__pb2.ReviewFileRequest.SerializeToString,
                 response_deserializer=reasoning_dot_v1_dot_reasoning__pb2.ReviewFileResponse.FromString,
                 _registered_method=True)
         self.GenerateEmbedding = channel.unary_unary(
-                '/codeaware.reasoning.v1.ReasoningService/GenerateEmbedding',
+                '/sourcebridge.reasoning.v1.ReasoningService/GenerateEmbedding',
                 request_serializer=reasoning_dot_v1_dot_reasoning__pb2.GenerateEmbeddingRequest.SerializeToString,
                 response_deserializer=reasoning_dot_v1_dot_reasoning__pb2.GenerateEmbeddingResponse.FromString,
+                _registered_method=True)
+        self.SimulateChange = channel.unary_unary(
+                '/sourcebridge.reasoning.v1.ReasoningService/SimulateChange',
+                request_serializer=reasoning_dot_v1_dot_reasoning__pb2.SimulateChangeRequest.SerializeToString,
+                response_deserializer=reasoning_dot_v1_dot_reasoning__pb2.SimulateChangeResponse.FromString,
                 _registered_method=True)
 
 
@@ -101,6 +106,13 @@ class ReasoningServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SimulateChange(self, request, context):
+        """SimulateChange resolves symbols affected by a hypothetical change description
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ReasoningServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -129,11 +141,16 @@ def add_ReasoningServiceServicer_to_server(servicer, server):
                     request_deserializer=reasoning_dot_v1_dot_reasoning__pb2.GenerateEmbeddingRequest.FromString,
                     response_serializer=reasoning_dot_v1_dot_reasoning__pb2.GenerateEmbeddingResponse.SerializeToString,
             ),
+            'SimulateChange': grpc.unary_unary_rpc_method_handler(
+                    servicer.SimulateChange,
+                    request_deserializer=reasoning_dot_v1_dot_reasoning__pb2.SimulateChangeRequest.FromString,
+                    response_serializer=reasoning_dot_v1_dot_reasoning__pb2.SimulateChangeResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'codeaware.reasoning.v1.ReasoningService', rpc_method_handlers)
+            'sourcebridge.reasoning.v1.ReasoningService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('codeaware.reasoning.v1.ReasoningService', rpc_method_handlers)
+    server.add_registered_method_handlers('sourcebridge.reasoning.v1.ReasoningService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
@@ -155,7 +172,7 @@ class ReasoningService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.reasoning.v1.ReasoningService/AnalyzeSymbol',
+            '/sourcebridge.reasoning.v1.ReasoningService/AnalyzeSymbol',
             reasoning_dot_v1_dot_reasoning__pb2.AnalyzeSymbolRequest.SerializeToString,
             reasoning_dot_v1_dot_reasoning__pb2.AnalyzeSymbolResponse.FromString,
             options,
@@ -182,7 +199,7 @@ class ReasoningService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.reasoning.v1.ReasoningService/ExplainRelationship',
+            '/sourcebridge.reasoning.v1.ReasoningService/ExplainRelationship',
             reasoning_dot_v1_dot_reasoning__pb2.ExplainRelationshipRequest.SerializeToString,
             reasoning_dot_v1_dot_reasoning__pb2.ExplainRelationshipResponse.FromString,
             options,
@@ -209,7 +226,7 @@ class ReasoningService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.reasoning.v1.ReasoningService/AnswerQuestion',
+            '/sourcebridge.reasoning.v1.ReasoningService/AnswerQuestion',
             reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionRequest.SerializeToString,
             reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionResponse.FromString,
             options,
@@ -236,7 +253,7 @@ class ReasoningService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.reasoning.v1.ReasoningService/ReviewFile',
+            '/sourcebridge.reasoning.v1.ReasoningService/ReviewFile',
             reasoning_dot_v1_dot_reasoning__pb2.ReviewFileRequest.SerializeToString,
             reasoning_dot_v1_dot_reasoning__pb2.ReviewFileResponse.FromString,
             options,
@@ -263,9 +280,36 @@ class ReasoningService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/codeaware.reasoning.v1.ReasoningService/GenerateEmbedding',
+            '/sourcebridge.reasoning.v1.ReasoningService/GenerateEmbedding',
             reasoning_dot_v1_dot_reasoning__pb2.GenerateEmbeddingRequest.SerializeToString,
             reasoning_dot_v1_dot_reasoning__pb2.GenerateEmbeddingResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SimulateChange(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/sourcebridge.reasoning.v1.ReasoningService/SimulateChange',
+            reasoning_dot_v1_dot_reasoning__pb2.SimulateChangeRequest.SerializeToString,
+            reasoning_dot_v1_dot_reasoning__pb2.SimulateChangeResponse.FromString,
             options,
             channel_credentials,
             insecure,
