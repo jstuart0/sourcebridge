@@ -269,3 +269,13 @@ First-time contributors must agree to the [Contributor License Agreement](CLA.md
 ## License
 
 SourceBridge is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+
+---
+
+## Did it work?
+
+If SourceBridge helped you understand a codebase, let us know:
+
+- **It worked?** Give the repo a star — it helps others find the project
+- **Something broke?** [Open an issue](https://github.com/jstuart0/sourcebridge/issues) — we want to fix it
+- **Have ideas?** [Start a discussion](https://github.com/jstuart0/sourcebridge/discussions)
