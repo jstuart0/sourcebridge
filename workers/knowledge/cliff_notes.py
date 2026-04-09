@@ -12,6 +12,7 @@ import structlog
 from workers.common.llm.provider import (
     LLMProvider,
     LLMResponse,
+    check_prompt_budget,
     complete_with_optional_model,
     require_nonempty,
 )
@@ -228,6 +229,12 @@ async def generate_cliff_notes(
     required_sections = REQUIRED_SECTIONS_BY_SCOPE.get(effective_scope, REQUIRED_SECTIONS)
     prompt = build_cliff_notes_prompt(
         repository_name, audience, depth, snapshot_json, effective_scope, scope_path
+    )
+
+    check_prompt_budget(
+        prompt,
+        system=CLIFF_NOTES_SYSTEM,
+        context=f"cliff_notes:{effective_scope}",
     )
 
     response: LLMResponse = require_nonempty(await complete_with_optional_model(

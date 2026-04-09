@@ -13,6 +13,7 @@ import structlog
 from workers.common.llm.provider import (
     LLMProvider,
     LLMResponse,
+    check_prompt_budget,
     complete_with_optional_model,
     require_nonempty,
 )
@@ -61,6 +62,12 @@ async def generate_code_tour(
 ) -> tuple[CodeTourResult, LLMUsageRecord]:
     """Generate a code tour from a repository snapshot."""
     prompt = build_code_tour_prompt(repository_name, audience, depth, snapshot_json, theme)
+
+    check_prompt_budget(
+        prompt,
+        system=CODE_TOUR_SYSTEM,
+        context="code_tour:repository",
+    )
 
     response: LLMResponse = require_nonempty(await complete_with_optional_model(
         provider,

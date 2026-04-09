@@ -13,6 +13,8 @@ import structlog
 from workers.common.llm.provider import (
     LLMProvider,
     LLMResponse,
+    SnapshotTooLargeError,
+    check_prompt_budget,
     complete_with_optional_model,
     require_nonempty,
 )
@@ -398,6 +400,15 @@ async def generate_workflow_story(
         execution_path_json=execution_path_json,
     )
 
+    # Budget check runs OUTSIDE the fallback try/except below so that
+    # SNAPSHOT_TOO_LARGE propagates to the caller as an actionable error
+    # rather than being swallowed into a templated fallback story.
+    check_prompt_budget(
+        prompt,
+        system=WORKFLOW_STORY_SYSTEM,
+        context=f"workflow_story:{scope_type or 'repository'}",
+    )
+
     sections: list[CliffNotesSection] = []
     llm_failed = False
     try:
@@ -409,6 +420,9 @@ async def generate_workflow_story(
             max_tokens=8192,
             model=model_override,
         ), context=f"workflow_story:{scope_type or 'repository'}")
+    except SnapshotTooLargeError:
+        # Re-raise so the servicer can classify and surface the error.
+        raise
     except Exception as exc:
         log.warning("workflow_story_llm_failed_using_fallbacks", error=str(exc))
         llm_failed = True

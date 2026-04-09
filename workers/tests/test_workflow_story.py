@@ -209,6 +209,44 @@ async def test_workflow_story_fills_missing_sections_from_execution_path() -> No
 
 
 @pytest.mark.asyncio
+async def test_workflow_story_handles_empty_snapshot_and_execution_path() -> None:
+    """Regression: empty snapshot + empty execution path must not raise NoneType.
+
+    Live thor logs surfaced a repeating 'NoneType' object is not subscriptable
+    crash when the workflow story helpers were called with empty inputs. The
+    fallback builders were hardened to tolerate missing/None values in nested
+    snapshot sections; this test locks in that behavior.
+    """
+    provider = StaticLLMProvider(json.dumps([
+        {
+            "title": "Goal",
+            "content": "A minimal goal.",
+            "summary": "Minimal.",
+            "confidence": "low",
+            "inferred": True,
+            "evidence": [],
+        },
+    ]))
+
+    # Empty snapshot and empty execution_path_json — the original failing shape.
+    result, usage = await generate_workflow_story(
+        provider=provider,
+        repository_name="empty-repo",
+        audience="developer",
+        depth="medium",
+        snapshot_json="{}",
+        scope_type="repository",
+        execution_path_json="",
+    )
+
+    assert result.sections, "should still produce sections when inputs are empty"
+    titles = [section.title for section in result.sections]
+    for required in REQUIRED_WORKFLOW_STORY_SECTIONS:
+        assert required in titles
+    assert usage.operation == "workflow_story"
+
+
+@pytest.mark.asyncio
 async def test_workflow_story_replaces_placeholder_sections() -> None:
     """Sections with placeholder content should be replaced by grounded fallbacks."""
     provider = StaticLLMProvider(json.dumps([

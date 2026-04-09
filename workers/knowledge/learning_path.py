@@ -13,6 +13,7 @@ import structlog
 from workers.common.llm.provider import (
     LLMProvider,
     LLMResponse,
+    check_prompt_budget,
     complete_with_optional_model,
     require_nonempty,
 )
@@ -62,6 +63,12 @@ async def generate_learning_path(
 ) -> tuple[LearningPathResult, LLMUsageRecord]:
     """Generate a learning path from a repository snapshot."""
     prompt = build_learning_path_prompt(repository_name, audience, depth, snapshot_json, focus_area)
+
+    check_prompt_budget(
+        prompt,
+        system=LEARNING_PATH_SYSTEM,
+        context="learning_path:repository",
+    )
 
     response: LLMResponse = require_nonempty(await complete_with_optional_model(
         provider,

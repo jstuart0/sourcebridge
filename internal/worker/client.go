@@ -6,6 +6,7 @@ package worker
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -31,11 +32,44 @@ const (
 	TimeoutLinkTotal  = 600 * time.Second
 	TimeoutParse      = 60 * time.Second
 	TimeoutEnrich     = 120 * time.Second
-	TimeoutExtraction  = 300 * time.Second
-	TimeoutSimulation  = 30 * time.Second
-	TimeoutKnowledge   = 600 * time.Second
-	TimeoutContracts   = 120 * time.Second
+	TimeoutExtraction = 300 * time.Second
+	TimeoutSimulation = 30 * time.Second
+	// TimeoutKnowledge is the uniform legacy timeout for knowledge-generation
+	// RPCs. Prefer timeoutForKnowledgeScope for callers that know the scope.
+	TimeoutKnowledge = 600 * time.Second
+	TimeoutContracts = 120 * time.Second
 )
+
+// Per-scope knowledge timeouts. Repository-level generations may legitimately
+// run for many minutes on large codebases; file/symbol scopes should never
+// need more than a couple of minutes, and a stuck call shouldn't hold the
+// worker's attention past that.
+const (
+	TimeoutKnowledgeRepository = 600 * time.Second
+	TimeoutKnowledgeModule     = 300 * time.Second
+	TimeoutKnowledgeFile       = 120 * time.Second
+	TimeoutKnowledgeSymbol     = 120 * time.Second
+	TimeoutKnowledgeDefault    = 300 * time.Second
+)
+
+// timeoutForKnowledgeScope returns an appropriate worker timeout for a given
+// knowledge generation scope. Unknown scopes fall back to
+// TimeoutKnowledgeDefault so a typo in the scope string cannot silently
+// extend or shrink the timeout beyond safe bounds.
+func timeoutForKnowledgeScope(scopeType string) time.Duration {
+	switch strings.ToLower(strings.TrimSpace(scopeType)) {
+	case "", "repository", "repo":
+		return TimeoutKnowledgeRepository
+	case "module", "package":
+		return TimeoutKnowledgeModule
+	case "file":
+		return TimeoutKnowledgeFile
+	case "symbol", "requirement":
+		return TimeoutKnowledgeSymbol
+	default:
+		return TimeoutKnowledgeDefault
+	}
+}
 
 // Client wraps gRPC connections to the Python worker and exposes typed service
 // clients for reasoning, linking, and requirements.
@@ -197,36 +231,40 @@ func (c *Client) SimulateChange(ctx context.Context, req *reasoningv1.SimulateCh
 }
 
 // GenerateCliffNotes calls the knowledge worker to generate cliff notes.
+// Timeout is scoped to the request: repository-level calls get 600s,
+// module-level 300s, and file/symbol-level 120s.
 func (c *Client) GenerateCliffNotes(ctx context.Context, req *knowledgev1.GenerateCliffNotesRequest) (*knowledgev1.GenerateCliffNotesResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, TimeoutKnowledge)
+	ctx, cancel := context.WithTimeout(ctx, timeoutForKnowledgeScope(req.GetScopeType()))
 	defer cancel()
 	return c.Knowledge.GenerateCliffNotes(ctx, req)
 }
 
 // GenerateLearningPath calls the knowledge worker to generate a learning path.
+// Learning paths are always repository-scoped today.
 func (c *Client) GenerateLearningPath(ctx context.Context, req *knowledgev1.GenerateLearningPathRequest) (*knowledgev1.GenerateLearningPathResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, TimeoutKnowledge)
+	ctx, cancel := context.WithTimeout(ctx, TimeoutKnowledgeRepository)
 	defer cancel()
 	return c.Knowledge.GenerateLearningPath(ctx, req)
 }
 
 // GenerateWorkflowStory calls the knowledge worker to generate a workflow story.
 func (c *Client) GenerateWorkflowStory(ctx context.Context, req *knowledgev1.GenerateWorkflowStoryRequest) (*knowledgev1.GenerateWorkflowStoryResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, TimeoutKnowledge)
+	ctx, cancel := context.WithTimeout(ctx, timeoutForKnowledgeScope(req.GetScopeType()))
 	defer cancel()
 	return c.Knowledge.GenerateWorkflowStory(ctx, req)
 }
 
 // ExplainSystem calls the knowledge worker for a whole-system explanation.
 func (c *Client) ExplainSystem(ctx context.Context, req *knowledgev1.ExplainSystemRequest) (*knowledgev1.ExplainSystemResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, TimeoutKnowledge)
+	ctx, cancel := context.WithTimeout(ctx, timeoutForKnowledgeScope(req.GetScopeType()))
 	defer cancel()
 	return c.Knowledge.ExplainSystem(ctx, req)
 }
 
 // GenerateCodeTour calls the knowledge worker to generate a code tour.
+// Code tours are always repository-scoped today.
 func (c *Client) GenerateCodeTour(ctx context.Context, req *knowledgev1.GenerateCodeTourRequest) (*knowledgev1.GenerateCodeTourResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, TimeoutKnowledge)
+	ctx, cancel := context.WithTimeout(ctx, TimeoutKnowledgeRepository)
 	defer cancel()
 	return c.Knowledge.GenerateCodeTour(ctx, req)
 }

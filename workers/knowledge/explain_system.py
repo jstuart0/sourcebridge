@@ -12,6 +12,7 @@ import structlog
 from workers.common.llm.provider import (
     LLMProvider,
     LLMResponse,
+    check_prompt_budget,
     complete_with_optional_model,
     require_nonempty,
 )
@@ -42,6 +43,12 @@ async def explain_system(
 ) -> tuple[ExplainResult, LLMUsageRecord]:
     """Generate a whole-system explanation from a repository snapshot."""
     prompt = build_explain_system_prompt(repository_name, audience, question, snapshot_json, depth)
+
+    check_prompt_budget(
+        prompt,
+        system=EXPLAIN_SYSTEM_SYSTEM,
+        context="explain_system:repository",
+    )
 
     response: LLMResponse = require_nonempty(
         await complete_with_optional_model(

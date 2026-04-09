@@ -68,6 +68,27 @@ func persistArtifactFailure(store knowledgepkg.KnowledgeStore, artifactID string
 	_ = store.SetArtifactFailed(artifactID, code, err.Error())
 }
 
+// staleGenerationThreshold bounds how long an artifact can sit in the
+// GENERATING/PENDING state before a new request will re-claim it. Without
+// this window a crashed mid-generation (worker OOM, pod restart) would
+// permanently block future retries; with it, the stuck artifact is deleted
+// and a fresh goroutine takes over after 60s of silence.
+const staleGenerationThreshold = 60 * time.Second
+
+// isInFlightGeneration reports whether the existing artifact is actively
+// generating within the staleness window. Callers use this to dedupe rapid
+// repeated requests (the original "3 calls in 3 seconds" thor thrashing
+// pattern) while still allowing recovery after a worker crash.
+func isInFlightGeneration(existing *knowledgepkg.Artifact) bool {
+	if existing == nil {
+		return false
+	}
+	if existing.Status != knowledgepkg.StatusGenerating && existing.Status != knowledgepkg.StatusPending {
+		return false
+	}
+	return time.Since(existing.UpdatedAt) < staleGenerationThreshold
+}
+
 // AddRepository is the resolver for the addRepository field.
 func (r *mutationResolver) AddRepository(ctx context.Context, input AddRepositoryInput) (*Repository, error) {
 	store := r.getStore(ctx)
@@ -1382,10 +1403,16 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
 			return mapKnowledgeArtifact(existing), nil
 		}
-		if existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
+		if isInFlightGeneration(existing) {
+			slog.Info("cliff_notes_generation_deduped",
+				"artifact_id", existing.ID,
+				"elapsed_ms", time.Since(existing.UpdatedAt).Milliseconds())
 			return mapKnowledgeArtifact(existing), nil
 		}
-		if existing.Status == knowledgepkg.StatusFailed || existing.Stale {
+		// Either terminal (failed/stale) or stuck in a stale GENERATING/PENDING
+		// state past the staleness window — delete and re-claim.
+		if existing.Status == knowledgepkg.StatusFailed || existing.Stale ||
+			existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
 			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
 		}
 	}
@@ -1585,10 +1612,14 @@ func (r *mutationResolver) GenerateLearningPath(ctx context.Context, input Gener
 		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
 			return mapKnowledgeArtifact(existing), nil
 		}
-		if existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
+		if isInFlightGeneration(existing) {
+			slog.Info("learning_path_generation_deduped",
+				"artifact_id", existing.ID,
+				"elapsed_ms", time.Since(existing.UpdatedAt).Milliseconds())
 			return mapKnowledgeArtifact(existing), nil
 		}
-		if existing.Status == knowledgepkg.StatusFailed || existing.Stale {
+		if existing.Status == knowledgepkg.StatusFailed || existing.Stale ||
+			existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
 			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
 		}
 	}
@@ -1732,10 +1763,14 @@ func (r *mutationResolver) GenerateCodeTour(ctx context.Context, input GenerateC
 		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
 			return mapKnowledgeArtifact(existing), nil
 		}
-		if existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
+		if isInFlightGeneration(existing) {
+			slog.Info("code_tour_generation_deduped",
+				"artifact_id", existing.ID,
+				"elapsed_ms", time.Since(existing.UpdatedAt).Milliseconds())
 			return mapKnowledgeArtifact(existing), nil
 		}
-		if existing.Status == knowledgepkg.StatusFailed || existing.Stale {
+		if existing.Status == knowledgepkg.StatusFailed || existing.Stale ||
+			existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
 			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
 		}
 	}
@@ -1850,10 +1885,14 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
 			return mapKnowledgeArtifact(existing), nil
 		}
-		if existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
+		if isInFlightGeneration(existing) {
+			slog.Info("workflow_story_generation_deduped",
+				"artifact_id", existing.ID,
+				"elapsed_ms", time.Since(existing.UpdatedAt).Milliseconds())
 			return mapKnowledgeArtifact(existing), nil
 		}
-		if existing.Status == knowledgepkg.StatusFailed || existing.Stale {
+		if existing.Status == knowledgepkg.StatusFailed || existing.Stale ||
+			existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
 			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
 		}
 	}
@@ -2068,9 +2107,14 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 	if existing == nil {
 		return nil, fmt.Errorf("knowledge artifact %s not found", id)
 	}
-	if existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
+	if isInFlightGeneration(existing) {
+		slog.Info("knowledge_artifact_refresh_deduped",
+			"artifact_id", existing.ID,
+			"elapsed_ms", time.Since(existing.UpdatedAt).Milliseconds())
 		return mapKnowledgeArtifact(existing), nil
 	}
+	// If the artifact is stuck in GENERATING/PENDING past the staleness window,
+	// treat this as a legitimate refresh request and fall through to re-run.
 	repo := r.getStore(ctx).GetRepository(existing.RepositoryID)
 	if repo == nil {
 		return nil, fmt.Errorf("repository %s not found", existing.RepositoryID)
