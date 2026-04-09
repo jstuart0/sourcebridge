@@ -8,13 +8,13 @@ spec:
   params:
     - name: repo-url
       type: string
-      default: https://github.com/sourcebridge/sourcebridge.git
+      default: https://github.com/sourcebridge-ai/sourcebridge.git
     - name: revision
       type: string
       default: main
     - name: registry
       type: string
-      default: ghcr.io/sourcebridge
+      default: ghcr.io/sourcebridge-ai
   workspaces:
     - name: shared-workspace
     - name: git-credentials
