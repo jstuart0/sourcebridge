@@ -392,6 +392,14 @@ export default function AdminPage() {
         eyebrow="Operations"
         title="Admin"
         description="Monitor service health, configure providers, and manage repository-level operational settings."
+        actions={
+          <a
+            href="/admin/llm"
+            className="inline-flex items-center gap-2 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+          >
+            Generation Monitor →
+          </a>
+        }
       />
 
       <div className="-mx-3 flex gap-2 overflow-x-auto border-b border-[var(--border-subtle)] px-3 pb-4 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">

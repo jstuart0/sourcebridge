@@ -37,6 +37,7 @@ import { Button } from "@/components/ui/button";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
+import { RepoJobsPopover } from "@/components/llm/repo-jobs-popover";
 import { FileTree } from "@/components/source/FileTree";
 import { EnterpriseSourcePanel } from "@/components/source/EnterpriseSourcePanel";
 import { SourceRefLink } from "@/components/source/SourceRefLink";
@@ -1018,6 +1019,7 @@ export default function RepositoryDetailPage() {
               {repo.path || repo.remoteUrl}
             </a>
           ) : (repo?.path || "Explore the codebase through files, symbols, field guides, reviews, and change impact.")}
+          actions={repo ? <RepoJobsPopover repoId={repo.id} /> : null}
         />
         {repo && (
           <Panel className="w-full lg:w-72">
