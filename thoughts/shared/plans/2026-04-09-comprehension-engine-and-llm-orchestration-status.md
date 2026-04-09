@@ -59,26 +59,30 @@ Purpose: execution log and handoff state for autonomous implementation
 
 ## In progress in this pass
 
-- Real-provider benchmark runner for thor/Ollama is not implemented yet.
 - Full orchestrator/monitor work is still pending.
 - Broader mutation dedupe beyond `refreshKnowledgeArtifact` is still pending.
 
 ## Added in latest slice
 
-- Extended persisted failure detail surfacing to the remaining repository artifact panels:
-  - workflow story
-  - learning path
-  - code tour
-- Refactored the repository page to reuse a shared `renderKnowledgeFailure()` helper for consistent error presentation.
-- Added direct memstore coverage for failure metadata behavior:
-  - `SetArtifactFailed()` persists `status`, `errorCode`, and `errorMessage`
-  - `UpdateKnowledgeArtifactStatus(..., READY)` clears prior failure metadata and restores ready-state fields
+- Implemented a real-provider benchmark path for the existing fixture suite:
+  - `workers/benchmarks/run_comprehension_bench.py` now supports `--provider-mode live`
+  - `make benchmark-comprehension-local` now runs the same fixture cases against the configured worker LLM provider
+- Kept live-provider benchmark outputs OSS-safer by design:
+  - no prompt/output text is written to benchmark artifacts
+  - live-provider failures are sanitized to exception type + generic failure marker
+- Added worker test coverage for:
+  - provider-mode override behavior
+  - live-provider error sanitization
+  - live-provider execution path with a patched provider factory
+- Prior slice completed:
+  - extended persisted failure detail surfacing to workflow story, learning path, and code tour
+  - added direct memstore coverage for failure metadata behavior
 
 ## Next recommended steps if handed off
 
 1. Finish A0 code scaffolding:
-   - add `benchmark-comprehension-local` implementation for sanitized thor runs
    - decide whether committed fixture benchmark results should stay in-tree or only regenerated in CI/local workflows
+   - run `benchmark-comprehension-local` in the intended thor/Ollama environment and archive the sanitized report
 2. Finish A1/A2 API-side work:
    - broaden dedupe beyond refresh where still needed
    - decide whether any admin/ops views should surface persisted artifact failure metadata
@@ -100,9 +104,12 @@ Successful:
 - `make benchmark-comprehension-fake BENCHMARK_RESULTS_DIR=benchmarks/results/local-checkpoint`
 - `make benchmark-comprehension-report BENCHMARK_RESULTS_DIR=benchmarks/results/local-checkpoint`
 - `cd workers && uv run python -m pytest tests/test_requirements_servicer.py -v`
+- `cd workers && uv run python -m pytest tests/test_comprehension_bench.py -v`
 - `go test ./internal/api/graphql ./internal/knowledge ./internal/db`
 - `go test ./internal/api/graphql`
 - `go test ./internal/knowledge ./internal/api/graphql`
+- `make benchmark-comprehension-fake BENCHMARK_RESULTS_DIR=benchmarks/results/local-checkpoint`
+- `make benchmark-comprehension-report BENCHMARK_RESULTS_DIR=benchmarks/results/local-checkpoint`
 
 Frontend validation resolved in this environment:
 

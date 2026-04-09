@@ -13,6 +13,8 @@ from typing import Any
 import yaml
 
 from workers.common.llm.fake import FakeLLMProvider
+from workers.common.llm.config import create_llm_provider
+from workers.common.config import WorkerConfig
 from workers.knowledge.cliff_notes import generate_cliff_notes
 from workers.knowledge.code_tour import generate_code_tour
 from workers.knowledge.learning_path import generate_learning_path
@@ -115,6 +117,29 @@ def _load_manifest(path: Path = MANIFEST_PATH) -> list[dict[str, Any]]:
     return cases
 
 
+def _effective_provider_mode(case: dict[str, Any], override: str | None) -> str:
+    if override is None or override == "manifest":
+        return str(case["provider_mode"])
+    return override
+
+
+def _create_provider(provider_mode: str) -> tuple[Any, str, str]:
+    if provider_mode == "fake":
+        provider = FakeLLMProvider()
+        return provider, "fake", provider.default_model
+    if provider_mode == "live":
+        config = WorkerConfig()
+        provider = create_llm_provider(config)
+        provider_name = getattr(provider, "provider_name", None) or config.llm_provider
+        model_id = getattr(provider, "default_model", None) or config.llm_model
+        return provider, provider_name, model_id
+    raise ValueError(f"unsupported provider mode: {provider_mode}")
+
+
+def _sanitize_live_error(exc: Exception) -> str:
+    return f"{type(exc).__name__}: live provider run failed"
+
+
 def _snapshot_json_for_corpus(corpus_id: str) -> str:
     if corpus_id != "multi-lang-repo-fixture":
         raise ValueError(f"unsupported corpus id: {corpus_id}")
@@ -151,11 +176,9 @@ CHECKS = {
 }
 
 
-async def _run_case(case: dict[str, Any]) -> BenchmarkResult:
-    provider_mode = case["provider_mode"]
-    if provider_mode != "fake":
-        raise ValueError(f"unsupported provider mode for OSS benchmark runner: {provider_mode}")
-    provider = FakeLLMProvider()
+async def _run_case(case: dict[str, Any], provider_mode_override: str | None = None) -> BenchmarkResult:
+    provider_mode = _effective_provider_mode(case, provider_mode_override)
+    provider, provider_name, model_id = _create_provider(provider_mode)
     snapshot_json = _snapshot_json_for_corpus(case["corpus_id"])
     artifact_type = case["artifact_type"]
 
@@ -221,8 +244,8 @@ async def _run_case(case: dict[str, Any]) -> BenchmarkResult:
             corpus_id=case["corpus_id"],
             artifact_type=artifact_type,
             provider_mode=provider_mode,
-            provider_name="fake",
-            model_id=usage.model,
+            provider_name=provider_name,
+            model_id=usage.model or model_id,
             success=all(checks.values()),
             duration_ms=elapsed_ms,
             input_tokens=usage.input_tokens,
@@ -238,13 +261,13 @@ async def _run_case(case: dict[str, Any]) -> BenchmarkResult:
             corpus_id=case["corpus_id"],
             artifact_type=artifact_type,
             provider_mode=provider_mode,
-            provider_name="fake",
-            model_id=provider.default_model,
+            provider_name=provider_name,
+            model_id=model_id,
             success=False,
             duration_ms=elapsed_ms,
             input_tokens=0,
             output_tokens=0,
-            error=str(exc),
+            error=str(exc) if provider_mode == "fake" else _sanitize_live_error(exc),
             checks={},
             metrics={},
         )
@@ -287,10 +310,16 @@ async def _main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=MANIFEST_PATH)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--provider-mode",
+        choices=("manifest", "fake", "live"),
+        default="manifest",
+        help="Override manifest provider mode. Use 'live' to run the fixture suite against the configured worker LLM provider.",
+    )
     args = parser.parse_args()
 
     cases = _load_manifest(args.manifest)
-    results = [await _run_case(case) for case in cases]
+    results = [await _run_case(case, args.provider_mode) for case in cases]
     _write_report(args.output_dir, results)
     return 0 if all(result.success for result in results) else 1
 

@@ -158,8 +158,7 @@ benchmark-comprehension-fake:
 	uv run --project workers python -m workers.benchmarks.run_comprehension_bench --output-dir $(BENCHMARK_RESULTS_DIR)
 
 benchmark-comprehension-local:
-	@echo "Not yet implemented: local-provider benchmark runner requires repo-specific configuration."
-	@echo "Use benchmark-comprehension-fake for the OSS-safe baseline harness."
+	uv run --project workers python -m workers.benchmarks.run_comprehension_bench --provider-mode live --output-dir $(BENCHMARK_RESULTS_DIR)
 
 benchmark-comprehension-report:
 	@test -f $(BENCHMARK_RESULTS_DIR)/report.md && cat $(BENCHMARK_RESULTS_DIR)/report.md || (echo "No benchmark report found at $(BENCHMARK_RESULTS_DIR)/report.md" && exit 1)
