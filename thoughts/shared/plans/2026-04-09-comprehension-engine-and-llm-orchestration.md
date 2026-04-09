@@ -1298,3 +1298,97 @@ The plan requires a standing test program, not ad hoc verification:
 
 - Thor API pod logs (`sourcebridge-api-664c554746-48nt9`, 2026-04-09): `refresh cliff notes failed` with `DeadlineExceeded`, `workflow story generation failed` with `'NoneType' object is not subscriptable`.
 - Thor worker pod logs (`sourcebridge-worker-784d8db9dc-mqb2f`, 2026-04-09): `cliff_notes_parse_fallback` with empty LLM responses, `generate_cliff_notes` firing three times within three seconds for the same repository scope, quality metrics showing 7 stub sections with 38 avg char length.
+
+---
+
+## Implementation status addendum (2026-04-09)
+
+Phases have shipped on the `main` branch in the order below. The commit
+history records the full detail; this addendum reconciles the
+implementation's internal phase numbering (1-7) with the plan's
+lettered phases (A-F) and documents what is explicitly deferred.
+
+### Shipped
+
+| Impl phase | Plan phase | Status | Commits |
+|---|---|---|---|
+| Phase 1 (close gaps) | A1 + A2 minus orchestrator | ✅ | `892a57b` |
+| Phase 2a (orchestrator foundation) | A2 | ✅ | `a221603` |
+| Phase 2b (wire knowledge mutations) | A2 | ✅ | `f4480d6` |
+| Phase 2c (Monitor REST + SSE) | A3 | ✅ | `04a6d59` |
+| Phase 2d (Monitor page UI) | A3 | ✅ | `c98aa9b` |
+| Phase 2e (route synchronous LLM mutations) | A2 | ✅ | `28e8d8f` |
+| Phase 3 (Comprehension engine + HierarchicalStrategy) | B | ✅ | `adf11d6` |
+| Phase 4a-c (strategies + selector + servicer dispatch) | D partial, E partial | ✅ | `f9d83e4` |
+| Phase 4d-e (RequirementsCorpus + DocumentCorpus) | F | ✅ | (this commit) |
+
+### Deferred from Phase 4
+
+Two of the advanced strategies in Phase D are intentionally **not
+shipped** in this pass:
+
+1. **RAPTORStrategy** — requires `scikit-learn` for Gaussian Mixture
+   clustering. That adds ~50MB of Python dependencies to the worker
+   image, which is a non-trivial change for every deployment. Until
+   a benchmark clearly demonstrates RAPTOR beats hierarchical on a
+   real workload (Phase D's evaluation rules), the extra dep weight
+   is not justified. Shipping plan: land in a dedicated commit that
+   also updates the worker Dockerfile and includes a bakeoff report.
+
+2. **GraphRAGStrategy** — requires `networkx` + `python-leidenalg`
+   (and the latter needs C compilation that can fail on ARM builds),
+   plus an entity-extraction pass whose quality on small Ollama
+   models is untested. GraphRAG is also capability-gated to
+   `min_instruction_following=high` + native JSON mode, which rules
+   out every local Ollama model in our current registry. Shipping
+   plan: land when (a) the deployment standardizes on a capable
+   model and (b) a benchmark slice shows GraphRAG meaningfully
+   improves "how does everything relate" queries.
+
+Both deferrals live behind the existing `StrategySelector` preference
+chain, so enabling them later is additive: new strategy registered,
+new entry in `DEFAULT_CLIFF_NOTES_CHAIN`, no changes to any existing
+code path.
+
+### What Phase 4 does ship
+
+- `SingleShotStrategy` — legacy path formalized as a first-class strategy.
+- `LongContextDirectStrategy` — single-call path with a pre-flight
+  budget guard and a runtime fallback to hierarchical when the guard
+  trips. Gated on `min_context_tokens=32k` and `medium` instruction
+  following, so only cloud models and large local models pass.
+- `ModelCapabilityRegistry` with builtin profiles for 13 production
+  models (Claude Opus/Sonnet/Haiku 4.x, GPT-4.1 family, Gemini 2.5
+  Pro/Flash, Llama 3.3 at multiple context sizes, Qwen 2.5 Coder,
+  Nomic Embed Code, voyage-code-3).
+- `StrategySelector` with capability gating, fallback chains, and a
+  plain-English `SelectionTrace` that the Monitor page can render.
+- Comma-separated preference chain via
+  `SOURCEBRIDGE_CLIFF_NOTES_STRATEGY`. Default:
+  `hierarchical,single_shot`.
+- `RequirementsCorpus` adapter — wraps requirements collections
+  (single or multiple documents, with or without sections) as the
+  CorpusSource protocol, enabling hierarchical summarization of
+  requirements with zero strategy changes.
+- `DocumentCorpus` adapter — wraps plain-text and markdown documents.
+  Splits markdown by heading level, falls back to paragraph splitting
+  for plain text, caps paragraphs per section so runaway docs don't
+  spawn thousands of leaf calls.
+
+New renderers for the two new corpus types (`RequirementsDigestRenderer`,
+`DocumentDigestRenderer`) are **also deferred** — the existing
+`CliffNotesRenderer` can consume any `SummaryTree` regardless of
+corpus type, so the new adapters are immediately useful via the
+existing hierarchical path when operators point the cliff notes
+servicer at a requirements or document source. Dedicated renderers
+with scope-specific section templates land when the servicer gains
+a new RPC or the existing one learns to route by corpus type.
+
+### Tests
+
+  - Phase 4a: 7 new tests (`test_single_shot_strategy.py`)
+  - Phase 4b: 9 new tests (`test_selector.py`)
+  - Phase 4c: 4 new tests added to `test_hierarchical_servicer.py`
+  - Phase 4d+4e: 14 new tests (`test_corpus_adapters.py`)
+  - Total new in Phase 4: **34 tests**, all passing
+  - Full comprehension suite: **70 tests passing**, ruff clean.
