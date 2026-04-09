@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+
 import grpc
 import structlog
 from common.v1 import types_pb2
@@ -13,6 +16,9 @@ from knowledge.v1 import knowledge_pb2, knowledge_pb2_grpc
 from workers.common.embedding.provider import EmbeddingProvider
 from workers.common.grpc_metadata import resolve_model_override
 from workers.common.llm.provider import LLMProvider
+from workers.comprehension.adapters.code import CodeCorpus
+from workers.comprehension.hierarchical import HierarchicalConfig, HierarchicalStrategy
+from workers.comprehension.renderers import CliffNotesRenderer
 from workers.knowledge.cliff_notes import generate_cliff_notes
 from workers.knowledge.code_tour import generate_code_tour
 from workers.knowledge.explain_system import explain_system
@@ -22,9 +28,29 @@ from workers.knowledge.retrieval import (
     retrieve_relevant_snapshot,
 )
 from workers.knowledge.snapshot_truncate import condense_snapshot
+from workers.knowledge.types import CliffNotesResult
 from workers.knowledge.workflow_story import generate_workflow_story
+from workers.reasoning.types import LLMUsageRecord
 
 log = structlog.get_logger()
+
+
+# SOURCEBRIDGE_CLIFF_NOTES_STRATEGY selects which comprehension strategy
+# runs for the cliff_notes RPC:
+#
+#   - "single_shot"  (default): the legacy pipeline — one LLM call with
+#     the whole snapshot, condensed or retrieved if too large.
+#   - "hierarchical": the Phase 3 bottom-up tree pipeline that works on
+#     any model including small local Ollama variants.
+#
+# Operators flip this on thor once the hierarchical path is validated.
+# Keeping single_shot as the default means zero behavior change for
+# existing deployments until an operator explicitly opts in.
+CLIFF_NOTES_STRATEGY_ENV = "SOURCEBRIDGE_CLIFF_NOTES_STRATEGY"
+
+
+def _selected_cliff_notes_strategy() -> str:
+    return (os.environ.get(CLIFF_NOTES_STRATEGY_ENV, "single_shot") or "single_shot").strip().lower()
 
 
 def _llm_usage_proto(usage_record) -> types_pb2.LLMUsage:
@@ -78,6 +104,75 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         # Fall back to condensation
         return condense_snapshot(snapshot_json, scope_type=scope_type)
 
+    async def _generate_cliff_notes_hierarchical(
+        self,
+        *,
+        request: knowledge_pb2.GenerateCliffNotesRequest,
+        audience: str,
+        depth: str,
+        scope_type: str,
+        model_override: str | None,
+    ) -> tuple[CliffNotesResult, LLMUsageRecord]:
+        """Run the Phase 3 hierarchical pipeline for cliff notes.
+
+        Steps:
+          1. Parse the snapshot JSON into a dict.
+          2. Wrap it in a CodeCorpus adapter.
+          3. Build a SummaryTree with HierarchicalStrategy — each LLM
+             call sees only one segment / one file's children / one
+             package's children / one repo's children, so the prompt
+             always fits even small-context models.
+          4. Render the final structured cliff notes from the tree
+             via CliffNotesRenderer.
+        """
+        try:
+            snapshot_dict = json.loads(request.snapshot_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"snapshot_json is not valid JSON: {exc}") from exc
+
+        corpus = CodeCorpus(snapshot=snapshot_dict)
+        strategy = HierarchicalStrategy(
+            provider=self._llm,
+            config=HierarchicalConfig.from_env(repository_name=request.repository_name or corpus.root().label),
+        )
+
+        log.info(
+            "cliff_notes_hierarchical_started",
+            repository_id=request.repository_id,
+            scope_type=scope_type,
+            scope_path=request.scope_path,
+        )
+
+        tree = await strategy.build_tree(corpus)
+
+        log.info(
+            "cliff_notes_hierarchical_tree_built",
+            repository_id=request.repository_id,
+            stats=tree.stats(),
+        )
+
+        renderer = CliffNotesRenderer(
+            provider=self._llm,
+            model_override=model_override,
+        )
+        result, usage = await renderer.render(
+            tree,
+            repository_name=request.repository_name,
+            audience=audience,
+            depth=depth,
+            scope_type=scope_type,
+            scope_path=request.scope_path,
+        )
+
+        log.info(
+            "cliff_notes_hierarchical_completed",
+            repository_id=request.repository_id,
+            sections=len(result.sections),
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+        )
+        return result, usage
+
     async def GenerateCliffNotes(  # noqa: N802
         self,
         request: knowledge_pb2.GenerateCliffNotesRequest,
@@ -109,22 +204,39 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             scope_type=scope_type,
             scope_path=request.scope_path,
         )
-        snapshot = await self._prepare_snapshot(request.snapshot_json, query, scope_type=scope_type)
 
+        strategy_name = _selected_cliff_notes_strategy()
         model_override = resolve_model_override(context)
+
         try:
-            result, usage = await generate_cliff_notes(
-                provider=self._llm,
-                repository_name=request.repository_name,
-                audience=audience,
-                depth=depth,
-                scope_type=request.scope_type or "repository",
-                scope_path=request.scope_path,
-                snapshot_json=snapshot,
-                model_override=model_override,
-            )
+            if strategy_name == "hierarchical":
+                result, usage = await self._generate_cliff_notes_hierarchical(
+                    request=request,
+                    audience=audience,
+                    depth=depth,
+                    scope_type=scope_type,
+                    model_override=model_override,
+                )
+            else:
+                snapshot = await self._prepare_snapshot(
+                    request.snapshot_json, query, scope_type=scope_type,
+                )
+                result, usage = await generate_cliff_notes(
+                    provider=self._llm,
+                    repository_name=request.repository_name,
+                    audience=audience,
+                    depth=depth,
+                    scope_type=scope_type,
+                    scope_path=request.scope_path,
+                    snapshot_json=snapshot,
+                    model_override=model_override,
+                )
         except Exception as exc:
-            log.error("generate_cliff_notes_failed", error=str(exc))
+            log.error(
+                "generate_cliff_notes_failed",
+                strategy=strategy_name,
+                error=str(exc),
+            )
             await context.abort(
                 grpc.StatusCode.INTERNAL,
                 f"Cliff notes generation failed: {exc}",
