@@ -59,10 +59,21 @@ Purpose: execution log and handoff state for autonomous implementation
 
 ## In progress in this pass
 
-- Full orchestrator/monitor work is still pending.
+- Full orchestrator work is still pending.
 - Broader mutation dedupe beyond `refreshKnowledgeArtifact` is still pending.
 
 ## Added in latest slice
+
+- Added minimal monitor-oriented admin knowledge payload improvements:
+  - `internal/api/rest/admin_knowledge.go` now reports `by_error_code`
+  - per-artifact admin entries now include `progress`, scope details, `error_code`, `error_message`, and timestamps
+  - repository artifact lists are ordered to surface in-flight work first
+- Added focused REST coverage in:
+  - `internal/api/rest/admin_knowledge_test.go`
+  - verifies aggregated error-code counts and artifact-level failure detail exposure
+- Brought seed generation failure handling into parity with the main GraphQL generation path:
+  - `internal/api/graphql/knowledge_seed.go` now persists structured failure metadata via `persistArtifactFailure(...)`
+- Updated the REST package mock knowledge store to implement `SetArtifactFailed()`
 
 - Implemented a real-provider benchmark path for the existing fixture suite:
   - `workers/benchmarks/run_comprehension_bench.py` now supports `--provider-mode live`
@@ -85,7 +96,7 @@ Purpose: execution log and handoff state for autonomous implementation
    - run `benchmark-comprehension-local` in the intended thor/Ollama environment and archive the sanitized report
 2. Finish A1/A2 API-side work:
    - broaden dedupe beyond refresh where still needed
-   - decide whether any admin/ops views should surface persisted artifact failure metadata
+   - decide whether any admin/ops UI should consume `/api/v1/admin/knowledge` directly or whether this stays an operator API only
 3. Add a phase report artifact under an OSS-safe path.
 4. Only then consider broader orchestrator/monitor work.
 
@@ -108,6 +119,7 @@ Successful:
 - `go test ./internal/api/graphql ./internal/knowledge ./internal/db`
 - `go test ./internal/api/graphql`
 - `go test ./internal/knowledge ./internal/api/graphql`
+- `go test ./internal/api/rest ./internal/api/graphql ./internal/knowledge`
 - `make benchmark-comprehension-fake BENCHMARK_RESULTS_DIR=benchmarks/results/local-checkpoint`
 - `make benchmark-comprehension-report BENCHMARK_RESULTS_DIR=benchmarks/results/local-checkpoint`
 

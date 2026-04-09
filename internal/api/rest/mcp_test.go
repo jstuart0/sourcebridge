@@ -93,6 +93,14 @@ func (m *mockKnowledgeStore) UpdateKnowledgeArtifactStatus(id string, status kno
 	}
 	return nil
 }
+func (m *mockKnowledgeStore) SetArtifactFailed(id string, code string, message string) error {
+	if a, ok := m.artifacts[id]; ok {
+		a.Status = knowledge.StatusFailed
+		a.ErrorCode = code
+		a.ErrorMessage = message
+	}
+	return nil
+}
 func (m *mockKnowledgeStore) UpdateKnowledgeArtifactProgress(id string, progress float64) error {
 	return nil
 }

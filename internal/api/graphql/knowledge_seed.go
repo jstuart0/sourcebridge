@@ -121,7 +121,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			SnapshotJson:   snapshotJSON,
 		})
 		if err != nil {
-			_ = r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusFailed)
+			persistArtifactFailure(r.KnowledgeStore, artifact.ID, err)
 			return
 		}
 		sections := make([]knowledgepkg.Section, len(resp.Sections))
@@ -136,7 +136,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			}
 		}
 		if err := r.KnowledgeStore.SupersedeArtifact(artifact.ID, sections); err != nil {
-			_ = r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusFailed)
+			persistArtifactFailure(r.KnowledgeStore, artifact.ID, err)
 		}
 	case knowledgepkg.ArtifactLearningPath:
 		resp, err := r.Worker.GenerateLearningPath(context.Background(), &knowledgev1.GenerateLearningPathRequest{
@@ -147,7 +147,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			SnapshotJson:   snapshotJSON,
 		})
 		if err != nil {
-			_ = r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusFailed)
+			persistArtifactFailure(r.KnowledgeStore, artifact.ID, err)
 			return
 		}
 		sections := make([]knowledgepkg.Section, len(resp.Steps))
@@ -160,7 +160,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			}
 		}
 		if err := r.KnowledgeStore.SupersedeArtifact(artifact.ID, sections); err != nil {
-			_ = r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusFailed)
+			persistArtifactFailure(r.KnowledgeStore, artifact.ID, err)
 		}
 	case knowledgepkg.ArtifactCodeTour:
 		resp, err := r.Worker.GenerateCodeTour(context.Background(), &knowledgev1.GenerateCodeTourRequest{
@@ -171,7 +171,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			SnapshotJson:   snapshotJSON,
 		})
 		if err != nil {
-			_ = r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusFailed)
+			persistArtifactFailure(r.KnowledgeStore, artifact.ID, err)
 			return
 		}
 		sections := make([]knowledgepkg.Section, len(resp.Stops))
@@ -190,7 +190,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			}
 		}
 		if err := r.KnowledgeStore.SupersedeArtifact(artifact.ID, sections); err != nil {
-			_ = r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusFailed)
+			persistArtifactFailure(r.KnowledgeStore, artifact.ID, err)
 		}
 	case knowledgepkg.ArtifactWorkflowStory:
 		resp, err := r.Worker.GenerateWorkflowStory(context.Background(), &knowledgev1.GenerateWorkflowStoryRequest{
@@ -203,7 +203,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			SnapshotJson:   snapshotJSON,
 		})
 		if err != nil {
-			_ = r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusFailed)
+			persistArtifactFailure(r.KnowledgeStore, artifact.ID, err)
 			return
 		}
 		sections := make([]knowledgepkg.Section, len(resp.Sections))
@@ -218,7 +218,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			}
 		}
 		if err := r.KnowledgeStore.SupersedeArtifact(artifact.ID, sections); err != nil {
-			_ = r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusFailed)
+			persistArtifactFailure(r.KnowledgeStore, artifact.ID, err)
 		}
 	}
 }
