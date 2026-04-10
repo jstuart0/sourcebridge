@@ -62,6 +62,9 @@ export default function RepositoriesPage() {
   const [addError, setAddError] = useState("");
   const [adding, setAdding] = useState(false);
   const [addSuccess, setAddSuccess] = useState("");
+  const [bulkText, setBulkText] = useState("");
+  const [bulkResults, setBulkResults] = useState<{ name: string; status: string; error?: string }[]>([]);
+  const [bulkImporting, setBulkImporting] = useState(false);
   const [pendingRedirectRepoId, setPendingRedirectRepoId] = useState<string | null>(null);
 
   const repos: Repository[] = result.data?.repositories || [];
@@ -152,6 +155,37 @@ export default function RepositoriesPage() {
     }
   }
 
+  async function handleBulkImport() {
+    const lines = bulkText
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith("#"));
+    if (lines.length === 0) return;
+    setBulkImporting(true);
+    setBulkResults([]);
+    const results: { name: string; status: string; error?: string }[] = [];
+    for (const line of lines) {
+      // Each line is a git URL or path. Derive name from the URL.
+      const name = line
+        .split("/")
+        .pop()
+        ?.replace(/\.git$/, "") || line;
+      try {
+        const res = await addRepo({ input: { name, path: line } });
+        if (res.error) {
+          results.push({ name, status: "error", error: res.error.message });
+        } else {
+          results.push({ name, status: "queued" });
+        }
+      } catch (e) {
+        results.push({ name, status: "error", error: String(e) });
+      }
+      setBulkResults([...results]);
+    }
+    setBulkImporting(false);
+    reexecute({ requestPolicy: "network-only" });
+  }
+
   async function handleRemoveRepo(id: string, name: string) {
     if (!confirm(`Remove repository "${name}"? This cannot be undone.`)) return;
     await removeRepo({ id });
@@ -222,6 +256,49 @@ export default function RepositoriesPage() {
                 {adding ? "Adding…" : "Add & Index"}
               </Button>
             </div>
+          </div>
+
+          <div className="border-t border-[var(--border-subtle)] pt-5">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold text-[var(--text-primary)]">Bulk Import</h3>
+              <p className="text-sm text-[var(--text-secondary)]">
+                Paste one git URL or path per line. Each repo will be cloned, indexed, and automatically
+                generate cliff notes, learning paths, and code tours.
+              </p>
+            </div>
+            <textarea
+              value={bulkText}
+              onChange={(e) => setBulkText(e.target.value)}
+              placeholder={"https://github.com/org/repo1.git\nhttps://github.com/org/repo2.git\n/path/to/local/repo3"}
+              rows={5}
+              className="mt-3 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 font-mono text-sm text-[var(--text-primary)]"
+            />
+            <div className="mt-3 flex items-center gap-3">
+              <Button
+                disabled={!bulkText.trim() || bulkImporting}
+                onClick={handleBulkImport}
+              >
+                {bulkImporting ? `Importing... (${bulkResults.length}/${bulkText.split("\n").filter((l) => l.trim() && !l.trim().startsWith("#")).length})` : "Import All"}
+              </Button>
+              {bulkResults.length > 0 && (
+                <span className="text-xs text-[var(--text-secondary)]">
+                  {bulkResults.filter((r) => r.status === "queued").length} queued,{" "}
+                  {bulkResults.filter((r) => r.status === "error").length} errors
+                </span>
+              )}
+            </div>
+            {bulkResults.length > 0 && (
+              <div className="mt-3 max-h-48 overflow-y-auto rounded-[var(--control-radius)] border border-[var(--border-subtle)] bg-[var(--bg-base)] text-xs">
+                {bulkResults.map((r, i) => (
+                  <div key={i} className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-1.5 last:border-0">
+                    <span className="font-mono text-[var(--text-primary)]">{r.name}</span>
+                    <span className={r.status === "queued" ? "text-green-500" : "text-red-400"}>
+                      {r.status === "queued" ? "Queued" : r.error || "Error"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </Panel>
       ) : null}
