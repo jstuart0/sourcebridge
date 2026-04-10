@@ -15,6 +15,7 @@ adapter; the strategies stay unchanged.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -61,6 +62,12 @@ class CorpusUnit:
     # needs further splitting before it fits the model's effective
     # context. Adapters should populate it when possible; 0 means unknown.
     size_tokens: int = 0
+    # content_hash is a Merkle fingerprint that changes when the leaf
+    # content changes. Used by the incremental reindex to skip nodes
+    # whose content hasn't changed since the last build. Empty string
+    # means "always rebuild" (safe default for adapters that don't
+    # compute hashes yet).
+    content_hash: str = ""
     # metadata carries adapter-specific fields (file path, module name,
     # commit sha, etc.) that renderers may surface in evidence links.
     metadata: dict[str, object] = field(default_factory=dict)
@@ -138,3 +145,13 @@ def walk_by_level(corpus: CorpusSource) -> dict[int, list[CorpusUnit]]:
         by_level.setdefault(unit.level, []).append(unit)
         stack.extend(reversed(list(corpus.children(unit))))
     return by_level
+
+
+def content_hash(text: str) -> str:
+    """Compute a SHA-256 content hash for Merkle fingerprinting.
+
+    Used to determine whether a leaf's content has changed since the
+    last build. Interior nodes derive their hash from their children's
+    hashes — the HierarchicalStrategy handles that combination.
+    """
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]

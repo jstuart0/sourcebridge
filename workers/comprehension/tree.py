@@ -37,6 +37,7 @@ class SummaryNode:
     headline: str = ""
     summary_tokens: int = 0
     source_tokens: int = 0
+    content_hash: str = ""
     model_used: str = ""
     strategy: str = ""
     revision_fp: str = ""

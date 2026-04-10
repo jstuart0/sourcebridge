@@ -73,6 +73,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	var knowledgeStore knowledge.KnowledgeStore
 	var jobStore llm.JobStore
 	var comprehensionStore comprehension.Store
+	var summaryNodeStore comprehension.SummaryNodeStore
 	if cfg.Storage.SurrealMode == "external" {
 		// Run migrations against the external SurrealDB instance.
 		migrationsDir := migrationsPath()
@@ -86,12 +87,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 		knowledgeStore = surrealStore
 		jobStore = surrealStore
 		comprehensionStore = surrealStore
+		summaryNodeStore = surrealStore
 		slog.Info("using SurrealDB-backed store (external mode)")
 	} else {
+		memCS := comprehension.NewMemStore()
 		store = graph.NewStore()
 		knowledgeStore = knowledge.NewMemStore()
 		jobStore = llm.NewMemStore()
-		comprehensionStore = comprehension.NewMemStore()
+		comprehensionStore = memCS
+		summaryNodeStore = memCS
 		slog.Info("using in-memory store (embedded mode)")
 	}
 
@@ -200,6 +204,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		rest.WithTokenStore(tokenStore),
 		rest.WithDesktopAuthStore(desktopAuthStore),
 		rest.WithComprehensionStore(comprehensionStore),
+		rest.WithSummaryNodeStore(summaryNodeStore),
 	)
 
 	// Initialize OIDC if configured

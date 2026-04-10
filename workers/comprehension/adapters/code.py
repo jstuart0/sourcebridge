@@ -37,7 +37,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from workers.comprehension.corpus import CorpusUnit, UnitKind
+from workers.comprehension.corpus import CorpusUnit, UnitKind, content_hash
 
 
 @dataclass
@@ -196,6 +196,10 @@ class CodeCorpus:
                     # still contributes content even without structured
                     # symbols.
                     leaf_id = f"leaf:{file_path}"
+                    leaf_text = (
+                        f"File `{file_path}` is part of the `{module_label}` module. "
+                        "No structured symbols were extracted for this file."
+                    )
                     self._add_unit(CorpusUnit(
                         id=leaf_id,
                         kind=UnitKind.LEAF,
@@ -203,15 +207,13 @@ class CodeCorpus:
                         label=_basename(file_path),
                         parent_id=file_id,
                         size_tokens=200,
+                        content_hash=content_hash(leaf_text),
                         metadata={
                             "file_path": file_path,
                             "language": language,
                         },
                     ))
-                    self._leaf_texts[leaf_id] = (
-                        f"File `{file_path}` is part of the `{module_label}` module. "
-                        "No structured symbols were extracted for this file."
-                    )
+                    self._leaf_texts[leaf_id] = leaf_text
                     continue
 
                 for sym in symbols:
@@ -227,6 +229,15 @@ class CodeCorpus:
                     end_line = int(sym.get("end_line") or 0)
                     body_lines = int(sym.get("line_count") or max(0, end_line - start_line))
 
+                    leaf_text = _render_leaf_text(
+                        name=name,
+                        kind=kind,
+                        signature=signature,
+                        doc=doc,
+                        file_path=file_path,
+                        start_line=start_line,
+                        end_line=end_line,
+                    )
                     self._add_unit(CorpusUnit(
                         id=leaf_id,
                         kind=UnitKind.LEAF,
@@ -234,6 +245,7 @@ class CodeCorpus:
                         label=name,
                         parent_id=file_id,
                         size_tokens=max(50, body_lines * 8),
+                        content_hash=content_hash(leaf_text),
                         metadata={
                             "file_path": file_path,
                             "language": language,
@@ -244,15 +256,7 @@ class CodeCorpus:
                             "end_line": end_line,
                         },
                     ))
-                    self._leaf_texts[leaf_id] = _render_leaf_text(
-                        name=name,
-                        kind=kind,
-                        signature=signature,
-                        doc=doc,
-                        file_path=file_path,
-                        start_line=start_line,
-                        end_line=end_line,
-                    )
+                    self._leaf_texts[leaf_id] = leaf_text
 
         # --- Scope context fallback -----------------------------------
         # If the snapshot carries a scope_context (for scoped artifacts

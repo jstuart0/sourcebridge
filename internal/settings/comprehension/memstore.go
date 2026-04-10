@@ -8,11 +8,12 @@ import (
 	"sync"
 )
 
-// MemStore is an in-memory implementation of Store for tests.
+// MemStore is an in-memory implementation of Store and SummaryNodeStore for tests.
 type MemStore struct {
 	mu           sync.RWMutex
 	settings     map[string]*Settings          // keyed by "scopeType:scopeKey"
 	capabilities map[string]*ModelCapabilities // keyed by modelID
+	summaryNodes map[string][]SummaryNode      // keyed by corpusID
 }
 
 // NewMemStore creates an empty in-memory store.
@@ -20,6 +21,7 @@ func NewMemStore() *MemStore {
 	return &MemStore{
 		settings:     make(map[string]*Settings),
 		capabilities: make(map[string]*ModelCapabilities),
+		summaryNodes: make(map[string][]SummaryNode),
 	}
 }
 
@@ -96,4 +98,54 @@ func (m *MemStore) ListModelCapabilities() ([]ModelCapabilities, error) {
 		result = append(result, *mc)
 	}
 	return result, nil
+}
+
+// --- SummaryNodeStore ---
+
+func (m *MemStore) GetSummaryNodes(corpusID string) ([]SummaryNode, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	nodes := m.summaryNodes[corpusID]
+	cp := make([]SummaryNode, len(nodes))
+	copy(cp, nodes)
+	return cp, nil
+}
+
+func (m *MemStore) GetSummaryNode(corpusID, unitID string) (*SummaryNode, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, n := range m.summaryNodes[corpusID] {
+		if n.UnitID == unitID {
+			cp := n
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MemStore) StoreSummaryNodes(nodes []SummaryNode) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, n := range nodes {
+		existing := m.summaryNodes[n.CorpusID]
+		found := false
+		for i, e := range existing {
+			if e.UnitID == n.UnitID {
+				existing[i] = n
+				found = true
+				break
+			}
+		}
+		if !found {
+			m.summaryNodes[n.CorpusID] = append(existing, n)
+		}
+	}
+	return nil
+}
+
+func (m *MemStore) InvalidateSummaryNodes(corpusID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.summaryNodes, corpusID)
+	return nil
 }

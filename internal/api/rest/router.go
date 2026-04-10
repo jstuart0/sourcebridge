@@ -98,6 +98,11 @@ func WithComprehensionStore(cs comprehension.Store) ServerOption {
 	return func(s *Server) { s.comprehensionStore = cs }
 }
 
+// WithSummaryNodeStore injects the summary node persistence store.
+func WithSummaryNodeStore(sns comprehension.SummaryNodeStore) ServerOption {
+	return func(s *Server) { s.summaryNodeStore = sns }
+}
+
 // Server is the HTTP API server.
 type Server struct {
 	cfg            *config.Config
@@ -122,6 +127,7 @@ type Server struct {
 	mcpAuditLogger     MCPAuditLogger               // deferred to mcp handler at setup
 	mcpToolExtender    MCPToolExtender              // deferred to mcp handler at setup
 	comprehensionStore comprehension.Store           // comprehension settings + model capabilities
+	summaryNodeStore   comprehension.SummaryNodeStore // cached summary tree nodes
 }
 
 // getStore returns a tenant-filtered store when RepoAccessMiddleware has
@@ -314,6 +320,11 @@ func (s *Server) setupRouter() {
 		r.Get("/api/v1/admin/comprehension/models/{modelId}", s.handleGetModelCapabilities)
 		r.Put("/api/v1/admin/comprehension/models", s.handleUpdateModelCapabilities)
 		r.Delete("/api/v1/admin/comprehension/models/{modelId}", s.handleDeleteModelCapabilities)
+
+		// Summary node cache (Phase 7)
+		r.Get("/api/v1/admin/llm/corpus/{corpusId}/nodes", s.handleGetSummaryNodes)
+		r.Put("/api/v1/admin/llm/corpus/nodes", s.handleStoreSummaryNodes)
+		r.Post("/api/v1/admin/llm/corpus/{corpusId}/invalidate", s.handleInvalidateSummaryNodes)
 
 		// API token management
 		r.Post("/api/v1/tokens", s.handleCreateToken)

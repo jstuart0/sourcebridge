@@ -85,12 +85,18 @@ class HierarchicalConfig:
     ``model_override`` lets the caller force a specific model for every
     call in the tree — useful for smoke-testing a particular local
     model without changing the provider default.
+
+    ``cached_tree`` is an optional previously-built tree loaded from
+    the summary node store. When provided, the strategy skips leaf
+    summaries whose content_hash matches the cached node, avoiding
+    redundant LLM calls for unchanged code.
     """
 
     repository_name: str = ""
     leaf_concurrency: int = DEFAULT_LEAF_CONCURRENCY
     max_tokens_per_call: int = DEFAULT_MAX_TOKENS_PER_CALL
     model_override: str | None = None
+    cached_tree: SummaryTree | None = None
 
     @classmethod
     def from_env(cls, repository_name: str = "") -> HierarchicalConfig:
@@ -238,6 +244,14 @@ class HierarchicalStrategy:
         unit: CorpusUnit,
         tree: SummaryTree,
     ) -> None:
+        # Incremental reindex: skip if the cached summary has the same content_hash.
+        if unit.content_hash and self._config.cached_tree:
+            cached = self._config.cached_tree.get(unit.id)
+            if cached and cached.content_hash == unit.content_hash and cached.summary_text:
+                log.debug("hierarchical_leaf_cache_hit", unit_id=unit.id)
+                tree.add(cached)
+                return
+
         try:
             code = corpus.leaf_content(unit)
         except ValueError as exc:
@@ -271,6 +285,7 @@ class HierarchicalStrategy:
                 headline=_first_line(summary),
                 summary_tokens=tokens_out,
                 source_tokens=unit.size_tokens or max(len(code) // 4, 1),
+                content_hash=unit.content_hash,
                 model_used=model,
                 strategy=self.name,
                 revision_fp=tree.revision_fp,

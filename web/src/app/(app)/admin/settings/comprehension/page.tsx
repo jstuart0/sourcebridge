@@ -145,6 +145,8 @@ export default function ComprehensionSettingsPage() {
   const [maxPromptTokens, setMaxPromptTokens] = useState(100000);
   const [leafBudgetTokens, setLeafBudgetTokens] = useState(3000);
   const [cacheEnabled, setCacheEnabled] = useState(false);
+  const [rebuildCorpusId, setRebuildCorpusId] = useState("");
+  const [rebuildMessage, setRebuildMessage] = useState("");
 
   const fetchWithAuth = useCallback(async (path: string, options?: RequestInit) => {
     const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
@@ -293,6 +295,26 @@ export default function ComprehensionSettingsPage() {
     setMaxPromptTokens(100000);
     setLeafBudgetTokens(3000);
     setCacheEnabled(false);
+  };
+
+  const handleRebuildIndex = async () => {
+    if (!rebuildCorpusId.trim()) return;
+    setRebuildMessage("Invalidating...");
+    try {
+      const res = await fetchWithAuth(
+        `/api/v1/admin/llm/corpus/${encodeURIComponent(rebuildCorpusId.trim())}/invalidate`,
+        { method: "POST" }
+      );
+      if (res.ok) {
+        setRebuildMessage("Index invalidated. Next generation will rebuild from scratch.");
+        setRebuildCorpusId("");
+      } else {
+        const err = await res.json().catch(() => ({ error: "Failed" }));
+        setRebuildMessage(`Error: ${err.error || "Failed"}`);
+      }
+    } catch {
+      setRebuildMessage("Network error.");
+    }
   };
 
   // Determine which model is recommended for the current selected model
@@ -494,6 +516,38 @@ export default function ComprehensionSettingsPage() {
               <p className="text-sm text-[var(--text-secondary)]">
                 No monitor data available. Generate an artifact to see system status here.
               </p>
+            )}
+          </div>
+        </Panel>
+
+        {/* Rebuild index (always visible) */}
+        <Panel>
+          <div className="space-y-3">
+            <div>
+              <h3 className="text-base font-semibold text-[var(--text-primary)]">Rebuild Index</h3>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                Invalidate the cached summary tree for a repository. The next generation will rebuild from scratch.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                placeholder="Repository ID (corpus ID)"
+                value={rebuildCorpusId}
+                onChange={(e) => setRebuildCorpusId(e.target.value)}
+                className="flex-1 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent-primary)]"
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleRebuildIndex}
+                disabled={!rebuildCorpusId.trim()}
+              >
+                Rebuild
+              </Button>
+            </div>
+            {rebuildMessage && (
+              <p className="text-sm text-[var(--text-secondary)]">{rebuildMessage}</p>
             )}
           </div>
         </Panel>
