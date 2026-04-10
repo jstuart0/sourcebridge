@@ -122,6 +122,10 @@ func New(store llm.JobStore, cfg Config) *Orchestrator {
 		o.workers.Add(1)
 		go o.worker(i)
 	}
+	// Start stale job reaper — marks jobs stuck in pending/generating
+	// for longer than the reap threshold as failed so they don't block
+	// dedupe forever.
+	go o.reaper()
 	return o
 }
 
@@ -141,6 +145,45 @@ func (o *Orchestrator) Shutdown(graceful time.Duration) error {
 		return nil
 	case <-time.After(graceful):
 		return fmt.Errorf("orchestrator shutdown timed out after %s", graceful)
+	}
+}
+
+// staleJobThreshold is how long a job can sit in pending/generating before
+// the reaper marks it failed. Set higher than the longest expected generation.
+const staleJobThreshold = 35 * time.Minute
+
+// reaper periodically scans for jobs stuck in pending/generating and marks
+// them failed. This prevents stale jobs from permanently blocking dedupe
+// after a worker crash, timeout, or deployment.
+func (o *Orchestrator) reaper() {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-o.ctx.Done():
+			return
+		case <-ticker.C:
+			o.reapStaleJobs()
+		}
+	}
+}
+
+func (o *Orchestrator) reapStaleJobs() {
+	active := o.store.ListActive(llm.ListFilter{})
+	now := time.Now()
+	for _, job := range active {
+		age := now.Sub(job.UpdatedAt)
+		if age < staleJobThreshold {
+			continue
+		}
+		slog.Warn("reaping stale job",
+			"job_id", job.ID,
+			"target_key", job.TargetKey,
+			"status", job.Status,
+			"age", age.Round(time.Second).String())
+		o.store.SetStatus(job.ID, llm.StatusFailed)
+		o.store.SetError(job.ID, "DEADLINE_EXCEEDED", "Job reaped: stuck in "+string(job.Status)+" for "+age.Round(time.Second).String())
+		o.inflight.release(job.TargetKey)
 	}
 }
 
