@@ -261,8 +261,8 @@ async def test_validate_link_no_symbol(servicer, context):
 # ---------------------------------------------------------------------------
 
 
-async def test_batch_link_unimplemented(servicer, context):
-    """BatchLink aborts with UNIMPLEMENTED status."""
+async def test_batch_link_empty_candidates(servicer, context):
+    """BatchLink returns empty response when no candidates are provided."""
     request = linking_pb2.BatchLinkRequest(
         requirements=[
             types_pb2.Requirement(id="REQ-001", title="Test"),
@@ -270,11 +270,11 @@ async def test_batch_link_unimplemented(servicer, context):
         repository_id="test-repo",
     )
 
-    with pytest.raises(Exception, match="gRPC abort"):
-        await servicer.BatchLink(request, context)
+    response = await servicer.BatchLink(request, context)
 
-    assert context.code == grpc.StatusCode.UNIMPLEMENTED
-    assert "not implemented" in context.details.lower()
+    assert response.requirements_processed == 0
+    assert response.links_found == 0
+    assert len(response.links) == 0
 
 
 # ---------------------------------------------------------------------------

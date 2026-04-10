@@ -104,6 +104,9 @@ func (m *mockKnowledgeStore) SetArtifactFailed(id string, code string, message s
 func (m *mockKnowledgeStore) UpdateKnowledgeArtifactProgress(id string, progress float64) error {
 	return nil
 }
+func (m *mockKnowledgeStore) UpdateKnowledgeArtifactProgressWithPhase(id string, progress float64, phase, message string) error {
+	return nil
+}
 func (m *mockKnowledgeStore) MarkKnowledgeArtifactStale(id string, stale bool) error {
 	return nil
 }

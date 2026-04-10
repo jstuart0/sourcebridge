@@ -122,7 +122,7 @@ async def test_answer_question_prefers_context_code(servicer, context, monkeypat
     """AnswerQuestion passes explicit context_code through to the discussion prompt."""
     captured = {}
 
-    async def fake_discuss_code(provider, question, context_code, context_metadata=""):
+    async def fake_discuss_code(provider, question, context_code, context_metadata="", model_override=None):
         captured["question"] = question
         captured["context_code"] = context_code
         captured["context_metadata"] = context_metadata
