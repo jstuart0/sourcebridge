@@ -431,15 +431,19 @@ export default function RepositoryDetailPage() {
   const currentCliffNotes = knowledgeArtifacts.find(
     (a) => a.type === "CLIFF_NOTES" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
   );
+  const isCliffNotesGenerating = currentCliffNotes?.status === "GENERATING" || currentCliffNotes?.status === "PENDING";
   const currentLearningPath = knowledgeArtifacts.find(
     (a) => a.type === "LEARNING_PATH" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
   );
+  const isLearningPathGenerating = currentLearningPath?.status === "GENERATING" || currentLearningPath?.status === "PENDING";
   const currentCodeTour = knowledgeArtifacts.find(
     (a) => a.type === "CODE_TOUR" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
   );
+  const isCodeTourGenerating = currentCodeTour?.status === "GENERATING" || currentCodeTour?.status === "PENDING";
   const currentWorkflowStory = knowledgeArtifacts.find(
     (a) => a.type === "WORKFLOW_STORY" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
   );
+  const isWorkflowStoryGenerating = currentWorkflowStory?.status === "GENERATING" || currentWorkflowStory?.status === "PENDING";
 
   // Reset tour stop index when code tour changes (e.g. after refresh with different stop count)
   const codeTourId = currentCodeTour?.id;
@@ -1836,8 +1840,8 @@ export default function RepositoryDetailPage() {
                             Generate a grounded guide for {scopeTitle()} to get oriented fast. Requirements are optional and can be layered in later.
                           </p>
                           <div className="mt-4">
-                            <Button onClick={handleGenerateCliffNotes} disabled={knowledgeLoading || !features.cliffNotes}>
-                              {knowledgeLoading ? "Generating..." : "Generate field guide"}
+                            <Button onClick={handleGenerateCliffNotes} disabled={knowledgeLoading || isCliffNotesGenerating || !features.cliffNotes}>
+                              {knowledgeLoading || isCliffNotesGenerating ? "Generating..." : "Generate field guide"}
                             </Button>
                           </div>
                           {!features.cliffNotes ? (
@@ -1868,10 +1872,10 @@ export default function RepositoryDetailPage() {
                               </p>
                             </div>
                             <div className="flex gap-2">
-                              <Button variant="secondary" size="sm" onClick={handleGenerateCliffNotes} disabled={knowledgeLoading}>
-                                Generate this lens
+                              <Button variant="secondary" size="sm" onClick={handleGenerateCliffNotes} disabled={knowledgeLoading || isCliffNotesGenerating}>
+                                {isCliffNotesGenerating ? "Generating..." : "Generate this lens"}
                               </Button>
-                              <Button variant="secondary" size="sm" onClick={() => handleRefreshArtifact(currentCliffNotes.id)} disabled={knowledgeLoading}>
+                              <Button variant="secondary" size="sm" onClick={() => handleRefreshArtifact(currentCliffNotes.id)} disabled={knowledgeLoading || isCliffNotesGenerating}>
                                 Refresh
                               </Button>
                             </div>
@@ -2153,8 +2157,8 @@ export default function RepositoryDetailPage() {
                         </p>
                         <div className="flex shrink-0 gap-2">
                           {!currentWorkflowStory ? (
-                            <Button variant="secondary" size="sm" onClick={handleGenerateWorkflowStory} disabled={knowledgeLoading}>
-                              Generate story
+                            <Button variant="secondary" size="sm" onClick={handleGenerateWorkflowStory} disabled={knowledgeLoading || isWorkflowStoryGenerating}>
+                              {isWorkflowStoryGenerating ? "Generating..." : "Generate story"}
                             </Button>
                           ) : null}
                           {currentWorkflowStory ? (
@@ -2273,13 +2277,13 @@ export default function RepositoryDetailPage() {
                       <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
                         <div className="mb-4 flex flex-wrap gap-2">
                           {features.learningPaths && (
-                            <Button variant="secondary" size="sm" onClick={handleGenerateLearningPath} disabled={knowledgeLoading}>
-                              {currentLearningPath ? "Refresh learning path" : "Generate learning path"}
+                            <Button variant="secondary" size="sm" onClick={handleGenerateLearningPath} disabled={knowledgeLoading || isLearningPathGenerating}>
+                              {isLearningPathGenerating ? "Generating..." : currentLearningPath ? "Refresh learning path" : "Generate learning path"}
                             </Button>
                           )}
                           {features.codeTours && (
-                            <Button variant="secondary" size="sm" onClick={handleGenerateCodeTour} disabled={knowledgeLoading}>
-                              {currentCodeTour ? "Refresh code tour" : "Generate code tour"}
+                            <Button variant="secondary" size="sm" onClick={handleGenerateCodeTour} disabled={knowledgeLoading || isCodeTourGenerating}>
+                              {isCodeTourGenerating ? "Generating..." : currentCodeTour ? "Refresh code tour" : "Generate code tour"}
                             </Button>
                           )}
                         </div>

@@ -584,8 +584,6 @@ export const KNOWLEDGE_ARTIFACTS_QUERY = gql`
       status
       progress
       stale
-      errorCode
-      errorMessage
       generatedAt
       createdAt
       updatedAt
@@ -845,8 +843,6 @@ export const REFRESH_KNOWLEDGE_ARTIFACT_MUTATION = gql`
         symbolName
       }
       status
-      errorCode
-      errorMessage
       stale
       generatedAt
       sections {
@@ -882,8 +878,6 @@ export const REQUIREMENT_KNOWLEDGE_QUERY = gql`
       progress
       stale
       generatedAt
-      errorCode
-      errorMessage
       scope {
         scopeType
         scopePath
