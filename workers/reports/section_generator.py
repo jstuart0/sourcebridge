@@ -21,6 +21,27 @@ from workers.common.llm.provider import LLMProvider, LLMResponse, complete_with_
 from workers.reports.evidence_registry import EvidenceRegistry
 from workers.reports.prompts.audience import audience_prompt_block
 
+# Section-specific instructions per report type
+_SECTION_INSTRUCTION_MODULES: dict[str, object] = {}
+
+
+def _get_section_instructions(report_type: str, section_key: str) -> str:
+    """Get section-specific extra instructions for a report type + section."""
+    if report_type not in _SECTION_INSTRUCTION_MODULES:
+        try:
+            mod = __import__(
+                f"workers.reports.prompts.{report_type}",
+                fromlist=["get_section_instructions"],
+            )
+            _SECTION_INSTRUCTION_MODULES[report_type] = mod
+        except (ImportError, AttributeError):
+            _SECTION_INSTRUCTION_MODULES[report_type] = None
+
+    mod = _SECTION_INSTRUCTION_MODULES.get(report_type)
+    if mod and hasattr(mod, "get_section_instructions"):
+        return mod.get_section_instructions(section_key)
+    return ""
+
 logger = logging.getLogger(__name__)
 
 SECTION_SYSTEM = (
@@ -108,6 +129,10 @@ async def generate_section(
     model_override: str | None = None,
 ) -> GeneratedSection:
     """Generate a single report section via LLM."""
+    # Auto-load section-specific instructions from the report type's prompt module
+    type_instructions = _get_section_instructions(report_type, section_key)
+    combined_extra = "\n".join(filter(None, [type_instructions, extra_instructions]))
+
     prompt = SECTION_TEMPLATE.format(
         section_title=section_title,
         report_type=report_type.replace("_", " ").title(),
@@ -117,7 +142,7 @@ async def generate_section(
         loe_mode=loe_mode,
         loe_instructions=LOE_INSTRUCTIONS.get(loe_mode, LOE_INSTRUCTIONS["human_hours"]),
         min_words=min_words,
-        extra_instructions=extra_instructions,
+        extra_instructions=combined_extra,
     )
 
     try:
