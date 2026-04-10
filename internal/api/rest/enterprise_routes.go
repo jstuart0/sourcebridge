@@ -81,9 +81,9 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 
 	// Wire the report generator to call the Python worker via gRPC
 	if s.worker != nil {
-		ectx.API.SetReportGenerator(func(reportID, reportType, audience, repoDataJSON, sectionDefsJSON, outputDir string, repoIDs, selectedSections []string, includeDiagrams bool, loeMode, reportName string) error {
+		ectx.API.SetReportGenerator(func(reportID, reportType, audience, repoDataJSON, sectionDefsJSON, outputDir string, repoIDs, selectedSections []string, includeDiagrams bool, loeMode, reportName string) (string, int, int, int, error) {
 			ctx := context.Background()
-			_, err := s.worker.GenerateReport(ctx, &knowledgev1.GenerateReportRequest{
+			resp, err := s.worker.GenerateReport(ctx, &knowledgev1.GenerateReportRequest{
 				ReportId:               reportID,
 				ReportName:             reportName,
 				ReportType:             reportType,
@@ -96,7 +96,10 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 				RepoDataJson:           repoDataJSON,
 				SectionDefinitionsJson: sectionDefsJSON,
 			})
-			return err
+			if err != nil {
+				return "", 0, 0, 0, err
+			}
+			return resp.Markdown, int(resp.SectionCount), int(resp.WordCount), int(resp.EvidenceCount), nil
 		})
 		slog.Info("report generator wired to Python worker via gRPC")
 	}
