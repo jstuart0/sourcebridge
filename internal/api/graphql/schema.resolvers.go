@@ -1540,6 +1540,7 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 
+		stopProgress := r.startProgressTicker(rt, artifact.ID)
 		bgCtx := r.withModelMetadata(context.Background(), "knowledge")
 		resp, err := r.Worker.GenerateCliffNotes(bgCtx, &knowledgev1.GenerateCliffNotesRequest{
 			RepositoryId:   repo.ID,
@@ -1550,6 +1551,7 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 			ScopePath:      scope.ScopePath,
 			SnapshotJson:   string(snapJSON),
 		})
+		stopProgress()
 		if err != nil {
 			slog.Error("cliff_notes_generation_failed",
 				"artifact_id", artifact.ID,
@@ -1715,6 +1717,7 @@ func (r *mutationResolver) GenerateLearningPath(ctx context.Context, input Gener
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 
+		stopProgress := r.startProgressTicker(rt, artifact.ID)
 		bgCtx := r.withModelMetadata(context.Background(), "knowledge")
 		resp, err := r.Worker.GenerateLearningPath(bgCtx, &knowledgev1.GenerateLearningPathRequest{
 			RepositoryId:   repo.ID,
@@ -1724,6 +1727,7 @@ func (r *mutationResolver) GenerateLearningPath(ctx context.Context, input Gener
 			SnapshotJson:   string(snapJSON),
 			FocusArea:      focusArea,
 		})
+		stopProgress()
 		if err != nil {
 			slog.Error("learning path generation failed", "artifact_id", artifact.ID, "error", err)
 			return err
@@ -1874,6 +1878,7 @@ func (r *mutationResolver) GenerateCodeTour(ctx context.Context, input GenerateC
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 
+		stopProgress := r.startProgressTicker(rt, artifact.ID)
 		bgCtx := r.withModelMetadata(context.Background(), "knowledge")
 		resp, err := r.Worker.GenerateCodeTour(bgCtx, &knowledgev1.GenerateCodeTourRequest{
 			RepositoryId:   repo.ID,
@@ -1883,6 +1888,7 @@ func (r *mutationResolver) GenerateCodeTour(ctx context.Context, input GenerateC
 			SnapshotJson:   string(snapJSON),
 			Theme:          theme,
 		})
+		stopProgress()
 		if err != nil {
 			slog.Error("code tour generation failed", "artifact_id", artifact.ID, "error", err)
 			return err
@@ -2034,6 +2040,7 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 
+		stopProgress := r.startProgressTicker(rt, artifact.ID)
 		bgCtx := r.withModelMetadata(context.Background(), "knowledge")
 		resp, err := r.Worker.GenerateWorkflowStory(bgCtx, &knowledgev1.GenerateWorkflowStoryRequest{
 			RepositoryId:      repo.ID,
@@ -2046,6 +2053,7 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 			ExecutionPathJson: executionPathJSON,
 			SnapshotJson:      string(snapJSON),
 		})
+		stopProgress()
 		if err != nil {
 			slog.Error("workflow story generation failed", "artifact_id", artifact.ID, "error", err)
 			return err
@@ -2281,6 +2289,8 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 		rt.ReportSnapshotBytes(len(snapJSON))
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(existing.ID, 0.1, "snapshot", "Snapshot assembled")
+		stopProgress := r.startProgressTicker(rt, existing.ID)
+		defer stopProgress()
 
 		persistUsage := func(usage *commonv1.LLMUsage) {
 			if usage == nil {

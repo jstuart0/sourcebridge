@@ -4,12 +4,42 @@
 package graphql
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 )
+
+// startProgressTicker launches a goroutine that steadily advances both
+// the llm.Job progress (via rt) and the knowledge artifact progress
+// (via the store) while a long-running gRPC call is blocking. Without
+// this, the progress bar stays at 10% for the entire hierarchical build.
+//
+// Returns a cancel function that stops the ticker.
+func (r *Resolver) startProgressTicker(rt llm.Runtime, artifactID string) context.CancelFunc {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		tick := time.NewTicker(5 * time.Second)
+		defer tick.Stop()
+		p := 0.15
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				if p < 0.75 {
+					p += 0.02
+				}
+				rt.ReportProgress(p, "generating", "Building summary tree")
+				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifactID, p)
+			}
+		}
+	}()
+	return cancel
+}
 
 // knowledgeJobTargetKey returns the canonical dedupe key the orchestrator
 // uses for a knowledge artifact generation job. Matching keys collapse to
