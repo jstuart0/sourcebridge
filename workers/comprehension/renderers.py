@@ -83,8 +83,11 @@ Rules:
 - Do NOT include any prose outside the JSON array.
 - Do NOT wrap the JSON in markdown fences.
 - Every title must appear exactly once.
+- Each section's "content" must be 3-6 substantial sentences of markdown — \
+  not one-liners. Reference specific files, components, and patterns by name.
 - Use "low" confidence + "inferred": true when the summaries don't \
   directly support the section.
+- The "evidence" array should reference actual file paths from the summaries above.
 """
 
 
@@ -101,7 +104,7 @@ class CliffNotesRenderer:
     provider: LLMProvider
     max_group_summaries: int = 8
     max_file_summaries: int = 12
-    max_tokens_per_call: int = 4096
+    max_tokens_per_call: int = 16384  # thinking models need headroom for <think> chains before the JSON output
     model_override: str | None = None
 
     async def render(
