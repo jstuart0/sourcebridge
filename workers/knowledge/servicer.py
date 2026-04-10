@@ -616,7 +616,8 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 snapshot_json=snapshot,
             )
         except Exception as exc:
-            log.error("generate_workflow_story_failed", error=str(exc))
+            import traceback
+            log.error("generate_workflow_story_failed", error=str(exc), traceback=traceback.format_exc())
             await context.abort(
                 grpc.StatusCode.INTERNAL,
                 f"Workflow story generation failed: {exc}",
