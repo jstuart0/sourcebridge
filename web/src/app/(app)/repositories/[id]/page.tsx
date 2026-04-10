@@ -1879,7 +1879,7 @@ export default function RepositoryDetailPage() {
                           {currentCliffNotes.status === "GENERATING" || currentCliffNotes.status === "PENDING" ? (
                             <div className="mb-5 space-y-1">
                               <div className="flex justify-between text-xs text-[var(--text-secondary)]">
-                                <span>{currentCliffNotes.progressMessage || currentCliffNotes.progressPhase || "Working\u2026"}</span>
+                                <span>{"Working\u2026"}</span>
                                 <span>{Math.round(currentCliffNotes.progress * 100)}%</span>
                               </div>
                               <progress
