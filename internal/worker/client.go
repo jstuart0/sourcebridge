@@ -36,7 +36,7 @@ const (
 	TimeoutSimulation = 30 * time.Second
 	// TimeoutKnowledge is the uniform legacy timeout for knowledge-generation
 	// RPCs. Prefer timeoutForKnowledgeScope for callers that know the scope.
-	TimeoutKnowledge = 600 * time.Second
+	TimeoutKnowledge = 1800 * time.Second
 	TimeoutContracts = 120 * time.Second
 )
 
@@ -45,7 +45,7 @@ const (
 // need more than a couple of minutes, and a stuck call shouldn't hold the
 // worker's attention past that.
 const (
-	TimeoutKnowledgeRepository = 600 * time.Second
+	TimeoutKnowledgeRepository = 1800 * time.Second // 30min — thinking models (Qwen 3.x) need ~70s/leaf × 39 leaves at concurrency 4
 	TimeoutKnowledgeModule     = 300 * time.Second
 	TimeoutKnowledgeFile       = 120 * time.Second
 	TimeoutKnowledgeSymbol     = 120 * time.Second
