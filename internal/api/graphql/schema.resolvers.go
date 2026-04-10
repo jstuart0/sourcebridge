@@ -2035,8 +2035,46 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 		executionPathJSON = strings.TrimSpace(*input.ExecutionPathJSON)
 	}
 
+	// Deep mode: enrich the snapshot with cliff notes sections if available.
+	// This gives the workflow story model rich pre-analyzed context instead
+	// of just raw symbol signatures.
+	enrichedSnapJSON := snapJSON
+	if depth == "deep" && r.KnowledgeStore != nil {
+		cliffNotesKey := knowledgepkg.ArtifactKey{
+			RepositoryID: repo.ID,
+			Type:         knowledgepkg.ArtifactCliffNotes,
+			Audience:     knowledgepkg.Audience(audience),
+			Depth:        knowledgepkg.DepthMedium,
+			Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
+		}.Normalized()
+		if cliffNotes := r.KnowledgeStore.GetArtifactByKey(cliffNotesKey); cliffNotes != nil && cliffNotes.Status == knowledgepkg.StatusReady {
+			sections := r.KnowledgeStore.GetKnowledgeSections(cliffNotes.ID)
+			if len(sections) > 0 {
+				var analysis []map[string]string
+				for _, sec := range sections {
+					analysis = append(analysis, map[string]string{
+						"title":   sec.Title,
+						"content": sec.Content,
+						"summary": sec.Summary,
+					})
+				}
+				// Inject into the snapshot dict
+				var snapMap map[string]interface{}
+				if err := json.Unmarshal(snapJSON, &snapMap); err == nil {
+					snapMap["_pre_analysis"] = analysis
+					if enriched, err := json.Marshal(snapMap); err == nil {
+						enrichedSnapJSON = enriched
+						slog.Info("workflow_story_deep_enriched",
+							"artifact_id", artifact.ID,
+							"cliff_notes_sections", len(sections))
+					}
+				}
+			}
+		}
+	}
+
 	store := r.getStore(ctx)
-	err = r.enqueueKnowledgeJob(artifact, "workflow_story", len(snapJSON), func(rt llm.Runtime) error {
+	err = r.enqueueKnowledgeJob(artifact, "workflow_story", len(enrichedSnapJSON), func(rt llm.Runtime) error {
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 
@@ -2051,7 +2089,7 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 			ScopePath:         scope.ScopePath,
 			AnchorLabel:       anchorLabel,
 			ExecutionPathJson: executionPathJSON,
-			SnapshotJson:      string(snapJSON),
+			SnapshotJson:      string(enrichedSnapJSON),
 		})
 		stopProgress()
 		if err != nil {

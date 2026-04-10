@@ -46,10 +46,10 @@ class _StubProvider:
         self.counter += 1
         self.prompts.append(prompt)
 
-        # The final render prompt carries the "=== Output format ===" banner
+        # The final render prompt carries the "=== Task ===" banner
         # and asks for a JSON array of sections. Everything else is a
         # hierarchical summary step.
-        if "=== Output format ===" in prompt or "Return a JSON array of sections" in prompt:
+        if "=== Task ===" in prompt or "Return a JSON array of sections" in prompt:
             payload = json.dumps([
                 {
                     "title": title,
@@ -242,7 +242,7 @@ async def test_hierarchical_path_returns_required_sections(monkeypatch: pytest.M
     assert provider.counter >= 8
     # The final call should be the render (it's the one that includes
     # the Output format banner).
-    assert any("=== Output format ===" in p for p in provider.prompts)
+    assert any("=== Task ===" in p for p in provider.prompts)
 
 
 @pytest.mark.asyncio

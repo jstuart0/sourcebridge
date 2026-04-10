@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import json
+
 REQUIRED_WORKFLOW_STORY_SECTIONS = [
     "Goal",
     "Likely Actor",
@@ -73,6 +75,31 @@ Do not copy them verbatim into every section; translate them into readable workf
 ```
 """
 
+    # Deep mode: extract pre-analysis from enriched snapshot
+    pre_analysis_block = ""
+    try:
+        snap_data = json.loads(snapshot_json) if snapshot_json else {}
+        pre_analysis = snap_data.get("_pre_analysis")
+        if pre_analysis and isinstance(pre_analysis, list):
+            lines = []
+            for section in pre_analysis:
+                if isinstance(section, dict):
+                    title = section.get("title", "")
+                    content = section.get("content", "")
+                    if title and content:
+                        lines.append(f"### {title}\n{content}")
+            if lines:
+                pre_analysis_block = (
+                    "**Pre-computed Codebase Analysis (from field guide)**\n"
+                    "Use this analysis as PRIMARY context — it contains detailed, "
+                    "grounded information about each part of the codebase. "
+                    "Sections referencing this analysis should have confidence: high.\n\n"
+                    + "\n\n".join(lines)
+                    + "\n\n"
+                )
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+
     return f"""\
 Create a Workflow Story for this scope:
 
@@ -124,7 +151,7 @@ Confidence rules:
 - Only use "low" confidence when the snapshot provides no relevant evidence at all.
 - Most sections should be "high" confidence when the snapshot contains relevant symbols.
 
-**Repository snapshot**
+{pre_analysis_block}**Repository snapshot**
 ```json
 {snapshot_json}
 ```
