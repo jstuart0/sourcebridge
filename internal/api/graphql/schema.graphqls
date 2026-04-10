@@ -80,6 +80,12 @@ type Query {
   # Phase 17: Analytics
   llmUsage(repositoryId: ID, limit: Int): [LLMUsageEntry!]!
   platformStats: PlatformStats!
+
+  # Phase 6: Comprehension settings
+  comprehensionSettings(scopeType: String, scopeKey: String): EffectiveComprehensionSettings!
+  comprehensionSettingsList: [ComprehensionSettings!]!
+  modelCapabilities: [ModelCapabilityProfile!]!
+  modelCapability(modelId: String!): ModelCapabilityProfile
 }
 
 type Mutation {
@@ -123,6 +129,12 @@ type Mutation {
   generateWorkflowStory(input: GenerateWorkflowStoryInput!): KnowledgeArtifact!
   explainSystem(input: ExplainSystemInput!): ExplainSystemResult!
   refreshKnowledgeArtifact(id: ID!): KnowledgeArtifact!
+
+  # Phase 6: Comprehension settings
+  updateComprehensionSettings(input: UpdateComprehensionSettingsInput!): EffectiveComprehensionSettings!
+  resetComprehensionSettings(scopeType: String!, scopeKey: String): Boolean!
+  updateModelCapabilities(input: UpdateModelCapabilitiesInput!): ModelCapabilityProfile!
+  deleteModelCapabilities(modelId: String!): Boolean!
 }
 
 # Health and system types
@@ -937,4 +949,101 @@ type APIContract {
   endpointCount: Int!
   version: String
   detectedAt: Time!
+}
+
+# --- Phase 6: Comprehension Settings & Model Capabilities ---
+
+type ComprehensionSettings {
+  id: ID
+  scopeType: String!
+  scopeKey: String!
+  strategyPreferenceChain: [String!]
+  modelId: String
+  maxConcurrency: Int
+  maxPromptTokens: Int
+  leafBudgetTokens: Int
+  refinePassEnabled: Boolean
+  longContextMaxTokens: Int
+  graphragEntityTypes: [String!]
+  cacheEnabled: Boolean
+  allowUnsafeCombinations: Boolean
+  updatedAt: Time
+  updatedBy: String
+}
+
+type ScopeOrigin {
+  type: String!
+  key: String!
+}
+
+type EffectiveComprehensionSettings {
+  scopeType: String!
+  scopeKey: String!
+  strategyPreferenceChain: [String!]!
+  modelId: String!
+  maxConcurrency: Int!
+  maxPromptTokens: Int!
+  leafBudgetTokens: Int!
+  refinePassEnabled: Boolean!
+  longContextMaxTokens: Int!
+  graphragEntityTypes: [String!]!
+  cacheEnabled: Boolean!
+  allowUnsafeCombinations: Boolean!
+  inheritedFrom: [FieldOrigin!]
+}
+
+type FieldOrigin {
+  field: String!
+  scopeType: String!
+  scopeKey: String!
+}
+
+type ModelCapabilityProfile {
+  id: ID
+  modelId: String!
+  provider: String!
+  declaredContextTokens: Int!
+  effectiveContextTokens: Int!
+  instructionFollowing: String!
+  jsonMode: String!
+  toolUse: String!
+  extractionGrade: String!
+  creativeGrade: String!
+  embeddingModel: Boolean!
+  costPer1kInput: Float
+  costPer1kOutput: Float
+  lastProbedAt: Time
+  source: String!
+  notes: String
+  updatedAt: Time
+}
+
+input UpdateComprehensionSettingsInput {
+  scopeType: String!
+  scopeKey: String
+  strategyPreferenceChain: [String!]
+  modelId: String
+  maxConcurrency: Int
+  maxPromptTokens: Int
+  leafBudgetTokens: Int
+  refinePassEnabled: Boolean
+  longContextMaxTokens: Int
+  graphragEntityTypes: [String!]
+  cacheEnabled: Boolean
+  allowUnsafeCombinations: Boolean
+}
+
+input UpdateModelCapabilitiesInput {
+  modelId: String!
+  provider: String
+  declaredContextTokens: Int
+  effectiveContextTokens: Int
+  instructionFollowing: String
+  jsonMode: String
+  toolUse: String
+  extractionGrade: String
+  creativeGrade: String
+  embeddingModel: Boolean
+  source: String
+  notes: String
 }

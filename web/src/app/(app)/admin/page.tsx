@@ -393,12 +393,20 @@ export default function AdminPage() {
         title="Admin"
         description="Monitor service health, configure providers, and manage repository-level operational settings."
         actions={
-          <a
-            href="/admin/llm"
-            className="inline-flex items-center gap-2 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
-          >
-            Generation Monitor →
-          </a>
+          <div className="flex items-center gap-2">
+            <a
+              href="/admin/settings/comprehension"
+              className="inline-flex items-center gap-2 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+            >
+              Comprehension Settings →
+            </a>
+            <a
+              href="/admin/llm"
+              className="inline-flex items-center gap-2 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+            >
+              Generation Monitor →
+            </a>
+          </div>
         }
       />
 

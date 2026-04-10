@@ -12,6 +12,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
+	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
@@ -31,7 +32,8 @@ type Resolver struct {
 	Orchestrator   *orchestrator.Orchestrator // nil when llm orchestration is unavailable (degraded mode)
 	Config         *config.Config            // application configuration
 	EventBus       *events.Bus               // in-process event bus for SSE notifications
-	GitConfig      GitConfigLoader           // reads git credentials from DB (multi-replica safe)
+	GitConfig          GitConfigLoader           // reads git credentials from DB (multi-replica safe)
+	ComprehensionStore comprehension.Store        // comprehension settings + model capabilities; nil when unavailable
 }
 
 // getStore returns the per-request tenant-filtered store when available,

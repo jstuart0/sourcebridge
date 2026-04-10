@@ -36,6 +36,103 @@ type AnalysisResult struct {
 	OutputTokens *int     `json:"outputTokens,omitempty"`
 }
 
+// Phase 6: Comprehension settings types
+
+type ComprehensionSettings struct {
+	ID                      *string    `json:"id,omitempty"`
+	ScopeType               string     `json:"scopeType"`
+	ScopeKey                string     `json:"scopeKey"`
+	StrategyPreferenceChain []string   `json:"strategyPreferenceChain,omitempty"`
+	ModelID                 *string    `json:"modelId,omitempty"`
+	MaxConcurrency          *int       `json:"maxConcurrency,omitempty"`
+	MaxPromptTokens         *int       `json:"maxPromptTokens,omitempty"`
+	LeafBudgetTokens        *int       `json:"leafBudgetTokens,omitempty"`
+	RefinePassEnabled       *bool      `json:"refinePassEnabled,omitempty"`
+	LongContextMaxTokens    *int       `json:"longContextMaxTokens,omitempty"`
+	GraphRAGEntityTypes     []string   `json:"graphragEntityTypes,omitempty"`
+	CacheEnabled            *bool      `json:"cacheEnabled,omitempty"`
+	AllowUnsafeCombinations *bool      `json:"allowUnsafeCombinations,omitempty"`
+	UpdatedAt               *time.Time `json:"updatedAt,omitempty"`
+	UpdatedBy               *string    `json:"updatedBy,omitempty"`
+}
+
+type EffectiveComprehensionSettings struct {
+	ScopeType               string         `json:"scopeType"`
+	ScopeKey                string         `json:"scopeKey"`
+	StrategyPreferenceChain []string       `json:"strategyPreferenceChain"`
+	ModelID                 string         `json:"modelId"`
+	MaxConcurrency          int            `json:"maxConcurrency"`
+	MaxPromptTokens         int            `json:"maxPromptTokens"`
+	LeafBudgetTokens        int            `json:"leafBudgetTokens"`
+	RefinePassEnabled       bool           `json:"refinePassEnabled"`
+	LongContextMaxTokens    int            `json:"longContextMaxTokens"`
+	GraphRAGEntityTypes     []string       `json:"graphragEntityTypes"`
+	CacheEnabled            bool           `json:"cacheEnabled"`
+	AllowUnsafeCombinations bool           `json:"allowUnsafeCombinations"`
+	InheritedFrom           []*FieldOrigin `json:"inheritedFrom,omitempty"`
+}
+
+type FieldOrigin struct {
+	Field     string `json:"field"`
+	ScopeType string `json:"scopeType"`
+	ScopeKey  string `json:"scopeKey"`
+}
+
+type ModelCapabilityProfile struct {
+	ID                     *string    `json:"id,omitempty"`
+	ModelID                string     `json:"modelId"`
+	Provider               string     `json:"provider"`
+	DeclaredContextTokens  int        `json:"declaredContextTokens"`
+	EffectiveContextTokens int        `json:"effectiveContextTokens"`
+	InstructionFollowing   string     `json:"instructionFollowing"`
+	JSONMode               string     `json:"jsonMode"`
+	ToolUse                string     `json:"toolUse"`
+	ExtractionGrade        string     `json:"extractionGrade"`
+	CreativeGrade          string     `json:"creativeGrade"`
+	EmbeddingModel         bool       `json:"embeddingModel"`
+	CostPer1kInput         *float64   `json:"costPer1kInput,omitempty"`
+	CostPer1kOutput        *float64   `json:"costPer1kOutput,omitempty"`
+	LastProbedAt           *time.Time `json:"lastProbedAt,omitempty"`
+	Source                 string     `json:"source"`
+	Notes                  *string    `json:"notes,omitempty"`
+	UpdatedAt              *time.Time `json:"updatedAt,omitempty"`
+}
+
+type ScopeOrigin struct {
+	Type string `json:"type"`
+	Key  string `json:"key"`
+}
+
+type UpdateComprehensionSettingsInput struct {
+	ScopeType               string   `json:"scopeType"`
+	ScopeKey                *string  `json:"scopeKey,omitempty"`
+	StrategyPreferenceChain []string `json:"strategyPreferenceChain,omitempty"`
+	ModelID                 *string  `json:"modelId,omitempty"`
+	MaxConcurrency          *int     `json:"maxConcurrency,omitempty"`
+	MaxPromptTokens         *int     `json:"maxPromptTokens,omitempty"`
+	LeafBudgetTokens        *int     `json:"leafBudgetTokens,omitempty"`
+	RefinePassEnabled       *bool    `json:"refinePassEnabled,omitempty"`
+	LongContextMaxTokens    *int     `json:"longContextMaxTokens,omitempty"`
+	GraphRAGEntityTypes     []string `json:"graphragEntityTypes,omitempty"`
+	CacheEnabled            *bool    `json:"cacheEnabled,omitempty"`
+	AllowUnsafeCombinations *bool    `json:"allowUnsafeCombinations,omitempty"`
+}
+
+type UpdateModelCapabilitiesInput struct {
+	ModelID                string  `json:"modelId"`
+	Provider               *string `json:"provider,omitempty"`
+	DeclaredContextTokens  *int    `json:"declaredContextTokens,omitempty"`
+	EffectiveContextTokens *int    `json:"effectiveContextTokens,omitempty"`
+	InstructionFollowing   *string `json:"instructionFollowing,omitempty"`
+	JSONMode               *string `json:"jsonMode,omitempty"`
+	ToolUse                *string `json:"toolUse,omitempty"`
+	ExtractionGrade        *string `json:"extractionGrade,omitempty"`
+	CreativeGrade          *string `json:"creativeGrade,omitempty"`
+	EmbeddingModel         *bool   `json:"embeddingModel,omitempty"`
+	Source                 *string `json:"source,omitempty"`
+	Notes                  *string `json:"notes,omitempty"`
+}
+
 type AutoLinkResult struct {
 	LinksCreated          int                `json:"linksCreated"`
 	RequirementsProcessed int                `json:"requirementsProcessed"`

@@ -24,6 +24,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
@@ -71,6 +72,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	var store graph.GraphStore
 	var knowledgeStore knowledge.KnowledgeStore
 	var jobStore llm.JobStore
+	var comprehensionStore comprehension.Store
 	if cfg.Storage.SurrealMode == "external" {
 		// Run migrations against the external SurrealDB instance.
 		migrationsDir := migrationsPath()
@@ -83,11 +85,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		store = surrealStore
 		knowledgeStore = surrealStore
 		jobStore = surrealStore
+		comprehensionStore = surrealStore
 		slog.Info("using SurrealDB-backed store (external mode)")
 	} else {
 		store = graph.NewStore()
 		knowledgeStore = knowledge.NewMemStore()
 		jobStore = llm.NewMemStore()
+		comprehensionStore = comprehension.NewMemStore()
 		slog.Info("using in-memory store (embedded mode)")
 	}
 
@@ -195,6 +199,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		rest.WithLLMConfigStore(llmConfigStore),
 		rest.WithTokenStore(tokenStore),
 		rest.WithDesktopAuthStore(desktopAuthStore),
+		rest.WithComprehensionStore(comprehensionStore),
 	)
 
 	// Initialize OIDC if configured

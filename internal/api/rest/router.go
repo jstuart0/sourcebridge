@@ -24,6 +24,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
+	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
@@ -91,6 +92,12 @@ func WithMCPToolExtender(te MCPToolExtender) ServerOption {
 	return func(s *Server) { s.mcpToolExtender = te }
 }
 
+// WithComprehensionStore injects the comprehension settings and model
+// capabilities store into the server.
+func WithComprehensionStore(cs comprehension.Store) ServerOption {
+	return func(s *Server) { s.comprehensionStore = cs }
+}
+
 // Server is the HTTP API server.
 type Server struct {
 	cfg            *config.Config
@@ -111,9 +118,10 @@ type Server struct {
 	enterpriseDB    interface{}                  // *surrealdb.DB when available, type-asserted in enterprise_routes.go
 	repoChecker     middleware.RepoAccessChecker // set by enterprise build to enable tenant repo filtering
 	mcp             *mcpHandler                  // MCP protocol handler (nil when disabled)
-	mcpPermChecker  MCPPermissionChecker         // deferred to mcp handler at setup
-	mcpAuditLogger  MCPAuditLogger               // deferred to mcp handler at setup
-	mcpToolExtender MCPToolExtender              // deferred to mcp handler at setup
+	mcpPermChecker     MCPPermissionChecker         // deferred to mcp handler at setup
+	mcpAuditLogger     MCPAuditLogger               // deferred to mcp handler at setup
+	mcpToolExtender    MCPToolExtender              // deferred to mcp handler at setup
+	comprehensionStore comprehension.Store           // comprehension settings + model capabilities
 }
 
 // getStore returns a tenant-filtered store when RepoAccessMiddleware has
@@ -294,6 +302,18 @@ func (s *Server) setupRouter() {
 		// Git configuration
 		r.Get("/api/v1/admin/git-config", s.handleGetGitConfig)
 		r.Put("/api/v1/admin/git-config", s.handleUpdateGitConfig)
+
+		// Comprehension settings (Phase 6)
+		r.Get("/api/v1/admin/comprehension/settings", s.handleListComprehensionSettings)
+		r.Get("/api/v1/admin/comprehension/settings/effective", s.handleGetEffectiveComprehensionSettings)
+		r.Put("/api/v1/admin/comprehension/settings", s.handleUpdateComprehensionSettings)
+		r.Delete("/api/v1/admin/comprehension/settings", s.handleResetComprehensionSettings)
+
+		// Model capabilities (Phase 6)
+		r.Get("/api/v1/admin/comprehension/models", s.handleListModelCapabilities)
+		r.Get("/api/v1/admin/comprehension/models/{modelId}", s.handleGetModelCapabilities)
+		r.Put("/api/v1/admin/comprehension/models", s.handleUpdateModelCapabilities)
+		r.Delete("/api/v1/admin/comprehension/models/{modelId}", s.handleDeleteModelCapabilities)
 
 		// API token management
 		r.Post("/api/v1/tokens", s.handleCreateToken)
