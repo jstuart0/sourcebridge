@@ -71,6 +71,13 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 	// MCP enterprise extensions: when the enterprise routes.Context exposes
 	// MCPPermissionChecker / MCPAuditLogger / MCPToolExtender, wire them
 	// into s.mcp here. The interfaces are defined in mcp.go.
+
+	// Reports — registered in the main admin group (not enterprise tenant group)
+	// so they use the same auth as existing admin endpoints (JWT only, no tenant context needed).
+	r.Route("/api/v1/reports", func(r chi.Router) {
+		r.Use(auth.MiddlewareWithTokens(s.jwtMgr, s.tokenStore))
+		ectx.RegisterReportRoutes(r)
+	})
 }
 
 type claimsFirstTenantExtractor struct {
