@@ -193,8 +193,8 @@ def _build_workflow_fallbacks(
             main_steps = focus_summary
         else:
             # Build steps from snapshot entry points and public API
-            entry_points = snapshot.get("entry_points", [])
-            public_api = snapshot.get("public_api", [])
+            entry_points = snapshot.get("entry_points") or []
+            public_api = snapshot.get("public_api") or []
             step_sources = entry_points[:4] or public_api[:4]
             if step_sources:
                 step_lines = []
