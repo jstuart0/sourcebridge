@@ -359,22 +359,24 @@ type ImportResult struct {
 }
 
 type KnowledgeArtifact struct {
-	ID             string                  `json:"id"`
-	RepositoryID   string                  `json:"repositoryId"`
-	Type           KnowledgeArtifactType   `json:"type"`
-	Audience       KnowledgeAudience       `json:"audience"`
-	Depth          KnowledgeDepth          `json:"depth"`
-	Scope          *KnowledgeScope         `json:"scope"`
-	Status         KnowledgeArtifactStatus `json:"status"`
-	Progress       float64                 `json:"progress"`
-	SourceRevision *SourceRevision         `json:"sourceRevision"`
-	Stale          bool                    `json:"stale"`
-	GeneratedAt    *time.Time              `json:"generatedAt,omitempty"`
-	CreatedAt      time.Time               `json:"createdAt"`
-	UpdatedAt      time.Time               `json:"updatedAt"`
-	ErrorCode      *string                 `json:"errorCode,omitempty"`
-	ErrorMessage   *string                 `json:"errorMessage,omitempty"`
-	Sections       []*KnowledgeSection     `json:"sections"`
+	ID              string                  `json:"id"`
+	RepositoryID    string                  `json:"repositoryId"`
+	Type            KnowledgeArtifactType   `json:"type"`
+	Audience        KnowledgeAudience       `json:"audience"`
+	Depth           KnowledgeDepth          `json:"depth"`
+	Scope           *KnowledgeScope         `json:"scope"`
+	Status          KnowledgeArtifactStatus `json:"status"`
+	Progress        float64                 `json:"progress"`
+	ProgressPhase   *string                 `json:"progressPhase,omitempty"`
+	ProgressMessage *string                 `json:"progressMessage,omitempty"`
+	SourceRevision  *SourceRevision         `json:"sourceRevision"`
+	Stale           bool                    `json:"stale"`
+	GeneratedAt     *time.Time              `json:"generatedAt,omitempty"`
+	CreatedAt       time.Time               `json:"createdAt"`
+	UpdatedAt       time.Time               `json:"updatedAt"`
+	ErrorCode       *string                 `json:"errorCode,omitempty"`
+	ErrorMessage    *string                 `json:"errorMessage,omitempty"`
+	Sections        []*KnowledgeSection     `json:"sections"`
 }
 
 type KnowledgeEvidence struct {

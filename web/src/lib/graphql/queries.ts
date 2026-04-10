@@ -583,6 +583,8 @@ export const KNOWLEDGE_ARTIFACTS_QUERY = gql`
       }
       status
       progress
+      progressPhase
+      progressMessage
       stale
       errorCode
       errorMessage

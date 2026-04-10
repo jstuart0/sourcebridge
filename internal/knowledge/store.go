@@ -17,6 +17,10 @@ type KnowledgeStore interface {
 	UpdateKnowledgeArtifactStatus(id string, status ArtifactStatus) error
 	SetArtifactFailed(id string, code string, message string) error
 	UpdateKnowledgeArtifactProgress(id string, progress float64) error
+	// UpdateKnowledgeArtifactProgressWithPhase sets progress + phase label + message
+	// in one write. Used by the Phase 5 streaming progress path so the frontend
+	// can display a meaningful phase label under the progress bar.
+	UpdateKnowledgeArtifactProgressWithPhase(id string, progress float64, phase, message string) error
 	MarkKnowledgeArtifactStale(id string, stale bool) error
 	DeleteKnowledgeArtifact(id string) error
 	SupersedeArtifact(id string, sections []Section) error

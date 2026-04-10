@@ -171,6 +171,10 @@ func (s *MemStore) SetArtifactFailed(id string, code string, message string) err
 }
 
 func (s *MemStore) UpdateKnowledgeArtifactProgress(id string, progress float64) error {
+	return s.UpdateKnowledgeArtifactProgressWithPhase(id, progress, "", "")
+}
+
+func (s *MemStore) UpdateKnowledgeArtifactProgressWithPhase(id string, progress float64, phase, message string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -179,6 +183,12 @@ func (s *MemStore) UpdateKnowledgeArtifactProgress(id string, progress float64) 
 		return fmt.Errorf("artifact %s not found", id)
 	}
 	a.Progress = progress
+	if phase != "" {
+		a.ProgressPhase = phase
+	}
+	if message != "" {
+		a.ProgressMessage = message
+	}
 	a.UpdatedAt = time.Now()
 	return nil
 }

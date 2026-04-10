@@ -663,6 +663,8 @@ type KnowledgeArtifact {
   scope: KnowledgeScope!
   status: KnowledgeArtifactStatus!
   progress: Float!
+  progressPhase: String
+  progressMessage: String
   sourceRevision: SourceRevision!
   stale: Boolean!
   generatedAt: Time

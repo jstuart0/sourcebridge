@@ -1538,7 +1538,7 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 	err = r.enqueueKnowledgeJob(artifact, "cliff_notes", snapshotSizeBytes, func(rt llm.Runtime) error {
 		genStart := time.Now()
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifact.ID, 0.1)
+		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 
 		bgCtx := r.withModelMetadata(context.Background(), "knowledge")
 		resp, err := r.Worker.GenerateCliffNotes(bgCtx, &knowledgev1.GenerateCliffNotesRequest{
@@ -1563,7 +1563,7 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 		}
 
 		rt.ReportProgress(0.8, "llm", "LLM completed, persisting sections")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifact.ID, 0.8)
+		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
 
 		if resp.Usage != nil {
 			store.StoreLLMUsage(&graphstore.LLMUsageRecord{
@@ -1713,7 +1713,7 @@ func (r *mutationResolver) GenerateLearningPath(ctx context.Context, input Gener
 	store := r.getStore(ctx)
 	err = r.enqueueKnowledgeJob(artifact, "learning_path", len(snapJSON), func(rt llm.Runtime) error {
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifact.ID, 0.1)
+		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 
 		bgCtx := r.withModelMetadata(context.Background(), "knowledge")
 		resp, err := r.Worker.GenerateLearningPath(bgCtx, &knowledgev1.GenerateLearningPathRequest{
@@ -1730,7 +1730,7 @@ func (r *mutationResolver) GenerateLearningPath(ctx context.Context, input Gener
 		}
 
 		rt.ReportProgress(0.8, "llm", "LLM completed, persisting steps")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifact.ID, 0.8)
+		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
 
 		if resp.Usage != nil {
 			store.StoreLLMUsage(&graphstore.LLMUsageRecord{
@@ -1872,7 +1872,7 @@ func (r *mutationResolver) GenerateCodeTour(ctx context.Context, input GenerateC
 	store := r.getStore(ctx)
 	err = r.enqueueKnowledgeJob(artifact, "code_tour", len(snapJSON), func(rt llm.Runtime) error {
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifact.ID, 0.1)
+		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 
 		bgCtx := r.withModelMetadata(context.Background(), "knowledge")
 		resp, err := r.Worker.GenerateCodeTour(bgCtx, &knowledgev1.GenerateCodeTourRequest{
@@ -1889,7 +1889,7 @@ func (r *mutationResolver) GenerateCodeTour(ctx context.Context, input GenerateC
 		}
 
 		rt.ReportProgress(0.8, "llm", "LLM completed, persisting stops")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifact.ID, 0.8)
+		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
 
 		if resp.Usage != nil {
 			store.StoreLLMUsage(&graphstore.LLMUsageRecord{
@@ -2032,7 +2032,7 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 	store := r.getStore(ctx)
 	err = r.enqueueKnowledgeJob(artifact, "workflow_story", len(snapJSON), func(rt llm.Runtime) error {
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifact.ID, 0.1)
+		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 
 		bgCtx := r.withModelMetadata(context.Background(), "knowledge")
 		resp, err := r.Worker.GenerateWorkflowStory(bgCtx, &knowledgev1.GenerateWorkflowStoryRequest{
@@ -2052,7 +2052,7 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 		}
 
 		rt.ReportProgress(0.8, "llm", "LLM completed, persisting sections")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifact.ID, 0.8)
+		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
 
 		if resp.Usage != nil {
 			store.StoreLLMUsage(&graphstore.LLMUsageRecord{
@@ -2280,7 +2280,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 		}
 		rt.ReportSnapshotBytes(len(snapJSON))
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(existing.ID, 0.1)
+		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(existing.ID, 0.1, "snapshot", "Snapshot assembled")
 
 		persistUsage := func(usage *commonv1.LLMUsage) {
 			if usage == nil {

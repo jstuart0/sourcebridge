@@ -35,6 +35,8 @@ type surrealKnowledgeArtifact struct {
 	ScopeSymbolName         string           `json:"scope_symbol_name"`
 	Status                  string           `json:"status"`
 	Progress                float64          `json:"progress"`
+	ProgressPhase           string           `json:"progress_phase"`
+	ProgressMessage         string           `json:"progress_message"`
 	ErrorCode               string           `json:"error_code"`
 	ErrorMessage            string           `json:"error_message"`
 	SourceRevisionCommit    string           `json:"source_revision_commit"`
@@ -59,11 +61,13 @@ func (r *surrealKnowledgeArtifact) toArtifact() *knowledge.Artifact {
 			ScopePath:  r.ScopePath,
 			SymbolName: r.ScopeSymbolName,
 		}.NormalizePtr(),
-		Status:   knowledge.ArtifactStatus(r.Status),
-		Progress: r.Progress,
-		ErrorCode: r.ErrorCode,
-		ErrorMessage: r.ErrorMessage,
-		Stale:    r.Stale,
+		Status:          knowledge.ArtifactStatus(r.Status),
+		Progress:        r.Progress,
+		ProgressPhase:   r.ProgressPhase,
+		ProgressMessage: r.ProgressMessage,
+		ErrorCode:       r.ErrorCode,
+		ErrorMessage:    r.ErrorMessage,
+		Stale:           r.Stale,
 		SourceRevision: knowledge.SourceRevision{
 			CommitSHA:          r.SourceRevisionCommit,
 			Branch:             r.SourceRevisionBranch,
@@ -370,14 +374,27 @@ func (s *SurrealStore) SetArtifactFailed(id string, code string, message string)
 }
 
 func (s *SurrealStore) UpdateKnowledgeArtifactProgress(id string, progress float64) error {
+	return s.UpdateKnowledgeArtifactProgressWithPhase(id, progress, "", "")
+}
+
+func (s *SurrealStore) UpdateKnowledgeArtifactProgressWithPhase(id string, progress float64, phase, message string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
 
-	_, err := queryOne[interface{}](ctx(), db,
-		`UPDATE type::thing('ca_knowledge_artifact', $id) SET progress = $progress, updated_at = time::now()`,
-		map[string]any{"id": id, "progress": progress})
+	sql := `UPDATE type::thing('ca_knowledge_artifact', $id)
+		SET progress = $progress, updated_at = time::now()`
+	vars := map[string]any{"id": id, "progress": progress}
+	if phase != "" {
+		sql += `, progress_phase = $phase`
+		vars["phase"] = phase
+	}
+	if message != "" {
+		sql += `, progress_message = $message`
+		vars["message"] = message
+	}
+	_, err := queryOne[interface{}](ctx(), db, sql, vars)
 	return err
 }
 

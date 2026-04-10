@@ -227,22 +227,24 @@ type SourceRevision struct {
 
 // Artifact is a persisted knowledge artifact (Cliff Notes, learning path, code tour).
 type Artifact struct {
-	ID             string         `json:"id"`
-	RepositoryID   string         `json:"repository_id"`
-	Type           ArtifactType   `json:"type"`
-	Audience       Audience       `json:"audience"`
-	Depth          Depth          `json:"depth"`
-	Scope          *ArtifactScope `json:"scope,omitempty"`
-	Status         ArtifactStatus `json:"status"`
-	Progress       float64        `json:"progress"`
-	ErrorCode      string         `json:"error_code,omitempty"`
-	ErrorMessage   string         `json:"error_message,omitempty"`
-	SourceRevision SourceRevision `json:"source_revision"`
-	Stale          bool           `json:"stale"`
-	GeneratedAt    time.Time      `json:"generated_at,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
-	Sections       []Section      `json:"sections,omitempty"`
+	ID              string         `json:"id"`
+	RepositoryID    string         `json:"repository_id"`
+	Type            ArtifactType   `json:"type"`
+	Audience        Audience       `json:"audience"`
+	Depth           Depth          `json:"depth"`
+	Scope           *ArtifactScope `json:"scope,omitempty"`
+	Status          ArtifactStatus `json:"status"`
+	Progress        float64        `json:"progress"`
+	ProgressPhase   string         `json:"progress_phase,omitempty"`
+	ProgressMessage string         `json:"progress_message,omitempty"`
+	ErrorCode       string         `json:"error_code,omitempty"`
+	ErrorMessage    string         `json:"error_message,omitempty"`
+	SourceRevision  SourceRevision `json:"source_revision"`
+	Stale           bool           `json:"stale"`
+	GeneratedAt     time.Time      `json:"generated_at,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	Sections        []Section      `json:"sections,omitempty"`
 }
 
 // Section is an ordered component of a knowledge artifact.

@@ -129,6 +129,8 @@ interface KnowledgeArtifact {
   };
   status: string;
   progress: number;
+  progressPhase: string | null;
+  progressMessage: string | null;
   stale: boolean;
   errorCode: string | null;
   errorMessage: string | null;
@@ -340,7 +342,7 @@ export default function RepositoryDetailPage() {
     const interval = setInterval(() => {
       reexecuteKnowledge({ requestPolicy: "network-only" });
       reexecuteScopeChildren({ requestPolicy: "network-only" });
-    }, 5000);
+    }, 2000);
     return () => clearInterval(interval);
   }, [hasGenerating, reexecuteKnowledge, reexecuteScopeChildren]);
 
@@ -989,7 +991,7 @@ export default function RepositoryDetailPage() {
     const interval = setInterval(() => {
       reexecuteSymbolKnowledge({ requestPolicy: "network-only" });
       reexecuteSymbolChildren({ requestPolicy: "network-only" });
-    }, 5000);
+    }, 2000);
     return () => clearInterval(interval);
   }, [hasGeneratingScopedArtifact, reexecuteSymbolKnowledge, reexecuteSymbolChildren]);
 
@@ -1875,7 +1877,11 @@ export default function RepositoryDetailPage() {
                             </div>
                           </div>
                           {currentCliffNotes.status === "GENERATING" || currentCliffNotes.status === "PENDING" ? (
-                            <div className="mb-5">
+                            <div className="mb-5 space-y-1">
+                              <div className="flex justify-between text-xs text-[var(--text-secondary)]">
+                                <span>{currentCliffNotes.progressMessage || currentCliffNotes.progressPhase || "Working\u2026"}</span>
+                                <span>{Math.round(currentCliffNotes.progress * 100)}%</span>
+                              </div>
                               <progress
                                 className="h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--bg-hover)] [&::-webkit-progress-value]:bg-[var(--accent-primary)] [&::-moz-progress-bar]:bg-[var(--accent-primary)]"
                                 max={100}

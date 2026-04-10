@@ -682,6 +682,12 @@ func mapKnowledgeArtifact(a *knowledgepkg.Artifact) *KnowledgeArtifact {
 	if !a.GeneratedAt.IsZero() {
 		out.GeneratedAt = &a.GeneratedAt
 	}
+	if a.ProgressPhase != "" {
+		out.ProgressPhase = ptrString(a.ProgressPhase)
+	}
+	if a.ProgressMessage != "" {
+		out.ProgressMessage = ptrString(a.ProgressMessage)
+	}
 	if a.ErrorCode != "" {
 		out.ErrorCode = ptrString(a.ErrorCode)
 	}
