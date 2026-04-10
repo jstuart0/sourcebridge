@@ -13,11 +13,90 @@ This plan adds a **Reports** tab to SourceBridge where operators can:
 
 1. Select one or more repositories
 2. Choose a report type (Architecture Baseline, SWOT, Environment Evaluation, etc.)
-3. Select which categories/sections to include
-4. Generate a professional document in Markdown, PDF, or Word format
-5. Download or share the result
+3. Select a **target audience** that controls language, depth, and framing
+4. Select which categories/sections to include
+5. Generate a professional document in Markdown, PDF, or Word format
+6. Download or share the result
 
 When multiple repositories are selected, the report seamlessly integrates findings across all of them, identifying commonalities, inconsistencies, and portfolio-level patterns rather than producing separate per-repo sections.
+
+## Target Audiences
+
+Every report is generated for a specific audience. The audience selection controls:
+- **Language complexity** — technical jargon vs. business language
+- **Detail level** — implementation specifics vs. strategic implications
+- **Framing** — "how it works" vs. "what it means for the business"
+- **Recommendations** — tactical fixes vs. strategic initiatives
+- **Metrics** — code-level metrics vs. risk/cost/timeline estimates
+
+### Audience Presets
+
+| Audience | Description | Tone | Technical Depth | Focus |
+|---|---|---|---|---|
+| **C-Suite / Board** | CEOs, CFOs, board members with no technical background | Plain business English, no jargon. Every technical concept explained in one sentence. | Minimal — risks framed as business impact (revenue, liability, reputation). No file paths or code references. | Strategic risk, compliance exposure, investment priorities, business continuity. |
+| **Executive / VP** | VPs of Engineering, CTOs, Directors who understand technology at a strategic level | Business-technical hybrid. Technical terms used but always with context. | Moderate — architecture patterns named, risks quantified, but no line-level detail. | Portfolio health, resource allocation, team capability gaps, modernization ROI. |
+| **Technical Leadership** | Engineering managers, architects, tech leads who make implementation decisions | Professional technical. Assumes familiarity with frameworks, patterns, and DevOps concepts. | High — specific technologies, version numbers, architectural patterns, integration points. | Architecture quality, technical debt quantification, remediation priorities with effort estimates. |
+| **Developer** | Individual contributors who will implement changes | Direct technical. Uses framework/language-specific terminology freely. | Full — file paths, function names, code patterns, specific CVEs, exact configuration changes. | What to fix, where to fix it, how to fix it, in what order. |
+| **Compliance / Audit** | Compliance officers, auditors, legal teams reviewing technical systems | Formal, evidence-based. Maps findings to specific control frameworks. | Moderate — enough technical detail to substantiate findings, but framed in compliance language. | Control gaps, evidence inventory, remediation requirements, regulatory exposure. |
+| **Non-Technical Stakeholder** | Project managers, product owners, business analysts | Accessible language. Technical concepts explained with analogies. | Low — focuses on "what does this mean" rather than "how does it work." | Timeline impact, user-facing risk, feature delivery implications, resource needs. |
+
+### How Audience Affects Each Section
+
+The same section data produces different output depending on audience. Example for a "Testing" finding where no automated tests exist:
+
+**C-Suite / Board:**
+> The applications have no automated safety checks before changes go live. This means every update carries a risk of breaking something in production. In a regulated environment handling student records, this creates both operational risk (service outages) and compliance risk (undetected data exposure). Estimated cost to remediate: 2-4 weeks of engineering effort per application.
+
+**Developer:**
+> None of the 7 repositories contain automated test suites. No `jest.config`, `vitest.config`, `pytest.ini`, or test directories were detected. The `package.json` files in the Next.js applications have no `test` script defined. The only test found across the portfolio is a single manual pipeline test in AskMax (`tests/test_ingestion.py`). Recommended: Start with integration tests for the most critical data mutation endpoints in each application, using the existing Supabase test helpers.
+
+**Compliance / Audit:**
+> Finding: No automated testing controls exist across the application portfolio. This represents a gap in change management controls. Without automated validation, there is no systematic assurance that code changes do not introduce security regressions or data handling violations. This affects the ability to demonstrate compliance with FERPA's requirement for reasonable safeguards (34 CFR 99.31) and GLBA's written information security program requirements. Remediation: Implement automated testing as a required gate before production deployment.
+
+### Implementation
+
+Audience is stored on the report record and passed to every section generation prompt. The prompt template includes audience-specific instructions:
+
+```python
+AUDIENCE_INSTRUCTIONS = {
+    "c_suite": {
+        "language": "Write in plain business English. No technical jargon — if you must use a technical term, explain it in one sentence. Frame everything in terms of business impact: risk, cost, liability, reputation, and timeline.",
+        "depth": "Do not reference file names, code patterns, or specific technologies unless absolutely necessary. Focus on what the finding means for the organization.",
+        "recommendations": "Frame recommendations as business decisions with estimated cost, timeline, and risk reduction. Use language like 'invest in' not 'implement'.",
+        "metrics": "Use business metrics: estimated cost to fix, risk level (High/Medium/Low), compliance impact, timeline to remediate.",
+    },
+    "executive": {
+        "language": "Use business-technical hybrid language. Technical terms are acceptable if they're commonly understood by engineering leaders. Avoid deep implementation details.",
+        "depth": "Name technologies and architectural patterns but don't go to file/function level. Quantify technical debt in terms of effort and risk.",
+        "recommendations": "Frame as strategic initiatives with team allocation and quarterly timeline. Include trade-offs.",
+        "metrics": "Use portfolio-level metrics: repo health scores, vulnerability counts, coverage percentages, effort estimates in person-weeks.",
+    },
+    "technical_leadership": {
+        "language": "Professional technical writing. Assume the reader understands software architecture, CI/CD, and cloud infrastructure.",
+        "depth": "Include specific technologies, version numbers, architectural patterns, and integration points. Reference specific repos when they diverge from the norm.",
+        "recommendations": "Provide prioritized remediation with effort estimates (T-shirt sizing) and dependency chains. Flag quick wins separately from structural changes.",
+        "metrics": "Include code-level metrics: complexity scores, dependency counts, test ratios, OWASP finding counts by severity.",
+    },
+    "developer": {
+        "language": "Direct technical language. Use framework-specific terminology freely.",
+        "depth": "Full detail: file paths, function names, code patterns, specific CVE numbers, exact configuration changes needed.",
+        "recommendations": "Provide specific fix instructions: which file to change, what to add, code examples where helpful. Ordered by priority.",
+        "metrics": "Raw metrics: line counts, function counts, dependency versions, specific vulnerability IDs.",
+    },
+    "compliance": {
+        "language": "Formal, evidence-based language suitable for regulatory documentation. Use passive voice where appropriate for findings.",
+        "depth": "Enough technical detail to substantiate each finding, but always framed in terms of the applicable control framework.",
+        "recommendations": "Map each recommendation to a specific control requirement. Include evidence expectations for demonstrating remediation.",
+        "metrics": "Control coverage percentages, finding counts by severity mapped to control categories, evidence inventory completeness.",
+    },
+    "non_technical": {
+        "language": "Accessible, jargon-free language. Explain technical concepts with everyday analogies. Use 'the system' not 'the application server'.",
+        "depth": "Focus on outcomes and user-facing impact. Avoid internal architecture details entirely.",
+        "recommendations": "Frame in terms of what the team needs (time, people, budget) and what stakeholders will see when it's done.",
+        "metrics": "Simple risk ratings (Red/Yellow/Green), estimated timeline, user impact scope.",
+    },
+}
+```
 
 ## Report Types
 
@@ -334,6 +413,7 @@ ca_report
   id uuid primary
   name string                           -- user-provided report name
   report_type string                    -- "architecture_baseline" | "swot" | "environment_eval" | etc.
+  audience string                       -- "c_suite" | "executive" | "technical_leadership" | "developer" | "compliance" | "non_technical"
   repository_ids array<string>          -- selected repos
   selected_sections array<string>       -- which sections to include
   include_diagrams bool default false   -- include diagram placeholders
@@ -371,20 +451,27 @@ ca_report
 - Grid of report type cards (Architecture Baseline, SWOT, Environment Eval, Due Diligence, Compliance Gap, Portfolio Health)
 - Each card has: icon, title, one-line description, "Select" button
 
-**Step 2: Select Repositories**
+**Step 2: Select Audience**
+- Grid of audience cards, each showing:
+  - Audience name (e.g., "C-Suite / Board")
+  - One-line description (e.g., "Plain business language, strategic risk focus")
+  - Example sentence showing the tone
+- Default: "Technical Leadership"
+
+**Step 3: Select Repositories**
 - Multi-select list of all indexed repositories
 - Each shows: name, status badge, understanding score, last indexed date
 - "Select All" / "Deselect All" buttons
 - Minimum 1 repo required
 
-**Step 3: Configure Sections**
+**Step 4: Configure Sections**
 - Grouped checklist of all sections for the chosen report type
 - "Select All" / "Deselect All" per category
 - Diagram placeholder toggle
 - Output format checkboxes (Markdown, PDF, Word)
 - Report name input
 
-**Step 4: Generate**
+**Step 5: Generate**
 - Summary of selections
 - "Generate Report" button
 - Progress display with phase labels:
