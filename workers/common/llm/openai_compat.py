@@ -30,6 +30,7 @@ class OpenAICompatProvider:
         extra_headers: dict[str, str] | None = None,
         draft_model: str | None = None,
         provider_name: str | None = None,
+        disable_thinking: bool = False,
     ) -> None:
         self.client = openai.AsyncOpenAI(
             api_key=api_key or "not-needed",
@@ -40,6 +41,7 @@ class OpenAICompatProvider:
         self.model = model
         self.draft_model = draft_model
         self.provider_name = provider_name
+        self.disable_thinking = disable_thinking
 
     @property
     def default_model(self) -> str:
@@ -62,16 +64,21 @@ class OpenAICompatProvider:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        extra_body: dict[str, str] | None = None
+        extra_body: dict[str, object] = {}
         if self.draft_model:
-            extra_body = {"draft_model": self.draft_model}
+            extra_body["draft_model"] = self.draft_model
+        # Disable thinking mode for Qwen 3.5 and similar models that use
+        # the enable_thinking Jinja template variable. This is a llama.cpp
+        # extension to the OpenAI API — ignored by other providers.
+        if self.disable_thinking:
+            extra_body["chat_template_kwargs"] = {"enable_thinking": False}
 
         response = await self.client.chat.completions.create(
             model=use_model,
             messages=messages,  # type: ignore[arg-type]
             max_tokens=max_tokens,
             temperature=temperature,
-            extra_body=extra_body,
+            extra_body=extra_body or None,
         )
         choice = response.choices[0]
 

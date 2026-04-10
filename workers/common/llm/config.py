@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from workers.common.config import WorkerConfig
 from workers.common.llm.anthropic import AnthropicProvider
 from workers.common.llm.fake import FakeLLMProvider
@@ -50,12 +52,19 @@ def create_llm_provider(config: WorkerConfig) -> LLMProvider:
                 "X-Title": "SourceBridge",
             }
 
+        # Disable thinking mode for local models by default. Thinking
+        # models (Qwen 3.5) generate long <think> chains that waste
+        # tokens on summarization tasks. Operators can re-enable via
+        # SOURCEBRIDGE_LLM_ENABLE_THINKING=true.
+        disable_thinking = os.environ.get("SOURCEBRIDGE_LLM_ENABLE_THINKING", "").lower() not in ("true", "1", "yes")
+
         return OpenAICompatProvider(
             api_key=config.llm_api_key,
             model=config.llm_model,
             base_url=base_url,
             extra_headers=extra_headers,
             provider_name=config.llm_provider,
+            disable_thinking=disable_thinking,
         )
     else:
         raise ValueError(f"Unknown LLM provider: {config.llm_provider}")
