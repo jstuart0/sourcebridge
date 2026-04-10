@@ -693,17 +693,111 @@ Output the section content in Markdown. Do not include the report title or other
 5. Sections with insufficient data produce useful placeholders rather than fabricated content.
 6. The report engine leverages existing SourceBridge analysis (cliff notes, understanding scores) rather than re-analyzing from scratch.
 
-## Open Questions
+## Resolved Design Decisions
 
-1. **OWASP scanning scope**: Should the OWASP scanner run as a Python analyzer within the worker, or as a separate tool? The sample report shows detailed per-file findings which suggests deep static analysis.
+1. **PDF rendering**: Playwright (headless Chromium). Full CSS/JS power, consulting-grade visuals.
 
-2. **PDF rendering**: Puppeteer (headless Chrome) produces excellent PDFs but adds ~400MB to the Docker image. Alternatives: wkhtmltopdf (lighter but lower quality), WeasyPrint (Python, good quality), or a dedicated PDF microservice.
+2. **Report storage**: Markdown in SurrealDB (searchable text). PDF/DOCX files on disk at `/data/reports/{report_id}/` with paths stored in DB.
 
-3. **Report storage**: Should full report content (Markdown, PDF, DOCX) be stored in SurrealDB, or on disk/S3? Large reports could be several MB.
+3. **Concurrent report generation**: Separate queue from artifact generation with its own concurrency limit (default 1 report at a time). Reports are expensive and shouldn't starve cliff notes.
 
-4. **Concurrent report generation**: Should reports use the existing LLM orchestrator queue, or have their own? Reports make many LLM calls (one per section) and could starve artifact generation.
+4. **Incremental updates**: Mark existing reports as "stale" when underlying repos are re-indexed (badge on report list). Do NOT auto-regenerate — reports are deliberate deliverables, not background artifacts.
 
-5. **Incremental updates**: When a repo is re-indexed, should existing reports be marked stale? Should they auto-regenerate?
+5. **OWASP scanning**: Python analyzer within the worker. Runs as part of the report data collection phase, not a standalone service.
+
+## Reports UI/UX Principles
+
+The reports feature handles the most complex user flow in SourceBridge — multi-step configuration with many options. If this feels like an enterprise admin wizard, operators will abandon it. Every screen must be designed for someone who has never generated a report before.
+
+### Core UX Rules
+
+1. **The wizard should feel like a conversation, not a form.** Each step asks one question: "What kind of report?" "Who is it for?" "Which repos?" "What should it cover?" One decision per screen. No scrolling walls of checkboxes.
+
+2. **Smart defaults eliminate decisions.** When you pick "Architecture Baseline" + "C-Suite", the system pre-selects the sections that matter for that combination and hides the ones that don't. The operator can customize, but the default should be good enough to just click "Generate."
+
+3. **Show what you'll get before you commit.** Before the final "Generate" button, show a preview card: "Architecture Baseline for 3 repos, C-Suite audience, 18 sections, ~25 pages, estimated 8-12 minutes." No surprises.
+
+4. **Progress is narrative, not a number.** Instead of "47%", show: "Analyzing security patterns across MACU Helpdesk... (3 of 7 repositories complete)". The operator should know what's happening, not just that something is happening.
+
+5. **The report preview is the hero.** When generation completes, the first thing the operator sees is the rendered report — not a download button. They should be able to read it, scroll through it, and decide if it's good before downloading. One-click download for each format sits in a sticky header bar.
+
+6. **Regeneration is surgical, not nuclear.** If one section is weak, the operator can click "Regenerate this section" without redoing the whole report. If the overall framing is wrong, "Regenerate all" starts fresh.
+
+7. **Empty states are invitations.** The reports list starts with: "Reports turn SourceBridge's analysis into professional documents you can share. Pick a report type to get started." Not a blank table.
+
+8. **The report type cards sell themselves.** Each card shows: the type name, a one-line value proposition ("Show your board the real state of your software portfolio"), an example output thumbnail, and estimated generation time. The operator should want to click one.
+
+9. **Audience selection uses examples, not descriptions.** Instead of "C-Suite: plain business English...", show a 2-sentence sample of what the report will actually sound like for that audience. Let the operator read the tone and pick the one that fits.
+
+10. **Download is not the end.** After download, suggest next steps: "Share this report with stakeholders" or "Schedule this report to run monthly" or "Generate a deeper version with more sections."
+
+### Wizard Step Design
+
+**Step 1 — Report Type** (full-width cards, 2 per row)
+```
++----------------------------------+  +----------------------------------+
+|  [icon]                          |  |  [icon]                          |
+|  Architecture Baseline           |  |  SWOT Analysis                   |
+|  Comprehensive technical review  |  |  Strategic strengths & risks     |
+|  of your software portfolio.     |  |  assessment for leadership.      |
+|  ~30 sections | ~40 pages        |  |  ~5 sections | ~10 pages         |
+|  [Select]                        |  |  [Select]                        |
++----------------------------------+  +----------------------------------+
+```
+
+**Step 2 — Audience** (horizontal cards with tone samples)
+```
++-------------------+  +-------------------+  +-------------------+
+| C-Suite / Board   |  | Technical Lead    |  | Developer         |
+| "The portfolio    |  | "The 4 Supabase   |  | "Add auth guard   |
+| carries risk that |  | apps bypass RLS   |  | to route.ts L5:   |
+| should be..."     |  | via service keys" |  | const user = ..." |
+| [Select]          |  | [Select]          |  | [Select]          |
++-------------------+  +-------------------+  +-------------------+
+```
+
+**Step 3 — Repositories** (clean multi-select with search)
+```
+Search: [________________]  [Select All] [Deselect All]
+
+[x] MACU Helpdesk        Score: 27  |  21 files  |  Indexed 2h ago
+[x] MACU Residence       Score: 15  |  34 files  |  Indexed 2h ago
+[ ] MACU Fleetly         Score: 22  |  18 files  |  Indexed 2h ago
+                                            3 of 7 selected
+```
+
+**Step 4 — Sections** (grouped with smart defaults pre-checked)
+```
+Recommended for Architecture Baseline + C-Suite:  [Use recommended]
+
+[v] Executive           [v] Summary  [v] Assessment
+[v] Security            [v] OWASP  [v] Compliance  [ ] Supply Chain
+[v] Operations          [v] Deployment  [ ] Monitoring  [ ] Secrets
+[ ] Engineering         [ ] Source Control  [ ] Testing  [ ] Lifecycle
+[v] Appendices          [v] OWASP Results  [ ] Team Members
+
+Options:
+  [v] Include diagram placeholders
+  [ ] Include code snippets in appendices
+  Estimation mode: [Human Hours v]
+  Output formats: [v] PDF  [v] Word  [v] Markdown
+```
+
+**Step 5 — Confirm & Generate**
+```
++----------------------------------------------------------+
+|  Architecture Baseline                                    |
+|  For: C-Suite / Board                                     |
+|  Repos: MACU Helpdesk, MACU Residence (2)                |
+|  Sections: 14 selected across 4 categories                |
+|  Output: PDF + Word + Markdown                            |
+|  Estimated: ~25 pages, 8-12 minutes                       |
+|                                                           |
+|  Report name: [MACU Architecture Baseline - April 2026]   |
+|                                                           |
+|  [Generate Report]                                        |
++----------------------------------------------------------+
+```
 
 ## References
 
@@ -712,4 +806,5 @@ Output the section content in Markdown. Do not include the report title or other
 - NIST Cybersecurity Framework: https://www.nist.gov/cyberframework
 - FERPA requirements: https://studentprivacy.ed.gov/
 - python-docx: https://python-docx.readthedocs.io/
-- Puppeteer PDF: https://pptr.dev/api/class-page#pagepdf
+- Playwright PDF: https://playwright.dev/docs/api/class-page#page-pdf
+- Typst (runner-up PDF option): https://typst.app/
