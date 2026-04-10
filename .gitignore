@@ -89,3 +89,6 @@ web/tsconfig.tsbuildinfo
 .claude/settings.local.json
 .mcp.json
 codeaware
+
+# Internal notes and plans (not for OSS repos)
+thoughts/
