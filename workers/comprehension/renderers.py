@@ -66,6 +66,8 @@ Scope: {scope_type}{scope_path_suffix}
 === Notable files ===
 {file_summaries}
 
+{pre_analysis_block}
+
 === Task ===
 Write a JSON array of {section_count} section objects. IMPORTANT: your \
 total output must be at least 1500 words across all sections combined. \
@@ -126,6 +128,7 @@ class CliffNotesRenderer:
         depth: str = "medium",
         scope_type: str = "repository",
         scope_path: str = "",
+        pre_analysis: list[dict[str, str]] | None = None,
     ) -> tuple[CliffNotesResult, LLMUsageRecord]:
         """Render cliff notes from the supplied tree.
 
@@ -143,6 +146,23 @@ class CliffNotesRenderer:
         group_nodes = self._select_groups(tree, root)
         file_nodes = self._select_files(tree, group_nodes)
 
+        # Build pre-analysis block from repository-level cliff notes (deep mode)
+        pa_block = ""
+        if pre_analysis:
+            lines = []
+            for section in pre_analysis:
+                title = section.get("title", "")
+                content = section.get("content", "")
+                if title and content:
+                    lines.append(f"### {title}\n{content}")
+            if lines:
+                pa_block = (
+                    "=== Repository-level analysis (from existing field guide) ===\n"
+                    "Use this as PRIMARY grounded context. Sections that build on "
+                    "this analysis should have confidence: high.\n\n"
+                    + "\n\n".join(lines)
+                )
+
         prompt = CLIFF_NOTES_RENDER_TEMPLATE.format(
             repository_name=repository_name or "repository",
             audience=audience,
@@ -152,6 +172,7 @@ class CliffNotesRenderer:
             root_summary=root.summary_text or "(no repository summary available)",
             group_summaries=self._format_summaries(group_nodes, label_prefix="Subsystem"),
             file_summaries=self._format_summaries(file_nodes, label_prefix="File"),
+            pre_analysis_block=pa_block,
             section_count=len(required_sections),
             required_sections="\n".join(f"- {t}" for t in required_sections),
         )

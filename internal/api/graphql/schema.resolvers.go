@@ -1535,7 +1535,44 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 		"truncated", truncated,
 	)
 
-	err = r.enqueueKnowledgeJob(artifact, "cliff_notes", snapshotSizeBytes, func(rt llm.Runtime) error {
+	// Deep mode: enrich the snapshot with repository-level cliff notes
+	// for scoped generations (module/file/symbol). This gives the model
+	// the full codebase context even when generating for a narrow scope.
+	enrichedCliffSnapJSON := snapJSON
+	if depth == "deep" && scope.ScopeType != knowledgepkg.ScopeRepository && r.KnowledgeStore != nil {
+		repoCliffKey := knowledgepkg.ArtifactKey{
+			RepositoryID: repo.ID,
+			Type:         knowledgepkg.ArtifactCliffNotes,
+			Audience:     knowledgepkg.Audience(audience),
+			Depth:        knowledgepkg.DepthMedium,
+			Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
+		}.Normalized()
+		if repoCliff := r.KnowledgeStore.GetArtifactByKey(repoCliffKey); repoCliff != nil && repoCliff.Status == knowledgepkg.StatusReady {
+			sections := r.KnowledgeStore.GetKnowledgeSections(repoCliff.ID)
+			if len(sections) > 0 {
+				var analysis []map[string]string
+				for _, sec := range sections {
+					analysis = append(analysis, map[string]string{
+						"title":   sec.Title,
+						"content": sec.Content,
+						"summary": sec.Summary,
+					})
+				}
+				var snapMap map[string]interface{}
+				if err := json.Unmarshal(snapJSON, &snapMap); err == nil {
+					snapMap["_pre_analysis"] = analysis
+					if enriched, err := json.Marshal(snapMap); err == nil {
+						enrichedCliffSnapJSON = enriched
+						slog.Info("cliff_notes_deep_enriched",
+							"artifact_id", artifact.ID,
+							"repo_cliff_sections", len(sections))
+					}
+				}
+			}
+		}
+	}
+
+	err = r.enqueueKnowledgeJob(artifact, "cliff_notes", len(enrichedCliffSnapJSON), func(rt llm.Runtime) error {
 		genStart := time.Now()
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
@@ -1549,7 +1586,7 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 			Depth:          depth,
 			ScopeType:      string(scope.ScopeType),
 			ScopePath:      scope.ScopePath,
-			SnapshotJson:   string(snapJSON),
+			SnapshotJson:   string(enrichedCliffSnapJSON),
 		})
 		stopProgress()
 		if err != nil {

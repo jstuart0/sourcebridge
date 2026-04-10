@@ -400,6 +400,10 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             stats=tree.stats(),
         )
 
+        # Extract pre-analysis from enriched snapshot (deep mode injects
+        # repository-level cliff notes as _pre_analysis)
+        pre_analysis = snapshot_dict.get("_pre_analysis") if isinstance(snapshot_dict, dict) else None
+
         renderer = CliffNotesRenderer(
             provider=self._llm,
             model_override=model_override,
@@ -411,6 +415,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             depth=depth,
             scope_type=scope_type,
             scope_path=request.scope_path,
+            pre_analysis=pre_analysis,
         )
 
         log.info(
