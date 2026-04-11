@@ -33,6 +33,7 @@ class LLMProvider(Protocol):
         system: str = "",
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        frequency_penalty: float = 0.0,
         model: str | None = None,
     ) -> LLMResponse:
         """Generate a completion. If model is provided, it overrides the default."""
@@ -157,6 +158,7 @@ async def complete_with_optional_model(
     system: str = "",
     max_tokens: int = 4096,
     temperature: float = 0.0,
+    frequency_penalty: float = 0.0,
     model: str | None = None,
 ) -> LLMResponse:
     """Call provider.complete while remaining compatible with legacy test doubles.
@@ -169,11 +171,13 @@ async def complete_with_optional_model(
             system=system,
             max_tokens=max_tokens,
             temperature=temperature,
+            frequency_penalty=frequency_penalty,
         )
     return await provider.complete(
         prompt,
         system=system,
         max_tokens=max_tokens,
         temperature=temperature,
+        frequency_penalty=frequency_penalty,
         model=model,
     )

@@ -67,6 +67,7 @@ class AnthropicProvider:
         system: str = "",
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        frequency_penalty: float = 0.0,
         model: str | None = None,
     ) -> LLMResponse:
         """Generate a completion via Anthropic API."""

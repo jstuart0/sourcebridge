@@ -55,6 +55,7 @@ class OpenAICompatProvider:
         system: str = "",
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        frequency_penalty: float = 0.0,
         model: str | None = None,
     ) -> LLMResponse:
         """Generate a completion."""
@@ -78,6 +79,7 @@ class OpenAICompatProvider:
             messages=messages,  # type: ignore[arg-type]
             max_tokens=max_tokens,
             temperature=temperature,
+            frequency_penalty=frequency_penalty,
             extra_body=extra_body or None,
         )
         choice = response.choices[0]
