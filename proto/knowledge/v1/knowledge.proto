@@ -163,6 +163,8 @@ message GenerateReportRequest {
   string output_dir = 9;         // where to write output files
   string repo_data_json = 10;    // JSON-serialized repo data (cliff notes, scores, metadata)
   string section_definitions_json = 11; // JSON-serialized section definitions from Go
+  string model_override = 12;    // Optional model override for report generation
+  string analysis_depth = 13;    // "standard" or "deep"
 }
 
 message GenerateReportResponse {

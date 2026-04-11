@@ -805,6 +805,16 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 except (json.JSONDecodeError, TypeError):
                     pass
 
+            # Run deep analysis if requested and clone paths are available
+            if repo_data and getattr(request, "analysis_depth", "") == "deep":
+                try:
+                    from workers.reports.analyzer_runner import run_analyzers
+                    repo_data = await run_analyzers(repo_data)
+                except ImportError:
+                    pass  # Enterprise package not installed
+                except Exception:
+                    log.warning("analyzer pipeline failed, using base data", exc_info=True)
+
             config = ReportConfig(
                 report_id=request.report_id,
                 report_name=request.report_name,
@@ -815,6 +825,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 include_diagrams=request.include_diagrams,
                 loe_mode=request.loe_mode or "human_hours",
                 output_dir=request.output_dir,
+                model_override=request.model_override or None,
             )
 
             result = await generate_report(

@@ -316,6 +316,10 @@ func collectRepoDataForReport(store graphstore.GraphStore, knowledgeStore knowle
 			"symbol_count": repo.FunctionCount + repo.ClassCount,
 		}
 
+		if repo.ClonePath != "" {
+			rd["clone_path"] = repo.ClonePath
+		}
+
 		// --- Language distribution from actual files ---
 		files := store.GetFiles(repoID)
 		langCounts := map[string]int{}
@@ -395,6 +399,7 @@ func collectRepoDataForReport(store graphstore.GraphStore, knowledgeStore knowle
 			}
 		}
 		rd["test_detection"] = map[string]interface{}{
+			"source":          "heuristic",
 			"test_file_count": testSymbols,
 			"total_symbols":   totalSymbols,
 			"frameworks":      testFrameworks,
@@ -425,7 +430,7 @@ func collectRepoDataForReport(store graphstore.GraphStore, knowledgeStore knowle
 				authPatterns = appendUnique(authPatterns, "RBAC")
 			}
 		}
-		rd["auth_detection"] = map[string]interface{}{"patterns": authPatterns}
+		rd["auth_detection"] = map[string]interface{}{"source": "heuristic", "patterns": authPatterns}
 
 		// --- CI/CD detection from file paths ---
 		var cicdTools []string
@@ -462,6 +467,7 @@ func collectRepoDataForReport(store graphstore.GraphStore, knowledgeStore knowle
 			cicdTools = appendUnique(cicdTools, "Docker")
 		}
 		rd["cicd_detection"] = map[string]interface{}{
+			"source":         "heuristic",
 			"tools":          cicdTools,
 			"has_dockerfile": hasDockerfile,
 		}
@@ -552,6 +558,7 @@ func collectRepoDataForReport(store graphstore.GraphStore, knowledgeStore knowle
 
 		// --- Secret scanner placeholder ---
 		rd["secret_scanner"] = map[string]interface{}{
+			"source":        "heuristic",
 			"finding_count": 0,
 		}
 
