@@ -211,6 +211,7 @@ def main() -> int:
     parser.add_argument("--poll-interval-seconds", type=int, default=5)
     parser.add_argument("--include-loe", action="store_true")
     parser.add_argument("--include-diagrams", action="store_true")
+    parser.add_argument("--include-recommendations", action="store_true")
     parser.add_argument("--style-id", default="")
     args = parser.parse_args()
 
@@ -253,7 +254,7 @@ def main() -> int:
         "outputFormats": ["markdown"],
         "loeMode": "human_hours",
         "analysisDepth": args.analysis_depth,
-        "includeRecommendations": True,
+        "includeRecommendations": args.include_recommendations,
         "includeLoe": args.include_loe,
     }
     if args.style_id:
