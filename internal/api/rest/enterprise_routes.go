@@ -86,7 +86,7 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 	// The callback collects REAL repository data from the GraphStore so
 	// the LLM has actual evidence to write about (not hallucinations).
 	if s.worker != nil {
-		ectx.API.SetReportGenerator(func(reportID, reportType, audience, repoDataJSON, sectionDefsJSON, outputDir string, repoIDs, selectedSections []string, includeDiagrams bool, loeMode, reportName string) (string, int, int, int, error) {
+		ectx.API.SetReportGenerator(func(reportID, reportType, audience, repoDataJSON, sectionDefsJSON, outputDir string, repoIDs, selectedSections []string, includeDiagrams, includeRecommendations, includeLOE bool, loeMode, reportName string) (string, int, int, int, error) {
 			// Collect actual repo data from the graph and knowledge stores
 			realRepoData := collectRepoDataForReport(s.store, s.knowledgeStore, repoIDs)
 			repoJSON, _ := json.Marshal(realRepoData)
@@ -105,8 +105,8 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 				OutputDir:              outputDir,
 				RepoDataJson:           string(repoJSON),
 				SectionDefinitionsJson: sectionDefsJSON,
-				IncludeRecommendations: true,  // TODO: pass from enterprise handler
-				IncludeLoe:             true,  // TODO: pass from enterprise handler
+				IncludeRecommendations: includeRecommendations,
+				IncludeLoe:             includeLOE,
 			})
 			if err != nil {
 				return "", 0, 0, 0, err
