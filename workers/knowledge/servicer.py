@@ -13,6 +13,7 @@ import structlog
 from common.v1 import types_pb2
 from knowledge.v1 import knowledge_pb2, knowledge_pb2_grpc
 
+from workers.common.config import WorkerConfig
 from workers.common.embedding.provider import EmbeddingProvider
 from workers.common.grpc_metadata import resolve_model_override
 from workers.common.llm.provider import LLMProvider, SnapshotTooLargeError
@@ -108,9 +109,13 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         embedding_provider: EmbeddingProvider | None = None,
         *,
         default_model_id: str = "",
+        report_llm: LLMProvider | None = None,
+        worker_config: WorkerConfig | None = None,
     ) -> None:
         self._llm = llm_provider
         self._embedding = embedding_provider
+        self._report_llm = report_llm
+        self._config = worker_config
         # default_model_id is the best-effort identifier of the model
         # the LLM provider is configured with. The selector uses it to
         # look up the model's capability profile when no per-call
@@ -826,10 +831,12 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 loe_mode=request.loe_mode or "human_hours",
                 output_dir=request.output_dir,
                 model_override=request.model_override or None,
+                enable_validation=self._config.report_validation_enabled if self._config else False,
+                validation_model=(self._config.llm_validation_model or None) if self._config else None,
             )
 
             result = await generate_report(
-                self._llm,
+                self._report_llm or self._llm,
                 config,
                 repo_data=repo_data,
                 section_definitions=section_defs,
@@ -860,6 +867,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 evidence=result.evidence_count,
             )
 
+            report_provider = self._report_llm or self._llm
             return knowledge_pb2.GenerateReportResponse(
                 markdown=result.markdown,
                 section_count=result.section_count,
@@ -868,7 +876,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 content_dir=result.content_dir,
                 sections=section_results,
                 usage=types_pb2.LLMUsage(
-                    model=getattr(self._llm, 'model', 'unknown'),
+                    model=getattr(report_provider, 'model', 'unknown'),
                     input_tokens=total_input,
                     output_tokens=total_output,
                     operation="report_generation",

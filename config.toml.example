@@ -18,6 +18,12 @@ base_url = "http://localhost:11434/v1"
 summary_model = "qwen3:32b"
 review_model  = "qwen3:32b"
 ask_model     = "qwen3:32b"
+# report_model  = ""            # Optional: override model for report generation
+                                 # Leave empty to use summary_model
+# [llm.report]                  # Optional: separate provider for reports
+# provider = "anthropic"
+# model = "claude-sonnet-4-20250514"
+# api_key = ""
 
 # ─── Local mode (vLLM) ────────────────────────────────────────────
 # [llm]

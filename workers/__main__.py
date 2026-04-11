@@ -26,7 +26,7 @@ from requirements.v1 import requirements_pb2, requirements_pb2_grpc  # noqa: E40
 
 from workers.common.config import WorkerConfig  # noqa: E402
 from workers.common.embedding.config import create_embedding_provider  # noqa: E402
-from workers.common.llm.factory import create_llm_provider  # noqa: E402
+from workers.common.llm.factory import create_llm_provider, create_report_provider  # noqa: E402
 from workers.contracts.servicer import ContractsServicer  # noqa: E402
 from workers.knowledge.servicer import KnowledgeServicer  # noqa: E402
 from workers.linking.servicer import LinkingServicer  # noqa: E402
@@ -68,6 +68,9 @@ async def serve() -> None:
 
     # --- Initialize providers (long-lived, connection-pooled) ---
     llm_provider = create_llm_provider(config)
+    report_llm = create_report_provider(config)
+    if report_llm:
+        log.info("report_llm_provider_configured", provider=config.llm_report_provider or config.llm_provider, model=config.llm_report_model)
     embedding_provider = create_embedding_provider(config)
 
     # --- Build async gRPC server ---
@@ -88,7 +91,7 @@ async def serve() -> None:
     requirements_servicer = RequirementsServicer(llm_provider)
     requirements_pb2_grpc.add_RequirementsServiceServicer_to_server(requirements_servicer, server)
 
-    knowledge_servicer = KnowledgeServicer(llm_provider, embedding_provider)
+    knowledge_servicer = KnowledgeServicer(llm_provider, embedding_provider, report_llm=report_llm, worker_config=config)
     knowledge_pb2_grpc.add_KnowledgeServiceServicer_to_server(knowledge_servicer, server)
 
     contracts_servicer = ContractsServicer()

@@ -21,6 +21,16 @@ class WorkerConfig(BaseSettings):
     llm_draft_model: str = ""  # LM Studio only: sent as draft_model in request body
     llm_timeout: int = 30
 
+    # Report-specific LLM overrides (optional)
+    llm_report_model: str = ""       # If set, used for report generation instead of llm_model
+    llm_report_provider: str = ""    # Optional: separate LLM provider for reports
+    llm_report_api_key: str = ""     # API key for report provider (if different)
+    llm_report_base_url: str = ""    # Base URL for report provider (if different)
+
+    # Report validation
+    llm_validation_model: str = ""  # Model for report validation (can be cheaper/faster)
+    report_validation_enabled: bool = False  # Enable validation pass after generation
+
     # Embedding provider
     embedding_provider: str = "ollama"
     embedding_api_key: str = ""
