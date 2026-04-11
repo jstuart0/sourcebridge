@@ -19,6 +19,9 @@ This note tracks the live remediation work for poor enterprise report quality ag
 - Hardened section generation to fail closed for missing `cicd_detection` evidence instead of inventing deployment topology.
 - Removed fake evidence markers, markdown fence leakage, and most repeated validation scaffolding.
 - Added live benchmark harness and trend tracking in `benchmarks/results/report-quality-live/`.
+- Curated the default `Architecture Baseline` section set for `C-Suite / Board` so the report no longer tries to force the full long-form section catalog into a one-repository baseline.
+- Replaced more of the opening and governance-access material with deterministic descriptive rendering rather than open-ended synthesis.
+- Cleaned the cover page and appendix output so the final document reads more like a baseline deliverable and less like an exported system artifact.
 
 ## Key Live Runs
 
@@ -48,47 +51,60 @@ This note tracks the live remediation work for poor enterprise report quality ag
   - improved control, but added lower-value package-risk noise from structural `package_health` flags
   - not promoted as the live baseline
 
+- `20260411T223329Z-macu-residence-deep`
+  - report `f0b7f6e7-7ea2-4758-9b36-292878ee380f`
+  - `quality_score=88`
+  - first report where weak governance/support sections were more aggressively suppressed instead of expanded into filler
+
+- `20260411T230533Z-macu-residence-deep`
+  - report `d397512c-8942-4a8b-8816-5e14667fef02`
+  - `quality_score=96`
+  - first strong pass of the curated C-suite section set
+  - improved deterministic body control, but the cover page and appendix still looked too system-generated
+
+- `20260411T231214Z-macu-residence-deep`
+  - report `d5009be5-d1a6-4675-aed8-0ca5a66eb4fa`
+  - `quality_score=100`
+  - cleaner appendix structure and deduplicated package-version notes
+  - still retained a timestamped title and some duplicated metric phrasing in the opening sections
+
+- `20260411T231704Z-macu-residence-deep`
+  - report `b2807075-1afe-4de1-bd70-21e8a69ec071`
+  - `quality_score=100`
+  - current best deployed run
+  - title now renders as `Software Architecture Baseline`
+  - opening pages are more descriptive and less obviously system-generated
+  - recommendations remain absent when disabled
+
 ## Current Recommendation
 
-Use the trust-hardened worker behavior from `ent-20260411-144002` as the baseline, even though its heuristic score is lower than the peak `91` run.
+Use the curated descriptive worker behavior from `ent-20260411-191306` as the baseline.
 
 Reason:
 
-- The `91` run looked cleaner, but it still fabricated materially important details about third-party services and dependency risk.
-- The current trust-hardened behavior is closer to something defensible in a client-facing setting.
-- Remaining problems are now mostly presentation/noise problems rather than high-severity factual invention.
-- The later deterministic-section experiment was useful for learning, but it did not outperform the current baseline end-to-end and was rolled back from the live deployment.
+- It keeps the stronger trust boundary that earlier remediation introduced.
+- It removes more of the obvious machine-shaped framing from the cover page, opening sections, and appendices.
+- The curated section set is better aligned with a one-repository C-suite baseline and avoids low-value sections that previously made the document feel auto-generated.
+- Remaining issues are now primarily editorial polish, not factual trust or pipeline integrity.
 
 ## Current Live Worker Tag
 
-- `ent-20260411-144002`
+- `ent-20260411-191306`
 
 ## Remaining Issues
 
-- Generic `**Current State.**` repetition is still higher than desired.
-- CI/CD-absent sections repeat the same fail-closed sentence several times across the report.
-- Some sections still drift into generic filler when only weak metadata exists.
-- `Integration and System Interactions` / `Data Inventory and Handling` still overuse cliff-note style fragments instead of concise synthesized conclusions.
+- The opening summary is still more repository-metric-led than a strong human-authored baseline would be.
+- Several section titles are inherited from the long-form template and are broader than the concise descriptive content now emitted under them.
+- The appendices are cleaner, but they still read like internal evidence summaries rather than client-ready appendix prose.
+- The live benchmark still occasionally records post-rollout transient gRPC dial failures that should be classified separately from content regressions.
 
 ## Suggested Next Moves
 
-1. Add section-specific compact fallback templates for:
-   - `system_availability`
-   - `deployment_architecture`
-   - `build_deployment`
-   - `monitoring_config`
-   - `backup_recovery`
-   So the fail-closed output is shorter and less repetitive.
+1. Add a stronger document-level editorial pass for the opening pages so executive text is less metric-led and more narrative while staying descriptive.
 
-2. Add deterministic renderers for:
-   - `third_party_services`
-   - `package_dependencies`
-   This will remove the last high-risk prompt-only sections.
+2. Review the `Architecture Baseline` section labels and either rename or collapse the ones that still sound broader than the evidence-backed content beneath them.
 
-3. Reduce reuse of raw cliff-note fragments in:
-   - `data_inventory`
-   - `integrations`
-   by summarizing structured evidence instead of replaying file-purpose bullets.
+3. Improve appendix rendering from internal evidence snippets toward more polished appendix summaries.
 
 4. Update the benchmark harness to separate:
    - transient worker-unavailable deployment race failures
