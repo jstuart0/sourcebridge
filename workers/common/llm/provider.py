@@ -165,19 +165,33 @@ async def complete_with_optional_model(
 
     Some local test providers do not accept the optional ``model`` kwarg yet.
     """
-    if model is None:
-        return await provider.complete(
-            prompt,
-            system=system,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            frequency_penalty=frequency_penalty,
-        )
-    return await provider.complete(
-        prompt,
-        system=system,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        frequency_penalty=frequency_penalty,
-        model=model,
-    )
+    kwargs = {
+        "system": system,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "frequency_penalty": frequency_penalty,
+    }
+    if model is not None:
+        kwargs["model"] = model
+
+    try:
+        return await provider.complete(prompt, **kwargs)
+    except TypeError as exc:
+        # Legacy test doubles may not yet accept newer optional kwargs such as
+        # frequency_penalty or model. Retry with the minimal signature so shared
+        # helpers remain backward compatible.
+        if "unexpected keyword argument" not in str(exc):
+            raise
+
+    fallback_kwargs = {
+        "system": system,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    if model is not None:
+        try:
+            return await provider.complete(prompt, model=model, **fallback_kwargs)
+        except TypeError as exc:
+            if "unexpected keyword argument" not in str(exc):
+                raise
+    return await provider.complete(prompt, **fallback_kwargs)

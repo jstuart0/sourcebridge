@@ -831,6 +831,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 loe_mode=request.loe_mode or "human_hours",
                 output_dir=request.output_dir,
                 model_override=request.model_override or None,
+                analysis_depth=request.analysis_depth or "standard",
                 enable_validation=self._config.report_validation_enabled if self._config else False,
                 validation_model=(self._config.llm_validation_model or None) if self._config else None,
                 include_recommendations=request.include_recommendations,
