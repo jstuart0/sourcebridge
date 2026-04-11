@@ -96,9 +96,12 @@ def create_report_provider(config: WorkerConfig) -> LLMProvider | None:
     if not base_url:
         base_url = default_urls.get(provider_name, "")
 
+    disable_thinking = os.environ.get("SOURCEBRIDGE_LLM_ENABLE_THINKING", "").lower() not in ("true", "1", "yes")
+
     return OpenAICompatProvider(
         api_key=api_key,
         model=model,
         base_url=base_url,
         provider_name=provider_name,
+        disable_thinking=disable_thinking,
     )
