@@ -204,19 +204,32 @@ function knowledgeProgressLabel(artifact: KnowledgeArtifact): string {
   return "Generating artifact";
 }
 
-function renderKnowledgeProgress(artifact: KnowledgeArtifact, waitingLabel: string) {
-  const label = artifact.status === "PENDING" ? waitingLabel : knowledgeQueueLabel(artifact);
+function knowledgeJobProgressLabel(job: RepoJobView): string {
+  if (job.progress_message?.trim()) return job.progress_message.trim();
+  if (job.progress_phase === "queued") return "Waiting for a generation slot";
+  if (job.progress_phase === "snapshot") return "Preparing the repository snapshot";
+  if (job.progress_phase === "llm") return "LLM completed, persisting the result";
+  if (job.progress_phase === "backoff") return "Waiting for model backend to recover";
+  if (job.status === "pending") return "Waiting for a generation slot";
+  return "Generating artifact";
+}
+
+function renderKnowledgeProgress(artifact: KnowledgeArtifact, waitingLabel: string, job?: RepoJobView | null) {
+  const liveJob = job && (job.status === "pending" || job.status === "generating") ? job : null;
+  const label = liveJob ? (liveJob.status === "pending" ? waitingLabel : "Generating") : artifact.status === "PENDING" ? waitingLabel : knowledgeQueueLabel(artifact);
+  const progress = liveJob ? liveJob.progress : artifact.progress;
+  const progressLabel = liveJob ? knowledgeJobProgressLabel(liveJob) : knowledgeProgressLabel(artifact);
   return (
     <div className="mb-5 space-y-1">
       <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
         <span>{label}</span>
-        <span>{Math.round(artifact.progress * 100)}%</span>
+        <span>{Math.round(progress * 100)}%</span>
       </div>
-      <div className="text-xs text-[var(--text-tertiary)]">{knowledgeProgressLabel(artifact)}</div>
+      <div className="text-xs text-[var(--text-tertiary)]">{progressLabel}</div>
       <progress
         className="h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--bg-hover)] [&::-webkit-progress-value]:bg-[var(--accent-primary)] [&::-moz-progress-bar]:bg-[var(--accent-primary)]"
         max={100}
-        value={Math.max(artifact.progress * 100, 5)}
+        value={Math.max(progress * 100, 5)}
       />
     </div>
   );
@@ -2182,7 +2195,7 @@ export default function RepositoryDetailPage() {
                             </div>
                           </div>
                           {isCliffNotesGenerating ? (
-                            renderKnowledgeProgress(currentCliffNotes, "Queued for generation")
+                            renderKnowledgeProgress(currentCliffNotes, "Queued for generation", currentCliffNotesJob)
                           ) : null}
                           {currentCliffNotes.status === "FAILED" ? renderKnowledgeFailure(currentCliffNotes) : null}
                           {(artifactHistoryMap.get(currentCliffNotes.id)?.length ?? 0) > 0 ? (
@@ -2494,7 +2507,7 @@ export default function RepositoryDetailPage() {
                       ) : null}
 
                       {currentWorkflowStory && isWorkflowStoryGenerating ? (
-                        renderKnowledgeProgress(currentWorkflowStory, "Queued for workflow generation")
+                        renderKnowledgeProgress(currentWorkflowStory, "Queued for workflow generation", currentWorkflowStoryJob)
                       ) : null}
 
                       {currentWorkflowStory?.status === "FAILED" ? renderKnowledgeFailure(currentWorkflowStory) : null}
@@ -2624,7 +2637,7 @@ export default function RepositoryDetailPage() {
                               <p className="mt-2 text-xs text-[var(--text-tertiary)]">{repoJobStatusLabel(currentLearningPathJob)}</p>
                             ) : null}
                             {isLearningPathGenerating ? (
-                              <div className="mt-3">{renderKnowledgeProgress(currentLearningPath, "Queued for learning path generation")}</div>
+                              <div className="mt-3">{renderKnowledgeProgress(currentLearningPath, "Queued for learning path generation", currentLearningPathJob)}</div>
                             ) : null}
                             {currentLearningPath.status === "FAILED" ? (
                               <div className="mt-3">{renderKnowledgeFailure(currentLearningPath)}</div>
@@ -2659,7 +2672,7 @@ export default function RepositoryDetailPage() {
                               <p className="mt-2 text-xs text-[var(--text-tertiary)]">{repoJobStatusLabel(currentCodeTourJob)}</p>
                             ) : null}
                             {isCodeTourGenerating ? (
-                              <div className="mt-3">{renderKnowledgeProgress(currentCodeTour, "Queued for code tour generation")}</div>
+                              <div className="mt-3">{renderKnowledgeProgress(currentCodeTour, "Queued for code tour generation", currentCodeTourJob)}</div>
                             ) : null}
                             {currentCodeTour.status === "FAILED" ? (
                               <div className="mt-3">{renderKnowledgeFailure(currentCodeTour)}</div>
