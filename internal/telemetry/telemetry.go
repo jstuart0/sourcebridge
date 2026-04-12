@@ -41,7 +41,7 @@ import (
 )
 
 // DefaultEndpoint is the telemetry collection endpoint.
-const DefaultEndpoint = "https://telemetry.sourcebridge.dev/v1/ping"
+const DefaultEndpoint = "https://telemetry.sourcebridge.ai/v1/ping"
 
 // Ping is the anonymous telemetry payload.
 type Ping struct {

@@ -50,7 +50,7 @@ enabled and how to disable it. This message appears once per startup.
 
 ## Data handling
 
-Telemetry data is sent to `https://telemetry.sourcebridge.dev/v1/ping` via
+Telemetry data is sent to `https://telemetry.sourcebridge.ai/v1/ping` via
 HTTPS. The endpoint is operated by SourceBridge. Data is used in aggregate
 only and is not sold or shared with third parties.
 
