@@ -13,7 +13,8 @@ Design notes:
 
 - Leaf calls run under a local asyncio.Semaphore so a large repo does
   not fire thousands of concurrent LLM calls into a single worker. The
-  default concurrency is 4; operators can tune this via env var.
+  default concurrency is intentionally conservative; operators can tune
+  this via env var when the backend can actually sustain more load.
 
 - Each call passes through ``check_prompt_budget`` so an overflowing
   leaf (a single giant function body) surfaces as SNAPSHOT_TOO_LARGE
@@ -65,7 +66,7 @@ from workers.comprehension.tree import SummaryNode, SummaryTree
 log = structlog.get_logger()
 
 
-DEFAULT_LEAF_CONCURRENCY = 2
+DEFAULT_LEAF_CONCURRENCY = 1
 DEFAULT_MAX_TOKENS_PER_CALL = 16384  # thinking models (Qwen 3.x) consume thousands of tokens on <think> chains before producing visible summary text
 
 

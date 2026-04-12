@@ -2,6 +2,7 @@ package graphql
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -92,5 +93,85 @@ func TestEnqueueKnowledgeJobCreatesQueuedKnowledgeJob(t *testing.T) {
 	}
 	if job.SnapshotBytes != 1234 {
 		t.Fatalf("expected snapshot bytes 1234, got %d", job.SnapshotBytes)
+	}
+}
+
+func TestKnowledgeJobsShareGlobalConcurrencyGate(t *testing.T) {
+	t.Setenv("SOURCEBRIDGE_KNOWLEDGE_MAX_CONCURRENCY", "1")
+	knowledgeArtifactGates = sync.Map{}
+	knowledgeGlobalSlots = nil
+	knowledgeGlobalGate = sync.Once{}
+
+	knowledgeStore := knowledge.NewMemStore()
+	jobStore := llm.NewMemStore()
+	orch := orchestrator.New(jobStore, orchestrator.Config{MaxConcurrency: 2})
+	defer func() {
+		_ = orch.Shutdown(2 * time.Second)
+	}()
+
+	makeArtifact := func(repoID string, artifactType knowledge.ArtifactType) *knowledge.Artifact {
+		key := knowledge.ArtifactKey{
+			RepositoryID: repoID,
+			Type:         artifactType,
+			Audience:     knowledge.AudienceDeveloper,
+			Depth:        knowledge.DepthMedium,
+			Scope:        knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository},
+		}
+		artifact, created, err := knowledgeStore.ClaimArtifact(key, knowledge.SourceRevision{})
+		if err != nil {
+			t.Fatalf("ClaimArtifact(%s): %v", artifactType, err)
+		}
+		if !created {
+			t.Fatalf("expected fresh artifact claim for %s", artifactType)
+		}
+		return artifact
+	}
+
+	r := &Resolver{
+		KnowledgeStore: knowledgeStore,
+		Orchestrator:   orch,
+	}
+
+	entered := make(chan string, 2)
+	releaseRunning := make(chan struct{})
+
+	first := makeArtifact("repo-1", knowledge.ArtifactCliffNotes)
+	if err := r.enqueueKnowledgeJob(first, "cliff_notes", 100, func(_ context.Context, rt llm.Runtime) error {
+		rt.ReportProgress(0.25, "generating", "first")
+		entered <- "cliff_notes"
+		<-releaseRunning
+		return nil
+	}); err != nil {
+		t.Fatalf("enqueue first: %v", err)
+	}
+
+	second := makeArtifact("repo-1", knowledge.ArtifactCodeTour)
+	if err := r.enqueueKnowledgeJob(second, "code_tour", 100, func(_ context.Context, rt llm.Runtime) error {
+		rt.ReportProgress(0.25, "generating", "second")
+		entered <- "code_tour"
+		<-releaseRunning
+		return nil
+	}); err != nil {
+		t.Fatalf("enqueue second: %v", err)
+	}
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no job entered the shared knowledge slot")
+	}
+
+	select {
+	case name := <-entered:
+		t.Fatalf("expected only one job in the shared knowledge slot before release, but %s entered too", name)
+	case <-time.After(250 * time.Millisecond):
+	}
+
+	close(releaseRunning)
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second job never entered after shared slot released")
 	}
 }

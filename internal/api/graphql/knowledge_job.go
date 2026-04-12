@@ -18,6 +18,8 @@ import (
 )
 
 var knowledgeArtifactGates sync.Map
+var knowledgeGlobalGate sync.Once
+var knowledgeGlobalSlots chan struct{}
 
 // startProgressTicker launches a goroutine that steadily advances both
 // the llm.Job progress (via rt) and the knowledge artifact progress
@@ -103,6 +105,26 @@ func knowledgeJobConcurrencyLimit(jobType string) int {
 	}
 }
 
+func knowledgeGlobalConcurrencyLimit() int {
+	return knowledgeJobEnvLimit("knowledge", "SOURCEBRIDGE_KNOWLEDGE_MAX_CONCURRENCY", 1)
+}
+
+func acquireKnowledgeGlobalSlot(ctx context.Context) (func(), error) {
+	limit := knowledgeGlobalConcurrencyLimit()
+	if limit <= 0 {
+		return func() {}, nil
+	}
+	knowledgeGlobalGate.Do(func() {
+		knowledgeGlobalSlots = make(chan struct{}, limit)
+	})
+	select {
+	case knowledgeGlobalSlots <- struct{}{}:
+		return func() { <-knowledgeGlobalSlots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func acquireKnowledgeJobSlot(ctx context.Context, jobType string) (func(), error) {
 	limit := knowledgeJobConcurrencyLimit(jobType)
 	if limit <= 0 {
@@ -173,6 +195,11 @@ func (r *Resolver) enqueueKnowledgeJob(
 		MaxAttempts: 3,
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
 			rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot")
+			releaseGlobal, err := acquireKnowledgeGlobalSlot(runCtx)
+			if err != nil {
+				return err
+			}
+			defer releaseGlobal()
 			release, err := acquireKnowledgeJobSlot(runCtx, jobType)
 			if err != nil {
 				return err
