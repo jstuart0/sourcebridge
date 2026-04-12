@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,7 +35,7 @@ func newMonitorTestServer(t *testing.T) *Server {
 
 func TestErrorTitleForCodeCoversKnownCodes(t *testing.T) {
 	cases := []struct {
-		code string
+		code     string
 		hasTitle bool
 	}{
 		{"LLM_EMPTY", true},
@@ -120,6 +121,9 @@ func TestHandleLLMActivityEmptySystem(t *testing.T) {
 	// Worker is nil in the test fixture, so health should be unhealthy.
 	if resp.Health.Status != "unhealthy" {
 		t.Fatalf("expected unhealthy (no worker), got %q", resp.Health.Status)
+	}
+	if resp.Control.IntakePaused {
+		t.Fatal("expected intake to be unpaused by default")
 	}
 }
 
@@ -234,6 +238,62 @@ func TestHandleLLMJobRetryNonRetryableState(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected 409 for non-retryable (ready) state, got %d", w.Code)
+	}
+}
+
+func TestHandleUpdateQueueControl(t *testing.T) {
+	s := newMonitorTestServer(t)
+	r := chi.NewRouter()
+	r.Put("/api/v1/admin/llm/control", s.handleUpdateQueueControl)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/llm/control", strings.NewReader(`{"intake_paused":true}`))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !s.orchestrator.IntakePaused() {
+		t.Fatal("expected intake to be paused")
+	}
+}
+
+func TestHandleDrainQueue(t *testing.T) {
+	s := newMonitorTestServer(t)
+	block := make(chan struct{})
+	started := make(chan struct{})
+	_, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
+		Subsystem: llm.SubsystemKnowledge,
+		JobType:   "cliff_notes",
+		TargetKey: "repo-1:drain-running",
+		Run: func(rt llm.Runtime) error {
+			close(started)
+			<-block
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("enqueue running job: %v", err)
+	}
+	<-started
+	_, err = s.orchestrator.Enqueue(&llm.EnqueueRequest{
+		Subsystem: llm.SubsystemKnowledge,
+		JobType:   "learning_path",
+		TargetKey: "repo-1:drain-pending",
+		Run: func(rt llm.Runtime) error {
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("enqueue pending job: %v", err)
+	}
+
+	r := chi.NewRouter()
+	r.Post("/api/v1/admin/llm/drain", s.handleDrainQueue)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/llm/drain", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	close(block)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

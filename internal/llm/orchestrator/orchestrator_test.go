@@ -579,3 +579,66 @@ func TestBackoffGrowsExponentially(t *testing.T) {
 		t.Fatalf("BackoffFor(4) = %v, want 400ms", got)
 	}
 }
+
+func TestEnqueueRejectedWhenIntakePaused(t *testing.T) {
+	orch := newTestOrchestrator(t, Config{MaxConcurrency: 1})
+	orch.SetIntakePaused(true)
+
+	_, err := orch.Enqueue(&llm.EnqueueRequest{
+		Subsystem: llm.SubsystemKnowledge,
+		JobType:   "cliff_notes",
+		TargetKey: "repo-1:paused",
+		Run: func(rt llm.Runtime) error {
+			return nil
+		},
+	})
+	if err == nil {
+		t.Fatal("expected enqueue to fail while intake is paused")
+	}
+}
+
+func TestDrainPendingCancelsQueuedJobs(t *testing.T) {
+	orch := newTestOrchestrator(t, Config{MaxConcurrency: 1})
+	block := make(chan struct{})
+	firstStarted := make(chan struct{})
+
+	_, err := orch.Enqueue(&llm.EnqueueRequest{
+		Subsystem: llm.SubsystemKnowledge,
+		JobType:   "cliff_notes",
+		TargetKey: "repo-1:running",
+		Run: func(rt llm.Runtime) error {
+			close(firstStarted)
+			<-block
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("enqueue running job: %v", err)
+	}
+	<-firstStarted
+
+	pending, err := orch.Enqueue(&llm.EnqueueRequest{
+		Subsystem: llm.SubsystemKnowledge,
+		JobType:   "learning_path",
+		TargetKey: "repo-1:pending",
+		Run: func(rt llm.Runtime) error {
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("enqueue pending job: %v", err)
+	}
+
+	cancelled, err := orch.DrainPending()
+	if err != nil {
+		t.Fatalf("drain pending: %v", err)
+	}
+	if cancelled != 1 {
+		t.Fatalf("expected 1 pending job cancelled, got %d", cancelled)
+	}
+	got := orch.GetJob(pending.ID)
+	if got == nil || got.Status != llm.StatusCancelled {
+		t.Fatalf("expected pending job cancelled, got %#v", got)
+	}
+	close(block)
+}

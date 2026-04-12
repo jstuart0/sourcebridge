@@ -77,6 +77,11 @@ func WithLLMConfigStore(store LLMConfigStore) ServerOption {
 	return func(s *Server) { s.llmConfigStore = store }
 }
 
+// WithQueueControlStore enables persisted LLM queue intake controls.
+func WithQueueControlStore(store QueueControlStore) ServerOption {
+	return func(s *Server) { s.queueControlStore = store }
+}
+
 // WithMCPPermissionChecker sets the enterprise MCP permission checker.
 func WithMCPPermissionChecker(pc MCPPermissionChecker) ServerOption {
 	return func(s *Server) { s.mcpPermChecker = pc }
@@ -120,6 +125,7 @@ type Server struct {
 	desktopAuth        DesktopAuthSessionStore
 	gitConfigStore     GitConfigStore                 // persists git tokens/SSH config across restarts
 	llmConfigStore     LLMConfigStore                 // persists LLM provider/model config across restarts
+	queueControlStore  QueueControlStore              // persists queue intake controls across restarts
 	enterpriseDB       interface{}                    // *surrealdb.DB when available, type-asserted in enterprise_routes.go
 	repoChecker        middleware.RepoAccessChecker   // set by enterprise build to enable tenant repo filtering
 	mcp                *mcpHandler                    // MCP protocol handler (nil when disabled)
@@ -196,6 +202,11 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		}
 	}
 	s.orchestrator = orchestrator.New(s.jobStore, orchCfg)
+	if s.queueControlStore != nil {
+		if rec, err := s.queueControlStore.LoadQueueControl(); err == nil && rec != nil {
+			s.orchestrator.SetIntakePaused(rec.IntakePaused)
+		}
+	}
 
 	s.setupRouter()
 	return s
@@ -306,6 +317,9 @@ func (s *Server) setupRouter() {
 		// LLM job monitor (Phase 2c)
 		r.Get("/api/v1/admin/llm/activity", s.handleLLMActivity)
 		r.Get("/api/v1/admin/llm/stream", s.handleLLMStream)
+		r.Get("/api/v1/admin/llm/control", s.handleGetQueueControl)
+		r.Put("/api/v1/admin/llm/control", s.handleUpdateQueueControl)
+		r.Post("/api/v1/admin/llm/drain", s.handleDrainQueue)
 		r.Get("/api/v1/admin/llm/jobs/{id}", s.handleLLMJobDetail)
 		r.Post("/api/v1/admin/llm/jobs/{id}/cancel", s.handleLLMJobCancel)
 		r.Post("/api/v1/admin/llm/jobs/{id}/retry", s.handleLLMJobRetry)

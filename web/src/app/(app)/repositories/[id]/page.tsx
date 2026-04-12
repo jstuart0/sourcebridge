@@ -58,6 +58,7 @@ import { SymbolTree } from "@/components/source/SymbolTree";
 import { SymbolList } from "@/components/source/SymbolList";
 import { kindBadgeClass, kindLabel, SYMBOL_KINDS } from "@/components/source/symbol-kind";
 import { trackEvent } from "@/lib/telemetry";
+import { disableJobAlerts, enableJobAlerts, jobAlertsEnabled, notifyJobEvent } from "@/lib/notifications";
 import { TOKEN_KEY } from "@/lib/token-key";
 
 type Tab = "files" | "symbols" | "requirements" | "specs" | "analysis" | "impact" | "architecture" | "related" | "knowledge" | "settings";
@@ -366,6 +367,8 @@ export default function RepositoryDetailPage() {
   const [repoJobs, setRepoJobs] = useState<RepoJobActivityResponse | null>(null);
   const [repoJobsError, setRepoJobsError] = useState<string | null>(null);
   const repoJobsPollRef = useRef<number | null>(null);
+  const [alertsEnabled, setAlertsEnabled] = useState(false);
+  const seenRepoTerminalRef = useRef<Record<string, string>>({});
 
   const [repoResult] = useQuery({ query: REPOSITORY_QUERY, variables: { id: repoId } });
   const [symbolsResult] = useQuery({
@@ -474,6 +477,10 @@ export default function RepositoryDetailPage() {
   }, [hasGenerating, reexecuteKnowledge, reexecuteScopeChildren]);
 
   useEffect(() => {
+    setAlertsEnabled(jobAlertsEnabled());
+  }, []);
+
+  useEffect(() => {
     void fetchRepoJobs();
     const schedule = () => {
       if (repoJobsPollRef.current) window.clearInterval(repoJobsPollRef.current);
@@ -490,6 +497,26 @@ export default function RepositoryDetailPage() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [fetchRepoJobs]);
+
+  useEffect(() => {
+    if (!repoJobs?.recent?.length) return;
+    const now = Date.now();
+    for (const job of repoJobs.recent) {
+      if (job.status !== "ready" && job.status !== "failed" && job.status !== "cancelled") continue;
+      const marker = `${job.status}:${job.updated_at}`;
+      if (seenRepoTerminalRef.current[job.id] === marker) continue;
+      seenRepoTerminalRef.current[job.id] = marker;
+      const updatedMs = new Date(job.updated_at).getTime();
+      if (!updatedMs || now - updatedMs > 20_000) continue;
+      if (job.status === "ready") {
+        notifyJobEvent("Repository generation completed", `${job.job_type} finished for ${repo?.name || "this repository"}.`);
+      } else if (job.status === "failed") {
+        notifyJobEvent("Repository generation failed", job.error_title || `${job.job_type} failed for ${repo?.name || "this repository"}.`);
+      } else {
+        notifyJobEvent("Repository generation cancelled", `${job.job_type} was cancelled for ${repo?.name || "this repository"}.`);
+      }
+    }
+  }, [repoJobs?.recent, repo?.name]);
 
   const [, reindex] = useMutation(REINDEX_REPOSITORY_MUTATION);
   const [, removeRepo] = useMutation(REMOVE_REPOSITORY_MUTATION);
@@ -789,6 +816,21 @@ export default function RepositoryDetailPage() {
     }
     await fetchRepoJobs();
     reexecuteKnowledge({ requestPolicy: "network-only" });
+  }
+
+  async function handleToggleAlerts() {
+    if (alertsEnabled) {
+      disableJobAlerts();
+      setAlertsEnabled(false);
+      return;
+    }
+    const permission = await enableJobAlerts();
+    if (permission === "granted") {
+      setAlertsEnabled(true);
+      notifyJobEvent("Desktop alerts enabled", `Repository generation alerts are now enabled for ${repo?.name || "this repository"}.`);
+      return;
+    }
+    notifyJobEvent("Desktop alerts unavailable", permission === "unsupported" ? "This browser does not support desktop notifications." : "Notification permission was not granted.");
   }
 
   async function handleGenerateCliffNotesFor(scopeType = knowledgeScopeType, scopePath = knowledgeScopePath) {
@@ -2017,16 +2059,21 @@ export default function RepositoryDetailPage() {
             </div>
 
             <div className="border-t border-[var(--border-subtle)] px-6 py-4">
-              <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-tertiary)]">
-                <span className={artifactStatusClass}>
-                  Queue {repoJobs?.stats.queue_depth ?? 0} / {repoJobs?.stats.max_concurrency ?? 0} slots
-                </span>
-                <span className={artifactStatusClass}>
-                  Batch {batchSummary.completed}/{batchSummary.total || 0} complete
-                </span>
-                {batchSummary.running > 0 ? <span className={artifactStatusClass}>{batchSummary.running} running</span> : null}
-                {batchSummary.failed > 0 ? <span className={artifactStatusClass}>{batchSummary.failed} failed</span> : null}
-                {repoJobsError ? <span className="text-[var(--color-error,#ef4444)]">{repoJobsError}</span> : null}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-tertiary)]">
+                  <span className={artifactStatusClass}>
+                    Queue {repoJobs?.stats.queue_depth ?? 0} / {repoJobs?.stats.max_concurrency ?? 0} slots
+                  </span>
+                  <span className={artifactStatusClass}>
+                    Batch {batchSummary.completed}/{batchSummary.total || 0} complete
+                  </span>
+                  {batchSummary.running > 0 ? <span className={artifactStatusClass}>{batchSummary.running} running</span> : null}
+                  {batchSummary.failed > 0 ? <span className={artifactStatusClass}>{batchSummary.failed} failed</span> : null}
+                  {repoJobsError ? <span className="text-[var(--color-error,#ef4444)]">{repoJobsError}</span> : null}
+                </div>
+                <Button variant="secondary" size="sm" onClick={() => void handleToggleAlerts()}>
+                  {alertsEnabled ? "Desktop alerts on" : "Enable desktop alerts"}
+                </Button>
               </div>
             </div>
 

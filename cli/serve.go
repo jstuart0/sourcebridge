@@ -122,6 +122,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	var authPersister auth.AuthPersister
 	var gitConfigStore rest.GitConfigStore
 	var llmConfigStore rest.LLMConfigStore
+	var queueControlStore rest.QueueControlStore
 	var tokenStore auth.APITokenStore
 	var oidcStateStore auth.OIDCStateStore
 	var desktopAuthStore rest.DesktopAuthSessionStore
@@ -149,6 +150,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		// Load persisted LLM config (DB values fill in where env vars are empty)
 		lcs := db.NewSurrealLLMConfigStore(surrealDB)
 		llmConfigStore = &llmConfigAdapter{store: lcs}
+		queueControlStore = &queueControlAdapter{store: db.NewSurrealQueueControlStore(surrealDB)}
 		if rec, err := lcs.LoadLLMConfig(); err == nil && rec != nil {
 			if cfg.LLM.Provider == "anthropic" && rec.Provider != "" {
 				// Only override defaults — if env var was explicitly set, it takes priority
@@ -201,6 +203,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		rest.WithJobStore(jobStore),
 		rest.WithGitConfigStore(gitConfigStore),
 		rest.WithLLMConfigStore(llmConfigStore),
+		rest.WithQueueControlStore(queueControlStore),
 		rest.WithTokenStore(tokenStore),
 		rest.WithDesktopAuthStore(desktopAuthStore),
 		rest.WithComprehensionStore(comprehensionStore),
@@ -348,6 +351,10 @@ type llmConfigAdapter struct {
 	store *db.SurrealLLMConfigStore
 }
 
+type queueControlAdapter struct {
+	store *db.SurrealQueueControlStore
+}
+
 func (a *llmConfigAdapter) LoadLLMConfig() (*rest.LLMConfigRecord, error) {
 	rec, err := a.store.LoadLLMConfig()
 	if err != nil || rec == nil {
@@ -379,5 +386,21 @@ func (a *llmConfigAdapter) SaveLLMConfig(rec *rest.LLMConfigRecord) error {
 		DraftModel:     rec.DraftModel,
 		TimeoutSecs:    rec.TimeoutSecs,
 		AdvancedMode:   rec.AdvancedMode,
+	})
+}
+
+func (a *queueControlAdapter) LoadQueueControl() (*rest.QueueControlRecord, error) {
+	rec, err := a.store.LoadQueueControl()
+	if err != nil || rec == nil {
+		return nil, err
+	}
+	return &rest.QueueControlRecord{
+		IntakePaused: rec.IntakePaused,
+	}, nil
+}
+
+func (a *queueControlAdapter) SaveQueueControl(rec *rest.QueueControlRecord) error {
+	return a.store.SaveQueueControl(&db.QueueControlRecord{
+		IntakePaused: rec.IntakePaused,
 	})
 }

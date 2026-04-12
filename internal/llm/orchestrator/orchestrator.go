@@ -105,9 +105,11 @@ type Orchestrator struct {
 	queue   chan *workItem
 	workers sync.WaitGroup
 
-	runMu      sync.Mutex
-	runCancels map[string]context.CancelFunc
-	cancelled  map[string]struct{}
+	runMu        sync.Mutex
+	runCancels   map[string]context.CancelFunc
+	cancelled    map[string]struct{}
+	intakeMu     sync.RWMutex
+	intakePaused bool
 
 	// shutdown lifecycle
 	ctx    context.Context
@@ -255,6 +257,10 @@ func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 		// Registry was stale — clear and retry once.
 		o.inflight.release(req.TargetKey)
 	}
+	if o.IntakePaused() {
+		o.inflight.release(req.TargetKey)
+		return nil, fmt.Errorf("llm queue intake is paused")
+	}
 
 	// Materialize the job and persist it.
 	job := &llm.Job{
@@ -293,6 +299,39 @@ func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 		_ = o.store.SetError(id, "ORCHESTRATOR_SHUTDOWN", "orchestrator is shutting down")
 		return nil, fmt.Errorf("orchestrator shutting down")
 	}
+}
+
+// SetIntakePaused toggles whether the orchestrator accepts new work. It does
+// not affect already-active jobs.
+func (o *Orchestrator) SetIntakePaused(paused bool) {
+	o.intakeMu.Lock()
+	defer o.intakeMu.Unlock()
+	o.intakePaused = paused
+}
+
+// IntakePaused reports whether new enqueue requests are currently blocked.
+func (o *Orchestrator) IntakePaused() bool {
+	o.intakeMu.RLock()
+	defer o.intakeMu.RUnlock()
+	return o.intakePaused
+}
+
+// DrainPending cancels every currently-pending job while allowing running jobs
+// to finish normally. It returns the number of jobs it transitioned.
+func (o *Orchestrator) DrainPending() (int, error) {
+	pending := o.PendingSnapshot(llm.ListFilter{})
+	cancelled := 0
+	var firstErr error
+	for _, job := range pending {
+		if err := o.Cancel(job.ID); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		cancelled++
+	}
+	return cancelled, firstErr
 }
 
 // GetJob returns the current state of a job by id, or nil.

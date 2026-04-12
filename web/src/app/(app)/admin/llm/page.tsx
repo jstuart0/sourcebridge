@@ -8,6 +8,7 @@ import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
 import { StatCard } from "@/components/ui/stat-card";
+import { disableJobAlerts, enableJobAlerts, jobAlertsEnabled, notifyJobEvent } from "@/lib/notifications";
 import { TOKEN_KEY } from "@/lib/token-key";
 import { cn } from "@/lib/utils";
 
@@ -103,6 +104,9 @@ interface ActivityResponse {
   active: JobView[];
   recent: JobView[];
   metrics: MetricsSnapshot;
+  control: {
+    intake_paused: boolean;
+  };
   stats: {
     in_flight: number;
     queue_depth: number;
@@ -187,7 +191,9 @@ export default function MonitorPage() {
   const [data, setData] = useState<ActivityResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<JobView | null>(null);
+  const [alertsEnabled, setAlertsEnabled] = useState(false);
   const pollRef = useRef<number | null>(null);
+  const seenTerminalRef = useRef<Record<string, string>>({});
 
   const fetchActivity = useCallback(async () => {
     try {
@@ -216,9 +222,54 @@ export default function MonitorPage() {
     await fetchActivity();
   }, [fetchActivity]);
 
+  const setIntakePaused = useCallback(async (paused: boolean) => {
+    const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
+    const res = await fetch("/api/v1/admin/llm/control", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ intake_paused: paused }),
+    });
+    if (!res.ok) throw new Error(`queue control returned ${res.status}`);
+    await fetchActivity();
+  }, [fetchActivity]);
+
+  const drainQueue = useCallback(async () => {
+    const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
+    const res = await fetch("/api/v1/admin/llm/drain", {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`drain returned ${res.status}`);
+    const body = await res.json() as { cancelled_pending?: number };
+    notifyJobEvent("Queue drained", `Cancelled ${body.cancelled_pending ?? 0} pending job(s).`);
+    await fetchActivity();
+  }, [fetchActivity]);
+
+  const toggleAlerts = useCallback(async () => {
+    if (alertsEnabled) {
+      disableJobAlerts();
+      setAlertsEnabled(false);
+      return;
+    }
+    const permission = await enableJobAlerts();
+    if (permission === "granted") {
+      setAlertsEnabled(true);
+      notifyJobEvent("Desktop alerts enabled", "You will now get queue completion and failure alerts in this browser.");
+      return;
+    }
+    notifyJobEvent("Desktop alerts unavailable", permission === "unsupported" ? "This browser does not support desktop notifications." : "Notification permission was not granted.");
+  }, [alertsEnabled]);
+
   // Poll the activity endpoint every 2 seconds while the tab is visible.
   // Switch to a 10-second interval when hidden so we don't burn bandwidth
   // in the background.
+  useEffect(() => {
+    setAlertsEnabled(jobAlertsEnabled());
+  }, []);
+
   useEffect(() => {
     fetchActivity();
     const schedule = () => {
@@ -238,6 +289,26 @@ export default function MonitorPage() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [fetchActivity]);
+
+  useEffect(() => {
+    if (!data?.recent?.length) return;
+    const now = Date.now()
+    for (const job of data.recent) {
+      if (job.status !== "ready" && job.status !== "failed" && job.status !== "cancelled") continue;
+      const marker = `${job.status}:${job.updated_at}`;
+      if (seenTerminalRef.current[job.id] === marker) continue;
+      seenTerminalRef.current[job.id] = marker;
+      const updatedMs = new Date(job.updated_at).getTime();
+      if (!updatedMs || now-updatedMs > 20_000) continue;
+      if (job.status === "ready") {
+        notifyJobEvent("AI job completed", `${job.job_type} finished successfully.`);
+      } else if (job.status === "failed") {
+        notifyJobEvent("AI job failed", job.error_title || `${job.job_type} failed.`);
+      } else {
+        notifyJobEvent("AI job cancelled", `${job.job_type} was cancelled.`);
+      }
+    }
+  }, [data?.recent]);
 
   const stats = data?.stats;
   const overall = data?.metrics?.overall;
@@ -291,10 +362,29 @@ export default function MonitorPage() {
               Jobs currently executing or waiting in the queue.
             </p>
           </div>
-          <Button variant="secondary" onClick={() => void fetchActivity()}>
-            Refresh
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => void toggleAlerts()}>
+              {alertsEnabled ? "Desktop alerts on" : "Enable desktop alerts"}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => void setIntakePaused(!data?.control?.intake_paused)}
+            >
+              {data?.control?.intake_paused ? "Resume intake" : "Pause intake"}
+            </Button>
+            <Button variant="secondary" onClick={() => void drainQueue()}>
+              Drain pending
+            </Button>
+            <Button variant="secondary" onClick={() => void fetchActivity()}>
+              Refresh
+            </Button>
+          </div>
         </header>
+        {data?.control?.intake_paused ? (
+          <div className="mb-4 rounded-[var(--radius-md)] border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-[var(--text-primary)]">
+            Queue intake is paused. Running jobs continue; new jobs will be rejected until intake is resumed.
+          </div>
+        ) : null}
         <ActiveJobsSection jobs={data?.active ?? []} onSelect={setSelected} onCancel={cancelJob} />
       </Panel>
 

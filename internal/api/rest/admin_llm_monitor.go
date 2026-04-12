@@ -24,6 +24,7 @@ type monitorActivityResponse struct {
 	Active  []monitorJobView      `json:"active"`
 	Recent  []monitorJobView      `json:"recent"`
 	Metrics orchestrator.Snapshot `json:"metrics"`
+	Control monitorQueueControl   `json:"control"`
 	// Stats is derived queue state that tests and the Monitor header
 	// rely on (max concurrency, current in-flight, pending queue depth).
 	Stats monitorStats `json:"stats"`
@@ -45,6 +46,10 @@ type monitorStats struct {
 	InFlight       int `json:"in_flight"`
 	QueueDepth     int `json:"queue_depth"`
 	MaxConcurrency int `json:"max_concurrency"`
+}
+
+type monitorQueueControl struct {
+	IntakePaused bool `json:"intake_paused"`
 }
 
 // monitorJobView is the serialization of an llm.Job for the Monitor page.
@@ -255,6 +260,9 @@ func (s *Server) handleLLMActivity(w http.ResponseWriter, r *http.Request) {
 		Active:  activeViews,
 		Recent:  recentViews,
 		Metrics: s.orchestrator.Metrics(),
+		Control: monitorQueueControl{
+			IntakePaused: s.orchestrator.IntakePaused(),
+		},
 		Stats: monitorStats{
 			InFlight:       len(active), // DB-backed count — consistent across pods
 			QueueDepth:     s.orchestrator.QueueDepth(),

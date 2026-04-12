@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BellRing } from "lucide-react";
 import { useEventStream, ServerEvent } from "@/lib/sse";
+import { AppToastDetail, subscribeToToasts } from "@/lib/notifications";
 
 interface Toast {
   id: number;
@@ -38,10 +39,7 @@ function formatEvent(event: ServerEvent): string | null {
 export function Notifications() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const handleEvent = useCallback((event: ServerEvent) => {
-    const message = formatEvent(event);
-    if (!message) return;
-
+  const push = useCallback((message: string) => {
     const id = ++nextId;
     setToasts((prev) => [...prev.slice(-4), { id, message }]);
 
@@ -50,7 +48,20 @@ export function Notifications() {
     }, 5000);
   }, []);
 
+  const handleEvent = useCallback((event: ServerEvent) => {
+    const message = formatEvent(event);
+    if (!message) return;
+    push(message);
+  }, [push]);
+
   useEventStream(handleEvent);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToToasts((detail: AppToastDetail) => {
+      push(detail.message);
+    });
+    return unsubscribe;
+  }, [push]);
 
   if (toasts.length === 0) return null;
 
