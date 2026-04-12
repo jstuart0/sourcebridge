@@ -583,7 +583,11 @@ export const KNOWLEDGE_ARTIFACTS_QUERY = gql`
       }
       status
       progress
+      progressPhase
+      progressMessage
       stale
+      errorCode
+      errorMessage
       generatedAt
       createdAt
       updatedAt
@@ -698,7 +702,12 @@ export const GENERATE_CLIFF_NOTES_MUTATION = gql`
         symbolName
       }
       status
+      progress
+      progressPhase
+      progressMessage
       stale
+      errorCode
+      errorMessage
       generatedAt
       sections {
         id
@@ -727,7 +736,12 @@ export const GENERATE_LEARNING_PATH_MUTATION = gql`
       id
       type
       status
+      progress
+      progressPhase
+      progressMessage
       stale
+      errorCode
+      errorMessage
       generatedAt
       sections {
         id
@@ -755,7 +769,12 @@ export const GENERATE_CODE_TOUR_MUTATION = gql`
       id
       type
       status
+      progress
+      progressPhase
+      progressMessage
       stale
+      errorCode
+      errorMessage
       generatedAt
       sections {
         id
@@ -793,7 +812,12 @@ export const GENERATE_WORKFLOW_STORY_MUTATION = gql`
         symbolName
       }
       status
+      progress
+      progressPhase
+      progressMessage
       stale
+      errorCode
+      errorMessage
       generatedAt
       sections {
         id
@@ -843,7 +867,12 @@ export const REFRESH_KNOWLEDGE_ARTIFACT_MUTATION = gql`
         symbolName
       }
       status
+      progress
+      progressPhase
+      progressMessage
       stale
+      errorCode
+      errorMessage
       generatedAt
       sections {
         id

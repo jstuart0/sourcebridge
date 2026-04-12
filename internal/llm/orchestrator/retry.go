@@ -102,6 +102,8 @@ func IsRetryable(err error) bool {
 		return false
 	case strings.Contains(msg, "llm returned empty content"):
 		return true
+	case strings.Contains(msg, "compute error"), strings.Contains(msg, "server_error"):
+		return true
 	case strings.Contains(msg, "deadline exceeded"), strings.Contains(msg, "context deadline"):
 		return true
 	case strings.Contains(msg, "connection refused"), strings.Contains(msg, "unavailable"):

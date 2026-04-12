@@ -178,6 +178,42 @@ function renderKnowledgeFailure(artifact: KnowledgeArtifact) {
   );
 }
 
+function knowledgeQueueLabel(artifact: KnowledgeArtifact): string {
+  if (artifact.status === "PENDING") return "Queued";
+  if (artifact.status === "GENERATING") return "Generating";
+  if (artifact.status === "FAILED") return "Failed";
+  if (artifact.status === "STALE") return "Stale";
+  return artifact.status;
+}
+
+function knowledgeProgressLabel(artifact: KnowledgeArtifact): string {
+  if (artifact.progressMessage?.trim()) return artifact.progressMessage.trim();
+  if (artifact.progressPhase === "queued") return "Waiting for a generation slot";
+  if (artifact.progressPhase === "snapshot") return "Preparing the repository snapshot";
+  if (artifact.progressPhase === "llm") return "LLM completed, persisting the result";
+  if (artifact.progressPhase === "ready") return "Finishing up";
+  if (artifact.status === "PENDING") return "Waiting for a generation slot";
+  return "Generating artifact";
+}
+
+function renderKnowledgeProgress(artifact: KnowledgeArtifact, waitingLabel: string) {
+  const label = artifact.status === "PENDING" ? waitingLabel : knowledgeQueueLabel(artifact);
+  return (
+    <div className="mb-5 space-y-1">
+      <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
+        <span>{label}</span>
+        <span>{Math.round(artifact.progress * 100)}%</span>
+      </div>
+      <div className="text-xs text-[var(--text-tertiary)]">{knowledgeProgressLabel(artifact)}</div>
+      <progress
+        className="h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--bg-hover)] [&::-webkit-progress-value]:bg-[var(--accent-primary)] [&::-moz-progress-bar]:bg-[var(--accent-primary)]"
+        max={100}
+        value={Math.max(artifact.progress * 100, 5)}
+      />
+    </div>
+  );
+}
+
 interface ScopeChild {
   scopeType: string;
   label: string;
@@ -1855,7 +1891,7 @@ export default function RepositoryDetailPage() {
                             <div>
                               <div className="flex items-center gap-2">
                                 {currentCliffNotes.status === "GENERATING" || currentCliffNotes.status === "PENDING" ? (
-                                  <span className={artifactStatusClass}>Refreshing this view</span>
+                                  <span className={artifactStatusClass}>{knowledgeQueueLabel(currentCliffNotes)}</span>
                                 ) : null}
                                 {currentCliffNotes.stale ? <span className={artifactStatusClass}>Stale</span> : null}
                                 {currentCliffNotes.status === "FAILED" ? <span className={artifactStatusClass}>Refresh failed</span> : null}
@@ -1871,7 +1907,7 @@ export default function RepositoryDetailPage() {
                             </div>
                             <div className="flex gap-2">
                               <Button variant="secondary" size="sm" onClick={handleGenerateCliffNotes} disabled={knowledgeLoading || isCliffNotesGenerating}>
-                                {isCliffNotesGenerating ? "Generating..." : "Generate this lens"}
+                                {currentCliffNotes?.status === "PENDING" ? "Queued..." : isCliffNotesGenerating ? "Generating..." : "Generate this lens"}
                               </Button>
                               <Button variant="secondary" size="sm" onClick={() => handleRefreshArtifact(currentCliffNotes.id)} disabled={knowledgeLoading || isCliffNotesGenerating}>
                                 Refresh
@@ -1879,17 +1915,7 @@ export default function RepositoryDetailPage() {
                             </div>
                           </div>
                           {currentCliffNotes.status === "GENERATING" || currentCliffNotes.status === "PENDING" ? (
-                            <div className="mb-5 space-y-1">
-                              <div className="flex justify-between text-xs text-[var(--text-secondary)]">
-                                <span>{"Working\u2026"}</span>
-                                <span>{Math.round(currentCliffNotes.progress * 100)}%</span>
-                              </div>
-                              <progress
-                                className="h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--bg-hover)] [&::-webkit-progress-value]:bg-[var(--accent-primary)] [&::-moz-progress-bar]:bg-[var(--accent-primary)]"
-                                max={100}
-                                value={Math.max(currentCliffNotes.progress * 100, 5)}
-                              />
-                            </div>
+                            renderKnowledgeProgress(currentCliffNotes, "Queued for generation")
                           ) : null}
                           {currentCliffNotes.status === "FAILED" ? renderKnowledgeFailure(currentCliffNotes) : null}
                           {currentCliffNotes.sections
@@ -2141,7 +2167,7 @@ export default function RepositoryDetailPage() {
                         {currentWorkflowStory && (currentWorkflowStory.status === "READY" || currentWorkflowStory.status === "STALE")
                           ? `${currentWorkflowStory.sections.length} section${currentWorkflowStory.sections.length !== 1 ? "s" : ""}`
                           : currentWorkflowStory && (currentWorkflowStory.status === "GENERATING" || currentWorkflowStory.status === "PENDING")
-                            ? "Generating..."
+                            ? currentWorkflowStory.status === "PENDING" ? "Queued…" : "Generating…"
                             : "Not generated yet"}
                       </p>
                     </div>
@@ -2156,7 +2182,7 @@ export default function RepositoryDetailPage() {
                         <div className="flex shrink-0 gap-2">
                           {!currentWorkflowStory ? (
                             <Button variant="secondary" size="sm" onClick={handleGenerateWorkflowStory} disabled={knowledgeLoading || isWorkflowStoryGenerating}>
-                              {isWorkflowStoryGenerating ? "Generating..." : "Generate story"}
+                              {currentWorkflowStory?.status === "PENDING" ? "Queued..." : isWorkflowStoryGenerating ? "Generating..." : "Generate story"}
                             </Button>
                           ) : null}
                           {currentWorkflowStory ? (
@@ -2177,14 +2203,7 @@ export default function RepositoryDetailPage() {
                       ) : null}
 
                       {currentWorkflowStory && (currentWorkflowStory.status === "GENERATING" || currentWorkflowStory.status === "PENDING") ? (
-                        <div className="space-y-3">
-                          <span className={artifactStatusClass}>Generating workflow story</span>
-                          <progress
-                            className="h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--bg-hover)] [&::-webkit-progress-value]:bg-[var(--accent-primary)] [&::-moz-progress-bar]:bg-[var(--accent-primary)]"
-                            max={100}
-                            value={Math.max(currentWorkflowStory.progress * 100, 5)}
-                          />
-                        </div>
+                        renderKnowledgeProgress(currentWorkflowStory, "Queued for workflow generation")
                       ) : null}
 
                       {currentWorkflowStory?.status === "FAILED" ? renderKnowledgeFailure(currentWorkflowStory) : null}
@@ -2276,18 +2295,21 @@ export default function RepositoryDetailPage() {
                         <div className="mb-4 flex flex-wrap gap-2">
                           {features.learningPaths && (
                             <Button variant="secondary" size="sm" onClick={currentLearningPath ? () => handleRefreshArtifact(currentLearningPath.id) : handleGenerateLearningPath} disabled={knowledgeLoading || isLearningPathGenerating}>
-                              {isLearningPathGenerating ? "Generating..." : currentLearningPath ? "Refresh learning path" : "Generate learning path"}
+                              {currentLearningPath?.status === "PENDING" ? "Queued..." : isLearningPathGenerating ? "Generating..." : currentLearningPath ? "Refresh learning path" : "Generate learning path"}
                             </Button>
                           )}
                           {features.codeTours && (
                             <Button variant="secondary" size="sm" onClick={currentCodeTour ? () => handleRefreshArtifact(currentCodeTour.id) : handleGenerateCodeTour} disabled={knowledgeLoading || isCodeTourGenerating}>
-                              {isCodeTourGenerating ? "Generating..." : currentCodeTour ? "Refresh code tour" : "Generate code tour"}
+                              {currentCodeTour?.status === "PENDING" ? "Queued..." : isCodeTourGenerating ? "Generating..." : currentCodeTour ? "Refresh code tour" : "Generate code tour"}
                             </Button>
                           )}
                         </div>
                         {currentLearningPath && (
                           <div className="mb-5">
                             <h4 className="text-sm font-semibold text-[var(--text-primary)]">Learning Path</h4>
+                            {currentLearningPath.status === "GENERATING" || currentLearningPath.status === "PENDING" ? (
+                              <div className="mt-3">{renderKnowledgeProgress(currentLearningPath, "Queued for learning path generation")}</div>
+                            ) : null}
                             {currentLearningPath.status === "FAILED" ? (
                               <div className="mt-3">{renderKnowledgeFailure(currentLearningPath)}</div>
                             ) : null}
@@ -2317,6 +2339,9 @@ export default function RepositoryDetailPage() {
                         {currentCodeTour && (
                           <div>
                             <h4 className="text-sm font-semibold text-[var(--text-primary)]">Code Tour</h4>
+                            {currentCodeTour.status === "GENERATING" || currentCodeTour.status === "PENDING" ? (
+                              <div className="mt-3">{renderKnowledgeProgress(currentCodeTour, "Queued for code tour generation")}</div>
+                            ) : null}
                             {currentCodeTour.status === "FAILED" ? (
                               <div className="mt-3">{renderKnowledgeFailure(currentCodeTour)}</div>
                             ) : null}

@@ -7,11 +7,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 )
+
+var knowledgeArtifactGates sync.Map
 
 // startProgressTicker launches a goroutine that steadily advances both
 // the llm.Job progress (via rt) and the knowledge artifact progress
@@ -61,6 +67,55 @@ func knowledgeJobTargetKey(key knowledgepkg.ArtifactKey) string {
 		string(norm.Depth),
 		norm.ScopeKey(),
 	)
+}
+
+func knowledgeJobBaseType(jobType string) string {
+	base := strings.TrimSpace(strings.ToLower(jobType))
+	base = strings.TrimPrefix(base, "seed:")
+	base = strings.TrimPrefix(base, "refresh:")
+	return base
+}
+
+func knowledgeJobEnvLimit(jobType, envKey string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(envKey))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func knowledgeJobConcurrencyLimit(jobType string) int {
+	switch knowledgeJobBaseType(jobType) {
+	case "cliff_notes":
+		return knowledgeJobEnvLimit(jobType, "SOURCEBRIDGE_KNOWLEDGE_CLIFF_NOTES_MAX_CONCURRENCY", 1)
+	case "learning_path":
+		return knowledgeJobEnvLimit(jobType, "SOURCEBRIDGE_KNOWLEDGE_LEARNING_PATH_MAX_CONCURRENCY", 1)
+	case "code_tour":
+		return knowledgeJobEnvLimit(jobType, "SOURCEBRIDGE_KNOWLEDGE_CODE_TOUR_MAX_CONCURRENCY", 1)
+	case "workflow_story":
+		return knowledgeJobEnvLimit(jobType, "SOURCEBRIDGE_KNOWLEDGE_WORKFLOW_STORY_MAX_CONCURRENCY", 2)
+	default:
+		return knowledgeJobEnvLimit(jobType, "SOURCEBRIDGE_KNOWLEDGE_DEFAULT_MAX_CONCURRENCY", 1)
+	}
+}
+
+func acquireKnowledgeJobSlot(ctx context.Context, jobType string) (func(), error) {
+	limit := knowledgeJobConcurrencyLimit(jobType)
+	if limit <= 0 {
+		return func() {}, nil
+	}
+	gateAny, _ := knowledgeArtifactGates.LoadOrStore(jobType, make(chan struct{}, limit))
+	gate := gateAny.(chan struct{})
+	select {
+	case gate <- struct{}{}:
+		return func() { <-gate }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // enqueueKnowledgeJob is the shared wrapper that routes knowledge
@@ -117,10 +172,16 @@ func (r *Resolver) enqueueKnowledgeJob(
 		RepoID:      artifact.RepositoryID,
 		MaxAttempts: 3,
 		Run: func(rt llm.Runtime) error {
+			rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot")
+			release, err := acquireKnowledgeJobSlot(context.Background(), jobType)
+			if err != nil {
+				return err
+			}
+			defer release()
 			if snapshotBytes > 0 {
 				rt.ReportSnapshotBytes(snapshotBytes)
 			}
-			err := run(rt)
+			err = run(rt)
 			if err != nil {
 				// Mirror the failure onto the artifact so the existing
 				// knowledgeArtifact GraphQL type shows the error. The

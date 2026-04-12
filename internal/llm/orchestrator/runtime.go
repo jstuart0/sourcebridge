@@ -158,6 +158,8 @@ func ClassifyError(err error) string {
 	switch {
 	case strings.Contains(msg, "llm returned empty content"):
 		return "LLM_EMPTY"
+	case strings.Contains(msg, "compute error"), strings.Contains(msg, "server_error"):
+		return "PROVIDER_COMPUTE"
 	case strings.Contains(msg, "snapshot too large"), strings.Contains(msg, "exceeds budget"):
 		return "SNAPSHOT_TOO_LARGE"
 	case strings.Contains(msg, "deadline exceeded"), strings.Contains(msg, "context deadline"):

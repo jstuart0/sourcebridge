@@ -33,8 +33,8 @@ type monitorActivityResponse struct {
 // page. The Summary field is a one-sentence plain-English description
 // that the frontend can render without any further transformation.
 type monitorHealth struct {
-	Status          string `json:"status"`          // "healthy" | "degraded" | "unhealthy"
-	Summary         string `json:"summary"`         // plain-english banner text
+	Status          string `json:"status"`  // "healthy" | "degraded" | "unhealthy"
+	Summary         string `json:"summary"` // plain-english banner text
 	WorkerConnected bool   `json:"worker_connected"`
 	ActiveCount     int    `json:"active_count"`
 	RecentFailed    int    `json:"recent_failed"`
@@ -64,8 +64,8 @@ type monitorJobView struct {
 	ProgressMessage string     `json:"progress_message,omitempty"`
 	ErrorCode       string     `json:"error_code,omitempty"`
 	ErrorMessage    string     `json:"error_message,omitempty"`
-	ErrorTitle      string     `json:"error_title,omitempty"`       // human-readable title derived from error_code
-	ErrorHint       string     `json:"error_hint,omitempty"`        // one-sentence remediation
+	ErrorTitle      string     `json:"error_title,omitempty"` // human-readable title derived from error_code
+	ErrorHint       string     `json:"error_hint,omitempty"`  // one-sentence remediation
 	RetryCount      int        `json:"retry_count"`
 	MaxAttempts     int        `json:"max_attempts"`
 	InputTokens     int        `json:"input_tokens"`
@@ -99,6 +99,9 @@ func errorTitleForCode(code string) (title, hint string) {
 	case "WORKER_UNAVAILABLE":
 		return "Worker not reachable",
 			"The worker gRPC channel was not ready. Check that sourcebridge-worker is running and accepting connections."
+	case "PROVIDER_COMPUTE":
+		return "Model backend compute failure",
+			"The upstream model backend returned a compute error. This is usually transient overload or an unstable model runtime — queued retries may recover automatically."
 	case "INVALID_ARGUMENT":
 		return "Bad request",
 			"The worker rejected the request as malformed. This is usually a code bug and should not auto-retry."
