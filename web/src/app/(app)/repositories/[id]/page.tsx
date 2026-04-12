@@ -216,9 +216,21 @@ function knowledgeJobProgressLabel(job: RepoJobView): string {
 
 function renderKnowledgeProgress(artifact: KnowledgeArtifact, waitingLabel: string, job?: RepoJobView | null) {
   const liveJob = job && (job.status === "pending" || job.status === "generating") ? job : null;
-  const label = liveJob ? (liveJob.status === "pending" ? waitingLabel : "Generating") : artifact.status === "PENDING" ? waitingLabel : knowledgeQueueLabel(artifact);
+  const heartbeat = liveJob ? formatHeartbeatAge(liveJob.updated_at) : null;
+  const label = liveJob
+    ? (liveJob.status === "pending"
+      ? waitingLabel
+      : liveJob.progress >= 0.9
+        ? "Finalizing"
+        : "Generating")
+    : artifact.status === "PENDING"
+      ? waitingLabel
+      : knowledgeQueueLabel(artifact);
   const progress = liveJob ? liveJob.progress : artifact.progress;
-  const progressLabel = liveJob ? knowledgeJobProgressLabel(liveJob) : knowledgeProgressLabel(artifact);
+  const baseProgressLabel = liveJob ? knowledgeJobProgressLabel(liveJob) : knowledgeProgressLabel(artifact);
+  const progressLabel = heartbeat && liveJob?.status === "generating"
+    ? `${baseProgressLabel} · Last heartbeat ${heartbeat}`
+    : baseProgressLabel;
   return (
     <div className="mb-5 space-y-1">
       <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
@@ -243,13 +255,45 @@ function formatQueueEta(ms?: number): string | null {
   return `${minutes}m`;
 }
 
+function formatHeartbeatAge(iso?: string): string | null {
+  if (!iso) return null;
+  const ts = new Date(iso).getTime();
+  if (!ts || Number.isNaN(ts)) return null;
+  const diff = Math.max(0, Date.now() - ts);
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
+}
+
+function formatElapsedMs(ms?: number): string | null {
+  if (!ms || ms <= 0) return null;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rem = seconds % 60;
+  if (minutes < 60) return rem > 0 ? `${minutes}m ${rem}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remMin = minutes % 60;
+  return remMin > 0 ? `${hours}h ${remMin}m` : `${hours}h`;
+}
+
 function repoJobStatusLabel(job: RepoJobView | null | undefined): string | null {
   if (!job) return null;
   if (job.status === "pending" && job.queue_position) {
     const eta = formatQueueEta(job.estimated_wait_ms);
     return eta ? `Queued #${job.queue_position} · ~${eta}` : `Queued #${job.queue_position}`;
   }
-  if (job.status === "generating") return "Generating now";
+  if (job.status === "generating") {
+    const heartbeat = formatHeartbeatAge(job.updated_at);
+    const elapsed = formatElapsedMs(job.elapsed_ms);
+    if (heartbeat && elapsed) return `Generating now · alive ${heartbeat} · elapsed ${elapsed}`;
+    if (heartbeat) return `Generating now · alive ${heartbeat}`;
+    if (elapsed) return `Generating now · elapsed ${elapsed}`;
+    return "Generating now";
+  }
   if (job.status === "failed") return job.error_title || "Last run failed";
   if (job.status === "cancelled") return "Cancelled";
   if (job.status === "ready") return "Completed";

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from time import monotonic
 
 import structlog
 
@@ -146,6 +147,7 @@ class CliffNotesRenderer:
         root = tree.root()
         if root is None:
             raise ValueError("cannot render cliff notes from an empty summary tree")
+        render_started = monotonic()
 
         # Deep mode: widen the context window — include more summaries
         # and leaf-level detail so the output is noticeably richer.
@@ -219,6 +221,15 @@ class CliffNotesRenderer:
             context=f"hierarchical_render:cliff_notes:{scope_type}",
         )
 
+        log.info(
+            "cliff_notes_renderer_started",
+            repository=repository_name,
+            scope_type=scope_type,
+            tree_nodes=len(tree.nodes),
+            selected_groups=len(group_nodes),
+            selected_files=len(file_nodes),
+        )
+
         try:
             response = await self._render_with_retry(
                 prompt=prompt,
@@ -265,6 +276,7 @@ class CliffNotesRenderer:
             tree_nodes=len(tree.nodes),
             group_summaries=len(group_nodes),
             file_summaries=len(file_nodes),
+            elapsed_ms=int((monotonic() - render_started) * 1000),
         )
 
         return CliffNotesResult(sections=sections), usage

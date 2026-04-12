@@ -37,6 +37,7 @@ import asyncio
 import os
 import uuid
 from dataclasses import dataclass
+from time import monotonic
 
 import structlog
 
@@ -158,6 +159,7 @@ class HierarchicalStrategy:
         root_units = by_level.get(3, [])
 
         total_nodes = sum(len(v) for v in by_level.values())
+        build_started = monotonic()
         log.info(
             "hierarchical_build_started",
             corpus_id=corpus.corpus_id,
@@ -177,27 +179,91 @@ class HierarchicalStrategy:
 
         # Level 0 — leaf summaries, run in parallel under a semaphore.
         if leaf_units:
+            stage_started = monotonic()
+            log.info(
+                "hierarchical_stage_started",
+                corpus_id=corpus.corpus_id,
+                stage="leaves",
+                total=len(leaf_units),
+            )
             await self._summarize_leaves(corpus, leaf_units, tree, progress)
+            log.info(
+                "hierarchical_stage_completed",
+                corpus_id=corpus.corpus_id,
+                stage="leaves",
+                total=len(leaf_units),
+                elapsed_ms=int((monotonic() - stage_started) * 1000),
+            )
 
         # Level 1 — file summaries.
         if file_units:
             await _maybe_await(progress("files", 0.55, f"Summarizing {len(file_units)} files"))
-            for unit in file_units:
+            stage_started = monotonic()
+            log.info(
+                "hierarchical_stage_started",
+                corpus_id=corpus.corpus_id,
+                stage="files",
+                total=len(file_units),
+            )
+            for idx, unit in enumerate(file_units, start=1):
                 self._populate_child_ids(unit, corpus, tree)
                 await self._summarize_file(corpus, unit, tree)
+                if idx == len(file_units) or idx % max(1, len(file_units) // 5) == 0:
+                    log.info(
+                        "hierarchical_stage_progress",
+                        corpus_id=corpus.corpus_id,
+                        stage="files",
+                        completed=idx,
+                        total=len(file_units),
+                    )
+            log.info(
+                "hierarchical_stage_completed",
+                corpus_id=corpus.corpus_id,
+                stage="files",
+                total=len(file_units),
+                elapsed_ms=int((monotonic() - stage_started) * 1000),
+            )
 
         # Level 2 — package summaries.
         if package_units:
             await _maybe_await(
                 progress("packages", 0.8, f"Summarizing {len(package_units)} packages")
             )
-            for unit in package_units:
+            stage_started = monotonic()
+            log.info(
+                "hierarchical_stage_started",
+                corpus_id=corpus.corpus_id,
+                stage="packages",
+                total=len(package_units),
+            )
+            for idx, unit in enumerate(package_units, start=1):
                 self._populate_child_ids(unit, corpus, tree)
                 await self._summarize_package(corpus, unit, tree)
+                log.info(
+                    "hierarchical_stage_progress",
+                    corpus_id=corpus.corpus_id,
+                    stage="packages",
+                    completed=idx,
+                    total=len(package_units),
+                )
+            log.info(
+                "hierarchical_stage_completed",
+                corpus_id=corpus.corpus_id,
+                stage="packages",
+                total=len(package_units),
+                elapsed_ms=int((monotonic() - stage_started) * 1000),
+            )
 
         # Level 3 — root summary.
         if root_units:
             await _maybe_await(progress("root", 0.95, "Summarizing repository"))
+            stage_started = monotonic()
+            log.info(
+                "hierarchical_stage_started",
+                corpus_id=corpus.corpus_id,
+                stage="root",
+                total=1,
+            )
             root = root_units[0]
             self._populate_child_ids(root, corpus, tree)
             await self._summarize_root(
@@ -207,11 +273,19 @@ class HierarchicalStrategy:
                 file_count=len(file_units),
                 segment_count=len(leaf_units),
             )
+            log.info(
+                "hierarchical_stage_completed",
+                corpus_id=corpus.corpus_id,
+                stage="root",
+                total=1,
+                elapsed_ms=int((monotonic() - stage_started) * 1000),
+            )
 
         log.info(
             "hierarchical_build_completed",
             corpus_id=corpus.corpus_id,
             stats=tree.stats(),
+            elapsed_ms=int((monotonic() - build_started) * 1000),
         )
         await _maybe_await(progress("ready", 1.0, "Hierarchical summary tree built"))
         return tree
@@ -247,6 +321,13 @@ class HierarchicalStrategy:
                 if completed % max(1, total // 10) == 0 or completed == total:
                     # Progress range 0.05 → 0.55 for leaves.
                     pct = 0.05 + 0.5 * (completed / total)
+                    log.info(
+                        "hierarchical_stage_progress",
+                        corpus_id=corpus.corpus_id,
+                        stage="leaves",
+                        completed=completed,
+                        total=total,
+                    )
                     await _maybe_await(
                         progress("leaves", pct, f"Summarized {completed}/{total} segments")
                     )
