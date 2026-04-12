@@ -356,11 +356,28 @@ class HierarchicalStrategy:
         unit: CorpusUnit,
         tree: SummaryTree,
     ) -> None:
+        leaf_started = monotonic()
+        file_path = str(unit.metadata.get("file_path", "")) if unit.metadata else ""
+        context = f"hierarchical:leaf:{file_path}#{unit.label}"
+        log.info(
+            "hierarchical_leaf_started",
+            corpus_id=corpus.corpus_id,
+            unit_id=unit.id,
+            file_path=file_path,
+            segment_label=unit.label,
+        )
         # Incremental reindex: skip if the cached summary has the same content_hash.
         if unit.content_hash and self._config.cached_tree:
             cached = self._config.cached_tree.get(unit.id)
             if cached and cached.content_hash == unit.content_hash and cached.summary_text:
-                log.debug("hierarchical_leaf_cache_hit", unit_id=unit.id)
+                log.info(
+                    "hierarchical_leaf_cache_hit",
+                    corpus_id=corpus.corpus_id,
+                    unit_id=unit.id,
+                    file_path=file_path,
+                    segment_label=unit.label,
+                    elapsed_ms=int((monotonic() - leaf_started) * 1000),
+                )
                 tree.add(cached)
                 return
 
@@ -371,7 +388,6 @@ class HierarchicalStrategy:
             tree.add(self._stub_node(unit, tree, "Missing content — could not load segment."))
             return
 
-        file_path = str(unit.metadata.get("file_path", "")) if unit.metadata else ""
         language = str(unit.metadata.get("language", "")) if unit.metadata else ""
         prompt = build_leaf_prompt(
             repository_name=self._config.repository_name,
@@ -383,8 +399,30 @@ class HierarchicalStrategy:
 
         summary, model, tokens_in, tokens_out = await self._call_llm(
             prompt,
-            context=f"hierarchical:leaf:{file_path}#{unit.label}",
+            context=context,
             fallback="Could not summarize this segment.",
+        )
+        elapsed_ms = int((monotonic() - leaf_started) * 1000)
+        if elapsed_ms >= 30000:
+            log.warning(
+                "hierarchical_leaf_slow",
+                corpus_id=corpus.corpus_id,
+                unit_id=unit.id,
+                file_path=file_path,
+                segment_label=unit.label,
+                elapsed_ms=elapsed_ms,
+                model=model,
+            )
+        log.info(
+            "hierarchical_leaf_completed",
+            corpus_id=corpus.corpus_id,
+            unit_id=unit.id,
+            file_path=file_path,
+            segment_label=unit.label,
+            elapsed_ms=elapsed_ms,
+            model=model,
+            input_tokens=tokens_in,
+            output_tokens=tokens_out,
         )
         tree.add(
             SummaryNode(

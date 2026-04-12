@@ -6,8 +6,11 @@ import re
 from collections.abc import AsyncIterator
 
 import openai
+import structlog
 
 from workers.common.llm.provider import LLMResponse
+
+log = structlog.get_logger()
 
 
 def _strip_think_tags(text: str) -> str:
@@ -48,6 +51,28 @@ class OpenAICompatProvider:
         """Return the default model ID."""
         return self.model
 
+    def _request_metadata(
+        self,
+        *,
+        use_model: str,
+        extra_body: dict[str, object] | None,
+        operation: str,
+    ) -> dict[str, object]:
+        chat_template_kwargs = extra_body.get("chat_template_kwargs") if extra_body else None
+        draft_model = extra_body.get("draft_model") if extra_body else None
+        enable_thinking = None
+        if isinstance(chat_template_kwargs, dict):
+            enable_thinking = chat_template_kwargs.get("enable_thinking")
+        return {
+            "operation": operation,
+            "provider": self.provider_name or "openai-compatible",
+            "model": use_model,
+            "base_url": str(self.client.base_url),
+            "disable_thinking": self.disable_thinking,
+            "enable_thinking_override": enable_thinking,
+            "draft_model": draft_model,
+        }
+
     async def complete(
         self,
         prompt: str,
@@ -73,6 +98,12 @@ class OpenAICompatProvider:
         # extension to the OpenAI API — ignored by other providers.
         if self.disable_thinking:
             extra_body["chat_template_kwargs"] = {"enable_thinking": False}
+
+        log.info("llm_request_dispatch", **self._request_metadata(
+            use_model=use_model,
+            extra_body=extra_body or None,
+            operation="complete",
+        ))
 
         response = await self.client.chat.completions.create(
             model=use_model,
@@ -114,6 +145,12 @@ class OpenAICompatProvider:
                 acceptance_rate = accepted / total
 
         raw_content = choice.message.content or ""
+        if raw_content and "<think>" in raw_content.lower():
+            log.warning(
+                "llm_response_contained_think_tags",
+                provider=self.provider_name or "openai-compatible",
+                model=use_model,
+            )
         content = _strip_think_tags(raw_content) if raw_content else ""
 
         return LLMResponse(
@@ -144,9 +181,18 @@ class OpenAICompatProvider:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        extra_body: dict[str, str] | None = None
+        extra_body: dict[str, object] | None = None
         if self.draft_model:
             extra_body = {"draft_model": self.draft_model}
+        if self.disable_thinking:
+            extra_body = dict(extra_body or {})
+            extra_body["chat_template_kwargs"] = {"enable_thinking": False}
+
+        log.info("llm_request_dispatch", **self._request_metadata(
+            use_model=use_model,
+            extra_body=extra_body,
+            operation="stream",
+        ))
 
         stream = await self.client.chat.completions.create(
             model=use_model,
