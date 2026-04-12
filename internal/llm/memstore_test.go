@@ -161,6 +161,37 @@ func TestMemStoreIncrementRetry(t *testing.T) {
 	}
 }
 
+func TestMemStoreIgnoresWritesForTerminalJobs(t *testing.T) {
+	store := NewMemStore()
+	_, _ = store.Create(newTestJob("done", "tk", StatusCancelled))
+	before := store.GetByID("done")
+	if err := store.SetProgress("done", 0.75, "render", "ignored"); err != nil {
+		t.Fatalf("SetProgress failed: %v", err)
+	}
+	if err := store.SetTokens("done", 10, 20); err != nil {
+		t.Fatalf("SetTokens failed: %v", err)
+	}
+	if err := store.SetSnapshotBytes("done", 123); err != nil {
+		t.Fatalf("SetSnapshotBytes failed: %v", err)
+	}
+	if err := store.IncrementRetry("done"); err != nil {
+		t.Fatalf("IncrementRetry failed: %v", err)
+	}
+	after := store.GetByID("done")
+	if after.Progress != before.Progress || after.ProgressPhase != before.ProgressPhase || after.ProgressMessage != before.ProgressMessage {
+		t.Fatalf("terminal progress mutated: before=%+v after=%+v", before, after)
+	}
+	if after.InputTokens != before.InputTokens || after.OutputTokens != before.OutputTokens || after.SnapshotBytes != before.SnapshotBytes {
+		t.Fatalf("terminal metrics mutated: before=%+v after=%+v", before, after)
+	}
+	if after.RetryCount != before.RetryCount {
+		t.Fatalf("terminal retry count mutated: before=%d after=%d", before.RetryCount, after.RetryCount)
+	}
+	if !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Fatalf("terminal updated_at changed: before=%s after=%s", before.UpdatedAt, after.UpdatedAt)
+	}
+}
+
 func TestMemStoreCloneIsolatesCallers(t *testing.T) {
 	store := NewMemStore()
 	_, _ = store.Create(newTestJob("iso", "tk", StatusPending))

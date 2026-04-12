@@ -206,6 +206,9 @@ func (s *MemStore) SetProgress(id string, progress float64, phase, message strin
 	if !ok {
 		return fmt.Errorf("job %s not found", id)
 	}
+	if j.Status.IsTerminal() {
+		return nil
+	}
 	if progress < 0 {
 		progress = 0
 	}
@@ -245,6 +248,9 @@ func (s *MemStore) SetTokens(id string, input, output int) error {
 	if !ok {
 		return fmt.Errorf("job %s not found", id)
 	}
+	if j.Status.IsTerminal() {
+		return nil
+	}
 	j.InputTokens = input
 	j.OutputTokens = output
 	j.UpdatedAt = time.Now()
@@ -258,6 +264,9 @@ func (s *MemStore) SetSnapshotBytes(id string, bytes int) error {
 	j, ok := s.jobs[id]
 	if !ok {
 		return fmt.Errorf("job %s not found", id)
+	}
+	if j.Status.IsTerminal() {
+		return nil
 	}
 	j.SnapshotBytes = bytes
 	j.UpdatedAt = time.Now()
@@ -287,6 +296,9 @@ func (s *MemStore) IncrementRetry(id string) error {
 	j, ok := s.jobs[id]
 	if !ok {
 		return fmt.Errorf("job %s not found", id)
+	}
+	if j.Status.IsTerminal() {
+		return nil
 	}
 	j.RetryCount++
 	j.UpdatedAt = time.Now()

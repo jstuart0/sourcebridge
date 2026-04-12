@@ -393,7 +393,8 @@ func (s *SurrealStore) SetProgress(id string, progress float64, phase, message s
 			progress = $progress,
 			progress_phase = $phase,
 			progress_message = $message,
-			updated_at = time::now()`,
+			updated_at = time::now()
+		  WHERE status = 'pending' OR status = 'generating'`,
 		map[string]any{
 			"id":       id,
 			"progress": progress,
@@ -435,7 +436,8 @@ func (s *SurrealStore) SetTokens(id string, input, output int) error {
 		`UPDATE type::thing('ca_llm_job', $id) SET
 			input_tokens = $input,
 			output_tokens = $output,
-			updated_at = time::now()`,
+			updated_at = time::now()
+		  WHERE status = 'pending' OR status = 'generating'`,
 		map[string]any{"id": id, "input": input, "output": output})
 	return err
 }
@@ -449,7 +451,8 @@ func (s *SurrealStore) SetSnapshotBytes(id string, bytes int) error {
 	_, err := queryOne[interface{}](ctx(), db,
 		`UPDATE type::thing('ca_llm_job', $id) SET
 			snapshot_bytes = $bytes,
-			updated_at = time::now()`,
+			updated_at = time::now()
+		  WHERE status = 'pending' OR status = 'generating'`,
 		map[string]any{"id": id, "bytes": bytes})
 	return err
 }
@@ -463,7 +466,8 @@ func (s *SurrealStore) IncrementRetry(id string) error {
 	_, err := queryOne[interface{}](ctx(), db,
 		`UPDATE type::thing('ca_llm_job', $id) SET
 			retry_count = retry_count + 1,
-			updated_at = time::now()`,
+			updated_at = time::now()
+		  WHERE status = 'pending' OR status = 'generating'`,
 		map[string]any{"id": id})
 	return err
 }
