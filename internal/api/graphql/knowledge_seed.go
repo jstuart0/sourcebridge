@@ -131,7 +131,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			if err != nil {
 				return err
 			}
-			rt.ReportProgress(0.8, "llm", "Seed LLM completed, persisting")
+			rt.ReportProgress(0.96, "llm", "Seed LLM completed, persisting")
 			sections := make([]knowledgepkg.Section, len(resp.Sections))
 			for i, sec := range resp.Sections {
 				sections[i] = knowledgepkg.Section{
@@ -157,7 +157,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			if err != nil {
 				return err
 			}
-			rt.ReportProgress(0.8, "llm", "Seed LLM completed, persisting")
+			rt.ReportProgress(0.96, "llm", "Seed LLM completed, persisting")
 			sections := make([]knowledgepkg.Section, len(resp.Steps))
 			for i, step := range resp.Steps {
 				sections[i] = knowledgepkg.Section{
@@ -181,7 +181,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			if err != nil {
 				return err
 			}
-			rt.ReportProgress(0.8, "llm", "Seed LLM completed, persisting")
+			rt.ReportProgress(0.96, "llm", "Seed LLM completed, persisting")
 			sections := make([]knowledgepkg.Section, len(resp.Stops))
 			for i, stop := range resp.Stops {
 				sections[i] = knowledgepkg.Section{
@@ -213,7 +213,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			if err != nil {
 				return err
 			}
-			rt.ReportProgress(0.8, "llm", "Seed LLM completed, persisting")
+			rt.ReportProgress(0.96, "llm", "Seed LLM completed, persisting")
 			sections := make([]knowledgepkg.Section, len(resp.Sections))
 			for i, sec := range resp.Sections {
 				sections[i] = knowledgepkg.Section{

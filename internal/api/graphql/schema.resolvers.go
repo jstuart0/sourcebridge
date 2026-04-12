@@ -1542,7 +1542,7 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 			return err
 		}
 
-		rt.ReportProgress(0.8, "llm", "LLM completed, persisting sections")
+		rt.ReportProgress(0.96, "llm", "LLM completed, persisting sections")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
 
 		if resp.Usage != nil {
@@ -1711,7 +1711,7 @@ func (r *mutationResolver) GenerateLearningPath(ctx context.Context, input Gener
 			return err
 		}
 
-		rt.ReportProgress(0.8, "llm", "LLM completed, persisting steps")
+		rt.ReportProgress(0.96, "llm", "LLM completed, persisting steps")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
 
 		if resp.Usage != nil {
@@ -1872,7 +1872,7 @@ func (r *mutationResolver) GenerateCodeTour(ctx context.Context, input GenerateC
 			return err
 		}
 
-		rt.ReportProgress(0.8, "llm", "LLM completed, persisting stops")
+		rt.ReportProgress(0.96, "llm", "LLM completed, persisting stops")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
 
 		if resp.Usage != nil {
@@ -2075,7 +2075,7 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 			return err
 		}
 
-		rt.ReportProgress(0.8, "llm", "LLM completed, persisting sections")
+		rt.ReportProgress(0.96, "llm", "LLM completed, persisting sections")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
 
 		if resp.Usage != nil {

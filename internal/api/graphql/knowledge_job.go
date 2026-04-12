@@ -38,10 +38,18 @@ func (r *Resolver) startProgressTicker(rt llm.Runtime, artifactID string) contex
 			case <-ctx.Done():
 				return
 			case <-tick.C:
-				if p < 0.75 {
+				switch {
+				case p < 0.6:
 					p += 0.02
+				case p < 0.8:
+					p += 0.005
+				case p < 0.95:
+					p += 0.001
 				}
-				rt.ReportProgress(p, "generating", "Building summary tree")
+				if p > 0.95 {
+					p = 0.95
+				}
+				rt.ReportProgress(p, "generating", "Generating artifact")
 				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifactID, p)
 			}
 		}
