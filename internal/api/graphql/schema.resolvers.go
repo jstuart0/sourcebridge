@@ -29,66 +29,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/requirements"
 	"github.com/sourcebridge/sourcebridge/internal/version"
-	"google.golang.org/grpc/codes"
-	grpcstatus "google.golang.org/grpc/status"
 )
-
-func classifyError(err error) string {
-	if err == nil {
-		return ""
-	}
-	if st, ok := grpcstatus.FromError(err); ok {
-		switch st.Code() {
-		case codes.DeadlineExceeded:
-			return "DEADLINE_EXCEEDED"
-		case codes.Unavailable:
-			return "WORKER_UNAVAILABLE"
-		}
-	}
-
-	msg := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(msg, "llm returned empty content"):
-		return "LLM_EMPTY"
-	case strings.Contains(msg, "snapshot too large"), strings.Contains(msg, "exceeds budget"):
-		return "SNAPSHOT_TOO_LARGE"
-	case strings.Contains(msg, "deadline exceeded"):
-		return "DEADLINE_EXCEEDED"
-	case strings.Contains(msg, "connection refused"), strings.Contains(msg, "transport is closing"), strings.Contains(msg, "unavailable"):
-		return "WORKER_UNAVAILABLE"
-	default:
-		return "INTERNAL"
-	}
-}
-
-func persistArtifactFailure(store knowledgepkg.KnowledgeStore, artifactID string, err error) {
-	if store == nil || artifactID == "" || err == nil {
-		return
-	}
-	code := classifyError(err)
-	_ = store.SetArtifactFailed(artifactID, code, err.Error())
-}
-
-// staleGenerationThreshold bounds how long an artifact can sit in the
-// GENERATING/PENDING state before a new request will re-claim it. Without
-// this window a crashed mid-generation (worker OOM, pod restart) would
-// permanently block future retries; with it, the stuck artifact is deleted
-// and a fresh goroutine takes over after 60s of silence.
-const staleGenerationThreshold = 60 * time.Second
-
-// isInFlightGeneration reports whether the existing artifact is actively
-// generating within the staleness window. Callers use this to dedupe rapid
-// repeated requests (the original "3 calls in 3 seconds" thor thrashing
-// pattern) while still allowing recovery after a worker crash.
-func isInFlightGeneration(existing *knowledgepkg.Artifact) bool {
-	if existing == nil {
-		return false
-	}
-	if existing.Status != knowledgepkg.StatusGenerating && existing.Status != knowledgepkg.StatusPending {
-		return false
-	}
-	return time.Since(existing.UpdatedAt) < staleGenerationThreshold
-}
 
 // AddRepository is the resolver for the addRepository field.
 func (r *mutationResolver) AddRepository(ctx context.Context, input AddRepositoryInput) (*Repository, error) {
@@ -3427,3 +3368,56 @@ func (r *Resolver) Repository() RepositoryResolver { return &repositoryResolver{
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
 type repositoryResolver struct{ *Resolver }
+
+// !!! WARNING !!!
+// The code below was going to be deleted when updating resolvers. It has been copied here so you have
+// one last chance to move it out of harms way if you want. There are two reasons this happens:
+//  - When renaming or deleting a resolver the old code will be put in here. You can safely delete
+//    it when you're done.
+//  - You have helper methods in this file. Move them out to keep these resolver files clean.
+/*
+	func classifyError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if st, ok := grpcstatus.FromError(err); ok {
+		switch st.Code() {
+		case codes.DeadlineExceeded:
+			return "DEADLINE_EXCEEDED"
+		case codes.Unavailable:
+			return "WORKER_UNAVAILABLE"
+		}
+	}
+
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "llm returned empty content"):
+		return "LLM_EMPTY"
+	case strings.Contains(msg, "snapshot too large"), strings.Contains(msg, "exceeds budget"):
+		return "SNAPSHOT_TOO_LARGE"
+	case strings.Contains(msg, "deadline exceeded"):
+		return "DEADLINE_EXCEEDED"
+	case strings.Contains(msg, "connection refused"), strings.Contains(msg, "transport is closing"), strings.Contains(msg, "unavailable"):
+		return "WORKER_UNAVAILABLE"
+	default:
+		return "INTERNAL"
+	}
+}
+func persistArtifactFailure(store knowledgepkg.KnowledgeStore, artifactID string, err error) {
+	if store == nil || artifactID == "" || err == nil {
+		return
+	}
+	code := classifyError(err)
+	_ = store.SetArtifactFailed(artifactID, code, err.Error())
+}
+const staleGenerationThreshold = 60 * time.Second
+func isInFlightGeneration(existing *knowledgepkg.Artifact) bool {
+	if existing == nil {
+		return false
+	}
+	if existing.Status != knowledgepkg.StatusGenerating && existing.Status != knowledgepkg.StatusPending {
+		return false
+	}
+	return time.Since(existing.UpdatedAt) < staleGenerationThreshold
+}
+*/

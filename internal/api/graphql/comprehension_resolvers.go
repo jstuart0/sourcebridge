@@ -110,8 +110,8 @@ func (r *mutationResolver) UpdateComprehensionSettings(ctx context.Context, inpu
 	if input.LongContextMaxTokens != nil {
 		settings.LongContextMaxTokens = *input.LongContextMaxTokens
 	}
-	if len(input.GraphRAGEntityTypes) > 0 {
-		settings.GraphRAGEntityTypes = input.GraphRAGEntityTypes
+	if len(input.GraphragEntityTypes) > 0 {
+		settings.GraphRAGEntityTypes = input.GraphragEntityTypes
 	}
 
 	if err := r.ComprehensionStore.SetSettings(settings); err != nil {
@@ -141,7 +141,7 @@ func (r *mutationResolver) ResetComprehensionSettings(ctx context.Context, scope
 	return true, nil
 }
 
-func (r *mutationResolver) UpdateModelCapabilitiesMutation(ctx context.Context, input UpdateModelCapabilitiesInput) (*ModelCapabilityProfile, error) {
+func (r *mutationResolver) UpdateModelCapabilities(ctx context.Context, input UpdateModelCapabilitiesInput) (*ModelCapabilityProfile, error) {
 	if r.ComprehensionStore == nil {
 		return nil, fmt.Errorf("comprehension settings not configured")
 	}
@@ -204,7 +204,7 @@ func (r *mutationResolver) UpdateModelCapabilitiesMutation(ctx context.Context, 
 	return mapModelCapability(mc), nil
 }
 
-func (r *mutationResolver) DeleteModelCapabilitiesMutation(ctx context.Context, modelID string) (bool, error) {
+func (r *mutationResolver) DeleteModelCapabilities(ctx context.Context, modelID string) (bool, error) {
 	if r.ComprehensionStore == nil {
 		return false, fmt.Errorf("comprehension settings not configured")
 	}
@@ -248,7 +248,7 @@ func mapSettings(s *comprehension.Settings) *ComprehensionSettings {
 		cs.LongContextMaxTokens = &v
 	}
 	if len(s.GraphRAGEntityTypes) > 0 {
-		cs.GraphRAGEntityTypes = s.GraphRAGEntityTypes
+		cs.GraphragEntityTypes = s.GraphRAGEntityTypes
 	}
 	if !s.UpdatedAt.IsZero() {
 		cs.UpdatedAt = &s.UpdatedAt
@@ -283,7 +283,7 @@ func mapEffectiveSettings(eff *comprehension.EffectiveSettings) *EffectiveCompre
 		LeafBudgetTokens:        eff.LeafBudgetTokens,
 		RefinePassEnabled:       refine,
 		LongContextMaxTokens:    eff.LongContextMaxTokens,
-		GraphRAGEntityTypes:     eff.GraphRAGEntityTypes,
+		GraphragEntityTypes:     eff.GraphRAGEntityTypes,
 		CacheEnabled:            cache,
 		AllowUnsafeCombinations: unsafe,
 	}
