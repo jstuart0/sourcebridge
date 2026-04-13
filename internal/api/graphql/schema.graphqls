@@ -94,6 +94,7 @@ type Mutation {
   addRepository(input: AddRepositoryInput!): Repository!
   removeRepository(id: ID!): Boolean!
   reindexRepository(id: ID!): Repository!
+  buildRepositoryUnderstanding(input: BuildRepositoryUnderstandingInput!): RepositoryUnderstanding!
 
   # Phase 3: Requirement import (stubs in Phase 1)
   importRequirements(input: ImportRequirementsInput!): ImportResult!
@@ -388,6 +389,12 @@ input GenerateCliffNotesInput {
   repositoryId: ID!
   audience: KnowledgeAudience
   depth: KnowledgeDepth
+  scopeType: KnowledgeScopeType
+  scopePath: String
+}
+
+input BuildRepositoryUnderstandingInput {
+  repositoryId: ID!
   scopeType: KnowledgeScopeType
   scopePath: String
 }

@@ -9,6 +9,7 @@ import {
   SYMBOLS_QUERY,
   REQUIREMENTS_QUERY,
   REINDEX_REPOSITORY_MUTATION,
+  BUILD_REPOSITORY_UNDERSTANDING_MUTATION,
   REMOVE_REPOSITORY_MUTATION,
   ANALYZE_SYMBOL_MUTATION,
   DISCUSS_CODE_MUTATION,
@@ -531,7 +532,7 @@ export default function RepositoryDetailPage() {
   const seenRepoTerminalRef = useRef<Record<string, string>>({});
   const locallyCancelledJobsRef = useRef<Record<string, number>>({});
 
-  const [repoResult] = useQuery({ query: REPOSITORY_QUERY, variables: { id: repoId } });
+  const [repoResult, reexecuteRepo] = useQuery({ query: REPOSITORY_QUERY, variables: { id: repoId } });
   const [symbolsResult] = useQuery({
     query: SYMBOLS_QUERY,
     variables: { repositoryId: repoId, query: symbolQuery || undefined, kind: symbolKindFilter || undefined, limit: 200 },
@@ -679,6 +680,7 @@ export default function RepositoryDetailPage() {
   }, [repoJobs?.recent, repoResult.data?.repository?.name]);
 
   const [, reindex] = useMutation(REINDEX_REPOSITORY_MUTATION);
+  const [, buildRepositoryUnderstanding] = useMutation(BUILD_REPOSITORY_UNDERSTANDING_MUTATION);
   const [, removeRepo] = useMutation(REMOVE_REPOSITORY_MUTATION);
   const [, analyzeSymbol] = useMutation(ANALYZE_SYMBOL_MUTATION);
   const [, discussCode] = useMutation(DISCUSS_CODE_MUTATION);
@@ -1103,6 +1105,23 @@ export default function RepositoryDetailPage() {
     try {
       await generateLearningPath({ input: { repositoryId: repoId, audience: knowledgeAudience, depth: knowledgeDepth } });
       reexecuteKnowledge({ requestPolicy: "network-only" });
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  }
+
+  async function handleBuildRepositoryUnderstanding() {
+    setKnowledgeLoading(true);
+    try {
+      await buildRepositoryUnderstanding({
+        input: {
+          repositoryId: repoId,
+          scopeType: knowledgeScopeType,
+          scopePath: knowledgeScopeType === "REPOSITORY" ? undefined : knowledgeScopePath,
+        },
+      });
+      reexecuteRepo({ requestPolicy: "network-only" });
+      void fetchRepoJobs();
     } finally {
       setKnowledgeLoading(false);
     }
@@ -2266,6 +2285,16 @@ export default function RepositoryDetailPage() {
                       {currentUnderstanding ? <span className={artifactStatusClass}>{understandingTreeLabel(currentUnderstanding)}</span> : null}
                       {currentUnderstanding?.refreshAvailable ? <span className={artifactStatusClass}>Refresh available</span> : null}
                     </div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <Button variant="secondary" size="sm" onClick={handleBuildRepositoryUnderstanding} disabled={knowledgeLoading}>
+                      {knowledgeLoading ? "Starting..." : currentUnderstanding ? "Refresh understanding" : "Build understanding"}
+                    </Button>
+                    {currentUnderstanding?.updatedAt ? (
+                      <span className="text-xs text-[var(--text-tertiary)]">
+                        Updated {formatGeneratedAt(currentUnderstanding.updatedAt)}
+                      </span>
+                    ) : null}
                   </div>
                   {currentUnderstanding ? (
                     <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

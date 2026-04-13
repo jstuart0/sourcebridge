@@ -42,6 +42,12 @@ type AutoLinkResult struct {
 	Links                 []*RequirementLink `json:"links"`
 }
 
+type BuildRepositoryUnderstandingInput struct {
+	RepositoryID string              `json:"repositoryId"`
+	ScopeType    *KnowledgeScopeType `json:"scopeType,omitempty"`
+	ScopePath    *string             `json:"scopePath,omitempty"`
+}
+
 type CodeSymbol struct {
 	ID            string             `json:"id"`
 	Name          string             `json:"name"`

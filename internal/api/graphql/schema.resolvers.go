@@ -299,6 +299,110 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 	return mapRepository(updatedRepo), nil
 }
 
+// BuildRepositoryUnderstanding is the resolver for the buildRepositoryUnderstanding field.
+func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, input BuildRepositoryUnderstandingInput) (*RepositoryUnderstanding, error) {
+	if r.Worker == nil {
+		return nil, fmt.Errorf("AI features are unavailable — worker not connected")
+	}
+	if r.KnowledgeStore == nil {
+		return nil, fmt.Errorf("knowledge store not configured")
+	}
+
+	repo := r.getStore(ctx).GetRepository(input.RepositoryID)
+	if repo == nil {
+		return nil, fmt.Errorf("repository %s not found", input.RepositoryID)
+	}
+	scope, err := artifactScopeFromInput(input.ScopeType, input.ScopePath)
+	if err != nil {
+		return nil, err
+	}
+
+	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
+	repoRoot, repoRootErr := resolveRepoSourcePath(repo)
+	if repoRootErr != nil {
+		slog.Warn("repository understanding: repo source unavailable, docs will be omitted from snapshot",
+			"repo_id", repo.ID, "error", repoRootErr)
+	}
+	var snap *knowledgepkg.KnowledgeSnapshot
+	if scope.ScopeType == knowledgepkg.ScopeRepository {
+		snap, err = assembler.Assemble(repo.ID, repoRoot)
+	} else {
+		snap, err = assembler.AssembleScoped(repo.ID, repoRoot, scope)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to assemble knowledge snapshot: %w", err)
+	}
+	snapshotJSON, err := json.Marshal(snap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
+	}
+
+	existing := r.KnowledgeStore.GetRepositoryUnderstanding(repo.ID, scope)
+	revisionFP := knowledgepkg.RevisionFingerprint(snap.SourceRevision)
+	if existing != nil && existing.RevisionFP == revisionFP && existing.Stage != knowledgepkg.UnderstandingNeedsRefresh && existing.TreeStatus == knowledgepkg.UnderstandingTreeComplete {
+		return mapRepositoryUnderstanding(existing), nil
+	}
+
+	understanding := &knowledgepkg.RepositoryUnderstanding{
+		RepositoryID: repo.ID,
+		Scope:        scope.NormalizePtr(),
+		RevisionFP:   revisionFP,
+		Stage:        knowledgepkg.UnderstandingBuildingTree,
+		TreeStatus:   knowledgepkg.UnderstandingTreeMissing,
+	}
+	understanding, err = r.KnowledgeStore.StoreRepositoryUnderstanding(understanding)
+	if err != nil {
+		return nil, fmt.Errorf("failed to seed repository understanding: %w", err)
+	}
+
+	err = enqueueRepositoryUnderstandingJob(r.Resolver, repo, understanding, scope, snapshotJSON, func(runCtx context.Context, rt llm.Runtime) error {
+		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
+		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "snapshot", "snapshot_assembled", "Snapshot assembled", map[string]any{
+			"snapshot_bytes": len(snapshotJSON),
+			"scope_type":     string(scope.ScopeType),
+			"scope_path":     scope.ScopePath,
+		})
+		bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, understanding.ID, "build_repository_understanding")
+		resp, err := r.Worker.GenerateCliffNotes(bgCtx, &knowledgev1.GenerateCliffNotesRequest{
+			RepositoryId:   repo.ID,
+			RepositoryName: repo.Name,
+			Audience:       string(knowledgepkg.AudienceDeveloper),
+			Depth:          string(knowledgepkg.DepthMedium),
+			ScopeType:      string(scope.ScopeType),
+			ScopePath:      scope.ScopePath,
+			SnapshotJson:   string(snapshotJSON),
+		})
+		if err != nil {
+			markRepositoryUnderstandingFailed(r.KnowledgeStore, &knowledgepkg.Artifact{RepositoryID: repo.ID}, scope, snap.SourceRevision, err)
+			return err
+		}
+		if _, err := updateUnderstandingForCliffNotes(r.KnowledgeStore, &knowledgepkg.Artifact{RepositoryID: repo.ID}, scope, snap.SourceRevision, resp, knowledgepkg.UnderstandingFirstPassReady); err != nil {
+			return err
+		}
+		rt.ReportProgress(1.0, "ready", "Repository understanding ready")
+		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "ready", "repository_understanding_ready", "Repository understanding ready", map[string]any{
+			"cached_nodes": func() int32 {
+				if resp.Diagnostics == nil {
+					return 0
+				}
+				return resp.Diagnostics.CachedNodes
+			}(),
+			"total_nodes": func() int32 {
+				if resp.Diagnostics == nil {
+					return 0
+				}
+				return resp.Diagnostics.TotalNodes
+			}(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("enqueue repository understanding job: %w", err)
+	}
+
+	return mapRepositoryUnderstanding(understanding), nil
+}
+
 // ImportRequirements is the resolver for the importRequirements field.
 func (r *mutationResolver) ImportRequirements(ctx context.Context, input ImportRequirementsInput) (*ImportResult, error) {
 	if r.getStore(ctx) == nil {
@@ -3076,7 +3180,7 @@ func (r *queryResolver) KnowledgeArtifacts(ctx context.Context, repositoryID str
 	if scopeType == nil && scopePath == nil {
 		result := make([]*KnowledgeArtifact, len(artifacts))
 		for i, a := range artifacts {
-			result[i] = mapKnowledgeArtifact(a)
+			result[i] = mapKnowledgeArtifactWithStore(r.KnowledgeStore, a)
 		}
 		return result, nil
 	}
@@ -3091,7 +3195,7 @@ func (r *queryResolver) KnowledgeArtifacts(ctx context.Context, repositoryID str
 			artifactScope = a.Scope.Normalize()
 		}
 		if artifactScope.ScopeKey() == scope.ScopeKey() {
-			result = append(result, mapKnowledgeArtifact(a))
+			result = append(result, mapKnowledgeArtifactWithStore(r.KnowledgeStore, a))
 		}
 	}
 	if result == nil {
@@ -3109,7 +3213,7 @@ func (r *queryResolver) KnowledgeArtifact(ctx context.Context, id string) (*Know
 	if a == nil {
 		return nil, nil
 	}
-	return mapKnowledgeArtifact(a), nil
+	return mapKnowledgeArtifactWithStore(r.KnowledgeStore, a), nil
 }
 
 // RepositoryUnderstanding is the resolver for the repositoryUnderstanding field.

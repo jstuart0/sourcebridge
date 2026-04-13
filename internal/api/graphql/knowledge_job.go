@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 )
@@ -102,6 +103,8 @@ func knowledgeJobEnvLimit(jobType, envKey string, fallback int) int {
 func knowledgeJobConcurrencyLimit(jobType string) int {
 	switch knowledgeJobBaseType(jobType) {
 	case "cliff_notes":
+		return knowledgeJobEnvLimit(jobType, "SOURCEBRIDGE_KNOWLEDGE_CLIFF_NOTES_MAX_CONCURRENCY", 1)
+	case "build_repository_understanding":
 		return knowledgeJobEnvLimit(jobType, "SOURCEBRIDGE_KNOWLEDGE_CLIFF_NOTES_MAX_CONCURRENCY", 1)
 	case "learning_path":
 		return knowledgeJobEnvLimit(jobType, "SOURCEBRIDGE_KNOWLEDGE_LEARNING_PATH_MAX_CONCURRENCY", 1)
@@ -287,4 +290,55 @@ func knowledgeJobMaxAttempts(artifact *knowledgepkg.Artifact, scope knowledgepkg
 		return 1
 	}
 	return 3
+}
+
+func enqueueRepositoryUnderstandingJob(
+	r *Resolver,
+	repo *graphstore.Repository,
+	understanding *knowledgepkg.RepositoryUnderstanding,
+	scope knowledgepkg.ArtifactScope,
+	snapshotJSON []byte,
+	run func(ctx context.Context, rt llm.Runtime) error,
+) error {
+	if r == nil || r.Orchestrator == nil {
+		return fmt.Errorf("llm orchestrator is not configured")
+	}
+	if repo == nil {
+		return fmt.Errorf("repository is required")
+	}
+	if understanding == nil {
+		return fmt.Errorf("repository understanding is required")
+	}
+	req := &llm.EnqueueRequest{
+		Subsystem:   llm.SubsystemKnowledge,
+		JobType:     "build_repository_understanding",
+		TargetKey:   fmt.Sprintf("understanding:%s:%s", repo.ID, scope.Normalize().ScopeKey()),
+		Strategy:    "repository_understanding_queue",
+		ArtifactID:  understanding.ID,
+		RepoID:      repo.ID,
+		MaxAttempts: 1,
+		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
+			rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot")
+			appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "queued", "knowledge_slot_wait_started", "Waiting for knowledge generation slot", map[string]any{
+				"job_type": "build_repository_understanding",
+			})
+			stopHeartbeat := startKnowledgeQueueHeartbeat(runCtx, rt, "", nil)
+			defer stopHeartbeat()
+			releaseGlobal, err := acquireKnowledgeGlobalSlot(runCtx)
+			if err != nil {
+				return err
+			}
+			defer releaseGlobal()
+			release, err := acquireKnowledgeJobSlot(runCtx, "build_repository_understanding")
+			if err != nil {
+				return err
+			}
+			defer release()
+			stopHeartbeat()
+			rt.ReportSnapshotBytes(len(snapshotJSON))
+			return run(runCtx, rt)
+		},
+	}
+	_, err := r.Orchestrator.Enqueue(req)
+	return err
 }

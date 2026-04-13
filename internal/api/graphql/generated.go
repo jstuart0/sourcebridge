@@ -463,6 +463,7 @@ type ComplexityRoot struct {
 		AddRepository                    func(childComplexity int, input AddRepositoryInput) int
 		AnalyzeSymbol                    func(childComplexity int, repositoryID string, symbolID string) int
 		AutoLinkRequirements             func(childComplexity int, repositoryID string, minConfidence *float64) int
+		BuildRepositoryUnderstanding     func(childComplexity int, input BuildRepositoryUnderstandingInput) int
 		CreateManualLink                 func(childComplexity int, input CreateManualLinkInput) int
 		DeleteModelCapabilities          func(childComplexity int, modelID string) int
 		DetectContracts                  func(childComplexity int, repoID string) int
@@ -771,6 +772,7 @@ type MutationResolver interface {
 	AddRepository(ctx context.Context, input AddRepositoryInput) (*Repository, error)
 	RemoveRepository(ctx context.Context, id string) (bool, error)
 	ReindexRepository(ctx context.Context, id string) (*Repository, error)
+	BuildRepositoryUnderstanding(ctx context.Context, input BuildRepositoryUnderstandingInput) (*RepositoryUnderstanding, error)
 	ImportRequirements(ctx context.Context, input ImportRequirementsInput) (*ImportResult, error)
 	VerifyLink(ctx context.Context, linkID string, verified bool) (*RequirementLink, error)
 	CreateManualLink(ctx context.Context, input CreateManualLinkInput) (*RequirementLink, error)
@@ -3000,6 +3002,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Mutation.AutoLinkRequirements(childComplexity, args["repositoryId"].(string), args["minConfidence"].(*float64)), true
 
+	case "Mutation.buildRepositoryUnderstanding":
+		if e.complexity.Mutation.BuildRepositoryUnderstanding == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_buildRepositoryUnderstanding_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.BuildRepositoryUnderstanding(childComplexity, args["input"].(BuildRepositoryUnderstandingInput)), true
+
 	case "Mutation.createManualLink":
 		if e.complexity.Mutation.CreateManualLink == nil {
 			break
@@ -4865,6 +4879,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 	ec := executionContext{opCtx, e, 0, 0, make(chan graphql.DeferredResult)}
 	inputUnmarshalMap := graphql.BuildUnmarshalerMap(
 		ec.unmarshalInputAddRepositoryInput,
+		ec.unmarshalInputBuildRepositoryUnderstandingInput,
 		ec.unmarshalInputCreateManualLinkInput,
 		ec.unmarshalInputDiscussCodeInput,
 		ec.unmarshalInputExecutionPathInput,
@@ -5122,6 +5137,34 @@ func (ec *executionContext) field_Mutation_autoLinkRequirements_argsMinConfidenc
 	}
 
 	var zeroVal *float64
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_buildRepositoryUnderstanding_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_buildRepositoryUnderstanding_argsInput(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_buildRepositoryUnderstanding_argsInput(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (BuildRepositoryUnderstandingInput, error) {
+	if _, ok := rawArgs["input"]; !ok {
+		var zeroVal BuildRepositoryUnderstandingInput
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("input"))
+	if tmp, ok := rawArgs["input"]; ok {
+		return ec.unmarshalNBuildRepositoryUnderstandingInput2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐBuildRepositoryUnderstandingInput(ctx, tmp)
+	}
+
+	var zeroVal BuildRepositoryUnderstandingInput
 	return zeroVal, nil
 }
 
@@ -21593,6 +21636,95 @@ func (ec *executionContext) fieldContext_Mutation_reindexRepository(ctx context.
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_buildRepositoryUnderstanding(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_buildRepositoryUnderstanding(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().BuildRepositoryUnderstanding(rctx, fc.Args["input"].(BuildRepositoryUnderstandingInput))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*RepositoryUnderstanding)
+	fc.Result = res
+	return ec.marshalNRepositoryUnderstanding2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryUnderstanding(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_buildRepositoryUnderstanding(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_RepositoryUnderstanding_id(ctx, field)
+			case "repositoryId":
+				return ec.fieldContext_RepositoryUnderstanding_repositoryId(ctx, field)
+			case "scope":
+				return ec.fieldContext_RepositoryUnderstanding_scope(ctx, field)
+			case "corpusId":
+				return ec.fieldContext_RepositoryUnderstanding_corpusId(ctx, field)
+			case "revisionFp":
+				return ec.fieldContext_RepositoryUnderstanding_revisionFp(ctx, field)
+			case "strategy":
+				return ec.fieldContext_RepositoryUnderstanding_strategy(ctx, field)
+			case "stage":
+				return ec.fieldContext_RepositoryUnderstanding_stage(ctx, field)
+			case "treeStatus":
+				return ec.fieldContext_RepositoryUnderstanding_treeStatus(ctx, field)
+			case "cachedNodes":
+				return ec.fieldContext_RepositoryUnderstanding_cachedNodes(ctx, field)
+			case "totalNodes":
+				return ec.fieldContext_RepositoryUnderstanding_totalNodes(ctx, field)
+			case "modelUsed":
+				return ec.fieldContext_RepositoryUnderstanding_modelUsed(ctx, field)
+			case "refreshAvailable":
+				return ec.fieldContext_RepositoryUnderstanding_refreshAvailable(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_RepositoryUnderstanding_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_RepositoryUnderstanding_updatedAt(ctx, field)
+			case "errorCode":
+				return ec.fieldContext_RepositoryUnderstanding_errorCode(ctx, field)
+			case "errorMessage":
+				return ec.fieldContext_RepositoryUnderstanding_errorMessage(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type RepositoryUnderstanding", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_buildRepositoryUnderstanding_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Mutation_importRequirements(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_Mutation_importRequirements(ctx, field)
 	if err != nil {
@@ -35791,6 +35923,47 @@ func (ec *executionContext) unmarshalInputAddRepositoryInput(ctx context.Context
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputBuildRepositoryUnderstandingInput(ctx context.Context, obj any) (BuildRepositoryUnderstandingInput, error) {
+	var it BuildRepositoryUnderstandingInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"repositoryId", "scopeType", "scopePath"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "repositoryId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("repositoryId"))
+			data, err := ec.unmarshalNID2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.RepositoryID = data
+		case "scopeType":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("scopeType"))
+			data, err := ec.unmarshalOKnowledgeScopeType2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐKnowledgeScopeType(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ScopeType = data
+		case "scopePath":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("scopePath"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ScopePath = data
+		}
+	}
+
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputCreateManualLinkInput(ctx context.Context, obj any) (CreateManualLinkInput, error) {
 	var it CreateManualLinkInput
 	asMap := map[string]any{}
@@ -39244,6 +39417,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "buildRepositoryUnderstanding":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_buildRepositoryUnderstanding(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		case "importRequirements":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_importRequirements(ctx, field)
@@ -42335,6 +42515,11 @@ func (ec *executionContext) marshalNBoolean2bool(ctx context.Context, sel ast.Se
 	return res
 }
 
+func (ec *executionContext) unmarshalNBuildRepositoryUnderstandingInput2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐBuildRepositoryUnderstandingInput(ctx context.Context, v any) (BuildRepositoryUnderstandingInput, error) {
+	res, err := ec.unmarshalInputBuildRepositoryUnderstandingInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
 func (ec *executionContext) marshalNCodeSymbol2ᚕᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐCodeSymbolᚄ(ctx context.Context, sel ast.SelectionSet, v []*CodeSymbol) graphql.Marshaler {
 	ret := make(graphql.Array, len(v))
 	var wg sync.WaitGroup
@@ -43908,6 +44093,20 @@ func (ec *executionContext) unmarshalNRepositoryStatus2githubᚗcomᚋsourcebrid
 
 func (ec *executionContext) marshalNRepositoryStatus2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryStatus(ctx context.Context, sel ast.SelectionSet, v RepositoryStatus) graphql.Marshaler {
 	return v
+}
+
+func (ec *executionContext) marshalNRepositoryUnderstanding2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryUnderstanding(ctx context.Context, sel ast.SelectionSet, v RepositoryUnderstanding) graphql.Marshaler {
+	return ec._RepositoryUnderstanding(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNRepositoryUnderstanding2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryUnderstanding(ctx context.Context, sel ast.SelectionSet, v *RepositoryUnderstanding) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._RepositoryUnderstanding(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalNRepositoryUnderstandingStage2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryUnderstandingStage(ctx context.Context, v any) (RepositoryUnderstandingStage, error) {

@@ -23,8 +23,11 @@ func updateUnderstandingForCliffNotes(
 	resp *knowledgev1.GenerateCliffNotesResponse,
 	stage knowledgepkg.RepositoryUnderstandingStage,
 ) (*knowledgepkg.RepositoryUnderstanding, error) {
-	if store == nil || artifact == nil || resp == nil {
+	if store == nil || resp == nil {
 		return nil, nil
+	}
+	if artifact == nil {
+		return nil, fmt.Errorf("artifact is required")
 	}
 	understanding := &knowledgepkg.RepositoryUnderstanding{
 		RepositoryID: artifact.RepositoryID,
@@ -59,7 +62,7 @@ func updateUnderstandingForCliffNotes(
 	if err != nil {
 		return nil, err
 	}
-	if stored != nil {
+	if stored != nil && artifact.ID != "" {
 		_ = store.AttachArtifactUnderstanding(artifact.ID, stored.ID, stored.RevisionFP)
 	}
 	return stored, nil

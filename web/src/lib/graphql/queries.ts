@@ -370,6 +370,35 @@ export const REINDEX_REPOSITORY_MUTATION = gql`
   }
 `;
 
+export const BUILD_REPOSITORY_UNDERSTANDING_MUTATION = gql`
+  mutation BuildRepositoryUnderstanding($input: BuildRepositoryUnderstandingInput!) {
+    buildRepositoryUnderstanding(input: $input) {
+      id
+      repositoryId
+      corpusId
+      revisionFp
+      strategy
+      stage
+      treeStatus
+      cachedNodes
+      totalNodes
+      modelUsed
+      refreshAvailable
+      createdAt
+      updatedAt
+      errorCode
+      errorMessage
+      scope {
+        scopeType
+        scopePath
+        modulePath
+        filePath
+        symbolName
+      }
+    }
+  }
+`;
+
 export const ANALYZE_SYMBOL_MUTATION = gql`
   mutation AnalyzeSymbol($repositoryId: ID!, $symbolId: ID!) {
     analyzeSymbol(repositoryId: $repositoryId, symbolId: $symbolId) {

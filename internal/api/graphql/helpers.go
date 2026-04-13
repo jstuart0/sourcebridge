@@ -706,6 +706,27 @@ func mapKnowledgeArtifact(a *knowledgepkg.Artifact) *KnowledgeArtifact {
 	return out
 }
 
+func mapKnowledgeArtifactWithStore(store knowledgepkg.KnowledgeStore, a *knowledgepkg.Artifact) *KnowledgeArtifact {
+	out := mapKnowledgeArtifact(a)
+	if store == nil || a == nil || out == nil {
+		return out
+	}
+	scope := knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository}
+	if a.Scope != nil {
+		scope = a.Scope.Normalize()
+	}
+	if u := store.GetRepositoryUnderstanding(a.RepositoryID, understandingScopeForArtifact(scope)); u != nil {
+		out.RefreshAvailable = a.Stale || knowledgepkg.ArtifactRefreshAvailable(a, u)
+		if out.UnderstandingID == nil && u.ID != "" {
+			out.UnderstandingID = ptrString(u.ID)
+		}
+		if out.UnderstandingRevisionFp == nil && u.RevisionFP != "" {
+			out.UnderstandingRevisionFp = ptrString(u.RevisionFP)
+		}
+	}
+	return out
+}
+
 func mapRepositoryUnderstanding(u *knowledgepkg.RepositoryUnderstanding) *RepositoryUnderstanding {
 	if u == nil {
 		return nil
