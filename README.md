@@ -15,6 +15,32 @@
 
 SourceBridge is a requirement-aware code comprehension platform. Point it at any codebase and it generates field guides -- cliff notes, learning paths, code tours, architecture diagrams, and workflow stories -- so your team can understand how a system actually works. It also traces requirements to code, runs AI-powered reviews, and serves as an MCP server for AI agent integration.
 
+Most tools help you search code. **SourceBridge helps you understand systems.**
+
+<p align="center">
+  <img src="docs/screenshots/repository-overview.png" alt="Repository overview showing cliff notes, code tours, and learning paths" width="800">
+</p>
+
+<details>
+<summary><strong>More screenshots</strong></summary>
+
+### Cliff Notes
+<p align="center">
+  <img src="docs/screenshots/cliff-notes.png" alt="AI-generated cliff notes with hierarchical code summaries" width="800">
+</p>
+
+### Admin Monitor
+<p align="center">
+  <img src="docs/screenshots/admin-monitor.png" alt="LLM job queue with real-time generation progress" width="800">
+</p>
+
+### Semantic Search
+<p align="center">
+  <img src="docs/screenshots/search.png" alt="Natural language search against the repository graph" width="800">
+</p>
+
+</details>
+
 ## Key Features
 
 - **Code Indexing** -- Tree-sitter based parsing for Go, Python, TypeScript, JavaScript, Java, Rust, and C++
