@@ -120,7 +120,7 @@ CREATE ca_llm_job_log SET
             log.warning(
                 "job_log_append_failed",
                 job_id=self.metadata.job_id,
-                event=event,
+                log_event=event,
                 error=str(exc),
             )
 

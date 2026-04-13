@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from pydantic_settings import BaseSettings
 
 
@@ -50,3 +52,47 @@ class WorkerConfig(BaseSettings):
 
     # gRPC auth
     grpc_auth_secret: str = ""
+
+    def model_post_init(self, __context: object) -> None:
+        self.surreal_url = self._fallback_env(
+            current=self.surreal_url,
+            default_value="ws://localhost:8000/rpc",
+            primary_env="SOURCEBRIDGE_WORKER_SURREAL_URL",
+            fallback_env="SOURCEBRIDGE_STORAGE_SURREAL_URL",
+        )
+        self.surreal_namespace = self._fallback_env(
+            current=self.surreal_namespace,
+            default_value="sourcebridge",
+            primary_env="SOURCEBRIDGE_WORKER_SURREAL_NAMESPACE",
+            fallback_env="SOURCEBRIDGE_STORAGE_SURREAL_NAMESPACE",
+        )
+        self.surreal_database = self._fallback_env(
+            current=self.surreal_database,
+            default_value="sourcebridge",
+            primary_env="SOURCEBRIDGE_WORKER_SURREAL_DATABASE",
+            fallback_env="SOURCEBRIDGE_STORAGE_SURREAL_DATABASE",
+        )
+        self.surreal_user = self._fallback_env(
+            current=self.surreal_user,
+            default_value="root",
+            primary_env="SOURCEBRIDGE_WORKER_SURREAL_USER",
+            fallback_env="SOURCEBRIDGE_STORAGE_SURREAL_USER",
+        )
+        self.surreal_pass = self._fallback_env(
+            current=self.surreal_pass,
+            default_value="root",
+            primary_env="SOURCEBRIDGE_WORKER_SURREAL_PASS",
+            fallback_env="SOURCEBRIDGE_STORAGE_SURREAL_PASS",
+        )
+
+    @staticmethod
+    def _fallback_env(current: str, default_value: str, primary_env: str, fallback_env: str) -> str:
+        if current and current != default_value:
+            return current
+        primary = os.getenv(primary_env, "").strip()
+        if primary:
+            return primary
+        fallback = os.getenv(fallback_env, "").strip()
+        if fallback:
+            return fallback
+        return current

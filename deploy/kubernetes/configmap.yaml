@@ -13,6 +13,9 @@ data:
   SOURCEBRIDGE_STORAGE_REPO_CACHE_PATH: "/data/repo-cache"
   # Worker gRPC address
   SOURCEBRIDGE_WORKER_ADDRESS: "worker.sourcebridge.svc.cluster.local:50051"
+  SOURCEBRIDGE_WORKER_SURREAL_URL: "ws://surrealdb.sourcebridge.svc.cluster.local:8000"
+  SOURCEBRIDGE_WORKER_SURREAL_NAMESPACE: "sourcebridge"
+  SOURCEBRIDGE_WORKER_SURREAL_DATABASE: "main"
   # Public URL — change to your domain
   SOURCEBRIDGE_SERVER_PUBLIC_BASE_URL: "https://sourcebridge.example.com"
   # OIDC SSO — configure with your identity provider (optional)
