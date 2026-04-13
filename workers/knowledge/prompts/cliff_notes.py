@@ -52,6 +52,7 @@ REQUIRED_SECTIONS_BY_SCOPE = {
     "repository": [
         "System Purpose",
         "Architecture Overview",
+        "External Dependencies",
         "Domain Model",
         "Core System Flows",
         "Code Structure",
@@ -102,6 +103,8 @@ _SCOPE_INSTRUCTIONS = {
         "requirements actually matter. Do not default to a requirements-first lens.\n"
         "Focus on:\n"
         "- What the system does and who it serves (one paragraph, not a product brief)\n"
+        "- Which third-party services, SaaS/PaaS platforms, APIs, or infrastructure providers it depends on\n"
+        "- How those external systems are used, and where the integration boundaries live\n"
         "- The critical paths a maintainer would trace first\n"
         "- Where complexity hides and what to watch out for\n"
         "- Concrete starting points (files, entry points) not abstract layers\n"
@@ -198,6 +201,10 @@ def build_cliff_notes_prompt(
 - Write like a maintainer helping the next maintainer.
 - Explain what matters operationally, not just structurally.
 - Prefer concrete editing guidance over generic dependency narration.
+- For repository scope, explicitly separate external dependencies from internal architecture.
+- In the external dependencies section, include third-party integrations, SaaS/PaaS services, external APIs,
+  cloud infrastructure, authentication providers, messaging providers, storage services, or observability platforms
+  only when the snapshot provides evidence they are actually used.
 - Use requirements evidence only when it clarifies purpose or user intent for this specific scope.
 - For file and symbol scopes, prioritize local code behavior over platform-wide framing.
 - For symbol scope, never invent runtime layers, storage systems, or parameter details

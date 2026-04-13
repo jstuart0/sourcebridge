@@ -25,6 +25,7 @@ interface JobView {
   job_type: string;
   status: "pending" | "generating" | "ready" | "failed" | "cancelled";
   progress: number;
+  progress_phase?: string;
   progress_message?: string;
   error_title?: string;
   error_hint?: string;
@@ -216,9 +217,9 @@ export function RepoJobsPopover({ repoId }: { repoId: string }) {
                       </span>
                       <span>{pct}%</span>
                     </div>
-                    {job.status === "pending" && job.queue_position ? (
+                    {(job.status === "pending" || job.progress_phase === "queued") && job.queue_position ? (
                       <div className="mt-1 text-[11px] text-[var(--text-tertiary)]">
-                        Queue #{job.queue_position}
+                        {job.progress_phase === "queued" && job.status !== "pending" ? "Slot wait" : "Queue"} #{job.queue_position}
                         {job.queue_depth ? ` of ${job.queue_depth}` : ""}
                         {formatQueueEta(job.estimated_wait_ms) ? ` · ~${formatQueueEta(job.estimated_wait_ms)}` : ""}
                       </div>

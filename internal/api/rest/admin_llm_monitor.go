@@ -45,6 +45,8 @@ type monitorHealth struct {
 type monitorStats struct {
 	InFlight       int `json:"in_flight"`
 	QueueDepth     int `json:"queue_depth"`
+	GateWaiting    int `json:"gate_waiting"`
+	TotalWaiting   int `json:"total_waiting"`
 	MaxConcurrency int `json:"max_concurrency"`
 	RecentReusedSummaries int `json:"recent_reused_summaries"`
 }
@@ -266,6 +268,8 @@ func (s *Server) handleLLMActivity(w http.ResponseWriter, r *http.Request) {
 		Stats: monitorStats{
 			InFlight:              len(active), // DB-backed count — consistent across pods
 			QueueDepth:            s.orchestrator.QueueDepth(),
+			GateWaiting:           gateWaitingCount(activeViews),
+			TotalWaiting:          s.orchestrator.QueueDepth() + gateWaitingCount(activeViews),
 			MaxConcurrency:        s.orchestrator.MaxConcurrency(),
 			RecentReusedSummaries: totalReusedSummaries(recentViews),
 		},
@@ -279,6 +283,20 @@ func totalReusedSummaries(jobs []monitorJobView) int {
 		total += job.ReusedSummaries
 	}
 	return total
+}
+
+func gateWaitingCount(jobs []monitorJobView) int {
+	total := 0
+	for _, job := range jobs {
+		if isGateQueued(job) {
+			total++
+		}
+	}
+	return total
+}
+
+func isGateQueued(job monitorJobView) bool {
+	return job.Status == string(llm.StatusGenerating) && job.ProgressPhase == "queued"
 }
 
 func enrichQueueMetadata(active []monitorJobView, pending []*llm.Job, metrics orchestrator.Snapshot, maxConcurrency int) {
@@ -297,24 +315,44 @@ func enrichQueueMetadata(active []monitorJobView, pending []*llm.Job, metrics or
 	if maxConcurrency <= 0 {
 		maxConcurrency = 1
 	}
+	gateQueued := make([]*monitorJobView, 0, len(active))
 	for i := range active {
-		if active[i].Status != string(llm.StatusPending) {
+		if active[i].Status == string(llm.StatusPending) {
+			pos := positions[active[i].ID]
+			active[i].QueuePosition = pos
+			active[i].QueueDepth = queueDepth
+			waitBase := defaultWait
+			if stats, ok := metrics.ByJobType[active[i].Subsystem+"/"+active[i].JobType]; ok && stats.P50LatencyMs > 0 {
+				waitBase = stats.P50LatencyMs
+			} else if stats, ok := metrics.BySubsystem[active[i].Subsystem]; ok && stats.P50LatencyMs > 0 {
+				waitBase = stats.P50LatencyMs
+			}
+			wavesAhead := pos - 1
+			if wavesAhead < 0 {
+				wavesAhead = 0
+			}
+			active[i].EstimatedWaitMs = int64((wavesAhead / maxConcurrency)) * waitBase
 			continue
 		}
-		pos := positions[active[i].ID]
-		active[i].QueuePosition = pos
-		active[i].QueueDepth = queueDepth
-		waitBase := defaultWait
-		if stats, ok := metrics.ByJobType[active[i].Subsystem+"/"+active[i].JobType]; ok && stats.P50LatencyMs > 0 {
+		if isGateQueued(active[i]) {
+			gateQueued = append(gateQueued, &active[i])
+		}
+	}
+	if len(gateQueued) == 0 {
+		return
+	}
+	gateDepth := len(gateQueued)
+	waitBase := defaultWait
+	for idx, job := range gateQueued {
+		job.QueuePosition = idx + 1
+		job.QueueDepth = gateDepth
+		if stats, ok := metrics.ByJobType[job.Subsystem+"/"+job.JobType]; ok && stats.P50LatencyMs > 0 {
 			waitBase = stats.P50LatencyMs
-		} else if stats, ok := metrics.BySubsystem[active[i].Subsystem]; ok && stats.P50LatencyMs > 0 {
+		} else if stats, ok := metrics.BySubsystem[job.Subsystem]; ok && stats.P50LatencyMs > 0 {
 			waitBase = stats.P50LatencyMs
 		}
-		wavesAhead := pos - 1
-		if wavesAhead < 0 {
-			wavesAhead = 0
-		}
-		active[i].EstimatedWaitMs = int64((wavesAhead / maxConcurrency)) * waitBase
+		wavesAhead := idx
+		job.EstimatedWaitMs = int64((wavesAhead / maxConcurrency)) * waitBase
 	}
 }
 

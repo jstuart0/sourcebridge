@@ -51,8 +51,8 @@ class SurrealClient:
             auth=(self.user, self.password),
             headers={
                 "Accept": "application/json",
-                "NS": self.namespace,
-                "DB": self.database,
+                "Surreal-NS": self.namespace,
+                "Surreal-DB": self.database,
             },
             timeout=30.0,
         )
@@ -73,15 +73,22 @@ class SurrealClient:
         """Execute a SurrealQL query via the HTTP /sql endpoint."""
         if not self._connected or self._client is None:
             raise RuntimeError("Not connected to SurrealDB")
+        if params:
+            raise ValueError("SurrealClient.query does not support params with HTTP /sql")
 
         log.debug("surreal_query", sql=sql[:100])
         resp = await self._client.post(
             "/sql",
             content=sql,
-            headers={"Content-Type": "application/json" if params else "text/plain"},
+            headers={"Content-Type": "application/surrealdb"},
         )
         resp.raise_for_status()
         results = resp.json()
+        if isinstance(results, list):
+            for idx, result in enumerate(results):
+                if isinstance(result, dict) and str(result.get("status", "")).upper() == "ERR":
+                    message = str(result.get("result") or result.get("detail") or "unknown SurrealDB statement error")
+                    raise RuntimeError(f"SurrealDB statement {idx} failed: {message}")
         if isinstance(results, list):
             return results
         return [results]

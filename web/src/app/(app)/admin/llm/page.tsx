@@ -116,6 +116,8 @@ interface ActivityResponse {
   stats: {
     in_flight: number;
     queue_depth: number;
+    gate_waiting?: number;
+    total_waiting?: number;
     max_concurrency: number;
     recent_reused_summaries?: number;
   };
@@ -356,9 +358,14 @@ export default function MonitorPage() {
           detail={saturation !== null ? `${saturation}% of capacity` : undefined}
         />
         <StatCard
-          label="Queued"
+          label="Outer queue"
           value={stats?.queue_depth ?? "—"}
-          detail="Pending jobs waiting for a slot"
+          detail="Jobs not yet admitted to execution"
+        />
+        <StatCard
+          label="Waiting on slot"
+          value={stats?.gate_waiting ?? "—"}
+          detail="Jobs admitted but blocked on a knowledge slot"
         />
         <StatCard
           label="Succeeded (last hour)"
@@ -544,9 +551,9 @@ function ActiveJobCard({
           <span>{job.progress_message || job.progress_phase || "Working…"}</span>
           <span>{progressPct}%</span>
         </div>
-        {job.status === "pending" && job.queue_position ? (
+        {(job.status === "pending" || job.progress_phase === "queued") && job.queue_position ? (
           <div className="text-[11px] text-[var(--text-tertiary)]">
-            Queue #{job.queue_position}
+            {job.progress_phase === "queued" && job.status !== "pending" ? "Slot wait" : "Queue"} #{job.queue_position}
             {job.queue_depth ? ` of ${job.queue_depth}` : ""}
             {formatQueueEta(job.estimated_wait_ms) ? ` · ~${formatQueueEta(job.estimated_wait_ms)}` : ""}
           </div>

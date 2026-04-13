@@ -231,6 +231,7 @@ async def test_render_prompt_includes_root_summary_and_subsystems() -> None:
     assert "Root summary of the sample repository" in prompt
     assert "API package" in prompt or "Exposes the public HTTP API" in prompt
     assert "Store package" in prompt or "Persists domain objects" in prompt
+    assert "External Dependencies" in prompt
 
 
 @pytest.mark.asyncio
