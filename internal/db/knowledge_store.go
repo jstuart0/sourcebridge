@@ -297,6 +297,10 @@ func (s *SurrealStore) StoreKnowledgeArtifact(artifact *knowledge.Artifact) (*kn
 }
 
 func (s *SurrealStore) ClaimArtifact(key knowledge.ArtifactKey, sourceRevision knowledge.SourceRevision) (*knowledge.Artifact, bool, error) {
+	return s.ClaimArtifactWithMode(key, sourceRevision, "")
+}
+
+func (s *SurrealStore) ClaimArtifactWithMode(key knowledge.ArtifactKey, sourceRevision knowledge.SourceRevision, mode knowledge.GenerationMode) (*knowledge.Artifact, bool, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, false, fmt.Errorf("database not connected")
@@ -306,6 +310,7 @@ func (s *SurrealStore) ClaimArtifact(key knowledge.ArtifactKey, sourceRevision k
 	if err := key.Validate(); err != nil {
 		return nil, false, err
 	}
+	normalizedMode := knowledge.NormalizeGenerationMode(mode)
 
 	id := uuid.New().String()
 	scope := key.Scope.Normalize()
@@ -350,10 +355,10 @@ func (s *SurrealStore) ClaimArtifact(key knowledge.ArtifactKey, sourceRevision k
 			"src_content_fp":    sourceRevision.ContentFingerprint,
 			"src_docs_fp":       sourceRevision.DocsFingerprint,
 			"renderer_version":  knowledge.RendererVersionForArtifact(key.Type),
-			"generation_mode":   string(knowledge.GenerationModeUnderstandingFirst),
+			"generation_mode":   string(normalizedMode),
 		})
 	if err != nil {
-		existing := s.GetArtifactByKey(key)
+		existing := s.GetArtifactByKeyAndMode(key, normalizedMode)
 		if existing != nil {
 			return existing, false, nil
 		}
@@ -381,27 +386,38 @@ func (s *SurrealStore) GetKnowledgeArtifact(id string) *knowledge.Artifact {
 }
 
 func (s *SurrealStore) GetArtifactByKey(key knowledge.ArtifactKey) *knowledge.Artifact {
+	return s.GetArtifactByKeyAndMode(key, "")
+}
+
+func (s *SurrealStore) GetArtifactByKeyAndMode(key knowledge.ArtifactKey, mode knowledge.GenerationMode) *knowledge.Artifact {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
 	key = key.Normalized()
-	rows, err := queryOne[[]surrealKnowledgeArtifact](ctx(), db,
-		`SELECT * FROM ca_knowledge_artifact
+	query := `SELECT * FROM ca_knowledge_artifact
 		 WHERE repo_id = $repo_id
 		   AND type = $type
 		   AND audience = $audience
 		   AND depth = $depth
-		   AND scope_key = $scope_key
-		 LIMIT 1`,
-		map[string]any{
-			"repo_id":   key.RepositoryID,
-			"type":      string(key.Type),
-			"audience":  string(key.Audience),
-			"depth":     string(key.Depth),
-			"scope_key": key.ScopeKey(),
-		})
+		   AND scope_key = $scope_key`
+	vars := map[string]any{
+		"repo_id":   key.RepositoryID,
+		"type":      string(key.Type),
+		"audience":  string(key.Audience),
+		"depth":     string(key.Depth),
+		"scope_key": key.ScopeKey(),
+	}
+	if mode != "" {
+		query += `
+		   AND generation_mode = $generation_mode`
+		vars["generation_mode"] = string(knowledge.NormalizeGenerationMode(mode))
+	}
+	query += `
+		 ORDER BY created_at DESC
+		 LIMIT 1`
+	rows, err := queryOne[[]surrealKnowledgeArtifact](ctx(), db, query, vars)
 	if err != nil || len(rows) == 0 {
 		return nil
 	}

@@ -22,6 +22,30 @@ def _strip_think_tags(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
+def _normalize_api_key(provider_name: str | None, api_key: str) -> str:
+    """Normalize auth for OpenAI-compatible backends.
+
+    Local OpenAI-compatible servers like Ollama, LM Studio, llama.cpp, vLLM,
+    and SGLang commonly do not require authentication. Passing the historical
+    placeholder ``not-needed`` causes some servers or proxies to reject the
+    request. Keep explicit credentials intact, but strip well-known dummy
+    placeholders for these local/self-hosted providers.
+    """
+
+    normalized = (api_key or "").strip()
+    if normalized == "":
+        return ""
+
+    provider = (provider_name or "").strip().lower()
+    if provider in {"ollama", "lmstudio", "llama-cpp", "vllm", "sglang"} and normalized.lower() in {
+        "not-needed",
+        "none",
+        "dummy",
+    }:
+        return ""
+    return normalized
+
+
 class OpenAICompatProvider:
     """OpenAI-compatible LLM provider."""
 
@@ -35,8 +59,9 @@ class OpenAICompatProvider:
         provider_name: str | None = None,
         disable_thinking: bool = False,
     ) -> None:
+        normalized_api_key = _normalize_api_key(provider_name, api_key)
         self.client = openai.AsyncOpenAI(
-            api_key=api_key or "not-needed",
+            api_key=normalized_api_key,
             base_url=base_url,
             timeout=600.0,
             default_headers=extra_headers or {},

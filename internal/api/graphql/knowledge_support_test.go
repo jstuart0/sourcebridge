@@ -6,7 +6,47 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
+	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 )
+
+type stubComprehensionStore struct {
+	workspace *comprehension.Settings
+}
+
+func (s stubComprehensionStore) GetSettings(scope comprehension.Scope) (*comprehension.Settings, error) {
+	if scope == comprehension.WorkspaceScope && s.workspace != nil {
+		return s.workspace, nil
+	}
+	return nil, nil
+}
+
+func (s stubComprehensionStore) SetSettings(settings *comprehension.Settings) error {
+	return nil
+}
+
+func (s stubComprehensionStore) DeleteSettings(scope comprehension.Scope) error {
+	return nil
+}
+
+func (s stubComprehensionStore) ListSettings() ([]comprehension.Settings, error) {
+	return nil, nil
+}
+
+func (s stubComprehensionStore) GetModelCapabilities(modelID string) (*comprehension.ModelCapabilities, error) {
+	return nil, nil
+}
+
+func (s stubComprehensionStore) SetModelCapabilities(m *comprehension.ModelCapabilities) error {
+	return nil
+}
+
+func (s stubComprehensionStore) DeleteModelCapabilities(modelID string) error {
+	return nil
+}
+
+func (s stubComprehensionStore) ListModelCapabilities() ([]comprehension.ModelCapabilities, error) {
+	return nil, nil
+}
 
 func TestTopLevelModuleScopesFallsBackToFilesWhenModulesMissing(t *testing.T) {
 	store := graph.NewStore()
@@ -44,5 +84,27 @@ func TestTopLevelModuleScopesFallsBackToFilesWhenModulesMissing(t *testing.T) {
 	}
 	if !foundInternalModule {
 		t.Fatal("expected top-level module child from file paths")
+	}
+}
+
+func TestResolvedKnowledgeGenerationModePrecedence(t *testing.T) {
+	repo := &graph.Repository{GenerationModeDefault: "classic"}
+	store := stubComprehensionStore{
+		workspace: &comprehension.Settings{
+			ScopeType:                      comprehension.ScopeWorkspace,
+			ScopeKey:                       comprehension.WorkspaceScope.Key,
+			KnowledgeGenerationModeDefault: "understanding_first",
+		},
+	}
+
+	mode := resolvedKnowledgeGenerationMode(store, repo, nil)
+	if mode != knowledgepkg.GenerationModeClassic {
+		t.Fatalf("expected repo default to win, got %q", mode)
+	}
+
+	requested := KnowledgeGenerationModeUnderstandingFirst
+	mode = resolvedKnowledgeGenerationMode(store, repo, &requested)
+	if mode != knowledgepkg.GenerationModeUnderstandingFirst {
+		t.Fatalf("expected request override to win, got %q", mode)
 	}
 }

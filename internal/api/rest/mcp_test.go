@@ -61,10 +61,16 @@ func (m *mockKnowledgeStore) StoreKnowledgeArtifact(a *knowledge.Artifact) (*kno
 func (m *mockKnowledgeStore) ClaimArtifact(key knowledge.ArtifactKey, rev knowledge.SourceRevision) (*knowledge.Artifact, bool, error) {
 	return nil, false, nil
 }
+func (m *mockKnowledgeStore) ClaimArtifactWithMode(key knowledge.ArtifactKey, rev knowledge.SourceRevision, mode knowledge.GenerationMode) (*knowledge.Artifact, bool, error) {
+	return nil, false, nil
+}
 func (m *mockKnowledgeStore) GetKnowledgeArtifact(id string) *knowledge.Artifact {
 	return m.artifacts[id]
 }
 func (m *mockKnowledgeStore) GetArtifactByKey(key knowledge.ArtifactKey) *knowledge.Artifact {
+	return m.GetArtifactByKeyAndMode(key, "")
+}
+func (m *mockKnowledgeStore) GetArtifactByKeyAndMode(key knowledge.ArtifactKey, mode knowledge.GenerationMode) *knowledge.Artifact {
 	key = key.Normalized()
 	for _, a := range m.artifacts {
 		aKey := knowledge.ArtifactKey{
@@ -78,7 +84,8 @@ func (m *mockKnowledgeStore) GetArtifactByKey(key knowledge.ArtifactKey) *knowle
 			aKey.Type == key.Type &&
 			aKey.Audience == key.Audience &&
 			aKey.Depth == key.Depth &&
-			aKey.ScopeKey() == key.ScopeKey() {
+			aKey.ScopeKey() == key.ScopeKey() &&
+			(mode == "" || knowledge.NormalizeGenerationMode(a.GenerationMode) == knowledge.NormalizeGenerationMode(mode)) {
 			return a
 		}
 	}

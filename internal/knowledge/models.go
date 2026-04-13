@@ -260,6 +260,15 @@ const (
 	GenerationModeUnderstandingFirst GenerationMode = "understanding_first"
 )
 
+func NormalizeGenerationMode(mode GenerationMode) GenerationMode {
+	switch strings.ToLower(strings.TrimSpace(string(mode))) {
+	case string(GenerationModeClassic):
+		return GenerationModeClassic
+	default:
+		return GenerationModeUnderstandingFirst
+	}
+}
+
 // RepositoryUnderstandingStage represents the lifecycle of the shared
 // repository understanding artifact.
 type RepositoryUnderstandingStage string

@@ -381,6 +381,16 @@ func resolvedKnowledgeGenerationMode(store comprehension.Store, repo *graphstore
 	return configuredKnowledgeGenerationModeDefault(store)
 }
 
+func knowledgePrewarmOnIndexEnabled() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("SOURCEBRIDGE_KNOWLEDGE_PREWARM_ON_INDEX")))
+	switch raw {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
+}
+
 func enrichSnapshotWithCliffNotesAnalysis(
 	store knowledgepkg.KnowledgeStore,
 	repoID string,

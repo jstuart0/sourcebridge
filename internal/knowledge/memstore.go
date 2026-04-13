@@ -82,19 +82,34 @@ func (s *MemStore) StoreRepositoryUnderstanding(u *RepositoryUnderstanding) (*Re
 }
 
 func (s *MemStore) ClaimArtifact(key ArtifactKey, sourceRevision SourceRevision) (*Artifact, bool, error) {
+	return s.ClaimArtifactWithMode(key, sourceRevision, "")
+}
+
+func (s *MemStore) ClaimArtifactWithMode(key ArtifactKey, sourceRevision SourceRevision, mode GenerationMode) (*Artifact, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	key = key.Normalized()
+	normalizedMode := NormalizeGenerationMode(mode)
+	var matched *Artifact
 	for _, existing := range s.artifacts {
 		if existing.RepositoryID != key.RepositoryID || existing.Type != key.Type || existing.Audience != key.Audience || existing.Depth != key.Depth {
 			continue
 		}
-		if artifactScopeKey(existing.Scope) == key.ScopeKey() {
-			out := *existing
-			out.Sections = s.loadSectionsLocked(existing.ID)
-			return &out, false, nil
+		if artifactScopeKey(existing.Scope) != key.ScopeKey() {
+			continue
 		}
+		if mode != "" && NormalizeGenerationMode(existing.GenerationMode) != normalizedMode {
+			continue
+		}
+		if matched == nil || existing.CreatedAt.After(matched.CreatedAt) {
+			matched = existing
+		}
+	}
+	if matched != nil {
+		out := *matched
+		out.Sections = s.loadSectionsLocked(matched.ID)
+		return &out, false, nil
 	}
 
 	now := time.Now()
@@ -109,6 +124,7 @@ func (s *MemStore) ClaimArtifact(key ArtifactKey, sourceRevision SourceRevision)
 		Status:         StatusGenerating,
 		Progress:       0,
 		SourceRevision: sourceRevision,
+		GenerationMode: normalizedMode,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -131,21 +147,36 @@ func (s *MemStore) GetKnowledgeArtifact(id string) *Artifact {
 }
 
 func (s *MemStore) GetArtifactByKey(key ArtifactKey) *Artifact {
+	return s.GetArtifactByKeyAndMode(key, "")
+}
+
+func (s *MemStore) GetArtifactByKeyAndMode(key ArtifactKey, mode GenerationMode) *Artifact {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	key = key.Normalized()
+	normalizedMode := NormalizeGenerationMode(mode)
+	var matched *Artifact
 	for _, existing := range s.artifacts {
 		if existing.RepositoryID != key.RepositoryID || existing.Type != key.Type || existing.Audience != key.Audience || existing.Depth != key.Depth {
 			continue
 		}
-		if artifactScopeKey(existing.Scope) == key.ScopeKey() {
-			out := *existing
-			out.Sections = s.loadSectionsLocked(existing.ID)
-			return &out
+		if artifactScopeKey(existing.Scope) != key.ScopeKey() {
+			continue
+		}
+		if mode != "" && NormalizeGenerationMode(existing.GenerationMode) != normalizedMode {
+			continue
+		}
+		if matched == nil || existing.CreatedAt.After(matched.CreatedAt) {
+			matched = existing
 		}
 	}
-	return nil
+	if matched == nil {
+		return nil
+	}
+	out := *matched
+	out.Sections = s.loadSectionsLocked(matched.ID)
+	return &out
 }
 
 func (s *MemStore) GetKnowledgeArtifacts(repoID string) []*Artifact {

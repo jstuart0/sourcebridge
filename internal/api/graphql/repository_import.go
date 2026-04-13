@@ -67,5 +67,7 @@ func (r *mutationResolver) importRepository(repoID, repoName, repoPath string, i
 			Branch:    gitMeta.Branch,
 		})
 	}
-	go r.seedRepositoryFieldGuide(repoID)
+	if knowledgePrewarmOnIndexEnabled() {
+		go r.seedRepositoryFieldGuide(repoID)
+	}
 }

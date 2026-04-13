@@ -295,7 +295,9 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 		"commitSHA", updatedRepo.CommitSHA,
 	)
 
-	go r.seedRepositoryFieldGuide(id)
+	if knowledgePrewarmOnIndexEnabled() {
+		go r.seedRepositoryFieldGuide(id)
+	}
 
 	return mapRepository(updatedRepo), nil
 }
@@ -1525,7 +1527,7 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 		}
 	}
 
-	existing := r.KnowledgeStore.GetArtifactByKey(key)
+	existing := r.KnowledgeStore.GetArtifactByKeyAndMode(key, generationMode)
 	if existing != nil {
 		if shouldRefreshScopedCliffNotes(existing) {
 			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
@@ -1579,7 +1581,7 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
 	}
 
-	artifact, created, err := r.KnowledgeStore.ClaimArtifact(key, snap.SourceRevision)
+	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(key, snap.SourceRevision, generationMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim knowledge artifact: %w", err)
 	}
@@ -1918,7 +1920,7 @@ func (r *mutationResolver) GenerateLearningPath(ctx context.Context, input Gener
 		Depth:        knowledgepkg.Depth(depth),
 		Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
 	}.Normalized()
-	if existing := r.KnowledgeStore.GetArtifactByKey(key); existing != nil {
+	if existing := r.KnowledgeStore.GetArtifactByKeyAndMode(key, generationMode); existing != nil {
 		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
 			return mapKnowledgeArtifact(existing), nil
 		}
@@ -1933,7 +1935,7 @@ func (r *mutationResolver) GenerateLearningPath(ctx context.Context, input Gener
 			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
 		}
 	}
-	artifact, created, err := r.KnowledgeStore.ClaimArtifact(key, snap.SourceRevision)
+	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(key, snap.SourceRevision, generationMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim knowledge artifact: %w", err)
 	}
@@ -2102,7 +2104,7 @@ func (r *mutationResolver) GenerateCodeTour(ctx context.Context, input GenerateC
 		Depth:        knowledgepkg.Depth(depth),
 		Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
 	}.Normalized()
-	if existing := r.KnowledgeStore.GetArtifactByKey(key); existing != nil {
+	if existing := r.KnowledgeStore.GetArtifactByKeyAndMode(key, generationMode); existing != nil {
 		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
 			return mapKnowledgeArtifact(existing), nil
 		}
@@ -2117,7 +2119,7 @@ func (r *mutationResolver) GenerateCodeTour(ctx context.Context, input GenerateC
 			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
 		}
 	}
-	artifact, created, err := r.KnowledgeStore.ClaimArtifact(key, snap.SourceRevision)
+	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(key, snap.SourceRevision, generationMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim knowledge artifact: %w", err)
 	}
@@ -2255,7 +2257,7 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 	scope := key.Scope.Normalize()
 	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
 
-	existing := r.KnowledgeStore.GetArtifactByKey(key)
+	existing := r.KnowledgeStore.GetArtifactByKeyAndMode(key, generationMode)
 	if existing != nil {
 		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
 			return mapKnowledgeArtifact(existing), nil
@@ -2293,7 +2295,7 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
 	}
 
-	artifact, created, err := r.KnowledgeStore.ClaimArtifact(key, snap.SourceRevision)
+	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(key, snap.SourceRevision, generationMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim knowledge artifact: %w", err)
 	}

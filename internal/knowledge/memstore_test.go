@@ -243,6 +243,43 @@ func TestUpdateKnowledgeArtifactStatusClearsErrorMetadataOnRecovery(t *testing.T
 	}
 }
 
+func TestArtifactsCanCoexistAcrossGenerationModes(t *testing.T) {
+	s := NewMemStore()
+	key := ArtifactKey{
+		RepositoryID: "repo-1",
+		Type:         ArtifactCliffNotes,
+		Audience:     AudienceDeveloper,
+		Depth:        DepthMedium,
+		Scope:        ArtifactScope{ScopeType: ScopeRepository},
+	}
+
+	classic, created, err := s.ClaimArtifactWithMode(key, SourceRevision{CommitSHA: "a"}, GenerationModeClassic)
+	if err != nil {
+		t.Fatalf("ClaimArtifactWithMode classic: %v", err)
+	}
+	if !created {
+		t.Fatal("expected classic artifact to be created")
+	}
+
+	understanding, created, err := s.ClaimArtifactWithMode(key, SourceRevision{CommitSHA: "a"}, GenerationModeUnderstandingFirst)
+	if err != nil {
+		t.Fatalf("ClaimArtifactWithMode understanding_first: %v", err)
+	}
+	if !created {
+		t.Fatal("expected understanding-first artifact to be created")
+	}
+	if classic.ID == understanding.ID {
+		t.Fatal("expected distinct artifacts per generation mode")
+	}
+
+	if got := s.GetArtifactByKeyAndMode(key, GenerationModeClassic); got == nil || got.ID != classic.ID {
+		t.Fatalf("expected classic lookup to return %q, got %#v", classic.ID, got)
+	}
+	if got := s.GetArtifactByKeyAndMode(key, GenerationModeUnderstandingFirst); got == nil || got.ID != understanding.ID {
+		t.Fatalf("expected understanding lookup to return %q, got %#v", understanding.ID, got)
+	}
+}
+
 func TestRepositoryUnderstandingLifecycle(t *testing.T) {
 	s := NewMemStore()
 

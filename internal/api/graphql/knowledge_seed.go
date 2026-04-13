@@ -94,7 +94,7 @@ func (r *mutationResolver) seedRepositoryFieldGuide(repoID string) {
 
 func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, key knowledgepkg.ArtifactKey, sourceRevision knowledgepkg.SourceRevision, snapshotJSON string) {
 	key = key.Normalized()
-	existing := r.KnowledgeStore.GetArtifactByKey(key)
+	existing := r.KnowledgeStore.GetArtifactByKeyAndMode(key, knowledgepkg.GenerationModeUnderstandingFirst)
 	if existing != nil {
 		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
 			return
@@ -105,7 +105,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 		_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
 	}
 
-	artifact, created, err := r.KnowledgeStore.ClaimArtifact(key, sourceRevision)
+	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(key, sourceRevision, knowledgepkg.GenerationModeUnderstandingFirst)
 	if err != nil || !created {
 		return
 	}
