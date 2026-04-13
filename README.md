@@ -43,15 +43,37 @@ SOURCEBRIDGE_LLM_API_KEY=sk-ant-... ./demo.sh
 
 ## What You'll See
 
-After running the demo, open [http://localhost:3000](http://localhost:3000) and click on the **acme-api** sample repository:
+### Dashboard Overview
 
-**Cliff Notes** — A structured summary of the entire system: what it does, how it's built, its dependencies, domain model, core flows, and risk areas. Each insight links to the specific files and lines that support it.
+Your workspace at a glance — repositories indexed, symbols discovered, understanding scores, and field guide activity.
 
-**Code Tour** — A guided walkthrough of the codebase, starting at the entry point and walking through authentication, data models, the service layer, billing integration, and error handling.
+<p align="center">
+  <img src="docs/screenshots/SourceBridge-Overview.png" alt="SourceBridge Dashboard" width="800">
+</p>
 
-**Learning Path** — A step-by-step onboarding guide: "Read these files in this order to understand this system." Each step includes an objective, the files to read, and what to look for.
+### Cliff Notes
 
-**Understanding Score** — A composite metric showing how well the codebase is documented, tested, reviewed, and traced to requirements.
+A structured summary of the entire system: what it does, how it's built, its dependencies, domain model, core flows, and risk areas. Each insight links to the specific files and lines that support it.
+
+<p align="center">
+  <img src="docs/screenshots/SourceBridge-CliffNotes.png" alt="Cliff Notes" width="800">
+</p>
+
+### Search Across Code and Requirements
+
+Find symbols, files, and requirements from a single indexed view of the system.
+
+<p align="center">
+  <img src="docs/screenshots/SourceBridge-Search.png" alt="Search" width="800">
+</p>
+
+### Generation Monitor
+
+Live view of every AI job SourceBridge is running — what's working, what's queued, what failed.
+
+<p align="center">
+  <img src="docs/screenshots/SourceBridge-Generation.png" alt="Generation Monitor" width="800">
+</p>
 
 > **What's different?** SourceBridge doesn't just search your code — it builds a graph-backed understanding of your system: who calls what, what depends on what, and how requirements connect to implementation. Every insight is evidence-grounded, linking back to the actual code that supports it.
 
