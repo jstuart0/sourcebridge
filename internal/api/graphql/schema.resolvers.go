@@ -1543,11 +1543,22 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 		}
 
 		reusedSummaries := 0
+		leafCacheHits := 0
+		fileCacheHits := 0
+		packageCacheHits := 0
+		rootCacheHits := 0
 		if resp.Diagnostics != nil {
-			reusedSummaries += int(resp.Diagnostics.LeafCacheHits)
-			reusedSummaries += int(resp.Diagnostics.FileCacheHits)
-			reusedSummaries += int(resp.Diagnostics.PackageCacheHits)
-			reusedSummaries += int(resp.Diagnostics.RootCacheHits)
+			leafCacheHits = int(resp.Diagnostics.LeafCacheHits)
+			fileCacheHits = int(resp.Diagnostics.FileCacheHits)
+			packageCacheHits = int(resp.Diagnostics.PackageCacheHits)
+			rootCacheHits = int(resp.Diagnostics.RootCacheHits)
+			reusedSummaries = leafCacheHits + fileCacheHits + packageCacheHits + rootCacheHits
+			if err := r.Orchestrator.SetReuseStats(rt.JobID(), reusedSummaries, leafCacheHits, fileCacheHits, packageCacheHits, rootCacheHits); err != nil {
+				slog.Warn("failed to persist cliff notes reuse stats",
+					"job_id", rt.JobID(),
+					"artifact_id", artifact.ID,
+					"error", err)
+			}
 		}
 		llmMessage := "LLM completed, persisting sections"
 		if reusedSummaries > 0 {

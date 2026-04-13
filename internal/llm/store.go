@@ -60,6 +60,10 @@ type JobStore interface {
 	// SetSnapshotBytes records the serialized input size.
 	SetSnapshotBytes(id string, bytes int) error
 
+	// SetReuseStats records structured summary reuse/cache-hit counts for jobs
+	// that support resumable or cached generation paths.
+	SetReuseStats(id string, reused, leafHits, fileHits, packageHits, rootHits int) error
+
 	// IncrementRetry bumps the retry counter on an existing job without
 	// changing its status. Called between retry attempts.
 	IncrementRetry(id string) error

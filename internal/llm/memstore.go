@@ -273,6 +273,23 @@ func (s *MemStore) SetSnapshotBytes(id string, bytes int) error {
 	return nil
 }
 
+// SetReuseStats records structured summary reuse/cache-hit counts.
+func (s *MemStore) SetReuseStats(id string, reused, leafHits, fileHits, packageHits, rootHits int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, ok := s.jobs[id]
+	if !ok {
+		return fmt.Errorf("job %s not found", id)
+	}
+	j.ReusedSummaries = reused
+	j.LeafCacheHits = leafHits
+	j.FileCacheHits = fileHits
+	j.PackageCacheHits = packageHits
+	j.RootCacheHits = rootHits
+	j.UpdatedAt = time.Now()
+	return nil
+}
+
 // IncrementAttachedRequests bumps the deduped request count.
 func (s *MemStore) IncrementAttachedRequests(id string) error {
 	s.mu.Lock()

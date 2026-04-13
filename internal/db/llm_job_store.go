@@ -40,6 +40,11 @@ type surrealLLMJob struct {
 	InputTokens      int              `json:"input_tokens"`
 	OutputTokens     int              `json:"output_tokens"`
 	SnapshotBytes    int              `json:"snapshot_bytes"`
+	ReusedSummaries  int              `json:"reused_summaries"`
+	LeafCacheHits    int              `json:"leaf_cache_hits"`
+	FileCacheHits    int              `json:"file_cache_hits"`
+	PackageCacheHits int              `json:"package_cache_hits"`
+	RootCacheHits    int              `json:"root_cache_hits"`
 	ArtifactID       string           `json:"artifact_id"`
 	RepoID           string           `json:"repo_id"`
 	CreatedAt        surrealTime      `json:"created_at"`
@@ -69,6 +74,11 @@ func (r *surrealLLMJob) toJob() *llm.Job {
 		InputTokens:      r.InputTokens,
 		OutputTokens:     r.OutputTokens,
 		SnapshotBytes:    r.SnapshotBytes,
+		ReusedSummaries:  r.ReusedSummaries,
+		LeafCacheHits:    r.LeafCacheHits,
+		FileCacheHits:    r.FileCacheHits,
+		PackageCacheHits: r.PackageCacheHits,
+		RootCacheHits:    r.RootCacheHits,
 		ArtifactID:       r.ArtifactID,
 		RepoID:           r.RepoID,
 		CreatedAt:        r.CreatedAt.Time,
@@ -124,33 +134,43 @@ func (s *SurrealStore) Create(job *llm.Job) (*llm.Job, error) {
 		input_tokens = $input_tokens,
 		output_tokens = $output_tokens,
 		snapshot_bytes = $snapshot_bytes,
+		reused_summaries = $reused_summaries,
+		leaf_cache_hits = $leaf_cache_hits,
+		file_cache_hits = $file_cache_hits,
+		package_cache_hits = $package_cache_hits,
+		root_cache_hits = $root_cache_hits,
 		artifact_id = $artifact_id,
 		repo_id = $repo_id,
 		created_at = time::now(),
 		updated_at = time::now()`
 
 	vars := map[string]any{
-		"id":                job.ID,
-		"subsystem":         string(job.Subsystem),
-		"job_type":          job.JobType,
-		"target_key":        job.TargetKey,
-		"strategy":          job.Strategy,
-		"model":             job.Model,
-		"status":            string(status),
-		"progress":          job.Progress,
-		"progress_phase":    job.ProgressPhase,
-		"progress_message":  job.ProgressMessage,
-		"error_code":        job.ErrorCode,
-		"error_message":     job.ErrorMessage,
-		"retry_count":       job.RetryCount,
-		"max_attempts":      job.MaxAttempts,
-		"timeout_sec":       job.TimeoutSec,
-		"attached_requests": job.AttachedRequests,
-		"input_tokens":      job.InputTokens,
-		"output_tokens":     job.OutputTokens,
-		"snapshot_bytes":    job.SnapshotBytes,
-		"artifact_id":       job.ArtifactID,
-		"repo_id":           job.RepoID,
+		"id":                 job.ID,
+		"subsystem":          string(job.Subsystem),
+		"job_type":           job.JobType,
+		"target_key":         job.TargetKey,
+		"strategy":           job.Strategy,
+		"model":              job.Model,
+		"status":             string(status),
+		"progress":           job.Progress,
+		"progress_phase":     job.ProgressPhase,
+		"progress_message":   job.ProgressMessage,
+		"error_code":         job.ErrorCode,
+		"error_message":      job.ErrorMessage,
+		"retry_count":        job.RetryCount,
+		"max_attempts":       job.MaxAttempts,
+		"timeout_sec":        job.TimeoutSec,
+		"attached_requests":  job.AttachedRequests,
+		"input_tokens":       job.InputTokens,
+		"output_tokens":      job.OutputTokens,
+		"snapshot_bytes":     job.SnapshotBytes,
+		"reused_summaries":   job.ReusedSummaries,
+		"leaf_cache_hits":    job.LeafCacheHits,
+		"file_cache_hits":    job.FileCacheHits,
+		"package_cache_hits": job.PackageCacheHits,
+		"root_cache_hits":    job.RootCacheHits,
+		"artifact_id":        job.ArtifactID,
+		"repo_id":            job.RepoID,
 	}
 
 	if _, err := surrealdb.Query[interface{}](ctx(), db, sql, vars); err != nil {
@@ -189,31 +209,41 @@ func (s *SurrealStore) Update(job *llm.Job) error {
 		input_tokens = $input_tokens,
 		output_tokens = $output_tokens,
 		snapshot_bytes = $snapshot_bytes,
+		reused_summaries = $reused_summaries,
+		leaf_cache_hits = $leaf_cache_hits,
+		file_cache_hits = $file_cache_hits,
+		package_cache_hits = $package_cache_hits,
+		root_cache_hits = $root_cache_hits,
 		artifact_id = $artifact_id,
 		repo_id = $repo_id,
 		updated_at = time::now()`
 	vars := map[string]any{
-		"id":                job.ID,
-		"subsystem":         string(job.Subsystem),
-		"job_type":          job.JobType,
-		"target_key":        job.TargetKey,
-		"strategy":          job.Strategy,
-		"model":             job.Model,
-		"status":            string(job.Status),
-		"progress":          job.Progress,
-		"progress_phase":    job.ProgressPhase,
-		"progress_message":  job.ProgressMessage,
-		"error_code":        job.ErrorCode,
-		"error_message":     job.ErrorMessage,
-		"retry_count":       job.RetryCount,
-		"max_attempts":      job.MaxAttempts,
-		"timeout_sec":       job.TimeoutSec,
-		"attached_requests": job.AttachedRequests,
-		"input_tokens":      job.InputTokens,
-		"output_tokens":     job.OutputTokens,
-		"snapshot_bytes":    job.SnapshotBytes,
-		"artifact_id":       job.ArtifactID,
-		"repo_id":           job.RepoID,
+		"id":                 job.ID,
+		"subsystem":          string(job.Subsystem),
+		"job_type":           job.JobType,
+		"target_key":         job.TargetKey,
+		"strategy":           job.Strategy,
+		"model":              job.Model,
+		"status":             string(job.Status),
+		"progress":           job.Progress,
+		"progress_phase":     job.ProgressPhase,
+		"progress_message":   job.ProgressMessage,
+		"error_code":         job.ErrorCode,
+		"error_message":      job.ErrorMessage,
+		"retry_count":        job.RetryCount,
+		"max_attempts":       job.MaxAttempts,
+		"timeout_sec":        job.TimeoutSec,
+		"attached_requests":  job.AttachedRequests,
+		"input_tokens":       job.InputTokens,
+		"output_tokens":      job.OutputTokens,
+		"snapshot_bytes":     job.SnapshotBytes,
+		"reused_summaries":   job.ReusedSummaries,
+		"leaf_cache_hits":    job.LeafCacheHits,
+		"file_cache_hits":    job.FileCacheHits,
+		"package_cache_hits": job.PackageCacheHits,
+		"root_cache_hits":    job.RootCacheHits,
+		"artifact_id":        job.ArtifactID,
+		"repo_id":            job.RepoID,
 	}
 	_, err := queryOne[interface{}](ctx(), db, sql, vars)
 	return err
@@ -454,6 +484,32 @@ func (s *SurrealStore) SetSnapshotBytes(id string, bytes int) error {
 			updated_at = time::now()
 		  WHERE status = 'pending' OR status = 'generating'`,
 		map[string]any{"id": id, "bytes": bytes})
+	return err
+}
+
+// SetReuseStats records structured summary reuse/cache-hit counts.
+func (s *SurrealStore) SetReuseStats(id string, reused, leafHits, fileHits, packageHits, rootHits int) error {
+	db := s.client.DB()
+	if db == nil {
+		return fmt.Errorf("database not connected")
+	}
+	_, err := queryOne[interface{}](ctx(), db,
+		`UPDATE type::thing('ca_llm_job', $id) SET
+			reused_summaries = $reused,
+			leaf_cache_hits = $leaf_hits,
+			file_cache_hits = $file_hits,
+			package_cache_hits = $package_hits,
+			root_cache_hits = $root_hits,
+			updated_at = time::now()
+		  WHERE status = 'pending' OR status = 'generating' OR status = 'ready'`,
+		map[string]any{
+			"id":           id,
+			"reused":       reused,
+			"leaf_hits":    leafHits,
+			"file_hits":    fileHits,
+			"package_hits": packageHits,
+			"root_hits":    rootHits,
+		})
 	return err
 }
 

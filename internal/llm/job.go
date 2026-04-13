@@ -99,9 +99,14 @@ type Job struct {
 	// job through dedupe. The initial request sets it to 1.
 	AttachedRequests int `json:"attached_requests"`
 
-	InputTokens   int `json:"input_tokens"`
-	OutputTokens  int `json:"output_tokens"`
-	SnapshotBytes int `json:"snapshot_bytes"`
+	InputTokens      int `json:"input_tokens"`
+	OutputTokens     int `json:"output_tokens"`
+	SnapshotBytes    int `json:"snapshot_bytes"`
+	ReusedSummaries  int `json:"reused_summaries"`
+	LeafCacheHits    int `json:"leaf_cache_hits"`
+	FileCacheHits    int `json:"file_cache_hits"`
+	PackageCacheHits int `json:"package_cache_hits"`
+	RootCacheHits    int `json:"root_cache_hits"`
 
 	// ArtifactID (optional) links the job back to a domain record — a
 	// ca_knowledge_artifact row for knowledge jobs, a requirement id for

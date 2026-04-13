@@ -30,6 +30,11 @@ interface JobView {
   error_hint?: string;
   error_code?: string;
   attached_requests?: number;
+  reused_summaries?: number;
+  leaf_cache_hits?: number;
+  file_cache_hits?: number;
+  package_cache_hits?: number;
+  root_cache_hits?: number;
   queue_position?: number;
   queue_depth?: number;
   estimated_wait_ms?: number;
@@ -73,6 +78,12 @@ function formatQueueEta(ms?: number): string | null {
   const seconds = Math.ceil(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
   return `${Math.ceil(seconds / 60)}m`;
+}
+
+function reuseLabel(job: JobView): string | null {
+  const reused = job.reused_summaries ?? 0;
+  if (reused <= 0) return null;
+  return `${reused} reused`;
 }
 
 export function RepoJobsPopover({ repoId }: { repoId: string }) {
@@ -217,6 +228,11 @@ export function RepoJobsPopover({ repoId }: { repoId: string }) {
                         Shared by {job.attached_requests} requests
                       </div>
                     ) : null}
+                    {reuseLabel(job) ? (
+                      <div className="mt-1 text-[11px] text-[var(--text-tertiary)]">
+                        {reuseLabel(job)}
+                      </div>
+                    ) : null}
                     <div className="mt-1 h-1 overflow-hidden rounded-full bg-[var(--bg-subtle)]">
                       <div
                         className="h-full rounded-full bg-[color:var(--color-accent,#3b82f6)] transition-all"
@@ -254,7 +270,10 @@ export function RepoJobsPopover({ repoId }: { repoId: string }) {
                         {job.error_title}
                       </p>
                     ) : (
-                      <p className="truncate">{formatElapsed(job.elapsed_ms)}</p>
+                      <p className="truncate">
+                        {formatElapsed(job.elapsed_ms)}
+                        {reuseLabel(job) ? ` · ${reuseLabel(job)}` : ""}
+                      </p>
                     )}
                   </div>
                 </div>

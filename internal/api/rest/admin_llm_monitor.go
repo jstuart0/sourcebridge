@@ -77,6 +77,11 @@ type monitorJobView struct {
 	InputTokens      int        `json:"input_tokens"`
 	OutputTokens     int        `json:"output_tokens"`
 	SnapshotBytes    int        `json:"snapshot_bytes"`
+	ReusedSummaries  int        `json:"reused_summaries"`
+	LeafCacheHits    int        `json:"leaf_cache_hits"`
+	FileCacheHits    int        `json:"file_cache_hits"`
+	PackageCacheHits int        `json:"package_cache_hits"`
+	RootCacheHits    int        `json:"root_cache_hits"`
 	ArtifactID       string     `json:"artifact_id,omitempty"`
 	RepoID           string     `json:"repo_id,omitempty"`
 	ElapsedMs        int64      `json:"elapsed_ms"`
@@ -159,6 +164,11 @@ func toMonitorJobView(j *llm.Job) monitorJobView {
 		InputTokens:      j.InputTokens,
 		OutputTokens:     j.OutputTokens,
 		SnapshotBytes:    j.SnapshotBytes,
+		ReusedSummaries:  j.ReusedSummaries,
+		LeafCacheHits:    j.LeafCacheHits,
+		FileCacheHits:    j.FileCacheHits,
+		PackageCacheHits: j.PackageCacheHits,
+		RootCacheHits:    j.RootCacheHits,
 		ArtifactID:       j.ArtifactID,
 		RepoID:           j.RepoID,
 		ElapsedMs:        j.Elapsed().Milliseconds(),

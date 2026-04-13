@@ -56,6 +56,11 @@ interface JobView {
   input_tokens: number;
   output_tokens: number;
   snapshot_bytes: number;
+  reused_summaries?: number;
+  leaf_cache_hits?: number;
+  file_cache_hits?: number;
+  package_cache_hits?: number;
+  root_cache_hits?: number;
   artifact_id?: string;
   repo_id?: string;
   queue_position?: number;
@@ -160,6 +165,18 @@ function formatQueueEta(ms?: number): string | null {
   const seconds = Math.ceil(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
   return `${Math.ceil(seconds / 60)}m`;
+}
+
+function jobReuseSummary(job: Pick<JobView, "reused_summaries" | "leaf_cache_hits" | "file_cache_hits" | "package_cache_hits" | "root_cache_hits">): string | null {
+  const reused = job.reused_summaries ?? 0;
+  if (reused <= 0) return null;
+  const parts = [
+    job.leaf_cache_hits ? `${job.leaf_cache_hits} leaf` : null,
+    job.file_cache_hits ? `${job.file_cache_hits} file` : null,
+    job.package_cache_hits ? `${job.package_cache_hits} package` : null,
+    job.root_cache_hits ? `${job.root_cache_hits} root` : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? `${reused} reused · ${parts.join(" · ")}` : `${reused} reused`;
 }
 
 function healthStyle(status: HealthPayload["status"]) {
@@ -543,6 +560,9 @@ function ActiveJobCard({
           {job.attached_requests > 1 ? <span>shared {job.attached_requests}</span> : null}
         </span>
       </div>
+      {jobReuseSummary(job) ? (
+        <div className="text-[11px] text-[var(--text-tertiary)]">{jobReuseSummary(job)}</div>
+      ) : null}
       <div className="pt-1">
         <Button
           variant="secondary"
@@ -743,6 +763,15 @@ function JobDetailDrawer({ job, onClose }: { job: JobView; onClose: () => void }
             <dd className="text-[var(--text-primary)]">{job.input_tokens.toLocaleString()}</dd>
             <dt>Output tokens</dt>
             <dd className="text-[var(--text-primary)]">{job.output_tokens.toLocaleString()}</dd>
+            {job.reused_summaries ? (
+              <>
+                <dt>Reused summaries</dt>
+                <dd className="text-[var(--text-primary)]">
+                  {job.reused_summaries.toLocaleString()}
+                  {jobReuseSummary(job) ? ` · ${jobReuseSummary(job)?.replace(/^\d+ reused · /, "")}` : ""}
+                </dd>
+              </>
+            ) : null}
             {job.snapshot_bytes > 0 ? (
               <>
                 <dt>Snapshot</dt>

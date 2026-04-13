@@ -215,6 +215,18 @@ function knowledgeJobProgressLabel(job: RepoJobView): string {
   return "Generating artifact";
 }
 
+function repoJobReuseLabel(job: RepoJobView | null | undefined): string | null {
+  const reused = job?.reused_summaries ?? 0;
+  if (reused <= 0) return null;
+  const parts = [
+    job?.leaf_cache_hits ? `${job.leaf_cache_hits} leaf` : null,
+    job?.file_cache_hits ? `${job.file_cache_hits} file` : null,
+    job?.package_cache_hits ? `${job.package_cache_hits} package` : null,
+    job?.root_cache_hits ? `${job.root_cache_hits} root` : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? `${reused} reused · ${parts.join(" · ")}` : `${reused} reused`;
+}
+
 function renderKnowledgeProgress(artifact: KnowledgeArtifact, waitingLabel: string, job?: RepoJobView | null) {
   const liveJob = job && (job.status === "pending" || job.status === "generating") ? job : null;
   const heartbeat = liveJob ? formatHeartbeatAge(liveJob.updated_at) : null;
@@ -393,6 +405,11 @@ interface RepoJobView {
   retry_count: number;
   max_attempts: number;
   attached_requests: number;
+  reused_summaries?: number;
+  leaf_cache_hits?: number;
+  file_cache_hits?: number;
+  package_cache_hits?: number;
+  root_cache_hits?: number;
   artifact_id?: string;
   repo_id?: string;
   queue_position?: number;
@@ -2235,6 +2252,9 @@ export default function RepositoryDetailPage() {
                               {repoJobStatusLabel(currentCliffNotesJob) ? (
                                 <p className="mt-2 text-xs text-[var(--text-tertiary)]">{repoJobStatusLabel(currentCliffNotesJob)}</p>
                               ) : null}
+                              {repoJobReuseLabel(currentCliffNotesJob) ? (
+                                <p className="mt-1 text-xs text-[var(--text-tertiary)]">{repoJobReuseLabel(currentCliffNotesJob)}</p>
+                              ) : null}
                             </div>
                             <div className="flex gap-2">
                               <Button variant="secondary" size="sm" onClick={handleGenerateCliffNotes} disabled={knowledgeLoading || isCliffNotesGenerating}>
@@ -2263,6 +2283,7 @@ export default function RepositoryDetailPage() {
                                     <span className="truncate">
                                       {job.status === "failed" ? (job.error_title || "Failed") : job.status === "pending" ? "Queued" : job.status === "generating" ? "Generating" : job.status === "cancelled" ? "Cancelled" : "Completed"}
                                       {job.progress_message ? ` · ${job.progress_message}` : ""}
+                                      {repoJobReuseLabel(job) ? ` · ${repoJobReuseLabel(job)}` : ""}
                                       {job.attached_requests > 1 ? ` · shared by ${job.attached_requests}` : ""}
                                     </span>
                                     <span>{new Date(job.updated_at).toLocaleTimeString()}</span>

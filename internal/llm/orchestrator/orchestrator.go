@@ -349,6 +349,11 @@ func (o *Orchestrator) GetJob(id string) *llm.Job {
 	return o.store.GetByID(id)
 }
 
+// SetReuseStats records structured summary reuse/cache-hit counts on a job.
+func (o *Orchestrator) SetReuseStats(id string, reused, leafHits, fileHits, packageHits, rootHits int) error {
+	return o.store.SetReuseStats(id, reused, leafHits, fileHits, packageHits, rootHits)
+}
+
 // Cancel requests cancellation of an active job. Pending jobs are cancelled
 // immediately; generating jobs are cancelled through their run context.
 func (o *Orchestrator) Cancel(jobID string) error {
