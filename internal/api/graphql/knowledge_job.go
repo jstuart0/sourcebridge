@@ -20,6 +20,7 @@ import (
 var knowledgeArtifactGates sync.Map
 var knowledgeGlobalGate sync.Once
 var knowledgeGlobalSlots chan struct{}
+var knowledgeQueueHeartbeatInterval = 5 * time.Second
 
 // startProgressTicker launches a goroutine that steadily advances both
 // the llm.Job progress (via rt) and the knowledge artifact progress
@@ -148,6 +149,26 @@ func acquireKnowledgeJobSlot(ctx context.Context, jobType string) (func(), error
 	}
 }
 
+func startKnowledgeQueueHeartbeat(ctx context.Context, rt llm.Runtime, artifactID string, store knowledgepkg.KnowledgeStore) context.CancelFunc {
+	hbCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		tick := time.NewTicker(knowledgeQueueHeartbeatInterval)
+		defer tick.Stop()
+		for {
+			select {
+			case <-hbCtx.Done():
+				return
+			case <-tick.C:
+				rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot")
+				if store != nil && artifactID != "" {
+					_ = store.UpdateKnowledgeArtifactProgressWithPhase(artifactID, 0.02, "queued", "Waiting for knowledge generation slot")
+				}
+			}
+		}
+	}()
+	return cancel
+}
+
 // enqueueKnowledgeJob is the shared wrapper that routes knowledge
 // artifact generation through the LLM orchestrator. It performs three
 // jobs:
@@ -203,6 +224,9 @@ func (r *Resolver) enqueueKnowledgeJob(
 		MaxAttempts: knowledgeJobMaxAttempts(artifact, scope),
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
 			rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot")
+			_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.02, "queued", "Waiting for knowledge generation slot")
+			stopHeartbeat := startKnowledgeQueueHeartbeat(runCtx, rt, artifact.ID, r.KnowledgeStore)
+			defer stopHeartbeat()
 			releaseGlobal, err := acquireKnowledgeGlobalSlot(runCtx)
 			if err != nil {
 				return err
@@ -213,6 +237,7 @@ func (r *Resolver) enqueueKnowledgeJob(
 				return err
 			}
 			defer release()
+			stopHeartbeat()
 			if snapshotBytes > 0 {
 				rt.ReportSnapshotBytes(snapshotBytes)
 			}

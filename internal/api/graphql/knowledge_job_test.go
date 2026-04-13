@@ -230,3 +230,105 @@ func TestRepositoryCliffNotesJobsDoNotAutoRetry(t *testing.T) {
 		t.Fatalf("expected max attempts 1, got %d", job.MaxAttempts)
 	}
 }
+
+func TestQueuedKnowledgeJobsHeartbeatWhileWaitingForGate(t *testing.T) {
+	t.Setenv("SOURCEBRIDGE_KNOWLEDGE_MAX_CONCURRENCY", "1")
+	knowledgeArtifactGates = sync.Map{}
+	knowledgeGlobalSlots = nil
+	knowledgeGlobalGate = sync.Once{}
+	prevInterval := knowledgeQueueHeartbeatInterval
+	knowledgeQueueHeartbeatInterval = 10 * time.Millisecond
+	defer func() {
+		knowledgeQueueHeartbeatInterval = prevInterval
+	}()
+
+	knowledgeStore := knowledge.NewMemStore()
+	jobStore := llm.NewMemStore()
+	orch := orchestrator.New(jobStore, orchestrator.Config{MaxConcurrency: 2})
+	defer func() {
+		_ = orch.Shutdown(2 * time.Second)
+	}()
+
+	makeArtifact := func(repoID string) *knowledge.Artifact {
+		key := knowledge.ArtifactKey{
+			RepositoryID: repoID,
+			Type:         knowledge.ArtifactCliffNotes,
+			Audience:     knowledge.AudienceDeveloper,
+			Depth:        knowledge.DepthDeep,
+			Scope:        knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository},
+		}
+		artifact, created, err := knowledgeStore.ClaimArtifact(key, knowledge.SourceRevision{})
+		if err != nil {
+			t.Fatalf("ClaimArtifact(%s): %v", repoID, err)
+		}
+		if !created {
+			t.Fatalf("expected fresh artifact claim for %s", repoID)
+		}
+		return artifact
+	}
+
+	r := &Resolver{
+		KnowledgeStore: knowledgeStore,
+		Orchestrator:   orch,
+	}
+
+	releaseFirst := make(chan struct{})
+	firstEntered := make(chan struct{}, 1)
+	first := makeArtifact("repo-1")
+	if err := r.enqueueKnowledgeJob(first, "cliff_notes", 100, func(_ context.Context, rt llm.Runtime) error {
+		rt.ReportProgress(0.25, "generating", "first")
+		firstEntered <- struct{}{}
+		<-releaseFirst
+		return nil
+	}); err != nil {
+		t.Fatalf("enqueue first: %v", err)
+	}
+
+	second := makeArtifact("repo-2")
+	if err := r.enqueueKnowledgeJob(second, "cliff_notes", 100, func(_ context.Context, rt llm.Runtime) error {
+		return nil
+	}); err != nil {
+		t.Fatalf("enqueue second: %v", err)
+	}
+
+	select {
+	case <-firstEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first job never entered the knowledge slot")
+	}
+
+	var waitingJob *llm.Job
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		active := orch.ListActive(llm.ListFilter{
+			Subsystem: llm.SubsystemKnowledge,
+			JobType:   "cliff_notes",
+			RepoID:    "repo-2",
+		})
+		if len(active) > 0 {
+			waitingJob = active[0]
+			if waitingJob.ProgressPhase == "queued" {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if waitingJob == nil {
+		t.Fatal("expected second job to be active and waiting")
+	}
+
+	initialUpdatedAt := waitingJob.UpdatedAt
+	time.Sleep(50 * time.Millisecond)
+	waitingJob = jobStore.GetByID(waitingJob.ID)
+	if waitingJob == nil {
+		t.Fatal("expected waiting job to still exist")
+	}
+	if !waitingJob.UpdatedAt.After(initialUpdatedAt) {
+		t.Fatalf("expected queued waiting job heartbeat to advance updated_at, initial=%s current=%s", initialUpdatedAt, waitingJob.UpdatedAt)
+	}
+	if waitingJob.ProgressPhase != "queued" {
+		t.Fatalf("expected queued progress phase while waiting, got %q", waitingJob.ProgressPhase)
+	}
+
+	close(releaseFirst)
+}
