@@ -10,6 +10,7 @@ import {
   REQUIREMENTS_QUERY,
   REINDEX_REPOSITORY_MUTATION,
   BUILD_REPOSITORY_UNDERSTANDING_MUTATION,
+  UPDATE_REPOSITORY_KNOWLEDGE_SETTINGS_MUTATION,
   REMOVE_REPOSITORY_MUTATION,
   ANALYZE_SYMBOL_MUTATION,
   DISCUSS_CODE_MUTATION,
@@ -191,6 +192,8 @@ interface RepositoryUnderstanding {
     symbolName?: string | null;
   };
 }
+
+type RepositoryGenerationMode = "CLASSIC" | "UNDERSTANDING_FIRST";
 
 function knowledgeErrorHint(errorCode: string | null | undefined): string {
   switch (errorCode) {
@@ -697,6 +700,7 @@ export default function RepositoryDetailPage() {
 
   const [, reindex] = useMutation(REINDEX_REPOSITORY_MUTATION);
   const [, buildRepositoryUnderstanding] = useMutation(BUILD_REPOSITORY_UNDERSTANDING_MUTATION);
+  const [, updateRepositoryKnowledgeSettings] = useMutation(UPDATE_REPOSITORY_KNOWLEDGE_SETTINGS_MUTATION);
   const [, removeRepo] = useMutation(REMOVE_REPOSITORY_MUTATION);
   const [, analyzeSymbol] = useMutation(ANALYZE_SYMBOL_MUTATION);
   const [, discussCode] = useMutation(DISCUSS_CODE_MUTATION);
@@ -791,6 +795,7 @@ export default function RepositoryDetailPage() {
     (a) => a.type === "WORKFLOW_STORY" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
   );
   const currentUnderstanding: RepositoryUnderstanding | null = repoResult.data?.repository?.repositoryUnderstanding || null;
+  const repoGenerationModeDefault: RepositoryGenerationMode = (repo?.generationModeDefault || "UNDERSTANDING_FIRST") as RepositoryGenerationMode;
   const repoActiveJobs = useMemo(() => repoJobs?.active ?? [], [repoJobs?.active]);
   const repoRecentJobs = useMemo(() => repoJobs?.recent ?? [], [repoJobs?.recent]);
   const artifactJobMap = useMemo(() => {
@@ -1140,6 +1145,21 @@ export default function RepositoryDetailPage() {
       });
       reexecuteRepo({ requestPolicy: "network-only" });
       void fetchRepoJobs();
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  }
+
+  async function handleSaveRepositoryGenerationMode(nextMode: RepositoryGenerationMode) {
+    setKnowledgeLoading(true);
+    try {
+      await updateRepositoryKnowledgeSettings({
+        input: {
+          repositoryId: repoId,
+          generationModeDefault: nextMode,
+        },
+      });
+      reexecuteRepo({ requestPolicy: "network-only" });
     } finally {
       setKnowledgeLoading(false);
     }
@@ -3113,6 +3133,38 @@ export default function RepositoryDetailPage() {
             <Button variant="secondary" onClick={() => reindex({ id: repoId })}>
               Reindex
             </Button>
+          </div>
+          <div className="mt-6 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h4 className="text-sm font-semibold text-[var(--text-primary)]">Knowledge Engine Default</h4>
+                <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                  Sets the repository-level default generation engine. Request-time selections in the field guide still override this.
+                </p>
+              </div>
+              <span className={artifactStatusClass}>{repoGenerationModeDefault === "CLASSIC" ? "Classic" : "Understanding First"}</span>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {[
+                { key: "UNDERSTANDING_FIRST", label: "Understanding First" },
+                { key: "CLASSIC", label: "Classic" },
+              ].map((mode) => (
+                <button
+                  key={mode.key}
+                  type="button"
+                  onClick={() => void handleSaveRepositoryGenerationMode(mode.key as RepositoryGenerationMode)}
+                  disabled={knowledgeLoading}
+                  className={cn(
+                    "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                    repoGenerationModeDefault === mode.key
+                      ? "border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--accent-contrast)]"
+                      : "border-[var(--border-default)] bg-[var(--bg-base)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                  )}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="mt-8 rounded-[var(--control-radius)] border border-[var(--color-error,#ef4444)] p-4">
             <h4 className="mb-2 font-semibold text-[var(--color-error,#ef4444)]">Danger Zone</h4>

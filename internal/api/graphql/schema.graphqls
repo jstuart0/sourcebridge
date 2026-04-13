@@ -95,6 +95,7 @@ type Mutation {
   removeRepository(id: ID!): Boolean!
   reindexRepository(id: ID!): Repository!
   buildRepositoryUnderstanding(input: BuildRepositoryUnderstandingInput!): RepositoryUnderstanding!
+  updateRepositoryKnowledgeSettings(input: UpdateRepositoryKnowledgeSettingsInput!): Repository!
 
   # Phase 3: Requirement import (stubs in Phase 1)
   importRequirements(input: ImportRequirementsInput!): ImportResult!
@@ -203,6 +204,7 @@ type Repository {
   remoteUrl: String
   commitSha: String
   branch: String
+  generationModeDefault: KnowledgeGenerationMode
   hasAuth: Boolean!
   status: RepositoryStatus!
   fileCount: Int!
@@ -215,6 +217,11 @@ type Repository {
   modules: [Module!]!
   understandingScore: UnderstandingScore
   repositoryUnderstanding(scopeType: KnowledgeScopeType, scopePath: String): RepositoryUnderstanding
+}
+
+input UpdateRepositoryKnowledgeSettingsInput {
+  repositoryId: ID!
+  generationModeDefault: KnowledgeGenerationMode!
 }
 
 enum RepositoryStatus {

@@ -474,36 +474,37 @@ type ComplexityRoot struct {
 	}
 
 	Mutation struct {
-		AddRepository                    func(childComplexity int, input AddRepositoryInput) int
-		AnalyzeSymbol                    func(childComplexity int, repositoryID string, symbolID string) int
-		AutoLinkRequirements             func(childComplexity int, repositoryID string, minConfidence *float64) int
-		BuildRepositoryUnderstanding     func(childComplexity int, input BuildRepositoryUnderstandingInput) int
-		CreateManualLink                 func(childComplexity int, input CreateManualLinkInput) int
-		DeleteModelCapabilities          func(childComplexity int, modelID string) int
-		DetectContracts                  func(childComplexity int, repoID string) int
-		DiscussCode                      func(childComplexity int, input DiscussCodeInput) int
-		DismissAllDiscoveredRequirements func(childComplexity int, repositoryID string) int
-		DismissDiscoveredRequirement     func(childComplexity int, id string, reason *string) int
-		EnrichRequirement                func(childComplexity int, requirementID string) int
-		ExplainSystem                    func(childComplexity int, input ExplainSystemInput) int
-		GenerateCliffNotes               func(childComplexity int, input GenerateCliffNotesInput) int
-		GenerateCodeTour                 func(childComplexity int, input GenerateCodeTourInput) int
-		GenerateLearningPath             func(childComplexity int, input GenerateLearningPathInput) int
-		GenerateWorkflowStory            func(childComplexity int, input GenerateWorkflowStoryInput) int
-		ImportRequirements               func(childComplexity int, input ImportRequirementsInput) int
-		LinkRepos                        func(childComplexity int, sourceRepoID string, targetRepoID string, linkType *string) int
-		PromoteDiscoveredRequirement     func(childComplexity int, id string, title *string, description *string) int
-		RefreshKnowledgeArtifact         func(childComplexity int, id string) int
-		ReindexRepository                func(childComplexity int, id string) int
-		RemoveRepository                 func(childComplexity int, id string) int
-		ResetComprehensionSettings       func(childComplexity int, scopeType string, scopeKey *string) int
-		ReviewCode                       func(childComplexity int, input ReviewCodeInput) int
-		SimulateChange                   func(childComplexity int, input SimulateChangeInput) int
-		TriggerSpecExtraction            func(childComplexity int, input TriggerSpecExtractionInput) int
-		UnlinkRepos                      func(childComplexity int, linkID string) int
-		UpdateComprehensionSettings      func(childComplexity int, input UpdateComprehensionSettingsInput) int
-		UpdateModelCapabilities          func(childComplexity int, input UpdateModelCapabilitiesInput) int
-		VerifyLink                       func(childComplexity int, linkID string, verified bool) int
+		AddRepository                     func(childComplexity int, input AddRepositoryInput) int
+		AnalyzeSymbol                     func(childComplexity int, repositoryID string, symbolID string) int
+		AutoLinkRequirements              func(childComplexity int, repositoryID string, minConfidence *float64) int
+		BuildRepositoryUnderstanding      func(childComplexity int, input BuildRepositoryUnderstandingInput) int
+		CreateManualLink                  func(childComplexity int, input CreateManualLinkInput) int
+		DeleteModelCapabilities           func(childComplexity int, modelID string) int
+		DetectContracts                   func(childComplexity int, repoID string) int
+		DiscussCode                       func(childComplexity int, input DiscussCodeInput) int
+		DismissAllDiscoveredRequirements  func(childComplexity int, repositoryID string) int
+		DismissDiscoveredRequirement      func(childComplexity int, id string, reason *string) int
+		EnrichRequirement                 func(childComplexity int, requirementID string) int
+		ExplainSystem                     func(childComplexity int, input ExplainSystemInput) int
+		GenerateCliffNotes                func(childComplexity int, input GenerateCliffNotesInput) int
+		GenerateCodeTour                  func(childComplexity int, input GenerateCodeTourInput) int
+		GenerateLearningPath              func(childComplexity int, input GenerateLearningPathInput) int
+		GenerateWorkflowStory             func(childComplexity int, input GenerateWorkflowStoryInput) int
+		ImportRequirements                func(childComplexity int, input ImportRequirementsInput) int
+		LinkRepos                         func(childComplexity int, sourceRepoID string, targetRepoID string, linkType *string) int
+		PromoteDiscoveredRequirement      func(childComplexity int, id string, title *string, description *string) int
+		RefreshKnowledgeArtifact          func(childComplexity int, id string) int
+		ReindexRepository                 func(childComplexity int, id string) int
+		RemoveRepository                  func(childComplexity int, id string) int
+		ResetComprehensionSettings        func(childComplexity int, scopeType string, scopeKey *string) int
+		ReviewCode                        func(childComplexity int, input ReviewCodeInput) int
+		SimulateChange                    func(childComplexity int, input SimulateChangeInput) int
+		TriggerSpecExtraction             func(childComplexity int, input TriggerSpecExtractionInput) int
+		UnlinkRepos                       func(childComplexity int, linkID string) int
+		UpdateComprehensionSettings       func(childComplexity int, input UpdateComprehensionSettingsInput) int
+		UpdateModelCapabilities           func(childComplexity int, input UpdateModelCapabilitiesInput) int
+		UpdateRepositoryKnowledgeSettings func(childComplexity int, input UpdateRepositoryKnowledgeSettingsInput) int
+		VerifyLink                        func(childComplexity int, linkID string, verified bool) int
 	}
 
 	PlatformStats struct {
@@ -579,6 +580,7 @@ type ComplexityRoot struct {
 		FileCount               func(childComplexity int) int
 		Files                   func(childComplexity int, limit *int, offset *int, path *string) int
 		FunctionCount           func(childComplexity int) int
+		GenerationModeDefault   func(childComplexity int) int
 		HasAuth                 func(childComplexity int) int
 		ID                      func(childComplexity int) int
 		LastIndexedAt           func(childComplexity int) int
@@ -793,6 +795,7 @@ type MutationResolver interface {
 	RemoveRepository(ctx context.Context, id string) (bool, error)
 	ReindexRepository(ctx context.Context, id string) (*Repository, error)
 	BuildRepositoryUnderstanding(ctx context.Context, input BuildRepositoryUnderstandingInput) (*RepositoryUnderstanding, error)
+	UpdateRepositoryKnowledgeSettings(ctx context.Context, input UpdateRepositoryKnowledgeSettingsInput) (*Repository, error)
 	ImportRequirements(ctx context.Context, input ImportRequirementsInput) (*ImportResult, error)
 	VerifyLink(ctx context.Context, linkID string, verified bool) (*RequirementLink, error)
 	CreateManualLink(ctx context.Context, input CreateManualLinkInput) (*RequirementLink, error)
@@ -3411,6 +3414,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Mutation.UpdateModelCapabilities(childComplexity, args["input"].(UpdateModelCapabilitiesInput)), true
 
+	case "Mutation.updateRepositoryKnowledgeSettings":
+		if e.complexity.Mutation.UpdateRepositoryKnowledgeSettings == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_updateRepositoryKnowledgeSettings_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.UpdateRepositoryKnowledgeSettings(childComplexity, args["input"].(UpdateRepositoryKnowledgeSettingsInput)), true
+
 	case "Mutation.verifyLink":
 		if e.complexity.Mutation.VerifyLink == nil {
 			break
@@ -4002,6 +4017,13 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Repository.FunctionCount(childComplexity), true
+
+	case "Repository.generationModeDefault":
+		if e.complexity.Repository.GenerationModeDefault == nil {
+			break
+		}
+
+		return e.complexity.Repository.GenerationModeDefault(childComplexity), true
 
 	case "Repository.hasAuth":
 		if e.complexity.Repository.HasAuth == nil {
@@ -5012,6 +5034,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 		ec.unmarshalInputTriggerSpecExtractionInput,
 		ec.unmarshalInputUpdateComprehensionSettingsInput,
 		ec.unmarshalInputUpdateModelCapabilitiesInput,
+		ec.unmarshalInputUpdateRepositoryKnowledgeSettingsInput,
 	)
 	first := true
 
@@ -6121,6 +6144,34 @@ func (ec *executionContext) field_Mutation_updateModelCapabilities_argsInput(
 	}
 
 	var zeroVal UpdateModelCapabilitiesInput
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_updateRepositoryKnowledgeSettings_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_updateRepositoryKnowledgeSettings_argsInput(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_updateRepositoryKnowledgeSettings_argsInput(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (UpdateRepositoryKnowledgeSettingsInput, error) {
+	if _, ok := rawArgs["input"]; !ok {
+		var zeroVal UpdateRepositoryKnowledgeSettingsInput
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("input"))
+	if tmp, ok := rawArgs["input"]; ok {
+		return ec.unmarshalNUpdateRepositoryKnowledgeSettingsInput2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐUpdateRepositoryKnowledgeSettingsInput(ctx, tmp)
+	}
+
+	var zeroVal UpdateRepositoryKnowledgeSettingsInput
 	return zeroVal, nil
 }
 
@@ -22051,6 +22102,8 @@ func (ec *executionContext) fieldContext_Mutation_addRepository(ctx context.Cont
 				return ec.fieldContext_Repository_commitSha(ctx, field)
 			case "branch":
 				return ec.fieldContext_Repository_branch(ctx, field)
+			case "generationModeDefault":
+				return ec.fieldContext_Repository_generationModeDefault(ctx, field)
 			case "hasAuth":
 				return ec.fieldContext_Repository_hasAuth(ctx, field)
 			case "status":
@@ -22199,6 +22252,8 @@ func (ec *executionContext) fieldContext_Mutation_reindexRepository(ctx context.
 				return ec.fieldContext_Repository_commitSha(ctx, field)
 			case "branch":
 				return ec.fieldContext_Repository_branch(ctx, field)
+			case "generationModeDefault":
+				return ec.fieldContext_Repository_generationModeDefault(ctx, field)
 			case "hasAuth":
 				return ec.fieldContext_Repository_hasAuth(ctx, field)
 			case "status":
@@ -22326,6 +22381,101 @@ func (ec *executionContext) fieldContext_Mutation_buildRepositoryUnderstanding(c
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_buildRepositoryUnderstanding_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_updateRepositoryKnowledgeSettings(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_updateRepositoryKnowledgeSettings(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().UpdateRepositoryKnowledgeSettings(rctx, fc.Args["input"].(UpdateRepositoryKnowledgeSettingsInput))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*Repository)
+	fc.Result = res
+	return ec.marshalNRepository2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepository(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_updateRepositoryKnowledgeSettings(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Repository_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Repository_name(ctx, field)
+			case "path":
+				return ec.fieldContext_Repository_path(ctx, field)
+			case "remoteUrl":
+				return ec.fieldContext_Repository_remoteUrl(ctx, field)
+			case "commitSha":
+				return ec.fieldContext_Repository_commitSha(ctx, field)
+			case "branch":
+				return ec.fieldContext_Repository_branch(ctx, field)
+			case "generationModeDefault":
+				return ec.fieldContext_Repository_generationModeDefault(ctx, field)
+			case "hasAuth":
+				return ec.fieldContext_Repository_hasAuth(ctx, field)
+			case "status":
+				return ec.fieldContext_Repository_status(ctx, field)
+			case "fileCount":
+				return ec.fieldContext_Repository_fileCount(ctx, field)
+			case "functionCount":
+				return ec.fieldContext_Repository_functionCount(ctx, field)
+			case "classCount":
+				return ec.fieldContext_Repository_classCount(ctx, field)
+			case "requirementCount":
+				return ec.fieldContext_Repository_requirementCount(ctx, field)
+			case "lastIndexedAt":
+				return ec.fieldContext_Repository_lastIndexedAt(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Repository_createdAt(ctx, field)
+			case "files":
+				return ec.fieldContext_Repository_files(ctx, field)
+			case "modules":
+				return ec.fieldContext_Repository_modules(ctx, field)
+			case "understandingScore":
+				return ec.fieldContext_Repository_understandingScore(ctx, field)
+			case "repositoryUnderstanding":
+				return ec.fieldContext_Repository_repositoryUnderstanding(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Repository", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_updateRepositoryKnowledgeSettings_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -25061,6 +25211,8 @@ func (ec *executionContext) fieldContext_Query_repositories(_ context.Context, f
 				return ec.fieldContext_Repository_commitSha(ctx, field)
 			case "branch":
 				return ec.fieldContext_Repository_branch(ctx, field)
+			case "generationModeDefault":
+				return ec.fieldContext_Repository_generationModeDefault(ctx, field)
 			case "hasAuth":
 				return ec.fieldContext_Repository_hasAuth(ctx, field)
 			case "status":
@@ -25140,6 +25292,8 @@ func (ec *executionContext) fieldContext_Query_repository(ctx context.Context, f
 				return ec.fieldContext_Repository_commitSha(ctx, field)
 			case "branch":
 				return ec.fieldContext_Repository_branch(ctx, field)
+			case "generationModeDefault":
+				return ec.fieldContext_Repository_generationModeDefault(ctx, field)
 			case "hasAuth":
 				return ec.fieldContext_Repository_hasAuth(ctx, field)
 			case "status":
@@ -28263,6 +28417,47 @@ func (ec *executionContext) fieldContext_Repository_branch(_ context.Context, fi
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Repository_generationModeDefault(ctx context.Context, field graphql.CollectedField, obj *Repository) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Repository_generationModeDefault(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.GenerationModeDefault, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*KnowledgeGenerationMode)
+	fc.Result = res
+	return ec.marshalOKnowledgeGenerationMode2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐKnowledgeGenerationMode(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Repository_generationModeDefault(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Repository",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type KnowledgeGenerationMode does not have child fields")
 		},
 	}
 	return fc, nil
@@ -37644,6 +37839,40 @@ func (ec *executionContext) unmarshalInputUpdateModelCapabilitiesInput(ctx conte
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputUpdateRepositoryKnowledgeSettingsInput(ctx context.Context, obj any) (UpdateRepositoryKnowledgeSettingsInput, error) {
+	var it UpdateRepositoryKnowledgeSettingsInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"repositoryId", "generationModeDefault"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "repositoryId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("repositoryId"))
+			data, err := ec.unmarshalNID2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.RepositoryID = data
+		case "generationModeDefault":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("generationModeDefault"))
+			data, err := ec.unmarshalNKnowledgeGenerationMode2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐKnowledgeGenerationMode(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.GenerationModeDefault = data
+		}
+	}
+
+	return it, nil
+}
+
 // endregion **************************** input.gotpl *****************************
 
 // region    ************************** interface.gotpl ***************************
@@ -40324,6 +40553,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "updateRepositoryKnowledgeSettings":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_updateRepositoryKnowledgeSettings(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		case "importRequirements":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_importRequirements(ctx, field)
@@ -41614,6 +41850,8 @@ func (ec *executionContext) _Repository(ctx context.Context, sel ast.SelectionSe
 			out.Values[i] = ec._Repository_commitSha(ctx, field, obj)
 		case "branch":
 			out.Values[i] = ec._Repository_branch(ctx, field, obj)
+		case "generationModeDefault":
+			out.Values[i] = ec._Repository_generationModeDefault(ctx, field, obj)
 		case "hasAuth":
 			out.Values[i] = ec._Repository_hasAuth(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -45872,6 +46110,11 @@ func (ec *executionContext) unmarshalNUpdateComprehensionSettingsInput2githubᚗ
 
 func (ec *executionContext) unmarshalNUpdateModelCapabilitiesInput2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐUpdateModelCapabilitiesInput(ctx context.Context, v any) (UpdateModelCapabilitiesInput, error) {
 	res, err := ec.unmarshalInputUpdateModelCapabilitiesInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) unmarshalNUpdateRepositoryKnowledgeSettingsInput2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐUpdateRepositoryKnowledgeSettingsInput(ctx context.Context, v any) (UpdateRepositoryKnowledgeSettingsInput, error) {
+	res, err := ec.unmarshalInputUpdateRepositoryKnowledgeSettingsInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 

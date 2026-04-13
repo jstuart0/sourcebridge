@@ -17,22 +17,23 @@ import (
 
 // Repository represents a stored repository.
 type Repository struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Path          string    `json:"path"`
-	ClonePath     string    `json:"clone_path,omitempty"`  // local path to persisted clone (for remote repos)
-	RemoteURL     string    `json:"remote_url,omitempty"`  // canonical remote git URL
-	CommitSHA         string    `json:"commit_sha,omitempty"`
-	PreviousCommitSHA string    `json:"previous_commit_sha,omitempty"`
-	Branch            string    `json:"branch,omitempty"`
-	Status        string    `json:"status"` // pending, indexing, ready, error
-	FileCount     int       `json:"file_count"`
-	FunctionCount int       `json:"function_count"`
-	ClassCount    int       `json:"class_count"`
-	LastIndexedAt time.Time `json:"last_indexed_at"`
-	CreatedAt     time.Time `json:"created_at"`
-	IndexError    string    `json:"index_error,omitempty"`
-	AuthToken     string    `json:"-"` // never serialized — holds PAT for private repo access
+	ID                    string    `json:"id"`
+	Name                  string    `json:"name"`
+	Path                  string    `json:"path"`
+	ClonePath             string    `json:"clone_path,omitempty"` // local path to persisted clone (for remote repos)
+	RemoteURL             string    `json:"remote_url,omitempty"` // canonical remote git URL
+	CommitSHA             string    `json:"commit_sha,omitempty"`
+	PreviousCommitSHA     string    `json:"previous_commit_sha,omitempty"`
+	Branch                string    `json:"branch,omitempty"`
+	GenerationModeDefault string    `json:"generation_mode_default,omitempty"`
+	Status                string    `json:"status"` // pending, indexing, ready, error
+	FileCount             int       `json:"file_count"`
+	FunctionCount         int       `json:"function_count"`
+	ClassCount            int       `json:"class_count"`
+	LastIndexedAt         time.Time `json:"last_indexed_at"`
+	CreatedAt             time.Time `json:"created_at"`
+	IndexError            string    `json:"index_error,omitempty"`
+	AuthToken             string    `json:"-"` // never serialized — holds PAT for private repo access
 
 	// Cached understanding score — precomputed on reindex/link/review changes.
 	UnderstandingScoreVal *float64   `json:"understanding_score,omitempty"`
@@ -119,17 +120,17 @@ type StoredRequirement struct {
 type DiscoveredRequirement struct {
 	ID              string    `json:"id"`
 	RepoID          string    `json:"repo_id"`
-	Source          string    `json:"source"`           // "test", "schema", "comment"
+	Source          string    `json:"source"` // "test", "schema", "comment"
 	SourceFile      string    `json:"source_file"`
 	SourceLine      int       `json:"source_line"`
-	SourceFiles     []string  `json:"source_files"`     // additional files (from dedup merge)
-	Text            string    `json:"text"`              // refined requirement text
-	RawText         string    `json:"raw_text"`          // original extraction
+	SourceFiles     []string  `json:"source_files"` // additional files (from dedup merge)
+	Text            string    `json:"text"`         // refined requirement text
+	RawText         string    `json:"raw_text"`     // original extraction
 	GroupKey        string    `json:"group_key"`
 	Language        string    `json:"language"`
 	Keywords        []string  `json:"keywords"`
-	Confidence      string    `json:"confidence"`        // "high", "medium", "low"
-	Status          string    `json:"status"`            // "discovered", "promoted", "dismissed"
+	Confidence      string    `json:"confidence"` // "high", "medium", "low"
+	Status          string    `json:"status"`     // "discovered", "promoted", "dismissed"
 	LLMRefined      bool      `json:"llm_refined"`
 	PromotedTo      string    `json:"promoted_to,omitempty"`
 	DismissedBy     string    `json:"dismissed_by,omitempty"`
@@ -166,79 +167,79 @@ type EmbeddingRecord struct {
 
 // ReviewResultRecord stores a persisted AI code review.
 type ReviewResultRecord struct {
-	ID        string                 `json:"id"`
-	RepoID    string                 `json:"repo_id"`
-	TargetID  string                 `json:"target_id"` // symbol or file ID
-	Template  string                 `json:"template"`
-	Findings  []ReviewFinding        `json:"findings"`
-	Score     *float64               `json:"score,omitempty"`
-	CreatedBy string                 `json:"created_by,omitempty"`
-	CreatedAt time.Time              `json:"created_at"`
+	ID        string          `json:"id"`
+	RepoID    string          `json:"repo_id"`
+	TargetID  string          `json:"target_id"` // symbol or file ID
+	Template  string          `json:"template"`
+	Findings  []ReviewFinding `json:"findings"`
+	Score     *float64        `json:"score,omitempty"`
+	CreatedBy string          `json:"created_by,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
 }
 
 // ReviewFinding is a single finding from an AI review.
 type ReviewFinding struct {
-	Severity    string `json:"severity"` // "info", "warning", "error", "critical"
-	Category    string `json:"category"`
-	Message     string `json:"message"`
-	Line        int    `json:"line,omitempty"`
-	Suggestion  string `json:"suggestion,omitempty"`
+	Severity   string `json:"severity"` // "info", "warning", "error", "critical"
+	Category   string `json:"category"`
+	Message    string `json:"message"`
+	Line       int    `json:"line,omitempty"`
+	Suggestion string `json:"suggestion,omitempty"`
 }
 
 // Store provides graph storage operations.
 // In-memory implementation for OSS/CLI mode.
 // SurrealDB backend can be plugged in for Docker/K8s mode.
 type Store struct {
-	mu               sync.RWMutex
-	repos            map[string]*Repository
-	files            map[string]*File               // fileID -> File
-	symbols          map[string]*StoredSymbol       // symbolID -> Symbol
-	modules          map[string]*StoredModule       // moduleID -> Module
-	requirements     map[string]*StoredRequirement  // reqID -> Requirement
-	links            map[string]*StoredLink         // linkID -> Link
-	imports          []StoredImport
-	callGraph        map[string][]string            // callerID -> []calleeID
-	reverseCallGraph map[string][]string            // calleeID -> []callerID
-	repoFiles        map[string][]string            // repoID -> []fileID
-	repoSymbols      map[string][]string            // repoID -> []symbolID
-	repoModules      map[string][]string            // repoID -> []moduleID
-	repoRequirements map[string][]string            // repoID -> []reqID
-	repoLinks        map[string][]string            // repoID -> []linkID
-	reqLinks         map[string][]string            // reqID -> []linkID
-	symLinks         map[string][]string            // symbolID -> []linkID
-	fileSymbols      map[string][]string            // fileID -> []symbolID
-	llmUsage         []LLMUsageRecord
-	embeddings       map[string]*EmbeddingRecord   // targetID -> EmbeddingRecord
-	reviewResults    map[string]*ReviewResultRecord // reviewID -> ReviewResultRecord
-	impactReports           map[string][]*ImpactReport          // repoID -> []*ImpactReport
-	discoveredRequirements  map[string]*DiscoveredRequirement   // discReqID -> DiscoveredRequirement
-	repoDiscoveredReqs      map[string][]string                 // repoID -> []discReqID
+	mu                     sync.RWMutex
+	repos                  map[string]*Repository
+	files                  map[string]*File              // fileID -> File
+	symbols                map[string]*StoredSymbol      // symbolID -> Symbol
+	modules                map[string]*StoredModule      // moduleID -> Module
+	requirements           map[string]*StoredRequirement // reqID -> Requirement
+	links                  map[string]*StoredLink        // linkID -> Link
+	imports                []StoredImport
+	callGraph              map[string][]string // callerID -> []calleeID
+	reverseCallGraph       map[string][]string // calleeID -> []callerID
+	repoFiles              map[string][]string // repoID -> []fileID
+	repoSymbols            map[string][]string // repoID -> []symbolID
+	repoModules            map[string][]string // repoID -> []moduleID
+	repoRequirements       map[string][]string // repoID -> []reqID
+	repoLinks              map[string][]string // repoID -> []linkID
+	reqLinks               map[string][]string // reqID -> []linkID
+	symLinks               map[string][]string // symbolID -> []linkID
+	fileSymbols            map[string][]string // fileID -> []symbolID
+	llmUsage               []LLMUsageRecord
+	embeddings             map[string]*EmbeddingRecord       // targetID -> EmbeddingRecord
+	reviewResults          map[string]*ReviewResultRecord    // reviewID -> ReviewResultRecord
+	impactReports          map[string][]*ImpactReport        // repoID -> []*ImpactReport
+	discoveredRequirements map[string]*DiscoveredRequirement // discReqID -> DiscoveredRequirement
+	repoDiscoveredReqs     map[string][]string               // repoID -> []discReqID
 }
 
 // NewStore creates a new in-memory graph store.
 func NewStore() *Store {
 	return &Store{
-		repos:            make(map[string]*Repository),
-		files:            make(map[string]*File),
-		symbols:          make(map[string]*StoredSymbol),
-		modules:          make(map[string]*StoredModule),
-		requirements:     make(map[string]*StoredRequirement),
-		links:            make(map[string]*StoredLink),
-		callGraph:        make(map[string][]string),
-		reverseCallGraph: make(map[string][]string),
-		repoFiles:        make(map[string][]string),
-		repoSymbols:      make(map[string][]string),
-		repoModules:      make(map[string][]string),
-		repoRequirements: make(map[string][]string),
-		repoLinks:        make(map[string][]string),
-		reqLinks:         make(map[string][]string),
-		symLinks:         make(map[string][]string),
-		fileSymbols:      make(map[string][]string),
-		embeddings:       make(map[string]*EmbeddingRecord),
-		reviewResults:    make(map[string]*ReviewResultRecord),
-		impactReports:           make(map[string][]*ImpactReport),
-		discoveredRequirements:  make(map[string]*DiscoveredRequirement),
-		repoDiscoveredReqs:      make(map[string][]string),
+		repos:                  make(map[string]*Repository),
+		files:                  make(map[string]*File),
+		symbols:                make(map[string]*StoredSymbol),
+		modules:                make(map[string]*StoredModule),
+		requirements:           make(map[string]*StoredRequirement),
+		links:                  make(map[string]*StoredLink),
+		callGraph:              make(map[string][]string),
+		reverseCallGraph:       make(map[string][]string),
+		repoFiles:              make(map[string][]string),
+		repoSymbols:            make(map[string][]string),
+		repoModules:            make(map[string][]string),
+		repoRequirements:       make(map[string][]string),
+		repoLinks:              make(map[string][]string),
+		reqLinks:               make(map[string][]string),
+		symLinks:               make(map[string][]string),
+		fileSymbols:            make(map[string][]string),
+		embeddings:             make(map[string]*EmbeddingRecord),
+		reviewResults:          make(map[string]*ReviewResultRecord),
+		impactReports:          make(map[string][]*ImpactReport),
+		discoveredRequirements: make(map[string]*DiscoveredRequirement),
+		repoDiscoveredReqs:     make(map[string][]string),
 	}
 }
 
@@ -537,6 +538,9 @@ func (s *Store) UpdateRepositoryMeta(id string, meta RepositoryMeta) {
 	}
 	if meta.AuthToken != "" {
 		repo.AuthToken = meta.AuthToken
+	}
+	if meta.GenerationModeDefault != "" {
+		repo.GenerationModeDefault = meta.GenerationModeDefault
 	}
 }
 
@@ -885,7 +889,7 @@ func (s *Store) Stats() map[string]int {
 		"modules":      len(s.modules),
 		"requirements": len(s.requirements),
 		"links":        len(s.links),
-		"imports":       len(s.imports),
+		"imports":      len(s.imports),
 		"contains":     containsCount,
 	}
 }

@@ -103,6 +103,7 @@ export const REPOSITORY_QUERY = gql`
       name
       path
       remoteUrl
+      generationModeDefault
       status
       fileCount
       functionCount
@@ -403,6 +404,15 @@ export const BUILD_REPOSITORY_UNDERSTANDING_MUTATION = gql`
         filePath
         symbolName
       }
+    }
+  }
+`;
+
+export const UPDATE_REPOSITORY_KNOWLEDGE_SETTINGS_MUTATION = gql`
+  mutation UpdateRepositoryKnowledgeSettings($input: UpdateRepositoryKnowledgeSettingsInput!) {
+    updateRepositoryKnowledgeSettings(input: $input) {
+      id
+      generationModeDefault
     }
   }
 `;

@@ -85,37 +85,39 @@ func queryOne[T any](ctx context.Context, db *surrealdb.DB, sql string, vars map
 
 // surrealRepo is the SurrealDB representation of a repository record.
 type surrealRepo struct {
-	ID            *models.RecordID `json:"id,omitempty"`
-	Name          string           `json:"name"`
-	Path          string           `json:"path"`
-	ClonePath     string           `json:"clone_path,omitempty"`
-	RemoteURL     string           `json:"remote_url,omitempty"`
-	CommitSHA     string           `json:"commit_sha,omitempty"`
-	Branch        string           `json:"branch,omitempty"`
-	Status        string           `json:"status"`
-	FileCount     int              `json:"file_count"`
-	FunctionCount int              `json:"function_count"`
-	ClassCount    int              `json:"class_count"`
-	LastIndexedAt surrealTime          `json:"last_indexed_at"`
-	CreatedAt     surrealTime          `json:"created_at"`
-	IndexError    *string          `json:"index_error,omitempty"`
-	UnderstandingScore   *float64     `json:"understanding_score,omitempty"`
-	UnderstandingScoreAt *surrealTime `json:"understanding_score_at,omitempty"`
+	ID                    *models.RecordID `json:"id,omitempty"`
+	Name                  string           `json:"name"`
+	Path                  string           `json:"path"`
+	ClonePath             string           `json:"clone_path,omitempty"`
+	RemoteURL             string           `json:"remote_url,omitempty"`
+	CommitSHA             string           `json:"commit_sha,omitempty"`
+	Branch                string           `json:"branch,omitempty"`
+	GenerationModeDefault string           `json:"generation_mode_default,omitempty"`
+	Status                string           `json:"status"`
+	FileCount             int              `json:"file_count"`
+	FunctionCount         int              `json:"function_count"`
+	ClassCount            int              `json:"class_count"`
+	LastIndexedAt         surrealTime      `json:"last_indexed_at"`
+	CreatedAt             surrealTime      `json:"created_at"`
+	IndexError            *string          `json:"index_error,omitempty"`
+	UnderstandingScore    *float64         `json:"understanding_score,omitempty"`
+	UnderstandingScoreAt  *surrealTime     `json:"understanding_score_at,omitempty"`
 }
 
 func (r *surrealRepo) toRepository() *graph.Repository {
 	repo := &graph.Repository{
-		ID:            recordIDString(r.ID),
-		Name:          r.Name,
-		Path:          r.Path,
-		ClonePath:     r.ClonePath,
-		RemoteURL:     r.RemoteURL,
-		CommitSHA:     r.CommitSHA,
-		Branch:        r.Branch,
-		Status:        r.Status,
-		FileCount:     r.FileCount,
-		FunctionCount: r.FunctionCount,
-		ClassCount:    r.ClassCount,
+		ID:                    recordIDString(r.ID),
+		Name:                  r.Name,
+		Path:                  r.Path,
+		ClonePath:             r.ClonePath,
+		RemoteURL:             r.RemoteURL,
+		CommitSHA:             r.CommitSHA,
+		Branch:                r.Branch,
+		GenerationModeDefault: r.GenerationModeDefault,
+		Status:                r.Status,
+		FileCount:             r.FileCount,
+		FunctionCount:         r.FunctionCount,
+		ClassCount:            r.ClassCount,
 	}
 	if r.IndexError != nil {
 		repo.IndexError = *r.IndexError
@@ -216,8 +218,8 @@ type surrealRequirement struct {
 	Priority           string           `json:"priority"`
 	Tags               []string         `json:"tags"`
 	AcceptanceCriteria []string         `json:"acceptance_criteria"`
-	CreatedAt          surrealTime         `json:"created_at"`
-	UpdatedAt          surrealTime         `json:"updated_at"`
+	CreatedAt          surrealTime      `json:"created_at"`
+	UpdatedAt          surrealTime      `json:"updated_at"`
 }
 
 func (r *surrealRequirement) toStoredRequirement() *graph.StoredRequirement {
@@ -248,7 +250,7 @@ type surrealLink struct {
 	Verified      bool             `json:"verified"`
 	VerifiedBy    string           `json:"verified_by"`
 	Rejected      bool             `json:"rejected"`
-	CreatedAt     surrealTime         `json:"created_at"`
+	CreatedAt     surrealTime      `json:"created_at"`
 }
 
 func (l *surrealLink) toStoredLink() *graph.StoredLink {
@@ -483,11 +485,11 @@ func (s *SurrealStore) StoreIndexResult(result *indexer.IndexResult) (*graph.Rep
 			last_indexed_at = time::now(),
 			created_at = time::now()`,
 		map[string]any{
-			"rid":        repoID,
-			"name":       result.RepoName,
-			"path":       result.RepoPath,
-			"file_count": result.TotalFiles,
-			"func_count": funcCount,
+			"rid":         repoID,
+			"name":        result.RepoName,
+			"path":        result.RepoPath,
+			"file_count":  result.TotalFiles,
+			"func_count":  funcCount,
 			"class_count": classCount,
 		})
 	if err != nil {
@@ -663,9 +665,9 @@ func (s *SurrealStore) ReplaceIndexResult(repoID string, result *indexer.IndexRe
 			last_indexed_at = time::now(),
 			index_error = NONE`,
 		map[string]any{
-			"id":         repoID,
-			"file_count": result.TotalFiles,
-			"func_count": funcCount,
+			"id":          repoID,
+			"file_count":  result.TotalFiles,
+			"func_count":  funcCount,
 			"class_count": classCount,
 		})
 	if err != nil {
@@ -700,6 +702,10 @@ func (s *SurrealStore) UpdateRepositoryMeta(id string, meta graph.RepositoryMeta
 	if meta.Branch != "" {
 		sets = append(sets, "branch = $branch")
 		vars["branch"] = meta.Branch
+	}
+	if meta.GenerationModeDefault != "" {
+		sets = append(sets, "generation_mode_default = $generation_mode_default")
+		vars["generation_mode_default"] = meta.GenerationModeDefault
 	}
 
 	if len(sets) == 0 {
@@ -1780,7 +1786,7 @@ func (s *SurrealStore) GetLLMUsage(repoID string, limit int) []graph.LLMUsageRec
 		Operation    string           `json:"operation"`
 		InputTokens  int              `json:"input_tokens"`
 		OutputTokens int              `json:"output_tokens"`
-		CreatedAt    surrealTime         `json:"created_at"`
+		CreatedAt    surrealTime      `json:"created_at"`
 	}
 
 	rows, err := queryOne[[]usageRow](ctx(), db, sql, vars)
@@ -1863,7 +1869,7 @@ func (s *SurrealStore) GetEmbedding(targetID string) *graph.EmbeddingRecord {
 		Dimension  int              `json:"dimension"`
 		Model      string           `json:"model"`
 		TextHash   string           `json:"text_hash"`
-		CreatedAt  surrealTime         `json:"created_at"`
+		CreatedAt  surrealTime      `json:"created_at"`
 	}
 
 	rows, err := queryOne[[]embRow](ctx(), db,
@@ -2068,7 +2074,7 @@ func (s *SurrealStore) GetReviewResults(targetID string) []*graph.ReviewResultRe
 		Findings  []interface{}    `json:"findings"`
 		Score     *float64         `json:"score"`
 		CreatedBy string           `json:"created_by"`
-		CreatedAt surrealTime         `json:"created_at"`
+		CreatedAt surrealTime      `json:"created_at"`
 	}
 
 	rows, err := queryOne[[]reviewRow](ctx(), db,

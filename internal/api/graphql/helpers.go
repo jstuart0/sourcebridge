@@ -411,6 +411,10 @@ func mapRepository(gr *graphstore.Repository) *Repository {
 	if gr.Branch != "" {
 		repo.Branch = &gr.Branch
 	}
+	if gr.GenerationModeDefault != "" {
+		mode := mapGenerationMode(knowledgepkg.GenerationMode(gr.GenerationModeDefault))
+		repo.GenerationModeDefault = &mode
+	}
 	return repo
 }
 

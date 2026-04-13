@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"path"
 	"sort"
 	"strings"
@@ -342,6 +343,31 @@ func knowledgeGenerationModeValue(mode *KnowledgeGenerationMode) knowledgepkg.Ge
 	default:
 		return knowledgepkg.GenerationModeUnderstandingFirst
 	}
+}
+
+func defaultKnowledgeGenerationMode() knowledgepkg.GenerationMode {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("SOURCEBRIDGE_KNOWLEDGE_GENERATION_MODE_DEFAULT")))
+	switch raw {
+	case "classic":
+		return knowledgepkg.GenerationModeClassic
+	default:
+		return knowledgepkg.GenerationModeUnderstandingFirst
+	}
+}
+
+func resolvedKnowledgeGenerationMode(repo *graphstore.Repository, requested *KnowledgeGenerationMode) knowledgepkg.GenerationMode {
+	if requested != nil {
+		return knowledgeGenerationModeValue(requested)
+	}
+	if repo != nil {
+		switch strings.ToLower(strings.TrimSpace(repo.GenerationModeDefault)) {
+		case "classic":
+			return knowledgepkg.GenerationModeClassic
+		case "understanding_first":
+			return knowledgepkg.GenerationModeUnderstandingFirst
+		}
+	}
+	return defaultKnowledgeGenerationMode()
 }
 
 func artifactUsesUnderstanding(mode knowledgepkg.GenerationMode) bool {

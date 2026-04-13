@@ -7,11 +7,12 @@ import "github.com/sourcebridge/sourcebridge/internal/indexer"
 
 // RepositoryMeta holds mutable metadata fields for a repository.
 type RepositoryMeta struct {
-	ClonePath string
-	RemoteURL string
-	CommitSHA string
-	Branch    string
-	AuthToken string // personal access token for private HTTPS repos
+	ClonePath             string
+	RemoteURL             string
+	CommitSHA             string
+	Branch                string
+	AuthToken             string // personal access token for private HTTPS repos
+	GenerationModeDefault string
 }
 
 // CallEdge represents a single caller→callee relationship.

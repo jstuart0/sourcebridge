@@ -404,6 +404,22 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 	return mapRepositoryUnderstanding(understanding), nil
 }
 
+// UpdateRepositoryKnowledgeSettings is the resolver for the updateRepositoryKnowledgeSettings field.
+func (r *mutationResolver) UpdateRepositoryKnowledgeSettings(ctx context.Context, input UpdateRepositoryKnowledgeSettingsInput) (*Repository, error) {
+	store := r.getStore(ctx)
+	if store == nil {
+		return nil, fmt.Errorf("store not initialized")
+	}
+	repo := store.GetRepository(input.RepositoryID)
+	if repo == nil {
+		return nil, fmt.Errorf("repository %s not found", input.RepositoryID)
+	}
+	store.UpdateRepositoryMeta(repo.ID, graphstore.RepositoryMeta{
+		GenerationModeDefault: strings.ToLower(string(input.GenerationModeDefault)),
+	})
+	return mapRepository(store.GetRepository(repo.ID)), nil
+}
+
 // ImportRequirements is the resolver for the importRequirements field.
 func (r *mutationResolver) ImportRequirements(ctx context.Context, input ImportRequirementsInput) (*ImportResult, error) {
 	if r.getStore(ctx) == nil {
@@ -1493,7 +1509,7 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 	if err != nil {
 		return nil, err
 	}
-	generationMode := knowledgeGenerationModeValue(input.GenerationMode)
+	generationMode := resolvedKnowledgeGenerationMode(repo, input.GenerationMode)
 	audience := string(key.Audience)
 	depth := string(key.Depth)
 	scope := key.Scope.Normalize()
@@ -1877,7 +1893,7 @@ func (r *mutationResolver) GenerateLearningPath(ctx context.Context, input Gener
 	if input.FocusArea != nil {
 		focusArea = *input.FocusArea
 	}
-	generationMode := knowledgeGenerationModeValue(input.GenerationMode)
+	generationMode := resolvedKnowledgeGenerationMode(repo, input.GenerationMode)
 
 	// Assemble snapshot
 	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
@@ -2057,7 +2073,7 @@ func (r *mutationResolver) GenerateCodeTour(ctx context.Context, input GenerateC
 	if input.Theme != nil {
 		theme = *input.Theme
 	}
-	generationMode := knowledgeGenerationModeValue(input.GenerationMode)
+	generationMode := resolvedKnowledgeGenerationMode(repo, input.GenerationMode)
 
 	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
 	repoRoot, repoRootErr := resolveRepoSourcePath(repo)
@@ -2227,7 +2243,7 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 	audience := string(key.Audience)
 	depth := string(key.Depth)
 	scope := key.Scope.Normalize()
-	generationMode := knowledgeGenerationModeValue(input.GenerationMode)
+	generationMode := resolvedKnowledgeGenerationMode(repo, input.GenerationMode)
 
 	existing := r.KnowledgeStore.GetArtifactByKey(key)
 	if existing != nil {
@@ -2435,7 +2451,7 @@ func (r *mutationResolver) ExplainSystem(ctx context.Context, input ExplainSyste
 	if input.Question != nil {
 		question = *input.Question
 	}
-	generationMode := knowledgeGenerationModeValue(input.GenerationMode)
+	generationMode := resolvedKnowledgeGenerationMode(repo, input.GenerationMode)
 
 	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
 	scope, err := artifactScopeFromInput(input.ScopeType, input.ScopePath)

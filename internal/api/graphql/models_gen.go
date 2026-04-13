@@ -562,6 +562,7 @@ type Repository struct {
 	RemoteURL               *string                  `json:"remoteUrl,omitempty"`
 	CommitSha               *string                  `json:"commitSha,omitempty"`
 	Branch                  *string                  `json:"branch,omitempty"`
+	GenerationModeDefault   *KnowledgeGenerationMode `json:"generationModeDefault,omitempty"`
 	HasAuth                 bool                     `json:"hasAuth"`
 	Status                  RepositoryStatus         `json:"status"`
 	FileCount               int                      `json:"fileCount"`
@@ -813,6 +814,11 @@ type UpdateModelCapabilitiesInput struct {
 	EmbeddingModel         *bool   `json:"embeddingModel,omitempty"`
 	Source                 *string `json:"source,omitempty"`
 	Notes                  *string `json:"notes,omitempty"`
+}
+
+type UpdateRepositoryKnowledgeSettingsInput struct {
+	RepositoryID          string                  `json:"repositoryId"`
+	GenerationModeDefault KnowledgeGenerationMode `json:"generationModeDefault"`
 }
 
 type VersionInfo struct {
