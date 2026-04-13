@@ -47,11 +47,17 @@ body {
 @media (min-width: 768px) {
   .ca-shell-grid {
     height: 100vh;
+    overflow: hidden;
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   }
 
   .ca-shell-grid[data-collapsed="true"] {
     grid-template-columns: var(--sidebar-collapsed-width) minmax(0, 1fr);
+  }
+
+  .ca-shell-grid > main {
+    overflow-y: auto;
+    height: 100vh;
   }
 }
 
