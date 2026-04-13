@@ -110,21 +110,22 @@ type ComplexityRoot struct {
 	}
 
 	ComprehensionSettings struct {
-		AllowUnsafeCombinations func(childComplexity int) int
-		CacheEnabled            func(childComplexity int) int
-		GraphragEntityTypes     func(childComplexity int) int
-		ID                      func(childComplexity int) int
-		LeafBudgetTokens        func(childComplexity int) int
-		LongContextMaxTokens    func(childComplexity int) int
-		MaxConcurrency          func(childComplexity int) int
-		MaxPromptTokens         func(childComplexity int) int
-		ModelID                 func(childComplexity int) int
-		RefinePassEnabled       func(childComplexity int) int
-		ScopeKey                func(childComplexity int) int
-		ScopeType               func(childComplexity int) int
-		StrategyPreferenceChain func(childComplexity int) int
-		UpdatedAt               func(childComplexity int) int
-		UpdatedBy               func(childComplexity int) int
+		AllowUnsafeCombinations        func(childComplexity int) int
+		CacheEnabled                   func(childComplexity int) int
+		GraphragEntityTypes            func(childComplexity int) int
+		ID                             func(childComplexity int) int
+		KnowledgeGenerationModeDefault func(childComplexity int) int
+		LeafBudgetTokens               func(childComplexity int) int
+		LongContextMaxTokens           func(childComplexity int) int
+		MaxConcurrency                 func(childComplexity int) int
+		MaxPromptTokens                func(childComplexity int) int
+		ModelID                        func(childComplexity int) int
+		RefinePassEnabled              func(childComplexity int) int
+		ScopeKey                       func(childComplexity int) int
+		ScopeType                      func(childComplexity int) int
+		StrategyPreferenceChain        func(childComplexity int) int
+		UpdatedAt                      func(childComplexity int) int
+		UpdatedBy                      func(childComplexity int) int
 	}
 
 	CrossRepoRef struct {
@@ -200,19 +201,20 @@ type ComplexityRoot struct {
 	}
 
 	EffectiveComprehensionSettings struct {
-		AllowUnsafeCombinations func(childComplexity int) int
-		CacheEnabled            func(childComplexity int) int
-		GraphragEntityTypes     func(childComplexity int) int
-		InheritedFrom           func(childComplexity int) int
-		LeafBudgetTokens        func(childComplexity int) int
-		LongContextMaxTokens    func(childComplexity int) int
-		MaxConcurrency          func(childComplexity int) int
-		MaxPromptTokens         func(childComplexity int) int
-		ModelID                 func(childComplexity int) int
-		RefinePassEnabled       func(childComplexity int) int
-		ScopeKey                func(childComplexity int) int
-		ScopeType               func(childComplexity int) int
-		StrategyPreferenceChain func(childComplexity int) int
+		AllowUnsafeCombinations        func(childComplexity int) int
+		CacheEnabled                   func(childComplexity int) int
+		GraphragEntityTypes            func(childComplexity int) int
+		InheritedFrom                  func(childComplexity int) int
+		KnowledgeGenerationModeDefault func(childComplexity int) int
+		LeafBudgetTokens               func(childComplexity int) int
+		LongContextMaxTokens           func(childComplexity int) int
+		MaxConcurrency                 func(childComplexity int) int
+		MaxPromptTokens                func(childComplexity int) int
+		ModelID                        func(childComplexity int) int
+		RefinePassEnabled              func(childComplexity int) int
+		ScopeKey                       func(childComplexity int) int
+		ScopeType                      func(childComplexity int) int
+		StrategyPreferenceChain        func(childComplexity int) int
 	}
 
 	ExecutionEntryPoint struct {
@@ -1218,6 +1220,13 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.ComprehensionSettings.ID(childComplexity), true
 
+	case "ComprehensionSettings.knowledgeGenerationModeDefault":
+		if e.complexity.ComprehensionSettings.KnowledgeGenerationModeDefault == nil {
+			break
+		}
+
+		return e.complexity.ComprehensionSettings.KnowledgeGenerationModeDefault(childComplexity), true
+
 	case "ComprehensionSettings.leafBudgetTokens":
 		if e.complexity.ComprehensionSettings.LeafBudgetTokens == nil {
 			break
@@ -1679,6 +1688,13 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.EffectiveComprehensionSettings.InheritedFrom(childComplexity), true
+
+	case "EffectiveComprehensionSettings.knowledgeGenerationModeDefault":
+		if e.complexity.EffectiveComprehensionSettings.KnowledgeGenerationModeDefault == nil {
+			break
+		}
+
+		return e.complexity.EffectiveComprehensionSettings.KnowledgeGenerationModeDefault(childComplexity), true
 
 	case "EffectiveComprehensionSettings.leafBudgetTokens":
 		if e.complexity.EffectiveComprehensionSettings.LeafBudgetTokens == nil {
@@ -10307,6 +10323,47 @@ func (ec *executionContext) fieldContext_ComprehensionSettings_strategyPreferenc
 	return fc, nil
 }
 
+func (ec *executionContext) _ComprehensionSettings_knowledgeGenerationModeDefault(ctx context.Context, field graphql.CollectedField, obj *ComprehensionSettings) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_ComprehensionSettings_knowledgeGenerationModeDefault(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.KnowledgeGenerationModeDefault, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*KnowledgeGenerationMode)
+	fc.Result = res
+	return ec.marshalOKnowledgeGenerationMode2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐKnowledgeGenerationMode(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_ComprehensionSettings_knowledgeGenerationModeDefault(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ComprehensionSettings",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type KnowledgeGenerationMode does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _ComprehensionSettings_modelId(ctx context.Context, field graphql.CollectedField, obj *ComprehensionSettings) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_ComprehensionSettings_modelId(ctx, field)
 	if err != nil {
@@ -13160,6 +13217,50 @@ func (ec *executionContext) fieldContext_EffectiveComprehensionSettings_strategy
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _EffectiveComprehensionSettings_knowledgeGenerationModeDefault(ctx context.Context, field graphql.CollectedField, obj *EffectiveComprehensionSettings) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_EffectiveComprehensionSettings_knowledgeGenerationModeDefault(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.KnowledgeGenerationModeDefault, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(KnowledgeGenerationMode)
+	fc.Result = res
+	return ec.marshalNKnowledgeGenerationMode2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐKnowledgeGenerationMode(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_EffectiveComprehensionSettings_knowledgeGenerationModeDefault(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "EffectiveComprehensionSettings",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type KnowledgeGenerationMode does not have child fields")
 		},
 	}
 	return fc, nil
@@ -24211,6 +24312,8 @@ func (ec *executionContext) fieldContext_Mutation_updateComprehensionSettings(ct
 				return ec.fieldContext_EffectiveComprehensionSettings_scopeKey(ctx, field)
 			case "strategyPreferenceChain":
 				return ec.fieldContext_EffectiveComprehensionSettings_strategyPreferenceChain(ctx, field)
+			case "knowledgeGenerationModeDefault":
+				return ec.fieldContext_EffectiveComprehensionSettings_knowledgeGenerationModeDefault(ctx, field)
 			case "modelId":
 				return ec.fieldContext_EffectiveComprehensionSettings_modelId(ctx, field)
 			case "maxConcurrency":
@@ -27534,6 +27637,8 @@ func (ec *executionContext) fieldContext_Query_comprehensionSettings(ctx context
 				return ec.fieldContext_EffectiveComprehensionSettings_scopeKey(ctx, field)
 			case "strategyPreferenceChain":
 				return ec.fieldContext_EffectiveComprehensionSettings_strategyPreferenceChain(ctx, field)
+			case "knowledgeGenerationModeDefault":
+				return ec.fieldContext_EffectiveComprehensionSettings_knowledgeGenerationModeDefault(ctx, field)
 			case "modelId":
 				return ec.fieldContext_EffectiveComprehensionSettings_modelId(ctx, field)
 			case "maxConcurrency":
@@ -27619,6 +27724,8 @@ func (ec *executionContext) fieldContext_Query_comprehensionSettingsList(_ conte
 				return ec.fieldContext_ComprehensionSettings_scopeKey(ctx, field)
 			case "strategyPreferenceChain":
 				return ec.fieldContext_ComprehensionSettings_strategyPreferenceChain(ctx, field)
+			case "knowledgeGenerationModeDefault":
+				return ec.fieldContext_ComprehensionSettings_knowledgeGenerationModeDefault(ctx, field)
 			case "modelId":
 				return ec.fieldContext_ComprehensionSettings_modelId(ctx, field)
 			case "maxConcurrency":
@@ -37638,7 +37745,7 @@ func (ec *executionContext) unmarshalInputUpdateComprehensionSettingsInput(ctx c
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"scopeType", "scopeKey", "strategyPreferenceChain", "modelId", "maxConcurrency", "maxPromptTokens", "leafBudgetTokens", "refinePassEnabled", "longContextMaxTokens", "graphragEntityTypes", "cacheEnabled", "allowUnsafeCombinations"}
+	fieldsInOrder := [...]string{"scopeType", "scopeKey", "strategyPreferenceChain", "knowledgeGenerationModeDefault", "modelId", "maxConcurrency", "maxPromptTokens", "leafBudgetTokens", "refinePassEnabled", "longContextMaxTokens", "graphragEntityTypes", "cacheEnabled", "allowUnsafeCombinations"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -37666,6 +37773,13 @@ func (ec *executionContext) unmarshalInputUpdateComprehensionSettingsInput(ctx c
 				return it, err
 			}
 			it.StrategyPreferenceChain = data
+		case "knowledgeGenerationModeDefault":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("knowledgeGenerationModeDefault"))
+			data, err := ec.unmarshalOKnowledgeGenerationMode2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐKnowledgeGenerationMode(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.KnowledgeGenerationModeDefault = data
 		case "modelId":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("modelId"))
 			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
@@ -38301,6 +38415,8 @@ func (ec *executionContext) _ComprehensionSettings(ctx context.Context, sel ast.
 			}
 		case "strategyPreferenceChain":
 			out.Values[i] = ec._ComprehensionSettings_strategyPreferenceChain(ctx, field, obj)
+		case "knowledgeGenerationModeDefault":
+			out.Values[i] = ec._ComprehensionSettings_knowledgeGenerationModeDefault(ctx, field, obj)
 		case "modelId":
 			out.Values[i] = ec._ComprehensionSettings_modelId(ctx, field, obj)
 		case "maxConcurrency":
@@ -38835,6 +38951,11 @@ func (ec *executionContext) _EffectiveComprehensionSettings(ctx context.Context,
 			}
 		case "strategyPreferenceChain":
 			out.Values[i] = ec._EffectiveComprehensionSettings_strategyPreferenceChain(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "knowledgeGenerationModeDefault":
+			out.Values[i] = ec._EffectiveComprehensionSettings_knowledgeGenerationModeDefault(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}

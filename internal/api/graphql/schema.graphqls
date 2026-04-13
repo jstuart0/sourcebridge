@@ -1041,6 +1041,7 @@ type ComprehensionSettings {
   scopeType: String!
   scopeKey: String!
   strategyPreferenceChain: [String!]
+  knowledgeGenerationModeDefault: KnowledgeGenerationMode
   modelId: String
   maxConcurrency: Int
   maxPromptTokens: Int
@@ -1063,6 +1064,7 @@ type EffectiveComprehensionSettings {
   scopeType: String!
   scopeKey: String!
   strategyPreferenceChain: [String!]!
+  knowledgeGenerationModeDefault: KnowledgeGenerationMode!
   modelId: String!
   maxConcurrency: Int!
   maxPromptTokens: Int!
@@ -1105,6 +1107,7 @@ input UpdateComprehensionSettingsInput {
   scopeType: String!
   scopeKey: String
   strategyPreferenceChain: [String!]
+  knowledgeGenerationModeDefault: KnowledgeGenerationMode
   modelId: String
   maxConcurrency: Int
   maxPromptTokens: Int

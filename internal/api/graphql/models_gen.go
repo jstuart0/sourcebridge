@@ -84,21 +84,22 @@ type CodeTourStop struct {
 }
 
 type ComprehensionSettings struct {
-	ID                      *string    `json:"id,omitempty"`
-	ScopeType               string     `json:"scopeType"`
-	ScopeKey                string     `json:"scopeKey"`
-	StrategyPreferenceChain []string   `json:"strategyPreferenceChain,omitempty"`
-	ModelID                 *string    `json:"modelId,omitempty"`
-	MaxConcurrency          *int       `json:"maxConcurrency,omitempty"`
-	MaxPromptTokens         *int       `json:"maxPromptTokens,omitempty"`
-	LeafBudgetTokens        *int       `json:"leafBudgetTokens,omitempty"`
-	RefinePassEnabled       *bool      `json:"refinePassEnabled,omitempty"`
-	LongContextMaxTokens    *int       `json:"longContextMaxTokens,omitempty"`
-	GraphragEntityTypes     []string   `json:"graphragEntityTypes,omitempty"`
-	CacheEnabled            *bool      `json:"cacheEnabled,omitempty"`
-	AllowUnsafeCombinations *bool      `json:"allowUnsafeCombinations,omitempty"`
-	UpdatedAt               *time.Time `json:"updatedAt,omitempty"`
-	UpdatedBy               *string    `json:"updatedBy,omitempty"`
+	ID                             *string                  `json:"id,omitempty"`
+	ScopeType                      string                   `json:"scopeType"`
+	ScopeKey                       string                   `json:"scopeKey"`
+	StrategyPreferenceChain        []string                 `json:"strategyPreferenceChain,omitempty"`
+	KnowledgeGenerationModeDefault *KnowledgeGenerationMode `json:"knowledgeGenerationModeDefault,omitempty"`
+	ModelID                        *string                  `json:"modelId,omitempty"`
+	MaxConcurrency                 *int                     `json:"maxConcurrency,omitempty"`
+	MaxPromptTokens                *int                     `json:"maxPromptTokens,omitempty"`
+	LeafBudgetTokens               *int                     `json:"leafBudgetTokens,omitempty"`
+	RefinePassEnabled              *bool                    `json:"refinePassEnabled,omitempty"`
+	LongContextMaxTokens           *int                     `json:"longContextMaxTokens,omitempty"`
+	GraphragEntityTypes            []string                 `json:"graphragEntityTypes,omitempty"`
+	CacheEnabled                   *bool                    `json:"cacheEnabled,omitempty"`
+	AllowUnsafeCombinations        *bool                    `json:"allowUnsafeCombinations,omitempty"`
+	UpdatedAt                      *time.Time               `json:"updatedAt,omitempty"`
+	UpdatedBy                      *string                  `json:"updatedBy,omitempty"`
 }
 
 type CreateManualLinkInput struct {
@@ -193,19 +194,20 @@ type DiscussionResult struct {
 }
 
 type EffectiveComprehensionSettings struct {
-	ScopeType               string         `json:"scopeType"`
-	ScopeKey                string         `json:"scopeKey"`
-	StrategyPreferenceChain []string       `json:"strategyPreferenceChain"`
-	ModelID                 string         `json:"modelId"`
-	MaxConcurrency          int            `json:"maxConcurrency"`
-	MaxPromptTokens         int            `json:"maxPromptTokens"`
-	LeafBudgetTokens        int            `json:"leafBudgetTokens"`
-	RefinePassEnabled       bool           `json:"refinePassEnabled"`
-	LongContextMaxTokens    int            `json:"longContextMaxTokens"`
-	GraphragEntityTypes     []string       `json:"graphragEntityTypes"`
-	CacheEnabled            bool           `json:"cacheEnabled"`
-	AllowUnsafeCombinations bool           `json:"allowUnsafeCombinations"`
-	InheritedFrom           []*FieldOrigin `json:"inheritedFrom,omitempty"`
+	ScopeType                      string                  `json:"scopeType"`
+	ScopeKey                       string                  `json:"scopeKey"`
+	StrategyPreferenceChain        []string                `json:"strategyPreferenceChain"`
+	KnowledgeGenerationModeDefault KnowledgeGenerationMode `json:"knowledgeGenerationModeDefault"`
+	ModelID                        string                  `json:"modelId"`
+	MaxConcurrency                 int                     `json:"maxConcurrency"`
+	MaxPromptTokens                int                     `json:"maxPromptTokens"`
+	LeafBudgetTokens               int                     `json:"leafBudgetTokens"`
+	RefinePassEnabled              bool                    `json:"refinePassEnabled"`
+	LongContextMaxTokens           int                     `json:"longContextMaxTokens"`
+	GraphragEntityTypes            []string                `json:"graphragEntityTypes"`
+	CacheEnabled                   bool                    `json:"cacheEnabled"`
+	AllowUnsafeCombinations        bool                    `json:"allowUnsafeCombinations"`
+	InheritedFrom                  []*FieldOrigin          `json:"inheritedFrom,omitempty"`
 }
 
 type ExecutionEntryPoint struct {
@@ -787,18 +789,19 @@ type UnderstandingSection struct {
 }
 
 type UpdateComprehensionSettingsInput struct {
-	ScopeType               string   `json:"scopeType"`
-	ScopeKey                *string  `json:"scopeKey,omitempty"`
-	StrategyPreferenceChain []string `json:"strategyPreferenceChain,omitempty"`
-	ModelID                 *string  `json:"modelId,omitempty"`
-	MaxConcurrency          *int     `json:"maxConcurrency,omitempty"`
-	MaxPromptTokens         *int     `json:"maxPromptTokens,omitempty"`
-	LeafBudgetTokens        *int     `json:"leafBudgetTokens,omitempty"`
-	RefinePassEnabled       *bool    `json:"refinePassEnabled,omitempty"`
-	LongContextMaxTokens    *int     `json:"longContextMaxTokens,omitempty"`
-	GraphragEntityTypes     []string `json:"graphragEntityTypes,omitempty"`
-	CacheEnabled            *bool    `json:"cacheEnabled,omitempty"`
-	AllowUnsafeCombinations *bool    `json:"allowUnsafeCombinations,omitempty"`
+	ScopeType                      string                   `json:"scopeType"`
+	ScopeKey                       *string                  `json:"scopeKey,omitempty"`
+	StrategyPreferenceChain        []string                 `json:"strategyPreferenceChain,omitempty"`
+	KnowledgeGenerationModeDefault *KnowledgeGenerationMode `json:"knowledgeGenerationModeDefault,omitempty"`
+	ModelID                        *string                  `json:"modelId,omitempty"`
+	MaxConcurrency                 *int                     `json:"maxConcurrency,omitempty"`
+	MaxPromptTokens                *int                     `json:"maxPromptTokens,omitempty"`
+	LeafBudgetTokens               *int                     `json:"leafBudgetTokens,omitempty"`
+	RefinePassEnabled              *bool                    `json:"refinePassEnabled,omitempty"`
+	LongContextMaxTokens           *int                     `json:"longContextMaxTokens,omitempty"`
+	GraphragEntityTypes            []string                 `json:"graphragEntityTypes,omitempty"`
+	CacheEnabled                   *bool                    `json:"cacheEnabled,omitempty"`
+	AllowUnsafeCombinations        *bool                    `json:"allowUnsafeCombinations,omitempty"`
 }
 
 type UpdateModelCapabilitiesInput struct {

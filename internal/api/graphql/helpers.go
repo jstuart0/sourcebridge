@@ -732,6 +732,10 @@ func mapSettings(s *comprehension.Settings) *ComprehensionSettings {
 		CacheEnabled:            s.CacheEnabled,
 		AllowUnsafeCombinations: s.AllowUnsafeCombinations,
 	}
+	if s.KnowledgeGenerationModeDefault != "" {
+		mode := mapGenerationMode(knowledgepkg.GenerationMode(s.KnowledgeGenerationModeDefault))
+		cs.KnowledgeGenerationModeDefault = &mode
+	}
 	if s.ID != "" {
 		cs.ID = &s.ID
 	}
@@ -784,6 +788,7 @@ func mapEffectiveSettings(eff *comprehension.EffectiveSettings) *EffectiveCompre
 		ScopeType:               string(eff.ScopeType),
 		ScopeKey:                eff.ScopeKey,
 		StrategyPreferenceChain: eff.StrategyPreferenceChain,
+		KnowledgeGenerationModeDefault: mapGenerationMode(knowledgepkg.GenerationMode(eff.KnowledgeGenerationModeDefault)),
 		ModelID:                 eff.ModelID,
 		MaxConcurrency:          eff.MaxConcurrency,
 		MaxPromptTokens:         eff.MaxPromptTokens,

@@ -2863,6 +2863,9 @@ func (r *mutationResolver) UpdateComprehensionSettings(ctx context.Context, inpu
 		CacheEnabled:            input.CacheEnabled,
 		AllowUnsafeCombinations: input.AllowUnsafeCombinations,
 	}
+	if input.KnowledgeGenerationModeDefault != nil {
+		settings.KnowledgeGenerationModeDefault = strings.ToLower(string(*input.KnowledgeGenerationModeDefault))
+	}
 	if input.ModelID != nil {
 		settings.ModelID = *input.ModelID
 	}
