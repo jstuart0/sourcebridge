@@ -46,6 +46,7 @@ body {
 
 @media (min-width: 768px) {
   .ca-shell-grid {
+    height: 100vh;
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   }
 

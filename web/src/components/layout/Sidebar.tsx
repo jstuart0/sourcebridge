@@ -154,7 +154,7 @@ export function Sidebar({ onCollapseChange }: { onCollapseChange?: (collapsed: b
       <aside
         data-collapsed={collapsed}
         className={cn(
-          "hidden h-screen flex-col border-r border-[var(--border-subtle)] bg-[var(--nav-bg)]/95 px-3 py-4 shadow-[var(--panel-shadow-soft)] transition-[width] duration-200 md:sticky md:top-0 md:flex md:overflow-y-auto",
+          "hidden h-screen flex-col border-r border-[var(--border-subtle)] bg-[var(--nav-bg)]/95 px-3 py-4 shadow-[var(--panel-shadow-soft)] transition-[width] duration-200 md:flex md:overflow-y-auto",
           collapsed ? "w-[var(--sidebar-collapsed-width)]" : "w-[var(--sidebar-width)]"
         )}
       >
