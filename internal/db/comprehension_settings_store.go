@@ -22,36 +22,38 @@ var _ comprehension.Store = (*SurrealStore)(nil)
 // ---------------------------------------------------------------------------
 
 type surrealStrategySettings struct {
-	ID                      *models.RecordID `json:"id,omitempty"`
-	ScopeType               string           `json:"scope_type"`
-	ScopeKey                string           `json:"scope_key"`
-	StrategyPreferenceChain string           `json:"strategy_preference_chain"`
-	ModelID                 string           `json:"model_id"`
-	MaxConcurrency          int              `json:"max_concurrency"`
-	MaxPromptTokens         int              `json:"max_prompt_tokens"`
-	LeafBudgetTokens        int              `json:"leaf_budget_tokens"`
-	RefinePassEnabled       bool             `json:"refine_pass_enabled"`
-	LongContextMaxTokens    int              `json:"long_context_max_tokens"`
-	GraphRAGEntityTypes     string           `json:"graphrag_entity_types"`
-	CacheEnabled            bool             `json:"cache_enabled"`
-	AllowUnsafeCombinations bool             `json:"allow_unsafe_combinations"`
-	UpdatedAt               surrealTime      `json:"updated_at"`
-	UpdatedBy               string           `json:"updated_by"`
-	CreatedAt               surrealTime      `json:"created_at"`
+	ID                             *models.RecordID `json:"id,omitempty"`
+	ScopeType                      string           `json:"scope_type"`
+	ScopeKey                       string           `json:"scope_key"`
+	StrategyPreferenceChain        string           `json:"strategy_preference_chain"`
+	KnowledgeGenerationModeDefault string           `json:"knowledge_generation_mode_default"`
+	ModelID                        string           `json:"model_id"`
+	MaxConcurrency                 int              `json:"max_concurrency"`
+	MaxPromptTokens                int              `json:"max_prompt_tokens"`
+	LeafBudgetTokens               int              `json:"leaf_budget_tokens"`
+	RefinePassEnabled              bool             `json:"refine_pass_enabled"`
+	LongContextMaxTokens           int              `json:"long_context_max_tokens"`
+	GraphRAGEntityTypes            string           `json:"graphrag_entity_types"`
+	CacheEnabled                   bool             `json:"cache_enabled"`
+	AllowUnsafeCombinations        bool             `json:"allow_unsafe_combinations"`
+	UpdatedAt                      surrealTime      `json:"updated_at"`
+	UpdatedBy                      string           `json:"updated_by"`
+	CreatedAt                      surrealTime      `json:"created_at"`
 }
 
 func (r *surrealStrategySettings) toSettings() *comprehension.Settings {
 	s := &comprehension.Settings{
-		ID:                   recordIDString(r.ID),
-		ScopeType:            comprehension.ScopeType(r.ScopeType),
-		ScopeKey:             r.ScopeKey,
-		ModelID:              r.ModelID,
-		MaxConcurrency:       r.MaxConcurrency,
-		MaxPromptTokens:      r.MaxPromptTokens,
-		LeafBudgetTokens:     r.LeafBudgetTokens,
-		LongContextMaxTokens: r.LongContextMaxTokens,
-		UpdatedAt:            r.UpdatedAt.Time,
-		UpdatedBy:            r.UpdatedBy,
+		ID:                             recordIDString(r.ID),
+		ScopeType:                      comprehension.ScopeType(r.ScopeType),
+		ScopeKey:                       r.ScopeKey,
+		KnowledgeGenerationModeDefault: r.KnowledgeGenerationModeDefault,
+		ModelID:                        r.ModelID,
+		MaxConcurrency:                 r.MaxConcurrency,
+		MaxPromptTokens:                r.MaxPromptTokens,
+		LeafBudgetTokens:               r.LeafBudgetTokens,
+		LongContextMaxTokens:           r.LongContextMaxTokens,
+		UpdatedAt:                      r.UpdatedAt.Time,
+		UpdatedBy:                      r.UpdatedBy,
 	}
 
 	// Unmarshal JSON arrays stored as strings
@@ -177,6 +179,7 @@ func (s *SurrealStore) SetSettings(settings *comprehension.Settings) error {
 		IF array::len($existing) > 0 THEN
 			(UPDATE ca_strategy_settings SET
 				strategy_preference_chain = $chain,
+				knowledge_generation_mode_default = $generation_mode_default,
 				model_id = $model_id,
 				max_concurrency = $max_concurrency,
 				max_prompt_tokens = $max_prompt_tokens,
@@ -195,6 +198,7 @@ func (s *SurrealStore) SetSettings(settings *comprehension.Settings) error {
 				scope_type = $scope_type,
 				scope_key = $scope_key,
 				strategy_preference_chain = $chain,
+				knowledge_generation_mode_default = $generation_mode_default,
 				model_id = $model_id,
 				max_concurrency = $max_concurrency,
 				max_prompt_tokens = $max_prompt_tokens,
@@ -213,20 +217,21 @@ func (s *SurrealStore) SetSettings(settings *comprehension.Settings) error {
 		id = uuid.New().String()
 	}
 	vars := map[string]any{
-		"id":                     id,
-		"scope_type":             string(settings.ScopeType),
-		"scope_key":              settings.ScopeKey,
-		"chain":                  string(chainJSON),
-		"model_id":               settings.ModelID,
-		"max_concurrency":        settings.MaxConcurrency,
-		"max_prompt_tokens":      settings.MaxPromptTokens,
-		"leaf_budget_tokens":     settings.LeafBudgetTokens,
-		"refine":                 refine,
+		"id":                      id,
+		"scope_type":              string(settings.ScopeType),
+		"scope_key":               settings.ScopeKey,
+		"chain":                   string(chainJSON),
+		"generation_mode_default": settings.KnowledgeGenerationModeDefault,
+		"model_id":                settings.ModelID,
+		"max_concurrency":         settings.MaxConcurrency,
+		"max_prompt_tokens":       settings.MaxPromptTokens,
+		"leaf_budget_tokens":      settings.LeafBudgetTokens,
+		"refine":                  refine,
 		"long_context_max_tokens": settings.LongContextMaxTokens,
-		"entity_types":           string(entityTypesJSON),
-		"cache":                  cache,
-		"unsafe":                 unsafe,
-		"updated_by":             settings.UpdatedBy,
+		"entity_types":            string(entityTypesJSON),
+		"cache":                   cache,
+		"unsafe":                  unsafe,
+		"updated_by":              settings.UpdatedBy,
 	}
 
 	_, err := surrealdb.Query[interface{}](ctx(), db, sql, vars)

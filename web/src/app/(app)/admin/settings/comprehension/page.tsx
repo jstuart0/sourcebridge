@@ -34,6 +34,7 @@ interface EffectiveSettings {
   scopeType: string;
   scopeKey: string;
   strategyPreferenceChain: string[];
+  knowledgeGenerationModeDefault?: "classic" | "understanding_first";
   modelId: string;
   maxConcurrency: number;
   maxPromptTokens: number;
@@ -140,6 +141,7 @@ export default function ComprehensionSettingsPage() {
   // Editable fields (simple mode)
   const [selectedModel, setSelectedModel] = useState("");
   const [strategyChain, setStrategyChain] = useState<string[]>([]);
+  const [generationModeDefault, setGenerationModeDefault] = useState<"classic" | "understanding_first">("understanding_first");
   // Advanced fields
   const [maxConcurrency, setMaxConcurrency] = useState(3);
   const [maxPromptTokens, setMaxPromptTokens] = useState(100000);
@@ -174,6 +176,7 @@ export default function ComprehensionSettingsPage() {
         if (!initialLoad.current) {
           setSelectedModel(s.modelId || "");
           setStrategyChain(s.strategyPreferenceChain || ["hierarchical", "single_shot"]);
+          setGenerationModeDefault((s.knowledgeGenerationModeDefault || "understanding_first") as "classic" | "understanding_first");
           setMaxConcurrency(s.maxConcurrency || 3);
           setMaxPromptTokens(s.maxPromptTokens || 100000);
           setLeafBudgetTokens(s.leafBudgetTokens || 3000);
@@ -218,6 +221,7 @@ export default function ComprehensionSettingsPage() {
           scopeType: "workspace",
           scopeKey: "default",
           strategyPreferenceChain: strategyChain,
+          knowledgeGenerationModeDefault: generationModeDefault,
           modelId: selectedModel,
           maxConcurrency,
           maxPromptTokens,
@@ -250,6 +254,7 @@ export default function ComprehensionSettingsPage() {
           scopeType: "workspace",
           scopeKey: "default",
           strategyPreferenceChain: undoSnapshot.strategyPreferenceChain,
+          knowledgeGenerationModeDefault: undoSnapshot.knowledgeGenerationModeDefault || "understanding_first",
           modelId: undoSnapshot.modelId,
           maxConcurrency: undoSnapshot.maxConcurrency,
           maxPromptTokens: undoSnapshot.maxPromptTokens,
@@ -482,6 +487,38 @@ export default function ComprehensionSettingsPage() {
                     ))}
                 </select>
               )}
+            </div>
+          </div>
+        </Panel>
+
+        <Panel>
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-base font-semibold text-[var(--text-primary)]">Default Generation Mode</h3>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                Choose the workspace-wide default engine for repository knowledge generation. Per-repo and per-request overrides still take precedence.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { key: "understanding_first" as const, label: "Understanding First", detail: "Shared understanding, reuse, and background deepening." },
+                { key: "classic" as const, label: "Classic", detail: "Direct artifact generation without the understanding-first substrate." },
+              ].map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => setGenerationModeDefault(option.key)}
+                  className={cn(
+                    "rounded-[var(--control-radius)] border px-3 py-2 text-left text-sm transition-colors",
+                    generationModeDefault === option.key
+                      ? "border-[var(--accent-primary)] bg-[var(--accent-primary)]/10 text-[var(--text-primary)]"
+                      : "border-[var(--border-default)] bg-[var(--bg-base)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                  )}
+                >
+                  <div className="font-medium">{option.label}</div>
+                  <div className="mt-1 max-w-sm text-xs text-[var(--text-tertiary)]">{option.detail}</div>
+                </button>
+              ))}
             </div>
           </div>
         </Panel>

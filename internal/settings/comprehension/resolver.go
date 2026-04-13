@@ -72,6 +72,10 @@ func applyOverrides(eff *EffectiveSettings, src *Settings, scope Scope) {
 		eff.StrategyPreferenceChain = src.StrategyPreferenceChain
 		eff.InheritedFrom["strategyPreferenceChain"] = scope
 	}
+	if src.KnowledgeGenerationModeDefault != "" {
+		eff.KnowledgeGenerationModeDefault = src.KnowledgeGenerationModeDefault
+		eff.InheritedFrom["knowledgeGenerationModeDefault"] = scope
+	}
 	if src.ModelID != "" {
 		eff.ModelID = src.ModelID
 		eff.InheritedFrom["modelId"] = scope

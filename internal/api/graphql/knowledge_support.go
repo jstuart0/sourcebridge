@@ -14,6 +14,7 @@ import (
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 )
 
 type repositoryUnderstandingMetadata struct {
@@ -345,7 +346,17 @@ func knowledgeGenerationModeValue(mode *KnowledgeGenerationMode) knowledgepkg.Ge
 	}
 }
 
-func defaultKnowledgeGenerationMode() knowledgepkg.GenerationMode {
+func configuredKnowledgeGenerationModeDefault(store comprehension.Store) knowledgepkg.GenerationMode {
+	if store != nil {
+		if eff, err := comprehension.Resolve(store, comprehension.WorkspaceScope); err == nil && eff != nil {
+			switch strings.TrimSpace(strings.ToLower(eff.KnowledgeGenerationModeDefault)) {
+			case "classic":
+				return knowledgepkg.GenerationModeClassic
+			case "understanding_first":
+				return knowledgepkg.GenerationModeUnderstandingFirst
+			}
+		}
+	}
 	raw := strings.TrimSpace(strings.ToLower(os.Getenv("SOURCEBRIDGE_KNOWLEDGE_GENERATION_MODE_DEFAULT")))
 	switch raw {
 	case "classic":
@@ -355,7 +366,7 @@ func defaultKnowledgeGenerationMode() knowledgepkg.GenerationMode {
 	}
 }
 
-func resolvedKnowledgeGenerationMode(repo *graphstore.Repository, requested *KnowledgeGenerationMode) knowledgepkg.GenerationMode {
+func resolvedKnowledgeGenerationMode(store comprehension.Store, repo *graphstore.Repository, requested *KnowledgeGenerationMode) knowledgepkg.GenerationMode {
 	if requested != nil {
 		return knowledgeGenerationModeValue(requested)
 	}
@@ -367,7 +378,69 @@ func resolvedKnowledgeGenerationMode(repo *graphstore.Repository, requested *Kno
 			return knowledgepkg.GenerationModeUnderstandingFirst
 		}
 	}
-	return defaultKnowledgeGenerationMode()
+	return configuredKnowledgeGenerationModeDefault(store)
+}
+
+func enrichSnapshotWithCliffNotesAnalysis(
+	store knowledgepkg.KnowledgeStore,
+	repoID string,
+	audience knowledgepkg.Audience,
+	snapshotJSON []byte,
+) ([]byte, bool) {
+	if store == nil || strings.TrimSpace(repoID) == "" || len(snapshotJSON) == 0 {
+		return snapshotJSON, false
+	}
+	lookupOrder := []knowledgepkg.ArtifactKey{
+		knowledgepkg.ArtifactKey{
+			RepositoryID: repoID,
+			Type:         knowledgepkg.ArtifactCliffNotes,
+			Audience:     audience,
+			Depth:        knowledgepkg.DepthMedium,
+			Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
+		}.Normalized(),
+		knowledgepkg.ArtifactKey{
+			RepositoryID: repoID,
+			Type:         knowledgepkg.ArtifactCliffNotes,
+			Audience:     knowledgepkg.AudienceDeveloper,
+			Depth:        knowledgepkg.DepthMedium,
+			Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
+		}.Normalized(),
+	}
+	var cliffNotes *knowledgepkg.Artifact
+	for _, key := range lookupOrder {
+		if candidate := store.GetArtifactByKey(key); candidate != nil && candidate.Status == knowledgepkg.StatusReady {
+			cliffNotes = candidate
+			break
+		}
+	}
+	if cliffNotes == nil {
+		return snapshotJSON, false
+	}
+	sections := store.GetKnowledgeSections(cliffNotes.ID)
+	if len(sections) == 0 {
+		return snapshotJSON, false
+	}
+	var snapMap map[string]any
+	if err := json.Unmarshal(snapshotJSON, &snapMap); err != nil {
+		return snapshotJSON, false
+	}
+	if _, exists := snapMap["_pre_analysis"]; exists {
+		return snapshotJSON, false
+	}
+	analysis := make([]map[string]string, 0, len(sections))
+	for _, sec := range sections {
+		analysis = append(analysis, map[string]string{
+			"title":   sec.Title,
+			"content": sec.Content,
+			"summary": sec.Summary,
+		})
+	}
+	snapMap["_pre_analysis"] = analysis
+	enriched, err := json.Marshal(snapMap)
+	if err != nil {
+		return snapshotJSON, false
+	}
+	return enriched, true
 }
 
 func artifactUsesUnderstanding(mode knowledgepkg.GenerationMode) bool {

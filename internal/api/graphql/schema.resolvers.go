@@ -1509,7 +1509,7 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 	if err != nil {
 		return nil, err
 	}
-	generationMode := resolvedKnowledgeGenerationMode(repo, input.GenerationMode)
+	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
 	audience := string(key.Audience)
 	depth := string(key.Depth)
 	scope := key.Scope.Normalize()
@@ -1893,7 +1893,7 @@ func (r *mutationResolver) GenerateLearningPath(ctx context.Context, input Gener
 	if input.FocusArea != nil {
 		focusArea = *input.FocusArea
 	}
-	generationMode := resolvedKnowledgeGenerationMode(repo, input.GenerationMode)
+	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
 
 	// Assemble snapshot
 	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
@@ -1960,6 +1960,11 @@ func (r *mutationResolver) GenerateLearningPath(ctx context.Context, input Gener
 						enrichedSnapJSON = enriched
 					}
 				}
+			}
+		}
+		if knowledgepkg.Depth(depth) == knowledgepkg.DepthDeep {
+			if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), enrichedSnapJSON); ok {
+				enrichedSnapJSON = enriched
 			}
 		}
 
@@ -2073,7 +2078,7 @@ func (r *mutationResolver) GenerateCodeTour(ctx context.Context, input GenerateC
 	if input.Theme != nil {
 		theme = *input.Theme
 	}
-	generationMode := resolvedKnowledgeGenerationMode(repo, input.GenerationMode)
+	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
 
 	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
 	repoRoot, repoRootErr := resolveRepoSourcePath(repo)
@@ -2139,6 +2144,11 @@ func (r *mutationResolver) GenerateCodeTour(ctx context.Context, input GenerateC
 						enrichedSnapJSON = enriched
 					}
 				}
+			}
+		}
+		if knowledgepkg.Depth(depth) == knowledgepkg.DepthDeep {
+			if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), enrichedSnapJSON); ok {
+				enrichedSnapJSON = enriched
 			}
 		}
 
@@ -2243,7 +2253,7 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 	audience := string(key.Audience)
 	depth := string(key.Depth)
 	scope := key.Scope.Normalize()
-	generationMode := resolvedKnowledgeGenerationMode(repo, input.GenerationMode)
+	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
 
 	existing := r.KnowledgeStore.GetArtifactByKey(key)
 	if existing != nil {
@@ -2322,36 +2332,9 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 				}
 			}
 		}
-		if depth == "deep" && r.KnowledgeStore != nil {
-			cliffNotesKey := knowledgepkg.ArtifactKey{
-				RepositoryID: repo.ID,
-				Type:         knowledgepkg.ArtifactCliffNotes,
-				Audience:     knowledgepkg.Audience(audience),
-				Depth:        knowledgepkg.DepthMedium,
-				Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
-			}.Normalized()
-			if cliffNotes := r.KnowledgeStore.GetArtifactByKey(cliffNotesKey); cliffNotes != nil && cliffNotes.Status == knowledgepkg.StatusReady {
-				sections := r.KnowledgeStore.GetKnowledgeSections(cliffNotes.ID)
-				if len(sections) > 0 {
-					var analysis []map[string]string
-					for _, sec := range sections {
-						analysis = append(analysis, map[string]string{
-							"title":   sec.Title,
-							"content": sec.Content,
-							"summary": sec.Summary,
-						})
-					}
-					var snapMap map[string]interface{}
-					if err := json.Unmarshal(enrichedSnapJSON, &snapMap); err == nil {
-						snapMap["_pre_analysis"] = analysis
-						if enriched, err := json.Marshal(snapMap); err == nil {
-							enrichedSnapJSON = enriched
-							slog.Info("workflow_story_deep_enriched",
-								"artifact_id", artifact.ID,
-								"cliff_notes_sections", len(sections))
-						}
-					}
-				}
+		if knowledgepkg.Depth(depth) == knowledgepkg.DepthDeep {
+			if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), enrichedSnapJSON); ok {
+				enrichedSnapJSON = enriched
 			}
 		}
 
@@ -2451,7 +2434,7 @@ func (r *mutationResolver) ExplainSystem(ctx context.Context, input ExplainSyste
 	if input.Question != nil {
 		question = *input.Question
 	}
-	generationMode := resolvedKnowledgeGenerationMode(repo, input.GenerationMode)
+	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
 
 	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
 	scope, err := artifactScopeFromInput(input.ScopeType, input.ScopePath)
@@ -2712,6 +2695,11 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					}
 				}
 			}
+			if existing.Depth == knowledgepkg.DepthDeep {
+				if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, existing.Audience, enrichedSnapJSON); ok {
+					enrichedSnapJSON = enriched
+				}
+			}
 			resp, err := r.Worker.GenerateLearningPath(r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, existing.ID, "learning_path"), &knowledgev1.GenerateLearningPathRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
@@ -2749,6 +2737,11 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
 						enrichedSnapJSON = enriched
 					}
+				}
+			}
+			if existing.Depth == knowledgepkg.DepthDeep {
+				if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, existing.Audience, enrichedSnapJSON); ok {
+					enrichedSnapJSON = enriched
 				}
 			}
 			resp, err := r.Worker.GenerateCodeTour(r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, existing.ID, "code_tour"), &knowledgev1.GenerateCodeTourRequest{
@@ -2799,6 +2792,11 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
 						enrichedSnapJSON = enriched
 					}
+				}
+			}
+			if existing.Depth == knowledgepkg.DepthDeep {
+				if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, existing.Audience, enrichedSnapJSON); ok {
+					enrichedSnapJSON = enriched
 				}
 			}
 			resp, err := r.Worker.GenerateWorkflowStory(r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, existing.ID, "workflow_story"), &knowledgev1.GenerateWorkflowStoryRequest{

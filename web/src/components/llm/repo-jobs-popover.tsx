@@ -23,6 +23,8 @@ interface JobView {
   id: string;
   subsystem: string;
   job_type: string;
+  priority?: "interactive" | "maintenance" | "prewarm";
+  generation_mode?: "classic" | "understanding_first";
   status: "pending" | "generating" | "ready" | "failed" | "cancelled";
   progress: number;
   progress_phase?: string;
@@ -97,6 +99,11 @@ function reuseLabel(job: JobView): string | null {
   const reused = job.reused_summaries ?? 0;
   if (reused <= 0) return null;
   return `${reused} reused`;
+}
+
+function generationModeLabel(mode?: JobView["generation_mode"]): string | null {
+  if (!mode) return null;
+  return mode === "classic" ? "Classic" : "Understanding First";
 }
 
 function formatTime(iso: string): string {
@@ -258,6 +265,11 @@ export function RepoJobsPopover({ repoId }: { repoId: string }) {
                         Shared by {job.attached_requests} requests
                       </div>
                     ) : null}
+                    {generationModeLabel(job.generation_mode) ? (
+                      <div className="mt-1 text-[11px] text-[var(--text-tertiary)]">
+                        {generationModeLabel(job.generation_mode)}
+                      </div>
+                    ) : null}
                     {reuseLabel(job) ? (
                       <div className="mt-1 text-[11px] text-[var(--text-tertiary)]">
                         {reuseLabel(job)}
@@ -311,6 +323,7 @@ export function RepoJobsPopover({ repoId }: { repoId: string }) {
                     ) : (
                       <p className="truncate">
                         {formatElapsed(job.elapsed_ms)}
+                        {generationModeLabel(job.generation_mode) ? ` · ${generationModeLabel(job.generation_mode)}` : ""}
                         {reuseLabel(job) ? ` · ${reuseLabel(job)}` : ""}
                       </p>
                     )}

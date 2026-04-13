@@ -31,21 +31,22 @@ var WorkspaceScope = Scope{Type: ScopeWorkspace, Key: "default"}
 // Settings holds the comprehension configuration for a given scope.
 // Zero-value fields mean "inherit from parent scope."
 type Settings struct {
-	ID                      string    `json:"id,omitempty"`
-	ScopeType               ScopeType `json:"scopeType"`
-	ScopeKey                string    `json:"scopeKey"`
-	StrategyPreferenceChain []string  `json:"strategyPreferenceChain,omitempty"`
-	ModelID                 string    `json:"modelId,omitempty"`
-	MaxConcurrency          int       `json:"maxConcurrency,omitempty"`
-	MaxPromptTokens         int       `json:"maxPromptTokens,omitempty"`
-	LeafBudgetTokens        int       `json:"leafBudgetTokens,omitempty"`
-	RefinePassEnabled       *bool     `json:"refinePassEnabled,omitempty"`
-	LongContextMaxTokens    int       `json:"longContextMaxTokens,omitempty"`
-	GraphRAGEntityTypes     []string  `json:"graphragEntityTypes,omitempty"`
-	CacheEnabled            *bool     `json:"cacheEnabled,omitempty"`
-	AllowUnsafeCombinations *bool     `json:"allowUnsafeCombinations,omitempty"`
-	UpdatedAt               time.Time `json:"updatedAt"`
-	UpdatedBy               string    `json:"updatedBy,omitempty"`
+	ID                             string    `json:"id,omitempty"`
+	ScopeType                      ScopeType `json:"scopeType"`
+	ScopeKey                       string    `json:"scopeKey"`
+	StrategyPreferenceChain        []string  `json:"strategyPreferenceChain,omitempty"`
+	KnowledgeGenerationModeDefault string    `json:"knowledgeGenerationModeDefault,omitempty"`
+	ModelID                        string    `json:"modelId,omitempty"`
+	MaxConcurrency                 int       `json:"maxConcurrency,omitempty"`
+	MaxPromptTokens                int       `json:"maxPromptTokens,omitempty"`
+	LeafBudgetTokens               int       `json:"leafBudgetTokens,omitempty"`
+	RefinePassEnabled              *bool     `json:"refinePassEnabled,omitempty"`
+	LongContextMaxTokens           int       `json:"longContextMaxTokens,omitempty"`
+	GraphRAGEntityTypes            []string  `json:"graphragEntityTypes,omitempty"`
+	CacheEnabled                   *bool     `json:"cacheEnabled,omitempty"`
+	AllowUnsafeCombinations        *bool     `json:"allowUnsafeCombinations,omitempty"`
+	UpdatedAt                      time.Time `json:"updatedAt"`
+	UpdatedBy                      string    `json:"updatedBy,omitempty"`
 }
 
 // EffectiveSettings is a fully-resolved settings object with no zero-value
@@ -63,42 +64,43 @@ func DefaultSettings() Settings {
 	cache := false
 	unsafe := false
 	return Settings{
-		ScopeType:               ScopeWorkspace,
-		ScopeKey:                "default",
-		StrategyPreferenceChain: []string{"hierarchical", "single_shot"},
-		ModelID:                 "",
-		MaxConcurrency:          3,
-		MaxPromptTokens:         100000,
-		LeafBudgetTokens:        3000,
-		RefinePassEnabled:       &refine,
-		LongContextMaxTokens:    0,
-		GraphRAGEntityTypes:     []string{},
-		CacheEnabled:            &cache,
-		AllowUnsafeCombinations: &unsafe,
+		ScopeType:                      ScopeWorkspace,
+		ScopeKey:                       "default",
+		StrategyPreferenceChain:        []string{"hierarchical", "single_shot"},
+		KnowledgeGenerationModeDefault: "understanding_first",
+		ModelID:                        "",
+		MaxConcurrency:                 3,
+		MaxPromptTokens:                100000,
+		LeafBudgetTokens:               3000,
+		RefinePassEnabled:              &refine,
+		LongContextMaxTokens:           0,
+		GraphRAGEntityTypes:            []string{},
+		CacheEnabled:                   &cache,
+		AllowUnsafeCombinations:        &unsafe,
 	}
 }
 
 // ModelCapabilities describes what a model can do. Mirrors the Python
 // ModelCapabilities dataclass in workers/comprehension/capabilities.py.
 type ModelCapabilities struct {
-	ID                     string            `json:"id,omitempty"`
-	ModelID                string            `json:"modelId"`
-	Provider               string            `json:"provider"`
-	DeclaredContextTokens  int               `json:"declaredContextTokens"`
-	EffectiveContextTokens int               `json:"effectiveContextTokens"`
-	LongContextQuality     map[int]string    `json:"longContextQuality,omitempty"`
-	InstructionFollowing   string            `json:"instructionFollowing"`
-	JSONMode               string            `json:"jsonMode"`
-	ToolUse                string            `json:"toolUse"`
-	ExtractionGrade        string            `json:"extractionGrade"`
-	CreativeGrade          string            `json:"creativeGrade"`
-	EmbeddingModel         bool              `json:"embeddingModel"`
-	CostPer1kInput         *float64          `json:"costPer1kInput,omitempty"`
-	CostPer1kOutput        *float64          `json:"costPer1kOutput,omitempty"`
-	LastProbedAt           *time.Time        `json:"lastProbedAt,omitempty"`
-	Source                 string            `json:"source"`
-	Notes                  string            `json:"notes,omitempty"`
-	UpdatedAt              time.Time         `json:"updatedAt"`
+	ID                     string         `json:"id,omitempty"`
+	ModelID                string         `json:"modelId"`
+	Provider               string         `json:"provider"`
+	DeclaredContextTokens  int            `json:"declaredContextTokens"`
+	EffectiveContextTokens int            `json:"effectiveContextTokens"`
+	LongContextQuality     map[int]string `json:"longContextQuality,omitempty"`
+	InstructionFollowing   string         `json:"instructionFollowing"`
+	JSONMode               string         `json:"jsonMode"`
+	ToolUse                string         `json:"toolUse"`
+	ExtractionGrade        string         `json:"extractionGrade"`
+	CreativeGrade          string         `json:"creativeGrade"`
+	EmbeddingModel         bool           `json:"embeddingModel"`
+	CostPer1kInput         *float64       `json:"costPer1kInput,omitempty"`
+	CostPer1kOutput        *float64       `json:"costPer1kOutput,omitempty"`
+	LastProbedAt           *time.Time     `json:"lastProbedAt,omitempty"`
+	Source                 string         `json:"source"`
+	Notes                  string         `json:"notes,omitempty"`
+	UpdatedAt              time.Time      `json:"updatedAt"`
 }
 
 // MarshalLongContextQuality serializes the LongContextQuality map to JSON

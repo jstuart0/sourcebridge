@@ -42,6 +42,8 @@ interface JobView {
   target_key: string;
   strategy?: string;
   model?: string;
+  priority?: "interactive" | "maintenance" | "prewarm";
+  generation_mode?: "classic" | "understanding_first";
   status: Status;
   progress: number;
   progress_phase?: string;
@@ -132,6 +134,13 @@ interface ActivityResponse {
     total_waiting?: number;
     max_concurrency: number;
     recent_reused_summaries?: number;
+    active_classic?: number;
+    active_understanding_first?: number;
+    recent_classic?: number;
+    recent_understanding_first?: number;
+    pending_interactive?: number;
+    pending_maintenance?: number;
+    pending_prewarm?: number;
   };
 }
 
@@ -199,6 +208,23 @@ function jobReuseSummary(job: Pick<JobView, "reused_summaries" | "leaf_cache_hit
     job.root_cache_hits ? `${job.root_cache_hits} root` : null,
   ].filter(Boolean);
   return parts.length > 0 ? `${reused} reused · ${parts.join(" · ")}` : `${reused} reused`;
+}
+
+function formatGenerationMode(mode?: JobView["generation_mode"]): string | null {
+  if (!mode) return null;
+  return mode === "classic" ? "Classic" : "Understanding First";
+}
+
+function formatPriority(priority?: JobView["priority"]): string | null {
+  if (!priority) return null;
+  switch (priority) {
+    case "maintenance":
+      return "Maintenance";
+    case "prewarm":
+      return "Prewarm";
+    default:
+      return "Interactive";
+  }
 }
 
 function healthStyle(status: HealthPayload["status"]) {
@@ -415,6 +441,21 @@ export default function MonitorPage() {
           value={stats?.recent_reused_summaries ?? "—"}
           detail="Cache hits reused across recent jobs"
         />
+        <StatCard
+          label="Understanding-first"
+          value={stats ? `${stats.active_understanding_first ?? 0} active` : "—"}
+          detail={stats ? `${stats.recent_understanding_first ?? 0} recent` : undefined}
+        />
+        <StatCard
+          label="Classic"
+          value={stats ? `${stats.active_classic ?? 0} active` : "—"}
+          detail={stats ? `${stats.recent_classic ?? 0} recent` : undefined}
+        />
+        <StatCard
+          label="Background backlog"
+          value={stats ? `${(stats.pending_maintenance ?? 0) + (stats.pending_prewarm ?? 0)}` : "—"}
+          detail={stats ? `${stats.pending_maintenance ?? 0} maint · ${stats.pending_prewarm ?? 0} prewarm` : undefined}
+        />
       </div>
 
       {/* Zone 2 — Now running */}
@@ -602,6 +643,8 @@ function ActiveJobCard({
       <div className="flex items-center justify-between gap-2 text-xs text-[var(--text-tertiary)]">
         <span>{formatElapsed(job.elapsed_ms)}</span>
         <span className="flex items-center gap-2">
+          {formatGenerationMode(job.generation_mode) ? <span>{formatGenerationMode(job.generation_mode)}</span> : null}
+          {formatPriority(job.priority) ? <span>{formatPriority(job.priority)}</span> : null}
           {job.retry_count > 0 ? <span>retry {job.retry_count}</span> : null}
           {job.attached_requests > 1 ? <span>shared {job.attached_requests}</span> : null}
         </span>
@@ -791,6 +834,18 @@ function JobDetailDrawer({ job, onClose }: { job: JobView; onClose: () => void }
               <>
                 <dt>Model</dt>
                 <dd className="text-[var(--text-primary)]">{job.model}</dd>
+              </>
+            ) : null}
+            {formatGenerationMode(job.generation_mode) ? (
+              <>
+                <dt>Mode</dt>
+                <dd className="text-[var(--text-primary)]">{formatGenerationMode(job.generation_mode)}</dd>
+              </>
+            ) : null}
+            {formatPriority(job.priority) ? (
+              <>
+                <dt>Priority</dt>
+                <dd className="text-[var(--text-primary)]">{formatPriority(job.priority)}</dd>
               </>
             ) : null}
             <dt>Target</dt>

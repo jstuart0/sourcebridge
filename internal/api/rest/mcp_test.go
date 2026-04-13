@@ -126,6 +126,27 @@ func (m *mockKnowledgeStore) StoreKnowledgeEvidence(sectionID string, evidence [
 func (m *mockKnowledgeStore) GetKnowledgeEvidence(sectionID string) []knowledge.Evidence {
 	return nil
 }
+func (m *mockKnowledgeStore) StoreRepositoryUnderstanding(u *knowledge.RepositoryUnderstanding) (*knowledge.RepositoryUnderstanding, error) {
+	return u, nil
+}
+func (m *mockKnowledgeStore) GetRepositoryUnderstanding(repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding {
+	return nil
+}
+func (m *mockKnowledgeStore) GetRepositoryUnderstandings(repoID string) []*knowledge.RepositoryUnderstanding {
+	return nil
+}
+func (m *mockKnowledgeStore) MarkRepositoryUnderstandingNeedsRefresh(repoID string) error {
+	return nil
+}
+func (m *mockKnowledgeStore) AttachArtifactUnderstanding(artifactID, understandingID, revisionFP string) error {
+	return nil
+}
+func (m *mockKnowledgeStore) StoreArtifactDependencies(artifactID string, dependencies []knowledge.ArtifactDependency) error {
+	return nil
+}
+func (m *mockKnowledgeStore) GetArtifactDependencies(artifactID string) []knowledge.ArtifactDependency {
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // Test harness

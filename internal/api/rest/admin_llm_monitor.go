@@ -49,6 +49,13 @@ type monitorStats struct {
 	TotalWaiting          int `json:"total_waiting"`
 	MaxConcurrency        int `json:"max_concurrency"`
 	RecentReusedSummaries int `json:"recent_reused_summaries"`
+	ActiveClassic         int `json:"active_classic"`
+	ActiveUnderstanding   int `json:"active_understanding_first"`
+	RecentClassic         int `json:"recent_classic"`
+	RecentUnderstanding   int `json:"recent_understanding_first"`
+	PendingInteractive    int `json:"pending_interactive"`
+	PendingMaintenance    int `json:"pending_maintenance"`
+	PendingPrewarm        int `json:"pending_prewarm"`
 }
 
 type monitorQueueControl struct {
@@ -66,6 +73,8 @@ type monitorJobView struct {
 	TargetKey        string     `json:"target_key"`
 	Strategy         string     `json:"strategy,omitempty"`
 	Model            string     `json:"model,omitempty"`
+	Priority         string     `json:"priority,omitempty"`
+	GenerationMode   string     `json:"generation_mode,omitempty"`
 	Status           string     `json:"status"`
 	Progress         float64    `json:"progress"`
 	ProgressPhase    string     `json:"progress_phase,omitempty"`
@@ -169,6 +178,8 @@ func toMonitorJobView(j *llm.Job) monitorJobView {
 		TargetKey:        j.TargetKey,
 		Strategy:         j.Strategy,
 		Model:            j.Model,
+		Priority:         string(j.Priority),
+		GenerationMode:   j.GenerationMode,
 		Status:           string(j.Status),
 		Progress:         j.Progress,
 		ProgressPhase:    j.ProgressPhase,
@@ -282,7 +293,8 @@ func (s *Server) handleLLMActivity(w http.ResponseWriter, r *http.Request) {
 	for _, j := range active {
 		activeViews = append(activeViews, toMonitorJobView(j))
 	}
-	enrichQueueMetadata(activeViews, s.orchestrator.PendingSnapshot(activeFilter), s.orchestrator.Metrics(), s.orchestrator.MaxConcurrency())
+	pending := s.orchestrator.PendingSnapshot(activeFilter)
+	enrichQueueMetadata(activeViews, pending, s.orchestrator.Metrics(), s.orchestrator.MaxConcurrency())
 	recentViews := make([]monitorJobView, 0, len(recent))
 	for _, j := range recent {
 		recentViews = append(recentViews, toMonitorJobView(j))
@@ -309,6 +321,13 @@ func (s *Server) handleLLMActivity(w http.ResponseWriter, r *http.Request) {
 			TotalWaiting:          s.orchestrator.QueueDepth() + gateWaitingCount(activeViews),
 			MaxConcurrency:        s.orchestrator.MaxConcurrency(),
 			RecentReusedSummaries: totalReusedSummaries(recentViews),
+			ActiveClassic:         countGenerationMode(activeViews, "classic"),
+			ActiveUnderstanding:   countGenerationMode(activeViews, "understanding_first"),
+			RecentClassic:         countGenerationMode(recentViews, "classic"),
+			RecentUnderstanding:   countGenerationMode(recentViews, "understanding_first"),
+			PendingInteractive:    countPendingPriority(pending, llm.PriorityInteractive),
+			PendingMaintenance:    countPendingPriority(pending, llm.PriorityMaintenance),
+			PendingPrewarm:        countPendingPriority(pending, llm.PriorityPrewarm),
 		},
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -318,6 +337,26 @@ func totalReusedSummaries(jobs []monitorJobView) int {
 	total := 0
 	for _, job := range jobs {
 		total += job.ReusedSummaries
+	}
+	return total
+}
+
+func countGenerationMode(jobs []monitorJobView, mode string) int {
+	total := 0
+	for _, job := range jobs {
+		if job.GenerationMode == mode {
+			total++
+		}
+	}
+	return total
+}
+
+func countPendingPriority(jobs []*llm.Job, priority llm.JobPriority) int {
+	total := 0
+	for _, job := range jobs {
+		if job != nil && job.Priority == priority {
+			total++
+		}
 	}
 	return total
 }
