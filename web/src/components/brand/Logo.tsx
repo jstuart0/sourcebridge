@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { cn } from "@/lib/utils";
 
 interface BrandProps {
@@ -20,9 +21,19 @@ const taglineSizes = {
   xl: "text-base",
 };
 
+const iconSizes = {
+  sm: 24,
+  md: 28,
+  lg: 40,
+  xl: 56,
+};
+
 export function Brand({ size = "md", showTagline = false, className }: BrandProps) {
+  const iconPx = iconSizes[size];
   return (
-    <span className={cn("inline-flex flex-col", className)}>
+    <span className={cn("inline-flex items-center gap-2", className)}>
+      <Image src="/logo.png" alt="" width={iconPx} height={iconPx} className="rounded-lg" />
+      <span className="inline-flex flex-col">
       <span className={cn("font-semibold tracking-[0.04em] text-[var(--text-primary)]", sizeClasses[size])}>
         SourceBridge<em className="not-italic font-light text-[var(--accent-primary)]">.ai</em>
       </span>
@@ -36,13 +47,17 @@ export function Brand({ size = "md", showTagline = false, className }: BrandProp
           understand any codebase, fast
         </span>
       )}
+      </span>
     </span>
   );
 }
 
 export function BrandEnterprise({ size = "md", className }: Omit<BrandProps, "showTagline">) {
+  const iconPx = iconSizes[size];
   return (
-    <span className={cn("inline-flex flex-col", className)}>
+    <span className={cn("inline-flex items-center gap-2", className)}>
+      <Image src="/logo.png" alt="" width={iconPx} height={iconPx} className="rounded-lg" />
+      <span className="inline-flex flex-col">
       <span className={cn("font-semibold tracking-[0.04em] text-[var(--accent-primary)]", sizeClasses[size])}>
         SourceBridge<em className="not-italic font-light">.ai</em>
         <span className="ml-1.5 font-normal text-[var(--text-secondary)]">Enterprise</span>
@@ -54,6 +69,7 @@ export function BrandEnterprise({ size = "md", className }: Omit<BrandProps, "sh
         )}
       >
         Control Workspace
+      </span>
       </span>
     </span>
   );
