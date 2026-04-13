@@ -1,7 +1,10 @@
 package graphql
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"path"
 	"sort"
 	"strings"
@@ -9,7 +12,12 @@ import (
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
+	"github.com/sourcebridge/sourcebridge/internal/llm"
 )
+
+type repositoryUnderstandingMetadata struct {
+	FirstPassSections []map[string]string `json:"first_pass_sections,omitempty"`
+}
 
 func understandingScopeForArtifact(scope knowledgepkg.ArtifactScope) knowledgepkg.ArtifactScope {
 	return scope.Normalize()
@@ -52,6 +60,9 @@ func updateUnderstandingForCliffNotes(
 			understanding.TreeStatus = knowledgepkg.UnderstandingTreePartial
 		}
 	}
+	if metadata := cliffNotesUnderstandingMetadata(resp); metadata != "" {
+		understanding.Metadata = metadata
+	}
 	if understanding.Strategy == "" {
 		understanding.Strategy = "hierarchical"
 	}
@@ -66,6 +77,36 @@ func updateUnderstandingForCliffNotes(
 		_ = store.AttachArtifactUnderstanding(artifact.ID, stored.ID, stored.RevisionFP)
 	}
 	return stored, nil
+}
+
+func cliffNotesUnderstandingMetadata(resp *knowledgev1.GenerateCliffNotesResponse) string {
+	if resp == nil || len(resp.Sections) == 0 {
+		return ""
+	}
+	meta := repositoryUnderstandingMetadata{
+		FirstPassSections: make([]map[string]string, 0, len(resp.Sections)),
+	}
+	for _, sec := range resp.Sections {
+		summary := strings.TrimSpace(sec.Summary)
+		if summary == "" {
+			summary = strings.TrimSpace(sec.Content)
+		}
+		if len(summary) > 280 {
+			summary = summary[:280]
+		}
+		meta.FirstPassSections = append(meta.FirstPassSections, map[string]string{
+			"title":   sec.Title,
+			"summary": summary,
+		})
+	}
+	if len(meta.FirstPassSections) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 func seedRepositoryUnderstanding(
@@ -140,6 +181,80 @@ func attachFreshUnderstanding(
 	}
 	_ = store.AttachArtifactUnderstanding(artifact.ID, u.ID, u.RevisionFP)
 	return u, u.TreeStatus == knowledgepkg.UnderstandingTreeComplete
+}
+
+func enrichSnapshotWithUnderstanding(snapshotJSON []byte, understanding *knowledgepkg.RepositoryUnderstanding) ([]byte, bool) {
+	if understanding == nil || strings.TrimSpace(understanding.Metadata) == "" {
+		return snapshotJSON, false
+	}
+	var meta repositoryUnderstandingMetadata
+	if err := json.Unmarshal([]byte(understanding.Metadata), &meta); err != nil {
+		return snapshotJSON, false
+	}
+	if len(meta.FirstPassSections) == 0 {
+		return snapshotJSON, false
+	}
+	var snapMap map[string]any
+	if err := json.Unmarshal(snapshotJSON, &snapMap); err != nil {
+		return snapshotJSON, false
+	}
+	snapMap["_repository_understanding"] = meta
+	enriched, err := json.Marshal(snapMap)
+	if err != nil {
+		return snapshotJSON, false
+	}
+	return enriched, true
+}
+
+func (r *Resolver) ensureFreshRepositoryUnderstanding(
+	ctx context.Context,
+	rt llm.Runtime,
+	repo *graphstore.Repository,
+	artifact *knowledgepkg.Artifact,
+	sourceRevision knowledgepkg.SourceRevision,
+	snapshotJSON []byte,
+) (*knowledgepkg.RepositoryUnderstanding, bool, error) {
+	if r == nil || r.KnowledgeStore == nil || r.Worker == nil || repo == nil || artifact == nil {
+		return nil, false, nil
+	}
+	repoScope := knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository}
+	if understanding, fresh := attachFreshUnderstanding(r.KnowledgeStore, artifact, repoScope, sourceRevision); understanding != nil && fresh {
+		return understanding, true, nil
+	}
+	if _, err := seedRepositoryUnderstanding(r.KnowledgeStore, artifact, repoScope, sourceRevision, knowledgepkg.UnderstandingBuildingTree); err != nil {
+		slog.Warn("failed to seed repository understanding", "artifact_id", artifact.ID, "error", err)
+	}
+	if rt != nil {
+		rt.ReportProgress(0.12, "understanding", "Building repository understanding")
+	}
+	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Building repository understanding")
+	resp, err := r.Worker.GenerateCliffNotes(
+		r.withJobMetadata(ctx, "knowledge", rt, repo.ID, artifact.ID, "build_repository_understanding"),
+		&knowledgev1.GenerateCliffNotesRequest{
+			RepositoryId:   repo.ID,
+			RepositoryName: repo.Name,
+			Audience:       string(knowledgepkg.AudienceDeveloper),
+			Depth:          string(knowledgepkg.DepthMedium),
+			ScopeType:      string(knowledgepkg.ScopeRepository),
+			SnapshotJson:   string(snapshotJSON),
+		},
+	)
+	if err != nil {
+		markRepositoryUnderstandingFailed(r.KnowledgeStore, artifact, repoScope, sourceRevision, err)
+		return nil, false, err
+	}
+	understanding, err := updateUnderstandingForCliffNotes(
+		r.KnowledgeStore,
+		artifact,
+		repoScope,
+		sourceRevision,
+		resp,
+		knowledgepkg.UnderstandingFirstPassReady,
+	)
+	if err != nil {
+		return nil, false, err
+	}
+	return understanding, false, nil
 }
 
 func knowledgeAudienceValue(audience *KnowledgeAudience) knowledgepkg.Audience {

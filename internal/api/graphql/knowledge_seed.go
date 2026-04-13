@@ -111,6 +111,8 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 	}
 
 	run := func(runCtx context.Context, rt llm.Runtime) error {
+		snapshotBytes := []byte(snapshotJSON)
+		enrichedSnapshotJSON := snapshotJSON
 		rt.ReportProgress(0.1, "snapshot", "Seed snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Seed snapshot assembled")
 		stopProgress := r.startProgressTicker(rt, artifact.ID)
@@ -131,6 +133,9 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			if err != nil {
 				return err
 			}
+			if _, err := updateUnderstandingForCliffNotes(r.KnowledgeStore, artifact, key.Scope, sourceRevision, resp, knowledgepkg.UnderstandingFirstPassReady); err != nil {
+				slog.Warn("failed to update repository understanding from seed cliff notes", "artifact_id", artifact.ID, "error", err)
+			}
 			rt.ReportProgress(0.96, "llm", "Seed LLM completed, persisting")
 			sections := make([]knowledgepkg.Section, len(resp.Sections))
 			for i, sec := range resp.Sections {
@@ -147,12 +152,25 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 				return err
 			}
 		case knowledgepkg.ArtifactLearningPath:
+			if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, sourceRevision, snapshotBytes); err != nil {
+				return err
+			} else {
+				if reused {
+					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
+					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
+				}
+				if understanding != nil {
+					if enriched, ok := enrichSnapshotWithUnderstanding(snapshotBytes, understanding); ok {
+						enrichedSnapshotJSON = string(enriched)
+					}
+				}
+			}
 			resp, err := r.Worker.GenerateLearningPath(bgCtx, &knowledgev1.GenerateLearningPathRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(key.Audience),
 				Depth:          string(key.Depth),
-				SnapshotJson:   snapshotJSON,
+				SnapshotJson:   enrichedSnapshotJSON,
 			})
 			if err != nil {
 				return err
@@ -171,12 +189,25 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 				return err
 			}
 		case knowledgepkg.ArtifactCodeTour:
+			if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, sourceRevision, snapshotBytes); err != nil {
+				return err
+			} else {
+				if reused {
+					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
+					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
+				}
+				if understanding != nil {
+					if enriched, ok := enrichSnapshotWithUnderstanding(snapshotBytes, understanding); ok {
+						enrichedSnapshotJSON = string(enriched)
+					}
+				}
+			}
 			resp, err := r.Worker.GenerateCodeTour(bgCtx, &knowledgev1.GenerateCodeTourRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(key.Audience),
 				Depth:          string(key.Depth),
-				SnapshotJson:   snapshotJSON,
+				SnapshotJson:   enrichedSnapshotJSON,
 			})
 			if err != nil {
 				return err
@@ -201,6 +232,19 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 				return err
 			}
 		case knowledgepkg.ArtifactWorkflowStory:
+			if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, sourceRevision, snapshotBytes); err != nil {
+				return err
+			} else {
+				if reused {
+					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
+					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
+				}
+				if understanding != nil {
+					if enriched, ok := enrichSnapshotWithUnderstanding(snapshotBytes, understanding); ok {
+						enrichedSnapshotJSON = string(enriched)
+					}
+				}
+			}
 			resp, err := r.Worker.GenerateWorkflowStory(bgCtx, &knowledgev1.GenerateWorkflowStoryRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
@@ -208,7 +252,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 				Depth:          string(key.Depth),
 				ScopeType:      string(key.Scope.ScopeType),
 				ScopePath:      key.Scope.ScopePath,
-				SnapshotJson:   snapshotJSON,
+				SnapshotJson:   enrichedSnapshotJSON,
 			})
 			if err != nil {
 				return err

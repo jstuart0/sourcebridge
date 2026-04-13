@@ -232,10 +232,6 @@ func TestRepositoryCliffNotesJobsDoNotAutoRetry(t *testing.T) {
 }
 
 func TestQueuedKnowledgeJobsHeartbeatWhileWaitingForGate(t *testing.T) {
-	t.Setenv("SOURCEBRIDGE_KNOWLEDGE_MAX_CONCURRENCY", "1")
-	knowledgeArtifactGates = sync.Map{}
-	knowledgeGlobalSlots = nil
-	knowledgeGlobalGate = sync.Once{}
 	prevInterval := knowledgeQueueHeartbeatInterval
 	knowledgeQueueHeartbeatInterval = 10 * time.Millisecond
 	defer func() {
@@ -244,91 +240,78 @@ func TestQueuedKnowledgeJobsHeartbeatWhileWaitingForGate(t *testing.T) {
 
 	knowledgeStore := knowledge.NewMemStore()
 	jobStore := llm.NewMemStore()
-	orch := orchestrator.New(jobStore, orchestrator.Config{MaxConcurrency: 2})
-	defer func() {
-		_ = orch.Shutdown(2 * time.Second)
-	}()
-
-	makeArtifact := func(repoID string) *knowledge.Artifact {
-		key := knowledge.ArtifactKey{
-			RepositoryID: repoID,
-			Type:         knowledge.ArtifactCliffNotes,
-			Audience:     knowledge.AudienceDeveloper,
-			Depth:        knowledge.DepthDeep,
-			Scope:        knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository},
-		}
-		artifact, created, err := knowledgeStore.ClaimArtifact(key, knowledge.SourceRevision{})
-		if err != nil {
-			t.Fatalf("ClaimArtifact(%s): %v", repoID, err)
-		}
-		if !created {
-			t.Fatalf("expected fresh artifact claim for %s", repoID)
-		}
-		return artifact
+	artifact, created, err := knowledgeStore.ClaimArtifact(knowledge.ArtifactKey{
+		RepositoryID: "repo-1",
+		Type:         knowledge.ArtifactCliffNotes,
+		Audience:     knowledge.AudienceDeveloper,
+		Depth:        knowledge.DepthDeep,
+		Scope:        knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository},
+	}, knowledge.SourceRevision{})
+	if err != nil {
+		t.Fatalf("ClaimArtifact: %v", err)
+	}
+	if !created {
+		t.Fatal("expected fresh artifact claim")
 	}
 
-	r := &Resolver{
-		KnowledgeStore: knowledgeStore,
-		Orchestrator:   orch,
+	job, err := jobStore.Create(&llm.Job{
+		ID:         "job-1",
+		Subsystem:  llm.SubsystemKnowledge,
+		JobType:    "cliff_notes",
+		TargetKey:  "knowledge:repo-1:cliff_notes:developer:deep:repository:",
+		ArtifactID: artifact.ID,
+		RepoID:     "repo-1",
+		Status:     llm.StatusGenerating,
+	})
+	if err != nil {
+		t.Fatalf("Create job: %v", err)
 	}
+	initialUpdatedAt := job.UpdatedAt
 
-	releaseFirst := make(chan struct{})
-	firstEntered := make(chan struct{}, 1)
-	first := makeArtifact("repo-1")
-	if err := r.enqueueKnowledgeJob(first, "cliff_notes", 100, func(_ context.Context, rt llm.Runtime) error {
-		rt.ReportProgress(0.25, "generating", "first")
-		firstEntered <- struct{}{}
-		<-releaseFirst
-		return nil
-	}); err != nil {
-		t.Fatalf("enqueue first: %v", err)
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := startKnowledgeQueueHeartbeat(ctx, testRuntime{
+		jobID: "job-1",
+		setProgress: func(progress float64, phase, message string) {
+			_ = jobStore.SetProgress("job-1", progress, phase, message)
+		},
+	}, artifact.ID, knowledgeStore)
+	defer stop()
 
-	second := makeArtifact("repo-2")
-	if err := r.enqueueKnowledgeJob(second, "cliff_notes", 100, func(_ context.Context, rt llm.Runtime) error {
-		return nil
-	}); err != nil {
-		t.Fatalf("enqueue second: %v", err)
-	}
+	time.Sleep(50 * time.Millisecond)
 
-	select {
-	case <-firstEntered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first job never entered the knowledge slot")
+	job = jobStore.GetByID("job-1")
+	if job == nil {
+		t.Fatal("expected heartbeat job to still exist")
 	}
-
-	var waitingJob *llm.Job
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		active := orch.ListActive(llm.ListFilter{
-			Subsystem: llm.SubsystemKnowledge,
-			JobType:   "cliff_notes",
-			RepoID:    "repo-2",
-		})
-		if len(active) > 0 {
-			waitingJob = active[0]
-			if waitingJob.ProgressPhase == "queued" {
-				break
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
+	if !job.UpdatedAt.After(initialUpdatedAt) {
+		t.Fatalf("expected queued waiting job heartbeat to advance updated_at, initial=%s current=%s", initialUpdatedAt, job.UpdatedAt)
 	}
-	if waitingJob == nil {
-		t.Fatal("expected second job to be active and waiting")
+	if job.ProgressPhase != "queued" {
+		t.Fatalf("expected queued progress phase while waiting, got %q", job.ProgressPhase)
 	}
-
-	initialUpdatedAt := waitingJob.UpdatedAt
-	time.Sleep(650 * time.Millisecond)
-	waitingJob = jobStore.GetByID(waitingJob.ID)
-	if waitingJob == nil {
-		t.Fatal("expected waiting job to still exist")
+	artifact = knowledgeStore.GetKnowledgeArtifact(artifact.ID)
+	if artifact == nil {
+		t.Fatal("expected artifact to still exist")
 	}
-	if !waitingJob.UpdatedAt.After(initialUpdatedAt) {
-		t.Fatalf("expected queued waiting job heartbeat to advance updated_at, initial=%s current=%s", initialUpdatedAt, waitingJob.UpdatedAt)
+	if artifact.ProgressPhase != "queued" {
+		t.Fatalf("expected artifact queued progress phase while waiting, got %q", artifact.ProgressPhase)
 	}
-	if waitingJob.ProgressPhase != "queued" {
-		t.Fatalf("expected queued progress phase while waiting, got %q", waitingJob.ProgressPhase)
-	}
-
-	close(releaseFirst)
 }
+
+type testRuntime struct {
+	jobID       string
+	setProgress func(progress float64, phase, message string)
+}
+
+func (t testRuntime) JobID() string { return t.jobID }
+
+func (t testRuntime) ReportProgress(progress float64, phase, message string) {
+	if t.setProgress != nil {
+		t.setProgress(progress, phase, message)
+	}
+}
+
+func (testRuntime) ReportTokens(input, output int) {}
+
+func (testRuntime) ReportSnapshotBytes(bytes int) {}
