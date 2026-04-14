@@ -312,6 +312,13 @@ function understandingTreeLabel(understanding: RepositoryUnderstanding | null | 
   }
 }
 
+function shouldCollapseRepositoryUnderstanding(understanding: RepositoryUnderstanding | null | undefined): boolean {
+  if (!understanding) return false;
+  if (understanding.errorMessage) return false;
+  if (understanding.refreshAvailable) return false;
+  return understanding.stage === "READY" && understanding.treeStatus === "COMPLETE";
+}
+
 function renderKnowledgeProgress(artifact: KnowledgeArtifact, waitingLabel: string, job?: RepoJobView | null) {
   const liveJob = job && (job.status === "pending" || job.status === "generating") ? job : null;
   const heartbeat = liveJob ? formatHeartbeatAge(liveJob.updated_at) : null;
@@ -785,6 +792,7 @@ export default function RepositoryDetailPage() {
   const features = useFeatures();
   const symbolScopedAnalysisEnabled = features.symbolScopedAnalysis;
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
+  const [understandingCollapsed, setUnderstandingCollapsed] = useState(false);
   const [explainQuestion, setExplainQuestion] = useState("");
   const [explainResult, setExplainResult] = useState<{ explanation: string } | null>(null);
   const [tourStopIndex, setTourStopIndex] = useState(0);
@@ -808,6 +816,11 @@ export default function RepositoryDetailPage() {
     (a) => a.type === "WORKFLOW_STORY" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
   );
   const currentUnderstanding: RepositoryUnderstanding | null = repoResult.data?.repository?.repositoryUnderstanding || null;
+  const shouldAutoCollapseUnderstanding = shouldCollapseRepositoryUnderstanding(currentUnderstanding);
+
+  useEffect(() => {
+    setUnderstandingCollapsed(shouldAutoCollapseUnderstanding);
+  }, [currentUnderstanding?.id, shouldAutoCollapseUnderstanding]);
   const repoGenerationModeDefault: RepositoryGenerationMode = (repo?.generationModeDefault || "UNDERSTANDING_FIRST") as RepositoryGenerationMode;
   const repoActiveJobs = useMemo(() => repoJobs?.active ?? [], [repoJobs?.active]);
   const repoRecentJobs = useMemo(() => repoJobs?.recent ?? [], [repoJobs?.recent]);
@@ -2373,62 +2386,90 @@ export default function RepositoryDetailPage() {
                     <Button variant="secondary" size="sm" onClick={handleBuildRepositoryUnderstanding} disabled={knowledgeLoading}>
                       {knowledgeLoading ? "Starting..." : currentUnderstanding ? "Refresh understanding" : "Build understanding"}
                     </Button>
+                    {currentUnderstanding ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setUnderstandingCollapsed((current) => !current)}
+                      >
+                        {understandingCollapsed ? "Show details" : "Hide details"}
+                      </Button>
+                    ) : null}
                     {currentUnderstanding?.updatedAt ? (
                       <span className="text-xs text-[var(--text-tertiary)]">
                         Updated {formatGeneratedAt(currentUnderstanding.updatedAt)}
                       </span>
                     ) : null}
                   </div>
-                  {currentUnderstanding ? (
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <div className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Nodes</p>
-                        <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">
-                          {currentUnderstanding.cachedNodes}/{currentUnderstanding.totalNodes || currentUnderstanding.cachedNodes}
-                        </p>
-                      </div>
-                      <div className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Strategy</p>
-                        <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">
-                          {currentUnderstanding.strategy || "hierarchical"}
-                        </p>
-                      </div>
-                      <div className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Model</p>
-                        <p className="mt-1 truncate text-sm font-medium text-[var(--text-primary)]">
-                          {currentUnderstanding.modelUsed || "Unknown"}
-                        </p>
-                      </div>
-                      <div className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Revision</p>
-                        <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">
-                          {currentUnderstanding.revisionFp ? currentUnderstanding.revisionFp.slice(0, 12) : "Unknown"}
-                        </p>
-                      </div>
+                  {currentUnderstanding && understandingCollapsed ? (
+                    <div className="mt-4 rounded-[var(--radius-sm)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
+                      <span className="text-[var(--text-primary)]">
+                        {currentUnderstanding.cachedNodes}/{currentUnderstanding.totalNodes || currentUnderstanding.cachedNodes} nodes
+                      </span>
+                      {" · "}
+                      {currentUnderstanding.strategy || "hierarchical"}
+                      {" · "}
+                      {currentUnderstanding.modelUsed || "Unknown model"}
+                      {currentUnderstanding.firstPassSections?.length ? (
+                        <>
+                          {" · "}
+                          {currentUnderstanding.firstPassSections.length} first-pass sections
+                        </>
+                      ) : null}
                     </div>
                   ) : null}
-                  {currentUnderstanding?.firstPassSections?.length ? (
-                    <div className="mt-4 space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-                          First Pass
-                        </p>
-                        <span className="text-xs text-[var(--text-tertiary)]">
-                          {currentUnderstanding.firstPassSections.length} sections
-                        </span>
+                  {currentUnderstanding && !understandingCollapsed ? (
+                    <>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Nodes</p>
+                          <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">
+                            {currentUnderstanding.cachedNodes}/{currentUnderstanding.totalNodes || currentUnderstanding.cachedNodes}
+                          </p>
+                        </div>
+                        <div className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Strategy</p>
+                          <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">
+                            {currentUnderstanding.strategy || "hierarchical"}
+                          </p>
+                        </div>
+                        <div className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Model</p>
+                          <p className="mt-1 truncate text-sm font-medium text-[var(--text-primary)]">
+                            {currentUnderstanding.modelUsed || "Unknown"}
+                          </p>
+                        </div>
+                        <div className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Revision</p>
+                          <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">
+                            {currentUnderstanding.revisionFp ? currentUnderstanding.revisionFp.slice(0, 12) : "Unknown"}
+                          </p>
+                        </div>
                       </div>
-                      <div className="grid gap-3 lg:grid-cols-2">
-                        {currentUnderstanding.firstPassSections.map((section) => (
-                          <div
-                            key={section.title}
-                            className="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3"
-                          >
-                            <p className="text-sm font-medium text-[var(--text-primary)]">{section.title}</p>
-                            <p className="mt-1 text-sm text-[var(--text-secondary)]">{section.summary}</p>
+                      {currentUnderstanding.firstPassSections?.length ? (
+                        <div className="mt-4 space-y-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+                              First Pass
+                            </p>
+                            <span className="text-xs text-[var(--text-tertiary)]">
+                              {currentUnderstanding.firstPassSections.length} sections
+                            </span>
                           </div>
-                        ))}
-                      </div>
-                    </div>
+                          <div className="grid gap-3 lg:grid-cols-2">
+                            {currentUnderstanding.firstPassSections.map((section) => (
+                              <div
+                                key={section.title}
+                                className="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3"
+                              >
+                                <p className="text-sm font-medium text-[var(--text-primary)]">{section.title}</p>
+                                <p className="mt-1 text-sm text-[var(--text-secondary)]">{section.summary}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </>
                   ) : null}
                   {currentUnderstanding?.errorMessage ? (
                     <p className="mt-3 text-xs text-[var(--color-error,#ef4444)]">{currentUnderstanding.errorMessage}</p>
