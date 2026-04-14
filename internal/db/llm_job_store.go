@@ -49,6 +49,13 @@ type surrealLLMJob struct {
 	FileCacheHits    int              `json:"file_cache_hits"`
 	PackageCacheHits int              `json:"package_cache_hits"`
 	RootCacheHits    int              `json:"root_cache_hits"`
+	CachedNodesLoaded int             `json:"cached_nodes_loaded"`
+	TotalNodes        int             `json:"total_nodes"`
+	ResumeStage       string          `json:"resume_stage"`
+	SkippedLeafUnits  int             `json:"skipped_leaf_units"`
+	SkippedFileUnits  int             `json:"skipped_file_units"`
+	SkippedPackageUnits int           `json:"skipped_package_units"`
+	SkippedRootUnits  int             `json:"skipped_root_units"`
 	ArtifactID       string           `json:"artifact_id"`
 	RepoID           string           `json:"repo_id"`
 	CreatedAt        surrealTime      `json:"created_at"`
@@ -101,6 +108,13 @@ func (r *surrealLLMJob) toJob() *llm.Job {
 		FileCacheHits:    r.FileCacheHits,
 		PackageCacheHits: r.PackageCacheHits,
 		RootCacheHits:    r.RootCacheHits,
+		CachedNodesLoaded: r.CachedNodesLoaded,
+		TotalNodes:        r.TotalNodes,
+		ResumeStage:       r.ResumeStage,
+		SkippedLeafUnits:  r.SkippedLeafUnits,
+		SkippedFileUnits:  r.SkippedFileUnits,
+		SkippedPackageUnits: r.SkippedPackageUnits,
+		SkippedRootUnits:  r.SkippedRootUnits,
 		ArtifactID:       r.ArtifactID,
 		RepoID:           r.RepoID,
 		CreatedAt:        r.CreatedAt.Time,
@@ -184,6 +198,13 @@ func (s *SurrealStore) Create(job *llm.Job) (*llm.Job, error) {
 		file_cache_hits = $file_cache_hits,
 		package_cache_hits = $package_cache_hits,
 		root_cache_hits = $root_cache_hits,
+		cached_nodes_loaded = $cached_nodes_loaded,
+		total_nodes = $total_nodes,
+		resume_stage = $resume_stage,
+		skipped_leaf_units = $skipped_leaf_units,
+		skipped_file_units = $skipped_file_units,
+		skipped_package_units = $skipped_package_units,
+		skipped_root_units = $skipped_root_units,
 		artifact_id = $artifact_id,
 		repo_id = $repo_id,
 		created_at = time::now(),
@@ -216,6 +237,13 @@ func (s *SurrealStore) Create(job *llm.Job) (*llm.Job, error) {
 		"file_cache_hits":    job.FileCacheHits,
 		"package_cache_hits": job.PackageCacheHits,
 		"root_cache_hits":    job.RootCacheHits,
+		"cached_nodes_loaded": job.CachedNodesLoaded,
+		"total_nodes":         job.TotalNodes,
+		"resume_stage":        job.ResumeStage,
+		"skipped_leaf_units":  job.SkippedLeafUnits,
+		"skipped_file_units":  job.SkippedFileUnits,
+		"skipped_package_units": job.SkippedPackageUnits,
+		"skipped_root_units":  job.SkippedRootUnits,
 		"artifact_id":        job.ArtifactID,
 		"repo_id":            job.RepoID,
 	}
@@ -263,6 +291,13 @@ func (s *SurrealStore) Update(job *llm.Job) error {
 		file_cache_hits = $file_cache_hits,
 		package_cache_hits = $package_cache_hits,
 		root_cache_hits = $root_cache_hits,
+		cached_nodes_loaded = $cached_nodes_loaded,
+		total_nodes = $total_nodes,
+		resume_stage = $resume_stage,
+		skipped_leaf_units = $skipped_leaf_units,
+		skipped_file_units = $skipped_file_units,
+		skipped_package_units = $skipped_package_units,
+		skipped_root_units = $skipped_root_units,
 		artifact_id = $artifact_id,
 		repo_id = $repo_id,
 		updated_at = time::now()`
@@ -293,6 +328,13 @@ func (s *SurrealStore) Update(job *llm.Job) error {
 		"file_cache_hits":    job.FileCacheHits,
 		"package_cache_hits": job.PackageCacheHits,
 		"root_cache_hits":    job.RootCacheHits,
+		"cached_nodes_loaded": job.CachedNodesLoaded,
+		"total_nodes":         job.TotalNodes,
+		"resume_stage":        job.ResumeStage,
+		"skipped_leaf_units":  job.SkippedLeafUnits,
+		"skipped_file_units":  job.SkippedFileUnits,
+		"skipped_package_units": job.SkippedPackageUnits,
+		"skipped_root_units":  job.SkippedRootUnits,
 		"artifact_id":        job.ArtifactID,
 		"repo_id":            job.RepoID,
 	}

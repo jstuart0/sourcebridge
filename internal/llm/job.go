@@ -119,6 +119,13 @@ type Job struct {
 	FileCacheHits    int `json:"file_cache_hits"`
 	PackageCacheHits int `json:"package_cache_hits"`
 	RootCacheHits    int `json:"root_cache_hits"`
+	CachedNodesLoaded int    `json:"cached_nodes_loaded"`
+	TotalNodes        int    `json:"total_nodes"`
+	ResumeStage       string `json:"resume_stage,omitempty"`
+	SkippedLeafUnits  int    `json:"skipped_leaf_units"`
+	SkippedFileUnits  int    `json:"skipped_file_units"`
+	SkippedPackageUnits int  `json:"skipped_package_units"`
+	SkippedRootUnits  int    `json:"skipped_root_units"`
 
 	// ArtifactID (optional) links the job back to a domain record — a
 	// ca_knowledge_artifact row for knowledge jobs, a requirement id for

@@ -94,6 +94,13 @@ type monitorJobView struct {
 	FileCacheHits    int        `json:"file_cache_hits"`
 	PackageCacheHits int        `json:"package_cache_hits"`
 	RootCacheHits    int        `json:"root_cache_hits"`
+	CachedNodesLoaded int       `json:"cached_nodes_loaded"`
+	TotalNodes        int       `json:"total_nodes"`
+	ResumeStage       string    `json:"resume_stage,omitempty"`
+	SkippedLeafUnits  int       `json:"skipped_leaf_units"`
+	SkippedFileUnits  int       `json:"skipped_file_units"`
+	SkippedPackageUnits int     `json:"skipped_package_units"`
+	SkippedRootUnits  int       `json:"skipped_root_units"`
 	ArtifactID       string     `json:"artifact_id,omitempty"`
 	RepoID           string     `json:"repo_id,omitempty"`
 	ElapsedMs        int64      `json:"elapsed_ms"`
@@ -199,6 +206,13 @@ func toMonitorJobView(j *llm.Job) monitorJobView {
 		FileCacheHits:    j.FileCacheHits,
 		PackageCacheHits: j.PackageCacheHits,
 		RootCacheHits:    j.RootCacheHits,
+		CachedNodesLoaded: j.CachedNodesLoaded,
+		TotalNodes:        j.TotalNodes,
+		ResumeStage:       j.ResumeStage,
+		SkippedLeafUnits:  j.SkippedLeafUnits,
+		SkippedFileUnits:  j.SkippedFileUnits,
+		SkippedPackageUnits: j.SkippedPackageUnits,
+		SkippedRootUnits:  j.SkippedRootUnits,
 		ArtifactID:       j.ArtifactID,
 		RepoID:           j.RepoID,
 		ElapsedMs:        j.Elapsed().Milliseconds(),

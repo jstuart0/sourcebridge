@@ -38,6 +38,13 @@ interface JobView {
   file_cache_hits?: number;
   package_cache_hits?: number;
   root_cache_hits?: number;
+  cached_nodes_loaded?: number;
+  total_nodes?: number;
+  resume_stage?: string;
+  skipped_leaf_units?: number;
+  skipped_file_units?: number;
+  skipped_package_units?: number;
+  skipped_root_units?: number;
   queue_position?: number;
   queue_depth?: number;
   estimated_wait_ms?: number;
@@ -97,8 +104,16 @@ function formatQueueEta(ms?: number): string | null {
 
 function reuseLabel(job: JobView): string | null {
   const reused = job.reused_summaries ?? 0;
-  if (reused <= 0) return null;
-  return `${reused} reused`;
+  const cached = job.cached_nodes_loaded ?? 0;
+  const parts = [
+    cached > 0 ? `${cached} cached loaded` : null,
+    job.resume_stage ? `resume ${job.resume_stage}` : null,
+  ].filter(Boolean);
+  if (reused <= 0 && parts.length === 0) return null;
+  if (reused > 0) {
+    return parts.length > 0 ? `${reused} reused · ${parts.join(" · ")}` : `${reused} reused`;
+  }
+  return parts.join(" · ");
 }
 
 function generationModeLabel(mode?: JobView["generation_mode"]): string | null {

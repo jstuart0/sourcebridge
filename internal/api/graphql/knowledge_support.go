@@ -19,6 +19,7 @@ import (
 
 type repositoryUnderstandingMetadata struct {
 	FirstPassSections []map[string]string `json:"first_pass_sections,omitempty"`
+	Resume            map[string]any      `json:"resume,omitempty"`
 }
 
 type cliffNotesRenderPlan struct {
@@ -95,7 +96,8 @@ func updateUnderstandingForCliffNotes(
 			understanding.TreeStatus = knowledgepkg.UnderstandingTreePartial
 		}
 	}
-	if metadata := cliffNotesUnderstandingMetadata(resp); metadata != "" {
+	existing := store.GetRepositoryUnderstanding(artifact.RepositoryID, understandingScopeForArtifact(scope))
+	if metadata := cliffNotesUnderstandingMetadata(existing, resp); metadata != "" {
 		understanding.Metadata = metadata
 	}
 	if understanding.Strategy == "" {
@@ -121,13 +123,22 @@ func updateUnderstandingForCliffNotes(
 	return stored, nil
 }
 
-func cliffNotesUnderstandingMetadata(resp *knowledgev1.GenerateCliffNotesResponse) string {
+func cliffNotesUnderstandingMetadata(existing *knowledgepkg.RepositoryUnderstanding, resp *knowledgev1.GenerateCliffNotesResponse) string {
+	meta := repositoryUnderstandingMetadata{}
+	if existing != nil && strings.TrimSpace(existing.Metadata) != "" {
+		_ = json.Unmarshal([]byte(existing.Metadata), &meta)
+	}
 	if resp == nil || len(resp.Sections) == 0 {
-		return ""
+		if len(meta.FirstPassSections) == 0 && len(meta.Resume) == 0 {
+			return ""
+		}
+		raw, err := json.Marshal(meta)
+		if err != nil {
+			return ""
+		}
+		return string(raw)
 	}
-	meta := repositoryUnderstandingMetadata{
-		FirstPassSections: make([]map[string]string, 0, len(resp.Sections)),
-	}
+	meta.FirstPassSections = make([]map[string]string, 0, len(resp.Sections))
 	for _, sec := range resp.Sections {
 		summary := strings.TrimSpace(sec.Summary)
 		if summary == "" {
@@ -142,7 +153,9 @@ func cliffNotesUnderstandingMetadata(resp *knowledgev1.GenerateCliffNotesRespons
 		})
 	}
 	if len(meta.FirstPassSections) == 0 {
-		return ""
+		if len(meta.Resume) == 0 {
+			return ""
+		}
 	}
 	raw, err := json.Marshal(meta)
 	if err != nil {

@@ -24,6 +24,7 @@ from workers.common.grpc_metadata import (
 from workers.common.llm.config import create_llm_provider_for_request
 from workers.common.llm.provider import LLMProvider, SnapshotTooLargeError
 from workers.comprehension.adapters.code import CodeCorpus
+from workers.comprehension.corpus import walk_by_level
 from workers.comprehension.hierarchical import HierarchicalConfig, HierarchicalStrategy
 from workers.comprehension.long_context import (
     LongContextConfig,
@@ -42,6 +43,7 @@ from workers.knowledge.retrieval import (
 )
 from workers.knowledge.snapshot_truncate import condense_snapshot
 from workers.knowledge.job_logs import JobLogMetadata, SurrealJobLogger
+from workers.knowledge.job_state import JobStateMetadata, SurrealJobStateUpdater
 from workers.knowledge.summary_nodes import SurrealSummaryNodeCache
 from workers.knowledge.types import CliffNotesResult
 from workers.knowledge.workflow_story import generate_workflow_story
@@ -466,6 +468,13 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             raise ValueError(f"snapshot_json is not valid JSON: {exc}") from exc
 
         corpus = CodeCorpus(snapshot=snapshot_dict)
+        by_level = walk_by_level(corpus)
+        stage_totals = {
+            "leaves": len(by_level.get(0, [])),
+            "files": len(by_level.get(1, [])),
+            "packages": len(by_level.get(2, [])),
+            "root": len(by_level.get(3, [])),
+        }
         cached_tree = None
         if self._summary_node_cache is not None:
             try:
@@ -482,8 +491,110 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     error=str(exc),
                 )
 
+        job_state_updater = None
+        if self._config is not None and job_logger is not None:
+            meta = JobStateMetadata(
+                job_id=job_logger.metadata.job_id,
+                repo_id=job_logger.metadata.repo_id or request.repository_id,
+                artifact_id=job_logger.metadata.artifact_id,
+            )
+            if not meta.is_empty():
+                job_state_updater = SurrealJobStateUpdater.from_config(self._config, meta)
+
+        strategy: HierarchicalStrategy | None = None
+
+        def _resume_checkpoint_payload(
+            tree,
+            *,
+            cached_nodes_loaded: int,
+            leaf_cache_hits: int,
+            file_cache_hits: int,
+            package_cache_hits: int,
+            root_cache_hits: int,
+        ) -> dict[str, object]:
+            completed_counts = {
+                "leaves": len(tree.at_level(0)),
+                "files": len(tree.at_level(1)),
+                "packages": len(tree.at_level(2)),
+                "root": len(tree.at_level(3)),
+            }
+            completed_stages: list[str] = []
+            resume_stage = "render"
+            for stage_name in ("leaves", "files", "packages", "root"):
+                if completed_counts[stage_name] >= stage_totals[stage_name]:
+                    completed_stages.append(stage_name)
+                    continue
+                resume_stage = stage_name
+                break
+            total_nodes = sum(stage_totals.values())
+            tree_status = "complete" if len(tree.nodes) >= total_nodes and total_nodes > 0 else "partial"
+            skipped_counts = {
+                "leaves": leaf_cache_hits,
+                "files": file_cache_hits,
+                "packages": package_cache_hits,
+                "root": root_cache_hits,
+            }
+            return {
+                "corpus_id": tree.corpus_id,
+                "revision_fp": tree.revision_fp,
+                "strategy": tree.strategy,
+                "resume_stage": resume_stage,
+                "completed_stages": completed_stages,
+                "completed_counts": completed_counts,
+                "total_counts": stage_totals,
+                "skipped_counts": skipped_counts,
+                "cached_nodes_loaded": cached_nodes_loaded,
+                "cached_nodes": len(tree.nodes),
+                "total_nodes": total_nodes,
+                "tree_status": tree_status,
+                "reused_summaries": sum(skipped_counts.values()),
+            }
+
+        async def sync_resume_state(tree, *, cached_nodes_loaded: int) -> None:
+            if job_state_updater is None:
+                return
+            current = strategy.diagnostics() if strategy is not None else {
+                "leaf_cache_hits": 0,
+                "file_cache_hits": 0,
+                "package_cache_hits": 0,
+                "root_cache_hits": 0,
+            }
+            checkpoint = _resume_checkpoint_payload(
+                tree,
+                cached_nodes_loaded=cached_nodes_loaded,
+                leaf_cache_hits=int(current.get("leaf_cache_hits", 0)),
+                file_cache_hits=int(current.get("file_cache_hits", 0)),
+                package_cache_hits=int(current.get("package_cache_hits", 0)),
+                root_cache_hits=int(current.get("root_cache_hits", 0)),
+            )
+            await job_state_updater.update_job_resume_state(
+                cached_nodes_loaded=int(checkpoint["cached_nodes_loaded"]),
+                total_nodes=int(checkpoint["total_nodes"]),
+                resume_stage=str(checkpoint["resume_stage"]),
+                skipped_leaf_units=int(checkpoint["skipped_counts"]["leaves"]),
+                skipped_file_units=int(checkpoint["skipped_counts"]["files"]),
+                skipped_package_units=int(checkpoint["skipped_counts"]["packages"]),
+                skipped_root_units=int(checkpoint["skipped_counts"]["root"]),
+                leaf_cache_hits=int(checkpoint["skipped_counts"]["leaves"]),
+                file_cache_hits=int(checkpoint["skipped_counts"]["files"]),
+                package_cache_hits=int(checkpoint["skipped_counts"]["packages"]),
+                root_cache_hits=int(checkpoint["skipped_counts"]["root"]),
+            )
+            await job_state_updater.update_understanding_checkpoint(
+                corpus_id=str(checkpoint["corpus_id"]),
+                revision_fp=str(checkpoint["revision_fp"]),
+                strategy=str(checkpoint["strategy"]),
+                stage="ready" if str(checkpoint["tree_status"]) == "complete" else "building_tree",
+                tree_status=str(checkpoint["tree_status"]),
+                cached_nodes=int(checkpoint["cached_nodes"]),
+                total_nodes=int(checkpoint["total_nodes"]),
+                model_used=model_override or "",
+                checkpoint=checkpoint,
+            )
+
         async def persist_stage(stage: str, tree) -> None:
             if self._summary_node_cache is None:
+                await sync_resume_state(tree, cached_nodes_loaded=len(cached_tree.nodes) if cached_tree is not None else 0)
                 return
             try:
                 await self._summary_node_cache.store_tree(tree, stage=stage)
@@ -495,6 +606,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     stage=stage,
                     error=str(exc),
                 )
+            await sync_resume_state(tree, cached_nodes_loaded=len(cached_tree.nodes) if cached_tree is not None else 0)
 
         async def persist_node(stage: str, tree, node) -> None:
             if self._summary_node_cache is None:
@@ -557,133 +669,157 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 "scope_path": request.scope_path,
             },
         )
-
-        if render_only and cached_tree is not None and cached_tree.root() is not None:
-            tree = cached_tree
-            diagnostics = {
-                "fallback_count": 0,
-                "provider_compute_errors": 0,
-                "root_fallback": False,
-                "leaf_cache_hits": 0,
-                "file_cache_hits": 0,
-                "package_cache_hits": 0,
-                "root_cache_hits": 1,
-            }
+        if cached_tree is not None and len(cached_tree.nodes) > 0:
             await emit_job_log(
-                "rerender",
-                "cliff_notes_render_only_reused_tree",
-                "Reused cached summary tree for cliff notes render",
+                "resume",
+                "summary_node_cache_loaded",
+                "Loaded cached summary nodes for resume",
                 {
                     "cached_nodes": len(cached_tree.nodes),
-                    "selected_sections": selected_section_titles,
+                    "resume_stage": _resume_checkpoint_payload(
+                        cached_tree,
+                        cached_nodes_loaded=len(cached_tree.nodes),
+                        leaf_cache_hits=0,
+                        file_cache_hits=0,
+                        package_cache_hits=0,
+                        root_cache_hits=0,
+                    )["resume_stage"],
                 },
             )
-        else:
-            tree = await strategy.build_tree(corpus)
-            diagnostics = strategy.diagnostics()
+            await sync_resume_state(cached_tree, cached_nodes_loaded=len(cached_tree.nodes))
 
-        log.info(
-            "cliff_notes_hierarchical_tree_built",
-            repository_id=request.repository_id,
-            stats=tree.stats(),
-            cached_nodes=len(cached_tree.nodes) if cached_tree is not None else 0,
-            fallback_count=diagnostics["fallback_count"],
-            provider_compute_errors=diagnostics["provider_compute_errors"],
-            root_fallback=diagnostics["root_fallback"],
-            leaf_cache_hits=diagnostics["leaf_cache_hits"],
-            file_cache_hits=diagnostics["file_cache_hits"],
-            package_cache_hits=diagnostics["package_cache_hits"],
-            root_cache_hits=diagnostics["root_cache_hits"],
-        )
-        await emit_job_log(
-            "llm",
-            "cliff_notes_hierarchical_tree_built",
-            "Hierarchical summary tree built",
-            {
-                "stats": tree.stats(),
+        try:
+            if render_only and cached_tree is not None and cached_tree.root() is not None:
+                tree = cached_tree
+                diagnostics = {
+                    "fallback_count": 0,
+                    "provider_compute_errors": 0,
+                    "root_fallback": False,
+                    "leaf_cache_hits": 0,
+                    "file_cache_hits": 0,
+                    "package_cache_hits": 0,
+                    "root_cache_hits": 1,
+                }
+                await emit_job_log(
+                    "rerender",
+                    "cliff_notes_render_only_reused_tree",
+                    "Reused cached summary tree for cliff notes render",
+                    {
+                        "cached_nodes": len(cached_tree.nodes),
+                        "selected_sections": selected_section_titles,
+                    },
+                )
+                await sync_resume_state(tree, cached_nodes_loaded=len(cached_tree.nodes))
+            else:
+                tree = await strategy.build_tree(corpus)
+                diagnostics = strategy.diagnostics()
+                await sync_resume_state(tree, cached_nodes_loaded=len(cached_tree.nodes) if cached_tree is not None else 0)
+
+            log.info(
+                "cliff_notes_hierarchical_tree_built",
+                repository_id=request.repository_id,
+                stats=tree.stats(),
+                cached_nodes=len(cached_tree.nodes) if cached_tree is not None else 0,
+                fallback_count=diagnostics["fallback_count"],
+                provider_compute_errors=diagnostics["provider_compute_errors"],
+                root_fallback=diagnostics["root_fallback"],
+                leaf_cache_hits=diagnostics["leaf_cache_hits"],
+                file_cache_hits=diagnostics["file_cache_hits"],
+                package_cache_hits=diagnostics["package_cache_hits"],
+                root_cache_hits=diagnostics["root_cache_hits"],
+            )
+            await emit_job_log(
+                "llm",
+                "cliff_notes_hierarchical_tree_built",
+                "Hierarchical summary tree built",
+                {
+                    "stats": tree.stats(),
+                    "cached_nodes": len(cached_tree.nodes) if cached_tree is not None else 0,
+                    "fallback_count": diagnostics["fallback_count"],
+                    "provider_compute_errors": diagnostics["provider_compute_errors"],
+                    "leaf_cache_hits": diagnostics["leaf_cache_hits"],
+                    "file_cache_hits": diagnostics["file_cache_hits"],
+                    "package_cache_hits": diagnostics["package_cache_hits"],
+                    "root_cache_hits": diagnostics["root_cache_hits"],
+                },
+            )
+
+            total_nodes = max(len(tree.nodes), 1)
+            fallback_count = int(diagnostics["fallback_count"])
+            if bool(diagnostics["root_fallback"]) or fallback_count / total_nodes >= 0.2:
+                raise RuntimeError(
+                    "hierarchical summarization degraded due to repeated model backend compute failures "
+                    f"(fallback_nodes={fallback_count}, total_nodes={total_nodes})"
+                )
+
+            # Extract pre-analysis from enriched snapshot (deep mode injects
+            # repository-level cliff notes as _pre_analysis)
+            pre_analysis = snapshot_dict.get("_pre_analysis") if isinstance(snapshot_dict, dict) else None
+
+            renderer = CliffNotesRenderer(
+                provider=provider,
+                model_override=model_override,
+            )
+            await emit_job_log("llm", "cliff_notes_renderer_started", "Final cliff notes render started", None)
+            result, usage = await renderer.render(
+                tree,
+                repository_name=request.repository_name,
+                audience=audience,
+                depth=depth,
+                scope_type=scope_type,
+                scope_path=request.scope_path,
+                pre_analysis=pre_analysis,
+                required_section_titles=selected_section_titles or None,
+            )
+
+            if usage.operation == "cliff_notes_render_fallback":
+                raise RuntimeError(
+                    "final cliff notes render degraded due to model backend compute failures"
+                )
+
+            log.info(
+                "cliff_notes_hierarchical_completed",
+                repository_id=request.repository_id,
+                sections=len(result.sections),
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                fallback_count=fallback_count,
+                provider_compute_errors=diagnostics["provider_compute_errors"],
+                leaf_cache_hits=diagnostics["leaf_cache_hits"],
+                file_cache_hits=diagnostics["file_cache_hits"],
+                package_cache_hits=diagnostics["package_cache_hits"],
+                root_cache_hits=diagnostics["root_cache_hits"],
+            )
+            await emit_job_log(
+                "ready",
+                "cliff_notes_hierarchical_completed",
+                "Hierarchical cliff notes generation completed",
+                {
+                    "sections": len(result.sections),
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                    "fallback_count": fallback_count,
+                    "provider_compute_errors": diagnostics["provider_compute_errors"],
+                },
+            )
+            return result, usage, {
                 "cached_nodes": len(cached_tree.nodes) if cached_tree is not None else 0,
-                "fallback_count": diagnostics["fallback_count"],
+                "fallback_count": fallback_count,
                 "provider_compute_errors": diagnostics["provider_compute_errors"],
                 "leaf_cache_hits": diagnostics["leaf_cache_hits"],
                 "file_cache_hits": diagnostics["file_cache_hits"],
                 "package_cache_hits": diagnostics["package_cache_hits"],
                 "root_cache_hits": diagnostics["root_cache_hits"],
-            },
-        )
-
-        total_nodes = max(len(tree.nodes), 1)
-        fallback_count = int(diagnostics["fallback_count"])
-        if bool(diagnostics["root_fallback"]) or fallback_count / total_nodes >= 0.2:
-            raise RuntimeError(
-                "hierarchical summarization degraded due to repeated model backend compute failures "
-                f"(fallback_nodes={fallback_count}, total_nodes={total_nodes})"
-            )
-
-        # Extract pre-analysis from enriched snapshot (deep mode injects
-        # repository-level cliff notes as _pre_analysis)
-        pre_analysis = snapshot_dict.get("_pre_analysis") if isinstance(snapshot_dict, dict) else None
-
-        renderer = CliffNotesRenderer(
-            provider=provider,
-            model_override=model_override,
-        )
-        await emit_job_log("llm", "cliff_notes_renderer_started", "Final cliff notes render started", None)
-        result, usage = await renderer.render(
-            tree,
-            repository_name=request.repository_name,
-            audience=audience,
-            depth=depth,
-            scope_type=scope_type,
-            scope_path=request.scope_path,
-            pre_analysis=pre_analysis,
-            required_section_titles=selected_section_titles or None,
-        )
-
-        if usage.operation == "cliff_notes_render_fallback":
-            raise RuntimeError(
-                "final cliff notes render degraded due to model backend compute failures"
-            )
-
-        log.info(
-            "cliff_notes_hierarchical_completed",
-            repository_id=request.repository_id,
-            sections=len(result.sections),
-            input_tokens=usage.input_tokens,
-            output_tokens=usage.output_tokens,
-            fallback_count=fallback_count,
-            provider_compute_errors=diagnostics["provider_compute_errors"],
-            leaf_cache_hits=diagnostics["leaf_cache_hits"],
-            file_cache_hits=diagnostics["file_cache_hits"],
-            package_cache_hits=diagnostics["package_cache_hits"],
-            root_cache_hits=diagnostics["root_cache_hits"],
-        )
-        await emit_job_log(
-            "ready",
-            "cliff_notes_hierarchical_completed",
-            "Hierarchical cliff notes generation completed",
-            {
-                "sections": len(result.sections),
-                "input_tokens": usage.input_tokens,
-                "output_tokens": usage.output_tokens,
-                "fallback_count": fallback_count,
-                "provider_compute_errors": diagnostics["provider_compute_errors"],
-            },
-        )
-        return result, usage, {
-            "cached_nodes": len(cached_tree.nodes) if cached_tree is not None else 0,
-            "fallback_count": fallback_count,
-            "provider_compute_errors": diagnostics["provider_compute_errors"],
-            "leaf_cache_hits": diagnostics["leaf_cache_hits"],
-            "file_cache_hits": diagnostics["file_cache_hits"],
-            "package_cache_hits": diagnostics["package_cache_hits"],
-            "root_cache_hits": diagnostics["root_cache_hits"],
-            "root_fallback": diagnostics["root_fallback"],
-            "total_nodes": len(tree.nodes),
-            "corpus_id": tree.corpus_id,
-            "revision_fp": tree.revision_fp,
-            "strategy": tree.strategy,
-            "model_used": usage.model or (model_override or ""),
-        }
+                "root_fallback": diagnostics["root_fallback"],
+                "total_nodes": len(tree.nodes),
+                "corpus_id": tree.corpus_id,
+                "revision_fp": tree.revision_fp,
+                "strategy": tree.strategy,
+                "model_used": usage.model or (model_override or ""),
+            }
+        finally:
+            if job_state_updater is not None:
+                await job_state_updater.close()
 
     async def GenerateCliffNotes(  # noqa: N802
         self,

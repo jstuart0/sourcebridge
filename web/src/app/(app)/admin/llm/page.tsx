@@ -63,6 +63,13 @@ interface JobView {
   file_cache_hits?: number;
   package_cache_hits?: number;
   root_cache_hits?: number;
+  cached_nodes_loaded?: number;
+  total_nodes?: number;
+  resume_stage?: string;
+  skipped_leaf_units?: number;
+  skipped_file_units?: number;
+  skipped_package_units?: number;
+  skipped_root_units?: number;
   artifact_id?: string;
   repo_id?: string;
   queue_position?: number;
@@ -198,16 +205,22 @@ function formatQueueEta(ms?: number): string | null {
   return `${Math.ceil(seconds / 60)}m`;
 }
 
-function jobReuseSummary(job: Pick<JobView, "reused_summaries" | "leaf_cache_hits" | "file_cache_hits" | "package_cache_hits" | "root_cache_hits">): string | null {
+function jobReuseSummary(job: Pick<JobView, "reused_summaries" | "leaf_cache_hits" | "file_cache_hits" | "package_cache_hits" | "root_cache_hits" | "cached_nodes_loaded" | "resume_stage">): string | null {
   const reused = job.reused_summaries ?? 0;
-  if (reused <= 0) return null;
+  const cached = job.cached_nodes_loaded ?? 0;
   const parts = [
+    cached > 0 ? `${cached} cached loaded` : null,
+    job.resume_stage ? `resume ${job.resume_stage}` : null,
     job.leaf_cache_hits ? `${job.leaf_cache_hits} leaf` : null,
     job.file_cache_hits ? `${job.file_cache_hits} file` : null,
     job.package_cache_hits ? `${job.package_cache_hits} package` : null,
     job.root_cache_hits ? `${job.root_cache_hits} root` : null,
   ].filter(Boolean);
-  return parts.length > 0 ? `${reused} reused · ${parts.join(" · ")}` : `${reused} reused`;
+  if (reused <= 0 && parts.length === 0) return null;
+  if (reused > 0) {
+    return parts.length > 0 ? `${reused} reused · ${parts.join(" · ")}` : `${reused} reused`;
+  }
+  return parts.join(" · ");
 }
 
 function formatGenerationMode(mode?: JobView["generation_mode"]): string | null {
