@@ -1004,6 +1004,12 @@ export default function RepositoryDetailPage() {
   const understandingSections = understandingHighlightSections(currentUnderstanding);
   const understandingFeaturedSections = understandingSections.slice(0, 4);
   const understandingAdditionalSections = understandingSections.slice(4);
+  const understandingBusy = Boolean(
+    currentUnderstanding &&
+      (currentUnderstanding.stage === "BUILDING_TREE" ||
+        currentUnderstanding.stage === "FIRST_PASS_READY" ||
+        currentUnderstanding.stage === "DEEPENING"),
+  );
 
   useEffect(() => {
     setUnderstandingCollapsed(shouldAutoCollapseUnderstanding);
@@ -1731,7 +1737,27 @@ export default function RepositoryDetailPage() {
             {repo.path || repo.remoteUrl}
           </a>
         ) : (repo?.path || "Explore the codebase through files, symbols, field guides, reviews, and change impact.")}
-        actions={repo ? <RepoJobsPopover repoId={repo.id} /> : null}
+        actions={repo ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleBuildRepositoryUnderstanding}
+              disabled={knowledgeLoading || understandingBusy}
+            >
+              {knowledgeLoading
+                ? "Starting..."
+                : understandingBusy
+                  ? "Understanding running"
+                  : currentUnderstanding
+                    ? currentUnderstanding.refreshAvailable
+                      ? "Refresh understanding"
+                      : "Rebuild understanding"
+                    : "Build understanding"}
+            </Button>
+            <RepoJobsPopover repoId={repo.id} />
+          </div>
+        ) : null}
       />
       {repo && (
         <Panel className="w-full" padding="sm">
