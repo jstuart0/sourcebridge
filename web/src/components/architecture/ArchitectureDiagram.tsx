@@ -52,6 +52,13 @@ interface AIDiagramArtifact {
   sections?: AIDiagramSection[] | null;
 }
 
+interface AIDiagramComponent {
+  id: string;
+  label: string;
+  kind?: string;
+  modulePaths?: string[];
+}
+
 function parseArchitectureMetadata(metadata?: string | null): {
   validationStatus?: string;
   repairSummary?: string;
@@ -59,6 +66,7 @@ function parseArchitectureMetadata(metadata?: string | null): {
   contradictoryEdges?: string[];
   graphAlignmentStatus?: string;
   generationStrategy?: string;
+  components?: AIDiagramComponent[];
   executionMermaidSource?: string;
   executionSummary?: string;
   systemSummary?: string;
@@ -73,6 +81,7 @@ function parseArchitectureMetadata(metadata?: string | null): {
       contradictoryEdges: Array.isArray(parsed.contradictory_edges) ? parsed.contradictory_edges : [],
       graphAlignmentStatus: parsed.graph_alignment_status,
       generationStrategy: parsed.generation_strategy,
+      components: Array.isArray(parsed.components) ? parsed.components : [],
       executionMermaidSource: parsed.execution_mermaid_source,
       executionSummary: parsed.execution_summary,
       systemSummary: parsed.system_summary,
@@ -91,6 +100,7 @@ export function ArchitectureDiagram({
   const [level, setLevel] = useState<"MODULE" | "FILE">("MODULE");
   const [moduleFilter, setModuleFilter] = useState<string | null>(null);
   const [moduleDepth, setModuleDepth] = useState(1);
+  const [selectedAIComponentId, setSelectedAIComponentId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -124,6 +134,8 @@ export function ArchitectureDiagram({
   }, [artifactsResult.data]);
   const aiSection = aiArtifact?.sections?.[0] ?? null;
   const aiMetadata = parseArchitectureMetadata(aiSection?.metadata);
+  const aiComponents = useMemo(() => aiMetadata.components ?? [], [aiMetadata.components]);
+  const selectedAIComponent = aiComponents.find((component) => component.id === selectedAIComponentId) ?? null;
 
   const aiSystemMermaidSource = aiSection?.content ?? "";
   const aiExecutionMermaidSource = aiMetadata.executionMermaidSource ?? "";
@@ -135,6 +147,24 @@ export function ArchitectureDiagram({
     aiFocus === "EXECUTION"
       ? aiMetadata.executionSummary || "This view follows the request-to-worker execution path and the supporting systems around it."
       : aiMetadata.systemSummary || aiSection?.summary || "This view highlights the main system context for the repository.";
+
+  const handleNodeClick = useCallback(
+    (nodePath: string) => {
+      if (level === "MODULE") {
+        setModuleFilter(nodePath);
+        setLevel("FILE");
+      } else {
+        onModuleClick?.(nodePath);
+      }
+    },
+    [level, onModuleClick],
+  );
+
+  const handleOpenComponentModule = useCallback((modulePath: string) => {
+    setViewMode("DETERMINISTIC");
+    setLevel("FILE");
+    setModuleFilter(modulePath);
+  }, []);
 
   useEffect(() => {
     if (!currentMermaidSource || !containerRef.current) return;
@@ -165,6 +195,18 @@ export function ArchitectureDiagram({
                 handleNodeClick(path);
               });
             });
+          } else if (viewMode === "AI") {
+            containerRef.current.querySelectorAll<HTMLElement>(".node").forEach((node) => {
+              const nodeId = node.id.replace(/^flowchart-/, "").replace(/-\d+$/, "");
+              const component = aiComponents.find((entry) => entry.id === nodeId);
+              if (!component) {
+                return;
+              }
+              node.style.cursor = "pointer";
+              node.addEventListener("click", () => {
+                setSelectedAIComponentId(component.id);
+              });
+            });
           }
         }
       } catch (error) {
@@ -178,19 +220,7 @@ export function ArchitectureDiagram({
     return () => {
       cancelled = true;
     };
-  }, [currentMermaidSource, repositoryId, viewMode, handleNodeClick]);
-
-  const handleNodeClick = useCallback(
-    (nodePath: string) => {
-      if (level === "MODULE") {
-        setModuleFilter(nodePath);
-        setLevel("FILE");
-      } else {
-        onModuleClick?.(nodePath);
-      }
-    },
-    [level, onModuleClick],
-  );
+  }, [aiComponents, currentMermaidSource, repositoryId, viewMode, handleNodeClick]);
 
   const handleCopyMermaid = useCallback(() => {
     if (!currentMermaidSource) return;
@@ -203,6 +233,10 @@ export function ArchitectureDiagram({
     setLevel("MODULE");
     setModuleFilter(null);
   }, []);
+
+  useEffect(() => {
+    setSelectedAIComponentId(null);
+  }, [aiArtifact?.id, aiFocus]);
 
   const handleGenerateAIDiagram = useCallback(async () => {
     if (aiArtifact?.id && (aiArtifact.refreshAvailable || aiArtifact.stale || aiArtifact.status === "FAILED")) {
@@ -377,6 +411,11 @@ export function ArchitectureDiagram({
                 </div>
               ) : null}
               {aiArtifact.understandingId && <div>Backed by repository understanding.</div>}
+              {aiComponents.length > 0 ? (
+                <div className="text-xs text-[var(--text-tertiary)]">
+                  Click an AI diagram box to inspect the repo areas it is grounded in.
+                </div>
+              ) : null}
             </div>
           )}
         </Panel>
@@ -399,6 +438,40 @@ export function ArchitectureDiagram({
           </div>
         )}
       </Panel>
+
+      {viewMode === "AI" && selectedAIComponent ? (
+        <Panel>
+          <div className="space-y-3 text-sm text-[var(--text-secondary)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="text-sm font-medium text-[var(--text-primary)]">{selectedAIComponent.label}</h4>
+              {selectedAIComponent.kind ? (
+                <span className="rounded-full border border-[var(--border-default)] px-2.5 py-1 text-xs text-[var(--text-primary)]">
+                  {selectedAIComponent.kind}
+                </span>
+              ) : null}
+            </div>
+            {selectedAIComponent.modulePaths && selectedAIComponent.modulePaths.length > 0 ? (
+              <>
+                <div>Grounded in these repo areas:</div>
+                <div className="flex flex-wrap gap-2">
+                  {selectedAIComponent.modulePaths.map((modulePath) => (
+                    <button
+                      key={modulePath}
+                      type="button"
+                      onClick={() => handleOpenComponentModule(modulePath)}
+                      className="rounded-full border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-1 text-xs font-mono text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                    >
+                      {modulePath}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div>This component is conceptual and does not map to a local module path.</div>
+            )}
+          </div>
+        </Panel>
+      ) : null}
 
       {viewMode === "DETERMINISTIC" && deterministicDiagram.modules.length > 0 && (
         <Panel>

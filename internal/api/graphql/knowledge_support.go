@@ -48,6 +48,7 @@ type architectureDiagramSectionMetadata struct {
 	ContradictoryEdges   []string `json:"contradictory_edges,omitempty"`
 	GraphAlignmentStatus string   `json:"graph_alignment_status,omitempty"`
 	GenerationStrategy   string   `json:"generation_strategy,omitempty"`
+	Components           []architectureSystemComponent `json:"components,omitempty"`
 	ExecutionMermaid     string   `json:"execution_mermaid_source,omitempty"`
 	ExecutionSummary     string   `json:"execution_summary,omitempty"`
 	SystemSummary        string   `json:"system_summary,omitempty"`
@@ -165,6 +166,7 @@ func architectureDiagramMetadataJSON(resp *knowledgev1.GenerateArchitectureDiagr
 		ContradictoryEdges: architectureDiagramContradictoryEdges(resp, bundle),
 		GraphAlignmentStatus: architectureDiagramGraphAlignmentStatus(resp, bundle),
 		GenerationStrategy: architectureDiagramGenerationStrategy(resp),
+		Components:         append([]architectureSystemComponent(nil), bundle.SystemComponents...),
 		ExecutionMermaid:   buildArchitectureExecutionViewMermaid(*bundle),
 		ExecutionSummary:   buildArchitectureExecutionSummary(*bundle),
 		SystemSummary:      strings.TrimSpace(resp.DiagramSummary),
@@ -176,6 +178,7 @@ func architectureDiagramMetadataJSON(resp *knowledgev1.GenerateArchitectureDiagr
 		len(meta.ContradictoryEdges) == 0 &&
 		meta.GraphAlignmentStatus == "" &&
 		meta.GenerationStrategy == "" &&
+		len(meta.Components) == 0 &&
 		meta.ExecutionMermaid == "" &&
 		meta.ExecutionSummary == "" &&
 		meta.SystemSummary == "" {

@@ -119,6 +119,9 @@ func TestArchitectureDiagramMetadataIncludesExecutionViewAndStrategy(t *testing.
 	if meta.GraphAlignmentStatus != "inferred" {
 		t.Fatalf("expected inferred graph alignment status, got %q", meta.GraphAlignmentStatus)
 	}
+	if len(meta.Components) != len(bundle.SystemComponents) {
+		t.Fatalf("expected component grounding metadata, got %#v", meta.Components)
+	}
 	if !strings.Contains(meta.ExecutionMermaid, "subgraph request_path") {
 		t.Fatalf("expected execution mermaid in metadata, got %q", meta.ExecutionMermaid)
 	}
