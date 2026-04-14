@@ -171,6 +171,52 @@ func TestTotalReusedSummaries(t *testing.T) {
 	}
 }
 
+func TestModeRollups(t *testing.T) {
+	rollups := modeRollups([]monitorJobView{
+		{
+			GenerationMode:  "classic",
+			Status:          string(llm.StatusReady),
+			ElapsedMs:       1200,
+			ReusedSummaries: 1,
+			LeafCacheHits:   2,
+			FileCacheHits:   1,
+		},
+		{
+			GenerationMode:   "classic",
+			Status:           string(llm.StatusFailed),
+			ElapsedMs:        2400,
+			PackageCacheHits: 3,
+		},
+		{
+			GenerationMode:  "understanding_first",
+			Status:          string(llm.StatusReady),
+			ElapsedMs:       1800,
+			ReusedSummaries: 4,
+			RootCacheHits:   2,
+		},
+	})
+	classic := rollups["classic"]
+	if classic.Total != 2 || classic.Succeeded != 1 || classic.Failed != 1 {
+		t.Fatalf("unexpected classic rollup %#v", classic)
+	}
+	if classic.ReusedSummaries != 1 {
+		t.Fatalf("expected classic reused summaries 1, got %d", classic.ReusedSummaries)
+	}
+	if classic.CacheHits != 6 {
+		t.Fatalf("expected classic cache hits 6, got %d", classic.CacheHits)
+	}
+	if classic.P50LatencyMs == 0 || classic.P95LatencyMs == 0 {
+		t.Fatalf("expected classic latencies, got %#v", classic)
+	}
+	understanding := rollups["understanding_first"]
+	if understanding.Total != 1 || understanding.Succeeded != 1 {
+		t.Fatalf("unexpected understanding-first rollup %#v", understanding)
+	}
+	if understanding.ReusedSummaries != 4 || understanding.CacheHits != 2 {
+		t.Fatalf("unexpected understanding-first reuse %#v", understanding)
+	}
+}
+
 func TestHandleLLMActivityShowsCompletedJob(t *testing.T) {
 	s := newMonitorTestServer(t)
 
