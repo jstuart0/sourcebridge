@@ -56,6 +56,8 @@ function parseArchitectureMetadata(metadata?: string | null): {
   validationStatus?: string;
   repairSummary?: string;
   inferredEdges?: string[];
+  contradictoryEdges?: string[];
+  graphAlignmentStatus?: string;
   generationStrategy?: string;
   executionMermaidSource?: string;
   executionSummary?: string;
@@ -68,6 +70,8 @@ function parseArchitectureMetadata(metadata?: string | null): {
       validationStatus: parsed.validation_status,
       repairSummary: parsed.repair_summary,
       inferredEdges: Array.isArray(parsed.inferred_edges) ? parsed.inferred_edges : [],
+      contradictoryEdges: Array.isArray(parsed.contradictory_edges) ? parsed.contradictory_edges : [],
+      graphAlignmentStatus: parsed.graph_alignment_status,
       generationStrategy: parsed.generation_strategy,
       executionMermaidSource: parsed.execution_mermaid_source,
       executionSummary: parsed.execution_summary,
@@ -345,14 +349,33 @@ export function ArchitectureDiagram({
                     Validation: {aiMetadata.validationStatus}
                   </span>
                 )}
+                {aiMetadata.graphAlignmentStatus ? (
+                  <span className="rounded-full border border-[var(--border-default)] px-2.5 py-1 text-xs text-[var(--text-primary)]">
+                    {aiMetadata.graphAlignmentStatus === "contradictory"
+                      ? "Graph contradiction"
+                      : aiMetadata.graphAlignmentStatus === "inferred"
+                        ? "Contains inferred structure"
+                        : "Graph-aligned"}
+                  </span>
+                ) : null}
                 {aiMetadata.inferredEdges && aiMetadata.inferredEdges.length > 0 && (
                   <span className="rounded-full border border-[var(--border-default)] px-2.5 py-1 text-xs text-[var(--text-primary)]">
                     Inferred edges: {aiMetadata.inferredEdges.length}
                   </span>
                 )}
+                {aiMetadata.contradictoryEdges && aiMetadata.contradictoryEdges.length > 0 && (
+                  <span className="rounded-full border border-[var(--color-error,#ef4444)] px-2.5 py-1 text-xs text-[var(--color-error,#ef4444)]">
+                    Contradictory edges: {aiMetadata.contradictoryEdges.length}
+                  </span>
+                )}
               </div>
               <div className="text-[var(--text-primary)]">{currentAICaption}</div>
               {aiMetadata.repairSummary && <div>Repair: {aiMetadata.repairSummary}</div>}
+              {aiMetadata.contradictoryEdges && aiMetadata.contradictoryEdges.length > 0 ? (
+                <div className="text-[var(--color-error,#ef4444)]">
+                  Structural warning: some AI edges contradict the deterministic system view.
+                </div>
+              ) : null}
               {aiArtifact.understandingId && <div>Backed by repository understanding.</div>}
             </div>
           )}

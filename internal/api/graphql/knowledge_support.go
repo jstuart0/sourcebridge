@@ -45,6 +45,8 @@ type architectureDiagramSectionMetadata struct {
 	ValidationStatus     string   `json:"validation_status,omitempty"`
 	RepairSummary        string   `json:"repair_summary,omitempty"`
 	InferredEdges        []string `json:"inferred_edges,omitempty"`
+	ContradictoryEdges   []string `json:"contradictory_edges,omitempty"`
+	GraphAlignmentStatus string   `json:"graph_alignment_status,omitempty"`
 	GenerationStrategy   string   `json:"generation_strategy,omitempty"`
 	ExecutionMermaid     string   `json:"execution_mermaid_source,omitempty"`
 	ExecutionSummary     string   `json:"execution_summary,omitempty"`
@@ -160,6 +162,8 @@ func architectureDiagramMetadataJSON(resp *knowledgev1.GenerateArchitectureDiagr
 		ValidationStatus:   strings.TrimSpace(resp.ValidationStatus),
 		RepairSummary:      strings.TrimSpace(resp.RepairSummary),
 		InferredEdges:      append([]string(nil), resp.InferredEdges...),
+		ContradictoryEdges: architectureDiagramContradictoryEdges(resp, bundle),
+		GraphAlignmentStatus: architectureDiagramGraphAlignmentStatus(resp, bundle),
 		GenerationStrategy: architectureDiagramGenerationStrategy(resp),
 		ExecutionMermaid:   buildArchitectureExecutionViewMermaid(*bundle),
 		ExecutionSummary:   buildArchitectureExecutionSummary(*bundle),
@@ -169,6 +173,8 @@ func architectureDiagramMetadataJSON(resp *knowledgev1.GenerateArchitectureDiagr
 		meta.ValidationStatus == "" &&
 		meta.RepairSummary == "" &&
 		len(meta.InferredEdges) == 0 &&
+		len(meta.ContradictoryEdges) == 0 &&
+		meta.GraphAlignmentStatus == "" &&
 		meta.GenerationStrategy == "" &&
 		meta.ExecutionMermaid == "" &&
 		meta.ExecutionSummary == "" &&
@@ -180,6 +186,68 @@ func architectureDiagramMetadataJSON(resp *knowledgev1.GenerateArchitectureDiagr
 		return ""
 	}
 	return string(raw)
+}
+
+func architectureDiagramContradictoryEdges(resp *knowledgev1.GenerateArchitectureDiagramResponse, bundle *architectureDiagramPromptBundle) []string {
+	if resp == nil || bundle == nil {
+		return nil
+	}
+	reverse := architectureDiagramReverseEdgeSet(bundle.SystemFlows)
+	if len(reverse) == 0 {
+		return nil
+	}
+	var out []string
+	for _, edge := range resp.InferredEdges {
+		if _, ok := reverse[edge]; ok {
+			out = append(out, edge)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func architectureDiagramGraphAlignmentStatus(resp *knowledgev1.GenerateArchitectureDiagramResponse, bundle *architectureDiagramPromptBundle) string {
+	if resp == nil || bundle == nil {
+		return ""
+	}
+	if len(architectureDiagramContradictoryEdges(resp, bundle)) > 0 {
+		return "contradictory"
+	}
+	if len(resp.InferredEdges) > 0 {
+		return "inferred"
+	}
+	if len(bundle.SystemFlows) > 0 {
+		return "aligned"
+	}
+	return ""
+}
+
+func architectureDiagramAllowedEdgeSet(flows []architectureSystemFlow) map[string]struct{} {
+	if len(flows) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(flows))
+	for _, flow := range flows {
+		if flow.SourceID == "" || flow.TargetID == "" {
+			continue
+		}
+		out[fmt.Sprintf("%s -> %s", flow.SourceID, flow.TargetID)] = struct{}{}
+	}
+	return out
+}
+
+func architectureDiagramReverseEdgeSet(flows []architectureSystemFlow) map[string]struct{} {
+	if len(flows) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(flows))
+	for _, flow := range flows {
+		if flow.SourceID == "" || flow.TargetID == "" {
+			continue
+		}
+		out[fmt.Sprintf("%s -> %s", flow.TargetID, flow.SourceID)] = struct{}{}
+	}
+	return out
 }
 
 func architectureDiagramGenerationStrategy(resp *knowledgev1.GenerateArchitectureDiagramResponse) string {

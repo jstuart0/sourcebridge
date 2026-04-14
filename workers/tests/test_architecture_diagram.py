@@ -152,3 +152,37 @@ background_workers -->|stores artifacts and job state| persistence""",
     assert result["generation_strategy"] == "repaired"
     assert usage.input_tokens == 200
     assert usage.output_tokens == 100
+
+
+async def test_generate_architecture_diagram_flags_contradictory_edges() -> None:
+    provider = _SequenceProvider(
+        [
+            """flowchart LR
+api_auth["API & Auth"]
+background_workers["Background Workers"]
+background_workers -->|sends requests back| api_auth""",
+        ]
+    )
+    snapshot_json = """{
+      "system_components": [
+        {"id": "api_auth", "label": "API & Auth", "kind": "service"},
+        {"id": "background_workers", "label": "Background Workers", "kind": "worker"}
+      ],
+      "system_flows": [
+        {"source_id": "api_auth", "target_id": "background_workers", "summary": "dispatches jobs"}
+      ]
+    }"""
+    result, _ = await generate_architecture_diagram(
+        provider,
+        repository_name="Example Repo",
+        audience="developer",
+        depth="medium",
+        snapshot_json=snapshot_json,
+        deterministic_diagram_json='{"modules":[]}',
+        model_override="test-model",
+    )
+
+    assert result["generation_strategy"] == "repaired"
+    assert result["contradictory_edges"] == ["background_workers -> api_auth"]
+    assert result["inferred_edges"] == []
+    assert "graph-contradictory edges" in result["repair_summary"]

@@ -13,7 +13,7 @@ from workers.common.llm.provider import (
     complete_with_optional_model,
     require_nonempty,
 )
-from workers.common.mermaid.validator import infer_edge_labels, validate_and_repair_mermaid
+from workers.common.mermaid.validator import validate_and_repair_mermaid
 from workers.knowledge.prompts.architecture_diagram import (
     ARCHITECTURE_DIAGRAM_SYSTEM,
     build_architecture_diagram_prompt,
@@ -71,6 +71,19 @@ def _deterministic_edges(scaffold_json: str) -> set[tuple[str, str]]:
             tgt = str(target).strip()
             if tgt:
                 edges.add((src, tgt))
+    return edges
+
+
+def _system_flow_edges(snapshot_json: str) -> set[tuple[str, str]]:
+    _, flows = _load_system_context(snapshot_json)
+    edges: set[tuple[str, str]] = set()
+    for flow in flows:
+        if not isinstance(flow, dict):
+            continue
+        src = str(flow.get("source_id", "")).strip()
+        tgt = str(flow.get("target_id", "")).strip()
+        if src and tgt:
+            edges.add((src, tgt))
     return edges
 
 
@@ -225,6 +238,27 @@ def _diagram_quality_issues(mermaid_source: str) -> list[str]:
     return issues
 
 
+def _graph_alignment(validation, snapshot_json: str, deterministic_diagram_json: str) -> tuple[list[str], list[str], list[str]]:
+    system_edges = _system_flow_edges(snapshot_json)
+    if system_edges:
+        supported_basis = system_edges
+    else:
+        supported_basis = _deterministic_edges(deterministic_diagram_json)
+    ai_edges = validation.edge_pairs
+    supported: list[str] = []
+    inferred: list[str] = []
+    contradictory: list[str] = []
+    for src, tgt in sorted(ai_edges):
+        edge = f"{src} -> {tgt}"
+        if (src, tgt) in supported_basis:
+            supported.append(edge)
+        elif (tgt, src) in supported_basis:
+            contradictory.append(edge)
+        else:
+            inferred.append(edge)
+    return supported, inferred, contradictory
+
+
 async def generate_architecture_diagram(
     provider: LLMProvider,
     repository_name: str,
@@ -372,9 +406,19 @@ async def generate_architecture_diagram(
                 ]
                 if part
             )
-    deterministic_edges = _deterministic_edges(deterministic_diagram_json)
-    ai_edges = infer_edge_labels(validation)
-    inferred_edges = sorted(f"{src} -> {tgt}" for src, tgt in ai_edges if (src, tgt) not in deterministic_edges)
+    supported_edges, inferred_edges, contradictory_edges = _graph_alignment(
+        validation,
+        snapshot_json,
+        deterministic_diagram_json,
+    )
+    if contradictory_edges:
+        if generation_strategy != "fallback":
+            generation_strategy = "repaired"
+        validation.validation_status = "repaired"
+        repair_summary = validation.repair_summary.strip()
+        validation.repair_summary = "; ".join(
+            part for part in [repair_summary, f"flagged {len(contradictory_edges)} graph-contradictory edges"] if part
+        )
     if inferred_edges and validation.validation_status == "valid" and generation_strategy == "llm":
         validation.validation_status = "repaired"
         generation_strategy = "repaired"
@@ -392,7 +436,9 @@ async def generate_architecture_diagram(
         "repair_summary": validation.repair_summary,
         "diagram_summary": _system_view_summary(repository_name, snapshot_json),
         "evidence": _build_evidence(deterministic_diagram_json),
+        "supported_edges": supported_edges,
         "inferred_edges": inferred_edges,
+        "contradictory_edges": contradictory_edges,
         "generation_strategy": generation_strategy,
     }
     return result, usage

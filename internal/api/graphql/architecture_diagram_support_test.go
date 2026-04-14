@@ -116,6 +116,9 @@ func TestArchitectureDiagramMetadataIncludesExecutionViewAndStrategy(t *testing.
 	if meta.GenerationStrategy != "fallback" {
 		t.Fatalf("expected fallback generation strategy, got %q", meta.GenerationStrategy)
 	}
+	if meta.GraphAlignmentStatus != "inferred" {
+		t.Fatalf("expected inferred graph alignment status, got %q", meta.GraphAlignmentStatus)
+	}
 	if !strings.Contains(meta.ExecutionMermaid, "subgraph request_path") {
 		t.Fatalf("expected execution mermaid in metadata, got %q", meta.ExecutionMermaid)
 	}
@@ -124,5 +127,33 @@ func TestArchitectureDiagramMetadataIncludesExecutionViewAndStrategy(t *testing.
 	}
 	if !strings.Contains(meta.SystemSummary, "SourceBridge routes user requests") {
 		t.Fatalf("unexpected system summary %q", meta.SystemSummary)
+	}
+	if len(meta.InferredEdges) != 1 || meta.InferredEdges[0] != "api -> worker" {
+		t.Fatalf("unexpected inferred edges %#v", meta.InferredEdges)
+	}
+}
+
+func TestArchitectureDiagramMetadataFlagsContradictoryEdges(t *testing.T) {
+	bundle := architectureDiagramPromptBundle{
+		SystemFlows: []architectureSystemFlow{
+			{SourceID: "api_auth", TargetID: "background_workers", Summary: "dispatches jobs"},
+		},
+	}
+	resp := &knowledgev1.GenerateArchitectureDiagramResponse{
+		ValidationStatus: "repaired",
+		RepairSummary:    "flagged 1 graph-contradictory edges",
+		InferredEdges:    []string{"background_workers -> api_auth"},
+	}
+
+	raw := architectureDiagramMetadataJSON(resp, &bundle)
+	var meta architectureDiagramSectionMetadata
+	if err := json.Unmarshal([]byte(raw), &meta); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if meta.GraphAlignmentStatus != "contradictory" {
+		t.Fatalf("expected contradictory graph alignment status, got %q", meta.GraphAlignmentStatus)
+	}
+	if len(meta.ContradictoryEdges) != 1 || meta.ContradictoryEdges[0] != "background_workers -> api_auth" {
+		t.Fatalf("unexpected contradictory edges %#v", meta.ContradictoryEdges)
 	}
 }
