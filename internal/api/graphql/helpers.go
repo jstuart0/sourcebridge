@@ -850,6 +850,12 @@ func mapKnowledgeArtifactWithStore(store knowledgepkg.KnowledgeStore, a *knowled
 	if out.Dependencies == nil {
 		out.Dependencies = []*ArtifactDependency{}
 	}
+	for _, unit := range store.GetRefinementUnits(a.ID) {
+		out.RefinementUnits = append(out.RefinementUnits, mapRefinementUnit(&unit))
+	}
+	if out.RefinementUnits == nil {
+		out.RefinementUnits = []*KnowledgeRefinementUnit{}
+	}
 	scope := knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository}
 	if a.Scope != nil {
 		scope = a.Scope.Normalize()
@@ -950,6 +956,28 @@ func mapArtifactDependency(dep *knowledgepkg.ArtifactDependency) *ArtifactDepend
 		TargetRevisionFp: ptrString(dep.TargetRevisionFP),
 		Metadata:         ptrString(dep.Metadata),
 		CreatedAt:        dep.CreatedAt,
+	}
+}
+
+func mapRefinementUnit(unit *knowledgepkg.RefinementUnit) *KnowledgeRefinementUnit {
+	if unit == nil {
+		return nil
+	}
+	return &KnowledgeRefinementUnit{
+		ID:                 unit.ID,
+		ArtifactID:         unit.ArtifactID,
+		SectionKey:         unit.SectionKey,
+		SectionTitle:       unit.SectionTitle,
+		RefinementType:     unit.RefinementType,
+		Status:             string(unit.Status),
+		AttemptCount:       unit.AttemptCount,
+		UnderstandingID:    ptrString(unit.UnderstandingID),
+		EvidenceRevisionFp: ptrString(unit.EvidenceRevisionFP),
+		RendererVersion:    ptrString(unit.RendererVersion),
+		LastError:          ptrString(unit.LastError),
+		Metadata:           ptrString(unit.Metadata),
+		CreatedAt:          unit.CreatedAt,
+		UpdatedAt:          unit.UpdatedAt,
 	}
 }
 

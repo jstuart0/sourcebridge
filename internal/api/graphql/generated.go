@@ -380,6 +380,7 @@ type ComplexityRoot struct {
 		Progress                func(childComplexity int) int
 		ProgressMessage         func(childComplexity int) int
 		ProgressPhase           func(childComplexity int) int
+		RefinementUnits         func(childComplexity int) int
 		RefreshAvailable        func(childComplexity int) int
 		RendererVersion         func(childComplexity int) int
 		RepositoryID            func(childComplexity int) int
@@ -404,6 +405,23 @@ type ComplexityRoot struct {
 		SectionID  func(childComplexity int) int
 		SourceID   func(childComplexity int) int
 		SourceType func(childComplexity int) int
+	}
+
+	KnowledgeRefinementUnit struct {
+		ArtifactID         func(childComplexity int) int
+		AttemptCount       func(childComplexity int) int
+		CreatedAt          func(childComplexity int) int
+		EvidenceRevisionFp func(childComplexity int) int
+		ID                 func(childComplexity int) int
+		LastError          func(childComplexity int) int
+		Metadata           func(childComplexity int) int
+		RefinementType     func(childComplexity int) int
+		RendererVersion    func(childComplexity int) int
+		SectionKey         func(childComplexity int) int
+		SectionTitle       func(childComplexity int) int
+		Status             func(childComplexity int) int
+		UnderstandingID    func(childComplexity int) int
+		UpdatedAt          func(childComplexity int) int
 	}
 
 	KnowledgeScope struct {
@@ -2582,6 +2600,13 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.KnowledgeArtifact.ProgressPhase(childComplexity), true
 
+	case "KnowledgeArtifact.refinementUnits":
+		if e.complexity.KnowledgeArtifact.RefinementUnits == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeArtifact.RefinementUnits(childComplexity), true
+
 	case "KnowledgeArtifact.refreshAvailable":
 		if e.complexity.KnowledgeArtifact.RefreshAvailable == nil {
 			break
@@ -2728,6 +2753,104 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.KnowledgeEvidence.SourceType(childComplexity), true
+
+	case "KnowledgeRefinementUnit.artifactId":
+		if e.complexity.KnowledgeRefinementUnit.ArtifactID == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeRefinementUnit.ArtifactID(childComplexity), true
+
+	case "KnowledgeRefinementUnit.attemptCount":
+		if e.complexity.KnowledgeRefinementUnit.AttemptCount == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeRefinementUnit.AttemptCount(childComplexity), true
+
+	case "KnowledgeRefinementUnit.createdAt":
+		if e.complexity.KnowledgeRefinementUnit.CreatedAt == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeRefinementUnit.CreatedAt(childComplexity), true
+
+	case "KnowledgeRefinementUnit.evidenceRevisionFp":
+		if e.complexity.KnowledgeRefinementUnit.EvidenceRevisionFp == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeRefinementUnit.EvidenceRevisionFp(childComplexity), true
+
+	case "KnowledgeRefinementUnit.id":
+		if e.complexity.KnowledgeRefinementUnit.ID == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeRefinementUnit.ID(childComplexity), true
+
+	case "KnowledgeRefinementUnit.lastError":
+		if e.complexity.KnowledgeRefinementUnit.LastError == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeRefinementUnit.LastError(childComplexity), true
+
+	case "KnowledgeRefinementUnit.metadata":
+		if e.complexity.KnowledgeRefinementUnit.Metadata == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeRefinementUnit.Metadata(childComplexity), true
+
+	case "KnowledgeRefinementUnit.refinementType":
+		if e.complexity.KnowledgeRefinementUnit.RefinementType == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeRefinementUnit.RefinementType(childComplexity), true
+
+	case "KnowledgeRefinementUnit.rendererVersion":
+		if e.complexity.KnowledgeRefinementUnit.RendererVersion == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeRefinementUnit.RendererVersion(childComplexity), true
+
+	case "KnowledgeRefinementUnit.sectionKey":
+		if e.complexity.KnowledgeRefinementUnit.SectionKey == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeRefinementUnit.SectionKey(childComplexity), true
+
+	case "KnowledgeRefinementUnit.sectionTitle":
+		if e.complexity.KnowledgeRefinementUnit.SectionTitle == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeRefinementUnit.SectionTitle(childComplexity), true
+
+	case "KnowledgeRefinementUnit.status":
+		if e.complexity.KnowledgeRefinementUnit.Status == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeRefinementUnit.Status(childComplexity), true
+
+	case "KnowledgeRefinementUnit.understandingId":
+		if e.complexity.KnowledgeRefinementUnit.UnderstandingID == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeRefinementUnit.UnderstandingID(childComplexity), true
+
+	case "KnowledgeRefinementUnit.updatedAt":
+		if e.complexity.KnowledgeRefinementUnit.UpdatedAt == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeRefinementUnit.UpdatedAt(childComplexity), true
 
 	case "KnowledgeScope.filePath":
 		if e.complexity.KnowledgeScope.FilePath == nil {
@@ -19507,6 +19630,80 @@ func (ec *executionContext) fieldContext_KnowledgeArtifact_dependencies(_ contex
 	return fc, nil
 }
 
+func (ec *executionContext) _KnowledgeArtifact_refinementUnits(ctx context.Context, field graphql.CollectedField, obj *KnowledgeArtifact) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeArtifact_refinementUnits(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.RefinementUnits, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.([]*KnowledgeRefinementUnit)
+	fc.Result = res
+	return ec.marshalNKnowledgeRefinementUnit2ᚕᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐKnowledgeRefinementUnitᚄ(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeArtifact_refinementUnits(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeArtifact",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_KnowledgeRefinementUnit_id(ctx, field)
+			case "artifactId":
+				return ec.fieldContext_KnowledgeRefinementUnit_artifactId(ctx, field)
+			case "sectionKey":
+				return ec.fieldContext_KnowledgeRefinementUnit_sectionKey(ctx, field)
+			case "sectionTitle":
+				return ec.fieldContext_KnowledgeRefinementUnit_sectionTitle(ctx, field)
+			case "refinementType":
+				return ec.fieldContext_KnowledgeRefinementUnit_refinementType(ctx, field)
+			case "status":
+				return ec.fieldContext_KnowledgeRefinementUnit_status(ctx, field)
+			case "attemptCount":
+				return ec.fieldContext_KnowledgeRefinementUnit_attemptCount(ctx, field)
+			case "understandingId":
+				return ec.fieldContext_KnowledgeRefinementUnit_understandingId(ctx, field)
+			case "evidenceRevisionFp":
+				return ec.fieldContext_KnowledgeRefinementUnit_evidenceRevisionFp(ctx, field)
+			case "rendererVersion":
+				return ec.fieldContext_KnowledgeRefinementUnit_rendererVersion(ctx, field)
+			case "lastError":
+				return ec.fieldContext_KnowledgeRefinementUnit_lastError(ctx, field)
+			case "metadata":
+				return ec.fieldContext_KnowledgeRefinementUnit_metadata(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_KnowledgeRefinementUnit_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_KnowledgeRefinementUnit_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type KnowledgeRefinementUnit", field.Name)
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _KnowledgeArtifact_sections(ctx context.Context, field graphql.CollectedField, obj *KnowledgeArtifact) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_KnowledgeArtifact_sections(ctx, field)
 	if err != nil {
@@ -19953,6 +20150,607 @@ func (ec *executionContext) fieldContext_KnowledgeEvidence_metadata(_ context.Co
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeRefinementUnit_id(ctx context.Context, field graphql.CollectedField, obj *KnowledgeRefinementUnit) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeRefinementUnit_id(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.ID, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNID2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeRefinementUnit_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeRefinementUnit",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeRefinementUnit_artifactId(ctx context.Context, field graphql.CollectedField, obj *KnowledgeRefinementUnit) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeRefinementUnit_artifactId(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.ArtifactID, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNID2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeRefinementUnit_artifactId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeRefinementUnit",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeRefinementUnit_sectionKey(ctx context.Context, field graphql.CollectedField, obj *KnowledgeRefinementUnit) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeRefinementUnit_sectionKey(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.SectionKey, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNString2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeRefinementUnit_sectionKey(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeRefinementUnit",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeRefinementUnit_sectionTitle(ctx context.Context, field graphql.CollectedField, obj *KnowledgeRefinementUnit) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeRefinementUnit_sectionTitle(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.SectionTitle, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNString2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeRefinementUnit_sectionTitle(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeRefinementUnit",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeRefinementUnit_refinementType(ctx context.Context, field graphql.CollectedField, obj *KnowledgeRefinementUnit) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeRefinementUnit_refinementType(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.RefinementType, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNString2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeRefinementUnit_refinementType(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeRefinementUnit",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeRefinementUnit_status(ctx context.Context, field graphql.CollectedField, obj *KnowledgeRefinementUnit) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeRefinementUnit_status(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Status, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNString2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeRefinementUnit_status(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeRefinementUnit",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeRefinementUnit_attemptCount(ctx context.Context, field graphql.CollectedField, obj *KnowledgeRefinementUnit) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeRefinementUnit_attemptCount(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.AttemptCount, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(int)
+	fc.Result = res
+	return ec.marshalNInt2int(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeRefinementUnit_attemptCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeRefinementUnit",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeRefinementUnit_understandingId(ctx context.Context, field graphql.CollectedField, obj *KnowledgeRefinementUnit) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeRefinementUnit_understandingId(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.UnderstandingID, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOID2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeRefinementUnit_understandingId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeRefinementUnit",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeRefinementUnit_evidenceRevisionFp(ctx context.Context, field graphql.CollectedField, obj *KnowledgeRefinementUnit) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeRefinementUnit_evidenceRevisionFp(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.EvidenceRevisionFp, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeRefinementUnit_evidenceRevisionFp(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeRefinementUnit",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeRefinementUnit_rendererVersion(ctx context.Context, field graphql.CollectedField, obj *KnowledgeRefinementUnit) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeRefinementUnit_rendererVersion(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.RendererVersion, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeRefinementUnit_rendererVersion(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeRefinementUnit",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeRefinementUnit_lastError(ctx context.Context, field graphql.CollectedField, obj *KnowledgeRefinementUnit) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeRefinementUnit_lastError(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.LastError, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeRefinementUnit_lastError(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeRefinementUnit",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeRefinementUnit_metadata(ctx context.Context, field graphql.CollectedField, obj *KnowledgeRefinementUnit) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeRefinementUnit_metadata(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Metadata, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeRefinementUnit_metadata(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeRefinementUnit",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeRefinementUnit_createdAt(ctx context.Context, field graphql.CollectedField, obj *KnowledgeRefinementUnit) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeRefinementUnit_createdAt(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.CreatedAt, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(time.Time)
+	fc.Result = res
+	return ec.marshalNTime2timeᚐTime(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeRefinementUnit_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeRefinementUnit",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeRefinementUnit_updatedAt(ctx context.Context, field graphql.CollectedField, obj *KnowledgeRefinementUnit) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_KnowledgeRefinementUnit_updatedAt(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.UpdatedAt, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(time.Time)
+	fc.Result = res
+	return ec.marshalNTime2timeᚐTime(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeRefinementUnit_updatedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeRefinementUnit",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
 		},
 	}
 	return fc, nil
@@ -23857,6 +24655,8 @@ func (ec *executionContext) fieldContext_Mutation_generateCliffNotes(ctx context
 				return ec.fieldContext_KnowledgeArtifact_refreshAvailable(ctx, field)
 			case "dependencies":
 				return ec.fieldContext_KnowledgeArtifact_dependencies(ctx, field)
+			case "refinementUnits":
+				return ec.fieldContext_KnowledgeArtifact_refinementUnits(ctx, field)
 			case "sections":
 				return ec.fieldContext_KnowledgeArtifact_sections(ctx, field)
 			}
@@ -23962,6 +24762,8 @@ func (ec *executionContext) fieldContext_Mutation_generateArchitectureDiagram(ct
 				return ec.fieldContext_KnowledgeArtifact_refreshAvailable(ctx, field)
 			case "dependencies":
 				return ec.fieldContext_KnowledgeArtifact_dependencies(ctx, field)
+			case "refinementUnits":
+				return ec.fieldContext_KnowledgeArtifact_refinementUnits(ctx, field)
 			case "sections":
 				return ec.fieldContext_KnowledgeArtifact_sections(ctx, field)
 			}
@@ -24067,6 +24869,8 @@ func (ec *executionContext) fieldContext_Mutation_generateLearningPath(ctx conte
 				return ec.fieldContext_KnowledgeArtifact_refreshAvailable(ctx, field)
 			case "dependencies":
 				return ec.fieldContext_KnowledgeArtifact_dependencies(ctx, field)
+			case "refinementUnits":
+				return ec.fieldContext_KnowledgeArtifact_refinementUnits(ctx, field)
 			case "sections":
 				return ec.fieldContext_KnowledgeArtifact_sections(ctx, field)
 			}
@@ -24172,6 +24976,8 @@ func (ec *executionContext) fieldContext_Mutation_generateCodeTour(ctx context.C
 				return ec.fieldContext_KnowledgeArtifact_refreshAvailable(ctx, field)
 			case "dependencies":
 				return ec.fieldContext_KnowledgeArtifact_dependencies(ctx, field)
+			case "refinementUnits":
+				return ec.fieldContext_KnowledgeArtifact_refinementUnits(ctx, field)
 			case "sections":
 				return ec.fieldContext_KnowledgeArtifact_sections(ctx, field)
 			}
@@ -24277,6 +25083,8 @@ func (ec *executionContext) fieldContext_Mutation_generateWorkflowStory(ctx cont
 				return ec.fieldContext_KnowledgeArtifact_refreshAvailable(ctx, field)
 			case "dependencies":
 				return ec.fieldContext_KnowledgeArtifact_dependencies(ctx, field)
+			case "refinementUnits":
+				return ec.fieldContext_KnowledgeArtifact_refinementUnits(ctx, field)
 			case "sections":
 				return ec.fieldContext_KnowledgeArtifact_sections(ctx, field)
 			}
@@ -24447,6 +25255,8 @@ func (ec *executionContext) fieldContext_Mutation_refreshKnowledgeArtifact(ctx c
 				return ec.fieldContext_KnowledgeArtifact_refreshAvailable(ctx, field)
 			case "dependencies":
 				return ec.fieldContext_KnowledgeArtifact_dependencies(ctx, field)
+			case "refinementUnits":
+				return ec.fieldContext_KnowledgeArtifact_refinementUnits(ctx, field)
 			case "sections":
 				return ec.fieldContext_KnowledgeArtifact_sections(ctx, field)
 			}
@@ -26354,6 +27164,8 @@ func (ec *executionContext) fieldContext_Query_knowledgeArtifacts(ctx context.Co
 				return ec.fieldContext_KnowledgeArtifact_refreshAvailable(ctx, field)
 			case "dependencies":
 				return ec.fieldContext_KnowledgeArtifact_dependencies(ctx, field)
+			case "refinementUnits":
+				return ec.fieldContext_KnowledgeArtifact_refinementUnits(ctx, field)
 			case "sections":
 				return ec.fieldContext_KnowledgeArtifact_sections(ctx, field)
 			}
@@ -26456,6 +27268,8 @@ func (ec *executionContext) fieldContext_Query_knowledgeArtifact(ctx context.Con
 				return ec.fieldContext_KnowledgeArtifact_refreshAvailable(ctx, field)
 			case "dependencies":
 				return ec.fieldContext_KnowledgeArtifact_dependencies(ctx, field)
+			case "refinementUnits":
+				return ec.fieldContext_KnowledgeArtifact_refinementUnits(ctx, field)
 			case "sections":
 				return ec.fieldContext_KnowledgeArtifact_sections(ctx, field)
 			}
@@ -40353,6 +41167,11 @@ func (ec *executionContext) _KnowledgeArtifact(ctx context.Context, sel ast.Sele
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "refinementUnits":
+			out.Values[i] = ec._KnowledgeArtifact_refinementUnits(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		case "sections":
 			out.Values[i] = ec._KnowledgeArtifact_sections(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -40422,6 +41241,95 @@ func (ec *executionContext) _KnowledgeEvidence(ctx context.Context, sel ast.Sele
 			out.Values[i] = ec._KnowledgeEvidence_rationale(ctx, field, obj)
 		case "metadata":
 			out.Values[i] = ec._KnowledgeEvidence_metadata(ctx, field, obj)
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var knowledgeRefinementUnitImplementors = []string{"KnowledgeRefinementUnit"}
+
+func (ec *executionContext) _KnowledgeRefinementUnit(ctx context.Context, sel ast.SelectionSet, obj *KnowledgeRefinementUnit) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, knowledgeRefinementUnitImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("KnowledgeRefinementUnit")
+		case "id":
+			out.Values[i] = ec._KnowledgeRefinementUnit_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "artifactId":
+			out.Values[i] = ec._KnowledgeRefinementUnit_artifactId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "sectionKey":
+			out.Values[i] = ec._KnowledgeRefinementUnit_sectionKey(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "sectionTitle":
+			out.Values[i] = ec._KnowledgeRefinementUnit_sectionTitle(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "refinementType":
+			out.Values[i] = ec._KnowledgeRefinementUnit_refinementType(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "status":
+			out.Values[i] = ec._KnowledgeRefinementUnit_status(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "attemptCount":
+			out.Values[i] = ec._KnowledgeRefinementUnit_attemptCount(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "understandingId":
+			out.Values[i] = ec._KnowledgeRefinementUnit_understandingId(ctx, field, obj)
+		case "evidenceRevisionFp":
+			out.Values[i] = ec._KnowledgeRefinementUnit_evidenceRevisionFp(ctx, field, obj)
+		case "rendererVersion":
+			out.Values[i] = ec._KnowledgeRefinementUnit_rendererVersion(ctx, field, obj)
+		case "lastError":
+			out.Values[i] = ec._KnowledgeRefinementUnit_lastError(ctx, field, obj)
+		case "metadata":
+			out.Values[i] = ec._KnowledgeRefinementUnit_metadata(ctx, field, obj)
+		case "createdAt":
+			out.Values[i] = ec._KnowledgeRefinementUnit_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updatedAt":
+			out.Values[i] = ec._KnowledgeRefinementUnit_updatedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -45347,6 +46255,60 @@ func (ec *executionContext) unmarshalNKnowledgeGenerationMode2githubᚗcomᚋsou
 
 func (ec *executionContext) marshalNKnowledgeGenerationMode2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐKnowledgeGenerationMode(ctx context.Context, sel ast.SelectionSet, v KnowledgeGenerationMode) graphql.Marshaler {
 	return v
+}
+
+func (ec *executionContext) marshalNKnowledgeRefinementUnit2ᚕᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐKnowledgeRefinementUnitᚄ(ctx context.Context, sel ast.SelectionSet, v []*KnowledgeRefinementUnit) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNKnowledgeRefinementUnit2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐKnowledgeRefinementUnit(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNKnowledgeRefinementUnit2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐKnowledgeRefinementUnit(ctx context.Context, sel ast.SelectionSet, v *KnowledgeRefinementUnit) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._KnowledgeRefinementUnit(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalNKnowledgeScope2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐKnowledgeScope(ctx context.Context, sel ast.SelectionSet, v *KnowledgeScope) graphql.Marshaler {

@@ -668,6 +668,22 @@ export const KNOWLEDGE_ARTIFACTS_QUERY = gql`
         targetId
         targetRevisionFp
       }
+      refinementUnits {
+        id
+        artifactId
+        sectionKey
+        sectionTitle
+        refinementType
+        status
+        attemptCount
+        understandingId
+        evidenceRevisionFp
+        rendererVersion
+        lastError
+        metadata
+        createdAt
+        updatedAt
+      }
       refreshAvailable
       generatedAt
       createdAt

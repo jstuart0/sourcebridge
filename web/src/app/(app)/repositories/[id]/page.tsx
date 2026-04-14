@@ -128,6 +128,23 @@ interface ArtifactDependency {
   targetRevisionFp: string | null;
 }
 
+interface KnowledgeRefinementUnit {
+  id: string;
+  artifactId: string;
+  sectionKey: string;
+  sectionTitle: string;
+  refinementType: string;
+  status: string;
+  attemptCount: number;
+  understandingId?: string | null;
+  evidenceRevisionFp?: string | null;
+  rendererVersion?: string | null;
+  lastError?: string | null;
+  metadata?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface KnowledgeArtifact {
   id: string;
   repositoryId: string;
@@ -153,6 +170,7 @@ interface KnowledgeArtifact {
   generationMode?: string | null;
   rendererVersion?: string | null;
   dependencies?: ArtifactDependency[];
+  refinementUnits?: KnowledgeRefinementUnit[];
   refreshAvailable?: boolean;
   generatedAt: string | null;
   createdAt: string;
@@ -410,6 +428,28 @@ function artifactRefinementSummary(artifact: KnowledgeArtifact | null | undefine
   if (refined > 0) parts.push(`${refined} refined`);
   if (deepened > 0) parts.push(`${deepened} deepened`);
   return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function artifactDeepeningSummary(artifact: KnowledgeArtifact | null | undefined): string | null {
+  const units = (artifact?.refinementUnits ?? []).filter((unit) => unit.refinementType === "cliff_notes_deep");
+  if (!units.length) return null;
+  let queued = 0;
+  let running = 0;
+  let failed = 0;
+  let completed = 0;
+  for (const unit of units) {
+    const status = unit.status.trim().toLowerCase();
+    if (status === "queued") queued++;
+    else if (status === "running") running++;
+    else if (status === "failed") failed++;
+    else if (status === "completed") completed++;
+  }
+  const parts: string[] = [];
+  if (running > 0) parts.push(`${running} deepening`);
+  if (queued > 0) parts.push(`${queued} queued`);
+  if (failed > 0) parts.push(`${failed} failed`);
+  if (completed > 0) parts.push(`${completed} deepened`);
+  return parts.length ? parts.join(" · ") : null;
 }
 
 function parseCliffNotesSectionMetadata(section: KnowledgeSection): CliffNotesSectionMetadata | null {
@@ -2741,6 +2781,11 @@ export default function RepositoryDetailPage() {
                                   {artifactRefinementSummary(currentCliffNotes)}
                                 </p>
                               ) : null}
+                              {artifactDeepeningSummary(currentCliffNotes) ? (
+                                <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                                  {artifactDeepeningSummary(currentCliffNotes)}
+                                </p>
+                              ) : null}
                             </div>
                             <div className="flex gap-2">
                               <Button variant="secondary" size="sm" onClick={handleGenerateCliffNotes} disabled={knowledgeLoading || isCliffNotesGenerating}>
@@ -2775,6 +2820,22 @@ export default function RepositoryDetailPage() {
                                     <span>{new Date(job.updated_at).toLocaleTimeString()}</span>
                                   </div>
                                 ))}
+                              </div>
+                            </div>
+                          ) : null}
+                          {currentCliffNotes.refinementUnits?.some((unit) => unit.refinementType === "cliff_notes_deep" && unit.status.toLowerCase() === "failed") ? (
+                            <div className="mb-4 rounded-[var(--radius-sm)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+                              <p className="text-sm font-medium text-[var(--text-primary)]">Some background deepening attempts failed.</p>
+                              <div className="mt-2 space-y-1 text-xs text-[var(--text-secondary)]">
+                                {currentCliffNotes.refinementUnits
+                                  .filter((unit) => unit.refinementType === "cliff_notes_deep" && unit.status.toLowerCase() === "failed")
+                                  .map((unit) => (
+                                    <p key={unit.id}>
+                                      {unit.sectionTitle}
+                                      {unit.attemptCount > 0 ? ` · attempt ${unit.attemptCount}` : ""}
+                                      {unit.lastError ? ` · ${unit.lastError}` : ""}
+                                    </p>
+                                  ))}
                               </div>
                             </div>
                           ) : null}

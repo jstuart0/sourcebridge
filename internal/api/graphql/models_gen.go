@@ -427,30 +427,31 @@ type ImportResult struct {
 }
 
 type KnowledgeArtifact struct {
-	ID                      string                  `json:"id"`
-	RepositoryID            string                  `json:"repositoryId"`
-	Type                    KnowledgeArtifactType   `json:"type"`
-	Audience                KnowledgeAudience       `json:"audience"`
-	Depth                   KnowledgeDepth          `json:"depth"`
-	Scope                   *KnowledgeScope         `json:"scope"`
-	Status                  KnowledgeArtifactStatus `json:"status"`
-	Progress                float64                 `json:"progress"`
-	ProgressPhase           *string                 `json:"progressPhase,omitempty"`
-	ProgressMessage         *string                 `json:"progressMessage,omitempty"`
-	SourceRevision          *SourceRevision         `json:"sourceRevision"`
-	Stale                   bool                    `json:"stale"`
-	GeneratedAt             *time.Time              `json:"generatedAt,omitempty"`
-	CreatedAt               time.Time               `json:"createdAt"`
-	UpdatedAt               time.Time               `json:"updatedAt"`
-	ErrorCode               *string                 `json:"errorCode,omitempty"`
-	ErrorMessage            *string                 `json:"errorMessage,omitempty"`
-	GenerationMode          KnowledgeGenerationMode `json:"generationMode"`
-	RendererVersion         *string                 `json:"rendererVersion,omitempty"`
-	UnderstandingID         *string                 `json:"understandingId,omitempty"`
-	UnderstandingRevisionFp *string                 `json:"understandingRevisionFp,omitempty"`
-	RefreshAvailable        bool                    `json:"refreshAvailable"`
-	Dependencies            []*ArtifactDependency   `json:"dependencies"`
-	Sections                []*KnowledgeSection     `json:"sections"`
+	ID                      string                     `json:"id"`
+	RepositoryID            string                     `json:"repositoryId"`
+	Type                    KnowledgeArtifactType      `json:"type"`
+	Audience                KnowledgeAudience          `json:"audience"`
+	Depth                   KnowledgeDepth             `json:"depth"`
+	Scope                   *KnowledgeScope            `json:"scope"`
+	Status                  KnowledgeArtifactStatus    `json:"status"`
+	Progress                float64                    `json:"progress"`
+	ProgressPhase           *string                    `json:"progressPhase,omitempty"`
+	ProgressMessage         *string                    `json:"progressMessage,omitempty"`
+	SourceRevision          *SourceRevision            `json:"sourceRevision"`
+	Stale                   bool                       `json:"stale"`
+	GeneratedAt             *time.Time                 `json:"generatedAt,omitempty"`
+	CreatedAt               time.Time                  `json:"createdAt"`
+	UpdatedAt               time.Time                  `json:"updatedAt"`
+	ErrorCode               *string                    `json:"errorCode,omitempty"`
+	ErrorMessage            *string                    `json:"errorMessage,omitempty"`
+	GenerationMode          KnowledgeGenerationMode    `json:"generationMode"`
+	RendererVersion         *string                    `json:"rendererVersion,omitempty"`
+	UnderstandingID         *string                    `json:"understandingId,omitempty"`
+	UnderstandingRevisionFp *string                    `json:"understandingRevisionFp,omitempty"`
+	RefreshAvailable        bool                       `json:"refreshAvailable"`
+	Dependencies            []*ArtifactDependency      `json:"dependencies"`
+	RefinementUnits         []*KnowledgeRefinementUnit `json:"refinementUnits"`
+	Sections                []*KnowledgeSection        `json:"sections"`
 }
 
 type KnowledgeEvidence struct {
@@ -463,6 +464,23 @@ type KnowledgeEvidence struct {
 	LineEnd    *int               `json:"lineEnd,omitempty"`
 	Rationale  *string            `json:"rationale,omitempty"`
 	Metadata   *string            `json:"metadata,omitempty"`
+}
+
+type KnowledgeRefinementUnit struct {
+	ID                 string    `json:"id"`
+	ArtifactID         string    `json:"artifactId"`
+	SectionKey         string    `json:"sectionKey"`
+	SectionTitle       string    `json:"sectionTitle"`
+	RefinementType     string    `json:"refinementType"`
+	Status             string    `json:"status"`
+	AttemptCount       int       `json:"attemptCount"`
+	UnderstandingID    *string   `json:"understandingId,omitempty"`
+	EvidenceRevisionFp *string   `json:"evidenceRevisionFp,omitempty"`
+	RendererVersion    *string   `json:"rendererVersion,omitempty"`
+	LastError          *string   `json:"lastError,omitempty"`
+	Metadata           *string   `json:"metadata,omitempty"`
+	CreatedAt          time.Time `json:"createdAt"`
+	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
 type KnowledgeScope struct {

@@ -724,6 +724,7 @@ type KnowledgeArtifact {
   understandingRevisionFp: String
   refreshAvailable: Boolean!
   dependencies: [ArtifactDependency!]!
+  refinementUnits: [KnowledgeRefinementUnit!]!
   sections: [KnowledgeSection!]!
 }
 
@@ -805,6 +806,23 @@ type KnowledgeSection {
   orderIndex: Int!
   refinementStatus: String
   evidence: [KnowledgeEvidence!]!
+}
+
+type KnowledgeRefinementUnit {
+  id: ID!
+  artifactId: ID!
+  sectionKey: String!
+  sectionTitle: String!
+  refinementType: String!
+  status: String!
+  attemptCount: Int!
+  understandingId: ID
+  evidenceRevisionFp: String
+  rendererVersion: String
+  lastError: String
+  metadata: String
+  createdAt: Time!
+  updatedAt: Time!
 }
 
 type KnowledgeEvidence {
