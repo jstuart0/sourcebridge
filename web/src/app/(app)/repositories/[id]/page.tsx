@@ -319,6 +319,50 @@ function shouldCollapseRepositoryUnderstanding(understanding: RepositoryUndersta
   return understanding.stage === "READY" && understanding.treeStatus === "COMPLETE";
 }
 
+function understandingLeadSummary(understanding: RepositoryUnderstanding | null | undefined): string | null {
+  const sections = understanding?.firstPassSections ?? [];
+  if (!sections.length) return null;
+  const preferredTitles = [
+    "Architecture Overview",
+    "System Purpose",
+    "Core Components",
+    "Core System Flows",
+  ];
+  for (const title of preferredTitles) {
+    const match = sections.find((section) => section.title === title && section.summary.trim());
+    if (match) return match.summary.trim();
+  }
+  const fallback = sections.find((section) => section.summary.trim());
+  return fallback?.summary.trim() || null;
+}
+
+function understandingHighlightSections(understanding: RepositoryUnderstanding | null | undefined): Array<{ title: string; summary: string }> {
+  const sections = (understanding?.firstPassSections ?? []).filter(
+    (section) => section.title.trim() && section.summary.trim(),
+  );
+  const preferredTitles = [
+    "System Purpose",
+    "Architecture Overview",
+    "Core Components",
+    "Core System Flows",
+    "External Dependencies",
+    "Domain Model",
+  ];
+  const ordered: Array<{ title: string; summary: string }> = [];
+  for (const title of preferredTitles) {
+    const match = sections.find((section) => section.title === title);
+    if (match && !ordered.some((section) => section.title === match.title)) {
+      ordered.push(match);
+    }
+  }
+  for (const section of sections) {
+    if (!ordered.some((candidate) => candidate.title === section.title)) {
+      ordered.push(section);
+    }
+  }
+  return ordered;
+}
+
 function renderKnowledgeProgress(artifact: KnowledgeArtifact, waitingLabel: string, job?: RepoJobView | null) {
   const liveJob = job && (job.status === "pending" || job.status === "generating") ? job : null;
   const heartbeat = liveJob ? formatHeartbeatAge(liveJob.updated_at) : null;
@@ -793,6 +837,7 @@ export default function RepositoryDetailPage() {
   const symbolScopedAnalysisEnabled = features.symbolScopedAnalysis;
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [understandingCollapsed, setUnderstandingCollapsed] = useState(false);
+  const [understandingShowAllSections, setUnderstandingShowAllSections] = useState(false);
   const [explainQuestion, setExplainQuestion] = useState("");
   const [explainResult, setExplainResult] = useState<{ explanation: string } | null>(null);
   const [tourStopIndex, setTourStopIndex] = useState(0);
@@ -817,10 +862,18 @@ export default function RepositoryDetailPage() {
   );
   const currentUnderstanding: RepositoryUnderstanding | null = repoResult.data?.repository?.repositoryUnderstanding || null;
   const shouldAutoCollapseUnderstanding = shouldCollapseRepositoryUnderstanding(currentUnderstanding);
+  const understandingSummary = understandingLeadSummary(currentUnderstanding);
+  const understandingSections = understandingHighlightSections(currentUnderstanding);
+  const understandingFeaturedSections = understandingSections.slice(0, 4);
+  const understandingAdditionalSections = understandingSections.slice(4);
 
   useEffect(() => {
     setUnderstandingCollapsed(shouldAutoCollapseUnderstanding);
   }, [currentUnderstanding?.id, shouldAutoCollapseUnderstanding]);
+
+  useEffect(() => {
+    setUnderstandingShowAllSections(false);
+  }, [currentUnderstanding?.id]);
   const repoGenerationModeDefault: RepositoryGenerationMode = (repo?.generationModeDefault || "UNDERSTANDING_FIRST") as RepositoryGenerationMode;
   const repoActiveJobs = useMemo(() => repoJobs?.active ?? [], [repoJobs?.active]);
   const repoRecentJobs = useMemo(() => repoJobs?.recent ?? [], [repoJobs?.recent]);
@@ -2402,20 +2455,28 @@ export default function RepositoryDetailPage() {
                     ) : null}
                   </div>
                   {currentUnderstanding && understandingCollapsed ? (
-                    <div className="mt-4 rounded-[var(--radius-sm)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
-                      <span className="text-[var(--text-primary)]">
-                        {currentUnderstanding.cachedNodes}/{currentUnderstanding.totalNodes || currentUnderstanding.cachedNodes} nodes
-                      </span>
-                      {" · "}
-                      {currentUnderstanding.strategy || "hierarchical"}
-                      {" · "}
-                      {currentUnderstanding.modelUsed || "Unknown model"}
-                      {currentUnderstanding.firstPassSections?.length ? (
-                        <>
-                          {" · "}
-                          {currentUnderstanding.firstPassSections.length} first-pass sections
-                        </>
+                    <div className="mt-4 space-y-3">
+                      {understandingSummary ? (
+                        <div className="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-3 text-sm text-[var(--text-secondary)]">
+                          <span className="font-medium text-[var(--text-primary)]">What the system learned:</span>{" "}
+                          {understandingSummary}
+                        </div>
                       ) : null}
+                      <div className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
+                        <span className="text-[var(--text-primary)]">
+                          {currentUnderstanding.cachedNodes}/{currentUnderstanding.totalNodes || currentUnderstanding.cachedNodes} nodes
+                        </span>
+                        {" · "}
+                        {currentUnderstanding.strategy || "hierarchical"}
+                        {" · "}
+                        {currentUnderstanding.modelUsed || "Unknown model"}
+                        {understandingSections.length ? (
+                          <>
+                            {" · "}
+                            {understandingSections.length} first-pass sections
+                          </>
+                        ) : null}
+                      </div>
                     </div>
                   ) : null}
                   {currentUnderstanding && !understandingCollapsed ? (
@@ -2446,18 +2507,18 @@ export default function RepositoryDetailPage() {
                           </p>
                         </div>
                       </div>
-                      {currentUnderstanding.firstPassSections?.length ? (
+                      {understandingFeaturedSections.length ? (
                         <div className="mt-4 space-y-3">
                           <div className="flex items-center justify-between gap-3">
                             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-                              First Pass
+                              Understanding Highlights
                             </p>
                             <span className="text-xs text-[var(--text-tertiary)]">
-                              {currentUnderstanding.firstPassSections.length} sections
+                              {understandingSections.length} sections
                             </span>
                           </div>
                           <div className="grid gap-3 lg:grid-cols-2">
-                            {currentUnderstanding.firstPassSections.map((section) => (
+                            {understandingFeaturedSections.map((section) => (
                               <div
                                 key={section.title}
                                 className="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3"
@@ -2467,6 +2528,32 @@ export default function RepositoryDetailPage() {
                               </div>
                             ))}
                           </div>
+                          {understandingAdditionalSections.length ? (
+                            <div className="space-y-3">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setUnderstandingShowAllSections((current) => !current)}
+                              >
+                                {understandingShowAllSections
+                                  ? `Hide ${understandingAdditionalSections.length} additional sections`
+                                  : `Show ${understandingAdditionalSections.length} additional sections`}
+                              </Button>
+                              {understandingShowAllSections ? (
+                                <div className="grid gap-3 lg:grid-cols-2">
+                                  {understandingAdditionalSections.map((section) => (
+                                    <div
+                                      key={section.title}
+                                      className="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3"
+                                    >
+                                      <p className="text-sm font-medium text-[var(--text-primary)]">{section.title}</p>
+                                      <p className="mt-1 text-sm text-[var(--text-secondary)]">{section.summary}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                     </>
