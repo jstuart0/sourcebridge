@@ -47,6 +47,28 @@ type architectureDiagramSectionMetadata struct {
 	InferredEdges    []string `json:"inferred_edges,omitempty"`
 }
 
+type architectureDiagramPromptBundle struct {
+	RepositoryID            string                            `json:"repository_id"`
+	RepositoryName          string                            `json:"repository_name"`
+	SourceRevision          knowledgepkg.SourceRevision       `json:"source_revision"`
+	Languages               []knowledgepkg.LanguageSummary    `json:"languages,omitempty"`
+	Modules                 []knowledgepkg.ModuleSummary      `json:"modules,omitempty"`
+	EntryPoints             []knowledgepkg.SymbolRef          `json:"entry_points,omitempty"`
+	PublicAPI               []knowledgepkg.SymbolRef          `json:"public_api,omitempty"`
+	HighFanOutSymbols       []knowledgepkg.SymbolRef          `json:"high_fan_out_symbols,omitempty"`
+	HighFanInSymbols        []knowledgepkg.SymbolRef          `json:"high_fan_in_symbols,omitempty"`
+	RepresentativeFiles     []knowledgepkg.FileRef            `json:"representative_files,omitempty"`
+	DocumentationHighlights []architectureDiagramDocHighlight `json:"documentation_highlights,omitempty"`
+	RepositoryUnderstanding []map[string]string               `json:"repository_understanding,omitempty"`
+	CliffNotesHighlights    []map[string]string               `json:"cliff_notes_highlights,omitempty"`
+	DeterministicScaffold   architectureDiagramScaffold       `json:"deterministic_scaffold"`
+}
+
+type architectureDiagramDocHighlight struct {
+	Path    string `json:"path"`
+	Content string `json:"content,omitempty"`
+}
+
 func buildArchitectureDiagramScaffold(store graphstore.GraphStore, repoID string) ([]byte, error) {
 	if store == nil || strings.TrimSpace(repoID) == "" {
 		return nil, nil
@@ -128,6 +150,228 @@ func architectureDiagramMetadataJSON(resp *knowledgev1.GenerateArchitectureDiagr
 		return ""
 	}
 	return string(raw)
+}
+
+func buildArchitectureDiagramPromptBundle(
+	store knowledgepkg.KnowledgeStore,
+	repoID string,
+	audience knowledgepkg.Audience,
+	snap *knowledgepkg.KnowledgeSnapshot,
+	understanding *knowledgepkg.RepositoryUnderstanding,
+	scaffoldJSON []byte,
+) ([]byte, error) {
+	if snap == nil {
+		return nil, fmt.Errorf("snapshot is required")
+	}
+	bundle := architectureDiagramPromptBundle{
+		RepositoryID:      snap.RepositoryID,
+		RepositoryName:    snap.RepositoryName,
+		SourceRevision:    snap.SourceRevision,
+		Languages:         append([]knowledgepkg.LanguageSummary(nil), snap.Languages...),
+		Modules:           append([]knowledgepkg.ModuleSummary(nil), snap.Modules...),
+		EntryPoints:       architectureDiagramCapSymbols(snap.EntryPoints, 8),
+		PublicAPI:         architectureDiagramCapSymbols(snap.PublicAPI, 8),
+		HighFanOutSymbols: architectureDiagramCapSymbols(snap.HighFanOutSymbols, 6),
+		HighFanInSymbols:  architectureDiagramCapSymbols(snap.HighFanInSymbols, 6),
+	}
+	if len(bundle.Languages) > 8 {
+		bundle.Languages = bundle.Languages[:8]
+	}
+	if len(bundle.Modules) > 14 {
+		bundle.Modules = bundle.Modules[:14]
+	}
+	bundle.RepresentativeFiles = architectureDiagramRepresentativeFiles(snap, scaffoldJSON)
+	bundle.DocumentationHighlights = architectureDiagramDocHighlights(snap.Docs, 3)
+	bundle.RepositoryUnderstanding = architectureDiagramUnderstandingHighlights(understanding)
+	bundle.CliffNotesHighlights = architectureDiagramCliffNotesHighlights(store, repoID, audience)
+	if len(scaffoldJSON) > 0 {
+		if err := json.Unmarshal(scaffoldJSON, &bundle.DeterministicScaffold); err != nil {
+			return nil, fmt.Errorf("unmarshal architecture scaffold: %w", err)
+		}
+	}
+	return json.Marshal(bundle)
+}
+
+func architectureDiagramCapSymbols(in []knowledgepkg.SymbolRef, limit int) []knowledgepkg.SymbolRef {
+	if limit <= 0 || len(in) == 0 {
+		return nil
+	}
+	if len(in) < limit {
+		limit = len(in)
+	}
+	out := make([]knowledgepkg.SymbolRef, 0, limit)
+	for _, sym := range in[:limit] {
+		sym.DocComment = truncateForArchitectureBundle(sym.DocComment, 220)
+		out = append(out, sym)
+	}
+	return out
+}
+
+func architectureDiagramRepresentativeFiles(
+	snap *knowledgepkg.KnowledgeSnapshot,
+	scaffoldJSON []byte,
+) []knowledgepkg.FileRef {
+	if snap == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	files := make([]knowledgepkg.FileRef, 0, 12)
+	add := func(filePath string) {
+		filePath = strings.TrimSpace(filePath)
+		if filePath == "" {
+			return
+		}
+		if _, ok := seen[filePath]; ok {
+			return
+		}
+		seen[filePath] = struct{}{}
+		files = append(files, knowledgepkg.FileRef{
+			Path:       filePath,
+			ModulePath: path.Dir(filePath),
+		})
+	}
+	if len(scaffoldJSON) > 0 {
+		var scaffold architectureDiagramScaffold
+		if err := json.Unmarshal(scaffoldJSON, &scaffold); err == nil {
+			for _, mod := range scaffold.Modules {
+				for _, filePath := range mod.FilePaths {
+					add(filePath)
+					if len(files) >= 12 {
+						return files
+					}
+				}
+			}
+		}
+	}
+	for _, sym := range snap.EntryPoints {
+		add(sym.FilePath)
+		if len(files) >= 12 {
+			return files
+		}
+	}
+	for _, sym := range snap.PublicAPI {
+		add(sym.FilePath)
+		if len(files) >= 12 {
+			return files
+		}
+	}
+	for _, sym := range snap.HighFanOutSymbols {
+		add(sym.FilePath)
+		if len(files) >= 12 {
+			return files
+		}
+	}
+	return files
+}
+
+func architectureDiagramDocHighlights(
+	docs []knowledgepkg.DocRef,
+	limit int,
+) []architectureDiagramDocHighlight {
+	if limit <= 0 || len(docs) == 0 {
+		return nil
+	}
+	if len(docs) < limit {
+		limit = len(docs)
+	}
+	out := make([]architectureDiagramDocHighlight, 0, limit)
+	for _, doc := range docs[:limit] {
+		out = append(out, architectureDiagramDocHighlight{
+			Path:    doc.Path,
+			Content: truncateForArchitectureBundle(doc.Content, 600),
+		})
+	}
+	return out
+}
+
+func architectureDiagramUnderstandingHighlights(understanding *knowledgepkg.RepositoryUnderstanding) []map[string]string {
+	if understanding == nil || strings.TrimSpace(understanding.Metadata) == "" {
+		return nil
+	}
+	var meta repositoryUnderstandingMetadata
+	if err := json.Unmarshal([]byte(understanding.Metadata), &meta); err != nil {
+		return nil
+	}
+	out := make([]map[string]string, 0, min(len(meta.FirstPassSections), 8))
+	for _, sec := range meta.FirstPassSections {
+		title := strings.TrimSpace(sec["title"])
+		summary := truncateForArchitectureBundle(sec["summary"], 280)
+		if title == "" || summary == "" {
+			continue
+		}
+		out = append(out, map[string]string{
+			"title":   title,
+			"summary": summary,
+		})
+		if len(out) >= 8 {
+			break
+		}
+	}
+	return out
+}
+
+func architectureDiagramCliffNotesHighlights(
+	store knowledgepkg.KnowledgeStore,
+	repoID string,
+	audience knowledgepkg.Audience,
+) []map[string]string {
+	if store == nil || strings.TrimSpace(repoID) == "" {
+		return nil
+	}
+	lookupOrder := []knowledgepkg.ArtifactKey{
+		knowledgepkg.ArtifactKey{
+			RepositoryID: repoID,
+			Type:         knowledgepkg.ArtifactCliffNotes,
+			Audience:     audience,
+			Depth:        knowledgepkg.DepthMedium,
+			Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
+		}.Normalized(),
+		knowledgepkg.ArtifactKey{
+			RepositoryID: repoID,
+			Type:         knowledgepkg.ArtifactCliffNotes,
+			Audience:     knowledgepkg.AudienceDeveloper,
+			Depth:        knowledgepkg.DepthMedium,
+			Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
+		}.Normalized(),
+	}
+	for _, key := range lookupOrder {
+		artifact := store.GetArtifactByKey(key)
+		if artifact == nil || artifact.Status != knowledgepkg.StatusReady {
+			continue
+		}
+		sections := store.GetKnowledgeSections(artifact.ID)
+		if len(sections) == 0 {
+			continue
+		}
+		out := make([]map[string]string, 0, min(len(sections), 8))
+		for _, sec := range sections {
+			content := strings.TrimSpace(sec.Summary)
+			if content == "" {
+				content = strings.TrimSpace(sec.Content)
+			}
+			content = truncateForArchitectureBundle(content, 320)
+			if content == "" {
+				continue
+			}
+			out = append(out, map[string]string{
+				"title":   sec.Title,
+				"content": content,
+			})
+			if len(out) >= 8 {
+				break
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func truncateForArchitectureBundle(s string, limit int) string {
+	s = strings.TrimSpace(s)
+	if limit <= 0 || len(s) <= limit {
+		return s
+	}
+	return strings.TrimSpace(s[:limit]) + "..."
 }
 
 func cliffNotesDeepeningTargets(store knowledgepkg.KnowledgeStore, artifact *knowledgepkg.Artifact) []string {

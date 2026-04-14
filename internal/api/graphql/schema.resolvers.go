@@ -1941,22 +1941,21 @@ func (r *mutationResolver) GenerateArchitectureDiagram(ctx context.Context, inpu
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 
-		enrichedSnapJSON := snapJSON
+		architecturePromptJSON := snapJSON
+		var understandingForDiagram *knowledgepkg.RepositoryUnderstanding
 		if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
 			return err
 		} else {
+			understandingForDiagram = understanding
 			if reused {
 				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
 				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 			}
-			if understanding != nil {
-				if enriched, ok := enrichSnapshotWithUnderstanding(enrichedSnapJSON, understanding); ok {
-					enrichedSnapJSON = enriched
-				}
-			}
 		}
-		if enriched, ok := enrichSnapshotWithArchitectureScaffold(enrichedSnapJSON, scaffoldJSON); ok {
-			enrichedSnapJSON = enriched
+		if promptJSON, err := buildArchitectureDiagramPromptBundle(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), snap, understandingForDiagram, scaffoldJSON); err != nil {
+			return err
+		} else {
+			architecturePromptJSON = promptJSON
 		}
 
 		stopProgress := r.startProgressTicker(rt, artifact.ID)
@@ -1967,7 +1966,7 @@ func (r *mutationResolver) GenerateArchitectureDiagram(ctx context.Context, inpu
 				RepositoryName:           repo.Name,
 				Audience:                 string(audience),
 				Depth:                    string(depth),
-				SnapshotJson:             string(enrichedSnapJSON),
+				SnapshotJson:             string(architecturePromptJSON),
 				DeterministicDiagramJson: string(scaffoldJSON),
 			},
 		)
@@ -2838,33 +2837,32 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				}
 			}
 		case knowledgepkg.ArtifactArchitectureDiagram:
-			enrichedSnapJSON := snapJSON
+			architecturePromptJSON := snapJSON
+			var understandingForDiagram *knowledgepkg.RepositoryUnderstanding
 			if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, existing, snap.SourceRevision, snapJSON); err != nil {
 				return err
 			} else {
+				understandingForDiagram = understanding
 				if reused {
 					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
 					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(existing.ID, 0.12, "understanding", "Using cached repository understanding")
-				}
-				if understanding != nil {
-					if enriched, ok := enrichSnapshotWithUnderstanding(enrichedSnapJSON, understanding); ok {
-						enrichedSnapJSON = enriched
-					}
 				}
 			}
 			scaffoldJSON, err := buildArchitectureDiagramScaffold(r.getStore(ctx), repo.ID)
 			if err != nil {
 				return err
 			}
-			if enriched, ok := enrichSnapshotWithArchitectureScaffold(enrichedSnapJSON, scaffoldJSON); ok {
-				enrichedSnapJSON = enriched
+			if promptJSON, err := buildArchitectureDiagramPromptBundle(r.KnowledgeStore, repo.ID, existing.Audience, snap, understandingForDiagram, scaffoldJSON); err != nil {
+				return err
+			} else {
+				architecturePromptJSON = promptJSON
 			}
 			resp, err := r.Worker.GenerateArchitectureDiagram(r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, existing.ID, "architecture_diagram"), &knowledgev1.GenerateArchitectureDiagramRequest{
 				RepositoryId:             repo.ID,
 				RepositoryName:           repo.Name,
 				Audience:                 string(existing.Audience),
 				Depth:                    string(existing.Depth),
-				SnapshotJson:             string(enrichedSnapJSON),
+				SnapshotJson:             string(architecturePromptJSON),
 				DeterministicDiagramJson: string(scaffoldJSON),
 			})
 			if err != nil {

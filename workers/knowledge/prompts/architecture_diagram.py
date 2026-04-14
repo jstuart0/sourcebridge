@@ -23,7 +23,7 @@ def build_architecture_diagram_prompt(
     repository_name: str,
     audience: str,
     depth: str,
-    snapshot_json: str,
+    architecture_context_json: str,
     deterministic_diagram_json: str,
 ) -> str:
     return f"""\
@@ -38,6 +38,6 @@ human-readable Mermaid diagram that stays structurally grounded.
 Deterministic scaffold JSON:
 {deterministic_diagram_json}
 
-Repository snapshot JSON:
-{snapshot_json}
+Bounded architecture context JSON:
+{architecture_context_json}
 """
