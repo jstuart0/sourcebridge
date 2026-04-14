@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sourcebridge/sourcebridge/internal/architecture"
@@ -148,58 +147,6 @@ func (s *Server) handleImportMermaid(w http.ResponseWriter, r *http.Request) {
 		"mermaid":       generatedMermaid,
 		"normalization": normResult,
 	})
-}
-
-// handleSaveDiagramDocument saves a user-edited diagram document.
-func (s *Server) handleSaveDiagramDocument(w http.ResponseWriter, r *http.Request) {
-	repoID := chi.URLParam(r, "repoId")
-	if repoID == "" {
-		http.Error(w, `{"error":"repoId is required"}`, http.StatusBadRequest)
-		return
-	}
-
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	if err != nil {
-		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
-		return
-	}
-
-	var doc architecture.DiagramDocument
-	if err := json.Unmarshal(body, &doc); err != nil {
-		http.Error(w, `{"error":"invalid DiagramDocument JSON"}`, http.StatusBadRequest)
-		return
-	}
-
-	doc.RepositoryID = repoID
-	doc.SourceKind = architecture.SourceUserEdited
-	doc.UpdatedAt = time.Now().UTC()
-
-	diagStore.mu.Lock()
-	diagStore.docs[diagramKey(repoID, architecture.SourceUserEdited)] = &doc
-	diagStore.mu.Unlock()
-
-	mermaid := doc.GenerateMermaid()
-
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"document": doc,
-		"mermaid":  mermaid,
-	})
-}
-
-// handleResetDiagramDocument removes user edits.
-func (s *Server) handleResetDiagramDocument(w http.ResponseWriter, r *http.Request) {
-	repoID := chi.URLParam(r, "repoId")
-	if repoID == "" {
-		http.Error(w, `{"error":"repoId is required"}`, http.StatusBadRequest)
-		return
-	}
-
-	diagStore.mu.Lock()
-	delete(diagStore.docs, diagramKey(repoID, architecture.SourceUserEdited))
-	delete(diagStore.docs, diagramKey(repoID, architecture.SourceImportedMermaid))
-	diagStore.mu.Unlock()
-
-	respondJSON(w, http.StatusOK, map[string]string{"status": "reset"})
 }
 
 // handleExportDiagramMermaid generates and returns Mermaid source.

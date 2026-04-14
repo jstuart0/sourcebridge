@@ -10,7 +10,6 @@ import {
 } from "@/lib/graphql/queries";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
-import { DiagramEditor } from "./DiagramEditor";
 
 interface DiagramEdge {
   targetPath: string;
@@ -105,7 +104,6 @@ export function ArchitectureDiagram({
   const [selectedAIComponentId, setSelectedAIComponentId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
-  const [editMode, setEditMode] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [deterministicResult] = useQuery({
@@ -336,18 +334,7 @@ export function ArchitectureDiagram({
         <Button variant="secondary" size="sm" onClick={handleCopyMermaid} disabled={!currentMermaidSource}>
           {copied ? "Copied!" : "Copy Mermaid"}
         </Button>
-        <Button variant="secondary" size="sm" onClick={() => setEditMode(true)}>
-          Edit
-        </Button>
       </div>
-
-      {editMode && (
-        <DiagramEditor
-          repositoryId={repositoryId}
-          onClose={() => setEditMode(false)}
-          onSave={() => setEditMode(false)}
-        />
-      )}
 
       {viewMode === "AI" && (
         <Panel>
