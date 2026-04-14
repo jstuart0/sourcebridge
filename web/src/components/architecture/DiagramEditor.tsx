@@ -20,6 +20,25 @@ import {
 import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
 
+// ── React Flow data types ───────────────────────────────────────────────────
+
+interface FlowNodeData extends Record<string, unknown> {
+  label: string;
+  kind: string;
+  description?: string;
+  provenance?: string;
+  symbolCount?: number;
+  fileCount?: number;
+}
+
+interface FlowEdgeData extends Record<string, unknown> {
+  kind?: string;
+  provenance?: string;
+}
+
+type FlowNode = Node<FlowNodeData>;
+type FlowEdge = Edge<FlowEdgeData>;
+
 // ── Types matching the Go DiagramDocument model ─────────────────────────────
 
 interface DiagramNode {
@@ -110,7 +129,7 @@ interface DiagramEditorProps {
 
 // ── Layout helpers ──────────────────────────────────────────────────────────
 
-function layoutNodes(diagramNodes: DiagramNode[], groups: DiagramGroup[]): Node[] {
+function layoutNodes(diagramNodes: DiagramNode[], groups: DiagramGroup[]): FlowNode[] {
   const groupMap = new Map<string, DiagramNode[]>();
   const ungrouped: DiagramNode[] = [];
 
@@ -124,7 +143,7 @@ function layoutNodes(diagramNodes: DiagramNode[], groups: DiagramGroup[]): Node[
     }
   }
 
-  const rfNodes: Node[] = [];
+  const rfNodes: FlowNode[] = [];
   let xOffset = 0;
   const nodeWidth = 200;
   const nodeHeight = 80;
@@ -151,7 +170,7 @@ function layoutNodes(diagramNodes: DiagramNode[], groups: DiagramGroup[]): Node[
         borderRadius: "8px",
         border: "1px dashed rgba(100,116,139,0.3)",
       },
-      data: { label: group.label },
+      data: { label: group.label, kind: "component" },
     });
 
     members.forEach((n, i) => {
@@ -175,7 +194,7 @@ function layoutNodes(diagramNodes: DiagramNode[], groups: DiagramGroup[]): Node[
   return rfNodes;
 }
 
-function diagramNodeToFlowNode(n: DiagramNode, pos: { x: number; y: number }, parentId?: string): Node {
+function diagramNodeToFlowNode(n: DiagramNode, pos: { x: number; y: number }, parentId?: string): FlowNode {
   const colors = kindColors[n.kind] || kindColors.component;
   const prov = provenanceBadge[n.provenance];
 
@@ -208,7 +227,7 @@ function diagramNodeToFlowNode(n: DiagramNode, pos: { x: number; y: number }, pa
   };
 }
 
-function diagramEdgesToFlowEdges(edges: DiagramEdge[]): Edge[] {
+function diagramEdgesToFlowEdges(edges: DiagramEdge[]): FlowEdge[] {
   return edges.map((e) => {
     const style = edgeKindStyles[e.kind] || edgeKindStyles.other;
     return {
@@ -232,8 +251,8 @@ function diagramEdgesToFlowEdges(edges: DiagramEdge[]): Edge[] {
 
 export function DiagramEditor({ repositoryId, onClose, onSave }: DiagramEditorProps) {
   const [document, setDocument] = useState<DiagramDocument | null>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([]);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -264,24 +283,29 @@ export function DiagramEditor({ repositoryId, onClose, onSave }: DiagramEditorPr
 
   const onConnect = useCallback(
     (params: Connection) => {
-      const newEdge: Edge = {
-        ...params,
+      if (!params.source || !params.target) return;
+      const newEdge: FlowEdge = {
         id: `e-${Date.now()}`,
-        markerEnd: { type: MarkerType.ArrowClosed },
+        source: params.source,
+        target: params.target,
+        sourceHandle: params.sourceHandle ?? null,
+        targetHandle: params.targetHandle ?? null,
+        markerEnd: { type: MarkerType.ArrowClosed, color: "#6b7280" },
         style: { stroke: "#6b7280", strokeWidth: 2 },
-      } as Edge;
-      setEdges((eds) => addEdge(newEdge, eds));
+        data: { kind: "call", provenance: "user_added" },
+      };
+      setEdges((eds) => [...eds, newEdge]);
       setDirty(true);
     },
     [setEdges],
   );
 
-  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+  const onNodeClick = useCallback((_: React.MouseEvent, node: FlowNode) => {
     setSelectedNode(node.id);
     setSelectedEdge(null);
   }, []);
 
-  const onEdgeClick = useCallback((_: React.MouseEvent, edge: Edge) => {
+  const onEdgeClick = useCallback((_: React.MouseEvent, edge: FlowEdge) => {
     setSelectedEdge(edge.id);
     setSelectedNode(null);
   }, []);
@@ -292,14 +316,14 @@ export function DiagramEditor({ repositoryId, onClose, onSave }: DiagramEditorPr
   }, []);
 
   // Track dirty state on any change
-  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+  const handleNodesChange = useCallback((changes: NodeChange<FlowNode>[]) => {
     onNodesChange(changes);
-    if (changes.some((c) => c.type === "position" && (c as any).dragging === false)) {
+    if (changes.some((c) => c.type === "position" && "dragging" in c && c.dragging === false)) {
       setDirty(true);
     }
   }, [onNodesChange]);
 
-  const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
+  const handleEdgesChange = useCallback((changes: EdgeChange<FlowEdge>[]) => {
     onEdgesChange(changes);
     setDirty(true);
   }, [onEdgesChange]);
@@ -337,7 +361,7 @@ export function DiagramEditor({ repositoryId, onClose, onSave }: DiagramEditorPr
 
   const addNode = useCallback(() => {
     const id = `new-${Date.now()}`;
-    const newNode: Node = {
+    const newNode: FlowNode = {
       id,
       position: { x: 100 + Math.random() * 200, y: 100 + Math.random() * 200 },
       data: { label: "New Component", kind: "component", provenance: "user_added" },
@@ -386,12 +410,12 @@ export function DiagramEditor({ repositoryId, onClose, onSave }: DiagramEditorPr
       .filter((n) => n.type !== "group")
       .map((n) => ({
         id: n.id,
-        label: (n.data as any).label || n.id,
-        kind: (n.data as any).kind || "component",
-        description: (n.data as any).description || "",
-        provenance: (n.data as any).provenance || "user_added",
-        symbol_count: (n.data as any).symbolCount,
-        file_count: (n.data as any).fileCount,
+        label: n.data.label || n.id,
+        kind: n.data.kind || "component",
+        description: n.data.description || "",
+        provenance: n.data.provenance || "user_added",
+        symbol_count: n.data.symbolCount,
+        file_count: n.data.fileCount,
         position_x: n.position.x,
         position_y: n.position.y,
         group_id: n.parentId?.replace("group-", ""),
@@ -402,8 +426,8 @@ export function DiagramEditor({ repositoryId, onClose, onSave }: DiagramEditorPr
       from_node_id: e.source,
       to_node_id: e.target,
       label: typeof e.label === "string" ? e.label : "",
-      kind: (e.data as any)?.kind || "call",
-      provenance: (e.data as any)?.provenance || "user_added",
+      kind: e.data?.kind || "call",
+      provenance: e.data?.provenance || "user_added",
     }));
 
     const updatedDoc: DiagramDocument = {
@@ -520,7 +544,7 @@ export function DiagramEditor({ repositoryId, onClose, onSave }: DiagramEditorPr
             style={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
             maskColor="rgba(0,0,0,0.7)"
             nodeColor={(n) => {
-              const kind = (n.data as any)?.kind || "component";
+              const kind = String((n.data as FlowNodeData)?.kind || "component");
               return kindColors[kind]?.border || "#6b7280";
             }}
           />
