@@ -222,30 +222,25 @@ func architectureDiagramSystemView(
 		{ID: "code_graph_index", Label: "Code Graph & Index", Kind: "analysis"},
 		{ID: "repository_access", Label: "Repository Access", Kind: "integration"},
 		{ID: "persistence", Label: "Persistence", Kind: "storage"},
-		{ID: "configuration", Label: "Configuration", Kind: "support"},
-		{ID: "supporting", Label: "Supporting Services", Kind: "support"},
+		{ID: "llm_provider", Label: "LLM Provider", Kind: "external"},
 	}
 	componentByID := make(map[string]*architectureSystemComponent, len(componentOrder))
 	for i := range componentOrder {
 		componentByID[componentOrder[i].ID] = &componentOrder[i]
 	}
-	moduleToComponent := make(map[string]string, len(scaffold.Modules))
 	for _, mod := range scaffold.Modules {
 		componentID := architectureComponentForModule(mod.Path)
-		moduleToComponent[mod.Path] = componentID
+		if componentID == "" {
+			continue
+		}
 		component := componentByID[componentID]
+		if component == nil {
+			continue
+		}
 		component.ModulePaths = append(component.ModulePaths, mod.Path)
 	}
-	flowCounts := make(map[string]int)
-	for _, mod := range scaffold.Modules {
-		srcID := moduleToComponent[mod.Path]
-		for _, outbound := range mod.OutboundPaths {
-			tgtID := architectureComponentForModule(outbound)
-			if srcID == "" || tgtID == "" || srcID == tgtID {
-				continue
-			}
-			flowCounts[srcID+"->"+tgtID]++
-		}
+	if componentByID["background_workers"] != nil && len(componentByID["background_workers"].ModulePaths) > 0 {
+		componentByID["llm_provider"].ModulePaths = []string{"external:llm_provider"}
 	}
 	components := make([]architectureSystemComponent, 0, len(componentOrder))
 	for _, component := range componentOrder {
@@ -255,28 +250,28 @@ func architectureDiagramSystemView(
 		sort.Strings(component.ModulePaths)
 		components = append(components, component)
 	}
-	flows := make([]architectureSystemFlow, 0, len(flowCounts))
-	for key, count := range flowCounts {
-		parts := strings.SplitN(key, "->", 2)
-		if len(parts) != 2 {
+	present := make(map[string]bool, len(components))
+	for _, component := range components {
+		present[component.ID] = true
+	}
+	candidates := []architectureSystemFlow{
+		{SourceID: "user_interfaces", TargetID: "api_auth", Summary: "HTTP/API requests"},
+		{SourceID: "api_auth", TargetID: "knowledge_orchestration", Summary: "routes generation requests"},
+		{SourceID: "knowledge_orchestration", TargetID: "background_workers", Summary: "dispatches jobs"},
+		{SourceID: "knowledge_orchestration", TargetID: "code_graph_index", Summary: "loads repository understanding"},
+		{SourceID: "background_workers", TargetID: "repository_access", Summary: "reads repository snapshots"},
+		{SourceID: "background_workers", TargetID: "code_graph_index", Summary: "reads graph and summaries"},
+		{SourceID: "background_workers", TargetID: "persistence", Summary: "stores artifacts and job state"},
+		{SourceID: "background_workers", TargetID: "llm_provider", Summary: "calls LLM provider"},
+		{SourceID: "api_auth", TargetID: "persistence", Summary: "reads and writes metadata"},
+	}
+	flows := make([]architectureSystemFlow, 0, len(candidates))
+	for _, flow := range candidates {
+		if !present[flow.SourceID] || !present[flow.TargetID] {
 			continue
 		}
-		summary := "primary flow"
-		if count > 3 {
-			summary = "major flow"
-		}
-		flows = append(flows, architectureSystemFlow{
-			SourceID: parts[0],
-			TargetID: parts[1],
-			Summary:  summary,
-		})
+		flows = append(flows, flow)
 	}
-	sort.Slice(flows, func(i, j int) bool {
-		if flows[i].SourceID == flows[j].SourceID {
-			return flows[i].TargetID < flows[j].TargetID
-		}
-		return flows[i].SourceID < flows[j].SourceID
-	})
 	return components, flows
 }
 
@@ -295,16 +290,12 @@ func architectureComponentForModule(modulePath string) string {
 		return "background_workers"
 	case modulePath == "internal/graph", strings.HasPrefix(modulePath, "internal/graph/"), modulePath == "internal/indexer", strings.HasPrefix(modulePath, "internal/indexer/"):
 		return "code_graph_index"
-	case modulePath == "internal/git", strings.HasPrefix(modulePath, "internal/git/"):
+	case modulePath == "internal/git", strings.HasPrefix(modulePath, "internal/git/"), modulePath == "internal/source", strings.HasPrefix(modulePath, "internal/source/"):
 		return "repository_access"
 	case modulePath == "internal/db", strings.HasPrefix(modulePath, "internal/db/"):
 		return "persistence"
-	case modulePath == "internal/config", strings.HasPrefix(modulePath, "internal/config/"):
-		return "configuration"
-	case strings.HasPrefix(modulePath, "tests/"), strings.HasSuffix(modulePath, "/tests"):
-		return "supporting"
 	default:
-		return "supporting"
+		return ""
 	}
 }
 

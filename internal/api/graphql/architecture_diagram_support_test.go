@@ -20,8 +20,9 @@ func TestBuildArchitectureDiagramPromptBundleBoundsLargeSnapshotContext(t *testi
 			{Language: "go", FileCount: 12, SymbolCount: 60},
 		},
 		Modules: []knowledgepkg.ModuleSummary{
-			{Path: "cmd/api", Name: "api", FileCount: 3},
-			{Path: "internal/service", Name: "service", FileCount: 4},
+			{Path: "internal/api", Name: "api", FileCount: 3},
+			{Path: "internal/knowledge", Name: "knowledge", FileCount: 4},
+			{Path: "workers", Name: "workers", FileCount: 6},
 		},
 		EntryPoints: []knowledgepkg.SymbolRef{
 			{Name: "main", FilePath: "cmd/api/main.go"},
@@ -39,7 +40,7 @@ func TestBuildArchitectureDiagramPromptBundleBoundsLargeSnapshotContext(t *testi
 	understanding := &knowledgepkg.RepositoryUnderstanding{
 		Metadata: `{"first_pass_sections":[{"title":"Architecture Overview","summary":"Layered web app with API, service, and storage modules."}]}`,
 	}
-	scaffoldJSON := []byte(`{"level":"MODULE","mermaid_source":"flowchart TD\nA-->B","modules":[{"path":"cmd/api","file_paths":["cmd/api/main.go"],"outbound_paths":["internal/service"]}]}`)
+	scaffoldJSON := []byte(`{"level":"MODULE","mermaid_source":"flowchart TD\nA-->B","modules":[{"path":"internal/api","file_paths":["internal/api/http.go"],"outbound_paths":["internal/knowledge"]},{"path":"internal/knowledge","file_paths":["internal/knowledge/engine.go"],"outbound_paths":["workers"]},{"path":"workers","file_paths":["workers/knowledge/servicer.py"],"outbound_paths":["internal/db","internal/graph","internal/git"]}]}`)
 
 	raw, err := buildArchitectureDiagramPromptBundle(nil, "repo-1", knowledgepkg.AudienceDeveloper, snap, understanding, scaffoldJSON)
 	if err != nil {
@@ -73,5 +74,10 @@ func TestBuildArchitectureDiagramPromptBundleBoundsLargeSnapshotContext(t *testi
 	}
 	if len(bundle.SystemFlows) == 0 {
 		t.Fatal("expected system flows")
+	}
+	for _, flow := range bundle.SystemFlows {
+		if flow.Summary == "primary flow" || flow.Summary == "major flow" {
+			t.Fatalf("expected semantic flow label, got %q", flow.Summary)
+		}
 	}
 }

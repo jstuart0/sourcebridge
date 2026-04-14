@@ -74,8 +74,8 @@ async def test_generate_architecture_diagram_falls_back_to_system_view() -> None
         {"id": "persistence", "label": "Persistence", "kind": "storage"}
       ],
       "system_flows": [
-        {"source_id": "user_interfaces", "target_id": "api_auth", "summary": "primary flow"},
-        {"source_id": "api_auth", "target_id": "persistence", "summary": "major flow"}
+        {"source_id": "user_interfaces", "target_id": "api_auth", "summary": "HTTP/API requests"},
+        {"source_id": "api_auth", "target_id": "persistence", "summary": "reads and writes metadata"}
       ]
     }"""
     result, usage = await generate_architecture_diagram(
@@ -93,3 +93,57 @@ async def test_generate_architecture_diagram_falls_back_to_system_view() -> None
     assert 'user_interfaces["User Interfaces"]' in result["mermaid_source"]
     assert "fell back to deterministic system view" in result["repair_summary"]
     assert usage.input_tokens == 200
+
+
+async def test_generate_architecture_diagram_rejects_dense_generic_system_view() -> None:
+    provider = _SequenceProvider(
+        [
+            """flowchart LR
+user["User"]
+ui["User Interfaces"]
+api["API & Auth"]
+jobs["Background Workers"]
+db["Persistence"]
+repo["Repository Access"]
+graph["Code Graph & Index"]
+user --> ui
+ui -->|primary flow| api
+ui -->|primary flow| jobs
+api -->|primary flow| jobs
+api -->|primary flow| db
+jobs -->|primary flow| api
+jobs -->|major flow| db
+jobs -->|primary flow| repo
+jobs -->|primary flow| graph
+repo -->|primary flow| jobs
+graph -->|primary flow| jobs
+db -->|primary flow| api""",
+            """flowchart LR
+user["User"]
+user_interfaces["User Interfaces"]
+api_auth["API & Auth"]
+knowledge_orchestration["Knowledge Orchestration"]
+background_workers["Background Workers"]
+persistence["Persistence"]
+user --> user_interfaces
+user_interfaces -->|HTTP/API requests| api_auth
+api_auth -->|routes generation requests| knowledge_orchestration
+knowledge_orchestration -->|dispatches jobs| background_workers
+background_workers -->|stores artifacts and job state| persistence""",
+        ]
+    )
+    result, usage = await generate_architecture_diagram(
+        provider,
+        repository_name="Example Repo",
+        audience="developer",
+        depth="medium",
+        snapshot_json='{"repository_name":"Example Repo"}',
+        deterministic_diagram_json='{"modules":[{"path":"internal/api","outbound_paths":["internal/knowledge"]},{"path":"internal/knowledge","outbound_paths":["workers"]}]}',
+        model_override="test-model",
+    )
+
+    assert len(provider.calls) == 2
+    assert "primary flow" not in result["mermaid_source"]
+    assert "regenerated diagram to satisfy system-view quality gate" in result["repair_summary"]
+    assert usage.input_tokens == 200
+    assert usage.output_tokens == 100

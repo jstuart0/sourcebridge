@@ -10,7 +10,7 @@ Return Mermaid flowchart syntax only. No prose, no explanations, no Markdown fen
 
 Rules:
 1. This is a 1000-foot system view, not a module call graph.
-2. Use 6-10 boxes maximum, grouped around major subsystems and external actors.
+2. Use 5-8 boxes maximum, grouped around major subsystems and external actors.
 3. Prefer labels like User Interfaces, API & Auth, Knowledge Orchestration, Background Workers, Code Graph & Index, Persistence, Repository Access.
 4. Do not include call counts, file paths, or low-level module names as node labels unless they are the subsystem labels provided in the context.
 5. Treat the system_components and system_flows context as the primary structure to render.
@@ -18,6 +18,9 @@ Rules:
 7. If an edge is uncertain, omit it rather than guessing.
 8. Avoid naming a subgraph and a node with the same identifier.
 9. Output a single Mermaid flowchart diagram only.
+10. Use concrete edge labels such as HTTP/API requests, dispatches jobs, stores artifacts, reads repository snapshots, calls LLM provider.
+11. Do not use generic edge labels like primary flow, major flow, secondary flow, or data flow.
+12. Avoid reciprocal edge pairs and avoid connecting every node to every other node.
 """
 
 
@@ -63,8 +66,10 @@ Requirements:
 - Start with `flowchart LR` or `flowchart TD`
 - Define explicit nodes or subgraphs
 - Return a 1000-foot system view with subsystem boxes, not a dense module graph
+- Use 5-8 boxes maximum and avoid dense cross-linking
 - Use the provided system components and system flows as the main structure
 - Do not include call counts or low-level module labels in the final diagram
+- Use concrete edge labels, never generic labels like `primary flow` or `major flow`
 - Omit uncertain edges instead of guessing
 - No prose, no Markdown fences, no explanation
 

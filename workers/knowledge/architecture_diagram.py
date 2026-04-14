@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from workers.common.llm.provider import (
     LLMProvider,
@@ -20,6 +21,15 @@ from workers.knowledge.prompts.architecture_diagram import (
 )
 from workers.knowledge.types import EvidenceRef
 from workers.reasoning.types import LLMUsageRecord
+
+_EDGE_LABEL_RE = re.compile(r'-->\s*\|([^|]+)\|\s*([A-Za-z0-9_]+)')
+_GENERIC_EDGE_LABELS = {
+    "primary flow",
+    "major flow",
+    "secondary flow",
+    "data flow",
+    "flow",
+}
 
 
 def _build_evidence(scaffold_json: str) -> list[EvidenceRef]:
@@ -118,6 +128,42 @@ def _system_view_fallback_mermaid(snapshot_json: str) -> str | None:
     return "\n".join(lines)
 
 
+def _diagram_quality_issues(mermaid_source: str) -> list[str]:
+    issues: list[str] = []
+    validation = validate_and_repair_mermaid(mermaid_source)
+    node_count = len(validation.node_labels)
+    edge_count = len(validation.edge_pairs)
+    if node_count > 8:
+        issues.append(f"too many boxes ({node_count} > 8)")
+    if edge_count > 10:
+        issues.append(f"too many edges ({edge_count} > 10)")
+    if node_count and edge_count > node_count + 2:
+        issues.append("too much cross-linking for a system-context view")
+
+    raw_pairs: set[tuple[str, str]] = set()
+    generic_labels = False
+    for line in mermaid_source.splitlines():
+        match = _EDGE_LABEL_RE.search(line)
+        if match and match.group(1).strip().lower() in _GENERIC_EDGE_LABELS:
+            generic_labels = True
+        parts = line.split("-->")
+        if len(parts) != 2:
+            continue
+        src = parts[0].strip().split()[-1] if parts[0].strip() else ""
+        rhs = parts[1].strip()
+        if "|" in rhs:
+            rhs = rhs.rsplit("|", 1)[-1].strip()
+        tgt = rhs.split()[0] if rhs else ""
+        if src and tgt:
+            raw_pairs.add((src, tgt))
+    if generic_labels:
+        issues.append("uses generic edge labels")
+    reciprocal_pairs = sum(1 for src, tgt in raw_pairs if (tgt, src) in raw_pairs and src < tgt)
+    if reciprocal_pairs:
+        issues.append("contains reciprocal edge pairs")
+    return issues
+
+
 async def generate_architecture_diagram(
     provider: LLMProvider,
     repository_name: str,
@@ -206,6 +252,59 @@ async def generate_architecture_diagram(
                     repair_summary,
                     f"retry regenerated invalid Mermaid: {exc}",
                     f"fell back to deterministic system view: {retry_exc}",
+                ]
+                if part
+            )
+    quality_issues = _diagram_quality_issues(validation.mermaid_source)
+    if quality_issues:
+        retry_prompt = build_architecture_diagram_retry_prompt(
+            repository_name,
+            audience,
+            depth,
+            deterministic_diagram_json,
+            response.content + "\n\nQuality issues: " + "; ".join(quality_issues),
+        )
+        retry_response = require_nonempty(
+            await complete_with_optional_model(
+                provider,
+                retry_prompt,
+                system=ARCHITECTURE_DIAGRAM_SYSTEM,
+                temperature=0.0,
+                max_tokens=3072,
+                model=model_override,
+            ),
+            context="architecture_diagram:repository_quality_retry",
+        )
+        usage = LLMUsageRecord(
+            provider=retry_response.provider_name or response.provider_name or "llm",
+            model=retry_response.model or response.model,
+            input_tokens=usage.input_tokens + retry_response.input_tokens,
+            output_tokens=usage.output_tokens + retry_response.output_tokens,
+            operation="architecture_diagram",
+            entity_name=repository_name,
+        )
+        try:
+            retry_validation = validate_and_repair_mermaid(retry_response.content)
+            retry_issues = _diagram_quality_issues(retry_validation.mermaid_source)
+            if retry_issues:
+                raise ValueError("; ".join(retry_issues))
+            validation = retry_validation
+            repair_summary = validation.repair_summary.strip()
+            validation.repair_summary = "; ".join(
+                part for part in [repair_summary, "regenerated diagram to satisfy system-view quality gate"] if part
+            )
+        except ValueError as quality_exc:
+            fallback = _system_view_fallback_mermaid(snapshot_json)
+            if not fallback:
+                raise quality_exc
+            validation = validate_and_repair_mermaid(fallback)
+            repair_summary = validation.repair_summary.strip()
+            validation.repair_summary = "; ".join(
+                part
+                for part in [
+                    repair_summary,
+                    "regenerated diagram to satisfy system-view quality gate",
+                    f"fell back to deterministic system view: {quality_exc}",
                 ]
                 if part
             )
