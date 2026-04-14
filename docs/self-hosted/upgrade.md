@@ -78,11 +78,11 @@ kubectl -n sourcebridge rollout status deployment/sourcebridge-worker
 ```bash
 # Update image tags in your manifests, then apply
 kubectl -n sourcebridge set image deployment/sourcebridge-api \
-  api=ghcr.io/sourcebridge/sourcebridge:1.5.0
+  sourcebridge-api=ghcr.io/sourcebridge/sourcebridge-api:1.5.0
 kubectl -n sourcebridge set image deployment/sourcebridge-worker \
-  worker=ghcr.io/sourcebridge/sourcebridge-worker:1.5.0
+  sourcebridge-worker=ghcr.io/sourcebridge/sourcebridge-worker:1.5.0
 kubectl -n sourcebridge set image deployment/sourcebridge-web \
-  web=ghcr.io/sourcebridge/sourcebridge-web:1.5.0
+  sourcebridge-web=ghcr.io/sourcebridge/sourcebridge-web:1.5.0
 
 kubectl -n sourcebridge rollout status deployment/sourcebridge-api
 ```
@@ -118,6 +118,87 @@ surreal import --conn http://localhost:8000 \
   --ns sourcebridge --db production \
   pre-upgrade-20260315.surql
 ```
+
+## Upgrading to the Repository Understanding / Understanding-First Model
+
+Versions that introduce the shared repository understanding layer add new artifact and understanding fields such as:
+
+- `generation_mode`
+- `renderer_version`
+- `understanding_id`
+- section-level metadata for AI-backed artifacts
+
+This is still an in-place upgrade. You do **not** need to re-import repositories.
+
+What changes after upgrade:
+
+1. Existing repositories stay indexed.
+2. Existing knowledge artifacts remain present.
+3. Repository understanding is built lazily on the next qualifying request, or explicitly when a user clicks `Build Understanding`.
+4. New artifacts can coexist with older artifacts while the system rebuilds understanding-backed outputs.
+
+### Recommended sequence
+
+1. Upgrade API, worker, and web together.
+2. Wait for API startup migrations to finish cleanly.
+3. Verify the API can read old artifacts without startup errors.
+4. Trigger one `Build Understanding` or one new cliff-notes generation on a known repository.
+5. Confirm a `repositoryUnderstanding` record appears and reaches `READY`.
+
+### Legacy artifact normalization
+
+Most installations will upgrade cleanly with migrations alone. If the API fails on startup while reading legacy `ca_knowledge_artifact` rows, normalize the older rows once so the newly added fields are present.
+
+Example repair:
+
+```sql
+UPDATE ca_knowledge_artifact SET
+  generation_mode = string::is::empty(generation_mode) ? 'understanding_first' : generation_mode,
+  renderer_version = string::is::empty(renderer_version) ? 'v1' : renderer_version,
+  understanding_id = string::is::empty(understanding_id) ? '' : understanding_id,
+  understanding_revision_fp = string::is::empty(understanding_revision_fp) ? '' : understanding_revision_fp
+WHERE generation_mode = NONE
+   OR renderer_version = NONE
+   OR understanding_id = NONE
+   OR understanding_revision_fp = NONE;
+```
+
+If your version also added section metadata and older rows are missing it, normalize those rows too:
+
+```sql
+UPDATE ca_knowledge_section SET
+  metadata = object::is::empty(metadata) ? {} : metadata
+WHERE metadata = NONE;
+```
+
+Run those repairs only if startup or query behavior shows legacy-row incompatibility. Do not wipe repositories or artifacts as a first response.
+
+### Post-upgrade verification for understanding-aware installs
+
+After the deploy:
+
+```bash
+# Confirm repositories are still queryable
+curl -s http://localhost:8080/api/v1/graphql \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"query":"{ repositories { id name } }"}' | jq .
+
+# Confirm the worker is connected
+curl -s http://localhost:8080/api/v1/admin/llm/monitor | jq '.worker_connected'
+```
+
+Then in the UI:
+
+1. Open a repository page.
+2. Click `Build Understanding` if no understanding record exists yet.
+3. Refresh the page after the job starts.
+4. Verify the understanding panel shows a real record with:
+   - stage progress
+   - node counts
+   - `READY` when complete
+
+If `Build Understanding` flips back to idle with no visible record, verify that the `Repository.repositoryUnderstanding` GraphQL field resolves correctly in your deployed version before investigating the worker.
 
 ## Rollback Procedure
 
