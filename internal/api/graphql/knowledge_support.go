@@ -1081,28 +1081,15 @@ func (r *Resolver) ensureFreshRepositoryUnderstanding(
 		return nil, false, nil
 	}
 	repoScope := knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository}
-	if understanding, fresh := attachFreshUnderstanding(r.KnowledgeStore, artifact, repoScope, sourceRevision); understanding != nil && fresh {
-		return understanding, true, nil
-	}
-
-	// If cliff notes are already generating for this repo, skip the understanding
-	// build rather than blocking the worker with a concurrent generation request.
-	// The understanding will be available once the in-flight cliff notes complete.
-	for _, existingCN := range r.KnowledgeStore.GetKnowledgeArtifacts(repo.ID) {
-		if existingCN.Type != knowledgepkg.ArtifactCliffNotes || existingCN.Scope.ScopeType != knowledgepkg.ScopeRepository {
-			continue
-		}
-		if existingCN.Status == knowledgepkg.StatusGenerating || existingCN.Status == knowledgepkg.StatusPending {
-			slog.Info("skipping_understanding_build",
+	// Accept any existing understanding (even if slightly stale) to avoid
+	// blocking the worker with a concurrent cliff notes generation request.
+	if understanding, fresh := attachFreshUnderstanding(r.KnowledgeStore, artifact, repoScope, sourceRevision); understanding != nil {
+		if !fresh {
+			slog.Info("using_stale_understanding",
 				"artifact_id", artifact.ID,
-				"reason", "cliff_notes_already_generating",
-				"cliff_notes_id", existingCN.ID)
-			if rt != nil {
-				rt.ReportProgress(0.12, "understanding", "Cliff notes in progress — proceeding without understanding")
-			}
-			return nil, false, nil
+				"understanding_id", understanding.ID)
 		}
-		break
+		return understanding, fresh, nil
 	}
 
 	if _, err := seedRepositoryUnderstanding(r.KnowledgeStore, artifact, repoScope, sourceRevision, knowledgepkg.UnderstandingBuildingTree); err != nil {
