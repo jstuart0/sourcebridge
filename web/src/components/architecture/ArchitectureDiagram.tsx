@@ -105,6 +105,7 @@ export function ArchitectureDiagram({
   const [copied, setCopied] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [structuredMermaid, setStructuredMermaid] = useState<string | null>(null);
+  const [aiRefreshStartedAt, setAIRefreshStartedAt] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [deterministicResult, reexecuteDeterministicQuery] = useQuery({
@@ -138,6 +139,11 @@ export function ArchitectureDiagram({
   const aiMetadata = parseArchitectureMetadata(aiSection?.metadata);
   const aiComponents = useMemo(() => aiMetadata.components ?? [], [aiMetadata.components]);
   const selectedAIComponent = aiComponents.find((component) => component.id === selectedAIComponentId) ?? null;
+  const aiArtifactInFlight = aiArtifact?.status === "PENDING" || aiArtifact?.status === "GENERATING";
+  const aiKickoffPending =
+    aiRefreshStartedAt !== null &&
+    (!aiArtifact ||
+      (!aiArtifactInFlight && new Date(aiArtifact.updatedAt).getTime() < aiRefreshStartedAt));
 
   const aiSystemMermaidSource = aiSection?.content ?? "";
   const aiExecutionMermaidSource = aiMetadata.executionMermaidSource ?? "";
@@ -269,7 +275,32 @@ export function ArchitectureDiagram({
     setSelectedAIComponentId(null);
   }, [aiArtifact?.id, aiFocus]);
 
+  useEffect(() => {
+    if (aiRefreshStartedAt === null) {
+      return;
+    }
+    if (aiArtifactInFlight) {
+      setAIRefreshStartedAt(null);
+      return;
+    }
+    if (aiArtifact && new Date(aiArtifact.updatedAt).getTime() >= aiRefreshStartedAt) {
+      setAIRefreshStartedAt(null);
+    }
+  }, [aiArtifact, aiArtifactInFlight, aiRefreshStartedAt]);
+
+  useEffect(() => {
+    if (!aiKickoffPending && !aiArtifactInFlight) {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      reexecuteArtifactsQuery({ requestPolicy: "network-only" });
+    }, 2000);
+    return () => window.clearInterval(interval);
+  }, [aiArtifactInFlight, aiKickoffPending, reexecuteArtifactsQuery]);
+
   const handleGenerateAIDiagram = useCallback(async () => {
+    const startedAt = Date.now();
+    setAIRefreshStartedAt(startedAt);
     if (aiArtifact?.id) {
       await refreshArtifact({ id: aiArtifact.id });
     } else {
@@ -307,7 +338,7 @@ export function ArchitectureDiagram({
     );
   }
 
-  const aiBusy = aiArtifact?.status === "PENDING" || aiArtifact?.status === "GENERATING";
+  const aiBusy = aiKickoffPending || aiArtifactInFlight;
 
   return (
     <div className="space-y-4">
@@ -376,8 +407,12 @@ export function ArchitectureDiagram({
             </div>
           ) : aiBusy ? (
             <div className="space-y-2 text-sm text-[var(--text-secondary)]">
-              <div>{aiArtifact.progressMessage || "Generating AI architecture diagram..."}</div>
-              <div>{Math.round((aiArtifact.progress || 0) * 100)}%</div>
+              <div>
+                {aiKickoffPending
+                  ? "Starting AI architecture diagram regeneration..."
+                  : aiArtifact.progressMessage || "Generating AI architecture diagram..."}
+              </div>
+              <div>{aiKickoffPending ? "Queued…" : `${Math.round((aiArtifact.progress || 0) * 100)}%`}</div>
             </div>
           ) : aiArtifact.status === "FAILED" ? (
             <div className="space-y-2 text-sm text-[var(--text-secondary)]">
