@@ -19,7 +19,7 @@ SourceBridge is a requirement-aware code comprehension platform. Point it at any
 Most tools help you search code. **SourceBridge helps you understand systems.**
 
 <p align="center">
-  <img src="docs/screenshots/repository-overview.png" alt="Repository overview showing cliff notes, code tours, and learning paths" width="800">
+  <img src="docs/screenshots/SourceBridge-Overview.png" alt="Repository overview showing cliff notes, code tours, and learning paths" width="800">
 </p>
 
 <details>
@@ -27,17 +27,17 @@ Most tools help you search code. **SourceBridge helps you understand systems.**
 
 ### Cliff Notes
 <p align="center">
-  <img src="docs/screenshots/cliff-notes.png" alt="AI-generated cliff notes with hierarchical code summaries" width="800">
+  <img src="docs/screenshots/SourceBridge-CliffNotes.png" alt="AI-generated cliff notes with hierarchical code summaries" width="800">
 </p>
 
 ### Admin Monitor
 <p align="center">
-  <img src="docs/screenshots/admin-monitor.png" alt="LLM job queue with real-time generation progress" width="800">
+  <img src="docs/screenshots/SourceBridge-Generation.png" alt="LLM job queue with real-time generation progress" width="800">
 </p>
 
 ### Semantic Search
 <p align="center">
-  <img src="docs/screenshots/search.png" alt="Natural language search against the repository graph" width="800">
+  <img src="docs/screenshots/SourceBridge-Search.png" alt="Natural language search against the repository graph" width="800">
 </p>
 
 </details>
