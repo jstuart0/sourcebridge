@@ -12,5 +12,5 @@ database_name = "sourcebridge-telemetry"
 database_id = "3b91def6-5729-4562-988f-24eeb976fc24"
 
 [vars]
-POSTHOG_API_KEY = "phc_vhLdm8b5dYsYUi44n6Dm2aH2nFqnFyupre8FkEC6fDhx"
+# POSTHOG_API_KEY is set via `wrangler secret put POSTHOG_API_KEY`
 POSTHOG_HOST = "https://us.i.posthog.com"

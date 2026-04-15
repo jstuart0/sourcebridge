@@ -8,6 +8,12 @@ COPY web/package.json web/package-lock.json* ./
 RUN npm ci
 
 COPY web/ .
+
+ARG NEXT_PUBLIC_POSTHOG_KEY=""
+ARG NEXT_PUBLIC_POSTHOG_HOST="https://us.i.posthog.com"
+ENV NEXT_PUBLIC_POSTHOG_KEY=${NEXT_PUBLIC_POSTHOG_KEY}
+ENV NEXT_PUBLIC_POSTHOG_HOST=${NEXT_PUBLIC_POSTHOG_HOST}
+
 RUN npm run build && mkdir -p /app/public
 
 # Runtime stage

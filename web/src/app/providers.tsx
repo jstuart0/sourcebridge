@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { Provider as UrqlProvider } from "urql";
 import { AppearanceProvider } from "@/components/layout/AppearanceProvider";
 import { CommandPalette, CommandItem } from "@/components/command-palette";
 import { createClient } from "@/lib/graphql/client";
 import { getCommandNavigationItems, type ProductEdition } from "@/lib/navigation";
 import { TOKEN_KEY } from "@/lib/token-key";
+import { initPostHog, identifyUser, resetPostHog } from "@/lib/posthog";
 import { useRouter } from "next/navigation";
 
 // Simple external store so the urql client rebuilds when the token changes.
@@ -46,6 +47,20 @@ function CommandPaletteWithRouter() {
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const token = useSyncExternalStore(subscribeToken, getTokenSnapshot, getTokenServerSnapshot);
+
+  // Initialize PostHog once on mount
+  useEffect(() => {
+    initPostHog();
+  }, []);
+
+  // Identify or reset user when auth state changes
+  useEffect(() => {
+    if (token) {
+      identifyUser(token);
+    } else {
+      resetPostHog();
+    }
+  }, [token]);
 
   const client = useMemo(() => {
     return createClient(token ?? undefined);

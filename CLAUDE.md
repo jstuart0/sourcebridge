@@ -40,6 +40,16 @@ cd workers && uv run python -m workers  # Start worker (separate terminal)
 Configuration via `config.toml` or environment variables with `SOURCEBRIDGE_` prefix.
 See `config.toml.example` for all options.
 
+## Legacy Name: CodeAware
+
+This project was originally called **CodeAware**. It has since been renamed to **SourceBridge**, but remnants of the old name exist throughout the codebase — environment variables with the `CODEAWARE_` prefix, Go module paths, internal references, config keys, Kubernetes resource names, and database records.
+
+When you encounter a `CODEAWARE_` or `codeaware` reference:
+- There is likely a `SOURCEBRIDGE_` / `sourcebridge` counterpart already in place
+- If you can safely replace the old reference without breaking anything, do so
+- **Do not** rename things that would break runtime behavior — e.g. database table names, persisted config keys, Kubernetes service names that other services resolve by name, or environment variables that deployed infrastructure depends on
+- When in doubt, leave it and note it for a future cleanup pass
+
 ## Safety
 
 - Never commit credentials or `.env` files
