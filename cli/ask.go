@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+
+	"github.com/sourcebridge/sourcebridge/internal/config"
 )
 
 var askImplCmd = &cobra.Command{
@@ -41,7 +43,12 @@ func runAsk(cmd *cobra.Command, args []string) error {
 
 	pyCmd := exec.CommandContext(cmd.Context(), "uv", "run", "python", "cli_ask.py", question)
 	pyCmd.Dir = findWorkersDir()
-	pyCmd.Env = append(os.Environ(), "SOURCEBRIDGE_REPO_PATH="+absRepo)
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	pyCmd.Env = append(os.Environ(), buildWorkerLLMEnv(cfg, cfg.LLM.AskModel, "SOURCEBRIDGE_LLM_ASK_MODEL")...)
+	pyCmd.Env = append(pyCmd.Env, "SOURCEBRIDGE_REPO_PATH="+absRepo)
 
 	output, err := pyCmd.Output()
 	if err != nil {

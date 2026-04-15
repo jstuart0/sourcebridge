@@ -11,6 +11,16 @@
 # See docs/installation.md for full configuration reference.
 
 services:
+  surrealdb-init:
+    image: alpine:3.20
+    command:
+      - /bin/sh
+      - -lc
+      - mkdir -p /data/database.db && chown -R 65532:65532 /data
+    volumes:
+      - surrealdb-data:/data
+    restart: "no"
+
   # SurrealDB — embedded document/graph database
   surrealdb:
     image: surrealdb/surrealdb:v2.2.1
@@ -19,9 +29,12 @@ services:
       - "${SOURCEBRIDGE_SURREALDB_PORT:-8000}:8000"
     volumes:
       - surrealdb-data:/data
+    depends_on:
+      surrealdb-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "/surreal", "is-ready", "--endpoint", "ws://localhost:8000"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -92,14 +105,16 @@ services:
       - SOURCEBRIDGE_WORKER_LLM_API_KEY=${SOURCEBRIDGE_LLM_API_KEY:-not-needed}
 
       # ─── Embedding Provider ──────────────────────────────────────────
-      - SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER=${SOURCEBRIDGE_EMBEDDING_PROVIDER:-voyage}
-      - SOURCEBRIDGE_WORKER_EMBEDDING_API_KEY=${VOYAGE_API_KEY:-}
+      - SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER=${SOURCEBRIDGE_EMBEDDING_PROVIDER:-ollama}
+      - SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL=${SOURCEBRIDGE_EMBEDDING_BASE_URL:-http://host.docker.internal:11434/v1}
+      - SOURCEBRIDGE_WORKER_EMBEDDING_MODEL=${SOURCEBRIDGE_EMBEDDING_MODEL:-nomic-embed-text}
+      - SOURCEBRIDGE_WORKER_EMBEDDING_API_KEY=${SOURCEBRIDGE_EMBEDDING_API_KEY:-not-needed}
     depends_on:
       surrealdb:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import grpc; ch = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=2)"]
+      test: ["CMD", "uv", "run", "python", "-c", "import grpc; ch = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=2)"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -120,11 +135,11 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000"]
       interval: 10s
       timeout: 3s
       retries: 5
-      start_period: 15s
+      start_period: 20s
 
 volumes:
   surrealdb-data:

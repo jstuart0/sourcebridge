@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -13,7 +14,8 @@ _parent = os.path.dirname(_here)
 if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
-from workers.common.llm.fake import FakeLLMProvider  # noqa: E402
+from workers.common.config import WorkerConfig  # noqa: E402
+from workers.common.llm.config import create_llm_provider  # noqa: E402
 from workers.reasoning.discussion import discuss_code  # noqa: E402
 
 
@@ -44,8 +46,10 @@ async def main() -> None:
 
     context_code = "\n\n".join(context_parts) if context_parts else "No code files found."
 
-    provider = FakeLLMProvider()
-    answer, usage = await discuss_code(provider, question, context_code)
+    config = WorkerConfig()
+    provider = create_llm_provider(config)
+    with contextlib.redirect_stdout(sys.stderr):
+        answer, usage = await discuss_code(provider, question, context_code)
 
     output = {
         "answer": answer.answer,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -13,7 +14,8 @@ _parent = os.path.dirname(_here)
 if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
-from workers.common.llm.fake import FakeLLMProvider  # noqa: E402
+from workers.common.config import WorkerConfig  # noqa: E402
+from workers.common.llm.config import create_llm_provider  # noqa: E402
 from workers.reasoning.cache import UsageTracker  # noqa: E402
 from workers.reasoning.reviewer import review_code  # noqa: E402
 
@@ -44,11 +46,12 @@ async def main() -> None:
     }
     language = lang_map.get(ext, "unknown")
 
-    # Use fake provider for testing, real provider configured via env
-    provider = FakeLLMProvider()
+    config = WorkerConfig()
+    provider = create_llm_provider(config)
 
     tracker = UsageTracker()
-    result, usage = await review_code(provider, file_path, language, content, template=template)
+    with contextlib.redirect_stdout(sys.stderr):
+        result, usage = await review_code(provider, file_path, language, content, template=template)
     tracker.record(usage)
 
     output = {
