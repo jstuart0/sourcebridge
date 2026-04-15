@@ -9,12 +9,19 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sourcebridge/sourcebridge/internal/architecture"
 )
 
-// diagramDocumentStore is a simple in-memory store for diagram documents.
+type diagramDocumentPersistence interface {
+	StoreDiagramDocument(doc *architecture.DiagramDocument) error
+	GetDiagramDocument(repoID string, sourceKinds ...architecture.SourceKind) *architecture.DiagramDocument
+	DeleteDiagramDocument(repoID string, sourceKind architecture.SourceKind) error
+}
+
+// diagramDocumentStore is an in-memory fallback for diagram documents.
 type diagramDocumentStore struct {
 	mu   sync.RWMutex
 	docs map[string]*architecture.DiagramDocument // key: repoID + ":" + sourceKind
@@ -28,6 +35,40 @@ func diagramKey(repoID string, sourceKind architecture.SourceKind) string {
 	return repoID + ":" + string(sourceKind)
 }
 
+func (s *diagramDocumentStore) StoreDiagramDocument(doc *architecture.DiagramDocument) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cloned := *doc
+	s.docs[diagramKey(doc.RepositoryID, doc.SourceKind)] = &cloned
+	return nil
+}
+
+func (s *diagramDocumentStore) GetDiagramDocument(repoID string, sourceKinds ...architecture.SourceKind) *architecture.DiagramDocument {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, sourceKind := range sourceKinds {
+		if doc, ok := s.docs[diagramKey(repoID, sourceKind)]; ok {
+			cloned := *doc
+			return &cloned
+		}
+	}
+	return nil
+}
+
+func (s *diagramDocumentStore) DeleteDiagramDocument(repoID string, sourceKind architecture.SourceKind) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.docs, diagramKey(repoID, sourceKind))
+	return nil
+}
+
+func (s *Server) diagramStoreForRequest(r *http.Request) diagramDocumentPersistence {
+	if store, ok := s.store.(diagramDocumentPersistence); ok {
+		return store
+	}
+	return diagStore
+}
+
 // handleGetStructuredDiagram returns the deterministic diagram as a DiagramDocument.
 func (s *Server) handleGetStructuredDiagram(w http.ResponseWriter, r *http.Request) {
 	repoID := chi.URLParam(r, "repoId")
@@ -36,14 +77,13 @@ func (s *Server) handleGetStructuredDiagram(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	store := s.diagramStoreForRequest(r)
+
 	// Check for a user-edited version first
-	diagStore.mu.RLock()
-	if doc, ok := diagStore.docs[diagramKey(repoID, architecture.SourceUserEdited)]; ok {
-		diagStore.mu.RUnlock()
+	if doc := store.GetDiagramDocument(repoID, architecture.SourceUserEdited); doc != nil {
 		respondJSON(w, http.StatusOK, doc)
 		return
 	}
-	diagStore.mu.RUnlock()
 
 	depth := 1
 	if raw := r.URL.Query().Get("depth"); raw != "" {
@@ -74,20 +114,16 @@ func (s *Server) handleGetDiagramDocument(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	diagStore.mu.RLock()
-	for _, sk := range []architecture.SourceKind{
+	store := s.diagramStoreForRequest(r)
+	if doc := store.GetDiagramDocument(repoID,
 		architecture.SourceUserEdited,
 		architecture.SourceImportedMermaid,
 		architecture.SourceAIGenerated,
 		architecture.SourceDeterministic,
-	} {
-		if doc, ok := diagStore.docs[diagramKey(repoID, sk)]; ok {
-			diagStore.mu.RUnlock()
-			respondJSON(w, http.StatusOK, doc)
-			return
-		}
+	); doc != nil {
+		respondJSON(w, http.StatusOK, doc)
+		return
 	}
-	diagStore.mu.RUnlock()
 
 	// No stored document — generate deterministic on the fly
 	s.handleGetStructuredDiagram(w, r)
@@ -141,9 +177,10 @@ func (s *Server) handleImportMermaid(w http.ResponseWriter, r *http.Request) {
 	normResult := architecture.Normalize(doc, mode)
 	generatedMermaid := doc.GenerateMermaid()
 
-	diagStore.mu.Lock()
-	diagStore.docs[diagramKey(repoID, architecture.SourceImportedMermaid)] = doc
-	diagStore.mu.Unlock()
+	if err := s.diagramStoreForRequest(r).StoreDiagramDocument(doc); err != nil {
+		http.Error(w, `{"error":"failed to store diagram"}`, http.StatusInternalServerError)
+		return
+	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"document":      doc,
@@ -155,7 +192,12 @@ func (s *Server) handleImportMermaid(w http.ResponseWriter, r *http.Request) {
 // handleExportDiagramMermaid generates and returns Mermaid source.
 func (s *Server) handleExportDiagramMermaid(w http.ResponseWriter, r *http.Request) {
 	repoID := chi.URLParam(r, "repoId")
-	doc := getDiagramDoc(repoID)
+	doc := s.diagramStoreForRequest(r).GetDiagramDocument(repoID,
+		architecture.SourceUserEdited,
+		architecture.SourceImportedMermaid,
+		architecture.SourceAIGenerated,
+		architecture.SourceDeterministic,
+	)
 	if doc == nil {
 		var err error
 		doc, err = s.buildDeterministicDiagramDoc(r, repoID, 1, 30)
@@ -174,7 +216,12 @@ func (s *Server) handleExportDiagramMermaid(w http.ResponseWriter, r *http.Reque
 // handleExportDiagramJSON exports the structured document as JSON.
 func (s *Server) handleExportDiagramJSON(w http.ResponseWriter, r *http.Request) {
 	repoID := chi.URLParam(r, "repoId")
-	doc := getDiagramDoc(repoID)
+	doc := s.diagramStoreForRequest(r).GetDiagramDocument(repoID,
+		architecture.SourceUserEdited,
+		architecture.SourceImportedMermaid,
+		architecture.SourceAIGenerated,
+		architecture.SourceDeterministic,
+	)
 	if doc == nil {
 		var err error
 		doc, err = s.buildDeterministicDiagramDoc(r, repoID, 1, 30)
@@ -195,21 +242,58 @@ func (s *Server) handleExportDiagramJSON(w http.ResponseWriter, r *http.Request)
 	w.Write([]byte(jsonStr))
 }
 
-func getDiagramDoc(repoID string) *architecture.DiagramDocument {
-	diagStore.mu.RLock()
-	defer diagStore.mu.RUnlock()
-
-	for _, sk := range []architecture.SourceKind{
-		architecture.SourceUserEdited,
-		architecture.SourceImportedMermaid,
-		architecture.SourceAIGenerated,
-		architecture.SourceDeterministic,
-	} {
-		if doc, ok := diagStore.docs[diagramKey(repoID, sk)]; ok {
-			return doc
-		}
+func (s *Server) handlePutDiagramDocument(w http.ResponseWriter, r *http.Request) {
+	repoID := chi.URLParam(r, "repoId")
+	if repoID == "" {
+		http.Error(w, `{"error":"repoId is required"}`, http.StatusBadRequest)
+		return
 	}
-	return nil
+	if s.getStore(r).GetRepository(repoID) == nil {
+		http.Error(w, `{"error":"repository not found"}`, http.StatusNotFound)
+		return
+	}
+
+	var doc architecture.DiagramDocument
+	if err := json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&doc); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now().UTC()
+	existing := s.diagramStoreForRequest(r).GetDiagramDocument(repoID, architecture.SourceUserEdited)
+	if existing != nil && !existing.CreatedAt.IsZero() {
+		doc.CreatedAt = existing.CreatedAt
+	} else if doc.CreatedAt.IsZero() {
+		doc.CreatedAt = now
+	}
+	doc.RepositoryID = repoID
+	doc.SourceKind = architecture.SourceUserEdited
+	doc.UpdatedAt = now
+	if doc.ID == "" {
+		doc.ID = "user-" + repoID
+	}
+
+	if err := s.diagramStoreForRequest(r).StoreDiagramDocument(&doc); err != nil {
+		http.Error(w, `{"error":"failed to store diagram"}`, http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"document": &doc,
+	})
+}
+
+func (s *Server) handleDeleteDiagramDocument(w http.ResponseWriter, r *http.Request) {
+	repoID := chi.URLParam(r, "repoId")
+	if repoID == "" {
+		http.Error(w, `{"error":"repoId is required"}`, http.StatusBadRequest)
+		return
+	}
+	if err := s.diagramStoreForRequest(r).DeleteDiagramDocument(repoID, architecture.SourceUserEdited); err != nil {
+		http.Error(w, `{"error":"failed to delete diagram"}`, http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) buildDeterministicDiagramDoc(r *http.Request, repoID string, depth int, maxNodes int) (*architecture.DiagramDocument, error) {

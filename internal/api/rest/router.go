@@ -372,6 +372,8 @@ func (s *Server) setupRouter() {
 		// Diagram document API (structured architecture diagrams — read-only in OSS)
 		r.Get("/api/v1/diagrams/{repoId}", s.handleGetDiagramDocument)
 		r.Get("/api/v1/diagrams/{repoId}/structured", s.handleGetStructuredDiagram)
+		r.Put("/api/v1/diagrams/{repoId}", s.handlePutDiagramDocument)
+		r.Delete("/api/v1/diagrams/{repoId}", s.handleDeleteDiagramDocument)
 		r.Post("/api/v1/diagrams/{repoId}/import", s.handleImportMermaid)
 		r.Get("/api/v1/diagrams/{repoId}/export/mermaid", s.handleExportDiagramMermaid)
 		r.Get("/api/v1/diagrams/{repoId}/export/json", s.handleExportDiagramJSON)

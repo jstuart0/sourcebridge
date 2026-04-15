@@ -76,6 +76,68 @@ func TestHandleGetStructuredDiagramHonorsDepthQueryParam(t *testing.T) {
 	}
 }
 
+func TestHandlePutAndDeleteDiagramDocumentPersistsUserEditedDocument(t *testing.T) {
+	diagStore = &diagramDocumentStore{docs: make(map[string]*architecture.DiagramDocument)}
+	store, repo := newDiagramTestServerAndRepo(t)
+	server := &Server{store: store}
+
+	body := `{
+		"id":"manual-1",
+		"repository_id":"` + repo.ID + `",
+		"source_kind":"deterministic",
+		"view_type":"system",
+		"title":"Manual Diagram",
+		"nodes":[{"id":"ui","label":"UI","kind":"interface","provenance":"user_added","position_x":100,"position_y":120}],
+		"edges":[],
+		"groups":[]
+	}`
+
+	putReq := withRepoRouteParam(httptest.NewRequest(http.MethodPut, "/api/v1/diagrams/"+repo.ID, strings.NewReader(body)), repo.ID)
+	putRec := httptest.NewRecorder()
+	server.handlePutDiagramDocument(putRec, putReq)
+
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from put, got %d: %s", putRec.Code, putRec.Body.String())
+	}
+
+	getReq := withRepoRouteParam(httptest.NewRequest(http.MethodGet, "/api/v1/diagrams/"+repo.ID+"/structured", nil), repo.ID)
+	getRec := httptest.NewRecorder()
+	server.handleGetStructuredDiagram(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from get, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+	var doc architecture.DiagramDocument
+	if err := json.Unmarshal(getRec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if doc.SourceKind != architecture.SourceUserEdited {
+		t.Fatalf("expected user-edited source kind, got %q", doc.SourceKind)
+	}
+	if len(doc.Nodes) != 1 || doc.Nodes[0].Label != "UI" {
+		t.Fatalf("expected saved node, got %#v", doc.Nodes)
+	}
+
+	deleteReq := withRepoRouteParam(httptest.NewRequest(http.MethodDelete, "/api/v1/diagrams/"+repo.ID, nil), repo.ID)
+	deleteRec := httptest.NewRecorder()
+	server.handleDeleteDiagramDocument(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 from delete, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	fallbackRec := httptest.NewRecorder()
+	server.handleGetStructuredDiagram(fallbackRec, getReq)
+	if fallbackRec.Code != http.StatusOK {
+		t.Fatalf("expected deterministic fallback after delete, got %d: %s", fallbackRec.Code, fallbackRec.Body.String())
+	}
+	var fallbackDoc architecture.DiagramDocument
+	if err := json.Unmarshal(fallbackRec.Body.Bytes(), &fallbackDoc); err != nil {
+		t.Fatalf("json.Unmarshal fallback: %v", err)
+	}
+	if fallbackDoc.SourceKind != architecture.SourceDeterministic {
+		t.Fatalf("expected deterministic fallback after delete, got %q", fallbackDoc.SourceKind)
+	}
+}
+
 func newDiagramTestServerAndRepo(t *testing.T) (*graphstore.Store, *graphstore.Repository) {
 	t.Helper()
 	store := graphstore.NewStore()
