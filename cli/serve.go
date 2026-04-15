@@ -26,6 +26,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/telemetry"
+	"github.com/sourcebridge/sourcebridge/internal/version"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
@@ -241,7 +242,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		dataDir = "/data"
 	}
 	tracker := telemetry.New(
-		cfg.Server.PublicBaseURL,
+		version.Version,
 		cfg.Edition,
 		dataDir,
 		telemetry.WithCountProvider(&telemetryCountProvider{store: store}),
