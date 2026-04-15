@@ -49,11 +49,7 @@ func (m *mockStore) GetSymbols(repoID string, query *string, kind *string, limit
 	return result, len(result)
 }
 func (m *mockStore) GetCallEdges(repoID string) []graph.CallEdge {
-	var result []graph.CallEdge
-	for _, e := range m.edges {
-		result = append(result, e)
-	}
-	return result
+	return append([]graph.CallEdge(nil), m.edges...)
 }
 func (m *mockStore) GetFiles(repoID string) []*graph.File {
 	var result []*graph.File

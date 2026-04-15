@@ -105,10 +105,7 @@ func (r *runtime) flush() {
 		r.writeProgressLocked(time.Now())
 	}
 	if r.pendingTokensSet {
-		if err := r.orch.store.SetTokens(r.jobID, r.pendingTokensInput, r.pendingTokensOutput); err != nil {
-			// Don't fail the job because of a metrics write miss.
-			// Best-effort is appropriate here.
-		}
+		_ = r.orch.store.SetTokens(r.jobID, r.pendingTokensInput, r.pendingTokensOutput)
 		r.pendingTokensSet = false
 	}
 	if r.pendingBytesSet {
