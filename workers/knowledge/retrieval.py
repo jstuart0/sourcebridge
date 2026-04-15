@@ -93,8 +93,12 @@ async def retrieve_relevant_snapshot(
 
     # Collect all symbols from all lists with their source list name
     symbol_keys = (
-        "entry_points", "public_api", "test_symbols", "complex_symbols",
-        "high_fan_out_symbols", "high_fan_in_symbols",
+        "entry_points",
+        "public_api",
+        "test_symbols",
+        "complex_symbols",
+        "high_fan_out_symbols",
+        "high_fan_in_symbols",
     )
     all_symbols: list[tuple[str, int, dict]] = []  # (list_key, index, symbol)
     for key in symbol_keys:
@@ -126,6 +130,7 @@ async def retrieve_relevant_snapshot(
         log.error("retrieval_embedding_failed", error=str(exc))
         # Fall back to condensed snapshot
         from workers.knowledge.snapshot_truncate import condense_snapshot
+
         return condense_snapshot(snapshot_json)
 
     # Sort by similarity descending, take top_k
@@ -151,10 +156,7 @@ async def retrieve_relevant_snapshot(
 
     # Filter links to only those involving selected symbols
     links = snap.get("links") or []
-    snap["links"] = [
-        link for link in links
-        if link.get("symbol_id") in selected_symbol_ids
-    ]
+    snap["links"] = [link for link in links if link.get("symbol_id") in selected_symbol_ids]
 
     # Filter docs to only those whose paths overlap with selected files
     docs = snap.get("docs") or []
@@ -205,20 +207,14 @@ def build_overview_query(
             f"dependencies side effects usage patterns of {repository_name}"
         )
     if scope_type == "file" and scope_path:
-        return (
-            f"File {scope_path} symbols responsibilities dependencies "
-            f"patterns usage of {repository_name}"
-        )
+        return f"File {scope_path} symbols responsibilities dependencies patterns usage of {repository_name}"
     if scope_type == "requirement" and scope_path:
         return (
             f"Requirement {scope_path} implementation linked symbols files "
             f"cross-cutting behavior traceability {repository_name}"
         )
     if scope_type == "module" and scope_path:
-        return (
-            f"Module {scope_path} components files API boundaries "
-            f"patterns of {repository_name}"
-        )
+        return f"Module {scope_path} components files API boundaries patterns of {repository_name}"
 
     # Broad queries for repository scope
     queries = {

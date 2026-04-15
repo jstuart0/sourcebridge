@@ -76,7 +76,7 @@ def _label_hint(prompt: str) -> str:
     for marker in ("Segment: ", "File: ", "Package: ", "Repository: "):
         idx = prompt.find(marker)
         if idx >= 0:
-            tail = prompt[idx + len(marker):]
+            tail = prompt[idx + len(marker) :]
             line = tail.splitlines()[0].strip()
             if line:
                 return line[:60]
@@ -104,25 +104,29 @@ class _ToyCorpus:
             self._add(CorpusUnit(id=p, kind=UnitKind.GROUP, level=2, label=p, parent_id="repo"))
             for f in ("a.go", "b.go"):
                 fid = f"{p}/{f}"
-                self._add(CorpusUnit(
-                    id=fid,
-                    kind=UnitKind.LEAF_CONTAINER,
-                    level=1,
-                    label=f,
-                    parent_id=p,
-                    metadata={"file_path": fid, "language": "go"},
-                ))
+                self._add(
+                    CorpusUnit(
+                        id=fid,
+                        kind=UnitKind.LEAF_CONTAINER,
+                        level=1,
+                        label=f,
+                        parent_id=p,
+                        metadata={"file_path": fid, "language": "go"},
+                    )
+                )
                 for s in ("Func1", "Func2"):
                     sid = f"{fid}#{s}"
-                    self._add(CorpusUnit(
-                        id=sid,
-                        kind=UnitKind.LEAF,
-                        level=0,
-                        label=s,
-                        parent_id=fid,
-                        size_tokens=50,
-                        metadata={"file_path": fid, "language": "go"},
-                    ))
+                    self._add(
+                        CorpusUnit(
+                            id=sid,
+                            kind=UnitKind.LEAF,
+                            level=0,
+                            label=s,
+                            parent_id=fid,
+                            size_tokens=50,
+                            metadata={"file_path": fid, "language": "go"},
+                        )
+                    )
                     self.leaf_texts[sid] = f"func {s}() {{}}"
 
     def _add(self, unit: CorpusUnit) -> None:
@@ -213,9 +217,7 @@ async def test_leaf_failure_falls_back_without_aborting_build() -> None:
 
     assert len(tree.nodes) == 15
     # At least one leaf node should carry the fallback text.
-    fallback_leaves = [
-        n for n in tree.at_level(0) if "Could not summarize this segment" in n.summary_text
-    ]
+    fallback_leaves = [n for n in tree.at_level(0) if "Could not summarize this segment" in n.summary_text]
     assert len(fallback_leaves) == 1
 
 

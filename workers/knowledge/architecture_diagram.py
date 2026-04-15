@@ -22,7 +22,7 @@ from workers.knowledge.prompts.architecture_diagram import (
 from workers.knowledge.types import EvidenceRef
 from workers.reasoning.types import LLMUsageRecord
 
-_EDGE_LABEL_RE = re.compile(r'-->\s*\|([^|]+)\|\s*([A-Za-z0-9_]+)')
+_EDGE_LABEL_RE = re.compile(r"-->\s*\|([^|]+)\|\s*([A-Za-z0-9_]+)")
 _GENERIC_EDGE_LABELS = {
     "primary flow",
     "major flow",
@@ -132,14 +132,16 @@ def _system_view_fallback_mermaid(snapshot_json: str) -> str | None:
         for member in members:
             lines.append(f'        {member}["{labels_by_id[member]}"]')
         lines.append("    end")
-    lines.extend([
-        "    classDef primary fill:#1f3b5b,stroke:#9fd3ff,color:#f5fbff,stroke-width:2px;",
-        "    classDef support fill:#263238,stroke:#90a4ae,color:#f5f7fa,stroke-width:1px;",
-        "    classDef external fill:#3f2f21,stroke:#f2c078,color:#fff7ea,stroke-width:1px;",
-        "    class user,user_interfaces,api_auth,knowledge_orchestration,background_workers primary;",
-        "    class code_graph_index,repository_access,persistence support;",
-        "    class llm_provider external;",
-    ])
+    lines.extend(
+        [
+            "    classDef primary fill:#1f3b5b,stroke:#9fd3ff,color:#f5fbff,stroke-width:2px;",
+            "    classDef support fill:#263238,stroke:#90a4ae,color:#f5f7fa,stroke-width:1px;",
+            "    classDef external fill:#3f2f21,stroke:#f2c078,color:#fff7ea,stroke-width:1px;",
+            "    class user,user_interfaces,api_auth,knowledge_orchestration,background_workers primary;",
+            "    class code_graph_index,repository_access,persistence support;",
+            "    class llm_provider external;",
+        ]
+    )
     if interface_present:
         lines.append("    user --> user_interfaces")
 
@@ -181,11 +183,7 @@ def _load_system_context(snapshot_json: str) -> tuple[list[dict[str, object]], l
 
 def _system_view_summary(repository_name: str, snapshot_json: str) -> str:
     components, _ = _load_system_context(snapshot_json)
-    component_ids = {
-        str(component.get("id", "")).strip()
-        for component in components
-        if isinstance(component, dict)
-    }
+    component_ids = {str(component.get("id", "")).strip() for component in components if isinstance(component, dict)}
     if not component_ids:
         return f"{repository_name} is shown as a high-level system view."
     parts = [f"{repository_name} routes user requests through the interfaces and API"]
@@ -238,12 +236,11 @@ def _diagram_quality_issues(mermaid_source: str) -> list[str]:
     return issues
 
 
-def _graph_alignment(validation, snapshot_json: str, deterministic_diagram_json: str) -> tuple[list[str], list[str], list[str]]:
+def _graph_alignment(
+    validation, snapshot_json: str, deterministic_diagram_json: str
+) -> tuple[list[str], list[str], list[str]]:
     system_edges = _system_flow_edges(snapshot_json)
-    if system_edges:
-        supported_basis = system_edges
-    else:
-        supported_basis = _deterministic_edges(deterministic_diagram_json)
+    supported_basis = system_edges or _deterministic_edges(deterministic_diagram_json)
     ai_edges = validation.edge_pairs
     supported: list[str] = []
     inferred: list[str] = []

@@ -31,8 +31,17 @@ async def main() -> None:
 
     # Detect language from extension
     ext = os.path.splitext(file_path)[1].lower()
-    lang_map = {".go": "go", ".py": "python", ".ts": "typescript", ".js": "javascript",
-                ".java": "java", ".rs": "rust", ".cs": "csharp", ".cpp": "cpp", ".rb": "ruby"}
+    lang_map = {
+        ".go": "go",
+        ".py": "python",
+        ".ts": "typescript",
+        ".js": "javascript",
+        ".java": "java",
+        ".rs": "rust",
+        ".cs": "csharp",
+        ".cpp": "cpp",
+        ".rb": "ruby",
+    }
     language = lang_map.get(ext, "unknown")
 
     # Use fake provider for testing, real provider configured via env

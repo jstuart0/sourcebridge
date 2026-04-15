@@ -12,9 +12,9 @@ from typing import Any
 
 import yaml
 
-from workers.common.llm.fake import FakeLLMProvider
-from workers.common.llm.config import create_llm_provider
 from workers.common.config import WorkerConfig
+from workers.common.llm.config import create_llm_provider
+from workers.common.llm.fake import FakeLLMProvider
 from workers.knowledge.cliff_notes import generate_cliff_notes
 from workers.knowledge.code_tour import generate_code_tour
 from workers.knowledge.learning_path import generate_learning_path
@@ -81,7 +81,7 @@ FIXTURE_SNAPSHOT = {
         {"path": "requirements.md", "title": "Requirements"},
     ],
     "scope_context": {
-        "focus_summary": "The login and request-handling path starts in the API surface and fans into language-specific helpers."
+        "focus_summary": "The login and request-handling path starts in the API surface and fans into language-specific helpers."  # noqa: E501
     },
     "source_revision": {
         "commit_sha": "",
@@ -235,10 +235,7 @@ async def _run_case(case: dict[str, Any], provider_mode_override: str | None = N
             raise ValueError(f"unsupported artifact type: {artifact_type}")
 
         elapsed_ms = int((time.perf_counter() - started) * 1000)
-        checks = {
-            name: CHECKS[name](result)
-            for name in case.get("expected_checks", [])
-        }
+        checks = {name: CHECKS[name](result) for name in case.get("expected_checks", [])}
         return BenchmarkResult(
             case_id=case["id"],
             corpus_id=case["corpus_id"],
@@ -314,7 +311,7 @@ async def _main() -> int:
         "--provider-mode",
         choices=("manifest", "fake", "live"),
         default="manifest",
-        help="Override manifest provider mode. Use 'live' to run the fixture suite against the configured worker LLM provider.",
+        help="Override manifest provider mode. Use 'live' to run the fixture suite against the configured worker LLM provider.",  # noqa: E501
     )
     args = parser.parse_args()
 

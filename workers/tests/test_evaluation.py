@@ -88,16 +88,18 @@ def _extract_go_entities(file_path: str, lines: list[str]) -> list[CodeEntity]:
                 if depth <= 0 and k > i:
                     break
 
-            entities.append(CodeEntity(
-                file_path=file_path,
-                name=name,
-                kind="function",
-                start_line=i + 1,
-                end_line=i + len(body_lines),
-                content="\n".join(body_lines),
-                doc_comment="\n".join(comments),
-                language="go",
-            ))
+            entities.append(
+                CodeEntity(
+                    file_path=file_path,
+                    name=name,
+                    kind="function",
+                    start_line=i + 1,
+                    end_line=i + len(body_lines),
+                    content="\n".join(body_lines),
+                    doc_comment="\n".join(comments),
+                    language="go",
+                )
+            )
     return entities
 
 
@@ -160,16 +162,18 @@ def _extract_python_entities(file_path: str, lines: list[str]) -> list[CodeEntit
                 if has_methods:
                     docstring = module_doc + "\n" + docstring
 
-            entities.append(CodeEntity(
-                file_path=file_path,
-                name=name,
-                kind=kind,
-                start_line=i + 1,
-                end_line=i + 20,
-                content="",
-                doc_comment=docstring,
-                language="python",
-            ))
+            entities.append(
+                CodeEntity(
+                    file_path=file_path,
+                    name=name,
+                    kind=kind,
+                    start_line=i + 1,
+                    end_line=i + 20,
+                    content="",
+                    doc_comment=docstring,
+                    language="python",
+                )
+            )
     return entities
 
 
@@ -188,7 +192,7 @@ def _extract_ts_entities(file_path: str, lines: list[str]) -> list[CodeEntity]:
         for prefix in ["export function ", "function ", "export const ", "export async function ", "async function "]:
             if stripped.startswith(prefix):
                 is_func = True
-                rest = stripped[len(prefix):]
+                rest = stripped[len(prefix) :]
                 name = rest.split("=")[0].strip() if "=" in rest else rest.split("(")[0].strip()
                 break
 
@@ -214,16 +218,18 @@ def _extract_ts_entities(file_path: str, lines: list[str]) -> list[CodeEntity]:
                 break
             j -= 1
 
-        entities.append(CodeEntity(
-            file_path=file_path,
-            name=name,
-            kind="function",
-            start_line=i + 1,
-            end_line=i + 20,
-            content="",
-            doc_comment="\n".join(jsdoc_lines),
-            language="typescript",
-        ))
+        entities.append(
+            CodeEntity(
+                file_path=file_path,
+                name=name,
+                kind="function",
+                start_line=i + 1,
+                end_line=i + 20,
+                content="",
+                doc_comment="\n".join(jsdoc_lines),
+                language="typescript",
+            )
+        )
     return entities
 
 
@@ -275,16 +281,18 @@ def _extract_java_entities(file_path: str, lines: list[str]) -> list[CodeEntity]
                 break
             j -= 1
 
-        entities.append(CodeEntity(
-            file_path=file_path,
-            name=name,
-            kind="method",
-            start_line=i + 1,
-            end_line=i + 20,
-            content="",
-            doc_comment="\n".join(javadoc_lines),
-            language="java",
-        ))
+        entities.append(
+            CodeEntity(
+                file_path=file_path,
+                name=name,
+                kind="method",
+                start_line=i + 1,
+                end_line=i + 20,
+                content="",
+                doc_comment="\n".join(javadoc_lines),
+                language="java",
+            )
+        )
     return entities
 
 
@@ -304,16 +312,18 @@ def _extract_rust_entities(file_path: str, lines: list[str]) -> list[CodeEntity]
                 doc_lines.insert(0, lines[j].strip())
                 j -= 1
 
-            entities.append(CodeEntity(
-                file_path=file_path,
-                name=name,
-                kind="function",
-                start_line=i + 1,
-                end_line=i + 20,
-                content="",
-                doc_comment="\n".join(doc_lines),
-                language="rust",
-            ))
+            entities.append(
+                CodeEntity(
+                    file_path=file_path,
+                    name=name,
+                    kind="function",
+                    start_line=i + 1,
+                    end_line=i + 20,
+                    content="",
+                    doc_comment="\n".join(doc_lines),
+                    language="rust",
+                )
+            )
     return entities
 
 

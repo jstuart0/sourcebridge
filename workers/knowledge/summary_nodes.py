@@ -66,11 +66,7 @@ class SurrealSummaryNodeCache:
         strategy: str = "hierarchical",
     ) -> SummaryTree | None:
         await self._ensure_connected()
-        sql = (
-            "SELECT * FROM ca_summary_node "
-            f"WHERE corpus_id = {_sql_string(corpus_id)} "
-            "ORDER BY level, unit_id;"
-        )
+        sql = f"SELECT * FROM ca_summary_node WHERE corpus_id = {_sql_string(corpus_id)} ORDER BY level, unit_id;"
         rows = _normalize_query_result(await self.client.query(sql))
         if not rows:
             return None

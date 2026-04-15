@@ -114,9 +114,7 @@ def _grade_response(response_text: str) -> tuple[str, str]:
         score += 1
 
     # Grade instruction following
-    if score == total:
-        instruction_grade = "high"
-    elif score >= total - 1:
+    if score == total or score >= total - 1:
         instruction_grade = "high"
     elif score >= 2:
         instruction_grade = "medium"

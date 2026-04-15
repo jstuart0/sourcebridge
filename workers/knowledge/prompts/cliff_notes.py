@@ -43,8 +43,7 @@ _DEPTH_INSTRUCTIONS = {
     "summary": "Keep each section to 2-3 sentences. Prioritize breadth over depth.",
     "medium": "Write 1-2 paragraphs per section. Balance breadth and depth.",
     "deep": (
-        "Write thorough sections with detailed explanations. "
-        "Include specific code references and explain trade-offs."
+        "Write thorough sections with detailed explanations. Include specific code references and explain trade-offs."
     ),
 }
 
@@ -132,7 +131,7 @@ _SCOPE_INSTRUCTIONS = {
         "should verify before changing it.\n"
         "STRICT GROUNDING RULES for symbol scope:\n"
         "- Only describe parameter types, return types, and signatures that appear literally in the snapshot.\n"
-        "- If parameter types or signatures are not shown, write 'Parameter types not available in snapshot' — do not guess.\n"
+        "- If parameter types or signatures are not shown, write 'Parameter types not available in snapshot' — do not guess.\n"  # noqa: E501
         "- Do not invent runtime infrastructure (databases, caches, queues, HTTP clients) unless the snapshot "
         "shows explicit references to them.\n"
         "- Do not describe what happens 'downstream' beyond the direct callees listed in scope_context.\n"
@@ -175,7 +174,7 @@ def build_cliff_notes_prompt(
 
     required_sections = REQUIRED_SECTIONS_BY_SCOPE.get(scope_type or "repository", REQUIRED_SECTIONS)
     scope_label = scope_path or repository_name
-    sections_list = "\n".join(f"  {i+1}. {s}" for i, s in enumerate(required_sections))
+    sections_list = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(required_sections))
     scope_instruction = _SCOPE_INSTRUCTIONS.get(scope_type or "repository", _SCOPE_INSTRUCTIONS["repository"])
 
     intro = (

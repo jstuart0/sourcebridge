@@ -70,13 +70,16 @@ async def generate_learning_path(
         context="learning_path:repository",
     )
 
-    response: LLMResponse = require_nonempty(await complete_with_optional_model(
-        provider,
-        prompt,
-        system=LEARNING_PATH_SYSTEM,
-        temperature=0.0,
-        model=model_override,
-    ), context="learning_path:repository")
+    response: LLMResponse = require_nonempty(
+        await complete_with_optional_model(
+            provider,
+            prompt,
+            system=LEARNING_PATH_SYSTEM,
+            temperature=0.0,
+            model=model_override,
+        ),
+        context="learning_path:repository",
+    )
 
     try:
         raw_steps = _parse_steps(response.content)

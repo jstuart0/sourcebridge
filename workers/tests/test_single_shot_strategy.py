@@ -39,17 +39,19 @@ class _StubProvider:
     ) -> LLMResponse:
         self.calls += 1
         self.prompts.append(prompt)
-        payload = json.dumps([
-            {
-                "title": title,
-                "content": f"Body for {title}",
-                "summary": f"Summary for {title}",
-                "confidence": "medium",
-                "inferred": False,
-                "evidence": [],
-            }
-            for title in REQUIRED_SECTIONS
-        ])
+        payload = json.dumps(
+            [
+                {
+                    "title": title,
+                    "content": f"Body for {title}",
+                    "summary": f"Summary for {title}",
+                    "confidence": "medium",
+                    "inferred": False,
+                    "evidence": [],
+                }
+                for title in REQUIRED_SECTIONS
+            ]
+        )
         return LLMResponse(
             content=payload,
             model=model or "stub",

@@ -143,8 +143,7 @@ class CliffNotesRenderer:
         single-shot path does.
         """
         required_sections = list(
-            required_section_titles
-            or REQUIRED_SECTIONS_BY_SCOPE.get(scope_type or "repository", REQUIRED_SECTIONS)
+            required_section_titles or REQUIRED_SECTIONS_BY_SCOPE.get(scope_type or "repository", REQUIRED_SECTIONS)
         )
         root = tree.root()
         if root is None:
@@ -176,8 +175,7 @@ class CliffNotesRenderer:
                 pa_block = (
                     "=== Repository-level analysis (from existing field guide) ===\n"
                     "Use this as PRIMARY grounded context. Sections that build on "
-                    "this analysis should have confidence: high.\n\n"
-                    + "\n\n".join(lines)
+                    "this analysis should have confidence: high.\n\n" + "\n\n".join(lines)
                 )
 
         depth_instructions = {
@@ -468,11 +466,7 @@ class CliffNotesRenderer:
         sections: list[CliffNotesSection] = []
         seen_titles: set[str] = set()
         for index, raw in enumerate(raw_sections):
-            fallback_title = (
-                required_sections[index]
-                if index < len(required_sections)
-                else f"Section {index + 1}"
-            )
+            fallback_title = required_sections[index] if index < len(required_sections) else f"Section {index + 1}"
             normalized = _coerce_section(raw, fallback_title=fallback_title)
             title = str(normalized.get("title", fallback_title))
             evidence_raw = normalized.get("evidence", [])
@@ -516,8 +510,5 @@ def _first_line(text: str) -> str:
 def _node_label(node: SummaryNode) -> str:
     meta = node.metadata or {}
     return (
-        str(meta.get("file_path"))
-        or str(meta.get("module_label"))
-        or str(meta.get("repository_name"))
-        or node.unit_id
+        str(meta.get("file_path")) or str(meta.get("module_label")) or str(meta.get("repository_name")) or node.unit_id
     )

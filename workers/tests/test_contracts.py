@@ -1,7 +1,6 @@
 """Tests for contract detection."""
 
 from workers.contracts.detector import (
-    DetectedContract,
     detect_contracts,
     detect_graphql_schema,
     detect_openapi,

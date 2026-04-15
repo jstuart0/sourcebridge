@@ -96,23 +96,23 @@ class CodeCorpus:
 
     def _build(self) -> None:
         rev = self.snapshot.get("source_revision") or {}
-        self._revision_fp = (
-            str(rev.get("content_fingerprint") or rev.get("commit_sha") or "")
-        )
+        self._revision_fp = str(rev.get("content_fingerprint") or rev.get("commit_sha") or "")
 
         repo_name = str(self.snapshot.get("repository_name") or "repository")
-        self._add_unit(CorpusUnit(
-            id="repo",
-            kind=UnitKind.ROOT,
-            level=3,
-            label=repo_name,
-            metadata={
-                "repository_id": str(self.snapshot.get("repository_id") or ""),
-                "repository_name": repo_name,
-                "file_count": int(self.snapshot.get("file_count") or 0),
-                "symbol_count": int(self.snapshot.get("symbol_count") or 0),
-            },
-        ))
+        self._add_unit(
+            CorpusUnit(
+                id="repo",
+                kind=UnitKind.ROOT,
+                level=3,
+                label=repo_name,
+                metadata={
+                    "repository_id": str(self.snapshot.get("repository_id") or ""),
+                    "repository_name": repo_name,
+                    "file_count": int(self.snapshot.get("file_count") or 0),
+                    "symbol_count": int(self.snapshot.get("symbol_count") or 0),
+                },
+            )
+        )
 
         # --- Group symbols by file path ------------------------------
         # Pull every symbol the snapshot mentions into a flat set keyed
@@ -150,8 +150,7 @@ class CodeCorpus:
         # without a matching module still need a home — we create an
         # "(unassigned)" package that groups them.
         module_paths = [
-            (str(m.get("path") or ""), str(m.get("name") or m.get("path") or "(root)"))
-            for m in modules_raw
+            (str(m.get("path") or ""), str(m.get("name") or m.get("path") or "(root)")) for m in modules_raw
         ]
         # Sort by path length desc so the most-specific prefix wins.
         module_paths.sort(key=lambda mp: -len(mp[0]))
@@ -178,30 +177,34 @@ class CodeCorpus:
         # --- Emit package / file / segment units --------------------
         for module_label in module_labels:
             package_id = f"package:{module_label}"
-            self._add_unit(CorpusUnit(
-                id=package_id,
-                kind=UnitKind.GROUP,
-                level=2,
-                label=module_label,
-                parent_id="repo",
-                metadata={"module_label": module_label},
-            ))
+            self._add_unit(
+                CorpusUnit(
+                    id=package_id,
+                    kind=UnitKind.GROUP,
+                    level=2,
+                    label=module_label,
+                    parent_id="repo",
+                    metadata={"module_label": module_label},
+                )
+            )
 
             for file_path in files_by_module[module_label]:
                 file_id = f"file:{file_path}"
                 language = _language_for_path(file_path)
-                self._add_unit(CorpusUnit(
-                    id=file_id,
-                    kind=UnitKind.LEAF_CONTAINER,
-                    level=1,
-                    label=_basename(file_path),
-                    parent_id=package_id,
-                    metadata={
-                        "file_path": file_path,
-                        "module_label": module_label,
-                        "language": language,
-                    },
-                ))
+                self._add_unit(
+                    CorpusUnit(
+                        id=file_id,
+                        kind=UnitKind.LEAF_CONTAINER,
+                        level=1,
+                        label=_basename(file_path),
+                        parent_id=package_id,
+                        metadata={
+                            "file_path": file_path,
+                            "module_label": module_label,
+                            "language": language,
+                        },
+                    )
+                )
 
                 symbols = symbols_by_file.get(file_path, [])
                 if not symbols:
@@ -213,19 +216,21 @@ class CodeCorpus:
                         f"File `{file_path}` is part of the `{module_label}` module. "
                         "No structured symbols were extracted for this file."
                     )
-                    self._add_unit(CorpusUnit(
-                        id=leaf_id,
-                        kind=UnitKind.LEAF,
-                        level=0,
-                        label=_basename(file_path),
-                        parent_id=file_id,
-                        size_tokens=200,
-                        content_hash=content_hash(leaf_text),
-                        metadata={
-                            "file_path": file_path,
-                            "language": language,
-                        },
-                    ))
+                    self._add_unit(
+                        CorpusUnit(
+                            id=leaf_id,
+                            kind=UnitKind.LEAF,
+                            level=0,
+                            label=_basename(file_path),
+                            parent_id=file_id,
+                            size_tokens=200,
+                            content_hash=content_hash(leaf_text),
+                            metadata={
+                                "file_path": file_path,
+                                "language": language,
+                            },
+                        )
+                    )
                     self._leaf_texts[leaf_id] = leaf_text
                     continue
 
@@ -254,24 +259,26 @@ class CodeCorpus:
                             start_line=start_line,
                             end_line=end_line,
                         )
-                        self._add_unit(CorpusUnit(
-                            id=leaf_id,
-                            kind=UnitKind.LEAF,
-                            level=0,
-                            label=name,
-                            parent_id=file_id,
-                            size_tokens=max(50, body_lines * 8),
-                            content_hash=content_hash(leaf_text),
-                            metadata={
-                                "file_path": file_path,
-                                "language": language,
-                                "symbol_id": sym_id_raw,
-                                "symbol_name": name,
-                                "symbol_kind": kind,
-                                "start_line": start_line,
-                                "end_line": end_line,
-                            },
-                        ))
+                        self._add_unit(
+                            CorpusUnit(
+                                id=leaf_id,
+                                kind=UnitKind.LEAF,
+                                level=0,
+                                label=name,
+                                parent_id=file_id,
+                                size_tokens=max(50, body_lines * 8),
+                                content_hash=content_hash(leaf_text),
+                                metadata={
+                                    "file_path": file_path,
+                                    "language": language,
+                                    "symbol_id": sym_id_raw,
+                                    "symbol_name": name,
+                                    "symbol_kind": kind,
+                                    "start_line": start_line,
+                                    "end_line": end_line,
+                                },
+                            )
+                        )
                         self._leaf_texts[leaf_id] = leaf_text
                         continue
 
@@ -286,22 +293,24 @@ class CodeCorpus:
                         start_line = int(sym.get("start_line") or 0)
                         end_line = int(sym.get("end_line") or 0)
                         total_lines += int(sym.get("line_count") or max(0, end_line - start_line))
-                    self._add_unit(CorpusUnit(
-                        id=leaf_id,
-                        kind=UnitKind.LEAF,
-                        level=0,
-                        label=chunk_label,
-                        parent_id=file_id,
-                        size_tokens=max(150, total_lines * 8),
-                        content_hash=content_hash(leaf_text),
-                        metadata={
-                            "file_path": file_path,
-                            "language": language,
-                            "symbol_count": len(symbol_group),
-                            "symbol_names": [str(sym.get("name") or "") for sym in symbol_group],
-                            "chunked": True,
-                        },
-                    ))
+                    self._add_unit(
+                        CorpusUnit(
+                            id=leaf_id,
+                            kind=UnitKind.LEAF,
+                            level=0,
+                            label=chunk_label,
+                            parent_id=file_id,
+                            size_tokens=max(150, total_lines * 8),
+                            content_hash=content_hash(leaf_text),
+                            metadata={
+                                "file_path": file_path,
+                                "language": language,
+                                "symbol_count": len(symbol_group),
+                                "symbol_names": [str(sym.get("name") or "") for sym in symbol_group],
+                                "chunked": True,
+                            },
+                        )
+                    )
                     self._leaf_texts[leaf_id] = leaf_text
 
         # --- Scope context fallback -----------------------------------
@@ -317,34 +326,39 @@ class CodeCorpus:
                 # Ensure the unassigned package exists.
                 package_id = "package:(unassigned)"
                 if package_id not in self._units:
-                    self._add_unit(CorpusUnit(
-                        id=package_id,
-                        kind=UnitKind.GROUP,
-                        level=2,
-                        label="(unassigned)",
-                        parent_id="repo",
-                    ))
+                    self._add_unit(
+                        CorpusUnit(
+                            id=package_id,
+                            kind=UnitKind.GROUP,
+                            level=2,
+                            label="(unassigned)",
+                            parent_id="repo",
+                        )
+                    )
                 file_id = f"file:{file_path}"
-                self._add_unit(CorpusUnit(
-                    id=file_id,
-                    kind=UnitKind.LEAF_CONTAINER,
-                    level=1,
-                    label=_basename(file_path),
-                    parent_id=package_id,
-                    metadata={"file_path": file_path, "language": language},
-                ))
+                self._add_unit(
+                    CorpusUnit(
+                        id=file_id,
+                        kind=UnitKind.LEAF_CONTAINER,
+                        level=1,
+                        label=_basename(file_path),
+                        parent_id=package_id,
+                        metadata={"file_path": file_path, "language": language},
+                    )
+                )
                 leaf_id = f"leaf:{file_path}"
-                self._add_unit(CorpusUnit(
-                    id=leaf_id,
-                    kind=UnitKind.LEAF,
-                    level=0,
-                    label=_basename(file_path),
-                    parent_id=file_id,
-                    metadata={"file_path": file_path, "language": language},
-                ))
+                self._add_unit(
+                    CorpusUnit(
+                        id=leaf_id,
+                        kind=UnitKind.LEAF,
+                        level=0,
+                        label=_basename(file_path),
+                        parent_id=file_id,
+                        metadata={"file_path": file_path, "language": language},
+                    )
+                )
                 self._leaf_texts[leaf_id] = (
-                    f"Focused scope file `{file_path}`. The snapshot provided no "
-                    "structured symbols for this file."
+                    f"Focused scope file `{file_path}`. The snapshot provided no structured symbols for this file."
                 )
 
     def _add_unit(self, unit: CorpusUnit) -> None:
@@ -397,7 +411,7 @@ def _basename(path: str) -> str:
     idx = path.rfind("/")
     if idx < 0:
         return path
-    return path[idx + 1:]
+    return path[idx + 1 :]
 
 
 def _render_leaf_text(
@@ -459,7 +473,7 @@ def _group_symbols_for_file(file_path: str, symbols: list[dict[str, Any]]) -> li
         return [[sym] for sym in symbols]
     grouped: list[list[dict[str, Any]]] = []
     for idx in range(0, len(symbols), SYMBOL_CHUNK_TARGET):
-        grouped.append(symbols[idx:idx + SYMBOL_CHUNK_TARGET])
+        grouped.append(symbols[idx : idx + SYMBOL_CHUNK_TARGET])
     return grouped
 
 

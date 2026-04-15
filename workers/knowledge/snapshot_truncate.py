@@ -67,8 +67,12 @@ def condense_snapshot(
 
     original_tokens = _estimated_tokens(snapshot_json)
     symbol_keys = (
-        "entry_points", "public_api", "test_symbols", "complex_symbols",
-        "high_fan_out_symbols", "high_fan_in_symbols",
+        "entry_points",
+        "public_api",
+        "test_symbols",
+        "complex_symbols",
+        "high_fan_out_symbols",
+        "high_fan_in_symbols",
     )
 
     def _compact() -> str:
@@ -76,23 +80,31 @@ def condense_snapshot(
 
     # Step 1: strip doc_comment from all symbol lists
     for key in symbol_keys:
-        for sym in (snap.get(key) or []):
+        for sym in snap.get(key) or []:
             sym.pop("doc_comment", None)
 
     result = _compact()
     if len(result) <= budget_chars:
-        log.info("snapshot_condensed", strategy="strip_doc_comments",
-                 original_tokens=original_tokens, result_tokens=_estimated_tokens(result))
+        log.info(
+            "snapshot_condensed",
+            strategy="strip_doc_comments",
+            original_tokens=original_tokens,
+            result_tokens=_estimated_tokens(result),
+        )
         return result
 
     # Step 2: strip doc content (keep paths for reference)
-    for doc in (snap.get("docs") or []):
+    for doc in snap.get("docs") or []:
         doc.pop("content", None)
 
     result = _compact()
     if len(result) <= budget_chars:
-        log.info("snapshot_condensed", strategy="strip_doc_content",
-                 original_tokens=original_tokens, result_tokens=_estimated_tokens(result))
+        log.info(
+            "snapshot_condensed",
+            strategy="strip_doc_content",
+            original_tokens=original_tokens,
+            result_tokens=_estimated_tokens(result),
+        )
         return result
 
     # Step 2b: for requirement scope, strip docs — the requirement
@@ -101,9 +113,13 @@ def condense_snapshot(
         snap["docs"] = []
         result = _compact()
         if len(result) <= budget_chars:
-            log.info("snapshot_condensed", strategy="strip_docs_requirement_scope",
-                     scope_type=scope_type,
-                     original_tokens=original_tokens, result_tokens=_estimated_tokens(result))
+            log.info(
+                "snapshot_condensed",
+                strategy="strip_docs_requirement_scope",
+                scope_type=scope_type,
+                original_tokens=original_tokens,
+                result_tokens=_estimated_tokens(result),
+            )
             return result
 
     # Step 2c: for file/symbol scopes, strip requirements early —
@@ -113,45 +129,61 @@ def condense_snapshot(
         snap["requirements"] = []
         result = _compact()
         if len(result) <= budget_chars:
-            log.info("snapshot_condensed", strategy="strip_requirements_narrow_scope",
-                     scope_type=scope_type,
-                     original_tokens=original_tokens, result_tokens=_estimated_tokens(result))
+            log.info(
+                "snapshot_condensed",
+                strategy="strip_requirements_narrow_scope",
+                scope_type=scope_type,
+                original_tokens=original_tokens,
+                result_tokens=_estimated_tokens(result),
+            )
             return result
 
     # Step 3: cap links at 200, highest confidence first
-    links = (snap.get("links") or [])
+    links = snap.get("links") or []
     if len(links) > 200:
         links.sort(key=lambda x: x.get("confidence", 0), reverse=True)
         snap["links"] = links[:200]
 
     result = _compact()
     if len(result) <= budget_chars:
-        log.info("snapshot_condensed", strategy="cap_links_200",
-                 original_tokens=original_tokens, result_tokens=_estimated_tokens(result))
+        log.info(
+            "snapshot_condensed",
+            strategy="cap_links_200",
+            original_tokens=original_tokens,
+            result_tokens=_estimated_tokens(result),
+        )
         return result
 
     # Step 4: cap symbol lists at 100
     for key in symbol_keys:
-        lst = (snap.get(key) or [])
+        lst = snap.get(key) or []
         if len(lst) > 100:
             snap[key] = lst[:100]
 
     result = _compact()
     if len(result) <= budget_chars:
-        log.info("snapshot_condensed", strategy="cap_symbols_100",
-                 original_tokens=original_tokens, result_tokens=_estimated_tokens(result))
+        log.info(
+            "snapshot_condensed",
+            strategy="cap_symbols_100",
+            original_tokens=original_tokens,
+            result_tokens=_estimated_tokens(result),
+        )
         return result
 
     # Step 5: cap symbol lists at 50
     for key in symbol_keys:
-        lst = (snap.get(key) or [])
+        lst = snap.get(key) or []
         if len(lst) > 50:
             snap[key] = lst[:50]
 
     result = _compact()
     if len(result) <= budget_chars:
-        log.info("snapshot_condensed", strategy="cap_symbols_50",
-                 original_tokens=original_tokens, result_tokens=_estimated_tokens(result))
+        log.info(
+            "snapshot_condensed",
+            strategy="cap_symbols_50",
+            original_tokens=original_tokens,
+            result_tokens=_estimated_tokens(result),
+        )
         return result
 
     # Step 6: remove docs entirely
@@ -159,8 +191,12 @@ def condense_snapshot(
 
     result = _compact()
     if len(result) <= budget_chars:
-        log.info("snapshot_condensed", strategy="remove_docs",
-                 original_tokens=original_tokens, result_tokens=_estimated_tokens(result))
+        log.info(
+            "snapshot_condensed",
+            strategy="remove_docs",
+            original_tokens=original_tokens,
+            result_tokens=_estimated_tokens(result),
+        )
         return result
 
     # Step 7: remove links entirely
@@ -168,8 +204,12 @@ def condense_snapshot(
 
     result = _compact()
     if len(result) <= budget_chars:
-        log.info("snapshot_condensed", strategy="remove_links",
-                 original_tokens=original_tokens, result_tokens=_estimated_tokens(result))
+        log.info(
+            "snapshot_condensed",
+            strategy="remove_links",
+            original_tokens=original_tokens,
+            result_tokens=_estimated_tokens(result),
+        )
         return result
 
     # Step 8: remove all symbol lists, keep only counts
@@ -177,6 +217,10 @@ def condense_snapshot(
         snap[key] = []
 
     result = _compact()
-    log.info("snapshot_condensed", strategy="remove_all_symbols",
-             original_tokens=original_tokens, result_tokens=_estimated_tokens(result))
+    log.info(
+        "snapshot_condensed",
+        strategy="remove_all_symbols",
+        original_tokens=original_tokens,
+        result_tokens=_estimated_tokens(result),
+    )
     return result

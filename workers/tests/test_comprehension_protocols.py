@@ -68,25 +68,29 @@ def _build_sample_corpus() -> _SimpleCorpus:
         add(CorpusUnit(id=p, kind=UnitKind.GROUP, level=2, label=p, parent_id="repo"))
         for f in ("a.go", "b.go"):
             fid = f"{p}/{f}"
-            add(CorpusUnit(
-                id=fid,
-                kind=UnitKind.LEAF_CONTAINER,
-                level=1,
-                label=f,
-                parent_id=p,
-                metadata={"file_path": fid},
-            ))
+            add(
+                CorpusUnit(
+                    id=fid,
+                    kind=UnitKind.LEAF_CONTAINER,
+                    level=1,
+                    label=f,
+                    parent_id=p,
+                    metadata={"file_path": fid},
+                )
+            )
             for s in ("Func1", "Func2"):
                 sid = f"{fid}#{s}"
-                add(CorpusUnit(
-                    id=sid,
-                    kind=UnitKind.LEAF,
-                    level=0,
-                    label=s,
-                    parent_id=fid,
-                    size_tokens=100,
-                    metadata={"file_path": fid, "symbol": s},
-                ))
+                add(
+                    CorpusUnit(
+                        id=sid,
+                        kind=UnitKind.LEAF,
+                        level=0,
+                        label=s,
+                        parent_id=fid,
+                        size_tokens=100,
+                        metadata={"file_path": fid, "symbol": s},
+                    )
+                )
                 leaf_texts[sid] = f"func {s}() {{ // body for {fid} }}"
     return _SimpleCorpus(
         corpus_id="test-corpus",

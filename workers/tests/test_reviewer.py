@@ -11,7 +11,9 @@ async def test_security_review_returns_findings():
     """Security review returns findings array with required fields."""
     provider = FakeLLMProvider()
     result, usage = await review_code(
-        provider, "processor.go", "go",
+        provider,
+        "processor.go",
+        "go",
         "func processPayment(ctx, order) { charge(order.Amount) }",
         template="security",
     )
@@ -30,7 +32,10 @@ async def test_all_templates_valid():
     provider = FakeLLMProvider()
     for template in ("security", "solid", "performance", "reliability", "maintainability"):
         result, _ = await review_code(
-            provider, "test.go", "go", "func test() {}",
+            provider,
+            "test.go",
+            "go",
+            "func test() {}",
             template=template,
         )
         assert result.template == template
@@ -42,7 +47,9 @@ async def test_review_findings_have_file_path():
     """Findings include file path."""
     provider = FakeLLMProvider()
     result, _ = await review_code(
-        provider, "processor.go", "go",
+        provider,
+        "processor.go",
+        "go",
         "func process() { sql.Query(userInput) }",
         template="security",
     )
@@ -55,7 +62,9 @@ async def test_review_findings_have_line_numbers():
     """Findings include start_line and end_line."""
     provider = FakeLLMProvider()
     result, _ = await review_code(
-        provider, "processor.go", "go",
+        provider,
+        "processor.go",
+        "go",
         "func process() { charge(amount) }",
         template="security",
     )
@@ -77,7 +86,10 @@ async def test_review_score():
     """Review returns a numeric score."""
     provider = FakeLLMProvider()
     result, _ = await review_code(
-        provider, "test.go", "go", "func test() { /* security issue */ }",
+        provider,
+        "test.go",
+        "go",
+        "func test() { /* security issue */ }",
         template="security",
     )
     assert isinstance(result.score, float)

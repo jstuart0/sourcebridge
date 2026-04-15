@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -297,9 +298,12 @@ func parseToolText(resp jsonRPCResponse) (string, bool) {
 func TestMCP_SSEConnection(t *testing.T) {
 	h := newTestHarness(t)
 
-	// Create a fake authenticated request
+	// Create a fake authenticated request with a cancellable context.
+	// Cancel the context to make handleSSE exit, then read the recorder
+	// after the handler goroutine finishes — avoids the data race.
 	req := httptest.NewRequest("GET", "/api/v1/mcp/sse", nil)
-	ctx := context.WithValue(req.Context(), auth.ClaimsKey, &auth.Claims{UserID: "user-1"})
+	ctx, cancel := context.WithCancel(req.Context())
+	ctx = context.WithValue(ctx, auth.ClaimsKey, &auth.Claims{UserID: "user-1"})
 	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()
@@ -311,15 +315,16 @@ func TestMCP_SSEConnection(t *testing.T) {
 		h.handler.handleSSE(rr, req)
 	}()
 
-	// Give it a moment to start writing
+	// Give it a moment to write the initial endpoint event, then cancel
 	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
 
-	// The response should have started with text/event-stream
+	// Now safe to read — the handler goroutine has exited
 	if ct := rr.Header().Get("Content-Type"); ct != "text/event-stream" {
 		t.Errorf("expected Content-Type text/event-stream, got %q", ct)
 	}
 
-	// Check that the endpoint event was sent
 	body := rr.Body.String()
 	if !strings.Contains(body, "event: endpoint") {
 		t.Error("expected 'event: endpoint' in SSE stream")
@@ -1355,25 +1360,25 @@ func TestMCP_MaxSessionsEnforced(t *testing.T) {
 func TestMCP_FullHTTPFlow(t *testing.T) {
 	h := newTestHarness(t)
 
-	// Start SSE connection
+	// Use io.Pipe so the SSE handler can write concurrently while we
+	// read the initial endpoint event without a data race on httptest.ResponseRecorder.
+	pr, pw := io.Pipe()
+
 	req := httptest.NewRequest("GET", "/api/v1/mcp/sse", nil)
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
 	ctx = context.WithValue(ctx, auth.ClaimsKey, &auth.Claims{UserID: "user-1"})
 	req = req.WithContext(ctx)
 
-	rr := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.handler.handleSSE(rr, req)
+		defer pw.Close()
+		h.handler.handleSSE(&pipeResponseWriter{header: make(http.Header), pw: pw}, req)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
-
-	// Parse the endpoint event to get sessionId
-	body := rr.Body.String()
-	scanner := bufio.NewScanner(strings.NewReader(body))
+	// Read just enough to extract the sessionId from the initial endpoint event
+	scanner := bufio.NewScanner(pr)
 	var sessionID string
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -1386,12 +1391,22 @@ func TestMCP_FullHTTPFlow(t *testing.T) {
 				}
 			}
 		}
+		if sessionID != "" {
+			break
+		}
 	}
 	if sessionID == "" {
+		cancel()
+		pr.Close()
+		<-done
 		t.Fatal("could not extract sessionId from SSE stream")
 	}
 
-	// Send initialize via message endpoint
+	// Drain remaining pipe output in a goroutine so the handler doesn't
+	// block on write after we stop reading.
+	go io.Copy(io.Discard, pr) //nolint:errcheck
+
+	// Send initialize via message endpoint (SSE handler still running)
 	initBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"%s","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}`, mcpProtocolVersion)
 	msgReq := httptest.NewRequest("POST", "/api/v1/mcp/message?sessionId="+sessionID, strings.NewReader(initBody))
 	msgReq.Header.Set("Content-Type", "application/json")
@@ -1402,7 +1417,6 @@ func TestMCP_FullHTTPFlow(t *testing.T) {
 		t.Errorf("expected 202, got %d", msgRR.Code)
 	}
 
-	// The response should be in the session's event channel — wait briefly
 	time.Sleep(20 * time.Millisecond)
 
 	// Verify session is now initialized
@@ -1417,6 +1431,18 @@ func TestMCP_FullHTTPFlow(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// pipeResponseWriter implements http.ResponseWriter backed by an io.PipeWriter,
+// used to safely read SSE output concurrently without a data race.
+type pipeResponseWriter struct {
+	header http.Header
+	pw     *io.PipeWriter
+}
+
+func (w *pipeResponseWriter) Header() http.Header        { return w.header }
+func (w *pipeResponseWriter) WriteHeader(int)             {}
+func (w *pipeResponseWriter) Flush()                      {}
+func (w *pipeResponseWriter) Write(b []byte) (int, error) { return w.pw.Write(b) }
 
 // ---------------------------------------------------------------------------
 // Streamable HTTP transport tests

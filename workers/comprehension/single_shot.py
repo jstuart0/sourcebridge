@@ -133,34 +133,36 @@ class SingleShotStrategy(ComprehensionStrategy):
             strategy=self.name,
             revision_fp=corpus.revision_fingerprint(),
         )
-        tree.add(SummaryNode(
-            id=str(uuid.uuid4()),
-            corpus_id=corpus.corpus_id,
-            unit_id=corpus.root().id,
-            level=3,
-            parent_id=None,
-            summary_text=_result_as_text(result),
-            headline=result.sections[0].title if result.sections else "Single-shot result",
-            summary_tokens=usage.output_tokens if usage else 0,
-            source_tokens=len(cfg.snapshot_json) // 4,
-            model_used=usage.model if usage else "",
-            strategy=self.name,
-            revision_fp=corpus.revision_fingerprint(),
-            metadata={
-                "single_shot_payload": json.dumps(
-                    [
-                        {
-                            "title": s.title,
-                            "content": s.content,
-                            "summary": s.summary,
-                            "confidence": s.confidence,
-                            "inferred": s.inferred,
-                        }
-                        for s in result.sections
-                    ]
-                ),
-            },
-        ))
+        tree.add(
+            SummaryNode(
+                id=str(uuid.uuid4()),
+                corpus_id=corpus.corpus_id,
+                unit_id=corpus.root().id,
+                level=3,
+                parent_id=None,
+                summary_text=_result_as_text(result),
+                headline=result.sections[0].title if result.sections else "Single-shot result",
+                summary_tokens=usage.output_tokens if usage else 0,
+                source_tokens=len(cfg.snapshot_json) // 4,
+                model_used=usage.model if usage else "",
+                strategy=self.name,
+                revision_fp=corpus.revision_fingerprint(),
+                metadata={
+                    "single_shot_payload": json.dumps(
+                        [
+                            {
+                                "title": s.title,
+                                "content": s.content,
+                                "summary": s.summary,
+                                "confidence": s.confidence,
+                                "inferred": s.inferred,
+                            }
+                            for s in result.sections
+                        ]
+                    ),
+                },
+            )
+        )
         return tree
 
 

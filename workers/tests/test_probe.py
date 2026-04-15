@@ -38,12 +38,14 @@ class FakeProvider:
 
 def test_grade_perfect_response():
     """Perfect JSON response gets high/prompted."""
-    response = json.dumps({
-        "echo": "PROBE_MARKER_7f3a",
-        "count_to_five": [1, 2, 3, 4, 5],
-        "reverse": "edcba",
-        "classify": "positive",
-    })
+    response = json.dumps(
+        {
+            "echo": "PROBE_MARKER_7f3a",
+            "count_to_five": [1, 2, 3, 4, 5],
+            "reverse": "edcba",
+            "classify": "positive",
+        }
+    )
     instruction, json_mode = _grade_response(response)
     assert instruction == "high"
     assert json_mode == "prompted"
@@ -51,12 +53,14 @@ def test_grade_perfect_response():
 
 def test_grade_perfect_with_markdown_fences():
     """JSON wrapped in markdown fences still grades high."""
-    inner = json.dumps({
-        "echo": "PROBE_MARKER_7f3a",
-        "count_to_five": [1, 2, 3, 4, 5],
-        "reverse": "edcba",
-        "classify": "positive",
-    })
+    inner = json.dumps(
+        {
+            "echo": "PROBE_MARKER_7f3a",
+            "count_to_five": [1, 2, 3, 4, 5],
+            "reverse": "edcba",
+            "classify": "positive",
+        }
+    )
     response = f"```json\n{inner}\n```"
     instruction, json_mode = _grade_response(response)
     assert instruction == "high"
@@ -65,12 +69,14 @@ def test_grade_perfect_with_markdown_fences():
 
 def test_grade_partial_response():
     """Two out of four correct gets medium."""
-    response = json.dumps({
-        "echo": "PROBE_MARKER_7f3a",
-        "count_to_five": [1, 2, 3, 4, 5],
-        "reverse": "wrong",
-        "classify": "wrong",
-    })
+    response = json.dumps(
+        {
+            "echo": "PROBE_MARKER_7f3a",
+            "count_to_five": [1, 2, 3, 4, 5],
+            "reverse": "wrong",
+            "classify": "wrong",
+        }
+    )
     instruction, json_mode = _grade_response(response)
     assert instruction == "medium"
     assert json_mode == "prompted"
@@ -78,12 +84,14 @@ def test_grade_partial_response():
 
 def test_grade_one_correct():
     """One out of four correct gets low."""
-    response = json.dumps({
-        "echo": "wrong",
-        "count_to_five": [1],
-        "reverse": "wrong",
-        "classify": "positive",
-    })
+    response = json.dumps(
+        {
+            "echo": "wrong",
+            "count_to_five": [1],
+            "reverse": "wrong",
+            "classify": "positive",
+        }
+    )
     instruction, json_mode = _grade_response(response)
     assert instruction == "low"
     assert json_mode == "prompted"
@@ -116,12 +124,14 @@ def test_grade_json_array():
 @pytest.mark.asyncio
 async def test_probe_success():
     """Successful probe returns graded capabilities."""
-    response = json.dumps({
-        "echo": "PROBE_MARKER_7f3a",
-        "count_to_five": [1, 2, 3, 4, 5],
-        "reverse": "edcba",
-        "classify": "positive",
-    })
+    response = json.dumps(
+        {
+            "echo": "PROBE_MARKER_7f3a",
+            "count_to_five": [1, 2, 3, 4, 5],
+            "reverse": "edcba",
+            "classify": "positive",
+        }
+    )
     provider = FakeProvider(response_text=response)
     result = await probe_model(provider, "test-model", "test-provider")
 

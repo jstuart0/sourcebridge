@@ -31,9 +31,7 @@ class LLMRouter:
         last_error: Exception | None = None
         for i, provider in enumerate(self.providers):
             try:
-                return await provider.complete(
-                    prompt, system=system, max_tokens=max_tokens, temperature=temperature
-                )
+                return await provider.complete(prompt, system=system, max_tokens=max_tokens, temperature=temperature)
             except Exception as e:
                 last_error = e
                 log.warning("provider_failed", provider_index=i, error=str(e))

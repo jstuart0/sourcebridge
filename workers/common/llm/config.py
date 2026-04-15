@@ -126,13 +126,15 @@ def create_llm_provider_for_request(
 
     Empty override fields fall back to the worker's bootstrap config.
     """
-    effective = config.model_copy(update={
-        "llm_provider": provider or config.llm_provider,
-        "llm_base_url": base_url or config.llm_base_url,
-        "llm_api_key": api_key or config.llm_api_key,
-        "llm_model": model or config.llm_model,
-        "llm_draft_model": draft_model or config.llm_draft_model,
-    })
+    effective = config.model_copy(
+        update={
+            "llm_provider": provider or config.llm_provider,
+            "llm_base_url": base_url or config.llm_base_url,
+            "llm_api_key": api_key or config.llm_api_key,
+            "llm_model": model or config.llm_model,
+            "llm_draft_model": draft_model or config.llm_draft_model,
+        }
+    )
     return create_llm_provider(effective), effective.llm_model
 
 

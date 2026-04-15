@@ -18,7 +18,8 @@ def test_build_overview_query_repository_scope() -> None:
 def test_build_overview_query_symbol_scope() -> None:
     """Symbol scope produces a targeted query with the symbol name."""
     query = build_overview_query(
-        "my-repo", "cliff_notes",
+        "my-repo",
+        "cliff_notes",
         scope_type="symbol",
         scope_path="internal/auth.go#handleLogin",
     )
@@ -31,7 +32,8 @@ def test_build_overview_query_symbol_scope() -> None:
 def test_build_overview_query_file_scope() -> None:
     """File scope produces a targeted query with the file path."""
     query = build_overview_query(
-        "my-repo", "cliff_notes",
+        "my-repo",
+        "cliff_notes",
         scope_type="file",
         scope_path="internal/auth.go",
     )
@@ -43,7 +45,8 @@ def test_build_overview_query_file_scope() -> None:
 def test_build_overview_query_module_scope() -> None:
     """Module scope produces a targeted query with the module path."""
     query = build_overview_query(
-        "my-repo", "cliff_notes",
+        "my-repo",
+        "cliff_notes",
         scope_type="module",
         scope_path="internal/api",
     )

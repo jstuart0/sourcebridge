@@ -11,7 +11,9 @@ async def test_explain_returns_markdown():
     """Explainer returns markdown-formatted explanation."""
     provider = FakeLLMProvider()
     explanation, usage = await explain_code(
-        provider, "processPayment", "go",
+        provider,
+        "processPayment",
+        "go",
         "func processPayment(ctx, order) { validate(order); charge(order) }",
     )
     assert isinstance(explanation, str)

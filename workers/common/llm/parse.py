@@ -21,10 +21,7 @@ def strip_llm_wrapping(raw: str) -> str:
     # Strip markdown code fences
     if text.startswith("```"):
         first_nl = text.find("\n")
-        if first_nl != -1:
-            text = text[first_nl + 1:]
-        else:
-            text = text[3:]
+        text = text[first_nl + 1 :] if first_nl != -1 else text[3:]
         text = text.rstrip()
         if text.endswith("```"):
             text = text[:-3].rstrip()

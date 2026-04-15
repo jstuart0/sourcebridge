@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
 import httpx
@@ -55,10 +56,8 @@ class SurrealClient:
         """Internal connect — caller must hold self._lock."""
         # Close any stale client
         if self._client is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await self._client.aclose()
-            except Exception:
-                pass
             self._client = None
             self._connected = False
 
@@ -131,14 +130,22 @@ class SurrealClient:
                 if isinstance(results, list):
                     for idx, result in enumerate(results):
                         if isinstance(result, dict) and str(result.get("status", "")).upper() == "ERR":
-                            message = str(result.get("result") or result.get("detail") or "unknown SurrealDB statement error")
+                            message = str(
+                                result.get("result") or result.get("detail") or "unknown SurrealDB statement error"
+                            )
                             raise RuntimeError(f"SurrealDB statement {idx} failed: {message}")
                 if isinstance(results, list):
                     return results
                 return [results]
 
-            except (httpx.ConnectError, httpx.ReadError, httpx.WriteError,
-                    httpx.PoolTimeout, httpx.ConnectTimeout, httpx.ReadTimeout) as e:
+            except (
+                httpx.ConnectError,
+                httpx.ReadError,
+                httpx.WriteError,
+                httpx.PoolTimeout,
+                httpx.ConnectTimeout,
+                httpx.ReadTimeout,
+            ) as e:
                 # Transient connection error — mark disconnected and retry
                 last_error = e
                 log.warn(

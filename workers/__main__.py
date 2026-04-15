@@ -71,7 +71,11 @@ async def serve() -> None:
     llm_provider = create_llm_provider(config)
     report_llm = create_report_provider(config)
     if report_llm:
-        log.info("report_llm_provider_configured", provider=config.llm_report_provider or config.llm_provider, model=config.llm_report_model)
+        log.info(
+            "report_llm_provider_configured",
+            provider=config.llm_report_provider or config.llm_provider,
+            model=config.llm_report_model,
+        )
     embedding_provider = create_embedding_provider(config)
     summary_node_cache = SurrealSummaryNodeCache.from_config(config)
 
@@ -112,7 +116,9 @@ async def serve() -> None:
     await health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
     await health_servicer.set("sourcebridge.reasoning.v1.ReasoningService", health_pb2.HealthCheckResponse.SERVING)
     await health_servicer.set("sourcebridge.linking.v1.LinkingService", health_pb2.HealthCheckResponse.SERVING)
-    await health_servicer.set("sourcebridge.requirements.v1.RequirementsService", health_pb2.HealthCheckResponse.SERVING)
+    await health_servicer.set(
+        "sourcebridge.requirements.v1.RequirementsService", health_pb2.HealthCheckResponse.SERVING
+    )
     await health_servicer.set("sourcebridge.knowledge.v1.KnowledgeService", health_pb2.HealthCheckResponse.SERVING)
     await health_servicer.set("sourcebridge.contracts.v1.ContractsService", health_pb2.HealthCheckResponse.SERVING)
 

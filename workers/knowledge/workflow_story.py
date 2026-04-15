@@ -55,8 +55,8 @@ def _is_placeholder_content(content: str) -> bool:
         or "not enough grounded evidence" in text
         or "to be determined" in text
         or "placeholder" in text
-        or "n/a" == text
-        or "tbd" == text
+        or text == "n/a"
+        or text == "tbd"
         or "use the focused scope" in text
         or "the story is grounded in the focused scope" in text
         or "start with the focused scope" in text
@@ -74,14 +74,16 @@ def _gather_execution_evidence(execution_path: dict[str, Any], limit: int = 4) -
         line_end = step.get("lineEnd") or 0
         label = _normalize_text(step.get("label"))
         reason = _normalize_text(step.get("reason"))
-        evidence.append(EvidenceRef(
-            source_type="symbol" if step.get("symbolId") else "file",
-            source_id=_normalize_text(step.get("symbolId")),
-            file_path=file_path,
-            line_start=int(line_start) if isinstance(line_start, int) else 0,
-            line_end=int(line_end) if isinstance(line_end, int) else 0,
-            rationale=reason or f"Execution path step: {label}",
-        ))
+        evidence.append(
+            EvidenceRef(
+                source_type="symbol" if step.get("symbolId") else "file",
+                source_id=_normalize_text(step.get("symbolId")),
+                file_path=file_path,
+                line_start=int(line_start) if isinstance(line_start, int) else 0,
+                line_end=int(line_end) if isinstance(line_end, int) else 0,
+                rationale=reason or f"Execution path step: {label}",
+            )
+        )
     return evidence
 
 
@@ -90,33 +92,39 @@ def _gather_scope_evidence(snapshot: dict[str, Any], limit: int = 4) -> list[Evi
     evidence: list[EvidenceRef] = []
     target_symbol = scope.get("target_symbol") or {}
     if isinstance(target_symbol, dict) and target_symbol.get("file_path"):
-        evidence.append(EvidenceRef(
-            source_type="symbol",
-            source_id=_normalize_text(target_symbol.get("id")),
-            file_path=_normalize_text(target_symbol.get("file_path")),
-            line_start=int(target_symbol.get("start_line") or 0),
-            line_end=int(target_symbol.get("end_line") or 0),
-            rationale="Focused symbol for this workflow story.",
-        ))
+        evidence.append(
+            EvidenceRef(
+                source_type="symbol",
+                source_id=_normalize_text(target_symbol.get("id")),
+                file_path=_normalize_text(target_symbol.get("file_path")),
+                line_start=int(target_symbol.get("start_line") or 0),
+                line_end=int(target_symbol.get("end_line") or 0),
+                rationale="Focused symbol for this workflow story.",
+            )
+        )
     target_file = scope.get("target_file") or {}
     if isinstance(target_file, dict) and target_file.get("path"):
-        evidence.append(EvidenceRef(
-            source_type="file",
-            file_path=_normalize_text(target_file.get("path")),
-            rationale="Focused file for this workflow story.",
-        ))
+        evidence.append(
+            EvidenceRef(
+                source_type="file",
+                file_path=_normalize_text(target_file.get("path")),
+                rationale="Focused file for this workflow story.",
+            )
+        )
     for group_name in ("entry_points", "public_api"):
         for item in (snapshot.get(group_name) or [])[:limit]:
             if not isinstance(item, dict):
                 continue
-            evidence.append(EvidenceRef(
-                source_type="symbol",
-                source_id=_normalize_text(item.get("id")),
-                file_path=_normalize_text(item.get("file_path")),
-                line_start=int(item.get("start_line") or 0),
-                line_end=int(item.get("end_line") or 0),
-                rationale=f"Snapshot {group_name.replace('_', ' ')} reference.",
-            ))
+            evidence.append(
+                EvidenceRef(
+                    source_type="symbol",
+                    source_id=_normalize_text(item.get("id")),
+                    file_path=_normalize_text(item.get("file_path")),
+                    line_start=int(item.get("start_line") or 0),
+                    line_end=int(item.get("end_line") or 0),
+                    rationale=f"Snapshot {group_name.replace('_', ' ')} reference.",
+                )
+            )
             if len(evidence) >= limit:
                 return evidence
     return evidence[:limit]
@@ -208,11 +216,17 @@ def _build_workflow_fallbacks(
                     detail = f" in `{fp}`" if fp else ""
                     kind_hint = f" ({kind})" if kind else ""
                     step_lines.append(f"{idx}. Start at {label}{kind_hint}{detail}.")
-                main_steps = "\n".join(step_lines) if step_lines else (
-                    f"Explore the entry points and public API of {repository_name} to trace the main execution flow."
+                main_steps = (
+                    "\n".join(step_lines)
+                    if step_lines
+                    else (
+                        f"Explore the entry points and public API of {repository_name} to trace the main execution flow."  # noqa: E501
+                    )
                 )
             else:
-                main_steps = f"Explore the entry points and public API of {repository_name} to trace the main execution flow."
+                main_steps = (
+                    f"Explore the entry points and public API of {repository_name} to trace the main execution flow."
+                )
 
     behind_parts = []
     if path_steps:
@@ -225,9 +239,7 @@ def _build_workflow_fallbacks(
     if target_symbol:
         symbol_name = _normalize_text(target_symbol.get("name"))
         symbol_file = _normalize_text(target_symbol.get("file_path"))
-        behind_parts.append(
-            f"The workflow is anchored on `{symbol_name}` in `{symbol_file}`."
-        )
+        behind_parts.append(f"The workflow is anchored on `{symbol_name}` in `{symbol_file}`.")
     elif target_file:
         behind_parts.append(f"The focused code lives in `{_normalize_text(target_file.get('path'))}`.")
     if path_files:
@@ -244,7 +256,7 @@ def _build_workflow_fallbacks(
             if mod_names:
                 behind_parts.append("Key modules: " + ", ".join(f"`{m}`" for m in mod_names) + ".")
     behind_the_scenes = " ".join(part for part in behind_parts if part) or (
-        f"The internals of {repository_name} are best understood by tracing its entry points through the module structure."
+        f"The internals of {repository_name} are best understood by tracing its entry points through the module structure."  # noqa: E501
     )
 
     if execution_path.get("message"):
@@ -258,14 +270,21 @@ def _build_workflow_fallbacks(
         # Build from snapshot complexity signals
         complex_symbols = snapshot.get("complex_symbols") or []
         if complex_symbols:
-            complex_names = [_normalize_text(sym.get("qualified_name") or sym.get("name"))
-                            for sym in complex_symbols[:3] if isinstance(sym, dict)]
+            complex_names = [
+                _normalize_text(sym.get("qualified_name") or sym.get("name"))
+                for sym in complex_symbols[:3]
+                if isinstance(sym, dict)
+            ]
             branches = (
-                "Potential complexity hotspots: " + ", ".join(f"`{n}`" for n in complex_names if n) + ". "
-                "These symbols have high cyclomatic complexity and may contain branching logic or error handling."
-            ) if complex_names else f"No execution path is available. Inspect entry points of {repository_name} for branching logic."
+                (
+                    "Potential complexity hotspots: " + ", ".join(f"`{n}`" for n in complex_names if n) + ". "
+                    "These symbols have high cyclomatic complexity and may contain branching logic or error handling."
+                )
+                if complex_names
+                else f"No execution path is available. Inspect entry points of {repository_name} for branching logic."
+            )
         else:
-            branches = f"No execution path is available. Inspect entry points of {repository_name} for branching logic and error handling."
+            branches = f"No execution path is available. Inspect entry points of {repository_name} for branching logic and error handling."  # noqa: E501
 
     inspect_targets = []
     if target_file:
@@ -410,30 +429,34 @@ async def generate_workflow_story(
     )
 
     sections: list[CliffNotesSection] = []
-    llm_failed = False
     try:
-        response: LLMResponse = require_nonempty(await complete_with_optional_model(
-            provider,
-            prompt,
-            system=WORKFLOW_STORY_SYSTEM,
-            temperature=0.0,
-            max_tokens=8192,
-            model=model_override,
-        ), context=f"workflow_story:{scope_type or 'repository'}")
+        response: LLMResponse = require_nonempty(
+            await complete_with_optional_model(
+                provider,
+                prompt,
+                system=WORKFLOW_STORY_SYSTEM,
+                temperature=0.0,
+                max_tokens=8192,
+                model=model_override,
+            ),
+            context=f"workflow_story:{scope_type or 'repository'}",
+        )
     except SnapshotTooLargeError:
         # Re-raise so the servicer can classify and surface the error.
         raise
     except Exception as exc:
         log.warning("workflow_story_llm_failed_using_fallbacks", error=str(exc))
-        llm_failed = True
         response = None
 
     if response is not None:
         try:
             raw_sections = _parse_sections(response.content)
         except (json.JSONDecodeError, ValueError, TypeError) as exc:
-            log.warning("workflow_story_parse_fallback", error=str(exc),
-                        response_preview=response.content[:2000] if response.content else "(empty)")
+            log.warning(
+                "workflow_story_parse_fallback",
+                error=str(exc),
+                response_preview=response.content[:2000] if response.content else "(empty)",
+            )
             raw_sections = [
                 {
                     "title": "Goal",
@@ -506,7 +529,7 @@ async def generate_workflow_story(
         total_evidence=total_evidence,
         evidence_by_type=evidence_by_type,
         has_execution_path=bool(execution_path_json),
-        execution_path_steps=len((execution_path.get("steps") or [])) if isinstance(execution_path, dict) else 0,
+        execution_path_steps=len(execution_path.get("steps") or []) if isinstance(execution_path, dict) else 0,
     )
 
     usage = LLMUsageRecord(

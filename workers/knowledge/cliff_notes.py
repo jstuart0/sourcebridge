@@ -119,13 +119,10 @@ def _parse_sections(raw: str) -> list[dict[str, object]]:
     # Strip markdown code fences if present (handles ```json, ``` json, etc.)
     if text.startswith("```"):
         first_newline = text.find("\n")
-        if first_newline != -1:
-            text = text[first_newline + 1 :]
-        else:
-            text = text[3:]
+        text = text[first_newline + 1 :] if first_newline != -1 else text[3:]
         text = text.rstrip()
         if text.endswith("```"):
-            text = text[: -3].rstrip()
+            text = text[:-3].rstrip()
 
     # Try direct parse first
     try:
@@ -148,10 +145,11 @@ def _parse_sections(raw: str) -> list[dict[str, object]]:
             sole_value = next(iter(parsed.values()))
             if isinstance(sole_value, list):
                 return sole_value  # type: ignore[no-any-return]
-            if isinstance(sole_value, dict):
+            if isinstance(sole_value, dict) and all(
+                isinstance(v, dict) for v in sole_value.values()
+            ):
                 # e.g. {"workflow_story": {"Goal": {...}, "Trigger": {...}}}
-                if all(isinstance(v, dict) for v in sole_value.values()):
-                    return [{"title": k, **v} for k, v in sole_value.items()]
+                return [{"title": k, **v} for k, v in sole_value.items()]
         # If it looks like a single section object (has "title" and "content"), wrap it
         if "title" in parsed and "content" in parsed:
             return [parsed]
@@ -227,9 +225,7 @@ async def generate_cliff_notes(
     """
     effective_scope = scope_type or "repository"
     required_sections = REQUIRED_SECTIONS_BY_SCOPE.get(effective_scope, REQUIRED_SECTIONS)
-    prompt = build_cliff_notes_prompt(
-        repository_name, audience, depth, snapshot_json, effective_scope, scope_path
-    )
+    prompt = build_cliff_notes_prompt(repository_name, audience, depth, snapshot_json, effective_scope, scope_path)
 
     check_prompt_budget(
         prompt,
@@ -237,14 +233,17 @@ async def generate_cliff_notes(
         context=f"cliff_notes:{effective_scope}",
     )
 
-    response: LLMResponse = require_nonempty(await complete_with_optional_model(
-        provider,
-        prompt,
-        system=CLIFF_NOTES_SYSTEM,
-        temperature=0.0,
-        max_tokens=8192,
-        model=model_override,
-    ), context=f"cliff_notes:{effective_scope or 'repository'}")
+    response: LLMResponse = require_nonempty(
+        await complete_with_optional_model(
+            provider,
+            prompt,
+            system=CLIFF_NOTES_SYSTEM,
+            temperature=0.0,
+            max_tokens=8192,
+            model=model_override,
+        ),
+        context=f"cliff_notes:{effective_scope or 'repository'}",
+    )
 
     try:
         raw_sections = _parse_sections(response.content)
@@ -266,9 +265,7 @@ async def generate_cliff_notes(
     seen_titles: set[str] = set()
 
     for index, raw in enumerate(raw_sections):
-        fallback_title = (
-            required_sections[index] if index < len(required_sections) else f"Section {index + 1}"
-        )
+        fallback_title = required_sections[index] if index < len(required_sections) else f"Section {index + 1}"
         normalized = _coerce_section(raw, fallback_title=fallback_title)
         title = str(normalized.get("title", fallback_title))
         evidence = normalized.get("evidence", [])
