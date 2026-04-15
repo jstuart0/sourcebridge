@@ -5,7 +5,12 @@ FROM ${NODE_BASE_IMAGE} AS builder
 WORKDIR /app
 
 COPY web/package.json web/package-lock.json* ./
-RUN npm ci
+RUN npm config set fetch-retries 10 \
+  && npm config set fetch-retry-factor 2 \
+  && npm config set fetch-retry-mintimeout 20000 \
+  && npm config set fetch-retry-maxtimeout 120000 \
+  && npm config set network-timeout 300000 \
+  && npm ci
 
 COPY web/ .
 
