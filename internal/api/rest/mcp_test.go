@@ -160,12 +160,6 @@ func (m *mockKnowledgeStore) StoreArtifactDependencies(artifactID string, depend
 func (m *mockKnowledgeStore) GetArtifactDependencies(artifactID string) []knowledge.ArtifactDependency {
 	return nil
 }
-func (m *mockKnowledgeStore) StoreRefinementUnits(artifactID string, units []knowledge.RefinementUnit) error {
-	return nil
-}
-func (m *mockKnowledgeStore) GetRefinementUnits(artifactID string) []knowledge.RefinementUnit {
-	return nil
-}
 
 // ---------------------------------------------------------------------------
 // Test harness
