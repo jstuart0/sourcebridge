@@ -107,7 +107,7 @@ export function ArchitectureDiagram({
   const [structuredMermaid, setStructuredMermaid] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const [deterministicResult] = useQuery({
+  const [deterministicResult, reexecuteDeterministicQuery] = useQuery({
     query: ARCHITECTURE_DIAGRAM_QUERY,
     variables: {
       repoId: repositoryId,
@@ -117,7 +117,7 @@ export function ArchitectureDiagram({
     },
   });
 
-  const [artifactsResult] = useQuery({
+  const [artifactsResult, reexecuteArtifactsQuery] = useQuery({
     query: KNOWLEDGE_ARTIFACTS_QUERY,
     variables: {
       repositoryId,
@@ -270,18 +270,20 @@ export function ArchitectureDiagram({
   }, [aiArtifact?.id, aiFocus]);
 
   const handleGenerateAIDiagram = useCallback(async () => {
-    if (aiArtifact?.id && (aiArtifact.refreshAvailable || aiArtifact.stale || aiArtifact.status === "FAILED")) {
+    if (aiArtifact?.id) {
       await refreshArtifact({ id: aiArtifact.id });
-      return;
+    } else {
+      await generateArchitectureDiagram({
+        input: {
+          repositoryId,
+          audience: "DEVELOPER",
+          depth: "MEDIUM",
+        },
+      });
     }
-    await generateArchitectureDiagram({
-      input: {
-        repositoryId,
-        audience: "DEVELOPER",
-        depth: "MEDIUM",
-      },
-    });
-  }, [aiArtifact?.id, aiArtifact?.refreshAvailable, aiArtifact?.stale, aiArtifact?.status, generateArchitectureDiagram, refreshArtifact, repositoryId]);
+    reexecuteArtifactsQuery({ requestPolicy: "network-only" });
+    reexecuteDeterministicQuery({ requestPolicy: "network-only" });
+  }, [aiArtifact?.id, generateArchitectureDiagram, refreshArtifact, reexecuteArtifactsQuery, reexecuteDeterministicQuery, repositoryId]);
 
   if (deterministicResult.fetching && !deterministicDiagram) {
     return (
@@ -358,7 +360,7 @@ export function ArchitectureDiagram({
         )}
         {viewMode === "AI" && (
           <Button variant="secondary" size="sm" onClick={handleGenerateAIDiagram}>
-            {aiBusy ? "Generating…" : aiArtifact?.id ? "Refresh AI Diagram" : "Generate AI Diagram"}
+            {aiBusy ? "Generating…" : aiArtifact?.id ? "Regenerate AI Diagram" : "Generate AI Diagram"}
           </Button>
         )}
         <Button variant="secondary" size="sm" onClick={handleCopyMermaid} disabled={!currentMermaidSource}>
@@ -398,6 +400,7 @@ export function ArchitectureDiagram({
                     onClick={() => setAIFocus("EXECUTION")}
                     className={`rounded-full px-3 py-1.5 text-xs font-medium ${aiFocus === "EXECUTION" ? "bg-[var(--accent-primary)] text-[var(--accent-contrast)]" : "text-[var(--text-secondary)]"}`}
                     disabled={!aiExecutionMermaidSource}
+                    title={!aiExecutionMermaidSource ? "Regenerate the AI diagram to generate the execution view." : undefined}
                   >
                     Execution View
                   </button>
