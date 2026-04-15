@@ -820,7 +820,7 @@ func (o *Orchestrator) runJob(item *workItem) {
 			o.finalizeCancelled(jobID)
 			return
 		}
-		if !o.cfg.Retry.ShouldRetry(attempt, err) {
+		if !o.cfg.Retry.ShouldRetryWithMax(attempt, maxAttempts, err) {
 			slog.Info("llm_job_error_not_retryable",
 				"job_id", jobID,
 				"attempt", attempt,

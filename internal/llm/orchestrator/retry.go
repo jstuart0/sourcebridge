@@ -64,10 +64,17 @@ func (p RetryPolicy) BackoffFor(attempt int) time.Duration {
 // returned boolean is informational for logging; the orchestrator also
 // checks attempt < MaxAttempts before actually retrying.
 func (p RetryPolicy) ShouldRetry(attempt int, err error) bool {
+	return p.ShouldRetryWithMax(attempt, p.MaxAttempts, err)
+}
+
+// ShouldRetryWithMax is like ShouldRetry but uses a caller-supplied max
+// attempts instead of the policy default. This allows per-job max attempts
+// to override the global retry policy.
+func (p RetryPolicy) ShouldRetryWithMax(attempt, maxAttempts int, err error) bool {
 	if err == nil {
 		return false
 	}
-	if attempt >= p.MaxAttempts {
+	if attempt >= maxAttempts {
 		return false
 	}
 	return IsRetryable(err)
