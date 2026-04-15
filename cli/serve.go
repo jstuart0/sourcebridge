@@ -245,6 +245,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		version.Version,
 		cfg.Edition,
 		dataDir,
+		telemetry.WithLLMProviderKind(classifyTelemetryLLMProviderKind(cfg.LLM.Provider)),
 		telemetry.WithCountProvider(&telemetryCountProvider{store: store}),
 	)
 	tracker.Start()
@@ -460,4 +461,15 @@ func (p *telemetryCountProvider) TelemetryCounts() (repos, users int, features [
 	}
 
 	return repos, 0, nil, counts
+}
+
+func classifyTelemetryLLMProviderKind(provider string) string {
+	switch provider {
+	case "ollama", "vllm", "llama-cpp", "sglang", "lmstudio":
+		return "local"
+	case "":
+		return ""
+	default:
+		return "cloud"
+	}
 }
