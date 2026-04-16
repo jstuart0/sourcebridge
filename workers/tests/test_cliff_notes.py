@@ -14,31 +14,45 @@ from workers.common.llm.provider import LLMResponse
 from workers.knowledge.cliff_notes import generate_cliff_notes
 from workers.knowledge.prompts.cliff_notes import REQUIRED_SECTIONS
 
-SAMPLE_SNAPSHOT = json.dumps({
-    "repository_id": "repo-1",
-    "repository_name": "test-repo",
-    "file_count": 2,
-    "symbol_count": 4,
-    "test_count": 1,
-    "languages": [{"language": "go", "file_count": 2, "line_count": 150}],
-    "modules": [{"name": "main", "path": ".", "file_count": 2}],
-    "entry_points": [{
-        "id": "sym-1", "name": "main", "kind": "function",
-        "file_path": "main.go", "start_line": 1, "end_line": 20,
-    }],
-    "public_api": [],
-    "complex_symbols": [],
-    "high_fan_out": [],
-    "high_fan_in": [],
-    "test_symbols": [{
-        "id": "sym-t", "name": "TestHelper", "kind": "function",
-        "file_path": "util.go", "start_line": 12, "end_line": 20,
-    }],
-    "requirements": [],
-    "links": [],
-    "docs": [],
-    "source_revision": {"commit_sha": "", "branch": "", "content_fingerprint": "abc123", "docs_fingerprint": ""},
-})
+SAMPLE_SNAPSHOT = json.dumps(
+    {
+        "repository_id": "repo-1",
+        "repository_name": "test-repo",
+        "file_count": 2,
+        "symbol_count": 4,
+        "test_count": 1,
+        "languages": [{"language": "go", "file_count": 2, "line_count": 150}],
+        "modules": [{"name": "main", "path": ".", "file_count": 2}],
+        "entry_points": [
+            {
+                "id": "sym-1",
+                "name": "main",
+                "kind": "function",
+                "file_path": "main.go",
+                "start_line": 1,
+                "end_line": 20,
+            }
+        ],
+        "public_api": [],
+        "complex_symbols": [],
+        "high_fan_out": [],
+        "high_fan_in": [],
+        "test_symbols": [
+            {
+                "id": "sym-t",
+                "name": "TestHelper",
+                "kind": "function",
+                "file_path": "util.go",
+                "start_line": 12,
+                "end_line": 20,
+            }
+        ],
+        "requirements": [],
+        "links": [],
+        "docs": [],
+        "source_revision": {"commit_sha": "", "branch": "", "content_fingerprint": "abc123", "docs_fingerprint": ""},
+    }
+)
 
 
 class StaticLLMProvider:
@@ -148,10 +162,14 @@ async def test_cliff_notes_beginner_audience() -> None:
 
 @pytest.mark.asyncio
 async def test_cliff_notes_coerces_string_sections_without_crashing() -> None:
-    provider = StaticLLMProvider(json.dumps([
-        "Purpose of this scope",
-        "Main behavior of this scope",
-    ]))
+    provider = StaticLLMProvider(
+        json.dumps(
+            [
+                "Purpose of this scope",
+                "Main behavior of this scope",
+            ]
+        )
+    )
 
     result, _ = await generate_cliff_notes(
         provider=provider,
@@ -171,26 +189,30 @@ async def test_cliff_notes_coerces_string_sections_without_crashing() -> None:
 
 @pytest.mark.asyncio
 async def test_cliff_notes_ignores_non_object_evidence_entries() -> None:
-    provider = StaticLLMProvider(json.dumps([
-        {
-            "title": "Purpose",
-            "content": "Handles login submissions.",
-            "summary": "Login handler.",
-            "confidence": "high",
-            "inferred": False,
-            "evidence": [
-                "not-an-object",
+    provider = StaticLLMProvider(
+        json.dumps(
+            [
                 {
-                    "source_type": "symbol",
-                    "source_id": "sym-1",
-                    "file_path": "auth.go",
-                    "line_start": 10,
-                    "line_end": 40,
-                    "rationale": "Primary handler implementation.",
+                    "title": "Purpose",
+                    "content": "Handles login submissions.",
+                    "summary": "Login handler.",
+                    "confidence": "high",
+                    "inferred": False,
+                    "evidence": [
+                        "not-an-object",
+                        {
+                            "source_type": "symbol",
+                            "source_id": "sym-1",
+                            "file_path": "auth.go",
+                            "line_start": 10,
+                            "line_end": 40,
+                            "rationale": "Primary handler implementation.",
+                        },
+                    ],
                 },
-            ],
-        },
-    ]))
+            ]
+        )
+    )
 
     result, _ = await generate_cliff_notes(
         provider=provider,
@@ -208,23 +230,27 @@ async def test_cliff_notes_ignores_non_object_evidence_entries() -> None:
 
 @pytest.mark.asyncio
 async def test_cliff_notes_flattens_nested_content_objects() -> None:
-    provider = StaticLLMProvider(json.dumps([
-        {
-            "title": "Purpose",
-            "content": {
-                "title": "Purpose",
-                "content": "Handles login submissions.",
-                "summary": "Login handler.",
-                "confidence": "high",
-                "inferred": False,
-                "evidence": [],
-            },
-            "summary": "",
-            "confidence": "medium",
-            "inferred": False,
-            "evidence": [],
-        },
-    ]))
+    provider = StaticLLMProvider(
+        json.dumps(
+            [
+                {
+                    "title": "Purpose",
+                    "content": {
+                        "title": "Purpose",
+                        "content": "Handles login submissions.",
+                        "summary": "Login handler.",
+                        "confidence": "high",
+                        "inferred": False,
+                        "evidence": [],
+                    },
+                    "summary": "",
+                    "confidence": "medium",
+                    "inferred": False,
+                    "evidence": [],
+                },
+            ]
+        )
+    )
 
     result, _ = await generate_cliff_notes(
         provider=provider,
@@ -243,19 +269,23 @@ async def test_cliff_notes_flattens_nested_content_objects() -> None:
 @pytest.mark.asyncio
 async def test_cliff_notes_handles_nested_content_with_string_evidence() -> None:
     """Nested content dict where evidence is a string must not crash."""
-    provider = StaticLLMProvider(json.dumps([
-        {
-            "title": "Purpose",
-            "content": {
-                "content": "Handles authentication.",
-                "evidence": "see handlers/auth.go",
-            },
-            "summary": "",
-            "confidence": "medium",
-            "inferred": False,
-            "evidence": [],
-        },
-    ]))
+    provider = StaticLLMProvider(
+        json.dumps(
+            [
+                {
+                    "title": "Purpose",
+                    "content": {
+                        "content": "Handles authentication.",
+                        "evidence": "see handlers/auth.go",
+                    },
+                    "summary": "",
+                    "confidence": "medium",
+                    "inferred": False,
+                    "evidence": [],
+                },
+            ]
+        )
+    )
 
     result, _ = await generate_cliff_notes(
         provider=provider,
@@ -274,16 +304,20 @@ async def test_cliff_notes_handles_nested_content_with_string_evidence() -> None
 @pytest.mark.asyncio
 async def test_cliff_notes_handles_evidence_as_non_list() -> None:
     """Evidence field as a string instead of list must not crash."""
-    provider = StaticLLMProvider(json.dumps([
-        {
-            "title": "Purpose",
-            "content": "Handles auth.",
-            "summary": "Auth handler.",
-            "confidence": "high",
-            "inferred": False,
-            "evidence": "auth.go handles login",
-        },
-    ]))
+    provider = StaticLLMProvider(
+        json.dumps(
+            [
+                {
+                    "title": "Purpose",
+                    "content": "Handles auth.",
+                    "summary": "Auth handler.",
+                    "confidence": "high",
+                    "inferred": False,
+                    "evidence": "auth.go handles login",
+                },
+            ]
+        )
+    )
 
     result, _ = await generate_cliff_notes(
         provider=provider,
@@ -376,16 +410,20 @@ def test_parse_sections_handles_single_section_object() -> None:
 
 @pytest.mark.asyncio
 async def test_symbol_cliff_notes_require_impact_analysis_section() -> None:
-    provider = StaticLLMProvider(json.dumps([
-        {
-            "title": "Purpose",
-            "content": "Handles login submissions.",
-            "summary": "Login handler.",
-            "confidence": "high",
-            "inferred": False,
-            "evidence": [],
-        },
-    ]))
+    provider = StaticLLMProvider(
+        json.dumps(
+            [
+                {
+                    "title": "Purpose",
+                    "content": "Handles login submissions.",
+                    "summary": "Login handler.",
+                    "confidence": "high",
+                    "inferred": False,
+                    "evidence": [],
+                },
+            ]
+        )
+    )
 
     result, _ = await generate_cliff_notes(
         provider=provider,

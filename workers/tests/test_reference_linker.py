@@ -26,8 +26,11 @@ def test_extract_from_branch_name():
 def test_extract_with_entities():
     """Reference linker links to changed entities."""
     entity = CodeEntity(
-        file_path="auth.py", name="login", kind="function",
-        start_line=1, end_line=10,
+        file_path="auth.py",
+        name="login",
+        kind="function",
+        start_line=1,
+        end_line=10,
     )
     result = extract_reference_links(
         commit_messages=["Implement REQ-011 session management"],

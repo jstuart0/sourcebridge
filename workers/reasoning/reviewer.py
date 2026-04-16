@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 from workers.common.llm.provider import LLMProvider, complete_with_optional_model, require_nonempty
 from workers.reasoning.prompts.reviewer import TEMPLATE_SYSTEMS, build_review_prompt
 from workers.reasoning.types import Finding, LLMUsageRecord, ReviewResult
@@ -19,15 +17,17 @@ def _parse_review(raw: str, template: str) -> ReviewResult:
 
     findings = []
     for f in data.get("findings", []):
-        findings.append(Finding(
-            category=f.get("category", template),
-            severity=f.get("severity", "medium"),
-            message=f.get("message", ""),
-            file_path=f.get("file_path", ""),
-            start_line=f.get("start_line", 0),
-            end_line=f.get("end_line", 0),
-            suggestion=f.get("suggestion", ""),
-        ))
+        findings.append(
+            Finding(
+                category=f.get("category", template),
+                severity=f.get("severity", "medium"),
+                message=f.get("message", ""),
+                file_path=f.get("file_path", ""),
+                start_line=f.get("start_line", 0),
+                end_line=f.get("end_line", 0),
+                suggestion=f.get("suggestion", ""),
+            )
+        )
 
     return ReviewResult(
         template=template,

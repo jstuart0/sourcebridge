@@ -44,7 +44,7 @@ class ResolvedSymbol:
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
     if norm_a == 0 or norm_b == 0:
@@ -85,10 +85,7 @@ async def resolve_symbols(
     # Step 1: Early anchor resolution
     primary_symbols: list[SymbolInfo] = []
     if anchor_symbol:
-        exact_matches = [
-            s for s in symbols
-            if s.name == anchor_symbol or s.qualified_name == anchor_symbol
-        ]
+        exact_matches = [s for s in symbols if s.name == anchor_symbol or s.qualified_name == anchor_symbol]
         if anchor_file:
             exact_matches = [s for s in exact_matches if s.file_path == anchor_file]
         if exact_matches:
@@ -133,29 +130,34 @@ async def resolve_symbols(
     results: list[ResolvedSymbol] = []
     for sim, s in scored[:top_n]:
         if sim >= confidence_threshold:
-            results.append(ResolvedSymbol(
-                symbol_id=s.id,
-                name=s.name,
-                qualified_name=s.qualified_name,
-                kind=s.kind,
-                file_path=s.file_path,
-                similarity=sim,
-                is_anchor=s.id in primary_ids,
-            ))
+            results.append(
+                ResolvedSymbol(
+                    symbol_id=s.id,
+                    name=s.name,
+                    qualified_name=s.qualified_name,
+                    kind=s.kind,
+                    file_path=s.file_path,
+                    similarity=sim,
+                    is_anchor=s.id in primary_ids,
+                )
+            )
 
     # Step 7: Ensure anchor symbols are always included
     result_ids = {r.symbol_id for r in results}
     for ps in primary_symbols:
         if ps.id not in result_ids:
-            results.insert(0, ResolvedSymbol(
-                symbol_id=ps.id,
-                name=ps.name,
-                qualified_name=ps.qualified_name,
-                kind=ps.kind,
-                file_path=ps.file_path,
-                similarity=1.0,
-                is_anchor=True,
-            ))
+            results.insert(
+                0,
+                ResolvedSymbol(
+                    symbol_id=ps.id,
+                    name=ps.name,
+                    qualified_name=ps.qualified_name,
+                    kind=ps.kind,
+                    file_path=ps.file_path,
+                    similarity=1.0,
+                    is_anchor=True,
+                ),
+            )
 
     log.info(
         "resolve_symbols",

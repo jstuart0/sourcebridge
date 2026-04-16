@@ -104,9 +104,11 @@ export function ArchitectureDiagram({
   const [selectedAIComponentId, setSelectedAIComponentId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
+  const [structuredMermaid, setStructuredMermaid] = useState<string | null>(null);
+  const [aiRefreshStartedAt, setAIRefreshStartedAt] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const [deterministicResult] = useQuery({
+  const [deterministicResult, reexecuteDeterministicQuery] = useQuery({
     query: ARCHITECTURE_DIAGRAM_QUERY,
     variables: {
       repoId: repositoryId,
@@ -116,7 +118,7 @@ export function ArchitectureDiagram({
     },
   });
 
-  const [artifactsResult] = useQuery({
+  const [artifactsResult, reexecuteArtifactsQuery] = useQuery({
     query: KNOWLEDGE_ARTIFACTS_QUERY,
     variables: {
       repositoryId,
@@ -137,13 +139,18 @@ export function ArchitectureDiagram({
   const aiMetadata = parseArchitectureMetadata(aiSection?.metadata);
   const aiComponents = useMemo(() => aiMetadata.components ?? [], [aiMetadata.components]);
   const selectedAIComponent = aiComponents.find((component) => component.id === selectedAIComponentId) ?? null;
+  const aiArtifactInFlight = aiArtifact?.status === "PENDING" || aiArtifact?.status === "GENERATING";
+  const aiKickoffPending =
+    aiRefreshStartedAt !== null &&
+    (!aiArtifact ||
+      (!aiArtifactInFlight && new Date(aiArtifact.updatedAt).getTime() < aiRefreshStartedAt));
 
   const aiSystemMermaidSource = aiSection?.content ?? "";
   const aiExecutionMermaidSource = aiMetadata.executionMermaidSource ?? "";
   const currentMermaidSource =
     viewMode === "AI"
       ? (aiFocus === "EXECUTION" ? aiExecutionMermaidSource : aiSystemMermaidSource)
-      : deterministicDiagram?.mermaidSource ?? "";
+      : structuredMermaid || deterministicDiagram?.mermaidSource || "";
   const currentAICaption =
     aiFocus === "EXECUTION"
       ? aiMetadata.executionSummary || "This view follows the request-to-worker execution path and the supporting systems around it."
@@ -166,6 +173,35 @@ export function ArchitectureDiagram({
     setLevel("FILE");
     setModuleFilter(modulePath);
   }, []);
+
+  useEffect(() => {
+    if (viewMode !== "DETERMINISTIC") {
+      return;
+    }
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const params = new URLSearchParams({ depth: String(moduleDepth) });
+        const response = await fetch(`/api/v1/diagrams/${repositoryId}/export/mermaid?${params.toString()}`);
+        if (!response.ok) {
+          throw new Error("Failed to load structured Mermaid");
+        }
+        const mermaid = await response.text();
+        if (!cancelled) {
+          setStructuredMermaid(mermaid);
+        }
+      } catch {
+        if (!cancelled) {
+          setStructuredMermaid(null);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [moduleDepth, moduleFilter, repositoryId, viewMode]);
 
   useEffect(() => {
     if (!currentMermaidSource || !containerRef.current) return;
@@ -239,19 +275,46 @@ export function ArchitectureDiagram({
     setSelectedAIComponentId(null);
   }, [aiArtifact?.id, aiFocus]);
 
-  const handleGenerateAIDiagram = useCallback(async () => {
-    if (aiArtifact?.id && (aiArtifact.refreshAvailable || aiArtifact.stale || aiArtifact.status === "FAILED")) {
-      await refreshArtifact({ id: aiArtifact.id });
+  useEffect(() => {
+    if (aiRefreshStartedAt === null) {
       return;
     }
-    await generateArchitectureDiagram({
-      input: {
-        repositoryId,
-        audience: "DEVELOPER",
-        depth: "MEDIUM",
-      },
-    });
-  }, [aiArtifact?.id, aiArtifact?.refreshAvailable, aiArtifact?.stale, aiArtifact?.status, generateArchitectureDiagram, refreshArtifact, repositoryId]);
+    if (aiArtifactInFlight) {
+      setAIRefreshStartedAt(null);
+      return;
+    }
+    if (aiArtifact && new Date(aiArtifact.updatedAt).getTime() >= aiRefreshStartedAt) {
+      setAIRefreshStartedAt(null);
+    }
+  }, [aiArtifact, aiArtifactInFlight, aiRefreshStartedAt]);
+
+  useEffect(() => {
+    if (!aiKickoffPending && !aiArtifactInFlight) {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      reexecuteArtifactsQuery({ requestPolicy: "network-only" });
+    }, 2000);
+    return () => window.clearInterval(interval);
+  }, [aiArtifactInFlight, aiKickoffPending, reexecuteArtifactsQuery]);
+
+  const handleGenerateAIDiagram = useCallback(async () => {
+    const startedAt = Date.now();
+    setAIRefreshStartedAt(startedAt);
+    if (aiArtifact?.id) {
+      await refreshArtifact({ id: aiArtifact.id });
+    } else {
+      await generateArchitectureDiagram({
+        input: {
+          repositoryId,
+          audience: "DEVELOPER",
+          depth: "MEDIUM",
+        },
+      });
+    }
+    reexecuteArtifactsQuery({ requestPolicy: "network-only" });
+    reexecuteDeterministicQuery({ requestPolicy: "network-only" });
+  }, [aiArtifact?.id, generateArchitectureDiagram, refreshArtifact, reexecuteArtifactsQuery, reexecuteDeterministicQuery, repositoryId]);
 
   if (deterministicResult.fetching && !deterministicDiagram) {
     return (
@@ -275,7 +338,7 @@ export function ArchitectureDiagram({
     );
   }
 
-  const aiBusy = aiArtifact?.status === "PENDING" || aiArtifact?.status === "GENERATING";
+  const aiBusy = aiKickoffPending || aiArtifactInFlight;
 
   return (
     <div className="space-y-4">
@@ -328,7 +391,7 @@ export function ArchitectureDiagram({
         )}
         {viewMode === "AI" && (
           <Button variant="secondary" size="sm" onClick={handleGenerateAIDiagram}>
-            {aiBusy ? "Generating…" : aiArtifact?.id ? "Refresh AI Diagram" : "Generate AI Diagram"}
+            {aiBusy ? "Generating…" : aiArtifact?.id ? "Regenerate AI Diagram" : "Generate AI Diagram"}
           </Button>
         )}
         <Button variant="secondary" size="sm" onClick={handleCopyMermaid} disabled={!currentMermaidSource}>
@@ -344,8 +407,12 @@ export function ArchitectureDiagram({
             </div>
           ) : aiBusy ? (
             <div className="space-y-2 text-sm text-[var(--text-secondary)]">
-              <div>{aiArtifact.progressMessage || "Generating AI architecture diagram..."}</div>
-              <div>{Math.round((aiArtifact.progress || 0) * 100)}%</div>
+              <div>
+                {aiKickoffPending
+                  ? "Starting AI architecture diagram regeneration..."
+                  : aiArtifact.progressMessage || "Generating AI architecture diagram..."}
+              </div>
+              <div>{aiKickoffPending ? "Queued…" : `${Math.round((aiArtifact.progress || 0) * 100)}%`}</div>
             </div>
           ) : aiArtifact.status === "FAILED" ? (
             <div className="space-y-2 text-sm text-[var(--text-secondary)]">
@@ -368,6 +435,7 @@ export function ArchitectureDiagram({
                     onClick={() => setAIFocus("EXECUTION")}
                     className={`rounded-full px-3 py-1.5 text-xs font-medium ${aiFocus === "EXECUTION" ? "bg-[var(--accent-primary)] text-[var(--accent-contrast)]" : "text-[var(--text-secondary)]"}`}
                     disabled={!aiExecutionMermaidSource}
+                    title={!aiExecutionMermaidSource ? "Regenerate the AI diagram to generate the execution view." : undefined}
                   >
                     Execution View
                   </button>

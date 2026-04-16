@@ -15,6 +15,7 @@ class SummaryLevel(StrEnum):
 @dataclass
 class Summary:
     """Structured code summary."""
+
     purpose: str
     inputs: list[str] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)
@@ -46,6 +47,7 @@ class Severity(StrEnum):
 @dataclass
 class Finding:
     """A single review finding."""
+
     category: str
     severity: str
     message: str
@@ -58,6 +60,7 @@ class Finding:
 @dataclass
 class ReviewResult:
     """Result of a structured code review."""
+
     template: str
     findings: list[Finding] = field(default_factory=list)
     score: float = 0.0
@@ -66,6 +69,7 @@ class ReviewResult:
 @dataclass
 class DiscussionAnswer:
     """Response to a code question."""
+
     answer: str
     references: list[str] = field(default_factory=list)
     related_requirements: list[str] = field(default_factory=list)
@@ -74,6 +78,7 @@ class DiscussionAnswer:
 @dataclass
 class LLMUsageRecord:
     """Tracks a single LLM call."""
+
     provider: str
     model: str
     input_tokens: int

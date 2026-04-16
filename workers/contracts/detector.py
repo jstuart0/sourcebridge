@@ -32,10 +32,9 @@ def detect_openapi(path: str, content: str) -> DetectedContract | None:
     """Detect OpenAPI/Swagger specification files."""
     # Quick path-based filter
     lower_path = path.lower()
-    if not any(
-        kw in lower_path
-        for kw in ("openapi", "swagger", "api-spec", "api_spec")
-    ) and not (lower_path.endswith((".yaml", ".yml", ".json"))):
+    if not any(kw in lower_path for kw in ("openapi", "swagger", "api-spec", "api_spec")) and not (
+        lower_path.endswith((".yaml", ".yml", ".json"))
+    ):
         return None
 
     # Check for OpenAPI markers in content
@@ -89,8 +88,8 @@ def _extract_openapi_endpoints(content: str) -> list[Endpoint]:
         pass
 
     # Fallback: regex-based extraction for YAML
-    path_pattern = re.compile(r"^  (/[^\s:]+):\s*$", re.MULTILINE)
-    method_pattern = re.compile(r"^    (get|post|put|patch|delete|head|options):\s*$", re.MULTILINE)
+    re.compile(r"^  (/[^\s:]+):\s*$", re.MULTILINE)
+    re.compile(r"^    (get|post|put|patch|delete|head|options):\s*$", re.MULTILINE)
 
     current_path = ""
     for line in content.split("\n"):
@@ -122,10 +121,12 @@ def detect_protobuf(path: str, content: str) -> DetectedContract | None:
     for m in re.finditer(r"rpc\s+(\w+)\s*\(\s*(\w+)\s*\)\s*returns\s*\(\s*(\w+)\s*\)", content):
         rpc_name = m.group(1)
         service_name = service_match.group(1)
-        endpoints.append(Endpoint(
-            path=f"{service_name}.{rpc_name}",
-            method="RPC",
-        ))
+        endpoints.append(
+            Endpoint(
+                path=f"{service_name}.{rpc_name}",
+                method="RPC",
+            )
+        )
 
     return DetectedContract(
         file_path=path,
@@ -154,10 +155,12 @@ def detect_graphql_schema(path: str, content: str) -> DetectedContract | None:
         type_name = type_match.group(1)
         body = type_match.group(2)
         for field_match in re.finditer(r"(\w+)\s*(?:\([^)]*\))?\s*:", body):
-            endpoints.append(Endpoint(
-                path=field_match.group(1),
-                method=type_name.upper(),
-            ))
+            endpoints.append(
+                Endpoint(
+                    path=field_match.group(1),
+                    method=type_name.upper(),
+                )
+            )
 
     return DetectedContract(
         file_path=path,

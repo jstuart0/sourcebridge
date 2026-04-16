@@ -13,6 +13,7 @@ from workers.reasoning.types import LLMUsageRecord, ReviewResult, Summary
 @dataclass
 class CacheEntry:
     """A cached item with metadata."""
+
     value: object
     content_hash: str
     model_version: str
@@ -50,12 +51,15 @@ class SummaryCache:
     def put_summary(self, summary: Summary, model_version: str) -> None:
         """Cache a summary (no time expiry — invalidated by content hash change)."""
         key = self._make_key(summary.content_hash, model_version, "summary")
-        self._put(key, CacheEntry(
-            value=summary,
-            content_hash=summary.content_hash,
-            model_version=model_version,
-            ttl=0,
-        ))
+        self._put(
+            key,
+            CacheEntry(
+                value=summary,
+                content_hash=summary.content_hash,
+                model_version=model_version,
+                ttl=0,
+            ),
+        )
 
     def get_review(self, content_hash: str, model_version: str, template: str) -> ReviewResult | None:
         """Get a cached review, or None if not cached or expired."""
@@ -66,12 +70,15 @@ class SummaryCache:
     def put_review(self, content_hash: str, result: ReviewResult, model_version: str) -> None:
         """Cache a review result with 7-day TTL."""
         key = self._make_key(content_hash, model_version, f"review:{result.template}")
-        self._put(key, CacheEntry(
-            value=result,
-            content_hash=content_hash,
-            model_version=model_version,
-            ttl=self.REVIEW_TTL,
-        ))
+        self._put(
+            key,
+            CacheEntry(
+                value=result,
+                content_hash=content_hash,
+                model_version=model_version,
+                ttl=self.REVIEW_TTL,
+            ),
+        )
 
     def invalidate(self, content_hash: str) -> int:
         """Remove all entries for a given content hash. Returns count removed."""

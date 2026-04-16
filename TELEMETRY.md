@@ -56,5 +56,8 @@ only and is not sold or shared with third parties.
 
 ## Source code
 
-The telemetry implementation is fully open source at
+The client-side telemetry sender remains in the OSS repository at
 [`internal/telemetry/telemetry.go`](internal/telemetry/telemetry.go).
+
+The hosted telemetry collector and dashboard are maintained separately from the
+main OSS repository.

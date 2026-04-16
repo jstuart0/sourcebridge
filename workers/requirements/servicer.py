@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 import grpc
 import structlog
 from common.v1 import types_pb2

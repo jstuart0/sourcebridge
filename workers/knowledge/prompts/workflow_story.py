@@ -93,9 +93,7 @@ Do not copy them verbatim into every section; translate them into readable workf
                     "**Pre-computed Codebase Analysis (from field guide)**\n"
                     "Use this analysis as PRIMARY context — it contains detailed, "
                     "grounded information about each part of the codebase. "
-                    "Sections referencing this analysis should have confidence: high.\n\n"
-                    + "\n\n".join(lines)
-                    + "\n\n"
+                    "Sections referencing this analysis should have confidence: high.\n\n" + "\n\n".join(lines) + "\n\n"
                 )
     except (json.JSONDecodeError, TypeError, ValueError):
         pass

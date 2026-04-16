@@ -1,0 +1,105 @@
+# SourceBridge — Docker Hub Images
+#
+# Use this file to run SourceBridge from pre-built images (no git clone needed).
+#
+# Quick start:
+#   curl -O https://raw.githubusercontent.com/sourcebridge-ai/sourcebridge/main/docker-compose.hub.yml
+#   docker compose -f docker-compose.hub.yml up -d
+#
+# With a cloud LLM provider:
+#   SOURCEBRIDGE_LLM_PROVIDER=anthropic \
+#   SOURCEBRIDGE_LLM_API_KEY=sk-ant-... \
+#   SOURCEBRIDGE_LLM_MODEL=claude-sonnet-4-20250514 \
+#   docker compose -f docker-compose.hub.yml up -d
+#
+# Default: Ollama (local inference, no API key needed).
+#   Install Ollama first: https://ollama.com
+#   Pull a model: ollama pull qwen3:32b
+
+services:
+  surrealdb:
+    image: surrealdb/surrealdb:v2.2.1
+    command: start --user root --pass root --log info file:/data/database.db
+    volumes:
+      - surrealdb-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  sourcebridge:
+    image: sourcebridge/sourcebridge-api:latest
+    ports:
+      - "${SOURCEBRIDGE_API_PORT:-8080}:8080"
+    environment:
+      - SOURCEBRIDGE_STORAGE_SURREAL_MODE=external
+      - SOURCEBRIDGE_STORAGE_SURREAL_URL=ws://surrealdb:8000/rpc
+      - SOURCEBRIDGE_STORAGE_SURREAL_NAMESPACE=sourcebridge
+      - SOURCEBRIDGE_STORAGE_SURREAL_DATABASE=sourcebridge
+      - SOURCEBRIDGE_STORAGE_SURREAL_USER=root
+      - SOURCEBRIDGE_STORAGE_SURREAL_PASS=root
+      - SOURCEBRIDGE_STORAGE_REDIS_MODE=memory
+      - SOURCEBRIDGE_WORKER_ADDRESS=worker:50051
+      - SOURCEBRIDGE_SECURITY_GRPC_AUTH_SECRET=${SOURCEBRIDGE_GRPC_SECRET:-dev-shared-secret}
+      - SOURCEBRIDGE_SECURITY_JWT_SECRET=${SOURCEBRIDGE_JWT_SECRET:-dev-jwt-secret-change-me}
+    depends_on:
+      surrealdb:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  worker:
+    image: sourcebridge/sourcebridge-worker:latest
+    environment:
+      - SOURCEBRIDGE_WORKER_GRPC_PORT=50051
+      - SOURCEBRIDGE_WORKER_SURREAL_URL=ws://surrealdb:8000/rpc
+      - SOURCEBRIDGE_WORKER_SURREAL_NAMESPACE=sourcebridge
+      - SOURCEBRIDGE_WORKER_SURREAL_DATABASE=sourcebridge
+      - SOURCEBRIDGE_WORKER_SURREAL_USER=root
+      - SOURCEBRIDGE_WORKER_SURREAL_PASS=root
+      - SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET=${SOURCEBRIDGE_GRPC_SECRET:-dev-shared-secret}
+      - SOURCEBRIDGE_WORKER_LLM_PROVIDER=${SOURCEBRIDGE_LLM_PROVIDER:-ollama}
+      - SOURCEBRIDGE_WORKER_LLM_BASE_URL=${SOURCEBRIDGE_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      - SOURCEBRIDGE_WORKER_LLM_MODEL=${SOURCEBRIDGE_LLM_MODEL:-qwen3:32b}
+      - SOURCEBRIDGE_WORKER_LLM_API_KEY=${SOURCEBRIDGE_LLM_API_KEY:-not-needed}
+      - SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER=${SOURCEBRIDGE_EMBEDDING_PROVIDER:-ollama}
+      - SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL=${SOURCEBRIDGE_EMBEDDING_BASE_URL:-${SOURCEBRIDGE_LLM_BASE_URL:-http://host.docker.internal:11434}}
+    depends_on:
+      surrealdb:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; ch = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=2)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  web:
+    image: sourcebridge/sourcebridge-web:latest
+    ports:
+      - "${SOURCEBRIDGE_WEB_PORT:-3000}:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://sourcebridge:8080
+      - SOURCEBRIDGE_WEB_DEV_PROXY=http://sourcebridge:8080
+    depends_on:
+      sourcebridge:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  surrealdb-data:

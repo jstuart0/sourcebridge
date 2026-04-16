@@ -8,12 +8,36 @@ from workers.requirements.spec_models import CandidateSpec
 
 # Behavioral keywords that indicate a comment describes a requirement
 BEHAVIORAL_KEYWORDS = {
-    "creates", "returns", "validates", "processes", "handles", "ensures",
-    "verifies", "checks", "computes", "transforms", "fetches", "stores",
-    "deletes", "updates", "authorizes", "authenticates",
-    "must", "should", "shall", "required", "expected", "guarantee",
-    "invariant", "precondition", "postcondition",
-    "if", "when", "unless", "provided that", "given that",
+    "creates",
+    "returns",
+    "validates",
+    "processes",
+    "handles",
+    "ensures",
+    "verifies",
+    "checks",
+    "computes",
+    "transforms",
+    "fetches",
+    "stores",
+    "deletes",
+    "updates",
+    "authorizes",
+    "authenticates",
+    "must",
+    "should",
+    "shall",
+    "required",
+    "expected",
+    "guarantee",
+    "invariant",
+    "precondition",
+    "postcondition",
+    "if",
+    "when",
+    "unless",
+    "provided that",
+    "given that",
 }
 
 # Auto-generated markers to skip
@@ -32,9 +56,7 @@ MIN_WORD_COUNT = 20
 class DocCommentScanner:
     """Extracts candidate specs from documentation comments."""
 
-    def extract(
-        self, path: str, content: str, language: str
-    ) -> list[CandidateSpec]:
+    def extract(self, path: str, content: str, language: str) -> list[CandidateSpec]:
         """Extract candidate specs from doc comments in a source file."""
         # Skip auto-generated files
         first_500 = content[:500]
@@ -179,10 +201,7 @@ class DocCommentScanner:
         for match in jsdoc_pattern.finditer(content):
             raw = match.group(1)
             # Clean up JSDoc formatting
-            lines = [
-                re.sub(r"^\s*\*\s?", "", line).strip()
-                for line in raw.split("\n")
-            ]
+            lines = [re.sub(r"^\s*\*\s?", "", line).strip() for line in raw.split("\n")]
             cleaned = " ".join(line for line in lines if line)
 
             # Extract @description if present
@@ -237,10 +256,7 @@ class DocCommentScanner:
 
         for match in javadoc_pattern.finditer(content):
             raw = match.group(1)
-            lines = [
-                re.sub(r"^\s*\*\s?", "", line).strip()
-                for line in raw.split("\n")
-            ]
+            lines = [re.sub(r"^\s*\*\s?", "", line).strip() for line in raw.split("\n")]
             # Take everything before the first @param/@return/@throws
             text_lines: list[str] = []
             for line in lines:

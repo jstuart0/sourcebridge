@@ -124,11 +124,14 @@ class OpenAICompatProvider:
         if self.disable_thinking:
             extra_body["chat_template_kwargs"] = {"enable_thinking": False}
 
-        log.info("llm_request_dispatch", **self._request_metadata(
-            use_model=use_model,
-            extra_body=extra_body or None,
-            operation="complete",
-        ))
+        log.info(
+            "llm_request_dispatch",
+            **self._request_metadata(
+                use_model=use_model,
+                extra_body=extra_body or None,
+                operation="complete",
+            ),
+        )
 
         response = await self.client.chat.completions.create(
             model=use_model,
@@ -213,11 +216,14 @@ class OpenAICompatProvider:
             extra_body = dict(extra_body or {})
             extra_body["chat_template_kwargs"] = {"enable_thinking": False}
 
-        log.info("llm_request_dispatch", **self._request_metadata(
-            use_model=use_model,
-            extra_body=extra_body,
-            operation="stream",
-        ))
+        log.info(
+            "llm_request_dispatch",
+            **self._request_metadata(
+                use_model=use_model,
+                extra_body=extra_body,
+                operation="stream",
+            ),
+        )
 
         stream = await self.client.chat.completions.create(
             model=use_model,

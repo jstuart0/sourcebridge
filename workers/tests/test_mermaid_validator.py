@@ -39,5 +39,5 @@ def test_validate_and_repair_mermaid_normalizes_quoted_edge_labels():
     )
 
     assert result.validation_status == "repaired"
-    assert '-->|31 calls|' in result.mermaid_source
+    assert "-->|31 calls|" in result.mermaid_source
     assert '"31 calls"' not in result.mermaid_source

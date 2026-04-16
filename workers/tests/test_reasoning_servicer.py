@@ -60,8 +60,7 @@ async def test_analyze_symbol(servicer, context):
     request = reasoning_pb2.AnalyzeSymbolRequest(
         symbol=symbol,
         surrounding_context=(
-            "func processPayment(ctx context.Context, order Order)"
-            " (Receipt, error) { validate(order); charge(order) }"
+            "func processPayment(ctx context.Context, order Order) (Receipt, error) { validate(order); charge(order) }"
         ),
     )
 
@@ -127,17 +126,25 @@ async def test_answer_question_prefers_context_code(servicer, context, monkeypat
         captured["context_code"] = context_code
         captured["context_metadata"] = context_metadata
         return (
-            type("Discussion", (), {
-                "answer": "ok",
-                "references": [],
-                "related_requirements": [],
-            })(),
-            type("Usage", (), {
-                "model": "fake-test-model",
-                "input_tokens": 10,
-                "output_tokens": 5,
-                "operation": "discussion",
-            })(),
+            type(
+                "Discussion",
+                (),
+                {
+                    "answer": "ok",
+                    "references": [],
+                    "related_requirements": [],
+                },
+            )(),
+            type(
+                "Usage",
+                (),
+                {
+                    "model": "fake-test-model",
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                    "operation": "discussion",
+                },
+            )(),
         )
 
     monkeypatch.setattr("workers.reasoning.servicer.discuss_code", fake_discuss_code)

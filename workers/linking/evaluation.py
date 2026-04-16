@@ -98,9 +98,7 @@ def evaluate(predicted: list[Link], gold: list[GoldLink]) -> EvalResult:
     return result
 
 
-def evaluate_confidence_calibration(
-    predicted: list[Link], gold: list[GoldLink], threshold: float = 0.9
-) -> float:
+def evaluate_confidence_calibration(predicted: list[Link], gold: list[GoldLink], threshold: float = 0.9) -> float:
     """Evaluate confidence calibration.
 
     For links above the threshold, what fraction are correct?

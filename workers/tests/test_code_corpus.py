@@ -176,15 +176,17 @@ def test_code_corpus_leaf_content_raises_on_non_leaf() -> None:
 def test_code_corpus_chunks_noisy_integration_files_without_losing_symbol_names() -> None:
     symbols = []
     for idx in range(8):
-        symbols.append({
-            "id": f"sym-{idx}",
-            "name": f"helper_{idx}",
-            "kind": "function",
-            "file_path": "backend/services/google_sheets.py",
-            "start_line": 10 + idx * 5,
-            "end_line": 13 + idx * 5,
-            "signature": f"def helper_{idx}(): ...",
-        })
+        symbols.append(
+            {
+                "id": f"sym-{idx}",
+                "name": f"helper_{idx}",
+                "kind": "function",
+                "file_path": "backend/services/google_sheets.py",
+                "start_line": 10 + idx * 5,
+                "end_line": 13 + idx * 5,
+                "signature": f"def helper_{idx}(): ...",
+            }
+        )
     snap = {
         "repository_id": "repo-noisy",
         "repository_name": "NoisyRepo",

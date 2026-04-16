@@ -99,19 +99,17 @@ class DocumentCorpus:
     # Construction
 
     def _build(self) -> None:
-        self._revision_fp = str(
-            self.payload.get("revision_fingerprint")
-            or self.payload.get("updated_at")
-            or ""
-        )
+        self._revision_fp = str(self.payload.get("revision_fingerprint") or self.payload.get("updated_at") or "")
         collection_name = str(self.payload.get("collection_name") or "Documents")
-        self._add_unit(CorpusUnit(
-            id="collection",
-            kind=UnitKind.ROOT,
-            level=3,
-            label=collection_name,
-            metadata={"collection_id": self.corpus_id},
-        ))
+        self._add_unit(
+            CorpusUnit(
+                id="collection",
+                kind=UnitKind.ROOT,
+                level=3,
+                label=collection_name,
+                metadata={"collection_id": self.corpus_id},
+            )
+        )
 
         documents = self._normalize_documents(self.payload)
         for doc in documents:
@@ -123,25 +121,29 @@ class DocumentCorpus:
             return [d for d in docs_field if isinstance(d, dict)]
         if isinstance(payload.get("content"), str):
             # Single-document shortcut.
-            return [{
-                "id": payload.get("id") or payload.get("title") or "document",
-                "title": payload.get("title") or "Document",
-                "content": payload["content"],
-            }]
+            return [
+                {
+                    "id": payload.get("id") or payload.get("title") or "document",
+                    "title": payload.get("title") or "Document",
+                    "content": payload["content"],
+                }
+            ]
         return []
 
     def _build_document(self, doc: dict[str, Any]) -> None:
         doc_id_raw = str(doc.get("id") or doc.get("title") or "doc")
         doc_title = str(doc.get("title") or doc_id_raw)
         doc_unit_id = f"doc:{doc_id_raw}"
-        self._add_unit(CorpusUnit(
-            id=doc_unit_id,
-            kind=UnitKind.GROUP,
-            level=2,
-            label=doc_title,
-            parent_id="collection",
-            metadata={"document_id": doc_id_raw},
-        ))
+        self._add_unit(
+            CorpusUnit(
+                id=doc_unit_id,
+                kind=UnitKind.GROUP,
+                level=2,
+                label=doc_title,
+                parent_id="collection",
+                metadata={"document_id": doc_id_raw},
+            )
+        )
 
         content = str(doc.get("content") or "").strip()
         if not content:
@@ -181,23 +183,27 @@ class DocumentCorpus:
         doc_title: str,
     ) -> None:
         sec_unit_id = f"sec:{doc_id_raw}:empty"
-        self._add_unit(CorpusUnit(
-            id=sec_unit_id,
-            kind=UnitKind.LEAF_CONTAINER,
-            level=1,
-            label=doc_title,
-            parent_id=doc_unit_id,
-            metadata={"document_id": doc_id_raw},
-        ))
+        self._add_unit(
+            CorpusUnit(
+                id=sec_unit_id,
+                kind=UnitKind.LEAF_CONTAINER,
+                level=1,
+                label=doc_title,
+                parent_id=doc_unit_id,
+                metadata={"document_id": doc_id_raw},
+            )
+        )
         leaf_id = f"para:{doc_id_raw}:empty"
-        self._add_unit(CorpusUnit(
-            id=leaf_id,
-            kind=UnitKind.LEAF,
-            level=0,
-            label="(empty document)",
-            parent_id=sec_unit_id,
-            metadata={"document_id": doc_id_raw},
-        ))
+        self._add_unit(
+            CorpusUnit(
+                id=leaf_id,
+                kind=UnitKind.LEAF,
+                level=0,
+                label="(empty document)",
+                parent_id=sec_unit_id,
+                metadata={"document_id": doc_id_raw},
+            )
+        )
         self._leaf_texts[leaf_id] = f"Document `{doc_title}` is empty."
 
     def _add_section_with_paragraphs(
@@ -210,47 +216,53 @@ class DocumentCorpus:
         paragraphs: list[str],
     ) -> None:
         sec_unit_id = f"sec:{doc_id_raw}:{section_id}"
-        self._add_unit(CorpusUnit(
-            id=sec_unit_id,
-            kind=UnitKind.LEAF_CONTAINER,
-            level=1,
-            label=section_title[:80],
-            parent_id=doc_unit_id,
-            metadata={
-                "document_id": doc_id_raw,
-                "section_id": section_id,
-            },
-        ))
+        self._add_unit(
+            CorpusUnit(
+                id=sec_unit_id,
+                kind=UnitKind.LEAF_CONTAINER,
+                level=1,
+                label=section_title[:80],
+                parent_id=doc_unit_id,
+                metadata={
+                    "document_id": doc_id_raw,
+                    "section_id": section_id,
+                },
+            )
+        )
 
         if not paragraphs:
             leaf_id = f"para:{doc_id_raw}:{section_id}:empty"
-            self._add_unit(CorpusUnit(
-                id=leaf_id,
-                kind=UnitKind.LEAF,
-                level=0,
-                label="(no paragraphs)",
-                parent_id=sec_unit_id,
-                metadata={"document_id": doc_id_raw},
-            ))
+            self._add_unit(
+                CorpusUnit(
+                    id=leaf_id,
+                    kind=UnitKind.LEAF,
+                    level=0,
+                    label="(no paragraphs)",
+                    parent_id=sec_unit_id,
+                    metadata={"document_id": doc_id_raw},
+                )
+            )
             self._leaf_texts[leaf_id] = f"Section `{section_title}` has no paragraphs."
             return
 
         for idx, paragraph in enumerate(paragraphs):
             leaf_id = f"para:{doc_id_raw}:{section_id}:{idx}"
             label = paragraph.splitlines()[0][:80] if paragraph.splitlines() else "paragraph"
-            self._add_unit(CorpusUnit(
-                id=leaf_id,
-                kind=UnitKind.LEAF,
-                level=0,
-                label=label,
-                parent_id=sec_unit_id,
-                size_tokens=max(20, len(paragraph) // 4),
-                metadata={
-                    "document_id": doc_id_raw,
-                    "section_id": section_id,
-                    "paragraph_index": idx,
-                },
-            ))
+            self._add_unit(
+                CorpusUnit(
+                    id=leaf_id,
+                    kind=UnitKind.LEAF,
+                    level=0,
+                    label=label,
+                    parent_id=sec_unit_id,
+                    size_tokens=max(20, len(paragraph) // 4),
+                    metadata={
+                        "document_id": doc_id_raw,
+                        "section_id": section_id,
+                        "paragraph_index": idx,
+                    },
+                )
+            )
             self._leaf_texts[leaf_id] = paragraph.strip()
 
     def _add_unit(self, unit: CorpusUnit) -> None:
@@ -326,5 +338,5 @@ def _split_paragraphs(text: str, max_paragraphs: int) -> list[str]:
         return chunks
     # Merge overflow into the last slot.
     head = chunks[: max_paragraphs - 1]
-    tail = "\n\n".join(chunks[max_paragraphs - 1:])
+    tail = "\n\n".join(chunks[max_paragraphs - 1 :])
     return head + [tail]

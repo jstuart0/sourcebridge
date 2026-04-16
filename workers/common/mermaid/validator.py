@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 _FENCE_RE = re.compile(r"```(?:mermaid)?\s*([\s\S]*?)```", re.IGNORECASE)
 _NODE_RE = re.compile(r'^\s*([A-Za-z0-9_]+)\s*\[\s*"([^"]+)"\s*\]\s*$')
 _SUBGRAPH_RE = re.compile(r'^\s*subgraph\s+([A-Za-z0-9_]+)\s*\[\s*"([^"]+)"\s*\]\s*$')
-_EDGE_RE = re.compile(r'^\s*([A-Za-z0-9_]+)\s*-->\s*(?:\|[^|]*\|\s*)?([A-Za-z0-9_]+)\s*$')
+_EDGE_RE = re.compile(r"^\s*([A-Za-z0-9_]+)\s*-->\s*(?:\|[^|]*\|\s*)?([A-Za-z0-9_]+)\s*$")
 _INLINE_NODE_RE = re.compile(r'([A-Za-z0-9_]+)\s*\[\s*"([^"]+)"\s*\]')
 _QUOTED_EDGE_LABEL_RE = re.compile(r'(-->\s*)\|"([^"]+)"\|')
 

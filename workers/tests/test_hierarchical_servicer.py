@@ -50,17 +50,19 @@ class _StubProvider:
         # and asks for a JSON array of sections. Everything else is a
         # hierarchical summary step.
         if "=== Task ===" in prompt or "Return a JSON array of sections" in prompt:
-            payload = json.dumps([
-                {
-                    "title": title,
-                    "content": f"Hierarchical body for {title}",
-                    "summary": f"Summary for {title}",
-                    "confidence": "medium",
-                    "inferred": False,
-                    "evidence": [],
-                }
-                for title in REQUIRED_SECTIONS
-            ])
+            payload = json.dumps(
+                [
+                    {
+                        "title": title,
+                        "content": f"Hierarchical body for {title}",
+                        "summary": f"Summary for {title}",
+                        "confidence": "medium",
+                        "inferred": False,
+                        "evidence": [],
+                    }
+                    for title in REQUIRED_SECTIONS
+                ]
+            )
             return LLMResponse(
                 content=payload,
                 model=model or "stub",
@@ -70,11 +72,7 @@ class _StubProvider:
             )
 
         # Hierarchical summary stub.
-        body = (
-            f"Headline for call {self.counter}\n"
-            f"\n"
-            f"Synthetic summary produced on call {self.counter}."
-        )
+        body = f"Headline for call {self.counter}\n\nSynthetic summary produced on call {self.counter}."
         return LLMResponse(
             content=body,
             model=model or "stub",
@@ -182,6 +180,7 @@ def test_selected_strategy_default_chain_starts_with_hierarchical(
         DEFAULT_CLIFF_NOTES_CHAIN,
         _cliff_notes_preference_chain,
     )
+
     monkeypatch.delenv(CLIFF_NOTES_STRATEGY_ENV, raising=False)
     assert _cliff_notes_preference_chain() == DEFAULT_CLIFF_NOTES_CHAIN
     assert _selected_cliff_notes_strategy() == "hierarchical"
@@ -197,6 +196,7 @@ def test_selected_strategy_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_preference_chain_parses_comma_separated(monkeypatch: pytest.MonkeyPatch) -> None:
     """Chain format: comma-separated, whitespace-tolerant, case-insensitive."""
     from workers.knowledge.servicer import _cliff_notes_preference_chain
+
     monkeypatch.setenv(
         CLIFF_NOTES_STRATEGY_ENV,
         "long_context_direct, HIERARCHICAL ,single_shot",
@@ -213,6 +213,7 @@ def test_preference_chain_falls_back_on_empty(monkeypatch: pytest.MonkeyPatch) -
         DEFAULT_CLIFF_NOTES_CHAIN,
         _cliff_notes_preference_chain,
     )
+
     monkeypatch.setenv(CLIFF_NOTES_STRATEGY_ENV, "")
     assert _cliff_notes_preference_chain() == DEFAULT_CLIFF_NOTES_CHAIN
     monkeypatch.setenv(CLIFF_NOTES_STRATEGY_ENV, "   ,   ")
@@ -418,6 +419,7 @@ async def test_hierarchical_path_handles_scoped_request(monkeypatch: pytest.Monk
 
     # Should produce cliff notes with every required file-scope section.
     from workers.knowledge.prompts.cliff_notes import REQUIRED_SECTIONS_BY_SCOPE
+
     expected = REQUIRED_SECTIONS_BY_SCOPE["file"]
     titles = [s.title for s in result.sections]
     for required in expected:

@@ -1166,16 +1166,6 @@ func mapProtoConfidence(c string) knowledgepkg.ConfidenceLevel {
 	}
 }
 
-func knowledgeAudiencePtr(a knowledgepkg.Audience) *KnowledgeAudience {
-	v := mapAudience(a)
-	return &v
-}
-
-func knowledgeDepthPtr(d knowledgepkg.Depth) *KnowledgeDepth {
-	v := mapDepth(d)
-	return &v
-}
-
 func ptrString(s string) *string {
 	if s == "" {
 		return nil

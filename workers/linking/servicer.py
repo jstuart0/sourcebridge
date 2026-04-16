@@ -135,8 +135,7 @@ class LinkingServicer(linking_pb2_grpc.LinkingServiceServicer):
         comment_result = extract_comment_links(entities)
         # Filter to only links referencing THIS requirement
         comment_links = [
-            lk for lk in comment_result.links
-            if lk.requirement_id == req.id or lk.requirement_id == req.external_id
+            lk for lk in comment_result.links if lk.requirement_id == req.id or lk.requirement_id == req.external_id
         ]
 
         # --- Semantic linking ---
@@ -145,11 +144,13 @@ class LinkingServicer(linking_pb2_grpc.LinkingServiceServicer):
         if req_text and entities:
             try:
                 semantic_result = await extract_semantic_links(
-                    requirements=[RequirementText(
-                        id=req.id,
-                        text=req_text,
-                        label=req.external_id or req.id,
-                    )],
+                    requirements=[
+                        RequirementText(
+                            id=req.id,
+                            text=req_text,
+                            label=req.external_id or req.id,
+                        )
+                    ],
                     entities=entities,
                     embedding_provider=self._embedding,
                     threshold=max(min_confidence, 0.5),
@@ -187,7 +188,9 @@ class LinkingServicer(linking_pb2_grpc.LinkingServiceServicer):
 
         if not reqs or not candidates:
             return linking_pb2.BatchLinkResponse(
-                links=[], requirements_processed=0, links_found=0,
+                links=[],
+                requirements_processed=0,
+                links_found=0,
             )
 
         # Convert candidates to internal entities once
@@ -215,8 +218,7 @@ class LinkingServicer(linking_pb2_grpc.LinkingServiceServicer):
 
             # Filter comment links for this requirement
             req_comment_links = [
-                lk for lk in comment_result.links
-                if lk.requirement_id == req.id or lk.requirement_id == req.external_id
+                lk for lk in comment_result.links if lk.requirement_id == req.id or lk.requirement_id == req.external_id
             ]
 
             # Semantic linking with cached embeddings
@@ -224,11 +226,13 @@ class LinkingServicer(linking_pb2_grpc.LinkingServiceServicer):
             if req_text and entities:
                 try:
                     semantic_result = await extract_semantic_links(
-                        requirements=[RequirementText(
-                            id=req.id,
-                            text=req_text,
-                            label=req.external_id or req.id,
-                        )],
+                        requirements=[
+                            RequirementText(
+                                id=req.id,
+                                text=req_text,
+                                label=req.external_id or req.id,
+                            )
+                        ],
                         entities=entities,
                         embedding_provider=self._embedding,
                         threshold=max(min_confidence, 0.5),

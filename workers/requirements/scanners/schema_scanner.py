@@ -74,8 +74,7 @@ class APISchemaScanner:
                 description = self._collect_comments(lines, i - 2)
 
                 raw_text = (
-                    f"RPC {method_name}: accepts {request_type}, "
-                    f"returns {response_type}. Service: {service_name}."
+                    f"RPC {method_name}: accepts {request_type}, returns {response_type}. Service: {service_name}."
                 )
                 if description:
                     raw_text = f"{description} {raw_text}"
@@ -131,9 +130,7 @@ class APISchemaScanner:
                 description = self._collect_graphql_comments(lines, i - 2)
 
                 operation = current_type.lower()
-                raw_text = (
-                    f"{current_type} {field_name}: Returns {return_type}."
-                )
+                raw_text = f"{current_type} {field_name}: Returns {return_type}."
                 if description:
                     raw_text = f"{description} {raw_text}"
 
@@ -203,7 +200,7 @@ class APISchemaScanner:
                 req_fields: list[str] = []
                 req_required: list[str] = []
                 if isinstance(request_body, dict):
-                    for ct, ct_data in request_body.get("content", {}).items():
+                    for _ct, ct_data in request_body.get("content", {}).items():
                         schema = ct_data.get("schema", {}) if isinstance(ct_data, dict) else {}
                         props = schema.get("properties", {})
                         req_fields = list(props.keys()) if isinstance(props, dict) else []
@@ -219,11 +216,11 @@ class APISchemaScanner:
                 responses = details.get("responses", {})
                 resp_status = ""
                 resp_fields: list[str] = []
-                for status, resp_data in (responses.items() if isinstance(responses, dict) else []):
+                for status, resp_data in responses.items() if isinstance(responses, dict) else []:
                     if status.startswith("2"):
                         resp_status = status
                         if isinstance(resp_data, dict):
-                            for ct, ct_data in resp_data.get("content", {}).items():
+                            for _ct, ct_data in resp_data.get("content", {}).items():
                                 schema = ct_data.get("schema", {}) if isinstance(ct_data, dict) else {}
                                 props = schema.get("properties", {})
                                 resp_fields = list(props.keys()) if isinstance(props, dict) else []

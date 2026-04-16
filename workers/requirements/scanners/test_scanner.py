@@ -147,9 +147,7 @@ class TestFileScanner:
 
         return candidates
 
-    def _resolve_file_under_test(
-        self, test_file: str, language: str, repo_files: list[str]
-    ) -> str | None:
+    def _resolve_file_under_test(self, test_file: str, language: str, repo_files: list[str]) -> str | None:
         """Map a test file to its implementation file."""
         basename = os.path.basename(test_file)
         dirpath = os.path.dirname(test_file)
@@ -173,8 +171,16 @@ class TestFileScanner:
 
         elif language in ("typescript", "javascript"):
             # user.test.ts -> user.ts
-            for suffix in (".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx",
-                           ".test.js", ".spec.js", ".test.jsx", ".spec.jsx"):
+            for suffix in (
+                ".test.ts",
+                ".test.tsx",
+                ".spec.ts",
+                ".spec.tsx",
+                ".test.js",
+                ".spec.js",
+                ".test.jsx",
+                ".spec.jsx",
+            ):
                 if basename.endswith(suffix):
                     ext = ".ts" if "ts" in suffix else ".js"
                     if "tsx" in suffix:
@@ -193,9 +199,7 @@ class TestFileScanner:
                 if basename.endswith(suffix):
                     impl = basename[: -len(suffix)] + ".java"
                     # Convert test path to main path
-                    impl_path = test_file.replace(
-                        "/test/", "/main/"
-                    ).replace(basename, impl)
+                    impl_path = test_file.replace("/test/", "/main/").replace(basename, impl)
                     candidates.append(impl_path)
                     break
 

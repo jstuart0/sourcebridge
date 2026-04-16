@@ -11,7 +11,9 @@ async def test_function_summary_structure():
     """Summarizer returns structured JSON with all required fields."""
     provider = FakeLLMProvider()
     summary, usage = await summarize_function(
-        provider, "processPayment", "go",
+        provider,
+        "processPayment",
+        "go",
         "func processPayment(ctx context.Context, order Order) (Receipt, error) { ... }",
         "// Processes a payment transaction",
     )
@@ -31,7 +33,9 @@ async def test_function_summary_content():
     """Summary purpose contains relevant content."""
     provider = FakeLLMProvider()
     summary, _ = await summarize_function(
-        provider, "processPayment", "go",
+        provider,
+        "processPayment",
+        "go",
         "func processPayment(ctx, order) { validate(order); charge(order) }",
     )
     assert "payment" in summary.purpose.lower()
@@ -52,9 +56,7 @@ async def test_function_summary_usage_tracking():
 async def test_file_summary():
     """File-level summary returns structured result."""
     provider = FakeLLMProvider()
-    summary, usage = await summarize_file(
-        provider, "main.go", "go", ["StartServer", "handleRequest", "main"]
-    )
+    summary, usage = await summarize_file(provider, "main.go", "go", ["StartServer", "handleRequest", "main"])
     assert summary.purpose != ""
     assert summary.level == "file"
     assert summary.entity_name == "main.go"

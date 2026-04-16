@@ -12,28 +12,36 @@ import pytest
 from workers.common.llm.fake import FakeLLMProvider
 from workers.knowledge.learning_path import generate_learning_path
 
-SAMPLE_SNAPSHOT = json.dumps({
-    "repository_id": "repo-1",
-    "repository_name": "test-repo",
-    "file_count": 2,
-    "symbol_count": 3,
-    "test_count": 0,
-    "languages": [{"language": "go", "file_count": 2, "line_count": 100}],
-    "modules": [{"name": "main", "path": ".", "file_count": 2}],
-    "entry_points": [{
-        "id": "sym-1", "name": "main", "kind": "function",
-        "file_path": "main.go", "start_line": 1, "end_line": 20,
-    }],
-    "public_api": [],
-    "complex_symbols": [],
-    "high_fan_out": [],
-    "high_fan_in": [],
-    "test_symbols": [],
-    "requirements": [],
-    "links": [],
-    "docs": [],
-    "source_revision": {"commit_sha": "", "branch": "", "content_fingerprint": "abc", "docs_fingerprint": ""},
-})
+SAMPLE_SNAPSHOT = json.dumps(
+    {
+        "repository_id": "repo-1",
+        "repository_name": "test-repo",
+        "file_count": 2,
+        "symbol_count": 3,
+        "test_count": 0,
+        "languages": [{"language": "go", "file_count": 2, "line_count": 100}],
+        "modules": [{"name": "main", "path": ".", "file_count": 2}],
+        "entry_points": [
+            {
+                "id": "sym-1",
+                "name": "main",
+                "kind": "function",
+                "file_path": "main.go",
+                "start_line": 1,
+                "end_line": 20,
+            }
+        ],
+        "public_api": [],
+        "complex_symbols": [],
+        "high_fan_out": [],
+        "high_fan_in": [],
+        "test_symbols": [],
+        "requirements": [],
+        "links": [],
+        "docs": [],
+        "source_revision": {"commit_sha": "", "branch": "", "content_fingerprint": "abc", "docs_fingerprint": ""},
+    }
+)
 
 
 @pytest.mark.asyncio

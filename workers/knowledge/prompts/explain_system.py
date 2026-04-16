@@ -14,9 +14,9 @@ in markdown format. Reference specific files and symbols from the snapshot.
 
 
 _DEPTH_GUIDANCE = {
-    "summary": "Keep it brief — a high-level overview in a few paragraphs. Focus on the big picture, skip implementation details.",
-    "medium": "Provide a balanced explanation with enough detail to understand the design and key decisions, but don't go line-by-line.",
-    "deep": "Be thorough and detailed. Explain architecture, design patterns, edge cases, and implementation specifics. Include code-level references.",
+    "summary": "Keep it brief — a high-level overview in a few paragraphs. Focus on the big picture, skip implementation details.",  # noqa: E501
+    "medium": "Provide a balanced explanation with enough detail to understand the design and key decisions, but don't go line-by-line.",  # noqa: E501
+    "deep": "Be thorough and detailed. Explain architecture, design patterns, edge cases, and implementation specifics. Include code-level references.",  # noqa: E501
 }
 
 

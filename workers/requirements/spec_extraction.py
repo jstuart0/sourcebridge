@@ -96,19 +96,13 @@ async def extract_specs_structural(
         lang = file_entry.language or detect_language(file_entry.path)
 
         if test_scanner.is_test_file(file_entry.path, lang):
-            candidates.extend(
-                test_scanner.extract(file_entry.path, content, lang, files)
-            )
+            candidates.extend(test_scanner.extract(file_entry.path, content, lang, files))
         elif schema_scanner.is_schema_file(file_entry.path, content):
-            candidates.extend(
-                schema_scanner.extract(file_entry.path, content)
-            )
+            candidates.extend(schema_scanner.extract(file_entry.path, content))
 
         # Doc comments are extracted from all non-test source files
         if not test_scanner.is_test_file(file_entry.path, lang):
-            candidates.extend(
-                comment_scanner.extract(file_entry.path, content, lang)
-            )
+            candidates.extend(comment_scanner.extract(file_entry.path, content, lang))
 
     return candidates
 
@@ -122,7 +116,7 @@ def humanize_test_name(name: str) -> str:
     # Strip common prefixes
     for prefix in ("Test", "test_", "test"):
         if name.startswith(prefix):
-            name = name[len(prefix):]
+            name = name[len(prefix) :]
             break
 
     # Split on _ and camelCase boundaries
@@ -137,10 +131,7 @@ def humanize_test_name(name: str) -> str:
 
 def humanize_candidate(c: CandidateSpec) -> RefinedSpec:
     """Convert a raw candidate to a refined spec without LLM."""
-    if c.source == "test":
-        text = humanize_test_name(c.raw_text)
-    else:
-        text = c.raw_text
+    text = humanize_test_name(c.raw_text) if c.source == "test" else c.raw_text
 
     confidence = compute_confidence([c])
 
@@ -182,10 +173,7 @@ def compute_confidence(candidates: list[CandidateSpec]) -> str:
 
     # MEDIUM: Comment with behavioral keywords
     if has_comment:
-        keyword_count = sum(
-            len(c.metadata.get("behavioral_keywords", []))
-            for c in candidates
-        )
+        keyword_count = sum(len(c.metadata.get("behavioral_keywords", [])) for c in candidates)
         if keyword_count >= 3:
             return "medium"
 
@@ -331,7 +319,9 @@ async def extract_specs_pipeline(
 
     if total_candidates == 0:
         return ExtractionResult(
-            specs=[], total_candidates=0, usage=None,
+            specs=[],
+            total_candidates=0,
+            usage=None,
             warnings=["No specs found in source files"],
         )
 

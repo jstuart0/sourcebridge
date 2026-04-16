@@ -212,15 +212,17 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
 
         findings = []
         for f in result.findings:
-            findings.append(reasoning_pb2.ReviewFinding(
-                category=f.category,
-                severity=f.severity,
-                message=f.message,
-                file_path=f.file_path,
-                start_line=f.start_line,
-                end_line=f.end_line,
-                suggestion=f.suggestion,
-            ))
+            findings.append(
+                reasoning_pb2.ReviewFinding(
+                    category=f.category,
+                    severity=f.severity,
+                    message=f.message,
+                    file_path=f.file_path,
+                    start_line=f.start_line,
+                    end_line=f.end_line,
+                    suggestion=f.suggestion,
+                )
+            )
 
         return reasoning_pb2.ReviewFileResponse(
             template=result.template,

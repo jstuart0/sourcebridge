@@ -48,6 +48,7 @@ type Ping struct {
 	InstallationID string            `json:"installation_id"`
 	Version        string            `json:"version"`
 	Edition        string            `json:"edition"`
+	LLMProviderKind string           `json:"llm_provider_kind,omitempty"`
 	Platform       string            `json:"platform"`
 	GoVersion      string            `json:"go_version"`
 	Uptime         string            `json:"uptime"`
@@ -73,6 +74,7 @@ type Tracker struct {
 	startTime      time.Time
 	enabled        bool
 	interval       time.Duration
+	llmProviderKind string
 	provider       CountProvider
 	client         *http.Client
 	once           sync.Once
@@ -95,6 +97,12 @@ func WithInterval(d time.Duration) Option {
 // WithCountProvider sets the provider for aggregate counts.
 func WithCountProvider(p CountProvider) Option {
 	return func(t *Tracker) { t.provider = p }
+}
+
+// WithLLMProviderKind sets the configured provider class reported in telemetry.
+// Expected values are "local" or "cloud".
+func WithLLMProviderKind(kind string) Option {
+	return func(t *Tracker) { t.llmProviderKind = strings.TrimSpace(strings.ToLower(kind)) }
 }
 
 // New creates a telemetry tracker. Call Start() to begin pinging.
@@ -175,6 +183,7 @@ func (t *Tracker) send() {
 		InstallationID: t.installationID,
 		Version:        t.version,
 		Edition:        t.edition,
+		LLMProviderKind: t.llmProviderKind,
 		Platform:       runtime.GOOS + "/" + runtime.GOARCH,
 		GoVersion:      runtime.Version(),
 		Uptime:         time.Since(t.startTime).Truncate(time.Second).String(),

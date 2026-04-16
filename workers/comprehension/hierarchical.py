@@ -36,9 +36,10 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import monotonic
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 import structlog
 
@@ -53,8 +54,10 @@ from workers.common.llm.provider import (
 from workers.comprehension.corpus import (
     CorpusSource,
     CorpusUnit,
-    content_hash as corpus_content_hash,
     walk_by_level,
+)
+from workers.comprehension.corpus import (
+    content_hash as corpus_content_hash,
 )
 from workers.comprehension.prompts.hierarchical import (
     HIERARCHICAL_SYSTEM,
@@ -249,7 +252,9 @@ class HierarchicalStrategy:
                 stage="leaves",
                 total=len(leaf_units),
             )
-            await self._emit_log("leaves", "hierarchical_stage_started", "Leaf summarization started", {"total": len(leaf_units)})
+            await self._emit_log(
+                "leaves", "hierarchical_stage_started", "Leaf summarization started", {"total": len(leaf_units)}
+            )
             await self._summarize_leaves(corpus, leaf_units, tree, progress)
             log.info(
                 "hierarchical_stage_completed",
@@ -281,7 +286,9 @@ class HierarchicalStrategy:
                 stage="files",
                 total=len(file_units),
             )
-            await self._emit_log("files", "hierarchical_stage_started", "File summarization started", {"total": len(file_units)})
+            await self._emit_log(
+                "files", "hierarchical_stage_started", "File summarization started", {"total": len(file_units)}
+            )
             await self._summarize_nonleaf_stage(
                 corpus=corpus,
                 units=file_units,
@@ -312,9 +319,7 @@ class HierarchicalStrategy:
 
         # Level 2 — package summaries.
         if package_units:
-            await _maybe_await(
-                progress("packages", 0.8, f"Summarizing {len(package_units)} packages")
-            )
+            await _maybe_await(progress("packages", 0.8, f"Summarizing {len(package_units)} packages"))
             stage_started = monotonic()
             log.info(
                 "hierarchical_stage_started",
@@ -322,7 +327,9 @@ class HierarchicalStrategy:
                 stage="packages",
                 total=len(package_units),
             )
-            await self._emit_log("packages", "hierarchical_stage_started", "Package summarization started", {"total": len(package_units)})
+            await self._emit_log(
+                "packages", "hierarchical_stage_started", "Package summarization started", {"total": len(package_units)}
+            )
             await self._summarize_nonleaf_stage(
                 corpus=corpus,
                 units=package_units,
@@ -477,9 +484,7 @@ class HierarchicalStrategy:
                         f"Leaf summarization progress {completed}/{total}",
                         {"completed": completed, "total": total},
                     )
-                    await _maybe_await(
-                        progress("leaves", pct, f"Summarized {completed}/{total} segments")
-                    )
+                    await _maybe_await(progress("leaves", pct, f"Summarized {completed}/{total} segments"))
 
         await asyncio.gather(*(one(u) for u in leaves))
 

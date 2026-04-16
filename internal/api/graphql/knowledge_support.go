@@ -143,26 +143,6 @@ func buildArchitectureDiagramScaffold(store graphstore.GraphStore, repoID string
 	return json.Marshal(payload)
 }
 
-func enrichSnapshotWithArchitectureScaffold(snapshotJSON []byte, scaffoldJSON []byte) ([]byte, bool) {
-	if len(snapshotJSON) == 0 || len(scaffoldJSON) == 0 {
-		return snapshotJSON, false
-	}
-	var snapMap map[string]any
-	if err := json.Unmarshal(snapshotJSON, &snapMap); err != nil {
-		return snapshotJSON, false
-	}
-	var scaffold map[string]any
-	if err := json.Unmarshal(scaffoldJSON, &scaffold); err != nil {
-		return snapshotJSON, false
-	}
-	snapMap["_architecture_baseline"] = scaffold
-	enriched, err := json.Marshal(snapMap)
-	if err != nil {
-		return snapshotJSON, false
-	}
-	return enriched, true
-}
-
 func architectureDiagramMetadataJSON(resp *knowledgev1.GenerateArchitectureDiagramResponse, bundle *architectureDiagramPromptBundle) string {
 	if resp == nil || bundle == nil {
 		return ""
@@ -232,20 +212,6 @@ func architectureDiagramGraphAlignmentStatus(resp *knowledgev1.GenerateArchitect
 		return "aligned"
 	}
 	return ""
-}
-
-func architectureDiagramAllowedEdgeSet(flows []architectureSystemFlow) map[string]struct{} {
-	if len(flows) == 0 {
-		return nil
-	}
-	out := make(map[string]struct{}, len(flows))
-	for _, flow := range flows {
-		if flow.SourceID == "" || flow.TargetID == "" {
-			continue
-		}
-		out[fmt.Sprintf("%s -> %s", flow.SourceID, flow.TargetID)] = struct{}{}
-	}
-	return out
 }
 
 func architectureDiagramReverseEdgeSet(flows []architectureSystemFlow) map[string]struct{} {
@@ -1387,20 +1353,6 @@ func artifactKeyFromWorkflowStoryInput(input GenerateWorkflowStoryInput) (knowle
 		Depth:        knowledgeDepthValue(input.Depth),
 		Scope:        scope,
 	}.Normalized(), nil
-}
-
-func artifactKeyForStoredArtifact(artifact *knowledgepkg.Artifact) knowledgepkg.ArtifactKey {
-	scope := knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository}
-	if artifact.Scope != nil {
-		scope = artifact.Scope.Normalize()
-	}
-	return knowledgepkg.ArtifactKey{
-		RepositoryID: artifact.RepositoryID,
-		Type:         artifact.Type,
-		Audience:     artifact.Audience,
-		Depth:        artifact.Depth,
-		Scope:        scope,
-	}.Normalized()
 }
 
 func scopeTypeToGraph(scopeType KnowledgeScopeType) knowledgepkg.ScopeType {

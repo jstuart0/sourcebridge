@@ -12,7 +12,7 @@ def test_extract_go_comment():
         kind="function",
         start_line=37,
         end_line=44,
-        content='// REQ-001: System must start and listen on configured port\nfunc StartServer(cfg Config) error {',
+        content="// REQ-001: System must start and listen on configured port\nfunc StartServer(cfg Config) error {",
         doc_comment="// REQ-001: System must start and listen on configured port",
         language="go",
     )
@@ -82,7 +82,7 @@ def test_no_requirements_in_code():
         kind="function",
         start_line=1,
         end_line=5,
-        content="func main() {\n\tfmt.Println(\"hello\")\n}",
+        content='func main() {\n\tfmt.Println("hello")\n}',
         doc_comment="",
         language="go",
     )
@@ -94,20 +94,29 @@ def test_multiple_entities():
     """Comment linker processes multiple entities."""
     entities = [
         CodeEntity(
-            file_path="a.go", name="funcA", kind="function",
-            start_line=1, end_line=5,
+            file_path="a.go",
+            name="funcA",
+            kind="function",
+            start_line=1,
+            end_line=5,
             doc_comment="// REQ-001: first",
             language="go",
         ),
         CodeEntity(
-            file_path="b.go", name="funcB", kind="function",
-            start_line=1, end_line=5,
+            file_path="b.go",
+            name="funcB",
+            kind="function",
+            start_line=1,
+            end_line=5,
             doc_comment="// REQ-002: second",
             language="go",
         ),
         CodeEntity(
-            file_path="c.go", name="funcC", kind="function",
-            start_line=1, end_line=5,
+            file_path="c.go",
+            name="funcC",
+            kind="function",
+            start_line=1,
+            end_line=5,
             doc_comment="no requirement here",
             language="go",
         ),
@@ -119,8 +128,11 @@ def test_multiple_entities():
 def test_confidence_is_high():
     """Comment links should have high confidence."""
     entity = CodeEntity(
-        file_path="a.go", name="func", kind="function",
-        start_line=1, end_line=5,
+        file_path="a.go",
+        name="func",
+        kind="function",
+        start_line=1,
+        end_line=5,
         doc_comment="// REQ-100: test",
         language="go",
     )

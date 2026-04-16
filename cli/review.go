@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+
+	"github.com/sourcebridge/sourcebridge/internal/config"
 )
 
 var reviewImplCmd = &cobra.Command{
@@ -35,6 +37,10 @@ func init() {
 
 func runReview(cmd *cobra.Command, args []string) error {
 	targetPath := args[0]
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
 
 	absPath, err := filepath.Abs(targetPath)
 	if err != nil {
@@ -85,7 +91,8 @@ func runReview(cmd *cobra.Command, args []string) error {
 	for _, file := range filesToReview {
 		pyCmd := exec.CommandContext(cmd.Context(), "uv", "run", "python", "cli_review.py", file)
 		pyCmd.Dir = findWorkersDir()
-		pyCmd.Env = append(os.Environ(), "SOURCEBRIDGE_REVIEW_TEMPLATE="+reviewTemplate)
+		pyCmd.Env = append(os.Environ(), buildWorkerLLMEnv(cfg, cfg.LLM.ReviewModel, "SOURCEBRIDGE_LLM_REVIEW_MODEL")...)
+		pyCmd.Env = append(pyCmd.Env, "SOURCEBRIDGE_REVIEW_TEMPLATE="+reviewTemplate)
 
 		output, err := pyCmd.Output()
 		if err != nil {

@@ -14,7 +14,7 @@ from workers.linking.types import CodeEntity, Link, LinkResult, LinkSource, Link
 
 _TEST_REQ_PATTERN = re.compile(
     r"(?:test_?)?(?:req|REQ)[_-]?(\d+)|"  # test_req_001, test_REQ_001
-    r"(?:Test)?(?:Req|REQ)[_-]?(\d+)",     # TestReq001, TestREQ001
+    r"(?:Test)?(?:Req|REQ)[_-]?(\d+)",  # TestReq001, TestREQ001
     re.IGNORECASE,
 )
 

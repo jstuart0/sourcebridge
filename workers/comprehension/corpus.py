@@ -33,9 +33,9 @@ class UnitKind(StrEnum):
     """
 
     ROOT = "root"
-    GROUP = "group"           # package / document / collection
+    GROUP = "group"  # package / document / collection
     LEAF_CONTAINER = "leaf_container"  # file / section
-    LEAF = "leaf"             # segment / paragraph
+    LEAF = "leaf"  # segment / paragraph
 
     def is_leaf(self) -> bool:
         return self is UnitKind.LEAF

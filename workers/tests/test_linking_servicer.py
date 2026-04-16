@@ -1,6 +1,5 @@
 """Tests for the LinkingServicer gRPC servicer."""
 
-import grpc
 import pytest
 from common.v1 import types_pb2
 from linking.v1 import linking_pb2

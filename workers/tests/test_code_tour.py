@@ -13,21 +13,29 @@ from workers.common.llm.fake import FakeLLMProvider
 from workers.knowledge.code_tour import generate_code_tour
 from workers.knowledge.explain_system import explain_system
 
-SAMPLE_SNAPSHOT = json.dumps({
-    "repository_id": "repo-1",
-    "repository_name": "test-repo",
-    "file_count": 2,
-    "symbol_count": 3,
-    "languages": [{"language": "go", "file_count": 2, "line_count": 150}],
-    "entry_points": [{
-        "id": "sym-1", "name": "main", "kind": "function",
-        "file_path": "main.go", "start_line": 1, "end_line": 20,
-    }],
-    "public_api": [],
-    "complex_symbols": [],
-    "docs": [],
-    "source_revision": {"commit_sha": "", "branch": "", "content_fingerprint": "abc", "docs_fingerprint": ""},
-})
+SAMPLE_SNAPSHOT = json.dumps(
+    {
+        "repository_id": "repo-1",
+        "repository_name": "test-repo",
+        "file_count": 2,
+        "symbol_count": 3,
+        "languages": [{"language": "go", "file_count": 2, "line_count": 150}],
+        "entry_points": [
+            {
+                "id": "sym-1",
+                "name": "main",
+                "kind": "function",
+                "file_path": "main.go",
+                "start_line": 1,
+                "end_line": 20,
+            }
+        ],
+        "public_api": [],
+        "complex_symbols": [],
+        "docs": [],
+        "source_revision": {"commit_sha": "", "branch": "", "content_fingerprint": "abc", "docs_fingerprint": ""},
+    }
+)
 
 
 @pytest.mark.asyncio

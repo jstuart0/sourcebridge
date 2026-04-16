@@ -233,10 +233,10 @@ func TestRepositoryCliffNotesJobsDoNotAutoRetry(t *testing.T) {
 
 func TestQueuedKnowledgeJobsHeartbeatWhileWaitingForGate(t *testing.T) {
 	prevInterval := knowledgeQueueHeartbeatInterval
-	knowledgeQueueHeartbeatInterval = 10 * time.Millisecond
-	defer func() {
+	knowledgeQueueHeartbeatInterval = 20 * time.Millisecond
+	t.Cleanup(func() {
 		knowledgeQueueHeartbeatInterval = prevInterval
-	}()
+	})
 
 	knowledgeStore := knowledge.NewMemStore()
 	jobStore := llm.NewMemStore()
@@ -278,7 +278,7 @@ func TestQueuedKnowledgeJobsHeartbeatWhileWaitingForGate(t *testing.T) {
 	}, artifact.ID, knowledgeStore)
 	defer stop()
 
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	job = jobStore.GetByID("job-1")
 	if job == nil {

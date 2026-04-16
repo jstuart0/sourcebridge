@@ -85,91 +85,105 @@ def _build_tree() -> SummaryTree:
     """A small 4-level tree with 1 root, 2 packages, 3 files, 4 leaves.
     Sufficient to exercise the renderer's selection + formatting."""
     tree = SummaryTree(corpus_id="repo", corpus_type="code", strategy="hierarchical")
-    tree.add(SummaryNode(
-        id="r",
-        corpus_id="repo",
-        unit_id="repo",
-        level=3,
-        parent_id=None,
-        child_ids=["package:api", "package:store"],
-        summary_text="Headline\n\nRoot summary of the sample repository.",
-        headline="Sample repo headline",
-        source_tokens=500,
-        metadata={"repository_name": "Sample"},
-    ))
-    tree.add(SummaryNode(
-        id="pa",
-        corpus_id="repo",
-        unit_id="package:api",
-        level=2,
-        parent_id="repo",
-        child_ids=["file:api/a.go", "file:api/b.go"],
-        summary_text="API headline\n\nExposes the public HTTP API.",
-        headline="API package",
-        source_tokens=300,
-        metadata={"module_label": "api"},
-    ))
-    tree.add(SummaryNode(
-        id="ps",
-        corpus_id="repo",
-        unit_id="package:store",
-        level=2,
-        parent_id="repo",
-        child_ids=["file:store/repo.go"],
-        summary_text="Store headline\n\nPersists domain objects.",
-        headline="Store package",
-        source_tokens=200,
-        metadata={"module_label": "store"},
-    ))
-    tree.add(SummaryNode(
-        id="fa",
-        corpus_id="repo",
-        unit_id="file:api/a.go",
-        level=1,
-        parent_id="package:api",
-        summary_text="Auth handlers for login/logout.",
-        headline="Auth handlers",
-        source_tokens=150,
-        metadata={"file_path": "internal/api/auth.go"},
-    ))
-    tree.add(SummaryNode(
-        id="fb",
-        corpus_id="repo",
-        unit_id="file:api/b.go",
-        level=1,
-        parent_id="package:api",
-        summary_text="Router wiring.",
-        headline="Router",
-        source_tokens=100,
-        metadata={"file_path": "internal/api/router.go"},
-    ))
-    tree.add(SummaryNode(
-        id="fs",
-        corpus_id="repo",
-        unit_id="file:store/repo.go",
-        level=1,
-        parent_id="package:store",
-        summary_text="Repository pattern over SurrealDB.",
-        headline="Repository",
-        source_tokens=200,
-        metadata={"file_path": "internal/store/repo.go"},
-    ))
+    tree.add(
+        SummaryNode(
+            id="r",
+            corpus_id="repo",
+            unit_id="repo",
+            level=3,
+            parent_id=None,
+            child_ids=["package:api", "package:store"],
+            summary_text="Headline\n\nRoot summary of the sample repository.",
+            headline="Sample repo headline",
+            source_tokens=500,
+            metadata={"repository_name": "Sample"},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="pa",
+            corpus_id="repo",
+            unit_id="package:api",
+            level=2,
+            parent_id="repo",
+            child_ids=["file:api/a.go", "file:api/b.go"],
+            summary_text="API headline\n\nExposes the public HTTP API.",
+            headline="API package",
+            source_tokens=300,
+            metadata={"module_label": "api"},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="ps",
+            corpus_id="repo",
+            unit_id="package:store",
+            level=2,
+            parent_id="repo",
+            child_ids=["file:store/repo.go"],
+            summary_text="Store headline\n\nPersists domain objects.",
+            headline="Store package",
+            source_tokens=200,
+            metadata={"module_label": "store"},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fa",
+            corpus_id="repo",
+            unit_id="file:api/a.go",
+            level=1,
+            parent_id="package:api",
+            summary_text="Auth handlers for login/logout.",
+            headline="Auth handlers",
+            source_tokens=150,
+            metadata={"file_path": "internal/api/auth.go"},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fb",
+            corpus_id="repo",
+            unit_id="file:api/b.go",
+            level=1,
+            parent_id="package:api",
+            summary_text="Router wiring.",
+            headline="Router",
+            source_tokens=100,
+            metadata={"file_path": "internal/api/router.go"},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fs",
+            corpus_id="repo",
+            unit_id="file:store/repo.go",
+            level=1,
+            parent_id="package:store",
+            summary_text="Repository pattern over SurrealDB.",
+            headline="Repository",
+            source_tokens=200,
+            metadata={"file_path": "internal/store/repo.go"},
+        )
+    )
     return tree
 
 
 def _valid_response_payload() -> str:
     """Build a JSON payload with every required repository-scope section."""
-    return json.dumps([
-        {
-            "title": title,
-            "content": f"Body for {title}",
-            "summary": f"Summary for {title}",
-            "confidence": "high",
-            "inferred": False,
-            "evidence": [],
-        }
-        for title in REQUIRED_SECTIONS
-    ])
+    return json.dumps(
+        [
+            {
+                "title": title,
+                "content": f"Body for {title}",
+                "summary": f"Summary for {title}",
+                "confidence": "high",
+                "inferred": False,
+                "evidence": [],
+            }
+            for title in REQUIRED_SECTIONS
+        ]
+    )
 
 
 @pytest.mark.asyncio
@@ -197,14 +211,16 @@ async def test_render_returns_all_required_sections_from_valid_payload() -> None
 async def test_render_backfills_missing_sections_as_stubs() -> None:
     # Provider returns only one of the required sections — the renderer
     # should backfill the rest with low-confidence stubs.
-    payload = json.dumps([
-        {
-            "title": "System Purpose",
-            "content": "Provides sample services.",
-            "summary": "Sample service",
-            "confidence": "medium",
-        }
-    ])
+    payload = json.dumps(
+        [
+            {
+                "title": "System Purpose",
+                "content": "Provides sample services.",
+                "summary": "Sample service",
+                "confidence": "medium",
+            }
+        ]
+    )
     provider = _RecordingProvider(response_text=payload)
     renderer = CliffNotesRenderer(provider=provider)
     tree = _build_tree()
@@ -264,28 +280,32 @@ async def test_render_falls_back_when_final_render_call_fails() -> None:
 async def test_render_limits_group_summaries() -> None:
     """The renderer caps how many level-2 summaries it feeds into the prompt."""
     tree = SummaryTree(corpus_id="r", corpus_type="code", strategy="hierarchical")
-    tree.add(SummaryNode(
-        id="root",
-        corpus_id="r",
-        unit_id="repo",
-        level=3,
-        parent_id=None,
-        child_ids=[f"pkg{i}" for i in range(20)],
-        summary_text="Root",
-        metadata={},
-    ))
-    for i in range(20):
-        tree.add(SummaryNode(
-            id=f"p{i}",
+    tree.add(
+        SummaryNode(
+            id="root",
             corpus_id="r",
-            unit_id=f"pkg{i}",
-            level=2,
-            parent_id="repo",
-            summary_text=f"Package {i} content",
-            headline=f"pkg{i}",
-            source_tokens=100 - i,  # decreasing so ordering matters
-            metadata={"module_label": f"pkg{i}"},
-        ))
+            unit_id="repo",
+            level=3,
+            parent_id=None,
+            child_ids=[f"pkg{i}" for i in range(20)],
+            summary_text="Root",
+            metadata={},
+        )
+    )
+    for i in range(20):
+        tree.add(
+            SummaryNode(
+                id=f"p{i}",
+                corpus_id="r",
+                unit_id=f"pkg{i}",
+                level=2,
+                parent_id="repo",
+                summary_text=f"Package {i} content",
+                headline=f"pkg{i}",
+                source_tokens=100 - i,  # decreasing so ordering matters
+                metadata={"module_label": f"pkg{i}"},
+            )
+        )
 
     provider = _RecordingProvider(response_text=_valid_response_payload())
     renderer = CliffNotesRenderer(provider=provider, max_group_summaries=5)

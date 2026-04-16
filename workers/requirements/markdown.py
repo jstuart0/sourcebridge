@@ -17,9 +17,7 @@ import re
 from workers.requirements.models import Requirement
 
 # Matches ## REQ-001: Title  or  ## ENG-42: Title  etc.
-_HEADING_RE = re.compile(
-    r"^##\s+(?P<id>[A-Z]+-\d+):\s*(?P<title>.+)$", re.MULTILINE
-)
+_HEADING_RE = re.compile(r"^##\s+(?P<id>[A-Z]+-\d+):\s*(?P<title>.+)$", re.MULTILINE)
 _PRIORITY_RE = re.compile(r"\*\*Priority:\*\*\s*(?P<priority>\w+)")
 
 

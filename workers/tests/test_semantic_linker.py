@@ -36,8 +36,11 @@ async def test_semantic_linker_finds_links():
     ]
     entities = [
         CodeEntity(
-            file_path="main.go", name="StartServer",
-            kind="function", start_line=1, end_line=10,
+            file_path="main.go",
+            name="StartServer",
+            kind="function",
+            start_line=1,
+            end_line=10,
             content="func StartServer(port int) error { listen(port) }",
         ),
     ]

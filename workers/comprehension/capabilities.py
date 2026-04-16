@@ -69,7 +69,7 @@ class ModelCapabilities:
     long_context_quality: dict[int, str] = field(default_factory=dict)
     instruction_following: str = "low"
     json_mode: str = "none"  # "none" | "prompted" | "native"
-    tool_use: str = "none"   # "none" | "supported" | "native"
+    tool_use: str = "none"  # "none" | "supported" | "native"
     extraction_grade: str = "low"
     creative_grade: str = "low"
     embedding_model: bool = False

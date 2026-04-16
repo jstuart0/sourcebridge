@@ -26,6 +26,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/telemetry"
+	"github.com/sourcebridge/sourcebridge/internal/version"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
@@ -241,9 +242,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 		dataDir = "/data"
 	}
 	tracker := telemetry.New(
-		cfg.Server.PublicBaseURL,
+		version.Version,
 		cfg.Edition,
 		dataDir,
+		telemetry.WithLLMProviderKind(classifyTelemetryLLMProviderKind(cfg.LLM.Provider)),
 		telemetry.WithCountProvider(&telemetryCountProvider{store: store}),
 	)
 	tracker.Start()
@@ -459,4 +461,15 @@ func (p *telemetryCountProvider) TelemetryCounts() (repos, users int, features [
 	}
 
 	return repos, 0, nil, counts
+}
+
+func classifyTelemetryLLMProviderKind(provider string) string {
+	switch provider {
+	case "ollama", "vllm", "llama-cpp", "sglang", "lmstudio":
+		return "local"
+	case "":
+		return ""
+	default:
+		return "cloud"
+	}
 }

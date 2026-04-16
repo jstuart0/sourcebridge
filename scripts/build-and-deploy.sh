@@ -12,11 +12,13 @@ set -euo pipefail
 #   ./scripts/build-and-deploy.sh --no-deploy  # Build all, skip deploy
 #
 # Environment variables:
-#   REGISTRY    — Container registry (default: ghcr.io/sourcebridge)
+#   REGISTRY    — Primary container registry (default: ghcr.io/sourcebridge-ai)
+#   DOCKERHUB   — Docker Hub org/user for mirroring (default: sourcebridge)
 #   KUBE_CONTEXT — kubectl context to use (default: current context)
 #   NAMESPACE   — Kubernetes namespace (default: sourcebridge)
 
-REGISTRY="${REGISTRY:-ghcr.io/sourcebridge}"
+REGISTRY="${REGISTRY:-ghcr.io/sourcebridge-ai}"
+DOCKERHUB="${DOCKERHUB:-sourcebridge}"
 NAMESPACE="${NAMESPACE:-sourcebridge}"
 TAG="sha-$(git rev-parse --short HEAD)"
 COMPONENT="${1:-all}"
@@ -31,12 +33,19 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Check if Docker Hub push is possible (logged in)
+DOCKERHUB_AVAILABLE=false
+if docker info 2>/dev/null | grep -q "Username" || grep -q "index.docker.io" ~/.docker/config.json 2>/dev/null; then
+  DOCKERHUB_AVAILABLE=true
+fi
+
 echo "=== SourceBridge Build & Deploy ==="
-echo "Registry:  ${REGISTRY}"
-echo "Tag:       ${TAG}"
-echo "Component: ${COMPONENT}"
-echo "Namespace: ${NAMESPACE}"
-echo "Repo root: ${REPO_ROOT}"
+echo "Registry:   ${REGISTRY}"
+echo "Docker Hub: ${DOCKERHUB} ($([ "$DOCKERHUB_AVAILABLE" = true ] && echo "enabled" || echo "skipped — run 'docker login' first"))"
+echo "Tag:        ${TAG}"
+echo "Component:  ${COMPONENT}"
+echo "Namespace:  ${NAMESPACE}"
+echo "Repo root:  ${REPO_ROOT}"
 echo ""
 
 # Verify kubectl context if KUBE_CONTEXT is set
@@ -49,44 +58,37 @@ if [ -n "${KUBE_CONTEXT:-}" ]; then
   fi
 fi
 
-build_api() {
-  echo "--- Building sourcebridge-api ---"
+# Build, tag for both registries, and push.
+# Docker Hub tags are always applied (so the image is ready to push),
+# but only pushed when DOCKERHUB_AVAILABLE=true.
+build_and_push() {
+  local name="$1"
+  local dockerfile="$2"
+
+  echo "--- Building ${name} ---"
   docker build \
     --platform linux/amd64 \
-    -f "${REPO_ROOT}/deploy/docker/Dockerfile.sourcebridge" \
-    -t "${REGISTRY}/sourcebridge-api:${TAG}" \
-    -t "${REGISTRY}/sourcebridge-api:latest" \
+    -f "${REPO_ROOT}/${dockerfile}" \
+    -t "${REGISTRY}/${name}:${TAG}" \
+    -t "${REGISTRY}/${name}:latest" \
+    -t "${DOCKERHUB}/${name}:${TAG}" \
+    -t "${DOCKERHUB}/${name}:latest" \
     "${REPO_ROOT}"
-  echo "--- Pushing sourcebridge-api ---"
-  docker push "${REGISTRY}/sourcebridge-api:${TAG}"
-  docker push "${REGISTRY}/sourcebridge-api:latest"
+
+  echo "--- Pushing ${name} to ${REGISTRY} ---"
+  docker push "${REGISTRY}/${name}:${TAG}"
+  docker push "${REGISTRY}/${name}:latest"
+
+  if [ "$DOCKERHUB_AVAILABLE" = true ]; then
+    echo "--- Pushing ${name} to Docker Hub (${DOCKERHUB}) ---"
+    docker push "${DOCKERHUB}/${name}:${TAG}"
+    docker push "${DOCKERHUB}/${name}:latest"
+  fi
 }
 
-build_web() {
-  echo "--- Building sourcebridge-web ---"
-  docker build \
-    --platform linux/amd64 \
-    -f "${REPO_ROOT}/deploy/docker/Dockerfile.web" \
-    -t "${REGISTRY}/sourcebridge-web:${TAG}" \
-    -t "${REGISTRY}/sourcebridge-web:latest" \
-    "${REPO_ROOT}"
-  echo "--- Pushing sourcebridge-web ---"
-  docker push "${REGISTRY}/sourcebridge-web:${TAG}"
-  docker push "${REGISTRY}/sourcebridge-web:latest"
-}
-
-build_worker() {
-  echo "--- Building sourcebridge-worker ---"
-  docker build \
-    --platform linux/amd64 \
-    -f "${REPO_ROOT}/deploy/docker/Dockerfile.worker" \
-    -t "${REGISTRY}/sourcebridge-worker:${TAG}" \
-    -t "${REGISTRY}/sourcebridge-worker:latest" \
-    "${REPO_ROOT}"
-  echo "--- Pushing sourcebridge-worker ---"
-  docker push "${REGISTRY}/sourcebridge-worker:${TAG}"
-  docker push "${REGISTRY}/sourcebridge-worker:latest"
-}
+build_api()    { build_and_push "sourcebridge-api"    "deploy/docker/Dockerfile.sourcebridge"; }
+build_web()    { build_and_push "sourcebridge-web"    "deploy/docker/Dockerfile.web"; }
+build_worker() { build_and_push "sourcebridge-worker" "deploy/docker/Dockerfile.worker"; }
 
 case "$COMPONENT" in
   api)    build_api ;;
@@ -107,7 +109,10 @@ esac
 if [ "$NO_DEPLOY" = true ]; then
   echo ""
   echo "=== Build complete (deploy skipped) ==="
-  echo "Images pushed with tag: ${TAG}"
+  echo "GHCR:       ${REGISTRY}/sourcebridge-{api,web,worker}:${TAG}"
+  if [ "$DOCKERHUB_AVAILABLE" = true ]; then
+    echo "Docker Hub: ${DOCKERHUB}/sourcebridge-{api,web,worker}:${TAG}"
+  fi
   exit 0
 fi
 
@@ -149,4 +154,7 @@ done
 
 echo ""
 echo "=== Deploy complete ==="
-echo "Images: ${REGISTRY}/sourcebridge-{api,web,worker}:${TAG}"
+echo "GHCR:       ${REGISTRY}/sourcebridge-{api,web,worker}:${TAG}"
+if [ "$DOCKERHUB_AVAILABLE" = true ]; then
+  echo "Docker Hub: ${DOCKERHUB}/sourcebridge-{api,web,worker}:${TAG}"
+fi

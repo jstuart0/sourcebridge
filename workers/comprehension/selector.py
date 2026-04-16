@@ -67,9 +67,7 @@ class SelectionTrace:
         if not self.steps:
             return f"no strategies considered for model {self.model_id}"
         chosen = self.selected or "none"
-        return (
-            f"selected={chosen} · model={self.model_id} · chain={','.join(self.preference_chain)}"
-        )
+        return f"selected={chosen} · model={self.model_id} · chain={','.join(self.preference_chain)}"
 
 
 @dataclass
@@ -114,20 +112,24 @@ class StrategySelector:
         for name in preference_chain:
             strategy = strategies.get(name)
             if strategy is None:
-                trace.add(SelectionStep(
-                    strategy=name,
-                    status="skipped_unknown",
-                    reason=f"strategy {name!r} is not registered",
-                ))
+                trace.add(
+                    SelectionStep(
+                        strategy=name,
+                        status="skipped_unknown",
+                        reason=f"strategy {name!r} is not registered",
+                    )
+                )
                 continue
 
             ok, reason = _check_capabilities(strategy, capabilities)
             if not ok:
-                trace.add(SelectionStep(
-                    strategy=name,
-                    status="skipped_capability",
-                    reason=reason,
-                ))
+                trace.add(
+                    SelectionStep(
+                        strategy=name,
+                        status="skipped_capability",
+                        reason=reason,
+                    )
+                )
                 log.info(
                     "strategy_skipped_capability",
                     strategy=name,
@@ -136,11 +138,13 @@ class StrategySelector:
                 )
                 continue
 
-            trace.add(SelectionStep(
-                strategy=name,
-                status="selected",
-                reason=f"model {model_id!r} satisfies requirements",
-            ))
+            trace.add(
+                SelectionStep(
+                    strategy=name,
+                    status="selected",
+                    reason=f"model {model_id!r} satisfies requirements",
+                )
+            )
             trace.selected = name
             log.info(
                 "strategy_selected",
@@ -175,8 +179,7 @@ def _check_capabilities(
 
     if not capabilities.meets_context(reqs.min_context_tokens):
         return False, (
-            f"model context {capabilities.effective_context_tokens} tokens "
-            f"< required {reqs.min_context_tokens}"
+            f"model context {capabilities.effective_context_tokens} tokens < required {reqs.min_context_tokens}"
         )
     if not capabilities.meets_instruction_following(reqs.min_instruction_following):
         return False, (
@@ -190,17 +193,9 @@ def _check_capabilities(
     if reqs.min_extraction_grade is not None and not _grade_ok(
         capabilities.extraction_grade, reqs.min_extraction_grade
     ):
-        return False, (
-            f"model extraction_grade={capabilities.extraction_grade} "
-            f"< required {reqs.min_extraction_grade}"
-        )
-    if reqs.min_creative_grade is not None and not _grade_ok(
-        capabilities.creative_grade, reqs.min_creative_grade
-    ):
-        return False, (
-            f"model creative_grade={capabilities.creative_grade} "
-            f"< required {reqs.min_creative_grade}"
-        )
+        return False, (f"model extraction_grade={capabilities.extraction_grade} < required {reqs.min_extraction_grade}")
+    if reqs.min_creative_grade is not None and not _grade_ok(capabilities.creative_grade, reqs.min_creative_grade):
+        return False, (f"model creative_grade={capabilities.creative_grade} < required {reqs.min_creative_grade}")
     return True, "all requirements met"
 
 

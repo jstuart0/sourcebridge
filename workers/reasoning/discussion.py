@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 from workers.common.llm.provider import LLMProvider, complete_with_optional_model, require_nonempty
 from workers.reasoning.prompts.discussion import DISCUSSION_SYSTEM, build_discussion_prompt
 from workers.reasoning.types import DiscussionAnswer, LLMUsageRecord
@@ -18,15 +16,19 @@ def _parse_discussion(raw: str) -> DiscussionAnswer:
         return DiscussionAnswer(answer=strip_llm_wrapping(raw))
 
     refs = data.get("references", [])
-    if isinstance(refs, list):
-        refs = [r for r in refs if isinstance(r, str) and r.strip()]
-    else:
-        refs = []
+    refs = [r for r in refs if isinstance(r, str) and r.strip()] if isinstance(refs, list) else []
+
+    answer_value = data.get("answer", "")
+    if not isinstance(answer_value, str):
+        return DiscussionAnswer(answer=strip_llm_wrapping(raw), references=refs)
+
+    reqs = data.get("related_requirements", [])
+    reqs = [r for r in reqs if isinstance(r, str) and r.strip()] if isinstance(reqs, list) else []
 
     return DiscussionAnswer(
-        answer=data.get("answer", ""),
+        answer=answer_value,
         references=refs,
-        related_requirements=data.get("related_requirements", []),
+        related_requirements=reqs,
     )
 
 

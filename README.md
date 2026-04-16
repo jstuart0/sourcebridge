@@ -6,10 +6,11 @@
 
 <p align="center"><strong>The field guide your codebase should have had.</strong></p>
 
-[![CI](https://github.com/sourcebridge/sourcebridge/actions/workflows/ci.yml/badge.svg)](https://github.com/sourcebridge/sourcebridge/actions/workflows/ci.yml)
+[![CI](https://github.com/sourcebridge-ai/sourcebridge/actions/workflows/ci.yml/badge.svg)](https://github.com/sourcebridge-ai/sourcebridge/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8.svg)](https://go.dev/)
-[![Release](https://img.shields.io/github/v/release/sourcebridge/sourcebridge)](https://github.com/sourcebridge/sourcebridge/releases)
+[![Release](https://img.shields.io/github/v/release/sourcebridge-ai/sourcebridge)](https://github.com/sourcebridge-ai/sourcebridge/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/sourcebridge/sourcebridge-api)](https://hub.docker.com/u/sourcebridge)
 
 ## What is SourceBridge?
 
@@ -18,7 +19,7 @@ SourceBridge is a requirement-aware code comprehension platform. Point it at any
 Most tools help you search code. **SourceBridge helps you understand systems.**
 
 <p align="center">
-  <img src="docs/screenshots/repository-overview.png" alt="Repository overview showing cliff notes, code tours, and learning paths" width="800">
+  <img src="docs/screenshots/SourceBridge-Overview.png" alt="Repository overview showing cliff notes, code tours, and learning paths" width="800">
 </p>
 
 <details>
@@ -26,17 +27,17 @@ Most tools help you search code. **SourceBridge helps you understand systems.**
 
 ### Cliff Notes
 <p align="center">
-  <img src="docs/screenshots/cliff-notes.png" alt="AI-generated cliff notes with hierarchical code summaries" width="800">
+  <img src="docs/screenshots/SourceBridge-CliffNotes.png" alt="AI-generated cliff notes with hierarchical code summaries" width="800">
 </p>
 
 ### Admin Monitor
 <p align="center">
-  <img src="docs/screenshots/admin-monitor.png" alt="LLM job queue with real-time generation progress" width="800">
+  <img src="docs/screenshots/SourceBridge-Generation.png" alt="LLM job queue with real-time generation progress" width="800">
 </p>
 
 ### Semantic Search
 <p align="center">
-  <img src="docs/screenshots/search.png" alt="Natural language search against the repository graph" width="800">
+  <img src="docs/screenshots/SourceBridge-Search.png" alt="Natural language search against the repository graph" width="800">
 </p>
 
 </details>
@@ -57,25 +58,103 @@ Most tools help you search code. **SourceBridge helps you understand systems.**
 
 ## Quick Start
 
-### Docker Compose (recommended)
+### Docker Hub (fastest)
 
-The fastest way to try SourceBridge. Requires Docker and Docker Compose.
+No git clone needed. Just pull and run:
 
 ```bash
-git clone https://github.com/sourcebridge/sourcebridge.git
+# Download the compose file
+curl -O https://raw.githubusercontent.com/sourcebridge-ai/sourcebridge/main/docker-compose.hub.yml
+
+# Start SourceBridge (uses Ollama by default — no API key required)
+docker compose -f docker-compose.hub.yml up -d
+```
+
+Open [http://localhost:3000](http://localhost:3000) and create your admin account.
+
+> **Using a cloud LLM?** Pass your provider config inline:
+>
+> ```bash
+> SOURCEBRIDGE_LLM_PROVIDER=anthropic \
+> SOURCEBRIDGE_LLM_API_KEY=sk-ant-... \
+> SOURCEBRIDGE_LLM_MODEL=claude-sonnet-4-20250514 \
+> docker compose -f docker-compose.hub.yml up -d
+> ```
+
+<details>
+<summary><strong>Full configuration examples</strong></summary>
+
+#### Anthropic (recommended for quality)
+
+```bash
+SOURCEBRIDGE_LLM_PROVIDER=anthropic \
+SOURCEBRIDGE_LLM_API_KEY=sk-ant-api03-xxxxx \
+SOURCEBRIDGE_LLM_MODEL=claude-sonnet-4-20250514 \
+docker compose -f docker-compose.hub.yml up -d
+```
+
+#### OpenAI
+
+```bash
+SOURCEBRIDGE_LLM_PROVIDER=openai \
+SOURCEBRIDGE_LLM_API_KEY=sk-xxxxx \
+SOURCEBRIDGE_LLM_MODEL=gpt-4o \
+docker compose -f docker-compose.hub.yml up -d
+```
+
+#### Ollama (local, free)
+
+```bash
+# Install Ollama first: https://ollama.com
+ollama pull qwen3:32b
+
+# No API key needed — Ollama is the default
+docker compose -f docker-compose.hub.yml up -d
+```
+
+#### OpenRouter (access to 100+ models)
+
+```bash
+SOURCEBRIDGE_LLM_PROVIDER=openrouter \
+SOURCEBRIDGE_LLM_API_KEY=sk-or-xxxxx \
+SOURCEBRIDGE_LLM_MODEL=anthropic/claude-sonnet-4-20250514 \
+docker compose -f docker-compose.hub.yml up -d
+```
+
+#### Production secrets
+
+For production, pin your JWT and gRPC secrets instead of using defaults:
+
+```bash
+SOURCEBRIDGE_JWT_SECRET=$(openssl rand -hex 32) \
+SOURCEBRIDGE_GRPC_SECRET=$(openssl rand -hex 32) \
+SOURCEBRIDGE_LLM_PROVIDER=anthropic \
+SOURCEBRIDGE_LLM_API_KEY=sk-ant-api03-xxxxx \
+SOURCEBRIDGE_LLM_MODEL=claude-sonnet-4-20250514 \
+docker compose -f docker-compose.hub.yml up -d
+```
+
+</details>
+
+### Try the demo
+
+SourceBridge includes a sample TypeScript project you can index immediately:
+
+```bash
+git clone https://github.com/sourcebridge-ai/sourcebridge.git
+cd sourcebridge
+./demo.sh
+```
+
+The demo starts SourceBridge, indexes a 44-file sample API, and generates cliff notes, code tours, and architecture diagrams. Open [http://localhost:3000](http://localhost:3000) to explore.
+
+### Build from source
+
+```bash
+git clone https://github.com/sourcebridge-ai/sourcebridge.git
 cd sourcebridge
 cp .env.example .env   # configure your LLM provider
 docker compose up -d
-```
-
-Open [http://localhost:3000](http://localhost:3000) for the web UI. The API is at `http://localhost:8080`.
-
-To use a cloud LLM provider, set these in your `.env`:
-
-```bash
-SOURCEBRIDGE_LLM_PROVIDER=anthropic
-SOURCEBRIDGE_LLM_API_KEY=sk-ant-...
-SOURCEBRIDGE_LLM_MODEL=claude-sonnet-4-20250514
 ```
 
 ### Homebrew
@@ -86,18 +165,6 @@ Install the CLI directly on macOS or Linux:
 brew install sourcebridge/tap/sourcebridge
 sourcebridge serve
 ```
-
-### One-Command Setup
-
-For local development or evaluation without Docker:
-
-```bash
-git clone https://github.com/sourcebridge/sourcebridge.git
-cd sourcebridge
-./setup.sh
-```
-
-This installs dependencies, builds the Go binary and web UI, and starts the server.
 
 ### Helm / Kubernetes
 
@@ -225,7 +292,7 @@ See [CLI Reference](docs/user/cli-reference.md) for full flag documentation.
 
 ```bash
 # Clone the repository
-git clone https://github.com/sourcebridge/sourcebridge.git
+git clone https://github.com/sourcebridge-ai/sourcebridge.git
 cd sourcebridge
 
 # Build the Go API server
@@ -307,5 +374,5 @@ SourceBridge is licensed under the [GNU Affero General Public License v3.0](LICE
 If SourceBridge helped you understand a codebase, let us know:
 
 - **It worked?** Give the repo a star — it helps others find the project
-- **Something broke?** [Open an issue](https://github.com/jstuart0/sourcebridge/issues) — we want to fix it
-- **Have ideas?** [Start a discussion](https://github.com/jstuart0/sourcebridge/discussions)
+- **Something broke?** [Open an issue](https://github.com/sourcebridge-ai/sourcebridge/issues) — we want to fix it
+- **Have ideas?** [Start a discussion](https://github.com/sourcebridge-ai/sourcebridge/discussions)

@@ -317,7 +317,9 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             scope_path=request.scope_path,
         )
         snapshot = await self._prepare_snapshot(
-            request.snapshot_json, query, scope_type=scope_type,
+            request.snapshot_json,
+            query,
+            scope_type=scope_type,
         )
 
         chain = _cliff_notes_preference_chain()
@@ -349,10 +351,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             if selection.strategy is None:
                 if last_error is not None:
                     raise last_error
-                raise RuntimeError(
-                    f"no viable strategy for model {model_id}: "
-                    f"{selection.trace.summary()}"
-                )
+                raise RuntimeError(f"no viable strategy for model {model_id}: {selection.trace.summary()}")
 
             name = selection.strategy_name
             tried.append(name)
@@ -555,12 +554,16 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         async def sync_resume_state(tree, *, cached_nodes_loaded: int) -> None:
             if job_state_updater is None:
                 return
-            current = strategy.diagnostics() if strategy is not None else {
-                "leaf_cache_hits": 0,
-                "file_cache_hits": 0,
-                "package_cache_hits": 0,
-                "root_cache_hits": 0,
-            }
+            current = (
+                strategy.diagnostics()
+                if strategy is not None
+                else {
+                    "leaf_cache_hits": 0,
+                    "file_cache_hits": 0,
+                    "package_cache_hits": 0,
+                    "root_cache_hits": 0,
+                }
+            )
             checkpoint = _resume_checkpoint_payload(
                 tree,
                 cached_nodes_loaded=cached_nodes_loaded,
@@ -779,9 +782,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             )
 
             if usage.operation == "cliff_notes_render_fallback":
-                raise RuntimeError(
-                    "final cliff notes render degraded due to model backend compute failures"
-                )
+                raise RuntimeError("final cliff notes render degraded due to model backend compute failures")
 
             log.info(
                 "cliff_notes_hierarchical_completed",
@@ -808,21 +809,25 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     "provider_compute_errors": diagnostics["provider_compute_errors"],
                 },
             )
-            return result, usage, {
-                "cached_nodes": len(cached_tree.nodes) if cached_tree is not None else 0,
-                "fallback_count": fallback_count,
-                "provider_compute_errors": diagnostics["provider_compute_errors"],
-                "leaf_cache_hits": diagnostics["leaf_cache_hits"],
-                "file_cache_hits": diagnostics["file_cache_hits"],
-                "package_cache_hits": diagnostics["package_cache_hits"],
-                "root_cache_hits": diagnostics["root_cache_hits"],
-                "root_fallback": diagnostics["root_fallback"],
-                "total_nodes": len(tree.nodes),
-                "corpus_id": tree.corpus_id,
-                "revision_fp": tree.revision_fp,
-                "strategy": tree.strategy,
-                "model_used": usage.model or (model_override or ""),
-            }
+            return (
+                result,
+                usage,
+                {
+                    "cached_nodes": len(cached_tree.nodes) if cached_tree is not None else 0,
+                    "fallback_count": fallback_count,
+                    "provider_compute_errors": diagnostics["provider_compute_errors"],
+                    "leaf_cache_hits": diagnostics["leaf_cache_hits"],
+                    "file_cache_hits": diagnostics["file_cache_hits"],
+                    "package_cache_hits": diagnostics["package_cache_hits"],
+                    "root_cache_hits": diagnostics["root_cache_hits"],
+                    "root_fallback": diagnostics["root_fallback"],
+                    "total_nodes": len(tree.nodes),
+                    "corpus_id": tree.corpus_id,
+                    "revision_fp": tree.revision_fp,
+                    "strategy": tree.strategy,
+                    "model_used": usage.model or (model_override or ""),
+                },
+            )
         finally:
             if job_state_updater is not None:
                 await job_state_updater.close()
@@ -1212,6 +1217,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             )
         except Exception as exc:
             import traceback
+
             if job_logger is not None:
                 await job_logger.error(
                     phase="failed",
@@ -1291,9 +1297,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         audience = request.audience or "developer"
         depth = request.depth or "medium"
         # For Q&A, use the actual question for retrieval
-        query = request.question or build_overview_query(
-            request.repository_name, "explain"
-        )
+        query = request.question or build_overview_query(request.repository_name, "explain")
         snapshot = await self._prepare_snapshot(request.snapshot_json, query)
 
         provider, model_override = self._resolve_request_provider(context)
@@ -1466,6 +1470,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             if repo_data and getattr(request, "analysis_depth", "") == "deep":
                 try:
                     from workers.reports.analyzer_runner import run_analyzers
+
                     repo_data = await run_analyzers(repo_data)
                 except ImportError:
                     pass  # Enterprise package not installed
@@ -1538,7 +1543,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 sections=section_results,
                 evidence_json=json.dumps(result.evidence_items),
                 usage=types_pb2.LLMUsage(
-                    model=getattr(report_provider, 'model', 'unknown'),
+                    model=getattr(report_provider, "model", "unknown"),
                     input_tokens=total_input,
                     output_tokens=total_output,
                     operation="report_generation",
@@ -1546,6 +1551,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             )
         except Exception as exc:
             import traceback
+
             log.error("generate_report_failed", error=str(exc), traceback=traceback.format_exc())
             await context.abort(
                 grpc.StatusCode.INTERNAL,

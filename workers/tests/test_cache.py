@@ -84,12 +84,12 @@ def test_cache_size():
 def test_usage_tracker():
     """Usage tracker records and retrieves events."""
     tracker = UsageTracker()
-    tracker.record(LLMUsageRecord(
-        provider="anthropic", model="claude-3", input_tokens=100, output_tokens=50, operation="summary"
-    ))
-    tracker.record(LLMUsageRecord(
-        provider="openai", model="gpt-4", input_tokens=200, output_tokens=100, operation="review"
-    ))
+    tracker.record(
+        LLMUsageRecord(provider="anthropic", model="claude-3", input_tokens=100, output_tokens=50, operation="summary")
+    )
+    tracker.record(
+        LLMUsageRecord(provider="openai", model="gpt-4", input_tokens=200, output_tokens=100, operation="review")
+    )
 
     records = tracker.records
     assert len(records) == 2
@@ -100,9 +100,7 @@ def test_usage_tracker():
 def test_usage_tracker_clear():
     """Usage tracker can be cleared."""
     tracker = UsageTracker()
-    tracker.record(LLMUsageRecord(
-        provider="test", model="test", input_tokens=0, output_tokens=0, operation="test"
-    ))
+    tracker.record(LLMUsageRecord(provider="test", model="test", input_tokens=0, output_tokens=0, operation="test"))
     tracker.clear()
     assert len(tracker.records) == 0
 

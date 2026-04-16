@@ -151,9 +151,7 @@ class LongContextDirectStrategy(ComprehensionStrategy):
         from workers.comprehension.hierarchical import _maybe_await
 
         cfg = self._config
-        await _maybe_await(
-            progress("budget", 0.05, "Checking snapshot budget for long-context call")
-        )
+        await _maybe_await(progress("budget", 0.05, "Checking snapshot budget for long-context call"))
 
         # Pre-flight budget check. We pass the snapshot as the "prompt"
         # for the purpose of budget estimation — the real cliff notes
@@ -187,20 +185,22 @@ class LongContextDirectStrategy(ComprehensionStrategy):
             strategy=self.name,
             revision_fp=corpus.revision_fingerprint(),
         )
-        tree.add(SummaryNode(
-            id=str(uuid.uuid4()),
-            corpus_id=corpus.corpus_id,
-            unit_id=corpus.root().id,
-            level=3,
-            parent_id=None,
-            summary_text=_result_as_text(result),
-            headline=result.sections[0].title if result.sections else "Long-context result",
-            summary_tokens=usage.output_tokens if usage else 0,
-            source_tokens=len(cfg.snapshot_json) // 4,
-            model_used=usage.model if usage else "",
-            strategy=self.name,
-            revision_fp=corpus.revision_fingerprint(),
-        ))
+        tree.add(
+            SummaryNode(
+                id=str(uuid.uuid4()),
+                corpus_id=corpus.corpus_id,
+                unit_id=corpus.root().id,
+                level=3,
+                parent_id=None,
+                summary_text=_result_as_text(result),
+                headline=result.sections[0].title if result.sections else "Long-context result",
+                summary_tokens=usage.output_tokens if usage else 0,
+                source_tokens=len(cfg.snapshot_json) // 4,
+                model_used=usage.model if usage else "",
+                strategy=self.name,
+                revision_fp=corpus.revision_fingerprint(),
+            )
+        )
         return tree
 
 

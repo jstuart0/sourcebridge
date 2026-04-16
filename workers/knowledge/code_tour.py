@@ -69,13 +69,16 @@ async def generate_code_tour(
         context="code_tour:repository",
     )
 
-    response: LLMResponse = require_nonempty(await complete_with_optional_model(
-        provider,
-        prompt,
-        system=CODE_TOUR_SYSTEM,
-        temperature=0.0,
-        model=model_override,
-    ), context="code_tour:repository")
+    response: LLMResponse = require_nonempty(
+        await complete_with_optional_model(
+            provider,
+            prompt,
+            system=CODE_TOUR_SYSTEM,
+            temperature=0.0,
+            model=model_override,
+        ),
+        context="code_tour:repository",
+    )
 
     try:
         raw_stops = _parse_stops(response.content)
