@@ -93,3 +93,7 @@ codeaware
 
 # Internal notes and plans (not for OSS repos)
 thoughts/
+
+# Demo seed and benchmark data (lives in sourcebridge-ai/demo repo)
+benchmark-results/
+demo-seed/
