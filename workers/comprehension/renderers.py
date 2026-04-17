@@ -83,6 +83,26 @@ DEEP_SECTION_GROUPS: tuple[tuple[str, ...], ...] = (
     ("Data Flow & Request Lifecycle", "Concurrency & State Management", "Testing Strategy", "Complexity & Risk Areas"),
 )
 
+GROUP_INSTRUCTIONS: dict[tuple[str, ...], str] = {
+    DEEP_SECTION_GROUPS[0]: (
+        "IMPORTANT: Treat this as the system-shape slice. Do not over-center any single interface such as the CLI "
+        "unless the selected evidence is overwhelmingly CLI-only. If the evidence spans API, workers, and web code, "
+        "describe the repository as a multi-surface code intelligence system and explain how those surfaces connect."
+    ),
+    DEEP_SECTION_GROUPS[1]: (
+        "IMPORTANT: Treat this as the code-and-model slice. Focus on repository entities, abstractions, and module "
+        "responsibilities. Prefer stable internal concepts over temporary tooling or test scaffolding."
+    ),
+    DEEP_SECTION_GROUPS[2]: (
+        "IMPORTANT: Treat this as the operational safeguards slice. Be concrete about auth, configuration, external "
+        "systems, retries, and failure modes. Do not invent infrastructure beyond the selected evidence."
+    ),
+    DEEP_SECTION_GROUPS[3]: (
+        "IMPORTANT: Treat this as the runtime-behavior slice. Explain request lifecycles, background execution, "
+        "state, concurrency, and testing boundaries using the selected evidence only."
+    ),
+}
+
 
 def _is_provider_compute_error(exc: Exception) -> bool:
     text = str(exc).lower()
@@ -423,7 +443,7 @@ class CliffNotesRenderer:
                     depth="deep",
                     scope_type=scope_type,
                     scope_path=scope_path,
-                    root_summary=root.summary_text or "(no repository summary available)",
+                    root_summary=self._theme_root_summary(root, section_group),
                     section_evidence_plan=section_plan,
                     group_nodes=group_nodes,
                     file_nodes=file_nodes,
@@ -431,7 +451,8 @@ class CliffNotesRenderer:
                     relevance_profile=relevance_profile,
                     depth_instructions=(
                         "IMPORTANT: This is a DEEP themed field guide slice. Produce evidence-dense sections, "
-                        "not broad filler. Stay inside the requested sections only and cite concrete repo files."
+                        "not broad filler. Stay inside the requested sections only and cite concrete repo files.\n"
+                        f"{GROUP_INSTRUCTIONS.get(section_group, '')}"
                     ),
                     required_sections=list(section_group),
                 )
@@ -713,6 +734,11 @@ class CliffNotesRenderer:
     ) -> list[SummaryNode]:
         selected: list[SummaryNode] = []
         seen: set[str] = set()
+        seen_areas: set[str] = set()
+        diversify = any(
+            section in {"System Purpose", "Architecture Overview", "Core System Flows", "Suggested Starting Points"}
+            for section in sections
+        )
         for title in sections:
             for node in self._rank_nodes_for_section(
                 title,
@@ -724,11 +750,43 @@ class CliffNotesRenderer:
             ):
                 if node.unit_id in seen:
                     continue
+                area = _node_area(node)
+                if diversify and area in seen_areas:
+                    continue
                 selected.append(node)
                 seen.add(node.unit_id)
+                if diversify and area:
+                    seen_areas.add(area)
                 if len(selected) >= limit:
                     return selected
+        if diversify and len(selected) < limit:
+            for title in sections:
+                for node in self._rank_nodes_for_section(
+                    title,
+                    nodes=all_file_nodes,
+                    kind="file",
+                    limit=4,
+                    relevance_profile=relevance_profile,
+                    scope_path=scope_path,
+                ):
+                    if node.unit_id in seen:
+                        continue
+                    selected.append(node)
+                    seen.add(node.unit_id)
+                    if len(selected) >= limit:
+                        return selected
         return selected
+
+    def _theme_root_summary(self, root: SummaryNode, section_group: tuple[str, ...]) -> str:
+        base = (root.summary_text or "(no repository summary available)").strip()
+        if section_group == DEEP_SECTION_GROUPS[0]:
+            headline = root.headline or _first_line(base) or "Repository overview"
+            return (
+                f"{headline}\n\n"
+                "Use the selected subsystem and file evidence below as the primary basis for system purpose and "
+                "architecture claims. Treat this repository summary as orientation only."
+            )
+        return base
 
     def _rank_nodes_for_section(
         self,
@@ -956,3 +1014,21 @@ def _node_label(node: SummaryNode) -> str:
     return (
         str(meta.get("file_path")) or str(meta.get("module_label")) or str(meta.get("repository_name")) or node.unit_id
     )
+
+
+def _node_area(node: SummaryNode) -> str:
+    label = _node_label(node).strip().lstrip("/")
+    if not label:
+        return ""
+    if label.startswith("web/src/"):
+        return "web"
+    if label.startswith("internal/api/"):
+        return "internal_api"
+    if label.startswith("internal/"):
+        return "internal"
+    if label.startswith("workers/"):
+        return "workers"
+    if label.startswith("cli/"):
+        return "cli"
+    head = label.split("/", 1)[0]
+    return head

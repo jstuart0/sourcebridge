@@ -359,6 +359,70 @@ async def test_deep_section_evidence_plan_prefers_product_core_over_examples() -
 
 
 @pytest.mark.asyncio
+async def test_deep_system_slice_diversifies_top_level_areas() -> None:
+    provider = _RecordingProvider(response_text=_valid_deep_response_payload())
+    renderer = CliffNotesRenderer(provider=provider)
+    tree = _build_tree()
+    tree.add(
+        SummaryNode(
+            id="fc",
+            corpus_id="repo",
+            unit_id="file:cli/index.go",
+            level=1,
+            parent_id="package:api",
+            summary_text="CLI indexing entrypoint.",
+            headline="CLI entry",
+            source_tokens=170,
+            metadata={"file_path": "cli/index.go"},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fw",
+            corpus_id="repo",
+            unit_id="file:web/app/page.tsx",
+            level=1,
+            parent_id="package:api",
+            summary_text="Repository landing page.",
+            headline="Web entry",
+            source_tokens=180,
+            metadata={"file_path": "web/src/app/page.tsx"},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fk",
+            corpus_id="repo",
+            unit_id="file:workers/knowledge/servicer.py",
+            level=1,
+            parent_id="package:store",
+            summary_text="Knowledge worker entrypoints.",
+            headline="Knowledge worker",
+            source_tokens=190,
+            metadata={"file_path": "workers/knowledge/servicer.py"},
+        )
+    )
+
+    await renderer.render(
+        tree,
+        repository_name="Sample",
+        audience="developer",
+        depth="deep",
+        scope_type="repository",
+    )
+
+    prompts = provider.captured_prompts or []
+    system_prompt = next(
+        prompt
+        for prompt in prompts
+        if "- System Purpose" in prompt and "- Architecture Overview" in prompt
+    )
+    assert "cli/index.go" in system_prompt
+    assert "workers/knowledge/servicer.py" in system_prompt
+    assert "web/src/app/page.tsx" in system_prompt
+
+
+@pytest.mark.asyncio
 async def test_render_raises_on_empty_tree() -> None:
     provider = _RecordingProvider(response_text=_valid_response_payload())
     renderer = CliffNotesRenderer(provider=provider)
