@@ -295,6 +295,19 @@ SECTION_ENTITY_HINTS: dict[str, tuple[str, ...]] = {
     "External Dependencies": ("job", "report", "diagram"),
 }
 
+SECTION_DISFAVORED_PATH_SNIPPETS: dict[str, tuple[str, ...]] = {
+    "System Purpose": ("workers/requirements/scanners/", "workers/common/llm/fake.py", "workers/cli_review.py"),
+    "Architecture Overview": ("workers/requirements/scanners/", "workers/common/llm/fake.py", "workers/cli_review.py"),
+    "Core System Flows": ("workers/requirements/scanners/", "workers/common/llm/fake.py"),
+    "External Dependencies": (
+        "workers/common/llm/fake.py",
+        "workers/requirements/scanners/",
+        "workers/knowledge/architecture_diagram.py",
+        "workers/cli_review.py",
+    ),
+    "Key Abstractions": ("internal/db/store.go", "internal/graph/store.go"),
+}
+
 GROUP_FEWSHOT_EXAMPLES: dict[tuple[str, ...], str] = {
     DEEP_SECTION_GROUPS[0]: """\
 === Quality examples for this slice ===
@@ -1180,6 +1193,7 @@ class CliffNotesRenderer:
         )
         files: list[SummaryNode] = []
         seen: set[str] = set()
+        disfavored_paths = tuple(snippet.lower() for snippet in SECTION_DISFAVORED_PATH_SNIPPETS.get(title, ()))
         for area in ("internal_api", "web", "workers", "cli"):
             seeded = self._best_area_seed_for_sections(
                 area,
@@ -1201,6 +1215,9 @@ class CliffNotesRenderer:
             scope_path=scope_path,
         ):
             if node.unit_id in seen:
+                continue
+            label = _node_label(node).lower()
+            if disfavored_paths and any(snippet in label for snippet in disfavored_paths):
                 continue
             files.append(node)
             seen.add(node.unit_id)
@@ -1418,6 +1435,8 @@ class CliffNotesRenderer:
                 "system and mention CLI as one access path rather than the dominant purpose.\n"
                 "If a web product surface is present, mention it explicitly instead of reducing the repository to APIs "
                 "and workers alone.\n"
+                "Do not let specialized scanner, benchmark, or fake-provider files define the repository purpose when "
+                "broader API, web, and knowledge-service evidence is present.\n"
                 + "\n".join(bullets)
                 + "\n"
             )
@@ -1531,6 +1550,11 @@ class CliffNotesRenderer:
         relevance_profile: str,
         scope_path: str,
     ) -> SummaryNode | None:
+        disfavored_paths = tuple(
+            snippet.lower()
+            for title in sections
+            for snippet in SECTION_DISFAVORED_PATH_SNIPPETS.get(title, ())
+        )
         candidates = [
             node
             for node in nodes
@@ -1539,6 +1563,11 @@ class CliffNotesRenderer:
         ]
         if not candidates:
             return None
+        preferred_candidates = [
+            node for node in candidates if not any(snippet in _node_label(node).lower() for snippet in disfavored_paths)
+        ]
+        if preferred_candidates:
+            candidates = preferred_candidates
         best_lists = [
             self._rank_nodes_for_section(
                 title,
@@ -1571,6 +1600,7 @@ class CliffNotesRenderer:
         signal_hints = SECTION_SIGNAL_HINTS.get(title, ())
         dependency_hints = SECTION_DEPENDENCY_HINTS.get(title, ())
         entity_hints = SECTION_ENTITY_HINTS.get(title, ())
+        disfavored_paths = SECTION_DISFAVORED_PATH_SNIPPETS.get(title, ())
         scored: list[tuple[int, int, int, int, int, int, int, int, SummaryNode]] = []
         for idx, node in enumerate(nodes):
             label = _node_label(node)
@@ -1617,12 +1647,13 @@ class CliffNotesRenderer:
             dependency_hits = sum(
                 1 for hint in dependency_hints if hint.lower() in dependency_signals or hint.lower() in text
             )
+            disfavored_hits = sum(1 for snippet in disfavored_paths if snippet.lower() in text)
             keyword_hits = sum(1 for keyword in keywords if keyword in text)
             if kind == "file" and "/" in label:
                 keyword_hits += 1
             scored.append(
                 (
-                    penalty,
+                    penalty + (disfavored_hits * 10),
                     area_rank,
                     -entity_hits,
                     -signal_hits,

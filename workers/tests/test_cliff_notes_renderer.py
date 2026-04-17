@@ -690,6 +690,85 @@ async def test_external_dependencies_evidence_plan_uses_fact_signals() -> None:
 
 
 @pytest.mark.asyncio
+async def test_system_purpose_evidence_plan_avoids_specialized_scanners_when_broader_surfaces_exist() -> None:
+    provider = _RecordingProvider(response_text=_valid_deep_response_payload())
+    renderer = CliffNotesRenderer(provider=provider)
+    tree = _build_tree()
+    tree.add(
+        SummaryNode(
+            id="fc",
+            corpus_id="repo",
+            unit_id="file:cli/index.go",
+            level=1,
+            parent_id="package:api",
+            summary_text="CLI entrypoint for developer operations.",
+            headline="CLI entrypoint",
+            source_tokens=170,
+            metadata={"file_path": "cli/index.go"},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fw",
+            corpus_id="repo",
+            unit_id="file:web/src/app/page.tsx",
+            level=1,
+            parent_id="package:api",
+            summary_text="Web product surface for the repository.",
+            headline="Web page",
+            source_tokens=175,
+            metadata={"file_path": "web/src/app/page.tsx"},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fk",
+            corpus_id="repo",
+            unit_id="file:workers/knowledge/servicer.py",
+            level=1,
+            parent_id="package:api",
+            summary_text="Knowledge service worker for artifact generation.",
+            headline="Knowledge servicer",
+            source_tokens=240,
+            metadata={"file_path": "workers/knowledge/servicer.py"},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fs",
+            corpus_id="repo",
+            unit_id="file:workers/requirements/scanners/schema_scanner.py",
+            level=1,
+            parent_id="package:workers",
+            summary_text="Schema scanner worker implementation.",
+            headline="Schema scanner",
+            source_tokens=600,
+            metadata={"file_path": "workers/requirements/scanners/schema_scanner.py"},
+        )
+    )
+
+    await renderer.render(
+        tree,
+        repository_name="Sample",
+        audience="developer",
+        depth="deep",
+        scope_type="repository",
+    )
+
+    prompts = provider.captured_prompts or []
+    system_prompt = next(
+        prompt
+        for prompt in prompts
+        if "- System Purpose" in prompt and "- Architecture Overview" in prompt
+    )
+    system_line = next(line for line in system_prompt.splitlines() if line.startswith("- System Purpose:"))
+    assert "workers/requirements/scanners/schema_scanner.py" not in system_line
+    assert "workers/knowledge/servicer.py" in system_line
+    assert "web/src/app/page.tsx" in system_line
+    assert "cli/index.go" in system_line
+
+
+@pytest.mark.asyncio
 async def test_domain_model_evidence_plan_prefers_knowledge_models() -> None:
     provider = _RecordingProvider(response_text=_valid_deep_response_payload())
     renderer = CliffNotesRenderer(provider=provider)
