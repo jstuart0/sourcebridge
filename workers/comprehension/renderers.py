@@ -1927,10 +1927,31 @@ class CliffNotesRenderer:
         system = by_title.get("System Purpose")
         if system:
             system.content = _replace_opening_sentence(system.content, system_lead)
+            system.content = _strip_sentences_with_phrases(
+                system.content,
+                (
+                    "multi-faceted approach",
+                    "various api surfaces",
+                    "overall,",
+                    "overall ",
+                    "likely support",
+                    "potentially for deployment",
+                ),
+            )
             system.summary = system_lead
         architecture = by_title.get("Architecture Overview")
         if architecture:
             architecture.content = _replace_opening_sentence(architecture.content, architecture_lead)
+            architecture.content = _strip_sentences_with_phrases(
+                architecture.content,
+                (
+                    "likely schedule",
+                    "likely fetch",
+                    "implied by the need",
+                    "not explicitly detailed",
+                    "various domain entities",
+                ),
+            )
             architecture.summary = architecture_lead
         return sections
 
@@ -1943,6 +1964,19 @@ def _replace_opening_sentence(content: str, replacement: str) -> str:
     if len(pieces) == 1:
         return replacement
     return f"{replacement} {pieces[1].strip()}"
+
+
+def _strip_sentences_with_phrases(content: str, blocked_phrases: tuple[str, ...]) -> str:
+    body = (content or "").strip()
+    if not body:
+        return body
+    pieces = re.split(r"(?<=[.!?])\s+|\n+", body)
+    kept = [
+        piece.strip()
+        for piece in pieces
+        if piece.strip() and not any(phrase in piece.lower() for phrase in blocked_phrases)
+    ]
+    return " ".join(kept) if kept else body
 
 
 def _display_repository_name(repository_name: str) -> str:
