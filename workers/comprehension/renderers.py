@@ -744,12 +744,6 @@ class CliffNotesRenderer:
                 all_group_nodes=all_group_nodes,
                 all_file_nodes=all_file_nodes,
             )
-            sections = self._normalize_repository_entity_sections(
-                sections,
-                repository_name=repository_name,
-                all_group_nodes=all_group_nodes,
-                all_file_nodes=all_file_nodes,
-            )
 
         return CliffNotesResult(sections=sections), usage
 
@@ -1940,99 +1934,6 @@ class CliffNotesRenderer:
             architecture.summary = architecture_lead
         return sections
 
-    def _normalize_repository_entity_sections(
-        self,
-        sections: list[CliffNotesSection],
-        *,
-        repository_name: str,
-        all_group_nodes: list[SummaryNode],
-        all_file_nodes: list[SummaryNode],
-    ) -> list[CliffNotesSection]:
-        repo_label = _display_repository_name(repository_name)
-        nodes = [*all_group_nodes, *all_file_nodes]
-        entity_examples: dict[str, str] = {}
-        for node in nodes:
-            metadata = node.metadata or {}
-            for entity in _metadata_values(
-                metadata,
-                "fact_entity_signals",
-                "fact_package_entities",
-                "fact_root_entities",
-                "entity_signals",
-            ):
-                entity_examples.setdefault(entity, _node_label(node))
-
-        abstraction_examples: dict[str, str] = {}
-        for node in nodes:
-            label = _node_label(node)
-            lowered = label.lower()
-            if "internal/llm/orchestrator/" in lowered:
-                abstraction_examples.setdefault("job orchestrator", label)
-            if lowered.endswith("workers/knowledge/servicer.py"):
-                abstraction_examples.setdefault("knowledge servicer", label)
-            if lowered.endswith("workers/comprehension/renderers.py"):
-                abstraction_examples.setdefault("artifact renderer", label)
-            if lowered.endswith("internal/db/surreal.go") or lowered.endswith("internal/db/store.go"):
-                abstraction_examples.setdefault("persistence store", label)
-            if lowered.endswith("internal/api/graphql/schema.resolvers.go"):
-                abstraction_examples.setdefault("graphql resolver", label)
-
-        entity_terms: list[str] = []
-        if any(k in entity_examples for k in ("repository", "scope")):
-            entity_terms.append("repositories and scopes")
-        if any(k in entity_examples for k in ("knowledge_artifact", "understanding")):
-            entity_terms.append("generated knowledge artifacts and understanding revisions")
-        if "job" in entity_examples:
-            entity_terms.append("background jobs")
-        output_terms = [term for term in ("report", "diagram", "requirement") if term in entity_examples]
-        if output_terms:
-            mapped = {
-                "report": "reports",
-                "diagram": "diagrams",
-                "requirement": "requirements",
-            }
-            entity_terms.append("outputs such as " + _join_surface_labels([mapped[t] for t in output_terms]))
-        if not entity_terms:
-            entity_terms.append("repositories, artifacts, and jobs")
-
-        abstraction_terms = list(abstraction_examples.keys()) or [
-            "job orchestrator",
-            "knowledge servicer",
-            "artifact renderer",
-            "persistence store",
-        ]
-
-        domain_lead = f"{repo_label}'s core entities are {_join_surface_labels(entity_terms)}."
-        abstraction_lead = f"The main {repo_label} abstractions are {_join_surface_labels(abstraction_terms)}."
-
-        by_title = {section.title: section for section in sections}
-        domain = by_title.get("Domain Model")
-        if domain:
-            domain.content = _replace_opening_sentence(domain.content, domain_lead)
-            domain.content = _strip_sentences_with_phrases(
-                domain.content,
-                (
-                    "fundamental concept",
-                    "overall system aims",
-                    "while ",
-                    "not explicitly provided",
-                ),
-            )
-            domain.summary = domain_lead
-        abstractions = by_title.get("Key Abstractions")
-        if abstractions:
-            abstractions.content = _replace_opening_sentence(abstractions.content, abstraction_lead)
-            abstractions.content = _strip_sentences_with_phrases(
-                abstractions.content,
-                (
-                    "another critical abstraction",
-                    "various domain entities",
-                    "provides an abstraction",
-                ),
-            )
-            abstractions.summary = abstraction_lead
-        return sections
-
 
 def _replace_opening_sentence(content: str, replacement: str) -> str:
     body = (content or "").strip()
@@ -2042,19 +1943,6 @@ def _replace_opening_sentence(content: str, replacement: str) -> str:
     if len(pieces) == 1:
         return replacement
     return f"{replacement} {pieces[1].strip()}"
-
-
-def _strip_sentences_with_phrases(content: str, blocked_phrases: tuple[str, ...]) -> str:
-    body = (content or "").strip()
-    if not body:
-        return body
-    pieces = re.split(r"(?<=[.!?])\s+|\n+", body)
-    kept = [
-        piece.strip()
-        for piece in pieces
-        if piece.strip() and not any(phrase in piece.lower() for phrase in blocked_phrases)
-    ]
-    return " ".join(kept) if kept else body
 
 
 def _display_repository_name(repository_name: str) -> str:
