@@ -194,6 +194,7 @@ message KnowledgeSection {
   string confidence = 4;       // "high", "medium", "low"
   bool inferred = 5;           // true if LLM-inferred rather than directly evidenced
   repeated KnowledgeEvidence evidence = 6;
+  string refinement_status = 7;
 }
 
 // KnowledgeEvidence links a knowledge section to a source artifact.

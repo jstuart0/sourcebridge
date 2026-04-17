@@ -990,6 +990,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     confidence=sec.confidence,
                     inferred=sec.inferred,
                     evidence=evidence,
+                    refinement_status=sec.refinement_status,
                 )
             )
 

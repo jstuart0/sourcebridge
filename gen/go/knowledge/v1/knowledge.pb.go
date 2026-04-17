@@ -1410,15 +1410,16 @@ func (x *CodeTourStop) GetRefinementStatus() string {
 
 // KnowledgeSection is a structured section of a knowledge artifact.
 type KnowledgeSection struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Title         string                 `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty"`
-	Content       string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`       // markdown body
-	Summary       string                 `protobuf:"bytes,3,opt,name=summary,proto3" json:"summary,omitempty"`       // one-line summary
-	Confidence    string                 `protobuf:"bytes,4,opt,name=confidence,proto3" json:"confidence,omitempty"` // "high", "medium", "low"
-	Inferred      bool                   `protobuf:"varint,5,opt,name=inferred,proto3" json:"inferred,omitempty"`    // true if LLM-inferred rather than directly evidenced
-	Evidence      []*KnowledgeEvidence   `protobuf:"bytes,6,rep,name=evidence,proto3" json:"evidence,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Title            string                 `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty"`
+	Content          string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`       // markdown body
+	Summary          string                 `protobuf:"bytes,3,opt,name=summary,proto3" json:"summary,omitempty"`       // one-line summary
+	Confidence       string                 `protobuf:"bytes,4,opt,name=confidence,proto3" json:"confidence,omitempty"` // "high", "medium", "low"
+	Inferred         bool                   `protobuf:"varint,5,opt,name=inferred,proto3" json:"inferred,omitempty"`    // true if LLM-inferred rather than directly evidenced
+	Evidence         []*KnowledgeEvidence   `protobuf:"bytes,6,rep,name=evidence,proto3" json:"evidence,omitempty"`
+	RefinementStatus string                 `protobuf:"bytes,7,opt,name=refinement_status,json=refinementStatus,proto3" json:"refinement_status,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *KnowledgeSection) Reset() {
@@ -1491,6 +1492,13 @@ func (x *KnowledgeSection) GetEvidence() []*KnowledgeEvidence {
 		return x.Evidence
 	}
 	return nil
+}
+
+func (x *KnowledgeSection) GetRefinementStatus() string {
+	if x != nil {
+		return x.RefinementStatus
+	}
+	return ""
 }
 
 // KnowledgeEvidence links a knowledge section to a source artifact.
@@ -2091,7 +2099,7 @@ const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"confidence\x18\t \x01(\tR\n" +
 	"confidence\x12+\n" +
 	"\x11refinement_status\x18\n" +
-	" \x01(\tR\x10refinementStatus\"\xe2\x01\n" +
+	" \x01(\tR\x10refinementStatus\"\x8f\x02\n" +
 	"\x10KnowledgeSection\x12\x14\n" +
 	"\x05title\x18\x01 \x01(\tR\x05title\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12\x18\n" +
@@ -2100,7 +2108,8 @@ const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"confidence\x18\x04 \x01(\tR\n" +
 	"confidence\x12\x1a\n" +
 	"\binferred\x18\x05 \x01(\bR\binferred\x12H\n" +
-	"\bevidence\x18\x06 \x03(\v2,.sourcebridge.knowledge.v1.KnowledgeEvidenceR\bevidence\"\xc6\x01\n" +
+	"\bevidence\x18\x06 \x03(\v2,.sourcebridge.knowledge.v1.KnowledgeEvidenceR\bevidence\x12+\n" +
+	"\x11refinement_status\x18\a \x01(\tR\x10refinementStatus\"\xc6\x01\n" +
 	"\x11KnowledgeEvidence\x12\x1f\n" +
 	"\vsource_type\x18\x01 \x01(\tR\n" +
 	"sourceType\x12\x1b\n" +

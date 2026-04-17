@@ -278,20 +278,22 @@ class CodeTourStop(_message.Message):
     def __init__(self, order: _Optional[int] = ..., title: _Optional[str] = ..., description: _Optional[str] = ..., file_path: _Optional[str] = ..., line_start: _Optional[int] = ..., line_end: _Optional[int] = ..., trail: _Optional[str] = ..., modification_hints: _Optional[_Iterable[str]] = ..., confidence: _Optional[str] = ..., refinement_status: _Optional[str] = ...) -> None: ...
 
 class KnowledgeSection(_message.Message):
-    __slots__ = ("title", "content", "summary", "confidence", "inferred", "evidence")
+    __slots__ = ("title", "content", "summary", "confidence", "inferred", "evidence", "refinement_status")
     TITLE_FIELD_NUMBER: _ClassVar[int]
     CONTENT_FIELD_NUMBER: _ClassVar[int]
     SUMMARY_FIELD_NUMBER: _ClassVar[int]
     CONFIDENCE_FIELD_NUMBER: _ClassVar[int]
     INFERRED_FIELD_NUMBER: _ClassVar[int]
     EVIDENCE_FIELD_NUMBER: _ClassVar[int]
+    REFINEMENT_STATUS_FIELD_NUMBER: _ClassVar[int]
     title: str
     content: str
     summary: str
     confidence: str
     inferred: bool
     evidence: _containers.RepeatedCompositeFieldContainer[KnowledgeEvidence]
-    def __init__(self, title: _Optional[str] = ..., content: _Optional[str] = ..., summary: _Optional[str] = ..., confidence: _Optional[str] = ..., inferred: bool = ..., evidence: _Optional[_Iterable[_Union[KnowledgeEvidence, _Mapping]]] = ...) -> None: ...
+    refinement_status: str
+    def __init__(self, title: _Optional[str] = ..., content: _Optional[str] = ..., summary: _Optional[str] = ..., confidence: _Optional[str] = ..., inferred: bool = ..., evidence: _Optional[_Iterable[_Union[KnowledgeEvidence, _Mapping]]] = ..., refinement_status: _Optional[str] = ...) -> None: ...
 
 class KnowledgeEvidence(_message.Message):
     __slots__ = ("source_type", "source_id", "file_path", "line_start", "line_end", "rationale")

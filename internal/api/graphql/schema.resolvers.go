@@ -1793,15 +1793,19 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 
 		sections := make([]knowledgepkg.Section, len(resp.Sections))
 		for i, sec := range resp.Sections {
+			refinementStatus := strings.TrimSpace(sec.RefinementStatus)
+			if refinementStatus == "" {
+				refinementStatus = "light"
+			}
 			sections[i] = knowledgepkg.Section{
 				Title:            sec.Title,
 				Content:          sec.Content,
 				Summary:          sec.Summary,
-				Metadata:         cliffNotesSectionMetadataJSON(knowledgepkg.ArtifactCliffNotes, understanding, "light", sec.Title, len(sec.Evidence) > 0),
+				Metadata:         cliffNotesSectionMetadataJSON(knowledgepkg.ArtifactCliffNotes, understanding, refinementStatus, sec.Title, len(sec.Evidence) > 0),
 				Confidence:       mapProtoConfidence(sec.Confidence),
 				Inferred:         sec.Inferred,
 				SectionKey:       knowledgepkg.SectionKeyForTitle(sec.Title),
-				RefinementStatus: "light",
+				RefinementStatus: refinementStatus,
 			}
 		}
 		if renderPlan.RenderOnly && len(renderPlan.SelectedSectionTitles) > 0 {
@@ -2863,16 +2867,20 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 			persistUsage(resp.Usage)
 			sections := make([]knowledgepkg.Section, len(resp.Sections))
 			for i, sec := range resp.Sections {
+				refinementStatus := strings.TrimSpace(sec.RefinementStatus)
+				if refinementStatus == "" {
+					refinementStatus = "light"
+				}
 				sections[i] = knowledgepkg.Section{
 					Title:            sec.Title,
 					Content:          sec.Content,
 					Summary:          sec.Summary,
-					Metadata:         cliffNotesSectionMetadataJSON(knowledgepkg.ArtifactCliffNotes, understanding, "light", sec.Title, len(sec.Evidence) > 0),
+					Metadata:         cliffNotesSectionMetadataJSON(knowledgepkg.ArtifactCliffNotes, understanding, refinementStatus, sec.Title, len(sec.Evidence) > 0),
 					Confidence:       mapProtoConfidence(sec.Confidence),
 					Inferred:         sec.Inferred,
 					Evidence:         mapProtoEvidence(sec.Evidence),
 					SectionKey:       knowledgepkg.SectionKeyForTitle(sec.Title),
-					RefinementStatus: "light",
+					RefinementStatus: refinementStatus,
 				}
 			}
 			if renderPlan.RenderOnly && len(renderPlan.SelectedSectionTitles) > 0 {

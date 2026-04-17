@@ -732,7 +732,12 @@ func cliffNotesDeepeningTargets(store knowledgepkg.KnowledgeStore, artifact *kno
 		if _, ok := seen[sec.Title]; ok {
 			continue
 		}
-		if sec.Confidence == knowledgepkg.ConfidenceLow || sec.Inferred {
+		status := strings.TrimSpace(sec.RefinementStatus)
+		needsDeepening := sec.Confidence == knowledgepkg.ConfidenceLow || sec.Inferred
+		if status == "needs_evidence" || status == "unsupported_claims" {
+			needsDeepening = true
+		}
+		if needsDeepening {
 			if unit, ok := refinementBySectionKey[sec.SectionKey]; ok {
 				switch unit.Status {
 				case knowledgepkg.RefinementQueued, knowledgepkg.RefinementRunning, knowledgepkg.RefinementCompleted:
@@ -1628,16 +1633,20 @@ func (r *Resolver) enqueueCliffNotesDeepening(
 			}
 			incoming := make([]knowledgepkg.Section, 0, len(resp.Sections))
 			for _, sec := range resp.Sections {
+				refinementStatus := strings.TrimSpace(sec.RefinementStatus)
+				if refinementStatus == "" {
+					refinementStatus = "deep"
+				}
 				incoming = append(incoming, knowledgepkg.Section{
 					Title:            sec.Title,
 					Content:          sec.Content,
 					Summary:          sec.Summary,
-					Metadata:         cliffNotesSectionMetadataJSON(knowledgepkg.ArtifactCliffNotes, &knowledgepkg.RepositoryUnderstanding{ID: artifact.UnderstandingID, RevisionFP: artifact.UnderstandingRevisionFP}, "deep", sec.Title, len(sec.Evidence) > 0),
+					Metadata:         cliffNotesSectionMetadataJSON(knowledgepkg.ArtifactCliffNotes, &knowledgepkg.RepositoryUnderstanding{ID: artifact.UnderstandingID, RevisionFP: artifact.UnderstandingRevisionFP}, refinementStatus, sec.Title, len(sec.Evidence) > 0),
 					Confidence:       mapProtoConfidence(sec.Confidence),
 					Inferred:         sec.Inferred,
 					Evidence:         mapProtoEvidence(sec.Evidence),
 					SectionKey:       knowledgepkg.SectionKeyForTitle(sec.Title),
-					RefinementStatus: "deep",
+					RefinementStatus: refinementStatus,
 				})
 			}
 			selected := make(map[string]struct{}, len(selectedTitles))

@@ -211,19 +211,20 @@ func TestCliffNotesDeepeningTargetsIncludeLowConfidenceOrInferredSections(t *tes
 		{Title: "Key Abstractions", SectionKey: "key_abstractions", RefinementStatus: "light", Confidence: knowledgepkg.ConfidenceHigh},
 		{Title: "Testing Strategy", SectionKey: "testing_strategy", RefinementStatus: "needs_evidence", Confidence: knowledgepkg.ConfidenceLow},
 		{Title: "Configuration & Feature Flags", SectionKey: "configuration_feature_flags", RefinementStatus: "light", Confidence: knowledgepkg.ConfidenceHigh, Inferred: true},
+		{Title: "Concurrency & Background Work", SectionKey: "concurrency_background_work", RefinementStatus: "unsupported_claims", Confidence: knowledgepkg.ConfidenceHigh},
 	}
 	if err := store.StoreKnowledgeSections(artifact.ID, sections); err != nil {
 		t.Fatalf("StoreKnowledgeSections: %v", err)
 	}
 
 	targets := cliffNotesDeepeningTargets(store, artifact)
-	if len(targets) != 6 {
-		t.Fatalf("expected 6 targets, got %#v", targets)
+	if len(targets) != 7 {
+		t.Fatalf("expected 7 targets, got %#v", targets)
 	}
 	if targets[0] != "Architecture Overview" || targets[1] != "Domain Model" || targets[2] != "External Dependencies" || targets[3] != "Key Abstractions" {
 		t.Fatalf("unexpected default priority targets: %#v", targets)
 	}
-	if !containsString(targets, "Testing Strategy") || !containsString(targets, "Configuration & Feature Flags") {
+	if !containsString(targets, "Testing Strategy") || !containsString(targets, "Configuration & Feature Flags") || !containsString(targets, "Concurrency & Background Work") {
 		t.Fatalf("expected dynamic weak-section targets, got %#v", targets)
 	}
 }
