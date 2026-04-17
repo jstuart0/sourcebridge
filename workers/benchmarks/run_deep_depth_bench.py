@@ -281,19 +281,55 @@ def compose(project: str, override: Path, args: list[str]) -> None:
     run(["docker", "compose", "-p", project, "-f", "docker-compose.yml", "-f", str(override), *args], env=env)
 
 
-def compose_up_resilient(project: str, override: Path, services: list[str]) -> None:
+def compose_output(project: str, override: Path, args: list[str]) -> str:
+    env = os.environ.copy()
+    env.setdefault("SOURCEBRIDGE_API_PORT", project_ports(project)["api"])
+    env.setdefault("SOURCEBRIDGE_SURREALDB_PORT", project_ports(project)["surreal"])
+    env.setdefault("SOURCEBRIDGE_WORKER_PORT", project_ports(project)["worker"])
+    env.setdefault("SOURCEBRIDGE_WEB_PORT", project_ports(project)["web"])
+    return run(
+        ["docker", "compose", "-p", project, "-f", "docker-compose.yml", "-f", str(override), *args],
+        env=env,
+        capture=True,
+    )
+
+
+def compose_service_container_id(project: str, override: Path, service: str) -> str:
+    return compose_output(project, override, ["ps", "-q", service]).strip()
+
+
+def wait_container_healthy(container_id: str, timeout_s: int = 180) -> None:
+    started = time.time()
+    while time.time() - started < timeout_s:
+        if not container_id:
+            time.sleep(2)
+            continue
+        status = run(
+            ["docker", "inspect", "-f", "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}", container_id],
+            capture=True,
+        ).strip()
+        if status == "healthy":
+            return
+        if status in {"exited", "dead"}:
+            raise RuntimeError(f"container {container_id} exited before becoming healthy")
+        time.sleep(2)
+    raise RuntimeError(f"timed out waiting for container {container_id} healthy")
+
+
+def compose_up_resilient(project: str, override: Path) -> None:
     attempts = 3
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
-            compose(project, override, ["up", "-d", "--build", *services])
+            compose(project, override, ["up", "-d", "--build", "surrealdb"])
+            wait_container_healthy(compose_service_container_id(project, override, "surrealdb"), timeout_s=180)
+            compose(project, override, ["up", "-d", "--build", "worker", "sourcebridge"])
             return
         except Exception as exc:
             last_error = exc
-            detail = str(exc).lower()
-            if attempt >= attempts or ("unhealthy" not in detail and "dependency failed to start" not in detail):
+            if attempt >= attempts:
                 raise
-            print(f"[bench] compose startup retry {attempt}/{attempts - 1} after unhealthy dependency", flush=True)
+            print(f"[bench] compose startup retry {attempt}/{attempts - 1} after startup failure: {exc}", flush=True)
             compose(project, override, ["down", "-v"])
             time.sleep(3)
     if last_error is not None:
@@ -371,7 +407,7 @@ def benchmark_scenario(
     try:
         print(f"[bench] model={model_label} scenario={canonical_scenario} repo={repo_name} start", flush=True)
         compose(project, override, ["down", "-v"])
-        compose_up_resilient(project, override, ["surrealdb", "worker", "sourcebridge"])
+        compose_up_resilient(project, override)
         wait_http(f"{api_url}/healthz")
         wait_http(f"{api_url}/readyz")
         token = setup_auth(api_url)
