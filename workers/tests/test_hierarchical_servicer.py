@@ -19,6 +19,7 @@ from workers.knowledge.servicer import (
     KnowledgeServicer,
     _selected_cliff_notes_strategy,
 )
+from workers.common.grpc_metadata import CliffNotesRenderMetadata
 
 
 @dataclass
@@ -263,6 +264,85 @@ async def test_hierarchical_path_returns_required_sections(monkeypatch: pytest.M
     # The final call should be the render (it's the one that includes
     # the Output format banner).
     assert any("=== Task ===" in p for p in provider.prompts)
+
+
+@pytest.mark.asyncio
+async def test_render_only_deep_reuses_cached_medium_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(CLIFF_NOTES_STRATEGY_ENV, "hierarchical")
+
+    provider = _StubProvider()
+    cache = _StubSummaryNodeCache()
+    servicer = KnowledgeServicer(llm_provider=provider, summary_node_cache=cache)
+
+    request = knowledge_pb2.GenerateCliffNotesRequest(
+        repository_id="repo-1",
+        repository_name="MACU Sample",
+        audience="developer",
+        depth="medium",
+        scope_type="repository",
+        snapshot_json=_snapshot_json(),
+    )
+
+    await servicer._generate_cliff_notes_hierarchical(
+        request=request,
+        audience="developer",
+        depth="medium",
+        scope_type="repository",
+        model_override=None,
+    )
+
+    provider.counter = 0
+    provider.prompts.clear()
+
+    deep_request = knowledge_pb2.GenerateCliffNotesRequest(
+        repository_id="repo-1",
+        repository_name="MACU Sample",
+        audience="developer",
+        depth="deep",
+        scope_type="repository",
+        snapshot_json=_snapshot_json(),
+    )
+    result, usage, diagnostics = await servicer._generate_cliff_notes_hierarchical(
+        request=deep_request,
+        audience="developer",
+        depth="deep",
+        scope_type="repository",
+        model_override=None,
+        render_meta=CliffNotesRenderMetadata(render_only=True, understanding_depth="medium"),
+    )
+
+    assert len(result.sections) >= len(REQUIRED_SECTIONS)
+    assert usage.operation == "cliff_notes_render_parallel"
+    assert diagnostics["root_cache_hits"] == 1
+    assert provider.counter == 4
+
+
+@pytest.mark.asyncio
+async def test_render_only_without_cached_tree_fails_explicitly(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(CLIFF_NOTES_STRATEGY_ENV, "hierarchical")
+
+    provider = _StubProvider()
+    cache = _StubSummaryNodeCache()
+    servicer = KnowledgeServicer(llm_provider=provider, summary_node_cache=cache)
+
+    request = knowledge_pb2.GenerateCliffNotesRequest(
+        repository_id="repo-1",
+        repository_name="MACU Sample",
+        audience="developer",
+        depth="deep",
+        scope_type="repository",
+        snapshot_json=_snapshot_json(),
+    )
+
+    with pytest.raises(RuntimeError, match="render-only cliff notes requested without a reusable understanding tree"):
+        await servicer._generate_cliff_notes_hierarchical(
+            request=request,
+            audience="developer",
+            depth="deep",
+            scope_type="repository",
+            model_override=None,
+            render_meta=CliffNotesRenderMetadata(render_only=True, understanding_depth="medium"),
+        )
 
 
 @pytest.mark.asyncio

@@ -1683,7 +1683,13 @@ func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input Generat
 		stopProgress := r.startProgressTicker(rt, artifact.ID)
 		bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, artifact.ID, "cliff_notes")
 		if renderPlan.RenderOnly {
-			bgCtx = withCliffNotesRenderMetadata(bgCtx, true, renderPlan.SelectedSectionTitles)
+			bgCtx = withCliffNotesRenderMetadata(
+				bgCtx,
+				true,
+				renderPlan.SelectedSectionTitles,
+				renderPlan.UnderstandingDepth,
+				renderPlan.RelevanceProfile,
+			)
 		}
 		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "llm", "worker_dispatch", "Dispatching cliff notes request to worker", map[string]any{
 			"repository_id":   repo.ID,
@@ -2190,11 +2196,11 @@ func (r *mutationResolver) GenerateLearningPath(ctx context.Context, input Gener
 				"checkpoint":         step.Checkpoint,
 			})
 			sections[i] = knowledgepkg.Section{
-				Title:      step.Title,
-				Content:    step.Content,
-				Summary:    step.Objective,
-				Metadata:   string(metaRaw),
-				Confidence: mapProtoConfidence(step.Confidence),
+				Title:            step.Title,
+				Content:          step.Content,
+				Summary:          step.Objective,
+				Metadata:         string(metaRaw),
+				Confidence:       mapProtoConfidence(step.Confidence),
 				RefinementStatus: step.RefinementStatus,
 			}
 		}
@@ -2828,7 +2834,13 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 			}
 			bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, existing.ID, "cliff_notes")
 			if renderPlan.RenderOnly {
-				bgCtx = withCliffNotesRenderMetadata(bgCtx, true, renderPlan.SelectedSectionTitles)
+				bgCtx = withCliffNotesRenderMetadata(
+					bgCtx,
+					true,
+					renderPlan.SelectedSectionTitles,
+					renderPlan.UnderstandingDepth,
+					renderPlan.RelevanceProfile,
+				)
 			}
 			resp, err := r.Worker.GenerateCliffNotes(bgCtx, &knowledgev1.GenerateCliffNotesRequest{
 				RepositoryId:   repo.ID,

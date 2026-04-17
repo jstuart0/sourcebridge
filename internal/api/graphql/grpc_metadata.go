@@ -6,6 +6,7 @@ package graphql
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"google.golang.org/grpc/metadata"
 
@@ -61,8 +62,14 @@ func (r *Resolver) withJobMetadata(
 	return metadata.NewOutgoingContext(ctx, md)
 }
 
-func withCliffNotesRenderMetadata(ctx context.Context, renderOnly bool, selectedSectionTitles []string) context.Context {
-	if !renderOnly && len(selectedSectionTitles) == 0 {
+func withCliffNotesRenderMetadata(
+	ctx context.Context,
+	renderOnly bool,
+	selectedSectionTitles []string,
+	understandingDepth string,
+	relevanceProfile string,
+) context.Context {
+	if !renderOnly && len(selectedSectionTitles) == 0 && understandingDepth == "" && relevanceProfile == "" {
 		return ctx
 	}
 	pairs := []string{}
@@ -73,6 +80,12 @@ func withCliffNotesRenderMetadata(ctx context.Context, renderOnly bool, selected
 		if raw, err := json.Marshal(selectedSectionTitles); err == nil {
 			pairs = append(pairs, "x-sb-cliff-selected-sections", string(raw))
 		}
+	}
+	if strings.TrimSpace(understandingDepth) != "" {
+		pairs = append(pairs, "x-sb-cliff-understanding-depth", strings.TrimSpace(strings.ToLower(understandingDepth)))
+	}
+	if strings.TrimSpace(relevanceProfile) != "" {
+		pairs = append(pairs, "x-sb-cliff-relevance-profile", strings.TrimSpace(strings.ToLower(relevanceProfile)))
 	}
 	if len(pairs) == 0 {
 		return ctx

@@ -24,7 +24,13 @@ from workers.knowledge.prompts.cliff_notes import (
     REQUIRED_SECTIONS_BY_SCOPE,
     build_cliff_notes_prompt,
 )
-from workers.knowledge.evidence import evaluate_evidence_gate, extract_section_evidence_refs, is_valid_evidence_path
+from workers.knowledge.evidence import (
+    evaluate_evidence_gate,
+    extract_section_evidence_refs,
+    is_valid_evidence_path,
+    strip_forbidden_phrase_sentences,
+    strip_unsupported_claim_sentences,
+)
 from workers.knowledge.types import CliffNotesResult, CliffNotesSection, EvidenceRef
 from workers.reasoning.types import LLMUsageRecord
 
@@ -306,13 +312,25 @@ async def generate_cliff_notes(
             )
 
     if required_sections == REQUIRED_SECTIONS_DEEP_REPOSITORY:
+        evidence_store_text = snapshot_json
         for section in sections:
             gate = evaluate_evidence_gate(
                 text=f"{section.summary}\n{section.content}",
                 evidence=extract_section_evidence_refs(section.evidence),
                 minimum=DEEP_MIN_EVIDENCE.get(section.title, 3),
+                evidence_store_text=evidence_store_text,
             )
+            if gate.unsupported_claim_terms:
+                section.content = strip_unsupported_claim_sentences(section.content, gate.unsupported_claim_terms)
+                section.summary = strip_unsupported_claim_sentences(section.summary, gate.unsupported_claim_terms)
+                section.confidence = "low"
+                section.inferred = True
+                section.refinement_status = "unsupported_claims"
+                continue
             if gate.below_threshold or gate.forbidden_phrases:
+                if gate.forbidden_phrases:
+                    section.content = strip_forbidden_phrase_sentences(section.content, gate.forbidden_phrases)
+                    section.summary = strip_forbidden_phrase_sentences(section.summary, gate.forbidden_phrases)
                 section.confidence = "low"
                 section.refinement_status = "needs_evidence"
 

@@ -485,6 +485,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             "packages": len(by_level.get(2, [])),
             "root": len(by_level.get(3, [])),
         }
+        corpus_revision_fp = corpus.revision_fingerprint()
         cached_tree = None
         if self._summary_node_cache is not None:
             try:
@@ -496,6 +497,17 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 if _supports_kwarg(self._summary_node_cache.load_tree, "depth"):
                     load_kwargs["depth"] = depth
                 cached_tree = await self._summary_node_cache.load_tree(**load_kwargs)
+                render_only = bool(getattr(render_meta, "render_only", False))
+                understanding_depth = str(getattr(render_meta, "understanding_depth", "") or "").strip().lower()
+                if (
+                    render_only
+                    and cached_tree is None
+                    and understanding_depth
+                    and understanding_depth != depth
+                    and _supports_kwarg(self._summary_node_cache.load_tree, "depth")
+                ):
+                    load_kwargs["depth"] = understanding_depth
+                    cached_tree = await self._summary_node_cache.load_tree(**load_kwargs)
             except Exception as exc:
                 log.warning(
                     "summary_node_cache_load_failed",
@@ -677,6 +689,8 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
 
         render_only = bool(getattr(render_meta, "render_only", False))
         selected_section_titles = list(getattr(render_meta, "selected_section_titles", None) or [])
+        relevance_profile = str(getattr(render_meta, "relevance_profile", "") or "").strip().lower() or "product_core"
+        understanding_depth = str(getattr(render_meta, "understanding_depth", "") or "").strip().lower()
 
         log.info(
             "cliff_notes_hierarchical_started",
@@ -714,7 +728,17 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             await sync_resume_state(cached_tree, cached_nodes_loaded=len(cached_tree.nodes))
 
         try:
-            if render_only and cached_tree is not None and cached_tree.root() is not None:
+            if render_only:
+                if cached_tree is None or cached_tree.root() is None:
+                    raise RuntimeError(
+                        "render-only cliff notes requested without a reusable understanding tree; "
+                        "rebuild understanding instead of triggering a hidden hierarchical pass"
+                    )
+                if corpus_revision_fp and cached_tree.revision_fp and cached_tree.revision_fp != corpus_revision_fp:
+                    raise RuntimeError(
+                        "render-only cliff notes requested with a stale understanding tree revision; "
+                        "rebuild understanding before rendering"
+                    )
                 tree = cached_tree
                 diagnostics = {
                     "fallback_count": 0,
@@ -732,6 +756,8 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     {
                         "cached_nodes": len(cached_tree.nodes),
                         "selected_sections": selected_section_titles,
+                        "understanding_depth": understanding_depth or depth,
+                        "relevance_profile": relevance_profile,
                     },
                 )
                 await sync_resume_state(tree, cached_nodes_loaded=len(cached_tree.nodes))
@@ -798,6 +824,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 scope_path=request.scope_path,
                 pre_analysis=pre_analysis,
                 required_section_titles=selected_section_titles or None,
+                relevance_profile=relevance_profile,
             )
 
             if usage.operation == "cliff_notes_render_fallback":

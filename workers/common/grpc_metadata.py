@@ -111,9 +111,16 @@ def resolve_job_log_metadata(context: grpc.aio.ServicerContext) -> RuntimeJobLog
 class CliffNotesRenderMetadata:
     render_only: bool = False
     selected_section_titles: list[str] | None = None
+    understanding_depth: str = ""
+    relevance_profile: str = ""
 
     def is_empty(self) -> bool:
-        return not self.render_only and not self.selected_section_titles
+        return (
+            not self.render_only
+            and not self.selected_section_titles
+            and not self.understanding_depth
+            and not self.relevance_profile
+        )
 
 
 def resolve_cliff_notes_render_metadata(
@@ -135,6 +142,10 @@ def resolve_cliff_notes_render_metadata(
                 continue
             if isinstance(parsed, list):
                 meta.selected_section_titles = [str(item).strip() for item in parsed if str(item).strip()]
+        elif key == "x-sb-cliff-understanding-depth":
+            meta.understanding_depth = (value or "").strip().lower()
+        elif key == "x-sb-cliff-relevance-profile":
+            meta.relevance_profile = (value or "").strip().lower()
     if meta.is_empty():
         return None
     return meta

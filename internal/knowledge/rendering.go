@@ -5,7 +5,11 @@ package knowledge
 
 import "strings"
 
-func RequiredCliffNotesSections(scopeType ScopeType) []string {
+func RequiredCliffNotesSections(scopeType ScopeType, depth ...Depth) []string {
+	requestedDepth := DepthMedium
+	if len(depth) > 0 {
+		requestedDepth = depth[0]
+	}
 	switch scopeType {
 	case ScopeModule:
 		return []string{
@@ -45,6 +49,26 @@ func RequiredCliffNotesSections(scopeType ScopeType) []string {
 			"Change Impact",
 		}
 	default:
+		if requestedDepth == DepthDeep {
+			return []string{
+				"System Purpose",
+				"Architecture Overview",
+				"External Dependencies",
+				"Domain Model",
+				"Core System Flows",
+				"Code Structure",
+				"Security Model",
+				"Error Handling Patterns",
+				"Data Flow & Request Lifecycle",
+				"Concurrency & State Management",
+				"Configuration & Feature Flags",
+				"Testing Strategy",
+				"Key Abstractions",
+				"Module Deep Dives",
+				"Complexity & Risk Areas",
+				"Suggested Starting Points",
+			}
+		}
 		return []string{
 			"System Purpose",
 			"Architecture Overview",

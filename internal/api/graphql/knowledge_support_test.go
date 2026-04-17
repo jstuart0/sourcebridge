@@ -223,3 +223,44 @@ func TestMarkCliffNotesDeepRefinementStatusTracksAttempts(t *testing.T) {
 		t.Fatalf("expected last error boom, got %q", unit.LastError)
 	}
 }
+
+func TestCliffNotesRenderPlanForArtifactUsesUnderstandingBackedDeepRender(t *testing.T) {
+	store := knowledgepkg.NewMemStore()
+	artifact, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+		RepositoryID:            "repo-1",
+		Type:                    knowledgepkg.ArtifactCliffNotes,
+		Audience:                knowledgepkg.AudienceDeveloper,
+		Depth:                   knowledgepkg.DepthDeep,
+		Scope:                   &knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
+		UnderstandingRevisionFP: "rev-1",
+		RendererVersion:         knowledgepkg.RendererVersionForArtifact(knowledgepkg.ArtifactCliffNotes),
+	})
+	if err != nil {
+		t.Fatalf("StoreKnowledgeArtifact: %v", err)
+	}
+	understanding, err := store.StoreRepositoryUnderstanding(&knowledgepkg.RepositoryUnderstanding{
+		RepositoryID: "repo-1",
+		Scope:        (&knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository}).NormalizePtr(),
+		RevisionFP:   "rev-1",
+		Stage:        knowledgepkg.UnderstandingReady,
+		TreeStatus:   knowledgepkg.UnderstandingTreeComplete,
+	})
+	if err != nil {
+		t.Fatalf("StoreRepositoryUnderstanding: %v", err)
+	}
+	_ = understanding
+
+	plan := cliffNotesRenderPlanForArtifact(store, artifact, knowledgepkg.SourceRevision{ContentFingerprint: "rev-1"}, understanding)
+	if !plan.RenderOnly {
+		t.Fatal("expected render-only plan for fresh DEEP artifact backed by understanding")
+	}
+	if plan.UnderstandingDepth != string(knowledgepkg.DepthMedium) {
+		t.Fatalf("expected medium understanding depth, got %q", plan.UnderstandingDepth)
+	}
+	if plan.RelevanceProfile != "product_core" {
+		t.Fatalf("expected product_core relevance profile, got %q", plan.RelevanceProfile)
+	}
+	if len(plan.SelectedSectionTitles) != 16 {
+		t.Fatalf("expected 16 deep section titles, got %d", len(plan.SelectedSectionTitles))
+	}
+}

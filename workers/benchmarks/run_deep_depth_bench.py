@@ -1,4 +1,4 @@
-"""Benchmark DEEP cliff notes cold vs warm across the prior OpenRouter model set."""
+"""Benchmark understanding-first cliff notes on selected OpenRouter models."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ MODELS = [
     ("claude-sonnet-4", "anthropic/claude-sonnet-4"),
     ("claude-haiku-4.5", "anthropic/claude-haiku-4.5"),
     ("gemini-2.5-flash", "google/gemini-2.5-flash"),
-    ("deepseek-v3", "deepseek/deepseek-chat-v3-0324"),
+    ("qwen2.5-32b", "Qwen/Qwen2.5-32B-Instruct"),
 ]
 FORBIDDEN = [
     "various components",
@@ -49,6 +49,7 @@ class ScenarioResult:
     scenario: str
     repo: str
     index_seconds: int
+    understanding_seconds: int
     medium_seconds: int
     deep_seconds: int
     total_seconds: int
@@ -128,11 +129,44 @@ def mutation_generate_cliff_notes(repo_id: str, depth: str) -> str:
     )
 
 
+def mutation_build_repository_understanding(repo_id: str) -> str:
+    return (
+        'mutation { buildRepositoryUnderstanding(input: { repositoryId: "'
+        + repo_id
+        + '", scopeType: REPOSITORY }) { id stage treeStatus revisionFp modelUsed } }'
+    )
+
+
+def latest_understanding(api_url: str, token: str, repo_id: str) -> dict | None:
+    query = (
+        '{ repositoryUnderstanding(repositoryId: "'
+        + repo_id
+        + '", scopeType: REPOSITORY) { id stage treeStatus revisionFp modelUsed cachedNodes totalNodes updatedAt } }'
+    )
+    data = graphql(api_url, token, query)
+    return ((data.get("data") or {}).get("repositoryUnderstanding") or None)
+
+
+def wait_understanding_ready(api_url: str, token: str, repo_id: str, timeout_s: int = 7200) -> dict:
+    started = time.time()
+    while time.time() - started < timeout_s:
+        understanding = latest_understanding(api_url, token, repo_id)
+        if understanding:
+            stage = (understanding.get("stage") or "").upper()
+            tree_status = (understanding.get("treeStatus") or "").upper()
+            if stage == "READY" and tree_status == "COMPLETE":
+                return understanding
+            if stage == "FAILED":
+                raise RuntimeError("repository understanding failed")
+        time.sleep(10)
+    raise RuntimeError("timed out waiting for repository understanding")
+
+
 def latest_artifact(api_url: str, token: str, repo_id: str, depth: str) -> dict | None:
     query = (
         '{ knowledgeArtifacts(repositoryId: "'
         + repo_id
-        + '") { id type depth status generatedAt sections { title content confidence evidence { filePath lineStart lineEnd } } } }'
+        + '") { id type depth status generatedAt errorCode errorMessage progressMessage sections { title content confidence evidence { filePath lineStart lineEnd } } } }'
     )
     data = graphql(api_url, token, query)
     artifacts = ((data.get("data") or {}).get("knowledgeArtifacts") or [])
@@ -150,6 +184,11 @@ def wait_artifact_ready(api_url: str, token: str, repo_id: str, depth: str, time
             if status == "READY":
                 return artifact
             if status == "FAILED":
+                error_code = (artifact.get("errorCode") or "").strip()
+                error_message = (artifact.get("errorMessage") or artifact.get("progressMessage") or "").strip()
+                detail = " ".join(part for part in [error_code, error_message] if part).strip()
+                if detail:
+                    raise RuntimeError(f"{depth} cliff notes failed: {detail}")
                 raise RuntimeError(f"{depth} cliff notes failed")
         time.sleep(10)
     raise RuntimeError(f"timed out waiting for {depth} cliff notes")
@@ -293,12 +332,21 @@ def benchmark_scenario(
     repo_name: str,
     import_path: str,
 ) -> ScenarioResult:
+    canonical_scenario = {
+        "direct_deep": "deep_from_understanding",
+        "medium_then_deep": "medium_then_deep_from_understanding",
+    }.get(scenario, scenario)
     project = f"sb-deep-{model_label.replace('.', '-').replace('_', '-')}-{scenario}"
     ports = project_ports(project)
     api_url = f"http://localhost:{ports['api']}"
     override = make_override(model, api_key, repo_mount)
+    index_seconds = 0
+    understanding_seconds = 0
+    medium_seconds = 0
+    deep_seconds = 0
+    repo_id = ""
     try:
-        print(f"[bench] model={model_label} scenario={scenario} repo={repo_name} start", flush=True)
+        print(f"[bench] model={model_label} scenario={canonical_scenario} repo={repo_name} start", flush=True)
         compose(project, override, ["down", "-v"])
         compose(project, override, ["up", "-d", "--build", "surrealdb", "worker", "sourcebridge"])
         wait_http(f"{api_url}/healthz")
@@ -308,22 +356,32 @@ def benchmark_scenario(
         repo_id = add_local_repo(api_url, token, repo_name, import_path)
         wait_repo_ready(api_url, token, repo_id)
         index_seconds = int(time.time() - index_started)
-        print(f"[bench] model={model_label} scenario={scenario} indexed in {index_seconds}s", flush=True)
+        print(f"[bench] model={model_label} scenario={canonical_scenario} indexed in {index_seconds}s", flush=True)
 
-        medium_seconds = 0
-        if scenario == "medium_then_deep":
+        understanding_started = time.time()
+        graphql(api_url, token, mutation_build_repository_understanding(repo_id))
+        understanding = wait_understanding_ready(api_url, token, repo_id)
+        understanding_seconds = int(time.time() - understanding_started)
+        print(
+            "[bench] model="
+            f"{model_label} scenario={canonical_scenario} understanding in {understanding_seconds}s "
+            f"(nodes={understanding.get('totalNodes', 0)} cached={understanding.get('cachedNodes', 0)})",
+            flush=True,
+        )
+
+        if canonical_scenario == "medium_then_deep_from_understanding":
             started = time.time()
             graphql(api_url, token, mutation_generate_cliff_notes(repo_id, "MEDIUM"))
             wait_artifact_ready(api_url, token, repo_id, "MEDIUM")
             medium_seconds = int(time.time() - started)
-            print(f"[bench] model={model_label} scenario={scenario} medium in {medium_seconds}s", flush=True)
+            print(f"[bench] model={model_label} scenario={canonical_scenario} medium in {medium_seconds}s", flush=True)
 
         deep_started = time.time()
         graphql(api_url, token, mutation_generate_cliff_notes(repo_id, "DEEP"))
         deep_artifact = wait_artifact_ready(api_url, token, repo_id, "DEEP")
         deep_seconds = int(time.time() - deep_started)
-        print(f"[bench] model={model_label} scenario={scenario} deep in {deep_seconds}s", flush=True)
-        total_seconds = index_seconds + medium_seconds + deep_seconds
+        print(f"[bench] model={model_label} scenario={canonical_scenario} deep in {deep_seconds}s", flush=True)
+        total_seconds = index_seconds + understanding_seconds + medium_seconds + deep_seconds
         (
             section_count,
             content_bytes,
@@ -337,9 +395,10 @@ def benchmark_scenario(
         result = ScenarioResult(
             label=model_label,
             model=model,
-            scenario=scenario,
+            scenario=canonical_scenario,
             repo=repo_name,
             index_seconds=index_seconds,
+            understanding_seconds=understanding_seconds,
             medium_seconds=medium_seconds,
             deep_seconds=deep_seconds,
             total_seconds=total_seconds,
@@ -354,6 +413,40 @@ def benchmark_scenario(
             artifact_path="",
         )
         return persist_artifact(results_dir, result, deep_artifact)
+    except Exception as exc:
+        artifact = latest_artifact(api_url, token, repo_id, "DEEP") if repo_id else None
+        error = str(exc)
+        if artifact and not error:
+            error = (
+                artifact.get("errorMessage")
+                or artifact.get("progressMessage")
+                or artifact.get("errorCode")
+                or error
+            )
+        partial = ScenarioResult(
+            label=model_label,
+            model=model,
+            scenario=canonical_scenario,
+            repo=repo_name,
+            index_seconds=index_seconds,
+            understanding_seconds=understanding_seconds,
+            medium_seconds=medium_seconds,
+            deep_seconds=deep_seconds,
+            total_seconds=index_seconds + understanding_seconds + medium_seconds + deep_seconds,
+            section_count=0,
+            total_content_bytes=0,
+            avg_evidence_refs=0.0,
+            zero_evidence_sections=0,
+            forbidden_phrase_count=0,
+            low_confidence_sections=0,
+            passed_hard_gates=False,
+            passed_soft_quality=False,
+            artifact_path="",
+            error=error,
+        )
+        if artifact:
+            return persist_artifact(results_dir, partial, artifact)
+        return partial
     finally:
         try:
             compose(project, override, ["down", "-v"])
@@ -366,14 +459,14 @@ def write_report(results_dir: Path, results: list[ScenarioResult]) -> None:
     payload = {"results": [asdict(result) for result in results], "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     (results_dir / "results.json").write_text(json.dumps(payload, indent=2))
     lines = [
-        "# DEEP Depth Benchmark",
+        "# Understanding-First DEEP Benchmark",
         "",
-        "| Model | Repo | Scenario | Index s | Medium s | Deep s | Sections | Bytes | Avg refs | Zero-evidence | Forbidden | Hard | Soft |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
+        "| Model | Repo | Scenario | Index s | Understanding s | Medium s | Deep s | Sections | Bytes | Avg refs | Zero-evidence | Forbidden | Hard | Soft |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
     ]
     for result in results:
         lines.append(
-            f"| {result.label} | {result.repo} | {result.scenario} | {result.index_seconds} | {result.medium_seconds} | {result.deep_seconds} | "
+            f"| {result.label} | {result.repo} | {result.scenario} | {result.index_seconds} | {result.understanding_seconds} | {result.medium_seconds} | {result.deep_seconds} | "
             f"{result.section_count} | {result.total_content_bytes} | {result.avg_evidence_refs} | {result.zero_evidence_sections} | "
             f"{result.forbidden_phrase_count} | {'pass' if result.passed_hard_gates else 'fail'} | {'pass' if result.passed_soft_quality else 'fail'} |"
         )
@@ -407,42 +500,20 @@ def main() -> None:
     import_path = "/bench/repo"
     results: list[ScenarioResult] = []
     selected_models = [(label, model) for label, model in MODELS if not args.model_label or label in args.model_label]
-    selected_scenarios = args.scenario or ["direct_deep", "medium_then_deep"]
+    selected_scenarios = args.scenario or ["deep_from_understanding", "medium_then_deep_from_understanding"]
     for idx, (label, model) in enumerate(selected_models):
         for scenario_offset, scenario in enumerate(selected_scenarios):
-            try:
-                result = benchmark_scenario(
-                        label,
-                        model,
-                        scenario,
-                        api_key,
-                        idx * 10 + scenario_offset,
-                        results_dir=args.results_dir,
-                        repo_mount=repo_mount,
-                        repo_name=repo_name,
-                        import_path=import_path,
-                    )
-            except Exception as exc:
-                result = ScenarioResult(
-                    label=label,
-                    model=model,
-                    scenario=scenario,
-                    repo=repo_name,
-                    index_seconds=0,
-                    medium_seconds=0,
-                    deep_seconds=0,
-                    total_seconds=0,
-                    section_count=0,
-                    total_content_bytes=0,
-                    avg_evidence_refs=0.0,
-                    zero_evidence_sections=0,
-                    forbidden_phrase_count=0,
-                    low_confidence_sections=0,
-                    passed_hard_gates=False,
-                    passed_soft_quality=False,
-                    artifact_path="",
-                    error=str(exc),
-                )
+            result = benchmark_scenario(
+                label,
+                model,
+                scenario,
+                api_key,
+                idx * 10 + scenario_offset,
+                results_dir=args.results_dir,
+                repo_mount=repo_mount,
+                repo_name=repo_name,
+                import_path=import_path,
+            )
             results.append(result)
             write_report(args.results_dir, results)
 

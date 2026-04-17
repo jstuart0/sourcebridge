@@ -1,8 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 from workers.knowledge.evidence import (
+    detect_unsupported_claim_terms,
     extract_section_evidence_refs,
     is_valid_evidence_path,
+    relevance_penalty,
+    strip_forbidden_phrase_sentences,
+    strip_unsupported_claim_sentences,
 )
 from workers.knowledge.types import EvidenceRef
 
@@ -28,3 +32,35 @@ def test_extract_section_evidence_refs_filters_invalid_paths() -> None:
     )
     assert len(refs) == 1
     assert refs[0].path == "src/services/auth-service.ts"
+
+
+def test_relevance_penalty_downranks_example_paths_for_product_core() -> None:
+    assert relevance_penalty("examples/demo/main.go", profile="product_core") == 1
+    assert relevance_penalty("internal/api/server.go", profile="product_core") == 0
+
+
+def test_relevance_penalty_keeps_explicitly_scoped_path() -> None:
+    assert relevance_penalty("examples/demo/main.go", profile="product_core", scope_path="examples/demo") == 0
+
+
+def test_detect_unsupported_claim_terms_flags_missing_tech() -> None:
+    hits = detect_unsupported_claim_terms(
+        "The system uses Redis for queueing and Graphviz for diagrams.",
+        "The repository mentions Mermaid and a job queue worker.",
+    )
+    assert "redis" in hits
+    assert "graphviz" in hits
+
+
+def test_strip_unsupported_claim_sentences_removes_bad_claims() -> None:
+    text = "The system uses Redis for queueing. It stores job state in files."
+    stripped = strip_unsupported_claim_sentences(text, ["redis"])
+    assert "Redis" not in stripped
+    assert "stores job state in files" in stripped
+
+
+def test_strip_forbidden_phrase_sentences_removes_inflated_framing() -> None:
+    text = "SourceBridge is a comprehensive platform designed for developers. It exposes a GraphQL API."
+    stripped = strip_forbidden_phrase_sentences(text, ["comprehensive platform", "designed for"])
+    assert "comprehensive platform" not in stripped.lower()
+    assert "GraphQL API" in stripped

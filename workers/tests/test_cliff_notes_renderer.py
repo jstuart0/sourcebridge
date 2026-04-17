@@ -14,7 +14,7 @@ import pytest
 from workers.common.llm.provider import LLMResponse
 from workers.comprehension.renderers import CliffNotesRenderer
 from workers.comprehension.tree import SummaryNode, SummaryTree
-from workers.knowledge.prompts.cliff_notes import REQUIRED_SECTIONS
+from workers.knowledge.prompts.cliff_notes import REQUIRED_SECTIONS, REQUIRED_SECTIONS_DEEP_REPOSITORY
 
 
 @dataclass
@@ -23,6 +23,7 @@ class _RecordingProvider:
 
     response_text: str
     captured_prompt: str = ""
+    captured_prompts: list[str] | None = None
     calls: int = 0
 
     async def complete(
@@ -36,6 +37,9 @@ class _RecordingProvider:
     ) -> LLMResponse:
         self.calls += 1
         self.captured_prompt = prompt
+        if self.captured_prompts is None:
+            self.captured_prompts = []
+        self.captured_prompts.append(prompt)
         return LLMResponse(
             content=self.response_text,
             model=model or "fake-model",
@@ -186,6 +190,26 @@ def _valid_response_payload() -> str:
     )
 
 
+def _valid_deep_response_payload() -> str:
+    return json.dumps(
+        [
+            {
+                "title": title,
+                "content": f"Body for {title} referencing internal/api/auth.go and internal/store/repo.go",
+                "summary": f"Summary for {title}",
+                "confidence": "high",
+                "inferred": False,
+                "evidence": [
+                    {"source_type": "file", "file_path": "internal/api/auth.go", "line_start": 10, "line_end": 20},
+                    {"source_type": "file", "file_path": "internal/store/repo.go", "line_start": 1, "line_end": 5},
+                    {"source_type": "file", "file_path": "internal/api/router.go", "line_start": 5, "line_end": 8},
+                ],
+            }
+            for title in REQUIRED_SECTIONS_DEEP_REPOSITORY
+        ]
+    )
+
+
 @pytest.mark.asyncio
 async def test_render_returns_all_required_sections_from_valid_payload() -> None:
     provider = _RecordingProvider(response_text=_valid_response_payload())
@@ -248,6 +272,90 @@ async def test_render_prompt_includes_root_summary_and_subsystems() -> None:
     assert "API package" in prompt or "Exposes the public HTTP API" in prompt
     assert "Store package" in prompt or "Persists domain objects" in prompt
     assert "External Dependencies" in prompt
+
+
+@pytest.mark.asyncio
+async def test_deep_render_prompt_includes_section_evidence_plan() -> None:
+    provider = _RecordingProvider(response_text=_valid_deep_response_payload())
+    renderer = CliffNotesRenderer(provider=provider)
+    tree = _build_tree()
+
+    await renderer.render(
+        tree,
+        repository_name="Sample",
+        audience="developer",
+        depth="deep",
+        scope_type="repository",
+    )
+
+    prompts = provider.captured_prompts or []
+    assert any("=== Section evidence plan ===" in prompt for prompt in prompts)
+    assert any("System Purpose" in prompt for prompt in prompts)
+    assert any("Architecture Overview" in prompt for prompt in prompts)
+    joined = "\n".join(prompts)
+    assert "internal/api/auth.go" in joined
+    assert "internal/store/repo.go" in joined
+
+
+@pytest.mark.asyncio
+async def test_deep_repository_render_splits_into_parallel_groups() -> None:
+    provider = _RecordingProvider(response_text=_valid_deep_response_payload())
+    renderer = CliffNotesRenderer(provider=provider)
+    tree = _build_tree()
+
+    result, usage = await renderer.render(
+        tree,
+        repository_name="Sample",
+        audience="developer",
+        depth="deep",
+        scope_type="repository",
+    )
+
+    assert provider.calls == 4
+    assert usage.operation == "cliff_notes_render_parallel"
+    assert len(result.sections) == len(REQUIRED_SECTIONS_DEEP_REPOSITORY)
+    prompts = provider.captured_prompts or []
+    assert len(prompts) == 4
+    assert any("- System Purpose" in prompt and "- Architecture Overview" in prompt for prompt in prompts)
+    assert any("- Security Model" in prompt and "- Configuration & Feature Flags" in prompt for prompt in prompts)
+
+
+@pytest.mark.asyncio
+async def test_deep_section_evidence_plan_prefers_product_core_over_examples() -> None:
+    provider = _RecordingProvider(response_text=_valid_deep_response_payload())
+    renderer = CliffNotesRenderer(provider=provider)
+    tree = _build_tree()
+    tree.add(
+        SummaryNode(
+            id="fe",
+            corpus_id="repo",
+            unit_id="file:examples/auth.ts",
+            level=1,
+            parent_id="package:api",
+            summary_text="Example auth middleware for demo flows.",
+            headline="Example auth middleware",
+            source_tokens=500,
+            metadata={"file_path": "examples/acme-api/src/api/middleware/auth.ts"},
+        )
+    )
+
+    await renderer.render(
+        tree,
+        repository_name="Sample",
+        audience="developer",
+        depth="deep",
+        scope_type="repository",
+    )
+
+    prompts = provider.captured_prompts or []
+    security_line = next(
+        line
+        for prompt in prompts
+        for line in prompt.splitlines()
+        if line.startswith("- Security Model:")
+    )
+    assert "internal/api/auth.go" in security_line
+    assert "examples/acme-api/src/api/middleware/auth.ts" not in security_line
 
 
 @pytest.mark.asyncio

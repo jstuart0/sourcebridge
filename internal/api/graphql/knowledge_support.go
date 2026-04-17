@@ -35,6 +35,8 @@ type cliffNotesSectionMetadata struct {
 type cliffNotesRenderPlan struct {
 	RenderOnly            bool
 	SelectedSectionTitles []string
+	UnderstandingDepth    string
+	RelevanceProfile      string
 }
 
 type architectureDiagramScaffold struct {
@@ -864,6 +866,8 @@ func updateUnderstandingForCliffNotes(
 	}
 	if stored != nil && artifact.ID != "" {
 		_ = store.AttachArtifactUnderstanding(artifact.ID, stored.ID, stored.RevisionFP)
+		artifact.UnderstandingID = stored.ID
+		artifact.UnderstandingRevisionFP = stored.RevisionFP
 		_ = store.StoreArtifactDependencies(artifact.ID, []knowledgepkg.ArtifactDependency{{
 			ArtifactID:       artifact.ID,
 			DependencyType:   knowledgepkg.DependencyRepositoryUnderstanding,
@@ -971,6 +975,8 @@ func seedRepositoryUnderstanding(
 	}
 	if stored != nil {
 		_ = store.AttachArtifactUnderstanding(artifact.ID, stored.ID, stored.RevisionFP)
+		artifact.UnderstandingID = stored.ID
+		artifact.UnderstandingRevisionFP = stored.RevisionFP
 		_ = store.StoreArtifactDependencies(artifact.ID, []knowledgepkg.ArtifactDependency{{
 			ArtifactID:       artifact.ID,
 			DependencyType:   knowledgepkg.DependencyRepositoryUnderstanding,
@@ -1005,6 +1011,8 @@ func markRepositoryUnderstandingFailed(
 	stored, storeErr := store.StoreRepositoryUnderstanding(u)
 	if storeErr == nil && stored != nil {
 		_ = store.AttachArtifactUnderstanding(artifact.ID, stored.ID, stored.RevisionFP)
+		artifact.UnderstandingID = stored.ID
+		artifact.UnderstandingRevisionFP = stored.RevisionFP
 		_ = store.StoreArtifactDependencies(artifact.ID, []knowledgepkg.ArtifactDependency{{
 			ArtifactID:       artifact.ID,
 			DependencyType:   knowledgepkg.DependencyRepositoryUnderstanding,
@@ -1033,6 +1041,8 @@ func attachFreshUnderstanding(
 		return u, false
 	}
 	_ = store.AttachArtifactUnderstanding(artifact.ID, u.ID, u.RevisionFP)
+	artifact.UnderstandingID = u.ID
+	artifact.UnderstandingRevisionFP = u.RevisionFP
 	_ = store.StoreArtifactDependencies(artifact.ID, []knowledgepkg.ArtifactDependency{{
 		ArtifactID:       artifact.ID,
 		DependencyType:   knowledgepkg.DependencyRepositoryUnderstanding,
@@ -1317,16 +1327,22 @@ func cliffNotesRenderPlanForArtifact(
 	if artifact.Scope != nil {
 		scopeType = artifact.Scope.Normalize().ScopeType
 	}
-	required := knowledgepkg.RequiredCliffNotesSections(scopeType)
+	required := knowledgepkg.RequiredCliffNotesSections(scopeType, artifact.Depth)
 	existingSections := store.GetKnowledgeSections(artifact.ID)
 	missing := knowledgepkg.MissingSectionTitles(existingSections, required)
 	if artifact.RendererVersion != knowledgepkg.RendererVersionForArtifact(artifact.Type) {
-		return cliffNotesRenderPlan{RenderOnly: true}
+		return cliffNotesRenderPlan{
+			RenderOnly:         true,
+			UnderstandingDepth: string(knowledgepkg.DepthMedium),
+			RelevanceProfile:   "product_core",
+		}
 	}
 	if len(missing) > 0 {
 		return cliffNotesRenderPlan{
 			RenderOnly:            true,
 			SelectedSectionTitles: missing,
+			UnderstandingDepth:    string(knowledgepkg.DepthMedium),
+			RelevanceProfile:      "product_core",
 		}
 	}
 	return cliffNotesRenderPlan{}
@@ -1574,7 +1590,7 @@ func (r *Resolver) enqueueCliffNotesDeepening(
 			rt.ReportProgress(0.05, "deepening", "Deepening critical cliff note sections")
 			markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(artifact.ID), selectedTitles, knowledgepkg.RefinementRunning, "")
 			bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, artifact.ID, "cliff_notes_deepen")
-			bgCtx = withCliffNotesRenderMetadata(bgCtx, true, selectedTitles)
+			bgCtx = withCliffNotesRenderMetadata(bgCtx, true, selectedTitles, string(knowledgepkg.DepthMedium), "product_core")
 			resp, err := r.Worker.GenerateCliffNotes(bgCtx, &knowledgev1.GenerateCliffNotesRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
