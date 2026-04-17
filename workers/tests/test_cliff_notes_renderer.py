@@ -670,6 +670,32 @@ async def test_external_dependencies_evidence_plan_uses_fact_signals() -> None:
             },
         )
     )
+    tree.add(
+        SummaryNode(
+            id="fk",
+            corpus_id="repo",
+            unit_id="file:workers/knowledge/servicer.py",
+            level=1,
+            parent_id="package:store",
+            summary_text="Knowledge servicer implementation.",
+            headline="Knowledge servicer",
+            source_tokens=300,
+            metadata={"file_path": "workers/knowledge/servicer.py"},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fr",
+            corpus_id="repo",
+            unit_id="file:internal/api/rest/router.go",
+            level=1,
+            parent_id="package:store",
+            summary_text="REST router wiring.",
+            headline="REST router",
+            source_tokens=320,
+            metadata={"file_path": "internal/api/rest/router.go"},
+        )
+    )
 
     await renderer.render(
         tree,
@@ -687,6 +713,8 @@ async def test_external_dependencies_evidence_plan_uses_fact_signals() -> None:
     )
     deps_line = next(line for line in ops_prompt.splitlines() if line.startswith("- External Dependencies:"))
     assert "internal/platform/client.go" in deps_line
+    assert "workers/knowledge/servicer.py" not in deps_line
+    assert "internal/api/rest/router.go" not in deps_line
 
 
 @pytest.mark.asyncio
@@ -920,6 +948,7 @@ async def test_domain_model_hint_seed_beats_larger_store_file() -> None:
     )
     assert "internal/knowledge/models.go" in domain_line
     assert "internal/llm/job.go" in domain_line
+    assert "internal/graph/store.go" not in domain_line
     assert "=== Domain-model guardrail ===" in model_prompt
     assert "- knowledge_artifact: `internal/knowledge/models.go`" in model_prompt
     assert "- job: `internal/llm/job.go`" in model_prompt

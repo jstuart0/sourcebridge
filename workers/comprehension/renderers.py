@@ -258,11 +258,11 @@ SECTION_FOCUS_NOTES: dict[str, str] = {
     "System Purpose": "state what SourceBridge produces for users and operators first: repository understanding, knowledge artifacts, reports, diagrams, and review or QA workflows; do not frame the repo as primarily a REST API or generic code intelligence platform when web, GraphQL, worker, and CLI evidence are present",
     "Architecture Overview": "explain the cooperating surfaces in this order when evidence exists: web product, GraphQL or API entrypoints, workers, persistence, CLI; do not lead with router wiring alone",
     "Domain Model": "focus on repositories, scopes, knowledge artifacts, understanding revisions, jobs, reports, and diagrams; avoid centering scanners unless they dominate the evidence",
-    "External Dependencies": "mention only concrete external systems such as SurrealDB, configured LLM providers, and explicit service boundaries; do not list internal APIs, renderers, or diagrams as dependencies",
+    "External Dependencies": "mention only concrete external systems such as SurrealDB, configured LLM providers, and explicit service boundaries; do not list internal APIs, renderers, or diagrams as dependencies, and do not infer gRPC or distributed boundaries from servicer names alone",
     "Data Flow & Request Lifecycle": "trace request entrypoints through API layers into stores or workers; prefer concrete request-to-worker-to-store flows over generic service summaries",
     "Concurrency & State Management": "focus on worker loops, queued jobs, resume state, and persistence-backed state transitions rather than generic async language",
     "Testing Strategy": "mention explicit test directories, fake providers, or benchmark scripts when present; otherwise say testing evidence is limited",
-    "Key Abstractions": "prefer stores, artifacts, jobs, renderers, orchestrators, and servicers over generic resolvers or scanners unless those abstractions dominate",
+    "Key Abstractions": "prefer SourceBridge abstractions such as artifacts, understanding revisions, jobs, renderers, orchestrators, stores, and servicers; avoid reducing the section to generic database or graph helper types unless they dominate the evidence",
     "Complexity & Risk Areas": "focus on hierarchical summarization, orchestration/reuse, persistence consistency, and renderer quality risks",
 }
 
@@ -311,9 +311,12 @@ SECTION_DISFAVORED_PATH_SNIPPETS: dict[str, tuple[str, ...]] = {
         "workers/requirements/scanners/",
         "workers/knowledge/architecture_diagram.py",
         "workers/cli_review.py",
+        "workers/knowledge/servicer.py",
+        "workers/reasoning/servicer.py",
         "internal/api/graphql/schema.resolvers.go",
         "internal/api/rest/router.go",
     ),
+    "Domain Model": ("internal/db/surreal.go", "internal/db/store.go", "internal/graph/store.go"),
     "Key Abstractions": ("internal/db/store.go", "internal/graph/store.go"),
 }
 
@@ -346,6 +349,13 @@ Good Domain Model example:
 Bad Domain Model example:
 - "The domain model is mainly API schemas and comments."
 
+Good Key Abstractions example:
+- "Name the repository-specific abstractions that organize work: understanding trees, artifact renderers,
+  orchestration jobs, knowledge servicers, and persistence stores. Explain what each abstraction is for."
+
+Bad Key Abstractions example:
+- "The key abstractions are the database client and a few helpers."
+
 Good Code Structure example:
 - "Organize the explanation around product-facing slices such as `internal/api`, `internal/knowledge`, `workers/*`,
   `web/*`, and CLI entrypoints, then explain how those modules cooperate."
@@ -361,6 +371,9 @@ Good External Dependencies example:
 
 Bad External Dependencies example:
 - "The system probably uses several cloud services and external APIs."
+
+Bad External Dependencies example:
+- "Servicer files imply there is probably a gRPC service boundary."
 
 Good Security example:
 - "Ground security claims in middleware, auth stores, token handling, and tenant/repo access enforcement."
