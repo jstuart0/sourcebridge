@@ -324,6 +324,8 @@ def compose_up_resilient(project: str, override: Path) -> None:
             compose(project, override, ["up", "-d", "--build", "surrealdb"])
             wait_container_healthy(compose_service_container_id(project, override, "surrealdb"), timeout_s=180)
             compose(project, override, ["up", "-d", "--build", "worker", "sourcebridge"])
+            wait_container_healthy(compose_service_container_id(project, override, "worker"), timeout_s=180)
+            wait_container_healthy(compose_service_container_id(project, override, "sourcebridge"), timeout_s=240)
             return
         except Exception as exc:
             last_error = exc
