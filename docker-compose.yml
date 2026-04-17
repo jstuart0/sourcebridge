@@ -36,9 +36,9 @@ services:
     healthcheck:
       test: ["CMD", "/surreal", "is-ready", "--endpoint", "ws://localhost:8000"]
       interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
 
   # SourceBridge API — Go HTTP/GraphQL server
   sourcebridge:

@@ -106,8 +106,9 @@ def wait_http(url: str, timeout_s: int = 180) -> None:
     raise RuntimeError(f"timed out waiting for {url}")
 
 
-def wait_repo_ready(api_url: str, token: str, repo_id: str, timeout_s: int = 600) -> None:
+def wait_repo_ready(api_url: str, token: str, repo_id: str, timeout_s: int = 1800) -> None:
     started = time.time()
+    last_status = ""
     while time.time() - started < timeout_s:
         data = graphql(api_url, token, f'{{ repository(id: "{repo_id}") {{ status }} }}')
         status = (((data.get("data") or {}).get("repository") or {}).get("status") or "").upper()
@@ -115,6 +116,9 @@ def wait_repo_ready(api_url: str, token: str, repo_id: str, timeout_s: int = 600
             return
         if status == "ERROR":
             raise RuntimeError("repository indexing failed")
+        if status and status != last_status:
+            print(f"[bench] repository status={status}", flush=True)
+            last_status = status
         time.sleep(5)
     raise RuntimeError("timed out waiting for repository ready")
 
@@ -277,6 +281,25 @@ def compose(project: str, override: Path, args: list[str]) -> None:
     run(["docker", "compose", "-p", project, "-f", "docker-compose.yml", "-f", str(override), *args], env=env)
 
 
+def compose_up_resilient(project: str, override: Path, services: list[str]) -> None:
+    attempts = 3
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            compose(project, override, ["up", "-d", "--build", *services])
+            return
+        except Exception as exc:
+            last_error = exc
+            detail = str(exc).lower()
+            if attempt >= attempts or ("unhealthy" not in detail and "dependency failed to start" not in detail):
+                raise
+            print(f"[bench] compose startup retry {attempt}/{attempts - 1} after unhealthy dependency", flush=True)
+            compose(project, override, ["down", "-v"])
+            time.sleep(3)
+    if last_error is not None:
+        raise last_error
+
+
 def project_ports(project: str) -> dict[str, str]:
     base = 8200 + (sum(ord(ch) for ch in project) % 200)
     return {
@@ -348,7 +371,7 @@ def benchmark_scenario(
     try:
         print(f"[bench] model={model_label} scenario={canonical_scenario} repo={repo_name} start", flush=True)
         compose(project, override, ["down", "-v"])
-        compose(project, override, ["up", "-d", "--build", "surrealdb", "worker", "sourcebridge"])
+        compose_up_resilient(project, override, ["surrealdb", "worker", "sourcebridge"])
         wait_http(f"{api_url}/healthz")
         wait_http(f"{api_url}/readyz")
         token = setup_auth(api_url)
