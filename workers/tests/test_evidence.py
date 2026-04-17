@@ -6,6 +6,7 @@ from workers.knowledge.evidence import (
     is_valid_evidence_path,
     relevance_penalty,
     strip_forbidden_phrase_sentences,
+    strip_speculative_sentences,
     strip_unsupported_claim_sentences,
 )
 from workers.knowledge.types import EvidenceRef
@@ -64,3 +65,14 @@ def test_strip_forbidden_phrase_sentences_removes_inflated_framing() -> None:
     stripped = strip_forbidden_phrase_sentences(text, ["comprehensive platform", "designed for"])
     assert "comprehensive platform" not in stripped.lower()
     assert "GraphQL API" in stripped
+
+
+def test_strip_speculative_sentences_removes_unbacked_inference() -> None:
+    text = (
+        "While persistence is not explicitly detailed, it is an inferred component necessary to store artifacts. "
+        "The web UI renders architecture diagrams."
+    )
+    stripped = strip_speculative_sentences(text)
+    assert "not explicitly detailed" not in stripped.lower()
+    assert "inferred component" not in stripped.lower()
+    assert "web UI renders architecture diagrams" in stripped

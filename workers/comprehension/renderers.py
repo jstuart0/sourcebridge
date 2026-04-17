@@ -43,6 +43,7 @@ from workers.knowledge.evidence import (
     extract_section_evidence_refs,
     relevance_penalty,
     strip_forbidden_phrase_sentences,
+    strip_speculative_sentences,
     strip_unsupported_claim_sentences,
 )
 from workers.knowledge.prompts.cliff_notes import (
@@ -1848,6 +1849,14 @@ class CliffNotesRenderer:
                     section.inferred = True
                     section.refinement_status = "unsupported_claims"
                     continue
+                cleaned_content = strip_speculative_sentences(section.content)
+                cleaned_summary = strip_speculative_sentences(section.summary)
+                if cleaned_content != section.content or cleaned_summary != section.summary:
+                    section.content = cleaned_content
+                    section.summary = cleaned_summary
+                    section.confidence = "low" if section.confidence == "high" else section.confidence
+                    section.inferred = True
+                    section.refinement_status = "unsupported_claims"
                 if gate.below_threshold or gate.forbidden_phrases:
                     if gate.forbidden_phrases:
                         section.content = strip_forbidden_phrase_sentences(section.content, gate.forbidden_phrases)

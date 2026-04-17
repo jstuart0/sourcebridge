@@ -67,6 +67,30 @@ UNSUPPORTED_CLAIM_TERMS = (
     "master control program",
 )
 
+SPECULATIVE_SENTENCE_PHRASES = (
+    "not explicitly detailed",
+    "not explicitly shown",
+    "not directly shown",
+    "not directly detailed",
+    "not directly visible",
+    "is inferred",
+    "are inferred",
+    "can be inferred",
+    "could be inferred",
+    "likely ",
+    "likely to ",
+    "suggests ",
+    "suggesting ",
+    "implies ",
+    "implying ",
+    "might ",
+    "may ",
+    "potentially ",
+    "would be used",
+    "would be consumed",
+    "necessary to store",
+)
+
 _INLINE_FILE_LINE_RE = re.compile(r"(?P<path>[A-Za-z0-9_./-]+\.[A-Za-z0-9]+):(?P<start>\d+)(?:-(?P<end>\d+))?")
 _SYMBOL_MENTION_RE = re.compile(r"`?[A-Za-z_][A-Za-z0-9_]*\(\)`?")
 _INVALID_EVIDENCE_PATHS = {"", "none", "null", "repository", "repo", "unknown"}
@@ -191,6 +215,21 @@ def strip_forbidden_phrase_sentences(text: str, forbidden_phrases: Iterable[str]
     kept = [piece.strip() for piece in pieces if piece.strip() and not any(phrase in piece.lower() for phrase in blocked)]
     if not kept:
         return "*Insufficient grounded evidence to support the original summary wording.*"
+    return "\n\n".join(kept)
+
+
+def strip_speculative_sentences(text: str) -> str:
+    content = (text or "").strip()
+    if not content:
+        return content
+    pieces = re.split(r"(?<=[.!?])\s+|\n+", content)
+    kept = [
+        piece.strip()
+        for piece in pieces
+        if piece.strip() and not any(phrase in piece.lower() for phrase in SPECULATIVE_SENTENCE_PHRASES)
+    ]
+    if not kept:
+        return "*Insufficient grounded evidence to support the original inferred wording.*"
     return "\n\n".join(kept)
 
 
