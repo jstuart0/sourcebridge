@@ -980,6 +980,107 @@ async def test_deep_system_slice_includes_contrastive_examples() -> None:
 
 
 @pytest.mark.asyncio
+async def test_deep_repository_opening_sections_get_deterministic_leads() -> None:
+    provider = _RecordingProvider(
+        response_text=json.dumps(
+            [
+                {
+                    "title": title,
+                    "content": "This repository is a generic platform. It also has more detailed grounded content.",
+                    "summary": "Generic summary.",
+                    "confidence": "high",
+                    "inferred": False,
+                    "evidence": [
+                        {
+                            "source_type": "file",
+                            "source_id": "f1",
+                            "file_path": "web/src/components/architecture/ArchitectureDiagram.tsx",
+                            "line_start": 1,
+                            "line_end": 10,
+                            "rationale": "web surface",
+                        },
+                        {
+                            "source_type": "file",
+                            "source_id": "f2",
+                            "file_path": "workers/comprehension/hierarchical.py",
+                            "line_start": 1,
+                            "line_end": 10,
+                            "rationale": "worker surface",
+                        },
+                        {
+                            "source_type": "file",
+                            "source_id": "f3",
+                            "file_path": "cli/serve.go",
+                            "line_start": 1,
+                            "line_end": 10,
+                            "rationale": "cli surface",
+                        },
+                    ],
+                }
+                for title in REQUIRED_SECTIONS_DEEP_REPOSITORY
+            ]
+        )
+    )
+    renderer = CliffNotesRenderer(provider=provider)
+    tree = _build_tree()
+    tree.add(
+        SummaryNode(
+            id="fw2",
+            corpus_id="repo",
+            unit_id="file:web/src/components/architecture/ArchitectureDiagram.tsx",
+            level=1,
+            parent_id="package:api",
+            summary_text="Architecture diagram UI.",
+            headline="Architecture diagram",
+            source_tokens=150,
+            metadata={"file_path": "web/src/components/architecture/ArchitectureDiagram.tsx"},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fk2",
+            corpus_id="repo",
+            unit_id="file:workers/comprehension/hierarchical.py",
+            level=1,
+            parent_id="package:api",
+            summary_text="Hierarchical understanding strategy.",
+            headline="Hierarchical strategy",
+            source_tokens=150,
+            metadata={"file_path": "workers/comprehension/hierarchical.py"},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fc2",
+            corpus_id="repo",
+            unit_id="file:cli/serve.go",
+            level=1,
+            parent_id="package:api",
+            summary_text="Serve command.",
+            headline="Serve command",
+            source_tokens=150,
+            metadata={"file_path": "cli/serve.go"},
+        )
+    )
+
+    result, _usage = await renderer.render(
+        tree,
+        repository_name="sourcebridge-deterministic-v99",
+        audience="developer",
+        depth="deep",
+        scope_type="repository",
+    )
+
+    by_title = {section.title: section for section in result.sections}
+    assert by_title["System Purpose"].content.startswith(
+        "SourceBridge builds repository understanding and generated knowledge artifacts"
+    )
+    assert by_title["Architecture Overview"].content.startswith(
+        "SourceBridge's architecture combines"
+    )
+
+
+@pytest.mark.asyncio
 async def test_render_raises_on_empty_tree() -> None:
     provider = _RecordingProvider(response_text=_valid_response_payload())
     renderer = CliffNotesRenderer(provider=provider)

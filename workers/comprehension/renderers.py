@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass
 from time import monotonic
 
@@ -735,6 +736,14 @@ class CliffNotesRenderer:
             file_summaries=len(file_nodes),
             elapsed_ms=int((monotonic() - render_started) * 1000),
         )
+
+        if depth == "deep" and (scope_type or "repository") == "repository":
+            sections = self._normalize_repository_opening_sections(
+                sections,
+                repository_name=repository_name,
+                all_group_nodes=all_group_nodes,
+                all_file_nodes=all_file_nodes,
+            )
 
         return CliffNotesResult(sections=sections), usage
 
@@ -1865,6 +1874,94 @@ class CliffNotesRenderer:
                     section.refinement_status = "needs_evidence"
 
         return sections
+
+    def _normalize_repository_opening_sections(
+        self,
+        sections: list[CliffNotesSection],
+        *,
+        repository_name: str,
+        all_group_nodes: list[SummaryNode],
+        all_file_nodes: list[SummaryNode],
+    ) -> list[CliffNotesSection]:
+        repo_label = _display_repository_name(repository_name)
+        paths = {
+            (_node_label(node) or "").lower()
+            for node in [*all_group_nodes, *all_file_nodes]
+        }
+        has_web = any(path.startswith("web/") for path in paths)
+        has_graphql = any("graphql" in path for path in paths)
+        has_rest = any(path.startswith("internal/api/rest/") for path in paths)
+        has_workers = any(path.startswith("workers/") for path in paths)
+        has_cli = any(path.startswith("cli/") or path.startswith("cmd/") for path in paths)
+        has_persistence = any(path.startswith("internal/db/") or "/store" in path for path in paths)
+
+        system_surfaces: list[str] = []
+        if has_web:
+            system_surfaces.append("web product")
+        if has_graphql and has_rest:
+            system_surfaces.append("GraphQL and REST entrypoints")
+        elif has_graphql:
+            system_surfaces.append("GraphQL entrypoints")
+        elif has_rest:
+            system_surfaces.append("API entrypoints")
+        if has_workers:
+            system_surfaces.append("background workers")
+        if has_cli:
+            system_surfaces.append("CLI workflows")
+
+        architecture_surfaces = list(system_surfaces)
+        if has_persistence:
+            insert_at = 3 if len(architecture_surfaces) >= 3 else len(architecture_surfaces)
+            architecture_surfaces.insert(insert_at, "persistence-backed stores")
+
+        system_lead = (
+            f"{repo_label} builds repository understanding and generated knowledge artifacts such as reports, "
+            f"diagrams, and review outputs."
+        )
+        if system_surfaces:
+            system_lead += f" It exposes that work through {_join_surface_labels(system_surfaces)}."
+
+        architecture_lead = f"{repo_label}'s architecture combines {_join_surface_labels(architecture_surfaces or ['background processing surfaces'])}."
+
+        by_title = {section.title: section for section in sections}
+        system = by_title.get("System Purpose")
+        if system:
+            system.content = _replace_opening_sentence(system.content, system_lead)
+            system.summary = system_lead
+        architecture = by_title.get("Architecture Overview")
+        if architecture:
+            architecture.content = _replace_opening_sentence(architecture.content, architecture_lead)
+            architecture.summary = architecture_lead
+        return sections
+
+
+def _replace_opening_sentence(content: str, replacement: str) -> str:
+    body = (content or "").strip()
+    if not body:
+        return replacement
+    pieces = re.split(r"(?<=[.!?])\s+", body, maxsplit=1)
+    if len(pieces) == 1:
+        return replacement
+    return f"{replacement} {pieces[1].strip()}"
+
+
+def _display_repository_name(repository_name: str) -> str:
+    name = (repository_name or "This repository").strip()
+    name = re.sub(r"-deterministic-v\d+$", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"-v\d+$", "", name, flags=re.IGNORECASE)
+    if name.lower() == "sourcebridge":
+        return "SourceBridge"
+    return name or "This repository"
+
+
+def _join_surface_labels(labels: list[str]) -> str:
+    if not labels:
+        return "its available surfaces"
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f"{labels[0]} and {labels[1]}"
+    return ", ".join(labels[:-1]) + f", and {labels[-1]}"
 
 
 def _first_line(text: str) -> str:
