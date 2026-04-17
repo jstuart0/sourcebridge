@@ -1601,18 +1601,39 @@ func (r *Resolver) enqueueCliffNotesDeepening(
 	if artifact.GenerationMode == knowledgepkg.GenerationModeClassic {
 		return nil
 	}
+	for _, title := range selectedTitles {
+		title = strings.TrimSpace(title)
+		if title == "" {
+			continue
+		}
+		if err := r.enqueueSingleCliffNotesDeepening(repo, artifact, scope, sourceRevision, snapshotJSON, title); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Resolver) enqueueSingleCliffNotesDeepening(
+	repo *graphstore.Repository,
+	artifact *knowledgepkg.Artifact,
+	scope knowledgepkg.ArtifactScope,
+	sourceRevision knowledgepkg.SourceRevision,
+	snapshotJSON []byte,
+	selectedTitle string,
+) error {
 	currentSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
+	selectedTitles := []string{selectedTitle}
 	markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, currentSections, selectedTitles, knowledgepkg.RefinementQueued, "")
 	req := &llm.EnqueueRequest{
 		Subsystem:      llm.SubsystemKnowledge,
 		JobType:        "cliff_notes_deepen",
-		TargetKey:      fmt.Sprintf("refine:%s:%s", artifact.ID, strings.Join(selectedTitles, "|")),
+		TargetKey:      fmt.Sprintf("refine:%s:%s", artifact.ID, selectedTitle),
 		Strategy:       "knowledge_artifact_refinement",
 		ArtifactID:     artifact.ID,
 		RepoID:         repo.ID,
 		Priority:       llm.PriorityMaintenance,
 		GenerationMode: string(artifact.GenerationMode),
-		MaxAttempts:    1,
+		MaxAttempts:    2,
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
 			rt.ReportProgress(0.05, "deepening", "Deepening critical cliff note sections")
 			markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(artifact.ID), selectedTitles, knowledgepkg.RefinementRunning, "")
