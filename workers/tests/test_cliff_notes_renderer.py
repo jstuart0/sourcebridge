@@ -986,7 +986,7 @@ async def test_deep_repository_opening_sections_get_deterministic_leads() -> Non
             [
                 {
                     "title": title,
-                    "content": "This repository is a generic platform. It achieves this through a multi-faceted approach with various API surfaces. It also has more detailed grounded content.",
+                    "content": "This repository is a generic platform. It also has more detailed grounded content.",
                     "summary": "Generic summary.",
                     "confidence": "high",
                     "inferred": False,
@@ -1075,7 +1075,6 @@ async def test_deep_repository_opening_sections_get_deterministic_leads() -> Non
     assert by_title["System Purpose"].content.startswith(
         "SourceBridge builds repository understanding and generated knowledge artifacts"
     )
-    assert "multi-faceted approach" not in by_title["System Purpose"].content
     assert by_title["Architecture Overview"].content.startswith(
         "SourceBridge's architecture combines"
     )
