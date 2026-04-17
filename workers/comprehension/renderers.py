@@ -58,8 +58,8 @@ from workers.reasoning.types import LLMUsageRecord
 log = structlog.get_logger()
 
 SECTION_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "System Purpose": ("entry", "serve", "web", "api", "worker", "product", "graphql", "knowledge", "artifact", "ui"),
-    "Architecture Overview": ("api", "graphql", "worker", "web", "service", "orchestr", "artifact", "knowledge"),
+    "System Purpose": ("entry", "serve", "web", "page", "ui", "browser", "api", "worker", "product", "graphql", "knowledge", "artifact"),
+    "Architecture Overview": ("api", "graphql", "worker", "web", "page", "ui", "service", "orchestr", "artifact", "knowledge"),
     "External Dependencies": ("openai", "anthropic", "openrouter", "surreal", "docker", "cloudflare", "ollama", "kubectl"),
     "Domain Model": ("repository", "artifact", "understanding", "job", "section", "knowledge", "graph", "requirement"),
     "Core System Flows": ("generate", "build", "render", "index", "queue", "orchestr", "mutation", "servicer"),
@@ -716,28 +716,84 @@ class CliffNotesRenderer:
     ) -> str:
         lines: list[str] = []
         for title in required_sections:
-            groups = self._rank_nodes_for_section(
-                title,
-                nodes=all_group_nodes,
-                kind="group",
-                limit=2,
-                relevance_profile=relevance_profile,
-                scope_path=scope_path,
-            )
-            files = self._rank_nodes_for_section(
-                title,
-                nodes=all_file_nodes,
-                kind="file",
-                limit=4,
-                relevance_profile=relevance_profile,
-                scope_path=scope_path,
-            )
+            if title in {"System Purpose", "Architecture Overview"}:
+                groups, files = self._build_system_shape_section_plan_nodes(
+                    title,
+                    all_group_nodes=all_group_nodes,
+                    all_file_nodes=all_file_nodes,
+                    relevance_profile=relevance_profile,
+                    scope_path=scope_path,
+                )
+            else:
+                groups = self._rank_nodes_for_section(
+                    title,
+                    nodes=all_group_nodes,
+                    kind="group",
+                    limit=2,
+                    relevance_profile=relevance_profile,
+                    scope_path=scope_path,
+                )
+                files = self._rank_nodes_for_section(
+                    title,
+                    nodes=all_file_nodes,
+                    kind="file",
+                    limit=4,
+                    relevance_profile=relevance_profile,
+                    scope_path=scope_path,
+                )
             if not groups and not files:
                 continue
             group_part = ", ".join(_node_label(node) for node in groups) or "none"
             file_part = ", ".join(_node_label(node) for node in files) or "none"
             lines.append(f"- {title}: subsystems [{group_part}] | files [{file_part}]")
         return "\n".join(lines)
+
+    def _build_system_shape_section_plan_nodes(
+        self,
+        title: str,
+        *,
+        all_group_nodes: list[SummaryNode],
+        all_file_nodes: list[SummaryNode],
+        relevance_profile: str,
+        scope_path: str,
+    ) -> tuple[list[SummaryNode], list[SummaryNode]]:
+        groups = self._rank_nodes_for_section(
+            title,
+            nodes=all_group_nodes,
+            kind="group",
+            limit=2,
+            relevance_profile=relevance_profile,
+            scope_path=scope_path,
+        )
+        files: list[SummaryNode] = []
+        seen: set[str] = set()
+        for area in ("internal_api", "web", "workers", "cli"):
+            seeded = self._best_area_seed_for_sections(
+                area,
+                sections=(title,),
+                nodes=all_file_nodes,
+                relevance_profile=relevance_profile,
+                scope_path=scope_path,
+            )
+            if seeded is None or seeded.unit_id in seen:
+                continue
+            files.append(seeded)
+            seen.add(seeded.unit_id)
+        for node in self._rank_nodes_for_section(
+            title,
+            nodes=all_file_nodes,
+            kind="file",
+            limit=6,
+            relevance_profile=relevance_profile,
+            scope_path=scope_path,
+        ):
+            if node.unit_id in seen:
+                continue
+            files.append(node)
+            seen.add(node.unit_id)
+            if len(files) >= 4:
+                break
+        return groups, files[:4]
 
     def _select_group_nodes_for_sections(
         self,
@@ -786,17 +842,18 @@ class CliffNotesRenderer:
         diversify = system_slice
         if system_slice:
             for area in SYSTEM_GROUP_PREFERRED_AREAS:
-                for node in all_file_nodes:
-                    if node.unit_id in seen:
-                        continue
-                    if _node_area(node) != area:
-                        continue
-                    if relevance_penalty(_node_label(node), profile=relevance_profile, scope_path=scope_path) != 0:
-                        continue
-                    selected.append(node)
-                    seen.add(node.unit_id)
-                    seen_areas.add(area)
-                    break
+                seeded = self._best_area_seed_for_sections(
+                    area,
+                    sections=sections,
+                    nodes=all_file_nodes,
+                    relevance_profile=relevance_profile,
+                    scope_path=scope_path,
+                )
+                if seeded is None or seeded.unit_id in seen:
+                    continue
+                selected.append(seeded)
+                seen.add(seeded.unit_id)
+                seen_areas.add(area)
                 if len(selected) >= limit:
                     return selected
         for title in sections:
@@ -883,9 +940,44 @@ class CliffNotesRenderer:
             "Treat these evidence anchors as the primary basis for repo-purpose and architecture framing.\n"
             "If API/web/worker evidence is present, describe the repository as a multi-surface code intelligence "
             "system and mention CLI as one access path rather than the dominant purpose.\n"
+            "If a web product surface is present, mention it explicitly instead of reducing the repository to APIs "
+            "and workers alone.\n"
             + "\n".join(bullets)
             + "\n"
         )
+
+    def _best_area_seed_for_sections(
+        self,
+        area: str,
+        *,
+        sections: tuple[str, ...] | list[str],
+        nodes: list[SummaryNode],
+        relevance_profile: str,
+        scope_path: str,
+    ) -> SummaryNode | None:
+        candidates = [
+            node
+            for node in nodes
+            if _node_area(node) == area
+            and relevance_penalty(_node_label(node), profile=relevance_profile, scope_path=scope_path) == 0
+        ]
+        if not candidates:
+            return None
+        best_lists = [
+            self._rank_nodes_for_section(
+                title,
+                nodes=candidates,
+                kind="file",
+                limit=1,
+                relevance_profile=relevance_profile,
+                scope_path=scope_path,
+            )
+            for title in sections
+        ]
+        for ranked in best_lists:
+            if ranked:
+                return ranked[0]
+        return candidates[0]
 
     def _rank_nodes_for_section(
         self,
