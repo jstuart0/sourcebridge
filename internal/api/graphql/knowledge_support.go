@@ -721,6 +721,28 @@ func cliffNotesDeepeningTargets(store knowledgepkg.KnowledgeStore, artifact *kno
 		}
 		pending = append(pending, title)
 	}
+	seen := make(map[string]struct{}, len(pending))
+	for _, title := range pending {
+		seen[title] = struct{}{}
+	}
+	for _, sec := range current {
+		if sec.Title == "" || strings.EqualFold(sec.RefinementStatus, "deep") {
+			continue
+		}
+		if _, ok := seen[sec.Title]; ok {
+			continue
+		}
+		if sec.Confidence == knowledgepkg.ConfidenceLow || sec.Inferred {
+			if unit, ok := refinementBySectionKey[sec.SectionKey]; ok {
+				switch unit.Status {
+				case knowledgepkg.RefinementQueued, knowledgepkg.RefinementRunning, knowledgepkg.RefinementCompleted:
+					continue
+				}
+			}
+			pending = append(pending, sec.Title)
+			seen[sec.Title] = struct{}{}
+		}
+	}
 	return pending
 }
 

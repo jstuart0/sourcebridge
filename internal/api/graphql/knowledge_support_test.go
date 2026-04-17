@@ -49,6 +49,15 @@ func (s stubComprehensionStore) ListModelCapabilities() ([]comprehension.ModelCa
 	return nil, nil
 }
 
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
 func TestTopLevelModuleScopesFallsBackToFilesWhenModulesMissing(t *testing.T) {
 	store := graph.NewStore()
 	result := &indexer.IndexResult{
@@ -161,9 +170,9 @@ func TestCliffNotesDeepeningTargetsSkipsQueuedRunningAndCompletedUnits(t *testin
 	}
 	sections := []knowledgepkg.Section{
 		{Title: "Architecture Overview", SectionKey: "architecture_overview", RefinementStatus: "light"},
+		{Title: "Domain Model", SectionKey: "domain_model", RefinementStatus: "light"},
 		{Title: "External Dependencies", SectionKey: "external_dependencies", RefinementStatus: "light"},
-		{Title: "Core System Flows", SectionKey: "core_system_flows", RefinementStatus: "light"},
-		{Title: "Complexity & Risk Areas", SectionKey: "complexity_risk_areas", RefinementStatus: "light"},
+		{Title: "Key Abstractions", SectionKey: "key_abstractions", RefinementStatus: "light"},
 	}
 	if err := store.StoreKnowledgeSections(artifact.ID, sections); err != nil {
 		t.Fatalf("StoreKnowledgeSections: %v", err)
@@ -171,14 +180,51 @@ func TestCliffNotesDeepeningTargetsSkipsQueuedRunningAndCompletedUnits(t *testin
 	if err := store.StoreRefinementUnits(artifact.ID, []knowledgepkg.RefinementUnit{
 		{SectionKey: "architecture_overview", SectionTitle: "Architecture Overview", RefinementType: cliffNotesDeepRefinementType, Status: knowledgepkg.RefinementQueued},
 		{SectionKey: "external_dependencies", SectionTitle: "External Dependencies", RefinementType: cliffNotesDeepRefinementType, Status: knowledgepkg.RefinementRunning},
-		{SectionKey: "core_system_flows", SectionTitle: "Core System Flows", RefinementType: cliffNotesDeepRefinementType, Status: knowledgepkg.RefinementCompleted},
+		{SectionKey: "domain_model", SectionTitle: "Domain Model", RefinementType: cliffNotesDeepRefinementType, Status: knowledgepkg.RefinementCompleted},
 	}); err != nil {
 		t.Fatalf("StoreRefinementUnits: %v", err)
 	}
 
 	targets := cliffNotesDeepeningTargets(store, artifact)
-	if len(targets) != 1 || targets[0] != "Complexity & Risk Areas" {
+	if len(targets) != 1 || targets[0] != "Key Abstractions" {
 		t.Fatalf("unexpected deepening targets: %#v", targets)
+	}
+}
+
+func TestCliffNotesDeepeningTargetsIncludeLowConfidenceOrInferredSections(t *testing.T) {
+	store := knowledgepkg.NewMemStore()
+	artifact, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+		RepositoryID: "repo-1",
+		Type:         knowledgepkg.ArtifactCliffNotes,
+		Audience:     knowledgepkg.AudienceDeveloper,
+		Depth:        knowledgepkg.DepthDeep,
+		Scope:        &knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
+		Status:       knowledgepkg.StatusReady,
+	})
+	if err != nil {
+		t.Fatalf("StoreKnowledgeArtifact: %v", err)
+	}
+	sections := []knowledgepkg.Section{
+		{Title: "Architecture Overview", SectionKey: "architecture_overview", RefinementStatus: "light", Confidence: knowledgepkg.ConfidenceHigh},
+		{Title: "Domain Model", SectionKey: "domain_model", RefinementStatus: "light", Confidence: knowledgepkg.ConfidenceHigh},
+		{Title: "External Dependencies", SectionKey: "external_dependencies", RefinementStatus: "light", Confidence: knowledgepkg.ConfidenceHigh},
+		{Title: "Key Abstractions", SectionKey: "key_abstractions", RefinementStatus: "light", Confidence: knowledgepkg.ConfidenceHigh},
+		{Title: "Testing Strategy", SectionKey: "testing_strategy", RefinementStatus: "needs_evidence", Confidence: knowledgepkg.ConfidenceLow},
+		{Title: "Configuration & Feature Flags", SectionKey: "configuration_feature_flags", RefinementStatus: "light", Confidence: knowledgepkg.ConfidenceHigh, Inferred: true},
+	}
+	if err := store.StoreKnowledgeSections(artifact.ID, sections); err != nil {
+		t.Fatalf("StoreKnowledgeSections: %v", err)
+	}
+
+	targets := cliffNotesDeepeningTargets(store, artifact)
+	if len(targets) != 6 {
+		t.Fatalf("expected 6 targets, got %#v", targets)
+	}
+	if targets[0] != "Architecture Overview" || targets[1] != "Domain Model" || targets[2] != "External Dependencies" || targets[3] != "Key Abstractions" {
+		t.Fatalf("unexpected default priority targets: %#v", targets)
+	}
+	if !containsString(targets, "Testing Strategy") || !containsString(targets, "Configuration & Feature Flags") {
+		t.Fatalf("expected dynamic weak-section targets, got %#v", targets)
 	}
 }
 

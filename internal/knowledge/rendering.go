@@ -109,9 +109,9 @@ func DeepRefinementSectionTitles(scopeType ScopeType) []string {
 	default:
 		return []string{
 			"Architecture Overview",
+			"Domain Model",
 			"External Dependencies",
-			"Core System Flows",
-			"Complexity & Risk Areas",
+			"Key Abstractions",
 		}
 	}
 }
