@@ -744,6 +744,12 @@ class CliffNotesRenderer:
                 all_group_nodes=all_group_nodes,
                 all_file_nodes=all_file_nodes,
             )
+            sections = self._normalize_repository_entity_sections(
+                sections,
+                repository_name=repository_name,
+                all_group_nodes=all_group_nodes,
+                all_file_nodes=all_file_nodes,
+            )
 
         return CliffNotesResult(sections=sections), usage
 
@@ -1934,6 +1940,90 @@ class CliffNotesRenderer:
             architecture.summary = architecture_lead
         return sections
 
+    def _normalize_repository_entity_sections(
+        self,
+        sections: list[CliffNotesSection],
+        *,
+        repository_name: str,
+        all_group_nodes: list[SummaryNode],
+        all_file_nodes: list[SummaryNode],
+    ) -> list[CliffNotesSection]:
+        repo_label = _display_repository_name(repository_name)
+        nodes = [*all_group_nodes, *all_file_nodes]
+        entity_signals: set[str] = set()
+        for node in nodes:
+            entity_signals.update(
+                _metadata_values(
+                    node.metadata or {},
+                    "fact_entity_signals",
+                    "fact_package_entities",
+                    "fact_root_entities",
+                    "entity_signals",
+                )
+            )
+
+        entity_terms: list[str] = []
+        if "repository" in entity_signals or "scope" in entity_signals:
+            entity_terms.append("repositories and scopes")
+        if "knowledge_artifact" in entity_signals or "understanding" in entity_signals:
+            entity_terms.append("generated knowledge artifacts and understanding revisions")
+        if "job" in entity_signals:
+            entity_terms.append("background jobs")
+        outputs: list[str] = []
+        if "report" in entity_signals:
+            outputs.append("reports")
+        if "diagram" in entity_signals:
+            outputs.append("diagrams")
+        if "requirement" in entity_signals:
+            outputs.append("requirements")
+        if outputs:
+            entity_terms.append("outputs such as " + _join_surface_labels(outputs))
+        if not entity_terms:
+            return sections
+
+        abstraction_terms: list[str] = []
+        labels = {_node_label(node).lower(): _node_label(node) for node in nodes}
+        if any("internal/llm/orchestrator/" in label for label in labels):
+            abstraction_terms.append("job orchestrator")
+        if any(label.endswith("workers/knowledge/servicer.py") for label in labels):
+            abstraction_terms.append("knowledge servicer")
+        if any(label.endswith("workers/comprehension/renderers.py") for label in labels):
+            abstraction_terms.append("artifact renderer")
+        if any(label.endswith("internal/db/surreal.go") or label.endswith("internal/db/store.go") for label in labels):
+            abstraction_terms.append("persistence store")
+        if any(label.endswith("internal/api/graphql/schema.resolvers.go") for label in labels):
+            abstraction_terms.append("graphql resolver")
+
+        by_title = {section.title: section for section in sections}
+        domain = by_title.get("Domain Model")
+        if domain:
+            lead = f"{repo_label}'s core entities are {_join_surface_labels(entity_terms)}."
+            domain.content = _replace_opening_sentence(domain.content, lead)
+            domain.content = _strip_sentences_with_phrases(
+                domain.content,
+                (
+                    "while diagrams are mentioned",
+                    "not explicitly provided",
+                    "fundamental concept",
+                    "suggesting a domain model",
+                ),
+            )
+            domain.summary = lead
+        abstractions = by_title.get("Key Abstractions")
+        if abstractions and abstraction_terms:
+            lead = f"The main {repo_label} abstractions are {_join_surface_labels(abstraction_terms)}."
+            abstractions.content = _replace_opening_sentence(abstractions.content, lead)
+            abstractions.content = _strip_sentences_with_phrases(
+                abstractions.content,
+                (
+                    "another critical abstraction",
+                    "provides an abstraction for access control",
+                    "various data types",
+                ),
+            )
+            abstractions.summary = lead
+        return sections
+
 
 def _replace_opening_sentence(content: str, replacement: str) -> str:
     body = (content or "").strip()
@@ -1943,6 +2033,19 @@ def _replace_opening_sentence(content: str, replacement: str) -> str:
     if len(pieces) == 1:
         return replacement
     return f"{replacement} {pieces[1].strip()}"
+
+
+def _strip_sentences_with_phrases(content: str, blocked_phrases: tuple[str, ...]) -> str:
+    body = (content or "").strip()
+    if not body:
+        return body
+    pieces = re.split(r"(?<=[.!?])\s+|\n+", body)
+    kept = [
+        piece.strip()
+        for piece in pieces
+        if piece.strip() and not any(phrase in piece.lower() for phrase in blocked_phrases)
+    ]
+    return " ".join(kept) if kept else body
 
 
 def _display_repository_name(repository_name: str) -> str:
