@@ -410,6 +410,47 @@ async def test_deep_targeted_render_uses_narrow_section_path() -> None:
 
 
 @pytest.mark.asyncio
+async def test_deep_targeted_render_marks_generic_domain_model_for_refinement() -> None:
+    provider = _RecordingProvider(
+        response_text=json.dumps(
+            [
+                {
+                    "title": "Domain Model",
+                    "content": "The core domain model revolves around repositories, jobs, and knowledge artifacts.",
+                    "summary": "The core domain model revolves around several central concepts.",
+                    "confidence": "high",
+                    "inferred": False,
+                    "evidence": [
+                        {"source_type": "file", "file_path": "internal/api/auth.go", "line_start": 1, "line_end": 5},
+                        {"source_type": "file", "file_path": "internal/store/repo.go", "line_start": 1, "line_end": 5},
+                        {"source_type": "file", "file_path": "workers/knowledge/servicer.py", "line_start": 1, "line_end": 5},
+                        {"source_type": "file", "file_path": "internal/llm/orchestrator/orchestrator.go", "line_start": 1, "line_end": 5},
+                        {"source_type": "file", "file_path": "internal/indexer/indexer.go", "line_start": 1, "line_end": 5},
+                    ],
+                }
+            ]
+        )
+    )
+    renderer = CliffNotesRenderer(provider=provider)
+    tree = _build_tree()
+
+    result, _usage = await renderer.render(
+        tree,
+        repository_name="Sample",
+        audience="developer",
+        depth="deep",
+        scope_type="repository",
+        required_section_titles=["Domain Model"],
+    )
+
+    section = result.sections[0]
+    assert section.title == "Domain Model"
+    assert section.confidence == "low"
+    assert section.refinement_status == "needs_evidence"
+    assert section.inferred is True
+
+
+@pytest.mark.asyncio
 async def test_deep_repository_render_falls_back_per_group_not_whole_artifact() -> None:
     provider = _FlakyProvider(
         response_text=_valid_deep_response_payload(),

@@ -27,6 +27,7 @@ from workers.knowledge.prompts.cliff_notes import (
 from workers.knowledge.evidence import (
     evaluate_evidence_gate,
     extract_section_evidence_refs,
+    find_section_weakness_phrases,
     is_valid_evidence_path,
     strip_forbidden_phrase_sentences,
     strip_unsupported_claim_sentences,
@@ -332,6 +333,16 @@ async def generate_cliff_notes(
                     section.content = strip_forbidden_phrase_sentences(section.content, gate.forbidden_phrases)
                     section.summary = strip_forbidden_phrase_sentences(section.summary, gate.forbidden_phrases)
                 section.confidence = "low"
+                section.refinement_status = "needs_evidence"
+            weakness_phrases = find_section_weakness_phrases(
+                section.title,
+                f"{section.summary}\n{section.content}",
+            )
+            if weakness_phrases:
+                section.content = strip_forbidden_phrase_sentences(section.content, weakness_phrases)
+                section.summary = strip_forbidden_phrase_sentences(section.summary, weakness_phrases)
+                section.confidence = "low"
+                section.inferred = True
                 section.refinement_status = "needs_evidence"
 
     # --- Baseline quality instrumentation ---

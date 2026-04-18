@@ -28,6 +28,24 @@ FORBIDDEN_GENERIC_PHRASES = [
     "multi-language architecture",
 ]
 
+SECTION_WEAKNESS_PHRASES = {
+    "Domain Model": (
+        "revolves around",
+        "fundamental concept",
+        "central concept",
+        "structured representation",
+        "iterative approach to knowledge processing",
+        "allowing external systems to interact",
+    ),
+    "Key Abstractions": (
+        "key abstractions include",
+        "collectively manage",
+        "lifecycle of data processing",
+        "crucial component",
+        "central abstraction",
+    ),
+}
+
 RELEVANCE_DOWNRANK_PATTERNS = (
     "/examples/",
     "/example/",
@@ -115,6 +133,11 @@ class EvidenceGateResult:
 def find_forbidden_generic_phrases(text: str) -> list[str]:
     lowered = (text or "").lower()
     return [phrase for phrase in FORBIDDEN_GENERIC_PHRASES if phrase in lowered]
+
+
+def find_section_weakness_phrases(title: str, text: str) -> list[str]:
+    lowered = (text or "").lower()
+    return [phrase for phrase in SECTION_WEAKNESS_PHRASES.get(title, ()) if phrase in lowered]
 
 
 def is_valid_evidence_path(path: str) -> bool:

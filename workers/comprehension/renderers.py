@@ -42,6 +42,7 @@ from workers.knowledge.cliff_notes import (
 from workers.knowledge.evidence import (
     evaluate_evidence_gate,
     extract_section_evidence_refs,
+    find_section_weakness_phrases,
     relevance_penalty,
     strip_forbidden_phrase_sentences,
     strip_speculative_sentences,
@@ -708,6 +709,7 @@ class CliffNotesRenderer:
                     response.content,
                     required_sections,
                     evidence_store_text=evidence_store_text,
+                    apply_deep_quality_gates=(depth == "deep" and (scope_type or "repository") == "repository"),
                 )
                 usage = LLMUsageRecord(
                     provider="llm",
@@ -829,6 +831,7 @@ class CliffNotesRenderer:
                         response.content,
                         [title],
                         evidence_store_text=evidence_store_text,
+                        apply_deep_quality_gates=True,
                     )[0]
                     return title, section, response, False
                 except Exception as exc:
@@ -952,6 +955,7 @@ class CliffNotesRenderer:
                         response.content,
                         list(section_group),
                         evidence_store_text=evidence_store_text,
+                        apply_deep_quality_gates=True,
                     )
                     return sections, response, False
                 except Exception as exc:
@@ -1099,6 +1103,7 @@ class CliffNotesRenderer:
                         response.content,
                         [title],
                         evidence_store_text=evidence_store_text,
+                        apply_deep_quality_gates=True,
                     )[0]
                     if self._should_accept_repaired_section(current, repaired):
                         return title, repaired
@@ -1929,6 +1934,7 @@ class CliffNotesRenderer:
         required_sections: list[str],
         *,
         evidence_store_text: str = "",
+        apply_deep_quality_gates: bool = False,
     ) -> list[CliffNotesSection]:
         """Parse the LLM JSON output into typed sections.
 
@@ -1986,7 +1992,7 @@ class CliffNotesRenderer:
                     )
                 )
 
-        if required_sections == REQUIRED_SECTIONS_DEEP_REPOSITORY:
+        if apply_deep_quality_gates:
             for section in sections:
                 minimum = DEEP_MIN_EVIDENCE.get(section.title, 3)
                 gate = evaluate_evidence_gate(
@@ -2015,6 +2021,16 @@ class CliffNotesRenderer:
                         section.content = strip_forbidden_phrase_sentences(section.content, gate.forbidden_phrases)
                         section.summary = strip_forbidden_phrase_sentences(section.summary, gate.forbidden_phrases)
                     section.confidence = "low"
+                    section.refinement_status = "needs_evidence"
+                weakness_phrases = find_section_weakness_phrases(
+                    section.title,
+                    f"{section.summary}\n{section.content}",
+                )
+                if weakness_phrases:
+                    section.content = strip_forbidden_phrase_sentences(section.content, weakness_phrases)
+                    section.summary = strip_forbidden_phrase_sentences(section.summary, weakness_phrases)
+                    section.confidence = "low"
+                    section.inferred = True
                     section.refinement_status = "needs_evidence"
 
         return sections
