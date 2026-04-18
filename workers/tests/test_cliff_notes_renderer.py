@@ -12,9 +12,10 @@ from dataclasses import dataclass
 import pytest
 
 from workers.common.llm.provider import LLMResponse
-from workers.comprehension.renderers import CliffNotesRenderer
+from workers.comprehension.renderers import CliffNotesRenderer, _enforce_deep_confidence_floor
 from workers.comprehension.tree import SummaryNode, SummaryTree
 from workers.knowledge.prompts.cliff_notes import REQUIRED_SECTIONS, REQUIRED_SECTIONS_DEEP_REPOSITORY
+from workers.knowledge.types import CliffNotesSection, EvidenceRef
 
 
 @dataclass
@@ -958,6 +959,101 @@ async def test_domain_model_evidence_plan_prefers_knowledge_models() -> None:
 
 
 @pytest.mark.asyncio
+async def test_domain_model_evidence_plan_diversifies_across_subsystems() -> None:
+    """Domain Model must span multiple surfaces, not fixate on one subsystem.
+
+    Prior iterations saw the ranker pick 4 architecture/diagram files and
+    write a narrow diagram-only Domain Model. The area-seed logic seeds
+    one file per surface (internal, workers, internal_api, web) so the
+    LLM always sees broad domain entity coverage.
+    """
+
+    provider = _RecordingProvider(response_text=_valid_deep_response_payload())
+    renderer = CliffNotesRenderer(provider=provider)
+    tree = _build_tree()
+    tree.add(
+        SummaryNode(
+            id="fd1",
+            corpus_id="repo",
+            unit_id="file:internal/architecture/diagram.go",
+            level=1,
+            parent_id="package:store",
+            summary_text="Architecture diagram builders.",
+            headline="Diagram",
+            source_tokens=400,
+            metadata={"file_path": "internal/architecture/diagram.go", "fact_entity_signals": ["diagram"]},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fd2",
+            corpus_id="repo",
+            unit_id="file:internal/architecture/document.go",
+            level=1,
+            parent_id="package:store",
+            summary_text="Diagram document model.",
+            headline="DocModel",
+            source_tokens=380,
+            metadata={"file_path": "internal/architecture/document.go", "fact_entity_signals": ["diagram", "document"]},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fw1",
+            corpus_id="repo",
+            unit_id="file:workers/knowledge/artifact.py",
+            level=1,
+            parent_id="package:store",
+            summary_text="Knowledge artifact assembly in the worker.",
+            headline="WorkerArtifact",
+            source_tokens=300,
+            metadata={"file_path": "workers/knowledge/artifact.py", "fact_entity_signals": ["knowledge_artifact"]},
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fui",
+            corpus_id="repo",
+            unit_id="file:web/src/domain/entities.ts",
+            level=1,
+            parent_id="package:store",
+            summary_text="Web-surface repository, job, and artifact entities.",
+            headline="WebEntities",
+            source_tokens=250,
+            metadata={"file_path": "web/src/domain/entities.ts", "fact_entity_signals": ["repository", "job", "artifact"]},
+        )
+    )
+
+    await renderer.render(
+        tree,
+        repository_name="Sample",
+        audience="developer",
+        depth="deep",
+        scope_type="repository",
+    )
+
+    prompts = provider.captured_prompts or []
+    model_prompt = next(
+        prompt
+        for prompt in prompts
+        if "- Domain Model" in prompt and "- Key Abstractions" in prompt
+    )
+    domain_line = next(
+        line
+        for line in model_prompt.splitlines()
+        if line.startswith("- Domain Model:")
+    )
+    # At least three distinct surfaces should be represented so the LLM
+    # can't collapse the section to a single subsystem.
+    surfaces_seen = sum(
+        1
+        for marker in ("internal/architecture", "workers/knowledge", "web/src", "internal/api")
+        if marker in domain_line
+    )
+    assert surfaces_seen >= 3, f"Domain Model plan lacks breadth: {domain_line}"
+
+
+@pytest.mark.asyncio
 async def test_domain_model_hint_seed_beats_larger_store_file() -> None:
     provider = _RecordingProvider(response_text=_valid_deep_response_payload())
     renderer = CliffNotesRenderer(provider=provider)
@@ -1030,6 +1126,201 @@ async def test_domain_model_hint_seed_beats_larger_store_file() -> None:
     assert "=== Domain-model guardrail ===" in model_prompt
     assert "- knowledge_artifact: `internal/knowledge/models.go`" in model_prompt
     assert "- job: `internal/llm/job.go`" in model_prompt
+
+
+def _section_with_grounded_content(
+    title: str, *, confidence: str, files: list[str], identifiers: list[str], refinement_status: str = ""
+) -> CliffNotesSection:
+    body = " ".join(f"The `{ident}` lives in `{files[i % len(files)]}`." for i, ident in enumerate(identifiers))
+    return CliffNotesSection(
+        title=title,
+        content=body,
+        summary=f"{title} summary.",
+        confidence=confidence,
+        inferred=confidence != "high",
+        refinement_status=refinement_status,
+        evidence=[EvidenceRef(source_type="file", file_path=fp, line_start=1, line_end=1) for fp in files],
+    )
+
+
+def test_enforce_deep_confidence_floor_upgrades_grounded_low_section() -> None:
+    """A section that cites 3+ unique files and names 3+ identifiers
+    must be upgraded from LOW/MEDIUM to HIGH — the LLM often understates."""
+    section = _section_with_grounded_content(
+        "Domain Model",
+        confidence="low",
+        files=["internal/foo.go", "internal/bar.go", "workers/baz.py"],
+        identifiers=["FooService", "BarController", "BazHandler"],
+    )
+    _enforce_deep_confidence_floor([section])
+    assert section.confidence == "high"
+    assert section.inferred is False
+
+
+def test_enforce_deep_confidence_floor_keeps_low_when_under_files() -> None:
+    """Fewer than three unique file paths must not trigger an upgrade."""
+    section = _section_with_grounded_content(
+        "Key Abstractions",
+        confidence="low",
+        files=["internal/foo.go", "internal/foo.go"],
+        identifiers=["FooService", "BarController", "BazHandler"],
+    )
+    _enforce_deep_confidence_floor([section])
+    assert section.confidence == "low"
+
+
+def test_enforce_deep_confidence_floor_upgrades_over_hyperactive_flag() -> None:
+    """Quality gates flag refinement_status aggressively — stripping a single
+    speculative sentence is enough to mark a section as
+    "unsupported_claims". If the surviving content still cites enough real
+    files and names enough specific identifiers, enforcement upgrades
+    anyway and clears the now-stale flag. The strip already removed the
+    problematic prose, so the remaining text is more grounded, not less."""
+    section = _section_with_grounded_content(
+        "Domain Model",
+        confidence="low",
+        files=["internal/foo.go", "internal/bar.go", "workers/baz.py"],
+        identifiers=["FooService", "BarController", "BazHandler"],
+        refinement_status="unsupported_claims",
+    )
+    _enforce_deep_confidence_floor([section])
+    assert section.confidence == "high"
+    assert section.refinement_status == ""
+
+
+@pytest.mark.asyncio
+async def test_deep_domain_model_guardrail_surfaces_typed_fact_inventory() -> None:
+    provider = _RecordingProvider(response_text=_valid_deep_response_payload())
+    renderer = CliffNotesRenderer(provider=provider)
+    tree = _build_tree()
+    tree.add(
+        SummaryNode(
+            id="fart",
+            corpus_id="repo",
+            unit_id="file:internal/knowledge/artifact.go",
+            level=1,
+            parent_id="package:store",
+            summary_text="Artifact persistence.",
+            headline="Artifact store",
+            source_tokens=220,
+            metadata={
+                "file_path": "internal/knowledge/artifact.go",
+                "fact_symbol_names": ["Artifact", "SaveArtifact", "LoadArtifact", "ArtifactID"],
+                "fact_roles": ["public api surface"],
+                "fact_path_signals": ["knowledge", "store"],
+                "fact_entity_signals": ["knowledge_artifact"],
+                "fact_external_dependencies": ["surreal"],
+            },
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="fjob",
+            corpus_id="repo",
+            unit_id="file:internal/jobs/runner.go",
+            level=1,
+            parent_id="package:store",
+            summary_text="Job orchestration.",
+            headline="Job runner",
+            source_tokens=180,
+            metadata={
+                "file_path": "internal/jobs/runner.go",
+                "fact_symbol_names": ["JobRunner", "Enqueue", "Run"],
+                "fact_roles": ["entry point", "public api surface"],
+                "fact_path_signals": ["workers", "queue"],
+                "fact_entity_signals": ["job"],
+            },
+        )
+    )
+
+    await renderer.render(
+        tree,
+        repository_name="Sample",
+        audience="developer",
+        depth="deep",
+        scope_type="repository",
+    )
+
+    prompts = provider.captured_prompts or []
+    model_prompt = next(
+        prompt
+        for prompt in prompts
+        if "- Domain Model" in prompt and "- Key Abstractions" in prompt
+    )
+    assert "=== Domain-model guardrail ===" in model_prompt
+    # Per-file symbols now live in the section evidence plan lines.
+    assert "internal/knowledge/artifact.go (Artifact, SaveArtifact, LoadArtifact)" in model_prompt
+    assert "internal/jobs/runner.go (JobRunner, Enqueue, Run)" in model_prompt
+    # Group-level inventory keeps role distribution + external deps only.
+    assert "Role distribution across selected evidence:" in model_prompt
+    assert "public api surface" in model_prompt
+    assert "External dependencies seen in selected evidence:" in model_prompt
+    assert "surreal" in model_prompt
+
+
+@pytest.mark.asyncio
+async def test_deep_runtime_behavior_group_receives_fact_inventory_guardrail() -> None:
+    provider = _RecordingProvider(response_text=_valid_deep_response_payload())
+    renderer = CliffNotesRenderer(provider=provider)
+    tree = _build_tree()
+    tree.add(
+        SummaryNode(
+            id="fwork",
+            corpus_id="repo",
+            unit_id="file:workers/knowledge/servicer.py",
+            level=1,
+            parent_id="package:store",
+            summary_text="gRPC servicer handling knowledge requests.",
+            headline="Knowledge servicer",
+            source_tokens=210,
+            metadata={
+                "file_path": "workers/knowledge/servicer.py",
+                "fact_symbol_names": ["KnowledgeServicer", "GenerateCliffNotes", "RefineSection"],
+                "fact_roles": ["entry point", "public api surface"],
+                "fact_path_signals": ["workers", "grpc"],
+                "fact_external_dependencies": ["grpc"],
+            },
+        )
+    )
+    tree.add(
+        SummaryNode(
+            id="ftest",
+            corpus_id="repo",
+            unit_id="file:workers/tests/test_servicer.py",
+            level=1,
+            parent_id="package:store",
+            summary_text="Pytest coverage for the knowledge servicer.",
+            headline="Servicer tests",
+            source_tokens=120,
+            metadata={
+                "file_path": "workers/tests/test_servicer.py",
+                "fact_symbol_names": ["test_generate_cliff_notes", "test_refine_section"],
+                "fact_roles": ["test helpers"],
+                "fact_path_signals": ["tests", "pytest"],
+            },
+        )
+    )
+
+    await renderer.render(
+        tree,
+        repository_name="Sample",
+        audience="developer",
+        depth="deep",
+        scope_type="repository",
+    )
+
+    prompts = provider.captured_prompts or []
+    runtime_prompt = next(
+        prompt
+        for prompt in prompts
+        if "- Testing Strategy" in prompt and "- Complexity & Risk Areas" in prompt
+    )
+    assert "=== Runtime-behavior guardrail ===" in runtime_prompt
+    # Per-file symbols appear in the per-section evidence plan lines.
+    assert "workers/knowledge/servicer.py (KnowledgeServicer, GenerateCliffNotes, RefineSection)" in runtime_prompt
+    assert "workers/tests/test_servicer.py (test_generate_cliff_notes, test_refine_section)" in runtime_prompt
+    assert "Role distribution across selected evidence:" in runtime_prompt
+    assert "test helpers" in runtime_prompt
 
 
 @pytest.mark.asyncio

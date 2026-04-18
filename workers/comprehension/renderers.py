@@ -443,31 +443,46 @@ Write a JSON array of {section_count} section objects.
 
 Each section object has these keys:
   - "title": one of the required section titles listed below (string)
-  - "content": a detailed markdown paragraph of 6-10 sentences. Name specific \
+  - "content": a detailed markdown paragraph of 8-12 sentences. Name specific \
     files, components, functions, and patterns. Explain HOW things work, not \
-    just WHAT they are. Minimum 120 words per section. (string)
+    just WHAT they are. Target 180-220 words per section — do not stop short \
+    once the section has been introduced; elaborate on the named abstractions, \
+    cite each file with the specific function or type defined there, and \
+    describe at least one concrete interaction between components. (string)
   - "summary": a single-sentence takeaway (string)
   - "confidence": "high", "medium", or "low" (string)
   - "inferred": true if you're extrapolating beyond the summaries (boolean)
   - "evidence": array of objects with keys: source_type, source_id, file_path, \
     line_start, line_end, rationale. Every evidence entry must include an actual \
-    repository file path from the summaries above.
+    repository file path from the summaries above. Include at least one entry \
+    per file that appears in the section evidence plan for the section you are \
+    writing (unless that file is genuinely off-topic for the section).
 
 Required section titles (produce every one, in this order):
 {required_sections}
 
-Confidence rules:
-- Set confidence to "high" and inferred to false when the summaries above \
-  directly describe what you're writing about and you can cite multiple real repo files.
-- Treat the section evidence plan as the primary routing guide for what to inspect \
-  for each section. The repository summary is orientation only.
-- The summaries are context, not evidence by themselves. Synthetic references like \
-  "repository_summary", "subsystem_auth", or other non-file labels are invalid.
-- If you cannot cite real repo files for a claim, lower confidence and keep the \
-  section narrow instead of inventing evidence.
-- Only use "medium" when you are connecting dots NOT mentioned in any summary.
-- Only use "low" when the summaries provide no relevant information at all.
-- Do not force "high" confidence. Grounding quality matters more than completeness.
+Confidence rules (mechanical — apply exactly):
+- Set confidence to "high" and inferred to false when you cite AT LEAST THREE \
+  real repository file paths from the section evidence plan AND name at least \
+  three specific functions, types, methods, or test identifiers from them.
+- Set confidence to "medium" when you can cite at least one real repo file path \
+  but are extending beyond what the summaries make explicit.
+- Set confidence to "low" only when no file in the section evidence plan is \
+  relevant and you must rely on general inference.
+- Do NOT self-downgrade below high when the mechanical criteria above are met — \
+  the criteria are the ground truth.
+
+Citation rules:
+- Treat the section evidence plan as the primary routing guide. For each \
+  section, include at least one evidence entry for every file path that appears \
+  in that section's plan line (unless the file is genuinely off-topic for the \
+  section you're writing). Evidence entries MUST use real file paths from the \
+  plan or the subsystem/file summaries.
+- The summaries are context, not evidence by themselves. Synthetic references \
+  like "repository_summary", "subsystem_auth", or other non-file labels are \
+  invalid.
+- Never invent a file path. If you have not seen a path in the plan or \
+  summaries above, do not cite it.
 
 Output rules:
 - Return ONLY the JSON array — no text before or after it.
@@ -1331,6 +1346,14 @@ class CliffNotesRenderer:
                     relevance_profile=relevance_profile,
                     scope_path=scope_path,
                 )
+            elif title in {"Domain Model", "Key Abstractions"}:
+                groups, files = self._build_domain_section_plan_nodes(
+                    title,
+                    all_group_nodes=all_group_nodes,
+                    all_file_nodes=all_file_nodes,
+                    relevance_profile=relevance_profile,
+                    scope_path=scope_path,
+                )
             else:
                 groups = self._rank_nodes_for_section(
                     title,
@@ -1351,7 +1374,7 @@ class CliffNotesRenderer:
             if not groups and not files:
                 continue
             group_part = ", ".join(_node_label(node) for node in groups) or "none"
-            file_part = ", ".join(_node_label(node) for node in files) or "none"
+            file_part = ", ".join(_file_with_top_symbols(node) for node in files) or "none"
             focus_note = SECTION_FOCUS_NOTES.get(title)
             focus_part = f" | focus [{focus_note}]" if focus_note else ""
             lines.append(f"- {title}: subsystems [{group_part}] | files [{file_part}]{focus_part}")
@@ -1407,6 +1430,62 @@ class CliffNotesRenderer:
             if len(files) >= 4:
                 break
         return groups, files[:4]
+
+    def _build_domain_section_plan_nodes(
+        self,
+        title: str,
+        *,
+        all_group_nodes: list[SummaryNode],
+        all_file_nodes: list[SummaryNode],
+        relevance_profile: str,
+        scope_path: str,
+    ) -> tuple[list[SummaryNode], list[SummaryNode]]:
+        """Pick files for Domain Model / Key Abstractions with subsystem breadth.
+
+        Strategy: take the top-ranked section files first (preserving
+        per-section specificity), then fill with one file per
+        underrepresented surface (``internal``, ``workers``,
+        ``internal_api``, ``web``). This prevents the prior regression
+        where the ranker fixated on whichever subsystem had the most
+        keyword matches and the LLM produced a narrow, diagram-only
+        Domain Model.
+        """
+
+        groups = self._rank_nodes_for_section(
+            title,
+            nodes=all_group_nodes,
+            kind="group",
+            limit=3,
+            relevance_profile=relevance_profile,
+            scope_path=scope_path,
+        )
+        ranked_candidates = self._rank_nodes_for_section(
+            title,
+            nodes=all_file_nodes,
+            kind="file",
+            limit=6,
+            relevance_profile=relevance_profile,
+            scope_path=scope_path,
+        )
+        files: list[SummaryNode] = list(ranked_candidates[:4])
+        seen: set[str] = {node.unit_id for node in files}
+        seen_areas: set[str] = {area for node in files if (area := _node_area(node))}
+        for area in ("internal", "workers", "internal_api", "web"):
+            if area in seen_areas or len(files) >= 6:
+                continue
+            seeded = self._best_area_seed_for_sections(
+                area,
+                sections=(title,),
+                nodes=all_file_nodes,
+                relevance_profile=relevance_profile,
+                scope_path=scope_path,
+            )
+            if seeded is None or seeded.unit_id in seen:
+                continue
+            files.append(seeded)
+            seen.add(seeded.unit_id)
+            seen_areas.add(area)
+        return groups, files[:6]
 
     def _select_group_nodes_for_sections(
         self,
@@ -1649,16 +1728,33 @@ class CliffNotesRenderer:
                 example = entity_examples.get(entity)
                 if example:
                     bullets.append(f"- {entity}: `{example}`")
-            if not bullets:
+            inventory = _format_selected_fact_inventory(group_nodes, file_nodes)
+            if not bullets and not inventory:
                 return ""
-            return (
-                "=== Domain-model guardrail ===\n"
-                "Treat these entity anchors as the primary basis for `Domain Model` and `Key Abstractions`.\n"
+            parts: list[str] = [
+                "=== Domain-model guardrail ===",
+                "Treat these entity anchors and typed-fact signals as the primary basis for `Domain Model`, "
+                "`Key Abstractions`, `Code Structure`, and `Module Deep Dives`.",
                 "Prefer repositories, knowledge artifacts, understanding revisions, jobs, requirements, and report/"
                 "diagram abstractions over generic stores or resolvers unless the selected evidence is overwhelmingly "
-                "storage-only.\n"
-                + "\n".join(bullets)
-                + "\n"
+                "storage-only. Cite the symbol names below by their actual file paths rather than inventing types.",
+            ]
+            if bullets:
+                parts.append("Entity anchors (from selected evidence):\n" + "\n".join(bullets))
+            if inventory:
+                parts.append(inventory)
+            return "\n\n".join(parts) + "\n"
+        if section_group == DEEP_SECTION_GROUPS[3]:
+            inventory = _format_selected_fact_inventory(group_nodes, file_nodes)
+            if not inventory:
+                return ""
+            return (
+                "=== Runtime-behavior guardrail ===\n"
+                "Treat the typed-fact signals below as the primary basis for `Data Flow & Request Lifecycle`, "
+                "`Concurrency & State Management`, `Testing Strategy`, and `Complexity & Risk Areas`. Ground each "
+                "claim in a specific symbol or file from this inventory rather than generic descriptions of tests, "
+                "queues, or risks.\n\n"
+                f"{inventory}\n"
             )
         return ""
 
@@ -2033,6 +2129,8 @@ class CliffNotesRenderer:
                     section.inferred = True
                     section.refinement_status = "needs_evidence"
 
+            _enforce_deep_confidence_floor(sections)
+
         return sections
 
     def _normalize_repository_opening_sections(
@@ -2190,6 +2288,166 @@ def _root_fact_orientation(root: SummaryNode) -> str:
     if not lines:
         return ""
     return "\n".join(lines)
+
+
+_SPECIFIC_IDENTIFIER_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]{2,})`")
+_CONFIDENCE_ENFORCE_MIN_UNIQUE_FILES = 3
+# Ops-heavy sections (External Dependencies, Security Model, Complexity & Risk Areas)
+# lean on file references more than named identifiers. Requiring only two keeps
+# well-grounded sections from being downgraded while still ruling out sections
+# that barely name any specific code element.
+_CONFIDENCE_ENFORCE_MIN_IDENTIFIERS = 2
+
+
+def _enforce_deep_confidence_floor(sections: list[CliffNotesSection]) -> None:
+    """Override LLM self-reported confidence when mechanical criteria are met.
+
+    The DEEP render prompt asks for "high" whenever a section cites multiple
+    real file paths and names multiple specific identifiers. Flash-class
+    models routinely understate and return "low" even when those criteria
+    hold. On top of that the earlier quality gate flags ``refinement_status``
+    aggressively — stripping a single "may"/"likely" sentence is enough to
+    mark a section as "unsupported_claims" even when the surviving content
+    is well-grounded. So enforcement evaluates the post-strip text directly:
+    if the section still cites enough real files and names enough
+    identifiers, we upgrade. The gate's strip already removed the risky
+    prose.
+    """
+
+    for section in sections:
+        if (section.confidence or "").lower() == "high":
+            continue
+        unique_paths = {
+            ev.file_path.strip()
+            for ev in (section.evidence or [])
+            if ev.file_path and ev.file_path.strip()
+        }
+        if len(unique_paths) < _CONFIDENCE_ENFORCE_MIN_UNIQUE_FILES:
+            continue
+        specific_ids = {
+            match.group(1)
+            for match in _SPECIFIC_IDENTIFIER_RE.finditer(section.content or "")
+        }
+        if len(specific_ids) < _CONFIDENCE_ENFORCE_MIN_IDENTIFIERS:
+            log.info(
+                "deep_confidence_floor_skipped",
+                section_title=section.title,
+                reason="too_few_identifiers",
+                unique_paths=len(unique_paths),
+                identifier_count=len(specific_ids),
+            )
+            continue
+        log.info(
+            "deep_confidence_floor_applied",
+            section_title=section.title,
+            from_confidence=section.confidence,
+            from_refinement_status=section.refinement_status,
+            unique_paths=len(unique_paths),
+            identifier_count=len(specific_ids),
+        )
+        section.confidence = "high"
+        section.inferred = False
+        # Clear the refinement flag: we've mechanically verified the section
+        # is grounded. Leaving "unsupported_claims" or "needs_evidence" on a
+        # HIGH-confidence section would be inconsistent and make downstream
+        # deepening pick up work that no longer applies.
+        section.refinement_status = ""
+
+
+def _case_preserving_metadata_values(metadata: dict[str, object], key: str) -> list[str]:
+    """Read a list-valued metadata key without lowercasing.
+
+    ``_metadata_values`` lowercases everything, which is correct for
+    token-like signals (``api``, ``store``, ``auth``) but destroys the
+    case of symbol identifiers (``KnowledgeServicer``, ``SaveArtifact``).
+    """
+
+    raw = metadata.get(key)
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        items = [str(item).strip() for item in raw]
+    else:
+        items = [str(raw).strip()]
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        ordered.append(item)
+    return ordered
+
+
+def _file_with_top_symbols(node: SummaryNode, *, max_symbols: int = 3) -> str:
+    """Format a file node as "path (Sym1, Sym2, Sym3)" for per-section plan lines.
+
+    Per-section routing through the section evidence plan is stronger when
+    the LLM sees concrete symbols ranked for that specific section, not
+    just a file path. Symbol identifiers are case-preserved.
+    """
+
+    label = _node_label(node)
+    if not label:
+        return ""
+    metadata = node.metadata or {}
+    symbols = _case_preserving_metadata_values(metadata, "fact_symbol_names")[:max_symbols]
+    if not symbols:
+        return label
+    return f"{label} ({', '.join(symbols)})"
+
+
+def _format_selected_fact_inventory(
+    group_nodes: list[SummaryNode],
+    file_nodes: list[SummaryNode],
+    *,
+    max_files: int = 8,
+) -> str:
+    """Aggregate group-level typed facts for middle-section guardrails.
+
+    Per-file symbol listings live in the section evidence plan (see
+    ``_file_with_top_symbols``) because each section routes to a
+    different top-ranked file set. This block is the group-level
+    summary: role distribution and external dependency aggregate. Kept
+    short so the section-level plan stays the primary routing signal.
+    """
+
+    role_counts: dict[str, int] = {}
+    for node in file_nodes[:max_files]:
+        metadata = node.metadata or {}
+        for role in _metadata_values(metadata, "fact_roles", "fact_package_roles"):
+            role_counts[role] = role_counts.get(role, 0) + 1
+    for node in group_nodes:
+        metadata = node.metadata or {}
+        for role in _metadata_values(metadata, "fact_package_roles"):
+            role_counts[role] = role_counts.get(role, 0) + 1
+    role_lines: list[str] = []
+    for role, count in sorted(role_counts.items(), key=lambda pair: (-pair[1], pair[0]))[:4]:
+        role_lines.append(f"- {role} ({count} occurrence{'s' if count != 1 else ''})")
+
+    dependency_set: list[str] = []
+    seen_deps: set[str] = set()
+    for node in [*file_nodes[:max_files], *group_nodes]:
+        metadata = node.metadata or {}
+        for dep in _metadata_values(metadata, "fact_external_dependencies"):
+            if dep in seen_deps:
+                continue
+            seen_deps.add(dep)
+            dependency_set.append(dep)
+        if len(dependency_set) >= 8:
+            break
+
+    sections: list[str] = []
+    if role_lines:
+        sections.append("Role distribution across selected evidence:\n" + "\n".join(role_lines))
+    if dependency_set:
+        sections.append(
+            "External dependencies seen in selected evidence: "
+            + ", ".join(dependency_set[:8])
+        )
+    if not sections:
+        return ""
+    return "\n\n".join(sections)
 
 
 def _node_area(node: SummaryNode) -> str:
