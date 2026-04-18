@@ -275,6 +275,46 @@ func TestMarkCliffNotesDeepRefinementStatusTracksAttempts(t *testing.T) {
 	}
 }
 
+func TestSyncCliffNotesRefinementUnitsStoresAllSections(t *testing.T) {
+	store := knowledgepkg.NewMemStore()
+	artifact, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+		ID:                      "artifact-sync-1",
+		RepositoryID:            "repo-1",
+		Type:                    knowledgepkg.ArtifactCliffNotes,
+		Audience:                knowledgepkg.AudienceDeveloper,
+		Depth:                   knowledgepkg.DepthDeep,
+		Status:                  knowledgepkg.StatusReady,
+		UnderstandingID:         "u-1",
+		UnderstandingRevisionFP: "rev-1",
+	})
+	if err != nil {
+		t.Fatalf("StoreKnowledgeArtifact: %v", err)
+	}
+	sections := []knowledgepkg.Section{
+		{Title: "System Purpose", SectionKey: "system_purpose"},
+		{Title: "Architecture Overview", SectionKey: "architecture_overview"},
+		{Title: "Domain Model", SectionKey: "domain_model"},
+	}
+
+	syncCliffNotesRefinementUnits(store, artifact, sections, &knowledgepkg.RepositoryUnderstanding{
+		ID:         "u-1",
+		RevisionFP: "rev-1",
+	})
+
+	units := store.GetRefinementUnits(artifact.ID)
+	if len(units) != 3 {
+		t.Fatalf("expected 3 refinement units, got %#v", units)
+	}
+	for _, unit := range units {
+		if unit.RefinementType != cliffNotesLightRefinementType {
+			t.Fatalf("expected light refinement units, got %#v", units)
+		}
+		if unit.Status != knowledgepkg.RefinementCompleted {
+			t.Fatalf("expected completed status, got %#v", units)
+		}
+	}
+}
+
 func TestCliffNotesDeepeningOutcomeFailsForWeakSections(t *testing.T) {
 	sections := []knowledgepkg.Section{
 		{Title: "Domain Model", SectionKey: "domain_model", RefinementStatus: "needs_evidence", Confidence: knowledgepkg.ConfidenceLow},

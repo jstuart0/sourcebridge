@@ -779,6 +779,12 @@ func syncCliffNotesRefinementUnits(
 		})
 	}
 	_ = store.StoreRefinementUnits(artifact.ID, units)
+	slog.Info("cliff_notes_light_units_synced",
+		"artifact_id", artifact.ID,
+		"section_count", len(sections),
+		"light_unit_count", len(units),
+		"total_refinement_units", len(store.GetRefinementUnits(artifact.ID)),
+	)
 }
 
 func markCliffNotesDeepRefinementStatus(
@@ -1682,6 +1688,11 @@ func (r *Resolver) enqueueCliffNotesDeepening(
 			return err
 		}
 	}
+	slog.Info("cliff_notes_deepening_enqueued",
+		"artifact_id", artifact.ID,
+		"selected_titles", selectedTitles,
+		"total_refinement_units", len(r.KnowledgeStore.GetRefinementUnits(artifact.ID)),
+	)
 	return nil
 }
 
@@ -1696,6 +1707,12 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 	currentSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
 	selectedTitles := []string{selectedTitle}
 	markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, currentSections, selectedTitles, knowledgepkg.RefinementQueued, "")
+	slog.Info("cliff_notes_deep_unit_marked_queued",
+		"artifact_id", artifact.ID,
+		"selected_title", selectedTitle,
+		"section_count", len(currentSections),
+		"total_refinement_units", len(r.KnowledgeStore.GetRefinementUnits(artifact.ID)),
+	)
 	req := &llm.EnqueueRequest{
 		Subsystem:      llm.SubsystemKnowledge,
 		JobType:        "cliff_notes_deepen",
