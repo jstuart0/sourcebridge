@@ -35,12 +35,17 @@ OLLAMA_URL = "http://192.168.10.108:11434/v1"
 # models anchor the local side. claude-haiku is already exercised by
 # ``run_other_artifacts_bench`` so we include it here for parity with
 # the cliff-notes leaderboard, not as a new data point.
+# Cloud models first, then the faster Qwen 3.6 MoE. Qwen3-32b dense is
+# omitted here because a single DEEP artifact takes ~35-45 min on a Mac
+# Studio via Ollama, which blows past the bench polling ceiling even
+# after lifting it to 3600s. It needs a dedicated, slower run (or a
+# parallel per-artifact harness). The MoE path (qwen3.6) is fast enough
+# to fit the budget and still represents local-model quality.
 TOP5_MODELS: list[tuple[str, str, float, str]] = [
-    ("qwen3-32b", "qwen3:32b", 20.2, "ollama"),
-    ("qwen3.6-35b-a3b-moe", "qwen3.6:35b-a3b-q4_K_M", 23.0, "ollama"),
     ("claude-haiku-4.5", "anthropic/claude-haiku-4.5", 0.0, "openrouter"),
     ("claude-sonnet-4", "anthropic/claude-sonnet-4", 0.0, "openrouter"),
     ("gemini-2.5-flash", "google/gemini-2.5-flash", 0.0, "openrouter"),
+    ("qwen3.6-35b-a3b-moe", "qwen3.6:35b-a3b-q4_K_M", 23.0, "ollama"),
 ]
 
 

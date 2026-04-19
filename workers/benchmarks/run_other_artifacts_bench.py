@@ -116,7 +116,7 @@ def wait_artifact_ready_by_type(
     repo_id: str,
     artifact_type: str,
     depth_filter: str = "",
-    timeout_s: int = 1800,
+    timeout_s: int = 3600,
 ) -> dict:
     started = time.time()
     while time.time() - started < timeout_s:
