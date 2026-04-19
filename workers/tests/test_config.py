@@ -5,8 +5,11 @@ import os
 from workers.common.config import WorkerConfig
 
 
-def test_default_config() -> None:
+def test_default_config(monkeypatch: object) -> None:
     """Test default configuration values."""
+    assert hasattr(monkeypatch, "delenv")
+    monkeypatch.delenv("SOURCEBRIDGE_WORKER_TEST_MODE", raising=False)  # type: ignore[attr-defined]
+    monkeypatch.delenv("SOURCEBRIDGE_TEST_MODE", raising=False)  # type: ignore[attr-defined]
     config = WorkerConfig()
     assert config.grpc_port == 50051
     assert config.max_workers == 10
