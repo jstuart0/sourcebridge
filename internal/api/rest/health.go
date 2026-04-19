@@ -154,6 +154,16 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	workerTotal := metrics.workerRPCTotal.Load()
 	workerErrors := metrics.workerRPCErrors.Load()
 	indexTotal := metrics.indexingTotal.Load()
+	activePoolSize := 0
+	configuredPoolSize := 0
+	if s != nil && s.orchestrator != nil {
+		activePoolSize = s.orchestrator.ActiveWorkerCount()
+		configuredPoolSize = s.orchestrator.MaxConcurrency()
+	}
+	runtimeReconfigureEnabled := 0
+	if s != nil && s.flags.RuntimeReconfigure {
+		runtimeReconfigureEnabled = 1
+	}
 
 	up := 1
 	fmt.Fprintf(w, "# HELP sourcebridge_up Whether the service is up\n")
@@ -183,4 +193,16 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP sourcebridge_indexing_total Total repository indexing operations\n")
 	fmt.Fprintf(w, "# TYPE sourcebridge_indexing_total counter\n")
 	fmt.Fprintf(w, "sourcebridge_indexing_total %d\n", indexTotal)
+
+	fmt.Fprintf(w, "# HELP sourcebridge_llm_orchestrator_active_pool_size Active worker goroutines in the orchestrator pool\n")
+	fmt.Fprintf(w, "# TYPE sourcebridge_llm_orchestrator_active_pool_size gauge\n")
+	fmt.Fprintf(w, "sourcebridge_llm_orchestrator_active_pool_size %d\n", activePoolSize)
+
+	fmt.Fprintf(w, "# HELP sourcebridge_llm_orchestrator_configured_pool_size Desired worker goroutine count in the orchestrator pool\n")
+	fmt.Fprintf(w, "# TYPE sourcebridge_llm_orchestrator_configured_pool_size gauge\n")
+	fmt.Fprintf(w, "sourcebridge_llm_orchestrator_configured_pool_size %d\n", configuredPoolSize)
+
+	fmt.Fprintf(w, "# HELP sourcebridge_feature_runtime_reconfigure_enabled Whether runtime orchestrator reconfiguration is enabled\n")
+	fmt.Fprintf(w, "# TYPE sourcebridge_feature_runtime_reconfigure_enabled gauge\n")
+	fmt.Fprintf(w, "sourcebridge_feature_runtime_reconfigure_enabled %d\n", runtimeReconfigureEnabled)
 }

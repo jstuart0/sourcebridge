@@ -20,6 +20,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/events"
+	"github.com/sourcebridge/sourcebridge/internal/featureflags"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
@@ -121,6 +122,7 @@ type Server struct {
 	orchestrator       *orchestrator.Orchestrator // shared LLM job orchestrator (created in NewServer)
 	worker             *worker.Client
 	eventBus           *events.Bus
+	flags              featureflags.Flags
 	tokenStore         auth.APITokenStore
 	desktopAuth        DesktopAuthSessionStore
 	gitConfigStore     GitConfigStore                 // persists git tokens/SSH config across restarts
@@ -172,6 +174,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		store:       store,
 		worker:      workerClient,
 		eventBus:    events.NewBus(),
+		flags:       featureflags.LoadFromEnv(),
 		tokenStore:  auth.NewAPITokenStore(),
 		desktopAuth: NewMemoryDesktopAuthStore(),
 	}
@@ -207,6 +210,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			s.orchestrator.SetIntakePaused(rec.IntakePaused)
 		}
 	}
+	slog.Info("backend feature flags", "enabled", s.flags.EnabledNames())
 
 	s.setupRouter()
 	return s
@@ -280,7 +284,7 @@ func (s *Server) setupRouter() {
 
 	// GraphQL server
 	gqlSrv := handler.NewDefaultServer(graphql.NewExecutableSchema(graphql.Config{
-		Resolvers: &graphql.Resolver{Store: s.store, KnowledgeStore: s.knowledgeStore, Worker: s.worker, Orchestrator: s.orchestrator, Config: s.cfg, EventBus: s.eventBus, GitConfig: s.gitConfigStore},
+		Resolvers: &graphql.Resolver{Store: s.store, KnowledgeStore: s.knowledgeStore, Worker: s.worker, Orchestrator: s.orchestrator, Config: s.cfg, EventBus: s.eventBus, Flags: s.flags, GitConfig: s.gitConfigStore, ComprehensionStore: s.comprehensionStore},
 	}))
 
 	// Protected API routes (accepts both JWT and API tokens)

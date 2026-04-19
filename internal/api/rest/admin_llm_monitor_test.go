@@ -145,6 +145,12 @@ func TestHandleLLMActivityEmptySystem(t *testing.T) {
 	if resp.Stats.MaxConcurrency != 2 {
 		t.Fatalf("expected max_concurrency=2, got %d", resp.Stats.MaxConcurrency)
 	}
+	if resp.Stats.ActivePoolSize != 2 {
+		t.Fatalf("expected active_pool_size=2, got %d", resp.Stats.ActivePoolSize)
+	}
+	if resp.Stats.ConfiguredPoolSize != 2 {
+		t.Fatalf("expected configured_pool_size=2, got %d", resp.Stats.ConfiguredPoolSize)
+	}
 	if resp.Stats.RecentReusedSummaries != 0 {
 		t.Fatalf("expected recent_reused_summaries=0, got %d", resp.Stats.RecentReusedSummaries)
 	}

@@ -50,6 +50,8 @@ type monitorStats struct {
 	GateWaiting           int `json:"gate_waiting"`
 	TotalWaiting          int `json:"total_waiting"`
 	MaxConcurrency        int `json:"max_concurrency"`
+	ActivePoolSize        int `json:"active_pool_size"`
+	ConfiguredPoolSize    int `json:"configured_pool_size"`
 	RecentReusedSummaries int `json:"recent_reused_summaries"`
 	ActiveClassic         int `json:"active_classic"`
 	ActiveUnderstanding   int `json:"active_understanding_first"`
@@ -350,6 +352,8 @@ func (s *Server) handleLLMActivity(w http.ResponseWriter, r *http.Request) {
 			GateWaiting:           gateWaitingCount(activeViews),
 			TotalWaiting:          s.orchestrator.QueueDepth() + gateWaitingCount(activeViews),
 			MaxConcurrency:        s.orchestrator.MaxConcurrency(),
+			ActivePoolSize:        s.orchestrator.ActiveWorkerCount(),
+			ConfiguredPoolSize:    s.orchestrator.MaxConcurrency(),
 			RecentReusedSummaries: totalReusedSummaries(recentViews),
 			ActiveClassic:         countGenerationMode(activeViews, "classic"),
 			ActiveUnderstanding:   countGenerationMode(activeViews, "understanding_first"),

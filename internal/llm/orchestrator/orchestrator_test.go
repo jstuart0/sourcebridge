@@ -198,6 +198,90 @@ func TestOrchestratorBoundedConcurrency(t *testing.T) {
 	}
 }
 
+func TestOrchestratorReconfigureMaxConcurrency(t *testing.T) {
+	orch := newTestOrchestrator(t, Config{MaxConcurrency: 3})
+
+	var running atomic.Int32
+	var started atomic.Int32
+	release := make(chan struct{})
+
+	for i := 0; i < 6; i++ {
+		_, err := orch.Enqueue(&llm.EnqueueRequest{
+			Subsystem: llm.SubsystemKnowledge,
+			JobType:   "cliff_notes",
+			TargetKey: fmt.Sprintf("repo-1:reconfigure:%d", i),
+			Run: func(rt llm.Runtime) error {
+				started.Add(1)
+				running.Add(1)
+				defer running.Add(-1)
+				<-release
+				return nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("enqueue failed: %v", err)
+		}
+	}
+
+	waitFor(t, time.Second, func() bool {
+		return running.Load() == 3
+	})
+	if orch.ActiveWorkerCount() != 3 {
+		t.Fatalf("expected 3 active workers before reconfigure, got %d", orch.ActiveWorkerCount())
+	}
+
+	oldConfigured, newConfigured := orch.ReconfigureMaxConcurrency(1)
+	if oldConfigured != 3 || newConfigured != 1 {
+		t.Fatalf("unexpected reconfigure result old=%d new=%d", oldConfigured, newConfigured)
+	}
+	if orch.MaxConcurrency() != 1 {
+		t.Fatalf("expected configured max concurrency to be 1, got %d", orch.MaxConcurrency())
+	}
+
+	close(release)
+	waitFor(t, 2*time.Second, func() bool {
+		return orch.ActiveWorkerCount() == 1
+	})
+
+	var secondWaveRunning atomic.Int32
+	secondWaveRelease := make(chan struct{})
+	for i := 0; i < 2; i++ {
+		_, err := orch.Enqueue(&llm.EnqueueRequest{
+			Subsystem: llm.SubsystemKnowledge,
+			JobType:   "cliff_notes",
+			TargetKey: fmt.Sprintf("repo-1:reconfigure:second:%d", i),
+			Run: func(rt llm.Runtime) error {
+				secondWaveRunning.Add(1)
+				defer secondWaveRunning.Add(-1)
+				<-secondWaveRelease
+				return nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("enqueue second wave failed: %v", err)
+		}
+	}
+
+	waitFor(t, time.Second, func() bool {
+		return secondWaveRunning.Load() == 1
+	})
+	if secondWaveRunning.Load() > 1 {
+		t.Fatalf("expected second wave to respect lowered ceiling, got %d", secondWaveRunning.Load())
+	}
+	close(secondWaveRelease)
+	waitFor(t, 2*time.Second, func() bool {
+		return secondWaveRunning.Load() == 0
+	})
+
+	oldConfigured, newConfigured = orch.ReconfigureMaxConcurrency(4)
+	if oldConfigured != 1 || newConfigured != 4 {
+		t.Fatalf("unexpected scale-up result old=%d new=%d", oldConfigured, newConfigured)
+	}
+	waitFor(t, time.Second, func() bool {
+		return orch.ActiveWorkerCount() == 4
+	})
+}
+
 func TestOrchestratorRetryOnTransientError(t *testing.T) {
 	orch := newTestOrchestrator(t, Config{
 		MaxConcurrency: 1,

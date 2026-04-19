@@ -3179,6 +3179,7 @@ func (r *mutationResolver) UpdateComprehensionSettings(ctx context.Context, inpu
 	if err != nil {
 		return nil, err
 	}
+	r.applyEffectiveComprehensionSettings(eff)
 	return mapEffectiveSettings(eff), nil
 }
 

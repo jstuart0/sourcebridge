@@ -5,6 +5,7 @@ package rest
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -86,7 +87,20 @@ func (s *Server) handleUpdateComprehensionSettings(w http.ResponseWriter, r *htt
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.applyEffectiveComprehensionSettings(eff)
 	writeJSON(w, http.StatusOK, eff)
+}
+
+func (s *Server) applyEffectiveComprehensionSettings(eff *comprehension.EffectiveSettings) {
+	if eff == nil || s.orchestrator == nil || !s.flags.RuntimeReconfigure {
+		return
+	}
+	oldConfigured, newConfigured := s.orchestrator.ReconfigureMaxConcurrency(eff.MaxConcurrency)
+	slog.Info("orchestrator_reconfigure",
+		"event", "orchestrator_reconfigure",
+		"source", "rest_admin_comprehension",
+		"old_configured_pool_size", oldConfigured,
+		"new_configured_pool_size", newConfigured)
 }
 
 // handleResetComprehensionSettings deletes the settings for a scope,
