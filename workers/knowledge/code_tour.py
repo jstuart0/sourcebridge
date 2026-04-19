@@ -21,8 +21,9 @@ from workers.knowledge.cliff_notes import _parse_sections
 from workers.knowledge.evidence import evaluate_evidence_gate, extract_code_tour_stop_evidence
 from workers.knowledge.parse_utils import (
     coerce_int,
-    collect_snapshot_file_paths,
+    collect_snapshot_path_signals,
     meets_confidence_floor,
+    path_looks_grounded,
 )
 from workers.knowledge.prompts.code_tour import (
     CODE_TOUR_SYSTEM,
@@ -134,13 +135,13 @@ async def generate_code_tour(
         # evidence in the artifact; better to lose the stop than keep a
         # bogus one. Mirrors the learning_path filter that took haiku
         # from 31% → 0% hallucination in iteration 5.
-        known_paths = collect_snapshot_file_paths(snapshot_json)
-        if known_paths:
+        known_paths, known_dirs = collect_snapshot_path_signals(snapshot_json)
+        if known_paths or known_dirs:
             kept: list[TourStop] = []
             dropped_paths: list[str] = []
             for stop in stops:
                 fp = (stop.file_path or "").strip()
-                if not fp or fp in known_paths:
+                if not fp or path_looks_grounded(fp, known_paths, known_dirs):
                     kept.append(stop)
                 else:
                     dropped_paths.append(fp)

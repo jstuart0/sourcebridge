@@ -22,7 +22,9 @@ from workers.knowledge.evidence import evaluate_evidence_gate, extract_step_file
 from workers.knowledge.parse_utils import (
     coerce_int,
     collect_snapshot_file_paths,
+    collect_snapshot_path_signals,
     meets_confidence_floor,
+    path_looks_grounded,
 )
 from workers.knowledge.prompts.learning_path import (
     LEARNING_PATH_SYSTEM,
@@ -148,12 +150,12 @@ async def generate_learning_path(
         )
 
     if depth == "deep":
-        known_paths = _collect_snapshot_file_paths(snapshot_json)
-        if known_paths:
+        known_paths, known_dirs = collect_snapshot_path_signals(snapshot_json)
+        if known_paths or known_dirs:
             for step in steps:
                 raw_paths = list(step.file_paths or [])
-                filtered = [p for p in raw_paths if p in known_paths]
-                dropped = [p for p in raw_paths if p not in known_paths]
+                filtered = [p for p in raw_paths if path_looks_grounded(p, known_paths, known_dirs)]
+                dropped = [p for p in raw_paths if not path_looks_grounded(p, known_paths, known_dirs)]
                 if dropped:
                     step.file_paths = filtered
                     log.info(

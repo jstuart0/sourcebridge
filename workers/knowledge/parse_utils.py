@@ -86,24 +86,47 @@ def meets_confidence_floor(
 
 
 def collect_snapshot_file_paths(snapshot_json: str) -> set[str]:
-    """Extract the set of real file paths present in the repository snapshot.
+    """Return the set of file paths the snapshot explicitly names.
 
-    Shared by learning_path and code_tour post-parse hallucination
-    filters. The filters drop any LLM-emitted file path that isn't in
-    this set — haiku occasionally invents plausible-looking paths like
-    ``internal/worker/queue.go`` even when no such file exists. This
-    walker pulls paths from every symbol list + module/file array the
-    assembler emits.
+    This is the strict "exact-match" set — paths here appear verbatim
+    in a symbol list or module/file array. Compare against
+    :func:`collect_snapshot_path_signals` which also returns parent
+    directories for a softer grounded-ness check.
+    """
+
+    return collect_snapshot_path_signals(snapshot_json)[0]
+
+
+def collect_snapshot_path_signals(snapshot_json: str) -> tuple[set[str], set[str]]:
+    """Return (known_full_paths, known_directories) from the snapshot.
+
+    The ``KnowledgeSnapshot`` only materialises file paths for symbols
+    it tracks — not every file in the repo. Using ``known_full_paths``
+    alone as the ground truth drops real-but-untracked files (e.g.
+    ``internal/db/migrations.go`` when only ``internal/db/store.go`` has
+    a tracked symbol), which torpedoes the HIGH-confidence floor on the
+    learning path. Using ``known_directories`` lets a filter say "this
+    looks like it belongs to a real directory in the repo, keep it"
+    while still catching clear inventions like ``internal/worker/
+    queue.go`` when there is no ``internal/worker/`` anywhere.
     """
 
     try:
         snap = json.loads(snapshot_json) if snapshot_json else {}
     except (json.JSONDecodeError, TypeError, ValueError):
-        return set()
+        return set(), set()
     if not isinstance(snap, dict):
-        return set()
+        return set(), set()
 
     paths: set[str] = set()
+
+    def _add(raw: object) -> None:
+        if not isinstance(raw, str):
+            return
+        text = raw.strip()
+        if text:
+            paths.add(text)
+
     for key in (
         "entry_points",
         "public_api",
@@ -114,24 +137,65 @@ def collect_snapshot_file_paths(snapshot_json: str) -> set[str]:
     ):
         for sym in snap.get(key) or []:
             if isinstance(sym, dict):
-                p = (sym.get("file_path") or "").strip()
-                if p:
-                    paths.add(p)
+                _add(sym.get("file_path"))
     for module in snap.get("modules") or []:
-        if not isinstance(module, dict):
-            continue
-        for f in module.get("files") or []:
-            if isinstance(f, dict):
-                p = (f.get("path") or f.get("file_path") or "").strip()
-                if p:
-                    paths.add(p)
-            elif isinstance(f, str) and f.strip():
-                paths.add(f.strip())
+        if isinstance(module, dict):
+            _add(module.get("path"))
+            for f in module.get("files") or []:
+                if isinstance(f, dict):
+                    _add(f.get("path") or f.get("file_path"))
+                else:
+                    _add(f)
     for f in snap.get("files") or []:
         if isinstance(f, dict):
-            p = (f.get("path") or f.get("file_path") or "").strip()
-            if p:
-                paths.add(p)
-        elif isinstance(f, str) and f.strip():
-            paths.add(f.strip())
-    return paths
+            _add(f.get("path") or f.get("file_path"))
+        else:
+            _add(f)
+    for doc in snap.get("docs") or []:
+        if isinstance(doc, dict):
+            _add(doc.get("path"))
+
+    dirs: set[str] = set()
+    for p in paths:
+        # Walk every ancestor directory so a cited file under a known
+        # module directory counts as grounded even when its exact path
+        # isn't tracked as a symbol.
+        parent = p
+        while True:
+            idx = parent.rfind("/")
+            if idx < 0:
+                break
+            parent = parent[:idx]
+            if not parent:
+                break
+            dirs.add(parent)
+
+    # Pure path values like ``internal/db`` are also directories.
+    dirs.update(p for p in paths if "/" in p and "." not in p.rsplit("/", 1)[-1])
+
+    return paths, dirs
+
+
+def path_looks_grounded(
+    file_path: str,
+    known_paths: set[str],
+    known_dirs: set[str],
+) -> bool:
+    """Return True when the path is either exactly known or sits inside a known directory.
+
+    The directory-prefix check is deliberately lenient: it keeps
+    real-but-untracked file citations while still rejecting obvious
+    inventions where the entire directory is absent from the snapshot.
+    """
+
+    fp = (file_path or "").strip()
+    if not fp:
+        return False
+    if fp in known_paths:
+        return True
+    idx = fp.rfind("/")
+    if idx < 0:
+        # Bare basenames (README, go.mod) — trust them.
+        return True
+    parent = fp[:idx]
+    return parent in known_dirs
