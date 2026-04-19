@@ -9,8 +9,8 @@ import {
   Settings2,
   Users,
 } from "lucide-react";
+import { clearStoredToken } from "@/lib/auth-token-store";
 import { cn } from "@/lib/utils";
-import { TOKEN_KEY } from "@/lib/token-key";
 import { Panel as UiPanel } from "@/components/ui/panel";
 
 type AdminTab = "billing" | "sso" | "audit" | "notifications" | "team" | "settings";
@@ -25,7 +25,7 @@ interface AdminShellProps {
  *  On 401, clears the token and redirects to login. */
 async function handleApiError(res: Response): Promise<string> {
   if (res.status === 401) {
-    localStorage.removeItem(TOKEN_KEY);
+    clearStoredToken();
     window.location.href = "/login";
     return "Session expired — redirecting to login...";
   }

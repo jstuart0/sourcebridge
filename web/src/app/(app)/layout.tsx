@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { TOKEN_KEY } from "@/lib/token-key";
+import { getStoredToken } from "@/lib/auth-token-store";
 import { isTokenExpired, msUntilExpiry, forceLogout } from "@/lib/auth-utils";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { ErrorBoundary } from "@/components/layout/ErrorBoundary";
@@ -14,7 +14,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
+    const token = getStoredToken();
     if (!token || isTokenExpired(token)) {
       forceLogout();
       return;

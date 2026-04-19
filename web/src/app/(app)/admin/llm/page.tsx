@@ -8,9 +8,9 @@ import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
 import { StatCard } from "@/components/ui/stat-card";
+import { authFetch } from "@/lib/auth-fetch";
 import { normalizeActivityResponse } from "@/lib/llm/activity";
 import { disableJobAlerts, enableJobAlerts, jobAlertsEnabled, notifyJobEvent } from "@/lib/notifications";
-import { TOKEN_KEY } from "@/lib/token-key";
 import { cn } from "@/lib/utils";
 
 /**
@@ -309,10 +309,7 @@ export default function MonitorPage() {
 
   const fetchActivity = useCallback(async () => {
     try {
-      const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
-      const res = await fetch("/api/v1/admin/llm/activity", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await authFetch("/api/v1/admin/llm/activity");
       if (!res.ok) {
         throw new Error(`activity endpoint returned ${res.status}`);
       }
@@ -325,22 +322,18 @@ export default function MonitorPage() {
   }, []);
 
   const cancelJob = useCallback(async (jobId: string) => {
-    const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
-    const res = await fetch(`/api/v1/admin/llm/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    const res = await authFetch(`/api/v1/admin/llm/jobs/${encodeURIComponent(jobId)}/cancel`, {
       method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) throw new Error(`cancel returned ${res.status}`);
     await fetchActivity();
   }, [fetchActivity]);
 
   const setIntakePaused = useCallback(async (paused: boolean) => {
-    const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
-    const res = await fetch("/api/v1/admin/llm/control", {
+    const res = await authFetch("/api/v1/admin/llm/control", {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ intake_paused: paused }),
     });
@@ -349,10 +342,8 @@ export default function MonitorPage() {
   }, [fetchActivity]);
 
   const drainQueue = useCallback(async () => {
-    const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
-    const res = await fetch("/api/v1/admin/llm/drain", {
+    const res = await authFetch("/api/v1/admin/llm/drain", {
       method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) throw new Error(`drain returned ${res.status}`);
     const body = await res.json() as { cancelled_pending?: number };
@@ -998,10 +989,7 @@ function JobLogsPanel({ job }: { job: JobView }) {
 
   const fetchLogs = useCallback(async () => {
     try {
-      const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
-      const res = await fetch(`/api/v1/admin/llm/jobs/${encodeURIComponent(job.id)}/logs?limit=200`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await authFetch(`/api/v1/admin/llm/jobs/${encodeURIComponent(job.id)}/logs?limit=200`);
       if (!res.ok) throw new Error(`logs endpoint returned ${res.status}`);
       const body = (await res.json()) as { logs?: JobLogView[] };
       setLogs(Array.isArray(body.logs) ? body.logs : []);

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
-import { TOKEN_KEY } from "@/lib/token-key";
+import { authFetch } from "@/lib/auth-fetch";
 import { cn } from "@/lib/utils";
 
 /**
@@ -96,12 +96,10 @@ export default function ModelsPage() {
   });
 
   const fetchWithAuth = useCallback(async (path: string, options?: RequestInit) => {
-    const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
-    return fetch(path, {
+    return authFetch(path, {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...options?.headers,
       },
     });

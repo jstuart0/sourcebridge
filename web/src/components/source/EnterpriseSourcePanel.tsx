@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { MessageSquarePlus, Pin, ShieldCheck } from "lucide-react";
+import { authFetch } from "@/lib/auth-fetch";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { buildRepositorySourceHref, type SourceTarget } from "@/lib/source-target";
-import { TOKEN_KEY } from "@/lib/token-key";
 
 interface SharedSourceContext {
   id: string;
@@ -34,22 +34,14 @@ interface SourceAnnotation {
 }
 
 async function enterpriseFetch(url: string, init?: RequestInit) {
-  const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
-  const res = await fetch(url, {
+  const res = await authFetch(url, {
     credentials: "include",
     ...init,
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {}),
     },
   });
-
-  if (res.status === 401) {
-    localStorage.removeItem(TOKEN_KEY);
-    window.location.href = "/login";
-    throw new Error("Session expired");
-  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `HTTP ${res.status}`);

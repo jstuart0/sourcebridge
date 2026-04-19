@@ -60,9 +60,9 @@ import { SymbolTree } from "@/components/source/SymbolTree";
 import { SymbolList } from "@/components/source/SymbolList";
 import { kindBadgeClass, kindLabel, SYMBOL_KINDS } from "@/components/source/symbol-kind";
 import { normalizeActivityResponse } from "@/lib/llm/activity";
+import { authFetch } from "@/lib/auth-fetch";
 import { trackEvent } from "@/lib/telemetry";
 import { disableJobAlerts, enableJobAlerts, jobAlertsEnabled, notifyJobEvent } from "@/lib/notifications";
-import { TOKEN_KEY } from "@/lib/token-key";
 
 type Tab = "files" | "symbols" | "requirements" | "specs" | "analysis" | "impact" | "architecture" | "related" | "knowledge" | "settings";
 type SymbolDetailTab = "source" | "cliff-notes" | "chat";
@@ -831,10 +831,7 @@ export default function RepositoryDetailPage() {
 
   const fetchRepoJobs = useCallback(async () => {
     try {
-      const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
-      const res = await fetch(`/api/v1/admin/llm/activity?repo_id=${encodeURIComponent(repoId)}&limit=40`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await authFetch(`/api/v1/admin/llm/activity?repo_id=${encodeURIComponent(repoId)}&limit=40`);
       if (!res.ok) {
         throw new Error(`job activity returned ${res.status}`);
       }
@@ -1215,11 +1212,9 @@ export default function RepositoryDetailPage() {
   async function handleCancelRepoJob(jobId: string) {
     if (cancellingJobIds[jobId]) return;
     setCancellingJobIds((current) => ({ ...current, [jobId]: true }));
-    const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
     try {
-      const res = await fetch(`/api/v1/admin/llm/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      const res = await authFetch(`/api/v1/admin/llm/jobs/${encodeURIComponent(jobId)}/cancel`, {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!res.ok) {
         throw new Error(`cancel returned ${res.status}`);
