@@ -359,7 +359,11 @@ export default function ComprehensionSettingsPage() {
 
   const handleUseRecommended = () => {
     setStrategyChain(["hierarchical", "single_shot"]);
-    setMaxConcurrency(3);
+    // Prefer the provider+size-aware recommendation when we have a
+    // model selected; otherwise fall back to the safe 3-per-Ollama default.
+    const caps = models.find((m) => m.modelId === selectedModel);
+    const rec = caps ? recommendMaxConcurrency(caps.modelId, caps.provider) : null;
+    setMaxConcurrency(rec?.value ?? 3);
     setMaxPromptTokens(100000);
     setLeafBudgetTokens(3000);
     setCacheEnabled(false);
