@@ -53,6 +53,7 @@ PROTO_SOURCES = $(PROTO_DIR)/common/v1/types.proto \
 	$(PROTO_DIR)/linking/v1/linking.proto \
 	$(PROTO_DIR)/requirements/v1/requirements.proto \
 	$(PROTO_DIR)/indexer/v1/indexer.proto \
+	$(PROTO_DIR)/enterprise/v1/report.proto \
 	$(PROTO_DIR)/knowledge/v1/knowledge.proto \
 	$(PROTO_DIR)/contracts/v1/contracts.proto
 

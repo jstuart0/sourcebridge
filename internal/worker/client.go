@@ -10,11 +10,14 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	grpcstatus "google.golang.org/grpc/status"
 
 	contractsv1 "github.com/sourcebridge/sourcebridge/gen/go/contracts/v1"
+	enterprisev1 "github.com/sourcebridge/sourcebridge/gen/go/enterprise/v1"
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
 	linkingv1 "github.com/sourcebridge/sourcebridge/gen/go/linking/v1"
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
@@ -87,6 +90,7 @@ type Client struct {
 	Linking                  linkingv1.LinkingServiceClient
 	Requirements             requirementsv1.RequirementsServiceClient
 	Knowledge                knowledgev1.KnowledgeServiceClient
+	EnterpriseReport         enterprisev1.EnterpriseReportServiceClient
 	Contracts                contractsv1.ContractsServiceClient
 	Health                   healthpb.HealthClient
 }
@@ -127,6 +131,7 @@ func New(address string, opts ...Option) (*Client, error) {
 		Linking:                  linkingv1.NewLinkingServiceClient(conn),
 		Requirements:             requirementsv1.NewRequirementsServiceClient(conn),
 		Knowledge:                knowledgev1.NewKnowledgeServiceClient(conn),
+		EnterpriseReport:         enterprisev1.NewEnterpriseReportServiceClient(conn),
 		Contracts:                contractsv1.NewContractsServiceClient(conn),
 		Health:                   healthpb.NewHealthClient(conn),
 	}
@@ -348,6 +353,11 @@ func (c *Client) GenerateCodeTour(ctx context.Context, req *knowledgev1.Generate
 func (c *Client) GenerateReport(ctx context.Context, req *knowledgev1.GenerateReportRequest) (*knowledgev1.GenerateReportResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.repositoryKnowledgeTimeout())
 	defer cancel()
+	resp, err := c.EnterpriseReport.GenerateReport(ctx, req)
+	if grpcstatus.Code(err) != codes.Unimplemented {
+		return resp, err
+	}
+	slog.Info("enterprise report rpc unavailable, falling back to knowledge service")
 	return c.Knowledge.GenerateReport(ctx, req)
 }
 

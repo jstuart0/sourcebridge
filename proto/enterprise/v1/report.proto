@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package sourcebridge.enterprise.v1;
+
+option go_package = "github.com/sourcebridge/sourcebridge/gen/go/enterprise/v1;enterprisev1";
+
+import "knowledge/v1/knowledge.proto";
+
+// EnterpriseReportService hosts enterprise-only report generation RPCs.
+// Request and response messages remain shared with knowledge.v1 during the
+// migration so older knowledge.v1 callers can coexist with the new service.
+service EnterpriseReportService {
+  rpc GenerateReport(sourcebridge.knowledge.v1.GenerateReportRequest) returns (sourcebridge.knowledge.v1.GenerateReportResponse);
+}
