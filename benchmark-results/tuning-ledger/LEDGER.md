@@ -57,6 +57,29 @@ the biggest single-change quality gain in this tuning sweep.
 | code_tour | 15 | **14/0/1** | 0.0 | ✅ first-class — "name 2+ symbols" prompt stabilised HIGH count |
 | workflow_story | 9 | 2/4/3 | 0.0 | LLM hit an unterminated-JSON parse error; needs a deeper look |
 
+## Iteration 7 (softer filter + workflow_story tokens + trailing-slash scorer fix)
+
+Commits: `2e92442` (directory-aware path filter), `f06818a` (workflow_story
+max_tokens 8192→16384), `efe60da` (bench scorer strips trailing / before
+comparing against real_dirs).
+
+| Artifact | Sections | H/M/L | Halluc% | First-class? |
+|---|---:|---|---:|---|
+| learning_path | 15 | 9/2/4 | 2.0 | ⚠ 1 under HIGH target (10), 4 LOW |
+| code_tour | 15 | 9/6/0 | 0.0 | ⚠ 1 under HIGH target, but no LOW |
+| workflow_story | 9 | **6/2/1** | 0.0 | ✅ at target (6 HIGH = 67%) |
+
+Key findings:
+1. The 27.5% learning_path "hallucination rate" measured on iteration-6
+   first pass was a **scorer bug**, not a real regression — haiku cites
+   package paths with a trailing slash (`internal/api/graphql/`), which
+   the scorer's `real_dirs` set (built from `Path.is_dir()`) doesn't
+   have. Rescoring with the fix shows 2% real halluc.
+2. Bumping workflow_story to 16384 tokens fixed the parse-fallback
+   regression (2/4/3 → 6/2/1 HIGH).
+3. code_tour HIGH count varies 9-14 across runs; the prompt tightening
+   raised the floor but run-to-run variance persists.
+
 Key finding: the strict exact-match hallucination filter regressed
 learning_path because the `KnowledgeSnapshot` doesn't ship the full file
 list — only files touched by tracked symbols. Real-but-untracked files

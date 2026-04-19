@@ -187,7 +187,18 @@ def score_artifact(
         for p in paths:
             if not p:
                 continue
-            if p in real_files or ("/" not in p and p in real_basenames) or p in real_dirs:
+            # Normalise trailing slashes — the LLM frequently cites
+            # a package path like ``internal/api/graphql/`` which the
+            # worker stores verbatim. Strip the trailing / so it can
+            # match ``real_dirs``, which never has trailing slashes.
+            stripped = p.rstrip("/")
+            if (
+                p in real_files
+                or stripped in real_files
+                or ("/" not in p and p in real_basenames)
+                or p in real_dirs
+                or stripped in real_dirs
+            ):
                 grounded += 1
             else:
                 hallucinated_paths.append(p)
