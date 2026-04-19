@@ -11,6 +11,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/sourcebridge/sourcebridge/internal/api/graphql"
+	"github.com/sourcebridge/sourcebridge/internal/events"
 )
 
 // componentStatus represents the health state of a single dependency.
@@ -164,6 +167,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if s != nil && s.flags.RuntimeReconfigure {
 		runtimeReconfigureEnabled = 1
 	}
+	knowledgeProgressWriteErrors := graphql.KnowledgeProgressWriteErrorsTotal()
+	knowledgeJobLogWriteErrors := graphql.KnowledgeJobLogWriteErrorsTotal()
+	eventBusHandlerErrors := events.HandlerErrorsTotal()
 
 	up := 1
 	fmt.Fprintf(w, "# HELP sourcebridge_up Whether the service is up\n")
@@ -205,4 +211,16 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP sourcebridge_feature_runtime_reconfigure_enabled Whether runtime orchestrator reconfiguration is enabled\n")
 	fmt.Fprintf(w, "# TYPE sourcebridge_feature_runtime_reconfigure_enabled gauge\n")
 	fmt.Fprintf(w, "sourcebridge_feature_runtime_reconfigure_enabled %d\n", runtimeReconfigureEnabled)
+
+	fmt.Fprintf(w, "# HELP sourcebridge_knowledge_progress_write_errors_total Total knowledge artifact progress write errors\n")
+	fmt.Fprintf(w, "# TYPE sourcebridge_knowledge_progress_write_errors_total counter\n")
+	fmt.Fprintf(w, "sourcebridge_knowledge_progress_write_errors_total %d\n", knowledgeProgressWriteErrors)
+
+	fmt.Fprintf(w, "# HELP sourcebridge_knowledge_job_log_write_errors_total Total job log write errors on knowledge paths\n")
+	fmt.Fprintf(w, "# TYPE sourcebridge_knowledge_job_log_write_errors_total counter\n")
+	fmt.Fprintf(w, "sourcebridge_knowledge_job_log_write_errors_total %d\n", knowledgeJobLogWriteErrors)
+
+	fmt.Fprintf(w, "# HELP sourcebridge_event_bus_handler_errors_total Total event bus handler panics\n")
+	fmt.Fprintf(w, "# TYPE sourcebridge_event_bus_handler_errors_total counter\n")
+	fmt.Fprintf(w, "sourcebridge_event_bus_handler_errors_total %d\n", eventBusHandlerErrors)
 }

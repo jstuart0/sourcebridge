@@ -175,7 +175,7 @@ async def retrieve_relevant_snapshot(
         for idx, (key, orig_idx, sym) in enumerate(all_symbols):
             sim = cosine_similarity(query_embedding, symbol_embeddings[idx])
             scored.append((sim, key, orig_idx, sym))
-    except Exception as exc:
+    except (RuntimeError, TimeoutError, ConnectionError) as exc:
         log.error("retrieval_embedding_failed", error=str(exc))
         # Fall back to condensed snapshot
         from workers.knowledge.snapshot_truncate import condense_snapshot

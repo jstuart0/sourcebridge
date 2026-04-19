@@ -224,7 +224,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     query,
                     self._embedding,
                 )
-            except Exception as exc:
+            except (json.JSONDecodeError, TypeError) as exc:
                 log.warn("retrieval_failed_falling_back", error=str(exc))
 
         # Fall back to condensation

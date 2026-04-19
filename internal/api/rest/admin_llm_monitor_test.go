@@ -154,6 +154,12 @@ func TestHandleLLMActivityEmptySystem(t *testing.T) {
 	if resp.Stats.RecentReusedSummaries != 0 {
 		t.Fatalf("expected recent_reused_summaries=0, got %d", resp.Stats.RecentReusedSummaries)
 	}
+	if resp.ErrorCounters.KnowledgeProgressWriteErrors != 0 {
+		t.Fatalf("expected knowledge progress errors 0, got %d", resp.ErrorCounters.KnowledgeProgressWriteErrors)
+	}
+	if resp.ErrorCounters.EventBusHandlerErrors != 0 {
+		t.Fatalf("expected event bus handler errors 0, got %d", resp.ErrorCounters.EventBusHandlerErrors)
+	}
 	if len(resp.Active) != 0 {
 		t.Fatalf("expected empty active list, got %d", len(resp.Active))
 	}

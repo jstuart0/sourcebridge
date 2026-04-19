@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -428,6 +429,29 @@ func (s *Server) setupRouter() {
 // Handler returns the HTTP handler.
 func (s *Server) Handler() http.Handler {
 	return s.router
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if s.eventBus != nil {
+		if err := s.eventBus.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+	if s.orchestrator != nil {
+		graceful := 5 * time.Second
+		if deadline, ok := ctx.Deadline(); ok {
+			if remaining := time.Until(deadline); remaining > 0 {
+				graceful = remaining
+			}
+		}
+		if err := s.orchestrator.Shutdown(graceful); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func securityHeaders(next http.Handler) http.Handler {
