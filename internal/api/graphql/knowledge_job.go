@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
@@ -21,7 +22,19 @@ import (
 var knowledgeArtifactGates sync.Map
 var knowledgeGlobalGate sync.Once
 var knowledgeGlobalSlots chan struct{}
-var knowledgeQueueHeartbeatInterval = 5 * time.Second
+var knowledgeQueueHeartbeatIntervalNanos atomic.Int64
+
+func init() {
+	knowledgeQueueHeartbeatIntervalNanos.Store(int64(5 * time.Second))
+}
+
+func knowledgeQueueHeartbeatInterval() time.Duration {
+	return time.Duration(knowledgeQueueHeartbeatIntervalNanos.Load())
+}
+
+func setKnowledgeQueueHeartbeatInterval(interval time.Duration) {
+	knowledgeQueueHeartbeatIntervalNanos.Store(int64(interval))
+}
 
 // startProgressTicker launches a goroutine that steadily advances both
 // the llm.Job progress (via rt) and the knowledge artifact progress
@@ -164,7 +177,7 @@ func acquireKnowledgeJobSlot(ctx context.Context, jobType string) (func(), error
 func startKnowledgeQueueHeartbeat(ctx context.Context, rt llm.Runtime, artifactID string, store knowledgepkg.KnowledgeStore) context.CancelFunc {
 	hbCtx, cancel := context.WithCancel(ctx)
 	go func() {
-		tick := time.NewTicker(knowledgeQueueHeartbeatInterval)
+		tick := time.NewTicker(knowledgeQueueHeartbeatInterval())
 		defer tick.Stop()
 		for {
 			select {

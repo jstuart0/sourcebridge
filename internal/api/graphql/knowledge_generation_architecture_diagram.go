@@ -88,8 +88,8 @@ func (s architectureDiagramGenerationService) Generate(ctx context.Context) (*Kn
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 
-		architecturePromptJSON := snapJSON
 		var architectureBundle architectureDiagramPromptBundle
+		var architecturePromptJSON []byte
 		var understandingForDiagram *knowledgepkg.RepositoryUnderstanding
 		if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
 			return err

@@ -232,10 +232,10 @@ func TestRepositoryCliffNotesJobsDoNotAutoRetry(t *testing.T) {
 }
 
 func TestQueuedKnowledgeJobsHeartbeatWhileWaitingForGate(t *testing.T) {
-	prevInterval := knowledgeQueueHeartbeatInterval
-	knowledgeQueueHeartbeatInterval = 20 * time.Millisecond
+	prevInterval := knowledgeQueueHeartbeatInterval()
+	setKnowledgeQueueHeartbeatInterval(20 * time.Millisecond)
 	t.Cleanup(func() {
-		knowledgeQueueHeartbeatInterval = prevInterval
+		setKnowledgeQueueHeartbeatInterval(prevInterval)
 	})
 
 	knowledgeStore := knowledge.NewMemStore()

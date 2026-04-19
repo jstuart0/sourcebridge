@@ -13,7 +13,7 @@ const knowledgeWorkerUnavailableMessage = "AI features are unavailable — worke
 
 func (r *Resolver) requireKnowledgeGenerationSupport() error {
 	if r.Worker == nil {
-		return fmt.Errorf(knowledgeWorkerUnavailableMessage)
+		return fmt.Errorf("%s", knowledgeWorkerUnavailableMessage)
 	}
 	if r.KnowledgeStore == nil {
 		return fmt.Errorf("knowledge store not configured")
