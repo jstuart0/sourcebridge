@@ -89,6 +89,60 @@ async def test_code_tour_usage_tracking() -> None:
 
 
 @pytest.mark.asyncio
+async def test_code_tour_deep_drops_hallucinated_file_paths() -> None:
+    """DEEP-depth generation must drop any stops whose file_path doesn't
+    appear in the snapshot, to keep hallucination rate at 0."""
+
+    class _FakeLLMWithInventedPath(FakeLLMProvider):
+        async def complete(self, prompt, *, system="", max_tokens=4096, temperature=0.0, model=None, frequency_penalty=0.0, extra_body=None):  # noqa: D401
+            payload = json.dumps(
+                [
+                    {
+                        "order": 1,
+                        "title": "Real stop",
+                        "description": "Inspect `mainFunc` and `runServer` in `main.go`.",
+                        "file_path": "main.go",
+                        "line_start": 1,
+                        "line_end": 20,
+                        "trail": "bootstrap",
+                        "modification_hints": ["Trace control flow"],
+                    },
+                    {
+                        "order": 2,
+                        "title": "Ghost stop",
+                        "description": "Explore the imaginary orchestrator.",
+                        "file_path": "internal/ghost/service.go",
+                        "line_start": 1,
+                        "line_end": 20,
+                        "trail": "ghost",
+                        "modification_hints": ["Update ghost"],
+                    },
+                ]
+            )
+            from workers.common.llm.provider import LLMResponse
+
+            return LLMResponse(
+                content=payload,
+                model=model or "fake-test-model",
+                input_tokens=len(prompt) // 4,
+                output_tokens=len(payload) // 4,
+                stop_reason="end_turn",
+            )
+
+    provider = _FakeLLMWithInventedPath()
+    result, _ = await generate_code_tour(
+        provider=provider,
+        repository_name="test-repo",
+        audience="developer",
+        depth="deep",
+        snapshot_json=SAMPLE_SNAPSHOT,
+    )
+    assert len(result.stops) == 1
+    assert result.stops[0].file_path == "main.go"
+    assert result.stops[0].order == 1
+
+
+@pytest.mark.asyncio
 async def test_explain_system_returns_explanation() -> None:
     """ExplainSystem must return a non-empty explanation."""
     provider = FakeLLMProvider()

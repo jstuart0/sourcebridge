@@ -13,6 +13,7 @@ artifact at once rather than being copy-pasted per module.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable
 
@@ -82,3 +83,55 @@ def meets_confidence_floor(
     if count_specific_identifiers(content) < min_identifiers:
         return False
     return True
+
+
+def collect_snapshot_file_paths(snapshot_json: str) -> set[str]:
+    """Extract the set of real file paths present in the repository snapshot.
+
+    Shared by learning_path and code_tour post-parse hallucination
+    filters. The filters drop any LLM-emitted file path that isn't in
+    this set — haiku occasionally invents plausible-looking paths like
+    ``internal/worker/queue.go`` even when no such file exists. This
+    walker pulls paths from every symbol list + module/file array the
+    assembler emits.
+    """
+
+    try:
+        snap = json.loads(snapshot_json) if snapshot_json else {}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return set()
+    if not isinstance(snap, dict):
+        return set()
+
+    paths: set[str] = set()
+    for key in (
+        "entry_points",
+        "public_api",
+        "test_symbols",
+        "complex_symbols",
+        "high_fan_in_symbols",
+        "high_fan_out_symbols",
+    ):
+        for sym in snap.get(key) or []:
+            if isinstance(sym, dict):
+                p = (sym.get("file_path") or "").strip()
+                if p:
+                    paths.add(p)
+    for module in snap.get("modules") or []:
+        if not isinstance(module, dict):
+            continue
+        for f in module.get("files") or []:
+            if isinstance(f, dict):
+                p = (f.get("path") or f.get("file_path") or "").strip()
+                if p:
+                    paths.add(p)
+            elif isinstance(f, str) and f.strip():
+                paths.add(f.strip())
+    for f in snap.get("files") or []:
+        if isinstance(f, dict):
+            p = (f.get("path") or f.get("file_path") or "").strip()
+            if p:
+                paths.add(p)
+        elif isinstance(f, str) and f.strip():
+            paths.add(f.strip())
+    return paths

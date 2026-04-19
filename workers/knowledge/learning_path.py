@@ -19,7 +19,11 @@ from workers.common.llm.provider import (
 )
 from workers.knowledge.cliff_notes import _parse_sections
 from workers.knowledge.evidence import evaluate_evidence_gate, extract_step_file_symbol_evidence
-from workers.knowledge.parse_utils import coerce_int, meets_confidence_floor
+from workers.knowledge.parse_utils import (
+    coerce_int,
+    collect_snapshot_file_paths,
+    meets_confidence_floor,
+)
 from workers.knowledge.prompts.learning_path import (
     LEARNING_PATH_SYSTEM,
     build_learning_path_prompt,
@@ -61,55 +65,14 @@ def _parse_steps(raw: str) -> list[dict[str, object]]:
 
 
 def _collect_snapshot_file_paths(snapshot_json: str) -> set[str]:
-    """Extract the set of real file paths present in the repository snapshot.
+    """Back-compat alias for :func:`collect_snapshot_file_paths`.
 
-    Learning-path DEEP runs were hallucinating file_paths — haiku would
-    invent plausible-looking paths like ``internal/worker/queue.go`` even
-    when no such file existed. The structured-fact prompt helps, but the
-    only defensible fix is filtering the LLM output against the paths
-    the snapshot actually contains. This extractor pulls paths from every
-    symbol list + module/file array the assembler emits.
+    The logic moved into ``parse_utils`` so code_tour can reuse the same
+    ground-truth set. The existing learning_path tests import this name
+    directly, so keep the alias until those tests follow the move.
     """
 
-    try:
-        snap = json.loads(snapshot_json) if snapshot_json else {}
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return set()
-    if not isinstance(snap, dict):
-        return set()
-
-    paths: set[str] = set()
-    for key in (
-        "entry_points",
-        "public_api",
-        "test_symbols",
-        "complex_symbols",
-        "high_fan_in_symbols",
-        "high_fan_out_symbols",
-    ):
-        for sym in snap.get(key) or []:
-            if isinstance(sym, dict):
-                p = (sym.get("file_path") or "").strip()
-                if p:
-                    paths.add(p)
-    for module in snap.get("modules") or []:
-        if not isinstance(module, dict):
-            continue
-        for f in module.get("files") or []:
-            if isinstance(f, dict):
-                p = (f.get("path") or f.get("file_path") or "").strip()
-                if p:
-                    paths.add(p)
-            elif isinstance(f, str) and f.strip():
-                paths.add(f.strip())
-    for f in snap.get("files") or []:
-        if isinstance(f, dict):
-            p = (f.get("path") or f.get("file_path") or "").strip()
-            if p:
-                paths.add(p)
-        elif isinstance(f, str) and f.strip():
-            paths.add(f.strip())
-    return paths
+    return collect_snapshot_file_paths(snapshot_json)
 
 
 async def generate_learning_path(

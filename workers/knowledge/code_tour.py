@@ -19,7 +19,11 @@ from workers.common.llm.provider import (
 )
 from workers.knowledge.cliff_notes import _parse_sections
 from workers.knowledge.evidence import evaluate_evidence_gate, extract_code_tour_stop_evidence
-from workers.knowledge.parse_utils import coerce_int, meets_confidence_floor
+from workers.knowledge.parse_utils import (
+    coerce_int,
+    collect_snapshot_file_paths,
+    meets_confidence_floor,
+)
 from workers.knowledge.prompts.code_tour import (
     CODE_TOUR_SYSTEM,
     build_code_tour_prompt,
@@ -124,6 +128,33 @@ async def generate_code_tour(
         )
 
     if depth == "deep":
+        # Post-parse hallucination filter: drop stops anchored at file
+        # paths that aren't in the snapshot. A code-tour stop without a
+        # real anchor would open to a 404 in the UI and provides false
+        # evidence in the artifact; better to lose the stop than keep a
+        # bogus one. Mirrors the learning_path filter that took haiku
+        # from 31% → 0% hallucination in iteration 5.
+        known_paths = collect_snapshot_file_paths(snapshot_json)
+        if known_paths:
+            kept: list[TourStop] = []
+            dropped_paths: list[str] = []
+            for stop in stops:
+                fp = (stop.file_path or "").strip()
+                if not fp or fp in known_paths:
+                    kept.append(stop)
+                else:
+                    dropped_paths.append(fp)
+            if dropped_paths:
+                log.info(
+                    "code_tour_dropped_hallucinated_stops",
+                    dropped=dropped_paths[:10],
+                    dropped_count=len(dropped_paths),
+                    kept_count=len(kept),
+                )
+                for index, stop in enumerate(kept, start=1):
+                    stop.order = index
+                stops = kept
+
         for stop in stops:
             gate = evaluate_evidence_gate(
                 text=f"{stop.description}\n" + "\n".join(stop.modification_hints),
