@@ -67,6 +67,7 @@ async def generate_code_tour(
     model_override: str | None = None,
 ) -> tuple[CodeTourResult, LLMUsageRecord]:
     """Generate a code tour from a repository snapshot."""
+    depth = (depth or "").strip().lower()
     prompt = build_code_tour_prompt(repository_name, audience, depth, snapshot_json, theme)
 
     check_prompt_budget(
@@ -81,6 +82,10 @@ async def generate_code_tour(
             prompt,
             system=CODE_TOUR_SYSTEM,
             temperature=0.0,
+            # Same rationale as learning_path: 10+ stops with detailed
+            # descriptions can exceed the default 4096-token cap,
+            # truncating the JSON and sending the parser into fallback.
+            max_tokens=16384,
             model=model_override,
         ),
         context="code_tour:repository",

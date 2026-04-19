@@ -70,6 +70,7 @@ async def generate_learning_path(
     model_override: str | None = None,
 ) -> tuple[LearningPathResult, LLMUsageRecord]:
     """Generate a learning path from a repository snapshot."""
+    depth = (depth or "").strip().lower()
     prompt = build_learning_path_prompt(repository_name, audience, depth, snapshot_json, focus_area)
 
     check_prompt_budget(
@@ -84,6 +85,12 @@ async def generate_learning_path(
             prompt,
             system=LEARNING_PATH_SYSTEM,
             temperature=0.0,
+            # A DEEP learning path targets 10-15 steps; at ~120 words per
+            # step the rendered JSON comfortably exceeds the default 4096
+            # cap. 16384 matches the cliff-notes renderer ceiling and
+            # gives every cloud + local model room to emit a complete
+            # array instead of being truncated mid-section.
+            max_tokens=16384,
             model=model_override,
         ),
         context="learning_path:repository",
