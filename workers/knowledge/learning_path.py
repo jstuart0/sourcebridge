@@ -17,19 +17,20 @@ from workers.common.llm.provider import (
     complete_with_optional_model,
     require_nonempty,
 )
-from workers.knowledge.cliff_notes import _parse_sections
 from workers.knowledge.evidence import evaluate_evidence_gate, extract_step_file_symbol_evidence
 from workers.knowledge.parse_utils import (
     coerce_int,
     collect_snapshot_file_paths,
     collect_snapshot_path_signals,
     meets_confidence_floor,
+    parse_with_fallback,
     path_looks_grounded,
 )
 from workers.knowledge.prompts.learning_path import (
     LEARNING_PATH_SYSTEM,
     build_learning_path_prompt,
 )
+from workers.knowledge.thresholds import MIN_FILES_LEARNING_PATH, MIN_IDENTIFIERS_DEFAULT, TITLE_SUMMARY_MAX_CHARS
 from workers.reasoning.types import LLMUsageRecord
 
 log = structlog.get_logger()
@@ -63,7 +64,18 @@ class LearningPathResult:
 
 def _parse_steps(raw: str) -> list[dict[str, object]]:
     """Parse JSON array from LLM response using the shared robust parser."""
-    return _parse_sections(raw)
+    return parse_with_fallback(
+        raw,
+        fallback_item_fn=lambda text: {
+            "order": 1,
+            "title": "Getting Started",
+            "objective": "Understand the repository structure.",
+            "content": text,
+            "file_paths": [],
+            "symbol_ids": [],
+            "estimated_time": "15 minutes",
+        },
+    )
 
 
 def _collect_snapshot_file_paths(snapshot_json: str) -> set[str]:
@@ -113,26 +125,12 @@ async def generate_learning_path(
         context="learning_path:repository",
     )
 
-    try:
-        raw_steps = _parse_steps(response.content)
-    except (json.JSONDecodeError, ValueError, TypeError) as exc:
-        log.warning("learning_path_parse_fallback", error=str(exc))
-        raw_steps = [
-            {
-                "order": 1,
-                "title": "Getting Started",
-                "objective": "Understand the repository structure.",
-                "content": response.content,
-                "file_paths": [],
-                "symbol_ids": [],
-                "estimated_time": "15 minutes",
-            }
-        ]
+    raw_steps = _parse_steps(response.content)
 
     steps: list[LearningStep] = []
     for raw in raw_steps:
         if not isinstance(raw, dict):
-            raw = {"title": str(raw)[:160], "content": str(raw)}
+            raw = {"title": str(raw)[:TITLE_SUMMARY_MAX_CHARS], "content": str(raw)}
         steps.append(
             LearningStep(
                 order=coerce_int(raw.get("order"), len(steps) + 1),
@@ -187,8 +185,8 @@ async def generate_learning_path(
                     current_confidence=step.confidence,
                     unique_file_paths=set(step.file_paths or []),
                     content=step_text,
-                    min_files=2,
-                    min_identifiers=2,
+                    min_files=MIN_FILES_LEARNING_PATH,
+                    min_identifiers=MIN_IDENTIFIERS_DEFAULT,
                 ):
                     step.confidence = "high"
                     step.refinement_status = ""

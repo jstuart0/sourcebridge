@@ -34,11 +34,6 @@ from workers.common.llm.provider import (
     require_nonempty,
 )
 from workers.comprehension.tree import SummaryNode, SummaryTree
-from workers.knowledge.cliff_notes import (
-    _coerce_section,
-    _parse_evidence,
-    _parse_sections,
-)
 from workers.knowledge.evidence import (
     evaluate_evidence_gate,
     extract_section_evidence_refs,
@@ -48,13 +43,14 @@ from workers.knowledge.evidence import (
     strip_speculative_sentences,
     strip_unsupported_claim_sentences,
 )
+from workers.knowledge.parse_utils import coerce_section, parse_evidence, parse_json_sections
 from workers.knowledge.prompts.cliff_notes import (
     CLIFF_NOTES_SYSTEM,
-    DEEP_MIN_EVIDENCE,
     REQUIRED_SECTIONS,
     REQUIRED_SECTIONS_DEEP_REPOSITORY,
     REQUIRED_SECTIONS_BY_SCOPE,
 )
+from workers.knowledge.thresholds import DEEP_MIN_EVIDENCE, TITLE_SUMMARY_MAX_CHARS
 from workers.knowledge.types import CliffNotesResult, CliffNotesSection
 from workers.reasoning.types import LLMUsageRecord
 
@@ -2039,7 +2035,7 @@ class CliffNotesRenderer:
         and preamble/postamble text.
         """
         try:
-            raw_sections = _parse_sections(raw_content)
+            raw_sections = parse_json_sections(raw_content)
         except (json.JSONDecodeError, ValueError, TypeError) as exc:
             log.warning("hierarchical_render_parse_fallback", error=str(exc))
             raw_sections = [
@@ -2057,7 +2053,7 @@ class CliffNotesRenderer:
         seen_titles: set[str] = set()
         for index, raw in enumerate(raw_sections):
             fallback_title = required_sections[index] if index < len(required_sections) else f"Section {index + 1}"
-            normalized = _coerce_section(raw, fallback_title=fallback_title)
+            normalized = coerce_section(raw, fallback_title=fallback_title, title_summary_max_chars=TITLE_SUMMARY_MAX_CHARS)
             title = str(normalized.get("title", fallback_title))
             if title not in required_sections:
                 continue
@@ -2072,7 +2068,7 @@ class CliffNotesRenderer:
                     summary=str(normalized.get("summary", "")),
                     confidence=str(normalized.get("confidence", "medium")),
                     inferred=bool(normalized.get("inferred", False)),
-                    evidence=_parse_evidence(evidence_raw),
+                    evidence=parse_evidence(evidence_raw),
                 )
             )
 

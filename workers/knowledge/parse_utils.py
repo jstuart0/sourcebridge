@@ -16,6 +16,10 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable
+from typing import Any, Callable
+
+from workers.knowledge.evidence import is_valid_evidence_path
+from workers.knowledge.types import EvidenceRef
 
 # Backtick-wrapped identifiers like ``CliffNotesRenderer`` or
 # ``GenerateArchitectureDiagram``. Used as a lightweight "specificity"
@@ -46,6 +50,193 @@ def coerce_int(value: object, default: int = 0) -> int:
         except ValueError:
             return default
     return default
+
+
+def load_json_dict(raw: str) -> dict[str, Any]:
+    """Parse a JSON object, returning ``{}`` for invalid or non-dict input."""
+
+    try:
+        parsed = json.loads(raw) if raw else {}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def normalize_text(raw: object) -> str:
+    """Flatten nested content values into readable text."""
+
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        text = raw.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                decoded = json.loads(text)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                return text
+            return normalize_text(decoded)
+        return text
+    if isinstance(raw, dict):
+        if "content" in raw:
+            return normalize_text(raw.get("content"))
+        if "text" in raw:
+            return normalize_text(raw.get("text"))
+        if "summary" in raw:
+            return normalize_text(raw.get("summary"))
+        return json.dumps(raw, ensure_ascii=False)
+    if isinstance(raw, list):
+        parts = [normalize_text(item) for item in raw]
+        parts = [part for part in parts if part]
+        return "\n".join(parts)
+    return str(raw).strip()
+
+
+def normalize_section_object(raw: dict[str, object], *, title_summary_max_chars: int) -> dict[str, object]:
+    """Flatten nested section-shaped objects into the expected top-level shape."""
+
+    try:
+        content = raw.get("content")
+        if isinstance(content, dict):
+            nested = content
+            merged = dict(nested)
+            merged.setdefault("title", raw.get("title"))
+            merged.setdefault("summary", raw.get("summary", ""))
+            merged.setdefault("confidence", raw.get("confidence", "medium"))
+            merged.setdefault("inferred", raw.get("inferred", False))
+            outer_ev = raw.get("evidence", [])
+            inner_ev = nested.get("evidence", [])
+            fallback_ev = outer_ev if isinstance(outer_ev, list) else (inner_ev if isinstance(inner_ev, list) else [])
+            merged.setdefault("evidence", fallback_ev)
+            raw = merged
+
+        evidence = raw.get("evidence", [])
+        if not isinstance(evidence, list):
+            evidence = []
+
+        content_text = normalize_text(raw.get("content", ""))
+        summary_text = normalize_text(raw.get("summary", ""))
+        if not summary_text and content_text:
+            summary_text = content_text.splitlines()[0][:title_summary_max_chars]
+
+        return {
+            "title": normalize_text(raw.get("title", "")),
+            "content": content_text,
+            "summary": summary_text,
+            "confidence": normalize_text(raw.get("confidence", "medium")) or "medium",
+            "inferred": bool(raw.get("inferred", False)),
+            "evidence": evidence,
+        }
+    except (AttributeError, TypeError, KeyError):
+        return {
+            "title": "",
+            "content": normalize_text(raw) if raw else "",
+            "summary": "",
+            "confidence": "low",
+            "inferred": True,
+            "evidence": [],
+        }
+
+
+def parse_json_sections(raw: str) -> list[dict[str, object]]:
+    """Parse JSON array from LLM response, tolerating common LLM quirks."""
+
+    text = (raw or "").strip()
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+    if text.startswith("```"):
+        first_newline = text.find("\n")
+        text = text[first_newline + 1 :] if first_newline != -1 else text[3:]
+        text = text.rstrip()
+        if text.endswith("```"):
+            text = text[:-3].rstrip()
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\[.*\]", text, flags=re.DOTALL)
+        if match:
+            parsed = json.loads(match.group())
+        else:
+            raise
+
+    if isinstance(parsed, dict):
+        for key in ("sections", "data", "items", "results", "steps", "stops"):
+            if key in parsed and isinstance(parsed[key], list):
+                return parsed[key]  # type: ignore[no-any-return]
+        if len(parsed) == 1:
+            sole_value = next(iter(parsed.values()))
+            if isinstance(sole_value, list):
+                return sole_value  # type: ignore[no-any-return]
+            if isinstance(sole_value, dict) and all(isinstance(v, dict) for v in sole_value.values()):
+                return [{"title": k, **v} for k, v in sole_value.items()]
+        if "title" in parsed and "content" in parsed:
+            return [parsed]
+        if all(isinstance(v, dict) for v in parsed.values()):
+            return [{"title": k, **v} for k, v in parsed.items()]
+        if all(isinstance(v, str) for v in parsed.values()):
+            return [{"title": k, "content": v} for k, v in parsed.items()]
+        raise ValueError("expected a JSON array of sections")
+
+    if not isinstance(parsed, list):
+        raise ValueError("expected a JSON array of sections")
+    return parsed  # type: ignore[no-any-return]
+
+
+def parse_evidence(raw_evidence: list[dict]) -> list[EvidenceRef]:
+    """Parse evidence entries from the LLM response."""
+
+    result = []
+    for ev in raw_evidence:
+        if not isinstance(ev, dict):
+            continue
+        file_path = str(ev.get("file_path", "") or "").strip()
+        if not is_valid_evidence_path(file_path):
+            continue
+        result.append(
+            EvidenceRef(
+                source_type=ev.get("source_type", "file"),
+                source_id=ev.get("source_id", ""),
+                file_path=file_path,
+                line_start=coerce_int(ev.get("line_start")),
+                line_end=coerce_int(ev.get("line_end")),
+                rationale=ev.get("rationale", ""),
+            )
+        )
+    return result
+
+
+def coerce_section(raw: object, *, fallback_title: str, title_summary_max_chars: int) -> dict[str, object]:
+    """Coerce a raw LLM section candidate into the expected dict shape."""
+
+    if isinstance(raw, dict):
+        normalized = normalize_section_object(raw, title_summary_max_chars=title_summary_max_chars)
+        if not normalized.get("title"):
+            normalized["title"] = fallback_title
+        return normalized
+
+    text = normalize_text(raw)
+    summary = text.splitlines()[0] if text else "LLM output could not be structured for this section."
+    return {
+        "title": fallback_title,
+        "content": text or "*Insufficient structured content returned for this section.*",
+        "summary": summary[:title_summary_max_chars],
+        "confidence": "low",
+        "inferred": True,
+        "evidence": [],
+    }
+
+
+def parse_with_fallback(
+    raw: str,
+    *,
+    fallback_item_fn: Callable[[str], dict[str, object]],
+) -> list[dict[str, object]]:
+    """Parse JSON sections, or return a single fallback item on parse failure."""
+
+    try:
+        return parse_json_sections(raw)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return [fallback_item_fn(raw)]
 
 
 def count_unique_file_paths(paths: Iterable[str]) -> int:

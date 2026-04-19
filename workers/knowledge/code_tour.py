@@ -17,18 +17,19 @@ from workers.common.llm.provider import (
     complete_with_optional_model,
     require_nonempty,
 )
-from workers.knowledge.cliff_notes import _parse_sections
 from workers.knowledge.evidence import evaluate_evidence_gate, extract_code_tour_stop_evidence
 from workers.knowledge.parse_utils import (
     coerce_int,
     collect_snapshot_path_signals,
     meets_confidence_floor,
+    parse_with_fallback,
     path_looks_grounded,
 )
 from workers.knowledge.prompts.code_tour import (
     CODE_TOUR_SYSTEM,
     build_code_tour_prompt,
 )
+from workers.knowledge.thresholds import MIN_FILES_CODE_TOUR, MIN_IDENTIFIERS_DEFAULT, TITLE_SUMMARY_MAX_CHARS
 from workers.reasoning.types import LLMUsageRecord
 
 log = structlog.get_logger()
@@ -59,7 +60,17 @@ class CodeTourResult:
 
 def _parse_stops(raw: str) -> list[dict[str, object]]:
     """Parse JSON array from LLM response using the shared robust parser."""
-    return _parse_sections(raw)
+    return parse_with_fallback(
+        raw,
+        fallback_item_fn=lambda text: {
+            "order": 1,
+            "title": "Overview",
+            "description": text,
+            "file_path": "",
+            "line_start": 0,
+            "line_end": 0,
+        },
+    )
 
 
 async def generate_code_tour(
@@ -96,25 +107,12 @@ async def generate_code_tour(
         context="code_tour:repository",
     )
 
-    try:
-        raw_stops = _parse_stops(response.content)
-    except (json.JSONDecodeError, ValueError, TypeError) as exc:
-        log.warning("code_tour_parse_fallback", error=str(exc))
-        raw_stops = [
-            {
-                "order": 1,
-                "title": "Overview",
-                "description": response.content,
-                "file_path": "",
-                "line_start": 0,
-                "line_end": 0,
-            }
-        ]
+    raw_stops = _parse_stops(response.content)
 
     stops: list[TourStop] = []
     for raw in raw_stops:
         if not isinstance(raw, dict):
-            raw = {"title": str(raw)[:160], "description": str(raw)}
+            raw = {"title": str(raw)[:TITLE_SUMMARY_MAX_CHARS], "description": str(raw)}
         stops.append(
             TourStop(
                 order=coerce_int(raw.get("order"), len(stops) + 1),
@@ -177,8 +175,8 @@ async def generate_code_tour(
                     current_confidence=stop.confidence,
                     unique_file_paths={stop.file_path} if stop.file_path else set(),
                     content=stop_text,
-                    min_files=1,
-                    min_identifiers=2,
+                    min_files=MIN_FILES_CODE_TOUR,
+                    min_identifiers=MIN_IDENTIFIERS_DEFAULT,
                 ):
                     stop.confidence = "high"
                     stop.refinement_status = ""

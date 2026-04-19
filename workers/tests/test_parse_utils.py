@@ -6,11 +6,17 @@
 from __future__ import annotations
 
 from workers.knowledge.parse_utils import (
+    coerce_section,
     coerce_int,
     count_specific_identifiers,
     count_unique_file_paths,
+    load_json_dict,
     meets_confidence_floor,
+    normalize_text,
+    parse_json_sections,
+    parse_with_fallback,
 )
+from workers.knowledge.thresholds import TITLE_SUMMARY_MAX_CHARS
 
 
 def test_coerce_int_handles_null_and_strings():
@@ -27,6 +33,44 @@ def test_coerce_int_handles_null_and_strings():
 def test_count_unique_file_paths_ignores_blanks():
     paths = [" internal/foo.go ", "internal/foo.go", "", None, "workers/bar.py"]
     assert count_unique_file_paths(p for p in paths if p is not None) == 2
+
+
+def test_load_json_dict_returns_empty_dict_for_invalid_input():
+    assert load_json_dict("") == {}
+    assert load_json_dict("not-json") == {}
+    assert load_json_dict('["x"]') == {}
+    assert load_json_dict('{"ok": true}') == {"ok": True}
+
+
+def test_normalize_text_flattens_nested_content():
+    assert normalize_text({"content": {"text": " nested "}}) == "nested"
+    assert normalize_text(["one", {"summary": "two"}]) == "one\ntwo"
+
+
+def test_parse_json_sections_handles_fenced_payload():
+    raw = """```json
+    {"sections":[{"title":"System Purpose","content":"Hello"}]}
+    ```"""
+    parsed = parse_json_sections(raw)
+    assert parsed == [{"title": "System Purpose", "content": "Hello"}]
+
+
+def test_parse_with_fallback_returns_single_item_on_parse_error():
+    parsed = parse_with_fallback(
+        "not-json",
+        fallback_item_fn=lambda text: {"title": "Fallback", "content": text},
+    )
+    assert parsed == [{"title": "Fallback", "content": "not-json"}]
+
+
+def test_coerce_section_applies_title_and_summary_limits():
+    section = coerce_section(
+        "A" * 200,
+        fallback_title="Fallback",
+        title_summary_max_chars=TITLE_SUMMARY_MAX_CHARS,
+    )
+    assert section["title"] == "Fallback"
+    assert len(section["summary"]) == TITLE_SUMMARY_MAX_CHARS
 
 
 def test_count_specific_identifiers_finds_backticked_names():

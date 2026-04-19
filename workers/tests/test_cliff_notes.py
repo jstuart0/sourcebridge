@@ -334,10 +334,10 @@ async def test_cliff_notes_handles_evidence_as_non_list() -> None:
 
 def test_parse_sections_handles_think_tags() -> None:
     """_parse_sections must strip <think> blocks from Qwen-style models."""
-    from workers.knowledge.cliff_notes import _parse_sections
+    from workers.knowledge.parse_utils import parse_json_sections
 
     raw = '<think>Let me analyze this...</think>\n[{"title":"Purpose","content":"Handles auth."}]'
-    result = _parse_sections(raw)
+    result = parse_json_sections(raw)
     assert len(result) == 1
     assert result[0]["title"] == "Purpose"
 
@@ -345,7 +345,7 @@ def test_parse_sections_handles_think_tags() -> None:
 def test_parse_evidence_coerces_null_line_numbers() -> None:
     """LLMs sometimes emit null for line_start/line_end; downstream code
     compares `line_start > 0` and must not crash on NoneType."""
-    from workers.knowledge.cliff_notes import _parse_evidence
+    from workers.knowledge.parse_utils import parse_evidence
 
     raw = [
         {"source_type": "file", "source_id": "a", "file_path": "auth.go", "line_start": None, "line_end": None},
@@ -353,7 +353,7 @@ def test_parse_evidence_coerces_null_line_numbers() -> None:
         {"source_type": "file", "source_id": "c", "file_path": "store.go", "line_start": 7.9, "line_end": 42.0},
         {"source_type": "file", "source_id": "d", "file_path": "bad.go", "line_start": "not-a-number", "line_end": None},
     ]
-    result = _parse_evidence(raw)
+    result = parse_evidence(raw)
     assert [r.line_start for r in result] == [0, 12, 7, 0]
     assert [r.line_end for r in result] == [0, 20, 42, 0]
     # All must be plain ints — any None here would re-trigger the original bug.
@@ -362,30 +362,30 @@ def test_parse_evidence_coerces_null_line_numbers() -> None:
 
 def test_parse_sections_handles_object_wrapper() -> None:
     """_parse_sections must extract array from object-wrapped responses."""
-    from workers.knowledge.cliff_notes import _parse_sections
+    from workers.knowledge.parse_utils import parse_json_sections
 
     raw = '{"sections": [{"title":"Purpose","content":"Auth handler."}]}'
-    result = _parse_sections(raw)
+    result = parse_json_sections(raw)
     assert len(result) == 1
     assert result[0]["title"] == "Purpose"
 
 
 def test_parse_sections_handles_preamble_text() -> None:
     """_parse_sections must extract JSON array from text with preamble."""
-    from workers.knowledge.cliff_notes import _parse_sections
+    from workers.knowledge.parse_utils import parse_json_sections
 
     raw = 'Here is the JSON array:\n[{"title":"Purpose","content":"Auth handler."}]'
-    result = _parse_sections(raw)
+    result = parse_json_sections(raw)
     assert len(result) == 1
     assert result[0]["title"] == "Purpose"
 
 
 def test_parse_sections_handles_keyed_dict() -> None:
     """_parse_sections must convert title-keyed dicts to array."""
-    from workers.knowledge.cliff_notes import _parse_sections
+    from workers.knowledge.parse_utils import parse_json_sections
 
     raw = '{"Purpose": {"content": "Auth handler."}, "Architecture": {"content": "Layered."}}'
-    result = _parse_sections(raw)
+    result = parse_json_sections(raw)
     assert len(result) == 2
     titles = {r["title"] for r in result}
     assert "Purpose" in titles
@@ -394,10 +394,10 @@ def test_parse_sections_handles_keyed_dict() -> None:
 
 def test_parse_sections_handles_string_valued_dict() -> None:
     """_parse_sections must handle dict where values are content strings."""
-    from workers.knowledge.cliff_notes import _parse_sections
+    from workers.knowledge.parse_utils import parse_json_sections
 
     raw = '{"Goal": "Understand the system.", "Trigger": "User opens the page."}'
-    result = _parse_sections(raw)
+    result = parse_json_sections(raw)
     assert len(result) == 2
     assert result[0]["title"] == "Goal"
     assert result[0]["content"] == "Understand the system."
@@ -405,10 +405,10 @@ def test_parse_sections_handles_string_valued_dict() -> None:
 
 def test_parse_sections_handles_nested_wrapper() -> None:
     """_parse_sections must unwrap single-key nested wrappers."""
-    from workers.knowledge.cliff_notes import _parse_sections
+    from workers.knowledge.parse_utils import parse_json_sections
 
     raw = '{"workflow_story": {"Goal": {"content": "Understand it."}, "Trigger": {"content": "Click."}}}'
-    result = _parse_sections(raw)
+    result = parse_json_sections(raw)
     assert len(result) == 2
     titles = {r["title"] for r in result}
     assert "Goal" in titles
@@ -417,10 +417,10 @@ def test_parse_sections_handles_nested_wrapper() -> None:
 
 def test_parse_sections_handles_single_section_object() -> None:
     """_parse_sections must wrap a bare section object in a list."""
-    from workers.knowledge.cliff_notes import _parse_sections
+    from workers.knowledge.parse_utils import parse_json_sections
 
     raw = '{"title": "Goal", "content": "Understand the system.", "confidence": "high"}'
-    result = _parse_sections(raw)
+    result = parse_json_sections(raw)
     assert len(result) == 1
     assert result[0]["title"] == "Goal"
     assert result[0]["content"] == "Understand the system."
@@ -459,19 +459,19 @@ async def test_symbol_cliff_notes_require_impact_analysis_section() -> None:
 
 def test_parse_sections_handles_fenced_json_with_language_hint() -> None:
     """_parse_sections must strip ```json fences correctly."""
-    from workers.knowledge.cliff_notes import _parse_sections
+    from workers.knowledge.parse_utils import parse_json_sections
 
     raw = '```json\n[{"title":"Purpose","content":"Auth handler."}]\n```'
-    result = _parse_sections(raw)
+    result = parse_json_sections(raw)
     assert len(result) == 1
     assert result[0]["title"] == "Purpose"
 
 
 def test_parse_sections_handles_fenced_json_with_trailing_whitespace() -> None:
     """_parse_sections must strip fences even with trailing whitespace."""
-    from workers.knowledge.cliff_notes import _parse_sections
+    from workers.knowledge.parse_utils import parse_json_sections
 
     raw = '```json\n[{"title":"Purpose","content":"Auth handler."}]\n```  \n'
-    result = _parse_sections(raw)
+    result = parse_json_sections(raw)
     assert len(result) == 1
     assert result[0]["title"] == "Purpose"
