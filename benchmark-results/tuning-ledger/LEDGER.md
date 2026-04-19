@@ -118,6 +118,24 @@ addendum.
 Highlights:
 - **First perfect artifact in either sweep**: qwen3.6 MoE at 10/10 HIGH
   code_tour with 0% hallucination.
+
+## Verification note (2026-04-19)
+
+Repository-local validation after the audit-remediation implementation:
+
+- `go test ./internal/api/graphql ./internal/api/rest` ✅
+- `cd web && npm run typecheck` ✅
+- `cd web && npm run test` ✅
+- `cd workers && uv run pytest -q tests/test_proto_enums.py tests/test_hierarchical_servicer.py` ✅
+- `go test ./tests/integration/...` ⚠️ fails in existing CLI review/ask coverage:
+  - `TestCLIReviewSecurity`
+  - `TestCLIReviewSOLID`
+  - `TestCLIAsk`
+  - `TestCLIReviewUsageTracking`
+  - `TestCLIReviewAllTemplates`
+  - `TestCLIAskReferences`
+
+The model-backed benchmark sweep from Phase 8 was not rerun in this local pass because it requires the external benchmark stack and live model endpoints. Existing benchmark baselines above remain the reference point for follow-up bench runs.
 - **Workflow story goes first-class across all cloud models** after the
   token-ceiling bump — Gemini leads (7/9), haiku close (6/9), sonnet
   slightly behind (5/9).
