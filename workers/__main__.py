@@ -19,6 +19,7 @@ if _GEN_PYTHON not in sys.path:
     sys.path.insert(0, os.path.abspath(_GEN_PYTHON))
 
 from contracts.v1 import contracts_pb2, contracts_pb2_grpc  # noqa: E402
+from enterprise.v1 import report_pb2, report_pb2_grpc  # noqa: E402
 from knowledge.v1 import knowledge_pb2, knowledge_pb2_grpc  # noqa: E402
 from linking.v1 import linking_pb2, linking_pb2_grpc  # noqa: E402
 from reasoning.v1 import reasoning_pb2, reasoning_pb2_grpc  # noqa: E402
@@ -28,6 +29,7 @@ from workers.common.config import WorkerConfig  # noqa: E402
 from workers.common.embedding.config import create_embedding_provider  # noqa: E402
 from workers.common.llm.factory import create_llm_provider, create_report_provider  # noqa: E402
 from workers.contracts.servicer import ContractsServicer  # noqa: E402
+from workers.enterprise.report_servicer import EnterpriseReportServicer  # noqa: E402
 from workers.knowledge.servicer import KnowledgeServicer  # noqa: E402
 from workers.knowledge.summary_nodes import SurrealSummaryNodeCache  # noqa: E402
 from workers.linking.servicer import LinkingServicer  # noqa: E402
@@ -106,6 +108,10 @@ async def serve() -> None:
         summary_node_cache=summary_node_cache,
     )
     knowledge_pb2_grpc.add_KnowledgeServiceServicer_to_server(knowledge_servicer, server)
+    report_pb2_grpc.add_EnterpriseReportServiceServicer_to_server(
+        EnterpriseReportServicer(knowledge_servicer),
+        server,
+    )
 
     contracts_servicer = ContractsServicer()
     contracts_pb2_grpc.add_ContractsServiceServicer_to_server(contracts_servicer, server)
@@ -120,6 +126,10 @@ async def serve() -> None:
         "sourcebridge.requirements.v1.RequirementsService", health_pb2.HealthCheckResponse.SERVING
     )
     await health_servicer.set("sourcebridge.knowledge.v1.KnowledgeService", health_pb2.HealthCheckResponse.SERVING)
+    await health_servicer.set(
+        "sourcebridge.enterprise.v1.EnterpriseReportService",
+        health_pb2.HealthCheckResponse.SERVING,
+    )
     await health_servicer.set("sourcebridge.contracts.v1.ContractsService", health_pb2.HealthCheckResponse.SERVING)
 
     # --- Server reflection ---
@@ -128,6 +138,7 @@ async def serve() -> None:
         linking_pb2.DESCRIPTOR.services_by_name["LinkingService"].full_name,
         requirements_pb2.DESCRIPTOR.services_by_name["RequirementsService"].full_name,
         knowledge_pb2.DESCRIPTOR.services_by_name["KnowledgeService"].full_name,
+        report_pb2.DESCRIPTOR.services_by_name["EnterpriseReportService"].full_name,
         contracts_pb2.DESCRIPTOR.services_by_name["ContractsService"].full_name,
         health_pb2.DESCRIPTOR.services_by_name["Health"].full_name,
         reflection.SERVICE_NAME,

@@ -72,25 +72,6 @@ REQUIRED_SECTIONS_DEEP_REPOSITORY = [
     "Suggested Starting Points",
 ]
 
-DEEP_MIN_EVIDENCE = {
-    "System Purpose": 2,
-    "Architecture Overview": 5,
-    "External Dependencies": 3,
-    "Domain Model": 5,
-    "Core System Flows": 5,
-    "Code Structure": 3,
-    "Security Model": 4,
-    "Error Handling Patterns": 3,
-    "Data Flow & Request Lifecycle": 5,
-    "Concurrency & State Management": 3,
-    "Configuration & Feature Flags": 3,
-    "Testing Strategy": 3,
-    "Key Abstractions": 5,
-    "Module Deep Dives": 5,
-    "Complexity & Risk Areas": 4,
-    "Suggested Starting Points": 3,
-}
-
 REQUIRED_SECTIONS_BY_SCOPE = {
     "repository": [
         "System Purpose",

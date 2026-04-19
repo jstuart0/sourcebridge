@@ -13,6 +13,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/sourcebridge/sourcebridge/internal/api/graphql"
+	"github.com/sourcebridge/sourcebridge/internal/events"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
 )
@@ -21,12 +23,13 @@ import (
 // It bundles the four things the UI needs in one round trip: the system
 // health banner, active jobs, recent terminal jobs, and rollup metrics.
 type monitorActivityResponse struct {
-	Health  monitorHealth                `json:"health"`
-	Active  []monitorJobView             `json:"active"`
-	Recent  []monitorJobView             `json:"recent"`
-	Metrics orchestrator.Snapshot        `json:"metrics"`
-	Modes   map[string]monitorModeRollup `json:"modes,omitempty"`
-	Control monitorQueueControl          `json:"control"`
+	Health        monitorHealth                `json:"health"`
+	Active        []monitorJobView             `json:"active"`
+	Recent        []monitorJobView             `json:"recent"`
+	Metrics       orchestrator.Snapshot        `json:"metrics"`
+	Modes         map[string]monitorModeRollup `json:"modes,omitempty"`
+	Control       monitorQueueControl          `json:"control"`
+	ErrorCounters monitorErrorCounters         `json:"error_counters"`
 	// Stats is derived queue state that tests and the Monitor header
 	// rely on (max concurrency, current in-flight, pending queue depth).
 	Stats monitorStats `json:"stats"`
@@ -50,6 +53,8 @@ type monitorStats struct {
 	GateWaiting           int `json:"gate_waiting"`
 	TotalWaiting          int `json:"total_waiting"`
 	MaxConcurrency        int `json:"max_concurrency"`
+	ActivePoolSize        int `json:"active_pool_size"`
+	ConfiguredPoolSize    int `json:"configured_pool_size"`
 	RecentReusedSummaries int `json:"recent_reused_summaries"`
 	ActiveClassic         int `json:"active_classic"`
 	ActiveUnderstanding   int `json:"active_understanding_first"`
@@ -62,6 +67,12 @@ type monitorStats struct {
 
 type monitorQueueControl struct {
 	IntakePaused bool `json:"intake_paused"`
+}
+
+type monitorErrorCounters struct {
+	KnowledgeProgressWriteErrors int64 `json:"knowledge_progress_write_errors_total"`
+	KnowledgeJobLogWriteErrors   int64 `json:"knowledge_job_log_write_errors_total"`
+	EventBusHandlerErrors        int64 `json:"event_bus_handler_errors_total"`
 }
 
 type monitorModeRollup struct {
@@ -344,12 +355,19 @@ func (s *Server) handleLLMActivity(w http.ResponseWriter, r *http.Request) {
 		Control: monitorQueueControl{
 			IntakePaused: s.orchestrator.IntakePaused(),
 		},
+		ErrorCounters: monitorErrorCounters{
+			KnowledgeProgressWriteErrors: graphql.KnowledgeProgressWriteErrorsTotal(),
+			KnowledgeJobLogWriteErrors:   graphql.KnowledgeJobLogWriteErrorsTotal(),
+			EventBusHandlerErrors:        events.HandlerErrorsTotal(),
+		},
 		Stats: monitorStats{
 			InFlight:              len(active), // DB-backed count — consistent across pods
 			QueueDepth:            s.orchestrator.QueueDepth(),
 			GateWaiting:           gateWaitingCount(activeViews),
 			TotalWaiting:          s.orchestrator.QueueDepth() + gateWaitingCount(activeViews),
 			MaxConcurrency:        s.orchestrator.MaxConcurrency(),
+			ActivePoolSize:        s.orchestrator.ActiveWorkerCount(),
+			ConfiguredPoolSize:    s.orchestrator.MaxConcurrency(),
 			RecentReusedSummaries: totalReusedSummaries(recentViews),
 			ActiveClassic:         countGenerationMode(activeViews, "classic"),
 			ActiveUnderstanding:   countGenerationMode(activeViews, "understanding_first"),

@@ -40,11 +40,6 @@ type runtime struct {
 	pendingTokensSet    bool
 	pendingBytes        int
 	pendingBytesSet     bool
-
-	// Events are published on every successful progress write so the
-	// Monitor page sees incremental updates without waiting for the
-	// debounce window to expire.
-	publishProgress bool
 }
 
 func newRuntime(orch *Orchestrator, jobID string) *runtime {

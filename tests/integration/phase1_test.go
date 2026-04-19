@@ -66,6 +66,12 @@ func TestMetricsEndpoint(t *testing.T) {
 	if !strings.Contains(string(body), "sourcebridge_up") {
 		t.Fatal("metrics should contain sourcebridge_up gauge")
 	}
+	if !strings.Contains(string(body), "sourcebridge_feature_runtime_reconfigure_enabled") {
+		t.Fatal("metrics should expose runtime reconfigure feature flag")
+	}
+	if !strings.Contains(string(body), "sourcebridge_event_bus_handler_errors_total") {
+		t.Fatal("metrics should expose event bus handler error counter")
+	}
 }
 
 func TestSecurityHeaders(t *testing.T) {
@@ -79,8 +85,8 @@ func TestSecurityHeaders(t *testing.T) {
 
 	checks := map[string]string{
 		"X-Content-Type-Options": "nosniff",
-		"X-Frame-Options":       "DENY",
-		"Referrer-Policy":       "strict-origin-when-cross-origin",
+		"X-Frame-Options":        "DENY",
+		"Referrer-Policy":        "strict-origin-when-cross-origin",
 	}
 
 	for header, expected := range checks {

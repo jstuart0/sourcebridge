@@ -209,7 +209,7 @@ class LinkingServicer(linking_pb2_grpc.LinkingServiceServicer):
 
         log.info("batch_link_embeddings_cached", entity_count=len(cached_embeddings))
 
-        all_proto_links = []
+        all_proto_links: list[types_pb2.RequirementCodeLink] = []
         processed = 0
 
         for req in reqs:

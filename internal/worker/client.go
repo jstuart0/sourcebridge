@@ -15,6 +15,7 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	contractsv1 "github.com/sourcebridge/sourcebridge/gen/go/contracts/v1"
+	enterprisev1 "github.com/sourcebridge/sourcebridge/gen/go/enterprise/v1"
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
 	linkingv1 "github.com/sourcebridge/sourcebridge/gen/go/linking/v1"
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
@@ -24,7 +25,7 @@ import (
 // Timeout presets for different operation classes.
 const (
 	TimeoutHealth     = 3 * time.Second
-	TimeoutEmbedding  = 10 * time.Second
+	TimeoutEmbedding  = 60 * time.Second // cold-start local Ollama needs a few seconds per batch; 10s cut off real users
 	TimeoutAnalysis   = 120 * time.Second
 	TimeoutDiscussion = 120 * time.Second
 	TimeoutReview     = 120 * time.Second
@@ -36,7 +37,7 @@ const (
 	TimeoutSimulation = 30 * time.Second
 	// TimeoutKnowledge is the uniform legacy timeout for knowledge-generation
 	// RPCs. Prefer timeoutForKnowledgeScope for callers that know the scope.
-	TimeoutKnowledge = 1800 * time.Second
+	TimeoutKnowledge = 3600 * time.Second
 	TimeoutContracts = 120 * time.Second
 )
 
@@ -45,11 +46,17 @@ const (
 // need more than a couple of minutes, and a stuck call shouldn't hold the
 // worker's attention past that.
 const (
-	TimeoutKnowledgeRepository = 1800 * time.Second // 30min — thinking models (Qwen 3.x) need ~70s/leaf × 39 leaves at concurrency 4
-	TimeoutKnowledgeModule     = 300 * time.Second
-	TimeoutKnowledgeFile       = 120 * time.Second
-	TimeoutKnowledgeSymbol     = 120 * time.Second
-	TimeoutKnowledgeDefault    = 300 * time.Second
+	// Repo-level DEEP cliff notes on large codebases with local models can
+	// take 45-60+ minutes (measured: qwen3:32b at 48 min, qwen3.5:35b-a3b at
+	// 55 min, qwen3.6:35b-a3b at 42 min). The previous 30-minute ceiling was
+	// killing real completions on Mac Studio hardware. 60 minutes lets every
+	// dense model up through 70B finish while still catching runaway 100B+
+	// MoE loads that are operationally too slow anyway.
+	TimeoutKnowledgeRepository = 3600 * time.Second
+	TimeoutKnowledgeModule     = 600 * time.Second
+	TimeoutKnowledgeFile       = 300 * time.Second
+	TimeoutKnowledgeSymbol     = 300 * time.Second
+	TimeoutKnowledgeDefault    = 600 * time.Second
 )
 
 // timeoutForKnowledgeScope returns an appropriate worker timeout for a given
@@ -81,6 +88,7 @@ type Client struct {
 	Linking                  linkingv1.LinkingServiceClient
 	Requirements             requirementsv1.RequirementsServiceClient
 	Knowledge                knowledgev1.KnowledgeServiceClient
+	EnterpriseReport         enterprisev1.EnterpriseReportServiceClient
 	Contracts                contractsv1.ContractsServiceClient
 	Health                   healthpb.HealthClient
 }
@@ -121,6 +129,7 @@ func New(address string, opts ...Option) (*Client, error) {
 		Linking:                  linkingv1.NewLinkingServiceClient(conn),
 		Requirements:             requirementsv1.NewRequirementsServiceClient(conn),
 		Knowledge:                knowledgev1.NewKnowledgeServiceClient(conn),
+		EnterpriseReport:         enterprisev1.NewEnterpriseReportServiceClient(conn),
 		Contracts:                contractsv1.NewContractsServiceClient(conn),
 		Health:                   healthpb.NewHealthClient(conn),
 	}
@@ -337,12 +346,12 @@ func (c *Client) GenerateCodeTour(ctx context.Context, req *knowledgev1.Generate
 	return c.Knowledge.GenerateCodeTour(ctx, req)
 }
 
-// GenerateReport calls the knowledge worker to generate a professional report.
+// GenerateReport calls the enterprise report worker to generate a professional report.
 // Reports can take a long time (30+ sections × LLM calls) so the timeout is generous.
-func (c *Client) GenerateReport(ctx context.Context, req *knowledgev1.GenerateReportRequest) (*knowledgev1.GenerateReportResponse, error) {
+func (c *Client) GenerateReport(ctx context.Context, req *enterprisev1.GenerateReportRequest) (*enterprisev1.GenerateReportResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.repositoryKnowledgeTimeout())
 	defer cancel()
-	return c.Knowledge.GenerateReport(ctx, req)
+	return c.EnterpriseReport.GenerateReport(ctx, req)
 }
 
 // DetectContracts calls the contracts worker to detect API contracts in files.

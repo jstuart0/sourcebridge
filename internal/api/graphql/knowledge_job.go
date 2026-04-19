@@ -52,7 +52,14 @@ func (r *Resolver) startProgressTicker(rt llm.Runtime, artifactID string) contex
 					p = 0.95
 				}
 				rt.ReportProgress(p, "generating", "Generating artifact")
-				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifactID, p)
+				if err := r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifactID, p); err != nil {
+					knowledgeProgressWriteErrorsTotal.Add(1)
+					slog.Warn("knowledge_progress_write_failed",
+						"event", "knowledge_progress_write_failed",
+						"artifact_id", artifactID,
+						"phase", "generating",
+						"error", err)
+				}
 			}
 		}
 	}()
@@ -166,7 +173,14 @@ func startKnowledgeQueueHeartbeat(ctx context.Context, rt llm.Runtime, artifactI
 			case <-tick.C:
 				rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot")
 				if store != nil && artifactID != "" {
-					_ = store.UpdateKnowledgeArtifactProgressWithPhase(artifactID, 0.02, "queued", "Waiting for knowledge generation slot")
+					if err := store.UpdateKnowledgeArtifactProgressWithPhase(artifactID, 0.02, "queued", "Waiting for knowledge generation slot"); err != nil {
+						knowledgeProgressWriteErrorsTotal.Add(1)
+						slog.Warn("knowledge_progress_write_failed",
+							"event", "knowledge_progress_write_failed",
+							"artifact_id", artifactID,
+							"phase", "queued",
+							"error", err)
+					}
 				}
 			}
 		}
@@ -231,7 +245,14 @@ func (r *Resolver) enqueueKnowledgeJob(
 		MaxAttempts:    knowledgeJobMaxAttempts(artifact, scope),
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
 			rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot")
-			_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.02, "queued", "Waiting for knowledge generation slot")
+			if err := r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.02, "queued", "Waiting for knowledge generation slot"); err != nil {
+				knowledgeProgressWriteErrorsTotal.Add(1)
+				slog.Warn("knowledge_progress_write_failed",
+					"event", "knowledge_progress_write_failed",
+					"artifact_id", artifact.ID,
+					"phase", "queued",
+					"error", err)
+			}
 			appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "queued", "knowledge_slot_wait_started", "Waiting for knowledge generation slot", map[string]any{
 				"job_type": jobType,
 			})

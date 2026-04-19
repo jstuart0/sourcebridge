@@ -2106,7 +2106,7 @@ func (s *SurrealStore) StoreImpactReport(repoID string, report *graph.ImpactRepo
 	if db == nil {
 		return
 	}
-	surrealdb.Query[interface{}](ctx(), db,
+	if _, err := surrealdb.Query[interface{}](ctx(), db,
 		`CREATE ca_impact_report SET
 			report_id = $report_id, repo_id = $repo_id,
 			old_commit_sha = $old_sha, new_commit_sha = $new_sha,
@@ -2121,7 +2121,9 @@ func (s *SurrealStore) StoreImpactReport(repoID string, report *graph.ImpactRepo
 			"sym_modified": report.SymbolsModified, "sym_removed": report.SymbolsRemoved,
 			"aff_links": report.AffectedLinks, "aff_reqs": report.AffectedRequirements,
 			"stale": report.StaleArtifacts,
-		})
+		}); err != nil {
+		return
+	}
 }
 
 // GetLatestImpactReport returns the most recent impact report for a repository.

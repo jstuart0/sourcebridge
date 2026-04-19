@@ -34,7 +34,6 @@ STOPWORDS = {
     "can",
     "generated",
     "generate",
-    "generated",
     "how",
     "in",
     "is",
@@ -50,7 +49,6 @@ STOPWORDS = {
     "which",
     "who",
     "why",
-    "the",
     "and",
     "for",
     "with",
@@ -346,7 +344,7 @@ def _plan_hint_files(repo_path: Path, question: str, question_type: str) -> list
             )
         return hinted
 
-    hinted: list[FileEvidence] = []
+    planned_hints: list[FileEvidence] = []
     question_tokens = _tokenize_question(question)
     for path in repo_path.rglob("*"):
         if not path.is_file():
@@ -363,7 +361,7 @@ def _plan_hint_files(repo_path: Path, question: str, question_type: str) -> list
             snippet, reference = _best_snippet(path, question_tokens, repo_path)
         except Exception:
             continue
-        hinted.append(
+        planned_hints.append(
             FileEvidence(
                 path=rel,
                 score=boost_score,
@@ -372,8 +370,8 @@ def _plan_hint_files(repo_path: Path, question: str, question_type: str) -> list
                 reason=";".join(boost_reasons) or "plan-hint",
             )
         )
-    hinted.sort(key=lambda item: (-item.score, str(item.path)))
-    return hinted[:MAX_FILES]
+    planned_hints.sort(key=lambda item: (-item.score, str(item.path)))
+    return planned_hints[:MAX_FILES]
 
 
 def _best_snippet(path: Path, question_tokens: list[str], repo_path: Path) -> tuple[str, str]:
@@ -661,29 +659,29 @@ def _best_deep_files(
             reason=f"understanding:{item.reason}",
         )
 
-    for item in _plan_hint_files(repo_path, question, question_kind):
-        merged[str(item.path)] = item
+    for hint in _plan_hint_files(repo_path, question, question_kind):
+        merged[str(hint.path)] = hint
 
-    for item in _collect_file_evidence(repo_path, question):
-        key = str(item.path)
-        boost_score, boost_reasons = _deep_path_boosts(item.path, question, question_kind)
-        item.score += boost_score
+    for evidence in _collect_file_evidence(repo_path, question):
+        key = str(evidence.path)
+        boost_score, boost_reasons = _deep_path_boosts(evidence.path, question, question_kind)
+        evidence.score += boost_score
         if boost_reasons:
-            item.reason = ";".join(filter(None, [item.reason, *boost_reasons]))
+            evidence.reason = ";".join(filter(None, [evidence.reason, *boost_reasons]))
         if key in merged:
             existing = merged[key]
-            if item.score > existing.score:
+            if evidence.score > existing.score:
                 merged[key] = FileEvidence(
-                    path=item.path,
-                    score=item.score,
-                    snippet=item.snippet,
-                    reference=item.reference,
-                    reason=f"{existing.reason};heuristic:{item.reason}",
+                    path=evidence.path,
+                    score=evidence.score,
+                    snippet=evidence.snippet,
+                    reference=evidence.reference,
+                    reason=f"{existing.reason};heuristic:{evidence.reason}",
                 )
             else:
-                existing.reason = f"{existing.reason};heuristic:{item.reason}"
+                existing.reason = f"{existing.reason};heuristic:{evidence.reason}"
         else:
-            merged[key] = item
+            merged[key] = evidence
 
     ranked = sorted(merged.values(), key=lambda item: (-item.score, str(item.path)))
     non_tests = [item for item in ranked if all(marker not in str(item.path).lower() for marker in ("/test", "_test.", ".test.", "tests/"))]
@@ -734,7 +732,7 @@ async def _build_deep_context(
     requirements = _select_relevant_requirements(_extract_requirement_lines(repo_path), file_evidence, question)
 
     metadata_parts = [
-        f"Mode: deep",
+        "Mode: deep",
         f"Repository: {repo_path.name}",
         f"Question type: {_question_type(question)}",
         f"Repository lookup: {understanding.repo_lookup}",

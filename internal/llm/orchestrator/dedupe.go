@@ -23,13 +23,6 @@ func newInflightRegistry() *inflightRegistry {
 	return &inflightRegistry{byKey: make(map[string]string)}
 }
 
-// get returns the jobID currently registered for the target key, or "".
-func (r *inflightRegistry) get(targetKey string) string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.byKey[targetKey]
-}
-
 // claim registers a target key to a job id. Returns the existing job id
 // (and false) if the key is already claimed, or the new id (and true) on
 // success. The operation is atomic so two goroutines racing to enqueue

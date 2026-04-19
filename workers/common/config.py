@@ -21,7 +21,11 @@ class WorkerConfig(BaseSettings):
     llm_model: str = "claude-sonnet-4-20250514"
     llm_base_url: str = ""
     llm_draft_model: str = ""  # LM Studio only: sent as draft_model in request body
-    llm_timeout: int = 30
+    # Per-request HTTP timeout applied to the OpenAI-compatible LLM client.
+    # Large local models (qwen3:32b, qwen3.6 MoE, llama3.3:70b) can legitimately
+    # take minutes per completion when the user asked for deep, grounded output.
+    # 900s (15 min) is a safe ceiling that still catches hung providers.
+    llm_timeout: int = 900
 
     # Report-specific LLM overrides (optional)
     llm_report_model: str = ""  # If set, used for report generation instead of llm_model
@@ -54,6 +58,11 @@ class WorkerConfig(BaseSettings):
     grpc_auth_secret: str = ""
 
     def model_post_init(self, __context: object) -> None:
+        self.test_mode = self._fallback_bool_env(
+            current=self.test_mode,
+            primary_env="SOURCEBRIDGE_WORKER_TEST_MODE",
+            fallback_env="SOURCEBRIDGE_TEST_MODE",
+        )
         self.surreal_url = self._fallback_env(
             current=self.surreal_url,
             default_value="ws://localhost:8000/rpc",
@@ -95,4 +104,14 @@ class WorkerConfig(BaseSettings):
         fallback = os.getenv(fallback_env, "").strip()
         if fallback:
             return fallback
+        return current
+
+    @staticmethod
+    def _fallback_bool_env(current: bool, primary_env: str, fallback_env: str) -> bool:
+        primary = os.getenv(primary_env, "").strip()
+        if primary:
+            return primary.lower() in ("true", "1", "yes", "on")
+        fallback = os.getenv(fallback_env, "").strip()
+        if fallback:
+            return fallback.lower() in ("true", "1", "yes", "on")
         return current

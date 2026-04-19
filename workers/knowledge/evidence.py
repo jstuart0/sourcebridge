@@ -6,9 +6,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import Iterable
 
 from workers.knowledge.types import EvidenceRef
 

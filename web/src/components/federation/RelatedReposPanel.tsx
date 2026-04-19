@@ -85,7 +85,7 @@ export function RelatedReposPanel({ repositoryId }: { repositoryId: string }) {
     query: REPO_LINKS_QUERY,
     variables: { repoId: repositoryId },
   });
-  const [refsResult] = useQuery<{ crossRepoRefs: CrossRepoRef[] }>({
+  const [refsResult] = useQuery<{ crossRepoRefsConnection: { nodes: CrossRepoRef[] } }>({
     query: CROSS_REPO_REFS_QUERY,
     variables: { repoId: repositoryId },
   });
@@ -103,7 +103,7 @@ export function RelatedReposPanel({ repositoryId }: { repositoryId: string }) {
   const [{ fetching: detecting }, detectContracts] = useMutation(DETECT_CONTRACTS_MUTATION);
 
   const links = linksResult.data?.repoLinks ?? [];
-  const refs = refsResult.data?.crossRepoRefs ?? [];
+  const refs = refsResult.data?.crossRepoRefsConnection?.nodes ?? [];
   const contracts = contractsResult.data?.apiContracts ?? [];
   const repos = reposResult.data?.repositories ?? [];
 

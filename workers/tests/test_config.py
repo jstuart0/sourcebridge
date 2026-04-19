@@ -33,3 +33,13 @@ def test_llm_provider_types() -> None:
     for provider in ["anthropic", "openai", "ollama", "vllm"]:
         config = WorkerConfig(llm_provider=provider)
         assert config.llm_provider == provider
+
+
+def test_global_test_mode_fallback() -> None:
+    """Test the repo-wide SOURCEBRIDGE_TEST_MODE fallback."""
+    os.environ["SOURCEBRIDGE_TEST_MODE"] = "true"
+    try:
+        config = WorkerConfig()
+        assert config.test_mode is True
+    finally:
+        del os.environ["SOURCEBRIDGE_TEST_MODE"]

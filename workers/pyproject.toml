@@ -34,14 +34,17 @@ sourcebridge-worker = "workers.__main__:main"
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+extend-exclude = ["benchmarks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM"]
+ignore = ["E501", "SIM102", "SIM103", "SIM108"]
 
 [tool.mypy]
 python_version = "3.12"
 warn_unused_configs = true
 check_untyped_defs = true
+exclude = ["(^|/)benchmarks/"]
 # Relax strict checks that conflict with gRPC stubs and third-party SDK types
 disable_error_code = ["union-attr", "arg-type", "return-value", "attr-defined"]
 

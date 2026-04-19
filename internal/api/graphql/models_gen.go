@@ -123,6 +123,11 @@ type CrossRepoRef struct {
 	CreatedAt      time.Time        `json:"createdAt"`
 }
 
+type CrossRepoRefConnection struct {
+	Nodes      []*CrossRepoRef `json:"nodes"`
+	TotalCount int             `json:"totalCount"`
+}
+
 type DiagramEdge struct {
 	TargetPath string `json:"targetPath"`
 	CallCount  int    `json:"callCount"`
@@ -556,6 +561,11 @@ type Module struct {
 type Mutation struct {
 }
 
+type MutationResult struct {
+	Success bool    `json:"success"`
+	Error   *string `json:"error,omitempty"`
+}
+
 type PlatformStats struct {
 	Repositories      int `json:"repositories"`
 	Files             int `json:"files"`
@@ -653,6 +663,11 @@ type RequirementLink struct {
 	Symbol        *CodeSymbol  `json:"symbol,omitempty"`
 	Requirement   *Requirement `json:"requirement,omitempty"`
 	CreatedAt     time.Time    `json:"createdAt"`
+}
+
+type RequirementLinkConnection struct {
+	Nodes      []*RequirementLink `json:"nodes"`
+	TotalCount int                `json:"totalCount"`
 }
 
 type ResolvedSymbol struct {

@@ -4,9 +4,9 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { Copy, Search, Waypoints } from "lucide-react";
 import { useQuery } from "urql";
+import { authFetch } from "@/lib/auth-fetch";
 import { SOURCE_FILE_QUERY } from "@/lib/graphql/queries";
 import type { SourceTarget } from "@/lib/source-target";
-import { TOKEN_KEY } from "@/lib/token-key";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Panel } from "@/components/ui/panel";
@@ -40,11 +40,9 @@ interface EnterpriseAnnotation {
 }
 
 async function loadEnterpriseAnnotations(repositoryId: string, filePath: string) {
-  const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
   const params = new URLSearchParams({ repository_id: repositoryId, file_path: filePath });
-  const res = await fetch(`/api/v1/enterprise/source/default/annotations?${params.toString()}`, {
+  const res = await authFetch(`/api/v1/enterprise/source/default/annotations?${params.toString()}`, {
     credentials: "include",
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
   if (!res.ok) {
     return [];

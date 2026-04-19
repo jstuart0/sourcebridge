@@ -24,6 +24,7 @@ class _FakeAsyncOpenAI:
     def __init__(self, *args, **kwargs) -> None:
         self.api_key = kwargs.get("api_key")
         self.base_url = kwargs.get("base_url")
+        self.timeout = kwargs.get("timeout")
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=_FakeCreate()))
 
 
@@ -108,3 +109,46 @@ def test_openai_provider_keeps_explicit_api_key(monkeypatch: pytest.MonkeyPatch)
     )
 
     assert provider.client.api_key == "real-key"
+
+
+def test_default_timeout_matches_worker_config_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No explicit timeout → fall back to the 900s default matching WorkerConfig."""
+    monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
+    provider = OpenAICompatProvider(
+        api_key="x",
+        model="gpt-4o",
+        base_url="https://api.openai.com/v1",
+        provider_name="openai",
+    )
+
+    assert provider.timeout == 900.0
+    assert provider.client.timeout == 900.0
+
+
+def test_explicit_timeout_flows_through_to_async_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Admin-configured TimeoutSecs must reach the HTTP client."""
+    monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
+    provider = OpenAICompatProvider(
+        api_key="x",
+        model="gpt-4o",
+        base_url="https://api.openai.com/v1",
+        provider_name="openai",
+        timeout=1500.0,
+    )
+
+    assert provider.timeout == 1500.0
+    assert provider.client.timeout == 1500.0
+
+
+def test_zero_or_negative_timeout_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Guarding against operator mistakes where TimeoutSecs lands at 0."""
+    monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
+    provider = OpenAICompatProvider(
+        api_key="x",
+        model="gpt-4o",
+        base_url="https://api.openai.com/v1",
+        provider_name="openai",
+        timeout=0,
+    )
+
+    assert provider.timeout == 900.0

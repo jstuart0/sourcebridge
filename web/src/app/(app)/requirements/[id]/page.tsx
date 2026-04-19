@@ -154,7 +154,7 @@ export default function RequirementDetailPage() {
         const result = await client
           .query(REQUIREMENT_LINKS_QUERY, { requirementId: reqId, limit: batchSize, offset })
           .toPromise();
-        const batch: ReqLink[] = result.data?.requirementLinks || [];
+        const batch: ReqLink[] = result.data?.requirementLinksConnection?.nodes || [];
         if (batch.length === 0) break;
         allExtra.push(...batch);
         offset += batch.length;

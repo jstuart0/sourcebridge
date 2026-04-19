@@ -65,11 +65,6 @@ class KnowledgeServiceStub(object):
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourRequest.SerializeToString,
                 response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourResponse.FromString,
                 _registered_method=True)
-        self.GenerateReport = channel.unary_unary(
-                '/sourcebridge.knowledge.v1.KnowledgeService/GenerateReport',
-                request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateReportRequest.SerializeToString,
-                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateReportResponse.FromString,
-                _registered_method=True)
 
 
 class KnowledgeServiceServicer(object):
@@ -118,13 +113,6 @@ class KnowledgeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GenerateReport(self, request, context):
-        """GenerateReport produces a professional multi-section report.
-        """
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
 
 def add_KnowledgeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -157,11 +145,6 @@ def add_KnowledgeServiceServicer_to_server(servicer, server):
                     servicer.GenerateCodeTour,
                     request_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourRequest.FromString,
                     response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourResponse.SerializeToString,
-            ),
-            'GenerateReport': grpc.unary_unary_rpc_method_handler(
-                    servicer.GenerateReport,
-                    request_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateReportRequest.FromString,
-                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateReportResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -327,33 +310,6 @@ class KnowledgeService(object):
             '/sourcebridge.knowledge.v1.KnowledgeService/GenerateCodeTour',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourRequest.SerializeToString,
             knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GenerateReport(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/sourcebridge.knowledge.v1.KnowledgeService/GenerateReport',
-            knowledge_dot_v1_dot_knowledge__pb2.GenerateReportRequest.SerializeToString,
-            knowledge_dot_v1_dot_knowledge__pb2.GenerateReportResponse.FromString,
             options,
             channel_credentials,
             insecure,

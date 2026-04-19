@@ -18,19 +18,23 @@ from workers.common.llm.provider import (
     complete_with_optional_model,
     require_nonempty,
 )
-from workers.knowledge.cliff_notes import (
-    _coerce_section,
-    _normalize_text,
-    _parse_evidence,
-    _parse_sections,
-)
 from workers.knowledge.evidence import evaluate_evidence_gate, extract_section_evidence_refs
+from workers.knowledge.parse_utils import (
+    coerce_int,
+    coerce_section,
+    load_json_dict,
+    meets_confidence_floor,
+    normalize_text,
+    parse_evidence,
+    parse_json_sections,
+)
 from workers.knowledge.prompts.workflow_story import (
     REQUIRED_WORKFLOW_STORY_SECTIONS,
     REQUIRED_WORKFLOW_STORY_SECTIONS_DEEP,
     WORKFLOW_STORY_SYSTEM,
     build_workflow_story_prompt,
 )
+from workers.knowledge.thresholds import MIN_FILES_CLIFF_NOTES, MIN_IDENTIFIERS_DEFAULT, TITLE_SUMMARY_MAX_CHARS
 from workers.knowledge.types import CliffNotesResult, CliffNotesSection, EvidenceRef
 from workers.reasoning.types import LLMUsageRecord
 
@@ -38,11 +42,7 @@ log = structlog.get_logger()
 
 
 def _load_json(raw: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(raw) if raw else {}
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+    return load_json_dict(raw)
 
 
 def _is_placeholder_content(content: str) -> bool:
@@ -71,18 +71,16 @@ def _gather_execution_evidence(execution_path: dict[str, Any], limit: int = 4) -
     for step in (execution_path.get("steps") or [])[:limit]:
         if not isinstance(step, dict):
             continue
-        file_path = _normalize_text(step.get("filePath"))
-        line_start = step.get("lineStart") or 0
-        line_end = step.get("lineEnd") or 0
-        label = _normalize_text(step.get("label"))
-        reason = _normalize_text(step.get("reason"))
+        file_path = normalize_text(step.get("filePath"))
+        label = normalize_text(step.get("label"))
+        reason = normalize_text(step.get("reason"))
         evidence.append(
             EvidenceRef(
                 source_type="symbol" if step.get("symbolId") else "file",
-                source_id=_normalize_text(step.get("symbolId")),
+                source_id=normalize_text(step.get("symbolId")),
                 file_path=file_path,
-                line_start=int(line_start) if isinstance(line_start, int) else 0,
-                line_end=int(line_end) if isinstance(line_end, int) else 0,
+                line_start=coerce_int(step.get("lineStart"), 0),
+                line_end=coerce_int(step.get("lineEnd"), 0),
                 rationale=reason or f"Execution path step: {label}",
             )
         )
@@ -97,10 +95,10 @@ def _gather_scope_evidence(snapshot: dict[str, Any], limit: int = 4) -> list[Evi
         evidence.append(
             EvidenceRef(
                 source_type="symbol",
-                source_id=_normalize_text(target_symbol.get("id")),
-                file_path=_normalize_text(target_symbol.get("file_path")),
-                line_start=int(target_symbol.get("start_line") or 0),
-                line_end=int(target_symbol.get("end_line") or 0),
+                source_id=normalize_text(target_symbol.get("id")),
+                file_path=normalize_text(target_symbol.get("file_path")),
+                line_start=coerce_int(target_symbol.get("start_line"), 0),
+                line_end=coerce_int(target_symbol.get("end_line"), 0),
                 rationale="Focused symbol for this workflow story.",
             )
         )
@@ -109,7 +107,7 @@ def _gather_scope_evidence(snapshot: dict[str, Any], limit: int = 4) -> list[Evi
         evidence.append(
             EvidenceRef(
                 source_type="file",
-                file_path=_normalize_text(target_file.get("path")),
+                file_path=normalize_text(target_file.get("path")),
                 rationale="Focused file for this workflow story.",
             )
         )
@@ -120,10 +118,10 @@ def _gather_scope_evidence(snapshot: dict[str, Any], limit: int = 4) -> list[Evi
             evidence.append(
                 EvidenceRef(
                     source_type="symbol",
-                    source_id=_normalize_text(item.get("id")),
-                    file_path=_normalize_text(item.get("file_path")),
-                    line_start=int(item.get("start_line") or 0),
-                    line_end=int(item.get("end_line") or 0),
+                    source_id=normalize_text(item.get("id")),
+                    file_path=normalize_text(item.get("file_path")),
+                    line_start=coerce_int(item.get("start_line"), 0),
+                    line_end=coerce_int(item.get("end_line"), 0),
                     rationale=f"Snapshot {group_name.replace('_', ' ')} reference.",
                 )
             )
@@ -165,11 +163,11 @@ def _build_workflow_fallbacks(
     scope = snapshot.get("scope_context") or {}
     target_symbol = scope.get("target_symbol") or {}
     target_file = scope.get("target_file") or {}
-    entry_label = _normalize_text(execution_path.get("entryLabel")) or anchor_label or scope_path or repository_name
+    entry_label = normalize_text(execution_path.get("entryLabel")) or anchor_label or scope_path or repository_name
     path_steps = [step for step in (execution_path.get("steps") or []) if isinstance(step, dict)]
     path_files = []
     for step in path_steps:
-        file_path = _normalize_text(step.get("filePath"))
+        file_path = normalize_text(step.get("filePath"))
         if file_path and file_path not in path_files:
             path_files.append(file_path)
 
@@ -184,21 +182,21 @@ def _build_workflow_fallbacks(
     goal = anchor_label or f"Understand how {entry_label} works and where to inspect it in the codebase."
     trigger = f"The workflow starts when someone reaches `{entry_label}`."
     if scope_type == "symbol" and target_symbol:
-        symbol_name = _normalize_text(target_symbol.get("name"))
-        symbol_file = _normalize_text(target_symbol.get("file_path"))
+        symbol_name = normalize_text(target_symbol.get("name"))
+        symbol_file = normalize_text(target_symbol.get("file_path"))
         trigger = f"The workflow starts at the focused symbol `{symbol_name}` in `{symbol_file}`."
     elif scope_type == "file" and target_file:
-        trigger = f"The workflow starts in the focused file `{_normalize_text(target_file.get('path'))}`."
+        trigger = f"The workflow starts in the focused file `{normalize_text(target_file.get('path'))}`."
 
     if path_steps:
         step_lines = []
         for index, step in enumerate(path_steps[:6], start=1):
-            label = _normalize_text(step.get("label")) or f"Step {index}"
-            explanation = _normalize_text(step.get("explanation"))
+            label = normalize_text(step.get("label")) or f"Step {index}"
+            explanation = normalize_text(step.get("explanation"))
             step_lines.append(f"{index}. `{label}`. {explanation}")
         main_steps = "\n".join(step_lines)
     else:
-        focus_summary = _normalize_text(scope.get("focus_summary"))
+        focus_summary = normalize_text(scope.get("focus_summary"))
         if focus_summary:
             main_steps = focus_summary
         else:
@@ -211,9 +209,9 @@ def _build_workflow_fallbacks(
                 for idx, sym in enumerate(step_sources, start=1):
                     if not isinstance(sym, dict):
                         continue
-                    name = _normalize_text(sym.get("qualified_name") or sym.get("name"))
-                    fp = _normalize_text(sym.get("file_path"))
-                    kind = _normalize_text(sym.get("kind"))
+                    name = normalize_text(sym.get("qualified_name") or sym.get("name"))
+                    fp = normalize_text(sym.get("file_path"))
+                    kind = normalize_text(sym.get("kind"))
                     label = f"`{name}`" if name else f"Step {idx}"
                     detail = f" in `{fp}`" if fp else ""
                     kind_hint = f" ({kind})" if kind else ""
@@ -239,11 +237,11 @@ def _build_workflow_fallbacks(
             f"with {observed_count} observed and {inferred_count} inferred."
         )
     if target_symbol:
-        symbol_name = _normalize_text(target_symbol.get("name"))
-        symbol_file = _normalize_text(target_symbol.get("file_path"))
+        symbol_name = normalize_text(target_symbol.get("name"))
+        symbol_file = normalize_text(target_symbol.get("file_path"))
         behind_parts.append(f"The workflow is anchored on `{symbol_name}` in `{symbol_file}`.")
     elif target_file:
-        behind_parts.append(f"The focused code lives in `{_normalize_text(target_file.get('path'))}`.")
+        behind_parts.append(f"The focused code lives in `{normalize_text(target_file.get('path'))}`.")
     if path_files:
         behind_parts.append("Key files on this path: " + ", ".join(f"`{path}`" for path in path_files[:4]) + ".")
     if not behind_parts:
@@ -251,8 +249,8 @@ def _build_workflow_fallbacks(
         languages = snapshot.get("languages") or []
         modules = snapshot.get("modules") or []
         if languages or modules:
-            lang_names = [_normalize_text(lang.get("name")) for lang in languages[:3] if isinstance(lang, dict)]
-            mod_names = [_normalize_text(mod.get("path")) for mod in modules[:4] if isinstance(mod, dict)]
+            lang_names = [normalize_text(lang.get("name")) for lang in languages[:3] if isinstance(lang, dict)]
+            mod_names = [normalize_text(mod.get("path")) for mod in modules[:4] if isinstance(mod, dict)]
             if lang_names:
                 behind_parts.append(f"The codebase uses {', '.join(lang_names)}.")
             if mod_names:
@@ -262,7 +260,7 @@ def _build_workflow_fallbacks(
     )
 
     if execution_path.get("message"):
-        branches = _normalize_text(execution_path.get("message"))
+        branches = normalize_text(execution_path.get("message"))
     elif path_steps:
         branches = (
             "Follow the traced execution path and inspect any downstream helpers or handoffs if the behavior diverges. "
@@ -273,7 +271,7 @@ def _build_workflow_fallbacks(
         complex_symbols = snapshot.get("complex_symbols") or []
         if complex_symbols:
             complex_names = [
-                _normalize_text(sym.get("qualified_name") or sym.get("name"))
+                normalize_text(sym.get("qualified_name") or sym.get("name"))
                 for sym in complex_symbols[:3]
                 if isinstance(sym, dict)
             ]
@@ -290,19 +288,19 @@ def _build_workflow_fallbacks(
 
     inspect_targets = []
     if target_file:
-        inspect_targets.append(f"`{_normalize_text(target_file.get('path'))}`")
+        inspect_targets.append(f"`{normalize_text(target_file.get('path'))}`")
     for path in path_files:
         formatted = f"`{path}`"
         if formatted not in inspect_targets:
             inspect_targets.append(formatted)
     if target_symbol:
-        inspect_targets.append(f"`{_normalize_text(target_symbol.get('name'))}`")
+        inspect_targets.append(f"`{normalize_text(target_symbol.get('name'))}`")
     if not inspect_targets:
         # Populate from snapshot entry points when no scope targets
         entry_points = snapshot.get("entry_points") or []
         for ep in entry_points[:4]:
             if isinstance(ep, dict) and ep.get("file_path"):
-                fp = _normalize_text(ep["file_path"])
+                fp = normalize_text(ep["file_path"])
                 formatted = f"`{fp}`"
                 if formatted not in inspect_targets:
                     inspect_targets.append(formatted)
@@ -455,14 +453,21 @@ async def generate_workflow_story(
     )
 
     sections: list[CliffNotesSection] = []
+    response: LLMResponse | None = None
     try:
-        response: LLMResponse = require_nonempty(
+        response = require_nonempty(
             await complete_with_optional_model(
                 provider,
                 prompt,
                 system=WORKFLOW_STORY_SYSTEM,
                 temperature=0.0,
-                max_tokens=8192,
+                # DEEP workflow stories emit 9 structured sections with
+                # long-form Main Steps + Behind-the-Scenes bodies. Haiku
+                # routinely hits >22k characters of JSON, which at the
+                # old 8192 cap was getting truncated mid-Observability
+                # and sending the parser into fallback. Match the 16384
+                # ceiling we already use for learning_path and code_tour.
+                max_tokens=16384,
                 model=model_override,
             ),
             context=f"workflow_story:{scope_type or 'repository'}",
@@ -476,7 +481,7 @@ async def generate_workflow_story(
 
     if response is not None:
         try:
-            raw_sections = _parse_sections(response.content)
+            raw_sections = parse_json_sections(response.content)
         except (json.JSONDecodeError, ValueError, TypeError) as exc:
             log.warning(
                 "workflow_story_parse_fallback",
@@ -502,7 +507,7 @@ async def generate_workflow_story(
                 if index < len(required_sections)
                 else f"Section {index + 1}"
             )
-            normalized = _coerce_section(raw, fallback_title=fallback_title)
+            normalized = coerce_section(raw, fallback_title=fallback_title, title_summary_max_chars=TITLE_SUMMARY_MAX_CHARS)
             title = str(normalized.get("title", fallback_title))
             evidence = normalized.get("evidence", [])
             if not isinstance(evidence, list):
@@ -515,7 +520,7 @@ async def generate_workflow_story(
                     summary=str(normalized.get("summary", "")),
                     confidence=str(normalized.get("confidence", "medium")),
                     inferred=bool(normalized.get("inferred", False)),
-                    evidence=_parse_evidence(evidence),
+                    evidence=parse_evidence(evidence),
                 )
             )
     fallback_sections = _build_workflow_fallbacks(
@@ -540,6 +545,21 @@ async def generate_workflow_story(
             if gate.below_threshold or gate.forbidden_phrases:
                 section.confidence = "low"
                 section.refinement_status = "needs_evidence"
+            else:
+                # Workflow-story sections, like cliff-notes sections, cite
+                # multiple evidence refs per section. Use the same 3-files
+                # / 2-identifiers mechanical floor that drove the cliff-
+                # notes HIGH-confidence upgrades in v13.
+                cited = {e.file_path for e in (section.evidence or []) if e.file_path}
+                if meets_confidence_floor(
+                    current_confidence=section.confidence,
+                    unique_file_paths=cited,
+                    content=f"{section.summary}\n{section.content}",
+                    min_files=MIN_FILES_CLIFF_NOTES,
+                    min_identifiers=MIN_IDENTIFIERS_DEFAULT,
+                ):
+                    section.confidence = "high"
+                    section.refinement_status = ""
 
     # --- Baseline quality instrumentation ---
     evidence_by_type: dict[str, int] = {}

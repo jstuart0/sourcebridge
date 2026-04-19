@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import pytest
 from knowledge.v1 import knowledge_pb2
 
+from workers.common.grpc_metadata import CliffNotesRenderMetadata
 from workers.common.llm.provider import LLMResponse
 from workers.knowledge.prompts.cliff_notes import REQUIRED_SECTIONS
 from workers.knowledge.servicer import (
@@ -19,7 +20,6 @@ from workers.knowledge.servicer import (
     KnowledgeServicer,
     _selected_cliff_notes_strategy,
 )
-from workers.common.grpc_metadata import CliffNotesRenderMetadata
 
 
 @dataclass

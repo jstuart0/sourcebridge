@@ -29,6 +29,7 @@ class RuntimeLLMOverride:
     model: str = ""
     draft_model: str = ""
     operation: str = ""
+    timeout_seconds: int = 0
 
     def is_empty(self) -> bool:
         return not any(
@@ -39,6 +40,7 @@ class RuntimeLLMOverride:
                 self.model,
                 self.draft_model,
                 self.operation,
+                self.timeout_seconds,
             )
         )
 
@@ -61,6 +63,13 @@ def resolve_llm_override(context: grpc.aio.ServicerContext) -> RuntimeLLMOverrid
             override.draft_model = value or ""
         elif key == "x-sb-operation":
             override.operation = value or ""
+        elif key == "x-sb-llm-timeout-seconds":
+            try:
+                parsed = int(str(value or "").strip())
+            except ValueError:
+                parsed = 0
+            if parsed > 0:
+                override.timeout_seconds = parsed
     if override.is_empty():
         return None
     return override

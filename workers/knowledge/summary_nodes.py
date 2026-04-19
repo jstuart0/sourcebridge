@@ -119,11 +119,11 @@ class SurrealSummaryNodeCache:
         metadata_raw = row.get("metadata") or "{}"
         try:
             child_ids = json.loads(child_ids_raw) if isinstance(child_ids_raw, str) else list(child_ids_raw)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             child_ids = []
         try:
             metadata = json.loads(metadata_raw) if isinstance(metadata_raw, str) else dict(metadata_raw)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             metadata = {}
         return SummaryNode(
             id=str(row.get("id") or ""),

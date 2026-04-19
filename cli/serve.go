@@ -299,6 +299,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err := httpServer.Shutdown(ctx); err != nil {
 		return fmt.Errorf("shutdown error: %w", err)
 	}
+	if err := server.Shutdown(ctx); err != nil {
+		return fmt.Errorf("server component shutdown error: %w", err)
+	}
 
 	slog.Info("server stopped")
 	return nil

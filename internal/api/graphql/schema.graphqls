@@ -1,4 +1,4 @@
-# CodeAware GraphQL Schema
+# SourceBridge GraphQL Schema
 # Phase 1: Foundation types and queries
 # Subsequent phases add fields and resolvers
 
@@ -27,7 +27,8 @@ type Query {
   # Phase 4: Traceability
   search(query: String!, repositoryId: ID, limit: Int): [SearchResult!]!
   traceabilityMatrix(repositoryId: ID!): TraceabilityMatrix!
-  requirementLinks(requirementId: ID!, limit: Int, offset: Int): [RequirementLink!]!
+  requirementLinks(requirementId: ID!, limit: Int, offset: Int): [RequirementLink!]! @deprecated(reason: "Use requirementLinksConnection")
+  requirementLinksConnection(requirementId: ID!, limit: Int, offset: Int): RequirementLinkConnection!
   requirementToCode(requirementId: ID!): [RequirementLink!]!
   codeToRequirements(symbolId: ID!): [RequirementLink!]!
   sourceFile(repositoryId: ID!, filePath: String!): SourceFileResult!
@@ -74,7 +75,8 @@ type Query {
 
   # Multi-repo federation (OSS)
   repoLinks(repoId: ID!): [RepoLink!]!
-  crossRepoRefs(repoId: ID!, refType: CrossRepoRefType, limit: Int): [CrossRepoRef!]!
+  crossRepoRefs(repoId: ID!, refType: CrossRepoRefType, limit: Int): [CrossRepoRef!]! @deprecated(reason: "Use crossRepoRefsConnection")
+  crossRepoRefsConnection(repoId: ID!, refType: CrossRepoRefType, limit: Int): CrossRepoRefConnection!
   symbolCrossRepoRefs(symbolId: ID!): [CrossRepoRef!]!
   apiContracts(repoId: ID!): [APIContract!]!
 
@@ -84,7 +86,7 @@ type Query {
 
   # Phase 6: Comprehension settings
   comprehensionSettings(scopeType: String, scopeKey: String): EffectiveComprehensionSettings!
-  comprehensionSettingsList: [ComprehensionSettings!]!
+  comprehensionSettingsList: [ComprehensionSettings!]! @deprecated(reason: "Use comprehensionSettings with an explicit scope")
   modelCapabilities: [ModelCapabilityProfile!]!
   modelCapability(modelId: String!): ModelCapabilityProfile
 }
@@ -92,7 +94,8 @@ type Query {
 type Mutation {
   # Phase 2: Repository management
   addRepository(input: AddRepositoryInput!): Repository!
-  removeRepository(id: ID!): Boolean!
+  removeRepository(id: ID!): Boolean! @deprecated(reason: "Use removeRepositoryResult")
+  removeRepositoryResult(id: ID!): MutationResult!
   reindexRepository(id: ID!): Repository!
   buildRepositoryUnderstanding(input: BuildRepositoryUnderstandingInput!): RepositoryUnderstanding!
   updateRepositoryKnowledgeSettings(input: UpdateRepositoryKnowledgeSettingsInput!): Repository!
@@ -122,8 +125,10 @@ type Mutation {
 
   # Multi-repo federation (OSS)
   linkRepos(sourceRepoId: ID!, targetRepoId: ID!, linkType: String): RepoLink!
-  unlinkRepos(linkId: ID!): Boolean!
-  detectContracts(repoId: ID!): Boolean!
+  unlinkRepos(linkId: ID!): Boolean! @deprecated(reason: "Use unlinkReposResult")
+  unlinkReposResult(linkId: ID!): MutationResult!
+  detectContracts(repoId: ID!): Boolean! @deprecated(reason: "Use detectContractsResult")
+  detectContractsResult(repoId: ID!): MutationResult!
 
   # Knowledge engine mutations
   generateCliffNotes(input: GenerateCliffNotesInput!): KnowledgeArtifact!
@@ -138,7 +143,8 @@ type Mutation {
   updateComprehensionSettings(input: UpdateComprehensionSettingsInput!): EffectiveComprehensionSettings!
   resetComprehensionSettings(scopeType: String!, scopeKey: String): Boolean!
   updateModelCapabilities(input: UpdateModelCapabilitiesInput!): ModelCapabilityProfile!
-  deleteModelCapabilities(modelId: String!): Boolean!
+  deleteModelCapabilities(modelId: String!): Boolean! @deprecated(reason: "Use deleteModelCapabilitiesResult")
+  deleteModelCapabilitiesResult(modelId: String!): MutationResult!
 }
 
 # Health and system types
@@ -157,6 +163,11 @@ type VersionInfo {
   version: String!
   commit: String!
   buildDate: String!
+}
+
+type MutationResult {
+  success: Boolean!
+  error: String
 }
 
 type Features {
@@ -194,6 +205,16 @@ type IDECapabilities {
   reviewCode: Boolean!
   vscode: Boolean!
   jetbrains: Boolean!
+}
+
+type RequirementLinkConnection {
+  nodes: [RequirementLink!]!
+  totalCount: Int!
+}
+
+type CrossRepoRefConnection {
+  nodes: [CrossRepoRef!]!
+  totalCount: Int!
 }
 
 # Repository types

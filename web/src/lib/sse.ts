@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { TOKEN_KEY } from "@/lib/token-key";
+import { getStoredToken } from "@/lib/auth-token-store";
 import { isTokenExpired, forceLogout } from "@/lib/auth-utils";
 
 export interface ServerEvent {
@@ -30,7 +30,7 @@ export function useEventStream(onEvent: (event: ServerEvent) => void) {
   onEventRef.current = onEvent;
 
   useEffect(() => {
-    const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
+    const token = getStoredToken();
     if (!token) return;
 
     // Don't even connect if the token is already expired
@@ -61,7 +61,7 @@ export function useEventStream(onEvent: (event: ServerEvent) => void) {
       // (3+ in a row with no successful events), the token is likely
       // expired — check and force logout if so.
       if (errorCount >= 3) {
-        const currentToken = localStorage.getItem(TOKEN_KEY);
+        const currentToken = getStoredToken();
         if (!currentToken || isTokenExpired(currentToken)) {
           source.close();
           forceLogout();

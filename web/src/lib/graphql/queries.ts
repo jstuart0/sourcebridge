@@ -230,20 +230,23 @@ export const REQUIREMENT_QUERY = gql`
 
 export const REQUIREMENT_LINKS_QUERY = gql`
   query RequirementLinks($requirementId: ID!, $limit: Int, $offset: Int) {
-    requirementLinks(requirementId: $requirementId, limit: $limit, offset: $offset) {
-      id
-      confidence
-      symbolId
-      rationale
-      verified
-      symbol {
+    requirementLinksConnection(requirementId: $requirementId, limit: $limit, offset: $offset) {
+      nodes {
         id
-        name
-        filePath
-        kind
-        startLine
-        endLine
+        confidence
+        symbolId
+        rationale
+        verified
+        symbol {
+          id
+          name
+          filePath
+          kind
+          startLine
+          endLine
+        }
       }
+      totalCount
     }
   }
 `;
@@ -361,7 +364,10 @@ export const ADD_REPOSITORY_MUTATION = gql`
 
 export const REMOVE_REPOSITORY_MUTATION = gql`
   mutation RemoveRepository($id: ID!) {
-    removeRepository(id: $id)
+    removeRepositoryResult(id: $id) {
+      success
+      error
+    }
   }
 `;
 
@@ -1223,18 +1229,21 @@ export const REPO_LINKS_QUERY = gql`
 
 export const CROSS_REPO_REFS_QUERY = gql`
   query CrossRepoRefs($repoId: ID!, $refType: CrossRepoRefType, $limit: Int) {
-    crossRepoRefs(repoId: $repoId, refType: $refType, limit: $limit) {
-      id
-      sourceSymbolId
-      targetSymbolId
-      sourceRepoId
-      targetRepoId
-      refType
-      confidence
-      contractFile
-      consumerFile
-      evidence
-      createdAt
+    crossRepoRefsConnection(repoId: $repoId, refType: $refType, limit: $limit) {
+      nodes {
+        id
+        sourceSymbolId
+        targetSymbolId
+        sourceRepoId
+        targetRepoId
+        refType
+        confidence
+        contractFile
+        consumerFile
+        evidence
+        createdAt
+      }
+      totalCount
     }
   }
 `;
@@ -1285,13 +1294,19 @@ export const LINK_REPOS_MUTATION = gql`
 
 export const UNLINK_REPOS_MUTATION = gql`
   mutation UnlinkRepos($linkId: ID!) {
-    unlinkRepos(linkId: $linkId)
+    unlinkReposResult(linkId: $linkId) {
+      success
+      error
+    }
   }
 `;
 
 export const DETECT_CONTRACTS_MUTATION = gql`
   mutation DetectContracts($repoId: ID!) {
-    detectContracts(repoId: $repoId)
+    detectContractsResult(repoId: $repoId) {
+      success
+      error
+    }
   }
 `;
 

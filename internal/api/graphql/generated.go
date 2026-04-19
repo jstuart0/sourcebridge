@@ -142,6 +142,11 @@ type ComplexityRoot struct {
 		TargetSymbolID func(childComplexity int) int
 	}
 
+	CrossRepoRefConnection struct {
+		Nodes      func(childComplexity int) int
+		TotalCount func(childComplexity int) int
+	}
+
 	DiagramEdge struct {
 		CallCount  func(childComplexity int) int
 		TargetPath func(childComplexity int) int
@@ -501,7 +506,9 @@ type ComplexityRoot struct {
 		BuildRepositoryUnderstanding      func(childComplexity int, input BuildRepositoryUnderstandingInput) int
 		CreateManualLink                  func(childComplexity int, input CreateManualLinkInput) int
 		DeleteModelCapabilities           func(childComplexity int, modelID string) int
+		DeleteModelCapabilitiesResult     func(childComplexity int, modelID string) int
 		DetectContracts                   func(childComplexity int, repoID string) int
+		DetectContractsResult             func(childComplexity int, repoID string) int
 		DiscussCode                       func(childComplexity int, input DiscussCodeInput) int
 		DismissAllDiscoveredRequirements  func(childComplexity int, repositoryID string) int
 		DismissDiscoveredRequirement      func(childComplexity int, id string, reason *string) int
@@ -518,15 +525,22 @@ type ComplexityRoot struct {
 		RefreshKnowledgeArtifact          func(childComplexity int, id string) int
 		ReindexRepository                 func(childComplexity int, id string) int
 		RemoveRepository                  func(childComplexity int, id string) int
+		RemoveRepositoryResult            func(childComplexity int, id string) int
 		ResetComprehensionSettings        func(childComplexity int, scopeType string, scopeKey *string) int
 		ReviewCode                        func(childComplexity int, input ReviewCodeInput) int
 		SimulateChange                    func(childComplexity int, input SimulateChangeInput) int
 		TriggerSpecExtraction             func(childComplexity int, input TriggerSpecExtractionInput) int
 		UnlinkRepos                       func(childComplexity int, linkID string) int
+		UnlinkReposResult                 func(childComplexity int, linkID string) int
 		UpdateComprehensionSettings       func(childComplexity int, input UpdateComprehensionSettingsInput) int
 		UpdateModelCapabilities           func(childComplexity int, input UpdateModelCapabilitiesInput) int
 		UpdateRepositoryKnowledgeSettings func(childComplexity int, input UpdateRepositoryKnowledgeSettingsInput) int
 		VerifyLink                        func(childComplexity int, linkID string, verified bool) int
+	}
+
+	MutationResult struct {
+		Error   func(childComplexity int) int
+		Success func(childComplexity int) int
 	}
 
 	PlatformStats struct {
@@ -545,45 +559,47 @@ type ComplexityRoot struct {
 	}
 
 	Query struct {
-		APIContracts              func(childComplexity int, repoID string) int
-		AiGeneratedFiles          func(childComplexity int, repositoryID string, minScore *float64) int
-		ArchitectureDiagram       func(childComplexity int, repoID string, level DiagramLevel, moduleFilter *string, moduleDepth *int, maxNodes *int) int
-		CodeToRequirements        func(childComplexity int, symbolID string) int
-		ComprehensionSettings     func(childComplexity int, scopeType *string, scopeKey *string) int
-		ComprehensionSettingsList func(childComplexity int) int
-		CrossRepoRefs             func(childComplexity int, repoID string, refType *CrossRepoRefType, limit *int) int
-		DiscoveredRequirement     func(childComplexity int, id string) int
-		DiscoveredRequirements    func(childComplexity int, repositoryID string, status *string, confidence *string, limit *int, offset *int) int
-		ExecutionEntryPoints      func(childComplexity int, repositoryID string) int
-		ExecutionPath             func(childComplexity int, input ExecutionPathInput) int
-		Features                  func(childComplexity int) int
-		Health                    func(childComplexity int) int
-		IdeCapabilities           func(childComplexity int) int
-		ImpactReports             func(childComplexity int, repositoryID string, limit *int) int
-		KnowledgeArtifact         func(childComplexity int, id string) int
-		KnowledgeArtifacts        func(childComplexity int, repositoryID string, scopeType *KnowledgeScopeType, scopePath *string) int
-		KnowledgeScopeChildren    func(childComplexity int, repositoryID string, scopeType KnowledgeScopeType, scopePath string, audience *KnowledgeAudience, depth *KnowledgeDepth) int
-		LatestImpactReport        func(childComplexity int, repositoryID string) int
-		LlmUsage                  func(childComplexity int, repositoryID *string, limit *int) int
-		ModelCapabilities         func(childComplexity int) int
-		ModelCapability           func(childComplexity int, modelID string) int
-		PlatformStats             func(childComplexity int) int
-		RepoLinks                 func(childComplexity int, repoID string) int
-		Repositories              func(childComplexity int) int
-		Repository                func(childComplexity int, id string) int
-		RepositoryUnderstanding   func(childComplexity int, repositoryID string, scopeType *KnowledgeScopeType, scopePath *string) int
-		Requirement               func(childComplexity int, id string) int
-		RequirementLinks          func(childComplexity int, requirementID string, limit *int, offset *int) int
-		RequirementToCode         func(childComplexity int, requirementID string) int
-		Requirements              func(childComplexity int, repositoryID string, limit *int, offset *int) int
-		Search                    func(childComplexity int, query string, repositoryID *string, limit *int) int
-		SimulatedImpactReport     func(childComplexity int, id string) int
-		SourceFile                func(childComplexity int, repositoryID string, filePath string) int
-		SymbolCrossRepoRefs       func(childComplexity int, symbolID string) int
-		Symbols                   func(childComplexity int, repositoryID string, query *string, filePath *string, kind *SymbolKind, limit *int, offset *int) int
-		TraceabilityMatrix        func(childComplexity int, repositoryID string) int
-		UnderstandingScore        func(childComplexity int, repositoryID string) int
-		Version                   func(childComplexity int) int
+		APIContracts               func(childComplexity int, repoID string) int
+		AiGeneratedFiles           func(childComplexity int, repositoryID string, minScore *float64) int
+		ArchitectureDiagram        func(childComplexity int, repoID string, level DiagramLevel, moduleFilter *string, moduleDepth *int, maxNodes *int) int
+		CodeToRequirements         func(childComplexity int, symbolID string) int
+		ComprehensionSettings      func(childComplexity int, scopeType *string, scopeKey *string) int
+		ComprehensionSettingsList  func(childComplexity int) int
+		CrossRepoRefs              func(childComplexity int, repoID string, refType *CrossRepoRefType, limit *int) int
+		CrossRepoRefsConnection    func(childComplexity int, repoID string, refType *CrossRepoRefType, limit *int) int
+		DiscoveredRequirement      func(childComplexity int, id string) int
+		DiscoveredRequirements     func(childComplexity int, repositoryID string, status *string, confidence *string, limit *int, offset *int) int
+		ExecutionEntryPoints       func(childComplexity int, repositoryID string) int
+		ExecutionPath              func(childComplexity int, input ExecutionPathInput) int
+		Features                   func(childComplexity int) int
+		Health                     func(childComplexity int) int
+		IdeCapabilities            func(childComplexity int) int
+		ImpactReports              func(childComplexity int, repositoryID string, limit *int) int
+		KnowledgeArtifact          func(childComplexity int, id string) int
+		KnowledgeArtifacts         func(childComplexity int, repositoryID string, scopeType *KnowledgeScopeType, scopePath *string) int
+		KnowledgeScopeChildren     func(childComplexity int, repositoryID string, scopeType KnowledgeScopeType, scopePath string, audience *KnowledgeAudience, depth *KnowledgeDepth) int
+		LatestImpactReport         func(childComplexity int, repositoryID string) int
+		LlmUsage                   func(childComplexity int, repositoryID *string, limit *int) int
+		ModelCapabilities          func(childComplexity int) int
+		ModelCapability            func(childComplexity int, modelID string) int
+		PlatformStats              func(childComplexity int) int
+		RepoLinks                  func(childComplexity int, repoID string) int
+		Repositories               func(childComplexity int) int
+		Repository                 func(childComplexity int, id string) int
+		RepositoryUnderstanding    func(childComplexity int, repositoryID string, scopeType *KnowledgeScopeType, scopePath *string) int
+		Requirement                func(childComplexity int, id string) int
+		RequirementLinks           func(childComplexity int, requirementID string, limit *int, offset *int) int
+		RequirementLinksConnection func(childComplexity int, requirementID string, limit *int, offset *int) int
+		RequirementToCode          func(childComplexity int, requirementID string) int
+		Requirements               func(childComplexity int, repositoryID string, limit *int, offset *int) int
+		Search                     func(childComplexity int, query string, repositoryID *string, limit *int) int
+		SimulatedImpactReport      func(childComplexity int, id string) int
+		SourceFile                 func(childComplexity int, repositoryID string, filePath string) int
+		SymbolCrossRepoRefs        func(childComplexity int, symbolID string) int
+		Symbols                    func(childComplexity int, repositoryID string, query *string, filePath *string, kind *SymbolKind, limit *int, offset *int) int
+		TraceabilityMatrix         func(childComplexity int, repositoryID string) int
+		UnderstandingScore         func(childComplexity int, repositoryID string) int
+		Version                    func(childComplexity int) int
 	}
 
 	RepoLink struct {
@@ -665,6 +681,11 @@ type ComplexityRoot struct {
 		SymbolID      func(childComplexity int) int
 		Verified      func(childComplexity int) int
 		VerifiedBy    func(childComplexity int) int
+	}
+
+	RequirementLinkConnection struct {
+		Nodes      func(childComplexity int) int
+		TotalCount func(childComplexity int) int
 	}
 
 	ResolvedSymbol struct {
@@ -815,6 +836,7 @@ type ComplexityRoot struct {
 type MutationResolver interface {
 	AddRepository(ctx context.Context, input AddRepositoryInput) (*Repository, error)
 	RemoveRepository(ctx context.Context, id string) (bool, error)
+	RemoveRepositoryResult(ctx context.Context, id string) (*MutationResult, error)
 	ReindexRepository(ctx context.Context, id string) (*Repository, error)
 	BuildRepositoryUnderstanding(ctx context.Context, input BuildRepositoryUnderstandingInput) (*RepositoryUnderstanding, error)
 	UpdateRepositoryKnowledgeSettings(ctx context.Context, input UpdateRepositoryKnowledgeSettingsInput) (*Repository, error)
@@ -833,7 +855,9 @@ type MutationResolver interface {
 	DismissAllDiscoveredRequirements(ctx context.Context, repositoryID string) (int, error)
 	LinkRepos(ctx context.Context, sourceRepoID string, targetRepoID string, linkType *string) (*RepoLink, error)
 	UnlinkRepos(ctx context.Context, linkID string) (bool, error)
+	UnlinkReposResult(ctx context.Context, linkID string) (*MutationResult, error)
 	DetectContracts(ctx context.Context, repoID string) (bool, error)
+	DetectContractsResult(ctx context.Context, repoID string) (*MutationResult, error)
 	GenerateCliffNotes(ctx context.Context, input GenerateCliffNotesInput) (*KnowledgeArtifact, error)
 	GenerateArchitectureDiagram(ctx context.Context, input GenerateArchitectureDiagramInput) (*KnowledgeArtifact, error)
 	GenerateLearningPath(ctx context.Context, input GenerateLearningPathInput) (*KnowledgeArtifact, error)
@@ -845,6 +869,7 @@ type MutationResolver interface {
 	ResetComprehensionSettings(ctx context.Context, scopeType string, scopeKey *string) (bool, error)
 	UpdateModelCapabilities(ctx context.Context, input UpdateModelCapabilitiesInput) (*ModelCapabilityProfile, error)
 	DeleteModelCapabilities(ctx context.Context, modelID string) (bool, error)
+	DeleteModelCapabilitiesResult(ctx context.Context, modelID string) (*MutationResult, error)
 }
 type QueryResolver interface {
 	Health(ctx context.Context) (*HealthStatus, error)
@@ -859,6 +884,7 @@ type QueryResolver interface {
 	Search(ctx context.Context, query string, repositoryID *string, limit *int) ([]*SearchResult, error)
 	TraceabilityMatrix(ctx context.Context, repositoryID string) (*TraceabilityMatrix, error)
 	RequirementLinks(ctx context.Context, requirementID string, limit *int, offset *int) ([]*RequirementLink, error)
+	RequirementLinksConnection(ctx context.Context, requirementID string, limit *int, offset *int) (*RequirementLinkConnection, error)
 	RequirementToCode(ctx context.Context, requirementID string) ([]*RequirementLink, error)
 	CodeToRequirements(ctx context.Context, symbolID string) ([]*RequirementLink, error)
 	SourceFile(ctx context.Context, repositoryID string, filePath string) (*SourceFileResult, error)
@@ -878,6 +904,7 @@ type QueryResolver interface {
 	ArchitectureDiagram(ctx context.Context, repoID string, level DiagramLevel, moduleFilter *string, moduleDepth *int, maxNodes *int) (*DiagramOutput, error)
 	RepoLinks(ctx context.Context, repoID string) ([]*RepoLink, error)
 	CrossRepoRefs(ctx context.Context, repoID string, refType *CrossRepoRefType, limit *int) ([]*CrossRepoRef, error)
+	CrossRepoRefsConnection(ctx context.Context, repoID string, refType *CrossRepoRefType, limit *int) (*CrossRepoRefConnection, error)
 	SymbolCrossRepoRefs(ctx context.Context, symbolID string) ([]*CrossRepoRef, error)
 	APIContracts(ctx context.Context, repoID string) ([]*APIContract, error)
 	LlmUsage(ctx context.Context, repositoryID *string, limit *int) ([]*LLMUsageEntry, error)
@@ -1402,6 +1429,20 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.CrossRepoRef.TargetSymbolID(childComplexity), true
+
+	case "CrossRepoRefConnection.nodes":
+		if e.complexity.CrossRepoRefConnection.Nodes == nil {
+			break
+		}
+
+		return e.complexity.CrossRepoRefConnection.Nodes(childComplexity), true
+
+	case "CrossRepoRefConnection.totalCount":
+		if e.complexity.CrossRepoRefConnection.TotalCount == nil {
+			break
+		}
+
+		return e.complexity.CrossRepoRefConnection.TotalCount(childComplexity), true
 
 	case "DiagramEdge.callCount":
 		if e.complexity.DiagramEdge.CallCount == nil {
@@ -3288,6 +3329,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Mutation.DeleteModelCapabilities(childComplexity, args["modelId"].(string)), true
 
+	case "Mutation.deleteModelCapabilitiesResult":
+		if e.complexity.Mutation.DeleteModelCapabilitiesResult == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_deleteModelCapabilitiesResult_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.DeleteModelCapabilitiesResult(childComplexity, args["modelId"].(string)), true
+
 	case "Mutation.detectContracts":
 		if e.complexity.Mutation.DetectContracts == nil {
 			break
@@ -3299,6 +3352,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.DetectContracts(childComplexity, args["repoId"].(string)), true
+
+	case "Mutation.detectContractsResult":
+		if e.complexity.Mutation.DetectContractsResult == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_detectContractsResult_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.DetectContractsResult(childComplexity, args["repoId"].(string)), true
 
 	case "Mutation.discussCode":
 		if e.complexity.Mutation.DiscussCode == nil {
@@ -3492,6 +3557,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Mutation.RemoveRepository(childComplexity, args["id"].(string)), true
 
+	case "Mutation.removeRepositoryResult":
+		if e.complexity.Mutation.RemoveRepositoryResult == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_removeRepositoryResult_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.RemoveRepositoryResult(childComplexity, args["id"].(string)), true
+
 	case "Mutation.resetComprehensionSettings":
 		if e.complexity.Mutation.ResetComprehensionSettings == nil {
 			break
@@ -3552,6 +3629,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Mutation.UnlinkRepos(childComplexity, args["linkId"].(string)), true
 
+	case "Mutation.unlinkReposResult":
+		if e.complexity.Mutation.UnlinkReposResult == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_unlinkReposResult_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.UnlinkReposResult(childComplexity, args["linkId"].(string)), true
+
 	case "Mutation.updateComprehensionSettings":
 		if e.complexity.Mutation.UpdateComprehensionSettings == nil {
 			break
@@ -3599,6 +3688,20 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.VerifyLink(childComplexity, args["linkId"].(string), args["verified"].(bool)), true
+
+	case "MutationResult.error":
+		if e.complexity.MutationResult.Error == nil {
+			break
+		}
+
+		return e.complexity.MutationResult.Error(childComplexity), true
+
+	case "MutationResult.success":
+		if e.complexity.MutationResult.Success == nil {
+			break
+		}
+
+		return e.complexity.MutationResult.Success(childComplexity), true
 
 	case "PlatformStats.files":
 		if e.complexity.PlatformStats.Files == nil {
@@ -3741,6 +3844,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.CrossRepoRefs(childComplexity, args["repoId"].(string), args["refType"].(*CrossRepoRefType), args["limit"].(*int)), true
+
+	case "Query.crossRepoRefsConnection":
+		if e.complexity.Query.CrossRepoRefsConnection == nil {
+			break
+		}
+
+		args, err := ec.field_Query_crossRepoRefsConnection_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.CrossRepoRefsConnection(childComplexity, args["repoId"].(string), args["refType"].(*CrossRepoRefType), args["limit"].(*int)), true
 
 	case "Query.discoveredRequirement":
 		if e.complexity.Query.DiscoveredRequirement == nil {
@@ -3975,6 +4090,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.RequirementLinks(childComplexity, args["requirementId"].(string), args["limit"].(*int), args["offset"].(*int)), true
+
+	case "Query.requirementLinksConnection":
+		if e.complexity.Query.RequirementLinksConnection == nil {
+			break
+		}
+
+		args, err := ec.field_Query_requirementLinksConnection_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.RequirementLinksConnection(childComplexity, args["requirementId"].(string), args["limit"].(*int), args["offset"].(*int)), true
 
 	case "Query.requirementToCode":
 		if e.complexity.Query.RequirementToCode == nil {
@@ -4541,6 +4668,20 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.RequirementLink.VerifiedBy(childComplexity), true
+
+	case "RequirementLinkConnection.nodes":
+		if e.complexity.RequirementLinkConnection.Nodes == nil {
+			break
+		}
+
+		return e.complexity.RequirementLinkConnection.Nodes(childComplexity), true
+
+	case "RequirementLinkConnection.totalCount":
+		if e.complexity.RequirementLinkConnection.TotalCount == nil {
+			break
+		}
+
+		return e.complexity.RequirementLinkConnection.TotalCount(childComplexity), true
 
 	case "ResolvedSymbol.filePath":
 		if e.complexity.ResolvedSymbol.FilePath == nil {
@@ -5500,6 +5641,34 @@ func (ec *executionContext) field_Mutation_createManualLink_argsInput(
 	return zeroVal, nil
 }
 
+func (ec *executionContext) field_Mutation_deleteModelCapabilitiesResult_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_deleteModelCapabilitiesResult_argsModelID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["modelId"] = arg0
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_deleteModelCapabilitiesResult_argsModelID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["modelId"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("modelId"))
+	if tmp, ok := rawArgs["modelId"]; ok {
+		return ec.unmarshalNString2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
 func (ec *executionContext) field_Mutation_deleteModelCapabilities_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -5522,6 +5691,34 @@ func (ec *executionContext) field_Mutation_deleteModelCapabilities_argsModelID(
 	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("modelId"))
 	if tmp, ok := rawArgs["modelId"]; ok {
 		return ec.unmarshalNString2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_detectContractsResult_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_detectContractsResult_argsRepoID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["repoId"] = arg0
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_detectContractsResult_argsRepoID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["repoId"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("repoId"))
+	if tmp, ok := rawArgs["repoId"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
 	}
 
 	var zeroVal string
@@ -6091,6 +6288,34 @@ func (ec *executionContext) field_Mutation_reindexRepository_argsID(
 	return zeroVal, nil
 }
 
+func (ec *executionContext) field_Mutation_removeRepositoryResult_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_removeRepositoryResult_argsID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg0
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_removeRepositoryResult_argsID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["id"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("id"))
+	if tmp, ok := rawArgs["id"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
 func (ec *executionContext) field_Mutation_removeRepository_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -6251,6 +6476,34 @@ func (ec *executionContext) field_Mutation_triggerSpecExtraction_argsInput(
 	}
 
 	var zeroVal TriggerSpecExtractionInput
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_unlinkReposResult_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_unlinkReposResult_argsLinkID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["linkId"] = arg0
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_unlinkReposResult_argsLinkID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["linkId"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("linkId"))
+	if tmp, ok := rawArgs["linkId"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
 	return zeroVal, nil
 }
 
@@ -6720,6 +6973,80 @@ func (ec *executionContext) field_Query_comprehensionSettings_argsScopeKey(
 	}
 
 	var zeroVal *string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Query_crossRepoRefsConnection_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Query_crossRepoRefsConnection_argsRepoID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["repoId"] = arg0
+	arg1, err := ec.field_Query_crossRepoRefsConnection_argsRefType(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["refType"] = arg1
+	arg2, err := ec.field_Query_crossRepoRefsConnection_argsLimit(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["limit"] = arg2
+	return args, nil
+}
+func (ec *executionContext) field_Query_crossRepoRefsConnection_argsRepoID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["repoId"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("repoId"))
+	if tmp, ok := rawArgs["repoId"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Query_crossRepoRefsConnection_argsRefType(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*CrossRepoRefType, error) {
+	if _, ok := rawArgs["refType"]; !ok {
+		var zeroVal *CrossRepoRefType
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("refType"))
+	if tmp, ok := rawArgs["refType"]; ok {
+		return ec.unmarshalOCrossRepoRefType2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐCrossRepoRefType(ctx, tmp)
+	}
+
+	var zeroVal *CrossRepoRefType
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Query_crossRepoRefsConnection_argsLimit(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*int, error) {
+	if _, ok := rawArgs["limit"]; !ok {
+		var zeroVal *int
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("limit"))
+	if tmp, ok := rawArgs["limit"]; ok {
+		return ec.unmarshalOInt2ᚖint(ctx, tmp)
+	}
+
+	var zeroVal *int
 	return zeroVal, nil
 }
 
@@ -7508,6 +7835,80 @@ func (ec *executionContext) field_Query_repository_argsID(
 	}
 
 	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Query_requirementLinksConnection_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Query_requirementLinksConnection_argsRequirementID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["requirementId"] = arg0
+	arg1, err := ec.field_Query_requirementLinksConnection_argsLimit(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["limit"] = arg1
+	arg2, err := ec.field_Query_requirementLinksConnection_argsOffset(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["offset"] = arg2
+	return args, nil
+}
+func (ec *executionContext) field_Query_requirementLinksConnection_argsRequirementID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["requirementId"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("requirementId"))
+	if tmp, ok := rawArgs["requirementId"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Query_requirementLinksConnection_argsLimit(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*int, error) {
+	if _, ok := rawArgs["limit"]; !ok {
+		var zeroVal *int
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("limit"))
+	if tmp, ok := rawArgs["limit"]; ok {
+		return ec.unmarshalOInt2ᚖint(ctx, tmp)
+	}
+
+	var zeroVal *int
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Query_requirementLinksConnection_argsOffset(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*int, error) {
+	if _, ok := rawArgs["offset"]; !ok {
+		var zeroVal *int
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("offset"))
+	if tmp, ok := rawArgs["offset"]; ok {
+		return ec.unmarshalOInt2ᚖint(ctx, tmp)
+	}
+
+	var zeroVal *int
 	return zeroVal, nil
 }
 
@@ -11460,6 +11861,118 @@ func (ec *executionContext) fieldContext_CrossRepoRef_createdAt(_ context.Contex
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _CrossRepoRefConnection_nodes(ctx context.Context, field graphql.CollectedField, obj *CrossRepoRefConnection) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_CrossRepoRefConnection_nodes(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Nodes, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.([]*CrossRepoRef)
+	fc.Result = res
+	return ec.marshalNCrossRepoRef2ᚕᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐCrossRepoRefᚄ(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_CrossRepoRefConnection_nodes(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "CrossRepoRefConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_CrossRepoRef_id(ctx, field)
+			case "sourceSymbolId":
+				return ec.fieldContext_CrossRepoRef_sourceSymbolId(ctx, field)
+			case "targetSymbolId":
+				return ec.fieldContext_CrossRepoRef_targetSymbolId(ctx, field)
+			case "sourceRepoId":
+				return ec.fieldContext_CrossRepoRef_sourceRepoId(ctx, field)
+			case "targetRepoId":
+				return ec.fieldContext_CrossRepoRef_targetRepoId(ctx, field)
+			case "refType":
+				return ec.fieldContext_CrossRepoRef_refType(ctx, field)
+			case "confidence":
+				return ec.fieldContext_CrossRepoRef_confidence(ctx, field)
+			case "contractFile":
+				return ec.fieldContext_CrossRepoRef_contractFile(ctx, field)
+			case "consumerFile":
+				return ec.fieldContext_CrossRepoRef_consumerFile(ctx, field)
+			case "evidence":
+				return ec.fieldContext_CrossRepoRef_evidence(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_CrossRepoRef_createdAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type CrossRepoRef", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _CrossRepoRefConnection_totalCount(ctx context.Context, field graphql.CollectedField, obj *CrossRepoRefConnection) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_CrossRepoRefConnection_totalCount(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.TotalCount, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(int)
+	fc.Result = res
+	return ec.marshalNInt2int(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_CrossRepoRefConnection_totalCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "CrossRepoRefConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
 		},
 	}
 	return fc, nil
@@ -23195,6 +23708,67 @@ func (ec *executionContext) fieldContext_Mutation_removeRepository(ctx context.C
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_removeRepositoryResult(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_removeRepositoryResult(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().RemoveRepositoryResult(rctx, fc.Args["id"].(string))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*MutationResult)
+	fc.Result = res
+	return ec.marshalNMutationResult2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐMutationResult(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_removeRepositoryResult(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "success":
+				return ec.fieldContext_MutationResult_success(ctx, field)
+			case "error":
+				return ec.fieldContext_MutationResult_error(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type MutationResult", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_removeRepositoryResult_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Mutation_reindexRepository(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_Mutation_reindexRepository(ctx, field)
 	if err != nil {
@@ -24515,6 +25089,67 @@ func (ec *executionContext) fieldContext_Mutation_unlinkRepos(ctx context.Contex
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_unlinkReposResult(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_unlinkReposResult(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().UnlinkReposResult(rctx, fc.Args["linkId"].(string))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*MutationResult)
+	fc.Result = res
+	return ec.marshalNMutationResult2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐMutationResult(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_unlinkReposResult(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "success":
+				return ec.fieldContext_MutationResult_success(ctx, field)
+			case "error":
+				return ec.fieldContext_MutationResult_error(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type MutationResult", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_unlinkReposResult_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Mutation_detectContracts(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_Mutation_detectContracts(ctx, field)
 	if err != nil {
@@ -24564,6 +25199,67 @@ func (ec *executionContext) fieldContext_Mutation_detectContracts(ctx context.Co
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_detectContracts_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_detectContractsResult(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_detectContractsResult(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().DetectContractsResult(rctx, fc.Args["repoId"].(string))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*MutationResult)
+	fc.Result = res
+	return ec.marshalNMutationResult2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐMutationResult(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_detectContractsResult(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "success":
+				return ec.fieldContext_MutationResult_success(ctx, field)
+			case "error":
+				return ec.fieldContext_MutationResult_error(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type MutationResult", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_detectContractsResult_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -25559,6 +26255,152 @@ func (ec *executionContext) fieldContext_Mutation_deleteModelCapabilities(ctx co
 	if fc.Args, err = ec.field_Mutation_deleteModelCapabilities_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_deleteModelCapabilitiesResult(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_deleteModelCapabilitiesResult(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().DeleteModelCapabilitiesResult(rctx, fc.Args["modelId"].(string))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*MutationResult)
+	fc.Result = res
+	return ec.marshalNMutationResult2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐMutationResult(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_deleteModelCapabilitiesResult(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "success":
+				return ec.fieldContext_MutationResult_success(ctx, field)
+			case "error":
+				return ec.fieldContext_MutationResult_error(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type MutationResult", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_deleteModelCapabilitiesResult_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _MutationResult_success(ctx context.Context, field graphql.CollectedField, obj *MutationResult) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_MutationResult_success(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Success, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(bool)
+	fc.Result = res
+	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_MutationResult_success(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "MutationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _MutationResult_error(ctx context.Context, field graphql.CollectedField, obj *MutationResult) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_MutationResult_error(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Error, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_MutationResult_error(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "MutationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
 	}
 	return fc, nil
 }
@@ -26854,6 +27696,67 @@ func (ec *executionContext) fieldContext_Query_requirementLinks(ctx context.Cont
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_requirementLinks_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_requirementLinksConnection(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Query_requirementLinksConnection(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Query().RequirementLinksConnection(rctx, fc.Args["requirementId"].(string), fc.Args["limit"].(*int), fc.Args["offset"].(*int))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*RequirementLinkConnection)
+	fc.Result = res
+	return ec.marshalNRequirementLinkConnection2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRequirementLinkConnection(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Query_requirementLinksConnection(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "nodes":
+				return ec.fieldContext_RequirementLinkConnection_nodes(ctx, field)
+			case "totalCount":
+				return ec.fieldContext_RequirementLinkConnection_totalCount(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type RequirementLinkConnection", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_requirementLinksConnection_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -28319,6 +29222,67 @@ func (ec *executionContext) fieldContext_Query_crossRepoRefs(ctx context.Context
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_crossRepoRefs_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_crossRepoRefsConnection(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Query_crossRepoRefsConnection(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Query().CrossRepoRefsConnection(rctx, fc.Args["repoId"].(string), fc.Args["refType"].(*CrossRepoRefType), fc.Args["limit"].(*int))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*CrossRepoRefConnection)
+	fc.Result = res
+	return ec.marshalNCrossRepoRefConnection2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐCrossRepoRefConnection(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Query_crossRepoRefsConnection(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "nodes":
+				return ec.fieldContext_CrossRepoRefConnection_nodes(ctx, field)
+			case "totalCount":
+				return ec.fieldContext_CrossRepoRefConnection_totalCount(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type CrossRepoRefConnection", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_crossRepoRefsConnection_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -31982,6 +32946,116 @@ func (ec *executionContext) fieldContext_RequirementLink_createdAt(_ context.Con
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RequirementLinkConnection_nodes(ctx context.Context, field graphql.CollectedField, obj *RequirementLinkConnection) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RequirementLinkConnection_nodes(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Nodes, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.([]*RequirementLink)
+	fc.Result = res
+	return ec.marshalNRequirementLink2ᚕᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRequirementLinkᚄ(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RequirementLinkConnection_nodes(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RequirementLinkConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_RequirementLink_id(ctx, field)
+			case "requirementId":
+				return ec.fieldContext_RequirementLink_requirementId(ctx, field)
+			case "symbolId":
+				return ec.fieldContext_RequirementLink_symbolId(ctx, field)
+			case "confidence":
+				return ec.fieldContext_RequirementLink_confidence(ctx, field)
+			case "rationale":
+				return ec.fieldContext_RequirementLink_rationale(ctx, field)
+			case "verified":
+				return ec.fieldContext_RequirementLink_verified(ctx, field)
+			case "verifiedBy":
+				return ec.fieldContext_RequirementLink_verifiedBy(ctx, field)
+			case "symbol":
+				return ec.fieldContext_RequirementLink_symbol(ctx, field)
+			case "requirement":
+				return ec.fieldContext_RequirementLink_requirement(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_RequirementLink_createdAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type RequirementLink", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RequirementLinkConnection_totalCount(ctx context.Context, field graphql.CollectedField, obj *RequirementLinkConnection) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RequirementLinkConnection_totalCount(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.TotalCount, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(int)
+	fc.Result = res
+	return ec.marshalNInt2int(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RequirementLinkConnection_totalCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RequirementLinkConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
 		},
 	}
 	return fc, nil
@@ -39597,6 +40671,50 @@ func (ec *executionContext) _CrossRepoRef(ctx context.Context, sel ast.Selection
 	return out
 }
 
+var crossRepoRefConnectionImplementors = []string{"CrossRepoRefConnection"}
+
+func (ec *executionContext) _CrossRepoRefConnection(ctx context.Context, sel ast.SelectionSet, obj *CrossRepoRefConnection) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, crossRepoRefConnectionImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("CrossRepoRefConnection")
+		case "nodes":
+			out.Values[i] = ec._CrossRepoRefConnection_nodes(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "totalCount":
+			out.Values[i] = ec._CrossRepoRefConnection_totalCount(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var diagramEdgeImplementors = []string{"DiagramEdge"}
 
 func (ec *executionContext) _DiagramEdge(ctx context.Context, sel ast.SelectionSet, obj *DiagramEdge) graphql.Marshaler {
@@ -41811,6 +42929,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "removeRepositoryResult":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_removeRepositoryResult(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		case "reindexRepository":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_reindexRepository(ctx, field)
@@ -41937,9 +43062,23 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "unlinkReposResult":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_unlinkReposResult(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		case "detectContracts":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_detectContracts(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "detectContractsResult":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_detectContractsResult(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
@@ -42021,6 +43160,54 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "deleteModelCapabilitiesResult":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_deleteModelCapabilitiesResult(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var mutationResultImplementors = []string{"MutationResult"}
+
+func (ec *executionContext) _MutationResult(ctx context.Context, sel ast.SelectionSet, obj *MutationResult) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, mutationResultImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("MutationResult")
+		case "success":
+			out.Values[i] = ec._MutationResult_success(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "error":
+			out.Values[i] = ec._MutationResult_error(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -42434,6 +43621,28 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "requirementLinksConnection":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_requirementLinksConnection(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
 		case "requirementToCode":
 			field := field
 
@@ -42822,6 +44031,28 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_crossRepoRefs(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "crossRepoRefsConnection":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_crossRepoRefsConnection(ctx, field)
 				if res == graphql.Null {
 					atomic.AddUint32(&fs.Invalids, 1)
 				}
@@ -43567,6 +44798,50 @@ func (ec *executionContext) _RequirementLink(ctx context.Context, sel ast.Select
 			out.Values[i] = ec._RequirementLink_requirement(ctx, field, obj)
 		case "createdAt":
 			out.Values[i] = ec._RequirementLink_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var requirementLinkConnectionImplementors = []string{"RequirementLinkConnection"}
+
+func (ec *executionContext) _RequirementLinkConnection(ctx context.Context, sel ast.SelectionSet, obj *RequirementLinkConnection) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, requirementLinkConnectionImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("RequirementLinkConnection")
+		case "nodes":
+			out.Values[i] = ec._RequirementLinkConnection_nodes(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "totalCount":
+			out.Values[i] = ec._RequirementLinkConnection_totalCount(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
@@ -45248,6 +46523,20 @@ func (ec *executionContext) marshalNCrossRepoRef2ᚖgithubᚗcomᚋsourcebridge�
 	return ec._CrossRepoRef(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNCrossRepoRefConnection2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐCrossRepoRefConnection(ctx context.Context, sel ast.SelectionSet, v CrossRepoRefConnection) graphql.Marshaler {
+	return ec._CrossRepoRefConnection(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNCrossRepoRefConnection2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐCrossRepoRefConnection(ctx context.Context, sel ast.SelectionSet, v *CrossRepoRefConnection) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._CrossRepoRefConnection(ctx, sel, v)
+}
+
 func (ec *executionContext) unmarshalNCrossRepoRefType2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐCrossRepoRefType(ctx context.Context, v any) (CrossRepoRefType, error) {
 	var res CrossRepoRefType
 	err := res.UnmarshalGQL(v)
@@ -46561,6 +47850,20 @@ func (ec *executionContext) marshalNModule2ᚖgithubᚗcomᚋsourcebridgeᚋsour
 	return ec._Module(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNMutationResult2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐMutationResult(ctx context.Context, sel ast.SelectionSet, v MutationResult) graphql.Marshaler {
+	return ec._MutationResult(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNMutationResult2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐMutationResult(ctx context.Context, sel ast.SelectionSet, v *MutationResult) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._MutationResult(ctx, sel, v)
+}
+
 func (ec *executionContext) marshalNPlatformStats2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐPlatformStats(ctx context.Context, sel ast.SelectionSet, v PlatformStats) graphql.Marshaler {
 	return ec._PlatformStats(ctx, sel, &v)
 }
@@ -46887,6 +48190,20 @@ func (ec *executionContext) marshalNRequirementLink2ᚖgithubᚗcomᚋsourcebrid
 		return graphql.Null
 	}
 	return ec._RequirementLink(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNRequirementLinkConnection2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRequirementLinkConnection(ctx context.Context, sel ast.SelectionSet, v RequirementLinkConnection) graphql.Marshaler {
+	return ec._RequirementLinkConnection(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNRequirementLinkConnection2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRequirementLinkConnection(ctx context.Context, sel ast.SelectionSet, v *RequirementLinkConnection) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._RequirementLinkConnection(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalNResolvedSymbol2ᚕᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐResolvedSymbolᚄ(ctx context.Context, sel ast.SelectionSet, v []*ResolvedSymbol) graphql.Marshaler {

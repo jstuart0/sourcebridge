@@ -58,18 +58,25 @@ class OpenAICompatProvider:
         draft_model: str | None = None,
         provider_name: str | None = None,
         disable_thinking: bool = False,
+        timeout: float | None = None,
     ) -> None:
         normalized_api_key = _normalize_api_key(provider_name, api_key)
+        # Default of 900s (15 min) matches WorkerConfig.llm_timeout and is
+        # tuned for slow local models (qwen3:32b, MoEs, large thinking
+        # models). Callers can pass an explicit timeout sourced from the
+        # admin-configured TimeoutSecs value.
+        effective_timeout = 900.0 if timeout is None or timeout <= 0 else float(timeout)
         self.client = openai.AsyncOpenAI(
             api_key=normalized_api_key,
             base_url=base_url,
-            timeout=600.0,
+            timeout=effective_timeout,
             default_headers=extra_headers or {},
         )
         self.model = model
         self.draft_model = draft_model
         self.provider_name = provider_name
         self.disable_thinking = disable_thinking
+        self.timeout = effective_timeout
 
     @property
     def default_model(self) -> str:

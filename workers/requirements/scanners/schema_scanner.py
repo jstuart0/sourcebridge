@@ -6,6 +6,8 @@ import json
 import os
 import re
 
+import yaml  # type: ignore[import-untyped]
+
 from workers.requirements.spec_models import CandidateSpec
 
 # Schema file detection patterns
@@ -163,8 +165,6 @@ class APISchemaScanner:
             data = json.loads(content)
         except (json.JSONDecodeError, ValueError):
             try:
-                import yaml  # noqa: F811
-
                 data = yaml.safe_load(content)
             except Exception:
                 return candidates

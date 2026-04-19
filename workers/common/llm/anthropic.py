@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
+from typing import Any, cast
 
 import anthropic
 
@@ -72,12 +73,12 @@ class AnthropicProvider:
     ) -> LLMResponse:
         """Generate a completion via Anthropic API."""
         use_model = model or self.model
-        message = await self.client.messages.create(
+        message = await self.client.messages.create(  # type: ignore[call-overload]
             model=use_model,
             max_tokens=max_tokens,
             temperature=temperature,
             system=self._build_system(system),
-            messages=[{"role": "user", "content": prompt}],
+            messages=cast(list[dict[str, Any]], [{"role": "user", "content": prompt}]),
         )
 
         # Log cache performance when available

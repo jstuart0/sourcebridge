@@ -73,6 +73,7 @@ from workers.comprehension.strategy import (
     _noop_progress,
 )
 from workers.comprehension.tree import SummaryNode, SummaryTree
+from workers.knowledge.parse_utils import coerce_int
 
 log = structlog.get_logger()
 
@@ -1044,7 +1045,7 @@ def _deterministic_leaf_summary(unit: CorpusUnit) -> str | None:
     module_label = str(metadata.get("module_label") or "")
 
     if metadata.get("chunked"):
-        symbol_count = int(metadata.get("symbol_count") or 0)
+        symbol_count = coerce_int(metadata.get("symbol_count"))
         symbol_names = [str(name) for name in (metadata.get("symbol_names") or []) if str(name)]
         roles = [ROLE_LABELS.get(str(role), str(role).replace("_", " ")) for role in (metadata.get("symbol_roles") or [])]
         headline = f"Groups {symbol_count or 'multiple'} related symbols in {file_path or unit.label}"
@@ -1065,11 +1066,11 @@ def _deterministic_leaf_summary(unit: CorpusUnit) -> str | None:
     symbol_name = str(metadata.get("symbol_name") or unit.label or "symbol")
     symbol_kind = str(metadata.get("symbol_kind") or "symbol")
     roles = [ROLE_LABELS.get(str(role), str(role).replace("_", " ")) for role in (metadata.get("symbol_roles") or [])]
-    fan_in = int(metadata.get("fan_in") or 0)
-    fan_out = int(metadata.get("fan_out") or 0)
+    fan_in = coerce_int(metadata.get("fan_in"))
+    fan_out = coerce_int(metadata.get("fan_out"))
     has_doc_comment = bool(metadata.get("has_doc_comment"))
-    start_line = int(metadata.get("start_line") or 0)
-    end_line = int(metadata.get("end_line") or 0)
+    start_line = coerce_int(metadata.get("start_line"))
+    end_line = coerce_int(metadata.get("end_line"))
 
     headline = f"Defines {symbol_kind} `{symbol_name}`"
     body_parts = [
@@ -1115,8 +1116,8 @@ def _collect_file_facts(unit: CorpusUnit, children: list[SummaryNode]) -> dict[s
             symbol_names.append(name)
         if bool(metadata.get("has_doc_comment")):
             doc_comments += 1
-        max_fan_in = max(max_fan_in, int(metadata.get("fan_in") or 0))
-        max_fan_out = max(max_fan_out, int(metadata.get("fan_out") or 0))
+        max_fan_in = max(max_fan_in, coerce_int(metadata.get("fan_in")))
+        max_fan_out = max(max_fan_out, coerce_int(metadata.get("fan_out")))
         for role in metadata.get("symbol_roles") or []:
             role_counts[str(role)] += 1
         for signal in metadata.get("path_signals") or []:
@@ -1165,7 +1166,7 @@ def _collect_package_facts(unit: CorpusUnit, children: list[SummaryNode]) -> dic
         module_label = str(metadata.get("module_label") or "")
         if module_label:
             module_labels.append(module_label)
-        total_symbols += int(metadata.get("fact_symbol_count") or 0)
+        total_symbols += coerce_int(metadata.get("fact_symbol_count"))
         for label in metadata.get("fact_symbol_kinds") or []:
             kind = str(label).split(" (", 1)[0].strip()
             if kind:
@@ -1211,7 +1212,7 @@ def _collect_root_facts(
     for child in children:
         metadata = child.metadata or {}
         package_labels.append(child.unit_id)
-        total_symbols += int(metadata.get("fact_total_symbols") or 0)
+        total_symbols += coerce_int(metadata.get("fact_total_symbols"))
         key_files.extend([str(path) for path in (metadata.get("fact_key_files") or []) if str(path)])
         for label in metadata.get("fact_languages") or []:
             language = str(label).split(" (", 1)[0].strip()

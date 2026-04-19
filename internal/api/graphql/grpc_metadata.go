@@ -6,6 +6,7 @@ package graphql
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"google.golang.org/grpc/metadata"
@@ -41,6 +42,9 @@ func (r *Resolver) withJobMetadata(
 		"x-sb-llm-api-key", r.Config.LLM.APIKey,
 		"x-sb-llm-draft-model", r.Config.LLM.DraftModel,
 		"x-sb-operation", operationGroup,
+	}
+	if r.Config.LLM.TimeoutSecs > 0 {
+		pairs = append(pairs, "x-sb-llm-timeout-seconds", strconv.Itoa(r.Config.LLM.TimeoutSecs))
 	}
 	if model != "" {
 		pairs = append(pairs, "x-sb-model", model)

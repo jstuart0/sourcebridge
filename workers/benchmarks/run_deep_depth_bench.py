@@ -397,6 +397,7 @@ def benchmark_scenario(
     canonical_scenario = {
         "direct_deep": "deep_from_understanding",
         "medium_then_deep": "medium_then_deep_from_understanding",
+        "medium_only": "medium_from_understanding",
     }.get(scenario, scenario)
     project = f"sb-deep-{model_label.replace('.', '-').replace('_', '-')}-{scenario}"
     ports = project_ports(project)
@@ -438,11 +439,20 @@ def benchmark_scenario(
             medium_seconds = int(time.time() - started)
             print(f"[bench] model={model_label} scenario={canonical_scenario} medium in {medium_seconds}s", flush=True)
 
-        deep_started = time.time()
-        graphql(api_url, token, mutation_generate_cliff_notes(repo_id, "DEEP"))
-        deep_artifact = wait_artifact_ready(api_url, token, repo_id, "DEEP")
-        deep_seconds = int(time.time() - deep_started)
-        print(f"[bench] model={model_label} scenario={canonical_scenario} deep in {deep_seconds}s", flush=True)
+        if canonical_scenario == "medium_from_understanding":
+            started = time.time()
+            graphql(api_url, token, mutation_generate_cliff_notes(repo_id, "MEDIUM"))
+            medium_artifact = wait_artifact_ready(api_url, token, repo_id, "MEDIUM")
+            medium_seconds = int(time.time() - started)
+            print(f"[bench] model={model_label} scenario={canonical_scenario} medium in {medium_seconds}s", flush=True)
+            deep_artifact = medium_artifact
+            deep_seconds = 0
+        else:
+            deep_started = time.time()
+            graphql(api_url, token, mutation_generate_cliff_notes(repo_id, "DEEP"))
+            deep_artifact = wait_artifact_ready(api_url, token, repo_id, "DEEP")
+            deep_seconds = int(time.time() - deep_started)
+            print(f"[bench] model={model_label} scenario={canonical_scenario} deep in {deep_seconds}s", flush=True)
         total_seconds = index_seconds + understanding_seconds + medium_seconds + deep_seconds
         (
             section_count,

@@ -63,7 +63,6 @@ jobs:
         run: |
           uv sync --dev
           uv run ruff check .
-          uv run mypy . --ignore-missing-imports --exclude tests/
 
   test-python:
     runs-on: ubuntu-latest

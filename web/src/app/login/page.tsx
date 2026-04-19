@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { notifyTokenChanged } from "@/app/providers";
-import { TOKEN_KEY } from "@/lib/token-key";
+import { clearStoredToken, getStoredToken, setStoredToken } from "@/lib/auth-token-store";
 import { isTokenExpired } from "@/lib/auth-utils";
 import { Brand } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
@@ -19,11 +18,11 @@ export default function LoginPage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
+    const token = getStoredToken();
     if (token) {
       if (isTokenExpired(token)) {
         // Token exists but is expired — clear it and continue to login
-        localStorage.removeItem(TOKEN_KEY);
+        clearStoredToken();
       } else {
         router.replace("/repositories");
         return;
@@ -97,8 +96,7 @@ export default function LoginPage() {
 
       const data = await res.json();
       if (data.token) {
-        localStorage.setItem(TOKEN_KEY, data.token);
-        notifyTokenChanged();
+        setStoredToken(data.token);
       }
 
       router.push("/repositories");

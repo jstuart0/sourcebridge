@@ -87,6 +87,10 @@ func (s *Server) collectKnowledgeStats(store graphstore.GraphStore) knowledgeSta
 }
 
 func (s *Server) handleAdminKnowledgeStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Deprecation", "true")
+	w.Header().Set("Sunset", "Wed, 20 May 2026 00:00:00 GMT")
+	w.Header().Set("Link", `</graphql>; rel="successor-version"`)
+
 	if s.knowledgeStore == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"configured": false,

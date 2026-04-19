@@ -216,7 +216,10 @@ func Defaults() *Config {
 			ReviewModel:              "claude-sonnet-4-20250514",
 			AskModel:                 "claude-sonnet-4-20250514",
 			ArchitectureDiagramModel: "",
-			TimeoutSecs:              30,
+			// 900s (15 min) covers any single LLM call from the slowest local
+			// models we've measured. The prior 30s default was ignored
+			// downstream anyway; operators can tune via the admin UI.
+			TimeoutSecs: 900,
 		},
 		Linking: LinkingConfig{
 			MinConfidenceUI:        0.5,

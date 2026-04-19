@@ -81,7 +81,8 @@ def _extract_openapi_endpoints(content: str) -> list[Endpoint]:
                 if method.lower() in ("get", "post", "put", "patch", "delete", "head", "options"):
                     desc = ""
                     if isinstance(details, dict):
-                        desc = details.get("summary", details.get("description", ""))
+                        raw_desc = details.get("summary", details.get("description", ""))
+                        desc = raw_desc if isinstance(raw_desc, str) else ""
                     endpoints.append(Endpoint(path=path, method=method.upper(), description=desc))
         return endpoints
     except (json.JSONDecodeError, AttributeError):

@@ -29,6 +29,20 @@ _DEFAULT_TOP_K = 80
 # Batch size for embedding requests
 _EMBED_BATCH_SIZE = 256
 
+# Symbol embeddings are stable across renders — the same symbol text always
+# maps to the same vector for a given provider/model combination. Keeping an
+# in-process cache means a DEEP artifact that re-runs retrieval per group,
+# or a subsequent render of the same repo, pays the embedding cost only once.
+# Capped to bound memory: LRU-style eviction once full.
+_EMBEDDING_CACHE: dict[tuple[str, str, str], list[float]] = {}
+_EMBEDDING_CACHE_MAX = 50_000
+
+
+def _provider_cache_key(provider: EmbeddingProvider) -> tuple[str, str]:
+    model = getattr(provider, "_model", None) or getattr(provider, "model", None) or ""
+    base_url = getattr(provider, "_base_url", None) or getattr(provider, "base_url", None) or ""
+    return (f"{type(provider).__name__}:{model}", str(base_url))
+
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     """Compute cosine similarity between two vectors."""
@@ -59,13 +73,48 @@ async def _batch_embed(
     provider: EmbeddingProvider,
     texts: list[str],
 ) -> list[list[float]]:
-    """Embed texts in batches to avoid overwhelming the provider."""
-    all_embeddings: list[list[float]] = []
-    for i in range(0, len(texts), _EMBED_BATCH_SIZE):
-        batch = texts[i : i + _EMBED_BATCH_SIZE]
-        embeddings = await provider.embed(batch)
-        all_embeddings.extend(embeddings)
-    return all_embeddings
+    """Embed texts in batches, with an in-process cache keyed by text."""
+    provider_key, base_url_key = _provider_cache_key(provider)
+    cached: list[list[float] | None] = []
+    uncached_indices: list[int] = []
+    uncached_texts: list[str] = []
+    for idx, text in enumerate(texts):
+        cache_key = (provider_key, base_url_key, text)
+        vector = _EMBEDDING_CACHE.get(cache_key)
+        if vector is not None:
+            cached.append(vector)
+        else:
+            cached.append(None)
+            uncached_indices.append(idx)
+            uncached_texts.append(text)
+
+    hits = len(texts) - len(uncached_texts)
+    if hits and uncached_texts:
+        log.info("embedding_cache_partial", total=len(texts), hits=hits, misses=len(uncached_texts))
+    elif hits:
+        log.info("embedding_cache_full_hit", total=len(texts))
+
+    if uncached_texts:
+        fresh: list[list[float]] = []
+        for i in range(0, len(uncached_texts), _EMBED_BATCH_SIZE):
+            batch = uncached_texts[i : i + _EMBED_BATCH_SIZE]
+            batch_embeddings = await provider.embed(batch)
+            fresh.extend(batch_embeddings)
+        if len(_EMBEDDING_CACHE) > _EMBEDDING_CACHE_MAX:
+            # Simple drop-oldest: Python dicts preserve insertion order, so
+            # popping the first N keys behaves like FIFO eviction.
+            drop = len(_EMBEDDING_CACHE) - _EMBEDDING_CACHE_MAX + len(uncached_texts)
+            for key in list(_EMBEDDING_CACHE.keys())[:drop]:
+                _EMBEDDING_CACHE.pop(key, None)
+        for idx, text, vector in zip(uncached_indices, uncached_texts, fresh, strict=True):
+            cache_key = (provider_key, base_url_key, text)
+            _EMBEDDING_CACHE[cache_key] = vector
+            cached[idx] = vector
+
+    # By construction every entry in `cached` is now populated: either from
+    # the cache at the top of this function, or from the freshly-embedded
+    # `fresh` list above (strict=True zip guarantees length parity).
+    return [vec for vec in cached if vec is not None]
 
 
 async def retrieve_relevant_snapshot(
@@ -126,7 +175,7 @@ async def retrieve_relevant_snapshot(
         for idx, (key, orig_idx, sym) in enumerate(all_symbols):
             sim = cosine_similarity(query_embedding, symbol_embeddings[idx])
             scored.append((sim, key, orig_idx, sym))
-    except Exception as exc:
+    except (RuntimeError, TimeoutError, ConnectionError) as exc:
         log.error("retrieval_embedding_failed", error=str(exc))
         # Fall back to condensed snapshot
         from workers.knowledge.snapshot_truncate import condense_snapshot

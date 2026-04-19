@@ -1,5 +1,6 @@
 from common.v1 import types_pb2 as _types_pb2
 from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from collections.abc import Iterable as _Iterable, Mapping as _Mapping
@@ -7,8 +8,28 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class Audience(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    AUDIENCE_UNSPECIFIED: _ClassVar[Audience]
+    AUDIENCE_BEGINNER: _ClassVar[Audience]
+    AUDIENCE_DEVELOPER: _ClassVar[Audience]
+
+class Depth(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    DEPTH_UNSPECIFIED: _ClassVar[Depth]
+    DEPTH_SUMMARY: _ClassVar[Depth]
+    DEPTH_MEDIUM: _ClassVar[Depth]
+    DEPTH_DEEP: _ClassVar[Depth]
+AUDIENCE_UNSPECIFIED: Audience
+AUDIENCE_BEGINNER: Audience
+AUDIENCE_DEVELOPER: Audience
+DEPTH_UNSPECIFIED: Depth
+DEPTH_SUMMARY: Depth
+DEPTH_MEDIUM: Depth
+DEPTH_DEEP: Depth
+
 class GenerateCliffNotesRequest(_message.Message):
-    __slots__ = ("repository_id", "repository_name", "audience", "depth", "snapshot_json", "scope_type", "scope_path")
+    __slots__ = ("repository_id", "repository_name", "audience", "depth", "snapshot_json", "scope_type", "scope_path", "audience_enum", "depth_enum")
     REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
     REPOSITORY_NAME_FIELD_NUMBER: _ClassVar[int]
     AUDIENCE_FIELD_NUMBER: _ClassVar[int]
@@ -16,6 +37,8 @@ class GenerateCliffNotesRequest(_message.Message):
     SNAPSHOT_JSON_FIELD_NUMBER: _ClassVar[int]
     SCOPE_TYPE_FIELD_NUMBER: _ClassVar[int]
     SCOPE_PATH_FIELD_NUMBER: _ClassVar[int]
+    AUDIENCE_ENUM_FIELD_NUMBER: _ClassVar[int]
+    DEPTH_ENUM_FIELD_NUMBER: _ClassVar[int]
     repository_id: str
     repository_name: str
     audience: str
@@ -23,7 +46,9 @@ class GenerateCliffNotesRequest(_message.Message):
     snapshot_json: str
     scope_type: str
     scope_path: str
-    def __init__(self, repository_id: _Optional[str] = ..., repository_name: _Optional[str] = ..., audience: _Optional[str] = ..., depth: _Optional[str] = ..., snapshot_json: _Optional[str] = ..., scope_type: _Optional[str] = ..., scope_path: _Optional[str] = ...) -> None: ...
+    audience_enum: Audience
+    depth_enum: Depth
+    def __init__(self, repository_id: _Optional[str] = ..., repository_name: _Optional[str] = ..., audience: _Optional[str] = ..., depth: _Optional[str] = ..., snapshot_json: _Optional[str] = ..., scope_type: _Optional[str] = ..., scope_path: _Optional[str] = ..., audience_enum: _Optional[_Union[Audience, str]] = ..., depth_enum: _Optional[_Union[Depth, str]] = ...) -> None: ...
 
 class GenerateCliffNotesResponse(_message.Message):
     __slots__ = ("sections", "usage", "diagnostics")
@@ -36,20 +61,24 @@ class GenerateCliffNotesResponse(_message.Message):
     def __init__(self, sections: _Optional[_Iterable[_Union[KnowledgeSection, _Mapping]]] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ..., diagnostics: _Optional[_Union[CliffNotesDiagnostics, _Mapping]] = ...) -> None: ...
 
 class GenerateArchitectureDiagramRequest(_message.Message):
-    __slots__ = ("repository_id", "repository_name", "audience", "depth", "snapshot_json", "deterministic_diagram_json")
+    __slots__ = ("repository_id", "repository_name", "audience", "depth", "snapshot_json", "deterministic_diagram_json", "audience_enum", "depth_enum")
     REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
     REPOSITORY_NAME_FIELD_NUMBER: _ClassVar[int]
     AUDIENCE_FIELD_NUMBER: _ClassVar[int]
     DEPTH_FIELD_NUMBER: _ClassVar[int]
     SNAPSHOT_JSON_FIELD_NUMBER: _ClassVar[int]
     DETERMINISTIC_DIAGRAM_JSON_FIELD_NUMBER: _ClassVar[int]
+    AUDIENCE_ENUM_FIELD_NUMBER: _ClassVar[int]
+    DEPTH_ENUM_FIELD_NUMBER: _ClassVar[int]
     repository_id: str
     repository_name: str
     audience: str
     depth: str
     snapshot_json: str
     deterministic_diagram_json: str
-    def __init__(self, repository_id: _Optional[str] = ..., repository_name: _Optional[str] = ..., audience: _Optional[str] = ..., depth: _Optional[str] = ..., snapshot_json: _Optional[str] = ..., deterministic_diagram_json: _Optional[str] = ...) -> None: ...
+    audience_enum: Audience
+    depth_enum: Depth
+    def __init__(self, repository_id: _Optional[str] = ..., repository_name: _Optional[str] = ..., audience: _Optional[str] = ..., depth: _Optional[str] = ..., snapshot_json: _Optional[str] = ..., deterministic_diagram_json: _Optional[str] = ..., audience_enum: _Optional[_Union[Audience, str]] = ..., depth_enum: _Optional[_Union[Depth, str]] = ...) -> None: ...
 
 class GenerateArchitectureDiagramResponse(_message.Message):
     __slots__ = ("mermaid_source", "raw_mermaid_source", "validation_status", "repair_summary", "diagram_summary", "evidence", "inferred_edges", "usage", "detail_mermaid_source", "detail_raw_mermaid_source", "detail_validation_status", "detail_repair_summary", "detail_diagram_summary", "detail_subsystem_name", "detail_candidate_subsystems", "detail_evidence")
@@ -116,20 +145,24 @@ class CliffNotesDiagnostics(_message.Message):
     def __init__(self, cached_nodes: _Optional[int] = ..., fallback_count: _Optional[int] = ..., provider_compute_errors: _Optional[int] = ..., leaf_cache_hits: _Optional[int] = ..., file_cache_hits: _Optional[int] = ..., package_cache_hits: _Optional[int] = ..., root_cache_hits: _Optional[int] = ..., total_nodes: _Optional[int] = ..., corpus_id: _Optional[str] = ..., revision_fp: _Optional[str] = ..., strategy: _Optional[str] = ..., model_used: _Optional[str] = ...) -> None: ...
 
 class GenerateLearningPathRequest(_message.Message):
-    __slots__ = ("repository_id", "repository_name", "audience", "depth", "snapshot_json", "focus_area")
+    __slots__ = ("repository_id", "repository_name", "audience", "depth", "snapshot_json", "focus_area", "audience_enum", "depth_enum")
     REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
     REPOSITORY_NAME_FIELD_NUMBER: _ClassVar[int]
     AUDIENCE_FIELD_NUMBER: _ClassVar[int]
     DEPTH_FIELD_NUMBER: _ClassVar[int]
     SNAPSHOT_JSON_FIELD_NUMBER: _ClassVar[int]
     FOCUS_AREA_FIELD_NUMBER: _ClassVar[int]
+    AUDIENCE_ENUM_FIELD_NUMBER: _ClassVar[int]
+    DEPTH_ENUM_FIELD_NUMBER: _ClassVar[int]
     repository_id: str
     repository_name: str
     audience: str
     depth: str
     snapshot_json: str
     focus_area: str
-    def __init__(self, repository_id: _Optional[str] = ..., repository_name: _Optional[str] = ..., audience: _Optional[str] = ..., depth: _Optional[str] = ..., snapshot_json: _Optional[str] = ..., focus_area: _Optional[str] = ...) -> None: ...
+    audience_enum: Audience
+    depth_enum: Depth
+    def __init__(self, repository_id: _Optional[str] = ..., repository_name: _Optional[str] = ..., audience: _Optional[str] = ..., depth: _Optional[str] = ..., snapshot_json: _Optional[str] = ..., focus_area: _Optional[str] = ..., audience_enum: _Optional[_Union[Audience, str]] = ..., depth_enum: _Optional[_Union[Depth, str]] = ...) -> None: ...
 
 class GenerateLearningPathResponse(_message.Message):
     __slots__ = ("steps", "usage")
@@ -140,7 +173,7 @@ class GenerateLearningPathResponse(_message.Message):
     def __init__(self, steps: _Optional[_Iterable[_Union[LearningStep, _Mapping]]] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ...) -> None: ...
 
 class GenerateWorkflowStoryRequest(_message.Message):
-    __slots__ = ("repository_id", "repository_name", "audience", "depth", "snapshot_json", "scope_type", "scope_path", "anchor_label", "execution_path_json")
+    __slots__ = ("repository_id", "repository_name", "audience", "depth", "snapshot_json", "scope_type", "scope_path", "anchor_label", "execution_path_json", "audience_enum", "depth_enum")
     REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
     REPOSITORY_NAME_FIELD_NUMBER: _ClassVar[int]
     AUDIENCE_FIELD_NUMBER: _ClassVar[int]
@@ -150,6 +183,8 @@ class GenerateWorkflowStoryRequest(_message.Message):
     SCOPE_PATH_FIELD_NUMBER: _ClassVar[int]
     ANCHOR_LABEL_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_PATH_JSON_FIELD_NUMBER: _ClassVar[int]
+    AUDIENCE_ENUM_FIELD_NUMBER: _ClassVar[int]
+    DEPTH_ENUM_FIELD_NUMBER: _ClassVar[int]
     repository_id: str
     repository_name: str
     audience: str
@@ -159,7 +194,9 @@ class GenerateWorkflowStoryRequest(_message.Message):
     scope_path: str
     anchor_label: str
     execution_path_json: str
-    def __init__(self, repository_id: _Optional[str] = ..., repository_name: _Optional[str] = ..., audience: _Optional[str] = ..., depth: _Optional[str] = ..., snapshot_json: _Optional[str] = ..., scope_type: _Optional[str] = ..., scope_path: _Optional[str] = ..., anchor_label: _Optional[str] = ..., execution_path_json: _Optional[str] = ...) -> None: ...
+    audience_enum: Audience
+    depth_enum: Depth
+    def __init__(self, repository_id: _Optional[str] = ..., repository_name: _Optional[str] = ..., audience: _Optional[str] = ..., depth: _Optional[str] = ..., snapshot_json: _Optional[str] = ..., scope_type: _Optional[str] = ..., scope_path: _Optional[str] = ..., anchor_label: _Optional[str] = ..., execution_path_json: _Optional[str] = ..., audience_enum: _Optional[_Union[Audience, str]] = ..., depth_enum: _Optional[_Union[Depth, str]] = ...) -> None: ...
 
 class GenerateWorkflowStoryResponse(_message.Message):
     __slots__ = ("sections", "usage")
@@ -230,20 +267,24 @@ class ExplainSystemResponse(_message.Message):
     def __init__(self, explanation: _Optional[str] = ..., evidence: _Optional[_Iterable[_Union[KnowledgeEvidence, _Mapping]]] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ...) -> None: ...
 
 class GenerateCodeTourRequest(_message.Message):
-    __slots__ = ("repository_id", "repository_name", "audience", "depth", "snapshot_json", "theme")
+    __slots__ = ("repository_id", "repository_name", "audience", "depth", "snapshot_json", "theme", "audience_enum", "depth_enum")
     REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
     REPOSITORY_NAME_FIELD_NUMBER: _ClassVar[int]
     AUDIENCE_FIELD_NUMBER: _ClassVar[int]
     DEPTH_FIELD_NUMBER: _ClassVar[int]
     SNAPSHOT_JSON_FIELD_NUMBER: _ClassVar[int]
     THEME_FIELD_NUMBER: _ClassVar[int]
+    AUDIENCE_ENUM_FIELD_NUMBER: _ClassVar[int]
+    DEPTH_ENUM_FIELD_NUMBER: _ClassVar[int]
     repository_id: str
     repository_name: str
     audience: str
     depth: str
     snapshot_json: str
     theme: str
-    def __init__(self, repository_id: _Optional[str] = ..., repository_name: _Optional[str] = ..., audience: _Optional[str] = ..., depth: _Optional[str] = ..., snapshot_json: _Optional[str] = ..., theme: _Optional[str] = ...) -> None: ...
+    audience_enum: Audience
+    depth_enum: Depth
+    def __init__(self, repository_id: _Optional[str] = ..., repository_name: _Optional[str] = ..., audience: _Optional[str] = ..., depth: _Optional[str] = ..., snapshot_json: _Optional[str] = ..., theme: _Optional[str] = ..., audience_enum: _Optional[_Union[Audience, str]] = ..., depth_enum: _Optional[_Union[Depth, str]] = ...) -> None: ...
 
 class GenerateCodeTourResponse(_message.Message):
     __slots__ = ("stops", "usage")
@@ -310,79 +351,3 @@ class KnowledgeEvidence(_message.Message):
     line_end: int
     rationale: str
     def __init__(self, source_type: _Optional[str] = ..., source_id: _Optional[str] = ..., file_path: _Optional[str] = ..., line_start: _Optional[int] = ..., line_end: _Optional[int] = ..., rationale: _Optional[str] = ...) -> None: ...
-
-class GenerateReportRequest(_message.Message):
-    __slots__ = ("report_id", "report_name", "report_type", "audience", "repository_ids", "selected_sections", "include_diagrams", "loe_mode", "output_dir", "repo_data_json", "section_definitions_json", "model_override", "analysis_depth", "include_recommendations", "include_loe", "style_system_prompt", "style_section_rules")
-    REPORT_ID_FIELD_NUMBER: _ClassVar[int]
-    REPORT_NAME_FIELD_NUMBER: _ClassVar[int]
-    REPORT_TYPE_FIELD_NUMBER: _ClassVar[int]
-    AUDIENCE_FIELD_NUMBER: _ClassVar[int]
-    REPOSITORY_IDS_FIELD_NUMBER: _ClassVar[int]
-    SELECTED_SECTIONS_FIELD_NUMBER: _ClassVar[int]
-    INCLUDE_DIAGRAMS_FIELD_NUMBER: _ClassVar[int]
-    LOE_MODE_FIELD_NUMBER: _ClassVar[int]
-    OUTPUT_DIR_FIELD_NUMBER: _ClassVar[int]
-    REPO_DATA_JSON_FIELD_NUMBER: _ClassVar[int]
-    SECTION_DEFINITIONS_JSON_FIELD_NUMBER: _ClassVar[int]
-    MODEL_OVERRIDE_FIELD_NUMBER: _ClassVar[int]
-    ANALYSIS_DEPTH_FIELD_NUMBER: _ClassVar[int]
-    INCLUDE_RECOMMENDATIONS_FIELD_NUMBER: _ClassVar[int]
-    INCLUDE_LOE_FIELD_NUMBER: _ClassVar[int]
-    STYLE_SYSTEM_PROMPT_FIELD_NUMBER: _ClassVar[int]
-    STYLE_SECTION_RULES_FIELD_NUMBER: _ClassVar[int]
-    report_id: str
-    report_name: str
-    report_type: str
-    audience: str
-    repository_ids: _containers.RepeatedScalarFieldContainer[str]
-    selected_sections: _containers.RepeatedScalarFieldContainer[str]
-    include_diagrams: bool
-    loe_mode: str
-    output_dir: str
-    repo_data_json: str
-    section_definitions_json: str
-    model_override: str
-    analysis_depth: str
-    include_recommendations: bool
-    include_loe: bool
-    style_system_prompt: str
-    style_section_rules: str
-    def __init__(self, report_id: _Optional[str] = ..., report_name: _Optional[str] = ..., report_type: _Optional[str] = ..., audience: _Optional[str] = ..., repository_ids: _Optional[_Iterable[str]] = ..., selected_sections: _Optional[_Iterable[str]] = ..., include_diagrams: bool = ..., loe_mode: _Optional[str] = ..., output_dir: _Optional[str] = ..., repo_data_json: _Optional[str] = ..., section_definitions_json: _Optional[str] = ..., model_override: _Optional[str] = ..., analysis_depth: _Optional[str] = ..., include_recommendations: bool = ..., include_loe: bool = ..., style_system_prompt: _Optional[str] = ..., style_section_rules: _Optional[str] = ...) -> None: ...
-
-class GenerateReportResponse(_message.Message):
-    __slots__ = ("markdown", "section_count", "word_count", "evidence_count", "content_dir", "sections", "usage", "evidence_json")
-    MARKDOWN_FIELD_NUMBER: _ClassVar[int]
-    SECTION_COUNT_FIELD_NUMBER: _ClassVar[int]
-    WORD_COUNT_FIELD_NUMBER: _ClassVar[int]
-    EVIDENCE_COUNT_FIELD_NUMBER: _ClassVar[int]
-    CONTENT_DIR_FIELD_NUMBER: _ClassVar[int]
-    SECTIONS_FIELD_NUMBER: _ClassVar[int]
-    USAGE_FIELD_NUMBER: _ClassVar[int]
-    EVIDENCE_JSON_FIELD_NUMBER: _ClassVar[int]
-    markdown: str
-    section_count: int
-    word_count: int
-    evidence_count: int
-    content_dir: str
-    sections: _containers.RepeatedCompositeFieldContainer[ReportSectionResult]
-    usage: _types_pb2.LLMUsage
-    evidence_json: str
-    def __init__(self, markdown: _Optional[str] = ..., section_count: _Optional[int] = ..., word_count: _Optional[int] = ..., evidence_count: _Optional[int] = ..., content_dir: _Optional[str] = ..., sections: _Optional[_Iterable[_Union[ReportSectionResult, _Mapping]]] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ..., evidence_json: _Optional[str] = ...) -> None: ...
-
-class ReportSectionResult(_message.Message):
-    __slots__ = ("key", "title", "category", "status", "word_count", "duration_ms", "error_message")
-    KEY_FIELD_NUMBER: _ClassVar[int]
-    TITLE_FIELD_NUMBER: _ClassVar[int]
-    CATEGORY_FIELD_NUMBER: _ClassVar[int]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    WORD_COUNT_FIELD_NUMBER: _ClassVar[int]
-    DURATION_MS_FIELD_NUMBER: _ClassVar[int]
-    ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    key: str
-    title: str
-    category: str
-    status: str
-    word_count: int
-    duration_ms: int
-    error_message: str
-    def __init__(self, key: _Optional[str] = ..., title: _Optional[str] = ..., category: _Optional[str] = ..., status: _Optional[str] = ..., word_count: _Optional[int] = ..., duration_ms: _Optional[int] = ..., error_message: _Optional[str] = ...) -> None: ...

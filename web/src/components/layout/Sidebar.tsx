@@ -4,9 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, LogOut, Menu, X } from "lucide-react";
-import { notifyTokenChanged } from "@/app/providers";
+import { clearStoredToken } from "@/lib/auth-token-store";
 import { getNavigation, type ProductEdition } from "@/lib/navigation";
-import { TOKEN_KEY } from "@/lib/token-key";
 import { Brand, BrandEnterprise } from "@/components/brand/Logo";
 import { cn } from "@/lib/utils";
 
@@ -44,8 +43,7 @@ export function Sidebar({ onCollapseChange }: { onCollapseChange?: (collapsed: b
       // Ignore network errors during logout.
     }
 
-    localStorage.removeItem(TOKEN_KEY);
-    notifyTokenChanged();
+    clearStoredToken();
     router.push("/login");
   }, [router]);
 

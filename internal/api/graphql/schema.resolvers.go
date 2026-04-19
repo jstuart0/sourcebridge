@@ -90,10 +90,21 @@ func (r *mutationResolver) AddRepository(ctx context.Context, input AddRepositor
 
 // RemoveRepository is the resolver for the removeRepository field.
 func (r *mutationResolver) RemoveRepository(ctx context.Context, id string) (bool, error) {
+	recordDeprecatedFieldRead("Mutation.removeRepository")
 	if r.getStore(ctx) == nil {
 		return false, fmt.Errorf("store not initialized")
 	}
 	return r.getStore(ctx).RemoveRepository(id), nil
+}
+
+// RemoveRepositoryResult is the resolver for the removeRepositoryResult field.
+func (r *mutationResolver) RemoveRepositoryResult(ctx context.Context, id string) (*MutationResult, error) {
+	ok, err := r.RemoveRepository(ctx, id)
+	if err != nil {
+		message := err.Error()
+		return &MutationResult{Success: false, Error: &message}, nil
+	}
+	return &MutationResult{Success: ok}, nil
 }
 
 // ReindexRepository is the resolver for the reindexRepository field.
@@ -370,7 +381,9 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 			RepositoryId:   repo.ID,
 			RepositoryName: repo.Name,
 			Audience:       string(knowledgepkg.AudienceDeveloper),
+			AudienceEnum:   protoAudience(knowledgepkg.AudienceDeveloper),
 			Depth:          string(knowledgepkg.DepthMedium),
+			DepthEnum:      protoDepth(knowledgepkg.DepthMedium),
 			ScopeType:      string(scope.ScopeType),
 			ScopePath:      scope.ScopePath,
 			SnapshotJson:   string(snapshotJSON),
@@ -1396,6 +1409,7 @@ func (r *mutationResolver) LinkRepos(ctx context.Context, sourceRepoID string, t
 
 // UnlinkRepos is the resolver for the unlinkRepos field.
 func (r *mutationResolver) UnlinkRepos(ctx context.Context, linkID string) (bool, error) {
+	recordDeprecatedFieldRead("Mutation.unlinkRepos")
 	store := r.getStore(ctx)
 	if store == nil {
 		return false, fmt.Errorf("store not initialized")
@@ -1407,8 +1421,19 @@ func (r *mutationResolver) UnlinkRepos(ctx context.Context, linkID string) (bool
 	return true, nil
 }
 
+// UnlinkReposResult is the resolver for the unlinkReposResult field.
+func (r *mutationResolver) UnlinkReposResult(ctx context.Context, linkID string) (*MutationResult, error) {
+	ok, err := r.UnlinkRepos(ctx, linkID)
+	if err != nil {
+		message := err.Error()
+		return &MutationResult{Success: false, Error: &message}, nil
+	}
+	return &MutationResult{Success: ok}, nil
+}
+
 // DetectContracts is the resolver for the detectContracts field.
 func (r *mutationResolver) DetectContracts(ctx context.Context, repoID string) (bool, error) {
+	recordDeprecatedFieldRead("Mutation.detectContracts")
 	if r.Worker == nil {
 		return false, fmt.Errorf("AI features are unavailable — worker not connected")
 	}
@@ -1494,1133 +1519,39 @@ func (r *mutationResolver) DetectContracts(ctx context.Context, repoID string) (
 	return true, nil
 }
 
+// DetectContractsResult is the resolver for the detectContractsResult field.
+func (r *mutationResolver) DetectContractsResult(ctx context.Context, repoID string) (*MutationResult, error) {
+	ok, err := r.DetectContracts(ctx, repoID)
+	if err != nil {
+		message := err.Error()
+		return &MutationResult{Success: false, Error: &message}, nil
+	}
+	return &MutationResult{Success: ok}, nil
+}
+
 // GenerateCliffNotes is the resolver for the generateCliffNotes field.
 func (r *mutationResolver) GenerateCliffNotes(ctx context.Context, input GenerateCliffNotesInput) (*KnowledgeArtifact, error) {
-	if r.Worker == nil {
-		return nil, fmt.Errorf("AI features are unavailable — worker not connected")
-	}
-	if r.KnowledgeStore == nil {
-		return nil, fmt.Errorf("knowledge store not configured")
-	}
-
-	repo := r.getStore(ctx).GetRepository(input.RepositoryID)
-	if repo == nil {
-		return nil, fmt.Errorf("repository %s not found", input.RepositoryID)
-	}
-	key, err := artifactKeyFromCliffNotesInput(input)
-	if err != nil {
-		return nil, err
-	}
-	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
-	audience := string(key.Audience)
-	depth := string(key.Depth)
-	scope := key.Scope.Normalize()
-
-	// For requirement scope, store the display name so scopeLabel can resolve it.
-	if scope.ScopeType == knowledgepkg.ScopeRequirement {
-		if req := r.getStore(ctx).GetRequirement(scope.ScopePath); req != nil {
-			scope.SymbolName = req.ExternalID
-			if scope.SymbolName == "" {
-				scope.SymbolName = req.Title
-			}
-			key.Scope = scope
-		}
-	}
-
-	existing := r.KnowledgeStore.GetArtifactByKeyAndMode(key, generationMode)
-	if existing != nil {
-		if shouldRefreshScopedCliffNotes(existing) {
-			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
-			existing = nil
-		}
-	}
-	if existing != nil {
-		existing.GenerationMode = generationMode
-		syncArtifactExecutionMetadata(r.KnowledgeStore, existing)
-		scopeUnderstanding := (*knowledgepkg.RepositoryUnderstanding)(nil)
-		if artifactUsesUnderstanding(generationMode) {
-			scopeUnderstanding, _ = attachFreshUnderstanding(r.KnowledgeStore, existing, scope, knowledgepkg.SourceRevision{})
-		}
-		renderPlan := cliffNotesRenderPlanForArtifact(r.KnowledgeStore, existing, knowledgepkg.SourceRevision{}, scopeUnderstanding)
-		if existing.Status == knowledgepkg.StatusReady && !existing.Stale && !renderPlan.RenderOnly {
-			return mapKnowledgeArtifact(existing), nil
-		}
-		if isInFlightGeneration(existing) {
-			slog.Info("cliff_notes_generation_deduped",
-				"artifact_id", existing.ID,
-				"elapsed_ms", time.Since(existing.UpdatedAt).Milliseconds())
-			return mapKnowledgeArtifact(existing), nil
-		}
-		// Either terminal (failed/stale) or stuck in a stale GENERATING/PENDING
-		// state past the staleness window — delete and re-claim.
-		if existing.Status == knowledgepkg.StatusFailed || existing.Stale ||
-			existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
-			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
-		}
-	}
-
-	// Assemble snapshot — repo source is optional (docs will be omitted if unavailable).
-	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
-	repoRoot, repoRootErr := resolveRepoSourcePath(repo)
-	if repoRootErr != nil {
-		slog.Warn("cliff notes: repo source unavailable, docs will be omitted from snapshot",
-			"repo_id", repo.ID, "error", repoRootErr)
-	}
-	var snap *knowledgepkg.KnowledgeSnapshot
-	if scope.ScopeType == knowledgepkg.ScopeRepository {
-		snap, err = assembler.Assemble(repo.ID, repoRoot)
-	} else {
-		snap, err = assembler.AssembleScoped(repo.ID, repoRoot, scope)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to assemble knowledge snapshot: %w", err)
-	}
-
-	snapJSON, err := json.Marshal(snap)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
-	}
-
-	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(key, snap.SourceRevision, generationMode)
-	if err != nil {
-		return nil, fmt.Errorf("failed to claim knowledge artifact: %w", err)
-	}
-	if !created {
-		return mapKnowledgeArtifact(artifact), nil
-	}
-	artifact.GenerationMode = generationMode
-	syncArtifactExecutionMetadata(r.KnowledgeStore, artifact)
-	understanding := (*knowledgepkg.RepositoryUnderstanding)(nil)
-	reusedUnderstanding := false
-	renderPlan := cliffNotesRenderPlan{}
-	if artifactUsesUnderstanding(generationMode) {
-		understanding, reusedUnderstanding = attachFreshUnderstanding(r.KnowledgeStore, artifact, scope, snap.SourceRevision)
-		if understanding == nil {
-			if _, err := seedRepositoryUnderstanding(r.KnowledgeStore, artifact, scope, snap.SourceRevision, knowledgepkg.UnderstandingBuildingTree); err != nil {
-				slog.Warn("failed to seed repository understanding", "artifact_id", artifact.ID, "error", err)
-			}
-		} else {
-			renderPlan = cliffNotesRenderPlanForArtifact(r.KnowledgeStore, artifact, snap.SourceRevision, understanding)
-		}
-	}
-
-	// Hand the work off to the LLM orchestrator. The artifact is
-	// already claimed, so the UI will see its GENERATING status
-	// immediately via the return below; the orchestrator drives the
-	// actual worker call in a bounded-pool goroutine.
-	store := r.getStore(ctx)
-	snapshotSizeBytes := len(snapJSON)
-	truncated := scope.ScopeType == knowledgepkg.ScopeRequirement && snap.SymbolCount >= 200
-	clientType := clientTypeFromContext(ctx)
-	slog.Info("cliff_notes_generation_started",
-		"artifact_id", artifact.ID,
-		"scope_type", string(scope.ScopeType),
-		"scope_path", scope.ScopePath,
-		"client_type", clientType,
-		"linked_symbol_count", snap.SymbolCount,
-		"snapshot_size_bytes", snapshotSizeBytes,
-		"truncated", truncated,
-	)
-
-	// Deep mode: enrich the snapshot with repository-level cliff notes
-	// for scoped generations (module/file/symbol). This gives the model
-	// the full codebase context even when generating for a narrow scope.
-	enrichedCliffSnapJSON := snapJSON
-	if depth == "deep" && scope.ScopeType != knowledgepkg.ScopeRepository && r.KnowledgeStore != nil {
-		repoCliffKey := knowledgepkg.ArtifactKey{
-			RepositoryID: repo.ID,
-			Type:         knowledgepkg.ArtifactCliffNotes,
-			Audience:     knowledgepkg.Audience(audience),
-			Depth:        knowledgepkg.DepthMedium,
-			Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
-		}.Normalized()
-		if repoCliff := r.KnowledgeStore.GetArtifactByKey(repoCliffKey); repoCliff != nil && repoCliff.Status == knowledgepkg.StatusReady {
-			sections := r.KnowledgeStore.GetKnowledgeSections(repoCliff.ID)
-			if len(sections) > 0 {
-				var analysis []map[string]string
-				for _, sec := range sections {
-					analysis = append(analysis, map[string]string{
-						"title":   sec.Title,
-						"content": sec.Content,
-						"summary": sec.Summary,
-					})
-				}
-				var snapMap map[string]interface{}
-				if err := json.Unmarshal(snapJSON, &snapMap); err == nil {
-					snapMap["_pre_analysis"] = analysis
-					if enriched, err := json.Marshal(snapMap); err == nil {
-						enrichedCliffSnapJSON = enriched
-						slog.Info("cliff_notes_deep_enriched",
-							"artifact_id", artifact.ID,
-							"repo_cliff_sections", len(sections))
-					}
-				}
-			}
-		}
-	}
-
-	err = r.enqueueKnowledgeJob(artifact, "cliff_notes", len(enrichedCliffSnapJSON), func(runCtx context.Context, rt llm.Runtime) (runErr error) {
-		defer func() {
-			if runErr != nil {
-				markRepositoryUnderstandingFailed(r.KnowledgeStore, artifact, scope, snap.SourceRevision, runErr)
-			}
-		}()
-		genStart := time.Now()
-		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
-		if reusedUnderstanding {
-			rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
-			_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
-		}
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "snapshot", "snapshot_assembled", "Snapshot assembled", map[string]any{
-			"snapshot_bytes": len(enrichedCliffSnapJSON),
-			"scope_type":     string(scope.ScopeType),
-			"scope_path":     scope.ScopePath,
-			"depth":          depth,
-			"audience":       audience,
-		})
-
-		stopProgress := r.startProgressTicker(rt, artifact.ID)
-		bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, artifact.ID, "cliff_notes")
-		if renderPlan.RenderOnly {
-			bgCtx = withCliffNotesRenderMetadata(
-				bgCtx,
-				true,
-				renderPlan.SelectedSectionTitles,
-				renderPlan.UnderstandingDepth,
-				renderPlan.RelevanceProfile,
-			)
-		}
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "llm", "worker_dispatch", "Dispatching cliff notes request to worker", map[string]any{
-			"repository_id":   repo.ID,
-			"repository_name": repo.Name,
-			"scope_type":      string(scope.ScopeType),
-			"scope_path":      scope.ScopePath,
-			"depth":           depth,
-			"generation_mode": string(generationMode),
-			"render_only":     renderPlan.RenderOnly,
-			"selected_titles": renderPlan.SelectedSectionTitles,
-		})
-		resp, err := r.Worker.GenerateCliffNotes(bgCtx, &knowledgev1.GenerateCliffNotesRequest{
-			RepositoryId:   repo.ID,
-			RepositoryName: repo.Name,
-			Audience:       audience,
-			Depth:          depth,
-			ScopeType:      string(scope.ScopeType),
-			ScopePath:      scope.ScopePath,
-			SnapshotJson:   string(enrichedCliffSnapJSON),
-		})
-		stopProgress()
-		if err != nil {
-			appendJobLog(r.Orchestrator, rt, llm.LogLevelError, "llm", "worker_failed", "Worker cliff notes request failed", map[string]any{
-				"duration_ms": time.Since(genStart).Milliseconds(),
-			})
-			slog.Error("cliff_notes_generation_failed",
-				"artifact_id", artifact.ID,
-				"scope_type", string(scope.ScopeType),
-				"scope_path", scope.ScopePath,
-				"client_type", clientType,
-				"duration_ms", time.Since(genStart).Milliseconds(),
-				"error", err,
-			)
-			return err
-		}
-		understanding, err := updateUnderstandingForCliffNotes(r.KnowledgeStore, artifact, scope, snap.SourceRevision, resp, knowledgepkg.UnderstandingReady)
-		if err != nil {
-			slog.Warn("failed to update repository understanding", "artifact_id", artifact.ID, "error", err)
-		}
-
-		reusedSummaries := 0
-		leafCacheHits := 0
-		fileCacheHits := 0
-		packageCacheHits := 0
-		rootCacheHits := 0
-		if resp.Diagnostics != nil {
-			leafCacheHits = int(resp.Diagnostics.LeafCacheHits)
-			fileCacheHits = int(resp.Diagnostics.FileCacheHits)
-			packageCacheHits = int(resp.Diagnostics.PackageCacheHits)
-			rootCacheHits = int(resp.Diagnostics.RootCacheHits)
-			reusedSummaries = leafCacheHits + fileCacheHits + packageCacheHits + rootCacheHits
-			if err := r.Orchestrator.SetReuseStats(rt.JobID(), reusedSummaries, leafCacheHits, fileCacheHits, packageCacheHits, rootCacheHits); err != nil {
-				slog.Warn("failed to persist cliff notes reuse stats",
-					"job_id", rt.JobID(),
-					"artifact_id", artifact.ID,
-					"error", err)
-			}
-		}
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "llm", "worker_response_received", "Worker returned cliff notes response", map[string]any{
-			"duration_ms":        time.Since(genStart).Milliseconds(),
-			"section_count":      len(resp.Sections),
-			"reused_summaries":   reusedSummaries,
-			"leaf_cache_hits":    leafCacheHits,
-			"file_cache_hits":    fileCacheHits,
-			"package_cache_hits": packageCacheHits,
-			"root_cache_hits":    rootCacheHits,
-			"provider_compute_errors": func() int32 {
-				if resp.Diagnostics == nil {
-					return 0
-				}
-				return resp.Diagnostics.ProviderComputeErrors
-			}(),
-			"fallback_count": func() int32 {
-				if resp.Diagnostics == nil {
-					return 0
-				}
-				return resp.Diagnostics.FallbackCount
-			}(),
-		})
-		llmMessage := "LLM completed, persisting sections"
-		if reusedSummaries > 0 {
-			llmMessage = fmt.Sprintf("LLM completed, reused %d summaries, persisting sections", reusedSummaries)
-		}
-		rt.ReportProgress(0.96, "llm", llmMessage)
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", llmMessage)
-
-		if resp.Usage != nil {
-			store.StoreLLMUsage(&graphstore.LLMUsageRecord{
-				RepoID:       repo.ID,
-				Provider:     "llm",
-				Model:        resp.Usage.Model,
-				Operation:    resp.Usage.Operation,
-				InputTokens:  int(resp.Usage.InputTokens),
-				OutputTokens: int(resp.Usage.OutputTokens),
-			})
-			rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
-		}
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "persist", "persist_sections_started", "Persisting generated cliff note sections", map[string]any{
-			"section_count": len(resp.Sections),
-		})
-
-		sections := make([]knowledgepkg.Section, len(resp.Sections))
-		for i, sec := range resp.Sections {
-			refinementStatus := strings.TrimSpace(sec.RefinementStatus)
-			if refinementStatus == "" {
-				refinementStatus = "light"
-			}
-			sections[i] = knowledgepkg.Section{
-				Title:            sec.Title,
-				Content:          sec.Content,
-				Summary:          sec.Summary,
-				Metadata:         cliffNotesSectionMetadataJSON(knowledgepkg.ArtifactCliffNotes, understanding, refinementStatus, sec.Title, len(sec.Evidence) > 0),
-				Confidence:       mapProtoConfidence(sec.Confidence),
-				Inferred:         sec.Inferred,
-				SectionKey:       knowledgepkg.SectionKeyForTitle(sec.Title),
-				RefinementStatus: refinementStatus,
-			}
-		}
-		if renderPlan.RenderOnly && len(renderPlan.SelectedSectionTitles) > 0 {
-			selected := make(map[string]struct{}, len(renderPlan.SelectedSectionTitles))
-			for _, title := range renderPlan.SelectedSectionTitles {
-				selected[title] = struct{}{}
-			}
-			sections = knowledgepkg.MergeSectionsByTitle(r.KnowledgeStore.GetKnowledgeSections(artifact.ID), sections, selected)
-		}
-		if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
-			slog.Error("failed to store cliff notes sections", "artifact_id", artifact.ID, "error", err)
-			return err
-		}
-		syncCliffNotesRefinementUnits(r.KnowledgeStore, artifact, sections, understanding)
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "persist", "persist_sections_completed", "Stored cliff note sections", map[string]any{
-			"section_count": len(sections),
-		})
-
-		storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
-		for i, sec := range resp.Sections {
-			if i >= len(storedSections) {
-				break
-			}
-			if len(sec.Evidence) > 0 {
-				evidence := make([]knowledgepkg.Evidence, len(sec.Evidence))
-				for j, ev := range sec.Evidence {
-					evidence[j] = knowledgepkg.Evidence{
-						SourceType: knowledgepkg.EvidenceSourceType(ev.SourceType),
-						SourceID:   ev.SourceId,
-						FilePath:   ev.FilePath,
-						LineStart:  int(ev.LineStart),
-						LineEnd:    int(ev.LineEnd),
-						Rationale:  ev.Rationale,
-					}
-				}
-				_ = r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[i].ID, evidence)
-			}
-		}
-
-		if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
-			slog.Error("failed to mark cliff notes ready", "artifact_id", artifact.ID, "error", err)
-		}
-		if artifactUsesUnderstanding(generationMode) && depth != string(knowledgepkg.DepthSummary) {
-			targets := cliffNotesDeepeningTargets(r.KnowledgeStore, artifact)
-			slog.Info("cliff_notes_deepening_targets_evaluated",
-				"artifact_id", artifact.ID,
-				"target_count", len(targets),
-				"targets", targets,
-			)
-			if len(targets) > 0 {
-				if err := r.enqueueCliffNotesDeepening(repo, artifact, scope, snap.SourceRevision, enrichedCliffSnapJSON, targets); err != nil {
-					slog.Warn("failed to enqueue cliff notes deepening", "artifact_id", artifact.ID, "error", err)
-				}
-			}
-		}
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "ready", "artifact_ready", "Cliff notes artifact marked ready", map[string]any{
-			"section_count": len(sections),
-		})
-		readyMessage := "Cliff notes ready"
-		if reusedSummaries > 0 {
-			readyMessage = fmt.Sprintf("Cliff notes ready · reused %d summaries", reusedSummaries)
-		}
-		rt.ReportProgress(1.0, "ready", readyMessage)
-		slog.Info("cliff_notes_generation_completed",
-			"artifact_id", artifact.ID,
-			"scope_type", string(scope.ScopeType),
-			"scope_path", scope.ScopePath,
-			"client_type", clientType,
-			"duration_ms", time.Since(genStart).Milliseconds(),
-			"snapshot_size_bytes", snapshotSizeBytes,
-			"section_count", len(resp.Sections),
-			"reused_summaries", reusedSummaries,
-		)
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("enqueue cliff notes job: %w", err)
-	}
-
-	// Return immediately with GENERATING status — the UI polls to
-	// observe the orchestrator's progress updates.
-	return mapKnowledgeArtifact(artifact), nil
+	return cliffNotesGenerationService{resolver: r.Resolver, input: input}.Generate(ctx)
 }
 
 // GenerateArchitectureDiagram is the resolver for the generateArchitectureDiagram field.
 func (r *mutationResolver) GenerateArchitectureDiagram(ctx context.Context, input GenerateArchitectureDiagramInput) (*KnowledgeArtifact, error) {
-	if r.Worker == nil {
-		return nil, fmt.Errorf("AI features are unavailable — worker not connected")
-	}
-	if r.KnowledgeStore == nil {
-		return nil, fmt.Errorf("knowledge store not configured")
-	}
-
-	repo := r.getStore(ctx).GetRepository(input.RepositoryID)
-	if repo == nil {
-		return nil, fmt.Errorf("repository %s not found", input.RepositoryID)
-	}
-
-	audience := knowledgeAudienceValue(input.Audience)
-	depth := knowledgeDepthValue(input.Depth)
-	key := knowledgepkg.ArtifactKey{
-		RepositoryID: repo.ID,
-		Type:         knowledgepkg.ArtifactArchitectureDiagram,
-		Audience:     audience,
-		Depth:        depth,
-		Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
-	}.Normalized()
-	generationMode := knowledgepkg.GenerationModeUnderstandingFirst
-
-	if existing := r.KnowledgeStore.GetArtifactByKeyAndMode(key, generationMode); existing != nil {
-		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
-			return mapKnowledgeArtifact(existing), nil
-		}
-		if isInFlightGeneration(existing) {
-			return mapKnowledgeArtifact(existing), nil
-		}
-		if existing.Status == knowledgepkg.StatusFailed || existing.Stale ||
-			existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
-			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
-		}
-	}
-
-	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
-	repoRoot, repoRootErr := resolveRepoSourcePath(repo)
-	if repoRootErr != nil {
-		slog.Warn("architecture diagram: repo source unavailable, docs will be omitted from snapshot",
-			"repo_id", repo.ID, "error", repoRootErr)
-	}
-	snap, err := assembler.Assemble(repo.ID, repoRoot)
-	if err != nil {
-		return nil, fmt.Errorf("failed to assemble knowledge snapshot: %w", err)
-	}
-	snapJSON, err := json.Marshal(snap)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
-	}
-	scaffoldJSON, err := buildArchitectureDiagramScaffold(r.getStore(ctx), repo.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build architecture scaffold: %w", err)
-	}
-
-	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(key, snap.SourceRevision, generationMode)
-	if err != nil {
-		return nil, fmt.Errorf("failed to claim knowledge artifact: %w", err)
-	}
-	if !created {
-		return mapKnowledgeArtifact(artifact), nil
-	}
-	artifact.GenerationMode = generationMode
-	syncArtifactExecutionMetadata(r.KnowledgeStore, artifact)
-	store := r.getStore(ctx)
-
-	err = r.enqueueKnowledgeJob(artifact, "architecture_diagram", len(snapJSON), func(runCtx context.Context, rt llm.Runtime) error {
-		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
-
-		architecturePromptJSON := snapJSON
-		var architectureBundle architectureDiagramPromptBundle
-		var understandingForDiagram *knowledgepkg.RepositoryUnderstanding
-		if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
-			return err
-		} else {
-			understandingForDiagram = understanding
-			if reused {
-				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
-				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
-			}
-		}
-		if promptJSON, err := buildArchitectureDiagramPromptBundle(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), snap, understandingForDiagram, scaffoldJSON); err != nil {
-			return err
-		} else {
-			architecturePromptJSON = promptJSON
-			if err := json.Unmarshal(promptJSON, &architectureBundle); err != nil {
-				return fmt.Errorf("failed to unmarshal architecture prompt bundle: %w", err)
-			}
-		}
-
-		stopProgress := r.startProgressTicker(rt, artifact.ID)
-		resp, err := r.Worker.GenerateArchitectureDiagram(
-			r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, artifact.ID, "architecture_diagram"),
-			&knowledgev1.GenerateArchitectureDiagramRequest{
-				RepositoryId:             repo.ID,
-				RepositoryName:           repo.Name,
-				Audience:                 string(audience),
-				Depth:                    string(depth),
-				SnapshotJson:             string(architecturePromptJSON),
-				DeterministicDiagramJson: string(scaffoldJSON),
-			},
-		)
-		stopProgress()
-		if err != nil {
-			slog.Error("architecture diagram generation failed", "artifact_id", artifact.ID, "error", err)
-			return err
-		}
-
-		if resp.Usage != nil {
-			store.StoreLLMUsage(&graphstore.LLMUsageRecord{
-				RepoID:       repo.ID,
-				Provider:     "llm",
-				Model:        resp.Usage.Model,
-				Operation:    resp.Usage.Operation,
-				InputTokens:  int(resp.Usage.InputTokens),
-				OutputTokens: int(resp.Usage.OutputTokens),
-			})
-			rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
-		}
-
-		rt.ReportProgress(0.96, "llm", "LLM completed, persisting diagram")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting diagram")
-
-		sections := []knowledgepkg.Section{{
-			Title:            "AI Architecture Diagram",
-			SectionKey:       "ai_architecture_diagram",
-			Content:          resp.MermaidSource,
-			Summary:          resp.DiagramSummary,
-			Metadata:         architectureDiagramMetadataJSON(resp, &architectureBundle),
-			Confidence:       knowledgepkg.ConfidenceMedium,
-			Inferred:         len(resp.InferredEdges) > 0,
-			RefinementStatus: "light",
-		}}
-		if strings.TrimSpace(resp.GetDetailMermaidSource()) != "" {
-			sections = append(sections, knowledgepkg.Section{
-				Title:            "AI Architecture Diagram Detail",
-				SectionKey:       "ai_architecture_diagram_detail",
-				Content:          resp.GetDetailMermaidSource(),
-				Summary:          resp.GetDetailDiagramSummary(),
-				Metadata:         architectureDiagramDetailMetadataJSON(resp),
-				Confidence:       knowledgepkg.ConfidenceMedium,
-				Inferred:         false,
-				RefinementStatus: "deep",
-			})
-		}
-		if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
-			return err
-		}
-		storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
-		if len(storedSections) > 0 && len(resp.Evidence) > 0 {
-			if err := r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[0].ID, mapProtoEvidence(resp.Evidence)); err != nil {
-				return err
-			}
-		}
-		if len(storedSections) > 1 && len(resp.DetailEvidence) > 0 {
-			if err := r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[1].ID, mapProtoEvidence(resp.DetailEvidence)); err != nil {
-				return err
-			}
-		}
-		if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
-			return err
-		}
-		rt.ReportProgress(1.0, "ready", "AI architecture diagram ready")
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("enqueue architecture diagram job: %w", err)
-	}
-
-	return mapKnowledgeArtifact(artifact), nil
+	return architectureDiagramGenerationService{resolver: r.Resolver, input: input}.Generate(ctx)
 }
 
 // GenerateLearningPath is the resolver for the generateLearningPath field.
 func (r *mutationResolver) GenerateLearningPath(ctx context.Context, input GenerateLearningPathInput) (*KnowledgeArtifact, error) {
-	if r.Worker == nil {
-		return nil, fmt.Errorf("AI features are unavailable — worker not connected")
-	}
-	if r.KnowledgeStore == nil {
-		return nil, fmt.Errorf("knowledge store not configured")
-	}
-
-	repo := r.getStore(ctx).GetRepository(input.RepositoryID)
-	if repo == nil {
-		return nil, fmt.Errorf("repository %s not found", input.RepositoryID)
-	}
-
-	audience := "developer"
-	if input.Audience != nil {
-		audience = strings.ToLower(string(*input.Audience))
-	}
-	depth := "medium"
-	if input.Depth != nil {
-		depth = strings.ToLower(string(*input.Depth))
-	}
-	focusArea := ""
-	if input.FocusArea != nil {
-		focusArea = *input.FocusArea
-	}
-	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
-
-	// Assemble snapshot
-	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
-	repoRoot, repoRootErr := resolveRepoSourcePath(repo)
-	if repoRootErr != nil {
-		slog.Warn("repo source unavailable, docs will be omitted", "repo_id", repo.ID, "error", repoRootErr)
-	}
-	snap, err := assembler.Assemble(repo.ID, repoRoot)
-	if err != nil {
-		return nil, fmt.Errorf("failed to assemble knowledge snapshot: %w", err)
-	}
-
-	snapJSON, err := json.Marshal(snap)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
-	}
-	enrichedSnapJSON := snapJSON
-	key := knowledgepkg.ArtifactKey{
-		RepositoryID: repo.ID,
-		Type:         knowledgepkg.ArtifactLearningPath,
-		Audience:     knowledgepkg.Audience(audience),
-		Depth:        knowledgepkg.Depth(depth),
-		Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
-	}.Normalized()
-	if existing := r.KnowledgeStore.GetArtifactByKeyAndMode(key, generationMode); existing != nil {
-		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
-			return mapKnowledgeArtifact(existing), nil
-		}
-		if isInFlightGeneration(existing) {
-			slog.Info("learning_path_generation_deduped",
-				"artifact_id", existing.ID,
-				"elapsed_ms", time.Since(existing.UpdatedAt).Milliseconds())
-			return mapKnowledgeArtifact(existing), nil
-		}
-		if existing.Status == knowledgepkg.StatusFailed || existing.Stale ||
-			existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
-			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
-		}
-	}
-	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(key, snap.SourceRevision, generationMode)
-	if err != nil {
-		return nil, fmt.Errorf("failed to claim knowledge artifact: %w", err)
-	}
-	if !created {
-		return mapKnowledgeArtifact(artifact), nil
-	}
-	artifact.GenerationMode = generationMode
-	syncArtifactExecutionMetadata(r.KnowledgeStore, artifact)
-	// Run LLM generation async via the orchestrator.
-	store := r.getStore(ctx)
-	err = r.enqueueKnowledgeJob(artifact, "learning_path", len(enrichedSnapJSON), func(runCtx context.Context, rt llm.Runtime) error {
-		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
-		if artifactUsesUnderstanding(generationMode) {
-			if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
-				return err
-			} else {
-				if reused {
-					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
-					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
-				}
-				if understanding != nil {
-					if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
-						enrichedSnapJSON = enriched
-					}
-				}
-			}
-		}
-		if knowledgepkg.Depth(depth) == knowledgepkg.DepthDeep {
-			if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), enrichedSnapJSON); ok {
-				enrichedSnapJSON = enriched
-			}
-		}
-
-		stopProgress := r.startProgressTicker(rt, artifact.ID)
-		bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, artifact.ID, "learning_path")
-		resp, err := r.Worker.GenerateLearningPath(bgCtx, &knowledgev1.GenerateLearningPathRequest{
-			RepositoryId:   repo.ID,
-			RepositoryName: repo.Name,
-			Audience:       audience,
-			Depth:          depth,
-			SnapshotJson:   string(enrichedSnapJSON),
-			FocusArea:      focusArea,
-		})
-		stopProgress()
-		if err != nil {
-			slog.Error("learning path generation failed", "artifact_id", artifact.ID, "error", err)
-			return err
-		}
-
-		rt.ReportProgress(0.96, "llm", "LLM completed, persisting steps")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
-
-		if resp.Usage != nil {
-			store.StoreLLMUsage(&graphstore.LLMUsageRecord{
-				RepoID:       repo.ID,
-				Provider:     "llm",
-				Model:        resp.Usage.Model,
-				Operation:    resp.Usage.Operation,
-				InputTokens:  int(resp.Usage.InputTokens),
-				OutputTokens: int(resp.Usage.OutputTokens),
-			})
-			rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
-		}
-
-		sections := make([]knowledgepkg.Section, len(resp.Steps))
-		for i, step := range resp.Steps {
-			metaRaw, _ := json.Marshal(map[string]any{
-				"prerequisite_steps": step.PrerequisiteSteps,
-				"difficulty":         step.Difficulty,
-				"exercises":          step.Exercises,
-				"checkpoint":         step.Checkpoint,
-			})
-			sections[i] = knowledgepkg.Section{
-				Title:            step.Title,
-				Content:          step.Content,
-				Summary:          step.Objective,
-				Metadata:         string(metaRaw),
-				Confidence:       mapProtoConfidence(step.Confidence),
-				RefinementStatus: step.RefinementStatus,
-			}
-		}
-		if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
-			slog.Error("failed to store learning path sections", "artifact_id", artifact.ID, "error", err)
-			return err
-		}
-
-		storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
-		for i, step := range resp.Steps {
-			if i >= len(storedSections) {
-				break
-			}
-			var evidence []knowledgepkg.Evidence
-			for _, fp := range step.FilePaths {
-				evidence = append(evidence, knowledgepkg.Evidence{
-					SourceType: knowledgepkg.EvidenceFile,
-					FilePath:   fp,
-					Rationale:  "Referenced in learning step",
-				})
-			}
-			for _, sid := range step.SymbolIds {
-				evidence = append(evidence, knowledgepkg.Evidence{
-					SourceType: knowledgepkg.EvidenceSymbol,
-					SourceID:   sid,
-					Rationale:  "Referenced in learning step",
-				})
-			}
-			if len(evidence) > 0 {
-				_ = r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[i].ID, evidence)
-			}
-		}
-
-		if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
-			slog.Error("failed to mark learning path ready", "artifact_id", artifact.ID, "error", err)
-		}
-		rt.ReportProgress(1.0, "ready", "Learning path ready")
-		slog.Info("learning path generation complete", "artifact_id", artifact.ID)
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("enqueue learning path job: %w", err)
-	}
-
-	return mapKnowledgeArtifact(artifact), nil
+	return learningPathGenerationService{resolver: r.Resolver, input: input}.Generate(ctx)
 }
 
 // GenerateCodeTour is the resolver for the generateCodeTour field.
 func (r *mutationResolver) GenerateCodeTour(ctx context.Context, input GenerateCodeTourInput) (*KnowledgeArtifact, error) {
-	if r.Worker == nil {
-		return nil, fmt.Errorf("AI features are unavailable — worker not connected")
-	}
-	if r.KnowledgeStore == nil {
-		return nil, fmt.Errorf("knowledge store not configured")
-	}
-
-	repo := r.getStore(ctx).GetRepository(input.RepositoryID)
-	if repo == nil {
-		return nil, fmt.Errorf("repository %s not found", input.RepositoryID)
-	}
-
-	audience := "developer"
-	if input.Audience != nil {
-		audience = strings.ToLower(string(*input.Audience))
-	}
-	depth := "medium"
-	if input.Depth != nil {
-		depth = strings.ToLower(string(*input.Depth))
-	}
-	theme := ""
-	if input.Theme != nil {
-		theme = *input.Theme
-	}
-	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
-
-	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
-	repoRoot, repoRootErr := resolveRepoSourcePath(repo)
-	if repoRootErr != nil {
-		slog.Warn("repo source unavailable, docs will be omitted", "repo_id", repo.ID, "error", repoRootErr)
-	}
-	snap, err := assembler.Assemble(repo.ID, repoRoot)
-	if err != nil {
-		return nil, fmt.Errorf("failed to assemble knowledge snapshot: %w", err)
-	}
-
-	snapJSON, err := json.Marshal(snap)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
-	}
-	enrichedSnapJSON := snapJSON
-	key := knowledgepkg.ArtifactKey{
-		RepositoryID: repo.ID,
-		Type:         knowledgepkg.ArtifactCodeTour,
-		Audience:     knowledgepkg.Audience(audience),
-		Depth:        knowledgepkg.Depth(depth),
-		Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
-	}.Normalized()
-	if existing := r.KnowledgeStore.GetArtifactByKeyAndMode(key, generationMode); existing != nil {
-		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
-			return mapKnowledgeArtifact(existing), nil
-		}
-		if isInFlightGeneration(existing) {
-			slog.Info("code_tour_generation_deduped",
-				"artifact_id", existing.ID,
-				"elapsed_ms", time.Since(existing.UpdatedAt).Milliseconds())
-			return mapKnowledgeArtifact(existing), nil
-		}
-		if existing.Status == knowledgepkg.StatusFailed || existing.Stale ||
-			existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
-			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
-		}
-	}
-	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(key, snap.SourceRevision, generationMode)
-	if err != nil {
-		return nil, fmt.Errorf("failed to claim knowledge artifact: %w", err)
-	}
-	if !created {
-		return mapKnowledgeArtifact(artifact), nil
-	}
-	artifact.GenerationMode = generationMode
-	syncArtifactExecutionMetadata(r.KnowledgeStore, artifact)
-	// Run LLM generation async via the orchestrator.
-	store := r.getStore(ctx)
-	err = r.enqueueKnowledgeJob(artifact, "code_tour", len(enrichedSnapJSON), func(runCtx context.Context, rt llm.Runtime) error {
-		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
-		if artifactUsesUnderstanding(generationMode) {
-			if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
-				return err
-			} else {
-				if reused {
-					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
-					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
-				}
-				if understanding != nil {
-					if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
-						enrichedSnapJSON = enriched
-					}
-				}
-			}
-		}
-		if knowledgepkg.Depth(depth) == knowledgepkg.DepthDeep {
-			if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), enrichedSnapJSON); ok {
-				enrichedSnapJSON = enriched
-			}
-		}
-
-		stopProgress := r.startProgressTicker(rt, artifact.ID)
-		bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, artifact.ID, "code_tour")
-		resp, err := r.Worker.GenerateCodeTour(bgCtx, &knowledgev1.GenerateCodeTourRequest{
-			RepositoryId:   repo.ID,
-			RepositoryName: repo.Name,
-			Audience:       audience,
-			Depth:          depth,
-			SnapshotJson:   string(enrichedSnapJSON),
-			Theme:          theme,
-		})
-		stopProgress()
-		if err != nil {
-			slog.Error("code tour generation failed", "artifact_id", artifact.ID, "error", err)
-			return err
-		}
-
-		rt.ReportProgress(0.96, "llm", "LLM completed, persisting stops")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
-
-		if resp.Usage != nil {
-			store.StoreLLMUsage(&graphstore.LLMUsageRecord{
-				RepoID:       repo.ID,
-				Provider:     "llm",
-				Model:        resp.Usage.Model,
-				Operation:    resp.Usage.Operation,
-				InputTokens:  int(resp.Usage.InputTokens),
-				OutputTokens: int(resp.Usage.OutputTokens),
-			})
-			rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
-		}
-
-		sections := make([]knowledgepkg.Section, len(resp.Stops))
-		for i, stop := range resp.Stops {
-			summary := stop.Description
-			if len(summary) > 160 {
-				summary = summary[:160]
-			}
-			metaRaw, _ := json.Marshal(map[string]any{
-				"trail":              stop.Trail,
-				"modification_hints": stop.ModificationHints,
-			})
-			sections[i] = knowledgepkg.Section{
-				Title:            stop.Title,
-				Content:          stop.Description,
-				Summary:          summary,
-				Metadata:         string(metaRaw),
-				Confidence:       mapProtoConfidence(stop.Confidence),
-				RefinementStatus: stop.RefinementStatus,
-			}
-		}
-		if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
-			slog.Error("failed to store code tour sections", "artifact_id", artifact.ID, "error", err)
-			return err
-		}
-
-		storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
-		for i, stop := range resp.Stops {
-			if i >= len(storedSections) {
-				break
-			}
-			if stop.FilePath != "" {
-				_ = r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[i].ID, []knowledgepkg.Evidence{
-					{
-						SourceType: knowledgepkg.EvidenceFile,
-						FilePath:   stop.FilePath,
-						LineStart:  int(stop.LineStart),
-						LineEnd:    int(stop.LineEnd),
-						Rationale:  "Code tour stop location",
-					},
-				})
-			}
-		}
-
-		if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
-			slog.Error("failed to mark code tour ready", "artifact_id", artifact.ID, "error", err)
-		}
-		rt.ReportProgress(1.0, "ready", "Code tour ready")
-		slog.Info("code tour generation complete", "artifact_id", artifact.ID)
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("enqueue code tour job: %w", err)
-	}
-
-	return mapKnowledgeArtifact(artifact), nil
+	return codeTourGenerationService{resolver: r.Resolver, input: input}.Generate(ctx)
 }
 
 // GenerateWorkflowStory is the resolver for the generateWorkflowStory field.
 func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input GenerateWorkflowStoryInput) (*KnowledgeArtifact, error) {
-	if r.Worker == nil {
-		return nil, fmt.Errorf("AI features are unavailable — worker not connected")
-	}
-	if r.KnowledgeStore == nil {
-		return nil, fmt.Errorf("knowledge store not configured")
-	}
-
-	repo := r.getStore(ctx).GetRepository(input.RepositoryID)
-	if repo == nil {
-		return nil, fmt.Errorf("repository %s not found", input.RepositoryID)
-	}
-	key, err := artifactKeyFromWorkflowStoryInput(input)
-	if err != nil {
-		return nil, err
-	}
-	audience := string(key.Audience)
-	depth := string(key.Depth)
-	scope := key.Scope.Normalize()
-	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
-
-	existing := r.KnowledgeStore.GetArtifactByKeyAndMode(key, generationMode)
-	if existing != nil {
-		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
-			return mapKnowledgeArtifact(existing), nil
-		}
-		if isInFlightGeneration(existing) {
-			slog.Info("workflow_story_generation_deduped",
-				"artifact_id", existing.ID,
-				"elapsed_ms", time.Since(existing.UpdatedAt).Milliseconds())
-			return mapKnowledgeArtifact(existing), nil
-		}
-		if existing.Status == knowledgepkg.StatusFailed || existing.Stale ||
-			existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
-			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
-		}
-	}
-
-	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
-	repoRoot, repoRootErr := resolveRepoSourcePath(repo)
-	if repoRootErr != nil {
-		slog.Warn("workflow story: repo source unavailable, docs will be omitted from snapshot",
-			"repo_id", repo.ID, "error", repoRootErr)
-	}
-	var snap *knowledgepkg.KnowledgeSnapshot
-	if scope.ScopeType == knowledgepkg.ScopeRepository {
-		snap, err = assembler.Assemble(repo.ID, repoRoot)
-	} else {
-		snap, err = assembler.AssembleScoped(repo.ID, repoRoot, scope)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to assemble knowledge snapshot: %w", err)
-	}
-
-	snapJSON, err := json.Marshal(snap)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
-	}
-
-	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(key, snap.SourceRevision, generationMode)
-	if err != nil {
-		return nil, fmt.Errorf("failed to claim knowledge artifact: %w", err)
-	}
-	if !created {
-		return mapKnowledgeArtifact(artifact), nil
-	}
-	artifact.GenerationMode = generationMode
-	syncArtifactExecutionMetadata(r.KnowledgeStore, artifact)
-
-	anchorLabel := ""
-	if input.AnchorLabel != nil {
-		anchorLabel = strings.TrimSpace(*input.AnchorLabel)
-	}
-	executionPathJSON := ""
-	if input.ExecutionPathJSON != nil {
-		executionPathJSON = strings.TrimSpace(*input.ExecutionPathJSON)
-	}
-
-	enrichedSnapJSON := snapJSON
-	store := r.getStore(ctx)
-	err = r.enqueueKnowledgeJob(artifact, "workflow_story", len(enrichedSnapJSON), func(runCtx context.Context, rt llm.Runtime) error {
-		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
-		if artifactUsesUnderstanding(generationMode) {
-			if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
-				return err
-			} else {
-				if reused {
-					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
-					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
-				}
-				if understanding != nil {
-					if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
-						enrichedSnapJSON = enriched
-					}
-				}
-			}
-		}
-		if knowledgepkg.Depth(depth) == knowledgepkg.DepthDeep {
-			if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), enrichedSnapJSON); ok {
-				enrichedSnapJSON = enriched
-			}
-		}
-
-		stopProgress := r.startProgressTicker(rt, artifact.ID)
-		bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, artifact.ID, "workflow_story")
-		resp, err := r.Worker.GenerateWorkflowStory(bgCtx, &knowledgev1.GenerateWorkflowStoryRequest{
-			RepositoryId:      repo.ID,
-			RepositoryName:    repo.Name,
-			Audience:          audience,
-			Depth:             depth,
-			ScopeType:         string(scope.ScopeType),
-			ScopePath:         scope.ScopePath,
-			AnchorLabel:       anchorLabel,
-			ExecutionPathJson: executionPathJSON,
-			SnapshotJson:      string(enrichedSnapJSON),
-		})
-		stopProgress()
-		if err != nil {
-			slog.Error("workflow story generation failed", "artifact_id", artifact.ID, "error", err)
-			return err
-		}
-
-		rt.ReportProgress(0.96, "llm", "LLM completed, persisting sections")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
-
-		if resp.Usage != nil {
-			store.StoreLLMUsage(&graphstore.LLMUsageRecord{
-				RepoID:       repo.ID,
-				Provider:     "llm",
-				Model:        resp.Usage.Model,
-				Operation:    resp.Usage.Operation,
-				InputTokens:  int(resp.Usage.InputTokens),
-				OutputTokens: int(resp.Usage.OutputTokens),
-			})
-			rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
-		}
-
-		sections := make([]knowledgepkg.Section, len(resp.Sections))
-		for i, sec := range resp.Sections {
-			sections[i] = knowledgepkg.Section{
-				Title:      sec.Title,
-				Content:    sec.Content,
-				Summary:    sec.Summary,
-				Confidence: mapProtoConfidence(sec.Confidence),
-				Inferred:   sec.Inferred,
-			}
-		}
-		if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
-			slog.Error("failed to store workflow story sections", "artifact_id", artifact.ID, "error", err)
-			return err
-		}
-
-		storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
-		for i, sec := range resp.Sections {
-			if i >= len(storedSections) {
-				break
-			}
-			if len(sec.Evidence) > 0 {
-				_ = r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[i].ID, mapProtoEvidence(sec.Evidence))
-			}
-		}
-
-		if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
-			slog.Error("failed to mark workflow story ready", "artifact_id", artifact.ID, "error", err)
-		}
-		rt.ReportProgress(1.0, "ready", "Workflow story ready")
-		slog.Info("workflow story generation complete", "artifact_id", artifact.ID)
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("enqueue workflow story job: %w", err)
-	}
-
-	return mapKnowledgeArtifact(artifact), nil
+	return workflowStoryGenerationService{resolver: r.Resolver, input: input}.Generate(ctx)
 }
 
 // ExplainSystem is the resolver for the explainSystem field.
@@ -2856,7 +1787,9 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
+				AudienceEnum:   protoAudience(existing.Audience),
 				Depth:          string(existing.Depth),
+				DepthEnum:      protoDepth(existing.Depth),
 				ScopeType:      string(scope.ScopeType),
 				ScopePath:      scope.ScopePath,
 				SnapshotJson:   string(snapJSON),
@@ -2942,7 +1875,9 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				RepositoryId:             repo.ID,
 				RepositoryName:           repo.Name,
 				Audience:                 string(existing.Audience),
+				AudienceEnum:             protoAudience(existing.Audience),
 				Depth:                    string(existing.Depth),
+				DepthEnum:                protoDepth(existing.Depth),
 				SnapshotJson:             string(architecturePromptJSON),
 				DeterministicDiagramJson: string(scaffoldJSON),
 			})
@@ -2989,7 +1924,9 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
+				AudienceEnum:   protoAudience(existing.Audience),
 				Depth:          string(existing.Depth),
+				DepthEnum:      protoDepth(existing.Depth),
 				SnapshotJson:   string(enrichedSnapJSON),
 			})
 			if err != nil {
@@ -3033,7 +1970,9 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
+				AudienceEnum:   protoAudience(existing.Audience),
 				Depth:          string(existing.Depth),
+				DepthEnum:      protoDepth(existing.Depth),
 				SnapshotJson:   string(enrichedSnapJSON),
 			})
 			if err != nil {
@@ -3088,7 +2027,9 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
+				AudienceEnum:   protoAudience(existing.Audience),
 				Depth:          string(existing.Depth),
+				DepthEnum:      protoDepth(existing.Depth),
 				ScopeType:      string(scope.ScopeType),
 				ScopePath:      scope.ScopePath,
 				SnapshotJson:   string(enrichedSnapJSON),
@@ -3179,6 +2120,7 @@ func (r *mutationResolver) UpdateComprehensionSettings(ctx context.Context, inpu
 	if err != nil {
 		return nil, err
 	}
+	r.applyEffectiveComprehensionSettings(eff)
 	return mapEffectiveSettings(eff), nil
 }
 
@@ -3264,6 +2206,7 @@ func (r *mutationResolver) UpdateModelCapabilities(ctx context.Context, input Up
 
 // DeleteModelCapabilities is the resolver for the deleteModelCapabilities field.
 func (r *mutationResolver) DeleteModelCapabilities(ctx context.Context, modelID string) (bool, error) {
+	recordDeprecatedFieldRead("Mutation.deleteModelCapabilities")
 	if r.ComprehensionStore == nil {
 		return false, fmt.Errorf("comprehension settings not configured")
 	}
@@ -3271,6 +2214,16 @@ func (r *mutationResolver) DeleteModelCapabilities(ctx context.Context, modelID 
 		return false, err
 	}
 	return true, nil
+}
+
+// DeleteModelCapabilitiesResult is the resolver for the deleteModelCapabilitiesResult field.
+func (r *mutationResolver) DeleteModelCapabilitiesResult(ctx context.Context, modelID string) (*MutationResult, error) {
+	ok, err := r.DeleteModelCapabilities(ctx, modelID)
+	if err != nil {
+		message := err.Error()
+		return &MutationResult{Success: false, Error: &message}, nil
+	}
+	return &MutationResult{Success: ok}, nil
 }
 
 // Health is the resolver for the health field.
@@ -3613,6 +2566,7 @@ func (r *queryResolver) TraceabilityMatrix(ctx context.Context, repositoryID str
 
 // RequirementLinks is the resolver for the requirementLinks field.
 func (r *queryResolver) RequirementLinks(ctx context.Context, requirementID string, limit *int, offset *int) ([]*RequirementLink, error) {
+	recordDeprecatedFieldRead("Query.requirementLinks")
 	store := r.getStore(ctx)
 	if store == nil {
 		return nil, fmt.Errorf("store not initialized")
@@ -3651,6 +2605,24 @@ func (r *queryResolver) RequirementLinks(ctx context.Context, requirementID stri
 		result = append(result, rl)
 	}
 	return result, nil
+}
+
+// RequirementLinksConnection is the resolver for the requirementLinksConnection field.
+func (r *queryResolver) RequirementLinksConnection(ctx context.Context, requirementID string, limit *int, offset *int) (*RequirementLinkConnection, error) {
+	store := r.getStore(ctx)
+	if store == nil {
+		return nil, fmt.Errorf("store not initialized")
+	}
+
+	links, err := r.RequirementLinks(ctx, requirementID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	return &RequirementLinkConnection{
+		Nodes:      links,
+		TotalCount: len(store.GetLinksForRequirement(requirementID, false)),
+	}, nil
 }
 
 // RequirementToCode is the resolver for the requirementToCode field.
@@ -4043,6 +3015,7 @@ func (r *queryResolver) RepoLinks(ctx context.Context, repoID string) ([]*RepoLi
 
 // CrossRepoRefs is the resolver for the crossRepoRefs field.
 func (r *queryResolver) CrossRepoRefs(ctx context.Context, repoID string, refType *CrossRepoRefType, limit *int) ([]*CrossRepoRef, error) {
+	recordDeprecatedFieldRead("Query.crossRepoRefs")
 	store := r.getStore(ctx)
 	if store == nil {
 		return nil, fmt.Errorf("store not initialized")
@@ -4061,6 +3034,32 @@ func (r *queryResolver) CrossRepoRefs(ctx context.Context, repoID string, refTyp
 		return nil, err
 	}
 	return mapCrossRepoRefs(refs), nil
+}
+
+// CrossRepoRefsConnection is the resolver for the crossRepoRefsConnection field.
+func (r *queryResolver) CrossRepoRefsConnection(ctx context.Context, repoID string, refType *CrossRepoRefType, limit *int) (*CrossRepoRefConnection, error) {
+	store := r.getStore(ctx)
+	if store == nil {
+		return nil, fmt.Errorf("store not initialized")
+	}
+
+	var refTypeStr *string
+	if refType != nil {
+		s := string(*refType)
+		refTypeStr = &s
+	}
+	totalRefs, err := store.GetCrossRepoRefs(repoID, refTypeStr, 0)
+	if err != nil {
+		return nil, err
+	}
+	refs, err := r.CrossRepoRefs(ctx, repoID, refType, limit)
+	if err != nil {
+		return nil, err
+	}
+	return &CrossRepoRefConnection{
+		Nodes:      refs,
+		TotalCount: len(totalRefs),
+	}, nil
 }
 
 // SymbolCrossRepoRefs is the resolver for the symbolCrossRepoRefs field.
@@ -4164,6 +3163,7 @@ func (r *queryResolver) ComprehensionSettings(ctx context.Context, scopeType *st
 
 // ComprehensionSettingsList is the resolver for the comprehensionSettingsList field.
 func (r *queryResolver) ComprehensionSettingsList(ctx context.Context) ([]*ComprehensionSettings, error) {
+	recordDeprecatedFieldRead("Query.comprehensionSettingsList")
 	if r.ComprehensionStore == nil {
 		return nil, fmt.Errorf("comprehension settings not configured")
 	}

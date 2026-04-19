@@ -47,6 +47,7 @@ class RequirementsServicer(requirements_pb2_grpc.RequirementsServiceServicer):
             api_key=override.api_key,
             model=override.model,
             draft_model=override.draft_model,
+            timeout_seconds=override.timeout_seconds,
         )
         return provider, model or None
 

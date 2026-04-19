@@ -108,6 +108,7 @@ def create_llm_provider(config: WorkerConfig) -> LLMProvider:
             extra_headers=extra_headers,
             provider_name=config.llm_provider,
             disable_thinking=disable_thinking,
+            timeout=float(config.llm_timeout) if config.llm_timeout else None,
         )
     else:
         raise ValueError(f"Unknown LLM provider: {config.llm_provider}")
@@ -121,10 +122,14 @@ def create_llm_provider_for_request(
     api_key: str = "",
     model: str = "",
     draft_model: str = "",
+    timeout_seconds: int = 0,
 ) -> tuple[LLMProvider, str]:
     """Create a per-request provider from effective runtime settings.
 
     Empty override fields fall back to the worker's bootstrap config.
+    ``timeout_seconds`` > 0 overrides the worker's bootstrap
+    ``llm_timeout``; this is how the admin UI's TimeoutSecs reaches the
+    HTTP client on a per-call basis.
     """
     effective = config.model_copy(
         update={
@@ -133,6 +138,7 @@ def create_llm_provider_for_request(
             "llm_api_key": api_key or config.llm_api_key,
             "llm_model": model or config.llm_model,
             "llm_draft_model": draft_model or config.llm_draft_model,
+            "llm_timeout": timeout_seconds if timeout_seconds > 0 else config.llm_timeout,
         }
     )
     return create_llm_provider(effective), effective.llm_model

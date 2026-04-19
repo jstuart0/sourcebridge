@@ -128,6 +128,12 @@ type Orchestrator struct {
 	logSubscribers  map[int64]chan llm.JobLogEntry
 	nextLogSubID    int64
 	lastLogSequence map[string]int64
+
+	workerMu          sync.Mutex
+	nextWorkerID      int
+	configuredWorkers int
+	activeWorkers     int
+	retiringWorkers   int
 }
 
 // workItem is the internal envelope that carries a job id and its run
@@ -143,26 +149,28 @@ func New(store llm.JobStore, cfg Config) *Orchestrator {
 	cfg = cfg.withDefaults()
 	ctx, cancel := context.WithCancel(context.Background())
 	o := &Orchestrator{
-		cfg:             cfg,
-		store:           store,
-		inflight:        newInflightRegistry(),
-		metrics:         newMetrics(cfg.MetricsCapacity),
-		breaker:         newSubsystemBreaker(cfg.ComputeErrorThreshold, cfg.ComputeCooldown),
-		interactiveQ:    make(chan *workItem, cfg.QueueCapacity),
-		maintenanceQ:    make(chan *workItem, cfg.QueueCapacity),
-		prewarmQ:        make(chan *workItem, cfg.QueueCapacity),
-		ctx:             ctx,
-		cancel:          cancel,
-		subscribers:     make(map[int64]chan llm.JobEvent),
-		logSubscribers:  make(map[int64]chan llm.JobLogEntry),
-		lastLogSequence: make(map[string]int64),
-		runCancels:      make(map[string]context.CancelFunc),
-		cancelled:       make(map[string]struct{}),
+		cfg:               cfg,
+		store:             store,
+		inflight:          newInflightRegistry(),
+		metrics:           newMetrics(cfg.MetricsCapacity),
+		breaker:           newSubsystemBreaker(cfg.ComputeErrorThreshold, cfg.ComputeCooldown),
+		interactiveQ:      make(chan *workItem, cfg.QueueCapacity),
+		maintenanceQ:      make(chan *workItem, cfg.QueueCapacity),
+		prewarmQ:          make(chan *workItem, cfg.QueueCapacity),
+		ctx:               ctx,
+		cancel:            cancel,
+		subscribers:       make(map[int64]chan llm.JobEvent),
+		logSubscribers:    make(map[int64]chan llm.JobLogEntry),
+		lastLogSequence:   make(map[string]int64),
+		runCancels:        make(map[string]context.CancelFunc),
+		cancelled:         make(map[string]struct{}),
+		configuredWorkers: cfg.MaxConcurrency,
 	}
+	o.workerMu.Lock()
 	for i := 0; i < cfg.MaxConcurrency; i++ {
-		o.workers.Add(1)
-		go o.worker(i)
+		o.startWorkerLocked()
 	}
+	o.workerMu.Unlock()
 	// Start stale job reaper — marks jobs stuck in pending/generating
 	// for longer than the reap threshold as failed so they don't block
 	// dedupe forever.
@@ -238,8 +246,16 @@ func (o *Orchestrator) reapStaleJobs() {
 			"status", job.Status,
 			"age", age.Round(time.Second).String(),
 			"threshold", threshold.String())
-		o.store.SetStatus(job.ID, llm.StatusFailed)
-		o.store.SetError(job.ID, "DEADLINE_EXCEEDED", "Job reaped: stuck in "+string(job.Status)+" for "+age.Round(time.Second).String())
+		if err := o.store.SetStatus(job.ID, llm.StatusFailed); err != nil {
+			slog.Warn("failed to mark stale job failed", "job_id", job.ID, "error", err)
+		}
+		if err := o.store.SetError(
+			job.ID,
+			"DEADLINE_EXCEEDED",
+			"Job reaped: stuck in "+string(job.Status)+" for "+age.Round(time.Second).String(),
+		); err != nil {
+			slog.Warn("failed to persist stale job error", "job_id", job.ID, "error", err)
+		}
 		o.inflight.release(job.TargetKey)
 		if o.cfg.OnStaleJob != nil {
 			o.cfg.OnStaleJob(job)
@@ -565,7 +581,49 @@ func (o *Orchestrator) InFlightCount() int {
 
 // MaxConcurrency returns the configured worker pool size.
 func (o *Orchestrator) MaxConcurrency() int {
-	return o.cfg.MaxConcurrency
+	o.workerMu.Lock()
+	defer o.workerMu.Unlock()
+	return o.configuredWorkers
+}
+
+// ActiveWorkerCount returns the number of currently running worker goroutines.
+func (o *Orchestrator) ActiveWorkerCount() int {
+	o.workerMu.Lock()
+	defer o.workerMu.Unlock()
+	return o.activeWorkers
+}
+
+// ReconfigureMaxConcurrency updates the desired worker-pool size without
+// cancelling in-flight jobs. New workers start immediately on scale-up;
+// scale-down retires workers after they finish their current job.
+func (o *Orchestrator) ReconfigureMaxConcurrency(max int) (oldConfigured int, newConfigured int) {
+	if max <= 0 {
+		max = 1
+	}
+
+	o.workerMu.Lock()
+	defer o.workerMu.Unlock()
+
+	oldConfigured = o.configuredWorkers
+	if oldConfigured <= 0 {
+		oldConfigured = o.cfg.MaxConcurrency
+	}
+	newConfigured = max
+	if oldConfigured == newConfigured {
+		return oldConfigured, newConfigured
+	}
+
+	o.configuredWorkers = newConfigured
+	o.cfg.MaxConcurrency = newConfigured
+	if newConfigured > oldConfigured {
+		for i := 0; i < newConfigured-oldConfigured; i++ {
+			o.startWorkerLocked()
+		}
+		return oldConfigured, newConfigured
+	}
+
+	o.retiringWorkers += oldConfigured - newConfigured
+	return oldConfigured, newConfigured
 }
 
 // PendingSnapshot returns pending jobs ordered by queue order, oldest first.
@@ -678,8 +736,18 @@ func (o *Orchestrator) publishLog(entry llm.JobLogEntry) {
 // worker is the loop that drains the queue and runs jobs under the
 // bounded concurrency budget. One goroutine per MaxConcurrency.
 func (o *Orchestrator) worker(idx int) {
-	defer o.workers.Done()
+	defer func() {
+		o.workerMu.Lock()
+		if o.activeWorkers > 0 {
+			o.activeWorkers--
+		}
+		o.workerMu.Unlock()
+		o.workers.Done()
+	}()
 	for {
+		if o.shouldWorkerRetire() {
+			return
+		}
 		item, ok := o.dequeue()
 		if !ok {
 			return
@@ -687,6 +755,27 @@ func (o *Orchestrator) worker(idx int) {
 		o.runJob(item)
 		_ = idx // reserved for future per-worker instrumentation
 	}
+}
+
+func (o *Orchestrator) startWorkerLocked() {
+	idx := o.nextWorkerID
+	o.nextWorkerID++
+	o.activeWorkers++
+	o.workers.Add(1)
+	go o.worker(idx)
+}
+
+func (o *Orchestrator) shouldWorkerRetire() bool {
+	o.workerMu.Lock()
+	defer o.workerMu.Unlock()
+	if o.retiringWorkers <= 0 {
+		return false
+	}
+	if o.activeWorkers <= o.configuredWorkers {
+		return false
+	}
+	o.retiringWorkers--
+	return true
 }
 
 func (o *Orchestrator) dequeue() (*workItem, bool) {

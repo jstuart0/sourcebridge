@@ -9,6 +9,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/entitlements"
 	"github.com/sourcebridge/sourcebridge/internal/events"
+	"github.com/sourcebridge/sourcebridge/internal/featureflags"
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
@@ -26,13 +27,14 @@ type GitConfigLoader interface {
 // It serves as dependency injection for your app, add any dependencies you require here.
 
 type Resolver struct {
-	Store          graph.GraphStore
-	KnowledgeStore knowledge.KnowledgeStore  // nil when knowledge persistence is unavailable
-	Worker         *worker.Client            // nil when AI features are unavailable
-	Orchestrator   *orchestrator.Orchestrator // nil when llm orchestration is unavailable (degraded mode)
-	Config         *config.Config            // application configuration
-	EventBus       *events.Bus               // in-process event bus for SSE notifications
-	GitConfig          GitConfigLoader           // reads git credentials from DB (multi-replica safe)
+	Store              graph.GraphStore
+	KnowledgeStore     knowledge.KnowledgeStore   // nil when knowledge persistence is unavailable
+	Worker             *worker.Client             // nil when AI features are unavailable
+	Orchestrator       *orchestrator.Orchestrator // nil when llm orchestration is unavailable (degraded mode)
+	Config             *config.Config             // application configuration
+	EventBus           *events.Bus                // in-process event bus for SSE notifications
+	Flags              featureflags.Flags         // backend startup-time feature flags
+	GitConfig          GitConfigLoader            // reads git credentials from DB (multi-replica safe)
 	ComprehensionStore comprehension.Store        // comprehension settings + model capabilities; nil when unavailable
 }
 
@@ -116,10 +118,10 @@ func (r *Resolver) resolveCapabilities() resolvedCapabilities {
 			CustomTemplates: hasWorker && allow(entitlements.FeatureCustomTemplates),
 			Billing:         currentPlan() != entitlements.PlanOSS,
 
-			CliffNotes:    hasKnowledge && hasWorker && allow(entitlements.FeatureCliffNotes),
-			LearningPaths: hasKnowledge && hasWorker && allow(entitlements.FeatureLearningPaths),
-			CodeTours:     hasKnowledge && hasWorker && allow(entitlements.FeatureCodeTours),
-			SystemExplain: hasKnowledge && hasWorker && allow(entitlements.FeatureSystemExplain),
+			CliffNotes:           hasKnowledge && hasWorker && allow(entitlements.FeatureCliffNotes),
+			LearningPaths:        hasKnowledge && hasWorker && allow(entitlements.FeatureLearningPaths),
+			CodeTours:            hasKnowledge && hasWorker && allow(entitlements.FeatureCodeTours),
+			SystemExplain:        hasKnowledge && hasWorker && allow(entitlements.FeatureSystemExplain),
 			SymbolScopedAnalysis: hasKnowledge && hasWorker && allow(entitlements.FeatureCliffNotes),
 
 			MultiAudienceKnowledge:   hasKnowledge && hasWorker && allow(entitlements.FeatureMultiAudienceKnowledge),

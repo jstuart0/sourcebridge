@@ -19,7 +19,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/jstuart0/sourcebridge-enterprise/routes"
-	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
+	enterprisev1 "github.com/sourcebridge/sourcebridge/gen/go/enterprise/v1"
 	"github.com/sourcebridge/sourcebridge/internal/api/middleware"
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 	"github.com/sourcebridge/sourcebridge/internal/config"
@@ -95,7 +95,7 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 			slog.Info("report: collected repo data", "repos", len(repoIDs), "jsonBytes", len(repoJSON))
 
 			ctx := withWorkerLLMMetadata(context.Background(), s.cfg, "report")
-			resp, err := s.worker.GenerateReport(ctx, &knowledgev1.GenerateReportRequest{
+			resp, err := s.worker.GenerateReport(ctx, &enterprisev1.GenerateReportRequest{
 				ReportId:               reportID,
 				ReportName:             reportName,
 				ReportType:             reportType,

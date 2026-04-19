@@ -8,7 +8,7 @@ import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
 import { StatCard } from "@/components/ui/stat-card";
-import { TOKEN_KEY } from "@/lib/token-key";
+import { authFetch } from "@/lib/auth-fetch";
 import { cn } from "@/lib/utils";
 
 type Tab = "status" | "llm" | "auth" | "repos" | "git" | "knowledge";
@@ -90,14 +90,8 @@ interface GitConfigState {
   ssh_key_path: string;
 }
 
-/** Parse an API error response into a user-friendly message.
- *  On 401, clears the token and redirects to login. */
+/** Parse an API error response into a user-friendly message. */
 async function handleApiError(res: Response): Promise<string> {
-  if (res.status === 401) {
-    localStorage.removeItem(TOKEN_KEY);
-    window.location.href = "/login";
-    return "Session expired — redirecting to login...";
-  }
   const text = await res.text();
   // Try to parse JSON error body
   try {
@@ -119,8 +113,7 @@ function useAdminFetch<T>(path: string) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem(TOKEN_KEY);
-      const res = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await authFetch(path);
       if (!res.ok) throw new Error(await handleApiError(res));
       setData(await res.json());
       setError(null);
@@ -156,7 +149,7 @@ export default function AdminPage() {
   const [llmKnowledgeModel, setLlmKnowledgeModel] = useState("");
   const [llmArchitectureDiagramModel, setLlmArchitectureDiagramModel] = useState("");
   const [llmReportModel, setLlmReportModel] = useState("");
-  const [llmTimeoutSecs, setLlmTimeoutSecs] = useState(30);
+  const [llmTimeoutSecs, setLlmTimeoutSecs] = useState(900);
   const [llmAdvancedMode, setLlmAdvancedMode] = useState(false);
   const [llmDraftModel, setLlmDraftModel] = useState("");
   const [llmSaving, setLlmSaving] = useState(false);
@@ -188,13 +181,10 @@ export default function AdminPage() {
     setLlmModelsLoading(true);
     setLlmModelsError(null);
     try {
-      const token = localStorage.getItem(TOKEN_KEY);
       const params = new URLSearchParams();
       if (provider) params.set("provider", provider);
       if (baseURL) params.set("base_url", baseURL);
-      const res = await fetch(`/api/v1/admin/llm-models?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(`/api/v1/admin/llm-models?${params}`);
       if (!res.ok) throw new Error(await handleApiError(res));
       const data = await res.json();
       setLlmModels(data.models || []);
@@ -233,7 +223,7 @@ export default function AdminPage() {
       setLlmKnowledgeModel(llmConfig.knowledge_model || "");
       setLlmArchitectureDiagramModel(llmConfig.architecture_diagram_model || "");
       setLlmReportModel(llmConfig.report_model || "");
-      setLlmTimeoutSecs(llmConfig.timeout_secs || 30);
+      setLlmTimeoutSecs(llmConfig.timeout_secs || 900);
       setLlmAdvancedMode(llmConfig.advanced_mode || false);
       setLlmDraftModel(llmConfig.draft_model || "");
       initialLoadDone.current = true;
@@ -273,7 +263,6 @@ export default function AdminPage() {
     setLlmMessage(null);
     setLlmSuccess(false);
     try {
-      const token = localStorage.getItem(TOKEN_KEY);
       const body: Record<string, unknown> = {
         provider: llmProvider,
         base_url: llmBaseURL,
@@ -290,9 +279,9 @@ export default function AdminPage() {
         body.report_model = llmReportModel;
       }
       if (llmAPIKey) body.api_key = llmAPIKey;
-      const res = await fetch("/api/v1/admin/llm-config", {
+      const res = await authFetch("/api/v1/admin/llm-config", {
         method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(await handleApiError(res));
@@ -314,13 +303,12 @@ export default function AdminPage() {
     setGitMessage(null);
     setGitSuccess(false);
     try {
-      const token = localStorage.getItem(TOKEN_KEY);
       const body: Record<string, string> = {};
       if (gitToken) body.default_token = gitToken;
       body.ssh_key_path = gitSSHKeyPath;
-      const res = await fetch("/api/v1/admin/git-config", {
+      const res = await authFetch("/api/v1/admin/git-config", {
         method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(await handleApiError(res));
@@ -340,8 +328,7 @@ export default function AdminPage() {
 
   async function testEndpoint(path: string) {
     setTestResult(null);
-    const token = localStorage.getItem(TOKEN_KEY);
-    const res = await fetch(path, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    const res = await authFetch(path, { method: "POST" });
     const data = await res.json();
     setTestResult(JSON.stringify(data, null, 2));
   }
@@ -801,9 +788,9 @@ export default function AdminPage() {
                 <input
                   type="number"
                   value={llmTimeoutSecs}
-                  onChange={(e) => setLlmTimeoutSecs(parseInt(e.target.value) || 30)}
+                  onChange={(e) => setLlmTimeoutSecs(parseInt(e.target.value) || 900)}
                   min={5}
-                  max={300}
+                  max={3600}
                   className="h-11 w-32 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)]"
                 />
               </div>

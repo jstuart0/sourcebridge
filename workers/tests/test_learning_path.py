@@ -10,7 +10,7 @@ import json
 import pytest
 
 from workers.common.llm.fake import FakeLLMProvider
-from workers.knowledge.learning_path import generate_learning_path
+from workers.knowledge.learning_path import _collect_snapshot_file_paths, generate_learning_path
 
 SAMPLE_SNAPSHOT = json.dumps(
     {
@@ -110,3 +110,96 @@ async def test_learning_path_with_focus_area() -> None:
     )
 
     assert len(result.steps) >= 1
+
+
+def test_collect_snapshot_file_paths_extracts_from_every_symbol_list():
+    """The path extractor must walk every symbol array + modules + files so the
+    hallucination filter has a complete ground-truth set to check against."""
+
+    snapshot = json.dumps(
+        {
+            "entry_points": [{"file_path": "cmd/main.go"}],
+            "public_api": [{"file_path": "internal/api/router.go"}],
+            "test_symbols": [{"file_path": "internal/api/router_test.go"}],
+            "complex_symbols": [{"file_path": "internal/llm/orchestrator.go"}],
+            "high_fan_in_symbols": [{"file_path": "internal/db/store.go"}],
+            "high_fan_out_symbols": [{"file_path": "internal/graph/index.go"}],
+            "modules": [
+                {
+                    "path": "internal/api",
+                    "files": [
+                        {"path": "internal/api/handler.go"},
+                        "internal/api/middleware.go",
+                    ],
+                }
+            ],
+            "files": [{"path": "README.md"}, "go.mod"],
+        }
+    )
+    paths = _collect_snapshot_file_paths(snapshot)
+    assert "cmd/main.go" in paths
+    assert "internal/api/router.go" in paths
+    assert "internal/llm/orchestrator.go" in paths
+    assert "internal/graph/index.go" in paths
+    assert "internal/api/handler.go" in paths
+    assert "internal/api/middleware.go" in paths
+    assert "README.md" in paths
+    assert "go.mod" in paths
+
+
+def test_collect_snapshot_file_paths_handles_malformed_snapshot():
+    assert _collect_snapshot_file_paths("") == set()
+    assert _collect_snapshot_file_paths("not-json") == set()
+    assert _collect_snapshot_file_paths("[]") == set()
+
+
+@pytest.mark.asyncio
+async def test_learning_path_deep_filters_hallucinated_file_paths():
+    """DEEP-depth generation must drop any file_paths that don't appear in
+    the snapshot, silently correcting the LLM when it invents paths."""
+
+    # FakeLLMProvider returns a fixed payload — patch it to emit a step
+    # citing one real path (main.go, in SAMPLE_SNAPSHOT) and one invented
+    # path (internal/fake/service.go).
+    class _FakeLLMWithInventedPath(FakeLLMProvider):
+        async def complete(self, prompt, *, system="", max_tokens=4096, temperature=0.0, model=None, frequency_penalty=0.0, extra_body=None):  # noqa: D401
+            payload = json.dumps(
+                [
+                    {
+                        "order": 1,
+                        "title": "Step 1",
+                        "objective": "Read main",
+                        "content": "Inspect `main.go` and `internal/fake/service.go`.",
+                        "file_paths": ["main.go", "internal/fake/service.go"],
+                        "symbol_ids": [],
+                        "estimated_time": "10 minutes",
+                        "prerequisite_steps": [],
+                        "difficulty": "beginner",
+                        "exercises": ["Read main.go and trace control flow"],
+                        "checkpoint": "You can identify the entry point",
+                    }
+                ]
+            )
+            from workers.common.llm.provider import LLMResponse
+
+            return LLMResponse(
+                content=payload,
+                model=model or "fake-test-model",
+                input_tokens=len(prompt) // 4,
+                output_tokens=len(payload) // 4,
+                stop_reason="end_turn",
+            )
+
+    provider = _FakeLLMWithInventedPath()
+    result, _ = await generate_learning_path(
+        provider=provider,
+        repository_name="test-repo",
+        audience="developer",
+        depth="deep",
+        snapshot_json=SAMPLE_SNAPSHOT,
+    )
+    assert len(result.steps) == 1
+    step = result.steps[0]
+    assert "main.go" in step.file_paths
+    # The invented path should be dropped from file_paths entirely.
+    assert "internal/fake/service.go" not in step.file_paths

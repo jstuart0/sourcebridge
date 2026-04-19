@@ -1,4 +1,4 @@
-import { TOKEN_KEY } from "@/lib/token-key";
+import { clearStoredToken } from "@/lib/auth-token-store";
 
 /**
  * Decode a JWT payload without verifying the signature.
@@ -41,7 +41,7 @@ export function msUntilExpiry(token: string): number {
  */
 export function forceLogout() {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(TOKEN_KEY);
+  clearStoredToken();
   // Avoid redirect loop if already on the login page
   if (window.location.pathname !== "/login") {
     window.location.href = "/login";

@@ -22,6 +22,107 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type Audience int32
+
+const (
+	Audience_AUDIENCE_UNSPECIFIED Audience = 0
+	Audience_AUDIENCE_BEGINNER    Audience = 1
+	Audience_AUDIENCE_DEVELOPER   Audience = 2
+)
+
+// Enum value maps for Audience.
+var (
+	Audience_name = map[int32]string{
+		0: "AUDIENCE_UNSPECIFIED",
+		1: "AUDIENCE_BEGINNER",
+		2: "AUDIENCE_DEVELOPER",
+	}
+	Audience_value = map[string]int32{
+		"AUDIENCE_UNSPECIFIED": 0,
+		"AUDIENCE_BEGINNER":    1,
+		"AUDIENCE_DEVELOPER":   2,
+	}
+)
+
+func (x Audience) Enum() *Audience {
+	p := new(Audience)
+	*p = x
+	return p
+}
+
+func (x Audience) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Audience) Descriptor() protoreflect.EnumDescriptor {
+	return file_knowledge_v1_knowledge_proto_enumTypes[0].Descriptor()
+}
+
+func (Audience) Type() protoreflect.EnumType {
+	return &file_knowledge_v1_knowledge_proto_enumTypes[0]
+}
+
+func (x Audience) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Audience.Descriptor instead.
+func (Audience) EnumDescriptor() ([]byte, []int) {
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{0}
+}
+
+type Depth int32
+
+const (
+	Depth_DEPTH_UNSPECIFIED Depth = 0
+	Depth_DEPTH_SUMMARY     Depth = 1
+	Depth_DEPTH_MEDIUM      Depth = 2
+	Depth_DEPTH_DEEP        Depth = 3
+)
+
+// Enum value maps for Depth.
+var (
+	Depth_name = map[int32]string{
+		0: "DEPTH_UNSPECIFIED",
+		1: "DEPTH_SUMMARY",
+		2: "DEPTH_MEDIUM",
+		3: "DEPTH_DEEP",
+	}
+	Depth_value = map[string]int32{
+		"DEPTH_UNSPECIFIED": 0,
+		"DEPTH_SUMMARY":     1,
+		"DEPTH_MEDIUM":      2,
+		"DEPTH_DEEP":        3,
+	}
+)
+
+func (x Depth) Enum() *Depth {
+	p := new(Depth)
+	*p = x
+	return p
+}
+
+func (x Depth) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Depth) Descriptor() protoreflect.EnumDescriptor {
+	return file_knowledge_v1_knowledge_proto_enumTypes[1].Descriptor()
+}
+
+func (Depth) Type() protoreflect.EnumType {
+	return &file_knowledge_v1_knowledge_proto_enumTypes[1]
+}
+
+func (x Depth) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Depth.Descriptor instead.
+func (Depth) EnumDescriptor() ([]byte, []int) {
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{1}
+}
+
 // GenerateCliffNotesRequest carries the assembled repository snapshot for the
 // Python worker to synthesize into cliff notes. The Go API side assembles the
 // snapshot from the graph store and serializes it as JSON.
@@ -34,6 +135,8 @@ type GenerateCliffNotesRequest struct {
 	SnapshotJson   string                 `protobuf:"bytes,5,opt,name=snapshot_json,json=snapshotJson,proto3" json:"snapshot_json,omitempty"` // JSON-serialized KnowledgeSnapshot
 	ScopeType      string                 `protobuf:"bytes,6,opt,name=scope_type,json=scopeType,proto3" json:"scope_type,omitempty"`          // "repository", "module", "file", "symbol"
 	ScopePath      string                 `protobuf:"bytes,7,opt,name=scope_path,json=scopePath,proto3" json:"scope_path,omitempty"`          // canonical scope path
+	AudienceEnum   Audience               `protobuf:"varint,8,opt,name=audience_enum,json=audienceEnum,proto3,enum=sourcebridge.knowledge.v1.Audience" json:"audience_enum,omitempty"`
+	DepthEnum      Depth                  `protobuf:"varint,9,opt,name=depth_enum,json=depthEnum,proto3,enum=sourcebridge.knowledge.v1.Depth" json:"depth_enum,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -117,6 +220,20 @@ func (x *GenerateCliffNotesRequest) GetScopePath() string {
 	return ""
 }
 
+func (x *GenerateCliffNotesRequest) GetAudienceEnum() Audience {
+	if x != nil {
+		return x.AudienceEnum
+	}
+	return Audience_AUDIENCE_UNSPECIFIED
+}
+
+func (x *GenerateCliffNotesRequest) GetDepthEnum() Depth {
+	if x != nil {
+		return x.DepthEnum
+	}
+	return Depth_DEPTH_UNSPECIFIED
+}
+
 type GenerateCliffNotesResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Sections      []*KnowledgeSection    `protobuf:"bytes,1,rep,name=sections,proto3" json:"sections,omitempty"`
@@ -185,6 +302,8 @@ type GenerateArchitectureDiagramRequest struct {
 	Depth                    string                 `protobuf:"bytes,4,opt,name=depth,proto3" json:"depth,omitempty"`
 	SnapshotJson             string                 `protobuf:"bytes,5,opt,name=snapshot_json,json=snapshotJson,proto3" json:"snapshot_json,omitempty"`
 	DeterministicDiagramJson string                 `protobuf:"bytes,6,opt,name=deterministic_diagram_json,json=deterministicDiagramJson,proto3" json:"deterministic_diagram_json,omitempty"` // JSON-serialized deterministic diagram scaffold
+	AudienceEnum             Audience               `protobuf:"varint,7,opt,name=audience_enum,json=audienceEnum,proto3,enum=sourcebridge.knowledge.v1.Audience" json:"audience_enum,omitempty"`
+	DepthEnum                Depth                  `protobuf:"varint,8,opt,name=depth_enum,json=depthEnum,proto3,enum=sourcebridge.knowledge.v1.Depth" json:"depth_enum,omitempty"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -259,6 +378,20 @@ func (x *GenerateArchitectureDiagramRequest) GetDeterministicDiagramJson() strin
 		return x.DeterministicDiagramJson
 	}
 	return ""
+}
+
+func (x *GenerateArchitectureDiagramRequest) GetAudienceEnum() Audience {
+	if x != nil {
+		return x.AudienceEnum
+	}
+	return Audience_AUDIENCE_UNSPECIFIED
+}
+
+func (x *GenerateArchitectureDiagramRequest) GetDepthEnum() Depth {
+	if x != nil {
+		return x.DepthEnum
+	}
+	return Depth_DEPTH_UNSPECIFIED
 }
 
 type GenerateArchitectureDiagramResponse struct {
@@ -566,6 +699,8 @@ type GenerateLearningPathRequest struct {
 	Depth          string                 `protobuf:"bytes,4,opt,name=depth,proto3" json:"depth,omitempty"`
 	SnapshotJson   string                 `protobuf:"bytes,5,opt,name=snapshot_json,json=snapshotJson,proto3" json:"snapshot_json,omitempty"`
 	FocusArea      string                 `protobuf:"bytes,6,opt,name=focus_area,json=focusArea,proto3" json:"focus_area,omitempty"` // optional area to focus the learning path on
+	AudienceEnum   Audience               `protobuf:"varint,7,opt,name=audience_enum,json=audienceEnum,proto3,enum=sourcebridge.knowledge.v1.Audience" json:"audience_enum,omitempty"`
+	DepthEnum      Depth                  `protobuf:"varint,8,opt,name=depth_enum,json=depthEnum,proto3,enum=sourcebridge.knowledge.v1.Depth" json:"depth_enum,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -642,6 +777,20 @@ func (x *GenerateLearningPathRequest) GetFocusArea() string {
 	return ""
 }
 
+func (x *GenerateLearningPathRequest) GetAudienceEnum() Audience {
+	if x != nil {
+		return x.AudienceEnum
+	}
+	return Audience_AUDIENCE_UNSPECIFIED
+}
+
+func (x *GenerateLearningPathRequest) GetDepthEnum() Depth {
+	if x != nil {
+		return x.DepthEnum
+	}
+	return Depth_DEPTH_UNSPECIFIED
+}
+
 type GenerateLearningPathResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Steps         []*LearningStep        `protobuf:"bytes,1,rep,name=steps,proto3" json:"steps,omitempty"`
@@ -705,6 +854,8 @@ type GenerateWorkflowStoryRequest struct {
 	ScopePath         string                 `protobuf:"bytes,7,opt,name=scope_path,json=scopePath,proto3" json:"scope_path,omitempty"`                           // canonical scope path
 	AnchorLabel       string                 `protobuf:"bytes,8,opt,name=anchor_label,json=anchorLabel,proto3" json:"anchor_label,omitempty"`                     // optional plain-language anchor for the story
 	ExecutionPathJson string                 `protobuf:"bytes,9,opt,name=execution_path_json,json=executionPathJson,proto3" json:"execution_path_json,omitempty"` // optional JSON-serialized execution steps
+	AudienceEnum      Audience               `protobuf:"varint,10,opt,name=audience_enum,json=audienceEnum,proto3,enum=sourcebridge.knowledge.v1.Audience" json:"audience_enum,omitempty"`
+	DepthEnum         Depth                  `protobuf:"varint,11,opt,name=depth_enum,json=depthEnum,proto3,enum=sourcebridge.knowledge.v1.Depth" json:"depth_enum,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -800,6 +951,20 @@ func (x *GenerateWorkflowStoryRequest) GetExecutionPathJson() string {
 		return x.ExecutionPathJson
 	}
 	return ""
+}
+
+func (x *GenerateWorkflowStoryRequest) GetAudienceEnum() Audience {
+	if x != nil {
+		return x.AudienceEnum
+	}
+	return Audience_AUDIENCE_UNSPECIFIED
+}
+
+func (x *GenerateWorkflowStoryRequest) GetDepthEnum() Depth {
+	if x != nil {
+		return x.DepthEnum
+	}
+	return Depth_DEPTH_UNSPECIFIED
 }
 
 type GenerateWorkflowStoryResponse struct {
@@ -1164,6 +1329,8 @@ type GenerateCodeTourRequest struct {
 	Depth          string                 `protobuf:"bytes,4,opt,name=depth,proto3" json:"depth,omitempty"`
 	SnapshotJson   string                 `protobuf:"bytes,5,opt,name=snapshot_json,json=snapshotJson,proto3" json:"snapshot_json,omitempty"`
 	Theme          string                 `protobuf:"bytes,6,opt,name=theme,proto3" json:"theme,omitempty"` // optional theme/focus for the tour
+	AudienceEnum   Audience               `protobuf:"varint,7,opt,name=audience_enum,json=audienceEnum,proto3,enum=sourcebridge.knowledge.v1.Audience" json:"audience_enum,omitempty"`
+	DepthEnum      Depth                  `protobuf:"varint,8,opt,name=depth_enum,json=depthEnum,proto3,enum=sourcebridge.knowledge.v1.Depth" json:"depth_enum,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -1238,6 +1405,20 @@ func (x *GenerateCodeTourRequest) GetTheme() string {
 		return x.Theme
 	}
 	return ""
+}
+
+func (x *GenerateCodeTourRequest) GetAudienceEnum() Audience {
+	if x != nil {
+		return x.AudienceEnum
+	}
+	return Audience_AUDIENCE_UNSPECIFIED
+}
+
+func (x *GenerateCodeTourRequest) GetDepthEnum() Depth {
+	if x != nil {
+		return x.DepthEnum
+	}
+	return Depth_DEPTH_UNSPECIFIED
 }
 
 type GenerateCodeTourResponse struct {
@@ -1586,375 +1767,11 @@ func (x *KnowledgeEvidence) GetRationale() string {
 	return ""
 }
 
-type GenerateReportRequest struct {
-	state                  protoimpl.MessageState `protogen:"open.v1"`
-	ReportId               string                 `protobuf:"bytes,1,opt,name=report_id,json=reportId,proto3" json:"report_id,omitempty"`
-	ReportName             string                 `protobuf:"bytes,2,opt,name=report_name,json=reportName,proto3" json:"report_name,omitempty"`
-	ReportType             string                 `protobuf:"bytes,3,opt,name=report_type,json=reportType,proto3" json:"report_type,omitempty"` // "architecture_baseline", "swot", etc.
-	Audience               string                 `protobuf:"bytes,4,opt,name=audience,proto3" json:"audience,omitempty"`                       // "c_suite", "developer", etc.
-	RepositoryIds          []string               `protobuf:"bytes,5,rep,name=repository_ids,json=repositoryIds,proto3" json:"repository_ids,omitempty"`
-	SelectedSections       []string               `protobuf:"bytes,6,rep,name=selected_sections,json=selectedSections,proto3" json:"selected_sections,omitempty"`
-	IncludeDiagrams        bool                   `protobuf:"varint,7,opt,name=include_diagrams,json=includeDiagrams,proto3" json:"include_diagrams,omitempty"`
-	LoeMode                string                 `protobuf:"bytes,8,opt,name=loe_mode,json=loeMode,proto3" json:"loe_mode,omitempty"`                                                 // "human_hours" | "ai_assisted"
-	OutputDir              string                 `protobuf:"bytes,9,opt,name=output_dir,json=outputDir,proto3" json:"output_dir,omitempty"`                                           // where to write output files
-	RepoDataJson           string                 `protobuf:"bytes,10,opt,name=repo_data_json,json=repoDataJson,proto3" json:"repo_data_json,omitempty"`                               // JSON-serialized repo data (cliff notes, scores, metadata)
-	SectionDefinitionsJson string                 `protobuf:"bytes,11,opt,name=section_definitions_json,json=sectionDefinitionsJson,proto3" json:"section_definitions_json,omitempty"` // JSON-serialized section definitions from Go
-	ModelOverride          string                 `protobuf:"bytes,12,opt,name=model_override,json=modelOverride,proto3" json:"model_override,omitempty"`                              // Optional model override for report generation
-	AnalysisDepth          string                 `protobuf:"bytes,13,opt,name=analysis_depth,json=analysisDepth,proto3" json:"analysis_depth,omitempty"`                              // "standard" or "deep"
-	IncludeRecommendations bool                   `protobuf:"varint,14,opt,name=include_recommendations,json=includeRecommendations,proto3" json:"include_recommendations,omitempty"`  // Whether to include recommendations in sections
-	IncludeLoe             bool                   `protobuf:"varint,15,opt,name=include_loe,json=includeLoe,proto3" json:"include_loe,omitempty"`                                      // Whether to include LOE estimates
-	StyleSystemPrompt      string                 `protobuf:"bytes,16,opt,name=style_system_prompt,json=styleSystemPrompt,proto3" json:"style_system_prompt,omitempty"`                // Custom system prompt from selected style
-	StyleSectionRules      string                 `protobuf:"bytes,17,opt,name=style_section_rules,json=styleSectionRules,proto3" json:"style_section_rules,omitempty"`                // Custom section rules from selected style
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
-}
-
-func (x *GenerateReportRequest) Reset() {
-	*x = GenerateReportRequest{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[17]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GenerateReportRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GenerateReportRequest) ProtoMessage() {}
-
-func (x *GenerateReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[17]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GenerateReportRequest.ProtoReflect.Descriptor instead.
-func (*GenerateReportRequest) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{17}
-}
-
-func (x *GenerateReportRequest) GetReportId() string {
-	if x != nil {
-		return x.ReportId
-	}
-	return ""
-}
-
-func (x *GenerateReportRequest) GetReportName() string {
-	if x != nil {
-		return x.ReportName
-	}
-	return ""
-}
-
-func (x *GenerateReportRequest) GetReportType() string {
-	if x != nil {
-		return x.ReportType
-	}
-	return ""
-}
-
-func (x *GenerateReportRequest) GetAudience() string {
-	if x != nil {
-		return x.Audience
-	}
-	return ""
-}
-
-func (x *GenerateReportRequest) GetRepositoryIds() []string {
-	if x != nil {
-		return x.RepositoryIds
-	}
-	return nil
-}
-
-func (x *GenerateReportRequest) GetSelectedSections() []string {
-	if x != nil {
-		return x.SelectedSections
-	}
-	return nil
-}
-
-func (x *GenerateReportRequest) GetIncludeDiagrams() bool {
-	if x != nil {
-		return x.IncludeDiagrams
-	}
-	return false
-}
-
-func (x *GenerateReportRequest) GetLoeMode() string {
-	if x != nil {
-		return x.LoeMode
-	}
-	return ""
-}
-
-func (x *GenerateReportRequest) GetOutputDir() string {
-	if x != nil {
-		return x.OutputDir
-	}
-	return ""
-}
-
-func (x *GenerateReportRequest) GetRepoDataJson() string {
-	if x != nil {
-		return x.RepoDataJson
-	}
-	return ""
-}
-
-func (x *GenerateReportRequest) GetSectionDefinitionsJson() string {
-	if x != nil {
-		return x.SectionDefinitionsJson
-	}
-	return ""
-}
-
-func (x *GenerateReportRequest) GetModelOverride() string {
-	if x != nil {
-		return x.ModelOverride
-	}
-	return ""
-}
-
-func (x *GenerateReportRequest) GetAnalysisDepth() string {
-	if x != nil {
-		return x.AnalysisDepth
-	}
-	return ""
-}
-
-func (x *GenerateReportRequest) GetIncludeRecommendations() bool {
-	if x != nil {
-		return x.IncludeRecommendations
-	}
-	return false
-}
-
-func (x *GenerateReportRequest) GetIncludeLoe() bool {
-	if x != nil {
-		return x.IncludeLoe
-	}
-	return false
-}
-
-func (x *GenerateReportRequest) GetStyleSystemPrompt() string {
-	if x != nil {
-		return x.StyleSystemPrompt
-	}
-	return ""
-}
-
-func (x *GenerateReportRequest) GetStyleSectionRules() string {
-	if x != nil {
-		return x.StyleSectionRules
-	}
-	return ""
-}
-
-type GenerateReportResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Markdown      string                 `protobuf:"bytes,1,opt,name=markdown,proto3" json:"markdown,omitempty"` // full assembled markdown
-	SectionCount  int32                  `protobuf:"varint,2,opt,name=section_count,json=sectionCount,proto3" json:"section_count,omitempty"`
-	WordCount     int32                  `protobuf:"varint,3,opt,name=word_count,json=wordCount,proto3" json:"word_count,omitempty"`
-	EvidenceCount int32                  `protobuf:"varint,4,opt,name=evidence_count,json=evidenceCount,proto3" json:"evidence_count,omitempty"`
-	ContentDir    string                 `protobuf:"bytes,5,opt,name=content_dir,json=contentDir,proto3" json:"content_dir,omitempty"`
-	Sections      []*ReportSectionResult `protobuf:"bytes,6,rep,name=sections,proto3" json:"sections,omitempty"`
-	Usage         *v1.LLMUsage           `protobuf:"bytes,7,opt,name=usage,proto3" json:"usage,omitempty"`
-	EvidenceJson  string                 `protobuf:"bytes,8,opt,name=evidence_json,json=evidenceJson,proto3" json:"evidence_json,omitempty"` // JSON-serialized evidence items generated by the worker
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GenerateReportResponse) Reset() {
-	*x = GenerateReportResponse{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[18]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GenerateReportResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GenerateReportResponse) ProtoMessage() {}
-
-func (x *GenerateReportResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[18]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GenerateReportResponse.ProtoReflect.Descriptor instead.
-func (*GenerateReportResponse) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{18}
-}
-
-func (x *GenerateReportResponse) GetMarkdown() string {
-	if x != nil {
-		return x.Markdown
-	}
-	return ""
-}
-
-func (x *GenerateReportResponse) GetSectionCount() int32 {
-	if x != nil {
-		return x.SectionCount
-	}
-	return 0
-}
-
-func (x *GenerateReportResponse) GetWordCount() int32 {
-	if x != nil {
-		return x.WordCount
-	}
-	return 0
-}
-
-func (x *GenerateReportResponse) GetEvidenceCount() int32 {
-	if x != nil {
-		return x.EvidenceCount
-	}
-	return 0
-}
-
-func (x *GenerateReportResponse) GetContentDir() string {
-	if x != nil {
-		return x.ContentDir
-	}
-	return ""
-}
-
-func (x *GenerateReportResponse) GetSections() []*ReportSectionResult {
-	if x != nil {
-		return x.Sections
-	}
-	return nil
-}
-
-func (x *GenerateReportResponse) GetUsage() *v1.LLMUsage {
-	if x != nil {
-		return x.Usage
-	}
-	return nil
-}
-
-func (x *GenerateReportResponse) GetEvidenceJson() string {
-	if x != nil {
-		return x.EvidenceJson
-	}
-	return ""
-}
-
-type ReportSectionResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
-	Category      string                 `protobuf:"bytes,3,opt,name=category,proto3" json:"category,omitempty"`
-	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"` // "completed" | "failed"
-	WordCount     int32                  `protobuf:"varint,5,opt,name=word_count,json=wordCount,proto3" json:"word_count,omitempty"`
-	DurationMs    int32                  `protobuf:"varint,6,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
-	ErrorMessage  string                 `protobuf:"bytes,7,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ReportSectionResult) Reset() {
-	*x = ReportSectionResult{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[19]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ReportSectionResult) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ReportSectionResult) ProtoMessage() {}
-
-func (x *ReportSectionResult) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[19]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ReportSectionResult.ProtoReflect.Descriptor instead.
-func (*ReportSectionResult) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{19}
-}
-
-func (x *ReportSectionResult) GetKey() string {
-	if x != nil {
-		return x.Key
-	}
-	return ""
-}
-
-func (x *ReportSectionResult) GetTitle() string {
-	if x != nil {
-		return x.Title
-	}
-	return ""
-}
-
-func (x *ReportSectionResult) GetCategory() string {
-	if x != nil {
-		return x.Category
-	}
-	return ""
-}
-
-func (x *ReportSectionResult) GetStatus() string {
-	if x != nil {
-		return x.Status
-	}
-	return ""
-}
-
-func (x *ReportSectionResult) GetWordCount() int32 {
-	if x != nil {
-		return x.WordCount
-	}
-	return 0
-}
-
-func (x *ReportSectionResult) GetDurationMs() int32 {
-	if x != nil {
-		return x.DurationMs
-	}
-	return 0
-}
-
-func (x *ReportSectionResult) GetErrorMessage() string {
-	if x != nil {
-		return x.ErrorMessage
-	}
-	return ""
-}
-
 var File_knowledge_v1_knowledge_proto protoreflect.FileDescriptor
 
 const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"\n" +
-	"\x1cknowledge/v1/knowledge.proto\x12\x19sourcebridge.knowledge.v1\x1a\x15common/v1/types.proto\"\xfe\x01\n" +
+	"\x1cknowledge/v1/knowledge.proto\x12\x19sourcebridge.knowledge.v1\x1a\x15common/v1/types.proto\"\x89\x03\n" +
 	"\x19GenerateCliffNotesRequest\x12#\n" +
 	"\rrepository_id\x18\x01 \x01(\tR\frepositoryId\x12'\n" +
 	"\x0frepository_name\x18\x02 \x01(\tR\x0erepositoryName\x12\x1a\n" +
@@ -1964,18 +1781,24 @@ const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"\n" +
 	"scope_type\x18\x06 \x01(\tR\tscopeType\x12\x1d\n" +
 	"\n" +
-	"scope_path\x18\a \x01(\tR\tscopePath\"\xf1\x01\n" +
+	"scope_path\x18\a \x01(\tR\tscopePath\x12H\n" +
+	"\raudience_enum\x18\b \x01(\x0e2#.sourcebridge.knowledge.v1.AudienceR\faudienceEnum\x12?\n" +
+	"\n" +
+	"depth_enum\x18\t \x01(\x0e2 .sourcebridge.knowledge.v1.DepthR\tdepthEnum\"\xf1\x01\n" +
 	"\x1aGenerateCliffNotesResponse\x12G\n" +
 	"\bsections\x18\x01 \x03(\v2+.sourcebridge.knowledge.v1.KnowledgeSectionR\bsections\x126\n" +
 	"\x05usage\x18\x02 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\x12R\n" +
-	"\vdiagnostics\x18\x03 \x01(\v20.sourcebridge.knowledge.v1.CliffNotesDiagnosticsR\vdiagnostics\"\x87\x02\n" +
+	"\vdiagnostics\x18\x03 \x01(\v20.sourcebridge.knowledge.v1.CliffNotesDiagnosticsR\vdiagnostics\"\x92\x03\n" +
 	"\"GenerateArchitectureDiagramRequest\x12#\n" +
 	"\rrepository_id\x18\x01 \x01(\tR\frepositoryId\x12'\n" +
 	"\x0frepository_name\x18\x02 \x01(\tR\x0erepositoryName\x12\x1a\n" +
 	"\baudience\x18\x03 \x01(\tR\baudience\x12\x14\n" +
 	"\x05depth\x18\x04 \x01(\tR\x05depth\x12#\n" +
 	"\rsnapshot_json\x18\x05 \x01(\tR\fsnapshotJson\x12<\n" +
-	"\x1adeterministic_diagram_json\x18\x06 \x01(\tR\x18deterministicDiagramJson\"\xfe\x06\n" +
+	"\x1adeterministic_diagram_json\x18\x06 \x01(\tR\x18deterministicDiagramJson\x12H\n" +
+	"\raudience_enum\x18\a \x01(\x0e2#.sourcebridge.knowledge.v1.AudienceR\faudienceEnum\x12?\n" +
+	"\n" +
+	"depth_enum\x18\b \x01(\x0e2 .sourcebridge.knowledge.v1.DepthR\tdepthEnum\"\xfe\x06\n" +
 	"#GenerateArchitectureDiagramResponse\x12%\n" +
 	"\x0emermaid_source\x18\x01 \x01(\tR\rmermaidSource\x12,\n" +
 	"\x12raw_mermaid_source\x18\x02 \x01(\tR\x10rawMermaidSource\x12+\n" +
@@ -2010,7 +1833,7 @@ const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"revisionFp\x12\x1a\n" +
 	"\bstrategy\x18\v \x01(\tR\bstrategy\x12\x1d\n" +
 	"\n" +
-	"model_used\x18\f \x01(\tR\tmodelUsed\"\xe1\x01\n" +
+	"model_used\x18\f \x01(\tR\tmodelUsed\"\xec\x02\n" +
 	"\x1bGenerateLearningPathRequest\x12#\n" +
 	"\rrepository_id\x18\x01 \x01(\tR\frepositoryId\x12'\n" +
 	"\x0frepository_name\x18\x02 \x01(\tR\x0erepositoryName\x12\x1a\n" +
@@ -2018,10 +1841,13 @@ const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"\x05depth\x18\x04 \x01(\tR\x05depth\x12#\n" +
 	"\rsnapshot_json\x18\x05 \x01(\tR\fsnapshotJson\x12\x1d\n" +
 	"\n" +
-	"focus_area\x18\x06 \x01(\tR\tfocusArea\"\x95\x01\n" +
+	"focus_area\x18\x06 \x01(\tR\tfocusArea\x12H\n" +
+	"\raudience_enum\x18\a \x01(\x0e2#.sourcebridge.knowledge.v1.AudienceR\faudienceEnum\x12?\n" +
+	"\n" +
+	"depth_enum\x18\b \x01(\x0e2 .sourcebridge.knowledge.v1.DepthR\tdepthEnum\"\x95\x01\n" +
 	"\x1cGenerateLearningPathResponse\x12=\n" +
 	"\x05steps\x18\x01 \x03(\v2'.sourcebridge.knowledge.v1.LearningStepR\x05steps\x126\n" +
-	"\x05usage\x18\x02 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"\xd4\x02\n" +
+	"\x05usage\x18\x02 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"\xdf\x03\n" +
 	"\x1cGenerateWorkflowStoryRequest\x12#\n" +
 	"\rrepository_id\x18\x01 \x01(\tR\frepositoryId\x12'\n" +
 	"\x0frepository_name\x18\x02 \x01(\tR\x0erepositoryName\x12\x1a\n" +
@@ -2033,7 +1859,11 @@ const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"\n" +
 	"scope_path\x18\a \x01(\tR\tscopePath\x12!\n" +
 	"\fanchor_label\x18\b \x01(\tR\vanchorLabel\x12.\n" +
-	"\x13execution_path_json\x18\t \x01(\tR\x11executionPathJson\"\xa0\x01\n" +
+	"\x13execution_path_json\x18\t \x01(\tR\x11executionPathJson\x12H\n" +
+	"\raudience_enum\x18\n" +
+	" \x01(\x0e2#.sourcebridge.knowledge.v1.AudienceR\faudienceEnum\x12?\n" +
+	"\n" +
+	"depth_enum\x18\v \x01(\x0e2 .sourcebridge.knowledge.v1.DepthR\tdepthEnum\"\xa0\x01\n" +
 	"\x1dGenerateWorkflowStoryResponse\x12G\n" +
 	"\bsections\x18\x01 \x03(\v2+.sourcebridge.knowledge.v1.KnowledgeSectionR\bsections\x126\n" +
 	"\x05usage\x18\x02 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"\xb1\x03\n" +
@@ -2074,14 +1904,17 @@ const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"\x15ExplainSystemResponse\x12 \n" +
 	"\vexplanation\x18\x01 \x01(\tR\vexplanation\x12H\n" +
 	"\bevidence\x18\x02 \x03(\v2,.sourcebridge.knowledge.v1.KnowledgeEvidenceR\bevidence\x126\n" +
-	"\x05usage\x18\x03 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"\xd4\x01\n" +
+	"\x05usage\x18\x03 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"\xdf\x02\n" +
 	"\x17GenerateCodeTourRequest\x12#\n" +
 	"\rrepository_id\x18\x01 \x01(\tR\frepositoryId\x12'\n" +
 	"\x0frepository_name\x18\x02 \x01(\tR\x0erepositoryName\x12\x1a\n" +
 	"\baudience\x18\x03 \x01(\tR\baudience\x12\x14\n" +
 	"\x05depth\x18\x04 \x01(\tR\x05depth\x12#\n" +
 	"\rsnapshot_json\x18\x05 \x01(\tR\fsnapshotJson\x12\x14\n" +
-	"\x05theme\x18\x06 \x01(\tR\x05theme\"\x91\x01\n" +
+	"\x05theme\x18\x06 \x01(\tR\x05theme\x12H\n" +
+	"\raudience_enum\x18\a \x01(\x0e2#.sourcebridge.knowledge.v1.AudienceR\faudienceEnum\x12?\n" +
+	"\n" +
+	"depth_enum\x18\b \x01(\x0e2 .sourcebridge.knowledge.v1.DepthR\tdepthEnum\"\x91\x01\n" +
 	"\x18GenerateCodeTourResponse\x12=\n" +
 	"\x05stops\x18\x01 \x03(\v2'.sourcebridge.knowledge.v1.CodeTourStopR\x05stops\x126\n" +
 	"\x05usage\x18\x02 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"\xc5\x02\n" +
@@ -2118,59 +1951,24 @@ const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"\n" +
 	"line_start\x18\x04 \x01(\x05R\tlineStart\x12\x19\n" +
 	"\bline_end\x18\x05 \x01(\x05R\alineEnd\x12\x1c\n" +
-	"\trationale\x18\x06 \x01(\tR\trationale\"\xb3\x05\n" +
-	"\x15GenerateReportRequest\x12\x1b\n" +
-	"\treport_id\x18\x01 \x01(\tR\breportId\x12\x1f\n" +
-	"\vreport_name\x18\x02 \x01(\tR\n" +
-	"reportName\x12\x1f\n" +
-	"\vreport_type\x18\x03 \x01(\tR\n" +
-	"reportType\x12\x1a\n" +
-	"\baudience\x18\x04 \x01(\tR\baudience\x12%\n" +
-	"\x0erepository_ids\x18\x05 \x03(\tR\rrepositoryIds\x12+\n" +
-	"\x11selected_sections\x18\x06 \x03(\tR\x10selectedSections\x12)\n" +
-	"\x10include_diagrams\x18\a \x01(\bR\x0fincludeDiagrams\x12\x19\n" +
-	"\bloe_mode\x18\b \x01(\tR\aloeMode\x12\x1d\n" +
+	"\trationale\x18\x06 \x01(\tR\trationale*S\n" +
+	"\bAudience\x12\x18\n" +
+	"\x14AUDIENCE_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11AUDIENCE_BEGINNER\x10\x01\x12\x16\n" +
+	"\x12AUDIENCE_DEVELOPER\x10\x02*S\n" +
+	"\x05Depth\x12\x15\n" +
+	"\x11DEPTH_UNSPECIFIED\x10\x00\x12\x11\n" +
+	"\rDEPTH_SUMMARY\x10\x01\x12\x10\n" +
+	"\fDEPTH_MEDIUM\x10\x02\x12\x0e\n" +
 	"\n" +
-	"output_dir\x18\t \x01(\tR\toutputDir\x12$\n" +
-	"\x0erepo_data_json\x18\n" +
-	" \x01(\tR\frepoDataJson\x128\n" +
-	"\x18section_definitions_json\x18\v \x01(\tR\x16sectionDefinitionsJson\x12%\n" +
-	"\x0emodel_override\x18\f \x01(\tR\rmodelOverride\x12%\n" +
-	"\x0eanalysis_depth\x18\r \x01(\tR\ranalysisDepth\x127\n" +
-	"\x17include_recommendations\x18\x0e \x01(\bR\x16includeRecommendations\x12\x1f\n" +
-	"\vinclude_loe\x18\x0f \x01(\bR\n" +
-	"includeLoe\x12.\n" +
-	"\x13style_system_prompt\x18\x10 \x01(\tR\x11styleSystemPrompt\x12.\n" +
-	"\x13style_section_rules\x18\x11 \x01(\tR\x11styleSectionRules\"\xe9\x02\n" +
-	"\x16GenerateReportResponse\x12\x1a\n" +
-	"\bmarkdown\x18\x01 \x01(\tR\bmarkdown\x12#\n" +
-	"\rsection_count\x18\x02 \x01(\x05R\fsectionCount\x12\x1d\n" +
-	"\n" +
-	"word_count\x18\x03 \x01(\x05R\twordCount\x12%\n" +
-	"\x0eevidence_count\x18\x04 \x01(\x05R\revidenceCount\x12\x1f\n" +
-	"\vcontent_dir\x18\x05 \x01(\tR\n" +
-	"contentDir\x12J\n" +
-	"\bsections\x18\x06 \x03(\v2..sourcebridge.knowledge.v1.ReportSectionResultR\bsections\x126\n" +
-	"\x05usage\x18\a \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\x12#\n" +
-	"\revidence_json\x18\b \x01(\tR\fevidenceJson\"\xd6\x01\n" +
-	"\x13ReportSectionResult\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05title\x18\x02 \x01(\tR\x05title\x12\x1a\n" +
-	"\bcategory\x18\x03 \x01(\tR\bcategory\x12\x16\n" +
-	"\x06status\x18\x04 \x01(\tR\x06status\x12\x1d\n" +
-	"\n" +
-	"word_count\x18\x05 \x01(\x05R\twordCount\x12\x1f\n" +
-	"\vduration_ms\x18\x06 \x01(\x05R\n" +
-	"durationMs\x12#\n" +
-	"\rerror_message\x18\a \x01(\tR\ferrorMessage2\xb4\a\n" +
+	"DEPTH_DEEP\x10\x032\xbd\x06\n" +
 	"\x10KnowledgeService\x12\x81\x01\n" +
 	"\x12GenerateCliffNotes\x124.sourcebridge.knowledge.v1.GenerateCliffNotesRequest\x1a5.sourcebridge.knowledge.v1.GenerateCliffNotesResponse\x12\x87\x01\n" +
 	"\x14GenerateLearningPath\x126.sourcebridge.knowledge.v1.GenerateLearningPathRequest\x1a7.sourcebridge.knowledge.v1.GenerateLearningPathResponse\x12\x9c\x01\n" +
 	"\x1bGenerateArchitectureDiagram\x12=.sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest\x1a>.sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse\x12\x8a\x01\n" +
 	"\x15GenerateWorkflowStory\x127.sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest\x1a8.sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse\x12r\n" +
 	"\rExplainSystem\x12/.sourcebridge.knowledge.v1.ExplainSystemRequest\x1a0.sourcebridge.knowledge.v1.ExplainSystemResponse\x12{\n" +
-	"\x10GenerateCodeTour\x122.sourcebridge.knowledge.v1.GenerateCodeTourRequest\x1a3.sourcebridge.knowledge.v1.GenerateCodeTourResponse\x12u\n" +
-	"\x0eGenerateReport\x120.sourcebridge.knowledge.v1.GenerateReportRequest\x1a1.sourcebridge.knowledge.v1.GenerateReportResponseBFZDgithub.com/sourcebridge/sourcebridge/gen/go/knowledge/v1;knowledgev1b\x06proto3"
+	"\x10GenerateCodeTour\x122.sourcebridge.knowledge.v1.GenerateCodeTourRequest\x1a3.sourcebridge.knowledge.v1.GenerateCodeTourResponseBFZDgithub.com/sourcebridge/sourcebridge/gen/go/knowledge/v1;knowledgev1b\x06proto3"
 
 var (
 	file_knowledge_v1_knowledge_proto_rawDescOnce sync.Once
@@ -2184,67 +1982,73 @@ func file_knowledge_v1_knowledge_proto_rawDescGZIP() []byte {
 	return file_knowledge_v1_knowledge_proto_rawDescData
 }
 
-var file_knowledge_v1_knowledge_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_knowledge_v1_knowledge_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_knowledge_v1_knowledge_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_knowledge_v1_knowledge_proto_goTypes = []any{
-	(*GenerateCliffNotesRequest)(nil),           // 0: sourcebridge.knowledge.v1.GenerateCliffNotesRequest
-	(*GenerateCliffNotesResponse)(nil),          // 1: sourcebridge.knowledge.v1.GenerateCliffNotesResponse
-	(*GenerateArchitectureDiagramRequest)(nil),  // 2: sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest
-	(*GenerateArchitectureDiagramResponse)(nil), // 3: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse
-	(*CliffNotesDiagnostics)(nil),               // 4: sourcebridge.knowledge.v1.CliffNotesDiagnostics
-	(*GenerateLearningPathRequest)(nil),         // 5: sourcebridge.knowledge.v1.GenerateLearningPathRequest
-	(*GenerateLearningPathResponse)(nil),        // 6: sourcebridge.knowledge.v1.GenerateLearningPathResponse
-	(*GenerateWorkflowStoryRequest)(nil),        // 7: sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest
-	(*GenerateWorkflowStoryResponse)(nil),       // 8: sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse
-	(*LearningStep)(nil),                        // 9: sourcebridge.knowledge.v1.LearningStep
-	(*ExplainSystemRequest)(nil),                // 10: sourcebridge.knowledge.v1.ExplainSystemRequest
-	(*ExplainSystemResponse)(nil),               // 11: sourcebridge.knowledge.v1.ExplainSystemResponse
-	(*GenerateCodeTourRequest)(nil),             // 12: sourcebridge.knowledge.v1.GenerateCodeTourRequest
-	(*GenerateCodeTourResponse)(nil),            // 13: sourcebridge.knowledge.v1.GenerateCodeTourResponse
-	(*CodeTourStop)(nil),                        // 14: sourcebridge.knowledge.v1.CodeTourStop
-	(*KnowledgeSection)(nil),                    // 15: sourcebridge.knowledge.v1.KnowledgeSection
-	(*KnowledgeEvidence)(nil),                   // 16: sourcebridge.knowledge.v1.KnowledgeEvidence
-	(*GenerateReportRequest)(nil),               // 17: sourcebridge.knowledge.v1.GenerateReportRequest
-	(*GenerateReportResponse)(nil),              // 18: sourcebridge.knowledge.v1.GenerateReportResponse
-	(*ReportSectionResult)(nil),                 // 19: sourcebridge.knowledge.v1.ReportSectionResult
-	(*v1.LLMUsage)(nil),                         // 20: sourcebridge.common.v1.LLMUsage
+	(Audience)(0),                               // 0: sourcebridge.knowledge.v1.Audience
+	(Depth)(0),                                  // 1: sourcebridge.knowledge.v1.Depth
+	(*GenerateCliffNotesRequest)(nil),           // 2: sourcebridge.knowledge.v1.GenerateCliffNotesRequest
+	(*GenerateCliffNotesResponse)(nil),          // 3: sourcebridge.knowledge.v1.GenerateCliffNotesResponse
+	(*GenerateArchitectureDiagramRequest)(nil),  // 4: sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest
+	(*GenerateArchitectureDiagramResponse)(nil), // 5: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse
+	(*CliffNotesDiagnostics)(nil),               // 6: sourcebridge.knowledge.v1.CliffNotesDiagnostics
+	(*GenerateLearningPathRequest)(nil),         // 7: sourcebridge.knowledge.v1.GenerateLearningPathRequest
+	(*GenerateLearningPathResponse)(nil),        // 8: sourcebridge.knowledge.v1.GenerateLearningPathResponse
+	(*GenerateWorkflowStoryRequest)(nil),        // 9: sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest
+	(*GenerateWorkflowStoryResponse)(nil),       // 10: sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse
+	(*LearningStep)(nil),                        // 11: sourcebridge.knowledge.v1.LearningStep
+	(*ExplainSystemRequest)(nil),                // 12: sourcebridge.knowledge.v1.ExplainSystemRequest
+	(*ExplainSystemResponse)(nil),               // 13: sourcebridge.knowledge.v1.ExplainSystemResponse
+	(*GenerateCodeTourRequest)(nil),             // 14: sourcebridge.knowledge.v1.GenerateCodeTourRequest
+	(*GenerateCodeTourResponse)(nil),            // 15: sourcebridge.knowledge.v1.GenerateCodeTourResponse
+	(*CodeTourStop)(nil),                        // 16: sourcebridge.knowledge.v1.CodeTourStop
+	(*KnowledgeSection)(nil),                    // 17: sourcebridge.knowledge.v1.KnowledgeSection
+	(*KnowledgeEvidence)(nil),                   // 18: sourcebridge.knowledge.v1.KnowledgeEvidence
+	(*v1.LLMUsage)(nil),                         // 19: sourcebridge.common.v1.LLMUsage
 }
 var file_knowledge_v1_knowledge_proto_depIdxs = []int32{
-	15, // 0: sourcebridge.knowledge.v1.GenerateCliffNotesResponse.sections:type_name -> sourcebridge.knowledge.v1.KnowledgeSection
-	20, // 1: sourcebridge.knowledge.v1.GenerateCliffNotesResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	4,  // 2: sourcebridge.knowledge.v1.GenerateCliffNotesResponse.diagnostics:type_name -> sourcebridge.knowledge.v1.CliffNotesDiagnostics
-	16, // 3: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse.evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
-	20, // 4: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	16, // 5: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse.detail_evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
-	9,  // 6: sourcebridge.knowledge.v1.GenerateLearningPathResponse.steps:type_name -> sourcebridge.knowledge.v1.LearningStep
-	20, // 7: sourcebridge.knowledge.v1.GenerateLearningPathResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	15, // 8: sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse.sections:type_name -> sourcebridge.knowledge.v1.KnowledgeSection
-	20, // 9: sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	16, // 10: sourcebridge.knowledge.v1.ExplainSystemResponse.evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
-	20, // 11: sourcebridge.knowledge.v1.ExplainSystemResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	14, // 12: sourcebridge.knowledge.v1.GenerateCodeTourResponse.stops:type_name -> sourcebridge.knowledge.v1.CodeTourStop
-	20, // 13: sourcebridge.knowledge.v1.GenerateCodeTourResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	16, // 14: sourcebridge.knowledge.v1.KnowledgeSection.evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
-	19, // 15: sourcebridge.knowledge.v1.GenerateReportResponse.sections:type_name -> sourcebridge.knowledge.v1.ReportSectionResult
-	20, // 16: sourcebridge.knowledge.v1.GenerateReportResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	0,  // 17: sourcebridge.knowledge.v1.KnowledgeService.GenerateCliffNotes:input_type -> sourcebridge.knowledge.v1.GenerateCliffNotesRequest
-	5,  // 18: sourcebridge.knowledge.v1.KnowledgeService.GenerateLearningPath:input_type -> sourcebridge.knowledge.v1.GenerateLearningPathRequest
-	2,  // 19: sourcebridge.knowledge.v1.KnowledgeService.GenerateArchitectureDiagram:input_type -> sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest
-	7,  // 20: sourcebridge.knowledge.v1.KnowledgeService.GenerateWorkflowStory:input_type -> sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest
-	10, // 21: sourcebridge.knowledge.v1.KnowledgeService.ExplainSystem:input_type -> sourcebridge.knowledge.v1.ExplainSystemRequest
-	12, // 22: sourcebridge.knowledge.v1.KnowledgeService.GenerateCodeTour:input_type -> sourcebridge.knowledge.v1.GenerateCodeTourRequest
-	17, // 23: sourcebridge.knowledge.v1.KnowledgeService.GenerateReport:input_type -> sourcebridge.knowledge.v1.GenerateReportRequest
-	1,  // 24: sourcebridge.knowledge.v1.KnowledgeService.GenerateCliffNotes:output_type -> sourcebridge.knowledge.v1.GenerateCliffNotesResponse
-	6,  // 25: sourcebridge.knowledge.v1.KnowledgeService.GenerateLearningPath:output_type -> sourcebridge.knowledge.v1.GenerateLearningPathResponse
-	3,  // 26: sourcebridge.knowledge.v1.KnowledgeService.GenerateArchitectureDiagram:output_type -> sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse
-	8,  // 27: sourcebridge.knowledge.v1.KnowledgeService.GenerateWorkflowStory:output_type -> sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse
-	11, // 28: sourcebridge.knowledge.v1.KnowledgeService.ExplainSystem:output_type -> sourcebridge.knowledge.v1.ExplainSystemResponse
-	13, // 29: sourcebridge.knowledge.v1.KnowledgeService.GenerateCodeTour:output_type -> sourcebridge.knowledge.v1.GenerateCodeTourResponse
-	18, // 30: sourcebridge.knowledge.v1.KnowledgeService.GenerateReport:output_type -> sourcebridge.knowledge.v1.GenerateReportResponse
-	24, // [24:31] is the sub-list for method output_type
-	17, // [17:24] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	0,  // 0: sourcebridge.knowledge.v1.GenerateCliffNotesRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
+	1,  // 1: sourcebridge.knowledge.v1.GenerateCliffNotesRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
+	17, // 2: sourcebridge.knowledge.v1.GenerateCliffNotesResponse.sections:type_name -> sourcebridge.knowledge.v1.KnowledgeSection
+	19, // 3: sourcebridge.knowledge.v1.GenerateCliffNotesResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	6,  // 4: sourcebridge.knowledge.v1.GenerateCliffNotesResponse.diagnostics:type_name -> sourcebridge.knowledge.v1.CliffNotesDiagnostics
+	0,  // 5: sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
+	1,  // 6: sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
+	18, // 7: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse.evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
+	19, // 8: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	18, // 9: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse.detail_evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
+	0,  // 10: sourcebridge.knowledge.v1.GenerateLearningPathRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
+	1,  // 11: sourcebridge.knowledge.v1.GenerateLearningPathRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
+	11, // 12: sourcebridge.knowledge.v1.GenerateLearningPathResponse.steps:type_name -> sourcebridge.knowledge.v1.LearningStep
+	19, // 13: sourcebridge.knowledge.v1.GenerateLearningPathResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	0,  // 14: sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
+	1,  // 15: sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
+	17, // 16: sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse.sections:type_name -> sourcebridge.knowledge.v1.KnowledgeSection
+	19, // 17: sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	18, // 18: sourcebridge.knowledge.v1.ExplainSystemResponse.evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
+	19, // 19: sourcebridge.knowledge.v1.ExplainSystemResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	0,  // 20: sourcebridge.knowledge.v1.GenerateCodeTourRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
+	1,  // 21: sourcebridge.knowledge.v1.GenerateCodeTourRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
+	16, // 22: sourcebridge.knowledge.v1.GenerateCodeTourResponse.stops:type_name -> sourcebridge.knowledge.v1.CodeTourStop
+	19, // 23: sourcebridge.knowledge.v1.GenerateCodeTourResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	18, // 24: sourcebridge.knowledge.v1.KnowledgeSection.evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
+	2,  // 25: sourcebridge.knowledge.v1.KnowledgeService.GenerateCliffNotes:input_type -> sourcebridge.knowledge.v1.GenerateCliffNotesRequest
+	7,  // 26: sourcebridge.knowledge.v1.KnowledgeService.GenerateLearningPath:input_type -> sourcebridge.knowledge.v1.GenerateLearningPathRequest
+	4,  // 27: sourcebridge.knowledge.v1.KnowledgeService.GenerateArchitectureDiagram:input_type -> sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest
+	9,  // 28: sourcebridge.knowledge.v1.KnowledgeService.GenerateWorkflowStory:input_type -> sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest
+	12, // 29: sourcebridge.knowledge.v1.KnowledgeService.ExplainSystem:input_type -> sourcebridge.knowledge.v1.ExplainSystemRequest
+	14, // 30: sourcebridge.knowledge.v1.KnowledgeService.GenerateCodeTour:input_type -> sourcebridge.knowledge.v1.GenerateCodeTourRequest
+	3,  // 31: sourcebridge.knowledge.v1.KnowledgeService.GenerateCliffNotes:output_type -> sourcebridge.knowledge.v1.GenerateCliffNotesResponse
+	8,  // 32: sourcebridge.knowledge.v1.KnowledgeService.GenerateLearningPath:output_type -> sourcebridge.knowledge.v1.GenerateLearningPathResponse
+	5,  // 33: sourcebridge.knowledge.v1.KnowledgeService.GenerateArchitectureDiagram:output_type -> sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse
+	10, // 34: sourcebridge.knowledge.v1.KnowledgeService.GenerateWorkflowStory:output_type -> sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse
+	13, // 35: sourcebridge.knowledge.v1.KnowledgeService.ExplainSystem:output_type -> sourcebridge.knowledge.v1.ExplainSystemResponse
+	15, // 36: sourcebridge.knowledge.v1.KnowledgeService.GenerateCodeTour:output_type -> sourcebridge.knowledge.v1.GenerateCodeTourResponse
+	31, // [31:37] is the sub-list for method output_type
+	25, // [25:31] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_knowledge_v1_knowledge_proto_init() }
@@ -2257,13 +2061,14 @@ func file_knowledge_v1_knowledge_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_knowledge_v1_knowledge_proto_rawDesc), len(file_knowledge_v1_knowledge_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   20,
+			NumEnums:      2,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_knowledge_v1_knowledge_proto_goTypes,
 		DependencyIndexes: file_knowledge_v1_knowledge_proto_depIdxs,
+		EnumInfos:         file_knowledge_v1_knowledge_proto_enumTypes,
 		MessageInfos:      file_knowledge_v1_knowledge_proto_msgTypes,
 	}.Build()
 	File_knowledge_v1_knowledge_proto = out.File

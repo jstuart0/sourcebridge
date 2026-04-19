@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
-import { TOKEN_KEY } from "@/lib/token-key";
+import { authFetch } from "@/lib/auth-fetch";
 import { cn } from "@/lib/utils";
 
 /**
@@ -124,6 +124,69 @@ function formatContext(tokens: number): string {
   return `${tokens}`;
 }
 
+/**
+ * Recommend a MaxConcurrency value for a given model/provider pair.
+ *
+ * Cloud providers scale linearly until TPM/RPM limits kick in — we
+ * suggest 8 as a reasonable ceiling. Local Ollama tops out at
+ * OLLAMA_NUM_PARALLEL (4 on the Mac Studio by default). Dense local
+ * models saturate under concurrent DEEP prompts (our benchmarks
+ * caught qwen3:32b dense dropping into parse-fallback when 3 DEEP
+ * artifacts ran together), so we suggest 2 for dense models ≥20B.
+ * MoE models route each request through a different expert subset
+ * and absorb concurrency more gracefully, so we suggest 3 for those.
+ *
+ * Returns null if no recommendation can be made (e.g. no model
+ * selected yet).
+ */
+function recommendMaxConcurrency(
+  modelId: string,
+  provider: string
+): { value: number; reason: string } | null {
+  if (!modelId || !provider) return null;
+  const p = provider.toLowerCase();
+  const m = modelId.toLowerCase();
+  const isCloud = ["anthropic", "openai", "openrouter", "google", "gemini"].some((c) =>
+    p.includes(c)
+  );
+  if (isCloud) {
+    return {
+      value: 8,
+      reason:
+        "Cloud providers scale per-request on their own GPU fleet. 8 is a safe ceiling; raise if you hit no rate limits.",
+    };
+  }
+  // Ollama / local paths
+  const isMoe = /\ba\d+b\b|moe/.test(m); // matches "a3b", "a4b", "a10b", "moe"
+  if (isMoe) {
+    return {
+      value: 3,
+      reason:
+        "MoE routes each request through a different expert subset, so concurrent prompts don't fight over the same KV cache. 3 works well with OLLAMA_NUM_PARALLEL≥3.",
+    };
+  }
+  // Dense local — heuristic by parameter count in the model name
+  const sizeMatch = m.match(/(\d+(?:\.\d+)?)b/);
+  const sizeB = sizeMatch ? parseFloat(sizeMatch[1]) : 0;
+  if (sizeB >= 20) {
+    return {
+      value: 2,
+      reason: `Dense ${sizeB}B locally: concurrent DEEP prompts can push output into parse-fallback territory (we observed this on qwen3:32b). Keep it at 2 for reliability.`,
+    };
+  }
+  if (sizeB >= 7) {
+    return {
+      value: 3,
+      reason: `Dense ${sizeB}B locally handles 3 concurrent prompts under OLLAMA_NUM_PARALLEL=3+.`,
+    };
+  }
+  return {
+    value: 3,
+    reason:
+      "Local default — matches the orchestrator's built-in safe ceiling for a single-Ollama backend.",
+  };
+}
+
 // --- Main component ---
 
 export default function ComprehensionSettingsPage() {
@@ -151,12 +214,10 @@ export default function ComprehensionSettingsPage() {
   const [rebuildMessage, setRebuildMessage] = useState("");
 
   const fetchWithAuth = useCallback(async (path: string, options?: RequestInit) => {
-    const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
-    return fetch(path, {
+    return authFetch(path, {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...options?.headers,
       },
     });
@@ -296,7 +357,11 @@ export default function ComprehensionSettingsPage() {
 
   const handleUseRecommended = () => {
     setStrategyChain(["hierarchical", "single_shot"]);
-    setMaxConcurrency(3);
+    // Prefer the provider+size-aware recommendation when we have a
+    // model selected; otherwise fall back to the safe 3-per-Ollama default.
+    const caps = models.find((m) => m.modelId === selectedModel);
+    const rec = caps ? recommendMaxConcurrency(caps.modelId, caps.provider) : null;
+    setMaxConcurrency(rec?.value ?? 3);
     setMaxPromptTokens(100000);
     setLeafBudgetTokens(3000);
     setCacheEnabled(false);
@@ -324,6 +389,9 @@ export default function ComprehensionSettingsPage() {
 
   // Determine which model is recommended for the current selected model
   const selectedModelCaps = models.find((m) => m.modelId === selectedModel);
+  const concurrencyRecommendation = selectedModelCaps
+    ? recommendMaxConcurrency(selectedModelCaps.modelId, selectedModelCaps.provider)
+    : null;
 
   if (loading) {
     return (
@@ -600,17 +668,40 @@ export default function ComprehensionSettingsPage() {
                     <label className="mb-1.5 block text-sm text-[var(--text-secondary)]">
                       Max concurrency
                     </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={20}
-                      value={maxConcurrency}
-                      onChange={(e) => setMaxConcurrency(Number(e.target.value))}
-                      className="w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent-primary)]"
-                    />
-                    <p className="mt-1 text-xs text-[var(--text-muted)]">
-                      Parallel LLM jobs. 3 is safe for a single Ollama.
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={maxConcurrency}
+                        onChange={(e) => setMaxConcurrency(Number(e.target.value))}
+                        className="w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent-primary)]"
+                      />
+                      {concurrencyRecommendation &&
+                        concurrencyRecommendation.value !== maxConcurrency && (
+                          <button
+                            type="button"
+                            onClick={() => setMaxConcurrency(concurrencyRecommendation.value)}
+                            className="shrink-0 rounded-[var(--control-radius)] border border-[var(--accent-primary)]/40 bg-[var(--accent-primary)]/10 px-2.5 py-2 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
+                            title={`Apply the recommended value (${concurrencyRecommendation.value}) for ${selectedModelCaps?.modelId}`}
+                          >
+                            Use {concurrencyRecommendation.value}
+                          </button>
+                        )}
+                    </div>
+                    {concurrencyRecommendation ? (
+                      <p className="mt-1 text-xs text-[var(--text-muted)]">
+                        <span className="font-medium text-[var(--text-secondary)]">
+                          Recommended: {concurrencyRecommendation.value}
+                        </span>{" "}
+                        — {concurrencyRecommendation.reason}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-xs text-[var(--text-muted)]">
+                        Parallel LLM jobs. Select a model above for a
+                        recommendation tuned to its provider + size.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="mb-1.5 block text-sm text-[var(--text-secondary)]">

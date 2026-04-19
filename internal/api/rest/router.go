@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/events"
+	"github.com/sourcebridge/sourcebridge/internal/featureflags"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
@@ -121,6 +123,7 @@ type Server struct {
 	orchestrator       *orchestrator.Orchestrator // shared LLM job orchestrator (created in NewServer)
 	worker             *worker.Client
 	eventBus           *events.Bus
+	flags              featureflags.Flags
 	tokenStore         auth.APITokenStore
 	desktopAuth        DesktopAuthSessionStore
 	gitConfigStore     GitConfigStore                 // persists git tokens/SSH config across restarts
@@ -172,6 +175,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		store:       store,
 		worker:      workerClient,
 		eventBus:    events.NewBus(),
+		flags:       featureflags.LoadFromEnv(),
 		tokenStore:  auth.NewAPITokenStore(),
 		desktopAuth: NewMemoryDesktopAuthStore(),
 	}
@@ -207,6 +211,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			s.orchestrator.SetIntakePaused(rec.IntakePaused)
 		}
 	}
+	slog.Info("backend feature flags", "enabled", s.flags.EnabledNames())
 
 	s.setupRouter()
 	return s
@@ -280,7 +285,7 @@ func (s *Server) setupRouter() {
 
 	// GraphQL server
 	gqlSrv := handler.NewDefaultServer(graphql.NewExecutableSchema(graphql.Config{
-		Resolvers: &graphql.Resolver{Store: s.store, KnowledgeStore: s.knowledgeStore, Worker: s.worker, Orchestrator: s.orchestrator, Config: s.cfg, EventBus: s.eventBus, GitConfig: s.gitConfigStore},
+		Resolvers: &graphql.Resolver{Store: s.store, KnowledgeStore: s.knowledgeStore, Worker: s.worker, Orchestrator: s.orchestrator, Config: s.cfg, EventBus: s.eventBus, Flags: s.flags, GitConfig: s.gitConfigStore, ComprehensionStore: s.comprehensionStore},
 	}))
 
 	// Protected API routes (accepts both JWT and API tokens)
@@ -424,6 +429,29 @@ func (s *Server) setupRouter() {
 // Handler returns the HTTP handler.
 func (s *Server) Handler() http.Handler {
 	return s.router
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if s.eventBus != nil {
+		if err := s.eventBus.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+	if s.orchestrator != nil {
+		graceful := 5 * time.Second
+		if deadline, ok := ctx.Deadline(); ok {
+			if remaining := time.Until(deadline); remaining > 0 {
+				graceful = remaining
+			}
+		}
+		if err := s.orchestrator.Shutdown(graceful); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func securityHeaders(next http.Handler) http.Handler {

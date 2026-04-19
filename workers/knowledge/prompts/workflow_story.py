@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 
+from workers.knowledge.prompts.fact_hints import build_fact_hints_block
+
 REQUIRED_WORKFLOW_STORY_SECTIONS = [
     "Goal",
     "Likely Actor",
@@ -114,6 +116,8 @@ Do not copy them verbatim into every section; translate them into readable workf
     except (json.JSONDecodeError, TypeError, ValueError):
         pass
 
+    fact_hints_block = build_fact_hints_block(snapshot_json)
+
     return f"""\
 Create a Workflow Story for this scope:
 
@@ -167,7 +171,7 @@ Confidence rules:
 - Only use "low" confidence when the snapshot provides no relevant evidence at all.
 - Most sections should be "high" confidence when the snapshot contains relevant symbols.
 
-{pre_analysis_block}**Repository snapshot**
+{pre_analysis_block}{fact_hints_block}**Repository snapshot**
 ```json
 {snapshot_json}
 ```

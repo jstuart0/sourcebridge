@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from workers.knowledge.prompts.fact_hints import build_fact_hints_block
+
 LEARNING_PATH_SYSTEM = """\
 You are a senior developer creating a structured learning path for a codebase. \
 The path should guide a new contributor from zero context to productive work. \
@@ -44,7 +46,22 @@ Per-step requirements:
 - include a concrete checkpoint for verifying understanding
 
 GROUNDING RULE: never tell the reader to merely "explore the codebase" or "familiarize yourself".
-Every step must name specific files and what to inspect in them.""",
+Every step must name specific files and what to inspect in them.
+
+FILE-PATH DISCIPLINE (violations lower the step's confidence):
+- Every entry in "file_paths" MUST be a real file path you can see in the
+  snapshot or in the "Representative files" / "Entry-point symbols" /
+  "Public-API symbols" anchors above. Do not invent paths.
+- Every entry MUST include a file extension (".go", ".py", ".ts",
+  ".tsx", ".sql", ".proto", ".md", etc.). If you only know a directory
+  (e.g. "internal/graph") drop it — do NOT list directories in
+  "file_paths"; describe the directory in prose instead.
+- Prefer paths that appear multiple times in the anchors — those are
+  the load-bearing files. Citing a random matching file once is worse
+  than citing the canonical one three times across steps.
+- If you find yourself wanting to cite a file whose exact path you are
+  not sure of, cite a file from the anchors instead and describe the
+  uncertain component in prose rather than as a path.""",
 }
 
 
@@ -84,6 +101,8 @@ def build_learning_path_prompt(
     except (json.JSONDecodeError, TypeError, ValueError):
         pre_analysis_block = ""
 
+    fact_hints = build_fact_hints_block(snapshot_json)
+
     return f"""\
 Generate a learning path for the repository "{repository_name}".
 
@@ -93,7 +112,7 @@ Generate a learning path for the repository "{repository_name}".
 **Depth:** {depth}
 {depth_instruction}
 {focus_line}
-{pre_analysis_block}
+{pre_analysis_block}{fact_hints}
 **Output format:** Return a JSON array of step objects, ordered from first to last. Each object must have:
 - "order": int (1-based step number)
 - "title": string (short step title)
