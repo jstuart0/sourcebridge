@@ -17,8 +17,10 @@ COPY . .
 
 # Build binary (CGO_ENABLED=1 required for go-tree-sitter)
 # GOWORK=off disables go.work which references sourcebridge-enterprise (not in this build context)
-RUN GOWORK=off CGO_ENABLED=1 GOOS=linux go build -o /bin/sourcebridge ./cmd/sourcebridge
-RUN GOWORK=off CGO_ENABLED=1 GOOS=linux go build -o /bin/migrate ./cmd/migrate
+# -p 2 caps compile parallelism — CGO tree-sitter balloons memory and
+# segfaults cc1 on 4 GiB VMs (Colima default) otherwise.
+RUN GOWORK=off CGO_ENABLED=1 GOOS=linux go build -p 2 -o /bin/sourcebridge ./cmd/sourcebridge
+RUN GOWORK=off CGO_ENABLED=1 GOOS=linux go build -p 2 -o /bin/migrate ./cmd/migrate
 
 # Runtime stage
 ARG RUNTIME_BASE_IMAGE

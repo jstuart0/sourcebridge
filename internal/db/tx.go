@@ -9,53 +9,38 @@ import (
 	"log/slog"
 )
 
-// RunInTx runs fn inside a SurrealDB transaction.
+// RunInTx runs fn inside what SHOULD be a SurrealDB transaction.
 //
-// If fn returns an error the transaction is cancelled; if fn panics the
-// panic is recovered, the transaction cancelled, and the panic re-raised
-// so tests and the runtime still see it.
+// Status note. Early deployment found that the SurrealDB version
+// currently used by SourceBridge (checked against the thor cluster's
+// surrealdb/surrealdb image) rejects standalone `COMMIT TRANSACTION`
+// statements sent over the Go SDK's Query path — the server returns
+// "Unexpected statement type encountered: Commit(CommitStatement)".
+// Multi-statement batching (BEGIN / body / COMMIT in a single Query
+// call) is the correct SurrealDB transaction API, and should be
+// adopted when we introduce a safer batching helper.
 //
-// This is the first use of SurrealDB transactions in SourceBridge. The
-// trash feature adopted it to keep cascade soft-deletes atomic, but
-// callers should be aware that:
+// Until that lands, RunInTx runs fn *without* a transaction wrapper.
+// Callers in the trash package pair it with a shared trash_batch_id
+// so restore can reverse partial cascades cleanly; the design's
+// "post-commit reconciler" pattern is therefore the primary
+// correctness mechanism today, not a backup.
 //
-//   - SurrealDB's transaction behaviour is not yet battle-tested in this
-//     codebase.
-//   - There is no savepoint / nested-transaction support; callers must
-//     not invoke RunInTx inside another RunInTx.
-//   - Large transactions can block the cache; keep scope small.
-//
-// Callers that need absolute cascade durability should pair this with a
-// post-commit reconciler (see internal/trash for the canonical pattern).
+// Panic semantics are preserved: a panic from fn is recovered and
+// re-raised so tests and the runtime still see it; the caller's
+// partial writes remain as they are.
 func (s *SurrealDB) RunInTx(ctx context.Context, fn func(ctx context.Context) error) (txErr error) {
 	db := s.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
 
-	if _, err := s.Query(ctx, "BEGIN TRANSACTION;", nil); err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-
 	defer func() {
 		if r := recover(); r != nil {
-			if _, err := s.Query(ctx, "CANCEL TRANSACTION;", nil); err != nil {
-				slog.Error("cancel transaction after panic failed", "error", err)
-			}
-			// Re-raise the panic — tests and the runtime need to see it.
+			slog.Error("RunInTx caller panicked; any partial writes remain as-is (no transaction to cancel)", "panic", r)
 			panic(r)
 		}
 	}()
 
-	if err := fn(ctx); err != nil {
-		if _, cancelErr := s.Query(ctx, "CANCEL TRANSACTION;", nil); cancelErr != nil {
-			slog.Error("cancel transaction failed", "error", cancelErr, "fn_error", err)
-		}
-		return err
-	}
-
-	if _, err := s.Query(ctx, "COMMIT TRANSACTION;", nil); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-	return nil
+	return fn(ctx)
 }

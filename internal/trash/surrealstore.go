@@ -27,11 +27,79 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/google/uuid"
 	"github.com/surrealdb/surrealdb.go"
+	"github.com/surrealdb/surrealdb.go/pkg/models"
 
 	"github.com/sourcebridge/sourcebridge/internal/db"
 )
+
+// surrealTrashRow is the typed projection of a trashable row across
+// any of the three Phase-1 tables. Fields not relevant to a given
+// type simply stay zero. Using a typed struct over map[string]any
+// avoids the landmine of SurrealDB returning RecordID and datetime
+// values as SDK types that don't assert to string / time.Time
+// cleanly via the map path.
+type surrealTrashRow struct {
+	ID            *models.RecordID `json:"id,omitempty" cbor:"id,omitempty"`
+	RepoID        string           `json:"repo_id,omitempty" cbor:"repo_id,omitempty"`
+	DeletedAt     *surrealTime     `json:"deleted_at,omitempty" cbor:"deleted_at,omitempty"`
+	DeletedBy     string           `json:"deleted_by,omitempty" cbor:"deleted_by,omitempty"`
+	DeletedReason string           `json:"deleted_reason,omitempty" cbor:"deleted_reason,omitempty"`
+	TrashBatchID  string           `json:"trash_batch_id,omitempty" cbor:"trash_batch_id,omitempty"`
+
+	// Requirement-only.
+	ExternalID           string `json:"external_id,omitempty" cbor:"external_id,omitempty"`
+	OriginalExternalID   string `json:"original_external_id,omitempty" cbor:"original_external_id,omitempty"`
+	Title                string `json:"title,omitempty" cbor:"title,omitempty"`
+
+	// Link-only.
+	RequirementID string `json:"requirement_id,omitempty" cbor:"requirement_id,omitempty"`
+	SymbolID      string `json:"symbol_id,omitempty" cbor:"symbol_id,omitempty"`
+
+	// Knowledge-artifact-only.
+	ArtifactType     string `json:"type,omitempty" cbor:"type,omitempty"`
+	ScopeKey         string `json:"scope_key,omitempty" cbor:"scope_key,omitempty"`
+	OriginalScopeKey string `json:"original_scope_key,omitempty" cbor:"original_scope_key,omitempty"`
+}
+
+// surrealTime mirrors db.surrealTime but is package-local so we don't
+// have to export it. CBOR unmarshal handles both the SurrealDB native
+// datetime (CBOR tag 12) and legacy string values.
+type surrealTime struct {
+	time.Time
+}
+
+func (st *surrealTime) UnmarshalCBOR(data []byte) error {
+	var dt models.CustomDateTime
+	if err := dt.UnmarshalCBOR(data); err == nil {
+		st.Time = dt.Time
+		return nil
+	}
+	var s string
+	if err := cbor.Unmarshal(data, &s); err == nil && s != "" {
+		if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+			st.Time = t
+			return nil
+		}
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			st.Time = t
+			return nil
+		}
+	}
+	st.Time = time.Time{}
+	return nil
+}
+
+// recordIDString extracts the id portion of a SurrealDB record id,
+// returning "" for nil.
+func recordIDString(rid *models.RecordID) string {
+	if rid == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", rid.ID)
+}
 
 // SurrealStore persists trash state via SurrealDB.
 type SurrealStore struct {
@@ -75,9 +143,8 @@ func naturalKeyColumnFor(t TrashableType) (col, originalCol string) {
 	}
 }
 
-// fetchRowMap loads a single row's columns for the trash entry
-// assembly. Returns nil when the row doesn't exist.
-func (s *SurrealStore) fetchRowMap(ctx context.Context, t TrashableType, id string) (map[string]any, error) {
+// fetchRow loads a single typed row. Returns (nil, nil) on miss.
+func (s *SurrealStore) fetchRow(ctx context.Context, t TrashableType, id string) (*surrealTrashRow, error) {
 	table, err := tableFor(t)
 	if err != nil {
 		return nil, err
@@ -86,9 +153,7 @@ func (s *SurrealStore) fetchRowMap(ctx context.Context, t TrashableType, id stri
 	if d == nil {
 		return nil, errors.New("database not connected")
 	}
-	// Thing-scoped SELECT. We include tombstoned rows so the store can
-	// read either side of the lifecycle.
-	rows, err := surrealdb.Query[[]map[string]any](ctx, d,
+	rows, err := surrealdb.Query[[]surrealTrashRow](ctx, d,
 		fmt.Sprintf("SELECT * FROM type::thing('%s', $id)", table),
 		map[string]any{"id": id})
 	if err != nil {
@@ -98,42 +163,32 @@ func (s *SurrealStore) fetchRowMap(ctx context.Context, t TrashableType, id stri
 		return nil, nil
 	}
 	first := (*rows)[0]
-	if first.Result == nil || len(first.Result) == 0 {
+	if len(first.Result) == 0 {
 		return nil, nil
 	}
-	return first.Result[0], nil
+	row := first.Result[0]
+	return &row, nil
 }
 
-// describeRow derives a user-facing label for the trash entry. Kept
-// simple: the store pulls from the row's obvious columns. Richer
-// rendering lives at the GraphQL layer.
-func describeRow(t TrashableType, row map[string]any) (label, naturalKey, repoID string) {
-	repoID, _ = row["repo_id"].(string)
+// describeRow derives the user-facing label and natural key for a
+// typed trash row.
+func describeRow(t TrashableType, row *surrealTrashRow) (label, naturalKey string) {
 	switch t {
 	case TypeRequirement:
-		extID, _ := row["external_id"].(string)
-		title, _ := row["title"].(string)
-		original, _ := row["original_external_id"].(string)
-		if original != "" {
-			// If tombstoned, prefer the original key for display.
-			extID = original
+		extID := row.ExternalID
+		if row.OriginalExternalID != "" {
+			extID = row.OriginalExternalID
 		}
-		label = strings.TrimSpace(extID + " — " + title)
+		label = strings.TrimSpace(extID + " — " + row.Title)
 		naturalKey = extID
 	case TypeRequirementLink:
-		// Links don't have a human-facing key; the resolver decorates
-		// with requirement/symbol names at render time.
-		reqID, _ := row["requirement_id"].(string)
-		symID, _ := row["symbol_id"].(string)
-		label = reqID + " → " + symID
+		label = row.RequirementID + " → " + row.SymbolID
 	case TypeKnowledgeArtifact:
-		scope, _ := row["scope_key"].(string)
-		origScope, _ := row["original_scope_key"].(string)
-		if origScope != "" {
-			scope = origScope
+		scope := row.ScopeKey
+		if row.OriginalScopeKey != "" {
+			scope = row.OriginalScopeKey
 		}
-		kind, _ := row["type"].(string)
-		label = kind + " · " + scope
+		label = row.ArtifactType + " · " + scope
 		naturalKey = scope
 	}
 	return
@@ -152,14 +207,14 @@ func (s *SurrealStore) MoveToTrash(ctx context.Context, t TrashableType, id stri
 	if err != nil {
 		return Entry{}, err
 	}
-	row, err := s.fetchRowMap(ctx, t, id)
+	row, err := s.fetchRow(ctx, t, id)
 	if err != nil {
 		return Entry{}, err
 	}
 	if row == nil {
 		return Entry{}, fmt.Errorf("%s %s not found", t, id)
 	}
-	if existing, _ := row["deleted_at"].(string); existing != "" {
+	if row.DeletedAt != nil && !row.DeletedAt.IsZero() {
 		return Entry{}, fmt.Errorf("%s %s already in trash", t, id)
 	}
 
@@ -185,7 +240,13 @@ func (s *SurrealStore) MoveToTrash(ctx context.Context, t TrashableType, id stri
 		"batch_id": batchID,
 	}
 	if natCol != "" {
-		current, _ := row[natCol].(string)
+		var current string
+		switch t {
+		case TypeRequirement:
+			current = row.ExternalID
+		case TypeKnowledgeArtifact:
+			current = row.ScopeKey
+		}
 		rewritten := current + TombstoneKeyPrefix + uuid.NewString()[:8]
 		sets = append(sets,
 			natCol+" = $rewritten_key",
@@ -221,7 +282,7 @@ func (s *SurrealStore) MoveToTrash(ctx context.Context, t TrashableType, id stri
 	}
 
 	// Re-read the row so the returned Entry reflects what's persisted.
-	updatedRow, err := s.fetchRowMap(ctx, t, id)
+	updatedRow, err := s.fetchRow(ctx, t, id)
 	if err != nil || updatedRow == nil {
 		return Entry{}, fmt.Errorf("reload after move: %w", err)
 	}
@@ -260,7 +321,7 @@ func (s *SurrealStore) cascadeArtifactChildren(ctx context.Context, artifactID, 
 	}
 	// Evidence is keyed by section_id. Query sections (trashed this
 	// batch) to collect their ids, then tombstone evidence.
-	sectionRows, err := surrealdb.Query[[]map[string]any](ctx, s.sur.DB(),
+	sectionRows, err := surrealdb.Query[[]surrealTrashRow](ctx, s.sur.DB(),
 		"SELECT id FROM ca_knowledge_section WHERE artifact_id = $artifact_id AND trash_batch_id = $batch_id",
 		common)
 	if err != nil {
@@ -270,14 +331,14 @@ func (s *SurrealStore) cascadeArtifactChildren(ctx context.Context, artifactID, 
 		return nil
 	}
 	first := (*sectionRows)[0]
-	if first.Result == nil {
+	if len(first.Result) == 0 {
 		return nil
 	}
 	sectionIDs := make([]string, 0, len(first.Result))
-	for _, r := range first.Result {
-		// SurrealDB returns id as a record-id; toString via type::thing.
-		if raw, ok := r["id"].(string); ok {
-			sectionIDs = append(sectionIDs, raw)
+	for i := range first.Result {
+		id := recordIDString(first.Result[i].ID)
+		if id != "" {
+			sectionIDs = append(sectionIDs, id)
 		}
 	}
 	if len(sectionIDs) == 0 {
@@ -303,25 +364,30 @@ func (s *SurrealStore) RestoreFromTrash(ctx context.Context, t TrashableType, id
 	if err != nil {
 		return RestoreResult{}, err
 	}
-	row, err := s.fetchRowMap(ctx, t, id)
+	row, err := s.fetchRow(ctx, t, id)
 	if err != nil {
 		return RestoreResult{}, err
 	}
 	if row == nil {
 		return RestoreResult{}, fmt.Errorf("%s %s not found", t, id)
 	}
-	deletedAt, _ := row["deleted_at"].(string)
-	if deletedAt == "" {
+	if row.DeletedAt == nil || row.DeletedAt.IsZero() {
 		return RestoreResult{}, fmt.Errorf("%s %s is not in trash", t, id)
 	}
-	batchID, _ := row["trash_batch_id"].(string)
-	repoID, _ := row["repo_id"].(string)
+	batchID := row.TrashBatchID
+	repoID := row.RepoID
 
 	natCol, natOrigCol := naturalKeyColumnFor(t)
 	desiredKey := ""
 	renamed := false
 	if natCol != "" {
-		original, _ := row[natOrigCol].(string)
+		var original string
+		switch t {
+		case TypeRequirement:
+			original = row.OriginalExternalID
+		case TypeKnowledgeArtifact:
+			original = row.OriginalScopeKey
+		}
 		desiredKey = original
 
 		if s.keyIsTaken(ctx, t, repoID, desiredKey, id) {
@@ -502,23 +568,20 @@ func (s *SurrealStore) PermanentlyDelete(ctx context.Context, t TrashableType, i
 	if !t.Valid() {
 		return fmt.Errorf("invalid trashable type %q", t)
 	}
-	row, err := s.fetchRowMap(ctx, t, id)
+	row, err := s.fetchRow(ctx, t, id)
 	if err != nil {
 		return err
 	}
 	if row == nil {
 		return fmt.Errorf("%s %s not found", t, id)
 	}
-	deletedAt, _ := row["deleted_at"].(string)
-	if deletedAt == "" {
+	if row.DeletedAt == nil || row.DeletedAt.IsZero() {
 		return fmt.Errorf("%s %s is live; cannot permanently delete without first moving to trash", t, id)
 	}
 	table, err := tableFor(t)
 	if err != nil {
 		return err
 	}
-	batchID, _ := row["trash_batch_id"].(string)
-
 	return s.sur.RunInTx(ctx, func(ctx context.Context) error {
 		if t == TypeKnowledgeArtifact {
 			for _, child := range []string{
@@ -528,7 +591,7 @@ func (s *SurrealStore) PermanentlyDelete(ctx context.Context, t TrashableType, i
 				"ca_knowledge_section",
 			} {
 				stmt := fmt.Sprintf("DELETE %s WHERE trash_batch_id = $batch_id", child)
-				if _, qerr := s.sur.Query(ctx, stmt, map[string]any{"batch_id": batchID}); qerr != nil {
+				if _, qerr := s.sur.Query(ctx, stmt, map[string]any{"batch_id": row.TrashBatchID}); qerr != nil {
 					return fmt.Errorf("delete %s: %w", child, qerr)
 				}
 			}
@@ -597,7 +660,7 @@ func (s *SurrealStore) listType(ctx context.Context, t TrashableType, filter Lis
 		"SELECT * FROM %s WHERE %s ORDER BY deleted_at DESC",
 		table, clause,
 	)
-	rows, err := surrealdb.Query[[]map[string]any](ctx, s.sur.DB(), stmt, params)
+	rows, err := surrealdb.Query[[]surrealTrashRow](ctx, s.sur.DB(), stmt, params)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list %s: %w", table, err)
 	}
@@ -605,12 +668,13 @@ func (s *SurrealStore) listType(ctx context.Context, t TrashableType, filter Lis
 		return nil, 0, nil
 	}
 	first := (*rows)[0]
-	if first.Result == nil {
+	if len(first.Result) == 0 {
 		return nil, 0, nil
 	}
 	entries := make([]Entry, 0, len(first.Result))
-	for _, row := range first.Result {
-		id, _ := row["id"].(string)
+	for i := range first.Result {
+		row := &first.Result[i]
+		id := recordIDString(row.ID)
 		if id == "" {
 			continue
 		}
@@ -639,18 +703,18 @@ func (s *SurrealStore) SweepExpired(ctx context.Context, retention time.Duration
 		if err != nil {
 			continue
 		}
-		rows, err := surrealdb.Query[[]map[string]any](ctx, s.sur.DB(),
+		rows, err := surrealdb.Query[[]surrealTrashRow](ctx, s.sur.DB(),
 			fmt.Sprintf("SELECT id FROM %s WHERE deleted_at IS NOT NONE AND deleted_at < $cutoff LIMIT %d",
 				table, maxBatch),
 			map[string]any{"cutoff": cutoff})
 		if err != nil {
 			return total, fmt.Errorf("sweep select %s: %w", table, err)
 		}
-		if rows == nil || len(*rows) == 0 || (*rows)[0].Result == nil {
+		if rows == nil || len(*rows) == 0 || len((*rows)[0].Result) == 0 {
 			continue
 		}
-		for _, r := range (*rows)[0].Result {
-			id, _ := r["id"].(string)
+		for i := range (*rows)[0].Result {
+			id := recordIDString((*rows)[0].Result[i].ID)
 			if id == "" {
 				continue
 			}
@@ -666,31 +730,29 @@ func (s *SurrealStore) SweepExpired(ctx context.Context, retention time.Duration
 
 // --- Entry assembly -----------------------------------------------------
 
-func (s *SurrealStore) entryFromRow(t TrashableType, id string, row map[string]any) Entry {
-	label, naturalKey, repoID := describeRow(t, row)
-	deletedAtStr, _ := row["deleted_at"].(string)
-	deletedAt, _ := time.Parse(time.RFC3339, deletedAtStr)
-	batchID, _ := row["trash_batch_id"].(string)
-	deletedBy, _ := row["deleted_by"].(string)
-	deletedReason, _ := row["deleted_reason"].(string)
-
+func (s *SurrealStore) entryFromRow(t TrashableType, id string, row *surrealTrashRow) Entry {
+	label, naturalKey := describeRow(t, row)
+	var deletedAt time.Time
+	if row.DeletedAt != nil {
+		deletedAt = row.DeletedAt.Time
+	}
 	entry := Entry{
 		ID:            id,
 		Type:          t,
-		RepositoryID:  repoID,
+		RepositoryID:  row.RepoID,
 		Label:         label,
 		OriginalKey:   naturalKey,
 		DeletedAt:     deletedAt,
-		DeletedBy:     deletedBy,
-		DeletedReason: deletedReason,
-		TrashBatchID:  batchID,
+		DeletedBy:     row.DeletedBy,
+		DeletedReason: row.DeletedReason,
+		TrashBatchID:  row.TrashBatchID,
 		CanRestore:    true,
 	}
 	// Advisory conflict check. Best-effort; restore itself re-checks.
 	if naturalKey != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if s.keyIsTaken(ctx, t, repoID, naturalKey, id) {
+		if s.keyIsTaken(ctx, t, row.RepoID, naturalKey, id) {
 			entry.CanRestore = false
 			entry.RestoreConflict = fmt.Sprintf("%q is now in use by another entity", naturalKey)
 		}
