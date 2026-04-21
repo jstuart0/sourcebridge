@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useClient, useMutation, useQuery } from "urql";
 import {
@@ -17,6 +17,7 @@ import {
 } from "@/lib/graphql/queries";
 import { ConfidenceBadge, type ConfidenceLevel } from "@/components/code-viewer/ConfidenceBadge";
 import { EditRequirementCard } from "@/components/requirements/EditRequirementCard";
+import { RemoveRequirementDialog } from "@/components/requirements/RemoveRequirementDialog";
 import { SourceRefLink } from "@/components/source/SourceRefLink";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
@@ -104,6 +105,7 @@ function knowledgeErrorHint(errorCode: string | null | undefined): string {
 export default function RequirementDetailPage() {
   const params = useParams();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const reqId = params.id as string;
 
   // Repo context — passed when navigating from a repository's requirements tab
@@ -121,6 +123,7 @@ export default function RequirementDetailPage() {
   const [linkRationale, setLinkRationale] = useState("");
   const [enriching, setEnriching] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [removeOpen, setRemoveOpen] = useState(false);
 
   const [symbolsResult] = useQuery({
     query: SYMBOLS_QUERY,
@@ -362,11 +365,34 @@ export default function RequirementDetailPage() {
                     Edit requirement
                   </Button>
                 ) : null}
+                {!editing ? (
+                  <Button variant="ghost" onClick={() => setRemoveOpen(true)}>
+                    Remove
+                  </Button>
+                ) : null}
                 <Button onClick={handleEnrich} disabled={enriching}>
                   {enriching ? "Enriching…" : "Enrich with AI"}
                 </Button>
               </div>
             }
+          />
+
+          <RemoveRequirementDialog
+            open={removeOpen}
+            requirementId={req.id}
+            requirementLabel={req.externalId || req.title}
+            onClose={() => setRemoveOpen(false)}
+            onRemoved={() => {
+              // Head back where the user likely came from. If repo context
+              // is present in the URL, return to that repo's Requirements
+              // tab; otherwise to the global requirements list.
+              if (fromRepoId) {
+                const url = `/repositories/${fromRepoId}?tab=requirements`;
+                router.push(url);
+              } else {
+                router.push("/requirements");
+              }
+            }}
           />
 
           {editing ? (
