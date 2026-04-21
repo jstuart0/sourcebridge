@@ -151,6 +151,10 @@ type Store interface {
 	MoveToTrash(ctx context.Context, t TrashableType, id string, opts MoveOptions) (Entry, error)
 	RestoreFromTrash(ctx context.Context, t TrashableType, id string, opts RestoreOptions) (RestoreResult, error)
 	PermanentlyDelete(ctx context.Context, t TrashableType, id string) error
+	// Get returns the trash entry for a tombstoned row, or (nil, nil) when
+	// the row is not in the trash. Used by the permanentlyDelete resolver
+	// to enforce ownership before destroying data.
+	Get(ctx context.Context, t TrashableType, id string) (*Entry, error)
 	List(ctx context.Context, filter ListFilter) ([]Entry, int, error)
 	SweepExpired(ctx context.Context, retention time.Duration, maxBatch int) (int, error)
 }

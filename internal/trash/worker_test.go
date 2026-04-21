@@ -28,6 +28,9 @@ func (f *fakeStore) RestoreFromTrash(_ context.Context, _ TrashableType, _ strin
 func (f *fakeStore) PermanentlyDelete(_ context.Context, _ TrashableType, _ string) error {
 	return nil
 }
+func (f *fakeStore) Get(_ context.Context, _ TrashableType, _ string) (*Entry, error) {
+	return nil, nil
+}
 func (f *fakeStore) List(_ context.Context, _ ListFilter) ([]Entry, int, error) { return nil, 0, nil }
 func (f *fakeStore) SweepExpired(_ context.Context, _ time.Duration, _ int) (int, error) {
 	f.calls.Add(1)

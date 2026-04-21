@@ -478,6 +478,15 @@ func (s *SurrealStore) RestoreFromTrash(ctx context.Context, t TrashableType, id
 
 // restoreChildrenByBatch un-tombstones every row in any of the
 // artifact's four child tables whose trash_batch_id matches.
+//
+// NOTE on audit fields for cascade children: `ca_knowledge_section`,
+// `ca_knowledge_evidence`, `ca_knowledge_dependency`, and
+// `ca_knowledge_refinement` do not have `restored_at` / `restored_by`
+// columns (migration 031 only added those to the three primary
+// trashable types). We write them defensively as `option<datetime>` /
+// `option<string>` SET clauses anyway — SurrealDB 2.x silently adds the
+// fields on first write so the data lands on rows from this point on
+// without needing a new migration.
 func (s *SurrealStore) restoreChildrenByBatch(ctx context.Context, batchID string, now time.Time, userID string) (int, error) {
 	total := 0
 	for _, table := range []string{
@@ -488,12 +497,15 @@ func (s *SurrealStore) restoreChildrenByBatch(ctx context.Context, batchID strin
 	} {
 		stmt := fmt.Sprintf(
 			`UPDATE %s
-			 SET deleted_at = NONE, trash_batch_id = NONE
+			 SET deleted_at = NONE,
+			     trash_batch_id = NONE,
+			     restored_at = $now,
+			     restored_by = $user
 			 WHERE trash_batch_id = $batch_id`,
 			table,
 		)
 		res, err := surrealdb.Query[[]map[string]any](ctx, s.sur.DB(), stmt,
-			map[string]any{"batch_id": batchID})
+			map[string]any{"batch_id": batchID, "now": now, "user": userID})
 		if err != nil {
 			return total, fmt.Errorf("restore children %s: %w", table, err)
 		}
@@ -501,8 +513,6 @@ func (s *SurrealStore) restoreChildrenByBatch(ctx context.Context, batchID strin
 			total += len((*res)[0].Result)
 		}
 	}
-	_ = now    // reserved: restored_at/by on child tables will be added in a follow-up migration when we surface per-row audit.
-	_ = userID // reserved: same.
 	return total, nil
 }
 
@@ -600,6 +610,29 @@ func (s *SurrealStore) PermanentlyDelete(ctx context.Context, t TrashableType, i
 		_, qerr := s.sur.Query(ctx, stmt, map[string]any{"id": id})
 		return qerr
 	})
+}
+
+// --- Get ----------------------------------------------------------------
+
+// Get returns the Entry for a tombstoned row, or (nil, nil) for a row
+// that is either live or missing. Powers ownership checks on the
+// permanentlyDelete resolver.
+func (s *SurrealStore) Get(ctx context.Context, t TrashableType, id string) (*Entry, error) {
+	if !t.Valid() {
+		return nil, fmt.Errorf("invalid trashable type %q", t)
+	}
+	row, err := s.fetchRow(ctx, t, id)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, nil
+	}
+	if row.DeletedAt == nil || row.DeletedAt.IsZero() {
+		return nil, nil
+	}
+	entry := s.entryFromRow(t, id, row)
+	return &entry, nil
 }
 
 // --- List ---------------------------------------------------------------

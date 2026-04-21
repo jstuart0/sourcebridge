@@ -279,14 +279,28 @@ func (r *Resolver) permanentlyDelete(ctx context.Context, t TrashableType, id st
 	if err != nil {
 		return false, err
 	}
-	// Ownership gate: the caller may permanentlyDelete their own
-	// tombstones without admin, or anyone's as admin. We rely on the
-	// existing List to surface the DeletedBy field; a dedicated
-	// LookupOwner method is future work.
-	// For now: admins pass unconditionally; non-admins attempt the op
-	// and the store returns a not-found / refuse on mismatch. A
-	// future refinement adds a dedicated permission-checking helper.
-	_ = currentUserIsAdmin // reserved for the upcoming per-user gate
+	caller := currentUserID(ctx)
+	if caller == "" {
+		return false, errors.New("unauthenticated")
+	}
+
+	// Ownership gate. A user may permanentlyDelete their own trash
+	// entries (deletedBy == caller). Admins may purge anyone's.
+	// Neither path reaches this code without authentication above.
+	entry, err := r.TrashStore.Get(ctx, mapped, id)
+	if err != nil {
+		return false, err
+	}
+	if entry == nil {
+		// Either the row is live or doesn't exist. Either way, refuse
+		// to proceed — permanentlyDelete is a destructive op and
+		// callers need a clear signal that the target isn't in trash.
+		return false, fmt.Errorf("%s %s is not in trash", mapped, id)
+	}
+	if entry.DeletedBy != caller && !currentUserIsAdmin(ctx) {
+		return false, fmt.Errorf("permanentlyDelete: only the user who moved an item to trash or an admin may purge it (trashed by %q, caller %q)", entry.DeletedBy, caller)
+	}
+
 	if err := r.TrashStore.PermanentlyDelete(ctx, mapped, id); err != nil {
 		return false, err
 	}

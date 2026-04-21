@@ -1270,21 +1270,18 @@ func (s *SurrealStore) GetRequirements(repoID string, limit, offset int) ([]*gra
 
 	vars := map[string]any{"repo_id": repoID}
 
-	// Count (trashed rows excluded — see soft-delete plan §1.4)
-	countRows, err := queryOne[[]map[string]interface{}](ctx(), db,
-		"SELECT count() AS total FROM ca_requirement WHERE repo_id = $repo_id AND deleted_at IS NONE GROUP ALL", vars)
+	// Count (trashed rows excluded).
+	//
+	// WORKAROUND for SurrealDB 2.2.1: `SELECT count() ... WHERE x = $y AND
+	// deleted_at IS NONE GROUP ALL` silently ignores the IS NONE predicate
+	// when combined with an equality filter — returns the full repo total.
+	// `array::len((SELECT id FROM ...))` applies the filter correctly and
+	// is fast enough on requirement-sized datasets.
+	totalCnt, err := queryOne[int](ctx(), db,
+		"RETURN array::len((SELECT id FROM ca_requirement WHERE repo_id = $repo_id AND deleted_at IS NONE));", vars)
 	total := 0
-	if err == nil && len(countRows) > 0 {
-		if v, ok := countRows[0]["total"]; ok {
-			switch vt := v.(type) {
-			case float64:
-				total = int(vt)
-			case int:
-				total = vt
-			case uint64:
-				total = int(vt)
-			}
-		}
+	if err == nil {
+		total = totalCnt
 	}
 
 	// Exclude trashed rows. See soft-delete plan §1.4 ("read-path audit").

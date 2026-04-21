@@ -314,6 +314,22 @@ func (s *MemStore) PermanentlyDelete(_ context.Context, t TrashableType, id stri
 	return nil
 }
 
+// Get returns the Entry for a trashed row, or (nil, nil) when the row
+// isn't in the trash. Returns an error only for invalid input.
+func (s *MemStore) Get(_ context.Context, t TrashableType, id string) (*Entry, error) {
+	if !t.Valid() {
+		return nil, fmt.Errorf("invalid trashable type %q", t)
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	e, ok := s.entities[entityKey{Type: t, ID: id}]
+	if !ok || e.DeletedAt == nil {
+		return nil, nil
+	}
+	entry := s.toEntry(e)
+	return &entry, nil
+}
+
 // List returns trashed entries matching the filter.
 func (s *MemStore) List(_ context.Context, filter ListFilter) ([]Entry, int, error) {
 	s.mu.RLock()
