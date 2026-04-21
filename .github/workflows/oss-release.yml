@@ -86,8 +86,16 @@ jobs:
     needs: [build-binaries, build-docker]
     runs-on: ubuntu-latest
     steps:
+      # Only download the binary-archive artifacts. docker/build-push-action
+      # publishes a `*.dockerbuild` provenance artifact alongside the image
+      # push; that artifact is sometimes slow to finalize in the artifacts
+      # API and causes the release job to fail with "Artifact download
+      # failed after 5 retries" even though the Docker image pushed fine.
+      # We don't need the provenance blob for the GitHub release anyway —
+      # only the tarballs end up attached to the release page.
       - uses: actions/download-artifact@v4
         with:
+          pattern: binary-*
           merge-multiple: true
           path: artifacts
       - uses: softprops/action-gh-release@v2
