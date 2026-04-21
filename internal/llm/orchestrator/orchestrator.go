@@ -221,6 +221,18 @@ func (o *Orchestrator) reaper() {
 	}
 }
 
+// isTerminalJob reports whether the job has finalized in any state
+// that makes it safe for the inflight registry to release. Active
+// pending / generating jobs return false.
+func isTerminalJob(job *llm.Job) bool {
+	switch job.Status {
+	case llm.StatusReady, llm.StatusFailed, llm.StatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 func (o *Orchestrator) reapStaleJobs() {
 	active := o.store.ListActive(llm.ListFilter{})
 	now := time.Now()
@@ -287,11 +299,22 @@ func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 	}
 
 	// Generate a fresh id and reserve the target key. If someone else
-	// wins the race, defer to them.
+	// wins the race, defer to them — unless their claimed job has
+	// already terminally ended (failed / ready / cancelled). In that
+	// case the registry is stale: release and retry so we don't hand
+	// the caller a dead job reference. Without this, an API pod that
+	// failed a job in memory (e.g. during a worker-pod startup race)
+	// will dedupe every future request with the same target key to
+	// that same dead job, until the pod restarts.
 	id := uuid.New().String()
-	if winner, ok := o.inflight.claim(req.TargetKey, id); !ok {
+	const maxClaimAttempts = 2
+	for attempt := 0; attempt < maxClaimAttempts; attempt++ {
+		winner, ok := o.inflight.claim(req.TargetKey, id)
+		if ok {
+			break
+		}
 		existing := o.store.GetByID(winner)
-		if existing != nil {
+		if existing != nil && !isTerminalJob(existing) {
 			_ = o.store.IncrementAttachedRequests(winner)
 			existing = o.store.GetByID(winner)
 			slog.Info("llm_job_dedupe_hit_inflight",
@@ -299,8 +322,17 @@ func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 				"target_key", req.TargetKey)
 			return existing, nil
 		}
-		// Registry was stale — clear and retry once.
+		existingStatus := "missing"
+		if existing != nil {
+			existingStatus = string(existing.Status)
+		}
+		slog.Info("llm_inflight_stale_release",
+			"stale_job_id", winner,
+			"target_key", req.TargetKey,
+			"existing_status", existingStatus,
+			"attempt", attempt)
 		o.inflight.release(req.TargetKey)
+		// Loop re-claims with the same id on next iteration.
 	}
 	if o.IntakePaused() {
 		o.inflight.release(req.TargetKey)
