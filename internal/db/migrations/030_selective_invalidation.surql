@@ -25,4 +25,17 @@ DEFINE FIELD IF NOT EXISTS stale_report_id
 DEFINE FIELD IF NOT EXISTS stale_artifact_reasons
     ON ca_impact_report TYPE string DEFAULT '';
 
+-- SurrealDB's DEFAULT is only applied at CREATE time; existing rows would
+-- otherwise leave the new fields as NONE. Under SCHEMAFULL, any subsequent
+-- query that touches the record re-validates EVERY field on the record, so
+-- a separate UPDATE per column fails with "Found NONE for field X" while
+-- X still hasn't been backfilled. Setting both new fields in a single
+-- UPDATE, and using `?? ''` to coalesce NONE to the default, fixes both at
+-- once. `?? ''` on an existing non-empty string is a no-op.
+UPDATE ca_knowledge_artifact SET
+    stale_reason_json = (stale_reason_json ?? ''),
+    stale_report_id = (stale_report_id ?? '');
+UPDATE ca_impact_report SET
+    stale_artifact_reasons = (stale_artifact_reasons ?? '');
+
 UPSERT schema_version:v30 SET version = 30;
