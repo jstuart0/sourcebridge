@@ -178,4 +178,55 @@ func TestUpdateRequirementFields_UnknownID(t *testing.T) {
 	}
 }
 
+// Round-trip verifies the bug that motivated Phase 1.1: acceptanceCriteria
+// written via updateRequirementFields must be readable via the GraphQL
+// Requirement type. Before the fix, the mapper simply dropped the field.
+func TestUpdateRequirementFields_AcceptanceCriteria_RoundTrip(t *testing.T) {
+	r, repoID := newResolverWithRepo(t)
+	ext := "AC-1"
+	created, err := r.createRequirementImpl(context.Background(), CreateRequirementInput{
+		RepositoryID: repoID,
+		ExternalID:   &ext,
+		Title:        "needs acceptance criteria",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Brand-new requirements default to an empty slice — not nil — so the
+	// non-null GraphQL contract is honored even before the first update.
+	if created.AcceptanceCriteria == nil {
+		t.Errorf("expected empty slice, got nil")
+	}
+	if len(created.AcceptanceCriteria) != 0 {
+		t.Errorf("expected empty on create, got %v", created.AcceptanceCriteria)
+	}
+
+	criteria := []string{"User can sign in", "Session persists across reload"}
+	updated, err := r.updateRequirementFieldsImpl(context.Background(), UpdateRequirementFieldsInput{
+		ID:                 created.ID,
+		AcceptanceCriteria: criteria,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.AcceptanceCriteria) != 2 ||
+		updated.AcceptanceCriteria[0] != "User can sign in" ||
+		updated.AcceptanceCriteria[1] != "Session persists across reload" {
+		t.Errorf("round-trip failed: got %v", updated.AcceptanceCriteria)
+	}
+
+	// Empty slice on update should clear, not preserve.
+	cleared, err := r.updateRequirementFieldsImpl(context.Background(), UpdateRequirementFieldsInput{
+		ID:                 created.ID,
+		AcceptanceCriteria: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cleared.AcceptanceCriteria) != 0 {
+		t.Errorf("clear failed: got %v", cleared.AcceptanceCriteria)
+	}
+}
+
 // strPtr is declared elsewhere in the package; no helper needed here.

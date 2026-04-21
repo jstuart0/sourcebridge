@@ -106,8 +106,23 @@ type Mutation {
 
   # Phase 3: Requirement import (stubs in Phase 1)
   importRequirements(input: ImportRequirementsInput!): ImportResult!
-  # Requirement CRUD (added alongside VSCode extension 0.3.0).
+
+  """
+  Create a single requirement. `externalId` auto-generates as
+  `REQ-<8-char-uuid>` when omitted or blank. `source` defaults to
+  `"manual"` when not supplied. Uniqueness of `(repositoryId, externalId)`
+  is enforced both by an app-layer precheck and a DB UNIQUE index — the
+  latter is authoritative under concurrent writes.
+  """
   createRequirement(input: CreateRequirementInput!): Requirement!
+
+  """
+  Patch an existing requirement. Uses pointer-semantics: a null (omitted)
+  field preserves the current value; an empty string clears it. Uniqueness
+  of `(repositoryId, externalId)` is enforced both app-side and via a DB
+  UNIQUE index — a live race resolves with the first writer winning and
+  the second receiving a friendly collision error.
+  """
   updateRequirementFields(input: UpdateRequirementFieldsInput!): Requirement!
 
   # Phase 4: Link management
@@ -404,6 +419,11 @@ type Requirement {
   source: String!
   priority: String
   tags: [String!]!
+  """
+  Ordered acceptance criteria bullet-list. Writable via
+  updateRequirementFields; readable here. Empty list when unset (never null).
+  """
+  acceptanceCriteria: [String!]!
   links: [RequirementLink!]!
   createdAt: Time!
   updatedAt: Time

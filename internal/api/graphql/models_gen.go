@@ -653,16 +653,19 @@ type RepositoryUnderstanding struct {
 }
 
 type Requirement struct {
-	ID          string             `json:"id"`
-	ExternalID  *string            `json:"externalId,omitempty"`
-	Title       string             `json:"title"`
-	Description string             `json:"description"`
-	Source      string             `json:"source"`
-	Priority    *string            `json:"priority,omitempty"`
-	Tags        []string           `json:"tags"`
-	Links       []*RequirementLink `json:"links"`
-	CreatedAt   time.Time          `json:"createdAt"`
-	UpdatedAt   *time.Time         `json:"updatedAt,omitempty"`
+	ID          string   `json:"id"`
+	ExternalID  *string  `json:"externalId,omitempty"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Source      string   `json:"source"`
+	Priority    *string  `json:"priority,omitempty"`
+	Tags        []string `json:"tags"`
+	// Ordered acceptance criteria bullet-list. Writable via
+	// updateRequirementFields; readable here. Empty list when unset (never null).
+	AcceptanceCriteria []string           `json:"acceptanceCriteria"`
+	Links              []*RequirementLink `json:"links"`
+	CreatedAt          time.Time          `json:"createdAt"`
+	UpdatedAt          *time.Time         `json:"updatedAt,omitempty"`
 }
 
 type RequirementConnection struct {

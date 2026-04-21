@@ -448,18 +448,24 @@ func mapRequirement(r *graphstore.StoredRequirement) *Requirement {
 	if tags == nil {
 		tags = []string{}
 	}
+	// GraphQL [String!]! — honor non-null by defaulting to an empty slice.
+	acceptanceCriteria := r.AcceptanceCriteria
+	if acceptanceCriteria == nil {
+		acceptanceCriteria = []string{}
+	}
 	updated := r.UpdatedAt
 	return &Requirement{
-		ID:          r.ID,
-		ExternalID:  &r.ExternalID,
-		Title:       r.Title,
-		Description: r.Description,
-		Source:      r.Source,
-		Priority:    priorityPtr,
-		Tags:        tags,
-		Links:       []*RequirementLink{},
-		CreatedAt:   r.CreatedAt,
-		UpdatedAt:   &updated,
+		ID:                 r.ID,
+		ExternalID:         &r.ExternalID,
+		Title:              r.Title,
+		Description:        r.Description,
+		Source:             r.Source,
+		Priority:           priorityPtr,
+		Tags:               tags,
+		AcceptanceCriteria: acceptanceCriteria,
+		Links:              []*RequirementLink{},
+		CreatedAt:          r.CreatedAt,
+		UpdatedAt:          &updated,
 	}
 }
 

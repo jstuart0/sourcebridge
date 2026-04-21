@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -54,32 +55,59 @@ func (r *Resolver) createRequirementImpl(ctx context.Context, input CreateRequir
 	}
 
 	// Uniqueness against live rows. GetRequirementByExternalID already
-	// filters soft-deleted entries.
+	// filters soft-deleted entries. This precheck is a friendly UX layer;
+	// migration 032's UNIQUE index on (repo_id, external_id) is the
+	// authoritative race-proof backstop.
 	if existing := store.GetRequirementByExternalID(input.RepositoryID, externalID); existing != nil {
+		slog.Warn("requirement_create_duplicate_external_id",
+			"repo_id", input.RepositoryID,
+			"external_id", externalID,
+		)
 		return nil, fmt.Errorf("a requirement with externalId %q already exists in this repository", externalID)
 	}
 
 	now := time.Now().UTC()
 	rec := &graphstore.StoredRequirement{
-		ID:          uuid.NewString(),
-		RepoID:      input.RepositoryID,
-		ExternalID:  externalID,
-		Title:       title,
-		Description: deref(input.Description),
-		Priority:    deref(input.Priority),
-		Source:      defaultIfBlank(deref(input.Source), "manual"),
-		Tags:        input.Tags,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:                 uuid.NewString(),
+		RepoID:             input.RepositoryID,
+		ExternalID:         externalID,
+		Title:              title,
+		Description:        deref(input.Description),
+		Priority:           deref(input.Priority),
+		Source:             defaultIfBlank(deref(input.Source), "manual"),
+		Tags:               input.Tags,
+		AcceptanceCriteria: []string{},
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	store.StoreRequirement(input.RepositoryID, rec)
 
+	// Post-hoc verification: StoreRequirement currently swallows DB errors
+	// and logs them (signature doesn't return an error). A rejected unique
+	// constraint would therefore look like a silent no-op. Re-resolve by
+	// external ID to confirm the row actually persisted.
+	persisted := store.GetRequirementByExternalID(input.RepositoryID, externalID)
+	if persisted == nil {
+		slog.Warn("requirement_create_persist_failed",
+			"repo_id", input.RepositoryID,
+			"external_id", externalID,
+			"hint", "likely unique-constraint violation from a concurrent create",
+		)
+		return nil, fmt.Errorf("failed to persist requirement with externalId %q — please retry", externalID)
+	}
+
+	slog.Info("requirement_created",
+		"repo_id", persisted.RepoID,
+		"requirement_id", persisted.ID,
+		"external_id", persisted.ExternalID,
+		"source", persisted.Source,
+	)
 	r.publishEvent("requirement.created", map[string]interface{}{
-		"repository_id": input.RepositoryID,
-		"requirement_id": rec.ID,
-		"external_id":   rec.ExternalID,
+		"repository_id":  input.RepositoryID,
+		"requirement_id": persisted.ID,
+		"external_id":    persisted.ExternalID,
 	})
-	return mapRequirement(rec), nil
+	return mapRequirement(persisted), nil
 }
 
 func (r *Resolver) updateRequirementFieldsImpl(ctx context.Context, input UpdateRequirementFieldsInput) (*Requirement, error) {
@@ -106,21 +134,60 @@ func (r *Resolver) updateRequirementFieldsImpl(ctx context.Context, input Update
 
 	updated := store.UpdateRequirementFields(input.ID, patch)
 	if updated == nil {
-		// Two reasons this returns nil:
+		// Three reasons this returns nil:
 		//   1. requirement not found (or trashed)
-		//   2. externalId uniqueness conflict
+		//   2. externalId app-layer precheck collision
+		//   3. DB-level unique-constraint rejection (migration 032 race backstop)
 		// Disambiguate so the UI can render a specific error.
 		current := store.GetRequirement(input.ID)
 		if current == nil {
 			return nil, fmt.Errorf("requirement %q not found", input.ID)
 		}
 		if input.ExternalID != nil && *input.ExternalID != "" && *input.ExternalID != current.ExternalID {
+			slog.Warn("requirement_update_duplicate_external_id",
+				"repo_id", current.RepoID,
+				"requirement_id", input.ID,
+				"attempted_external_id", *input.ExternalID,
+			)
 			return nil, fmt.Errorf("externalId %q is already taken by another requirement in this repository", *input.ExternalID)
 		}
+		slog.Warn("requirement_update_failed",
+			"requirement_id", input.ID,
+			"hint", "no field-level diagnosis; check DB logs for unique-constraint violations",
+		)
 		return nil, errors.New("update failed")
 	}
+	// Report which fields were actually in the patch — useful for audit /
+	// debugging without logging PII-level content.
+	var changedFields []string
+	if patch.ExternalID != nil {
+		changedFields = append(changedFields, "external_id")
+	}
+	if patch.Title != nil {
+		changedFields = append(changedFields, "title")
+	}
+	if patch.Description != nil {
+		changedFields = append(changedFields, "description")
+	}
+	if patch.Priority != nil {
+		changedFields = append(changedFields, "priority")
+	}
+	if patch.Source != nil {
+		changedFields = append(changedFields, "source")
+	}
+	if patch.Tags != nil {
+		changedFields = append(changedFields, "tags")
+	}
+	if patch.AcceptanceCriteria != nil {
+		changedFields = append(changedFields, "acceptance_criteria")
+	}
+	slog.Info("requirement_updated",
+		"repo_id", updated.RepoID,
+		"requirement_id", updated.ID,
+		"changed_fields", changedFields,
+	)
 	r.publishEvent("requirement.updated", map[string]interface{}{
-		"repository_id": updated.RepoID,
+		"repository_id":  updated.RepoID,
 		"requirement_id": updated.ID,
 	})
 	return mapRequirement(updated), nil

@@ -662,16 +662,17 @@ type ComplexityRoot struct {
 	}
 
 	Requirement struct {
-		CreatedAt   func(childComplexity int) int
-		Description func(childComplexity int) int
-		ExternalID  func(childComplexity int) int
-		ID          func(childComplexity int) int
-		Links       func(childComplexity int) int
-		Priority    func(childComplexity int) int
-		Source      func(childComplexity int) int
-		Tags        func(childComplexity int) int
-		Title       func(childComplexity int) int
-		UpdatedAt   func(childComplexity int) int
+		AcceptanceCriteria func(childComplexity int) int
+		CreatedAt          func(childComplexity int) int
+		Description        func(childComplexity int) int
+		ExternalID         func(childComplexity int) int
+		ID                 func(childComplexity int) int
+		Links              func(childComplexity int) int
+		Priority           func(childComplexity int) int
+		Source             func(childComplexity int) int
+		Tags               func(childComplexity int) int
+		Title              func(childComplexity int) int
+		UpdatedAt          func(childComplexity int) int
 	}
 
 	RequirementConnection struct {
@@ -4663,6 +4664,13 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.RepositoryUnderstanding.UpdatedAt(childComplexity), true
+
+	case "Requirement.acceptanceCriteria":
+		if e.complexity.Requirement.AcceptanceCriteria == nil {
+			break
+		}
+
+		return e.complexity.Requirement.AcceptanceCriteria(childComplexity), true
 
 	case "Requirement.createdAt":
 		if e.complexity.Requirement.CreatedAt == nil {
@@ -24971,6 +24979,8 @@ func (ec *executionContext) fieldContext_Mutation_createRequirement(ctx context.
 				return ec.fieldContext_Requirement_priority(ctx, field)
 			case "tags":
 				return ec.fieldContext_Requirement_tags(ctx, field)
+			case "acceptanceCriteria":
+				return ec.fieldContext_Requirement_acceptanceCriteria(ctx, field)
 			case "links":
 				return ec.fieldContext_Requirement_links(ctx, field)
 			case "createdAt":
@@ -25048,6 +25058,8 @@ func (ec *executionContext) fieldContext_Mutation_updateRequirementFields(ctx co
 				return ec.fieldContext_Requirement_priority(ctx, field)
 			case "tags":
 				return ec.fieldContext_Requirement_tags(ctx, field)
+			case "acceptanceCriteria":
+				return ec.fieldContext_Requirement_acceptanceCriteria(ctx, field)
 			case "links":
 				return ec.fieldContext_Requirement_links(ctx, field)
 			case "createdAt":
@@ -25551,6 +25563,8 @@ func (ec *executionContext) fieldContext_Mutation_enrichRequirement(ctx context.
 				return ec.fieldContext_Requirement_priority(ctx, field)
 			case "tags":
 				return ec.fieldContext_Requirement_tags(ctx, field)
+			case "acceptanceCriteria":
+				return ec.fieldContext_Requirement_acceptanceCriteria(ctx, field)
 			case "links":
 				return ec.fieldContext_Requirement_links(ctx, field)
 			case "createdAt":
@@ -27991,6 +28005,8 @@ func (ec *executionContext) fieldContext_PromoteResult_requirement(_ context.Con
 				return ec.fieldContext_Requirement_priority(ctx, field)
 			case "tags":
 				return ec.fieldContext_Requirement_tags(ctx, field)
+			case "acceptanceCriteria":
+				return ec.fieldContext_Requirement_acceptanceCriteria(ctx, field)
 			case "links":
 				return ec.fieldContext_Requirement_links(ctx, field)
 			case "createdAt":
@@ -28688,6 +28704,8 @@ func (ec *executionContext) fieldContext_Query_requirement(ctx context.Context, 
 				return ec.fieldContext_Requirement_priority(ctx, field)
 			case "tags":
 				return ec.fieldContext_Requirement_tags(ctx, field)
+			case "acceptanceCriteria":
+				return ec.fieldContext_Requirement_acceptanceCriteria(ctx, field)
 			case "links":
 				return ec.fieldContext_Requirement_links(ctx, field)
 			case "createdAt":
@@ -33548,6 +33566,50 @@ func (ec *executionContext) fieldContext_Requirement_tags(_ context.Context, fie
 	return fc, nil
 }
 
+func (ec *executionContext) _Requirement_acceptanceCriteria(ctx context.Context, field graphql.CollectedField, obj *Requirement) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Requirement_acceptanceCriteria(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.AcceptanceCriteria, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.([]string)
+	fc.Result = res
+	return ec.marshalNString2ᚕstringᚄ(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Requirement_acceptanceCriteria(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Requirement",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Requirement_links(ctx context.Context, field graphql.CollectedField, obj *Requirement) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_Requirement_links(ctx, field)
 	if err != nil {
@@ -33752,6 +33814,8 @@ func (ec *executionContext) fieldContext_RequirementConnection_nodes(_ context.C
 				return ec.fieldContext_Requirement_priority(ctx, field)
 			case "tags":
 				return ec.fieldContext_Requirement_tags(ctx, field)
+			case "acceptanceCriteria":
+				return ec.fieldContext_Requirement_acceptanceCriteria(ctx, field)
 			case "links":
 				return ec.fieldContext_Requirement_links(ctx, field)
 			case "createdAt":
@@ -34230,6 +34294,8 @@ func (ec *executionContext) fieldContext_RequirementLink_requirement(_ context.C
 				return ec.fieldContext_Requirement_priority(ctx, field)
 			case "tags":
 				return ec.fieldContext_Requirement_tags(ctx, field)
+			case "acceptanceCriteria":
+				return ec.fieldContext_Requirement_acceptanceCriteria(ctx, field)
 			case "links":
 				return ec.fieldContext_Requirement_links(ctx, field)
 			case "createdAt":
@@ -38027,6 +38093,8 @@ func (ec *executionContext) fieldContext_TraceabilityMatrix_requirements(_ conte
 				return ec.fieldContext_Requirement_priority(ctx, field)
 			case "tags":
 				return ec.fieldContext_Requirement_tags(ctx, field)
+			case "acceptanceCriteria":
+				return ec.fieldContext_Requirement_acceptanceCriteria(ctx, field)
 			case "links":
 				return ec.fieldContext_Requirement_links(ctx, field)
 			case "createdAt":
@@ -47213,6 +47281,11 @@ func (ec *executionContext) _Requirement(ctx context.Context, sel ast.SelectionS
 			out.Values[i] = ec._Requirement_priority(ctx, field, obj)
 		case "tags":
 			out.Values[i] = ec._Requirement_tags(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "acceptanceCriteria":
+			out.Values[i] = ec._Requirement_acceptanceCriteria(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
