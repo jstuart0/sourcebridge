@@ -983,17 +983,24 @@ export default function RepositoryDetailPage() {
     () => sourceTargetFromSearchParams(new URLSearchParams(searchParams.toString())),
     [searchParams]
   );
+  // Engine-mode-aware picker: must filter by generationMode so the selected
+  // engine toggle (Classic vs Understanding First) is respected. Without this
+  // guard, .find() returns whichever artifact the server happened to list
+  // first, which can mask a Classic-mode READY artifact behind an
+  // Understanding-First FAILED one (or vice versa) in the UI.
+  const matchesEngine = (a: KnowledgeArtifact): boolean =>
+    (a.generationMode || "").toUpperCase() === knowledgeGenerationMode;
   const currentCliffNotes = knowledgeArtifacts.find(
-    (a) => a.type === "CLIFF_NOTES" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
+    (a) => a.type === "CLIFF_NOTES" && a.audience === knowledgeAudience && a.depth === knowledgeDepth && matchesEngine(a)
   );
   const currentLearningPath = knowledgeArtifacts.find(
-    (a) => a.type === "LEARNING_PATH" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
+    (a) => a.type === "LEARNING_PATH" && a.audience === knowledgeAudience && a.depth === knowledgeDepth && matchesEngine(a)
   );
   const currentCodeTour = knowledgeArtifacts.find(
-    (a) => a.type === "CODE_TOUR" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
+    (a) => a.type === "CODE_TOUR" && a.audience === knowledgeAudience && a.depth === knowledgeDepth && matchesEngine(a)
   );
   const currentWorkflowStory = knowledgeArtifacts.find(
-    (a) => a.type === "WORKFLOW_STORY" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
+    (a) => a.type === "WORKFLOW_STORY" && a.audience === knowledgeAudience && a.depth === knowledgeDepth && matchesEngine(a)
   );
   const currentUnderstanding: RepositoryUnderstanding | null = repoResult.data?.repository?.repositoryUnderstanding || null;
   const shouldAutoCollapseUnderstanding = shouldCollapseRepositoryUnderstanding(currentUnderstanding);
@@ -1077,7 +1084,7 @@ export default function RepositoryDetailPage() {
   useEffect(() => { setTourStopIndex(0); }, [codeTourId]);
 
   const availableLenses = knowledgeArtifacts
-    .filter((a) => a.type === "CLIFF_NOTES")
+    .filter((a) => a.type === "CLIFF_NOTES" && matchesEngine(a))
     .map((a) => `${a.audience}:${a.depth}`)
     .filter((value, index, arr) => arr.indexOf(value) === index);
 
@@ -3441,7 +3448,7 @@ export default function RepositoryDetailPage() {
                   </div>
                 </div>
 
-                {knowledgeArtifacts.filter((a) => a.status === "FAILED").map((a) => (
+                {knowledgeArtifacts.filter((a) => a.status === "FAILED" && matchesEngine(a)).map((a) => (
                   <Panel key={a.id} className="border-[var(--color-error,#ef4444)]">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-sm text-[var(--color-error,#ef4444)]">
