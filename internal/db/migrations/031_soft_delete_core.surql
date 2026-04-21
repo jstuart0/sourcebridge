@@ -20,15 +20,19 @@ DEFINE FIELD IF NOT EXISTS original_external_id ON ca_requirement TYPE option<st
 DEFINE INDEX IF NOT EXISTS idx_req_deleted_at   ON ca_requirement FIELDS repo_id, deleted_at;
 DEFINE INDEX IF NOT EXISTS idx_req_trash_batch  ON ca_requirement FIELDS trash_batch_id;
 
--- ca_requirement_link (no natural-key tombstone needed — primary id is opaque)
-DEFINE FIELD IF NOT EXISTS deleted_at     ON ca_requirement_link TYPE option<datetime> DEFAULT NONE;
-DEFINE FIELD IF NOT EXISTS deleted_by     ON ca_requirement_link TYPE option<string>   DEFAULT NONE;
-DEFINE FIELD IF NOT EXISTS deleted_reason ON ca_requirement_link TYPE option<string>   DEFAULT NONE;
-DEFINE FIELD IF NOT EXISTS restored_at    ON ca_requirement_link TYPE option<datetime> DEFAULT NONE;
-DEFINE FIELD IF NOT EXISTS restored_by    ON ca_requirement_link TYPE option<string>   DEFAULT NONE;
-DEFINE FIELD IF NOT EXISTS trash_batch_id ON ca_requirement_link TYPE option<string>   DEFAULT NONE;
-DEFINE INDEX IF NOT EXISTS idx_link_deleted_at  ON ca_requirement_link FIELDS repo_id, deleted_at;
-DEFINE INDEX IF NOT EXISTS idx_link_trash_batch ON ca_requirement_link FIELDS trash_batch_id;
+-- ca_link (no natural-key tombstone needed — primary id is opaque).
+-- NOTE: The plan document's text refers to `ca_requirement_link`; the
+-- actual table name in SurrealDB is `ca_link` (migration 003). The
+-- plan uses the more descriptive label; the schema uses the shorter
+-- historical name.
+DEFINE FIELD IF NOT EXISTS deleted_at     ON ca_link TYPE option<datetime> DEFAULT NONE;
+DEFINE FIELD IF NOT EXISTS deleted_by     ON ca_link TYPE option<string>   DEFAULT NONE;
+DEFINE FIELD IF NOT EXISTS deleted_reason ON ca_link TYPE option<string>   DEFAULT NONE;
+DEFINE FIELD IF NOT EXISTS restored_at    ON ca_link TYPE option<datetime> DEFAULT NONE;
+DEFINE FIELD IF NOT EXISTS restored_by    ON ca_link TYPE option<string>   DEFAULT NONE;
+DEFINE FIELD IF NOT EXISTS trash_batch_id ON ca_link TYPE option<string>   DEFAULT NONE;
+DEFINE INDEX IF NOT EXISTS idx_link_deleted_at  ON ca_link FIELDS repo_id, deleted_at;
+DEFINE INDEX IF NOT EXISTS idx_link_trash_batch ON ca_link FIELDS trash_batch_id;
 
 -- ca_knowledge_artifact (unique on repo_id, type, audience, depth, scope_key)
 DEFINE FIELD IF NOT EXISTS deleted_at         ON ca_knowledge_artifact TYPE option<datetime> DEFAULT NONE;

@@ -89,6 +89,10 @@ type Query {
   comprehensionSettingsList: [ComprehensionSettings!]! @deprecated(reason: "Use comprehensionSettings with an explicit scope")
   modelCapabilities: [ModelCapabilityProfile!]!
   modelCapability(modelId: String!): ModelCapabilityProfile
+
+  # Recycle bin (soft-delete) — see docs/user/recycle-bin.md (forthcoming)
+  trashedItems(repositoryId: ID, types: [TrashableType!], limit: Int = 50, offset: Int = 0, search: String): TrashConnection!
+  trashRetentionDays: Int!
 }
 
 type Mutation {
@@ -145,6 +149,50 @@ type Mutation {
   updateModelCapabilities(input: UpdateModelCapabilitiesInput!): ModelCapabilityProfile!
   deleteModelCapabilities(modelId: String!): Boolean! @deprecated(reason: "Use deleteModelCapabilitiesResult")
   deleteModelCapabilitiesResult(modelId: String!): MutationResult!
+
+  # Recycle bin (soft-delete)
+  moveToTrash(type: TrashableType!, id: ID!, reason: String): TrashEntry!
+  restoreFromTrash(type: TrashableType!, id: ID!, resolveConflict: RestoreConflictResolution, rename: String): RestoreResult!
+  permanentlyDelete(type: TrashableType!, id: ID!): Boolean!
+  emptyTrash(repositoryId: ID!, olderThanDays: Int): Int!
+}
+
+enum TrashableType {
+  REQUIREMENT
+  REQUIREMENT_LINK
+  KNOWLEDGE_ARTIFACT
+}
+
+enum RestoreConflictResolution {
+  CANCEL
+  RENAME
+}
+
+type TrashEntry {
+  id: ID!
+  type: TrashableType!
+  repositoryId: ID
+  label: String!
+  originalKey: String
+  deletedAt: String!
+  deletedBy: String
+  expiresAt: String!
+  canRestore: Boolean!
+  restoreConflict: String
+  trashBatchId: ID!
+}
+
+type TrashConnection {
+  nodes: [TrashEntry!]!
+  totalCount: Int!
+  retentionDays: Int!
+}
+
+type RestoreResult {
+  restoredId: ID!
+  batchSize: Int!
+  renamed: Boolean!
+  newKey: String
 }
 
 # Health and system types

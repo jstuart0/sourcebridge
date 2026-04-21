@@ -1270,9 +1270,9 @@ func (s *SurrealStore) GetRequirements(repoID string, limit, offset int) ([]*gra
 
 	vars := map[string]any{"repo_id": repoID}
 
-	// Count
+	// Count (trashed rows excluded — see soft-delete plan §1.4)
 	countRows, err := queryOne[[]map[string]interface{}](ctx(), db,
-		"SELECT count() AS total FROM ca_requirement WHERE repo_id = $repo_id GROUP ALL", vars)
+		"SELECT count() AS total FROM ca_requirement WHERE repo_id = $repo_id AND deleted_at IS NONE GROUP ALL", vars)
 	total := 0
 	if err == nil && len(countRows) > 0 {
 		if v, ok := countRows[0]["total"]; ok {
@@ -1287,7 +1287,8 @@ func (s *SurrealStore) GetRequirements(repoID string, limit, offset int) ([]*gra
 		}
 	}
 
-	sql := "SELECT * FROM ca_requirement WHERE repo_id = $repo_id"
+	// Exclude trashed rows. See soft-delete plan §1.4 ("read-path audit").
+	sql := "SELECT * FROM ca_requirement WHERE repo_id = $repo_id AND deleted_at IS NONE"
 	if limit > 0 {
 		sql += fmt.Sprintf(" LIMIT %d", limit)
 	}
@@ -1315,7 +1316,7 @@ func (s *SurrealStore) GetRequirement(id string) *graph.StoredRequirement {
 	}
 
 	rows, err := queryOne[[]surrealRequirement](ctx(), db,
-		"SELECT * FROM type::thing('ca_requirement', $id)",
+		"SELECT * FROM type::thing('ca_requirement', $id) WHERE deleted_at IS NONE",
 		map[string]any{"id": id})
 	if err != nil || len(rows) == 0 {
 		return nil
@@ -1331,7 +1332,7 @@ func (s *SurrealStore) GetRequirementsByIDs(ids []string) map[string]*graph.Stor
 	}
 
 	rows, err := queryOne[[]surrealRequirement](ctx(), db,
-		"SELECT * FROM ca_requirement WHERE id IN $ids.map(|$v| type::thing('ca_requirement', $v))",
+		"SELECT * FROM ca_requirement WHERE id IN $ids.map(|$v| type::thing('ca_requirement', $v)) AND deleted_at IS NONE",
 		map[string]any{"ids": ids})
 	if err != nil {
 		slog.Warn("failed to batch fetch requirements", "error", err, "count", len(ids))
@@ -1354,7 +1355,7 @@ func (s *SurrealStore) GetRequirementByExternalID(repoID, externalID string) *gr
 	}
 
 	rows, err := queryOne[[]surrealRequirement](ctx(), db,
-		"SELECT * FROM ca_requirement WHERE repo_id = $repo_id AND external_id = $eid LIMIT 1",
+		"SELECT * FROM ca_requirement WHERE repo_id = $repo_id AND external_id = $eid AND deleted_at IS NONE LIMIT 1",
 		map[string]any{"repo_id": repoID, "eid": externalID})
 	if err != nil || len(rows) == 0 {
 		return nil
@@ -1494,7 +1495,7 @@ func (s *SurrealStore) GetLink(id string) *graph.StoredLink {
 	}
 
 	rows, err := queryOne[[]surrealLink](ctx(), db,
-		"SELECT * FROM type::thing('ca_link', $id)",
+		"SELECT * FROM type::thing('ca_link', $id) WHERE deleted_at IS NONE",
 		map[string]any{"id": id})
 	if err != nil || len(rows) == 0 {
 		return nil
@@ -1509,7 +1510,7 @@ func (s *SurrealStore) GetLinksForRequirement(reqID string, includeRejected bool
 		return nil
 	}
 
-	sql := "SELECT * FROM ca_link WHERE requirement_id = $req_id"
+	sql := "SELECT * FROM ca_link WHERE requirement_id = $req_id AND deleted_at IS NONE"
 	if !includeRejected {
 		sql += " AND rejected = false"
 	}
@@ -1535,7 +1536,7 @@ func (s *SurrealStore) GetLinksForSymbol(symID string, includeRejected bool) []*
 		return nil
 	}
 
-	sql := "SELECT * FROM ca_link WHERE symbol_id = $sym_id"
+	sql := "SELECT * FROM ca_link WHERE symbol_id = $sym_id AND deleted_at IS NONE"
 	if !includeRejected {
 		sql += " AND rejected = false"
 	}
@@ -1586,7 +1587,7 @@ func (s *SurrealStore) GetLinksForFile(fileID string, startLine, endLine int, mi
 
 	// Get links for those symbols
 	linkRows, err := queryOne[[]surrealLink](ctx(), db,
-		"SELECT * FROM ca_link WHERE symbol_id IN $sym_ids AND rejected = false AND confidence >= $min_conf",
+		"SELECT * FROM ca_link WHERE symbol_id IN $sym_ids AND rejected = false AND deleted_at IS NONE AND confidence >= $min_conf",
 		map[string]any{
 			"sym_ids":  symIDs,
 			"min_conf": minConfidence,
@@ -1634,7 +1635,7 @@ func (s *SurrealStore) GetLinksForRepo(repoID string) []*graph.StoredLink {
 	}
 
 	rows, err := queryOne[[]surrealLink](ctx(), db,
-		"SELECT * FROM ca_link WHERE repo_id = $repo_id AND rejected = false",
+		"SELECT * FROM ca_link WHERE repo_id = $repo_id AND rejected = false AND deleted_at IS NONE",
 		map[string]any{"repo_id": repoID})
 	if err != nil {
 		return nil
@@ -1715,8 +1716,11 @@ func (s *SurrealStore) UpdateRequirement(id string, priority string, tags []stri
 		return nil
 	}
 
+	// Refuse to update a trashed requirement. The mutation returns nil
+	// and the caller gets "requirement not found" — correct behaviour
+	// because from the caller's perspective the row is deleted.
 	rows, err := queryOne[[]surrealRequirement](ctx(), db,
-		"UPDATE type::thing('ca_requirement', $id) SET priority = $priority, tags = $tags, updated_at = time::now() RETURN AFTER",
+		"UPDATE type::thing('ca_requirement', $id) SET priority = $priority, tags = $tags, updated_at = time::now() WHERE deleted_at IS NONE RETURN AFTER",
 		map[string]any{"id": id, "priority": priority, "tags": tags})
 	if err != nil || len(rows) == 0 {
 		return nil

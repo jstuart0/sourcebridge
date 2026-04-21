@@ -685,6 +685,13 @@ type ResolvedSymbol struct {
 	IsAnchor      bool    `json:"isAnchor"`
 }
 
+type RestoreResult struct {
+	RestoredID string  `json:"restoredId"`
+	BatchSize  int     `json:"batchSize"`
+	Renamed    bool    `json:"renamed"`
+	NewKey     *string `json:"newKey,omitempty"`
+}
+
 type ReviewCodeInput struct {
 	RepositoryID string    `json:"repositoryId"`
 	FilePath     string    `json:"filePath"`
@@ -824,6 +831,26 @@ type TraceabilityMatrix struct {
 	Symbols      []*CodeSymbol      `json:"symbols"`
 	Links        []*RequirementLink `json:"links"`
 	Coverage     float64            `json:"coverage"`
+}
+
+type TrashConnection struct {
+	Nodes         []*TrashEntry `json:"nodes"`
+	TotalCount    int           `json:"totalCount"`
+	RetentionDays int           `json:"retentionDays"`
+}
+
+type TrashEntry struct {
+	ID              string        `json:"id"`
+	Type            TrashableType `json:"type"`
+	RepositoryID    *string       `json:"repositoryId,omitempty"`
+	Label           string        `json:"label"`
+	OriginalKey     *string       `json:"originalKey,omitempty"`
+	DeletedAt       string        `json:"deletedAt"`
+	DeletedBy       *string       `json:"deletedBy,omitempty"`
+	ExpiresAt       string        `json:"expiresAt"`
+	CanRestore      bool          `json:"canRestore"`
+	RestoreConflict *string       `json:"restoreConflict,omitempty"`
+	TrashBatchID    string        `json:"trashBatchId"`
 }
 
 type TriggerSpecExtractionInput struct {
@@ -1961,6 +1988,61 @@ func (e RequirementFormat) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+type RestoreConflictResolution string
+
+const (
+	RestoreConflictResolutionCancel RestoreConflictResolution = "CANCEL"
+	RestoreConflictResolutionRename RestoreConflictResolution = "RENAME"
+)
+
+var AllRestoreConflictResolution = []RestoreConflictResolution{
+	RestoreConflictResolutionCancel,
+	RestoreConflictResolutionRename,
+}
+
+func (e RestoreConflictResolution) IsValid() bool {
+	switch e {
+	case RestoreConflictResolutionCancel, RestoreConflictResolutionRename:
+		return true
+	}
+	return false
+}
+
+func (e RestoreConflictResolution) String() string {
+	return string(e)
+}
+
+func (e *RestoreConflictResolution) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = RestoreConflictResolution(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid RestoreConflictResolution", str)
+	}
+	return nil
+}
+
+func (e RestoreConflictResolution) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *RestoreConflictResolution) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e RestoreConflictResolution) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
 type SymbolChangeType string
 
 const (
@@ -2088,6 +2170,63 @@ func (e *SymbolKind) UnmarshalJSON(b []byte) error {
 }
 
 func (e SymbolKind) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type TrashableType string
+
+const (
+	TrashableTypeRequirement       TrashableType = "REQUIREMENT"
+	TrashableTypeRequirementLink   TrashableType = "REQUIREMENT_LINK"
+	TrashableTypeKnowledgeArtifact TrashableType = "KNOWLEDGE_ARTIFACT"
+)
+
+var AllTrashableType = []TrashableType{
+	TrashableTypeRequirement,
+	TrashableTypeRequirementLink,
+	TrashableTypeKnowledgeArtifact,
+}
+
+func (e TrashableType) IsValid() bool {
+	switch e {
+	case TrashableTypeRequirement, TrashableTypeRequirementLink, TrashableTypeKnowledgeArtifact:
+		return true
+	}
+	return false
+}
+
+func (e TrashableType) String() string {
+	return string(e)
+}
+
+func (e *TrashableType) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = TrashableType(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid TrashableType", str)
+	}
+	return nil
+}
+
+func (e TrashableType) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *TrashableType) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e TrashableType) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	e.MarshalGQL(&buf)
 	return buf.Bytes(), nil

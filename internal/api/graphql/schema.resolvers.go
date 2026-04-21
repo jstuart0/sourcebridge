@@ -2274,6 +2274,26 @@ func (r *mutationResolver) DeleteModelCapabilitiesResult(ctx context.Context, mo
 	return &MutationResult{Success: ok}, nil
 }
 
+// MoveToTrash is the resolver for the moveToTrash field.
+func (r *mutationResolver) MoveToTrash(ctx context.Context, typeArg TrashableType, id string, reason *string) (*TrashEntry, error) {
+	return r.Resolver.moveToTrash(ctx, typeArg, id, reason)
+}
+
+// RestoreFromTrash is the resolver for the restoreFromTrash field.
+func (r *mutationResolver) RestoreFromTrash(ctx context.Context, typeArg TrashableType, id string, resolveConflict *RestoreConflictResolution, rename *string) (*RestoreResult, error) {
+	return r.Resolver.restoreFromTrash(ctx, typeArg, id, resolveConflict, rename)
+}
+
+// PermanentlyDelete is the resolver for the permanentlyDelete field.
+func (r *mutationResolver) PermanentlyDelete(ctx context.Context, typeArg TrashableType, id string) (bool, error) {
+	return r.Resolver.permanentlyDelete(ctx, typeArg, id)
+}
+
+// EmptyTrash is the resolver for the emptyTrash field.
+func (r *mutationResolver) EmptyTrash(ctx context.Context, repositoryID string, olderThanDays *int) (int, error) {
+	return r.Resolver.emptyTrash(ctx, repositoryID, olderThanDays)
+}
+
 // Health is the resolver for the health field.
 func (r *queryResolver) Health(ctx context.Context) (*HealthStatus, error) {
 	services := []*ServiceHealth{
@@ -3255,6 +3275,16 @@ func (r *queryResolver) ModelCapability(ctx context.Context, modelID string) (*M
 		return nil, nil
 	}
 	return mapModelCapability(mc), nil
+}
+
+// TrashedItems is the resolver for the trashedItems field.
+func (r *queryResolver) TrashedItems(ctx context.Context, repositoryID *string, types []TrashableType, limit *int, offset *int, search *string) (*TrashConnection, error) {
+	return r.Resolver.trashedItems(ctx, repositoryID, types, limit, offset, search)
+}
+
+// TrashRetentionDays is the resolver for the trashRetentionDays field.
+func (r *queryResolver) TrashRetentionDays(ctx context.Context) (int, error) {
+	return r.Resolver.trashRetentionDays(), nil
 }
 
 // Files is the resolver for the files field.

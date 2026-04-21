@@ -26,6 +26,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/telemetry"
+	"github.com/sourcebridge/sourcebridge/internal/trash"
 	"github.com/sourcebridge/sourcebridge/internal/version"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
@@ -102,8 +103,22 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Initialize shared cache (memory by default, Redis when configured).
-	// Consumed by the MCP session store for HA across replicas.
+	// Consumed by the MCP session store for HA across replicas, and by
+	// the trash retention worker for cross-replica leader election.
 	cache := db.NewCache(cfg.Storage)
+
+	// Trash (soft-delete recycle bin). Phase 1 requires external
+	// SurrealDB — embedded mode falls back to nil (feature disabled).
+	var trashStore trash.Store
+	if cfg.Trash.Enabled && cfg.Storage.SurrealMode == "external" {
+		trashStore = trash.NewSurrealStore(surrealDB)
+		slog.Info("trash (recycle bin) enabled",
+			"retention_days", cfg.Trash.RetentionDays,
+			"sweep_interval_sec", cfg.Trash.SweepIntervalSec)
+	} else if cfg.Trash.Enabled {
+		slog.Warn("trash is enabled in config but requires external SurrealDB; feature disabled",
+			"storage.surreal_mode", cfg.Storage.SurrealMode)
+	}
 
 	knowledgeTimeoutProvider := func() time.Duration {
 		// TimeoutSecs is for individual LLM completions (default 30s).
@@ -225,6 +240,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		rest.WithComprehensionStore(comprehensionStore),
 		rest.WithSummaryNodeStore(summaryNodeStore),
 		rest.WithCache(cache),
+		rest.WithTrashStore(trashStore),
 	)
 
 	// Initialize OIDC if configured

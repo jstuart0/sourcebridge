@@ -416,7 +416,7 @@ func (s *SurrealStore) GetKnowledgeArtifact(id string) *knowledge.Artifact {
 	}
 
 	row, err := queryOne[[]surrealKnowledgeArtifact](ctx(), db,
-		"SELECT * FROM type::thing('ca_knowledge_artifact', $id)",
+		"SELECT * FROM type::thing('ca_knowledge_artifact', $id) WHERE deleted_at IS NONE",
 		map[string]any{"id": id})
 	if err != nil || len(row) == 0 {
 		return nil
@@ -443,7 +443,8 @@ func (s *SurrealStore) GetArtifactByKeyAndMode(key knowledge.ArtifactKey, mode k
 		   AND type = $type
 		   AND audience = $audience
 		   AND depth = $depth
-		   AND scope_key = $scope_key`
+		   AND scope_key = $scope_key
+		   AND deleted_at IS NONE`
 	vars := map[string]any{
 		"repo_id":   key.RepositoryID,
 		"type":      string(key.Type),
@@ -475,7 +476,7 @@ func (s *SurrealStore) GetKnowledgeArtifacts(repoID string) []*knowledge.Artifac
 	}
 
 	rows, err := queryOne[[]surrealKnowledgeArtifact](ctx(), db,
-		"SELECT * FROM ca_knowledge_artifact WHERE repo_id = $repo_id ORDER BY created_at DESC",
+		"SELECT * FROM ca_knowledge_artifact WHERE repo_id = $repo_id AND deleted_at IS NONE ORDER BY created_at DESC",
 		map[string]any{"repo_id": repoID})
 	if err != nil {
 		return nil
@@ -733,6 +734,7 @@ func (s *SurrealStore) artifactsFromSectionIDs(repoID string, sectionIDSet map[s
 	rows, err := queryOne[[]surrealKnowledgeArtifact](ctx(), db,
 		`SELECT * FROM ca_knowledge_artifact
 		 WHERE repo_id = $repo_id
+		   AND deleted_at IS NONE
 		   AND id IN $ids.map(|$v| type::thing('ca_knowledge_artifact', $v))`,
 		map[string]any{"repo_id": repoID, "ids": artifactIDs})
 	if err != nil {
@@ -875,7 +877,7 @@ func (s *SurrealStore) GetKnowledgeSections(artifactID string) []knowledge.Secti
 	}
 
 	rows, err := queryOne[[]surrealKnowledgeSection](ctx(), db,
-		"SELECT * FROM ca_knowledge_section WHERE artifact_id = $artifact_id ORDER BY order_index ASC",
+		"SELECT * FROM ca_knowledge_section WHERE artifact_id = $artifact_id AND deleted_at IS NONE ORDER BY order_index ASC",
 		map[string]any{"artifact_id": artifactID})
 	if err != nil {
 		return nil
@@ -950,7 +952,7 @@ func (s *SurrealStore) GetRefinementUnits(artifactID string) []knowledge.Refinem
 		return nil
 	}
 	rows, err := queryOne[[]surrealRefinementUnit](ctx(), db,
-		"SELECT * FROM ca_knowledge_refinement WHERE artifact_id = $artifact_id ORDER BY section_title ASC, refinement_type ASC",
+		"SELECT * FROM ca_knowledge_refinement WHERE artifact_id = $artifact_id AND deleted_at IS NONE ORDER BY section_title ASC, refinement_type ASC",
 		map[string]any{"artifact_id": artifactID})
 	if err != nil {
 		return nil
@@ -1007,7 +1009,7 @@ func (s *SurrealStore) GetArtifactDependencies(artifactID string) []knowledge.Ar
 		return nil
 	}
 	rows, err := queryOne[[]surrealArtifactDependency](ctx(), db,
-		"SELECT * FROM ca_knowledge_dependency WHERE artifact_id = $artifact_id ORDER BY created_at ASC",
+		"SELECT * FROM ca_knowledge_dependency WHERE artifact_id = $artifact_id AND deleted_at IS NONE ORDER BY created_at ASC",
 		map[string]any{"artifact_id": artifactID})
 	if err != nil {
 		return nil
@@ -1082,7 +1084,7 @@ func (s *SurrealStore) GetKnowledgeEvidence(sectionID string) []knowledge.Eviden
 	}
 
 	rows, err := queryOne[[]surrealKnowledgeEvidence](ctx(), db,
-		"SELECT * FROM ca_knowledge_evidence WHERE section_id = $section_id",
+		"SELECT * FROM ca_knowledge_evidence WHERE section_id = $section_id AND deleted_at IS NONE",
 		map[string]any{"section_id": sectionID})
 	if err != nil {
 		return nil

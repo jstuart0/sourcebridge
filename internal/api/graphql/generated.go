@@ -513,6 +513,7 @@ type ComplexityRoot struct {
 		DiscussCode                       func(childComplexity int, input DiscussCodeInput) int
 		DismissAllDiscoveredRequirements  func(childComplexity int, repositoryID string) int
 		DismissDiscoveredRequirement      func(childComplexity int, id string, reason *string) int
+		EmptyTrash                        func(childComplexity int, repositoryID string, olderThanDays *int) int
 		EnrichRequirement                 func(childComplexity int, requirementID string) int
 		ExplainSystem                     func(childComplexity int, input ExplainSystemInput) int
 		GenerateArchitectureDiagram       func(childComplexity int, input GenerateArchitectureDiagramInput) int
@@ -522,12 +523,15 @@ type ComplexityRoot struct {
 		GenerateWorkflowStory             func(childComplexity int, input GenerateWorkflowStoryInput) int
 		ImportRequirements                func(childComplexity int, input ImportRequirementsInput) int
 		LinkRepos                         func(childComplexity int, sourceRepoID string, targetRepoID string, linkType *string) int
+		MoveToTrash                       func(childComplexity int, typeArg TrashableType, id string, reason *string) int
+		PermanentlyDelete                 func(childComplexity int, typeArg TrashableType, id string) int
 		PromoteDiscoveredRequirement      func(childComplexity int, id string, title *string, description *string) int
 		RefreshKnowledgeArtifact          func(childComplexity int, id string) int
 		ReindexRepository                 func(childComplexity int, id string) int
 		RemoveRepository                  func(childComplexity int, id string) int
 		RemoveRepositoryResult            func(childComplexity int, id string) int
 		ResetComprehensionSettings        func(childComplexity int, scopeType string, scopeKey *string) int
+		RestoreFromTrash                  func(childComplexity int, typeArg TrashableType, id string, resolveConflict *RestoreConflictResolution, rename *string) int
 		ReviewCode                        func(childComplexity int, input ReviewCodeInput) int
 		SimulateChange                    func(childComplexity int, input SimulateChangeInput) int
 		TriggerSpecExtraction             func(childComplexity int, input TriggerSpecExtractionInput) int
@@ -599,6 +603,8 @@ type ComplexityRoot struct {
 		SymbolCrossRepoRefs        func(childComplexity int, symbolID string) int
 		Symbols                    func(childComplexity int, repositoryID string, query *string, filePath *string, kind *SymbolKind, limit *int, offset *int) int
 		TraceabilityMatrix         func(childComplexity int, repositoryID string) int
+		TrashRetentionDays         func(childComplexity int) int
+		TrashedItems               func(childComplexity int, repositoryID *string, types []TrashableType, limit *int, offset *int, search *string) int
 		UnderstandingScore         func(childComplexity int, repositoryID string) int
 		Version                    func(childComplexity int) int
 	}
@@ -697,6 +703,13 @@ type ComplexityRoot struct {
 		QualifiedName func(childComplexity int) int
 		Similarity    func(childComplexity int) int
 		SymbolID      func(childComplexity int) int
+	}
+
+	RestoreResult struct {
+		BatchSize  func(childComplexity int) int
+		NewKey     func(childComplexity int) int
+		Renamed    func(childComplexity int) int
+		RestoredID func(childComplexity int) int
 	}
 
 	ReviewFinding struct {
@@ -818,6 +831,26 @@ type ComplexityRoot struct {
 		Symbols      func(childComplexity int) int
 	}
 
+	TrashConnection struct {
+		Nodes         func(childComplexity int) int
+		RetentionDays func(childComplexity int) int
+		TotalCount    func(childComplexity int) int
+	}
+
+	TrashEntry struct {
+		CanRestore      func(childComplexity int) int
+		DeletedAt       func(childComplexity int) int
+		DeletedBy       func(childComplexity int) int
+		ExpiresAt       func(childComplexity int) int
+		ID              func(childComplexity int) int
+		Label           func(childComplexity int) int
+		OriginalKey     func(childComplexity int) int
+		RepositoryID    func(childComplexity int) int
+		RestoreConflict func(childComplexity int) int
+		TrashBatchID    func(childComplexity int) int
+		Type            func(childComplexity int) int
+	}
+
 	UnderstandingScore struct {
 		AiCodeRatio           func(childComplexity int) int
 		ComputedAt            func(childComplexity int) int
@@ -878,6 +911,10 @@ type MutationResolver interface {
 	UpdateModelCapabilities(ctx context.Context, input UpdateModelCapabilitiesInput) (*ModelCapabilityProfile, error)
 	DeleteModelCapabilities(ctx context.Context, modelID string) (bool, error)
 	DeleteModelCapabilitiesResult(ctx context.Context, modelID string) (*MutationResult, error)
+	MoveToTrash(ctx context.Context, typeArg TrashableType, id string, reason *string) (*TrashEntry, error)
+	RestoreFromTrash(ctx context.Context, typeArg TrashableType, id string, resolveConflict *RestoreConflictResolution, rename *string) (*RestoreResult, error)
+	PermanentlyDelete(ctx context.Context, typeArg TrashableType, id string) (bool, error)
+	EmptyTrash(ctx context.Context, repositoryID string, olderThanDays *int) (int, error)
 }
 type QueryResolver interface {
 	Health(ctx context.Context) (*HealthStatus, error)
@@ -921,6 +958,8 @@ type QueryResolver interface {
 	ComprehensionSettingsList(ctx context.Context) ([]*ComprehensionSettings, error)
 	ModelCapabilities(ctx context.Context) ([]*ModelCapabilityProfile, error)
 	ModelCapability(ctx context.Context, modelID string) (*ModelCapabilityProfile, error)
+	TrashedItems(ctx context.Context, repositoryID *string, types []TrashableType, limit *int, offset *int, search *string) (*TrashConnection, error)
+	TrashRetentionDays(ctx context.Context) (int, error)
 }
 type RepositoryResolver interface {
 	Files(ctx context.Context, obj *Repository, limit *int, offset *int, path *string) (*FileConnection, error)
@@ -3416,6 +3455,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Mutation.DismissDiscoveredRequirement(childComplexity, args["id"].(string), args["reason"].(*string)), true
 
+	case "Mutation.emptyTrash":
+		if e.complexity.Mutation.EmptyTrash == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_emptyTrash_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.EmptyTrash(childComplexity, args["repositoryId"].(string), args["olderThanDays"].(*int)), true
+
 	case "Mutation.enrichRequirement":
 		if e.complexity.Mutation.EnrichRequirement == nil {
 			break
@@ -3524,6 +3575,30 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Mutation.LinkRepos(childComplexity, args["sourceRepoId"].(string), args["targetRepoId"].(string), args["linkType"].(*string)), true
 
+	case "Mutation.moveToTrash":
+		if e.complexity.Mutation.MoveToTrash == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_moveToTrash_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.MoveToTrash(childComplexity, args["type"].(TrashableType), args["id"].(string), args["reason"].(*string)), true
+
+	case "Mutation.permanentlyDelete":
+		if e.complexity.Mutation.PermanentlyDelete == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_permanentlyDelete_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.PermanentlyDelete(childComplexity, args["type"].(TrashableType), args["id"].(string)), true
+
 	case "Mutation.promoteDiscoveredRequirement":
 		if e.complexity.Mutation.PromoteDiscoveredRequirement == nil {
 			break
@@ -3595,6 +3670,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.ResetComprehensionSettings(childComplexity, args["scopeType"].(string), args["scopeKey"].(*string)), true
+
+	case "Mutation.restoreFromTrash":
+		if e.complexity.Mutation.RestoreFromTrash == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_restoreFromTrash_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.RestoreFromTrash(childComplexity, args["type"].(TrashableType), args["id"].(string), args["resolveConflict"].(*RestoreConflictResolution), args["rename"].(*string)), true
 
 	case "Mutation.reviewCode":
 		if e.complexity.Mutation.ReviewCode == nil {
@@ -4214,6 +4301,25 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Query.TraceabilityMatrix(childComplexity, args["repositoryId"].(string)), true
 
+	case "Query.trashRetentionDays":
+		if e.complexity.Query.TrashRetentionDays == nil {
+			break
+		}
+
+		return e.complexity.Query.TrashRetentionDays(childComplexity), true
+
+	case "Query.trashedItems":
+		if e.complexity.Query.TrashedItems == nil {
+			break
+		}
+
+		args, err := ec.field_Query_trashedItems_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.TrashedItems(childComplexity, args["repositoryId"].(*string), args["types"].([]TrashableType), args["limit"].(*int), args["offset"].(*int), args["search"].(*string)), true
+
 	case "Query.understandingScore":
 		if e.complexity.Query.UnderstandingScore == nil {
 			break
@@ -4747,6 +4853,34 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.ResolvedSymbol.SymbolID(childComplexity), true
 
+	case "RestoreResult.batchSize":
+		if e.complexity.RestoreResult.BatchSize == nil {
+			break
+		}
+
+		return e.complexity.RestoreResult.BatchSize(childComplexity), true
+
+	case "RestoreResult.newKey":
+		if e.complexity.RestoreResult.NewKey == nil {
+			break
+		}
+
+		return e.complexity.RestoreResult.NewKey(childComplexity), true
+
+	case "RestoreResult.renamed":
+		if e.complexity.RestoreResult.Renamed == nil {
+			break
+		}
+
+		return e.complexity.RestoreResult.Renamed(childComplexity), true
+
+	case "RestoreResult.restoredId":
+		if e.complexity.RestoreResult.RestoredID == nil {
+			break
+		}
+
+		return e.complexity.RestoreResult.RestoredID(childComplexity), true
+
 	case "ReviewFinding.category":
 		if e.complexity.ReviewFinding.Category == nil {
 			break
@@ -5264,6 +5398,104 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.TraceabilityMatrix.Symbols(childComplexity), true
+
+	case "TrashConnection.nodes":
+		if e.complexity.TrashConnection.Nodes == nil {
+			break
+		}
+
+		return e.complexity.TrashConnection.Nodes(childComplexity), true
+
+	case "TrashConnection.retentionDays":
+		if e.complexity.TrashConnection.RetentionDays == nil {
+			break
+		}
+
+		return e.complexity.TrashConnection.RetentionDays(childComplexity), true
+
+	case "TrashConnection.totalCount":
+		if e.complexity.TrashConnection.TotalCount == nil {
+			break
+		}
+
+		return e.complexity.TrashConnection.TotalCount(childComplexity), true
+
+	case "TrashEntry.canRestore":
+		if e.complexity.TrashEntry.CanRestore == nil {
+			break
+		}
+
+		return e.complexity.TrashEntry.CanRestore(childComplexity), true
+
+	case "TrashEntry.deletedAt":
+		if e.complexity.TrashEntry.DeletedAt == nil {
+			break
+		}
+
+		return e.complexity.TrashEntry.DeletedAt(childComplexity), true
+
+	case "TrashEntry.deletedBy":
+		if e.complexity.TrashEntry.DeletedBy == nil {
+			break
+		}
+
+		return e.complexity.TrashEntry.DeletedBy(childComplexity), true
+
+	case "TrashEntry.expiresAt":
+		if e.complexity.TrashEntry.ExpiresAt == nil {
+			break
+		}
+
+		return e.complexity.TrashEntry.ExpiresAt(childComplexity), true
+
+	case "TrashEntry.id":
+		if e.complexity.TrashEntry.ID == nil {
+			break
+		}
+
+		return e.complexity.TrashEntry.ID(childComplexity), true
+
+	case "TrashEntry.label":
+		if e.complexity.TrashEntry.Label == nil {
+			break
+		}
+
+		return e.complexity.TrashEntry.Label(childComplexity), true
+
+	case "TrashEntry.originalKey":
+		if e.complexity.TrashEntry.OriginalKey == nil {
+			break
+		}
+
+		return e.complexity.TrashEntry.OriginalKey(childComplexity), true
+
+	case "TrashEntry.repositoryId":
+		if e.complexity.TrashEntry.RepositoryID == nil {
+			break
+		}
+
+		return e.complexity.TrashEntry.RepositoryID(childComplexity), true
+
+	case "TrashEntry.restoreConflict":
+		if e.complexity.TrashEntry.RestoreConflict == nil {
+			break
+		}
+
+		return e.complexity.TrashEntry.RestoreConflict(childComplexity), true
+
+	case "TrashEntry.trashBatchId":
+		if e.complexity.TrashEntry.TrashBatchID == nil {
+			break
+		}
+
+		return e.complexity.TrashEntry.TrashBatchID(childComplexity), true
+
+	case "TrashEntry.type":
+		if e.complexity.TrashEntry.Type == nil {
+			break
+		}
+
+		return e.complexity.TrashEntry.Type(childComplexity), true
 
 	case "UnderstandingScore.aiCodeRatio":
 		if e.complexity.UnderstandingScore.AiCodeRatio == nil {
@@ -5903,6 +6135,57 @@ func (ec *executionContext) field_Mutation_dismissDiscoveredRequirement_argsReas
 	return zeroVal, nil
 }
 
+func (ec *executionContext) field_Mutation_emptyTrash_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_emptyTrash_argsRepositoryID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["repositoryId"] = arg0
+	arg1, err := ec.field_Mutation_emptyTrash_argsOlderThanDays(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["olderThanDays"] = arg1
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_emptyTrash_argsRepositoryID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["repositoryId"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("repositoryId"))
+	if tmp, ok := rawArgs["repositoryId"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_emptyTrash_argsOlderThanDays(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*int, error) {
+	if _, ok := rawArgs["olderThanDays"]; !ok {
+		var zeroVal *int
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("olderThanDays"))
+	if tmp, ok := rawArgs["olderThanDays"]; ok {
+		return ec.unmarshalOInt2ᚖint(ctx, tmp)
+	}
+
+	var zeroVal *int
+	return zeroVal, nil
+}
+
 func (ec *executionContext) field_Mutation_enrichRequirement_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -6201,6 +6484,131 @@ func (ec *executionContext) field_Mutation_linkRepos_argsLinkType(
 	return zeroVal, nil
 }
 
+func (ec *executionContext) field_Mutation_moveToTrash_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_moveToTrash_argsType(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["type"] = arg0
+	arg1, err := ec.field_Mutation_moveToTrash_argsID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
+	arg2, err := ec.field_Mutation_moveToTrash_argsReason(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["reason"] = arg2
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_moveToTrash_argsType(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (TrashableType, error) {
+	if _, ok := rawArgs["type"]; !ok {
+		var zeroVal TrashableType
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("type"))
+	if tmp, ok := rawArgs["type"]; ok {
+		return ec.unmarshalNTrashableType2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashableType(ctx, tmp)
+	}
+
+	var zeroVal TrashableType
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_moveToTrash_argsID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["id"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("id"))
+	if tmp, ok := rawArgs["id"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_moveToTrash_argsReason(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*string, error) {
+	if _, ok := rawArgs["reason"]; !ok {
+		var zeroVal *string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("reason"))
+	if tmp, ok := rawArgs["reason"]; ok {
+		return ec.unmarshalOString2ᚖstring(ctx, tmp)
+	}
+
+	var zeroVal *string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_permanentlyDelete_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_permanentlyDelete_argsType(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["type"] = arg0
+	arg1, err := ec.field_Mutation_permanentlyDelete_argsID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_permanentlyDelete_argsType(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (TrashableType, error) {
+	if _, ok := rawArgs["type"]; !ok {
+		var zeroVal TrashableType
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("type"))
+	if tmp, ok := rawArgs["type"]; ok {
+		return ec.unmarshalNTrashableType2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashableType(ctx, tmp)
+	}
+
+	var zeroVal TrashableType
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_permanentlyDelete_argsID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["id"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("id"))
+	if tmp, ok := rawArgs["id"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
 func (ec *executionContext) field_Mutation_promoteDiscoveredRequirement_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -6431,6 +6839,103 @@ func (ec *executionContext) field_Mutation_resetComprehensionSettings_argsScopeK
 
 	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("scopeKey"))
 	if tmp, ok := rawArgs["scopeKey"]; ok {
+		return ec.unmarshalOString2ᚖstring(ctx, tmp)
+	}
+
+	var zeroVal *string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_restoreFromTrash_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_restoreFromTrash_argsType(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["type"] = arg0
+	arg1, err := ec.field_Mutation_restoreFromTrash_argsID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
+	arg2, err := ec.field_Mutation_restoreFromTrash_argsResolveConflict(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["resolveConflict"] = arg2
+	arg3, err := ec.field_Mutation_restoreFromTrash_argsRename(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["rename"] = arg3
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_restoreFromTrash_argsType(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (TrashableType, error) {
+	if _, ok := rawArgs["type"]; !ok {
+		var zeroVal TrashableType
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("type"))
+	if tmp, ok := rawArgs["type"]; ok {
+		return ec.unmarshalNTrashableType2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashableType(ctx, tmp)
+	}
+
+	var zeroVal TrashableType
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_restoreFromTrash_argsID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["id"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("id"))
+	if tmp, ok := rawArgs["id"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_restoreFromTrash_argsResolveConflict(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*RestoreConflictResolution, error) {
+	if _, ok := rawArgs["resolveConflict"]; !ok {
+		var zeroVal *RestoreConflictResolution
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("resolveConflict"))
+	if tmp, ok := rawArgs["resolveConflict"]; ok {
+		return ec.unmarshalORestoreConflictResolution2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRestoreConflictResolution(ctx, tmp)
+	}
+
+	var zeroVal *RestoreConflictResolution
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_restoreFromTrash_argsRename(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*string, error) {
+	if _, ok := rawArgs["rename"]; !ok {
+		var zeroVal *string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("rename"))
+	if tmp, ok := rawArgs["rename"]; ok {
 		return ec.unmarshalOString2ᚖstring(ctx, tmp)
 	}
 
@@ -8508,6 +9013,126 @@ func (ec *executionContext) field_Query_traceabilityMatrix_argsRepositoryID(
 	}
 
 	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Query_trashedItems_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Query_trashedItems_argsRepositoryID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["repositoryId"] = arg0
+	arg1, err := ec.field_Query_trashedItems_argsTypes(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["types"] = arg1
+	arg2, err := ec.field_Query_trashedItems_argsLimit(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["limit"] = arg2
+	arg3, err := ec.field_Query_trashedItems_argsOffset(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["offset"] = arg3
+	arg4, err := ec.field_Query_trashedItems_argsSearch(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["search"] = arg4
+	return args, nil
+}
+func (ec *executionContext) field_Query_trashedItems_argsRepositoryID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*string, error) {
+	if _, ok := rawArgs["repositoryId"]; !ok {
+		var zeroVal *string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("repositoryId"))
+	if tmp, ok := rawArgs["repositoryId"]; ok {
+		return ec.unmarshalOID2ᚖstring(ctx, tmp)
+	}
+
+	var zeroVal *string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Query_trashedItems_argsTypes(
+	ctx context.Context,
+	rawArgs map[string]any,
+) ([]TrashableType, error) {
+	if _, ok := rawArgs["types"]; !ok {
+		var zeroVal []TrashableType
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("types"))
+	if tmp, ok := rawArgs["types"]; ok {
+		return ec.unmarshalOTrashableType2ᚕgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashableTypeᚄ(ctx, tmp)
+	}
+
+	var zeroVal []TrashableType
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Query_trashedItems_argsLimit(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*int, error) {
+	if _, ok := rawArgs["limit"]; !ok {
+		var zeroVal *int
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("limit"))
+	if tmp, ok := rawArgs["limit"]; ok {
+		return ec.unmarshalOInt2ᚖint(ctx, tmp)
+	}
+
+	var zeroVal *int
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Query_trashedItems_argsOffset(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*int, error) {
+	if _, ok := rawArgs["offset"]; !ok {
+		var zeroVal *int
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("offset"))
+	if tmp, ok := rawArgs["offset"]; ok {
+		return ec.unmarshalOInt2ᚖint(ctx, tmp)
+	}
+
+	var zeroVal *int
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Query_trashedItems_argsSearch(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*string, error) {
+	if _, ok := rawArgs["search"]; !ok {
+		var zeroVal *string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("search"))
+	if tmp, ok := rawArgs["search"]; ok {
+		return ec.unmarshalOString2ᚖstring(ctx, tmp)
+	}
+
+	var zeroVal *string
 	return zeroVal, nil
 }
 
@@ -26426,6 +27051,260 @@ func (ec *executionContext) fieldContext_Mutation_deleteModelCapabilitiesResult(
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_moveToTrash(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_moveToTrash(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().MoveToTrash(rctx, fc.Args["type"].(TrashableType), fc.Args["id"].(string), fc.Args["reason"].(*string))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*TrashEntry)
+	fc.Result = res
+	return ec.marshalNTrashEntry2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashEntry(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_moveToTrash(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_TrashEntry_id(ctx, field)
+			case "type":
+				return ec.fieldContext_TrashEntry_type(ctx, field)
+			case "repositoryId":
+				return ec.fieldContext_TrashEntry_repositoryId(ctx, field)
+			case "label":
+				return ec.fieldContext_TrashEntry_label(ctx, field)
+			case "originalKey":
+				return ec.fieldContext_TrashEntry_originalKey(ctx, field)
+			case "deletedAt":
+				return ec.fieldContext_TrashEntry_deletedAt(ctx, field)
+			case "deletedBy":
+				return ec.fieldContext_TrashEntry_deletedBy(ctx, field)
+			case "expiresAt":
+				return ec.fieldContext_TrashEntry_expiresAt(ctx, field)
+			case "canRestore":
+				return ec.fieldContext_TrashEntry_canRestore(ctx, field)
+			case "restoreConflict":
+				return ec.fieldContext_TrashEntry_restoreConflict(ctx, field)
+			case "trashBatchId":
+				return ec.fieldContext_TrashEntry_trashBatchId(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type TrashEntry", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_moveToTrash_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_restoreFromTrash(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_restoreFromTrash(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().RestoreFromTrash(rctx, fc.Args["type"].(TrashableType), fc.Args["id"].(string), fc.Args["resolveConflict"].(*RestoreConflictResolution), fc.Args["rename"].(*string))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*RestoreResult)
+	fc.Result = res
+	return ec.marshalNRestoreResult2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRestoreResult(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_restoreFromTrash(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "restoredId":
+				return ec.fieldContext_RestoreResult_restoredId(ctx, field)
+			case "batchSize":
+				return ec.fieldContext_RestoreResult_batchSize(ctx, field)
+			case "renamed":
+				return ec.fieldContext_RestoreResult_renamed(ctx, field)
+			case "newKey":
+				return ec.fieldContext_RestoreResult_newKey(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type RestoreResult", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_restoreFromTrash_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_permanentlyDelete(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_permanentlyDelete(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().PermanentlyDelete(rctx, fc.Args["type"].(TrashableType), fc.Args["id"].(string))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(bool)
+	fc.Result = res
+	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_permanentlyDelete(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_permanentlyDelete_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_emptyTrash(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_emptyTrash(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().EmptyTrash(rctx, fc.Args["repositoryId"].(string), fc.Args["olderThanDays"].(*int))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(int)
+	fc.Result = res
+	return ec.marshalNInt2int(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_emptyTrash(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_emptyTrash_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _MutationResult_success(ctx context.Context, field graphql.CollectedField, obj *MutationResult) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_MutationResult_success(ctx, field)
 	if err != nil {
@@ -30011,6 +30890,113 @@ func (ec *executionContext) fieldContext_Query_modelCapability(ctx context.Conte
 	return fc, nil
 }
 
+func (ec *executionContext) _Query_trashedItems(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Query_trashedItems(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Query().TrashedItems(rctx, fc.Args["repositoryId"].(*string), fc.Args["types"].([]TrashableType), fc.Args["limit"].(*int), fc.Args["offset"].(*int), fc.Args["search"].(*string))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*TrashConnection)
+	fc.Result = res
+	return ec.marshalNTrashConnection2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashConnection(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Query_trashedItems(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "nodes":
+				return ec.fieldContext_TrashConnection_nodes(ctx, field)
+			case "totalCount":
+				return ec.fieldContext_TrashConnection_totalCount(ctx, field)
+			case "retentionDays":
+				return ec.fieldContext_TrashConnection_retentionDays(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type TrashConnection", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_trashedItems_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_trashRetentionDays(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Query_trashRetentionDays(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Query().TrashRetentionDays(rctx)
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(int)
+	fc.Result = res
+	return ec.marshalNInt2int(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Query_trashRetentionDays(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Query___type(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_Query___type(ctx, field)
 	if err != nil {
@@ -33479,6 +34465,179 @@ func (ec *executionContext) fieldContext_ResolvedSymbol_isAnchor(_ context.Conte
 	return fc, nil
 }
 
+func (ec *executionContext) _RestoreResult_restoredId(ctx context.Context, field graphql.CollectedField, obj *RestoreResult) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RestoreResult_restoredId(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.RestoredID, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNID2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RestoreResult_restoredId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RestoreResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RestoreResult_batchSize(ctx context.Context, field graphql.CollectedField, obj *RestoreResult) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RestoreResult_batchSize(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.BatchSize, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(int)
+	fc.Result = res
+	return ec.marshalNInt2int(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RestoreResult_batchSize(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RestoreResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RestoreResult_renamed(ctx context.Context, field graphql.CollectedField, obj *RestoreResult) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RestoreResult_renamed(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Renamed, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(bool)
+	fc.Result = res
+	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RestoreResult_renamed(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RestoreResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RestoreResult_newKey(ctx context.Context, field graphql.CollectedField, obj *RestoreResult) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RestoreResult_newKey(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.NewKey, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RestoreResult_newKey(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RestoreResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _ReviewFinding_category(ctx context.Context, field graphql.CollectedField, obj *ReviewFinding) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_ReviewFinding_category(ctx, field)
 	if err != nil {
@@ -36818,6 +37977,634 @@ func (ec *executionContext) fieldContext_TraceabilityMatrix_coverage(_ context.C
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Float does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TrashConnection_nodes(ctx context.Context, field graphql.CollectedField, obj *TrashConnection) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_TrashConnection_nodes(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Nodes, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.([]*TrashEntry)
+	fc.Result = res
+	return ec.marshalNTrashEntry2ᚕᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashEntryᚄ(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_TrashConnection_nodes(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TrashConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_TrashEntry_id(ctx, field)
+			case "type":
+				return ec.fieldContext_TrashEntry_type(ctx, field)
+			case "repositoryId":
+				return ec.fieldContext_TrashEntry_repositoryId(ctx, field)
+			case "label":
+				return ec.fieldContext_TrashEntry_label(ctx, field)
+			case "originalKey":
+				return ec.fieldContext_TrashEntry_originalKey(ctx, field)
+			case "deletedAt":
+				return ec.fieldContext_TrashEntry_deletedAt(ctx, field)
+			case "deletedBy":
+				return ec.fieldContext_TrashEntry_deletedBy(ctx, field)
+			case "expiresAt":
+				return ec.fieldContext_TrashEntry_expiresAt(ctx, field)
+			case "canRestore":
+				return ec.fieldContext_TrashEntry_canRestore(ctx, field)
+			case "restoreConflict":
+				return ec.fieldContext_TrashEntry_restoreConflict(ctx, field)
+			case "trashBatchId":
+				return ec.fieldContext_TrashEntry_trashBatchId(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type TrashEntry", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TrashConnection_totalCount(ctx context.Context, field graphql.CollectedField, obj *TrashConnection) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_TrashConnection_totalCount(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.TotalCount, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(int)
+	fc.Result = res
+	return ec.marshalNInt2int(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_TrashConnection_totalCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TrashConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TrashConnection_retentionDays(ctx context.Context, field graphql.CollectedField, obj *TrashConnection) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_TrashConnection_retentionDays(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.RetentionDays, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(int)
+	fc.Result = res
+	return ec.marshalNInt2int(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_TrashConnection_retentionDays(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TrashConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TrashEntry_id(ctx context.Context, field graphql.CollectedField, obj *TrashEntry) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_TrashEntry_id(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.ID, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNID2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_TrashEntry_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TrashEntry",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TrashEntry_type(ctx context.Context, field graphql.CollectedField, obj *TrashEntry) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_TrashEntry_type(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Type, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(TrashableType)
+	fc.Result = res
+	return ec.marshalNTrashableType2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashableType(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_TrashEntry_type(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TrashEntry",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type TrashableType does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TrashEntry_repositoryId(ctx context.Context, field graphql.CollectedField, obj *TrashEntry) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_TrashEntry_repositoryId(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.RepositoryID, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOID2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_TrashEntry_repositoryId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TrashEntry",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TrashEntry_label(ctx context.Context, field graphql.CollectedField, obj *TrashEntry) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_TrashEntry_label(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Label, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNString2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_TrashEntry_label(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TrashEntry",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TrashEntry_originalKey(ctx context.Context, field graphql.CollectedField, obj *TrashEntry) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_TrashEntry_originalKey(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.OriginalKey, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_TrashEntry_originalKey(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TrashEntry",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TrashEntry_deletedAt(ctx context.Context, field graphql.CollectedField, obj *TrashEntry) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_TrashEntry_deletedAt(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.DeletedAt, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNString2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_TrashEntry_deletedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TrashEntry",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TrashEntry_deletedBy(ctx context.Context, field graphql.CollectedField, obj *TrashEntry) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_TrashEntry_deletedBy(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.DeletedBy, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_TrashEntry_deletedBy(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TrashEntry",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TrashEntry_expiresAt(ctx context.Context, field graphql.CollectedField, obj *TrashEntry) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_TrashEntry_expiresAt(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.ExpiresAt, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNString2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_TrashEntry_expiresAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TrashEntry",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TrashEntry_canRestore(ctx context.Context, field graphql.CollectedField, obj *TrashEntry) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_TrashEntry_canRestore(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.CanRestore, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(bool)
+	fc.Result = res
+	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_TrashEntry_canRestore(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TrashEntry",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TrashEntry_restoreConflict(ctx context.Context, field graphql.CollectedField, obj *TrashEntry) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_TrashEntry_restoreConflict(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.RestoreConflict, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_TrashEntry_restoreConflict(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TrashEntry",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TrashEntry_trashBatchId(ctx context.Context, field graphql.CollectedField, obj *TrashEntry) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_TrashEntry_trashBatchId(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.TrashBatchID, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNID2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_TrashEntry_trashBatchId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TrashEntry",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
 		},
 	}
 	return fc, nil
@@ -43452,6 +45239,34 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "moveToTrash":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_moveToTrash(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "restoreFromTrash":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_restoreFromTrash(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "permanentlyDelete":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_permanentlyDelete(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "emptyTrash":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_emptyTrash(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -44523,6 +46338,50 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "trashedItems":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_trashedItems(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "trashRetentionDays":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_trashRetentionDays(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
 		case "__type":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Query___type(ctx, field)
@@ -45199,6 +47058,57 @@ func (ec *executionContext) _ResolvedSymbol(ctx context.Context, sel ast.Selecti
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var restoreResultImplementors = []string{"RestoreResult"}
+
+func (ec *executionContext) _RestoreResult(ctx context.Context, sel ast.SelectionSet, obj *RestoreResult) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, restoreResultImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("RestoreResult")
+		case "restoredId":
+			out.Values[i] = ec._RestoreResult_restoredId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "batchSize":
+			out.Values[i] = ec._RestoreResult_batchSize(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "renamed":
+			out.Values[i] = ec._RestoreResult_renamed(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "newKey":
+			out.Values[i] = ec._RestoreResult_newKey(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -45992,6 +47902,132 @@ func (ec *executionContext) _TraceabilityMatrix(ctx context.Context, sel ast.Sel
 			}
 		case "coverage":
 			out.Values[i] = ec._TraceabilityMatrix_coverage(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var trashConnectionImplementors = []string{"TrashConnection"}
+
+func (ec *executionContext) _TrashConnection(ctx context.Context, sel ast.SelectionSet, obj *TrashConnection) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, trashConnectionImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("TrashConnection")
+		case "nodes":
+			out.Values[i] = ec._TrashConnection_nodes(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "totalCount":
+			out.Values[i] = ec._TrashConnection_totalCount(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "retentionDays":
+			out.Values[i] = ec._TrashConnection_retentionDays(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var trashEntryImplementors = []string{"TrashEntry"}
+
+func (ec *executionContext) _TrashEntry(ctx context.Context, sel ast.SelectionSet, obj *TrashEntry) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, trashEntryImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("TrashEntry")
+		case "id":
+			out.Values[i] = ec._TrashEntry_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "type":
+			out.Values[i] = ec._TrashEntry_type(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "repositoryId":
+			out.Values[i] = ec._TrashEntry_repositoryId(ctx, field, obj)
+		case "label":
+			out.Values[i] = ec._TrashEntry_label(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "originalKey":
+			out.Values[i] = ec._TrashEntry_originalKey(ctx, field, obj)
+		case "deletedAt":
+			out.Values[i] = ec._TrashEntry_deletedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "deletedBy":
+			out.Values[i] = ec._TrashEntry_deletedBy(ctx, field, obj)
+		case "expiresAt":
+			out.Values[i] = ec._TrashEntry_expiresAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "canRestore":
+			out.Values[i] = ec._TrashEntry_canRestore(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "restoreConflict":
+			out.Values[i] = ec._TrashEntry_restoreConflict(ctx, field, obj)
+		case "trashBatchId":
+			out.Values[i] = ec._TrashEntry_trashBatchId(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
@@ -48596,6 +50632,20 @@ func (ec *executionContext) marshalNResolvedSymbol2ᚖgithubᚗcomᚋsourcebridg
 	return ec._ResolvedSymbol(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNRestoreResult2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRestoreResult(ctx context.Context, sel ast.SelectionSet, v RestoreResult) graphql.Marshaler {
+	return ec._RestoreResult(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNRestoreResult2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRestoreResult(ctx context.Context, sel ast.SelectionSet, v *RestoreResult) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._RestoreResult(ctx, sel, v)
+}
+
 func (ec *executionContext) unmarshalNReviewCodeInput2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐReviewCodeInput(ctx context.Context, v any) (ReviewCodeInput, error) {
 	res, err := ec.unmarshalInputReviewCodeInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -49050,6 +51100,88 @@ func (ec *executionContext) marshalNTraceabilityMatrix2ᚖgithubᚗcomᚋsourceb
 		return graphql.Null
 	}
 	return ec._TraceabilityMatrix(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNTrashConnection2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashConnection(ctx context.Context, sel ast.SelectionSet, v TrashConnection) graphql.Marshaler {
+	return ec._TrashConnection(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNTrashConnection2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashConnection(ctx context.Context, sel ast.SelectionSet, v *TrashConnection) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._TrashConnection(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNTrashEntry2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashEntry(ctx context.Context, sel ast.SelectionSet, v TrashEntry) graphql.Marshaler {
+	return ec._TrashEntry(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNTrashEntry2ᚕᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashEntryᚄ(ctx context.Context, sel ast.SelectionSet, v []*TrashEntry) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNTrashEntry2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashEntry(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNTrashEntry2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashEntry(ctx context.Context, sel ast.SelectionSet, v *TrashEntry) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._TrashEntry(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalNTrashableType2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashableType(ctx context.Context, v any) (TrashableType, error) {
+	var res TrashableType
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNTrashableType2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashableType(ctx context.Context, sel ast.SelectionSet, v TrashableType) graphql.Marshaler {
+	return v
 }
 
 func (ec *executionContext) unmarshalNTriggerSpecExtractionInput2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTriggerSpecExtractionInput(ctx context.Context, v any) (TriggerSpecExtractionInput, error) {
@@ -49696,6 +51828,22 @@ func (ec *executionContext) marshalORequirement2ᚖgithubᚗcomᚋsourcebridge�
 	return ec._Requirement(ctx, sel, v)
 }
 
+func (ec *executionContext) unmarshalORestoreConflictResolution2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRestoreConflictResolution(ctx context.Context, v any) (*RestoreConflictResolution, error) {
+	if v == nil {
+		return nil, nil
+	}
+	var res = new(RestoreConflictResolution)
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalORestoreConflictResolution2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRestoreConflictResolution(ctx context.Context, sel ast.SelectionSet, v *RestoreConflictResolution) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return v
+}
+
 func (ec *executionContext) marshalOSimulatedImpactReport2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐSimulatedImpactReport(ctx context.Context, sel ast.SelectionSet, v *SimulatedImpactReport) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
@@ -49803,6 +51951,71 @@ func (ec *executionContext) marshalOTime2ᚖtimeᚐTime(ctx context.Context, sel
 	_ = ctx
 	res := graphql.MarshalTime(*v)
 	return res
+}
+
+func (ec *executionContext) unmarshalOTrashableType2ᚕgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashableTypeᚄ(ctx context.Context, v any) ([]TrashableType, error) {
+	if v == nil {
+		return nil, nil
+	}
+	var vSlice []any
+	vSlice = graphql.CoerceList(v)
+	var err error
+	res := make([]TrashableType, len(vSlice))
+	for i := range vSlice {
+		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithIndex(i))
+		res[i], err = ec.unmarshalNTrashableType2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashableType(ctx, vSlice[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
+}
+
+func (ec *executionContext) marshalOTrashableType2ᚕgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashableTypeᚄ(ctx context.Context, sel ast.SelectionSet, v []TrashableType) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNTrashableType2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐTrashableType(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
 }
 
 func (ec *executionContext) marshalOUnderstandingScore2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐUnderstandingScore(ctx context.Context, sel ast.SelectionSet, v *UnderstandingScore) graphql.Marshaler {

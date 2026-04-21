@@ -28,6 +28,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
+	"github.com/sourcebridge/sourcebridge/internal/trash"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
@@ -118,6 +119,13 @@ func WithCache(c db.Cache) ServerOption {
 	return func(s *Server) { s.cache = c }
 }
 
+// WithTrashStore wires the soft-delete recycle bin. Callers pass nil
+// to run without the feature (embedded mode, or when trash is disabled
+// in config).
+func WithTrashStore(ts trash.Store) ServerOption {
+	return func(s *Server) { s.trashStore = ts }
+}
+
 // Server is the HTTP API server.
 type Server struct {
 	cfg                *config.Config
@@ -146,6 +154,7 @@ type Server struct {
 	comprehensionStore comprehension.Store            // comprehension settings + model capabilities
 	summaryNodeStore   comprehension.SummaryNodeStore // cached summary tree nodes
 	cache              db.Cache                       // shared KV cache (memory or Redis); nil = MCP session store falls back to in-memory
+	trashStore         trash.Store                    // soft-delete recycle bin; nil = feature disabled
 }
 
 // getStore returns a tenant-filtered store when RepoAccessMiddleware has
@@ -293,7 +302,7 @@ func (s *Server) setupRouter() {
 
 	// GraphQL server
 	gqlSrv := handler.NewDefaultServer(graphql.NewExecutableSchema(graphql.Config{
-		Resolvers: &graphql.Resolver{Store: s.store, KnowledgeStore: s.knowledgeStore, Worker: s.worker, Orchestrator: s.orchestrator, Config: s.cfg, EventBus: s.eventBus, Flags: s.flags, GitConfig: s.gitConfigStore, ComprehensionStore: s.comprehensionStore},
+		Resolvers: &graphql.Resolver{Store: s.store, KnowledgeStore: s.knowledgeStore, Worker: s.worker, Orchestrator: s.orchestrator, Config: s.cfg, EventBus: s.eventBus, Flags: s.flags, GitConfig: s.gitConfigStore, ComprehensionStore: s.comprehensionStore, TrashStore: s.trashStore},
 	}))
 
 	// Protected API routes (accepts both JWT and API tokens)
