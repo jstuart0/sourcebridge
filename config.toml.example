@@ -48,3 +48,48 @@ surreal_mode = "embedded"
 
 [security]
 mode = "oss"
+
+# ─── Knowledge artifact invalidation ───────────────────────────────
+# When a repository is reindexed, knowledge artifacts (cliff notes, diagrams,
+# learning paths, etc.) need to be re-examined for freshness. Two env vars
+# tune this:
+#
+# SOURCEBRIDGE_SELECTIVE_INVALIDATION (default: true)
+#   When true, only artifacts whose persisted evidence references a changed
+#   symbol or file are marked stale. Artifacts without usable provenance
+#   (missing or whole-repo-only evidence) conservatively fall back to
+#   blanket-stale so nothing silently drifts.
+#   Set to "false" / "0" / "off" to restore the legacy always-blanket
+#   behavior.
+#
+# SOURCEBRIDGE_SELECTIVE_INVALIDATION_MAX_CHANGES (default: 200)
+#   Upper bound on (changed symbols + changed files) passed to the selective
+#   query. Beyond this threshold the system falls back to blanket stale,
+#   because the selective query would produce a near-universal-stale result
+#   anyway.
+
+# ─── Phase 2: Delta-driven auto-regeneration ──────────────────────
+# When artifacts are marked stale by selective invalidation (above),
+# Phase 2 can automatically enqueue regeneration in the background so
+# the user doesn't have to click "refresh" for every stale artifact.
+#
+# SOURCEBRIDGE_DELTA_REGEN_MODE (default: off)
+#   off    — no auto-regen logic runs (recommended default).
+#   shadow — the driver runs every decision step (candidate selection,
+#            prioritization, per-reindex cap, per-repo-per-hour rate limit,
+#            understanding-first gating) and emits telemetry describing
+#            what it WOULD enqueue, but skips the actual enqueue. Use
+#            this to observe the cost and decision quality on real
+#            traffic before committing to live.
+#   live   — full auto-regen: stale artifacts are regenerated in the
+#            background on the prewarm priority queue.
+#   Requires SOURCEBRIDGE_SELECTIVE_INVALIDATION=true; otherwise forced to
+#   off regardless of this setting.
+#
+# SOURCEBRIDGE_DELTA_REGEN_MAX_PER_INDEX (default: 5)
+#   Cap on how many artifacts can be auto-regenerated per reindex.
+#   Remainder stay stale until a manual refresh.
+#
+# SOURCEBRIDGE_DELTA_REGEN_MAX_PER_REPO_PER_HOUR (default: 20)
+#   Rolling-hour cap per repo. Protects against reindex thrash (a user
+#   reindexing 20×/hour won't spawn 20 regen waves).

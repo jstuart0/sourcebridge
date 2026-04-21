@@ -89,6 +89,10 @@ type Query {
   comprehensionSettingsList: [ComprehensionSettings!]! @deprecated(reason: "Use comprehensionSettings with an explicit scope")
   modelCapabilities: [ModelCapabilityProfile!]!
   modelCapability(modelId: String!): ModelCapabilityProfile
+
+  # Recycle bin (soft-delete) — see docs/user/recycle-bin.md (forthcoming)
+  trashedItems(repositoryId: ID, types: [TrashableType!], limit: Int = 50, offset: Int = 0, search: String): TrashConnection!
+  trashRetentionDays: Int!
 }
 
 type Mutation {
@@ -102,6 +106,24 @@ type Mutation {
 
   # Phase 3: Requirement import (stubs in Phase 1)
   importRequirements(input: ImportRequirementsInput!): ImportResult!
+
+  """
+  Create a single requirement. `externalId` auto-generates as
+  `REQ-<8-char-uuid>` when omitted or blank. `source` defaults to
+  `"manual"` when not supplied. Uniqueness of `(repositoryId, externalId)`
+  is enforced both by an app-layer precheck and a DB UNIQUE index — the
+  latter is authoritative under concurrent writes.
+  """
+  createRequirement(input: CreateRequirementInput!): Requirement!
+
+  """
+  Patch an existing requirement. Uses pointer-semantics: a null (omitted)
+  field preserves the current value; an empty string clears it. Uniqueness
+  of `(repositoryId, externalId)` is enforced both app-side and via a DB
+  UNIQUE index — a live race resolves with the first writer winning and
+  the second receiving a friendly collision error.
+  """
+  updateRequirementFields(input: UpdateRequirementFieldsInput!): Requirement!
 
   # Phase 4: Link management
   verifyLink(linkId: ID!, verified: Boolean!): RequirementLink!
@@ -145,6 +167,50 @@ type Mutation {
   updateModelCapabilities(input: UpdateModelCapabilitiesInput!): ModelCapabilityProfile!
   deleteModelCapabilities(modelId: String!): Boolean! @deprecated(reason: "Use deleteModelCapabilitiesResult")
   deleteModelCapabilitiesResult(modelId: String!): MutationResult!
+
+  # Recycle bin (soft-delete)
+  moveToTrash(type: TrashableType!, id: ID!, reason: String): TrashEntry!
+  restoreFromTrash(type: TrashableType!, id: ID!, resolveConflict: RestoreConflictResolution, rename: String): RestoreResult!
+  permanentlyDelete(type: TrashableType!, id: ID!): Boolean!
+  emptyTrash(repositoryId: ID!, olderThanDays: Int): Int!
+}
+
+enum TrashableType {
+  REQUIREMENT
+  REQUIREMENT_LINK
+  KNOWLEDGE_ARTIFACT
+}
+
+enum RestoreConflictResolution {
+  CANCEL
+  RENAME
+}
+
+type TrashEntry {
+  id: ID!
+  type: TrashableType!
+  repositoryId: ID
+  label: String!
+  originalKey: String
+  deletedAt: String!
+  deletedBy: String
+  expiresAt: String!
+  canRestore: Boolean!
+  restoreConflict: String
+  trashBatchId: ID!
+}
+
+type TrashConnection {
+  nodes: [TrashEntry!]!
+  totalCount: Int!
+  retentionDays: Int!
+}
+
+type RestoreResult {
+  restoredId: ID!
+  batchSize: Int!
+  renamed: Boolean!
+  newKey: String
 }
 
 # Health and system types
@@ -353,6 +419,11 @@ type Requirement {
   source: String!
   priority: String
   tags: [String!]!
+  """
+  Ordered acceptance criteria bullet-list. Writable via
+  updateRequirementFields; readable here. Empty list when unset (never null).
+  """
+  acceptanceCriteria: [String!]!
   links: [RequirementLink!]!
   createdAt: Time!
   updatedAt: Time
@@ -405,6 +476,37 @@ input ImportRequirementsInput {
   content: String!
   format: RequirementFormat!
   sourcePath: String
+}
+
+"""
+Create a single requirement. `externalId` auto-generates when blank.
+Server validates uniqueness of (repositoryId, externalId) among
+non-trashed rows.
+"""
+input CreateRequirementInput {
+  repositoryId: ID!
+  externalId: String
+  title: String!
+  description: String
+  priority: String
+  source: String
+  tags: [String!]
+}
+
+"""
+Patch an existing requirement. Every non-null field replaces the
+stored value; null fields preserve it. `externalId` uniqueness is
+enforced against active (non-trashed) rows in the same repository.
+"""
+input UpdateRequirementFieldsInput {
+  id: ID!
+  externalId: String
+  title: String
+  description: String
+  priority: String
+  source: String
+  tags: [String!]
+  acceptanceCriteria: [String!]
 }
 
 input CreateManualLinkInput {
@@ -734,6 +836,13 @@ type KnowledgeArtifact {
   progressMessage: String
   sourceRevision: SourceRevision!
   stale: Boolean!
+  """
+  Explanation for why this artifact is stale. Present when selective
+  invalidation on reindex flagged the artifact; null for fresh artifacts and
+  for artifacts that were staled by legacy blanket invalidation on installs
+  prior to the Phase 1 rollout.
+  """
+  staleReason: StaleReason
   generatedAt: Time
   createdAt: Time!
   updatedAt: Time!
@@ -747,6 +856,24 @@ type KnowledgeArtifact {
   dependencies: [ArtifactDependency!]!
   refinementUnits: [KnowledgeRefinementUnit!]!
   sections: [KnowledgeSection!]!
+}
+
+"""
+StaleReason explains which changes caused an artifact to be marked stale.
+Surfaces progressive-disclosure "what changed" context in the UI.
+"""
+type StaleReason {
+  """Symbol IDs whose change triggered the invalidation (may be empty)."""
+  symbols: [String!]!
+  """File paths whose change triggered the invalidation (may be empty)."""
+  files: [String!]!
+  """
+  True when the artifact was staled without specific attribution
+  (missing evidence, whole-repo evidence only, or change-set-size fallback).
+  """
+  blanket: Boolean!
+  """ID of the ImpactReport that caused the invalidation (may be empty)."""
+  reportId: String
 }
 
 type ArtifactDependency {

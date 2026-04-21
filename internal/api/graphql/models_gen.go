@@ -109,6 +109,19 @@ type CreateManualLinkInput struct {
 	Rationale     *string `json:"rationale,omitempty"`
 }
 
+// Create a single requirement. `externalId` auto-generates when blank.
+// Server validates uniqueness of (repositoryId, externalId) among
+// non-trashed rows.
+type CreateRequirementInput struct {
+	RepositoryID string   `json:"repositoryId"`
+	ExternalID   *string  `json:"externalId,omitempty"`
+	Title        string   `json:"title"`
+	Description  *string  `json:"description,omitempty"`
+	Priority     *string  `json:"priority,omitempty"`
+	Source       *string  `json:"source,omitempty"`
+	Tags         []string `json:"tags,omitempty"`
+}
+
 type CrossRepoRef struct {
 	ID             string           `json:"id"`
 	SourceSymbolID string           `json:"sourceSymbolId"`
@@ -432,18 +445,23 @@ type ImportResult struct {
 }
 
 type KnowledgeArtifact struct {
-	ID                      string                     `json:"id"`
-	RepositoryID            string                     `json:"repositoryId"`
-	Type                    KnowledgeArtifactType      `json:"type"`
-	Audience                KnowledgeAudience          `json:"audience"`
-	Depth                   KnowledgeDepth             `json:"depth"`
-	Scope                   *KnowledgeScope            `json:"scope"`
-	Status                  KnowledgeArtifactStatus    `json:"status"`
-	Progress                float64                    `json:"progress"`
-	ProgressPhase           *string                    `json:"progressPhase,omitempty"`
-	ProgressMessage         *string                    `json:"progressMessage,omitempty"`
-	SourceRevision          *SourceRevision            `json:"sourceRevision"`
-	Stale                   bool                       `json:"stale"`
+	ID              string                  `json:"id"`
+	RepositoryID    string                  `json:"repositoryId"`
+	Type            KnowledgeArtifactType   `json:"type"`
+	Audience        KnowledgeAudience       `json:"audience"`
+	Depth           KnowledgeDepth          `json:"depth"`
+	Scope           *KnowledgeScope         `json:"scope"`
+	Status          KnowledgeArtifactStatus `json:"status"`
+	Progress        float64                 `json:"progress"`
+	ProgressPhase   *string                 `json:"progressPhase,omitempty"`
+	ProgressMessage *string                 `json:"progressMessage,omitempty"`
+	SourceRevision  *SourceRevision         `json:"sourceRevision"`
+	Stale           bool                    `json:"stale"`
+	// Explanation for why this artifact is stale. Present when selective
+	// invalidation on reindex flagged the artifact; null for fresh artifacts and
+	// for artifacts that were staled by legacy blanket invalidation on installs
+	// prior to the Phase 1 rollout.
+	StaleReason             *StaleReason               `json:"staleReason,omitempty"`
 	GeneratedAt             *time.Time                 `json:"generatedAt,omitempty"`
 	CreatedAt               time.Time                  `json:"createdAt"`
 	UpdatedAt               time.Time                  `json:"updatedAt"`
@@ -635,16 +653,19 @@ type RepositoryUnderstanding struct {
 }
 
 type Requirement struct {
-	ID          string             `json:"id"`
-	ExternalID  *string            `json:"externalId,omitempty"`
-	Title       string             `json:"title"`
-	Description string             `json:"description"`
-	Source      string             `json:"source"`
-	Priority    *string            `json:"priority,omitempty"`
-	Tags        []string           `json:"tags"`
-	Links       []*RequirementLink `json:"links"`
-	CreatedAt   time.Time          `json:"createdAt"`
-	UpdatedAt   *time.Time         `json:"updatedAt,omitempty"`
+	ID          string   `json:"id"`
+	ExternalID  *string  `json:"externalId,omitempty"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Source      string   `json:"source"`
+	Priority    *string  `json:"priority,omitempty"`
+	Tags        []string `json:"tags"`
+	// Ordered acceptance criteria bullet-list. Writable via
+	// updateRequirementFields; readable here. Empty list when unset (never null).
+	AcceptanceCriteria []string           `json:"acceptanceCriteria"`
+	Links              []*RequirementLink `json:"links"`
+	CreatedAt          time.Time          `json:"createdAt"`
+	UpdatedAt          *time.Time         `json:"updatedAt,omitempty"`
 }
 
 type RequirementConnection struct {
@@ -678,6 +699,13 @@ type ResolvedSymbol struct {
 	FilePath      string  `json:"filePath"`
 	Similarity    float64 `json:"similarity"`
 	IsAnchor      bool    `json:"isAnchor"`
+}
+
+type RestoreResult struct {
+	RestoredID string  `json:"restoredId"`
+	BatchSize  int     `json:"batchSize"`
+	Renamed    bool    `json:"renamed"`
+	NewKey     *string `json:"newKey,omitempty"`
 }
 
 type ReviewCodeInput struct {
@@ -786,6 +814,20 @@ type SpecExtractionResult struct {
 	OutputTokens    *int     `json:"outputTokens,omitempty"`
 }
 
+// StaleReason explains which changes caused an artifact to be marked stale.
+// Surfaces progressive-disclosure "what changed" context in the UI.
+type StaleReason struct {
+	// Symbol IDs whose change triggered the invalidation (may be empty).
+	Symbols []string `json:"symbols"`
+	// File paths whose change triggered the invalidation (may be empty).
+	Files []string `json:"files"`
+	// True when the artifact was staled without specific attribution
+	// (missing evidence, whole-repo evidence only, or change-set-size fallback).
+	Blanket bool `json:"blanket"`
+	// ID of the ImpactReport that caused the invalidation (may be empty).
+	ReportID *string `json:"reportId,omitempty"`
+}
+
 type SymbolChange struct {
 	SymbolID     *string          `json:"symbolId,omitempty"`
 	Name         string           `json:"name"`
@@ -805,6 +847,26 @@ type TraceabilityMatrix struct {
 	Symbols      []*CodeSymbol      `json:"symbols"`
 	Links        []*RequirementLink `json:"links"`
 	Coverage     float64            `json:"coverage"`
+}
+
+type TrashConnection struct {
+	Nodes         []*TrashEntry `json:"nodes"`
+	TotalCount    int           `json:"totalCount"`
+	RetentionDays int           `json:"retentionDays"`
+}
+
+type TrashEntry struct {
+	ID              string        `json:"id"`
+	Type            TrashableType `json:"type"`
+	RepositoryID    *string       `json:"repositoryId,omitempty"`
+	Label           string        `json:"label"`
+	OriginalKey     *string       `json:"originalKey,omitempty"`
+	DeletedAt       string        `json:"deletedAt"`
+	DeletedBy       *string       `json:"deletedBy,omitempty"`
+	ExpiresAt       string        `json:"expiresAt"`
+	CanRestore      bool          `json:"canRestore"`
+	RestoreConflict *string       `json:"restoreConflict,omitempty"`
+	TrashBatchID    string        `json:"trashBatchId"`
 }
 
 type TriggerSpecExtractionInput struct {
@@ -862,6 +924,20 @@ type UpdateModelCapabilitiesInput struct {
 type UpdateRepositoryKnowledgeSettingsInput struct {
 	RepositoryID          string                  `json:"repositoryId"`
 	GenerationModeDefault KnowledgeGenerationMode `json:"generationModeDefault"`
+}
+
+// Patch an existing requirement. Every non-null field replaces the
+// stored value; null fields preserve it. `externalId` uniqueness is
+// enforced against active (non-trashed) rows in the same repository.
+type UpdateRequirementFieldsInput struct {
+	ID                 string   `json:"id"`
+	ExternalID         *string  `json:"externalId,omitempty"`
+	Title              *string  `json:"title,omitempty"`
+	Description        *string  `json:"description,omitempty"`
+	Priority           *string  `json:"priority,omitempty"`
+	Source             *string  `json:"source,omitempty"`
+	Tags               []string `json:"tags,omitempty"`
+	AcceptanceCriteria []string `json:"acceptanceCriteria,omitempty"`
 }
 
 type VersionInfo struct {
@@ -1942,6 +2018,61 @@ func (e RequirementFormat) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+type RestoreConflictResolution string
+
+const (
+	RestoreConflictResolutionCancel RestoreConflictResolution = "CANCEL"
+	RestoreConflictResolutionRename RestoreConflictResolution = "RENAME"
+)
+
+var AllRestoreConflictResolution = []RestoreConflictResolution{
+	RestoreConflictResolutionCancel,
+	RestoreConflictResolutionRename,
+}
+
+func (e RestoreConflictResolution) IsValid() bool {
+	switch e {
+	case RestoreConflictResolutionCancel, RestoreConflictResolutionRename:
+		return true
+	}
+	return false
+}
+
+func (e RestoreConflictResolution) String() string {
+	return string(e)
+}
+
+func (e *RestoreConflictResolution) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = RestoreConflictResolution(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid RestoreConflictResolution", str)
+	}
+	return nil
+}
+
+func (e RestoreConflictResolution) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *RestoreConflictResolution) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e RestoreConflictResolution) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
 type SymbolChangeType string
 
 const (
@@ -2069,6 +2200,63 @@ func (e *SymbolKind) UnmarshalJSON(b []byte) error {
 }
 
 func (e SymbolKind) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type TrashableType string
+
+const (
+	TrashableTypeRequirement       TrashableType = "REQUIREMENT"
+	TrashableTypeRequirementLink   TrashableType = "REQUIREMENT_LINK"
+	TrashableTypeKnowledgeArtifact TrashableType = "KNOWLEDGE_ARTIFACT"
+)
+
+var AllTrashableType = []TrashableType{
+	TrashableTypeRequirement,
+	TrashableTypeRequirementLink,
+	TrashableTypeKnowledgeArtifact,
+}
+
+func (e TrashableType) IsValid() bool {
+	switch e {
+	case TrashableTypeRequirement, TrashableTypeRequirementLink, TrashableTypeKnowledgeArtifact:
+		return true
+	}
+	return false
+}
+
+func (e TrashableType) String() string {
+	return string(e)
+}
+
+func (e *TrashableType) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = TrashableType(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid TrashableType", str)
+	}
+	return nil
+}
+
+func (e TrashableType) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *TrashableType) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e TrashableType) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	e.MarshalGQL(&buf)
 	return buf.Bytes(), nil

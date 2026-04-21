@@ -207,6 +207,7 @@ export const REQUIREMENT_QUERY = gql`
       source
       priority
       tags
+      acceptanceCriteria
       links {
         id
         confidence
@@ -304,6 +305,64 @@ export const IMPORT_REQUIREMENTS_MUTATION = gql`
       imported
       skipped
       warnings
+    }
+  }
+`;
+
+// Fragment shared by create / update / detail so all three see the same
+// shape. Keeping this close to REQUIREMENT_QUERY so a schema change lands
+// in one spot.
+export const CREATE_REQUIREMENT_MUTATION = gql`
+  mutation CreateRequirement($input: CreateRequirementInput!) {
+    createRequirement(input: $input) {
+      id
+      externalId
+      title
+      description
+      source
+      priority
+      tags
+      acceptanceCriteria
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const UPDATE_REQUIREMENT_FIELDS_MUTATION = gql`
+  mutation UpdateRequirementFields($input: UpdateRequirementFieldsInput!) {
+    updateRequirementFields(input: $input) {
+      id
+      externalId
+      title
+      description
+      source
+      priority
+      tags
+      acceptanceCriteria
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+// Shared move-to-trash mutation. Requirement delete uses this via
+// moveToTrash(type: REQUIREMENT, id: $id). The trash backend lives in
+// internal/trash/ and enforces soft-delete — rows stay in the DB with
+// deleted_at set and can be restored by an admin.
+//
+// Note: deleting a requirement does NOT cascade to its links, by design
+// (internal/trash/surrealstore.go:268-272). The UI's confirm copy must
+// reflect that truthfully.
+export const MOVE_TO_TRASH_MUTATION = gql`
+  mutation MoveToTrash($type: TrashableType!, $id: ID!, $reason: String) {
+    moveToTrash(type: $type, id: $id, reason: $reason) {
+      id
+      type
+      repositoryId
+      label
+      deletedAt
+      canRestore
     }
   }
 `;

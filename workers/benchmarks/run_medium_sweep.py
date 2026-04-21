@@ -36,6 +36,8 @@ OLLAMA_URL = "http://192.168.10.108:11434/v1"
 MEDIUM_MODELS: list[tuple[str, str, float, str]] = [
     ("qwen3-32b", "qwen3:32b", 20.2, "ollama"),
     ("qwen3.6-35b-a3b-moe", "qwen3.6:35b-a3b-q4_K_M", 23.0, "ollama"),
+    ("gemma4-26b-a4b-moe", "gemma4:26b-a4b-it-q4_K_M", 15.5, "ollama"),
+    ("gemma4-31b", "gemma4:31b-it-q4_K_M", 18.5, "ollama"),
     ("claude-haiku-4.5", "anthropic/claude-haiku-4.5", 0.0, "openrouter"),
     ("claude-sonnet-4", "anthropic/claude-sonnet-4", 0.0, "openrouter"),
     ("gemini-2.5-flash", "google/gemini-2.5-flash", 0.0, "openrouter"),

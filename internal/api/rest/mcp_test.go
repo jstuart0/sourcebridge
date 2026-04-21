@@ -118,6 +118,15 @@ func (m *mockKnowledgeStore) UpdateKnowledgeArtifactProgressWithPhase(id string,
 func (m *mockKnowledgeStore) MarkKnowledgeArtifactStale(id string, stale bool) error {
 	return nil
 }
+func (m *mockKnowledgeStore) MarkKnowledgeArtifactStaleWithReason(id string, reasonJSON string, reportID string) error {
+	return nil
+}
+func (m *mockKnowledgeStore) GetArtifactsForSources(repoID string, sources []knowledge.SourceRef) []*knowledge.Artifact {
+	return nil
+}
+func (m *mockKnowledgeStore) GetArtifactsForFiles(repoID string, filePaths []string) []*knowledge.Artifact {
+	return nil
+}
 func (m *mockKnowledgeStore) DeleteKnowledgeArtifact(id string) error { return nil }
 func (m *mockKnowledgeStore) SupersedeArtifact(id string, sections []knowledge.Section) error {
 	return nil
@@ -235,7 +244,7 @@ func newTestHarness(t *testing.T) *mcpTestHarness {
 		Source:        "semantic",
 	})
 
-	h := newMCPHandler(store, ks, worker, "", 1*time.Hour, 30*time.Second, 100)
+	h := newMCPHandler(store, ks, worker, "", 1*time.Hour, 30*time.Second, 100, nil)
 
 	return &mcpTestHarness{
 		handler: h,
@@ -246,18 +255,24 @@ func newTestHarness(t *testing.T) *mcpTestHarness {
 	}
 }
 
-// createSession creates a test session and marks it initialized.
+// createSession creates a test session and marks it initialized. The session
+// is persisted to the store and registered with pod-local SSE delivery
+// channels so sendResponse-based tests work unchanged.
 func (h *mcpTestHarness) createSession() *mcpSession {
+	chans := &mcpLocalChans{
+		eventCh: make(chan []byte, 64),
+		done:    make(chan struct{}),
+	}
 	sess := &mcpSession{
 		id:          "test-session-1",
 		claims:      &auth.Claims{UserID: "user-1", OrgID: "org-1"},
 		initialized: true,
 		createdAt:   time.Now(),
 		lastUsed:    time.Now(),
-		eventCh:     make(chan []byte, 64),
-		done:        make(chan struct{}),
+		chans:       chans,
 	}
-	h.handler.sessions.Store(sess.id, sess)
+	_ = h.handler.sessionStore.Save(context.Background(), sess.toState(), time.Hour)
+	h.handler.localChans.Store(sess.id, chans)
 	return sess
 }
 
@@ -1144,18 +1159,19 @@ func TestMCP_RepoAccessDenied(t *testing.T) {
 	repo, _ := store.StoreIndexResult(result)
 
 	// Create handler that only allows a different repo
-	h := newMCPHandler(store, ks, worker, "other-repo-id", 1*time.Hour, 30*time.Second, 100)
+	h := newMCPHandler(store, ks, worker, "other-repo-id", 1*time.Hour, 30*time.Second, 100, nil)
 
+	chans := &mcpLocalChans{eventCh: make(chan []byte, 64), done: make(chan struct{})}
 	sess := &mcpSession{
 		id:          "sess-restricted",
 		claims:      &auth.Claims{UserID: "user-1"},
 		initialized: true,
 		createdAt:   time.Now(),
 		lastUsed:    time.Now(),
-		eventCh:     make(chan []byte, 64),
-		done:        make(chan struct{}),
+		chans:       chans,
 	}
-	h.sessions.Store(sess.id, sess)
+	_ = h.sessionStore.Save(context.Background(), sess.toState(), time.Hour)
+	h.localChans.Store(sess.id, chans)
 
 	idRaw, _ := json.Marshal(3)
 	argsRaw, _ := json.Marshal(map[string]interface{}{
@@ -1247,7 +1263,7 @@ func TestMCP_NotificationIgnored(t *testing.T) {
 
 	// No response should have been sent to the event channel
 	select {
-	case data := <-sess.eventCh:
+	case data := <-sess.chans.eventCh:
 		t.Errorf("expected no response for notification, got: %s", string(data))
 	default:
 		// Good — no response
@@ -1325,7 +1341,7 @@ func TestMCP_MaxSessionsEnforced(t *testing.T) {
 	store := graphstore.NewStore()
 	worker := &mockWorkerCaller{available: true}
 	ks := newMockKnowledgeStore()
-	h := newMCPHandler(store, ks, worker, "", 1*time.Hour, 30*time.Second, 2) // max 2 sessions
+	h := newMCPHandler(store, ks, worker, "", 1*time.Hour, 30*time.Second, 2, nil) // max 2 sessions
 
 	// Create 2 sessions
 	for i := 0; i < 2; i++ {
@@ -1334,10 +1350,8 @@ func TestMCP_MaxSessionsEnforced(t *testing.T) {
 			claims:    &auth.Claims{UserID: "user-1"},
 			createdAt: time.Now(),
 			lastUsed:  time.Now(),
-			eventCh:   make(chan []byte, 64),
-			done:      make(chan struct{}),
 		}
-		h.sessions.Store(sess.id, sess)
+		_ = h.sessionStore.Save(context.Background(), sess.toState(), time.Hour)
 	}
 
 	// Try to create a 3rd via SSE — should get 429
@@ -1420,11 +1434,11 @@ func TestMCP_FullHTTPFlow(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Verify session is now initialized
-	val, ok := h.handler.sessions.Load(sessionID)
-	if !ok {
+	state, err := h.handler.sessionStore.Get(context.Background(), sessionID)
+	if err != nil || state == nil {
 		t.Fatal("session not found")
 	}
-	if !val.(*mcpSession).initialized {
+	if !state.Initialized {
 		t.Error("session should be initialized after handshake")
 	}
 
@@ -1637,8 +1651,285 @@ func TestMCP_StreamableHTTP_DeleteSession(t *testing.T) {
 		t.Errorf("expected 200 for DELETE, got %d", delRR.Code)
 	}
 
-	// Session should be gone
-	if _, ok := h.handler.sessions.Load(sessionID); ok {
+	// Session should be gone from the shared store
+	state, _ := h.handler.sessionStore.Get(context.Background(), sessionID)
+	if state != nil {
 		t.Error("session should be deleted")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: closeDone is idempotent across concurrent callers
+// ---------------------------------------------------------------------------
+//
+// Multiple goroutines (reaper, DELETE handler, terminateSession) can race to
+// shut down a session. A double close panics Go, so closeDone uses sync.Once.
+
+func TestMCP_CloseDoneIdempotent(t *testing.T) {
+	chans := &mcpLocalChans{
+		done:    make(chan struct{}),
+		eventCh: make(chan []byte, 1),
+	}
+
+	const n = 32
+	start := make(chan struct{})
+	doneWG := make(chan struct{}, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			<-start
+			chans.closeDone()
+			doneWG <- struct{}{}
+		}()
+	}
+	close(start)
+	for i := 0; i < n; i++ {
+		<-doneWG
+	}
+
+	// Channel must be closed (non-blocking receive returns immediately).
+	select {
+	case <-chans.done:
+	default:
+		t.Fatal("done should be closed after concurrent closeDone calls")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: sendResponse blocks briefly under backpressure, does not silently drop
+// ---------------------------------------------------------------------------
+//
+// The old implementation dropped responses the moment eventCh was full, which
+// caused clients to hang on a response that never arrived. The new
+// implementation blocks up to sendResponseTimeout so transient backpressure
+// (TCP slow-start, RTT spikes) doesn't lose tool results.
+
+func TestMCP_SendResponseBlocksUntilDrained(t *testing.T) {
+	h := newTestHarness(t)
+	chans := &mcpLocalChans{
+		eventCh: make(chan []byte, 1),
+		done:    make(chan struct{}),
+	}
+	sess := &mcpSession{
+		id:    "backpressure-ok",
+		chans: chans,
+	}
+	_ = h.handler.sessionStore.Save(context.Background(), sess.toState(), time.Hour)
+	h.handler.localChans.Store(sess.id, chans)
+
+	// Fill the buffer so the next send must block.
+	chans.eventCh <- []byte(`{"filler":true}`)
+
+	// Drain it from another goroutine after a short delay, simulating a slow
+	// but live SSE reader.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		<-chans.eventCh
+	}()
+
+	start := time.Now()
+	h.handler.sendResponse(sess, successResponse(nil, map[string]string{"ok": "yes"}))
+	elapsed := time.Since(start)
+
+	if elapsed < 30*time.Millisecond {
+		t.Errorf("expected sendResponse to block for backpressure, returned in %v", elapsed)
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("sendResponse blocked too long: %v", elapsed)
+	}
+	// The filler has been drained; our real response must now be queued.
+	select {
+	case <-chans.eventCh:
+	default:
+		t.Fatal("expected response to land in eventCh after drain")
+	}
+	// Session must still be alive in the store.
+	state, _ := h.handler.sessionStore.Get(context.Background(), sess.id)
+	if state == nil {
+		t.Fatal("session should still be registered — backpressure alone must not terminate it")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: sendResponse terminates a truly stuck session after its timeout
+// ---------------------------------------------------------------------------
+//
+// If the client never drains the buffer, we must eventually give up. The
+// session is removed and done is closed, so future sends see the shutdown
+// signal instead of queuing work on a dead session.
+
+func TestMCP_SendResponseTerminatesStuckSession(t *testing.T) {
+	h := newTestHarness(t)
+	chans := &mcpLocalChans{
+		eventCh: make(chan []byte, 1),
+		done:    make(chan struct{}),
+	}
+	sess := &mcpSession{
+		id:    "backpressure-stuck",
+		chans: chans,
+	}
+	_ = h.handler.sessionStore.Save(context.Background(), sess.toState(), time.Hour)
+	h.handler.localChans.Store(sess.id, chans)
+	chans.eventCh <- []byte(`{"filler":true}`) // fill and never drain
+
+	// Short-circuit the blocking send by terminating from another goroutine —
+	// that is the exact shutdown path sendResponse observes.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		h.handler.terminateSession(sess)
+	}()
+
+	start := time.Now()
+	h.handler.sendResponse(sess, successResponse(nil, map[string]string{"ok": "yes"}))
+	elapsed := time.Since(start)
+
+	if elapsed > 2*time.Second {
+		t.Errorf("sendResponse should have returned via done signal quickly, took %v", elapsed)
+	}
+	// Session must have been removed from the store and chans closed.
+	state, _ := h.handler.sessionStore.Get(context.Background(), sess.id)
+	if state != nil {
+		t.Error("session should have been terminated")
+	}
+	select {
+	case <-chans.done:
+	default:
+		t.Error("done channel should be closed after terminateSession")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: session state round-trips through the Redis-shape store interface
+// ---------------------------------------------------------------------------
+//
+// This exercises the shared-store hot path the streamable-HTTP handler uses:
+// save full session state with a TTL, load it on a subsequent "request", see
+// the same fields. The memory store is our local implementation, but it uses
+// the exact same methods the Redis backing does.
+
+func TestMCP_SessionStore_RoundTrip(t *testing.T) {
+	store := newMemorySessionStore()
+	ctx := context.Background()
+
+	st := &mcpSessionState{
+		ID:            "sess-roundtrip",
+		UserID:        "u-1",
+		OrgID:         "org-1",
+		Email:         "jay@example.com",
+		Role:          "admin",
+		Initialized:   true,
+		ClientName:    "claude-code",
+		ClientVersion: "2.1.116",
+		CreatedAt:     time.Now().Truncate(time.Second),
+		LastUsed:      time.Now().Truncate(time.Second),
+	}
+	if err := store.Save(ctx, st, time.Hour); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := store.Get(ctx, "sess-roundtrip")
+	if err != nil || got == nil {
+		t.Fatalf("Get: %v, %v", got, err)
+	}
+	if got.UserID != "u-1" || got.ClientName != "claude-code" || !got.Initialized {
+		t.Errorf("round-trip mismatch: %+v", got)
+	}
+
+	n, _ := store.Count(ctx)
+	if n != 1 {
+		t.Errorf("expected Count=1, got %d", n)
+	}
+
+	if err := store.Delete(ctx, "sess-roundtrip"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	after, _ := store.Get(ctx, "sess-roundtrip")
+	if after != nil {
+		t.Errorf("expected nil after Delete, got %+v", after)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: memory store honours TTL expiration
+// ---------------------------------------------------------------------------
+
+func TestMCP_SessionStore_Expires(t *testing.T) {
+	store := newMemorySessionStore()
+	ctx := context.Background()
+	st := &mcpSessionState{ID: "ttl-test", CreatedAt: time.Now(), LastUsed: time.Now()}
+	_ = store.Save(ctx, st, 50*time.Millisecond)
+
+	time.Sleep(120 * time.Millisecond)
+
+	got, _ := store.Get(ctx, "ttl-test")
+	if got != nil {
+		t.Errorf("expected expired entry to be gone, got %+v", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: streaming tools/call emits SSE + a final JSON-RPC result
+// ---------------------------------------------------------------------------
+//
+// The server should frame the result as one SSE `message` event with the
+// JSON-RPC response in the data field. Progress notifications would appear
+// here too if the tool were slow enough to fire the heartbeat ticker; for a
+// fast mock worker we just verify the response framing.
+
+func TestMCP_StreamableHTTP_StreamingToolCall(t *testing.T) {
+	h := newTestHarness(t)
+	// Initialize a streamable session.
+	initBody, _ := json.Marshal(jsonRPCRequest{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`1`),
+		Method:  "initialize",
+		Params: json.RawMessage(`{
+			"protocolVersion": "` + mcpProtocolVersion + `",
+			"clientInfo": {"name": "stream-test", "version": "1.0"}
+		}`),
+	})
+	initReq := httptest.NewRequest("POST", "/api/v1/mcp/http", strings.NewReader(string(initBody)))
+	initReq.Header.Set("Content-Type", "application/json")
+	initReq = initReq.WithContext(context.WithValue(initReq.Context(), auth.ClaimsKey, &auth.Claims{UserID: "user-1"}))
+	initRR := httptest.NewRecorder()
+	h.handler.handleStreamableHTTP(initRR, initReq)
+	if initRR.Code != http.StatusOK {
+		t.Fatalf("init: %d %s", initRR.Code, initRR.Body.String())
+	}
+	sessionID := initRR.Header().Get("Mcp-Session-Id")
+
+	// Call explain_code with Accept: text/event-stream — should stream.
+	callBody, _ := json.Marshal(map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name": "explain_code",
+			"arguments": map[string]interface{}{
+				"repository_id": h.repoID,
+				"code":          "func Foo() {}",
+			},
+			"_meta": map[string]interface{}{"progressToken": "abc123"},
+		},
+	})
+	callReq := httptest.NewRequest("POST", "/api/v1/mcp/http", strings.NewReader(string(callBody)))
+	callReq.Header.Set("Content-Type", "application/json")
+	callReq.Header.Set("Accept", "application/json, text/event-stream")
+	callReq.Header.Set("Mcp-Session-Id", sessionID)
+	callReq = callReq.WithContext(context.WithValue(callReq.Context(), auth.ClaimsKey, &auth.Claims{UserID: "user-1"}))
+
+	// httptest.ResponseRecorder implements http.Flusher (as a no-op), which
+	// is what handleStreamingToolCall needs.
+	callRR := httptest.NewRecorder()
+	h.handler.handleStreamableHTTP(callRR, callReq)
+
+	if ct := callRR.Header().Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("expected text/event-stream content-type, got %q", ct)
+	}
+	body := callRR.Body.String()
+	if !strings.Contains(body, "event: message") {
+		t.Errorf("expected at least one SSE message event, got:\n%s", body)
+	}
+	if !strings.Contains(body, `"jsonrpc":"2.0"`) || !strings.Contains(body, `"id":2`) {
+		t.Errorf("expected JSON-RPC response in SSE data, got:\n%s", body)
 	}
 }

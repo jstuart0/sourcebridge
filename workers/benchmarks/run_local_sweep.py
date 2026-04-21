@@ -53,6 +53,8 @@ SWEEP_MODELS: list[tuple[str, str, float]] = [
     ("qwen3-32b", "qwen3:32b", 20.2),
     ("qwen3.5-35b-a3b-moe", "qwen3.5:35b-a3b", 23.9),
     ("qwen3.6-35b-a3b-moe", "qwen3.6:35b-a3b-q4_K_M", 23.0),
+    ("gemma4-26b-a4b-moe", "gemma4:26b-a4b-it-q4_K_M", 15.5),
+    ("gemma4-31b", "gemma4:31b-it-q4_K_M", 18.5),
     ("qwen3.5-122b-a10b-moe", "qwen3.5:122b-a10b", 81.4),
 ]
 

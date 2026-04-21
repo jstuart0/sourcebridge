@@ -20,6 +20,13 @@ const (
 	EventLinkRejected = "link.rejected"
 
 	EventReviewCompleted = "review.completed"
+
+	// Recycle-bin events. Granular (per-row) events use EventTrashChanged;
+	// cascade + bulk operations coalesce to EventTrashBulkChanged; the
+	// per-repo badge is driven by EventTrashCountChanged.
+	EventTrashChanged      = "trash.changed"
+	EventTrashBulkChanged  = "trash.bulk_changed"
+	EventTrashCountChanged = "trash.count_changed"
 )
 
 // Event represents a domain event.

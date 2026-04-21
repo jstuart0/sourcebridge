@@ -294,8 +294,136 @@ func (s *MemStore) MarkKnowledgeArtifactStale(id string, stale bool) error {
 		return fmt.Errorf("artifact %s not found", id)
 	}
 	a.Stale = stale
+	if !stale {
+		// Clearing stale → drop the reason too; a later refresh will
+		// overwrite it cleanly.
+		a.StaleReasonJSON = ""
+		a.StaleReportID = ""
+	}
 	a.UpdatedAt = time.Now()
 	return nil
+}
+
+func (s *MemStore) MarkKnowledgeArtifactStaleWithReason(id string, reasonJSON string, reportID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	a := s.artifacts[id]
+	if a == nil {
+		return fmt.Errorf("artifact %s not found", id)
+	}
+	a.Stale = true
+	a.StaleReasonJSON = reasonJSON
+	a.StaleReportID = reportID
+	a.UpdatedAt = time.Now()
+	return nil
+}
+
+func (s *MemStore) GetArtifactsForSources(repoID string, sources []SourceRef) []*Artifact {
+	if len(sources) == 0 {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	wanted := make(map[string]struct{}, len(sources))
+	for _, ref := range sources {
+		if ref.SourceID == "" {
+			continue
+		}
+		wanted[string(ref.SourceType)+"\x00"+ref.SourceID] = struct{}{}
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	var out []*Artifact
+	for _, a := range s.artifacts {
+		if a.RepositoryID != repoID {
+			continue
+		}
+		if _, dup := seen[a.ID]; dup {
+			continue
+		}
+		// Walk this artifact's sections -> evidence, testing each row.
+		if s.artifactMatchesSourceLocked(a.ID, wanted) {
+			seen[a.ID] = struct{}{}
+			clone := *a
+			clone.Sections = s.loadSectionsLocked(a.ID)
+			out = append(out, &clone)
+		}
+	}
+	return out
+}
+
+func (s *MemStore) GetArtifactsForFiles(repoID string, filePaths []string) []*Artifact {
+	if len(filePaths) == 0 {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	wanted := make(map[string]struct{}, len(filePaths))
+	for _, p := range filePaths {
+		if p == "" {
+			continue
+		}
+		wanted[p] = struct{}{}
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	var out []*Artifact
+	for _, a := range s.artifacts {
+		if a.RepositoryID != repoID {
+			continue
+		}
+		if _, dup := seen[a.ID]; dup {
+			continue
+		}
+		if s.artifactMatchesFileLocked(a.ID, wanted) {
+			seen[a.ID] = struct{}{}
+			clone := *a
+			clone.Sections = s.loadSectionsLocked(a.ID)
+			out = append(out, &clone)
+		}
+	}
+	return out
+}
+
+// artifactMatchesSourceLocked returns true if any evidence row on any of the
+// artifact's sections matches the (source_type, source_id) set. Caller must
+// hold s.mu.
+func (s *MemStore) artifactMatchesSourceLocked(artifactID string, wanted map[string]struct{}) bool {
+	for _, sec := range s.sections[artifactID] {
+		for _, ev := range s.evidence[sec.ID] {
+			key := string(ev.SourceType) + "\x00" + ev.SourceID
+			if _, ok := wanted[key]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// artifactMatchesFileLocked returns true if any evidence row on any of the
+// artifact's sections carries one of the given file paths. Caller must hold
+// s.mu.
+func (s *MemStore) artifactMatchesFileLocked(artifactID string, wanted map[string]struct{}) bool {
+	for _, sec := range s.sections[artifactID] {
+		for _, ev := range s.evidence[sec.ID] {
+			if ev.FilePath == "" {
+				continue
+			}
+			if _, ok := wanted[ev.FilePath]; ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *MemStore) MarkRepositoryUnderstandingNeedsRefresh(repoID string) error {

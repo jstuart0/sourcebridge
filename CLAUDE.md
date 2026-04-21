@@ -40,6 +40,29 @@ cd workers && uv run python -m workers  # Start worker (separate terminal)
 Configuration via `config.toml` or environment variables with `SOURCEBRIDGE_` prefix.
 See `config.toml.example` for all options.
 
+## Telemetry
+
+Anonymous install telemetry is sent from `internal/telemetry/telemetry.go` to
+`https://telemetry.sourcebridge.ai/v1/ping`. Opt-out rules and the collected-fields
+table live in [`TELEMETRY.md`](TELEMETRY.md).
+
+- Public dashboard: <https://telemetry.sourcebridge.ai/dashboard>
+- Collector/worker source: `/Users/jaystuart/dev/sourcebridge-telemetry/` (separate repo)
+- Dashboard and badge hide installations flagged `is_test`; toggle on the
+  dashboard or append `?include_test=1` to any stats URL to include them.
+- Jay's own dev/test installs should be marked with the admin endpoint
+  (`POST /v1/admin/mark-test`, bearer token in Vaultwarden as
+  **SourceBridge Telemetry → ADMIN_TOKEN**) so the public numbers reflect
+  real users. Obvious patterns (`platform=test`, ingress-URL versions) are
+  auto-flagged at ingest; `version=dev` is not, to avoid hiding contributors.
+
+When adding new telemetry fields:
+1. Update the ping struct and send site in `internal/telemetry/telemetry.go`.
+2. Mirror the field in the collector repo (`schema.sql`, worker handlers, and a
+   new `migrations/NNN_*.sql` for existing databases).
+3. Add the field to `TELEMETRY.md`'s collected-fields table so the opt-in
+   disclosure stays accurate.
+
 ## Legacy Name: CodeAware
 
 This project was originally called **CodeAware**. It has since been renamed to **SourceBridge**, but remnants of the old name exist throughout the codebase — environment variables with the `CODEAWARE_` prefix, Go module paths, internal references, config keys, Kubernetes resource names, and database records.

@@ -19,12 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ReasoningService_AnalyzeSymbol_FullMethodName       = "/sourcebridge.reasoning.v1.ReasoningService/AnalyzeSymbol"
-	ReasoningService_ExplainRelationship_FullMethodName = "/sourcebridge.reasoning.v1.ReasoningService/ExplainRelationship"
-	ReasoningService_AnswerQuestion_FullMethodName      = "/sourcebridge.reasoning.v1.ReasoningService/AnswerQuestion"
-	ReasoningService_ReviewFile_FullMethodName          = "/sourcebridge.reasoning.v1.ReasoningService/ReviewFile"
-	ReasoningService_GenerateEmbedding_FullMethodName   = "/sourcebridge.reasoning.v1.ReasoningService/GenerateEmbedding"
-	ReasoningService_SimulateChange_FullMethodName      = "/sourcebridge.reasoning.v1.ReasoningService/SimulateChange"
+	ReasoningService_AnalyzeSymbol_FullMethodName        = "/sourcebridge.reasoning.v1.ReasoningService/AnalyzeSymbol"
+	ReasoningService_ExplainRelationship_FullMethodName  = "/sourcebridge.reasoning.v1.ReasoningService/ExplainRelationship"
+	ReasoningService_AnswerQuestion_FullMethodName       = "/sourcebridge.reasoning.v1.ReasoningService/AnswerQuestion"
+	ReasoningService_AnswerQuestionStream_FullMethodName = "/sourcebridge.reasoning.v1.ReasoningService/AnswerQuestionStream"
+	ReasoningService_ReviewFile_FullMethodName           = "/sourcebridge.reasoning.v1.ReasoningService/ReviewFile"
+	ReasoningService_GenerateEmbedding_FullMethodName    = "/sourcebridge.reasoning.v1.ReasoningService/GenerateEmbedding"
+	ReasoningService_SimulateChange_FullMethodName       = "/sourcebridge.reasoning.v1.ReasoningService/SimulateChange"
 )
 
 // ReasoningServiceClient is the client API for ReasoningService service.
@@ -39,6 +40,13 @@ type ReasoningServiceClient interface {
 	ExplainRelationship(ctx context.Context, in *ExplainRelationshipRequest, opts ...grpc.CallOption) (*ExplainRelationshipResponse, error)
 	// AnswerQuestion answers a natural language question about the codebase
 	AnswerQuestion(ctx context.Context, in *AnswerQuestionRequest, opts ...grpc.CallOption) (*AnswerQuestionResponse, error)
+	// AnswerQuestionStream is the server-streaming variant of AnswerQuestion.
+	// The server emits zero-or-more AnswerDelta messages containing incremental
+	// text chunks while the model is generating, followed by a terminal
+	// AnswerDelta with `finished = true` carrying the final usage stats. This
+	// lets callers render tokens progressively instead of waiting for the whole
+	// answer. Semantics of the request are identical to AnswerQuestion.
+	AnswerQuestionStream(ctx context.Context, in *AnswerQuestionRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[AnswerDelta], error)
 	// ReviewFile performs a template-based code review of a file
 	ReviewFile(ctx context.Context, in *ReviewFileRequest, opts ...grpc.CallOption) (*ReviewFileResponse, error)
 	// GenerateEmbedding creates an embedding vector for text
@@ -85,6 +93,25 @@ func (c *reasoningServiceClient) AnswerQuestion(ctx context.Context, in *AnswerQ
 	return out, nil
 }
 
+func (c *reasoningServiceClient) AnswerQuestionStream(ctx context.Context, in *AnswerQuestionRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[AnswerDelta], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ReasoningService_ServiceDesc.Streams[0], ReasoningService_AnswerQuestionStream_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[AnswerQuestionRequest, AnswerDelta]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ReasoningService_AnswerQuestionStreamClient = grpc.ServerStreamingClient[AnswerDelta]
+
 func (c *reasoningServiceClient) ReviewFile(ctx context.Context, in *ReviewFileRequest, opts ...grpc.CallOption) (*ReviewFileResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReviewFileResponse)
@@ -127,6 +154,13 @@ type ReasoningServiceServer interface {
 	ExplainRelationship(context.Context, *ExplainRelationshipRequest) (*ExplainRelationshipResponse, error)
 	// AnswerQuestion answers a natural language question about the codebase
 	AnswerQuestion(context.Context, *AnswerQuestionRequest) (*AnswerQuestionResponse, error)
+	// AnswerQuestionStream is the server-streaming variant of AnswerQuestion.
+	// The server emits zero-or-more AnswerDelta messages containing incremental
+	// text chunks while the model is generating, followed by a terminal
+	// AnswerDelta with `finished = true` carrying the final usage stats. This
+	// lets callers render tokens progressively instead of waiting for the whole
+	// answer. Semantics of the request are identical to AnswerQuestion.
+	AnswerQuestionStream(*AnswerQuestionRequest, grpc.ServerStreamingServer[AnswerDelta]) error
 	// ReviewFile performs a template-based code review of a file
 	ReviewFile(context.Context, *ReviewFileRequest) (*ReviewFileResponse, error)
 	// GenerateEmbedding creates an embedding vector for text
@@ -151,6 +185,9 @@ func (UnimplementedReasoningServiceServer) ExplainRelationship(context.Context, 
 }
 func (UnimplementedReasoningServiceServer) AnswerQuestion(context.Context, *AnswerQuestionRequest) (*AnswerQuestionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AnswerQuestion not implemented")
+}
+func (UnimplementedReasoningServiceServer) AnswerQuestionStream(*AnswerQuestionRequest, grpc.ServerStreamingServer[AnswerDelta]) error {
+	return status.Error(codes.Unimplemented, "method AnswerQuestionStream not implemented")
 }
 func (UnimplementedReasoningServiceServer) ReviewFile(context.Context, *ReviewFileRequest) (*ReviewFileResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReviewFile not implemented")
@@ -235,6 +272,17 @@ func _ReasoningService_AnswerQuestion_Handler(srv interface{}, ctx context.Conte
 	}
 	return interceptor(ctx, in, info, handler)
 }
+
+func _ReasoningService_AnswerQuestionStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(AnswerQuestionRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ReasoningServiceServer).AnswerQuestionStream(m, &grpc.GenericServerStream[AnswerQuestionRequest, AnswerDelta]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ReasoningService_AnswerQuestionStreamServer = grpc.ServerStreamingServer[AnswerDelta]
 
 func _ReasoningService_ReviewFile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReviewFileRequest)
@@ -322,6 +370,12 @@ var ReasoningService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ReasoningService_SimulateChange_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "AnswerQuestionStream",
+			Handler:       _ReasoningService_AnswerQuestionStream_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "reasoning/v1/reasoning.proto",
 }

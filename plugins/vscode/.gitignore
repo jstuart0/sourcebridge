@@ -1,0 +1,7 @@
+# Build outputs and dependency caches for the VS Code extension.
+# Keep these local; don't track them in git.
+node_modules/
+out/
+*.vsix
+.vscode-test/
+.eslintcache

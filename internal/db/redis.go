@@ -20,6 +20,12 @@ type Cache interface {
 	Get(ctx context.Context, key string) (string, error)
 	Set(ctx context.Context, key string, value string, ttl time.Duration) error
 	Delete(ctx context.Context, key string) error
+	// SetIfAbsent atomically stores value at key with ttl iff key does not
+	// exist. Returns true when the caller acquired the key, false when it
+	// was already held. Used by the trash retention worker for leader
+	// election across replicas; anything needing an advisory lock can
+	// reuse it.
+	SetIfAbsent(ctx context.Context, key string, value string, ttl time.Duration) (bool, error)
 }
 
 // --- In-memory cache ---
@@ -76,6 +82,24 @@ func (c *InMemoryCache) Delete(_ context.Context, key string) error {
 	return nil
 }
 
+func (c *InMemoryCache) SetIfAbsent(_ context.Context, key string, value string, ttl time.Duration) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// If an entry exists and hasn't expired, refuse to take the key.
+	if entry, ok := c.entries[key]; ok {
+		if entry.expiresAt.IsZero() || time.Now().Before(entry.expiresAt) {
+			return false, nil
+		}
+	}
+	var expiresAt time.Time
+	if ttl > 0 {
+		expiresAt = time.Now().Add(ttl)
+	}
+	c.entries[key] = cacheEntry{value: value, expiresAt: expiresAt}
+	return true, nil
+}
+
 // --- Redis cache ---
 
 // RedisCache wraps a go-redis client behind the Cache interface.
@@ -117,6 +141,12 @@ func (c *RedisCache) Set(ctx context.Context, key string, value string, ttl time
 
 func (c *RedisCache) Delete(ctx context.Context, key string) error {
 	return c.client.Del(ctx, key).Err()
+}
+
+func (c *RedisCache) SetIfAbsent(ctx context.Context, key string, value string, ttl time.Duration) (bool, error) {
+	// Redis SETNX via SetNX primitive. go-redis returns true iff the key
+	// was set (did not exist before). TTL is applied atomically.
+	return c.client.SetNX(ctx, key, value, ttl).Result()
 }
 
 // Close closes the underlying Redis connection.

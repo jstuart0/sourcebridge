@@ -56,6 +56,7 @@ import { ImpactReportPanel } from "@/components/impact-report";
 import { ChangeSimulationPanel } from "@/components/change-simulation";
 import { ArchitectureDiagram } from "@/components/architecture/ArchitectureDiagram";
 import { RelatedReposPanel } from "@/components/federation/RelatedReposPanel";
+import { CreateRequirementDialog } from "@/components/requirements/CreateRequirementDialog";
 import { SymbolTree } from "@/components/source/SymbolTree";
 import { SymbolList } from "@/components/source/SymbolList";
 import { kindBadgeClass, kindLabel, SYMBOL_KINDS } from "@/components/source/symbol-kind";
@@ -739,6 +740,7 @@ export default function RepositoryDetailPage() {
   const [importContent, setImportContent] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [linkResult, setLinkResult] = useState<string | null>(null);
+  const [createRequirementOpen, setCreateRequirementOpen] = useState(false);
   const [symbolChatQuestion, setSymbolChatQuestion] = useState("");
   const [symbolChatByScope, setSymbolChatByScope] = useState<Record<string, SymbolChatMessage[]>>({});
   const [specExtracting, setSpecExtracting] = useState(false);
@@ -758,7 +760,7 @@ export default function RepositoryDetailPage() {
     variables: { repositoryId: repoId, query: symbolQuery || undefined, kind: symbolKindFilter || undefined, limit: 200 },
     pause: tab !== "symbols" && tab !== "analysis",
   });
-  const [reqsResult] = useQuery({
+  const [reqsResult, reexecuteRequirements] = useQuery({
     query: REQUIREMENTS_QUERY,
     variables: { repositoryId: repoId, limit: 50 },
     pause: tab !== "requirements",
@@ -983,17 +985,24 @@ export default function RepositoryDetailPage() {
     () => sourceTargetFromSearchParams(new URLSearchParams(searchParams.toString())),
     [searchParams]
   );
+  // Engine-mode-aware picker: must filter by generationMode so the selected
+  // engine toggle (Classic vs Understanding First) is respected. Without this
+  // guard, .find() returns whichever artifact the server happened to list
+  // first, which can mask a Classic-mode READY artifact behind an
+  // Understanding-First FAILED one (or vice versa) in the UI.
+  const matchesEngine = (a: KnowledgeArtifact): boolean =>
+    (a.generationMode || "").toUpperCase() === knowledgeGenerationMode;
   const currentCliffNotes = knowledgeArtifacts.find(
-    (a) => a.type === "CLIFF_NOTES" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
+    (a) => a.type === "CLIFF_NOTES" && a.audience === knowledgeAudience && a.depth === knowledgeDepth && matchesEngine(a)
   );
   const currentLearningPath = knowledgeArtifacts.find(
-    (a) => a.type === "LEARNING_PATH" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
+    (a) => a.type === "LEARNING_PATH" && a.audience === knowledgeAudience && a.depth === knowledgeDepth && matchesEngine(a)
   );
   const currentCodeTour = knowledgeArtifacts.find(
-    (a) => a.type === "CODE_TOUR" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
+    (a) => a.type === "CODE_TOUR" && a.audience === knowledgeAudience && a.depth === knowledgeDepth && matchesEngine(a)
   );
   const currentWorkflowStory = knowledgeArtifacts.find(
-    (a) => a.type === "WORKFLOW_STORY" && a.audience === knowledgeAudience && a.depth === knowledgeDepth
+    (a) => a.type === "WORKFLOW_STORY" && a.audience === knowledgeAudience && a.depth === knowledgeDepth && matchesEngine(a)
   );
   const currentUnderstanding: RepositoryUnderstanding | null = repoResult.data?.repository?.repositoryUnderstanding || null;
   const shouldAutoCollapseUnderstanding = shouldCollapseRepositoryUnderstanding(currentUnderstanding);
@@ -1077,7 +1086,7 @@ export default function RepositoryDetailPage() {
   useEffect(() => { setTourStopIndex(0); }, [codeTourId]);
 
   const availableLenses = knowledgeArtifacts
-    .filter((a) => a.type === "CLIFF_NOTES")
+    .filter((a) => a.type === "CLIFF_NOTES" && matchesEngine(a))
     .map((a) => `${a.audience}:${a.depth}`)
     .filter((value, index, arr) => arr.indexOf(value) === index);
 
@@ -1131,10 +1140,37 @@ export default function RepositoryDetailPage() {
     if (!discussQuestion.trim()) return;
     trackEvent({ event: "discuss_code_used", repositoryId: repoId, metadata: { questionLength: discussQuestion.trim().length } });
     setAiLoading(true);
-    setDiscussResult(null);
+    setDiscussResult({ answer: "" });
     try {
-      const res = await discussCode({ input: { repositoryId: repoId, question: discussQuestion } });
-      if (res.data?.discussCode) setDiscussResult(res.data.discussCode);
+      // Use the SSE streaming endpoint so the user sees tokens as
+      // they're generated. On error we fall back to the legacy
+      // GraphQL mutation so older servers (where /discuss/stream
+      // isn't mounted) still work.
+      const { askStream } = await import("@/lib/askStream");
+      let accumulated = "";
+      let streamErrored = false;
+      await askStream(
+        { repositoryId: repoId, question: discussQuestion.trim() },
+        {
+          onToken: (delta) => {
+            accumulated += delta;
+            setDiscussResult({ answer: accumulated });
+          },
+          onDone: (result) => {
+            // Server's final answer is authoritative — prefer it
+            // when non-empty (it may have been post-processed) and
+            // otherwise keep whatever we streamed.
+            setDiscussResult({ answer: result.answer || accumulated });
+          },
+          onError: () => {
+            streamErrored = true;
+          },
+        },
+      );
+      if (streamErrored) {
+        const res = await discussCode({ input: { repositoryId: repoId, question: discussQuestion } });
+        if (res.data?.discussCode) setDiscussResult(res.data.discussCode);
+      }
     } finally {
       setAiLoading(false);
     }
@@ -2130,7 +2166,10 @@ export default function RepositoryDetailPage() {
       {/* Requirements Tab */}
       {tab === "requirements" && (
         <div>
-          <div className="mb-4 flex gap-4">
+          <div className="mb-4 flex flex-wrap gap-3">
+            <Button onClick={() => setCreateRequirementOpen(true)}>
+              + New requirement
+            </Button>
             <Button variant="secondary" onClick={handleAutoLink} disabled={aiLoading}>
               {aiLoading ? "Linking..." : "Auto-Link Specs to Code"}
             </Button>
@@ -2189,6 +2228,15 @@ export default function RepositoryDetailPage() {
               </div>
             )}
           </Panel>
+          <CreateRequirementDialog
+            open={createRequirementOpen}
+            repositoryId={repoId}
+            onClose={() => setCreateRequirementOpen(false)}
+            onCreated={() => {
+              // Refresh the list so the new row appears immediately.
+              reexecuteRequirements({ requestPolicy: "network-only" });
+            }}
+          />
         </div>
       )}
 
@@ -3441,7 +3489,7 @@ export default function RepositoryDetailPage() {
                   </div>
                 </div>
 
-                {knowledgeArtifacts.filter((a) => a.status === "FAILED").map((a) => (
+                {knowledgeArtifacts.filter((a) => a.status === "FAILED" && matchesEngine(a)).map((a) => (
                   <Panel key={a.id} className="border-[var(--color-error,#ef4444)]">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-sm text-[var(--color-error,#ef4444)]">

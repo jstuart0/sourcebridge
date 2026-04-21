@@ -226,6 +226,14 @@ type SourceRevision struct {
 	DocsFingerprint    string `json:"docs_fingerprint,omitempty"`
 }
 
+// SourceRef identifies an evidence source (e.g. a specific symbol or file)
+// referenced by a knowledge artifact. Used by selective invalidation to
+// look up artifacts whose provenance points at a changed entity.
+type SourceRef struct {
+	SourceType EvidenceSourceType
+	SourceID   string
+}
+
 // Artifact is a persisted knowledge artifact (Cliff Notes, learning path, code tour).
 type Artifact struct {
 	ID                      string         `json:"id"`
@@ -246,10 +254,17 @@ type Artifact struct {
 	UnderstandingRevisionFP string         `json:"understanding_revision_fp,omitempty"`
 	RendererVersion         string         `json:"renderer_version,omitempty"`
 	Stale                   bool           `json:"stale"`
-	GeneratedAt             time.Time      `json:"generated_at,omitempty"`
-	CreatedAt               time.Time      `json:"created_at"`
-	UpdatedAt               time.Time      `json:"updated_at"`
-	Sections                []Section      `json:"sections,omitempty"`
+	// StaleReasonJSON is the JSON-serialized graph.StaleArtifactReason that
+	// caused the most recent stale mark (if any). Persisted on the artifact
+	// so the "why" explanation survives later reindexes that overwrite the
+	// repository-level latest ImpactReport.
+	StaleReasonJSON string `json:"stale_reason_json,omitempty"`
+	// StaleReportID is the ImpactReport.ID that caused the stale mark.
+	StaleReportID string    `json:"stale_report_id,omitempty"`
+	GeneratedAt   time.Time `json:"generated_at,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Sections      []Section `json:"sections,omitempty"`
 }
 
 // GenerationMode determines which orchestration path should be used to

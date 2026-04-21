@@ -39,6 +39,18 @@ data:
   SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL: "http://localhost:11434"
   SOURCEBRIDGE_WORKER_EMBEDDING_MODEL: "nomic-embed-text"
   SOURCEBRIDGE_WORKER_EMBEDDING_DIMENSION: "768"
+  # MCP (Model Context Protocol) — server for Claude Code, Codex, Cursor, etc.
+  # NOTE: MCP sessions are stored in-process. If you enable this, set the API
+  # deployment to replicas=1 (see api.yaml) until shared session storage lands,
+  # otherwise clients will see intermittent "Invalid or expired session" errors
+  # as requests round-robin between pods.
+  SOURCEBRIDGE_MCP_ENABLED: "false"
+  SOURCEBRIDGE_MCP_SESSION_TTL: "3600"
+  SOURCEBRIDGE_MCP_KEEPALIVE: "30"
+  SOURCEBRIDGE_MCP_MAX_SESSIONS: "100"
+  # Comma-separated repo ID allowlist (empty = all repos accessible via MCP)
+  # SOURCEBRIDGE_MCP_REPOS: ""
+
   # Knowledge generation pressure controls
   SOURCEBRIDGE_KNOWLEDGE_MAX_CONCURRENCY: "1"
   SOURCEBRIDGE_HIERARCHICAL_CONCURRENCY: "3"

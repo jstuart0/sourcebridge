@@ -1,0 +1,12 @@
+# Build-time and developer-only files that shouldn't ship in the VSIX.
+src/**
+**/__tests__/**
+**/*.test.ts
+**/*.map
+tsconfig.json
+jest.config.js
+eslint.config.cjs
+.vscode-test/**
+node_modules/**
+**/.eslintcache
+**/*.vsix

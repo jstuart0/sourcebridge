@@ -43,7 +43,14 @@ async def test_complete_attaches_disable_thinking_override(monkeypatch: pytest.M
 
     create = provider.client.chat.completions.create
     assert create.calls
+    # llama.cpp path: kwarg toggles the Jinja template variable.
     assert create.calls[0]["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    # Ollama path: `/no_think` directive appended to the user message.
+    # (Both are sent on every call; each backend honors the one it
+    # understands, the other is a no-op.)
+    user_msg = create.calls[0]["messages"][-1]
+    assert user_msg["role"] == "user"
+    assert user_msg["content"].endswith("/no_think")
     assert provider.client.api_key == "x"
 
 
@@ -84,7 +91,63 @@ async def test_stream_attaches_disable_thinking_override(monkeypatch: pytest.Mon
     create = provider.client.chat.completions.create
     assert create.calls
     assert create.calls[0]["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    user_msg = create.calls[0]["messages"][-1]
+    assert user_msg["content"].endswith("/no_think")
     assert provider.client.api_key == "x"
+
+
+@pytest.mark.asyncio
+async def test_no_think_scoped_to_qwen_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-Qwen models must not receive the `/no_think` directive,
+    even when disable_thinking is True, because the string would leak
+    into those models' context as literal content rather than being
+    interpreted as a directive."""
+    monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
+    provider = OpenAICompatProvider(
+        api_key="x",
+        model="gpt-4o",
+        base_url="https://api.openai.com/v1",
+        provider_name="openai",
+        disable_thinking=True,
+    )
+    await provider.complete("hello")
+    user_msg = provider.client.chat.completions.create.calls[0]["messages"][-1]
+    assert "/no_think" not in user_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_no_think_not_duplicated_on_second_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A user whose prompt already contains `/no_think` (deliberate
+    or from a prior pass) shouldn't get a second copy appended."""
+    monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
+    provider = OpenAICompatProvider(
+        api_key="x",
+        model="qwen3:14b",
+        base_url="http://localhost:11434/v1",
+        provider_name="ollama",
+        disable_thinking=True,
+    )
+    await provider.complete("what is 2+2?\n\n/no_think")
+    user_msg = provider.client.chat.completions.create.calls[0]["messages"][-1]
+    assert user_msg["content"].count("/no_think") == 1
+
+
+@pytest.mark.asyncio
+async def test_disable_thinking_false_injects_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Callers that opt out of the disable_thinking flag should see
+    the prompt pass through unchanged on Qwen models too."""
+    monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
+    provider = OpenAICompatProvider(
+        api_key="x",
+        model="qwen3.5:35b-a3b",
+        base_url="http://localhost:11434/v1",
+        provider_name="ollama",
+        disable_thinking=False,
+    )
+    await provider.complete("hi")
+    call = provider.client.chat.completions.create.calls[0]
+    assert call["extra_body"] is None
+    assert "/no_think" not in call["messages"][-1]["content"]
 
 
 def test_ollama_placeholder_api_key_is_suppressed(monkeypatch: pytest.MonkeyPatch) -> None:

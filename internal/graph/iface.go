@@ -72,6 +72,11 @@ type GraphStore interface {
 	GetRequirementsByIDs(ids []string) map[string]*StoredRequirement
 	GetRequirementByExternalID(repoID, externalID string) *StoredRequirement
 	UpdateRequirement(id string, priority string, tags []string) *StoredRequirement
+	// UpdateRequirementFields updates a requirement in place. Non-empty
+	// string fields in `fields` replace the stored value; unset fields
+	// are preserved. Returns the updated row or nil when the target is
+	// missing/trashed.
+	UpdateRequirementFields(id string, fields RequirementUpdate) *StoredRequirement
 
 	// Link operations
 	StoreLink(repoID string, link *StoredLink) *StoredLink

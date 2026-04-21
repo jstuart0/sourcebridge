@@ -1,0 +1,36 @@
+# Enterprise Web Build — sets NEXT_PUBLIC_EDITION=enterprise at build time
+# Next.js bakes NEXT_PUBLIC_* env vars into the bundle during build,
+# so the enterprise web needs its own image.
+
+# Build stage
+ARG NODE_BASE_IMAGE=node:22-alpine
+FROM ${NODE_BASE_IMAGE} AS builder
+
+WORKDIR /app
+
+COPY web/package.json web/package-lock.json* ./
+RUN npm ci
+
+COPY web/ .
+
+# Enterprise edition flag — baked into the Next.js bundle
+ENV NEXT_PUBLIC_EDITION=enterprise
+
+RUN npm run build && mkdir -p /app/public
+
+# Runtime stage
+ARG NODE_BASE_IMAGE=node:22-alpine
+FROM ${NODE_BASE_IMAGE}
+
+WORKDIR /app
+
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+
+EXPOSE 3000
+
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+CMD ["node", "server.js"]

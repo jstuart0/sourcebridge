@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
@@ -1330,6 +1331,109 @@ func knowledgePrewarmOnIndexEnabled() bool {
 	default:
 		return true
 	}
+}
+
+// selectiveInvalidationEnabled toggles Phase 1 selective knowledge artifact
+// invalidation on reindex. When true, only artifacts whose evidence references
+// a changed symbol or file are marked stale. When false, the legacy blanket
+// MarkAllStale behavior is preserved as a safe fallback.
+//
+// Defaults to true. Override with SOURCEBRIDGE_SELECTIVE_INVALIDATION=false.
+func selectiveInvalidationEnabled() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("SOURCEBRIDGE_SELECTIVE_INVALIDATION")))
+	switch raw {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
+}
+
+// selectiveInvalidationMaxChanges caps the total number of changed
+// (symbols + files) entries fed into selective invalidation. Beyond this
+// threshold we fall back to blanket invalidation, because the selective query
+// becomes a large IN clause and the result would be near-universal-stale
+// anyway.
+//
+// Defaults to 200. Override with SOURCEBRIDGE_SELECTIVE_INVALIDATION_MAX_CHANGES.
+func selectiveInvalidationMaxChanges() int {
+	raw := strings.TrimSpace(os.Getenv("SOURCEBRIDGE_SELECTIVE_INVALIDATION_MAX_CHANGES"))
+	if raw == "" {
+		return 200
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 200
+	}
+	return n
+}
+
+// DeltaRegenMode controls Phase 2 delta-driven auto-regeneration after
+// reindex. Three modes:
+//
+//   - off: no auto-regen logic runs (default).
+//   - shadow: the driver runs every decision step (candidate selection,
+//     prioritization, capping, rate-limiting, understanding gating) and
+//     emits telemetry/slog describing what it WOULD enqueue — but skips the
+//     actual enqueue. Lets you measure cost + decision quality on real
+//     traffic before committing to live.
+//   - live: full auto-regen — stale artifacts get regenerated in the
+//     background via the existing RefreshKnowledgeArtifact path on the
+//     prewarm priority queue.
+type DeltaRegenMode string
+
+const (
+	DeltaRegenModeOff    DeltaRegenMode = "off"
+	DeltaRegenModeShadow DeltaRegenMode = "shadow"
+	DeltaRegenModeLive   DeltaRegenMode = "live"
+)
+
+// deltaRegenMode returns the effective mode. If Phase 1 selective
+// invalidation is disabled, forces off — without selective invalidation,
+// StaleArtifacts carries the legacy pre-stale collected set (wrong
+// semantics) and auto-regen would thrash through every ready artifact.
+func deltaRegenMode() DeltaRegenMode {
+	if !selectiveInvalidationEnabled() {
+		return DeltaRegenModeOff
+	}
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("SOURCEBRIDGE_DELTA_REGEN_MODE")))
+	switch raw {
+	case "shadow":
+		return DeltaRegenModeShadow
+	case "live", "on", "true", "1":
+		return DeltaRegenModeLive
+	default:
+		return DeltaRegenModeOff
+	}
+}
+
+// deltaRegenMaxPerIndex caps the number of artifacts auto-regenerated per
+// reindex invocation. Beyond this cap the remainder stay stale until
+// manual refresh. Default 5.
+func deltaRegenMaxPerIndex() int {
+	raw := strings.TrimSpace(os.Getenv("SOURCEBRIDGE_DELTA_REGEN_MAX_PER_INDEX"))
+	if raw == "" {
+		return 5
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 5
+	}
+	return n
+}
+
+// deltaRegenMaxPerRepoPerHour caps the rolling number of auto-regens per
+// repo per hour. Protects against reindex thrash. Default 20.
+func deltaRegenMaxPerRepoPerHour() int {
+	raw := strings.TrimSpace(os.Getenv("SOURCEBRIDGE_DELTA_REGEN_MAX_PER_REPO_PER_HOUR"))
+	if raw == "" {
+		return 20
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 20
+	}
+	return n
 }
 
 func enrichSnapshotWithCliffNotesAnalysis(

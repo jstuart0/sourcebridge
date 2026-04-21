@@ -46,6 +46,19 @@ type AffectedRequirement struct {
 	TotalLinks    int    `json:"total_links"`
 }
 
+// StaleArtifactReason explains why a given knowledge artifact was marked
+// stale by a reindex. It's the rich counterpart to the bare
+// ImpactReport.StaleArtifacts []string list. Kept in the graph package (not
+// knowledge) because graph does not import knowledge; knowledge.freshness
+// constructs these values and returns them to callers in graph.
+type StaleArtifactReason struct {
+	ArtifactID string   `json:"artifact_id"`
+	Symbols    []string `json:"symbols,omitempty"`
+	Files      []string `json:"files,omitempty"`
+	Blanket    bool     `json:"blanket,omitempty"`
+	ReportID   string   `json:"report_id,omitempty"`
+}
+
 // ImpactReport holds the results of a change impact analysis.
 type ImpactReport struct {
 	ID                   string                `json:"id"`
@@ -58,7 +71,14 @@ type ImpactReport struct {
 	SymbolsRemoved       []ImpactSymbolChange  `json:"symbols_removed"`
 	AffectedLinks        []AffectedLink        `json:"affected_links"`
 	AffectedRequirements []AffectedRequirement `json:"affected_requirements"`
-	StaleArtifacts       []string              `json:"stale_artifacts"`
+	// StaleArtifacts is the legacy bare-ID list. Preserved for rollback
+	// compatibility; populated alongside StaleArtifactReasons.
+	StaleArtifacts []string `json:"stale_artifacts"`
+	// StaleArtifactReasons is the richer per-artifact invalidation metadata
+	// (which symbols/files caused the stale mark, or whether it was a blanket
+	// fallback). Empty on legacy reports and when selective invalidation is
+	// disabled.
+	StaleArtifactReasons []StaleArtifactReason `json:"stale_artifact_reasons,omitempty"`
 	ComputedAt           time.Time             `json:"computed_at"`
 }
 
@@ -152,6 +172,9 @@ func ComputeImpact(store GraphStore, repoID string, fileDiffs []ImpactFileDiff, 
 	}
 	if report.StaleArtifacts == nil {
 		report.StaleArtifacts = []string{}
+	}
+	if report.StaleArtifactReasons == nil {
+		report.StaleArtifactReasons = []StaleArtifactReason{}
 	}
 
 	return report

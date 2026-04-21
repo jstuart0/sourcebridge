@@ -20,6 +20,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/api/middleware"
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 	"github.com/sourcebridge/sourcebridge/internal/config"
+	"github.com/sourcebridge/sourcebridge/internal/db"
 	"github.com/sourcebridge/sourcebridge/internal/events"
 	"github.com/sourcebridge/sourcebridge/internal/featureflags"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
@@ -27,6 +28,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
+	"github.com/sourcebridge/sourcebridge/internal/trash"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
@@ -110,6 +112,20 @@ func WithSummaryNodeStore(sns comprehension.SummaryNodeStore) ServerOption {
 	return func(s *Server) { s.summaryNodeStore = sns }
 }
 
+// WithCache injects a shared KV cache (memory or Redis). The MCP session
+// store uses this to persist streamable-HTTP session state across replicas
+// when a Redis-backed cache is provided.
+func WithCache(c db.Cache) ServerOption {
+	return func(s *Server) { s.cache = c }
+}
+
+// WithTrashStore wires the soft-delete recycle bin. Callers pass nil
+// to run without the feature (embedded mode, or when trash is disabled
+// in config).
+func WithTrashStore(ts trash.Store) ServerOption {
+	return func(s *Server) { s.trashStore = ts }
+}
+
 // Server is the HTTP API server.
 type Server struct {
 	cfg                *config.Config
@@ -137,7 +153,8 @@ type Server struct {
 	mcpToolExtender    MCPToolExtender                // deferred to mcp handler at setup
 	comprehensionStore comprehension.Store            // comprehension settings + model capabilities
 	summaryNodeStore   comprehension.SummaryNodeStore // cached summary tree nodes
-
+	cache              db.Cache                       // shared KV cache (memory or Redis); nil = MCP session store falls back to in-memory
+	trashStore         trash.Store                    // soft-delete recycle bin; nil = feature disabled
 }
 
 // getStore returns a tenant-filtered store when RepoAccessMiddleware has
@@ -285,7 +302,7 @@ func (s *Server) setupRouter() {
 
 	// GraphQL server
 	gqlSrv := handler.NewDefaultServer(graphql.NewExecutableSchema(graphql.Config{
-		Resolvers: &graphql.Resolver{Store: s.store, KnowledgeStore: s.knowledgeStore, Worker: s.worker, Orchestrator: s.orchestrator, Config: s.cfg, EventBus: s.eventBus, Flags: s.flags, GitConfig: s.gitConfigStore, ComprehensionStore: s.comprehensionStore},
+		Resolvers: &graphql.Resolver{Store: s.store, KnowledgeStore: s.knowledgeStore, Worker: s.worker, Orchestrator: s.orchestrator, Config: s.cfg, EventBus: s.eventBus, Flags: s.flags, GitConfig: s.gitConfigStore, ComprehensionStore: s.comprehensionStore, TrashStore: s.trashStore},
 	}))
 
 	// Protected API routes (accepts both JWT and API tokens)
@@ -306,6 +323,12 @@ func (s *Server) setupRouter() {
 
 		// SSE events
 		r.Get("/api/v1/events", s.handleSSE)
+
+		// Server-Sent Events stream of a discuss_code answer. The web
+		// UI uses this for the "Ask" panel so users see tokens as the
+		// model generates them. GraphQL's `discussCode` mutation is
+		// still the unary fallback for clients that can't consume SSE.
+		r.With(aiConcurrencyMiddleware).Post("/api/v1/discuss/stream", s.handleDiscussStream)
 	})
 
 	// Admin API routes (requires auth, accepts both JWT and API tokens)
@@ -388,7 +411,7 @@ func (s *Server) setupRouter() {
 	if s.cfg.MCP.Enabled {
 		sessionTTL := time.Duration(s.cfg.MCP.SessionTTL) * time.Second
 		keepalive := time.Duration(s.cfg.MCP.Keepalive) * time.Second
-		s.mcp = newMCPHandler(s.store, s.knowledgeStore, s.worker, s.cfg.MCP.Repos, sessionTTL, keepalive, s.cfg.MCP.MaxSessions)
+		s.mcp = newMCPHandler(s.store, s.knowledgeStore, s.worker, s.cfg.MCP.Repos, sessionTTL, keepalive, s.cfg.MCP.MaxSessions, s.cache)
 		// Wire enterprise extensions if provided via server options
 		if s.mcpPermChecker != nil {
 			s.mcp.permChecker = s.mcpPermChecker

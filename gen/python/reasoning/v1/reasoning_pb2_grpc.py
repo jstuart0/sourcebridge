@@ -50,6 +50,11 @@ class ReasoningServiceStub(object):
                 request_serializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionRequest.SerializeToString,
                 response_deserializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionResponse.FromString,
                 _registered_method=True)
+        self.AnswerQuestionStream = channel.unary_stream(
+                '/sourcebridge.reasoning.v1.ReasoningService/AnswerQuestionStream',
+                request_serializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionRequest.SerializeToString,
+                response_deserializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerDelta.FromString,
+                _registered_method=True)
         self.ReviewFile = channel.unary_unary(
                 '/sourcebridge.reasoning.v1.ReasoningService/ReviewFile',
                 request_serializer=reasoning_dot_v1_dot_reasoning__pb2.ReviewFileRequest.SerializeToString,
@@ -87,6 +92,18 @@ class ReasoningServiceServicer(object):
 
     def AnswerQuestion(self, request, context):
         """AnswerQuestion answers a natural language question about the codebase
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def AnswerQuestionStream(self, request, context):
+        """AnswerQuestionStream is the server-streaming variant of AnswerQuestion.
+        The server emits zero-or-more AnswerDelta messages containing incremental
+        text chunks while the model is generating, followed by a terminal
+        AnswerDelta with `finished = true` carrying the final usage stats. This
+        lets callers render tokens progressively instead of waiting for the whole
+        answer. Semantics of the request are identical to AnswerQuestion.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -130,6 +147,11 @@ def add_ReasoningServiceServicer_to_server(servicer, server):
                     servicer.AnswerQuestion,
                     request_deserializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionRequest.FromString,
                     response_serializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionResponse.SerializeToString,
+            ),
+            'AnswerQuestionStream': grpc.unary_stream_rpc_method_handler(
+                    servicer.AnswerQuestionStream,
+                    request_deserializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionRequest.FromString,
+                    response_serializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerDelta.SerializeToString,
             ),
             'ReviewFile': grpc.unary_unary_rpc_method_handler(
                     servicer.ReviewFile,
@@ -229,6 +251,33 @@ class ReasoningService(object):
             '/sourcebridge.reasoning.v1.ReasoningService/AnswerQuestion',
             reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionRequest.SerializeToString,
             reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AnswerQuestionStream(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/sourcebridge.reasoning.v1.ReasoningService/AnswerQuestionStream',
+            reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionRequest.SerializeToString,
+            reasoning_dot_v1_dot_reasoning__pb2.AnswerDelta.FromString,
             options,
             channel_credentials,
             insecure,

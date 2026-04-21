@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -1269,24 +1270,22 @@ func (s *SurrealStore) GetRequirements(repoID string, limit, offset int) ([]*gra
 
 	vars := map[string]any{"repo_id": repoID}
 
-	// Count
-	countRows, err := queryOne[[]map[string]interface{}](ctx(), db,
-		"SELECT count() AS total FROM ca_requirement WHERE repo_id = $repo_id GROUP ALL", vars)
+	// Count (trashed rows excluded).
+	//
+	// WORKAROUND for SurrealDB 2.2.1: `SELECT count() ... WHERE x = $y AND
+	// deleted_at IS NONE GROUP ALL` silently ignores the IS NONE predicate
+	// when combined with an equality filter — returns the full repo total.
+	// `array::len((SELECT id FROM ...))` applies the filter correctly and
+	// is fast enough on requirement-sized datasets.
+	totalCnt, err := queryOne[int](ctx(), db,
+		"RETURN array::len((SELECT id FROM ca_requirement WHERE repo_id = $repo_id AND deleted_at IS NONE));", vars)
 	total := 0
-	if err == nil && len(countRows) > 0 {
-		if v, ok := countRows[0]["total"]; ok {
-			switch vt := v.(type) {
-			case float64:
-				total = int(vt)
-			case int:
-				total = vt
-			case uint64:
-				total = int(vt)
-			}
-		}
+	if err == nil {
+		total = totalCnt
 	}
 
-	sql := "SELECT * FROM ca_requirement WHERE repo_id = $repo_id"
+	// Exclude trashed rows. See soft-delete plan §1.4 ("read-path audit").
+	sql := "SELECT * FROM ca_requirement WHERE repo_id = $repo_id AND deleted_at IS NONE"
 	if limit > 0 {
 		sql += fmt.Sprintf(" LIMIT %d", limit)
 	}
@@ -1314,7 +1313,7 @@ func (s *SurrealStore) GetRequirement(id string) *graph.StoredRequirement {
 	}
 
 	rows, err := queryOne[[]surrealRequirement](ctx(), db,
-		"SELECT * FROM type::thing('ca_requirement', $id)",
+		"SELECT * FROM type::thing('ca_requirement', $id) WHERE deleted_at IS NONE",
 		map[string]any{"id": id})
 	if err != nil || len(rows) == 0 {
 		return nil
@@ -1330,7 +1329,7 @@ func (s *SurrealStore) GetRequirementsByIDs(ids []string) map[string]*graph.Stor
 	}
 
 	rows, err := queryOne[[]surrealRequirement](ctx(), db,
-		"SELECT * FROM ca_requirement WHERE id IN $ids.map(|$v| type::thing('ca_requirement', $v))",
+		"SELECT * FROM ca_requirement WHERE id IN $ids.map(|$v| type::thing('ca_requirement', $v)) AND deleted_at IS NONE",
 		map[string]any{"ids": ids})
 	if err != nil {
 		slog.Warn("failed to batch fetch requirements", "error", err, "count", len(ids))
@@ -1353,7 +1352,7 @@ func (s *SurrealStore) GetRequirementByExternalID(repoID, externalID string) *gr
 	}
 
 	rows, err := queryOne[[]surrealRequirement](ctx(), db,
-		"SELECT * FROM ca_requirement WHERE repo_id = $repo_id AND external_id = $eid LIMIT 1",
+		"SELECT * FROM ca_requirement WHERE repo_id = $repo_id AND external_id = $eid AND deleted_at IS NONE LIMIT 1",
 		map[string]any{"repo_id": repoID, "eid": externalID})
 	if err != nil || len(rows) == 0 {
 		return nil
@@ -1493,7 +1492,7 @@ func (s *SurrealStore) GetLink(id string) *graph.StoredLink {
 	}
 
 	rows, err := queryOne[[]surrealLink](ctx(), db,
-		"SELECT * FROM type::thing('ca_link', $id)",
+		"SELECT * FROM type::thing('ca_link', $id) WHERE deleted_at IS NONE",
 		map[string]any{"id": id})
 	if err != nil || len(rows) == 0 {
 		return nil
@@ -1508,7 +1507,7 @@ func (s *SurrealStore) GetLinksForRequirement(reqID string, includeRejected bool
 		return nil
 	}
 
-	sql := "SELECT * FROM ca_link WHERE requirement_id = $req_id"
+	sql := "SELECT * FROM ca_link WHERE requirement_id = $req_id AND deleted_at IS NONE"
 	if !includeRejected {
 		sql += " AND rejected = false"
 	}
@@ -1534,7 +1533,7 @@ func (s *SurrealStore) GetLinksForSymbol(symID string, includeRejected bool) []*
 		return nil
 	}
 
-	sql := "SELECT * FROM ca_link WHERE symbol_id = $sym_id"
+	sql := "SELECT * FROM ca_link WHERE symbol_id = $sym_id AND deleted_at IS NONE"
 	if !includeRejected {
 		sql += " AND rejected = false"
 	}
@@ -1585,7 +1584,7 @@ func (s *SurrealStore) GetLinksForFile(fileID string, startLine, endLine int, mi
 
 	// Get links for those symbols
 	linkRows, err := queryOne[[]surrealLink](ctx(), db,
-		"SELECT * FROM ca_link WHERE symbol_id IN $sym_ids AND rejected = false AND confidence >= $min_conf",
+		"SELECT * FROM ca_link WHERE symbol_id IN $sym_ids AND rejected = false AND deleted_at IS NONE AND confidence >= $min_conf",
 		map[string]any{
 			"sym_ids":  symIDs,
 			"min_conf": minConfidence,
@@ -1608,11 +1607,12 @@ func (s *SurrealStore) VerifyLink(linkID string, verified bool, verifiedBy strin
 		return nil
 	}
 
+	// Guard against updating a trashed link. deleted_at IS NONE.
 	var sql string
 	if verified {
-		sql = `UPDATE type::thing('ca_link', $id) SET verified = true, rejected = false, confidence = 1.0, verified_by = $by`
+		sql = `UPDATE type::thing('ca_link', $id) SET verified = true, rejected = false, confidence = 1.0, verified_by = $by WHERE deleted_at IS NONE`
 	} else {
-		sql = `UPDATE type::thing('ca_link', $id) SET rejected = true, verified = false, verified_by = $by`
+		sql = `UPDATE type::thing('ca_link', $id) SET rejected = true, verified = false, verified_by = $by WHERE deleted_at IS NONE`
 	}
 
 	_, err := surrealdb.Query[interface{}](ctx(), db, sql,
@@ -1633,7 +1633,7 @@ func (s *SurrealStore) GetLinksForRepo(repoID string) []*graph.StoredLink {
 	}
 
 	rows, err := queryOne[[]surrealLink](ctx(), db,
-		"SELECT * FROM ca_link WHERE repo_id = $repo_id AND rejected = false",
+		"SELECT * FROM ca_link WHERE repo_id = $repo_id AND rejected = false AND deleted_at IS NONE",
 		map[string]any{"repo_id": repoID})
 	if err != nil {
 		return nil
@@ -1714,13 +1714,91 @@ func (s *SurrealStore) UpdateRequirement(id string, priority string, tags []stri
 		return nil
 	}
 
+	// Refuse to update a trashed requirement. The mutation returns nil
+	// and the caller gets "requirement not found" — correct behaviour
+	// because from the caller's perspective the row is deleted.
 	rows, err := queryOne[[]surrealRequirement](ctx(), db,
-		"UPDATE type::thing('ca_requirement', $id) SET priority = $priority, tags = $tags, updated_at = time::now() RETURN AFTER",
+		"UPDATE type::thing('ca_requirement', $id) SET priority = $priority, tags = $tags, updated_at = time::now() WHERE deleted_at IS NONE RETURN AFTER",
 		map[string]any{"id": id, "priority": priority, "tags": tags})
 	if err != nil || len(rows) == 0 {
 		return nil
 	}
 	return rows[0].toStoredRequirement()
+}
+
+// UpdateRequirementFields applies a partial update, preserving any
+// field the caller leaves nil. Enforces externalId uniqueness per-repo
+// via a pre-check against non-trashed rows.
+func (s *SurrealStore) UpdateRequirementFields(id string, fields graph.RequirementUpdate) *graph.StoredRequirement {
+	db := s.client.DB()
+	if db == nil {
+		return nil
+	}
+	// Load current row to preserve non-modified fields and to scope the
+	// uniqueness check to the same repo. GetRequirement already filters
+	// trashed rows.
+	current := s.GetRequirement(id)
+	if current == nil {
+		return nil
+	}
+	if fields.ExternalID != nil && *fields.ExternalID != "" && *fields.ExternalID != current.ExternalID {
+		// Soft-delete aware uniqueness — see plan §1.4 on read-path filters.
+		existing, err := queryOne[int](ctx(), db,
+			"RETURN array::len((SELECT id FROM ca_requirement WHERE repo_id = $repo AND external_id = $eid AND deleted_at IS NONE));",
+			map[string]any{"repo": current.RepoID, "eid": *fields.ExternalID})
+		if err == nil && existing > 0 {
+			return nil
+		}
+	}
+
+	// Build a SET clause from the non-nil fields.
+	sets := []string{"updated_at = time::now()"}
+	vars := map[string]any{"id": id}
+	addString := func(col string, val *string) {
+		if val == nil {
+			return
+		}
+		sets = append(sets, col+" = $"+col)
+		vars[col] = *val
+	}
+	addStrings := func(col string, val *[]string) {
+		if val == nil {
+			return
+		}
+		sets = append(sets, col+" = $"+col)
+		vars[col] = *val
+	}
+	addString("external_id", fields.ExternalID)
+	addString("title", fields.Title)
+	addString("description", fields.Description)
+	addString("priority", fields.Priority)
+	addString("source", fields.Source)
+	addStrings("tags", fields.Tags)
+	addStrings("acceptance_criteria", fields.AcceptanceCriteria)
+
+	if len(sets) == 1 {
+		// Nothing substantive changed — return the current row.
+		return current
+	}
+
+	stmt := "UPDATE type::thing('ca_requirement', $id) SET " + joinComma(sets) + " WHERE deleted_at IS NONE RETURN AFTER"
+	rows, err := queryOne[[]surrealRequirement](ctx(), db, stmt, vars)
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	return rows[0].toStoredRequirement()
+}
+
+// joinComma is a tiny local join to avoid importing strings just here.
+func joinComma(parts []string) string {
+	out := ""
+	for i, p := range parts {
+		if i > 0 {
+			out += ", "
+		}
+		out += p
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -2106,6 +2184,15 @@ func (s *SurrealStore) StoreImpactReport(repoID string, report *graph.ImpactRepo
 	if db == nil {
 		return
 	}
+	// stale_artifact_reasons is an additive, rollback-safe JSON mirror of the
+	// rich StaleArtifactReasons slice. Old binaries that don't know about the
+	// column still read the legacy stale_artifacts []string column unchanged.
+	var reasonsJSON string
+	if len(report.StaleArtifactReasons) > 0 {
+		if b, err := json.Marshal(report.StaleArtifactReasons); err == nil {
+			reasonsJSON = string(b)
+		}
+	}
 	if _, err := surrealdb.Query[interface{}](ctx(), db,
 		`CREATE ca_impact_report SET
 			report_id = $report_id, repo_id = $repo_id,
@@ -2113,17 +2200,79 @@ func (s *SurrealStore) StoreImpactReport(repoID string, report *graph.ImpactRepo
 			files_changed = $files, symbols_added = $sym_added,
 			symbols_modified = $sym_modified, symbols_removed = $sym_removed,
 			affected_links = $aff_links, affected_requirements = $aff_reqs,
-			stale_artifacts = $stale, computed_at = time::now()`,
+			stale_artifacts = $stale, stale_artifact_reasons = $reasons,
+			computed_at = time::now()`,
 		map[string]any{
 			"report_id": report.ID, "repo_id": repoID,
 			"old_sha": report.OldCommitSHA, "new_sha": report.NewCommitSHA,
 			"files": report.FilesChanged, "sym_added": report.SymbolsAdded,
 			"sym_modified": report.SymbolsModified, "sym_removed": report.SymbolsRemoved,
 			"aff_links": report.AffectedLinks, "aff_reqs": report.AffectedRequirements,
-			"stale": report.StaleArtifacts,
+			"stale":   report.StaleArtifacts,
+			"reasons": reasonsJSON,
 		}); err != nil {
 		return
 	}
+}
+
+// impactReportRow is the shared row shape used by the impact-report read
+// paths. stale_artifact_reasons is a JSON string column (additive in
+// migration 030); old reports leave it empty.
+type impactReportRow struct {
+	ReportID             string                      `json:"report_id"`
+	RepoID               string                      `json:"repo_id"`
+	OldCommitSHA         string                      `json:"old_commit_sha"`
+	NewCommitSHA         string                      `json:"new_commit_sha"`
+	FilesChanged         []graph.ImpactFileDiff      `json:"files_changed"`
+	SymbolsAdded         []graph.ImpactSymbolChange  `json:"symbols_added"`
+	SymbolsModified      []graph.ImpactSymbolChange  `json:"symbols_modified"`
+	SymbolsRemoved       []graph.ImpactSymbolChange  `json:"symbols_removed"`
+	AffectedLinks        []graph.AffectedLink        `json:"affected_links"`
+	AffectedRequirements []graph.AffectedRequirement `json:"affected_requirements"`
+	StaleArtifacts       []string                    `json:"stale_artifacts"`
+	StaleArtifactReasons string                      `json:"stale_artifact_reasons"`
+	ComputedAt           surrealTime                 `json:"computed_at"`
+}
+
+func (r *impactReportRow) toImpactReport() *graph.ImpactReport {
+	report := &graph.ImpactReport{
+		ID:                   r.ReportID,
+		RepositoryID:         r.RepoID,
+		OldCommitSHA:         r.OldCommitSHA,
+		NewCommitSHA:         r.NewCommitSHA,
+		FilesChanged:         r.FilesChanged,
+		SymbolsAdded:         r.SymbolsAdded,
+		SymbolsModified:      r.SymbolsModified,
+		SymbolsRemoved:       r.SymbolsRemoved,
+		AffectedLinks:        r.AffectedLinks,
+		AffectedRequirements: r.AffectedRequirements,
+		StaleArtifacts:       r.StaleArtifacts,
+		ComputedAt:           r.ComputedAt.Time,
+	}
+	if r.StaleArtifactReasons != "" {
+		var parsed []graph.StaleArtifactReason
+		if err := json.Unmarshal([]byte(r.StaleArtifactReasons), &parsed); err == nil {
+			report.StaleArtifactReasons = parsed
+		}
+	}
+	// Rollback-compat fallback: legacy reports only have the bare ID list.
+	// Project those into the rich shape with Blanket=true so consumers see a
+	// usable "stale for unknown reason" signal instead of nothing.
+	if len(report.StaleArtifactReasons) == 0 && len(report.StaleArtifacts) > 0 {
+		projected := make([]graph.StaleArtifactReason, 0, len(report.StaleArtifacts))
+		for _, aid := range report.StaleArtifacts {
+			if aid == "" {
+				continue
+			}
+			projected = append(projected, graph.StaleArtifactReason{
+				ArtifactID: aid,
+				Blanket:    true,
+				ReportID:   r.ReportID,
+			})
+		}
+		report.StaleArtifactReasons = projected
+	}
+	return report
 }
 
 // GetLatestImpactReport returns the most recent impact report for a repository.
@@ -2132,35 +2281,13 @@ func (s *SurrealStore) GetLatestImpactReport(repoID string) *graph.ImpactReport 
 	if db == nil {
 		return nil
 	}
-	type impactRow struct {
-		ReportID             string                      `json:"report_id"`
-		RepoID               string                      `json:"repo_id"`
-		OldCommitSHA         string                      `json:"old_commit_sha"`
-		NewCommitSHA         string                      `json:"new_commit_sha"`
-		FilesChanged         []graph.ImpactFileDiff      `json:"files_changed"`
-		SymbolsAdded         []graph.ImpactSymbolChange  `json:"symbols_added"`
-		SymbolsModified      []graph.ImpactSymbolChange  `json:"symbols_modified"`
-		SymbolsRemoved       []graph.ImpactSymbolChange  `json:"symbols_removed"`
-		AffectedLinks        []graph.AffectedLink        `json:"affected_links"`
-		AffectedRequirements []graph.AffectedRequirement `json:"affected_requirements"`
-		StaleArtifacts       []string                    `json:"stale_artifacts"`
-		ComputedAt           surrealTime                 `json:"computed_at"`
-	}
-	impRows, err := queryOne[[]impactRow](ctx(), db,
+	impRows, err := queryOne[[]impactReportRow](ctx(), db,
 		"SELECT * FROM ca_impact_report WHERE repo_id = $repo_id ORDER BY computed_at DESC LIMIT 1",
 		map[string]any{"repo_id": repoID})
 	if err != nil || len(impRows) == 0 {
 		return nil
 	}
-	r := impRows[0]
-	return &graph.ImpactReport{
-		ID: r.ReportID, RepositoryID: r.RepoID,
-		OldCommitSHA: r.OldCommitSHA, NewCommitSHA: r.NewCommitSHA,
-		FilesChanged: r.FilesChanged, SymbolsAdded: r.SymbolsAdded,
-		SymbolsModified: r.SymbolsModified, SymbolsRemoved: r.SymbolsRemoved,
-		AffectedLinks: r.AffectedLinks, AffectedRequirements: r.AffectedRequirements,
-		StaleArtifacts: r.StaleArtifacts, ComputedAt: r.ComputedAt.Time,
-	}
+	return impRows[0].toImpactReport()
 }
 
 // GetImpactReports returns impact reports for a repository, most recent first.
@@ -2169,39 +2296,18 @@ func (s *SurrealStore) GetImpactReports(repoID string, limit int) ([]*graph.Impa
 	if db == nil {
 		return nil, 0
 	}
-	type impactRow struct {
-		ReportID             string                      `json:"report_id"`
-		RepoID               string                      `json:"repo_id"`
-		OldCommitSHA         string                      `json:"old_commit_sha"`
-		NewCommitSHA         string                      `json:"new_commit_sha"`
-		FilesChanged         []graph.ImpactFileDiff      `json:"files_changed"`
-		SymbolsAdded         []graph.ImpactSymbolChange  `json:"symbols_added"`
-		SymbolsModified      []graph.ImpactSymbolChange  `json:"symbols_modified"`
-		SymbolsRemoved       []graph.ImpactSymbolChange  `json:"symbols_removed"`
-		AffectedLinks        []graph.AffectedLink        `json:"affected_links"`
-		AffectedRequirements []graph.AffectedRequirement `json:"affected_requirements"`
-		StaleArtifacts       []string                    `json:"stale_artifacts"`
-		ComputedAt           surrealTime                 `json:"computed_at"`
-	}
 	if limit <= 0 {
 		limit = 10
 	}
-	impRows, err := queryOne[[]impactRow](ctx(), db,
+	impRows, err := queryOne[[]impactReportRow](ctx(), db,
 		"SELECT * FROM ca_impact_report WHERE repo_id = $repo_id ORDER BY computed_at DESC LIMIT $lim",
 		map[string]any{"repo_id": repoID, "lim": limit})
 	if err != nil {
 		return nil, 0
 	}
-	var out []*graph.ImpactReport
+	out := make([]*graph.ImpactReport, 0, len(impRows))
 	for _, r := range impRows {
-		out = append(out, &graph.ImpactReport{
-			ID: r.ReportID, RepositoryID: r.RepoID,
-			OldCommitSHA: r.OldCommitSHA, NewCommitSHA: r.NewCommitSHA,
-			FilesChanged: r.FilesChanged, SymbolsAdded: r.SymbolsAdded,
-			SymbolsModified: r.SymbolsModified, SymbolsRemoved: r.SymbolsRemoved,
-			AffectedLinks: r.AffectedLinks, AffectedRequirements: r.AffectedRequirements,
-			StaleArtifacts: r.StaleArtifacts, ComputedAt: r.ComputedAt.Time,
-		})
+		out = append(out, r.toImpactReport())
 	}
 	return out, len(out)
 }

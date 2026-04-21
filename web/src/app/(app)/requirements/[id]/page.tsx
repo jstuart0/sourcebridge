@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useClient, useMutation, useQuery } from "urql";
 import {
@@ -16,6 +16,8 @@ import {
   VERIFY_LINK_MUTATION,
 } from "@/lib/graphql/queries";
 import { ConfidenceBadge, type ConfidenceLevel } from "@/components/code-viewer/ConfidenceBadge";
+import { EditRequirementCard } from "@/components/requirements/EditRequirementCard";
+import { RemoveRequirementDialog } from "@/components/requirements/RemoveRequirementDialog";
 import { SourceRefLink } from "@/components/source/SourceRefLink";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
@@ -42,6 +44,7 @@ interface Req {
   source: string;
   priority: string | null;
   tags: string[];
+  acceptanceCriteria: string[];
   links: ReqLink[];
   createdAt: string;
   updatedAt: string | null;
@@ -102,6 +105,7 @@ function knowledgeErrorHint(errorCode: string | null | undefined): string {
 export default function RequirementDetailPage() {
   const params = useParams();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const reqId = params.id as string;
 
   // Repo context — passed when navigating from a repository's requirements tab
@@ -118,6 +122,8 @@ export default function RequirementDetailPage() {
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [linkRationale, setLinkRationale] = useState("");
   const [enriching, setEnriching] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [removeOpen, setRemoveOpen] = useState(false);
 
   const [symbolsResult] = useQuery({
     query: SYMBOLS_QUERY,
@@ -353,39 +359,101 @@ export default function RequirementDetailPage() {
             title={req.title}
             description={req.description}
             actions={
-              <Button onClick={handleEnrich} disabled={enriching}>
-                {enriching ? "Enriching…" : "Enrich with AI"}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {!editing ? (
+                  <Button variant="secondary" onClick={() => setEditing(true)}>
+                    Edit requirement
+                  </Button>
+                ) : null}
+                {!editing ? (
+                  <Button variant="ghost" onClick={() => setRemoveOpen(true)}>
+                    Remove
+                  </Button>
+                ) : null}
+                <Button onClick={handleEnrich} disabled={enriching}>
+                  {enriching ? "Enriching…" : "Enrich with AI"}
+                </Button>
+              </div>
             }
           />
 
-          <Panel variant="surface" className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              {req.externalId ? (
-                <span className="rounded-full border border-[var(--border-default)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-                  {req.externalId}
-                </span>
+          <RemoveRequirementDialog
+            open={removeOpen}
+            requirementId={req.id}
+            requirementLabel={req.externalId || req.title}
+            onClose={() => setRemoveOpen(false)}
+            onRemoved={() => {
+              // Head back where the user likely came from. If repo context
+              // is present in the URL, return to that repo's Requirements
+              // tab; otherwise to the global requirements list.
+              if (fromRepoId) {
+                const url = `/repositories/${fromRepoId}?tab=requirements`;
+                router.push(url);
+              } else {
+                router.push("/requirements");
+              }
+            }}
+          />
+
+          {editing ? (
+            <EditRequirementCard
+              requirement={{
+                id: req.id,
+                externalId: req.externalId,
+                title: req.title,
+                description: req.description,
+                source: req.source,
+                priority: req.priority,
+                tags: req.tags,
+                acceptanceCriteria: req.acceptanceCriteria ?? [],
+              }}
+              onSaved={() => {
+                setEditing(false);
+                reexecute({ requestPolicy: "network-only" });
+              }}
+              onCancel={() => setEditing(false)}
+            />
+          ) : (
+            <Panel variant="surface" className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                {req.externalId ? (
+                  <span className="rounded-full border border-[var(--border-default)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+                    {req.externalId}
+                  </span>
+                ) : null}
+                {req.priority ? (
+                  <span className="rounded-full border border-[var(--border-default)] px-3 py-1 text-xs text-[var(--text-secondary)]">
+                    {req.priority}
+                  </span>
+                ) : null}
+                {req.source ? (
+                  <span className="rounded-full border border-[var(--border-default)] px-3 py-1 text-xs text-[var(--text-secondary)]">
+                    Source: {req.source}
+                  </span>
+                ) : null}
+                {req.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full bg-[var(--bg-active)] px-3 py-1 text-xs text-[var(--text-secondary)]"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+              {(req.acceptanceCriteria?.length ?? 0) > 0 ? (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+                    Acceptance Criteria
+                  </p>
+                  <ul className="list-disc space-y-1 pl-5 text-sm text-[var(--text-secondary)]">
+                    {req.acceptanceCriteria.map((ac, i) => (
+                      <li key={i}>{ac}</li>
+                    ))}
+                  </ul>
+                </div>
               ) : null}
-              {req.priority ? (
-                <span className="rounded-full border border-[var(--border-default)] px-3 py-1 text-xs text-[var(--text-secondary)]">
-                  {req.priority}
-                </span>
-              ) : null}
-              {req.source ? (
-                <span className="rounded-full border border-[var(--border-default)] px-3 py-1 text-xs text-[var(--text-secondary)]">
-                  Source: {req.source}
-                </span>
-              ) : null}
-              {req.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-full bg-[var(--bg-active)] px-3 py-1 text-xs text-[var(--text-secondary)]"
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-          </Panel>
+            </Panel>
+          )}
 
           {/* Tab switcher */}
           <div className="flex items-center gap-6 border-b border-[var(--border-default)]">

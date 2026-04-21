@@ -24,6 +24,20 @@ type KnowledgeStore interface {
 	// can display a meaningful phase label under the progress bar.
 	UpdateKnowledgeArtifactProgressWithPhase(id string, progress float64, phase, message string) error
 	MarkKnowledgeArtifactStale(id string, stale bool) error
+	// MarkKnowledgeArtifactStaleWithReason is the per-artifact invalidation
+	// path used by selective reindex. It atomically sets stale=true, records
+	// the JSON-serialized invalidation reason (symbols/files/blanket) and the
+	// triggering ImpactReport.ID. Used so the "why" explanation survives
+	// later reindexes that replace the repository-level latest report.
+	MarkKnowledgeArtifactStaleWithReason(id string, reasonJSON string, reportID string) error
+	// GetArtifactsForSources returns ready artifacts whose persisted evidence
+	// references any of the given (source_type, source_id) pairs. Results are
+	// deduped by artifact ID.
+	GetArtifactsForSources(repoID string, sources []SourceRef) []*Artifact
+	// GetArtifactsForFiles returns ready artifacts whose persisted evidence
+	// references any of the given file paths. Used to catch evidence rows
+	// that capture a file_path without a symbol-level source_id.
+	GetArtifactsForFiles(repoID string, filePaths []string) []*Artifact
 	DeleteKnowledgeArtifact(id string) error
 	SupersedeArtifact(id string, sections []Section) error
 

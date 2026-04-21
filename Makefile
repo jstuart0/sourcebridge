@@ -1,5 +1,6 @@
-.PHONY: all build build-go build-web build-worker test test-go test-web test-worker \
-	lint lint-go lint-web lint-worker proto proto-clean docker-build docker-up docker-down \
+.PHONY: all build build-go build-web build-worker build-vscode test test-go test-web test-worker test-vscode \
+	lint lint-go lint-web lint-worker lint-vscode package-vscode install-vscode \
+	proto proto-clean docker-build docker-up docker-down \
 	dev dev-web dev-go clean migrate help integration-test smoke-test phase-gate ci \
 	benchmark-comprehension-fake benchmark-comprehension-local benchmark-comprehension-report \
 	benchmark-report-quality-live
@@ -12,7 +13,7 @@ GEN_DIR = gen
 all: build
 
 # Build
-build: build-go build-web
+build: build-go build-web build-vscode
 
 build-go:
 	go build -o $(GO_BIN) ./cmd/sourcebridge
@@ -23,8 +24,11 @@ build-web:
 build-worker:
 	cd workers && uv sync
 
+build-vscode:
+	cd plugins/vscode && npm ci && npm run compile
+
 # Test
-test: test-go test-web test-worker
+test: test-go test-web test-worker test-vscode
 
 test-go:
 	go test ./... -v -race
@@ -35,8 +39,11 @@ test-web:
 test-worker:
 	cd workers && uv run python -m pytest tests/ -v
 
+test-vscode:
+	cd plugins/vscode && npm test
+
 # Lint
-lint: lint-go lint-web lint-worker
+lint: lint-go lint-web lint-worker lint-vscode
 
 lint-go:
 	golangci-lint run ./...
@@ -46,6 +53,23 @@ lint-web:
 
 lint-worker:
 	cd workers && uv run ruff check .
+
+lint-vscode:
+	cd plugins/vscode && npx eslint src --ext ts
+
+# Package the VS Code extension as a VSIX. The output file lands in
+# plugins/vscode/ and is gitignored. Use `install-vscode` to drop it
+# into your local VS Code afterward.
+package-vscode:
+	cd plugins/vscode && npm run compile && npm run package
+
+# Install the most recently packaged VSIX into the VS Code on the
+# current machine. Requires the `code` CLI to be on PATH (macOS: the
+# full path lives at "/Applications/Visual Studio Code.app/Contents/
+# Resources/app/bin/code" — symlink it or use `make` from a shell
+# that has it).
+install-vscode: package-vscode
+	code --install-extension $(shell ls -t plugins/vscode/*.vsix | head -1) --force
 
 # Proto
 PROTO_SOURCES = $(PROTO_DIR)/common/v1/types.proto \

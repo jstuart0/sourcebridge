@@ -79,6 +79,18 @@ class AnswerQuestionResponse(_message.Message):
     usage: _types_pb2.LLMUsage
     def __init__(self, answer: _Optional[str] = ..., referenced_symbols: _Optional[_Iterable[_Union[_types_pb2.CodeSymbol, _Mapping]]] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ...) -> None: ...
 
+class AnswerDelta(_message.Message):
+    __slots__ = ("content_delta", "finished", "referenced_symbols", "usage")
+    CONTENT_DELTA_FIELD_NUMBER: _ClassVar[int]
+    FINISHED_FIELD_NUMBER: _ClassVar[int]
+    REFERENCED_SYMBOLS_FIELD_NUMBER: _ClassVar[int]
+    USAGE_FIELD_NUMBER: _ClassVar[int]
+    content_delta: str
+    finished: bool
+    referenced_symbols: _containers.RepeatedCompositeFieldContainer[_types_pb2.CodeSymbol]
+    usage: _types_pb2.LLMUsage
+    def __init__(self, content_delta: _Optional[str] = ..., finished: bool = ..., referenced_symbols: _Optional[_Iterable[_Union[_types_pb2.CodeSymbol, _Mapping]]] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ...) -> None: ...
+
 class ReviewFileRequest(_message.Message):
     __slots__ = ("repository_id", "file_path", "language", "content", "template")
     REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]

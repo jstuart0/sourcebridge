@@ -211,6 +211,30 @@ func (c *Client) AnswerQuestion(ctx context.Context, req *reasoningv1.AnswerQues
 	return c.Reasoning.AnswerQuestion(ctx, req)
 }
 
+// AnswerQuestionStream opens a server-streaming discussion RPC. Callers
+// receive AnswerDelta frames as the model generates output, then a
+// terminal frame with `finished=true` carrying the final usage and
+// referenced_symbols. The deadline matches the unary variant so callers
+// get identical timeout semantics whether they chose to stream or not.
+//
+// The returned stream handle is responsible for cancellation on error;
+// the caller should read until io.EOF (or a transport error) and then
+// drop the context via the returned cancel func. Returning the cancel
+// lets the caller bail out mid-stream (e.g. user hit stop) without
+// leaking the background goroutine.
+func (c *Client) AnswerQuestionStream(
+	ctx context.Context,
+	req *reasoningv1.AnswerQuestionRequest,
+) (reasoningv1.ReasoningService_AnswerQuestionStreamClient, context.CancelFunc, error) {
+	streamCtx, cancel := context.WithTimeout(ctx, TimeoutDiscussion)
+	stream, err := c.Reasoning.AnswerQuestionStream(streamCtx, req)
+	if err != nil {
+		cancel()
+		return nil, func() {}, err
+	}
+	return stream, cancel, nil
+}
+
 // ReviewFile calls the reasoning worker review RPC.
 func (c *Client) ReviewFile(ctx context.Context, req *reasoningv1.ReviewFileRequest) (*reasoningv1.ReviewFileResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, TimeoutReview)

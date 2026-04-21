@@ -135,6 +135,26 @@ docker compose restart worker
 SurrealDB data is stored in a named Docker volume (`surrealdb-data`). Data survives
 `docker compose down` but is removed by `docker compose down -v`.
 
+### Redis (optional — required for HA MCP)
+
+The bundled `docker compose` stack starts a Redis container by default.
+SourceBridge uses it for its shared cache, which backs the **MCP session
+store**: sessions created on one replica stay valid when subsequent requests
+hit another replica.
+
+If you're not running MCP or only running a single API replica, you can
+remove the `redis` service from `docker-compose.yml` and set
+`SOURCEBRIDGE_STORAGE_REDIS_MODE=memory`. SourceBridge will keep the cache
+in-process.
+
+To customize the Redis URL, set `SOURCEBRIDGE_STORAGE_REDIS_URL` (e.g.
+`redis://host:6379/0`). With `redis_mode=external` and no reachable Redis,
+the server logs a warning at startup and falls back to in-memory — it
+never refuses to boot.
+
+See [docs/user/mcp-clients.md](user/mcp-clients.md) for full MCP client
+setup and the multi-replica reliability notes.
+
 To back up the volume:
 
 ```bash
@@ -516,9 +536,31 @@ surreal_namespace = "sourcebridge"
 surreal_database  = "sourcebridge"
 surreal_user      = "root"
 surreal_pass      = "root"
-redis_mode        = "memory"      # memory | external
+redis_mode        = "memory"      # memory | external — see "When to use Redis" below
 redis_url         = ""            # redis://host:port (external mode only)
 ```
+
+##### When to use Redis
+
+Redis is optional. Leave `redis_mode = "memory"` for single-node, single-replica
+installs — SourceBridge keeps its cache in-process and everything works.
+
+Switch to `redis_mode = "external"` when:
+
+- You run the API with **more than one replica** and want the **MCP server**
+  to stay reliable. MCP sessions are stored in this cache; with a shared
+  Redis, any replica can handle any MCP request. Without it, clients see
+  intermittent `"Invalid or expired session"` errors as requests round-robin
+  across pods.
+- You want cache state to survive pod restarts.
+
+If `redis_mode = "external"` is set but SourceBridge can't reach the URL
+at startup, it logs a warning and falls back to in-memory — startup does
+not fail. Fix the Redis connection to re-enable HA-safe MCP.
+
+Any Redis-compatible server works (Redis 6+, KeyDB, Dragonfly, Upstash over
+TLS). The bundled Helm chart enables Redis by default; see `redis.enabled`
+below.
 
 #### [security] -- Authentication mode
 

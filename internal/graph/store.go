@@ -116,6 +116,19 @@ type StoredRequirement struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
+// RequirementUpdate carries the patch fields for UpdateRequirementFields.
+// Nil pointers mean "do not modify" so callers can partially-update
+// without needing to read-before-write.
+type RequirementUpdate struct {
+	ExternalID         *string
+	Title              *string
+	Description        *string
+	Priority           *string
+	Source             *string
+	Tags               *[]string
+	AcceptanceCriteria *[]string
+}
+
 // DiscoveredRequirement represents a spec inferred from code analysis.
 type DiscoveredRequirement struct {
 	ID              string    `json:"id"`
@@ -1221,6 +1234,51 @@ func (s *Store) UpdateRequirement(id string, priority string, tags []string) *St
 	}
 	if tags != nil {
 		req.Tags = tags
+	}
+	req.UpdatedAt = time.Now()
+	return req
+}
+
+// UpdateRequirementFields applies a partial update to the requirement.
+// Nil fields are preserved; externalId uniqueness is enforced per-repo.
+func (s *Store) UpdateRequirementFields(id string, fields RequirementUpdate) *StoredRequirement {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	req := s.requirements[id]
+	if req == nil {
+		return nil
+	}
+	if fields.ExternalID != nil && *fields.ExternalID != "" && *fields.ExternalID != req.ExternalID {
+		// Uniqueness check — reject if another requirement in this repo
+		// already owns the external id.
+		for otherID := range s.requirements {
+			other := s.requirements[otherID]
+			if other == nil || otherID == id {
+				continue
+			}
+			if other.RepoID == req.RepoID && other.ExternalID == *fields.ExternalID {
+				return nil
+			}
+		}
+		req.ExternalID = *fields.ExternalID
+	}
+	if fields.Title != nil {
+		req.Title = *fields.Title
+	}
+	if fields.Description != nil {
+		req.Description = *fields.Description
+	}
+	if fields.Priority != nil {
+		req.Priority = *fields.Priority
+	}
+	if fields.Source != nil {
+		req.Source = *fields.Source
+	}
+	if fields.Tags != nil {
+		req.Tags = *fields.Tags
+	}
+	if fields.AcceptanceCriteria != nil {
+		req.AcceptanceCriteria = *fields.AcceptanceCriteria
 	}
 	req.UpdatedAt = time.Now()
 	return req

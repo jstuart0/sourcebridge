@@ -430,6 +430,80 @@ func (x *AnswerQuestionResponse) GetUsage() *v1.LLMUsage {
 	return nil
 }
 
+// AnswerDelta is one frame on the AnswerQuestionStream wire. Most frames
+// contain just an incremental `content_delta` (text appended to the running
+// answer). The final frame sets `finished = true` and carries the resolved
+// `referenced_symbols` and `usage`; consumers must treat that frame as the
+// signal to stop rendering deltas.
+type AnswerDelta struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	ContentDelta string                 `protobuf:"bytes,1,opt,name=content_delta,json=contentDelta,proto3" json:"content_delta,omitempty"`
+	Finished     bool                   `protobuf:"varint,2,opt,name=finished,proto3" json:"finished,omitempty"`
+	// Populated only on the terminal frame.
+	ReferencedSymbols []*v1.CodeSymbol `protobuf:"bytes,3,rep,name=referenced_symbols,json=referencedSymbols,proto3" json:"referenced_symbols,omitempty"`
+	Usage             *v1.LLMUsage     `protobuf:"bytes,4,opt,name=usage,proto3" json:"usage,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *AnswerDelta) Reset() {
+	*x = AnswerDelta{}
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerDelta) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerDelta) ProtoMessage() {}
+
+func (x *AnswerDelta) ProtoReflect() protoreflect.Message {
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerDelta.ProtoReflect.Descriptor instead.
+func (*AnswerDelta) Descriptor() ([]byte, []int) {
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *AnswerDelta) GetContentDelta() string {
+	if x != nil {
+		return x.ContentDelta
+	}
+	return ""
+}
+
+func (x *AnswerDelta) GetFinished() bool {
+	if x != nil {
+		return x.Finished
+	}
+	return false
+}
+
+func (x *AnswerDelta) GetReferencedSymbols() []*v1.CodeSymbol {
+	if x != nil {
+		return x.ReferencedSymbols
+	}
+	return nil
+}
+
+func (x *AnswerDelta) GetUsage() *v1.LLMUsage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
+}
+
 type ReviewFileRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RepositoryId  string                 `protobuf:"bytes,1,opt,name=repository_id,json=repositoryId,proto3" json:"repository_id,omitempty"`
@@ -443,7 +517,7 @@ type ReviewFileRequest struct {
 
 func (x *ReviewFileRequest) Reset() {
 	*x = ReviewFileRequest{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[6]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -455,7 +529,7 @@ func (x *ReviewFileRequest) String() string {
 func (*ReviewFileRequest) ProtoMessage() {}
 
 func (x *ReviewFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[6]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -468,7 +542,7 @@ func (x *ReviewFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviewFileRequest.ProtoReflect.Descriptor instead.
 func (*ReviewFileRequest) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{6}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ReviewFileRequest) GetRepositoryId() string {
@@ -518,7 +592,7 @@ type ReviewFileResponse struct {
 
 func (x *ReviewFileResponse) Reset() {
 	*x = ReviewFileResponse{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[7]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -530,7 +604,7 @@ func (x *ReviewFileResponse) String() string {
 func (*ReviewFileResponse) ProtoMessage() {}
 
 func (x *ReviewFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[7]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -543,7 +617,7 @@ func (x *ReviewFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviewFileResponse.ProtoReflect.Descriptor instead.
 func (*ReviewFileResponse) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{7}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ReviewFileResponse) GetTemplate() string {
@@ -589,7 +663,7 @@ type ReviewFinding struct {
 
 func (x *ReviewFinding) Reset() {
 	*x = ReviewFinding{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[8]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -601,7 +675,7 @@ func (x *ReviewFinding) String() string {
 func (*ReviewFinding) ProtoMessage() {}
 
 func (x *ReviewFinding) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[8]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -614,7 +688,7 @@ func (x *ReviewFinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviewFinding.ProtoReflect.Descriptor instead.
 func (*ReviewFinding) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{8}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ReviewFinding) GetCategory() string {
@@ -676,7 +750,7 @@ type GenerateEmbeddingRequest struct {
 
 func (x *GenerateEmbeddingRequest) Reset() {
 	*x = GenerateEmbeddingRequest{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[9]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -688,7 +762,7 @@ func (x *GenerateEmbeddingRequest) String() string {
 func (*GenerateEmbeddingRequest) ProtoMessage() {}
 
 func (x *GenerateEmbeddingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[9]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -701,7 +775,7 @@ func (x *GenerateEmbeddingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateEmbeddingRequest.ProtoReflect.Descriptor instead.
 func (*GenerateEmbeddingRequest) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{9}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GenerateEmbeddingRequest) GetText() string {
@@ -728,7 +802,7 @@ type GenerateEmbeddingResponse struct {
 
 func (x *GenerateEmbeddingResponse) Reset() {
 	*x = GenerateEmbeddingResponse{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[10]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -740,7 +814,7 @@ func (x *GenerateEmbeddingResponse) String() string {
 func (*GenerateEmbeddingResponse) ProtoMessage() {}
 
 func (x *GenerateEmbeddingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[10]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -753,7 +827,7 @@ func (x *GenerateEmbeddingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateEmbeddingResponse.ProtoReflect.Descriptor instead.
 func (*GenerateEmbeddingResponse) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{10}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GenerateEmbeddingResponse) GetEmbedding() *v1.Embedding {
@@ -785,7 +859,7 @@ type SimulateChangeRequest struct {
 
 func (x *SimulateChangeRequest) Reset() {
 	*x = SimulateChangeRequest{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[11]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -797,7 +871,7 @@ func (x *SimulateChangeRequest) String() string {
 func (*SimulateChangeRequest) ProtoMessage() {}
 
 func (x *SimulateChangeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[11]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -810,7 +884,7 @@ func (x *SimulateChangeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SimulateChangeRequest.ProtoReflect.Descriptor instead.
 func (*SimulateChangeRequest) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{11}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SimulateChangeRequest) GetRepositoryId() string {
@@ -877,7 +951,7 @@ type SimulatedSymbolMatch struct {
 
 func (x *SimulatedSymbolMatch) Reset() {
 	*x = SimulatedSymbolMatch{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[12]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -889,7 +963,7 @@ func (x *SimulatedSymbolMatch) String() string {
 func (*SimulatedSymbolMatch) ProtoMessage() {}
 
 func (x *SimulatedSymbolMatch) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[12]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -902,7 +976,7 @@ func (x *SimulatedSymbolMatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SimulatedSymbolMatch.ProtoReflect.Descriptor instead.
 func (*SimulatedSymbolMatch) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{12}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SimulatedSymbolMatch) GetSymbolId() string {
@@ -966,7 +1040,7 @@ type SimulateChangeResponse struct {
 
 func (x *SimulateChangeResponse) Reset() {
 	*x = SimulateChangeResponse{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[13]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -978,7 +1052,7 @@ func (x *SimulateChangeResponse) String() string {
 func (*SimulateChangeResponse) ProtoMessage() {}
 
 func (x *SimulateChangeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[13]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -991,7 +1065,7 @@ func (x *SimulateChangeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SimulateChangeResponse.ProtoReflect.Descriptor instead.
 func (*SimulateChangeResponse) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{13}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SimulateChangeResponse) GetResolvedSymbols() []*SimulatedSymbolMatch {
@@ -1059,7 +1133,12 @@ const file_reasoning_v1_reasoning_proto_rawDesc = "" +
 	"\x16AnswerQuestionResponse\x12\x16\n" +
 	"\x06answer\x18\x01 \x01(\tR\x06answer\x12Q\n" +
 	"\x12referenced_symbols\x18\x02 \x03(\v2\".sourcebridge.common.v1.CodeSymbolR\x11referencedSymbols\x126\n" +
-	"\x05usage\x18\x03 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"\xc9\x01\n" +
+	"\x05usage\x18\x03 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"\xd9\x01\n" +
+	"\vAnswerDelta\x12#\n" +
+	"\rcontent_delta\x18\x01 \x01(\tR\fcontentDelta\x12\x1a\n" +
+	"\bfinished\x18\x02 \x01(\bR\bfinished\x12Q\n" +
+	"\x12referenced_symbols\x18\x03 \x03(\v2\".sourcebridge.common.v1.CodeSymbolR\x11referencedSymbols\x126\n" +
+	"\x05usage\x18\x04 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"\xc9\x01\n" +
 	"\x11ReviewFileRequest\x12#\n" +
 	"\rrepository_id\x18\x01 \x01(\tR\frepositoryId\x12\x1b\n" +
 	"\tfile_path\x18\x02 \x01(\tR\bfilePath\x12<\n" +
@@ -1111,11 +1190,12 @@ const file_reasoning_v1_reasoning_proto_rawDesc = "" +
 	"\x10resolved_symbols\x18\x01 \x03(\v2/.sourcebridge.reasoning.v1.SimulatedSymbolMatchR\x0fresolvedSymbols\x12>\n" +
 	"\x1bdescription_embedding_model\x18\x02 \x01(\tR\x19descriptionEmbeddingModel\x12+\n" +
 	"\x11symbols_evaluated\x18\x03 \x01(\x05R\x10symbolsEvaluated\x126\n" +
-	"\x05usage\x18\x04 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage2\xe6\x05\n" +
+	"\x05usage\x18\x04 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage2\xda\x06\n" +
 	"\x10ReasoningService\x12r\n" +
 	"\rAnalyzeSymbol\x12/.sourcebridge.reasoning.v1.AnalyzeSymbolRequest\x1a0.sourcebridge.reasoning.v1.AnalyzeSymbolResponse\x12\x84\x01\n" +
 	"\x13ExplainRelationship\x125.sourcebridge.reasoning.v1.ExplainRelationshipRequest\x1a6.sourcebridge.reasoning.v1.ExplainRelationshipResponse\x12u\n" +
-	"\x0eAnswerQuestion\x120.sourcebridge.reasoning.v1.AnswerQuestionRequest\x1a1.sourcebridge.reasoning.v1.AnswerQuestionResponse\x12i\n" +
+	"\x0eAnswerQuestion\x120.sourcebridge.reasoning.v1.AnswerQuestionRequest\x1a1.sourcebridge.reasoning.v1.AnswerQuestionResponse\x12r\n" +
+	"\x14AnswerQuestionStream\x120.sourcebridge.reasoning.v1.AnswerQuestionRequest\x1a&.sourcebridge.reasoning.v1.AnswerDelta0\x01\x12i\n" +
 	"\n" +
 	"ReviewFile\x12,.sourcebridge.reasoning.v1.ReviewFileRequest\x1a-.sourcebridge.reasoning.v1.ReviewFileResponse\x12~\n" +
 	"\x11GenerateEmbedding\x123.sourcebridge.reasoning.v1.GenerateEmbeddingRequest\x1a4.sourcebridge.reasoning.v1.GenerateEmbeddingResponse\x12u\n" +
@@ -1133,7 +1213,7 @@ func file_reasoning_v1_reasoning_proto_rawDescGZIP() []byte {
 	return file_reasoning_v1_reasoning_proto_rawDescData
 }
 
-var file_reasoning_v1_reasoning_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_reasoning_v1_reasoning_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_reasoning_v1_reasoning_proto_goTypes = []any{
 	(*AnalyzeSymbolRequest)(nil),        // 0: sourcebridge.reasoning.v1.AnalyzeSymbolRequest
 	(*AnalyzeSymbolResponse)(nil),       // 1: sourcebridge.reasoning.v1.AnalyzeSymbolResponse
@@ -1141,56 +1221,61 @@ var file_reasoning_v1_reasoning_proto_goTypes = []any{
 	(*ExplainRelationshipResponse)(nil), // 3: sourcebridge.reasoning.v1.ExplainRelationshipResponse
 	(*AnswerQuestionRequest)(nil),       // 4: sourcebridge.reasoning.v1.AnswerQuestionRequest
 	(*AnswerQuestionResponse)(nil),      // 5: sourcebridge.reasoning.v1.AnswerQuestionResponse
-	(*ReviewFileRequest)(nil),           // 6: sourcebridge.reasoning.v1.ReviewFileRequest
-	(*ReviewFileResponse)(nil),          // 7: sourcebridge.reasoning.v1.ReviewFileResponse
-	(*ReviewFinding)(nil),               // 8: sourcebridge.reasoning.v1.ReviewFinding
-	(*GenerateEmbeddingRequest)(nil),    // 9: sourcebridge.reasoning.v1.GenerateEmbeddingRequest
-	(*GenerateEmbeddingResponse)(nil),   // 10: sourcebridge.reasoning.v1.GenerateEmbeddingResponse
-	(*SimulateChangeRequest)(nil),       // 11: sourcebridge.reasoning.v1.SimulateChangeRequest
-	(*SimulatedSymbolMatch)(nil),        // 12: sourcebridge.reasoning.v1.SimulatedSymbolMatch
-	(*SimulateChangeResponse)(nil),      // 13: sourcebridge.reasoning.v1.SimulateChangeResponse
-	(*v1.CodeSymbol)(nil),               // 14: sourcebridge.common.v1.CodeSymbol
-	(*v1.LLMUsage)(nil),                 // 15: sourcebridge.common.v1.LLMUsage
-	(v1.Confidence)(0),                  // 16: sourcebridge.common.v1.Confidence
-	(v1.Language)(0),                    // 17: sourcebridge.common.v1.Language
-	(*v1.Embedding)(nil),                // 18: sourcebridge.common.v1.Embedding
+	(*AnswerDelta)(nil),                 // 6: sourcebridge.reasoning.v1.AnswerDelta
+	(*ReviewFileRequest)(nil),           // 7: sourcebridge.reasoning.v1.ReviewFileRequest
+	(*ReviewFileResponse)(nil),          // 8: sourcebridge.reasoning.v1.ReviewFileResponse
+	(*ReviewFinding)(nil),               // 9: sourcebridge.reasoning.v1.ReviewFinding
+	(*GenerateEmbeddingRequest)(nil),    // 10: sourcebridge.reasoning.v1.GenerateEmbeddingRequest
+	(*GenerateEmbeddingResponse)(nil),   // 11: sourcebridge.reasoning.v1.GenerateEmbeddingResponse
+	(*SimulateChangeRequest)(nil),       // 12: sourcebridge.reasoning.v1.SimulateChangeRequest
+	(*SimulatedSymbolMatch)(nil),        // 13: sourcebridge.reasoning.v1.SimulatedSymbolMatch
+	(*SimulateChangeResponse)(nil),      // 14: sourcebridge.reasoning.v1.SimulateChangeResponse
+	(*v1.CodeSymbol)(nil),               // 15: sourcebridge.common.v1.CodeSymbol
+	(*v1.LLMUsage)(nil),                 // 16: sourcebridge.common.v1.LLMUsage
+	(v1.Confidence)(0),                  // 17: sourcebridge.common.v1.Confidence
+	(v1.Language)(0),                    // 18: sourcebridge.common.v1.Language
+	(*v1.Embedding)(nil),                // 19: sourcebridge.common.v1.Embedding
 }
 var file_reasoning_v1_reasoning_proto_depIdxs = []int32{
-	14, // 0: sourcebridge.reasoning.v1.AnalyzeSymbolRequest.symbol:type_name -> sourcebridge.common.v1.CodeSymbol
-	15, // 1: sourcebridge.reasoning.v1.AnalyzeSymbolResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	14, // 2: sourcebridge.reasoning.v1.ExplainRelationshipRequest.source:type_name -> sourcebridge.common.v1.CodeSymbol
-	14, // 3: sourcebridge.reasoning.v1.ExplainRelationshipRequest.target:type_name -> sourcebridge.common.v1.CodeSymbol
-	16, // 4: sourcebridge.reasoning.v1.ExplainRelationshipResponse.confidence:type_name -> sourcebridge.common.v1.Confidence
-	15, // 5: sourcebridge.reasoning.v1.ExplainRelationshipResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	14, // 6: sourcebridge.reasoning.v1.AnswerQuestionRequest.context_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
-	17, // 7: sourcebridge.reasoning.v1.AnswerQuestionRequest.language:type_name -> sourcebridge.common.v1.Language
-	14, // 8: sourcebridge.reasoning.v1.AnswerQuestionResponse.referenced_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
-	15, // 9: sourcebridge.reasoning.v1.AnswerQuestionResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	17, // 10: sourcebridge.reasoning.v1.ReviewFileRequest.language:type_name -> sourcebridge.common.v1.Language
-	8,  // 11: sourcebridge.reasoning.v1.ReviewFileResponse.findings:type_name -> sourcebridge.reasoning.v1.ReviewFinding
-	15, // 12: sourcebridge.reasoning.v1.ReviewFileResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	18, // 13: sourcebridge.reasoning.v1.GenerateEmbeddingResponse.embedding:type_name -> sourcebridge.common.v1.Embedding
-	15, // 14: sourcebridge.reasoning.v1.GenerateEmbeddingResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	14, // 15: sourcebridge.reasoning.v1.SimulateChangeRequest.symbols:type_name -> sourcebridge.common.v1.CodeSymbol
-	12, // 16: sourcebridge.reasoning.v1.SimulateChangeResponse.resolved_symbols:type_name -> sourcebridge.reasoning.v1.SimulatedSymbolMatch
-	15, // 17: sourcebridge.reasoning.v1.SimulateChangeResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	0,  // 18: sourcebridge.reasoning.v1.ReasoningService.AnalyzeSymbol:input_type -> sourcebridge.reasoning.v1.AnalyzeSymbolRequest
-	2,  // 19: sourcebridge.reasoning.v1.ReasoningService.ExplainRelationship:input_type -> sourcebridge.reasoning.v1.ExplainRelationshipRequest
-	4,  // 20: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestion:input_type -> sourcebridge.reasoning.v1.AnswerQuestionRequest
-	6,  // 21: sourcebridge.reasoning.v1.ReasoningService.ReviewFile:input_type -> sourcebridge.reasoning.v1.ReviewFileRequest
-	9,  // 22: sourcebridge.reasoning.v1.ReasoningService.GenerateEmbedding:input_type -> sourcebridge.reasoning.v1.GenerateEmbeddingRequest
-	11, // 23: sourcebridge.reasoning.v1.ReasoningService.SimulateChange:input_type -> sourcebridge.reasoning.v1.SimulateChangeRequest
-	1,  // 24: sourcebridge.reasoning.v1.ReasoningService.AnalyzeSymbol:output_type -> sourcebridge.reasoning.v1.AnalyzeSymbolResponse
-	3,  // 25: sourcebridge.reasoning.v1.ReasoningService.ExplainRelationship:output_type -> sourcebridge.reasoning.v1.ExplainRelationshipResponse
-	5,  // 26: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestion:output_type -> sourcebridge.reasoning.v1.AnswerQuestionResponse
-	7,  // 27: sourcebridge.reasoning.v1.ReasoningService.ReviewFile:output_type -> sourcebridge.reasoning.v1.ReviewFileResponse
-	10, // 28: sourcebridge.reasoning.v1.ReasoningService.GenerateEmbedding:output_type -> sourcebridge.reasoning.v1.GenerateEmbeddingResponse
-	13, // 29: sourcebridge.reasoning.v1.ReasoningService.SimulateChange:output_type -> sourcebridge.reasoning.v1.SimulateChangeResponse
-	24, // [24:30] is the sub-list for method output_type
-	18, // [18:24] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	15, // 0: sourcebridge.reasoning.v1.AnalyzeSymbolRequest.symbol:type_name -> sourcebridge.common.v1.CodeSymbol
+	16, // 1: sourcebridge.reasoning.v1.AnalyzeSymbolResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	15, // 2: sourcebridge.reasoning.v1.ExplainRelationshipRequest.source:type_name -> sourcebridge.common.v1.CodeSymbol
+	15, // 3: sourcebridge.reasoning.v1.ExplainRelationshipRequest.target:type_name -> sourcebridge.common.v1.CodeSymbol
+	17, // 4: sourcebridge.reasoning.v1.ExplainRelationshipResponse.confidence:type_name -> sourcebridge.common.v1.Confidence
+	16, // 5: sourcebridge.reasoning.v1.ExplainRelationshipResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	15, // 6: sourcebridge.reasoning.v1.AnswerQuestionRequest.context_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
+	18, // 7: sourcebridge.reasoning.v1.AnswerQuestionRequest.language:type_name -> sourcebridge.common.v1.Language
+	15, // 8: sourcebridge.reasoning.v1.AnswerQuestionResponse.referenced_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
+	16, // 9: sourcebridge.reasoning.v1.AnswerQuestionResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	15, // 10: sourcebridge.reasoning.v1.AnswerDelta.referenced_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
+	16, // 11: sourcebridge.reasoning.v1.AnswerDelta.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	18, // 12: sourcebridge.reasoning.v1.ReviewFileRequest.language:type_name -> sourcebridge.common.v1.Language
+	9,  // 13: sourcebridge.reasoning.v1.ReviewFileResponse.findings:type_name -> sourcebridge.reasoning.v1.ReviewFinding
+	16, // 14: sourcebridge.reasoning.v1.ReviewFileResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	19, // 15: sourcebridge.reasoning.v1.GenerateEmbeddingResponse.embedding:type_name -> sourcebridge.common.v1.Embedding
+	16, // 16: sourcebridge.reasoning.v1.GenerateEmbeddingResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	15, // 17: sourcebridge.reasoning.v1.SimulateChangeRequest.symbols:type_name -> sourcebridge.common.v1.CodeSymbol
+	13, // 18: sourcebridge.reasoning.v1.SimulateChangeResponse.resolved_symbols:type_name -> sourcebridge.reasoning.v1.SimulatedSymbolMatch
+	16, // 19: sourcebridge.reasoning.v1.SimulateChangeResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	0,  // 20: sourcebridge.reasoning.v1.ReasoningService.AnalyzeSymbol:input_type -> sourcebridge.reasoning.v1.AnalyzeSymbolRequest
+	2,  // 21: sourcebridge.reasoning.v1.ReasoningService.ExplainRelationship:input_type -> sourcebridge.reasoning.v1.ExplainRelationshipRequest
+	4,  // 22: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestion:input_type -> sourcebridge.reasoning.v1.AnswerQuestionRequest
+	4,  // 23: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionStream:input_type -> sourcebridge.reasoning.v1.AnswerQuestionRequest
+	7,  // 24: sourcebridge.reasoning.v1.ReasoningService.ReviewFile:input_type -> sourcebridge.reasoning.v1.ReviewFileRequest
+	10, // 25: sourcebridge.reasoning.v1.ReasoningService.GenerateEmbedding:input_type -> sourcebridge.reasoning.v1.GenerateEmbeddingRequest
+	12, // 26: sourcebridge.reasoning.v1.ReasoningService.SimulateChange:input_type -> sourcebridge.reasoning.v1.SimulateChangeRequest
+	1,  // 27: sourcebridge.reasoning.v1.ReasoningService.AnalyzeSymbol:output_type -> sourcebridge.reasoning.v1.AnalyzeSymbolResponse
+	3,  // 28: sourcebridge.reasoning.v1.ReasoningService.ExplainRelationship:output_type -> sourcebridge.reasoning.v1.ExplainRelationshipResponse
+	5,  // 29: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestion:output_type -> sourcebridge.reasoning.v1.AnswerQuestionResponse
+	6,  // 30: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionStream:output_type -> sourcebridge.reasoning.v1.AnswerDelta
+	8,  // 31: sourcebridge.reasoning.v1.ReasoningService.ReviewFile:output_type -> sourcebridge.reasoning.v1.ReviewFileResponse
+	11, // 32: sourcebridge.reasoning.v1.ReasoningService.GenerateEmbedding:output_type -> sourcebridge.reasoning.v1.GenerateEmbeddingResponse
+	14, // 33: sourcebridge.reasoning.v1.ReasoningService.SimulateChange:output_type -> sourcebridge.reasoning.v1.SimulateChangeResponse
+	27, // [27:34] is the sub-list for method output_type
+	20, // [20:27] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_reasoning_v1_reasoning_proto_init() }
@@ -1204,7 +1289,7 @@ func file_reasoning_v1_reasoning_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_reasoning_v1_reasoning_proto_rawDesc), len(file_reasoning_v1_reasoning_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

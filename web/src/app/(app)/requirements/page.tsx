@@ -10,6 +10,7 @@ import {
   REQUIREMENT_TO_CODE_QUERY as REQUIREMENT_TO_CODE,
 } from "@/lib/graphql/queries";
 import { ConfidenceBadge, ConfidenceLevel } from "@/components/code-viewer/ConfidenceBadge";
+import { CreateRequirementDialog } from "@/components/requirements/CreateRequirementDialog";
 import { SourceRefLink } from "@/components/source/SourceRefLink";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -120,6 +121,7 @@ export default function RequirementsPage() {
   const [, autoLink] = useMutation(AUTO_LINK_MUTATION);
   const [linking, setLinking] = useState(false);
   const [linkResult, setLinkResult] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const [selectedReq, setSelectedReq] = useState<string | null>(null);
 
@@ -156,13 +158,33 @@ export default function RequirementsPage() {
         title="Requirements and traceability"
         description="Browse imported requirements and inspect their linked code evidence."
         actions={
-          reqs.length > 0 ? (
-            <Button onClick={handleAutoLink} disabled={linking || !repoId}>
-              {linking ? "Linking…" : "Auto-Link to Code"}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setCreateOpen(true)}
+              disabled={!repoId}
+            >
+              + New requirement
             </Button>
-          ) : undefined
+            {reqs.length > 0 ? (
+              <Button onClick={handleAutoLink} disabled={linking || !repoId}>
+                {linking ? "Linking…" : "Auto-Link to Code"}
+              </Button>
+            ) : null}
+          </div>
         }
       />
+
+      {repoId ? (
+        <CreateRequirementDialog
+          open={createOpen}
+          repositoryId={repoId}
+          onClose={() => setCreateOpen(false)}
+          onCreated={() => {
+            reexecuteReqs({ requestPolicy: "network-only" });
+          }}
+        />
+      ) : null}
 
       {repos.length > 1 && (
         <div className="flex items-center gap-3">

@@ -51,7 +51,8 @@ Most tools help you search code. **SourceBridge helps you understand systems.**
 - **Code Discussion** -- Conversational exploration with full codebase context
 - **Architecture Diagrams** -- Auto-generated Mermaid diagrams from code structure
 - **Impact Analysis** -- Simulate changes and see affected requirements and code paths
-- **MCP Server** -- Model Context Protocol support for AI agent integration
+- **MCP Server** -- Model Context Protocol support for AI agent integration ([setup guide](docs/user/mcp-clients.md))
+- **VS Code Extension** -- First-class editor integration: inline requirement lenses, streaming AI chat (`Cmd+I`), create/edit requirements from the sidebar, one-keystroke field guides ([install guide](plugins/vscode/README.md))
 - **Multi-Provider LLM** -- Works with cloud APIs (Anthropic, OpenAI, Gemini, OpenRouter) or fully local inference (Ollama, vLLM, llama.cpp, SGLang, LM Studio)
 - **GraphQL API** -- Full programmatic access to all platform capabilities
 - **CLI** -- Complete command-line interface for scripting and automation
@@ -177,6 +178,61 @@ helm install sourcebridge deploy/helm/sourcebridge/ \
 ```
 
 See [Helm Guide](docs/self-hosted/helm-guide.md) for full configuration options, including air-gapped and local inference setups.
+
+## VS Code Extension
+
+Use SourceBridge without leaving your editor. The extension is in [`plugins/vscode/`](plugins/vscode/) and talks to any SourceBridge server — local, Docker, Helm, or a shared team deployment.
+
+<p align="center">
+  <em>Inline requirement lenses · streaming AI chat · sidebar CRUD · one-keystroke field guides</em>
+</p>
+
+### Install
+
+From a pre-built VSIX:
+
+```bash
+# Build the VSIX from source
+make package-vscode
+
+# Install it into your local VS Code
+make install-vscode
+```
+
+Or from inside VS Code: `Cmd+Shift+P` → **Extensions: Install from VSIX…** → pick `plugins/vscode/sourcebridge-*.vsix`.
+
+### Configure
+
+1. `Cmd+Shift+P` → **SourceBridge: Sign In**
+2. Enter your server URL (e.g. `http://localhost:8080` for local dev, or your team's deployed URL)
+3. Pick sign-in method (browser OIDC or local password)
+
+The status bar (bottom-left) reflects connection state: `connected · <repo>`, `offline · retry in Ns`, `sign in required`, etc. Click it for quick actions.
+
+### Highlights
+
+| Flow | How | What happens |
+|---|---|---|
+| **Ask streaming** | `Cmd+I` on any selection | Chat panel opens; tokens stream in live via MCP (fallback: non-streaming GraphQL if server doesn't mount MCP) |
+| **Show linked requirements** | `Cmd+.` on a function | Lightbulb menu lists linked requirements; click to open detail panel |
+| **Create requirement** | `Cmd+.` on an unlinked symbol → *Create requirement from this symbol…* | Inline flow pre-fills title from the symbol name; the new requirement is linked automatically |
+| **Edit / delete from sidebar** | Hover a requirement row in the activity bar | Pencil + trash icons; delete soft-deletes (30-day recycle bin) |
+| **Field guide for file** | `Cmd+K N` | Generates cliff notes for the active file and opens the panel |
+| **Change Risk tree** | Activity bar → Change Risk | Shows changed files / affected requirements / stale field guides from the latest impact report |
+| **Scoped palette** | `Cmd+Shift+;` | Context-filtered picker — only shows actions valid for your current focus |
+
+Full feature list + troubleshooting in [`plugins/vscode/README.md`](plugins/vscode/README.md).
+
+### Develop / contribute
+
+```bash
+cd plugins/vscode
+npm install
+npm run watch      # rebuilds on save
+# Open the folder in VS Code, press F5 → "Run Extension" for a dev host
+```
+
+Tests: `make test-vscode` (or `npm test` from inside `plugins/vscode/`).
 
 ## Architecture
 

@@ -22,6 +22,63 @@ def _strip_think_tags(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
+# Qwen 3 / 3.5 honor a `/no_think` directive in the user message to
+# skip the reasoning block. llama.cpp also understands this (via the
+# chat template's enable_thinking jinja var), but Ollama ignores
+# `chat_template_kwargs={"enable_thinking": False}` entirely — it
+# just renders the chat template verbatim, leaving thinking on. The
+# directive is the only portable way to disable thinking on Ollama,
+# and it's harmless on llama.cpp because the template still honors
+# the kwarg and the `/no_think` token is treated as a model-level
+# directive, not leaked into the output. Scoping to the Qwen family
+# (by model-id prefix match) avoids poisoning other models' prompts
+# with a string they have no rule to interpret.
+_QWEN_MODEL_PREFIXES = ("qwen3", "qwen-3", "qwen3.5", "qwen-3.5", "qwen3.6", "qwen-3.6")
+_NO_THINK_TOKEN = "/no_think"
+
+
+def _is_qwen_thinking_model(model: str | None) -> bool:
+    """True when the model id looks like a Qwen 3/3.5/3.6 variant."""
+    if not model:
+        return False
+    m = model.lower()
+    return any(m.startswith(p) for p in _QWEN_MODEL_PREFIXES)
+
+
+def _maybe_inject_no_think(
+    messages: list[dict[str, str]],
+    *,
+    model: str,
+    disable_thinking: bool,
+) -> list[dict[str, str]]:
+    """Append `/no_think` to the last user message for Qwen models.
+
+    Mutation is scoped:
+      - only when `disable_thinking` is True (caller opted in),
+      - only when the target model is a Qwen 3.x reasoning variant,
+      - only when the last message is a user turn (system prompts
+        shouldn't carry directives — some Ollama templates drop
+        system messages),
+      - skipped when the directive is already present so retries
+        don't accumulate duplicates.
+
+    Returns a new list; the input is not mutated.
+    """
+    if not disable_thinking or not _is_qwen_thinking_model(model):
+        return messages
+    if not messages:
+        return messages
+    out = [dict(m) for m in messages]
+    last = out[-1]
+    if last.get("role") != "user":
+        return messages
+    content = last.get("content") or ""
+    if _NO_THINK_TOKEN in content:
+        return messages
+    last["content"] = f"{content}\n\n{_NO_THINK_TOKEN}"
+    return out
+
+
 def _normalize_api_key(provider_name: str | None, api_key: str) -> str:
     """Normalize auth for OpenAI-compatible backends.
 
@@ -125,11 +182,21 @@ class OpenAICompatProvider:
         extra_body: dict[str, object] = {}
         if self.draft_model:
             extra_body["draft_model"] = self.draft_model
-        # Disable thinking mode for Qwen 3.5 and similar models that use
-        # the enable_thinking Jinja template variable. This is a llama.cpp
-        # extension to the OpenAI API — ignored by other providers.
+        # Two-pronged "disable thinking" that works for both llama.cpp
+        # and Ollama:
+        #   1. `chat_template_kwargs={"enable_thinking": False}` — llama.cpp
+        #      extension, toggles the Jinja template variable in the chat
+        #      template. Ignored (and not an error) on Ollama / OpenAI /
+        #      Anthropic.
+        #   2. `/no_think` suffix on the last user message — Qwen 3.x
+        #      model-level directive, honored on Ollama. Scoped to Qwen
+        #      so other models don't see a stray directive string.
+        # Using both makes either backend work with no runtime detection.
         if self.disable_thinking:
             extra_body["chat_template_kwargs"] = {"enable_thinking": False}
+        messages = _maybe_inject_no_think(
+            messages, model=use_model, disable_thinking=self.disable_thinking
+        )
 
         log.info(
             "llm_request_dispatch",
@@ -219,9 +286,15 @@ class OpenAICompatProvider:
         extra_body: dict[str, object] | None = None
         if self.draft_model:
             extra_body = {"draft_model": self.draft_model}
+        # Mirror the two-pronged disable-thinking strategy used in
+        # complete(): kwarg for llama.cpp, `/no_think` directive for
+        # Ollama-served Qwen models. See the comment in complete().
         if self.disable_thinking:
             extra_body = dict(extra_body or {})
             extra_body["chat_template_kwargs"] = {"enable_thinking": False}
+        messages = _maybe_inject_no_think(
+            messages, model=use_model, disable_thinking=self.disable_thinking
+        )
 
         log.info(
             "llm_request_dispatch",

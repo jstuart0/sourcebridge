@@ -1,0 +1,393 @@
+{
+  "name": "sourcebridge",
+  "displayName": "SourceBridge.ai",
+  "description": "SourceBridge.ai — Codebase field guide and context layer for VS Code. Explain, review, and connect specs to code when needed.",
+  "version": "0.3.0",
+  "publisher": "sourcebridge",
+  "license": "AGPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sourcebridge-ai/ai-bridge.git",
+    "directory": "plugins/vscode"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "sourcebridge",
+    "field guide",
+    "requirements",
+    "traceability",
+    "code review",
+    "documentation",
+    "ai"
+  ],
+  "activationEvents": [
+    "workspaceContains:**/.sourcebridge",
+    "onView:sourcebridge.requirements",
+    "onCommand:sourcebridge.configure",
+    "onCommand:sourcebridge.signIn"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sourcebridge.discussCode",
+        "title": "SourceBridge: Discuss This Code"
+      },
+      {
+        "command": "sourcebridge.runReview",
+        "title": "SourceBridge: Run Review"
+      },
+      {
+        "command": "sourcebridge.showRequirements",
+        "title": "SourceBridge: Show Requirements"
+      },
+      {
+        "command": "sourcebridge.configure",
+        "title": "SourceBridge: Configure Server"
+      },
+      {
+        "command": "sourcebridge.signIn",
+        "title": "SourceBridge: Sign In"
+      },
+      {
+        "command": "sourcebridge.signOut",
+        "title": "SourceBridge: Sign Out"
+      },
+      {
+        "command": "sourcebridge.explainSystem",
+        "title": "SourceBridge: Explain This Repository"
+      },
+      {
+        "command": "sourcebridge.explainFile",
+        "title": "SourceBridge: Explain This File"
+      },
+      {
+        "command": "sourcebridge.explainSymbol",
+        "title": "SourceBridge: Explain This Symbol"
+      },
+      {
+        "command": "sourcebridge.generateCliffNotes",
+        "title": "SourceBridge: Generate Field Guide"
+      },
+      {
+        "command": "sourcebridge.generateCliffNotesForFile",
+        "title": "SourceBridge: Generate Field Guide for This File"
+      },
+      {
+        "command": "sourcebridge.generateCliffNotesForSymbol",
+        "title": "SourceBridge: Generate Field Guide for This Symbol"
+      },
+      {
+        "command": "sourcebridge.generateLearningPath",
+        "title": "SourceBridge: Generate Learning Path"
+      },
+      {
+        "command": "sourcebridge.generateCodeTour",
+        "title": "SourceBridge: Generate Code Tour"
+      },
+      {
+        "command": "sourcebridge.showKnowledge",
+        "title": "SourceBridge: Open Field Guide"
+      },
+      {
+        "command": "sourcebridge.showLinkedRequirements",
+        "title": "SourceBridge: Show Linked Requirements"
+      },
+      {
+        "command": "sourcebridge.switchRepository",
+        "title": "SourceBridge: Switch Repository"
+      },
+      {
+        "command": "sourcebridge.setKnowledgeLens",
+        "title": "SourceBridge: Set Knowledge Lens"
+      },
+      {
+        "command": "sourcebridge.refreshKnowledge",
+        "title": "SourceBridge: Refresh Knowledge"
+      },
+      {
+        "command": "sourcebridge.showImpactReport",
+        "title": "SourceBridge: Show Change Risk"
+      },
+      {
+        "command": "sourcebridge.showLogs",
+        "title": "SourceBridge: Show Logs"
+      },
+      {
+        "command": "sourcebridge.createRequirement",
+        "title": "SourceBridge: New Requirement",
+        "icon": "$(add)"
+      },
+      {
+        "command": "sourcebridge.createRequirementFromSymbol",
+        "title": "SourceBridge: Create Requirement from Symbol"
+      },
+      {
+        "command": "sourcebridge.linkRequirementToSymbol",
+        "title": "SourceBridge: Link Requirement to Symbol"
+      },
+      {
+        "command": "sourcebridge.editRequirement",
+        "title": "SourceBridge: Edit Requirement",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "sourcebridge.deleteRequirement",
+        "title": "SourceBridge: Move Requirement to Recycle Bin",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "sourcebridge.unlinkRequirementLink",
+        "title": "SourceBridge: Remove Requirement Link"
+      },
+      {
+        "command": "sourcebridge.askAboutSymbol",
+        "title": "SourceBridge: Ask About This Symbol"
+      },
+      {
+        "command": "sourcebridge.askAboutSelection",
+        "title": "SourceBridge: Ask About Selection"
+      },
+      {
+        "command": "sourcebridge.showRequirementDetail",
+        "title": "SourceBridge: Show Requirement"
+      },
+      {
+        "command": "sourcebridge.filterRequirements",
+        "title": "SourceBridge: Filter Requirements",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "sourcebridge.clearRequirementsFilter",
+        "title": "SourceBridge: Clear Requirements Filter",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "sourcebridge.toggleRequirementsGrouping",
+        "title": "SourceBridge: Toggle Priority Grouping",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "sourcebridge.scopedPalette",
+        "title": "SourceBridge: Scoped Command Palette"
+      },
+      {
+        "command": "sourcebridge.clearRecentDiscussions",
+        "title": "SourceBridge: Clear Recent Discussions",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "sourcebridge.openRecentDiscussion",
+        "title": "SourceBridge: Open Recent Discussion"
+      },
+      {
+        "command": "sourcebridge.impact.refresh",
+        "title": "SourceBridge: Refresh Change Risk",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "sourcebridge.impact.openFile",
+        "title": "SourceBridge: Open Impact File"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sourcebridge",
+          "title": "SourceBridge",
+          "icon": "$(checklist)"
+        }
+      ]
+    },
+    "views": {
+      "sourcebridge": [
+        {
+          "id": "sourcebridge.requirements",
+          "name": "Requirements"
+        },
+        {
+          "id": "sourcebridge.discussion",
+          "name": "Recent Chats"
+        },
+        {
+          "id": "sourcebridge.knowledge",
+          "name": "Field Guide"
+        },
+        {
+          "id": "sourcebridge.impact",
+          "name": "Change Risk"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "submenu": "sourcebridge.submenu",
+          "group": "sourcebridge@1"
+        }
+      ],
+      "sourcebridge.submenu": [
+        {
+          "command": "sourcebridge.askAboutSelection",
+          "group": "1_ask@1"
+        },
+        {
+          "command": "sourcebridge.askAboutSymbol",
+          "group": "1_ask@2"
+        },
+        {
+          "command": "sourcebridge.explainFile",
+          "group": "2_explain@1"
+        },
+        {
+          "command": "sourcebridge.explainSymbol",
+          "group": "2_explain@2"
+        },
+        {
+          "command": "sourcebridge.discussCode",
+          "group": "2_explain@3"
+        },
+        {
+          "command": "sourcebridge.runReview",
+          "group": "3_review@1"
+        },
+        {
+          "command": "sourcebridge.showLinkedRequirements",
+          "group": "3_review@2"
+        },
+        {
+          "command": "sourcebridge.generateCliffNotesForFile",
+          "group": "4_knowledge@1"
+        },
+        {
+          "command": "sourcebridge.generateCliffNotesForSymbol",
+          "group": "4_knowledge@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "sourcebridge.createRequirement",
+          "when": "view == sourcebridge.requirements",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sourcebridge.filterRequirements",
+          "when": "view == sourcebridge.requirements",
+          "group": "navigation@2"
+        },
+        {
+          "command": "sourcebridge.toggleRequirementsGrouping",
+          "when": "view == sourcebridge.requirements",
+          "group": "navigation@3"
+        },
+        {
+          "command": "sourcebridge.clearRecentDiscussions",
+          "when": "view == sourcebridge.discussion",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sourcebridge.impact.refresh",
+          "when": "view == sourcebridge.impact",
+          "group": "navigation@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "sourcebridge.editRequirement",
+          "when": "view == sourcebridge.requirements && viewItem == requirement",
+          "group": "inline@1"
+        },
+        {
+          "command": "sourcebridge.deleteRequirement",
+          "when": "view == sourcebridge.requirements && viewItem == requirement",
+          "group": "inline@2"
+        },
+        {
+          "command": "sourcebridge.editRequirement",
+          "when": "view == sourcebridge.requirements && viewItem == requirement",
+          "group": "1_edit@1"
+        },
+        {
+          "command": "sourcebridge.deleteRequirement",
+          "when": "view == sourcebridge.requirements && viewItem == requirement",
+          "group": "1_edit@2"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "sourcebridge.askAboutSelection",
+        "key": "ctrl+i",
+        "mac": "cmd+i",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "sourcebridge.generateCliffNotesForFile",
+        "key": "ctrl+k n",
+        "mac": "cmd+k n",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "sourcebridge.scopedPalette",
+        "key": "ctrl+shift+;",
+        "mac": "cmd+shift+;"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "sourcebridge.submenu",
+        "label": "SourceBridge"
+      }
+    ],
+    "configuration": {
+      "title": "SourceBridge",
+      "properties": {
+        "sourcebridge.apiUrl": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "URL of the SourceBridge.ai API server"
+        },
+        "sourcebridge.debug": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable verbose debug logging in the SourceBridge output channel"
+        },
+        "sourcebridge.telemetry.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Send anonymous usage telemetry (command counts + errors) to help prioritize improvements. No source code, file paths, or requirement content is transmitted. Off by default."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "jest --passWithNoTests",
+    "package": "npx vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "graphql": "^16.13.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.57.1",
+    "@typescript-eslint/parser": "^8.57.1",
+    "@vscode/vsce": "^3.0.0",
+    "eslint": "^10.1.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
+    "typescript": "^5.8.0"
+  }
+}

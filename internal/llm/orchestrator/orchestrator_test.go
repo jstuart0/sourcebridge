@@ -141,6 +141,70 @@ func TestOrchestratorDedupeReturnsSameJob(t *testing.T) {
 	}
 }
 
+// TestOrchestratorInflightReleasesAfterTerminalJob pins the fix for the
+// "stale inflight dedupe" production incident: when an API pod
+// registered a job in its in-memory inflight map but that job then
+// terminally failed (e.g. because the worker pod wasn't reachable at
+// startup), subsequent identical requests kept deduping to the dead
+// job forever, returning its cached error until the pod restarted.
+// The expected behavior is: Enqueue should detect that the claimed
+// job is terminal, drop the stale registry entry, and create a
+// fresh job for the new request.
+func TestOrchestratorInflightReleasesAfterTerminalJob(t *testing.T) {
+	orch := newTestOrchestrator(t, Config{MaxConcurrency: 1})
+	const targetKey = "repo-1:discuss:invite_user.ts"
+
+	// Simulate the production sequence: a job was claimed but it ended
+	// in a terminal failure state. Reach directly into the store + the
+	// inflight registry to set this up deterministically without
+	// needing to race a real failure.
+	deadID := "dead-job-from-prior-race"
+	if _, err := orch.store.Create(&llm.Job{
+		ID:        deadID,
+		Subsystem: llm.SubsystemReasoning,
+		JobType:   "discuss_code",
+		TargetKey: targetKey,
+		Status:    llm.StatusFailed,
+	}); err != nil {
+		t.Fatalf("seed dead job: %v", err)
+	}
+	if err := orch.store.SetError(deadID, "WORKER_UNAVAILABLE", "prior startup race"); err != nil {
+		t.Fatalf("set error on dead job: %v", err)
+	}
+	if claimedID, ok := orch.inflight.claim(targetKey, deadID); !ok || claimedID != deadID {
+		t.Fatalf("failed to seed inflight registry with dead job: got (%q, %v)", claimedID, ok)
+	}
+
+	// New request with the same target key must NOT return the dead
+	// job — instead it should release the stale claim and run fresh.
+	var ran atomic.Bool
+	freshJob, err := orch.Enqueue(&llm.EnqueueRequest{
+		Subsystem: llm.SubsystemReasoning,
+		JobType:   "discuss_code",
+		TargetKey: targetKey,
+		Run: func(rt llm.Runtime) error {
+			ran.Store(true)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("enqueue after stale claim failed: %v", err)
+	}
+	if freshJob.ID == deadID {
+		t.Fatalf("enqueue returned the dead job id %q instead of a fresh one", deadID)
+	}
+	if freshJob.Status == llm.StatusFailed {
+		t.Fatalf("fresh job should not inherit the dead status; got %q", freshJob.Status)
+	}
+	waitFor(t, time.Second, func() bool {
+		j := orch.GetJob(freshJob.ID)
+		return j != nil && j.Status == llm.StatusReady
+	})
+	if !ran.Load() {
+		t.Fatal("fresh Run closure should have executed; orchestrator seems to have deduped to the dead job")
+	}
+}
+
 func TestOrchestratorBoundedConcurrency(t *testing.T) {
 	const maxConcurrency = 3
 	const total = 10

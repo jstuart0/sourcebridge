@@ -12,7 +12,7 @@ from workers.common.embedding.provider import EmbeddingProvider
 from workers.common.grpc_metadata import resolve_llm_override, resolve_model_override
 from workers.common.llm.config import create_llm_provider_for_request
 from workers.common.llm.provider import LLMProvider
-from workers.reasoning.discussion import discuss_code
+from workers.reasoning.discussion import discuss_code, discuss_code_stream
 from workers.reasoning.reviewer import review_code
 from workers.reasoning.summarizer import summarize_function
 
@@ -36,6 +36,38 @@ _LANGUAGE_MAP: dict[int, str] = {
 
 def _language_name(proto_lang: int) -> str:
     return _LANGUAGE_MAP.get(proto_lang, "unknown")
+
+
+def _build_discussion_context(request: reasoning_pb2.AnswerQuestionRequest) -> str:
+    """Assemble the `context_code` blob the discussion prompt expects.
+
+    Shared by AnswerQuestion (unary) and AnswerQuestionStream. Keeping
+    it in one place means the two RPCs can never drift on what the
+    model sees, which matters because the streaming answer should be
+    exactly the unary answer produced token-by-token.
+    """
+    parts: list[str] = []
+    if request.context_code:
+        header_bits: list[str] = []
+        if request.file_path:
+            header_bits.append(f"file: {request.file_path}")
+        language_name = _language_name(request.language)
+        if language_name != "unknown":
+            header_bits.append(f"language: {language_name}")
+        if header_bits:
+            parts.append("// " + " | ".join(header_bits))
+        parts.append(request.context_code)
+
+    for sym in request.context_symbols:
+        _language_name(sym.language)
+        if sym.signature:
+            parts.append(f"// {sym.qualified_name or sym.name}\n{sym.signature}")
+        elif sym.doc_comment:
+            parts.append(f"// {sym.qualified_name or sym.name}\n{sym.doc_comment}")
+        else:
+            parts.append(f"// {sym.qualified_name or sym.name}")
+
+    return "\n\n".join(parts) if parts else "(no code context provided)"
 
 
 def _llm_usage_proto(usage_record) -> types_pb2.LLMUsage:
@@ -133,30 +165,7 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
         """Answer a natural-language question about the codebase."""
         log.info("answer_question", question=request.question[:80])
 
-        context_parts: list[str] = []
-        if request.context_code:
-            header_bits = []
-            if request.file_path:
-                header_bits.append(f"file: {request.file_path}")
-            language_name = _language_name(request.language)
-            if language_name != "unknown":
-                header_bits.append(f"language: {language_name}")
-            if header_bits:
-                context_parts.append("// " + " | ".join(header_bits))
-            context_parts.append(request.context_code)
-
-        # Add symbol metadata as supporting repository context.
-        for sym in request.context_symbols:
-            _language_name(sym.language)
-            if sym.signature:
-                context_parts.append(f"// {sym.qualified_name or sym.name}\n{sym.signature}")
-            elif sym.doc_comment:
-                context_parts.append(f"// {sym.qualified_name or sym.name}\n{sym.doc_comment}")
-            else:
-                context_parts.append(f"// {sym.qualified_name or sym.name}")
-
-        context_code = "\n\n".join(context_parts) if context_parts else "(no code context provided)"
-
+        context_code = _build_discussion_context(request)
         provider, model_override = self._resolve_provider(context)
         try:
             answer, usage = await discuss_code(
@@ -182,6 +191,54 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
             referenced_symbols=ref_symbols,
             usage=_llm_usage_proto(usage),
         )
+
+    async def AnswerQuestionStream(  # noqa: N802
+        self,
+        request: reasoning_pb2.AnswerQuestionRequest,
+        context: grpc.aio.ServicerContext,
+    ):
+        """Stream a natural-language answer as the LLM generates it.
+
+        Wire shape mirrors AnswerQuestion's prompt assembly so both
+        variants share the same behavior — only the delivery differs.
+        Emits one AnswerDelta per visible text chunk, then a terminal
+        frame (finished=True) carrying referenced_symbols + usage.
+        """
+        log.info("answer_question_stream", question=request.question[:80])
+
+        context_code = _build_discussion_context(request)
+        provider, model_override = self._resolve_provider(context)
+
+        max_tokens = request.max_tokens if request.max_tokens > 0 else 4096
+        try:
+            async for delta, final_answer, usage in discuss_code_stream(
+                provider=provider,
+                question=request.question,
+                context_code=context_code,
+                model_override=model_override,
+                max_tokens=max_tokens,
+            ):
+                if delta is not None:
+                    yield reasoning_pb2.AnswerDelta(content_delta=delta)
+                    continue
+                # Terminal frame: assemble the references + usage proto
+                # the unary caller would have returned and send it as the
+                # last AnswerDelta with finished=True set.
+                assert final_answer is not None and usage is not None
+                ref_symbols = [
+                    types_pb2.CodeSymbol(qualified_name=ref)
+                    for ref in final_answer.references
+                ]
+                yield reasoning_pb2.AnswerDelta(
+                    finished=True,
+                    referenced_symbols=ref_symbols,
+                    usage=_llm_usage_proto(usage),
+                )
+        except Exception as exc:
+            log.error("answer_question_stream_failed", error=str(exc))
+            await context.abort(
+                grpc.StatusCode.INTERNAL, f"Question streaming failed: {exc}"
+            )
 
     async def ReviewFile(  # noqa: N802
         self,

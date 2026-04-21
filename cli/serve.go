@@ -26,6 +26,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/telemetry"
+	"github.com/sourcebridge/sourcebridge/internal/trash"
 	"github.com/sourcebridge/sourcebridge/internal/version"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
@@ -101,8 +102,37 @@ func runServe(cmd *cobra.Command, args []string) error {
 		slog.Info("using in-memory store (embedded mode)")
 	}
 
-	// Initialize cache
-	_ = db.NewCache(cfg.Storage)
+	// Initialize shared cache (memory by default, Redis when configured).
+	// Consumed by the MCP session store for HA across replicas, and by
+	// the trash retention worker for cross-replica leader election.
+	cache := db.NewCache(cfg.Storage)
+
+	// Trash (soft-delete recycle bin). Phase 1 requires external
+	// SurrealDB — embedded mode falls back to nil (feature disabled).
+	var trashStore trash.Store
+	if cfg.Trash.Enabled && cfg.Storage.SurrealMode == "external" {
+		trashStore = trash.NewSurrealStore(surrealDB)
+		slog.Info("trash (recycle bin) enabled",
+			"retention_days", cfg.Trash.RetentionDays,
+			"sweep_interval_sec", cfg.Trash.SweepIntervalSec)
+
+		// Retention worker runs in the background for the lifetime of
+		// the server process. Leader election via Redis ensures only
+		// one replica sweeps per tick when the cache is Redis-backed.
+		worker := trash.NewWorker(trashStore, cache, trash.WorkerConfig{
+			RetentionDays: cfg.Trash.RetentionDays,
+			SweepInterval: time.Duration(cfg.Trash.SweepIntervalSec) * time.Second,
+			MaxBatchSize:  cfg.Trash.MaxBatchSize,
+		})
+		go func() {
+			if err := worker.Run(context.Background()); err != nil {
+				slog.Error("trash retention worker exited", "error", err)
+			}
+		}()
+	} else if cfg.Trash.Enabled {
+		slog.Warn("trash is enabled in config but requires external SurrealDB; feature disabled",
+			"storage.surreal_mode", cfg.Storage.SurrealMode)
+	}
 
 	knowledgeTimeoutProvider := func() time.Duration {
 		// TimeoutSecs is for individual LLM completions (default 30s).
@@ -223,6 +253,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		rest.WithDesktopAuthStore(desktopAuthStore),
 		rest.WithComprehensionStore(comprehensionStore),
 		rest.WithSummaryNodeStore(summaryNodeStore),
+		rest.WithCache(cache),
+		rest.WithTrashStore(trashStore),
 	)
 
 	// Initialize OIDC if configured
@@ -461,6 +493,13 @@ func (p *telemetryCountProvider) TelemetryCounts() (repos, users int, features [
 	counts = map[string]int{
 		"total_files":   totalFiles,
 		"total_symbols": totalSymbols,
+	}
+
+	// Merge in trash (recycle bin) counters. These are process-start
+	// cumulative; safe to read even when the feature is disabled
+	// (atomics default to zero).
+	for k, v := range trash.Counters() {
+		counts[k] = v
 	}
 
 	return repos, 0, nil, counts

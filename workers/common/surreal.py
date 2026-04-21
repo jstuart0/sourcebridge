@@ -15,6 +15,18 @@ log = structlog.get_logger()
 _MAX_RECONNECT_ATTEMPTS = 3
 _RECONNECT_DELAY = 1.0  # seconds
 
+# Soft-delete filter fragment for trashable tables. Append to any SELECT
+# or UPDATE that targets ca_requirement, ca_link, ca_knowledge_artifact,
+# ca_knowledge_section, ca_knowledge_evidence, ca_knowledge_dependency,
+# or ca_knowledge_refinement.
+#
+# These tables gained tombstone bookkeeping in migration 031. Phase 1 of
+# the recycle-bin feature does NOT query any of them from Python today,
+# but this constant is pinned here so that when a future worker does,
+# the filter is obvious and consistent. See
+# thoughts/shared/plans/2026-04-20-soft-delete-recycle-bin.md §1.8.
+ACTIVE_FILTER = "deleted_at IS NONE"
+
 
 class SurrealClient:
     """Async SurrealDB client using the HTTP API.

@@ -194,6 +194,39 @@ async def test_answer_question_referenced_symbols(servicer, context):
     assert isinstance(list(response.referenced_symbols), list)
 
 
+async def test_answer_question_stream_yields_deltas_then_terminal(servicer, context):
+    """AnswerQuestionStream emits at least one content delta before the
+    final frame, and the terminal frame carries finished=True plus the
+    usage proto that the unary variant returns."""
+    symbol = types_pb2.CodeSymbol(
+        name="processPayment",
+        qualified_name="payment.processPayment",
+        language=types_pb2.LANGUAGE_GO,
+        signature="func processPayment(ctx, order)",
+    )
+    request = reasoning_pb2.AnswerQuestionRequest(
+        question="What does processPayment do?",
+        context_symbols=[symbol],
+    )
+
+    deltas: list[str] = []
+    terminal = None
+    async for frame in servicer.AnswerQuestionStream(request, context):
+        if frame.finished:
+            terminal = frame
+            break
+        deltas.append(frame.content_delta)
+
+    assert terminal is not None, "no terminal frame emitted"
+    assert terminal.finished is True
+    assert terminal.usage.model == "fake-test-model"
+    assert terminal.usage.operation == "discussion"
+    # At least one delta should carry visible text (the fake provider
+    # streams word-by-word). Concatenating them should reconstruct the
+    # same answer the unary variant would produce.
+    assert any(d.strip() for d in deltas), "expected at least one non-empty delta"
+
+
 # ---------------------------------------------------------------------------
 # ReviewFile
 # ---------------------------------------------------------------------------

@@ -255,6 +255,10 @@ func (f *TenantFilteredStore) UpdateRequirement(id string, priority string, tags
 	return f.inner.UpdateRequirement(id, priority, tags)
 }
 
+func (f *TenantFilteredStore) UpdateRequirementFields(id string, fields RequirementUpdate) *StoredRequirement {
+	return f.inner.UpdateRequirementFields(id, fields)
+}
+
 func (f *TenantFilteredStore) GetLink(id string) *StoredLink {
 	return f.inner.GetLink(id)
 }

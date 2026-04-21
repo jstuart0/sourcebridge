@@ -17,6 +17,14 @@ service ReasoningService {
   // AnswerQuestion answers a natural language question about the codebase
   rpc AnswerQuestion(AnswerQuestionRequest) returns (AnswerQuestionResponse);
 
+  // AnswerQuestionStream is the server-streaming variant of AnswerQuestion.
+  // The server emits zero-or-more AnswerDelta messages containing incremental
+  // text chunks while the model is generating, followed by a terminal
+  // AnswerDelta with `finished = true` carrying the final usage stats. This
+  // lets callers render tokens progressively instead of waiting for the whole
+  // answer. Semantics of the request are identical to AnswerQuestion.
+  rpc AnswerQuestionStream(AnswerQuestionRequest) returns (stream AnswerDelta);
+
   // ReviewFile performs a template-based code review of a file
   rpc ReviewFile(ReviewFileRequest) returns (ReviewFileResponse);
 
@@ -67,6 +75,19 @@ message AnswerQuestionResponse {
   string answer = 1;
   repeated sourcebridge.common.v1.CodeSymbol referenced_symbols = 2;
   sourcebridge.common.v1.LLMUsage usage = 3;
+}
+
+// AnswerDelta is one frame on the AnswerQuestionStream wire. Most frames
+// contain just an incremental `content_delta` (text appended to the running
+// answer). The final frame sets `finished = true` and carries the resolved
+// `referenced_symbols` and `usage`; consumers must treat that frame as the
+// signal to stop rendering deltas.
+message AnswerDelta {
+  string content_delta = 1;
+  bool finished = 2;
+  // Populated only on the terminal frame.
+  repeated sourcebridge.common.v1.CodeSymbol referenced_symbols = 3;
+  sourcebridge.common.v1.LLMUsage usage = 4;
 }
 
 message ReviewFileRequest {

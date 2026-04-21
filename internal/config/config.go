@@ -26,6 +26,7 @@ type Config struct {
 	Git           GitConfig           `mapstructure:"git"`
 	MCP           MCPConfig           `mapstructure:"mcp"`
 	Comprehension ComprehensionConfig `mapstructure:"comprehension"`
+	Trash         TrashConfig         `mapstructure:"trash"`
 }
 
 // ComprehensionConfig holds tunables for the LLM job orchestrator and
@@ -182,6 +183,19 @@ type MCPConfig struct {
 	MaxSessions int    `mapstructure:"max_sessions"` // max concurrent MCP sessions (0 = unlimited)
 }
 
+// TrashConfig controls the soft-delete recycle bin feature.
+//
+// When Enabled is false, moveToTrash mutations and the retention worker
+// are both no-ops; existing hard-delete paths remain active. Turning
+// this on upgrades hard-deletes into soft-deletes and starts the
+// retention sweep.
+type TrashConfig struct {
+	Enabled          bool `mapstructure:"enabled"`            // SOURCEBRIDGE_TRASH_ENABLED
+	RetentionDays    int  `mapstructure:"retention_days"`     // SOURCEBRIDGE_TRASH_RETENTION_DAYS (default 30, min 1, max 365)
+	SweepIntervalSec int  `mapstructure:"sweep_interval_sec"` // SOURCEBRIDGE_TRASH_SWEEP_INTERVAL (default 21600 = 6h)
+	MaxBatchSize     int  `mapstructure:"max_batch_size"`     // SOURCEBRIDGE_TRASH_SWEEP_MAX_BATCH (default 500)
+}
+
 // Defaults returns a Config with all default values.
 func Defaults() *Config {
 	return &Config{
@@ -245,6 +259,12 @@ func Defaults() *Config {
 			Keepalive:   30,   // 30 seconds
 			MaxSessions: 100,
 		},
+		Trash: TrashConfig{
+			Enabled:          true,
+			RetentionDays:    30,
+			SweepIntervalSec: 6 * 3600,
+			MaxBatchSize:     500,
+		},
 	}
 }
 
@@ -302,6 +322,10 @@ func Load() (*Config, error) {
 	v.SetDefault("mcp.session_ttl", cfg.MCP.SessionTTL)
 	v.SetDefault("mcp.keepalive", cfg.MCP.Keepalive)
 	v.SetDefault("mcp.max_sessions", cfg.MCP.MaxSessions)
+	v.SetDefault("trash.enabled", cfg.Trash.Enabled)
+	v.SetDefault("trash.retention_days", cfg.Trash.RetentionDays)
+	v.SetDefault("trash.sweep_interval_sec", cfg.Trash.SweepIntervalSec)
+	v.SetDefault("trash.max_batch_size", cfg.Trash.MaxBatchSize)
 
 	// Try reading config file (not required)
 	if err := v.ReadInConfig(); err != nil {
@@ -342,6 +366,17 @@ func (c *Config) Validate() error {
 	}
 	if (c.LLM.Provider == "ollama" || c.LLM.Provider == "vllm" || c.LLM.Provider == "llama-cpp" || c.LLM.Provider == "sglang" || c.LLM.Provider == "lmstudio") && c.LLM.BaseURL == "" {
 		return fmt.Errorf("llm.base_url is required when provider is %s", c.LLM.Provider)
+	}
+	if c.Trash.Enabled {
+		if c.Trash.RetentionDays < 1 || c.Trash.RetentionDays > 365 {
+			return fmt.Errorf("invalid trash.retention_days: %d (must be 1..365)", c.Trash.RetentionDays)
+		}
+		if c.Trash.SweepIntervalSec < 60 {
+			return fmt.Errorf("invalid trash.sweep_interval_sec: %d (must be >= 60)", c.Trash.SweepIntervalSec)
+		}
+		if c.Trash.MaxBatchSize < 1 || c.Trash.MaxBatchSize > 10000 {
+			return fmt.Errorf("invalid trash.max_batch_size: %d (must be 1..10000)", c.Trash.MaxBatchSize)
+		}
 	}
 	return nil
 }
