@@ -331,6 +331,18 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 	// Persist the report after invalidation so StaleArtifacts reflects the
 	// surgically-chosen set (not the pre-stale snapshot).
 	r.getStore(ctx).StoreImpactReport(id, impactReport)
+
+	// Phase 2: delta-driven auto-regeneration. No-op when the mode is off.
+	// Shadow mode logs what it would do; live mode actually enqueues. Runs
+	// in a goroutine so the reindex mutation returns promptly; the driver
+	// uses its own background context.
+	if deltaRegenMode() != DeltaRegenModeOff && len(impactReport.StaleArtifacts) > 0 {
+		staleIDs := make([]string, len(impactReport.StaleArtifacts))
+		copy(staleIDs, impactReport.StaleArtifacts)
+		reportID := impactReport.ID
+		go r.enqueueStaleArtifactRefresh(id, staleIDs, reportID)
+	}
+
 	slog.Info("impact analysis complete",
 		"id", impactReport.ID,
 		"filesChanged", len(impactReport.FilesChanged),

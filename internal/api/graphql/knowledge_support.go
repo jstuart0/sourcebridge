@@ -1368,6 +1368,74 @@ func selectiveInvalidationMaxChanges() int {
 	return n
 }
 
+// DeltaRegenMode controls Phase 2 delta-driven auto-regeneration after
+// reindex. Three modes:
+//
+//   - off: no auto-regen logic runs (default).
+//   - shadow: the driver runs every decision step (candidate selection,
+//     prioritization, capping, rate-limiting, understanding gating) and
+//     emits telemetry/slog describing what it WOULD enqueue — but skips the
+//     actual enqueue. Lets you measure cost + decision quality on real
+//     traffic before committing to live.
+//   - live: full auto-regen — stale artifacts get regenerated in the
+//     background via the existing RefreshKnowledgeArtifact path on the
+//     prewarm priority queue.
+type DeltaRegenMode string
+
+const (
+	DeltaRegenModeOff    DeltaRegenMode = "off"
+	DeltaRegenModeShadow DeltaRegenMode = "shadow"
+	DeltaRegenModeLive   DeltaRegenMode = "live"
+)
+
+// deltaRegenMode returns the effective mode. If Phase 1 selective
+// invalidation is disabled, forces off — without selective invalidation,
+// StaleArtifacts carries the legacy pre-stale collected set (wrong
+// semantics) and auto-regen would thrash through every ready artifact.
+func deltaRegenMode() DeltaRegenMode {
+	if !selectiveInvalidationEnabled() {
+		return DeltaRegenModeOff
+	}
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("SOURCEBRIDGE_DELTA_REGEN_MODE")))
+	switch raw {
+	case "shadow":
+		return DeltaRegenModeShadow
+	case "live", "on", "true", "1":
+		return DeltaRegenModeLive
+	default:
+		return DeltaRegenModeOff
+	}
+}
+
+// deltaRegenMaxPerIndex caps the number of artifacts auto-regenerated per
+// reindex invocation. Beyond this cap the remainder stay stale until
+// manual refresh. Default 5.
+func deltaRegenMaxPerIndex() int {
+	raw := strings.TrimSpace(os.Getenv("SOURCEBRIDGE_DELTA_REGEN_MAX_PER_INDEX"))
+	if raw == "" {
+		return 5
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 5
+	}
+	return n
+}
+
+// deltaRegenMaxPerRepoPerHour caps the rolling number of auto-regens per
+// repo per hour. Protects against reindex thrash. Default 20.
+func deltaRegenMaxPerRepoPerHour() int {
+	raw := strings.TrimSpace(os.Getenv("SOURCEBRIDGE_DELTA_REGEN_MAX_PER_REPO_PER_HOUR"))
+	if raw == "" {
+		return 20
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 20
+	}
+	return n
+}
+
 func enrichSnapshotWithCliffNotesAnalysis(
 	store knowledgepkg.KnowledgeStore,
 	repoID string,
