@@ -40,6 +40,7 @@ type Resolver struct {
 	ComprehensionStore comprehension.Store        // comprehension settings + model capabilities; nil when unavailable
 	TrashStore         trash.Store                // soft-delete recycle bin; nil when the feature is disabled or unavailable
 	SearchSvc          *search.Service            // hybrid retrieval backbone; nil falls back to legacy substring search
+	ReqBooster         *search.RequirementBooster // requirement-link cache; link mutations call Invalidate so subsequent searches see fresh links
 }
 
 // getStore returns the per-request tenant-filtered store when available,

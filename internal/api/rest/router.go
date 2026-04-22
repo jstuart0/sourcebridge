@@ -330,6 +330,7 @@ func (s *Server) setupRouter() {
 			ComprehensionStore: s.comprehensionStore,
 			TrashStore:         s.trashStore,
 			SearchSvc:          s.searchSvc,
+			ReqBooster:         s.reqBooster,
 		},
 	}))
 

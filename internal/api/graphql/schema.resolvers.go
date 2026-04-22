@@ -578,6 +578,9 @@ func (r *mutationResolver) VerifyLink(ctx context.Context, linkID string, verifi
 	if link == nil {
 		return nil, fmt.Errorf("link not found: %s", linkID)
 	}
+	if r.ReqBooster != nil && link.RepoID != "" {
+		r.ReqBooster.Invalidate(link.RepoID)
+	}
 	if verified {
 		r.Resolver.publishEvent(events.EventLinkVerified, map[string]interface{}{"link_id": linkID})
 	} else {
@@ -607,6 +610,9 @@ func (r *mutationResolver) CreateManualLink(ctx context.Context, input CreateMan
 	})
 	if link == nil {
 		return nil, fmt.Errorf("failed to create link")
+	}
+	if r.ReqBooster != nil {
+		r.ReqBooster.Invalidate(input.RepositoryID)
 	}
 	return mapLinkWithRelations(link, r.getStore(ctx)), nil
 }
@@ -1093,6 +1099,10 @@ func (r *mutationResolver) AutoLinkRequirements(ctx context.Context, repositoryI
 	store := r.getStore(ctx)
 	stored := store.StoreLinks(repositoryID, storedLinks)
 	slog.Info("auto-link: storage complete", "stored", stored)
+
+	if r.ReqBooster != nil && stored > 0 {
+		r.ReqBooster.Invalidate(repositoryID)
+	}
 
 	r.Resolver.publishEvent(events.EventRequirementLinked, map[string]interface{}{
 		"repo_id": repositoryID, "links_created": stored,
