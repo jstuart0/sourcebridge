@@ -94,6 +94,9 @@ codeaware
 # Internal notes and plans (not for OSS repos)
 thoughts/
 
+# Drafts, marketing essays, positioning pieces — not the OSS repo's job
+docs/essays/
+
 # Demo seed and benchmark data (lives in sourcebridge-ai/demo repo)
 benchmark-results/
 demo-seed/
