@@ -53,6 +53,51 @@ type GraphNeighbor struct {
 	Language      string
 }
 
+// ArtifactLookup resolves a knowledge-artifact ID to a human-readable
+// context block. Used by discussCode routing to preserve the existing
+// ArtifactID parameter's behavior.
+type ArtifactLookup interface {
+	ArtifactContext(artifactID string) string
+}
+
+// RequirementLookup resolves a requirement ID to a context block.
+type RequirementLookup interface {
+	RequirementContext(requirementID string) string
+	// RequirementLabelsForSymbols returns the ExternalID (or Title)
+	// for every requirement linked to any of the supplied symbol IDs.
+	// Deduped, stable order.
+	RequirementLabelsForSymbols(symbolIDs []string) []string
+}
+
+// SymbolLookup resolves a symbol ID and a file path to context,
+// mirroring the discussCode resolver's symbol handling:
+//   - SymbolContext: indexed-symbol metadata block (qualified name,
+//     signature, doc comment).
+//   - SymbolFilePath: the file the symbol lives in, so the pipeline
+//     can opportunistically add the full file as context.
+//   - SymbolsInFile: IDs + display names of every symbol in a file,
+//     used to populate context_symbols on the synthesis request.
+type SymbolLookup interface {
+	SymbolContext(symbolID string) string
+	SymbolFilePath(symbolID string) string
+	SymbolsInFile(repoID, filePath string) []SymbolContextRef
+}
+
+// SymbolContextRef is the minimal identifier shape used for
+// context_symbols on the synthesis request.
+type SymbolContextRef struct {
+	ID            string
+	Name          string
+	QualifiedName string
+}
+
+// FileReader reads a file within a repo clone, with the same
+// path-traversal safety guarantees as resolveRepoSourcePath +
+// safeJoinPath on the existing discussCode path.
+type FileReader interface {
+	ReadRepoFile(repoID, filePath string) (string, error)
+}
+
 // Orchestrator is the server-side deep-QA entry point. One instance
 // lives per running server. Ask(req) is the only user-facing method;
 // everything else is internal plumbing.
@@ -60,12 +105,16 @@ type GraphNeighbor struct {
 // Dependencies are injected so tests can swap the synthesizer, the
 // reader, and the lane registry without standing up a worker.
 type Orchestrator struct {
-	synthesizer Synthesizer
-	reader      UnderstandingReader
-	locator     RepoLocator
-	graph       GraphExpander
-	lanes       *worker.Lanes
-	config      Config
+	synthesizer  Synthesizer
+	reader       UnderstandingReader
+	locator      RepoLocator
+	graph        GraphExpander
+	artifacts    ArtifactLookup
+	requirements RequirementLookup
+	symbols      SymbolLookup
+	files        FileReader
+	lanes        *worker.Lanes
+	config       Config
 }
 
 // WithRepoLocator returns o with the supplied locator installed.
@@ -80,6 +129,27 @@ func (o *Orchestrator) WithRepoLocator(l RepoLocator) *Orchestrator {
 // skips one-hop expansion without error.
 func (o *Orchestrator) WithGraphExpander(g GraphExpander) *Orchestrator {
 	o.graph = g
+	return o
+}
+
+// WithArtifactLookup, WithRequirementLookup, WithSymbolLookup, and
+// WithFileReader install collaborators used by the discussCode
+// routing path (Phase 5). Optional — nil leaves the behavior on the
+// legacy resolver which does its own resolution.
+func (o *Orchestrator) WithArtifactLookup(a ArtifactLookup) *Orchestrator {
+	o.artifacts = a
+	return o
+}
+func (o *Orchestrator) WithRequirementLookup(r RequirementLookup) *Orchestrator {
+	o.requirements = r
+	return o
+}
+func (o *Orchestrator) WithSymbolLookup(s SymbolLookup) *Orchestrator {
+	o.symbols = s
+	return o
+}
+func (o *Orchestrator) WithFileReader(f FileReader) *Orchestrator {
+	o.files = f
 	return o
 }
 

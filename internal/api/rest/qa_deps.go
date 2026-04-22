@@ -4,10 +4,12 @@
 package rest
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
+	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
 )
 
@@ -103,6 +105,279 @@ type qaGraphAdapter struct {
 func (a *qaGraphAdapter) GetCallers(id string) []string { return a.store.GetCallers(id) }
 func (a *qaGraphAdapter) GetCallees(id string) []string { return a.store.GetCallees(id) }
 
+// qaArtifactLookup adapts the knowledge store to qa.ArtifactLookup.
+// Returns the same context block the legacy discussCode resolver
+// built so F10/F11 shape preservation doesn't regress.
+type qaArtifactLookup struct {
+	store knowledge.KnowledgeStore
+}
+
+func (a *qaArtifactLookup) ArtifactContext(id string) string {
+	if a == nil || a.store == nil || id == "" {
+		return ""
+	}
+	art := a.store.GetKnowledgeArtifact(id)
+	if art == nil {
+		return ""
+	}
+	return discussionContextFromArtifactQA(art)
+}
+
+// discussionContextFromArtifactQA duplicates the helper in
+// internal/api/graphql/helpers.go so we don't import the graphql
+// package from rest (which would be a layering inversion). If the
+// legacy helper changes, keep this in sync.
+func discussionContextFromArtifactQA(artifact *knowledge.Artifact) string {
+	if artifact == nil || len(artifact.Sections) == 0 {
+		return ""
+	}
+	scopePath := "repository"
+	if artifact.Scope != nil {
+		scopePath = artifact.Scope.ScopePath
+	}
+	parts := []string{
+		fmt.Sprintf("Indexed %s context for %s.", lower(string(artifact.Type)), scopePath),
+	}
+	for idx, section := range artifact.Sections {
+		if idx >= 6 {
+			break
+		}
+		body := section.Summary
+		if body == "" {
+			body = section.Content
+		}
+		body = trim(body)
+		if len(body) > 500 {
+			body = body[:500] + "..."
+		}
+		parts = append(parts, fmt.Sprintf("- %s: %s", section.Title, body))
+	}
+	return joinLines(parts)
+}
+
+// qaRequirementLookup adapts the graph store for requirement
+// resolution. One struct implements both RequirementContext (by ID)
+// and RequirementLabelsForSymbols (via links) so the orchestrator's
+// dependency list stays short.
+type qaRequirementLookup struct {
+	store graphstore.GraphStore
+}
+
+func (r *qaRequirementLookup) RequirementContext(id string) string {
+	if r == nil || r.store == nil || id == "" {
+		return ""
+	}
+	req := r.store.GetRequirement(id)
+	if req == nil {
+		return ""
+	}
+	return fmt.Sprintf(
+		"Requirement context:\nID: %s\nTitle: %s\nDescription: %s",
+		req.ExternalID, req.Title, req.Description,
+	)
+}
+
+func (r *qaRequirementLookup) RequirementLabelsForSymbols(symbolIDs []string) []string {
+	if r == nil || r.store == nil || len(symbolIDs) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, sid := range symbolIDs {
+		for _, link := range r.store.GetLinksForSymbol(sid, false) {
+			if _, dup := seen[link.RequirementID]; dup {
+				continue
+			}
+			seen[link.RequirementID] = struct{}{}
+			req := r.store.GetRequirement(link.RequirementID)
+			if req == nil {
+				continue
+			}
+			label := req.ExternalID
+			if label == "" {
+				label = req.Title
+			}
+			if label != "" {
+				out = append(out, label)
+			}
+		}
+	}
+	return out
+}
+
+// qaSymbolLookup resolves symbol IDs + files to context blocks. Uses
+// the same metadata fields as the legacy resolver so the synthesis
+// prompt sees identical text.
+type qaSymbolLookup struct {
+	store graphstore.GraphStore
+}
+
+func (s *qaSymbolLookup) SymbolContext(id string) string {
+	if s == nil || s.store == nil || id == "" {
+		return ""
+	}
+	sym := s.store.GetSymbol(id)
+	if sym == nil {
+		return ""
+	}
+	parts := []string{"Indexed symbol: " + sym.QualifiedName}
+	if sym.Signature != "" {
+		parts = append(parts, sym.Signature)
+	}
+	if sym.DocComment != "" {
+		parts = append(parts, sym.DocComment)
+	}
+	return joinLines(parts)
+}
+
+func (s *qaSymbolLookup) SymbolFilePath(id string) string {
+	if s == nil || s.store == nil || id == "" {
+		return ""
+	}
+	sym := s.store.GetSymbol(id)
+	if sym == nil {
+		return ""
+	}
+	return sym.FilePath
+}
+
+func (s *qaSymbolLookup) SymbolsInFile(repoID, filePath string) []qa.SymbolContextRef {
+	if s == nil || s.store == nil || repoID == "" || filePath == "" {
+		return nil
+	}
+	syms := s.store.GetSymbolsByFile(repoID, filePath)
+	out := make([]qa.SymbolContextRef, 0, len(syms))
+	for _, sym := range syms {
+		out = append(out, qa.SymbolContextRef{
+			ID:            sym.ID,
+			Name:          sym.Name,
+			QualifiedName: sym.QualifiedName,
+		})
+	}
+	return out
+}
+
+// qaFileReader reads files from repo clones via the shared locator
+// and path-traversal-safe join. Implements qa.FileReader.
+type qaFileReader struct {
+	locator *qaRepoLocator
+}
+
+func (r *qaFileReader) ReadRepoFile(repoID, filePath string) (string, error) {
+	if r == nil || r.locator == nil {
+		return "", errNoLocator
+	}
+	root, ok := r.locator.LocateRepoClone(repoID)
+	if !ok || root == "" {
+		return "", errRepoUnavailable
+	}
+	abs, err := safeJoinRepoPath(root, filePath)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// safeJoinRepoPath duplicates safeJoinPath from internal/api/graphql
+// for the same layering reason as the artifact helper above. Rejects
+// absolute paths and any join that escapes the repo root.
+func safeJoinRepoPath(repoRoot, relPath string) (string, error) {
+	relPath = trimPrefix(relPath, "./")
+	if filepath.IsAbs(relPath) {
+		return "", fmt.Errorf("absolute path not allowed: %s", relPath)
+	}
+	joined := filepath.Join(repoRoot, filepath.FromSlash(relPath))
+	absJoined, err := filepath.Abs(joined)
+	if err != nil {
+		return "", fmt.Errorf("resolving path: %w", err)
+	}
+	absRoot, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return "", fmt.Errorf("resolving repo root: %w", err)
+	}
+	if absJoined != absRoot && !hasPrefix(absJoined, absRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("path traversal rejected: %s", relPath)
+	}
+	return absJoined, nil
+}
+
+// local helpers to avoid pulling strings just for these calls; a
+// separate strings-based impl would be identical.
+func lower(s string) string {
+	out := make([]byte, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		out[i] = c
+	}
+	return string(out)
+}
+func trim(s string) string {
+	start, end := 0, len(s)
+	for start < end {
+		c := s[start]
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			start++
+			continue
+		}
+		break
+	}
+	for end > start {
+		c := s[end-1]
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			end--
+			continue
+		}
+		break
+	}
+	return s[start:end]
+}
+func joinLines(ps []string) string {
+	var total int
+	for _, p := range ps {
+		total += len(p) + 1
+	}
+	b := make([]byte, 0, total)
+	for i, p := range ps {
+		if i > 0 {
+			b = append(b, '\n')
+		}
+		b = append(b, p...)
+	}
+	return string(b)
+}
+func trimPrefix(s, pfx string) string {
+	if len(s) >= len(pfx) && s[:len(pfx)] == pfx {
+		return s[len(pfx):]
+	}
+	return s
+}
+func hasPrefix(s, pfx string) bool {
+	return len(s) >= len(pfx) && s[:len(pfx)] == pfx
+}
+
 // compile-time check: both adapters satisfy the qa package's
 // interfaces. This catches drift if the qa interfaces change.
 var _ qa.RepoLocator = (*qaRepoLocator)(nil)
+var _ qa.ArtifactLookup = (*qaArtifactLookup)(nil)
+var _ qa.RequirementLookup = (*qaRequirementLookup)(nil)
+var _ qa.SymbolLookup = (*qaSymbolLookup)(nil)
+var _ qa.FileReader = (*qaFileReader)(nil)
+
+// sentinel errors for the file reader. Kept internal — callers see
+// these via the qa.FileReader return and only need to know the file
+// wasn't readable, not the specific cause.
+var (
+	errNoLocator       = errorString("qa: no repo locator configured")
+	errRepoUnavailable = errorString("qa: repo clone unavailable")
+)
+
+type errorString string
+
+func (e errorString) Error() string { return string(e) }

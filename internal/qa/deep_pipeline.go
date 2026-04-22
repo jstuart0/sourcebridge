@@ -122,9 +122,52 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 		result.Diagnostics.GraphExpansionUsed = len(graphNeighbors) > 0
 	}
 
+	// Stage 3d: pinned-context resolution (discussCode parity).
+	// Artifact / requirement / symbol / file pins are resolved to
+	// context blocks here so the same input shape the legacy resolver
+	// took produces the same quality answer. Lookups are optional —
+	// unsupplied collaborators just contribute nothing.
+	var pinnedBlocks []string
+	var contextSymbols []SymbolContextRef
+
+	if in.ArtifactID != "" && o.artifacts != nil {
+		if block := o.artifacts.ArtifactContext(in.ArtifactID); block != "" {
+			pinnedBlocks = append(pinnedBlocks, block)
+		}
+	}
+	if in.RequirementID != "" && o.requirements != nil {
+		if block := o.requirements.RequirementContext(in.RequirementID); block != "" {
+			pinnedBlocks = append(pinnedBlocks, block)
+		}
+	}
+	if in.SymbolID != "" && o.symbols != nil {
+		if block := o.symbols.SymbolContext(in.SymbolID); block != "" {
+			pinnedBlocks = append(pinnedBlocks, block)
+		}
+		// Opportunistically also pin the symbol's file so the LLM
+		// has line-level context, not just metadata.
+		if in.FilePath == "" {
+			if fp := o.symbols.SymbolFilePath(in.SymbolID); fp != "" {
+				in.FilePath = fp
+			}
+		}
+		contextSymbols = append(contextSymbols, SymbolContextRef{ID: in.SymbolID})
+	}
+	if in.FilePath != "" && in.Code == "" && o.files != nil {
+		if content, err := o.files.ReadRepoFile(in.RepositoryID, in.FilePath); err == nil && content != "" {
+			pinnedBlocks = append(pinnedBlocks, content)
+		}
+		if o.symbols != nil {
+			contextSymbols = append(contextSymbols, o.symbols.SymbolsInFile(in.RepositoryID, in.FilePath)...)
+		}
+	}
+
 	// Stage 4: deterministic assembly.
 	t3 := time.Now()
 	contextMD := buildDeepContextMarkdown(in, summaries, files, graphNeighbors, requirementLines)
+	if len(pinnedBlocks) > 0 {
+		contextMD += "\n# Caller-pinned context\n\n" + strings.Join(pinnedBlocks, "\n\n") + "\n"
+	}
 	promptEnvelope := buildPromptEnvelope(in, contextMD)
 	result.Diagnostics.StageTimings["qa.assemble"] = FromDuration(time.Since(t3))
 	result.Diagnostics.StageTimings["qa.prompt_build"] = FromDuration(time.Since(t3))
@@ -191,12 +234,13 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 
 	t4 := time.Now()
 	req := &reasoningv1.AnswerQuestionRequest{
-		Question:     promptEnvelope,
-		RepositoryId: in.RepositoryID,
-		ContextCode:  contextMD,
-		FilePath:     in.FilePath,
-		Language:     languageFromString(in.Language),
-		MaxTokens:    int32(o.config.MaxAnswerTokens),
+		Question:       promptEnvelope,
+		RepositoryId:   in.RepositoryID,
+		ContextCode:    contextMD,
+		ContextSymbols: buildProtoContextSymbols(contextSymbols),
+		FilePath:       in.FilePath,
+		Language:       languageFromString(in.Language),
+		MaxTokens:      int32(o.config.MaxAnswerTokens),
 	}
 	resp, err := o.synthesizer.AnswerQuestion(ctx, req)
 	result.Diagnostics.StageTimings["qa.llm_call"] = FromDuration(time.Since(t4))
@@ -223,6 +267,20 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 	for _, sym := range resp.GetReferencedSymbols() {
 		result.References = append(result.References, symbolRefFromProto(sym))
 	}
+
+	// Related requirements: resolve links for every context symbol we
+	// packed. Mirrors the legacy discussCode resolver's post-synthesis
+	// step so F10 / F11 shape preservation doesn't regress.
+	if o.requirements != nil && len(contextSymbols) > 0 {
+		ids := make([]string, 0, len(contextSymbols))
+		for _, s := range contextSymbols {
+			if s.ID != "" {
+				ids = append(ids, s.ID)
+			}
+		}
+		result.RelatedRequirements = append(result.RelatedRequirements, o.requirements.RequirementLabelsForSymbols(ids)...)
+	}
+
 	result.Diagnostics.StageTimings["qa.response_parse"] = FromDuration(time.Since(t5))
 	result.Diagnostics.StageTimings["qa.normalize"] = FromDuration(time.Since(t5))
 	result.Diagnostics.StageTimings["qa.ask"] = FromDuration(time.Since(started))
@@ -284,6 +342,25 @@ func symbolRefFromProto(sym *commonv1.CodeSymbol) AskReference {
 		Symbol: ref,
 		Title:  sym.GetQualifiedName(),
 	}
+}
+
+// buildProtoContextSymbols maps orchestrator-level symbol refs to the
+// proto CodeSymbol shape the synthesis worker consumes. Only the ID
+// and QualifiedName/Name are populated — that's what the worker's
+// template uses today, and keeps the wire payload small.
+func buildProtoContextSymbols(refs []SymbolContextRef) []*commonv1.CodeSymbol {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]*commonv1.CodeSymbol, 0, len(refs))
+	for _, r := range refs {
+		out = append(out, &commonv1.CodeSymbol{
+			Id:            r.ID,
+			Name:          r.Name,
+			QualifiedName: r.QualifiedName,
+		})
+	}
+	return out
 }
 
 // uniqueStrings returns s with duplicates removed while preserving

@@ -706,6 +706,15 @@ func (r *mutationResolver) DiscussCode(ctx context.Context, input DiscussCodeInp
 		"has_artifact_id", input.ArtifactID != nil && *input.ArtifactID != "",
 	)
 
+	// Route through the server-side orchestrator when enabled. The
+	// orchestrator produces a structured AskResult that we flatten to
+	// DiscussionResult's legacy []string references wire shape,
+	// preserving Ledger F10/F11. Flag-gated so the legacy path remains
+	// the fallback until parity ships.
+	if r.QA != nil {
+		return r.dispatchDiscussThroughOrchestrator(ctx, input)
+	}
+
 	contextParts := make([]string, 0, 4)
 	if input.ConversationHistory != nil && len(input.ConversationHistory) > 0 {
 		contextParts = append(contextParts, "Recent follow-up context:\n"+strings.Join(input.ConversationHistory, "\n\n"))

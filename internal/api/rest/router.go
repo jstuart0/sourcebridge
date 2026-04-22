@@ -265,8 +265,15 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		}
 		o := qa.New(s.worker, reader, s.workerLanes, qaOrchCfg)
 		if s.store != nil {
-			o = o.WithRepoLocator(newQARepoLocator(s.store, cfg.Storage.RepoCachePath))
+			locator := newQARepoLocator(s.store, cfg.Storage.RepoCachePath)
+			o = o.WithRepoLocator(locator)
 			o = o.WithGraphExpander(qa.NewGraphExpander(&qaGraphAdapter{store: s.store}, &qaGraphLookup{store: s.store}))
+			o = o.WithRequirementLookup(&qaRequirementLookup{store: s.store})
+			o = o.WithSymbolLookup(&qaSymbolLookup{store: s.store})
+			o = o.WithFileReader(&qaFileReader{locator: locator})
+		}
+		if s.knowledgeStore != nil {
+			o = o.WithArtifactLookup(&qaArtifactLookup{store: s.knowledgeStore})
 		}
 		s.qaOrchestrator = o
 	}
