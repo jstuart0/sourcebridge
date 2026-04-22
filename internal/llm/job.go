@@ -59,6 +59,7 @@ const (
 	SubsystemRequirements Subsystem = "requirements"
 	SubsystemLinking      Subsystem = "linking"
 	SubsystemContracts    Subsystem = "contracts"
+	SubsystemQA           Subsystem = "qa"
 )
 
 // JobPriority controls queue preference. Higher-priority jobs should be
