@@ -1,0 +1,86 @@
+# Adjudicated relevance labels for the frozen search benchmark.
+#
+# Relevance scale:
+# - 3 = ideal / exact target
+# - 2 = clearly useful
+# - 1 = marginally relevant
+# - 0 = irrelevant
+#
+# Each query should be reviewed by at least two humans before final
+# adjudication. Keep reviewer notes here until the set is frozen.
+
+labels:
+  - query_id: q_001
+    targets:
+      - entity_type: symbol
+        entity_id: symbol_parse_user
+        relevance: 3
+      - entity_type: file
+        entity_id: file_internal_auth_parser_go
+        relevance: 2
+    reviewers:
+      - reviewer: reviewer_a
+        status: agree
+      - reviewer: reviewer_b
+        status: agree
+    adjudicated: true
+
+  - query_id: q_002
+    targets:
+      - entity_type: symbol
+        entity_id: symbol_parse_user_token
+        relevance: 3
+      - entity_type: requirement
+        entity_id: requirement_auth_001
+        relevance: 1
+    reviewers:
+      - reviewer: reviewer_a
+        status: agree
+      - reviewer: reviewer_b
+        status: agree
+    adjudicated: true
+
+  - query_id: q_003
+    targets:
+      - entity_type: symbol
+        entity_id: symbol_handle_oidc_login
+        relevance: 3
+      - entity_type: requirement
+        entity_id: requirement_auth_001
+        relevance: 2
+    reviewers:
+      - reviewer: reviewer_a
+        status: agree
+      - reviewer: reviewer_b
+        status: agree
+    adjudicated: true
+
+  - query_id: q_004
+    targets:
+      - entity_type: symbol
+        entity_id: symbol_refresh_session
+        relevance: 2
+      - entity_type: symbol
+        entity_id: symbol_validate_id_token
+        relevance: 1
+    reviewers:
+      - reviewer: reviewer_a
+        status: pending
+      - reviewer: reviewer_b
+        status: pending
+    adjudicated: false
+
+  - query_id: q_005
+    targets:
+      - entity_type: symbol
+        entity_id: symbol_handle_refresh_token
+        relevance: 3
+      - entity_type: file
+        entity_id: file_internal_session_refresh_go
+        relevance: 2
+    reviewers:
+      - reviewer: reviewer_a
+        status: pending
+      - reviewer: reviewer_b
+        status: pending
+    adjudicated: false

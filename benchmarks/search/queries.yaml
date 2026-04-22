@@ -1,0 +1,52 @@
+# Frozen search benchmark query set.
+# Keep this file human-editable and reviewable.
+#
+# Conventions:
+# - `id` is stable and never reused.
+# - `repo_id` should match the repository snapshot used during benchmarking.
+# - `query_class` is one of:
+#     identifier | phrase | natural_language | structural | mixed
+# - `requirement_link_cohort` is one of:
+#     none | low | high
+# - `notes` is optional reviewer context and should not be consumed by code.
+
+queries:
+  - id: q_001
+    repo_id: repo_example_zero_links
+    repo_name: example-zero-links
+    query: "parseUser"
+    query_class: identifier
+    requirement_link_cohort: none
+    notes: "Exact symbol lookup on a repo with no requirement links."
+
+  - id: q_002
+    repo_id: repo_example_zero_links
+    repo_name: example-zero-links
+    query: "\"parse user token\""
+    query_class: phrase
+    requirement_link_cohort: none
+    notes: "Phrase query that should favor doc-comment lexical hits."
+
+  - id: q_003
+    repo_id: repo_example_linked
+    repo_name: example-linked
+    query: "where is oidc login handled"
+    query_class: natural_language
+    requirement_link_cohort: high
+    notes: "Natural-language intent query."
+
+  - id: q_004
+    repo_id: repo_example_linked
+    repo_name: example-linked
+    query: "calls:handleOIDCLogin"
+    query_class: structural
+    requirement_link_cohort: high
+    notes: "Structural caller/callee query."
+
+  - id: q_005
+    repo_id: repo_example_linked
+    repo_name: example-linked
+    query: "session refresh handleRefreshToken"
+    query_class: mixed
+    requirement_link_cohort: low
+    notes: "Mixed identifier + natural-language query."
