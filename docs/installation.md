@@ -562,6 +562,32 @@ Any Redis-compatible server works (Redis 6+, KeyDB, Dragonfly, Upstash over
 TLS). The bundled Helm chart enables Redis by default; see `redis.enabled`
 below.
 
+#### [qa] -- Server-side deep-QA orchestrator
+
+```toml
+[qa]
+server_side_enabled        = false    # flip to true to enable POST /api/v1/ask + MCP ask_question
+local_fast_mode_subprocess = true     # local-desktop installs keep the subprocess fast path
+question_max_bytes         = 4096
+session_tokens_per_hour    = 100000
+repo_tokens_per_day        = 1000000
+deployment_tokens_per_day  = 10000000
+synthesis_lane             = 4        # concurrent QA synthesis calls against the reasoning worker
+```
+
+When `server_side_enabled = true`:
+
+- `/healthz` advertises `X-SourceBridge-QA: v1` so `sourcebridge ask`
+  auto-selects the server path (no pre-flight GraphQL round trip).
+- `POST /api/v1/ask` returns structured `AskResult` with diagnostics,
+  references, usage, and optional debug payload.
+- The MCP `ask_question` tool becomes an active orchestrator call
+  rather than returning a "server-side QA disabled" hint.
+
+The subprocess `cli_ask.py` path remains the only route that reads
+uncommitted working-tree changes, so it stays available for local
+development via `sourcebridge ask --legacy`.
+
 #### [security] -- Authentication mode
 
 ```toml
@@ -593,6 +619,13 @@ grpc_auth_secret = ""             # shared secret for API <-> worker
 | `SOURCEBRIDGE_SECURITY_MODE` | `[security] mode` | Auth mode |
 | `SOURCEBRIDGE_SECURITY_JWT_SECRET` | `[security] jwt_secret` | JWT signing key |
 | `SOURCEBRIDGE_SECURITY_GRPC_AUTH_SECRET` | `[security] grpc_auth_secret` | gRPC shared secret |
+| `SOURCEBRIDGE_QA_SERVER_SIDE_ENABLED` | `[qa] server_side_enabled` | Turn on /api/v1/ask + MCP ask_question |
+| `SOURCEBRIDGE_QA_LOCAL_FAST_MODE_SUBPROCESS` | `[qa] local_fast_mode_subprocess` | Keep subprocess fast path for local-desktop installs |
+| `SOURCEBRIDGE_QA_QUESTION_MAX_BYTES` | `[qa] question_max_bytes` | Cap question payload size |
+| `SOURCEBRIDGE_QA_SESSION_TOKENS_PER_HOUR` | `[qa] session_tokens_per_hour` | Per-session token budget |
+| `SOURCEBRIDGE_QA_REPO_TOKENS_PER_DAY` | `[qa] repo_tokens_per_day` | Per-repo daily token budget |
+| `SOURCEBRIDGE_QA_DEPLOYMENT_TOKENS_PER_DAY` | `[qa] deployment_tokens_per_day` | Deployment circuit breaker |
+| `SOURCEBRIDGE_QA_SYNTHESIS_LANE` | `[qa] synthesis_lane` | Concurrent QA synthesis calls |
 
 ### LLM provider configuration
 

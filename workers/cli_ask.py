@@ -799,6 +799,18 @@ async def main() -> None:
         print(json.dumps({"error": f"Invalid mode: {mode}"}))
         sys.exit(1)
 
+    # Deprecation warning: the server-side orchestrator (internal/qa)
+    # is the target path for deep mode going forward. Local-desktop
+    # installs still use the subprocess fast path; set
+    # SOURCEBRIDGE_QA_LEGACY=1 to silence.
+    if mode == "deep" and os.environ.get("SOURCEBRIDGE_QA_LEGACY") != "1":
+        print(
+            "warning: cli_ask.py deep mode is deprecated — prefer the server's "
+            "POST /api/v1/ask endpoint via `sourcebridge ask`. "
+            "Set SOURCEBRIDGE_QA_LEGACY=1 to silence.",
+            file=sys.stderr,
+        )
+
     if not repo_path.exists():
         print(json.dumps({"error": f"Repository not found: {repo_path}"}))
         sys.exit(1)
