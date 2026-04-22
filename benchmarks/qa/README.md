@@ -57,12 +57,17 @@ benchmarks/qa/runner -arm=candidate \
     -api-token="$SOURCEBRIDGE_API_TOKEN" \
     -out=benchmarks/qa/reports/$(date +%Y-%m-%d)_candidate
 
-# 5. Judge both arms (LLM-as-judge):
-ANTHROPIC_API_KEY=sk-ant-... python3 benchmarks/qa/judge.py \
+# 5. Judge both arms (LLM-as-judge).
+#    On thor, pull the key from the canonical automation secret:
+export ANTHROPIC_API_KEY=$(kubectl -n automation get secret \
+    anthropic-api-credentials -o jsonpath='{.data.api-key}' | base64 -d)
+#    (off-cluster: export ANTHROPIC_API_KEY=sk-ant-... from your own vault)
+
+python3 benchmarks/qa/judge.py \
     --run benchmarks/qa/reports/$(date +%Y-%m-%d)_baseline/run.jsonl \
     --out benchmarks/qa/reports/$(date +%Y-%m-%d)_baseline/judgments.yaml
 
-ANTHROPIC_API_KEY=sk-ant-... python3 benchmarks/qa/judge.py \
+python3 benchmarks/qa/judge.py \
     --run benchmarks/qa/reports/$(date +%Y-%m-%d)_candidate/run.jsonl \
     --out benchmarks/qa/reports/$(date +%Y-%m-%d)_candidate/judgments.yaml
 

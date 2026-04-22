@@ -33,9 +33,18 @@ Before flipping `SOURCEBRIDGE_QA_SERVER_SIDE_ENABLED`:
 - [ ] Candidate arm run (against a *non-production* server with the
       flag on):
       `benchmarks/qa/cmd/runner -arm=candidate -mode=deep ...`
-- [ ] LLM-as-judge passes over both arms:
-      `ANTHROPIC_API_KEY=... python3 benchmarks/qa/judge.py --run ... --out ...`
-      for each arm. Uses Claude Opus 4.7 by default.
+- [ ] LLM-as-judge passes over both arms. Uses Claude Opus 4.7 by
+      default. On thor, the key lives at
+      `automation/anthropic-api-credentials` (field `api-key`):
+      ```bash
+      export ANTHROPIC_API_KEY=$(kubectl -n automation get secret \
+        anthropic-api-credentials -o jsonpath='{.data.api-key}' | base64 -d)
+      python3 benchmarks/qa/judge.py \
+        --run benchmarks/qa/reports/<date>_baseline/run.jsonl \
+        --out benchmarks/qa/reports/<date>_baseline/judgments.yaml
+      ```
+      Run once per arm. Judgments are cached by `(question, answer)`
+      hash so `--resume` re-uses work on retries.
 - [ ] Paired report committed:
       `benchmarks/qa/reports/<date>_baseline-vs-candidate/report.md`
 - [ ] Decision Rule checks in the report all PASS:
