@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, LogOut, Menu, X } from "lucide-react";
-import { clearStoredToken } from "@/lib/auth-token-store";
+import { usePathname } from "next/navigation";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { getNavigation, type ProductEdition } from "@/lib/navigation";
 import { Brand, BrandEnterprise } from "@/components/brand/Logo";
 import { cn } from "@/lib/utils";
@@ -13,16 +12,22 @@ const edition: ProductEdition =
   process.env.NEXT_PUBLIC_EDITION === "enterprise" ? "enterprise" : "oss";
 const navItems = getNavigation(edition);
 
-export function Sidebar({ onCollapseChange }: { onCollapseChange?: (collapsed: boolean) => void }) {
-  const router = useRouter();
+export function Sidebar({
+  onCollapseChange,
+  mobileOpen,
+  onMobileOpenChange,
+}: {
+  onCollapseChange?: (collapsed: boolean) => void;
+  mobileOpen: boolean;
+  onMobileOpenChange: (open: boolean) => void;
+}) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
 
   // Close mobile menu on route change
   useEffect(() => {
-    setMobileOpen(false);
-  }, [pathname]);
+    onMobileOpenChange(false);
+  }, [pathname, onMobileOpenChange]);
 
   // Prevent body scroll when mobile menu is open
   useEffect(() => {
@@ -35,17 +40,6 @@ export function Sidebar({ onCollapseChange }: { onCollapseChange?: (collapsed: b
       document.body.style.overflow = "";
     };
   }, [mobileOpen]);
-
-  const handleLogout = useCallback(async () => {
-    try {
-      await fetch("/auth/logout", { method: "POST" });
-    } catch {
-      // Ignore network errors during logout.
-    }
-
-    clearStoredToken();
-    router.push("/login");
-  }, [router]);
 
   const navContent = (
     <>
@@ -71,7 +65,7 @@ export function Sidebar({ onCollapseChange }: { onCollapseChange?: (collapsed: b
         {/* Mobile close button */}
         <button
           type="button"
-          onClick={() => setMobileOpen(false)}
+          onClick={() => onMobileOpenChange(false)}
           className="inline-flex rounded-[var(--control-radius)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] md:hidden"
           aria-label="Close menu"
         >
@@ -104,36 +98,16 @@ export function Sidebar({ onCollapseChange }: { onCollapseChange?: (collapsed: b
         })}
       </nav>
 
-      <div className="mt-4 border-t border-[var(--border-subtle)] pt-4">
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="flex min-h-[44px] w-full items-center gap-3 rounded-[var(--control-radius)] border border-transparent px-3 py-2.5 text-left text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        >
-          <LogOut className="h-4 w-4 shrink-0" />
-          {!collapsed ? <span>Logout</span> : null}
-        </button>
-      </div>
     </>
   );
 
   return (
     <>
-      {/* Mobile hamburger button — fixed top-left */}
-      <button
-        type="button"
-        onClick={() => setMobileOpen(true)}
-        className="fixed left-3 top-3 z-40 inline-flex items-center justify-center rounded-[var(--control-radius)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-2.5 text-[var(--text-secondary)] shadow-[var(--panel-shadow-soft)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] md:hidden"
-        aria-label="Open menu"
-      >
-        <Menu className="h-5 w-5" />
-      </button>
-
       {/* Mobile overlay backdrop */}
       {mobileOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/50 md:hidden"
-          onClick={() => setMobileOpen(false)}
+          onClick={() => onMobileOpenChange(false)}
           aria-hidden="true"
         />
       )}

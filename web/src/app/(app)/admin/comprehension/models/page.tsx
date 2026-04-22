@@ -11,7 +11,7 @@ import { authFetch } from "@/lib/auth-fetch";
 import { cn } from "@/lib/utils";
 
 /**
- * Model Capability Registry page (/admin/settings/comprehension/models).
+ * Model Capability Registry page (/admin/comprehension/models).
  *
  * Viewer and editor for the model capability registry. Operators can:
  *   - View all known models with capability badges
@@ -297,7 +297,7 @@ export default function ModelsPage() {
         actions={
           <div className="flex items-center gap-2">
             <Link
-              href="/admin/settings/comprehension"
+              href="/admin/comprehension"
               className="inline-flex items-center gap-1.5 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
             >
               ← Settings

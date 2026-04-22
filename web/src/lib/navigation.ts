@@ -1,12 +1,9 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Building2,
-  CircleHelp,
   FolderKanban,
   Home,
   Search,
-  Settings,
-  Shield,
   TextSearch,
 } from "lucide-react";
 
@@ -35,9 +32,6 @@ const BASE_NAVIGATION: NavigationItem[] = [
     commandLabel: "Go to Requirements",
   },
   { label: "Search", href: "/search", icon: Search, commandLabel: "Go to Search" },
-  { label: "Admin", href: "/admin", icon: Shield, commandLabel: "Go to Admin" },
-  { label: "Settings", href: "/settings", icon: Settings, commandLabel: "Go to Settings" },
-  { label: "Help", href: "/help", icon: CircleHelp, commandLabel: "Go to Help" },
 ];
 
 const ENTERPRISE_NAVIGATION: NavigationItem[] = [
@@ -55,8 +49,16 @@ export function getNavigation(edition: ProductEdition): NavigationItem[] {
   return edition === "enterprise" ? ENTERPRISE_NAVIGATION : BASE_NAVIGATION;
 }
 
+// Items that live in the top-right/avatar menu instead of the sidebar,
+// but should still be reachable from the command palette.
+const COMMAND_ONLY_ITEMS: { label: string; href: string }[] = [
+  { label: "Go to Admin", href: "/admin" },
+  { label: "Go to Settings", href: "/settings" },
+  { label: "Go to Help", href: "/help" },
+];
+
 export function getCommandNavigationItems(edition: ProductEdition) {
-  return getNavigation(edition)
+  const fromSidebar = getNavigation(edition)
     .filter((item) => item.commandLabel)
     .map((item) => ({
       id: `nav-${item.href.replaceAll("/", "-") || "root"}`,
@@ -64,4 +66,13 @@ export function getCommandNavigationItems(edition: ProductEdition) {
       href: item.href,
       group: "Navigation",
     }));
+
+  const fromTopBar = COMMAND_ONLY_ITEMS.map((item) => ({
+    id: `nav-${item.href.replaceAll("/", "-") || "root"}`,
+    label: item.label,
+    href: item.href,
+    group: "Navigation",
+  }));
+
+  return [...fromSidebar, ...fromTopBar];
 }

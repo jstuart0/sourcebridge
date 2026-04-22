@@ -11,7 +11,7 @@ import { authFetch } from "@/lib/auth-fetch";
 import { cn } from "@/lib/utils";
 
 /**
- * Comprehension Settings page (/admin/settings/comprehension).
+ * Comprehension Settings page (/admin/comprehension).
  *
  * Phase 6 settings UI for the comprehension engine. Two modes:
  *   - **Simple** (default): 3 cards — model picker + recommended setup,
@@ -413,7 +413,7 @@ export default function ComprehensionSettingsPage() {
         actions={
           <div className="flex items-center gap-2">
             <Link
-              href="/admin/llm"
+              href="/admin/monitor"
               className="inline-flex items-center gap-1.5 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
             >
               Monitor →
@@ -597,7 +597,7 @@ export default function ComprehensionSettingsPage() {
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold text-[var(--text-primary)]">System Status</h3>
               <Link
-                href="/admin/llm"
+                href="/admin/monitor"
                 className="text-sm text-[var(--accent-primary)] hover:underline"
               >
                 Full monitor →
@@ -756,7 +756,7 @@ export default function ComprehensionSettingsPage() {
                 <div className="flex items-center justify-between">
                   <h3 className="text-base font-semibold text-[var(--text-primary)]">Model Registry</h3>
                   <Link
-                    href="/admin/settings/comprehension/models"
+                    href="/admin/comprehension/models"
                     className="text-sm text-[var(--accent-primary)] hover:underline"
                   >
                     Manage models →

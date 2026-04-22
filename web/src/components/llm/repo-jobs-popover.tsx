@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
  * The popover follows the same Phase 2d UX principles as the full
  * Monitor page but with a much smaller footprint: one button in the
  * header, click to expand a panel with the last N jobs for this repo,
- * plus a "Full monitor →" link into /admin/llm.
+ * plus a "Full monitor →" link into /admin/monitor.
  */
 
 interface JobView {
@@ -214,7 +214,7 @@ export function RepoJobsPopover({ repoId }: { repoId: string }) {
               <p className="text-xs text-[var(--text-secondary)]">For this repository</p>
             </div>
             <Link
-              href="/admin/llm"
+              href="/admin/monitor"
               className="text-xs text-[var(--text-secondary)] underline underline-offset-2 hover:text-[var(--text-primary)]"
             >
               Full monitor →

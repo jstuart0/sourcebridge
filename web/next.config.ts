@@ -7,6 +7,20 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_POSTHOG_KEY: process.env.NEXT_PUBLIC_POSTHOG_KEY || "",
     NEXT_PUBLIC_POSTHOG_HOST: process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com",
   },
+  async redirects() {
+    return [
+      {
+        source: "/admin/settings/comprehension",
+        destination: "/admin/comprehension",
+        permanent: true,
+      },
+      {
+        source: "/admin/settings/comprehension/:path*",
+        destination: "/admin/comprehension/:path*",
+        permanent: true,
+      },
+    ];
+  },
   async rewrites() {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || process.env.SOURCEBRIDGE_WEB_DEV_PROXY || "http://localhost:8080";
     return [

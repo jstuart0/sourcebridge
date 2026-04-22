@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { getStoredToken } from "@/lib/auth-token-store";
 import { isTokenExpired, msUntilExpiry, forceLogout } from "@/lib/auth-utils";
 import { Sidebar } from "@/components/layout/Sidebar";
+import { TopBar } from "@/components/layout/TopBar";
 import { ErrorBoundary } from "@/components/layout/ErrorBoundary";
 import { Notifications } from "@/components/layout/Notifications";
 
@@ -12,6 +13,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [authed, setAuthed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     const token = getStoredToken();
@@ -49,8 +51,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="ca-shell ca-shell-grid" data-collapsed={sidebarCollapsed}>
-      <Sidebar onCollapseChange={setSidebarCollapsed} />
-      <main className="min-w-0 overflow-x-hidden overflow-y-auto pt-14 md:pt-0">
+      <Sidebar
+        onCollapseChange={setSidebarCollapsed}
+        mobileOpen={mobileNavOpen}
+        onMobileOpenChange={setMobileNavOpen}
+      />
+      <main className="min-w-0 overflow-x-hidden overflow-y-auto">
+        <TopBar onMobileNavOpen={() => setMobileNavOpen(true)} />
         <ErrorBoundary>{children}</ErrorBoundary>
       </main>
       <Notifications />
