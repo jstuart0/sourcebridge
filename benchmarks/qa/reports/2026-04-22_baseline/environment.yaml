@@ -1,0 +1,6 @@
+arm: baseline
+date: 2026-04-22T21:39:52.489693Z
+commit_sha: 7ca8203
+mode: deep
+questions_hash: ""
+notes: Python cli_ask.py in worker pod, Claude Sonnet 4.5

@@ -1,0 +1,932 @@
+judgments:
+  arch-001:
+    answer_hash: 8d31b60ac5f3762f
+    model: claude-opus-4-7
+    rationale: The answer is an HTTP error code (524 timeout) with no content, failing
+      to address the question at all.
+    score: 0
+  arch-002:
+    answer_hash: 4132d28a9f87c2fc
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with concrete reasoning
+      (LLM/ML ecosystem access, separation of concerns) and cites specific files like
+      cli/worker_env.go and the generated gRPC protobuf code that a reader could verify.
+    score: 3
+  arch-003:
+    answer_hash: 1beed34d2a2fb8d9
+    model: claude-opus-4-7
+    rationale: The answer directly addresses how the contract is defined (.proto files)
+      and kept in sync (code generation into gen/go and gen/python directories), and
+      cites specific file paths and service names that are verifiable.
+    score: 3
+  arch-004:
+    answer_hash: 2688606417d10dda
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the distinction between the two packages
+      with concrete responsibilities (Assembler in knowledge, repository/requirements/impact
+      operations in graph) and describes their interaction via GraphQL resolvers.
+      While the cited references are somewhat generic and don't pinpoint exact files
+      in the graph package, the claims are plausible and coherent for the domain.
+    score: 2
+  arch-005:
+    answer_hash: 86dc372b49a3f9c4
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the relationship between the two packages,
+      naming concrete handlers (handleAsk, handleRevokeCurrentToken, handleUpdateLLMConfig),
+      GraphQL adapters (askInputToQA, dispatchDiscussThroughOrchestrator), and specific
+      file paths that are plausible and consistent with the cited references.
+    score: 3
+  arch-006:
+    answer_hash: e9119194a2486119
+    model: claude-opus-4-7
+    rationale: The answer directly addresses orchestration coordination with concrete
+      mechanisms (circuit breakers, dedupe registry, metrics ring buffers, priority
+      queues) and cites plausible file paths matching the stated directory. While
+      specific claims like TargetKey and subsystem-specific cooldowns cannot be independently
+      verified, they are coherent and on-topic.
+    score: 2
+  arch-007:
+    answer_hash: 8831c7ddf1a36848
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with concrete interface
+      names (DesktopAuthSessionStore, APITokenStore, mcpSessionStore) and their implementations
+      (memory vs SurrealDB/Redis), and cites specific files like internal/api/rest/desktop_auth.go,
+      desktop_auth_surreal.go, mcp_session_store.go, and api_tokens.go with line ranges.
+    score: 3
+  arch-008:
+    answer_hash: 5ed5bfb54d53356e
+    model: claude-opus-4-7
+    rationale: The answer admits it lacks sufficient evidence to describe the MCP
+      tool surface or dispatch mechanism, only partially describing the slow-tool
+      routing for two tools. It fails to enumerate the tool catalog or explain the
+      primary dispatch handler, punting on the core question.
+    score: 1
+  arch-009:
+    answer_hash: 08711e6c03d4d71e
+    model: claude-opus-4-7
+    rationale: The answer punts by claiming no evidence of internal/qa exists in the
+      provided context, rather than answering the question about what the package
+      is and how it sits between the CLI/GraphQL and reasoning worker. This is a classic
+      'context doesn't say' non-answer.
+    score: 1
+  arch-010:
+    answer_hash: 2848fefa539fb7e1
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the provided context doesn't show tenant-filtering
+      logic, rather than identifying the actual mechanism. This is a 'not useful'
+      response that fails to answer the question with concrete components.
+    score: 1
+  arch-011:
+    answer_hash: fef46415fa5d5ea0
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question by identifying the gating
+      mechanism (QAConfig.ServerSideEnabled boolean and nil-check on r.QA) and cites
+      specific files. It honestly clarifies that there isn't a sophisticated feature-flag
+      system, which is responsive to the question even if the answer is somewhat negative.
+    score: 2
+  arch-012:
+    answer_hash: b13861f27b6a21d0
+    model: claude-opus-4-7
+    rationale: "The answer describes a plausible, coherent layered pipeline (Assembler\
+      \ \u2192 KnowledgeSnapshot \u2192 worker \u2192 sections/evidence \u2192 summary\
+      \ nodes \u2192 repository understanding) and cites specific components like\
+      \ ClaimArtifactWithMode, StoreKnowledgeSections, and concrete file paths. However,\
+      \ it lacks depth on how the pieces actually connect and doesn't deeply cite\
+      \ evidence from specific functions beyond naming them."
+    score: 2
+  arch-013:
+    answer_hash: 84e5edd4cf97ce55
+    model: claude-opus-4-7
+    rationale: The answer punts by saying evidence is insufficient, only vaguely mentioning
+      a RequirementLinkCount field and GetLinksForRepo method without actually explaining
+      the role of the requirement-linking subsystem or identifying the packages that
+      implement it.
+    score: 1
+  arch-014:
+    answer_hash: 440ed73cec4f2d97
+    model: claude-opus-4-7
+    rationale: The answer punts on the question, stating the evidence is insufficient
+      rather than describing the three-tier architecture. While it mentions some components
+      that fit each tier, it explicitly declines to describe the separation, which
+      is what was asked.
+    score: 1
+  arch-015:
+    answer_hash: f9291a6528600250
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the context doesn't contain evidence of
+      telemetry, rather than answering the question about how the telemetry ping system
+      works.
+    score: 1
+  arch-016:
+    answer_hash: f65cb8f8bd7f55e3
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the feature cannot be explained from the
+      provided context, rather than identifying concrete soft-delete/recycle bin components.
+      This is a hand-wave response that doesn't answer the question, even if the feature
+      genuinely exists in the codebase.
+    score: 1
+  arch-017:
+    answer_hash: ca1f675c400c62a2
+    model: claude-opus-4-7
+    rationale: The answer punts, stating the evidence is insufficient rather than
+      describing the worker-lanes semaphore system. While it mentions some related
+      components (SubsystemKnowledge, SubsystemQA, slot acquisition), it does not
+      actually explain how starvation is prevented.
+    score: 1
+  arch-018:
+    answer_hash: 761c20f119fde33a
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the architecture question with concrete
+      layers, naming specific middleware files, services, external integrations, and
+      data store components with supporting file paths.
+    score: 3
+  arch-019:
+    answer_hash: 62ebb837de12b93c
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the three-tier layering with concrete
+      file paths (src/auth/, src/services/auth-service.ts, src/api/middleware/auth.ts),
+      specific function names (signToken, setSession, authenticate, requireAuth),
+      and implementation details (JWT expiry, bcrypt, role/teamId in payload) that
+      a reader could verify.
+    score: 3
+  arch-020:
+    answer_hash: 185135ff54d56cef
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the Stripe integration with concrete
+      components (billing-service, handleStripeWebhook, checkout.sessions.create),
+      env vars (STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET), specific events, and cites
+      file paths like src/services/billing-service.ts and src/api/routes/billing.ts.
+    score: 3
+  arch-021:
+    answer_hash: 04c2734b0578e7de
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question by identifying three concrete
+      middleware concerns (auth, rate limiting, validation), names specific functions
+      (authenticate, requireAuth, checkRateLimit, validateBody), and cites plausible
+      file paths with line ranges that a reader could verify.
+    score: 3
+  arch-022:
+    answer_hash: f82573db47d8a3ea
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with concrete relationships
+      (TeamMembership join, team_id/invited_by FKs, role field) and cites plausible
+      file paths. It lacks verifiable specifics like exact column definitions or migration
+      details, but the explanation is coherent and responsive.
+    score: 2
+  arch-023:
+    answer_hash: ff0305eef51cb111
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the separation of concerns with concrete
+      layer names, file paths (src/api/routes, src/services, src/db/queries), and
+      specific function examples (handleCreateCheckout, createCheckoutSession, findTeamById),
+      making it verifiable and responsive.
+    score: 3
+  arch-024:
+    answer_hash: 9a7c3a32a29b4d2c
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the plan-tier system with concrete mechanisms
+      (PLAN_LIMITS constant, MEMBER_LIMIT error, Stripe webhook-driven downgrades,
+      usage_limit field) and cites plausible file paths like billing-service.ts and
+      team-service.ts. It hedges on enterprise tier but otherwise provides actionable,
+      specific detail.
+    score: 2
+  arch-025:
+    answer_hash: 18b62dd4b7de7e7e
+    model: claude-opus-4-7
+    rationale: The answer directly addresses both email flows with concrete function
+      names (requestMagicLink, redeemMagicLink, inviteTeamMember, sendMagicLinkEmail,
+      sendInvitationEmail), specific file paths with line ranges, and implementation
+      details like token expiration times and the Resend service integration.
+    score: 3
+  cross-001:
+    answer_hash: c96e098295843e11
+    model: claude-opus-4-7
+    rationale: The answer punts by claiming the evidence doesn't cover prompt-injection
+      defenses or tenant isolation, rather than identifying concrete mechanisms. While
+      it names some files, it explicitly states it cannot answer the question about
+      what prevents cross-tenant exfiltration.
+    score: 1
+  cross-002:
+    answer_hash: 4fd6440758e6fde0
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question by concluding that no enforcement
+      exists, only tracking, and cites concrete interfaces (SetTokens, ReportTokens)
+      and files (llm_job_store.go, store.go) to support this. A negative finding with
+      evidence is useful, though it lacks deeper verification of whether any middleware
+      or quota check exists elsewhere.
+    score: 2
+  cross-003:
+    answer_hash: d1111a432c36906e
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the failure mode with concrete mechanisms
+      (lazy gRPC connections, scope-specific timeouts, Lane semaphore with defer release)
+      and cites plausible file paths like internal/worker/client.go and internal/worker/lanes.go.
+      Specific timeout values are asserted without clear grounding but are plausible.
+    score: 2
+  cross-004:
+    answer_hash: fbef3aeae0da79ef
+    model: claude-opus-4-7
+    rationale: The answer punts on the question, explicitly stating the context lacks
+      evidence of the sync mechanism. While it correctly identifies gqlgen as involved,
+      it fails to explain the actual synchronization process (e.g., gqlgen.yml config,
+      schema.graphql files, go generate directives), which is what the question asks.
+    score: 1
+  cross-005:
+    answer_hash: 7d5e103300118ec5
+    model: claude-opus-4-7
+    rationale: The answer punts on the question by claiming no deep-QA observability
+      signals exist in the context, without naming any concrete deep-QA orchestration
+      components or their instrumentation. This is the classic 'context doesn't say'
+      non-answer.
+    score: 1
+  cross-006:
+    answer_hash: 6a49f12bae286cdb
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with concrete mechanisms
+      (trashEnabled() gate, fallback to hard-delete, retention worker, Redis leader
+      election) and cites plausible file paths like internal/trash/worker.go and internal/api/graphql/trash.resolvers.go.
+      While specific details (30-day default, Redis leader election specifics) are
+      unverifiable, they are coherent and plausible for this kind of system.
+    score: 2
+  cross-007:
+    answer_hash: f6905b26e7d38028
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the context does not contain evidence, without
+      naming concrete handling mechanisms. This is a 'not useful' response that fails
+      to directly answer the question.
+    score: 1
+  cross-008:
+    answer_hash: b71d4581f3be71ab
+    model: claude-opus-4-7
+    rationale: The answer directly addresses session persistence across replicas,
+      naming concrete components (mcpSessionState, localChans, eventCh) and citing
+      a specific file path (internal/api/rest/mcp_session_store.go) with line ranges.
+      It explains both the memory and Redis implementations and notes the SSE pod-affinity
+      caveat, which is a coherent and verifiable-sounding explanation.
+    score: 3
+  cross-009:
+    answer_hash: 64049147ceb04692
+    model: claude-opus-4-7
+    rationale: The answer punts, stating that the context doesn't reveal hallucination
+      safeguards, rather than naming concrete mechanisms. This is a non-answer that
+      fails to address the question with specifics.
+    score: 1
+  cross-010:
+    answer_hash: e359e9e3edf9be93
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the context is insufficient rather than
+      identifying concrete path traversal prevention mechanisms. It does not name
+      specific validation functions or files that handle this protection.
+    score: 1
+  cross-011:
+    answer_hash: 7ba5847425f8d63a
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with concrete components
+      (RepoAccessMiddleware, TenantFilteredStore, GetTenantRepos, StoreFromContext)
+      and cites a specific file path (internal/api/middleware/repo_access.go) with
+      line ranges. It's coherent and plausible for the domain, though it only covers
+      one layer of guards without mentioning other likely protections (e.g., query-time
+      filters in workers or gRPC metadata checks).
+    score: 2
+  cross-012:
+    answer_hash: f2e3e888206eaac0
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the context doesn't contain evidence about
+      QuestionMaxBytes validation, rather than answering the question with concrete
+      behavior.
+    score: 1
+  cross-013:
+    answer_hash: 5c6f3e2758c9eea4
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the context doesn't contain relevant information,
+      rather than providing concrete details about discussCode backwards compatibility.
+      This is a classic 'not useful' response per the rubric.
+    score: 1
+  cross-014:
+    answer_hash: 720e8d1aa694f896
+    model: claude-opus-4-7
+    rationale: "The answer identifies a concrete mechanism\u2014the `QAConfig.ServerSideEnabled`\
+      \ flag gating `dispatchDiscussThroughOrchestrator`\u2014which effectively functions\
+      \ as a rollback toggle, though the answer frames this as 'no rollback mechanism'\
+      \ while simultaneously describing one. It names plausible files and the key\
+      \ config field, making it useful but somewhat self-contradictory."
+    score: 2
+  cross-015:
+    answer_hash: 5182523d43352d60
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the evidence is insufficient, rather than
+      providing concrete information about proto version compatibility mechanisms.
+      While honest, it fails to answer the question asked.
+    score: 1
+  cross-016:
+    answer_hash: 673389309980a1a3
+    model: claude-opus-4-7
+    rationale: The answer punts, stating the context doesn't contain sufficient evidence
+      to determine what prevents error leakage. While it mentions some relevant files
+      (knowledge_errors.go, mcp_progress.go), it fails to concretely answer the question
+      about MCP tool error sanitization.
+    score: 1
+  cross-017:
+    answer_hash: e93586a5be2f26d0
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the evidence is insufficient, rather than
+      providing concrete details about feature-flag capability discovery or /healthz.
+      This is a non-answer.
+    score: 1
+  cross-018:
+    answer_hash: b1bcadb2a1226b65
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the context doesn't contain the information,
+      without naming any concrete concurrency-limiting component. This is a 'not useful'
+      response per the rubric.
+    score: 1
+  cross-019:
+    answer_hash: 26d577947bcd2a76
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the context doesn't contain the information,
+      rather than providing concrete components or mechanisms. It's on-topic but does
+      not actually answer the question.
+    score: 1
+  cross-020:
+    answer_hash: 2f7299726981ce68
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the prompt injection concern by citing
+      specific prompt files and their grounding directives that establish separation
+      between system instructions and repository content. While it doesn't mention
+      additional defenses like input sanitization or sandboxing, it names concrete
+      file paths and describes plausible defensive prompt patterns.
+    score: 2
+  cross-021:
+    answer_hash: d449f9e22d773c1d
+    model: claude-opus-4-7
+    rationale: "The answer directly addresses the question with concrete components\
+      \ (downgradeToPlan function, customer.subscription.deleted webhook, specific\
+      \ fields) and explains that no deletion occurs\u2014just tier/limit updates.\
+      \ Plausible file paths are cited, though without deeper evidence like specific\
+      \ code snippets or REQ IDs."
+    score: 2
+  cross-022:
+    answer_hash: aea756640645a7de
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question by naming a concrete middleware
+      (`requireAuth` in `src/api/middleware/auth.ts`) and describing its behavior
+      plausibly. It lacks specific evidence that mutations specifically (vs. all routes)
+      are gated, but the components cited are coherent and plausible.
+    score: 2
+  cross-023:
+    answer_hash: 79a06a848bce8a13
+    model: claude-opus-4-7
+    rationale: The answer punts on the question, stating the implementation isn't
+      available rather than providing concrete details about how anonymous vs authenticated
+      requests are handled differently.
+    score: 1
+  cross-024:
+    answer_hash: ad49796e822c4788
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with concrete function names
+      (handleWebhook, handleStripeWebhook, constructEvent, errorResponse) and describes
+      a plausible error-handling flow including the MISSING_SIGNATURE case. While
+      specific file/line verification isn't possible, the response is coherent and
+      actionable.
+    score: 2
+  cross-025:
+    answer_hash: 6dbdc0894c086986
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with concrete components
+      (requireAuth middleware, session.role check, AuthorizationError) and plausible
+      file paths for a TypeScript API codebase. It provides specific line numbers
+      and function names that a reader could verify.
+    score: 2
+  flow-001:
+    answer_hash: ceb0f62ed8e0e92c
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the request flow with concrete components
+      (handleAsk, askRequest, toAskInput, qaOrchestrator.Ask, qa.AskResult) and a
+      plausible file path (internal/api/rest/ask_handler.go). It lacks deeper tracing
+      into the orchestrator itself but is coherent and responsive.
+    score: 2
+  flow-002:
+    answer_hash: 2ae079400ffe871c
+    model: claude-opus-4-7
+    rationale: The answer directly traces the flow with concrete function names (dispatchDiscussThroughOrchestrator,
+      r.QA.Ask), types (DiscussCodeInput, qa.AskInput, qa.ModeDeep, DiscussionResult),
+      and a specific file path (internal/api/graphql/discuss_via_orchestrator.go),
+      plus a config key (QAConfig.ServerSideEnabled). This is directly responsive
+      and verifiable.
+    score: 3
+  flow-003:
+    answer_hash: 6a1b4bc452baaf54
+    model: claude-opus-4-7
+    rationale: The answer is directly responsive and names concrete components (cli/ask.go,
+      workers/cli_ask.py, runAskServer/runAskLegacy, --legacy flag, /healthz probe).
+      The specifics like the X-SourceBridge-QA header are plausible but unverifiable;
+      overall it's a coherent and useful explanation.
+    score: 2
+  flow-004:
+    answer_hash: f48ccf60670b7b50
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with a concrete mechanism
+      (CTA response rather than failure), names a specific constant `understandingCTAAnswer`
+      and function `buildUnderstandingCTA()`, cites the file `internal/qa/deep_pipeline.go`
+      with line range, and describes the resulting AskReference URL pattern. This
+      is verifiable and responsive.
+    score: 3
+  flow-005:
+    answer_hash: b3f1c1ec2d5e5fef
+    model: claude-opus-4-7
+    rationale: The answer directly describes the SSE flow end-to-end with concrete
+      components (handleDiscussStream, worker.AnswerQuestionStream, StreamingAnswerExtractor,
+      feed/finalize) and cites specific file paths like internal/api/rest/discuss_stream.go
+      and workers/reasoning/answer_stream.py with line ranges. The explanation is
+      coherent and plausible for the described architecture.
+    score: 3
+  flow-006:
+    answer_hash: 74f8840872cbfc81
+    model: claude-opus-4-7
+    rationale: The answer punts on the question, stating the context doesn't contain
+      the implementation, rather than providing concrete details about what addRepository
+      does.
+    score: 1
+  flow-007:
+    answer_hash: e7f9289db4117ab5
+    model: claude-opus-4-7
+    rationale: The answer provides specific-sounding details (15-second heartbeat,
+      5-minute timeout, Accept header, progressToken) but the cited references are
+      mostly unrelated (token revocation, CSRF, JWT, OIDC) and the few relevant ones
+      (mcp_progress.go, client.go) are named without concrete function/symbol evidence.
+      The specific numeric claims appear fabricated rather than grounded in the cited
+      code.
+    score: 1
+  flow-008:
+    answer_hash: 164a54f71ee3f568
+    model: claude-opus-4-7
+    rationale: The answer directly addresses lane acquisition with a plausible implementation
+      (buffered channel, select, context cancellation, release function) and cites
+      internal/worker/lanes.go. However, it doesn't specifically trace the QA synthesis
+      request path - it describes the generic lane mechanism without showing how a
+      QA request in particular reaches Acquire.
+    score: 2
+  flow-009:
+    answer_hash: 6938101165ca2cff
+    model: claude-opus-4-7
+    rationale: "The answer gives a concrete, ordered sequence of reads (RepoLocator\
+      \ \u2192 SymbolLookup \u2192 GraphExpander \u2192 ArtifactLookup/RequirementLookup\
+      \ \u2192 RequirementLabelsForSymbols) and cites specific files like internal/qa/deep_pipeline.go\
+      \ with line ranges. The components named are plausible and domain-appropriate,\
+      \ directly answering the question."
+    score: 2
+  flow-010:
+    answer_hash: 467335b8f30d112c
+    model: claude-opus-4-7
+    rationale: The answer directly describes the authentication middleware pipeline
+      with concrete details (Bearer/cookie extraction, ca_ prefix check, APITokenStore
+      vs JWTManager, context injection of Claims/UserID/TenantID/Role, 401 fallback)
+      and cites specific files and line ranges like internal/auth/middleware.go:36-80.
+    score: 3
+  flow-011:
+    answer_hash: 66e868cc9c93f435
+    model: claude-opus-4-7
+    rationale: The answer directly describes the sign-up flow with concrete steps
+      (validation, service call, duplicate check, user creation, JWT with team/role
+      claims, cookie, 201 response) and cites specific file paths and line ranges
+      that a reader could verify.
+    score: 3
+  flow-012:
+    answer_hash: 2aab14d61577385b
+    model: claude-opus-4-7
+    rationale: The answer traces the flow with concrete function names (handleRedeemMagicLink,
+      redeemMagicLink, consumeMagicLink, findUserByEmail, signToken, setSession) and
+      cites plausible file paths (src/services/auth-service.ts, src/api/routes/auth.ts).
+      It is directly responsive with specific evidence, though some cited references
+      seem irrelevant (billing, rate limiting).
+    score: 2
+  flow-013:
+    answer_hash: '3927319281608761'
+    model: claude-opus-4-7
+    rationale: The answer walks through the invitation flow end-to-end with concrete
+      function names, file paths, and line ranges (handleInviteMember, inviteTeamMember,
+      createInvitation, sendInvitationEmail), covering auth, authorization, plan limits,
+      token generation, and email delivery.
+    score: 3
+  flow-014:
+    answer_hash: ef4c3e64be608ed6
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the webhook-to-subscription-update flow
+      with concrete steps (signature verification, event switch, activateSubscription/downgradeToPlan,
+      Supabase team update) and cites plausible file paths like src/services/billing-service.ts.
+      It lacks explicit reference to the webhook route handler itself, but the sequence
+      is coherent and responsive.
+    score: 2
+  flow-015:
+    answer_hash: b58f190caf801cc9
+    model: claude-opus-4-7
+    rationale: The answer punts on the question, stating the context is insufficient
+      rather than describing the rate-limiting check order. While it honestly acknowledges
+      limitations, it does not actually answer what was asked.
+    score: 1
+  flow-016:
+    answer_hash: 453b3f2170431535
+    model: claude-opus-4-7
+    rationale: The answer punts on the question, explicitly stating that the implementation
+      of removeTeamMember is not in the provided context and declining to enumerate
+      side effects. It fails to directly answer what happens on removal.
+    score: 1
+  flow-017:
+    answer_hash: 529f076745fe3976
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with a coherent flow involving
+      concrete function names (acceptTeamInvitation, findInvitationByToken, acceptInvitation)
+      and file paths with line numbers. The explanation is plausible and domain-appropriate,
+      though it omits the route handler entry point despite citing teams.ts.
+    score: 2
+  flow-018:
+    answer_hash: 1fbcf30d99e8e000
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with concrete function names
+      (requestMagicLink, createMagicLink, sendMagicLinkEmail), file paths (src/services/auth-service.ts,
+      src/auth/magic-link.ts, src/services/email-service.ts), and implementation details
+      (32-byte hex token, magic_links table, 15-minute expiration). These are plausible
+      for the stated domain and coherent.
+    score: 2
+  flow-019:
+    answer_hash: ab630cd14c71e6ab
+    model: claude-opus-4-7
+    rationale: The answer directly describes a plausible sign-in flow with concrete
+      function names (handleSignIn, validateBody, signIn, signToken, setSession) and
+      cites specific file paths with line numbers. While some details may not be fully
+      verifiable, it addresses the question coherently with domain-appropriate components.
+    score: 2
+  flow-020:
+    answer_hash: 30c7b4eaa350a7d7
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with a concrete sequence
+      naming specific handlers (handleCreateTeam, createNewTeam, createTeam), middleware
+      (requireAuth), and file paths with line numbers. While some details like default
+      values are unverifiable, the flow is coherent and plausible for a team-management
+      API.
+    score: 2
+  flow-021:
+    answer_hash: e091d2a7f30e474a
+    model: claude-opus-4-7
+    rationale: The answer explicitly declines to walk through ProcessPayment, stating
+      the evidence is insufficient. It does not provide the concrete step-by-step
+      flow the question asked for.
+    score: 1
+  flow-022:
+    answer_hash: 98d2a51546749255
+    model: claude-opus-4-7
+    rationale: The answer directly names three concrete validation checks (non-empty
+      order ID, positive amount, non-empty payment method) and cites a specific file
+      and line range (go/payment/processor.go:54-66) along with the ProcessPayment
+      function. This is plausible and directly responsive to the question.
+    score: 2
+  flow-023:
+    answer_hash: 2b079d43ce04b3fb
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the context lacks sufficient evidence, without
+      naming concrete approval logic, thresholds, or enforcement mechanisms. This
+      is a classic hand-wave that fails to answer the question.
+    score: 1
+  flow-024:
+    answer_hash: cf4bfc4a256164c5
+    model: claude-opus-4-7
+    rationale: "The answer directly addresses the startup sequence with concrete steps\
+      \ (NewConfig \u2192 StartServer \u2192 validation) and cites specific file paths\
+      \ and line ranges in go/main.go. While some details can't be independently verified,\
+      \ the answer is coherent, on-topic, and names plausible functions for a Go service\
+      \ entry point."
+    score: 2
+  flow-025:
+    answer_hash: 20a25ed0a9ff8449
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the context doesn't provide the validation
+      logic, without naming concrete checks, fields, or errors. This is a non-answer.
+    score: 1
+  mix-001:
+    answer_hash: 8cf77d9f7da7f980
+    model: claude-opus-4-7
+    rationale: The answer punts on the question rather than answering it, stating
+      the context doesn't contain the function. This is a classic 'not useful' response
+      per the grading rubric.
+    score: 1
+  mix-002:
+    answer_hash: 49377dda25feb5dd
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the evidence is insufficient, which is a
+      classic non-answer. It does not name a concrete classifier component or explain
+      the decision logic.
+    score: 1
+  mix-003:
+    answer_hash: 41b010a085494826
+    model: claude-opus-4-7
+    rationale: The answer punts on the actual question, stating the validation behavior
+      cannot be determined from the provided context rather than giving a concrete
+      answer about what the orchestrator returns for a missing repository ID.
+    score: 1
+  mix-004:
+    answer_hash: 956511c0298a00d8
+    model: claude-opus-4-7
+    rationale: The answer directly addresses how stage_timings is populated, naming
+      specific stages (qa.classify, qa.understanding_ready, qa.ask), the FromDuration
+      helper, and citing concrete file/line references in internal/qa/deep_pipeline.go.
+    score: 3
+  mix-005:
+    answer_hash: 6f4505d8a0c16154
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the evidence doesn't describe AskInput,
+      rather than answering the question about what happens when both a symbol ID
+      and file path are provided.
+    score: 1
+  mix-006:
+    answer_hash: a20aa14da0132966
+    model: claude-opus-4-7
+    rationale: The answer punts on the question rather than providing concrete information
+      about FlattenReferencesToStrings. While the refusal may be honest given the
+      provided snippets, it does not answer what the function does or when it's used.
+    score: 1
+  mix-007:
+    answer_hash: a4a57215a96c6774
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the context doesn't contain evidence about
+      the best-deep-files selector, rather than answering how it handles test vs product
+      code. This is a non-answer that doesn't help the reader.
+    score: 1
+  mix-008:
+    answer_hash: 5b8f05b01d0f71ad
+    model: claude-opus-4-7
+    rationale: The answer admits it cannot determine what bestSnippet returns for
+      the no-match case, only describing caller behavior. It does not directly answer
+      the question.
+    score: 1
+  mix-009:
+    answer_hash: d55bb10093d792be
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with concrete components
+      (askRequest struct, IncludeDebug field, toAskInput() method, AskResult) and
+      cites specific file paths (internal/api/rest/ask_handler.go with line ranges).
+      The explanation is coherent and plausible for the domain.
+    score: 2
+  mix-010:
+    answer_hash: bc1a45757cf99738
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the context doesn't mention the diagnostic,
+      which is exactly the hand-waving behavior that earns a 1. It fails to provide
+      any concrete information about what triggers the diagnostic.
+    score: 1
+  mix-011:
+    answer_hash: 05276c54bb841411
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with concrete behavior (no
+      email existence check, magic link sent anyway, user created on redemption) and
+      cites plausible file paths. It's coherent and on-topic, though the auto-creation
+      claim on redemption is an additional detail that may or may not be accurate.
+    score: 2
+  mix-012:
+    answer_hash: 144df72062e486cc
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with concrete function names
+      (signIn, verifyPassword, handleSignIn) and file paths (src/services/auth-service.ts,
+      src/api/routes/auth.ts) that are plausible for the stated domain. It describes
+      a coherent error flow with AuthenticationError and errorResponse utility.
+    score: 2
+  mix-013:
+    answer_hash: 40c91a4bda2e47d3
+    model: claude-opus-4-7
+    rationale: The answer concretely explains trackUsage's behavior (checking usage_count
+      vs usage_limit, throwing AppError with 'USAGE_LIMIT'/403, calling incrementUsage)
+      with a plausible file reference. However, it explicitly punts on the 'when is
+      it called' half of the question, which is a meaningful gap.
+    score: 2
+  mix-014:
+    answer_hash: 1ec877241088c540
+    model: claude-opus-4-7
+    rationale: The answer punts on the question, stating the JWT verification implementation
+      is not in the provided context rather than describing expired-token behavior.
+      It does not name concrete verification functions or error handling logic.
+    score: 1
+  mix-015:
+    answer_hash: 222d3f2c03fa487f
+    model: claude-opus-4-7
+    rationale: 'The answer directly addresses the question with concrete behavior
+      (NotFoundError if team missing, returns {active: false, plan tier} if no subscription)
+      and cites specific file paths and line numbers. Claims are plausible and coherent
+      for the stated domain.'
+    score: 2
+  mix-016:
+    answer_hash: 688d55e7ca059c05
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with concrete function names
+      (acceptTeamInvitation, findInvitationByToken), specific error type (NotFoundError),
+      file paths and line numbers (team-service.ts:84-87, invitations.ts:30-41), and
+      explains the mechanism (expires_at filter causing null return, then throwing
+      the error).
+    score: 3
+  mix-017:
+    answer_hash: eb281ebc7de74d00
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the cleanup mechanism with a specific
+      function name (cleanupExpiredEntries), describes the logic (iterating the Map
+      and deleting expired entries based on resetAt), and cites the interval schedule
+      along with concrete file paths and line ranges.
+    score: 3
+  mix-018:
+    answer_hash: b3be968a7619b4b1
+    model: claude-opus-4-7
+    rationale: 'The answer directly addresses the question with concrete details (returns
+      session.url string, caller is handleCreateCheckout in billing route, responds
+      with JSON {url: ...}) and cites specific file paths and line ranges. It''s plausible
+      and coherent for a Stripe-integrated billing flow, though without deeper evidence
+      like exact function signatures quoted.'
+    score: 2
+  mix-019:
+    answer_hash: d7be56f2db951fb3
+    model: claude-opus-4-7
+    rationale: The answer directly explains the flow from Zod safeParse through validateBody
+      middleware, ValidationError, and errorResponse, citing specific files and line
+      ranges that a reader could verify.
+    score: 3
+  mix-020:
+    answer_hash: 9182af72f349daf3
+    model: claude-opus-4-7
+    rationale: The answer punts by saying the context doesn't contain hashPassword,
+      without providing the actual algorithm or salt strategy. This is a non-answer
+      to the question asked.
+    score: 1
+  own-001:
+    answer_hash: 18a3cc9c52b05a02
+    model: claude-opus-4-7
+    rationale: The answer hedges by saying the Ask method is 'in the internal/qa package'
+      but never provides a specific file path or line number for the definition itself.
+      It only cites call sites, not the definition, which is what the question asked
+      for.
+    score: 1
+  own-002:
+    answer_hash: 02568218f2cf6471
+    model: claude-opus-4-7
+    rationale: The answer directly names a specific file (internal/api/rest/ask_handler.go)
+      with line numbers and function name (handleAsk), providing concrete, verifiable
+      evidence responsive to the question.
+    score: 3
+  own-003:
+    answer_hash: 2f980fa9491ba135
+    model: claude-opus-4-7
+    rationale: The answer directly identifies a concrete file (internal/api/graphql/discuss_via_orchestrator.go)
+      and method (dispatchDiscussThroughOrchestrator) as the implementation location,
+      plus notes the gqlgen-generated stub delegation pattern. This is a plausible,
+      directly responsive answer with specific file paths.
+    score: 2
+  own-004:
+    answer_hash: 0a910155d777df9e
+    model: claude-opus-4-7
+    rationale: The answer punts on the question, stating the dispatch table isn't
+      in the provided context rather than naming a concrete file. This is a non-answer.
+    score: 1
+  own-005:
+    answer_hash: b0a7fab1519092d1
+    model: claude-opus-4-7
+    rationale: The answer punts by saying no such code is present in the provided
+      evidence, rather than identifying the retired Python deep-QA context assembly
+      module. It doesn't name a concrete file or path that answers the question.
+    score: 1
+  own-006:
+    answer_hash: 27de89f01f75b1da
+    model: claude-opus-4-7
+    rationale: The answer directly names internal/config/config.go as the file defining
+      the Config struct and Load function, and cites specific line ranges for verification.
+    score: 3
+  own-007:
+    answer_hash: 446465c6c30ff7f4
+    model: claude-opus-4-7
+    rationale: The answer directly identifies the file (internal/qa/retrieval_files.go)
+      and function (BestFiles), citing specific line numbers and describing the scoring
+      formula with concrete details (token-match points, domain signals, path boosts,
+      test file deprioritization).
+    score: 3
+  own-008:
+    answer_hash: 9a5230415c3ed11e
+    model: claude-opus-4-7
+    rationale: The answer directly names the file (internal/qa/classifier.go) and
+      provides specific function name, line numbers, and additional context about
+      the classification logic.
+    score: 3
+  own-009:
+    answer_hash: 787f0130cd87f001
+    model: claude-opus-4-7
+    rationale: The answer punts, stating the registration is not in the provided context
+      rather than identifying where the SSE discussion-stream endpoint is registered.
+      It does not concretely answer the question.
+    score: 1
+  own-010:
+    answer_hash: acd6123c86a908ae
+    model: claude-opus-4-7
+    rationale: The answer directly identifies the proto-generated files for the reasoning
+      service in both Go and Python, names the service methods, and cites specific
+      file paths that can be verified.
+    score: 3
+  own-011:
+    answer_hash: 0520bc5899dc54bf
+    model: claude-opus-4-7
+    rationale: Directly answers with a specific file path and line range (src/services/auth-service.ts:30-49),
+      and describes plausible behavior consistent with an auth service.
+    score: 3
+  own-012:
+    answer_hash: 00753fb4f790ed25
+    model: claude-opus-4-7
+    rationale: The answer directly names the file (src/api/middleware/rate-limit.ts)
+      and provides concrete function names and integration details with specific line
+      references.
+    score: 3
+  own-013:
+    answer_hash: 6657e6ae9550b711
+    model: claude-opus-4-7
+    rationale: The answer directly identifies the file (src/auth/jwt.ts), names the
+      three exported functions, describes their behavior, and cites specific line
+      ranges and call sites in auth-service.ts.
+    score: 3
+  own-014:
+    answer_hash: 63f59e8064259265
+    model: claude-opus-4-7
+    rationale: The answer directly names the file (src/api/routes/billing.ts) with
+      a specific function (handleStripeWebhook) and line references, and explains
+      delegation to billing-service.ts with concrete event types.
+    score: 3
+  own-015:
+    answer_hash: d0c365bd337b0e1c
+    model: claude-opus-4-7
+    rationale: The answer directly names a specific file path (src/db/models/user.ts)
+      and provides concrete details about its contents including field names and related
+      types, with line-range citations.
+    score: 3
+  own-016:
+    answer_hash: bde1c948ac822839
+    model: claude-opus-4-7
+    rationale: The answer directly identifies the function (`acceptTeamInvitation`)
+      and file (`src/services/team-service.ts`), describes the flow concretely (token
+      lookup, membership insertion, marking accepted), and cites specific line ranges
+      and helper functions like `findInvitationByToken` and `acceptInvitation`.
+    score: 3
+  own-017:
+    answer_hash: cbea7ab26c8f4fe4
+    model: claude-opus-4-7
+    rationale: The answer directly identifies a specific file (src/auth/magic-link.ts)
+      and describes concrete functions (createMagicLink, consumeMagicLink) with plausible
+      implementation details and line-number citations.
+    score: 3
+  own-018:
+    answer_hash: eb98394993ac4c5c
+    model: claude-opus-4-7
+    rationale: The answer directly identifies the file (src/auth/session.ts), names
+      specific functions (getSession, setSession, clearSession, optionalSession),
+      describes cookie attributes, and references integration points in auth-service.ts
+      with line-range citations.
+    score: 3
+  own-019:
+    answer_hash: e86c8a33c4e9e743
+    model: claude-opus-4-7
+    rationale: The answer directly identifies the file (src/api/middleware/validate.ts),
+      names the exported function (validateBody), and cites specific route files that
+      use it.
+    score: 3
+  own-020:
+    answer_hash: 5006a76951e3e6d4
+    model: claude-opus-4-7
+    rationale: The answer directly addresses the question with a concrete file path
+      (src/auth/password.ts), named functions (hashPassword, verifyPassword), and
+      a plausible library (bcryptjs). It identifies callers in auth-service for sign-in/sign-up
+      flows, which is coherent for this kind of codebase.
+    score: 2
+  own-021:
+    answer_hash: 8e4891cdae9fe7e1
+    model: claude-opus-4-7
+    rationale: The answer directly names a concrete file path and line range (go/payment/processor.go:29-50)
+      that matches the cited reference, answering the question precisely.
+    score: 3
+  own-022:
+    answer_hash: 999cf51bd2f89432
+    model: claude-opus-4-7
+    rationale: The answer directly names the file (go/main.go) with specific line
+      numbers where the Config struct is defined, which is exactly what the question
+      asked.
+    score: 3
+  own-023:
+    answer_hash: 285ca878b7b5cbb0
+    model: claude-opus-4-7
+    rationale: The answer directly identifies the helper function by name (`validate`),
+      specifies its location with file path and line numbers, and describes its behavior
+      and caller (`ProcessPayment`). This is concrete and immediately verifiable.
+    score: 3
+  own-024:
+    answer_hash: e90ebcccb8279b93
+    model: claude-opus-4-7
+    rationale: The answer directly names a concrete file path (go/main.go) and line
+      range for the StartServer entry point, which is plausible and responsive to
+      the question.
+    score: 2
+  own-025:
+    answer_hash: af9dd4e79caecd41
+    model: claude-opus-4-7
+    rationale: The answer directly identifies a concrete file path (go/payment/processor.go)
+      that is plausible and consistent with the cited references about the Payment
+      Processor API for Order and Receipt Management.
+    score: 2
+version: 1
