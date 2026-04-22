@@ -974,6 +974,32 @@ func (r *mutationResolver) ReviewCode(ctx context.Context, input ReviewCodeInput
 	return result, nil
 }
 
+// Ask is the resolver for the ask field.
+//
+// Routes through internal/qa.Orchestrator when server-side QA is
+// enabled; otherwise returns a structured "disabled" result so
+// GraphQL clients get a readable answer rather than a raw gRPC-style
+// error. The mutation is additive — discussCode remains the legacy
+// path and continues to work through Phase 6.
+func (r *mutationResolver) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
+	if r.QA == nil {
+		return &AskResult{
+			Answer: "Server-side QA is disabled on this deployment. Ask the operator to set SOURCEBRIDGE_QA_SERVER_SIDE_ENABLED=true.",
+			Diagnostics: &AskDiagnostics{
+				FallbackUsed: optString("server_side_disabled"),
+				Mode:         input.Mode,
+			},
+			Usage: &AskUsage{},
+		}, nil
+	}
+	qaIn := askInputToQA(input)
+	res, err := r.QA.Ask(ctx, qaIn)
+	if err != nil {
+		return nil, err
+	}
+	return askResultFromQA(res), nil
+}
+
 // AutoLinkRequirements is the resolver for the autoLinkRequirements field.
 func (r *mutationResolver) AutoLinkRequirements(ctx context.Context, repositoryID string, minConfidence *float64) (*AutoLinkResult, error) {
 	if r.Worker == nil {

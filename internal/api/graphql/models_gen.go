@@ -45,6 +45,115 @@ type ArtifactDependency struct {
 	CreatedAt        time.Time `json:"createdAt"`
 }
 
+type AskCrossRepoRef struct {
+	RepositoryID string  `json:"repositoryId"`
+	FilePath     *string `json:"filePath,omitempty"`
+	Note         *string `json:"note,omitempty"`
+}
+
+type AskDebug struct {
+	Prompt          *string              `json:"prompt,omitempty"`
+	ContextMarkdown *string              `json:"contextMarkdown,omitempty"`
+	Candidates      []*AskDebugCandidate `json:"candidates,omitempty"`
+}
+
+type AskDebugCandidate struct {
+	Source string   `json:"source"`
+	ID     *string  `json:"id,omitempty"`
+	Score  *float64 `json:"score,omitempty"`
+	Reason *string  `json:"reason,omitempty"`
+}
+
+type AskDiagnostics struct {
+	QuestionType          *string           `json:"questionType,omitempty"`
+	UnderstandingStage    *string           `json:"understandingStage,omitempty"`
+	TreeStatus            *string           `json:"treeStatus,omitempty"`
+	UnderstandingRevision *string           `json:"understandingRevision,omitempty"`
+	UnderstandingUsed     *bool             `json:"understandingUsed,omitempty"`
+	GraphExpansionUsed    *bool             `json:"graphExpansionUsed,omitempty"`
+	FilesConsidered       []string          `json:"filesConsidered,omitempty"`
+	FilesUsed             []string          `json:"filesUsed,omitempty"`
+	FallbackUsed          *string           `json:"fallbackUsed,omitempty"`
+	ModelUsed             *string           `json:"modelUsed,omitempty"`
+	StageTimingsMs        []*AskStageTiming `json:"stageTimingsMs,omitempty"`
+	Mode                  *string           `json:"mode,omitempty"`
+}
+
+type AskFileRangeRef struct {
+	FilePath  string  `json:"filePath"`
+	StartLine *int    `json:"startLine,omitempty"`
+	EndLine   *int    `json:"endLine,omitempty"`
+	Snippet   *string `json:"snippet,omitempty"`
+}
+
+type AskInput struct {
+	RepositoryID   string    `json:"repositoryId"`
+	Question       string    `json:"question"`
+	Mode           *string   `json:"mode,omitempty"`
+	ConversationID *string   `json:"conversationId,omitempty"`
+	PriorMessages  []string  `json:"priorMessages,omitempty"`
+	FilePath       *string   `json:"filePath,omitempty"`
+	Code           *string   `json:"code,omitempty"`
+	Language       *Language `json:"language,omitempty"`
+	ArtifactID     *string   `json:"artifactId,omitempty"`
+	SymbolID       *string   `json:"symbolId,omitempty"`
+	RequirementID  *string   `json:"requirementId,omitempty"`
+	IncludeDebug   *bool     `json:"includeDebug,omitempty"`
+}
+
+type AskReference struct {
+	Kind                 string                      `json:"kind"`
+	Title                *string                     `json:"title,omitempty"`
+	Symbol               *AskSymbolRef               `json:"symbol,omitempty"`
+	FileRange            *AskFileRangeRef            `json:"fileRange,omitempty"`
+	Requirement          *AskRequirementRef          `json:"requirement,omitempty"`
+	UnderstandingSection *AskUnderstandingSectionRef `json:"understandingSection,omitempty"`
+	CrossRepo            *AskCrossRepoRef            `json:"crossRepo,omitempty"`
+}
+
+type AskRequirementRef struct {
+	ExternalID string  `json:"externalId"`
+	Title      *string `json:"title,omitempty"`
+	FilePath   *string `json:"filePath,omitempty"`
+}
+
+type AskResult struct {
+	Answer              string          `json:"answer"`
+	References          []*AskReference `json:"references"`
+	RelatedRequirements []string        `json:"relatedRequirements"`
+	Diagnostics         *AskDiagnostics `json:"diagnostics"`
+	Usage               *AskUsage       `json:"usage"`
+	Debug               *AskDebug       `json:"debug,omitempty"`
+}
+
+type AskStageTiming struct {
+	Stage      string `json:"stage"`
+	DurationMs int    `json:"durationMs"`
+}
+
+type AskSymbolRef struct {
+	SymbolID      string  `json:"symbolId"`
+	QualifiedName string  `json:"qualifiedName"`
+	FilePath      *string `json:"filePath,omitempty"`
+	StartLine     *int    `json:"startLine,omitempty"`
+	EndLine       *int    `json:"endLine,omitempty"`
+	Language      *string `json:"language,omitempty"`
+}
+
+type AskUnderstandingSectionRef struct {
+	ArtifactID *string `json:"artifactId,omitempty"`
+	SectionID  *string `json:"sectionId,omitempty"`
+	Headline   *string `json:"headline,omitempty"`
+	Kind       *string `json:"kind,omitempty"`
+	ActionURL  *string `json:"actionUrl,omitempty"`
+}
+
+type AskUsage struct {
+	Model        *string `json:"model,omitempty"`
+	InputTokens  *int    `json:"inputTokens,omitempty"`
+	OutputTokens *int    `json:"outputTokens,omitempty"`
+}
+
 type AutoLinkResult struct {
 	LinksCreated          int                `json:"linksCreated"`
 	RequirementsProcessed int                `json:"requirementsProcessed"`

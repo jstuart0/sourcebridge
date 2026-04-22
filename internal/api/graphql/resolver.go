@@ -13,6 +13,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
+	"github.com/sourcebridge/sourcebridge/internal/qa"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/trash"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
@@ -38,6 +39,7 @@ type Resolver struct {
 	GitConfig          GitConfigLoader            // reads git credentials from DB (multi-replica safe)
 	ComprehensionStore comprehension.Store        // comprehension settings + model capabilities; nil when unavailable
 	TrashStore         trash.Store                // soft-delete recycle bin; nil when the feature is disabled or unavailable
+	QA                 *qa.Orchestrator           // server-side deep-QA orchestrator; nil when server-side QA is disabled
 }
 
 // getStore returns the per-request tenant-filtered store when available,

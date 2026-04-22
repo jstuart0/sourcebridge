@@ -133,6 +133,10 @@ type Mutation {
   analyzeSymbol(repositoryId: ID!, symbolId: ID!): AnalysisResult!
   discussCode(input: DiscussCodeInput!): DiscussionResult!
   reviewCode(input: ReviewCodeInput!): ReviewResult!
+  # Server-side deep-QA orchestrator (internal/qa).
+  # Returns structured references and diagnostics, unlike discussCode
+  # which carries the legacy string-array references wire shape.
+  ask(input: AskInput!): AskResult!
   autoLinkRequirements(repositoryId: ID!, minConfidence: Float): AutoLinkResult!
   enrichRequirement(requirementId: ID!): Requirement!
 
@@ -682,6 +686,120 @@ type DiscussionResult {
   model: String
   inputTokens: Int
   outputTokens: Int
+}
+
+# ----- Server-side deep-QA orchestrator types ------------------------
+
+input AskInput {
+  repositoryId: ID!
+  question: String!
+  mode: String            # fast | deep | explain (default fast)
+  conversationId: String
+  priorMessages: [String!]
+  filePath: String
+  code: String
+  language: Language
+  artifactId: ID
+  symbolId: ID
+  requirementId: ID
+  includeDebug: Boolean
+}
+
+type AskResult {
+  answer: String!
+  references: [AskReference!]!
+  relatedRequirements: [String!]!
+  diagnostics: AskDiagnostics!
+  usage: AskUsage!
+  debug: AskDebug
+}
+
+# Tagged-union reference. `kind` identifies which sub-field is populated.
+# Kept as a single object instead of a union so non-generated clients can
+# read it with a simple switch on `kind` without union-type fragments.
+type AskReference {
+  kind: String!  # symbol | file_range | requirement | understanding_section | cross_repo_ref
+  title: String
+  symbol: AskSymbolRef
+  fileRange: AskFileRangeRef
+  requirement: AskRequirementRef
+  understandingSection: AskUnderstandingSectionRef
+  crossRepo: AskCrossRepoRef
+}
+
+type AskSymbolRef {
+  symbolId: ID!
+  qualifiedName: String!
+  filePath: String
+  startLine: Int
+  endLine: Int
+  language: String
+}
+
+type AskFileRangeRef {
+  filePath: String!
+  startLine: Int
+  endLine: Int
+  snippet: String
+}
+
+type AskRequirementRef {
+  externalId: String!
+  title: String
+  filePath: String
+}
+
+type AskUnderstandingSectionRef {
+  artifactId: String
+  sectionId: String
+  headline: String
+  kind: String
+  actionUrl: String
+}
+
+type AskCrossRepoRef {
+  repositoryId: ID!
+  filePath: String
+  note: String
+}
+
+type AskDiagnostics {
+  questionType: String
+  understandingStage: String
+  treeStatus: String
+  understandingRevision: String
+  understandingUsed: Boolean
+  graphExpansionUsed: Boolean
+  filesConsidered: [String!]
+  filesUsed: [String!]
+  fallbackUsed: String
+  modelUsed: String
+  stageTimingsMs: [AskStageTiming!]
+  mode: String
+}
+
+type AskStageTiming {
+  stage: String!
+  durationMs: Int!
+}
+
+type AskUsage {
+  model: String
+  inputTokens: Int
+  outputTokens: Int
+}
+
+type AskDebug {
+  prompt: String
+  contextMarkdown: String
+  candidates: [AskDebugCandidate!]
+}
+
+type AskDebugCandidate {
+  source: String!
+  id: String
+  score: Float
+  reason: String
 }
 
 type ReviewFinding {

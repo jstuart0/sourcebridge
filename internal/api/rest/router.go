@@ -160,6 +160,17 @@ type Server struct {
 	workerLanes        *worker.Lanes                  // shared lane registry used by search + qa
 }
 
+// qaResolverOrchestrator exposes the server's QA orchestrator to the
+// GraphQL resolver only when QA is enabled in config. Returning nil
+// when the flag is off causes the ask mutation resolver to emit a
+// structured "disabled" response, matching the REST handler's 503.
+func (s *Server) qaResolverOrchestrator() *qa.Orchestrator {
+	if s.cfg == nil || !s.cfg.QA.ServerSideEnabled {
+		return nil
+	}
+	return s.qaOrchestrator
+}
+
 // getStore returns a tenant-filtered store when RepoAccessMiddleware has
 // injected one, otherwise returns the base store.
 func (s *Server) getStore(r *http.Request) graphstore.GraphStore {
@@ -329,7 +340,7 @@ func (s *Server) setupRouter() {
 
 	// GraphQL server
 	gqlSrv := handler.NewDefaultServer(graphql.NewExecutableSchema(graphql.Config{
-		Resolvers: &graphql.Resolver{Store: s.store, KnowledgeStore: s.knowledgeStore, Worker: s.worker, Orchestrator: s.orchestrator, Config: s.cfg, EventBus: s.eventBus, Flags: s.flags, GitConfig: s.gitConfigStore, ComprehensionStore: s.comprehensionStore, TrashStore: s.trashStore},
+		Resolvers: &graphql.Resolver{Store: s.store, KnowledgeStore: s.knowledgeStore, Worker: s.worker, Orchestrator: s.orchestrator, Config: s.cfg, EventBus: s.eventBus, Flags: s.flags, GitConfig: s.gitConfigStore, ComprehensionStore: s.comprehensionStore, TrashStore: s.trashStore, QA: s.qaResolverOrchestrator()},
 	}))
 
 	// Protected API routes (accepts both JWT and API tokens)
