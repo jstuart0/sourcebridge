@@ -147,7 +147,17 @@ export default function RequirementDetailPage() {
   );
 
   useEffect(() => {
-    if (initialLinks.length < 50) return;
+    // Reset synchronously every time the requirement changes so the
+    // paginated links from the previous requirement don't leak into
+    // this requirement's view. Without this, navigating A → B shows
+    // B's first 50 links merged with A's paginated tail until B's
+    // own pagination finishes, which is confusing at best and wrong
+    // at worst (the merged links belong to different requirements).
+    setExtraLinks([]);
+    if (initialLinks.length < 50) {
+      setLoadingMore(false);
+      return;
+    }
     let cancelled = false;
     setLoadingMore(true);
 
