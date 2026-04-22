@@ -162,12 +162,12 @@ func TestBestSnippet_OversizedFileSkipped(t *testing.T) {
 
 func TestIsTestPath(t *testing.T) {
 	cases := map[string]bool{
-		"tests/foo.test.ts":           true,
-		"internal/foo/bar_test.go":    true,
-		"src/auth/login.test.ts":      true,
-		"src/auth/login.ts":           false,
-		"internal/architecture/x.go":  false,
-		"test/integration.go":         true,
+		"tests/foo.test.ts":          true,
+		"internal/foo/bar_test.go":   true,
+		"src/auth/login.test.ts":     true,
+		"src/auth/login.ts":          false,
+		"internal/architecture/x.go": false,
+		"test/integration.go":        true,
 	}
 	for p, want := range cases {
 		if got := isTestPath(p); got != want {

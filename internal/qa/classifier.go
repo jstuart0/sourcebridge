@@ -14,13 +14,13 @@ import (
 type QuestionKind string
 
 const (
-	KindArchitecture         QuestionKind = "architecture"
-	KindExecutionFlow        QuestionKind = "execution_flow"
-	KindRequirementCoverage  QuestionKind = "requirement_coverage"
-	KindOwnership            QuestionKind = "ownership"
-	KindDataModel            QuestionKind = "data_model"
-	KindRiskReview           QuestionKind = "risk_review"
-	KindBehavior             QuestionKind = "behavior"
+	KindArchitecture        QuestionKind = "architecture"
+	KindExecutionFlow       QuestionKind = "execution_flow"
+	KindRequirementCoverage QuestionKind = "requirement_coverage"
+	KindOwnership           QuestionKind = "ownership"
+	KindDataModel           QuestionKind = "data_model"
+	KindRiskReview          QuestionKind = "risk_review"
+	KindBehavior            QuestionKind = "behavior"
 )
 
 // ClassifyQuestion mirrors Python _question_type. The keyword sets

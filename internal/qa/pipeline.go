@@ -298,12 +298,12 @@ func (o *Orchestrator) Ask(ctx context.Context, in AskInput) (*AskResult, error)
 
 	t2 := time.Now()
 	req := &reasoningv1.AnswerQuestionRequest{
-		Question:       promptEnvelope,
-		RepositoryId:   in.RepositoryID,
-		ContextCode:    contextMD,
-		FilePath:       in.FilePath,
-		Language:       languageFromString(in.Language),
-		MaxTokens:      int32(o.config.MaxAnswerTokens),
+		Question:     promptEnvelope,
+		RepositoryId: in.RepositoryID,
+		ContextCode:  contextMD,
+		FilePath:     in.FilePath,
+		Language:     languageFromString(in.Language),
+		MaxTokens:    int32(o.config.MaxAnswerTokens),
 	}
 	var resp *reasoningv1.AnswerQuestionResponse
 	err = o.runSynth(ctx, in.RepositoryID, in.Question, func(rt TokenReporter) error {

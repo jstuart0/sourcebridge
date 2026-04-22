@@ -92,16 +92,17 @@ func GetRepositoryStatus(reader UnderstandingReader, repoID, repoName string) *R
 // GetSummaryEvidence ports Python _load_summary_evidence.
 //
 // Scoring (identical to Python, keep in sync with cli_ask.py:548):
-//   +8 per question token appearing in unit_id/headline/summary_text/metadata
-//   +5 if level == 1 (file-level)
-//   +1 if level == 0
-//   +min(level,3) if level > 1
-//   +4 if question kind is execution_flow/behavior AND haystack contains
-//      any of route/handler/service/session/token/auth
-//   +5 if question kind is architecture AND level > 0
-//   +1 if metadata.file_path is populated
-//   +3 if either headline or summary_text is "useful" (non-empty,
-//      not 'could not summarize' / 'n/a' / 'unknown')
+//
+//	+8 per question token appearing in unit_id/headline/summary_text/metadata
+//	+5 if level == 1 (file-level)
+//	+1 if level == 0
+//	+min(level,3) if level > 1
+//	+4 if question kind is execution_flow/behavior AND haystack contains
+//	   any of route/handler/service/session/token/auth
+//	+5 if question kind is architecture AND level > 0
+//	+1 if metadata.file_path is populated
+//	+3 if either headline or summary_text is "useful" (non-empty,
+//	   not 'could not summarize' / 'n/a' / 'unknown')
 //
 // Rows with non-useful summary text are discarded (Python `continue`).
 // Rows with final score <= 0 are discarded.

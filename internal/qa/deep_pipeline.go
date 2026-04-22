@@ -17,11 +17,11 @@ import (
 
 // deepAsk implements the deep orchestration route:
 //
-//   1. repository readiness check
-//   2. parallel retrieval: summary evidence + requirement lines
-//   3. deterministic context assembly with token-budget eviction
-//   4. synthesis via AnswerQuestion
-//   5. reference emission from recorded provenance
+//  1. repository readiness check
+//  2. parallel retrieval: summary evidence + requirement lines
+//  3. deterministic context assembly with token-budget eviction
+//  4. synthesis via AnswerQuestion
+//  5. reference emission from recorded provenance
 //
 // Failures on any step degrade gracefully: the caller always gets a
 // well-formed AskResult with a diagnostic explaining what happened.

@@ -45,28 +45,28 @@ type questionsFile struct {
 }
 
 type sample struct {
-	ID           string            `json:"id"`
-	Repo         string            `json:"repo"`
-	Class        string            `json:"class"`
-	Question     string            `json:"question"`
-	Arm          string            `json:"arm"`
-	Answer       string            `json:"answer"`
-	References   []string          `json:"references"`
-	Diagnostics  map[string]any    `json:"diagnostics"`
-	Usage        map[string]int    `json:"usage"`
-	ElapsedMs    int64             `json:"elapsed_ms"`
-	ErrorKind    string            `json:"error_kind,omitempty"`
-	FallbackUsed string            `json:"fallback_used,omitempty"`
+	ID           string         `json:"id"`
+	Repo         string         `json:"repo"`
+	Class        string         `json:"class"`
+	Question     string         `json:"question"`
+	Arm          string         `json:"arm"`
+	Answer       string         `json:"answer"`
+	References   []string       `json:"references"`
+	Diagnostics  map[string]any `json:"diagnostics"`
+	Usage        map[string]int `json:"usage"`
+	ElapsedMs    int64          `json:"elapsed_ms"`
+	ErrorKind    string         `json:"error_kind,omitempty"`
+	FallbackUsed string         `json:"fallback_used,omitempty"`
 }
 
 type environment struct {
-	Arm          string    `yaml:"arm"`
-	Date         time.Time `yaml:"date"`
-	CommitSHA    string    `yaml:"commit_sha"`
-	ServerURL    string    `yaml:"server_url,omitempty"`
-	Mode         string    `yaml:"mode"`
-	QuestionsHash string   `yaml:"questions_hash"`
-	Notes        string    `yaml:"notes,omitempty"`
+	Arm           string    `yaml:"arm"`
+	Date          time.Time `yaml:"date"`
+	CommitSHA     string    `yaml:"commit_sha"`
+	ServerURL     string    `yaml:"server_url,omitempty"`
+	Mode          string    `yaml:"mode"`
+	QuestionsHash string    `yaml:"questions_hash"`
+	Notes         string    `yaml:"notes,omitempty"`
 }
 
 func main() {

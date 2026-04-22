@@ -71,10 +71,11 @@ func DefaultFileRetriever(repoRoot string) *FileRetriever {
 // benchmark can treat arm differences as bug signal, not noise.
 //
 // Scoring (per file):
-//   base  = token-match (8 per token) + domain signals (12 per domain match)
-//         + routes/services path bonuses + readme.md bonus
-//   delta = PathBoosts(path, question, kind)
-//   final = base + delta.Delta
+//
+//	base  = token-match (8 per token) + domain signals (12 per domain match)
+//	      + routes/services path bonuses + readme.md bonus
+//	delta = PathBoosts(path, question, kind)
+//	final = base + delta.Delta
 //
 // After scoring, test files are pushed to the tail so product code
 // dominates the top-K by default (matches Python).

@@ -81,9 +81,9 @@ func TestAskResultJSONRoundtrip(t *testing.T) {
 			FallbackUsed:          "",
 			ModelUsed:             "claude-sonnet-4-6",
 			StageTimings: map[string]DurationMs{
-				"qa.classify":    12,
-				"qa.retrieve":    340,
-				"qa.llm_call":    1200,
+				"qa.classify": 12,
+				"qa.retrieve": 340,
+				"qa.llm_call": 1200,
 			},
 			Mode: "deep",
 		},

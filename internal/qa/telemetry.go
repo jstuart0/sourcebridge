@@ -29,8 +29,8 @@ var (
 )
 
 type askBucket struct {
-	day    int64 // UTC days since Unix epoch, 0 = empty slot
-	count  int64
+	day   int64 // UTC days since Unix epoch, 0 = empty slot
+	count int64
 }
 
 // SetServerSideEnabled is called at startup so telemetry can report

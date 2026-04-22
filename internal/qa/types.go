@@ -41,11 +41,11 @@ type AskInput struct {
 	ConversationID string   `json:"conversationId,omitempty"`
 	PriorMessages  []string `json:"priorMessages,omitempty"`
 
-	FilePath    string `json:"filePath,omitempty"`
-	Code        string `json:"code,omitempty"`
-	Language    string `json:"language,omitempty"`
-	ArtifactID  string `json:"artifactId,omitempty"`
-	SymbolID    string `json:"symbolId,omitempty"`
+	FilePath      string `json:"filePath,omitempty"`
+	Code          string `json:"code,omitempty"`
+	Language      string `json:"language,omitempty"`
+	ArtifactID    string `json:"artifactId,omitempty"`
+	SymbolID      string `json:"symbolId,omitempty"`
 	RequirementID string `json:"requirementId,omitempty"`
 
 	IncludeDebug bool `json:"includeDebug,omitempty"`
@@ -54,12 +54,12 @@ type AskInput struct {
 // AskResult is the canonical response envelope returned from every
 // orchestrator invocation.
 type AskResult struct {
-	Answer              string          `json:"answer"`
-	References          []AskReference  `json:"references"`
-	RelatedRequirements []string        `json:"relatedRequirements"`
-	Diagnostics         AskDiagnostics  `json:"diagnostics"`
-	Usage               AskUsage        `json:"usage"`
-	Debug               *AskDebug       `json:"debug,omitempty"`
+	Answer              string         `json:"answer"`
+	References          []AskReference `json:"references"`
+	RelatedRequirements []string       `json:"relatedRequirements"`
+	Diagnostics         AskDiagnostics `json:"diagnostics"`
+	Usage               AskUsage       `json:"usage"`
+	Debug               *AskDebug      `json:"debug,omitempty"`
 }
 
 // AskReference is the tagged-union reference shape. The Kind field
@@ -139,18 +139,18 @@ type CrossRepoRef struct {
 // by every orchestrator run. Keys parallel what workers/cli_ask.py
 // emits today so callers that inspect diagnostics do not break.
 type AskDiagnostics struct {
-	QuestionType          string                 `json:"questionType,omitempty"`
-	UnderstandingStage    string                 `json:"understandingStage,omitempty"`
-	TreeStatus            string                 `json:"treeStatus,omitempty"`
-	UnderstandingRevision string                 `json:"understandingRevision,omitempty"`
-	UnderstandingUsed     bool                   `json:"understandingUsed,omitempty"`
-	GraphExpansionUsed    bool                   `json:"graphExpansionUsed,omitempty"`
-	FilesConsidered       []string               `json:"filesConsidered,omitempty"`
-	FilesUsed             []string               `json:"filesUsed,omitempty"`
-	FallbackUsed          string                 `json:"fallbackUsed,omitempty"`
-	ModelUsed             string                 `json:"modelUsed,omitempty"`
-	StageTimings          map[string]DurationMs  `json:"stageTimings,omitempty"`
-	Mode                  string                 `json:"mode,omitempty"`
+	QuestionType          string                `json:"questionType,omitempty"`
+	UnderstandingStage    string                `json:"understandingStage,omitempty"`
+	TreeStatus            string                `json:"treeStatus,omitempty"`
+	UnderstandingRevision string                `json:"understandingRevision,omitempty"`
+	UnderstandingUsed     bool                  `json:"understandingUsed,omitempty"`
+	GraphExpansionUsed    bool                  `json:"graphExpansionUsed,omitempty"`
+	FilesConsidered       []string              `json:"filesConsidered,omitempty"`
+	FilesUsed             []string              `json:"filesUsed,omitempty"`
+	FallbackUsed          string                `json:"fallbackUsed,omitempty"`
+	ModelUsed             string                `json:"modelUsed,omitempty"`
+	StageTimings          map[string]DurationMs `json:"stageTimings,omitempty"`
+	Mode                  string                `json:"mode,omitempty"`
 }
 
 // DurationMs is a duration expressed as integer milliseconds on the wire.
@@ -174,9 +174,9 @@ type AskUsage struct {
 // included by default — it may contain sensitive snippets from
 // retrieval, and callers should treat it as opt-in.
 type AskDebug struct {
-	Prompt          string            `json:"prompt,omitempty"`
-	ContextMarkdown string            `json:"contextMarkdown,omitempty"`
-	Candidates      []DebugCandidate  `json:"candidates,omitempty"`
+	Prompt          string           `json:"prompt,omitempty"`
+	ContextMarkdown string           `json:"contextMarkdown,omitempty"`
+	Candidates      []DebugCandidate `json:"candidates,omitempty"`
 }
 
 // DebugCandidate is one retrieval candidate surfaced in debug payloads.
