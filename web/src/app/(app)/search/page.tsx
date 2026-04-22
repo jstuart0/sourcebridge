@@ -11,6 +11,14 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
 import { buildRepositorySourceHref } from "@/lib/source-target";
 
+interface SearchSignals {
+  exact: number | null;
+  lexical: number | null;
+  semantic: number | null;
+  graph: number | null;
+  requirement: number | null;
+}
+
 interface SearchResultItem {
   type: string;
   id: string;
@@ -20,6 +28,24 @@ interface SearchResultItem {
   line: number | null;
   repositoryId: string;
   repositoryName: string;
+  score: number | null;
+  signals: SearchSignals | null;
+}
+
+// SIGNAL_CHIPS is the display model for result-level signal
+// explanations. Order matters — it mirrors the canonical order in
+// internal/search.Signals so the UI is consistent across the stack.
+const SIGNAL_CHIPS: Array<{ key: keyof SearchSignals; label: string; title: string }> = [
+  { key: "exact", label: "exact", title: "Exact name or qualified-name hit." },
+  { key: "lexical", label: "match", title: "Full-text match (BM25 or substring fallback)." },
+  { key: "semantic", label: "semantic", title: "Vector similarity hit from the embedding index." },
+  { key: "graph", label: "graph", title: "Reachable via the call graph from a seed symbol." },
+  { key: "requirement", label: "req", title: "This symbol has a linked requirement." },
+];
+
+function firedSignals(signals: SearchSignals | null): typeof SIGNAL_CHIPS {
+  if (!signals) return [];
+  return SIGNAL_CHIPS.filter((c) => (signals[c.key] ?? 0) > 0);
 }
 
 export default function SearchPage() {
@@ -148,6 +174,19 @@ export default function SearchPage() {
                       <div className="mt-2 font-mono text-xs text-[var(--text-tertiary)]">
                         {item.filePath}
                         {item.line ? `:${item.line}` : ""}
+                      </div>
+                    ) : null}
+                    {firedSignals(item.signals).length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {firedSignals(item.signals).map((c) => (
+                          <span
+                            key={c.key}
+                            title={c.title}
+                            className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-subtle)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]"
+                          >
+                            {c.label}
+                          </span>
+                        ))}
                       </div>
                     ) : null}
                   </Link>

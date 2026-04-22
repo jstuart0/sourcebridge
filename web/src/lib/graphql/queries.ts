@@ -408,6 +408,14 @@ export const SEARCH_QUERY = gql`
       line
       repositoryId
       repositoryName
+      score
+      signals {
+        exact
+        lexical
+        semantic
+        graph
+        requirement
+      }
     }
   }
 `;

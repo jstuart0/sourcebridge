@@ -158,6 +158,7 @@ type Server struct {
 	trashStore         trash.Store                    // soft-delete recycle bin; nil = feature disabled
 	searchSvc          *search.Service                // hybrid retrieval backbone; always set in NewServer
 	reqBooster         *search.RequirementBooster     // repo-scoped requirement link cache; feeds searchSvc boosters
+	searchMetrics      *search.Metrics                // in-process ring buffer of per-stage latency / success
 }
 
 // getStore returns a tenant-filtered store when RepoAccessMiddleware has
@@ -238,6 +239,8 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 	// Embedder is wired when a worker client is available; absent it,
 	// the vector arm reports unavailable and the fuser degrades.
 	s.searchSvc = search.NewService(s.store)
+	s.searchMetrics = search.NewMetrics(0)
+	s.searchSvc.Metrics = s.searchMetrics
 	if s.worker != nil {
 		emb := search.NewWorkerEmbedder(s.worker, "")
 		cached := search.NewCachedEmbedder(emb, 2048, 5*time.Minute, 5, 30*time.Second)
