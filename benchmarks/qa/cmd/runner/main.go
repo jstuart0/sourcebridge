@@ -340,7 +340,11 @@ func runCandidate(ctx context.Context, serverURL, token, repoID, question, mode 
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	client := &http.Client{Timeout: 120 * time.Second}
+	// Generous timeout — deep mode on cold understanding + 4-section
+	// context assembly + LLM synthesis can routinely take 30-60s on
+	// longer questions; 120s was too aggressive and produced spurious
+	// "context deadline exceeded" errors on the first few questions.
+	client := &http.Client{Timeout: 300 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
