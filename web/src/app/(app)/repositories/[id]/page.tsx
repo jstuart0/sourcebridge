@@ -1085,11 +1085,6 @@ export default function RepositoryDetailPage() {
   const codeTourId = currentCodeTour?.id;
   useEffect(() => { setTourStopIndex(0); }, [codeTourId]);
 
-  const availableLenses = knowledgeArtifacts
-    .filter((a) => a.type === "CLIFF_NOTES" && matchesEngine(a))
-    .map((a) => `${a.audience}:${a.depth}`)
-    .filter((value, index, arr) => arr.indexOf(value) === index);
-
   useEffect(() => {
     if (!repo?.id) return;
     trackEvent({
@@ -2533,23 +2528,24 @@ export default function RepositoryDetailPage() {
                   </button>
                 ))}
               </div>
-              <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                <div>
-              <p className="text-xs uppercase tracking-[0.16em] text-[var(--text-tertiary)]">Field Guide</p>
-                  <h2 className="mt-1 text-3xl font-semibold text-[var(--text-primary)]">{scopeTitle()}</h2>
-                  <p className="mt-2 text-sm text-[var(--text-secondary)]">{scopeSubtitle()}</p>
+              <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{scopeTitle()}</p>
+                  {scopeSubtitle() ? (
+                    <p className="mt-0.5 truncate text-xs text-[var(--text-tertiary)]">{scopeSubtitle()}</p>
+                  ) : null}
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <p className="mb-2 text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Audience</p>
-                    <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Audience</span>
+                    <div className="flex flex-wrap gap-1.5">
                       {["DEVELOPER", "BEGINNER"].map((aud) => (
                         <button
                           key={aud}
                           type="button"
                           onClick={() => setKnowledgeLens(aud, knowledgeDepth)}
                           className={cn(
-                            "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                            "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
                             knowledgeAudience === aud
                               ? "border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--accent-contrast)]"
                               : "border-[var(--border-default)] bg-[var(--bg-base)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
@@ -2560,16 +2556,16 @@ export default function RepositoryDetailPage() {
                       ))}
                     </div>
                   </div>
-                  <div>
-                    <p className="mb-2 text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Depth</p>
-                    <div className="flex flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Depth</span>
+                    <div className="flex flex-wrap gap-1.5">
                       {["SUMMARY", "MEDIUM", "DEEP"].map((dep) => (
                         <button
                           key={dep}
                           type="button"
                           onClick={() => setKnowledgeLens(knowledgeAudience, dep)}
                           className={cn(
-                            "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                            "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
                             knowledgeDepth === dep
                               ? "border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--accent-contrast)]"
                               : "border-[var(--border-default)] bg-[var(--bg-base)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
@@ -2580,9 +2576,9 @@ export default function RepositoryDetailPage() {
                       ))}
                     </div>
                   </div>
-                  <div>
-                    <p className="mb-2 text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Engine</p>
-                    <div className="flex flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Engine</span>
+                    <div className="flex flex-wrap gap-1.5">
                       {[
                         { key: "UNDERSTANDING_FIRST", label: "Understanding First" },
                         { key: "CLASSIC", label: "Classic" },
@@ -2592,7 +2588,7 @@ export default function RepositoryDetailPage() {
                           type="button"
                           onClick={() => setKnowledgeGenerationMode(mode.key)}
                           className={cn(
-                            "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                            "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
                             knowledgeGenerationMode === mode.key
                               ? "border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--accent-contrast)]"
                               : "border-[var(--border-default)] bg-[var(--bg-base)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
@@ -2605,29 +2601,6 @@ export default function RepositoryDetailPage() {
                   </div>
                 </div>
               </div>
-              {availableLenses.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {availableLenses.map((lens) => {
-                    const [audience, depth] = lens.split(":");
-                    const selected = audience === knowledgeAudience && depth === knowledgeDepth;
-                    return (
-                      <button
-                        key={lens}
-                        type="button"
-                        onClick={() => setKnowledgeLens(audience, depth)}
-                        className={cn(
-                          "rounded-full border px-3 py-1.5 text-xs transition-colors",
-                          selected
-                            ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-base)]"
-                            : "border-[var(--border-default)] bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                        )}
-                      >
-                        {audience[0]}{audience.slice(1).toLowerCase()} / {depth[0]}{depth.slice(1).toLowerCase()}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
             </div>
 
             <div className="border-t border-[var(--border-subtle)] px-6 py-4">
