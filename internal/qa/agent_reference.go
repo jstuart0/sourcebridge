@@ -27,24 +27,37 @@ var citeTagRe = regexp.MustCompile(`\[cite:([^\]]+)\]`)
 // resolveReferencesFromAnswer returns the list of AskReferences the
 // answer cites, plus a bool indicating whether the structural
 // fallback fired (no `[cite:...]` tags found).
+//
+// Citation path resolves handles against the FINAL-turn tool result
+// block (the one the model most recently saw) because that's the
+// context it answered from.
+//
+// Fallback scans ALL tool results across the conversation. A last
+// under-specific search_evidence call can return zero hits; limiting
+// the fallback to that one slice would drop perfectly good
+// references from earlier turns. Dedup by handle keeps the list
+// clean.
 func resolveReferencesFromAnswer(answer string, history []AgentMessage) ([]AskReference, bool) {
-	// Find the final tool_result message (the one immediately before
-	// the final assistant text answer). This is the "final-turn
-	// context block" the contract talks about.
 	finalResults := finalTurnResults(history)
-	if len(finalResults) == 0 {
+	allResults := allToolResults(history)
+	if len(allResults) == 0 {
 		// No tools were called — no references to emit.
 		return []AskReference{}, false
 	}
 
-	// Index by handle.
-	byHandle := indexResultsByHandle(finalResults)
+	// Index every known handle so unresolved-cite checks see the full
+	// history. Citation-driven resolution uses this same index so the
+	// model can cite a handle from any turn, not just the most recent.
+	byHandle := indexResultsByHandle(allResults)
 
 	// Parse citation tags.
 	matches := citeTagRe.FindAllStringSubmatch(answer, -1)
 	if len(matches) == 0 {
-		// Fallback: structural emission from every final-turn result.
-		return emitAllFromResults(finalResults), true
+		// Fallback: structural emission from every tool result,
+		// deduped by handle. Broader than final-turn-only because a
+		// terminal zero-hit call must not erase earlier evidence.
+		_ = finalResults
+		return emitAllFromResults(allResults), true
 	}
 	refs := make([]AskReference, 0, len(matches))
 	seenHandles := map[string]struct{}{}
@@ -60,16 +73,29 @@ func resolveReferencesFromAnswer(answer string, history []AgentMessage) ([]AskRe
 		if ref, ok := refFromHandle(handle, byHandle); ok {
 			refs = append(refs, ref)
 		}
-		// Unresolved handles: we silently skip but the diagnostic
-		// hook in the loop records them via CitationFallbackUsed.
-		// Concretely, this design's failure mode is "LLM cited a
-		// handle that wasn't in context" — logged, not fatal.
+		// Unresolved handles: silently skipped. The loop's
+		// CitationFallbackUsed flag logs the overall failure mode.
 	}
 	if len(refs) == 0 {
-		// All cited handles failed to resolve — fall back structurally.
-		return emitAllFromResults(finalResults), true
+		// All cited handles failed to resolve — fall back structurally
+		// across the whole conversation.
+		return emitAllFromResults(allResults), true
 	}
 	return refs, false
+}
+
+// allToolResults flattens every tool_result across the conversation
+// into one slice. Used by the structural fallback so references
+// aren't tied to a single terminal turn that may have returned
+// nothing.
+func allToolResults(history []AgentMessage) []ToolResult {
+	out := []ToolResult{}
+	for _, m := range history {
+		if m.Role == AgentRoleToolResult {
+			out = append(out, m.ToolResults...)
+		}
+	}
+	return out
 }
 
 // finalTurnResults returns the ToolResults from the last tool_result
