@@ -97,18 +97,27 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 		summaries = trimSummaries(summaries, 8)
 	}
 
-	// Stage 3b: file-level retrieval over the clone. This matches
-	// Python's _best_deep_files and backs ownership/location questions
-	// that summaries alone can't answer.
+	// Stage 3b: file-level retrieval. Prefer the hybrid search
+	// backbone (FTS + vector + graph + requirement boosters) when it
+	// is wired up — that's the "Deep-QA integration" follow-up from
+	// the hybrid-search plan's Phase 6. When the searcher isn't
+	// available, fall back to the local grep-style FileRetriever so
+	// deep mode still works on minimal installs.
 	var files []FileEvidence
-	if o.locator != nil {
-		t2b := time.Now()
+	t2b := time.Now()
+	if o.searcher != nil {
+		hits, serr := o.searcher.SearchForQA(ctx, in.RepositoryID, in.Question, 12)
+		if serr == nil {
+			files = filesFromSearchHits(hits, o.locator, in.RepositoryID)
+		}
+	}
+	if len(files) == 0 && o.locator != nil {
 		if cloneRoot, ok := o.locator.LocateRepoClone(in.RepositoryID); ok && cloneRoot != "" {
 			fr := DefaultFileRetriever(cloneRoot)
 			files = fr.BestFiles(in.Question, kind)
 		}
-		result.Diagnostics.StageTimings["qa.file_retrieval"] = FromDuration(time.Since(t2b))
 	}
+	result.Diagnostics.StageTimings["qa.file_retrieval"] = FromDuration(time.Since(t2b))
 
 	// Stage 3c: one-hop graph expansion. Caller/callee evidence for
 	// flow/behavior questions. Bounded by the retriever to avoid

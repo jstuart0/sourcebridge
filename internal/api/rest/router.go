@@ -282,6 +282,9 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		if s.orchestrator != nil {
 			o = o.WithJobRunner(&qaJobRunner{orch: s.orchestrator})
 		}
+		if s.searchSvc != nil {
+			o = o.WithSearcher(&qaSearcher{svc: s.searchSvc})
+		}
 		s.qaOrchestrator = o
 		// Publish the server-side QA state to the telemetry counters
 		// so the public dashboard can track adoption without collecting

@@ -100,6 +100,35 @@ type FileReader interface {
 	ReadRepoFile(repoID, filePath string) (string, error)
 }
 
+// Searcher is the hybrid retrieval backbone the deep pipeline
+// consumes instead of the local FileRetriever. This is the
+// integration point the hybrid-search plan's Phase 6 carved out
+// for deep-QA: call search.Service.Search(mode: "deep") and receive
+// ranked results drawn from FTS + vector + graph + requirement
+// boosters, instead of a grep-style fallback.
+//
+// Returns nil Results on error — the deep pipeline degrades to
+// summary-only evidence when the search service is unavailable,
+// rather than 500ing.
+type Searcher interface {
+	SearchForQA(ctx context.Context, repoID, query string, limit int) ([]SearchHit, error)
+}
+
+// SearchHit is the minimum shape the deep pipeline needs from a
+// search result. Narrower than search.Result so internal/qa doesn't
+// leak internal/search types into its public interface.
+type SearchHit struct {
+	EntityType string   // "symbol" | "requirement" | "file"
+	EntityID   string   // stable ID for the hit
+	Title      string
+	Subtitle   string
+	FilePath   string
+	StartLine  int
+	EndLine    int
+	Score      float64
+	Signals    []string // which adapters fired (exact / lexical / semantic / graph / requirement)
+}
+
 // JobRunner integrates the synthesis call with the LLM job
 // orchestrator so QA jobs appear on the Monitor page alongside
 // knowledge / reasoning / linking / requirements jobs. Runtime carries
@@ -134,9 +163,19 @@ type Orchestrator struct {
 	requirements RequirementLookup
 	symbols      SymbolLookup
 	files        FileReader
+	searcher     Searcher
 	jobs         JobRunner
 	lanes        *worker.Lanes
 	config       Config
+}
+
+// WithSearcher installs the hybrid retrieval service (search.Service
+// adapted to qa.Searcher). Optional — when nil, the deep pipeline
+// falls back to the local FileRetriever grep path for file-level
+// evidence.
+func (o *Orchestrator) WithSearcher(s Searcher) *Orchestrator {
+	o.searcher = s
+	return o
 }
 
 // WithJobRunner installs the LLM-orchestrator adapter so QA jobs

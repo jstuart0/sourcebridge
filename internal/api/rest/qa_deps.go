@@ -15,6 +15,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
+	"github.com/sourcebridge/sourcebridge/internal/search"
 )
 
 // qaRepoLocator adapts the graph store's Repository records to
@@ -366,6 +367,55 @@ func hasPrefix(s, pfx string) bool {
 	return len(s) >= len(pfx) && s[:len(pfx)] == pfx
 }
 
+// qaSearcher adapts the hybrid retrieval service to qa.Searcher. The
+// bridge is narrow on purpose — internal/qa doesn't know about
+// search.Request/Response shapes.
+type qaSearcher struct {
+	svc *search.Service
+}
+
+func (q *qaSearcher) SearchForQA(ctx context.Context, repoID, query string, limit int) ([]qa.SearchHit, error) {
+	if q == nil || q.svc == nil {
+		return nil, nil
+	}
+	resp, err := q.svc.Search(ctx, &search.Request{
+		Repo:  repoID,
+		Query: query,
+		Limit: limit,
+		Mode:  "deep",
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, nil
+	}
+	out := make([]qa.SearchHit, 0, len(resp.Results))
+	for _, r := range resp.Results {
+		hit := qa.SearchHit{
+			EntityType: r.EntityType,
+			EntityID:   r.EntityID,
+			Title:      r.Title,
+			Subtitle:   r.Subtitle,
+			FilePath:   r.FilePath,
+			StartLine:  r.Line,
+			Score:      r.Score,
+			Signals:    r.Signals.Fired(),
+		}
+		// Symbol end-line lives on the stored symbol; pull it through
+		// when present so the deep pipeline gets the real function
+		// span, not just the start.
+		if r.Symbol != nil {
+			if hit.StartLine == 0 {
+				hit.StartLine = r.Symbol.StartLine
+			}
+			hit.EndLine = r.Symbol.EndLine
+		}
+		out = append(out, hit)
+	}
+	return out, nil
+}
+
 // qaJobRunner integrates QA synthesis with the LLM job orchestrator
 // so Monitor sees qa.* jobs alongside knowledge / reasoning. When the
 // orchestrator is nil (tests), callers run inline via the qa.JobRunner
@@ -407,6 +457,7 @@ var _ qa.RequirementLookup = (*qaRequirementLookup)(nil)
 var _ qa.SymbolLookup = (*qaSymbolLookup)(nil)
 var _ qa.FileReader = (*qaFileReader)(nil)
 var _ qa.JobRunner = (*qaJobRunner)(nil)
+var _ qa.Searcher = (*qaSearcher)(nil)
 
 // sentinel errors for the file reader. Kept internal — callers see
 // these via the qa.FileReader return and only need to know the file
