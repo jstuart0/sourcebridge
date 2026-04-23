@@ -1,0 +1,7 @@
+arm: candidate
+date: 2026-04-23T18:17:20.314893Z
+commit_sha: 5235a57
+server_url: https://sourcebridge.xmojo.net
+mode: deep
+questions_hash: ""
+notes: 'thor image sha-913752f, SURGICAL config: agentic+caching+smart_classifier(no file_candidates)+decomposition(arch-only)'
