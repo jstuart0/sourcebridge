@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httprate"
 
+	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 	"github.com/sourcebridge/sourcebridge/internal/api/graphql"
 	"github.com/sourcebridge/sourcebridge/internal/api/middleware"
 	"github.com/sourcebridge/sourcebridge/internal/auth"
@@ -307,14 +308,28 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		// unsupported, the orchestrator stays on single-shot
 		// regardless of AgenticRetrievalEnabled.
 		//
-		// We do NOT gate on worker.IsAvailable(): gRPC dials are lazy,
-		// so the connection reports Idle until the first call. The
-		// probe itself is the first call — it drives the dial and has
-		// its own 10s timeout inside worker.Client.GetProviderCapabilities.
+		// Probe with retry: the API and the worker come up in parallel
+		// under a rolling deploy. If the API pod wins the race, the
+		// first probe fails with "connection refused" and the pod
+		// stays single-shot for its entire lifetime while the sibling
+		// pod (probed seconds later) is wired. We retry for up to 30s
+		// so both pods converge to the same capability state. A
+		// single run against two pods with split agentic-enablement
+		// corrupts benchmarks and produces flaky prod traffic.
 		if s.worker != nil {
-			caps, err := s.worker.GetProviderCapabilities(context.Background())
+			var caps *reasoningv1.GetProviderCapabilitiesResponse
+			var err error
+			for attempt := 1; attempt <= 6; attempt++ {
+				caps, err = s.worker.GetProviderCapabilities(context.Background())
+				if err == nil {
+					break
+				}
+				slog.Warn("agent synth: capability probe attempt failed; retrying",
+					"attempt", attempt, "error", err)
+				time.Sleep(5 * time.Second)
+			}
 			if err != nil {
-				slog.Warn("agent synth: provider capability probe failed; agentic disabled",
+				slog.Warn("agent synth: provider capability probe failed after retries; agentic disabled",
 					"error", err)
 			} else if caps.GetToolUseSupported() {
 				agent := qa.NewWorkerAgentSynthesizer(s.worker, true)
