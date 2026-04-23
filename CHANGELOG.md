@@ -4,6 +4,49 @@ All notable changes to SourceBridge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0-rc.2] — 2026-04-23
+
+Second prerelease. Two material changes on top of rc.1: a reliability
+fix for rolling deploys and a quality win on ownership questions.
+Paired benchmark vs the Phase-3 agentic baseline now shows
+**+5.83% overall** (65.83% → 71.67% useful-rate) and a **+8%**
+gain on ownership, up from the **-8% regression** rc.1 shipped with.
+
+### Fixed
+
+- **Split-brain agentic deployment on rolling rollouts.** Under a
+  rolling deploy, the API pod could probe the worker's capability
+  endpoint before the worker Pod reached Ready, fail, and stay on
+  the single-shot path for its entire lifetime. The sibling pod,
+  probed seconds later, would wire agentic normally — so 50% of
+  traffic silently routed to single-shot until a manual restart.
+  The startup probe now retries up to 6× with 5s backoff (30s
+  window), so both pods converge on the same capability state
+  and benchmark samples land on the intended code path.
+- **Ownership-class fabrication from advisory file candidates.**
+  The smart classifier's `file_candidates` hint field was being
+  treated as a citation anchor by the synthesis turn on ownership
+  questions, which rewarded "plausible-sounding but unverified
+  path" citations and scored as fabrication. Fix: render
+  `file_candidates` only for classes that benefit from a seed
+  entry file (architecture, execution_flow, cross_cutting) — the
+  classes where the model would otherwise have to search from
+  scratch. Ownership and behavior questions now see only symbol
+  and topic hints, which work as search queries rather than
+  citation anchors.
+
+### Changed
+
+- **Quality: ownership 76% → 84% (+8%)**, cross_cutting 56% → 60%
+  (+4%), overall 65.83% → 71.67% (+5.83%) on the 120-question
+  benchmark (Opus-4.7 judge). Architecture stays at 84%.
+  Execution_flow 80% → 76% (-4%, one question, within noise).
+- Prompt-cache read ratio of 99.6% on the benchmark run; ~70%
+  input-token cost savings vs pre-cache.
+
+Full benchmark report at
+`benchmarks/qa/reports/2026-04-23_surgical_v2_vs_agentic/report.md`.
+
 ## [0.9.0-rc.1] — 2026-04-23
 
 Theme: **ask smarter, not harder.** A new agentic retrieval loop, a
