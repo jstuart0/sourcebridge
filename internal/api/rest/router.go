@@ -289,7 +289,12 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		// use (probed at startup). When the probe fails or returns
 		// unsupported, the orchestrator stays on single-shot
 		// regardless of AgenticRetrievalEnabled.
-		if s.worker != nil && s.worker.IsAvailable() {
+		//
+		// We do NOT gate on worker.IsAvailable(): gRPC dials are lazy,
+		// so the connection reports Idle until the first call. The
+		// probe itself is the first call — it drives the dial and has
+		// its own 10s timeout inside worker.Client.GetProviderCapabilities.
+		if s.worker != nil {
 			caps, err := s.worker.GetProviderCapabilities(context.Background())
 			if err != nil {
 				slog.Warn("agent synth: provider capability probe failed; agentic disabled",
