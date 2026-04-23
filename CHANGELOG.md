@@ -4,7 +4,7 @@ All notable changes to SourceBridge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0-rc.1] — 2026-04-23
 
 Theme: **ask smarter, not harder.** A new agentic retrieval loop, a
 server-side deep-QA orchestrator, and a hybrid search backbone plugged into
