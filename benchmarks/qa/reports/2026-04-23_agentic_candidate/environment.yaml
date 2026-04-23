@@ -1,0 +1,7 @@
+arm: candidate
+date: 2026-04-23T04:58:10.537541Z
+commit_sha: 4776aeb
+server_url: https://sourcebridge.xmojo.net
+mode: deep
+questions_hash: ""
+notes: thor image sha-4776aeb, agentic enabled (canary 0%, global on), Claude Sonnet 4.5
