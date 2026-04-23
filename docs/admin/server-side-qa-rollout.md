@@ -1,9 +1,67 @@
 # Server-Side QA Rollout Checklist
 
 Operator checklist for enabling the server-side deep-QA orchestrator
-(plan `2026-04-22-deep-qa-server-side-orchestrator.md`, Phase 5).
-Work the list top-to-bottom. The flag flip is the last step, not
-the first.
+(plan `2026-04-22-deep-qa-server-side-orchestrator.md`, Phase 5) and
+the follow-on agentic-retrieval loop (plan
+`2026-04-23-agentic-retrieval-for-deep-qa.md`, Phases 0–4).
+Work the list top-to-bottom. Each flag flip is the last step of its
+stage, not the first.
+
+## Agentic retrieval (new — plan 2026-04-23)
+
+Two flags work together:
+
+- `SOURCEBRIDGE_QA_AGENTIC_RETRIEVAL_ENABLED` — global on/off.
+  Default `false` through the Phase 3 paired benchmark.
+- `SOURCEBRIDGE_QA_AGENTIC_RETRIEVAL_CANARY_PCT` — staged-rollout
+  percentage (0..100). Set to 10 for Stage A, 50 for Stage B.
+  Ignored when `ENABLED=true`.
+
+**Capability gate**: the agentic loop only runs when the active
+provider/model supports structured tool use. The server probes
+`GetProviderCapabilities` at startup and logs the result. If the
+probe returns `tool_use_supported=false`, agentic stays off no
+matter what the flags say; deep-QA continues on the single-shot
+path.
+
+### Stage A — 10% canary (≥ 2 days observation)
+
+1. `SOURCEBRIDGE_QA_AGENTIC_RETRIEVAL_CANARY_PCT=10` + restart.
+2. Watch `qa_agent_tool_error_rate`, `qa_agent_deadline_exceeded_total`,
+   `turn1TextOnly`, p95 latency, token spend per question on the
+   canary path (agentic slice of traffic).
+3. Shadow-run single-shot asynchronously on a 20% sample of canary
+   traffic; compare quality on a daily 20-question sample.
+4. Rollback trigger: any canary-path metric > 2× its benchmark-report
+   value.
+
+### Stage B — 50% canary (≥ 3 days observation)
+
+1. Raise `SOURCEBRIDGE_QA_AGENTIC_RETRIEVAL_CANARY_PCT=50`.
+2. Shadow-run sample rate drops to 5% to cap worker load.
+3. Rollback trigger: p95 latency > 2× or cost-per-question > 5×
+   single-shot on the canary path.
+
+### Stage C — 100% default-on
+
+1. `SOURCEBRIDGE_QA_AGENTIC_RETRIEVAL_ENABLED=true`, `CANARY_PCT=0`.
+2. Confirm the Monitor page shows `qa.agent.loop` stage timings
+   alongside single-shot `qa.llm_call` rows.
+
+**Rollback (all stages)**: unset both flags or set
+`AGENTIC_RETRIEVAL_ENABLED=false` and `CANARY_PCT=0`. Deep-QA falls
+back to the v2 single-shot path with no code-path ambiguity.
+
+### Per-request override
+
+An `X-SourceBridge-QA-Force` header with value `agentic` or
+`single-shot` overrides the canary coin flip for one request. Use
+from support tools to reproduce reported issues on a specific
+path.
+
+---
+
+## Server-side QA (plan 2026-04-22) — existing checklist below
 
 ## Q5.6 — Why the flag stays off by default
 

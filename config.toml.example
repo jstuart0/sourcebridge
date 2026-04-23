@@ -122,3 +122,18 @@ mode = "oss"
 # SOURCEBRIDGE_QA_SYNTHESIS_LANE (default: 4)
 #   Concurrent synthesis calls against the reasoning worker. Keeps
 #   QA and embedding-search from starving each other under load.
+
+# ─── Agentic retrieval (plan 2026-04-23-agentic-retrieval) ────────
+# Tool-using deep-QA loop. Only active when the provider/model
+# supports structured tool use (Anthropic Claude 3.5+/Sonnet/Opus).
+
+# SOURCEBRIDGE_QA_AGENTIC_RETRIEVAL_ENABLED (default: false)
+#   Turns the tool-using loop on for deep mode. Default off until
+#   the Phase 3 paired benchmark demonstrates the quality gain
+#   required by the plan's Decision Rule.
+
+# SOURCEBRIDGE_QA_AGENTIC_RETRIEVAL_CANARY_PCT (default: 0)
+#   Staged-rollout percentage. 0 = off. Set to 10 for Stage A,
+#   50 for Stage B. Per-request coin flip keyed on (repo_id,
+#   5-min window) so retries of the same request stay on the same
+#   path. Ignored when ENABLED=true (agentic is always on).
