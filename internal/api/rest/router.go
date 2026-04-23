@@ -254,6 +254,20 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		s.workerLanes.Register(worker.NewLane(worker.LaneQASynthesize, cfg.QA.SynthesisLane))
 	}
 
+	// Hybrid retrieval service. One instance per process, shared by
+	// every transport adapter (MCP, GraphQL, REST, CLI) and by the
+	// agentic search_evidence tool. Must be constructed BEFORE the QA
+	// orchestrator so WithSearcher wires correctly; the worker
+	// embedder is attached below once the worker client is in scope.
+	s.searchSvc = search.NewService(s.store)
+	s.searchMetrics = search.NewMetrics(0)
+	s.searchSvc.Metrics = s.searchMetrics
+	if s.worker != nil {
+		emb := search.NewWorkerEmbedder(s.worker, "")
+		cached := search.NewCachedEmbedder(emb, 2048, 5*time.Minute, 5, 30*time.Second)
+		s.searchSvc.WithEmbedder(cached)
+	}
+
 	// Server-side QA orchestrator. Default off until Phase 5 flips
 	// QAConfig.ServerSideEnabled. The handler also double-checks the
 	// flag so operators can disable cleanly without a restart.
@@ -325,18 +339,8 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 
 	slog.Info("backend feature flags", "enabled", s.flags.EnabledNames())
 
-	// Build the hybrid retrieval service. One instance per process,
-	// shared by every transport adapter (MCP, GraphQL, REST, CLI).
-	// Embedder is wired when a worker client is available; absent it,
-	// the vector arm reports unavailable and the fuser degrades.
-	s.searchSvc = search.NewService(s.store)
-	s.searchMetrics = search.NewMetrics(0)
-	s.searchSvc.Metrics = s.searchMetrics
-	if s.worker != nil {
-		emb := search.NewWorkerEmbedder(s.worker, "")
-		cached := search.NewCachedEmbedder(emb, 2048, 5*time.Minute, 5, 30*time.Second)
-		s.searchSvc.WithEmbedder(cached)
-	}
+	// Requirement booster is attached late — it depends on the store
+	// being constructed above and doesn't change the QA wiring path.
 	s.reqBooster = &search.RequirementBooster{Store: s.store}
 	s.searchSvc.WithRequirementBooster(s.reqBooster)
 
