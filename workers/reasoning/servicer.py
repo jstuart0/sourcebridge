@@ -21,6 +21,7 @@ from workers.common.llm.tools import (
     provider_supports_tool_use,
     run_agent_turn_anthropic,
 )
+from workers.reasoning.classifier import classify_question
 from workers.reasoning.discussion import discuss_code, discuss_code_stream
 from workers.reasoning.reviewer import review_code
 from workers.reasoning.summarizer import summarize_function
@@ -532,6 +533,55 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
             termination_hint=turn_resp.termination_hint,
             cache_creation_input_tokens=turn_resp.cache_creation_input_tokens,
             cache_read_input_tokens=turn_resp.cache_read_input_tokens,
+        )
+
+    async def ClassifyQuestion(  # noqa: N802
+        self,
+        request: reasoning_pb2.ClassifyQuestionRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> reasoning_pb2.ClassifyQuestionResponse:
+        """LLM-backed question classifier. Quality-push Phase 2."""
+        provider, _model_override = self._resolve_provider(context)
+        provider_name = getattr(provider, "__class__", type(provider)).__name__.lower()
+        provider_key = "anthropic" if "anthropic" in provider_name else ""
+
+        # Only Anthropic has Haiku today; other providers can still
+        # produce well-formed JSON but accuracy isn't validated here.
+        # Signal unsupported so the Go side falls back to keyword.
+        if provider_key != "anthropic":
+            return reasoning_pb2.ClassifyQuestionResponse(
+                capability_supported=False,
+            )
+
+        try:
+            result = await classify_question(
+                provider,
+                question=request.question,
+                file_path=request.file_path,
+                pinned_code=request.pinned_code,
+            )
+        except Exception as exc:
+            log.error("classify_question_failed", error=str(exc))
+            return reasoning_pb2.ClassifyQuestionResponse(
+                capability_supported=False,
+            )
+
+        return reasoning_pb2.ClassifyQuestionResponse(
+            capability_supported=True,
+            question_class=result.question_class,
+            needs_call_graph=result.needs_call_graph,
+            needs_requirements=result.needs_requirements,
+            needs_tests=result.needs_tests,
+            needs_summaries=result.needs_summaries,
+            symbol_candidates=list(result.symbol_candidates),
+            file_candidates=list(result.file_candidates),
+            topic_terms=list(result.topic_terms),
+            usage=types_pb2.LLMUsage(
+                model=result.model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                operation="classify_question",
+            ),
         )
 
     async def GetProviderCapabilities(  # noqa: N802

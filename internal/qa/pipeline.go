@@ -172,6 +172,10 @@ type Orchestrator struct {
 	agent        AgentSynthesizer
 	agentEnabled bool
 	agentCanary  int // 0..100 — per-request coin flip for canary stages
+	// Optional LLM-backed question profiler (quality-push Phase 2).
+	// Nil means keyword-only. When non-nil AND SmartClassifierEnabled
+	// is true, runAgentic calls Profile before building seed context.
+	profiler QuestionProfiler
 }
 
 // WithAgentSynthesizer installs the tool-use synthesizer. When nil,
@@ -199,6 +203,13 @@ func (o *Orchestrator) WithAgenticCanaryPct(pct int) *Orchestrator {
 		pct = 100
 	}
 	o.agentCanary = pct
+	return o
+}
+
+// WithQuestionProfiler installs the LLM-backed profiler. When nil,
+// the orchestrator uses the keyword profile. Quality-push Phase 2.
+func (o *Orchestrator) WithQuestionProfiler(p QuestionProfiler) *Orchestrator {
+	o.profiler = p
 	return o
 }
 
@@ -259,20 +270,22 @@ func (o *Orchestrator) WithFileReader(f FileReader) *Orchestrator {
 // package boundaries stay clean (internal/qa does not import
 // internal/config).
 type Config struct {
-	QuestionMaxBytes     int
-	AskModel             string
-	MaxAnswerTokens      int
-	PromptCachingEnabled bool
+	QuestionMaxBytes       int
+	AskModel               string
+	MaxAnswerTokens        int
+	PromptCachingEnabled   bool
+	SmartClassifierEnabled bool
 }
 
 // DefaultConfig returns a Config with reasonable defaults for unit
 // tests. Production callers pass the resolved QAConfig.
 func DefaultConfig() Config {
 	return Config{
-		QuestionMaxBytes:     4096,
-		AskModel:             "",
-		MaxAnswerTokens:      1024,
-		PromptCachingEnabled: true,
+		QuestionMaxBytes:       4096,
+		AskModel:               "",
+		MaxAnswerTokens:        1024,
+		PromptCachingEnabled:   true,
+		SmartClassifierEnabled: false,
 	}
 }
 

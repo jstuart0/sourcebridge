@@ -68,6 +68,22 @@ func (o *Orchestrator) runAgentic(
 	result *AskResult,
 	started time.Time,
 ) (*AskResult, error) {
+	// Quality-push Phase 2: produce a smart profile when enabled.
+	// Runs in parallel with understanding readiness so we don't add
+	// latency on the critical path.
+	profile := QuestionProfile{Kind: kind, EvidenceHints: defaultHintsForKind(kind)}
+	if o.profiler != nil && o.config.SmartClassifierEnabled {
+		pt := time.Now()
+		if p, err := o.profiler.Profile(ctx, in); err == nil {
+			profile = p
+			// Smart profile supersedes the keyword-derived kind so
+			// downstream seed + budget logic uses the LLM's class.
+			kind = p.Kind
+		}
+		result.Diagnostics.StageTimings["qa.profile"] = FromDuration(time.Since(pt))
+		result.Diagnostics.SmartClassifierUsed = true
+	}
+
 	// Seed context: summaries + classifier hints.
 	var summaries []SummaryEvidence
 	if o.reader != nil {
@@ -95,7 +111,7 @@ func (o *Orchestrator) runAgentic(
 		}
 	}
 
-	seed := buildAgentSeedMessages(in, kind, summaries)
+	seed := buildAgentSeedMessages(in, kind, summaries, profile.EvidenceHints)
 	dispatcher := NewAgentToolDispatcher(o, in.RepositoryID)
 
 	t3 := time.Now()
@@ -165,14 +181,19 @@ func (o *Orchestrator) runAgentic(
 // buildAgentSeedMessages constructs the system + seed context as the
 // first two messages in the conversation. The user's question is
 // appended by RunAgentLoop itself.
-func buildAgentSeedMessages(in AskInput, kind QuestionKind, summaries []SummaryEvidence) []AgentMessage {
+//
+// `hints` (quality-push Phase 2) carries LLM-extracted candidates
+// that get rendered into the seed context block so the first agent
+// turn sees them immediately instead of burning search calls.
+func buildAgentSeedMessages(in AskInput, kind QuestionKind, summaries []SummaryEvidence, hints EvidenceKindHints) []AgentMessage {
 	system := agentSystemPrompt(kind)
 	seed := []AgentMessage{{Role: AgentRoleSystem, Text: system}}
 
-	if len(summaries) > 0 || len(in.PriorMessages) > 0 || in.Code != "" || in.FilePath != "" {
+	hasHints := len(hints.SymbolCandidates) > 0 || len(hints.FileCandidates) > 0 || len(hints.TopicTerms) > 0
+	if len(summaries) > 0 || len(in.PriorMessages) > 0 || in.Code != "" || in.FilePath != "" || hasHints {
 		seed = append(seed, AgentMessage{
 			Role: AgentRoleAssistant,
-			Text: buildSeedContextBlock(in, summaries),
+			Text: buildSeedContextBlock(in, summaries, hints),
 		})
 	}
 	return seed
@@ -210,7 +231,12 @@ func agentSystemPrompt(kind QuestionKind) string {
 // as a visible, cite-able assistant-role message. Surfaces
 // `unit_id` explicitly so the LLM can call `get_summary` later
 // (plan §Seed Context Format / §H7).
-func buildSeedContextBlock(in AskInput, summaries []SummaryEvidence) string {
+//
+// `hints` (quality-push Phase 2) pre-populates candidate symbols,
+// files, and topic terms when the smart classifier produced them.
+// The first agent turn sees these directly and can call read_file
+// or search_evidence on targeted candidates instead of exploring.
+func buildSeedContextBlock(in AskInput, summaries []SummaryEvidence, hints EvidenceKindHints) string {
 	var sb strings.Builder
 	sb.WriteString("Here is what I already retrieved before you started:\n\n")
 	if len(summaries) > 0 {
@@ -246,6 +272,20 @@ func buildSeedContextBlock(in AskInput, summaries []SummaryEvidence) string {
 				lang = ""
 			}
 			fmt.Fprintf(&sb, "```%s\n%s\n```\n", lang, in.Code)
+		}
+		sb.WriteString("\n")
+	}
+	if len(hints.SymbolCandidates) > 0 || len(hints.FileCandidates) > 0 || len(hints.TopicTerms) > 0 {
+		sb.WriteString("# Advisory hints from the classifier\n\n")
+		sb.WriteString("These are best-guess starting points, not authoritative answers — verify with tools before citing.\n\n")
+		if len(hints.SymbolCandidates) > 0 {
+			fmt.Fprintf(&sb, "symbol_candidates: %s\n", strings.Join(hints.SymbolCandidates, ", "))
+		}
+		if len(hints.FileCandidates) > 0 {
+			fmt.Fprintf(&sb, "file_candidates: %s\n", strings.Join(hints.FileCandidates, ", "))
+		}
+		if len(hints.TopicTerms) > 0 {
+			fmt.Fprintf(&sb, "topic_terms: %s\n", strings.Join(hints.TopicTerms, ", "))
 		}
 		sb.WriteString("\n")
 	}

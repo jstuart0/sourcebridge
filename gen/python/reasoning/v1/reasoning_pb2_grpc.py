@@ -80,6 +80,11 @@ class ReasoningServiceStub(object):
                 request_serializer=reasoning_dot_v1_dot_reasoning__pb2.GetProviderCapabilitiesRequest.SerializeToString,
                 response_deserializer=reasoning_dot_v1_dot_reasoning__pb2.GetProviderCapabilitiesResponse.FromString,
                 _registered_method=True)
+        self.ClassifyQuestion = channel.unary_unary(
+                '/sourcebridge.reasoning.v1.ReasoningService/ClassifyQuestion',
+                request_serializer=reasoning_dot_v1_dot_reasoning__pb2.ClassifyQuestionRequest.SerializeToString,
+                response_deserializer=reasoning_dot_v1_dot_reasoning__pb2.ClassifyQuestionResponse.FromString,
+                _registered_method=True)
 
 
 class ReasoningServiceServicer(object):
@@ -166,6 +171,21 @@ class ReasoningServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ClassifyQuestion(self, request, context):
+        """ClassifyQuestion runs a cheap LLM classifier (Haiku) that
+        returns the question's likely class plus evidence-kind hints
+        (needs_call_graph, needs_tests, ...) and advisory symbol /
+        file / topic candidates the agentic loop can pre-populate in
+        its seed context. Quality-push Phase 2.
+
+        Fail-open: if this RPC errors, the orchestrator falls back to
+        the keyword classifier. Callers should time this call out
+        aggressively (≤ 2s).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ReasoningServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -213,6 +233,11 @@ def add_ReasoningServiceServicer_to_server(servicer, server):
                     servicer.GetProviderCapabilities,
                     request_deserializer=reasoning_dot_v1_dot_reasoning__pb2.GetProviderCapabilitiesRequest.FromString,
                     response_serializer=reasoning_dot_v1_dot_reasoning__pb2.GetProviderCapabilitiesResponse.SerializeToString,
+            ),
+            'ClassifyQuestion': grpc.unary_unary_rpc_method_handler(
+                    servicer.ClassifyQuestion,
+                    request_deserializer=reasoning_dot_v1_dot_reasoning__pb2.ClassifyQuestionRequest.FromString,
+                    response_serializer=reasoning_dot_v1_dot_reasoning__pb2.ClassifyQuestionResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -459,6 +484,33 @@ class ReasoningService(object):
             '/sourcebridge.reasoning.v1.ReasoningService/GetProviderCapabilities',
             reasoning_dot_v1_dot_reasoning__pb2.GetProviderCapabilitiesRequest.SerializeToString,
             reasoning_dot_v1_dot_reasoning__pb2.GetProviderCapabilitiesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ClassifyQuestion(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/sourcebridge.reasoning.v1.ReasoningService/ClassifyQuestion',
+            reasoning_dot_v1_dot_reasoning__pb2.ClassifyQuestionRequest.SerializeToString,
+            reasoning_dot_v1_dot_reasoning__pb2.ClassifyQuestionResponse.FromString,
             options,
             channel_credentials,
             insecure,

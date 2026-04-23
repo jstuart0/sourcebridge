@@ -274,9 +274,10 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 	if cfg != nil {
 		askModel := cfg.LLM.AskModel
 		qaOrchCfg := qa.Config{
-			QuestionMaxBytes:     cfg.QA.QuestionMaxBytes,
-			AskModel:             askModel,
-			PromptCachingEnabled: cfg.QA.PromptCachingEnabled,
+			QuestionMaxBytes:       cfg.QA.QuestionMaxBytes,
+			AskModel:               askModel,
+			PromptCachingEnabled:   cfg.QA.PromptCachingEnabled,
+			SmartClassifierEnabled: cfg.QA.SmartClassifierEnabled,
 		}
 		var reader qa.UnderstandingReader
 		if s.knowledgeStore != nil && s.summaryNodeStore != nil {
@@ -319,11 +320,18 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 				o = o.WithAgentSynthesizer(agent).
 					WithAgenticEnabled(cfg.QA.AgenticRetrievalEnabled).
 					WithAgenticCanaryPct(cfg.QA.AgenticRetrievalCanaryPct)
+				// Smart classifier is wired alongside agentic since
+				// both rely on the Anthropic provider surface. It
+				// still honors its own SmartClassifierEnabled flag
+				// at runtime, so wiring here is harmless when off.
+				o = o.WithQuestionProfiler(qa.NewWorkerQuestionProfiler(s.worker))
 				slog.Info("agent synth: wired",
 					"provider", caps.GetProvider(),
 					"model", caps.GetModel(),
 					"enabled", cfg.QA.AgenticRetrievalEnabled,
-					"canary_pct", cfg.QA.AgenticRetrievalCanaryPct)
+					"canary_pct", cfg.QA.AgenticRetrievalCanaryPct,
+					"smart_classifier", cfg.QA.SmartClassifierEnabled,
+					"prompt_caching", cfg.QA.PromptCachingEnabled)
 			} else {
 				slog.Info("agent synth: provider does not support tool use; agentic disabled",
 					"provider", caps.GetProvider(), "model", caps.GetModel())

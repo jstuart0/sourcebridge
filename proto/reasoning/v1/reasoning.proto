@@ -51,6 +51,17 @@ service ReasoningService {
   // and caches the result so the agentic path can be gated without
   // a per-request round-trip.
   rpc GetProviderCapabilities(GetProviderCapabilitiesRequest) returns (GetProviderCapabilitiesResponse);
+
+  // ClassifyQuestion runs a cheap LLM classifier (Haiku) that
+  // returns the question's likely class plus evidence-kind hints
+  // (needs_call_graph, needs_tests, ...) and advisory symbol /
+  // file / topic candidates the agentic loop can pre-populate in
+  // its seed context. Quality-push Phase 2.
+  //
+  // Fail-open: if this RPC errors, the orchestrator falls back to
+  // the keyword classifier. Callers should time this call out
+  // aggressively (≤ 2s).
+  rpc ClassifyQuestion(ClassifyQuestionRequest) returns (ClassifyQuestionResponse);
 }
 
 message AnalyzeSymbolRequest {
@@ -259,6 +270,40 @@ message AnswerQuestionWithToolsResponse {
   // diagnostics so operators can verify the cache is active.
   int64 cache_creation_input_tokens = 5;
   int64 cache_read_input_tokens = 6;
+}
+
+message ClassifyQuestionRequest {
+  string repository_id = 1;
+  string question = 2;
+  // Optional caller-provided context the classifier can use: a
+  // file path or pinned code snippet narrows its hypothesis.
+  string file_path = 3;
+  string pinned_code = 4;
+}
+
+message ClassifyQuestionResponse {
+  // True when the worker has an LLM available for classification.
+  // False when the provider/model can't serve the call; callers
+  // fall back to the Go-side keyword classifier.
+  bool capability_supported = 1;
+  // Canonical question class, matching QuestionKind enum strings
+  // on the Go side: "architecture", "behavior", "execution_flow",
+  // "cross_cutting", "ownership", "requirement_coverage",
+  // "data_model", "risk_review".
+  string question_class = 2;
+  // Evidence-kind hints. The agentic loop pre-populates seed
+  // context with matching evidence (summaries, tests, graph
+  // neighbors, requirements) so the first turn sees it.
+  bool needs_call_graph = 3;
+  bool needs_requirements = 4;
+  bool needs_tests = 5;
+  bool needs_summaries = 6;
+  // Advisory candidates. Empty when the LLM can't extract any.
+  repeated string symbol_candidates = 7;
+  repeated string file_candidates = 8;
+  repeated string topic_terms = 9;
+  // Usage accounting for telemetry / cost tracking.
+  sourcebridge.common.v1.LLMUsage usage = 10;
 }
 
 message GetProviderCapabilitiesRequest {}

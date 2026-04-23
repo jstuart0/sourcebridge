@@ -275,6 +275,42 @@ class AnswerQuestionWithToolsResponse(_message.Message):
     cache_read_input_tokens: int
     def __init__(self, capability_supported: bool = ..., turn: _Optional[_Union[AgentMessage, _Mapping]] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ..., termination_hint: _Optional[str] = ..., cache_creation_input_tokens: _Optional[int] = ..., cache_read_input_tokens: _Optional[int] = ...) -> None: ...
 
+class ClassifyQuestionRequest(_message.Message):
+    __slots__ = ("repository_id", "question", "file_path", "pinned_code")
+    REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
+    QUESTION_FIELD_NUMBER: _ClassVar[int]
+    FILE_PATH_FIELD_NUMBER: _ClassVar[int]
+    PINNED_CODE_FIELD_NUMBER: _ClassVar[int]
+    repository_id: str
+    question: str
+    file_path: str
+    pinned_code: str
+    def __init__(self, repository_id: _Optional[str] = ..., question: _Optional[str] = ..., file_path: _Optional[str] = ..., pinned_code: _Optional[str] = ...) -> None: ...
+
+class ClassifyQuestionResponse(_message.Message):
+    __slots__ = ("capability_supported", "question_class", "needs_call_graph", "needs_requirements", "needs_tests", "needs_summaries", "symbol_candidates", "file_candidates", "topic_terms", "usage")
+    CAPABILITY_SUPPORTED_FIELD_NUMBER: _ClassVar[int]
+    QUESTION_CLASS_FIELD_NUMBER: _ClassVar[int]
+    NEEDS_CALL_GRAPH_FIELD_NUMBER: _ClassVar[int]
+    NEEDS_REQUIREMENTS_FIELD_NUMBER: _ClassVar[int]
+    NEEDS_TESTS_FIELD_NUMBER: _ClassVar[int]
+    NEEDS_SUMMARIES_FIELD_NUMBER: _ClassVar[int]
+    SYMBOL_CANDIDATES_FIELD_NUMBER: _ClassVar[int]
+    FILE_CANDIDATES_FIELD_NUMBER: _ClassVar[int]
+    TOPIC_TERMS_FIELD_NUMBER: _ClassVar[int]
+    USAGE_FIELD_NUMBER: _ClassVar[int]
+    capability_supported: bool
+    question_class: str
+    needs_call_graph: bool
+    needs_requirements: bool
+    needs_tests: bool
+    needs_summaries: bool
+    symbol_candidates: _containers.RepeatedScalarFieldContainer[str]
+    file_candidates: _containers.RepeatedScalarFieldContainer[str]
+    topic_terms: _containers.RepeatedScalarFieldContainer[str]
+    usage: _types_pb2.LLMUsage
+    def __init__(self, capability_supported: bool = ..., question_class: _Optional[str] = ..., needs_call_graph: bool = ..., needs_requirements: bool = ..., needs_tests: bool = ..., needs_summaries: bool = ..., symbol_candidates: _Optional[_Iterable[str]] = ..., file_candidates: _Optional[_Iterable[str]] = ..., topic_terms: _Optional[_Iterable[str]] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ...) -> None: ...
+
 class GetProviderCapabilitiesRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...

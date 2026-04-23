@@ -28,6 +28,7 @@ const (
 	ReasoningService_SimulateChange_FullMethodName          = "/sourcebridge.reasoning.v1.ReasoningService/SimulateChange"
 	ReasoningService_AnswerQuestionWithTools_FullMethodName = "/sourcebridge.reasoning.v1.ReasoningService/AnswerQuestionWithTools"
 	ReasoningService_GetProviderCapabilities_FullMethodName = "/sourcebridge.reasoning.v1.ReasoningService/GetProviderCapabilities"
+	ReasoningService_ClassifyQuestion_FullMethodName        = "/sourcebridge.reasoning.v1.ReasoningService/ClassifyQuestion"
 )
 
 // ReasoningServiceClient is the client API for ReasoningService service.
@@ -71,6 +72,16 @@ type ReasoningServiceClient interface {
 	// and caches the result so the agentic path can be gated without
 	// a per-request round-trip.
 	GetProviderCapabilities(ctx context.Context, in *GetProviderCapabilitiesRequest, opts ...grpc.CallOption) (*GetProviderCapabilitiesResponse, error)
+	// ClassifyQuestion runs a cheap LLM classifier (Haiku) that
+	// returns the question's likely class plus evidence-kind hints
+	// (needs_call_graph, needs_tests, ...) and advisory symbol /
+	// file / topic candidates the agentic loop can pre-populate in
+	// its seed context. Quality-push Phase 2.
+	//
+	// Fail-open: if this RPC errors, the orchestrator falls back to
+	// the keyword classifier. Callers should time this call out
+	// aggressively (≤ 2s).
+	ClassifyQuestion(ctx context.Context, in *ClassifyQuestionRequest, opts ...grpc.CallOption) (*ClassifyQuestionResponse, error)
 }
 
 type reasoningServiceClient struct {
@@ -180,6 +191,16 @@ func (c *reasoningServiceClient) GetProviderCapabilities(ctx context.Context, in
 	return out, nil
 }
 
+func (c *reasoningServiceClient) ClassifyQuestion(ctx context.Context, in *ClassifyQuestionRequest, opts ...grpc.CallOption) (*ClassifyQuestionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClassifyQuestionResponse)
+	err := c.cc.Invoke(ctx, ReasoningService_ClassifyQuestion_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ReasoningServiceServer is the server API for ReasoningService service.
 // All implementations must embed UnimplementedReasoningServiceServer
 // for forward compatibility.
@@ -221,6 +242,16 @@ type ReasoningServiceServer interface {
 	// and caches the result so the agentic path can be gated without
 	// a per-request round-trip.
 	GetProviderCapabilities(context.Context, *GetProviderCapabilitiesRequest) (*GetProviderCapabilitiesResponse, error)
+	// ClassifyQuestion runs a cheap LLM classifier (Haiku) that
+	// returns the question's likely class plus evidence-kind hints
+	// (needs_call_graph, needs_tests, ...) and advisory symbol /
+	// file / topic candidates the agentic loop can pre-populate in
+	// its seed context. Quality-push Phase 2.
+	//
+	// Fail-open: if this RPC errors, the orchestrator falls back to
+	// the keyword classifier. Callers should time this call out
+	// aggressively (≤ 2s).
+	ClassifyQuestion(context.Context, *ClassifyQuestionRequest) (*ClassifyQuestionResponse, error)
 	mustEmbedUnimplementedReasoningServiceServer()
 }
 
@@ -257,6 +288,9 @@ func (UnimplementedReasoningServiceServer) AnswerQuestionWithTools(context.Conte
 }
 func (UnimplementedReasoningServiceServer) GetProviderCapabilities(context.Context, *GetProviderCapabilitiesRequest) (*GetProviderCapabilitiesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetProviderCapabilities not implemented")
+}
+func (UnimplementedReasoningServiceServer) ClassifyQuestion(context.Context, *ClassifyQuestionRequest) (*ClassifyQuestionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ClassifyQuestion not implemented")
 }
 func (UnimplementedReasoningServiceServer) mustEmbedUnimplementedReasoningServiceServer() {}
 func (UnimplementedReasoningServiceServer) testEmbeddedByValue()                          {}
@@ -434,6 +468,24 @@ func _ReasoningService_GetProviderCapabilities_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ReasoningService_ClassifyQuestion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClassifyQuestionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ReasoningServiceServer).ClassifyQuestion(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ReasoningService_ClassifyQuestion_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ReasoningServiceServer).ClassifyQuestion(ctx, req.(*ClassifyQuestionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ReasoningService_ServiceDesc is the grpc.ServiceDesc for ReasoningService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -472,6 +524,10 @@ var ReasoningService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetProviderCapabilities",
 			Handler:    _ReasoningService_GetProviderCapabilities_Handler,
+		},
+		{
+			MethodName: "ClassifyQuestion",
+			Handler:    _ReasoningService_ClassifyQuestion_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

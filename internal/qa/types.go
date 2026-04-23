@@ -167,6 +167,9 @@ type AskDiagnostics struct {
 	// caching is disabled or the provider doesn't support it.
 	CacheCreationInputTokens int `json:"cacheCreationInputTokens,omitempty"`
 	CacheReadInputTokens     int `json:"cacheReadInputTokens,omitempty"`
+	// Smart classifier used (quality-push Phase 2). True when the
+	// LLM-backed profiler ran and returned a usable result.
+	SmartClassifierUsed bool `json:"smartClassifierUsed,omitempty"`
 }
 
 // DurationMs is a duration expressed as integer milliseconds on the wire.

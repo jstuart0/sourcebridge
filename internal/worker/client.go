@@ -229,6 +229,15 @@ func (c *Client) GetProviderCapabilities(ctx context.Context) (*reasoningv1.GetP
 	return c.Reasoning.GetProviderCapabilities(ctx, &reasoningv1.GetProviderCapabilitiesRequest{})
 }
 
+// ClassifyQuestion runs the LLM-backed question classifier. Quick
+// timeout (2s) because callers fall back to the keyword classifier
+// when this fails.
+func (c *Client) ClassifyQuestion(ctx context.Context, req *reasoningv1.ClassifyQuestionRequest) (*reasoningv1.ClassifyQuestionResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return c.Reasoning.ClassifyQuestion(ctx, req)
+}
+
 // AnswerQuestionStream opens a server-streaming discussion RPC. Callers
 // receive AnswerDelta frames as the model generates output, then a
 // terminal frame with `finished=true` carrying the final usage and

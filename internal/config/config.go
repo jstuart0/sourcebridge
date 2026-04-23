@@ -242,6 +242,13 @@ type QAConfig struct {
 	// that don't support it. Set false to roll back if cache behavior
 	// breaks in a future SDK/model combination.
 	PromptCachingEnabled bool `mapstructure:"prompt_caching_enabled"`
+	// SmartClassifierEnabled turns on the LLM-backed question
+	// profiler (quality-push Phase 2). Runs a cheap Haiku call that
+	// returns evidence-kind hints and advisory symbol/file/topic
+	// candidates; the agentic loop pre-populates seed context with
+	// these so the first turn starts with the right hypothesis.
+	// Default off until the Phase-5 benchmark confirms quality win.
+	SmartClassifierEnabled bool `mapstructure:"smart_classifier_enabled"`
 }
 
 // TrashConfig controls the soft-delete recycle bin feature.
@@ -336,7 +343,8 @@ func Defaults() *Config {
 			SynthesisLane:             4,
 			AgenticRetrievalEnabled:   false, // default-off through Phase 3
 			AgenticRetrievalCanaryPct: 0,
-			PromptCachingEnabled:      true, // Anthropic-safe default
+			PromptCachingEnabled:      true,  // Anthropic-safe default
+			SmartClassifierEnabled:    false, // default-off through quality-push Phase 5
 		},
 	}
 }
@@ -409,6 +417,7 @@ func Load() (*Config, error) {
 	v.SetDefault("qa.agentic_retrieval_enabled", cfg.QA.AgenticRetrievalEnabled)
 	v.SetDefault("qa.agentic_retrieval_canary_pct", cfg.QA.AgenticRetrievalCanaryPct)
 	v.SetDefault("qa.prompt_caching_enabled", cfg.QA.PromptCachingEnabled)
+	v.SetDefault("qa.smart_classifier_enabled", cfg.QA.SmartClassifierEnabled)
 
 	// Try reading config file (not required)
 	if err := v.ReadInConfig(); err != nil {
