@@ -684,6 +684,10 @@ func (h *mcpHandler) dispatchCtx(ctx context.Context, session *mcpSession, msg j
 		return h.handleResourcesList(session, msg)
 	case "resources/read":
 		return h.handleResourcesRead(session, msg)
+	case "prompts/list":
+		return h.handlePromptsList(session, msg)
+	case "prompts/get":
+		return h.handlePromptsGet(session, msg)
 	default:
 		slog.Warn("mcp method not found", "session_id", session.id, "method", msg.Method)
 		return errorResponse(msg.ID, -32601, fmt.Sprintf("Method not found: %s", msg.Method))
@@ -732,6 +736,7 @@ func (h *mcpHandler) handleInitialize(session *mcpSession, msg jsonRPCRequest) j
 		"capabilities": map[string]interface{}{
 			"tools":     map[string]interface{}{},
 			"resources": map[string]interface{}{},
+			"prompts":   map[string]interface{}{},
 			// experimental.sourcebridge carries SourceBridge-specific
 			// capability declarations. Vanilla MCP clients ignore the
 			// extension namespace; capability-aware clients read it to
