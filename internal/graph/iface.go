@@ -58,6 +58,12 @@ type GraphStore interface {
 	GetCallEdges(repoID string) []CallEdge
 	GetImports(repoID string) []*StoredImport
 
+	// Test linkage — "given a non-test symbol ID, return the IDs of
+	// test symbols that exercise it." Populated from
+	// IndexResult.Relations with Type=RelationTests. See the
+	// in-memory Store.testedByGraph for the backing structure.
+	GetTestsForSymbolPersisted(symbolID string) []string
+
 	// Search
 	SearchContent(repoID, query string, limit int) []SearchResult
 

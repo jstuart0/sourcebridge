@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+
+	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 )
 
 // LLMConfigStore persists LLM configuration so it survives server restarts.
@@ -79,7 +81,7 @@ func (s *Server) handleGetLLMConfig(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.LLM.APIKey != "" {
 		resp.APIKeyHint = maskToken(s.cfg.LLM.APIKey)
 	}
-	if s.cfg.Edition == "enterprise" {
+	if capabilities.IsAvailable("per_op_models", capabilities.NormalizeEdition(s.cfg.Edition)) {
 		resp.ReportModel = s.cfg.LLM.ReportModel
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -124,7 +126,7 @@ func (s *Server) handleUpdateLLMConfig(w http.ResponseWriter, r *http.Request) {
 	if req.ArchitectureDiagramModel != nil {
 		s.cfg.LLM.ArchitectureDiagramModel = *req.ArchitectureDiagramModel
 	}
-	if req.ReportModel != nil && s.cfg.Edition == "enterprise" {
+	if req.ReportModel != nil && capabilities.IsAvailable("per_op_models", capabilities.NormalizeEdition(s.cfg.Edition)) {
 		s.cfg.LLM.ReportModel = *req.ReportModel
 	}
 	if req.DraftModel != nil {

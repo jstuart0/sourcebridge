@@ -435,6 +435,12 @@ func (x *AnswerQuestionResponse) GetUsage() *v1.LLMUsage {
 // answer). The final frame sets `finished = true` and carries the resolved
 // `referenced_symbols` and `usage`; consumers must treat that frame as the
 // signal to stop rendering deltas.
+//
+// Non-content frames set `progress` to a structured event describing a
+// phase change inside the agentic loop (planning, tool_call,
+// synthesizing). These let the Go relay forward intermediate progress
+// to MCP's ContentEmitter so streaming clients can show "agent is
+// calling search_evidence..." without waiting for the full answer.
 type AnswerDelta struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	ContentDelta string                 `protobuf:"bytes,1,opt,name=content_delta,json=contentDelta,proto3" json:"content_delta,omitempty"`
@@ -442,8 +448,11 @@ type AnswerDelta struct {
 	// Populated only on the terminal frame.
 	ReferencedSymbols []*v1.CodeSymbol `protobuf:"bytes,3,rep,name=referenced_symbols,json=referencedSymbols,proto3" json:"referenced_symbols,omitempty"`
 	Usage             *v1.LLMUsage     `protobuf:"bytes,4,opt,name=usage,proto3" json:"usage,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Progress event — set on non-content phase transitions.
+	// content_delta is empty when progress is set.
+	Progress      *ProgressEvent `protobuf:"bytes,5,opt,name=progress,proto3" json:"progress,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AnswerDelta) Reset() {
@@ -504,6 +513,105 @@ func (x *AnswerDelta) GetUsage() *v1.LLMUsage {
 	return nil
 }
 
+func (x *AnswerDelta) GetProgress() *ProgressEvent {
+	if x != nil {
+		return x.Progress
+	}
+	return nil
+}
+
+// ProgressEvent describes one phase transition in the agentic
+// retrieval loop. `phase` is a stable string identifier; clients
+// compare literal values (not enums — easier to extend without a
+// proto bump). `detail` is optional human-readable context the
+// client can render verbatim.
+//
+// Stable phase values (2026-04-24):
+//
+//	"planning"         — classifier decided which strategy to run
+//	"tool_call"        — agent invoked a tool. `detail` = tool name
+//	                      + args summary (e.g. "search_evidence query=auth")
+//	"tool_result"      — tool returned. `detail` = result summary
+//	                      (e.g. "search_evidence: 12 results")
+//	"synthesizing"     — final answer generation started
+//	"error"            — recoverable per-phase error. `detail` =
+//	                      message. The stream does NOT end here —
+//	                      the agent may retry or fall back.
+//
+// New phase values are additive. Clients should ignore unknown
+// phases rather than failing.
+type ProgressEvent struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Phase  string                 `protobuf:"bytes,1,opt,name=phase,proto3" json:"phase,omitempty"`
+	Detail string                 `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
+	// Optional tool-specific fields. Populated for "tool_call" and
+	// "tool_result" phases; empty otherwise.
+	ToolName string `protobuf:"bytes,3,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
+	// Elapsed time since the request started, milliseconds. Useful
+	// for UIs that want to show "searching for 2.3s".
+	ElapsedMs     int64 `protobuf:"varint,4,opt,name=elapsed_ms,json=elapsedMs,proto3" json:"elapsed_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProgressEvent) Reset() {
+	*x = ProgressEvent{}
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProgressEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProgressEvent) ProtoMessage() {}
+
+func (x *ProgressEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProgressEvent.ProtoReflect.Descriptor instead.
+func (*ProgressEvent) Descriptor() ([]byte, []int) {
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ProgressEvent) GetPhase() string {
+	if x != nil {
+		return x.Phase
+	}
+	return ""
+}
+
+func (x *ProgressEvent) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+func (x *ProgressEvent) GetToolName() string {
+	if x != nil {
+		return x.ToolName
+	}
+	return ""
+}
+
+func (x *ProgressEvent) GetElapsedMs() int64 {
+	if x != nil {
+		return x.ElapsedMs
+	}
+	return 0
+}
+
 type ReviewFileRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RepositoryId  string                 `protobuf:"bytes,1,opt,name=repository_id,json=repositoryId,proto3" json:"repository_id,omitempty"`
@@ -517,7 +625,7 @@ type ReviewFileRequest struct {
 
 func (x *ReviewFileRequest) Reset() {
 	*x = ReviewFileRequest{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[7]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -529,7 +637,7 @@ func (x *ReviewFileRequest) String() string {
 func (*ReviewFileRequest) ProtoMessage() {}
 
 func (x *ReviewFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[7]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -542,7 +650,7 @@ func (x *ReviewFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviewFileRequest.ProtoReflect.Descriptor instead.
 func (*ReviewFileRequest) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{7}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ReviewFileRequest) GetRepositoryId() string {
@@ -592,7 +700,7 @@ type ReviewFileResponse struct {
 
 func (x *ReviewFileResponse) Reset() {
 	*x = ReviewFileResponse{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[8]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -604,7 +712,7 @@ func (x *ReviewFileResponse) String() string {
 func (*ReviewFileResponse) ProtoMessage() {}
 
 func (x *ReviewFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[8]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -617,7 +725,7 @@ func (x *ReviewFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviewFileResponse.ProtoReflect.Descriptor instead.
 func (*ReviewFileResponse) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{8}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ReviewFileResponse) GetTemplate() string {
@@ -663,7 +771,7 @@ type ReviewFinding struct {
 
 func (x *ReviewFinding) Reset() {
 	*x = ReviewFinding{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[9]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -675,7 +783,7 @@ func (x *ReviewFinding) String() string {
 func (*ReviewFinding) ProtoMessage() {}
 
 func (x *ReviewFinding) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[9]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -688,7 +796,7 @@ func (x *ReviewFinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviewFinding.ProtoReflect.Descriptor instead.
 func (*ReviewFinding) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{9}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ReviewFinding) GetCategory() string {
@@ -750,7 +858,7 @@ type GenerateEmbeddingRequest struct {
 
 func (x *GenerateEmbeddingRequest) Reset() {
 	*x = GenerateEmbeddingRequest{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[10]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -762,7 +870,7 @@ func (x *GenerateEmbeddingRequest) String() string {
 func (*GenerateEmbeddingRequest) ProtoMessage() {}
 
 func (x *GenerateEmbeddingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[10]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -775,7 +883,7 @@ func (x *GenerateEmbeddingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateEmbeddingRequest.ProtoReflect.Descriptor instead.
 func (*GenerateEmbeddingRequest) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{10}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GenerateEmbeddingRequest) GetText() string {
@@ -802,7 +910,7 @@ type GenerateEmbeddingResponse struct {
 
 func (x *GenerateEmbeddingResponse) Reset() {
 	*x = GenerateEmbeddingResponse{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[11]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -814,7 +922,7 @@ func (x *GenerateEmbeddingResponse) String() string {
 func (*GenerateEmbeddingResponse) ProtoMessage() {}
 
 func (x *GenerateEmbeddingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[11]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -827,7 +935,7 @@ func (x *GenerateEmbeddingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateEmbeddingResponse.ProtoReflect.Descriptor instead.
 func (*GenerateEmbeddingResponse) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{11}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GenerateEmbeddingResponse) GetEmbedding() *v1.Embedding {
@@ -859,7 +967,7 @@ type SimulateChangeRequest struct {
 
 func (x *SimulateChangeRequest) Reset() {
 	*x = SimulateChangeRequest{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[12]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -871,7 +979,7 @@ func (x *SimulateChangeRequest) String() string {
 func (*SimulateChangeRequest) ProtoMessage() {}
 
 func (x *SimulateChangeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[12]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -884,7 +992,7 @@ func (x *SimulateChangeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SimulateChangeRequest.ProtoReflect.Descriptor instead.
 func (*SimulateChangeRequest) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{12}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SimulateChangeRequest) GetRepositoryId() string {
@@ -951,7 +1059,7 @@ type SimulatedSymbolMatch struct {
 
 func (x *SimulatedSymbolMatch) Reset() {
 	*x = SimulatedSymbolMatch{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[13]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -963,7 +1071,7 @@ func (x *SimulatedSymbolMatch) String() string {
 func (*SimulatedSymbolMatch) ProtoMessage() {}
 
 func (x *SimulatedSymbolMatch) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[13]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -976,7 +1084,7 @@ func (x *SimulatedSymbolMatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SimulatedSymbolMatch.ProtoReflect.Descriptor instead.
 func (*SimulatedSymbolMatch) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{13}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SimulatedSymbolMatch) GetSymbolId() string {
@@ -1040,7 +1148,7 @@ type SimulateChangeResponse struct {
 
 func (x *SimulateChangeResponse) Reset() {
 	*x = SimulateChangeResponse{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[14]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1052,7 +1160,7 @@ func (x *SimulateChangeResponse) String() string {
 func (*SimulateChangeResponse) ProtoMessage() {}
 
 func (x *SimulateChangeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[14]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1065,7 +1173,7 @@ func (x *SimulateChangeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SimulateChangeResponse.ProtoReflect.Descriptor instead.
 func (*SimulateChangeResponse) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{14}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SimulateChangeResponse) GetResolvedSymbols() []*SimulatedSymbolMatch {
@@ -1110,7 +1218,7 @@ type ToolSchema struct {
 
 func (x *ToolSchema) Reset() {
 	*x = ToolSchema{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[15]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1122,7 +1230,7 @@ func (x *ToolSchema) String() string {
 func (*ToolSchema) ProtoMessage() {}
 
 func (x *ToolSchema) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[15]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1135,7 +1243,7 @@ func (x *ToolSchema) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolSchema.ProtoReflect.Descriptor instead.
 func (*ToolSchema) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{15}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ToolSchema) GetName() string {
@@ -1182,7 +1290,7 @@ type AgentMessage struct {
 
 func (x *AgentMessage) Reset() {
 	*x = AgentMessage{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[16]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1194,7 +1302,7 @@ func (x *AgentMessage) String() string {
 func (*AgentMessage) ProtoMessage() {}
 
 func (x *AgentMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[16]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1207,7 +1315,7 @@ func (x *AgentMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMessage.ProtoReflect.Descriptor instead.
 func (*AgentMessage) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{16}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *AgentMessage) GetRole() string {
@@ -1252,7 +1360,7 @@ type ToolCall struct {
 
 func (x *ToolCall) Reset() {
 	*x = ToolCall{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[17]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1264,7 +1372,7 @@ func (x *ToolCall) String() string {
 func (*ToolCall) ProtoMessage() {}
 
 func (x *ToolCall) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[17]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1277,7 +1385,7 @@ func (x *ToolCall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolCall.ProtoReflect.Descriptor instead.
 func (*ToolCall) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{17}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ToolCall) GetCallId() string {
@@ -1316,7 +1424,7 @@ type ToolResult struct {
 
 func (x *ToolResult) Reset() {
 	*x = ToolResult{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[18]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1328,7 +1436,7 @@ func (x *ToolResult) String() string {
 func (*ToolResult) ProtoMessage() {}
 
 func (x *ToolResult) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[18]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1341,7 +1449,7 @@ func (x *ToolResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolResult.ProtoReflect.Descriptor instead.
 func (*ToolResult) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{18}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ToolResult) GetCallId() string {
@@ -1402,7 +1510,7 @@ type AnswerQuestionWithToolsRequest struct {
 
 func (x *AnswerQuestionWithToolsRequest) Reset() {
 	*x = AnswerQuestionWithToolsRequest{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[19]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1414,7 +1522,7 @@ func (x *AnswerQuestionWithToolsRequest) String() string {
 func (*AnswerQuestionWithToolsRequest) ProtoMessage() {}
 
 func (x *AnswerQuestionWithToolsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[19]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1427,7 +1535,7 @@ func (x *AnswerQuestionWithToolsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerQuestionWithToolsRequest.ProtoReflect.Descriptor instead.
 func (*AnswerQuestionWithToolsRequest) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{19}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *AnswerQuestionWithToolsRequest) GetRepositoryId() string {
@@ -1493,7 +1601,7 @@ type AnswerQuestionWithToolsResponse struct {
 
 func (x *AnswerQuestionWithToolsResponse) Reset() {
 	*x = AnswerQuestionWithToolsResponse{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[20]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1505,7 +1613,7 @@ func (x *AnswerQuestionWithToolsResponse) String() string {
 func (*AnswerQuestionWithToolsResponse) ProtoMessage() {}
 
 func (x *AnswerQuestionWithToolsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[20]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1518,7 +1626,7 @@ func (x *AnswerQuestionWithToolsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerQuestionWithToolsResponse.ProtoReflect.Descriptor instead.
 func (*AnswerQuestionWithToolsResponse) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{20}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *AnswerQuestionWithToolsResponse) GetCapabilitySupported() bool {
@@ -1577,7 +1685,7 @@ type ClassifyQuestionRequest struct {
 
 func (x *ClassifyQuestionRequest) Reset() {
 	*x = ClassifyQuestionRequest{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[21]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1589,7 +1697,7 @@ func (x *ClassifyQuestionRequest) String() string {
 func (*ClassifyQuestionRequest) ProtoMessage() {}
 
 func (x *ClassifyQuestionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[21]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1602,7 +1710,7 @@ func (x *ClassifyQuestionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClassifyQuestionRequest.ProtoReflect.Descriptor instead.
 func (*ClassifyQuestionRequest) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{21}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ClassifyQuestionRequest) GetRepositoryId() string {
@@ -1663,7 +1771,7 @@ type ClassifyQuestionResponse struct {
 
 func (x *ClassifyQuestionResponse) Reset() {
 	*x = ClassifyQuestionResponse{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[22]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1675,7 +1783,7 @@ func (x *ClassifyQuestionResponse) String() string {
 func (*ClassifyQuestionResponse) ProtoMessage() {}
 
 func (x *ClassifyQuestionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[22]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1688,7 +1796,7 @@ func (x *ClassifyQuestionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClassifyQuestionResponse.ProtoReflect.Descriptor instead.
 func (*ClassifyQuestionResponse) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{22}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ClassifyQuestionResponse) GetCapabilitySupported() bool {
@@ -1777,7 +1885,7 @@ type DecomposeQuestionRequest struct {
 
 func (x *DecomposeQuestionRequest) Reset() {
 	*x = DecomposeQuestionRequest{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[23]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1789,7 +1897,7 @@ func (x *DecomposeQuestionRequest) String() string {
 func (*DecomposeQuestionRequest) ProtoMessage() {}
 
 func (x *DecomposeQuestionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[23]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1802,7 +1910,7 @@ func (x *DecomposeQuestionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DecomposeQuestionRequest.ProtoReflect.Descriptor instead.
 func (*DecomposeQuestionRequest) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{23}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *DecomposeQuestionRequest) GetRepositoryId() string {
@@ -1847,7 +1955,7 @@ type DecomposeQuestionResponse struct {
 
 func (x *DecomposeQuestionResponse) Reset() {
 	*x = DecomposeQuestionResponse{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[24]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1859,7 +1967,7 @@ func (x *DecomposeQuestionResponse) String() string {
 func (*DecomposeQuestionResponse) ProtoMessage() {}
 
 func (x *DecomposeQuestionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[24]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1872,7 +1980,7 @@ func (x *DecomposeQuestionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DecomposeQuestionResponse.ProtoReflect.Descriptor instead.
 func (*DecomposeQuestionResponse) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{24}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *DecomposeQuestionResponse) GetCapabilitySupported() bool {
@@ -1908,7 +2016,7 @@ type SynthesizeDecomposedAnswerRequest struct {
 
 func (x *SynthesizeDecomposedAnswerRequest) Reset() {
 	*x = SynthesizeDecomposedAnswerRequest{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[25]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1920,7 +2028,7 @@ func (x *SynthesizeDecomposedAnswerRequest) String() string {
 func (*SynthesizeDecomposedAnswerRequest) ProtoMessage() {}
 
 func (x *SynthesizeDecomposedAnswerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[25]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1933,7 +2041,7 @@ func (x *SynthesizeDecomposedAnswerRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use SynthesizeDecomposedAnswerRequest.ProtoReflect.Descriptor instead.
 func (*SynthesizeDecomposedAnswerRequest) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{25}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *SynthesizeDecomposedAnswerRequest) GetRepositoryId() string {
@@ -1985,7 +2093,7 @@ type DecomposedSubAnswer struct {
 
 func (x *DecomposedSubAnswer) Reset() {
 	*x = DecomposedSubAnswer{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[26]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1997,7 +2105,7 @@ func (x *DecomposedSubAnswer) String() string {
 func (*DecomposedSubAnswer) ProtoMessage() {}
 
 func (x *DecomposedSubAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[26]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2010,7 +2118,7 @@ func (x *DecomposedSubAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DecomposedSubAnswer.ProtoReflect.Descriptor instead.
 func (*DecomposedSubAnswer) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{26}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *DecomposedSubAnswer) GetSubQuestion() string {
@@ -2060,7 +2168,7 @@ type SynthesizeDecomposedAnswerResponse struct {
 
 func (x *SynthesizeDecomposedAnswerResponse) Reset() {
 	*x = SynthesizeDecomposedAnswerResponse{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[27]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2072,7 +2180,7 @@ func (x *SynthesizeDecomposedAnswerResponse) String() string {
 func (*SynthesizeDecomposedAnswerResponse) ProtoMessage() {}
 
 func (x *SynthesizeDecomposedAnswerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[27]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2085,7 +2193,7 @@ func (x *SynthesizeDecomposedAnswerResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use SynthesizeDecomposedAnswerResponse.ProtoReflect.Descriptor instead.
 func (*SynthesizeDecomposedAnswerResponse) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{27}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *SynthesizeDecomposedAnswerResponse) GetAnswer() string {
@@ -2124,7 +2232,7 @@ type GetProviderCapabilitiesRequest struct {
 
 func (x *GetProviderCapabilitiesRequest) Reset() {
 	*x = GetProviderCapabilitiesRequest{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[28]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2136,7 +2244,7 @@ func (x *GetProviderCapabilitiesRequest) String() string {
 func (*GetProviderCapabilitiesRequest) ProtoMessage() {}
 
 func (x *GetProviderCapabilitiesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[28]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2149,7 +2257,7 @@ func (x *GetProviderCapabilitiesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProviderCapabilitiesRequest.ProtoReflect.Descriptor instead.
 func (*GetProviderCapabilitiesRequest) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{28}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{29}
 }
 
 type GetProviderCapabilitiesResponse struct {
@@ -2169,7 +2277,7 @@ type GetProviderCapabilitiesResponse struct {
 
 func (x *GetProviderCapabilitiesResponse) Reset() {
 	*x = GetProviderCapabilitiesResponse{}
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[29]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2181,7 +2289,7 @@ func (x *GetProviderCapabilitiesResponse) String() string {
 func (*GetProviderCapabilitiesResponse) ProtoMessage() {}
 
 func (x *GetProviderCapabilitiesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_reasoning_v1_reasoning_proto_msgTypes[29]
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2194,7 +2302,7 @@ func (x *GetProviderCapabilitiesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProviderCapabilitiesResponse.ProtoReflect.Descriptor instead.
 func (*GetProviderCapabilitiesResponse) Descriptor() ([]byte, []int) {
-	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{29}
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *GetProviderCapabilitiesResponse) GetProvider() string {
@@ -2262,12 +2370,19 @@ const file_reasoning_v1_reasoning_proto_rawDesc = "" +
 	"\x16AnswerQuestionResponse\x12\x16\n" +
 	"\x06answer\x18\x01 \x01(\tR\x06answer\x12Q\n" +
 	"\x12referenced_symbols\x18\x02 \x03(\v2\".sourcebridge.common.v1.CodeSymbolR\x11referencedSymbols\x126\n" +
-	"\x05usage\x18\x03 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"\xd9\x01\n" +
+	"\x05usage\x18\x03 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"\x9f\x02\n" +
 	"\vAnswerDelta\x12#\n" +
 	"\rcontent_delta\x18\x01 \x01(\tR\fcontentDelta\x12\x1a\n" +
 	"\bfinished\x18\x02 \x01(\bR\bfinished\x12Q\n" +
 	"\x12referenced_symbols\x18\x03 \x03(\v2\".sourcebridge.common.v1.CodeSymbolR\x11referencedSymbols\x126\n" +
-	"\x05usage\x18\x04 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\"\xc9\x01\n" +
+	"\x05usage\x18\x04 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\x12D\n" +
+	"\bprogress\x18\x05 \x01(\v2(.sourcebridge.reasoning.v1.ProgressEventR\bprogress\"y\n" +
+	"\rProgressEvent\x12\x14\n" +
+	"\x05phase\x18\x01 \x01(\tR\x05phase\x12\x16\n" +
+	"\x06detail\x18\x02 \x01(\tR\x06detail\x12\x1b\n" +
+	"\ttool_name\x18\x03 \x01(\tR\btoolName\x12\x1d\n" +
+	"\n" +
+	"elapsed_ms\x18\x04 \x01(\x03R\telapsedMs\"\xc9\x01\n" +
 	"\x11ReviewFileRequest\x12#\n" +
 	"\rrepository_id\x18\x01 \x01(\tR\frepositoryId\x12\x1b\n" +
 	"\tfile_path\x18\x02 \x01(\tR\bfilePath\x12<\n" +
@@ -2436,7 +2551,7 @@ func file_reasoning_v1_reasoning_proto_rawDescGZIP() []byte {
 	return file_reasoning_v1_reasoning_proto_rawDescData
 }
 
-var file_reasoning_v1_reasoning_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_reasoning_v1_reasoning_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_reasoning_v1_reasoning_proto_goTypes = []any{
 	(*AnalyzeSymbolRequest)(nil),               // 0: sourcebridge.reasoning.v1.AnalyzeSymbolRequest
 	(*AnalyzeSymbolResponse)(nil),              // 1: sourcebridge.reasoning.v1.AnalyzeSymbolResponse
@@ -2445,95 +2560,97 @@ var file_reasoning_v1_reasoning_proto_goTypes = []any{
 	(*AnswerQuestionRequest)(nil),              // 4: sourcebridge.reasoning.v1.AnswerQuestionRequest
 	(*AnswerQuestionResponse)(nil),             // 5: sourcebridge.reasoning.v1.AnswerQuestionResponse
 	(*AnswerDelta)(nil),                        // 6: sourcebridge.reasoning.v1.AnswerDelta
-	(*ReviewFileRequest)(nil),                  // 7: sourcebridge.reasoning.v1.ReviewFileRequest
-	(*ReviewFileResponse)(nil),                 // 8: sourcebridge.reasoning.v1.ReviewFileResponse
-	(*ReviewFinding)(nil),                      // 9: sourcebridge.reasoning.v1.ReviewFinding
-	(*GenerateEmbeddingRequest)(nil),           // 10: sourcebridge.reasoning.v1.GenerateEmbeddingRequest
-	(*GenerateEmbeddingResponse)(nil),          // 11: sourcebridge.reasoning.v1.GenerateEmbeddingResponse
-	(*SimulateChangeRequest)(nil),              // 12: sourcebridge.reasoning.v1.SimulateChangeRequest
-	(*SimulatedSymbolMatch)(nil),               // 13: sourcebridge.reasoning.v1.SimulatedSymbolMatch
-	(*SimulateChangeResponse)(nil),             // 14: sourcebridge.reasoning.v1.SimulateChangeResponse
-	(*ToolSchema)(nil),                         // 15: sourcebridge.reasoning.v1.ToolSchema
-	(*AgentMessage)(nil),                       // 16: sourcebridge.reasoning.v1.AgentMessage
-	(*ToolCall)(nil),                           // 17: sourcebridge.reasoning.v1.ToolCall
-	(*ToolResult)(nil),                         // 18: sourcebridge.reasoning.v1.ToolResult
-	(*AnswerQuestionWithToolsRequest)(nil),     // 19: sourcebridge.reasoning.v1.AnswerQuestionWithToolsRequest
-	(*AnswerQuestionWithToolsResponse)(nil),    // 20: sourcebridge.reasoning.v1.AnswerQuestionWithToolsResponse
-	(*ClassifyQuestionRequest)(nil),            // 21: sourcebridge.reasoning.v1.ClassifyQuestionRequest
-	(*ClassifyQuestionResponse)(nil),           // 22: sourcebridge.reasoning.v1.ClassifyQuestionResponse
-	(*DecomposeQuestionRequest)(nil),           // 23: sourcebridge.reasoning.v1.DecomposeQuestionRequest
-	(*DecomposeQuestionResponse)(nil),          // 24: sourcebridge.reasoning.v1.DecomposeQuestionResponse
-	(*SynthesizeDecomposedAnswerRequest)(nil),  // 25: sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerRequest
-	(*DecomposedSubAnswer)(nil),                // 26: sourcebridge.reasoning.v1.DecomposedSubAnswer
-	(*SynthesizeDecomposedAnswerResponse)(nil), // 27: sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerResponse
-	(*GetProviderCapabilitiesRequest)(nil),     // 28: sourcebridge.reasoning.v1.GetProviderCapabilitiesRequest
-	(*GetProviderCapabilitiesResponse)(nil),    // 29: sourcebridge.reasoning.v1.GetProviderCapabilitiesResponse
-	(*v1.CodeSymbol)(nil),                      // 30: sourcebridge.common.v1.CodeSymbol
-	(*v1.LLMUsage)(nil),                        // 31: sourcebridge.common.v1.LLMUsage
-	(v1.Confidence)(0),                         // 32: sourcebridge.common.v1.Confidence
-	(v1.Language)(0),                           // 33: sourcebridge.common.v1.Language
-	(*v1.Embedding)(nil),                       // 34: sourcebridge.common.v1.Embedding
+	(*ProgressEvent)(nil),                      // 7: sourcebridge.reasoning.v1.ProgressEvent
+	(*ReviewFileRequest)(nil),                  // 8: sourcebridge.reasoning.v1.ReviewFileRequest
+	(*ReviewFileResponse)(nil),                 // 9: sourcebridge.reasoning.v1.ReviewFileResponse
+	(*ReviewFinding)(nil),                      // 10: sourcebridge.reasoning.v1.ReviewFinding
+	(*GenerateEmbeddingRequest)(nil),           // 11: sourcebridge.reasoning.v1.GenerateEmbeddingRequest
+	(*GenerateEmbeddingResponse)(nil),          // 12: sourcebridge.reasoning.v1.GenerateEmbeddingResponse
+	(*SimulateChangeRequest)(nil),              // 13: sourcebridge.reasoning.v1.SimulateChangeRequest
+	(*SimulatedSymbolMatch)(nil),               // 14: sourcebridge.reasoning.v1.SimulatedSymbolMatch
+	(*SimulateChangeResponse)(nil),             // 15: sourcebridge.reasoning.v1.SimulateChangeResponse
+	(*ToolSchema)(nil),                         // 16: sourcebridge.reasoning.v1.ToolSchema
+	(*AgentMessage)(nil),                       // 17: sourcebridge.reasoning.v1.AgentMessage
+	(*ToolCall)(nil),                           // 18: sourcebridge.reasoning.v1.ToolCall
+	(*ToolResult)(nil),                         // 19: sourcebridge.reasoning.v1.ToolResult
+	(*AnswerQuestionWithToolsRequest)(nil),     // 20: sourcebridge.reasoning.v1.AnswerQuestionWithToolsRequest
+	(*AnswerQuestionWithToolsResponse)(nil),    // 21: sourcebridge.reasoning.v1.AnswerQuestionWithToolsResponse
+	(*ClassifyQuestionRequest)(nil),            // 22: sourcebridge.reasoning.v1.ClassifyQuestionRequest
+	(*ClassifyQuestionResponse)(nil),           // 23: sourcebridge.reasoning.v1.ClassifyQuestionResponse
+	(*DecomposeQuestionRequest)(nil),           // 24: sourcebridge.reasoning.v1.DecomposeQuestionRequest
+	(*DecomposeQuestionResponse)(nil),          // 25: sourcebridge.reasoning.v1.DecomposeQuestionResponse
+	(*SynthesizeDecomposedAnswerRequest)(nil),  // 26: sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerRequest
+	(*DecomposedSubAnswer)(nil),                // 27: sourcebridge.reasoning.v1.DecomposedSubAnswer
+	(*SynthesizeDecomposedAnswerResponse)(nil), // 28: sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerResponse
+	(*GetProviderCapabilitiesRequest)(nil),     // 29: sourcebridge.reasoning.v1.GetProviderCapabilitiesRequest
+	(*GetProviderCapabilitiesResponse)(nil),    // 30: sourcebridge.reasoning.v1.GetProviderCapabilitiesResponse
+	(*v1.CodeSymbol)(nil),                      // 31: sourcebridge.common.v1.CodeSymbol
+	(*v1.LLMUsage)(nil),                        // 32: sourcebridge.common.v1.LLMUsage
+	(v1.Confidence)(0),                         // 33: sourcebridge.common.v1.Confidence
+	(v1.Language)(0),                           // 34: sourcebridge.common.v1.Language
+	(*v1.Embedding)(nil),                       // 35: sourcebridge.common.v1.Embedding
 }
 var file_reasoning_v1_reasoning_proto_depIdxs = []int32{
-	30, // 0: sourcebridge.reasoning.v1.AnalyzeSymbolRequest.symbol:type_name -> sourcebridge.common.v1.CodeSymbol
-	31, // 1: sourcebridge.reasoning.v1.AnalyzeSymbolResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	30, // 2: sourcebridge.reasoning.v1.ExplainRelationshipRequest.source:type_name -> sourcebridge.common.v1.CodeSymbol
-	30, // 3: sourcebridge.reasoning.v1.ExplainRelationshipRequest.target:type_name -> sourcebridge.common.v1.CodeSymbol
-	32, // 4: sourcebridge.reasoning.v1.ExplainRelationshipResponse.confidence:type_name -> sourcebridge.common.v1.Confidence
-	31, // 5: sourcebridge.reasoning.v1.ExplainRelationshipResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	30, // 6: sourcebridge.reasoning.v1.AnswerQuestionRequest.context_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
-	33, // 7: sourcebridge.reasoning.v1.AnswerQuestionRequest.language:type_name -> sourcebridge.common.v1.Language
-	30, // 8: sourcebridge.reasoning.v1.AnswerQuestionResponse.referenced_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
-	31, // 9: sourcebridge.reasoning.v1.AnswerQuestionResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	30, // 10: sourcebridge.reasoning.v1.AnswerDelta.referenced_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
-	31, // 11: sourcebridge.reasoning.v1.AnswerDelta.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	33, // 12: sourcebridge.reasoning.v1.ReviewFileRequest.language:type_name -> sourcebridge.common.v1.Language
-	9,  // 13: sourcebridge.reasoning.v1.ReviewFileResponse.findings:type_name -> sourcebridge.reasoning.v1.ReviewFinding
-	31, // 14: sourcebridge.reasoning.v1.ReviewFileResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	34, // 15: sourcebridge.reasoning.v1.GenerateEmbeddingResponse.embedding:type_name -> sourcebridge.common.v1.Embedding
-	31, // 16: sourcebridge.reasoning.v1.GenerateEmbeddingResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	30, // 17: sourcebridge.reasoning.v1.SimulateChangeRequest.symbols:type_name -> sourcebridge.common.v1.CodeSymbol
-	13, // 18: sourcebridge.reasoning.v1.SimulateChangeResponse.resolved_symbols:type_name -> sourcebridge.reasoning.v1.SimulatedSymbolMatch
-	31, // 19: sourcebridge.reasoning.v1.SimulateChangeResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	17, // 20: sourcebridge.reasoning.v1.AgentMessage.tool_calls:type_name -> sourcebridge.reasoning.v1.ToolCall
-	18, // 21: sourcebridge.reasoning.v1.AgentMessage.tool_results:type_name -> sourcebridge.reasoning.v1.ToolResult
-	16, // 22: sourcebridge.reasoning.v1.AnswerQuestionWithToolsRequest.messages:type_name -> sourcebridge.reasoning.v1.AgentMessage
-	15, // 23: sourcebridge.reasoning.v1.AnswerQuestionWithToolsRequest.tools:type_name -> sourcebridge.reasoning.v1.ToolSchema
-	16, // 24: sourcebridge.reasoning.v1.AnswerQuestionWithToolsResponse.turn:type_name -> sourcebridge.reasoning.v1.AgentMessage
-	31, // 25: sourcebridge.reasoning.v1.AnswerQuestionWithToolsResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	31, // 26: sourcebridge.reasoning.v1.ClassifyQuestionResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	31, // 27: sourcebridge.reasoning.v1.DecomposeQuestionResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	26, // 28: sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerRequest.sub_answers:type_name -> sourcebridge.reasoning.v1.DecomposedSubAnswer
-	31, // 29: sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	0,  // 30: sourcebridge.reasoning.v1.ReasoningService.AnalyzeSymbol:input_type -> sourcebridge.reasoning.v1.AnalyzeSymbolRequest
-	2,  // 31: sourcebridge.reasoning.v1.ReasoningService.ExplainRelationship:input_type -> sourcebridge.reasoning.v1.ExplainRelationshipRequest
-	4,  // 32: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestion:input_type -> sourcebridge.reasoning.v1.AnswerQuestionRequest
-	4,  // 33: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionStream:input_type -> sourcebridge.reasoning.v1.AnswerQuestionRequest
-	7,  // 34: sourcebridge.reasoning.v1.ReasoningService.ReviewFile:input_type -> sourcebridge.reasoning.v1.ReviewFileRequest
-	10, // 35: sourcebridge.reasoning.v1.ReasoningService.GenerateEmbedding:input_type -> sourcebridge.reasoning.v1.GenerateEmbeddingRequest
-	12, // 36: sourcebridge.reasoning.v1.ReasoningService.SimulateChange:input_type -> sourcebridge.reasoning.v1.SimulateChangeRequest
-	19, // 37: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionWithTools:input_type -> sourcebridge.reasoning.v1.AnswerQuestionWithToolsRequest
-	28, // 38: sourcebridge.reasoning.v1.ReasoningService.GetProviderCapabilities:input_type -> sourcebridge.reasoning.v1.GetProviderCapabilitiesRequest
-	21, // 39: sourcebridge.reasoning.v1.ReasoningService.ClassifyQuestion:input_type -> sourcebridge.reasoning.v1.ClassifyQuestionRequest
-	23, // 40: sourcebridge.reasoning.v1.ReasoningService.DecomposeQuestion:input_type -> sourcebridge.reasoning.v1.DecomposeQuestionRequest
-	25, // 41: sourcebridge.reasoning.v1.ReasoningService.SynthesizeDecomposedAnswer:input_type -> sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerRequest
-	1,  // 42: sourcebridge.reasoning.v1.ReasoningService.AnalyzeSymbol:output_type -> sourcebridge.reasoning.v1.AnalyzeSymbolResponse
-	3,  // 43: sourcebridge.reasoning.v1.ReasoningService.ExplainRelationship:output_type -> sourcebridge.reasoning.v1.ExplainRelationshipResponse
-	5,  // 44: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestion:output_type -> sourcebridge.reasoning.v1.AnswerQuestionResponse
-	6,  // 45: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionStream:output_type -> sourcebridge.reasoning.v1.AnswerDelta
-	8,  // 46: sourcebridge.reasoning.v1.ReasoningService.ReviewFile:output_type -> sourcebridge.reasoning.v1.ReviewFileResponse
-	11, // 47: sourcebridge.reasoning.v1.ReasoningService.GenerateEmbedding:output_type -> sourcebridge.reasoning.v1.GenerateEmbeddingResponse
-	14, // 48: sourcebridge.reasoning.v1.ReasoningService.SimulateChange:output_type -> sourcebridge.reasoning.v1.SimulateChangeResponse
-	20, // 49: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionWithTools:output_type -> sourcebridge.reasoning.v1.AnswerQuestionWithToolsResponse
-	29, // 50: sourcebridge.reasoning.v1.ReasoningService.GetProviderCapabilities:output_type -> sourcebridge.reasoning.v1.GetProviderCapabilitiesResponse
-	22, // 51: sourcebridge.reasoning.v1.ReasoningService.ClassifyQuestion:output_type -> sourcebridge.reasoning.v1.ClassifyQuestionResponse
-	24, // 52: sourcebridge.reasoning.v1.ReasoningService.DecomposeQuestion:output_type -> sourcebridge.reasoning.v1.DecomposeQuestionResponse
-	27, // 53: sourcebridge.reasoning.v1.ReasoningService.SynthesizeDecomposedAnswer:output_type -> sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerResponse
-	42, // [42:54] is the sub-list for method output_type
-	30, // [30:42] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	31, // 0: sourcebridge.reasoning.v1.AnalyzeSymbolRequest.symbol:type_name -> sourcebridge.common.v1.CodeSymbol
+	32, // 1: sourcebridge.reasoning.v1.AnalyzeSymbolResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	31, // 2: sourcebridge.reasoning.v1.ExplainRelationshipRequest.source:type_name -> sourcebridge.common.v1.CodeSymbol
+	31, // 3: sourcebridge.reasoning.v1.ExplainRelationshipRequest.target:type_name -> sourcebridge.common.v1.CodeSymbol
+	33, // 4: sourcebridge.reasoning.v1.ExplainRelationshipResponse.confidence:type_name -> sourcebridge.common.v1.Confidence
+	32, // 5: sourcebridge.reasoning.v1.ExplainRelationshipResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	31, // 6: sourcebridge.reasoning.v1.AnswerQuestionRequest.context_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
+	34, // 7: sourcebridge.reasoning.v1.AnswerQuestionRequest.language:type_name -> sourcebridge.common.v1.Language
+	31, // 8: sourcebridge.reasoning.v1.AnswerQuestionResponse.referenced_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
+	32, // 9: sourcebridge.reasoning.v1.AnswerQuestionResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	31, // 10: sourcebridge.reasoning.v1.AnswerDelta.referenced_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
+	32, // 11: sourcebridge.reasoning.v1.AnswerDelta.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	7,  // 12: sourcebridge.reasoning.v1.AnswerDelta.progress:type_name -> sourcebridge.reasoning.v1.ProgressEvent
+	34, // 13: sourcebridge.reasoning.v1.ReviewFileRequest.language:type_name -> sourcebridge.common.v1.Language
+	10, // 14: sourcebridge.reasoning.v1.ReviewFileResponse.findings:type_name -> sourcebridge.reasoning.v1.ReviewFinding
+	32, // 15: sourcebridge.reasoning.v1.ReviewFileResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	35, // 16: sourcebridge.reasoning.v1.GenerateEmbeddingResponse.embedding:type_name -> sourcebridge.common.v1.Embedding
+	32, // 17: sourcebridge.reasoning.v1.GenerateEmbeddingResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	31, // 18: sourcebridge.reasoning.v1.SimulateChangeRequest.symbols:type_name -> sourcebridge.common.v1.CodeSymbol
+	14, // 19: sourcebridge.reasoning.v1.SimulateChangeResponse.resolved_symbols:type_name -> sourcebridge.reasoning.v1.SimulatedSymbolMatch
+	32, // 20: sourcebridge.reasoning.v1.SimulateChangeResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	18, // 21: sourcebridge.reasoning.v1.AgentMessage.tool_calls:type_name -> sourcebridge.reasoning.v1.ToolCall
+	19, // 22: sourcebridge.reasoning.v1.AgentMessage.tool_results:type_name -> sourcebridge.reasoning.v1.ToolResult
+	17, // 23: sourcebridge.reasoning.v1.AnswerQuestionWithToolsRequest.messages:type_name -> sourcebridge.reasoning.v1.AgentMessage
+	16, // 24: sourcebridge.reasoning.v1.AnswerQuestionWithToolsRequest.tools:type_name -> sourcebridge.reasoning.v1.ToolSchema
+	17, // 25: sourcebridge.reasoning.v1.AnswerQuestionWithToolsResponse.turn:type_name -> sourcebridge.reasoning.v1.AgentMessage
+	32, // 26: sourcebridge.reasoning.v1.AnswerQuestionWithToolsResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	32, // 27: sourcebridge.reasoning.v1.ClassifyQuestionResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	32, // 28: sourcebridge.reasoning.v1.DecomposeQuestionResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	27, // 29: sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerRequest.sub_answers:type_name -> sourcebridge.reasoning.v1.DecomposedSubAnswer
+	32, // 30: sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	0,  // 31: sourcebridge.reasoning.v1.ReasoningService.AnalyzeSymbol:input_type -> sourcebridge.reasoning.v1.AnalyzeSymbolRequest
+	2,  // 32: sourcebridge.reasoning.v1.ReasoningService.ExplainRelationship:input_type -> sourcebridge.reasoning.v1.ExplainRelationshipRequest
+	4,  // 33: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestion:input_type -> sourcebridge.reasoning.v1.AnswerQuestionRequest
+	4,  // 34: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionStream:input_type -> sourcebridge.reasoning.v1.AnswerQuestionRequest
+	8,  // 35: sourcebridge.reasoning.v1.ReasoningService.ReviewFile:input_type -> sourcebridge.reasoning.v1.ReviewFileRequest
+	11, // 36: sourcebridge.reasoning.v1.ReasoningService.GenerateEmbedding:input_type -> sourcebridge.reasoning.v1.GenerateEmbeddingRequest
+	13, // 37: sourcebridge.reasoning.v1.ReasoningService.SimulateChange:input_type -> sourcebridge.reasoning.v1.SimulateChangeRequest
+	20, // 38: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionWithTools:input_type -> sourcebridge.reasoning.v1.AnswerQuestionWithToolsRequest
+	29, // 39: sourcebridge.reasoning.v1.ReasoningService.GetProviderCapabilities:input_type -> sourcebridge.reasoning.v1.GetProviderCapabilitiesRequest
+	22, // 40: sourcebridge.reasoning.v1.ReasoningService.ClassifyQuestion:input_type -> sourcebridge.reasoning.v1.ClassifyQuestionRequest
+	24, // 41: sourcebridge.reasoning.v1.ReasoningService.DecomposeQuestion:input_type -> sourcebridge.reasoning.v1.DecomposeQuestionRequest
+	26, // 42: sourcebridge.reasoning.v1.ReasoningService.SynthesizeDecomposedAnswer:input_type -> sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerRequest
+	1,  // 43: sourcebridge.reasoning.v1.ReasoningService.AnalyzeSymbol:output_type -> sourcebridge.reasoning.v1.AnalyzeSymbolResponse
+	3,  // 44: sourcebridge.reasoning.v1.ReasoningService.ExplainRelationship:output_type -> sourcebridge.reasoning.v1.ExplainRelationshipResponse
+	5,  // 45: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestion:output_type -> sourcebridge.reasoning.v1.AnswerQuestionResponse
+	6,  // 46: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionStream:output_type -> sourcebridge.reasoning.v1.AnswerDelta
+	9,  // 47: sourcebridge.reasoning.v1.ReasoningService.ReviewFile:output_type -> sourcebridge.reasoning.v1.ReviewFileResponse
+	12, // 48: sourcebridge.reasoning.v1.ReasoningService.GenerateEmbedding:output_type -> sourcebridge.reasoning.v1.GenerateEmbeddingResponse
+	15, // 49: sourcebridge.reasoning.v1.ReasoningService.SimulateChange:output_type -> sourcebridge.reasoning.v1.SimulateChangeResponse
+	21, // 50: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionWithTools:output_type -> sourcebridge.reasoning.v1.AnswerQuestionWithToolsResponse
+	30, // 51: sourcebridge.reasoning.v1.ReasoningService.GetProviderCapabilities:output_type -> sourcebridge.reasoning.v1.GetProviderCapabilitiesResponse
+	23, // 52: sourcebridge.reasoning.v1.ReasoningService.ClassifyQuestion:output_type -> sourcebridge.reasoning.v1.ClassifyQuestionResponse
+	25, // 53: sourcebridge.reasoning.v1.ReasoningService.DecomposeQuestion:output_type -> sourcebridge.reasoning.v1.DecomposeQuestionResponse
+	28, // 54: sourcebridge.reasoning.v1.ReasoningService.SynthesizeDecomposedAnswer:output_type -> sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerResponse
+	43, // [43:55] is the sub-list for method output_type
+	31, // [31:43] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_reasoning_v1_reasoning_proto_init() }
@@ -2547,7 +2664,7 @@ func file_reasoning_v1_reasoning_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_reasoning_v1_reasoning_proto_rawDesc), len(file_reasoning_v1_reasoning_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   30,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

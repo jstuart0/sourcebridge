@@ -436,26 +436,40 @@ func (s *SurrealStore) StoreIndexResult(result *indexer.IndexResult) (*graph.Rep
 		}
 	}
 
-	// Store call graph relations
+	// Store call graph + test-linkage relations.
 	for _, rel := range result.Relations {
-		if rel.Type != indexer.RelationCalls {
+		sourceID := idMap[rel.SourceID]
+		targetID := idMap[rel.TargetID]
+		if sourceID == "" || targetID == "" {
 			continue
 		}
-		callerID := idMap[rel.SourceID]
-		calleeID := idMap[rel.TargetID]
-		if callerID == "" || calleeID == "" {
-			continue
+		switch rel.Type {
+		case indexer.RelationCalls:
+			_, _ = surrealdb.Query[interface{}](ctx(), db,
+				`CREATE ca_calls SET
+					caller_id = $caller_id,
+					callee_id = $callee_id,
+					repo_id = $repo_id`,
+				map[string]any{
+					"caller_id": sourceID,
+					"callee_id": targetID,
+					"repo_id":   repoID,
+				})
+		case indexer.RelationTests:
+			// ca_tests: source_id = test symbol, target_id = symbol
+			// being tested. Queried via target_id in
+			// GetTestsForSymbolPersisted.
+			_, _ = surrealdb.Query[interface{}](ctx(), db,
+				`CREATE ca_tests SET
+					source_id = $source_id,
+					target_id = $target_id,
+					repo_id = $repo_id`,
+				map[string]any{
+					"source_id": sourceID,
+					"target_id": targetID,
+					"repo_id":   repoID,
+				})
 		}
-		_, _ = surrealdb.Query[interface{}](ctx(), db,
-			`CREATE ca_calls SET
-				caller_id = $caller_id,
-				callee_id = $callee_id,
-				repo_id = $repo_id`,
-			map[string]any{
-				"caller_id": callerID,
-				"callee_id": calleeID,
-				"repo_id":   repoID,
-			})
 	}
 
 	// Store modules
@@ -998,6 +1012,23 @@ func (s *SurrealStore) GetCallees(symbolID string) []string {
 
 	rows, err := queryOne[[]string](ctx(), db,
 		"SELECT VALUE callee_id FROM ca_calls WHERE caller_id = $id",
+		map[string]any{"id": symbolID})
+	if err != nil {
+		return nil
+	}
+	return rows
+}
+
+// GetTestsForSymbolPersisted returns the IDs of test symbols that
+// exercise the given target symbol, from the ca_tests edge table.
+// Parallels GetCallees — edge shape is source_id=test, target_id=tested.
+func (s *SurrealStore) GetTestsForSymbolPersisted(symbolID string) []string {
+	db := s.client.DB()
+	if db == nil {
+		return nil
+	}
+	rows, err := queryOne[[]string](ctx(), db,
+		"SELECT VALUE source_id FROM ca_tests WHERE target_id = $id",
 		map[string]any{"id": symbolID})
 	if err != nil {
 		return nil

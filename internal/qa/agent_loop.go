@@ -192,6 +192,10 @@ func (o *Orchestrator) RunAgentLoopWithBudget(
 	toolNamesSeen := map[string]struct{}{}
 	var recentCallSignatures []string
 
+	// Progress: consumers see "planning…" before the first worker
+	// round-trip. Safe no-op when no emitter is attached.
+	emitProgress(ctx, loopStart, "planning")
+
 	for turn := 1; ; turn++ {
 		// Deadline propagation (plan §Deadline Propagation).
 		remaining := wallClock - time.Since(loopStart)
@@ -242,6 +246,8 @@ func (o *Orchestrator) RunAgentLoopWithBudget(
 
 		// Text-only response → final answer, loop terminates.
 		if len(resp.ToolCalls) == 0 {
+			// Progress: the turn produced the final answer directly.
+			emitProgress(ctx, loopStart, "synthesizing")
 			result.RawAnswer = resp.Text
 			if turn == 1 {
 				result.Turn1TextOnly = true
@@ -326,10 +332,18 @@ func (o *Orchestrator) RunAgentLoopWithBudget(
 				agentPerToolDeadline,
 				wallClock-time.Since(loopStart),
 			))
+			// Progress: tool_call. Emit before dispatch so clients
+			// can show "agent is calling search_evidence…" while the
+			// tool runs.
+			emitProgress(ctx, loopStart, "tool_call", withTool(call.Name))
 			execStart := time.Now()
 			toolResult := dispatcher.Dispatch(toolCtx, call)
 			execMs := time.Since(execStart).Milliseconds()
 			toolCancel()
+			emitProgress(ctx, loopStart, "tool_result",
+				withTool(call.Name),
+				withDuration(time.Since(execStart)),
+			)
 
 			// Record evidence tokens (best-effort approximation).
 			result.EvidenceTokens += approxTokens(toolResult)
@@ -370,6 +384,12 @@ func (o *Orchestrator) RunAgentLoopWithBudget(
 
 	// Strip citation tags from user-visible answer.
 	result.Answer = stripCitationTags(result.RawAnswer)
+
+	// Progress: loop terminated. TerminationReason carries the
+	// structural outcome (answer / timeout / budget / worker_error
+	// / cancelled) so clients can distinguish "done because the
+	// agent produced an answer" from "done because we timed out."
+	emitProgress(ctx, loopStart, "done", withTermination(result.TerminationReason))
 
 	return result, nil
 }

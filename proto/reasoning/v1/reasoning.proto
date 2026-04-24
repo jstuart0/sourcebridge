@@ -126,12 +126,51 @@ message AnswerQuestionResponse {
 // answer). The final frame sets `finished = true` and carries the resolved
 // `referenced_symbols` and `usage`; consumers must treat that frame as the
 // signal to stop rendering deltas.
+//
+// Non-content frames set `progress` to a structured event describing a
+// phase change inside the agentic loop (planning, tool_call,
+// synthesizing). These let the Go relay forward intermediate progress
+// to MCP's ContentEmitter so streaming clients can show "agent is
+// calling search_evidence..." without waiting for the full answer.
 message AnswerDelta {
   string content_delta = 1;
   bool finished = 2;
   // Populated only on the terminal frame.
   repeated sourcebridge.common.v1.CodeSymbol referenced_symbols = 3;
   sourcebridge.common.v1.LLMUsage usage = 4;
+  // Progress event — set on non-content phase transitions.
+  // content_delta is empty when progress is set.
+  ProgressEvent progress = 5;
+}
+
+// ProgressEvent describes one phase transition in the agentic
+// retrieval loop. `phase` is a stable string identifier; clients
+// compare literal values (not enums — easier to extend without a
+// proto bump). `detail` is optional human-readable context the
+// client can render verbatim.
+//
+// Stable phase values (2026-04-24):
+//   "planning"         — classifier decided which strategy to run
+//   "tool_call"        — agent invoked a tool. `detail` = tool name
+//                         + args summary (e.g. "search_evidence query=auth")
+//   "tool_result"      — tool returned. `detail` = result summary
+//                         (e.g. "search_evidence: 12 results")
+//   "synthesizing"     — final answer generation started
+//   "error"            — recoverable per-phase error. `detail` =
+//                         message. The stream does NOT end here —
+//                         the agent may retry or fall back.
+//
+// New phase values are additive. Clients should ignore unknown
+// phases rather than failing.
+message ProgressEvent {
+  string phase = 1;
+  string detail = 2;
+  // Optional tool-specific fields. Populated for "tool_call" and
+  // "tool_result" phases; empty otherwise.
+  string tool_name = 3;
+  // Elapsed time since the request started, milliseconds. Useful
+  // for UIs that want to show "searching for 2.3s".
+  int64 elapsed_ms = 4;
 }
 
 message ReviewFileRequest {

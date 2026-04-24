@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/sourcebridge/sourcebridge/internal/api/middleware"
+	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/entitlements"
 	"github.com/sourcebridge/sourcebridge/internal/events"
@@ -160,7 +161,10 @@ func currentPlan() entitlements.Plan {
 		}
 	}
 
-	if os.Getenv("SOURCEBRIDGE_EDITION") == "enterprise" {
+	// Canonicalize the edition string through the capabilities
+	// registry's normalizer so the plan decision matches every other
+	// surface (MCP, REST, capability filter).
+	if capabilities.NormalizeEdition(os.Getenv("SOURCEBRIDGE_EDITION")) == capabilities.EditionEnterprise {
 		return entitlements.PlanEnterprise
 	}
 	return entitlements.PlanOSS

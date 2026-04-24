@@ -213,6 +213,11 @@ type Store struct {
 	imports                []StoredImport
 	callGraph              map[string][]string // callerID -> []calleeID
 	reverseCallGraph       map[string][]string // calleeID -> []callerID
+	// testedByGraph maps target-symbol-id → []test-symbol-id, i.e.
+	// "symbols that tests cover." Populated from
+	// IndexResult.Relations with Type=RelationTests. Enables the
+	// Phase-1b MCP get_tests_for_symbol persisted_edge source.
+	testedByGraph          map[string][]string // targetID -> []testSymbolID
 	repoFiles              map[string][]string // repoID -> []fileID
 	repoSymbols            map[string][]string // repoID -> []symbolID
 	repoModules            map[string][]string // repoID -> []moduleID
@@ -240,6 +245,7 @@ func NewStore() *Store {
 		links:                  make(map[string]*StoredLink),
 		callGraph:              make(map[string][]string),
 		reverseCallGraph:       make(map[string][]string),
+		testedByGraph:          make(map[string][]string),
 		repoFiles:              make(map[string][]string),
 		repoSymbols:            make(map[string][]string),
 		repoModules:            make(map[string][]string),
@@ -339,18 +345,25 @@ func (s *Store) StoreIndexResult(result *indexer.IndexResult) (*Repository, erro
 		}
 	}
 
-	// Store call graph relations
+	// Store call graph + test-linkage relations. Both live in the
+	// same Relations slice on IndexResult; the Type discriminator
+	// picks the target graph.
 	for _, rel := range result.Relations {
-		if rel.Type != indexer.RelationCalls {
+		sourceID := idMap[rel.SourceID]
+		targetID := idMap[rel.TargetID]
+		if sourceID == "" || targetID == "" {
 			continue
 		}
-		callerID := idMap[rel.SourceID]
-		calleeID := idMap[rel.TargetID]
-		if callerID == "" || calleeID == "" {
-			continue
+		switch rel.Type {
+		case indexer.RelationCalls:
+			s.callGraph[sourceID] = append(s.callGraph[sourceID], targetID)
+			s.reverseCallGraph[targetID] = append(s.reverseCallGraph[targetID], sourceID)
+		case indexer.RelationTests:
+			// Edge convention: SourceID = test symbol, TargetID =
+			// symbol being tested. testedByGraph is keyed by target
+			// so "what tests cover X" is a cheap lookup.
+			s.testedByGraph[targetID] = append(s.testedByGraph[targetID], sourceID)
 		}
-		s.callGraph[callerID] = append(s.callGraph[callerID], calleeID)
-		s.reverseCallGraph[calleeID] = append(s.reverseCallGraph[calleeID], callerID)
 	}
 
 	// Store modules
@@ -490,18 +503,25 @@ func (s *Store) ReplaceIndexResult(repoID string, result *indexer.IndexResult) (
 		}
 	}
 
-	// Store call graph relations
+	// Store call graph + test-linkage relations. Both live in the
+	// same Relations slice on IndexResult; the Type discriminator
+	// picks the target graph.
 	for _, rel := range result.Relations {
-		if rel.Type != indexer.RelationCalls {
+		sourceID := idMap[rel.SourceID]
+		targetID := idMap[rel.TargetID]
+		if sourceID == "" || targetID == "" {
 			continue
 		}
-		callerID := idMap[rel.SourceID]
-		calleeID := idMap[rel.TargetID]
-		if callerID == "" || calleeID == "" {
-			continue
+		switch rel.Type {
+		case indexer.RelationCalls:
+			s.callGraph[sourceID] = append(s.callGraph[sourceID], targetID)
+			s.reverseCallGraph[targetID] = append(s.reverseCallGraph[targetID], sourceID)
+		case indexer.RelationTests:
+			// Edge convention: SourceID = test symbol, TargetID =
+			// symbol being tested. testedByGraph is keyed by target
+			// so "what tests cover X" is a cheap lookup.
+			s.testedByGraph[targetID] = append(s.testedByGraph[targetID], sourceID)
 		}
-		s.callGraph[callerID] = append(s.callGraph[callerID], calleeID)
-		s.reverseCallGraph[calleeID] = append(s.reverseCallGraph[calleeID], callerID)
 	}
 
 	// Store modules
@@ -827,6 +847,15 @@ func (s *Store) GetCallees(symbolID string) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.callGraph[symbolID]
+}
+
+// GetTestsForSymbolPersisted returns the IDs of test symbols that
+// exercise the given target symbol, sourced from RelationTests edges
+// written during indexing.
+func (s *Store) GetTestsForSymbolPersisted(symbolID string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.testedByGraph[symbolID]
 }
 
 // GetCallEdges returns all call edges for a repository in a single batch.

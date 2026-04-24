@@ -80,16 +80,30 @@ class AnswerQuestionResponse(_message.Message):
     def __init__(self, answer: _Optional[str] = ..., referenced_symbols: _Optional[_Iterable[_Union[_types_pb2.CodeSymbol, _Mapping]]] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ...) -> None: ...
 
 class AnswerDelta(_message.Message):
-    __slots__ = ("content_delta", "finished", "referenced_symbols", "usage")
+    __slots__ = ("content_delta", "finished", "referenced_symbols", "usage", "progress")
     CONTENT_DELTA_FIELD_NUMBER: _ClassVar[int]
     FINISHED_FIELD_NUMBER: _ClassVar[int]
     REFERENCED_SYMBOLS_FIELD_NUMBER: _ClassVar[int]
     USAGE_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_FIELD_NUMBER: _ClassVar[int]
     content_delta: str
     finished: bool
     referenced_symbols: _containers.RepeatedCompositeFieldContainer[_types_pb2.CodeSymbol]
     usage: _types_pb2.LLMUsage
-    def __init__(self, content_delta: _Optional[str] = ..., finished: bool = ..., referenced_symbols: _Optional[_Iterable[_Union[_types_pb2.CodeSymbol, _Mapping]]] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ...) -> None: ...
+    progress: ProgressEvent
+    def __init__(self, content_delta: _Optional[str] = ..., finished: bool = ..., referenced_symbols: _Optional[_Iterable[_Union[_types_pb2.CodeSymbol, _Mapping]]] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ..., progress: _Optional[_Union[ProgressEvent, _Mapping]] = ...) -> None: ...
+
+class ProgressEvent(_message.Message):
+    __slots__ = ("phase", "detail", "tool_name", "elapsed_ms")
+    PHASE_FIELD_NUMBER: _ClassVar[int]
+    DETAIL_FIELD_NUMBER: _ClassVar[int]
+    TOOL_NAME_FIELD_NUMBER: _ClassVar[int]
+    ELAPSED_MS_FIELD_NUMBER: _ClassVar[int]
+    phase: str
+    detail: str
+    tool_name: str
+    elapsed_ms: int
+    def __init__(self, phase: _Optional[str] = ..., detail: _Optional[str] = ..., tool_name: _Optional[str] = ..., elapsed_ms: _Optional[int] = ...) -> None: ...
 
 class ReviewFileRequest(_message.Message):
     __slots__ = ("repository_id", "file_path", "language", "content", "template")

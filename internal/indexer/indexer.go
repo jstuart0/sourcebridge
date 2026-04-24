@@ -128,6 +128,7 @@ func (idx *Indexer) IndexRepository(ctx context.Context, repoPath string) (*Inde
 		Progress:    0.9,
 	})
 	result.Relations = idx.resolveCallGraph(result)
+	result.Relations = append(result.Relations, idx.resolveTestLinkage(result)...)
 	result.TotalRelations = idx.countRelations(result) + len(result.Relations)
 
 	// Done
@@ -244,6 +245,7 @@ func (idx *Indexer) IndexRepositoryIncremental(ctx context.Context, repoPath str
 
 	idx.progress(ProgressEvent{RepoID: repoID, Phase: "relations", Progress: 0.9})
 	result.Relations = idx.resolveCallGraph(result)
+	result.Relations = append(result.Relations, idx.resolveTestLinkage(result)...)
 	result.TotalRelations = idx.countRelations(result) + len(result.Relations)
 
 	idx.progress(ProgressEvent{RepoID: repoID, Phase: "complete", Progress: 1.0})
@@ -318,6 +320,87 @@ func (idx *Indexer) resolveCallGraph(result *IndexResult) []Relation {
 	}
 
 	slog.Info("call graph resolved", "edges", len(relations))
+	return relations
+}
+
+// resolveTestLinkage walks the call sites once more, this time
+// looking for calls whose *caller* is a test symbol. For each such
+// call where the callee can be resolved to a non-test symbol in the
+// same repo, emit a RelationTests edge {source: test caller, target:
+// symbol-being-tested}. This is how get_tests_for_symbol's
+// persisted_edge source gets populated.
+//
+// Conservative matching: only exact name matches in the same repo,
+// and only when the resolved target isn't itself a test. The
+// resolver doesn't try to infer intent beyond "a test function
+// directly calls this symbol."
+func (idx *Indexer) resolveTestLinkage(result *IndexResult) []Relation {
+	// symbolID → Symbol (so we can check IsTest on the resolved target).
+	byID := make(map[string]*Symbol)
+	for i, f := range result.Files {
+		for j := range f.Symbols {
+			byID[f.Symbols[j].ID] = &result.Files[i].Symbols[j]
+		}
+	}
+
+	// Name-index for callable non-test symbols (the resolution
+	// targets). Tests aren't candidates for their own tests.
+	nameIndex := make(map[string][]symbolEntry)
+	for _, f := range result.Files {
+		dir := filepath.Dir(f.Path)
+		for _, sym := range f.Symbols {
+			if sym.IsTest {
+				continue
+			}
+			if sym.Kind == SymbolFunction || sym.Kind == SymbolMethod {
+				nameIndex[sym.Name] = append(nameIndex[sym.Name], symbolEntry{
+					id:       sym.ID,
+					filePath: sym.FilePath,
+					dir:      dir,
+				})
+			}
+		}
+	}
+
+	seen := make(map[string]bool)
+	var relations []Relation
+
+	for _, f := range result.Files {
+		callerDir := filepath.Dir(f.Path)
+		for _, call := range f.Calls {
+			caller := byID[call.CallerID]
+			if caller == nil || !caller.IsTest {
+				continue
+			}
+			candidates := nameIndex[call.CalleeName]
+			if len(candidates) == 0 {
+				continue
+			}
+			target := resolveCallTargetScoped(call.CallerID, call.FilePath, callerDir, candidates)
+			if target == "" || target == call.CallerID {
+				continue
+			}
+			// Skip targets that are themselves test symbols —
+			// "test calls test helper" isn't the intent.
+			if tsym, ok := byID[target]; ok && tsym.IsTest {
+				continue
+			}
+
+			key := call.CallerID + ":" + target
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+
+			relations = append(relations, Relation{
+				SourceID: call.CallerID,
+				TargetID: target,
+				Type:     RelationTests,
+			})
+		}
+	}
+
+	slog.Info("test linkage resolved", "edges", len(relations))
 	return relations
 }
 

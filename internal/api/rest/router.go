@@ -20,6 +20,8 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/api/graphql"
 	"github.com/sourcebridge/sourcebridge/internal/api/middleware"
 	"github.com/sourcebridge/sourcebridge/internal/auth"
+	"github.com/sourcebridge/sourcebridge/internal/capabilities"
+	"github.com/sourcebridge/sourcebridge/internal/indexing"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/db"
 	"github.com/sourcebridge/sourcebridge/internal/events"
@@ -579,10 +581,13 @@ func (s *Server) setupRouter() {
 	if s.cfg.MCP.Enabled {
 		sessionTTL := time.Duration(s.cfg.MCP.SessionTTL) * time.Second
 		keepalive := time.Duration(s.cfg.MCP.Keepalive) * time.Second
-		s.mcp = newMCPHandler(s.store, s.knowledgeStore, s.worker, s.cfg.MCP.Repos, sessionTTL, keepalive, s.cfg.MCP.MaxSessions, s.cache)
+		s.mcp = newMCPHandlerWithEdition(s.store, s.knowledgeStore, s.worker, s.cfg.MCP.Repos, sessionTTL, keepalive, s.cfg.MCP.MaxSessions, s.cache, capabilities.NormalizeEdition(s.cfg.Edition))
 		s.mcp.qaOrchestrator = s.qaOrchestrator
 		s.mcp.qaEnabled = s.cfg.QA.ServerSideEnabled
 		s.mcp.searchSvc = s.searchSvc
+		// Shared indexing service — enables end-to-end index_repository
+		// + refresh_repository MCP flows (Follow-on #3).
+		s.mcp.indexingSvc = indexing.NewService(s.cfg, s.store, nil, nil)
 		// Wire enterprise extensions if provided via server options
 		if s.mcpPermChecker != nil {
 			s.mcp.permChecker = s.mcpPermChecker

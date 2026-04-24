@@ -235,6 +235,10 @@ func (f *TenantFilteredStore) GetCallees(symbolID string) []string {
 	return f.inner.GetCallees(symbolID)
 }
 
+func (f *TenantFilteredStore) GetTestsForSymbolPersisted(symbolID string) []string {
+	return f.inner.GetTestsForSymbolPersisted(symbolID)
+}
+
 func (f *TenantFilteredStore) GetCallEdges(repoID string) []CallEdge {
 	return f.inner.GetCallEdges(repoID)
 }

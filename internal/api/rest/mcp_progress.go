@@ -57,6 +57,7 @@ const progressHeartbeat = 15 * time.Second
 var slowToolNames = map[string]bool{
 	"explain_code":    true,
 	"get_cliff_notes": true,
+	"ask_question":    true,
 }
 
 // requestWantsSSE reports whether the client opted into streamed SSE

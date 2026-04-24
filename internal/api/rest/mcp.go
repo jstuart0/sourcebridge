@@ -17,7 +17,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/sourcebridge/sourcebridge/internal/auth"
+	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	"github.com/sourcebridge/sourcebridge/internal/db"
+	"github.com/sourcebridge/sourcebridge/internal/indexing"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
@@ -72,8 +74,9 @@ type mcpContent struct {
 }
 
 type mcpToolResult struct {
-	Content []mcpContent `json:"content"`
-	IsError bool         `json:"isError,omitempty"`
+	Content []mcpContent           `json:"content"`
+	IsError bool                   `json:"isError,omitempty"`
+	Meta    map[string]interface{} `json:"_meta,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -265,7 +268,9 @@ type mcpHandler struct {
 	store          graphstore.GraphStore
 	knowledgeStore knowledge.KnowledgeStore
 	worker         mcpWorkerCaller
-	allowedRepos   map[string]bool // nil = all repos allowed
+	indexingSvc    *indexing.Service    // Phase-3 follow-on — drives end-to-end index_repository / refresh_repository
+	edition        capabilities.Edition // drives tools/list filtering + initialize response
+	allowedRepos   map[string]bool      // nil = all repos allowed
 	sessionTTL     time.Duration
 	keepalive      time.Duration
 	maxSessions    int
@@ -316,6 +321,13 @@ func (c *mcpLocalChans) closeDone() {
 }
 
 func newMCPHandler(store graphstore.GraphStore, ks knowledge.KnowledgeStore, w mcpWorkerCaller, repos string, sessionTTL, keepalive time.Duration, maxSessions int, cache db.Cache) *mcpHandler {
+	return newMCPHandlerWithEdition(store, ks, w, repos, sessionTTL, keepalive, maxSessions, cache, capabilities.EditionOSS)
+}
+
+// newMCPHandlerWithEdition is the variant used by the real server
+// wiring (router.go) to thread the configured edition in. Tests use
+// the edition-less constructor, which defaults to OSS.
+func newMCPHandlerWithEdition(store graphstore.GraphStore, ks knowledge.KnowledgeStore, w mcpWorkerCaller, repos string, sessionTTL, keepalive time.Duration, maxSessions int, cache db.Cache, edition capabilities.Edition) *mcpHandler {
 	// Choose the session store based on what the caller provided. A non-nil
 	// Redis-capable cache gives us HA out of the box; anything else falls
 	// back to an in-process map.
@@ -331,10 +343,14 @@ func newMCPHandler(store graphstore.GraphStore, ks knowledge.KnowledgeStore, w m
 		store:          store,
 		knowledgeStore: ks,
 		worker:         w,
+		edition:        edition,
 		sessionTTL:     sessionTTL,
 		keepalive:      keepalive,
 		maxSessions:    maxSessions,
 		sessionStore:   ss,
+		// indexingSvc is wired by router.go after construction so
+		// tests without the full Server context can skip it and
+		// exercise the fallback register-only path.
 	}
 	if repos != "" {
 		h.allowedRepos = make(map[string]bool)
@@ -673,6 +689,10 @@ func (h *mcpHandler) dispatchCtx(ctx context.Context, session *mcpSession, msg j
 		return h.handleResourcesList(session, msg)
 	case "resources/read":
 		return h.handleResourcesRead(session, msg)
+	case "prompts/list":
+		return h.handlePromptsList(session, msg)
+	case "prompts/get":
+		return h.handlePromptsGet(session, msg)
 	default:
 		slog.Warn("mcp method not found", "session_id", session.id, "method", msg.Method)
 		return errorResponse(msg.ID, -32601, fmt.Sprintf("Method not found: %s", msg.Method))
@@ -721,12 +741,40 @@ func (h *mcpHandler) handleInitialize(session *mcpSession, msg jsonRPCRequest) j
 		"capabilities": map[string]interface{}{
 			"tools":     map[string]interface{}{},
 			"resources": map[string]interface{}{},
+			"prompts":   map[string]interface{}{},
+			// experimental.sourcebridge carries SourceBridge-specific
+			// capability declarations. Vanilla MCP clients ignore the
+			// extension namespace; capability-aware clients read it to
+			// skip tools that aren't available, pick latency-appropriate
+			// timeouts, and surface which LLM provider is configured.
+			"experimental": map[string]interface{}{
+				"sourcebridge": h.experimentalCapabilities(),
+			},
 		},
 		"serverInfo": map[string]interface{}{
 			"name":    mcpServerName,
 			"version": mcpServerVersion,
 		},
 	})
+}
+
+// experimentalCapabilities builds the SourceBridge extension block for
+// the initialize response. Every field is derived from the capability
+// registry — this function is the sole emit point for the initialize
+// path, so surfaces don't drift.
+func (h *mcpHandler) experimentalCapabilities() map[string]interface{} {
+	features := capabilities.AvailableNames(h.edition)
+	return map[string]interface{}{
+		"edition":  string(h.edition),
+		"version":  mcpServerVersion,
+		"features": features,
+		"latency_classes": map[string]interface{}{
+			"fast_read":    "<= 100ms",
+			"search":       "100-500ms",
+			"llm":          "5-30s",
+			"indexing_op":  "seconds-to-minutes",
+		},
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -738,11 +786,24 @@ func (h *mcpHandler) handleToolsList(_ *mcpSession, msg jsonRPCRequest) jsonRPCR
 	if h.toolExtender != nil {
 		tools = append(tools, h.toolExtender.ExtraTools()...)
 	}
-	return successResponse(msg.ID, map[string]interface{}{"tools": tools})
+	// Capability gating — hide any tool whose gating capability isn't
+	// available for this edition. Tools with no gating entry in the
+	// registry (e.g. anything not yet declared there) pass through
+	// untouched so the registry is additive rather than an allowlist.
+	filtered := make([]mcpToolDefinition, 0, len(tools))
+	for _, t := range tools {
+		if cap := capabilities.MCPToolGatedBy(t.Name); cap != nil {
+			if !capabilities.IsAvailable(cap.Name, h.edition) {
+				continue
+			}
+		}
+		filtered = append(filtered, t)
+	}
+	return successResponse(msg.ID, map[string]interface{}{"tools": filtered})
 }
 
 func (h *mcpHandler) baseTools() []mcpToolDefinition {
-	return []mcpToolDefinition{
+	tools := []mcpToolDefinition{
 		{
 			Name:        "search_symbols",
 			Description: "Search for code symbols (functions, classes, types, variables) in a repository.",
@@ -832,6 +893,31 @@ func (h *mcpHandler) baseTools() []mcpToolDefinition {
 			},
 		},
 	}
+	tools = append(tools, h.phase1aToolDefs()...)
+	tools = append(tools, h.getTestsForSymbolToolDef())
+	tools = append(tools, h.getEntryPointsToolDef())
+	tools = append(tools, h.lifecycleToolDefs()...)
+	tools = append(tools, h.compoundToolDefs()...)
+	tools = append(tools, h.crossRepoToolDef())
+	return tools
+}
+
+// baseToolsWithoutPhase1a returns the pre-Phase-1a tool list — used by
+// the tools/list ordering when we later split by capability registry.
+// Not currently wired; reserved for Phase 3.
+func (h *mcpHandler) baseToolsCore() []mcpToolDefinition {
+	tools := h.baseTools()
+	core := make([]mcpToolDefinition, 0, len(tools))
+	phase1aNames := map[string]bool{
+		"get_callers": true, "get_callees": true, "get_file_imports": true,
+		"get_architecture_diagram": true, "get_recent_changes": true,
+	}
+	for _, t := range tools {
+		if !phase1aNames[t.Name] {
+			core = append(core, t)
+		}
+	}
+	return core
 }
 
 // ---------------------------------------------------------------------------
@@ -874,6 +960,39 @@ func (h *mcpHandler) handleToolsCallCtx(ctx context.Context, session *mcpSession
 		result, toolErr = h.callGetCliffNotes(session, params.Arguments)
 	case "ask_question":
 		result, toolErr = h.callAskQuestion(ctx, session, params.Arguments)
+	// Phase 1a accessor tools (see mcp_accessors.go).
+	case "get_callers":
+		result, toolErr = h.callGetCallers(session, params.Arguments)
+	case "get_callees":
+		result, toolErr = h.callGetCallees(session, params.Arguments)
+	case "get_file_imports":
+		result, toolErr = h.callGetFileImports(session, params.Arguments)
+	case "get_architecture_diagram":
+		result, toolErr = h.callGetArchitectureDiagram(session, params.Arguments)
+	case "get_recent_changes":
+		result, toolErr = h.callGetRecentChanges(session, params.Arguments)
+	// Phase 1b tools.
+	case "get_tests_for_symbol":
+		result, toolErr = h.callGetTestsForSymbol(session, params.Arguments)
+	case "get_entry_points":
+		result, toolErr = h.callGetEntryPoints(session, params.Arguments)
+	// Phase 3.2 — indexing lifecycle tools.
+	case "index_repository":
+		result, toolErr = h.callIndexRepository(session, params.Arguments)
+	case "get_index_status":
+		result, toolErr = h.callGetIndexStatus(session, params.Arguments)
+	case "refresh_repository":
+		result, toolErr = h.callRefreshRepository(session, params.Arguments)
+	// Phase 2.1 — compound workflow tools.
+	case "review_diff_against_requirements":
+		result, toolErr = h.callReviewDiffAgainstRequirements(session, params.Arguments)
+	case "impact_summary":
+		result, toolErr = h.callImpactSummary(session, params.Arguments)
+	case "onboard_new_contributor":
+		result, toolErr = h.callOnboardNewContributor(session, params.Arguments)
+	// Phase 3.4 — enterprise-only cross-repo tool.
+	case "get_cross_repo_impact":
+		result, toolErr = h.callGetCrossRepoImpact(session, params.Arguments)
 	default:
 		// Try enterprise tool extender
 		if h.toolExtender != nil {
@@ -895,6 +1014,7 @@ func (h *mcpHandler) handleToolsCallCtx(ctx context.Context, session *mcpSession
 		return successResponse(msg.ID, mcpToolResult{
 			Content: []mcpContent{{Type: "text", Text: toolErr.Error()}},
 			IsError: true,
+			Meta:    toolErrorMeta(toolErr),
 		})
 	}
 
@@ -1151,11 +1271,52 @@ func (h *mcpHandler) callAskQuestion(ctx context.Context, session *mcpSession, a
 		ConversationID: params.ConversationID,
 		PriorMessages:  params.PriorMessages,
 	}
+
+	// Phase 2.5 progress emission. When the caller sent a
+	// _meta.progressToken (streamable-HTTP path), a ContentEmitter is
+	// bound to the context. Emit a bracketing set of phase markers
+	// around the orchestrator call so the client can show
+	// "searching…" / "synthesizing…" instead of a 15–30s blank wait.
+	// These are now REAL events from the agentic loop. When a
+	// ContentEmitter is bound to the context (streamable-HTTP path),
+	// the adapter below attaches a qa.ProgressEmitter so the loop
+	// pushes structured phase events (planning / tool_call /
+	// tool_result / synthesizing / done) to the streaming client.
+	emitter := ContentEmitterFromContext(ctx)
+	if emitter != nil {
+		ctx = qa.WithProgressEmitter(ctx, &contentEmitterProgressAdapter{emitter: emitter})
+		// Mode hint up front so the client knows which pipeline is
+		// running before any loop events arrive.
+		if mode == qa.ModeFast {
+			emitter.Emit("[ask_question] mode=fast — pinned to provided context\n")
+		} else {
+			emitter.Emit("[ask_question] mode=deep — agentic retrieval + synthesis\n")
+		}
+	}
+
 	res, err := h.qaOrchestrator.Ask(ctx, in)
 	if err != nil {
+		if emitter != nil {
+			emitter.Emit("[ask_question] failed\n")
+		}
 		return nil, err
 	}
 	return res, nil
+}
+
+// contentEmitterProgressAdapter bridges qa.ProgressEmitter → MCP
+// ContentEmitter. Each structured ProgressEvent renders to a single
+// line via qa.ProgressEventString and is pushed to the streaming
+// client as a content delta.
+type contentEmitterProgressAdapter struct {
+	emitter *ContentEmitter
+}
+
+func (a *contentEmitterProgressAdapter) Emit(event qa.ProgressEvent) {
+	if a == nil || a.emitter == nil {
+		return
+	}
+	a.emitter.Emit(qa.ProgressEventString(event))
 }
 
 // ContentEmitter is present on the context (i.e. the request came in
