@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -64,6 +65,12 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 		locator := newQARepoLocator(s.store, s.cfg.Storage.RepoCachePath)
 		ectx.SetComplianceCollectors(routes.NewComplianceRepoCollectors(locator))
 	}
+
+	// Optional LLM prose-enricher for control findings. Enabled only
+	// when the feature flag + Anthropic API key are both set in env.
+	// Nil passed through SetComplianceEnricher is a no-op; reports
+	// remain audit-ready with deterministic prose when disabled.
+	ectx.SetComplianceEnricher(routes.NewComplianceEnricherFromEnv(os.Getenv))
 
 	// Public webhook endpoints — they validate their own signatures
 	r.Post("/webhooks/github", ectx.GitHubWebhook)
