@@ -50,24 +50,30 @@ func (h *mcpHandler) phase1aToolDefs() []mcpToolDefinition {
 	return []mcpToolDefinition{
 		{
 			Name:        "get_callers",
-			Description: "Return symbols that call the target symbol. Optionally walks the call graph outward up to max_hops. Data is sourced from the stored call graph — no LLM call. Use this instead of ask_question when the question is \"who calls X?\".",
+			Description: "Return symbols that call the target symbol. Optionally walks the call graph outward up to max_hops. Data is sourced from the stored call graph — no LLM call. Use this instead of ask_question when the question is \"who calls X?\". Supports pagination via cursor/limit.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
-				"properties": mergeProps(symbolRefProps(), map[string]interface{}{
-					"max_hops":             map[string]interface{}{"type": "integer", "description": "Walk depth outward from the target (default 1, cap 3)"},
-					"include_test_callers": map[string]interface{}{"type": "boolean", "description": "Include symbols marked IsTest (default false)"},
-				}),
+				"properties": mergeProps(
+					mergeProps(symbolRefProps(), map[string]interface{}{
+						"max_hops":             map[string]interface{}{"type": "integer", "description": "Walk depth outward from the target (default 1, cap 3)"},
+						"include_test_callers": map[string]interface{}{"type": "boolean", "description": "Include symbols marked IsTest (default false)"},
+					}),
+					paginationToolProps(100, 500),
+				),
 				"required": []string{"repository_id", "file_path", "symbol_name"},
 			},
 		},
 		{
 			Name:        "get_callees",
-			Description: "Return symbols called by the target symbol. Optionally walks the call graph inward up to max_hops. Data is sourced from the stored call graph — no LLM call.",
+			Description: "Return symbols called by the target symbol. Optionally walks the call graph inward up to max_hops. Data is sourced from the stored call graph — no LLM call. Supports pagination via cursor/limit.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
-				"properties": mergeProps(symbolRefProps(), map[string]interface{}{
-					"max_hops": map[string]interface{}{"type": "integer", "description": "Walk depth inward from the target (default 1, cap 3)"},
-				}),
+				"properties": mergeProps(
+					mergeProps(symbolRefProps(), map[string]interface{}{
+						"max_hops": map[string]interface{}{"type": "integer", "description": "Walk depth inward from the target (default 1, cap 3)"},
+					}),
+					paginationToolProps(100, 500),
+				),
 				"required": []string{"repository_id", "file_path", "symbol_name"},
 			},
 		},
@@ -219,9 +225,11 @@ type callGraphSymbol struct {
 }
 
 type callGraphResult struct {
-	Root    callGraphSymbol   `json:"root"`
-	Symbols []callGraphSymbol `json:"symbols"`
-	Edges   []callGraphEdge   `json:"edges"`
+	Root       callGraphSymbol   `json:"root"`
+	Symbols    []callGraphSymbol `json:"symbols"`
+	Edges      []callGraphEdge   `json:"edges"`
+	Total      int               `json:"total"`
+	NextCursor string            `json:"next_cursor,omitempty"`
 }
 
 // callGetCallers / callGetCallees share most of the walk logic — direction
@@ -238,6 +246,7 @@ func (h *mcpHandler) callGetCallees(session *mcpSession, args json.RawMessage) (
 func (h *mcpHandler) walkCallGraph(session *mcpSession, args json.RawMessage, direction string) (interface{}, error) {
 	var params struct {
 		symbolRefParams
+		paginationArgs
 		MaxHops            int  `json:"max_hops"`
 		IncludeTestCallers bool `json:"include_test_callers"`
 	}
@@ -361,10 +370,22 @@ func (h *mcpHandler) walkCallGraph(session *mcpSession, args json.RawMessage, di
 		IsTest:     root.IsTest,
 	}
 
+	// Paginate the symbols list. Edges aren't paginated today — they
+	// reference pageless symbol IDs, so full edges + paginated nodes
+	// is the honest contract (clients can filter edges against the
+	// current page's symbols on their side).
+	offset, err := decodeCursor(params.Cursor)
+	if err != nil {
+		return nil, errInvalidArguments(err.Error())
+	}
+	page, nextCursor, total := paginateSlice(symbols, offset, params.Limit, 100, 500)
+
 	return callGraphResult{
-		Root:    rootView,
-		Symbols: symbols,
-		Edges:   edges,
+		Root:       rootView,
+		Symbols:    page,
+		Edges:      edges,
+		Total:      total,
+		NextCursor: nextCursor,
 	}, nil
 }
 
