@@ -152,8 +152,16 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 	// thoughts/shared/plans/2026-04-24-first-class-compliance-reports.md).
 	// Paths under /api/v1/compliance follow the tenant-in-path
 	// convention of /billing, /audit, /sessions.
+	//
+	// Auth: the same JWT + tenant middleware stack as /api/v1/enterprise.
+	// Compliance data is per-tenant and mutable, so every endpoint must
+	// require an authenticated caller whose tenant matches the orgId
+	// in the path. The store layer enforces tenant-match on every
+	// call; the middleware just prevents unauthenticated reads.
 	slog.Info("registering compliance routes at /api/v1/compliance")
 	r.Route("/api/v1/compliance", func(r chi.Router) {
+		r.Use(auth.MiddlewareWithTokens(s.jwtMgr, s.tokenStore))
+		r.Use(middleware.TenantMiddleware(&claimsFirstTenantExtractor{base: ectx.TenantExtractor}))
 		ectx.RegisterComplianceRoutes(r)
 	})
 }
