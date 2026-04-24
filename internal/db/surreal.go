@@ -290,8 +290,22 @@ func (s *SurrealDB) Migrate(ctx context.Context, migrationsDir string) error {
 	}
 	slog.Info("current schema version", "version", appliedVersion)
 
-	// Execute each migration file in order
+	// Execute each migration file in order, skipping any whose
+	// version is already applied. Migration filenames follow
+	// "NNN_description.surql" (three-digit leading version); the
+	// version field on schema_version is bumped after each
+	// successful apply so subsequent boots don't re-run destructive
+	// migrations (REMOVE TABLE, etc.).
 	for _, fname := range files {
+		version := migrationVersion(fname)
+		if version == 0 {
+			slog.Warn("migration filename missing numeric prefix; skipping", "file", fname)
+			continue
+		}
+		if version <= appliedVersion {
+			slog.Debug("skipping already-applied migration", "file", fname, "version", version)
+			continue
+		}
 		fpath := filepath.Join(migrationsDir, fname)
 		data, err := os.ReadFile(fpath)
 		if err != nil {
@@ -300,12 +314,39 @@ func (s *SurrealDB) Migrate(ctx context.Context, migrationsDir string) error {
 
 		sql := string(data)
 
-		slog.Info("applying migration", "file", fname)
+		slog.Info("applying migration", "file", fname, "version", version)
 		if _, err := surrealdb.Query[interface{}](ctx, s.db, sql, nil); err != nil {
 			return fmt.Errorf("executing migration %s: %w", fname, err)
 		}
-		slog.Info("migration applied", "file", fname)
+
+		// Record the applied version so later boots skip it.
+		if _, err := surrealdb.Query[interface{}](ctx, s.db,
+			"CREATE schema_version SET version = $v, applied_at = time::now()",
+			map[string]any{"v": version}); err != nil {
+			// If the row creation fails, subsequent boots will re-run
+			// the migration. That's the conservative failure mode —
+			// re-running an idempotent migration is safe, dropping a
+			// user's data is not.
+			slog.Warn("schema_version upsert failed; migration may re-run next boot",
+				"file", fname, "version", version, "error", err)
+		}
+		appliedVersion = version
+		slog.Info("migration applied", "file", fname, "version", version)
 	}
 
 	return nil
+}
+
+// migrationVersion extracts the numeric prefix from a migration
+// filename — "021_compliance_assessment.surql" → 21. Returns 0 when
+// the filename doesn't begin with digits.
+func migrationVersion(fname string) int {
+	n := 0
+	for _, c := range fname {
+		if c < '0' || c > '9' {
+			break
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
 }
