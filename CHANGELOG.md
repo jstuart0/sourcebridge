@@ -4,6 +4,100 @@ All notable changes to SourceBridge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Theme: **MCP as a first-class client surface.** SourceBridge's capabilities
+are now exposed through a complete Model Context Protocol server — not the
+minimum-viable handful, but the full retrieval/analysis/lifecycle surface a
+serious coding agent needs. Three phases, 19 tools, a capability registry
+that's the single source of truth across MCP + GraphQL + REST, structured
+errors, cursor pagination, compound workflows, and real intra-agentic-loop
+progress events streaming through SSE.
+
+### Added
+
+- **MCP Phase 1a — accessor tools.** `get_callers`, `get_callees`,
+  `get_file_imports`, `get_architecture_diagram`, `get_recent_changes`.
+  Each takes `{repository_id, file_path, symbol_name, line_start?}` and
+  returns the structured graph projection the UI uses, now directly
+  addressable by an agent.
+- **MCP Phase 1b — intent-shaped tools.** `get_tests_for_symbol` merges
+  persisted `RelationTests` edges, filename-adjacency heuristics, and
+  text-reference scans into a single result set where each hit is tagged
+  with `match_sources: []` so the agent can see which signals agreed.
+  `get_entry_points` classifies entries in both `basic` and
+  `framework_aware` modes (Grails controllers, FastAPI routers, Go
+  `http.Handler`, Next.js `app/api/.../route.ts`). `get_recent_changes`
+  symbol-scopes `git log -L`.
+- **MCP Phase 2 — workflow tools.** `review_diff_against_requirements`
+  takes a commit range or explicit file list, resolves touched symbols,
+  and cross-references linked requirements to flag public symbols with
+  no coverage. `impact_summary` composes callers + tests + linked
+  requirements in one call. `onboard_new_contributor` returns a ranked
+  reading list of entry points with cliff notes and recent-activity
+  authorship. Server-side composition so clients aren't forced to
+  orchestrate 4–6 round-trips.
+- **MCP Phase 2.2 — prompts surface.** `prompts/list` + `prompts/get`
+  expose three curated workflows as MCP prompts for clients that prefer
+  them over tool composition.
+- **MCP Phase 2.3 — cursor pagination.** Shared `encodeCursor` /
+  `decodeCursor` / `paginateSlice[T]` helpers return opaque base64 JSON
+  cursors. Every list-returning tool now carries `{total, next_cursor}`.
+- **MCP Phase 2.5 — real agent-loop progress events.** The agentic
+  QA loop emits structured `planning` / `tool_call` / `tool_result` /
+  `synthesizing` / `done(reason)` events through a new `qa.ProgressEmitter`;
+  a `contentEmitterProgressAdapter` bridges them to the MCP SSE path so
+  streaming clients see live `[agent] → search_evidence` /
+  `[agent] ← search_evidence (231ms)` markers instead of a 30s blank wait.
+- **MCP Phase 2.6 — structured error envelope.** `{ isError: true, content,
+  _meta.sourcebridge: { code, remediation } }` — vanilla MCP clients still
+  get a readable text body; capability-aware clients get a machine-actionable
+  code (`SYMBOL_NOT_FOUND`, `REPOSITORY_NOT_FOUND`, `INVALID_CURSOR`, …) and
+  a concrete next step. Back-compat safe.
+- **MCP Phase 3 — capability registry.** `internal/capabilities/registry.go`
+  is the single source of truth for what's available in which edition.
+  Drives the MCP `tools/list` filter, the `initialize` response
+  (`experimental.sourcebridge.features`), GraphQL `__schema` gating, and
+  REST config responses. Test suite enforces no duplicate names, every
+  capability has at least one edition, and no tool is gated by two
+  capabilities.
+- **MCP Phase 3.2 — indexing lifecycle tools.** `index_repository`,
+  `get_index_status`, `refresh_repository`. Remote git URLs now flow
+  through the extracted `internal/indexing.Service` end-to-end — clone,
+  parse, persist, without the GraphQL resolver as the critical path.
+- **MCP Phase 3.4 — `get_cross_repo_impact`** (enterprise). Hidden on OSS
+  editions via the capability registry, visible and functional on
+  enterprise.
+- **RelationTests edge persistence.** The indexer now emits
+  `test_for` edges during the resolve pass instead of recomputing them
+  at query time. `Store.GetTestsForSymbolPersisted` exposes the cached
+  view; `get_tests_for_symbol` uses it as one of three merged sources.
+- **Shared `internal/indexing.Service`.** Import and reindex logic lifted
+  out of the GraphQL resolver so MCP, CLI, and future surfaces share one
+  path. Exposes `IsGitURL`, `NormalizeGitURL`, `GitCloneCmd`,
+  `sanitizeRepoName`, `deriveRepoName` as supporting helpers.
+- **Compliance collector wiring.** GitHub platform collector now composes
+  into the compliance orchestrator via a routes adapter; the
+  `/api/v1/compliance` surface is mounted under the enterprise router
+  group and wrapped in JWT + tenant middleware.
+
+### Changed
+
+- **GraphQL + REST edition checks migrated to the capability registry.**
+  Direct `cfg.Edition == "enterprise"` comparisons in
+  `internal/api/graphql/resolver.go` and `internal/api/rest/llm_config.go`
+  are now `capabilities.IsAvailable("per_op_models",
+  capabilities.NormalizeEdition(...))`. Reduces the risk of gate drift as
+  new capabilities land.
+- **`ask_question` now streams.** The `slowToolNames` allowlist in
+  `internal/api/rest/mcp_progress.go` gained `ask_question` so the
+  streamable-HTTP path triggers and the adapter has a channel to push
+  agent-loop events onto.
+
+### Removed
+
+- Nothing shipping. 20 commits of additive surface.
+
 ## [0.9.0-rc.2] — 2026-04-23
 
 Second prerelease. Two material changes on top of rc.1: a reliability
