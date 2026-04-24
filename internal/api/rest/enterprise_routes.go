@@ -129,6 +129,15 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 	r.Route("/api/v1/diagrams", func(r chi.Router) {
 		ectx.RegisterDiagramEditorRoutes(r)
 	})
+
+	// Compliance-assessment endpoints (plan
+	// thoughts/shared/plans/2026-04-24-first-class-compliance-reports.md).
+	// Paths under /api/v1/compliance follow the tenant-in-path
+	// convention of /billing, /audit, /sessions.
+	slog.Info("registering compliance routes at /api/v1/compliance")
+	r.Route("/api/v1/compliance", func(r chi.Router) {
+		ectx.RegisterComplianceRoutes(r)
+	})
 }
 
 func withWorkerLLMMetadata(ctx context.Context, cfg *config.Config, operationGroup string) context.Context {
