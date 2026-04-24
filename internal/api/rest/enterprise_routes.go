@@ -58,6 +58,13 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 		repoChecker:    ectx.RepoChecker,
 	})
 
+	// Wire compliance collectors. The repo collector walks each
+	// in-scope repo's clone via the existing QA locator.
+	if s.store != nil {
+		locator := newQARepoLocator(s.store, s.cfg.Storage.RepoCachePath)
+		ectx.SetComplianceCollectors(routes.NewComplianceRepoCollectors(locator))
+	}
+
 	// Public webhook endpoints — they validate their own signatures
 	r.Post("/webhooks/github", ectx.GitHubWebhook)
 	r.Post("/webhooks/gitlab", ectx.GitLabWebhook)
