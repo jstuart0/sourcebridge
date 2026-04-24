@@ -893,6 +893,7 @@ func (h *mcpHandler) baseTools() []mcpToolDefinition {
 	tools = append(tools, h.getEntryPointsToolDef())
 	tools = append(tools, h.lifecycleToolDefs()...)
 	tools = append(tools, h.compoundToolDefs()...)
+	tools = append(tools, h.crossRepoToolDef())
 	return tools
 }
 
@@ -984,6 +985,9 @@ func (h *mcpHandler) handleToolsCallCtx(ctx context.Context, session *mcpSession
 		result, toolErr = h.callImpactSummary(session, params.Arguments)
 	case "onboard_new_contributor":
 		result, toolErr = h.callOnboardNewContributor(session, params.Arguments)
+	// Phase 3.4 — enterprise-only cross-repo tool.
+	case "get_cross_repo_impact":
+		result, toolErr = h.callGetCrossRepoImpact(session, params.Arguments)
 	default:
 		// Try enterprise tool extender
 		if h.toolExtender != nil {

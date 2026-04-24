@@ -176,11 +176,11 @@ var Registry = []Capability{
 		RESTRoutes:  []string{"/api/v1/enterprise/settings"},
 	},
 	{
-		Name:        "cross_repo_impact",
-		Description: "Cross-repository impact analysis over configured repo-dependency edges.",
-		Editions:    []Edition{EditionEnterprise},
-		RESTRoutes:  []string{"/api/v1/enterprise/dependencies"},
-		// MCPToolNames populated in Phase 3.4 when get_cross_repo_impact ships.
+		Name:         "cross_repo_impact",
+		Description:  "Cross-repository impact analysis over configured repo-dependency edges.",
+		Editions:     []Edition{EditionEnterprise},
+		MCPToolNames: []string{"get_cross_repo_impact"},
+		RESTRoutes:   []string{"/api/v1/enterprise/dependencies"},
 		LatencyClass: "search",
 	},
 	{
