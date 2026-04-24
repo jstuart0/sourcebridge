@@ -1266,10 +1266,30 @@ func (h *mcpHandler) callAskQuestion(ctx context.Context, session *mcpSession, a
 		ConversationID: params.ConversationID,
 		PriorMessages:  params.PriorMessages,
 	}
+
+	// Phase 2.5 progress emission. When the caller sent a
+	// _meta.progressToken (streamable-HTTP path), a ContentEmitter is
+	// bound to the context. Emit a bracketing set of phase markers
+	// around the orchestrator call so the client can show
+	// "searching…" / "synthesizing…" instead of a 15–30s blank wait.
+	// These are server-side phase hints, not events from the agentic
+	// loop itself — true intra-loop streaming ("tool_call:
+	// search_evidence") requires the Python worker to emit structured
+	// progress events over gRPC, which is a follow-on scope.
+	emitter := ContentEmitterFromContext(ctx)
+	emitter.Emit("[ask_question] planning…\n")
+	if mode == qa.ModeFast {
+		emitter.Emit("[ask_question] mode=fast — pinned to provided context\n")
+	} else {
+		emitter.Emit("[ask_question] mode=deep — agentic retrieval + synthesis\n")
+	}
+
 	res, err := h.qaOrchestrator.Ask(ctx, in)
 	if err != nil {
+		emitter.Emit("[ask_question] failed\n")
 		return nil, err
 	}
+	emitter.Emit("[ask_question] done\n")
 	return res, nil
 }
 
