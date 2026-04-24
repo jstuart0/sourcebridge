@@ -101,12 +101,16 @@ func (h *mcpHandler) phase1aToolDefs() []mcpToolDefinition {
 		},
 		{
 			Name:        "get_recent_changes",
-			Description: "Return the last N git commits affecting a path in the repository. File-level filter (directory or file). Symbol-level line filtering is a Phase 1b extension.",
+			Description: "Return the last N git commits affecting a path (file-level) or a specific symbol (line-range filter via git log -L). Provide either `path` OR {file_path + symbol_name} — symbol-level mode uses the symbol's line range at current HEAD to narrow commits to those that touched those lines.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"repository_id": map[string]interface{}{"type": "string", "description": "Repository ID"},
-					"path":          map[string]interface{}{"type": "string", "description": "Repo-relative path (file or directory); default = repo root"},
+					"path":          map[string]interface{}{"type": "string", "description": "Repo-relative path (file or directory) — file-level mode. Default = repo root."},
+					"file_path":     map[string]interface{}{"type": "string", "description": "Repo-relative file path for symbol-level mode. Pair with symbol_name."},
+					"symbol_name":   map[string]interface{}{"type": "string", "description": "Symbol name for symbol-level mode. Pair with file_path."},
+					"line_start":    map[string]interface{}{"type": "integer", "description": "Optional disambiguator when the same name appears multiple times in file_path."},
+					"symbol_id":     map[string]interface{}{"type": "string", "description": "Optional optimization hint for symbol-level mode."},
 					"limit":         map[string]interface{}{"type": "integer", "description": "Max commits to return (default 20, cap 200)"},
 				},
 				"required": []string{"repository_id"},
@@ -654,10 +658,18 @@ func (h *mcpHandler) callGetRecentChanges(session *mcpSession, args json.RawMess
 	var params struct {
 		RepositoryID string `json:"repository_id"`
 		Path         string `json:"path"`
-		Limit        int    `json:"limit"`
+		// Symbol-level filter (Phase 1b). When both file_path and
+		// symbol_name are set, the tool resolves the symbol, reads
+		// its line range, and runs `git log -L start,end:file` instead
+		// of a plain path-filtered log.
+		FilePath   string `json:"file_path"`
+		SymbolName string `json:"symbol_name"`
+		LineStart  int    `json:"line_start,omitempty"`
+		SymbolID   string `json:"symbol_id,omitempty"`
+		Limit      int    `json:"limit"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
-		return nil, fmt.Errorf("invalid arguments: %v", err)
+		return nil, errInvalidArguments(err.Error())
 	}
 	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
 		return nil, err
@@ -686,6 +698,30 @@ func (h *mcpHandler) callGetRecentChanges(session *mcpSession, args json.RawMess
 		return nil, fmt.Errorf("repository has no resolved git path on disk")
 	}
 
+	// Symbol-level mode: resolve the symbol and run git log -L.
+	if params.SymbolName != "" || params.SymbolID != "" {
+		sym, err := h.resolveSymbol(symbolRefParams{
+			RepositoryID: params.RepositoryID,
+			FilePath:     params.FilePath,
+			SymbolName:   params.SymbolName,
+			LineStart:    params.LineStart,
+			SymbolID:     params.SymbolID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		commits, err := runGitLogSymbol(context.Background(), gitRoot, sym.FilePath, sym.StartLine, sym.EndLine, limit)
+		if err != nil {
+			return nil, fmt.Errorf("git log -L failed: %v", err)
+		}
+		return recentChangesResult{
+			RepositoryID: params.RepositoryID,
+			Path:         fmt.Sprintf("%s:%d-%d", sym.FilePath, sym.StartLine, sym.EndLine),
+			Commits:      commits,
+		}, nil
+	}
+
+	// File / directory mode.
 	commits, err := runGitLog(context.Background(), gitRoot, params.Path, limit)
 	if err != nil {
 		return nil, fmt.Errorf("git log failed: %v", err)
@@ -696,6 +732,64 @@ func (h *mcpHandler) callGetRecentChanges(session *mcpSession, args json.RawMess
 		Path:         params.Path,
 		Commits:      commits,
 	}, nil
+}
+
+// runGitLogSymbol shells to `git log -L start,end:file` for
+// line-range-aware history. The -L mode output is more verbose than
+// path-filtered log (it includes the patch for each commit), so we
+// pass -s to suppress patches and keep the output parseable with the
+// same format as the file-level helper.
+func runGitLogSymbol(ctx context.Context, gitRoot, filePath string, startLine, endLine, limit int) ([]recentChange, error) {
+	const sep = "\x1f"
+	const recSep = "\x1e"
+	format := strings.Join([]string{"%H", "%an", "%ae", "%aI", "%s"}, sep) + recSep
+
+	// `git log -L` doesn't accept -n (limit) directly — it always
+	// prints full history for the range. We read the output and
+	// stop after `limit` records. Also pass -s to suppress the
+	// per-commit patch that -L emits by default.
+	args := []string{
+		"-C", gitRoot,
+		"log",
+		fmt.Sprintf("--pretty=format:%s", format),
+		"-s",
+		"-L",
+		fmt.Sprintf("%d,%d:%s", startLine, endLine, filePath),
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	var commits []recentChange
+	for _, block := range strings.Split(string(out), recSep) {
+		block = strings.TrimLeft(block, "\n")
+		if block == "" {
+			continue
+		}
+		// -s output shouldn't include file blocks, but strip any
+		// trailing newline content defensively.
+		header := block
+		if i := strings.Index(block, "\n"); i != -1 {
+			header = block[:i]
+		}
+		fields := strings.Split(header, sep)
+		if len(fields) < 5 {
+			continue
+		}
+		commits = append(commits, recentChange{
+			SHA:         fields[0],
+			Author:      fields[1],
+			AuthorEmail: fields[2],
+			Date:        fields[3],
+			Subject:     fields[4],
+		})
+		if len(commits) >= limit {
+			break
+		}
+	}
+	return commits, nil
 }
 
 // runGitLog shells out to `git log --pretty=... -n LIMIT -- PATH` and
