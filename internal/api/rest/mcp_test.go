@@ -467,6 +467,8 @@ func TestMCP_ToolsList(t *testing.T) {
 		"search_symbols", "explain_code", "get_requirements", "get_impact_report", "get_cliff_notes", "ask_question",
 		// Phase 1a accessor tools
 		"get_callers", "get_callees", "get_file_imports", "get_architecture_diagram", "get_recent_changes",
+		// Phase 1b accessor tools
+		"get_tests_for_symbol",
 	}
 	if len(tools) != len(expected) {
 		t.Fatalf("expected %d tools, got %d (names: %v)", len(expected), len(tools), toolNames(tools))

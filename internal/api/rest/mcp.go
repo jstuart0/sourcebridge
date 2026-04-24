@@ -883,7 +883,9 @@ func (h *mcpHandler) baseTools() []mcpToolDefinition {
 			},
 		},
 	}
-	return append(tools, h.phase1aToolDefs()...)
+	tools = append(tools, h.phase1aToolDefs()...)
+	tools = append(tools, h.getTestsForSymbolToolDef())
+	return tools
 }
 
 // baseToolsWithoutPhase1a returns the pre-Phase-1a tool list — used by
@@ -955,6 +957,9 @@ func (h *mcpHandler) handleToolsCallCtx(ctx context.Context, session *mcpSession
 		result, toolErr = h.callGetArchitectureDiagram(session, params.Arguments)
 	case "get_recent_changes":
 		result, toolErr = h.callGetRecentChanges(session, params.Arguments)
+	// Phase 1b tools.
+	case "get_tests_for_symbol":
+		result, toolErr = h.callGetTestsForSymbol(session, params.Arguments)
 	default:
 		// Try enterprise tool extender
 		if h.toolExtender != nil {

@@ -93,6 +93,13 @@ var Registry = []Capability{
 		MCPToolNames: []string{"get_recent_changes"},
 		LatencyClass: "fast_read",
 	},
+	{
+		Name:         "test_linkage",
+		Description:  "Resolve tests that exercise a symbol via persisted edges, adjacent-test heuristics, and text-reference fallback.",
+		Editions:     []Edition{EditionOSS, EditionEnterprise},
+		MCPToolNames: []string{"get_tests_for_symbol"},
+		LatencyClass: "fast_read",
+	},
 
 	// ---- Requirements + impact ----
 	{
