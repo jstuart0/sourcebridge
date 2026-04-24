@@ -458,20 +458,32 @@ func TestMCP_ToolsList(t *testing.T) {
 	if !ok {
 		t.Fatal("expected tools array in result")
 	}
-	if len(tools) != 6 {
-		t.Fatalf("expected 6 tools, got %d", len(tools))
-	}
-
 	names := make(map[string]bool)
 	for _, tool := range tools {
 		names[tool.Name] = true
 	}
-	expected := []string{"search_symbols", "explain_code", "get_requirements", "get_impact_report", "get_cliff_notes", "ask_question"}
+	expected := []string{
+		// Pre-Phase-1a tools
+		"search_symbols", "explain_code", "get_requirements", "get_impact_report", "get_cliff_notes", "ask_question",
+		// Phase 1a accessor tools
+		"get_callers", "get_callees", "get_file_imports", "get_architecture_diagram", "get_recent_changes",
+	}
+	if len(tools) != len(expected) {
+		t.Fatalf("expected %d tools, got %d (names: %v)", len(expected), len(tools), toolNames(tools))
+	}
 	for _, name := range expected {
 		if !names[name] {
 			t.Errorf("missing tool: %s", name)
 		}
 	}
+}
+
+func toolNames(tools []mcpToolDefinition) []string {
+	out := make([]string, len(tools))
+	for i, t := range tools {
+		out[i] = t.Name
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/sourcebridge/sourcebridge/internal/auth"
+	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	"github.com/sourcebridge/sourcebridge/internal/db"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
@@ -265,7 +266,8 @@ type mcpHandler struct {
 	store          graphstore.GraphStore
 	knowledgeStore knowledge.KnowledgeStore
 	worker         mcpWorkerCaller
-	allowedRepos   map[string]bool // nil = all repos allowed
+	edition        capabilities.Edition // drives tools/list filtering + initialize response
+	allowedRepos   map[string]bool      // nil = all repos allowed
 	sessionTTL     time.Duration
 	keepalive      time.Duration
 	maxSessions    int
@@ -316,6 +318,13 @@ func (c *mcpLocalChans) closeDone() {
 }
 
 func newMCPHandler(store graphstore.GraphStore, ks knowledge.KnowledgeStore, w mcpWorkerCaller, repos string, sessionTTL, keepalive time.Duration, maxSessions int, cache db.Cache) *mcpHandler {
+	return newMCPHandlerWithEdition(store, ks, w, repos, sessionTTL, keepalive, maxSessions, cache, capabilities.EditionOSS)
+}
+
+// newMCPHandlerWithEdition is the variant used by the real server
+// wiring (router.go) to thread the configured edition in. Tests use
+// the edition-less constructor, which defaults to OSS.
+func newMCPHandlerWithEdition(store graphstore.GraphStore, ks knowledge.KnowledgeStore, w mcpWorkerCaller, repos string, sessionTTL, keepalive time.Duration, maxSessions int, cache db.Cache, edition capabilities.Edition) *mcpHandler {
 	// Choose the session store based on what the caller provided. A non-nil
 	// Redis-capable cache gives us HA out of the box; anything else falls
 	// back to an in-process map.
@@ -331,6 +340,7 @@ func newMCPHandler(store graphstore.GraphStore, ks knowledge.KnowledgeStore, w m
 		store:          store,
 		knowledgeStore: ks,
 		worker:         w,
+		edition:        edition,
 		sessionTTL:     sessionTTL,
 		keepalive:      keepalive,
 		maxSessions:    maxSessions,
@@ -721,12 +731,39 @@ func (h *mcpHandler) handleInitialize(session *mcpSession, msg jsonRPCRequest) j
 		"capabilities": map[string]interface{}{
 			"tools":     map[string]interface{}{},
 			"resources": map[string]interface{}{},
+			// experimental.sourcebridge carries SourceBridge-specific
+			// capability declarations. Vanilla MCP clients ignore the
+			// extension namespace; capability-aware clients read it to
+			// skip tools that aren't available, pick latency-appropriate
+			// timeouts, and surface which LLM provider is configured.
+			"experimental": map[string]interface{}{
+				"sourcebridge": h.experimentalCapabilities(),
+			},
 		},
 		"serverInfo": map[string]interface{}{
 			"name":    mcpServerName,
 			"version": mcpServerVersion,
 		},
 	})
+}
+
+// experimentalCapabilities builds the SourceBridge extension block for
+// the initialize response. Every field is derived from the capability
+// registry — this function is the sole emit point for the initialize
+// path, so surfaces don't drift.
+func (h *mcpHandler) experimentalCapabilities() map[string]interface{} {
+	features := capabilities.AvailableNames(h.edition)
+	return map[string]interface{}{
+		"edition":  string(h.edition),
+		"version":  mcpServerVersion,
+		"features": features,
+		"latency_classes": map[string]interface{}{
+			"fast_read":    "<= 100ms",
+			"search":       "100-500ms",
+			"llm":          "5-30s",
+			"indexing_op":  "seconds-to-minutes",
+		},
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -738,7 +775,20 @@ func (h *mcpHandler) handleToolsList(_ *mcpSession, msg jsonRPCRequest) jsonRPCR
 	if h.toolExtender != nil {
 		tools = append(tools, h.toolExtender.ExtraTools()...)
 	}
-	return successResponse(msg.ID, map[string]interface{}{"tools": tools})
+	// Capability gating — hide any tool whose gating capability isn't
+	// available for this edition. Tools with no gating entry in the
+	// registry (e.g. anything not yet declared there) pass through
+	// untouched so the registry is additive rather than an allowlist.
+	filtered := make([]mcpToolDefinition, 0, len(tools))
+	for _, t := range tools {
+		if cap := capabilities.MCPToolGatedBy(t.Name); cap != nil {
+			if !capabilities.IsAvailable(cap.Name, h.edition) {
+				continue
+			}
+		}
+		filtered = append(filtered, t)
+	}
+	return successResponse(msg.ID, map[string]interface{}{"tools": filtered})
 }
 
 func (h *mcpHandler) baseTools() []mcpToolDefinition {
