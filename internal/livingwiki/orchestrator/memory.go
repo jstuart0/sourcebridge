@@ -46,6 +46,13 @@ func (m *MemoryPageStore) SetCanonical(_ context.Context, repoID string, page as
 	return nil
 }
 
+func (m *MemoryPageStore) DeleteCanonical(_ context.Context, repoID, pageID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.canonical, canonicalKey(repoID, pageID))
+	return nil
+}
+
 func (m *MemoryPageStore) GetProposed(_ context.Context, repoID, prID, pageID string) (ast.Page, bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

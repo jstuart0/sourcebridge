@@ -81,6 +81,11 @@ type PageStore interface {
 	// SetCanonical stores a page as the canonical AST for the given repo.
 	SetCanonical(ctx context.Context, repoID string, page ast.Page) error
 
+	// DeleteCanonical removes a canonical page from the store. Used when a page
+	// is renamed or migrated and the old ID must be retired.
+	// A no-op when the page does not exist.
+	DeleteCanonical(ctx context.Context, repoID, pageID string) error
+
 	// GetProposed returns the proposed page within the given PR.
 	// prID is the PR identifier returned by WikiPR.ID().
 	// Returns (Page{}, false, nil) when no proposed page exists for this PR.
