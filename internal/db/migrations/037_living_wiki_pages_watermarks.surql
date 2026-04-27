@@ -27,15 +27,13 @@ DEFINE FIELD IF NOT EXISTS ast_json ON TABLE lw_pages TYPE string DEFAULT '';
 DEFINE FIELD IF NOT EXISTS created_at ON TABLE lw_pages TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS updated_at ON TABLE lw_pages TYPE datetime DEFAULT time::now();
 
--- Unique canonical page: one canonical row per (repo_id, page_id).
-DEFINE INDEX IF NOT EXISTS idx_lw_pages_canonical
-    ON TABLE lw_pages COLUMNS repo_id, page_id, kind
-    WHERE kind = 'canonical' UNIQUE;
-
--- Unique proposed page: one proposed row per (repo_id, pr_id, page_id).
-DEFINE INDEX IF NOT EXISTS idx_lw_pages_proposed
-    ON TABLE lw_pages COLUMNS repo_id, pr_id, page_id, kind
-    WHERE kind = 'proposed' UNIQUE;
+-- Uniqueness is over (repo_id, pr_id, page_id, kind). For canonical rows
+-- pr_id is empty, so this collapses to (repo_id, page_id, 'canonical').
+-- For proposed rows pr_id is the PR ID, so each PR's proposed set is
+-- independent. SurrealDB's DEFINE INDEX does not accept WHERE clauses,
+-- so the disambiguation is encoded in the column tuple itself.
+DEFINE INDEX IF NOT EXISTS idx_lw_pages_pk
+    ON TABLE lw_pages COLUMNS repo_id, pr_id, page_id, kind UNIQUE;
 
 -- Fast lookup of all proposed pages in a PR.
 DEFINE INDEX IF NOT EXISTS idx_lw_pages_pr
