@@ -218,6 +218,16 @@ type Config struct {
 	GraphMetrics GraphMetricsProvider
 }
 
+// OnPageDoneFunc is called after each page completes generation (success,
+// exclusion, or partial warning). The callback is invoked from the page's
+// generation goroutine; implementations must be concurrency-safe.
+//
+// pageID is the planned page's ID (e.g. "arch.auth").
+// excluded is true when the page failed quality gates twice and was excluded.
+// warning is non-empty when the page was included but a non-fatal validation
+// issue occurred. It is empty for clean successes and full exclusions.
+type OnPageDoneFunc func(pageID string, excluded bool, warning string)
+
 // GenerateRequest carries the inputs for a single cold-start generation run.
 type GenerateRequest struct {
 	// Config overrides the orchestrator-level config for this run.
@@ -235,6 +245,13 @@ type GenerateRequest struct {
 	// Writer is the RepoWriter to use when Config.DirectPublish is true.
 	// May be nil when PR mode is active.
 	Writer RepoWriter
+
+	// OnPageDone is called after each page is processed (success, excluded, or
+	// warning). It is safe to leave nil. Used by the cold-start job goroutine to
+	// update the llm.Job progress record as pages complete. The total page count
+	// is known before generation starts (len(Pages)), enabling a determinate
+	// progress bar from the first callback.
+	OnPageDone OnPageDoneFunc
 }
 
 // GenerateResult summarises the outcome of a generation run.
@@ -329,6 +346,16 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 			outcomesMu.Lock()
 			outcomes[idx] = outcome
 			outcomesMu.Unlock()
+			// Notify the caller (e.g. cold-start job progress reporter) after
+			// each page completes. The callback is concurrency-safe by contract.
+			if req.OnPageDone != nil {
+				switch {
+				case outcome.excluded != nil:
+					req.OnPageDone(planned.ID, true, "")
+				default:
+					req.OnPageDone(planned.ID, false, "")
+				}
+			}
 			return nil
 		})
 	}

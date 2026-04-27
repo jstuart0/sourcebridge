@@ -14,6 +14,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/governance"
+	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
 	"github.com/sourcebridge/sourcebridge/internal/search"
@@ -42,11 +43,12 @@ type Resolver struct {
 	Flags              featureflags.Flags         // backend startup-time feature flags
 	GitConfig          GitConfigLoader            // reads git credentials from DB (multi-replica safe)
 	ComprehensionStore comprehension.Store        // comprehension settings + model capabilities; nil when unavailable
-	LivingWikiStore          livingwiki.Store              // living-wiki UI settings; nil when unavailable
-	LivingWikiResolver       *livingwiki.Resolver          // resolved living-wiki settings (UI + env fallback)
-	LivingWikiRepoStore      livingwiki.RepoSettingsStore  // per-repo living-wiki opt-in; nil when unavailable
-	LivingWikiJobResultStore livingwiki.JobResultStore     // per-run job result history; nil when unavailable
-	TrashStore               trash.Store                   // soft-delete recycle bin; nil when the feature is disabled or unavailable
+	LivingWikiStore              livingwiki.Store              // living-wiki UI settings; nil when unavailable
+	LivingWikiResolver           *livingwiki.Resolver          // resolved living-wiki settings (UI + env fallback)
+	LivingWikiRepoStore          livingwiki.RepoSettingsStore  // per-repo living-wiki opt-in; nil when unavailable
+	LivingWikiJobResultStore     livingwiki.JobResultStore     // per-run job result history; nil when unavailable
+	LivingWikiLiveOrchestrator   *lworch.Orchestrator          // living-wiki page-generation orchestrator; nil when feature unavailable
+	TrashStore                   trash.Store                   // soft-delete recycle bin; nil when the feature is disabled or unavailable
 	QA                 *qa.Orchestrator           // server-side deep-QA orchestrator; nil when server-side QA is disabled
 	SearchSvc          *search.Service            // hybrid retrieval backbone; nil falls back to legacy substring search
 	ReqBooster         *search.RequirementBooster // requirement-link cache; link mutations call Invalidate so subsequent searches see fresh links

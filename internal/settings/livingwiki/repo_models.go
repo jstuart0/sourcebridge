@@ -164,6 +164,12 @@ type LivingWikiJobResult struct {
 	ExcludedPageIDs     []string   `json:"excluded_page_ids,omitempty"`
 	GeneratedPageTitles []string   `json:"generated_page_titles,omitempty"`
 	ExclusionReasons    []string   `json:"exclusion_reasons,omitempty"`
-	Status              string     `json:"status"`
-	ErrorMessage        string     `json:"error_message,omitempty"`
+	// Status is one of: "running", "ok", "partial", "failed".
+	Status string `json:"status"`
+	// FailureCategory classifies terminal failures into one of three buckets
+	// that drive distinct CTAs in the UI (R5 taxonomy).
+	// Values: "" (success/partial), "transient", "auth", "partial_content".
+	// Always empty when Status is "ok" or "running".
+	FailureCategory string `json:"failure_category,omitempty"`
+	ErrorMessage    string `json:"error_message,omitempty"`
 }

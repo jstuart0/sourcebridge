@@ -707,8 +707,13 @@ type LivingWikiJobResult struct {
 	// current PageStore state.
 	GeneratedPageTitles []string `json:"generatedPageTitles"`
 	ExclusionReasons    []string `json:"exclusionReasons"`
-	Status              string   `json:"status"`
-	ErrorMessage        *string  `json:"errorMessage,omitempty"`
+	// status is one of: running, ok, partial, failed.
+	Status string `json:"status"`
+	// failureCategory classifies terminal failures into one of three buckets that
+	// drive distinct CTAs in the UI. Values: transient, auth, partial_content.
+	// Empty when status is ok, partial, or running.
+	FailureCategory *string `json:"failureCategory,omitempty"`
+	ErrorMessage    *string `json:"errorMessage,omitempty"`
 }
 
 // LivingWikiSettings is the UI-managed living-wiki configuration.

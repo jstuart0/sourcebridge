@@ -225,6 +225,15 @@ func (d *Dispatcher) Stop(ctx context.Context) error {
 	}
 }
 
+// LiveOrchestrator returns the living-wiki orchestrator wired into this
+// Dispatcher. Callers (e.g. the cold-start job goroutine in the GraphQL
+// resolver) use this to call Generate directly without routing through the
+// event-dispatch pipeline. Returns nil when the Dispatcher was constructed
+// without an orchestrator (should not happen in production).
+func (d *Dispatcher) LiveOrchestrator() *orchestrator.Orchestrator {
+	return d.deps.Orchestrator
+}
+
 // Submit enqueues an event for asynchronous dispatch. It returns immediately
 // after enqueuing; actual handling is asynchronous.
 //

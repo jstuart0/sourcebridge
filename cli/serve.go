@@ -28,6 +28,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/assembly"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/credentials"
 	lwmetrics "github.com/sourcebridge/sourcebridge/internal/livingwiki/metrics"
+	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/scheduler"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/webhook"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
@@ -380,6 +381,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		rest.WithLivingWikiRepoStore(lwRepoStore),
 		rest.WithLivingWikiDispatcher(lwDispatcher),
 		rest.WithLivingWikiJobResultStore(lwJobResultStore),
+		rest.WithLivingWikiLiveOrchestrator(func() *lworch.Orchestrator {
+			if lwDispatcher == nil {
+				return nil
+			}
+			return lwDispatcher.LiveOrchestrator()
+		}()),
 	)
 
 	// Initialize OIDC if configured

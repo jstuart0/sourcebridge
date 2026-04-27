@@ -2503,12 +2503,9 @@ func (r *mutationResolver) UpdateRepositoryLivingWikiSettings(ctx context.Contex
 
 // EnableLivingWikiForRepo resolves Mutation.enableLivingWikiForRepo.
 //
-// Saves the settings (enabled=true) and creates a placeholder llm.Job so the
-// UI can track progress via the activity feed. The kill-switch and global
-// enabled checks gate whether a job is actually queued.
-//
-// R5 wires the actual orchestrator dispatch; for now the job sits in "pending"
-// state and the RunWithContext is a no-op placeholder.
+// Saves the settings (enabled=true) and enqueues a living-wiki cold-start
+// job that is visible via the existing llm/activity polling feed (R5).
+// The kill-switch and global-enabled flags gate whether a job is queued.
 func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input EnableLivingWikiForRepoInput) (*EnableLivingWikiResult, error) {
 	if r.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
@@ -2557,15 +2554,10 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 		}, nil
 	}
 
-	// Happy path: enqueue a placeholder job. R5 will replace this with real
-	// cold-start orchestration logic.
+	// Gate: llm orchestrator required to queue a job.
 	if r.Orchestrator == nil {
-		// No orchestrator in test/embedded mode — return settings with no job.
 		notice := "Living Wiki orchestrator is not available. Jobs will run when the server is fully configured."
-		return &EnableLivingWikiResult{
-			Settings: gql,
-			Notice:   &notice,
-		}, nil
+		return &EnableLivingWikiResult{Settings: gql, Notice: &notice}, nil
 	}
 
 	retryExcluded := input.RetryExcludedOnly != nil && *input.RetryExcludedOnly
@@ -2574,29 +2566,44 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 		jobType = "living_wiki_retry_excluded"
 	}
 
+	// When retryExcludedOnly=true, look up the excluded page IDs from the
+	// most recent job result so the cold-start runner can scope its page set.
+	var excludedPageIDs []string
+	if retryExcluded && r.LivingWikiJobResultStore != nil {
+		if last, err := r.LivingWikiJobResultStore.LastResultForRepo(ctx, defaultTenantID, input.RepositoryID); err == nil && last != nil {
+			excludedPageIDs = last.ExcludedPageIDs
+		}
+	}
+
+	// Derive the primary sink kind for Prometheus labels from the first
+	// configured sink (fall back to "unknown" when no sinks are set).
+	sinkKind := "unknown"
+	if len(settings.Sinks) > 0 {
+		sinkKind = strings.ToLower(string(settings.Sinks[0].Kind))
+	}
+
 	req := &llm.EnqueueRequest{
 		Subsystem: llm.Subsystem("living_wiki"),
 		JobType:   jobType,
 		TargetKey: fmt.Sprintf("lw:%s:%s", defaultTenantID, input.RepositoryID),
 		RepoID:    input.RepositoryID,
 		Priority:  llm.PriorityInteractive,
-		// RunWithContext is a placeholder — R5 replaces this with the actual
-		// orchestrator dispatch. Until then the job transitions pending→ready
-		// immediately so the UI doesn't show a stuck spinner.
-		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
-			rt.ReportProgress(1.0, "queued", "Queued — waiting for R5 orchestrator dispatch")
-			return nil
-		},
+		RunWithContext: buildColdStartRunner(
+			r.LivingWikiLiveOrchestrator,
+			input.RepositoryID,
+			defaultTenantID,
+			r.getStore(ctx),
+			r.Worker,
+			excludedPageIDs,
+			sinkKind,
+			r.LivingWikiJobResultStore,
+		),
 	}
 
 	job, err := r.Orchestrator.Enqueue(req)
 	if err != nil {
-		// Non-fatal: settings are already persisted. Return without a job ID.
 		notice := fmt.Sprintf("Settings saved but job dispatch failed: %s", err.Error())
-		return &EnableLivingWikiResult{
-			Settings: gql,
-			Notice:   &notice,
-		}, nil
+		return &EnableLivingWikiResult{Settings: gql, Notice: &notice}, nil
 	}
 
 	return &EnableLivingWikiResult{
@@ -2632,6 +2639,52 @@ func (r *mutationResolver) DisableLivingWikiForRepo(ctx context.Context, reposit
 		return nil, err
 	}
 	return mapRepoLivingWikiSettings(current), nil
+}
+
+// RetryLivingWikiJob resolves Mutation.retryLivingWikiJob.
+//
+// Re-enqueues a cold-start job for the given repository, re-using the
+// current repo settings. When retryExcludedOnly is true the job is scoped
+// to pages that were excluded in the most recent run (the "Retry excluded
+// pages" CTA). When false (or nil), a full cold-start is triggered.
+func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool) (*EnableLivingWikiResult, error) {
+	if r.LivingWikiRepoStore == nil {
+		return nil, fmt.Errorf("living-wiki repo store not configured")
+	}
+
+	current, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	if err != nil {
+		return nil, fmt.Errorf("load repo settings: %w", err)
+	}
+	if current == nil {
+		current = defaultRepoSettings(repositoryID)
+	}
+
+	// Delegate to EnableLivingWikiForRepo so all the gating logic (global
+	// enabled, kill-switch, orchestrator nil checks) runs exactly once.
+	return r.EnableLivingWikiForRepo(ctx, EnableLivingWikiForRepoInput{
+		RepositoryID:      repositoryID,
+		Mode:              RepoWikiMode(current.Mode),
+		Sinks:             repoSinksToInputs(current.Sinks),
+		RetryExcludedOnly: retryExcludedOnly,
+	})
+}
+
+// repoSinksToInputs converts stored sink models back to the GraphQL input
+// type so RetryLivingWikiJob can delegate to EnableLivingWikiForRepo without
+// duplicating the settings.
+func repoSinksToInputs(sinks []livingwiki.RepoWikiSink) []*RepoWikiSinkInput {
+	out := make([]*RepoWikiSinkInput, 0, len(sinks))
+	for _, s := range sinks {
+		ep := RepoWikiEditPolicy(s.EditPolicy)
+		out = append(out, &RepoWikiSinkInput{
+			Kind:            RepoWikiSinkKind(s.Kind),
+			IntegrationName: s.IntegrationName,
+			Audience:        RepoWikiAudience(s.Audience),
+			EditPolicy:      &ep,
+		})
+	}
+	return out
 }
 
 // MoveToTrash is the resolver for the moveToTrash field.

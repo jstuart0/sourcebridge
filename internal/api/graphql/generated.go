@@ -585,6 +585,7 @@ type ComplexityRoot struct {
 		ErrorMessage        func(childComplexity int) int
 		ExcludedPageIds     func(childComplexity int) int
 		ExclusionReasons    func(childComplexity int) int
+		FailureCategory     func(childComplexity int) int
 		GeneratedPageTitles func(childComplexity int) int
 		JobID               func(childComplexity int) int
 		PagesExcluded       func(childComplexity int) int
@@ -672,6 +673,7 @@ type ComplexityRoot struct {
 		RemoveRepositoryResult             func(childComplexity int, id string) int
 		ResetComprehensionSettings         func(childComplexity int, scopeType string, scopeKey *string) int
 		RestoreFromTrash                   func(childComplexity int, typeArg TrashableType, id string, resolveConflict *RestoreConflictResolution, rename *string) int
+		RetryLivingWikiJob                 func(childComplexity int, repositoryID string, retryExcludedOnly *bool) int
 		ReviewCode                         func(childComplexity int, input ReviewCodeInput) int
 		SimulateChange                     func(childComplexity int, input SimulateChangeInput) int
 		TestLivingWikiConnection           func(childComplexity int, provider string) int
@@ -1107,6 +1109,7 @@ type MutationResolver interface {
 	UpdateRepositoryLivingWikiSettings(ctx context.Context, input UpdateRepositoryLivingWikiSettingsInput) (*RepositoryLivingWikiSettings, error)
 	EnableLivingWikiForRepo(ctx context.Context, input EnableLivingWikiForRepoInput) (*EnableLivingWikiResult, error)
 	DisableLivingWikiForRepo(ctx context.Context, repositoryID string) (*RepositoryLivingWikiSettings, error)
+	RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool) (*EnableLivingWikiResult, error)
 	MoveToTrash(ctx context.Context, typeArg TrashableType, id string, reason *string) (*TrashEntry, error)
 	RestoreFromTrash(ctx context.Context, typeArg TrashableType, id string, resolveConflict *RestoreConflictResolution, rename *string) (*RestoreResult, error)
 	PermanentlyDelete(ctx context.Context, typeArg TrashableType, id string) (bool, error)
@@ -3844,6 +3847,13 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.LivingWikiJobResult.ExclusionReasons(childComplexity), true
 
+	case "LivingWikiJobResult.failureCategory":
+		if e.complexity.LivingWikiJobResult.FailureCategory == nil {
+			break
+		}
+
+		return e.complexity.LivingWikiJobResult.FailureCategory(childComplexity), true
+
 	case "LivingWikiJobResult.generatedPageTitles":
 		if e.complexity.LivingWikiJobResult.GeneratedPageTitles == nil {
 			break
@@ -4543,6 +4553,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.RestoreFromTrash(childComplexity, args["type"].(TrashableType), args["id"].(string), args["resolveConflict"].(*RestoreConflictResolution), args["rename"].(*string)), true
+
+	case "Mutation.retryLivingWikiJob":
+		if e.complexity.Mutation.RetryLivingWikiJob == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_retryLivingWikiJob_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.RetryLivingWikiJob(childComplexity, args["repositoryId"].(string), args["retryExcludedOnly"].(*bool)), true
 
 	case "Mutation.reviewCode":
 		if e.complexity.Mutation.ReviewCode == nil {
@@ -8202,6 +8224,57 @@ func (ec *executionContext) field_Mutation_restoreFromTrash_argsRename(
 	}
 
 	var zeroVal *string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_retryLivingWikiJob_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_retryLivingWikiJob_argsRepositoryID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["repositoryId"] = arg0
+	arg1, err := ec.field_Mutation_retryLivingWikiJob_argsRetryExcludedOnly(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["retryExcludedOnly"] = arg1
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_retryLivingWikiJob_argsRepositoryID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["repositoryId"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("repositoryId"))
+	if tmp, ok := rawArgs["repositoryId"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_retryLivingWikiJob_argsRetryExcludedOnly(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*bool, error) {
+	if _, ok := rawArgs["retryExcludedOnly"]; !ok {
+		var zeroVal *bool
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("retryExcludedOnly"))
+	if tmp, ok := rawArgs["retryExcludedOnly"]; ok {
+		return ec.unmarshalOBoolean2ᚖbool(ctx, tmp)
+	}
+
+	var zeroVal *bool
 	return zeroVal, nil
 }
 
@@ -28061,6 +28134,47 @@ func (ec *executionContext) fieldContext_LivingWikiJobResult_status(_ context.Co
 	return fc, nil
 }
 
+func (ec *executionContext) _LivingWikiJobResult_failureCategory(ctx context.Context, field graphql.CollectedField, obj *LivingWikiJobResult) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_LivingWikiJobResult_failureCategory(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.FailureCategory, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_LivingWikiJobResult_failureCategory(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "LivingWikiJobResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _LivingWikiJobResult_errorMessage(ctx context.Context, field graphql.CollectedField, obj *LivingWikiJobResult) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_LivingWikiJobResult_errorMessage(ctx, field)
 	if err != nil {
@@ -32870,6 +32984,69 @@ func (ec *executionContext) fieldContext_Mutation_disableLivingWikiForRepo(ctx c
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_disableLivingWikiForRepo_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_retryLivingWikiJob(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_retryLivingWikiJob(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().RetryLivingWikiJob(rctx, fc.Args["repositoryId"].(string), fc.Args["retryExcludedOnly"].(*bool))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*EnableLivingWikiResult)
+	fc.Result = res
+	return ec.marshalNEnableLivingWikiResult2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐEnableLivingWikiResult(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_retryLivingWikiJob(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "settings":
+				return ec.fieldContext_EnableLivingWikiResult_settings(ctx, field)
+			case "jobId":
+				return ec.fieldContext_EnableLivingWikiResult_jobId(ctx, field)
+			case "notice":
+				return ec.fieldContext_EnableLivingWikiResult_notice(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type EnableLivingWikiResult", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_retryLivingWikiJob_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -39084,6 +39261,8 @@ func (ec *executionContext) fieldContext_RepositoryLivingWikiSettings_lastJobRes
 				return ec.fieldContext_LivingWikiJobResult_exclusionReasons(ctx, field)
 			case "status":
 				return ec.fieldContext_LivingWikiJobResult_status(ctx, field)
+			case "failureCategory":
+				return ec.fieldContext_LivingWikiJobResult_failureCategory(ctx, field)
 			case "errorMessage":
 				return ec.fieldContext_LivingWikiJobResult_errorMessage(ctx, field)
 			}
@@ -53428,6 +53607,8 @@ func (ec *executionContext) _LivingWikiJobResult(ctx context.Context, sel ast.Se
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "failureCategory":
+			out.Values[i] = ec._LivingWikiJobResult_failureCategory(ctx, field, obj)
 		case "errorMessage":
 			out.Values[i] = ec._LivingWikiJobResult_errorMessage(ctx, field, obj)
 		default:
@@ -53989,6 +54170,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "disableLivingWikiForRepo":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_disableLivingWikiForRepo(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "retryLivingWikiJob":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_retryLivingWikiJob(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++

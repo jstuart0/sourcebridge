@@ -30,6 +30,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
+	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/webhook"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
 	"github.com/sourcebridge/sourcebridge/internal/search"
@@ -169,6 +170,14 @@ func WithLivingWikiJobResultStore(rs livingwiki.JobResultStore) ServerOption {
 	return func(s *Server) { s.livingWikiJobResultStore = rs }
 }
 
+// WithLivingWikiLiveOrchestrator wires the living-wiki page-generation
+// orchestrator into the GraphQL resolver so the cold-start job goroutine
+// (R5) can call Generate directly. When nil, cold-start jobs return a
+// "orchestrator unavailable" notice without failing hard.
+func WithLivingWikiLiveOrchestrator(o *lworch.Orchestrator) ServerOption {
+	return func(s *Server) { s.livingWikiLiveOrchestrator = o }
+}
+
 // Server is the HTTP API server.
 type Server struct {
 	cfg                *config.Config
@@ -203,11 +212,12 @@ type Server struct {
 	searchSvc          *search.Service                // hybrid retrieval backbone; always set in NewServer
 	reqBooster         *search.RequirementBooster     // repo-scoped requirement link cache; feeds searchSvc boosters
 	searchMetrics      *search.Metrics                // in-process ring buffer of per-stage latency / success
-	livingWikiStore           livingwiki.Store              // living-wiki UI settings store; nil = feature unavailable
-	livingWikiResolver        *livingwiki.Resolver          // merged living-wiki config (UI + env); nil = only env applies
-	livingWikiRepoStore       livingwiki.RepoSettingsStore  // per-repo living-wiki opt-in; nil = feature unavailable
-	livingWikiDispatcher      *webhook.Dispatcher           // nil = feature not started or kill-switch active
-	livingWikiJobResultStore  livingwiki.JobResultStore     // nil = job result history unavailable
+	livingWikiStore              livingwiki.Store              // living-wiki UI settings store; nil = feature unavailable
+	livingWikiResolver           *livingwiki.Resolver          // merged living-wiki config (UI + env); nil = only env applies
+	livingWikiRepoStore          livingwiki.RepoSettingsStore  // per-repo living-wiki opt-in; nil = feature unavailable
+	livingWikiDispatcher         *webhook.Dispatcher           // nil = feature not started or kill-switch active
+	livingWikiJobResultStore     livingwiki.JobResultStore     // nil = job result history unavailable
+	livingWikiLiveOrchestrator   *lworch.Orchestrator          // living-wiki page-generation orchestrator; nil = feature unavailable
 }
 
 // qaResolverOrchestrator exposes the server's QA orchestrator to the
@@ -506,10 +516,11 @@ func (s *Server) setupRouter() {
 			SearchSvc:          s.searchSvc,
 			ReqBooster:         s.reqBooster,
 			QA:                 s.qaResolverOrchestrator(),
-			LivingWikiStore:          s.livingWikiStore,
-			LivingWikiResolver:       s.livingWikiResolver,
-			LivingWikiRepoStore:      s.livingWikiRepoStore,
-			LivingWikiJobResultStore: s.livingWikiJobResultStore,
+			LivingWikiStore:            s.livingWikiStore,
+			LivingWikiResolver:         s.livingWikiResolver,
+			LivingWikiRepoStore:        s.livingWikiRepoStore,
+			LivingWikiJobResultStore:   s.livingWikiJobResultStore,
+			LivingWikiLiveOrchestrator: s.livingWikiLiveOrchestrator,
 		},
 	}))
 

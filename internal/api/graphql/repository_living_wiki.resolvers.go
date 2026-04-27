@@ -76,8 +76,8 @@ func mapRepoLivingWikiSettings(s *livingwiki.RepositoryLivingWikiSettings) *Repo
 		ExcludePaths:      nonNilStringSlice(s.ExcludePaths),
 		StaleWhenStrategy: RepoStaleWhenStrategy(s.StaleWhenStrategy),
 		MaxPagesPerJob:    s.MaxPagesPerJob,
-		RepoID:            s.RepoID,
 	}
+	gql.RepoID = s.RepoID // non-schema field; set after literal to survive gqlgen regen
 	if gql.MaxPagesPerJob == 0 {
 		gql.MaxPagesPerJob = 50
 	}
@@ -146,6 +146,10 @@ func mapLivingWikiJobResult(r *livingwiki.LivingWikiJobResult) *LivingWikiJobRes
 	if r.ErrorMessage != "" {
 		msg := r.ErrorMessage
 		gql.ErrorMessage = &msg
+	}
+	if r.FailureCategory != "" {
+		cat := r.FailureCategory
+		gql.FailureCategory = &cat
 	}
 	return gql
 }

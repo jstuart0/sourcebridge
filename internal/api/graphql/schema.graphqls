@@ -189,6 +189,15 @@ type Mutation {
   updateRepositoryLivingWikiSettings(input: UpdateRepositoryLivingWikiSettingsInput!): RepositoryLivingWikiSettings!
   enableLivingWikiForRepo(input: EnableLivingWikiForRepoInput!): EnableLivingWikiResult!
   disableLivingWikiForRepo(repositoryId: ID!): RepositoryLivingWikiSettings!
+  """
+  retryLivingWikiJob re-runs the cold-start job for the given repository.
+  When retryExcludedOnly is true, only the pages that were excluded in the
+  most recent job (from lw_job_results.excluded_page_ids) are re-attempted;
+  otherwise a full cold-start is run. Returns the EnableLivingWikiResult for
+  the new job (same shape as enableLivingWikiForRepo so the UI can reuse the
+  same progress-tracking path).
+  """
+  retryLivingWikiJob(repositoryId: ID!, retryExcludedOnly: Boolean): EnableLivingWikiResult!
 
   # Recycle bin (soft-delete)
   moveToTrash(type: TrashableType!, id: ID!, reason: String): TrashEntry!
@@ -1592,7 +1601,16 @@ type LivingWikiJobResult {
   """
   generatedPageTitles: [String!]!
   exclusionReasons: [String!]!
+  """
+  status is one of: running, ok, partial, failed.
+  """
   status: String!
+  """
+  failureCategory classifies terminal failures into one of three buckets that
+  drive distinct CTAs in the UI. Values: transient, auth, partial_content.
+  Empty when status is ok, partial, or running.
+  """
+  failureCategory: String
   errorMessage: String
 }
 
