@@ -9,9 +9,16 @@
 --   Found NONE for field `tenant_id`, with record `lw_settings:default`,
 --   but expected a string
 --
--- Backfill any rows where tenant_id is missing.
+-- Backfill any required string fields whose DEFAULT clause never fired
+-- because the row predates the migration that added them.
+--
+-- SurrealDB validates ALL schema fields on UPDATE — not just the ones
+-- being assigned — so updating tenant_id alone fails when confluence_site
+-- (added in migration 038) is also still NONE on the same record.
+-- Fix: assign every at-risk field in one statement so post-write validation
+-- sees a fully-populated row.
 
-UPDATE lw_settings SET tenant_id = 'default' WHERE tenant_id IS NONE;
+UPDATE lw_settings:default SET tenant_id = 'default', confluence_site = '';
 
 -- Schema version marker
 UPSERT schema_version:v39 SET version = 39;
