@@ -1,0 +1,150 @@
+# livingwiki-smoke.yaml.example
+#
+# Tier-2 real-Confluence smoke test — weekly CronJob on-cluster.
+#
+# This file is an EXAMPLE TEMPLATE. It is NOT applied automatically. Copy it
+# to your site-specific overlay (e.g. deploy/kubernetes/overlays/production/)
+# and fill in the cluster-specific values before deploying.
+#
+# Prerequisites:
+#   1. A Secret named "sourcebridge-smoke-secrets" in the sourcebridge namespace
+#      containing the keys listed below.
+#   2. A ConfigMap named "sourcebridge-smoke-config" containing SMOKE_REPO_ID
+#      and SMOKE_SINK_KIND.
+#   3. The sourcebridge Docker image built with the livingwiki-smoke binary.
+#      The binary is compiled from cmd/livingwiki-smoke/main.go and added to
+#      the image as /usr/local/bin/livingwiki-smoke.
+#
+# Secret keys required (store in your secret manager, never commit):
+#   SOURCEBRIDGE_ADMIN_TOKEN   Bearer token for the SourceBridge admin GraphQL API
+#   SLACK_WEBHOOK_URL          (optional) Slack incoming webhook for pass/fail notification
+#
+# To deploy (after filling in values):
+#   kubectl -n sourcebridge apply -f livingwiki-smoke.yaml
+#
+# To run immediately without waiting for the schedule:
+#   kubectl -n sourcebridge create job --from=cronjob/livingwiki-smoke livingwiki-smoke-manual-$(date +%s)
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: livingwiki-smoke
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/name: livingwiki-smoke
+    app.kubernetes.io/part-of: sourcebridge
+spec:
+  # Run weekly on Sunday at 03:00 UTC (low-traffic window).
+  schedule: "0 3 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      # Allow 20 minutes total — enough for a cold-start on a medium-sized repo.
+      activeDeadlineSeconds: 1200
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: livingwiki-smoke
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: smoke
+              # Replace with your actual image tag.
+              image: YOUR_REGISTRY/sourcebridge:latest
+              command: ["/usr/local/bin/livingwiki-smoke"]
+              env:
+                # ── Required ───────────────────────────────────────────────
+                - name: SOURCEBRIDGE_URL
+                  valueFrom:
+                    configMapKeyRef:
+                      name: sourcebridge-smoke-config
+                      key: SOURCEBRIDGE_URL
+
+                - name: SMOKE_REPO_ID
+                  valueFrom:
+                    configMapKeyRef:
+                      name: sourcebridge-smoke-config
+                      key: SMOKE_REPO_ID
+
+                - name: SMOKE_SINK_KIND
+                  valueFrom:
+                    configMapKeyRef:
+                      name: sourcebridge-smoke-config
+                      key: SMOKE_SINK_KIND
+                      optional: true   # defaults to CONFLUENCE
+
+                - name: SMOKE_SINK_INTEGRATION
+                  valueFrom:
+                    configMapKeyRef:
+                      name: sourcebridge-smoke-config
+                      key: SMOKE_SINK_INTEGRATION
+                      optional: true   # defaults to "smoke-test"
+
+                - name: SOURCEBRIDGE_ADMIN_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: sourcebridge-smoke-secrets
+                      key: SOURCEBRIDGE_ADMIN_TOKEN
+
+                # ── Optional ───────────────────────────────────────────────
+                - name: SLACK_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: sourcebridge-smoke-secrets
+                      key: SLACK_WEBHOOK_URL
+                      optional: true
+
+                - name: SMOKE_POLL_TIMEOUT
+                  value: "10m"
+
+                - name: SMOKE_POLL_INTERVAL
+                  value: "5s"
+
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                capabilities:
+                  drop: [ALL]
+---
+# ConfigMap template — fill in SOURCEBRIDGE_URL and SMOKE_REPO_ID.
+# SMOKE_REPO_ID is the internal SourceBridge repository ID (UUID) for the
+# designated test repository. Find it via:
+#   sourcebridge repo list | grep <your-test-repo-name>
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sourcebridge-smoke-config
+  namespace: sourcebridge
+data:
+  SOURCEBRIDGE_URL: "https://sourcebridge.YOUR_DOMAIN"
+  SMOKE_REPO_ID: "REPLACE_WITH_TEST_REPO_UUID"
+  SMOKE_SINK_KIND: "CONFLUENCE"
+  SMOKE_SINK_INTEGRATION: "smoke-test"
+---
+# Secret template — DO NOT store real values here.
+# Create the actual secret with:
+#   kubectl -n sourcebridge create secret generic sourcebridge-smoke-secrets \
+#     --from-literal=SOURCEBRIDGE_ADMIN_TOKEN=<token> \
+#     --from-literal=SLACK_WEBHOOK_URL=<webhook-url>
+#
+# This stub is provided only to document the expected keys.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sourcebridge-smoke-secrets
+  namespace: sourcebridge
+stringData:
+  SOURCEBRIDGE_ADMIN_TOKEN: "REPLACE_WITH_REAL_TOKEN"
+  SLACK_WEBHOOK_URL: ""   # optional — leave empty to skip Slack notification

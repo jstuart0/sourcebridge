@@ -2,6 +2,7 @@
 	lint lint-go lint-web lint-worker lint-vscode package-vscode install-vscode \
 	proto proto-clean docker-build docker-up docker-down \
 	dev dev-web dev-go clean migrate help integration-test smoke-test phase-gate ci \
+	test-livingwiki-integration test-livingwiki-smoke \
 	benchmark-comprehension-fake benchmark-comprehension-local benchmark-comprehension-report \
 	benchmark-report-quality-live
 
@@ -128,6 +129,16 @@ migrate:
 integration-test:
 	go test ./tests/integration/... -v -count=1 -timeout 120s
 
+# Living-wiki Tier-1 unit-integration test (in-memory fakes, no external services)
+test-livingwiki-integration:
+	go test -tags integration -race -count=1 -timeout 120s \
+		./internal/livingwiki/... -v -run ^TestLivingWikiE2E
+
+# Living-wiki Tier-2 real-Confluence smoke (requires env vars, runs against live cluster)
+# SOURCEBRIDGE_URL, SOURCEBRIDGE_ADMIN_TOKEN, and SMOKE_REPO_ID must be set.
+test-livingwiki-smoke:
+	go run ./cmd/livingwiki-smoke
+
 # Smoke tests
 smoke-test:
 	bash tests/smoke/phase1.sh
@@ -202,15 +213,17 @@ benchmark-report-quality-live:
 # Help
 help:
 	@echo "Available targets:"
-	@echo "  build        - Build Go binary and web app"
-	@echo "  test         - Run all tests"
-	@echo "  lint         - Run all linters"
-	@echo "  proto        - Generate protobuf code"
-	@echo "  docker-build - Build Docker images"
-	@echo "  docker-up    - Start Docker Compose"
-	@echo "  docker-down  - Stop Docker Compose"
-	@echo "  dev          - Run Go server in dev mode"
-	@echo "  dev-web      - Run Next.js dev server"
-	@echo "  clean        - Remove build artifacts"
-	@echo "  migrate      - Run database migrations"
-	@echo "  help         - Show this help"
+	@echo "  build                        - Build Go binary and web app"
+	@echo "  test                         - Run all tests"
+	@echo "  lint                         - Run all linters"
+	@echo "  proto                        - Generate protobuf code"
+	@echo "  docker-build                 - Build Docker images"
+	@echo "  docker-up                    - Start Docker Compose"
+	@echo "  docker-down                  - Stop Docker Compose"
+	@echo "  dev                          - Run Go server in dev mode"
+	@echo "  dev-web                      - Run Next.js dev server"
+	@echo "  clean                        - Remove build artifacts"
+	@echo "  migrate                      - Run database migrations"
+	@echo "  test-livingwiki-integration  - Run living-wiki Tier-1 e2e tests (in-memory fakes)"
+	@echo "  test-livingwiki-smoke        - Run living-wiki Tier-2 smoke against live cluster"
+	@echo "  help                         - Show this help"
