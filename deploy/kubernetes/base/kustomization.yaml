@@ -4,12 +4,22 @@ namespace: sourcebridge
 resources:
   - namespace.yaml
   - configmap.yaml
-  # NOTE: secrets.yaml is an EXAMPLE TEMPLATE with placeholder values.
-  # Do NOT apply directly. Create real secrets via kubectl or Sealed Secrets.
-  # See secrets.yaml header for instructions.
-  - secrets.yaml
   - surrealdb.yaml
   - api.yaml
   - worker.yaml
   - web.yaml
   - ingress.yaml
+
+# Canonical image names for the OSS build.
+# Overlays rewrite these via the `images:` block — change newName to
+# your registry and newTag to the specific SHA or version you're deploying.
+#
+# Example overlay patch:
+#   images:
+#     - name: ghcr.io/sourcebridge-ai/sourcebridge-api
+#       newName: ghcr.io/your-org/sourcebridge-api
+#       newTag: sha-abc1234
+images:
+  - name: ghcr.io/sourcebridge-ai/sourcebridge-api
+  - name: ghcr.io/sourcebridge-ai/sourcebridge-worker
+  - name: ghcr.io/sourcebridge-ai/sourcebridge-web

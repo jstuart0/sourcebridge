@@ -37,7 +37,8 @@ spec:
     spec:
       containers:
         - name: sourcebridge-api
-          image: sourcebridge/api:latest
+          image: ghcr.io/sourcebridge-ai/sourcebridge-api:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
               name: http

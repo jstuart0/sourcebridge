@@ -22,7 +22,8 @@ spec:
     spec:
       containers:
         - name: sourcebridge-web
-          image: sourcebridge/web:latest
+          image: ghcr.io/sourcebridge-ai/sourcebridge-web:latest
+          imagePullPolicy: IfNotPresent
           env:
             - name: NEXT_PUBLIC_API_URL
               value: "https://sourcebridge.example.com"
