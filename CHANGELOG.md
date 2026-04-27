@@ -6,6 +6,168 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ## [Unreleased]
 
+Theme: **Living wiki + auto-extracted doc templates.** SourceBridge can now
+generate and maintain a coherent, cited wiki directly from your codebase —
+opening a PR within 90 seconds of enabling the feature, appending additive
+commits on subsequent pushes without force-pushing or overwriting reviewer
+edits, and publishing to nine sink targets from a single canonical page
+model. Every citation in every report, QA answer, and compliance artifact
+now speaks the same `(path:start-end)` contract, so the VS Code plugin can
+jump to the exact line a generated page is talking about.
+
+### Added
+
+- **Citation contract unified across all report paths** (`f48ac47`). New
+  `internal/citations` package — `Citation` struct, `Format()`, `Parse()` —
+  replaces ad-hoc formatters in QA, MCP accessors, and the VS Code plugin.
+  Every surface now emits `(path:start-end)` or `sym_<id>`; the plugin
+  handles both `path:line` and `path:start-end` ranges via
+  `citationToFileLocation`.
+
+- **Quality framework** (`4411950`). Eight validators (`vagueness`,
+  `empty_headline`, `code_example_present`, `citation_density`,
+  `reading_level`, `architectural_relevance`, `factual_grounding`,
+  `block_count`) with per-template profiles per audience
+  (engineer / product / operator). Gates vs. warnings are configured
+  per-template — ADRs don't need the same citation density as API ref pages.
+  Gate failure triggers one retry with the rejection reason injected into the
+  prompt; second failure excludes the page and surfaces the reason in the PR
+  description.
+
+- **Page dependency model + canonical Page AST** (`f4f40e1`). Every
+  generated page carries a typed `DependencyManifest` (paths, symbols,
+  upstream/downstream packages, `dependency_scope`, `stale_when` conditions)
+  so the system knows exactly which pages to regenerate when a diff lands.
+  Pages are internally a tree of typed blocks with stable IDs — sticky to
+  logical position, not derived from content — and four-state ownership
+  (`generated`, `human-edited`, `human-edited-on-pr-branch`, `human-only`).
+  Per-sink overlay storage keeps sink-divergent edits out of the canonical
+  AST without losing them.
+
+- **Edit governance** (`826d8b2`). Three per-sink edit policies:
+  `local_to_sink` (edit stays in that sink's overlay; canonical unchanged),
+  `promote_to_canonical` (edit syncs back and propagates to all sinks), and
+  `require_review_before_promote` (edit opens a sync-PR). Default policy per
+  sink kind: `promote_to_canonical` for git-repo sinks (PR review already
+  happened), `require_review_before_promote` for GitHub/GitLab built-in
+  wikis, `local_to_sink` for Confluence/Notion. Full audit trail on every
+  promotion and sync-PR disposition.
+
+- **Glossary, Activity Log, and ADR templates** (`64dbc51`). Three
+  auto-extracted doc templates:
+  - *Glossary* — zero-LLM, one entry per exported symbol from the graph,
+    deterministic, updates on reindex.
+  - *Activity log* — commit-graph bucketed by author and week; optional
+    LLM weekly-digest pass behind a config flag.
+  - *Decision records* — detects `decision:`/`adr:` commit prefixes and
+    `BREAKING CHANGE:` bodies; single LLM pass in ADR format (Context /
+    Decision / Consequences).
+
+- **Cold-start to PR in ≤ 90s** (`ad2096e`). `living_wiki` report type with
+  `git_repo` sink: generator produces a `proposed_ast`, `markdown_writer`
+  renders it, SourceBridge opens a `wiki: initial generation (sourcebridge)`
+  PR. On merge, `proposed_ast` promotes to `canonical_ast`. On rejection,
+  `proposed_ast` is discarded and cold-start retries on next push. Direct-
+  publish mode (skip the review gate) is an opt-in per-repo setting.
+
+- **Two-watermark incremental updates with additive commits** (`da2a7b6`).
+  Two markers per repo: `source_processed_sha` (last commit the generator
+  ran for) and `wiki_published_sha` (last merged-wiki baseline). Incremental
+  runs diff against the published baseline, not the unmerged PR head.
+  Subsequent pushes while a PR is open append a new commit
+  (`wiki: incremental update (<sha>)`) to the existing PR branch — no
+  force-push, no orphaned inline comments, no overwritten reviewer tweaks.
+  Reviewer commits to the PR branch mark affected blocks
+  `human-edited-on-pr-branch` in `proposed_ast`; subsequent bot commits
+  leave those blocks alone.
+
+- **GitHub/GitLab wiki and static-site sinks** (`3f7f252`). `github_wiki`
+  and `gitlab_wiki` sinks push AST → markdown to the repo's built-in wiki
+  (no PR gate; configurable 24h delay queue). Static-site sinks:
+  `backstage_techdocs`, `mkdocs`, `docusaurus`, `vitepress` — all use the
+  same `markdown_writer` path as `git_repo`, different output paths. Stale-
+  detection banners rendered as native callouts per sink: top-of-page
+  blockquote (markdown), `info` macro (Confluence), `callout` block
+  (Notion).
+
+- **Confluence and Notion API sinks** (`8f5d64c`). `confluence_writer`
+  emits AST → Confluence storage XHTML with block IDs preserved as
+  `ac:macro` parameters; pages reconciled by `external_id` in Confluence
+  metadata. `notion_writer` emits AST → Notion block API with block IDs as
+  `external_id` properties. Both perform block-level reconciliation on each
+  write — only changed generated blocks are updated; human-edited blocks are
+  left alone.
+
+- **Post-merge sink reconciliation + page migrations** (`ad892d4`). After a
+  wiki PR merges, the orchestrator reconciles all sinks: sink-overlay blocks
+  compose `canonical + overlay[sink]` on render; `human-edited` blocks
+  promoted from the PR branch are frozen in canonical. Explicit
+  `BlockMigration` ops (moved / split / merged / renamed) surface in PR
+  descriptions so reviewers can see what restructuring happened without
+  diffing the whole file.
+
+- **Real infrastructure adapters wired** (`822e1de`, `5622cd2`, `84baa65`):
+  - `GraphMetricsProvider` backed by the existing `graph.GraphStore` — page
+    IDs of the form `<repoID>.arch.<pkg>` map to package paths; replaces the
+    `ConstGraphMetrics` test stub in production.
+  - `DiffProvider` and `ExtendedRepoWriter` via `os/exec` git CLI calls,
+    matching the pattern in `internal/git/local.go`. SHA-not-found signals
+    from stderr trigger the force-push recovery path.
+  - HTTP clients for GitHub, GitLab, Confluence, and Notion — all stdlib
+    `net/http`, no SDK dependencies. Rate-limit headers honored on GitHub
+    (`X-RateLimit-Remaining/Reset`) and GitLab; bounded exponential backoff
+    on 5xx and 429. GitHub branch commits use the five-step Git Data API
+    dance; GitLab uses the repository-commits `actions` array for atomic
+    multi-file commits.
+  - Webhook event dispatcher with per-repo goroutine serialization
+    (different-repo events run concurrently, same-repo events never overlap)
+    and fixed-capacity LRU idempotency by delivery ID.
+  - `POST /webhooks/confluence` validates `X-Confluence-Signature`
+    (HMAC-SHA256) and maps `page_updated` events to the dispatcher.
+  - `POST /webhooks/notion-poll` accepts poll-trigger events from the Notion
+    integration.
+
+- **UI-configurable living-wiki settings** (`0cf3108`). Full settings page
+  at `/settings/living-wiki` with progressive disclosure: general settings
+  (enabled toggle, worker count, event timeout) visible by default;
+  integration sections (GitHub, GitLab, Confluence, Notion) and webhook
+  secrets collapsed until needed. Seven secret fields stored with field-level
+  encryption; the API returns `"********"` for any set secret — clients can
+  replace or clear but never read back plaintext. Test-connection buttons for
+  each integration. Precedence: UI value > env var > default, so existing
+  env-var deployments keep working without migration.
+
+### Fixed
+
+- **CLI integration tests** (`16fdba6`). `TestCLIReview*` and `TestCLIAsk*`
+  were invoking `uv run python` without `SOURCEBRIDGE_TEST_MODE=1` in the
+  subprocess environment, so each test spawned a real Anthropic API call and
+  exited 1 with an auth error. The `FakeLLMProvider` in
+  `workers/common/llm/fake.py` was already designed for this case but the
+  env var was never wired into `cmd.Env`. New `testEnv(extras...)` helper
+  adds `SOURCEBRIDGE_TEST_MODE=1` to the inherited environment; new
+  `requireUV(t)` calls `t.Skip()` explicitly when `uv` is not on PATH so
+  contributors without a Python environment don't see silent failures. All
+  six tests now pass.
+- **Non-deterministic API reference symbol order** (`822e1de`). The API
+  reference template iterated over a Go map (`byPkg`), producing different
+  symbol orderings across runs and phantom diffs in
+  `samples/wiki-example/`. Now iterates over the already-sorted package
+  slice and emits symbols sorted by name within each package.
+
+### Changed
+
+- **Telemetry platform override** (`8dfb80b`). New
+  `SOURCEBRIDGE_TELEMETRY_PLATFORM` env var lets dev and CI installs
+  override the auto-detected platform string in telemetry pings. Set it to
+  `test` and the collector's auto-flag rule excludes the install from public
+  counts — replaces the per-install "remember to call mark-test after every
+  fresh install" workflow with a one-liner at deploy time. `resolvePlatform()`
+  falls back to `runtime.GOOS/GOARCH` when the var is unset; default
+  behavior is unchanged.
+
+---
+
 Theme: **MCP as a first-class client surface.** SourceBridge's capabilities
 are now exposed through a complete Model Context Protocol server — not the
 minimum-viable handful, but the full retrieval/analysis/lifecycle surface a

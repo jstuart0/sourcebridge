@@ -4,6 +4,22 @@ All notable changes to this extension are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this extension uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Native citation parser** (`f48ac47`). Citation handles in
+  `(path:start-end)` format are now parsed by `src/citations.ts`.
+  Hovering a reference like `(internal/auth/auth.go:42-55)` in any
+  SourceBridge report — QA answer, compliance finding, living-wiki page,
+  knowledge artifact — opens that exact line range in the editor. The
+  single-line `path:line` form is also supported. Mirrors the canonical
+  format from `internal/citations` on the server side; all report paths
+  now emit the same string so every citation is clickable without
+  per-surface plugin logic.
+
+---
+
 ## [0.3.0] — 2026-04-20
 
 ### MCP streaming chat (Phase 3)
