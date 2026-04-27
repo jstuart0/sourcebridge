@@ -163,6 +163,12 @@ func WithLivingWikiDispatcher(d *webhook.Dispatcher) ServerOption {
 	return func(s *Server) { s.livingWikiDispatcher = d }
 }
 
+// WithLivingWikiJobResultStore wires the per-run living-wiki job result store.
+// When nil, the lastJobResult GraphQL field resolves to null.
+func WithLivingWikiJobResultStore(rs livingwiki.JobResultStore) ServerOption {
+	return func(s *Server) { s.livingWikiJobResultStore = rs }
+}
+
 // Server is the HTTP API server.
 type Server struct {
 	cfg                *config.Config
@@ -197,10 +203,11 @@ type Server struct {
 	searchSvc          *search.Service                // hybrid retrieval backbone; always set in NewServer
 	reqBooster         *search.RequirementBooster     // repo-scoped requirement link cache; feeds searchSvc boosters
 	searchMetrics      *search.Metrics                // in-process ring buffer of per-stage latency / success
-	livingWikiStore      livingwiki.Store              // living-wiki UI settings store; nil = feature unavailable
-	livingWikiResolver   *livingwiki.Resolver          // merged living-wiki config (UI + env); nil = only env applies
-	livingWikiRepoStore  livingwiki.RepoSettingsStore  // per-repo living-wiki opt-in; nil = feature unavailable
-	livingWikiDispatcher *webhook.Dispatcher           // nil = feature not started or kill-switch active
+	livingWikiStore           livingwiki.Store              // living-wiki UI settings store; nil = feature unavailable
+	livingWikiResolver        *livingwiki.Resolver          // merged living-wiki config (UI + env); nil = only env applies
+	livingWikiRepoStore       livingwiki.RepoSettingsStore  // per-repo living-wiki opt-in; nil = feature unavailable
+	livingWikiDispatcher      *webhook.Dispatcher           // nil = feature not started or kill-switch active
+	livingWikiJobResultStore  livingwiki.JobResultStore     // nil = job result history unavailable
 }
 
 // qaResolverOrchestrator exposes the server's QA orchestrator to the
@@ -499,9 +506,10 @@ func (s *Server) setupRouter() {
 			SearchSvc:          s.searchSvc,
 			ReqBooster:         s.reqBooster,
 			QA:                 s.qaResolverOrchestrator(),
-			LivingWikiStore:     s.livingWikiStore,
-			LivingWikiResolver:  s.livingWikiResolver,
-			LivingWikiRepoStore: s.livingWikiRepoStore,
+			LivingWikiStore:          s.livingWikiStore,
+			LivingWikiResolver:       s.livingWikiResolver,
+			LivingWikiRepoStore:      s.livingWikiRepoStore,
+			LivingWikiJobResultStore: s.livingWikiJobResultStore,
 		},
 	}))
 

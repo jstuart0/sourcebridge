@@ -153,8 +153,10 @@ func (s RepoWikiSink) EffectiveEditPolicy() RepoWikiEditPolicy {
 // LivingWikiJobResult records the per-run outcome of one living-wiki job.
 // Used by the UI's settings panel summary and the "Retry excluded pages" CTA.
 type LivingWikiJobResult struct {
-	JobID               string    `json:"job_id"`
-	StartedAt           time.Time `json:"started_at"`
+	// RepoID is the repository this result belongs to.
+	RepoID              string     `json:"repo_id"`
+	JobID               string     `json:"job_id"`
+	StartedAt           time.Time  `json:"started_at"`
 	CompletedAt         *time.Time `json:"completed_at,omitempty"`
 	PagesPlanned        int        `json:"pages_planned"`
 	PagesGenerated      int        `json:"pages_generated"`

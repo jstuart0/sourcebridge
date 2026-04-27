@@ -3806,9 +3806,16 @@ func (r *repositoryResolver) LivingWikiSettings(ctx context.Context, obj *Reposi
 }
 
 // LastJobResult resolves RepositoryLivingWikiSettings.lastJobResult.
-// Currently returns nil — R8 wires the lw_job_results read path.
+// Returns the most recent job result for the repo, or nil when none exists.
 func (r *repositoryLivingWikiSettingsResolver) LastJobResult(ctx context.Context, obj *RepositoryLivingWikiSettings) (*LivingWikiJobResult, error) {
-	return nil, nil
+	if r.LivingWikiJobResultStore == nil || obj == nil || obj.RepoID == "" {
+		return nil, nil
+	}
+	result, err := r.LivingWikiJobResultStore.LastResultForRepo(ctx, defaultTenantID, obj.RepoID)
+	if err != nil || result == nil {
+		return nil, err
+	}
+	return mapLivingWikiJobResult(result), nil
 }
 
 // Mutation returns MutationResolver implementation.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/sourcebridge/sourcebridge/internal/api/graphql"
 	"github.com/sourcebridge/sourcebridge/internal/events"
+	lwmetrics "github.com/sourcebridge/sourcebridge/internal/livingwiki/metrics"
 )
 
 // componentStatus represents the health state of a single dependency.
@@ -153,7 +154,7 @@ func aiConcurrencyMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) { //nolint:cyclop
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 
@@ -236,4 +237,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	for field, total := range deprecatedFieldReads {
 		fmt.Fprintf(w, "sourcebridge_deprecated_field_reads_total{field=%q} %d\n", field, total)
 	}
+
+	// Living-wiki metrics (R8). The collector writes its own HELP/TYPE headers.
+	lwmetrics.Default.WritePrometheusText(w)
 }

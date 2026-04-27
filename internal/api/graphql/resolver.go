@@ -42,10 +42,11 @@ type Resolver struct {
 	Flags              featureflags.Flags         // backend startup-time feature flags
 	GitConfig          GitConfigLoader            // reads git credentials from DB (multi-replica safe)
 	ComprehensionStore comprehension.Store        // comprehension settings + model capabilities; nil when unavailable
-	LivingWikiStore     livingwiki.Store           // living-wiki UI settings; nil when unavailable
-	LivingWikiResolver  *livingwiki.Resolver      // resolved living-wiki settings (UI + env fallback)
-	LivingWikiRepoStore livingwiki.RepoSettingsStore // per-repo living-wiki opt-in; nil when unavailable
-	TrashStore          trash.Store               // soft-delete recycle bin; nil when the feature is disabled or unavailable
+	LivingWikiStore          livingwiki.Store              // living-wiki UI settings; nil when unavailable
+	LivingWikiResolver       *livingwiki.Resolver          // resolved living-wiki settings (UI + env fallback)
+	LivingWikiRepoStore      livingwiki.RepoSettingsStore  // per-repo living-wiki opt-in; nil when unavailable
+	LivingWikiJobResultStore livingwiki.JobResultStore     // per-run job result history; nil when unavailable
+	TrashStore               trash.Store                   // soft-delete recycle bin; nil when the feature is disabled or unavailable
 	QA                 *qa.Orchestrator           // server-side deep-QA orchestrator; nil when server-side QA is disabled
 	SearchSvc          *search.Service            // hybrid retrieval backbone; nil falls back to legacy substring search
 	ReqBooster         *search.RequirementBooster // requirement-link cache; link mutations call Invalidate so subsequent searches see fresh links

@@ -139,3 +139,21 @@ type RepoSettingsStore interface {
 	// given integrationName. Used by the admin query.
 	RepositoriesUsingSink(ctx context.Context, tenantID, integrationName string) ([]RepositoryLivingWikiSettings, error)
 }
+
+// JobResultStore persists and retrieves per-run living-wiki job outcomes.
+// Results are append-only — Save creates a new row; there is no update path.
+//
+// Implementations: [db.LivingWikiJobResultStore] (SurrealDB-backed) and
+// [MemJobResultStore] (tests).
+type JobResultStore interface {
+	// Save persists result under tenantID. Returns an error only on DB failure;
+	// duplicate JobIDs are silently replaced by the underlying UPSERT.
+	Save(ctx context.Context, tenantID string, result *LivingWikiJobResult) error
+
+	// GetByJobID returns the result for the given jobID, or nil if not found.
+	GetByJobID(ctx context.Context, jobID string) (*LivingWikiJobResult, error)
+
+	// LastResultForRepo returns the most recently started result for the given
+	// tenant and repo, or nil when no results have been recorded.
+	LastResultForRepo(ctx context.Context, tenantID, repoID string) (*LivingWikiJobResult, error)
+}

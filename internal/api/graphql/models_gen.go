@@ -853,6 +853,9 @@ type RepositoryLivingWikiSettings struct {
 	// The most recent job result for this repo, surfaced in the settings panel
 	// summary. Null when no job has been run yet.
 	LastJobResult *LivingWikiJobResult `json:"lastJobResult,omitempty"`
+	// RepoID is the repository identifier. Not exposed via GraphQL; used
+	// internally so the LastJobResult field resolver can query by repo.
+	RepoID string `json:"-"`
 }
 
 type RepositoryUnderstanding struct {

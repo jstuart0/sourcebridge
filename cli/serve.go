@@ -27,6 +27,8 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/assembly"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/credentials"
+	lwmetrics "github.com/sourcebridge/sourcebridge/internal/livingwiki/metrics"
+	"github.com/sourcebridge/sourcebridge/internal/livingwiki/scheduler"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/webhook"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
@@ -315,6 +317,50 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Living-wiki job result store (R8).
+	// Constructed regardless of kill-switch status so the GraphQL resolver can
+	// query past results even when the dispatcher is not running.
+	var lwJobResultStore livingwiki.JobResultStore
+	if cfg.Storage.SurrealMode == "external" {
+		lwJobResultStore = db.NewLivingWikiJobResultStore(surrealDB)
+	}
+
+	// Living-wiki metrics collector (R8).
+	// Registered once at boot; the /metrics handler calls WritePrometheusText.
+	_ = lwmetrics.Default // ensures the package-level collector is initialized
+
+	// Living-wiki scheduler (R6).
+	// Started after the dispatcher so the dispatcher is ready to accept events
+	// on the first tick. schedCancel is always non-nil; it is a no-op when the
+	// scheduler was not started, so the defer below is unconditionally safe.
+	schedCtx, schedCancel := context.WithCancel(context.Background())
+	defer schedCancel() // ensure goroutine is cancelled on any exit path
+	if lwDispatcher != nil && lwRepoStore != nil {
+		var schedInterval time.Duration
+		if cfg.LivingWiki.SchedulerInterval != "" {
+			if d, err := time.ParseDuration(cfg.LivingWiki.SchedulerInterval); err == nil && d > 0 {
+				schedInterval = d
+			}
+		}
+		sched := scheduler.New(scheduler.SchedulerDeps{
+			RepoStore:   lwRepoStore,
+			Dispatcher:  lwDispatcher,
+			Cache:       cache,
+			Interval:    schedInterval,
+			MaxParallel: cfg.LivingWiki.MaxConcurrentJobsPerTenant,
+			TenantID:    "default",
+		})
+		go func() {
+			if err := sched.Run(schedCtx); err != nil && err != context.Canceled {
+				slog.Error("living-wiki scheduler exited unexpectedly", "error", err)
+			}
+		}()
+		slog.Info("living-wiki scheduler started",
+			"interval", cfg.LivingWiki.SchedulerInterval,
+			"max_parallel", cfg.LivingWiki.MaxConcurrentJobsPerTenant,
+		)
+	}
+
 	// Create HTTP server
 	server := rest.NewServer(cfg, localAuth, jwtMgr, store, workerClient,
 		rest.WithEnterpriseDB(surrealDB.DB()),
@@ -333,6 +379,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		rest.WithLivingWikiResolver(lwResolver),
 		rest.WithLivingWikiRepoStore(lwRepoStore),
 		rest.WithLivingWikiDispatcher(lwDispatcher),
+		rest.WithLivingWikiJobResultStore(lwJobResultStore),
 	)
 
 	// Initialize OIDC if configured
@@ -413,6 +460,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("server component shutdown error: %w", err)
 	}
 
+	// schedCancel() is called by defer above, ensuring the scheduler goroutine
+	// exits after the dispatcher has drained.
 	slog.Info("server stopped")
 	return nil
 }

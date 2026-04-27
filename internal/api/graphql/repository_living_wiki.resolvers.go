@@ -76,6 +76,7 @@ func mapRepoLivingWikiSettings(s *livingwiki.RepositoryLivingWikiSettings) *Repo
 		ExcludePaths:      nonNilStringSlice(s.ExcludePaths),
 		StaleWhenStrategy: RepoStaleWhenStrategy(s.StaleWhenStrategy),
 		MaxPagesPerJob:    s.MaxPagesPerJob,
+		RepoID:            s.RepoID,
 	}
 	if gql.MaxPagesPerJob == 0 {
 		gql.MaxPagesPerJob = 50
@@ -121,6 +122,32 @@ func (r *Resolver) isLivingWikiGloballyEnabled() bool {
 		return false
 	}
 	return *s.Enabled
+}
+
+// mapLivingWikiJobResult converts the domain job result to the GraphQL type.
+func mapLivingWikiJobResult(r *livingwiki.LivingWikiJobResult) *LivingWikiJobResult {
+	if r == nil {
+		return nil
+	}
+	gql := &LivingWikiJobResult{
+		JobID:               r.JobID,
+		StartedAt:           r.StartedAt,
+		PagesPlanned:        r.PagesPlanned,
+		PagesGenerated:      r.PagesGenerated,
+		PagesExcluded:       r.PagesExcluded,
+		ExcludedPageIds:     nonNilStringSlice(r.ExcludedPageIDs),
+		GeneratedPageTitles: nonNilStringSlice(r.GeneratedPageTitles),
+		ExclusionReasons:    nonNilStringSlice(r.ExclusionReasons),
+		Status:              r.Status,
+	}
+	if r.CompletedAt != nil {
+		gql.CompletedAt = r.CompletedAt
+	}
+	if r.ErrorMessage != "" {
+		msg := r.ErrorMessage
+		gql.ErrorMessage = &msg
+	}
+	return gql
 }
 
 // defaultTenantID is the tenant used for all single-tenant installs.

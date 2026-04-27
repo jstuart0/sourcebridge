@@ -285,6 +285,8 @@ type TrashConfig struct {
 //	event_timeout              = "5m"
 //	confluence_webhook_secret  = "your-confluence-hmac-secret"
 //	notion_webhook_secret      = "your-notion-secret"
+//	scheduler_interval         = "15m"
+//	max_concurrent_jobs_per_tenant = 5
 type LivingWikiConfig struct {
 	// Enabled activates the living-wiki feature. When false, the dispatcher
 	// is not started and webhook endpoints return 501.
@@ -308,6 +310,16 @@ type LivingWikiConfig struct {
 	// ships a richer webhook model. Unused as of early 2026.
 	// Set via SOURCEBRIDGE_LIVING_WIKI_NOTION_WEBHOOK_SECRET.
 	NotionWebhookSecret string `mapstructure:"notion_webhook_secret"`
+
+	// SchedulerInterval is the default regen frequency per repo.
+	// Default "15m". Expressed as a Go duration string.
+	// Set via SOURCEBRIDGE_LIVING_WIKI_SCHEDULER_INTERVAL.
+	SchedulerInterval string `mapstructure:"scheduler_interval"`
+
+	// MaxConcurrentJobsPerTenant caps concurrent regen jobs across the tenant.
+	// Default 5. Prevents a single high-volume tenant from monopolising workers.
+	// Set via SOURCEBRIDGE_LIVING_WIKI_MAX_CONCURRENT_JOBS_PER_TENANT.
+	MaxConcurrentJobsPerTenant int `mapstructure:"max_concurrent_jobs_per_tenant"`
 }
 
 // Defaults returns a Config with all default values.
@@ -394,9 +406,11 @@ func Defaults() *Config {
 			QueryDecompositionEnabled: false, // default-off through quality-push Phase 5
 		},
 		LivingWiki: LivingWikiConfig{
-			Enabled:      false, // opt-in; teams enable when ready to ship the wiki
-			WorkerCount:  4,
-			EventTimeout: "5m",
+			Enabled:                    false, // opt-in; teams enable when ready to ship the wiki
+			WorkerCount:                4,
+			EventTimeout:               "5m",
+			SchedulerInterval:          "15m",
+			MaxConcurrentJobsPerTenant: 5,
 		},
 	}
 }
@@ -476,6 +490,8 @@ func Load() (*Config, error) {
 	v.SetDefault("living_wiki.event_timeout", cfg.LivingWiki.EventTimeout)
 	v.SetDefault("living_wiki.confluence_webhook_secret", "")
 	v.SetDefault("living_wiki.notion_webhook_secret", "")
+	v.SetDefault("living_wiki.scheduler_interval", cfg.LivingWiki.SchedulerInterval)
+	v.SetDefault("living_wiki.max_concurrent_jobs_per_tenant", cfg.LivingWiki.MaxConcurrentJobsPerTenant)
 
 	// Try reading config file (not required)
 	if err := v.ReadInConfig(); err != nil {
