@@ -184,13 +184,22 @@ func (s *LivingWikiJobResultStore) GetByJobID(ctx context.Context, jobID string)
 
 // LastResultForRepo returns the most recently started job result for the given
 // tenant and repo, or nil if no results have been recorded yet.
+//
+// The query intentionally avoids `ORDER BY started_at DESC LIMIT 1` because
+// SurrealDB silently drops the ordering clause when parameter substitution is
+// used (`WHERE tenant_id = $tenant_id`), returning rows in insertion order
+// instead of sorted order. The same SQL with inline values orders correctly,
+// but the SDK forces parameterised execution. As a workaround we fetch every
+// row for the (tenant, repo) tuple and pick the latest StartedAt in Go — the
+// row count per repo is bounded (one per cold-start / retry-excluded run) so
+// the cost is negligible.
 func (s *LivingWikiJobResultStore) LastResultForRepo(ctx context.Context, tenantID, repoID string) (*livingwiki.LivingWikiJobResult, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, nil
 	}
 
-	sql := `SELECT * FROM lw_job_results WHERE tenant_id = $tenant_id AND repo_id = $repo_id ORDER BY started_at DESC LIMIT 1`
+	sql := `SELECT * FROM lw_job_results WHERE tenant_id = $tenant_id AND repo_id = $repo_id`
 	rows, err := queryOne[[]surrealLWJobResult](ctx, db, sql, map[string]any{
 		"tenant_id": tenantID,
 		"repo_id":   repoID,
@@ -198,5 +207,12 @@ func (s *LivingWikiJobResultStore) LastResultForRepo(ctx context.Context, tenant
 	if err != nil || len(rows) == 0 {
 		return nil, nil
 	}
-	return rows[0].toResult()
+
+	latest := &rows[0]
+	for i := 1; i < len(rows); i++ {
+		if rows[i].StartedAt.Time.After(latest.StartedAt.Time) {
+			latest = &rows[i]
+		}
+	}
+	return latest.toResult()
 }
