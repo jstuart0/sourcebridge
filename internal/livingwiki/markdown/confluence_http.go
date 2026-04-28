@@ -420,20 +420,40 @@ func (c *HTTPConfluenceClient) updatePage(ctx context.Context, auth, pageID, ext
 	return nil
 }
 
-// getPageProperties reads all known SourceBridge properties from a page.
-func (c *HTTPConfluenceClient) getPageProperties(ctx context.Context, auth, pageID string) (ConfluenceProperties, error) {
+// pagePropertyRecord is the v2 representation of a content property: a numeric
+// id, the human-readable key, the string value, and a version (required when
+// updating).
+type pagePropertyRecord struct {
+	ID      string `json:"id"`
+	Key     string `json:"key"`
+	Value   string `json:"value"`
+	Version struct {
+		Number int `json:"number"`
+	} `json:"version"`
+}
+
+// listPageProperties fetches every content property attached to pageID. v2
+// content-property endpoints are keyed by an opaque property id (not the
+// human-readable key), so all set/get-by-key flows route through this list.
+func (c *HTTPConfluenceClient) listPageProperties(ctx context.Context, auth, pageID string) ([]pagePropertyRecord, error) {
 	path := fmt.Sprintf("/pages/%s/properties", url.PathEscape(pageID))
 	var resp struct {
-		Results []struct {
-			Key   string `json:"key"`
-			Value string `json:"value"`
-		} `json:"results"`
+		Results []pagePropertyRecord `json:"results"`
 	}
 	if err := c.do(ctx, auth, http.MethodGet, path, nil, &resp); err != nil {
 		return nil, err
 	}
-	props := make(ConfluenceProperties, len(resp.Results))
-	for _, r := range resp.Results {
+	return resp.Results, nil
+}
+
+// getPageProperties reads all known SourceBridge properties from a page.
+func (c *HTTPConfluenceClient) getPageProperties(ctx context.Context, auth, pageID string) (ConfluenceProperties, error) {
+	records, err := c.listPageProperties(ctx, auth, pageID)
+	if err != nil {
+		return nil, err
+	}
+	props := make(ConfluenceProperties, len(records))
+	for _, r := range records {
 		props[r.Key] = r.Value
 	}
 	return props, nil
@@ -442,30 +462,54 @@ func (c *HTTPConfluenceClient) getPageProperties(ctx context.Context, auth, page
 // getPageProperty reads one property from a page. Returns "" and no error when
 // the property does not exist.
 func (c *HTTPConfluenceClient) getPageProperty(ctx context.Context, auth, pageID, key string) (string, error) {
-	path := fmt.Sprintf("/pages/%s/properties/%s", url.PathEscape(pageID), url.PathEscape(key))
-	var resp struct {
-		Value string `json:"value"`
-	}
-	err := c.do(ctx, auth, http.MethodGet, path, nil, &resp)
+	records, err := c.listPageProperties(ctx, auth, pageID)
 	if err != nil {
 		if IsConfluenceNotFound(err) {
 			return "", nil
 		}
 		return "", err
 	}
-	return resp.Value, nil
+	for _, r := range records {
+		if r.Key == key {
+			return r.Value, nil
+		}
+	}
+	return "", nil
 }
 
-// setPageProperty writes a single string property on a Confluence page using
-// PUT (which creates or updates).
+// setPageProperty writes a single string property on a Confluence page. v2
+// requires creating new properties via POST and updating existing properties
+// via PUT against the property's numeric id (not its key), so the call first
+// lists the page's properties to decide which path to take.
 func (c *HTTPConfluenceClient) setPageProperty(ctx context.Context, auth, pageID, key, value string) error {
-	path := fmt.Sprintf("/pages/%s/properties/%s", url.PathEscape(pageID), url.PathEscape(key))
+	records, err := c.listPageProperties(ctx, auth, pageID)
+	if err != nil {
+		return fmt.Errorf("confluence_http: list properties for %s: %w", pageID, err)
+	}
+	for _, r := range records {
+		if r.Key != key {
+			continue
+		}
+		path := fmt.Sprintf("/pages/%s/properties/%s", url.PathEscape(pageID), url.PathEscape(r.ID))
+		payload := map[string]interface{}{
+			"key":     key,
+			"value":   value,
+			"version": map[string]int{"number": r.Version.Number + 1},
+		}
+		if err := c.do(ctx, auth, http.MethodPut, path, payload, nil); err != nil {
+			return fmt.Errorf("confluence_http: update property %q on %s: %w", key, pageID, err)
+		}
+		return nil
+	}
+
+	// Property does not exist yet — create it.
+	path := fmt.Sprintf("/pages/%s/properties", url.PathEscape(pageID))
 	payload := map[string]interface{}{
 		"key":   key,
 		"value": value,
 	}
-	if err := c.do(ctx, auth, http.MethodPut, path, payload, nil); err != nil {
-		return fmt.Errorf("confluence_http: set property %q on %s: %w", key, pageID, err)
+	if err := c.do(ctx, auth, http.MethodPost, path, payload, nil); err != nil {
+		return fmt.Errorf("confluence_http: create property %q on %s: %w", key, pageID, err)
 	}
 	return nil
 }

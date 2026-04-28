@@ -91,44 +91,30 @@ func (cts *confluenceTestServer) handle(w http.ResponseWriter, r *http.Request) 
 		}
 		writeConfluenceJSON(w, http.StatusOK, map[string]interface{}{"results": results})
 
-	// Get page property.
-	case r.Method == http.MethodGet && strings.Contains(path, "/properties/"):
-		parts := strings.Split(path, "/properties/")
-		if len(parts) < 2 {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		pageID := extractConfluencePageID(parts[0])
-		key := parts[1]
-		// The property value IS the external ID.
-		var externalID string
-		for eid, id := range cts.pages {
-			if id == pageID && key == confluencePropertyKey {
-				externalID = eid
-				break
-			}
-		}
-		if externalID == "" {
-			writeConfluenceJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
-			return
-		}
-		writeConfluenceJSON(w, http.StatusOK, map[string]string{"key": key, "value": externalID})
-
-	// Get page properties list.
+	// Get page properties list (v2: returns array with id+key+value+version).
 	case r.Method == http.MethodGet && strings.HasSuffix(path, "/properties"):
 		pageID := extractConfluencePageID(strings.TrimSuffix(path, "/properties"))
-		var props []map[string]string
+		var props []map[string]interface{}
 		for eid, id := range cts.pages {
 			if id == pageID {
-				props = append(props, map[string]string{"key": confluencePropertyKey, "value": eid})
+				props = append(props, map[string]interface{}{
+					"id":      "prop-" + confluencePropertyKey,
+					"key":     confluencePropertyKey,
+					"value":   eid,
+					"version": map[string]int{"number": 1},
+				})
 				break
 			}
 		}
 		writeConfluenceJSON(w, http.StatusOK, map[string]interface{}{"results": props})
 
-	// Set page property.
+	// Update page property by property-id (v2 PUT).
 	case r.Method == http.MethodPut && strings.Contains(path, "/properties/"):
 		w.WriteHeader(http.StatusOK)
+
+	// Create page property (v2 POST).
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/properties"):
+		w.WriteHeader(http.StatusCreated)
 
 	// Get page body.
 	case r.Method == http.MethodGet && strings.Contains(path, "/pages/"):
