@@ -7,6 +7,8 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/99designs/gqlgen/graphql/handler"
@@ -290,12 +292,19 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 	if cfg != nil && cfg.Comprehension.MaxConcurrency > 0 {
 		orchCfg.MaxConcurrency = cfg.Comprehension.MaxConcurrency
 	}
-	// When the reaper marks a stale job as failed, also mark the linked
-	// knowledge artifact as failed so the UI doesn't show "generating"
-	// forever on a job that will never complete.
+	// When the reaper marks a stale job as failed, also mark related
+	// state as failed so the UI doesn't show "generating" forever on a
+	// job that will never complete:
+	//   - Knowledge artifacts get SetArtifactFailed.
+	//   - Living-wiki cold-start / retry-excluded jobs get a failed
+	//     LivingWikiJobResult written so the per-repo settings panel
+	//     surfaces the timeout instead of returning lastJobResult: null.
 	orchCfg.OnStaleJob = func(job *llm.Job) {
 		if s.knowledgeStore != nil && job.ArtifactID != "" {
 			_ = s.knowledgeStore.SetArtifactFailed(job.ArtifactID, "DEADLINE_EXCEEDED", "Generation timed out — please retry")
+		}
+		if s.livingWikiJobResultStore != nil && job.Subsystem == "living_wiki" {
+			persistStaleLivingWikiResult(s.livingWikiJobResultStore, job)
 		}
 	}
 	s.orchestrator = orchestrator.New(s.jobStore, orchCfg)
@@ -784,6 +793,76 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// persistStaleLivingWikiResult records a failed LivingWikiJobResult when the
+// reaper kills a stuck living-wiki cold-start (or retry-excluded) job. Without
+// this, the per-repo settings panel reads `lastJobResult: null` and gives no
+// signal that anything went wrong.
+//
+// repoID is parsed from the job's TargetKey (format `lw:<tenant>:<repoID>`).
+// pagesPlanned/pagesGenerated are best-effort, parsed from the progress
+// message ("N/M pages complete") so the user can see how far the job got.
+func persistStaleLivingWikiResult(store livingwiki.JobResultStore, job *llm.Job) {
+	tenantID, repoID := parseLWTargetKey(job.TargetKey)
+	if repoID == "" {
+		slog.Warn("livingwiki: could not parse repo_id from stale job target_key",
+			"job_id", job.ID, "target_key", job.TargetKey)
+		return
+	}
+	planned, generated := parseLWProgressMessage(job.ProgressMessage)
+	now := time.Now()
+	startedAt := job.CreatedAt
+	if job.StartedAt != nil {
+		startedAt = *job.StartedAt
+	}
+	result := &livingwiki.LivingWikiJobResult{
+		RepoID:          repoID,
+		JobID:           job.ID,
+		StartedAt:       startedAt,
+		CompletedAt:     &now,
+		PagesPlanned:    planned,
+		PagesGenerated:  generated,
+		Status:          "failed",
+		FailureCategory: "transient",
+		ErrorMessage:    "Job timed out — no progress for the stale-job threshold. Retry to resume.",
+	}
+	if err := store.Save(context.Background(), tenantID, result); err != nil {
+		slog.Warn("livingwiki: failed to persist stale-reap result",
+			"job_id", job.ID, "repo_id", repoID, "error", err)
+	}
+}
+
+// parseLWTargetKey extracts (tenant, repo) from a living-wiki target key in
+// the form `lw:<tenant>:<repoID>`. Returns ("", "") when the format doesn't
+// match — the caller skips persistence in that case.
+func parseLWTargetKey(targetKey string) (tenant, repoID string) {
+	parts := strings.SplitN(targetKey, ":", 3)
+	if len(parts) != 3 || parts[0] != "lw" {
+		return "", ""
+	}
+	return parts[1], parts[2]
+}
+
+// parseLWProgressMessage extracts (planned, generated) from a progress message
+// like "35/169 pages complete". Returns (0, 0) when the message is unparseable,
+// which is fine — the persisted result simply shows zero progress.
+func parseLWProgressMessage(msg string) (planned, generated int) {
+	slash := strings.Index(msg, "/")
+	if slash <= 0 {
+		return 0, 0
+	}
+	rest := msg[slash+1:]
+	space := strings.Index(rest, " ")
+	if space <= 0 {
+		return 0, 0
+	}
+	g, gErr := strconv.Atoi(msg[:slash])
+	p, pErr := strconv.Atoi(rest[:space])
+	if gErr != nil || pErr != nil {
+		return 0, 0
+	}
+	return p, g
 }
 
 func securityHeaders(next http.Handler) http.Handler {

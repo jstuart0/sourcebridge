@@ -200,10 +200,25 @@ func (o *Orchestrator) Shutdown(graceful time.Duration) error {
 // before the reaper marks it failed. Active jobs are expected to heartbeat
 // through progress writes while they run. Pending jobs are only reaped after a
 // much longer delay to avoid interfering with legitimate queue backlogs.
+//
+// Living-wiki cold-start runs use the longer threshold because a single LLM
+// call inside one page (especially architecture pages with full source bodies
+// embedded in the prompt) can legitimately take several minutes, during which
+// no per-page progress update fires. 10 min was killing real jobs mid-flight.
 const (
-	staleGeneratingThreshold = 10 * time.Minute
-	stalePendingThreshold    = 45 * time.Minute
+	staleGeneratingThreshold          = 10 * time.Minute
+	staleGeneratingThresholdLivingWiki = 30 * time.Minute
+	stalePendingThreshold             = 45 * time.Minute
 )
+
+// generatingThresholdFor returns the per-job stall threshold based on the
+// job's subsystem. Living-wiki cold-start runs are explicitly long-running.
+func generatingThresholdFor(job *llm.Job) time.Duration {
+	if job.Subsystem == "living_wiki" {
+		return staleGeneratingThresholdLivingWiki
+	}
+	return staleGeneratingThreshold
+}
 
 // reaper periodically scans for jobs stuck in pending/generating and marks
 // them failed. This prevents stale jobs from permanently blocking dedupe
@@ -238,7 +253,7 @@ func (o *Orchestrator) reapStaleJobs() {
 	now := time.Now()
 	for _, job := range active {
 		age := now.Sub(job.UpdatedAt)
-		threshold := staleGeneratingThreshold
+		threshold := generatingThresholdFor(job)
 		if job.Status == llm.StatusPending {
 			threshold = stalePendingThreshold
 		}
