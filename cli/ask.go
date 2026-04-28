@@ -134,7 +134,7 @@ func runAskServer(ctx context.Context, serverURL, question string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized {
-		return fmt.Errorf("server requires authentication; run `sourcebridge login` first")
+		return fmt.Errorf("server requires authentication. Run `sourcebridge setup claude --token=ca_...` or export SOURCEBRIDGE_API_TOKEN")
 	}
 	if resp.StatusCode != http.StatusOK {
 		var errBody struct {

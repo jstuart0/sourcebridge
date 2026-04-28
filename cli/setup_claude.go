@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,6 +54,11 @@ var (
 	setupClaudeCI           bool
 	setupClaudeForce        bool
 	setupClaudeCommitConfig bool
+
+	// Token flags (slice 2).
+	setupClaudeToken      string
+	setupClaudeNoSave     bool
+	setupClaudeForceToken bool
 )
 
 func init() {
@@ -65,6 +71,9 @@ func init() {
 	setupClaudeCmd.Flags().BoolVar(&setupClaudeCI, "ci", false, "Exit non-zero if any user-modified section would be skipped")
 	setupClaudeCmd.Flags().BoolVar(&setupClaudeForce, "force", false, "Overwrite user-edited sections and repair orphan markers")
 	setupClaudeCmd.Flags().BoolVar(&setupClaudeCommitConfig, "commit-config", false, "Do not add .claude/sourcebridge.json to .gitignore")
+	setupClaudeCmd.Flags().StringVar(&setupClaudeToken, "token", "", "SourceBridge API token (use --token=ca_... or set SOURCEBRIDGE_API_TOKEN)")
+	setupClaudeCmd.Flags().BoolVar(&setupClaudeNoSave, "no-save", false, "Don't persist --token to ~/.sourcebridge/token (default: persist)")
+	setupClaudeCmd.Flags().BoolVar(&setupClaudeForceToken, "force-token", false, "Overwrite an existing ~/.sourcebridge/token with --token")
 
 	setupCmd.AddCommand(setupClaudeCmd)
 }
@@ -100,6 +109,158 @@ type capabilitiesResponse struct {
 	Capabilities []string `json:"capabilities"`
 }
 
+// httpStatusError is returned by fetchClusters and the resolveToken probe when
+// the HTTP call completed (no transport error) but the server replied with a
+// non-success status. The top-level error handler uses errors.As to detect this
+// and suppresses the "is the server running?" framing, which only applies to
+// genuine transport failures.
+type httpStatusError struct {
+	status int
+	body   string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("server returned HTTP %d: %s", e.status, e.body)
+}
+
+// resolveToken determines the API token to use for this invocation and,
+// when --token is provided, validates it with a probe and (unless --no-save)
+// persists it to ~/.sourcebridge/token.
+//
+// Resolution order intentionally puts --token first, ahead of SOURCEBRIDGE_API_TOKEN.
+// This diverges from readAPIToken() which puts the env var first. The difference
+// is intentional: an explicit flag passed at the command line is the most
+// deliberate signal and must win over a previously-set env var. readAPIToken()
+// exists for passive/background resolution where no flag was given.
+func resolveToken(ctx context.Context, serverURL string) (string, error) {
+	// 1. --token flag (highest precedence).
+	if flag := strings.TrimSpace(setupClaudeToken); flag != "" {
+		if err := validateAndPersistToken(ctx, serverURL, flag); err != nil {
+			return "", err
+		}
+		return flag, nil
+	}
+	// 2–4. Fall back to the existing resolution chain (env → ~/.sourcebridge/token
+	// → ~/.config/sourcebridge/token).
+	return readAPIToken(), nil
+}
+
+// validateAndPersistToken probes /api/v1/repositories with the given token.
+// On success (200) it persists the token to ~/.sourcebridge/token unless
+// --no-save was set. The token is NEVER written on a non-200 response.
+func validateAndPersistToken(ctx context.Context, serverURL, token string) error {
+	endpoint := serverURL + "/api/v1/repositories"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		// Transport failure — bubble up unwrapped so the caller's "cannot reach
+		// server" framing applies.
+		return err
+	}
+	defer resp.Body.Close()
+	rawBody, _ := io.ReadAll(resp.Body)
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// Token is valid. Persist unless --no-save.
+		if !setupClaudeNoSave {
+			if err := saveToken(token); err != nil {
+				return err
+			}
+		}
+		return nil
+	case http.StatusUnauthorized:
+		return fmt.Errorf(
+			"Error: the token you provided is invalid or revoked.\n"+
+				"       Mint a new one at %s/settings/tokens and retry.",
+			serverURL,
+		)
+	case http.StatusForbidden:
+		return fmt.Errorf(
+			"Error: the token you provided does not have permission to read repositories on this server.",
+		)
+	default:
+		return &httpStatusError{status: resp.StatusCode, body: strings.TrimSpace(string(rawBody))}
+	}
+}
+
+// saveToken writes the token to ~/.sourcebridge/token atomically with mode 0600.
+// If the file already exists and contains a different trimmed value, --force-token
+// is required to overwrite.
+func saveToken(token string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolving home directory: %w", err)
+	}
+	dir := filepath.Join(home, ".sourcebridge")
+	tokenPath := filepath.Join(dir, "token")
+
+	// Read existing token (if any) for idempotency / guard checks.
+	var existing string
+	if data, err := os.ReadFile(tokenPath); err == nil {
+		existing = strings.TrimSpace(string(data))
+	}
+
+	// Idempotent: same value already on disk — silent no-op.
+	if existing == token {
+		return nil
+	}
+
+	// Refuse to clobber a different token without --force-token.
+	if existing != "" && !setupClaudeForceToken {
+		return fmt.Errorf(
+			"Refusing to overwrite existing ~/.sourcebridge/token. " +
+				"Pass --force-token to replace, or --no-save to use the new token without persisting.",
+		)
+	}
+
+	// Ensure the directory exists.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("creating ~/.sourcebridge: %w", err)
+	}
+
+	// Atomic write: temp file in same directory → chmod → rename.
+	tmp, err := os.CreateTemp(dir, "token*.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp token file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	// Clean up temp file on any failure path.
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := fmt.Fprint(tmp, token); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("writing token: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing temp token file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		return fmt.Errorf("setting token file permissions: %w", err)
+	}
+	if err := os.Rename(tmpPath, tokenPath); err != nil {
+		return fmt.Errorf("persisting token: %w", err)
+	}
+	committed = true
+
+	if existing != "" {
+		fmt.Fprintf(os.Stdout, "Saved token to ~/.sourcebridge/token (0600, overwriting previous)\n")
+	} else {
+		fmt.Fprintf(os.Stdout, "Saved token to ~/.sourcebridge/token (0600)\n")
+	}
+	return nil
+}
+
 func runSetupClaude(cmd *cobra.Command, args []string) error {
 	if setupClaudeEnableHooks {
 		fmt.Fprintln(os.Stderr, "Note: --enable-hooks is reserved; hooks are deferred to a later milestone.")
@@ -129,6 +290,13 @@ func runSetupClaude(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Resolve and (if --token was passed) validate + persist the API token.
+	// resolveToken() emits its own actionable errors for 401/403 from the probe,
+	// so we return those directly without the generic "cannot reach server" wrapper.
+	if _, err := resolveToken(ctx, serverURL); err != nil {
+		return err
+	}
+
 	// Resolve repo ID.
 	repoID := setupClaudeRepoID
 	if repoID == "" {
@@ -150,6 +318,13 @@ func runSetupClaude(cmd *cobra.Command, args []string) error {
 	// Fetch cluster data.
 	clusterResp, err := fetchClusters(ctx, serverURL, repoID)
 	if err != nil {
+		// httpStatusError means the server was reachable but returned a bad status.
+		// Return those errors (which carry their own actionable messages) directly —
+		// the "is the server running?" framing is wrong for a server that replied.
+		var statusErr *httpStatusError
+		if errors.As(err, &statusErr) {
+			return err
+		}
 		return fmt.Errorf(
 			"Error: cannot reach SourceBridge server at %s.\n"+
 				"       Is the server running? Check your --server flag and SOURCEBRIDGE_URL env.",
@@ -409,11 +584,22 @@ func fetchClusters(ctx context.Context, serverURL, repoID string) (*clustersAPIR
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf(
+			"Error: SourceBridge server at %s requires authentication, but no token was provided (or the token is invalid).\n\n"+
+				"       To fix this:\n"+
+				"       1. Mint a token at %s/settings/tokens\n"+
+				"       2. Re-run with --token=ca_... (saved to ~/.sourcebridge/token)\n"+
+				"       Or export SOURCEBRIDGE_API_TOKEN in your shell.\n",
+			serverURL, serverURL,
+		)
+	}
 	if resp.StatusCode == http.StatusForbidden {
 		return nil, fmt.Errorf("this SourceBridge instance doesn't expose the agent_setup capability. Update or contact your admin")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("clusters API returned %d", resp.StatusCode)
+		rawBody, _ := io.ReadAll(resp.Body)
+		return nil, &httpStatusError{status: resp.StatusCode, body: strings.TrimSpace(string(rawBody))}
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
