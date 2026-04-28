@@ -969,7 +969,7 @@ func csRunnerFromPagesWithSinks(
 		if err == nil && len(result.Generated) > 0 {
 			sinkResults = dispatchGeneratedPages(
 				runCtx, repoID, tenantID,
-				result.Generated,
+				result.Generated, nil, // skippedPageIDs: smart-resume not exercised in this test
 				broker, repoSettingsStore,
 				&status, &failCat, &errMsg,
 			)

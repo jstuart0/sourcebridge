@@ -144,7 +144,60 @@ func buildColdStartRunner(
 			return nil
 		}
 
-		rt.ReportProgress(0.05, "generating", fmt.Sprintf("Starting generation of %d pages", total))
+		// ── Step 1.5: Smart resume — skip pages already published ─────────────
+		//
+		// On a fresh cold-start every page is generated. On a retry after a
+		// time-out (or any failure that left some pages already in the sink),
+		// we don't want to redo all the work — just generate what's missing.
+		// Query each configured sink for the set of SourceBridge-tagged pages
+		// it currently holds, and skip any planned page whose ID is already
+		// present in every sink. The skipped IDs flow through to the dispatch
+		// step so the orphan-GC pass treats them as "still wanted" and doesn't
+		// delete them. PagesGenerated in the persisted result includes these
+		// skips so the UI shows the true sink state.
+		alreadyPublished := listAlreadyPublishedAcrossSinks(
+			runCtx, repoID, broker, repoSettingsStore,
+		)
+		var skippedPageIDs []string
+		if len(alreadyPublished) > 0 {
+			filtered := pages[:0]
+			for _, p := range pages {
+				if _, done := alreadyPublished[p.ID]; done {
+					skippedPageIDs = append(skippedPageIDs, p.ID)
+					continue
+				}
+				filtered = append(filtered, p)
+			}
+			pages = filtered
+		}
+		toGenerate := len(pages)
+		slog.Info("livingwiki/coldstart: smart resume",
+			"repo_id", repoID,
+			"taxonomy_total", total,
+			"already_published", len(skippedPageIDs),
+			"to_generate", toGenerate)
+
+		if toGenerate == 0 {
+			rt.ReportProgress(1.0, "ok", fmt.Sprintf(
+				"All %d pages already up to date — nothing to regenerate", total))
+			if jobResultStore != nil {
+				now := time.Now()
+				_ = jobResultStore.Save(runCtx, tenantID, &livingwiki.LivingWikiJobResult{
+					RepoID:         repoID,
+					JobID:          jobID,
+					StartedAt:      start,
+					CompletedAt:    &now,
+					PagesPlanned:   total,
+					PagesGenerated: total,
+					Status:         "ok",
+				})
+			}
+			lwmetrics.Default.RecordJob("ok", sinkKind, time.Since(start).Seconds())
+			return nil
+		}
+
+		rt.ReportProgress(0.05, "generating", fmt.Sprintf(
+			"Generating %d pages (%d already up to date)", toGenerate, len(skippedPageIDs)))
 
 		// ── Step 2: Generate pages with progress reporting ────────────────────
 		var generated, excludedCount int32
@@ -159,12 +212,12 @@ func buildColdStartRunner(
 			}
 			done := int(atomic.LoadInt32(&generated)) + int(atomic.LoadInt32(&excludedCount))
 			var progress float64
-			if total > 0 {
+			if toGenerate > 0 {
 				// Reserve 0–5% for planning, 5–90% for generation, 90–100% for sink push.
-				progress = 0.05 + 0.85*float64(done)/float64(total)
+				progress = 0.05 + 0.85*float64(done)/float64(toGenerate)
 			}
 			rt.ReportProgress(progress, "generating",
-				fmt.Sprintf("%d/%d pages complete", done, total))
+				fmt.Sprintf("%d/%d pages complete", done, toGenerate))
 		}
 
 		// Heartbeat: tick a progress update every 60s while Generate runs so
@@ -246,17 +299,24 @@ func buildColdStartRunner(
 		// ── Step 4: Dispatch generated pages to configured sinks ──────────────
 		var sinkResults []livingwiki.SinkWriteResult
 
-		if err == nil && len(result.Generated) > 0 {
+		if err == nil && (len(result.Generated) > 0 || len(skippedPageIDs) > 0) {
 			rt.ReportProgress(0.92, "pushing", fmt.Sprintf(
 				"Pushing %d pages to sinks", len(result.Generated)))
 
 			sinkResults = dispatchGeneratedPages(
 				runCtx, repoID, tenantID,
-				result.Generated,
+				result.Generated, skippedPageIDs,
 				broker, repoSettingsStore,
 				&status, &failCat, &errMsg,
 			)
 		}
+
+		// PagesGenerated counts pages successfully present in the sink as of
+		// the end of this run, so it includes both newly-generated pages and
+		// the smart-resume skips. The UI uses this to render the "X of Y
+		// pages" summary, and a follow-up retry uses it to decide whether
+		// any work remains.
+		finalGen += len(skippedPageIDs)
 
 		rt.ReportProgress(1.0, status, fmt.Sprintf(
 			"Generation complete: %d generated, %d excluded",
@@ -305,11 +365,17 @@ func buildColdStartRunner(
 // sink. It updates status/failCat/errMsg when sink failures warrant a
 // reclassification (e.g. all sinks return 401 → status "failed", cat "auth").
 //
+// skippedPageIDs lists pages the smart-resume step skipped because they were
+// already published. They are NOT pushed (the sink already has them) but they
+// ARE added to the orphan-cleanup "still wanted" set so the GC pass doesn't
+// delete them.
+//
 // When broker or repoSettingsStore is nil, dispatch is skipped silently.
 func dispatchGeneratedPages(
 	ctx context.Context,
 	repoID, tenantID string,
 	generatedPages []ast.Page,
+	skippedPageIDs []string,
 	broker credentials.Broker,
 	repoSettingsStore livingwiki.RepoSettingsStore,
 	status *string,
@@ -425,10 +491,15 @@ func dispatchGeneratedPages(
 	// Any repo where the field was never touched keeps the default-on behaviour.
 	orphanCleanEnabled := !repoSettings.AutoCleanOrphansDisabled()
 	if dispatchStatus == "ok" && orphanCleanEnabled {
-		currentIDs := make([]string, 0, len(generatedPages))
+		// currentIDs is the union of pages just generated + pages the
+		// smart-resume step skipped because they were already published.
+		// Both kinds are part of the current taxonomy and must NOT be
+		// treated as orphans.
+		currentIDs := make([]string, 0, len(generatedPages)+len(skippedPageIDs))
 		for _, p := range generatedPages {
 			currentIDs = append(currentIDs, p.ID)
 		}
+		currentIDs = append(currentIDs, skippedPageIDs...)
 		for _, nsw := range writers {
 			gcResult := sinks.RunOrphanCleanup(ctx, nsw.Writer, repoID, currentIDs)
 			if gcResult.Deleted > 0 || len(gcResult.Errors) > 0 {
@@ -440,6 +511,93 @@ func dispatchGeneratedPages(
 	}
 
 	return results
+}
+
+// listAlreadyPublishedAcrossSinks queries every configured sink that supports
+// the OrphanCleaner contract for the page IDs it currently holds, and returns
+// the *intersection* — the set of pages already published to every sink. The
+// cold-start runner uses this to skip pages that were published by a previous
+// run (typically the run that timed out and left some progress behind).
+//
+// Returns an empty map on any failure. Smart resume is purely an optimisation;
+// failures here just fall through to the regular full-generation path.
+//
+// Intersection semantics matter when a repo has multiple sinks: a page must be
+// in EVERY sink to be skipped, otherwise we'd skip a page and never push it to
+// the sink that doesn't have it yet.
+func listAlreadyPublishedAcrossSinks(
+	ctx context.Context,
+	repoID string,
+	broker credentials.Broker,
+	repoSettingsStore livingwiki.RepoSettingsStore,
+) map[string]struct{} {
+	empty := map[string]struct{}{}
+	if broker == nil || repoSettingsStore == nil {
+		return empty
+	}
+
+	repoSettings, err := repoSettingsStore.GetRepoSettings(ctx, defaultTenantID, repoID)
+	if err != nil || repoSettings == nil || len(repoSettings.Sinks) == 0 {
+		return empty
+	}
+
+	snap, err := credentials.Take(ctx, broker)
+	if err != nil {
+		return empty
+	}
+
+	writers, err := sinks.BuildSinkWriters(ctx, repoSettings, snap)
+	if err != nil || len(writers) == 0 {
+		return empty
+	}
+
+	prefix := repoID + "."
+	var perSink []map[string]struct{}
+	for _, nsw := range writers {
+		cleaner, ok := nsw.Writer.(sinks.OrphanCleaner)
+		if !ok {
+			// At least one sink can't tell us what it has, so we can't
+			// safely skip anything — abort and let the full path run.
+			return empty
+		}
+		listed, err := cleaner.ListPagesByExternalIDPrefix(ctx, prefix)
+		if err != nil {
+			return empty
+		}
+		set := make(map[string]struct{}, len(listed))
+		for _, id := range listed {
+			set[id] = struct{}{}
+		}
+		perSink = append(perSink, set)
+	}
+	if len(perSink) == 0 {
+		return empty
+	}
+
+	// Intersection: start from the smallest set, keep IDs present in all.
+	smallest := 0
+	for i, s := range perSink {
+		if len(s) < len(perSink[smallest]) {
+			smallest = i
+		}
+	}
+	result := make(map[string]struct{}, len(perSink[smallest]))
+	for id := range perSink[smallest] {
+		inAll := true
+		for i, s := range perSink {
+			if i == smallest {
+				continue
+			}
+			if _, ok := s[id]; !ok {
+				inAll = false
+				break
+			}
+		}
+		if inAll {
+			result[id] = struct{}{}
+		}
+	}
+	return result
 }
 
 // resolveTaxonomy builds the TaxonomyResolver from available dependencies and
