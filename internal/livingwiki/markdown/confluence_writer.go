@@ -423,6 +423,17 @@ type ConfluenceClient interface {
 	// parameter. Returns (xhtml, true, nil) when the block is found.
 	// Returns (nil, false, nil) when the block does not exist in the page.
 	GetBlockByExternalID(ctx context.Context, pageExternalID string, blockExternalID ast.BlockID) (xhtml []byte, ok bool, err error)
+
+	// ListPagesByExternalIDPrefix returns the external IDs of all Confluence
+	// pages whose sourcebridge_page_id property starts with prefix. Used by
+	// the orphan-cleanup pass to find pages from a specific repo.
+	// Implementations may return an empty slice rather than an error when the
+	// capability is not available.
+	ListPagesByExternalIDPrefix(ctx context.Context, prefix string) ([]string, error)
+
+	// DeletePage permanently deletes the Confluence page identified by
+	// externalID. Returns nil when the page did not exist (idempotent).
+	DeletePage(ctx context.Context, externalID string) error
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -490,6 +501,25 @@ func (m *MemoryConfluenceClient) GetBlockByExternalID(_ context.Context, pageExt
 		}
 	}
 	return nil, false, nil
+}
+
+// ListPagesByExternalIDPrefix implements [ConfluenceClient] by scanning the
+// in-memory page map for keys with the given prefix.
+func (m *MemoryConfluenceClient) ListPagesByExternalIDPrefix(_ context.Context, prefix string) ([]string, error) {
+	var out []string
+	for id := range m.pages {
+		if strings.HasPrefix(id, prefix) {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
+// DeletePage implements [ConfluenceClient] by removing the page from the
+// in-memory map. Returns nil when the page does not exist (idempotent).
+func (m *MemoryConfluenceClient) DeletePage(_ context.Context, externalID string) error {
+	delete(m.pages, externalID)
+	return nil
 }
 
 // MutateBlock directly modifies the stored XHTML of a block, simulating a

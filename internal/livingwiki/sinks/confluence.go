@@ -20,8 +20,13 @@ import (
 //
 // The ConfluenceWriter underneath performs the full read-diff-write reconciliation
 // cycle, preserving human-edited blocks.
+//
+// ConfluenceSinkWriter also implements [OrphanCleaner] so the dispatch layer
+// can delete Confluence pages that were published in a previous job but are
+// absent from the current taxonomy.
 type ConfluenceSinkWriter struct {
 	writer *markdown.ConfluenceWriter
+	client markdown.ConfluenceClient // kept for orphan-cleanup operations
 	kind   markdown.SinkKind
 }
 
@@ -46,6 +51,14 @@ func (s *snapshotBoundConfluenceClient) GetBlockByExternalID(ctx context.Context
 	return s.client.GetBlockByExternalID(ctx, s.snapshot, pageExternalID, blockExternalID)
 }
 
+func (s *snapshotBoundConfluenceClient) ListPagesByExternalIDPrefix(ctx context.Context, prefix string) ([]string, error) {
+	return s.client.ListPagesByExternalIDPrefix(ctx, s.snapshot, prefix)
+}
+
+func (s *snapshotBoundConfluenceClient) DeletePage(ctx context.Context, externalID string) error {
+	return s.client.DeletePage(ctx, s.snapshot, externalID)
+}
+
 // NewConfluenceSinkWriter constructs a ConfluenceSinkWriter.
 //
 // site is the Atlassian Cloud subdomain (e.g. "mycompany").
@@ -68,6 +81,7 @@ func NewConfluenceSinkWriter(site, spaceKey, parentPageID string, snapshot crede
 	})
 	return &ConfluenceSinkWriter{
 		writer: writer,
+		client: bound,
 		kind:   markdown.SinkKindConfluence,
 	}
 }
@@ -78,8 +92,21 @@ func NewConfluenceSinkWriter(site, spaceKey, parentPageID string, snapshot crede
 func NewConfluenceSinkWriterFromClient(client markdown.ConfluenceClient, cfg markdown.ConfluenceWriterConfig) *ConfluenceSinkWriter {
 	return &ConfluenceSinkWriter{
 		writer: markdown.NewConfluenceWriter(client, cfg),
+		client: client,
 		kind:   markdown.SinkKindConfluence,
 	}
+}
+
+// ListPagesByExternalIDPrefix implements [OrphanCleaner] by delegating to the
+// underlying ConfluenceClient.
+func (c *ConfluenceSinkWriter) ListPagesByExternalIDPrefix(ctx context.Context, prefix string) ([]string, error) {
+	return c.client.ListPagesByExternalIDPrefix(ctx, prefix)
+}
+
+// DeletePage implements [OrphanCleaner] by delegating to the underlying
+// ConfluenceClient.
+func (c *ConfluenceSinkWriter) DeletePage(ctx context.Context, externalID string) error {
+	return c.client.DeletePage(ctx, externalID)
 }
 
 // Kind implements SinkWriter.

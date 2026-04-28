@@ -70,12 +70,19 @@ func mapRepoLivingWikiSettings(s *livingwiki.RepositoryLivingWikiSettings) *Repo
 	if s == nil {
 		return nil
 	}
+	// AutoCleanOrphans defaults to true (nil → true); only false when
+	// the user explicitly disabled it.
+	autoClean := true
+	if s.AutoCleanOrphans != nil {
+		autoClean = *s.AutoCleanOrphans
+	}
 	gql := &RepositoryLivingWikiSettings{
 		Enabled:           s.Enabled,
 		Mode:              RepoWikiMode(s.Mode),
 		ExcludePaths:      nonNilStringSlice(s.ExcludePaths),
 		StaleWhenStrategy: RepoStaleWhenStrategy(s.StaleWhenStrategy),
 		MaxPagesPerJob:    s.MaxPagesPerJob,
+		AutoCleanOrphans:  autoClean,
 	}
 	gql.RepoID = s.RepoID // non-schema field; set after literal to survive gqlgen regen
 	if gql.MaxPagesPerJob == 0 {

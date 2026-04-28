@@ -1580,6 +1580,13 @@ type RepositoryLivingWikiSettings {
   excludePaths: [String!]!
   staleWhenStrategy: RepoStaleWhenStrategy!
   maxPagesPerJob: Int!
+  """
+  autoCleanOrphans controls whether the post-dispatch orphan-cleanup pass
+  deletes Confluence pages that were published in a previous job but are
+  absent from the current taxonomy. Defaults to true. Set to false to
+  preserve pages that are no longer generated.
+  """
+  autoCleanOrphans: Boolean!
   lastRunAt: Time
   updatedAt: Time
   updatedBy: String
@@ -1670,6 +1677,11 @@ input UpdateRepositoryLivingWikiSettingsInput {
   excludePaths: [String!]
   staleWhenStrategy: RepoStaleWhenStrategy
   maxPagesPerJob: Int
+  """
+  Set to false to disable the post-dispatch orphan-cleanup pass for this repo.
+  Omit to keep the current value (defaults to true for new repos).
+  """
+  autoCleanOrphans: Boolean
 }
 
 input RepoWikiSinkInput {

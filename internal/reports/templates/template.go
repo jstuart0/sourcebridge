@@ -130,6 +130,11 @@ type Symbol struct {
 
 	// EndLine is the 1-based last line of the declaration.
 	EndLine int
+
+	// Body is the raw source text of the declaration (StartLine..EndLine).
+	// Optional — callers that cannot read source files leave this empty.
+	// Capped at 200 lines / 8 KB by the supplier; never exceeded.
+	Body string
 }
 
 // GitLog is the port through which templates access indexed commit history.

@@ -230,6 +230,83 @@ func dispatchToSink(
 	return summary
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Orphan cleanup
+// ─────────────────────────────────────────────────────────────────────────────
+
+// OrphanCleaner is an optional interface that sink writers may implement to
+// support orphan-page deletion. Not all sinks support it (e.g. Notion does not
+// expose a by-property list endpoint), so callers must do a type assertion.
+type OrphanCleaner interface {
+	// ListPagesByExternalIDPrefix returns the external IDs of all pages in the
+	// sink whose SourceBridge external ID starts with prefix. Implementations
+	// may return an empty slice rather than an error when the capability is not
+	// available.
+	ListPagesByExternalIDPrefix(ctx context.Context, prefix string) ([]string, error)
+
+	// DeletePage permanently deletes the page with the given external ID from
+	// the sink. Returns nil when the page does not exist (idempotent).
+	DeletePage(ctx context.Context, externalID string) error
+}
+
+// OrphanCleanupResult records the outcome of one orphan-cleanup pass.
+type OrphanCleanupResult struct {
+	// Deleted is the count of orphan pages successfully removed.
+	Deleted int
+	// DeletedIDs lists the external IDs of removed pages.
+	DeletedIDs []string
+	// Errors lists non-fatal errors encountered (e.g. one delete call failing
+	// while others succeeded).
+	Errors []string
+}
+
+// RunOrphanCleanup removes Confluence pages that carry a SourceBridge property
+// for repoID but whose external ID is not in currentPageIDs. It is safe to
+// call even on partial-success dispatches — the caller is responsible for only
+// invoking it when the dispatch status is "ok" so a transient generation
+// failure cannot erroneously nuke live content.
+//
+// writer must implement [OrphanCleaner]; if it does not, the function returns
+// immediately with a zero result. Errors from individual delete calls are
+// collected in the result rather than aborting the whole pass.
+func RunOrphanCleanup(ctx context.Context, writer SinkWriter, repoID string, currentPageIDs []string) OrphanCleanupResult {
+	cleaner, ok := writer.(OrphanCleaner)
+	if !ok {
+		return OrphanCleanupResult{}
+	}
+
+	prefix := repoID + "."
+	listed, err := cleaner.ListPagesByExternalIDPrefix(ctx, prefix)
+	if err != nil {
+		return OrphanCleanupResult{
+			Errors: []string{fmt.Sprintf("orphan-cleanup: list pages: %v", err)},
+		}
+	}
+
+	current := make(map[string]bool, len(currentPageIDs))
+	for _, id := range currentPageIDs {
+		current[id] = true
+	}
+
+	var result OrphanCleanupResult
+	for _, extID := range listed {
+		if current[extID] {
+			continue
+		}
+		slog.Warn("livingwiki/orphan: deleting orphan page",
+			"external_id", extID, "repo_id", repoID)
+		if delErr := cleaner.DeletePage(ctx, extID); delErr != nil {
+			slog.Warn("livingwiki/orphan: delete failed",
+				"external_id", extID, "error", delErr)
+			result.Errors = append(result.Errors, fmt.Sprintf("delete %q: %v", extID, delErr))
+			continue
+		}
+		result.Deleted++
+		result.DeletedIDs = append(result.DeletedIDs, extID)
+	}
+	return result
+}
+
 // DispatchSummaryStatus classifies a DispatchResult into one of three terminal
 // job statuses:
 //

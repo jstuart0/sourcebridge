@@ -549,6 +549,92 @@ func (c *HTTPConfluenceClient) setPageProperty(ctx context.Context, auth, pageID
 	return nil
 }
 
+// ListPagesByExternalIDPrefix implements [ConfluenceClient] by paginating over
+// all pages in the space and returning those whose sourcebridge_page_id
+// property starts with prefix.
+//
+// This performs one GET /pages?space-id=… per page of results (Confluence
+// returns 250 pages per page by default) and one GET /properties call per
+// matching page, so it is O(space_size) and should only be called during the
+// orphan-cleanup pass at the end of a job.
+func (c *HTTPConfluenceClient) ListPagesByExternalIDPrefix(ctx context.Context, snap credentials.Snapshot, prefix string) ([]string, error) {
+	auth := basicAuthHeader(snap.ConfluenceEmail, snap.ConfluenceToken)
+	spaceID, err := c.resolveSpaceID(ctx, auth)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []string
+	cursor := ""
+	for {
+		params := url.Values{}
+		params.Set("space-id", spaceID)
+		params.Set("limit", "250")
+		if cursor != "" {
+			params.Set("cursor", cursor)
+		}
+		path := "/pages?" + params.Encode()
+
+		var resp struct {
+			Results []struct {
+				ID string `json:"id"`
+			} `json:"results"`
+			Links struct {
+				Next string `json:"next"`
+			} `json:"_links"`
+		}
+		if err := c.do(ctx, auth, http.MethodGet, path, nil, &resp); err != nil {
+			return nil, fmt.Errorf("confluence_http: list pages: %w", err)
+		}
+
+		for _, r := range resp.Results {
+			propVal, propErr := c.getPageProperty(ctx, auth, r.ID, confluencePropertyKey)
+			if propErr != nil || propVal == "" {
+				continue
+			}
+			if strings.HasPrefix(propVal, prefix) {
+				out = append(out, propVal)
+			}
+		}
+
+		if resp.Links.Next == "" {
+			break
+		}
+		// Confluence next links are path-only (/wiki/api/v2/pages?cursor=…).
+		// Extract the cursor from the query string.
+		nextURL, parseErr := url.Parse(resp.Links.Next)
+		if parseErr != nil {
+			break
+		}
+		cursor = nextURL.Query().Get("cursor")
+		if cursor == "" {
+			break
+		}
+	}
+	return out, nil
+}
+
+// DeletePage implements [ConfluenceClient] by calling DELETE /pages/{id}.
+// Returns nil when the page does not exist (idempotent).
+func (c *HTTPConfluenceClient) DeletePage(ctx context.Context, snap credentials.Snapshot, externalID string) error {
+	auth := basicAuthHeader(snap.ConfluenceEmail, snap.ConfluenceToken)
+	pageID, err := c.findPageIDByExternalID(ctx, auth, externalID)
+	if err != nil {
+		return err
+	}
+	if pageID == "" {
+		return nil // page not found — idempotent
+	}
+	path := fmt.Sprintf("/pages/%s", url.PathEscape(pageID))
+	if err := c.do(ctx, auth, http.MethodDelete, path, nil, nil); err != nil {
+		if IsConfluenceNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("confluence_http: delete page %q: %w", externalID, err)
+	}
+	return nil
+}
+
 // ─── HTTP core ────────────────────────────────────────────────────────────────
 
 func (c *HTTPConfluenceClient) do(ctx context.Context, auth, method, path string, reqBody, respBody interface{}) error {

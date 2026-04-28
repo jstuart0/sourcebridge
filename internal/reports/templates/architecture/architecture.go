@@ -47,6 +47,15 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
 )
 
+const (
+	// maxSymbolsInPrompt caps how many symbols are included in the user
+	// prompt to keep the total context within ~30 K input tokens.
+	maxSymbolsInPrompt = 40
+	// maxBodyLines is the maximum source lines emitted per symbol body.
+	// Suppliers cap at 200; we re-enforce here as a safety net.
+	maxBodyLines = 200
+)
+
 const templateID = "architecture"
 
 // Template is the Architecture page template. Construct with [New].
@@ -126,6 +135,60 @@ func (t *Template) GeneratePackagePage(ctx context.Context, input templates.Gene
 	}
 
 	pageID := pageIDFor(input.RepoID, pkg.Package)
+
+	// Empty-package fallback: no LLM call needed; emit a single informational
+	// paragraph so the page is not blank and the manifest can regenerate when
+	// exported symbols appear later.
+	if len(pkgSyms) == 0 {
+		placeholder := fmt.Sprintf(
+			"Package `%s` contains no exported public surface at this time. "+
+				"It may expose only internal helpers. This page will regenerate "+
+				"automatically when exported symbols appear.",
+			pkg.Package,
+		)
+		titleID := ast.GenerateBlockID(pageID, "", ast.BlockKindHeading, 0)
+		paraID := ast.GenerateBlockID(pageID, "Overview", ast.BlockKindParagraph, 0)
+		blocks := []ast.Block{
+			{
+				ID:   titleID,
+				Kind: ast.BlockKindHeading,
+				Content: ast.BlockContent{Heading: &ast.HeadingContent{
+					Level: 1,
+					Text:  "Architecture: " + pkg.Package,
+				}},
+				Owner:      ast.OwnerGenerated,
+				LastChange: ast.BlockChange{Timestamp: now, Source: "sourcebridge"},
+			},
+			{
+				ID:   paraID,
+				Kind: ast.BlockKindParagraph,
+				Content: ast.BlockContent{Paragraph: &ast.ParagraphContent{
+					Markdown: placeholder,
+				}},
+				Owner:      ast.OwnerGenerated,
+				LastChange: ast.BlockChange{Timestamp: now, Source: "sourcebridge"},
+			},
+		}
+		return ast.Page{
+			ID: pageID,
+			Manifest: manifest.DependencyManifest{
+				PageID:   pageID,
+				Template: string(quality.TemplateArchitecture),
+				Audience: string(input.Audience),
+				Dependencies: manifest.Dependencies{
+					Paths:           []string{pkg.Package + "/**"},
+					DependencyScope: manifest.ScopeDirect,
+				},
+				// Regenerate as soon as any symbol appears in this package.
+				StaleWhen: []manifest.StaleCondition{
+					{SignatureChangeIn: []string{pkg.Package + ".*"}},
+				},
+			},
+			Blocks:     blocks,
+			Provenance: ast.Provenance{GeneratedAt: now, ModelID: "llm"},
+		}, nil
+	}
+
 	systemPrompt := buildSystemPrompt(input.Audience)
 	userPrompt := buildUserPrompt(pkg, pkgSyms)
 
@@ -237,26 +300,71 @@ Format rules:
   ## Dependencies
   ## Used by
   ## Code example
-- Use only what you can infer from the provided symbol list and caller/callee data.
+- Use only what you can infer from the provided symbols and source excerpts. Quote behaviour from the code, not from imagination.
 - Every behavioral assertion must end with a citation in the form (path/file.go:start-end).
 - Do not use vague quantifiers ("various", "many", "several") without a specific number.
 - Keep prose to the point: aim for 200–600 words total excluding code.
-- The "Code example" section must contain at least one fenced Go code block.`, voiceHint)
+- The "Code example" section must contain at least one fenced Go code block drawn from the actual source excerpts.
+- If a section has no content (e.g. no callers, no callees), write one sentence explaining that rather than omitting the heading.`, voiceHint)
 }
 
 // buildUserPrompt assembles the user-turn prompt with the package data.
+// It emits full doc comments and fenced source excerpts so the model has
+// concrete code to quote from. Symbols are capped at maxSymbolsInPrompt to
+// keep the prompt within ~30 K input tokens.
 func buildUserPrompt(pkg PackageInfo, syms []templates.Symbol) string {
 	var sb strings.Builder
 
 	fmt.Fprintf(&sb, "Package: %s\n\n", pkg.Package)
 
+	// Package-level doc comment: look for a symbol whose DocComment looks like
+	// a package doc (i.e., starts with "Package "). Fall back to a note.
+	pkgDoc := packageLevelDoc(syms)
+	if pkgDoc != "" {
+		sb.WriteString("Package documentation:\n")
+		sb.WriteString(pkgDoc)
+		sb.WriteString("\n\n")
+	} else {
+		sb.WriteString("(no package-level documentation found)\n\n")
+	}
+
 	if len(syms) > 0 {
-		sb.WriteString("Exported symbols:\n")
-		for _, s := range syms {
-			fmt.Fprintf(&sb, "  %s — %s\n", s.Signature, oneLineSummary(s.DocComment))
+		// Cap to maxSymbolsInPrompt to stay within token budget.
+		capped := syms
+		if len(capped) > maxSymbolsInPrompt {
+			capped = capped[:maxSymbolsInPrompt]
+		}
+
+		sb.WriteString("Exported symbols with source:\n")
+		for _, s := range capped {
+			// Full signature + file reference.
 			if s.FilePath != "" {
-				fmt.Fprintf(&sb, "    Source: %s:%d-%d\n", s.FilePath, s.StartLine, s.EndLine)
+				fmt.Fprintf(&sb, "\n### %s (%s:%d-%d)\n", s.Name, s.FilePath, s.StartLine, s.EndLine)
+			} else {
+				fmt.Fprintf(&sb, "\n### %s\n", s.Name)
 			}
+
+			// Full doc comment, not just the first sentence.
+			if s.DocComment != "" {
+				sb.WriteString(s.DocComment)
+				sb.WriteString("\n")
+			}
+
+			// Signature.
+			fmt.Fprintf(&sb, "\nSignature: `%s`\n", s.Signature)
+
+			// Source body excerpt.
+			if s.Body != "" {
+				body := capLines(s.Body, maxBodyLines)
+				if s.FilePath != "" {
+					fmt.Fprintf(&sb, "\n```go\n// %s:%d-%d\n%s\n```\n", s.FilePath, s.StartLine, s.EndLine, body)
+				} else {
+					fmt.Fprintf(&sb, "\n```go\n%s\n```\n", body)
+				}
+			}
+		}
+		if len(syms) > maxSymbolsInPrompt {
+			fmt.Fprintf(&sb, "\n(%d additional symbols omitted for brevity)\n", len(syms)-maxSymbolsInPrompt)
 		}
 		sb.WriteString("\n")
 	}
@@ -279,6 +387,28 @@ func buildUserPrompt(pkg PackageInfo, syms []templates.Symbol) string {
 
 	sb.WriteString("Now write the six-section architecture page described in the system prompt.")
 	return sb.String()
+}
+
+// packageLevelDoc returns the first symbol doc that starts with "Package ",
+// which is the Go convention for package-level documentation. Falls back to
+// the first non-empty doc comment when no package-doc is found.
+func packageLevelDoc(syms []templates.Symbol) string {
+	for _, s := range syms {
+		if strings.HasPrefix(strings.TrimSpace(s.DocComment), "Package ") {
+			return strings.TrimSpace(s.DocComment)
+		}
+	}
+	return ""
+}
+
+// capLines returns s with at most n lines. When the original has more lines,
+// a truncation note is appended.
+func capLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[:n], "\n") + fmt.Sprintf("\n// … (%d lines truncated)", len(lines)-n)
 }
 
 // oneLineSummary returns the first sentence of a doc comment, or the full

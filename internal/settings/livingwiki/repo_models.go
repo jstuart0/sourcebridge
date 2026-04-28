@@ -42,6 +42,13 @@ type RepositoryLivingWikiSettings struct {
 	// Non-nil triggers the stale-banner insertion pass on next scheduler tick.
 	DisabledAt *time.Time `json:"disabled_at,omitempty"`
 
+	// AutoCleanOrphans controls whether the post-dispatch orphan-cleanup pass
+	// runs after a successful job. Defaults to true (nil = not yet set →
+	// treat as enabled). Set to false via the UI to keep manually-created or
+	// previously-generated pages that are no longer in the current taxonomy.
+	// Nil means the user has never changed the default.
+	AutoCleanOrphans *bool `json:"auto_clean_orphans,omitempty"`
+
 	UpdatedAt time.Time `json:"updated_at"`
 	UpdatedBy string    `json:"updated_by,omitempty"`
 }
@@ -109,6 +116,17 @@ type RepoWikiSink struct {
 	// EditPolicy controls how out-of-band sink edits are handled.
 	// When empty, DefaultRepoEditPolicy for the sink's Kind applies.
 	EditPolicy RepoWikiEditPolicy `json:"edit_policy,omitempty"`
+}
+
+// AutoCleanOrphansDisabled reports whether the user has explicitly opted out of
+// the orphan-cleanup pass. Returns false (meaning "cleanup is enabled") when
+// AutoCleanOrphans is nil (the default) or true. Returns true only when the
+// user has explicitly set the field to false.
+func (s *RepositoryLivingWikiSettings) AutoCleanOrphansDisabled() bool {
+	if s.AutoCleanOrphans == nil {
+		return false // nil → default-on
+	}
+	return !*s.AutoCleanOrphans
 }
 
 // DefaultRepoEditPolicy returns the default edit policy for a given sink kind.

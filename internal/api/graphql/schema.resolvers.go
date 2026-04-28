@@ -2494,6 +2494,10 @@ func (r *mutationResolver) UpdateRepositoryLivingWikiSettings(ctx context.Contex
 	if input.MaxPagesPerJob != nil {
 		current.MaxPagesPerJob = *input.MaxPagesPerJob
 	}
+	if input.AutoCleanOrphans != nil {
+		v := *input.AutoCleanOrphans
+		current.AutoCleanOrphans = &v
+	}
 
 	current.UpdatedAt = time.Now()
 	current.UpdatedBy = userIDFromContext(ctx)

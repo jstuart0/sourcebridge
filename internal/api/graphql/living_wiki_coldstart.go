@@ -19,9 +19,11 @@
 package graphql
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -41,6 +43,14 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
+)
+
+const (
+	// maxSymbolBodyLines is the maximum number of source lines included per
+	// symbol body to keep prompts manageable.
+	maxSymbolBodyLines = 200
+	// maxSymbolBodyBytes is the maximum byte size per symbol body.
+	maxSymbolBodyBytes = 8 * 1024
 )
 
 // buildColdStartRunner returns the RunWithContext closure for a living-wiki
@@ -350,6 +360,31 @@ func dispatchGeneratedPages(
 		}
 	}
 
+	// Orphan-cleanup pass: remove pages that were published in a previous job
+	// but are absent from the current taxonomy. Runs only on a fully-successful
+	// dispatch ("ok") so a transient generation failure cannot nuke live
+	// content. The user may disable this per-repo via AutoCleanOrphans=false.
+	//
+	// Default-on semantics: AutoCleanOrphans is a bool whose zero-value is
+	// false, but we treat an unset (zero) value the same as true here because
+	// the settings mutation explicitly sets it when the user flips the toggle.
+	// Any repo where the field was never touched keeps the default-on behaviour.
+	orphanCleanEnabled := !repoSettings.AutoCleanOrphansDisabled()
+	if dispatchStatus == "ok" && orphanCleanEnabled {
+		currentIDs := make([]string, 0, len(generatedPages))
+		for _, p := range generatedPages {
+			currentIDs = append(currentIDs, p.ID)
+		}
+		for _, nsw := range writers {
+			gcResult := sinks.RunOrphanCleanup(ctx, nsw.Writer, repoID, currentIDs)
+			if gcResult.Deleted > 0 || len(gcResult.Errors) > 0 {
+				slog.Info("livingwiki/dispatch: orphan cleanup done",
+					"sink", nsw.Name, "repo_id", repoID,
+					"deleted", gcResult.Deleted, "errors", len(gcResult.Errors))
+			}
+		}
+	}
+
 	return results
 }
 
@@ -426,18 +461,32 @@ func buildExclusionReasons(excluded []lworch.ExcludedPage) []string {
 // interface. It fetches all (non-test) symbols for the repo and maps them to
 // the narrow templates.Symbol shape. Package is derived from the symbol's
 // file path directory.
+//
+// When the repo has a local clone path on disk, ExportedSymbols populates
+// Symbol.Body with the raw source lines for each symbol so the architecture
+// template can include concrete code in its LLM prompt.
 type graphStoreSymbolGraph struct {
 	store graphstore.GraphStore
 }
 
 func (g *graphStoreSymbolGraph) ExportedSymbols(repoID string) ([]templates.Symbol, error) {
 	stored, _ := g.store.GetSymbols(repoID, nil, nil, 10000, 0)
+
+	// Determine the repo root for source-body reading.
+	repoRoot := ""
+	if repo := g.store.GetRepository(repoID); repo != nil {
+		repoRoot = repo.ClonePath
+		if repoRoot == "" {
+			repoRoot = repo.Path
+		}
+	}
+
 	out := make([]templates.Symbol, 0, len(stored))
 	for _, s := range stored {
 		if s.IsTest {
 			continue
 		}
-		out = append(out, templates.Symbol{
+		sym := templates.Symbol{
 			Package:    filepath.Dir(s.FilePath),
 			Name:       s.Name,
 			Signature:  s.Signature,
@@ -445,9 +494,56 @@ func (g *graphStoreSymbolGraph) ExportedSymbols(repoID string) ([]templates.Symb
 			FilePath:   s.FilePath,
 			StartLine:  s.StartLine,
 			EndLine:    s.EndLine,
-		})
+		}
+		if repoRoot != "" && s.FilePath != "" && s.StartLine > 0 && s.EndLine >= s.StartLine {
+			sym.Body = readSourceLines(repoRoot, s.FilePath, s.StartLine, s.EndLine)
+		}
+		out = append(out, sym)
 	}
 	return out, nil
+}
+
+// readSourceLines reads lines [startLine, endLine] (1-based, inclusive) from
+// filePath relative to repoRoot. Returns empty string on any read error so
+// callers can proceed without the body. The result is capped at
+// maxSymbolBodyLines / maxSymbolBodyBytes to keep prompts manageable.
+func readSourceLines(repoRoot, filePath string, startLine, endLine int) string {
+	absPath := filepath.Join(repoRoot, filePath)
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return ""
+	}
+
+	lines := bytes.Split(data, []byte("\n"))
+	// Convert 1-based to 0-based indices and clamp.
+	lo := startLine - 1
+	if lo < 0 {
+		lo = 0
+	}
+	hi := endLine // exclusive in slice terms
+	if hi > len(lines) {
+		hi = len(lines)
+	}
+	if lo >= hi {
+		return ""
+	}
+
+	selected := lines[lo:hi]
+	// Cap line count.
+	if len(selected) > maxSymbolBodyLines {
+		selected = selected[:maxSymbolBodyLines]
+	}
+
+	body := bytes.Join(selected, []byte("\n"))
+	// Cap byte size.
+	if len(body) > maxSymbolBodyBytes {
+		body = body[:maxSymbolBodyBytes]
+		// Trim to the last newline to avoid cutting mid-line.
+		if idx := bytes.LastIndexByte(body, '\n'); idx > 0 {
+			body = body[:idx]
+		}
+	}
+	return string(body)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
