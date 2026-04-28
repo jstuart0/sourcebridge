@@ -161,6 +161,34 @@ func buildColdStartRunner(
 				fmt.Sprintf("%d/%d pages complete", done, total))
 		}
 
+		// Heartbeat: tick a progress update every 60s while Generate runs so
+		// the LLM-orchestrator stale-reaper sees fresh UpdatedAt timestamps
+		// even if no page completes for a long stretch (e.g. all parallel
+		// workers happen to be on slow architecture pages simultaneously).
+		// Without this, sourcebridge-sized cold starts get reaped at the
+		// 30-minute "no progress" threshold even though the goroutines are
+		// still actively producing.
+		hbCtx, hbStop := context.WithCancel(runCtx)
+		defer hbStop()
+		go func() {
+			ticker := time.NewTicker(60 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-hbCtx.Done():
+					return
+				case <-ticker.C:
+					done := int(atomic.LoadInt32(&generated)) + int(atomic.LoadInt32(&excludedCount))
+					var p float64
+					if total > 0 {
+						p = 0.05 + 0.85*float64(done)/float64(total)
+					}
+					rt.ReportProgress(p, "generating",
+						fmt.Sprintf("%d/%d pages complete", done, total))
+				}
+			}
+		}()
+
 		// Use an in-memory WikiPR so pages are stored as proposed_ast.
 		// A future workstream will replace this with a per-job snapshot from the
 		// broker once git-based PR creation is wired.
@@ -570,12 +598,25 @@ type coldStartLLMCaller struct {
 	client *worker.Client
 }
 
+// perCallLLMTimeout caps how long any single AnswerQuestion RPC may run.
+// Without this cap a hung gRPC call (network blip, worker stall, provider
+// timeout) blocks its goroutine indefinitely. With 5 parallel workers and
+// 169 pages, all five getting stuck on hung calls produces an ~30-minute
+// silence that triggers the LLM-orchestrator stale-reaper, killing the
+// whole job. A 5-minute ceiling per call is generous for any legitimate
+// page (architecture pages with full source bodies typically finish in
+// 30-90 s) and lets the page-level retry loop recover from individual
+// hangs without poisoning the whole run.
+const perCallLLMTimeout = 5 * time.Minute
+
 func (c *coldStartLLMCaller) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	question := userPrompt
 	if systemPrompt != "" {
 		question = systemPrompt + "\n\n" + userPrompt
 	}
-	resp, err := c.client.AnswerQuestion(ctx, &reasoningv1.AnswerQuestionRequest{
+	callCtx, cancel := context.WithTimeout(ctx, perCallLLMTimeout)
+	defer cancel()
+	resp, err := c.client.AnswerQuestion(callCtx, &reasoningv1.AnswerQuestionRequest{
 		Question: question,
 	})
 	if err != nil {
