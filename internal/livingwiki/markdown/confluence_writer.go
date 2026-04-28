@@ -158,11 +158,24 @@ func inlineMarkdownToXHTMLInto(out *strings.Builder, s string) {
 			textStart, textEnd, urlEnd, _ := parseMdLinkAt(s, 0)
 			textPart := s[textStart:textEnd]
 			url := s[textEnd+2 : urlEnd] // s[textEnd+2:urlEnd] skips "]("
-			out.WriteString(`<a href="`)
-			out.WriteString(xmlEscape(url))
-			out.WriteString(`">`)
-			out.WriteString(xmlEscape(textPart))
-			out.WriteString("</a>")
+			if strings.HasPrefix(url, confluencePageScheme) {
+				// Confluence cross-page link — emit <ac:link> macro.
+				pageTitle := url[len(confluencePageScheme):]
+				out.WriteString(`<ac:link>`)
+				out.WriteString(`<ri:page ri:content-title="`)
+				out.WriteString(xmlEscape(pageTitle))
+				out.WriteString(`"/>`)
+				out.WriteString(`<ac:link-body>`)
+				out.WriteString(xmlEscape(textPart))
+				out.WriteString(`</ac:link-body>`)
+				out.WriteString(`</ac:link>`)
+			} else {
+				out.WriteString(`<a href="`)
+				out.WriteString(xmlEscape(url))
+				out.WriteString(`">`)
+				out.WriteString(xmlEscape(textPart))
+				out.WriteString("</a>")
+			}
 			s = s[urlEnd+1:] // skip past closing ')'
 
 		case "bold":
@@ -204,6 +217,14 @@ func inlineMarkdownToXHTMLInto(out *strings.Builder, s string) {
 	}
 }
 
+// confluencePageScheme is the URL scheme used to emit Confluence cross-page
+// links. The portion after the scheme is treated as the target page's exact
+// ri:content-title (no URL encoding). Example:
+//
+//	[Auth package](confluence-page:Architecture: internal/auth)
+//	→ <ac:link><ri:page ri:content-title="Architecture: internal/auth"/>…</ac:link>
+const confluencePageScheme = "confluence-page:"
+
 // parseMdLinkAt parses a markdown link "[text](url)" that starts at s[at].
 // Returns (textStart, textEnd, urlEnd, valid) where:
 //
@@ -211,6 +232,9 @@ func inlineMarkdownToXHTMLInto(out *strings.Builder, s string) {
 //	textEnd   = index of ']' in s
 //	urlEnd    = index of ')' that closes the URL (the ')' char is at s[urlEnd])
 //	valid     = true when the URL has a recognisable scheme
+//
+// Recognises http/https, relative paths, fragments, and the confluence-page:
+// scheme (for cross-page Confluence links).
 //
 // On failure valid is false and the other values are meaningless.
 func parseMdLinkAt(s string, at int) (textStart, textEnd, urlEnd int, valid bool) {
@@ -230,7 +254,8 @@ func parseMdLinkAt(s string, at int) (textStart, textEnd, urlEnd int, valid bool
 	urlEnd = urlStart + closeURL
 	url := s[urlStart:urlEnd]
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") &&
-		!strings.HasPrefix(url, "/") && !strings.HasPrefix(url, "#") {
+		!strings.HasPrefix(url, "/") && !strings.HasPrefix(url, "#") &&
+		!strings.HasPrefix(url, confluencePageScheme) {
 		return 0, 0, 0, false
 	}
 	return at + 1, textEnd, urlEnd, true
@@ -888,25 +913,25 @@ func (cw *ConfluenceWriter) WritePage(ctx context.Context, page ast.Page) error 
 // remaining keys are written through to Confluence.
 const propConfluenceTitle = "sb_confluence_title"
 
-// deriveConfluenceTitle returns the page's preferred Confluence title:
-// the first heading block's text when present, falling back to a
-// deterministic humanization of page.ID. The same fallback is used at search
-// time, so create / find round-trip even when no heading block exists.
+// deriveConfluenceTitle returns the page's Confluence title as a deterministic
+// humanization of page.ID via HumanizePageID. Using a stable ID-derived title
+// (rather than the first heading) ensures cross-page links always resolve —
+// a heading can be edited by a human but the page ID never changes.
 func deriveConfluenceTitle(page ast.Page) string {
-	for _, b := range page.Blocks {
-		if b.Kind == ast.BlockKindHeading && b.Content.Heading != nil {
-			if t := strings.TrimSpace(b.Content.Heading.Text); t != "" {
-				return t
-			}
-		}
-	}
 	return HumanizePageID(page.ID)
 }
 
-// HumanizePageID converts a SourceBridge page ID like
-// "<repoUUID>.arch.src.api.middleware" or "system_overview" into a
-// human-friendly title. The transformation is deterministic so create-time
-// and search-time produce the same string.
+// HumanizePageID converts a SourceBridge page ID into a human-friendly title.
+// The transformation is deterministic so create-time and search-time produce
+// the same string, which is required for cross-page <ac:link> resolution.
+//
+// Special cases (matched after stripping a leading UUID repo-id segment):
+//   - "arch.<rest>" → "Architecture: <rest with . replaced by />"
+//   - "system_overview" → "System Overview"
+//   - "glossary" → "Glossary"
+//   - "api_reference" → "API Reference"
+//   - Other single-segment IDs → title-case, underscore→space, common acronyms uppercased
+//   - Multi-segment IDs → join with " · ", each segment title-cased
 func HumanizePageID(externalID string) string {
 	if externalID == "" {
 		return externalID
@@ -920,11 +945,60 @@ func HumanizePageID(externalID string) string {
 	if len(parts) == 0 {
 		return externalID
 	}
+
+	// Special case: arch.* → "Architecture: <path with / separators>"
+	if parts[0] == "arch" && len(parts) > 1 {
+		rest := strings.Join(parts[1:], "/")
+		return "Architecture: " + rest
+	}
+
+	// Special case: well-known single-segment IDs.
+	if len(parts) == 1 {
+		switch parts[0] {
+		case "system_overview":
+			return "System Overview"
+		case "glossary":
+			return "Glossary"
+		case "api_reference":
+			return "API Reference"
+		}
+	}
+
+	// General: title-case each segment with acronym uppercasing.
 	pretty := make([]string, 0, len(parts))
 	for _, p := range parts {
-		pretty = append(pretty, strings.ReplaceAll(p, "_", " "))
+		pretty = append(pretty, humanizeSegment(p))
 	}
 	return strings.Join(pretty, " · ")
+}
+
+// humanizeSegment converts a single page-ID segment (e.g. "api_reference")
+// to a human-friendly label ("API Reference"). It:
+//  1. Replaces underscores with spaces.
+//  2. Uppercases each word if it is a known acronym; otherwise title-cases it.
+func humanizeSegment(s string) string {
+	words := strings.Fields(strings.ReplaceAll(s, "_", " "))
+	for i, w := range words {
+		if isAcronym(strings.ToLower(w)) {
+			words[i] = strings.ToUpper(w)
+		} else if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+// isAcronym returns true when w (already lowercased) is a well-known acronym
+// that should be rendered in full uppercase.
+func isAcronym(w string) bool {
+	switch w {
+	case "api", "db", "id", "url", "http", "sql", "xml", "json",
+		"yaml", "aws", "gcp", "dns", "tls", "ui", "iam", "rpc",
+		"grpc", "jwt", "oauth", "oidc", "ci", "cd", "sdk", "cli",
+		"abi", "arn", "sqs", "sns", "s3", "ec2", "vpc":
+		return true
+	}
+	return false
 }
 
 // WriteXHTML renders page to Confluence storage XHTML without performing

@@ -25,6 +25,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -652,16 +653,46 @@ func resolveTaxonomy(ctx context.Context, repoID string, gs graphstore.GraphStor
 				if c.LLMLabel != nil && *c.LLMLabel != "" {
 					label = *c.LLMLabel
 				}
-				clusterSummaries[i] = clustering.ClusterSummary{
+				sum := clustering.ClusterSummary{
 					ID:          c.ID,
 					Label:       label,
 					MemberCount: c.Size,
 				}
+				// Populate MemberPackages so TaxonomyResolver can derive
+				// cross-cluster dependency links. Fetch the full cluster record
+				// (includes Members) then map symbol IDs → package paths via gs.
+				if gs != nil {
+					if full, ferr := cs.GetClusterByID(ctx, c.ID); ferr == nil && full != nil && len(full.Members) > 0 {
+						symIDs := make([]string, len(full.Members))
+						for j, m := range full.Members {
+							symIDs[j] = m.SymbolID
+						}
+						symMap := gs.GetSymbolsByIDs(symIDs)
+						seen := make(map[string]struct{})
+						for _, sym := range symMap {
+							if sym.FilePath == "" {
+								continue
+							}
+							pkg := sym.FilePath
+							if idx := strings.LastIndex(sym.FilePath, "/"); idx >= 0 {
+								pkg = sym.FilePath[:idx]
+							}
+							if _, ok := seen[pkg]; !ok {
+								seen[pkg] = struct{}{}
+								sum.MemberPackages = append(sum.MemberPackages, pkg)
+							}
+						}
+					}
+				}
+				clusterSummaries[i] = sum
 			}
 		}
 	}
 
 	tr := lworch.NewTaxonomyResolver(repoID, sg, nil /* gitLog */, llmCaller)
+	if gs != nil {
+		tr.WithPackageDeps(gs)
+	}
 	return tr.Resolve(ctx, nil, clusterSummaries, time.Now())
 }
 

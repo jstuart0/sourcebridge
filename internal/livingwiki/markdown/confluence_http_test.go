@@ -224,6 +224,15 @@ func newConfluenceHTTPClient(srv *httptest.Server) *HTTPConfluenceClient {
 	return newConfluenceClientWithTransport(srv.URL)
 }
 
+// confluencePageKeys returns the keys of a pages map for diagnostic output.
+func confluencePageKeys(pages map[string]string) []string {
+	out := make([]string, 0, len(pages))
+	for k := range pages {
+		out = append(out, k)
+	}
+	return out
+}
+
 // confluenceRedirectTransport redirects all requests to the test server base URL.
 type confluenceRedirectTransport struct {
 	base string
@@ -292,10 +301,13 @@ func TestHTTPConfluenceClient_UpsertPage_Create(t *testing.T) {
 		t.Fatalf("UpsertPage create: %v", err)
 	}
 
-	// Verify it was stored.
-	id, ok := cts.pages["my-page"]
+	// Verify it was stored under the humanized title (HumanizePageID("my-page") = "My page").
+	// createPage uses HumanizePageID(externalID) as the Confluence page title when no
+	// propConfluenceTitle is supplied in metadata, so the mock keys on "My page" not "my-page".
+	humanTitle := HumanizePageID("my-page")
+	id, ok := cts.pages[humanTitle]
 	if !ok {
-		t.Fatal("page not stored in mock")
+		t.Fatalf("page not stored in mock under title %q (have keys: %v)", humanTitle, confluencePageKeys(cts.pages))
 	}
 	if cts.bodies[id] != "<p>Hello Confluence</p>" {
 		t.Errorf("stored body = %q, want %q", cts.bodies[id], "<p>Hello Confluence</p>")

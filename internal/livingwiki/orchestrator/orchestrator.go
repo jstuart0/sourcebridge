@@ -42,6 +42,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/sourcebridge/sourcebridge/internal/clustering"
+	"github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/manifest"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/markdown"
@@ -693,6 +695,15 @@ func mergeConfig(base, override Config) Config {
 	return merged
 }
 
+// PackageDepsProvider supplies pre-computed package-level dependency edges.
+// The graph.GraphStore satisfies this interface; a nil implementation is
+// safe — the TaxonomyResolver will produce pages without Callers/Callees.
+type PackageDepsProvider interface {
+	// GetPackageDependencies returns all package-level dependency records for
+	// the given repository. Returns an empty slice when none are available.
+	GetPackageDependencies(repoID string) []*graph.StoredPackageDependencies
+}
+
 // TaxonomyResolver derives the [PlannedPage] list for a repository from its
 // symbol graph. It emits:
 //   - One architecture page per top-level package (audience: engineer)
@@ -704,6 +715,7 @@ type TaxonomyResolver struct {
 	symbolGraph templates.SymbolGraph
 	gitLog      templates.GitLog
 	llm         templates.LLMCaller
+	pkgDeps     PackageDepsProvider // may be nil
 }
 
 // NewTaxonomyResolver creates a resolver for the given repository.
@@ -721,6 +733,15 @@ func NewTaxonomyResolver(
 		gitLog:      gitLog,
 		llm:         llm,
 	}
+}
+
+// WithPackageDeps wires a PackageDepsProvider so Resolve can populate
+// Callers/Callees for cluster-based architecture pages. The graph.GraphStore
+// satisfies this interface directly. Calling this is optional — without it
+// architecture pages are generated without cross-cluster dependency data.
+func (r *TaxonomyResolver) WithPackageDeps(p PackageDepsProvider) *TaxonomyResolver {
+	r.pkgDeps = p
+	return r
 }
 
 // PackageGraphInfo holds the graph-level relationships for one package, used
@@ -766,12 +787,98 @@ func (r *TaxonomyResolver) Resolve(ctx context.Context, pkgGraph []PackageGraphI
 	// 1a. Architecture pages — cluster-based (primary signal).
 	//
 	// When clusters are available, emit one architecture page per cluster
-	// using the cluster label as the page scope. The PackageInfo is
-	// derived from the representative symbols' packages.
+	// using the cluster label as the page scope. Callers/Callees are derived
+	// from pre-computed package dependency edges if a PackageDepsProvider has
+	// been wired in via WithPackageDeps.
 	if len(clusters) > 0 {
+		// Build package-level dependency lookup once.
+		var pkgDepByPkg map[string]*graph.StoredPackageDependencies
+		if r.pkgDeps != nil {
+			all := r.pkgDeps.GetPackageDependencies(r.repoID)
+			pkgDepByPkg = make(map[string]*graph.StoredPackageDependencies, len(all))
+			for _, d := range all {
+				pkgDepByPkg[d.Package] = d
+			}
+		}
+
+		// Build a symbol-level package → cluster label lookup so we can
+		// emit cross-cluster labels instead of raw package paths.
+		symsForCluster := make(map[string][]string) // clusterLabel → []package
+		if pkgDepByPkg != nil {
+			// Use the exported symbols we already fetched to derive which
+			// packages belong to which cluster. We rely on MemberPackages when
+			// populated; otherwise we fall back to the representative symbols.
+			for _, cs := range clusters {
+				seen := make(map[string]struct{})
+				for _, pkg := range cs.MemberPackages {
+					if _, ok := seen[pkg]; !ok {
+						seen[pkg] = struct{}{}
+						symsForCluster[cs.Label] = append(symsForCluster[cs.Label], pkg)
+					}
+				}
+			}
+		}
+
+		// Build the reverse map: package path → cluster label.
+		pkgToCluster := make(map[string]string)
+		for clusterLabel, pkgs := range symsForCluster {
+			for _, pkg := range pkgs {
+				pkgToCluster[pkg] = clusterLabel
+			}
+		}
+
 		for _, cs := range clusters {
 			archInput := baseInput
 			archInput.Audience = quality.AudienceEngineers
+
+			// Derive cross-cluster callers/callees.
+			var callerLabels, calleeLabels []string
+			if pkgDepByPkg != nil && len(cs.MemberPackages) > 0 {
+				memberSet := make(map[string]struct{}, len(cs.MemberPackages))
+				for _, pkg := range cs.MemberPackages {
+					memberSet[pkg] = struct{}{}
+				}
+
+				seenCallers := make(map[string]struct{})
+				seenCallees := make(map[string]struct{})
+
+				for _, pkg := range cs.MemberPackages {
+					dep, ok := pkgDepByPkg[pkg]
+					if !ok {
+						continue
+					}
+					// ImportedBy → callers (other clusters that import us).
+					for _, byPkg := range dep.ImportedBy {
+						if _, inCluster := memberSet[byPkg]; inCluster {
+							continue // intra-cluster edge — skip
+						}
+						label, ok := pkgToCluster[byPkg]
+						if !ok {
+							continue // orphan package — no architecture page
+						}
+						if _, seen := seenCallers[label]; !seen {
+							seenCallers[label] = struct{}{}
+							callerLabels = append(callerLabels, label)
+						}
+					}
+					// Imports → callees (other clusters we import).
+					for _, importPkg := range dep.Imports {
+						if _, inCluster := memberSet[importPkg]; inCluster {
+							continue // intra-cluster edge — skip
+						}
+						label, ok := pkgToCluster[importPkg]
+						if !ok {
+							continue // external/stdlib import — no architecture page
+						}
+						if _, seen := seenCallees[label]; !seen {
+							seenCallees[label] = struct{}{}
+							calleeLabels = append(calleeLabels, label)
+						}
+					}
+				}
+				sort.Strings(callerLabels)
+				sort.Strings(calleeLabels)
+			}
 
 			pages = append(pages, PlannedPage{
 				ID:         archPageID(r.repoID, cs.Label),
@@ -780,6 +887,8 @@ func (r *TaxonomyResolver) Resolve(ctx context.Context, pkgGraph []PackageGraphI
 				Input:      archInput,
 				PackageInfo: &ArchitecturePackageInfo{
 					Package: cs.Label,
+					Callers: callerLabels,
+					Callees: calleeLabels,
 				},
 			})
 		}

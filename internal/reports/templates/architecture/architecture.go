@@ -43,6 +43,7 @@ import (
 
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/manifest"
+	"github.com/sourcebridge/sourcebridge/internal/livingwiki/markdown"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
 )
@@ -198,6 +199,24 @@ func (t *Template) GeneratePackagePage(ctx context.Context, input templates.Gene
 	}
 
 	blocks := renderLLMOutput(pageID, pkg.Package, llmOut, now)
+
+	// Append a "Related pages" block when caller/callee cluster labels are known.
+	// Each label is rendered as a Confluence cross-page link so readers can
+	// navigate directly to the related architecture page.
+	if len(pkg.Callers) > 0 || len(pkg.Callees) > 0 {
+		relatedXHTML := buildRelatedPagesXHTML(input.RepoID, pkg.Callers, pkg.Callees)
+		relID := ast.GenerateBlockID(pageID, "Related pages", ast.BlockKindFreeform, 0)
+		blocks = append(blocks, ast.Block{
+			ID:   relID,
+			Kind: ast.BlockKindFreeform,
+			Content: ast.BlockContent{Freeform: &ast.FreeformContent{
+				Raw: relatedXHTML,
+			}},
+			Owner:      ast.OwnerGenerated,
+			LastChange: ast.BlockChange{Timestamp: now, Source: "sourcebridge"},
+		})
+	}
+
 	staleSymbols := symbolNames(pkgSyms)
 
 	page := ast.Page{
@@ -492,6 +511,50 @@ func renderLLMOutput(pageID, pkg string, llmOut string, now time.Time) []ast.Blo
 	}
 
 	return blocks
+}
+
+// buildRelatedPagesXHTML generates the XHTML body for the "Related pages" block.
+// Each caller/callee is a cluster label; the corresponding architecture page
+// title is derived via HumanizePageID so the Confluence ac:link resolves.
+func buildRelatedPagesXHTML(repoID string, callers, callees []string) string {
+	var sb strings.Builder
+	sb.WriteString("<h2>Related pages</h2>\n")
+
+	buildList := func(heading string, labels []string) {
+		if len(labels) == 0 {
+			return
+		}
+		sb.WriteString("<p><strong>")
+		sb.WriteString(heading)
+		sb.WriteString("</strong></p>\n<ul>\n")
+		for _, label := range labels {
+			pid := pageIDFor(repoID, label)
+			title := markdown.HumanizePageID(pid)
+			sb.WriteString(`  <li><ac:link><ri:page ri:content-title="`)
+			sb.WriteString(xmlEscapeSimple(title))
+			sb.WriteString(`"/><ac:link-body>`)
+			sb.WriteString(xmlEscapeSimple(label))
+			sb.WriteString(`</ac:link-body></ac:link></li>`)
+			sb.WriteString("\n")
+		}
+		sb.WriteString("</ul>\n")
+	}
+
+	buildList("Used by:", callers)
+	buildList("Dependencies:", callees)
+	return sb.String()
+}
+
+// xmlEscapeSimple escapes the five XML special characters.
+// Duplicating this small helper avoids importing the markdown package's
+// unexported xmlEscape while keeping the dependency graph clean.
+func xmlEscapeSimple(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, `"`, "&quot;")
+	s = strings.ReplaceAll(s, "'", "&apos;")
+	return s
 }
 
 // parseBodyBlocks converts lines within a section into typed [ast.Block] values.

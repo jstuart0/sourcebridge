@@ -64,6 +64,12 @@ type ClusterSummary struct {
 	// CrossClusterCalls maps cluster label → call count for edges that leave
 	// this cluster and enter another.
 	CrossClusterCalls map[string]int `json:"cross_cluster_calls,omitempty"`
+	// MemberPackages is the de-duplicated set of file-system package paths
+	// (e.g. "internal/auth") for all member symbols. Populated by the
+	// living-wiki cold-start pipeline when it resolves architecture pages;
+	// may be nil when retrieved via the MCP clustering tools which don't
+	// need package-level dependency data.
+	MemberPackages []string `json:"member_packages,omitempty"`
 	// Partial is true if the run hit the iteration cap before convergence.
 	Partial bool `json:"partial"`
 }
