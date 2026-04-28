@@ -147,6 +147,19 @@ func (f *TenantFilteredStore) GetImports(repoID string) []*StoredImport {
 	return f.inner.GetImports(repoID)
 }
 
+func (f *TenantFilteredStore) RecomputePackageDependencies(repoID string) {
+	if f.hasAccess(repoID) {
+		f.inner.RecomputePackageDependencies(repoID)
+	}
+}
+
+func (f *TenantFilteredStore) GetPackageDependencies(repoID string) []*StoredPackageDependencies {
+	if !f.hasAccess(repoID) {
+		return nil
+	}
+	return f.inner.GetPackageDependencies(repoID)
+}
+
 func (f *TenantFilteredStore) SearchContent(repoID, query string, limit int) []SearchResult {
 	if !f.hasAccess(repoID) {
 		return nil

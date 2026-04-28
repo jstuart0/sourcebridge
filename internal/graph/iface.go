@@ -58,6 +58,15 @@ type GraphStore interface {
 	GetCallEdges(repoID string) []CallEdge
 	GetImports(repoID string) []*StoredImport
 
+	// Package dependency aggregation.
+	// RecomputePackageDependencies rebuilds the package-level caller/callee
+	// edge map from raw imports. Call once at the end of each index run.
+	RecomputePackageDependencies(repoID string)
+	// GetPackageDependencies returns the pre-computed package dependency
+	// records for a repository. Returns an empty slice for repos that have
+	// not been indexed since this feature was added.
+	GetPackageDependencies(repoID string) []*StoredPackageDependencies
+
 	// Test linkage — "given a non-test symbol ID, return the IDs of
 	// test symbols that exercise it." Populated from
 	// IndexResult.Relations with Type=RelationTests. See the

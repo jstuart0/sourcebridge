@@ -200,6 +200,10 @@ func (s *Service) runImport(repoID, repoName, repoPath string, isRemote bool, to
 		s.store.SetRepositoryError(repoID, fmt.Errorf("storing index result: %w", err))
 		return
 	}
+
+	// Rebuild package-level dependency edges now that all imports are stored.
+	// This is idempotent; existing package_dep records for the repo are replaced.
+	s.store.RecomputePackageDependencies(repoID)
 	commitSHA := ""
 	if gitMeta, err := git.GetGitMetadata(localPath); err == nil && gitMeta != nil {
 		s.store.UpdateRepositoryMeta(repoID, graphstore.RepositoryMeta{

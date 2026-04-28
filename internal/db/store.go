@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -1109,6 +1110,138 @@ func (s *SurrealStore) GetImports(repoID string) []*graph.StoredImport {
 		})
 	}
 	return imports
+}
+
+// RecomputePackageDependencies rebuilds the package-level dependency records
+// for the given repo by aggregating raw import rows from SurrealDB, then
+// upserting one package_dep record per package. It is idempotent.
+func (s *SurrealStore) RecomputePackageDependencies(repoID string) {
+	db := s.client.DB()
+	if db == nil {
+		return
+	}
+
+	// Fetch all (file_path, import_path) pairs for this repo in one query.
+	type importPair struct {
+		FilePath   string `json:"file_path"`
+		ImportPath string `json:"import_path"`
+	}
+	rows, err := queryOne[[]importPair](ctx(), db,
+		`SELECT f.path AS file_path, i.path AS import_path
+		 FROM ca_import AS i
+		 JOIN ca_file AS f ON f.id = i.file_id
+		 WHERE f.repo_id = $repo_id`,
+		map[string]any{"repo_id": repoID})
+	if err != nil {
+		return
+	}
+
+	// Aggregate into imports / imported_by sets.
+	type edgeSet map[string]map[string]struct{}
+	imports := make(edgeSet)
+	importedBy := make(edgeSet)
+	addEdge := func(m edgeSet, key, val string) {
+		if m[key] == nil {
+			m[key] = make(map[string]struct{})
+		}
+		m[key][val] = struct{}{}
+	}
+
+	for _, r := range rows {
+		if r.FilePath == "" || r.ImportPath == "" {
+			continue
+		}
+		fromPkg := r.FilePath
+		if idx := strings.LastIndex(r.FilePath, "/"); idx >= 0 {
+			fromPkg = r.FilePath[:idx]
+		} else {
+			fromPkg = "."
+		}
+		toPkg := r.ImportPath
+		if fromPkg == toPkg {
+			continue
+		}
+		addEdge(imports, fromPkg, toPkg)
+		addEdge(importedBy, toPkg, fromPkg)
+	}
+
+	// Collect all packages.
+	allPkgs := make(map[string]struct{})
+	for pkg := range imports {
+		allPkgs[pkg] = struct{}{}
+	}
+	for pkg := range importedBy {
+		allPkgs[pkg] = struct{}{}
+	}
+
+	now := time.Now().UTC()
+	for pkg := range allPkgs {
+		importList := sortedKeys(imports[pkg])
+		importedByList := sortedKeys(importedBy[pkg])
+		// Upsert the record keyed by (repo_id, package).
+		_, _ = surrealdb.Query[interface{}](ctx(), db,
+			`UPSERT package_dep:[type::string($repo_id), type::string($pkg)] SET
+			   repo_id = $repo_id,
+			   package = $pkg,
+			   imports = $imports,
+			   imported_by = $imported_by,
+			   updated_at = $updated_at`,
+			map[string]any{
+				"repo_id":     repoID,
+				"pkg":         pkg,
+				"imports":     importList,
+				"imported_by": importedByList,
+				"updated_at":  now,
+			})
+	}
+}
+
+// sortedKeys returns the keys of a string set in sorted order.
+func sortedKeys(m map[string]struct{}) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// GetPackageDependencies returns all pre-computed package dependency records
+// for the given repository from the package_dep table.
+func (s *SurrealStore) GetPackageDependencies(repoID string) []*graph.StoredPackageDependencies {
+	db := s.client.DB()
+	if db == nil {
+		return nil
+	}
+
+	type depRow struct {
+		RepoID     string    `json:"repo_id"`
+		Package    string    `json:"package"`
+		Imports    []string  `json:"imports"`
+		ImportedBy []string  `json:"imported_by"`
+		UpdatedAt  surrealTime `json:"updated_at"`
+	}
+	rows, err := queryOne[[]depRow](ctx(), db,
+		`SELECT * FROM package_dep WHERE repo_id = $repo_id`,
+		map[string]any{"repo_id": repoID})
+	if err != nil {
+		return nil
+	}
+
+	result := make([]*graph.StoredPackageDependencies, 0, len(rows))
+	for _, r := range rows {
+		result = append(result, &graph.StoredPackageDependencies{
+			RepoID:    r.RepoID,
+			Package:   r.Package,
+			Imports:   r.Imports,
+			ImportedBy: r.ImportedBy,
+			UpdatedAt: r.UpdatedAt.Time,
+		})
+	}
+	return result
 }
 
 // SearchContent searches for symbols and files matching a query string.

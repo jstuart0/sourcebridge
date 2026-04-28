@@ -85,6 +85,23 @@ type StoredImport struct {
 	Line   int    `json:"line"`
 }
 
+// StoredPackageDependencies holds aggregated import/imported-by edges for one
+// package within a repository. It is computed once at the end of each index run
+// by RecomputePackageDependencies and cached so callers (e.g. the living-wiki
+// orchestrator) can query cross-package relationships without rescanning every
+// raw import record.
+//
+// Package is the file-system directory path of the package (e.g. "internal/auth").
+// Imports is the set of raw import paths this package references (as-seen in source).
+// ImportedBy is the set of raw import paths that reference this package.
+type StoredPackageDependencies struct {
+	RepoID    string    `json:"repo_id"`
+	Package   string    `json:"package"`
+	Imports   []string  `json:"imports"`
+	ImportedBy []string `json:"imported_by"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // StoredLink is a requirement-code link stored in the graph.
 type StoredLink struct {
 	ID            string    `json:"id"`
@@ -232,6 +249,7 @@ type Store struct {
 	impactReports          map[string][]*ImpactReport        // repoID -> []*ImpactReport
 	discoveredRequirements map[string]*DiscoveredRequirement // discReqID -> DiscoveredRequirement
 	repoDiscoveredReqs     map[string][]string               // repoID -> []discReqID
+	packageDeps            map[string]*StoredPackageDependencies // "repoID:pkg" -> deps
 }
 
 // NewStore creates a new in-memory graph store.
@@ -259,6 +277,7 @@ func NewStore() *Store {
 		impactReports:          make(map[string][]*ImpactReport),
 		discoveredRequirements: make(map[string]*DiscoveredRequirement),
 		repoDiscoveredReqs:     make(map[string][]string),
+		packageDeps:            make(map[string]*StoredPackageDependencies),
 	}
 }
 
@@ -1653,6 +1672,123 @@ func (s *Store) DeleteDiscoveredRequirementsByRepo(repoID string) int {
 	}
 	s.repoDiscoveredReqs[repoID] = remaining
 	return deleted
+}
+
+// --- Package dependency aggregation ---
+
+// RecomputePackageDependencies scans all stored imports for the given repo and
+// rebuilds the package-level caller/callee edge map. It is idempotent: each
+// call replaces the previously stored results for the repo.
+//
+// The algorithm:
+//  1. Build a fileID → file-path map from s.files.
+//  2. For each StoredImport{FileID, Path}: derive fromPkg = filepath.Dir(filePath),
+//     toPkg = Path.
+//  3. Aggregate into imports/imported_by sets per package.
+//  4. Store one StoredPackageDependencies per package.
+func (s *Store) RecomputePackageDependencies(repoID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Remove stale entries for this repo.
+	for key := range s.packageDeps {
+		if strings.HasPrefix(key, repoID+":") {
+			delete(s.packageDeps, key)
+		}
+	}
+
+	// Build fileID → directory-path lookup.
+	filePaths := make(map[string]string)
+	for _, fid := range s.repoFiles[repoID] {
+		if f := s.files[fid]; f != nil {
+			dir := f.Path
+			if idx := strings.LastIndex(f.Path, "/"); idx >= 0 {
+				dir = f.Path[:idx]
+			} else {
+				dir = "."
+			}
+			filePaths[fid] = dir
+		}
+	}
+
+	// Build set of fileIDs for this repo for fast membership check.
+	repoFileSet := make(map[string]bool, len(s.repoFiles[repoID]))
+	for _, fid := range s.repoFiles[repoID] {
+		repoFileSet[fid] = true
+	}
+
+	// imports[fromPkg] = set of toPkg paths
+	// importedBy[toPkg] = set of fromPkg paths
+	type edgeSet map[string]map[string]struct{}
+	imports := make(edgeSet)
+	importedBy := make(edgeSet)
+	addEdge := func(m edgeSet, key, val string) {
+		if m[key] == nil {
+			m[key] = make(map[string]struct{})
+		}
+		m[key][val] = struct{}{}
+	}
+
+	for i := range s.imports {
+		imp := &s.imports[i]
+		if !repoFileSet[imp.FileID] {
+			continue
+		}
+		fromPkg, ok := filePaths[imp.FileID]
+		if !ok {
+			continue
+		}
+		toPkg := imp.Path
+		if fromPkg == toPkg || toPkg == "" {
+			continue
+		}
+		addEdge(imports, fromPkg, toPkg)
+		addEdge(importedBy, toPkg, fromPkg)
+	}
+
+	// Collect all packages (union of sources and targets).
+	allPkgs := make(map[string]struct{})
+	for pkg := range imports {
+		allPkgs[pkg] = struct{}{}
+	}
+	for pkg := range importedBy {
+		allPkgs[pkg] = struct{}{}
+	}
+
+	now := time.Now()
+	for pkg := range allPkgs {
+		deps := &StoredPackageDependencies{
+			RepoID:    repoID,
+			Package:   pkg,
+			UpdatedAt: now,
+		}
+		for imp := range imports[pkg] {
+			deps.Imports = append(deps.Imports, imp)
+		}
+		for by := range importedBy[pkg] {
+			deps.ImportedBy = append(deps.ImportedBy, by)
+		}
+		sort.Strings(deps.Imports)
+		sort.Strings(deps.ImportedBy)
+		s.packageDeps[repoID+":"+pkg] = deps
+	}
+}
+
+// GetPackageDependencies returns all package-level dependency records for the
+// given repository. Returns an empty slice when no data has been computed yet
+// (e.g. for repos indexed before this feature was added).
+func (s *Store) GetPackageDependencies(repoID string) []*StoredPackageDependencies {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	prefix := repoID + ":"
+	var result []*StoredPackageDependencies
+	for key, dep := range s.packageDeps {
+		if strings.HasPrefix(key, prefix) {
+			result = append(result, dep)
+		}
+	}
+	return result
 }
 
 // --- Cross-Repo Federation (in-memory stubs) ---
