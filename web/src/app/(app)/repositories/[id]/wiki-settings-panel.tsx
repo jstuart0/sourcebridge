@@ -873,6 +873,115 @@ function ColdStartProgress({
 // Failure banners for States 3/4/5
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Translate a (failureCategory, errorMessage) pair into plain-language guidance.
+ * The backend produces precise but cryptic messages
+ * ("orchestrator: time budget exceeded", "Job timed out — no progress for the
+ * stale-job threshold. Retry to resume.") and asking the user to interpret
+ * those is unkind. The user just wants to know what happened, what it means
+ * for their work, and what to do next.
+ *
+ * Returns:
+ *   title  – one-line headline that sets the right tone
+ *   detail – one to three sentences explaining the situation, including the
+ *            raw error if it might help a developer file a bug
+ *   action – what the user should do (rendered next to the retry button)
+ */
+function humanizeFailure(result: LivingWikiJobResult): {
+  title: string;
+  detail: string;
+  action: string;
+} {
+  const raw = result.errorMessage ?? "";
+  const category = result.failureCategory ?? "";
+
+  // Time-budget exhaustion — the orchestrator hit its wall-clock cap.
+  if (raw.includes("time budget exceeded")) {
+    return {
+      title: "Generation ran out of time",
+      detail: `This run finished ${result.pagesGenerated} of ${result.pagesPlanned} pages before hitting the 60-minute time budget. Pages already in your wiki are kept; smart resume will skip them on the next attempt and only generate what's missing.`,
+      action: "Retry to continue from where this left off.",
+    };
+  }
+
+  // Stale-reaper killed the job (no progress in the threshold window).
+  if (raw.toLowerCase().includes("no progress") || raw.toLowerCase().includes("timed out")) {
+    return {
+      title: "Generation went silent",
+      detail: `Generation stopped reporting progress for too long and the system gave up to free its slot. ${result.pagesGenerated} pages were saved before that happened. Smart resume will skip them on retry.`,
+      action: "Retry to resume.",
+    };
+  }
+
+  // Authentication failure — credentials are wrong or expired.
+  if (category === "auth") {
+    return {
+      title: "Authentication failed",
+      detail:
+        raw ||
+        "A configured sink rejected our credentials. Check the Living Wiki settings page to confirm the token and email are still valid.",
+      action: "Fix credentials in Settings → Living Wiki, then retry.",
+    };
+  }
+
+  // Worker / network problem — the LLM gRPC call couldn't reach the worker.
+  if (
+    raw.includes("connection refused") ||
+    raw.includes("rpc error") ||
+    raw.includes("Unavailable")
+  ) {
+    return {
+      title: "Lost connection to the AI worker",
+      detail: `The API couldn't reach the worker that runs LLM calls. Often this means the worker pod restarted while a job was in flight. ${result.pagesGenerated} pages had already been saved; smart resume will skip them on retry.`,
+      action: "Wait a few seconds for the worker to come back up, then retry.",
+    };
+  }
+
+  // Page-level template error surfaced via the orchestrator.
+  if (raw.startsWith("page \"") || raw.includes("template generate")) {
+    return {
+      title: "A page failed to generate",
+      detail: `One page failed and the run stopped before completing. Detail: ${raw}.`,
+      action: "Retry to try again — smart resume keeps the pages that already succeeded.",
+    };
+  }
+
+  // Partial-content (some pages excluded by quality gates) is handled below
+  // with its own banner, so this branch only fires for genuinely unknown
+  // failures. Surface the raw message rather than hiding it — it's the only
+  // breadcrumb the user (or we) have to file a bug.
+  return {
+    title: "Wiki generation failed",
+    detail: raw || "An unexpected error stopped generation.",
+    action: "Retry — if it keeps failing, capture this message and let us know.",
+  };
+}
+
+/**
+ * Group exclusion-reason strings of the shape "page-id: reason" by page ID
+ * so the UI can render a concise list with all the violations for each page
+ * collapsed under one heading. The cold-start runner emits one entry per
+ * gate violation, so a single page with multiple failed gates currently
+ * appears as multiple top-level entries.
+ */
+function groupExclusionReasons(
+  reasons: string[],
+): { pageID: string; messages: string[] }[] {
+  const map = new Map<string, string[]>();
+  const order: string[] = [];
+  for (const r of reasons) {
+    const idx = r.indexOf(": ");
+    const pageID = idx > 0 ? r.slice(0, idx) : "";
+    const msg = idx > 0 ? r.slice(idx + 2) : r;
+    if (!map.has(pageID)) {
+      map.set(pageID, []);
+      order.push(pageID);
+    }
+    map.get(pageID)!.push(msg);
+  }
+  return order.map((id) => ({ pageID: id, messages: map.get(id) ?? [] }));
+}
+
 function FailureBanner({
   result,
   onRetry,
@@ -885,69 +994,45 @@ function FailureBanner({
   const [exclusionsOpen, setExclusionsOpen] = useState(false);
   const category = result.failureCategory;
 
-  if (category === "transient") {
-    return (
-      <AlertBanner
-        variant="warning"
-        message="Generation encountered a temporary error. Retrying should resolve it."
-      >
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={onRetry}
-            className="text-xs font-medium underline underline-offset-2"
-          >
-            Retry
-          </button>
-        </div>
-      </AlertBanner>
-    );
-  }
-
-  if (category === "auth") {
-    return (
-      <AlertBanner
-        variant="error"
-        message={
-          result.errorMessage ??
-          "Authentication failed for a configured sink. Update your credentials to unblock generation."
-        }
-      >
-        <div className="mt-2">
-          <Link
-            href="/settings/living-wiki"
-            className="text-xs font-medium underline underline-offset-2"
-          >
-            Fix credentials in Settings → Living Wiki
-          </Link>
-        </div>
-      </AlertBanner>
-    );
-  }
-
+  // Partial-content runs (status="partial" or pagesExcluded > 0) get a
+  // dedicated banner because the natural follow-up is "retry excluded only"
+  // rather than "retry from scratch".
   if (category === "partial_content" || result.pagesExcluded > 0) {
+    const grouped = groupExclusionReasons(result.exclusionReasons);
     return (
       <AlertBanner
         variant="warning"
         message={`${result.pagesGenerated} pages generated, ${result.pagesExcluded} pages excluded.`}
       >
         <div className="mt-2 space-y-2">
-          {result.exclusionReasons.length > 0 && (
+          <p className="text-xs text-[var(--text-secondary)]">
+            Pages get excluded when generated content fails our quality gates twice in a row. Retry — the system will only re-run the excluded ones.
+          </p>
+          {grouped.length > 0 && (
             <button
               type="button"
               onClick={() => setExclusionsOpen((o) => !o)}
               className="text-xs font-medium underline underline-offset-2"
             >
-              {exclusionsOpen ? "Hide" : "Show"} {result.pagesExcluded} excluded page
-              {result.pagesExcluded !== 1 ? "s" : ""}
+              {exclusionsOpen ? "Hide" : "Show"} why {result.pagesExcluded} page
+              {result.pagesExcluded !== 1 ? "s were" : " was"} excluded
             </button>
           )}
-          {exclusionsOpen && result.exclusionReasons.length > 0 && (
-            <ul className="mt-1 space-y-0.5 text-xs">
-              {result.exclusionReasons.map((reason, i) => (
-                <li key={i} className="flex gap-1">
-                  <span aria-hidden="true">–</span>
-                  <span>{reason}</span>
+          {exclusionsOpen && grouped.length > 0 && (
+            <ul className="mt-1 space-y-2 text-xs">
+              {grouped.map(({ pageID, messages }) => (
+                <li key={pageID} className="flex flex-col gap-0.5">
+                  <span className="font-mono text-[var(--text-primary)]">
+                    {pageID || "(unknown page)"}
+                  </span>
+                  <ul className="ml-3 space-y-0.5 text-[var(--text-secondary)]">
+                    {messages.map((m, j) => (
+                      <li key={j} className="flex gap-1">
+                        <span aria-hidden="true">–</span>
+                        <span>{m}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </li>
               ))}
             </ul>
@@ -966,20 +1051,34 @@ function FailureBanner({
     );
   }
 
-  if (result.status === "failed") {
+  // Everything else — transient, auth, raw failures, etc. — flows through
+  // the humanizer so the user sees plain-language guidance instead of the
+  // backend's diagnostic string. Auth banner additionally surfaces the
+  // settings link the user actually needs.
+  if (result.status === "failed" || (category && category !== "")) {
+    const { title, detail, action } = humanizeFailure(result);
+    const variant = category === "auth" ? "error" : "warning";
     return (
-      <AlertBanner
-        variant="error"
-        message={result.errorMessage ?? "Wiki generation failed."}
-      >
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={onRetry}
-            className="text-xs font-medium underline underline-offset-2"
-          >
-            Retry
-          </button>
+      <AlertBanner variant={variant} message={title}>
+        <div className="mt-2 space-y-2">
+          <p className="text-xs text-[var(--text-secondary)]">{detail}</p>
+          <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
+            <button
+              type="button"
+              onClick={onRetry}
+              className="underline underline-offset-2"
+            >
+              {action}
+            </button>
+            {category === "auth" && (
+              <Link
+                href="/settings/living-wiki"
+                className="underline underline-offset-2"
+              >
+                Open Living Wiki settings
+              </Link>
+            )}
+          </div>
         </div>
       </AlertBanner>
     );
