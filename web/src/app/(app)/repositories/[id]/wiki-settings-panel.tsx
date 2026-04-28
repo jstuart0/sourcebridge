@@ -1682,6 +1682,60 @@ export function WikiSettingsPanel({
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [panelState, setPanelState] = useState<PanelState>("loading");
 
+  // Sync settings from props when initialSettings changes (e.g. parent's
+  // urql query resolves after the panel mounts, or refetches with fresh
+  // data). Without this, the panel commits to whatever value initialSettings
+  // had on first render — which is null while the parent's Repository query
+  // is still fetching, and produces the "Living Wiki disabled / Enable" CTA
+  // even when the repo is enabled and a job is in flight.
+  //
+  // Local mutations call setSettings directly with the mutation response, and
+  // urql caches the response so the next initialSettings prop value carries
+  // the same data — there's no risk of clobbering a fresh local update.
+  useEffect(() => {
+    if (initialSettings !== undefined) {
+      setSettings(initialSettings);
+    }
+  }, [initialSettings]);
+
+  // Discover in-flight living-wiki jobs for this repo. activeJobId is normally
+  // set by the Enable / Retry mutation success handlers, so a user who
+  // refreshes the page or opens it in a new tab while a job is running would
+  // otherwise see State 4/5 (last result) instead of State 3 (running). Probe
+  // the LLM activity feed once on mount and whenever settings change so the
+  // running job is picked up.
+  useEffect(() => {
+    if (!repoId) return;
+    if (activeJobId) return;
+    if (!settings || !settings.enabled) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authFetch(
+          `/api/v1/admin/llm/activity?repo_id=${encodeURIComponent(repoId)}&limit=20`,
+        );
+        if (!res.ok) return;
+        const body = (await res.json()) as {
+          active?: { id: string; subsystem?: string; job_type?: string }[];
+        };
+        const job = (body.active ?? []).find(
+          (j) =>
+            j.subsystem === "living_wiki" &&
+            (j.job_type === "living_wiki_cold_start" ||
+              j.job_type === "living_wiki_retry_excluded"),
+        );
+        if (!cancelled && job) {
+          setActiveJobId(job.id);
+        }
+      } catch {
+        // Network blip — the user can refresh. Don't crash the panel.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [repoId, activeJobId, settings]);
+
   // Refs for focus management (a11y req 2, 3)
   const progressRef = useRef<HTMLDivElement>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
