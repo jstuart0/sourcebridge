@@ -2624,6 +2624,7 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 			r.livingWikiBroker(),
 			r.LivingWikiRepoStore,
 			r.ClusterStore,
+			r.KnowledgeStore,
 		),
 	}
 

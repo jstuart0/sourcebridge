@@ -28,6 +28,7 @@ import (
 
 	"github.com/sourcebridge/sourcebridge/internal/clustering"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
+	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/coldstart"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/credentials"
@@ -605,6 +606,7 @@ func TestBuildColdStartRunnerNilOrchestratorReturnsNotice(t *testing.T) {
 		nil,           // no broker
 		nil,           // no repo settings store
 		nil,           // no cluster store
+		nil,           // no knowledge store
 	)
 
 	rt := &fakeRuntime{jobID: "nil-orch-job"}
@@ -703,6 +705,165 @@ func TestResolveTaxonomyPassesClustersToResolver(t *testing.T) {
 	}
 	if !labels["billing"] {
 		t.Errorf("expected architecture page for cluster label 'billing'; labels present: %v", labels)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Knowledge artifact resolution: attachKnowledgeArtifacts
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestAttachKnowledgeArtifacts_FreshArtifactsAttached confirms that a ready,
+// non-stale artifact whose UnderstandingRevisionFP matches the current repo
+// understanding is attached to the matching architecture page's PackageInfo.
+func TestAttachKnowledgeArtifacts_FreshArtifactsAttached(t *testing.T) {
+	t.Parallel()
+
+	const repoID = "attach-fresh-repo"
+	const revFP = "sha256-abc123"
+
+	ks := knowledge.NewMemStore()
+
+	// Store a repo-level understanding with a known revisionFp.
+	_, err := ks.StoreRepositoryUnderstanding(&knowledge.RepositoryUnderstanding{
+		RepositoryID: repoID,
+		RevisionFP:   revFP,
+		Stage:        knowledge.UnderstandingReady,
+		TreeStatus:   knowledge.UnderstandingTreeComplete,
+	})
+	if err != nil {
+		t.Fatalf("StoreRepositoryUnderstanding: %v", err)
+	}
+
+	// Store a ready module-scoped artifact matching revFP.
+	art, err := ks.StoreKnowledgeArtifact(&knowledge.Artifact{
+		RepositoryID:            repoID,
+		Type:                    knowledge.ArtifactCliffNotes,
+		Audience:                knowledge.AudienceDeveloper,
+		Depth:                   knowledge.DepthDeep,
+		Status:                  knowledge.StatusReady,
+		Stale:                   false,
+		UnderstandingRevisionFP: revFP,
+		Scope: &knowledge.ArtifactScope{
+			ScopeType: knowledge.ScopeModule,
+			ScopePath: "internal/auth",
+		},
+		GeneratedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("StoreKnowledgeArtifact: %v", err)
+	}
+	// Store a section for this artifact.
+	if err := ks.StoreKnowledgeSections(art.ID, []knowledge.Section{
+		{
+			Title:      "Overview",
+			Content:    "The auth package provides JWT validation middleware.",
+			Summary:    "JWT middleware.",
+			OrderIndex: 0,
+		},
+	}); err != nil {
+		t.Fatalf("StoreKnowledgeSections: %v", err)
+	}
+
+	// Build a planned page for the auth cluster.
+	pages := []lworch.PlannedPage{
+		{
+			ID:         repoID + ".arch.auth",
+			TemplateID: "architecture",
+			PackageInfo: &lworch.ArchitecturePackageInfo{
+				Package:        "auth",
+				MemberPackages: []string{"internal/auth", "internal/auth/middleware"},
+			},
+		},
+	}
+
+	result := attachKnowledgeArtifacts(context.Background(), repoID, pages, ks)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 page, got %d", len(result))
+	}
+
+	pkg := result[0].PackageInfo
+	if pkg == nil {
+		t.Fatal("PackageInfo must not be nil after attachment")
+	}
+	if len(pkg.KnowledgeArtifacts) == 0 {
+		t.Fatal("expected at least one knowledge artifact attached")
+	}
+	a := pkg.KnowledgeArtifacts[0]
+	if a.Type != string(knowledge.ArtifactCliffNotes) {
+		t.Errorf("expected artifact type %q, got %q", knowledge.ArtifactCliffNotes, a.Type)
+	}
+	if len(a.Sections) == 0 {
+		t.Error("expected sections populated on attached artifact")
+	}
+	if a.Sections[0].Content != "The auth package provides JWT validation middleware." {
+		t.Errorf("unexpected section content: %q", a.Sections[0].Content)
+	}
+}
+
+// TestAttachKnowledgeArtifacts_StaleArtifactFiltered confirms that an artifact
+// whose UnderstandingRevisionFP does not match the current understanding's
+// RevisionFP is filtered out and no artifacts are attached to the page.
+func TestAttachKnowledgeArtifacts_StaleArtifactFiltered(t *testing.T) {
+	t.Parallel()
+
+	const repoID = "attach-stale-repo"
+	const currentRevFP = "sha256-current"
+	const staleRevFP = "sha256-old"
+
+	ks := knowledge.NewMemStore()
+
+	// Current understanding has a different revisionFp than the artifact.
+	_, err := ks.StoreRepositoryUnderstanding(&knowledge.RepositoryUnderstanding{
+		RepositoryID: repoID,
+		RevisionFP:   currentRevFP,
+		Stage:        knowledge.UnderstandingReady,
+		TreeStatus:   knowledge.UnderstandingTreeComplete,
+	})
+	if err != nil {
+		t.Fatalf("StoreRepositoryUnderstanding: %v", err)
+	}
+
+	// Store an artifact with the old (stale) revisionFp.
+	_, err = ks.StoreKnowledgeArtifact(&knowledge.Artifact{
+		RepositoryID:            repoID,
+		Type:                    knowledge.ArtifactCliffNotes,
+		Audience:                knowledge.AudienceDeveloper,
+		Depth:                   knowledge.DepthDeep,
+		Status:                  knowledge.StatusReady,
+		Stale:                   false,
+		UnderstandingRevisionFP: staleRevFP, // does not match current
+		Scope: &knowledge.ArtifactScope{
+			ScopeType: knowledge.ScopeModule,
+			ScopePath: "internal/auth",
+		},
+		GeneratedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("StoreKnowledgeArtifact: %v", err)
+	}
+
+	pages := []lworch.PlannedPage{
+		{
+			ID:         repoID + ".arch.auth",
+			TemplateID: "architecture",
+			PackageInfo: &lworch.ArchitecturePackageInfo{
+				Package:        "auth",
+				MemberPackages: []string{"internal/auth"},
+			},
+		},
+	}
+
+	result := attachKnowledgeArtifacts(context.Background(), repoID, pages, ks)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 page, got %d", len(result))
+	}
+
+	pkg := result[0].PackageInfo
+	if pkg == nil {
+		t.Fatal("PackageInfo must not be nil")
+	}
+	if len(pkg.KnowledgeArtifacts) != 0 {
+		t.Errorf("stale artifact should be filtered; got %d attached", len(pkg.KnowledgeArtifacts))
 	}
 }
 
@@ -857,6 +1018,7 @@ func TestColdStartSinkResultsPersistedInJobResult(t *testing.T) {
 		broker,
 		repoSettingsStore,
 		nil,   // no cluster store
+		nil,   // no knowledge store
 	)
 
 	// Override: run via csRunnerFromPages so we can inject the planned pages

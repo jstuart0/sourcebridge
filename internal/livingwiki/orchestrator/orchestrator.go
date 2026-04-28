@@ -162,6 +162,50 @@ type ArchitecturePackageInfo struct {
 	Package string
 	Callers []string
 	Callees []string
+
+	// MemberPackages is the set of package import paths that belong to this
+	// cluster. Used by the knowledge-artifact resolution step to match
+	// module-scoped artifacts whose scopePath aligns with any member package.
+	// Empty in the package-path fallback mode (pre-cluster behaviour).
+	MemberPackages []string
+
+	// KnowledgeArtifacts is the set of pre-computed knowledge artifacts that
+	// cover any of this cluster's member packages, in preference order
+	// (deepest + freshest first). The architecture template prefers artifact
+	// summaries as ground truth when fresh, and falls back to raw-symbol
+	// generation when this is empty or every artifact is stale.
+	KnowledgeArtifacts []KnowledgeArtifactSummary
+}
+
+// KnowledgeArtifactSummary is the narrow living-wiki view of a knowledge
+// artifact. We mirror just the fields the architecture template needs so the
+// orchestrator package doesn't take on a heavy dep on the knowledge package.
+type KnowledgeArtifactSummary struct {
+	Type        string // e.g. "cliff_notes", "architecture_diagram"
+	Audience    string
+	Depth       string // "summary", "medium", or "deep"
+	ScopePath   string // module / package path the artifact covers
+	Sections    []KnowledgeSection
+	RevisionFp  string    // matches understanding revisionFp
+	GeneratedAt time.Time
+}
+
+// KnowledgeSection is a single titled section from a knowledge artifact,
+// carried through to the architecture template for use as authoritative context.
+type KnowledgeSection struct {
+	Title    string
+	Content  string // markdown body
+	Summary  string // 1-2 line synopsis if available
+	Evidence []KnowledgeEvidence
+}
+
+// KnowledgeEvidence is a traceable file/line reference from a section, used
+// to surface verified source citations in the architecture page prompt.
+type KnowledgeEvidence struct {
+	FilePath  string
+	LineStart int
+	LineEnd   int
+	Rationale string
 }
 
 // GraphMetricsProvider supplies page-reference and graph-relation counts for
@@ -547,11 +591,42 @@ func callTemplate(ctx context.Context, tmpl templates.Template, input templates.
 	if pkg != nil {
 		// Architecture template has a per-package entry point.
 		if archTmpl, ok := tmpl.(*architecture.Template); ok {
-			return archTmpl.GeneratePackagePage(ctx, input, architecture.PackageInfo{
+			archPkg := architecture.PackageInfo{
 				Package: pkg.Package,
 				Callers: pkg.Callers,
 				Callees: pkg.Callees,
-			})
+			}
+			// Map orchestrator knowledge summaries into the architecture package's
+			// equivalent types. This translation keeps the import direction clean:
+			// orchestrator → architecture, never the reverse.
+			for _, ks := range pkg.KnowledgeArtifacts {
+				archArt := architecture.KnowledgeArtifactSummary{
+					Type:        ks.Type,
+					Audience:    ks.Audience,
+					Depth:       ks.Depth,
+					ScopePath:   ks.ScopePath,
+					RevisionFp:  ks.RevisionFp,
+					GeneratedAt: ks.GeneratedAt,
+				}
+				for _, sec := range ks.Sections {
+					archSec := architecture.KnowledgeSection{
+						Title:   sec.Title,
+						Content: sec.Content,
+						Summary: sec.Summary,
+					}
+					for _, ev := range sec.Evidence {
+						archSec.Evidence = append(archSec.Evidence, architecture.KnowledgeEvidence{
+							FilePath:  ev.FilePath,
+							LineStart: ev.LineStart,
+							LineEnd:   ev.LineEnd,
+							Rationale: ev.Rationale,
+						})
+					}
+					archArt.Sections = append(archArt.Sections, archSec)
+				}
+				archPkg.KnowledgeArtifacts = append(archPkg.KnowledgeArtifacts, archArt)
+			}
+			return archTmpl.GeneratePackagePage(ctx, input, archPkg)
 		}
 	}
 	return tmpl.Generate(ctx, input)
@@ -886,9 +961,10 @@ func (r *TaxonomyResolver) Resolve(ctx context.Context, pkgGraph []PackageGraphI
 				Audience:   quality.AudienceEngineers,
 				Input:      archInput,
 				PackageInfo: &ArchitecturePackageInfo{
-					Package: cs.Label,
-					Callers: callerLabels,
-					Callees: calleeLabels,
+					Package:        cs.Label,
+					Callers:        callerLabels,
+					Callees:        calleeLabels,
+					MemberPackages: cs.MemberPackages,
 				},
 			})
 		}

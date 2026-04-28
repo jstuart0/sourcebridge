@@ -71,6 +71,37 @@ var _ templates.Template = (*Template)(nil)
 // ID returns "architecture".
 func (t *Template) ID() string { return templateID }
 
+// KnowledgeArtifactSummary is the narrow view of a pre-computed knowledge
+// artifact passed into the architecture template. The orchestrator package
+// owns the canonical definition; this mirror lives here so the architecture
+// package never imports orchestrator (circular import prevention).
+type KnowledgeArtifactSummary struct {
+	Type        string // e.g. "cliff_notes", "architecture_diagram"
+	Audience    string
+	Depth       string // "summary", "medium", or "deep"
+	ScopePath   string // module / package path the artifact covers
+	Sections    []KnowledgeSection
+	RevisionFp  string    // matches the understanding revisionFp
+	GeneratedAt time.Time
+}
+
+// KnowledgeSection is a single titled section from a knowledge artifact.
+type KnowledgeSection struct {
+	Title    string
+	Content  string // markdown body
+	Summary  string // 1-2 line synopsis if available
+	Evidence []KnowledgeEvidence
+}
+
+// KnowledgeEvidence is a traceable file/line reference from a section, surfaced
+// as a verified source citation in the architecture page prompt.
+type KnowledgeEvidence struct {
+	FilePath  string
+	LineStart int
+	LineEnd   int
+	Rationale string
+}
+
 // PackageInput carries the package-specific data needed by Generate.
 // Callers populate this and embed it in GenerateInput.Config.
 //
@@ -98,6 +129,14 @@ type PackageInfo struct {
 	// Callees is the list of import paths that this package imports.
 	// Used to populate the "Dependencies" section.
 	Callees []string
+
+	// KnowledgeArtifacts contains pre-computed knowledge artifacts for this
+	// package, in preference order (deepest + freshest first). When non-empty,
+	// GeneratePackagePage builds a different prompt that opens with the artifact
+	// sections as authoritative curated context, then includes symbol data as
+	// verification material. When empty, behaviour is identical to the
+	// raw-symbol-only path used today.
+	KnowledgeArtifacts []KnowledgeArtifactSummary
 }
 
 // GeneratePackagePage generates an architecture page for a single package.
@@ -190,7 +229,7 @@ func (t *Template) GeneratePackagePage(ctx context.Context, input templates.Gene
 		}, nil
 	}
 
-	systemPrompt := buildSystemPrompt(input.Audience)
+	systemPrompt := buildSystemPrompt(input.Audience, len(pkg.KnowledgeArtifacts) > 0)
 	userPrompt := buildUserPrompt(pkg, pkgSyms)
 
 	llmOut, err := input.LLM.Complete(ctx, systemPrompt, userPrompt)
@@ -199,6 +238,23 @@ func (t *Template) GeneratePackagePage(ctx context.Context, input templates.Gene
 	}
 
 	blocks := renderLLMOutput(pageID, pkg.Package, llmOut, now)
+
+	// When the page was generated from curated knowledge artifacts, prepend an
+	// italicised provenance note so readers know the source of the analysis.
+	if len(pkg.KnowledgeArtifacts) > 0 {
+		noteID := ast.GenerateBlockID(pageID, "artifact_note", ast.BlockKindParagraph, 0)
+		noteBlock := ast.Block{
+			ID:   noteID,
+			Kind: ast.BlockKindParagraph,
+			Content: ast.BlockContent{Paragraph: &ast.ParagraphContent{
+				Markdown: "*Generated from curated knowledge for this package. Falls back to raw-symbol analysis when curated analysis is unavailable.*",
+			}},
+			Owner:      ast.OwnerGenerated,
+			LastChange: ast.BlockChange{Timestamp: now, Source: "sourcebridge"},
+		}
+		// Insert immediately after the H1 title block (index 0).
+		blocks = append([]ast.Block{blocks[0], noteBlock}, blocks[1:]...)
+	}
 
 	// Append a "Related pages" block when caller/callee cluster labels are known.
 	// Each label is rendered as a Confluence cross-page link so readers can
@@ -294,7 +350,10 @@ func symbolNames(syms []templates.Symbol) []string {
 }
 
 // buildSystemPrompt assembles the LLM system prompt for the architecture template.
-func buildSystemPrompt(audience quality.Audience) string {
+// When hasArtifacts is true, the prompt instructs the model to treat the curated
+// knowledge sections as authoritative ground truth and use raw symbols only to
+// fill gaps the artifacts do not cover.
+func buildSystemPrompt(audience quality.Audience, hasArtifacts bool) string {
 	var voiceHint string
 	switch audience {
 	case quality.AudienceProduct:
@@ -305,12 +364,23 @@ func buildSystemPrompt(audience quality.Audience) string {
 		voiceHint = "Write for an engineer audience: senior teammate to new hire. 70% what, 30% why. Direct and specific."
 	}
 
+	var artifactGuidance string
+	if hasArtifacts {
+		artifactGuidance = `
+Curated knowledge guidance:
+- The user prompt includes one or more "Curated knowledge artifact" sections. These are pre-analysed, human-reviewed summaries of the codebase. Treat them as authoritative ground truth.
+- Prefer curated artifact content over your own inference from raw symbols. Only fall back to inferring from raw symbols when the artifacts are silent on a topic.
+- When artifacts include "Verified source references", use those citations preferentially. Cite using the (path/file.go:start-end) convention.
+- Do not contradict or water down claims the artifacts make unless the raw symbol evidence is unambiguously inconsistent.
+`
+	}
+
 	return fmt.Sprintf(`You are a senior engineer writing architecture documentation for a software package.
 Your task is to produce one architecture page describing the package's role, public API, and relationships.
 
 Voice rules:
 %s
-
+%s
 Format rules:
 - Output exactly these six sections in order, each as a level-2 markdown heading:
   ## Overview
@@ -324,20 +394,85 @@ Format rules:
 - Do not use vague quantifiers ("various", "many", "several") without a specific number.
 - Keep prose to the point: aim for 200–600 words total excluding code.
 - The "Code example" section must contain at least one fenced Go code block drawn from the actual source excerpts.
-- If a section has no content (e.g. no callers, no callees), write one sentence explaining that rather than omitting the heading.`, voiceHint)
+- If a section has no content (e.g. no callers, no callees), write one sentence explaining that rather than omitting the heading.`, voiceHint, artifactGuidance)
 }
 
 // buildUserPrompt assembles the user-turn prompt with the package data.
 // It emits full doc comments and fenced source excerpts so the model has
 // concrete code to quote from. Symbols are capped at maxSymbolsInPrompt to
 // keep the prompt within ~30 K input tokens.
+//
+// When pkg.KnowledgeArtifacts is non-empty, the prompt opens with the curated
+// artifact sections as authoritative context, followed by raw symbol data as
+// supporting verification material. The order (artifacts first, symbols second)
+// signals to the model which source it should treat as ground truth.
 func buildUserPrompt(pkg PackageInfo, syms []templates.Symbol) string {
 	var sb strings.Builder
 
 	fmt.Fprintf(&sb, "Package: %s\n\n", pkg.Package)
 
-	// Package-level doc comment: look for a symbol whose DocComment looks like
-	// a package doc (i.e., starts with "Package "). Fall back to a note.
+	// ── Curated knowledge artifacts (highest-priority context) ────────────────
+	if len(pkg.KnowledgeArtifacts) > 0 {
+		sb.WriteString("## Curated knowledge artifacts\n\n")
+		sb.WriteString("The following sections were produced by a prior deep analysis of this package.\n")
+		sb.WriteString("Treat them as authoritative. Use the raw symbols below only to fill gaps.\n\n")
+
+		for i, art := range pkg.KnowledgeArtifacts {
+			fmt.Fprintf(&sb, "### Curated knowledge artifact %d (type=%s depth=%s)\n\n", i+1, art.Type, art.Depth)
+			for _, sec := range art.Sections {
+				fmt.Fprintf(&sb, "#### %s\n\n", sec.Title)
+				if sec.Content != "" {
+					sb.WriteString(sec.Content)
+					sb.WriteString("\n\n")
+				}
+				if sec.Summary != "" {
+					fmt.Fprintf(&sb, "_Synopsis: %s_\n\n", sec.Summary)
+				}
+			}
+		}
+
+		// Collect all evidence across all artifacts/sections and emit as a
+		// de-duplicated "verified source references" block. The model is
+		// instructed to cite from these refs first using the (file:start-end)
+		// convention.
+		type evKey struct{ fp string; lo, hi int }
+		seen := make(map[evKey]struct{})
+		var evLines []string
+		for _, art := range pkg.KnowledgeArtifacts {
+			for _, sec := range art.Sections {
+				for _, ev := range sec.Evidence {
+					if ev.FilePath == "" {
+						continue
+					}
+					k := evKey{ev.FilePath, ev.LineStart, ev.LineEnd}
+					if _, ok := seen[k]; ok {
+						continue
+					}
+					seen[k] = struct{}{}
+					line := fmt.Sprintf("  - %s:%d-%d", ev.FilePath, ev.LineStart, ev.LineEnd)
+					if ev.Rationale != "" {
+						line += " — " + ev.Rationale
+					}
+					evLines = append(evLines, line)
+				}
+			}
+		}
+		if len(evLines) > 0 {
+			sb.WriteString("### Verified source references\n\n")
+			sb.WriteString("Prefer these citations when writing (path/file.go:start-end) references:\n\n")
+			for _, l := range evLines {
+				sb.WriteString(l)
+				sb.WriteString("\n")
+			}
+			sb.WriteString("\n")
+		}
+
+		sb.WriteString("---\n\n")
+		sb.WriteString("## Supporting raw symbol data\n\n")
+		sb.WriteString("The symbols below are included for verification and to fill any gaps the curated analysis does not cover.\n\n")
+	}
+
+	// ── Package-level doc comment ─────────────────────────────────────────────
 	pkgDoc := packageLevelDoc(syms)
 	if pkgDoc != "" {
 		sb.WriteString("Package documentation:\n")

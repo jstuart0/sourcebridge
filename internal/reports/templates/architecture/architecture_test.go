@@ -175,6 +175,159 @@ func TestGeneratePackagePage_EmptyPackage(t *testing.T) {
 	}
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Knowledge artifact integration
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestGeneratePackagePage_ArtifactsInPrompt asserts that when PackageInfo
+// carries a non-empty KnowledgeArtifacts slice, the user prompt contains the
+// artifact's section content and the system prompt contains the curated-
+// knowledge guidance block, distinguishing it from the raw-symbol-only path.
+func TestGeneratePackagePage_ArtifactsInPrompt(t *testing.T) {
+	t.Parallel()
+
+	llm := &capturingLLM{response: minimalLLMResponse}
+	graph := &stubSymbolGraph{
+		syms: []templates.Symbol{
+			{
+				Package:   "src/db",
+				Name:      "Connect",
+				Signature: "func Connect(dsn string) error",
+				FilePath:  "src/db/conn.go",
+				StartLine: 10,
+				EndLine:   25,
+			},
+		},
+	}
+
+	tmpl := architecture.New()
+	input := templates.GenerateInput{
+		RepoID:      "test-repo",
+		Audience:    quality.AudienceEngineers,
+		SymbolGraph: graph,
+		LLM:         llm,
+		Now:         time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	art := architecture.KnowledgeArtifactSummary{
+		Type:      "cliff_notes",
+		Depth:     "deep",
+		ScopePath: "src/db",
+		Sections: []architecture.KnowledgeSection{
+			{
+				Title:   "Purpose",
+				Content: "The db package manages the connection pool lifecycle and provides typed query helpers.",
+				Summary: "Connection pool + typed queries.",
+				Evidence: []architecture.KnowledgeEvidence{
+					{FilePath: "src/db/conn.go", LineStart: 10, LineEnd: 25, Rationale: "pool init"},
+				},
+			},
+		},
+		GeneratedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	pkg := architecture.PackageInfo{
+		Package:            "src/db",
+		KnowledgeArtifacts: []architecture.KnowledgeArtifactSummary{art},
+	}
+
+	page, err := tmpl.GeneratePackagePage(context.Background(), input, pkg)
+	if err != nil {
+		t.Fatalf("GeneratePackagePage: %v", err)
+	}
+
+	// The user prompt must contain the artifact's section title and content.
+	if !strings.Contains(llm.userPrompt, "Curated knowledge artifact") {
+		t.Error("user prompt should contain 'Curated knowledge artifact' header")
+	}
+	if !strings.Contains(llm.userPrompt, "connection pool lifecycle") {
+		t.Error("user prompt should contain the artifact section content")
+	}
+	// The verified source references block must surface the evidence.
+	if !strings.Contains(llm.userPrompt, "src/db/conn.go:10-25") {
+		t.Error("user prompt should contain the evidence citation from the artifact")
+	}
+
+	// The system prompt must include curated-knowledge guidance when artifacts
+	// are present.
+	if !strings.Contains(llm.systemPrompt, "Curated knowledge guidance") {
+		t.Error("system prompt should contain 'Curated knowledge guidance' when artifacts are present")
+	}
+	if !strings.Contains(llm.systemPrompt, "authoritative ground truth") {
+		t.Error("system prompt should instruct model to treat curated content as ground truth")
+	}
+
+	// The generated page must contain the provenance note block.
+	hasNote := false
+	for _, b := range page.Blocks {
+		if b.Kind == ast.BlockKindParagraph && b.Content.Paragraph != nil &&
+			strings.Contains(b.Content.Paragraph.Markdown, "curated knowledge") {
+			hasNote = true
+			break
+		}
+	}
+	if !hasNote {
+		t.Error("page blocks should contain the italicised curated-knowledge provenance note")
+	}
+}
+
+// TestGeneratePackagePage_NoArtifacts_IdenticalToBaseline asserts that when
+// KnowledgeArtifacts is empty the prompt and system prompt are identical to
+// the pre-artifact behaviour: no "Curated knowledge" text, no provenance note.
+func TestGeneratePackagePage_NoArtifacts_IdenticalToBaseline(t *testing.T) {
+	t.Parallel()
+
+	llm := &capturingLLM{response: minimalLLMResponse}
+	graph := &stubSymbolGraph{
+		syms: []templates.Symbol{
+			{
+				Package:   "src/db",
+				Name:      "Connect",
+				Signature: "func Connect(dsn string) error",
+				FilePath:  "src/db/conn.go",
+				StartLine: 1,
+				EndLine:   5,
+			},
+		},
+	}
+
+	tmpl := architecture.New()
+	input := templates.GenerateInput{
+		RepoID:      "test-repo",
+		Audience:    quality.AudienceEngineers,
+		SymbolGraph: graph,
+		LLM:         llm,
+		Now:         time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	// Empty KnowledgeArtifacts — should use raw-symbol path.
+	pkg := architecture.PackageInfo{
+		Package:            "src/db",
+		KnowledgeArtifacts: nil,
+	}
+
+	page, err := tmpl.GeneratePackagePage(context.Background(), input, pkg)
+	if err != nil {
+		t.Fatalf("GeneratePackagePage: %v", err)
+	}
+
+	// No curated-knowledge text in either prompt.
+	if strings.Contains(llm.userPrompt, "Curated knowledge artifact") {
+		t.Error("user prompt must NOT contain 'Curated knowledge artifact' when artifacts are absent")
+	}
+	if strings.Contains(llm.systemPrompt, "Curated knowledge guidance") {
+		t.Error("system prompt must NOT contain 'Curated knowledge guidance' when artifacts are absent")
+	}
+
+	// No provenance note block.
+	for _, b := range page.Blocks {
+		if b.Kind == ast.BlockKindParagraph && b.Content.Paragraph != nil &&
+			strings.Contains(b.Content.Paragraph.Markdown, "curated knowledge") {
+			t.Error("page blocks must NOT contain the provenance note when artifacts are absent")
+		}
+	}
+}
+
 // TestGeneratePackagePage_PackageDoc asserts that when a symbol's DocComment
 // starts with "Package ", it is emitted as package-level documentation in the
 // prompt.

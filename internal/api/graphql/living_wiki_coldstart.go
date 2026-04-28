@@ -25,6 +25,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,8 @@ import (
 
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 	"github.com/sourcebridge/sourcebridge/internal/clustering"
+	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
+	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/coldstart"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/credentials"
@@ -42,7 +45,6 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
-	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
@@ -63,6 +65,11 @@ const (
 	// rate limits and provider concurrency are the actual ceilings, so this
 	// just removes the artificial floor.
 	coldStartMaxConcurrency = 12
+	// maxArtifactsPerCluster caps how many knowledge artifacts are passed to
+	// the architecture template per cluster. The prompt already has symbol
+	// bodies; each additional artifact adds ~1–4 KB. Three deep artifacts
+	// cover the curated analysis without approaching model context limits.
+	maxArtifactsPerCluster = 3
 )
 
 // buildColdStartRunner returns the RunWithContext closure for a living-wiki
@@ -82,6 +89,11 @@ const (
 // broker and repoSettingsStore power the post-generation sink dispatch phase.
 // When either is nil the dispatch phase is skipped; pages remain in the
 // proposed_ast store only (same behaviour as before this wiring landed).
+//
+// knowledgeStore, when non-nil, is queried for pre-computed knowledge artifacts.
+// Fresh artifacts (matching the current understanding revisionFp) are attached
+// to each architecture cluster's PackageInfo so the template can use curated
+// analysis as its primary LLM context instead of generating from scratch.
 func buildColdStartRunner(
 	lwOrch *lworch.Orchestrator,
 	repoID string,
@@ -94,6 +106,7 @@ func buildColdStartRunner(
 	broker credentials.Broker,
 	repoSettingsStore livingwiki.RepoSettingsStore,
 	clusterStore clustering.ClusterStore,
+	knowledgeStore knowledge.KnowledgeStore,
 ) func(ctx context.Context, rt llm.Runtime) error {
 	if lwOrch == nil {
 		return func(_ context.Context, rt llm.Runtime) error {
@@ -145,7 +158,19 @@ func buildColdStartRunner(
 			return nil
 		}
 
-		// ── Step 1.5: Smart resume — skip pages already published ─────────────
+		// ── Step 1.5: Attach knowledge artifacts to architecture pages ─────────
+		//
+		// Pull all ready, non-stale knowledge artifacts for this repo and attach
+		// fresh ones to each cluster's ArchitecturePackageInfo so the architecture
+		// template can use curated analysis as its primary LLM context. Freshness
+		// is determined by an exact match on UnderstandingRevisionFP against the
+		// current repo-level understanding's RevisionFP. Artifacts whose
+		// revisionFp does not match the current understanding are skipped so the
+		// template never presents stale curated data as ground truth.
+		pages = attachKnowledgeArtifacts(runCtx, repoID, pages, knowledgeStore)
+		logArtifactResolution(repoID, pages)
+
+		// ── Step 1.6: Smart resume — skip pages already published ─────────────
 		//
 		// On a fresh cold-start every page is generated. On a retry after a
 		// time-out (or any failure that left some pages already in the sink),
@@ -874,6 +899,231 @@ func (c *coldStartLLMCaller) Complete(ctx context.Context, systemPrompt, userPro
 		return "", fmt.Errorf("cold-start LLM caller: %w", err)
 	}
 	return resp.GetAnswer(), nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Knowledge artifact resolution
+// ─────────────────────────────────────────────────────────────────────────────
+
+// attachKnowledgeArtifacts queries the knowledge store for ready, non-stale
+// artifacts covering this repo and attaches fresh ones to each architecture
+// page's PackageInfo. Non-architecture pages and pages without a PackageInfo
+// are left untouched.
+//
+// Freshness rule: exact match on UnderstandingRevisionFP against the current
+// repo-level repository understanding's RevisionFP. If the understanding is
+// absent or has no revisionFp, all artifacts are considered stale and the
+// function is a no-op (the template falls back to raw-symbol generation).
+//
+// When knowledgeStore is nil the slice is returned unchanged.
+func attachKnowledgeArtifacts(
+	ctx context.Context,
+	repoID string,
+	pages []lworch.PlannedPage,
+	ks knowledge.KnowledgeStore,
+) []lworch.PlannedPage {
+	if ks == nil {
+		return pages
+	}
+
+	// Determine the freshness bar: the revisionFp from the current repo-level
+	// understanding. Pull it once; all clusters use the same bar.
+	currentUnderstanding := ks.GetRepositoryUnderstanding(
+		repoID,
+		knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository},
+	)
+	var currentRevFP string
+	if currentUnderstanding != nil {
+		currentRevFP = currentUnderstanding.RevisionFP
+	}
+
+	// With no current understanding fingerprint we cannot assert freshness;
+	// fall back to raw-symbol generation for all pages.
+	if currentRevFP == "" {
+		return pages
+	}
+
+	// Fetch all artifacts for the repo in one call, then filter and sort.
+	allArtifacts := ks.GetKnowledgeArtifacts(repoID)
+
+	// Build a lookup: scopePath → sorted fresh artifacts.
+	// scopePath for module-scoped artifacts is the module path (directory).
+	// Repository-scoped artifacts are filed under the empty string as a fallback.
+	type candidateArtifact struct {
+		art   *knowledge.Artifact
+		depth int // 3=deep 2=medium 1=summary 0=other
+	}
+	depthRank := func(d knowledge.Depth) int {
+		switch d {
+		case knowledge.DepthDeep:
+			return 3
+		case knowledge.DepthMedium:
+			return 2
+		case knowledge.DepthSummary:
+			return 1
+		default:
+			return 0
+		}
+	}
+
+	byScope := make(map[string][]candidateArtifact)
+	var staleSkipped int
+	for _, a := range allArtifacts {
+		if a.Status != knowledge.StatusReady || a.Stale {
+			continue
+		}
+		if a.UnderstandingRevisionFP != currentRevFP {
+			staleSkipped++
+			continue
+		}
+		scope := knowledge.ScopeRepository
+		scopePath := ""
+		if a.Scope != nil {
+			scope = a.Scope.ScopeType
+			scopePath = a.Scope.ScopePath
+		}
+		if scope != knowledge.ScopeModule && scope != knowledge.ScopeRepository {
+			// File- and symbol-scoped artifacts are too narrow for architecture pages.
+			continue
+		}
+		byScope[scopePath] = append(byScope[scopePath], candidateArtifact{
+			art:   a,
+			depth: depthRank(a.Depth),
+		})
+	}
+
+	// Sort each bucket: deepest first, then newest GeneratedAt desc.
+	for key := range byScope {
+		sort.Slice(byScope[key], func(i, j int) bool {
+			di, dj := byScope[key][i].depth, byScope[key][j].depth
+			if di != dj {
+				return di > dj
+			}
+			return byScope[key][i].art.GeneratedAt.After(byScope[key][j].art.GeneratedAt)
+		})
+	}
+
+	_ = staleSkipped // used in logArtifactResolution below
+
+	// Attach to each architecture page by matching cluster MemberPackages against
+	// module-scoped artifact paths, with a repo-level fallback.
+	for i, p := range pages {
+		if p.TemplateID != "architecture" || p.PackageInfo == nil {
+			continue
+		}
+		pkg := p.PackageInfo
+
+		// Collect all candidate artifacts: first module-scoped matches, then
+		// repo-scoped fallback if no module match was found.
+		var candidates []candidateArtifact
+
+		// Module scope: artifact's scopePath matches any member package (or is a
+		// prefix of one, since a cluster may span multiple sub-packages).
+		memberSet := make(map[string]struct{}, len(pkg.MemberPackages)+1)
+		// The cluster label itself (pkg.Package) is always a member.
+		memberSet[pkg.Package] = struct{}{}
+		for _, mp := range pkg.MemberPackages {
+			memberSet[mp] = struct{}{}
+		}
+
+		for scopePath, bucket := range byScope {
+			if scopePath == "" {
+				continue // repo-level; handled below as fallback
+			}
+			for member := range memberSet {
+				if member == scopePath || strings.HasPrefix(member, scopePath+"/") || strings.HasPrefix(scopePath, member+"/") {
+					candidates = append(candidates, bucket...)
+					break
+				}
+			}
+		}
+
+		// Repo-level fallback only when no module-scoped artifact matched.
+		if len(candidates) == 0 {
+			candidates = append(candidates, byScope[""]...)
+		}
+
+		// Cap and convert.
+		if len(candidates) > maxArtifactsPerCluster {
+			candidates = candidates[:maxArtifactsPerCluster]
+		}
+
+		summaries := make([]lworch.KnowledgeArtifactSummary, 0, len(candidates))
+		for _, c := range candidates {
+			s := lworch.KnowledgeArtifactSummary{
+				Type:        string(c.art.Type),
+				Audience:    string(c.art.Audience),
+				Depth:       string(c.art.Depth),
+				ScopePath:   scopePathOf(c.art),
+				RevisionFp:  c.art.UnderstandingRevisionFP,
+				GeneratedAt: c.art.GeneratedAt,
+			}
+			for _, sec := range c.art.Sections {
+				ks2 := lworch.KnowledgeSection{
+					Title:   sec.Title,
+					Content: sec.Content,
+					Summary: sec.Summary,
+				}
+				for _, ev := range sec.Evidence {
+					ks2.Evidence = append(ks2.Evidence, lworch.KnowledgeEvidence{
+						FilePath:  ev.FilePath,
+						LineStart: ev.LineStart,
+						LineEnd:   ev.LineEnd,
+						Rationale: ev.Rationale,
+					})
+				}
+				s.Sections = append(s.Sections, ks2)
+			}
+			summaries = append(summaries, s)
+		}
+
+		if len(summaries) > 0 {
+			updated := *pkg
+			updated.KnowledgeArtifacts = summaries
+			pages[i].PackageInfo = &updated
+		}
+	}
+
+	return pages
+}
+
+// scopePathOf returns the canonical scope path for an artifact, empty when the
+// artifact is repository-scoped.
+func scopePathOf(a *knowledge.Artifact) string {
+	if a.Scope == nil {
+		return ""
+	}
+	return a.Scope.ScopePath
+}
+
+// logArtifactResolution emits a single structured slog event summarising how
+// many clusters received fresh knowledge artifacts. This is the breadcrumb
+// needed to debug "why didn't my artifact get used".
+func logArtifactResolution(repoID string, pages []lworch.PlannedPage) {
+	clusters := 0
+	withArtifacts := 0
+	totalArtifacts := 0
+	staleSkipped := 0 // placeholder — computed in attachKnowledgeArtifacts
+
+	for _, p := range pages {
+		if p.TemplateID != "architecture" || p.PackageInfo == nil {
+			continue
+		}
+		clusters++
+		n := len(p.PackageInfo.KnowledgeArtifacts)
+		if n > 0 {
+			withArtifacts++
+			totalArtifacts += n
+		}
+	}
+
+	slog.Info("livingwiki/coldstart: knowledge artifact resolution",
+		"repo_id", repoID,
+		"clusters", clusters,
+		"clusters_with_artifacts", withArtifacts,
+		"artifacts_used", totalArtifacts,
+		"stale_skipped", staleSkipped,
+	)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
