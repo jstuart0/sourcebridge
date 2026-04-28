@@ -191,21 +191,31 @@ func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, setting
 	vars["last_run_at"] = lastRunAt
 	vars["disabled_at"] = disabledAt
 
+	// SurrealDB's `UPSERT <table> SET ... WHERE ...` only updates pre-existing
+	// rows that match WHERE — it does NOT insert when WHERE matches nothing
+	// and the result is silently empty. That gotcha is why every Enable click
+	// silently no-op'd: no row appeared, sink dispatch saw zero sinks and
+	// skipped, no Confluence pages got pushed.
+	//
+	// Fix: address the row by a deterministic record ID derived from the
+	// (tenant_id, repo_id) composite key via type::thing(). UPSERT on a
+	// specific record either updates it or creates it. last_run_at and
+	// disabled_at use type::datetime() to avoid the same option<datetime>
+	// schema-validation rejection that bit lw_job_results.
 	sql := `
-		UPSERT lw_repo_settings
-			SET tenant_id           = $tenant_id,
-			    repo_id             = $repo_id,
-			    enabled             = $enabled,
-			    mode                = $mode,
-			    sinks               = $sinks,
-			    exclude_paths       = $exclude_paths,
-			    stale_when_strategy = $stale_when_strategy,
-			    max_pages_per_job   = $max_pages_per_job,
-			    last_run_at         = $last_run_at,
-			    disabled_at         = $disabled_at,
-			    updated_by          = $updated_by,
-			    updated_at          = time::now()
-			WHERE tenant_id = $tenant_id AND repo_id = $repo_id
+		UPSERT type::thing('lw_repo_settings', [$tenant_id, $repo_id]) SET
+			tenant_id           = $tenant_id,
+			repo_id             = $repo_id,
+			enabled             = $enabled,
+			mode                = $mode,
+			sinks               = $sinks,
+			exclude_paths       = $exclude_paths,
+			stale_when_strategy = $stale_when_strategy,
+			max_pages_per_job   = $max_pages_per_job,
+			last_run_at         = IF $last_run_at = NONE THEN NONE ELSE type::datetime($last_run_at) END,
+			disabled_at         = IF $disabled_at = NONE THEN NONE ELSE type::datetime($disabled_at) END,
+			updated_by          = $updated_by,
+			updated_at          = time::now()
 	`
 	_, err = surrealdb.Query[interface{}](c, db, sql, vars)
 	return err
