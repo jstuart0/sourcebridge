@@ -368,6 +368,7 @@ type ComplexityRoot struct {
 
 	Features struct {
 		AdvancedLearningPaths    func(childComplexity int) int
+		AgentSetup               func(childComplexity int) int
 		AuditLog                 func(childComplexity int) int
 		Billing                  func(childComplexity int) int
 		CliffNotes               func(childComplexity int) int
@@ -387,7 +388,6 @@ type ComplexityRoot struct {
 		SlideGeneration          func(childComplexity int) int
 		Sso                      func(childComplexity int) int
 		SubsystemClustering      func(childComplexity int) int
-		AgentSetup               func(childComplexity int) int
 		SymbolScopedAnalysis     func(childComplexity int) int
 		SystemExplain            func(childComplexity int) int
 		Webhooks                 func(childComplexity int) int
@@ -802,6 +802,7 @@ type ComplexityRoot struct {
 	}
 
 	RepositoryLivingWikiSettings struct {
+		AutoCleanOrphans  func(childComplexity int) int
 		Enabled           func(childComplexity int) int
 		ExcludePaths      func(childComplexity int) int
 		LastJobResult     func(childComplexity int) int
@@ -2731,6 +2732,13 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Features.AdvancedLearningPaths(childComplexity), true
 
+	case "Features.agentSetup":
+		if e.complexity.Features.AgentSetup == nil {
+			break
+		}
+
+		return e.complexity.Features.AgentSetup(childComplexity), true
+
 	case "Features.auditLog":
 		if e.complexity.Features.AuditLog == nil {
 			break
@@ -2863,13 +2871,6 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Features.SubsystemClustering(childComplexity), true
-
-	case "Features.agentSetup":
-		if e.complexity.Features.AgentSetup == nil {
-			break
-		}
-
-		return e.complexity.Features.AgentSetup(childComplexity), true
 
 	case "Features.symbolScopedAnalysis":
 		if e.complexity.Features.SymbolScopedAnalysis == nil {
@@ -5552,6 +5553,13 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Repository.UpstreamStatus(childComplexity), true
+
+	case "RepositoryLivingWikiSettings.autoCleanOrphans":
+		if e.complexity.RepositoryLivingWikiSettings.AutoCleanOrphans == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLivingWikiSettings.AutoCleanOrphans(childComplexity), true
 
 	case "RepositoryLivingWikiSettings.enabled":
 		if e.complexity.RepositoryLivingWikiSettings.Enabled == nil {
@@ -19199,6 +19207,8 @@ func (ec *executionContext) fieldContext_EnableLivingWikiResult_settings(_ conte
 				return ec.fieldContext_RepositoryLivingWikiSettings_staleWhenStrategy(ctx, field)
 			case "maxPagesPerJob":
 				return ec.fieldContext_RepositoryLivingWikiSettings_maxPagesPerJob(ctx, field)
+			case "autoCleanOrphans":
+				return ec.fieldContext_RepositoryLivingWikiSettings_autoCleanOrphans(ctx, field)
 			case "lastRunAt":
 				return ec.fieldContext_RepositoryLivingWikiSettings_lastRunAt(ctx, field)
 			case "updatedAt":
@@ -21257,6 +21267,50 @@ func (ec *executionContext) fieldContext_Features_systemExplain(_ context.Contex
 	return fc, nil
 }
 
+func (ec *executionContext) _Features_symbolScopedAnalysis(ctx context.Context, field graphql.CollectedField, obj *Features) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Features_symbolScopedAnalysis(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.SymbolScopedAnalysis, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(bool)
+	fc.Result = res
+	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Features_symbolScopedAnalysis(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Features",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Features_subsystemClustering(ctx context.Context, field graphql.CollectedField, obj *Features) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_Features_subsystemClustering(ctx, field)
 	if err != nil {
@@ -21333,50 +21387,6 @@ func (ec *executionContext) _Features_agentSetup(ctx context.Context, field grap
 }
 
 func (ec *executionContext) fieldContext_Features_agentSetup(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	fc = &graphql.FieldContext{
-		Object:     "Features",
-		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
-		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Boolean does not have child fields")
-		},
-	}
-	return fc, nil
-}
-
-func (ec *executionContext) _Features_symbolScopedAnalysis(ctx context.Context, field graphql.CollectedField, obj *Features) (ret graphql.Marshaler) {
-	fc, err := ec.fieldContext_Features_symbolScopedAnalysis(ctx, field)
-	if err != nil {
-		return graphql.Null
-	}
-	ctx = graphql.WithFieldContext(ctx, fc)
-	defer func() {
-		if r := recover(); r != nil {
-			ec.Error(ctx, ec.Recover(ctx, r))
-			ret = graphql.Null
-		}
-	}()
-	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return obj.SymbolScopedAnalysis, nil
-	})
-	if err != nil {
-		ec.Error(ctx, err)
-		return graphql.Null
-	}
-	if resTmp == nil {
-		if !graphql.HasFieldError(ctx, fc) {
-			ec.Errorf(ctx, "must not be null")
-		}
-		return graphql.Null
-	}
-	res := resTmp.(bool)
-	fc.Result = res
-	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
-}
-
-func (ec *executionContext) fieldContext_Features_symbolScopedAnalysis(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Features",
 		Field:      field,
@@ -28541,47 +28551,6 @@ func (ec *executionContext) fieldContext_LivingWikiSettings_gitlabToken(_ contex
 	return fc, nil
 }
 
-func (ec *executionContext) _LivingWikiSettings_confluenceEmail(ctx context.Context, field graphql.CollectedField, obj *LivingWikiSettings) (ret graphql.Marshaler) {
-	fc, err := ec.fieldContext_LivingWikiSettings_confluenceEmail(ctx, field)
-	if err != nil {
-		return graphql.Null
-	}
-	ctx = graphql.WithFieldContext(ctx, fc)
-	defer func() {
-		if r := recover(); r != nil {
-			ec.Error(ctx, ec.Recover(ctx, r))
-			ret = graphql.Null
-		}
-	}()
-	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return obj.ConfluenceEmail, nil
-	})
-	if err != nil {
-		ec.Error(ctx, err)
-		return graphql.Null
-	}
-	if resTmp == nil {
-		return graphql.Null
-	}
-	res := resTmp.(*string)
-	fc.Result = res
-	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
-}
-
-func (ec *executionContext) fieldContext_LivingWikiSettings_confluenceEmail(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	fc = &graphql.FieldContext{
-		Object:     "LivingWikiSettings",
-		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
-		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type String does not have child fields")
-		},
-	}
-	return fc, nil
-}
-
 func (ec *executionContext) _LivingWikiSettings_confluenceSite(ctx context.Context, field graphql.CollectedField, obj *LivingWikiSettings) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_LivingWikiSettings_confluenceSite(ctx, field)
 	if err != nil {
@@ -28611,6 +28580,47 @@ func (ec *executionContext) _LivingWikiSettings_confluenceSite(ctx context.Conte
 }
 
 func (ec *executionContext) fieldContext_LivingWikiSettings_confluenceSite(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "LivingWikiSettings",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _LivingWikiSettings_confluenceEmail(ctx context.Context, field graphql.CollectedField, obj *LivingWikiSettings) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_LivingWikiSettings_confluenceEmail(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.ConfluenceEmail, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_LivingWikiSettings_confluenceEmail(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "LivingWikiSettings",
 		Field:      field,
@@ -32883,6 +32893,8 @@ func (ec *executionContext) fieldContext_Mutation_updateLivingWikiSettings(ctx c
 				return ec.fieldContext_LivingWikiSettings_githubToken(ctx, field)
 			case "gitlabToken":
 				return ec.fieldContext_LivingWikiSettings_gitlabToken(ctx, field)
+			case "confluenceSite":
+				return ec.fieldContext_LivingWikiSettings_confluenceSite(ctx, field)
 			case "confluenceEmail":
 				return ec.fieldContext_LivingWikiSettings_confluenceEmail(ctx, field)
 			case "confluenceToken":
@@ -33031,6 +33043,8 @@ func (ec *executionContext) fieldContext_Mutation_updateRepositoryLivingWikiSett
 				return ec.fieldContext_RepositoryLivingWikiSettings_staleWhenStrategy(ctx, field)
 			case "maxPagesPerJob":
 				return ec.fieldContext_RepositoryLivingWikiSettings_maxPagesPerJob(ctx, field)
+			case "autoCleanOrphans":
+				return ec.fieldContext_RepositoryLivingWikiSettings_autoCleanOrphans(ctx, field)
 			case "lastRunAt":
 				return ec.fieldContext_RepositoryLivingWikiSettings_lastRunAt(ctx, field)
 			case "updatedAt":
@@ -33171,6 +33185,8 @@ func (ec *executionContext) fieldContext_Mutation_disableLivingWikiForRepo(ctx c
 				return ec.fieldContext_RepositoryLivingWikiSettings_staleWhenStrategy(ctx, field)
 			case "maxPagesPerJob":
 				return ec.fieldContext_RepositoryLivingWikiSettings_maxPagesPerJob(ctx, field)
+			case "autoCleanOrphans":
+				return ec.fieldContext_RepositoryLivingWikiSettings_autoCleanOrphans(ctx, field)
 			case "lastRunAt":
 				return ec.fieldContext_RepositoryLivingWikiSettings_lastRunAt(ctx, field)
 			case "updatedAt":
@@ -37275,6 +37291,8 @@ func (ec *executionContext) fieldContext_Query_livingWikiSettings(_ context.Cont
 				return ec.fieldContext_LivingWikiSettings_githubToken(ctx, field)
 			case "gitlabToken":
 				return ec.fieldContext_LivingWikiSettings_gitlabToken(ctx, field)
+			case "confluenceSite":
+				return ec.fieldContext_LivingWikiSettings_confluenceSite(ctx, field)
 			case "confluenceEmail":
 				return ec.fieldContext_LivingWikiSettings_confluenceEmail(ctx, field)
 			case "confluenceToken":
@@ -37346,6 +37364,8 @@ func (ec *executionContext) fieldContext_Query_repositoryLivingWikiSettings(ctx 
 				return ec.fieldContext_RepositoryLivingWikiSettings_staleWhenStrategy(ctx, field)
 			case "maxPagesPerJob":
 				return ec.fieldContext_RepositoryLivingWikiSettings_maxPagesPerJob(ctx, field)
+			case "autoCleanOrphans":
+				return ec.fieldContext_RepositoryLivingWikiSettings_autoCleanOrphans(ctx, field)
 			case "lastRunAt":
 				return ec.fieldContext_RepositoryLivingWikiSettings_lastRunAt(ctx, field)
 			case "updatedAt":
@@ -39006,6 +39026,8 @@ func (ec *executionContext) fieldContext_Repository_livingWikiSettings(_ context
 				return ec.fieldContext_RepositoryLivingWikiSettings_staleWhenStrategy(ctx, field)
 			case "maxPagesPerJob":
 				return ec.fieldContext_RepositoryLivingWikiSettings_maxPagesPerJob(ctx, field)
+			case "autoCleanOrphans":
+				return ec.fieldContext_RepositoryLivingWikiSettings_autoCleanOrphans(ctx, field)
 			case "lastRunAt":
 				return ec.fieldContext_RepositoryLivingWikiSettings_lastRunAt(ctx, field)
 			case "updatedAt":
@@ -39290,6 +39312,50 @@ func (ec *executionContext) fieldContext_RepositoryLivingWikiSettings_maxPagesPe
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLivingWikiSettings_autoCleanOrphans(ctx context.Context, field graphql.CollectedField, obj *RepositoryLivingWikiSettings) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLivingWikiSettings_autoCleanOrphans(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.AutoCleanOrphans, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(bool)
+	fc.Result = res
+	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLivingWikiSettings_autoCleanOrphans(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLivingWikiSettings",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
 		},
 	}
 	return fc, nil
@@ -50349,7 +50415,7 @@ func (ec *executionContext) unmarshalInputUpdateRepositoryLivingWikiSettingsInpu
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"repositoryId", "enabled", "mode", "sinks", "excludePaths", "staleWhenStrategy", "maxPagesPerJob"}
+	fieldsInOrder := [...]string{"repositoryId", "enabled", "mode", "sinks", "excludePaths", "staleWhenStrategy", "maxPagesPerJob", "autoCleanOrphans"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -50405,6 +50471,13 @@ func (ec *executionContext) unmarshalInputUpdateRepositoryLivingWikiSettingsInpu
 				return it, err
 			}
 			it.MaxPagesPerJob = data
+		case "autoCleanOrphans":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("autoCleanOrphans"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.AutoCleanOrphans = data
 		}
 	}
 
@@ -53885,10 +53958,10 @@ func (ec *executionContext) _LivingWikiSettings(ctx context.Context, sel ast.Sel
 			out.Values[i] = ec._LivingWikiSettings_githubToken(ctx, field, obj)
 		case "gitlabToken":
 			out.Values[i] = ec._LivingWikiSettings_gitlabToken(ctx, field, obj)
-		case "confluenceEmail":
-			out.Values[i] = ec._LivingWikiSettings_confluenceEmail(ctx, field, obj)
 		case "confluenceSite":
 			out.Values[i] = ec._LivingWikiSettings_confluenceSite(ctx, field, obj)
+		case "confluenceEmail":
+			out.Values[i] = ec._LivingWikiSettings_confluenceEmail(ctx, field, obj)
 		case "confluenceToken":
 			out.Values[i] = ec._LivingWikiSettings_confluenceToken(ctx, field, obj)
 		case "notionToken":
@@ -56073,6 +56146,11 @@ func (ec *executionContext) _RepositoryLivingWikiSettings(ctx context.Context, s
 			}
 		case "maxPagesPerJob":
 			out.Values[i] = ec._RepositoryLivingWikiSettings_maxPagesPerJob(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "autoCleanOrphans":
+			out.Values[i] = ec._RepositoryLivingWikiSettings_autoCleanOrphans(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
