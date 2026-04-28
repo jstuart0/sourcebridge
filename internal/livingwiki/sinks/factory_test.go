@@ -137,9 +137,11 @@ func TestBuildSinkWritersMissingNotionToken(t *testing.T) {
 	}
 }
 
-// TestBuildSinkWritersGitRepoNotImplemented verifies that GIT_REPO returns
-// ErrSinkNotImplemented.
-func TestBuildSinkWritersGitRepoNotImplemented(t *testing.T) {
+// TestBuildSinkWritersGitRepoSkipped verifies that GIT_REPO is silently
+// skipped (writers list comes back length 0) rather than aborting the
+// whole build. Skip-rather-than-abort lets a repo configured with
+// [GIT_REPO, CONFLUENCE] still produce a working Confluence writer.
+func TestBuildSinkWritersGitRepoSkipped(t *testing.T) {
 	t.Parallel()
 
 	settings := &livingwiki.RepositoryLivingWikiSettings{
@@ -150,13 +152,12 @@ func TestBuildSinkWritersGitRepoNotImplemented(t *testing.T) {
 	}
 	snap := credentials.Snapshot{}
 
-	_, err := sinks.BuildSinkWriters(context.Background(), settings, snap)
-	if err == nil {
-		t.Fatal("expected error for not-implemented GIT_REPO sink")
+	writers, err := sinks.BuildSinkWriters(context.Background(), settings, snap)
+	if err != nil {
+		t.Fatalf("expected nil error when only an unimplemented sink is configured, got: %v", err)
 	}
-	var ne *sinks.ErrSinkNotImplemented
-	if !errors.As(err, &ne) {
-		t.Errorf("expected *ErrSinkNotImplemented, got %T: %v", err, err)
+	if len(writers) != 0 {
+		t.Errorf("expected 0 writers (GIT_REPO skipped), got %d", len(writers))
 	}
 }
 

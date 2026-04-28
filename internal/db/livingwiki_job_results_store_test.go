@@ -4,7 +4,6 @@
 package db
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 )
@@ -16,10 +15,6 @@ func TestSurrealLWJobResultToResult(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	completed := now.Add(5 * time.Second)
 
-	encIDs, _ := json.Marshal([]string{"page-1", "page-2"})
-	encTitles, _ := json.Marshal([]string{"Overview", "API Reference"})
-	encReasons, _ := json.Marshal([]string{"length", "content_gate"})
-
 	dto := &surrealLWJobResult{
 		TenantID:            "default",
 		RepoID:              "repo-abc",
@@ -29,9 +24,9 @@ func TestSurrealLWJobResultToResult(t *testing.T) {
 		PagesPlanned:        20,
 		PagesGenerated:      18,
 		PagesExcluded:       2,
-		ExcludedPageIDs:     string(encIDs),
-		GeneratedPageTitles: string(encTitles),
-		ExclusionReasons:    string(encReasons),
+		ExcludedPageIDs:     []string{"page-1", "page-2"},
+		GeneratedPageTitles: []string{"Overview", "API Reference"},
+		ExclusionReasons:    []string{"length", "content_gate"},
 		Status:              "ok",
 		ErrorMessage:        "",
 	}
@@ -82,9 +77,9 @@ func TestSurrealLWJobResultToResult_NilCompletedAt(t *testing.T) {
 		JobID:               "job-in-progress",
 		StartedAt:           surrealTime{Time: time.Now().UTC()},
 		CompletedAt:         nil,
-		ExcludedPageIDs:     "[]",
-		GeneratedPageTitles: "[]",
-		ExclusionReasons:    "[]",
+		ExcludedPageIDs:     []string{},
+		GeneratedPageTitles: []string{},
+		ExclusionReasons:    []string{},
 		Status:              "running",
 	}
 
@@ -104,9 +99,9 @@ func TestSurrealLWJobResultToResult_EmptySlices(t *testing.T) {
 	dto := &surrealLWJobResult{
 		JobID:               "job-empty",
 		StartedAt:           surrealTime{Time: time.Now().UTC()},
-		ExcludedPageIDs:     "",
-		GeneratedPageTitles: "[]",
-		ExclusionReasons:    "",
+		ExcludedPageIDs:     nil,
+		GeneratedPageTitles: []string{},
+		ExclusionReasons:    nil,
 		Status:              "ok",
 	}
 
@@ -131,9 +126,9 @@ func TestSurrealLWJobResultToResult_WithErrorMessage(t *testing.T) {
 	dto := &surrealLWJobResult{
 		JobID:               "job-failed",
 		StartedAt:           surrealTime{Time: time.Now().UTC()},
-		ExcludedPageIDs:     "[]",
-		GeneratedPageTitles: "[]",
-		ExclusionReasons:    "[]",
+		ExcludedPageIDs:     []string{},
+		GeneratedPageTitles: []string{},
+		ExclusionReasons:    []string{},
 		Status:              "failed",
 		ErrorMessage:        "LLM context window exceeded: 128k tokens",
 	}

@@ -5,7 +5,7 @@ package db
 
 import (
 	"context"
-	"encoding/json"
+
 	"fmt"
 	"time"
 
@@ -46,9 +46,12 @@ type surrealLWJobResult struct {
 	PagesPlanned        int              `json:"pages_planned"`
 	PagesGenerated      int              `json:"pages_generated"`
 	PagesExcluded       int              `json:"pages_excluded"`
-	ExcludedPageIDs     string           `json:"excluded_page_ids"`     // JSON-encoded []string
-	GeneratedPageTitles string           `json:"generated_page_titles"` // JSON-encoded []string
-	ExclusionReasons    string           `json:"exclusion_reasons"`     // JSON-encoded []string
+	// Native arrays on the wire (matches migration 041 TYPE array<string>).
+	// Earlier these were JSON-encoded strings; SurrealDB SCHEMAFULL rejected
+	// strings against array<string> with "expected a array<string>".
+	ExcludedPageIDs     []string         `json:"excluded_page_ids"`
+	GeneratedPageTitles []string         `json:"generated_page_titles"`
+	ExclusionReasons    []string         `json:"exclusion_reasons"`
 	Status              string           `json:"status"`
 	ErrorMessage        string           `json:"error_message"`
 }
@@ -68,25 +71,20 @@ func (r *surrealLWJobResult) toResult() (*livingwiki.LivingWikiJobResult, error)
 		result.CompletedAt = &t
 	}
 
-	if r.ExcludedPageIDs != "" && r.ExcludedPageIDs != "[]" {
-		_ = json.Unmarshal([]byte(r.ExcludedPageIDs), &result.ExcludedPageIDs)
-	}
-	if result.ExcludedPageIDs == nil {
+	if r.ExcludedPageIDs == nil {
 		result.ExcludedPageIDs = []string{}
+	} else {
+		result.ExcludedPageIDs = r.ExcludedPageIDs
 	}
-
-	if r.GeneratedPageTitles != "" && r.GeneratedPageTitles != "[]" {
-		_ = json.Unmarshal([]byte(r.GeneratedPageTitles), &result.GeneratedPageTitles)
-	}
-	if result.GeneratedPageTitles == nil {
+	if r.GeneratedPageTitles == nil {
 		result.GeneratedPageTitles = []string{}
+	} else {
+		result.GeneratedPageTitles = r.GeneratedPageTitles
 	}
-
-	if r.ExclusionReasons != "" && r.ExclusionReasons != "[]" {
-		_ = json.Unmarshal([]byte(r.ExclusionReasons), &result.ExclusionReasons)
-	}
-	if result.ExclusionReasons == nil {
+	if r.ExclusionReasons == nil {
 		result.ExclusionReasons = []string{}
+	} else {
+		result.ExclusionReasons = r.ExclusionReasons
 	}
 
 	return result, nil
@@ -103,17 +101,21 @@ func (s *LivingWikiJobResultStore) Save(ctx context.Context, tenantID string, re
 		return fmt.Errorf("livingwiki job result store: database not connected")
 	}
 
-	excludedJSON, err := json.Marshal(result.ExcludedPageIDs)
-	if err != nil {
-		return fmt.Errorf("encode excluded_page_ids: %w", err)
+	// SurrealDB schema (post-migration 041) types these fields as
+	// `array<string>`. Pass native Go []string slices so the SDK marshals
+	// them as native arrays at the wire level. The earlier JSON-string
+	// encoding hit "expected a array<string>" schema violations.
+	excludedIDs := result.ExcludedPageIDs
+	if excludedIDs == nil {
+		excludedIDs = []string{}
 	}
-	titlesJSON, err := json.Marshal(result.GeneratedPageTitles)
-	if err != nil {
-		return fmt.Errorf("encode generated_page_titles: %w", err)
+	titles := result.GeneratedPageTitles
+	if titles == nil {
+		titles = []string{}
 	}
-	reasonsJSON, err := json.Marshal(result.ExclusionReasons)
-	if err != nil {
-		return fmt.Errorf("encode exclusion_reasons: %w", err)
+	reasons := result.ExclusionReasons
+	if reasons == nil {
+		reasons = []string{}
 	}
 
 	vars := map[string]any{
@@ -124,9 +126,9 @@ func (s *LivingWikiJobResultStore) Save(ctx context.Context, tenantID string, re
 		"pages_planned":         result.PagesPlanned,
 		"pages_generated":       result.PagesGenerated,
 		"pages_excluded":        result.PagesExcluded,
-		"excluded_page_ids":     string(excludedJSON),
-		"generated_page_titles": string(titlesJSON),
-		"exclusion_reasons":     string(reasonsJSON),
+		"excluded_page_ids":     excludedIDs,
+		"generated_page_titles": titles,
+		"exclusion_reasons":     reasons,
 		"status":                result.Status,
 		"error_message":         result.ErrorMessage,
 	}
@@ -159,7 +161,7 @@ func (s *LivingWikiJobResultStore) Save(ctx context.Context, tenantID string, re
 			    status                = $status,
 			    error_message         = $error_message
 	`
-	_, err = surrealdb.Query[interface{}](ctx, db, sql, vars)
+	_, err := surrealdb.Query[interface{}](ctx, db, sql, vars)
 	return err
 }
 

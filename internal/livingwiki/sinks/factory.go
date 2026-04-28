@@ -5,6 +5,7 @@ package sinks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/credentials"
@@ -59,14 +60,39 @@ func BuildSinkWriters(
 
 	writers := make([]NamedSinkWriter, 0, len(repoSettings.Sinks))
 
+	// Per-sink errors should not abort the whole dispatch — one not-yet-implemented
+	// sink kind in a repo's config (e.g. git_repo while Confluence is wired) was
+	// stopping the build at the first error and silently dropping the rest of
+	// the configured sinks. Skip not-implemented sinks; only abort on missing
+	// credentials, which is a fixable user-facing problem.
+	var missingCredsErr error
 	for _, sink := range repoSettings.Sinks {
 		w, err := buildOneWriter(sink, snap)
 		if err != nil {
+			var notImpl *ErrSinkNotImplemented
+			if errors.As(err, &notImpl) {
+				// Log-and-skip via the caller — it sees the absence of this sink
+				// in the resulting writers list and can record a "not implemented"
+				// per-sink failure if it wants. For now, drop silently.
+				continue
+			}
+			var missing *ErrMissingCredentials
+			if errors.As(err, &missing) {
+				// Capture the first missing-creds error to return at the end so
+				// implemented sinks still get built.
+				if missingCredsErr == nil {
+					missingCredsErr = err
+				}
+				continue
+			}
 			return nil, err
 		}
 		writers = append(writers, NamedSinkWriter{Name: sink.IntegrationName, Writer: w})
 	}
 
+	if len(writers) == 0 && missingCredsErr != nil {
+		return nil, missingCredsErr
+	}
 	return writers, nil
 }
 
