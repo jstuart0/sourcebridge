@@ -51,6 +51,11 @@ const (
 	maxSymbolBodyLines = 200
 	// maxSymbolBodyBytes is the maximum byte size per symbol body.
 	maxSymbolBodyBytes = 8 * 1024
+	// coldStartTimeBudget is the maximum wall-clock time for a single
+	// cold-start (or retry-excluded) generation run. The orchestrator's
+	// default of 5 minutes is intended for incremental updates; cold starts
+	// over large repos (~150+ pages) routinely need much longer.
+	coldStartTimeBudget = 60 * time.Minute
 )
 
 // buildColdStartRunner returns the RunWithContext closure for a living-wiki
@@ -161,8 +166,15 @@ func buildColdStartRunner(
 		// broker once git-based PR creation is wired.
 		pr := lworch.NewMemoryWikiPR(fmt.Sprintf("pr-%s", jobID))
 
+		// Cold-start runs can include hundreds of pages; the orchestrator's
+		// default 5-minute TimeBudget targets fast incremental updates, not
+		// initial generation. Override to 60 min so large repos (~150+ pages)
+		// can finish without hitting ErrTimeBudgetExceeded mid-run.
 		genReq := lworch.GenerateRequest{
-			Config:     lworch.Config{RepoID: repoID},
+			Config: lworch.Config{
+				RepoID:     repoID,
+				TimeBudget: coldStartTimeBudget,
+			},
 			Pages:      pages,
 			PR:         pr,
 			OnPageDone: onPageDone,
