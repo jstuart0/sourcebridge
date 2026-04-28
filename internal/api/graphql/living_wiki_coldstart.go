@@ -56,6 +56,12 @@ const (
 	// default of 5 minutes is intended for incremental updates; cold starts
 	// over large repos (~150+ pages) routinely need much longer.
 	coldStartTimeBudget = 60 * time.Minute
+	// coldStartMaxConcurrency bumps the orchestrator's per-job parallelism
+	// from its default (5) so large cold starts complete in a reasonable
+	// wall-clock time. Each slot is one outstanding LLM call to the worker;
+	// rate limits and provider concurrency are the actual ceilings, so this
+	// just removes the artificial floor.
+	coldStartMaxConcurrency = 12
 )
 
 // buildColdStartRunner returns the RunWithContext closure for a living-wiki
@@ -200,8 +206,16 @@ func buildColdStartRunner(
 		// can finish without hitting ErrTimeBudgetExceeded mid-run.
 		genReq := lworch.GenerateRequest{
 			Config: lworch.Config{
-				RepoID:     repoID,
-				TimeBudget: coldStartTimeBudget,
+				RepoID: repoID,
+				// Cold starts run hundreds of independent page-generations.
+				// The orchestrator's default MaxConcurrency=5 is fine for
+				// incremental updates but bottlenecks large first runs;
+				// bump to 12 so a 169-page run can stay inside the
+				// 60-minute TimeBudget. Each parallel slot makes its own
+				// gRPC AnswerQuestion call so the worker / Anthropic side
+				// remain the natural rate-limiters.
+				MaxConcurrency: coldStartMaxConcurrency,
+				TimeBudget:     coldStartTimeBudget,
 			},
 			Pages:      pages,
 			PR:         pr,
@@ -505,11 +519,31 @@ func buildExclusionReasons(excluded []lworch.ExcludedPage) []string {
 // When the repo has a local clone path on disk, ExportedSymbols populates
 // Symbol.Body with the raw source lines for each symbol so the architecture
 // template can include concrete code in its LLM prompt.
+//
+// The architecture template calls ExportedSymbols once per page (it then
+// filters to the package it cares about). For a repo with N pages and M
+// symbols, that's O(N) calls, each doing M file reads to populate Body. On
+// large repos (sourcebridge: ~169 pages, several thousand symbols) this
+// dominates the cold-start latency. Cache the per-repo result and reuse it
+// across all pages — both the symbol slice and the file reads are
+// invariant for the duration of the cold-start.
 type graphStoreSymbolGraph struct {
 	store graphstore.GraphStore
+
+	cacheMu sync.Mutex
+	cache   map[string][]templates.Symbol // repoID → exported symbols
 }
 
 func (g *graphStoreSymbolGraph) ExportedSymbols(repoID string) ([]templates.Symbol, error) {
+	g.cacheMu.Lock()
+	if g.cache != nil {
+		if cached, ok := g.cache[repoID]; ok {
+			g.cacheMu.Unlock()
+			return cached, nil
+		}
+	}
+	g.cacheMu.Unlock()
+
 	stored, _ := g.store.GetSymbols(repoID, nil, nil, 10000, 0)
 
 	// Determine the repo root for source-body reading.
@@ -540,6 +574,14 @@ func (g *graphStoreSymbolGraph) ExportedSymbols(repoID string) ([]templates.Symb
 		}
 		out = append(out, sym)
 	}
+
+	g.cacheMu.Lock()
+	if g.cache == nil {
+		g.cache = make(map[string][]templates.Symbol, 1)
+	}
+	g.cache[repoID] = out
+	g.cacheMu.Unlock()
+
 	return out, nil
 }
 
