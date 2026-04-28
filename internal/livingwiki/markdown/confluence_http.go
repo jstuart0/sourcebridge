@@ -278,12 +278,19 @@ func (c *HTTPConfluenceClient) resolveSpaceID(ctx context.Context, auth string) 
 // findPageIDByExternalID searches for a Confluence page whose
 // sourcebridge_page_id property matches externalID. Returns "" when not found.
 //
-// It probes up to three title candidates in order:
+// It probes up to three title candidates in order, then falls back to a full
+// space scan when all title lookups fail:
+//
 //  1. The metadata-supplied title (sb_confluence_title) — used at create time
 //     and always the authoritative Confluence page title.
 //  2. HumanizePageID(externalID) — the deterministic fallback when no metadata
 //     title was provided.
 //  3. The raw externalID — legacy form used by an early version of this code.
+//  4. Full-space property scan — O(space_size) fallback for pages created with
+//     heading-derived titles (e.g. "Architecture: src/db") that don't match any
+//     of the three title candidates above. Only reached for pages whose title
+//     diverges from the deterministic forms, e.g. during orphan cleanup where
+//     metadata is not available at the call site.
 func (c *HTTPConfluenceClient) findPageIDByExternalID(ctx context.Context, auth, externalID string, metadata ConfluenceProperties) (string, error) {
 	spaceID, err := c.resolveSpaceID(ctx, auth)
 	if err != nil {
@@ -332,6 +339,69 @@ func (c *HTTPConfluenceClient) findPageIDByExternalID(ctx context.Context, auth,
 			if propVal == externalID {
 				return result.ID, nil
 			}
+		}
+	}
+
+	// 4. Full-space property scan fallback.
+	//
+	// Pages created with heading-derived titles (e.g. "Architecture: src/db")
+	// don't match the humanized form above. Scan every page in the space and
+	// compare the sourcebridge_page_id property directly. This is O(space_size)
+	// and is only reached when title-based lookups have all failed — typically
+	// during orphan cleanup for legacy or heading-titled pages.
+	pageID, err := c.findPageByPropertyScan(ctx, auth, spaceID, externalID)
+	if err != nil {
+		return "", err
+	}
+	return pageID, nil
+}
+
+// findPageByPropertyScan iterates every page in the space and returns the
+// Confluence page ID whose sourcebridge_page_id property equals externalID.
+// Returns "" when no match is found.
+func (c *HTTPConfluenceClient) findPageByPropertyScan(ctx context.Context, auth, spaceID, externalID string) (string, error) {
+	cursor := ""
+	for {
+		params := url.Values{}
+		params.Set("space-id", spaceID)
+		params.Set("limit", "250")
+		if cursor != "" {
+			params.Set("cursor", cursor)
+		}
+		path := "/pages?" + params.Encode()
+
+		var resp struct {
+			Results []struct {
+				ID string `json:"id"`
+			} `json:"results"`
+			Links struct {
+				Next string `json:"next"`
+			} `json:"_links"`
+		}
+		if err := c.do(ctx, auth, http.MethodGet, path, nil, &resp); err != nil {
+			return "", fmt.Errorf("confluence_http: property scan list pages: %w", err)
+		}
+
+		for _, r := range resp.Results {
+			propVal, propErr := c.getPageProperty(ctx, auth, r.ID, confluencePropertyKey)
+			if propErr != nil || propVal == "" {
+				continue
+			}
+			if propVal == externalID {
+				return r.ID, nil
+			}
+		}
+
+		if resp.Links.Next == "" {
+			break
+		}
+		nextURL, parseErr := url.Parse(resp.Links.Next)
+		if parseErr != nil {
+			break
+		}
+		cursor = nextURL.Query().Get("cursor")
+		if cursor == "" {
+			break
 		}
 	}
 	return "", nil

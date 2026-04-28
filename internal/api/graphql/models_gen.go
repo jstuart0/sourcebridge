@@ -862,8 +862,10 @@ type RepositoryLivingWikiSettings struct {
 	ExcludePaths      []string              `json:"excludePaths"`
 	StaleWhenStrategy RepoStaleWhenStrategy `json:"staleWhenStrategy"`
 	MaxPagesPerJob    int                   `json:"maxPagesPerJob"`
-	// AutoCleanOrphans controls whether the post-dispatch orphan-cleanup pass
-	// deletes Confluence pages absent from the current taxonomy. Defaults to true.
+	// autoCleanOrphans controls whether the post-dispatch orphan-cleanup pass
+	// deletes Confluence pages that were published in a previous job but are
+	// absent from the current taxonomy. Defaults to true. Set to false to
+	// preserve pages that are no longer generated.
 	AutoCleanOrphans bool       `json:"autoCleanOrphans"`
 	LastRunAt        *time.Time `json:"lastRunAt,omitempty"`
 	UpdatedAt        *time.Time `json:"updatedAt,omitempty"`
@@ -1214,7 +1216,9 @@ type UpdateRepositoryLivingWikiSettingsInput struct {
 	ExcludePaths      []string               `json:"excludePaths,omitempty"`
 	StaleWhenStrategy *RepoStaleWhenStrategy `json:"staleWhenStrategy,omitempty"`
 	MaxPagesPerJob    *int                   `json:"maxPagesPerJob,omitempty"`
-	AutoCleanOrphans  *bool                  `json:"autoCleanOrphans,omitempty"`
+	// Set to false to disable the post-dispatch orphan-cleanup pass for this repo.
+	// Omit to keep the current value (defaults to true for new repos).
+	AutoCleanOrphans *bool `json:"autoCleanOrphans,omitempty"`
 }
 
 // Patch an existing requirement. Every non-null field replaces the

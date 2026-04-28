@@ -71,6 +71,22 @@ func (cts *confluenceTestServer) handle(w http.ResponseWriter, r *http.Request) 
 		}
 		writeConfluenceJSON(w, http.StatusOK, map[string]interface{}{"results": results})
 
+	// List all pages in space (full-scan fallback — no title filter).
+	case r.Method == http.MethodGet && strings.HasSuffix(path, "/pages") && r.URL.Query().Get("title") == "":
+		type result struct {
+			ID string `json:"id"`
+		}
+		var results []result
+		// Return all known page IDs so findPageByPropertyScan can probe properties.
+		seen := make(map[string]bool)
+		for _, id := range cts.pages {
+			if !seen[id] {
+				seen[id] = true
+				results = append(results, result{ID: id})
+			}
+		}
+		writeConfluenceJSON(w, http.StatusOK, map[string]interface{}{"results": results, "_links": map[string]string{}})
+
 	// Search pages by title.
 	case r.Method == http.MethodGet && strings.Contains(path, "/pages") && r.URL.Query().Get("title") != "":
 		title := r.URL.Query().Get("title")
