@@ -278,15 +278,16 @@ func (c *HTTPConfluenceClient) resolveSpaceID(ctx context.Context, auth string) 
 // findPageIDByExternalID searches for a Confluence page whose
 // sourcebridge_page_id property matches externalID. Returns "" when not found.
 func (c *HTTPConfluenceClient) findPageIDByExternalID(ctx context.Context, auth, externalID string) (string, error) {
-	// Search by title (we use the externalID as the page title when creating).
-	// A title search is O(1) on Confluence's side; property verification is O(1)
-	// additional call.
+	// Search by title. Pages are created with the deterministic humanized
+	// title from HumanizePageID(externalID); using the same derivation here
+	// guarantees create / find round-trip without a separate index. Property
+	// verification narrows down any title collisions.
 	spaceID, err := c.resolveSpaceID(ctx, auth)
 	if err != nil {
 		return "", err
 	}
 	params := url.Values{}
-	params.Set("title", externalID)
+	params.Set("title", HumanizePageID(externalID))
 	params.Set("space-id", spaceID)
 
 	path := "/pages?" + params.Encode()
@@ -335,10 +336,18 @@ func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID 
 		Body     bodyValue `json:"body"`
 	}
 
+	// Human-readable title overrides the externalID fallback when the writer
+	// has supplied one via metadata. Search uses the same humanized form, so
+	// findPageIDByExternalID will still resolve the page on the next run.
+	title := metadata[propConfluenceTitle]
+	if title == "" {
+		title = HumanizePageID(externalID)
+	}
+
 	payload := createPayload{
 		SpaceID:  spaceID,
 		Status:   "current",
-		Title:    externalID,
+		Title:    title,
 		ParentID: c.cfg.ParentPageID,
 		Body: bodyValue{
 			Representation: "storage",
@@ -358,9 +367,11 @@ func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID 
 		return fmt.Errorf("confluence_http: set page property: %w", err)
 	}
 
-	// Write any additional metadata properties.
+	// Write any additional metadata properties. The pseudo-property
+	// `propConfluenceTitle` is consumed for the create payload's title and
+	// must not be persisted as a page content-property.
 	for k, v := range metadata {
-		if k == confluencePropertyKey {
+		if k == confluencePropertyKey || k == propConfluenceTitle {
 			continue
 		}
 		_ = c.setPageProperty(ctx, auth, resp.ID, k, v) // best-effort
@@ -398,10 +409,15 @@ func (c *HTTPConfluenceClient) updatePage(ctx context.Context, auth, pageID, ext
 		Version versionInfo `json:"version"`
 	}
 
+	title := metadata[propConfluenceTitle]
+	if title == "" {
+		title = HumanizePageID(externalID)
+	}
+
 	payload := updatePayload{
 		ID:     pageID,
 		Status: "current",
-		Title:  externalID,
+		Title:  title,
 		Body: bodyValue{
 			Representation: "storage",
 			Value:          string(xhtml),
@@ -413,8 +429,13 @@ func (c *HTTPConfluenceClient) updatePage(ctx context.Context, auth, pageID, ext
 		return fmt.Errorf("confluence_http: update page: %w", err)
 	}
 
-	// Update metadata properties (best-effort).
+	// Update metadata properties (best-effort). The pseudo-property
+	// `propConfluenceTitle` is consumed for the update payload's title and
+	// must not be persisted as a page content-property.
 	for k, v := range metadata {
+		if k == propConfluenceTitle {
+			continue
+		}
 		_ = c.setPageProperty(ctx, auth, pageID, k, v)
 	}
 	return nil

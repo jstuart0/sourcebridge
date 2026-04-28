@@ -120,7 +120,7 @@ func TestConfluence_WriteXHTML_ContainsManagedMarker(t *testing.T) {
 }
 
 // TestConfluence_WriteXHTML_ContainsBlockIDs verifies block IDs are embedded
-// as ac:parameter elements.
+// in sb-block HTML-comment markers (id/kind/owner attributes).
 func TestConfluence_WriteXHTML_ContainsBlockIDs(t *testing.T) {
 	var buf bytes.Buffer
 	if err := markdown.WriteXHTML(&buf, confluenceTestPage()); err != nil {
@@ -129,31 +129,34 @@ func TestConfluence_WriteXHTML_ContainsBlockIDs(t *testing.T) {
 	out := buf.String()
 
 	for _, id := range []string{"b001", "b002", "b003", "b004", "b005"} {
-		if !strings.Contains(out, id) {
-			t.Errorf("block ID %q missing from Confluence XHTML", id)
+		if !strings.Contains(out, `id="`+id+`"`) {
+			t.Errorf("block id=%q missing from sb-block markers in Confluence XHTML", id)
 		}
 	}
-	// Parameters embedded via ac:parameter.
-	if !strings.Contains(out, `ac:name="id"`) {
-		t.Error("ac:parameter id missing from output")
-	}
-	if !strings.Contains(out, `ac:name="kind"`) {
-		t.Error("ac:parameter kind missing from output")
-	}
-	if !strings.Contains(out, `ac:name="owner"`) {
-		t.Error("ac:parameter owner missing from output")
+	// Each block carries id/kind/owner attributes inside the open marker.
+	for _, attr := range []string{"id=", "kind=", "owner="} {
+		if !strings.Contains(out, attr) {
+			t.Errorf("sb-block attribute %s missing from output", attr)
+		}
 	}
 }
 
-// TestConfluence_WriteXHTML_SourcebridgeBlockMacro verifies the wrapper macro
-// name.
-func TestConfluence_WriteXHTML_SourcebridgeBlockMacro(t *testing.T) {
+// TestConfluence_WriteXHTML_SBBlockMarkers verifies blocks are wrapped in
+// HTML-comment markers (no custom Confluence macro install required).
+func TestConfluence_WriteXHTML_SBBlockMarkers(t *testing.T) {
 	var buf bytes.Buffer
 	if err := markdown.WriteXHTML(&buf, confluenceTestPage()); err != nil {
 		t.Fatalf("WriteXHTML: %v", err)
 	}
-	if !strings.Contains(buf.String(), `ac:name="sourcebridge-block"`) {
-		t.Error("sourcebridge-block macro missing from output")
+	out := buf.String()
+	if !strings.Contains(out, "<!-- sb:block ") {
+		t.Error("sb:block open marker missing from output")
+	}
+	if !strings.Contains(out, "<!-- /sb:block -->") {
+		t.Error("sb:block close marker missing from output")
+	}
+	if strings.Contains(out, `ac:name="sourcebridge-block"`) {
+		t.Error("legacy sourcebridge-block macro should no longer appear (renders as 'Error loading the extension!' in Confluence)")
 	}
 }
 
@@ -512,8 +515,8 @@ func TestConfluence_Reconciliation_HumanEditedBlockPreserved(t *testing.T) {
 	if !strings.Contains(string(xhtml), "Human-edited paragraph in Confluence") {
 		t.Fatal("human-edited content not stored")
 	}
-	if !strings.Contains(string(xhtml), `human-edited`) {
-		t.Fatal("owner=human-edited not stored in ac:parameter")
+	if !strings.Contains(string(xhtml), `owner="human-edited"`) {
+		t.Fatal("owner=human-edited not stored in sb-block marker")
 	}
 
 	// Step 2: Regen — orchestrator provides the page with b002 still human-edited

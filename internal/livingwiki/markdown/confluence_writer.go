@@ -516,62 +516,51 @@ func (m *MemoryConfluenceClient) MutateBlock(pageExternalID string, blockID ast.
 	return nil
 }
 
-// replaceBlockBody replaces the ac:rich-text-body content of the block macro
-// with the matching id parameter. Returns the modified XHTML or an error if
-// the block is not found.
+// replaceBlockBody replaces the body between sb-block open/close comment
+// markers for the block whose id attribute matches blockID. Returns the
+// modified XHTML or an error if the block is not found.
 func replaceBlockBody(xhtml string, blockID ast.BlockID, newBodyXHTML string) (string, error) {
-	// Find the sourcebridge-block macro containing the given block ID.
-	// Pattern: from the macro open tag containing the id parameter through to
-	// the closing </ac:structured-macro>.
 	escapedID := xmlEscape(string(blockID))
-	// Build a pattern that matches: <ac:parameter ac:name="id">blockID</ac:parameter>
-	idParamPattern := fmt.Sprintf(`<ac:parameter ac:name="id">%s</ac:parameter>`, regexp.QuoteMeta(escapedID))
 
-	// Find the start of the enclosing macro.
-	macroOpen := `<ac:structured-macro ac:name="sourcebridge-block">`
+	// Locate every sb-block open comment and pick the one whose id attribute
+	// matches blockID — attribute order in the comment is not guaranteed, so
+	// we cannot match against a single literal substring.
+	for _, loc := range reSBBlockOpen.FindAllStringSubmatchIndex(xhtml, -1) {
+		attrSpan := xhtml[loc[2]:loc[3]]
+		var matched bool
+		for _, m := range reSBAttr.FindAllStringSubmatch(attrSpan, -1) {
+			if m[1] == "id" && m[2] == escapedID {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
 
-	// Find position of id parameter.
-	idIdx := strings.Index(xhtml, idParamPattern)
-	if idIdx < 0 {
-		return "", fmt.Errorf("confluence block %q not found in XHTML", blockID)
+		openEnd := loc[1]
+		closeRel := strings.Index(xhtml[openEnd:], sbBlockClosePrefix)
+		if closeRel < 0 {
+			break
+		}
+		closeAbs := openEnd + closeRel
+		closeEnd := strings.Index(xhtml[closeAbs:], "-->")
+		if closeEnd < 0 {
+			break
+		}
+		closeEnd = closeAbs + closeEnd + len("-->")
+
+		var b strings.Builder
+		b.WriteString(xhtml[:openEnd])
+		b.WriteString("\n")
+		b.WriteString(strings.TrimSpace(newBodyXHTML))
+		b.WriteString("\n")
+		b.WriteString(sbBlockClose)
+		b.WriteString(xhtml[closeEnd:])
+		return b.String(), nil
 	}
 
-	// Walk backward to find the start of the enclosing macro.
-	macroStart := strings.LastIndex(xhtml[:idIdx], macroOpen)
-	if macroStart < 0 {
-		return "", fmt.Errorf("confluence: could not find macro open tag for block %q", blockID)
-	}
-
-	// Find the end of the macro: </ac:structured-macro> after the id parameter.
-	macroEnd := strings.Index(xhtml[idIdx:], "</ac:structured-macro>")
-	if macroEnd < 0 {
-		return "", fmt.Errorf("confluence: could not find macro close tag for block %q", blockID)
-	}
-	macroEnd = idIdx + macroEnd + len("</ac:structured-macro>")
-
-	// Rebuild the macro with the new body.
-	originalMacro := xhtml[macroStart:macroEnd]
-
-	// Extract parameters to preserve them.
-	idParam := extractAcParameter(originalMacro, "id")
-	kindParam := extractAcParameter(originalMacro, "kind")
-	ownerParam := extractAcParameter(originalMacro, "owner")
-
-	var newMacro strings.Builder
-	newMacro.WriteString(macroOpen)
-	newMacro.WriteString("\n")
-	fmt.Fprintf(&newMacro, `<ac:parameter ac:name="id">%s</ac:parameter>`, xmlEscape(idParam))
-	newMacro.WriteString("\n")
-	fmt.Fprintf(&newMacro, `<ac:parameter ac:name="kind">%s</ac:parameter>`, xmlEscape(kindParam))
-	newMacro.WriteString("\n")
-	fmt.Fprintf(&newMacro, `<ac:parameter ac:name="owner">%s</ac:parameter>`, xmlEscape(ownerParam))
-	newMacro.WriteString("\n")
-	newMacro.WriteString("<ac:rich-text-body>\n")
-	newMacro.WriteString(newBodyXHTML)
-	newMacro.WriteString("\n</ac:rich-text-body>\n")
-	newMacro.WriteString("</ac:structured-macro>")
-
-	return xhtml[:macroStart] + newMacro.String() + xhtml[macroEnd:], nil
+	return "", fmt.Errorf("confluence block %q not found in XHTML", blockID)
 }
 
 // extractAcParameter extracts the text content of <ac:parameter ac:name="name">…</ac:parameter>.
@@ -695,12 +684,63 @@ func (cw *ConfluenceWriter) WritePage(ctx context.Context, page ast.Page) error 
 	props := ConfluenceProperties{
 		"sourcebridge_page_id": page.ID,
 		"space_key":            cw.cfg.SpaceKey,
+		// Title is consumed by the HTTP client when creating/updating the
+		// Confluence page. Sinks that don't read this property (e.g. the
+		// in-memory fake) just store it. We prefer the page's first heading
+		// because that's the text humans authored as the natural title;
+		// otherwise fall back to a deterministic humanization of the page ID.
+		propConfluenceTitle: deriveConfluenceTitle(page),
 	}
 	if err := cw.client.UpsertPage(ctx, page.ID, buf.Bytes(), props); err != nil {
 		return fmt.Errorf("confluence_writer: UpsertPage %q: %w", page.ID, err)
 	}
 
 	return nil
+}
+
+// propConfluenceTitle is the property key on UpsertPage's metadata that the
+// HTTP client uses as the Confluence page title. It is not persisted as a
+// Confluence content-property — the HTTP layer pulls it out before the
+// remaining keys are written through to Confluence.
+const propConfluenceTitle = "sb_confluence_title"
+
+// deriveConfluenceTitle returns the page's preferred Confluence title:
+// the first heading block's text when present, falling back to a
+// deterministic humanization of page.ID. The same fallback is used at search
+// time, so create / find round-trip even when no heading block exists.
+func deriveConfluenceTitle(page ast.Page) string {
+	for _, b := range page.Blocks {
+		if b.Kind == ast.BlockKindHeading && b.Content.Heading != nil {
+			if t := strings.TrimSpace(b.Content.Heading.Text); t != "" {
+				return t
+			}
+		}
+	}
+	return HumanizePageID(page.ID)
+}
+
+// HumanizePageID converts a SourceBridge page ID like
+// "<repoUUID>.arch.src.api.middleware" or "system_overview" into a
+// human-friendly title. The transformation is deterministic so create-time
+// and search-time produce the same string.
+func HumanizePageID(externalID string) string {
+	if externalID == "" {
+		return externalID
+	}
+	parts := strings.Split(externalID, ".")
+	// Drop a leading repo-id segment when it looks like a UUID (contains 4
+	// hyphens) — repo IDs would otherwise dominate the visible title.
+	if len(parts) > 1 && strings.Count(parts[0], "-") == 4 {
+		parts = parts[1:]
+	}
+	if len(parts) == 0 {
+		return externalID
+	}
+	pretty := make([]string, 0, len(parts))
+	for _, p := range parts {
+		pretty = append(pretty, strings.ReplaceAll(p, "_", " "))
+	}
+	return strings.Join(pretty, " · ")
 }
 
 // WriteXHTML renders page to Confluence storage XHTML without performing
@@ -738,41 +778,40 @@ func writeConfluencePage(w io.Writer, page ast.Page) error {
 	return nil
 }
 
-// writeConfluenceBlock wraps block content in a sourcebridge-block macro.
+// sb-block round-trip markers. These are HTML comments rather than a custom
+// Confluence macro, so the page renders correctly in any Confluence instance
+// (no app/macro install required) while still letting the reconciler recover
+// per-block ownership on the next write.
+//
+// Format:
+//
+//	<!-- sb:block id="..." kind="..." owner="..." -->
+//	<plain XHTML for the block>
+//	<!-- /sb:block -->
+const (
+	sbBlockOpenPrefix = "<!-- sb:block"
+	sbBlockClosePrefix = "<!-- /sb:block"
+	sbBlockClose      = "<!-- /sb:block -->"
+)
+
+// writeConfluenceBlock renders one block surrounded by sb-block HTML-comment
+// markers and the block's plain XHTML body.
 func writeConfluenceBlock(w io.Writer, blk ast.Block) error {
-	// Open the sourcebridge-block structured macro.
-	if err := writeAcMacroOpen(w, "sourcebridge-block"); err != nil {
+	openComment := fmt.Sprintf(`<!-- sb:block id=%q kind=%q owner=%q -->`,
+		xmlEscape(string(blk.ID)),
+		xmlEscape(string(blk.Kind)),
+		xmlEscape(string(blk.Owner)),
+	)
+	if _, err := fmt.Fprintln(w, openComment); err != nil {
 		return err
 	}
-	// Block ID parameter.
-	if err := writeAcParameter(w, "id", string(blk.ID)); err != nil {
+	if err := writeConfluenceBlockContent(w, blk.Kind, blk.Content); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(w); err != nil {
+	if _, err := fmt.Fprintln(w, sbBlockClose); err != nil {
 		return err
 	}
-	// Kind parameter.
-	if err := writeAcParameter(w, "kind", string(blk.Kind)); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintln(w); err != nil {
-		return err
-	}
-	// Owner parameter.
-	if err := writeAcParameter(w, "owner", string(blk.Owner)); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintln(w); err != nil {
-		return err
-	}
-	// Rich-text body.
-	if err := writeAcRichTextBodyWrap(w, func(inner io.Writer) error {
-		return writeConfluenceBlockContent(inner, blk.Kind, blk.Content)
-	}); err != nil {
-		return err
-	}
-	// Close the macro.
-	return writeAcMacroClose(w)
+	return nil
 }
 
 // writeConfluenceBlockContent renders one block's content as Confluence XHTML.
@@ -1081,32 +1120,57 @@ type confluenceParsedBlock struct {
 	rawXHTML string
 }
 
-// parseConfluenceBlocks extracts all sourcebridge-block macros from XHTML,
-// returning their id/kind/owner parameters and raw body content.
+// reSBBlockOpen matches the sb-block open comment and captures id/kind/owner
+// in any order. The attribute regexes use \s+ separators so additional
+// attributes can be added later without breaking back-compat.
+var reSBBlockOpen = regexp.MustCompile(`<!--\s*sb:block\s+([^>]*?)\s*-->`)
+var reSBAttr = regexp.MustCompile(`(\w+)\s*=\s*"([^"]*)"`)
+
+// parseConfluenceBlocks extracts every sb-block-marked region from XHTML and
+// returns the block metadata plus the raw body that lived between the
+// open/close markers.
 func parseConfluenceBlocks(xhtml []byte) []confluenceParsedBlock {
 	s := string(xhtml)
-	const macroOpen = `<ac:structured-macro ac:name="sourcebridge-block">`
-	const macroClose = `</ac:structured-macro>`
-
 	var results []confluenceParsedBlock
-	offset := 0
-	for {
-		idx := strings.Index(s[offset:], macroOpen)
-		if idx < 0 {
-			break
-		}
-		start := offset + idx
-		end := strings.Index(s[start:], macroClose)
-		if end < 0 {
-			break
-		}
-		end = start + end + len(macroClose)
-		macroXHTML := s[start:end]
 
-		id := extractAcParameter(macroXHTML, "id")
-		kind := extractAcParameter(macroXHTML, "kind")
-		owner := extractAcParameter(macroXHTML, "owner")
-		body := extractRichTextBody(macroXHTML)
+	offset := 0
+	for offset < len(s) {
+		loc := reSBBlockOpen.FindStringSubmatchIndex(s[offset:])
+		if loc == nil {
+			break
+		}
+		// loc[0:1] is the full open comment span within s[offset:].
+		openStart := offset + loc[0]
+		openEnd := offset + loc[1]
+		attrSpan := s[offset+loc[2] : offset+loc[3]]
+
+		// Locate the matching close marker. We accept "<!-- /sb:block -->" and
+		// any whitespace-flexible variant so trivial editor reformats survive.
+		closeRel := strings.Index(s[openEnd:], sbBlockClosePrefix)
+		if closeRel < 0 {
+			break
+		}
+		// Find the actual end-of-comment past the close prefix.
+		closeAbs := openEnd + closeRel
+		closeEnd := strings.Index(s[closeAbs:], "-->")
+		if closeEnd < 0 {
+			break
+		}
+		closeEnd = closeAbs + closeEnd + len("-->")
+
+		body := strings.TrimSpace(s[openEnd:closeAbs])
+
+		var id, kind, owner string
+		for _, m := range reSBAttr.FindAllStringSubmatch(attrSpan, -1) {
+			switch m[1] {
+			case "id":
+				id = m[2]
+			case "kind":
+				kind = m[2]
+			case "owner":
+				owner = m[2]
+			}
+		}
 
 		if id != "" {
 			results = append(results, confluenceParsedBlock{
@@ -1116,25 +1180,11 @@ func parseConfluenceBlocks(xhtml []byte) []confluenceParsedBlock {
 				rawXHTML: body,
 			})
 		}
-		offset = end
+
+		_ = openStart
+		offset = closeEnd
 	}
 	return results
-}
-
-// extractRichTextBody returns the content between <ac:rich-text-body> tags.
-func extractRichTextBody(xhtml string) string {
-	const open = "<ac:rich-text-body>"
-	const close = "</ac:rich-text-body>"
-	start := strings.Index(xhtml, open)
-	if start < 0 {
-		return ""
-	}
-	start += len(open)
-	end := strings.Index(xhtml[start:], close)
-	if end < 0 {
-		return xhtml[start:]
-	}
-	return strings.TrimSpace(xhtml[start : start+end])
 }
 
 // confluenceXHTMLToBlocks converts parsed Confluence block data to [ast.Block]

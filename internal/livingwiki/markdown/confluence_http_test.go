@@ -317,15 +317,11 @@ func TestHTTPConfluenceClient_GetBlockByExternalID(t *testing.T) {
 	cts, srv := newConfluenceTestServer(t)
 	defer srv.Close()
 
-	// Pre-seed a page with a sourcebridge-block macro.
-	blockXHTML := `<ac:structured-macro ac:name="sourcebridge-block">
-<ac:parameter ac:name="id">block-001</ac:parameter>
-<ac:parameter ac:name="kind">paragraph</ac:parameter>
-<ac:parameter ac:name="owner">generated</ac:parameter>
-<ac:rich-text-body>
+	// Pre-seed a page with sb-block HTML-comment markers (the renderer's
+	// current format — matches what real Confluence pages will contain).
+	blockXHTML := `<!-- sb:block id="block-001" kind="paragraph" owner="generated" -->
 <p>Hello world</p>
-</ac:rich-text-body>
-</ac:structured-macro>`
+<!-- /sb:block -->`
 	cts.pages["my-page"] = "pid-my-page"
 	cts.bodies["pid-my-page"] = blockXHTML
 	cts.versions["pid-my-page"] = 1
