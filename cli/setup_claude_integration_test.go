@@ -228,6 +228,344 @@ func TestSetupClaude_E2E(t *testing.T) {
 	}
 }
 
+// TestSetupClaude_MCPHTTPTransport verifies that the .mcp.json written by
+// runSetupClaude uses the HTTP-transport schema with the ${SOURCEBRIDGE_API_TOKEN}
+// placeholder, not the old broken stdio schema.
+func TestSetupClaude_MCPHTTPTransport(t *testing.T) {
+	fakeResp := map[string]interface{}{
+		"repo_id":      "mcp-test-repo",
+		"status":       "ready",
+		"retrieved_at": time.Now().UTC().Format(time.RFC3339),
+		"clusters":     []map[string]interface{}{},
+	}
+	fakeRepo := map[string]interface{}{
+		"id":   "mcp-test-repo",
+		"name": "mcp-test",
+		"path": "/tmp/mcp-test",
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/healthz":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case strings.HasSuffix(r.URL.Path, "/clusters"):
+			if err := json.NewEncoder(w).Encode(fakeResp); err != nil {
+				t.Errorf("encoding clusters: %v", err)
+			}
+		case strings.HasPrefix(r.URL.Path, "/api/v1/repositories/mcp-test-repo"):
+			if err := json.NewEncoder(w).Encode(fakeRepo); err != nil {
+				t.Errorf("encoding repo: %v", err)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+
+	origServer := setupClaudeServer
+	origRepoID := setupClaudeRepoID
+	origDryRun := setupClaudeDryRun
+	origNoMCP := setupClaudeNoMCP
+	origCI := setupClaudeCI
+	origForce := setupClaudeForce
+	origCommit := setupClaudeCommitConfig
+	origNoSkills := setupClaudeNoSkills
+
+	setupClaudeServer = srv.URL
+	setupClaudeRepoID = "mcp-test-repo"
+	setupClaudeDryRun = false
+	setupClaudeNoMCP = false   // exercise MCP write
+	setupClaudeCI = false
+	setupClaudeForce = false
+	setupClaudeCommitConfig = true
+	setupClaudeNoSkills = true // skip CLAUDE.md for a focused MCP test
+
+	defer func() {
+		setupClaudeServer = origServer
+		setupClaudeRepoID = origRepoID
+		setupClaudeDryRun = origDryRun
+		setupClaudeNoMCP = origNoMCP
+		setupClaudeCI = origCI
+		setupClaudeForce = origForce
+		setupClaudeCommitConfig = origCommit
+		setupClaudeNoSkills = origNoSkills
+	}()
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(origWD) }()
+
+	setupClaudeCmd.SetContext(context.Background())
+	if err := runSetupClaude(setupClaudeCmd, nil); err != nil {
+		t.Fatalf("runSetupClaude: %v", err)
+	}
+
+	// Verify the .mcp.json has the HTTP-transport shape.
+	mcpPath := filepath.Join(tmpDir, ".mcp.json")
+	data, err := os.ReadFile(mcpPath)
+	if err != nil {
+		t.Fatalf("reading .mcp.json: %v", err)
+	}
+	var doc map[string]interface{}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parsing .mcp.json: %v", err)
+	}
+
+	servers, ok := doc["mcpServers"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("mcpServers not present or not a map")
+	}
+	entry, ok := servers["sourcebridge"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("mcpServers.sourcebridge not present")
+	}
+
+	if entry["type"] != "http" {
+		t.Errorf("expected type=http, got %v", entry["type"])
+	}
+	wantURL := srv.URL + "/api/v1/mcp/http"
+	if entry["url"] != wantURL {
+		t.Errorf("expected url=%q, got %v", wantURL, entry["url"])
+	}
+	headers, ok := entry["headers"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("headers not present or not a map")
+	}
+	wantAuth := "Bearer ${SOURCEBRIDGE_API_TOKEN}"
+	if headers["Authorization"] != wantAuth {
+		t.Errorf("expected Authorization=%q, got %v", wantAuth, headers["Authorization"])
+	}
+
+	// Verify no "command" or "args" fields (old stdio shape must be absent).
+	if _, has := entry["command"]; has {
+		t.Error("entry must not contain 'command' field (stdio shape)")
+	}
+	if _, has := entry["args"]; has {
+		t.Error("entry must not contain 'args' field (stdio shape)")
+	}
+}
+
+// TestSetupClaude_MCPIdempotent verifies that a second run leaves .mcp.json
+// byte-identical (UNCHANGED path).
+func TestSetupClaude_MCPIdempotent(t *testing.T) {
+	fakeResp := map[string]interface{}{
+		"repo_id":      "mcp-idm-repo",
+		"status":       "ready",
+		"retrieved_at": time.Now().UTC().Format(time.RFC3339),
+		"clusters":     []map[string]interface{}{},
+	}
+	fakeRepo := map[string]interface{}{
+		"id":   "mcp-idm-repo",
+		"name": "mcp-idm",
+		"path": "/tmp/mcp-idm",
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/healthz":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case strings.HasSuffix(r.URL.Path, "/clusters"):
+			if err := json.NewEncoder(w).Encode(fakeResp); err != nil {
+				t.Errorf("encoding clusters: %v", err)
+			}
+		case strings.HasPrefix(r.URL.Path, "/api/v1/repositories/mcp-idm-repo"):
+			if err := json.NewEncoder(w).Encode(fakeRepo); err != nil {
+				t.Errorf("encoding repo: %v", err)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+
+	origServer := setupClaudeServer
+	origRepoID := setupClaudeRepoID
+	origDryRun := setupClaudeDryRun
+	origNoMCP := setupClaudeNoMCP
+	origCI := setupClaudeCI
+	origForce := setupClaudeForce
+	origCommit := setupClaudeCommitConfig
+	origNoSkills := setupClaudeNoSkills
+
+	setupClaudeServer = srv.URL
+	setupClaudeRepoID = "mcp-idm-repo"
+	setupClaudeDryRun = false
+	setupClaudeNoMCP = false
+	setupClaudeCI = false
+	setupClaudeForce = false
+	setupClaudeCommitConfig = true
+	setupClaudeNoSkills = true
+
+	defer func() {
+		setupClaudeServer = origServer
+		setupClaudeRepoID = origRepoID
+		setupClaudeDryRun = origDryRun
+		setupClaudeNoMCP = origNoMCP
+		setupClaudeCI = origCI
+		setupClaudeForce = origForce
+		setupClaudeCommitConfig = origCommit
+		setupClaudeNoSkills = origNoSkills
+	}()
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(origWD) }()
+
+	setupClaudeCmd.SetContext(context.Background())
+	if err := runSetupClaude(setupClaudeCmd, nil); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+
+	mcpPath := filepath.Join(tmpDir, ".mcp.json")
+	before, err := os.ReadFile(mcpPath)
+	if err != nil {
+		t.Fatalf("reading .mcp.json after first run: %v", err)
+	}
+
+	if err := runSetupClaude(setupClaudeCmd, nil); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+
+	after, err := os.ReadFile(mcpPath)
+	if err != nil {
+		t.Fatalf("reading .mcp.json after second run: %v", err)
+	}
+
+	if string(before) != string(after) {
+		t.Errorf(".mcp.json changed on idempotent second run:\nbefore: %s\nafter:  %s", before, after)
+	}
+}
+
+// TestSetupClaude_MCPMigratesOldShape verifies that an existing v1 broken stdio
+// .mcp.json is rewritten to the HTTP shape when runSetupClaude is called.
+func TestSetupClaude_MCPMigratesOldShape(t *testing.T) {
+	fakeResp := map[string]interface{}{
+		"repo_id":      "mcp-migrate-repo",
+		"status":       "ready",
+		"retrieved_at": time.Now().UTC().Format(time.RFC3339),
+		"clusters":     []map[string]interface{}{},
+	}
+	fakeRepo := map[string]interface{}{
+		"id":   "mcp-migrate-repo",
+		"name": "mcp-migrate",
+		"path": "/tmp/mcp-migrate",
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/healthz":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case strings.HasSuffix(r.URL.Path, "/clusters"):
+			if err := json.NewEncoder(w).Encode(fakeResp); err != nil {
+				t.Errorf("encoding clusters: %v", err)
+			}
+		case strings.HasPrefix(r.URL.Path, "/api/v1/repositories/mcp-migrate-repo"):
+			if err := json.NewEncoder(w).Encode(fakeRepo); err != nil {
+				t.Errorf("encoding repo: %v", err)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+
+	// Write the broken v1 stdio shape first.
+	mcpPath := filepath.Join(tmpDir, ".mcp.json")
+	brokenShape := `{"mcpServers":{"sourcebridge":{"command":"sourcebridge","args":["mcp","--repo-id","mcp-migrate-repo"]}}}`
+	if err := os.WriteFile(mcpPath, []byte(brokenShape), 0o644); err != nil {
+		t.Fatalf("writing broken shape: %v", err)
+	}
+
+	origServer := setupClaudeServer
+	origRepoID := setupClaudeRepoID
+	origDryRun := setupClaudeDryRun
+	origNoMCP := setupClaudeNoMCP
+	origCI := setupClaudeCI
+	origForce := setupClaudeForce
+	origCommit := setupClaudeCommitConfig
+	origNoSkills := setupClaudeNoSkills
+
+	setupClaudeServer = srv.URL
+	setupClaudeRepoID = "mcp-migrate-repo"
+	setupClaudeDryRun = false
+	setupClaudeNoMCP = false
+	setupClaudeCI = false
+	setupClaudeForce = false
+	setupClaudeCommitConfig = true
+	setupClaudeNoSkills = true
+
+	defer func() {
+		setupClaudeServer = origServer
+		setupClaudeRepoID = origRepoID
+		setupClaudeDryRun = origDryRun
+		setupClaudeNoMCP = origNoMCP
+		setupClaudeCI = origCI
+		setupClaudeForce = origForce
+		setupClaudeCommitConfig = origCommit
+		setupClaudeNoSkills = origNoSkills
+	}()
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(origWD) }()
+
+	setupClaudeCmd.SetContext(context.Background())
+	if err := runSetupClaude(setupClaudeCmd, nil); err != nil {
+		t.Fatalf("runSetupClaude: %v", err)
+	}
+
+	data, err := os.ReadFile(mcpPath)
+	if err != nil {
+		t.Fatalf("reading .mcp.json: %v", err)
+	}
+	var doc map[string]interface{}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parsing .mcp.json: %v", err)
+	}
+
+	servers := doc["mcpServers"].(map[string]interface{})
+	entry := servers["sourcebridge"].(map[string]interface{})
+
+	if entry["type"] != "http" {
+		t.Errorf("expected type=http after migration, got %v", entry["type"])
+	}
+	if _, has := entry["command"]; has {
+		t.Error("entry must not contain 'command' field after migration")
+	}
+
+	// Backup should exist.
+	if _, err := os.Stat(mcpPath + ".sb-backup"); err != nil {
+		t.Errorf("expected .sb-backup after migration: %v", err)
+	}
+}
+
 func assertContains(t *testing.T, content, substr, msg string) {
 	t.Helper()
 	if !strings.Contains(content, substr) {

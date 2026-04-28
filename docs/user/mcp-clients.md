@@ -231,10 +231,34 @@ with `status: "stale"`.
 
 Instead of wiring `.mcp.json` by hand, run `sourcebridge setup claude`
 on a machine with the CLI installed and an indexed repository. It
-writes `.mcp.json`, generates a `.claude/CLAUDE.md` with per-subsystem
-sections, and creates a sidecar so the web UI can show "last
-auto-refresh" timestamps. See the
-[CLI reference](cli-reference.md#sourcebridge-setup-claude) for flags.
+writes `.mcp.json` using the HTTP-transport schema Claude Code understands,
+generates a `.claude/CLAUDE.md` with per-subsystem sections, and creates a
+sidecar so the web UI can show "last auto-refresh" timestamps.
+
+**Local server (no auth required):**
+
+```bash
+sourcebridge setup claude --repo-id <id>
+```
+
+**Cloud or authenticated server:**
+
+```bash
+sourcebridge setup claude --server https://my.sourcebridge.example --repo-id <id>
+```
+
+Then export your API token so Claude Code can authenticate:
+
+```bash
+export SOURCEBRIDGE_API_TOKEN=ca_...    # add to ~/.zshrc or ~/.bashrc
+```
+
+Restart Claude Code after exporting the variable. The `.mcp.json` written
+by `setup claude` uses `${SOURCEBRIDGE_API_TOKEN}` as a placeholder — Claude
+Code expands it at startup. The file contains no literal secret and is safe
+to commit to version control.
+
+See the [CLI reference](cli-reference.md#sourcebridge-setup-claude) for flags.
 
 ---
 

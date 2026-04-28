@@ -252,20 +252,20 @@ func runSetupClaude(cmd *cobra.Command, args []string) error {
 	if !setupClaudeNoMCP {
 		mcpPath := filepath.Join(baseDir, ".mcp.json")
 		if setupClaudeDryRun {
-			mcpTag := dryRunMCPTag(mcpPath, repoID)
+			mcpTag := dryRunMCPTag(mcpPath, serverURL)
 			diffActions = append(diffActions, skillcard.DiffAction{
 				Tag:  mcpTag,
 				Path: ".mcp.json",
 			})
 		} else {
-			_, warn, mcpErr := skillcard.MergeMCPJSON(mcpPath, repoID, setupClaudeForce)
+			_, warn, mcpErr := skillcard.MergeMCPJSON(mcpPath, serverURL, repoID, setupClaudeForce)
 			if mcpErr != nil {
 				return mcpErr
 			}
 			if warn != "" {
 				fmt.Fprintln(os.Stderr, "Warning:", warn)
 			}
-			mcpTag := dryRunMCPTag(mcpPath, repoID)
+			mcpTag := dryRunMCPTag(mcpPath, serverURL)
 			diffActions = append(diffActions, skillcard.DiffAction{
 				Tag:  mcpTag,
 				Path: ".mcp.json",
@@ -501,7 +501,12 @@ func resolveRepoName(ctx context.Context, serverURL, repoID string) string {
 
 // dryRunMCPTag determines the appropriate DiffAction tag for .mcp.json by
 // inspecting the existing file without writing anything.
-func dryRunMCPTag(mcpPath, repoID string) string {
+//
+// Detection matches the HTTP-transport shape that MergeMCPJSON now writes:
+//   - entry["type"] == "http" AND entry["url"] == expectedURL → UNCHANGED
+//   - file absent → CREATE
+//   - any other state (missing, broken JSON, old stdio shape, wrong URL) → MODIFY
+func dryRunMCPTag(mcpPath, serverURL string) string {
 	data, err := os.ReadFile(mcpPath)
 	if err != nil {
 		// File absent.
@@ -519,7 +524,9 @@ func dryRunMCPTag(mcpPath, repoID string) string {
 	if entry == nil {
 		return "MODIFY"
 	}
-	if entry["command"] == "sourcebridge" {
+	// Detect the HTTP-transport shape written by the current MergeMCPJSON.
+	expectedURL := skillcard.MCPExpectedURL(serverURL)
+	if entry["type"] == "http" && entry["url"] == expectedURL {
 		return "UNCHANGED"
 	}
 	return "MODIFY"
