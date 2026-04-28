@@ -214,9 +214,27 @@ If your client only supports stdio, wrap it with `mcp-remote`:
 | `get_requirements` | List tracked requirements, optionally with symbol links | No |
 | `get_impact_report` | Latest change impact report for a repo | No |
 | `get_cliff_notes` | AI-generated summaries at repo / module / file / symbol scope | Yes (generation), No (read) |
+| `get_subsystems` | List the repo's clusters with representative symbols and cross-cluster call counts | No |
+| `get_subsystem_by_id` | Full member list for a known cluster ID | No |
+| `get_subsystem` | The cluster a given symbol belongs to plus 5 peer symbols | No |
 
-`search_symbols`, `get_requirements`, and `get_impact_report` work even if the
-worker is down. `explain_code` returns an error if the worker is unreachable.
+`search_symbols`, `get_requirements`, `get_impact_report`, and the three
+`get_subsystem*` tools work even if the worker is down. `explain_code`
+returns an error if the worker is unreachable.
+
+The subsystem tools are gated by a `subsystem_clustering` capability on
+the server. Clustering runs as an async job after each index; while a
+cluster job is in flight, `get_subsystems` returns the previous result
+with `status: "stale"`.
+
+### Quickstart for Claude Code
+
+Instead of wiring `.mcp.json` by hand, run `sourcebridge setup claude`
+on a machine with the CLI installed and an indexed repository. It
+writes `.mcp.json`, generates a `.claude/CLAUDE.md` with per-subsystem
+sections, and creates a sidecar so the web UI can show "last
+auto-refresh" timestamps. See the
+[CLI reference](cli-reference.md#sourcebridge-setup-claude) for flags.
 
 ---
 

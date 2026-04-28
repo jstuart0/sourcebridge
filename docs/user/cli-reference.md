@@ -70,6 +70,33 @@ sourcebridge review /path/to/repo --template security
 
 **Templates:** `security`, `solid`, `performance`, `reliability`, `maintainability`
 
+### `sourcebridge setup claude`
+
+Wire an indexed repository into Claude Code. Writes `.claude/CLAUDE.md`
+with per-subsystem sections, registers SourceBridge's MCP server in
+`.mcp.json`, creates a `.claude/sourcebridge.json` sidecar, and patches
+`.gitignore`. Idempotent — safe to re-run.
+
+```bash
+sourcebridge setup claude --repo-id <id> [flags]
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--repo-id` | Repository ID (auto-detected from cwd if omitted) | — |
+| `--server` | SourceBridge server URL | `config.toml` or `SOURCEBRIDGE_URL` |
+| `--no-skills` | Skip CLAUDE.md generation | `false` |
+| `--no-mcp` | Skip `.mcp.json` registration | `false` |
+| `--enable-hooks` | Reserved (no-op in v1) | `false` |
+| `--dry-run` | Print the file diff without writing | `false` |
+| `--ci` | Exit non-zero if any section is user-modified | auto from `CI=true` |
+| `--force` | Overwrite user-modified sections | `false` |
+| `--commit-config` | Don't gitignore `.claude/sourcebridge.json` | `false` |
+
+After a successful `sourcebridge index`, the post-index hint prints the
+exact `setup claude` command with the resolved repo ID. See the
+[Getting Started](getting-started.md) guide for the full first-run flow.
+
 ### `sourcebridge ask <question>`
 
 Ask a question about the indexed codebase.

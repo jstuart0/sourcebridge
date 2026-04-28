@@ -44,7 +44,32 @@ sourcebridge index /path/to/your/repo
 
 SourceBridge.ai parses source files using tree-sitter and builds a graph of modules, files, and symbols.
 
-### 3. Import Requirements
+After indexing succeeds, the CLI prints a one-liner suggesting the next
+step:
+
+```
+Indexed 1,247 symbols. Use with Claude Code:
+  sourcebridge setup claude --repo-id abc123
+```
+
+### 3. Connect Claude Code (optional)
+
+If you use Claude Code, run the suggested command from your repository's
+working directory:
+
+```bash
+cd /path/to/your/repo
+sourcebridge setup claude --repo-id abc123
+```
+
+This writes `.claude/CLAUDE.md` with a per-subsystem reference card,
+registers SourceBridge's MCP server in `.mcp.json`, and patches
+`.gitignore`. Claude Code will now have instant context about your
+codebase's subsystem boundaries before you start a refactor. See
+[Using SourceBridge from an AI client (MCP)](mcp-clients.md) for other
+clients (Codex, Cursor, Claude Desktop).
+
+### 4. Import Requirements
 
 Create a requirements file in markdown format:
 
@@ -68,7 +93,7 @@ Import it:
 sourcebridge import /path/to/requirements.md
 ```
 
-### 4. Trace Requirements to Code
+### 5. Trace Requirements to Code
 
 ```bash
 sourcebridge trace REQ-001
@@ -76,7 +101,7 @@ sourcebridge trace REQ-001
 
 This shows which code symbols are linked to the requirement, with confidence scores.
 
-### 5. Run a Code Review
+### 6. Run a Code Review
 
 ```bash
 sourcebridge review /path/to/repo --template security
@@ -84,7 +109,7 @@ sourcebridge review /path/to/repo --template security
 
 Available templates: `security`, `solid`, `performance`, `reliability`, `maintainability`.
 
-### 6. Ask Questions About Code
+### 7. Ask Questions About Code
 
 ```bash
 sourcebridge ask "What does the processPayment function do?"
