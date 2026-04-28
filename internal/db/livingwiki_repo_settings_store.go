@@ -5,7 +5,6 @@ package db
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -40,8 +39,13 @@ type surrealLivingWikiRepoSettings struct {
 	RepoID           string           `json:"repo_id"`
 	Enabled          bool             `json:"enabled"`
 	Mode             string           `json:"mode"`
-	Sinks            string           `json:"sinks"`          // JSON-encoded []surrealRepoWikiSink
-	ExcludePaths     string           `json:"exclude_paths"`  // JSON-encoded []string
+	// SurrealDB stores these as native arrays (TYPE array). The struct
+	// reflects the on-the-wire shape: a slice of typed records and a slice
+	// of strings respectively. An earlier version stored them as JSON-encoded
+	// strings, which SurrealDB rejected with a schema error
+	// ("Found '[]' for field `exclude_paths` ... but expected a array").
+	Sinks            []surrealRepoWikiSink `json:"sinks"`
+	ExcludePaths     []string              `json:"exclude_paths"`
 	StaleWhenStrategy string          `json:"stale_when_strategy"`
 	MaxPagesPerJob   int              `json:"max_pages_per_job"`
 	LastRunAt        *surrealTime     `json:"last_run_at,omitempty"`
@@ -80,32 +84,21 @@ func (r *surrealLivingWikiRepoSettings) toSettings() (*livingwiki.RepositoryLivi
 		s.DisabledAt = &t
 	}
 
-	// Decode sinks from JSON string.
-	if r.Sinks != "" && r.Sinks != "[]" {
-		var raw []surrealRepoWikiSink
-		if err := json.Unmarshal([]byte(r.Sinks), &raw); err != nil {
-			return nil, fmt.Errorf("decode sinks: %w", err)
-		}
-		s.Sinks = make([]livingwiki.RepoWikiSink, 0, len(raw))
-		for _, sr := range raw {
-			s.Sinks = append(s.Sinks, livingwiki.RepoWikiSink{
-				Kind:            livingwiki.RepoWikiSinkKind(sr.Kind),
-				IntegrationName: sr.IntegrationName,
-				Audience:        livingwiki.RepoWikiAudience(sr.Audience),
-				EditPolicy:      livingwiki.RepoWikiEditPolicy(sr.EditPolicy),
-			})
-		}
-	}
-	if s.Sinks == nil {
-		s.Sinks = []livingwiki.RepoWikiSink{}
+	// Sinks are decoded directly as native arrays (the on-disk shape).
+	s.Sinks = make([]livingwiki.RepoWikiSink, 0, len(r.Sinks))
+	for _, sr := range r.Sinks {
+		s.Sinks = append(s.Sinks, livingwiki.RepoWikiSink{
+			Kind:            livingwiki.RepoWikiSinkKind(sr.Kind),
+			IntegrationName: sr.IntegrationName,
+			Audience:        livingwiki.RepoWikiAudience(sr.Audience),
+			EditPolicy:      livingwiki.RepoWikiEditPolicy(sr.EditPolicy),
+		})
 	}
 
-	// Decode exclude_paths from JSON string.
-	if r.ExcludePaths != "" && r.ExcludePaths != "[]" {
-		_ = json.Unmarshal([]byte(r.ExcludePaths), &s.ExcludePaths)
-	}
-	if s.ExcludePaths == nil {
+	if r.ExcludePaths == nil {
 		s.ExcludePaths = []string{}
+	} else {
+		s.ExcludePaths = r.ExcludePaths
 	}
 
 	return s, nil
@@ -149,7 +142,10 @@ func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, setting
 		settings.Mode = livingwiki.RepoWikiModePRReview
 	}
 
-	// Encode sinks to JSON string.
+	// Materialize sinks + exclude paths as native Go slices. The SurrealDB
+	// SDK marshals them as native arrays at the wire level so they satisfy
+	// the schema's TYPE array constraint. ExcludePaths is normalized to a
+	// non-nil empty slice so SurrealDB never sees null for a NOT-NULL field.
 	rawSinks := make([]surrealRepoWikiSink, 0, len(settings.Sinks))
 	for _, sink := range settings.Sinks {
 		rawSinks = append(rawSinks, surrealRepoWikiSink{
@@ -159,14 +155,9 @@ func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, setting
 			EditPolicy:      string(sink.EditPolicy),
 		})
 	}
-	sinksJSON, err := json.Marshal(rawSinks)
-	if err != nil {
-		return fmt.Errorf("encode sinks: %w", err)
-	}
-
-	excludePathsJSON, err := json.Marshal(settings.ExcludePaths)
-	if err != nil {
-		return fmt.Errorf("encode exclude_paths: %w", err)
+	excludePaths := settings.ExcludePaths
+	if excludePaths == nil {
+		excludePaths = []string{}
 	}
 
 	vars := map[string]any{
@@ -174,8 +165,8 @@ func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, setting
 		"repo_id":             settings.RepoID,
 		"enabled":             settings.Enabled,
 		"mode":                string(settings.Mode),
-		"sinks":               string(sinksJSON),
-		"exclude_paths":       string(excludePathsJSON),
+		"sinks":               rawSinks,
+		"exclude_paths":       excludePaths,
 		"stale_when_strategy": string(settings.StaleWhenStrategy),
 		"max_pages_per_job":   settings.MaxPagesPerJob,
 		"updated_by":          settings.UpdatedBy,
@@ -217,7 +208,7 @@ func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, setting
 			updated_by          = $updated_by,
 			updated_at          = time::now()
 	`
-	_, err = surrealdb.Query[interface{}](c, db, sql, vars)
+	_, err := surrealdb.Query[interface{}](c, db, sql, vars)
 	return err
 }
 
