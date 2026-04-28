@@ -51,6 +51,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
@@ -134,6 +135,13 @@ type HTTPConfluenceClient struct {
 	cfg            ConfluenceHTTPConfig
 	http           *http.Client
 	retryBaseDelay time.Duration // base delay for back-off; 0 means 1s
+
+	// spaceID caches the resolved numeric space ID for cfg.SpaceKey.
+	// Confluence v2 endpoints require spaceId (numeric) rather than the
+	// human-readable space key, so the first call resolves it via
+	// GET /spaces?keys=<key> and subsequent calls reuse the value.
+	spaceIDMu sync.Mutex
+	spaceID   string
 }
 
 func (c *HTTPConfluenceClient) retryDelay(attempt int) time.Duration {
@@ -233,15 +241,53 @@ func (c *HTTPConfluenceClient) GetBlockByExternalID(ctx context.Context, snap cr
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
+// resolveSpaceID looks up the numeric Confluence space ID for cfg.SpaceKey.
+// The result is cached on the client; subsequent calls within the same client
+// lifetime are cost-free. Confluence v2 endpoints require spaceId (numeric);
+// only the v1 endpoints accepted space-key.
+func (c *HTTPConfluenceClient) resolveSpaceID(ctx context.Context, auth string) (string, error) {
+	c.spaceIDMu.Lock()
+	defer c.spaceIDMu.Unlock()
+	if c.spaceID != "" {
+		return c.spaceID, nil
+	}
+	if c.cfg.SpaceKey == "" {
+		return "", fmt.Errorf("confluence_http: SpaceKey is empty; cannot resolve space ID")
+	}
+	params := url.Values{}
+	params.Set("keys", c.cfg.SpaceKey)
+	path := "/spaces?" + params.Encode()
+	var resp struct {
+		Results []struct {
+			ID  string `json:"id"`
+			Key string `json:"key"`
+		} `json:"results"`
+	}
+	if err := c.do(ctx, auth, http.MethodGet, path, nil, &resp); err != nil {
+		return "", fmt.Errorf("confluence_http: resolve space ID for key %q: %w", c.cfg.SpaceKey, err)
+	}
+	for _, r := range resp.Results {
+		if r.Key == c.cfg.SpaceKey && r.ID != "" {
+			c.spaceID = r.ID
+			return c.spaceID, nil
+		}
+	}
+	return "", fmt.Errorf("confluence_http: no Confluence space found with key %q (verify the key exists and the API token has access)", c.cfg.SpaceKey)
+}
+
 // findPageIDByExternalID searches for a Confluence page whose
 // sourcebridge_page_id property matches externalID. Returns "" when not found.
 func (c *HTTPConfluenceClient) findPageIDByExternalID(ctx context.Context, auth, externalID string) (string, error) {
 	// Search by title (we use the externalID as the page title when creating).
 	// A title search is O(1) on Confluence's side; property verification is O(1)
 	// additional call.
+	spaceID, err := c.resolveSpaceID(ctx, auth)
+	if err != nil {
+		return "", err
+	}
 	params := url.Values{}
 	params.Set("title", externalID)
-	params.Set("space-key", c.cfg.SpaceKey)
+	params.Set("space-id", spaceID)
 
 	path := "/pages?" + params.Encode()
 	var searchResp struct {
@@ -268,40 +314,36 @@ func (c *HTTPConfluenceClient) findPageIDByExternalID(ctx context.Context, auth,
 }
 
 // createPage creates a new Confluence page with the given XHTML body and
-// writes the sourcebridge_page_id property.
+// writes the sourcebridge_page_id property. Uses the v2 schema:
+// `spaceId` (not `space.key`), `status: "current"`, flat body with
+// `representation`+`value`.
 func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID string, xhtml []byte, metadata ConfluenceProperties) error {
-	type spaceRef struct {
-		Key string `json:"key"`
+	spaceID, err := c.resolveSpaceID(ctx, auth)
+	if err != nil {
+		return err
 	}
-	type parentRef struct {
-		ID string `json:"id"`
-	}
+
 	type bodyValue struct {
-		Value          string `json:"value"`
 		Representation string `json:"representation"`
-	}
-	type body struct {
-		Storage bodyValue `json:"storage"`
+		Value          string `json:"value"`
 	}
 	type createPayload struct {
-		Title  string    `json:"title"`
-		Space  spaceRef  `json:"space"`
-		Body   body      `json:"body"`
-		Parent *parentRef `json:"parent,omitempty"`
+		SpaceID  string    `json:"spaceId"`
+		Status   string    `json:"status"`
+		Title    string    `json:"title"`
+		ParentID string    `json:"parentId,omitempty"`
+		Body     bodyValue `json:"body"`
 	}
 
 	payload := createPayload{
-		Title: externalID,
-		Space: spaceRef{Key: c.cfg.SpaceKey},
-		Body: body{
-			Storage: bodyValue{
-				Value:          string(xhtml),
-				Representation: "storage",
-			},
+		SpaceID:  spaceID,
+		Status:   "current",
+		Title:    externalID,
+		ParentID: c.cfg.ParentPageID,
+		Body: bodyValue{
+			Representation: "storage",
+			Value:          string(xhtml),
 		},
-	}
-	if c.cfg.ParentPageID != "" {
-		payload.Parent = &parentRef{ID: c.cfg.ParentPageID}
 	}
 
 	var resp struct {
@@ -326,7 +368,9 @@ func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID 
 	return nil
 }
 
-// updatePage replaces the page body and bumps the version.
+// updatePage replaces the page body and bumps the version. Uses the v2 schema:
+// `id`, `status: "current"`, flat body with `representation`+`value`, and a
+// version object.
 func (c *HTTPConfluenceClient) updatePage(ctx context.Context, auth, pageID, externalID string, xhtml []byte, metadata ConfluenceProperties) error {
 	// Fetch current version number.
 	path := fmt.Sprintf("/pages/%s", url.PathEscape(pageID))
@@ -343,27 +387,26 @@ func (c *HTTPConfluenceClient) updatePage(ctx context.Context, auth, pageID, ext
 		Number int `json:"number"`
 	}
 	type bodyValue struct {
-		Value          string `json:"value"`
 		Representation string `json:"representation"`
-	}
-	type body struct {
-		Storage bodyValue `json:"storage"`
+		Value          string `json:"value"`
 	}
 	type updatePayload struct {
-		Version versionInfo `json:"version"`
+		ID      string      `json:"id"`
+		Status  string      `json:"status"`
 		Title   string      `json:"title"`
-		Body    body        `json:"body"`
+		Body    bodyValue   `json:"body"`
+		Version versionInfo `json:"version"`
 	}
 
 	payload := updatePayload{
-		Version: versionInfo{Number: current.Version.Number + 1},
-		Title:   externalID,
-		Body: body{
-			Storage: bodyValue{
-				Value:          string(xhtml),
-				Representation: "storage",
-			},
+		ID:     pageID,
+		Status: "current",
+		Title:  externalID,
+		Body: bodyValue{
+			Representation: "storage",
+			Value:          string(xhtml),
 		},
+		Version: versionInfo{Number: current.Version.Number + 1},
 	}
 
 	if err := c.do(ctx, auth, http.MethodPut, path, payload, nil); err != nil {

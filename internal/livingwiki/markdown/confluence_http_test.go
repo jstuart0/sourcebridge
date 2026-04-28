@@ -24,14 +24,17 @@ var testSnap = credentials.Snapshot{
 }
 
 // confluenceTestServer builds a minimal Confluence Cloud mock that understands:
+//   - GET /wiki/api/v2/spaces?keys=… → space-key → space-id resolution
 //   - GET /wiki/api/v2/pages?title=… → search results
 //   - GET /wiki/api/v2/pages/{id}/properties/{key} → property read
 //   - PUT /wiki/api/v2/pages/{id}/properties/{key} → property write
 //   - GET /wiki/api/v2/pages/{id}?body-format=storage → page body
-//   - POST /wiki/api/v2/pages → create
-//   - PUT /wiki/api/v2/pages/{id} → update
+//   - POST /wiki/api/v2/pages → create (v2 schema: spaceId + status + flat body)
+//   - PUT /wiki/api/v2/pages/{id} → update (v2 schema: id + status + flat body)
 //
-// It stores pages in a simple map keyed by external ID.
+// It stores pages in a simple map keyed by external ID. The handlers reject
+// requests that omit the v2-required spaceId / status fields so a regression to
+// the v1 schema fails the test loudly.
 type confluenceTestServer struct {
 	t        *testing.T
 	pages    map[string]string // externalID → confluence page ID
@@ -55,9 +58,29 @@ func (cts *confluenceTestServer) handle(w http.ResponseWriter, r *http.Request) 
 	path := r.URL.Path
 
 	switch {
+	// Resolve space key → space id.
+	case r.Method == http.MethodGet && strings.HasSuffix(path, "/spaces"):
+		key := r.URL.Query().Get("keys")
+		type result struct {
+			ID  string `json:"id"`
+			Key string `json:"key"`
+		}
+		results := []result{}
+		if key != "" {
+			results = append(results, result{ID: "space-id-" + key, Key: key})
+		}
+		writeConfluenceJSON(w, http.StatusOK, map[string]interface{}{"results": results})
+
 	// Search pages by title.
 	case r.Method == http.MethodGet && strings.Contains(path, "/pages") && r.URL.Query().Get("title") != "":
 		title := r.URL.Query().Get("title")
+		// v2 search must include space-id, not space-key. Fail loudly on
+		// regressions so the schema mismatch is caught at test time.
+		if r.URL.Query().Get("space-id") == "" {
+			cts.t.Errorf("search pages: missing space-id query param (got %s)", r.URL.RawQuery)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		type result struct {
 			ID    string `json:"id"`
 			Title string `json:"title"`
@@ -132,13 +155,22 @@ func (cts *confluenceTestServer) handle(w http.ResponseWriter, r *http.Request) 
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		// v2 schema: require spaceId + status to catch v1-schema regressions.
+		if s, _ := payload["spaceId"].(string); s == "" {
+			cts.t.Errorf("createPage: missing spaceId in payload: %#v", payload)
+			writeConfluenceJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"errors": []map[string]string{{"title": "spaceId: must not be null"}},
+			})
+			return
+		}
+		if s, _ := payload["status"].(string); s != "current" {
+			cts.t.Errorf("createPage: status should be \"current\", got %v", payload["status"])
+		}
 		title := payload["title"].(string)
 		pageID := "pid-" + title
 		body := ""
 		if b, ok := payload["body"].(map[string]interface{}); ok {
-			if s, ok := b["storage"].(map[string]interface{}); ok {
-				body, _ = s["value"].(string)
-			}
+			body, _ = b["value"].(string)
 		}
 		cts.pages[title] = pageID
 		cts.bodies[pageID] = body
@@ -150,10 +182,15 @@ func (cts *confluenceTestServer) handle(w http.ResponseWriter, r *http.Request) 
 		pageID := extractConfluencePageID(path)
 		var payload map[string]interface{}
 		_ = json.NewDecoder(r.Body).Decode(&payload)
+		// v2 update schema: require id + status (catches v1 regressions).
+		if id, _ := payload["id"].(string); id == "" {
+			cts.t.Errorf("updatePage: missing id in payload: %#v", payload)
+		}
+		if s, _ := payload["status"].(string); s != "current" {
+			cts.t.Errorf("updatePage: status should be \"current\", got %v", payload["status"])
+		}
 		if b, ok := payload["body"].(map[string]interface{}); ok {
-			if s, ok := b["storage"].(map[string]interface{}); ok {
-				cts.bodies[pageID], _ = s["value"].(string)
-			}
+			cts.bodies[pageID], _ = b["value"].(string)
 		}
 		cts.versions[pageID]++
 		w.WriteHeader(http.StatusOK)
@@ -358,6 +395,7 @@ func TestHTTPConfluenceClient_429_Retry(t *testing.T) {
 	defer srv.Close()
 
 	client := newConfluenceClientWithTransport(srv.URL)
+	client.spaceID = "preset" // skip space-id resolution; test focuses on retry behaviour
 	_, _, err := client.GetPage(context.Background(), testSnap, "any-page")
 	if err != nil {
 		t.Fatalf("GetPage: %v", err)
@@ -382,6 +420,7 @@ func TestHTTPConfluenceClient_500_Retry(t *testing.T) {
 	defer srv.Close()
 
 	client := newConfluenceClientWithTransport(srv.URL)
+	client.spaceID = "preset" // skip space-id resolution; test focuses on retry behaviour
 	_, _, err := client.GetPage(context.Background(), testSnap, "any-page")
 	if err != nil {
 		t.Fatalf("GetPage: %v", err)
