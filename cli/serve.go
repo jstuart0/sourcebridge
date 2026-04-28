@@ -23,6 +23,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/db"
 	"github.com/sourcebridge/sourcebridge/internal/graph"
+	"github.com/sourcebridge/sourcebridge/internal/health"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/assembly"
@@ -362,9 +363,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 		)
 	}
 
+	// Build the shared health checker. In external mode, pass the SurrealDB
+	// instance as the pinger so /readyz and serviceHealth do a real round-trip.
+	// In embedded/in-memory mode, pass nil so the checker treats DB as healthy
+	// without attempting a WebSocket connection.
+	var healthChecker *health.Checker
+	if cfg.Storage.SurrealMode == "external" {
+		healthChecker = health.New(surrealDB, workerClient)
+	} else {
+		healthChecker = health.New(nil, workerClient)
+	}
+
 	// Create HTTP server
 	server := rest.NewServer(cfg, localAuth, jwtMgr, store, workerClient,
 		rest.WithEnterpriseDB(surrealDB.DB()),
+		rest.WithHealthChecker(healthChecker),
 		rest.WithKnowledgeStore(knowledgeStore),
 		rest.WithJobStore(jobStore),
 		rest.WithGitConfigStore(gitConfigStore),

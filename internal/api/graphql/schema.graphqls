@@ -7,6 +7,7 @@ scalar Time
 type Query {
   # Phase 1: Health and meta
   health: HealthStatus!
+  serviceHealth: PlatformHealth!
   version: VersionInfo!
 
   # Phase 1: Feature flags
@@ -254,6 +255,21 @@ type HealthStatus {
 type ServiceHealth {
   name: String!
   status: String!
+}
+
+# PlatformHealth is the rich service-degradation type polled by the UI banner.
+# It succeeds even when SurrealDB is down — it MUST NOT query the database.
+type PlatformHealth {
+  # overall is false when any required subsystem is unreachable.
+  overall: Boolean!
+  # surreal indicates whether SurrealDB is reachable.
+  surreal: Boolean!
+  # worker indicates whether the AI gRPC worker is reachable.
+  worker: Boolean!
+  # message is a short human-readable status line for display in the banner.
+  message: String!
+  # checkedAt is the timestamp of the most recent probe (may be cached).
+  checkedAt: Time!
 }
 
 type VersionInfo {

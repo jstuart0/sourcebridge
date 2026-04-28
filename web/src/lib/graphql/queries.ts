@@ -43,6 +43,18 @@ export const HEALTH_QUERY = gql`
   }
 `;
 
+export const SERVICE_HEALTH_QUERY = gql`
+  query ServiceHealth {
+    serviceHealth {
+      overall
+      surreal
+      worker
+      message
+      checkedAt
+    }
+  }
+`;
+
 export const REPOSITORIES_QUERY = gql`
   query Repositories {
     repositories {

@@ -4,7 +4,6 @@
 package rest
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -47,43 +46,49 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		Components: make(map[string]componentStatus),
 	}
 
-	// API is always healthy if we're serving this request
+	// API is always healthy if we're serving this request.
 	resp.Components["api"] = componentStatus{Status: "healthy"}
 
-	// Database: mandatory
-	dbStatus := componentStatus{Status: "healthy"}
-	if s.cfg.Storage.SurrealMode == "external" {
-		// For external mode, the store was already initialized at startup.
-		// A deeper check would ping SurrealDB, but the store being non-nil
-		// confirms the connection was established.
-		if s.store == nil {
-			dbStatus = componentStatus{Status: "unavailable", Detail: "store not initialized"}
+	// Database: use the shared HealthChecker when available (external mode),
+	// otherwise assume healthy (embedded/in-memory needs no live ping).
+	dbStatus := componentStatus{Status: "healthy", Detail: "embedded/in-memory"}
+	if s.healthChecker != nil {
+		hs := s.healthChecker.Get(r.Context())
+		if hs.Surreal {
+			dbStatus = componentStatus{Status: "healthy"}
+		} else {
+			dbStatus = componentStatus{Status: "unavailable", Detail: "SurrealDB unreachable"}
 			resp.Status = "unavailable"
 		}
+		// Worker status from the same cached probe.
+		workerStatus := componentStatus{Status: "healthy"}
+		if !hs.Worker {
+			workerStatus = componentStatus{Status: "unavailable", Detail: "AI worker unreachable"}
+		}
+		resp.Components["worker"] = workerStatus
 	} else {
-		dbStatus = componentStatus{Status: "healthy", Detail: "embedded/in-memory"}
+		// Worker: direct check when no shared checker (should not occur in
+		// production, but keeps the handler functional in tests without a DB).
+		workerStatus := componentStatus{Status: "unavailable", Detail: "not configured"}
+		if s.worker != nil {
+			healthy, err := s.worker.CheckHealth(r.Context())
+			if err != nil {
+				workerStatus = componentStatus{Status: "unavailable", Detail: err.Error()}
+			} else if healthy {
+				workerStatus = componentStatus{Status: "healthy"}
+			} else {
+				workerStatus = componentStatus{Status: "degraded", Detail: "not serving"}
+			}
+		}
+		resp.Components["worker"] = workerStatus
 	}
 	resp.Components["database"] = dbStatus
 
-	// Worker: optional for core readiness
-	workerStatus := componentStatus{Status: "unavailable", Detail: "not configured"}
-	if s.worker != nil {
-		healthy, err := s.worker.CheckHealth(context.Background())
-		if err != nil {
-			workerStatus = componentStatus{Status: "unavailable", Detail: err.Error()}
-		} else if healthy {
-			workerStatus = componentStatus{Status: "healthy"}
-		} else {
-			workerStatus = componentStatus{Status: "degraded", Detail: "not serving"}
-		}
-	}
-	resp.Components["worker"] = workerStatus
-
-	// Determine overall status: worker degradation doesn't make core unavailable
+	// Determine HTTP status: DB unavailable → 503; worker degraded → 200 with degraded body.
 	httpStatus := http.StatusOK
 	if resp.Status == "unavailable" {
 		httpStatus = http.StatusServiceUnavailable
-	} else if workerStatus.Status != "healthy" {
+	} else if resp.Components["worker"].Status != "healthy" {
 		resp.Status = "degraded"
 	}
 

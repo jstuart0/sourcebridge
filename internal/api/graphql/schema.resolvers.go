@@ -2753,6 +2753,33 @@ func (r *queryResolver) Health(ctx context.Context) (*HealthStatus, error) {
 	}, nil
 }
 
+// ServiceHealth is the resolver for the serviceHealth field.
+// It MUST NOT touch the database — it is the mechanism by which we detect DB
+// outages, so introducing a DB dependency here would break that detection.
+func (r *queryResolver) ServiceHealth(ctx context.Context) (*PlatformHealth, error) {
+	if r.HealthChecker == nil {
+		// No checker wired (embedded mode or tests) — report everything healthy
+		// so the banner stays hidden in environments where live checks aren't
+		// meaningful.
+		return &PlatformHealth{
+			Overall:   true,
+			Surreal:   true,
+			Worker:    true,
+			Message:   "All systems normal",
+			CheckedAt: time.Now(),
+		}, nil
+	}
+
+	s := r.HealthChecker.Get(ctx)
+	return &PlatformHealth{
+		Overall:   s.Overall,
+		Surreal:   s.Surreal,
+		Worker:    s.Worker,
+		Message:   s.Message,
+		CheckedAt: s.CheckedAt,
+	}, nil
+}
+
 // Version is the resolver for the version field.
 func (r *queryResolver) Version(ctx context.Context) (*VersionInfo, error) {
 	return &VersionInfo{

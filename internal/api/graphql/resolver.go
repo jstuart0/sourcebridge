@@ -13,6 +13,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/events"
 	"github.com/sourcebridge/sourcebridge/internal/featureflags"
 	"github.com/sourcebridge/sourcebridge/internal/graph"
+	"github.com/sourcebridge/sourcebridge/internal/health"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/credentials"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/governance"
@@ -45,6 +46,7 @@ type Resolver struct {
 	Flags              featureflags.Flags         // backend startup-time feature flags
 	GitConfig          GitConfigLoader            // reads git credentials from DB (multi-replica safe)
 	ComprehensionStore comprehension.Store        // comprehension settings + model capabilities; nil when unavailable
+	HealthChecker      *health.Checker            // shared DB+worker health probe; nil = no live checks (embedded/test mode)
 	LivingWikiStore              livingwiki.Store              // living-wiki UI settings; nil when unavailable
 	LivingWikiResolver           *livingwiki.Resolver          // resolved living-wiki settings (UI + env fallback)
 	LivingWikiRepoStore          livingwiki.RepoSettingsStore  // per-repo living-wiki opt-in; nil when unavailable

@@ -181,6 +181,13 @@ func WithLivingWikiLiveOrchestrator(o *lworch.Orchestrator) ServerOption {
 	return func(s *Server) { s.livingWikiLiveOrchestrator = o }
 }
 
+// WithHealthChecker injects a shared HealthChecker used by both /readyz and
+// the serviceHealth GraphQL query. Pass nil to skip the checker (embedded
+// mode, tests), in which case both handlers fall back to lightweight checks.
+func WithHealthChecker(hc *HealthChecker) ServerOption {
+	return func(s *Server) { s.healthChecker = hc }
+}
+
 // Server is the HTTP API server.
 type Server struct {
 	cfg                *config.Config
@@ -222,6 +229,7 @@ type Server struct {
 	livingWikiJobResultStore     livingwiki.JobResultStore     // nil = job result history unavailable
 	livingWikiLiveOrchestrator   *lworch.Orchestrator          // living-wiki page-generation orchestrator; nil = feature unavailable
 	clusterRunner                *clustering.Runner            // subsystem clustering job dispatcher; nil = feature disabled
+	healthChecker                *HealthChecker                // shared DB+worker probe; nil = embedded/test mode, handlers fall back to local checks
 }
 
 // qaResolverOrchestrator exposes the server's QA orchestrator to the
@@ -547,6 +555,7 @@ func (s *Server) setupRouter() {
 			Flags:              s.flags,
 			GitConfig:          s.gitConfigStore,
 			ComprehensionStore: s.comprehensionStore,
+			HealthChecker:      s.healthChecker,
 			TrashStore:         s.trashStore,
 			SearchSvc:          s.searchSvc,
 			ReqBooster:         s.reqBooster,

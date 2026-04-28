@@ -6,6 +6,7 @@ import { getStoredToken } from "@/lib/auth-token-store";
 import { isTokenExpired, msUntilExpiry, forceLogout } from "@/lib/auth-utils";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TopBar } from "@/components/layout/TopBar";
+import { ServiceHealthBanner } from "@/components/layout/ServiceHealthBanner";
 import { ErrorBoundary } from "@/components/layout/ErrorBoundary";
 import { Notifications } from "@/components/layout/Notifications";
 
@@ -57,6 +58,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         onMobileOpenChange={setMobileNavOpen}
       />
       <main className="min-w-0 overflow-x-hidden overflow-y-auto">
+        <ServiceHealthBanner />
         <TopBar onMobileNavOpen={() => setMobileNavOpen(true)} />
         <ErrorBoundary>{children}</ErrorBoundary>
       </main>

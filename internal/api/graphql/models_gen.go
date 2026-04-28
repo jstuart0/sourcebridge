@@ -782,6 +782,14 @@ type MutationResult struct {
 	Error   *string `json:"error,omitempty"`
 }
 
+type PlatformHealth struct {
+	Overall   bool      `json:"overall"`
+	Surreal   bool      `json:"surreal"`
+	Worker    bool      `json:"worker"`
+	Message   string    `json:"message"`
+	CheckedAt time.Time `json:"checkedAt"`
+}
+
 type PlatformStats struct {
 	Repositories      int `json:"repositories"`
 	Files             int `json:"files"`

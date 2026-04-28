@@ -135,6 +135,22 @@ func (s *SurrealDB) keepaliveLoop() {
 	}
 }
 
+// Ping executes a trivial round-trip ("RETURN true") against SurrealDB and
+// returns nil when the DB is reachable. It satisfies the rest.DBPinger
+// interface so the /readyz handler and serviceHealth GraphQL resolver can
+// share a single health-check path without importing internal/db directly.
+func (s *SurrealDB) Ping(ctx context.Context) error {
+	db := s.DB()
+	if db == nil {
+		return fmt.Errorf("database not connected")
+	}
+	_, err := surrealdb.Query[interface{}](ctx, db, "RETURN true", nil)
+	if err != nil {
+		return fmt.Errorf("surrealdb ping: %w", err)
+	}
+	return nil
+}
+
 func (s *SurrealDB) ping() {
 	db := s.DB()
 	if db == nil {

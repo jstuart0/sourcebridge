@@ -698,6 +698,14 @@ type ComplexityRoot struct {
 		Success func(childComplexity int) int
 	}
 
+	PlatformHealth struct {
+		CheckedAt func(childComplexity int) int
+		Message   func(childComplexity int) int
+		Overall   func(childComplexity int) int
+		Surreal   func(childComplexity int) int
+		Worker    func(childComplexity int) int
+	}
+
 	PlatformStats struct {
 		Files             func(childComplexity int) int
 		Links             func(childComplexity int) int
@@ -751,6 +759,7 @@ type ComplexityRoot struct {
 		RequirementToCode            func(childComplexity int, requirementID string) int
 		Requirements                 func(childComplexity int, repositoryID string, limit *int, offset *int) int
 		Search                       func(childComplexity int, query string, repositoryID *string, limit *int) int
+		ServiceHealth                func(childComplexity int) int
 		SimulatedImpactReport        func(childComplexity int, id string) int
 		SourceFile                   func(childComplexity int, repositoryID string, filePath string) int
 		SymbolCrossRepoRefs          func(childComplexity int, symbolID string) int
@@ -1122,6 +1131,7 @@ type MutationResolver interface {
 }
 type QueryResolver interface {
 	Health(ctx context.Context) (*HealthStatus, error)
+	ServiceHealth(ctx context.Context) (*PlatformHealth, error)
 	Version(ctx context.Context) (*VersionInfo, error)
 	Features(ctx context.Context) (*Features, error)
 	IdeCapabilities(ctx context.Context) (*IDECapabilities, error)
@@ -4769,6 +4779,41 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.MutationResult.Success(childComplexity), true
 
+	case "PlatformHealth.checkedAt":
+		if e.complexity.PlatformHealth.CheckedAt == nil {
+			break
+		}
+
+		return e.complexity.PlatformHealth.CheckedAt(childComplexity), true
+
+	case "PlatformHealth.message":
+		if e.complexity.PlatformHealth.Message == nil {
+			break
+		}
+
+		return e.complexity.PlatformHealth.Message(childComplexity), true
+
+	case "PlatformHealth.overall":
+		if e.complexity.PlatformHealth.Overall == nil {
+			break
+		}
+
+		return e.complexity.PlatformHealth.Overall(childComplexity), true
+
+	case "PlatformHealth.surreal":
+		if e.complexity.PlatformHealth.Surreal == nil {
+			break
+		}
+
+		return e.complexity.PlatformHealth.Surreal(childComplexity), true
+
+	case "PlatformHealth.worker":
+		if e.complexity.PlatformHealth.Worker == nil {
+			break
+		}
+
+		return e.complexity.PlatformHealth.Worker(childComplexity), true
+
 	case "PlatformStats.files":
 		if e.complexity.PlatformStats.Files == nil {
 			break
@@ -5235,6 +5280,13 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.Search(childComplexity, args["query"].(string), args["repositoryId"].(*string), args["limit"].(*int)), true
+
+	case "Query.serviceHealth":
+		if e.complexity.Query.ServiceHealth == nil {
+			break
+		}
+
+		return e.complexity.Query.ServiceHealth(childComplexity), true
 
 	case "Query.simulatedImpactReport":
 		if e.complexity.Query.SimulatedImpactReport == nil {
@@ -33615,6 +33667,226 @@ func (ec *executionContext) fieldContext_MutationResult_error(_ context.Context,
 	return fc, nil
 }
 
+func (ec *executionContext) _PlatformHealth_overall(ctx context.Context, field graphql.CollectedField, obj *PlatformHealth) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_PlatformHealth_overall(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Overall, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(bool)
+	fc.Result = res
+	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_PlatformHealth_overall(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "PlatformHealth",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _PlatformHealth_surreal(ctx context.Context, field graphql.CollectedField, obj *PlatformHealth) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_PlatformHealth_surreal(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Surreal, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(bool)
+	fc.Result = res
+	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_PlatformHealth_surreal(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "PlatformHealth",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _PlatformHealth_worker(ctx context.Context, field graphql.CollectedField, obj *PlatformHealth) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_PlatformHealth_worker(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Worker, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(bool)
+	fc.Result = res
+	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_PlatformHealth_worker(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "PlatformHealth",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _PlatformHealth_message(ctx context.Context, field graphql.CollectedField, obj *PlatformHealth) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_PlatformHealth_message(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Message, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNString2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_PlatformHealth_message(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "PlatformHealth",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _PlatformHealth_checkedAt(ctx context.Context, field graphql.CollectedField, obj *PlatformHealth) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_PlatformHealth_checkedAt(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.CheckedAt, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(time.Time)
+	fc.Result = res
+	return ec.marshalNTime2timeᚐTime(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_PlatformHealth_checkedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "PlatformHealth",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _PlatformStats_repositories(ctx context.Context, field graphql.CollectedField, obj *PlatformStats) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_PlatformStats_repositories(ctx, field)
 	if err != nil {
@@ -34118,6 +34390,62 @@ func (ec *executionContext) fieldContext_Query_health(_ context.Context, field g
 				return ec.fieldContext_HealthStatus_services(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type HealthStatus", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_serviceHealth(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Query_serviceHealth(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Query().ServiceHealth(rctx)
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*PlatformHealth)
+	fc.Result = res
+	return ec.marshalNPlatformHealth2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐPlatformHealth(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Query_serviceHealth(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "overall":
+				return ec.fieldContext_PlatformHealth_overall(ctx, field)
+			case "surreal":
+				return ec.fieldContext_PlatformHealth_surreal(ctx, field)
+			case "worker":
+				return ec.fieldContext_PlatformHealth_worker(ctx, field)
+			case "message":
+				return ec.fieldContext_PlatformHealth_message(ctx, field)
+			case "checkedAt":
+				return ec.fieldContext_PlatformHealth_checkedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type PlatformHealth", field.Name)
 		},
 	}
 	return fc, nil
@@ -54583,6 +54911,65 @@ func (ec *executionContext) _MutationResult(ctx context.Context, sel ast.Selecti
 	return out
 }
 
+var platformHealthImplementors = []string{"PlatformHealth"}
+
+func (ec *executionContext) _PlatformHealth(ctx context.Context, sel ast.SelectionSet, obj *PlatformHealth) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, platformHealthImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("PlatformHealth")
+		case "overall":
+			out.Values[i] = ec._PlatformHealth_overall(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "surreal":
+			out.Values[i] = ec._PlatformHealth_surreal(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "worker":
+			out.Values[i] = ec._PlatformHealth_worker(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "message":
+			out.Values[i] = ec._PlatformHealth_message(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "checkedAt":
+			out.Values[i] = ec._PlatformHealth_checkedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var platformStatsImplementors = []string{"PlatformStats"}
 
 func (ec *executionContext) _PlatformStats(ctx context.Context, sel ast.SelectionSet, obj *PlatformStats) graphql.Marshaler {
@@ -54725,6 +55112,28 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_health(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "serviceHealth":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_serviceHealth(ctx, field)
 				if res == graphql.Null {
 					atomic.AddUint32(&fs.Invalids, 1)
 				}
@@ -60045,6 +60454,20 @@ func (ec *executionContext) marshalNMutationResult2ᚖgithubᚗcomᚋsourcebridg
 		return graphql.Null
 	}
 	return ec._MutationResult(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNPlatformHealth2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐPlatformHealth(ctx context.Context, sel ast.SelectionSet, v PlatformHealth) graphql.Marshaler {
+	return ec._PlatformHealth(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNPlatformHealth2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐPlatformHealth(ctx context.Context, sel ast.SelectionSet, v *PlatformHealth) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._PlatformHealth(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalNPlatformStats2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐPlatformStats(ctx context.Context, sel ast.SelectionSet, v PlatformStats) graphql.Marshaler {
