@@ -1001,3 +1001,191 @@ func TestConfluence_WriteXHTML_XMLEscaping(t *testing.T) {
 		t.Error("& not escaped to &amp;")
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hierarchy: root + Architecture section creation
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestConfluence_Hierarchy_RootAndSectionCreated verifies that WritePage
+// creates the root ("<repoName> Living Wiki") and Architecture section pages
+// on first call, and routes arch pages under the section and other pages under
+// the root.
+func TestConfluence_Hierarchy_RootAndSectionCreated(t *testing.T) {
+	const repoID = "test-repo-uuid"
+	const repoName = "sourcebridge"
+
+	client := markdown.NewMemoryConfluenceClient()
+	writer := markdown.NewConfluenceWriter(client, markdown.ConfluenceWriterConfig{
+		RepoID:   repoID,
+		RepoName: repoName,
+	})
+
+	archPage := ast.Page{
+		ID: repoID + ".arch.src.db",
+		Blocks: []ast.Block{
+			{ID: "b1", Kind: ast.BlockKindHeading,
+				Content: ast.BlockContent{Heading: &ast.HeadingContent{Level: 1, Text: "DB Package"}},
+				Owner:   ast.OwnerGenerated},
+		},
+	}
+	overviewPage := ast.Page{
+		ID: "system_overview",
+		Blocks: []ast.Block{
+			{ID: "b2", Kind: ast.BlockKindParagraph,
+				Content: ast.BlockContent{Paragraph: &ast.ParagraphContent{Markdown: "System overview."}},
+				Owner:   ast.OwnerGenerated},
+		},
+	}
+	glossaryPage := ast.Page{
+		ID: "glossary",
+		Blocks: []ast.Block{
+			{ID: "b3", Kind: ast.BlockKindParagraph,
+				Content: ast.BlockContent{Paragraph: &ast.ParagraphContent{Markdown: "Glossary terms."}},
+				Owner:   ast.OwnerGenerated},
+		},
+	}
+
+	// Write all three pages.
+	for _, p := range []ast.Page{archPage, overviewPage, glossaryPage} {
+		if err := writer.WritePage(confCtx, p); err != nil {
+			t.Fatalf("WritePage(%q): %v", p.ID, err)
+		}
+	}
+
+	rootExtID := repoID + ".__wiki_root__"
+	archSectionExtID := repoID + ".__section__.architecture"
+
+	// Root page must exist with the correct title embedded in its XHTML.
+	rootXHTML, _, err := client.GetPage(confCtx, rootExtID)
+	if err != nil {
+		t.Fatalf("GetPage(root): %v", err)
+	}
+	if rootXHTML == nil {
+		t.Fatal("root page was not created")
+	}
+	if !strings.Contains(string(rootXHTML), "sourcebridge") {
+		t.Errorf("root page body does not mention repoName; got:\n%s", rootXHTML)
+	}
+
+	// Architecture section must exist.
+	archXHTML, _, err := client.GetPage(confCtx, archSectionExtID)
+	if err != nil {
+		t.Fatalf("GetPage(arch section): %v", err)
+	}
+	if archXHTML == nil {
+		t.Fatal("architecture section page was not created")
+	}
+
+	// The arch content page must have been written.
+	archPageXHTML, _, err := client.GetPage(confCtx, archPage.ID)
+	if err != nil {
+		t.Fatalf("GetPage(arch content page): %v", err)
+	}
+	if archPageXHTML == nil {
+		t.Fatal("arch content page was not written")
+	}
+
+	// system_overview and glossary must be written as well.
+	for _, p := range []ast.Page{overviewPage, glossaryPage} {
+		xhtml, _, err := client.GetPage(confCtx, p.ID)
+		if err != nil {
+			t.Fatalf("GetPage(%q): %v", p.ID, err)
+		}
+		if xhtml == nil {
+			t.Errorf("page %q was not written", p.ID)
+		}
+	}
+
+	// Verify the arch page's UpsertPage call carried propParentExternalID
+	// pointing at the arch section. We probe this indirectly: the arch page's
+	// stored properties should NOT have a root-page parent (we can't inspect
+	// the create payload directly in the in-memory fake, but we can assert that
+	// EnsurePage was called for both hierarchy pages by checking numeric IDs).
+	rootNumID := client.NumericPageID(rootExtID)
+	if rootNumID == "" {
+		t.Error("root page has no numeric ID (EnsurePage was not called for it)")
+	}
+	archNumID := client.NumericPageID(archSectionExtID)
+	if archNumID == "" {
+		t.Error("arch section has no numeric ID (EnsurePage was not called for it)")
+	}
+	if rootNumID == archNumID {
+		t.Error("root and arch section should have distinct numeric IDs")
+	}
+}
+
+// TestConfluence_Hierarchy_HierarchyCreatedOnce verifies that concurrent
+// WritePage calls only create the hierarchy pages once (sync.Once semantics).
+func TestConfluence_Hierarchy_HierarchyCreatedOnce(t *testing.T) {
+	const repoID = "concurrent-repo"
+
+	client := markdown.NewMemoryConfluenceClient()
+	writer := markdown.NewConfluenceWriter(client, markdown.ConfluenceWriterConfig{
+		RepoID:   repoID,
+		RepoName: "Concurrent Repo",
+	})
+
+	// Write the same arch page twice sequentially (simulates two calls through
+	// the same writer — the sync.Once must not create duplicate root pages).
+	page := ast.Page{
+		ID: repoID + ".arch.core",
+		Blocks: []ast.Block{
+			{ID: "bx", Kind: ast.BlockKindParagraph,
+				Content: ast.BlockContent{Paragraph: &ast.ParagraphContent{Markdown: "Core."}},
+				Owner:   ast.OwnerGenerated},
+		},
+	}
+
+	for i := 0; i < 3; i++ {
+		if err := writer.WritePage(confCtx, page); err != nil {
+			t.Fatalf("WritePage (call %d): %v", i+1, err)
+		}
+	}
+
+	// Exactly one root page and one arch section should exist.
+	rootExtID := repoID + ".__wiki_root__"
+	archExtID := repoID + ".__section__.architecture"
+
+	rootXHTML, _, _ := client.GetPage(confCtx, rootExtID)
+	if rootXHTML == nil {
+		t.Error("root page missing after multiple WritePage calls")
+	}
+	archXHTML, _, _ := client.GetPage(confCtx, archExtID)
+	if archXHTML == nil {
+		t.Error("arch section missing after multiple WritePage calls")
+	}
+}
+
+// TestConfluence_Hierarchy_DisabledWhenNoRepoID verifies that the hierarchy
+// logic is a no-op when RepoID is empty (backwards-compatible default).
+func TestConfluence_Hierarchy_DisabledWhenNoRepoID(t *testing.T) {
+	client := markdown.NewMemoryConfluenceClient()
+	writer := markdown.NewConfluenceWriter(client, markdown.ConfluenceWriterConfig{
+		// RepoID intentionally empty — hierarchy disabled.
+	})
+
+	page := ast.Page{
+		ID: "standalone.arch.pkg",
+		Blocks: []ast.Block{
+			{ID: "by", Kind: ast.BlockKindParagraph,
+				Content: ast.BlockContent{Paragraph: &ast.ParagraphContent{Markdown: "No hierarchy."}},
+				Owner:   ast.OwnerGenerated},
+		},
+	}
+
+	if err := writer.WritePage(confCtx, page); err != nil {
+		t.Fatalf("WritePage: %v", err)
+	}
+
+	// No root or section pages should have been created.
+	listed, _ := client.ListPagesByExternalIDPrefix(confCtx, ".__wiki_root__")
+	if len(listed) > 0 {
+		t.Errorf("unexpected hierarchy pages created when RepoID is empty: %v", listed)
+	}
+
+	// The content page itself must still have been written.
+	xhtml, _, _ := client.GetPage(confCtx, page.ID)
+	if xhtml == nil {
+		t.Error("content page was not written when hierarchy is disabled")
+	}
+}

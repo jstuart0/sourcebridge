@@ -59,13 +59,19 @@ func (s *snapshotBoundConfluenceClient) DeletePage(ctx context.Context, external
 	return s.client.DeletePage(ctx, s.snapshot, externalID)
 }
 
+func (s *snapshotBoundConfluenceClient) EnsurePage(ctx context.Context, externalID, title, parentExternalID string, body []byte) (string, error) {
+	return s.client.EnsurePage(ctx, s.snapshot, externalID, title, parentExternalID, body)
+}
+
 // NewConfluenceSinkWriter constructs a ConfluenceSinkWriter.
 //
 // site is the Atlassian Cloud subdomain (e.g. "mycompany").
 // spaceKey is the Confluence space key (e.g. "ENG").
 // parentPageID is the optional parent page ID for new pages (empty = space root).
+// repoID is the SourceBridge repository ID used to derive hierarchy page IDs.
+// repoName is the human-readable repository name used as the root page title.
 // snapshot is the per-job credential snapshot.
-func NewConfluenceSinkWriter(site, spaceKey, parentPageID string, snapshot credentials.Snapshot) *ConfluenceSinkWriter {
+func NewConfluenceSinkWriter(site, spaceKey, parentPageID, repoID, repoName string, snapshot credentials.Snapshot) *ConfluenceSinkWriter {
 	httpClient := markdown.NewHTTPConfluenceClient(markdown.ConfluenceHTTPConfig{
 		Site:         site,
 		SpaceKey:     spaceKey,
@@ -78,6 +84,8 @@ func NewConfluenceSinkWriter(site, spaceKey, parentPageID string, snapshot crede
 	writer := markdown.NewConfluenceWriter(bound, markdown.ConfluenceWriterConfig{
 		SpaceKey:     spaceKey,
 		ParentPageID: parentPageID,
+		RepoID:       repoID,
+		RepoName:     repoName,
 	})
 	return &ConfluenceSinkWriter{
 		writer: writer,

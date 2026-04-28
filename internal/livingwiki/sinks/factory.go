@@ -43,6 +43,10 @@ func (e *ErrSinkNotImplemented) Error() string {
 // settings using the per-job credential snapshot. Call once at job dispatch
 // time.
 //
+// repoName is the human-readable repository name used as the title of the
+// auto-generated root page in Confluence ("‹repoName› Living Wiki"). Pass
+// "" when unknown; the root page will fall back to repoSettings.RepoID.
+//
 // Errors:
 //   - *ErrMissingCredentials when required credentials are absent from snap.
 //   - *ErrSinkNotImplemented for sink kinds that are not yet wired (only
@@ -53,6 +57,7 @@ func BuildSinkWriters(
 	_ context.Context,
 	repoSettings *livingwiki.RepositoryLivingWikiSettings,
 	snap credentials.Snapshot,
+	repoName string,
 ) ([]NamedSinkWriter, error) {
 	if repoSettings == nil || len(repoSettings.Sinks) == 0 {
 		return nil, nil
@@ -67,7 +72,7 @@ func BuildSinkWriters(
 	// credentials, which is a fixable user-facing problem.
 	var missingCredsErr error
 	for _, sink := range repoSettings.Sinks {
-		w, err := buildOneWriter(sink, snap)
+		w, err := buildOneWriter(sink, snap, repoSettings.RepoID, repoName)
 		if err != nil {
 			var notImpl *ErrSinkNotImplemented
 			if errors.As(err, &notImpl) {
@@ -97,7 +102,7 @@ func BuildSinkWriters(
 }
 
 // buildOneWriter creates a single SinkWriter for the given sink configuration.
-func buildOneWriter(sink livingwiki.RepoWikiSink, snap credentials.Snapshot) (SinkWriter, error) {
+func buildOneWriter(sink livingwiki.RepoWikiSink, snap credentials.Snapshot, repoID, repoName string) (SinkWriter, error) {
 	switch sink.Kind {
 	case livingwiki.RepoWikiSinkConfluence:
 		if snap.ConfluenceSite == "" {
@@ -117,7 +122,7 @@ func buildOneWriter(sink livingwiki.RepoWikiSink, snap credentials.Snapshot) (Si
 		// For v1: use IntegrationName as the space key. A future revision can
 		// add a per-sink SpaceKey field to RepoWikiSink.
 		spaceKey := sink.IntegrationName
-		return NewConfluenceSinkWriter(snap.ConfluenceSite, spaceKey, "" /* parentPageID */, snap), nil
+		return NewConfluenceSinkWriter(snap.ConfluenceSite, spaceKey, "" /* parentPageID */, repoID, repoName, snap), nil
 
 	case livingwiki.RepoWikiSinkNotion:
 		if snap.NotionToken == "" {

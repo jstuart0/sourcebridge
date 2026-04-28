@@ -303,10 +303,21 @@ func buildColdStartRunner(
 			rt.ReportProgress(0.92, "pushing", fmt.Sprintf(
 				"Pushing %d pages to sinks", len(result.Generated)))
 
+			// Resolve the repository name for the Confluence root page title.
+			// Best-effort: fall back to an empty string if the store is nil or
+			// the repo is not found; the sink writer will substitute repoID.
+			var repoName string
+			if graphStore != nil {
+				if repo := graphStore.GetRepository(repoID); repo != nil {
+					repoName = repo.Name
+				}
+			}
+
 			sinkResults = dispatchGeneratedPages(
 				runCtx, repoID, tenantID,
 				result.Generated, skippedPageIDs,
 				broker, repoSettingsStore,
+				repoName,
 				&status, &failCat, &errMsg,
 			)
 		}
@@ -370,6 +381,9 @@ func buildColdStartRunner(
 // ARE added to the orphan-cleanup "still wanted" set so the GC pass doesn't
 // delete them.
 //
+// repoName is the human-readable repository name used as the root page title
+// in Confluence ("<repoName> Living Wiki"). Pass "" when unknown.
+//
 // When broker or repoSettingsStore is nil, dispatch is skipped silently.
 func dispatchGeneratedPages(
 	ctx context.Context,
@@ -378,6 +392,7 @@ func dispatchGeneratedPages(
 	skippedPageIDs []string,
 	broker credentials.Broker,
 	repoSettingsStore livingwiki.RepoSettingsStore,
+	repoName string,
 	status *string,
 	failCat *coldstart.FailureCategory,
 	errMsg *string,
@@ -416,7 +431,7 @@ func dispatchGeneratedPages(
 		"has_confluence_token", snap.ConfluenceToken != "")
 
 	// Build SinkWriters from the repo's settings.
-	writers, err := sinks.BuildSinkWriters(ctx, repoSettings, snap)
+	writers, err := sinks.BuildSinkWriters(ctx, repoSettings, snap, repoName)
 	if err != nil {
 		slog.Warn("living-wiki: could not build sink writers",
 			"repo_id", repoID, "error", err)
@@ -491,11 +506,15 @@ func dispatchGeneratedPages(
 	// Any repo where the field was never touched keeps the default-on behaviour.
 	orphanCleanEnabled := !repoSettings.AutoCleanOrphansDisabled()
 	if dispatchStatus == "ok" && orphanCleanEnabled {
-		// currentIDs is the union of pages just generated + pages the
-		// smart-resume step skipped because they were already published.
-		// Both kinds are part of the current taxonomy and must NOT be
-		// treated as orphans.
-		currentIDs := make([]string, 0, len(generatedPages)+len(skippedPageIDs))
+		// currentIDs is the union of:
+		//   - hierarchy pages (root + Architecture section) — always "wanted"
+		//   - pages just generated
+		//   - pages the smart-resume step skipped (already published)
+		// All three sets must be excluded from orphan deletion.
+		currentIDs := []string{
+			repoID + ".__wiki_root__",
+			repoID + ".__section__.architecture",
+		}
 		for _, p := range generatedPages {
 			currentIDs = append(currentIDs, p.ID)
 		}
@@ -546,7 +565,8 @@ func listAlreadyPublishedAcrossSinks(
 		return empty
 	}
 
-	writers, err := sinks.BuildSinkWriters(ctx, repoSettings, snap)
+	// repoName is not needed for listing (only for create); pass "" here.
+	writers, err := sinks.BuildSinkWriters(ctx, repoSettings, snap, "")
 	if err != nil || len(writers) == 0 {
 		return empty
 	}

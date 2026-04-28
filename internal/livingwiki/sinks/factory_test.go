@@ -39,7 +39,7 @@ func TestBuildSinkWritersConfluenceHappyPath(t *testing.T) {
 		ConfluenceToken: "tok-abc",
 	}
 
-	writers, err := sinks.BuildSinkWriters(context.Background(), settings, snap)
+	writers, err := sinks.BuildSinkWriters(context.Background(), settings, snap, "my-repo")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestBuildSinkWritersNotionHappyPath(t *testing.T) {
 		NotionToken: "notion-secret",
 	}
 
-	writers, err := sinks.BuildSinkWriters(context.Background(), settings, snap)
+	writers, err := sinks.BuildSinkWriters(context.Background(), settings, snap, "repo-2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestBuildSinkWritersMissingConfluenceSite(t *testing.T) {
 		ConfluenceToken: "tok",
 	}
 
-	_, err := sinks.BuildSinkWriters(context.Background(), settings, snap)
+	_, err := sinks.BuildSinkWriters(context.Background(), settings, snap, "")
 	if err == nil {
 		t.Fatal("expected error for missing ConfluenceSite")
 	}
@@ -128,7 +128,7 @@ func TestBuildSinkWritersMissingNotionToken(t *testing.T) {
 	}
 	snap := credentials.Snapshot{} // NotionToken empty
 
-	_, err := sinks.BuildSinkWriters(context.Background(), settings, snap)
+	_, err := sinks.BuildSinkWriters(context.Background(), settings, snap, "")
 	if err == nil {
 		t.Fatal("expected error for missing NotionToken")
 	}
@@ -152,7 +152,7 @@ func TestBuildSinkWritersGitRepoSkipped(t *testing.T) {
 	}
 	snap := credentials.Snapshot{}
 
-	writers, err := sinks.BuildSinkWriters(context.Background(), settings, snap)
+	writers, err := sinks.BuildSinkWriters(context.Background(), settings, snap, "")
 	if err != nil {
 		t.Fatalf("expected nil error when only an unimplemented sink is configured, got: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestBuildSinkWritersGitRepoSkipped(t *testing.T) {
 func TestBuildSinkWritersNilSettings(t *testing.T) {
 	t.Parallel()
 
-	writers, err := sinks.BuildSinkWriters(context.Background(), nil, credentials.Snapshot{})
+	writers, err := sinks.BuildSinkWriters(context.Background(), nil, credentials.Snapshot{}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestBuildSinkWritersNoSinks(t *testing.T) {
 		Sinks:  []livingwiki.RepoWikiSink{},
 	}
 
-	writers, err := sinks.BuildSinkWriters(context.Background(), settings, credentials.Snapshot{})
+	writers, err := sinks.BuildSinkWriters(context.Background(), settings, credentials.Snapshot{}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

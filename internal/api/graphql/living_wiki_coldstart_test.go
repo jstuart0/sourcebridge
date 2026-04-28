@@ -971,6 +971,7 @@ func csRunnerFromPagesWithSinks(
 				runCtx, repoID, tenantID,
 				result.Generated, nil, // skippedPageIDs: smart-resume not exercised in this test
 				broker, repoSettingsStore,
+				"", // repoName: not required for test dispatch
 				&status, &failCat, &errMsg,
 			)
 		}

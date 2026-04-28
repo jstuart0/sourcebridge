@@ -71,6 +71,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 )
@@ -434,6 +435,15 @@ type ConfluenceClient interface {
 	// DeletePage permanently deletes the Confluence page identified by
 	// externalID. Returns nil when the page did not exist (idempotent).
 	DeletePage(ctx context.Context, externalID string) error
+
+	// EnsurePage creates a stub page (typically a root or section page) if one
+	// does not already exist with the given external ID, and returns the
+	// Confluence numeric page ID either way.
+	//
+	// parentExternalID may be empty when the page should live at the space root.
+	// When non-empty the parent page must already exist (caller's responsibility).
+	// body is the initial XHTML body for new pages; existing pages are not updated.
+	EnsurePage(ctx context.Context, externalID, title string, parentExternalID string, body []byte) (string, error)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -449,13 +459,17 @@ type confluencePageRecord struct {
 // MemoryConfluenceClient is a thread-safe in-memory implementation of
 // [ConfluenceClient] for use in tests and development.
 type MemoryConfluenceClient struct {
-	pages map[string]*confluencePageRecord // externalID → record
+	pages    map[string]*confluencePageRecord // externalID → record
+	numericIDs map[string]string             // externalID → fake numeric Confluence page ID
+	nextID   int
 }
 
 // NewMemoryConfluenceClient creates an empty [MemoryConfluenceClient].
 func NewMemoryConfluenceClient() *MemoryConfluenceClient {
 	return &MemoryConfluenceClient{
-		pages: make(map[string]*confluencePageRecord),
+		pages:      make(map[string]*confluencePageRecord),
+		numericIDs: make(map[string]string),
+		nextID:     1000,
 	}
 }
 
@@ -519,7 +533,38 @@ func (m *MemoryConfluenceClient) ListPagesByExternalIDPrefix(_ context.Context, 
 // in-memory map. Returns nil when the page does not exist (idempotent).
 func (m *MemoryConfluenceClient) DeletePage(_ context.Context, externalID string) error {
 	delete(m.pages, externalID)
+	delete(m.numericIDs, externalID)
 	return nil
+}
+
+// EnsurePage implements [ConfluenceClient]. It creates the page if it does not
+// already exist, and returns a stable fake numeric Confluence page ID in both
+// cases. Existing pages are left unchanged (the body argument is ignored for
+// pre-existing pages).
+func (m *MemoryConfluenceClient) EnsurePage(_ context.Context, externalID, title string, _ string, body []byte) (string, error) {
+	if numID, ok := m.numericIDs[externalID]; ok {
+		return numID, nil
+	}
+	// Create the page.
+	cp := make([]byte, len(body))
+	copy(cp, body)
+	m.pages[externalID] = &confluencePageRecord{
+		xhtml: cp,
+		properties: ConfluenceProperties{
+			"sourcebridge_page_id": externalID,
+			propConfluenceTitle:    title,
+		},
+	}
+	m.nextID++
+	numID := fmt.Sprintf("%d", m.nextID)
+	m.numericIDs[externalID] = numID
+	return numID, nil
+}
+
+// NumericPageID returns the fake Confluence numeric page ID for the given
+// external ID. Returns "" when the page does not exist. Used in tests.
+func (m *MemoryConfluenceClient) NumericPageID(externalID string) string {
+	return m.numericIDs[externalID]
 }
 
 // MutateBlock directly modifies the stored XHTML of a block, simulating a
@@ -628,7 +673,29 @@ type ConfluenceWriterConfig struct {
 	// ParentPageID is the Confluence page ID of the parent page under which new
 	// pages are created. Optional; if empty the page is created at the space root.
 	ParentPageID string
+
+	// RepoID is the SourceBridge repository ID. Used to construct stable
+	// external IDs for the root and section pages.
+	RepoID string
+
+	// RepoName is the human-readable repository name. Used as the title of the
+	// auto-generated "<RepoName> Living Wiki" root page.
+	RepoName string
 }
+
+// hierarchyExternalIDs returns the stable external IDs for the root and
+// Architecture section pages for this (writer, repo) combination.
+func (c ConfluenceWriterConfig) hierarchyExternalIDs() (root, archSection string) {
+	if c.RepoID == "" {
+		return "", ""
+	}
+	return c.RepoID + ".__wiki_root__", c.RepoID + ".__section__.architecture"
+}
+
+// propParentExternalID is the per-call metadata key that overrides the
+// default parent page (cfg.ParentPageID) when a page is first created.
+// It is consumed by createPage and never written as a Confluence content-property.
+const propParentExternalID = "sb_parent_external_id"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ConfluenceWriter
@@ -637,22 +704,94 @@ type ConfluenceWriterConfig struct {
 // ConfluenceWriter is the Confluence storage-XHTML sink adapter.
 //
 // Call [WritePage] to do the full read-diff-write cycle:
-//  1. Fetch the existing Confluence page via the [ConfluenceClient].
-//  2. Parse the existing XHTML to recover block IDs and ownership.
-//  3. Run block-level reconciliation.
-//  4. Write only changed generated blocks; preserve human-edited blocks.
-//  5. Upsert the composed XHTML via the [ConfluenceClient].
+//  1. Ensure the root and Architecture section pages exist (once per writer lifetime).
+//  2. Fetch the existing Confluence page via the [ConfluenceClient].
+//  3. Parse the existing XHTML to recover block IDs and ownership.
+//  4. Run block-level reconciliation.
+//  5. Write only changed generated blocks; preserve human-edited blocks.
+//  6. Upsert the composed XHTML via the [ConfluenceClient].
 //
 // The caller must compose canonical + overlay[sink] via [ast.ComposeForSink]
 // before calling WritePage when the sink has a local_to_sink policy.
 type ConfluenceWriter struct {
 	client ConfluenceClient
 	cfg    ConfluenceWriterConfig
+
+	// hierarchyOnce guards the one-time creation of the root and Architecture
+	// section pages. Concurrent WritePage calls will all block until the first
+	// caller has created the pages; subsequent callers proceed immediately.
+	hierarchyOnce sync.Once
+	hierarchyErr  error // non-nil when EnsurePage calls fail during setup
 }
 
 // NewConfluenceWriter creates a [ConfluenceWriter] using the given client.
 func NewConfluenceWriter(client ConfluenceClient, cfg ConfluenceWriterConfig) *ConfluenceWriter {
 	return &ConfluenceWriter{client: client, cfg: cfg}
+}
+
+// ensureHierarchy creates the root and Architecture section pages exactly once
+// per writer lifetime. It is called from WritePage under a sync.Once so
+// concurrent page writes block until the hierarchy exists.
+//
+// When cfg.RepoID is empty the hierarchy is disabled and this is a no-op.
+func (cw *ConfluenceWriter) ensureHierarchy(ctx context.Context) error {
+	cw.hierarchyOnce.Do(func() {
+		rootID, archID := cw.cfg.hierarchyExternalIDs()
+		if rootID == "" {
+			return // hierarchy disabled (no RepoID configured)
+		}
+
+		repoName := cw.cfg.RepoName
+		if repoName == "" {
+			repoName = cw.cfg.RepoID
+		}
+
+		rootBody := fmt.Appendf(nil,
+			`<p>This is the auto-generated SourceBridge wiki for %s. Pages are kept in sync as the codebase evolves.</p>`+"\n"+
+				`<ac:structured-macro ac:name="children" />`,
+			xmlEscape(repoName),
+		)
+
+		// Root page lives at the configured space root (no parent external ID).
+		_, err := cw.client.EnsurePage(ctx, rootID, repoName+" Living Wiki", "", rootBody)
+		if err != nil {
+			cw.hierarchyErr = fmt.Errorf("confluence_writer: ensure root page: %w", err)
+			return
+		}
+
+		archBody := fmt.Appendf(nil,
+			`<p>Architecture documentation for %s.</p>`+"\n"+
+				`<ac:structured-macro ac:name="children" />`,
+			xmlEscape(repoName),
+		)
+
+		// Architecture section is parented to the root.
+		_, err = cw.client.EnsurePage(ctx, archID, "Architecture", rootID, archBody)
+		if err != nil {
+			cw.hierarchyErr = fmt.Errorf("confluence_writer: ensure architecture section: %w", err)
+		}
+	})
+	return cw.hierarchyErr
+}
+
+// parentExternalIDForPage determines which parent page a new content page
+// should be created under, expressed as a SourceBridge external ID.
+//
+// Routing rules (v1):
+//   - Pages whose ID matches <repoID>.arch.* → Architecture section
+//   - All other pages → root page
+//
+// Returns "" when hierarchy is disabled (no RepoID configured).
+func (cw *ConfluenceWriter) parentExternalIDForPage(pageID string) string {
+	rootID, archID := cw.cfg.hierarchyExternalIDs()
+	if rootID == "" {
+		return ""
+	}
+	prefix := cw.cfg.RepoID + ".arch."
+	if strings.HasPrefix(pageID, prefix) {
+		return archID
+	}
+	return rootID
 }
 
 // WritePage performs the read-diff-write cycle for one page.
@@ -661,25 +800,32 @@ func NewConfluenceWriter(client ConfluenceClient, cfg ConfluenceWriterConfig) *C
 // assigned by the orchestrator (canonical AST or proposed AST).
 //
 // Algorithm:
-//  1. Fetch the existing Confluence page.
-//  2. Parse existing blocks to build a map of blockID → existing block.
-//  3. For each incoming block:
+//  1. Ensure root and Architecture section pages exist (once per writer lifetime).
+//  2. Fetch the existing Confluence page.
+//  3. Parse existing blocks to build a map of blockID → existing block.
+//  4. For each incoming block:
 //     - If an existing block with the same ID is human-edited or human-only,
 //       preserve its content and owner (the human edit wins).
 //     - Otherwise use the incoming block's content.
-//  4. Render and upsert.
+//  5. Render and upsert, injecting the per-page parent external ID so new pages
+//     land under the correct section rather than the space root.
 //
 // Caller responsibility: pass in the result of [ast.ComposeForSink] when the
 // Confluence sink has a local_to_sink overlay, so that per-sink divergent
 // content is included in the write.
 func (cw *ConfluenceWriter) WritePage(ctx context.Context, page ast.Page) error {
-	// Step 1: Fetch existing page.
+	// Step 1: Ensure hierarchy pages exist (idempotent, runs once per writer).
+	if err := cw.ensureHierarchy(ctx); err != nil {
+		return err
+	}
+
+	// Step 2: Fetch existing page.
 	existingXHTML, _, err := cw.client.GetPage(ctx, page.ID)
 	if err != nil {
 		return fmt.Errorf("confluence_writer: GetPage %q: %w", page.ID, err)
 	}
 
-	// Step 2: Parse existing blocks to recover ownership by block ID.
+	// Step 3: Parse existing blocks to recover ownership by block ID.
 	existingByID := make(map[ast.BlockID]ast.Block)
 	if len(existingXHTML) > 0 {
 		for _, b := range confluenceXHTMLToBlocks(existingXHTML) {
@@ -687,7 +833,7 @@ func (cw *ConfluenceWriter) WritePage(ctx context.Context, page ast.Page) error 
 		}
 	}
 
-	// Step 3: Compose the output blocks, preserving human-edited content.
+	// Step 4: Compose the output blocks, preserving human-edited content.
 	output := make([]ast.Block, len(page.Blocks))
 	for i, blk := range page.Blocks {
 		output[i] = blk
@@ -700,7 +846,7 @@ func (cw *ConfluenceWriter) WritePage(ctx context.Context, page ast.Page) error 
 		}
 	}
 
-	// Step 4: Render to XHTML and upsert.
+	// Step 5: Render to XHTML and upsert.
 	var buf bytes.Buffer
 	if err := writeConfluencePage(&buf, ast.Page{
 		ID:         page.ID,
@@ -721,6 +867,14 @@ func (cw *ConfluenceWriter) WritePage(ctx context.Context, page ast.Page) error 
 		// otherwise fall back to a deterministic humanization of the page ID.
 		propConfluenceTitle: deriveConfluenceTitle(page),
 	}
+
+	// Inject the per-page parent so new pages land under the correct section
+	// rather than the configured top-level parentPageID. The HTTP client reads
+	// this and resolves it to a Confluence numeric ID before the CREATE call.
+	if parentExtID := cw.parentExternalIDForPage(page.ID); parentExtID != "" {
+		props[propParentExternalID] = parentExtID
+	}
+
 	if err := cw.client.UpsertPage(ctx, page.ID, buf.Bytes(), props); err != nil {
 		return fmt.Errorf("confluence_writer: UpsertPage %q: %w", page.ID, err)
 	}

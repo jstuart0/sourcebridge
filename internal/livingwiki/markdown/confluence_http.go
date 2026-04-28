@@ -411,6 +411,10 @@ func (c *HTTPConfluenceClient) findPageByPropertyScan(ctx context.Context, auth,
 // writes the sourcebridge_page_id property. Uses the v2 schema:
 // `spaceId` (not `space.key`), `status: "current"`, flat body with
 // `representation`+`value`.
+//
+// When metadata contains propParentExternalID, the value is resolved to a
+// Confluence numeric page ID (via findPageIDByExternalID) and used as the
+// parentId of the new page rather than cfg.ParentPageID.
 func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID string, xhtml []byte, metadata ConfluenceProperties) error {
 	spaceID, err := c.resolveSpaceID(ctx, auth)
 	if err != nil {
@@ -437,11 +441,26 @@ func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID 
 		title = HumanizePageID(externalID)
 	}
 
+	// Determine the parent page ID. A per-call override (propParentExternalID)
+	// wins over the configured default (cfg.ParentPageID). This allows WritePage
+	// to place pages under the correct hierarchy section without changing the
+	// static ConfluenceHTTPConfig.
+	parentID := c.cfg.ParentPageID
+	if parentExtID := metadata[propParentExternalID]; parentExtID != "" {
+		resolved, resolveErr := c.findPageIDByExternalID(ctx, auth, parentExtID, nil)
+		if resolveErr != nil {
+			return fmt.Errorf("confluence_http: resolve parent %q: %w", parentExtID, resolveErr)
+		}
+		if resolved != "" {
+			parentID = resolved
+		}
+	}
+
 	payload := createPayload{
 		SpaceID:  spaceID,
 		Status:   "current",
 		Title:    title,
-		ParentID: c.cfg.ParentPageID,
+		ParentID: parentID,
 		Body: bodyValue{
 			Representation: "storage",
 			Value:          string(xhtml),
@@ -460,16 +479,57 @@ func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID 
 		return fmt.Errorf("confluence_http: set page property: %w", err)
 	}
 
-	// Write any additional metadata properties. The pseudo-property
-	// `propConfluenceTitle` is consumed for the create payload's title and
-	// must not be persisted as a page content-property.
+	// Write any additional metadata properties. The pseudo-properties
+	// propConfluenceTitle and propParentExternalID are consumed for the create
+	// payload and must not be persisted as Confluence content-properties.
 	for k, v := range metadata {
-		if k == confluencePropertyKey || k == propConfluenceTitle {
+		if k == confluencePropertyKey || k == propConfluenceTitle || k == propParentExternalID {
 			continue
 		}
 		_ = c.setPageProperty(ctx, auth, resp.ID, k, v) // best-effort
 	}
 	return nil
+}
+
+// EnsurePage implements [ConfluenceClient]. It creates a page with the given
+// external ID if none exists, and returns its Confluence numeric page ID.
+// Existing pages are left unchanged (body is ignored when the page exists).
+//
+// parentExternalID may be empty (page lives at the configured space root).
+// When non-empty the parent must already exist; this is a programming error
+// if it doesn't.
+func (c *HTTPConfluenceClient) EnsurePage(ctx context.Context, snap credentials.Snapshot, externalID, title, parentExternalID string, body []byte) (string, error) {
+	auth := basicAuthHeader(snap.ConfluenceEmail, snap.ConfluenceToken)
+
+	// Fast path: page already exists.
+	pageID, err := c.findPageIDByExternalID(ctx, auth, externalID, ConfluenceProperties{
+		propConfluenceTitle: title,
+	})
+	if err != nil {
+		return "", fmt.Errorf("confluence_http: EnsurePage lookup %q: %w", externalID, err)
+	}
+	if pageID != "" {
+		return pageID, nil
+	}
+
+	// Build metadata for createPage, including the per-call parent override.
+	metadata := ConfluenceProperties{
+		propConfluenceTitle: title,
+	}
+	if parentExternalID != "" {
+		metadata[propParentExternalID] = parentExternalID
+	}
+
+	if err := c.createPage(ctx, auth, externalID, body, metadata); err != nil {
+		return "", fmt.Errorf("confluence_http: EnsurePage create %q: %w", externalID, err)
+	}
+
+	// Resolve the new page's numeric ID.
+	newPageID, err := c.findPageIDByExternalID(ctx, auth, externalID, metadata)
+	if err != nil {
+		return "", fmt.Errorf("confluence_http: EnsurePage post-create lookup %q: %w", externalID, err)
+	}
+	return newPageID, nil
 }
 
 // updatePage replaces the page body and bumps the version. Uses the v2 schema:
