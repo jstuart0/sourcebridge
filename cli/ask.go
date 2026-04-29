@@ -134,7 +134,7 @@ func runAskServer(ctx context.Context, serverURL, question string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized {
-		return fmt.Errorf("server requires authentication. Run `sourcebridge setup claude --token=ca_...` or export SOURCEBRIDGE_API_TOKEN")
+		return fmt.Errorf("server requires authentication; run `sourcebridge login` first")
 	}
 	if resp.StatusCode != http.StatusOK {
 		var errBody struct {
@@ -265,27 +265,3 @@ func runAskLegacy(ctx context.Context, cfg *config.Config, question string) erro
 	return nil
 }
 
-// readAPIToken reads the API token from either the
-// SOURCEBRIDGE_API_TOKEN env var (takes precedence for CI / one-off
-// invocations) or the canonical CLI config location. Returns empty
-// string on miss — the request still goes out and the server emits
-// a clear 401 if auth is required.
-func readAPIToken() string {
-	if t := strings.TrimSpace(os.Getenv("SOURCEBRIDGE_API_TOKEN")); t != "" {
-		return t
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	candidates := []string{
-		filepath.Join(home, ".sourcebridge", "token"),
-		filepath.Join(home, ".config", "sourcebridge", "token"),
-	}
-	for _, p := range candidates {
-		if data, err := os.ReadFile(p); err == nil {
-			return strings.TrimSpace(string(data))
-		}
-	}
-	return ""
-}

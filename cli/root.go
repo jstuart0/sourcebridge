@@ -37,4 +37,5 @@ func init() {
 	rootCmd.AddCommand(askImplCmd)
 	rootCmd.AddCommand(importCmd)
 	rootCmd.AddCommand(setupCmd)
+	rootCmd.AddCommand(loginCmd)
 }

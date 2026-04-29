@@ -53,8 +53,15 @@ When the command needs an API token it checks, in order:
 
 1. `--token` flag
 2. `SOURCEBRIDGE_API_TOKEN` environment variable
-3. `~/.sourcebridge/token`
+3. `~/.sourcebridge/token` (written by `sourcebridge login`)
 4. `~/.config/sourcebridge/token`
+
+### Server URL resolution order
+
+1. `--server` flag
+2. `SOURCEBRIDGE_URL` environment variable
+3. `~/.sourcebridge/server` (written by `sourcebridge login`)
+4. `server.public_base_url` in `config.toml`
 
 ### Examples
 
@@ -98,6 +105,88 @@ SOURCEBRIDGE_API_TOKEN=ca_xxx \
 For the full first-run walkthrough see the [Getting Started](getting-started.md)
 guide. For connecting Claude Code to a hosted instance see
 [MCP clients](mcp-clients.md#1-quickstart--using-a-hosted-sourcebridge-from-claude-code).
+
+---
+
+## `sourcebridge login`
+
+Authenticate with a SourceBridge server and persist credentials to disk.
+Saves the API token to `~/.sourcebridge/token` (mode 0600) and the server URL
+to `~/.sourcebridge/server` (mode 0644). Subsequent commands pick these up
+automatically — no `--server` or `--token` flags needed.
+
+This is the recommended first step for cloud / hosted SourceBridge installs.
+It supports two auth flows, selected automatically or via `--method`:
+
+- **OIDC** — opens a browser, completes a standard OAuth 2.0 login, and polls
+  for the resulting token. Use `--no-open` to print the URL instead of launching
+  a browser (useful in headless / CI environments).
+- **local** — prompts for the single-admin password directly in the terminal
+  (characters are hidden). For self-hosted installs that are not connected to an
+  identity provider.
+
+```bash
+sourcebridge login [flags]
+```
+
+### Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--server <url>` | string | `SOURCEBRIDGE_URL` env or `~/.sourcebridge/server` | SourceBridge server URL. Required on first login. |
+| `--method <method>` | string | `auto` | Auth flow: `auto`, `oidc`, or `local`. `auto` prefers OIDC when both are available. |
+| `--no-open` | bool | `false` | Print the OIDC auth URL instead of opening a browser. |
+
+### Server URL resolution
+
+`sourcebridge login` checks, in order:
+
+1. `--server` flag
+2. `SOURCEBRIDGE_URL` environment variable
+3. `~/.sourcebridge/server` (previously saved by a prior `login`)
+
+### Examples
+
+**Cloud install, first login** — opens a browser for OIDC authentication:
+
+```bash
+sourcebridge login --server https://sourcebridge.example.com
+```
+
+After this completes, `~/.sourcebridge/token` and `~/.sourcebridge/server` are
+written. All subsequent `sourcebridge setup claude` runs will pick them up
+without additional flags.
+
+**Headless / CI** — print the URL and complete the flow in a separate browser:
+
+```bash
+sourcebridge login --server https://sourcebridge.example.com --no-open
+# Copy the printed URL into a browser, then wait for the terminal to confirm.
+```
+
+**Self-hosted with local password** — bypass OIDC and enter the admin password:
+
+```bash
+sourcebridge login --server https://internal.example.com --method local
+```
+
+**Re-login** — running `login` again replaces the existing token automatically
+(no `--force` flag needed):
+
+```bash
+sourcebridge login --server https://sourcebridge.example.com
+# Prints: Replaced existing ~/.sourcebridge/token.
+```
+
+### After login
+
+Run `sourcebridge setup claude` with no additional flags:
+
+```bash
+sourcebridge setup claude --repo-id <id>
+```
+
+The server URL and token are read from `~/.sourcebridge/` automatically.
 
 ---
 

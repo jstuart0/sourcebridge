@@ -141,7 +141,7 @@ func resolveToken(ctx context.Context, serverURL string) (string, error) {
 		return flag, nil
 	}
 	// 2–4. Fall back to the existing resolution chain (env → ~/.sourcebridge/token
-	// → ~/.config/sourcebridge/token).
+	// → ~/.config/sourcebridge/token). See readAPIToken in token_storage.go.
 	return readAPIToken(), nil
 }
 
@@ -169,8 +169,16 @@ func validateAndPersistToken(ctx context.Context, serverURL, token string) error
 	case http.StatusOK:
 		// Token is valid. Persist unless --no-save.
 		if !setupClaudeNoSave {
-			if err := saveToken(token); err != nil {
+			result, err := saveToken(token, setupClaudeForceToken)
+			if err != nil {
 				return err
+			}
+			if result.Written {
+				if result.Replaced {
+					fmt.Fprintf(os.Stdout, "Saved token to ~/.sourcebridge/token (0600, overwriting previous)\n")
+				} else {
+					fmt.Fprintf(os.Stdout, "Saved token to ~/.sourcebridge/token (0600)\n")
+				}
 			}
 		}
 		return nil
@@ -187,78 +195,6 @@ func validateAndPersistToken(ctx context.Context, serverURL, token string) error
 	default:
 		return &httpStatusError{status: resp.StatusCode, body: strings.TrimSpace(string(rawBody))}
 	}
-}
-
-// saveToken writes the token to ~/.sourcebridge/token atomically with mode 0600.
-// If the file already exists and contains a different trimmed value, --force-token
-// is required to overwrite.
-func saveToken(token string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("resolving home directory: %w", err)
-	}
-	dir := filepath.Join(home, ".sourcebridge")
-	tokenPath := filepath.Join(dir, "token")
-
-	// Read existing token (if any) for idempotency / guard checks.
-	var existing string
-	if data, err := os.ReadFile(tokenPath); err == nil {
-		existing = strings.TrimSpace(string(data))
-	}
-
-	// Idempotent: same value already on disk — silent no-op.
-	if existing == token {
-		return nil
-	}
-
-	// Refuse to clobber a different token without --force-token.
-	if existing != "" && !setupClaudeForceToken {
-		return fmt.Errorf(
-			"Refusing to overwrite existing ~/.sourcebridge/token. " +
-				"Pass --force-token to replace, or --no-save to use the new token without persisting.",
-		)
-	}
-
-	// Ensure the directory exists.
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("creating ~/.sourcebridge: %w", err)
-	}
-
-	// Atomic write: temp file in same directory → chmod → rename.
-	tmp, err := os.CreateTemp(dir, "token*.tmp")
-	if err != nil {
-		return fmt.Errorf("creating temp token file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	// Clean up temp file on any failure path.
-	committed := false
-	defer func() {
-		if !committed {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := fmt.Fprint(tmp, token); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("writing token: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("closing temp token file: %w", err)
-	}
-	if err := os.Chmod(tmpPath, 0o600); err != nil {
-		return fmt.Errorf("setting token file permissions: %w", err)
-	}
-	if err := os.Rename(tmpPath, tokenPath); err != nil {
-		return fmt.Errorf("persisting token: %w", err)
-	}
-	committed = true
-
-	if existing != "" {
-		fmt.Fprintf(os.Stdout, "Saved token to ~/.sourcebridge/token (0600, overwriting previous)\n")
-	} else {
-		fmt.Fprintf(os.Stdout, "Saved token to ~/.sourcebridge/token (0600)\n")
-	}
-	return nil
 }
 
 func runSetupClaude(cmd *cobra.Command, args []string) error {
@@ -521,13 +457,17 @@ func runSetupClaude(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// resolveServerURL picks the server URL from flag → env → config (in that order).
+// resolveServerURL picks the server URL from: --server flag → SOURCEBRIDGE_URL
+// env → ~/.sourcebridge/server (written by `sourcebridge login`) → config.toml.
 func resolveServerURL(cfg *config.Config) string {
 	if setupClaudeServer != "" {
 		return strings.TrimRight(setupClaudeServer, "/")
 	}
 	if env := os.Getenv("SOURCEBRIDGE_URL"); env != "" {
 		return strings.TrimRight(env, "/")
+	}
+	if saved := readServerURL(); saved != "" {
+		return saved
 	}
 	return strings.TrimRight(cfg.Server.PublicBaseURL, "/")
 }
