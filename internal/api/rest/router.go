@@ -726,6 +726,16 @@ func (s *Server) setupRouter() {
 			r.Post("/api/v1/mcp/http", s.mcp.handleStreamableHTTP)
 			r.Delete("/api/v1/mcp/http", s.mcp.handleStreamableHTTPDelete)
 		})
+		// HEAD probe used by the web client (use-server-capabilities.ts) to
+		// detect whether MCP is enabled. Without an explicit handler chi
+		// returns 405, which still tells the frontend "route exists" (its
+		// fallback path) but logs a noisy "Failed to load resource" line in
+		// every browser DevTools console. Answer 204 instead so the probe
+		// is invisible. No auth — the response carries no information
+		// beyond "MCP is registered".
+		r.Method("HEAD", "/api/v1/mcp/http", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
 		slog.Info("mcp server enabled", "max_sessions", s.cfg.MCP.MaxSessions, "session_ttl", sessionTTL, "keepalive", keepalive)
 	}
 
