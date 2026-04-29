@@ -1125,6 +1125,21 @@ func (s *SurrealStore) StoreRepositoryUnderstanding(u *knowledge.RepositoryUnder
 		scope = u.Scope.Normalize()
 	}
 
+	// Invariant: progress_* fields are meaningful only while a build is
+	// actively running (building_tree / deepening). Any write that lands a
+	// non-running stage (failed, ready, first_pass_ready, needs_refresh) must
+	// zero these so the UI never renders stale heartbeat text from the prior
+	// pass — past incident: stage=FAILED rows kept progress=0.78 / phase=
+	// "generating" / message="synthesising root", which kept the Build button
+	// stuck on "Building…" indefinitely.
+	progress := u.Progress
+	progressPhase := u.ProgressPhase
+	progressMessage := u.ProgressMessage
+	if !u.Stage.IsRunning() {
+		progress = 0
+		progressPhase = ""
+		progressMessage = ""
+	}
 	sql := `
 		LET $existing = (SELECT id, created_at FROM ca_repository_understanding WHERE repo_id = $repo_id AND scope_key = $scope_key LIMIT 1);
 		IF array::len($existing) > 0 THEN
@@ -1142,6 +1157,9 @@ func (s *SurrealStore) StoreRepositoryUnderstanding(u *knowledge.RepositoryUnder
 				metadata = $metadata,
 				error_code = $error_code,
 				error_message = $error_message,
+				progress = $progress,
+				progress_phase = $progress_phase,
+				progress_message = $progress_message,
 				updated_at = time::now()
 			WHERE repo_id = $repo_id AND scope_key = $scope_key)
 		ELSE
@@ -1162,27 +1180,33 @@ func (s *SurrealStore) StoreRepositoryUnderstanding(u *knowledge.RepositoryUnder
 				metadata = $metadata,
 				error_code = $error_code,
 				error_message = $error_message,
+				progress = $progress,
+				progress_phase = $progress_phase,
+				progress_message = $progress_message,
 				created_at = time::now(),
 				updated_at = time::now())
 		END;
 	`
 	vars := map[string]any{
-		"id":            id,
-		"repo_id":       u.RepositoryID,
-		"scope_type":    string(scope.ScopeType),
-		"scope_key":     scope.ScopeKey(),
-		"scope_path":    scope.ScopePath,
-		"corpus_id":     u.CorpusID,
-		"revision_fp":   u.RevisionFP,
-		"strategy":      u.Strategy,
-		"stage":         string(u.Stage),
-		"tree_status":   string(u.TreeStatus),
-		"cached_nodes":  u.CachedNodes,
-		"total_nodes":   u.TotalNodes,
-		"model_used":    u.ModelUsed,
-		"metadata":      u.Metadata,
-		"error_code":    u.ErrorCode,
-		"error_message": u.ErrorMessage,
+		"id":               id,
+		"repo_id":          u.RepositoryID,
+		"scope_type":       string(scope.ScopeType),
+		"scope_key":        scope.ScopeKey(),
+		"scope_path":       scope.ScopePath,
+		"corpus_id":        u.CorpusID,
+		"revision_fp":      u.RevisionFP,
+		"strategy":         u.Strategy,
+		"stage":            string(u.Stage),
+		"tree_status":      string(u.TreeStatus),
+		"cached_nodes":     u.CachedNodes,
+		"total_nodes":      u.TotalNodes,
+		"model_used":       u.ModelUsed,
+		"metadata":         u.Metadata,
+		"error_code":       u.ErrorCode,
+		"error_message":    u.ErrorMessage,
+		"progress":         progress,
+		"progress_phase":   progressPhase,
+		"progress_message": progressMessage,
 	}
 	if _, err := surrealdb.Query[interface{}](ctx(), db, sql, vars); err != nil {
 		return nil, fmt.Errorf("store repository understanding: %w", err)
@@ -1237,7 +1261,11 @@ func (s *SurrealStore) MarkRepositoryUnderstandingNeedsRefresh(repoID string) er
 	}
 	_, err := queryOne[interface{}](ctx(), db,
 		`UPDATE ca_repository_understanding
-		 SET stage = $stage, updated_at = time::now()
+		 SET stage = $stage,
+		     progress = 0,
+		     progress_phase = '',
+		     progress_message = '',
+		     updated_at = time::now()
 		 WHERE repo_id = $repo_id AND stage INSIDE ['first_pass_ready', 'ready']`,
 		map[string]any{
 			"repo_id": repoID,
@@ -1251,6 +1279,9 @@ func (s *SurrealStore) UpdateRepositoryUnderstandingProgress(id string, progress
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
+	// Heartbeat writes are gated on a running stage so a late heartbeat
+	// arriving after the build has already transitioned to failed/ready
+	// can't re-stamp stale progress text onto a terminal row.
 	sql := `UPDATE type::thing('ca_repository_understanding', $id)
 		SET progress = $progress, updated_at = time::now()`
 	vars := map[string]any{"id": id, "progress": progress}
@@ -1262,6 +1293,7 @@ func (s *SurrealStore) UpdateRepositoryUnderstandingProgress(id string, progress
 		sql += `, progress_message = $message`
 		vars["message"] = message
 	}
+	sql += ` WHERE stage INSIDE ['building_tree', 'deepening']`
 	_, err := queryOne[interface{}](ctx(), db, sql, vars)
 	return err
 }

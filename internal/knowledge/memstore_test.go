@@ -404,3 +404,67 @@ func TestRepositoryUnderstandingLifecycle(t *testing.T) {
 		t.Fatal("expected refresh to be available when understanding revision advances")
 	}
 }
+
+// TestStoreRepositoryUnderstandingZerosProgressOnTerminalStage pins down the
+// invariant that progress / phase / message fields are only meaningful while
+// the build is actively running. Regression guard: a stale "synthesising
+// root" / progress=0.78 row paired with stage=FAILED kept the UI showing
+// "Building…" indefinitely (April 2026).
+func TestStoreRepositoryUnderstandingZerosProgressOnTerminalStage(t *testing.T) {
+	t.Parallel()
+	s := NewMemStore()
+	scope := (&ArtifactScope{ScopeType: ScopeRepository}).NormalizePtr()
+
+	running, err := s.StoreRepositoryUnderstanding(&RepositoryUnderstanding{
+		RepositoryID:    "repo-progress",
+		Scope:           scope,
+		Stage:           UnderstandingBuildingTree,
+		TreeStatus:      UnderstandingTreePartial,
+		Progress:        0.78,
+		ProgressPhase:   "generating",
+		ProgressMessage: "synthesising root",
+	})
+	if err != nil {
+		t.Fatalf("StoreRepositoryUnderstanding(running): %v", err)
+	}
+	if running.Progress != 0.78 || running.ProgressPhase != "generating" || running.ProgressMessage != "synthesising root" {
+		t.Fatalf("running stage should preserve progress fields, got %+v", running)
+	}
+
+	terminalStages := []RepositoryUnderstandingStage{
+		UnderstandingFailed,
+		UnderstandingReady,
+		UnderstandingFirstPassReady,
+		UnderstandingNeedsRefresh,
+	}
+	for _, stage := range terminalStages {
+		stage := stage
+		t.Run(string(stage), func(t *testing.T) {
+			out, err := s.StoreRepositoryUnderstanding(&RepositoryUnderstanding{
+				RepositoryID:    "repo-progress",
+				Scope:           scope,
+				Stage:           stage,
+				TreeStatus:      UnderstandingTreePartial,
+				Progress:        0.78,
+				ProgressPhase:   "generating",
+				ProgressMessage: "synthesising root",
+				ErrorMessage:    "rpc unavailable",
+			})
+			if err != nil {
+				t.Fatalf("StoreRepositoryUnderstanding(%s): %v", stage, err)
+			}
+			if out.Progress != 0 || out.ProgressPhase != "" || out.ProgressMessage != "" {
+				t.Fatalf("stage %s must zero progress fields, got progress=%v phase=%q message=%q",
+					stage, out.Progress, out.ProgressPhase, out.ProgressMessage)
+			}
+			// Late heartbeat must not re-stamp progress on a terminal row.
+			if err := s.UpdateRepositoryUnderstandingProgress(out.ID, 0.5, "queued", "rebuilding"); err != nil {
+				t.Fatalf("UpdateRepositoryUnderstandingProgress: %v", err)
+			}
+			again := s.GetRepositoryUnderstanding("repo-progress", *scope)
+			if again.Progress != 0 || again.ProgressPhase != "" || again.ProgressMessage != "" {
+				t.Fatalf("late heartbeat re-stamped progress on stage %s: %+v", stage, again)
+			}
+		})
+	}
+}

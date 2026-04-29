@@ -6,6 +6,12 @@ import Link from "next/link";
 import { authFetch } from "@/lib/auth-fetch";
 import { Button } from "@/components/ui/button";
 import { normalizeActivityResponse } from "@/lib/llm/activity";
+import type { LLMJobView } from "@/lib/llm/job-types";
+import {
+  JobProgress,
+  formatElapsedMs,
+  jobReuseSummary,
+} from "@/components/llm/job-progress";
 import { cn } from "@/lib/utils";
 
 /**
@@ -19,38 +25,7 @@ import { cn } from "@/lib/utils";
  * plus a "Full monitor →" link into /admin/monitor.
  */
 
-interface JobView {
-  id: string;
-  subsystem: string;
-  job_type: string;
-  priority?: "interactive" | "maintenance" | "prewarm";
-  generation_mode?: "classic" | "understanding_first";
-  status: "pending" | "generating" | "ready" | "failed" | "cancelled";
-  progress: number;
-  progress_phase?: string;
-  progress_message?: string;
-  error_title?: string;
-  error_hint?: string;
-  error_code?: string;
-  attached_requests?: number;
-  reused_summaries?: number;
-  leaf_cache_hits?: number;
-  file_cache_hits?: number;
-  package_cache_hits?: number;
-  root_cache_hits?: number;
-  cached_nodes_loaded?: number;
-  total_nodes?: number;
-  resume_stage?: string;
-  skipped_leaf_units?: number;
-  skipped_file_units?: number;
-  skipped_package_units?: number;
-  skipped_root_units?: number;
-  queue_position?: number;
-  queue_depth?: number;
-  estimated_wait_ms?: number;
-  elapsed_ms: number;
-  updated_at: string;
-}
+type JobView = LLMJobView;
 
 interface JobLogView {
   id: string;
@@ -71,15 +46,6 @@ interface ActivityResponse {
 
 const POLL_INTERVAL_MS = 3000;
 
-function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rem = seconds % 60;
-  return rem > 0 ? `${minutes}m ${rem}s` : `${minutes}m`;
-}
-
 function statusColor(status: JobView["status"]): string {
   switch (status) {
     case "generating":
@@ -93,27 +59,6 @@ function statusColor(status: JobView["status"]): string {
     case "cancelled":
       return "bg-gray-400";
   }
-}
-
-function formatQueueEta(ms?: number): string | null {
-  if (!ms || ms <= 0) return null;
-  const seconds = Math.ceil(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.ceil(seconds / 60)}m`;
-}
-
-function reuseLabel(job: JobView): string | null {
-  const reused = job.reused_summaries ?? 0;
-  const cached = job.cached_nodes_loaded ?? 0;
-  const parts = [
-    cached > 0 ? `${cached} cached loaded` : null,
-    job.resume_stage ? `resume ${job.resume_stage}` : null,
-  ].filter(Boolean);
-  if (reused <= 0 && parts.length === 0) return null;
-  if (reused > 0) {
-    return parts.length > 0 ? `${reused} reused · ${parts.join(" · ")}` : `${reused} reused`;
-  }
-  return parts.join(" · ");
 }
 
 function generationModeLabel(mode?: JobView["generation_mode"]): string | null {
@@ -234,65 +179,44 @@ export function RepoJobsPopover({ repoId }: { repoId: string }) {
                 No jobs are currently running.
               </p>
             ) : (
-              active.map((job) => {
-                const pct = Math.max(5, Math.round(job.progress * 100));
-                return (
-                  <div
-                    key={job.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setSelectedJob(job)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setSelectedJob(job);
-                      }
-                    }}
-                    className="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] p-2"
-                  >
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-[var(--text-primary)]">{job.job_type}</span>
-                      <span className="text-[var(--text-tertiary)]">
-                        {formatElapsed(job.elapsed_ms)}
-                      </span>
-                    </div>
-                    <div className="mt-1 flex justify-between text-[11px] text-[var(--text-secondary)]">
-                      <span className="truncate">
-                        {job.progress_message || "Working…"}
-                      </span>
-                      <span>{pct}%</span>
-                    </div>
-                    {(job.status === "pending" || job.progress_phase === "queued") && job.queue_position ? (
-                      <div className="mt-1 text-[11px] text-[var(--text-tertiary)]">
-                        {job.progress_phase === "queued" && job.status !== "pending" ? "Slot wait" : "Queue"} #{job.queue_position}
-                        {job.queue_depth ? ` of ${job.queue_depth}` : ""}
-                        {formatQueueEta(job.estimated_wait_ms) ? ` · ~${formatQueueEta(job.estimated_wait_ms)}` : ""}
-                      </div>
-                    ) : null}
-                    {job.attached_requests && job.attached_requests > 1 ? (
-                      <div className="mt-1 text-[11px] text-[var(--text-tertiary)]">
-                        Shared by {job.attached_requests} requests
-                      </div>
-                    ) : null}
-                    {generationModeLabel(job.generation_mode) ? (
-                      <div className="mt-1 text-[11px] text-[var(--text-tertiary)]">
-                        {generationModeLabel(job.generation_mode)}
-                      </div>
-                    ) : null}
-                    {reuseLabel(job) ? (
-                      <div className="mt-1 text-[11px] text-[var(--text-tertiary)]">
-                        {reuseLabel(job)}
-                      </div>
-                    ) : null}
-                    <div className="mt-1 h-1 overflow-hidden rounded-full bg-[var(--bg-subtle)]">
-                      <div
-                        className="h-full rounded-full bg-[color:var(--color-accent,#3b82f6)] transition-all"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
+              active.map((job) => (
+                <div
+                  key={job.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedJob(job)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedJob(job);
+                    }
+                  }}
+                  className="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] p-2"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-[var(--text-primary)]">{job.job_type}</span>
+                    <span className="text-[var(--text-tertiary)]">
+                      {formatElapsedMs(job.elapsed_ms)}
+                    </span>
                   </div>
-                );
-              })
+                  <JobProgress job={job} variant="compact" className="mt-1" />
+                  {job.attached_requests && job.attached_requests > 1 ? (
+                    <div className="mt-1 text-[11px] text-[var(--text-tertiary)]">
+                      Shared by {job.attached_requests} requests
+                    </div>
+                  ) : null}
+                  {generationModeLabel(job.generation_mode) ? (
+                    <div className="mt-1 text-[11px] text-[var(--text-tertiary)]">
+                      {generationModeLabel(job.generation_mode)}
+                    </div>
+                  ) : null}
+                  {jobReuseSummary(job) ? (
+                    <div className="mt-1 text-[11px] text-[var(--text-tertiary)]">
+                      {jobReuseSummary(job)}
+                    </div>
+                  ) : null}
+                </div>
+              ))
             )}
           </section>
 
@@ -331,9 +255,9 @@ export function RepoJobsPopover({ repoId }: { repoId: string }) {
                       </p>
                     ) : (
                       <p className="truncate">
-                        {formatElapsed(job.elapsed_ms)}
+                        {formatElapsedMs(job.elapsed_ms)}
                         {generationModeLabel(job.generation_mode) ? ` · ${generationModeLabel(job.generation_mode)}` : ""}
-                        {reuseLabel(job) ? ` · ${reuseLabel(job)}` : ""}
+                        {jobReuseSummary(job) ? ` · ${jobReuseSummary(job)}` : ""}
                       </p>
                     )}
                   </div>

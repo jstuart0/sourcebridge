@@ -298,6 +298,19 @@ const (
 	UnderstandingFailed         RepositoryUnderstandingStage = "failed"
 )
 
+// IsRunning reports whether work is actively in progress for this stage.
+// Only running stages may carry meaningful progress / progress_phase /
+// progress_message values; any write that lands a non-running stage must
+// zero those fields so the UI never shows leftover heartbeat text.
+func (s RepositoryUnderstandingStage) IsRunning() bool {
+	switch s {
+	case UnderstandingBuildingTree, UnderstandingDeepening:
+		return true
+	default:
+		return false
+	}
+}
+
 // RepositoryUnderstandingTreeStatus captures whether the underlying summary
 // tree exists and how complete it is.
 type RepositoryUnderstandingTreeStatus string

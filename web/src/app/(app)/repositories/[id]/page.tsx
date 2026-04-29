@@ -42,6 +42,13 @@ import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
 import { RepoJobsPopover } from "@/components/llm/repo-jobs-popover";
+import {
+  JobProgress,
+  formatElapsedMs as sharedFormatElapsedMs,
+  formatHeartbeatAge as sharedFormatHeartbeatAge,
+  formatQueueEta,
+} from "@/components/llm/job-progress";
+import type { LLMJobView } from "@/lib/llm/job-types";
 import { FileTree } from "@/components/source/FileTree";
 import { EnterpriseSourcePanel } from "@/components/source/EnterpriseSourcePanel";
 import { SourceRefLink } from "@/components/source/SourceRefLink";
@@ -280,46 +287,6 @@ function knowledgeQueueLabel(artifact: KnowledgeArtifact): string {
   return artifact.status;
 }
 
-function knowledgeProgressLabel(artifact: KnowledgeArtifact): string {
-  if (artifact.progressMessage?.trim()) return artifact.progressMessage.trim();
-  if (artifact.progressPhase === "queued") return "Waiting for a generation slot";
-  if (artifact.progressPhase === "snapshot") return "Preparing the repository snapshot";
-  if (artifact.progressPhase === "llm") return "LLM completed, persisting the result";
-  if (artifact.progressPhase === "ready") return "Finishing up";
-  if (artifact.status === "PENDING") return "Waiting for a generation slot";
-  return "Generating artifact";
-}
-
-/**
- * Human-friendly elapsed time since the artifact's last update. We surface
- * this alongside the progress label so a long-running generation feels
- * "actively working" even when the percentage doesn't move for a stretch
- * (the backend ticker only updates every couple of seconds, and worker
- * stages can take a minute or more between progress events on slower models).
- */
-function knowledgeElapsedLabel(artifact: KnowledgeArtifact, now: number): string | null {
-  if (artifact.status !== "GENERATING" && artifact.status !== "PENDING") return null;
-  if (!artifact.updatedAt) return null;
-  const updated = new Date(artifact.updatedAt).getTime();
-  if (Number.isNaN(updated)) return null;
-  const elapsedSec = Math.max(0, Math.floor((now - updated) / 1000));
-  if (elapsedSec < 5) return null;
-  if (elapsedSec < 60) return `${elapsedSec}s since last update`;
-  const m = Math.floor(elapsedSec / 60);
-  const s = elapsedSec % 60;
-  return `${m}m ${s}s since last update`;
-}
-
-function knowledgeJobProgressLabel(job: RepoJobView): string {
-  if (job.progress_message?.trim()) return job.progress_message.trim();
-  if (job.progress_phase === "queued") return "Waiting for a generation slot";
-  if (job.progress_phase === "snapshot") return "Preparing the repository snapshot";
-  if (job.progress_phase === "llm") return "LLM completed, persisting the result";
-  if (job.progress_phase === "backoff") return "Waiting for model backend to recover";
-  if (job.status === "pending") return "Waiting for a generation slot";
-  return "Generating artifact";
-}
-
 function repoJobReuseLabel(job: RepoJobView | null | undefined): string | null {
   const reused = job?.reused_summaries ?? 0;
   const cached = job?.cached_nodes_loaded ?? 0;
@@ -525,84 +492,92 @@ function renderCliffNotesSectionProvenance(section: KnowledgeSection) {
   );
 }
 
+/**
+ * Adapts a KnowledgeArtifact (the durable record) to the canonical
+ * LLMJobView shape so renderKnowledgeProgress can hand it to the shared
+ * JobProgress component when no live job exists. Picks status from the
+ * artifact's own status field and threads progress fields through.
+ */
+/**
+ * Adapts the current repository understanding to an LLMJobView when the
+ * orchestrator's live activity feed has no in-flight job for it. Lets the
+ * shared JobProgress component drive the understanding panel so it tracks
+ * with the popover and admin monitor instead of reimplementing the bar.
+ *
+ * Prefers the live job when present — that's the same source the popover
+ * and monitor read, which is what the user wants ("they should use the
+ * same code"). Falls back to the durable understanding row only when
+ * there's no live job (e.g. the activity feed is stale or the row was
+ * just rehydrated from the DB).
+ */
+function understandingProgressJobView(
+  liveJob: RepoJobView | null | undefined,
+  understanding: RepositoryUnderstanding | null | undefined,
+): LLMJobView {
+  if (liveJob && (liveJob.status === "pending" || liveJob.status === "generating")) {
+    return liveJob;
+  }
+  const updated = understanding?.updatedAt ?? new Date().toISOString();
+  const elapsed = updated
+    ? Math.max(0, Date.now() - new Date(updated).getTime())
+    : 0;
+  const phase = understanding?.progressPhase ?? undefined;
+  return {
+    id: understanding?.id ?? "understanding",
+    subsystem: "knowledge",
+    job_type: "build_repository_understanding",
+    status: "generating",
+    progress: understanding?.progress ?? 0,
+    progress_phase: phase,
+    progress_message: understanding?.progressMessage ?? undefined,
+    elapsed_ms: elapsed,
+    updated_at: updated,
+  };
+}
+
+function artifactAsJobView(artifact: KnowledgeArtifact): LLMJobView {
+  const status: LLMJobView["status"] =
+    artifact.status === "PENDING"
+      ? "pending"
+      : artifact.status === "GENERATING"
+        ? "generating"
+        : artifact.status === "FAILED"
+          ? "failed"
+          : artifact.status === "STALE"
+            ? "ready"
+            : "ready";
+  const updated = artifact.updatedAt;
+  const elapsed = updated
+    ? Math.max(0, Date.now() - new Date(updated).getTime())
+    : 0;
+  return {
+    id: artifact.id,
+    subsystem: "knowledge",
+    job_type: artifact.type.toLowerCase(),
+    status,
+    progress: artifact.progress,
+    progress_phase: artifact.progressPhase ?? undefined,
+    progress_message: artifact.progressMessage ?? undefined,
+    elapsed_ms: elapsed,
+    updated_at: updated,
+  };
+}
+
 function renderKnowledgeProgress(artifact: KnowledgeArtifact, waitingLabel: string, job?: RepoJobView | null) {
   const liveJob = job && (job.status === "pending" || job.status === "generating") ? job : null;
-  const heartbeat = liveJob ? formatHeartbeatAge(liveJob.updated_at) : null;
-  const isCliffNotes = artifact.type === "CLIFF_NOTES";
-  const label = liveJob
-    ? (liveJob.status === "pending"
-      ? waitingLabel
-      : liveJob.progress >= 0.9
-        ? "Finalizing"
-        : "Generating")
-    : artifact.status === "PENDING"
-      ? waitingLabel
-      : knowledgeQueueLabel(artifact);
-  const progress = liveJob ? liveJob.progress : artifact.progress;
-  const baseProgressLabel = liveJob ? knowledgeJobProgressLabel(liveJob) : knowledgeProgressLabel(artifact);
-  const activeFallbackLabel = isCliffNotes && liveJob?.status === "generating" && progress >= 0.6 && progress < 0.96
-    ? "Building the repository summary tree. Slow leaves may fall back and continue."
-    : null;
-  const displayLabel = activeFallbackLabel || baseProgressLabel;
-  // Surface elapsed-since-last-update so the panel feels alive even when the
-  // backend ticker pauses between progress writes (the worker can sit on a
-  // single LLM call for tens of seconds on slow models). Prefer the live-job
-  // heartbeat when available; otherwise fall back to the artifact's own
-  // updatedAt so the artifact-only path also gets a "still working" cue.
-  const fallbackElapsed = !heartbeat ? knowledgeElapsedLabel(artifact, Date.now()) : null;
-  const progressLabel = heartbeat && liveJob?.status === "generating"
-    ? `${displayLabel} · Last heartbeat ${heartbeat}`
-    : fallbackElapsed
-      ? `${displayLabel} · ${fallbackElapsed}`
-      : displayLabel;
+  const sourceJob = liveJob ?? artifactAsJobView(artifact);
   return (
-    <div className="mb-5 space-y-1">
-      <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
-        <span>{label}</span>
-        <span>{Math.round(progress * 100)}%</span>
-      </div>
-      <div className="text-xs text-[var(--text-tertiary)]">{progressLabel}</div>
-      <progress
-        className="h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--bg-hover)] [&::-webkit-progress-value]:bg-[var(--accent-primary)] [&::-moz-progress-bar]:bg-[var(--accent-primary)]"
-        max={100}
-        value={Math.max(progress * 100, 5)}
-      />
+    <div className="mb-5">
+      <JobProgress job={sourceJob} variant="panel" pendingLabel={waitingLabel} />
     </div>
   );
 }
 
-function formatQueueEta(ms?: number): string | null {
-  if (!ms || ms <= 0) return null;
-  const seconds = Math.ceil(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.ceil(seconds / 60);
-  return `${minutes}m`;
-}
-
-function formatHeartbeatAge(iso?: string): string | null {
-  if (!iso) return null;
-  const ts = new Date(iso).getTime();
-  if (!ts || Number.isNaN(ts)) return null;
-  const diff = Math.max(0, Date.now() - ts);
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ago`;
-}
-
-function formatElapsedMs(ms?: number): string | null {
-  if (!ms || ms <= 0) return null;
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rem = seconds % 60;
-  if (minutes < 60) return rem > 0 ? `${minutes}m ${rem}s` : `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remMin = minutes % 60;
-  return remMin > 0 ? `${hours}h ${remMin}m` : `${hours}h`;
-}
+// Local aliases delegate to the shared LLM-progress helpers — kept named so
+// the surrounding UI code reads the same as before, but a single source of
+// truth lives in components/llm/job-progress.tsx.
+const formatHeartbeatAge = sharedFormatHeartbeatAge;
+const formatElapsedMs = sharedFormatElapsedMs;
 
 function repoJobStatusLabel(job: RepoJobView | null | undefined): string | null {
   if (!job) return null;
@@ -702,41 +677,9 @@ interface ExecutionPathResult {
   steps: ExecutionPathStep[];
 }
 
-interface RepoJobView {
-  id: string;
-  subsystem: string;
-  job_type: string;
-  status: "pending" | "generating" | "ready" | "failed" | "cancelled";
-  progress: number;
-  progress_phase?: string;
-  progress_message?: string;
-  error_code?: string;
-  error_message?: string;
-  error_title?: string;
-  error_hint?: string;
-  retry_count: number;
-  max_attempts: number;
-  attached_requests: number;
-  reused_summaries?: number;
-  leaf_cache_hits?: number;
-  file_cache_hits?: number;
-  package_cache_hits?: number;
-  root_cache_hits?: number;
-  cached_nodes_loaded?: number;
-  total_nodes?: number;
-  resume_stage?: string;
-  skipped_leaf_units?: number;
-  skipped_file_units?: number;
-  skipped_package_units?: number;
-  skipped_root_units?: number;
-  artifact_id?: string;
-  repo_id?: string;
-  queue_position?: number;
-  queue_depth?: number;
-  estimated_wait_ms?: number;
-  elapsed_ms: number;
-  updated_at: string;
-}
+// Repo-page activity-feed job. Identical to the canonical LLMJobView; kept
+// as a named alias so it reads naturally in the surrounding code.
+type RepoJobView = LLMJobView;
 
 interface RepoJobActivityResponse {
   active: RepoJobView[];
@@ -2770,43 +2713,12 @@ export default function RepositoryDetailPage() {
                     ) : null}
                   </div>
                   {understandingBuilding ? (
-                    <div className="mt-3 space-y-1">
-                      {(() => {
-                        const liveJob = understandingJob && (understandingJob.status === "pending" || understandingJob.status === "generating") ? understandingJob : null;
-                        const progress = liveJob ? liveJob.progress : (currentUnderstanding?.progress ?? 0);
-                        const progressMsg = liveJob?.progress_message?.trim() || currentUnderstanding?.progressMessage?.trim() || null;
-                        const phase = liveJob?.progress_phase || currentUnderstanding?.progressPhase || null;
-                        const displayMsg = progressMsg
-                          ? progressMsg
-                          : phase === "queued"
-                            ? "Waiting for a generation slot"
-                            : phase === "generating"
-                              ? "Building understanding"
-                              : "Starting build";
-                        const heartbeat = liveJob ? formatHeartbeatAge(liveJob.updated_at) : null;
-                        const elapsed = liveJob ? formatElapsedMs(liveJob.elapsed_ms) : null;
-                        const statusLine = heartbeat && elapsed
-                          ? `${displayMsg} · alive ${heartbeat} · elapsed ${elapsed}`
-                          : heartbeat
-                            ? `${displayMsg} · alive ${heartbeat}`
-                            : elapsed
-                              ? `${displayMsg} · elapsed ${elapsed}`
-                              : displayMsg;
-                        return (
-                          <>
-                            <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
-                              <span>{liveJob?.status === "pending" ? "Queued" : "Generating"}</span>
-                              <span>{Math.round(Math.max(progress, 0.02) * 100)}%</span>
-                            </div>
-                            <div className="text-xs text-[var(--text-tertiary)]">{statusLine}</div>
-                            <progress
-                              className="h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--bg-hover)] [&::-webkit-progress-value]:bg-[var(--accent-primary)] [&::-moz-progress-bar]:bg-[var(--accent-primary)]"
-                              max={100}
-                              value={Math.max(progress * 100, 5)}
-                            />
-                          </>
-                        );
-                      })()}
+                    <div className="mt-3">
+                      <JobProgress
+                        job={understandingProgressJobView(understandingJob, currentUnderstanding)}
+                        variant="panel"
+                        pendingLabel="Queued"
+                      />
                     </div>
                   ) : null}
                   {understandingDedupeNote ? (
@@ -3036,7 +2948,7 @@ export default function RepositoryDetailPage() {
                                       {job.status === "failed" ? (job.error_title || "Failed") : job.status === "pending" ? "Queued" : job.status === "generating" ? "Generating" : job.status === "cancelled" ? "Cancelled" : "Completed"}
                                       {job.progress_message ? ` · ${job.progress_message}` : ""}
                                       {repoJobReuseLabel(job) ? ` · ${repoJobReuseLabel(job)}` : ""}
-                                      {job.attached_requests > 1 ? ` · shared by ${job.attached_requests}` : ""}
+                                      {job.attached_requests && job.attached_requests > 1 ? ` · shared by ${job.attached_requests}` : ""}
                                     </span>
                                     <span>{new Date(job.updated_at).toLocaleTimeString()}</span>
                                   </div>

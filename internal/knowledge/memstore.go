@@ -79,6 +79,14 @@ func (s *MemStore) StoreRepositoryUnderstanding(u *RepositoryUnderstanding) (*Re
 	u.UpdatedAt = now
 
 	stored := *u
+	// See knowledge_store.go: progress fields are only meaningful while a
+	// build is actively running. Mirror that invariant in the in-memory store
+	// so unit tests and the OSS no-DB path behave identically to SurrealDB.
+	if !stored.Stage.IsRunning() {
+		stored.Progress = 0
+		stored.ProgressPhase = ""
+		stored.ProgressMessage = ""
+	}
 	s.understandings[stored.ID] = &stored
 	return &stored, nil
 }
@@ -437,6 +445,9 @@ func (s *MemStore) MarkRepositoryUnderstandingNeedsRefresh(repoID string) error 
 		}
 		if u.Stage == UnderstandingReady || u.Stage == UnderstandingFirstPassReady {
 			u.Stage = UnderstandingNeedsRefresh
+			u.Progress = 0
+			u.ProgressPhase = ""
+			u.ProgressMessage = ""
 			u.UpdatedAt = now
 		}
 	}
@@ -450,6 +461,12 @@ func (s *MemStore) UpdateRepositoryUnderstandingProgress(id string, progress flo
 	u := s.understandings[id]
 	if u == nil {
 		return fmt.Errorf("understanding %s not found", id)
+	}
+	// Mirror the SurrealDB heartbeat gate: a late heartbeat that arrives
+	// after the build has already moved to a terminal stage must not
+	// re-stamp progress text.
+	if !u.Stage.IsRunning() {
+		return nil
 	}
 	u.Progress = progress
 	if phase != "" {

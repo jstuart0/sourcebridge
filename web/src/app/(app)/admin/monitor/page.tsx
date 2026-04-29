@@ -10,6 +10,12 @@ import { Panel } from "@/components/ui/panel";
 import { StatCard } from "@/components/ui/stat-card";
 import { authFetch } from "@/lib/auth-fetch";
 import { normalizeActivityResponse } from "@/lib/llm/activity";
+import {
+  JobProgress,
+  formatElapsedMs,
+  jobReuseSummary,
+} from "@/components/llm/job-progress";
+import type { LLMJobView } from "@/lib/llm/job-types";
 import { disableJobAlerts, enableJobAlerts, jobAlertsEnabled, notifyJobEvent } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 
@@ -35,51 +41,21 @@ import { cn } from "@/lib/utils";
 
 type Status = "pending" | "generating" | "ready" | "failed" | "cancelled";
 
-interface JobView {
-  id: string;
-  subsystem: string;
-  job_type: string;
+// Monitor-specific extension of the shared LLMJobView. Adds the admin-only
+// fields the activity endpoint surfaces (target_key, model details, token
+// counts) on top of the canonical shape so the same JobProgress component
+// can render this and the popover/repo-page jobs identically.
+interface JobView extends LLMJobView {
   target_key: string;
   strategy?: string;
   model?: string;
-  priority?: "interactive" | "maintenance" | "prewarm";
-  generation_mode?: "classic" | "understanding_first";
-  status: Status;
-  progress: number;
-  progress_phase?: string;
-  progress_message?: string;
-  error_code?: string;
-  error_message?: string;
-  error_title?: string;
-  error_hint?: string;
   retry_count: number;
   max_attempts: number;
   attached_requests: number;
   input_tokens: number;
   output_tokens: number;
   snapshot_bytes: number;
-  reused_summaries?: number;
-  leaf_cache_hits?: number;
-  file_cache_hits?: number;
-  package_cache_hits?: number;
-  root_cache_hits?: number;
-  cached_nodes_loaded?: number;
-  total_nodes?: number;
-  resume_stage?: string;
-  skipped_leaf_units?: number;
-  skipped_file_units?: number;
-  skipped_package_units?: number;
-  skipped_root_units?: number;
-  artifact_id?: string;
-  repo_id?: string;
-  queue_position?: number;
-  queue_depth?: number;
-  estimated_wait_ms?: number;
-  elapsed_ms: number;
   created_at: string;
-  started_at?: string;
-  updated_at: string;
-  completed_at?: string;
 }
 
 interface JobLogView {
@@ -167,15 +143,6 @@ interface ActivityResponse {
 
 const POLL_INTERVAL_MS = 2000;
 
-function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rem = seconds % 60;
-  return rem > 0 ? `${minutes}m ${rem}s` : `${minutes}m`;
-}
-
 function formatRelative(iso: string): string {
   if (!iso) return "";
   const d = new Date(iso).getTime();
@@ -210,31 +177,6 @@ function statusDot(status: Status): string {
     default:
       return "bg-gray-400";
   }
-}
-
-function formatQueueEta(ms?: number): string | null {
-  if (!ms || ms <= 0) return null;
-  const seconds = Math.ceil(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.ceil(seconds / 60)}m`;
-}
-
-function jobReuseSummary(job: Pick<JobView, "reused_summaries" | "leaf_cache_hits" | "file_cache_hits" | "package_cache_hits" | "root_cache_hits" | "cached_nodes_loaded" | "resume_stage">): string | null {
-  const reused = job.reused_summaries ?? 0;
-  const cached = job.cached_nodes_loaded ?? 0;
-  const parts = [
-    cached > 0 ? `${cached} cached loaded` : null,
-    job.resume_stage ? `resume ${job.resume_stage}` : null,
-    job.leaf_cache_hits ? `${job.leaf_cache_hits} leaf` : null,
-    job.file_cache_hits ? `${job.file_cache_hits} file` : null,
-    job.package_cache_hits ? `${job.package_cache_hits} package` : null,
-    job.root_cache_hits ? `${job.root_cache_hits} root` : null,
-  ].filter(Boolean);
-  if (reused <= 0 && parts.length === 0) return null;
-  if (reused > 0) {
-    return parts.length > 0 ? `${reused} reused · ${parts.join(" · ")}` : `${reused} reused`;
-  }
-  return parts.join(" · ");
 }
 
 function formatGenerationMode(mode?: JobView["generation_mode"]): string | null {
@@ -465,12 +407,12 @@ export default function MonitorPage() {
         <StatCard
           label="Succeeded (last hour)"
           value={overall?.succeeded ?? "—"}
-          detail={overall?.p50_latency_ms ? `p50 ${formatElapsed(overall.p50_latency_ms)}` : undefined}
+          detail={overall?.p50_latency_ms ? `p50 ${formatElapsedMs(overall.p50_latency_ms)}` : undefined}
         />
         <StatCard
           label="Failed (last hour)"
           value={overall?.failed ?? "—"}
-          detail={overall?.p95_latency_ms ? `p95 ${formatElapsed(overall.p95_latency_ms)}` : undefined}
+          detail={overall?.p95_latency_ms ? `p95 ${formatElapsedMs(overall.p95_latency_ms)}` : undefined}
         />
         <StatCard
           label="Reused summaries"
@@ -520,11 +462,11 @@ export default function MonitorPage() {
                   </div>
                   <div>
                     <div className="text-[var(--text-tertiary)]">p50 latency</div>
-                    <div className="font-medium text-[var(--text-primary)]">{rollup.p50_latency_ms ? formatElapsed(rollup.p50_latency_ms) : "—"}</div>
+                    <div className="font-medium text-[var(--text-primary)]">{rollup.p50_latency_ms ? formatElapsedMs(rollup.p50_latency_ms) : "—"}</div>
                   </div>
                   <div>
                     <div className="text-[var(--text-tertiary)]">p95 latency</div>
-                    <div className="font-medium text-[var(--text-primary)]">{rollup.p95_latency_ms ? formatElapsed(rollup.p95_latency_ms) : "—"}</div>
+                    <div className="font-medium text-[var(--text-primary)]">{rollup.p95_latency_ms ? formatElapsedMs(rollup.p95_latency_ms) : "—"}</div>
                   </div>
                   <div>
                     <div className="text-[var(--text-tertiary)]">Reused summaries</div>
@@ -681,7 +623,6 @@ function ActiveJobCard({
   onSelect: (job: JobView) => void;
   onCancel: (jobId: string) => Promise<void>;
 }) {
-  const progressPct = Math.max(5, Math.round(job.progress * 100));
   return (
     <div
       role="button"
@@ -705,28 +646,10 @@ function ActiveJobCard({
         <span className={cn("mt-1 inline-block h-2.5 w-2.5 rounded-full", statusDot(job.status))} />
       </div>
 
-      <div className="space-y-1">
-        <div className="flex justify-between text-xs text-[var(--text-secondary)]">
-          <span>{job.progress_message || job.progress_phase || "Working…"}</span>
-          <span>{progressPct}%</span>
-        </div>
-        {(job.status === "pending" || job.progress_phase === "queued") && job.queue_position ? (
-          <div className="text-[11px] text-[var(--text-tertiary)]">
-            {job.progress_phase === "queued" && job.status !== "pending" ? "Slot wait" : "Queue"} #{job.queue_position}
-            {job.queue_depth ? ` of ${job.queue_depth}` : ""}
-            {formatQueueEta(job.estimated_wait_ms) ? ` · ~${formatQueueEta(job.estimated_wait_ms)}` : ""}
-          </div>
-        ) : null}
-        <div className="h-1.5 overflow-hidden rounded-full bg-[var(--bg-subtle)]">
-          <div
-            className="h-full rounded-full bg-[color:var(--color-accent,#3b82f6)] transition-all"
-            style={{ width: `${progressPct}%` }}
-          />
-        </div>
-      </div>
+      <JobProgress job={job} variant="card" />
 
       <div className="flex items-center justify-between gap-2 text-xs text-[var(--text-tertiary)]">
-        <span>{formatElapsed(job.elapsed_ms)}</span>
+        <span>{formatElapsedMs(job.elapsed_ms)}</span>
         <span className="flex items-center gap-2">
           {formatGenerationMode(job.generation_mode) ? <span>{formatGenerationMode(job.generation_mode)}</span> : null}
           {formatPriority(job.priority) ? <span>{formatPriority(job.priority)}</span> : null}
@@ -805,7 +728,7 @@ function RecentHistoryTable({
               <td className="py-3 pr-3 text-[var(--text-primary)]">{job.job_type}</td>
               <td className="py-3 pr-3 text-[var(--text-secondary)]">{job.subsystem}</td>
               <td className="py-3 pr-3 text-[var(--text-secondary)]">
-                {formatElapsed(job.elapsed_ms)}
+                {formatElapsedMs(job.elapsed_ms)}
               </td>
               <td className="py-3 pr-3 text-[var(--text-secondary)]">
                 {formatRelative(job.updated_at)}
@@ -867,7 +790,7 @@ function JobDetailDrawer({ job, onClose }: { job: JobView; onClose: () => void }
               {job.status}
             </span>
             <span className="text-xs text-[var(--text-secondary)]">
-              · {formatElapsed(job.elapsed_ms)}
+              · {formatElapsedMs(job.elapsed_ms)}
             </span>
           </div>
           {job.progress_message ? (
