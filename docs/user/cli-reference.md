@@ -12,6 +12,12 @@ deeper coverage.
 | `--config` | Config file path | `~/.sourcebridge/config.yaml` |
 | `--api-url` | API server URL | `http://localhost:8080` |
 | `--verbose` | Enable verbose output | `false` |
+| `--version` | Print the binary version and exit | — |
+
+The `--version` flag prints `sourcebridge version <X>` to stdout. Local
+builds report `dev`; release builds carry the tag (e.g. `v0.7.3`). The
+one-line installer (`scripts/install.sh`) uses `--version` to detect
+upgrades vs. fresh installs.
 
 ---
 

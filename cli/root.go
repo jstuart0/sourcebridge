@@ -20,6 +20,18 @@ providing bidirectional traceability, multi-level code comprehension, structured
 reviews, and architecture awareness.`,
 }
 
+// SetVersion populates the cobra Version field so `sourcebridge --version`
+// works. Called from cmd/sourcebridge/main.go with the value of main.version,
+// which is overridden at build time via -ldflags="-X main.version=vX.Y.Z".
+//
+// We use SetVersionTemplate to format as "sourcebridge version <X>" so the
+// installer's `awk '{print $NF}'` upgrade-detection works without parsing
+// JSON.
+func SetVersion(v string) {
+	rootCmd.Version = v
+	rootCmd.SetVersionTemplate("sourcebridge version {{.Version}}\n")
+}
+
 // Execute runs the root command.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {

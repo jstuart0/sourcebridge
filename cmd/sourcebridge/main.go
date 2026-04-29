@@ -6,6 +6,13 @@ package main
 
 import "github.com/sourcebridge/sourcebridge/cli"
 
+// version is overridden at build time via -ldflags="-X main.version=vX.Y.Z".
+// The release workflow at .github/workflows/oss-release.yml already passes
+// this flag; before this slice the symbol did not exist so the flag was a
+// silent no-op. Local/dev builds keep the literal "dev" value.
+var version = "dev"
+
 func main() {
+	cli.SetVersion(version)
 	cli.Execute()
 }
