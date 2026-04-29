@@ -656,3 +656,148 @@ func TestMCPProxy_NoToken_FailsFast(t *testing.T) {
 		t.Fatal("newProxy returned nil")
 	}
 }
+
+// TestMCPProxy_DrainCancelsNotificationWaitingOnSemaphore is the codex r2b L
+// guard: a no-id notification that's blocked waiting for a semaphore slot
+// when stdin closes must not POST to the server after drain begins. Before
+// the fix, synthetic registry entries were created only AFTER the worker
+// acquired the semaphore — leaving a window where drain could not target
+// the waiting goroutine.
+//
+// Test design: max-inflight=1. We feed `slow_op` first; once its server
+// handler enters (so we know it owns the only slot), we feed the
+// notification + close stdin. The notification's goroutine spawns and
+// blocks on the saturated semaphore. Drain begins; at its deadline, all
+// registered entries (including the pre-spawned synthetic notification
+// entry) get their cancel called. The notification exits without POSTing.
+func TestMCPProxy_DrainCancelsNotificationWaitingOnSemaphore(t *testing.T) {
+	f, srv := newFakeMCPServer(t)
+	f.on("initialize", func(t *testing.T, w http.ResponseWriter, r *http.Request, msg map[string]interface{}) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Mcp-Session-Id", f.defaultSess)
+		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"result":{"protocolVersion":"2025-03-26"}}`, msg["id"])
+	})
+	// "slow_op" holds the only semaphore slot. It blocks until the request
+	// context cancels — which happens when drain hits its deadline and
+	// cancels the registered entry. Signals on slowEntered when the handler
+	// is in flight on the server side.
+	slowEntered := make(chan struct{}, 1)
+	f.on("slow_op", func(t *testing.T, w http.ResponseWriter, r *http.Request, msg map[string]interface{}) {
+		select {
+		case slowEntered <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"error":{"code":-32000,"message":"cancelled"}}`, msg["id"])
+	})
+	// "notifications/late" should never arrive — it's queued behind slow_op
+	// on the semaphore, and drain must cancel it before it gets a slot.
+	f.on("notifications/late", func(t *testing.T, w http.ResponseWriter, _ *http.Request, _ map[string]interface{}) {
+		// If we get here, the test will fail below.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	// Shrink the drain timeout so the test runs in <1s. Save and restore.
+	prevDrain := mcpProxyDrainTimeout
+	mcpProxyDrainTimeout = 200 * time.Millisecond
+	defer func() { mcpProxyDrainTimeout = prevDrain }()
+
+	origStdin := os.Stdin
+	defer func() { os.Stdin = origStdin }()
+	rPipe, wPipe, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdin = rPipe
+
+	// Feed initialize + slow_op first, then wait until the server is sitting
+	// inside the slow_op handler (= slot held), THEN feed notification +
+	// close stdin. This removes the slow-vs-notification race for the
+	// semaphore slot — slow_op deterministically owns the slot when the
+	// notification goroutine starts.
+	go func() {
+		_, _ = wPipe.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n"))
+		_, _ = wPipe.Write([]byte(`{"jsonrpc":"2.0","id":10,"method":"slow_op","params":{}}` + "\n"))
+		select {
+		case <-slowEntered:
+		case <-time.After(2 * time.Second):
+			t.Errorf("slow_op handler did not enter within 2s")
+		}
+		_, _ = wPipe.Write([]byte(`{"jsonrpc":"2.0","method":"notifications/late","params":{}}` + "\n"))
+		// Give the proxy a beat to dispatch + register the notification.
+		time.Sleep(50 * time.Millisecond)
+		_ = wPipe.Close()
+	}()
+
+	prevVerbose := mcpProxyVerbose
+	mcpProxyVerbose = true
+	defer func() { mcpProxyVerbose = prevVerbose }()
+
+	var outBuf, errBuf bytes.Buffer
+	p := newProxy(srv.URL, "ca_test", &outBuf, &errBuf)
+	p.inflight = make(chan struct{}, 1) // saturated by slow_op
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = p.Run(ctx)
+
+	// notifications/late must NOT have reached the server.
+	if got := f.requestCount("notifications/late"); got != 0 {
+		t.Errorf("notifications/late POSTed after drain cancellation; count=%d\nstderr:\n%s", got, errBuf.String())
+	}
+}
+
+// TestMCPProxy_ValidateJSONRPCRejectsMalformedResponses is the codex r2b M
+// guard. validateJSONRPC must reject:
+//   - response missing both result and error
+//   - response containing both result and error
+//   - response carrying a method field
+//   - error object missing code or message
+//   - id mismatch when expectedID is non-empty
+//
+// validateJSONRPCAny (used for SSE streaming) accepts a bare notification
+// (method, no id) but still rejects malformed responses.
+func TestMCPProxy_ValidateJSONRPCRejectsMalformedResponses(t *testing.T) {
+	expectedID := json.RawMessage(`2`)
+
+	cases := []struct {
+		name string
+		body string
+		want bool // true = should validate; false = should be rejected
+	}{
+		{"valid result", `{"jsonrpc":"2.0","id":2,"result":{}}`, true},
+		{"valid error", `{"jsonrpc":"2.0","id":2,"error":{"code":-1,"message":"x"}}`, true},
+		{"missing both result and error", `{"jsonrpc":"2.0","id":2}`, false},
+		{"both result and error", `{"jsonrpc":"2.0","id":2,"result":{},"error":{"code":-1,"message":"x"}}`, false},
+		{"response carrying method", `{"jsonrpc":"2.0","id":2,"method":"foo","result":{}}`, false},
+		{"error missing code", `{"jsonrpc":"2.0","id":2,"error":{"message":"x"}}`, false},
+		{"error missing message", `{"jsonrpc":"2.0","id":2,"error":{"code":-1}}`, false},
+		{"id mismatch", `{"jsonrpc":"2.0","id":99,"result":{}}`, false},
+		{"missing jsonrpc", `{"id":2,"result":{}}`, false},
+		{"wrong jsonrpc version", `{"jsonrpc":"1.0","id":2,"result":{}}`, false},
+		{"non-JSON body", `not json`, false},
+		{"empty body", ``, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ok := validateJSONRPC([]byte(tc.body), expectedID)
+			if ok != tc.want {
+				t.Errorf("validateJSONRPC(%q) = %v; want %v", tc.body, ok, tc.want)
+			}
+		})
+	}
+
+	// validateJSONRPCAny must accept a notification but still reject the
+	// "result + error both" malformed response.
+	if _, ok := validateJSONRPCAny([]byte(`{"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":0.5}}`)); !ok {
+		t.Error("validateJSONRPCAny must accept a notification frame")
+	}
+	if _, ok := validateJSONRPCAny([]byte(`{"jsonrpc":"2.0","id":2,"result":{},"error":{"code":-1,"message":"x"}}`)); ok {
+		t.Error("validateJSONRPCAny must reject result+error response")
+	}
+	if _, ok := validateJSONRPCAny([]byte(`{"jsonrpc":"2.0","id":2,"method":"foo"}`)); ok {
+		t.Error("validateJSONRPCAny must reject id+method (neither pure response nor pure notification)")
+	}
+}

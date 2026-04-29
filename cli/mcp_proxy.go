@@ -68,6 +68,11 @@ var (
 	mcpProxyVerbose        bool
 	mcpProxyMaxInflight    int
 	mcpProxyRequestTimeout time.Duration
+	// mcpProxyDrainTimeout bounds how long Run() waits for in-flight requests
+	// to finish after stdin EOFs. After this, drain cancels all registered
+	// entries and waits a short grace window before returning. Tunable via
+	// the package var so tests can shrink it without exposing a flag.
+	mcpProxyDrainTimeout = 30 * time.Second
 )
 
 func init() {
@@ -147,9 +152,10 @@ type proxy struct {
 	token     string
 
 	out io.Writer // stdout, protocol channel — guarded by outMu
-	err io.Writer // stderr, diagnostics
+	err io.Writer // stderr, diagnostics — guarded by errMu (verbosef path)
 
 	outMu sync.Mutex
+	errMu sync.Mutex
 
 	hc *http.Client
 
@@ -254,7 +260,7 @@ func (p *proxy) Run(ctx context.Context) error {
 	}
 
 	// Stdin closed. Drain in-flight (with deadline), then DELETE session.
-	drainCtx, drainCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), mcpProxyDrainTimeout)
 	defer drainCancel()
 	p.drain(drainCtx)
 	cancelAll()
@@ -513,17 +519,63 @@ func (p *proxy) dispatchRequest(parent context.Context, raw []byte, id json.RawM
 		p.regMu.Unlock()
 	}
 
+	// For no-id notifications, register a synthetic registry entry BEFORE
+	// the goroutine spawns so the drain path can cancel the worker at any
+	// point — including while it waits on the semaphore (codex r2b L). The
+	// per-request context is created here too; the cancel is stored on the
+	// registry entry from the start. Nanosecond keys keep synthetic entries
+	// unique within a single proxy lifetime.
+	var (
+		notifKey  string
+		notifCtx  context.Context
+		notifCanc context.CancelFunc
+	)
+	if entry == nil {
+		notifKey = fmt.Sprintf("__notif_%d__", time.Now().UnixNano())
+		notifCtx, notifCanc = context.WithTimeout(parent, mcpProxyRequestTimeout)
+		p.regMu.Lock()
+		p.reg[notifKey] = &requestEntry{id: notifKey, state: stateRunning, cancel: notifCanc}
+		p.regMu.Unlock()
+	}
+
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
 
 		// Wait for a semaphore slot. Cancellation while we wait must
-		// short-circuit BEFORE the POST.
+		// short-circuit BEFORE the POST. We watch:
+		//   - parent.Done() — outer proxy context cancel
+		//   - notifCtx.Done() — drain or per-request timeout for notifs
+		//     (only meaningful for the entry == nil path)
+		// For id-bearing requests, drain triggers entry.cancel() which is
+		// either the placeholder context this goroutine builds post-acquire
+		// OR the per-request context once it's swapped in. For the
+		// pre-acquire window of an id-bearing request, the registry entry's
+		// cancel may be nil (we haven't built its reqCtx yet); we rely on
+		// the entry.state == stateCancelled check after acquiring the slot
+		// to drop the request before the POST.
+		var notifDone <-chan struct{}
+		if entry == nil {
+			notifDone = notifCtx.Done()
+		}
 		select {
 		case p.inflight <- struct{}{}:
 			// got the slot
 		case <-parent.Done():
-			p.unregister(idKey)
+			if entry == nil {
+				notifCanc()
+				p.unregister(notifKey)
+			} else {
+				p.unregister(idKey)
+			}
+			return
+		case <-notifDone:
+			// Drain (or timeout) cancelled this notification before it
+			// reached the semaphore. notifCanc has already fired via
+			// drain; just clean up the registry and exit.
+			notifCanc()
+			p.unregister(notifKey)
+			p.verbosef("dropped cancelled notification %s while waiting on semaphore", method)
 			return
 		}
 		defer func() { <-p.inflight }()
@@ -549,19 +601,16 @@ func (p *proxy) dispatchRequest(parent context.Context, raw []byte, id json.RawM
 			return
 		}
 
-		// No id (notification) — register under a synthetic key so the
-		// drain path can cancel it on shutdown (codex r2 H4). Synthetic
-		// keys collide harmlessly with each other; we use a counter via
-		// time.Now().UnixNano() to keep them unique within a single proxy
-		// lifetime.
-		notifKey := fmt.Sprintf("__notif_%d__", time.Now().UnixNano())
-		reqCtx, cancel := context.WithTimeout(parent, mcpProxyRequestTimeout)
-		p.regMu.Lock()
-		p.reg[notifKey] = &requestEntry{id: notifKey, state: stateRunning, cancel: cancel}
-		p.regMu.Unlock()
-		defer cancel()
+		// No id (notification) — registry entry was already created before
+		// the goroutine spawned (see above). If drain marked us cancelled
+		// while we waited on the semaphore, short-circuit before the POST.
+		defer notifCanc()
 		defer p.unregister(notifKey)
-		p.runWorker(reqCtx, raw, id, method)
+		if notifCtx.Err() != nil {
+			p.verbosef("dropped cancelled notification %s before POST", method)
+			return
+		}
+		p.runWorker(notifCtx, raw, id, method)
 	}()
 }
 
@@ -759,15 +808,19 @@ func (p *proxy) do(ctx context.Context, body []byte, sessionID string) ([]byte, 
 	return respBody, respSession, ct, status, sse, nil
 }
 
-// validateJSONRPC parses body as a JSON-RPC 2.0 message and asserts it
-// carries the expected id. Returns the (canonicalized) bytes when valid.
+// validateJSONRPC parses body as a JSON-RPC 2.0 RESPONSE for the given
+// expectedID. Strict shape (codex r2b M):
 //
-// "Valid JSON-RPC" here means: parses as JSON, has jsonrpc:"2.0", and has
-// either a result or an error field (request-shaped messages — the proxy
-// never receives notifications back from the server in normal flow).
+//   - jsonrpc == "2.0"
+//   - id matches expectedID (when expectedID is non-empty)
+//   - exactly one of result or error (not both, not neither)
+//   - method is absent (responses don't carry method)
+//   - if error is present, it's a JSON-RPC error object (has code + message)
 //
-// expectedID may be nil/empty to skip the id check (used for streaming
-// notifications during a tool call).
+// Returns the original bytes if valid, false otherwise.
+//
+// expectedID may be nil/empty to skip the id check — used by tests and the
+// notification path. Production code paths always pass the originating id.
 func validateJSONRPC(body []byte, expectedID json.RawMessage) ([]byte, bool) {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return nil, false
@@ -777,7 +830,7 @@ func validateJSONRPC(body []byte, expectedID json.RawMessage) ([]byte, bool) {
 		ID      json.RawMessage `json:"id"`
 		Result  json.RawMessage `json:"result"`
 		Error   json.RawMessage `json:"error"`
-		Method  string          `json:"method"`
+		Method  json.RawMessage `json:"method"`
 	}
 	if err := json.Unmarshal(body, &rpc); err != nil {
 		return nil, false
@@ -785,28 +838,94 @@ func validateJSONRPC(body []byte, expectedID json.RawMessage) ([]byte, bool) {
 	if rpc.JSONRPC != "2.0" {
 		return nil, false
 	}
-	// Must be a response (has result or error) OR a notification (has method).
-	if len(rpc.Result) == 0 && len(rpc.Error) == 0 && rpc.Method == "" {
+	// Responses don't carry method.
+	if len(rpc.Method) > 0 {
 		return nil, false
 	}
-	// Optional id check.
-	if len(expectedID) > 0 {
+	// Exactly one of result/error must be present.
+	hasResult := len(rpc.Result) > 0
+	hasError := len(rpc.Error) > 0
+	if hasResult == hasError {
+		return nil, false
+	}
+	// If error is present, validate the inner shape.
+	if hasError {
+		var inner struct {
+			Code    *int   `json:"code"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(rpc.Error, &inner); err != nil {
+			return nil, false
+		}
+		if inner.Code == nil || inner.Message == "" {
+			return nil, false
+		}
+	}
+	// id check: when expectedID is non-empty, matched ids are required.
+	if len(bytes.TrimSpace(expectedID)) > 0 {
 		gotKey := stringifyID(rpc.ID)
 		wantKey := stringifyID(expectedID)
-		if wantKey != "" && gotKey != "" && gotKey != wantKey {
-			// id mismatch — server returned a response for a different
-			// request. Don't forward.
+		if gotKey != wantKey {
 			return nil, false
 		}
 	}
 	return body, true
 }
 
-// validateJSONRPCAny accepts any well-formed JSON-RPC frame (response or
-// notification) without an id check. Used for SSE streaming where progress
-// notifications are forwarded alongside the eventual response.
+// validateJSONRPCAny accepts any well-formed JSON-RPC frame for SSE streaming:
+// either a response (id + result/error, no method) or a notification (method,
+// no id). Each frame still must carry jsonrpc:"2.0".
+//
+// This is intentionally more permissive than validateJSONRPC because progress
+// notifications during a tool call legitimately have method and no id, while
+// the final response has the originating id and no method.
 func validateJSONRPCAny(body []byte) ([]byte, bool) {
-	return validateJSONRPC(body, nil)
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil, false
+	}
+	var rpc struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Result  json.RawMessage `json:"result"`
+		Error   json.RawMessage `json:"error"`
+		Method  json.RawMessage `json:"method"`
+	}
+	if err := json.Unmarshal(body, &rpc); err != nil {
+		return nil, false
+	}
+	if rpc.JSONRPC != "2.0" {
+		return nil, false
+	}
+	hasResult := len(rpc.Result) > 0
+	hasError := len(rpc.Error) > 0
+	hasMethod := len(rpc.Method) > 0
+	hasID := len(bytes.TrimSpace(rpc.ID)) > 0 && string(bytes.TrimSpace(rpc.ID)) != "null"
+	switch {
+	case hasMethod && !hasResult && !hasError && !hasID:
+		// Notification: method present, no id, no result/error. We
+		// require id absent (or null) to distinguish from a JSON-RPC
+		// request frame (which the proxy never expects to receive on
+		// this server→client path).
+		return body, true
+	case !hasMethod && hasID && (hasResult != hasError):
+		// Response: id + exactly one of result/error.
+		if hasError {
+			// validate inner error shape
+			var inner struct {
+				Code    *int   `json:"code"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(rpc.Error, &inner); err != nil {
+				return nil, false
+			}
+			if inner.Code == nil || inner.Message == "" {
+				return nil, false
+			}
+		}
+		return body, true
+	default:
+		return nil, false
+	}
 }
 
 // sseFrameIsTerminal returns true iff body is a JSON-RPC response (has
@@ -934,6 +1053,12 @@ func (p *proxy) verbosef(format string, args ...interface{}) {
 	if !mcpProxyVerbose {
 		return
 	}
+	// Hold errMu so concurrent goroutines don't interleave bytes within a
+	// single line — and so test buffers (bytes.Buffer is not goroutine-safe)
+	// stay race-free under -race. os.Stderr is line-safe at the OS level
+	// but test stderr writers are not.
+	p.errMu.Lock()
+	defer p.errMu.Unlock()
 	fmt.Fprintf(p.err, "mcp-proxy: "+format+"\n", args...)
 }
 
