@@ -59,6 +59,12 @@ var (
 	setupClaudeToken      string
 	setupClaudeNoSave     bool
 	setupClaudeForceToken bool
+
+	// Proxy entry portability (slice 3 of cli-mcp-proxy-and-installer).
+	// When true, the .mcp.json `command` is the bare string "sourcebridge"
+	// (relies on PATH); when false (default) it is the absolute path of
+	// the running binary (works regardless of GUI-launched PATH).
+	setupClaudePortableCommand bool
 )
 
 func init() {
@@ -74,6 +80,10 @@ func init() {
 	setupClaudeCmd.Flags().StringVar(&setupClaudeToken, "token", "", "SourceBridge API token (use --token=ca_... or set SOURCEBRIDGE_API_TOKEN)")
 	setupClaudeCmd.Flags().BoolVar(&setupClaudeNoSave, "no-save", false, "Don't persist --token to ~/.sourcebridge/token (default: persist)")
 	setupClaudeCmd.Flags().BoolVar(&setupClaudeForceToken, "force-token", false, "Overwrite an existing ~/.sourcebridge/token with --token")
+	setupClaudeCmd.Flags().BoolVar(&setupClaudePortableCommand, "portable-command", false,
+		"Write .mcp.json `command` as the bare string \"sourcebridge\" (relies on PATH) "+
+			"instead of the absolute path of the running binary. Use for committed/team-shared .mcp.json files "+
+			"where teammates may install the CLI to a different location.")
 
 	setupCmd.AddCommand(setupClaudeCmd)
 }
@@ -410,7 +420,7 @@ func runSetupClaude(cmd *cobra.Command, args []string) error {
 				Path: ".mcp.json",
 			})
 		} else {
-			_, warn, mcpErr := skillcard.MergeMCPJSON(mcpPath, serverURL, repoID, setupClaudeForce)
+			_, warn, mcpErr := skillcard.MergeMCPJSON(mcpPath, serverURL, repoID, setupClaudePortableCommand, setupClaudeForce)
 			if mcpErr != nil {
 				return mcpErr
 			}
@@ -669,14 +679,15 @@ func resolveRepoName(ctx context.Context, serverURL, repoID string) string {
 // dryRunMCPTag determines the appropriate DiffAction tag for .mcp.json by
 // inspecting the existing file without writing anything.
 //
-// Detection matches the HTTP-transport shape that MergeMCPJSON now writes:
-//   - entry["type"] == "http" AND entry["url"] == expectedURL → UNCHANGED
+// Detection matches the stdio-proxy shape that MergeMCPJSON now writes:
+//   - command is "sourcebridge" (or absolute path ending in /sourcebridge)
+//     AND args[0] == "mcp-proxy" AND --server matches → UNCHANGED
 //   - file absent → CREATE
-//   - any other state (missing, broken JSON, old stdio shape, wrong URL) → MODIFY
+//   - any other state (legacy HTTP shape, broken stdio, wrong URL, custom
+//     command, broken JSON) → MODIFY
 func dryRunMCPTag(mcpPath, serverURL string) string {
 	data, err := os.ReadFile(mcpPath)
 	if err != nil {
-		// File absent.
 		return "CREATE"
 	}
 	var doc map[string]interface{}
@@ -691,10 +702,31 @@ func dryRunMCPTag(mcpPath, serverURL string) string {
 	if entry == nil {
 		return "MODIFY"
 	}
-	// Detect the HTTP-transport shape written by the current MergeMCPJSON.
-	expectedURL := skillcard.MCPExpectedURL(serverURL)
-	if entry["type"] == "http" && entry["url"] == expectedURL {
-		return "UNCHANGED"
+	// Proxy shape: command + args[0]=="mcp-proxy" + --server matches.
+	cmd, _ := entry["command"].(string)
+	if cmd == "sourcebridge" || strings.HasSuffix(cmd, "/sourcebridge") || strings.HasSuffix(cmd, "/sourcebridge.exe") {
+		args, _ := entry["args"].([]interface{})
+		if len(args) > 0 {
+			first, _ := args[0].(string)
+			if first == "mcp-proxy" {
+				expectedServer := strings.TrimRight(serverURL, "/")
+				for i, a := range args {
+					s, _ := a.(string)
+					if s == "--server" && i+1 < len(args) {
+						v, _ := args[i+1].(string)
+						if strings.TrimRight(v, "/") == expectedServer {
+							return "UNCHANGED"
+						}
+					}
+					if strings.HasPrefix(s, "--server=") {
+						v := strings.TrimPrefix(s, "--server=")
+						if strings.TrimRight(v, "/") == expectedServer {
+							return "UNCHANGED"
+						}
+					}
+				}
+			}
+		}
 	}
 	return "MODIFY"
 }

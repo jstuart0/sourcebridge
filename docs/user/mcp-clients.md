@@ -54,32 +54,52 @@ sourcebridge setup claude --server https://<your-host> --repo-id <repo-id>
 
 The command writes `.mcp.json` and `.claude/CLAUDE.md` in the current directory.
 
-### Export the token to your shell — required
+### How `.mcp.json` connects to SourceBridge
 
-> **This step is the most common first-touch failure. Do not skip it.**
+The `.mcp.json` written by `setup claude` uses the **stdio-proxy** shape:
 
-The `.mcp.json` written by `setup claude` contains the literal string
-`Bearer ${SOURCEBRIDGE_API_TOKEN}`. Claude Code expands environment variables
-at launch — not at config-write time. If `SOURCEBRIDGE_API_TOKEN` is not set in
-the shell that starts Claude Code, authentication fails silently.
-
-Add the export to your shell profile and restart Claude Code:
-
-```bash
-# ~/.zshrc  (or ~/.bashrc, or ~/.config/fish/config.fish, etc.)
-export SOURCEBRIDGE_API_TOKEN=ca_...
+```json
+{
+  "mcpServers": {
+    "sourcebridge": {
+      "command": "/Users/<you>/.local/bin/sourcebridge",
+      "args": ["mcp-proxy", "--server", "https://<your-host>"]
+    }
+  }
+}
 ```
 
-Then restart your terminal (or `source ~/.zshrc`) and relaunch Claude Code.
+When Claude Code starts, it spawns `sourcebridge mcp-proxy` as a child
+process. The proxy reads the API token from `~/.sourcebridge/token` (written
+by `sourcebridge login` or by `setup claude --token=…`) and bridges Claude
+Code's stdio MCP messages to the server's `POST /api/v1/mcp/http` endpoint.
+
+**No environment variable required.** Claude Code does not need
+`SOURCEBRIDGE_API_TOKEN` in its launch environment — the proxy reads the
+token directly from disk. This is the design improvement that removes the
+"export to your rc file and restart Claude Code" step.
 
 The `.mcp.json` file contains no literal secret and is safe to commit to
-version control.
+version control. The absolute `command` path embeds machine-specific
+information (each developer's install location); for committed/team-shared
+configs use `--portable-command` to write the bare string `"sourcebridge"`
+instead — teammates then need the binary on `$PATH`.
+
+#### Migrating from the legacy HTTP shape
+
+If you ran `setup claude` before April 2026, your `.mcp.json` may contain
+the legacy HTTP-transport shape with `Bearer ${SOURCEBRIDGE_API_TOKEN}`.
+Re-running `setup claude` against the same server silently migrates that
+exact shape to the proxy shape and writes a `.mcp.json.sb-backup-<timestamp>`
+file. Custom-edited HTTP entries (literal tokens, custom Authorization
+headers, extra fields) require `--force` to migrate, with a clear stderr
+message.
 
 ### Verify the connection
 
 ```bash
 claude mcp list | grep sourcebridge
-# expect: sourcebridge: https://<your-host>/api/v1/mcp/http (HTTP) - ✓ Connected
+# expect: sourcebridge: <abs-path>/sourcebridge mcp-proxy --server https://<your-host> - ✓ Connected
 ```
 
 Or open a Claude Code session and ask: *"List the subsystems of this repo."*

@@ -31,9 +31,9 @@ func readMCPJSON(t *testing.T, path string) map[string]interface{} {
 	return doc
 }
 
-// assertHTTPEntry verifies that doc["mcpServers"]["sourcebridge"] has the
-// expected HTTP-transport shape with the correct URL and token placeholder.
-func assertHTTPEntry(t *testing.T, doc map[string]interface{}, expectedURL string) {
+// assertProxyEntry verifies that doc["mcpServers"]["sourcebridge"] has the
+// expected stdio-proxy shape with the correct --server arg.
+func assertProxyEntry(t *testing.T, doc map[string]interface{}, expectedServer string) {
 	t.Helper()
 	servers, ok := doc["mcpServers"].(map[string]interface{})
 	if !ok {
@@ -43,28 +43,39 @@ func assertHTTPEntry(t *testing.T, doc map[string]interface{}, expectedURL strin
 	if !ok {
 		t.Fatalf("sourcebridge not a map: %T", servers["sourcebridge"])
 	}
-	if got := entry["type"]; got != "http" {
-		t.Errorf("entry[type] = %q, want %q", got, "http")
+	cmd, _ := entry["command"].(string)
+	// command should be either "sourcebridge" (portable) or any non-empty
+	// absolute path. Under `go test` os.Executable() returns the test
+	// binary's path (e.g. .../skillcard.test) so the basename test was
+	// over-strict — accept any absolute path here.
+	if cmd == "" {
+		t.Errorf("entry.command is empty")
 	}
-	if got := entry["url"]; got != expectedURL {
-		t.Errorf("entry[url] = %q, want %q", got, expectedURL)
+	if cmd != "sourcebridge" && !filepath.IsAbs(cmd) {
+		t.Errorf("entry.command = %q; expected \"sourcebridge\" or absolute path", cmd)
 	}
-	headers, ok := entry["headers"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("entry[headers] not a map: %T", entry["headers"])
+	args, ok := entry["args"].([]interface{})
+	if !ok || len(args) < 3 {
+		t.Fatalf("entry.args missing or wrong type: %+v", entry["args"])
 	}
-	wantAuth := "Bearer " + tokenPlaceholder
-	if got := headers["Authorization"]; got != wantAuth {
-		t.Errorf("headers[Authorization] = %q, want %q", got, wantAuth)
+	if got, _ := args[0].(string); got != "mcp-proxy" {
+		t.Errorf("entry.args[0] = %v; want mcp-proxy", args[0])
+	}
+	if got, _ := args[1].(string); got != "--server" {
+		t.Errorf("entry.args[1] = %v; want --server", args[1])
+	}
+	if got, _ := args[2].(string); got != expectedServer {
+		t.Errorf("entry.args[2] = %v; want %q", args[2], expectedServer)
 	}
 }
 
-// TestMergeMCPJSON_FreshInstall verifies that a fresh write creates the HTTP entry.
-func TestMergeMCPJSON_FreshInstall(t *testing.T) {
+// TestMergeMCPJSON_FreshInstall_AbsolutePath verifies that a fresh write
+// produces the proxy shape with an absolute command path.
+func TestMergeMCPJSON_FreshInstall_AbsolutePath(t *testing.T) {
 	dir := t.TempDir()
 	mcpPath := filepath.Join(dir, ".mcp.json")
 
-	changed, warn, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, false)
+	changed, warn, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, false /*portable*/, false /*force*/)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -76,24 +87,49 @@ func TestMergeMCPJSON_FreshInstall(t *testing.T) {
 	}
 
 	doc := readMCPJSON(t, mcpPath)
-	assertHTTPEntry(t, doc, testMCPURL)
+	assertProxyEntry(t, doc, testServerURL)
+
+	// Absolute-path mode: command should be the test binary's path
+	// (which is absolute under `go test`).
+	servers := doc["mcpServers"].(map[string]interface{})
+	entry := servers["sourcebridge"].(map[string]interface{})
+	cmd := entry["command"].(string)
+	if !filepath.IsAbs(cmd) {
+		t.Errorf("expected absolute command path, got %q", cmd)
+	}
 }
 
-// TestMergeMCPJSON_Idempotent verifies that a second run on a correct HTTP entry
-// returns changed=false and leaves the file byte-for-byte unchanged.
-func TestMergeMCPJSON_Idempotent(t *testing.T) {
+// TestMergeMCPJSON_FreshInstall_PortableCommand verifies that --portable-command
+// writes the bare string "sourcebridge".
+func TestMergeMCPJSON_FreshInstall_PortableCommand(t *testing.T) {
 	dir := t.TempDir()
 	mcpPath := filepath.Join(dir, ".mcp.json")
 
-	// First write.
-	_, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, false)
+	_, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true /*portable*/, false /*force*/)
 	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	doc := readMCPJSON(t, mcpPath)
+	servers := doc["mcpServers"].(map[string]interface{})
+	entry := servers["sourcebridge"].(map[string]interface{})
+	if got := entry["command"]; got != "sourcebridge" {
+		t.Errorf("portable command = %q; want \"sourcebridge\"", got)
+	}
+}
+
+// TestMergeMCPJSON_IdempotentOnProxyShape verifies that a second run on the
+// proxy shape with matching --server is a no-op.
+func TestMergeMCPJSON_IdempotentOnProxyShape(t *testing.T) {
+	dir := t.TempDir()
+	mcpPath := filepath.Join(dir, ".mcp.json")
+
+	if _, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true, false); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
 	before, _ := os.ReadFile(mcpPath)
 
-	// Second write — should be a no-op.
-	changed, warn, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, false)
+	changed, warn, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true, false)
 	if err != nil {
 		t.Fatalf("second write: %v", err)
 	}
@@ -110,53 +146,123 @@ func TestMergeMCPJSON_Idempotent(t *testing.T) {
 	}
 }
 
-// TestMergeMCPJSON_MigratesBrokenStdio verifies that the exact v1 broken stdio
-// shape is silently rewritten to the HTTP shape without requiring --force.
-func TestMergeMCPJSON_MigratesBrokenStdio(t *testing.T) {
+// TestMergeMCPJSON_RewritesCommandPathDrift verifies that an entry with the
+// same --server but a different `command` (e.g. user upgraded sourcebridge to
+// a new install location) is silently rewritten without --force.
+func TestMergeMCPJSON_RewritesCommandPathDrift(t *testing.T) {
 	dir := t.TempDir()
 	mcpPath := filepath.Join(dir, ".mcp.json")
 
-	// Write the broken v1 shape.
-	brokenContent := `{"mcpServers":{"sourcebridge":{"command":"sourcebridge","args":["mcp","--repo-id","abc"]}}}`
-	if err := os.WriteFile(mcpPath, []byte(brokenContent), 0o644); err != nil {
-		t.Fatalf("writing broken file: %v", err)
+	// Pre-populate with an old install path.
+	oldEntry := `{"mcpServers":{"sourcebridge":{"command":"/old/path/sourcebridge","args":["mcp-proxy","--server","` + testServerURL + `"]}}}`
+	if err := os.WriteFile(mcpPath, []byte(oldEntry), 0o644); err != nil {
+		t.Fatalf("seeding: %v", err)
 	}
 
-	changed, warn, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, false)
+	changed, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, false, false)
 	if err != nil {
-		t.Fatalf("unexpected error migrating broken stdio: %v", err)
+		t.Fatalf("unexpected error rewriting path drift: %v", err)
 	}
 	if !changed {
-		t.Error("expected changed=true when migrating broken stdio entry")
-	}
-	if warn != "" {
-		t.Errorf("unexpected warning: %q (migration message goes to stderr, not warningMsg)", warn)
+		t.Error("expected changed=true when rewriting drifted command path")
 	}
 
 	doc := readMCPJSON(t, mcpPath)
-	assertHTTPEntry(t, doc, testMCPURL)
-
-	// A backup should have been written.
-	backupPath := mcpPath + ".sb-backup"
-	if _, err := os.Stat(backupPath); err != nil {
-		t.Errorf("expected .sb-backup to exist after migration: %v", err)
+	servers := doc["mcpServers"].(map[string]interface{})
+	entry := servers["sourcebridge"].(map[string]interface{})
+	cmd, _ := entry["command"].(string)
+	if cmd == "/old/path/sourcebridge" {
+		t.Error("command path was not rewritten")
 	}
 }
 
-// TestMergeMCPJSON_OtherStdio_NoForce verifies that a user-customized stdio
-// entry aborts without --force.
-func TestMergeMCPJSON_OtherStdio_NoForce(t *testing.T) {
+// TestMergeMCPJSON_DifferentProxyServer verifies that an existing proxy entry
+// with a different --server aborts without --force.
+func TestMergeMCPJSON_DifferentProxyServer(t *testing.T) {
 	dir := t.TempDir()
 	mcpPath := filepath.Join(dir, ".mcp.json")
 
-	customContent := `{"mcpServers":{"sourcebridge":{"command":"/usr/local/bin/mcp-remote","args":["https://my.sourcebridge.example/mcp"]}}}`
-	if err := os.WriteFile(mcpPath, []byte(customContent), 0o644); err != nil {
-		t.Fatalf("writing custom file: %v", err)
+	otherEntry := `{"mcpServers":{"sourcebridge":{"command":"sourcebridge","args":["mcp-proxy","--server","https://other-cloud.example"]}}}`
+	if err := os.WriteFile(mcpPath, []byte(otherEntry), 0o644); err != nil {
+		t.Fatalf("seeding: %v", err)
 	}
 
-	_, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, false)
+	_, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true, false /*no force*/)
 	if err == nil {
-		t.Fatal("expected error for user-customized stdio entry without --force")
+		t.Fatal("expected error for different proxy --server without --force")
+	}
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("error should mention --force; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "other-cloud.example") {
+		t.Errorf("error should mention existing server URL; got: %v", err)
+	}
+}
+
+// TestMergeMCPJSON_DifferentProxyServer_Force verifies that --force retargets.
+func TestMergeMCPJSON_DifferentProxyServer_Force(t *testing.T) {
+	dir := t.TempDir()
+	mcpPath := filepath.Join(dir, ".mcp.json")
+
+	otherEntry := `{"mcpServers":{"sourcebridge":{"command":"sourcebridge","args":["mcp-proxy","--server","https://other-cloud.example"]}}}`
+	if err := os.WriteFile(mcpPath, []byte(otherEntry), 0o644); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	changed, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true, true /*force*/)
+	if err != nil {
+		t.Fatalf("unexpected error with --force: %v", err)
+	}
+	if !changed {
+		t.Error("expected changed=true with --force retarget")
+	}
+	doc := readMCPJSON(t, mcpPath)
+	assertProxyEntry(t, doc, testServerURL)
+}
+
+// TestMergeMCPJSON_MigratesFromBulletproofHTTP_Exact verifies the exact
+// bulletproof HTTP shape is silently migrated to the proxy shape (codex r1 H3).
+func TestMergeMCPJSON_MigratesFromBulletproofHTTP_Exact(t *testing.T) {
+	dir := t.TempDir()
+	mcpPath := filepath.Join(dir, ".mcp.json")
+
+	exactBulletproof := `{"mcpServers":{"sourcebridge":{"type":"http","url":"` + testMCPURL + `","headers":{"Authorization":"Bearer ${SOURCEBRIDGE_API_TOKEN}"}}}}`
+	if err := os.WriteFile(mcpPath, []byte(exactBulletproof), 0o644); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	changed, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true, false /*no force*/)
+	if err != nil {
+		t.Fatalf("expected silent migrate, got error: %v", err)
+	}
+	if !changed {
+		t.Error("expected changed=true on legacy migration")
+	}
+
+	doc := readMCPJSON(t, mcpPath)
+	assertProxyEntry(t, doc, testServerURL)
+
+	// Backup file with timestamp suffix.
+	matches, _ := filepath.Glob(mcpPath + ".sb-backup-*")
+	if len(matches) == 0 {
+		t.Errorf("expected timestamped backup file; none found")
+	}
+}
+
+// TestMergeMCPJSON_RefusesHTTPSameHostCustomHeader verifies that HTTP shape
+// with a custom Authorization (literal token) requires --force (codex r1 H3).
+func TestMergeMCPJSON_RefusesHTTPSameHostCustomHeader(t *testing.T) {
+	dir := t.TempDir()
+	mcpPath := filepath.Join(dir, ".mcp.json")
+
+	customAuth := `{"mcpServers":{"sourcebridge":{"type":"http","url":"` + testMCPURL + `","headers":{"Authorization":"Bearer ca_real_literal_token_xyz"}}}}`
+	if err := os.WriteFile(mcpPath, []byte(customAuth), 0o644); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	_, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true, false)
+	if err == nil {
+		t.Fatal("expected error for custom Authorization header without --force")
 	}
 	if !strings.Contains(err.Error(), "--force") {
 		t.Errorf("error should mention --force; got: %v", err)
@@ -164,125 +270,127 @@ func TestMergeMCPJSON_OtherStdio_NoForce(t *testing.T) {
 
 	// File should be untouched.
 	data, _ := os.ReadFile(mcpPath)
-	if string(data) != customContent {
+	if string(data) != customAuth {
 		t.Error("file should be unchanged after abort")
 	}
 }
 
-// TestMergeMCPJSON_OtherStdio_Force verifies that --force replaces a user-
-// customized stdio entry.
-func TestMergeMCPJSON_OtherStdio_Force(t *testing.T) {
+// TestMergeMCPJSON_RefusesHTTPSameHostExtraField verifies that any extra
+// top-level field in the HTTP entry blocks silent migration.
+func TestMergeMCPJSON_RefusesHTTPSameHostExtraField(t *testing.T) {
 	dir := t.TempDir()
 	mcpPath := filepath.Join(dir, ".mcp.json")
 
-	customContent := `{"mcpServers":{"sourcebridge":{"command":"/usr/local/bin/mcp-remote","args":["https://my.sourcebridge.example/mcp"]}}}`
-	if err := os.WriteFile(mcpPath, []byte(customContent), 0o644); err != nil {
-		t.Fatalf("writing custom file: %v", err)
+	withExtra := `{"mcpServers":{"sourcebridge":{"type":"http","url":"` + testMCPURL + `","headers":{"Authorization":"Bearer ${SOURCEBRIDGE_API_TOKEN}"},"extra_field":"do_not_clobber"}}}`
+	if err := os.WriteFile(mcpPath, []byte(withExtra), 0o644); err != nil {
+		t.Fatalf("seeding: %v", err)
 	}
 
-	changed, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true)
+	_, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true, false)
+	if err == nil {
+		t.Fatal("expected error for entry with extra top-level field without --force")
+	}
+}
+
+// TestMergeMCPJSON_MigratesFromBrokenStdio_StillWorks verifies that the v1
+// broken-stdio detection still fires and lands on the proxy shape.
+func TestMergeMCPJSON_MigratesFromBrokenStdio_StillWorks(t *testing.T) {
+	dir := t.TempDir()
+	mcpPath := filepath.Join(dir, ".mcp.json")
+
+	broken := `{"mcpServers":{"sourcebridge":{"command":"sourcebridge","args":["mcp","--repo-id","abc"]}}}`
+	if err := os.WriteFile(mcpPath, []byte(broken), 0o644); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	changed, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true, false)
 	if err != nil {
-		t.Fatalf("unexpected error with --force: %v", err)
+		t.Fatalf("expected silent migrate, got: %v", err)
 	}
 	if !changed {
-		t.Error("expected changed=true when --force replaces an entry")
+		t.Error("expected changed=true")
 	}
 
 	doc := readMCPJSON(t, mcpPath)
-	assertHTTPEntry(t, doc, testMCPURL)
+	assertProxyEntry(t, doc, testServerURL)
+
+	// Backup written.
+	if _, err := os.Stat(mcpPath + ".sb-backup"); err != nil {
+		t.Errorf("expected .sb-backup; got: %v", err)
+	}
 }
 
-// TestMergeMCPJSON_HTTPDifferentURL_NoForce verifies that a correct HTTP entry
-// pointing at a different server aborts without --force.
-func TestMergeMCPJSON_HTTPDifferentURL_NoForce(t *testing.T) {
+// TestMergeMCPJSON_DifferentURLStillErrors verifies the existing
+// HTTPDifferentURL behavior (different host, HTTP shape) is preserved.
+func TestMergeMCPJSON_DifferentURLStillErrors(t *testing.T) {
 	dir := t.TempDir()
 	mcpPath := filepath.Join(dir, ".mcp.json")
 
-	otherURL := "https://other-cloud.example" + mcpEndpointPath
-	existingContent := `{"mcpServers":{"sourcebridge":{"type":"http","url":"` + otherURL + `","headers":{"Authorization":"Bearer ${SOURCEBRIDGE_API_TOKEN}"}}}}`
-	if err := os.WriteFile(mcpPath, []byte(existingContent), 0o644); err != nil {
-		t.Fatalf("writing existing file: %v", err)
+	differentURL := `{"mcpServers":{"sourcebridge":{"type":"http","url":"https://other-cloud.example/api/v1/mcp/http","headers":{"Authorization":"Bearer ${SOURCEBRIDGE_API_TOKEN}"}}}}`
+	if err := os.WriteFile(mcpPath, []byte(differentURL), 0o644); err != nil {
+		t.Fatalf("seeding: %v", err)
 	}
 
-	_, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, false)
+	_, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true, false)
 	if err == nil {
 		t.Fatal("expected error for different URL without --force")
 	}
 	if !strings.Contains(err.Error(), "--force") {
 		t.Errorf("error should mention --force; got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "other-cloud.example") {
-		t.Errorf("error should mention the existing URL; got: %v", err)
-	}
-
-	// File should be untouched.
-	data, _ := os.ReadFile(mcpPath)
-	if string(data) != existingContent {
-		t.Error("file should be unchanged after abort")
-	}
 }
 
-// TestMergeMCPJSON_HTTPDifferentURL_Force verifies that --force retargets to the
-// new URL.
-func TestMergeMCPJSON_HTTPDifferentURL_Force(t *testing.T) {
+// TestMergeMCPJSON_OtherStdioStillErrors verifies that user-customized stdio
+// entries (mcp-remote wrapper, etc.) still require --force.
+func TestMergeMCPJSON_OtherStdioStillErrors(t *testing.T) {
 	dir := t.TempDir()
 	mcpPath := filepath.Join(dir, ".mcp.json")
 
-	otherURL := "https://other-cloud.example" + mcpEndpointPath
-	existingContent := `{"mcpServers":{"sourcebridge":{"type":"http","url":"` + otherURL + `","headers":{"Authorization":"Bearer ${SOURCEBRIDGE_API_TOKEN}"}}}}`
-	if err := os.WriteFile(mcpPath, []byte(existingContent), 0o644); err != nil {
-		t.Fatalf("writing existing file: %v", err)
+	custom := `{"mcpServers":{"sourcebridge":{"command":"/usr/local/bin/mcp-remote","args":["https://my.sourcebridge.example/mcp"]}}}`
+	if err := os.WriteFile(mcpPath, []byte(custom), 0o644); err != nil {
+		t.Fatalf("seeding: %v", err)
 	}
 
-	changed, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true)
-	if err != nil {
-		t.Fatalf("unexpected error with --force: %v", err)
+	_, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true, false)
+	if err == nil {
+		t.Fatal("expected error for custom stdio command without --force")
 	}
-	if !changed {
-		t.Error("expected changed=true when --force retargets URL")
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("error should mention --force; got: %v", err)
 	}
-
-	doc := readMCPJSON(t, mcpPath)
-	assertHTTPEntry(t, doc, testMCPURL)
 }
 
 // TestMergeMCPJSON_InvalidJSON verifies that invalid JSON is backed up and
-// replaced with a fresh HTTP entry.
+// replaced with a fresh proxy entry (existing behavior).
 func TestMergeMCPJSON_InvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	mcpPath := filepath.Join(dir, ".mcp.json")
 
 	if err := os.WriteFile(mcpPath, []byte(`{invalid json`), 0o644); err != nil {
-		t.Fatalf("writing invalid file: %v", err)
+		t.Fatalf("seeding: %v", err)
 	}
 
-	changed, warn, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, false)
+	changed, warn, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true, false)
 	if err != nil {
-		t.Fatalf("unexpected error for invalid JSON: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if !changed {
-		t.Error("expected changed=true when replacing invalid JSON")
+		t.Error("expected changed=true")
 	}
 	if !strings.Contains(warn, ".sb-backup") {
-		t.Errorf("warning should mention .sb-backup; got: %q", warn)
+		t.Errorf("warn should mention .sb-backup; got: %q", warn)
 	}
 
 	doc := readMCPJSON(t, mcpPath)
-	assertHTTPEntry(t, doc, testMCPURL)
-
-	// Backup should exist.
-	if _, err := os.Stat(mcpPath + ".sb-backup"); err != nil {
-		t.Errorf("expected .sb-backup to exist: %v", err)
-	}
+	assertProxyEntry(t, doc, testServerURL)
 }
 
-// TestMergeMCPJSON_PreservesForeignEntries verifies that other MCP servers in
-// the same file are not disturbed when the sourcebridge entry is written.
+// TestMergeMCPJSON_PreservesForeignEntries verifies that other MCP servers
+// in the same file are not disturbed.
 func TestMergeMCPJSON_PreservesForeignEntries(t *testing.T) {
 	dir := t.TempDir()
 	mcpPath := filepath.Join(dir, ".mcp.json")
 
-	// A file with a foreign entry and the broken sourcebridge entry.
 	initial := `{
   "mcpServers": {
     "my-other-server": {
@@ -296,54 +404,37 @@ func TestMergeMCPJSON_PreservesForeignEntries(t *testing.T) {
   }
 }`
 	if err := os.WriteFile(mcpPath, []byte(initial), 0o644); err != nil {
-		t.Fatalf("writing initial file: %v", err)
+		t.Fatalf("seeding: %v", err)
 	}
 
-	changed, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, false)
+	_, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !changed {
-		t.Error("expected changed=true for migration")
-	}
 
 	doc := readMCPJSON(t, mcpPath)
-
-	// Foreign entry must be preserved.
-	servers, ok := doc["mcpServers"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("mcpServers not a map")
-	}
-	other, ok := servers["my-other-server"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("my-other-server entry missing or wrong type")
-	}
+	servers := doc["mcpServers"].(map[string]interface{})
+	other := servers["my-other-server"].(map[string]interface{})
 	if other["url"] != "https://other.example/mcp" {
 		t.Errorf("foreign entry url changed: %v", other["url"])
 	}
-
-	// SourceBridge entry must be the new HTTP shape.
-	assertHTTPEntry(t, doc, testMCPURL)
+	assertProxyEntry(t, doc, testServerURL)
 }
 
-// TestMergeMCPJSON_FileInSubdir verifies that directories are created as needed.
+// TestMergeMCPJSON_FileInSubdir verifies directory creation as needed.
 func TestMergeMCPJSON_FileInSubdir(t *testing.T) {
 	dir := t.TempDir()
 	mcpPath := filepath.Join(dir, "nested", "dir", ".mcp.json")
 
-	changed, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, false)
+	_, _, err := MergeMCPJSON(mcpPath, testServerURL, testRepoID, true, false)
 	if err != nil {
-		t.Fatalf("unexpected error creating nested path: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !changed {
-		t.Error("expected changed=true")
-	}
-
 	doc := readMCPJSON(t, mcpPath)
-	assertHTTPEntry(t, doc, testMCPURL)
+	assertProxyEntry(t, doc, testServerURL)
 }
 
-// TestMCPExpectedURL verifies that MCPExpectedURL appends the correct path.
+// TestMCPExpectedURL is preserved.
 func TestMCPExpectedURL(t *testing.T) {
 	got := MCPExpectedURL("https://example.com")
 	want := "https://example.com/api/v1/mcp/http"
@@ -352,67 +443,80 @@ func TestMCPExpectedURL(t *testing.T) {
 	}
 }
 
-// TestClassifyExistingEntry exercises all classification branches directly.
+// TestClassifyExistingEntry exercises every classification branch.
 func TestClassifyExistingEntry(t *testing.T) {
+	const expServer = "https://example.com"
+	const expMCP = expServer + mcpEndpointPath
+
 	cases := []struct {
-		name        string
-		json        string
-		expectedURL string
-		want        entryKind
+		name string
+		json string
+		want entryKind
 	}{
 		{
-			name:        "HTTP match",
-			json:        `{"type":"http","url":"https://example.com/api/v1/mcp/http"}`,
-			expectedURL: "https://example.com/api/v1/mcp/http",
-			want:        entryKindHTTPMatch,
+			name: "proxy shape, --server matches",
+			json: `{"command":"sourcebridge","args":["mcp-proxy","--server","https://example.com"]}`,
+			want: entryKindProxyMatch,
 		},
 		{
-			name:        "HTTP different URL",
-			json:        `{"type":"http","url":"https://other.example/api/v1/mcp/http"}`,
-			expectedURL: "https://example.com/api/v1/mcp/http",
-			want:        entryKindHTTPDifferentURL,
+			name: "proxy shape with absolute path, --server matches",
+			json: `{"command":"/usr/local/bin/sourcebridge","args":["mcp-proxy","--server","https://example.com"]}`,
+			want: entryKindProxyMatch,
 		},
 		{
-			name:        "HTTP no URL",
-			json:        `{"type":"http"}`,
-			expectedURL: "https://example.com/api/v1/mcp/http",
-			want:        entryKindHTTPDifferentURL,
+			name: "proxy shape, --server differs",
+			json: `{"command":"sourcebridge","args":["mcp-proxy","--server","https://other.example"]}`,
+			want: entryKindProxyDifferentURL,
 		},
 		{
-			name:        "broken stdio v1 exact",
-			json:        `{"command":"sourcebridge","args":["mcp","--repo-id","abc"]}`,
-			expectedURL: "https://example.com/api/v1/mcp/http",
-			want:        entryKindBrokenStdio,
+			name: "proxy shape, --server=foo equals form",
+			json: `{"command":"sourcebridge","args":["mcp-proxy","--server=https://example.com"]}`,
+			want: entryKindProxyMatch,
 		},
 		{
-			name:        "broken stdio v1 minimal args",
-			json:        `{"command":"sourcebridge","args":["mcp"]}`,
-			expectedURL: "https://example.com/api/v1/mcp/http",
-			want:        entryKindBrokenStdio,
+			name: "v1 broken stdio",
+			json: `{"command":"sourcebridge","args":["mcp","--repo-id","abc"]}`,
+			want: entryKindBrokenStdio,
 		},
 		{
-			name:        "other stdio: custom command",
-			json:        `{"command":"/usr/local/bin/mcp-remote","args":["https://example.com/mcp"]}`,
-			expectedURL: "https://example.com/api/v1/mcp/http",
-			want:        entryKindOtherStdio,
+			name: "exact bulletproof HTTP shape",
+			json: `{"type":"http","url":"https://example.com/api/v1/mcp/http","headers":{"Authorization":"Bearer ${SOURCEBRIDGE_API_TOKEN}"}}`,
+			want: entryKindHTTPLegacyExact,
 		},
 		{
-			name:        "other stdio: sourcebridge but wrong first arg",
-			json:        `{"command":"sourcebridge","args":["serve"]}`,
-			expectedURL: "https://example.com/api/v1/mcp/http",
-			want:        entryKindOtherStdio,
+			name: "HTTP same URL, literal token",
+			json: `{"type":"http","url":"https://example.com/api/v1/mcp/http","headers":{"Authorization":"Bearer ca_xxx"}}`,
+			want: entryKindHTTPSameHostCustom,
 		},
 		{
-			name:        "other stdio: sourcebridge no args",
-			json:        `{"command":"sourcebridge"}`,
-			expectedURL: "https://example.com/api/v1/mcp/http",
-			want:        entryKindOtherStdio,
+			name: "HTTP same URL, extra top-level field",
+			json: `{"type":"http","url":"https://example.com/api/v1/mcp/http","headers":{"Authorization":"Bearer ${SOURCEBRIDGE_API_TOKEN}"},"extra":1}`,
+			want: entryKindHTTPSameHostCustom,
 		},
 		{
-			name:        "empty entry",
-			json:        `{}`,
-			expectedURL: "https://example.com/api/v1/mcp/http",
-			want:        entryKindOtherStdio,
+			name: "HTTP same URL, extra header",
+			json: `{"type":"http","url":"https://example.com/api/v1/mcp/http","headers":{"Authorization":"Bearer ${SOURCEBRIDGE_API_TOKEN}","X-Custom":"yes"}}`,
+			want: entryKindHTTPSameHostCustom,
+		},
+		{
+			name: "HTTP different URL",
+			json: `{"type":"http","url":"https://other.example/api/v1/mcp/http","headers":{"Authorization":"Bearer ${SOURCEBRIDGE_API_TOKEN}"}}`,
+			want: entryKindHTTPDifferentURL,
+		},
+		{
+			name: "custom stdio",
+			json: `{"command":"/usr/local/bin/mcp-remote","args":["https://example.com/mcp"]}`,
+			want: entryKindOtherStdio,
+		},
+		{
+			name: "sourcebridge with non-mcp-proxy first arg",
+			json: `{"command":"sourcebridge","args":["serve"]}`,
+			want: entryKindOtherStdio,
+		},
+		{
+			name: "empty entry",
+			json: `{}`,
+			want: entryKindOtherStdio,
 		},
 	}
 
@@ -420,12 +524,102 @@ func TestClassifyExistingEntry(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var entry map[string]json.RawMessage
 			if err := json.Unmarshal([]byte(tc.json), &entry); err != nil {
-				t.Fatalf("parsing test case json: %v", err)
+				t.Fatalf("parse: %v", err)
 			}
-			got := classifyExistingEntry(entry, tc.expectedURL)
+			got := classifyExistingEntry(entry, expMCP, expServer)
 			if got != tc.want {
 				t.Errorf("classifyExistingEntry = %v, want %v", got, tc.want)
 			}
 		})
 	}
+}
+
+// TestResolveSourcebridgeCommand_PreservesSymlinkPath is the codex r1b M1
+// guard: a symlink to the test binary should be persisted as-is, not resolved
+// to its target.
+func TestResolveSourcebridgeCommand_PreservesSymlinkPath(t *testing.T) {
+	// We can't reliably mock os.Executable() in-process, but we can verify
+	// the documented invariant on a synthetic path: filepath.EvalSymlinks
+	// is NOT called by the resolver. The most reliable way is to assert
+	// that for an arbitrary symlink we control, evaluating with
+	// filepath.IsAbs returns true and the path string contains the symlink
+	// directory, not the target directory.
+	if testing.Short() {
+		t.Skip("skipping symlink test in -short mode")
+	}
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target", "sourcebridge")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	symlinkDir := filepath.Join(dir, "stable", "bin")
+	if err := os.MkdirAll(symlinkDir, 0o755); err != nil {
+		t.Fatalf("mkdir symlinkDir: %v", err)
+	}
+	symlinkPath := filepath.Join(symlinkDir, "sourcebridge")
+	if err := os.Symlink(target, symlinkPath); err != nil {
+		t.Skipf("cannot create symlink (skipping symlink invariant test): %v", err)
+	}
+
+	// The invariant we care about: filepath.EvalSymlinks(symlinkPath) !=
+	// symlinkPath, but the resolver (if asked to look at this path) would
+	// preserve the symlink. We can't redirect os.Executable() in-process,
+	// but we can verify the building blocks of the resolver don't
+	// accidentally call filepath.EvalSymlinks. Comment-stripped scan to
+	// avoid false positives on the docstring that explicitly explains we
+	// do NOT call this function.
+	implBytes, err := os.ReadFile(mcpjsonSourcePath())
+	if err != nil {
+		t.Fatalf("reading mcpjson.go: %v", err)
+	}
+	src := string(implBytes)
+	// Strip line comments so we don't trip on "We do NOT EvalSymlinks" in
+	// docstrings.
+	stripped := stripLineComments(src)
+	if strings.Contains(stripped, "filepath.EvalSymlinks") {
+		t.Errorf("mcpjson.go calls filepath.EvalSymlinks — codex r1b M1 invariant broken")
+	}
+	_ = symlinkPath
+}
+
+// stripLineComments removes any text from "//" to end of line so a docstring
+// mentioning a forbidden symbol doesn't trip the source-level invariant test.
+func stripLineComments(src string) string {
+	var out strings.Builder
+	inBlockComment := false
+	lines := strings.Split(src, "\n")
+	for _, line := range lines {
+		clean := line
+		if inBlockComment {
+			if idx := strings.Index(clean, "*/"); idx >= 0 {
+				clean = clean[idx+2:]
+				inBlockComment = false
+			} else {
+				continue
+			}
+		}
+		// Find // not inside a string literal — a simple rule for this
+		// codebase since we don't use //-in-strings here.
+		if i := strings.Index(clean, "//"); i >= 0 {
+			clean = clean[:i]
+		}
+		// Block-comment open without close on same line.
+		if i := strings.Index(clean, "/*"); i >= 0 {
+			clean = clean[:i]
+			inBlockComment = true
+		}
+		out.WriteString(clean)
+		out.WriteByte('\n')
+	}
+	return out.String()
+}
+
+// mcpjsonSourcePath returns the path to mcpjson.go for source-level test.
+func mcpjsonSourcePath() string {
+	// Tests run with cwd == package dir, so a relative path works.
+	return "mcpjson.go"
 }

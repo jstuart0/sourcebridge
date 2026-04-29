@@ -228,10 +228,14 @@ func TestSetupClaude_E2E(t *testing.T) {
 	}
 }
 
-// TestSetupClaude_MCPHTTPTransport verifies that the .mcp.json written by
-// runSetupClaude uses the HTTP-transport schema with the ${SOURCEBRIDGE_API_TOKEN}
-// placeholder, not the old broken stdio schema.
-func TestSetupClaude_MCPHTTPTransport(t *testing.T) {
+// TestSetupClaude_MCPProxyTransport verifies that the .mcp.json written by
+// runSetupClaude uses the stdio-proxy schema with command + args including
+// "mcp-proxy" and "--server <url>", not the legacy HTTP-transport schema.
+//
+// Renamed from TestSetupClaude_MCPHTTPTransport (slice 3 of cli-mcp-proxy-and-installer)
+// because the writer now produces the proxy shape; the HTTP-transport assertions
+// would fail.
+func TestSetupClaude_MCPProxyTransport(t *testing.T) {
 	fakeResp := map[string]interface{}{
 		"repo_id":      "mcp-test-repo",
 		"status":       "ready",
@@ -329,28 +333,37 @@ func TestSetupClaude_MCPHTTPTransport(t *testing.T) {
 		t.Fatalf("mcpServers.sourcebridge not present")
 	}
 
-	if entry["type"] != "http" {
-		t.Errorf("expected type=http, got %v", entry["type"])
+	// Slice 3 (cli-mcp-proxy-and-installer): the writer now produces the
+	// stdio-proxy shape. Assert that explicitly.
+	cmd, _ := entry["command"].(string)
+	if cmd == "" {
+		t.Errorf("entry.command must be non-empty (proxy shape); got %v", entry["command"])
 	}
-	wantURL := srv.URL + "/api/v1/mcp/http"
-	if entry["url"] != wantURL {
-		t.Errorf("expected url=%q, got %v", wantURL, entry["url"])
-	}
-	headers, ok := entry["headers"].(map[string]interface{})
+	args, ok := entry["args"].([]interface{})
 	if !ok {
-		t.Fatalf("headers not present or not a map")
+		t.Fatalf("entry.args missing or not a slice")
 	}
-	wantAuth := "Bearer ${SOURCEBRIDGE_API_TOKEN}"
-	if headers["Authorization"] != wantAuth {
-		t.Errorf("expected Authorization=%q, got %v", wantAuth, headers["Authorization"])
+	if len(args) < 3 {
+		t.Fatalf("entry.args has fewer than 3 elements: %v", args)
 	}
-
-	// Verify no "command" or "args" fields (old stdio shape must be absent).
-	if _, has := entry["command"]; has {
-		t.Error("entry must not contain 'command' field (stdio shape)")
+	if args[0] != "mcp-proxy" {
+		t.Errorf("entry.args[0] = %v; want \"mcp-proxy\"", args[0])
 	}
-	if _, has := entry["args"]; has {
-		t.Error("entry must not contain 'args' field (stdio shape)")
+	if args[1] != "--server" {
+		t.Errorf("entry.args[1] = %v; want \"--server\"", args[1])
+	}
+	if args[2] != srv.URL {
+		t.Errorf("entry.args[2] = %v; want %q", args[2], srv.URL)
+	}
+	// Legacy HTTP-shape fields must be absent.
+	if _, has := entry["type"]; has {
+		t.Error("entry must not contain 'type' (legacy HTTP shape)")
+	}
+	if _, has := entry["url"]; has {
+		t.Error("entry must not contain 'url' (legacy HTTP shape)")
+	}
+	if _, has := entry["headers"]; has {
+		t.Error("entry must not contain 'headers' (legacy HTTP shape)")
 	}
 }
 
@@ -553,14 +566,20 @@ func TestSetupClaude_MCPMigratesOldShape(t *testing.T) {
 	servers := doc["mcpServers"].(map[string]interface{})
 	entry := servers["sourcebridge"].(map[string]interface{})
 
-	if entry["type"] != "http" {
-		t.Errorf("expected type=http after migration, got %v", entry["type"])
+	// Slice 3: migration target is now the proxy shape, not the HTTP shape.
+	args, ok := entry["args"].([]interface{})
+	if !ok || len(args) < 3 {
+		t.Fatalf("expected proxy-shape args after migration, got %v", entry["args"])
 	}
-	if _, has := entry["command"]; has {
-		t.Error("entry must not contain 'command' field after migration")
+	if args[0] != "mcp-proxy" {
+		t.Errorf("expected args[0]=\"mcp-proxy\", got %v", args[0])
+	}
+	if _, has := entry["type"]; has {
+		t.Error("entry must not contain 'type' field after migration to proxy shape")
 	}
 
-	// Backup should exist.
+	// Backup should exist (the broken-stdio path uses .sb-backup, not the
+	// timestamped suffix).
 	if _, err := os.Stat(mcpPath + ".sb-backup"); err != nil {
 		t.Errorf("expected .sb-backup after migration: %v", err)
 	}
