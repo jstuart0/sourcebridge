@@ -40,6 +40,13 @@ cd workers && uv run python -m workers  # Start worker (separate terminal)
 Configuration via `config.toml` or environment variables with `SOURCEBRIDGE_` prefix.
 See `config.toml.example` for all options.
 
+**LLM provider / API key / models**: managed in the admin UI at
+`/admin/llm`, which is the source of truth across every replica. The
+configmap is bootstrap-only. See [`docs/admin/llm-config.md`](docs/admin/llm-config.md)
+for the resolution order, the per-call structured-log verification
+ritual, encryption-at-rest details, and the operator runbook for
+removing API keys from the configmap.
+
 ## Telemetry
 
 Anonymous install telemetry is sent from `internal/telemetry/telemetry.go` to
