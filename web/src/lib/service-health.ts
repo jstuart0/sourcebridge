@@ -16,6 +16,15 @@ export interface ServiceHealthStatus {
 // enough that a user notices the banner within ~15 s of an outage starting.
 const POLL_INTERVAL_MS = 15_000;
 
+// Module-level context object — referentially stable across renders.
+// Inlining `context: { pollInterval: POLL_INTERVAL_MS }` inside the hook
+// produces a fresh object every render. urql treats that as the query args
+// having changed, refetches, returns a new result identity, the consumer
+// re-renders, and we loop forever — React surfaces it as the minified
+// "Maximum update depth exceeded" (#301) crash that took down the app shell
+// when this banner first shipped.
+const SERVICE_HEALTH_CONTEXT = { pollInterval: POLL_INTERVAL_MS } as const;
+
 /**
  * Polls the serviceHealth GraphQL query every 15 seconds and returns the
  * current platform health. Returns null while the first result is in flight
@@ -27,7 +36,7 @@ export function useServiceHealth(): ServiceHealthStatus | null {
     // cache-and-network: first paint uses any cached result (instant), then
     // re-fetches in the background so the banner reflects real state quickly.
     requestPolicy: "cache-and-network",
-    context: { pollInterval: POLL_INTERVAL_MS },
+    context: SERVICE_HEALTH_CONTEXT,
   });
 
   if (!result.data?.serviceHealth) {
