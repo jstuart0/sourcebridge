@@ -21,9 +21,13 @@ data:
   #   2. Wait for cert-manager to issue the leaf secrets (~30s).
   #   3. Flip SOURCEBRIDGE_WORKER_TLS_ENABLED to "true" via overlay patch.
   #   4. kubectl rollout restart deploy/sourcebridge-api deploy/sourcebridge-worker.
-  # Cert renewal: cert-manager renews 30d before expiry; OPERATOR must
-  # `kubectl rollout restart` both deployments after renewal to pick up
-  # the new cert (manual rotation; automated reload is a follow-up).
+  # Cert renewal: cert-manager renews 30d before expiry. The Go API
+  # process hot-reloads cert + CA material on disk via fsnotify +
+  # 5-minute polling fallback (R3 slice 4) — no API rollout required.
+  # The Python worker pod still requires `kubectl rollout restart`
+  # (or Stakater Reloader watching the cert Secret) on rotation;
+  # process-level Python hot reload was deferred per R3 codex r1
+  # (grpc.aio in-flight cancellation risk for long knowledge jobs).
   SOURCEBRIDGE_WORKER_TLS_ENABLED: "false"
   SOURCEBRIDGE_WORKER_TLS_CERT_PATH: "/etc/sourcebridge/tls/tls.crt"
   SOURCEBRIDGE_WORKER_TLS_KEY_PATH: "/etc/sourcebridge/tls/tls.key"

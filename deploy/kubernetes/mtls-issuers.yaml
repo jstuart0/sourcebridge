@@ -13,10 +13,17 @@
 # After this manifest applies, the Certificate manifests in
 # mtls-worker-cert.yaml and mtls-api-cert.yaml use sourcebridge-ca to
 # issue 90-day leaf certs that cert-manager auto-renews 30d before
-# expiry. When the leaf Secret is updated, OPERATOR MUST run
-# `kubectl -n sourcebridge rollout restart deploy/sourcebridge-api
-# deploy/sourcebridge-worker` to pick up the new cert. (Automated
-# rotation is captured as a follow-up; see the plan's followups doc.)
+# expiry. Rotation behavior after R3 slice 4:
+#   - sourcebridge-api: hot-reloads its cert + CA on disk via the
+#     tlsreload watcher (fsnotify on the parent dir + 5-minute
+#     mtime poll). No API rollout required.
+#   - sourcebridge-worker: process-level hot reload was deferred
+#     (grpc.aio's server.stop(grace=N) would kill long-running
+#     knowledge-generation RPCs). Worker still requires
+#     `kubectl -n sourcebridge rollout restart deploy/sourcebridge-worker`,
+#     or — preferred — install Stakater Reloader on the cluster so a
+#     change to the worker's TLS Secret triggers a graceful rollout
+#     automatically.
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
