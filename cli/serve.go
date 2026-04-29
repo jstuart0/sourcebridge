@@ -167,9 +167,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// TLS-enabled path: errors are FATAL. R2 slice 4 of plan
 	// 2026-04-29-workspace-llm-source-of-truth-r2.md requires fail-closed
 	// semantics: an operator who flipped SOURCEBRIDGE_WORKER_TLS_ENABLED=true
-	// is asserting that mTLS must be working; a TLS load failure or
-	// handshake mismatch must NOT degrade the API to plaintext or hide
-	// behind a healthy readiness probe.
+	// is asserting that mTLS must be working; a TLS load failure, handshake
+	// mismatch, or worker still serving insecure must NOT degrade the API
+	// to plaintext or hide behind a healthy readiness probe.
+	//
+	// Why we run a boot-time CheckHealth probe under TLS: grpc.NewClient
+	// is lazy — it does not actually open a connection. Without an explicit
+	// RPC, the API would start cleanly even when the worker is on insecure
+	// gRPC, the worker's cert SAN doesn't match, or the CA chain is wrong;
+	// the misconfig would only surface on the first real LLM call. Running
+	// CheckHealth synchronously at boot makes the handshake the canary.
 	var workerClient *worker.Client
 	if cfg.Worker.Address != "" {
 		wc, err := worker.New(
@@ -190,6 +197,24 @@ func runServe(cmd *cobra.Command, args []string) error {
 			}
 			slog.Warn("failed to create worker client, AI features disabled", "error", err)
 		} else {
+			// TLS-enabled: probe the handshake before declaring success.
+			// CheckHealth has a 3s timeout (TimeoutHealth) and runs a
+			// real unary RPC. If TLS is misconfigured, this fails with a
+			// transport error and we refuse to start.
+			if cfg.Worker.TLS.Enabled {
+				healthCtx, healthCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				ok, healthErr := wc.CheckHealth(healthCtx)
+				healthCancel()
+				if healthErr != nil {
+					_ = wc.Close()
+					return fmt.Errorf("worker mTLS handshake probe failed: %w (refusing to start; check that the worker is running with SOURCEBRIDGE_WORKER_TLS_ENABLED=true and the certs are signed by the same CA)", healthErr)
+				}
+				if !ok {
+					_ = wc.Close()
+					return fmt.Errorf("worker mTLS handshake probe returned non-serving (refusing to start; the worker process is up but its gRPC health check is reporting NOT_SERVING)")
+				}
+				slog.Info("worker mTLS handshake probe ok", "address", cfg.Worker.Address)
+			}
 			workerClient = wc
 			defer workerClient.Close()
 			slog.Info("worker client initialized", "address", cfg.Worker.Address, "tls_enabled", cfg.Worker.TLS.Enabled)
