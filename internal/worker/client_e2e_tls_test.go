@@ -475,11 +475,21 @@ func TestE2E_StaleCommit_FiresDroppedHook(t *testing.T) {
 }
 
 // TestE2E_HeldOpenRPCDrainsAcrossRotation covers codex r2 Medium 2's
-// "long-running RPC held open across rotation" gap: a CheckHealth
-// against a delaying server is launched, rotation fires while it's
-// in flight, the call completes successfully, and we observe that
-// the active bundle on call return is the NEW one (rotation
-// happened) but the call itself ran on the OLD bundle's conn.
+// "long-running RPC held open across rotation" gap, refined per codex
+// r2b Medium: the held RPC's release MUST be explicitly gated so the
+// rotation's health probe (which lands on the same server) cannot
+// "win" before the held RPC.
+//
+// Test shape:
+//   1. Use a gated mTLS server: held RPCs wait on a release channel
+//      keyed off a header value; the rotation's health probe is
+//      registered to NOT block.
+//   2. Launch held CheckHealth → blocks on its gate.
+//   3. w.Reload() → rotation Stage+probe+commit; probe is fast.
+//   4. Assert rotation completed AND initialBundle.inflight > 0 (held
+//      RPC is still attached).
+//   5. Release the held RPC → completes successfully on old bundle.
+//   6. Assert old bundle drains to inflight=0.
 func TestE2E_HeldOpenRPCDrainsAcrossRotation(t *testing.T) {
 	dir := t.TempDir()
 	caCertPath, caKeyPath := generateTestCA(t, dir)
@@ -487,8 +497,12 @@ func TestE2E_HeldOpenRPCDrainsAcrossRotation(t *testing.T) {
 	serverCertPath, serverKeyPath := generateServerCertSignedBy(t, dir, "worker-server", caCertPath, caKeyPath, serverName)
 	clientCertPath, clientKeyPath := generateClientCertSignedBy(t, dir, "client-v1", caCertPath, caKeyPath)
 
-	// Start a slow mTLS health server that waits 1 second per Check.
-	srv, addr, peerSerials := startSlowMTLSHealthServer(t, serverCertPath, serverKeyPath, caCertPath, 1*time.Second)
+	// Gated server: every Check from the FIRST in-flight CheckHealth
+	// blocks on `holdRelease`; subsequent Checks (the rotation probe)
+	// return immediately. We discriminate via a sequence counter.
+	holdRelease := make(chan struct{})
+	srv, addr, peerSerials := startGatedMTLSHealthServer(t,
+		serverCertPath, serverKeyPath, caCertPath, holdRelease)
 	defer srv.Stop()
 
 	w, err := tlsreload.New(tlsreload.Config{
@@ -519,32 +533,33 @@ func TestE2E_HeldOpenRPCDrainsAcrossRotation(t *testing.T) {
 		rotateDone <- cand
 	})
 
-	// Snapshot the initial bundle pointer so we can assert it
-	// changed after rotation.
 	initialBundle := c.bundle.Load()
 	if initialBundle == nil {
 		t.Fatal("initial bundle should be non-nil")
 	}
 	v1Serial := readCertSerial(t, clientCertPath)
 
-	// Launch a slow CheckHealth in the background. The slow server
-	// guarantees this stays in-flight while we trigger rotation.
+	// Launch the held CheckHealth. The server gates this call.
 	rpcDone := make(chan error, 1)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_, err := c.CheckHealth(ctx)
 		rpcDone <- err
 	}()
 
-	// Give the RPC a moment to land on the old bundle before we
-	// rotate.
-	time.Sleep(100 * time.Millisecond)
+	// Wait until the call has actually attached to the bundle.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && initialBundle.inflight.Load() < 1 {
+		time.Sleep(5 * time.Millisecond)
+	}
 	if got := initialBundle.inflight.Load(); got < 1 {
-		t.Errorf("expected initial bundle inflight >= 1 after launching slow RPC; got %d", got)
+		t.Fatalf("held RPC did not attach to initial bundle; inflight=%d", got)
 	}
 
-	// Trigger rotation while the RPC is in flight.
+	// Trigger rotation. The probe Check on the new conn is NOT gated
+	// (only the FIRST handler invocation gates), so rotation should
+	// commit and swap quickly.
 	v2Cert, v2Key := generateClientCertSignedBy(t, dir, "client-v2", caCertPath, caKeyPath)
 	if err := os.Rename(v2Cert, clientCertPath); err != nil {
 		t.Fatal(err)
@@ -556,45 +571,46 @@ func TestE2E_HeldOpenRPCDrainsAcrossRotation(t *testing.T) {
 		t.Fatalf("Reload: %v", err)
 	}
 
-	// Wait for rotation completion.
 	select {
 	case <-rotateDone:
 	case <-time.After(3 * time.Second):
 		t.Fatal("rotation never completed")
 	}
 
-	// New bundle should be different from the initial one.
+	// CRITICAL ASSERTIONS (codex r2b refinement):
+	//   1. Bundle pointer changed.
+	//   2. Old bundle is flagged closing.
+	//   3. Held RPC is STILL attached to the OLD bundle (inflight > 0).
 	if c.bundle.Load() == initialBundle {
 		t.Error("rotation completed but bundle pointer did not change")
 	}
-
-	// The old bundle should be flagged closing but its inflight
-	// is still > 0 (the slow RPC is still running).
 	if !initialBundle.closing.Load() {
 		t.Error("old bundle should be flagged closing after rotation")
 	}
+	if got := initialBundle.inflight.Load(); got < 1 {
+		t.Errorf("expected old bundle inflight >= 1 (held RPC still attached) AFTER rotation; got %d", got)
+	}
 
-	// The slow RPC must complete successfully — i.e. drain works.
+	// Release the held RPC. It completes on the OLD bundle.
+	close(holdRelease)
 	select {
 	case err := <-rpcDone:
 		if err != nil {
-			t.Errorf("held-open RPC should have completed; got %v", err)
+			t.Errorf("held-open RPC should complete cleanly; got %v", err)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("held-open RPC never returned")
+		t.Fatal("held-open RPC never returned after release")
 	}
 
-	// The server saw the v1 serial during the held-open call (the
-	// call ran on the old bundle).
+	// Server saw v1 serial during the held call (it ran on old bundle).
 	if !peerSerials.contains(v1Serial) {
 		t.Errorf("server should have seen v1 serial during held-open call; saw %v",
 			peerSerials.snapshot())
 	}
 
-	// After the slow RPC returns, the old bundle's drain goroutine
-	// closes the conn. Give it a beat then assert inflight is 0.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	// Old bundle's drain goroutine closes the conn after RPC done.
+	drainDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(drainDeadline) {
 		if initialBundle.inflight.Load() == 0 {
 			break
 		}
@@ -667,17 +683,19 @@ func (h *peerCapturingHealthServer) Check(ctx context.Context, _ *healthpb.Healt
 	return &healthpb.HealthCheckResponse{Status: healthpb.HealthCheckResponse_SERVING}, nil
 }
 
-// slowPeerCapturingHealthServer is identical to peerCapturingHealthServer
-// except every Check waits the configured delay before responding.
-// Used by held-open-RPC drain tests to keep an RPC in-flight long
-// enough to span a rotation.
-type slowPeerCapturingHealthServer struct {
+// gatedPeerCapturingHealthServer holds the FIRST in-flight Check on
+// `holdRelease`; subsequent Checks (rotation health probes) return
+// immediately. Used by the held-open-RPC drain test to ensure the
+// rotation can commit + swap before the held RPC completes.
+type gatedPeerCapturingHealthServer struct {
 	healthpb.UnimplementedHealthServer
 	serials *serialSet
-	delay   time.Duration
+	holdMu  sync.Mutex
+	used    bool
+	gate    chan struct{}
 }
 
-func (h *slowPeerCapturingHealthServer) Check(ctx context.Context, _ *healthpb.HealthCheckRequest) (*healthpb.HealthCheckResponse, error) {
+func (h *gatedPeerCapturingHealthServer) Check(ctx context.Context, _ *healthpb.HealthCheckRequest) (*healthpb.HealthCheckResponse, error) {
 	if p, ok := peer.FromContext(ctx); ok {
 		if tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo); ok {
 			if len(tlsInfo.State.PeerCertificates) > 0 {
@@ -685,18 +703,28 @@ func (h *slowPeerCapturingHealthServer) Check(ctx context.Context, _ *healthpb.H
 			}
 		}
 	}
-	select {
-	case <-time.After(h.delay):
-		return &healthpb.HealthCheckResponse{Status: healthpb.HealthCheckResponse_SERVING}, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+
+	h.holdMu.Lock()
+	shouldGate := !h.used
+	h.used = true
+	h.holdMu.Unlock()
+
+	if shouldGate {
+		select {
+		case <-h.gate:
+			// Released by the test.
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
+	return &healthpb.HealthCheckResponse{Status: healthpb.HealthCheckResponse_SERVING}, nil
 }
 
-// startSlowMTLSHealthServer is startMTLSHealthServer with a per-Check
-// delay so RPCs stay in flight long enough to observe drain semantics
-// across rotation.
-func startSlowMTLSHealthServer(t *testing.T, serverCertPath, serverKeyPath, caCertPath string, delay time.Duration) (*grpc.Server, string, *serialSet) {
+// startGatedMTLSHealthServer starts an mTLS health server where the
+// FIRST call to Check blocks on the provided release channel, and
+// subsequent calls return immediately. Used to deterministically hold
+// an RPC in flight while a rotation lands its (separate) post-probe.
+func startGatedMTLSHealthServer(t *testing.T, serverCertPath, serverKeyPath, caCertPath string, holdRelease chan struct{}) (*grpc.Server, string, *serialSet) {
 	t.Helper()
 	serverCert, err := tls.LoadX509KeyPair(serverCertPath, serverKeyPath)
 	if err != nil {
@@ -724,7 +752,7 @@ func startSlowMTLSHealthServer(t *testing.T, serverCertPath, serverKeyPath, caCe
 	}
 	srv := grpc.NewServer(grpc.Creds(creds))
 	serials := newSerialSet()
-	healthpb.RegisterHealthServer(srv, &slowPeerCapturingHealthServer{serials: serials, delay: delay})
+	healthpb.RegisterHealthServer(srv, &gatedPeerCapturingHealthServer{serials: serials, gate: holdRelease})
 	go func() {
 		_ = srv.Serve(lis)
 	}()
