@@ -57,6 +57,16 @@ class WorkerConfig(BaseSettings):
     # gRPC auth
     grpc_auth_secret: str = ""
 
+    # gRPC mTLS (slice 4 of plan 2026-04-29-workspace-llm-source-of-truth-r2.md).
+    # When tls_enabled is true and all three paths are valid, the worker
+    # binds with grpc.ssl_server_credentials and require_client_auth=True;
+    # the API client must present a cert signed by tls_ca_path's CA.
+    # Default false → legacy add_insecure_port path (OSS dev compat).
+    tls_enabled: bool = False
+    tls_cert_path: str = ""
+    tls_key_path: str = ""
+    tls_ca_path: str = ""
+
     def model_post_init(self, __context: object) -> None:
         self.test_mode = self._fallback_bool_env(
             current=self.test_mode,

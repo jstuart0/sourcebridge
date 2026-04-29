@@ -32,6 +32,18 @@ spec:
                 name: sourcebridge-config
             - secretRef:
                 name: sourcebridge-secrets
+          volumeMounts:
+            # mTLS material — only consumed when SOURCEBRIDGE_WORKER_TLS_ENABLED=true.
+            # cert-manager-managed; renewed automatically. After cert-manager
+            # rotates the leaf, OPERATOR must `kubectl rollout restart` to
+            # pick up the new cert (manual rotation per slice 4 of the plan;
+            # automated reload deferred to a follow-up).
+            - name: tls-server
+              mountPath: /etc/sourcebridge/tls
+              readOnly: true
+            - name: tls-ca
+              mountPath: /etc/sourcebridge/tls-ca
+              readOnly: true
           resources:
             requests:
               memory: "512Mi"
@@ -39,6 +51,15 @@ spec:
             limits:
               memory: "1Gi"
               cpu: "500m"
+      volumes:
+        - name: tls-server
+          secret:
+            secretName: sourcebridge-worker-tls
+            optional: true
+        - name: tls-ca
+          secret:
+            secretName: sourcebridge-ca-tls
+            optional: true
 ---
 apiVersion: v1
 kind: Service

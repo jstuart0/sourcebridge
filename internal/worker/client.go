@@ -5,12 +5,17 @@ package worker
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
@@ -95,6 +100,20 @@ type Client struct {
 
 type Option func(*Client)
 
+// TLSConfig captures the mTLS material the API needs to dial the worker
+// over a mutually-authenticated TLS channel. When all four fields are
+// set (CertPath, KeyPath, CAPath, ServerName) and Enabled is true, the
+// client uses credentials.NewTLS instead of insecure.NewCredentials.
+//
+// Slice 4 of plan 2026-04-29-workspace-llm-source-of-truth-r2.md.
+type TLSConfig struct {
+	Enabled    bool
+	CertPath   string
+	KeyPath    string
+	CAPath     string
+	ServerName string
+}
+
 // WithKnowledgeTimeoutProvider injects a live timeout provider for
 // repository-scale knowledge/report generation. The returned duration is used
 // as the repository-level ceiling and falls back to built-in defaults when
@@ -108,10 +127,22 @@ func WithKnowledgeTimeoutProvider(fn func() time.Duration) Option {
 // New creates a new worker Client. It attempts to connect to the worker at the
 // given address. If the worker is unreachable, the connection is established
 // lazily and the API can still start in degraded mode.
-func New(address string, opts ...Option) (*Client, error) {
+//
+// When tlsCfg.Enabled is true, all four paths/fields must be valid; the
+// function builds a tls.Config with mutual auth, loads the client cert
+// + CA bundle, and dials with credentials.NewTLS. On any TLS load
+// failure, returns an error (no silent fallback to insecure). When
+// tlsCfg.Enabled is false (zero value or explicitly disabled), the
+// legacy insecure path is used (OSS dev compatibility).
+func New(address string, tlsCfg TLSConfig, opts ...Option) (*Client, error) {
+	creds, err := dialCredentials(tlsCfg)
+	if err != nil {
+		return nil, fmt.Errorf("worker tls: %w", err)
+	}
+
 	conn, err := grpc.NewClient(
 		address,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(50*1024*1024),
 			grpc.MaxCallSendMsgSize(50*1024*1024),
@@ -139,6 +170,48 @@ func New(address string, opts ...Option) (*Client, error) {
 		}
 	}
 	return c, nil
+}
+
+// dialCredentials returns the gRPC TransportCredentials for the worker
+// dial. When TLS is disabled, returns insecure.NewCredentials() (legacy
+// path, OSS dev / no-cert-manager environments). When enabled, loads
+// the client cert + CA bundle from disk and builds a tls.Config with
+// mutual auth.
+func dialCredentials(cfg TLSConfig) (credentials.TransportCredentials, error) {
+	if !cfg.Enabled {
+		return insecure.NewCredentials(), nil
+	}
+	if cfg.CertPath == "" || cfg.KeyPath == "" || cfg.CAPath == "" {
+		return nil, fmt.Errorf("tls enabled but cert_path/key_path/ca_path are required")
+	}
+
+	clientCert, err := tls.LoadX509KeyPair(cfg.CertPath, cfg.KeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("load client cert: %w", err)
+	}
+
+	caPEM, err := os.ReadFile(cfg.CAPath)
+	if err != nil {
+		return nil, fmt.Errorf("read ca bundle: %w", err)
+	}
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("parse ca bundle: no PEM certs found at %s", cfg.CAPath)
+	}
+
+	serverName := cfg.ServerName
+	if serverName == "" {
+		serverName = "worker.sourcebridge.svc.cluster.local"
+	}
+
+	tlsCfg := &tls.Config{
+		Certificates: []tls.Certificate{clientCert},
+		RootCAs:      caPool,
+		ServerName:   serverName,
+		MinVersion:   tls.VersionTLS12,
+	}
+	slog.Info("worker tls enabled", "server_name", serverName, "cert", cfg.CertPath, "ca", cfg.CAPath)
+	return credentials.NewTLS(tlsCfg), nil
 }
 
 func minDuration(a, b time.Duration) time.Duration {

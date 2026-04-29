@@ -84,6 +84,48 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "worker tls enabled without cert path",
+			modify: func(c *Config) {
+				c.Worker.TLS.Enabled = true
+				c.Worker.TLS.KeyPath = "/etc/sourcebridge/tls/tls.key"
+				c.Worker.TLS.CAPath = "/etc/sourcebridge/tls-ca/ca.crt"
+			},
+			wantErr: true,
+		},
+		{
+			name: "worker tls enabled without key path",
+			modify: func(c *Config) {
+				c.Worker.TLS.Enabled = true
+				c.Worker.TLS.CertPath = "/etc/sourcebridge/tls/tls.crt"
+				c.Worker.TLS.CAPath = "/etc/sourcebridge/tls-ca/ca.crt"
+			},
+			wantErr: true,
+		},
+		{
+			name: "worker tls enabled without ca path",
+			modify: func(c *Config) {
+				c.Worker.TLS.Enabled = true
+				c.Worker.TLS.CertPath = "/etc/sourcebridge/tls/tls.crt"
+				c.Worker.TLS.KeyPath = "/etc/sourcebridge/tls/tls.key"
+			},
+			wantErr: true,
+		},
+		{
+			name: "worker tls enabled with all paths",
+			modify: func(c *Config) {
+				c.Worker.TLS.Enabled = true
+				c.Worker.TLS.CertPath = "/etc/sourcebridge/tls/tls.crt"
+				c.Worker.TLS.KeyPath = "/etc/sourcebridge/tls/tls.key"
+				c.Worker.TLS.CAPath = "/etc/sourcebridge/tls-ca/ca.crt"
+			},
+			wantErr: false,
+		},
+		{
+			name:    "worker tls disabled with empty paths",
+			modify:  func(c *Config) {},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {

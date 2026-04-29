@@ -146,10 +146,40 @@ async def serve() -> None:
     reflection.enable_server_reflection(service_names, server)
 
     # --- Start listening ---
+    # mTLS (slice 4 of plan 2026-04-29-workspace-llm-source-of-truth-r2.md).
+    # When all three TLS env vars are set + tls_enabled=true, bind with
+    # mutual auth via grpc.ssl_server_credentials. Otherwise fall back
+    # to add_insecure_port (OSS dev / no-cert-manager environments).
+    # Fail-closed: if tls_enabled=true but any path is missing/unreadable,
+    # log fatal and exit non-zero. No silent fallback to insecure.
     listen_addr = f"[::]:{config.grpc_port}"
-    server.add_insecure_port(listen_addr)
+    if config.tls_enabled:
+        try:
+            with open(config.tls_cert_path, "rb") as f:
+                server_cert = f.read()
+            with open(config.tls_key_path, "rb") as f:
+                server_key = f.read()
+            with open(config.tls_ca_path, "rb") as f:
+                ca_bundle = f.read()
+        except OSError as exc:
+            log.error("worker_tls_load_failed", error=str(exc))
+            raise SystemExit(2) from exc
+
+        creds = grpc.ssl_server_credentials(
+            [(server_key, server_cert)],
+            root_certificates=ca_bundle,
+            require_client_auth=True,
+        )
+        server.add_secure_port(listen_addr, creds)
+        log.info(
+            "worker_tls_enabled",
+            cert_path=config.tls_cert_path,
+            ca_path=config.tls_ca_path,
+        )
+    else:
+        server.add_insecure_port(listen_addr)
     await server.start()
-    log.info("worker_started", address=listen_addr)
+    log.info("worker_started", address=listen_addr, tls_enabled=config.tls_enabled)
 
     # --- Graceful shutdown on signals ---
     loop = asyncio.get_running_loop()

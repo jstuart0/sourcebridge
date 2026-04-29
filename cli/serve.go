@@ -160,7 +160,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Initialize worker client (non-fatal if unavailable)
 	var workerClient *worker.Client
 	if cfg.Worker.Address != "" {
-		wc, err := worker.New(cfg.Worker.Address, worker.WithKnowledgeTimeoutProvider(knowledgeTimeoutProvider))
+		wc, err := worker.New(
+			cfg.Worker.Address,
+			worker.TLSConfig{
+				Enabled:    cfg.Worker.TLS.Enabled,
+				CertPath:   cfg.Worker.TLS.CertPath,
+				KeyPath:    cfg.Worker.TLS.KeyPath,
+				CAPath:     cfg.Worker.TLS.CAPath,
+				ServerName: cfg.Worker.TLS.ServerName,
+			},
+			worker.WithKnowledgeTimeoutProvider(knowledgeTimeoutProvider),
+		)
 		if err != nil {
 			slog.Warn("failed to create worker client, AI features disabled", "error", err)
 		} else {

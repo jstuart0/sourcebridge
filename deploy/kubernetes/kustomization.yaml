@@ -13,3 +13,10 @@ resources:
   - worker.yaml
   - web.yaml
   - ingress.yaml
+  # mTLS for the API↔worker gRPC channel (slice 4 of plan
+  # 2026-04-29-workspace-llm-source-of-truth-r2.md). Requires cert-manager
+  # to be installed cluster-wide. Default disabled via configmap; flip
+  # SOURCEBRIDGE_WORKER_TLS_ENABLED=true to opt in.
+  - mtls-issuers.yaml
+  - mtls-worker-cert.yaml
+  - mtls-api-cert.yaml

@@ -178,6 +178,36 @@ type OIDCConfig struct {
 // WorkerConfig holds gRPC worker connection settings.
 type WorkerConfig struct {
 	Address string `mapstructure:"address"`
+	// TLS controls mTLS for the API↔worker gRPC channel. Slice 4 of
+	// plan 2026-04-29-workspace-llm-source-of-truth-r2.md. When TLSEnabled
+	// is true and all three paths are valid, the worker client dials
+	// the worker over TLS with mutual auth. When false (default), the
+	// legacy insecure path is used (OSS dev compatibility).
+	TLS WorkerTLSConfig `mapstructure:"tls"`
+}
+
+// WorkerTLSConfig holds the cert/key/CA paths for mTLS API↔worker
+// gRPC. All three paths are required when Enabled is true; the boot
+// path validates and fails closed.
+type WorkerTLSConfig struct {
+	// Enabled toggles mTLS for the worker gRPC channel.
+	// SOURCEBRIDGE_WORKER_TLS_ENABLED.
+	Enabled bool `mapstructure:"enabled"`
+	// CertPath is the API-side client certificate (mounted from a
+	// cert-manager Certificate secret).
+	// SOURCEBRIDGE_WORKER_TLS_CERT_PATH.
+	CertPath string `mapstructure:"cert_path"`
+	// KeyPath is the API-side client private key.
+	// SOURCEBRIDGE_WORKER_TLS_KEY_PATH.
+	KeyPath string `mapstructure:"key_path"`
+	// CAPath is the bundle that verifies the worker's server cert.
+	// SOURCEBRIDGE_WORKER_TLS_CA_PATH.
+	CAPath string `mapstructure:"ca_path"`
+	// ServerName is the SNI/SAN to verify against the worker's cert.
+	// Defaults to "worker.sourcebridge.svc.cluster.local". Set this
+	// when running the worker behind a different DNS name.
+	// SOURCEBRIDGE_WORKER_TLS_SERVER_NAME.
+	ServerName string `mapstructure:"server_name"`
 }
 
 // MCPConfig holds Model Context Protocol (MCP) server settings.
@@ -466,6 +496,11 @@ func Load() (*Config, error) {
 	v.SetDefault("security.oidc.client_secret", "")
 	v.SetDefault("security.oidc.redirect_url", "")
 	v.SetDefault("worker.address", cfg.Worker.Address)
+	v.SetDefault("worker.tls.enabled", false)
+	v.SetDefault("worker.tls.cert_path", "")
+	v.SetDefault("worker.tls.key_path", "")
+	v.SetDefault("worker.tls.ca_path", "")
+	v.SetDefault("worker.tls.server_name", "worker.sourcebridge.svc.cluster.local")
 	v.SetDefault("git.default_token", "")
 	v.SetDefault("git.ssh_key_path", "")
 	v.SetDefault("mcp.enabled", cfg.MCP.Enabled)
@@ -559,6 +594,17 @@ func (c *Config) Validate() error {
 	}
 	if c.QA.AgenticRetrievalCanaryPct < 0 || c.QA.AgenticRetrievalCanaryPct > 100 {
 		return fmt.Errorf("invalid qa.agentic_retrieval_canary_pct: %d (must be 0..100)", c.QA.AgenticRetrievalCanaryPct)
+	}
+	if c.Worker.TLS.Enabled {
+		if c.Worker.TLS.CertPath == "" {
+			return fmt.Errorf("worker.tls.cert_path is required when worker.tls.enabled is true")
+		}
+		if c.Worker.TLS.KeyPath == "" {
+			return fmt.Errorf("worker.tls.key_path is required when worker.tls.enabled is true")
+		}
+		if c.Worker.TLS.CAPath == "" {
+			return fmt.Errorf("worker.tls.ca_path is required when worker.tls.enabled is true")
+		}
 	}
 	return nil
 }

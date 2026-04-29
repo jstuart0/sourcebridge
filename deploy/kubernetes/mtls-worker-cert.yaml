@@ -1,0 +1,34 @@
+# Worker leaf TLS certificate signed by sourcebridge-ca.
+#
+# DNS SANs cover the in-cluster service-DNS shapes the API client uses
+# when dialing. ServerName in the API's tls.Config must match one of these.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: sourcebridge-worker-tls
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: worker
+spec:
+  secretName: sourcebridge-worker-tls
+  duration: 2160h     # 90 days
+  renewBefore: 720h   # 30 days before expiry
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - server auth
+    - client auth
+    - digital signature
+    - key encipherment
+  dnsNames:
+    - worker
+    - worker.sourcebridge
+    - worker.sourcebridge.svc
+    - worker.sourcebridge.svc.cluster.local
+  issuerRef:
+    name: sourcebridge-ca
+    kind: Issuer
+    group: cert-manager.io

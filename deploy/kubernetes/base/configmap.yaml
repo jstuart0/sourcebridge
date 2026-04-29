@@ -13,6 +13,22 @@ data:
   SOURCEBRIDGE_STORAGE_REPO_CACHE_PATH: "/data/repo-cache"
   # Worker gRPC address (Viper reads SOURCEBRIDGE_WORKER_ADDRESS)
   SOURCEBRIDGE_WORKER_ADDRESS: "worker.sourcebridge.svc.cluster.local:50051"
+  # mTLS for the API↔worker gRPC channel (slice 4 of plan
+  # 2026-04-29-workspace-llm-source-of-truth-r2.md). Default disabled.
+  # To enable production mTLS:
+  #   1. Apply the cert-manager manifests at deploy/kubernetes/mtls-*.yaml
+  #      (or a homelab-overlay equivalent).
+  #   2. Wait for cert-manager to issue the leaf secrets (~30s).
+  #   3. Flip SOURCEBRIDGE_WORKER_TLS_ENABLED to "true" via overlay patch.
+  #   4. kubectl rollout restart deploy/sourcebridge-api deploy/sourcebridge-worker.
+  # Cert renewal: cert-manager renews 30d before expiry; OPERATOR must
+  # `kubectl rollout restart` both deployments after renewal to pick up
+  # the new cert (manual rotation; automated reload is a follow-up).
+  SOURCEBRIDGE_WORKER_TLS_ENABLED: "false"
+  SOURCEBRIDGE_WORKER_TLS_CERT_PATH: "/etc/sourcebridge/tls/tls.crt"
+  SOURCEBRIDGE_WORKER_TLS_KEY_PATH: "/etc/sourcebridge/tls/tls.key"
+  SOURCEBRIDGE_WORKER_TLS_CA_PATH: "/etc/sourcebridge/tls-ca/ca.crt"
+  SOURCEBRIDGE_WORKER_TLS_SERVER_NAME: "worker.sourcebridge.svc.cluster.local"
   SOURCEBRIDGE_WORKER_SURREAL_URL: "ws://surrealdb.sourcebridge.svc.cluster.local:8000"
   SOURCEBRIDGE_WORKER_SURREAL_NAMESPACE: "sourcebridge"
   SOURCEBRIDGE_WORKER_SURREAL_DATABASE: "main"

@@ -1,0 +1,64 @@
+# Self-signed CA issuer + bootstrap CA + CA-backed leaf issuer for the
+# API↔worker mTLS channel. Slice 4 of the workspace-llm-source-of-truth-r2
+# plan.
+#
+# Why three resources:
+#  1. A "selfSigned" Issuer is bootstrap-only — it signs the CA cert.
+#  2. The CA Certificate is long-lived (10y) and stored in
+#     sourcebridge-ca-tls. Its public cert is what API and worker trust
+#     to verify each other.
+#  3. A "ca" Issuer references that CA secret and is what we point leaf
+#     Certificates at (the per-pod TLS secrets).
+#
+# After this manifest applies, the Certificate manifests in
+# mtls-worker-cert.yaml and mtls-api-cert.yaml use sourcebridge-ca to
+# issue 90-day leaf certs that cert-manager auto-renews 30d before
+# expiry. When the leaf Secret is updated, OPERATOR MUST run
+# `kubectl -n sourcebridge rollout restart deploy/sourcebridge-api
+# deploy/sourcebridge-worker` to pick up the new cert. (Automated
+# rotation is captured as a follow-up; see the plan's followups doc.)
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: sourcebridge-selfsigned
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: pki
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: sourcebridge-ca
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: pki
+spec:
+  isCA: true
+  commonName: sourcebridge-ca
+  duration: 87600h     # 10 years — CA validity
+  renewBefore: 720h    # 30d before expiry
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  secretName: sourcebridge-ca-tls
+  issuerRef:
+    name: sourcebridge-selfsigned
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: sourcebridge-ca
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: pki
+spec:
+  ca:
+    secretName: sourcebridge-ca-tls

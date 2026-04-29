@@ -10,7 +10,7 @@ import (
 
 func TestNewClient(t *testing.T) {
 	// New should succeed even with an unreachable address (lazy connect)
-	c, err := New("localhost:59999")
+	c, err := New("localhost:59999", TLSConfig{})
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestIsAvailableNilClient(t *testing.T) {
 }
 
 func TestIsAvailableNotConnected(t *testing.T) {
-	c, err := New("localhost:59999")
+	c, err := New("localhost:59999", TLSConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestCloseNilClient(t *testing.T) {
 }
 
 func TestCloseClient(t *testing.T) {
-	c, err := New("localhost:59999")
+	c, err := New("localhost:59999", TLSConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestTimeoutConstants(t *testing.T) {
 }
 
 func TestRepositoryKnowledgeTimeoutUsesProvider(t *testing.T) {
-	c, err := New("localhost:59999", WithKnowledgeTimeoutProvider(func() time.Duration {
+	c, err := New("localhost:59999", TLSConfig{}, WithKnowledgeTimeoutProvider(func() time.Duration {
 		return 45 * time.Minute
 	}))
 	if err != nil {
@@ -106,7 +106,7 @@ func TestRepositoryKnowledgeTimeoutUsesProvider(t *testing.T) {
 }
 
 func TestRepositoryKnowledgeTimeoutFallsBackToDefault(t *testing.T) {
-	c, err := New("localhost:59999", WithKnowledgeTimeoutProvider(func() time.Duration {
+	c, err := New("localhost:59999", TLSConfig{}, WithKnowledgeTimeoutProvider(func() time.Duration {
 		return 0
 	}))
 	if err != nil {
