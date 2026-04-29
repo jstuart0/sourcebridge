@@ -49,6 +49,10 @@ import {
   UPDATE_REPOSITORY_LIVING_WIKI_SETTINGS_MUTATION,
   RETRY_LIVING_WIKI_JOB_MUTATION,
 } from "@/lib/graphql/queries";
+import {
+  RepositoryLLMOverrideSection,
+  type RepositoryLLMOverride,
+} from "./repository-llm-override-section";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -98,6 +102,7 @@ export interface RepositoryLivingWikiSettings {
   updatedAt?: string | null;
   updatedBy?: string | null;
   lastJobResult?: LivingWikiJobResult | null;
+  llmOverride?: RepositoryLLMOverride | null;
 }
 
 interface GlobalSettings {
@@ -2055,6 +2060,25 @@ export function WikiSettingsPanel({
               summaryRef={summaryRef}
             />
           )}
+
+        {/* Per-repository LLM override — collapsed by default. Applies to
+            every repo-scoped LLM op (not just living-wiki), but lives on
+            this panel since the storage is alongside the wiki settings. */}
+        <RepositoryLLMOverrideSection
+          repoId={repoId}
+          override={settings?.llmOverride ?? null}
+          onSaved={(next) => {
+            // Sync the override back into local panel state so the
+            // saved-state hint reflects the latest save without a refetch.
+            setSettings((prev) =>
+              prev ? { ...prev, llmOverride: next } : prev,
+            );
+          }}
+          isEnterprise={
+            typeof process !== "undefined" &&
+            process.env.NEXT_PUBLIC_EDITION === "enterprise"
+          }
+        />
       </Panel>
     </>
   );

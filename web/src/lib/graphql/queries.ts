@@ -221,6 +221,22 @@ export const REPOSITORY_QUERY = gql`
           failureCategory
           errorMessage
         }
+        llmOverride {
+          provider
+          baseURL
+          apiKeySet
+          apiKeyHint
+          advancedMode
+          summaryModel
+          reviewModel
+          askModel
+          knowledgeModel
+          architectureDiagramModel
+          reportModel
+          draftModel
+          updatedAt
+          updatedBy
+        }
       }
     }
   }
@@ -1594,6 +1610,58 @@ export const UPDATE_REPOSITORY_LIVING_WIKI_SETTINGS_MUTATION = gql`
         status
         failureCategory
         errorMessage
+      }
+    }
+  }
+`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-repository LLM override (slice 2 of the workspace-llm-source-of-truth-r2
+// plan). The override mirrors the workspace /admin/llm advanced-mode area
+// list. Patch semantics: omitted fields preserve saved values; empty
+// strings clear non-secret fields back to workspace inheritance; apiKey
+// has its own clearAPIKey flag (omitted/empty leaves alone, non-empty
+// replaces, clearAPIKey:true drops).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const REPO_LLM_OVERRIDE_FIELDS = `
+  provider
+  baseURL
+  apiKeySet
+  apiKeyHint
+  advancedMode
+  summaryModel
+  reviewModel
+  askModel
+  knowledgeModel
+  architectureDiagramModel
+  reportModel
+  draftModel
+  updatedAt
+  updatedBy
+`;
+
+export const SET_REPOSITORY_LLM_OVERRIDE_MUTATION = gql`
+  mutation SetRepositoryLLMOverride($repositoryId: ID!, $input: RepositoryLLMOverrideInput!) {
+    setRepositoryLLMOverride(repositoryId: $repositoryId, input: $input) {
+      ${REPO_LLM_OVERRIDE_FIELDS}
+    }
+  }
+`;
+
+export const CLEAR_REPOSITORY_LLM_OVERRIDE_MUTATION = gql`
+  mutation ClearRepositoryLLMOverride($repositoryId: ID!) {
+    clearRepositoryLLMOverride(repositoryId: $repositoryId) {
+      enabled
+      mode
+      sinks {
+        kind
+        integrationName
+        audience
+        editPolicy
+      }
+      llmOverride {
+        ${REPO_LLM_OVERRIDE_FIELDS}
       }
     }
   }

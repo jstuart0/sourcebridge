@@ -106,7 +106,7 @@ describe("WikiSettingsPanel — State 0 (globally disabled)", () => {
     expect(link).toHaveAttribute("href", "/settings/living-wiki");
   });
 
-  it("shows no form controls when globally disabled", () => {
+  it("shows no wiki form controls when globally disabled", () => {
     render(
       <WikiSettingsPanel
         repoId="repo-1"
@@ -115,7 +115,13 @@ describe("WikiSettingsPanel — State 0 (globally disabled)", () => {
       />
     );
 
-    expect(screen.queryByRole("checkbox")).toBeNull();
+    // No wiki-specific buttons (publish-mode toggles, sink rows, Enable
+    // button) render in state 0. The per-repo LLM override section IS
+    // rendered (collapsed); it's a sibling concern that operates regardless
+    // of living-wiki state.
+    expect(screen.queryByRole("button", { name: /PR Review/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Direct Publish/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Enable Living Wiki/i })).toBeNull();
   });
 });
 
@@ -143,7 +149,7 @@ describe("WikiSettingsPanel — State 0 kill-switch", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows no form controls when kill-switch is active", () => {
+  it("shows no wiki form controls when kill-switch is active", () => {
     render(
       <WikiSettingsPanel
         repoId="repo-1"
@@ -152,7 +158,12 @@ describe("WikiSettingsPanel — State 0 kill-switch", () => {
       />
     );
 
-    expect(screen.queryByRole("checkbox")).toBeNull();
+    // Same scoping as the globally-disabled case: the per-repo LLM
+    // override section is a sibling concern and renders regardless;
+    // assert only the wiki-specific controls are absent.
+    expect(screen.queryByRole("button", { name: /PR Review/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Direct Publish/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Enable Living Wiki/i })).toBeNull();
   });
 });
 
