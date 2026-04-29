@@ -227,7 +227,7 @@ jobs:
           # Configure SSH with the deploy key and a pinned GitHub host key.
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          echo "${HOMEBREW_TAP_DEPLOY_KEY}" > ~/.ssh/tap_deploy_key
+          printf '%s\n' "${HOMEBREW_TAP_DEPLOY_KEY}" > ~/.ssh/tap_deploy_key
           chmod 600 ~/.ssh/tap_deploy_key
 
           # Pin GitHub's published ECDSA host key.

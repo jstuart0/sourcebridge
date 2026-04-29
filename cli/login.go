@@ -296,6 +296,13 @@ func runOIDCFlow(ctx context.Context, serverURL string, opener browserOpener) (s
 		return "", fmt.Errorf("OIDC start response is missing session_id or auth_url")
 	}
 
+	// Reject auth_url values that carry embedded credentials (user:pass@host).
+	// Pre-condition for a real attack is a compromised server, but the guard is
+	// small and strictly defensive (NEW-3).
+	if u, parseErr := url.Parse(start.AuthURL); parseErr == nil && u.User != nil {
+		return "", fmt.Errorf("server returned an auth_url containing embedded credentials; refusing to open. The SourceBridge server may be compromised")
+	}
+
 	// Print where we're about to send the user. A malicious server cannot
 	// inject control chars here because url.Parse rejects them, but we
 	// still display only the parsed host (not the full URL) when auto-opening.

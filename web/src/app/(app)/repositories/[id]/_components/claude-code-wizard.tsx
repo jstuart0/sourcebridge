@@ -320,8 +320,8 @@ export function ClaudeCodeWizard({ repoId, onUseExisting }: ClaudeCodeWizardProp
     // Step 1: write the token to ~/.sourcebridge/token (0600). The token is in
     // shell history for ONE command, but never in dotfiles or sync repos.
     const writeTokenCmd =
-      `mkdir -p ~/.sourcebridge && umask 077 && ` +
-      `printf '%s' '${escapeSingleQuotes(token.token)}' > ~/.sourcebridge/token && ` +
+      `mkdir -p ~/.sourcebridge && ` +
+      `( umask 077 && printf '%s' '${escapeSingleQuotes(token.token)}' > ~/.sourcebridge/token ) && ` +
       `chmod 600 ~/.sourcebridge/token`;
 
     // Step 2: setup command, no token on the command line. The CLI reads it

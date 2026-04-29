@@ -689,6 +689,32 @@ func TestLogin_SetupNotDone_ClearError(t *testing.T) {
 	}
 }
 
+// TestLogin_OIDC_AuthURLWithUserinfo_Rejected verifies that a server returning
+// an auth_url containing embedded credentials (user:pass@host) is rejected
+// before the browser opener is called (NEW-3).
+func TestLogin_OIDC_AuthURLWithUserinfo_Rejected(t *testing.T) {
+	srv := newLoginTestServer(t, loginTestServerCfg{
+		oidcEnabled:    true,
+		oidcAuthURL:    "https://user:pass@evil.example.com/phish?state=abc",
+		oidcFinalToken: "ca_should_never_arrive",
+	})
+	defer srv.Close()
+
+	opener := &fakeBrowserOpener{}
+	pwd := &fakePasswordReader{}
+
+	_, _, err := runLoginInTempHome(t, srv.URL, "oidc", false, opener.open, pwd.read)
+	if err == nil {
+		t.Fatal("expected error for auth_url with embedded credentials, got nil")
+	}
+	if !strings.Contains(err.Error(), "embedded credentials") {
+		t.Errorf("error should mention 'embedded credentials'; got: %v", err)
+	}
+	if len(opener.calls) != 0 {
+		t.Errorf("browser opener must not be called when auth_url has userinfo; got calls: %v", opener.calls)
+	}
+}
+
 // TestLogin_TokenWriteFailure_ClearError simulates a token-write failure by
 // making the .sourcebridge directory unwritable. The error message must mention
 // that the session is permanently consumed.
