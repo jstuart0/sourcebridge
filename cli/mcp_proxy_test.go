@@ -496,18 +496,16 @@ func TestMCPProxy_PipelinedRequestsDispatchConcurrently(t *testing.T) {
 		`{"jsonrpc":"2.0","id":3,"method":"fast","params":{}}`,
 	})
 
-	if !strings.Contains(stdout, `"id":2`) || !strings.Contains(stdout, `"id":3`) {
+	// Concurrent dispatch is proven by the watcher goroutine: it only closes
+	// releaseSlow after BOTH slowStart and fastStart fire, which means fast
+	// reached the server while slow was still in flight. If dispatch had
+	// serialized, fastStart would never close and the test would deadlock.
+	// We assert both responses arrived; we deliberately do NOT assert the
+	// stdout order between the two responses — that's determined by goroutine
+	// scheduling after both server handlers complete, and asserting it makes
+	// the test flaky without strengthening the property.
+	if !strings.Contains(stdout, `"order":"slow"`) || !strings.Contains(stdout, `"order":"fast"`) {
 		t.Errorf("missing responses; stdout:\n%s", stdout)
-	}
-	// fast (id=3) should have been served and likely written before slow.
-	idxSlow := strings.Index(stdout, `"order":"slow"`)
-	idxFast := strings.Index(stdout, `"order":"fast"`)
-	if idxFast < 0 || idxSlow < 0 {
-		t.Fatalf("missing markers; stdout:\n%s", stdout)
-	}
-	if idxFast >= idxSlow {
-		// Concurrent dispatch should have let fast finish first.
-		t.Errorf("fast did not return before slow under concurrent dispatch; stdout:\n%s", stdout)
 	}
 }
 
