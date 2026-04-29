@@ -93,24 +93,27 @@ func (r *surrealKnowledgeArtifact) toArtifact() *knowledge.Artifact {
 }
 
 type surrealRepositoryUnderstanding struct {
-	ID           *models.RecordID `json:"id,omitempty"`
-	RepoID       string           `json:"repo_id"`
-	ScopeType    string           `json:"scope_type"`
-	ScopeKey     string           `json:"scope_key"`
-	ScopePath    string           `json:"scope_path"`
-	CorpusID     string           `json:"corpus_id"`
-	RevisionFP   string           `json:"revision_fp"`
-	Strategy     string           `json:"strategy"`
-	Stage        string           `json:"stage"`
-	TreeStatus   string           `json:"tree_status"`
-	CachedNodes  int              `json:"cached_nodes"`
-	TotalNodes   int              `json:"total_nodes"`
-	ModelUsed    string           `json:"model_used"`
-	Metadata     string           `json:"metadata"`
-	ErrorCode    string           `json:"error_code"`
-	ErrorMessage string           `json:"error_message"`
-	CreatedAt    surrealTime      `json:"created_at"`
-	UpdatedAt    surrealTime      `json:"updated_at"`
+	ID              *models.RecordID `json:"id,omitempty"`
+	RepoID          string           `json:"repo_id"`
+	ScopeType       string           `json:"scope_type"`
+	ScopeKey        string           `json:"scope_key"`
+	ScopePath       string           `json:"scope_path"`
+	CorpusID        string           `json:"corpus_id"`
+	RevisionFP      string           `json:"revision_fp"`
+	Strategy        string           `json:"strategy"`
+	Stage           string           `json:"stage"`
+	TreeStatus      string           `json:"tree_status"`
+	CachedNodes     int              `json:"cached_nodes"`
+	TotalNodes      int              `json:"total_nodes"`
+	ModelUsed       string           `json:"model_used"`
+	Metadata        string           `json:"metadata"`
+	ErrorCode       string           `json:"error_code"`
+	ErrorMessage    string           `json:"error_message"`
+	Progress        float64          `json:"progress"`
+	ProgressPhase   string           `json:"progress_phase"`
+	ProgressMessage string           `json:"progress_message"`
+	CreatedAt       surrealTime      `json:"created_at"`
+	UpdatedAt       surrealTime      `json:"updated_at"`
 }
 
 func (r *surrealRepositoryUnderstanding) toRepositoryUnderstanding() *knowledge.RepositoryUnderstanding {
@@ -119,22 +122,25 @@ func (r *surrealRepositoryUnderstanding) toRepositoryUnderstanding() *knowledge.
 		ScopePath: r.ScopePath,
 	}.Normalize()
 	return &knowledge.RepositoryUnderstanding{
-		ID:           recordIDString(r.ID),
-		RepositoryID: r.RepoID,
-		Scope:        &scope,
-		CorpusID:     r.CorpusID,
-		RevisionFP:   r.RevisionFP,
-		Strategy:     r.Strategy,
-		Stage:        knowledge.RepositoryUnderstandingStage(r.Stage),
-		TreeStatus:   knowledge.RepositoryUnderstandingTreeStatus(r.TreeStatus),
-		CachedNodes:  r.CachedNodes,
-		TotalNodes:   r.TotalNodes,
-		ModelUsed:    r.ModelUsed,
-		Metadata:     r.Metadata,
-		ErrorCode:    r.ErrorCode,
-		ErrorMessage: r.ErrorMessage,
-		CreatedAt:    r.CreatedAt.Time,
-		UpdatedAt:    r.UpdatedAt.Time,
+		ID:              recordIDString(r.ID),
+		RepositoryID:    r.RepoID,
+		Scope:           &scope,
+		CorpusID:        r.CorpusID,
+		RevisionFP:      r.RevisionFP,
+		Strategy:        r.Strategy,
+		Stage:           knowledge.RepositoryUnderstandingStage(r.Stage),
+		TreeStatus:      knowledge.RepositoryUnderstandingTreeStatus(r.TreeStatus),
+		CachedNodes:     r.CachedNodes,
+		TotalNodes:      r.TotalNodes,
+		ModelUsed:       r.ModelUsed,
+		Metadata:        r.Metadata,
+		ErrorCode:       r.ErrorCode,
+		ErrorMessage:    r.ErrorMessage,
+		Progress:        r.Progress,
+		ProgressPhase:   r.ProgressPhase,
+		ProgressMessage: r.ProgressMessage,
+		CreatedAt:       r.CreatedAt.Time,
+		UpdatedAt:       r.UpdatedAt.Time,
 	}
 }
 
@@ -1237,6 +1243,26 @@ func (s *SurrealStore) MarkRepositoryUnderstandingNeedsRefresh(repoID string) er
 			"repo_id": repoID,
 			"stage":   string(knowledge.UnderstandingNeedsRefresh),
 		})
+	return err
+}
+
+func (s *SurrealStore) UpdateRepositoryUnderstandingProgress(id string, progress float64, phase, message string) error {
+	db := s.client.DB()
+	if db == nil {
+		return fmt.Errorf("database not connected")
+	}
+	sql := `UPDATE type::thing('ca_repository_understanding', $id)
+		SET progress = $progress, updated_at = time::now()`
+	vars := map[string]any{"id": id, "progress": progress}
+	if phase != "" {
+		sql += `, progress_phase = $phase`
+		vars["phase"] = phase
+	}
+	if message != "" {
+		sql += `, progress_message = $message`
+		vars["message"] = message
+	}
+	_, err := queryOne[interface{}](ctx(), db, sql, vars)
 	return err
 }
 

@@ -447,6 +447,8 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 			"scope_type":     string(scope.ScopeType),
 			"scope_path":     scope.ScopePath,
 		})
+		stopProgress := r.startUnderstandingProgressTicker(rt, understanding.ID)
+		defer stopProgress()
 		bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, understanding.ID, "build_repository_understanding")
 		resp, err := r.Worker.GenerateCliffNotes(bgCtx, &knowledgev1.GenerateCliffNotesRequest{
 			RepositoryId:   repo.ID,

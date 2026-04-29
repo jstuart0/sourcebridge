@@ -53,6 +53,11 @@ type KnowledgeStore interface {
 	GetRepositoryUnderstanding(repoID string, scope ArtifactScope) *RepositoryUnderstanding
 	GetRepositoryUnderstandings(repoID string) []*RepositoryUnderstanding
 	MarkRepositoryUnderstandingNeedsRefresh(repoID string) error
+	// UpdateRepositoryUnderstandingProgress sets the in-progress percentage,
+	// phase label, and human-readable message on the understanding row so the
+	// UI can surface live motion during the build (analogous to
+	// UpdateKnowledgeArtifactProgressWithPhase for artifact rows).
+	UpdateRepositoryUnderstandingProgress(id string, progress float64, phase, message string) error
 	AttachArtifactUnderstanding(artifactID, understandingID, revisionFP string) error
 	StoreArtifactDependencies(artifactID string, dependencies []ArtifactDependency) error
 	GetArtifactDependencies(artifactID string) []ArtifactDependency

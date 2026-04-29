@@ -902,6 +902,9 @@ type RepositoryUnderstanding struct {
 	ModelUsed         *string                           `json:"modelUsed,omitempty"`
 	FirstPassSections []*UnderstandingSection           `json:"firstPassSections"`
 	RefreshAvailable  bool                              `json:"refreshAvailable"`
+	Progress          float64                           `json:"progress"`
+	ProgressPhase     *string                           `json:"progressPhase,omitempty"`
+	ProgressMessage   *string                           `json:"progressMessage,omitempty"`
 	CreatedAt         time.Time                         `json:"createdAt"`
 	UpdatedAt         time.Time                         `json:"updatedAt"`
 	ErrorCode         *string                           `json:"errorCode,omitempty"`

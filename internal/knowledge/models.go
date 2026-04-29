@@ -311,22 +311,25 @@ const (
 // RepositoryUnderstanding is the first-class persisted understanding record
 // backing cliff notes and later downstream artifact generation.
 type RepositoryUnderstanding struct {
-	ID           string                            `json:"id"`
-	RepositoryID string                            `json:"repository_id"`
-	Scope        *ArtifactScope                    `json:"scope,omitempty"`
-	CorpusID     string                            `json:"corpus_id,omitempty"`
-	RevisionFP   string                            `json:"revision_fp,omitempty"`
-	Strategy     string                            `json:"strategy,omitempty"`
-	Stage        RepositoryUnderstandingStage      `json:"stage"`
-	TreeStatus   RepositoryUnderstandingTreeStatus `json:"tree_status"`
-	CachedNodes  int                               `json:"cached_nodes"`
-	TotalNodes   int                               `json:"total_nodes"`
-	ModelUsed    string                            `json:"model_used,omitempty"`
-	Metadata     string                            `json:"metadata,omitempty"`
-	ErrorCode    string                            `json:"error_code,omitempty"`
-	ErrorMessage string                            `json:"error_message,omitempty"`
-	CreatedAt    time.Time                         `json:"created_at"`
-	UpdatedAt    time.Time                         `json:"updated_at"`
+	ID              string                            `json:"id"`
+	RepositoryID    string                            `json:"repository_id"`
+	Scope           *ArtifactScope                    `json:"scope,omitempty"`
+	CorpusID        string                            `json:"corpus_id,omitempty"`
+	RevisionFP      string                            `json:"revision_fp,omitempty"`
+	Strategy        string                            `json:"strategy,omitempty"`
+	Stage           RepositoryUnderstandingStage      `json:"stage"`
+	TreeStatus      RepositoryUnderstandingTreeStatus `json:"tree_status"`
+	CachedNodes     int                               `json:"cached_nodes"`
+	TotalNodes      int                               `json:"total_nodes"`
+	ModelUsed       string                            `json:"model_used,omitempty"`
+	Metadata        string                            `json:"metadata,omitempty"`
+	ErrorCode       string                            `json:"error_code,omitempty"`
+	ErrorMessage    string                            `json:"error_message,omitempty"`
+	Progress        float64                           `json:"progress"`
+	ProgressPhase   string                            `json:"progress_phase,omitempty"`
+	ProgressMessage string                            `json:"progress_message,omitempty"`
+	CreatedAt       time.Time                         `json:"created_at"`
+	UpdatedAt       time.Time                         `json:"updated_at"`
 }
 
 // Section is an ordered component of a knowledge artifact.

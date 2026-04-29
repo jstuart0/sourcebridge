@@ -98,6 +98,66 @@ func (r *Resolver) startProgressTicker(rt llm.Runtime, artifactID string) contex
 	return cancel
 }
 
+// startUnderstandingProgressTicker mirrors startProgressTicker but writes to
+// the ca_repository_understanding row (via UpdateRepositoryUnderstandingProgress)
+// instead of the ca_knowledge_artifact row. It is intentionally a parallel
+// function rather than a generalised abstraction because the two stores have
+// different signatures and the duplication is modest. If the two paths
+// converge further this should be unified.
+//
+// Call-out for future cleanup: startProgressTicker and this function share the
+// same phase-label bucketing logic; extract a phaseLabel(p float64) helper if
+// a third call-site appears.
+func (r *Resolver) startUnderstandingProgressTicker(rt llm.Runtime, understandingID string) context.CancelFunc {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		tick := time.NewTicker(5 * time.Second)
+		defer tick.Stop()
+		p := 0.15
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				switch {
+				case p < 0.6:
+					p += 0.02
+				case p < 0.8:
+					p += 0.005
+				case p < 0.95:
+					p += 0.001
+				}
+				if p > 0.95 {
+					p = 0.95
+				}
+				msg := "Building understanding"
+				switch {
+				case p < 0.2:
+					msg = "Building understanding · summarising leaves"
+				case p < 0.4:
+					msg = "Building understanding · summarising files"
+				case p < 0.6:
+					msg = "Building understanding · summarising packages"
+				case p < 0.8:
+					msg = "Building understanding · synthesising root"
+				default:
+					msg = "Building understanding · finalising"
+				}
+				rt.ReportProgress(p, "generating", msg)
+				if err := r.KnowledgeStore.UpdateRepositoryUnderstandingProgress(understandingID, p, "generating", msg); err != nil {
+					knowledgeProgressWriteErrorsTotal.Add(1)
+					slog.Warn("knowledge_progress_write_failed",
+						"event", "knowledge_progress_write_failed",
+						"understanding_id", understandingID,
+						"phase", "generating",
+						"error", err)
+				}
+			}
+		}
+	}()
+	return cancel
+}
+
 // knowledgeJobTargetKey returns the canonical dedupe key the orchestrator
 // uses for a knowledge artifact generation job. Matching keys collapse to
 // a single in-flight job so rapid duplicate requests (the original thor

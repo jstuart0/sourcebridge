@@ -202,6 +202,9 @@ interface RepositoryUnderstanding {
   totalNodes: number;
   modelUsed?: string | null;
   refreshAvailable: boolean;
+  progress: number;
+  progressPhase?: string | null;
+  progressMessage?: string | null;
   firstPassSections?: Array<{
     title: string;
     summary: string;
@@ -785,6 +788,7 @@ export default function RepositoryDetailPage() {
   const [cancellingJobIds, setCancellingJobIds] = useState<Record<string, boolean>>({});
   const repoJobsPollRef = useRef<number | null>(null);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
+  const [understandingDedupeNote, setUnderstandingDedupeNote] = useState(false);
   const seenRepoTerminalRef = useRef<Record<string, string>>({});
   const locallyCancelledJobsRef = useRef<Record<string, number>>({});
 
@@ -1066,6 +1070,27 @@ export default function RepositoryDetailPage() {
   const repoGenerationModeDefault: RepositoryGenerationMode = (repo?.generationModeDefault || "UNDERSTANDING_FIRST") as RepositoryGenerationMode;
   const repoActiveJobs = useMemo(() => repoJobs?.active ?? [], [repoJobs?.active]);
   const repoRecentJobs = useMemo(() => repoJobs?.recent ?? [], [repoJobs?.recent]);
+  // The live job for the understanding build. We prefer an active job; fall
+  // back to the most recent job so progress is visible immediately after the
+  // run completes. The job_type matches the orchestrator key.
+  const understandingJob = useMemo(() => {
+    const active = repoActiveJobs.find((j) => j.job_type === "build_repository_understanding");
+    if (active) return active;
+    return repoRecentJobs.find((j) => j.job_type === "build_repository_understanding") ?? null;
+  }, [repoActiveJobs, repoRecentJobs]);
+  // True whenever an understanding build is in flight — either the persisted
+  // stage says so (catches the window between mutation return and the first
+  // job-poll cycle) or there is a live pending/generating job.
+  const understandingBuilding = Boolean(
+    understandingBusy ||
+    (understandingJob && (understandingJob.status === "pending" || understandingJob.status === "generating"))
+  );
+  // Clear the dedupe note once the build finishes so it doesn't linger.
+  useEffect(() => {
+    if (!understandingBuilding) {
+      setUnderstandingDedupeNote(false);
+    }
+  }, [understandingBuilding]);
   const artifactJobMap = useMemo(() => {
     const map = new Map<string, RepoJobView>();
     for (const job of [...repoActiveJobs, ...repoRecentJobs]) {
@@ -1424,12 +1449,14 @@ export default function RepositoryDetailPage() {
 
   async function handleBuildRepositoryUnderstanding() {
     setKnowledgeLoading(true);
+    setUnderstandingDedupeNote(false);
+    const wasBuilding = understandingBuilding;
     try {
       // force: true so a click on "Refresh understanding" actually re-runs
       // the build even when the source revision is unchanged. Without this,
       // the resolver short-circuits and the user gets the cached result
       // (e.g. one generated with a different LLM model) silently.
-      await buildRepositoryUnderstanding({
+      const result = await buildRepositoryUnderstanding({
         input: {
           repositoryId: repoId,
           scopeType: knowledgeScopeType,
@@ -1437,6 +1464,14 @@ export default function RepositoryDetailPage() {
           force: true,
         },
       });
+      // When the orchestrator dedupes (an identical build is already in
+      // flight) the mutation returns the existing understanding row with
+      // BUILDING_TREE stage. Show a one-line note so the user knows their
+      // click was joined to the running job rather than silently ignored.
+      const returnedStage = result.data?.buildRepositoryUnderstanding?.stage;
+      if (wasBuilding && (returnedStage === "BUILDING_TREE" || returnedStage === "FIRST_PASS_READY")) {
+        setUnderstandingDedupeNote(true);
+      }
       reexecuteRepo({ requestPolicy: "network-only" });
       void fetchRepoJobs();
     } finally {
@@ -1838,12 +1873,12 @@ export default function RepositoryDetailPage() {
               variant="secondary"
               size="sm"
               onClick={handleBuildRepositoryUnderstanding}
-              disabled={knowledgeLoading || understandingBusy}
+              disabled={knowledgeLoading || understandingBuilding}
             >
               {knowledgeLoading
                 ? "Starting..."
-                : understandingBusy
-                  ? "Understanding running"
+                : understandingBuilding
+                  ? "Building understanding..."
                   : currentUnderstanding
                     ? currentUnderstanding.refreshAvailable
                       ? "Refresh understanding"
@@ -2710,8 +2745,14 @@ export default function RepositoryDetailPage() {
                     </div>
                   </div>
                   <div className="mt-4 flex flex-wrap items-center gap-2">
-                    <Button variant="secondary" size="sm" onClick={handleBuildRepositoryUnderstanding} disabled={knowledgeLoading}>
-                      {knowledgeLoading ? "Starting..." : currentUnderstanding ? "Refresh understanding" : "Build understanding"}
+                    <Button variant="secondary" size="sm" onClick={handleBuildRepositoryUnderstanding} disabled={knowledgeLoading || understandingBuilding}>
+                      {knowledgeLoading
+                        ? "Starting..."
+                        : understandingBuilding
+                          ? "Building understanding..."
+                          : currentUnderstanding
+                            ? "Refresh understanding"
+                            : "Build understanding"}
                     </Button>
                     {currentUnderstanding ? (
                       <Button
@@ -2722,12 +2763,57 @@ export default function RepositoryDetailPage() {
                         {understandingCollapsed ? "Show details" : "Hide details"}
                       </Button>
                     ) : null}
-                    {currentUnderstanding?.updatedAt ? (
+                    {currentUnderstanding?.updatedAt && !understandingBuilding ? (
                       <span className="text-xs text-[var(--text-tertiary)]">
                         Updated {formatGeneratedAt(currentUnderstanding.updatedAt)}
                       </span>
                     ) : null}
                   </div>
+                  {understandingBuilding ? (
+                    <div className="mt-3 space-y-1">
+                      {(() => {
+                        const liveJob = understandingJob && (understandingJob.status === "pending" || understandingJob.status === "generating") ? understandingJob : null;
+                        const progress = liveJob ? liveJob.progress : (currentUnderstanding?.progress ?? 0);
+                        const progressMsg = liveJob?.progress_message?.trim() || currentUnderstanding?.progressMessage?.trim() || null;
+                        const phase = liveJob?.progress_phase || currentUnderstanding?.progressPhase || null;
+                        const displayMsg = progressMsg
+                          ? progressMsg
+                          : phase === "queued"
+                            ? "Waiting for a generation slot"
+                            : phase === "generating"
+                              ? "Building understanding"
+                              : "Starting build";
+                        const heartbeat = liveJob ? formatHeartbeatAge(liveJob.updated_at) : null;
+                        const elapsed = liveJob ? formatElapsedMs(liveJob.elapsed_ms) : null;
+                        const statusLine = heartbeat && elapsed
+                          ? `${displayMsg} · alive ${heartbeat} · elapsed ${elapsed}`
+                          : heartbeat
+                            ? `${displayMsg} · alive ${heartbeat}`
+                            : elapsed
+                              ? `${displayMsg} · elapsed ${elapsed}`
+                              : displayMsg;
+                        return (
+                          <>
+                            <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
+                              <span>{liveJob?.status === "pending" ? "Queued" : "Generating"}</span>
+                              <span>{Math.round(Math.max(progress, 0.02) * 100)}%</span>
+                            </div>
+                            <div className="text-xs text-[var(--text-tertiary)]">{statusLine}</div>
+                            <progress
+                              className="h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--bg-hover)] [&::-webkit-progress-value]:bg-[var(--accent-primary)] [&::-moz-progress-bar]:bg-[var(--accent-primary)]"
+                              max={100}
+                              value={Math.max(progress * 100, 5)}
+                            />
+                          </>
+                        );
+                      })()}
+                    </div>
+                  ) : null}
+                  {understandingDedupeNote ? (
+                    <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+                      Already building — your click was joined to the existing run.
+                    </p>
+                  ) : null}
                   {currentUnderstanding && understandingCollapsed ? (
                     <div className="mt-4 space-y-3">
                       {understandingSummary ? (

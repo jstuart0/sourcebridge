@@ -173,6 +173,9 @@ export const REPOSITORY_QUERY = gql`
         totalNodes
         modelUsed
         refreshAvailable
+        progress
+        progressPhase
+        progressMessage
         firstPassSections {
           title
           summary
@@ -526,6 +529,9 @@ export const BUILD_REPOSITORY_UNDERSTANDING_MUTATION = gql`
       totalNodes
       modelUsed
       refreshAvailable
+      progress
+      progressPhase
+      progressMessage
       firstPassSections {
         title
         summary

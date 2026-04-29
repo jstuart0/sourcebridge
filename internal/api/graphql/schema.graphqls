@@ -1122,6 +1122,9 @@ type RepositoryUnderstanding {
   modelUsed: String
   firstPassSections: [UnderstandingSection!]!
   refreshAvailable: Boolean!
+  progress: Float!
+  progressPhase: String
+  progressMessage: String
   createdAt: Time!
   updatedAt: Time!
   errorCode: String

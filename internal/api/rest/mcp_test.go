@@ -161,6 +161,9 @@ func (m *mockKnowledgeStore) GetRepositoryUnderstandings(repoID string) []*knowl
 func (m *mockKnowledgeStore) MarkRepositoryUnderstandingNeedsRefresh(repoID string) error {
 	return nil
 }
+func (m *mockKnowledgeStore) UpdateRepositoryUnderstandingProgress(id string, progress float64, phase, message string) error {
+	return nil
+}
 func (m *mockKnowledgeStore) AttachArtifactUnderstanding(artifactID, understandingID, revisionFP string) error {
 	return nil
 }

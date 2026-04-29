@@ -443,6 +443,25 @@ func (s *MemStore) MarkRepositoryUnderstandingNeedsRefresh(repoID string) error 
 	return nil
 }
 
+func (s *MemStore) UpdateRepositoryUnderstandingProgress(id string, progress float64, phase, message string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	u := s.understandings[id]
+	if u == nil {
+		return fmt.Errorf("understanding %s not found", id)
+	}
+	u.Progress = progress
+	if phase != "" {
+		u.ProgressPhase = phase
+	}
+	if message != "" {
+		u.ProgressMessage = message
+	}
+	u.UpdatedAt = time.Now()
+	return nil
+}
+
 func (s *MemStore) AttachArtifactUnderstanding(artifactID, understandingID, revisionFP string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
