@@ -833,6 +833,9 @@ type ComplexityRoot struct {
 		FirstPassSections func(childComplexity int) int
 		ID                func(childComplexity int) int
 		ModelUsed         func(childComplexity int) int
+		Progress          func(childComplexity int) int
+		ProgressMessage   func(childComplexity int) int
+		ProgressPhase     func(childComplexity int) int
 		RefreshAvailable  func(childComplexity int) int
 		RepositoryID      func(childComplexity int) int
 		RevisionFp        func(childComplexity int) int
@@ -5738,6 +5741,27 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.RepositoryUnderstanding.ModelUsed(childComplexity), true
+
+	case "RepositoryUnderstanding.progress":
+		if e.complexity.RepositoryUnderstanding.Progress == nil {
+			break
+		}
+
+		return e.complexity.RepositoryUnderstanding.Progress(childComplexity), true
+
+	case "RepositoryUnderstanding.progressMessage":
+		if e.complexity.RepositoryUnderstanding.ProgressMessage == nil {
+			break
+		}
+
+		return e.complexity.RepositoryUnderstanding.ProgressMessage(childComplexity), true
+
+	case "RepositoryUnderstanding.progressPhase":
+		if e.complexity.RepositoryUnderstanding.ProgressPhase == nil {
+			break
+		}
+
+		return e.complexity.RepositoryUnderstanding.ProgressPhase(childComplexity), true
 
 	case "RepositoryUnderstanding.refreshAvailable":
 		if e.complexity.RepositoryUnderstanding.RefreshAvailable == nil {
@@ -30260,6 +30284,12 @@ func (ec *executionContext) fieldContext_Mutation_buildRepositoryUnderstanding(c
 				return ec.fieldContext_RepositoryUnderstanding_firstPassSections(ctx, field)
 			case "refreshAvailable":
 				return ec.fieldContext_RepositoryUnderstanding_refreshAvailable(ctx, field)
+			case "progress":
+				return ec.fieldContext_RepositoryUnderstanding_progress(ctx, field)
+			case "progressPhase":
+				return ec.fieldContext_RepositoryUnderstanding_progressPhase(ctx, field)
+			case "progressMessage":
+				return ec.fieldContext_RepositoryUnderstanding_progressMessage(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_RepositoryUnderstanding_createdAt(ctx, field)
 			case "updatedAt":
@@ -35817,6 +35847,12 @@ func (ec *executionContext) fieldContext_Query_repositoryUnderstanding(ctx conte
 				return ec.fieldContext_RepositoryUnderstanding_firstPassSections(ctx, field)
 			case "refreshAvailable":
 				return ec.fieldContext_RepositoryUnderstanding_refreshAvailable(ctx, field)
+			case "progress":
+				return ec.fieldContext_RepositoryUnderstanding_progress(ctx, field)
+			case "progressPhase":
+				return ec.fieldContext_RepositoryUnderstanding_progressPhase(ctx, field)
+			case "progressMessage":
+				return ec.fieldContext_RepositoryUnderstanding_progressMessage(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_RepositoryUnderstanding_createdAt(ctx, field)
 			case "updatedAt":
@@ -39227,6 +39263,12 @@ func (ec *executionContext) fieldContext_Repository_repositoryUnderstanding(ctx 
 				return ec.fieldContext_RepositoryUnderstanding_firstPassSections(ctx, field)
 			case "refreshAvailable":
 				return ec.fieldContext_RepositoryUnderstanding_refreshAvailable(ctx, field)
+			case "progress":
+				return ec.fieldContext_RepositoryUnderstanding_progress(ctx, field)
+			case "progressPhase":
+				return ec.fieldContext_RepositoryUnderstanding_progressPhase(ctx, field)
+			case "progressMessage":
+				return ec.fieldContext_RepositoryUnderstanding_progressMessage(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_RepositoryUnderstanding_createdAt(ctx, field)
 			case "updatedAt":
@@ -40455,6 +40497,132 @@ func (ec *executionContext) fieldContext_RepositoryUnderstanding_refreshAvailabl
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryUnderstanding_progress(ctx context.Context, field graphql.CollectedField, obj *RepositoryUnderstanding) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryUnderstanding_progress(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Progress, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(float64)
+	fc.Result = res
+	return ec.marshalNFloat2float64(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryUnderstanding_progress(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryUnderstanding",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Float does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryUnderstanding_progressPhase(ctx context.Context, field graphql.CollectedField, obj *RepositoryUnderstanding) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryUnderstanding_progressPhase(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.ProgressPhase, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryUnderstanding_progressPhase(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryUnderstanding",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryUnderstanding_progressMessage(ctx context.Context, field graphql.CollectedField, obj *RepositoryUnderstanding) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryUnderstanding_progressMessage(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.ProgressMessage, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryUnderstanding_progressMessage(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryUnderstanding",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
 		},
 	}
 	return fc, nil
@@ -56699,6 +56867,15 @@ func (ec *executionContext) _RepositoryUnderstanding(ctx context.Context, sel as
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "progress":
+			out.Values[i] = ec._RepositoryUnderstanding_progress(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "progressPhase":
+			out.Values[i] = ec._RepositoryUnderstanding_progressPhase(ctx, field, obj)
+		case "progressMessage":
+			out.Values[i] = ec._RepositoryUnderstanding_progressMessage(ctx, field, obj)
 		case "createdAt":
 			out.Values[i] = ec._RepositoryUnderstanding_createdAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
