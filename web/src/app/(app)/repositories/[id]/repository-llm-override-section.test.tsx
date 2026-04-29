@@ -223,6 +223,59 @@ describe("RepositoryLLMOverrideSection — clear flow", () => {
   });
 });
 
+describe("RepositoryLLMOverrideSection — prop sync after async load", () => {
+  it("syncs form state when override prop transitions from null to populated", async () => {
+    const onSaved = vi.fn();
+    mockSetMutation.mockResolvedValue({
+      data: {
+        setRepositoryLLMOverride: {
+          provider: "openai",
+          apiKeySet: false,
+          advancedMode: false,
+        },
+      },
+    });
+
+    // First render: parent's GraphQL query is still loading (override=null).
+    const { rerender } = render(
+      <RepositoryLLMOverrideSection
+        repoId="repo-A"
+        override={null}
+        onSaved={onSaved}
+      />,
+    );
+
+    // Now the query resolves with a saved override.
+    rerender(
+      <RepositoryLLMOverrideSection
+        repoId="repo-A"
+        override={{
+          provider: "openai",
+          baseURL: "https://api.openai.com/v1",
+          apiKeySet: true,
+          apiKeyHint: "sk-A...XYZW",
+          advancedMode: false,
+          summaryModel: "gpt-4o",
+        }}
+        onSaved={onSaved}
+      />,
+    );
+
+    // Open the section.
+    const details = screen.getByTestId("repo-llm-override-summary").closest("details");
+    if (details) details.open = true;
+
+    // The form fields must reflect the saved override, NOT the initial null.
+    const providerSelect = screen.getByRole("combobox") as HTMLSelectElement;
+    expect(providerSelect.value).toBe("openai");
+
+    const textboxes = screen.getAllByRole("textbox") as HTMLInputElement[];
+    // textboxes[0] = baseURL, textboxes[1] = summaryModel.
+    expect(textboxes[0].value).toBe("https://api.openai.com/v1");
+    expect(textboxes[1].value).toBe("gpt-4o");
+  });
+});
+
 describe("RepositoryLLMOverrideSection — advanced mode", () => {
   it("reveals per-area model fields when advanced-mode toggle is on", () => {
     render(

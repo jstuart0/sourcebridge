@@ -157,7 +157,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return worker.TimeoutKnowledgeRepository
 	}
 
-	// Initialize worker client (non-fatal if unavailable)
+	// Initialize worker client.
+	//
+	// Default-disabled TLS path: errors are non-fatal (AI features get
+	// disabled and the API still serves the rest of the surface). This
+	// matches the pre-R2 behavior so OSS deployments with no worker
+	// available still come up.
+	//
+	// TLS-enabled path: errors are FATAL. R2 slice 4 of plan
+	// 2026-04-29-workspace-llm-source-of-truth-r2.md requires fail-closed
+	// semantics: an operator who flipped SOURCEBRIDGE_WORKER_TLS_ENABLED=true
+	// is asserting that mTLS must be working; a TLS load failure or
+	// handshake mismatch must NOT degrade the API to plaintext or hide
+	// behind a healthy readiness probe.
 	var workerClient *worker.Client
 	if cfg.Worker.Address != "" {
 		wc, err := worker.New(
@@ -172,13 +184,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 			worker.WithKnowledgeTimeoutProvider(knowledgeTimeoutProvider),
 		)
 		if err != nil {
+			if cfg.Worker.TLS.Enabled {
+				return fmt.Errorf("worker client init with mTLS enabled: %w (refusing to start; check TLS material at %s, %s, %s)",
+					err, cfg.Worker.TLS.CertPath, cfg.Worker.TLS.KeyPath, cfg.Worker.TLS.CAPath)
+			}
 			slog.Warn("failed to create worker client, AI features disabled", "error", err)
 		} else {
 			workerClient = wc
 			defer workerClient.Close()
-			slog.Info("worker client initialized", "address", cfg.Worker.Address)
+			slog.Info("worker client initialized", "address", cfg.Worker.Address, "tls_enabled", cfg.Worker.TLS.Enabled)
 		}
 	} else {
+		if cfg.Worker.TLS.Enabled {
+			return fmt.Errorf("worker.tls.enabled is true but worker.address is empty (refusing to start; either set worker.address or disable TLS)")
+		}
 		slog.Info("worker address not configured, AI features disabled")
 	}
 

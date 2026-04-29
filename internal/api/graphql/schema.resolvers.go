@@ -1998,7 +1998,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					return fmt.Errorf("failed to unmarshal architecture prompt bundle: %w", err)
 				}
 			}
-			resp, err := r.LLMCaller.GenerateArchitectureDiagramWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, existing.ID, "architecture_diagram"), &knowledgev1.GenerateArchitectureDiagramRequest{
+			resp, err := r.LLMCaller.GenerateArchitectureDiagramWithJob(runCtx, repo.ID, resolution.OpArchitectureDiagram, llmJobMetadata(rt, existing.ID, "architecture_diagram"), &knowledgev1.GenerateArchitectureDiagramRequest{
 				RepositoryId:             repo.ID,
 				RepositoryName:           repo.Name,
 				Audience:                 string(existing.Audience),

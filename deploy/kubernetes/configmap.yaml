@@ -26,7 +26,10 @@ data:
   SOURCEBRIDGE_WORKER_TLS_ENABLED: "false"
   SOURCEBRIDGE_WORKER_TLS_CERT_PATH: "/etc/sourcebridge/tls/tls.crt"
   SOURCEBRIDGE_WORKER_TLS_KEY_PATH: "/etc/sourcebridge/tls/tls.key"
-  SOURCEBRIDGE_WORKER_TLS_CA_PATH: "/etc/sourcebridge/tls-ca/ca.crt"
+  # cert-manager populates ca.crt alongside tls.crt + tls.key in every
+  # leaf Certificate Secret (since v1.0). We read the CA chain from the
+  # leaf Secret directly — no separate mount of the CA Secret needed.
+  SOURCEBRIDGE_WORKER_TLS_CA_PATH: "/etc/sourcebridge/tls/ca.crt"
   SOURCEBRIDGE_WORKER_TLS_SERVER_NAME: "worker.sourcebridge.svc.cluster.local"
   SOURCEBRIDGE_WORKER_SURREAL_URL: "ws://surrealdb.sourcebridge.svc.cluster.local:8000"
   SOURCEBRIDGE_WORKER_SURREAL_NAMESPACE: "sourcebridge"

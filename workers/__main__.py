@@ -154,6 +154,15 @@ async def serve() -> None:
     # log fatal and exit non-zero. No silent fallback to insecure.
     listen_addr = f"[::]:{config.grpc_port}"
     if config.tls_enabled:
+        # Validate the cert/key/CA paths are non-empty + readable + parse
+        # cleanly. Fail-closed: any validation error logs fatal and exits
+        # non-zero. No silent fallback to insecure once tls_enabled=true.
+        if not (config.tls_cert_path and config.tls_key_path and config.tls_ca_path):
+            log.error(
+                "worker_tls_misconfigured",
+                error="tls_enabled=true but cert/key/ca paths are not all set",
+            )
+            raise SystemExit(2)
         try:
             with open(config.tls_cert_path, "rb") as f:
                 server_cert = f.read()
@@ -165,16 +174,42 @@ async def serve() -> None:
             log.error("worker_tls_load_failed", error=str(exc))
             raise SystemExit(2) from exc
 
+        # Cheap parse validation — if any blob is empty or doesn't begin
+        # with a PEM header, fail before binding.
+        for label, blob in (
+            ("cert", server_cert),
+            ("key", server_key),
+            ("ca", ca_bundle),
+        ):
+            if not blob.lstrip().startswith(b"-----BEGIN"):
+                log.error(
+                    "worker_tls_invalid_pem",
+                    field=label,
+                    path={
+                        "cert": config.tls_cert_path,
+                        "key": config.tls_key_path,
+                        "ca": config.tls_ca_path,
+                    }[label],
+                )
+                raise SystemExit(2)
+
         creds = grpc.ssl_server_credentials(
             [(server_key, server_cert)],
             root_certificates=ca_bundle,
             require_client_auth=True,
         )
-        server.add_secure_port(listen_addr, creds)
+        bound_port = server.add_secure_port(listen_addr, creds)
+        if bound_port == 0:
+            # gRPC returns 0 when the bind failed (port in use, bad creds,
+            # etc.). Without this check the server start succeeds but
+            # accepts no connections.
+            log.error("worker_tls_bind_failed", listen_addr=listen_addr)
+            raise SystemExit(2)
         log.info(
             "worker_tls_enabled",
             cert_path=config.tls_cert_path,
             ca_path=config.tls_ca_path,
+            bound_port=bound_port,
         )
     else:
         server.add_insecure_port(listen_addr)

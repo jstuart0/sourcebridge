@@ -18,7 +18,7 @@
  *     model field to "" clears it back to workspace inheritance.
  */
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "urql";
 
 import { Button } from "@/components/ui/button";
@@ -104,6 +104,45 @@ export function RepositoryLLMOverrideSection({
   );
   const [reportModel, setReportModel] = useState(initial?.reportModel ?? "");
   const [draftModel, setDraftModel] = useState(initial?.draftModel ?? "");
+
+  // Sync form state when the override prop changes (parent's GraphQL
+  // query resolves async; without this sync the form mounts with a null
+  // initial and stays blank even after the saved override loads, which
+  // would let an operator save blanks over the saved values when they
+  // open the collapsed section).
+  //
+  // The local user-input edits are intentionally NOT preserved across
+  // a prop update — the contract is "props reflect the saved state, the
+  // form mirrors props on each load". Local mutations are short-lived
+  // (the user clicks Save and the parent re-renders with the latest
+  // saved value).
+  //
+  // apiKey + clearAPIKey are NOT synced (apiKey is a password field
+  // that is never pre-populated by design; clearAPIKey is transient
+  // local state).
+  useEffect(() => {
+    setProvider(initial?.provider ?? "");
+    setBaseURL(initial?.baseURL ?? "");
+    setAdvancedMode(initial?.advancedMode ?? false);
+    setSummaryModel(initial?.summaryModel ?? "");
+    setReviewModel(initial?.reviewModel ?? "");
+    setAskModel(initial?.askModel ?? "");
+    setKnowledgeModel(initial?.knowledgeModel ?? "");
+    setArchitectureDiagramModel(initial?.architectureDiagramModel ?? "");
+    setReportModel(initial?.reportModel ?? "");
+    setDraftModel(initial?.draftModel ?? "");
+  }, [
+    initial?.provider,
+    initial?.baseURL,
+    initial?.advancedMode,
+    initial?.summaryModel,
+    initial?.reviewModel,
+    initial?.askModel,
+    initial?.knowledgeModel,
+    initial?.architectureDiagramModel,
+    initial?.reportModel,
+    initial?.draftModel,
+  ]);
 
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);

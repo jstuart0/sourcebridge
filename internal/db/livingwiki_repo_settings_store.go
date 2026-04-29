@@ -16,10 +16,17 @@ import (
 )
 
 // LivingWikiRepoSettingsStore persists per-repo living-wiki opt-in records
-// in SurrealDB. Slice 5 of the workspace-LLM-source-of-truth plan added a
-// per-repo LLM override (LivingWikiLLMOverride). When set, that override
-// includes an api_key field encrypted at rest with the same sbenc:v1
-// envelope used by ca_llm_config.
+// in SurrealDB. The store also carries the per-repository LLM override
+// (livingwiki.LLMOverride). When set, that override includes an api_key
+// field encrypted at rest with the same sbenc:v1 envelope used by
+// ca_llm_config.
+//
+// Storage column name note: the override is stored in the
+// `lw_repo_settings.living_wiki_llm_override` column. The `living_wiki_`
+// prefix is legacy — slice 5 of the parent plan introduced the override
+// scoped to living-wiki ops only; slice 1 of the R2 plan widened it to
+// every repo-scoped op and renamed the Go type to `LLMOverride`. The
+// column name stays for backward compatibility per CLAUDE.md.
 type LivingWikiRepoSettingsStore struct {
 	client           *SurrealDB
 	encryptionKey    string
