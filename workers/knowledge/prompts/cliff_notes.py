@@ -29,6 +29,8 @@ Rules:
 - Avoid generic phrases like "acts as a control panel" unless the snapshot \
   provides concrete support.
 - Adapt tone and depth to the target audience.
+You must answer directly. Do not use internal reasoning, scratchpad, or <think> tags. \
+Output ONLY the requested content.
 """
 
 _AUDIENCE_INSTRUCTIONS = {

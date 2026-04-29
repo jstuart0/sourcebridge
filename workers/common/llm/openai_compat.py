@@ -12,14 +12,40 @@ from workers.common.llm.provider import LLMResponse
 
 log = structlog.get_logger()
 
+# When a response comes back with stop_reason=length AND empty visible content
+# (all tokens were consumed by <think> output), retry once with a doubled
+# max_tokens. This ceiling prevents runaway token budgets when the retry
+# itself is also dominated by think tokens.
+_RETRY_MAX_TOKENS_CEILING = 16384
+
+# Injected as a suffix to the system prompt on the empty-content retry so
+# the model receives the most direct possible instruction to skip reasoning.
+_RETRY_NO_THINK_SUFFIX = (
+    "\n\nIMPORTANT: Output only the requested content. "
+    "Do not use any internal reasoning, scratch space, or `<think>` tags. "
+    "Begin your response with the answer directly."
+)
+
 
 def _strip_think_tags(text: str) -> str:
-    """Strip <think>...</think> blocks from model output.
+    """Strip <think>…</think> (and <thinking>…</thinking>) blocks from output.
 
-    Thinking models (Qwen 3.x, DeepSeek-R1) wrap internal reasoning in
-    <think> tags. The visible summary follows after the closing tag.
+    Handles:
+    - Mixed case: <Think>, <THINK>, <Thinking>, etc.
+    - Multiple blocks in one response.
+    - Unclosed blocks at end-of-string (model truncated mid-thought) — the
+      opening tag and everything after it is dropped.
+
+    This is applied to every response unconditionally. Thinking tokens are
+    universally undesirable in SourceBridge's hot paths regardless of which
+    model produced them.
     """
-    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    # First pass: remove fully-closed blocks (greedy-stop so multiple blocks
+    # in one response are all stripped).
+    text = re.sub(r"<think(?:ing)?>.*?</think(?:ing)?>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # Second pass: drop any remaining unclosed opening tag through end-of-string.
+    text = re.sub(r"<think(?:ing)?>.+", "", text, flags=re.DOTALL | re.IGNORECASE)
+    return text.strip()
 
 
 # Qwen 3 / 3.5 honor a `/no_think` directive in the user message to
@@ -172,12 +198,16 @@ class OpenAICompatProvider:
         frequency_penalty: float = 0.0,
         model: str | None = None,
     ) -> LLMResponse:
-        """Generate a completion."""
+        """Generate a completion.
+
+        Includes two layers of defense against thinking-model derailment:
+        1. <think> blocks are stripped from every response unconditionally.
+        2. If stop_reason is "length" and the post-strip content is empty, a
+           single retry fires with doubled max_tokens and a stronger no-think
+           system-prompt suffix. If the retry also returns empty, the empty
+           response is returned so callers (e.g. require_nonempty) can handle it.
+        """
         use_model = model or self.model
-        messages: list[dict[str, str]] = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
 
         extra_body: dict[str, object] = {}
         if self.draft_model:
@@ -194,6 +224,63 @@ class OpenAICompatProvider:
         # Using both makes either backend work with no runtime detection.
         if self.disable_thinking:
             extra_body["chat_template_kwargs"] = {"enable_thinking": False}
+
+        result = await self._complete_once(
+            prompt=prompt,
+            system=system,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            frequency_penalty=frequency_penalty,
+            use_model=use_model,
+            extra_body=extra_body,
+        )
+
+        # Auto-retry: when stop_reason=length AND visible content is empty the
+        # model burned its entire budget on <think> tokens. Double the budget
+        # (up to the ceiling) and inject a harder no-think suffix so the model
+        # starts with the answer rather than reasoning first.
+        if result.stop_reason == "length" and not result.content.strip():
+            retry_max_tokens = min(max_tokens * 2, _RETRY_MAX_TOKENS_CEILING)
+            log.warning(
+                "llm_empty_content_retry",
+                model=use_model,
+                original_max_tokens=max_tokens,
+                retry_max_tokens=retry_max_tokens,
+                provider=self.provider_name or "openai-compatible",
+            )
+            retry_system = system + _RETRY_NO_THINK_SUFFIX
+            retry_result = await self._complete_once(
+                prompt=prompt,
+                system=retry_system,
+                max_tokens=retry_max_tokens,
+                temperature=temperature,
+                frequency_penalty=frequency_penalty,
+                use_model=use_model,
+                extra_body=extra_body,
+            )
+            if retry_result.content.strip():
+                return retry_result
+            # Both attempts empty — surface the original so callers get the
+            # real stop_reason and token counts for diagnostics.
+
+        return result
+
+    async def _complete_once(
+        self,
+        *,
+        prompt: str,
+        system: str,
+        max_tokens: int,
+        temperature: float,
+        frequency_penalty: float,
+        use_model: str,
+        extra_body: dict[str, object],
+    ) -> LLMResponse:
+        """Single (non-retrying) completion call; shared by complete() and retry."""
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
         messages = _maybe_inject_no_think(
             messages, model=use_model, disable_thinking=self.disable_thinking
         )
@@ -247,7 +334,7 @@ class OpenAICompatProvider:
                 acceptance_rate = accepted / total
 
         raw_content = choice.message.content or ""
-        if raw_content and "<think>" in raw_content.lower():
+        if raw_content and re.search(r"<think(?:ing)?>", raw_content, re.IGNORECASE):
             log.warning(
                 "llm_response_contained_think_tags",
                 provider=self.provider_name or "openai-compatible",
