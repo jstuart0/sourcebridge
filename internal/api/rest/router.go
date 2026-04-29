@@ -25,6 +25,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	"github.com/sourcebridge/sourcebridge/internal/clustering"
 	"github.com/sourcebridge/sourcebridge/internal/indexing"
+	"github.com/sourcebridge/sourcebridge/internal/installassets"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/db"
 	"github.com/sourcebridge/sourcebridge/internal/events"
@@ -509,6 +510,14 @@ func (s *Server) setupRouter() {
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/readyz", s.handleReadyz)
 	r.Get("/metrics", s.handleMetrics)
+
+	// Install script — serves the embedded SourceBridge installer at the
+	// origin so users can run:
+	//   curl -fsSL https://<this-server>/install.sh | sh -s -- --server <this-server>
+	// The script downloads binaries from the upstream GitHub releases, not
+	// from this server. See internal/installassets/install.sh for the source
+	// of truth (also reachable as scripts/install.sh via a symlink).
+	r.Get("/install.sh", installassets.Handler())
 
 	// Auth routes (rate limited more strictly — 10 req/min per IP covers all
 	// credential-submission and desktop-auth endpoints. The /auth/desktop/info

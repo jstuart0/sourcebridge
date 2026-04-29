@@ -1,0 +1,1 @@
+../internal/installassets/install.sh

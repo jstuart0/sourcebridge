@@ -149,7 +149,19 @@ cd sourcebridge
 
 The demo starts SourceBridge, indexes a 44-file sample API, and generates cliff notes, code tours, and architecture diagrams. Open [http://localhost:3000](http://localhost:3000) to explore.
 
-### Build from source
+### CLI — one line, any platform
+
+```bash
+curl -fsSL https://<your-sourcebridge-server>/install.sh | sh -s -- --server https://<your-sourcebridge-server>
+```
+
+Installs to `~/.local/bin/sourcebridge` (no `sudo`), authenticates against
+your server, and you're ready to run `sourcebridge setup claude` in any
+indexed repository. See [Installation](docs/user/installation.md) for the
+trust model, alternate paths (`brew install sourcebridge-ai/tap/sourcebridge`,
+manual download, build from source), and upgrade/uninstall instructions.
+
+### Server — Docker compose
 
 ```bash
 git clone https://github.com/sourcebridge-ai/sourcebridge.git
@@ -157,15 +169,6 @@ cd sourcebridge
 cp .env.example .env   # configure your LLM provider
 docker compose up -d
 ```
-
-### macOS CLI
-
-```bash
-brew install sourcebridge-ai/tap/sourcebridge
-```
-
-Linux users can also install via Homebrew, or grab the binary directly from
-the [Releases](https://github.com/sourcebridge-ai/sourcebridge/releases) page.
 
 ### Helm / Kubernetes
 

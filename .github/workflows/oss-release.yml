@@ -104,6 +104,16 @@ jobs:
           pattern: binary-*
           merge-multiple: true
           path: artifacts
+      - name: Compute SHA256SUMS
+        # Produces a SHA256SUMS file alongside the per-arch tarballs so
+        # the install.sh installer can do best-effort integrity verification.
+        # See docs/user/installation.md#trust-model for the trust contract
+        # (integrity, not authenticity — sigstore/cosign is future work).
+        run: |
+          cd artifacts
+          shasum -a 256 ./*.tar.gz | sed 's| \./| |' > SHA256SUMS
+          echo "--- SHA256SUMS ---"
+          cat SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*

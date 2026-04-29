@@ -80,13 +80,53 @@ func defaultBrowserOpener(url string) error {
 // fake that returns a fixed password without touching a real terminal.
 type passwordReader func(prompt string) (string, error)
 
-// defaultPasswordReader reads a password from stdin with echo disabled.
+// ttyOpener is a seam for /dev/tty access so the pipe-fallback path is
+// testable without requiring a real terminal device. Production uses
+// defaultTTYOpener which calls os.OpenFile("/dev/tty", os.O_RDWR, 0).
+type ttyOpener func() (*os.File, error)
+
+// defaultTTYOpener opens /dev/tty for reading + writing. Returns an error on
+// platforms without /dev/tty (Windows, some containers).
+func defaultTTYOpener() (*os.File, error) {
+	return os.OpenFile("/dev/tty", os.O_RDWR, 0)
+}
+
+// activeTTYOpener is the indirection point so tests can inject a fake.
+var activeTTYOpener ttyOpener = defaultTTYOpener
+
+// defaultPasswordReader reads a password from stdin with echo disabled. When
+// stdin is not a terminal (e.g. when sourcebridge login is chained from a
+// `curl ... | sh` installer), falls back to /dev/tty so the user can still
+// be prompted (codex r1 C2). Returns a clear error when /dev/tty is not
+// available — local-password login simply requires a real terminal.
 func defaultPasswordReader(prompt string) (string, error) {
-	fmt.Fprint(os.Stderr, prompt)
-	raw, err := term.ReadPassword(int(syscall.Stdin))
-	fmt.Fprintln(os.Stderr) // newline after the invisible input
+	// Fast path: stdin is a terminal — read directly.
+	stdinFD := int(syscall.Stdin)
+	if term.IsTerminal(stdinFD) {
+		fmt.Fprint(os.Stderr, prompt)
+		raw, err := term.ReadPassword(stdinFD)
+		fmt.Fprintln(os.Stderr) // newline after invisible input
+		if err != nil {
+			return "", fmt.Errorf("reading password: %w", err)
+		}
+		return strings.TrimSpace(string(raw)), nil
+	}
+	// Slow path: stdin is a pipe (curl | sh chains us through a download
+	// pipe). Try /dev/tty so the user can still type the password.
+	tty, err := activeTTYOpener()
 	if err != nil {
-		return "", fmt.Errorf("reading password: %w", err)
+		return "", fmt.Errorf(
+			"local-password login requires a terminal, but stdin is a pipe and /dev/tty is unavailable: %w. " +
+				"Run `sourcebridge login --server <url>` directly in your shell.",
+			err,
+		)
+	}
+	defer tty.Close()
+	fmt.Fprint(tty, prompt)
+	raw, err := term.ReadPassword(int(tty.Fd()))
+	fmt.Fprintln(tty)
+	if err != nil {
+		return "", fmt.Errorf("reading password from /dev/tty: %w", err)
 	}
 	return strings.TrimSpace(string(raw)), nil
 }
