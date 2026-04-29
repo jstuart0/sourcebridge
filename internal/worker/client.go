@@ -541,19 +541,6 @@ func (c *Client) drainAndClose(b *clientBundle) {
 	_ = b.conn.Close()
 }
 
-// dialCredentials returns the gRPC TransportCredentials for the worker
-// dial. When TLS is disabled, returns insecure.NewCredentials() (legacy
-// path, OSS dev / no-cert-manager environments). When enabled WITHOUT
-// a hot-reload watcher, loads the client cert + CA bundle once from
-// disk and builds a tls.Config with mutual auth. Used by callers that
-// don't need hot-reload (tests, OSS no-Reloader deployments).
-//
-// Production wiring goes through buildDialCredentials so future
-// handshakes pick up reloaded material.
-func dialCredentials(cfg TLSConfig) (credentials.TransportCredentials, error) {
-	return buildDialCredentials(cfg, nil, "")
-}
-
 // buildDialCredentials produces gRPC TransportCredentials with optional
 // hot-reload wiring. When a watcher is provided, the returned credentials
 // pull cert+CA dynamically on every handshake, so a redial after a
