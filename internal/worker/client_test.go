@@ -20,18 +20,23 @@ func TestNewClient(t *testing.T) {
 		t.Errorf("Address() = %q, want %q", c.Address(), "localhost:59999")
 	}
 
-	// Service clients should be non-nil
-	if c.Reasoning == nil {
-		t.Error("Reasoning client is nil")
+	// Service clients live on the active clientBundle (R3 slice 4).
+	// Verify the bundle is populated with non-nil stubs.
+	b := c.bundle.Load()
+	if b == nil {
+		t.Fatal("bundle is nil after New")
 	}
-	if c.Linking == nil {
-		t.Error("Linking client is nil")
+	if b.reasoning == nil {
+		t.Error("reasoning client is nil")
 	}
-	if c.Requirements == nil {
-		t.Error("Requirements client is nil")
+	if b.linking == nil {
+		t.Error("linking client is nil")
 	}
-	if c.Health == nil {
-		t.Error("Health client is nil")
+	if b.requirements == nil {
+		t.Error("requirements client is nil")
+	}
+	if b.health == nil {
+		t.Error("health client is nil")
 	}
 }
 

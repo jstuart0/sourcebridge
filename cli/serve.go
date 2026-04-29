@@ -43,6 +43,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/trash"
 	"github.com/sourcebridge/sourcebridge/internal/version"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
+	"github.com/sourcebridge/sourcebridge/internal/worker/tlsreload"
 	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 )
 
@@ -180,7 +181,38 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// the misconfig would only surface on the first real LLM call. Running
 	// CheckHealth synchronously at boot makes the handshake the canary.
 	var workerClient *worker.Client
+	var workerTLSReloadWatcher *tlsreload.Watcher
 	if cfg.Worker.Address != "" {
+		opts := []worker.Option{
+			worker.WithKnowledgeTimeoutProvider(knowledgeTimeoutProvider),
+		}
+		// R3 slice 4: when mTLS is enabled, construct a hot-reload
+		// watcher BEFORE worker.New so we can pass it via Option. The
+		// watcher loads + validates the initial cert (a second
+		// validation on top of dialCredentials' load — cheap, and it
+		// gives us mtime baselines for the poll loop). On every
+		// validated cert reload the worker.Client redials and
+		// atomic-swaps its bundle so future RPCs use the new cert
+		// without any kubectl-side restart.
+		if cfg.Worker.TLS.Enabled {
+			w, werr := tlsreload.New(tlsreload.Config{
+				CertPath:          cfg.Worker.TLS.CertPath,
+				KeyPath:           cfg.Worker.TLS.KeyPath,
+				CAPath:            cfg.Worker.TLS.CAPath,
+				ServiceIdentity:   cfg.Worker.TLS.ServerName,
+				ChainVerification: true,
+				Logger:            slog.Default(),
+			})
+			if werr != nil {
+				return fmt.Errorf("worker tls hot-reload watcher init: %w (refusing to start; check TLS material at %s, %s, %s)",
+					werr, cfg.Worker.TLS.CertPath, cfg.Worker.TLS.KeyPath, cfg.Worker.TLS.CAPath)
+			}
+			if serr := w.Start(); serr != nil {
+				return fmt.Errorf("worker tls hot-reload watcher start: %w", serr)
+			}
+			workerTLSReloadWatcher = w
+			opts = append(opts, worker.WithTLSReloadWatcher(w))
+		}
 		wc, err := worker.New(
 			cfg.Worker.Address,
 			worker.TLSConfig{
@@ -190,10 +222,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 				CAPath:     cfg.Worker.TLS.CAPath,
 				ServerName: cfg.Worker.TLS.ServerName,
 			},
-			worker.WithKnowledgeTimeoutProvider(knowledgeTimeoutProvider),
+			opts...,
 		)
 		if err != nil {
 			if cfg.Worker.TLS.Enabled {
+				if workerTLSReloadWatcher != nil {
+					_ = workerTLSReloadWatcher.Close()
+				}
 				return fmt.Errorf("worker client init with mTLS enabled: %w (refusing to start; check TLS material at %s, %s, %s)",
 					err, cfg.Worker.TLS.CertPath, cfg.Worker.TLS.KeyPath, cfg.Worker.TLS.CAPath)
 			}
@@ -209,16 +244,29 @@ func runServe(cmd *cobra.Command, args []string) error {
 				healthCancel()
 				if healthErr != nil {
 					_ = wc.Close()
+					if workerTLSReloadWatcher != nil {
+						_ = workerTLSReloadWatcher.Close()
+					}
 					return fmt.Errorf("worker mTLS handshake probe failed: %w (refusing to start; check that the worker is running with SOURCEBRIDGE_WORKER_TLS_ENABLED=true and the certs are signed by the same CA)", healthErr)
 				}
 				if !ok {
 					_ = wc.Close()
+					if workerTLSReloadWatcher != nil {
+						_ = workerTLSReloadWatcher.Close()
+					}
 					return fmt.Errorf("worker mTLS handshake probe returned non-serving (refusing to start; the worker process is up but its gRPC health check is reporting NOT_SERVING)")
 				}
 				slog.Info("worker mTLS handshake probe ok", "address", cfg.Worker.Address)
 			}
 			workerClient = wc
 			defer workerClient.Close()
+			if workerTLSReloadWatcher != nil {
+				defer func() { _ = workerTLSReloadWatcher.Close() }()
+				slog.Info("worker tls hot-reload watcher running",
+					"address", cfg.Worker.Address,
+					"cert", cfg.Worker.TLS.CertPath,
+					"poll_minutes", 5)
+			}
 			slog.Info("worker client initialized", "address", cfg.Worker.Address, "tls_enabled", cfg.Worker.TLS.Enabled)
 		}
 	} else {

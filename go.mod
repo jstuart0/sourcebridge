@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/99designs/gqlgen v0.17.73
 	github.com/coreos/go-oidc/v3 v3.17.0
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/fxamacker/cbor/v2 v2.7.0
 	github.com/go-chi/chi/v5 v5.2.1
 	github.com/go-chi/cors v1.2.1
@@ -45,7 +46,6 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
