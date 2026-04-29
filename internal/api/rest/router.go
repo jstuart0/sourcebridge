@@ -777,7 +777,28 @@ func (s *Server) setupRouter() {
 		s.mcp.searchSvc = s.searchSvc
 		// Shared indexing service — enables end-to-end index_repository
 		// + refresh_repository MCP flows (Follow-on #3).
-		mcpIndexSvc := indexing.NewService(s.cfg, s.store, nil, nil)
+		//
+		// Codex r2 high fix: route the git-credentials func through the
+		// runtime resolver so MCP indexing fails closed on encrypted-DB
+		// integrity errors instead of silently falling back to env. The
+		// non-GraphQL surfaces must obey the same source-of-truth
+		// contract as the GraphQL clone/import paths.
+		var mcpCreds indexing.GitCredentialsFunc
+		if s.gitResolver != nil {
+			resolver := s.gitResolver
+			mcpCreds = func(ctx context.Context) (string, string, error) {
+				snap, err := resolver.Resolve(ctx)
+				if err != nil {
+					return "", "", err
+				}
+				if snap.IntegrityError != nil {
+					return "", "", snap.IntegrityError
+				}
+				gitres.LogResolved(slog.Default(), "mcp.indexing", snap)
+				return snap.Token, snap.SSHKeyPath, nil
+			}
+		}
+		mcpIndexSvc := indexing.NewService(s.cfg, s.store, mcpCreds, nil)
 		if hook := s.clusteringHookFunc(); hook != nil {
 			mcpIndexSvc.WithClusteringHook(hook)
 		}

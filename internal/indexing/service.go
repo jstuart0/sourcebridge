@@ -25,6 +25,7 @@ import (
 
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/git"
+	gitres "github.com/sourcebridge/sourcebridge/internal/git/resolution"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
 )
@@ -292,7 +293,12 @@ func GitCloneCmd(ctx context.Context, repoURL, targetDir, token, sshKeyPath stri
 	args = append(args, cloneURL, targetDir)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	if sshKeyPath != "" && (strings.HasPrefix(repoURL, "git@") || strings.HasPrefix(repoURL, "ssh://")) {
-		cmd.Env = append(os.Environ(), "GIT_SSH_COMMAND=ssh -i "+sshKeyPath+" -o StrictHostKeyChecking=no")
+		// Codex r2 high fix: shell-safe quoting via gitres.BuildGitSSHCommand.
+		// Indexing path uses StrictHostKeyChecking=no for legacy compat
+		// (clones from internal mirrors where the host key is reset
+		// frequently); operators who want stricter behavior should
+		// pre-populate ~/.ssh/known_hosts on the API pod.
+		cmd.Env = append(os.Environ(), "GIT_SSH_COMMAND="+gitres.BuildGitSSHCommand(sshKeyPath, "no"))
 	}
 	return cmd
 }

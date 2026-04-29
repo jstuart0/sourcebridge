@@ -196,6 +196,36 @@ func (o *Orchestrator) Shutdown(graceful time.Duration) error {
 	}
 }
 
+// isLLMBackedEnqueue reports whether an EnqueueRequest names a
+// subsystem/job_type combination that performs LLM calls. Used by the
+// runtime warning at Enqueue time (codex r2 medium): the AST lint
+// already guarantees the LLMProvider field is present in source; this
+// runtime check spots resolver failures that produced an empty value
+// at runtime.
+//
+// Mirrors the same rule as internal/llm/orchestrator/llm_provider_lint_test.go:
+//   - SubsystemKnowledge / SubsystemReasoning / SubsystemRequirements /
+//     SubsystemLinking / SubsystemContracts / SubsystemQA — always
+//   - "living_wiki" subsystem string — always
+//   - SubsystemClustering with JobType == "relabel_clusters" — only
+//     this single CPU-vs-LLM split inside clustering
+func isLLMBackedEnqueue(req *llm.EnqueueRequest) bool {
+	if req == nil {
+		return false
+	}
+	switch req.Subsystem {
+	case llm.SubsystemKnowledge, llm.SubsystemReasoning, llm.SubsystemRequirements,
+		llm.SubsystemLinking, llm.SubsystemContracts, llm.SubsystemQA:
+		return true
+	case llm.SubsystemClustering:
+		return strings.TrimSpace(req.JobType) == "relabel_clusters"
+	}
+	if string(req.Subsystem) == "living_wiki" {
+		return true
+	}
+	return false
+}
+
 // staleJobThreshold is how long an active job can go without any store update
 // before the reaper marks it failed. Active jobs are expected to heartbeat
 // through progress writes while they run. Pending jobs are only reaped after a
@@ -370,6 +400,21 @@ func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 	// R3 slice 3: req.LLMProvider lands on job.LLMProvider so the Monitor
 	// page and per-provider metrics can attribute work without joining
 	// back to a workspace settings snapshot.
+	//
+	// Codex r2 medium: AST lint guarantees the field is *present* on
+	// every LLM-backed enqueue literal at compile time. Runtime emits a
+	// loud structured warning when the resolved value is empty for a
+	// subsystem we know is LLM-backed — operators should grep for this
+	// to spot a misconfigured resolver (workspace LLM not loaded,
+	// resolver.Resolve erroring) before the Monitor page goes blank.
+	if isLLMBackedEnqueue(req) && strings.TrimSpace(req.LLMProvider) == "" {
+		slog.Warn("llm_job_enqueue_missing_provider",
+			"target_key", req.TargetKey,
+			"subsystem", string(req.Subsystem),
+			"job_type", req.JobType,
+			"repo_id", req.RepoID,
+			"detail", "LLM-backed enqueue resolved an empty provider; metrics and Monitor attribution will show '' for this job")
+	}
 	job := &llm.Job{
 		ID:               id,
 		Subsystem:        req.Subsystem,

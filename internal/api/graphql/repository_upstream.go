@@ -97,7 +97,7 @@ func (r *Resolver) resolveUpstreamStatus(ctx context.Context, repo *graphstore.R
 		}
 	}
 
-	token, _, credsErr := r.resolveGitCredentials(ctx)
+	token, _, credsErr := r.resolveGitCredentialsForOp(ctx, "graphql.upstream")
 	// Repo-level token overrides workspace-level. When the repo has its
 	// own token, an integrity failure on the workspace token is irrelevant
 	// — the repo-scoped token is what we'll use.

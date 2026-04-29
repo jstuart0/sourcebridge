@@ -195,11 +195,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 		// atomic-swaps its bundle so future RPCs use the new cert
 		// without any kubectl-side restart.
 		if cfg.Worker.TLS.Enabled {
+			// Codex r2 critical fix: the watcher's ServiceIdentity
+			// validates the API client cert's SAN. cfg.Worker.TLS.ServerName
+			// is the WORKER server's expected SAN, not the API's client SAN
+			// — they're issued by the same CA but for different roles.
+			// Leaving ServiceIdentity empty skips SAN matching on the
+			// client cert; chain verification + ClientAuth EKU + key
+			// match are sufficient identity assertions for the API's
+			// own cert. The server's SAN is asserted on every handshake
+			// via tls.Config.ServerName + the custom VerifyPeerCertificate
+			// in worker.buildDialCredentials.
 			w, werr := tlsreload.New(tlsreload.Config{
 				CertPath:          cfg.Worker.TLS.CertPath,
 				KeyPath:           cfg.Worker.TLS.KeyPath,
 				CAPath:            cfg.Worker.TLS.CAPath,
-				ServiceIdentity:   cfg.Worker.TLS.ServerName,
+				ServiceIdentity:   "", // see comment above
 				ChainVerification: true,
 				Logger:            slog.Default(),
 			})
@@ -318,7 +328,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 				slog.Warn("git config: SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY is unset — admin saves of default_token will return 422 unless ALLOW_UNENCRYPTED is on (set the encryption key in production)")
 			}
 		}
-		gcs := db.NewSurrealGitConfigStore(surrealDB, db.WithGitConfigCipher(gitCipher))
+		// Codex r2 high fix: pass the SSH path validator so SaveGitConfig
+		// rejects relative paths, traversal, shell metacharacters, and
+		// out-of-allow-root paths at the store layer (the plan's
+		// authoritative save-time gate). The validator is constructed
+		// here because internal/git/resolution depends on internal/db
+		// — the resolution package can't be imported by the db package
+		// without a cycle. cli/serve.go owns the cross-package wiring.
+		sshValidator := gitres.NewSSHKeyPathValidator(cfg.Git.SSHKeyPathRoot)
+		gcs := db.NewSurrealGitConfigStore(
+			surrealDB,
+			db.WithGitConfigCipher(gitCipher),
+			db.WithGitConfigSSHValidator(sshValidator.Validate),
+		)
 		gitConfigStore = gcs
 		gitConfigStoreConcrete = gcs
 

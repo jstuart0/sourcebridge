@@ -123,6 +123,40 @@ func TestResolve_DBOverridesEnv(t *testing.T) {
 	}
 }
 
+// TestResolve_DBClearsEnv verifies that an empty workspace value
+// overrides the env-bootstrap default. Codex r2 high regression:
+// the original implementation only overlaid non-empty DB values, so
+// clearing the field in the UI silently let env win again. The
+// resolver MUST treat an existing DB row as authoritative for every
+// field, including empty.
+func TestResolve_DBClearsEnv(t *testing.T) {
+	store := &fakeStore{
+		token:      "",  // operator cleared via UI
+		sshKeyPath: "",  // operator cleared via UI
+		version:    7,   // but a row EXISTS — the DB layer is authoritative
+	}
+	r := New(store, config.GitConfig{
+		DefaultToken: "env-pat",
+		SSHKeyPath:   "/etc/ssh/id_rsa",
+	}, nil)
+	snap, err := r.Resolve(context.Background())
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if snap.Token != "" {
+		t.Errorf("token: want empty (operator cleared via UI), got %q", snap.Token)
+	}
+	if snap.SSHKeyPath != "" {
+		t.Errorf("ssh path: want empty (operator cleared via UI), got %q", snap.SSHKeyPath)
+	}
+	if snap.Sources[FieldToken] != SourceDB {
+		t.Errorf("token source: want db, got %q", snap.Sources[FieldToken])
+	}
+	if snap.Sources[FieldSSHKeyPath] != SourceDB {
+		t.Errorf("ssh source: want db, got %q", snap.Sources[FieldSSHKeyPath])
+	}
+}
+
 func TestResolve_VersionKeyedCache(t *testing.T) {
 	store := &fakeStore{
 		token:   "db-pat",

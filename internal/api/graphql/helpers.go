@@ -15,6 +15,7 @@ import (
 	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
 	"github.com/sourcebridge/sourcebridge/internal/architecture"
 	"github.com/sourcebridge/sourcebridge/internal/auth"
+	gitres "github.com/sourcebridge/sourcebridge/internal/git/resolution"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
@@ -80,7 +81,10 @@ func gitCloneCmd(ctx context.Context, repoURL, targetDir, token, sshKeyPath stri
 	cmd.Stderr = os.Stderr
 
 	if sshKeyPath != "" && strings.HasPrefix(repoURL, "git@") {
-		cmd.Env = append(os.Environ(), fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %s -o StrictHostKeyChecking=accept-new", sshKeyPath))
+		// Codex r2 high fix: shell-safe quoting via gitres.BuildGitSSHCommand.
+		// Belt-and-suspenders against any path that bypassed the
+		// SSHKeyPathValidator (env-bootstrap or pre-R3 plaintext rows).
+		cmd.Env = append(os.Environ(), "GIT_SSH_COMMAND="+gitres.BuildGitSSHCommand(sshKeyPath, "accept-new"))
 	}
 	return cmd
 }
@@ -104,7 +108,8 @@ func gitPullCmd(ctx context.Context, repoDir, token, sshKeyPath string) *exec.Cm
 		)
 	}
 	if sshKeyPath != "" {
-		cmd.Env = append(os.Environ(), fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %s -o StrictHostKeyChecking=accept-new", sshKeyPath))
+		// Codex r2 high fix: shell-safe quoting via gitres.BuildGitSSHCommand.
+		cmd.Env = append(os.Environ(), "GIT_SSH_COMMAND="+gitres.BuildGitSSHCommand(sshKeyPath, "accept-new"))
 	}
 	return cmd
 }

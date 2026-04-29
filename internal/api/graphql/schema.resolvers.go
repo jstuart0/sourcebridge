@@ -139,7 +139,7 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 		}
 		localPath = cloneDir
 
-		defaultToken, sshKeyPath, credsErr := r.resolveGitCredentials(ctx)
+		defaultToken, sshKeyPath, credsErr := r.resolveGitCredentialsForOp(ctx, "graphql.refresh")
 		// repo.AuthToken (if set) shadows the workspace token and makes a
 		// workspace integrity error irrelevant. Otherwise fail closed.
 		if credsErr != nil && repo.AuthToken == "" {

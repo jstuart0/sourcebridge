@@ -120,6 +120,16 @@ func (r *Resolver) getStore(ctx context.Context) graph.GraphStore {
 // surface IntegrityError — it only ever returns env-shadowed values —
 // so production deployments MUST wire the resolver.
 func (r *Resolver) resolveGitCredentials(ctx context.Context) (token, sshKeyPath string, err error) {
+	return r.resolveGitCredentialsForOp(ctx, "graphql")
+}
+
+// resolveGitCredentialsForOp is the codex r2 medium fix: every top-level
+// git op (clone, fetch, upstream probe, import) names itself so the
+// resulting `git creds resolved` log line carries op context. Operators
+// grep for `event="git creds resolved" sources_token=db` to verify
+// workspace settings are taking effect end-to-end. Token material is
+// never logged.
+func (r *Resolver) resolveGitCredentialsForOp(ctx context.Context, op string) (token, sshKeyPath string, err error) {
 	if r.GitResolver != nil {
 		snap, resolveErr := r.GitResolver.Resolve(ctx)
 		if resolveErr != nil {
@@ -129,6 +139,7 @@ func (r *Resolver) resolveGitCredentials(ctx context.Context) (token, sshKeyPath
 			// Hard fail-closed: corrupt envelope or missing key.
 			return "", "", fmt.Errorf("git creds integrity failure: %w", snap.IntegrityError)
 		}
+		gitres.LogResolved(slog.Default(), op, snap)
 		return snap.Token, snap.SSHKeyPath, nil
 	}
 

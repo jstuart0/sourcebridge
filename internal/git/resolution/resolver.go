@@ -296,6 +296,20 @@ func (r *DefaultResolver) applyWorkspace(ctx context.Context, snap *Snapshot) {
 
 // overlayFromCache applies a cached record onto snap with SourceDB
 // stamping. When stale=true also records per-field stale markers.
+//
+// Codex r2 high fix: when a workspace row exists (we got here because
+// currentVer > 0 OR a stale cache is being served), the DB row is
+// authoritative for BOTH fields including empty values. Clearing the
+// field in the UI MUST stop env from winning. Previously the overlay
+// only wrote when the cached value was non-empty, which meant
+// SOURCEBRIDGE_GIT_DEFAULT_TOKEN silently came back after an admin
+// cleared the UI field — the same source-of-truth bug shape that
+// motivated R2 + R3 in the first place.
+//
+// The plan's "empty token saves empty" requirement is satisfied here:
+// every field is overwritten unconditionally with the DB value, and
+// the source is stamped SourceDB regardless of value. Env-bootstrap
+// values from the prior layer are erased when the DB exists.
 func (r *DefaultResolver) overlayFromCache(snap *Snapshot, rec *cachedRecord, ver uint64, stale bool) {
 	mark := func(field string) {
 		snap.Sources[field] = SourceDB
@@ -306,14 +320,12 @@ func (r *DefaultResolver) overlayFromCache(snap *Snapshot, rec *cachedRecord, ve
 			snap.StaleFields[field] = true
 		}
 	}
-	if rec.token != "" {
-		snap.Token = rec.token
-		mark(FieldToken)
-	}
-	if rec.sshKeyPath != "" {
-		snap.SSHKeyPath = rec.sshKeyPath
-		mark(FieldSSHKeyPath)
-	}
+	// Authoritative: DB row exists, so we OVERWRITE — including with
+	// empty values. This is the codex r2 high fix.
+	snap.Token = rec.token
+	mark(FieldToken)
+	snap.SSHKeyPath = rec.sshKeyPath
+	mark(FieldSSHKeyPath)
 	snap.Version = ver
 }
 

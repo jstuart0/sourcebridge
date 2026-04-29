@@ -40,6 +40,14 @@ type SurrealGitConfigStore struct {
 	// inject a pre-built cipher via WithGitConfigCipher; tests use either form.
 	encryptionKeyForBootstrap    string
 	allowUnencryptedForBootstrap bool
+
+	// sshValidator validates an admin-supplied SSH key path on every
+	// SaveGitConfig (codex r2 high). Defaults to a permissive validator
+	// (any input passes) so OSS dev / tests don't need extra wiring.
+	// Production wiring (cli/serve.go) injects a validator that mirrors
+	// the REST-handler's pre-save validation, making the store the
+	// authoritative gate per the plan.
+	sshValidator func(p string) error
 }
 
 // GitConfigStoreOption configures optional behavior.
@@ -69,6 +77,17 @@ func WithGitConfigAllowUnencrypted(allow bool) GitConfigStoreOption {
 // it overrides any cipher constructed from WithGitConfigEncryptionKey /
 // WithGitConfigAllowUnencrypted. Production wiring uses this so a single
 // cipher is shared across the LLM and git stores.
+// WithGitConfigSSHValidator injects a validation function called on
+// every SaveGitConfig. R3 slice 2 + codex r2 high: the plan specified
+// the store as the authoritative save-time gate. The validator can
+// reject relative paths, traversal, shell metacharacters, and
+// out-of-allow-root paths. Implementations live in
+// internal/git/resolution (which depends on this package, so cli
+// wiring is responsible for the cross-package adapter).
+func WithGitConfigSSHValidator(fn func(p string) error) GitConfigStoreOption {
+	return func(s *SurrealGitConfigStore) { s.sshValidator = fn }
+}
+
 func WithGitConfigCipher(c secretcipher.Cipher) GitConfigStoreOption {
 	return func(s *SurrealGitConfigStore) {
 		s.cipher = c
@@ -189,16 +208,30 @@ func (s *SurrealGitConfigStore) LoadGitConfigVersion(ctx context.Context) (uint6
 	return uintVal(qr.Result[0], "version"), nil
 }
 
-// SaveGitConfig encrypts the token via the cipher, validates the SSH key
-// path (callers must validate before calling — this method assumes a
-// valid path), and upserts the row with an atomically-bumped version cell.
+// SaveGitConfig encrypts the token via the cipher, validates the SSH
+// key path through the configured validator (codex r2 high — the
+// store is now the authoritative gate, not just a trusted-input
+// recipient), and upserts the row with an atomically-bumped version
+// cell.
 //
 // Empty token saves empty (no envelope). Non-empty token with no key and
-// no escape hatch returns ErrGitTokenEncryptionKeyRequired.
+// no escape hatch returns ErrGitTokenEncryptionKeyRequired. SSH key
+// path that fails the configured validator returns the validator's
+// error verbatim (callers map to 400 in REST).
 func (s *SurrealGitConfigStore) SaveGitConfig(ctx context.Context, token, sshKeyPath string) error {
 	d := s.client.DB()
 	if d == nil {
 		return fmt.Errorf("database not connected")
+	}
+
+	// SSH path validation gate. Codex r2 high: the plan made save-time
+	// validation the authoritative path gate; previously only the REST
+	// handler validated, leaving any other write path (CLI tools,
+	// tests, future surfaces) unprotected.
+	if s.sshValidator != nil {
+		if vErr := s.sshValidator(sshKeyPath); vErr != nil {
+			return fmt.Errorf("git config: ssh key path: %w", vErr)
+		}
 	}
 
 	stored, encErr := s.cipher.Encrypt(token)

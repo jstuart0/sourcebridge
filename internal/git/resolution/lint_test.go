@@ -56,8 +56,13 @@ func TestNoDirectCfgGitReads(t *testing.T) {
 		"internal/api/rest/admin.go": {"adminGitView": true},
 		// GraphQL resolver's legacy fallback (when GitResolver is nil
 		// in tests). Production wiring sets GitResolver so this path
-		// is dead in live deployments.
-		"internal/api/graphql/resolver.go": {"resolveGitCredentials": true},
+		// is dead in live deployments. resolveGitCredentialsForOp is
+		// the codex r2 medium variant that takes an op label for the
+		// LogResolved structured log line; both wrap the same fallback.
+		"internal/api/graphql/resolver.go": {
+			"resolveGitCredentials":      true,
+			"resolveGitCredentialsForOp": true,
+		},
 	}
 
 	repoRoot := findRepoRoot(t)

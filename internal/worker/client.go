@@ -211,11 +211,30 @@ func WithHealthCheckOnSwap(enable bool) Option {
 // legacy insecure path is used (OSS dev compatibility).
 //
 // R3 slice 4: when an Option supplied via WithTLSReloadWatcher is set,
-// the Client subscribes to OnReload and cycles its connection on every
-// successful reload. The dial credentials still come from the supplied
-// tlsCfg at boot — the watcher tracks the same paths for hot-reload.
+// the dial credentials are built from the watcher's GetClientCertificate
+// hook + a VerifyPeerCertificate that reads the watcher's live RootCAs.
+// Every TLS handshake (on the initial dial AND every redial after
+// rotation) therefore uses the latest cert and CA bundle without
+// any static capture at boot. Codex r2 critical fix.
 func New(address string, tlsCfg TLSConfig, opts ...Option) (*Client, error) {
-	creds, err := dialCredentials(tlsCfg)
+	c := &Client{
+		address:                  address,
+		knowledgeTimeoutProvider: func() time.Duration { return TimeoutKnowledgeRepository },
+		healthCheckOnSwap:        true,
+	}
+
+	// Apply opts FIRST so the watcher (if any) is set before we build
+	// dial credentials. This is the codex r2 critical fix: previously
+	// dialCredentials ran from the static tlsCfg before opts applied,
+	// so the watcher was wired but rotations re-dialed with static
+	// creds captured at boot — the new cert was never actually used.
+	for _, opt := range opts {
+		if opt != nil {
+			opt(c)
+		}
+	}
+
+	creds, err := buildDialCredentials(tlsCfg, c.tlsWatcher, address)
 	if err != nil {
 		return nil, fmt.Errorf("worker tls: %w", err)
 	}
@@ -227,29 +246,24 @@ func New(address string, tlsCfg TLSConfig, opts ...Option) (*Client, error) {
 			grpc.MaxCallSendMsgSize(50*1024*1024),
 		),
 	}
+	c.dialOpts = dialOpts
 
 	conn, err := grpc.NewClient(address, dialOpts...)
 	if err != nil {
 		return nil, err
 	}
-
-	c := &Client{
-		address:                  address,
-		dialOpts:                 dialOpts,
-		knowledgeTimeoutProvider: func() time.Duration { return TimeoutKnowledgeRepository },
-		healthCheckOnSwap:        true,
-	}
 	c.bundle.Store(buildBundle(conn))
-
-	for _, opt := range opts {
-		if opt != nil {
-			opt(c)
-		}
-	}
 
 	// Subscribe to reload events so the Client can cycle the conn on
 	// validated cert changes. Subscribing AFTER the bundle is published
 	// guarantees the first OnReload sees a live bundle.
+	//
+	// Why we redial on reload even though the watcher's
+	// GetClientCertificate already serves new certs to fresh handshakes:
+	// gRPC's HTTP/2 connection is long-lived; once established it does
+	// NOT renegotiate TLS on its own. Redialing forces a fresh handshake
+	// against the new material (and lets us drain in-flight long RPCs
+	// against the old conn naturally rather than killing them).
 	if c.tlsWatcher != nil {
 		c.tlsWatcher.OnReload(func(success bool, err error) {
 			if !success {
@@ -394,10 +408,29 @@ func (c *Client) drainAndClose(b *clientBundle) {
 
 // dialCredentials returns the gRPC TransportCredentials for the worker
 // dial. When TLS is disabled, returns insecure.NewCredentials() (legacy
-// path, OSS dev / no-cert-manager environments). When enabled, loads
-// the client cert + CA bundle from disk and builds a tls.Config with
-// mutual auth.
+// path, OSS dev / no-cert-manager environments). When enabled WITHOUT
+// a hot-reload watcher, loads the client cert + CA bundle once from
+// disk and builds a tls.Config with mutual auth. Used by callers that
+// don't need hot-reload (tests, OSS no-Reloader deployments).
+//
+// Production wiring goes through buildDialCredentials so future
+// handshakes pick up reloaded material.
 func dialCredentials(cfg TLSConfig) (credentials.TransportCredentials, error) {
+	return buildDialCredentials(cfg, nil, "")
+}
+
+// buildDialCredentials produces gRPC TransportCredentials with optional
+// hot-reload wiring. When a watcher is provided, the returned credentials
+// pull cert+CA dynamically on every handshake, so a redial after a
+// validated cert reload uses the new material without any restart.
+//
+// Codex r2 critical fix: the previous implementation captured a static
+// tls.Certificate and static *x509.CertPool at boot, so even after the
+// watcher's atomic swap, redialed connections kept using the boot-time
+// material. Now the credentials reach into the watcher on every dial.
+//
+// addressForLog is purely cosmetic for the startup log line.
+func buildDialCredentials(cfg TLSConfig, watcher *tlsreload.Watcher, addressForLog string) (credentials.TransportCredentials, error) {
 	if !cfg.Enabled {
 		return insecure.NewCredentials(), nil
 	}
@@ -405,6 +438,36 @@ func dialCredentials(cfg TLSConfig) (credentials.TransportCredentials, error) {
 		return nil, fmt.Errorf("tls enabled but cert_path/key_path/ca_path are required")
 	}
 
+	serverName := cfg.ServerName
+	if serverName == "" {
+		serverName = "worker.sourcebridge.svc.cluster.local"
+	}
+
+	if watcher != nil {
+		// Hot-reload-aware path. The watcher already validated the
+		// initial material in tlsreload.New; its accessors return live
+		// pointers for every handshake.
+		tlsCfg := &tls.Config{
+			GetClientCertificate: watcher.GetClientCertificate,
+			ServerName:           serverName,
+			MinVersion:           tls.VersionTLS12,
+			// Custom verification reads the watcher's current RootCAs
+			// each time so a CA-bundle rotation is also picked up
+			// without restarting. We disable the standard verifier
+			// (InsecureSkipVerify=true) and replace it with our own
+			// that uses the live pool and re-checks ServerName.
+			InsecureSkipVerify:    true, //nolint:gosec // VerifyPeerCertificate replaces it
+			VerifyPeerCertificate: watcherVerifyPeerCertificate(watcher, serverName),
+		}
+		slog.Info("worker tls enabled (hot-reload)",
+			"server_name", serverName,
+			"cert", cfg.CertPath,
+			"ca", cfg.CAPath,
+			"address", addressForLog)
+		return credentials.NewTLS(tlsCfg), nil
+	}
+
+	// Static path (no watcher).
 	clientCert, err := tls.LoadX509KeyPair(cfg.CertPath, cfg.KeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("load client cert: %w", err)
@@ -419,19 +482,56 @@ func dialCredentials(cfg TLSConfig) (credentials.TransportCredentials, error) {
 		return nil, fmt.Errorf("parse ca bundle: no PEM certs found at %s", cfg.CAPath)
 	}
 
-	serverName := cfg.ServerName
-	if serverName == "" {
-		serverName = "worker.sourcebridge.svc.cluster.local"
-	}
-
 	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{clientCert},
 		RootCAs:      caPool,
 		ServerName:   serverName,
 		MinVersion:   tls.VersionTLS12,
 	}
-	slog.Info("worker tls enabled", "server_name", serverName, "cert", cfg.CertPath, "ca", cfg.CAPath)
+	slog.Info("worker tls enabled (static)",
+		"server_name", serverName,
+		"cert", cfg.CertPath,
+		"ca", cfg.CAPath)
 	return credentials.NewTLS(tlsCfg), nil
+}
+
+// watcherVerifyPeerCertificate returns a tls.Config.VerifyPeerCertificate
+// callback that uses the watcher's live RootCAs and re-asserts the
+// expected server name on every handshake. We replace the standard TLS
+// verifier (which would have captured a static RootCAs at config time)
+// with one that reads the watcher on demand.
+func watcherVerifyPeerCertificate(watcher *tlsreload.Watcher, expectedServerName string) func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+		if len(rawCerts) == 0 {
+			return fmt.Errorf("worker tls verify: server presented no certs")
+		}
+		certs := make([]*x509.Certificate, 0, len(rawCerts))
+		for _, raw := range rawCerts {
+			c, err := x509.ParseCertificate(raw)
+			if err != nil {
+				return fmt.Errorf("worker tls verify: parse server cert: %w", err)
+			}
+			certs = append(certs, c)
+		}
+		roots := watcher.RootCAs()
+		if roots == nil {
+			return fmt.Errorf("worker tls verify: no CA pool available")
+		}
+		intermediates := x509.NewCertPool()
+		for _, c := range certs[1:] {
+			intermediates.AddCert(c)
+		}
+		opts := x509.VerifyOptions{
+			Roots:         roots,
+			Intermediates: intermediates,
+			DNSName:       expectedServerName,
+			KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		}
+		if _, err := certs[0].Verify(opts); err != nil {
+			return fmt.Errorf("worker tls verify: chain verification failed: %w", err)
+		}
+		return nil
+	}
 }
 
 func minDuration(a, b time.Duration) time.Duration {

@@ -33,7 +33,7 @@ func (r *mutationResolver) importRepository(repoID, repoName, repoPath string, i
 		// auth_token (the explicit, request-scoped form) we keep using
 		// that and ignore a workspace integrity error — the repo-level
 		// token would override anyway.
-		defaultToken, sshKeyPath, credsErr := r.resolveGitCredentials(ctx)
+		defaultToken, sshKeyPath, credsErr := r.resolveGitCredentialsForOp(ctx, "graphql.import")
 		if credsErr != nil && pullToken == "" {
 			// No request-scoped fallback and the workspace creds are
 			// unusable (corrupt envelope, missing key). Fail closed.

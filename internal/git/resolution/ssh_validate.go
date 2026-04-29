@@ -111,3 +111,49 @@ func (v SSHKeyPathValidator) Validate(p string) error {
 
 	return nil
 }
+
+// QuoteForShell returns a single-quoted shell-safe representation of p
+// suitable for embedding into GIT_SSH_COMMAND. The validator above is
+// the primary guard (it rejects every character that would matter for
+// shell interpretation), but consumers SHOULD still call this helper
+// when constructing GIT_SSH_COMMAND so a future loosening of the
+// validator (or a path that bypassed the validator — env-bootstrap,
+// legacy DB row from before R3 — codex r2) cannot inject a metachar
+// into git's environment.
+//
+// The single-quote envelope is bash/sh-portable: inside single quotes,
+// the only special character is `'` itself, which we escape via the
+// standard `'\''` close-reopen idiom. Everything else (spaces,
+// backticks, dollar signs, etc.) is treated literally.
+//
+// Example:
+//
+//	BuildGitSSHCommand("/etc/sourcebridge/git-keys/id_ed25519")
+//	→ "ssh -i '/etc/sourcebridge/git-keys/id_ed25519' -o StrictHostKeyChecking=accept-new"
+func QuoteForShell(p string) string {
+	if p == "" {
+		return "''"
+	}
+	if !strings.ContainsAny(p, "'") {
+		return "'" + p + "'"
+	}
+	// Path contains a single-quote. Escape via close-reopen.
+	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
+}
+
+// BuildGitSSHCommand returns a properly-quoted GIT_SSH_COMMAND value
+// that loads the provided ssh key path. Returns the empty string when
+// keyPath is empty (caller should not set GIT_SSH_COMMAND in that case).
+//
+// hostKeyPolicy controls the StrictHostKeyChecking option. Pass
+// "accept-new" for a new clone (TOFU semantics) or "no" to skip host
+// verification entirely (less safe; some legacy paths use this).
+func BuildGitSSHCommand(keyPath, hostKeyPolicy string) string {
+	if keyPath == "" {
+		return ""
+	}
+	if hostKeyPolicy == "" {
+		hostKeyPolicy = "accept-new"
+	}
+	return "ssh -i " + QuoteForShell(keyPath) + " -o StrictHostKeyChecking=" + hostKeyPolicy
+}
