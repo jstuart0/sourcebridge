@@ -1,7 +1,7 @@
 .PHONY: all build build-go build-web build-worker build-vscode test test-go test-web test-worker test-vscode \
 	lint lint-go lint-web lint-worker lint-vscode package-vscode install-vscode \
 	proto proto-clean docker-build docker-up docker-down \
-	dev dev-web dev-go clean migrate help integration-test smoke-test phase-gate ci \
+	dev dev-web dev-go clean migrate help integration-test test-integration smoke-test phase-gate ci \
 	test-livingwiki-integration test-livingwiki-smoke \
 	benchmark-comprehension-fake benchmark-comprehension-local benchmark-comprehension-report \
 	benchmark-report-quality-live
@@ -129,6 +129,11 @@ migrate:
 integration-test:
 	go test ./tests/integration/... -v -count=1 -timeout 120s
 
+# Surreal-backed integration tests — requires Docker (testcontainers spins up SurrealDB).
+# Runs all packages with the "integration" build tag, not just the livingwiki subset.
+test-integration:
+	go test -tags integration -race -count=1 -timeout 300s ./... -v
+
 # Living-wiki Tier-1 unit-integration test (in-memory fakes, no external services)
 test-livingwiki-integration:
 	go test -tags integration -race -count=1 -timeout 120s \
@@ -224,6 +229,7 @@ help:
 	@echo "  dev-web                      - Run Next.js dev server"
 	@echo "  clean                        - Remove build artifacts"
 	@echo "  migrate                      - Run database migrations"
+	@echo "  test-integration             - Run Surreal-backed integration tests (requires Docker)"
 	@echo "  test-livingwiki-integration  - Run living-wiki Tier-1 e2e tests (in-memory fakes)"
 	@echo "  test-livingwiki-smoke        - Run living-wiki Tier-2 smoke against live cluster"
 	@echo "  help                         - Show this help"
