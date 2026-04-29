@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -51,6 +52,24 @@ func TestMemoryDesktopAuthPendingPollRemainsPending(t *testing.T) {
 	lookup, ok := store.LookupByState(context.Background(), "state-2")
 	if !ok || lookup == nil {
 		t.Fatal("LookupByState() should still work for pending session")
+	}
+}
+
+func TestGeneratedSessionIDIsRandomAndPrefixed(t *testing.T) {
+	seen := make(map[string]struct{}, 1000)
+	for i := range 1000 {
+		id := generateDesktopSessionID()
+		if !strings.HasPrefix(id, "ide_") {
+			t.Fatalf("expected ide_ prefix, got %q", id)
+		}
+		suffix := strings.TrimPrefix(id, "ide_")
+		if len(suffix) != 22 { // base64url of 16 bytes = 22 chars unpadded
+			t.Fatalf("expected 22-char suffix, got %d (%q)", len(suffix), suffix)
+		}
+		if _, dup := seen[id]; dup {
+			t.Fatalf("collision in 1000 IDs (round %d): %q", i, id)
+		}
+		seen[id] = struct{}{}
 	}
 }
 

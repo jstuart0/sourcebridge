@@ -510,19 +510,25 @@ func (s *Server) setupRouter() {
 	r.Get("/readyz", s.handleReadyz)
 	r.Get("/metrics", s.handleMetrics)
 
-	// Auth routes (rate limited more strictly)
+	// Auth routes (rate limited more strictly — 10 req/min per IP covers all
+	// credential-submission and desktop-auth endpoints. The /auth/desktop/info
+	// probe is included here for budget clarity; it's read-only but is used as a
+	// TOFU probe against /auth/desktop/oidc/poll so keeping all four desktop
+	// endpoints on the same counter keeps the math obvious. See the security
+	// hardening plan (2026-04-28-claude-code-security-hardening.md, decision e)
+	// for the shared-budget DoS trade-off analysis.
 	r.Group(func(r chi.Router) {
 		r.Use(httprate.LimitByIP(10, 1*time.Minute))
 		r.Post("/auth/setup", s.handleSetup)
 		r.Post("/auth/login", s.handleLogin)
+		r.Get("/auth/desktop/info", s.handleDesktopAuthInfo)
+		r.Post("/auth/desktop/local-login", s.handleDesktopLocalLogin)
+		r.Post("/auth/desktop/oidc/start", s.handleDesktopOIDCStart)
+		r.Get("/auth/desktop/oidc/poll", s.handleDesktopOIDCPoll)
 	})
 
 	// Auth info endpoint (tells frontend which auth methods are available)
 	r.Get("/auth/info", s.handleAuthInfo)
-	r.Get("/auth/desktop/info", s.handleDesktopAuthInfo)
-	r.Post("/auth/desktop/local-login", s.handleDesktopLocalLogin)
-	r.Post("/auth/desktop/oidc/start", s.handleDesktopOIDCStart)
-	r.Get("/auth/desktop/oidc/poll", s.handleDesktopOIDCPoll)
 	r.Post("/auth/logout", s.handleLogout)
 
 	// OIDC routes

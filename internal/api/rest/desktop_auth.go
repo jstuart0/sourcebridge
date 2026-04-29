@@ -5,6 +5,8 @@ package rest
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -35,7 +37,6 @@ type memoryDesktopAuthStore struct {
 	mu         sync.Mutex
 	sessions   map[string]*desktopAuthSession
 	byState    map[string]string
-	nextID     int64
 	sessionTTL time.Duration
 }
 
@@ -54,8 +55,7 @@ func (s *memoryDesktopAuthStore) TTL() time.Duration {
 func (s *memoryDesktopAuthStore) Create(_ context.Context, state string) (*desktopAuthSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.nextID++
-	id := generateDesktopSessionID(s.nextID)
+	id := generateDesktopSessionID()
 	session := &desktopAuthSession{
 		ID:        id,
 		State:     state,
@@ -129,8 +129,18 @@ func (s *memoryDesktopAuthStore) LookupByState(_ context.Context, state string) 
 	return &cp, true
 }
 
-func generateDesktopSessionID(seed int64) string {
-	return "ide_" + time.Now().UTC().Format("20060102150405") + "_" + time.Unix(seed, 0).UTC().Format("405")
+// generateDesktopSessionID returns "ide_" followed by 16 random bytes
+// base64url-encoded (22 chars, no padding). ~128 bits of entropy makes
+// brute-force enumeration of in-flight sessions infeasible. The "ide_"
+// prefix is preserved so log-grep tooling can recognize desktop sessions.
+func generateDesktopSessionID() string {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		// crypto/rand cannot fail under any normal condition; if it does,
+		// the only safe action is to refuse to mint a session ID.
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return "ide_" + base64.RawURLEncoding.EncodeToString(buf[:])
 }
 
 type desktopLocalLoginRequest struct {
