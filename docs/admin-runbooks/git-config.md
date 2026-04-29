@@ -123,3 +123,9 @@ on-disk shape is forward-compatible: existing `sbenc:v1:` rows are
 read transparently by the prior code path and the resolver's
 env-bootstrap fallback returns the env value when the DB is
 unavailable. Roll back the API binary; no data migration is required.
+
+## See also
+
+- [`llm-config.md`](llm-config.md) — parallel LLM credentials runbook.
+- [`encryption-key-setup.md`](encryption-key-setup.md) — bootstrap the
+  encryption key on a fresh deployment.
