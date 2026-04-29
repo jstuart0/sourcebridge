@@ -699,6 +699,16 @@ func (p *proxy) runWorker(ctx context.Context, raw []byte, id json.RawMessage, m
 // streamSSE reads SSE events as they arrive on r and writes each well-formed
 // JSON-RPC payload to stdout. Stops after the originating id receives a
 // result/error envelope, or when the stream closes.
+//
+// Validation policy (codex r2c M):
+//   - Notification frames (method present): forwarded only when method is a
+//     non-empty string AND id/result/error are absent.
+//   - Response frames (id present): forwarded only when validateJSONRPC
+//     accepts the body for the originating id.
+//
+// Anything else is dropped with a verbose log. This prevents wrong-id
+// responses (server bug, transport bug, or upstream misrouting) from
+// reaching the MCP client and corrupting protocol state.
 func (p *proxy) streamSSE(ctx context.Context, r io.Reader, originID json.RawMessage, method string) {
 	originIDKey := stringifyID(originID)
 	completed := false
@@ -711,9 +721,9 @@ func (p *proxy) streamSSE(ctx context.Context, r io.Reader, originID json.RawMes
 		if ev.Data == "" {
 			continue
 		}
-		validBody, ok := validateJSONRPCAny([]byte(ev.Data))
+		validBody, ok := validateSSEFrame([]byte(ev.Data), originID)
 		if !ok {
-			p.verbosef("dropped non-JSON-RPC SSE event for %s", method)
+			p.verbosef("dropped invalid SSE event for %s", method)
 			continue
 		}
 		p.writeRaw(validBody)
@@ -724,6 +734,58 @@ func (p *proxy) streamSSE(ctx context.Context, r io.Reader, originID json.RawMes
 		}
 		_ = ctx
 	}
+}
+
+// validateSSEFrame is the SSE-specific validator used by streamSSE. It
+// distinguishes notification frames from response frames and applies
+// frame-kind-specific rules:
+//
+//   - Notification: method is a non-empty string; id/result/error absent.
+//     params is allowed but not required (some servers omit it).
+//   - Response: id matches expectedID; passes validateJSONRPC's strict
+//     shape rules (no method; exactly one of result/error; valid error
+//     object when error is present).
+//
+// Returns the original bytes when valid, false otherwise.
+func validateSSEFrame(body []byte, expectedID json.RawMessage) ([]byte, bool) {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil, false
+	}
+	// First-pass parse to discriminate notification vs response.
+	var head struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Result  json.RawMessage `json:"result"`
+		Error   json.RawMessage `json:"error"`
+		Method  json.RawMessage `json:"method"`
+	}
+	if err := json.Unmarshal(body, &head); err != nil {
+		return nil, false
+	}
+	if head.JSONRPC != "2.0" {
+		return nil, false
+	}
+	hasMethod := len(head.Method) > 0
+	hasResult := len(head.Result) > 0
+	hasError := len(head.Error) > 0
+	hasID := len(bytes.TrimSpace(head.ID)) > 0 && string(bytes.TrimSpace(head.ID)) != "null"
+
+	if hasMethod {
+		// Notification path. Require:
+		//   - method is a non-empty string (not null, not number, not "")
+		//   - no id, result, or error fields
+		var methodStr string
+		if err := json.Unmarshal(head.Method, &methodStr); err != nil || methodStr == "" {
+			return nil, false
+		}
+		if hasID || hasResult || hasError {
+			return nil, false
+		}
+		return body, true
+	}
+	// Response path — delegate to the strict validator with the
+	// originating id required.
+	return validateJSONRPC(body, expectedID)
 }
 
 // handleCancellation processes notifications/cancelled.
@@ -870,62 +932,6 @@ func validateJSONRPC(body []byte, expectedID json.RawMessage) ([]byte, bool) {
 		}
 	}
 	return body, true
-}
-
-// validateJSONRPCAny accepts any well-formed JSON-RPC frame for SSE streaming:
-// either a response (id + result/error, no method) or a notification (method,
-// no id). Each frame still must carry jsonrpc:"2.0".
-//
-// This is intentionally more permissive than validateJSONRPC because progress
-// notifications during a tool call legitimately have method and no id, while
-// the final response has the originating id and no method.
-func validateJSONRPCAny(body []byte) ([]byte, bool) {
-	if len(bytes.TrimSpace(body)) == 0 {
-		return nil, false
-	}
-	var rpc struct {
-		JSONRPC string          `json:"jsonrpc"`
-		ID      json.RawMessage `json:"id"`
-		Result  json.RawMessage `json:"result"`
-		Error   json.RawMessage `json:"error"`
-		Method  json.RawMessage `json:"method"`
-	}
-	if err := json.Unmarshal(body, &rpc); err != nil {
-		return nil, false
-	}
-	if rpc.JSONRPC != "2.0" {
-		return nil, false
-	}
-	hasResult := len(rpc.Result) > 0
-	hasError := len(rpc.Error) > 0
-	hasMethod := len(rpc.Method) > 0
-	hasID := len(bytes.TrimSpace(rpc.ID)) > 0 && string(bytes.TrimSpace(rpc.ID)) != "null"
-	switch {
-	case hasMethod && !hasResult && !hasError && !hasID:
-		// Notification: method present, no id, no result/error. We
-		// require id absent (or null) to distinguish from a JSON-RPC
-		// request frame (which the proxy never expects to receive on
-		// this server→client path).
-		return body, true
-	case !hasMethod && hasID && (hasResult != hasError):
-		// Response: id + exactly one of result/error.
-		if hasError {
-			// validate inner error shape
-			var inner struct {
-				Code    *int   `json:"code"`
-				Message string `json:"message"`
-			}
-			if err := json.Unmarshal(rpc.Error, &inner); err != nil {
-				return nil, false
-			}
-			if inner.Code == nil || inner.Message == "" {
-				return nil, false
-			}
-		}
-		return body, true
-	default:
-		return nil, false
-	}
 }
 
 // sseFrameIsTerminal returns true iff body is a JSON-RPC response (has

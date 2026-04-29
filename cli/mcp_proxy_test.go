@@ -749,6 +749,64 @@ func TestMCPProxy_DrainCancelsNotificationWaitingOnSemaphore(t *testing.T) {
 	}
 }
 
+// TestMCPProxy_StreamingSSEDropsWrongIDResponse is the codex r2c M guard:
+// SSE response frames must be matched against the originating request id.
+// A wrong-id response (e.g. from a server bug, transport bug, or upstream
+// misrouting) must NOT be written to stdout — it would confuse the MCP
+// client about which request a result belongs to.
+func TestMCPProxy_StreamingSSEDropsWrongIDResponse(t *testing.T) {
+	f, srv := newFakeMCPServer(t)
+	f.on("initialize", func(t *testing.T, w http.ResponseWriter, r *http.Request, msg map[string]interface{}) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Mcp-Session-Id", f.defaultSess)
+		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"result":{"protocolVersion":"2025-03-26"}}`, msg["id"])
+	})
+	// Server emits: a wrong-id response, then a malformed-method
+	// notification, then the correct final response.
+	f.on("tools/call", func(t *testing.T, w http.ResponseWriter, r *http.Request, msg map[string]interface{}) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("response writer is not a flusher")
+		}
+		// Wrong-id response: id=99 instead of msg["id"].
+		fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":99,\"result\":{\"poison\":true}}\n\n")
+		flusher.Flush()
+		// Malformed notification (method is null).
+		fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":null}\n\n")
+		flusher.Flush()
+		// Valid progress notification.
+		fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progress\":0.5}}\n\n")
+		flusher.Flush()
+		// Correct final response.
+		fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":%v,\"result\":{\"done\":true}}\n\n", msg["id"])
+		flusher.Flush()
+	})
+
+	stdout, _ := runProxyWith(t, srv.URL, "ca_test", []string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{}}`,
+	})
+
+	// Wrong-id response must NOT have leaked to stdout.
+	if strings.Contains(stdout, `"poison":true`) {
+		t.Errorf("wrong-id SSE response leaked to stdout: %s", stdout)
+	}
+	// Malformed notification (method:null) must NOT have leaked.
+	if strings.Contains(stdout, `"method":null`) {
+		t.Errorf("malformed null-method notification leaked to stdout: %s", stdout)
+	}
+	// Valid progress notification must be present.
+	if !strings.Contains(stdout, "notifications/progress") {
+		t.Errorf("valid progress notification missing from stdout: %s", stdout)
+	}
+	// Correct final response must be present.
+	if !strings.Contains(stdout, `"done":true`) {
+		t.Errorf("correct final response missing from stdout: %s", stdout)
+	}
+}
+
 // TestMCPProxy_ValidateJSONRPCRejectsMalformedResponses is the codex r2b M
 // guard. validateJSONRPC must reject:
 //   - response missing both result and error
@@ -789,15 +847,40 @@ func TestMCPProxy_ValidateJSONRPCRejectsMalformedResponses(t *testing.T) {
 		})
 	}
 
-	// validateJSONRPCAny must accept a notification but still reject the
-	// "result + error both" malformed response.
-	if _, ok := validateJSONRPCAny([]byte(`{"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":0.5}}`)); !ok {
-		t.Error("validateJSONRPCAny must accept a notification frame")
-	}
-	if _, ok := validateJSONRPCAny([]byte(`{"jsonrpc":"2.0","id":2,"result":{},"error":{"code":-1,"message":"x"}}`)); ok {
-		t.Error("validateJSONRPCAny must reject result+error response")
-	}
-	if _, ok := validateJSONRPCAny([]byte(`{"jsonrpc":"2.0","id":2,"method":"foo"}`)); ok {
-		t.Error("validateJSONRPCAny must reject id+method (neither pure response nor pure notification)")
-	}
+	// validateSSEFrame is the SSE-specific validator used by streamSSE.
+	// It must accept a well-formed notification, accept a well-formed
+	// response carrying the expected id, and reject malformed/cross-id
+	// frames.
+	t.Run("sse_frame_notification_ok", func(t *testing.T) {
+		if _, ok := validateSSEFrame([]byte(`{"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":0.5}}`), expectedID); !ok {
+			t.Error("validateSSEFrame must accept a well-formed notification")
+		}
+	})
+	t.Run("sse_frame_response_ok", func(t *testing.T) {
+		if _, ok := validateSSEFrame([]byte(`{"jsonrpc":"2.0","id":2,"result":{}}`), expectedID); !ok {
+			t.Error("validateSSEFrame must accept response matching expected id")
+		}
+	})
+	t.Run("sse_frame_wrong_id_response_rejected", func(t *testing.T) {
+		if _, ok := validateSSEFrame([]byte(`{"jsonrpc":"2.0","id":99,"result":{}}`), expectedID); ok {
+			t.Error("validateSSEFrame must reject wrong-id response")
+		}
+	})
+	t.Run("sse_frame_null_method_notification_rejected", func(t *testing.T) {
+		if _, ok := validateSSEFrame([]byte(`{"jsonrpc":"2.0","method":null}`), expectedID); ok {
+			t.Error("validateSSEFrame must reject null-method notification")
+		}
+	})
+	t.Run("sse_frame_empty_method_notification_rejected", func(t *testing.T) {
+		if _, ok := validateSSEFrame([]byte(`{"jsonrpc":"2.0","method":""}`), expectedID); ok {
+			t.Error("validateSSEFrame must reject empty-method notification")
+		}
+	})
+	t.Run("sse_frame_request_shape_rejected", func(t *testing.T) {
+		// id + method + no result/error is a request frame; the proxy
+		// never expects the server to send a request, drop it.
+		if _, ok := validateSSEFrame([]byte(`{"jsonrpc":"2.0","id":2,"method":"foo","params":{}}`), expectedID); ok {
+			t.Error("validateSSEFrame must reject request-shaped frames")
+		}
+	})
 }
