@@ -18,11 +18,14 @@ import (
 // cycle through SurrealDB lives in tests/integration.
 
 func newStoreForCryptoTest(key string, allowUnenc bool) *SurrealLLMConfigStore {
-	s := &SurrealLLMConfigStore{
-		encryptionKey:    key,
-		allowUnencrypted: allowUnenc,
-	}
-	return s
+	// The store delegates encryption to a secretcipher.Cipher constructed
+	// from the same options the public constructor accepts. Building the
+	// store via NewSurrealLLMConfigStore here guarantees the cipher is
+	// wired up exactly the way production code wires it (slice 1 of R3).
+	return NewSurrealLLMConfigStore(nil,
+		WithLLMConfigEncryptionKey(key),
+		WithLLMConfigAllowUnencrypted(allowUnenc),
+	)
 }
 
 func TestEncryptAPIKey_RoundTrip(t *testing.T) {

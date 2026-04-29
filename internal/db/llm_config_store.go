@@ -5,19 +5,14 @@ package db
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"strings"
-	"sync"
 
 	"github.com/surrealdb/surrealdb.go"
+
+	"github.com/sourcebridge/sourcebridge/internal/secretcipher"
 )
 
 // SurrealLLMConfigStore persists LLM configuration in SurrealDB using a
@@ -28,13 +23,20 @@ import (
 // prefix). Existing legacy plaintext rows are read transparently; new
 // saves always write ciphertext (or refuse the save when no encryption
 // key is configured, unless the OSS escape hatch is on).
+//
+// R3 slice 1: encryption is delegated to a secretcipher.Cipher. The default
+// implementation is secretcipher.AESGCMCipher (the same sbenc:v1 envelope
+// the store has always used); a future Vault-backed Cipher swaps in here
+// without touching any callsite.
 type SurrealLLMConfigStore struct {
-	client          *SurrealDB
-	encryptionKey   string // empty disables encryption (OSS dev only)
-	allowUnencrypted bool   // OSS escape hatch, off by default in production
-	// loadedLegacyOnce rate-limits the "this row is unencrypted; please
-	// migrate" warning to one log line per process lifetime.
-	loadedLegacyOnce sync.Once
+	client *SurrealDB
+	cipher secretcipher.Cipher
+	// Held for backward-compatible options chaining: NewSurrealLLMConfigStore
+	// still accepts WithLLMConfigEncryptionKey + WithLLMConfigAllowUnencrypted
+	// and constructs the cipher from those values. Tests / live callers don't
+	// need to know the cipher exists.
+	encryptionKeyForBootstrap string
+	allowUnencryptedForBootstrap bool
 }
 
 // LLMConfigStoreOption configures optional behavior.
@@ -47,7 +49,7 @@ type LLMConfigStoreOption func(*SurrealLLMConfigStore)
 // bytes via SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY.
 func WithLLMConfigEncryptionKey(key string) LLMConfigStoreOption {
 	return func(s *SurrealLLMConfigStore) {
-		s.encryptionKey = key
+		s.encryptionKeyForBootstrap = key
 	}
 }
 
@@ -58,17 +60,33 @@ func WithLLMConfigEncryptionKey(key string) LLMConfigStoreOption {
 // SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY=true.
 func WithLLMConfigAllowUnencrypted(allow bool) LLMConfigStoreOption {
 	return func(s *SurrealLLMConfigStore) {
-		s.allowUnencrypted = allow
+		s.allowUnencryptedForBootstrap = allow
+	}
+}
+
+// WithLLMConfigCipher injects a pre-built secretcipher.Cipher. When set,
+// it overrides any cipher constructed from WithLLMConfigEncryptionKey /
+// WithLLMConfigAllowUnencrypted. Reserved for tests and future Vault
+// integration; production code uses the convenience options above.
+func WithLLMConfigCipher(c secretcipher.Cipher) LLMConfigStoreOption {
+	return func(s *SurrealLLMConfigStore) {
+		s.cipher = c
 	}
 }
 
 // NewSurrealLLMConfigStore creates a new LLM config store backed by SurrealDB.
+//
+// If WithLLMConfigCipher is not supplied, a secretcipher.AESGCMCipher is
+// constructed from the encryption-key and allow-unencrypted options.
 func NewSurrealLLMConfigStore(client *SurrealDB, opts ...LLMConfigStoreOption) *SurrealLLMConfigStore {
 	s := &SurrealLLMConfigStore{client: client}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(s)
 		}
+	}
+	if s.cipher == nil {
+		s.cipher = secretcipher.NewAESGCMCipher(s.encryptionKeyForBootstrap, s.allowUnencryptedForBootstrap)
 	}
 	return s
 }
@@ -100,19 +118,27 @@ type LLMConfigRecord struct {
 // supplies a non-empty API key but the store has no encryption key
 // configured AND the OSS escape hatch is off. The REST handler maps this
 // to a 422 Unprocessable Entity with a clear admin-facing message.
-var ErrEncryptionKeyRequired = errors.New("llm api key cannot be saved without an encryption key (set SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY or enable SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY for OSS development)")
+//
+// R3: this is now a wrapper around secretcipher.ErrEncryptionKeyRequired
+// so callers can match on either error via errors.Is.
+var ErrEncryptionKeyRequired = fmt.Errorf("llm api key cannot be saved without an encryption key (set SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY or enable SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY for OSS development): %w", secretcipher.ErrEncryptionKeyRequired)
 
 // ErrAPIKeyDecryptFailed is returned by LoadLLMConfig when a stored
 // ciphertext blob cannot be decrypted (corruption, key rotation, or a
 // programming bug). Fail-closed: callers must NOT silently fall back to
 // any other source for the api_key.
-var ErrAPIKeyDecryptFailed = errors.New("llm api key decrypt failed; refusing to return a partial config")
+//
+// R3: now wraps secretcipher.ErrDecryptFailed for unified errors.Is matching.
+var ErrAPIKeyDecryptFailed = fmt.Errorf("llm api key decrypt failed; refusing to return a partial config: %w", secretcipher.ErrDecryptFailed)
 
 // envelopePrefix marks ciphertext stored under the v1 envelope. The
 // stored form is "sbenc:v1:" + base64(nonce || ciphertext_with_tag).
 // Absence of this prefix means the value is legacy plaintext (read-
 // only — Save never writes plaintext under this prefix).
-const envelopePrefix = "sbenc:v1:"
+//
+// R3: kept as a constant for the compile-time-stable test surface
+// (test files use envelopePrefix directly).
+const envelopePrefix = secretcipher.EnvelopePrefix
 
 // LoadLLMConfig reads the workspace LLM config record. The api_key field
 // is decrypted before return: prefixed values go through GCM-Open;
@@ -349,114 +375,34 @@ func (s *SurrealLLMConfigStore) SaveLLMConfig(rec *LLMConfigRecord) error {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Encryption-at-rest (versioned envelope, fail-closed)
+// Encryption-at-rest (delegated to secretcipher.Cipher)
 // ─────────────────────────────────────────────────────────────────────────
 
-// deriveKey produces a 32-byte AES key from the configured passphrase
-// via SHA-256. Matches the LivingWikiSettingsStore convention so
-// operators with one SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY get
-// consistent treatment across both stores.
-func (s *SurrealLLMConfigStore) deriveKey() []byte {
-	h := sha256.Sum256([]byte(s.encryptionKey))
-	return h[:]
-}
-
-// encryptAPIKey returns the form to store in the DB:
-//   - empty input → empty (no encryption needed for an absent key).
-//   - encryption disabled (no key, no escape hatch, non-empty input) →
-//     ErrEncryptionKeyRequired.
-//   - encryption disabled with escape hatch on → store plaintext +
-//     emit a one-time WARN.
-//   - encryption enabled → "sbenc:v1:" + base64(nonce || ciphertext).
+// encryptAPIKey delegates to the cipher. Translates the cipher's sentinel
+// errors to the store's wrapped errors so callers can use either form
+// with errors.Is.
 func (s *SurrealLLMConfigStore) encryptAPIKey(plaintext string) (string, error) {
-	if plaintext == "" {
-		return "", nil
-	}
-	if s.encryptionKey == "" {
-		if !s.allowUnencrypted {
+	stored, err := s.cipher.Encrypt(plaintext)
+	if err != nil {
+		if errors.Is(err, secretcipher.ErrEncryptionKeyRequired) {
 			return "", ErrEncryptionKeyRequired
 		}
-		s.warnUnencryptedSaveOnce()
-		return plaintext, nil
+		return "", fmt.Errorf("llm api key encrypt: %w", err)
 	}
-
-	block, err := aes.NewCipher(s.deriveKey())
-	if err != nil {
-		return "", fmt.Errorf("encrypt: aes new cipher: %w", err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", fmt.Errorf("encrypt: gcm: %w", err)
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", fmt.Errorf("encrypt: nonce: %w", err)
-	}
-	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
-	return envelopePrefix + base64.StdEncoding.EncodeToString(ciphertext), nil
+	return stored, nil
 }
 
-// decryptAPIKey reverses encryptAPIKey:
-//   - empty input → empty.
-//   - prefixed → AES-GCM decrypt; failure returns error (fail-closed).
-//   - unprefixed → legacy plaintext, returned as-is + one-time WARN.
-//
-// Encryption-disabled (no key) decoding of a prefixed value returns an
-// error — we cannot decrypt without the key, and silently returning
-// "" or a corrupted string would be worse than failing the load.
+// decryptAPIKey delegates to the cipher. A decryption failure is
+// returned as ErrAPIKeyDecryptFailed (which wraps secretcipher.ErrDecryptFailed).
 func (s *SurrealLLMConfigStore) decryptAPIKey(stored string) (string, error) {
-	if stored == "" {
-		return "", nil
-	}
-	if !strings.HasPrefix(stored, envelopePrefix) {
-		// Legacy plaintext path. Warn once per process; never auto-
-		// migrate — the migration command (cli/admin_secrets.go) is the
-		// only place we re-save under encryption. Auto-migrating from
-		// Load would race concurrent saves.
-		s.warnLegacyLoadOnce()
-		return stored, nil
-	}
-	if s.encryptionKey == "" {
-		return "", fmt.Errorf("decrypt: stored value is encrypted but no encryption key is configured")
-	}
-	encoded := strings.TrimPrefix(stored, envelopePrefix)
-	data, err := base64.StdEncoding.DecodeString(encoded)
+	plaintext, err := s.cipher.Decrypt(stored)
 	if err != nil {
-		return "", fmt.Errorf("decrypt: base64: %w", err)
+		if errors.Is(err, secretcipher.ErrDecryptFailed) {
+			return "", ErrAPIKeyDecryptFailed
+		}
+		return "", fmt.Errorf("llm api key decrypt: %w", err)
 	}
-	block, err := aes.NewCipher(s.deriveKey())
-	if err != nil {
-		return "", fmt.Errorf("decrypt: aes new cipher: %w", err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", fmt.Errorf("decrypt: gcm: %w", err)
-	}
-	nonceSize := gcm.NonceSize()
-	if len(data) < nonceSize {
-		return "", fmt.Errorf("decrypt: ciphertext too short")
-	}
-	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return "", fmt.Errorf("decrypt: open: %w", err)
-	}
-	return string(plaintext), nil
-}
-
-// warnLegacyLoadOnce emits one WARN per process when a legacy
-// plaintext api_key value is read. Tells operators to re-save (or run
-// the migrate command) so the next deploy won't ship plaintext keys.
-func (s *SurrealLLMConfigStore) warnLegacyLoadOnce() {
-	s.loadedLegacyOnce.Do(func() {
-		slog.Warn("llm config: ca_llm_config.api_key is unencrypted on disk; run `sourcebridge migrate llm-secrets` (or re-save via /admin/llm) to migrate to the v1 envelope")
-	})
-}
-
-// warnUnencryptedSaveOnce emits one WARN per process when a save lands
-// in the OSS escape-hatch path (key absent + AllowUnencrypted=true).
-func (s *SurrealLLMConfigStore) warnUnencryptedSaveOnce() {
-	slog.Warn("llm config: SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY is set; saving api_key as plaintext (NOT recommended for production)")
+	return plaintext, nil
 }
 
 // strVal safely extracts a string value from a map.

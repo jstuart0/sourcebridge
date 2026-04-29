@@ -12,6 +12,7 @@ import (
 	surrealdb "github.com/surrealdb/surrealdb.go"
 	"github.com/surrealdb/surrealdb.go/pkg/models"
 
+	"github.com/sourcebridge/sourcebridge/internal/secretcipher"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 )
 
@@ -28,9 +29,12 @@ import (
 // every repo-scoped op and renamed the Go type to `LLMOverride`. The
 // column name stays for backward compatibility per CLAUDE.md.
 type LivingWikiRepoSettingsStore struct {
-	client           *SurrealDB
-	encryptionKey    string
-	allowUnencrypted bool
+	client *SurrealDB
+	cipher secretcipher.Cipher
+	// Held for backward-compat: NewLivingWikiRepoSettingsStore still
+	// accepts the legacy options + constructs the cipher from them.
+	encryptionKeyForBootstrap    string
+	allowUnencryptedForBootstrap bool
 }
 
 // LivingWikiRepoSettingsStoreOption configures optional behavior.
@@ -40,14 +44,22 @@ type LivingWikiRepoSettingsStoreOption func(*LivingWikiRepoSettingsStore)
 // per-repo LLM override's api_key field.
 func WithLivingWikiRepoEncryptionKey(key string) LivingWikiRepoSettingsStoreOption {
 	return func(s *LivingWikiRepoSettingsStore) {
-		s.encryptionKey = key
+		s.encryptionKeyForBootstrap = key
 	}
 }
 
 // WithLivingWikiRepoAllowUnencrypted is the OSS escape hatch.
 func WithLivingWikiRepoAllowUnencrypted(allow bool) LivingWikiRepoSettingsStoreOption {
 	return func(s *LivingWikiRepoSettingsStore) {
-		s.allowUnencrypted = allow
+		s.allowUnencryptedForBootstrap = allow
+	}
+}
+
+// WithLivingWikiRepoCipher injects a pre-built cipher (R3 slice 1).
+// Reserved for tests / future Vault impl.
+func WithLivingWikiRepoCipher(c secretcipher.Cipher) LivingWikiRepoSettingsStoreOption {
+	return func(s *LivingWikiRepoSettingsStore) {
+		s.cipher = c
 	}
 }
 
@@ -58,6 +70,9 @@ func NewLivingWikiRepoSettingsStore(client *SurrealDB, opts ...LivingWikiRepoSet
 		if opt != nil {
 			opt(s)
 		}
+	}
+	if s.cipher == nil {
+		s.cipher = secretcipher.NewAESGCMCipher(s.encryptionKeyForBootstrap, s.allowUnencryptedForBootstrap)
 	}
 	return s
 }
@@ -251,32 +266,33 @@ func (s *LivingWikiRepoSettingsStore) GetRepoSettings(c context.Context, tenantI
 }
 
 // decryptOverrideAPIKey is the closure used by toSettings to decrypt the
-// per-repo override's api_key. Reuses the sbenc:v1 envelope helpers from
-// llm_config_store.go via a local SurrealLLMConfigStore instance — keeps
-// the encryption logic in one place.
+// per-repo override's api_key. Delegates to the store's secretcipher.Cipher
+// (R3 slice 1).
 func (s *LivingWikiRepoSettingsStore) decryptOverrideAPIKey(stored string) (string, error) {
-	helper := &SurrealLLMConfigStore{
-		encryptionKey:    s.encryptionKey,
-		allowUnencrypted: s.allowUnencrypted,
+	plaintext, err := s.cipher.Decrypt(stored)
+	if err != nil {
+		if errors.Is(err, secretcipher.ErrDecryptFailed) {
+			return "", ErrAPIKeyDecryptFailed
+		}
+		return "", fmt.Errorf("repo override api key decrypt: %w", err)
 	}
-	return helper.decryptAPIKey(stored)
+	return plaintext, nil
 }
 
 // encryptOverrideAPIKey is the encryption counterpart used by SetRepoSettings.
 // Returns livingwiki.ErrEncryptionKeyRequired (wrapping the underlying
-// db.ErrEncryptionKeyRequired) when the encryption key is missing, so the
-// GraphQL resolver can map it to a clean extension code without importing
-// internal/db.
+// secretcipher.ErrEncryptionKeyRequired) when the encryption key is missing,
+// so the GraphQL resolver can map it to a clean extension code without
+// importing internal/db.
 func (s *LivingWikiRepoSettingsStore) encryptOverrideAPIKey(plaintext string) (string, error) {
-	helper := &SurrealLLMConfigStore{
-		encryptionKey:    s.encryptionKey,
-		allowUnencrypted: s.allowUnencrypted,
+	stored, err := s.cipher.Encrypt(plaintext)
+	if err != nil {
+		if errors.Is(err, secretcipher.ErrEncryptionKeyRequired) {
+			return "", fmt.Errorf("%w: %v", livingwiki.ErrEncryptionKeyRequired, err)
+		}
+		return "", fmt.Errorf("repo override api key encrypt: %w", err)
 	}
-	cipher, err := helper.encryptAPIKey(plaintext)
-	if err != nil && errors.Is(err, ErrEncryptionKeyRequired) {
-		return "", fmt.Errorf("%w: %v", livingwiki.ErrEncryptionKeyRequired, err)
-	}
-	return cipher, err
+	return stored, nil
 }
 
 func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, settings livingwiki.RepositoryLivingWikiSettings) error {
