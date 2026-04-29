@@ -29,6 +29,12 @@ jobs:
           - goos: linux
             goarch: arm64
             runner: ubuntu-24.04-arm
+          - goos: darwin
+            goarch: amd64
+            runner: macos-13
+          - goos: darwin
+            goarch: arm64
+            runner: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -107,3 +113,132 @@ jobs:
           # doesn't auto-detect from the tag name, so we flag
           # prerelease explicitly when the ref has a hyphen.
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  tap-update:
+    # Update the Homebrew tap formula after the release assets are published.
+    # If this job fails the binaries are already on the Releases page — the
+    # main release is NOT rolled back. Fix the deploy key or tap repo and
+    # re-run this job from the Actions UI.
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check deploy key secret
+        run: |
+          if [ -z "${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}" ]; then
+            echo "ERROR: HOMEBREW_TAP_DEPLOY_KEY secret is not set."
+            echo "Set it up following _homebrew-tap-bootstrap/SETUP.md before cutting a release."
+            exit 1
+          fi
+
+      - name: Compute version (strip leading v)
+        id: version
+        run: echo "ver=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download release archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "*.tar.gz" \
+            --dir release-assets
+
+      - name: Compute SHA256 checksums
+        id: sha
+        run: |
+          cd release-assets
+          darwin_arm64_sha=$(shasum -a 256 "sourcebridge-${{ github.ref_name }}-darwin-arm64.tar.gz" | awk '{print $1}')
+          darwin_amd64_sha=$(shasum -a 256 "sourcebridge-${{ github.ref_name }}-darwin-amd64.tar.gz" | awk '{print $1}')
+          linux_arm64_sha=$(shasum -a 256  "sourcebridge-${{ github.ref_name }}-linux-arm64.tar.gz"  | awk '{print $1}')
+          linux_amd64_sha=$(shasum -a 256  "sourcebridge-${{ github.ref_name }}-linux-amd64.tar.gz"  | awk '{print $1}')
+          echo "darwin_arm64=$darwin_arm64_sha" >> "$GITHUB_OUTPUT"
+          echo "darwin_amd64=$darwin_amd64_sha" >> "$GITHUB_OUTPUT"
+          echo "linux_arm64=$linux_arm64_sha"   >> "$GITHUB_OUTPUT"
+          echo "linux_amd64=$linux_amd64_sha"   >> "$GITHUB_OUTPUT"
+
+      - name: Render Formula
+        env:
+          VERSION: ${{ steps.version.outputs.ver }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          DARWIN_ARM64_SHA: ${{ steps.sha.outputs.darwin_arm64 }}
+          DARWIN_AMD64_SHA: ${{ steps.sha.outputs.darwin_amd64 }}
+          LINUX_ARM64_SHA: ${{ steps.sha.outputs.linux_arm64 }}
+          LINUX_AMD64_SHA: ${{ steps.sha.outputs.linux_amd64 }}
+        run: |
+          mkdir -p Formula
+          cat > Formula/sourcebridge.rb <<'FORMULA'
+          class Sourcebridge < Formula
+            desc "Requirement-aware code comprehension platform"
+            homepage "https://sourcebridge.ai"
+            version "VERSION_PLACEHOLDER"
+            license "AGPL-3.0-only"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/sourcebridge-TAG_PLACEHOLDER-darwin-arm64.tar.gz"
+                sha256 "DARWIN_ARM64_SHA_PLACEHOLDER"
+              end
+              on_intel do
+                url "https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/sourcebridge-TAG_PLACEHOLDER-darwin-amd64.tar.gz"
+                sha256 "DARWIN_AMD64_SHA_PLACEHOLDER"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/sourcebridge-TAG_PLACEHOLDER-linux-arm64.tar.gz"
+                sha256 "LINUX_ARM64_SHA_PLACEHOLDER"
+              end
+              on_intel do
+                url "https://github.com/REPO_PLACEHOLDER/releases/download/TAG_PLACEHOLDER/sourcebridge-TAG_PLACEHOLDER-linux-amd64.tar.gz"
+                sha256 "LINUX_AMD64_SHA_PLACEHOLDER"
+              end
+            end
+
+            def install
+              bin.install "sourcebridge"
+            end
+
+            test do
+              assert_match "sourcebridge", shell_output("#{bin}/sourcebridge --help")
+            end
+          end
+          FORMULA
+
+          # Substitute placeholders (avoid envsubst to keep the heredoc portable)
+          sed -i \
+            -e "s|VERSION_PLACEHOLDER|${VERSION}|g" \
+            -e "s|REPO_PLACEHOLDER|${REPO}|g" \
+            -e "s|TAG_PLACEHOLDER|${TAG}|g" \
+            -e "s|DARWIN_ARM64_SHA_PLACEHOLDER|${DARWIN_ARM64_SHA}|g" \
+            -e "s|DARWIN_AMD64_SHA_PLACEHOLDER|${DARWIN_AMD64_SHA}|g" \
+            -e "s|LINUX_ARM64_SHA_PLACEHOLDER|${LINUX_ARM64_SHA}|g" \
+            -e "s|LINUX_AMD64_SHA_PLACEHOLDER|${LINUX_AMD64_SHA}|g" \
+            Formula/sourcebridge.rb
+
+      - name: Validate Formula syntax
+        run: ruby -c Formula/sourcebridge.rb
+
+      - name: Push to tap repo
+        env:
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          # Configure SSH with the deploy key
+          mkdir -p ~/.ssh
+          echo "${HOMEBREW_TAP_DEPLOY_KEY}" > ~/.ssh/tap_deploy_key
+          chmod 600 ~/.ssh/tap_deploy_key
+          printf 'Host github-tap\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/tap_deploy_key\n  StrictHostKeyChecking no\n' >> ~/.ssh/config
+
+          # Clone the tap repo
+          git clone git@github-tap:sourcebridge-ai/homebrew-tap.git tap-repo
+          mkdir -p tap-repo/Formula
+          cp Formula/sourcebridge.rb tap-repo/Formula/sourcebridge.rb
+
+          cd tap-repo
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/sourcebridge.rb
+          git diff --cached --quiet && echo "Formula unchanged — skipping commit" && exit 0
+          git commit -m "update sourcebridge to ${{ github.ref_name }}"
+          git push

@@ -14,16 +14,14 @@ docker compose up -d
 
 This starts the API server, web UI, and all dependencies.
 
-### Option 2: From Source (macOS/Linux)
-
-macOS Homebrew support is coming in a future release. Build from source in the
-meantime:
+### Option 2: Homebrew (macOS / Linux)
 
 ```bash
-git clone https://github.com/sourcebridge-ai/sourcebridge.git
-cd sourcebridge
-make build
+brew install sourcebridge-ai/tap/sourcebridge
 ```
+
+Linux users can also install via Homebrew, or grab the binary directly from
+the [Releases](https://github.com/sourcebridge-ai/sourcebridge/releases) page.
 
 ### Option 3: From Source (manual)
 
