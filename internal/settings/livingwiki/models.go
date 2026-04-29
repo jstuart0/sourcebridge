@@ -5,8 +5,20 @@ package livingwiki
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrEncryptionKeyRequired is returned by RepoSettingsStore.SetRepoSettings
+// when the call would persist a non-empty LLMOverride.APIKey but the
+// server has no encryption key configured (cfg.Security.EncryptionKey
+// is empty AND the OSS escape hatch is off). The GraphQL layer maps
+// this to an extension code "ENCRYPTION_KEY_REQUIRED" so the UI can
+// render a clear message.
+//
+// Implementations wrap the lower-layer db.ErrEncryptionKeyRequired
+// sentinel — callers should match via errors.Is.
+var ErrEncryptionKeyRequired = errors.New("livingwiki: api key cannot be saved without an encryption key")
 
 // Settings holds the living-wiki configuration as stored in the DB (via the
 // admin UI). Zero/empty values mean "not configured by UI; use env-var or

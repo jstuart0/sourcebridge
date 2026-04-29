@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -255,12 +256,20 @@ func (s *LivingWikiRepoSettingsStore) decryptOverrideAPIKey(stored string) (stri
 }
 
 // encryptOverrideAPIKey is the encryption counterpart used by SetRepoSettings.
+// Returns livingwiki.ErrEncryptionKeyRequired (wrapping the underlying
+// db.ErrEncryptionKeyRequired) when the encryption key is missing, so the
+// GraphQL resolver can map it to a clean extension code without importing
+// internal/db.
 func (s *LivingWikiRepoSettingsStore) encryptOverrideAPIKey(plaintext string) (string, error) {
 	helper := &SurrealLLMConfigStore{
 		encryptionKey:    s.encryptionKey,
 		allowUnencrypted: s.allowUnencrypted,
 	}
-	return helper.encryptAPIKey(plaintext)
+	cipher, err := helper.encryptAPIKey(plaintext)
+	if err != nil && errors.Is(err, ErrEncryptionKeyRequired) {
+		return "", fmt.Errorf("%w: %v", livingwiki.ErrEncryptionKeyRequired, err)
+	}
+	return cipher, err
 }
 
 func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, settings livingwiki.RepositoryLivingWikiSettings) error {

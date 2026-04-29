@@ -2707,6 +2707,12 @@ func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID 
 	})
 }
 
+// SetRepositoryLLMOverride is implemented in
+// repository_llm_override.resolvers.go.
+//
+// ClearRepositoryLLMOverride is implemented in
+// repository_llm_override.resolvers.go.
+
 // MoveToTrash is the resolver for the moveToTrash field.
 func (r *mutationResolver) MoveToTrash(ctx context.Context, typeArg TrashableType, id string, reason *string) (*TrashEntry, error) {
 	return r.Resolver.moveToTrash(ctx, typeArg, id, reason)
@@ -3917,6 +3923,8 @@ func (r *repositoryLivingWikiSettingsResolver) LastJobResult(ctx context.Context
 	}
 	return mapLivingWikiJobResult(result), nil
 }
+
+// LlmOverride is implemented in repository_llm_override.resolvers.go.
 
 // Mutation returns MutationResolver implementation.
 func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }

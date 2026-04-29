@@ -647,6 +647,7 @@ type ComplexityRoot struct {
 		Ask                                func(childComplexity int, input AskInput) int
 		AutoLinkRequirements               func(childComplexity int, repositoryID string, minConfidence *float64) int
 		BuildRepositoryUnderstanding       func(childComplexity int, input BuildRepositoryUnderstandingInput) int
+		ClearRepositoryLLMOverride         func(childComplexity int, repositoryID string) int
 		CreateManualLink                   func(childComplexity int, input CreateManualLinkInput) int
 		CreateRequirement                  func(childComplexity int, input CreateRequirementInput) int
 		DeleteModelCapabilities            func(childComplexity int, modelID string) int
@@ -679,6 +680,7 @@ type ComplexityRoot struct {
 		RestoreFromTrash                   func(childComplexity int, typeArg TrashableType, id string, resolveConflict *RestoreConflictResolution, rename *string) int
 		RetryLivingWikiJob                 func(childComplexity int, repositoryID string, retryExcludedOnly *bool) int
 		ReviewCode                         func(childComplexity int, input ReviewCodeInput) int
+		SetRepositoryLLMOverride           func(childComplexity int, repositoryID string, input RepositoryLLMOverrideInput) int
 		SimulateChange                     func(childComplexity int, input SimulateChangeInput) int
 		TestLivingWikiConnection           func(childComplexity int, provider string) int
 		TriggerSpecExtraction              func(childComplexity int, input TriggerSpecExtractionInput) int
@@ -810,12 +812,30 @@ type ComplexityRoot struct {
 		UpstreamStatus          func(childComplexity int) int
 	}
 
+	RepositoryLLMOverride struct {
+		APIKeyHint               func(childComplexity int) int
+		APIKeySet                func(childComplexity int) int
+		AdvancedMode             func(childComplexity int) int
+		ArchitectureDiagramModel func(childComplexity int) int
+		AskModel                 func(childComplexity int) int
+		BaseURL                  func(childComplexity int) int
+		DraftModel               func(childComplexity int) int
+		KnowledgeModel           func(childComplexity int) int
+		Provider                 func(childComplexity int) int
+		ReportModel              func(childComplexity int) int
+		ReviewModel              func(childComplexity int) int
+		SummaryModel             func(childComplexity int) int
+		UpdatedAt                func(childComplexity int) int
+		UpdatedBy                func(childComplexity int) int
+	}
+
 	RepositoryLivingWikiSettings struct {
 		AutoCleanOrphans  func(childComplexity int) int
 		Enabled           func(childComplexity int) int
 		ExcludePaths      func(childComplexity int) int
 		LastJobResult     func(childComplexity int) int
 		LastRunAt         func(childComplexity int) int
+		LlmOverride       func(childComplexity int) int
 		MaxPagesPerJob    func(childComplexity int) int
 		Mode              func(childComplexity int) int
 		Sinks             func(childComplexity int) int
@@ -1127,6 +1147,8 @@ type MutationResolver interface {
 	EnableLivingWikiForRepo(ctx context.Context, input EnableLivingWikiForRepoInput) (*EnableLivingWikiResult, error)
 	DisableLivingWikiForRepo(ctx context.Context, repositoryID string) (*RepositoryLivingWikiSettings, error)
 	RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool) (*EnableLivingWikiResult, error)
+	SetRepositoryLLMOverride(ctx context.Context, repositoryID string, input RepositoryLLMOverrideInput) (*RepositoryLLMOverride, error)
+	ClearRepositoryLLMOverride(ctx context.Context, repositoryID string) (*RepositoryLivingWikiSettings, error)
 	MoveToTrash(ctx context.Context, typeArg TrashableType, id string, reason *string) (*TrashEntry, error)
 	RestoreFromTrash(ctx context.Context, typeArg TrashableType, id string, resolveConflict *RestoreConflictResolution, rename *string) (*RestoreResult, error)
 	PermanentlyDelete(ctx context.Context, typeArg TrashableType, id string) (bool, error)
@@ -1191,6 +1213,7 @@ type RepositoryResolver interface {
 }
 type RepositoryLivingWikiSettingsResolver interface {
 	LastJobResult(ctx context.Context, obj *RepositoryLivingWikiSettings) (*LivingWikiJobResult, error)
+	LlmOverride(ctx context.Context, obj *RepositoryLivingWikiSettings) (*RepositoryLLMOverride, error)
 }
 
 type executableSchema struct {
@@ -4240,6 +4263,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Mutation.BuildRepositoryUnderstanding(childComplexity, args["input"].(BuildRepositoryUnderstandingInput)), true
 
+	case "Mutation.clearRepositoryLLMOverride":
+		if e.complexity.Mutation.ClearRepositoryLLMOverride == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_clearRepositoryLLMOverride_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.ClearRepositoryLLMOverride(childComplexity, args["repositoryId"].(string)), true
+
 	case "Mutation.createManualLink":
 		if e.complexity.Mutation.CreateManualLink == nil {
 			break
@@ -4623,6 +4658,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.ReviewCode(childComplexity, args["input"].(ReviewCodeInput)), true
+
+	case "Mutation.setRepositoryLLMOverride":
+		if e.complexity.Mutation.SetRepositoryLLMOverride == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_setRepositoryLLMOverride_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.SetRepositoryLLMOverride(childComplexity, args["repositoryId"].(string), args["input"].(RepositoryLLMOverrideInput)), true
 
 	case "Mutation.simulateChange":
 		if e.complexity.Mutation.SimulateChange == nil {
@@ -5609,6 +5656,104 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Repository.UpstreamStatus(childComplexity), true
 
+	case "RepositoryLLMOverride.apiKeyHint":
+		if e.complexity.RepositoryLLMOverride.APIKeyHint == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.APIKeyHint(childComplexity), true
+
+	case "RepositoryLLMOverride.apiKeySet":
+		if e.complexity.RepositoryLLMOverride.APIKeySet == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.APIKeySet(childComplexity), true
+
+	case "RepositoryLLMOverride.advancedMode":
+		if e.complexity.RepositoryLLMOverride.AdvancedMode == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.AdvancedMode(childComplexity), true
+
+	case "RepositoryLLMOverride.architectureDiagramModel":
+		if e.complexity.RepositoryLLMOverride.ArchitectureDiagramModel == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.ArchitectureDiagramModel(childComplexity), true
+
+	case "RepositoryLLMOverride.askModel":
+		if e.complexity.RepositoryLLMOverride.AskModel == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.AskModel(childComplexity), true
+
+	case "RepositoryLLMOverride.baseURL":
+		if e.complexity.RepositoryLLMOverride.BaseURL == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.BaseURL(childComplexity), true
+
+	case "RepositoryLLMOverride.draftModel":
+		if e.complexity.RepositoryLLMOverride.DraftModel == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.DraftModel(childComplexity), true
+
+	case "RepositoryLLMOverride.knowledgeModel":
+		if e.complexity.RepositoryLLMOverride.KnowledgeModel == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.KnowledgeModel(childComplexity), true
+
+	case "RepositoryLLMOverride.provider":
+		if e.complexity.RepositoryLLMOverride.Provider == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.Provider(childComplexity), true
+
+	case "RepositoryLLMOverride.reportModel":
+		if e.complexity.RepositoryLLMOverride.ReportModel == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.ReportModel(childComplexity), true
+
+	case "RepositoryLLMOverride.reviewModel":
+		if e.complexity.RepositoryLLMOverride.ReviewModel == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.ReviewModel(childComplexity), true
+
+	case "RepositoryLLMOverride.summaryModel":
+		if e.complexity.RepositoryLLMOverride.SummaryModel == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.SummaryModel(childComplexity), true
+
+	case "RepositoryLLMOverride.updatedAt":
+		if e.complexity.RepositoryLLMOverride.UpdatedAt == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.UpdatedAt(childComplexity), true
+
+	case "RepositoryLLMOverride.updatedBy":
+		if e.complexity.RepositoryLLMOverride.UpdatedBy == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.UpdatedBy(childComplexity), true
+
 	case "RepositoryLivingWikiSettings.autoCleanOrphans":
 		if e.complexity.RepositoryLivingWikiSettings.AutoCleanOrphans == nil {
 			break
@@ -5643,6 +5788,13 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.RepositoryLivingWikiSettings.LastRunAt(childComplexity), true
+
+	case "RepositoryLivingWikiSettings.llmOverride":
+		if e.complexity.RepositoryLivingWikiSettings.LlmOverride == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLivingWikiSettings.LlmOverride(childComplexity), true
 
 	case "RepositoryLivingWikiSettings.maxPagesPerJob":
 		if e.complexity.RepositoryLivingWikiSettings.MaxPagesPerJob == nil {
@@ -6893,6 +7045,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 		ec.unmarshalInputGenerateWorkflowStoryInput,
 		ec.unmarshalInputImportRequirementsInput,
 		ec.unmarshalInputRepoWikiSinkInput,
+		ec.unmarshalInputRepositoryLLMOverrideInput,
 		ec.unmarshalInputReviewCodeInput,
 		ec.unmarshalInputSimulateChangeInput,
 		ec.unmarshalInputTriggerSpecExtractionInput,
@@ -7201,6 +7354,34 @@ func (ec *executionContext) field_Mutation_buildRepositoryUnderstanding_argsInpu
 	}
 
 	var zeroVal BuildRepositoryUnderstandingInput
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_clearRepositoryLLMOverride_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_clearRepositoryLLMOverride_argsRepositoryID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["repositoryId"] = arg0
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_clearRepositoryLLMOverride_argsRepositoryID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["repositoryId"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("repositoryId"))
+	if tmp, ok := rawArgs["repositoryId"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
 	return zeroVal, nil
 }
 
@@ -8419,6 +8600,57 @@ func (ec *executionContext) field_Mutation_reviewCode_argsInput(
 	}
 
 	var zeroVal ReviewCodeInput
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_setRepositoryLLMOverride_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_setRepositoryLLMOverride_argsRepositoryID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["repositoryId"] = arg0
+	arg1, err := ec.field_Mutation_setRepositoryLLMOverride_argsInput(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_setRepositoryLLMOverride_argsRepositoryID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["repositoryId"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("repositoryId"))
+	if tmp, ok := rawArgs["repositoryId"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_setRepositoryLLMOverride_argsInput(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (RepositoryLLMOverrideInput, error) {
+	if _, ok := rawArgs["input"]; !ok {
+		var zeroVal RepositoryLLMOverrideInput
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("input"))
+	if tmp, ok := rawArgs["input"]; ok {
+		return ec.unmarshalNRepositoryLLMOverrideInput2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryLLMOverrideInput(ctx, tmp)
+	}
+
+	var zeroVal RepositoryLLMOverrideInput
 	return zeroVal, nil
 }
 
@@ -19293,6 +19525,8 @@ func (ec *executionContext) fieldContext_EnableLivingWikiResult_settings(_ conte
 				return ec.fieldContext_RepositoryLivingWikiSettings_updatedBy(ctx, field)
 			case "lastJobResult":
 				return ec.fieldContext_RepositoryLivingWikiSettings_lastJobResult(ctx, field)
+			case "llmOverride":
+				return ec.fieldContext_RepositoryLivingWikiSettings_llmOverride(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type RepositoryLivingWikiSettings", field.Name)
 		},
@@ -33135,6 +33369,8 @@ func (ec *executionContext) fieldContext_Mutation_updateRepositoryLivingWikiSett
 				return ec.fieldContext_RepositoryLivingWikiSettings_updatedBy(ctx, field)
 			case "lastJobResult":
 				return ec.fieldContext_RepositoryLivingWikiSettings_lastJobResult(ctx, field)
+			case "llmOverride":
+				return ec.fieldContext_RepositoryLivingWikiSettings_llmOverride(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type RepositoryLivingWikiSettings", field.Name)
 		},
@@ -33277,6 +33513,8 @@ func (ec *executionContext) fieldContext_Mutation_disableLivingWikiForRepo(ctx c
 				return ec.fieldContext_RepositoryLivingWikiSettings_updatedBy(ctx, field)
 			case "lastJobResult":
 				return ec.fieldContext_RepositoryLivingWikiSettings_lastJobResult(ctx, field)
+			case "llmOverride":
+				return ec.fieldContext_RepositoryLivingWikiSettings_llmOverride(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type RepositoryLivingWikiSettings", field.Name)
 		},
@@ -33352,6 +33590,172 @@ func (ec *executionContext) fieldContext_Mutation_retryLivingWikiJob(ctx context
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_retryLivingWikiJob_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_setRepositoryLLMOverride(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_setRepositoryLLMOverride(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().SetRepositoryLLMOverride(rctx, fc.Args["repositoryId"].(string), fc.Args["input"].(RepositoryLLMOverrideInput))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*RepositoryLLMOverride)
+	fc.Result = res
+	return ec.marshalNRepositoryLLMOverride2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryLLMOverride(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_setRepositoryLLMOverride(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "provider":
+				return ec.fieldContext_RepositoryLLMOverride_provider(ctx, field)
+			case "baseURL":
+				return ec.fieldContext_RepositoryLLMOverride_baseURL(ctx, field)
+			case "apiKeySet":
+				return ec.fieldContext_RepositoryLLMOverride_apiKeySet(ctx, field)
+			case "apiKeyHint":
+				return ec.fieldContext_RepositoryLLMOverride_apiKeyHint(ctx, field)
+			case "advancedMode":
+				return ec.fieldContext_RepositoryLLMOverride_advancedMode(ctx, field)
+			case "summaryModel":
+				return ec.fieldContext_RepositoryLLMOverride_summaryModel(ctx, field)
+			case "reviewModel":
+				return ec.fieldContext_RepositoryLLMOverride_reviewModel(ctx, field)
+			case "askModel":
+				return ec.fieldContext_RepositoryLLMOverride_askModel(ctx, field)
+			case "knowledgeModel":
+				return ec.fieldContext_RepositoryLLMOverride_knowledgeModel(ctx, field)
+			case "architectureDiagramModel":
+				return ec.fieldContext_RepositoryLLMOverride_architectureDiagramModel(ctx, field)
+			case "reportModel":
+				return ec.fieldContext_RepositoryLLMOverride_reportModel(ctx, field)
+			case "draftModel":
+				return ec.fieldContext_RepositoryLLMOverride_draftModel(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_RepositoryLLMOverride_updatedAt(ctx, field)
+			case "updatedBy":
+				return ec.fieldContext_RepositoryLLMOverride_updatedBy(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type RepositoryLLMOverride", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_setRepositoryLLMOverride_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_clearRepositoryLLMOverride(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_clearRepositoryLLMOverride(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().ClearRepositoryLLMOverride(rctx, fc.Args["repositoryId"].(string))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*RepositoryLivingWikiSettings)
+	fc.Result = res
+	return ec.marshalNRepositoryLivingWikiSettings2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryLivingWikiSettings(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_clearRepositoryLLMOverride(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "enabled":
+				return ec.fieldContext_RepositoryLivingWikiSettings_enabled(ctx, field)
+			case "mode":
+				return ec.fieldContext_RepositoryLivingWikiSettings_mode(ctx, field)
+			case "sinks":
+				return ec.fieldContext_RepositoryLivingWikiSettings_sinks(ctx, field)
+			case "excludePaths":
+				return ec.fieldContext_RepositoryLivingWikiSettings_excludePaths(ctx, field)
+			case "staleWhenStrategy":
+				return ec.fieldContext_RepositoryLivingWikiSettings_staleWhenStrategy(ctx, field)
+			case "maxPagesPerJob":
+				return ec.fieldContext_RepositoryLivingWikiSettings_maxPagesPerJob(ctx, field)
+			case "autoCleanOrphans":
+				return ec.fieldContext_RepositoryLivingWikiSettings_autoCleanOrphans(ctx, field)
+			case "lastRunAt":
+				return ec.fieldContext_RepositoryLivingWikiSettings_lastRunAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_RepositoryLivingWikiSettings_updatedAt(ctx, field)
+			case "updatedBy":
+				return ec.fieldContext_RepositoryLivingWikiSettings_updatedBy(ctx, field)
+			case "lastJobResult":
+				return ec.fieldContext_RepositoryLivingWikiSettings_lastJobResult(ctx, field)
+			case "llmOverride":
+				return ec.fieldContext_RepositoryLivingWikiSettings_llmOverride(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type RepositoryLivingWikiSettings", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_clearRepositoryLLMOverride_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -37738,6 +38142,8 @@ func (ec *executionContext) fieldContext_Query_repositoryLivingWikiSettings(ctx 
 				return ec.fieldContext_RepositoryLivingWikiSettings_updatedBy(ctx, field)
 			case "lastJobResult":
 				return ec.fieldContext_RepositoryLivingWikiSettings_lastJobResult(ctx, field)
+			case "llmOverride":
+				return ec.fieldContext_RepositoryLivingWikiSettings_llmOverride(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type RepositoryLivingWikiSettings", field.Name)
 		},
@@ -39406,8 +39812,590 @@ func (ec *executionContext) fieldContext_Repository_livingWikiSettings(_ context
 				return ec.fieldContext_RepositoryLivingWikiSettings_updatedBy(ctx, field)
 			case "lastJobResult":
 				return ec.fieldContext_RepositoryLivingWikiSettings_lastJobResult(ctx, field)
+			case "llmOverride":
+				return ec.fieldContext_RepositoryLivingWikiSettings_llmOverride(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type RepositoryLivingWikiSettings", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_provider(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_provider(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Provider, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_provider(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_baseURL(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_baseURL(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.BaseURL, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_baseURL(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_apiKeySet(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_apiKeySet(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.APIKeySet, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(bool)
+	fc.Result = res
+	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_apiKeySet(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_apiKeyHint(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_apiKeyHint(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.APIKeyHint, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_apiKeyHint(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_advancedMode(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_advancedMode(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.AdvancedMode, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(bool)
+	fc.Result = res
+	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_advancedMode(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_summaryModel(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_summaryModel(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.SummaryModel, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_summaryModel(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_reviewModel(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_reviewModel(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.ReviewModel, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_reviewModel(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_askModel(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_askModel(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.AskModel, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_askModel(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_knowledgeModel(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_knowledgeModel(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.KnowledgeModel, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_knowledgeModel(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_architectureDiagramModel(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_architectureDiagramModel(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.ArchitectureDiagramModel, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_architectureDiagramModel(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_reportModel(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_reportModel(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.ReportModel, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_reportModel(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_draftModel(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_draftModel(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.DraftModel, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_draftModel(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_updatedAt(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_updatedAt(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.UpdatedAt, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*time.Time)
+	fc.Result = res
+	return ec.marshalOTime2ᚖtimeᚐTime(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_updatedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_updatedBy(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_updatedBy(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.UpdatedBy, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_updatedBy(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
 		},
 	}
 	return fc, nil
@@ -39916,6 +40904,77 @@ func (ec *executionContext) fieldContext_RepositoryLivingWikiSettings_lastJobRes
 				return ec.fieldContext_LivingWikiJobResult_errorMessage(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type LivingWikiJobResult", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLivingWikiSettings_llmOverride(ctx context.Context, field graphql.CollectedField, obj *RepositoryLivingWikiSettings) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLivingWikiSettings_llmOverride(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.RepositoryLivingWikiSettings().LlmOverride(rctx, obj)
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*RepositoryLLMOverride)
+	fc.Result = res
+	return ec.marshalORepositoryLLMOverride2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryLLMOverride(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLivingWikiSettings_llmOverride(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLivingWikiSettings",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "provider":
+				return ec.fieldContext_RepositoryLLMOverride_provider(ctx, field)
+			case "baseURL":
+				return ec.fieldContext_RepositoryLLMOverride_baseURL(ctx, field)
+			case "apiKeySet":
+				return ec.fieldContext_RepositoryLLMOverride_apiKeySet(ctx, field)
+			case "apiKeyHint":
+				return ec.fieldContext_RepositoryLLMOverride_apiKeyHint(ctx, field)
+			case "advancedMode":
+				return ec.fieldContext_RepositoryLLMOverride_advancedMode(ctx, field)
+			case "summaryModel":
+				return ec.fieldContext_RepositoryLLMOverride_summaryModel(ctx, field)
+			case "reviewModel":
+				return ec.fieldContext_RepositoryLLMOverride_reviewModel(ctx, field)
+			case "askModel":
+				return ec.fieldContext_RepositoryLLMOverride_askModel(ctx, field)
+			case "knowledgeModel":
+				return ec.fieldContext_RepositoryLLMOverride_knowledgeModel(ctx, field)
+			case "architectureDiagramModel":
+				return ec.fieldContext_RepositoryLLMOverride_architectureDiagramModel(ctx, field)
+			case "reportModel":
+				return ec.fieldContext_RepositoryLLMOverride_reportModel(ctx, field)
+			case "draftModel":
+				return ec.fieldContext_RepositoryLLMOverride_draftModel(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_RepositoryLLMOverride_updatedAt(ctx, field)
+			case "updatedBy":
+				return ec.fieldContext_RepositoryLLMOverride_updatedBy(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type RepositoryLLMOverride", field.Name)
 		},
 	}
 	return fc, nil
@@ -50428,6 +51487,110 @@ func (ec *executionContext) unmarshalInputRepoWikiSinkInput(ctx context.Context,
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputRepositoryLLMOverrideInput(ctx context.Context, obj any) (RepositoryLLMOverrideInput, error) {
+	var it RepositoryLLMOverrideInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"provider", "baseURL", "apiKey", "clearAPIKey", "advancedMode", "summaryModel", "reviewModel", "askModel", "knowledgeModel", "architectureDiagramModel", "reportModel", "draftModel"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "provider":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("provider"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Provider = data
+		case "baseURL":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("baseURL"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.BaseURL = data
+		case "apiKey":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("apiKey"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.APIKey = data
+		case "clearAPIKey":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("clearAPIKey"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ClearAPIKey = data
+		case "advancedMode":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("advancedMode"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.AdvancedMode = data
+		case "summaryModel":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("summaryModel"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.SummaryModel = data
+		case "reviewModel":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("reviewModel"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ReviewModel = data
+		case "askModel":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("askModel"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.AskModel = data
+		case "knowledgeModel":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("knowledgeModel"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.KnowledgeModel = data
+		case "architectureDiagramModel":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("architectureDiagramModel"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ArchitectureDiagramModel = data
+		case "reportModel":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("reportModel"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ReportModel = data
+		case "draftModel":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("draftModel"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.DraftModel = data
+		}
+	}
+
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputReviewCodeInput(ctx context.Context, obj any) (ReviewCodeInput, error) {
 	var it ReviewCodeInput
 	asMap := map[string]any{}
@@ -54994,6 +56157,20 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "setRepositoryLLMOverride":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_setRepositoryLLMOverride(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "clearRepositoryLLMOverride":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_clearRepositoryLLMOverride(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		case "moveToTrash":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_moveToTrash(ctx, field)
@@ -56692,6 +57869,74 @@ func (ec *executionContext) _Repository(ctx context.Context, sel ast.SelectionSe
 	return out
 }
 
+var repositoryLLMOverrideImplementors = []string{"RepositoryLLMOverride"}
+
+func (ec *executionContext) _RepositoryLLMOverride(ctx context.Context, sel ast.SelectionSet, obj *RepositoryLLMOverride) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, repositoryLLMOverrideImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("RepositoryLLMOverride")
+		case "provider":
+			out.Values[i] = ec._RepositoryLLMOverride_provider(ctx, field, obj)
+		case "baseURL":
+			out.Values[i] = ec._RepositoryLLMOverride_baseURL(ctx, field, obj)
+		case "apiKeySet":
+			out.Values[i] = ec._RepositoryLLMOverride_apiKeySet(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "apiKeyHint":
+			out.Values[i] = ec._RepositoryLLMOverride_apiKeyHint(ctx, field, obj)
+		case "advancedMode":
+			out.Values[i] = ec._RepositoryLLMOverride_advancedMode(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "summaryModel":
+			out.Values[i] = ec._RepositoryLLMOverride_summaryModel(ctx, field, obj)
+		case "reviewModel":
+			out.Values[i] = ec._RepositoryLLMOverride_reviewModel(ctx, field, obj)
+		case "askModel":
+			out.Values[i] = ec._RepositoryLLMOverride_askModel(ctx, field, obj)
+		case "knowledgeModel":
+			out.Values[i] = ec._RepositoryLLMOverride_knowledgeModel(ctx, field, obj)
+		case "architectureDiagramModel":
+			out.Values[i] = ec._RepositoryLLMOverride_architectureDiagramModel(ctx, field, obj)
+		case "reportModel":
+			out.Values[i] = ec._RepositoryLLMOverride_reportModel(ctx, field, obj)
+		case "draftModel":
+			out.Values[i] = ec._RepositoryLLMOverride_draftModel(ctx, field, obj)
+		case "updatedAt":
+			out.Values[i] = ec._RepositoryLLMOverride_updatedAt(ctx, field, obj)
+		case "updatedBy":
+			out.Values[i] = ec._RepositoryLLMOverride_updatedBy(ctx, field, obj)
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var repositoryLivingWikiSettingsImplementors = []string{"RepositoryLivingWikiSettings"}
 
 func (ec *executionContext) _RepositoryLivingWikiSettings(ctx context.Context, sel ast.SelectionSet, obj *RepositoryLivingWikiSettings) graphql.Marshaler {
@@ -56754,6 +57999,39 @@ func (ec *executionContext) _RepositoryLivingWikiSettings(ctx context.Context, s
 					}
 				}()
 				res = ec._RepositoryLivingWikiSettings_lastJobResult(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "llmOverride":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._RepositoryLivingWikiSettings_llmOverride(ctx, field, obj)
 				return res
 			}
 
@@ -60922,6 +62200,25 @@ func (ec *executionContext) marshalNRepository2ᚖgithubᚗcomᚋsourcebridgeᚋ
 	return ec._Repository(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNRepositoryLLMOverride2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryLLMOverride(ctx context.Context, sel ast.SelectionSet, v RepositoryLLMOverride) graphql.Marshaler {
+	return ec._RepositoryLLMOverride(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNRepositoryLLMOverride2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryLLMOverride(ctx context.Context, sel ast.SelectionSet, v *RepositoryLLMOverride) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._RepositoryLLMOverride(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalNRepositoryLLMOverrideInput2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryLLMOverrideInput(ctx context.Context, v any) (RepositoryLLMOverrideInput, error) {
+	res, err := ec.unmarshalInputRepositoryLLMOverrideInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
 func (ec *executionContext) marshalNRepositoryLivingWikiSettings2githubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryLivingWikiSettings(ctx context.Context, sel ast.SelectionSet, v RepositoryLivingWikiSettings) graphql.Marshaler {
 	return ec._RepositoryLivingWikiSettings(ctx, sel, &v)
 }
@@ -62602,6 +63899,13 @@ func (ec *executionContext) marshalORepository2ᚖgithubᚗcomᚋsourcebridgeᚋ
 		return graphql.Null
 	}
 	return ec._Repository(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalORepositoryLLMOverride2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryLLMOverride(ctx context.Context, sel ast.SelectionSet, v *RepositoryLLMOverride) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._RepositoryLLMOverride(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalORepositoryLivingWikiSettings2ᚖgithubᚗcomᚋsourcebridgeᚋsourcebridgeᚋinternalᚋapiᚋgraphqlᚐRepositoryLivingWikiSettings(ctx context.Context, sel ast.SelectionSet, v *RepositoryLivingWikiSettings) graphql.Marshaler {

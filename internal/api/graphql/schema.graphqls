@@ -200,6 +200,26 @@ type Mutation {
   """
   retryLivingWikiJob(repositoryId: ID!, retryExcludedOnly: Boolean): EnableLivingWikiResult!
 
+  """
+  setRepositoryLLMOverride sets or updates the per-repository LLM override.
+  Patch semantics: omitted fields leave the saved value unchanged; empty
+  strings clear non-secret fields back to workspace inheritance; apiKey
+  has its own clearAPIKey flag (see input docs). Returns the updated
+  RepositoryLLMOverride with the api_key masked.
+
+  Returns an error with extension code "ENCRYPTION_KEY_REQUIRED" when
+  the request includes a non-empty apiKey but the server's
+  SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY is not configured.
+  """
+  setRepositoryLLMOverride(repositoryId: ID!, input: RepositoryLLMOverrideInput!): RepositoryLLMOverride!
+
+  """
+  clearRepositoryLLMOverride removes the per-repository LLM override
+  entirely. Returns the updated RepositoryLivingWikiSettings record;
+  the override field will now be null.
+  """
+  clearRepositoryLLMOverride(repositoryId: ID!): RepositoryLivingWikiSettings!
+
   # Recycle bin (soft-delete)
   moveToTrash(type: TrashableType!, id: ID!, reason: String): TrashEntry!
   restoreFromTrash(type: TrashableType!, id: ID!, resolveConflict: RestoreConflictResolution, rename: String): RestoreResult!
@@ -1618,6 +1638,69 @@ type RepositoryLivingWikiSettings {
   summary. Null when no job has been run yet.
   """
   lastJobResult: LivingWikiJobResult
+  """
+  llmOverride is the per-repository LLM override. Despite living on this
+  type for storage-locality reasons (the override row is stored alongside
+  living-wiki settings in lw_repo_settings), the override applies to
+  every repo-scoped LLM op for this repository, not just living-wiki
+  ops. Returns null when no override exists. The api_key is never
+  returned in plaintext — apiKeySet+apiKeyHint expose enough for the
+  UI to render saved-state without leaking the secret.
+  """
+  llmOverride: RepositoryLLMOverride
+}
+
+"""
+RepositoryLLMOverride is the per-repository override of the workspace
+LLM configuration. Mirrors the shape of /admin/llm. Fields left blank
+fall through to the workspace settings via the resolver.
+
+The api_key is never returned in plaintext. apiKeySet=true means a key
+cipher is saved; apiKeyHint is a masked preview ("sk-ant-...abcd").
+"""
+type RepositoryLLMOverride {
+  provider: String
+  baseURL: String
+  apiKeySet: Boolean!
+  apiKeyHint: String
+  advancedMode: Boolean!
+  summaryModel: String
+  reviewModel: String
+  askModel: String
+  knowledgeModel: String
+  architectureDiagramModel: String
+  reportModel: String
+  draftModel: String
+  updatedAt: Time
+  updatedBy: String
+}
+
+"""
+RepositoryLLMOverrideInput. Patch semantics:
+- omitted (null) field → leave the saved value unchanged
+- empty string ("") for any non-secret field → clear that field, falling
+  back to workspace inheritance via the resolver
+- non-empty string → set that field
+- apiKey is special:
+  - omitted → leave the saved cipher unchanged
+  - non-empty → encrypt and replace
+  - clearAPIKey: true → drop the saved cipher (revert to workspace key)
+  Empty-string apiKey is treated as omitted to avoid ambiguous
+  password-field UX.
+"""
+input RepositoryLLMOverrideInput {
+  provider: String
+  baseURL: String
+  apiKey: String
+  clearAPIKey: Boolean
+  advancedMode: Boolean
+  summaryModel: String
+  reviewModel: String
+  askModel: String
+  knowledgeModel: String
+  architectureDiagramModel: String
+  reportModel: String
+  draftModel: String
 }
 
 type RepoWikiSink {

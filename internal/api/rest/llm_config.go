@@ -12,6 +12,7 @@ import (
 
 	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
+	"github.com/sourcebridge/sourcebridge/internal/maskutil"
 )
 
 // LLMConfigStore persists LLM configuration so it survives server restarts.
@@ -173,7 +174,7 @@ func (s *Server) handleGetLLMConfig(w http.ResponseWriter, r *http.Request) {
 		AdvancedMode:             eff.AdvancedMode,
 	}
 	if eff.APIKey != "" {
-		resp.APIKeyHint = maskToken(eff.APIKey)
+		resp.APIKeyHint = maskutil.Token(eff.APIKey)
 	}
 	if capabilities.IsAvailable("per_op_models", capabilities.NormalizeEdition(s.cfg.Edition)) {
 		resp.ReportModel = eff.ReportModel

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+
+	"github.com/sourcebridge/sourcebridge/internal/maskutil"
 )
 
 // GitConfigStore persists git configuration (tokens, SSH paths) so they
@@ -27,21 +29,13 @@ type updateGitConfigRequest struct {
 	SSHKeyPath   *string `json:"ssh_key_path,omitempty"`
 }
 
-// maskToken returns the first 4 and last 4 characters with dots in between.
-func maskToken(token string) string {
-	if len(token) <= 8 {
-		return "****"
-	}
-	return token[:4] + "..." + token[len(token)-4:]
-}
-
 func (s *Server) handleGetGitConfig(w http.ResponseWriter, r *http.Request) {
 	resp := gitConfigResponse{
 		DefaultTokenSet: s.cfg.Git.DefaultToken != "",
 		SSHKeyPath:      s.cfg.Git.SSHKeyPath,
 	}
 	if s.cfg.Git.DefaultToken != "" {
-		resp.DefaultTokenHint = maskToken(s.cfg.Git.DefaultToken)
+		resp.DefaultTokenHint = maskutil.Token(s.cfg.Git.DefaultToken)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

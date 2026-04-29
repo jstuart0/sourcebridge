@@ -864,6 +864,55 @@ type Repository struct {
 	LivingWikiSettings *RepositoryLivingWikiSettings `json:"livingWikiSettings,omitempty"`
 }
 
+// RepositoryLLMOverride is the per-repository override of the workspace
+// LLM configuration. Mirrors the shape of /admin/llm. Fields left blank
+// fall through to the workspace settings via the resolver.
+//
+// The api_key is never returned in plaintext. apiKeySet=true means a key
+// cipher is saved; apiKeyHint is a masked preview ("sk-ant-...abcd").
+type RepositoryLLMOverride struct {
+	Provider                 *string    `json:"provider,omitempty"`
+	BaseURL                  *string    `json:"baseURL,omitempty"`
+	APIKeySet                bool       `json:"apiKeySet"`
+	APIKeyHint               *string    `json:"apiKeyHint,omitempty"`
+	AdvancedMode             bool       `json:"advancedMode"`
+	SummaryModel             *string    `json:"summaryModel,omitempty"`
+	ReviewModel              *string    `json:"reviewModel,omitempty"`
+	AskModel                 *string    `json:"askModel,omitempty"`
+	KnowledgeModel           *string    `json:"knowledgeModel,omitempty"`
+	ArchitectureDiagramModel *string    `json:"architectureDiagramModel,omitempty"`
+	ReportModel              *string    `json:"reportModel,omitempty"`
+	DraftModel               *string    `json:"draftModel,omitempty"`
+	UpdatedAt                *time.Time `json:"updatedAt,omitempty"`
+	UpdatedBy                *string    `json:"updatedBy,omitempty"`
+}
+
+// RepositoryLLMOverrideInput. Patch semantics:
+//   - omitted (null) field → leave the saved value unchanged
+//   - empty string ("") for any non-secret field → clear that field, falling
+//     back to workspace inheritance via the resolver
+//   - non-empty string → set that field
+//   - apiKey is special:
+//   - omitted → leave the saved cipher unchanged
+//   - non-empty → encrypt and replace
+//   - clearAPIKey: true → drop the saved cipher (revert to workspace key)
+//     Empty-string apiKey is treated as omitted to avoid ambiguous
+//     password-field UX.
+type RepositoryLLMOverrideInput struct {
+	Provider                 *string `json:"provider,omitempty"`
+	BaseURL                  *string `json:"baseURL,omitempty"`
+	APIKey                   *string `json:"apiKey,omitempty"`
+	ClearAPIKey              *bool   `json:"clearAPIKey,omitempty"`
+	AdvancedMode             *bool   `json:"advancedMode,omitempty"`
+	SummaryModel             *string `json:"summaryModel,omitempty"`
+	ReviewModel              *string `json:"reviewModel,omitempty"`
+	AskModel                 *string `json:"askModel,omitempty"`
+	KnowledgeModel           *string `json:"knowledgeModel,omitempty"`
+	ArchitectureDiagramModel *string `json:"architectureDiagramModel,omitempty"`
+	ReportModel              *string `json:"reportModel,omitempty"`
+	DraftModel               *string `json:"draftModel,omitempty"`
+}
+
 type RepositoryLivingWikiSettings struct {
 	Enabled           bool                  `json:"enabled"`
 	Mode              RepoWikiMode          `json:"mode"`
@@ -882,9 +931,18 @@ type RepositoryLivingWikiSettings struct {
 	// The most recent job result for this repo, surfaced in the settings panel
 	// summary. Null when no job has been run yet.
 	LastJobResult *LivingWikiJobResult `json:"lastJobResult,omitempty"`
+	// llmOverride is the per-repository LLM override. Despite living on this
+	// type for storage-locality reasons (the override row is stored alongside
+	// living-wiki settings in lw_repo_settings), the override applies to
+	// every repo-scoped LLM op for this repository, not just living-wiki
+	// ops. Returns null when no override exists. The api_key is never
+	// returned in plaintext — apiKeySet+apiKeyHint expose enough for the
+	// UI to render saved-state without leaking the secret.
+	LlmOverride *RepositoryLLMOverride `json:"llmOverride,omitempty"`
 	// Internal: the repo ID, threaded through from the parent resolver so
-	// the lastJobResult field resolver can query JobResultStore. Not part
-	// of the GraphQL schema — populated by mapRepoLivingWikiSettings.
+	// the lastJobResult and llmOverride field resolvers can query their
+	// respective stores. Not part of the GraphQL schema — populated by
+	// mapRepoLivingWikiSettings.
 	RepoID string `json:"-"`
 }
 

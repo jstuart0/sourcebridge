@@ -45,10 +45,13 @@ models:
     fields:
       lastJobResult:
         resolver: true
+      llmOverride:
+        resolver: true
     extraFields:
       RepoID:
         type: string
         description: |-
           Internal: the repo ID, threaded through from the parent resolver so
-          the lastJobResult field resolver can query JobResultStore. Not part
-          of the GraphQL schema — populated by mapRepoLivingWikiSettings.
+          the lastJobResult and llmOverride field resolvers can query their
+          respective stores. Not part of the GraphQL schema — populated by
+          mapRepoLivingWikiSettings.
