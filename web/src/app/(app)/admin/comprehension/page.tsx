@@ -429,6 +429,34 @@ export default function ComprehensionSettingsPage() {
       />
 
       <div className="space-y-6">
+        {/* LLM-config callout: this page tunes orchestration & strategy
+            for comprehension. Provider, API key, and per-operation
+            models live on /admin/llm. Slice 6 of the workspace-LLM-
+            source-of-truth plan. */}
+        <Panel>
+          <div className="flex items-start gap-3 rounded-[var(--control-radius)] border border-[var(--accent-primary)]/30 bg-[var(--accent-primary)]/5 p-4">
+            <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--accent-primary)]/20 text-xs font-semibold text-[var(--accent-primary)]">
+              i
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-[var(--text-primary)]">
+                Looking to change the LLM provider, API key, or per-operation models?
+              </p>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                This page tunes <em>how</em> SourceBridge generates artifacts (concurrency, strategies, refine passes).
+                Provider, API key, base URL, and the per-operation model picks live in{" "}
+                <Link
+                  href="/admin/llm"
+                  className="font-medium text-[var(--accent-primary)] underline-offset-2 hover:underline"
+                >
+                  Admin → LLM
+                </Link>
+                . Saved settings there are the source of truth across every replica.
+              </p>
+            </div>
+          </div>
+        </Panel>
+
         {/* Card 1: Model picker + recommended setup */}
         <Panel>
           <div className="space-y-4">

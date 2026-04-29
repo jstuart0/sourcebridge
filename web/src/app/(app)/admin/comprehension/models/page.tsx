@@ -313,6 +313,36 @@ export default function ModelsPage() {
         }
       />
 
+      {/* LLM-config callout: stronger framing because users routinely
+          land here looking for "where do I set the API key" and this
+          page is just the capability registry. Slice 6 of the
+          workspace-LLM-source-of-truth plan. */}
+      <Panel className="mb-6">
+        <div className="flex items-start gap-3 rounded-[var(--control-radius)] border border-[var(--accent-primary)]/30 bg-[var(--accent-primary)]/5 p-4">
+          <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--accent-primary)]/20 text-xs font-semibold text-[var(--accent-primary)]">
+            !
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-medium text-[var(--text-primary)]">
+              This page is the model <em>capability registry</em>, not the LLM configuration.
+            </p>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              The rows below describe what each model can do (context window, JSON mode, tool use) so the comprehension
+              engine can pick safe strategies. To change the active provider, API key, base URL, or per-operation model
+              for the whole workspace, go to{" "}
+              <Link
+                href="/admin/llm"
+                className="font-medium text-[var(--accent-primary)] underline-offset-2 hover:underline"
+              >
+                Admin → LLM
+              </Link>
+              . Saved settings there are the source of truth across every replica and override the configmap on every
+              call.
+            </p>
+          </div>
+        </div>
+      </Panel>
+
       {message && (
         <p className="mb-4 text-sm text-[var(--text-secondary)]">{message}</p>
       )}
