@@ -164,6 +164,7 @@ type BuildRepositoryUnderstandingInput struct {
 	RepositoryID string              `json:"repositoryId"`
 	ScopeType    *KnowledgeScopeType `json:"scopeType,omitempty"`
 	ScopePath    *string             `json:"scopePath,omitempty"`
+	Force        *bool               `json:"force,omitempty"`
 }
 
 type CodeSymbol struct {

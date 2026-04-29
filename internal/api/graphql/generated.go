@@ -49469,7 +49469,7 @@ func (ec *executionContext) unmarshalInputBuildRepositoryUnderstandingInput(ctx 
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"repositoryId", "scopeType", "scopePath"}
+	fieldsInOrder := [...]string{"repositoryId", "scopeType", "scopePath", "force"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -49497,6 +49497,13 @@ func (ec *executionContext) unmarshalInputBuildRepositoryUnderstandingInput(ctx 
 				return it, err
 			}
 			it.ScopePath = data
+		case "force":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("force"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Force = data
 		}
 	}
 

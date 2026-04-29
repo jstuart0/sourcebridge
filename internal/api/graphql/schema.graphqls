@@ -616,6 +616,10 @@ input BuildRepositoryUnderstandingInput {
   repositoryId: ID!
   scopeType: KnowledgeScopeType
   scopePath: String
+  # When true the resolver bypasses the same-revision short-circuit and forces
+  # a fresh build. Set this from the "Refresh understanding" button so a model
+  # switch (or any non-source-code change) actually re-runs generation.
+  force: Boolean
 }
 
 input GenerateLearningPathInput {

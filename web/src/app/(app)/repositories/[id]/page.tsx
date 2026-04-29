@@ -1395,11 +1395,16 @@ export default function RepositoryDetailPage() {
   async function handleBuildRepositoryUnderstanding() {
     setKnowledgeLoading(true);
     try {
+      // force: true so a click on "Refresh understanding" actually re-runs
+      // the build even when the source revision is unchanged. Without this,
+      // the resolver short-circuits and the user gets the cached result
+      // (e.g. one generated with a different LLM model) silently.
       await buildRepositoryUnderstanding({
         input: {
           repositoryId: repoId,
           scopeType: knowledgeScopeType,
           scopePath: knowledgeScopeType === "REPOSITORY" ? undefined : knowledgeScopePath,
+          force: true,
         },
       });
       reexecuteRepo({ requestPolicy: "network-only" });

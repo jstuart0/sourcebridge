@@ -417,7 +417,14 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 
 	existing := r.KnowledgeStore.GetRepositoryUnderstanding(repo.ID, scope)
 	revisionFP := knowledgepkg.RevisionFingerprint(snap.SourceRevision)
-	if existing != nil && existing.RevisionFP == revisionFP && existing.Stage != knowledgepkg.UnderstandingNeedsRefresh && existing.TreeStatus == knowledgepkg.UnderstandingTreeComplete {
+	// Same-revision short-circuit: if the user hasn't asked for a forced
+	// rebuild and the existing understanding matches the current source
+	// revision and is fully built, return it as-is. Force bypasses this
+	// check so non-source-code changes (e.g. switching the configured LLM
+	// model, fixing a prompt regression) actually re-run generation when
+	// the user clicks "Refresh understanding".
+	force := input.Force != nil && *input.Force
+	if !force && existing != nil && existing.RevisionFP == revisionFP && existing.Stage != knowledgepkg.UnderstandingNeedsRefresh && existing.TreeStatus == knowledgepkg.UnderstandingTreeComplete {
 		return mapRepositoryUnderstanding(existing), nil
 	}
 
