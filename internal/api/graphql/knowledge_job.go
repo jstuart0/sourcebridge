@@ -64,8 +64,27 @@ func (r *Resolver) startProgressTicker(rt llm.Runtime, artifactID string) contex
 				if p > 0.95 {
 					p = 0.95
 				}
-				rt.ReportProgress(p, "generating", "Generating artifact")
-				if err := r.KnowledgeStore.UpdateKnowledgeArtifactProgress(artifactID, p); err != nil {
+				// Phase-aware label so the user sees meaningful motion instead
+				// of a generic "Generating artifact" string the entire run.
+				// The backend doesn't get streamed worker stage events so we
+				// approximate from elapsed-progress buckets, which roughly
+				// align with the hierarchical pipeline (leaves → files →
+				// packages → root → first-pass synthesis).
+				msg := "Building understanding"
+				switch {
+				case p < 0.2:
+					msg = "Building understanding · summarising leaves"
+				case p < 0.4:
+					msg = "Building understanding · summarising files"
+				case p < 0.6:
+					msg = "Building understanding · summarising packages"
+				case p < 0.8:
+					msg = "Building understanding · synthesising root"
+				default:
+					msg = "Building understanding · finalising"
+				}
+				rt.ReportProgress(p, "generating", msg)
+				if err := r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifactID, p, "generating", msg); err != nil {
 					knowledgeProgressWriteErrorsTotal.Add(1)
 					slog.Warn("knowledge_progress_write_failed",
 						"event", "knowledge_progress_write_failed",

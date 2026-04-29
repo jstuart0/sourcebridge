@@ -287,6 +287,26 @@ function knowledgeProgressLabel(artifact: KnowledgeArtifact): string {
   return "Generating artifact";
 }
 
+/**
+ * Human-friendly elapsed time since the artifact's last update. We surface
+ * this alongside the progress label so a long-running generation feels
+ * "actively working" even when the percentage doesn't move for a stretch
+ * (the backend ticker only updates every couple of seconds, and worker
+ * stages can take a minute or more between progress events on slower models).
+ */
+function knowledgeElapsedLabel(artifact: KnowledgeArtifact, now: number): string | null {
+  if (artifact.status !== "GENERATING" && artifact.status !== "PENDING") return null;
+  if (!artifact.updatedAt) return null;
+  const updated = new Date(artifact.updatedAt).getTime();
+  if (Number.isNaN(updated)) return null;
+  const elapsedSec = Math.max(0, Math.floor((now - updated) / 1000));
+  if (elapsedSec < 5) return null;
+  if (elapsedSec < 60) return `${elapsedSec}s since last update`;
+  const m = Math.floor(elapsedSec / 60);
+  const s = elapsedSec % 60;
+  return `${m}m ${s}s since last update`;
+}
+
 function knowledgeJobProgressLabel(job: RepoJobView): string {
   if (job.progress_message?.trim()) return job.progress_message.trim();
   if (job.progress_phase === "queued") return "Waiting for a generation slot";
@@ -521,9 +541,17 @@ function renderKnowledgeProgress(artifact: KnowledgeArtifact, waitingLabel: stri
     ? "Building the repository summary tree. Slow leaves may fall back and continue."
     : null;
   const displayLabel = activeFallbackLabel || baseProgressLabel;
+  // Surface elapsed-since-last-update so the panel feels alive even when the
+  // backend ticker pauses between progress writes (the worker can sit on a
+  // single LLM call for tens of seconds on slow models). Prefer the live-job
+  // heartbeat when available; otherwise fall back to the artifact's own
+  // updatedAt so the artifact-only path also gets a "still working" cue.
+  const fallbackElapsed = !heartbeat ? knowledgeElapsedLabel(artifact, Date.now()) : null;
   const progressLabel = heartbeat && liveJob?.status === "generating"
     ? `${displayLabel} · Last heartbeat ${heartbeat}`
-    : displayLabel;
+    : fallbackElapsed
+      ? `${displayLabel} · ${fallbackElapsed}`
+      : displayLabel;
   return (
     <div className="mb-5 space-y-1">
       <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
