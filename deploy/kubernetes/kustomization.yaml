@@ -1,18 +1,26 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: sourcebridge
+# R3 slice 5: top-level kustomization is now a thin wrapper around base/
+# plus a few opt-in resources that don't belong in the canonical OSS
+# base. Old Argo paths that point at deploy/kubernetes/ keep working —
+# the build resolves to base/ + the opt-ins listed below.
+#
+# Changes from the prior tree:
+#   - The eight stale duplicates of base/ files (api.yaml, configmap.yaml,
+#     ingress.yaml, namespace.yaml, secrets.yaml, surrealdb.yaml, web.yaml,
+#     worker.yaml) were deleted. They had drifted from base/: outdated
+#     image org name (`ghcr.io/sourcebridge/...` vs the canonical
+#     `ghcr.io/sourcebridge-ai/...`), older model defaults
+#     (`qwen3:32b` vs `qwen2.5:32b`), and a thor-specific `nfs`
+#     storageClass. Builds out of this tree now use base/ exclusively
+#     for shared manifests.
+#   - mtls-* and *-speculative.yaml stay at this level because they are
+#     either deployment-specific opt-ins (homelab / GPU profiles) or
+#     cluster-wide TLS material that the OSS base intentionally does
+#     not auto-include.
 resources:
-  - namespace.yaml
-  - configmap.yaml
-  # NOTE: secrets.yaml is an EXAMPLE TEMPLATE with placeholder values.
-  # Do NOT apply directly. Create real secrets via kubectl or Sealed Secrets.
-  # See secrets.yaml header for instructions.
-  - secrets.yaml
-  - surrealdb.yaml
-  - api.yaml
-  - worker.yaml
-  - web.yaml
-  - ingress.yaml
+  - ./base
   # mTLS for the API↔worker gRPC channel (slice 4 of plan
   # 2026-04-29-workspace-llm-source-of-truth-r2.md). Requires cert-manager
   # to be installed cluster-wide. Default disabled via configmap; flip
@@ -20,3 +28,6 @@ resources:
   - mtls-issuers.yaml
   - mtls-worker-cert.yaml
   - mtls-api-cert.yaml
+  # Speculative-decode and redis manifests are NOT auto-included — they
+  # are deployment-specific add-ons. Apply them explicitly with
+  # `kubectl apply -f deploy/kubernetes/<file>` when you want them.
