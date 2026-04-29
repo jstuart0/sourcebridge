@@ -36,6 +36,10 @@ import {
   DISMISS_ALL_DISCOVERED_REQUIREMENTS_MUTATION,
 } from "@/lib/graphql/queries";
 import { useFeatures } from "@/lib/features";
+import {
+  understandingStageHasReadableContent,
+  understandingStageIsRunning,
+} from "@/lib/understanding";
 import { useServerCapabilities } from "@/lib/use-server-capabilities";
 import { Button } from "@/components/ui/button";
 import { PageFrame } from "@/components/ui/page-frame";
@@ -996,17 +1000,13 @@ export default function RepositoryDetailPage() {
   const understandingSections = understandingHighlightSections(currentUnderstanding);
   const understandingFeaturedSections = understandingSections.slice(0, 4);
   const understandingAdditionalSections = understandingSections.slice(4);
-  // FIRST_PASS_READY is a terminal "first-pass complete, ready to read" state
-  // (see internal/db/knowledge_store.go:1130 — explicitly listed as non-running);
-  // only the actively-running stages count as busy. Including FIRST_PASS_READY
-  // here was a long-standing bug that made the UI show "Generating..." forever
-  // for any repo whose understanding finished its first pass but was never
-  // deepened.
-  const understandingBusy = Boolean(
-    currentUnderstanding &&
-      (currentUnderstanding.stage === "BUILDING_TREE" ||
-        currentUnderstanding.stage === "DEEPENING"),
-  );
+  // Source of truth for "is the understanding actively building?" lives in
+  // `understandingStageIsRunning` (web/src/lib/understanding.ts), which
+  // mirrors `RepositoryUnderstandingStage.IsRunning()` on the Go side
+  // (internal/knowledge/models.go) and is exhaustiveness-checked at compile
+  // time. Do NOT key this decision on `progress` — that's a heartbeat field
+  // that the store zeroes on every non-running stage.
+  const understandingBusy = understandingStageIsRunning(currentUnderstanding?.stage);
 
   useEffect(() => {
     setUnderstandingCollapsed(shouldAutoCollapseUnderstanding);
@@ -1413,11 +1413,16 @@ export default function RepositoryDetailPage() {
         },
       });
       // When the orchestrator dedupes (an identical build is already in
-      // flight) the mutation returns the existing understanding row with
-      // BUILDING_TREE stage. Show a one-line note so the user knows their
-      // click was joined to the running job rather than silently ignored.
+      // flight or has just finished its first pass) the mutation returns the
+      // existing understanding row with a running stage or FIRST_PASS_READY.
+      // Show a one-line note so the user knows their click was joined to
+      // existing work rather than silently ignored.
       const returnedStage = result.data?.buildRepositoryUnderstanding?.stage;
-      if (wasBuilding && (returnedStage === "BUILDING_TREE" || returnedStage === "FIRST_PASS_READY")) {
+      if (
+        wasBuilding &&
+        (understandingStageIsRunning(returnedStage) ||
+          understandingStageHasReadableContent(returnedStage))
+      ) {
         setUnderstandingDedupeNote(true);
       }
       reexecuteRepo({ requestPolicy: "network-only" });
