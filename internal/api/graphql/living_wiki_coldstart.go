@@ -307,15 +307,30 @@ func buildColdStartRunner(
 		result, err := lwOrch.Generate(runCtx, genReq)
 		elapsed := time.Since(start)
 
+		// IsPartialGenerationError matches ErrTimeBudgetExceeded and
+		// ErrSystemicSoftFailures — both signal "the run aborted, but pages
+		// that completed before the abort have been persisted by the
+		// orchestrator and may be dispatched to sinks." Other errors
+		// (template-not-found, user cancellation, store failures) leave the
+		// store partially-written or untouched and MUST NOT trigger sink
+		// dispatch.
+		isPartial := lworch.IsPartialGenerationError(err)
+
 		// ── Step 3: Classify generation outcome ───────────────────────────────
 		status := "ok"
 		failCat := coldstart.FailureCategoryNone
 		errMsg := ""
 
 		switch {
-		case err != nil:
+		case err != nil && !isPartial:
+			// Hard failure — generated set is unreliable; report failed.
 			status = "failed"
 			failCat = coldstart.ClassifyError(err)
+			errMsg = err.Error()
+		case err != nil && isPartial:
+			// Soft abort with partial persistence — surface as partial.
+			status = "partial"
+			failCat = coldstart.FailureCategoryPartialContent
 			errMsg = err.Error()
 		case len(result.Excluded) > 0:
 			status = "partial"
@@ -328,7 +343,9 @@ func buildColdStartRunner(
 		// ── Step 4: Dispatch generated pages to configured sinks ──────────────
 		var sinkResults []livingwiki.SinkWriteResult
 
-		if err == nil && (len(result.Generated) > 0 || len(skippedPageIDs) > 0) {
+		// Dispatch gating: success OR a partial-generation error class. Other
+		// errors leave sinks untouched. (codex r1b [Medium])
+		if (err == nil || isPartial) && (len(result.Generated) > 0 || len(skippedPageIDs) > 0) {
 			rt.ReportProgress(0.92, "pushing", fmt.Sprintf(
 				"Pushing %d pages to sinks", len(result.Generated)))
 

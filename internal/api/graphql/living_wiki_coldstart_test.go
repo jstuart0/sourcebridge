@@ -337,10 +337,27 @@ func TestColdStartJobVisibleInActivityFeed(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Criterion 3: auth failure → FailureCategoryAuth
+// Criterion 3: per-page LLM/template error → FailureCategoryPartialContent
 // ─────────────────────────────────────────────────────────────────────────────
+//
+// Before slice 2 of plan 2026-04-29-livingwiki-cold-start-progress.md, a
+// per-page template error fatally aborted the orchestrator and the runner
+// would surface it as "auth"-classified (because the test simulates an HTTP
+// 401 string in the error message). With the slice-2 fix, per-page LLM
+// errors are now soft-failed into result.Excluded so a single page's failure
+// does not kill the whole run on a 169-page repo.
+//
+// Real auth failures fire from the SINK DISPATCH layer (see
+// internal/api/graphql/living_wiki_coldstart.go's dispatchGeneratedPages —
+// the *failCat = FailureCategoryAuth assignments at lines 451/469/517 are
+// unchanged). Those still classify as "auth" with the right CTA in the UI.
+//
+// This test now verifies the new behaviour: a single template error becomes
+// a partial-content exclusion, and the runner returns nil. A future test
+// for the sink-side auth path would need to mock SinkWriters; it is recorded
+// in the plan's Carryover section.
 
-func TestColdStartAuthFailureClassification(t *testing.T) {
+func TestColdStartPerPageLLMErrorBecomesPartial(t *testing.T) {
 	t.Parallel()
 
 	lwOrch := csLWOrch(&csErrorTemplate{
@@ -356,8 +373,10 @@ func TestColdStartAuthFailureClassification(t *testing.T) {
 	rt := &fakeRuntime{jobID: "job-auth"}
 	err := runner(context.Background(), rt)
 
-	if err == nil {
-		t.Fatal("criterion 3: expected runner to return error on auth failure")
+	// New behaviour: per-page template errors are soft-failed; the runner
+	// returns nil and the result reflects partial completion.
+	if err != nil {
+		t.Fatalf("unexpected runner error (per-page errors should soft-fail): %v", err)
 	}
 
 	result, err2 := jrs.LastResultForRepo(context.Background(), "default", "repo-auth")
@@ -365,13 +384,16 @@ func TestColdStartAuthFailureClassification(t *testing.T) {
 		t.Fatalf("LastResultForRepo: %v", err2)
 	}
 	if result == nil {
-		t.Fatal("criterion 3: expected job result to be persisted")
+		t.Fatal("expected job result to be persisted")
 	}
-	if result.Status != "failed" {
-		t.Errorf("criterion 3: expected status=failed, got %q", result.Status)
+	if result.Status != "partial" {
+		t.Errorf("expected status=partial, got %q", result.Status)
 	}
-	if coldstart.FailureCategory(result.FailureCategory) != coldstart.FailureCategoryAuth {
-		t.Errorf("criterion 3: expected failureCategory=auth, got %q", result.FailureCategory)
+	if coldstart.FailureCategory(result.FailureCategory) != coldstart.FailureCategoryPartialContent {
+		t.Errorf("expected failureCategory=partial_content, got %q", result.FailureCategory)
+	}
+	if result.PagesExcluded != 1 {
+		t.Errorf("expected PagesExcluded=1, got %d", result.PagesExcluded)
 	}
 }
 

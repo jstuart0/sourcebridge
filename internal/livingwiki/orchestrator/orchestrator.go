@@ -64,8 +64,32 @@ import (
 var ErrIncrementalNotImplemented = errors.New("orchestrator: incremental generation is not implemented (A1.P2)")
 
 // ErrTimeBudgetExceeded is returned when the overall generation run exceeds
-// [Config.TimeBudget].
+// [Config.TimeBudget]. Pages that completed successfully before the deadline
+// are still persisted; see [Orchestrator.Generate].
 var ErrTimeBudgetExceeded = errors.New("orchestrator: time budget exceeded")
+
+// ErrSystemicSoftFailures is returned by [Orchestrator.Generate] when the
+// soft-failure sliding-window breaker trips — meaning many pages in a row
+// have hit the same LLM error category, indicating the LLM provider is
+// likely unreachable. Pages that completed successfully before the trip
+// are still persisted; the caller should NOT auto-retry.
+var ErrSystemicSoftFailures = errors.New("orchestrator: systemic LLM failure detected")
+
+// errTemplateNotFound is the sentinel wrapped when a planned page references
+// a template that is not in the registry. This is treated as a fatal config
+// bug rather than a per-page soft failure (a soft failure would just hide the
+// configuration mistake).
+var errTemplateNotFound = errors.New("template not registered")
+
+// IsPartialGenerationError reports whether err represents a Generate error
+// for which any pages that completed before the abort have been persisted.
+// Callers (e.g. the cold-start runner) use this to decide whether to dispatch
+// the partial result to sinks. Errors not in this set indicate either a
+// programmer/config bug or an external cancellation; the run produced nothing
+// usable and should not be dispatched.
+func IsPartialGenerationError(err error) bool {
+	return errors.Is(err, ErrTimeBudgetExceeded) || errors.Is(err, ErrSystemicSoftFailures)
+}
 
 // TemplateRegistry maps template IDs to [templates.Template] implementations.
 // The orchestrator looks up templates by the ID stored in each [PlannedPage].
@@ -263,6 +287,20 @@ type Config struct {
 	// which will cause system_overview pages to fail the architectural_relevance
 	// gate unless the validator profile is overridden.
 	GraphMetrics GraphMetricsProvider
+
+	// SoftFailureWindow is the number of most-recent page completions tracked
+	// by the systemic-failure breaker. Each entry is either a success or a
+	// failure with a normalized category. When zero, defaults to
+	// max(2*MaxConcurrency, 30).
+	SoftFailureWindow int
+
+	// SoftFailureThreshold is the number of same-category soft failures
+	// within the window that trips the breaker, aborting the run with
+	// [ErrSystemicSoftFailures]. When zero, defaults to
+	// max(MaxConcurrency+1, 15) so a single in-flight wave of same-category
+	// failures cannot single-handedly trip the breaker, regardless of
+	// MaxConcurrency.
+	SoftFailureThreshold int
 }
 
 // OnPageDoneFunc is called after each page completes generation (success,
@@ -316,7 +354,10 @@ type GenerateResult struct {
 	Duration time.Duration
 }
 
-// ExcludedPage records a page that failed quality gates twice.
+// ExcludedPage records a page that was excluded from the run, either after
+// two quality-gate failures, or after an unrecoverable per-page LLM/render
+// error. Use [ExcludedPage.Reason] and [ExcludedPage.FailureCategory] to
+// distinguish without parsing free-text.
 type ExcludedPage struct {
 	// PageID is the page that was excluded.
 	PageID string
@@ -324,12 +365,52 @@ type ExcludedPage struct {
 	// TemplateID is the template that was used.
 	TemplateID string
 
-	// FirstResult is the first-attempt validation result.
+	// FirstResult is the first-attempt validation result. Populated for
+	// gate-failure exclusions; zero-value for LLM/render-error exclusions.
 	FirstResult quality.ValidationResult
 
-	// SecondResult is the second-attempt (retry) validation result.
+	// SecondResult is the second-attempt (retry) validation result for
+	// gate failures. For LLM-error exclusions, this carries a synthetic
+	// ValidationResult with one violation describing the underlying error
+	// — that lets [buildPRBody]'s existing rendering surface the message
+	// without changes.
 	SecondResult quality.ValidationResult
+
+	// Reason classifies the exclusion type for callers/tests that want
+	// to distinguish without parsing free-text.
+	//   - "gate_failure" — both quality-gate attempts produced violations.
+	//   - "llm_error"    — LLM caller / template returned an error mid-page.
+	//   - "render_error" — markdown renderer rejected the page output.
+	Reason string
+
+	// FailureCategory is set when Reason == "llm_error". One of the
+	// normalized categories from classifySoftFailure:
+	//   - "deadline_exceeded"
+	//   - "provider_unavailable"
+	//   - "provider_compute"
+	//   - "llm_empty"
+	//   - "render_error"
+	//   - "template_internal"
+	// Empty string for non-LLM exclusions.
+	FailureCategory string
 }
+
+// Reason values for [ExcludedPage.Reason].
+const (
+	ExclusionReasonGateFailure  = "gate_failure"
+	ExclusionReasonLLMError     = "llm_error"
+	ExclusionReasonRenderError  = "render_error"
+)
+
+// Soft-failure category values for [ExcludedPage.FailureCategory].
+const (
+	SoftFailureCategoryDeadlineExceeded   = "deadline_exceeded"
+	SoftFailureCategoryProviderUnavailable = "provider_unavailable"
+	SoftFailureCategoryProviderCompute    = "provider_compute"
+	SoftFailureCategoryLLMEmpty           = "llm_empty"
+	SoftFailureCategoryRenderError        = "render_error"
+	SoftFailureCategoryTemplateInternal   = "template_internal"
+)
 
 // Orchestrator is the living-wiki generation orchestrator.
 // Construct with [New].
@@ -354,7 +435,37 @@ func New(cfg Config, registry TemplateRegistry, store PageStore) *Orchestrator {
 	if cfg.PRTitle == "" {
 		cfg.PRTitle = "wiki: initial generation (sourcebridge)"
 	}
+	cfg.SoftFailureWindow = effectiveSoftFailureWindow(cfg)
+	cfg.SoftFailureThreshold = effectiveSoftFailureThreshold(cfg)
 	return &Orchestrator{cfg: cfg, registry: registry, store: store, debounce: newRepoDebounceTracker()}
+}
+
+// effectiveSoftFailureWindow returns the sliding-window size, applying the
+// max(2*MaxConcurrency, 30) default when zero.
+func effectiveSoftFailureWindow(cfg Config) int {
+	if cfg.SoftFailureWindow > 0 {
+		return cfg.SoftFailureWindow
+	}
+	w := 2 * cfg.MaxConcurrency
+	if w < 30 {
+		w = 30
+	}
+	return w
+}
+
+// effectiveSoftFailureThreshold returns the breaker threshold, applying the
+// max(MaxConcurrency+1, 15) default when zero. The +1 ensures a single
+// in-flight wave of same-category failures cannot trip the breaker even
+// when MaxConcurrency is large.
+func effectiveSoftFailureThreshold(cfg Config) int {
+	if cfg.SoftFailureThreshold > 0 {
+		return cfg.SoftFailureThreshold
+	}
+	t := cfg.MaxConcurrency + 1
+	if t < 15 {
+		t = 15
+	}
+	return t
 }
 
 // Generate runs the cold-start generation pipeline for all planned pages.
@@ -371,16 +482,22 @@ func New(cfg Config, registry TemplateRegistry, store PageStore) *Orchestrator {
 // (direct-publish mode).
 func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (GenerateResult, error) {
 	cfg := mergeConfig(o.cfg, req.Config)
+	// Recompute window/threshold defaults in case mergeConfig produced a
+	// MaxConcurrency that differs from the orchestrator-level value.
+	cfg.SoftFailureWindow = effectiveSoftFailureWindow(cfg)
+	cfg.SoftFailureThreshold = effectiveSoftFailureThreshold(cfg)
 
 	start := time.Now()
+	parentCtx := ctx
 	deadline := start.Add(cfg.TimeBudget)
-	ctx, cancel := context.WithDeadline(ctx, deadline)
+	runCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 
 	outcomes := make([]pageOutcome, len(req.Pages))
 	var outcomesMu sync.Mutex
+	sw := newSoftFailureWindow(cfg.SoftFailureWindow, cfg.SoftFailureThreshold)
 
-	eg, egCtx := errgroup.WithContext(ctx)
+	eg, egCtx := errgroup.WithContext(runCtx)
 	eg.SetLimit(cfg.MaxConcurrency)
 
 	for idx, planned := range req.Pages {
@@ -388,17 +505,63 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 		eg.Go(func() error {
 			outcome, err := o.generateOnePage(egCtx, cfg, planned)
 			if err != nil {
-				return fmt.Errorf("page %q: %w", planned.ID, err)
+				// Whole-run cancellation (parent ctx, deadline, or
+				// peer goroutine errored): propagate so eg.Wait can
+				// shut down cleanly.
+				if egCtx.Err() != nil {
+					return err
+				}
+				// Programmer/config error — fatal.
+				if errors.Is(err, errTemplateNotFound) {
+					return fmt.Errorf("page %q: %w", planned.ID, err)
+				}
+				// Otherwise: convert to a soft-failure outcome so the
+				// rest of the run continues. The systemic-failure
+				// breaker decides whether the cumulative pattern
+				// warrants aborting.
+				cat := classifySoftFailure(err)
+				excl := newSoftFailureExcludedPage(planned, cat, err)
+				outcome = pageOutcome{excluded: excl}
+				err = nil
 			}
+
 			outcomesMu.Lock()
 			outcomes[idx] = outcome
 			outcomesMu.Unlock()
-			// Notify the caller (e.g. cold-start job progress reporter) after
-			// each page completes. The callback is concurrency-safe by contract.
+
+			// Update sliding-window counters and check breaker.
+			isSoftFailure := outcome.excluded != nil &&
+				outcome.excluded.Reason == ExclusionReasonLLMError
+			if isSoftFailure {
+				cat := outcome.excluded.FailureCategory
+				if cat == "" {
+					cat = SoftFailureCategoryTemplateInternal
+				}
+				sw.recordFailure(cat)
+				if sw.exceeded(cat) {
+					return fmt.Errorf("%w: %d page failures with category %q in last %d completions; last underlying error: %s",
+						ErrSystemicSoftFailures,
+						sw.countFor(cat), cat, sw.window,
+						outcome.excluded.SecondResult.Gates[0].Violations[0].Message)
+				}
+			} else if outcome.excluded == nil {
+				// Clean success — reset the streak.
+				sw.recordSuccess()
+			}
+			// Gate-failure exclusions don't move the breaker; they're
+			// already capped at 2 attempts per page.
+
+			// Notify the caller (e.g. cold-start job progress reporter)
+			// after each page completes. The callback is
+			// concurrency-safe by contract.
 			if req.OnPageDone != nil {
 				switch {
 				case outcome.excluded != nil:
-					req.OnPageDone(planned.ID, true, "")
+					warn := ""
+					if outcome.excluded.Reason == ExclusionReasonLLMError {
+						warn = outcome.excluded.FailureCategory
+					}
+					req.OnPageDone(planned.ID, true, warn)
 				default:
 					req.OnPageDone(planned.ID, false, "")
 				}
@@ -407,69 +570,129 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 		})
 	}
 
-	if err := eg.Wait(); err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return GenerateResult{}, ErrTimeBudgetExceeded
-		}
-		return GenerateResult{}, err
+	waitErr := eg.Wait()
+
+	// Normalize waitErr BEFORE the partial-persistence gate so a bare
+	// context.DeadlineExceeded (from the runCtx deadline) becomes
+	// ErrTimeBudgetExceeded. ErrSystemicSoftFailures is already wrapped
+	// at trip-time. (codex r1c [High] — both error classes must satisfy
+	// IsPartialGenerationError so persistence and dispatch run.)
+	genErr := waitErr
+	if genErr != nil && errors.Is(runCtx.Err(), context.DeadlineExceeded) &&
+		!errors.Is(genErr, ErrTimeBudgetExceeded) &&
+		!errors.Is(genErr, ErrSystemicSoftFailures) {
+		genErr = fmt.Errorf("%w: %v", ErrTimeBudgetExceeded, genErr)
 	}
 
-	// Separate successes from exclusions; collect rendered files.
+	// Always collect outcomes; partial-result handling depends on the error class.
 	var generated []ast.Page
 	var excluded []ExcludedPage
 	files := make(map[string][]byte)
-
 	for _, outcome := range outcomes {
 		if outcome.excluded != nil {
 			excluded = append(excluded, *outcome.excluded)
 			continue
 		}
 		if outcome.page.ID == "" {
-			continue // zero-value page means nothing was planned (shouldn't happen)
+			continue // zero-value page means the goroutine didn't run (cancellation)
 		}
 		generated = append(generated, outcome.page)
 		files[wikiFilePath(outcome.page.ID)] = outcome.rendered
 	}
 
-	// Store and publish.
+	// Decide whether to persist partials.
+	shouldPersist := genErr == nil || IsPartialGenerationError(genErr)
+
+	// Use a fresh, non-cancelable context for the cleanup phase so a
+	// deadline-cancelled runCtx doesn't bork the writes. Bound it with a
+	// short timeout so we don't hang forever on a wedged store. (codex
+	// r1b [High] — the original ctx is already cancelled when we get here
+	// on the time-budget path.)
 	var prID string
-	if cfg.DirectPublish {
-		// Direct-publish: store as canonical and write files.
-		for _, page := range generated {
-			if err := o.store.SetCanonical(ctx, cfg.RepoID, page); err != nil {
-				return GenerateResult{}, fmt.Errorf("orchestrator: storing canonical page %q: %w", page.ID, err)
-			}
-		}
-		if req.Writer != nil && len(files) > 0 {
-			if err := req.Writer.WriteFiles(ctx, files); err != nil {
-				return GenerateResult{}, fmt.Errorf("orchestrator: writing files: %w", err)
-			}
-		}
-	} else {
-		// PR mode: store as proposed and open the PR.
-		if req.PR == nil {
-			return GenerateResult{}, fmt.Errorf("orchestrator: WikiPR must be non-nil in PR mode")
-		}
-		prID = req.PR.ID()
+	if shouldPersist && len(generated) > 0 {
+		persistCtx, persistCancel := context.WithTimeout(
+			context.WithoutCancel(parentCtx), 30*time.Second,
+		)
+		defer persistCancel()
 
-		for _, page := range generated {
-			if err := o.store.SetProposed(ctx, cfg.RepoID, prID, page); err != nil {
-				return GenerateResult{}, fmt.Errorf("orchestrator: storing proposed page %q: %w", page.ID, err)
+		if cfg.DirectPublish {
+			for _, page := range generated {
+				if err := o.store.SetCanonical(persistCtx, cfg.RepoID, page); err != nil {
+					return GenerateResult{Generated: generated, Excluded: excluded, Duration: time.Since(start)},
+						fmt.Errorf("orchestrator: storing canonical page %q: %w (also: %v)", page.ID, err, genErr)
+				}
 			}
-		}
-
-		body := buildPRBody(generated, excluded)
-		if err := req.PR.Open(ctx, cfg.PRBranch, cfg.PRTitle, body, files); err != nil {
-			return GenerateResult{}, fmt.Errorf("orchestrator: opening PR: %w", err)
+			if req.Writer != nil && len(files) > 0 {
+				if err := req.Writer.WriteFiles(persistCtx, files); err != nil {
+					return GenerateResult{Generated: generated, Excluded: excluded, Duration: time.Since(start)},
+						fmt.Errorf("orchestrator: writing files: %w (also: %v)", err, genErr)
+				}
+			}
+		} else {
+			if req.PR == nil {
+				return GenerateResult{Generated: generated, Excluded: excluded, Duration: time.Since(start)},
+					fmt.Errorf("orchestrator: WikiPR must be non-nil in PR mode")
+			}
+			prID = req.PR.ID()
+			for _, page := range generated {
+				if err := o.store.SetProposed(persistCtx, cfg.RepoID, prID, page); err != nil {
+					return GenerateResult{Generated: generated, Excluded: excluded, PRID: prID, Duration: time.Since(start)},
+						fmt.Errorf("orchestrator: storing proposed page %q: %w (also: %v)", page.ID, err, genErr)
+				}
+			}
+			body := buildPRBody(generated, excluded)
+			if err := req.PR.Open(persistCtx, cfg.PRBranch, cfg.PRTitle, body, files); err != nil {
+				return GenerateResult{Generated: generated, Excluded: excluded, PRID: prID, Duration: time.Since(start)},
+					fmt.Errorf("orchestrator: opening PR: %w (also: %v)", err, genErr)
+			}
 		}
 	}
 
-	return GenerateResult{
+	// Final disposition. Codex r1c [Low]: include PRID in partial-error
+	// returns so callers can see what PR was opened.
+	result := GenerateResult{
 		Generated: generated,
 		Excluded:  excluded,
 		PRID:      prID,
 		Duration:  time.Since(start),
-	}, nil
+	}
+	if genErr != nil {
+		return result, genErr
+	}
+	return result, nil
+}
+
+// newSoftFailureExcludedPage builds an [ExcludedPage] for a per-page LLM /
+// render error. Populating SecondResult with a synthetic [quality.ValidationResult]
+// lets the existing [buildPRBody] / livingwiki/coldstart [buildExclusionReasons]
+// surface the underlying error message in their existing rendering paths
+// without changes.
+func newSoftFailureExcludedPage(planned PlannedPage, category string, cause error) *ExcludedPage {
+	reason := ExclusionReasonLLMError
+	if category == SoftFailureCategoryRenderError {
+		reason = ExclusionReasonRenderError
+	}
+	return &ExcludedPage{
+		PageID:     planned.ID,
+		TemplateID: planned.TemplateID,
+		Reason:     reason,
+		FailureCategory: category,
+		// Synthetic SecondResult so buildExclusionReasons surfaces the
+		// underlying error in the existing UI/PR rendering paths.
+		SecondResult: quality.ValidationResult{
+			AttemptNumber: 2,
+			GatesPassed:   false,
+			Decision:      quality.RetryReject,
+			RunAt:         time.Now().UTC(),
+			Gates: []quality.RuleResult{{
+				ValidatorID: quality.ValidatorID("llm_generation_error"),
+				Level:       quality.LevelGate,
+				Violations: []quality.Violation{{
+					Message: fmt.Sprintf("%s: %s", category, cause.Error()),
+				}},
+			}},
+		},
+	}
 }
 
 // Promote promotes all proposed pages for the given PR to canonical.
@@ -491,10 +714,104 @@ func (o *Orchestrator) Discard(ctx context.Context, repoID, prID string) error {
 var _ = ErrIncrementalNotImplemented // prevent "declared and not used" if no callers remain
 
 // pageOutcome is the internal result of generating one page.
+//
+// Exactly one of {page (success), excluded (gate or soft failure)} is
+// populated for a non-zero-value outcome.
 type pageOutcome struct {
 	page     ast.Page
 	excluded *ExcludedPage
 	rendered []byte
+}
+
+// classifySoftFailure maps a per-page generation error to a normalized
+// category used by the systemic-failure breaker and by [ExcludedPage.FailureCategory].
+// The mapping mirrors patterns from internal/llm/orchestrator/runtime.go:ClassifyError
+// but at a coarser granularity suitable for "is the LLM provider broken" detection.
+func classifySoftFailure(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return SoftFailureCategoryDeadlineExceeded
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "deadline exceeded"), strings.Contains(msg, "context deadline"):
+		return SoftFailureCategoryDeadlineExceeded
+	case strings.Contains(msg, "connection refused"),
+		strings.Contains(msg, "transport is closing"),
+		strings.Contains(msg, "unavailable"):
+		return SoftFailureCategoryProviderUnavailable
+	case strings.Contains(msg, "compute error"), strings.Contains(msg, "server_error"):
+		return SoftFailureCategoryProviderCompute
+	case strings.Contains(msg, "llm returned empty content"),
+		strings.Contains(msg, "empty content"):
+		return SoftFailureCategoryLLMEmpty
+	case strings.Contains(msg, "render"):
+		return SoftFailureCategoryRenderError
+	}
+	return SoftFailureCategoryTemplateInternal
+}
+
+// softFailureWindow is a sliding-window same-category counter. The systemic
+// breaker calls recordFailure / recordSuccess after each page completion
+// (any order — page completions across goroutines are serialised through
+// the window's mutex). The breaker trips when any single category has at
+// least `threshold` failures within the last `window` completions.
+type softFailureWindow struct {
+	mu        sync.Mutex
+	window    int
+	events    []string // ring buffer of category strings; "" = success
+	head      int
+	size      int            // number of entries currently held; up to window
+	byCat     map[string]int // count per category in the current window
+	threshold int
+}
+
+func newSoftFailureWindow(window, threshold int) *softFailureWindow {
+	return &softFailureWindow{
+		window:    window,
+		threshold: threshold,
+		events:    make([]string, window),
+		byCat:     make(map[string]int),
+	}
+}
+
+func (s *softFailureWindow) record(category string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// If at capacity, evict the oldest entry from byCat.
+	if s.size == s.window {
+		old := s.events[s.head]
+		if old != "" {
+			s.byCat[old]--
+			if s.byCat[old] <= 0 {
+				delete(s.byCat, old)
+			}
+		}
+	} else {
+		s.size++
+	}
+	s.events[s.head] = category
+	if category != "" {
+		s.byCat[category]++
+	}
+	s.head = (s.head + 1) % s.window
+}
+
+func (s *softFailureWindow) recordFailure(category string) { s.record(category) }
+func (s *softFailureWindow) recordSuccess()                { s.record("") }
+
+func (s *softFailureWindow) exceeded(category string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.byCat[category] >= s.threshold
+}
+
+func (s *softFailureWindow) countFor(category string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.byCat[category]
 }
 
 // graphMetricsForPage returns the validator base config populated with graph
@@ -513,7 +830,11 @@ func graphMetricsForPage(cfg Config, pageID string) quality.ValidatorConfig {
 func (o *Orchestrator) generateOnePage(ctx context.Context, cfg Config, planned PlannedPage) (pageOutcome, error) {
 	tmpl, ok := o.registry.Lookup(planned.TemplateID)
 	if !ok {
-		return pageOutcome{}, fmt.Errorf("template %q not found in registry", planned.TemplateID)
+		// Wrap the sentinel so callers can distinguish "config bug, hard-fail"
+		// from "transient LLM error, soft-fail". See orchestrator.go's
+		// errgroup goroutine — errTemplateNotFound is the only soft-fail
+		// opt-out.
+		return pageOutcome{}, fmt.Errorf("%w: %q", errTemplateNotFound, planned.TemplateID)
 	}
 
 	profile, hasProfile := quality.DefaultProfile(
@@ -571,6 +892,7 @@ func (o *Orchestrator) generateOnePage(ctx context.Context, cfg Config, planned 
 				TemplateID:   planned.TemplateID,
 				FirstResult:  firstResult,
 				SecondResult: secondResult,
+				Reason:       ExclusionReasonGateFailure,
 			}
 			return pageOutcome{excluded: excl}, nil
 		}
@@ -579,7 +901,9 @@ func (o *Orchestrator) generateOnePage(ctx context.Context, cfg Config, planned 
 
 	rendered, err := renderPage(page)
 	if err != nil {
-		return pageOutcome{}, err
+		// Wrap so the soft-failure classifier categorizes this as
+		// "render_error" rather than a generic template_internal.
+		return pageOutcome{}, fmt.Errorf("render: %w", err)
 	}
 
 	return pageOutcome{page: page, rendered: rendered}, nil
@@ -709,15 +1033,24 @@ func buildPRBody(generated []ast.Page, excluded []ExcludedPage) string {
 	}
 	if len(excluded) > 0 {
 		fmt.Fprintf(&sb, "\n### Pages excluded (%d)\n\n", len(excluded))
-		fmt.Fprintf(&sb, "The following pages failed quality gates after 2 attempts and were excluded:\n\n")
+		fmt.Fprintf(&sb, "The following pages could not be generated cleanly (gate failure or LLM error) and were excluded:\n\n")
 		for _, e := range excluded {
-			fmt.Fprintf(&sb, "- `%s` — see quality report below\n", e.PageID)
+			label := "see quality report below"
+			if e.Reason == ExclusionReasonLLMError {
+				label = fmt.Sprintf("LLM error: %s", e.FailureCategory)
+			}
+			fmt.Fprintf(&sb, "- `%s` — %s\n", e.PageID, label)
 		}
 		fmt.Fprintf(&sb, "\n")
 		for _, e := range excluded {
-			fmt.Fprintf(&sb, "#### Quality report for `%s`\n\n", e.PageID)
-			fmt.Fprintf(&sb, "**Attempt 1:**\n\n%s\n", e.FirstResult.QualityReportMarkdown())
-			fmt.Fprintf(&sb, "**Attempt 2:**\n\n%s\n", e.SecondResult.QualityReportMarkdown())
+			fmt.Fprintf(&sb, "#### Report for `%s`\n\n", e.PageID)
+			if e.Reason == ExclusionReasonGateFailure {
+				fmt.Fprintf(&sb, "**Attempt 1:**\n\n%s\n", e.FirstResult.QualityReportMarkdown())
+				fmt.Fprintf(&sb, "**Attempt 2:**\n\n%s\n", e.SecondResult.QualityReportMarkdown())
+			} else {
+				// LLM/render error: only SecondResult carries the synthetic violation.
+				fmt.Fprintf(&sb, "**Generation error:**\n\n%s\n", e.SecondResult.QualityReportMarkdown())
+			}
 		}
 	}
 	return sb.String()
@@ -767,6 +1100,12 @@ func mergeConfig(base, override Config) Config {
 	}
 	// DirectPublish: true in either wins.
 	merged.DirectPublish = base.DirectPublish || override.DirectPublish
+	if override.SoftFailureWindow > 0 {
+		merged.SoftFailureWindow = override.SoftFailureWindow
+	}
+	if override.SoftFailureThreshold > 0 {
+		merged.SoftFailureThreshold = override.SoftFailureThreshold
+	}
 	return merged
 }
 
