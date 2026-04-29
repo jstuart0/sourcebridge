@@ -136,8 +136,17 @@ type Client struct {
 	// Hot-reload coordination state.
 	tlsWatcher       *tlsreload.Watcher
 	dialOpts         []grpc.DialOption // captured at New() so rotation can re-dial
+	serverName       string            // captured at New() for per-bundle TLS configs
 	rotateMu         sync.Mutex        // serializes rotations; readers are lock-free
 	healthCheckOnSwap bool
+
+	// Test hooks (no production wiring). Subscribers receive
+	// notifications when a rotation commits or when a candidate is
+	// dropped. Used by client_e2e_tls_test to deterministically wait
+	// for rotation outcomes without log scraping.
+	rotateHooksMu       sync.RWMutex
+	onRotateComplete    []func(cand tlsreload.Candidate)
+	onCandidateDropped  []func(cand tlsreload.Candidate, reason error)
 
 	// Closed is set once Close() has run; further bundle rotations are
 	// no-ops and acquire returns nil so callers can short-circuit.
@@ -234,6 +243,14 @@ func New(address string, tlsCfg TLSConfig, opts ...Option) (*Client, error) {
 		}
 	}
 
+	// Capture the resolved server name once so the candidate-rotation
+	// path can rebuild per-bundle TLS configs without re-asking the
+	// user. Mirrors the default applied inside buildDialCredentials.
+	c.serverName = tlsCfg.ServerName
+	if c.serverName == "" {
+		c.serverName = "worker.sourcebridge.svc.cluster.local"
+	}
+
 	creds, err := buildDialCredentials(tlsCfg, c.tlsWatcher, address)
 	if err != nil {
 		return nil, fmt.Errorf("worker tls: %w", err)
@@ -254,25 +271,31 @@ func New(address string, tlsCfg TLSConfig, opts ...Option) (*Client, error) {
 	}
 	c.bundle.Store(buildBundle(conn))
 
-	// Subscribe to reload events so the Client can cycle the conn on
-	// validated cert changes. Subscribing AFTER the bundle is published
-	// guarantees the first OnReload sees a live bundle.
+	// Subscribe to candidate events so the Client can cycle the conn
+	// on validated cert changes. Subscribing AFTER the bundle is
+	// published guarantees the first OnCandidate sees a live bundle.
 	//
-	// Why we redial on reload even though the watcher's
+	// Why we redial on each candidate even though the watcher's
 	// GetClientCertificate already serves new certs to fresh handshakes:
 	// gRPC's HTTP/2 connection is long-lived; once established it does
 	// NOT renegotiate TLS on its own. Redialing forces a fresh handshake
 	// against the new material (and lets us drain in-flight long RPCs
 	// against the old conn naturally rather than killing them).
+	//
+	// R3 followups B2: subscribe via OnCandidate (not OnReload). The
+	// callback builds a NEW conn from the candidate's IMMUTABLE
+	// cert+pool snapshot, probes it, and only Commits the candidate
+	// to the watcher AFTER the probe passes. A rejected probe drops
+	// the candidate without ever exposing the new material on the
+	// active bundle's TLS handshakes.
 	if c.tlsWatcher != nil {
-		c.tlsWatcher.OnReload(func(success bool, err error) {
-			if !success {
-				return // validation failure; old bundle remains current
-			}
-			if rotErr := c.rotateConnection(); rotErr != nil {
-				slog.Warn("worker tls rotation failed; keeping old bundle",
+		c.tlsWatcher.OnCandidate(func(cand tlsreload.Candidate) {
+			if rotErr := c.rotateForCandidate(cand); rotErr != nil {
+				slog.Warn("worker tls rotation rejected candidate; keeping old bundle",
 					"error", rotErr,
+					"candidate_generation", cand.Generation,
 					"address", c.address)
+				c.notifyCandidateDropped(cand, rotErr)
 			}
 		})
 	}
@@ -327,18 +350,18 @@ func (c *Client) release(b *clientBundle) {
 	b.inflight.Add(-1)
 }
 
-// rotateConnection redials with the captured DialOptions, optionally
-// validates with a healthcheck against the new conn, and atomically
-// swaps the active bundle. The old conn is closed once its in-flight
-// drains to zero (no artificial deadline — long RPCs finish naturally).
+// rotateConnection redials with the captured DialOptions (insecure or
+// TLS via the watcher's live accessors — depending on construction),
+// optionally validates with a healthcheck against the new conn, and
+// atomically swaps the active bundle. The old conn is closed once its
+// in-flight drains to zero (no artificial deadline — long RPCs finish
+// naturally).
 //
-// Returns an error when the redial or healthcheck fails. In that case
-// the active bundle is NOT swapped; the old bundle remains current
-// and the validation-failure log line tells operators why.
-//
-// rotateMu serializes rotations so concurrent OnReload events (rare:
-// fsnotify burst + poll-loop tick coinciding) don't race-build two
-// new conns.
+// R3 followups B2: this is the legacy / synthetic-rotation path used
+// by tests that simulate rotations directly (not driven by a watcher
+// candidate). Production rotations go through rotateForCandidate, which
+// uses per-bundle immutable cert+pool snapshots. Insecure-mode tests
+// use this path because they don't have a watcher.
 func (c *Client) rotateConnection() error {
 	if c.closed.Load() {
 		return nil
@@ -365,17 +388,98 @@ func (c *Client) rotateConnection() error {
 		}
 	}
 
-	newBundle := buildBundle(newConn)
+	c.swapToNewBundle(buildBundle(newConn))
+	return nil
+}
+
+// rotateForCandidate builds a NEW gRPC conn whose TLS credentials are
+// snapshotted from the candidate's IMMUTABLE cert+pool, probes the new
+// conn, and on success Commits the candidate to the watcher and swaps
+// the bundle. The new bundle's TLS handshakes (now and forever) use
+// only the candidate's cert+pool — they do not reach into the watcher's
+// live accessors. This is the B2 invariant: a failed probe NEVER
+// advances the watcher's committed material, and even if a future
+// re-handshake fires on the old bundle, it uses the cert that bundle
+// was built with.
+//
+// Codex r2b on R3 + r1b on followups delivery.
+func (c *Client) rotateForCandidate(cand tlsreload.Candidate) error {
+	if c.closed.Load() {
+		return nil
+	}
+	if cand.Cert == nil || cand.RootCAs == nil {
+		return fmt.Errorf("rotate: empty candidate")
+	}
+	c.rotateMu.Lock()
+	defer c.rotateMu.Unlock()
+
+	// Build immutable per-bundle TLS credentials from the candidate
+	// snapshot. The closures captured here CANNOT reach the watcher.
+	candCreds, err := buildBundleCredentialsFromCandidate(cand, c.serverName)
+	if err != nil {
+		return fmt.Errorf("build candidate credentials: %w", err)
+	}
+	dialOpts := []grpc.DialOption{
+		grpc.WithTransportCredentials(candCreds),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(50*1024*1024),
+			grpc.MaxCallSendMsgSize(50*1024*1024),
+		),
+	}
+
+	newConn, err := grpc.NewClient(c.address, dialOpts...)
+	if err != nil {
+		return fmt.Errorf("redial worker on candidate: %w", err)
+	}
+
+	if c.healthCheckOnSwap {
+		probeCtx, cancel := context.WithTimeout(context.Background(), TimeoutHealth)
+		probeBundle := buildBundle(newConn)
+		_, probeErr := probeBundle.health.Check(probeCtx, &healthpb.HealthCheckRequest{})
+		cancel()
+		if probeErr != nil {
+			_ = newConn.Close()
+			return fmt.Errorf("post-rotation health probe failed: %w", probeErr)
+		}
+	}
+
+	// Probe passed. Commit the candidate to the watcher BEFORE
+	// swapping the bundle. If the watcher rejects (a newer candidate
+	// already won), drop our work — a fresher rotation will land
+	// shortly via the next OnCandidate event.
+	committed, err := c.tlsWatcher.Commit(cand)
+	if err != nil {
+		_ = newConn.Close()
+		return fmt.Errorf("watcher.Commit: %w", err)
+	}
+	if !committed {
+		_ = newConn.Close()
+		slog.Info("worker tls rotation: candidate superseded by newer commit",
+			"candidate_generation", cand.Generation,
+			"address", c.address)
+		return nil
+	}
+
+	c.swapToNewBundle(buildBundle(newConn))
+
+	// Test hook (zero-cost in production): notify subscribers that
+	// rotation completed for this candidate. Used by client_e2e_tls_test
+	// to deterministically wait for rotation rather than scraping logs.
+	c.notifyRotateComplete(cand)
+	return nil
+}
+
+// swapToNewBundle atomically swaps the active bundle and starts the
+// drain goroutine for the old one. Called by both rotation paths.
+func (c *Client) swapToNewBundle(newBundle *clientBundle) {
 	oldBundle := c.bundle.Swap(newBundle)
 	if oldBundle != nil {
 		oldBundle.closing.Store(true)
 		go c.drainAndClose(oldBundle)
 	}
-
 	slog.Info("worker tls rotation complete",
 		"address", c.address,
 		"new_inflight", newBundle.inflight.Load())
-	return nil
 }
 
 // drainAndClose waits for the old bundle's in-flight RPCs to finish,
@@ -493,6 +597,111 @@ func buildDialCredentials(cfg TLSConfig, watcher *tlsreload.Watcher, addressForL
 		"cert", cfg.CertPath,
 		"ca", cfg.CAPath)
 	return credentials.NewTLS(tlsCfg), nil
+}
+
+// buildBundleCredentialsFromCandidate builds a credentials.NewTLS
+// transport whose tls.Config closures snapshot the candidate's cert
+// and pool. Once built, the credentials are immutable: a future
+// re-handshake on the bundle that uses these credentials always
+// presents this exact cert and verifies against this exact pool —
+// independent of any later watcher Stage/Commit.
+//
+// R3 followups B2: this is the per-bundle-immutable-credentials
+// invariant. A failed post-rotation probe leaves the watcher's
+// committed material unchanged AND the old bundle's credentials
+// pointing at the (still-active) previous candidate.
+func buildBundleCredentialsFromCandidate(cand tlsreload.Candidate, serverName string) (credentials.TransportCredentials, error) {
+	if cand.Cert == nil {
+		return nil, fmt.Errorf("candidate cert is nil")
+	}
+	if cand.RootCAs == nil {
+		return nil, fmt.Errorf("candidate RootCAs is nil")
+	}
+	immutableCert := cand.Cert
+	immutablePool := cand.RootCAs
+	tlsCfg := &tls.Config{
+		GetClientCertificate: func(_ *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			return immutableCert, nil
+		},
+		ServerName:            serverName,
+		MinVersion:            tls.VersionTLS12,
+		InsecureSkipVerify:    true, //nolint:gosec // VerifyPeerCertificate replaces it
+		VerifyPeerCertificate: bundleVerifyPeerCertificate(immutablePool, serverName),
+	}
+	return credentials.NewTLS(tlsCfg), nil
+}
+
+// bundleVerifyPeerCertificate returns a tls.Config.VerifyPeerCertificate
+// callback that uses the bundle's IMMUTABLE pool — snapshotted at
+// bundle construction. Per-bundle vs the watcher-backed variant,
+// which reads watcher.RootCAs() at every handshake.
+func bundleVerifyPeerCertificate(roots *x509.CertPool, expectedServerName string) func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+		if len(rawCerts) == 0 {
+			return fmt.Errorf("worker tls verify: server presented no certs")
+		}
+		certs := make([]*x509.Certificate, 0, len(rawCerts))
+		for _, raw := range rawCerts {
+			cert, err := x509.ParseCertificate(raw)
+			if err != nil {
+				return fmt.Errorf("worker tls verify: parse server cert: %w", err)
+			}
+			certs = append(certs, cert)
+		}
+		intermediates := x509.NewCertPool()
+		for _, cert := range certs[1:] {
+			intermediates.AddCert(cert)
+		}
+		opts := x509.VerifyOptions{
+			Roots:         roots,
+			Intermediates: intermediates,
+			DNSName:       expectedServerName,
+			KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		}
+		if _, err := certs[0].Verify(opts); err != nil {
+			return fmt.Errorf("worker tls verify: chain verification failed: %w", err)
+		}
+		return nil
+	}
+}
+
+// onRotateCompleteHook (test-only): subscribers receive a copy of the
+// committed candidate after a successful rotation. Used by
+// client_e2e_tls_test for deterministic synchronization. Production
+// callers don't subscribe; the slice is normally empty.
+func (c *Client) onRotateCompleteHook(cb func(cand tlsreload.Candidate)) {
+	c.rotateHooksMu.Lock()
+	c.onRotateComplete = append(c.onRotateComplete, cb)
+	c.rotateHooksMu.Unlock()
+}
+
+// onCandidateDroppedHook (test-only): subscribers receive a notification
+// when a rotation drops a candidate (probe failed, watcher rejected,
+// etc.) along with the reason error. Used by client_e2e_tls_test.
+func (c *Client) onCandidateDroppedHook(cb func(cand tlsreload.Candidate, reason error)) {
+	c.rotateHooksMu.Lock()
+	c.onCandidateDropped = append(c.onCandidateDropped, cb)
+	c.rotateHooksMu.Unlock()
+}
+
+func (c *Client) notifyRotateComplete(cand tlsreload.Candidate) {
+	c.rotateHooksMu.RLock()
+	cbs := make([]func(tlsreload.Candidate), len(c.onRotateComplete))
+	copy(cbs, c.onRotateComplete)
+	c.rotateHooksMu.RUnlock()
+	for _, cb := range cbs {
+		cb(cand)
+	}
+}
+
+func (c *Client) notifyCandidateDropped(cand tlsreload.Candidate, reason error) {
+	c.rotateHooksMu.RLock()
+	cbs := make([]func(tlsreload.Candidate, error), len(c.onCandidateDropped))
+	copy(cbs, c.onCandidateDropped)
+	c.rotateHooksMu.RUnlock()
+	for _, cb := range cbs {
+		cb(cand, reason)
+	}
 }
 
 // watcherVerifyPeerCertificate returns a tls.Config.VerifyPeerCertificate

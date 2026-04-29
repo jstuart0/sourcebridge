@@ -193,6 +193,13 @@ func TestReload_AfterValidNewCertSwapsAtomically(t *testing.T) {
 			failureCount.Add(1)
 		}
 	})
+	// R3 followups B2: Reload no longer auto-Commits. Subscribe an
+	// OnCandidate callback that immediately Commits — this preserves
+	// the "Reload swaps the active cert" behavior the legacy test
+	// asserted, while still demonstrating the new candidate fan-out.
+	w.OnCandidate(func(c Candidate) {
+		_, _ = w.Commit(c)
+	})
 
 	// Write a fresh valid cert+key to the same paths.
 	newCert, newKey := genClientCertSignedBy(t, dir, "client-v2", caCert, caKey, "api.sourcebridge.svc.cluster.local")
@@ -208,7 +215,7 @@ func TestReload_AfterValidNewCertSwapsAtomically(t *testing.T) {
 	}
 
 	if w.Cert() == originalCert {
-		t.Error("expected Cert() to return a different cert after Reload")
+		t.Error("expected Cert() to return a different cert after Reload+Commit")
 	}
 	if w.LoadSuccessCount() != 2 {
 		t.Errorf("LoadSuccessCount: got %d, want 2", w.LoadSuccessCount())
@@ -218,6 +225,9 @@ func TestReload_AfterValidNewCertSwapsAtomically(t *testing.T) {
 	}
 	if failureCount.Load() != 0 {
 		t.Errorf("OnReload failure: got %d, want 0", failureCount.Load())
+	}
+	if w.CommittedGeneration() != 2 {
+		t.Errorf("CommittedGeneration: got %d, want 2 (init + reload commit)", w.CommittedGeneration())
 	}
 }
 
@@ -290,6 +300,13 @@ func TestStart_FsNotifyTriggersReload(t *testing.T) {
 	}
 	defer w.Close()
 
+	// R3 followups B2: Reload only Stages; subscribers Commit. Wire
+	// an auto-Commit OnCandidate so the test sees the fsnotify-driven
+	// path swap the active cert the way the legacy contract did.
+	w.OnCandidate(func(c Candidate) {
+		_, _ = w.Commit(c)
+	})
+
 	if err := w.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -313,7 +330,283 @@ func TestStart_FsNotifyTriggersReload(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if w.Cert() == originalCert {
-		t.Error("expected fsnotify-triggered reload to swap the cert within 3s")
+		t.Error("expected fsnotify-triggered reload+commit to swap the cert within 3s")
+	}
+}
+
+// ─── R3 followups B2 — Stage/Commit + Candidate generation tests ───
+
+// TestStage_ProducesStrictlyIncreasingGenerations pins that every
+// Stage call produces a Generation strictly greater than the last,
+// independent of whether prior candidates were Committed.
+func TestStage_ProducesStrictlyIncreasingGenerations(t *testing.T) {
+	dir := t.TempDir()
+	caCert, caKey := genCA(t, dir, "test-ca")
+	clientCert, clientKey := genClientCertSignedBy(t, dir, "client", caCert, caKey, "api.svc")
+
+	w, err := New(Config{
+		CertPath:          clientCert,
+		KeyPath:           clientKey,
+		CAPath:            caCert,
+		ChainVerification: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer w.Close()
+
+	// Constructor's Stage+Commit raised both gens to 1.
+	if got := w.StagedGeneration(); got != 1 {
+		t.Errorf("post-init StagedGeneration: got %d, want 1", got)
+	}
+
+	c2, err := w.Stage()
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if c2.Generation != 2 {
+		t.Errorf("Stage gen: got %d, want 2", c2.Generation)
+	}
+
+	c3, err := w.Stage()
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if c3.Generation != 3 {
+		t.Errorf("Stage gen: got %d, want 3", c3.Generation)
+	}
+
+	// CommittedGeneration unchanged because nothing was Committed.
+	if got := w.CommittedGeneration(); got != 1 {
+		t.Errorf("CommittedGeneration after 2 Stages-no-Commit: got %d, want 1", got)
+	}
+}
+
+// TestStage_WithoutCommit_PreservesActiveMaterial pins the core B2
+// invariant: a Stage that is never Committed leaves Cert() and
+// RootCAs() at the previously-committed values.
+func TestStage_WithoutCommit_PreservesActiveMaterial(t *testing.T) {
+	dir := t.TempDir()
+	caCert, caKey := genCA(t, dir, "test-ca")
+	clientCert, clientKey := genClientCertSignedBy(t, dir, "client", caCert, caKey, "api.svc")
+
+	w, err := New(Config{
+		CertPath:          clientCert,
+		KeyPath:           clientKey,
+		CAPath:            caCert,
+		ChainVerification: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer w.Close()
+
+	originalCert := w.Cert()
+	originalPool := w.RootCAs()
+
+	// Replace cert files with v2 material, Stage but don't Commit.
+	newCert, newKey := genClientCertSignedBy(t, dir, "client-v2", caCert, caKey, "api.svc")
+	if err := os.Rename(newCert, clientCert); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(newKey, clientKey); err != nil {
+		t.Fatal(err)
+	}
+
+	cand, err := w.Stage()
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	_ = cand // we deliberately do NOT Commit
+
+	if w.Cert() != originalCert {
+		t.Error("Stage without Commit must NOT change Cert()")
+	}
+	if w.RootCAs() != originalPool {
+		t.Error("Stage without Commit must NOT change RootCAs()")
+	}
+	if got := w.CommittedGeneration(); got != 1 {
+		t.Errorf("CommittedGeneration: got %d, want 1 (unchanged)", got)
+	}
+}
+
+// TestCommit_StaleCandidate_ReturnsOkFalseWithoutMutation pins that a
+// candidate whose Generation is less than the current committedGen
+// is dropped without changing active material.
+func TestCommit_StaleCandidate_ReturnsOkFalseWithoutMutation(t *testing.T) {
+	dir := t.TempDir()
+	caCert, caKey := genCA(t, dir, "test-ca")
+	clientCert, clientKey := genClientCertSignedBy(t, dir, "client", caCert, caKey, "api.svc")
+
+	w, err := New(Config{
+		CertPath:          clientCert,
+		KeyPath:           clientKey,
+		CAPath:            caCert,
+		ChainVerification: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer w.Close()
+
+	// Stage two candidates from two file rotations.
+	newCert, newKey := genClientCertSignedBy(t, dir, "client-v2", caCert, caKey, "api.svc")
+	if err := os.Rename(newCert, clientCert); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(newKey, clientKey); err != nil {
+		t.Fatal(err)
+	}
+	c2, err := w.Stage()
+	if err != nil {
+		t.Fatalf("Stage v2: %v", err)
+	}
+
+	newCert3, newKey3 := genClientCertSignedBy(t, dir, "client-v3", caCert, caKey, "api.svc")
+	if err := os.Rename(newCert3, clientCert); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(newKey3, clientKey); err != nil {
+		t.Fatal(err)
+	}
+	c3, err := w.Stage()
+	if err != nil {
+		t.Fatalf("Stage v3: %v", err)
+	}
+
+	// Commit v3 first (its probe wins the race).
+	ok, err := w.Commit(c3)
+	if err != nil {
+		t.Fatalf("Commit v3: %v", err)
+	}
+	if !ok {
+		t.Error("Commit v3: expected ok=true")
+	}
+
+	// Now v2's "probe" finally returns and tries to Commit. It should
+	// be dropped as stale.
+	v3Cert := w.Cert()
+	staleOk, staleErr := w.Commit(c2)
+	if staleErr != nil {
+		t.Errorf("Commit stale should return nil err, got %v", staleErr)
+	}
+	if staleOk {
+		t.Error("Commit stale should return ok=false")
+	}
+	if w.Cert() != v3Cert {
+		t.Error("stale Commit must NOT replace the active cert")
+	}
+	if got := w.CommittedGeneration(); got != c3.Generation {
+		t.Errorf("CommittedGeneration: got %d, want %d", got, c3.Generation)
+	}
+	if got := w.CommitStaleCount(); got != 1 {
+		t.Errorf("CommitStaleCount: got %d, want 1", got)
+	}
+}
+
+// TestCommit_IdempotentForActiveCandidate pins that re-committing the
+// currently-active candidate (same Generation, same pointers) is a
+// no-op that returns ok=true.
+func TestCommit_IdempotentForActiveCandidate(t *testing.T) {
+	dir := t.TempDir()
+	caCert, caKey := genCA(t, dir, "test-ca")
+	clientCert, clientKey := genClientCertSignedBy(t, dir, "client", caCert, caKey, "api.svc")
+
+	w, err := New(Config{
+		CertPath:          clientCert,
+		KeyPath:           clientKey,
+		CAPath:            caCert,
+		ChainVerification: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer w.Close()
+
+	// Stage a v2 candidate, Commit it, then Commit it again.
+	newCert, newKey := genClientCertSignedBy(t, dir, "client-v2", caCert, caKey, "api.svc")
+	if err := os.Rename(newCert, clientCert); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(newKey, clientKey); err != nil {
+		t.Fatal(err)
+	}
+	cand, err := w.Stage()
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	ok1, err := w.Commit(cand)
+	if err != nil || !ok1 {
+		t.Fatalf("first Commit: ok=%v err=%v", ok1, err)
+	}
+	commitsAfterFirst := w.CommitCount()
+
+	ok2, err := w.Commit(cand)
+	if err != nil {
+		t.Errorf("second Commit (idempotent): err=%v", err)
+	}
+	if !ok2 {
+		t.Error("second Commit (idempotent): ok should be true")
+	}
+	if w.CommitCount() != commitsAfterFirst {
+		t.Errorf("idempotent re-commit must not increment CommitCount: %d → %d",
+			commitsAfterFirst, w.CommitCount())
+	}
+}
+
+// TestOnCandidate_FiresOutsideMutexes pins that a callback can call
+// Commit synchronously without deadlocking. If the watcher held
+// reloadMu or commitMu while invoking callbacks, this test would
+// deadlock.
+func TestOnCandidate_FiresOutsideMutexes(t *testing.T) {
+	dir := t.TempDir()
+	caCert, caKey := genCA(t, dir, "test-ca")
+	clientCert, clientKey := genClientCertSignedBy(t, dir, "client", caCert, caKey, "api.svc")
+
+	w, err := New(Config{
+		CertPath:          clientCert,
+		KeyPath:           clientKey,
+		CAPath:            caCert,
+		ChainVerification: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer w.Close()
+
+	var committed atomic.Bool
+	w.OnCandidate(func(c Candidate) {
+		ok, err := w.Commit(c)
+		if err != nil {
+			t.Errorf("synchronous Commit from callback: %v", err)
+		}
+		if ok {
+			committed.Store(true)
+		}
+	})
+
+	// File rotation + Reload triggers the candidate fan-out.
+	newCert, newKey := genClientCertSignedBy(t, dir, "client-v2", caCert, caKey, "api.svc")
+	if err := os.Rename(newCert, clientCert); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(newKey, clientKey); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- w.Reload() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Reload error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Reload deadlocked — callback held reloadMu or commitMu")
+	}
+
+	if !committed.Load() {
+		t.Error("synchronous callback Commit did not succeed")
 	}
 }
 

@@ -93,6 +93,21 @@ type Config struct {
 	Logger *slog.Logger
 }
 
+// Candidate is a Stage-validated, not-yet-Committed mTLS material set.
+// It carries a monotonically-increasing Generation so a stale
+// candidate cannot clobber a newer one if two reloads race.
+//
+// R3 followups B2 (codex r1+r1b on followups delivery): Candidates exist
+// so the worker.Client can probe a new gRPC conn against the candidate
+// material BEFORE the watcher's atomic pointers advance. A failed probe
+// drops the candidate without ever exposing the rejected cert via
+// Cert()/GetClientCertificate.
+type Candidate struct {
+	Generation uint64
+	Cert       *tls.Certificate
+	RootCAs    *x509.CertPool
+}
+
 // Watcher loads, validates, and serves mTLS material to a gRPC client.
 // All accessors are safe for concurrent use; readers never block on
 // reload activity.
@@ -100,10 +115,16 @@ type Watcher struct {
 	cfg Config
 	log *slog.Logger
 
-	// Atomic pointers to the currently-active material. Writers hold
-	// reloadMu; readers Load() lock-free.
+	// Atomic pointers to the currently-active (committed) material.
+	// Writers hold commitMu; readers Load() lock-free.
 	cert atomic.Pointer[tls.Certificate]
 	caP  atomic.Pointer[x509.CertPool]
+
+	// Generation counters. stagedGen advances on every successful
+	// Stage; committedGen advances on every successful Commit. The
+	// constructor's initial Stage+Commit raises both to 1 atomically.
+	stagedGen    atomic.Uint64
+	committedGen atomic.Uint64
 
 	// Last-known mtimes. Used by the poll loop to decide whether to
 	// re-read. Writers hold reloadMu.
@@ -111,21 +132,39 @@ type Watcher struct {
 	lastKeyMtime  atomic.Pointer[time.Time]
 	lastCAMtime   atomic.Pointer[time.Time]
 
-	// reloadMu serializes reload attempts. The atomic accessors stay
-	// non-blocking; only the write path (load + validate + swap) holds
-	// this mutex.
+	// reloadMu serializes reload attempts (Stage). The atomic accessors
+	// stay non-blocking. The Commit path uses commitMu, NOT reloadMu —
+	// callbacks fired post-Stage call Commit asynchronously and a
+	// reloadMu hold here would deadlock if a callback ran on the same
+	// goroutine as Stage (it doesn't today, but the mutex split is the
+	// codex-recommended safety guarantee).
 	reloadMu sync.Mutex
 
-	// reloadCallbacks is the list of OnReload subscribers. Each is
-	// invoked on every successful reload. Subscribers are added once
-	// at startup; the slice is never mutated post-Start so it doesn't
-	// need its own lock — readers run after the constructor returns.
+	// commitMu serializes Commit attempts. Held only for the
+	// generation check + atomic swap; never held while invoking
+	// callbacks. Reads of cert/caP do not require this lock — they
+	// are atomic.
+	commitMu sync.Mutex
+
+	// candidateCallbacks: subscribers that receive each newly-Staged
+	// Candidate. The R3-followups Client wires this and Commits the
+	// candidate after a successful probe of a new conn built from it.
+	candidateCallbacksMu sync.RWMutex
+	candidateCallbacks   []func(c Candidate)
+
+	// reloadCallbacks: legacy success/error notifications fired after
+	// every reload-driven Stage attempt (regardless of whether any
+	// subscriber Commits). Kept for backward compatibility with
+	// existing tests/observability tooling. New code should subscribe
+	// via OnCandidate.
 	reloadCallbacksMu sync.RWMutex
 	reloadCallbacks   []func(success bool, err error)
 
 	// Counters for observability. Atomic so accessors don't lock.
 	loadSuccessCount  atomic.Int64
 	loadFailureCount  atomic.Int64
+	commitCount       atomic.Int64
+	commitStaleCount  atomic.Int64
 
 	// Lifecycle.
 	fsw    *fsnotify.Watcher
@@ -157,9 +196,19 @@ func New(cfg Config) (*Watcher, error) {
 		stopCh: make(chan struct{}),
 	}
 
-	// Initial load — must succeed.
-	if err := w.loadAndSwap(); err != nil {
-		return nil, fmt.Errorf("tlsreload: initial load: %w", err)
+	// Initial load — Stage + immediate Commit. Must succeed.
+	cand, err := w.Stage()
+	if err != nil {
+		return nil, fmt.Errorf("tlsreload: initial stage: %w", err)
+	}
+	ok, err := w.Commit(cand)
+	if err != nil {
+		return nil, fmt.Errorf("tlsreload: initial commit: %w", err)
+	}
+	if !ok {
+		// Cannot happen on first Commit — committedGen is 0 and the
+		// candidate's Generation is 1. Defensive belt-and-suspenders.
+		return nil, fmt.Errorf("tlsreload: initial commit rejected")
 	}
 	return w, nil
 }
@@ -239,14 +288,18 @@ func (w *Watcher) GetClientCertificate(_ *tls.CertificateRequestInfo) (*tls.Cert
 	return c, nil
 }
 
-// OnReload registers a callback invoked after every reload attempt
-// (both success and failure). Subscribers should be light: the
-// watcher invokes them serially under no specific deadline.
+// OnReload registers a callback invoked after every Reload attempt
+// (both successful Stage and failed Stage). Subscribers should be
+// light: the watcher invokes them serially under no specific deadline.
 //
-// R3 slice 4: the worker.Client uses this to cycle its gRPC
-// connection so a TLS handshake on a fresh dial picks up the new
-// cert (existing dialed connections continue to use the old cert
-// until they're closed).
+// R3 slice 4 (legacy contract): early subscribers used this to cycle
+// their gRPC connection on every successful Stage. R3 followups B2
+// shifted that responsibility to OnCandidate so callbacks can refuse
+// to advance the watcher's committed material on a probe failure.
+// OnReload remains for purely-observability subscribers.
+//
+// Callbacks fire OUTSIDE reloadMu and commitMu — a callback is free
+// to call Commit directly without deadlocking.
 func (w *Watcher) OnReload(cb func(success bool, err error)) {
 	if cb == nil {
 		return
@@ -256,53 +309,166 @@ func (w *Watcher) OnReload(cb func(success bool, err error)) {
 	w.reloadCallbacksMu.Unlock()
 }
 
-// Reload re-reads cert + key + CA from disk and atomically swaps if
-// validation succeeds. On failure the previously-active material
-// remains in use and the validation-failure counter increments.
-// Returns the validation error so callers can log or retry.
-func (w *Watcher) Reload() error {
-	return w.loadAndSwap()
+// OnCandidate registers a callback that receives every newly-Staged
+// Candidate. Subscribers (typically the worker.Client) probe a new
+// gRPC connection built from the candidate; on success they call
+// Commit on this watcher, then swap their internal bundle. On failure
+// they drop the candidate without calling Commit, leaving the
+// watcher's active material unchanged.
+//
+// Callbacks fire OUTSIDE reloadMu and commitMu — a callback is free
+// to call Commit directly without deadlocking. Multiple subscribers
+// race; the first to Commit wins, and later subscribers will see
+// ok=false on a stale Commit.
+//
+// R3 followups B2.
+func (w *Watcher) OnCandidate(cb func(c Candidate)) {
+	if cb == nil {
+		return
+	}
+	w.candidateCallbacksMu.Lock()
+	w.candidateCallbacks = append(w.candidateCallbacks, cb)
+	w.candidateCallbacksMu.Unlock()
 }
 
-// LoadSuccessCount returns the number of successful reloads (including
-// the initial load). Useful for tests.
-func (w *Watcher) LoadSuccessCount() int64 { return w.loadSuccessCount.Load() }
+// Reload triggers a reload-driven Stage and fires candidate-callbacks.
+// Subscribers (typically the worker.Client) decide whether to Commit
+// the resulting Candidate after their own validation (e.g. a post-
+// rotation health probe). On Stage failure the previously-active
+// material remains in use, the validation-failure counter increments,
+// and legacy reload-callbacks fire with success=false. Returns the
+// validation error so callers can log or retry.
+//
+// R3 followups B2: this is the public auto-trigger entry point used
+// by the fsnotify and poll loops. It does NOT auto-Commit — that
+// behavior moved to the OnCandidate callback chain so a rejected
+// post-rotation probe can drop the candidate.
+func (w *Watcher) Reload() error {
+	cand, err := w.Stage()
+	if err != nil {
+		w.fireReloadCallbacks(false, err)
+		return err
+	}
+	w.fireCandidateCallbacks(cand)
+	w.fireReloadCallbacks(true, nil)
+	return nil
+}
 
-// LoadFailureCount returns the number of failed reload attempts.
-// Useful for tests / metrics.
-func (w *Watcher) LoadFailureCount() int64 { return w.loadFailureCount.Load() }
-
-// loadAndSwap is the core write path: read cert+key+CA, validate
-// everything, swap atomically, fire callbacks.
-func (w *Watcher) loadAndSwap() error {
+// Stage reads cert+key+CA from disk, validates, and returns a
+// Candidate with a freshly-incremented Generation. Does NOT mutate
+// the watcher's active atomic pointers. The caller commits via
+// Commit() after their own validation passes.
+//
+// Stage is serialized via reloadMu so concurrent callers never race
+// on the disk reads, but Commit takes its OWN mutex and does not
+// block on Stage — callbacks dispatched after Stage can call Commit
+// without deadlocking.
+func (w *Watcher) Stage() (Candidate, error) {
 	w.reloadMu.Lock()
 	defer w.reloadMu.Unlock()
 
 	cert, caPool, err := w.loadAndValidate()
 	if err != nil {
 		w.loadFailureCount.Add(1)
-		w.log.Warn("tlsreload: reload validation failed; keeping previous cert",
+		w.log.Warn("tlsreload: stage validation failed; keeping previously-committed cert",
 			"error", err,
 			"cert_path", w.cfg.CertPath,
 			"ca_path", w.cfg.CAPath)
-		w.fireCallbacks(false, err)
-		return err
+		return Candidate{}, err
 	}
 
-	w.cert.Store(cert)
-	w.caP.Store(caPool)
-	w.loadSuccessCount.Add(1)
+	gen := w.stagedGen.Add(1)
 	w.recordMtimes()
 
 	leaf := certLeaf(cert)
-	w.log.Info("tlsreload: cert reloaded",
+	w.log.Info("tlsreload: cert staged",
 		"cert_path", w.cfg.CertPath,
 		"subject", leafSubject(leaf),
 		"not_after", leafNotAfter(leaf),
-		"success_count", w.loadSuccessCount.Load())
-	w.fireCallbacks(true, nil)
-	return nil
+		"generation", gen)
+	return Candidate{Generation: gen, Cert: cert, RootCAs: caPool}, nil
 }
+
+// Commit makes a candidate the active material iff it is strictly
+// newer than the currently-committed generation. Idempotent against
+// the active candidate (same generation, same pointers): returns
+// ok=true with no state change. Returns ok=false (no error) when
+// the candidate is stale (older or already-superseded). Returns
+// (false, error) when the watcher is closed.
+//
+// R3 followups B2 (codex r1b on followups delivery): the predicate
+// is "first probe-passing candidate after the current commit wins;
+// later candidates win only when STRICTLY newer." This intentionally
+// allows an older-but-validated candidate to commit ahead of a newer
+// candidate whose probe is still in flight — we want the freshest
+// cert that has actually passed an mTLS handshake to be active, not
+// the freshest cert that has only been Stage-validated.
+func (w *Watcher) Commit(c Candidate) (ok bool, err error) {
+	if w == nil || w.closed.Load() {
+		return false, errors.New("tlsreload: watcher closed")
+	}
+	if c.Cert == nil || c.RootCAs == nil {
+		return false, errors.New("tlsreload: cannot commit empty candidate")
+	}
+
+	w.commitMu.Lock()
+	defer w.commitMu.Unlock()
+
+	committed := w.committedGen.Load()
+	if c.Generation == committed {
+		// Idempotent: only treat as a "no-op accept" when the candidate
+		// is exactly the active material. A different cert with the
+		// same generation is a programming error.
+		if w.cert.Load() == c.Cert {
+			return true, nil
+		}
+		return false, errors.New("tlsreload: commit at active generation with different cert pointer")
+	}
+	if c.Generation < committed {
+		w.commitStaleCount.Add(1)
+		w.log.Info("tlsreload: stale candidate dropped at commit",
+			"candidate_generation", c.Generation,
+			"committed_generation", committed)
+		return false, nil
+	}
+
+	// Strictly newer: install.
+	w.cert.Store(c.Cert)
+	w.caP.Store(c.RootCAs)
+	w.committedGen.Store(c.Generation)
+	w.commitCount.Add(1)
+	w.loadSuccessCount.Add(1)
+
+	leaf := certLeaf(c.Cert)
+	w.log.Info("tlsreload: candidate committed",
+		"generation", c.Generation,
+		"subject", leafSubject(leaf),
+		"not_after", leafNotAfter(leaf),
+		"commit_count", w.commitCount.Load())
+	return true, nil
+}
+
+// LoadSuccessCount returns the number of committed candidates (including
+// the initial load). Useful for tests.
+func (w *Watcher) LoadSuccessCount() int64 { return w.loadSuccessCount.Load() }
+
+// LoadFailureCount returns the number of Stage-validation failures.
+// Useful for tests / metrics.
+func (w *Watcher) LoadFailureCount() int64 { return w.loadFailureCount.Load() }
+
+// CommitCount returns the number of successful Commits.
+func (w *Watcher) CommitCount() int64 { return w.commitCount.Load() }
+
+// CommitStaleCount returns the number of Commit attempts dropped as
+// stale (older or equal-with-different-cert generation).
+func (w *Watcher) CommitStaleCount() int64 { return w.commitStaleCount.Load() }
+
+// StagedGeneration returns the most recently-Staged generation.
+// committedGen <= stagedGen always.
+func (w *Watcher) StagedGeneration() uint64 { return w.stagedGen.Load() }
+
+// CommittedGeneration returns the most recently-committed generation.
+func (w *Watcher) CommittedGeneration() uint64 { return w.committedGen.Load() }
 
 // loadAndValidate reads cert + key + CA from disk and runs the full
 // validation contract. On any failure returns the error WITHOUT
@@ -378,10 +544,11 @@ func (w *Watcher) loadAndValidate() (*tls.Certificate, *x509.CertPool, error) {
 	return &clientCert, caPool, nil
 }
 
-// fireCallbacks invokes every registered OnReload callback serially.
-// Panics in callbacks are recovered so a buggy subscriber can't kill
-// the watcher loop.
-func (w *Watcher) fireCallbacks(ok bool, err error) {
+// fireReloadCallbacks invokes every registered OnReload callback
+// serially. Panics in callbacks are recovered so a buggy subscriber
+// can't kill the watcher loop. Callbacks run OUTSIDE the watcher's
+// internal mutexes.
+func (w *Watcher) fireReloadCallbacks(ok bool, err error) {
 	w.reloadCallbacksMu.RLock()
 	cbs := make([]func(bool, error), len(w.reloadCallbacks))
 	copy(cbs, w.reloadCallbacks)
@@ -394,6 +561,28 @@ func (w *Watcher) fireCallbacks(ok bool, err error) {
 				}
 			}()
 			cb(ok, err)
+		}()
+	}
+}
+
+// fireCandidateCallbacks invokes every registered OnCandidate callback
+// serially with the staged Candidate. Panics in callbacks are
+// recovered so a buggy subscriber can't kill the watcher loop.
+// Callbacks run OUTSIDE the watcher's internal mutexes so they can
+// call Commit without deadlocking.
+func (w *Watcher) fireCandidateCallbacks(c Candidate) {
+	w.candidateCallbacksMu.RLock()
+	cbs := make([]func(Candidate), len(w.candidateCallbacks))
+	copy(cbs, w.candidateCallbacks)
+	w.candidateCallbacksMu.RUnlock()
+	for _, cb := range cbs {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					w.log.Error("tlsreload: OnCandidate callback panicked", "panic", r)
+				}
+			}()
+			cb(c)
 		}()
 	}
 }
@@ -436,7 +625,7 @@ func (w *Watcher) watchLoop() {
 	flush := func() {
 		if pending {
 			pending = false
-			_ = w.loadAndSwap()
+			_ = w.Reload()
 		}
 	}
 
@@ -500,7 +689,7 @@ func (w *Watcher) pollLoop() {
 			return
 		case <-t.C:
 			if w.anyMtimeAdvanced() {
-				_ = w.loadAndSwap()
+				_ = w.Reload()
 			}
 		}
 	}

@@ -6,6 +6,7 @@ package worker
 import (
 	"context"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+
+	"github.com/sourcebridge/sourcebridge/internal/worker/tlsreload"
 )
 
 // TestClientBundleRotationSwapsAtomically verifies the bundle rotation
@@ -142,6 +145,148 @@ func TestClientConcurrentRPCsDuringRotation(t *testing.T) {
 	}
 	if got := final.inflight.Load(); got != 0 {
 		t.Errorf("final bundle inflight: got %d, want 0", got)
+	}
+}
+
+// TestRotateForCandidate_FailedProbe_PreservesWatcherCommittedMaterial
+// pins the R3 followups B2 invariant: when the post-rotation health
+// probe rejects a candidate, the watcher's committed cert/RootCAs do
+// NOT advance. A re-handshake on the active bundle still sees the
+// pre-rotation cert.
+//
+// We use a real watcher with self-signed test material and synthesize
+// a probe failure by pointing the rotation at a closed listener
+// address (the watcher's candidate is well-formed but the probe will
+// fail to dial).
+func TestRotateForCandidate_FailedProbe_PreservesWatcherCommittedMaterial(t *testing.T) {
+	dir := t.TempDir()
+	caPath, caKeyPath := generateTestCA(t, dir)
+	clientCertPath, clientKeyPath := generateClientCertSignedBy(t, dir, "client", caPath, caKeyPath)
+
+	w, err := tlsreload.New(tlsreload.Config{
+		CertPath:          clientCertPath,
+		KeyPath:           clientKeyPath,
+		CAPath:            caPath,
+		ChainVerification: true,
+	})
+	if err != nil {
+		t.Fatalf("tlsreload.New: %v", err)
+	}
+	defer w.Close()
+
+	committedBefore := w.CommittedGeneration()
+	certBefore := w.Cert()
+
+	// Stage a v2 candidate WITHOUT auto-Commit. We then call
+	// rotateForCandidate against an unreachable address so the probe
+	// fails. The watcher's committed material must not advance.
+	clientCertV2, clientKeyV2 := generateClientCertSignedBy(t, dir, "client-v2", caPath, caKeyPath)
+	if err := os.Rename(clientCertV2, clientCertPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(clientKeyV2, clientKeyPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cand, err := w.Stage()
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+
+	// Build a Client wired with the watcher. Probe will fail because
+	// 127.0.0.1:1 is closed.
+	c, err := New("127.0.0.1:1", TLSConfig{
+		Enabled:    true,
+		CertPath:   clientCertPath,
+		KeyPath:    clientKeyPath,
+		CAPath:     caPath,
+		ServerName: "worker.sourcebridge.svc.cluster.local",
+	}, WithTLSReloadWatcher(w))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer c.Close()
+
+	rotErr := c.rotateForCandidate(cand)
+	if rotErr == nil {
+		t.Fatal("expected rotateForCandidate to fail against closed port")
+	}
+
+	// CRITICAL ASSERTION: watcher's committed material is unchanged.
+	if w.CommittedGeneration() != committedBefore {
+		t.Errorf("failed rotation advanced CommittedGeneration: %d -> %d (must NOT change)",
+			committedBefore, w.CommittedGeneration())
+	}
+	if w.Cert() != certBefore {
+		t.Error("failed rotation changed Watcher.Cert() (must NOT change)")
+	}
+}
+
+// TestRotateForCandidate_OlderCandidateLosesToNewerCommit pins the
+// codex r1b refinement: when two candidates' probes race and the
+// newer probe Commits first, an older candidate's later Commit
+// returns ok=false (stale) and the active bundle reflects the newer
+// material.
+func TestRotateForCandidate_OlderCandidateLosesToNewerCommit(t *testing.T) {
+	dir := t.TempDir()
+	caPath, caKeyPath := generateTestCA(t, dir)
+	clientCertPath, clientKeyPath := generateClientCertSignedBy(t, dir, "client", caPath, caKeyPath)
+
+	w, err := tlsreload.New(tlsreload.Config{
+		CertPath:          clientCertPath,
+		KeyPath:           clientKeyPath,
+		CAPath:            caPath,
+		ChainVerification: true,
+	})
+	if err != nil {
+		t.Fatalf("tlsreload.New: %v", err)
+	}
+	defer w.Close()
+
+	// Stage candidate v2.
+	v2Cert, v2Key := generateClientCertSignedBy(t, dir, "client-v2", caPath, caKeyPath)
+	if err := os.Rename(v2Cert, clientCertPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(v2Key, clientKeyPath); err != nil {
+		t.Fatal(err)
+	}
+	cand2, err := w.Stage()
+	if err != nil {
+		t.Fatalf("Stage v2: %v", err)
+	}
+
+	// Stage candidate v3.
+	v3Cert, v3Key := generateClientCertSignedBy(t, dir, "client-v3", caPath, caKeyPath)
+	if err := os.Rename(v3Cert, clientCertPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(v3Key, clientKeyPath); err != nil {
+		t.Fatal(err)
+	}
+	cand3, err := w.Stage()
+	if err != nil {
+		t.Fatalf("Stage v3: %v", err)
+	}
+
+	// v3 commits first.
+	ok, err := w.Commit(cand3)
+	if err != nil || !ok {
+		t.Fatalf("Commit v3: ok=%v err=%v", ok, err)
+	}
+
+	// Now v2's "rotation" finishes. Without the Stage/Commit
+	// generation guard, v2 would Commit and overwrite v3's material.
+	staleOk, staleErr := w.Commit(cand2)
+	if staleErr != nil {
+		t.Errorf("stale Commit unexpected error: %v", staleErr)
+	}
+	if staleOk {
+		t.Error("stale candidate v2 should have lost to v3")
+	}
+	if w.CommittedGeneration() != cand3.Generation {
+		t.Errorf("CommittedGeneration: got %d, want %d (v3)",
+			w.CommittedGeneration(), cand3.Generation)
 	}
 }
 
