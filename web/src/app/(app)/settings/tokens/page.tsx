@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
@@ -37,11 +38,12 @@ async function readError(res: Response): Promise<string> {
 }
 
 export default function SettingsTokensPage() {
+  const searchParams = useSearchParams();
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [newName, setNewName] = useState("");
+  const [newName, setNewName] = useState(searchParams.get("suggested_name") ?? "");
   const [creating, setCreating] = useState(false);
   const [createdToken, setCreatedToken] = useState<CreateTokenResponse | null>(null);
 

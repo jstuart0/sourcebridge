@@ -36,6 +36,7 @@ import {
   DISMISS_ALL_DISCOVERED_REQUIREMENTS_MUTATION,
 } from "@/lib/graphql/queries";
 import { useFeatures } from "@/lib/features";
+import { useServerCapabilities } from "@/lib/use-server-capabilities";
 import { Button } from "@/components/ui/button";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
@@ -980,6 +981,7 @@ export default function RepositoryDetailPage() {
   const [subsystemsRefreshKey, setSubsystemsRefreshKey] = useState(0);
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [copiedSetupCmd, setCopiedSetupCmd] = useState(false);
+  const serverCaps = useServerCapabilities();
   const [understandingCollapsed, setUnderstandingCollapsed] = useState(false);
   const [understandingShowAllSections, setUnderstandingShowAllSections] = useState(false);
   const [explainQuestion, setExplainQuestion] = useState("");
@@ -3612,24 +3614,107 @@ export default function RepositoryDetailPage() {
               <p className="mt-1 text-sm text-[var(--text-secondary)]">
                 Generate a <code className="rounded bg-[var(--bg-subtle)] px-1 py-0.5 text-xs">.claude/CLAUDE.md</code> skill card with per-subsystem sections so Claude Code understands how this codebase is structured before you start refactoring.
               </p>
-              <div className="mt-3 flex items-center gap-2">
-                <code className="flex-1 rounded bg-[var(--bg-subtle)] px-3 py-2 text-xs font-mono text-[var(--text-primary)]">
-                  {`sourcebridge setup claude --repo-id ${repoId}`}
-                </code>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(`sourcebridge setup claude --repo-id ${repoId}`);
-                    setCopiedSetupCmd(true);
-                    setTimeout(() => setCopiedSetupCmd(false), 2000);
-                  }}
-                  className="shrink-0 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                  aria-label="Copy setup command"
-                >
-                  {copiedSetupCmd ? "Copied!" : "Copy"}
-                </button>
-              </div>
-              <p className="mt-2 text-xs text-[var(--text-tertiary,var(--text-secondary))]">
+
+              {serverCaps.loading ? (
+                /* Loading skeleton — don't flash the wrong block */
+                <div className="mt-3 space-y-2" aria-busy="true" aria-label="Detecting server configuration">
+                  <div className="h-8 w-full animate-pulse rounded-[var(--control-radius)] bg-[var(--bg-subtle)]" />
+                  <div className="h-4 w-2/3 animate-pulse rounded bg-[var(--bg-subtle)]" />
+                </div>
+              ) : !serverCaps.mcpEnabled ? (
+                /* MCP disabled — admin must enable it */
+                <div className="mt-3 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-subtle)] px-3 py-2.5">
+                  <p className="text-sm text-[var(--text-secondary)]">
+                    MCP isn&apos;t enabled on this SourceBridge instance. Ask your admin to set{" "}
+                    <code className="rounded bg-[var(--bg-base)] px-1 py-0.5 text-xs">SOURCEBRIDGE_MCP_ENABLED=true</code>{" "}
+                    and restart the server.
+                  </p>
+                </div>
+              ) : serverCaps.authRequired ? (
+                /* Cloud / auth-required — three-step flow */
+                <div className="mt-3 space-y-3">
+                  {serverCaps.error && (
+                    <p className="text-xs text-[var(--text-tertiary,var(--text-secondary))]">
+                      Couldn&apos;t detect this server&apos;s auth configuration automatically — showing the hosted-instance flow. If you&apos;re on a local install, use{" "}
+                      <code className="rounded bg-[var(--bg-subtle)] px-1 py-0.5 text-xs">sourcebridge setup claude --repo-id {repoId}</code> instead.
+                    </p>
+                  )}
+                  {/* Step 1 */}
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--border-default)] text-xs font-medium text-[var(--text-tertiary)]">1</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-[var(--text-secondary)]">
+                        Mint an API token for Claude Code.
+                      </p>
+                      <a
+                        href={`/settings/tokens?suggested_name=Claude%20Code`}
+                        className="mt-1.5 inline-flex items-center rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      >
+                        Go to API tokens
+                      </a>
+                    </div>
+                  </div>
+                  {/* Step 2 */}
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--border-default)] text-xs font-medium text-[var(--text-tertiary)]">2</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-[var(--text-secondary)]">Run this command, replacing <code className="rounded bg-[var(--bg-subtle)] px-1 py-0.5 text-xs">&lt;paste-here&gt;</code> with your token.</p>
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <code className="min-w-0 flex-1 overflow-x-auto rounded bg-[var(--bg-subtle)] px-3 py-2 text-xs font-mono text-[var(--text-primary)]">
+                          {typeof window !== "undefined"
+                            ? `sourcebridge setup claude --server ${window.location.protocol}//${window.location.host} --token <paste-here> --repo-id ${repoId}`
+                            : `sourcebridge setup claude --server <your-server-url> --token <paste-here> --repo-id ${repoId}`}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const host = typeof window !== "undefined"
+                              ? `${window.location.protocol}//${window.location.host}`
+                              : "<your-server-url>";
+                            void navigator.clipboard.writeText(
+                              `sourcebridge setup claude --server ${host} --token <paste-here> --repo-id ${repoId}`
+                            );
+                            setCopiedSetupCmd(true);
+                            setTimeout(() => setCopiedSetupCmd(false), 2000);
+                          }}
+                          className="shrink-0 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                          aria-label="Copy setup command"
+                        >
+                          {copiedSetupCmd ? "Copied!" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Step 3 */}
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--border-default)] text-xs font-medium text-[var(--text-tertiary)]">3</span>
+                    <p className="text-sm text-[var(--text-secondary)]">
+                      Add <code className="rounded bg-[var(--bg-subtle)] px-1 py-0.5 text-xs">export SOURCEBRIDGE_API_TOKEN=&lt;your-token&gt;</code> to your shell profile and restart Claude Code.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                /* Local / no-auth — single-step legacy flow */
+                <div className="mt-3 flex items-center gap-2">
+                  <code className="flex-1 rounded bg-[var(--bg-subtle)] px-3 py-2 text-xs font-mono text-[var(--text-primary)]">
+                    {`sourcebridge setup claude --repo-id ${repoId}`}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(`sourcebridge setup claude --repo-id ${repoId}`);
+                      setCopiedSetupCmd(true);
+                      setTimeout(() => setCopiedSetupCmd(false), 2000);
+                    }}
+                    className="shrink-0 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                    aria-label="Copy setup command"
+                  >
+                    {copiedSetupCmd ? "Copied!" : "Copy"}
+                  </button>
+                </div>
+              )}
+
+              <p className="mt-3 text-xs text-[var(--text-tertiary,var(--text-secondary))]">
                 <a
                   href="https://docs.claude.com/en/docs/claude-code/memory"
                   target="_blank"
