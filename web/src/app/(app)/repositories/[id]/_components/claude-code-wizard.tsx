@@ -317,67 +317,90 @@ export function ClaudeCodeWizard({ repoId, onUseExisting }: ClaudeCodeWizardProp
   }
 
   function renderRevealed(token: CreatedToken) {
-    // Step 1: write the token to ~/.sourcebridge/token (0600). The token is in
-    // shell history for ONE command, but never in dotfiles or sync repos.
+    // PRIMARY: one-line install + login. Installs sourcebridge to
+    // ~/.local/bin, runs `sourcebridge login --server <origin>`, persists the
+    // token to ~/.sourcebridge/token. After this, the user runs
+    // `sourcebridge setup claude` in a repo. No SOURCEBRIDGE_API_TOKEN env
+    // var, no .zshrc edit.
+    const escapedOrigin = escapeSingleQuotes(serverOrigin);
+    const oneLineInstall = `curl -fsSL ${serverOrigin}/install.sh | sh -s -- --server '${escapedOrigin}'`;
+
+    // SECONDARY (collapsed in <details>): the manual 3-step path for users
+    // who already have the CLI installed and prefer not to use the chained
+    // installer. Verbatim from the prior wizard so behavior is unchanged for
+    // power users.
     const writeTokenCmd =
       `mkdir -p ~/.sourcebridge && ` +
       `( umask 077 && printf '%s' '${escapeSingleQuotes(token.token)}' > ~/.sourcebridge/token ) && ` +
       `chmod 600 ~/.sourcebridge/token`;
-
-    // Step 2: setup command, no token on the command line. The CLI reads it
-    // from the file written in step 1 via readAPIToken().
-    const setupCmd = `sourcebridge setup claude --server '${escapeSingleQuotes(serverOrigin)}' --repo-id '${escapeSingleQuotes(repoId)}'`;
-
-    // Step 3: rc-line that reads the file at shell start. No literal token in dotfiles.
-    const rcLine = `echo 'export SOURCEBRIDGE_API_TOKEN=$(cat ~/.sourcebridge/token)' >> ~/.zshrc`;
+    const setupCmd = `sourcebridge setup claude --server '${escapedOrigin}' --repo-id '${escapeSingleQuotes(repoId)}'`;
 
     return (
       <div className="mt-3 space-y-4">
         {/* Token reveal — shown once for password-manager use */}
         <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-subtle)] p-3 space-y-2">
           <p className="text-xs font-medium text-[var(--text-primary)]">
-            Your API token — copy it now if you want it in a password manager. The setup steps below also save it to disk for you.
+            Your API token — copy it now if you want it in a password manager. The install command below also saves it to disk for you.
           </p>
           <CodeBlock code={token.token} label="Copy token value" />
         </div>
 
-        {/* Step 1: save token to disk */}
+        {/* PRIMARY: one-line install + login */}
         <div className="space-y-1.5">
           <p className="text-xs font-semibold text-[var(--text-primary)]">
-            Step 1 — Save the token securely
+            Install SourceBridge and authenticate
           </p>
-          <CodeBlock code={writeTokenCmd} label="Copy token-save command" />
+          <CodeBlock code={oneLineInstall} label="Copy install command" />
           <p className="text-xs text-[var(--text-tertiary)]">
-            This writes your token to{" "}
-            <code className="rounded bg-[var(--bg-base)] px-1 py-0.5 text-xs">~/.sourcebridge/token</code>{" "}
-            with read-only-by-you permissions. The CLI and the MCP integration read it from that file.
+            Installs the CLI to{" "}
+            <code className="rounded bg-[var(--bg-base)] px-1 py-0.5 text-xs">~/.local/bin/sourcebridge</code>{" "}
+            and prompts you to authenticate against your server. After it completes, run{" "}
+            <code className="rounded bg-[var(--bg-base)] px-1 py-0.5 text-xs">sourcebridge setup claude</code>{" "}
+            in a repository to wire it into Claude Code.
+            See the{" "}
+            <a
+              href="/docs/installation"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2 hover:text-[var(--text-primary)]"
+            >
+              install trust model
+            </a>{" "}
+            before piping curl to a shell.
           </p>
         </div>
 
-        {/* Step 2: run setup */}
-        <div className="space-y-1.5">
-          <p className="text-xs font-semibold text-[var(--text-primary)]">
-            Step 2 — Run the setup command
-          </p>
-          <CodeBlock code={setupCmd} label="Copy setup command" />
-          <p className="text-xs text-[var(--text-tertiary)]">
-            The setup command picks up the token from the file above. No need to paste the token again.
-          </p>
-        </div>
+        {/* SECONDARY: collapsed disclosure for users who already have the CLI */}
+        <details className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] p-3">
+          <summary className="cursor-pointer text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
+            Already have the CLI? Manual setup steps
+          </summary>
+          <div className="mt-3 space-y-3">
+            {/* Step 1: save token to disk */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-[var(--text-primary)]">
+                Step 1 — Save the token to <code className="rounded bg-[var(--bg-subtle)] px-1 py-0.5 text-xs">~/.sourcebridge/token</code>
+              </p>
+              <CodeBlock code={writeTokenCmd} label="Copy token-save command" />
+              <p className="text-xs text-[var(--text-tertiary)]">
+                Writes your token with read-only-by-you permissions. The CLI and the MCP proxy read it from that file at runtime.
+              </p>
+            </div>
 
-        {/* Step 3: persist to shell profile */}
-        <div className="space-y-1.5">
-          <p className="text-xs font-semibold text-[var(--text-primary)]">
-            Step 3 — Make Claude Code use it every shell
-          </p>
-          <CodeBlock code={rcLine} label="Copy shell rc line" />
-          <p className="text-xs text-[var(--text-tertiary)]">
-            Use <code className="rounded bg-[var(--bg-base)] px-1 py-0.5 text-xs">~/.bashrc</code> on Bash,{" "}
-            <code className="rounded bg-[var(--bg-base)] px-1 py-0.5 text-xs">~/.config/fish/config.fish</code> on Fish.
-            The shell reads the token from your file at startup — it is never written into the rc file itself.
-            Restart Claude Code (or open a new shell) after adding it.
-          </p>
-        </div>
+            {/* Step 2: run setup */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-[var(--text-primary)]">
+                Step 2 — Run setup in your repo
+              </p>
+              <CodeBlock code={setupCmd} label="Copy setup command" />
+              <p className="text-xs text-[var(--text-tertiary)]">
+                Generates <code className="rounded bg-[var(--bg-subtle)] px-1 py-0.5 text-xs">.mcp.json</code> and{" "}
+                <code className="rounded bg-[var(--bg-subtle)] px-1 py-0.5 text-xs">.claude/CLAUDE.md</code>{" "}
+                in the current directory. The MCP entry uses the new stdio-proxy shape, so no <code className="rounded bg-[var(--bg-subtle)] px-1 py-0.5 text-xs">SOURCEBRIDGE_API_TOKEN</code> env var or shell-rc edit is needed. Restart Claude Code after running setup.
+              </p>
+            </div>
+          </div>
+        </details>
 
         <Button
           variant="secondary"

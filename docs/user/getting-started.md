@@ -4,7 +4,17 @@ SourceBridge.ai is a requirement-aware code comprehension platform that helps yo
 
 ## Installation
 
-### Option 1: Docker Compose (Recommended)
+### Option 1: One-line installer (recommended for the CLI)
+
+```bash
+curl -fsSL https://<your-server>/install.sh | sh -s -- --server https://<your-server>
+```
+
+Installs `sourcebridge` to `~/.local/bin` (no `sudo`) and authenticates against
+your server in one step. See [Installation](installation.md) for the trust
+model and alternate paths.
+
+### Option 2: Docker Compose (server)
 
 ```bash
 git clone https://github.com/sourcebridge/sourcebridge.git
@@ -14,16 +24,13 @@ docker compose up -d
 
 This starts the API server, web UI, and all dependencies.
 
-### Option 2: Homebrew (macOS / Linux)
+### Option 3: Homebrew (macOS / Linux)
 
 ```bash
 brew install sourcebridge-ai/tap/sourcebridge
 ```
 
-Linux users can also install via Homebrew, or grab the binary directly from
-the [Releases](https://github.com/sourcebridge-ai/sourcebridge/releases) page.
-
-### Option 3: From Source (manual)
+### Option 4: From Source (manual)
 
 ```bash
 go build -o bin/sourcebridge ./cmd/sourcebridge
