@@ -50,4 +50,5 @@ func init() {
 	rootCmd.AddCommand(importCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(loginCmd)
+	rootCmd.AddCommand(mcpProxyCmd)
 }

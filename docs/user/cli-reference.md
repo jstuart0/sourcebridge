@@ -303,3 +303,62 @@ sourcebridge review /path/to/repo --template security
 | `--template` | Review template | `security` |
 
 **Templates:** `security`, `solid`, `performance`, `reliability`, `maintainability`
+
+---
+
+## `sourcebridge mcp-proxy`
+
+Bridges the stdio MCP transport to a SourceBridge server's streamable-HTTP
+MCP endpoint. Intended to be invoked by Claude Code via `.mcp.json`, not by
+humans directly.
+
+`sourcebridge setup claude` writes a `.mcp.json` that names this command, so
+Claude Code can connect to a remote SourceBridge install without setting a
+`SOURCEBRIDGE_API_TOKEN` environment variable. The proxy reads the token from
+`~/.sourcebridge/token` (or `SOURCEBRIDGE_API_TOKEN` if set) and the server
+URL from `--server`, `SOURCEBRIDGE_URL`, `~/.sourcebridge/server`, or
+`config.toml` in that order.
+
+```bash
+sourcebridge mcp-proxy --server https://sourcebridge.example.com
+```
+
+### Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--server <url>` | string | resolution chain | SourceBridge server URL. |
+| `--verbose` | bool | `false` | Log per-request diagnostics to stderr. **Tokens, headers, and bodies are never logged.** |
+| `--max-inflight` | int | `8` | Maximum concurrent in-flight requests. |
+| `--request-timeout` | duration | `10m` | Per-request HTTP timeout. Slow tool calls (deep_repo_qa) need ~5–10 minutes. |
+
+### What the proxy supports
+
+- **Concurrent dispatch.** Multiple requests can be in flight simultaneously
+  during slow tool calls. `notifications/cancelled` aborts the matching
+  in-flight request.
+- **SSE progress streams.** When the server emits progress notifications via
+  `text/event-stream`, the proxy parses each event per the SSE spec
+  (multi-line `data` concatenation, comment stripping, blank-line boundaries)
+  and forwards each JSON-RPC payload verbatim to stdout.
+- **HTTP 202 acks.** Accepted-no-body responses (used for notifications)
+  produce no stdout output, matching MCP semantics.
+- **`MCP-Protocol-Version` forwarding.** After `initialize` captures the
+  negotiated protocol version, every subsequent POST carries it.
+- **Session lifecycle.** Holds `Mcp-Session-Id` from initialize; issues
+  `DELETE /api/v1/mcp/http` on shutdown to free the session.
+
+### What the proxy does not support
+
+- Server-initiated notifications outside a tool call (long-poll). SourceBridge
+  does not emit those today; if it ever does, the proxy will need an outbound
+  poll loop.
+- Transparent reconnection on session expiry. The client (Claude Code) owns
+  the reconnection contract; the proxy surfaces session errors verbatim and
+  expects a fresh `initialize`.
+
+### Logging
+
+By default the proxy is silent. With `--verbose`, one line per HTTP exchange
+is written to stderr (method, request id, status, duration). The literal
+token value never appears in any log line — this is enforced by a unit test.
