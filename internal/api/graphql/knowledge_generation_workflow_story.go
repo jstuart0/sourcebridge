@@ -12,6 +12,7 @@ import (
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
 
 type workflowStoryGenerationService struct {
@@ -123,8 +124,7 @@ func (s workflowStoryGenerationService) Generate(ctx context.Context) (*Knowledg
 		}
 
 		stopProgress := r.startProgressTicker(rt, artifact.ID)
-		bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, artifact.ID, "workflow_story")
-		resp, err := r.Worker.GenerateWorkflowStory(bgCtx, &knowledgev1.GenerateWorkflowStoryRequest{
+		resp, err := r.LLMCaller.GenerateWorkflowStoryWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, artifact.ID, "workflow_story"), &knowledgev1.GenerateWorkflowStoryRequest{
 			RepositoryId:      repo.ID,
 			RepositoryName:    repo.Name,
 			Audience:          audience,

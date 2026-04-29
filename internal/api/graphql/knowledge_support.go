@@ -16,6 +16,7 @@ import (
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 )
 
@@ -1231,8 +1232,11 @@ func (r *Resolver) ensureFreshRepositoryUnderstanding(
 		rt.ReportProgress(0.12, "understanding", "Building repository understanding")
 	}
 	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Building repository understanding")
-	resp, err := r.Worker.GenerateCliffNotes(
-		r.withJobMetadata(ctx, "knowledge", rt, repo.ID, artifact.ID, "build_repository_understanding"),
+	resp, err := r.LLMCaller.GenerateCliffNotesWithJob(
+		ctx,
+		repo.ID,
+		resolution.OpKnowledge,
+		llmJobMetadata(rt, artifact.ID, "build_repository_understanding"),
 		&knowledgev1.GenerateCliffNotesRequest{
 			RepositoryId:   repo.ID,
 			RepositoryName: repo.Name,
@@ -1832,9 +1836,8 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
 			rt.ReportProgress(0.05, "deepening", "Deepening critical cliff note sections")
 			markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(artifact.ID), selectedTitles, knowledgepkg.RefinementRunning, "")
-			bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, artifact.ID, "cliff_notes_deepen")
-			bgCtx = withCliffNotesRenderMetadata(bgCtx, true, selectedTitles, string(knowledgepkg.DepthMedium), "product_core")
-			resp, err := r.Worker.GenerateCliffNotes(bgCtx, &knowledgev1.GenerateCliffNotesRequest{
+			bgCtx := withCliffNotesRenderMetadata(runCtx, true, selectedTitles, string(knowledgepkg.DepthMedium), "product_core")
+			resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, artifact.ID, "cliff_notes_deepen"), &knowledgev1.GenerateCliffNotesRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(artifact.Audience),

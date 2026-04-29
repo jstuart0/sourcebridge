@@ -12,6 +12,7 @@ import (
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
 
 type codeTourGenerationService struct {
@@ -118,8 +119,7 @@ func (s codeTourGenerationService) Generate(ctx context.Context) (*KnowledgeArti
 		}
 
 		stopProgress := r.startProgressTicker(rt, artifact.ID)
-		bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, artifact.ID, "code_tour")
-		resp, err := r.Worker.GenerateCodeTour(bgCtx, &knowledgev1.GenerateCodeTourRequest{
+		resp, err := r.LLMCaller.GenerateCodeTourWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, artifact.ID, "code_tour"), &knowledgev1.GenerateCodeTourRequest{
 			RepositoryId:   repo.ID,
 			RepositoryName: repo.Name,
 			Audience:       audience,

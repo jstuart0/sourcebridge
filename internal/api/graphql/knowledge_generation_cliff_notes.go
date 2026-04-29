@@ -12,6 +12,7 @@ import (
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
 
 type cliffNotesGenerationService struct {
@@ -194,7 +195,7 @@ func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeAr
 		})
 
 		stopProgress := r.startProgressTicker(rt, artifact.ID)
-		bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, artifact.ID, "cliff_notes")
+		bgCtx := runCtx
 		if renderPlan.RenderOnly {
 			bgCtx = withCliffNotesRenderMetadata(
 				bgCtx,
@@ -214,7 +215,7 @@ func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeAr
 			"render_only":     renderPlan.RenderOnly,
 			"selected_titles": renderPlan.SelectedSectionTitles,
 		})
-		resp, err := r.Worker.GenerateCliffNotes(bgCtx, &knowledgev1.GenerateCliffNotesRequest{
+		resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, artifact.ID, "cliff_notes"), &knowledgev1.GenerateCliffNotesRequest{
 			RepositoryId:   repo.ID,
 			RepositoryName: repo.Name,
 			Audience:       audience,

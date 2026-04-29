@@ -24,22 +24,47 @@ type llmModelInfo struct {
 }
 
 // handleListLLMModels fetches the list of available models from the configured
-// (or overridden) provider.  Query params ?provider= and ?base_url= let the
-// frontend preview models for a provider the user hasn't saved yet.
+// (or overridden) provider. Query params ?provider= and ?base_url= let the
+// frontend preview models for a provider the user hasn't saved yet (e.g. the
+// "switch provider" flow that needs to render the new provider's model list
+// without committing the change).
+//
+// Defaults (no query params): the resolver's current snapshot is used so the
+// admin UI sees the workspace-saved provider/api-key, not the env bootstrap.
+// Explicit query params still preview an unsaved provider — the api-key for
+// the preview comes from the saved snapshot if available, else env, so a user
+// switching from "anthropic + saved key" to "openai" can still list openai
+// models *if* they've also pasted an openai key (handled by a future
+// query-param ?api_key= addition; today the preview falls back to the saved
+// key only when the saved provider matches the requested provider).
 func (s *Server) handleListLLMModels(w http.ResponseWriter, r *http.Request) {
+	snap := s.ResolveLLMSnapshot(r.Context(), "models.list")
+
 	provider := r.URL.Query().Get("provider")
+	previewMode := provider != "" && provider != snap.Provider
 	if provider == "" {
-		provider = s.cfg.LLM.Provider
+		provider = snap.Provider
 	}
 	baseURL := r.URL.Query().Get("base_url")
 	if baseURL == "" {
-		baseURL = s.cfg.LLM.BaseURL
+		baseURL = snap.BaseURL
 	}
-	apiKey := s.cfg.LLM.APIKey
+	apiKey := snap.APIKey
+	// In preview mode (user is exploring a different provider) we don't
+	// reuse the saved api-key because it likely won't authenticate
+	// against the new provider. The fetch will fail with a clear auth
+	// error, which is the right UX — the user should paste the new
+	// provider's key, save once, and re-list.
+	if previewMode {
+		apiKey = ""
+	}
 
 	models, err := fetchModels(provider, baseURL, apiKey)
 	if err != nil {
-		slog.Warn("llm model listing failed", "provider", provider, "error", err)
+		slog.Warn("llm model listing failed", "provider", provider, "error", err,
+			"preview_mode", previewMode,
+			"sources_provider", snap.Sources["provider"],
+			"sources_api_key", snap.Sources["api_key"])
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"models": []llmModelInfo{},
 			"error":  err.Error(),

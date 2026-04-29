@@ -11,6 +11,7 @@ import (
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
 
 type architectureDiagramGenerationService struct {
@@ -110,8 +111,11 @@ func (s architectureDiagramGenerationService) Generate(ctx context.Context) (*Kn
 		}
 
 		stopProgress := r.startProgressTicker(rt, artifact.ID)
-		resp, err := r.Worker.GenerateArchitectureDiagram(
-			r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, artifact.ID, "architecture_diagram"),
+		resp, err := r.LLMCaller.GenerateArchitectureDiagramWithJob(
+			runCtx,
+			repo.ID,
+			resolution.OpKnowledge,
+			llmJobMetadata(rt, artifact.ID, "architecture_diagram"),
 			&knowledgev1.GenerateArchitectureDiagramRequest{
 				RepositoryId:             repo.ID,
 				RepositoryName:           repo.Name,

@@ -34,6 +34,8 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
+	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/webhook"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
@@ -91,6 +93,24 @@ func WithGitConfigStore(store GitConfigStore) ServerOption {
 // WithLLMConfigStore enables persistent storage of LLM configuration.
 func WithLLMConfigStore(store LLMConfigStore) ServerOption {
 	return func(s *Server) { s.llmConfigStore = store }
+}
+
+// WithLLMResolver wires the runtime LLM-config resolver. The resolver is
+// the single source of truth for which provider/api-key/model the server
+// uses on any LLM call. handleGetLLMConfig/handleListLLMModels read the
+// current resolved snapshot from this resolver instead of s.cfg.LLM
+// (which is env-bootstrap only after slice 1).
+func WithLLMResolver(r resolution.Resolver) ServerOption {
+	return func(s *Server) { s.llmResolver = r }
+}
+
+// WithLLMCaller wires the LLM-aware adapter around *worker.Client. Every
+// gRPC LLM RPC must flow through this Caller so that workspace-saved
+// settings (provider/api-key/model) are attached to the outgoing context
+// in metadata. Pass nil when the worker is unavailable; downstream
+// callers gate AI features on Caller.IsAvailable().
+func WithLLMCaller(c *llmcall.Caller) ServerOption {
+	return func(s *Server) { s.llmCaller = c }
 }
 
 // WithQueueControlStore enables persisted LLM queue intake controls.
@@ -231,6 +251,13 @@ type Server struct {
 	livingWikiLiveOrchestrator   *lworch.Orchestrator          // living-wiki page-generation orchestrator; nil = feature unavailable
 	clusterRunner                *clustering.Runner            // subsystem clustering job dispatcher; nil = feature disabled
 	healthChecker                *HealthChecker                // shared DB+worker probe; nil = embedded/test mode, handlers fall back to local checks
+
+	// LLM source-of-truth (single resolver shared with the GraphQL resolver
+	// and llmcall.Caller). The Server owns the resolver so handleGetLLMConfig
+	// and handleListLLMModels can read the resolved snapshot rather than
+	// s.cfg.LLM (which is env-only after slice 1).
+	llmResolver resolution.Resolver // nil only in test/embedded mode without a workspace store
+	llmCaller   *llmcall.Caller     // nil when worker is unavailable
 }
 
 // qaResolverOrchestrator exposes the server's QA orchestrator to the
@@ -564,6 +591,8 @@ func (s *Server) setupRouter() {
 			Store:              s.store,
 			KnowledgeStore:     s.knowledgeStore,
 			Worker:             s.worker,
+			LLMCaller:          s.llmCaller,
+			LLMResolver:        s.llmResolver,
 			Orchestrator:       s.orchestrator,
 			Config:             s.cfg,
 			EventBus:           s.eventBus,

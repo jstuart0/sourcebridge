@@ -29,6 +29,7 @@ import (
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/governance"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/requirements"
 	"github.com/sourcebridge/sourcebridge/internal/search"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
@@ -449,8 +450,7 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 		})
 		stopProgress := r.startUnderstandingProgressTicker(rt, understanding.ID)
 		defer stopProgress()
-		bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, understanding.ID, "build_repository_understanding")
-		resp, err := r.Worker.GenerateCliffNotes(bgCtx, &knowledgev1.GenerateCliffNotesRequest{
+		resp, err := r.LLMCaller.GenerateCliffNotesWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, understanding.ID, "build_repository_understanding"), &knowledgev1.GenerateCliffNotesRequest{
 			RepositoryId:   repo.ID,
 			RepositoryName: repo.Name,
 			Audience:       string(knowledgepkg.AudienceDeveloper),
@@ -655,14 +655,13 @@ func (r *mutationResolver) AnalyzeSymbol(ctx context.Context, repositoryID strin
 
 	symbolContext := extractSymbolContext(fileContent, sym.StartLine, sym.EndLine)
 
-	ctx = r.withModelMetadata(ctx, "analysis")
 	var resp *reasoningv1.AnalyzeSymbolResponse
 	err = r.runSyncLLMJob(ctx, llm.SubsystemReasoning, "analyze_symbol",
 		fmt.Sprintf("reasoning:analyze_symbol:%s:%s", repositoryID, sym.ID),
 		repositoryID,
 		func(rt llm.Runtime) error {
 			var callErr error
-			resp, callErr = r.Worker.AnalyzeSymbol(ctx, &reasoningv1.AnalyzeSymbolRequest{
+			resp, callErr = r.LLMCaller.AnalyzeSymbol(ctx, repositoryID, resolution.OpAnalysis, &reasoningv1.AnalyzeSymbolRequest{
 				RepositoryId: repositoryID,
 				Symbol: &commonv1.CodeSymbol{
 					Id:            sym.ID,
@@ -819,7 +818,6 @@ func (r *mutationResolver) DiscussCode(ctx context.Context, input DiscussCodeInp
 		}
 	}
 
-	ctx = r.withModelMetadata(ctx, "discussion")
 	var resp *reasoningv1.AnswerQuestionResponse
 	filePathArg := ""
 	if input.FilePath != nil {
@@ -830,7 +828,7 @@ func (r *mutationResolver) DiscussCode(ctx context.Context, input DiscussCodeInp
 	err := r.runSyncLLMJob(ctx, llm.SubsystemReasoning, "discuss_code", targetKey, input.RepositoryID,
 		func(rt llm.Runtime) error {
 			var callErr error
-			resp, callErr = r.Worker.AnswerQuestion(ctx, &reasoningv1.AnswerQuestionRequest{
+			resp, callErr = r.LLMCaller.AnswerQuestion(ctx, input.RepositoryID, resolution.OpDiscussion, &reasoningv1.AnswerQuestionRequest{
 				Question:       input.Question,
 				RepositoryId:   input.RepositoryID,
 				ContextSymbols: contextSymbols,
@@ -929,14 +927,13 @@ func (r *mutationResolver) ReviewCode(ctx context.Context, input ReviewCodeInput
 		lang = languageToProto(input.Language.String())
 	}
 
-	ctx = r.withModelMetadata(ctx, "review")
 	var resp *reasoningv1.ReviewFileResponse
 	err := r.runSyncLLMJob(ctx, llm.SubsystemReasoning, "review_code",
 		fmt.Sprintf("reasoning:review:%s:%s:%s", input.RepositoryID, input.FilePath, input.Template),
 		input.RepositoryID,
 		func(rt llm.Runtime) error {
 			var callErr error
-			resp, callErr = r.Worker.ReviewFile(ctx, &reasoningv1.ReviewFileRequest{
+			resp, callErr = r.LLMCaller.ReviewFile(ctx, input.RepositoryID, resolution.OpReview, &reasoningv1.ReviewFileRequest{
 				RepositoryId: input.RepositoryID,
 				FilePath:     input.FilePath,
 				Language:     lang,
@@ -1173,13 +1170,12 @@ func (r *mutationResolver) EnrichRequirement(ctx context.Context, requirementID 
 		return nil, fmt.Errorf("requirement not found: %s", requirementID)
 	}
 
-	ctx = r.withModelMetadata(ctx, "analysis")
 	var resp *requirementsv1.EnrichRequirementResponse
 	err := r.runSyncLLMJob(ctx, llm.SubsystemRequirements, "enrich_requirement",
 		fmt.Sprintf("requirements:enrich:%s", req.ID), "",
 		func(rt llm.Runtime) error {
 			var callErr error
-			resp, callErr = r.Worker.EnrichRequirement(ctx, &requirementsv1.EnrichRequirementRequest{
+			resp, callErr = r.LLMCaller.EnrichRequirement(ctx, "", resolution.OpRequirementsEnrich, &requirementsv1.EnrichRequirementRequest{
 				Requirement: &commonv1.Requirement{
 					Id:          req.ID,
 					ExternalId:  req.ExternalID,
@@ -1385,7 +1381,11 @@ func (r *mutationResolver) TriggerSpecExtraction(ctx context.Context, input Trig
 		fmt.Sprintf("requirements:extract:%s", input.RepositoryID), input.RepositoryID,
 		func(rt llm.Runtime) error {
 			var callErr error
-			resp, callErr = r.Worker.ExtractSpecs(ctx, &requirementsv1.ExtractSpecsRequest{
+			// FIX: pre-slice-1 this site never attached x-sb-llm-* metadata
+			// so it always ran on the worker's bootstrap (configmap)
+			// provider regardless of workspace settings — confirmed bypass.
+			// Routed through llmcall.Caller now so workspace settings win.
+			resp, callErr = r.LLMCaller.ExtractSpecs(ctx, input.RepositoryID, resolution.OpRequirementsExtract, &requirementsv1.ExtractSpecsRequest{
 				RepositoryId:      input.RepositoryID,
 				RepositoryName:    repo.Name,
 				Files:             protoFiles,
@@ -1744,7 +1744,6 @@ func (r *mutationResolver) ExplainSystem(ctx context.Context, input ExplainSyste
 	// Use a detached context so that a proxy/client disconnect does not cancel the LLM call.
 	bgCtx, bgCancel := context.WithTimeout(context.Background(), 600*time.Second)
 	defer bgCancel()
-	bgCtx = r.withModelMetadata(bgCtx, "knowledge")
 
 	var resp *knowledgev1.ExplainSystemResponse
 	err = r.runSyncLLMJob(bgCtx, llm.SubsystemKnowledge, "explain_system",
@@ -1754,7 +1753,7 @@ func (r *mutationResolver) ExplainSystem(ctx context.Context, input ExplainSyste
 		func(rt llm.Runtime) error {
 			rt.ReportSnapshotBytes(len(snapJSON))
 			var callErr error
-			resp, callErr = r.Worker.ExplainSystem(bgCtx, &knowledgev1.ExplainSystemRequest{
+			resp, callErr = r.LLMCaller.ExplainSystem(bgCtx, repo.ID, resolution.OpKnowledge, &knowledgev1.ExplainSystemRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       audience,
@@ -1901,7 +1900,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
 				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(existing.ID, 0.12, "understanding", "Using cached repository understanding")
 			}
-			bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, existing.ID, "cliff_notes")
+			bgCtx := runCtx
 			if renderPlan.RenderOnly {
 				bgCtx = withCliffNotesRenderMetadata(
 					bgCtx,
@@ -1911,7 +1910,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					renderPlan.RelevanceProfile,
 				)
 			}
-			resp, err := r.Worker.GenerateCliffNotes(bgCtx, &knowledgev1.GenerateCliffNotesRequest{
+			resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, existing.ID, "cliff_notes"), &knowledgev1.GenerateCliffNotesRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -1999,7 +1998,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					return fmt.Errorf("failed to unmarshal architecture prompt bundle: %w", err)
 				}
 			}
-			resp, err := r.Worker.GenerateArchitectureDiagram(r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, existing.ID, "architecture_diagram"), &knowledgev1.GenerateArchitectureDiagramRequest{
+			resp, err := r.LLMCaller.GenerateArchitectureDiagramWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, existing.ID, "architecture_diagram"), &knowledgev1.GenerateArchitectureDiagramRequest{
 				RepositoryId:             repo.ID,
 				RepositoryName:           repo.Name,
 				Audience:                 string(existing.Audience),
@@ -2048,7 +2047,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					enrichedSnapJSON = enriched
 				}
 			}
-			resp, err := r.Worker.GenerateLearningPath(r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, existing.ID, "learning_path"), &knowledgev1.GenerateLearningPathRequest{
+			resp, err := r.LLMCaller.GenerateLearningPathWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, existing.ID, "learning_path"), &knowledgev1.GenerateLearningPathRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -2094,7 +2093,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					enrichedSnapJSON = enriched
 				}
 			}
-			resp, err := r.Worker.GenerateCodeTour(r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, existing.ID, "code_tour"), &knowledgev1.GenerateCodeTourRequest{
+			resp, err := r.LLMCaller.GenerateCodeTourWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, existing.ID, "code_tour"), &knowledgev1.GenerateCodeTourRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -2151,7 +2150,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					enrichedSnapJSON = enriched
 				}
 			}
-			resp, err := r.Worker.GenerateWorkflowStory(r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, existing.ID, "workflow_story"), &knowledgev1.GenerateWorkflowStoryRequest{
+			resp, err := r.LLMCaller.GenerateWorkflowStoryWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, existing.ID, "workflow_story"), &knowledgev1.GenerateWorkflowStoryRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),

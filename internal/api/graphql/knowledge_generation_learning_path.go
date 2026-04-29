@@ -12,6 +12,7 @@ import (
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
 
 type learningPathGenerationService struct {
@@ -118,8 +119,7 @@ func (s learningPathGenerationService) Generate(ctx context.Context) (*Knowledge
 		}
 
 		stopProgress := r.startProgressTicker(rt, artifact.ID)
-		bgCtx := r.withJobMetadata(runCtx, "knowledge", rt, repo.ID, artifact.ID, "learning_path")
-		resp, err := r.Worker.GenerateLearningPath(bgCtx, &knowledgev1.GenerateLearningPathRequest{
+		resp, err := r.LLMCaller.GenerateLearningPathWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, artifact.ID, "learning_path"), &knowledgev1.GenerateLearningPathRequest{
 			RepositoryId:   repo.ID,
 			RepositoryName: repo.Name,
 			Audience:       audience,

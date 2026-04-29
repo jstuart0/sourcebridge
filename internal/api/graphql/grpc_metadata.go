@@ -12,12 +12,31 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 )
 
-// withModelMetadata enriches a context with the API's effective LLM
-// configuration for a single worker call. The API owns the DB-backed
-// LLM settings, so the worker should not rely on deployment env vars
-// as the runtime source of truth.
+// llmJobMetadata builds the llmcall.JobMetadata from an llm.Runtime plus
+// artifact ids. Callers pass this to the *WithJob variants of the Caller
+// methods so per-job tracing headers continue to flow to the worker.
+func llmJobMetadata(rt llm.Runtime, artifactID, jobType string) llmcall.JobMetadata {
+	jm := llmcall.JobMetadata{
+		ArtifactID: artifactID,
+		JobType:    jobType,
+	}
+	if rt != nil {
+		jm.JobID = rt.JobID()
+	}
+	return jm
+}
+
+// withModelMetadata is deprecated. Slice 1 of the workspace-LLM-source-of-
+// truth plan replaced its callers with llmcall.Caller wrappers that go
+// through the runtime resolver. Kept here only as a compatibility shim
+// in case any external caller imported this package (none do as of the
+// slice-1 commit). Slice 2 deletes this function once we've finished
+// migrating all bypass call sites and confirmed no consumer remains.
+//
+// Deprecated: use *llmcall.Caller via Resolver.LLMCaller instead.
 func (r *Resolver) withModelMetadata(ctx context.Context, operationGroup string) context.Context {
 	return r.withJobMetadata(ctx, operationGroup, nil, "", "", "")
 }

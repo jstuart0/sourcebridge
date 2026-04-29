@@ -19,12 +19,14 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/governance"
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
 	"github.com/sourcebridge/sourcebridge/internal/search"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 	"github.com/sourcebridge/sourcebridge/internal/trash"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
+	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 )
 
 // GitConfigLoader reads git credentials from persistent storage.
@@ -40,6 +42,16 @@ type Resolver struct {
 	Store              graph.GraphStore
 	KnowledgeStore     knowledge.KnowledgeStore   // nil when knowledge persistence is unavailable
 	Worker             *worker.Client             // nil when AI features are unavailable
+	// LLMCaller is the LLM-aware adapter around Worker. All GraphQL
+	// resolvers that perform LLM-bearing RPCs must call LLMCaller.<RPC>
+	// rather than Worker.<RPC> directly so workspace-saved settings are
+	// attached to the outgoing gRPC metadata. Nil when Worker is nil.
+	LLMCaller *llmcall.Caller
+	// LLMResolver is the runtime LLM-config resolver. Today only the
+	// llmcall.Caller goes through it directly; resolvers that need to
+	// inspect the resolved snapshot (e.g. for telemetry stamping) can
+	// also call Resolve. Nil only in tests / embedded mode.
+	LLMResolver resolution.Resolver
 	Orchestrator       *orchestrator.Orchestrator // nil when llm orchestration is unavailable (degraded mode)
 	Config             *config.Config             // application configuration
 	EventBus           *events.Bus                // in-process event bus for SSE notifications

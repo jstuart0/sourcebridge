@@ -36,6 +36,11 @@ type LLMConfigRecord struct {
 	DraftModel               string `json:"draft_model"`
 	TimeoutSecs              int    `json:"timeout_secs"`
 	AdvancedMode             bool   `json:"advanced_mode"`
+	// Version is bumped on every Save so resolvers on other replicas can
+	// detect that the workspace settings changed without polling. Zero
+	// means the record has never been saved (or pre-dates the version
+	// field). The resolver treats version=0 as "no workspace layer".
+	Version uint64 `json:"version"`
 }
 
 func (s *SurrealLLMConfigStore) LoadLLMConfig() (*LLMConfigRecord, error) {
@@ -47,7 +52,7 @@ func (s *SurrealLLMConfigStore) LoadLLMConfig() (*LLMConfigRecord, error) {
 	ctx := context.Background()
 
 	raw, err := surrealdb.Query[[]map[string]interface{}](ctx, db,
-		"SELECT provider, base_url, api_key, summary_model, review_model, ask_model, knowledge_model, architecture_diagram_model, report_model, draft_model, timeout_secs, advanced_mode FROM ca_llm_config WHERE id = type::thing('ca_llm_config', 'default') LIMIT 1",
+		"SELECT provider, base_url, api_key, summary_model, review_model, ask_model, knowledge_model, architecture_diagram_model, report_model, draft_model, timeout_secs, advanced_mode, version FROM ca_llm_config WHERE id = type::thing('ca_llm_config', 'default') LIMIT 1",
 		map[string]any{})
 	if err != nil {
 		slog.Warn("surreal llm config load query failed", "error", err)
@@ -96,7 +101,77 @@ func (s *SurrealLLMConfigStore) LoadLLMConfig() (*LLMConfigRecord, error) {
 			rec.AdvancedMode = b
 		}
 	}
+	if v, ok := row["version"]; ok {
+		switch t := v.(type) {
+		case float64:
+			rec.Version = uint64(t)
+		case uint64:
+			rec.Version = t
+		case int64:
+			if t >= 0 {
+				rec.Version = uint64(t)
+			}
+		case int:
+			if t >= 0 {
+				rec.Version = uint64(t)
+			}
+		}
+	}
 	return rec, nil
+}
+
+// LoadLLMConfigVersion fetches just the version cell. The resolver calls
+// this on every Resolve to detect cross-replica workspace saves; keeping
+// it as a single-field SELECT keeps the per-resolve cost in the sub-
+// millisecond range against a healthy SurrealDB.
+//
+// Returns 0 when the row doesn't exist yet (no workspace settings saved).
+// Errors propagate so the resolver can fall back to its cached snapshot
+// and stamp Stale=true.
+func (s *SurrealLLMConfigStore) LoadLLMConfigVersion() (uint64, error) {
+	db := s.client.DB()
+	if db == nil {
+		return 0, fmt.Errorf("database not connected")
+	}
+	ctx := context.Background()
+	raw, err := surrealdb.Query[[]map[string]interface{}](ctx, db,
+		"SELECT version FROM ca_llm_config WHERE id = type::thing('ca_llm_config', 'default') LIMIT 1",
+		map[string]any{})
+	if err != nil {
+		return 0, err
+	}
+	if raw == nil || len(*raw) == 0 {
+		return 0, nil
+	}
+	qr := (*raw)[0]
+	if qr.Error != nil {
+		return 0, fmt.Errorf("%v", qr.Error)
+	}
+	if len(qr.Result) == 0 {
+		return 0, nil
+	}
+	row := qr.Result[0]
+	v, ok := row["version"]
+	if !ok {
+		return 0, nil
+	}
+	switch t := v.(type) {
+	case float64:
+		return uint64(t), nil
+	case uint64:
+		return t, nil
+	case int64:
+		if t < 0 {
+			return 0, nil
+		}
+		return uint64(t), nil
+	case int:
+		if t < 0 {
+			return 0, nil
+		}
+		return uint64(t), nil
+	}
+	return 0, nil
 }
 
 func (s *SurrealLLMConfigStore) SaveLLMConfig(rec *LLMConfigRecord) error {
@@ -122,11 +197,16 @@ func (s *SurrealLLMConfigStore) SaveLLMConfig(rec *LLMConfigRecord) error {
 		DEFINE FIELD IF NOT EXISTS draft_model ON ca_llm_config TYPE string;
 		DEFINE FIELD IF NOT EXISTS timeout_secs ON ca_llm_config TYPE int;
 		DEFINE FIELD IF NOT EXISTS advanced_mode ON ca_llm_config TYPE bool;
+		DEFINE FIELD IF NOT EXISTS version ON ca_llm_config TYPE int DEFAULT 0;
 	`, map[string]any{})
 	if err != nil {
 		slog.Warn("failed to ensure ca_llm_config table", "error", err)
 	}
 
+	// version = (version OR 0) + 1: monotonically bumps on every save so
+	// resolvers on other replicas can detect changes via the lightweight
+	// LoadLLMConfigVersion probe. Atomic at the row level — concurrent
+	// saves UPSERT serially in SurrealDB and each one bumps once.
 	_, err = surrealdb.Query[interface{}](ctx, db,
 		`UPSERT type::thing('ca_llm_config', 'default') SET
 			provider = $provider,
@@ -140,7 +220,8 @@ func (s *SurrealLLMConfigStore) SaveLLMConfig(rec *LLMConfigRecord) error {
 				report_model = $report_model,
 				draft_model = $draft_model,
 			timeout_secs = $timeout_secs,
-			advanced_mode = $advanced_mode`,
+			advanced_mode = $advanced_mode,
+			version = (IF version != NONE THEN version ELSE 0 END) + 1`,
 		map[string]any{
 			"provider":                   rec.Provider,
 			"base_url":                   rec.BaseURL,

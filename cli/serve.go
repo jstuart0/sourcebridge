@@ -26,6 +26,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/health"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/assembly"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/credentials"
 	lwmetrics "github.com/sourcebridge/sourcebridge/internal/livingwiki/metrics"
@@ -39,6 +40,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/trash"
 	"github.com/sourcebridge/sourcebridge/internal/version"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
+	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 )
 
 var serveCmd = &cobra.Command{
@@ -199,7 +201,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Load persisted LLM config (DB values fill in where env vars are empty)
+		// Load persisted LLM config store. The legacy boot-time merge
+		// (where DB values were applied onto cfg.LLM and env vars
+		// silently won) is gone — see plan
+		// thoughts/shared/plans/2026-04-29-workspace-llm-source-of-truth.md.
+		// cfg.LLM is now the env-bootstrap layer of the resolver, never
+		// mutated post-boot. The resolver layer reads workspace settings
+		// directly from the DB on every Resolve via a version-keyed
+		// cache, so an admin save on replica A is visible to replica B
+		// on the very next worker LLM call.
 		lcs := db.NewSurrealLLMConfigStore(surrealDB)
 		llmConfigStore = &llmConfigAdapter{store: lcs}
 		queueControlStore = &queueControlAdapter{store: db.NewSurrealQueueControlStore(surrealDB)}
@@ -218,45 +228,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 			NotionWebhookSecret:     cfg.LivingWiki.NotionWebhookSecret,
 		}
 		lwResolver = livingwiki.NewResolver(lwStore, lwEnv, 0)
-		if rec, err := lcs.LoadLLMConfig(); err == nil && rec != nil {
-			if cfg.LLM.Provider == "anthropic" && rec.Provider != "" {
-				// Only override defaults — if env var was explicitly set, it takes priority
-				// The default provider is "anthropic", so if it's still the default, DB wins
-				cfg.LLM.Provider = rec.Provider
-			}
-			if cfg.LLM.BaseURL == "" && rec.BaseURL != "" {
-				cfg.LLM.BaseURL = rec.BaseURL
-			}
-			if cfg.LLM.APIKey == "" && rec.APIKey != "" {
-				cfg.LLM.APIKey = rec.APIKey
-			}
-			if rec.SummaryModel != "" {
-				cfg.LLM.SummaryModel = rec.SummaryModel
-			}
-			if rec.ReviewModel != "" {
-				cfg.LLM.ReviewModel = rec.ReviewModel
-			}
-			if rec.AskModel != "" {
-				cfg.LLM.AskModel = rec.AskModel
-			}
-			if rec.KnowledgeModel != "" {
-				cfg.LLM.KnowledgeModel = rec.KnowledgeModel
-			}
-			if rec.ArchitectureDiagramModel != "" {
-				cfg.LLM.ArchitectureDiagramModel = rec.ArchitectureDiagramModel
-			}
-			if rec.ReportModel != "" {
-				cfg.LLM.ReportModel = rec.ReportModel
-			}
-			if rec.DraftModel != "" {
-				cfg.LLM.DraftModel = rec.DraftModel
-			}
-			if rec.TimeoutSecs > 0 {
-				cfg.LLM.TimeoutSecs = rec.TimeoutSecs
-			}
-			cfg.LLM.AdvancedMode = rec.AdvancedMode
-			slog.Info("loaded LLM config from database", "provider", cfg.LLM.Provider, "advanced_mode", cfg.LLM.AdvancedMode)
-		}
 	}
 	if tokenStore == nil {
 		tokenStore = auth.NewAPITokenStore()
@@ -374,6 +345,26 @@ func runServe(cmd *cobra.Command, args []string) error {
 		healthChecker = health.New(nil, workerClient)
 	}
 
+	// Build the runtime LLM-config resolver. cfg.LLM is the env-bootstrap
+	// layer; the workspace store is layer 2. Per-repo override (slice 5)
+	// adds layer 1 by passing a non-nil RepoOverrideStore. Resolver runs
+	// in every replica — version-keyed cache makes admin saves visible
+	// cross-replica without polling or restart.
+	var llmStoreAdapter resolution.LLMConfigStore
+	if cfg.Storage.SurrealMode == "external" && surrealDB != nil {
+		llmStoreAdapter = &llmStoreResolverAdapter{store: db.NewSurrealLLMConfigStore(surrealDB)}
+	}
+	llmResolver := resolution.New(llmStoreAdapter, nil /* per-repo override store, slice 5 */, cfg.LLM, slog.Default())
+
+	// Build the LLM-aware adapter around the worker client. Every gRPC
+	// LLM RPC must flow through this Caller so resolved metadata is
+	// attached to the outgoing context. The AST lint test in
+	// internal/llm/resolution/lint_test.go enforces that.
+	var llmCaller *llmcall.Caller
+	if workerClient != nil {
+		llmCaller = llmcall.New(workerClient, llmResolver, slog.Default())
+	}
+
 	// Create HTTP server
 	server := rest.NewServer(cfg, localAuth, jwtMgr, store, workerClient,
 		rest.WithEnterpriseDB(surrealDB.DB()),
@@ -382,6 +373,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		rest.WithJobStore(jobStore),
 		rest.WithGitConfigStore(gitConfigStore),
 		rest.WithLLMConfigStore(llmConfigStore),
+		rest.WithLLMResolver(llmResolver),
+		rest.WithLLMCaller(llmCaller),
 		rest.WithQueueControlStore(queueControlStore),
 		rest.WithTokenStore(tokenStore),
 		rest.WithDesktopAuthStore(desktopAuthStore),
@@ -581,6 +574,7 @@ func (a *llmConfigAdapter) LoadLLMConfig() (*rest.LLMConfigRecord, error) {
 		AskModel:                 rec.AskModel,
 		KnowledgeModel:           rec.KnowledgeModel,
 		ArchitectureDiagramModel: rec.ArchitectureDiagramModel,
+		ReportModel:              rec.ReportModel,
 		DraftModel:               rec.DraftModel,
 		TimeoutSecs:              rec.TimeoutSecs,
 		AdvancedMode:             rec.AdvancedMode,
@@ -597,10 +591,44 @@ func (a *llmConfigAdapter) SaveLLMConfig(rec *rest.LLMConfigRecord) error {
 		AskModel:                 rec.AskModel,
 		KnowledgeModel:           rec.KnowledgeModel,
 		ArchitectureDiagramModel: rec.ArchitectureDiagramModel,
+		ReportModel:              rec.ReportModel,
 		DraftModel:               rec.DraftModel,
 		TimeoutSecs:              rec.TimeoutSecs,
 		AdvancedMode:             rec.AdvancedMode,
 	})
+}
+
+// llmStoreResolverAdapter bridges *db.SurrealLLMConfigStore to the narrow
+// resolution.LLMConfigStore interface. The resolver does not import
+// internal/db (which would create a cycle), so the adapter lives here.
+type llmStoreResolverAdapter struct {
+	store *db.SurrealLLMConfigStore
+}
+
+func (a *llmStoreResolverAdapter) LoadLLMConfig() (*resolution.WorkspaceRecord, error) {
+	rec, err := a.store.LoadLLMConfig()
+	if err != nil || rec == nil {
+		return nil, err
+	}
+	return &resolution.WorkspaceRecord{
+		Provider:                 rec.Provider,
+		BaseURL:                  rec.BaseURL,
+		APIKey:                   rec.APIKey,
+		SummaryModel:             rec.SummaryModel,
+		ReviewModel:              rec.ReviewModel,
+		AskModel:                 rec.AskModel,
+		KnowledgeModel:           rec.KnowledgeModel,
+		ArchitectureDiagramModel: rec.ArchitectureDiagramModel,
+		ReportModel:              rec.ReportModel,
+		DraftModel:               rec.DraftModel,
+		TimeoutSecs:              rec.TimeoutSecs,
+		AdvancedMode:             rec.AdvancedMode,
+		Version:                  rec.Version,
+	}, nil
+}
+
+func (a *llmStoreResolverAdapter) LoadLLMConfigVersion() (uint64, error) {
+	return a.store.LoadLLMConfigVersion()
 }
 
 func (a *queueControlAdapter) LoadQueueControl() (*rest.QueueControlRecord, error) {
