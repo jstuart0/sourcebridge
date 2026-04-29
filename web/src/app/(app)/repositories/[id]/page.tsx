@@ -996,10 +996,15 @@ export default function RepositoryDetailPage() {
   const understandingSections = understandingHighlightSections(currentUnderstanding);
   const understandingFeaturedSections = understandingSections.slice(0, 4);
   const understandingAdditionalSections = understandingSections.slice(4);
+  // FIRST_PASS_READY is a terminal "first-pass complete, ready to read" state
+  // (see internal/db/knowledge_store.go:1130 — explicitly listed as non-running);
+  // only the actively-running stages count as busy. Including FIRST_PASS_READY
+  // here was a long-standing bug that made the UI show "Generating..." forever
+  // for any repo whose understanding finished its first pass but was never
+  // deepened.
   const understandingBusy = Boolean(
     currentUnderstanding &&
       (currentUnderstanding.stage === "BUILDING_TREE" ||
-        currentUnderstanding.stage === "FIRST_PASS_READY" ||
         currentUnderstanding.stage === "DEEPENING"),
   );
 
