@@ -258,10 +258,22 @@ func (o *Orchestrator) reapStaleJobs() {
 			threshold = stalePendingThreshold
 		}
 		// Jobs waiting for a knowledge generation slot show phase
-		// "queued" or "backoff". They are alive and heartbeating but
-		// blocked behind other jobs. Use the longer pending threshold
-		// so they aren't reaped while legitimately waiting in line.
-		if job.ProgressPhase == "queued" || job.ProgressPhase == "backoff" {
+		// "queued" or "backoff". When alive they heartbeat every few
+		// seconds while blocked behind other jobs — UpdatedAt stays
+		// fresh — and we extend the threshold so a legitimate queue
+		// wait isn't killed prematurely.
+		//
+		// But a zombie that died mid-queue (e.g. pod terminated during
+		// a deploy) keeps the same phase label while no longer
+		// heartbeating, and the original code blindly extended the
+		// threshold to 45 minutes — making every kubectl-reroll cause
+		// a 45-minute UI hang on the next "Refresh" click that deduped
+		// to the dead record. Only extend when the heartbeat is fresh
+		// (within the standard generating threshold); otherwise treat
+		// the job like any other stalled work and reap on the normal
+		// schedule.
+		if (job.ProgressPhase == "queued" || job.ProgressPhase == "backoff") &&
+			age < staleGeneratingThreshold {
 			threshold = stalePendingThreshold
 		}
 		if age < threshold {
