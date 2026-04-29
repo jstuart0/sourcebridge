@@ -21,6 +21,7 @@ package graphql
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -280,12 +281,16 @@ func buildColdStartRunner(
 				case <-hbCtx.Done():
 					return
 				case <-ticker.C:
+					// runtime.Heartbeat() already structured-logs on
+					// failure with job_id (codex r2 [Low] — avoid
+					// double-warn). We log here only at debug to add
+					// repo_id for log correlation. Failure does not
+					// abort — next tick may succeed and the reaper has
+					// a 30-min window before it kills the job.
 					if hbErr := rt.Heartbeat(); hbErr != nil {
-						slog.Warn("livingwiki/coldstart: heartbeat failed",
+						slog.Debug("livingwiki/coldstart: heartbeat failed (already warned by runtime)",
 							"job_id", jobID, "repo_id", repoID,
 							"error", hbErr.Error())
-						// Don't abort — next tick may succeed; the reaper
-						// has a 30-min window before it kills the job.
 					}
 					done := int(atomic.LoadInt32(&generated)) + int(atomic.LoadInt32(&excludedCount))
 					var p float64
@@ -348,8 +353,17 @@ func buildColdStartRunner(
 			status = "failed"
 			failCat = coldstart.ClassifyError(err)
 			errMsg = err.Error()
+		case errors.Is(err, lworch.ErrSystemicSoftFailures):
+			// Codex r2 [Medium]: surface systemic LLM failures with a
+			// distinct failure category so the UI can show the right CTA
+			// ("provider unreachable; check the LLM config" vs the normal
+			// "retry excluded pages"). The orchestrator persisted any
+			// pages that completed before the breaker tripped.
+			status = "partial"
+			failCat = coldstart.FailureCategorySystemicLLM
+			errMsg = err.Error()
 		case err != nil && isPartial:
-			// Soft abort with partial persistence — surface as partial.
+			// Soft abort with partial persistence (time-budget) — surface as partial.
 			status = "partial"
 			failCat = coldstart.FailureCategoryPartialContent
 			errMsg = err.Error()
@@ -358,8 +372,16 @@ func buildColdStartRunner(
 			failCat = coldstart.FailureCategoryPartialContent
 		}
 
+		// Codex r2 [Medium]: on hard-error paths the orchestrator did NOT
+		// persist anything, so the OnPageDone-driven `generated` counter
+		// overstates the durable state. Use len(result.Generated) instead
+		// — Generate now zeroes that on hard errors per its contract.
 		finalGen := int(atomic.LoadInt32(&generated))
 		finalExcl := int(atomic.LoadInt32(&excludedCount))
+		if err != nil && !isPartial {
+			finalGen = len(result.Generated) // 0 on hard errors
+			finalExcl = len(result.Excluded) // exclusions still surface
+		}
 
 		// ── Step 4: Dispatch generated pages to configured sinks ──────────────
 		var sinkResults []livingwiki.SinkWriteResult

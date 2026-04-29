@@ -530,26 +530,36 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 			outcomesMu.Unlock()
 
 			// Update sliding-window counters and check breaker.
+			//
+			// Codex r2 [High]: count BOTH llm_error and render_error
+			// exclusions — both are non-gate soft failures and a
+			// systemic render bug should trip the breaker just like a
+			// systemic LLM outage. Gate-failure exclusions don't move
+			// the breaker; they're already capped at 2 attempts per
+			// page and a "page didn't pass quality" pattern shouldn't
+			// abort the run.
 			isSoftFailure := outcome.excluded != nil &&
-				outcome.excluded.Reason == ExclusionReasonLLMError
+				(outcome.excluded.Reason == ExclusionReasonLLMError ||
+					outcome.excluded.Reason == ExclusionReasonRenderError)
 			if isSoftFailure {
 				cat := outcome.excluded.FailureCategory
 				if cat == "" {
 					cat = SoftFailureCategoryTemplateInternal
 				}
-				sw.recordFailure(cat)
-				if sw.exceeded(cat) {
+				// Codex r2 [Low]: record AND check atomically so the
+				// count reported in the error message always reflects
+				// the same window state that crossed the threshold.
+				count, exceeded := sw.recordAndCheck(cat)
+				if exceeded {
 					return fmt.Errorf("%w: %d page failures with category %q in last %d completions; last underlying error: %s",
 						ErrSystemicSoftFailures,
-						sw.countFor(cat), cat, sw.window,
+						count, cat, sw.window,
 						outcome.excluded.SecondResult.Gates[0].Violations[0].Message)
 				}
 			} else if outcome.excluded == nil {
 				// Clean success — reset the streak.
 				sw.recordSuccess()
 			}
-			// Gate-failure exclusions don't move the breaker; they're
-			// already capped at 2 attempts per page.
 
 			// Notify the caller (e.g. cold-start job progress reporter)
 			// after each page completes. The callback is
@@ -650,8 +660,19 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 
 	// Final disposition. Codex r1c [Low]: include PRID in partial-error
 	// returns so callers can see what PR was opened.
+	//
+	// Codex r2 [Medium]: result.Generated must reflect ONLY pages that
+	// were actually persisted. If shouldPersist was false (hard error
+	// path), pages may have completed in goroutines before the abort,
+	// but they were NOT written to the store — reporting them as
+	// "generated" overstates the durable state. Excluded entries are
+	// in-memory anyway, so they're safe to surface either way.
+	resultGenerated := generated
+	if !shouldPersist {
+		resultGenerated = nil
+	}
 	result := GenerateResult{
-		Generated: generated,
+		Generated: resultGenerated,
 		Excluded:  excluded,
 		PRID:      prID,
 		Duration:  time.Since(start),
@@ -812,6 +833,36 @@ func (s *softFailureWindow) countFor(category string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.byCat[category]
+}
+
+// recordAndCheck records a failure for the given category and atomically
+// returns the new count and whether the breaker has tripped. Use this
+// instead of separate recordFailure + exceeded calls so the count in the
+// error message always reflects the same window state that crossed the
+// threshold (codex r2 [Low]).
+func (s *softFailureWindow) recordAndCheck(category string) (count int, exceeded bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Inline the record() body so we hold the lock through both phases.
+	if s.size == s.window {
+		old := s.events[s.head]
+		if old != "" {
+			s.byCat[old]--
+			if s.byCat[old] <= 0 {
+				delete(s.byCat, old)
+			}
+		}
+	} else {
+		s.size++
+	}
+	s.events[s.head] = category
+	if category != "" {
+		s.byCat[category]++
+	}
+	s.head = (s.head + 1) % s.window
+	count = s.byCat[category]
+	exceeded = count >= s.threshold
+	return count, exceeded
 }
 
 // graphMetricsForPage returns the validator base config populated with graph

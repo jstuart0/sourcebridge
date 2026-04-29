@@ -258,6 +258,12 @@ func TestSlidingWindowDoesNotFalseAbortUnderConcurrency(t *testing.T) {
 // pages 2-4 sleep 200ms each. With TimeBudget=50ms, the run aborts before
 // the slow pages complete. Verify ErrTimeBudgetExceeded is returned AND the
 // fast pages are persisted in the store.
+//
+// Codex r2 [Medium]: this test wraps the page store in ctxSensingStore so
+// the assertion proves the persistence phase was called with a LIVE
+// context — not the deadline-cancelled runCtx. If the implementation
+// regressed to writing with the cancelled ctx, ctxSensingStore would
+// reject the SetProposed call and the test would fail.
 func TestTimeBudgetAbortPersistsCompletedPages(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -266,9 +272,6 @@ func TestTimeBudgetAbortPersistsCompletedPages(t *testing.T) {
 
 	// Fast pages: pages[0], pages[1] — no delay.
 	// Slow pages: pages[2..4] — 200ms delay.
-	// We achieve this by using two templates registered under different IDs
-	// is awkward. Instead, use a template that delays based on RepoID
-	// pattern.
 	tmpl := &delayedTemplate{
 		id:          "glossary",
 		successResp: glossaryPassMarkdown,
@@ -280,7 +283,8 @@ func TestTimeBudgetAbortPersistsCompletedPages(t *testing.T) {
 	tmpl.slowDelay = 200 * time.Millisecond
 
 	reg := orchestrator.NewMapRegistry(tmpl)
-	store := orchestrator.NewMemoryPageStore()
+	inner := orchestrator.NewMemoryPageStore()
+	store := &ctxSensingStore{inner: inner}
 	pr := orchestrator.NewMemoryWikiPR("pr-tb")
 	orch := orchestrator.New(orchestrator.Config{
 		RepoID:         "test",
@@ -295,9 +299,9 @@ func TestTimeBudgetAbortPersistsCompletedPages(t *testing.T) {
 	if len(result.Generated) < 2 {
 		t.Errorf("expected at least 2 pages generated (the fast ones); got %d", len(result.Generated))
 	}
-	// The fast pages must be persisted.
+	// The fast pages must be persisted under a LIVE (not cancelled) ctx.
 	for _, p := range result.Generated {
-		_, ok, err := store.GetProposed(ctx, "test", "pr-tb", p.ID)
+		_, ok, err := inner.GetProposed(ctx, "test", "pr-tb", p.ID)
 		if err != nil {
 			t.Errorf("GetProposed(%q): %v", p.ID, err)
 		}
@@ -305,6 +309,63 @@ func TestTimeBudgetAbortPersistsCompletedPages(t *testing.T) {
 			t.Errorf("expected proposed page %q to be persisted under PR mode", p.ID)
 		}
 	}
+	// Codex r2: if any SetProposed write was attempted with a cancelled
+	// context, the sensing store would have recorded that here.
+	if cancelledWrites := store.cancelledWrites(); cancelledWrites > 0 {
+		t.Errorf("expected 0 SetProposed writes with cancelled ctx; got %d", cancelledWrites)
+	}
+}
+
+// ctxSensingStore wraps an orchestrator.PageStore and records whenever a
+// write call receives an already-cancelled context. Used by the time-budget
+// partial-persistence test to PROVE the orchestrator switched to a fresh
+// context for the persistence phase (rather than reusing the deadline-
+// cancelled runCtx).
+type ctxSensingStore struct {
+	inner          orchestrator.PageStore
+	mu             sync.Mutex
+	cancelledCount int
+}
+
+func (c *ctxSensingStore) recordIfCancelled(ctx context.Context) {
+	if ctx.Err() != nil {
+		c.mu.Lock()
+		c.cancelledCount++
+		c.mu.Unlock()
+	}
+}
+
+func (c *ctxSensingStore) cancelledWrites() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cancelledCount
+}
+
+func (c *ctxSensingStore) GetCanonical(ctx context.Context, repoID, pageID string) (ast.Page, bool, error) {
+	return c.inner.GetCanonical(ctx, repoID, pageID)
+}
+func (c *ctxSensingStore) SetCanonical(ctx context.Context, repoID string, page ast.Page) error {
+	c.recordIfCancelled(ctx)
+	return c.inner.SetCanonical(ctx, repoID, page)
+}
+func (c *ctxSensingStore) DeleteCanonical(ctx context.Context, repoID, pageID string) error {
+	return c.inner.DeleteCanonical(ctx, repoID, pageID)
+}
+func (c *ctxSensingStore) GetProposed(ctx context.Context, repoID, prID, pageID string) (ast.Page, bool, error) {
+	return c.inner.GetProposed(ctx, repoID, prID, pageID)
+}
+func (c *ctxSensingStore) SetProposed(ctx context.Context, repoID, prID string, page ast.Page) error {
+	c.recordIfCancelled(ctx)
+	return c.inner.SetProposed(ctx, repoID, prID, page)
+}
+func (c *ctxSensingStore) ListProposed(ctx context.Context, repoID, prID string) ([]ast.Page, error) {
+	return c.inner.ListProposed(ctx, repoID, prID)
+}
+func (c *ctxSensingStore) DeleteProposed(ctx context.Context, repoID, prID string) error {
+	return c.inner.DeleteProposed(ctx, repoID, prID)
+}
+func (c *ctxSensingStore) PromoteProposed(ctx context.Context, repoID, prID string) error {
+	return c.inner.PromoteProposed(ctx, repoID, prID)
 }
 
 // TestTemplateNotFoundIsFatal — a planned page references a template that

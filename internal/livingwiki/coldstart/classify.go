@@ -46,6 +46,16 @@ const (
 	// "partial" (not "failed"). The UI shows the excluded-pages list and a
 	// "Retry excluded pages" CTA.
 	FailureCategoryPartialContent FailureCategory = "partial_content"
+
+	// FailureCategorySystemicLLM means the orchestrator's sliding-window
+	// soft-failure breaker tripped — many same-category page failures in a
+	// row indicate the LLM provider is likely unreachable (DeadlineExceeded
+	// from every page, gRPC Unavailable, or persistent empty-content
+	// responses). The job status is "partial": pages that completed before
+	// the trip ARE persisted, but the user should fix the provider before
+	// retrying. The UI should show a distinct CTA ("Check LLM provider
+	// config / restart worker") rather than "Retry excluded pages".
+	FailureCategorySystemicLLM FailureCategory = "systemic_llm"
 )
 
 // authStatusCodes are the HTTP status codes that indicate a credential problem.
