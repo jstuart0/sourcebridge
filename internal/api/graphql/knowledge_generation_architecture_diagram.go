@@ -114,7 +114,7 @@ func (s architectureDiagramGenerationService) Generate(ctx context.Context) (*Kn
 		resp, err := r.LLMCaller.GenerateArchitectureDiagramWithJob(
 			runCtx,
 			repo.ID,
-			resolution.OpKnowledge,
+			resolution.OpArchitectureDiagram,
 			llmJobMetadata(rt, artifact.ID, "architecture_diagram"),
 			&knowledgev1.GenerateArchitectureDiagramRequest{
 				RepositoryId:             repo.ID,

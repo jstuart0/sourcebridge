@@ -695,14 +695,19 @@ func (a *llmStoreResolverAdapter) LoadLLMConfigVersion() (uint64, error) {
 }
 
 // lwRepoOverrideAdapter bridges *db.LivingWikiRepoSettingsStore to the
-// narrow resolution.RepoOverrideStore interface. The resolver consults
-// this only for living-wiki ops (see resolution.IsLivingWikiOp).
+// narrow resolution.RepoOverrideStore interface.
+//
+// History: the parent delivery scoped this to living-wiki ops only. R2
+// widens the override to apply to every repo-scoped LLM op. The "lw"
+// prefix is preserved because the storage column is still
+// `lw_repo_settings.living_wiki_llm_override` for backward compat — see
+// CLAUDE.md legacy-name caveat.
 type lwRepoOverrideAdapter struct {
 	store    *db.LivingWikiRepoSettingsStore
 	tenantID string
 }
 
-func (a *lwRepoOverrideAdapter) LoadLivingWikiLLMOverride(ctx context.Context, repoID string) (*resolution.RepoOverride, error) {
+func (a *lwRepoOverrideAdapter) LoadLLMOverride(ctx context.Context, repoID string) (*resolution.RepoOverride, error) {
 	if a == nil || a.store == nil || repoID == "" {
 		return nil, nil
 	}
@@ -714,10 +719,17 @@ func (a *lwRepoOverrideAdapter) LoadLivingWikiLLMOverride(ctx context.Context, r
 		return nil, nil
 	}
 	return &resolution.RepoOverride{
-		Provider: settings.LLMOverride.Provider,
-		BaseURL:  settings.LLMOverride.BaseURL,
-		APIKey:   settings.LLMOverride.APIKey,
-		Model:    settings.LLMOverride.Model,
+		Provider:                 settings.LLMOverride.Provider,
+		BaseURL:                  settings.LLMOverride.BaseURL,
+		APIKey:                   settings.LLMOverride.APIKey,
+		AdvancedMode:             settings.LLMOverride.AdvancedMode,
+		SummaryModel:             settings.LLMOverride.SummaryModel,
+		ReviewModel:              settings.LLMOverride.ReviewModel,
+		AskModel:                 settings.LLMOverride.AskModel,
+		KnowledgeModel:           settings.LLMOverride.KnowledgeModel,
+		ArchitectureDiagramModel: settings.LLMOverride.ArchitectureDiagramModel,
+		ReportModel:              settings.LLMOverride.ReportModel,
+		DraftModel:               settings.LLMOverride.DraftModel,
 	}, nil
 }
 

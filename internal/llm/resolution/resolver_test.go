@@ -50,7 +50,7 @@ type fakeRepoStore struct {
 	err       error
 }
 
-func (f *fakeRepoStore) LoadLivingWikiLLMOverride(_ context.Context, repoID string) (*RepoOverride, error) {
+func (f *fakeRepoStore) LoadLLMOverride(_ context.Context, repoID string) (*RepoOverride, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -288,7 +288,12 @@ func TestResolve_PerFieldSourceMix(t *testing.T) {
 	}
 }
 
-func TestResolve_RepoOverrideForLivingWikiOnly(t *testing.T) {
+// TestResolve_RepoOverrideAppliesAcrossAllOps replaces the parent
+// delivery's TestResolve_RepoOverrideForLivingWikiOnly. R2 widened the
+// override scope so an override now applies to every repo-scoped op,
+// not just living_wiki.* ones. (See repo_override_test.go for the
+// per-area-model and AdvancedMode coverage.)
+func TestResolve_RepoOverrideAppliesAcrossAllOps(t *testing.T) {
 	env := config.LLMConfig{Provider: "anthropic", APIKey: "env"}
 	store := &fakeStore{
 		rec:     &WorkspaceRecord{Provider: "openai", APIKey: "ws-key"},
@@ -296,36 +301,28 @@ func TestResolve_RepoOverrideForLivingWikiOnly(t *testing.T) {
 	}
 	repoStore := &fakeRepoStore{
 		overrides: map[string]*RepoOverride{
-			"repo-1": {Provider: "ollama", APIKey: "repo-key", Model: "qwen2.5"},
+			"repo-1": {Provider: "ollama", APIKey: "repo-key", SummaryModel: "qwen2.5"},
 		},
 	}
 	r := New(store, repoStore, env, nil)
 
-	// Living-wiki op: override applies.
-	snap, err := r.Resolve(context.Background(), "repo-1", OpLivingWikiColdStart)
-	if err != nil {
-		t.Fatalf("Resolve living-wiki: %v", err)
-	}
-	if snap.Provider != "ollama" {
-		t.Errorf("living-wiki provider: got %q, want ollama (repo override wins)", snap.Provider)
-	}
-	if snap.APIKey != "repo-key" {
-		t.Errorf("living-wiki api key: got %q, want repo-key", snap.APIKey)
-	}
-	if snap.Sources[FieldProvider] != SourceRepoOverride {
-		t.Errorf("living-wiki provider source: got %q, want repo_override", snap.Sources[FieldProvider])
-	}
-
-	// Discussion op: override is ignored even with the same repo.
-	snap2, err := r.Resolve(context.Background(), "repo-1", OpDiscussion)
-	if err != nil {
-		t.Fatalf("Resolve discussion: %v", err)
-	}
-	if snap2.Provider != "openai" {
-		t.Errorf("discussion provider: got %q, want openai (workspace, override skipped)", snap2.Provider)
-	}
-	if snap2.Sources[FieldProvider] != SourceWorkspace {
-		t.Errorf("discussion provider source: got %q, want workspace", snap2.Sources[FieldProvider])
+	// Both living-wiki and non-living-wiki ops resolve to the override.
+	for _, op := range []string{OpLivingWikiColdStart, OpDiscussion, OpReportGenerate, OpReview} {
+		t.Run(op, func(t *testing.T) {
+			snap, err := r.Resolve(context.Background(), "repo-1", op)
+			if err != nil {
+				t.Fatalf("Resolve %s: %v", op, err)
+			}
+			if snap.Provider != "ollama" {
+				t.Errorf("%s provider: got %q, want ollama (override wins for every op)", op, snap.Provider)
+			}
+			if snap.APIKey != "repo-key" {
+				t.Errorf("%s api_key: got %q, want repo-key", op, snap.APIKey)
+			}
+			if snap.Sources[FieldProvider] != SourceRepoOverride {
+				t.Errorf("%s provider source: got %q, want repo_override", op, snap.Sources[FieldProvider])
+			}
+		})
 	}
 }
 

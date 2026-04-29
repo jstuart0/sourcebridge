@@ -9,8 +9,9 @@
 //
 // Resolution order (per Resolve call):
 //
-//  1. Per-repo override (only when the op is in living_wiki.* and the repo
-//     has a LivingWikiLLMOverride row)
+//  1. Per-repo override (when the repo has an LLMOverride row; applies
+//     to every repo-scoped LLM op as of R2 — see slice 1 of plan
+//     2026-04-29-workspace-llm-source-of-truth-r2.md)
 //  2. Workspace settings (ca_llm_config), version-keyed cache so a save
 //     on replica A is visible to replica B on the very next Resolve
 //  3. Env-var bootstrap (cfg.LLM, populated at boot from SOURCEBRIDGE_LLM_*)
@@ -35,6 +36,7 @@ const (
 	OpReview               = "review"
 	OpAnalysis             = "analysis"
 	OpKnowledge            = "knowledge"
+	OpArchitectureDiagram  = "architecture_diagram"
 	OpLivingWikiColdStart  = "living_wiki.coldstart"
 	OpLivingWikiRegen      = "living_wiki.regen"
 	OpLivingWikiAssembly   = "living_wiki.assembly"
@@ -62,6 +64,7 @@ var KnownOps = map[string]struct{}{
 	OpReview:               {},
 	OpAnalysis:             {},
 	OpKnowledge:            {},
+	OpArchitectureDiagram:  {},
 	OpLivingWikiColdStart:  {},
 	OpLivingWikiRegen:      {},
 	OpLivingWikiAssembly:   {},
@@ -81,9 +84,15 @@ var KnownOps = map[string]struct{}{
 	OpRequirementsExtract:  {},
 }
 
-// IsLivingWikiOp returns true when the op is in the living_wiki.* family,
-// the only ops for which a per-repo LLMOverride applies. Other ops ignore
-// repo-level overrides even when one is set.
+// IsLivingWikiOp reports whether op is in the living_wiki.* family.
+//
+// Historical note: the parent delivery used this as a gate inside the
+// resolver's per-repo override pass — only living-wiki ops applied the
+// override. R2 widens the override to apply to every repo-scoped op
+// (mirroring the workspace area list), so the resolver no longer
+// consults this predicate. Kept exported for any non-resolver caller
+// that wants to ask "is this a living-wiki op" for unrelated reasons
+// (telemetry, dispatch routing, etc.).
 func IsLivingWikiOp(op string) bool {
 	switch op {
 	case OpLivingWikiColdStart, OpLivingWikiRegen, OpLivingWikiAssembly:

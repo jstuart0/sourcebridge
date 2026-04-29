@@ -88,17 +88,45 @@ type surrealLivingWikiRepoSettings struct {
 	LLMOverride *surrealLivingWikiLLMOverride `json:"living_wiki_llm_override,omitempty"`
 }
 
-// surrealLivingWikiLLMOverride is the on-disk shape of LivingWikiLLMOverride.
+// surrealLivingWikiLLMOverride is the on-disk shape of livingwiki.LLMOverride.
 // APIKeyCipher holds the sbenc:v1-encrypted api key (or empty when no
 // key override is set, or the legacy plaintext form for any rows that
 // pre-date the encryption rollout).
+//
+// R2 widened the override to mirror the workspace advanced-mode area
+// list. New per-area model fields nest as additional keys under the
+// SurrealDB option<object> column (no schema change required).
+//
+// Legacy compatibility: pre-R2 rows wrote the single-model field as
+// `model`. R2 reads BOTH `model` (LegacyModel) and `summary_model`
+// (SummaryModel) so a row written by an older replica or by the
+// followups-doc UPSERT example decodes cleanly. R2 writes BOTH keys on
+// save so a rollback to a pre-R2 binary still finds the model where it
+// expects. After one full release cycle proves no rollback is in
+// flight, a follow-up delivery drops the dual-write and the LegacyModel
+// field. See thoughts/shared/plans/2026-04-29-workspace-llm-source-of-truth-r2.md
+// section 5.1 for the full rationale.
 type surrealLivingWikiLLMOverride struct {
-	Provider     string       `json:"provider,omitempty"`
-	BaseURL      string       `json:"base_url,omitempty"`
-	APIKeyCipher string       `json:"api_key_cipher,omitempty"`
-	Model        string       `json:"model,omitempty"`
-	UpdatedAt    *surrealTime `json:"updated_at,omitempty"`
-	UpdatedBy    string       `json:"updated_by,omitempty"`
+	Provider     string `json:"provider,omitempty"`
+	BaseURL      string `json:"base_url,omitempty"`
+	APIKeyCipher string `json:"api_key_cipher,omitempty"`
+
+	// LegacyModel is the pre-R2 single-model JSON key. Reads use it as
+	// a fallback when SummaryModel is empty. The Go domain struct
+	// (livingwiki.LLMOverride) does not expose it.
+	LegacyModel string `json:"model,omitempty"`
+
+	AdvancedMode             bool   `json:"advanced_mode,omitempty"`
+	SummaryModel             string `json:"summary_model,omitempty"`
+	ReviewModel              string `json:"review_model,omitempty"`
+	AskModel                 string `json:"ask_model,omitempty"`
+	KnowledgeModel           string `json:"knowledge_model,omitempty"`
+	ArchitectureDiagramModel string `json:"architecture_diagram_model,omitempty"`
+	ReportModel              string `json:"report_model,omitempty"`
+	DraftModel               string `json:"draft_model,omitempty"`
+
+	UpdatedAt *surrealTime `json:"updated_at,omitempty"`
+	UpdatedBy string       `json:"updated_by,omitempty"`
 }
 
 type surrealRepoWikiSink struct {
@@ -152,11 +180,25 @@ func (r *surrealLivingWikiRepoSettings) toSettings(decryptAPIKey func(string) (s
 	// means "no key override" — fall through to workspace settings via
 	// the resolver's overlay logic.
 	if r.LLMOverride != nil {
-		ov := &livingwiki.LivingWikiLLMOverride{
-			Provider: r.LLMOverride.Provider,
-			BaseURL:  r.LLMOverride.BaseURL,
-			Model:    r.LLMOverride.Model,
-			UpdatedBy: r.LLMOverride.UpdatedBy,
+		ov := &livingwiki.LLMOverride{
+			Provider:                 r.LLMOverride.Provider,
+			BaseURL:                  r.LLMOverride.BaseURL,
+			AdvancedMode:             r.LLMOverride.AdvancedMode,
+			SummaryModel:             r.LLMOverride.SummaryModel,
+			ReviewModel:              r.LLMOverride.ReviewModel,
+			AskModel:                 r.LLMOverride.AskModel,
+			KnowledgeModel:           r.LLMOverride.KnowledgeModel,
+			ArchitectureDiagramModel: r.LLMOverride.ArchitectureDiagramModel,
+			ReportModel:              r.LLMOverride.ReportModel,
+			DraftModel:               r.LLMOverride.DraftModel,
+			UpdatedBy:                r.LLMOverride.UpdatedBy,
+		}
+		// Legacy `model` key compatibility: when a pre-R2 row only has
+		// `model` populated (no `summary_model`), promote it. New
+		// writes always populate both keys so rollback is safe; this
+		// is the read-side fallback for rows written before R2 lands.
+		if ov.SummaryModel == "" && r.LLMOverride.LegacyModel != "" {
+			ov.SummaryModel = r.LLMOverride.LegacyModel
 		}
 		if r.LLMOverride.UpdatedAt != nil {
 			ov.UpdatedAt = r.LLMOverride.UpdatedAt.Time
@@ -270,26 +312,49 @@ func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, setting
 	// LLMOverride: encrypt the api_key under the same envelope as
 	// ca_llm_config. Nil or empty override results in NONE on disk so
 	// the resolver treats the repo as inheriting workspace settings.
+	//
+	// R2 widening: the override now mirrors the workspace area list
+	// (advanced_mode + per-area model fields). The on-disk SurrealDB
+	// column is option<object> which accepts the wider shape with no
+	// schema migration. Legacy `model` key is dual-written so a
+	// rollback to a pre-R2 binary still finds the model where it
+	// expects (the legacy DTO reads `model` only).
 	llmOverrideClause := ""
 	if settings.LLMOverride != nil && !settings.LLMOverride.IsEmpty() {
 		cipher, err := s.encryptOverrideAPIKey(settings.LLMOverride.APIKey)
 		if err != nil {
 			return fmt.Errorf("living-wiki repo override api key encrypt: %w", err)
 		}
-		// Map to native Go map for SurrealDB to materialize as a record.
-		// Marshalling through the surreal*Override struct would also work
-		// but native maps are cheaper and keep the SET clause readable.
 		vars["llm_override_provider"] = settings.LLMOverride.Provider
 		vars["llm_override_base_url"] = settings.LLMOverride.BaseURL
 		vars["llm_override_api_key_cipher"] = cipher
-		vars["llm_override_model"] = settings.LLMOverride.Model
+		vars["llm_override_advanced_mode"] = settings.LLMOverride.AdvancedMode
+		vars["llm_override_summary_model"] = settings.LLMOverride.SummaryModel
+		vars["llm_override_review_model"] = settings.LLMOverride.ReviewModel
+		vars["llm_override_ask_model"] = settings.LLMOverride.AskModel
+		vars["llm_override_knowledge_model"] = settings.LLMOverride.KnowledgeModel
+		vars["llm_override_architecture_diagram_model"] = settings.LLMOverride.ArchitectureDiagramModel
+		vars["llm_override_report_model"] = settings.LLMOverride.ReportModel
+		vars["llm_override_draft_model"] = settings.LLMOverride.DraftModel
+		// Legacy `model` key dual-write: same value as summary_model so
+		// a pre-R2 binary that reads only `model` still gets the right
+		// answer. Drop in a follow-up after one stable release cycle.
+		vars["llm_override_legacy_model"] = settings.LLMOverride.SummaryModel
 		llmOverrideClause = `living_wiki_llm_override = {
-			provider: $llm_override_provider,
-			base_url: $llm_override_base_url,
-			api_key_cipher: $llm_override_api_key_cipher,
-			model: $llm_override_model,
-			updated_at: time::now(),
-			updated_by: $updated_by,
+			provider:                   $llm_override_provider,
+			base_url:                   $llm_override_base_url,
+			api_key_cipher:             $llm_override_api_key_cipher,
+			model:                      $llm_override_legacy_model,
+			advanced_mode:              $llm_override_advanced_mode,
+			summary_model:              $llm_override_summary_model,
+			review_model:               $llm_override_review_model,
+			ask_model:                  $llm_override_ask_model,
+			knowledge_model:            $llm_override_knowledge_model,
+			architecture_diagram_model: $llm_override_architecture_diagram_model,
+			report_model:               $llm_override_report_model,
+			draft_model:                $llm_override_draft_model,
+			updated_at:                 time::now(),
+			updated_by:                 $updated_by,
 		},
 		`
 	} else {

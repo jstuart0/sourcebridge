@@ -127,6 +127,10 @@ func (l *LLMConfig) ModelForOperation(group string) string {
 		if l.KnowledgeModel != "" {
 			return l.KnowledgeModel
 		}
+	case "architecture_diagram":
+		if l.ArchitectureDiagramModel != "" {
+			return l.ArchitectureDiagramModel
+		}
 	case "report":
 		if l.ReportModel != "" {
 			return l.ReportModel

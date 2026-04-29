@@ -81,22 +81,62 @@ type WorkspaceRecord struct {
 	Version                  uint64
 }
 
+// Operation group strings used internally by the resolver. These map ops
+// (the public Op* constants) to coarser groups so a single per-area model
+// field can apply to multiple ops (e.g., OpDiscussion + OpQASynth both
+// resolve to the workspace AskModel). Centralized here so callers and
+// tests reference the same string set.
+const (
+	GroupAnalysis             = "analysis"
+	GroupReview               = "review"
+	GroupDiscussion           = "discussion"
+	GroupKnowledge            = "knowledge"
+	GroupArchitectureDiagram  = "architecture_diagram"
+	GroupReport               = "report"
+)
+
 // RepoOverrideStore is the narrow interface the resolver needs to fetch
-// per-repo living-wiki overrides. Returns nil when no override is set.
-// The store is responsible for decryption; the returned APIKey is
-// plaintext (or empty).
+// per-repo overrides. Returns nil when no override is set. The store is
+// responsible for decryption; the returned APIKey is plaintext (or empty).
+//
+// History: this method was named LoadLivingWikiLLMOverride in the parent
+// delivery (slice 5), back when the override was scoped to living-wiki
+// ops only. R2 widens the override to apply to every repo-scoped op, so
+// the method is renamed to LoadLLMOverride to match. The on-disk storage
+// column (lw_repo_settings.living_wiki_llm_override) keeps its legacy
+// name for backward compatibility.
 type RepoOverrideStore interface {
-	LoadLivingWikiLLMOverride(ctx context.Context, repoID string) (*RepoOverride, error)
+	LoadLLMOverride(ctx context.Context, repoID string) (*RepoOverride, error)
 }
 
-// RepoOverride is the resolver-internal view of a per-repo living-wiki
-// LLM override. Slice 5 introduces the persisted form; until then no
-// caller registers a non-nil RepoOverrideStore and this stays unused.
+// RepoOverride is the resolver-internal view of a per-repo LLM override.
+// Mirrors the workspace advanced-mode area list exactly so the per-repo
+// surface and workspace surface stay aligned. Empty fields fall through
+// to the workspace layer.
 type RepoOverride struct {
 	Provider string
 	BaseURL  string
 	APIKey   string // already-decrypted
-	Model    string
+
+	// AdvancedMode mirrors the workspace flag. When false, the resolver
+	// uses SummaryModel for every group. When true, per-area fields
+	// override per group with SummaryModel as a fallback.
+	AdvancedMode bool
+
+	// Per-area model fields. The resolver picks the right one for the
+	// op being resolved via overrideModelForOp; missing fields fall
+	// through to workspace via the Sources stamp logic in applyRepoOverride.
+	SummaryModel             string
+	ReviewModel              string
+	AskModel                 string
+	KnowledgeModel           string
+	ArchitectureDiagramModel string
+	ReportModel              string
+
+	// DraftModel is overlaid separately (it is not selected by op group;
+	// it accompanies the main model for speculative decoding, mirroring
+	// how applyEnvBoot and the workspace handle DraftModel).
+	DraftModel string
 }
 
 // Resolver returns a Snapshot for a given (repoID, op) pair. The default
@@ -185,21 +225,24 @@ func (r *DefaultResolver) InvalidateLocal() {
 }
 
 // deriveOperationGroup maps the fine-grained op constants to the coarser
-// per-op model groups used by config.LLMConfig.ModelForOperation.
+// per-op model groups used by config.LLMConfig.ModelForOperation and the
+// resolver's own workspaceModelForOp / overrideModelForOp.
 func deriveOperationGroup(op string) string {
 	switch op {
 	case OpReview:
-		return "review"
+		return GroupReview
 	case OpDiscussion, OpDiscussStream, OpMCPDiscussStream, OpQASynth, OpQADeepSynth, OpQAAgentTurn, OpMCPExplain:
-		return "discussion"
+		return GroupDiscussion
 	case OpKnowledge, OpLivingWikiColdStart, OpLivingWikiRegen, OpLivingWikiAssembly:
-		return "knowledge"
+		return GroupKnowledge
+	case OpArchitectureDiagram:
+		return GroupArchitectureDiagram
 	case OpReportGenerate:
-		return "report"
+		return GroupReport
 	case OpAnalysis, OpClusteringRelabel, OpQAClassify, OpQADecompose, OpRequirementsEnrich, OpRequirementsExtract, OpProviderCapabilities, OpModelsList:
-		return "analysis"
+		return GroupAnalysis
 	default:
-		return "analysis"
+		return GroupAnalysis
 	}
 }
 
@@ -357,7 +400,8 @@ func (r *DefaultResolver) overlayWorkspaceFromRecord(snap *Snapshot, rec *Worksp
 
 // workspaceModelForOp picks the per-op model from a WorkspaceRecord.
 // Mirrors config.LLMConfig.ModelForOperation but operates on the resolver's
-// own struct shape.
+// own struct shape. R2 added the architecture_diagram group; in advanced
+// mode it returns ArchitectureDiagramModel, falling back to SummaryModel.
 func workspaceModelForOp(rec *WorkspaceRecord, group string) string {
 	if rec == nil {
 		return ""
@@ -366,23 +410,27 @@ func workspaceModelForOp(rec *WorkspaceRecord, group string) string {
 		return rec.SummaryModel
 	}
 	switch group {
-	case "analysis":
+	case GroupAnalysis:
 		if rec.SummaryModel != "" {
 			return rec.SummaryModel
 		}
-	case "review":
+	case GroupReview:
 		if rec.ReviewModel != "" {
 			return rec.ReviewModel
 		}
-	case "discussion":
+	case GroupDiscussion:
 		if rec.AskModel != "" {
 			return rec.AskModel
 		}
-	case "knowledge":
+	case GroupKnowledge:
 		if rec.KnowledgeModel != "" {
 			return rec.KnowledgeModel
 		}
-	case "report":
+	case GroupArchitectureDiagram:
+		if rec.ArchitectureDiagramModel != "" {
+			return rec.ArchitectureDiagramModel
+		}
+	case GroupReport:
 		if rec.ReportModel != "" {
 			return rec.ReportModel
 		}
@@ -390,16 +438,61 @@ func workspaceModelForOp(rec *WorkspaceRecord, group string) string {
 	return rec.SummaryModel
 }
 
-// applyRepoOverride applies a per-repo override on top of workspace, but
-// ONLY for living_wiki.* ops. Other ops ignore the override even when set.
+// overrideModelForOp picks the per-area model from a RepoOverride.
+// Mirrors workspaceModelForOp exactly. When AdvancedMode is false,
+// returns SummaryModel for every group (so a simple-mode override
+// applies to every area). When true, returns the per-area field if
+// non-empty, falling back to SummaryModel.
+func overrideModelForOp(ov *RepoOverride, group string) string {
+	if ov == nil {
+		return ""
+	}
+	if !ov.AdvancedMode {
+		return ov.SummaryModel
+	}
+	switch group {
+	case GroupAnalysis:
+		if ov.SummaryModel != "" {
+			return ov.SummaryModel
+		}
+	case GroupReview:
+		if ov.ReviewModel != "" {
+			return ov.ReviewModel
+		}
+	case GroupDiscussion:
+		if ov.AskModel != "" {
+			return ov.AskModel
+		}
+	case GroupKnowledge:
+		if ov.KnowledgeModel != "" {
+			return ov.KnowledgeModel
+		}
+	case GroupArchitectureDiagram:
+		if ov.ArchitectureDiagramModel != "" {
+			return ov.ArchitectureDiagramModel
+		}
+	case GroupReport:
+		if ov.ReportModel != "" {
+			return ov.ReportModel
+		}
+	}
+	return ov.SummaryModel
+}
+
+// applyRepoOverride applies a per-repo override on top of workspace.
+//
+// R2 widening: previously gated by IsLivingWikiOp. The override now
+// applies to every repo-scoped op, mirroring the workspace area list.
+// The per-area model is selected via overrideModelForOp (which respects
+// the override's AdvancedMode flag in the same way the workspace does).
+// DraftModel is overlaid separately because, like the workspace, it is
+// not selected by op group — it accompanies the main model for
+// speculative decoding.
 func (r *DefaultResolver) applyRepoOverride(ctx context.Context, snap *Snapshot, repoID, op string) {
 	if r.repoStore == nil || repoID == "" {
 		return
 	}
-	if !IsLivingWikiOp(op) {
-		return
-	}
-	ov, err := r.repoStore.LoadLivingWikiLLMOverride(ctx, repoID)
+	ov, err := r.repoStore.LoadLLMOverride(ctx, repoID)
 	if err != nil {
 		r.log.Warn("llm resolver: per-repo override fetch failed; falling back to workspace",
 			"repo_id", repoID, "error", err)
@@ -420,8 +513,12 @@ func (r *DefaultResolver) applyRepoOverride(ctx context.Context, snap *Snapshot,
 		snap.APIKey = ov.APIKey
 		snap.Sources[FieldAPIKey] = SourceRepoOverride
 	}
-	if ov.Model != "" {
-		snap.Model = ov.Model
+	if model := overrideModelForOp(ov, snap.OperationGroup); model != "" {
+		snap.Model = model
 		snap.Sources[FieldModel] = SourceRepoOverride
+	}
+	if ov.DraftModel != "" {
+		snap.DraftModel = ov.DraftModel
+		snap.Sources[FieldDraftModel] = SourceRepoOverride
 	}
 }

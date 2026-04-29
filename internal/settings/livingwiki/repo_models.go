@@ -5,29 +5,55 @@ package livingwiki
 
 import "time"
 
-// LivingWikiLLMOverride is the per-repo living-wiki LLM override.
+// LLMOverride is the per-repository LLM override. Mirrors the workspace
+// /admin/llm advanced-mode area list (summary, review, ask, knowledge,
+// architecture_diagram, report, draft) so the per-repo override surface
+// stays aligned with the workspace surface by construction. When a new
+// area is added to the workspace, it must be added here in the same
+// change.
 //
-// Slice 5 of the workspace-LLM-source-of-truth plan: an advanced
-// opt-in that lets a single repo's living-wiki use a different
-// provider / API key / model from the workspace defaults. Scoped
-// explicitly to living-wiki ops in the field name so a future PR
-// must make a deliberate, audited decision to widen it to
-// QA / comprehension / requirements.
+// Scope (R2 widening): unlike the parent delivery (which scoped the
+// override to living-wiki ops only), R2 applies the override to every
+// repo-scoped LLM op. The Go type was renamed from LivingWikiLLMOverride
+// to LLMOverride to reflect that. The on-disk SurrealDB column keeps
+// its legacy name (`lw_repo_settings.living_wiki_llm_override`) for
+// backward compatibility — see CLAUDE.md legacy-name caveat. The
+// nested legacy `model` JSON key is also preserved during a transition
+// release; see internal/db/livingwiki_repo_settings_store.go.
 //
-// The api_key field holds plaintext at this layer; the SurrealDB
-// store encrypts/decrypts via the same sbenc:v1 envelope used by
+// The api_key field holds plaintext at this layer; the SurrealDB store
+// encrypts/decrypts via the same sbenc:v1 envelope used by
 // ca_llm_config.api_key (see internal/db/llm_config_store.go).
-type LivingWikiLLMOverride struct {
-	// Provider, BaseURL, Model are optional. Empty fields fall through
-	// to the workspace layer in the resolver.
+type LLMOverride struct {
+	// Provider, BaseURL are optional. Empty fields fall through to the
+	// workspace layer in the resolver.
 	Provider string `json:"provider,omitempty"`
 	BaseURL  string `json:"base_url,omitempty"`
-	Model    string `json:"model,omitempty"`
 
 	// APIKey is plaintext at the application layer. Empty means "use
 	// the workspace api_key" — the resolver overlays this only when
 	// the override sets a non-empty value.
 	APIKey string `json:"api_key,omitempty"`
+
+	// AdvancedMode mirrors the workspace flag. When false, SummaryModel
+	// applies to every area (resolver picks SummaryModel for all groups).
+	// When true, per-area model fields are honored with SummaryModel as
+	// a fallback for unset areas.
+	AdvancedMode bool `json:"advanced_mode,omitempty"`
+
+	// Per-area model fields. Names match the workspace advanced-mode
+	// fields exactly (see web/src/app/(app)/admin/llm/page.tsx).
+	SummaryModel             string `json:"summary_model,omitempty"`
+	ReviewModel              string `json:"review_model,omitempty"`
+	AskModel                 string `json:"ask_model,omitempty"`
+	KnowledgeModel           string `json:"knowledge_model,omitempty"`
+	ArchitectureDiagramModel string `json:"architecture_diagram_model,omitempty"`
+	ReportModel              string `json:"report_model,omitempty"`
+
+	// DraftModel is overlaid separately by the resolver (it is not
+	// selected by op group; it accompanies the main model for
+	// speculative decoding). LM Studio / llama.cpp / SGLang.
+	DraftModel string `json:"draft_model,omitempty"`
 
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 	UpdatedBy string    `json:"updated_by,omitempty"`
@@ -36,11 +62,21 @@ type LivingWikiLLMOverride struct {
 // IsEmpty reports whether the override has no fields set. Used by
 // callers to decide between "leave the override untouched" and "this
 // override is a no-op, treat as no override".
-func (o *LivingWikiLLMOverride) IsEmpty() bool {
+func (o *LLMOverride) IsEmpty() bool {
 	if o == nil {
 		return true
 	}
-	return o.Provider == "" && o.BaseURL == "" && o.APIKey == "" && o.Model == ""
+	return o.Provider == "" &&
+		o.BaseURL == "" &&
+		o.APIKey == "" &&
+		!o.AdvancedMode &&
+		o.SummaryModel == "" &&
+		o.ReviewModel == "" &&
+		o.AskModel == "" &&
+		o.KnowledgeModel == "" &&
+		o.ArchitectureDiagramModel == "" &&
+		o.ReportModel == "" &&
+		o.DraftModel == ""
 }
 
 // RepositoryLivingWikiSettings is the per-repo living-wiki opt-in record.
@@ -91,16 +127,18 @@ type RepositoryLivingWikiSettings struct {
 	UpdatedBy string    `json:"updated_by,omitempty"`
 
 	// LLMOverride lets the user override the workspace LLM settings for
-	// this repo's living-wiki only. Nil means "inherit workspace
-	// settings". A non-nil override with empty fields is treated as
-	// nil (see IsEmpty); the resolver only overlays non-empty fields.
+	// this repository. Nil means "inherit workspace settings". A non-nil
+	// override with empty fields is treated as nil (see IsEmpty); the
+	// resolver only overlays non-empty fields.
 	//
-	// Scope: the resolver consults this ONLY when op is one of the
-	// living_wiki.* family (OpLivingWikiColdStart / OpLivingWikiRegen /
-	// OpLivingWikiAssembly). Other ops (QA, comprehension, etc.) ignore
-	// this field even when set. This makes the scope explicit at the
-	// resolver, not just by convention.
-	LLMOverride *LivingWikiLLMOverride `json:"living_wiki_llm_override,omitempty"`
+	// Scope (R2 widening): the resolver applies this override to every
+	// repo-scoped LLM op (summary/review/discussion/knowledge/
+	// architecture_diagram/report/...). Earlier (parent delivery), the
+	// override was gated to living-wiki ops only. The struct field name
+	// here is `LLMOverride` to reflect the wider scope. The on-disk
+	// SurrealDB column name is `living_wiki_llm_override` and is
+	// preserved as legacy for backward compatibility.
+	LLMOverride *LLMOverride `json:"living_wiki_llm_override,omitempty"`
 }
 
 // RepoWikiMode is the publish mode for a living-wiki repo.
