@@ -74,6 +74,79 @@ Never commit the private key.
 
 ---
 
+---
+
+## Step 5b — Understand blast radius and rotation
+
+**Critical:** the deploy key you just generated is a high-blast-radius
+credential. Treat it like a production code-signing key.
+
+### What a leak does
+
+A leak of `tap-deploy-key` (or the `HOMEBREW_TAP_DEPLOY_KEY` GitHub
+Actions secret) lets the holder push to `Formula/sourcebridge.rb` in
+`sourcebridge-ai/homebrew-tap`. Every Mac running
+
+```bash
+brew install sourcebridge-ai/tap/sourcebridge
+brew upgrade sourcebridge
+```
+
+after such a push executes whatever binary the modified formula points
+at, with the user's privileges. This is an arbitrary code execution
+vector for every macOS user of SourceBridge.
+
+### Rotation procedure
+
+If you suspect the key has leaked (incident, accidental commit, misplaced
+backup), rotate immediately:
+
+1. **Revoke.** Open
+   <https://github.com/sourcebridge-ai/homebrew-tap/settings/keys>
+   and delete the entry titled `sourcebridge-release-bot`. This
+   invalidates the old key; any pending push using it will fail.
+2. **Regenerate and re-install.** Re-run **Steps 2 → 3 → 4** of this
+   checklist with a fresh keypair and a new title (e.g.
+   `sourcebridge-release-bot-2`). Update the `HOMEBREW_TAP_DEPLOY_KEY`
+   secret in the main repo with the new private key.
+3. **Verify end-to-end.** Cut a no-op patch tag (e.g. bump the patch
+   number on your next release) to confirm the workflow can push with
+   the new key.
+
+If the push workflow later fails with "no matching host key type found",
+add `ecdsa-sha2-nistp256,ssh-ed25519` to `HostKeyAlgorithms` in the
+workflow's SSH config and pin the Ed25519 key alongside the ECDSA one.
+
+### Recommended posture upgrade — GitHub App
+
+The deploy-key model is convenient but custodial: the long-lived private
+key sits in a GitHub Actions secret indefinitely, and a leak compromises
+every release until rotation. A narrower posture is a GitHub App installed
+only on `sourcebridge-ai/homebrew-tap`, scoped to `contents:write` and
+nothing else, generating short-lived (60-min) installation tokens per
+workflow run.
+
+Trade-off:
+- **Pro:** no long-lived custody; in-flight token has bounded blast radius;
+  revocation is instantaneous (uninstall the app).
+- **Pro:** finer-grained audit log (per-installation request).
+- **Con:** ~1 hour of additional setup (create app, install on tap repo,
+  set `APP_ID` + `APP_PRIVATE_KEY` secrets, swap the workflow's SSH push
+  for `actions/create-github-app-token` + HTTPS push).
+
+This is recommended for production posture. It is **not** required to
+ship a release; the deploy-key flow with the hardening already in place
+is acceptable.
+
+### See also
+
+- xander's audit (finding M8) at
+  `thoughts/shared/reviews/2026-04-28-cloud-install-security-review-xander.md`
+- Security hardening plan (decision i) at
+  `thoughts/shared/plans/2026-04-28-claude-code-security-hardening.md`
+
+---
+
 ## Step 6 — (Optional) Smoke test with a pre-release tag
 
 Cut a test tag to verify the workflow end-to-end before a real release:

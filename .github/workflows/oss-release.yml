@@ -224,11 +224,28 @@ jobs:
         env:
           HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: |
-          # Configure SSH with the deploy key
+          # Configure SSH with the deploy key and a pinned GitHub host key.
           mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
           echo "${HOMEBREW_TAP_DEPLOY_KEY}" > ~/.ssh/tap_deploy_key
           chmod 600 ~/.ssh/tap_deploy_key
-          printf 'Host github-tap\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/tap_deploy_key\n  StrictHostKeyChecking no\n' >> ~/.ssh/config
+
+          # Pin GitHub's published ECDSA host key.
+          # Source: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
+          # SHA256:p2QAMXNIC1TJYWeIOttrVc98/R1BUFWu3/LiyKgUfQM
+          printf '%s\n' 'github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=' > ~/.ssh/tap_known_hosts
+          chmod 600 ~/.ssh/tap_known_hosts
+
+          printf '%s\n' \
+            'Host github-tap' \
+            '  HostName github.com' \
+            '  User git' \
+            '  IdentityFile ~/.ssh/tap_deploy_key' \
+            '  IdentitiesOnly yes' \
+            '  UserKnownHostsFile ~/.ssh/tap_known_hosts' \
+            '  StrictHostKeyChecking yes' \
+            '  HostKeyAlgorithms ecdsa-sha2-nistp256' >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
 
           # Clone the tap repo
           git clone git@github-tap:sourcebridge-ai/homebrew-tap.git tap-repo

@@ -737,8 +737,22 @@ func (s *Server) setupRouter() {
 		// returns 405, which still tells the frontend "route exists" (its
 		// fallback path) but logs a noisy "Failed to load resource" line in
 		// every browser DevTools console. Answer 204 instead so the probe
-		// is invisible. No auth — the response carries no information
-		// beyond "MCP is registered".
+		// is invisible.
+		//
+		// SECURITY: this probe is intentionally unauthenticated. It returns
+		// 204 only when MCP is enabled, which lets an unauthenticated
+		// observer fingerprint a SourceBridge install with MCP turned on.
+		// We accept this trade-off because the probe is the mechanism the
+		// web UI uses to render pre-auth UX (the "MCP isn't enabled on this
+		// server" banner). Auth-gating the probe would push that detection
+		// behind login and degrade the first-touch experience for users on
+		// misconfigured servers. The disclosure is bounded — version, tenant
+		// data, and auth-method enumeration are not exposed by this endpoint
+		// (auth methods are advertised at /auth/desktop/info, which is
+		// unauthenticated for the same reason). See the security model
+		// section in docs/user/security-model.md for the full pre-auth
+		// surface. See also xander finding H4 in the adversarial security
+		// audit (2026-04-28-cloud-install-security-review-xander.md).
 		r.Method("HEAD", "/api/v1/mcp/http", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		}))
