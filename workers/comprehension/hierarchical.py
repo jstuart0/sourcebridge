@@ -1337,8 +1337,30 @@ def _first_line(text: str) -> str:
 
 
 def _is_provider_compute_error(exc: Exception) -> bool:
+    """True for transient backend failures that the retry path should swallow.
+
+    See `workers.comprehension.renderers._is_provider_compute_error` for the
+    same logic — kept in sync here because hierarchical.py drives the per-node
+    retry loop independently. Don't drift the two definitions; if you broaden
+    one, broaden both.
+    """
     text = str(exc).lower()
-    return "compute error" in text or "server_error" in text
+    transient_markers = (
+        "compute error",
+        "server_error",
+        "request timed out",
+        "timeout",
+        "deadline exceeded",
+        "connection reset",
+        "connection refused",
+        "broken pipe",
+        "503",
+        "502",
+        "504",
+        "gateway",
+        "upstream",
+    )
+    return any(marker in text for marker in transient_markers)
 
 
 async def _maybe_await(value: object) -> None:
