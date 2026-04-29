@@ -217,6 +217,28 @@ async def serve() -> None:
     log.info("worker_started", address=listen_addr, tls_enabled=config.tls_enabled)
 
     # --- Graceful shutdown on signals ---
+    #
+    # R3 followups T1.8: a Reloader-triggered rollout (cert rotation) or
+    # any other SIGTERM must NOT cancel a 30+ minute knowledge-generation
+    # RPC mid-flight. The drain sequence is:
+    #
+    #   1. SIGTERM arrives → flip the health-servicer aggregate to
+    #      NOT_SERVING. The kubelet's gRPC readiness probe stops
+    #      considering this pod healthy; the Service endpoint flips
+    #      AWAY from this pod for new work. In-flight RPCs continue.
+    #   2. Call server.stop(grace=N) where N is config.shutdown_grace_seconds
+    #      (default 3600s). gRPC keeps existing RPCs running for up to N
+    #      seconds; only at the N-second mark does it force-cancel
+    #      anything still active.
+    #   3. After server.stop returns (drain complete OR grace expired),
+    #      close the embedding provider. Ordering matters: closing
+    #      providers BEFORE server.stop is wrong — in-flight embedding
+    #      RPCs would see a half-closed provider during the grace window.
+    #
+    # The Kubernetes Deployment's terminationGracePeriodSeconds must
+    # exceed shutdown_grace_seconds so kubelet's SIGKILL stays the
+    # OUTER bound. Today: 3900s (65 minutes) outer vs 3600s (60 minutes)
+    # inner.
     loop = asyncio.get_running_loop()
     shutdown_event = asyncio.Event()
 
@@ -230,12 +252,36 @@ async def serve() -> None:
 
     await shutdown_event.wait()
 
-    log.info("shutting_down")
-    # Close embedding provider if it has a close method (e.g. OllamaEmbeddingProvider)
+    log.info("shutting_down", grace_seconds=config.shutdown_grace_seconds)
+
+    # Step 1: flip health to NOT_SERVING for every registered service
+    # so the kubelet's gRPC readiness probe stops directing new work
+    # here. Any RPC in flight when this fires keeps running — we only
+    # stopped accepting NEW connections through the readiness path.
+    await health_servicer.set("", health_pb2.HealthCheckResponse.NOT_SERVING)
+    for service_name in (
+        "sourcebridge.reasoning.v1.ReasoningService",
+        "sourcebridge.linking.v1.LinkingService",
+        "sourcebridge.requirements.v1.RequirementsService",
+        "sourcebridge.knowledge.v1.KnowledgeService",
+        "sourcebridge.enterprise.v1.EnterpriseReportService",
+        "sourcebridge.contracts.v1.ContractsService",
+    ):
+        await health_servicer.set(service_name, health_pb2.HealthCheckResponse.NOT_SERVING)
+    log.info("worker_drain_started", grace_seconds=config.shutdown_grace_seconds)
+
+    # Step 2: graceful server stop with the configured grace window.
+    # Existing RPCs run to completion; new ones get rejected. After
+    # min(actual_drain_time, grace_seconds) the call returns.
+    await server.stop(grace=config.shutdown_grace_seconds)
+    log.info("worker_drain_complete")
+
+    # Step 3: close providers AFTER the server has finished draining.
+    # Closing them before server.stop would yank the provider out from
+    # under any in-flight RPC.
     if hasattr(embedding_provider, "close"):
         await embedding_provider.close()
 
-    await server.stop(grace=5)
     log.info("worker_stopped")
 
 

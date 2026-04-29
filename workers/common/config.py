@@ -67,6 +67,20 @@ class WorkerConfig(BaseSettings):
     tls_key_path: str = ""
     tls_ca_path: str = ""
 
+    # Shutdown drain ceiling. R3 followups T1.8: when SIGTERM arrives,
+    # the worker flips its health-servicer aggregate to NOT_SERVING (so
+    # the kubelet's gRPC readiness probe stops directing new work to
+    # this pod) and then calls grpc.aio.Server.stop(grace=N) where N is
+    # this value. Default 3600s (60 minutes) — matches
+    # TimeoutKnowledgeRepository on the Go client side, so the longest
+    # legitimate in-flight RPC has time to finish naturally during a
+    # cert-rotation rolling restart.
+    #
+    # The Kubernetes terminationGracePeriodSeconds on the worker
+    # Deployment must exceed this value so the kubelet's SIGKILL is
+    # the outer bound, not the inner one. Today that's 3900s (65min).
+    shutdown_grace_seconds: int = 3600
+
     def model_post_init(self, __context: object) -> None:
         self.test_mode = self._fallback_bool_env(
             current=self.test_mode,

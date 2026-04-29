@@ -7,6 +7,16 @@ metadata:
     app.kubernetes.io/name: sourcebridge-worker
     app.kubernetes.io/part-of: sourcebridge
     app.kubernetes.io/component: worker
+  annotations:
+    # Stakater Reloader watches this Secret and triggers a rolling
+    # restart whenever cert-manager rotates the worker mTLS material.
+    # Combined with terminationGracePeriodSeconds + the worker drain
+    # path in workers/__main__.py (R3 followups T1.8), this is the
+    # automated cert-rotation closure for A2 of the R3 followups doc.
+    #
+    # If Reloader is not installed in the cluster, this annotation is
+    # a no-op — the manual `kubectl rollout restart` still works.
+    secret.reloader.stakater.com/reload: "sourcebridge-worker-tls"
 spec:
   replicas: 1
   # Zero-disruption rolling updates: never tear down the old pod until the
@@ -30,6 +40,16 @@ spec:
         app.kubernetes.io/part-of: sourcebridge
         app.kubernetes.io/component: worker
     spec:
+      # R3 followups T1.8: graceful drain on cert rotations + planned
+      # restarts. The worker process flips its health-servicer to
+      # NOT_SERVING on SIGTERM, then calls grpc.aio.server.stop(grace=N)
+      # where N = SOURCEBRIDGE_WORKER_SHUTDOWN_GRACE_SECONDS (default
+      # 3600s = 60 minutes; matches TimeoutKnowledgeRepository on the Go
+      # client). terminationGracePeriodSeconds MUST exceed N so kubelet's
+      # SIGKILL stays the outer bound. 3900s = 65 minutes provides a
+      # 5-minute slack for the orderly close-providers step that follows
+      # server.stop.
+      terminationGracePeriodSeconds: 3900
       containers:
         - name: sourcebridge-worker
           image: ghcr.io/sourcebridge-ai/sourcebridge-worker:latest
@@ -62,30 +82,40 @@ spec:
             limits:
               memory: "1Gi"
               cpu: "500m"
-          # gRPC tcpSocket probe: kubelet only marks the pod Ready after
-          # the Python interpreter has bound the gRPC port. Before this
-          # probe was here, the pod went Ready the moment the container
-          # started — minutes before the Python module loader had finished
-          # — so the Service endpoint flipped to a not-yet-listening pod
-          # and clients hit immediate "connection refused".
+          # gRPC native probes (Kubernetes 1.24+). Replaces the prior
+          # tcpSocket probe so the kubelet observes the worker's
+          # health-servicer NOT_SERVING flip during drain — TCP staying
+          # open during the grace window is no longer interpreted as
+          # "still ready for new traffic." The worker publishes an
+          # aggregate health record under service="" alongside the
+          # per-service entries; native probes use the empty string to
+          # match that aggregate.
           #
-          # Startup probe gives the worker up to 90 s to come up cold
-          # (Python imports + ML client warmup); after that the readiness
-          # probe takes over with tighter timing for in-flight liveness.
+          # R3 followups T1.8: the drain sequence (workers/__main__.py)
+          # flips this aggregate to NOT_SERVING on SIGTERM, immediately
+          # making the readiness probe fail and stopping new work from
+          # attaching during the up-to-60-minute graceful drain.
+          #
+          # Startup probe still gives the worker up to 90 s to come up
+          # cold (Python imports + ML client warmup); after that the
+          # readiness probe takes over with tighter timing.
           startupProbe:
-            tcpSocket:
+            grpc:
               port: 50051
+              service: ""
             initialDelaySeconds: 5
             periodSeconds: 3
             failureThreshold: 30
           readinessProbe:
-            tcpSocket:
+            grpc:
               port: 50051
+              service: ""
             periodSeconds: 5
             failureThreshold: 3
           livenessProbe:
-            tcpSocket:
+            grpc:
               port: 50051
+              service: ""
             periodSeconds: 30
             failureThreshold: 3
       volumes:
