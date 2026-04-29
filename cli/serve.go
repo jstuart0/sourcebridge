@@ -236,7 +236,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 			slog.Warn("living-wiki: SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY not set; secrets stored in plaintext")
 		}
 		lwStore = db.NewLivingWikiSettingsStore(surrealDB, cfg.Security.EncryptionKey)
-		lwRepoStore = db.NewLivingWikiRepoSettingsStore(surrealDB)
+		// Slice 5: per-repo LLM override stores api_key encrypted under
+		// the same sbenc:v1 envelope as ca_llm_config. Forward the same
+		// encryption opts.
+		lwRepoOpts := []db.LivingWikiRepoSettingsStoreOption{
+			db.WithLivingWikiRepoEncryptionKey(cfg.Security.EncryptionKey),
+		}
+		if strings.EqualFold(os.Getenv("SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY"), "true") {
+			lwRepoOpts = append(lwRepoOpts, db.WithLivingWikiRepoAllowUnencrypted(true))
+		}
+		lwRepoStore = db.NewLivingWikiRepoSettingsStore(surrealDB, lwRepoOpts...)
 		lwEnv := livingwiki.EnvConfig{
 			Enabled:                 cfg.LivingWiki.Enabled,
 			WorkerCount:             cfg.LivingWiki.WorkerCount,
@@ -279,7 +288,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 			llmStoreAdapter = &llmStoreResolverAdapter{store: adapter.store}
 		}
 	}
-	llmResolver := resolution.New(llmStoreAdapter, nil /* per-repo override store, slice 5 */, cfg.LLM, slog.Default())
+
+	// Slice 5: per-repo override store. Defaults to "default" tenant
+	// for the multi-tenant cutover; tenant scoping is wired through
+	// the GraphQL resolver context in enterprise mode.
+	var repoOverrideAdapter resolution.RepoOverrideStore
+	if lwRepoStore != nil {
+		// Need the *db.LivingWikiRepoSettingsStore concrete type to
+		// access decrypted fields. Type-assert; if the store is
+		// something else (in-memory test mode) skip the override.
+		if concrete, ok := lwRepoStore.(*db.LivingWikiRepoSettingsStore); ok {
+			repoOverrideAdapter = &lwRepoOverrideAdapter{
+				store:    concrete,
+				tenantID: "default",
+			}
+		}
+	}
+	llmResolver := resolution.New(llmStoreAdapter, repoOverrideAdapter, cfg.LLM, slog.Default())
 
 	// Build the LLM-aware adapter around the worker client. Every gRPC
 	// LLM RPC must flow through this Caller so resolved metadata is
@@ -667,6 +692,33 @@ func (a *llmStoreResolverAdapter) LoadLLMConfig() (*resolution.WorkspaceRecord, 
 
 func (a *llmStoreResolverAdapter) LoadLLMConfigVersion() (uint64, error) {
 	return a.store.LoadLLMConfigVersion()
+}
+
+// lwRepoOverrideAdapter bridges *db.LivingWikiRepoSettingsStore to the
+// narrow resolution.RepoOverrideStore interface. The resolver consults
+// this only for living-wiki ops (see resolution.IsLivingWikiOp).
+type lwRepoOverrideAdapter struct {
+	store    *db.LivingWikiRepoSettingsStore
+	tenantID string
+}
+
+func (a *lwRepoOverrideAdapter) LoadLivingWikiLLMOverride(ctx context.Context, repoID string) (*resolution.RepoOverride, error) {
+	if a == nil || a.store == nil || repoID == "" {
+		return nil, nil
+	}
+	settings, err := a.store.GetRepoSettings(ctx, a.tenantID, repoID)
+	if err != nil {
+		return nil, err
+	}
+	if settings == nil || settings.LLMOverride == nil {
+		return nil, nil
+	}
+	return &resolution.RepoOverride{
+		Provider: settings.LLMOverride.Provider,
+		BaseURL:  settings.LLMOverride.BaseURL,
+		APIKey:   settings.LLMOverride.APIKey,
+		Model:    settings.LLMOverride.Model,
+	}, nil
 }
 
 func (a *queueControlAdapter) LoadQueueControl() (*rest.QueueControlRecord, error) {

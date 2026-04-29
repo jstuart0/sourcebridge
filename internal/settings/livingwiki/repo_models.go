@@ -5,6 +5,44 @@ package livingwiki
 
 import "time"
 
+// LivingWikiLLMOverride is the per-repo living-wiki LLM override.
+//
+// Slice 5 of the workspace-LLM-source-of-truth plan: an advanced
+// opt-in that lets a single repo's living-wiki use a different
+// provider / API key / model from the workspace defaults. Scoped
+// explicitly to living-wiki ops in the field name so a future PR
+// must make a deliberate, audited decision to widen it to
+// QA / comprehension / requirements.
+//
+// The api_key field holds plaintext at this layer; the SurrealDB
+// store encrypts/decrypts via the same sbenc:v1 envelope used by
+// ca_llm_config.api_key (see internal/db/llm_config_store.go).
+type LivingWikiLLMOverride struct {
+	// Provider, BaseURL, Model are optional. Empty fields fall through
+	// to the workspace layer in the resolver.
+	Provider string `json:"provider,omitempty"`
+	BaseURL  string `json:"base_url,omitempty"`
+	Model    string `json:"model,omitempty"`
+
+	// APIKey is plaintext at the application layer. Empty means "use
+	// the workspace api_key" — the resolver overlays this only when
+	// the override sets a non-empty value.
+	APIKey string `json:"api_key,omitempty"`
+
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	UpdatedBy string    `json:"updated_by,omitempty"`
+}
+
+// IsEmpty reports whether the override has no fields set. Used by
+// callers to decide between "leave the override untouched" and "this
+// override is a no-op, treat as no override".
+func (o *LivingWikiLLMOverride) IsEmpty() bool {
+	if o == nil {
+		return true
+	}
+	return o.Provider == "" && o.BaseURL == "" && o.APIKey == "" && o.Model == ""
+}
+
 // RepositoryLivingWikiSettings is the per-repo living-wiki opt-in record.
 // A repo without a row in this table is treated as disabled (nil return from
 // GetRepoSettings means "not yet configured").
@@ -51,6 +89,18 @@ type RepositoryLivingWikiSettings struct {
 
 	UpdatedAt time.Time `json:"updated_at"`
 	UpdatedBy string    `json:"updated_by,omitempty"`
+
+	// LLMOverride lets the user override the workspace LLM settings for
+	// this repo's living-wiki only. Nil means "inherit workspace
+	// settings". A non-nil override with empty fields is treated as
+	// nil (see IsEmpty); the resolver only overlays non-empty fields.
+	//
+	// Scope: the resolver consults this ONLY when op is one of the
+	// living_wiki.* family (OpLivingWikiColdStart / OpLivingWikiRegen /
+	// OpLivingWikiAssembly). Other ops (QA, comprehension, etc.) ignore
+	// this field even when set. This makes the scope explicit at the
+	// resolver, not just by convention.
+	LLMOverride *LivingWikiLLMOverride `json:"living_wiki_llm_override,omitempty"`
 }
 
 // RepoWikiMode is the publish mode for a living-wiki repo.

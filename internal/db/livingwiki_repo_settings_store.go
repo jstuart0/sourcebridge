@@ -15,15 +15,43 @@ import (
 )
 
 // LivingWikiRepoSettingsStore persists per-repo living-wiki opt-in records
-// in SurrealDB. No secret fields exist on this record — all credentials live
-// on the global lw_settings row.
+// in SurrealDB. Slice 5 of the workspace-LLM-source-of-truth plan added a
+// per-repo LLM override (LivingWikiLLMOverride). When set, that override
+// includes an api_key field encrypted at rest with the same sbenc:v1
+// envelope used by ca_llm_config.
 type LivingWikiRepoSettingsStore struct {
-	client *SurrealDB
+	client           *SurrealDB
+	encryptionKey    string
+	allowUnencrypted bool
+}
+
+// LivingWikiRepoSettingsStoreOption configures optional behavior.
+type LivingWikiRepoSettingsStoreOption func(*LivingWikiRepoSettingsStore)
+
+// WithLivingWikiRepoEncryptionKey sets the encryption key used for the
+// per-repo LLM override's api_key field.
+func WithLivingWikiRepoEncryptionKey(key string) LivingWikiRepoSettingsStoreOption {
+	return func(s *LivingWikiRepoSettingsStore) {
+		s.encryptionKey = key
+	}
+}
+
+// WithLivingWikiRepoAllowUnencrypted is the OSS escape hatch.
+func WithLivingWikiRepoAllowUnencrypted(allow bool) LivingWikiRepoSettingsStoreOption {
+	return func(s *LivingWikiRepoSettingsStore) {
+		s.allowUnencrypted = allow
+	}
 }
 
 // NewLivingWikiRepoSettingsStore creates a store backed by the given SurrealDB client.
-func NewLivingWikiRepoSettingsStore(client *SurrealDB) *LivingWikiRepoSettingsStore {
-	return &LivingWikiRepoSettingsStore{client: client}
+func NewLivingWikiRepoSettingsStore(client *SurrealDB, opts ...LivingWikiRepoSettingsStoreOption) *LivingWikiRepoSettingsStore {
+	s := &LivingWikiRepoSettingsStore{client: client}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	return s
 }
 
 // Compile-time interface check.
@@ -52,6 +80,25 @@ type surrealLivingWikiRepoSettings struct {
 	DisabledAt       *surrealTime     `json:"disabled_at,omitempty"`
 	UpdatedAt        surrealTime      `json:"updated_at"`
 	UpdatedBy        string           `json:"updated_by"`
+
+	// LLMOverride is the per-repo LLM override for living-wiki ops only.
+	// Slice 5: the api_key inside is encrypted at rest under the
+	// sbenc:v1 envelope. SurrealDB tolerates missing fields on read so
+	// pre-migration rows decode unchanged (LLMOverride stays nil).
+	LLMOverride *surrealLivingWikiLLMOverride `json:"living_wiki_llm_override,omitempty"`
+}
+
+// surrealLivingWikiLLMOverride is the on-disk shape of LivingWikiLLMOverride.
+// APIKeyCipher holds the sbenc:v1-encrypted api key (or empty when no
+// key override is set, or the legacy plaintext form for any rows that
+// pre-date the encryption rollout).
+type surrealLivingWikiLLMOverride struct {
+	Provider     string       `json:"provider,omitempty"`
+	BaseURL      string       `json:"base_url,omitempty"`
+	APIKeyCipher string       `json:"api_key_cipher,omitempty"`
+	Model        string       `json:"model,omitempty"`
+	UpdatedAt    *surrealTime `json:"updated_at,omitempty"`
+	UpdatedBy    string       `json:"updated_by,omitempty"`
 }
 
 type surrealRepoWikiSink struct {
@@ -61,7 +108,7 @@ type surrealRepoWikiSink struct {
 	EditPolicy      string `json:"edit_policy,omitempty"`
 }
 
-func (r *surrealLivingWikiRepoSettings) toSettings() (*livingwiki.RepositoryLivingWikiSettings, error) {
+func (r *surrealLivingWikiRepoSettings) toSettings(decryptAPIKey func(string) (string, error)) (*livingwiki.RepositoryLivingWikiSettings, error) {
 	s := &livingwiki.RepositoryLivingWikiSettings{
 		TenantID:          r.TenantID,
 		RepoID:            r.RepoID,
@@ -101,6 +148,33 @@ func (r *surrealLivingWikiRepoSettings) toSettings() (*livingwiki.RepositoryLivi
 		s.ExcludePaths = r.ExcludePaths
 	}
 
+	// Decrypt the LLM override's api key when present. Empty cipher
+	// means "no key override" — fall through to workspace settings via
+	// the resolver's overlay logic.
+	if r.LLMOverride != nil {
+		ov := &livingwiki.LivingWikiLLMOverride{
+			Provider: r.LLMOverride.Provider,
+			BaseURL:  r.LLMOverride.BaseURL,
+			Model:    r.LLMOverride.Model,
+			UpdatedBy: r.LLMOverride.UpdatedBy,
+		}
+		if r.LLMOverride.UpdatedAt != nil {
+			ov.UpdatedAt = r.LLMOverride.UpdatedAt.Time
+		}
+		if r.LLMOverride.APIKeyCipher != "" {
+			plaintext, err := decryptAPIKey(r.LLMOverride.APIKeyCipher)
+			if err != nil {
+				return nil, fmt.Errorf("living-wiki repo override api key decrypt: %w", err)
+			}
+			ov.APIKey = plaintext
+		}
+		// Skip empty overrides (all fields blank). Distinct from "no
+		// row" but indistinguishable in resolver semantics.
+		if !ov.IsEmpty() {
+			s.LLMOverride = ov
+		}
+	}
+
 	return s, nil
 }
 
@@ -123,7 +197,28 @@ func (s *LivingWikiRepoSettingsStore) GetRepoSettings(c context.Context, tenantI
 		// No row = not yet configured; return nil without error (default-disabled).
 		return nil, nil
 	}
-	return result[0].toSettings()
+	return result[0].toSettings(s.decryptOverrideAPIKey)
+}
+
+// decryptOverrideAPIKey is the closure used by toSettings to decrypt the
+// per-repo override's api_key. Reuses the sbenc:v1 envelope helpers from
+// llm_config_store.go via a local SurrealLLMConfigStore instance — keeps
+// the encryption logic in one place.
+func (s *LivingWikiRepoSettingsStore) decryptOverrideAPIKey(stored string) (string, error) {
+	helper := &SurrealLLMConfigStore{
+		encryptionKey:    s.encryptionKey,
+		allowUnencrypted: s.allowUnencrypted,
+	}
+	return helper.decryptAPIKey(stored)
+}
+
+// encryptOverrideAPIKey is the encryption counterpart used by SetRepoSettings.
+func (s *LivingWikiRepoSettingsStore) encryptOverrideAPIKey(plaintext string) (string, error) {
+	helper := &SurrealLLMConfigStore{
+		encryptionKey:    s.encryptionKey,
+		allowUnencrypted: s.allowUnencrypted,
+	}
+	return helper.encryptAPIKey(plaintext)
 }
 
 func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, settings livingwiki.RepositoryLivingWikiSettings) error {
@@ -172,6 +267,36 @@ func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, setting
 		"updated_by":          settings.UpdatedBy,
 	}
 
+	// LLMOverride: encrypt the api_key under the same envelope as
+	// ca_llm_config. Nil or empty override results in NONE on disk so
+	// the resolver treats the repo as inheriting workspace settings.
+	llmOverrideClause := ""
+	if settings.LLMOverride != nil && !settings.LLMOverride.IsEmpty() {
+		cipher, err := s.encryptOverrideAPIKey(settings.LLMOverride.APIKey)
+		if err != nil {
+			return fmt.Errorf("living-wiki repo override api key encrypt: %w", err)
+		}
+		// Map to native Go map for SurrealDB to materialize as a record.
+		// Marshalling through the surreal*Override struct would also work
+		// but native maps are cheaper and keep the SET clause readable.
+		vars["llm_override_provider"] = settings.LLMOverride.Provider
+		vars["llm_override_base_url"] = settings.LLMOverride.BaseURL
+		vars["llm_override_api_key_cipher"] = cipher
+		vars["llm_override_model"] = settings.LLMOverride.Model
+		llmOverrideClause = `living_wiki_llm_override = {
+			provider: $llm_override_provider,
+			base_url: $llm_override_base_url,
+			api_key_cipher: $llm_override_api_key_cipher,
+			model: $llm_override_model,
+			updated_at: time::now(),
+			updated_by: $updated_by,
+		},
+		`
+	} else {
+		// Explicit clear: NONE removes the field on update.
+		llmOverrideClause = "living_wiki_llm_override = NONE,\n\t\t\t"
+	}
+
 	// last_run_at and disabled_at are option<datetime>. Build the SET clause
 	// dynamically: include each field only when set. Omitted fields default
 	// to NONE (which option<datetime> accepts). Trying to pass null/NONE
@@ -204,7 +329,7 @@ func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, setting
 			exclude_paths       = $exclude_paths,
 			stale_when_strategy = $stale_when_strategy,
 			max_pages_per_job   = $max_pages_per_job,
-			` + dateClauses + `
+			` + dateClauses + llmOverrideClause + `
 			updated_by          = $updated_by,
 			updated_at          = time::now()
 	`
@@ -228,7 +353,7 @@ func (s *LivingWikiRepoSettingsStore) ListEnabledRepos(c context.Context, tenant
 	}
 	result := make([]livingwiki.RepositoryLivingWikiSettings, 0, len(rows))
 	for i := range rows {
-		s2, err := rows[i].toSettings()
+		s2, err := rows[i].toSettings(s.decryptOverrideAPIKey)
 		if err != nil {
 			return nil, fmt.Errorf("decode row for repo %s: %w", rows[i].RepoID, err)
 		}
@@ -269,7 +394,7 @@ func (s *LivingWikiRepoSettingsStore) RepositoriesUsingSink(c context.Context, t
 
 	var result []livingwiki.RepositoryLivingWikiSettings
 	for i := range rows {
-		s2, err := rows[i].toSettings()
+		s2, err := rows[i].toSettings(s.decryptOverrideAPIKey)
 		if err != nil {
 			continue
 		}
