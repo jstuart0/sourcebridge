@@ -162,8 +162,13 @@ type RepoSettingsStore interface {
 // Implementations: [db.LivingWikiJobResultStore] (SurrealDB-backed) and
 // [MemJobResultStore] (tests).
 type JobResultStore interface {
-	// Save persists result under tenantID. Returns an error only on DB failure;
-	// duplicate JobIDs are silently replaced by the underlying UPSERT.
+	// Save persists result under tenantID. Returns an error only on DB failure.
+	//
+	// Append-only: each call creates a new row. Multiple Save calls for the
+	// same JobID will produce multiple rows. Callers must ensure at most one
+	// Save per logical run — for cold-start this is enforced by setting
+	// MaxAttempts=1 on the LLM-orchestrator EnqueueRequest so the retry loop
+	// does not invoke the runner closure twice.
 	Save(ctx context.Context, tenantID string, result *LivingWikiJobResult) error
 
 	// GetByJobID returns the result for the given jobID, or nil if not found.

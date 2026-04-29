@@ -2620,6 +2620,17 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 		TargetKey: fmt.Sprintf("lw:%s:%s", defaultTenantID, input.RepositoryID),
 		RepoID:    input.RepositoryID,
 		Priority:  llm.PriorityInteractive,
+		// MaxAttempts=1 disables the LLM-orchestrator's within-job retry for
+		// cold-start. A failed cold-start has failure modes (page-level LLM
+		// timeouts, gate exclusions, provider unreachable) that are not
+		// transient enough to warrant a 5-second-backoff in-process retry.
+		// The retry would also append a duplicate row to lw_job_results
+		// (Save is append-only; see internal/settings/livingwiki/models.go),
+		// confusing the UI by showing two consecutive "failed" rows for what
+		// the user perceives as one cold-start. Users retry explicitly via
+		// the UI; smart-resume (commit 15be8a8) skips already-published
+		// pages so the explicit retry is cheap.
+		MaxAttempts: 1,
 		RunWithContext: buildColdStartRunner(
 			r.LivingWikiLiveOrchestrator,
 			input.RepositoryID,
