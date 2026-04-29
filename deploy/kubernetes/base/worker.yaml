@@ -9,6 +9,16 @@ metadata:
     app.kubernetes.io/component: worker
 spec:
   replicas: 1
+  # Zero-disruption rolling updates: never tear down the old pod until the
+  # new one is actually accepting gRPC connections. Without this, every
+  # worker rollout creates a window where the API can't reach any worker
+  # at all and in-flight knowledge / living-wiki jobs fail with
+  # "connection refused: 10.105.15.233:50051".
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: sourcebridge-worker
@@ -40,6 +50,32 @@ spec:
             limits:
               memory: "1Gi"
               cpu: "500m"
+          # gRPC tcpSocket probe: kubelet only marks the pod Ready after
+          # the Python interpreter has bound the gRPC port. Before this
+          # probe was here, the pod went Ready the moment the container
+          # started — minutes before the Python module loader had finished
+          # — so the Service endpoint flipped to a not-yet-listening pod
+          # and clients hit immediate "connection refused".
+          #
+          # Startup probe gives the worker up to 90 s to come up cold
+          # (Python imports + ML client warmup); after that the readiness
+          # probe takes over with tighter timing for in-flight liveness.
+          startupProbe:
+            tcpSocket:
+              port: 50051
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: 50051
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: 50051
+            periodSeconds: 30
+            failureThreshold: 3
 ---
 apiVersion: v1
 kind: Service
