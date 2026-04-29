@@ -5,8 +5,25 @@ package cli
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
+
+func TestSanitizeStatusBody(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"plain text", "plain text"},
+		{"with\x1b[31mansi", "with?[31mansi"},
+		{strings.Repeat("a", 600), strings.Repeat("a", 512) + "… [truncated]"},
+		{"  \n\nbody\n  ", "body"},
+		{"emoji \xf0\x9f\x98\x80 here", "emoji ???? here"},
+	}
+	for _, tc := range cases {
+		got := sanitizeStatusBody(tc.in)
+		if got != tc.want {
+			t.Errorf("sanitizeStatusBody(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
 
 func TestFormatSymbolCount(t *testing.T) {
 	cases := []struct {

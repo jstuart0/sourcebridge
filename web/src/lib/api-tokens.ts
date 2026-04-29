@@ -24,7 +24,7 @@ export type MintTokenError =
   | { kind: "forbidden" }
   | { kind: "duplicate"; name: string }
   | { kind: "network" }
-  | { kind: "unknown"; message: string };
+  | { kind: "unknown"; message: string; status: number };
 
 export interface MintTokenResult {
   ok: true;
@@ -82,7 +82,7 @@ export async function mintApiToken(
     }
 
     const message = await readErrorText(res);
-    return { ok: false, error: { kind: "unknown", message } };
+    return { ok: false, error: { kind: "unknown", message, status: res.status } };
   } catch {
     // authFetch throws AuthFetchError on 401 (and redirects) — treat as network
     // since the redirect will handle the auth case.

@@ -43,7 +43,19 @@ export default function SettingsTokensPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [newName, setNewName] = useState(searchParams.get("suggested_name") ?? "");
+  const [newName, setNewName] = useState(() => {
+    const raw = searchParams.get("suggested_name");
+    if (!raw) return "";
+    // Allowlist: A-Z a-z 0-9 space underscore hyphen, 1–64 chars.
+    // Reject anything else silently — the field is opportunistic UX.
+    if (/^[A-Za-z0-9 _-]{1,64}$/.test(raw)) return raw;
+    return "";
+  });
+  const [nameWasPrefilled] = useState(() => {
+    const raw = searchParams.get("suggested_name");
+    return !!raw && /^[A-Za-z0-9 _-]{1,64}$/.test(raw);
+  });
+  const [showPrefilledNotice, setShowPrefilledNotice] = useState(nameWasPrefilled);
   const [creating, setCreating] = useState(false);
   const [createdToken, setCreatedToken] = useState<CreateTokenResponse | null>(null);
 
@@ -116,7 +128,10 @@ export default function SettingsTokensPage() {
           <input
             type="text"
             value={newName}
-            onChange={(e) => setNewName(e.target.value)}
+            onChange={(e) => {
+              setNewName(e.target.value);
+              setShowPrefilledNotice(false);
+            }}
             placeholder="e.g. Laptop CLI, VS Code, CI runner"
             required
             className={`flex-1 ${inputClass}`}
@@ -125,6 +140,11 @@ export default function SettingsTokensPage() {
             {creating ? "Creating…" : "Create token"}
           </Button>
         </form>
+        {showPrefilledNotice && (
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+            Token name pre-filled from URL — verify before creating.
+          </p>
+        )}
 
         {createdToken && (
           <div className="rounded-[var(--radius-md)] border border-[var(--color-success,#22c55e)] bg-[rgba(34,197,94,0.08)] p-3">

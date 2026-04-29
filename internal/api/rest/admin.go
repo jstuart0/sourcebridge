@@ -170,6 +170,13 @@ type createTokenRequest struct {
 }
 
 func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
+	// NOTE(security/M7): the `name` field has no server-side length or
+	// character validation beyond the empty-string check. The web UI's tokens
+	// page applies a client-side allowlist regex (^[A-Za-z0-9 _-]{1,64}$) for
+	// social-engineering mitigation, but a direct API call bypasses it entirely.
+	// This is acceptable for M7's threat model (the reflected name is only
+	// displayed to the victim's own session), but should be hardened if the
+	// token name ever surfaces in shared or multi-user UX (e.g. admin views).
 	var req createTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)

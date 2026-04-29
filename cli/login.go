@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -295,14 +296,25 @@ func runOIDCFlow(ctx context.Context, serverURL string, opener browserOpener) (s
 		return "", fmt.Errorf("OIDC start response is missing session_id or auth_url")
 	}
 
+	// Print where we're about to send the user. A malicious server cannot
+	// inject control chars here because url.Parse rejects them, but we
+	// still display only the parsed host (not the full URL) when auto-opening.
+	authHost := "(unknown host)"
+	if u, parseErr := url.Parse(start.AuthURL); parseErr == nil && u.Host != "" {
+		authHost = u.Host
+	}
+
 	// Open the browser (or print the URL).
 	if loginNoOpen {
-		fmt.Fprintf(os.Stdout, "Open this URL in your browser to authenticate:\n%s\n", start.AuthURL)
+		fmt.Fprintf(os.Stdout, "Open this URL in your browser to authenticate (host: %s):\n%s\n",
+			authHost, start.AuthURL)
 	} else {
 		if err := opener(start.AuthURL); err != nil {
-			fmt.Fprintf(os.Stdout, "Could not open browser automatically.\nOpen this URL in your browser:\n%s\n", start.AuthURL)
+			fmt.Fprintf(os.Stdout,
+				"Could not open browser automatically.\nOpen this URL in your browser (host: %s):\n%s\n",
+				authHost, start.AuthURL)
 		} else {
-			fmt.Fprintf(os.Stdout, "Opening browser for authentication...\n")
+			fmt.Fprintf(os.Stdout, "Opening browser to authenticate via %s...\n", authHost)
 		}
 	}
 	fmt.Fprintf(os.Stdout, "Waiting for authentication")

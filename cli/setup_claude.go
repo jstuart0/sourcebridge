@@ -109,6 +109,37 @@ type capabilitiesResponse struct {
 	Capabilities []string `json:"capabilities"`
 }
 
+// sanitizeStatusBody bounds and sanitizes a non-2xx HTTP response body
+// before it is printed to the user's terminal. Caps at 512 bytes,
+// strips control chars (other than newline/tab), and replaces
+// non-ASCII bytes with '?' so a malicious server cannot inject ANSI
+// escapes or terminal-confusing characters via an error message.
+func sanitizeStatusBody(raw string) string {
+	const maxLen = 512
+	truncated := false
+	if len(raw) > maxLen {
+		raw = raw[:maxLen]
+		truncated = true
+	}
+	var b strings.Builder
+	b.Grow(len(raw))
+	for _, c := range []byte(raw) {
+		switch {
+		case c == '\n' || c == '\t':
+			b.WriteByte(c)
+		case c < 0x20 || c > 0x7E:
+			b.WriteByte('?')
+		default:
+			b.WriteByte(c)
+		}
+	}
+	out := strings.TrimSpace(b.String())
+	if truncated {
+		out += "… [truncated]"
+	}
+	return out
+}
+
 // httpStatusError is returned by fetchClusters and the resolveToken probe when
 // the HTTP call completed (no transport error) but the server replied with a
 // non-success status. The top-level error handler uses errors.As to detect this
@@ -193,7 +224,7 @@ func validateAndPersistToken(ctx context.Context, serverURL, token string) error
 			"Error: the token you provided does not have permission to read repositories on this server.",
 		)
 	default:
-		return &httpStatusError{status: resp.StatusCode, body: strings.TrimSpace(string(rawBody))}
+		return &httpStatusError{status: resp.StatusCode, body: sanitizeStatusBody(string(rawBody))}
 	}
 }
 
@@ -224,6 +255,16 @@ func runSetupClaude(cmd *cobra.Command, args []string) error {
 	// Probe server reachability.
 	if err := probeServerReachability(ctx, serverURL); err != nil {
 		return err
+	}
+
+	// Warn when --token is used: the value is visible in process listings
+	// (/proc/<pid>/cmdline on Linux, `ps` output on macOS). This warning is
+	// intentional friction — users on shared or multi-user systems need it even
+	// more than interactive users, so it is not suppressed by --ci.
+	if strings.TrimSpace(setupClaudeToken) != "" {
+		fmt.Fprintln(os.Stderr,
+			"Note: --token values are visible in process listings (e.g. /proc/<pid>/cmdline). "+
+				"For more secure alternatives use SOURCEBRIDGE_API_TOKEN or `sourcebridge login`.")
 	}
 
 	// Resolve and (if --token was passed) validate + persist the API token.
@@ -539,7 +580,7 @@ func fetchClusters(ctx context.Context, serverURL, repoID string) (*clustersAPIR
 	}
 	if resp.StatusCode != http.StatusOK {
 		rawBody, _ := io.ReadAll(resp.Body)
-		return nil, &httpStatusError{status: resp.StatusCode, body: strings.TrimSpace(string(rawBody))}
+		return nil, &httpStatusError{status: resp.StatusCode, body: sanitizeStatusBody(string(rawBody))}
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

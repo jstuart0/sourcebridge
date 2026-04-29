@@ -36,7 +36,7 @@ sourcebridge setup claude [flags]
 |------|------|---------|-------------|
 | `--repo-id <id>` | string | auto-detect | SourceBridge repository ID. Auto-detected from the current working directory if omitted. |
 | `--server <url>` | string | config / `SOURCEBRIDGE_URL` | SourceBridge server URL. Overrides `config.toml` and the `SOURCEBRIDGE_URL` environment variable. |
-| `--token <ca_...>` | string | — | API token to use for this invocation. Validated against the server and saved to `~/.sourcebridge/token` (0600) unless `--no-save` is set. Takes precedence over `SOURCEBRIDGE_API_TOKEN`. |
+| `--token <ca_...>` | string | — | API token to use for this invocation. Validated against the server and saved to `~/.sourcebridge/token` (0600) unless `--no-save` is set. Takes precedence over `SOURCEBRIDGE_API_TOKEN`. **Security note:** values passed via `--token` are visible to other processes that can read `/proc/<pid>/cmdline` (Linux) or the equivalent on macOS/Windows. Prefer `SOURCEBRIDGE_API_TOKEN` (env var) or `sourcebridge login` (interactive) for shared or multi-user systems. |
 | `--no-save` | bool | `false` | When set alongside `--token`, the token is used but not persisted to `~/.sourcebridge/token`. |
 | `--force-token` | bool | `false` | Allow `--token` to overwrite a different token already saved in `~/.sourcebridge/token`. Without this flag the command refuses to clobber an existing credential. |
 | `--no-skills` | bool | `false` | Skip generating `.claude/CLAUDE.md`. |
@@ -187,6 +187,12 @@ sourcebridge setup claude --repo-id <id>
 ```
 
 The server URL and token are read from `~/.sourcebridge/` automatically.
+
+> **Future direction:** The repo Settings page also offers an inline wizard for
+> minting a token and generating setup commands manually. That wizard currently
+> requires pasting a literal token into your terminal once. A planned follow-up
+> will redesign it to make `sourcebridge login` the default path — so the literal
+> token never crosses the shell at all.
 
 ---
 

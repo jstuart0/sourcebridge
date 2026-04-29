@@ -32,12 +32,19 @@ type WizardState =
   | { phase: "error"; error: MintTokenError }
   | { phase: "connected"; tokenName: string };
 
+// escapeSingleQuotes makes a value safe to interpolate inside a single-quoted
+// shell string. The token format is constrained today (no quotes), but a
+// crafted server response could relax that constraint — defense in depth (L2).
+function escapeSingleQuotes(s: string): string {
+  return s.replace(/'/g, `'\\''`);
+}
+
 // ---------------------------------------------------------------------------
 // localStorage helpers — UX hint only, not a security guarantee
 // ---------------------------------------------------------------------------
 
 function connectedKey(repoId: string) {
-  return `sb:claude-code-connected:${repoId}`;
+  return `sb:claude-code-connected:${encodeURIComponent(repoId)}`;
 }
 
 function readConnectedHint(repoId: string): { tokenName: string } | null {
@@ -310,44 +317,65 @@ export function ClaudeCodeWizard({ repoId, onUseExisting }: ClaudeCodeWizardProp
   }
 
   function renderRevealed(token: CreatedToken) {
-    const setupCmd = `export SOURCEBRIDGE_API_TOKEN=${token.token}\nsourcebridge setup claude --server ${serverOrigin} --repo-id ${repoId}`;
-    const rcLine = `echo 'export SOURCEBRIDGE_API_TOKEN=${token.token}' >> ~/.zshrc`;
+    // Step 1: write the token to ~/.sourcebridge/token (0600). The token is in
+    // shell history for ONE command, but never in dotfiles or sync repos.
+    const writeTokenCmd =
+      `mkdir -p ~/.sourcebridge && umask 077 && ` +
+      `printf '%s' '${escapeSingleQuotes(token.token)}' > ~/.sourcebridge/token && ` +
+      `chmod 600 ~/.sourcebridge/token`;
+
+    // Step 2: setup command, no token on the command line. The CLI reads it
+    // from the file written in step 1 via readAPIToken().
+    const setupCmd = `sourcebridge setup claude --server '${escapeSingleQuotes(serverOrigin)}' --repo-id '${escapeSingleQuotes(repoId)}'`;
+
+    // Step 3: rc-line that reads the file at shell start. No literal token in dotfiles.
+    const rcLine = `echo 'export SOURCEBRIDGE_API_TOKEN=$(cat ~/.sourcebridge/token)' >> ~/.zshrc`;
 
     return (
       <div className="mt-3 space-y-4">
-        {/* Token reveal */}
+        {/* Token reveal — shown once for password-manager use */}
         <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-subtle)] p-3 space-y-2">
           <p className="text-xs font-medium text-[var(--text-primary)]">
-            Your API token — copy it now. It won&apos;t be shown again.
+            Your API token — copy it now if you want it in a password manager. The setup steps below also save it to disk for you.
           </p>
           <CodeBlock code={token.token} label="Copy token value" />
+        </div>
+
+        {/* Step 1: save token to disk */}
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold text-[var(--text-primary)]">
+            Step 1 — Save the token securely
+          </p>
+          <CodeBlock code={writeTokenCmd} label="Copy token-save command" />
           <p className="text-xs text-[var(--text-tertiary)]">
-            Save it somewhere safe, or let the setup command below handle it in one shot.
+            This writes your token to{" "}
+            <code className="rounded bg-[var(--bg-base)] px-1 py-0.5 text-xs">~/.sourcebridge/token</code>{" "}
+            with read-only-by-you permissions. The CLI and the MCP integration read it from that file.
           </p>
         </div>
 
-        {/* Setup command */}
+        {/* Step 2: run setup */}
         <div className="space-y-1.5">
           <p className="text-xs font-semibold text-[var(--text-primary)]">
-            Run this in your terminal
+            Step 2 — Run the setup command
           </p>
           <CodeBlock code={setupCmd} label="Copy setup command" />
           <p className="text-xs text-[var(--text-tertiary)]">
-            The export line puts your token in the environment so the CLI and Claude Code can read it.
+            The setup command picks up the token from the file above. No need to paste the token again.
           </p>
         </div>
 
-        {/* Persistence step */}
+        {/* Step 3: persist to shell profile */}
         <div className="space-y-1.5">
           <p className="text-xs font-semibold text-[var(--text-primary)]">
-            Make Claude Code use this every time
+            Step 3 — Make Claude Code use it every shell
           </p>
           <CodeBlock code={rcLine} label="Copy shell rc line" />
           <p className="text-xs text-[var(--text-tertiary)]">
             Use <code className="rounded bg-[var(--bg-base)] px-1 py-0.5 text-xs">~/.bashrc</code> on Bash,{" "}
             <code className="rounded bg-[var(--bg-base)] px-1 py-0.5 text-xs">~/.config/fish/config.fish</code> on Fish.
-            Restart Claude Code (or open a new shell) after adding it. Without this export, Claude Code
-            won&apos;t be able to authenticate to the MCP server.
+            The shell reads the token from your file at startup — it is never written into the rc file itself.
+            Restart Claude Code (or open a new shell) after adding it.
           </p>
         </div>
 
@@ -426,9 +454,22 @@ export function ClaudeCodeWizard({ repoId, onUseExisting }: ClaudeCodeWizardProp
       );
     } else {
       heading = "Something went wrong";
+      const rawMsg = (error as { kind: "unknown"; message: string; status: number }).message ?? "";
+      const truncated = rawMsg.length > 200 ? rawMsg.slice(0, 200) + "…" : rawMsg;
+      const httpStatus = (error as { kind: "unknown"; status?: number }).status;
+      // Log full message to the console for debugging without surfacing it.
+      if (typeof window !== "undefined") {
+        console.warn("[claude-code-wizard] unknown error:", rawMsg);
+      }
       body = (
         <p className="text-sm text-[var(--text-secondary)]">
-          {(error as { kind: "unknown"; message: string }).message}
+          An unexpected error occurred{httpStatus ? ` (HTTP ${httpStatus})` : ""}.
+          {truncated && (
+            <>
+              {" "}
+              <span className="text-[var(--text-tertiary)]">Details: {truncated}</span>
+            </>
+          )}
         </p>
       );
       actions = (
