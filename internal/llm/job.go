@@ -233,6 +233,13 @@ type Runtime interface {
 	// ReportSnapshotBytes records the serialized input size for debugging
 	// (e.g. how big the knowledge snapshot was).
 	ReportSnapshotBytes(bytes int)
+	// Heartbeat asserts liveness by bumping the job's updated_at timestamp
+	// without recording a progress update. Use during long phases where no
+	// percentage progress is available (e.g. blocking gRPC call) and the
+	// stale-job reaper would otherwise mark the job failed. Heartbeat
+	// bypasses the progress debounce. Returns an error only on store
+	// failures; a heartbeat to a terminal job is a no-op (returns nil).
+	Heartbeat() error
 }
 
 // JobEvent is a change notification emitted by the orchestrator as jobs

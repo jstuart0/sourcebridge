@@ -315,3 +315,5 @@ func (t testRuntime) ReportProgress(progress float64, phase, message string) {
 func (testRuntime) ReportTokens(input, output int) {}
 
 func (testRuntime) ReportSnapshotBytes(bytes int) {}
+
+func (testRuntime) Heartbeat() error { return nil }

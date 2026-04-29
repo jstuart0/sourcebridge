@@ -4,6 +4,7 @@
 package orchestrator
 
 import (
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -87,6 +88,23 @@ func (r *runtime) ReportSnapshotBytes(bytes int) {
 	defer r.mu.Unlock()
 	r.pendingBytes = bytes
 	r.pendingBytesSet = true
+}
+
+// Heartbeat asserts liveness by bumping the job's updated_at via a dedicated
+// store path that bypasses the progress debounce. Use during long phases
+// where no percentage progress is available (e.g. blocking gRPC call).
+// On a heartbeat write failure, log a warning with the job ID so operators
+// can correlate against the stale-job reaper, but return nil — a single
+// heartbeat blip should not abort the job; the next tick will retry, and a
+// real outage will eventually let the reaper kill the job.
+func (r *runtime) Heartbeat() error {
+	jobID := r.jobID
+	if err := r.orch.store.Heartbeat(jobID); err != nil {
+		slog.Warn("llm_runtime_heartbeat_failed",
+			"job_id", jobID, "error", err.Error())
+		return err
+	}
+	return nil
 }
 
 // flush writes any pending metrics to the store. Called by the

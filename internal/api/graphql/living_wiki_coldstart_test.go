@@ -249,10 +249,11 @@ type fakeRuntime struct {
 	phase    string
 }
 
-func (f *fakeRuntime) JobID() string                                  { return f.jobID }
-func (f *fakeRuntime) ReportProgress(p float64, phase, _ string)      { f.progress = p; f.phase = phase }
-func (f *fakeRuntime) ReportTokens(_, _ int)                          {}
-func (f *fakeRuntime) ReportSnapshotBytes(_ int)                      {}
+func (f *fakeRuntime) JobID() string                             { return f.jobID }
+func (f *fakeRuntime) ReportProgress(p float64, phase, _ string) { f.progress = p; f.phase = phase }
+func (f *fakeRuntime) ReportTokens(_, _ int)                     {}
+func (f *fakeRuntime) ReportSnapshotBytes(_ int)                 {}
+func (f *fakeRuntime) Heartbeat() error                          { return nil }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Criterion 1 & 2: job visible in activity feed, transitions to ready

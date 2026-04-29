@@ -50,6 +50,16 @@ type JobStore interface {
 	// debounce upstream; the store writes every call it receives.
 	SetProgress(id string, progress float64, phase, message string) error
 
+	// Heartbeat bumps updated_at to time::now() without changing any other
+	// field. Used by long-running jobs to assert liveness when no progress
+	// numbers have changed (e.g. all parallel workers stuck on slow LLM
+	// calls). Implementations should restrict the write to active jobs
+	// (pending/generating/queued) so a heartbeat on a terminal job is a
+	// safe no-op. Returns an error only on infrastructure failures (DB
+	// connection lost, schema violation). A no-op write (job already
+	// terminal) MUST return nil.
+	Heartbeat(id string) error
+
 	// SetError records a terminal failure with classified code + message.
 	// It also transitions the job to StatusFailed and stamps completed_at.
 	SetError(id string, code, message string) error

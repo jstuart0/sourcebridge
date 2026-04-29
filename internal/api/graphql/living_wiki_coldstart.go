@@ -249,30 +249,51 @@ func buildColdStartRunner(
 				fmt.Sprintf("%d/%d pages complete", done, toGenerate))
 		}
 
-		// Heartbeat: tick a progress update every 60s while Generate runs so
-		// the LLM-orchestrator stale-reaper sees fresh UpdatedAt timestamps
-		// even if no page completes for a long stretch (e.g. all parallel
+		// Heartbeat: tick liveness every 30s while Generate runs so the
+		// LLM-orchestrator stale-reaper sees fresh updated_at timestamps
+		// even when no page completes for a long stretch (e.g. all parallel
 		// workers happen to be on slow architecture pages simultaneously).
 		// Without this, sourcebridge-sized cold starts get reaped at the
 		// 30-minute "no progress" threshold even though the goroutines are
 		// still actively producing.
+		//
+		// Slice 3 of plan 2026-04-29-livingwiki-cold-start-progress.md:
+		//   - Call rt.Heartbeat() unconditionally on every tick. Heartbeat
+		//     bypasses the runtime progress debounce and writes only
+		//     updated_at, so a heartbeat blip doesn't depend on whether
+		//     ReportProgress thinks the values changed.
+		//   - Also call rt.ReportProgress() so the UI bar advances; use
+		//     toGenerate (codex r1 [Medium] — using `total` would let the
+		//     bar regress after smart-resume skips).
+		//   - Bump tick from 60s → 30s. The reaper threshold is 30 min;
+		//     30s is well within budget and gives one full retry-grace
+		//     window for any transient DB blip.
+		slog.Info("livingwiki/coldstart: heartbeat goroutine started",
+			"job_id", jobID, "repo_id", repoID, "tick_interval", "30s")
 		hbCtx, hbStop := context.WithCancel(runCtx)
 		defer hbStop()
 		go func() {
-			ticker := time.NewTicker(60 * time.Second)
+			ticker := time.NewTicker(30 * time.Second)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-hbCtx.Done():
 					return
 				case <-ticker.C:
+					if hbErr := rt.Heartbeat(); hbErr != nil {
+						slog.Warn("livingwiki/coldstart: heartbeat failed",
+							"job_id", jobID, "repo_id", repoID,
+							"error", hbErr.Error())
+						// Don't abort — next tick may succeed; the reaper
+						// has a 30-min window before it kills the job.
+					}
 					done := int(atomic.LoadInt32(&generated)) + int(atomic.LoadInt32(&excludedCount))
 					var p float64
-					if total > 0 {
-						p = 0.05 + 0.85*float64(done)/float64(total)
+					if toGenerate > 0 {
+						p = 0.05 + 0.85*float64(done)/float64(toGenerate)
 					}
 					rt.ReportProgress(p, "generating",
-						fmt.Sprintf("%d/%d pages complete", done, total))
+						fmt.Sprintf("%d/%d pages complete", done, toGenerate))
 				}
 			}
 		}()

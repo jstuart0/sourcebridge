@@ -227,6 +227,22 @@ func (s *MemStore) SetProgress(id string, progress float64, phase, message strin
 	return nil
 }
 
+// Heartbeat bumps updated_at without touching any other field. No-op for
+// terminal or unknown jobs (returns nil).
+func (s *MemStore) Heartbeat(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, ok := s.jobs[id]
+	if !ok {
+		return nil
+	}
+	if j.Status.IsTerminal() {
+		return nil
+	}
+	j.UpdatedAt = time.Now()
+	return nil
+}
+
 // SetError marks the job failed with a classified error.
 func (s *MemStore) SetError(id string, code, message string) error {
 	s.mu.Lock()

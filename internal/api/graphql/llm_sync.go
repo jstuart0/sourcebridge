@@ -77,3 +77,4 @@ func (noopRuntime) JobID() string                                              {
 func (noopRuntime) ReportProgress(progress float64, phase, message string)     {}
 func (noopRuntime) ReportTokens(input, output int)                             {}
 func (noopRuntime) ReportSnapshotBytes(bytes int)                              {}
+func (noopRuntime) Heartbeat() error                                           { return nil }

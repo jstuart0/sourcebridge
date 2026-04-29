@@ -527,6 +527,24 @@ func (s *SurrealStore) SetProgress(id string, progress float64, phase, message s
 	return err
 }
 
+// Heartbeat bumps updated_at without changing any other field. The WHERE
+// clause restricts to active jobs so a heartbeat to a terminal job is a
+// safe no-op (zero rows updated, no error).
+func (s *SurrealStore) Heartbeat(id string) error {
+	db := s.client.DB()
+	if db == nil {
+		return fmt.Errorf("database not connected")
+	}
+	_, err := queryOne[interface{}](ctx(), db,
+		`UPDATE type::thing('ca_llm_job', $id) SET
+			updated_at = time::now()
+		  WHERE status = 'pending' OR status = 'generating' OR status = 'queued'`,
+		map[string]any{
+			"id": id,
+		})
+	return err
+}
+
 // SetError marks the job failed with a classified error code.
 func (s *SurrealStore) SetError(id string, code, message string) error {
 	db := s.client.DB()

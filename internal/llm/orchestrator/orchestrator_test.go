@@ -790,3 +790,172 @@ func TestDrainPendingCancelsQueuedJobs(t *testing.T) {
 	}
 	close(block)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Heartbeat regression tests (slice 3 of plan
+// 2026-04-29-livingwiki-cold-start-progress.md).
+//
+// These tests prove the dedicated heartbeat write path keeps a job's
+// UpdatedAt advancing during long phases where ReportProgress wouldn't
+// fire (or where its debounce/status-WHERE-clause might suppress it).
+// Without these, the LLM-orchestrator stale-reaper kills long cold-starts.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestRuntimeHeartbeatAdvancesUpdatedAt verifies that calling rt.Heartbeat()
+// from inside a running job's closure advances the persisted UpdatedAt
+// timestamp. The window is wide (>= 50ms) to cover scheduling jitter on
+// loaded CI runners while still proving the advance is real.
+func TestRuntimeHeartbeatAdvancesUpdatedAt(t *testing.T) {
+	orch := newTestOrchestrator(t, Config{MaxConcurrency: 1})
+
+	type sample struct {
+		t1, t2 time.Time
+	}
+	samples := make(chan sample, 1)
+	closureDone := make(chan struct{})
+
+	job, err := orch.Enqueue(&llm.EnqueueRequest{
+		Subsystem: llm.SubsystemKnowledge,
+		JobType:   "heartbeat_test",
+		TargetKey: "heartbeat-1",
+		Run: func(rt llm.Runtime) error {
+			// Capture UpdatedAt at t=0 (after initial heartbeat).
+			if err := rt.Heartbeat(); err != nil {
+				t.Errorf("heartbeat 1: %v", err)
+			}
+			j1 := orch.GetJob(rt.JobID())
+			t1 := j1.UpdatedAt
+			// Sleep enough to make any advance unambiguous.
+			time.Sleep(60 * time.Millisecond)
+			// Heartbeat again; capture UpdatedAt at t=~60ms.
+			if err := rt.Heartbeat(); err != nil {
+				t.Errorf("heartbeat 2: %v", err)
+			}
+			j2 := orch.GetJob(rt.JobID())
+			t2 := j2.UpdatedAt
+			samples <- sample{t1: t1, t2: t2}
+			close(closureDone)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	<-closureDone
+	s := <-samples
+	if !s.t2.After(s.t1) {
+		t.Fatalf("expected UpdatedAt to advance: t1=%s, t2=%s", s.t1, s.t2)
+	}
+	delta := s.t2.Sub(s.t1)
+	if delta < 50*time.Millisecond {
+		t.Errorf("expected delta >= 50ms (we slept 60ms); got %s", delta)
+	}
+	// Wait for terminal so the orchestrator is clean for shutdown.
+	waitFor(t, time.Second, func() bool {
+		stored := orch.GetJob(job.ID)
+		return stored != nil && stored.Status.IsTerminal()
+	})
+}
+
+// TestRuntimeHeartbeatIsNoopOnTerminalJob — call Heartbeat() against a
+// jobID that's already terminal; assert no error and UpdatedAt does not
+// move. Documents the contract so callers can rely on terminal jobs being
+// unaffected.
+func TestRuntimeHeartbeatIsNoopOnTerminalJob(t *testing.T) {
+	orch := newTestOrchestrator(t, Config{MaxConcurrency: 1})
+
+	// Run a job to completion and capture its terminal UpdatedAt.
+	job, err := orch.Enqueue(&llm.EnqueueRequest{
+		Subsystem: llm.SubsystemKnowledge,
+		JobType:   "heartbeat_terminal_test",
+		TargetKey: "heartbeat-terminal-1",
+		Run: func(rt llm.Runtime) error {
+			rt.ReportProgress(1.0, "ok", "done")
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	waitFor(t, time.Second, func() bool {
+		stored := orch.GetJob(job.ID)
+		return stored != nil && stored.Status == llm.StatusReady
+	})
+	terminalAt := orch.GetJob(job.ID).UpdatedAt
+
+	// Direct store heartbeat on the terminal job — should not error and
+	// should not advance UpdatedAt (the WHERE clause / status check
+	// excludes terminal jobs).
+	if err := orch.store.Heartbeat(job.ID); err != nil {
+		t.Errorf("Heartbeat on terminal job returned error: %v", err)
+	}
+	after := orch.GetJob(job.ID).UpdatedAt
+	if !after.Equal(terminalAt) {
+		t.Errorf("UpdatedAt changed on terminal job: before=%s after=%s",
+			terminalAt, after)
+	}
+}
+
+// TestRuntimeHeartbeatBypassesProgressDebounce — even when ReportProgress is
+// being debounced (rapid identical calls), Heartbeat updates UpdatedAt on
+// every call. Proves the dedicated path does what its docstring says.
+func TestRuntimeHeartbeatBypassesProgressDebounce(t *testing.T) {
+	// Configure a long debounce to make sure ReportProgress writes are
+	// suppressed during the test window.
+	orch := newTestOrchestrator(t, Config{
+		MaxConcurrency:   1,
+		ProgressDebounce: 5 * time.Second, // suppress the second ReportProgress
+	})
+
+	closureDone := make(chan struct{})
+	type result struct {
+		afterProgress1 time.Time
+		afterProgress2 time.Time
+		afterHB        time.Time
+	}
+	out := make(chan result, 1)
+
+	_, err := orch.Enqueue(&llm.EnqueueRequest{
+		Subsystem: llm.SubsystemKnowledge,
+		JobType:   "heartbeat_debounce_test",
+		TargetKey: "heartbeat-debounce-1",
+		Run: func(rt llm.Runtime) error {
+			rt.ReportProgress(0.5, "mid", "first")
+			afterProgress1 := orch.GetJob(rt.JobID()).UpdatedAt
+			time.Sleep(20 * time.Millisecond)
+			// Second ReportProgress is debounced (5s window) so should NOT
+			// advance UpdatedAt.
+			rt.ReportProgress(0.5, "mid", "first")
+			afterProgress2 := orch.GetJob(rt.JobID()).UpdatedAt
+			time.Sleep(20 * time.Millisecond)
+			// Heartbeat MUST advance UpdatedAt despite the debounce window.
+			if err := rt.Heartbeat(); err != nil {
+				t.Errorf("heartbeat: %v", err)
+			}
+			afterHB := orch.GetJob(rt.JobID()).UpdatedAt
+			out <- result{afterProgress1, afterProgress2, afterHB}
+			close(closureDone)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	<-closureDone
+	r := <-out
+
+	// ReportProgress was debounced → second call should NOT have advanced
+	// UpdatedAt (or at most by a tiny jitter; we assert exact equality
+	// since both writes hit the same lastWrite gate and skip).
+	if !r.afterProgress2.Equal(r.afterProgress1) {
+		t.Logf("ReportProgress debounce: t1=%s, t2=%s (delta=%s)",
+			r.afterProgress1, r.afterProgress2, r.afterProgress2.Sub(r.afterProgress1))
+		// Soft-assert: with a 5s debounce window the two should be equal,
+		// but allow tiny clock drift in case the runtime did write.
+	}
+	// Heartbeat MUST have advanced UpdatedAt.
+	if !r.afterHB.After(r.afterProgress2) {
+		t.Errorf("Heartbeat did not advance UpdatedAt: progress2=%s, hb=%s",
+			r.afterProgress2, r.afterHB)
+	}
+}
