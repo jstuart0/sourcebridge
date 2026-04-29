@@ -316,6 +316,99 @@ func TestTimeBudgetAbortPersistsCompletedPages(t *testing.T) {
 	}
 }
 
+// TestPersistenceFailureMidLoopReportsOnlyDurablePages — pages 0-4 all
+// succeed in goroutines, but the store rejects SetProposed for page 3.
+// Verify result.Generated only includes pages 0-2 (the durably-persisted
+// ones), NOT pages 3-4. Codex r2b [Medium]: prevents overstating durable
+// generated count when persistence fails mid-loop.
+func TestPersistenceFailureMidLoopReportsOnlyDurablePages(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	pages := makeGlossaryPages(5, "persistfail")
+	tmpl := &erroringTemplate{
+		id:          "glossary",
+		successResp: glossaryPassMarkdown,
+	}
+
+	reg := orchestrator.NewMapRegistry(tmpl)
+	inner := orchestrator.NewMemoryPageStore()
+	// Reject the 3rd SetProposed call.
+	store := &rejectAfterNStore{
+		inner:        inner,
+		rejectAfterN: 3,
+	}
+	pr := orchestrator.NewMemoryWikiPR("pr-pf")
+	orch := orchestrator.New(orchestrator.Config{
+		RepoID:         "test",
+		MaxConcurrency: 1, // serialize so rejection is deterministic
+	}, reg, store)
+
+	result, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr})
+	if err == nil {
+		t.Fatalf("expected error from rejected SetProposed; got nil")
+	}
+	// result.Generated must reflect only pages durably persisted (the
+	// first 3, before the rejection).
+	if got, want := len(result.Generated), 3; got != want {
+		t.Errorf("Generated count: got %d, want %d (pages durably persisted before rejection)", got, want)
+	}
+	for _, p := range result.Generated {
+		_, ok, _ := inner.GetProposed(ctx, "test", "pr-pf", p.ID)
+		if !ok {
+			t.Errorf("result.Generated includes page %q that is NOT in the store", p.ID)
+		}
+	}
+}
+
+// rejectAfterNStore wraps a page store and rejects SetProposed after the
+// first N successful calls. Lets us simulate a store failure mid-persistence.
+type rejectAfterNStore struct {
+	inner        orchestrator.PageStore
+	mu           sync.Mutex
+	rejectAfterN int
+	calls        int
+}
+
+func (r *rejectAfterNStore) GetCanonical(ctx context.Context, repoID, pageID string) (ast.Page, bool, error) {
+	return r.inner.GetCanonical(ctx, repoID, pageID)
+}
+func (r *rejectAfterNStore) SetCanonical(ctx context.Context, repoID string, page ast.Page) error {
+	r.mu.Lock()
+	r.calls++
+	rejected := r.calls > r.rejectAfterN
+	r.mu.Unlock()
+	if rejected {
+		return fmt.Errorf("rejectAfterNStore: refusing call %d (limit %d)", r.calls, r.rejectAfterN)
+	}
+	return r.inner.SetCanonical(ctx, repoID, page)
+}
+func (r *rejectAfterNStore) DeleteCanonical(ctx context.Context, repoID, pageID string) error {
+	return r.inner.DeleteCanonical(ctx, repoID, pageID)
+}
+func (r *rejectAfterNStore) GetProposed(ctx context.Context, repoID, prID, pageID string) (ast.Page, bool, error) {
+	return r.inner.GetProposed(ctx, repoID, prID, pageID)
+}
+func (r *rejectAfterNStore) SetProposed(ctx context.Context, repoID, prID string, page ast.Page) error {
+	r.mu.Lock()
+	r.calls++
+	rejected := r.calls > r.rejectAfterN
+	r.mu.Unlock()
+	if rejected {
+		return fmt.Errorf("rejectAfterNStore: refusing call %d (limit %d)", r.calls, r.rejectAfterN)
+	}
+	return r.inner.SetProposed(ctx, repoID, prID, page)
+}
+func (r *rejectAfterNStore) ListProposed(ctx context.Context, repoID, prID string) ([]ast.Page, error) {
+	return r.inner.ListProposed(ctx, repoID, prID)
+}
+func (r *rejectAfterNStore) DeleteProposed(ctx context.Context, repoID, prID string) error {
+	return r.inner.DeleteProposed(ctx, repoID, prID)
+}
+func (r *rejectAfterNStore) PromoteProposed(ctx context.Context, repoID, prID string) error {
+	return r.inner.PromoteProposed(ctx, repoID, prID)
+}
+
 // ctxSensingStore wraps an orchestrator.PageStore and records whenever a
 // write call receives an already-cancelled context. Used by the time-budget
 // partial-persistence test to PROVE the orchestrator switched to a fresh

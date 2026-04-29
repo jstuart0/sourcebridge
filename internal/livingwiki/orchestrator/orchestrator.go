@@ -618,7 +618,11 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 	// short timeout so we don't hang forever on a wedged store. (codex
 	// r1b [High] — the original ctx is already cancelled when we get here
 	// on the time-budget path.)
+	// Codex r2b [Medium]: track pages that were ACTUALLY persisted, so a
+	// mid-loop store/PR failure doesn't return the full pre-write slice
+	// to callers as if all pages were durable.
 	var prID string
+	persisted := make([]ast.Page, 0, len(generated))
 	if shouldPersist && len(generated) > 0 {
 		persistCtx, persistCancel := context.WithTimeout(
 			context.WithoutCancel(parentCtx), 30*time.Second,
@@ -628,31 +632,40 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 		if cfg.DirectPublish {
 			for _, page := range generated {
 				if err := o.store.SetCanonical(persistCtx, cfg.RepoID, page); err != nil {
-					return GenerateResult{Generated: generated, Excluded: excluded, Duration: time.Since(start)},
+					return GenerateResult{Generated: persisted, Excluded: excluded, Duration: time.Since(start)},
 						fmt.Errorf("orchestrator: storing canonical page %q: %w (also: %v)", page.ID, err, genErr)
 				}
+				persisted = append(persisted, page)
 			}
 			if req.Writer != nil && len(files) > 0 {
 				if err := req.Writer.WriteFiles(persistCtx, files); err != nil {
-					return GenerateResult{Generated: generated, Excluded: excluded, Duration: time.Since(start)},
+					// All pages have been written to the store individually;
+					// the file write is the bulk path. Surface persisted
+					// store-rows so callers see what's durable.
+					return GenerateResult{Generated: persisted, Excluded: excluded, Duration: time.Since(start)},
 						fmt.Errorf("orchestrator: writing files: %w (also: %v)", err, genErr)
 				}
 			}
 		} else {
 			if req.PR == nil {
-				return GenerateResult{Generated: generated, Excluded: excluded, Duration: time.Since(start)},
+				return GenerateResult{Generated: persisted, Excluded: excluded, Duration: time.Since(start)},
 					fmt.Errorf("orchestrator: WikiPR must be non-nil in PR mode")
 			}
 			prID = req.PR.ID()
 			for _, page := range generated {
 				if err := o.store.SetProposed(persistCtx, cfg.RepoID, prID, page); err != nil {
-					return GenerateResult{Generated: generated, Excluded: excluded, PRID: prID, Duration: time.Since(start)},
+					return GenerateResult{Generated: persisted, Excluded: excluded, PRID: prID, Duration: time.Since(start)},
 						fmt.Errorf("orchestrator: storing proposed page %q: %w (also: %v)", page.ID, err, genErr)
 				}
+				persisted = append(persisted, page)
 			}
-			body := buildPRBody(generated, excluded)
+			body := buildPRBody(persisted, excluded)
 			if err := req.PR.Open(persistCtx, cfg.PRBranch, cfg.PRTitle, body, files); err != nil {
-				return GenerateResult{Generated: generated, Excluded: excluded, PRID: prID, Duration: time.Since(start)},
+				// Store rows persisted, but the PR open itself failed.
+				// Pages are durable in the page store, but no PR exists
+				// to track them. Surface what's in the store; caller can
+				// re-Open the PR if it has a recovery path.
+				return GenerateResult{Generated: persisted, Excluded: excluded, PRID: prID, Duration: time.Since(start)},
 					fmt.Errorf("orchestrator: opening PR: %w (also: %v)", err, genErr)
 			}
 		}
@@ -667,9 +680,9 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 	// but they were NOT written to the store — reporting them as
 	// "generated" overstates the durable state. Excluded entries are
 	// in-memory anyway, so they're safe to surface either way.
-	resultGenerated := generated
-	if !shouldPersist {
-		resultGenerated = nil
+	var resultGenerated []ast.Page
+	if shouldPersist {
+		resultGenerated = persisted
 	}
 	result := GenerateResult{
 		Generated: resultGenerated,
