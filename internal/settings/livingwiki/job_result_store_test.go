@@ -142,6 +142,106 @@ func exerciseJobResultStore(t *testing.T, store livingwiki.JobResultStore) {
 		}
 	})
 
+	t.Run("Save_is_idempotent_by_JobID", func(t *testing.T) {
+		// First Save records a "running" status with PagesGenerated=0.
+		first := &livingwiki.LivingWikiJobResult{
+			RepoID:         "repo-upsert",
+			JobID:          "job-upsert-001",
+			StartedAt:      now,
+			Status:         "running",
+			PagesGenerated: 0,
+		}
+		if err := store.Save(ctx, "default", first); err != nil {
+			t.Fatalf("Save 1: %v", err)
+		}
+
+		// Second Save with same JobID and a later StartedAt completes the
+		// run with status=ok and PagesGenerated=42.
+		completed := now.Add(5 * time.Second)
+		second := &livingwiki.LivingWikiJobResult{
+			RepoID:         "repo-upsert",
+			JobID:          "job-upsert-001",
+			StartedAt:      completed,
+			CompletedAt:    &completed,
+			Status:         "ok",
+			PagesGenerated: 42,
+		}
+		if err := store.Save(ctx, "default", second); err != nil {
+			t.Fatalf("Save 2: %v", err)
+		}
+
+		// GetByJobID must return the second value (upsert in place).
+		got, err := store.GetByJobID(ctx, "job-upsert-001")
+		if err != nil {
+			t.Fatalf("GetByJobID: %v", err)
+		}
+		if got == nil {
+			t.Fatal("GetByJobID returned nil after upsert")
+		}
+		if got.Status != "ok" || got.PagesGenerated != 42 {
+			t.Errorf("expected upsert: status=%q pages=%d (want ok / 42)",
+				got.Status, got.PagesGenerated)
+		}
+
+		// LastResultForRepo must also reflect the upserted state.
+		last, err := store.LastResultForRepo(ctx, "default", "repo-upsert")
+		if err != nil {
+			t.Fatalf("LastResultForRepo: %v", err)
+		}
+		if last == nil || last.Status != "ok" {
+			t.Errorf("LastResultForRepo: got %+v, want status=ok", last)
+		}
+	})
+
+	t.Run("LastResultForRepo_uses_max_StartedAt_after_upsert", func(t *testing.T) {
+		// Codex r1b [Medium]: after Save became upsert-by-job-id, the prior
+		// "reverse insertion order" lookup diverged from the Surreal
+		// "max started_at" semantics. Save A older, save B newer, then
+		// upsert A again with the newest StartedAt — A must win.
+		repoID := "repo-divergence"
+		baseTime := now
+
+		// Old A
+		oldA := &livingwiki.LivingWikiJobResult{
+			RepoID: repoID, JobID: "job-A", StartedAt: baseTime, Status: "ok",
+		}
+		if err := store.Save(ctx, "default", oldA); err != nil {
+			t.Fatalf("Save oldA: %v", err)
+		}
+		// B newer than oldA
+		bRow := &livingwiki.LivingWikiJobResult{
+			RepoID: repoID, JobID: "job-B",
+			StartedAt: baseTime.Add(1 * time.Minute), Status: "partial",
+		}
+		if err := store.Save(ctx, "default", bRow); err != nil {
+			t.Fatalf("Save bRow: %v", err)
+		}
+		// A upserted with StartedAt newer than B.
+		newA := &livingwiki.LivingWikiJobResult{
+			RepoID: repoID, JobID: "job-A",
+			StartedAt: baseTime.Add(2 * time.Minute), Status: "failed",
+		}
+		if err := store.Save(ctx, "default", newA); err != nil {
+			t.Fatalf("Save newA: %v", err)
+		}
+
+		got, err := store.LastResultForRepo(ctx, "default", repoID)
+		if err != nil {
+			t.Fatalf("LastResultForRepo: %v", err)
+		}
+		if got == nil {
+			t.Fatal("LastResultForRepo returned nil")
+		}
+		// Latest is the upserted A.
+		if got.JobID != "job-A" {
+			t.Errorf("expected JobID=job-A (upserted with newest StartedAt), got %q",
+				got.JobID)
+		}
+		if got.Status != "failed" {
+			t.Errorf("expected Status=failed (the upserted value), got %q", got.Status)
+		}
+	})
+
 	t.Run("ErrorMessage_preserved", func(t *testing.T) {
 		result := &livingwiki.LivingWikiJobResult{
 			RepoID:       "repo-err",

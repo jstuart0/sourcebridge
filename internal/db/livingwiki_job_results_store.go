@@ -94,7 +94,21 @@ func (r *surrealLWJobResult) toResult() (*livingwiki.LivingWikiJobResult, error)
 // JobResultStore interface implementation
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Save persists result. Creates a new row; results are append-only (no update).
+// Save persists result. Idempotent by JobID: a second Save with the same
+// JobID overwrites the existing row's fields. No duplicate rows are produced.
+//
+// The deterministic record id (`type::thing('lw_job_results', $job_id)`) plus
+// the unique index on `job_id` (migration 046) close the duplicate-row hazard
+// at the store layer regardless of the caller path. The previous CREATE-only
+// implementation was protected only by MaxAttempts=1 on the cold-start
+// enqueue; this is the durable fix.
+//
+// CompletedAt semantics: the SET clause omits `completed_at` when nil so an
+// option<datetime> column keeps NONE on the row. The cold-start runner only
+// ever calls Save once per job (with CompletedAt set), so the "save running
+// then save completed" pattern is not exercised in practice. If a future
+// caller needs to clear a previously-set CompletedAt, the SQL would need an
+// explicit NONE branch.
 func (s *LivingWikiJobResultStore) Save(ctx context.Context, tenantID string, result *livingwiki.LivingWikiJobResult) error {
 	db := s.client.DB()
 	if db == nil {
@@ -146,8 +160,11 @@ func (s *LivingWikiJobResultStore) Save(ctx context.Context, tenantID string, re
 		completedClause = "completed_at          = type::datetime($completed_at),\n\t\t\t    "
 	}
 
+	// UPSERT keyed on a deterministic record id derived from job_id. A
+	// second Save for the same job_id updates the existing row in place.
+	// Mirrors the pattern in livingwiki_repo_settings_store.go.
 	sql := `
-		CREATE lw_job_results
+		UPSERT type::thing('lw_job_results', $job_id)
 			SET tenant_id             = $tenant_id,
 			    repo_id               = $repo_id,
 			    job_id                = $job_id,

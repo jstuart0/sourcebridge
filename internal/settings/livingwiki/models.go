@@ -157,18 +157,23 @@ type RepoSettingsStore interface {
 }
 
 // JobResultStore persists and retrieves per-run living-wiki job outcomes.
-// Results are append-only — Save creates a new row; there is no update path.
+// Save is idempotent by JobID — a second Save with the same JobID replaces
+// the existing row in place rather than appending a new one. This matches
+// the cold-start runner's contract that one logical run produces at most
+// one durable result row, even if the runner closure is re-entered (which
+// today is prevented by MaxAttempts=1 on the LLM-orchestrator EnqueueRequest;
+// the store-level guarantee is independent of that and survives any future
+// caller path).
 //
 // Implementations: [db.LivingWikiJobResultStore] (SurrealDB-backed) and
 // [MemJobResultStore] (tests).
 type JobResultStore interface {
 	// Save persists result under tenantID. Returns an error only on DB failure.
 	//
-	// Append-only: each call creates a new row. Multiple Save calls for the
-	// same JobID will produce multiple rows. Callers must ensure at most one
-	// Save per logical run — for cold-start this is enforced by setting
-	// MaxAttempts=1 on the LLM-orchestrator EnqueueRequest so the retry loop
-	// does not invoke the runner closure twice.
+	// Upsert by JobID: a second Save with the same JobID overwrites the
+	// existing row's fields. No duplicate rows are produced. The SurrealDB
+	// implementation uses UPSERT keyed on a deterministic record id derived
+	// from JobID and is backed by a UNIQUE index on the job_id column.
 	Save(ctx context.Context, tenantID string, result *LivingWikiJobResult) error
 
 	// GetByJobID returns the result for the given jobID, or nil if not found.
