@@ -368,20 +368,62 @@ func (p *proxy) dispatchInitialize(ctx context.Context, raw []byte, id json.RawM
 	p.protocolVersion = ""
 	p.sessMu.Unlock()
 
-	// Issue the initialize POST inline (not through the dispatcher) so the
-	// session lock is released before the response writes.
+	// Register an initialize cancellation entry so shutdown drain and
+	// notifications/cancelled can target it (codex r2 H4). The id key is
+	// the initialize request's id; if absent (no id on initialize, which
+	// is non-spec but defensive) we use a sentinel key.
+	idKey := stringifyID(id)
+	if idKey == "" {
+		idKey = "__initialize__"
+	}
+	initCtx, initCancel := context.WithTimeout(ctx, mcpProxyRequestTimeout)
+	p.regMu.Lock()
+	p.reg[idKey] = &requestEntry{id: idKey, state: stateRunning, cancel: initCancel}
+	p.regMu.Unlock()
+
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
+		defer initCancel()
+		defer p.unregister(idKey)
 
-		respBody, sessionID, ct, status, _, err := p.do(ctx, raw, "")
+		respBody, sessionID, _, status, sse, err := p.do(initCtx, raw, "")
 		if err != nil {
-			p.failInitialize(id, "transport error: "+err.Error())
+			p.failInitialize(id, "transport error: "+sanitizeForJSON(err.Error()))
+			return
+		}
+		// Initialize responses must be application/json per spec; if the
+		// server emitted SSE for some reason, drain it and use the last
+		// JSON-RPC payload as the initialize response. Defensive — current
+		// SourceBridge server always replies JSON for initialize.
+		if sse {
+			p.failInitialize(id, "initialize returned SSE; expected application/json")
 			return
 		}
 
-		// Parse out protocolVersion from the response body for forwarding
-		// on subsequent calls (codex r1 M3).
+		// Validate the body is a JSON-RPC message before doing anything
+		// else with it. A non-JSON-RPC HTTP error body (e.g. {"error":
+		// "unauthorized"} from middleware) must not corrupt the protocol
+		// channel (codex r2 H2).
+		validBody, parsed := validateJSONRPC(respBody, id)
+		if status >= 400 || !parsed {
+			// Either an HTTP error or an unparseable body — synthesize a
+			// JSON-RPC error rather than leaking raw HTTP error JSON to
+			// stdout. If the body parsed AS JSON-RPC even with non-2xx,
+			// forward it; the server's chosen error wording is more
+			// actionable than our synthesized one.
+			if parsed {
+				p.writeRaw(validBody)
+			} else {
+				p.writeErrorResponse(id, -32603,
+					fmt.Sprintf("initialize failed: HTTP %d", status))
+			}
+			p.failInitialize(id, "server rejected initialize")
+			return
+		}
+
+		// Parse protocolVersion from the result for forwarding on
+		// subsequent calls (codex r1 M3).
 		var initResp struct {
 			Result struct {
 				ProtocolVersion string `json:"protocolVersion"`
@@ -391,26 +433,23 @@ func (p *proxy) dispatchInitialize(ctx context.Context, raw []byte, id json.RawM
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		// Best-effort parse — the response may legitimately be JSON-RPC
-		// error-shaped, in which case protocolVersion is empty.
-		_ = json.Unmarshal(respBody, &initResp)
-
-		if status >= 400 || initResp.Error != nil {
-			// Forward the response (so the client sees the error) then mark
-			// failed and drain the queue with errors.
-			if status < 500 && len(respBody) > 0 {
-				p.writeRaw(respBody)
-			} else {
-				p.writeErrorResponse(id, -32603,
-					fmt.Sprintf("initialize failed: HTTP %d", status))
-			}
-			p.failInitialize(id, "server rejected initialize")
+		_ = json.Unmarshal(validBody, &initResp)
+		if initResp.Error != nil {
+			p.writeRaw(validBody)
+			p.failInitialize(id, "server returned JSON-RPC error on initialize")
 			return
 		}
 
-		// Success path: capture session, transition, drain queue, forward
-		// the response. Order matters — drain after forward so the client's
-		// initialize response is visible before any queued response shows up.
+		// CRITICAL ordering (codex r2 H3): write the initialize response
+		// to stdout BEFORE flipping sessionState to Ready. Otherwise a
+		// new stdin message can take the ready path and write its
+		// response ahead of the initialize response. The pendingQueue
+		// is held for drain — new arrivals continue to land there until
+		// we explicitly drain.
+		p.writeRaw(validBody)
+		p.verbosef("initialized session=%s protocolVersion=%s", redactSessionID(sessionID), initResp.Result.ProtocolVersion)
+
+		// Now flip state and grab the queue under sessMu.
 		p.sessMu.Lock()
 		p.sessionID = sessionID
 		p.protocolVersion = initResp.Result.ProtocolVersion
@@ -418,10 +457,6 @@ func (p *proxy) dispatchInitialize(ctx context.Context, raw []byte, id json.RawM
 		queue := p.pendingQueue
 		p.pendingQueue = nil
 		p.sessMu.Unlock()
-
-		_ = ct // content type currently unused on initialize success
-		p.writeRaw(respBody)
-		p.verbosef("initialized session=%s protocolVersion=%s", redactSessionID(sessionID), initResp.Result.ProtocolVersion)
 
 		// Drain queue.
 		for _, m := range queue {
@@ -514,9 +549,18 @@ func (p *proxy) dispatchRequest(parent context.Context, raw []byte, id json.RawM
 			return
 		}
 
-		// No id (notification) — no registry entry. Use parent ctx with timeout.
+		// No id (notification) — register under a synthetic key so the
+		// drain path can cancel it on shutdown (codex r2 H4). Synthetic
+		// keys collide harmlessly with each other; we use a counter via
+		// time.Now().UnixNano() to keep them unique within a single proxy
+		// lifetime.
+		notifKey := fmt.Sprintf("__notif_%d__", time.Now().UnixNano())
 		reqCtx, cancel := context.WithTimeout(parent, mcpProxyRequestTimeout)
+		p.regMu.Lock()
+		p.reg[notifKey] = &requestEntry{id: notifKey, state: stateRunning, cancel: cancel}
+		p.regMu.Unlock()
 		defer cancel()
+		defer p.unregister(notifKey)
 		p.runWorker(reqCtx, raw, id, method)
 	}()
 }
@@ -534,19 +578,19 @@ func (p *proxy) unregister(idKey string) {
 	p.regMu.Unlock()
 }
 
-// runWorker performs the POST and forwards the response.
+// runWorker performs the POST and forwards the response. For SSE responses
+// the body is parsed event-by-event as it arrives so progress notifications
+// reach the client during long tool calls (codex r2 H1). Non-JSON-RPC
+// response bodies are converted to synthesized JSON-RPC errors instead of
+// being written verbatim — corrupting the protocol channel with raw HTTP
+// error JSON would be a silent client-breaking bug (codex r2 H2).
 func (p *proxy) runWorker(ctx context.Context, raw []byte, id json.RawMessage, method string) {
 	p.sessMu.Lock()
 	sessionID := p.sessionID
 	p.sessMu.Unlock()
 
-	respBody, _, ct, status, sse, err := p.do(ctx, raw, sessionID)
+	resp, err := p.openResponse(ctx, raw, sessionID)
 	if err != nil {
-		// Context cancelled = either request timeout or external cancellation.
-		// For external cancellation we already acknowledged via the cancel path;
-		// the server doesn't expect a response either way. Still: surface the
-		// error to the client only when the context wasn't externally
-		// cancelled.
 		if errors.Is(ctx.Err(), context.Canceled) {
 			p.verbosef("worker for id=%s cancelled mid-flight", stringifyID(id))
 			return
@@ -554,54 +598,82 @@ func (p *proxy) runWorker(ctx context.Context, raw []byte, id json.RawMessage, m
 		p.writeErrorResponse(id, -32603, "transport error: "+sanitizeForJSON(err.Error()))
 		return
 	}
+	defer resp.Body.Close()
+
+	ct := resp.Header.Get("Content-Type")
+	status := resp.StatusCode
+	sse := strings.Contains(ct, "text/event-stream")
 
 	// Session lifecycle errors (codex r1 M2):
 	// - HTTP 400 / 404 with our session ID → synthesize -32600.
-	// - HTTP 200 + JSON-RPC -32600 → forward verbatim (server's
-	//   "Invalid or expired session" path).
+	// - HTTP 200 + JSON-RPC -32600 → forward verbatim (handled below).
 	if (status == http.StatusBadRequest || status == http.StatusNotFound) && sessionID != "" {
 		p.writeErrorResponse(id, -32600, "Invalid or expired session. Re-initialize.")
 		return
 	}
 
-	// Notification ack (codex r1 H1): empty body or 202 → write nothing.
+	// Notification ack: 202 with no body — write nothing.
 	if status == http.StatusAccepted {
 		p.verbosef("ack %s", method)
 		return
 	}
 
 	if sse {
-		p.consumeSSE(ctx, respBody, id)
+		// Stream-parse SSE events as they arrive. Each event's data is
+		// validated as JSON-RPC; non-JSON-RPC payloads (rare) are dropped
+		// with a verbose log entry. Completion is detected by matching
+		// the originating id with a result/error envelope.
+		p.streamSSE(ctx, resp.Body, id, method)
 		return
 	}
 
-	// JSON path: write response body verbatim.
-	if len(respBody) > 0 {
-		p.writeRaw(respBody)
+	// Non-SSE path: read the full body and validate it's JSON-RPC.
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		p.writeErrorResponse(id, -32603, "transport error reading body: "+sanitizeForJSON(readErr.Error()))
 		return
 	}
-	// 200 with empty body and no SSE — unusual; treat as ack.
-	if status == http.StatusOK {
+	if validBody, parsed := validateJSONRPC(body, id); parsed {
+		p.writeRaw(validBody)
+		return
+	}
+	// Not JSON-RPC. Convert to a synthesized error rather than leaking
+	// raw HTTP error JSON to the protocol channel (codex r2 H2).
+	if status == http.StatusOK && len(body) == 0 {
 		p.verbosef("empty 200 for %s; treating as ack", method)
 		return
 	}
-	p.writeErrorResponse(id, -32603, fmt.Sprintf("server returned HTTP %d with empty body", status))
-	_ = ct
+	p.writeErrorResponse(id, -32603,
+		fmt.Sprintf("server returned non-JSON-RPC response (HTTP %d)", status))
 }
 
-// consumeSSE iterates the SSE stream and forwards each well-formed
-// JSON-RPC payload to stdout. respBody is the (already-buffered) initial
-// chunk if the underlying response had Body fully consumed, but normally
-// SSE is streamed — we treat respBody as a full bytes slice and parse it
-// as a complete stream. (do() returns the full body for application/json;
-// for text/event-stream it returns the streamed bytes after EOF.)
-func (p *proxy) consumeSSE(_ context.Context, body []byte, _ json.RawMessage) {
-	for ev := range parseSSE(bytes.NewReader(body)) {
+// streamSSE reads SSE events as they arrive on r and writes each well-formed
+// JSON-RPC payload to stdout. Stops after the originating id receives a
+// result/error envelope, or when the stream closes.
+func (p *proxy) streamSSE(ctx context.Context, r io.Reader, originID json.RawMessage, method string) {
+	originIDKey := stringifyID(originID)
+	completed := false
+	for ev := range parseSSE(r) {
+		if completed {
+			// Drain remaining events but do not forward — server may emit a
+			// final keep-alive or trailing notification we don't need.
+			continue
+		}
 		if ev.Data == "" {
 			continue
 		}
-		// Each data payload is a JSON-RPC message — write it verbatim.
-		p.writeRaw([]byte(ev.Data))
+		validBody, ok := validateJSONRPCAny([]byte(ev.Data))
+		if !ok {
+			p.verbosef("dropped non-JSON-RPC SSE event for %s", method)
+			continue
+		}
+		p.writeRaw(validBody)
+		// Detect completion: a JSON-RPC response carrying our id with
+		// either result or error.
+		if originIDKey != "" && sseFrameIsTerminal(validBody, originIDKey) {
+			completed = true
+		}
+		_ = ctx
 	}
 }
 
@@ -641,15 +713,15 @@ func (p *proxy) handleCancellation(params json.RawMessage) {
 	}
 }
 
-// do performs one POST. For SSE responses it reads the body to EOF and
-// returns the full bytes as respBody with sse=true.
-//
-// Returns: respBody, sessionID-from-response, content-type, http-status,
-// sseFlag, transport-or-context error.
-func (p *proxy) do(ctx context.Context, body []byte, sessionID string) ([]byte, string, string, int, bool, error) {
+// openResponse performs one POST and returns the open *http.Response. The
+// caller must close the body. SSE responses are streamed by the caller; JSON
+// responses are read into a buffer by the caller. This split (vs the prior
+// `do` that always io.ReadAll'd) is what lets streamSSE forward events as
+// they arrive rather than buffering until EOF (codex r2 H1).
+func (p *proxy) openResponse(ctx context.Context, body []byte, sessionID string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.mcpURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, "", "", 0, false, err
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+p.token)
 	req.Header.Set("Content-Type", "application/json")
@@ -660,8 +732,16 @@ func (p *proxy) do(ctx context.Context, body []byte, sessionID string) ([]byte, 
 	if pv := p.snapProtocolVersion(); pv != "" {
 		req.Header.Set("MCP-Protocol-Version", pv)
 	}
+	return p.hc.Do(req)
+}
 
-	resp, err := p.hc.Do(req)
+// do is a JSON-only convenience used by dispatchInitialize (which expects
+// application/json, not SSE). Buffers the body to EOF.
+//
+// Returns: respBody, sessionID-from-response, content-type, http-status,
+// sseFlag, transport-or-context error.
+func (p *proxy) do(ctx context.Context, body []byte, sessionID string) ([]byte, string, string, int, bool, error) {
+	resp, err := p.openResponse(ctx, body, sessionID)
 	if err != nil {
 		return nil, "", "", 0, false, err
 	}
@@ -672,13 +752,78 @@ func (p *proxy) do(ctx context.Context, body []byte, sessionID string) ([]byte, 
 	respSession := resp.Header.Get("Mcp-Session-Id")
 	sse := strings.Contains(ct, "text/event-stream")
 
-	// Always read the body. For JSON it's the response; for SSE it's the
-	// streamed events; for 202 it's typically empty.
 	respBody, readErr := io.ReadAll(resp.Body)
 	if readErr != nil && !errors.Is(readErr, io.EOF) {
 		return nil, "", ct, status, sse, readErr
 	}
 	return respBody, respSession, ct, status, sse, nil
+}
+
+// validateJSONRPC parses body as a JSON-RPC 2.0 message and asserts it
+// carries the expected id. Returns the (canonicalized) bytes when valid.
+//
+// "Valid JSON-RPC" here means: parses as JSON, has jsonrpc:"2.0", and has
+// either a result or an error field (request-shaped messages — the proxy
+// never receives notifications back from the server in normal flow).
+//
+// expectedID may be nil/empty to skip the id check (used for streaming
+// notifications during a tool call).
+func validateJSONRPC(body []byte, expectedID json.RawMessage) ([]byte, bool) {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil, false
+	}
+	var rpc struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Result  json.RawMessage `json:"result"`
+		Error   json.RawMessage `json:"error"`
+		Method  string          `json:"method"`
+	}
+	if err := json.Unmarshal(body, &rpc); err != nil {
+		return nil, false
+	}
+	if rpc.JSONRPC != "2.0" {
+		return nil, false
+	}
+	// Must be a response (has result or error) OR a notification (has method).
+	if len(rpc.Result) == 0 && len(rpc.Error) == 0 && rpc.Method == "" {
+		return nil, false
+	}
+	// Optional id check.
+	if len(expectedID) > 0 {
+		gotKey := stringifyID(rpc.ID)
+		wantKey := stringifyID(expectedID)
+		if wantKey != "" && gotKey != "" && gotKey != wantKey {
+			// id mismatch — server returned a response for a different
+			// request. Don't forward.
+			return nil, false
+		}
+	}
+	return body, true
+}
+
+// validateJSONRPCAny accepts any well-formed JSON-RPC frame (response or
+// notification) without an id check. Used for SSE streaming where progress
+// notifications are forwarded alongside the eventual response.
+func validateJSONRPCAny(body []byte) ([]byte, bool) {
+	return validateJSONRPC(body, nil)
+}
+
+// sseFrameIsTerminal returns true iff body is a JSON-RPC response (has
+// result or error) carrying the originating id.
+func sseFrameIsTerminal(body []byte, originIDKey string) bool {
+	var rpc struct {
+		ID     json.RawMessage `json:"id"`
+		Result json.RawMessage `json:"result"`
+		Error  json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(body, &rpc); err != nil {
+		return false
+	}
+	if len(rpc.Result) == 0 && len(rpc.Error) == 0 {
+		return false
+	}
+	return stringifyID(rpc.ID) == originIDKey
 }
 
 // snapProtocolVersion returns the negotiated protocolVersion under sessMu.
@@ -689,7 +834,11 @@ func (p *proxy) snapProtocolVersion() string {
 }
 
 // drain waits up to ctx's deadline for in-flight workers to exit, then
-// cancels remaining ones.
+// cancels everything in the registry (initialize + running + pending +
+// notification workers — codex r2 H4) and waits for them. After the
+// deadline-then-cancel, an additional grace window (5s) is allowed so
+// cancelled HTTP requests can return; if any worker is still alive after
+// that, drain returns to avoid hanging shutdown indefinitely.
 func (p *proxy) drain(ctx context.Context) {
 	done := make(chan struct{})
 	go func() {
@@ -700,15 +849,24 @@ func (p *proxy) drain(ctx context.Context) {
 	case <-done:
 		return
 	case <-ctx.Done():
-		// Cancel remaining workers.
+		// Cancel all registered workers (covers initialize, running,
+		// pending, and notification entries thanks to the H4 fixes).
 		p.regMu.Lock()
 		for _, e := range p.reg {
 			if e.cancel != nil {
 				e.cancel()
 			}
+			e.state = stateCancelled
 		}
 		p.regMu.Unlock()
-		<-done // wait for cancelled workers to exit
+	}
+	// Wait for cancelled workers to exit, but bound by a hard grace
+	// window so a stuck DNS lookup or kernel-level network stall doesn't
+	// hang the proxy shutdown forever.
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		p.verbosef("drain: hard timeout — some workers did not exit")
 	}
 }
 

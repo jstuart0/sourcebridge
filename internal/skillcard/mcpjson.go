@@ -176,9 +176,12 @@ func MergeMCPJSON(path, serverURL, repoID string, portable, force bool) (changed
 				}
 
 			case entryKindHTTPLegacyExact:
-				// Exact bulletproof shape — silent migrate.
+				// Exact bulletproof shape — silent migrate. The legacy
+				// shape uses the ${SOURCEBRIDGE_API_TOKEN} placeholder so
+				// the backup carries no literal token — preserve the
+				// source file's mode (typically 0644).
 				backupPath := timestampedBackupPath(path)
-				_ = os.WriteFile(backupPath, existing, 0o644)
+				writeBackupPreservingMode(backupPath, existing, path, false)
 				fmt.Fprintln(os.Stderr, "migrated SourceBridge MCP entry to stdio proxy (no env-var setup needed)")
 
 			case entryKindHTTPSameHostCustom:
@@ -191,8 +194,17 @@ func MergeMCPJSON(path, serverURL, repoID string, portable, force bool) (changed
 						filepath.Base(path),
 					)
 				}
+				// Custom HTTP entry may carry a literal token in
+				// headers["Authorization"]. Write the backup with mode
+				// 0600 so the secret isn't broadened to world-readable
+				// (codex r2 M2). Surface a stderr warning so the user
+				// knows the backup contains the previous secret.
 				backupPath := timestampedBackupPath(path)
-				_ = os.WriteFile(backupPath, existing, 0o644)
+				writeBackupPreservingMode(backupPath, existing, path, true)
+				fmt.Fprintf(os.Stderr,
+					"warning: backed up the previous Authorization header to %s (mode 0600). "+
+						"Delete it once you've confirmed the new proxy entry works.\n",
+					backupPath)
 
 			case entryKindHTTPDifferentURL:
 				if !force {
@@ -205,8 +217,10 @@ func MergeMCPJSON(path, serverURL, repoID string, portable, force bool) (changed
 
 			case entryKindBrokenStdio:
 				// v1-generated broken stdio shape — silently rewrite.
+				// The broken shape carried no token (env-var via Header
+				// substitution wasn't in v1); preserve the source mode.
 				backupPath := path + ".sb-backup"
-				_ = os.WriteFile(backupPath, existing, 0o644)
+				writeBackupPreservingMode(backupPath, existing, path, false)
 				fmt.Fprintln(os.Stderr, "migrated old SourceBridge MCP entry to stdio proxy (cloud-compatible)")
 
 			case entryKindOtherStdio:
@@ -253,6 +267,22 @@ func MergeMCPJSON(path, serverURL, repoID string, portable, force bool) (changed
 // migrations on the same file don't overwrite earlier backups.
 func timestampedBackupPath(path string) string {
 	return fmt.Sprintf("%s.sb-backup-%d", path, time.Now().Unix())
+}
+
+// writeBackupPreservingMode writes content to backupPath. When
+// containsSecret is true, the file is written with mode 0600 regardless of
+// the source file's mode — the backup may carry a literal token from the
+// previous Authorization header and we don't want to broaden permissions.
+// When containsSecret is false, the source file's mode is preserved (or
+// defaults to 0644 if the source can't be stat'd).
+func writeBackupPreservingMode(backupPath string, content []byte, srcPath string, containsSecret bool) {
+	mode := os.FileMode(0o644)
+	if containsSecret {
+		mode = 0o600
+	} else if fi, err := os.Stat(srcPath); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	_ = os.WriteFile(backupPath, content, mode)
 }
 
 // entryKind describes how an existing sourcebridge entry should be treated
@@ -336,22 +366,23 @@ func classifyExistingEntry(entry map[string]json.RawMessage, expectedMCPURL, exp
 	return entryKindOtherStdio
 }
 
-// isProxyShape returns true iff entry is a stdio-proxy entry. The strongest
-// signal is args[0] == "mcp-proxy" — `mcp-proxy` is a SourceBridge-specific
-// subcommand, so any entry whose first arg is that string is one we wrote
-// (or a hand-rolled equivalent), regardless of how `command` is spelled.
+// isProxyShape returns true iff entry is a stdio-proxy entry that we (or a
+// hand-rolled equivalent) wrote. The criteria are deliberately strict
+// (codex r2 M1) so a user-owned wrapper binary that happens to use
+// `args[0]:"mcp-proxy"` is not silently rewritten without --force:
 //
-// We additionally require `command` to be either:
-//   - "sourcebridge", or
-//   - any path whose basename is "sourcebridge"/"sourcebridge.exe", or
-//   - the path of the running binary (so test binaries that re-invoke
-//     mcp-proxy via `go test` are recognized).
+//   - `args[0]` must be "mcp-proxy" (the SourceBridge-specific subcommand), AND
+//   - `command` must be plausibly the sourcebridge binary:
+//     - the bare string "sourcebridge", OR
+//     - any path whose basename is "sourcebridge"/"sourcebridge.exe", OR
+//     - the absolute path of the currently-running binary (so go-test
+//       harnesses that re-invoke mcp-proxy via `go test` are recognized).
 //
-// The third clause is intentionally lenient: a test harness running `go test`
-// produces an entry whose `command` is the test binary path (e.g. cli.test)
-// not "sourcebridge". The args array's "mcp-proxy" + "--server" combination
-// is enough to identify the entry as proxy-shape; we don't need to gate on
-// the command spelling.
+// The third clause keeps test infrastructure working without leaking a
+// "any non-empty command" relaxation into production behavior. A real
+// user-owned wrapper at /usr/local/bin/my-wrapper invoking mcp-proxy
+// will fall into entryKindOtherStdio and require --force, which is the
+// right default.
 func isProxyShape(entry map[string]json.RawMessage) bool {
 	argsRaw, ok := entry["args"]
 	if !ok {
@@ -364,11 +395,29 @@ func isProxyShape(entry map[string]json.RawMessage) bool {
 	if len(args) == 0 || args[0] != "mcp-proxy" {
 		return false
 	}
-	// args[0]=="mcp-proxy" is the strong signal. The command field must be
-	// non-empty (every shell-spawn config has a command) but we don't require
-	// the basename to spell "sourcebridge" — that would falsely classify a
-	// test-harness entry as not-proxy.
-	return strings.TrimSpace(stringField(entry, "command")) != ""
+	cmd := stringField(entry, "command")
+	if cmd == "" {
+		return false
+	}
+	if isSourcebridgeCommand(cmd) {
+		return true
+	}
+	// Test-harness escape hatch: when the command equals the absolute
+	// path of the currently-running process (which `os.Executable()`
+	// returns under `go test`), treat it as proxy-shape so test goldens
+	// remain stable. In production, os.Executable() returns the real
+	// `sourcebridge` binary path, which already passes isSourcebridgeCommand.
+	if exe, err := os.Executable(); err == nil {
+		// Compare both the raw value and an abs-resolved value; tests
+		// can produce either form.
+		if cmd == exe {
+			return true
+		}
+		if abs, err := filepath.Abs(exe); err == nil && cmd == abs {
+			return true
+		}
+	}
+	return false
 }
 
 // isSourcebridgeCommand returns true for "sourcebridge" or any absolute path

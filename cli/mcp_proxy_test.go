@@ -511,6 +511,134 @@ func TestMCPProxy_PipelinedRequestsDispatchConcurrently(t *testing.T) {
 	}
 }
 
+// TestMCPProxy_NonJSONRPCBodyDoesNotLeakToStdout is the codex r2 H2 guard:
+// a non-JSON-RPC HTTP error body (e.g. {"error":"unauthorized"}) must NOT
+// be written verbatim to stdout — that would corrupt the protocol channel
+// for the client.
+func TestMCPProxy_NonJSONRPCBodyDoesNotLeakToStdout(t *testing.T) {
+	f, srv := newFakeMCPServer(t)
+	f.on("initialize", func(t *testing.T, w http.ResponseWriter, r *http.Request, msg map[string]interface{}) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Mcp-Session-Id", f.defaultSess)
+		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"result":{"protocolVersion":"2025-03-26"}}`, msg["id"])
+	})
+	// tools/list returns a non-JSON-RPC error body.
+	f.on("tools/list", func(t *testing.T, w http.ResponseWriter, _ *http.Request, _ map[string]interface{}) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprintf(w, `{"error":"unauthorized"}`)
+	})
+
+	stdout, _ := runProxyWith(t, srv.URL, "ca_test", []string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+	})
+	// Must NOT contain the raw {"error":"unauthorized"} body.
+	if strings.Contains(stdout, `"error":"unauthorized"`) {
+		t.Errorf("non-JSON-RPC error body leaked to stdout: %s", stdout)
+	}
+	// Must contain a synthesized JSON-RPC error response.
+	if !strings.Contains(stdout, `"id":2`) || !strings.Contains(stdout, `-32603`) {
+		t.Errorf("expected synthesized -32603 for id 2; got: %s", stdout)
+	}
+	// Every line must parse as JSON.
+	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		if line == "" {
+			continue
+		}
+		var v map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &v); err != nil {
+			t.Errorf("non-JSON line on stdout: %q (err: %v)", line, err)
+		}
+		if v["jsonrpc"] != "2.0" {
+			t.Errorf("non-JSON-RPC line on stdout: %q", line)
+		}
+	}
+}
+
+// TestMCPProxy_StreamingSSEForwardsProgressBeforeFinal is the codex r2 H1
+// guard: a long tool call's progress notifications must reach stdout
+// before the final result event. With the old "buffer-then-parse" design
+// this test would have failed because every event arrived together at EOF.
+func TestMCPProxy_StreamingSSEForwardsProgressBeforeFinal(t *testing.T) {
+	f, srv := newFakeMCPServer(t)
+	f.on("initialize", func(t *testing.T, w http.ResponseWriter, r *http.Request, msg map[string]interface{}) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Mcp-Session-Id", f.defaultSess)
+		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"result":{"protocolVersion":"2025-03-26"}}`, msg["id"])
+	})
+	f.on("tools/call", func(t *testing.T, w http.ResponseWriter, r *http.Request, msg map[string]interface{}) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("response writer is not a flusher")
+		}
+		// First event: a progress notification (no id).
+		fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progress\":0.5}}\n\n")
+		flusher.Flush()
+		time.Sleep(50 * time.Millisecond)
+		// Second event: the final result.
+		fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":%v,\"result\":{\"done\":true}}\n\n", msg["id"])
+		flusher.Flush()
+	})
+
+	stdout, _ := runProxyWith(t, srv.URL, "ca_test", []string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{}}`,
+	})
+
+	// Both events should be on stdout, in order.
+	idxProg := strings.Index(stdout, "notifications/progress")
+	idxFinal := strings.Index(stdout, `"done":true`)
+	if idxProg < 0 || idxFinal < 0 {
+		t.Fatalf("missing events; stdout:\n%s", stdout)
+	}
+	if idxProg >= idxFinal {
+		t.Errorf("progress notification did not precede final result; stdout:\n%s", stdout)
+	}
+}
+
+// TestMCPProxy_InitializeOrderingRace is the codex r2 H3 guard: a
+// follow-up request that arrives between session-state-flip and
+// initialize-response-write must not write its response ahead of the
+// initialize response. We exercise this by running a fast follow-up
+// against a slow initialize.
+func TestMCPProxy_InitializeOrderingRace(t *testing.T) {
+	f, srv := newFakeMCPServer(t)
+	releaseInit := make(chan struct{})
+	f.on("initialize", func(t *testing.T, w http.ResponseWriter, r *http.Request, msg map[string]interface{}) {
+		<-releaseInit
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Mcp-Session-Id", f.defaultSess)
+		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"result":{"protocolVersion":"2025-03-26"}}`, msg["id"])
+	})
+	f.on("tools/list", func(t *testing.T, w http.ResponseWriter, r *http.Request, msg map[string]interface{}) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"result":{"tools":[]}}`, msg["id"])
+	})
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		close(releaseInit)
+	}()
+
+	stdout, _ := runProxyWith(t, srv.URL, "ca_test", []string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+	})
+	// The initialize response (id=1) must come before tools/list response (id=2)
+	// on stdout, regardless of any internal race.
+	idxInit := strings.Index(stdout, `"id":1`)
+	idxList := strings.Index(stdout, `"id":2`)
+	if idxInit < 0 || idxList < 0 {
+		t.Fatalf("missing responses; stdout:\n%s", stdout)
+	}
+	if idxInit >= idxList {
+		t.Errorf("initialize response must precede tools/list response (codex r2 H3); stdout:\n%s", stdout)
+	}
+}
+
 // TestMCPProxy_NoToken_FailsFast asserts that an empty token causes
 // resolveProxyServerURL to short-circuit before any HTTP attempt.
 func TestMCPProxy_NoToken_FailsFast(t *testing.T) {

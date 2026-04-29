@@ -47,14 +47,24 @@ USAGE
 }
 
 # --- arg parsing -------------------------------------------------------------
+#
+# Validate required flag values BEFORE the case statement reads $2, so an
+# unterminated flag like `--prefix` (with no value) emits a clear one-line
+# error instead of tripping `set -u`.
+require_value() {
+    if [ $# -lt 2 ] || [ -z "$2" ]; then
+        echo "sourcebridge install: $1 requires a value" >&2
+        exit 2
+    fi
+}
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --prefix)        PREFIX="$2"; shift 2 ;;
+        --prefix)        require_value "$@"; PREFIX="$2"; shift 2 ;;
         --prefix=*)      PREFIX="${1#--prefix=}"; shift ;;
-        --server)        SERVER="$2"; shift 2 ;;
+        --server)        require_value "$@"; SERVER="$2"; shift 2 ;;
         --server=*)      SERVER="${1#--server=}"; shift ;;
-        --version)       VERSION="$2"; shift 2 ;;
+        --version)       require_value "$@"; VERSION="$2"; shift 2 ;;
         --version=*)     VERSION="${1#--version=}"; shift ;;
         --no-upgrade)    NO_UPGRADE=1; shift ;;
         --force-install) FORCE_INSTALL=1; shift ;;
@@ -164,10 +174,25 @@ URL_BASE="https://github.com/${OWNER_REPO}/releases/download/${VERSION}"
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT INT TERM
 
+# Probe the asset URL with HEAD first so we can distinguish "asset doesn't
+# exist for this platform" (exit 5) from "download failed mid-transfer"
+# (exit 6). curl --head exits non-zero on 4xx; wget --spider does the same.
+asset_exists() {
+    if [ "$HAVE_CURL" = "1" ]; then
+        curl -sfI "$1" >/dev/null 2>&1
+    else
+        wget --spider -q "$1"
+    fi
+}
+
+if ! asset_exists "$URL_BASE/$ARCHIVE"; then
+    echo "sourcebridge install: release ${VERSION} has no asset for ${PLATFORM}." >&2
+    echo "Browse https://github.com/${OWNER_REPO}/releases/tag/${VERSION} to confirm." >&2
+    exit 5
+fi
 if ! fetch "$URL_BASE/$ARCHIVE" "$TMPDIR/$ARCHIVE"; then
     echo "sourcebridge install: download of $URL_BASE/$ARCHIVE failed." >&2
-    echo "Release ${VERSION} may not have an asset for ${PLATFORM}." >&2
-    exit 5
+    exit 6
 fi
 
 # --- checksum verification (best-effort) -------------------------------------
