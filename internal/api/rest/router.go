@@ -29,6 +29,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/db"
 	"github.com/sourcebridge/sourcebridge/internal/events"
 	"github.com/sourcebridge/sourcebridge/internal/featureflags"
+	gitres "github.com/sourcebridge/sourcebridge/internal/git/resolution"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
@@ -85,8 +86,23 @@ func WithRepoChecker(rc middleware.RepoAccessChecker) ServerOption {
 }
 
 // WithGitConfigStore enables persistent storage of git credentials.
+//
+// R3 slice 2: prefer WithGitResolver in production. The store option
+// remains for the migration command + the InvalidateLocal nudge from
+// the PUT handler. Both store and resolver should be wired together;
+// the store is now interface-narrowed to ctx-aware methods.
 func WithGitConfigStore(store GitConfigStore) ServerOption {
 	return func(s *Server) { s.gitConfigStore = store }
+}
+
+// WithGitResolver wires the runtime git-credential resolver. The resolver
+// is the single source of truth for the default PAT and SSH key path on
+// any git op. handleGetGitConfig / handleUpdateGitConfig read the
+// resolved snapshot from this resolver and call InvalidateLocal after
+// a successful save (instead of mutating s.cfg.Git, which is env-only
+// after R3).
+func WithGitResolver(r gitres.Resolver) ServerOption {
+	return func(s *Server) { s.gitResolver = r }
 }
 
 // WithLLMConfigStore enables persistent storage of LLM configuration.
@@ -257,6 +273,13 @@ type Server struct {
 	// s.cfg.LLM (which is env-only after slice 1).
 	llmResolver resolution.Resolver // nil only in test/embedded mode without a workspace store
 	llmCaller   *llmcall.Caller     // nil when worker is unavailable
+
+	// Git source-of-truth (R3 slice 2). Single resolver shared with the
+	// GraphQL resolver. handleGetGitConfig + handleUpdateGitConfig read
+	// and InvalidateLocal on this resolver instead of mutating s.cfg.Git
+	// (which is env-bootstrap only after R3 — captured by VALUE inside
+	// the resolver and never mutated post-boot).
+	gitResolver gitres.Resolver // nil only in test/embedded mode without a workspace store
 }
 
 // qaResolverOrchestrator exposes the server's QA orchestrator to the
@@ -597,7 +620,8 @@ func (s *Server) setupRouter() {
 			Config:             s.cfg,
 			EventBus:           s.eventBus,
 			Flags:              s.flags,
-			GitConfig:          s.gitConfigStore,
+			GitConfig:          gitConfigLoaderFromStore(s.gitConfigStore),
+			GitResolver:        s.gitResolver,
 			ComprehensionStore: s.comprehensionStore,
 			HealthChecker:      s.healthChecker,
 			TrashStore:         s.trashStore,

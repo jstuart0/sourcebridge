@@ -81,11 +81,37 @@ func (s *Server) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 		"worker": map[string]interface{}{
 			"address": s.cfg.Worker.Address,
 		},
-		"git": map[string]interface{}{
-			"default_token_set": s.cfg.Git.DefaultToken != "",
-			"ssh_key_path":      s.cfg.Git.SSHKeyPath,
-		},
+		"git": adminGitView(s, r),
 	})
+}
+
+// adminGitView returns the git config view for the admin /v1/admin/config
+// snapshot. R3 slice 2: prefers the runtime resolver's snapshot so the
+// admin UI sees the same DB-backed values as live clones (rather than
+// the env-bootstrap layer of cfg.Git, which is what live deployments
+// override via the workspace settings).
+func adminGitView(s *Server, r *http.Request) map[string]interface{} {
+	if s.gitResolver != nil {
+		snap, err := s.gitResolver.Resolve(r.Context())
+		if err == nil {
+			view := map[string]interface{}{
+				"default_token_set": snap.Token != "",
+				"ssh_key_path":      snap.SSHKeyPath,
+			}
+			if snap.IntegrityError != nil {
+				view["integrity_error"] = snap.IntegrityError.Error()
+			}
+			if snap.Stale {
+				view["stale"] = true
+			}
+			return view
+		}
+	}
+	// Fallback: env-bootstrap only (embedded/test mode).
+	return map[string]interface{}{
+		"default_token_set": s.cfg.Git.DefaultToken != "",
+		"ssh_key_path":      s.cfg.Git.SSHKeyPath,
+	}
 }
 
 func (s *Server) handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request) {

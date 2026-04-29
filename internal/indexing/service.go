@@ -29,9 +29,14 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
 )
 
-// GitCredentialsFunc returns the default token + ssh key path. Runs
-// on every import — callers may reread config between invocations.
-type GitCredentialsFunc func() (token, sshKeyPath string)
+// GitCredentialsFunc returns the default token + ssh key path for the
+// current import. R3 slice 2: ctx-aware and error-returning so a
+// workspace integrity failure (corrupt envelope, missing encryption
+// key) propagates up rather than silently downgrading to env-only
+// behavior. Callers MUST surface a non-nil error as a repository-failed
+// state — this is the same fail-closed contract the GraphQL clone path
+// enforces.
+type GitCredentialsFunc func(ctx context.Context) (token, sshKeyPath string, err error)
 
 // PrewarmHook runs after a successful index with the new repository
 // ID. Optional — nil = skip.
@@ -167,7 +172,16 @@ func (s *Service) runImport(repoID, repoName, repoPath string, isRemote bool, to
 		}
 		sshKeyPath := ""
 		if s.creds != nil {
-			defaultToken, defaultSSH := s.creds()
+			defaultToken, defaultSSH, credsErr := s.creds(ctx)
+			if credsErr != nil && pullToken == "" {
+				// No request-scoped fallback and the workspace creds
+				// are unusable (corrupt envelope, missing encryption
+				// key). Fail closed — same contract the GraphQL clone
+				// path enforces. Do NOT silently downgrade to an
+				// empty token (the legacy bug).
+				s.store.SetRepositoryError(repoID, fmt.Errorf("git credentials integrity failure: %w", credsErr))
+				return
+			}
 			if pullToken == "" {
 				pullToken = defaultToken
 			}

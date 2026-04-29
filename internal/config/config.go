@@ -45,9 +45,21 @@ type ComprehensionConfig struct {
 }
 
 // GitConfig holds git credentials for cloning private repositories.
+//
+// R3 slice 2: this struct is the env-bootstrap layer of the git
+// credential resolver. cli/serve.go captures it BY VALUE into the
+// resolver and never mutates it post-boot. Production deployments
+// set the encrypted DB-backed value via the admin UI; the env var is
+// only consulted when no DB row exists (fresh install) or as a stale
+// fallback during a transient DB outage.
 type GitConfig struct {
 	DefaultToken string `mapstructure:"default_token"` // PAT used when no per-repo token is provided
 	SSHKeyPath   string `mapstructure:"ssh_key_path"`  // path to SSH private key for SSH URLs
+	// SSHKeyPathRoot is the allow-root for admin-supplied SSH key paths
+	// at save time. Empty → /etc/sourcebridge/git-keys (the homelab + OSS
+	// default mount root). Operators with a different layout point this
+	// at their own root via SOURCEBRIDGE_GIT_SSH_KEY_PATH_ROOT.
+	SSHKeyPathRoot string `mapstructure:"ssh_key_path_root"`
 }
 
 // IsDevelopment returns true when running in development mode.
@@ -503,6 +515,7 @@ func Load() (*Config, error) {
 	v.SetDefault("worker.tls.server_name", "worker.sourcebridge.svc.cluster.local")
 	v.SetDefault("git.default_token", "")
 	v.SetDefault("git.ssh_key_path", "")
+	v.SetDefault("git.ssh_key_path_root", "") // empty → resolution.DefaultSSHKeyPathRoot
 	v.SetDefault("mcp.enabled", cfg.MCP.Enabled)
 	v.SetDefault("mcp.repos", cfg.MCP.Repos)
 	v.SetDefault("mcp.session_ttl", cfg.MCP.SessionTTL)

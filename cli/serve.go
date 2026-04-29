@@ -23,11 +23,13 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/db"
+	gitres "github.com/sourcebridge/sourcebridge/internal/git/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/health"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
+	"github.com/sourcebridge/sourcebridge/internal/secretcipher"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/assembly"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/credentials"
 	lwmetrics "github.com/sourcebridge/sourcebridge/internal/livingwiki/metrics"
@@ -230,6 +232,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	jwtMgr := auth.NewJWTManager(cfg.Security.JWTSecret, cfg.Security.JWTTTLMinutes, cfg.Edition)
 	var authPersister auth.AuthPersister
 	var gitConfigStore rest.GitConfigStore
+	var gitConfigStoreConcrete *db.SurrealGitConfigStore // typed handle for the resolver
 	var llmConfigStore rest.LLMConfigStore
 	var queueControlStore rest.QueueControlStore
 	var tokenStore auth.APITokenStore
@@ -242,19 +245,34 @@ func runServe(cmd *cobra.Command, args []string) error {
 		desktopAuthStore = rest.NewSurrealDesktopAuthStore(surrealDB)
 		slog.Info("auth persistence enabled via SurrealDB")
 
-		// Load persisted git config (DB values fill in where env vars are empty)
-		gcs := db.NewSurrealGitConfigStore(surrealDB)
-		gitConfigStore = gcs
-		if token, sshKey, err := gcs.LoadGitConfig(); err == nil {
-			if cfg.Git.DefaultToken == "" && token != "" {
-				cfg.Git.DefaultToken = token
-				slog.Info("loaded git token from database")
-			}
-			if cfg.Git.SSHKeyPath == "" && sshKey != "" {
-				cfg.Git.SSHKeyPath = sshKey
-				slog.Info("loaded git SSH key path from database")
+		// R3 slice 2: git creds source-of-truth. The legacy boot-time
+		// merge below (which let cfg.Git.DefaultToken win whenever the
+		// env var was set) is gone — same shape of bug as the LLM
+		// workstream fixed in R1/R2. cfg.Git is now ONLY the env-bootstrap
+		// layer of the git resolver; the resolver reads ca_git_config on
+		// every Resolve via a version-keyed cache so an admin save on
+		// replica A is visible to replica B on the very next clone.
+		//
+		// default_token is encrypted at rest under the sbenc:v1 envelope
+		// (same cipher as ca_llm_config). The encryption key comes from
+		// cfg.Security.EncryptionKey; the OSS escape hatch
+		// SOURCEBRIDGE_ALLOW_UNENCRYPTED_GIT_TOKEN keeps the LLM naming
+		// convention. cfg.Git is captured by VALUE into the resolver and
+		// MUST NOT be mutated post-boot.
+		gitCipher := secretcipher.NewAESGCMCipher(
+			cfg.Security.EncryptionKey,
+			strings.EqualFold(os.Getenv("SOURCEBRIDGE_ALLOW_UNENCRYPTED_GIT_TOKEN"), "true"),
+		)
+		if !gitCipher.HasKey() {
+			if gitCipher.AllowsUnencrypted() {
+				slog.Warn("git config: SOURCEBRIDGE_ALLOW_UNENCRYPTED_GIT_TOKEN=true — admin saves of default_token may land in plaintext on disk (OSS dev only)")
+			} else {
+				slog.Warn("git config: SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY is unset — admin saves of default_token will return 422 unless ALLOW_UNENCRYPTED is on (set the encryption key in production)")
 			}
 		}
+		gcs := db.NewSurrealGitConfigStore(surrealDB, db.WithGitConfigCipher(gitCipher))
+		gitConfigStore = gcs
+		gitConfigStoreConcrete = gcs
 
 		// Load persisted LLM config store. The legacy boot-time merge
 		// (where DB values were applied onto cfg.LLM and env vars
@@ -359,6 +377,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}
 	llmResolver := resolution.New(llmStoreAdapter, repoOverrideAdapter, cfg.LLM, slog.Default())
+
+	// R3 slice 2: build the runtime git-credential resolver. Mirrors the
+	// LLM resolver above. cfg.Git is the env-bootstrap layer (captured by
+	// VALUE inside the resolver and never mutated post-boot). The
+	// workspace store is layer 1; on every Resolve the resolver consults
+	// the version cell so admin saves on a peer replica are visible
+	// without polling. nil store ⇒ embedded mode without persistence;
+	// resolver still serves env-bootstrap cleanly.
+	var gitResolver gitres.Resolver
+	if gitConfigStoreConcrete != nil {
+		gitResolver = gitres.New(gitConfigStoreConcrete, cfg.Git, slog.Default())
+	} else {
+		gitResolver = gitres.New(nil, cfg.Git, slog.Default())
+	}
 
 	// Build the LLM-aware adapter around the worker client. Every gRPC
 	// LLM RPC must flow through this Caller so resolved metadata is
@@ -482,6 +514,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		rest.WithKnowledgeStore(knowledgeStore),
 		rest.WithJobStore(jobStore),
 		rest.WithGitConfigStore(gitConfigStore),
+		rest.WithGitResolver(gitResolver),
 		rest.WithLLMConfigStore(llmConfigStore),
 		rest.WithLLMResolver(llmResolver),
 		rest.WithLLMCaller(llmCaller),

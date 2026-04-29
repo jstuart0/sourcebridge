@@ -2,6 +2,7 @@ package graphql
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/entitlements"
 	"github.com/sourcebridge/sourcebridge/internal/events"
 	"github.com/sourcebridge/sourcebridge/internal/featureflags"
+	gitres "github.com/sourcebridge/sourcebridge/internal/git/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/health"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
@@ -29,7 +31,11 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 )
 
-// GitConfigLoader reads git credentials from persistent storage.
+// GitConfigLoader is the legacy adapter the graphql package used before
+// R3 slice 2 introduced gitres.Resolver. It is kept ONLY to preserve
+// the option name on rest.Server for backward-compatible test wiring
+// (the live runtime path uses Resolver.GitResolver). When both are set,
+// the resolver wins.
 type GitConfigLoader interface {
 	LoadGitConfig() (token, sshKeyPath string, err error)
 }
@@ -56,7 +62,14 @@ type Resolver struct {
 	Config             *config.Config             // application configuration
 	EventBus           *events.Bus                // in-process event bus for SSE notifications
 	Flags              featureflags.Flags         // backend startup-time feature flags
-	GitConfig          GitConfigLoader            // reads git credentials from DB (multi-replica safe)
+	GitConfig          GitConfigLoader            // legacy; nil-safe — when GitResolver is set it's authoritative
+	// GitResolver is the runtime git-credential resolver (R3 slice 2).
+	// All clone / fetch / upstream-probe call sites resolve credentials
+	// through this resolver so an admin save on replica A is visible to
+	// replica B on the very next op (version-cell pattern). When nil,
+	// resolveGitCredentials falls back to the legacy GitConfig loader
+	// (test wiring) and finally r.Config.Git (in-memory env bootstrap).
+	GitResolver gitres.Resolver
 	ComprehensionStore comprehension.Store        // comprehension settings + model capabilities; nil when unavailable
 	HealthChecker      *health.Checker            // shared DB+worker health probe; nil = no live checks (embedded/test mode)
 	LivingWikiStore              livingwiki.Store              // living-wiki UI settings; nil when unavailable
@@ -87,12 +100,39 @@ func (r *Resolver) getStore(ctx context.Context) graph.GraphStore {
 	return r.Store
 }
 
-// resolveGitCredentials returns the current git token and SSH key path,
-// reading from the database for multi-replica consistency. Falls back to
-// the in-memory config if no database store is available.
-func (r *Resolver) resolveGitCredentials() (token, sshKeyPath string) {
+// resolveGitCredentials returns the current git token and SSH key path
+// via the runtime git resolver (R3 slice 2). The resolver enforces the
+// same source order as the LLM resolver: workspace DB > env-bootstrap >
+// builtin. On a workspace-row decrypt failure (corruption, missing key,
+// etc.) the resolver returns an empty Token and a non-nil
+// Snapshot.IntegrityError; this function surfaces that as a non-nil err
+// — callers MUST check it and abort their operation rather than silently
+// fall back to an env-only value (fail-closed; same semantics the LLM
+// path enforces for ca_llm_config).
+//
+// Context is threaded so a cancelled GraphQL request bypasses the DB
+// version probe rather than completing on context.Background.
+//
+// Backward-compat: when r.GitResolver is nil (e.g. older test wiring) we
+// fall back to the legacy GitConfigLoader path. The legacy path cannot
+// surface IntegrityError — it only ever returns env-shadowed values —
+// so production deployments MUST wire the resolver.
+func (r *Resolver) resolveGitCredentials(ctx context.Context) (token, sshKeyPath string, err error) {
+	if r.GitResolver != nil {
+		snap, resolveErr := r.GitResolver.Resolve(ctx)
+		if resolveErr != nil {
+			return "", "", fmt.Errorf("resolve git creds: %w", resolveErr)
+		}
+		if snap.IntegrityError != nil {
+			// Hard fail-closed: corrupt envelope or missing key.
+			return "", "", fmt.Errorf("git creds integrity failure: %w", snap.IntegrityError)
+		}
+		return snap.Token, snap.SSHKeyPath, nil
+	}
+
+	// Legacy fallback (test wiring).
 	if r.GitConfig != nil {
-		if t, s, err := r.GitConfig.LoadGitConfig(); err == nil {
+		if t, s, lerr := r.GitConfig.LoadGitConfig(); lerr == nil {
 			if t != "" {
 				token = t
 			}
@@ -100,17 +140,16 @@ func (r *Resolver) resolveGitCredentials() (token, sshKeyPath string) {
 				sshKeyPath = s
 			}
 		} else {
-			slog.Warn("failed to load git config from database, using in-memory", "error", err)
+			slog.Warn("failed to load git config from database, using in-memory", "error", lerr)
 		}
 	}
-	// Fall back to in-memory config for anything the DB didn't provide
 	if token == "" && r.Config != nil {
 		token = r.Config.Git.DefaultToken
 	}
 	if sshKeyPath == "" && r.Config != nil {
 		sshKeyPath = r.Config.Git.SSHKeyPath
 	}
-	return
+	return token, sshKeyPath, nil
 }
 
 // publishEvent safely publishes to the event bus if available.

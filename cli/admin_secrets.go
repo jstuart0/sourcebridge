@@ -12,6 +12,7 @@ import (
 
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/db"
+	"github.com/sourcebridge/sourcebridge/internal/secretcipher"
 )
 
 // migrateLLMSecretsCmd re-encrypts ca_llm_config.api_key under the v1
@@ -101,6 +102,66 @@ func runMigrateLLMSecrets(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// migrateGitSecretsCmd re-encrypts ca_git_config.default_token under the
+// v1 envelope. Idempotent — rows that already start with `sbenc:v1:` are
+// left alone. Run once after rolling out R3 slice 2, then never again
+// unless the encryption key rotates.
+//
+// Read-only when there is no plaintext row to migrate; one UPDATE per
+// legacy row. Concurrent saves are not coordinated; the SurrealDB UPSERT
+// is atomic and the version stamp bumps so resolvers on other replicas
+// will refetch on their next probe.
+var migrateGitSecretsCmd = &cobra.Command{
+	Use:   "migrate-git-secrets",
+	Short: "Re-encrypt the saved git default_token under the sbenc:v1 envelope",
+	Long: `Re-encrypts the default_token column of the ca_git_config workspace
+record under the v1 envelope ("sbenc:v1:" + base64(nonce || ciphertext)).
+
+Read the existing value transparently (encrypted or legacy plaintext),
+then re-save under the configured SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY.
+
+Idempotent: rows already encrypted under the v1 envelope are skipped.
+The version stamp on the row is bumped on save so resolver instances
+on other replicas pick up the change on their next probe.
+
+Requires SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY to be set unless
+SOURCEBRIDGE_ALLOW_UNENCRYPTED_GIT_TOKEN=true (OSS dev only).`,
+	RunE: runMigrateGitSecrets,
+}
+
+func runMigrateGitSecrets(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if cfg.Storage.SurrealMode != "external" {
+		return fmt.Errorf("migrate-git-secrets requires external SurrealDB (storage.surreal_mode=external); embedded mode has nothing to migrate")
+	}
+
+	surrealDB := db.NewSurrealDB(cfg.Storage)
+	if err := surrealDB.Connect(context.Background()); err != nil {
+		return fmt.Errorf("connect to SurrealDB: %w", err)
+	}
+	defer surrealDB.Close()
+
+	// Build the cipher under the configured key (or refuse if neither
+	// the key nor the OSS escape hatch is on).
+	cipher := secretcipher.NewAESGCMCipher(cfg.Security.EncryptionKey, false)
+	if !cipher.HasKey() {
+		return fmt.Errorf("migrate-git-secrets: SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY must be set; refusing to migrate to a no-op encryption")
+	}
+
+	store := db.NewSurrealGitConfigStore(surrealDB, db.WithGitConfigCipher(cipher))
+	if err := store.MigrateGitSecrets(context.Background()); err != nil {
+		return fmt.Errorf("migrate-git-secrets: %w", err)
+	}
+
+	slog.Info("git secrets migration complete (idempotent — already-encrypted rows skipped, plaintext rows re-saved with version bumped)")
+	fmt.Println("migrate-git-secrets: ca_git_config.default_token now under sbenc:v1 envelope (or empty)")
+	return nil
+}
+
 func init() {
 	rootCmd.AddCommand(migrateLLMSecretsCmd)
+	rootCmd.AddCommand(migrateGitSecretsCmd)
 }

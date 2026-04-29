@@ -97,10 +97,29 @@ func (r *Resolver) resolveUpstreamStatus(ctx context.Context, repo *graphstore.R
 		}
 	}
 
-	token, _ := r.resolveGitCredentials()
-	// Repo-level token overrides workspace-level.
+	token, _, credsErr := r.resolveGitCredentials(ctx)
+	// Repo-level token overrides workspace-level. When the repo has its
+	// own token, an integrity failure on the workspace token is irrelevant
+	// — the repo-scoped token is what we'll use.
 	if repo.AuthToken != "" {
 		token = repo.AuthToken
+		credsErr = nil
+	}
+	if credsErr != nil {
+		// Workspace credentials are unusable AND no repo-level override.
+		// Surface a soft UNREACHABLE so the UI doesn't pin a dismissable
+		// error on the user; the structured log + the resolver's own
+		// integrity log line tell the operator what's wrong. We keep the
+		// existing soft-fail UX shape (the previous code path silently
+		// continued with no token, leading to opaque 401s upstream).
+		slog.Warn("upstream-status: git credential integrity failure; surfacing UNREACHABLE",
+			"repo_id", repo.ID, "error", credsErr)
+		return &RepositoryUpstreamStatus{
+			Status:           UpstreamStatusUnreachable,
+			IndexedCommitSha: ptrStringOrNil(repo.CommitSHA),
+			CheckedAt:        time.Now().UTC(),
+			ErrorMessage:     ptrStringOrNil(credsErr.Error()),
+		}
 	}
 
 	branch := repo.Branch

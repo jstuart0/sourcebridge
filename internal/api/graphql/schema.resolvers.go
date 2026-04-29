@@ -139,7 +139,12 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 		}
 		localPath = cloneDir
 
-		defaultToken, sshKeyPath := r.resolveGitCredentials()
+		defaultToken, sshKeyPath, credsErr := r.resolveGitCredentials(ctx)
+		// repo.AuthToken (if set) shadows the workspace token and makes a
+		// workspace integrity error irrelevant. Otherwise fail closed.
+		if credsErr != nil && repo.AuthToken == "" {
+			return nil, fmt.Errorf("git credentials integrity failure (refresh blocked; admin must re-save the workspace git config or set the encryption key): %w", credsErr)
+		}
 		pullToken := repo.AuthToken
 		if pullToken == "" {
 			pullToken = defaultToken
@@ -2645,6 +2650,7 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 			r.LivingWikiRepoStore,
 			r.ClusterStore,
 			r.KnowledgeStore,
+			nil, // metrics: fall back to lwmetrics.Default
 		),
 	}
 

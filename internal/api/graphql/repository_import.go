@@ -29,11 +29,20 @@ func (r *mutationResolver) importRepository(repoID, repoName, repoPath string, i
 		if token != nil {
 			pullToken = *token
 		}
+		// Resolve workspace credentials once. If the repo carries its own
+		// auth_token (the explicit, request-scoped form) we keep using
+		// that and ignore a workspace integrity error — the repo-level
+		// token would override anyway.
+		defaultToken, sshKeyPath, credsErr := r.resolveGitCredentials(ctx)
+		if credsErr != nil && pullToken == "" {
+			// No request-scoped fallback and the workspace creds are
+			// unusable (corrupt envelope, missing key). Fail closed.
+			store.SetRepositoryError(repoID, fmt.Errorf("git credentials integrity failure: %w", credsErr))
+			return
+		}
 		if pullToken == "" {
-			defaultToken, _ := r.resolveGitCredentials()
 			pullToken = defaultToken
 		}
-		_, sshKeyPath := r.resolveGitCredentials()
 		if err := os.MkdirAll(filepath.Dir(cloneDir), 0o755); err != nil {
 			store.SetRepositoryError(repoID, fmt.Errorf("creating clone dir: %w", err))
 			return
