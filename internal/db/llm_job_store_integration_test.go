@@ -195,3 +195,60 @@ func TestSurrealJobResultStoreSaveIsIdempotentByJobID(t *testing.T) {
 		t.Errorf("expected exactly 1 row for job_id=upsert-job-1, got %d", n)
 	}
 }
+
+// TestSurrealStoreLLMProviderRoundTrip verifies that Job.LLMProvider and
+// JobLogEntry.LLMProvider survive a full Surreal round-trip (Create + GetByID
+// + Update + AppendLog + ListLogs). R3 slice 3 — the column was added in
+// migration 049 and the DB driver must read/write it through the named
+// `llm_provider` field.
+func TestSurrealStoreLLMProviderRoundTrip(t *testing.T) {
+	s := startSurrealContainer(t)
+	store := NewSurrealStore(s)
+
+	job := newTestJob("tk-llmprovider-1", "repo-llmprov-1")
+	job.LLMProvider = "anthropic"
+	created, err := store.Create(job)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.LLMProvider != "anthropic" {
+		t.Fatalf("Create round-trip llm_provider: got %q, want anthropic", created.LLMProvider)
+	}
+
+	got := store.GetByID(job.ID)
+	if got == nil || got.LLMProvider != "anthropic" {
+		t.Fatalf("GetByID llm_provider: got %+v", got)
+	}
+
+	// Update path — change the provider and confirm it persists.
+	got.LLMProvider = "openai"
+	if err := store.Update(got); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got2 := store.GetByID(job.ID)
+	if got2 == nil || got2.LLMProvider != "openai" {
+		t.Fatalf("Update round-trip llm_provider: got %+v", got2)
+	}
+
+	// Append a log line and verify llm_provider is written and read back.
+	entry, err := store.AppendLog(&llm.JobLogEntry{
+		JobID:       job.ID,
+		Subsystem:   llm.SubsystemKnowledge,
+		JobType:     "test_job",
+		LLMProvider: "openai",
+		Level:       llm.LogLevelInfo,
+		Event:       "test",
+		Message:     "test",
+		Sequence:    time.Now().UnixNano(),
+	})
+	if err != nil {
+		t.Fatalf("AppendLog: %v", err)
+	}
+	if entry == nil || entry.LLMProvider != "openai" {
+		t.Fatalf("AppendLog llm_provider: got %+v", entry)
+	}
+	logs := store.ListLogs(job.ID, llm.JobLogFilter{})
+	if len(logs) != 1 || logs[0].LLMProvider != "openai" {
+		t.Fatalf("ListLogs llm_provider round-trip failed: %+v", logs)
+	}
+}

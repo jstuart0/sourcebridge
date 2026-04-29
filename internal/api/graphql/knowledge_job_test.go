@@ -40,7 +40,7 @@ func TestEnqueueKnowledgeJobCreatesQueuedKnowledgeJob(t *testing.T) {
 	}
 
 	block := make(chan struct{})
-	err = r.enqueueKnowledgeJob(artifact, "seed:cliff_notes", 1234, func(_ context.Context, rt llm.Runtime) error {
+	err = r.enqueueKnowledgeJob(context.Background(), artifact, "seed:cliff_notes", 1234, func(_ context.Context, rt llm.Runtime) error {
 		rt.ReportProgress(0.2, "snapshot", "queued")
 		<-block
 		return nil
@@ -136,7 +136,7 @@ func TestKnowledgeJobsShareGlobalConcurrencyGate(t *testing.T) {
 	releaseRunning := make(chan struct{})
 
 	first := makeArtifact("repo-1", knowledge.ArtifactCliffNotes)
-	if err := r.enqueueKnowledgeJob(first, "cliff_notes", 100, func(_ context.Context, rt llm.Runtime) error {
+	if err := r.enqueueKnowledgeJob(context.Background(), first, "cliff_notes", 100, func(_ context.Context, rt llm.Runtime) error {
 		rt.ReportProgress(0.25, "generating", "first")
 		entered <- "cliff_notes"
 		<-releaseRunning
@@ -146,7 +146,7 @@ func TestKnowledgeJobsShareGlobalConcurrencyGate(t *testing.T) {
 	}
 
 	second := makeArtifact("repo-1", knowledge.ArtifactCodeTour)
-	if err := r.enqueueKnowledgeJob(second, "code_tour", 100, func(_ context.Context, rt llm.Runtime) error {
+	if err := r.enqueueKnowledgeJob(context.Background(), second, "code_tour", 100, func(_ context.Context, rt llm.Runtime) error {
 		rt.ReportProgress(0.25, "generating", "second")
 		entered <- "code_tour"
 		<-releaseRunning
@@ -203,7 +203,7 @@ func TestRepositoryCliffNotesJobsDoNotAutoRetry(t *testing.T) {
 		KnowledgeStore: knowledgeStore,
 		Orchestrator:   orch,
 	}
-	if err := r.enqueueKnowledgeJob(artifact, "cliff_notes", 256, func(_ context.Context, _ llm.Runtime) error {
+	if err := r.enqueueKnowledgeJob(context.Background(), artifact, "cliff_notes", 256, func(_ context.Context, _ llm.Runtime) error {
 		return nil
 	}); err != nil {
 		t.Fatalf("enqueueKnowledgeJob: %v", err)

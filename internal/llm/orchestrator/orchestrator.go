@@ -367,6 +367,9 @@ func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 	}
 
 	// Materialize the job and persist it.
+	// R3 slice 3: req.LLMProvider lands on job.LLMProvider so the Monitor
+	// page and per-provider metrics can attribute work without joining
+	// back to a workspace settings snapshot.
 	job := &llm.Job{
 		ID:               id,
 		Subsystem:        req.Subsystem,
@@ -374,6 +377,7 @@ func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 		TargetKey:        req.TargetKey,
 		Strategy:         req.Strategy,
 		Model:            req.Model,
+		LLMProvider:      req.LLMProvider,
 		ArtifactID:       req.ArtifactID,
 		RepoID:           req.RepoID,
 		Priority:         req.Priority,
@@ -496,6 +500,9 @@ func (o *Orchestrator) AppendJobLog(jobID string, level llm.JobLogLevel, phase, 
 		ArtifactID:  job.ArtifactID,
 		Subsystem:   job.Subsystem,
 		JobType:     job.JobType,
+		// R3 slice 3: mirror the parent job's LLMProvider so per-log-line
+		// queries / metrics can attribute work without joining the job row.
+		LLMProvider: job.LLMProvider,
 		Level:       level,
 		Phase:       phase,
 		Event:       event,

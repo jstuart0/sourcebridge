@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/sourcebridge/sourcebridge/internal/api/middleware"
 	"github.com/sourcebridge/sourcebridge/internal/capabilities"
@@ -20,6 +21,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/credentials"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/governance"
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
+	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
@@ -150,6 +152,82 @@ func (r *Resolver) resolveGitCredentials(ctx context.Context) (token, sshKeyPath
 		sshKeyPath = r.Config.Git.SSHKeyPath
 	}
 	return token, sshKeyPath, nil
+}
+
+// syncJobOp picks the resolution.Op constant for sync jobs enqueued via
+// runSyncLLMJob. The mapping mirrors how the orchestrator routes
+// per-subsystem RPCs (linking, requirements, contracts, qa, …) — same
+// provider, just a different transport.
+func syncJobOp(subsystem llm.Subsystem, jobType string) string {
+	switch subsystem {
+	case llm.SubsystemRequirements:
+		if strings.Contains(jobType, "extract") {
+			return resolution.OpRequirementsExtract
+		}
+		return resolution.OpRequirementsEnrich
+	case llm.SubsystemLinking:
+		// Linking jobs run analysis-style RPCs; OpAnalysis routes to
+		// the same provider as the workspace summary model.
+		return resolution.OpAnalysis
+	case llm.SubsystemContracts:
+		return resolution.OpAnalysis
+	case llm.SubsystemQA:
+		switch jobType {
+		case "qa.classify":
+			return resolution.OpQAClassify
+		case "qa.decompose":
+			return resolution.OpQADecompose
+		case "qa.deep_synth", "qa.synth":
+			return resolution.OpQASynth
+		case "qa.agent_turn":
+			return resolution.OpQAAgentTurn
+		default:
+			return resolution.OpQASynth
+		}
+	case llm.SubsystemReasoning:
+		return resolution.OpDiscussion
+	case llm.SubsystemKnowledge:
+		return resolution.OpKnowledge
+	}
+	return resolution.OpAnalysis
+}
+
+// livingWikiOpForJobType maps a living-wiki orchestrator job_type to
+// the corresponding resolution.Op* constant for the LLM resolver. R3
+// slice 3: cold-start vs regen vs retry-excluded each route through
+// the same op family for provider attribution.
+func livingWikiOpForJobType(jobType string) string {
+	switch jobType {
+	case "living_wiki_regen", "living_wiki_assembly":
+		return resolution.OpLivingWikiRegen
+	default:
+		return resolution.OpLivingWikiColdStart
+	}
+}
+
+// resolveLLMProviderForOp returns the LLM provider name (e.g. "anthropic",
+// "openai", "ollama") for the (repoID, op) pair. Used by every
+// LLM-backed EnqueueRequest construction so the resulting Job records
+// llm_provider for the Monitor page and per-provider metrics. Returns
+// empty string when the resolver is unavailable or fails — the orchestrator
+// does not enforce non-empty at enqueue time, but the AST lint flags
+// missing fields at compile time.
+//
+// op is one of the resolution.Op* constants (see
+// internal/llm/resolution/ops.go).
+func (r *Resolver) resolveLLMProviderForOp(ctx context.Context, repoID, op string) string {
+	if r == nil || r.LLMResolver == nil {
+		return ""
+	}
+	snap, err := r.LLMResolver.Resolve(ctx, repoID, op)
+	if err != nil {
+		// Don't fail the enqueue on a resolver error — return empty so
+		// the orchestrator records "" and the operator can still see
+		// the job land. The resolver's own log line tells operators what
+		// went wrong.
+		return ""
+	}
+	return snap.Provider
 }
 
 // publishEvent safely publishes to the event bus if available.

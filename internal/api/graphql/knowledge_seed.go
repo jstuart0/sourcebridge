@@ -295,7 +295,10 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 		}
 		return
 	}
-	if err := r.enqueueKnowledgeJob(artifact, jobType, len(snapshotJSON), run); err != nil {
+	// Background path: no request ctx available; use Background. The
+	// resolver lookup is fast enough that lacking deadline propagation
+	// is acceptable for this fire-and-forget seeding flow.
+	if err := r.enqueueKnowledgeJob(context.Background(), artifact, jobType, len(snapshotJSON), run); err != nil {
 		persistArtifactFailure(r.KnowledgeStore, artifact.ID, err)
 	}
 }

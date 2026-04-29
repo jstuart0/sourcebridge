@@ -99,7 +99,7 @@ func (s workflowStoryGenerationService) Generate(ctx context.Context) (*Knowledg
 
 	enrichedSnapJSON := snapJSON
 	store := r.getStore(ctx)
-	err = r.enqueueKnowledgeJob(artifact, "workflow_story", len(enrichedSnapJSON), func(runCtx context.Context, rt llm.Runtime) error {
+	err = r.enqueueKnowledgeJob(ctx, artifact, "workflow_story", len(enrichedSnapJSON), func(runCtx context.Context, rt llm.Runtime) error {
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 		if artifactUsesUnderstanding(generationMode) {

@@ -173,7 +173,7 @@ func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeAr
 		}
 	}
 
-	err = r.enqueueKnowledgeJob(artifact, "cliff_notes", len(enrichedCliffSnapJSON), func(runCtx context.Context, rt llm.Runtime) (runErr error) {
+	err = r.enqueueKnowledgeJob(ctx, artifact, "cliff_notes", len(enrichedCliffSnapJSON), func(runCtx context.Context, rt llm.Runtime) (runErr error) {
 		defer func() {
 			if runErr != nil {
 				markRepositoryUnderstandingFailed(r.KnowledgeStore, artifact, scope, snap.SourceRevision, runErr)

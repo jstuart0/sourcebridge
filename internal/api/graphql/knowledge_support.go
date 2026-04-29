@@ -1830,6 +1830,10 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 		Strategy:       "knowledge_artifact_refinement",
 		ArtifactID:     artifact.ID,
 		RepoID:         repo.ID,
+		// R3 slice 3: stamp llm_provider. Background ctx is fine —
+		// the resolver lookup is fast and this enqueue path doesn't
+		// have a request ctx in scope (called from a deeper helper).
+		LLMProvider:    r.resolveLLMProviderForOp(context.Background(), repo.ID, resolution.OpKnowledge),
 		Priority:       llm.PriorityMaintenance,
 		GenerationMode: string(artifact.GenerationMode),
 		MaxAttempts:    2,

@@ -94,7 +94,7 @@ func (s learningPathGenerationService) Generate(ctx context.Context) (*Knowledge
 	syncArtifactExecutionMetadata(r.KnowledgeStore, artifact)
 	store := r.getStore(ctx)
 
-	err = r.enqueueKnowledgeJob(artifact, "learning_path", len(enrichedSnapJSON), func(runCtx context.Context, rt llm.Runtime) error {
+	err = r.enqueueKnowledgeJob(ctx, artifact, "learning_path", len(enrichedSnapJSON), func(runCtx context.Context, rt llm.Runtime) error {
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 		if artifactUsesUnderstanding(generationMode) {

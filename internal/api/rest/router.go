@@ -422,7 +422,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			o = o.WithArtifactLookup(&qaArtifactLookup{store: s.knowledgeStore})
 		}
 		if s.orchestrator != nil {
-			o = o.WithJobRunner(&qaJobRunner{orch: s.orchestrator})
+			o = o.WithJobRunner(&qaJobRunner{orch: s.orchestrator, llmResolver: s.llmResolver})
 		}
 		if s.searchSvc != nil {
 			o = o.WithSearcher(&qaSearcher{svc: s.searchSvc})

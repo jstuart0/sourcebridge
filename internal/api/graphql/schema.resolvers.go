@@ -446,7 +446,7 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 		return nil, fmt.Errorf("failed to seed repository understanding: %w", err)
 	}
 
-	err = enqueueRepositoryUnderstandingJob(r.Resolver, repo, understanding, scope, snapshotJSON, func(runCtx context.Context, rt llm.Runtime) error {
+	err = enqueueRepositoryUnderstandingJob(ctx, r.Resolver, repo, understanding, scope, snapshotJSON, func(runCtx context.Context, rt llm.Runtime) error {
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "snapshot", "snapshot_assembled", "Snapshot assembled", map[string]any{
 			"snapshot_bytes": len(snapshotJSON),
@@ -1852,7 +1852,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 	// Generate* mutations. We don't know the snapshot size until we
 	// assemble it inside the closure, so snapshotBytes is reported via
 	// Runtime after assembly rather than up-front.
-	err := r.enqueueKnowledgeJob(existing, "refresh:"+string(existing.Type), 0, func(runCtx context.Context, rt llm.Runtime) error {
+	err := r.enqueueKnowledgeJob(ctx, existing, "refresh:"+string(existing.Type), 0, func(runCtx context.Context, rt llm.Runtime) error {
 		var (
 			snap *knowledgepkg.KnowledgeSnapshot
 			err  error
@@ -2624,7 +2624,11 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 		JobType:   jobType,
 		TargetKey: fmt.Sprintf("lw:%s:%s", defaultTenantID, input.RepositoryID),
 		RepoID:    input.RepositoryID,
-		Priority:  llm.PriorityInteractive,
+		// R3 slice 3: living-wiki cold-start runs LLM jobs (page generation,
+		// understanding, etc.). Stamp llm_provider for Monitor + per-provider
+		// metrics. Use OpLivingWikiColdStart unless this is regen.
+		LLMProvider: r.resolveLLMProviderForOp(ctx, input.RepositoryID, livingWikiOpForJobType(jobType)),
+		Priority:    llm.PriorityInteractive,
 		// MaxAttempts=1 disables the LLM-orchestrator's within-job retry for
 		// cold-start. A failed cold-start has failure modes (page-level LLM
 		// timeouts, gate exclusions, provider unreachable) that are not

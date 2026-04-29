@@ -49,12 +49,19 @@ func (r *Resolver) runSyncLLMJob(
 	if r.Orchestrator == nil {
 		return run(noopRuntime{})
 	}
+	// R3 slice 3: stamp llm_provider so per-provider metrics track sync
+	// LLM jobs alongside their async siblings. The op is derived from
+	// the subsystem + job_type (a sync linking job uses the same provider
+	// as an async one — the resolver cares about the work, not the
+	// transport).
+	op := syncJobOp(subsystem, jobType)
 	job, err := r.Orchestrator.EnqueueSync(ctx, &llm.EnqueueRequest{
-		Subsystem: subsystem,
-		JobType:   jobType,
-		TargetKey: targetKey,
-		RepoID:    repoID,
-		Run:       run,
+		Subsystem:   subsystem,
+		JobType:     jobType,
+		TargetKey:   targetKey,
+		RepoID:      repoID,
+		LLMProvider: r.resolveLLMProviderForOp(ctx, repoID, op),
+		Run:         run,
 	})
 	if err != nil {
 		return err

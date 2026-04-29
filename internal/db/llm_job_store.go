@@ -29,6 +29,7 @@ type surrealLLMJob struct {
 	TargetKey        string           `json:"target_key"`
 	Strategy         string           `json:"strategy"`
 	Model            string           `json:"model"`
+	LLMProvider      string           `json:"llm_provider"`
 	Priority         string           `json:"priority"`
 	GenerationMode   string           `json:"generation_mode"`
 	Status           string           `json:"status"`
@@ -71,6 +72,7 @@ type surrealLLMJobLog struct {
 	ArtifactID  string           `json:"artifact_id"`
 	Subsystem   string           `json:"subsystem"`
 	JobType     string           `json:"job_type"`
+	LLMProvider string           `json:"llm_provider"`
 	Level       string           `json:"level"`
 	Phase       string           `json:"phase"`
 	Event       string           `json:"event"`
@@ -88,6 +90,7 @@ func (r *surrealLLMJob) toJob() *llm.Job {
 		TargetKey:        r.TargetKey,
 		Strategy:         r.Strategy,
 		Model:            r.Model,
+		LLMProvider:      r.LLMProvider,
 		Priority:         llm.JobPriority(r.Priority),
 		GenerationMode:   r.GenerationMode,
 		Status:           llm.JobStatus(r.Status),
@@ -142,6 +145,7 @@ func (r *surrealLLMJobLog) toJobLog() *llm.JobLogEntry {
 		ArtifactID:  r.ArtifactID,
 		Subsystem:   llm.Subsystem(r.Subsystem),
 		JobType:     r.JobType,
+		LLMProvider: r.LLMProvider,
 		Level:       llm.JobLogLevel(r.Level),
 		Phase:       r.Phase,
 		Event:       r.Event,
@@ -178,6 +182,7 @@ func (s *SurrealStore) Create(job *llm.Job) (*llm.Job, error) {
 		target_key = $target_key,
 		strategy = $strategy,
 		model = $model,
+		llm_provider = $llm_provider,
 		priority = $priority,
 		generation_mode = $generation_mode,
 		status = $status,
@@ -217,6 +222,7 @@ func (s *SurrealStore) Create(job *llm.Job) (*llm.Job, error) {
 		"target_key":         job.TargetKey,
 		"strategy":           job.Strategy,
 		"model":              job.Model,
+		"llm_provider":       job.LLMProvider,
 		"priority":           string(job.Priority),
 		"generation_mode":    job.GenerationMode,
 		"status":             string(status),
@@ -271,6 +277,7 @@ func (s *SurrealStore) Update(job *llm.Job) error {
 		target_key = $target_key,
 		strategy = $strategy,
 		model = $model,
+		llm_provider = $llm_provider,
 		priority = $priority,
 		generation_mode = $generation_mode,
 		status = $status,
@@ -308,6 +315,7 @@ func (s *SurrealStore) Update(job *llm.Job) error {
 		"target_key":         job.TargetKey,
 		"strategy":           job.Strategy,
 		"model":              job.Model,
+		"llm_provider":       job.LLMProvider,
 		"priority":           string(job.Priority),
 		"generation_mode":    job.GenerationMode,
 		"status":             string(job.Status),
@@ -685,6 +693,7 @@ func (s *SurrealStore) AppendLog(entry *llm.JobLogEntry) (*llm.JobLogEntry, erro
 		artifact_id = $artifact_id,
 		subsystem = $subsystem,
 		job_type = $job_type,
+		llm_provider = $llm_provider,
 		level = $level,
 		phase = $phase,
 		event = $event,
@@ -699,6 +708,7 @@ func (s *SurrealStore) AppendLog(entry *llm.JobLogEntry) (*llm.JobLogEntry, erro
 		"artifact_id":  entry.ArtifactID,
 		"subsystem":    string(entry.Subsystem),
 		"job_type":     entry.JobType,
+		"llm_provider": entry.LLMProvider,
 		"level":        string(entry.Level),
 		"phase":        entry.Phase,
 		"event":        entry.Event,

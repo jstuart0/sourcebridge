@@ -85,7 +85,7 @@ func (s architectureDiagramGenerationService) Generate(ctx context.Context) (*Kn
 	syncArtifactExecutionMetadata(r.KnowledgeStore, artifact)
 	store := r.getStore(ctx)
 
-	err = r.enqueueKnowledgeJob(artifact, "architecture_diagram", len(snapJSON), func(runCtx context.Context, rt llm.Runtime) error {
+	err = r.enqueueKnowledgeJob(ctx, artifact, "architecture_diagram", len(snapJSON), func(runCtx context.Context, rt llm.Runtime) error {
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 

@@ -330,12 +330,22 @@ func (s *Server) handleRelabelClusters(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetKey := fmt.Sprintf("relabel_clusters:%s", repoID)
+	// R3 slice 3: relabel_clusters is the LLM-backed job_type in the
+	// clustering subsystem (graph clustering itself is CPU-bound and
+	// leaves llm_provider empty). Stamp the resolved provider.
+	provider := ""
+	if s.llmResolver != nil {
+		if snap, err := s.llmResolver.Resolve(r.Context(), repoID, resolution.OpClusteringRelabel); err == nil {
+			provider = snap.Provider
+		}
+	}
 	enqReq := &llm.EnqueueRequest{
-		Subsystem: llm.SubsystemClustering,
-		JobType:   "relabel_clusters",
-		TargetKey: targetKey,
-		Priority:  llm.PriorityInteractive,
-		RepoID:    repoID,
+		Subsystem:   llm.SubsystemClustering,
+		JobType:     "relabel_clusters",
+		TargetKey:   targetKey,
+		Priority:    llm.PriorityInteractive,
+		RepoID:      repoID,
+		LLMProvider: provider,
 		RunWithContext: func(ctx context.Context, rt llm.Runtime) error {
 			return runRelabelClusters(ctx, rt, cs, s.llmCaller, repoID, clusterIDs)
 		},

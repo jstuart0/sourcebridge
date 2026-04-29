@@ -14,9 +14,28 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
 	"github.com/sourcebridge/sourcebridge/internal/search"
 )
+
+// qaJobOpFromType picks the resolution.Op for a QA job_type. The QA
+// pipeline has multiple sub-ops (classify / decompose / synth / agent)
+// that can use different provider configs in advanced mode; mirroring
+// the per-op resolution lets metrics attribute work correctly.
+func qaJobOpFromType(jobType string) string {
+	switch jobType {
+	case "qa.classify":
+		return resolution.OpQAClassify
+	case "qa.decompose":
+		return resolution.OpQADecompose
+	case "qa.deep_synth":
+		return resolution.OpQADeepSynth
+	case "qa.agent_turn":
+		return resolution.OpQAAgentTurn
+	}
+	return resolution.OpQASynth
+}
 
 // qaRepoLocator adapts the graph store's Repository records to
 // qa.RepoLocator. Uses the same clone-path-resolution logic as the
@@ -420,19 +439,32 @@ func (q *qaSearcher) SearchForQA(ctx context.Context, repoID, query string, limi
 // so Monitor sees qa.* jobs alongside knowledge / reasoning. When the
 // orchestrator is nil (tests), callers run inline via the qa.JobRunner
 // nil-check.
+//
+// R3 slice 3: optionally holds an llmResolver so each enqueue can stamp
+// the resolved provider on the job (Monitor + per-provider metrics).
+// When nil, llm_provider lands as empty.
 type qaJobRunner struct {
-	orch *orchestrator.Orchestrator
+	orch        *orchestrator.Orchestrator
+	llmResolver resolution.Resolver
 }
 
 func (j *qaJobRunner) RunSyncQAJob(ctx context.Context, jobType, targetKey, repoID string, run func(rt qa.TokenReporter) error) error {
 	if j == nil || j.orch == nil {
 		return run(nil)
 	}
+	provider := ""
+	if j.llmResolver != nil {
+		op := qaJobOpFromType(jobType)
+		if snap, err := j.llmResolver.Resolve(ctx, repoID, op); err == nil {
+			provider = snap.Provider
+		}
+	}
 	job, err := j.orch.EnqueueSync(ctx, &llm.EnqueueRequest{
-		Subsystem: llm.SubsystemQA,
-		JobType:   jobType,
-		TargetKey: targetKey,
-		RepoID:    repoID,
+		Subsystem:   llm.SubsystemQA,
+		JobType:     jobType,
+		TargetKey:   targetKey,
+		RepoID:      repoID,
+		LLMProvider: provider,
 		Run: func(rt llm.Runtime) error {
 			return run(rt)
 		},

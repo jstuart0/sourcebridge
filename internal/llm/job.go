@@ -100,6 +100,17 @@ type Job struct {
 	Model          string      `json:"model,omitempty"`
 	Priority       JobPriority `json:"priority,omitempty"`
 	GenerationMode string      `json:"generation_mode,omitempty"`
+	// LLMProvider records the resolved provider for this job (e.g. "openai",
+	// "anthropic", "ollama"). R3 slice 3: required for every LLM-backed
+	// subsystem (knowledge, reasoning, requirements, linking, contracts,
+	// qa, living_wiki, and clustering's relabel_clusters job_type) so the
+	// Monitor page and per-provider metrics know which model family
+	// produced the output. Optional for CPU-bound subsystems (clustering's
+	// graph job_types) — the orchestrator does not enforce a non-empty
+	// value at enqueue time, but the AST lint in
+	// internal/llm/orchestrator/llm_provider_lint_test.go fails CI when an
+	// LLM-backed enqueue literal omits the field.
+	LLMProvider string `json:"llm_provider,omitempty"`
 
 	Status          JobStatus `json:"status"`
 	Progress        float64   `json:"progress"`
@@ -177,6 +188,12 @@ type EnqueueRequest struct {
 	TargetKey      string
 	Strategy       string
 	Model          string
+	// LLMProvider is the resolved provider for the work this job performs.
+	// R3 slice 3: every LLM-backed subsystem must populate this so the
+	// Monitor page and per-provider metrics can attribute work correctly.
+	// Empty is acceptable for CPU-bound subsystems (graph clustering); the
+	// AST lint enforces the rule at compile time, not the orchestrator.
+	LLMProvider    string
 	Priority       JobPriority
 	GenerationMode string
 	ArtifactID     string

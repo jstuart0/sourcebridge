@@ -25,6 +25,10 @@ type JobLogEntry struct {
 	ArtifactID  string      `json:"artifact_id,omitempty"`
 	Subsystem   Subsystem   `json:"subsystem,omitempty"`
 	JobType     string      `json:"job_type,omitempty"`
+	// LLMProvider mirrors Job.LLMProvider so per-log-line filtering /
+	// metrics can attribute work without joining back to the job row.
+	// R3 slice 3.
+	LLMProvider string      `json:"llm_provider,omitempty"`
 	Level       JobLogLevel `json:"level"`
 	Phase       string      `json:"phase,omitempty"`
 	Event       string      `json:"event"`

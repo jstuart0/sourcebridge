@@ -17,6 +17,7 @@ import (
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
 
 var knowledgeArtifactGates sync.Map
@@ -274,6 +275,7 @@ func startKnowledgeQueueHeartbeat(ctx context.Context, rt llm.Runtime, artifactI
 // ownership of artifact dedupe / claim logic (that's where Phase 1's
 // staleness window lives).
 func (r *Resolver) enqueueKnowledgeJob(
+	ctx context.Context,
 	artifact *knowledgepkg.Artifact,
 	jobType string,
 	snapshotBytes int,
@@ -309,6 +311,12 @@ func (r *Resolver) enqueueKnowledgeJob(
 		Strategy:       "knowledge_artifact_queue",
 		ArtifactID:     artifact.ID,
 		RepoID:         artifact.RepositoryID,
+		// R3 slice 3: stamp llm_provider so the Monitor page and per-
+		// provider metrics attribute work correctly. Empty when the
+		// resolver isn't wired (test/embedded mode); the AST lint in
+		// internal/llm/orchestrator/ enforces presence at compile time
+		// for production code paths.
+		LLMProvider: r.resolveLLMProviderForOp(ctx, artifact.RepositoryID, resolution.OpKnowledge),
 		Priority:       llm.PriorityInteractive,
 		GenerationMode: string(artifact.GenerationMode),
 		MaxAttempts:    knowledgeJobMaxAttempts(artifact, scope),
@@ -387,6 +395,7 @@ func knowledgeJobMaxAttempts(artifact *knowledgepkg.Artifact, scope knowledgepkg
 }
 
 func enqueueRepositoryUnderstandingJob(
+	ctx context.Context,
 	r *Resolver,
 	repo *graphstore.Repository,
 	understanding *knowledgepkg.RepositoryUnderstanding,
@@ -410,6 +419,7 @@ func enqueueRepositoryUnderstandingJob(
 		Strategy:       "repository_understanding_queue",
 		ArtifactID:     understanding.ID,
 		RepoID:         repo.ID,
+		LLMProvider:    r.resolveLLMProviderForOp(ctx, repo.ID, resolution.OpKnowledge),
 		Priority:       llm.PriorityPrewarm,
 		GenerationMode: string(knowledgepkg.GenerationModeUnderstandingFirst),
 		// 3 attempts so a transient gRPC failure (e.g. the worker pod
