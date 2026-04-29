@@ -278,7 +278,7 @@ func (s *Server) handleUpdateLLMConfig(w http.ResponseWriter, r *http.Request) {
 		// Slice 3 introduces a typed encryption-key-missing error
 		// (ErrEncryptionKeyRequired). Detect it via errors.Is so the
 		// admin UI can show a 422 with a clear message.
-		if errors.Is(err, errLLMEncryptionKeyRequired) {
+		if errors.Is(err, ErrLLMEncryptionKeyRequired) {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
 				"error": "Cannot save API key: SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY is not set on the server. " +
 					"Set the encryption key (32+ random bytes, base64-encoded) and restart, or unset the api_key field to save other settings only.",
@@ -306,12 +306,13 @@ func (s *Server) handleUpdateLLMConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// errLLMEncryptionKeyRequired is the sentinel returned by the persistence
-// layer in slice 3 when SaveLLMConfig is called with a non-empty API key
-// but cfg.Security.EncryptionKey is unset and the OSS escape hatch
-// (SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY) is off. Defined here so
-// handleUpdateLLMConfig can produce a clean 422 without circular imports.
-var errLLMEncryptionKeyRequired = errors.New("llm api key cannot be saved without an encryption key")
+// ErrLLMEncryptionKeyRequired is the sentinel returned (via wrap) by
+// llmConfigAdapter.SaveLLMConfig in cli/serve.go when the underlying
+// store rejects an api_key save because cfg.Security.EncryptionKey is
+// unset and the OSS escape hatch (SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY)
+// is off. handleUpdateLLMConfig matches via errors.Is and returns 422
+// with a clear admin-facing message.
+var ErrLLMEncryptionKeyRequired = errors.New("llm api key cannot be saved without an encryption key")
 
 // ResolveLLMSnapshot exposes the runtime LLM-config resolver to handlers
 // in this package that need to inspect the current effective settings

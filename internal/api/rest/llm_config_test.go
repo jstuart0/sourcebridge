@@ -165,6 +165,28 @@ func TestHandleUpdateLLMConfig_RejectsInvalidProvider(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateLLMConfig_EncryptionKeyMissingReturns422(t *testing.T) {
+	// Slice 3 of the workspace-LLM-source-of-truth plan: when the
+	// underlying store rejects a save with ErrLLMEncryptionKeyRequired
+	// (encryption key missing AND OSS escape hatch off), the handler
+	// must surface 422 with a clear admin-facing message rather than a
+	// generic 500.
+	store := &fakeLLMConfigStore{saveErr: ErrLLMEncryptionKeyRequired}
+	s := newLLMConfigTestServer(t, config.LLMConfig{}, store)
+
+	body := `{"api_key":"sk-something"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/llm-config", bytes.NewBufferString(body))
+	w := httptest.NewRecorder()
+	s.handleUpdateLLMConfig(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("expected 422, got %d: %s", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("ENCRYPTION_KEY")) {
+		t.Errorf("expected error message to mention ENCRYPTION_KEY env var; got %s", w.Body.String())
+	}
+}
+
 func TestHandleUpdateLLMConfig_NoStoreReturns503(t *testing.T) {
 	s := &Server{cfg: &config.Config{}}
 	body := `{"provider":"openai"}`

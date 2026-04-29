@@ -5,6 +5,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -210,7 +211,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 		// directly from the DB on every Resolve via a version-keyed
 		// cache, so an admin save on replica A is visible to replica B
 		// on the very next worker LLM call.
-		lcs := db.NewSurrealLLMConfigStore(surrealDB)
+		//
+		// Slice 3: api_key column is encrypted at rest with the
+		// versioned sbenc:v1 envelope. The encryption key comes from
+		// cfg.Security.EncryptionKey; the OSS escape hatch
+		// (SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY) is consulted from env
+		// at boot and forwarded as a store option.
+		lcsOpts := []db.LLMConfigStoreOption{
+			db.WithLLMConfigEncryptionKey(cfg.Security.EncryptionKey),
+		}
+		if strings.EqualFold(os.Getenv("SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY"), "true") {
+			slog.Warn("llm config: SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY=true — admin saves of api_key may land in plaintext on disk (OSS dev only)")
+			lcsOpts = append(lcsOpts, db.WithLLMConfigAllowUnencrypted(true))
+		}
+		if cfg.Security.EncryptionKey == "" {
+			slog.Warn("llm config: SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY is unset — admin saves of api_key will return 422 unless ALLOW_UNENCRYPTED is on (set the encryption key in production)")
+		}
+		lcs := db.NewSurrealLLMConfigStore(surrealDB, lcsOpts...)
 		llmConfigStore = &llmConfigAdapter{store: lcs}
 		queueControlStore = &queueControlAdapter{store: db.NewSurrealQueueControlStore(surrealDB)}
 
@@ -245,9 +262,22 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// adds layer 1 by passing a non-nil RepoOverrideStore. Resolver runs
 	// in every replica — version-keyed cache makes admin saves visible
 	// cross-replica without polling or restart.
+	//
+	// IMPORTANT: the resolver uses the *same* SurrealLLMConfigStore
+	// instance as the REST admin handlers above, so encryption settings
+	// (cfg.Security.EncryptionKey + ALLOW_UNENCRYPTED) apply uniformly.
+	// Two stores against the same row would each track their own
+	// loadedLegacyOnce, producing duplicate WARNs on legacy reads — not
+	// a correctness bug but messier than necessary.
 	var llmStoreAdapter resolution.LLMConfigStore
 	if cfg.Storage.SurrealMode == "external" && surrealDB != nil {
-		llmStoreAdapter = &llmStoreResolverAdapter{store: db.NewSurrealLLMConfigStore(surrealDB)}
+		// Recover the encryption-aware instance constructed above.
+		// llmConfigStore is the rest.LLMConfigStore interface; the
+		// underlying *db.SurrealLLMConfigStore is reachable via the
+		// adapter we wrap it in.
+		if adapter, ok := llmConfigStore.(*llmConfigAdapter); ok && adapter != nil {
+			llmStoreAdapter = &llmStoreResolverAdapter{store: adapter.store}
+		}
 	}
 	llmResolver := resolution.New(llmStoreAdapter, nil /* per-repo override store, slice 5 */, cfg.LLM, slog.Default())
 
@@ -583,7 +613,7 @@ func (a *llmConfigAdapter) LoadLLMConfig() (*rest.LLMConfigRecord, error) {
 }
 
 func (a *llmConfigAdapter) SaveLLMConfig(rec *rest.LLMConfigRecord) error {
-	return a.store.SaveLLMConfig(&db.LLMConfigRecord{
+	err := a.store.SaveLLMConfig(&db.LLMConfigRecord{
 		Provider:                 rec.Provider,
 		BaseURL:                  rec.BaseURL,
 		APIKey:                   rec.APIKey,
@@ -597,6 +627,13 @@ func (a *llmConfigAdapter) SaveLLMConfig(rec *rest.LLMConfigRecord) error {
 		TimeoutSecs:              rec.TimeoutSecs,
 		AdvancedMode:             rec.AdvancedMode,
 	})
+	// Bridge the db-package sentinel into the rest-package sentinel so
+	// handleUpdateLLMConfig can map it to a 422 without importing
+	// internal/db. errors.Is matches across the wrap.
+	if errors.Is(err, db.ErrEncryptionKeyRequired) {
+		return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, err)
+	}
+	return err
 }
 
 // llmStoreResolverAdapter bridges *db.SurrealLLMConfigStore to the narrow
