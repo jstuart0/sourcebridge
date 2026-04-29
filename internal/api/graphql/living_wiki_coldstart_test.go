@@ -274,6 +274,7 @@ func TestColdStartJobVisibleInActivityFeed(t *testing.T) {
 
 	req := &llm.EnqueueRequest{
 		Subsystem:      llm.Subsystem("living_wiki"),
+		LLMProvider:   "test",
 		JobType:        "living_wiki_cold_start",
 		TargetKey:      "lw:default:test-repo",
 		RepoID:         "test-repo",
@@ -572,6 +573,7 @@ func TestColdStartJobAppearsInSharedActivityFeed(t *testing.T) {
 
 	req := &llm.EnqueueRequest{
 		Subsystem: llm.Subsystem("living_wiki"),
+		LLMProvider:   "test",
 		JobType:   "living_wiki_cold_start",
 		TargetKey: "lw:default:feed-test",
 		RepoID:    "feed-test",

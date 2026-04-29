@@ -106,10 +106,13 @@ type Job struct {
 	// qa, living_wiki, and clustering's relabel_clusters job_type) so the
 	// Monitor page and per-provider metrics know which model family
 	// produced the output. Optional for CPU-bound subsystems (clustering's
-	// graph job_types) — the orchestrator does not enforce a non-empty
-	// value at enqueue time, but the AST lint in
-	// internal/llm/orchestrator/llm_provider_lint_test.go fails CI when an
-	// LLM-backed enqueue literal omits the field.
+	// graph job_types).
+	//
+	// R3 followups B1: the orchestrator hard-blocks LLM-backed enqueues
+	// with empty LLMProvider via ErrLLMProviderRequired. The AST lint in
+	// internal/llm/orchestrator/llm_provider_lint_test.go is the
+	// compile-time defense; the runtime check is the resolver-failure
+	// defense.
 	LLMProvider string `json:"llm_provider,omitempty"`
 
 	Status          JobStatus `json:"status"`
@@ -191,8 +194,14 @@ type EnqueueRequest struct {
 	// LLMProvider is the resolved provider for the work this job performs.
 	// R3 slice 3: every LLM-backed subsystem must populate this so the
 	// Monitor page and per-provider metrics can attribute work correctly.
-	// Empty is acceptable for CPU-bound subsystems (graph clustering); the
-	// AST lint enforces the rule at compile time, not the orchestrator.
+	// Empty is acceptable for CPU-bound subsystems (graph clustering).
+	//
+	// R3 followups B1: the orchestrator returns
+	// orchestrator.ErrLLMProviderRequired when an LLM-backed Subsystem +
+	// JobType combination is enqueued with this field empty. The AST
+	// lint (internal/llm/orchestrator/llm_provider_lint_test.go) is the
+	// compile-time defense; the orchestrator's up-front check is the
+	// runtime defense for resolver failures.
 	LLMProvider    string
 	Priority       JobPriority
 	GenerationMode string

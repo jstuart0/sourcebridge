@@ -219,10 +219,14 @@ func livingWikiOpForJobType(jobType string) string {
 // resolveLLMProviderForOp returns the LLM provider name (e.g. "anthropic",
 // "openai", "ollama") for the (repoID, op) pair. Used by every
 // LLM-backed EnqueueRequest construction so the resulting Job records
-// llm_provider for the Monitor page and per-provider metrics. Returns
-// empty string when the resolver is unavailable or fails — the orchestrator
-// does not enforce non-empty at enqueue time, but the AST lint flags
-// missing fields at compile time.
+// llm_provider for the Monitor page and per-provider metrics.
+//
+// Returns empty string when the resolver is unavailable or fails. The
+// orchestrator's R3 followups B1 hard-block (orchestrator.ErrLLMProviderRequired)
+// will refuse the enqueue at that point — by design. An empty provider
+// at this layer means a misconfigured deployment (no /admin/llm save +
+// no SOURCEBRIDGE_LLM_PROVIDER env bootstrap) and the system fails
+// closed rather than silently producing an unattributable job.
 //
 // op is one of the resolution.Op* constants (see
 // internal/llm/resolution/ops.go).
@@ -232,10 +236,10 @@ func (r *Resolver) resolveLLMProviderForOp(ctx context.Context, repoID, op strin
 	}
 	snap, err := r.LLMResolver.Resolve(ctx, repoID, op)
 	if err != nil {
-		// Don't fail the enqueue on a resolver error — return empty so
-		// the orchestrator records "" and the operator can still see
-		// the job land. The resolver's own log line tells operators what
-		// went wrong.
+		// Don't paper over the resolver error here — return empty so
+		// the orchestrator's hard-block fires. The resolver's own log
+		// line tells operators what went wrong; the orchestrator's
+		// ErrLLMProviderRequired tells the caller the enqueue refused.
 		return ""
 	}
 	return snap.Provider

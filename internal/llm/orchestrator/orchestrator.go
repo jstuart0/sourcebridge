@@ -196,12 +196,28 @@ func (o *Orchestrator) Shutdown(graceful time.Duration) error {
 	}
 }
 
+// ErrLLMProviderRequired is returned by Enqueue when an LLM-backed
+// subsystem submits a request whose LLMProvider resolved to empty.
+//
+// R3 followups B1: this is a fail-closed guarantee. The R3 program's
+// invariant is "DB authoritative; integrity failures fail closed." A
+// runtime-empty LLMProvider on an LLM-backed enqueue is an integrity
+// failure of the resolver pipeline — silently persisting a job with
+// provider="" produces a permanent attribution gap on the Monitor
+// page and confuses per-provider metrics.
+//
+// Callers can `errors.Is(err, ErrLLMProviderRequired)` to surface a
+// targeted "your LLM config is missing — check /admin/llm" error to
+// the operator.
+var ErrLLMProviderRequired = errors.New("llm provider required: LLM-backed enqueue resolved an empty provider")
+
 // isLLMBackedEnqueue reports whether an EnqueueRequest names a
-// subsystem/job_type combination that performs LLM calls. Used by the
-// runtime warning at Enqueue time (codex r2 medium): the AST lint
-// already guarantees the LLMProvider field is present in source; this
-// runtime check spots resolver failures that produced an empty value
-// at runtime.
+// subsystem/job_type combination that performs LLM calls. R3 followups
+// B1: the orchestrator hard-blocks enqueues on this set with an empty
+// LLMProvider via ErrLLMProviderRequired. The AST lint in
+// internal/llm/orchestrator/llm_provider_lint_test.go guarantees the
+// field is *present* in source at compile time; this runtime check
+// catches resolver failures that produced an empty value at runtime.
 //
 // Mirrors the same rule as internal/llm/orchestrator/llm_provider_lint_test.go:
 //   - SubsystemKnowledge / SubsystemReasoning / SubsystemRequirements /
@@ -335,9 +351,33 @@ func (o *Orchestrator) reapStaleJobs() {
 // Enqueue claims a job, persists it, and schedules it for execution. If
 // a job with the same TargetKey is already active, Enqueue returns the
 // existing job without creating a duplicate.
+//
+// R3 followups B1: an LLM-backed enqueue with empty LLMProvider returns
+// ErrLLMProviderRequired up-front, BEFORE any dedupe or inflight claim.
+// We must not let a misconfigured-resolver request attach to an
+// unrelated active job (silent attribution gap) or disturb in-flight
+// registry state we don't own.
 func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
+	}
+
+	// Codex r2b + R3 followups B1: hard-block LLM-backed enqueues with
+	// empty provider. This runs BEFORE store/inflight dedupe so an
+	// unrelated active job owning the same target key isn't returned
+	// to the caller as if it were "their" job, and so we don't disturb
+	// in-flight registry state we don't own. The AST lint in
+	// llm_provider_lint_test.go is the compile-time defense; this is
+	// the runtime defense for resolver failures.
+	if isLLMBackedEnqueue(req) && strings.TrimSpace(req.LLMProvider) == "" {
+		slog.Warn("llm_job_enqueue_missing_provider",
+			"target_key", req.TargetKey,
+			"subsystem", string(req.Subsystem),
+			"job_type", req.JobType,
+			"repo_id", req.RepoID,
+			"detail", "LLM-backed enqueue resolved an empty provider; refusing")
+		return nil, fmt.Errorf("%w: subsystem=%s job_type=%s; verify /admin/llm and the resolver wiring",
+			ErrLLMProviderRequired, req.Subsystem, req.JobType)
 	}
 
 	// DB-level dedupe first — this also covers the "process restarted
@@ -401,20 +441,12 @@ func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 	// page and per-provider metrics can attribute work without joining
 	// back to a workspace settings snapshot.
 	//
-	// Codex r2 medium: AST lint guarantees the field is *present* on
-	// every LLM-backed enqueue literal at compile time. Runtime emits a
-	// loud structured warning when the resolved value is empty for a
-	// subsystem we know is LLM-backed — operators should grep for this
-	// to spot a misconfigured resolver (workspace LLM not loaded,
-	// resolver.Resolve erroring) before the Monitor page goes blank.
-	if isLLMBackedEnqueue(req) && strings.TrimSpace(req.LLMProvider) == "" {
-		slog.Warn("llm_job_enqueue_missing_provider",
-			"target_key", req.TargetKey,
-			"subsystem", string(req.Subsystem),
-			"job_type", req.JobType,
-			"repo_id", req.RepoID,
-			"detail", "LLM-backed enqueue resolved an empty provider; metrics and Monitor attribution will show '' for this job")
-	}
+	// R3 followups B1: the up-front empty-provider check at the top of
+	// Enqueue (above) hard-blocks misconfigured LLM-backed requests
+	// before they reach this materialization. This is a fail-closed
+	// guarantee — empty provider on an LLM-backed subsystem now returns
+	// ErrLLMProviderRequired rather than silently persisting an
+	// unattributable job.
 	job := &llm.Job{
 		ID:               id,
 		Subsystem:        req.Subsystem,

@@ -235,6 +235,7 @@ func TestHandleLLMActivityShowsCompletedJob(t *testing.T) {
 	done := make(chan struct{})
 	_, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:activity",
 		Run: func(rt llm.Runtime) error {
@@ -272,6 +273,7 @@ func TestHandleLLMJobDetailRoundTrip(t *testing.T) {
 
 	job, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:detail",
 		Run: func(rt llm.Runtime) error {
@@ -308,6 +310,7 @@ func TestHandleLLMJobLogs(t *testing.T) {
 	s := newMonitorTestServer(t)
 	job, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:logs",
 		Run: func(rt llm.Runtime) error {
@@ -356,6 +359,7 @@ func TestHandleLLMJobRetryNonRetryableState(t *testing.T) {
 	// Enqueue a job and let it complete successfully.
 	job, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:retry-ok",
 		Run: func(rt llm.Runtime) error {
@@ -398,6 +402,7 @@ func TestHandleDrainQueue(t *testing.T) {
 	started := make(chan struct{})
 	_, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:drain-running",
 		Run: func(rt llm.Runtime) error {
@@ -412,6 +417,7 @@ func TestHandleDrainQueue(t *testing.T) {
 	<-started
 	_, err = s.orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "learning_path",
 		TargetKey: "repo-1:drain-pending",
 		Run: func(rt llm.Runtime) error {
@@ -454,6 +460,7 @@ func TestParseListFilterBasicFields(t *testing.T) {
 func TestEventMatchesFilter(t *testing.T) {
 	job := &llm.Job{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		RepoID:    "repo-1",
 		TargetKey: "tk",

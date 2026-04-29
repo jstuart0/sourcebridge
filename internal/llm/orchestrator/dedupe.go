@@ -55,3 +55,17 @@ func (r *inflightRegistry) size() int {
 	defer r.mu.RUnlock()
 	return len(r.byKey)
 }
+
+// peek returns the currently-claimed job id for a target key, without
+// mutating the registry. (jobID, true) when claimed; ("", false) when
+// not. R3 followups B1 tests assert that a rejected empty-provider
+// enqueue does not disturb an unrelated active claim.
+func (r *inflightRegistry) peek(targetKey string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	id, ok := r.byKey[targetKey]
+	if !ok || id == "" {
+		return "", false
+	}
+	return id, true
+}

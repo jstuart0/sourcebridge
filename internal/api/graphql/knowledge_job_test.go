@@ -37,6 +37,7 @@ func TestEnqueueKnowledgeJobCreatesQueuedKnowledgeJob(t *testing.T) {
 	r := &Resolver{
 		KnowledgeStore: knowledgeStore,
 		Orchestrator:   orch,
+		LLMResolver:    newStubLLMResolver(),
 	}
 
 	block := make(chan struct{})
@@ -130,6 +131,7 @@ func TestKnowledgeJobsShareGlobalConcurrencyGate(t *testing.T) {
 	r := &Resolver{
 		KnowledgeStore: knowledgeStore,
 		Orchestrator:   orch,
+		LLMResolver:    newStubLLMResolver(),
 	}
 
 	entered := make(chan string, 2)
@@ -202,6 +204,7 @@ func TestRepositoryCliffNotesJobsDoNotAutoRetry(t *testing.T) {
 	r := &Resolver{
 		KnowledgeStore: knowledgeStore,
 		Orchestrator:   orch,
+		LLMResolver:    newStubLLMResolver(),
 	}
 	if err := r.enqueueKnowledgeJob(context.Background(), artifact, "cliff_notes", 256, func(_ context.Context, _ llm.Runtime) error {
 		return nil

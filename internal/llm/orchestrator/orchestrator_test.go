@@ -51,6 +51,7 @@ func TestOrchestratorEnqueueRunsJobToCompletion(t *testing.T) {
 	var ran atomic.Bool
 	job, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:cliff_notes:dev:medium",
 		Run: func(rt llm.Runtime) error {
@@ -93,6 +94,7 @@ func TestOrchestratorDedupeReturnsSameJob(t *testing.T) {
 	gate := make(chan struct{})
 	firstReq := &llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:dedupe",
 		Run: func(rt llm.Runtime) error {
@@ -116,6 +118,7 @@ func TestOrchestratorDedupeReturnsSameJob(t *testing.T) {
 	var secondRan atomic.Bool
 	second, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:dedupe",
 		Run: func(rt llm.Runtime) error {
@@ -162,6 +165,7 @@ func TestOrchestratorInflightReleasesAfterTerminalJob(t *testing.T) {
 	if _, err := orch.store.Create(&llm.Job{
 		ID:        deadID,
 		Subsystem: llm.SubsystemReasoning,
+		LLMProvider: "test",
 		JobType:   "discuss_code",
 		TargetKey: targetKey,
 		Status:    llm.StatusFailed,
@@ -180,6 +184,7 @@ func TestOrchestratorInflightReleasesAfterTerminalJob(t *testing.T) {
 	var ran atomic.Bool
 	freshJob, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemReasoning,
+		LLMProvider: "test",
 		JobType:   "discuss_code",
 		TargetKey: targetKey,
 		Run: func(rt llm.Runtime) error {
@@ -221,6 +226,7 @@ func TestOrchestratorBoundedConcurrency(t *testing.T) {
 			defer wg.Done()
 			_, err := orch.Enqueue(&llm.EnqueueRequest{
 				Subsystem: llm.SubsystemKnowledge,
+				LLMProvider: "test",
 				JobType:   "cliff_notes",
 				TargetKey: fmt.Sprintf("repo-1:concurrency:%d", i),
 				Run: func(rt llm.Runtime) error {
@@ -272,6 +278,7 @@ func TestOrchestratorReconfigureMaxConcurrency(t *testing.T) {
 	for i := 0; i < 6; i++ {
 		_, err := orch.Enqueue(&llm.EnqueueRequest{
 			Subsystem: llm.SubsystemKnowledge,
+			LLMProvider: "test",
 			JobType:   "cliff_notes",
 			TargetKey: fmt.Sprintf("repo-1:reconfigure:%d", i),
 			Run: func(rt llm.Runtime) error {
@@ -312,6 +319,7 @@ func TestOrchestratorReconfigureMaxConcurrency(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		_, err := orch.Enqueue(&llm.EnqueueRequest{
 			Subsystem: llm.SubsystemKnowledge,
+			LLMProvider: "test",
 			JobType:   "cliff_notes",
 			TargetKey: fmt.Sprintf("repo-1:reconfigure:second:%d", i),
 			Run: func(rt llm.Runtime) error {
@@ -360,6 +368,7 @@ func TestOrchestratorRetryOnTransientError(t *testing.T) {
 	var attempts atomic.Int32
 	job, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:retry-transient",
 		Run: func(rt llm.Runtime) error {
@@ -405,6 +414,7 @@ func TestOrchestratorNonRetryableFailsFast(t *testing.T) {
 	var attempts atomic.Int32
 	job, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:snapshot-too-large",
 		Run: func(rt llm.Runtime) error {
@@ -437,6 +447,7 @@ func TestOrchestratorPublishesEvents(t *testing.T) {
 
 	_, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:events",
 		Run: func(rt llm.Runtime) error {
@@ -477,6 +488,7 @@ func TestOrchestratorMetricsRecord(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		_, err := orch.Enqueue(&llm.EnqueueRequest{
 			Subsystem: llm.SubsystemKnowledge,
+			LLMProvider: "test",
 			JobType:   "cliff_notes",
 			TargetKey: fmt.Sprintf("repo-1:metrics:%d", i),
 			Run: func(rt llm.Runtime) error {
@@ -540,6 +552,7 @@ func TestSubsystemBreakerCooldownDelaysNextJobAfterProviderComputeFailures(t *te
 
 	first, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:breaker:first",
 		Run: func(rt llm.Runtime) error {
@@ -558,6 +571,7 @@ func TestSubsystemBreakerCooldownDelaysNextJobAfterProviderComputeFailures(t *te
 	var ranAt atomic.Int64
 	second, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "learning_path",
 		TargetKey: "repo-1:breaker:second",
 		Run: func(rt llm.Runtime) error {
@@ -588,6 +602,7 @@ func TestEnqueueSyncWaitsForTerminalState(t *testing.T) {
 	var captured string
 	job, err := orch.EnqueueSync(context.Background(), &llm.EnqueueRequest{
 		Subsystem: llm.SubsystemReasoning,
+		LLMProvider: "test",
 		JobType:   "analyze_symbol",
 		TargetKey: "reasoning:analyze:sym-1",
 		Run: func(rt llm.Runtime) error {
@@ -614,6 +629,7 @@ func TestEnqueueSyncPropagatesFailureStatus(t *testing.T) {
 
 	job, err := orch.EnqueueSync(context.Background(), &llm.EnqueueRequest{
 		Subsystem: llm.SubsystemReasoning,
+		LLMProvider: "test",
 		JobType:   "review",
 		TargetKey: "reasoning:review:fail",
 		Run: func(rt llm.Runtime) error {
@@ -640,6 +656,7 @@ func TestEnqueueSyncReturnsImmediatelyOnDedupeHit(t *testing.T) {
 	// Easier: run a job to completion first, then EnqueueSync the same target.
 	first, err := orch.EnqueueSync(context.Background(), &llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:enqueuesync-dedupe",
 		Run: func(rt llm.Runtime) error {
@@ -656,6 +673,7 @@ func TestEnqueueSyncReturnsImmediatelyOnDedupeHit(t *testing.T) {
 	// fast second job still works correctly via EnqueueSync.
 	second, err := orch.EnqueueSync(context.Background(), &llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:enqueuesync-dedupe",
 		Run: func(rt llm.Runtime) error {
@@ -682,6 +700,7 @@ func TestEnqueueSyncRespectsContextCancellation(t *testing.T) {
 	go func() {
 		_, err := orch.EnqueueSync(ctx, &llm.EnqueueRequest{
 			Subsystem: llm.SubsystemReasoning,
+			LLMProvider: "test",
 			JobType:   "analyze_symbol",
 			TargetKey: "reasoning:analyze:ctx",
 			Run: func(rt llm.Runtime) error {
@@ -734,6 +753,7 @@ func TestEnqueueRejectedWhenIntakePaused(t *testing.T) {
 
 	_, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:paused",
 		Run: func(rt llm.Runtime) error {
@@ -752,6 +772,7 @@ func TestDrainPendingCancelsQueuedJobs(t *testing.T) {
 
 	_, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:running",
 		Run: func(rt llm.Runtime) error {
@@ -767,6 +788,7 @@ func TestDrainPendingCancelsQueuedJobs(t *testing.T) {
 
 	pending, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "learning_path",
 		TargetKey: "repo-1:pending",
 		Run: func(rt llm.Runtime) error {
@@ -816,6 +838,7 @@ func TestRuntimeHeartbeatAdvancesUpdatedAt(t *testing.T) {
 
 	job, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "heartbeat_test",
 		TargetKey: "heartbeat-1",
 		Run: func(rt llm.Runtime) error {
@@ -867,6 +890,7 @@ func TestRuntimeHeartbeatIsNoopOnTerminalJob(t *testing.T) {
 	// Run a job to completion and capture its terminal UpdatedAt.
 	job, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "heartbeat_terminal_test",
 		TargetKey: "heartbeat-terminal-1",
 		Run: func(rt llm.Runtime) error {
@@ -917,6 +941,7 @@ func TestRuntimeHeartbeatBypassesProgressDebounce(t *testing.T) {
 
 	_, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
+		LLMProvider: "test",
 		JobType:   "heartbeat_debounce_test",
 		TargetKey: "heartbeat-debounce-1",
 		Run: func(rt llm.Runtime) error {
