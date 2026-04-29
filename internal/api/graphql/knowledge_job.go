@@ -435,7 +435,14 @@ func enqueueRepositoryUnderstandingJob(
 		RepoID:         repo.ID,
 		Priority:       llm.PriorityPrewarm,
 		GenerationMode: string(knowledgepkg.GenerationModeUnderstandingFirst),
-		MaxAttempts:    1,
+		// 3 attempts so a transient gRPC failure (e.g. the worker pod
+		// just restarted and the API still has the stale endpoint
+		// cached, or a brief network blip mid-stream) gets a retry
+		// instead of leaving the user staring at a "FAILED — connection
+		// refused" message and clicking refresh manually. The hierarchical
+		// pipeline already caches its summary nodes, so a retry resumes
+		// rather than redoing all the work.
+		MaxAttempts: 3,
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
 			rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot")
 			appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "queued", "knowledge_slot_wait_started", "Waiting for knowledge generation slot", map[string]any{
