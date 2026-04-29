@@ -18,7 +18,6 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httprate"
 
-	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 	"github.com/sourcebridge/sourcebridge/internal/api/graphql"
 	"github.com/sourcebridge/sourcebridge/internal/api/middleware"
 	"github.com/sourcebridge/sourcebridge/internal/auth"
@@ -387,7 +386,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		if s.knowledgeStore != nil && s.summaryNodeStore != nil {
 			reader = qaUnderstandingReader{knowledge: s.knowledgeStore, summaries: s.summaryNodeStore}
 		}
-		o := qa.New(s.worker, reader, s.workerLanes, qaOrchCfg)
+		o := qa.New(s.llmCaller, reader, s.workerLanes, qaOrchCfg)
 		if s.store != nil {
 			locator := newQARepoLocator(s.store, cfg.Storage.RepoCachePath)
 			o = o.WithRepoLocator(locator)
@@ -418,11 +417,11 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		// so both pods converge to the same capability state. A
 		// single run against two pods with split agentic-enablement
 		// corrupts benchmarks and produces flaky prod traffic.
-		if s.worker != nil {
-			var caps *reasoningv1.GetProviderCapabilitiesResponse
+		if s.llmCaller != nil && s.llmCaller.IsAvailable() {
+			var capsWrap *llmcall.CapabilitiesResponse
 			var err error
 			for attempt := 1; attempt <= 6; attempt++ {
-				caps, err = s.worker.GetProviderCapabilities(context.Background())
+				capsWrap, err = s.llmCaller.GetProviderCapabilities(context.Background(), "", resolution.OpProviderCapabilities)
 				if err == nil {
 					break
 				}
@@ -433,21 +432,21 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			if err != nil {
 				slog.Warn("agent synth: provider capability probe failed after retries; agentic disabled",
 					"error", err)
-			} else if caps.GetToolUseSupported() {
-				agent := qa.NewWorkerAgentSynthesizer(s.worker, true)
+			} else if capsWrap != nil && capsWrap.Resp.GetToolUseSupported() {
+				caps := capsWrap.Resp
+				// Pair the cached tool-support bit with the resolver
+				// snapshot version observed at probe time. A workspace
+				// save bumps the version; the synthesizer's IsStale()
+				// check (against the resolver's current version) lets
+				// the orchestrator re-probe before its next agentic
+				// turn so a configmap→workspace cutover is reflected
+				// without a pod restart.
+				agent := qa.NewWorkerAgentSynthesizerWithVersion(s.llmCaller, true, capsWrap.Version)
 				o = o.WithAgentSynthesizer(agent).
 					WithAgenticEnabled(cfg.QA.AgenticRetrievalEnabled).
 					WithAgenticCanaryPct(cfg.QA.AgenticRetrievalCanaryPct)
-				// Smart classifier is wired alongside agentic since
-				// both rely on the Anthropic provider surface. It
-				// still honors its own SmartClassifierEnabled flag
-				// at runtime, so wiring here is harmless when off.
-				o = o.WithQuestionProfiler(qa.NewWorkerQuestionProfiler(s.worker))
-				// Quality-push Phase 4: decomposer + synthesizer wire
-				// through to the same worker. Orchestrator honours
-				// QueryDecompositionEnabled at runtime so wiring here
-				// is harmless when the flag is off.
-				o = o.WithDecomposer(qa.NewWorkerDecomposer(s.worker), s.worker)
+				o = o.WithQuestionProfiler(qa.NewWorkerQuestionProfiler(s.llmCaller))
+				o = o.WithDecomposer(qa.NewWorkerDecomposer(s.llmCaller), s.llmCaller)
 				slog.Info("agent synth: wired",
 					"provider", caps.GetProvider(),
 					"model", caps.GetModel(),
@@ -455,10 +454,11 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 					"canary_pct", cfg.QA.AgenticRetrievalCanaryPct,
 					"smart_classifier", cfg.QA.SmartClassifierEnabled,
 					"query_decomposition", cfg.QA.QueryDecompositionEnabled,
-					"prompt_caching", cfg.QA.PromptCachingEnabled)
-			} else {
+					"prompt_caching", cfg.QA.PromptCachingEnabled,
+					"capability_probed_version", capsWrap.Version)
+			} else if capsWrap != nil {
 				slog.Info("agent synth: provider does not support tool use; agentic disabled",
-					"provider", caps.GetProvider(), "model", caps.GetModel())
+					"provider", capsWrap.Resp.GetProvider(), "model", capsWrap.Resp.GetModel())
 			}
 		}
 		s.qaOrchestrator = o
@@ -736,7 +736,18 @@ func (s *Server) setupRouter() {
 	if s.cfg.MCP.Enabled {
 		sessionTTL := time.Duration(s.cfg.MCP.SessionTTL) * time.Second
 		keepalive := time.Duration(s.cfg.MCP.Keepalive) * time.Second
-		s.mcp = newMCPHandlerWithEdition(s.store, s.knowledgeStore, s.worker, s.cfg.MCP.Repos, sessionTTL, keepalive, s.cfg.MCP.MaxSessions, s.cache, capabilities.NormalizeEdition(s.cfg.Edition))
+		// Wrap the LLM-aware Caller so MCP RPCs flow through the
+		// resolver. When llmCaller is nil (worker unavailable), pass nil
+		// and the MCP tools degrade gracefully via IsAvailable() checks.
+		var mcpWorker mcpWorkerCaller
+		if s.llmCaller != nil {
+			mcpWorker = &mcpLLMCallerAdapter{
+				caller:   s.llmCaller,
+				unaryOp:  resolution.OpMCPExplain,
+				streamOp: resolution.OpMCPDiscussStream,
+			}
+		}
+		s.mcp = newMCPHandlerWithEdition(s.store, s.knowledgeStore, mcpWorker, s.cfg.MCP.Repos, sessionTTL, keepalive, s.cfg.MCP.MaxSessions, s.cache, capabilities.NormalizeEdition(s.cfg.Edition))
 		s.mcp.qaOrchestrator = s.qaOrchestrator
 		s.mcp.qaEnabled = s.cfg.QA.ServerSideEnabled
 		s.mcp.searchSvc = s.searchSvc

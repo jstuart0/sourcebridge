@@ -8,6 +8,8 @@ import (
 	"fmt"
 
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
+
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
 
 // QuestionProfiler is the narrow surface the orchestrator uses to
@@ -37,10 +39,14 @@ func (keywordProfiler) Profile(_ context.Context, in AskInput) (QuestionProfile,
 func NewKeywordProfiler() QuestionProfiler { return keywordProfiler{} }
 
 // questionProfilerClient is the narrow worker surface used by the
-// LLM-backed profiler. Decoupled from *worker.Client so tests can
+// LLM-backed profiler. Decoupled from *llmcall.Caller so tests can
 // inject a fake.
+//
+// Slice 2 of the workspace-LLM-source-of-truth plan: signature now
+// takes (repoID, op) so the underlying *llmcall.Caller can resolve
+// workspace-saved settings and attach them to gRPC metadata.
 type questionProfilerClient interface {
-	ClassifyQuestion(ctx context.Context, req *reasoningv1.ClassifyQuestionRequest) (*reasoningv1.ClassifyQuestionResponse, error)
+	ClassifyQuestion(ctx context.Context, repoID, op string, req *reasoningv1.ClassifyQuestionRequest) (*reasoningv1.ClassifyQuestionResponse, error)
 }
 
 // WorkerQuestionProfiler dispatches the ClassifyQuestion RPC and
@@ -70,7 +76,9 @@ func (p *WorkerQuestionProfiler) Profile(ctx context.Context, in AskInput) (Ques
 		return p.fallback.Profile(ctx, in)
 	}
 
-	resp, err := p.worker.ClassifyQuestion(ctx, &reasoningv1.ClassifyQuestionRequest{
+	// llmcall:allow — p.worker is the questionProfilerClient interface,
+	// satisfied in production by *llmcall.Caller.
+	resp, err := p.worker.ClassifyQuestion(ctx, in.RepositoryID, resolution.OpQAClassify, &reasoningv1.ClassifyQuestionRequest{
 		RepositoryId: in.RepositoryID,
 		Question:     in.Question,
 		FilePath:     in.FilePath,
@@ -127,6 +135,6 @@ var _ questionProfilerClient = (*fakeProfilerClient)(nil) //nolint:unused,deadco
 // worker client. Tests supply their own fakes.
 type fakeProfilerClient struct{}
 
-func (fakeProfilerClient) ClassifyQuestion(_ context.Context, _ *reasoningv1.ClassifyQuestionRequest) (*reasoningv1.ClassifyQuestionResponse, error) {
+func (fakeProfilerClient) ClassifyQuestion(_ context.Context, _, _ string, _ *reasoningv1.ClassifyQuestionRequest) (*reasoningv1.ClassifyQuestionResponse, error) {
 	return nil, fmt.Errorf("fake")
 }

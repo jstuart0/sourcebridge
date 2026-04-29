@@ -26,6 +26,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/qa"
 	"github.com/sourcebridge/sourcebridge/internal/search"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
+	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 )
@@ -126,7 +127,11 @@ type MCPToolExtender interface {
 // Worker interface (for testability)
 // ---------------------------------------------------------------------------
 
-// mcpWorkerCaller abstracts the worker methods used by MCP tools.
+// mcpWorkerCaller abstracts the worker methods used by MCP tools. The
+// real implementation is mcpLLMCallerAdapter, which wraps an
+// *llmcall.Caller and binds the per-call (repoID, op) at the wrapper-
+// construction site. Tests inject mocks that satisfy this interface
+// directly.
 type mcpWorkerCaller interface {
 	IsAvailable() bool
 	AnswerQuestion(ctx context.Context, req *reasoningv1.AnswerQuestionRequest) (*reasoningv1.AnswerQuestionResponse, error)
@@ -145,9 +150,37 @@ type workerStreamingCaller interface {
 	) (reasoningv1.ReasoningService_AnswerQuestionStreamClient, context.CancelFunc, error)
 }
 
-// Verify that *worker.Client satisfies both interfaces at compile time.
-var _ mcpWorkerCaller = (*worker.Client)(nil)
-var _ workerStreamingCaller = (*worker.Client)(nil)
+// mcpLLMCallerAdapter adapts an *llmcall.Caller to the mcp* worker
+// interfaces. It binds the resolver op to the MCP-specific constants so
+// every RPC the MCP server makes is stamped with workspace-resolved
+// metadata.
+//
+// repoID is supplied per-call by the MCP tool from the request payload;
+// the adapter forwards it into the resolver via the Caller wrapper. We
+// bind the *op* at adapter-construction time because every MCP unary
+// answer goes through the explain_code tool (OpMCPExplain) and every
+// MCP stream goes through the discuss_stream tool (OpMCPDiscussStream).
+type mcpLLMCallerAdapter struct {
+	caller   *llmcall.Caller
+	unaryOp  string
+	streamOp string
+}
+
+func (a *mcpLLMCallerAdapter) IsAvailable() bool {
+	return a != nil && a.caller != nil && a.caller.IsAvailable()
+}
+
+func (a *mcpLLMCallerAdapter) AnswerQuestion(ctx context.Context, req *reasoningv1.AnswerQuestionRequest) (*reasoningv1.AnswerQuestionResponse, error) {
+	return a.caller.AnswerQuestion(ctx, req.GetRepositoryId(), a.unaryOp, req)
+}
+
+func (a *mcpLLMCallerAdapter) AnswerQuestionStream(ctx context.Context, req *reasoningv1.AnswerQuestionRequest) (reasoningv1.ReasoningService_AnswerQuestionStreamClient, context.CancelFunc, error) {
+	return a.caller.AnswerQuestionStream(ctx, req.GetRepositoryId(), a.streamOp, req)
+}
+
+// Compile-time check.
+var _ mcpWorkerCaller = (*mcpLLMCallerAdapter)(nil)
+var _ workerStreamingCaller = (*mcpLLMCallerAdapter)(nil)
 
 // streamDiscussion runs the server-streaming AnswerQuestionStream RPC
 // and forwards each AnswerDelta's content fragment to the given
@@ -1413,6 +1446,12 @@ func (h *mcpHandler) callExplainCodeCtx(ctx context.Context, session *mcpSession
 	if emitter == nil || !ok {
 		unaryCtx, cancel := context.WithTimeout(context.Background(), worker.TimeoutDiscussion)
 		defer cancel()
+		// llmcall:allow — h.worker is the mcpWorkerCaller interface,
+		// satisfied in production by *mcpLLMCallerAdapter which delegates
+		// to *llmcall.Caller. Lint heuristic can't see through the
+		// interface, so we allowlist this single line. Tests inject
+		// their own mocks satisfying mcpWorkerCaller; both paths go
+		// through llmcall.Caller for real RPCs.
 		resp, err := h.worker.AnswerQuestion(unaryCtx, req)
 		if err != nil {
 			return nil, fmt.Errorf("AI worker timed out or failed: %v", err)

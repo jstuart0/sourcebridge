@@ -19,7 +19,7 @@ type fakeClassifyClient struct {
 	err  error
 }
 
-func (f *fakeClassifyClient) ClassifyQuestion(_ context.Context, _ *reasoningv1.ClassifyQuestionRequest) (*reasoningv1.ClassifyQuestionResponse, error) {
+func (f *fakeClassifyClient) ClassifyQuestion(_ context.Context, _, _ string, _ *reasoningv1.ClassifyQuestionRequest) (*reasoningv1.ClassifyQuestionResponse, error) {
 	return f.resp, f.err
 }
 

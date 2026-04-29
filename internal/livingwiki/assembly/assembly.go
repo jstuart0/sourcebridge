@@ -29,8 +29,10 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/governance"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/webhook"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
+	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 )
 
 // AssemblerDeps carries every external dependency that the assembly factory
@@ -51,7 +53,18 @@ type AssemblerDeps struct {
 
 	// WorkerClient is the gRPC reasoning worker. Optional; when nil the LLM
 	// caller returns an error, causing template generation to fail gracefully.
+	//
+	// Slice 2 of the workspace-LLM-source-of-truth plan: the assembled LLM
+	// caller goes through LLMCaller (an llmcall.Caller) so workspace-saved
+	// settings are attached to gRPC metadata. WorkerClient is kept for
+	// other ports that need direct access (none today; placeholder).
 	WorkerClient *worker.Client
+
+	// LLMCaller is the LLM-aware adapter around WorkerClient. Required for
+	// LLM-bearing template generation; when nil the assembled
+	// templates.LLMCaller returns errors and LLM-dependent pages are
+	// excluded gracefully.
+	LLMCaller *llmcall.Caller
 
 	// Broker supplies credentials per-call. Required (R3 workstream).
 	Broker credentials.Broker
@@ -104,8 +117,8 @@ func AssembleDispatcher(deps AssemblerDeps) (*webhook.Dispatcher, error) {
 
 	// ── LLMCaller ─────────────────────────────────────────────────────────────
 	var llmCaller templates.LLMCaller
-	if deps.WorkerClient != nil {
-		llmCaller = &workerLLMCaller{client: deps.WorkerClient}
+	if deps.LLMCaller != nil && deps.LLMCaller.IsAvailable() {
+		llmCaller = &workerLLMCaller{caller: deps.LLMCaller}
 	} else {
 		llmCaller = &noopLLMCaller{}
 	}
@@ -178,16 +191,16 @@ func AssembleDispatcher(deps AssemblerDeps) (*webhook.Dispatcher, error) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // workerLLMCaller implements [templates.LLMCaller] backed by the gRPC reasoning
-// worker. It encodes the system prompt and user prompt into the AnswerQuestion
-// Question field, which is how other callers in the codebase compose multi-turn
-// content for the reasoning service.
+// worker. Slice 2 of the workspace-LLM-source-of-truth plan replaced the prior
+// direct *worker.Client wiring with an llmcall.Caller wrapper so workspace-
+// saved settings flow through gRPC metadata on every call.
 type workerLLMCaller struct {
-	client *worker.Client
+	caller *llmcall.Caller
 }
 
 func (w *workerLLMCaller) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-	if w.client == nil {
-		return "", fmt.Errorf("assembly: workerLLMCaller: worker client is nil")
+	if w.caller == nil {
+		return "", fmt.Errorf("assembly: workerLLMCaller: llmcall.Caller is nil")
 	}
 	// The AnswerQuestion RPC takes a single Question string. We combine the
 	// system-level instructions and the user-turn content so the reasoning
@@ -196,7 +209,12 @@ func (w *workerLLMCaller) Complete(ctx context.Context, systemPrompt, userPrompt
 	if systemPrompt != "" {
 		question = systemPrompt + "\n\n" + userPrompt
 	}
-	resp, err := w.client.AnswerQuestion(ctx, &reasoningv1.AnswerQuestionRequest{
+	// repoID is empty here: the assembly-time caller does not know the
+	// per-repo identity; the dispatcher's job context drives that. For
+	// the static template-generation path that uses this caller, the
+	// resolver falls through to workspace settings (env-bootstrap
+	// fallback) and per-repo override is by definition not relevant.
+	resp, err := w.caller.AnswerQuestion(ctx, "", resolution.OpLivingWikiAssembly, &reasoningv1.AnswerQuestionRequest{
 		Question: question,
 	})
 	if err != nil {

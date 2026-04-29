@@ -16,7 +16,7 @@ type fakeDecomposerClient struct {
 	err  error
 }
 
-func (f *fakeDecomposerClient) DecomposeQuestion(_ context.Context, _ *reasoningv1.DecomposeQuestionRequest) (*reasoningv1.DecomposeQuestionResponse, error) {
+func (f *fakeDecomposerClient) DecomposeQuestion(_ context.Context, _, _ string, _ *reasoningv1.DecomposeQuestionRequest) (*reasoningv1.DecomposeQuestionResponse, error) {
 	return f.resp, f.err
 }
 

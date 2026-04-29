@@ -600,6 +600,7 @@ func TestBuildColdStartRunnerNilOrchestratorReturnsNotice(t *testing.T) {
 		"default",
 		nil,           // no graph store
 		nil,           // no worker client
+		nil,           // no llmcall.Caller
 		nil,           // no excluded page IDs
 		"unknown",
 		nil,           // no job result store
@@ -1012,6 +1013,7 @@ func TestColdStartSinkResultsPersistedInJobResult(t *testing.T) {
 		"default",
 		nil,   // no graph store (taxonomy resolution skipped; pages provided via test)
 		nil,   // no worker client
+		nil,   // no llmcall.Caller
 		nil,   // no excluded page IDs (full cold-start path)
 		"confluence",
 		jrs,

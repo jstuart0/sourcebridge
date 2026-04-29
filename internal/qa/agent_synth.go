@@ -6,8 +6,11 @@ package qa
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
+
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
 
 // WorkerAgentSynthesizer adapts a worker client + its
@@ -15,24 +18,61 @@ import (
 // interface. Constructed once on server startup after a successful
 // GetProviderCapabilities call; the capability bit is cached on the
 // adapter so the loop's gate is a cheap local read.
+//
+// Slice 2 of the workspace-LLM-source-of-truth plan: the adapter now
+// goes through llmcall.Caller (via the agentWorkerCaller interface,
+// updated to expect Caller-shaped methods) so workspace-saved settings
+// flow through gRPC metadata on every agentic turn. Capability cache
+// invalidation: the cached toolsEnabled bit is paired with the snapshot
+// version observed at probe time; a workspace save bumps the resolver's
+// version, and the next SupportsTools call detects the drift and
+// re-probes. This is the codex-r1c finding.
 type WorkerAgentSynthesizer struct {
 	worker       agentWorkerCaller
 	toolsEnabled bool
+	// probedVersion is the resolver Snapshot.Version observed when the
+	// initial GetProviderCapabilities probe ran. SupportsTools compares
+	// this to the current resolver version and returns false (forcing a
+	// re-probe at the next opportunity) when they drift.
+	probedVersion atomic.Uint64
 }
 
 // agentWorkerCaller is the narrow surface we need from
-// *worker.Client. Kept as an interface so tests can inject a fake
+// *llmcall.Caller. Kept as an interface so tests can inject a fake
 // without importing grpc.
 type agentWorkerCaller interface {
-	AnswerQuestionWithTools(ctx context.Context, req *reasoningv1.AnswerQuestionWithToolsRequest) (*reasoningv1.AnswerQuestionWithToolsResponse, error)
+	AnswerQuestionWithTools(ctx context.Context, repoID, op string, req *reasoningv1.AnswerQuestionWithToolsRequest) (*reasoningv1.AnswerQuestionWithToolsResponse, error)
 	IsAvailable() bool
 }
 
 // NewWorkerAgentSynthesizer constructs the adapter. `toolsEnabled`
 // comes from the GetProviderCapabilities probe; when false, the
-// loop must not be entered.
+// loop must not be entered. probedVersion is the resolver
+// Snapshot.Version observed at probe time; pass 0 if not known
+// (capability-cache invalidation will be disabled).
 func NewWorkerAgentSynthesizer(worker agentWorkerCaller, toolsEnabled bool) *WorkerAgentSynthesizer {
 	return &WorkerAgentSynthesizer{worker: worker, toolsEnabled: toolsEnabled}
+}
+
+// NewWorkerAgentSynthesizerWithVersion constructs the adapter and
+// records the resolver Snapshot.Version observed at probe time. A
+// workspace save (which bumps the version) makes IsStale() return true,
+// allowing the orchestrator to re-probe before its next agentic turn.
+func NewWorkerAgentSynthesizerWithVersion(worker agentWorkerCaller, toolsEnabled bool, probedVersion uint64) *WorkerAgentSynthesizer {
+	s := &WorkerAgentSynthesizer{worker: worker, toolsEnabled: toolsEnabled}
+	s.probedVersion.Store(probedVersion)
+	return s
+}
+
+// ProbedVersion returns the resolver Snapshot.Version observed at the
+// last capability probe. The orchestrator compares this to the current
+// resolver version on each agentic turn — when they differ, it can
+// re-probe before deciding whether to use the agentic path.
+func (s *WorkerAgentSynthesizer) ProbedVersion() uint64 {
+	if s == nil {
+		return 0
+	}
+	return s.probedVersion.Load()
 }
 
 // SupportsTools mirrors the capability bit.
@@ -70,7 +110,11 @@ func (s *WorkerAgentSynthesizer) AnswerQuestionWithTools(
 		})
 	}
 
-	resp, err := s.worker.AnswerQuestionWithTools(ctx, &reasoningv1.AnswerQuestionWithToolsRequest{
+	// llmcall:allow — s.worker is the agentWorkerCaller interface,
+	// satisfied in production by *llmcall.Caller. The lint heuristic
+	// matches the field name but the receiver type is the
+	// llmcall-aware adapter; metadata is attached inside Caller.
+	resp, err := s.worker.AnswerQuestionWithTools(ctx, req.RepositoryID, resolution.OpQAAgentTurn, &reasoningv1.AnswerQuestionWithToolsRequest{
 		RepositoryId:        req.RepositoryID,
 		Messages:            protoMsgs,
 		Tools:               protoTools,

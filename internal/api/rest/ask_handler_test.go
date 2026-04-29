@@ -25,7 +25,7 @@ type stubSynth struct {
 }
 
 func (s *stubSynth) IsAvailable() bool { return s.available }
-func (s *stubSynth) AnswerQuestion(ctx context.Context, req *reasoningv1.AnswerQuestionRequest) (*reasoningv1.AnswerQuestionResponse, error) {
+func (s *stubSynth) AnswerQuestion(_ context.Context, _, _ string, _ *reasoningv1.AnswerQuestionRequest) (*reasoningv1.AnswerQuestionResponse, error) {
 	return s.resp, s.err
 }
 

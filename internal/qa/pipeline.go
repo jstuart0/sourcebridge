@@ -14,14 +14,20 @@ import (
 
 	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
 // Synthesizer is the minimum worker surface the orchestrator needs.
 // It is the single RPC boundary between the Go data plane and the
 // Python compute plane.
+//
+// Slice 2 of the workspace-LLM-source-of-truth plan: the AnswerQuestion
+// signature now takes (repoID, op) so the underlying *llmcall.Caller
+// can resolve workspace-saved settings and attach them to gRPC
+// metadata. Tests inject fakes that satisfy this signature.
 type Synthesizer interface {
-	AnswerQuestion(ctx context.Context, req *reasoningv1.AnswerQuestionRequest) (*reasoningv1.AnswerQuestionResponse, error)
+	AnswerQuestion(ctx context.Context, repoID, op string, req *reasoningv1.AnswerQuestionRequest) (*reasoningv1.AnswerQuestionResponse, error)
 	IsAvailable() bool
 }
 
@@ -412,7 +418,7 @@ func (o *Orchestrator) Ask(ctx context.Context, in AskInput) (*AskResult, error)
 	var resp *reasoningv1.AnswerQuestionResponse
 	err = o.runSynth(ctx, in.RepositoryID, in.Question, func(rt TokenReporter) error {
 		var callErr error
-		resp, callErr = o.synthesizer.AnswerQuestion(ctx, req)
+		resp, callErr = o.synthesizer.AnswerQuestion(ctx, in.RepositoryID, resolution.OpQASynth, req)
 		if callErr != nil {
 			return callErr
 		}

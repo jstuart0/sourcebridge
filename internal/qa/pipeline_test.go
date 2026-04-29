@@ -21,7 +21,7 @@ type fakeSynth struct {
 }
 
 func (f *fakeSynth) IsAvailable() bool { return f.available }
-func (f *fakeSynth) AnswerQuestion(ctx context.Context, req *reasoningv1.AnswerQuestionRequest) (*reasoningv1.AnswerQuestionResponse, error) {
+func (f *fakeSynth) AnswerQuestion(_ context.Context, _, _ string, req *reasoningv1.AnswerQuestionRequest) (*reasoningv1.AnswerQuestionResponse, error) {
 	f.lastReq = req
 	return f.resp, f.err
 }

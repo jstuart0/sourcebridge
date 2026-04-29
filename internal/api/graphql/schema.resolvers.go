@@ -2626,6 +2626,7 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 			defaultTenantID,
 			r.getStore(ctx),
 			r.Worker,
+			r.LLMCaller,
 			excludedPageIDs,
 			sinkKind,
 			r.LivingWikiJobResultStore,

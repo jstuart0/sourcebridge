@@ -240,6 +240,26 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	localAuth := auth.NewLocalAuth(jwtMgr, authPersister)
 
+	// Build the runtime LLM-config resolver. cfg.LLM is the env-bootstrap
+	// layer; the workspace store is layer 2. Per-repo override (slice 5)
+	// adds layer 1 by passing a non-nil RepoOverrideStore. Resolver runs
+	// in every replica — version-keyed cache makes admin saves visible
+	// cross-replica without polling or restart.
+	var llmStoreAdapter resolution.LLMConfigStore
+	if cfg.Storage.SurrealMode == "external" && surrealDB != nil {
+		llmStoreAdapter = &llmStoreResolverAdapter{store: db.NewSurrealLLMConfigStore(surrealDB)}
+	}
+	llmResolver := resolution.New(llmStoreAdapter, nil /* per-repo override store, slice 5 */, cfg.LLM, slog.Default())
+
+	// Build the LLM-aware adapter around the worker client. Every gRPC
+	// LLM RPC must flow through this Caller so resolved metadata is
+	// attached to the outgoing context. The AST lint test in
+	// internal/llm/resolution/lint_test.go enforces that.
+	var llmCaller *llmcall.Caller
+	if workerClient != nil {
+		llmCaller = llmcall.New(workerClient, llmResolver, slog.Default())
+	}
+
 	// Living-wiki dispatcher construction.
 	//
 	// Kill-switch: check env var before any DB state so operators can disable
@@ -267,6 +287,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 				SurrealDB:    surrealDB,
 				GraphStore:   store,
 				WorkerClient: workerClient,
+				LLMCaller:    llmCaller,
 				Broker:       broker,
 				Logger:       &slogLivingWikiLogger{},
 				WorkerCount:  cfg.LivingWiki.WorkerCount,
@@ -343,26 +364,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		healthChecker = health.New(surrealDB, workerClient)
 	} else {
 		healthChecker = health.New(nil, workerClient)
-	}
-
-	// Build the runtime LLM-config resolver. cfg.LLM is the env-bootstrap
-	// layer; the workspace store is layer 2. Per-repo override (slice 5)
-	// adds layer 1 by passing a non-nil RepoOverrideStore. Resolver runs
-	// in every replica — version-keyed cache makes admin saves visible
-	// cross-replica without polling or restart.
-	var llmStoreAdapter resolution.LLMConfigStore
-	if cfg.Storage.SurrealMode == "external" && surrealDB != nil {
-		llmStoreAdapter = &llmStoreResolverAdapter{store: db.NewSurrealLLMConfigStore(surrealDB)}
-	}
-	llmResolver := resolution.New(llmStoreAdapter, nil /* per-repo override store, slice 5 */, cfg.LLM, slog.Default())
-
-	// Build the LLM-aware adapter around the worker client. Every gRPC
-	// LLM RPC must flow through this Caller so resolved metadata is
-	// attached to the outgoing context. The AST lint test in
-	// internal/llm/resolution/lint_test.go enforces that.
-	var llmCaller *llmcall.Caller
-	if workerClient != nil {
-		llmCaller = llmcall.New(workerClient, llmResolver, slog.Default())
 	}
 
 	// Create HTTP server

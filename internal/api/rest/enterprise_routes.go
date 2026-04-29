@@ -17,15 +17,14 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"google.golang.org/grpc/metadata"
 
 	"github.com/jstuart0/sourcebridge-enterprise/routes"
 	enterprisev1 "github.com/sourcebridge/sourcebridge/gen/go/enterprise/v1"
 	"github.com/sourcebridge/sourcebridge/internal/api/middleware"
 	"github.com/sourcebridge/sourcebridge/internal/auth"
-	"github.com/sourcebridge/sourcebridge/internal/config"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	surrealdb "github.com/surrealdb/surrealdb.go"
 )
 
@@ -105,15 +104,22 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 	// Wire the report generator to call the Python worker via gRPC.
 	// The callback collects REAL repository data from the GraphStore so
 	// the LLM has actual evidence to write about (not hallucinations).
-	if s.worker != nil {
+	if s.llmCaller != nil && s.llmCaller.IsAvailable() {
 		ectx.API.SetReportGenerator(func(reportID, reportType, audience, repoDataJSON, sectionDefsJSON, outputDir string, repoIDs, selectedSections []string, includeDiagrams, includeRecommendations, includeLOE bool, loeMode, reportName, analysisDepth, styleSystemPrompt, styleSectionRules string) (string, int, int, int, string, error) {
 			// Collect actual repo data from the graph and knowledge stores
 			realRepoData := collectRepoDataForReport(s.store, s.knowledgeStore, repoIDs)
 			repoJSON, _ := json.Marshal(realRepoData)
 			slog.Info("report: collected repo data", "repos", len(repoIDs), "jsonBytes", len(repoJSON))
 
-			ctx := withWorkerLLMMetadata(context.Background(), s.cfg, "report")
-			resp, err := s.worker.GenerateReport(ctx, &enterprisev1.GenerateReportRequest{
+			// Reports may span multiple repos; pass the first as the
+			// resolver's repoID hint (per-repo override applies only to
+			// living-wiki ops, so for OpReportGenerate the resolver
+			// ignores the override anyway and uses workspace settings).
+			repoIDHint := ""
+			if len(repoIDs) > 0 {
+				repoIDHint = repoIDs[0]
+			}
+			resp, err := s.llmCaller.GenerateReport(context.Background(), repoIDHint, resolution.OpReportGenerate, &enterprisev1.GenerateReportRequest{
 				ReportId:               reportID,
 				ReportName:             reportName,
 				ReportType:             reportType,
@@ -164,24 +170,6 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 		r.Use(middleware.TenantMiddleware(&claimsFirstTenantExtractor{base: ectx.TenantExtractor}))
 		ectx.RegisterComplianceRoutes(r)
 	})
-}
-
-func withWorkerLLMMetadata(ctx context.Context, cfg *config.Config, operationGroup string) context.Context {
-	if cfg == nil {
-		return ctx
-	}
-	model := cfg.LLM.ModelForOperation(operationGroup)
-	pairs := []string{
-		"x-sb-llm-provider", cfg.LLM.Provider,
-		"x-sb-llm-base-url", cfg.LLM.BaseURL,
-		"x-sb-llm-api-key", cfg.LLM.APIKey,
-		"x-sb-llm-draft-model", cfg.LLM.DraftModel,
-		"x-sb-operation", operationGroup,
-	}
-	if model != "" {
-		pairs = append(pairs, "x-sb-model", model)
-	}
-	return metadata.NewOutgoingContext(ctx, metadata.Pairs(pairs...))
 }
 
 type claimsFirstTenantExtractor struct {

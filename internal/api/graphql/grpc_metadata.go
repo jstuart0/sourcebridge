@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 SourceBridge Contributors
 
+// Package-internal helpers for stamping outgoing gRPC metadata onto
+// contexts headed to the worker. Slice 2 of the workspace-LLM-source-
+// of-truth plan removed the legacy withModelMetadata / withJobMetadata
+// pair — every LLM-bearing RPC now flows through *llmcall.Caller, which
+// resolves and attaches the runtime LLM config (provider / api-key /
+// model) on its own. The remaining helpers in this file (llmJobMetadata,
+// withCliffNotesRenderMetadata) attach orthogonal metadata that the
+// resolver does not own (per-job tracing IDs, render-only flags).
 package graphql
 
 import (
 	"context"
 	"encoding/json"
-	"strconv"
 	"strings"
 
 	"google.golang.org/grpc/metadata"
@@ -27,62 +34,6 @@ func llmJobMetadata(rt llm.Runtime, artifactID, jobType string) llmcall.JobMetad
 		jm.JobID = rt.JobID()
 	}
 	return jm
-}
-
-// withModelMetadata is deprecated. Slice 1 of the workspace-LLM-source-of-
-// truth plan replaced its callers with llmcall.Caller wrappers that go
-// through the runtime resolver. Kept here only as a compatibility shim
-// in case any external caller imported this package (none do as of the
-// slice-1 commit). Slice 2 deletes this function once we've finished
-// migrating all bypass call sites and confirmed no consumer remains.
-//
-// Deprecated: use *llmcall.Caller via Resolver.LLMCaller instead.
-func (r *Resolver) withModelMetadata(ctx context.Context, operationGroup string) context.Context {
-	return r.withJobMetadata(ctx, operationGroup, nil, "", "", "")
-}
-
-func (r *Resolver) withJobMetadata(
-	ctx context.Context,
-	operationGroup string,
-	rt llm.Runtime,
-	repoID, artifactID, jobType string,
-) context.Context {
-	if r.Config == nil {
-		return ctx
-	}
-
-	model := r.Config.LLM.ModelForOperation(operationGroup)
-	if operationGroup == "knowledge" && jobType == "architecture_diagram" && r.Config.LLM.ArchitectureDiagramModel != "" {
-		model = r.Config.LLM.ArchitectureDiagramModel
-	}
-	pairs := []string{
-		"x-sb-llm-provider", r.Config.LLM.Provider,
-		"x-sb-llm-base-url", r.Config.LLM.BaseURL,
-		"x-sb-llm-api-key", r.Config.LLM.APIKey,
-		"x-sb-llm-draft-model", r.Config.LLM.DraftModel,
-		"x-sb-operation", operationGroup,
-	}
-	if r.Config.LLM.TimeoutSecs > 0 {
-		pairs = append(pairs, "x-sb-llm-timeout-seconds", strconv.Itoa(r.Config.LLM.TimeoutSecs))
-	}
-	if model != "" {
-		pairs = append(pairs, "x-sb-model", model)
-	}
-	if rt != nil && rt.JobID() != "" {
-		pairs = append(pairs, "x-sb-job-id", rt.JobID())
-	}
-	if repoID != "" {
-		pairs = append(pairs, "x-sb-repo-id", repoID)
-	}
-	if artifactID != "" {
-		pairs = append(pairs, "x-sb-artifact-id", artifactID)
-	}
-	if jobType != "" {
-		pairs = append(pairs, "x-sb-job-type", jobType)
-	}
-	pairs = append(pairs, "x-sb-subsystem", "knowledge")
-	md := metadata.Pairs(pairs...)
-	return metadata.NewOutgoingContext(ctx, md)
 }
 
 func withCliffNotesRenderMetadata(

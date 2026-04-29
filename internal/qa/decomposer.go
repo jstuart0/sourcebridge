@@ -7,6 +7,8 @@ import (
 	"context"
 
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
+
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
 
 // Decomposer splits a multi-hop question into sub-questions.
@@ -19,8 +21,12 @@ type Decomposer interface {
 
 // decomposerClient is the narrow worker surface used by
 // WorkerDecomposer. Isolated so tests can inject a fake.
+//
+// Slice 2 of the workspace-LLM-source-of-truth plan: signature now
+// takes (repoID, op) so the underlying *llmcall.Caller can resolve
+// workspace-saved settings and attach them to gRPC metadata.
 type decomposerClient interface {
-	DecomposeQuestion(ctx context.Context, req *reasoningv1.DecomposeQuestionRequest) (*reasoningv1.DecomposeQuestionResponse, error)
+	DecomposeQuestion(ctx context.Context, repoID, op string, req *reasoningv1.DecomposeQuestionRequest) (*reasoningv1.DecomposeQuestionResponse, error)
 }
 
 // WorkerDecomposer calls the worker's DecomposeQuestion RPC.
@@ -41,7 +47,10 @@ func (d *WorkerDecomposer) Decompose(ctx context.Context, in AskInput, kind Ques
 	if d == nil || d.worker == nil {
 		return nil, nil
 	}
-	resp, err := d.worker.DecomposeQuestion(ctx, &reasoningv1.DecomposeQuestionRequest{
+	// llmcall:allow — d.worker is the decomposerClient interface,
+	// satisfied in production by *llmcall.Caller. Lint heuristic
+	// matches the field name; receiver type is llmcall-aware.
+	resp, err := d.worker.DecomposeQuestion(ctx, in.RepositoryID, resolution.OpQADecompose, &reasoningv1.DecomposeQuestionRequest{
 		RepositoryId:    in.RepositoryID,
 		Question:        in.Question,
 		QuestionClass:   string(kind),
@@ -56,6 +65,8 @@ func (d *WorkerDecomposer) Decompose(ctx context.Context, in AskInput, kind Ques
 // decomposedSynthesizer is the narrow worker surface used by the
 // orchestrator to call SynthesizeDecomposedAnswer. Separate
 // interface keeps the decomposer interface small.
+//
+// Slice 2: signature now takes (repoID, op).
 type decomposedSynthesizer interface {
-	SynthesizeDecomposedAnswer(ctx context.Context, req *reasoningv1.SynthesizeDecomposedAnswerRequest) (*reasoningv1.SynthesizeDecomposedAnswerResponse, error)
+	SynthesizeDecomposedAnswer(ctx context.Context, repoID, op string, req *reasoningv1.SynthesizeDecomposedAnswerRequest) (*reasoningv1.SynthesizeDecomposedAnswerResponse, error)
 }

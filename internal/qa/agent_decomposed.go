@@ -12,6 +12,7 @@ import (
 
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 	"github.com/sourcebridge/sourcebridge/internal/citations"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
 
 // Decomposition budgets (quality-push Phase 4). These bracket the
@@ -117,6 +118,7 @@ func (o *Orchestrator) runDecomposed(
 	// returns the final answer.
 	t3 := time.Now()
 	synthResp, err := o.decompSynthesizer.SynthesizeDecomposedAnswer(parentCtx,
+		in.RepositoryID, resolution.OpQADeepSynth,
 		buildSynthesisRequest(in, answers, o.config.PromptCachingEnabled),
 	)
 	result.Diagnostics.StageTimings["qa.decompose.synthesize"] = FromDuration(time.Since(t3))

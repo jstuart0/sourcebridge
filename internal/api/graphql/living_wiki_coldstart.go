@@ -43,9 +43,11 @@ import (
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/sinks"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
+	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 )
 
 const (
@@ -100,6 +102,7 @@ func buildColdStartRunner(
 	tenantID string,
 	graphStore graphstore.GraphStore,
 	workerClient *worker.Client,
+	llmCaller *llmcall.Caller, // post-slice-2: LLM-aware adapter (resolved metadata)
 	excludedPageIDs []string, // non-nil+non-empty ⇒ retryExcludedOnly path
 	sinkKind string,
 	jobResultStore livingwiki.JobResultStore,
@@ -126,7 +129,7 @@ func buildColdStartRunner(
 
 		if len(excludedPageIDs) > 0 {
 			// retryExcludedOnly path: scope to previously-excluded pages.
-			full, err := resolveTaxonomy(runCtx, repoID, graphStore, workerClient, clusterStore)
+			full, err := resolveTaxonomy(runCtx, repoID, graphStore, llmCaller, clusterStore)
 			if err != nil {
 				return fmt.Errorf("living-wiki: taxonomy resolution failed: %w", err)
 			}
@@ -146,7 +149,7 @@ func buildColdStartRunner(
 		} else {
 			// Full cold-start path.
 			var err error
-			pages, err = resolveTaxonomy(runCtx, repoID, graphStore, workerClient, clusterStore)
+			pages, err = resolveTaxonomy(runCtx, repoID, graphStore, llmCaller, clusterStore)
 			if err != nil {
 				return fmt.Errorf("living-wiki: taxonomy resolution failed: %w", err)
 			}
@@ -647,18 +650,18 @@ func listAlreadyPublishedAcrossSinks(
 }
 
 // resolveTaxonomy builds the TaxonomyResolver from available dependencies and
-// returns the full planned-page list for the given repo. graphStore, workerClient,
-// and clusterStore may be nil; the resolver degrades gracefully (no LLM-dependent
-// pages will be generated and the package-path heuristic is used for architecture
-// pages, but the job won't hard-fail).
-func resolveTaxonomy(ctx context.Context, repoID string, gs graphstore.GraphStore, wc *worker.Client, cs clustering.ClusterStore) ([]lworch.PlannedPage, error) {
+// returns the full planned-page list for the given repo. graphStore, the
+// LLM caller, and clusterStore may be nil; the resolver degrades gracefully
+// (no LLM-dependent pages will be generated and the package-path heuristic
+// is used for architecture pages, but the job won't hard-fail).
+func resolveTaxonomy(ctx context.Context, repoID string, gs graphstore.GraphStore, lc *llmcall.Caller, cs clustering.ClusterStore) ([]lworch.PlannedPage, error) {
 	var sg templates.SymbolGraph
 	if gs != nil {
 		sg = &graphStoreSymbolGraph{store: gs}
 	}
-	var llmCaller templates.LLMCaller
-	if wc != nil {
-		llmCaller = &coldStartLLMCaller{client: wc}
+	var llmTemplateCaller templates.LLMCaller
+	if lc != nil && lc.IsAvailable() {
+		llmTemplateCaller = &coldStartLLMCaller{caller: lc, repoID: repoID, op: resolution.OpLivingWikiColdStart}
 	}
 
 	// Fetch clusters to use as the primary area signal for architecture pages.
@@ -714,7 +717,7 @@ func resolveTaxonomy(ctx context.Context, repoID string, gs graphstore.GraphStor
 		}
 	}
 
-	tr := lworch.NewTaxonomyResolver(repoID, sg, nil /* gitLog */, llmCaller)
+	tr := lworch.NewTaxonomyResolver(repoID, sg, nil /* gitLog */, llmTemplateCaller)
 	if gs != nil {
 		tr.WithPackageDeps(gs)
 	}
@@ -866,12 +869,18 @@ func readSourceLines(repoRoot, filePath string, startLine, endLine int) string {
 // coldStartLLMCaller
 // ─────────────────────────────────────────────────────────────────────────────
 
-// coldStartLLMCaller adapts worker.Client to the templates.LLMCaller interface
-// for use in the cold-start TaxonomyResolver. Equivalent to assembly's private
-// workerLLMCaller; kept here to avoid a cross-package dependency on the
-// assembly package's unexported type.
+// coldStartLLMCaller adapts the LLM-aware llmcall.Caller to the
+// templates.LLMCaller interface used by the cold-start TaxonomyResolver.
+// Slice 2 of the workspace-LLM-source-of-truth plan replaced the prior
+// direct *worker.Client wiring with the Caller wrapper so workspace-saved
+// settings flow through gRPC metadata on every cold-start call —
+// previously this was the smoking-gun bypass that drained the user's
+// Anthropic credit because cold-start pages always ran on the worker's
+// bootstrap (configmap) provider regardless of UI settings.
 type coldStartLLMCaller struct {
-	client *worker.Client
+	caller *llmcall.Caller
+	repoID string
+	op     string
 }
 
 // perCallLLMTimeout caps how long any single AnswerQuestion RPC may run.
@@ -886,13 +895,16 @@ type coldStartLLMCaller struct {
 const perCallLLMTimeout = 5 * time.Minute
 
 func (c *coldStartLLMCaller) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	if c == nil || c.caller == nil {
+		return "", fmt.Errorf("cold-start LLM caller: not configured")
+	}
 	question := userPrompt
 	if systemPrompt != "" {
 		question = systemPrompt + "\n\n" + userPrompt
 	}
 	callCtx, cancel := context.WithTimeout(ctx, perCallLLMTimeout)
 	defer cancel()
-	resp, err := c.client.AnswerQuestion(callCtx, &reasoningv1.AnswerQuestionRequest{
+	resp, err := c.caller.AnswerQuestion(callCtx, c.repoID, c.op, &reasoningv1.AnswerQuestionRequest{
 		Question: question,
 	})
 	if err != nil {

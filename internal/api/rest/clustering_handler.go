@@ -21,8 +21,9 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	"github.com/sourcebridge/sourcebridge/internal/clustering"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/skillcard"
-	"github.com/sourcebridge/sourcebridge/internal/worker"
+	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 )
 
 // clustersResponse is returned by GET /api/v1/repositories/{repo_id}/clusters.
@@ -336,7 +337,7 @@ func (s *Server) handleRelabelClusters(w http.ResponseWriter, r *http.Request) {
 		Priority:  llm.PriorityInteractive,
 		RepoID:    repoID,
 		RunWithContext: func(ctx context.Context, rt llm.Runtime) error {
-			return runRelabelClusters(ctx, rt, cs, s.worker, repoID, clusterIDs)
+			return runRelabelClusters(ctx, rt, cs, s.llmCaller, repoID, clusterIDs)
 		},
 	}
 
@@ -356,7 +357,7 @@ func (s *Server) handleRelabelClusters(w http.ResponseWriter, r *http.Request) {
 //
 // Per-cluster failures are logged and skipped; one failure does not poison
 // the whole batch.
-func runRelabelClusters(ctx context.Context, rt llm.Runtime, cs clustering.ClusterStore, wc *worker.Client, repoID string, clusterIDs []string) error {
+func runRelabelClusters(ctx context.Context, rt llm.Runtime, cs clustering.ClusterStore, lc *llmcall.Caller, repoID string, clusterIDs []string) error {
 	total := float64(len(clusterIDs))
 	for i, clusterID := range clusterIDs {
 		if ctx.Err() != nil {
@@ -381,7 +382,7 @@ func runRelabelClusters(ctx context.Context, rt llm.Runtime, cs clustering.Clust
 			syms = append(syms, m.SymbolID)
 		}
 
-		label, err := relabelWithLLM(ctx, wc, c.Label, syms)
+		label, err := relabelWithLLM(ctx, lc, repoID, c.Label, syms)
 		if err != nil {
 			slog.Warn("relabel_clusters: LLM call failed, skipping",
 				"cluster_id", clusterID, "error", err)
@@ -402,12 +403,17 @@ func runRelabelClusters(ctx context.Context, rt llm.Runtime, cs clustering.Clust
 	return nil
 }
 
-// relabelWithLLM calls the worker's AnswerQuestion with a compact prompt that
-// asks for a 1–3 word subsystem label. When the worker is nil (OSS without a
-// Python worker), it returns the heuristic label unchanged so the job still
-// completes cleanly.
-func relabelWithLLM(ctx context.Context, wc *worker.Client, heuristicLabel string, symbolIDs []string) (string, error) {
-	if wc == nil {
+// relabelWithLLM calls the worker's AnswerQuestion (via the LLM-aware
+// llmcall.Caller wrapper) with a compact prompt that asks for a 1–3 word
+// subsystem label. When the caller is nil/unavailable (OSS without a
+// Python worker), it returns the heuristic label unchanged so the job
+// still completes cleanly.
+//
+// Slice 2 of the workspace-LLM-source-of-truth plan replaced the prior
+// direct *worker.Client wiring with the Caller wrapper so workspace-saved
+// settings flow through gRPC metadata on every call.
+func relabelWithLLM(ctx context.Context, lc *llmcall.Caller, repoID string, heuristicLabel string, symbolIDs []string) (string, error) {
+	if lc == nil || !lc.IsAvailable() {
 		return heuristicLabel, nil
 	}
 	symList := strings.Join(symbolIDs, ", ")
@@ -417,7 +423,7 @@ func relabelWithLLM(ctx context.Context, wc *worker.Client, heuristicLabel strin
 			"the subsystem's purpose. Respond with ONLY the label text — no punctuation, no explanation.",
 		symList, heuristicLabel,
 	)
-	resp, err := wc.AnswerQuestion(ctx, &reasoningv1.AnswerQuestionRequest{
+	resp, err := lc.AnswerQuestion(ctx, repoID, resolution.OpClusteringRelabel, &reasoningv1.AnswerQuestionRequest{
 		Question: prompt,
 	})
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
 
 // discussStreamRequest mirrors the DiscussCodeInput GraphQL type plus
@@ -60,7 +61,7 @@ func (s *Server) handleDiscussStream(w http.ResponseWriter, r *http.Request) {
 
 	// Worker availability: fail fast with JSON rather than opening an
 	// SSE stream we can't populate.
-	if s.worker == nil || !s.worker.IsAvailable() {
+	if s.llmCaller == nil || !s.llmCaller.IsAvailable() || s.worker == nil || !s.worker.IsAvailable() {
 		writeDiscussJSONErr(w, http.StatusServiceUnavailable, "AI worker not reachable")
 		return
 	}
@@ -87,8 +88,10 @@ func (s *Server) handleDiscussStream(w http.ResponseWriter, r *http.Request) {
 		question = fmt.Sprintf("%s\n\n```\n%s\n```", req.Question, req.Code)
 	}
 
-	stream, cancel, err := s.worker.AnswerQuestionStream(
+	stream, cancel, err := s.llmCaller.AnswerQuestionStream(
 		r.Context(),
+		req.RepositoryID,
+		resolution.OpDiscussStream,
 		&reasoningv1.AnswerQuestionRequest{
 			Question:     question,
 			RepositoryId: req.RepositoryID,

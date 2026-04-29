@@ -12,6 +12,7 @@ import (
 
 	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
@@ -266,7 +267,7 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 	var resp *reasoningv1.AnswerQuestionResponse
 	err = o.runSynth(ctx, in.RepositoryID, in.Question, func(rt TokenReporter) error {
 		var callErr error
-		resp, callErr = o.synthesizer.AnswerQuestion(ctx, req)
+		resp, callErr = o.synthesizer.AnswerQuestion(ctx, in.RepositoryID, resolution.OpQADeepSynth, req)
 		if callErr != nil {
 			return callErr
 		}

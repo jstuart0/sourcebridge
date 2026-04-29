@@ -74,12 +74,14 @@ var allowedFilePathSuffixes = []string{
 // looksLikeWorkerClient).
 
 func TestNoDirectWorkerLLMCallsOutsideLLMCall(t *testing.T) {
-	// Slice 1 introduces this lint and the llmcall package; slice 2
-	// migrates every remaining call site. While slice 2 is in flight
-	// the lint runs in REPORT-ONLY mode so the resolver/adapter
-	// commit doesn't break CI. The flip to ENFORCE happens in the
-	// final slice-2 commit by removing this skip.
-	const enforceMode = false
+	// Slice 2 of the workspace-LLM-source-of-truth plan migrated every
+	// remaining bypass call site to llmcall.Caller; the lint runs in
+	// ENFORCE mode going forward. Any new direct *worker.Client.<RPC>
+	// call that lands without going through llmcall.Caller (or
+	// without a // llmcall:allow comment) fails this test. To add a
+	// new LLM-bearing RPC, see the contract in
+	// internal/llm/resolution/ops.go and internal/worker/llmcall/llmcall.go.
+	const enforceMode = true
 
 	root := repoRoot(t)
 	internalDir := filepath.Join(root, "internal")
@@ -117,7 +119,9 @@ func TestNoDirectWorkerLLMCallsOutsideLLMCall(t *testing.T) {
 		}
 
 		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		// ParseComments so file.Comments is populated; the
+		// hasAllowComment escape-hatch needs to see // llmcall:allow.
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution|parser.ParseComments)
 		if err != nil {
 			t.Fatalf("parse %s: %v", path, err)
 		}
@@ -223,14 +227,17 @@ func looksLikeWorkerClient(expr ast.Expr) bool {
 	return false
 }
 
-// hasAllowComment returns true when the line above `line` contains an
-// `// llmcall:allow` comment. Lets a legitimate exception bypass the lint
-// without disabling it project-wide.
+// hasAllowComment returns true when a comment within 6 lines above the
+// call (or on the same line) contains an `// llmcall:allow` token. The
+// 6-line window accommodates multi-line block comments while still
+// requiring the allow be visually adjacent to the call. Lets a
+// legitimate exception bypass the lint without disabling it
+// project-wide.
 func hasAllowComment(file *ast.File, fset *token.FileSet, line int) bool {
 	for _, cg := range file.Comments {
 		for _, c := range cg.List {
 			pos := fset.Position(c.Pos())
-			if pos.Line == line-1 || pos.Line == line {
+			if pos.Line >= line-6 && pos.Line <= line {
 				if strings.Contains(c.Text, "llmcall:allow") {
 					return true
 				}
