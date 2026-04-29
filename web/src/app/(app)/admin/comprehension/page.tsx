@@ -118,6 +118,54 @@ function gradeBadge(grade: string) {
   );
 }
 
+// EffectivePill renders a small inline badge showing where the
+// effective value for a comprehension settings field came from
+// (workspace default, corpus_type override, artifact_type override,
+// user-scope override). Slice 5 of plan 2026-04-29-workspace-llm-source-of-truth-r2.md.
+//
+// Reads from settings.inheritedFrom, the same data the bottom
+// "Field inheritance" panel already surfaces — this duplicates it
+// inline at the field for at-a-glance verification. Without this,
+// operators have to scroll to the bottom of the page to see what's
+// inherited vs. overridden, which was the original UX failure that
+// caused the parent-delivery LLM bug ("am I editing the right
+// scope?").
+function EffectivePill({
+  field,
+  inheritedFrom,
+  currentScope,
+}: {
+  field: string;
+  inheritedFrom?: FieldOrigin[];
+  currentScope: { scopeType: string; scopeKey: string };
+}) {
+  const origin = inheritedFrom?.find((fo) => fo.field === field);
+  if (!origin) {
+    // No origin record means the user (this scope) has explicitly set
+    // this field. The rendered value IS the effective value.
+    return (
+      <span
+        className="ml-2 inline-flex items-center rounded-full border border-[var(--accent-primary)]/40 bg-[var(--accent-primary)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent-primary)]"
+        title={`Set on this scope (${currentScope.scopeType}${
+          currentScope.scopeKey ? `:${currentScope.scopeKey}` : ""
+        })`}
+      >
+        this scope
+      </span>
+    );
+  }
+  // Inherited from a wider scope.
+  const label = origin.scopeKey ? `${origin.scopeType}:${origin.scopeKey}` : origin.scopeType;
+  return (
+    <span
+      className="ml-2 inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-base)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-secondary)]"
+      title={`Inherited from ${label}`}
+    >
+      inherited · {label}
+    </span>
+  );
+}
+
 function formatContext(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
   if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`;
@@ -474,8 +522,18 @@ export default function ComprehensionSettingsPage() {
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-[var(--text-secondary)]">
+                <label className="mb-1.5 flex items-center text-sm font-medium text-[var(--text-secondary)]">
                   Active model
+                  {settings && (
+                    <EffectivePill
+                      field="modelId"
+                      inheritedFrom={settings.inheritedFrom}
+                      currentScope={{
+                        scopeType: settings.scopeType,
+                        scopeKey: settings.scopeKey,
+                      }}
+                    />
+                  )}
                 </label>
                 <select
                   value={selectedModel}
@@ -693,8 +751,18 @@ export default function ComprehensionSettingsPage() {
                 <h3 className="text-base font-semibold text-[var(--text-primary)]">Orchestration</h3>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <div>
-                    <label className="mb-1.5 block text-sm text-[var(--text-secondary)]">
+                    <label className="mb-1.5 flex items-center text-sm text-[var(--text-secondary)]">
                       Max concurrency
+                      {settings && (
+                        <EffectivePill
+                          field="maxConcurrency"
+                          inheritedFrom={settings.inheritedFrom}
+                          currentScope={{
+                            scopeType: settings.scopeType,
+                            scopeKey: settings.scopeKey,
+                          }}
+                        />
+                      )}
                     </label>
                     <div className="flex items-center gap-2">
                       <input
@@ -732,8 +800,18 @@ export default function ComprehensionSettingsPage() {
                     )}
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-sm text-[var(--text-secondary)]">
+                    <label className="mb-1.5 flex items-center text-sm text-[var(--text-secondary)]">
                       Max prompt tokens
+                      {settings && (
+                        <EffectivePill
+                          field="maxPromptTokens"
+                          inheritedFrom={settings.inheritedFrom}
+                          currentScope={{
+                            scopeType: settings.scopeType,
+                            scopeKey: settings.scopeKey,
+                          }}
+                        />
+                      )}
                     </label>
                     <input
                       type="number"
@@ -748,8 +826,18 @@ export default function ComprehensionSettingsPage() {
                     </p>
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-sm text-[var(--text-secondary)]">
+                    <label className="mb-1.5 flex items-center text-sm text-[var(--text-secondary)]">
                       Leaf budget tokens
+                      {settings && (
+                        <EffectivePill
+                          field="leafBudgetTokens"
+                          inheritedFrom={settings.inheritedFrom}
+                          currentScope={{
+                            scopeType: settings.scopeType,
+                            scopeKey: settings.scopeKey,
+                          }}
+                        />
+                      )}
                     </label>
                     <input
                       type="number"
