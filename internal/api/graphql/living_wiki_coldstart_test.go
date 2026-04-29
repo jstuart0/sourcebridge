@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -243,17 +244,28 @@ func csRunnerFromPages(
 }
 
 // fakeRuntime satisfies llm.Runtime for use in synchronous tests.
+//
+// Cold-start parallelism (errgroup-driven page generation) means
+// ReportProgress can fire concurrently from multiple goroutines. Mutex
+// guards the small float/string fields so the race detector stays
+// quiet under -race.
 type fakeRuntime struct {
+	mu       sync.Mutex
 	jobID    string
 	progress float64
 	phase    string
 }
 
-func (f *fakeRuntime) JobID() string                             { return f.jobID }
-func (f *fakeRuntime) ReportProgress(p float64, phase, _ string) { f.progress = p; f.phase = phase }
-func (f *fakeRuntime) ReportTokens(_, _ int)                     {}
-func (f *fakeRuntime) ReportSnapshotBytes(_ int)                 {}
-func (f *fakeRuntime) Heartbeat() error                          { return nil }
+func (f *fakeRuntime) JobID() string { return f.jobID }
+func (f *fakeRuntime) ReportProgress(p float64, phase, _ string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.progress = p
+	f.phase = phase
+}
+func (f *fakeRuntime) ReportTokens(_, _ int)     {}
+func (f *fakeRuntime) ReportSnapshotBytes(_ int) {}
+func (f *fakeRuntime) Heartbeat() error          { return nil }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Criterion 1 & 2: job visible in activity feed, transitions to ready
