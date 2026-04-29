@@ -23,6 +23,20 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
+# grpc_health_probe (R3 followups T1.8 codex r2): the worker binds gRPC
+# with grpc.ssl_server_credentials when SOURCEBRIDGE_WORKER_TLS_ENABLED
+# is true. Kubernetes' built-in `grpc:` probe transport does NOT support
+# client TLS authentication, so an mTLS-required worker port cannot be
+# probed natively. We ship grpc_health_probe in the image and drive it
+# from an exec probe that conditionally adds -tls flags. The binary is
+# statically-linked (~10MB), and it works equally well for TLS and
+# non-TLS workers.
+ARG GRPC_HEALTH_PROBE_VERSION=v0.4.25
+RUN ARCH="$(dpkg --print-architecture)" \
+    && curl -fsSL -o /usr/local/bin/grpc_health_probe \
+       "https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-${ARCH}" \
+    && chmod +x /usr/local/bin/grpc_health_probe
+
 # Install uv for runtime
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
@@ -35,5 +49,42 @@ ENV PYTHONPATH="/app/gen/python:${PYTHONPATH}"
 RUN uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
 
 EXPOSE 50051
+
+# Health-probe wrapper: chooses TLS vs plaintext flags from the same
+# env vars the worker reads. Used by the kubelet via exec probes.
+RUN cat > /usr/local/bin/sourcebridge-health-probe.sh <<'PROBE_EOF' \
+    && chmod +x /usr/local/bin/sourcebridge-health-probe.sh
+#!/bin/sh
+# R3 followups T1.8 (codex r2 fix): health-probe wrapper that drives
+# grpc_health_probe with TLS args ONLY when the worker bound mTLS.
+# Mirrors the behavior of workers/__main__.py's bind logic so the probe
+# transport always matches the server's accept transport.
+set -eu
+PORT="${SOURCEBRIDGE_WORKER_GRPC_PORT:-50051}"
+ADDR="127.0.0.1:${PORT}"
+TLS_ENABLED="${SOURCEBRIDGE_WORKER_TLS_ENABLED:-false}"
+case "${TLS_ENABLED}" in
+    true|True|TRUE|1)
+        # Verify mode: probe presents the worker's own client cert
+        # (mounted from the worker-tls Secret) so it satisfies the
+        # require_client_auth=True bind.
+        exec /usr/local/bin/grpc_health_probe \
+            -addr="${ADDR}" \
+            -tls \
+            -tls-ca-cert="${SOURCEBRIDGE_WORKER_TLS_CA_PATH}" \
+            -tls-server-name="${SOURCEBRIDGE_WORKER_TLS_SERVER_NAME:-worker.sourcebridge.svc.cluster.local}" \
+            -tls-client-cert="${SOURCEBRIDGE_WORKER_TLS_CERT_PATH}" \
+            -tls-client-key="${SOURCEBRIDGE_WORKER_TLS_KEY_PATH}" \
+            -connect-timeout=2s \
+            -rpc-timeout=2s
+        ;;
+    *)
+        exec /usr/local/bin/grpc_health_probe \
+            -addr="${ADDR}" \
+            -connect-timeout=2s \
+            -rpc-timeout=2s
+        ;;
+esac
+PROBE_EOF
 
 CMD ["uv", "run", "python", "-m", "workers"]

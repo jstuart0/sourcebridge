@@ -8,15 +8,22 @@ metadata:
     app.kubernetes.io/part-of: sourcebridge
     app.kubernetes.io/component: worker
   annotations:
-    # Stakater Reloader watches this Secret and triggers a rolling
-    # restart whenever cert-manager rotates the worker mTLS material.
-    # Combined with terminationGracePeriodSeconds + the worker drain
-    # path in workers/__main__.py (R3 followups T1.8), this is the
-    # automated cert-rotation closure for A2 of the R3 followups doc.
+    # Stakater Reloader watches these Secrets and triggers a rolling
+    # restart whenever cert-manager rotates the worker mTLS material
+    # (leaf cert) or the trusted-CA bundle. Combined with
+    # terminationGracePeriodSeconds + the worker drain path in
+    # workers/__main__.py (R3 followups T1.8), this is the automated
+    # cert-rotation closure for A2 of the R3 followups doc.
+    #
+    # Both the leaf and the CA are watched (codex r2 Low fix): the
+    # leaf rotates on a 90-day cycle; the CA is long-lived but a
+    # forced CA rotation (e.g. compromise response) needs the same
+    # graceful-restart treatment because the worker's
+    # grpc.ssl_server_credentials trust bundle is captured at boot.
     #
     # If Reloader is not installed in the cluster, this annotation is
     # a no-op — the manual `kubectl rollout restart` still works.
-    secret.reloader.stakater.com/reload: "sourcebridge-worker-tls"
+    secret.reloader.stakater.com/reload: "sourcebridge-worker-tls,sourcebridge-ca-tls"
 spec:
   replicas: 1
   # Zero-disruption rolling updates: never tear down the old pod until the
@@ -82,42 +89,44 @@ spec:
             limits:
               memory: "1Gi"
               cpu: "500m"
-          # gRPC native probes (Kubernetes 1.24+). Replaces the prior
-          # tcpSocket probe so the kubelet observes the worker's
-          # health-servicer NOT_SERVING flip during drain — TCP staying
-          # open during the grace window is no longer interpreted as
-          # "still ready for new traffic." The worker publishes an
-          # aggregate health record under service="" alongside the
-          # per-service entries; native probes use the empty string to
-          # match that aggregate.
+          # gRPC health probes via exec — codex r2 fix to T1.8.
+          # Kubernetes' built-in `grpc:` probe transport does NOT support
+          # client TLS authentication, so it can't probe an mTLS worker
+          # that requires `require_client_auth=True`. We ship
+          # grpc_health_probe in the worker image (Dockerfile.worker) and
+          # invoke it through a tiny wrapper script that conditionally
+          # adds -tls flags based on SOURCEBRIDGE_WORKER_TLS_ENABLED.
+          # Works equally well for plaintext (current homelab) and mTLS
+          # (when flipped on) without any deploy-time manifest change.
           #
-          # R3 followups T1.8: the drain sequence (workers/__main__.py)
-          # flips this aggregate to NOT_SERVING on SIGTERM, immediately
-          # making the readiness probe fail and stopping new work from
-          # attaching during the up-to-60-minute graceful drain.
+          # The probe queries the gRPC health-servicer's aggregate
+          # service ("" by default for grpc_health_probe), which the
+          # worker publishes alongside per-service entries. R3 followups
+          # T1.8: the drain sequence flips this aggregate to NOT_SERVING
+          # on SIGTERM so readiness fails immediately during drain.
           #
-          # Startup probe still gives the worker up to 90 s to come up
-          # cold (Python imports + ML client warmup); after that the
+          # Startup probe gives the worker up to 90 s to come up cold
+          # (Python imports + ML client warmup); after that the
           # readiness probe takes over with tighter timing.
           startupProbe:
-            grpc:
-              port: 50051
-              service: ""
+            exec:
+              command: ["/usr/local/bin/sourcebridge-health-probe.sh"]
             initialDelaySeconds: 5
             periodSeconds: 3
             failureThreshold: 30
+            timeoutSeconds: 3
           readinessProbe:
-            grpc:
-              port: 50051
-              service: ""
+            exec:
+              command: ["/usr/local/bin/sourcebridge-health-probe.sh"]
             periodSeconds: 5
             failureThreshold: 3
+            timeoutSeconds: 3
           livenessProbe:
-            grpc:
-              port: 50051
-              service: ""
+            exec:
+              command: ["/usr/local/bin/sourcebridge-health-probe.sh"]
             periodSeconds: 30
             failureThreshold: 3
+            timeoutSeconds: 5
       volumes:
         - name: tls-server
           secret:

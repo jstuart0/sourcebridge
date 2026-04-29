@@ -251,9 +251,35 @@ func New(address string, tlsCfg TLSConfig, opts ...Option) (*Client, error) {
 		c.serverName = "worker.sourcebridge.svc.cluster.local"
 	}
 
-	creds, err := buildDialCredentials(tlsCfg, c.tlsWatcher, address)
-	if err != nil {
-		return nil, fmt.Errorf("worker tls: %w", err)
+	// R3 followups T1.2 + codex r2 Medium: the initial bundle uses the
+	// SAME per-bundle immutable credentials path that rotations use,
+	// when a watcher is wired. The watcher's constructor already did
+	// Stage+Commit, so its current Cert()/RootCAs() are the validated
+	// snapshot we want this first bundle to capture immutably. This
+	// way every bundle (initial AND rotation) is an immutable
+	// snapshot, not a watcher-live closure — uniform behavior across
+	// reconnect/handshake events on any bundle.
+	//
+	// Without a watcher, fall back to the original buildDialCredentials
+	// path (insecure mode, OSS dev, or static-cert tests).
+	var creds credentials.TransportCredentials
+	if c.tlsWatcher != nil && tlsCfg.Enabled {
+		initialCand := tlsreload.Candidate{
+			Generation: c.tlsWatcher.CommittedGeneration(),
+			Cert:       c.tlsWatcher.Cert(),
+			RootCAs:    c.tlsWatcher.RootCAs(),
+		}
+		bundleCreds, bcErr := buildBundleCredentialsFromCandidate(initialCand, c.serverName)
+		if bcErr != nil {
+			return nil, fmt.Errorf("worker tls (initial bundle): %w", bcErr)
+		}
+		creds = bundleCreds
+	} else {
+		legacyCreds, lcErr := buildDialCredentials(tlsCfg, c.tlsWatcher, address)
+		if lcErr != nil {
+			return nil, fmt.Errorf("worker tls: %w", lcErr)
+		}
+		creds = legacyCreds
 	}
 
 	dialOpts := []grpc.DialOption{
@@ -457,6 +483,11 @@ func (c *Client) rotateForCandidate(cand tlsreload.Candidate) error {
 		slog.Info("worker tls rotation: candidate superseded by newer commit",
 			"candidate_generation", cand.Generation,
 			"address", c.address)
+		// Codex r2 Medium 2 fix: notify the dropped-candidate hook
+		// for stale Commit as well as probe errors. This makes
+		// OnCandidateDropped a complete record of "rotation produced
+		// no observable bundle change."
+		c.notifyCandidateDropped(cand, fmt.Errorf("superseded by newer commit"))
 		return nil
 	}
 
