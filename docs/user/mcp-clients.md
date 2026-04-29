@@ -8,15 +8,193 @@ repo indexed in SourceBridge.
 
 This doc covers:
 
-- enabling the MCP server on a deployed instance
-- minting a bearer token
-- wiring up Codex, Claude Code, and Cursor
+- connecting Claude Code to a hosted SourceBridge instance (quickstart)
+- wiring up Codex, Cursor, and Claude Desktop
 - the known multi-replica caveat
 - debugging checklist when clients can't connect
+- enabling MCP on a self-hosted instance
 
 ---
 
-## 1. Enable MCP on the server
+## 1. Quickstart — using a hosted SourceBridge from Claude Code
+
+If your team runs a shared SourceBridge instance (or you are on SourceBridge
+Cloud), you can connect Claude Code in under three minutes.
+
+### Easiest path: web UI wizard
+
+Open your repo in SourceBridge → **Settings** tab → click **Connect Claude Code**.
+
+The wizard mints an API token, writes the environment-variable export line you
+need, and gives you a copy-paste setup script. Follow the on-screen steps and
+skip to the [verification step](#verify-the-connection) below.
+
+> This requires the `agent_setup` capability to be enabled on your SourceBridge
+> instance. Contact your admin if the "Connect Claude Code" button does not appear.
+
+### Alternative: CLI directly
+
+If you prefer the command line, the two forms below are equivalent.
+
+**With `--token` flag (token saved to `~/.sourcebridge/token`):**
+
+```bash
+sourcebridge setup claude \
+  --server https://<your-host> \
+  --token ca_... \
+  --repo-id <repo-id>
+```
+
+**With environment variable (token already exported):**
+
+```bash
+export SOURCEBRIDGE_API_TOKEN=ca_...
+sourcebridge setup claude --server https://<your-host> --repo-id <repo-id>
+```
+
+The command writes `.mcp.json` and `.claude/CLAUDE.md` in the current directory.
+
+### Export the token to your shell — required
+
+> **This step is the most common first-touch failure. Do not skip it.**
+
+The `.mcp.json` written by `setup claude` contains the literal string
+`Bearer ${SOURCEBRIDGE_API_TOKEN}`. Claude Code expands environment variables
+at launch — not at config-write time. If `SOURCEBRIDGE_API_TOKEN` is not set in
+the shell that starts Claude Code, authentication fails silently.
+
+Add the export to your shell profile and restart Claude Code:
+
+```bash
+# ~/.zshrc  (or ~/.bashrc, or ~/.config/fish/config.fish, etc.)
+export SOURCEBRIDGE_API_TOKEN=ca_...
+```
+
+Then restart your terminal (or `source ~/.zshrc`) and relaunch Claude Code.
+
+The `.mcp.json` file contains no literal secret and is safe to commit to
+version control.
+
+### Verify the connection
+
+```bash
+claude mcp list | grep sourcebridge
+# expect: sourcebridge: https://<your-host>/api/v1/mcp/http (HTTP) - ✓ Connected
+```
+
+Or open a Claude Code session and ask: *"List the subsystems of this repo."*
+A response that names actual subsystems confirms the MCP connection is working.
+
+---
+
+## 2. Other MCP clients
+
+### Codex CLI
+
+Edit `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.sourcebridge]
+url = "https://your-host/api/v1/mcp/http"
+bearer_token_env_var = "SOURCEBRIDGE_TOKEN"
+```
+
+Export the token in the shell Codex will inherit (`~/.zshrc`, `~/.bashrc`,
+or `launchctl setenv` on macOS for GUI launches):
+
+```bash
+export SOURCEBRIDGE_TOKEN="ca_535353cf..."
+```
+
+Verify:
+
+```bash
+$ codex mcp list
+Name          Url                                      Bearer Token Env Var  Status   Auth
+sourcebridge  https://your-host/api/v1/mcp/http        SOURCEBRIDGE_TOKEN    enabled  Bearer token
+```
+
+**Sandbox note.** Codex's `read-only` and `workspace-write` sandboxes silently
+cancel MCP tool calls that perform network I/O — you'll see
+`user cancelled MCP tool call` in the session log even though the server
+answered successfully. Run Codex with `--dangerously-bypass-approvals-and-sandbox`
+or `--sandbox danger-full-access` to let MCP traffic through. This is a Codex
+policy, not a SourceBridge bug.
+
+### Cursor / Claude Desktop / mcp-remote
+
+Both support HTTP-transport MCP servers. Example `mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "sourcebridge": {
+      "url": "https://your-host/api/v1/mcp/http",
+      "headers": {
+        "Authorization": "Bearer ca_535353cf..."
+      }
+    }
+  }
+}
+```
+
+If your client only supports stdio, wrap it with `mcp-remote`:
+
+```json
+{
+  "mcpServers": {
+    "sourcebridge": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://your-host/api/v1/mcp/http",
+               "--header", "Authorization: Bearer ca_535353cf..."]
+    }
+  }
+}
+```
+
+**Tool timeout — slow LLM.** Claude Code's default tool timeout is around
+60 seconds. The `explain_code` and `get_cliff_notes` tools route through
+the SourceBridge worker + LLM, which on a local Ollama setup can run
+60–120 s. The server automatically switches a slow tool call to an SSE
+streamed response (per MCP spec §6.2.1) when the client sends
+`Accept: text/event-stream` — Claude Code and Codex both do. While the
+tool runs, the server emits `notifications/progress` every 15 s, which
+resets the client's tool timeout. A server-side hard cap
+(`toolCallDeadline`, 5 min) prevents a wedged worker from pinning a
+connection forever.
+
+---
+
+## 3. Exposed tools
+
+| Tool | What it does | Requires worker? |
+|------|--------------|-----------------|
+| `search_symbols` | Find functions / classes / types in an indexed repo | No |
+| `explain_code` | LLM-generated explanation of a file or snippet | Yes |
+| `get_requirements` | List tracked requirements, optionally with symbol links | No |
+| `get_impact_report` | Latest change impact report for a repo | No |
+| `get_cliff_notes` | AI-generated summaries at repo / module / file / symbol scope | Yes (generation), No (read) |
+| `get_subsystems` | List the repo's clusters with representative symbols and cross-cluster call counts | No |
+| `get_subsystem_by_id` | Full member list for a known cluster ID | No |
+| `get_subsystem` | The cluster a given symbol belongs to plus 5 peer symbols | No |
+
+`search_symbols`, `get_requirements`, `get_impact_report`, and the three
+`get_subsystem*` tools work even if the worker is down. `explain_code`
+returns an error if the worker is unreachable.
+
+The subsystem tools are gated by a `subsystem_clustering` capability on
+the server. Clustering runs as an async job after each index; while a
+cluster job is in flight, `get_subsystems` returns the previous result
+with `status: "stale"`.
+
+---
+
+## 4. Self-hosting MCP
+
+This section is for operators running their own SourceBridge instance. If
+you are using a hosted instance, your admin has already handled this.
+
+### Enable MCP on the server
 
 MCP is **off by default**. Turn it on by setting `SOURCEBRIDGE_MCP_ENABLED=true`
 on the API deployment.
@@ -52,30 +230,7 @@ $ curl -i https://your-host/api/v1/mcp/http -X POST
 HTTP/1.1 401 Unauthorized   # 401 (not 404) means MCP is running
 ```
 
-### Multi-replica deployments
-
-Streamable-HTTP MCP (what Codex, Claude Code, and Cursor use) is **HA-safe
-as long as Redis is configured**. Session state lives in the shared cache
-so any replica can serve any request.
-
-```yaml
-# configmap additions
-SOURCEBRIDGE_STORAGE_REDIS_MODE: "external"
-SOURCEBRIDGE_STORAGE_REDIS_URL: "redis://redis:6379/0"
-```
-
-The bundled docker-compose and Helm chart ship Redis on by default. If
-you disable Redis (`redis_mode: memory`) and scale the API beyond 1
-replica, streamable-HTTP clients will see intermittent
-`"Invalid or expired session"` errors because sessions stay pod-local.
-
-The legacy SSE transport (`GET /api/v1/mcp/sse`) owns a TCP connection
-and always requires sticky routing or `replicas=1`, even with Redis —
-the event-delivery channel is process-bound.
-
----
-
-## 2. Mint a bearer token
+### Mint a bearer token
 
 The MCP server accepts either a JWT session cookie or a `ca_`-prefixed API
 token. For programmatic clients, use the API token.
@@ -108,157 +263,26 @@ Response:
 **Save the `token` value immediately — the full token is only returned at
 creation time.** The server stores only a SHA-256 hash.
 
----
+### Multi-replica deployments
 
-## 3. Client configuration
+Streamable-HTTP MCP (what Codex, Claude Code, and Cursor use) is **HA-safe
+as long as Redis is configured**. Session state lives in the shared cache
+so any replica can serve any request.
 
-### Codex CLI
-
-Edit `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.sourcebridge]
-url = "https://your-host/api/v1/mcp/http"
-bearer_token_env_var = "SOURCEBRIDGE_TOKEN"
+```yaml
+# configmap additions
+SOURCEBRIDGE_STORAGE_REDIS_MODE: "external"
+SOURCEBRIDGE_STORAGE_REDIS_URL: "redis://redis:6379/0"
 ```
 
-Export the token in the shell Codex will inherit (`~/.zshrc`, `~/.bashrc`,
-or `launchctl setenv` on macOS for GUI launches):
+The bundled docker-compose and Helm chart ship Redis on by default. If
+you disable Redis (`redis_mode: memory`) and scale the API beyond 1
+replica, streamable-HTTP clients will see intermittent
+`"Invalid or expired session"` errors because sessions stay pod-local.
 
-```bash
-export SOURCEBRIDGE_TOKEN="ca_535353cf..."
-```
-
-Verify:
-
-```bash
-$ codex mcp list
-Name          Url                                      Bearer Token Env Var  Status   Auth
-sourcebridge  https://your-host/api/v1/mcp/http        SOURCEBRIDGE_TOKEN    enabled  Bearer token
-```
-
-**Sandbox note.** Codex's `read-only` and `workspace-write` sandboxes silently
-cancel MCP tool calls that perform network I/O — you'll see
-`user cancelled MCP tool call` in the session log even though the server
-answered successfully. Run Codex with `--dangerously-bypass-approvals-and-sandbox`
-or `--sandbox danger-full-access` to let MCP traffic through. This is a Codex
-policy, not a SourceBridge bug.
-
-### Claude Code
-
-```bash
-claude mcp add --transport http sourcebridge \
-  https://your-host/api/v1/mcp/http \
-  --header "Authorization: Bearer ca_535353cf..."
-```
-
-Verify health:
-
-```bash
-$ claude mcp list | grep sourcebridge
-sourcebridge: https://your-host/api/v1/mcp/http (HTTP) - ✓ Connected
-```
-
-Tools will appear as `mcp__sourcebridge__search_symbols`, etc.
-
-**Tool timeout — slow LLM.** Claude Code's default tool timeout is around
-60 seconds. The `explain_code` and `get_cliff_notes` tools route through
-the SourceBridge worker + LLM, which on a local Ollama setup can run
-60–120 s. The server automatically switches a slow tool call to an SSE
-streamed response (per MCP spec §6.2.1) when the client sends
-`Accept: text/event-stream` — Claude Code and Codex both do. While the
-tool runs, the server emits `notifications/progress` every 15 s, which
-resets the client's tool timeout. A server-side hard cap
-(`toolCallDeadline`, 5 min) prevents a wedged worker from pinning a
-connection forever.
-
-### Cursor / Claude Desktop / mcp-remote
-
-Both support HTTP-transport MCP servers. Example `mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "sourcebridge": {
-      "url": "https://your-host/api/v1/mcp/http",
-      "headers": {
-        "Authorization": "Bearer ca_535353cf..."
-      }
-    }
-  }
-}
-```
-
-If your client only supports stdio, wrap it with `mcp-remote`:
-
-```json
-{
-  "mcpServers": {
-    "sourcebridge": {
-      "command": "npx",
-      "args": ["mcp-remote", "https://your-host/api/v1/mcp/http",
-               "--header", "Authorization: Bearer ca_535353cf..."]
-    }
-  }
-}
-```
-
----
-
-## 4. Exposed tools
-
-| Tool | What it does | Requires worker? |
-|------|--------------|-----------------|
-| `search_symbols` | Find functions / classes / types in an indexed repo | No |
-| `explain_code` | LLM-generated explanation of a file or snippet | Yes |
-| `get_requirements` | List tracked requirements, optionally with symbol links | No |
-| `get_impact_report` | Latest change impact report for a repo | No |
-| `get_cliff_notes` | AI-generated summaries at repo / module / file / symbol scope | Yes (generation), No (read) |
-| `get_subsystems` | List the repo's clusters with representative symbols and cross-cluster call counts | No |
-| `get_subsystem_by_id` | Full member list for a known cluster ID | No |
-| `get_subsystem` | The cluster a given symbol belongs to plus 5 peer symbols | No |
-
-`search_symbols`, `get_requirements`, `get_impact_report`, and the three
-`get_subsystem*` tools work even if the worker is down. `explain_code`
-returns an error if the worker is unreachable.
-
-The subsystem tools are gated by a `subsystem_clustering` capability on
-the server. Clustering runs as an async job after each index; while a
-cluster job is in flight, `get_subsystems` returns the previous result
-with `status: "stale"`.
-
-### Quickstart for Claude Code
-
-Instead of wiring `.mcp.json` by hand, run `sourcebridge setup claude`
-on a machine with the CLI installed and an indexed repository. It
-writes `.mcp.json` using the HTTP-transport schema Claude Code understands,
-generates a `.claude/CLAUDE.md` with per-subsystem sections, and creates a
-sidecar so the web UI can show "last auto-refresh" timestamps.
-
-**Local server (no auth required):**
-
-```bash
-sourcebridge setup claude --repo-id <id>
-```
-
-**Cloud or authenticated server:**
-
-```bash
-sourcebridge setup claude --server https://my.sourcebridge.example --repo-id <id>
-```
-
-Then export your API token so Claude Code can authenticate:
-
-```bash
-export SOURCEBRIDGE_API_TOKEN=ca_...    # add to ~/.zshrc or ~/.bashrc
-```
-
-Restart Claude Code after exporting the variable. The `.mcp.json` written
-by `setup claude` uses `${SOURCEBRIDGE_API_TOKEN}` as a placeholder — Claude
-Code expands it at startup. The file contains no literal secret and is safe
-to commit to version control.
-
-See the [CLI reference](cli-reference.md#sourcebridge-setup-claude) for flags.
+The legacy SSE transport (`GET /api/v1/mcp/sse`) owns a TCP connection
+and always requires sticky routing or `replicas=1`, even with Redis —
+the event-delivery channel is process-bound.
 
 ---
 
@@ -290,6 +314,9 @@ kubectl -n sourcebridge logs -l app.kubernetes.io/name=sourcebridge-api -f \
 
 If step 3 returns 200 but your client still hangs, the cause is almost always:
 
+- **`SOURCEBRIDGE_API_TOKEN` not exported** in the shell that launched Claude Code.
+  Add `export SOURCEBRIDGE_API_TOKEN=ca_...` to `~/.zshrc` (or `~/.bashrc`) and
+  restart Claude Code.
 - **Client-side sandbox** blocking network I/O from MCP tools (Codex `read-only`).
 - **Multi-replica split-brain** on the API deployment (scale to 1 replica).
 - **Tool timeout** on slow `explain_code` calls (see the Claude Code note above).

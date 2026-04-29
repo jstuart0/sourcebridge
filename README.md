@@ -158,13 +158,16 @@ cp .env.example .env   # configure your LLM provider
 docker compose up -d
 ```
 
-### Homebrew
+### macOS CLI
 
-Install the CLI directly on macOS or Linux:
+macOS Homebrew support is coming in a future release. For now, build from
+source:
 
 ```bash
-brew install sourcebridge/tap/sourcebridge
-sourcebridge serve
+git clone https://github.com/sourcebridge-ai/sourcebridge.git
+cd sourcebridge
+make build
+./bin/sourcebridge serve
 ```
 
 ### Helm / Kubernetes
