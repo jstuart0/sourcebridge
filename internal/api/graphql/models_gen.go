@@ -710,6 +710,15 @@ type LivingWikiJobResult struct {
 	// current PageStore state.
 	GeneratedPageTitles []string `json:"generatedPageTitles"`
 	ExclusionReasons    []string `json:"exclusionReasons"`
+	// exclusionFailureCategories is parallel to excludedPageIds: for each
+	// excluded page (in the same order), the per-page failure category from the
+	// orchestrator's classifier. Values are one of: "deadline_exceeded",
+	// "provider_unavailable", "provider_compute", "llm_empty", "render_error",
+	// "template_internal", or "" for gate-failure exclusions.
+	//
+	// The UI uses this to render a one-line failure-breakdown summary above the
+	// per-page exclusions list.
+	ExclusionFailureCategories []string `json:"exclusionFailureCategories"`
 	// status is one of: running, ok, partial, failed.
 	Status string `json:"status"`
 	// failureCategory classifies terminal failures into one of three buckets that

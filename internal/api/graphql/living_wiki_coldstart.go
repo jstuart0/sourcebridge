@@ -111,7 +111,11 @@ func buildColdStartRunner(
 	repoSettingsStore livingwiki.RepoSettingsStore,
 	clusterStore clustering.ClusterStore,
 	knowledgeStore knowledge.KnowledgeStore,
+	metricsCollector *lwmetrics.Collector, // when nil, falls back to lwmetrics.Default
 ) func(ctx context.Context, rt llm.Runtime) error {
+	if metricsCollector == nil {
+		metricsCollector = lwmetrics.Default
+	}
 	if lwOrch == nil {
 		return func(_ context.Context, rt llm.Runtime) error {
 			rt.ReportProgress(1.0, "unavailable", "Living-wiki orchestrator not configured")
@@ -362,6 +366,13 @@ func buildColdStartRunner(
 			status = "partial"
 			failCat = coldstart.FailureCategorySystemicLLM
 			errMsg = err.Error()
+			// Record the systemic-abort metric with the dominant per-page
+			// category that tripped the breaker. SystemicAbortCategory
+			// extracts the structured detail from the error chain via
+			// errors.As; returns "" if the error doesn't carry one (which
+			// is then clamped to "unknown" inside RecordColdStartSystemicAbort).
+			metricsCollector.RecordColdStartSystemicAbort(
+				lworch.SystemicAbortCategory(err))
 		case err != nil && isPartial:
 			// Soft abort with partial persistence (time-budget) — surface as partial.
 			status = "partial"
@@ -426,23 +437,38 @@ func buildColdStartRunner(
 		// ── Step 5: Persist LivingWikiJobResult ───────────────────────────────
 		if jobResultStore != nil {
 			now := time.Now()
-			exIDs := excludedIDsAcc.snapshot()
+			// Codex r1b [High]: derive PagesExcluded, ExcludedPageIDs, and
+			// ExclusionFailureCategories all from result.Excluded so the
+			// persisted record is self-consistent. The live atomic
+			// excludedCount can undercount on systemic-abort paths where
+			// the breaker returns before OnPageDone fires for the
+			// tripping page. Live progress counters are used only for the
+			// in-flight UI; persistence uses the orchestrator's authoritative
+			// result.
+			persistExIDs := make([]string, len(result.Excluded))
+			persistExCats := make([]string, len(result.Excluded))
+			for i, ex := range result.Excluded {
+				persistExIDs[i] = ex.PageID
+				persistExCats[i] = ex.FailureCategory
+			}
+			persistExclCount := len(result.Excluded)
 			reasons := buildExclusionReasons(result.Excluded)
 
 			jobResult := &livingwiki.LivingWikiJobResult{
-				RepoID:           repoID,
-				JobID:            jobID,
-				StartedAt:        start,
-				CompletedAt:      &now,
-				PagesPlanned:     total,
-				PagesGenerated:   finalGen,
-				PagesExcluded:    finalExcl,
-				ExcludedPageIDs:  exIDs,
-				ExclusionReasons: reasons,
-				SinkWriteResults: sinkResults,
-				Status:           status,
-				FailureCategory:  string(failCat),
-				ErrorMessage:     errMsg,
+				RepoID:                     repoID,
+				JobID:                      jobID,
+				StartedAt:                  start,
+				CompletedAt:                &now,
+				PagesPlanned:               total,
+				PagesGenerated:             finalGen,
+				PagesExcluded:              persistExclCount,
+				ExcludedPageIDs:            persistExIDs,
+				ExclusionReasons:           reasons,
+				ExclusionFailureCategories: persistExCats,
+				SinkWriteResults:           sinkResults,
+				Status:                     status,
+				FailureCategory:            string(failCat),
+				ErrorMessage:               errMsg,
 			}
 			if saveErr := jobResultStore.Save(runCtx, tenantID, jobResult); saveErr != nil {
 				slog.Warn("living-wiki: failed to persist job result",
@@ -451,7 +477,7 @@ func buildColdStartRunner(
 		}
 
 		// ── Step 6: Prometheus counter ────────────────────────────────────────
-		lwmetrics.Default.RecordJob(status, sinkKind, elapsed.Seconds())
+		metricsCollector.RecordJob(status, sinkKind, elapsed.Seconds())
 
 		if err != nil {
 			return fmt.Errorf("living-wiki generation failed: %w", err)

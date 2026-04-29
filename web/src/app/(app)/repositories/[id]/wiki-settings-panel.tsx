@@ -86,6 +86,11 @@ export interface LivingWikiJobResult {
   excludedPageIds: string[];
   generatedPageTitles: string[];
   exclusionReasons: string[];
+  // exclusionFailureCategories is parallel to excludedPageIds. Each entry is
+  // one of: "deadline_exceeded", "provider_unavailable", "provider_compute",
+  // "llm_empty", "render_error", "template_internal", or "" for gate failures.
+  // Empty array means no failure-category data is available (pre-migration rows).
+  exclusionFailureCategories: string[];
   status: string;
   failureCategory?: string | null;
   errorMessage?: string | null;
@@ -969,6 +974,39 @@ function humanizeFailure(result: LivingWikiJobResult): {
  * gate violation, so a single page with multiple failed gates currently
  * appears as multiple top-level entries.
  */
+
+// Human-readable labels for orchestrator failure categories. The data values
+// are snake_case strings; the UI renders the mapped label. Gate failures are
+// recorded as "" in the data and grouped under the "gate" key here.
+const FAILURE_CATEGORY_LABELS: Record<string, string> = {
+  deadline_exceeded: "deadline exceeded",
+  provider_unavailable: "provider unavailable",
+  provider_compute: "provider compute error",
+  llm_empty: "empty LLM response",
+  render_error: "render error",
+  template_internal: "template error",
+  gate: "quality gate",
+};
+
+// summarizeFailureCategories aggregates the per-page failure categories into a
+// stable sorted list of { label, count } pairs (count desc, then label asc).
+// Empty string entries (gate failures) are bucketed under "gate".
+function summarizeFailureCategories(
+  categories: string[],
+): { label: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const c of categories) {
+    const key = c || "gate";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([key, count]) => ({
+      label: FAILURE_CATEGORY_LABELS[key] ?? key,
+      count,
+    }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+
 function groupExclusionReasons(
   reasons: string[],
 ): { pageID: string; messages: string[] }[] {
@@ -1004,6 +1042,9 @@ function FailureBanner({
   // rather than "retry from scratch".
   if (category === "partial_content" || result.pagesExcluded > 0) {
     const grouped = groupExclusionReasons(result.exclusionReasons);
+    const categoryBreakdown = summarizeFailureCategories(
+      result.exclusionFailureCategories ?? [],
+    );
     return (
       <AlertBanner
         variant="warning"
@@ -1013,6 +1054,14 @@ function FailureBanner({
           <p className="text-xs text-[var(--text-secondary)]">
             Pages get excluded when generated content fails our quality gates twice in a row. Retry — the system will only re-run the excluded ones.
           </p>
+          {categoryBreakdown.length > 0 && (
+            <p className="text-xs text-[var(--text-secondary)]">
+              <span className="font-medium">Failure breakdown:</span>{" "}
+              {categoryBreakdown
+                .map((c) => `${c.count} ${c.label}`)
+                .join(" · ")}
+            </p>
+          )}
           {grouped.length > 0 && (
             <button
               type="button"

@@ -137,15 +137,16 @@ func mapLivingWikiJobResult(r *livingwiki.LivingWikiJobResult) *LivingWikiJobRes
 		return nil
 	}
 	gql := &LivingWikiJobResult{
-		JobID:               r.JobID,
-		StartedAt:           r.StartedAt,
-		PagesPlanned:        r.PagesPlanned,
-		PagesGenerated:      r.PagesGenerated,
-		PagesExcluded:       r.PagesExcluded,
-		ExcludedPageIds:     nonNilStringSlice(r.ExcludedPageIDs),
-		GeneratedPageTitles: nonNilStringSlice(r.GeneratedPageTitles),
-		ExclusionReasons:    nonNilStringSlice(r.ExclusionReasons),
-		Status:              r.Status,
+		JobID:                      r.JobID,
+		StartedAt:                  r.StartedAt,
+		PagesPlanned:               r.PagesPlanned,
+		PagesGenerated:             r.PagesGenerated,
+		PagesExcluded:              r.PagesExcluded,
+		ExcludedPageIds:            nonNilStringSlice(r.ExcludedPageIDs),
+		GeneratedPageTitles:        nonNilStringSlice(r.GeneratedPageTitles),
+		ExclusionReasons:           nonNilStringSlice(r.ExclusionReasons),
+		ExclusionFailureCategories: nonNilStringSlice(r.ExclusionFailureCategories),
+		Status:                     r.Status,
 	}
 	if r.CompletedAt != nil {
 		gql.CompletedAt = r.CompletedAt

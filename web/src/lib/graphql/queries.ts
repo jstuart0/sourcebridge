@@ -217,6 +217,7 @@ export const REPOSITORY_QUERY = gql`
           excludedPageIds
           generatedPageTitles
           exclusionReasons
+          exclusionFailureCategories
           status
           failureCategory
           errorMessage
@@ -1550,6 +1551,7 @@ export const ENABLE_LIVING_WIKI_FOR_REPO_MUTATION = gql`
           excludedPageIds
           generatedPageTitles
           exclusionReasons
+          exclusionFailureCategories
           status
           failureCategory
           errorMessage
@@ -1607,6 +1609,7 @@ export const UPDATE_REPOSITORY_LIVING_WIKI_SETTINGS_MUTATION = gql`
         excludedPageIds
         generatedPageTitles
         exclusionReasons
+        exclusionFailureCategories
         status
         failureCategory
         errorMessage

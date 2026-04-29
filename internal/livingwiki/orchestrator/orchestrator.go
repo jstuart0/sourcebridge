@@ -75,6 +75,52 @@ var ErrTimeBudgetExceeded = errors.New("orchestrator: time budget exceeded")
 // are still persisted; the caller should NOT auto-retry.
 var ErrSystemicSoftFailures = errors.New("orchestrator: systemic LLM failure detected")
 
+// SystemicAbortDetail is the structured form of [ErrSystemicSoftFailures].
+// Use [errors.As] to extract the dominant category and counts; use
+// [errors.Is] with [ErrSystemicSoftFailures] (the Unwrap target) to test
+// the error class.
+//
+// LastViolation is the human-readable message from the page-violation that
+// tripped the breaker (extracted from the synthesized [ExcludedPage]'s
+// SecondResult). The raw underlying [error] value is not available at the
+// trip site because [pageOutcome] only carries the synthesized
+// [ExcludedPage] by the time the failure is observed.
+//
+// Callers (e.g. the cold-start runner) use this to label Prometheus metrics
+// and structured logs with the dominant per-page category.
+type SystemicAbortDetail struct {
+	Category      string
+	Count         int
+	Window        int
+	LastViolation string
+}
+
+// Error returns the same human-readable message format the prior
+// fmt.Errorf-wrapped sentinel produced.
+func (e *SystemicAbortDetail) Error() string {
+	return fmt.Sprintf(
+		"orchestrator: systemic LLM failure detected: %d page failures with category %q in last %d completions; last underlying error: %s",
+		e.Count, e.Category, e.Window, e.LastViolation,
+	)
+}
+
+// Unwrap returns [ErrSystemicSoftFailures] so [errors.Is] continues to
+// match the existing partial-generation gating logic in
+// [IsPartialGenerationError].
+func (e *SystemicAbortDetail) Unwrap() error { return ErrSystemicSoftFailures }
+
+// SystemicAbortCategory returns the dominant failure category from a
+// systemic-abort error, or "" when err is not (or does not wrap) a
+// [*SystemicAbortDetail]. Callers in non-orchestrator packages use this
+// helper instead of importing the type.
+func SystemicAbortCategory(err error) string {
+	var d *SystemicAbortDetail
+	if errors.As(err, &d) {
+		return d.Category
+	}
+	return ""
+}
+
 // errTemplateNotFound is the sentinel wrapped when a planned page references
 // a template that is not in the registry. This is treated as a fatal config
 // bug rather than a per-page soft failure (a soft failure would just hide the
@@ -551,10 +597,19 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 				// the same window state that crossed the threshold.
 				count, exceeded := sw.recordAndCheck(cat)
 				if exceeded {
-					return fmt.Errorf("%w: %d page failures with category %q in last %d completions; last underlying error: %s",
-						ErrSystemicSoftFailures,
-						count, cat, sw.window,
-						outcome.excluded.SecondResult.Gates[0].Violations[0].Message)
+					var lastViolation string
+					if vr := outcome.excluded.SecondResult; len(vr.Gates) > 0 && len(vr.Gates[0].Violations) > 0 {
+						lastViolation = vr.Gates[0].Violations[0].Message
+					}
+					// Return the structured form so callers can extract the
+					// dominant category via errors.As. errors.Is(err,
+					// ErrSystemicSoftFailures) still works via Unwrap.
+					return &SystemicAbortDetail{
+						Category:      cat,
+						Count:         count,
+						Window:        sw.window,
+						LastViolation: lastViolation,
+					}
 				}
 			} else if outcome.excluded == nil {
 				// Clean success — reset the streak.

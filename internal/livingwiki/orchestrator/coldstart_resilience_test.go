@@ -204,6 +204,29 @@ func TestAbortsOnSystemicFailure(t *testing.T) {
 	if !orchestrator.IsPartialGenerationError(err) {
 		t.Errorf("expected IsPartialGenerationError(err) to be true; err=%v", err)
 	}
+
+	// Structured-error contract: errors.As must extract a *SystemicAbortDetail
+	// with the dominant category populated, and errors.Is must continue to
+	// match the sentinel via Unwrap. Callers (cold-start runner) rely on this
+	// to label the systemic-abort Prometheus counter.
+	var detail *orchestrator.SystemicAbortDetail
+	if !errors.As(err, &detail) {
+		t.Fatalf("expected errors.As to match *SystemicAbortDetail; err=%v", err)
+	}
+	if detail.Category != orchestrator.SoftFailureCategoryDeadlineExceeded {
+		t.Errorf("expected Category=%q, got %q",
+			orchestrator.SoftFailureCategoryDeadlineExceeded, detail.Category)
+	}
+	if detail.Count <= 0 {
+		t.Errorf("expected Count > 0, got %d", detail.Count)
+	}
+	if detail.Window <= 0 {
+		t.Errorf("expected Window > 0, got %d", detail.Window)
+	}
+	if cat := orchestrator.SystemicAbortCategory(err); cat != orchestrator.SoftFailureCategoryDeadlineExceeded {
+		t.Errorf("SystemicAbortCategory: got %q, want %q",
+			cat, orchestrator.SoftFailureCategoryDeadlineExceeded)
+	}
 }
 
 // TestSlidingWindowDoesNotFalseAbortUnderConcurrency — 30 pages, half fail

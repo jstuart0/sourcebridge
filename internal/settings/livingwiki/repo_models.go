@@ -288,6 +288,22 @@ type LivingWikiJobResult struct {
 	ExcludedPageIDs     []string   `json:"excluded_page_ids,omitempty"`
 	GeneratedPageTitles []string   `json:"generated_page_titles,omitempty"`
 	ExclusionReasons    []string   `json:"exclusion_reasons,omitempty"`
+	// ExclusionFailureCategories is parallel to ExcludedPageIDs: for each
+	// excluded page (in the same order), the per-page failure category from
+	// the orchestrator's classifier. Values are one of:
+	//   "deadline_exceeded", "provider_unavailable", "provider_compute",
+	//   "llm_empty", "render_error", "template_internal", or "" for
+	//   gate-failure exclusions.
+	//
+	// The UI renders a one-line failure-breakdown summary above the
+	// per-page exclusions list using these category counts. Empty entries
+	// (gate failures) are grouped under the "gate" bucket in the UI.
+	//
+	// Invariant: len(ExcludedPageIDs) == len(ExclusionFailureCategories)
+	// after persistence. Both slices are derived from the orchestrator's
+	// `result.Excluded` to avoid order/length divergence between live
+	// progress counters and the persisted record.
+	ExclusionFailureCategories []string `json:"exclusion_failure_categories,omitempty"`
 	// SinkWriteResults records per-sink push counts for this job.
 	// Populated after the dispatch phase completes.
 	SinkWriteResults []SinkWriteResult `json:"sink_write_results,omitempty"`

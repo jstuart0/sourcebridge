@@ -49,11 +49,12 @@ type surrealLWJobResult struct {
 	// Native arrays on the wire (matches migration 041 TYPE array<string>).
 	// Earlier these were JSON-encoded strings; SurrealDB SCHEMAFULL rejected
 	// strings against array<string> with "expected a array<string>".
-	ExcludedPageIDs     []string         `json:"excluded_page_ids"`
-	GeneratedPageTitles []string         `json:"generated_page_titles"`
-	ExclusionReasons    []string         `json:"exclusion_reasons"`
-	Status              string           `json:"status"`
-	ErrorMessage        string           `json:"error_message"`
+	ExcludedPageIDs            []string `json:"excluded_page_ids"`
+	GeneratedPageTitles        []string `json:"generated_page_titles"`
+	ExclusionReasons           []string `json:"exclusion_reasons"`
+	ExclusionFailureCategories []string `json:"exclusion_failure_categories"`
+	Status                     string   `json:"status"`
+	ErrorMessage               string   `json:"error_message"`
 }
 
 func (r *surrealLWJobResult) toResult() (*livingwiki.LivingWikiJobResult, error) {
@@ -85,6 +86,11 @@ func (r *surrealLWJobResult) toResult() (*livingwiki.LivingWikiJobResult, error)
 		result.ExclusionReasons = []string{}
 	} else {
 		result.ExclusionReasons = r.ExclusionReasons
+	}
+	if r.ExclusionFailureCategories == nil {
+		result.ExclusionFailureCategories = []string{}
+	} else {
+		result.ExclusionFailureCategories = r.ExclusionFailureCategories
 	}
 
 	return result, nil
@@ -131,20 +137,25 @@ func (s *LivingWikiJobResultStore) Save(ctx context.Context, tenantID string, re
 	if reasons == nil {
 		reasons = []string{}
 	}
+	categories := result.ExclusionFailureCategories
+	if categories == nil {
+		categories = []string{}
+	}
 
 	vars := map[string]any{
-		"tenant_id":             tenantID,
-		"repo_id":               result.RepoID,
-		"job_id":                result.JobID,
-		"started_at":            result.StartedAt.UTC().Format(time.RFC3339Nano),
-		"pages_planned":         result.PagesPlanned,
-		"pages_generated":       result.PagesGenerated,
-		"pages_excluded":        result.PagesExcluded,
-		"excluded_page_ids":     excludedIDs,
-		"generated_page_titles": titles,
-		"exclusion_reasons":     reasons,
-		"status":                result.Status,
-		"error_message":         result.ErrorMessage,
+		"tenant_id":                    tenantID,
+		"repo_id":                      result.RepoID,
+		"job_id":                       result.JobID,
+		"started_at":                   result.StartedAt.UTC().Format(time.RFC3339Nano),
+		"pages_planned":                result.PagesPlanned,
+		"pages_generated":              result.PagesGenerated,
+		"pages_excluded":               result.PagesExcluded,
+		"excluded_page_ids":            excludedIDs,
+		"generated_page_titles":        titles,
+		"exclusion_reasons":            reasons,
+		"exclusion_failure_categories": categories,
+		"status":                       result.Status,
+		"error_message":                result.ErrorMessage,
 	}
 
 	// completed_at is option<datetime>. Include it in the SET clause only
@@ -165,18 +176,19 @@ func (s *LivingWikiJobResultStore) Save(ctx context.Context, tenantID string, re
 	// Mirrors the pattern in livingwiki_repo_settings_store.go.
 	sql := `
 		UPSERT type::thing('lw_job_results', $job_id)
-			SET tenant_id             = $tenant_id,
-			    repo_id               = $repo_id,
-			    job_id                = $job_id,
-			    started_at            = type::datetime($started_at),
-			    ` + completedClause + `pages_planned         = $pages_planned,
-			    pages_generated       = $pages_generated,
-			    pages_excluded        = $pages_excluded,
-			    excluded_page_ids     = $excluded_page_ids,
-			    generated_page_titles = $generated_page_titles,
-			    exclusion_reasons     = $exclusion_reasons,
-			    status                = $status,
-			    error_message         = $error_message
+			SET tenant_id                    = $tenant_id,
+			    repo_id                      = $repo_id,
+			    job_id                       = $job_id,
+			    started_at                   = type::datetime($started_at),
+			    ` + completedClause + `pages_planned                = $pages_planned,
+			    pages_generated              = $pages_generated,
+			    pages_excluded               = $pages_excluded,
+			    excluded_page_ids            = $excluded_page_ids,
+			    generated_page_titles        = $generated_page_titles,
+			    exclusion_reasons            = $exclusion_reasons,
+			    exclusion_failure_categories = $exclusion_failure_categories,
+			    status                       = $status,
+			    error_message                = $error_message
 	`
 	_, err := surrealdb.Query[interface{}](ctx, db, sql, vars)
 	return err

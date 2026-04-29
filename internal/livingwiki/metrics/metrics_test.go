@@ -54,6 +54,40 @@ func TestRecordPageGeneratedLabels(t *testing.T) {
 	}
 }
 
+// TestRecordColdStartSystemicAbortClampsCategory verifies that the
+// allowlist clamps unknown labels to "unknown" inside the function (not the
+// caller). Cardinality stays bounded by the 6 known categories + "unknown".
+func TestRecordColdStartSystemicAbortClampsCategory(t *testing.T) {
+	c := metrics.NewCollector()
+	c.RecordColdStartSystemicAbort("deadline_exceeded")
+	c.RecordColdStartSystemicAbort("deadline_exceeded")
+	c.RecordColdStartSystemicAbort("provider_unavailable")
+
+	// Out-of-allowlist values are clamped.
+	c.RecordColdStartSystemicAbort("")           // → unknown
+	c.RecordColdStartSystemicAbort("hostile{x}") // → unknown
+	c.RecordColdStartSystemicAbort("transient")  // → unknown (caller-side category, not a per-page one)
+
+	var buf strings.Builder
+	c.WritePrometheusText(&buf)
+	out := buf.String()
+
+	expected := []string{
+		`livingwiki_cold_start_systemic_aborts_total{category="deadline_exceeded"} 2`,
+		`livingwiki_cold_start_systemic_aborts_total{category="provider_unavailable"} 1`,
+		`livingwiki_cold_start_systemic_aborts_total{category="unknown"} 3`,
+	}
+	for _, line := range expected {
+		if !strings.Contains(out, line) {
+			t.Errorf("metrics output missing line %q in:\n%s", line, out)
+		}
+	}
+	// HELP/TYPE for the new series must be present.
+	if !strings.Contains(out, "# TYPE livingwiki_cold_start_systemic_aborts_total counter") {
+		t.Errorf("metrics output missing TYPE comment for systemic aborts counter:\n%s", out)
+	}
+}
+
 // TestRecordValidationFailureLabels verifies distinct per-validator counters.
 func TestRecordValidationFailureLabels(t *testing.T) {
 	c := metrics.NewCollector()
@@ -149,6 +183,8 @@ func TestWritePrometheusTextContainsAllSeriesHeaders(t *testing.T) {
 		"# TYPE livingwiki_job_duration_seconds histogram",
 		"# HELP livingwiki_sink_write_duration_seconds",
 		"# TYPE livingwiki_sink_write_duration_seconds histogram",
+		"# HELP livingwiki_cold_start_systemic_aborts_total",
+		"# TYPE livingwiki_cold_start_systemic_aborts_total counter",
 	}
 
 	for _, line := range requiredLines {

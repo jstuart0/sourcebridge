@@ -166,6 +166,7 @@ func (h *labelHistogram) Snapshot() map[string]histSnapshot {
 //	livingwiki_validation_failures_total{validator}
 //	livingwiki_job_duration_seconds{sink} (histogram)
 //	livingwiki_sink_write_duration_seconds{sink} (histogram)
+//	livingwiki_cold_start_systemic_aborts_total{category}
 type Collector struct {
 	// JobsTotal counts completed jobs keyed by "status:sink" label pair.
 	jobsTotal *labelCounter
@@ -181,16 +182,23 @@ type Collector struct {
 
 	// SinkWriteLatency histograms individual HTTP write latency, keyed by sink kind.
 	sinkWriteLatency *labelHistogram
+
+	// ColdStartSystemicAbortsTotal counts cold-start runs aborted by the
+	// orchestrator's soft-failure breaker, keyed by the dominant per-page
+	// failure category. Cardinality is bounded by RecordColdStartSystemicAbort's
+	// allowlist (6 known categories + "unknown").
+	coldStartSystemicAbortsTotal *labelCounter
 }
 
 // NewCollector allocates a zeroed Collector. Safe for concurrent use after construction.
 func NewCollector() *Collector {
 	return &Collector{
-		jobsTotal:               newLabelCounter(),
-		pagesGeneratedTotal:     newLabelCounter(),
-		validationFailuresTotal: newLabelCounter(),
-		jobDurationSeconds:      newLabelHistogram(defaultDurationBuckets),
-		sinkWriteLatency:        newLabelHistogram(defaultDurationBuckets),
+		jobsTotal:                    newLabelCounter(),
+		pagesGeneratedTotal:          newLabelCounter(),
+		validationFailuresTotal:      newLabelCounter(),
+		jobDurationSeconds:           newLabelHistogram(defaultDurationBuckets),
+		sinkWriteLatency:             newLabelHistogram(defaultDurationBuckets),
+		coldStartSystemicAbortsTotal: newLabelCounter(),
 	}
 }
 
@@ -227,6 +235,31 @@ func (c *Collector) RecordValidationFailure(validator string) {
 // durationSeconds is the round-trip time of the individual HTTP call.
 func (c *Collector) RecordSinkWrite(sink string, durationSeconds float64) {
 	c.sinkWriteLatency.Observe(sink, durationSeconds)
+}
+
+// RecordColdStartSystemicAbort increments the systemic-abort counter for
+// the given dominant failure category. Called from the cold-start runner
+// when the orchestrator's soft-failure breaker trips with
+// [orchestrator.ErrSystemicSoftFailures] /
+// [orchestrator.SystemicAbortDetail].
+//
+// The function clamps category to a known allowlist (the
+// SoftFailureCategory* values plus "unknown") so cardinality is bounded
+// inside this function and does not depend on every caller getting it
+// right.
+func (c *Collector) RecordColdStartSystemicAbort(category string) {
+	switch category {
+	case "deadline_exceeded",
+		"provider_unavailable",
+		"provider_compute",
+		"llm_empty",
+		"render_error",
+		"template_internal":
+		// allowlisted
+	default:
+		category = "unknown"
+	}
+	c.coldStartSystemicAbortsTotal.Inc(category)
 }
 
 // WritePrometheusText writes the collector's current state in Prometheus text
@@ -279,6 +312,13 @@ func (c *Collector) WritePrometheusText(w io.Writer) {
 		fmt.Fprintf(w, "livingwiki_sink_write_duration_seconds_bucket{sink=%q,le=\"+Inf\"} %d\n", sink, snap.total)
 		fmt.Fprintf(w, "livingwiki_sink_write_duration_seconds_sum{sink=%q} %g\n", sink, snap.sum)
 		fmt.Fprintf(w, "livingwiki_sink_write_duration_seconds_count{sink=%q} %d\n", sink, snap.total)
+	}
+
+	// ── livingwiki_cold_start_systemic_aborts_total ───────────────────────────
+	fmt.Fprintf(w, "# HELP livingwiki_cold_start_systemic_aborts_total Cold-start runs aborted by the systemic-failure breaker, by dominant failure category\n")
+	fmt.Fprintf(w, "# TYPE livingwiki_cold_start_systemic_aborts_total counter\n")
+	for category, count := range c.coldStartSystemicAbortsTotal.Snapshot() {
+		fmt.Fprintf(w, "livingwiki_cold_start_systemic_aborts_total{category=%q} %d\n", category, count)
 	}
 }
 

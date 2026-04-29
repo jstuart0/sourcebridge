@@ -631,6 +631,7 @@ func TestBuildColdStartRunnerNilOrchestratorReturnsNotice(t *testing.T) {
 		nil,           // no repo settings store
 		nil,           // no cluster store
 		nil,           // no knowledge store
+		nil,           // no metrics collector (falls back to Default)
 	)
 
 	rt := &fakeRuntime{jobID: "nil-orch-job"}
@@ -1044,6 +1045,7 @@ func TestColdStartSinkResultsPersistedInJobResult(t *testing.T) {
 		repoSettingsStore,
 		nil,   // no cluster store
 		nil,   // no knowledge store
+		nil,   // no metrics collector (falls back to Default)
 	)
 
 	// Override: run via csRunnerFromPages so we can inject the planned pages
@@ -1084,6 +1086,208 @@ func TestColdStartSinkResultsPersistedInJobResult(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("SinkWriteResults does not contain entry for 'eng-docs'; got %+v", result.SinkWriteResults)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TestColdStartSystemicAbortEmitsMetric
+//
+// Drives buildColdStartRunner directly (not csRunnerFromPages) with a
+// template that always returns context.DeadlineExceeded on every page, so
+// the orchestrator's soft-failure breaker trips. Asserts that the production
+// wiring emits the labelled metric exactly once via the dedicated
+// metricsCollector.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// csMultiErrorOrch builds an orchestrator whose registry maps every template ID
+// (architecture, api_reference, system_overview, glossary) to the same
+// erroringTemplate so all pages fail with the same error.
+func csMultiErrorOrch(err error) *lworch.Orchestrator {
+	deadlineTmpl := func(id string) *csErrorTemplate { return &csErrorTemplate{id: id, err: err} }
+	reg := lworch.NewMapRegistry(
+		deadlineTmpl("architecture"),
+		deadlineTmpl("api_reference"),
+		deadlineTmpl("system_overview"),
+		deadlineTmpl("glossary"),
+	)
+	store := lworch.NewMemoryPageStore()
+	return lworch.New(lworch.Config{
+		RepoID:         "systemic-test-repo",
+		MaxConcurrency: 1, // serialise so completion order is deterministic
+	}, reg, store)
+}
+
+// csClusterStore builds a stubClusterStore with n clusters, each labelled
+// "cluster-N". Used to give the TaxonomyResolver enough planned pages to trip
+// the systemic-failure breaker (threshold = max(MaxConcurrency+1, 15)).
+func csClusterStore(n int) *stubClusterStore {
+	clusters := make([]clustering.Cluster, n)
+	for i := range clusters {
+		clusters[i] = clustering.Cluster{
+			ID:    fmt.Sprintf("cluster:%d", i),
+			Label: fmt.Sprintf("module-%d", i),
+			Size:  1,
+		}
+	}
+	return &stubClusterStore{clusters: clusters}
+}
+
+func TestColdStartSystemicAbortEmitsMetric(t *testing.T) {
+	t.Parallel()
+	mc := lwmetrics.NewCollector() // dedicated collector — no Default singleton races
+
+	lwOrch := csMultiErrorOrch(context.DeadlineExceeded)
+	jrs := livingwiki.NewMemJobResultStore()
+	// 20 clusters → 20 architecture pages + api_reference + system_overview + glossary = 23 pages.
+	// MaxConcurrency=1, threshold=max(1+1,15)=15. After 15 same-category failures the breaker trips.
+	cs := csClusterStore(20)
+
+	runner := buildColdStartRunner(
+		lwOrch,
+		"systemic-test-repo",
+		"default",
+		newStubGraphStore(), // provides the symbol-graph adapter; empty returns no symbols
+		nil,                 // no worker client
+		nil,                 // no llmcall.Caller
+		nil,                 // full cold-start path (not retry-excluded)
+		"confluence",
+		jrs,
+		nil, // no broker
+		nil, // no repo settings store
+		cs,
+		nil, // no knowledge store
+		mc,
+	)
+
+	rt := &fakeRuntime{jobID: "job-systemic-metric"}
+	// The runner returns a non-nil error when the orchestrator returns ErrSystemicSoftFailures
+	// (the runner wraps it). We don't assert nil here — just check the metric.
+	_ = runner(context.Background(), rt)
+
+	var buf bytes.Buffer
+	mc.WritePrometheusText(&buf)
+	want := `livingwiki_cold_start_systemic_aborts_total{category="deadline_exceeded"} 1`
+	if !strings.Contains(buf.String(), want) {
+		t.Errorf("systemic-abort metric not emitted; want %q in:\n%s", want, buf.String())
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TestColdStartExclusionInvariantPartialContent
+//
+// Asserts that PagesExcluded == len(ExcludedPageIDs) == len(ExclusionFailureCategories)
+// on the persisted result after a partial-content run (quality-gate exclusions).
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestColdStartExclusionInvariantPartialContent(t *testing.T) {
+	t.Parallel()
+	mc := lwmetrics.NewCollector()
+
+	// Architecture pages use csAlwaysFailTemplate (zero blocks → quality gate).
+	// Other pages use csPassingTemplate so the run ends as "partial" not "failed".
+	reg := lworch.NewMapRegistry(
+		&csAlwaysFailTemplate{id: "architecture"},
+		&csPassingTemplate{id: "api_reference"},
+		&csPassingTemplate{id: "system_overview"},
+		&csPassingTemplate{id: "glossary"},
+	)
+	store := lworch.NewMemoryPageStore()
+	lwOrch := lworch.New(lworch.Config{RepoID: "invariant-partial-repo"}, reg, store)
+	jrs := livingwiki.NewMemJobResultStore()
+	// Two clusters → two architecture pages → both fail quality gate → two exclusions.
+	cs := csClusterStore(2)
+
+	runner := buildColdStartRunner(
+		lwOrch,
+		"invariant-partial-repo",
+		"default",
+		newStubGraphStore(),
+		nil, nil, nil, // no worker client, LLM caller, excluded page IDs
+		"git_repo",
+		jrs,
+		nil, nil, cs, nil,
+		mc,
+	)
+
+	rt := &fakeRuntime{jobID: "job-invariant-partial"}
+	_ = runner(context.Background(), rt)
+
+	result, err := jrs.LastResultForRepo(context.Background(), "default", "invariant-partial-repo")
+	if err != nil {
+		t.Fatalf("LastResultForRepo: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected job result persisted")
+	}
+	if result.PagesExcluded != len(result.ExcludedPageIDs) ||
+		result.PagesExcluded != len(result.ExclusionFailureCategories) {
+		t.Fatalf("invariant violated (partial-content path): count=%d ids=%d cats=%d",
+			result.PagesExcluded, len(result.ExcludedPageIDs), len(result.ExclusionFailureCategories))
+	}
+	// Gate failures have an empty category string (not an LLM error category).
+	for i, cat := range result.ExclusionFailureCategories {
+		if cat != "" {
+			t.Errorf("ExclusionFailureCategories[%d]: expected empty (gate failure), got %q", i, cat)
+		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TestColdStartExclusionInvariantSystemicAbort
+//
+// Asserts that PagesExcluded == len(ExcludedPageIDs) == len(ExclusionFailureCategories)
+// on the persisted result after a systemic-abort run. The live atomic excludedCount
+// can undercount result.Excluded on systemic-abort paths; the persisted record
+// must still be self-consistent.
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestColdStartExclusionInvariantSystemicAbort(t *testing.T) {
+	t.Parallel()
+	mc := lwmetrics.NewCollector()
+
+	lwOrch := csMultiErrorOrch(context.DeadlineExceeded)
+	jrs := livingwiki.NewMemJobResultStore()
+	cs := csClusterStore(20)
+
+	runner := buildColdStartRunner(
+		lwOrch,
+		"invariant-systemic-repo",
+		"default",
+		newStubGraphStore(),
+		nil, nil, nil,
+		"confluence",
+		jrs,
+		nil, nil, cs, nil,
+		mc,
+	)
+
+	rt := &fakeRuntime{jobID: "job-invariant-systemic"}
+	_ = runner(context.Background(), rt)
+
+	result, err := jrs.LastResultForRepo(context.Background(), "default", "invariant-systemic-repo")
+	if err != nil {
+		t.Fatalf("LastResultForRepo: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected job result persisted after systemic abort")
+	}
+	if result.PagesExcluded != len(result.ExcludedPageIDs) ||
+		result.PagesExcluded != len(result.ExclusionFailureCategories) {
+		t.Fatalf("invariant violated (systemic-abort path): count=%d ids=%d cats=%d",
+			result.PagesExcluded, len(result.ExcludedPageIDs), len(result.ExclusionFailureCategories))
+	}
+	if result.Status != "partial" {
+		t.Errorf("expected status=partial for systemic abort, got %q", result.Status)
+	}
+	if coldstart.FailureCategory(result.FailureCategory) != coldstart.FailureCategorySystemicLLM {
+		t.Errorf("expected failureCategory=systemic_llm, got %q", result.FailureCategory)
+	}
+	// All failures should be deadline_exceeded (no gate failures in this path).
+	for i, cat := range result.ExclusionFailureCategories {
+		if cat != lworch.SoftFailureCategoryDeadlineExceeded {
+			t.Errorf("ExclusionFailureCategories[%d]: expected %q, got %q",
+				i, lworch.SoftFailureCategoryDeadlineExceeded, cat)
+		}
 	}
 }
 

@@ -425,6 +425,7 @@ const enabledIdleSettings: RepositoryLivingWikiSettings = {
     excludedPageIds: [],
     generatedPageTitles: ["Auth module", "API gateway", "Core services"],
     exclusionReasons: [],
+    exclusionFailureCategories: [],
     status: "ok",
     failureCategory: null,
     errorMessage: null,
@@ -566,6 +567,7 @@ describe("WikiSettingsPanel — State 5 failure: transient", () => {
             excludedPageIds: [],
             generatedPageTitles: [],
             exclusionReasons: [],
+            exclusionFailureCategories: [],
             status: "failed",
             failureCategory: "transient",
             errorMessage: "LLM rate limit exceeded",
@@ -603,6 +605,7 @@ describe("WikiSettingsPanel — State 5 failure: auth", () => {
             excludedPageIds: [],
             generatedPageTitles: [],
             exclusionReasons: [],
+            exclusionFailureCategories: [],
             status: "failed",
             failureCategory: "auth",
             errorMessage: "Confluence returned 401 — update your API token",
@@ -641,6 +644,7 @@ describe("WikiSettingsPanel — State 5 failure: partial_content", () => {
             excludedPageIds: ["page-1", "page-2", "page-3"],
             generatedPageTitles: [],
             exclusionReasons: ["Validation failed", "LLM timeout", "Token limit"],
+            exclusionFailureCategories: [],
             status: "partial",
             failureCategory: "partial_content",
             errorMessage: null,
@@ -731,6 +735,85 @@ describe("WikiSettingsPanel — Stage B (refinement form)", () => {
     await waitFor(() => {
       expect(execMock).toHaveBeenCalled();
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Failure breakdown summary line (exclusionFailureCategories)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("WikiSettingsPanel — failure-category breakdown line", () => {
+  beforeEach(() => {
+    setupQueryMock(globalEnabledData({ enabled: true }));
+    setupMutationMock();
+  });
+
+  it("renders breakdown line with counts when exclusionFailureCategories is non-empty", () => {
+    render(
+      <WikiSettingsPanel
+        repoId="repo-1"
+        repoName="my-repo"
+        initialSettings={{
+          ...baseEnabledSettings,
+          lastJobResult: {
+            jobId: "job-breakdown",
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            pagesPlanned: 10,
+            pagesGenerated: 6,
+            pagesExcluded: 4,
+            excludedPageIds: ["p-1", "p-2", "p-3", "p-4"],
+            generatedPageTitles: [],
+            exclusionReasons: [],
+            // 2 deadline_exceeded, 1 llm_empty, 1 "" (gate failure)
+            exclusionFailureCategories: [
+              "deadline_exceeded",
+              "deadline_exceeded",
+              "llm_empty",
+              "",
+            ],
+            status: "partial",
+            failureCategory: "partial_content",
+            errorMessage: null,
+          },
+        }}
+      />
+    );
+
+    // The breakdown line should be visible and list the categories by count desc.
+    // "deadline exceeded" (2) should appear before "empty LLM response" (1) and
+    // "quality gate" (1).
+    expect(screen.getByText(/Failure breakdown:/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 deadline exceeded/i)).toBeInTheDocument();
+  });
+
+  it("does not render breakdown line when exclusionFailureCategories is empty", () => {
+    render(
+      <WikiSettingsPanel
+        repoId="repo-1"
+        repoName="my-repo"
+        initialSettings={{
+          ...baseEnabledSettings,
+          lastJobResult: {
+            jobId: "job-no-breakdown",
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            pagesPlanned: 10,
+            pagesGenerated: 7,
+            pagesExcluded: 3,
+            excludedPageIds: ["p-1", "p-2", "p-3"],
+            generatedPageTitles: [],
+            exclusionReasons: [],
+            exclusionFailureCategories: [],
+            status: "partial",
+            failureCategory: "partial_content",
+            errorMessage: null,
+          },
+        }}
+      />
+    );
+
+    expect(screen.queryByText(/Failure breakdown:/i)).toBeNull();
   });
 });
 
