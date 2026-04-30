@@ -223,6 +223,17 @@ type PlannedPage struct {
 	// PackageInfo is non-nil for architecture pages; it is passed to
 	// architecture.Template.GeneratePackagePage in preference to Generate.
 	PackageInfo *ArchitecturePackageInfo
+
+	// RelatedPageIDsByLabel is a caller-supplied map from a related-page label
+	// (cluster name or package path) to the resolver-computed page ID for that
+	// related page. Templates use this to render cross-page links so all link
+	// targets share the resolver's prefix policy (overview./detail./arch.).
+	//
+	// When nil, templates fall back to their legacy pageIDFor derivation.
+	// Populated by the cold-start runner from the FULL taxonomy manifest
+	// BEFORE smart-resume splits buckets (CR3 — map must cover skipped pages
+	// too so cross-page links from regenerate pages resolve to their correct IDs).
+	RelatedPageIDsByLabel map[string]string
 }
 
 // ArchitecturePackageInfo carries the per-package inputs needed by the
@@ -251,10 +262,22 @@ type ArchitecturePackageInfo struct {
 // artifact. We mirror just the fields the architecture template needs so the
 // orchestrator package doesn't take on a heavy dep on the knowledge package.
 type KnowledgeArtifactSummary struct {
+	// ID is the persisted knowledge.Artifact.ID. Stable across runs as long as
+	// the artifact hasn't been deleted and recreated. Included in the page
+	// fingerprint so a regenerated artifact (same ScopePath, new ID) invalidates
+	// the page fingerprint (CR6).
+	ID string
+
 	Type        string // e.g. "cliff_notes", "architecture_diagram"
 	Audience    string
 	Depth       string // "summary", "medium", or "deep"
 	ScopePath   string // module / package path the artifact covers
+
+	// ScopeType is the knowledge.ScopeType ("repository" / "module" / "file" /
+	// "symbol" / "requirement"). Combined with ScopePath this fully identifies
+	// the slice the artifact covers (CR6).
+	ScopeType string
+
 	Sections    []KnowledgeSection
 	RevisionFp  string    // matches understanding revisionFp
 	GeneratedAt time.Time
@@ -383,6 +406,34 @@ type GenerateRequest struct {
 	// is known before generation starts (len(Pages)), enabling a determinate
 	// progress bar from the first callback.
 	OnPageDone OnPageDoneFunc
+
+	// OnPageReady, when non-nil, is invoked synchronously inside the orchestrator's
+	// post-eg.Wait() persistence loop after each successful SetProposed/SetCanonical
+	// call, BEFORE the loop advances to the next page.
+	//
+	// Contract (CR2 — locked):
+	//   - The callback MUST NOT perform blocking I/O. Runners that need to dispatch
+	//     pages to sinks MUST enqueue an event onto an internal channel and return
+	//     immediately. Blocking here extends the persistence-loop wall-clock and
+	//     risks exhausting persistCtx's 30s budget.
+	//   - No context argument: the orchestrator does not own dispatch lifetime.
+	//     The runner owns dispatchCtx and its cancellation policy.
+	//   - Fires ONLY when shouldPersist=true (i.e. genErr == nil or IsPartialGenerationError).
+	//     On hard aborts, the persistence loop is skipped and OnPageReady never fires —
+	//     preserving the all-or-nothing-on-hard-abort contract (mozart locked surface).
+	//   - OnPageDone continues to fire per-page-immediately from the per-page goroutine
+	//     (unchanged). OnPageReady fires later, in the post-Wait persistence loop.
+	//     Two callbacks, two events.
+	//
+	// fingerprint is the value from PageFingerprints[page.ID], pre-computed at
+	// planning time and passed through unchanged. The orchestrator does not interpret it.
+	OnPageReady func(page ast.Page, fingerprint string)
+
+	// PageFingerprints is a map from page ID to pre-computed content fingerprint
+	// (computed once at smart-resume time, reused here). The orchestrator passes
+	// the matching fingerprint to OnPageReady for each persisted page.
+	// May be nil; OnPageReady receives an empty fingerprint in that case.
+	PageFingerprints map[string]string
 }
 
 // GenerateResult summarises the outcome of a generation run.
@@ -691,6 +742,15 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 						fmt.Errorf("orchestrator: storing canonical page %q: %w (also: %v)", page.ID, err, genErr)
 				}
 				persisted = append(persisted, page)
+				// Fire OnPageReady after successful persistence. The callback must
+				// not block (CR2: non-blocking enqueue onto a runner-owned channel).
+				if req.OnPageReady != nil {
+					fp := ""
+					if req.PageFingerprints != nil {
+						fp = req.PageFingerprints[page.ID]
+					}
+					req.OnPageReady(page, fp)
+				}
 			}
 			if req.Writer != nil && len(files) > 0 {
 				if err := req.Writer.WriteFiles(persistCtx, files); err != nil {
@@ -713,6 +773,18 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 						fmt.Errorf("orchestrator: storing proposed page %q: %w (also: %v)", page.ID, err, genErr)
 				}
 				persisted = append(persisted, page)
+				// Fire OnPageReady after successful SetProposed. The callback must
+				// not block (CR2: non-blocking enqueue onto a runner-owned channel).
+				// Fires ONLY when shouldPersist=true — the all-or-nothing-on-hard-abort
+				// contract is preserved because the persistence loop is skipped entirely
+				// when shouldPersist=false (the gate at orchestrator.go line 669 is unchanged).
+				if req.OnPageReady != nil {
+					fp := ""
+					if req.PageFingerprints != nil {
+						fp = req.PageFingerprints[page.ID]
+					}
+					req.OnPageReady(page, fp)
+				}
 			}
 			body := buildPRBody(persisted, excluded)
 			if err := req.PR.Open(persistCtx, cfg.PRBranch, cfg.PRTitle, body, files); err != nil {

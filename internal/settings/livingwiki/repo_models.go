@@ -139,6 +139,20 @@ type RepositoryLivingWikiSettings struct {
 	// SurrealDB column name is `living_wiki_llm_override` and is
 	// preserved as legacy for backward compatibility.
 	LLMOverride *LLMOverride `json:"living_wiki_llm_override,omitempty"`
+
+	// LivingWikiOverviewEnabled controls Overview-mode (subsystem-level)
+	// generation. Default for new repos: true. Existing repos are backfilled
+	// to true by migration 051 (J1 — Jay's locked decision).
+	//
+	// Phase 1 deliverable (CR12 Part A): the schema and Go field land here so
+	// Phase 2's index renderer can read the flags without waiting for Phase 4b.
+	// The GraphQL surface and UI toggles land in Phase 4b.
+	LivingWikiOverviewEnabled bool `json:"living_wiki_overview_enabled"`
+
+	// LivingWikiDetailedEnabled controls Detailed-mode (per-folder) generation.
+	// Default for new repos: false. Existing repos are backfilled to true by
+	// migration 051 to preserve today's per-folder pages (J1).
+	LivingWikiDetailedEnabled bool `json:"living_wiki_detailed_enabled"`
 }
 
 // RepoWikiMode is the publish mode for a living-wiki repo.

@@ -57,12 +57,60 @@ type Template interface {
 	Generate(ctx context.Context, input GenerateInput) (ast.Page, error)
 }
 
+// templateVersions maps template IDs to version strings. Bump the version
+// whenever the template's prompt or output structure changes in a way that
+// produces meaningfully different output. A version bump invalidates every
+// existing fingerprint for that template, triggering full regeneration on
+// the next run (LD-7 escape hatch).
+//
+// Initial values are "@v1" for all templates. Template authors bump this
+// when changing prompts; the CI reviewer must include the bump in the PR
+// so the change is observable in history.
+var templateVersions = map[string]string{
+	"architecture":   "architecture@v1",
+	"api_reference":  "api_reference@v1",
+	"glossary":       "glossary@v1",
+	"system_overview": "system_overview@v1",
+}
+
+// TemplateVersion returns the version string for the given templateID.
+// Returns "unknown@v0" when the template is not in the registry, which
+// ensures an unrecognized template always produces a unique fingerprint
+// that mismatches any prior run.
+func TemplateVersion(id string) string {
+	if v, ok := templateVersions[id]; ok {
+		return v
+	}
+	return "unknown@v0"
+}
+
 // GenerateInput carries all data a template needs to produce one page.
 // Fields that are not needed by a particular template are ignored; callers
 // should populate everything they have and let templates pick what they need.
 type GenerateInput struct {
 	// RepoID is the opaque repository identifier used in citations and page IDs.
 	RepoID string
+
+	// PageID is the externally-visible page identifier the caller has chosen
+	// for this page. When non-empty, the template MUST use it as ast.Page.ID
+	// and as the cross-reference target ID for related-page link emission.
+	//
+	// When empty, templates fall back to their legacy ID derivation (e.g.
+	// pageIDFor for architecture). The empty case is preserved for backward
+	// compatibility with existing template tests; production callers from
+	// Phase 4a onward MUST set this (CR3).
+	PageID string
+
+	// RelatedPageIDsByLabel is a caller-supplied map from a related-page label
+	// (cluster name or package path) to the resolver-computed page ID for that
+	// related page. Templates use this to render cross-page links so all link
+	// targets share the resolver's prefix policy (overview./detail./arch.).
+	//
+	// When nil, templates fall back to their legacy pageIDFor derivation.
+	// Populated from the FULL taxonomy manifest BEFORE smart-resume splits
+	// buckets (CR3 — map must cover skipped pages so regenerate-bucket pages
+	// produce correct cross-links to skip-bucket peers).
+	RelatedPageIDsByLabel map[string]string
 
 	// Audience controls which voice profile and validator profile to use.
 	// Must match a quality.Audience constant.

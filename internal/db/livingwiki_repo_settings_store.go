@@ -109,6 +109,12 @@ type surrealLivingWikiRepoSettings struct {
 	// sbenc:v1 envelope. SurrealDB tolerates missing fields on read so
 	// pre-migration rows decode unchanged (LLMOverride stays nil).
 	LLMOverride *surrealLivingWikiLLMOverride `json:"living_wiki_llm_override,omitempty"`
+
+	// Dual-mode flags (migration 051 / CR12 Part A). SurrealDB tolerates
+	// missing fields on read; pre-051 rows decode as false (Go zero value)
+	// which the toSettings method corrects to the backfilled defaults.
+	LivingWikiOverviewEnabled bool `json:"living_wiki_overview_enabled"`
+	LivingWikiDetailedEnabled bool `json:"living_wiki_detailed_enabled"`
 }
 
 // surrealLivingWikiLLMOverride is the on-disk shape of livingwiki.LLMOverride.
@@ -238,6 +244,21 @@ func (r *surrealLivingWikiRepoSettings) toSettings(decryptAPIKey func(string) (s
 		if !ov.IsEmpty() {
 			s.LLMOverride = ov
 		}
+	}
+
+	// Dual-mode flags (migration 051 / CR12 Part A). The DTO booleans
+	// default to false (Go zero value) when the columns are absent (pre-051
+	// rows). The migration 051 UPDATE backfills existing rows to (true, true)
+	// so post-051 rows always carry explicit values. For any row that somehow
+	// still has false/false (e.g. a new row created before the migration ran),
+	// apply the "new repo default" policy: Overview=true, Detailed=false.
+	// This guarantees no repo is silently left in "both modes off" state
+	// unless the user explicitly set it that way via the Phase 4b UI.
+	s.LivingWikiOverviewEnabled = r.LivingWikiOverviewEnabled
+	s.LivingWikiDetailedEnabled = r.LivingWikiDetailedEnabled
+	if !s.LivingWikiOverviewEnabled && !s.LivingWikiDetailedEnabled {
+		// Default new-repo policy (not a user toggle; no existing row wrote this).
+		s.LivingWikiOverviewEnabled = true
 	}
 
 	return s, nil
@@ -416,19 +437,24 @@ func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, setting
 	// and the result is silently empty. Address the row by a deterministic
 	// composite-key ID via type::thing() so UPSERT actually creates or
 	// updates the record.
+	vars["living_wiki_overview_enabled"] = settings.LivingWikiOverviewEnabled
+	vars["living_wiki_detailed_enabled"] = settings.LivingWikiDetailedEnabled
+
 	sql := `
 		UPSERT type::thing('lw_repo_settings', [$tenant_id, $repo_id]) SET
-			tenant_id           = $tenant_id,
-			repo_id             = $repo_id,
-			enabled             = $enabled,
-			mode                = $mode,
-			sinks               = $sinks,
-			exclude_paths       = $exclude_paths,
-			stale_when_strategy = $stale_when_strategy,
-			max_pages_per_job   = $max_pages_per_job,
+			tenant_id                    = $tenant_id,
+			repo_id                      = $repo_id,
+			enabled                      = $enabled,
+			mode                         = $mode,
+			sinks                        = $sinks,
+			exclude_paths                = $exclude_paths,
+			stale_when_strategy          = $stale_when_strategy,
+			max_pages_per_job            = $max_pages_per_job,
+			living_wiki_overview_enabled = $living_wiki_overview_enabled,
+			living_wiki_detailed_enabled = $living_wiki_detailed_enabled,
 			` + dateClauses + llmOverrideClause + `
-			updated_by          = $updated_by,
-			updated_at          = time::now()
+			updated_by                   = $updated_by,
+			updated_at                   = time::now()
 	`
 	_, err := surrealdb.Query[interface{}](c, db, sql, vars)
 	return err

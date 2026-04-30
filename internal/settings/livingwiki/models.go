@@ -156,6 +156,108 @@ type RepoSettingsStore interface {
 	RepositoriesUsingSink(ctx context.Context, tenantID, integrationName string) ([]RepositoryLivingWikiSettings, error)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-page publish status
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Fixup status values for lw_page_publish_status.fixup_status (CR4).
+const (
+	// FixupStatusNone means the page never contained stub links.
+	FixupStatusNone = "none"
+	// FixupStatusPending means the page was published with stubs; fix-up not yet run.
+	FixupStatusPending = "pending"
+	// FixupStatusDone means the fix-up pass successfully re-rendered the page.
+	FixupStatusDone = "done"
+	// FixupStatusFailed means a fix-up attempt failed; will retry on next run.
+	FixupStatusFailed = "failed"
+)
+
+// PagePublishStatusRow is the Go representation of a single lw_page_publish_status row.
+type PagePublishStatusRow struct {
+	RepoID             string
+	PageID             string
+	SinkKind           string
+	IntegrationName    string
+	Status             string    // "pending", "generating", "ready", "failed", "failed_fixup"
+	ErrorMsg           string
+	ContentFingerprint string    // empty string (not nil) when no fingerprint yet (LD-7, C2)
+	HasStubs           bool
+	StubTargetPageIDs  []string
+	FixupStatus        string    // one of the FixupStatus* constants
+	UpdatedAt          time.Time
+}
+
+// SetReadyArgs carries the arguments for PagePublishStatusStore.SetReady.
+// This is the ONLY path that writes content_fingerprint (CR9).
+type SetReadyArgs struct {
+	RepoID          string
+	PageID          string
+	SinkKind        string
+	IntegrationName string
+	Fingerprint     string
+	HasStubs        bool
+	StubTargetIDs   []string
+	FixupStatus     string // when empty, inferred from HasStubs
+}
+
+// SetNonReadyArgs carries the arguments for PagePublishStatusStore.SetNonReady.
+// Does NOT include fingerprint/stub fields (CR9: preserve-on-failure).
+type SetNonReadyArgs struct {
+	RepoID          string
+	PageID          string
+	SinkKind        string
+	IntegrationName string
+	Status          string // "generating", "failed", "failed_fixup"
+	ErrorMsg        string
+}
+
+// UpdateFixupStatusArgs carries the arguments for updating the fixup state
+// on an already-ready row (Phase 3 fix-up pass).
+type UpdateFixupStatusArgs struct {
+	RepoID          string
+	PageID          string
+	SinkKind        string
+	IntegrationName string
+	FixupStatus     string // FixupStatusDone or FixupStatusFailed
+	HasStubs        bool   // false when stubs have been cleared
+}
+
+// PagePublishStatusStore persists per-page, per-sink publish state for the
+// Living Wiki stream-dispatch feature. The table (lw_page_publish_status,
+// migration 050) is keyed on (repo_id, page_id, sink_kind, integration_name).
+//
+// API contract (CR9):
+//   - SetReady is the ONLY write path for content_fingerprint and stub fields.
+//   - SetNonReady preserves those fields unchanged.
+//
+// Implementations: LivingWikiPagePublishStatusStore (internal/db) + in-memory
+// test stub.
+type PagePublishStatusStore interface {
+	// SetReady records a successful sink dispatch. Writes status='ready' plus
+	// content_fingerprint, has_stubs, stub_target_page_ids, fixup_status.
+	SetReady(ctx context.Context, args SetReadyArgs) error
+
+	// SetNonReady records a non-ready transition. Does NOT touch
+	// content_fingerprint, has_stubs, stub_target_page_ids, or fixup_status
+	// (CR9: preserve-on-failure contract).
+	SetNonReady(ctx context.Context, args SetNonReadyArgs) error
+
+	// LoadFingerprints loads all rows for repoID and returns a nested map:
+	//   pageID → sinkKey("<sink_kind>/<integration_name>") → PagePublishStatusRow.
+	// Used by smart-resume's 3-way bucket split (CR4, LD-7).
+	LoadFingerprints(ctx context.Context, repoID string) (map[string]map[string]PagePublishStatusRow, error)
+
+	// ListByRepo returns all rows for repoID, ordered by updated_at DESC.
+	// Used by the livingWikiPublishStatus GraphQL query.
+	ListByRepo(ctx context.Context, repoID string) ([]PagePublishStatusRow, error)
+
+	// UpdateFixupStatus updates fixup_status (and has_stubs) without touching
+	// other fields. Used by Phase 3's fix-up pass.
+	UpdateFixupStatus(ctx context.Context, args UpdateFixupStatusArgs) error
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 // JobResultStore persists and retrieves per-run living-wiki job outcomes.
 // Save is idempotent by JobID — a second Save with the same JobID replaces
 // the existing row in place rather than appending a new one. This matches
