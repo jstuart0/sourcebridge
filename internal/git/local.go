@@ -4,6 +4,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -213,23 +214,47 @@ type GitMetadata struct {
 // of an empty branch string they have to second-guess.
 var ErrNotAGitRepo = fmt.Errorf("not a git repository")
 
-// HeadRef returns the symbolic branch name (`git rev-parse --abbrev-ref HEAD`)
-// of repoPath's working tree, e.g. "main" or "feature/x".
+// HeadRef returns the symbolic branch name of repoPath's working tree,
+// e.g. "main" or "feature/x". Equivalent to
+// `git rev-parse --abbrev-ref HEAD` for the common cases (attached
+// branch, detached HEAD).
 //
-// On a detached HEAD git returns "HEAD", which HeadRef passes through
-// unchanged — callers that need to reject detached state must do so
-// at their own layer.
-//
-// Errors:
-//   - ErrNotAGitRepo if repoPath has no .git entry.
-//   - Wrapped exec error from `git rev-parse` if the command fails for
-//     any other reason (e.g. broken git index, missing binary).
+// On a detached HEAD this returns "HEAD" — matching `git rev-parse
+// --abbrev-ref HEAD`. Callers that need to reject detached state must
+// do so at their own layer.
 //
 // HeadRef is the load-bearing branch source for the change-watch
 // pipeline (Phase 1.C router validation, Phase 1.B IndexFiles
-// recording). The wrapper is deliberately thin so future migrations
-// to gogit or libgit2 stay confined to GetGitMetadata.
+// recording). It is on the latency-budget hot path: every
+// IndexFiles call validates the claimed branch against HeadRef under
+// the 100ms T0 budget. For that reason HeadRef tries a direct
+// .git/HEAD read first (microsecond-scale on a hot inode cache,
+// vs. tens of milliseconds for a `git` subprocess) and falls back to
+// the subprocess path only when the direct read can't classify the
+// state confidently.
+//
+// Errors:
+//   - ErrNotAGitRepo if repoPath has no .git entry.
+//   - Wrapped exec error from `git rev-parse` if both the fast path
+//     and the slow path fail (e.g. broken git index, missing binary).
 func HeadRef(repoPath string) (string, error) {
+	// Fast path: read .git/HEAD directly. This avoids the
+	// ~30-90ms `git` subprocess fork that dominates the
+	// IndexFiles latency budget on macOS / shared CI runners.
+	branch, fastErr := fastHeadRef(repoPath)
+	if fastErr == nil {
+		return branch, nil
+	}
+	if errors.Is(fastErr, ErrNotAGitRepo) {
+		return "", ErrNotAGitRepo
+	}
+
+	// Slow path: defer to GetGitMetadata, which shells out via
+	// `git rev-parse --abbrev-ref HEAD`. Used when the fast path
+	// can't classify the HEAD file confidently — e.g. a worktree
+	// whose .git pointer needs follow-resolution beyond what
+	// fastHeadRef tries, a packed-refs setup the symbolic ref
+	// parser doesn't recognize, or a future git format change.
 	meta, err := GetGitMetadata(repoPath)
 	if err != nil {
 		return "", fmt.Errorf("reading git metadata: %w", err)
@@ -238,6 +263,96 @@ func HeadRef(repoPath string) (string, error) {
 		return "", ErrNotAGitRepo
 	}
 	return meta.Branch, nil
+}
+
+// fastHeadRef reads .git/HEAD (or follows a worktree's gitdir pointer)
+// and parses the result without shelling out. It returns:
+//   - the branch name on a normal symbolic ref ("ref: refs/heads/main"
+//     → "main")
+//   - "HEAD" on a detached HEAD (the file contains a 40-char SHA),
+//     matching `git rev-parse --abbrev-ref HEAD`'s output for that case
+//   - ErrNotAGitRepo if .git does not exist
+//   - a non-nil error if the HEAD file is present but the contents
+//     cannot be classified (caller falls back to the slow path)
+//
+// Handles two on-disk shapes:
+//   - .git is a directory (the common case) → read .git/HEAD
+//   - .git is a file with "gitdir: <path>" (worktree / submodule) →
+//     read <path>/HEAD
+//
+// The format of .git/HEAD is documented in gitrepository-layout(5):
+//   - "ref: refs/heads/<branch>\n" for an attached branch
+//   - "<sha>\n" for a detached HEAD
+// Anything else is an unrecognized state; the caller should fall back.
+func fastHeadRef(repoPath string) (string, error) {
+	gitEntry := filepath.Join(repoPath, ".git")
+	stat, err := os.Stat(gitEntry)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", ErrNotAGitRepo
+		}
+		return "", fmt.Errorf("stat .git: %w", err)
+	}
+
+	gitDir := gitEntry
+	if !stat.IsDir() {
+		// .git is a file (worktree or submodule). Parse it for the
+		// gitdir pointer.
+		body, readErr := os.ReadFile(gitEntry)
+		if readErr != nil {
+			return "", fmt.Errorf("read .git pointer file: %w", readErr)
+		}
+		const prefix = "gitdir:"
+		line := strings.TrimSpace(string(body))
+		if !strings.HasPrefix(line, prefix) {
+			return "", fmt.Errorf("unrecognized .git pointer: %q", line)
+		}
+		raw := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		if !filepath.IsAbs(raw) {
+			raw = filepath.Join(repoPath, raw)
+		}
+		gitDir = raw
+	}
+
+	headPath := filepath.Join(gitDir, "HEAD")
+	headBytes, err := os.ReadFile(headPath)
+	if err != nil {
+		return "", fmt.Errorf("read HEAD: %w", err)
+	}
+	head := strings.TrimSpace(string(headBytes))
+
+	const refPrefix = "ref: refs/heads/"
+	if strings.HasPrefix(head, refPrefix) {
+		return strings.TrimPrefix(head, refPrefix), nil
+	}
+	// Detached HEAD: a 40-char (SHA-1) or 64-char (SHA-256) hex string.
+	if isHexSHA(head) {
+		return "HEAD", nil
+	}
+
+	// Symbolic ref to something other than refs/heads/* (e.g.
+	// refs/tags/v1, or a less common ref namespace). Fall back to
+	// the slow path so `git rev-parse --abbrev-ref HEAD` can give
+	// the canonical answer.
+	return "", fmt.Errorf("unrecognized HEAD contents: %q", head)
+}
+
+// isHexSHA reports whether s is a hex string of length 40 (SHA-1) or
+// 64 (SHA-256) — the two shapes git uses for object IDs.
+func isHexSHA(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'f':
+		case c >= 'A' && c <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // GetGitMetadata extracts git metadata from a repository path.
