@@ -130,7 +130,7 @@ func TestRequirementStorage(t *testing.T) {
 
 	// Index a repo first
 	idx := indexer.NewIndexer(nil)
-	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestRequirementRemovalWithRepo(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	repo, _ := store.StoreIndexResult(result)
 
 	// Store requirements
@@ -232,7 +232,7 @@ func TestGraphQLImportRequirements(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestGraphQLQueryRequirements(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestGraphQLQuerySingleRequirement(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	repo, _ := store.StoreIndexResult(result)
 
 	store.StoreRequirements(repo.ID, []*graph.StoredRequirement{
@@ -344,7 +344,7 @@ func TestGraphQLImportDuplicateSkip(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	repo, _ := store.StoreIndexResult(result)
 
 	// Pre-store a requirement
@@ -384,7 +384,7 @@ func TestGraphQLRequirementsPagination(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	repo, _ := store.StoreIndexResult(result)
 
 	// Store 10 requirements
@@ -421,7 +421,7 @@ func TestGraphQLCSVImport(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	repo, _ := store.StoreIndexResult(result)
 
 	ts, token := setupPhase3Server(t, store)

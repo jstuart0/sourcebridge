@@ -120,11 +120,7 @@ func IsIgnoredPath(repoPath, relPath string) bool {
 	// extension, mirroring ScanRepository's `DetectLanguage(path) == ""`
 	// skip.
 	leaf := parts[len(parts)-1]
-	if DetectLanguage(leaf) == "" {
-		return true
-	}
-
-	return false
+	return DetectLanguage(leaf) == ""
 }
 
 // ScanRepository walks a local repository path and returns file information.

@@ -199,7 +199,7 @@ func TestGraphQLSymbolsByFilePath(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestGraphQLSymbolsByFilePathEmpty(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	repo, _ := store.StoreIndexResult(result)
 
 	ts, token := setupPhase6Server(t, store)
@@ -258,7 +258,7 @@ func TestGraphQLSymbolsByNameQuery(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	repo, _ := store.StoreIndexResult(result)
 
 	ts, token := setupPhase6Server(t, store)
@@ -282,7 +282,7 @@ func TestGraphQLAIMutationWithoutWorker(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	repo, _ := store.StoreIndexResult(result)
 
 	// Get a symbol ID

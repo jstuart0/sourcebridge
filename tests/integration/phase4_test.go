@@ -18,7 +18,7 @@ func setupPhase4Store(t *testing.T) (*graph.Store, *graph.Repository) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	if err != nil {
 		t.Fatal(err)
 	}
