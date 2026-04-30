@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -260,22 +261,33 @@ type OrphanCleanupResult struct {
 	Errors []string
 }
 
-// RunOrphanCleanup removes Confluence pages that carry a SourceBridge property
-// for repoID but whose external ID is not in currentPageIDs. It is safe to
-// call even on partial-success dispatches — the caller is responsible for only
-// invoking it when the dispatch status is "ok" so a transient generation
-// failure cannot erroneously nuke live content.
+// RunOrphanCleanupForPrefix removes Confluence pages whose external ID begins
+// with prefix but is not in currentPageIDs. It is the prefix-aware core of the
+// orphan-cleanup system and is safe to call even on partial-success dispatches —
+// the caller is responsible for only invoking it when the dispatch status is
+// "ok" so a transient generation failure cannot erroneously nuke live content.
+//
+// prefix MUST start with repoID+"." — the function enforces this invariant to
+// prevent accidental cross-repo deletions when mode-specific prefixes are used
+// (e.g. repoID+".overview." or repoID+".detail."). A prefix that violates this
+// constraint is returned as an error in OrphanCleanupResult.Errors and no
+// cleanup is performed.
 //
 // writer must implement [OrphanCleaner]; if it does not, the function returns
 // immediately with a zero result. Errors from individual delete calls are
 // collected in the result rather than aborting the whole pass.
-func RunOrphanCleanup(ctx context.Context, writer SinkWriter, repoID string, currentPageIDs []string) OrphanCleanupResult {
+func RunOrphanCleanupForPrefix(ctx context.Context, writer SinkWriter, repoID, prefix string, currentPageIDs []string) OrphanCleanupResult {
+	if !strings.HasPrefix(prefix, repoID+".") {
+		return OrphanCleanupResult{
+			Errors: []string{fmt.Sprintf("orphan-cleanup: prefix %q must start with %q", prefix, repoID+".")},
+		}
+	}
+
 	cleaner, ok := writer.(OrphanCleaner)
 	if !ok {
 		return OrphanCleanupResult{}
 	}
 
-	prefix := repoID + "."
 	listed, err := cleaner.ListPagesByExternalIDPrefix(ctx, prefix)
 	if err != nil {
 		return OrphanCleanupResult{
@@ -294,7 +306,7 @@ func RunOrphanCleanup(ctx context.Context, writer SinkWriter, repoID string, cur
 			continue
 		}
 		slog.Warn("livingwiki/orphan: deleting orphan page",
-			"external_id", extID, "repo_id", repoID)
+			"external_id", extID, "repo_id", repoID, "prefix", prefix)
 		if delErr := cleaner.DeletePage(ctx, extID); delErr != nil {
 			slog.Warn("livingwiki/orphan: delete failed",
 				"external_id", extID, "error", delErr)
@@ -305,6 +317,15 @@ func RunOrphanCleanup(ctx context.Context, writer SinkWriter, repoID string, cur
 		result.DeletedIDs = append(result.DeletedIDs, extID)
 	}
 	return result
+}
+
+// RunOrphanCleanup removes Confluence pages that carry a SourceBridge property
+// for repoID but whose external ID is not in currentPageIDs. It is a thin
+// wrapper around [RunOrphanCleanupForPrefix] that uses repoID+"." as the prefix,
+// preserving backward-compatible "sweep all pages under this repo" semantics for
+// callers that do not need per-mode (overview / detail / arch) scoping.
+func RunOrphanCleanup(ctx context.Context, writer SinkWriter, repoID string, currentPageIDs []string) OrphanCleanupResult {
+	return RunOrphanCleanupForPrefix(ctx, writer, repoID, repoID+".", currentPageIDs)
 }
 
 // DispatchSummaryStatus classifies a DispatchResult into one of three terminal

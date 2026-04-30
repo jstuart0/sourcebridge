@@ -202,6 +202,116 @@ func TestRunOrphanCleanup_MultipleOrphans(t *testing.T) {
 	}
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4a: RunOrphanCleanupForPrefix tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestRunOrphanCleanupForPrefixScopedDeletion verifies that only pages matching
+// the given prefix are candidates for deletion — pages under sibling prefixes
+// (e.g. detail.*) are untouched when the caller passes overview.* as the prefix.
+func TestRunOrphanCleanupForPrefixScopedDeletion(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repoID := "acme"
+	client := markdown.NewMemoryConfluenceClient()
+
+	// Seed one overview orphan, one detail page (not in current), and one repo-wide page.
+	overviewOrphan := repoID + ".overview.auth_subsystem"
+	detailPage := repoID + ".detail.internal.api"
+	repoWidePage := repoID + ".system_overview"
+	for _, extID := range []string{overviewOrphan, detailPage, repoWidePage} {
+		if err := client.UpsertPage(ctx, extID, []byte("<p>x</p>"), markdown.ConfluenceProperties{
+			"sourcebridge_page_id": extID,
+		}); err != nil {
+			t.Fatalf("seed UpsertPage(%q): %v", extID, err)
+		}
+	}
+
+	writer := sinks.NewConfluenceSinkWriterFromClient(client, markdown.ConfluenceWriterConfig{})
+
+	// Cleanup the overview prefix with an empty current set — should delete only overviewOrphan.
+	result := sinks.RunOrphanCleanupForPrefix(ctx, writer, repoID, repoID+".overview.", nil)
+
+	if result.Deleted != 1 {
+		t.Errorf("expected 1 deletion, got %d (errors: %v)", result.Deleted, result.Errors)
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("unexpected errors: %v", result.Errors)
+	}
+	if len(result.DeletedIDs) != 1 || result.DeletedIDs[0] != overviewOrphan {
+		t.Errorf("expected deleted %q, got %v", overviewOrphan, result.DeletedIDs)
+	}
+
+	// detailPage and repoWidePage must be untouched.
+	for _, extID := range []string{detailPage, repoWidePage} {
+		xhtml, _, err := client.GetPage(ctx, extID)
+		if err != nil {
+			t.Fatalf("GetPage(%q): %v", extID, err)
+		}
+		if xhtml == nil {
+			t.Errorf("page %q should not have been deleted (wrong prefix scope)", extID)
+		}
+	}
+}
+
+// TestRunOrphanCleanupForPrefixRejectsCrossRepoPrefix verifies that passing a
+// prefix that does not start with repoID+"." returns an error and performs no deletes.
+func TestRunOrphanCleanupForPrefixRejectsCrossRepoPrefix(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repoID := "my-repo"
+	client := markdown.NewMemoryConfluenceClient()
+
+	// Seed a page under the correct repo.
+	if err := client.UpsertPage(ctx, repoID+".arch.api", []byte("<p>x</p>"), markdown.ConfluenceProperties{
+		"sourcebridge_page_id": repoID + ".arch.api",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	writer := sinks.NewConfluenceSinkWriterFromClient(client, markdown.ConfluenceWriterConfig{})
+
+	// Pass a prefix belonging to a different repo.
+	result := sinks.RunOrphanCleanupForPrefix(ctx, writer, repoID, "other-repo.arch.", nil)
+
+	if result.Deleted != 0 {
+		t.Errorf("expected 0 deletions with cross-repo prefix, got %d", result.Deleted)
+	}
+	if len(result.Errors) != 1 {
+		t.Errorf("expected 1 error for cross-repo prefix, got %v", result.Errors)
+	}
+}
+
+// TestRunOrphanCleanupBackwardsCompatible verifies that the RunOrphanCleanup
+// wrapper produces identical behavior to a direct RunOrphanCleanupForPrefix call
+// with repoID+"." as the prefix.
+func TestRunOrphanCleanupBackwardsCompatible(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repoID := "compat-repo"
+	client := markdown.NewMemoryConfluenceClient()
+
+	keep := repoID + ".arch.src.api"
+	orphan := repoID + ".arch.src.db"
+	for _, extID := range []string{keep, orphan} {
+		if err := client.UpsertPage(ctx, extID, []byte("<p>x</p>"), markdown.ConfluenceProperties{
+			"sourcebridge_page_id": extID,
+		}); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	writer := sinks.NewConfluenceSinkWriterFromClient(client, markdown.ConfluenceWriterConfig{})
+	result := sinks.RunOrphanCleanup(ctx, writer, repoID, []string{keep})
+
+	if result.Deleted != 1 || result.DeletedIDs[0] != orphan {
+		t.Errorf("RunOrphanCleanup: expected to delete %q, got %v (errors: %v)", orphan, result.DeletedIDs, result.Errors)
+	}
+}
+
 // Compile-time check: ConfluenceSinkWriter implements OrphanCleaner.
 var _ sinks.OrphanCleaner = (*sinks.ConfluenceSinkWriter)(nil)
 
