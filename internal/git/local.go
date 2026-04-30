@@ -210,6 +210,40 @@ type GitMetadata struct {
 	ParentSHA string
 }
 
+// ErrNotAGitRepo is returned by HeadRef when repoPath is not a git
+// working tree. GetGitMetadata signals the same condition by returning
+// (nil, nil) — HeadRef wraps that case as an error so callers like the
+// change-watch router (Phase 1.C) get an unambiguous failure instead
+// of an empty branch string they have to second-guess.
+var ErrNotAGitRepo = fmt.Errorf("not a git repository")
+
+// HeadRef returns the symbolic branch name (`git rev-parse --abbrev-ref HEAD`)
+// of repoPath's working tree, e.g. "main" or "feature/x".
+//
+// On a detached HEAD git returns "HEAD", which HeadRef passes through
+// unchanged — callers that need to reject detached state must do so
+// at their own layer.
+//
+// Errors:
+//   - ErrNotAGitRepo if repoPath has no .git entry.
+//   - Wrapped exec error from `git rev-parse` if the command fails for
+//     any other reason (e.g. broken git index, missing binary).
+//
+// HeadRef is the load-bearing branch source for the change-watch
+// pipeline (Phase 1.C router validation, Phase 1.B IndexFiles
+// recording). The wrapper is deliberately thin so future migrations
+// to gogit or libgit2 stay confined to GetGitMetadata.
+func HeadRef(repoPath string) (string, error) {
+	meta, err := GetGitMetadata(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("reading git metadata: %w", err)
+	}
+	if meta == nil {
+		return "", ErrNotAGitRepo
+	}
+	return meta.Branch, nil
+}
+
 // GetGitMetadata extracts git metadata from a repository path.
 // Returns nil without error if the path is not a git repository.
 func GetGitMetadata(repoPath string) (*GitMetadata, error) {

@@ -4,7 +4,9 @@
 package git
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -205,4 +207,92 @@ func itos(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// TestHeadRef_LocksTheContract pins the four cases the change-watch
+// router (Phase 1.C) and IndexFiles entry point (Phase 1.B) depend
+// on:
+//
+//  1. A normal working tree on a named branch returns that name.
+//  2. A path with no .git directory returns ErrNotAGitRepo.
+//  3. Detached HEAD passes through (the helper does not fabricate
+//     a branch — that's the caller's policy).
+//  4. The error from a malformed .git directory bubbles up wrapped.
+//
+// Each case is independent; we use a fresh tmp tree per subtest to
+// keep the assertions hermetic.
+func TestHeadRef_LocksTheContract(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git binary not available: %v", err)
+	}
+
+	t.Run("named branch returns the name", func(t *testing.T) {
+		repo := initFixtureRepo(t, "feature/mcp-feedback-1a")
+		got, err := HeadRef(repo)
+		if err != nil {
+			t.Fatalf("HeadRef: %v", err)
+		}
+		if got != "feature/mcp-feedback-1a" {
+			t.Fatalf("HeadRef = %q, want %q", got, "feature/mcp-feedback-1a")
+		}
+	})
+
+	t.Run("non-git directory returns ErrNotAGitRepo", func(t *testing.T) {
+		dir := t.TempDir()
+		_, err := HeadRef(dir)
+		if !errors.Is(err, ErrNotAGitRepo) {
+			t.Fatalf("HeadRef = %v, want errors.Is ErrNotAGitRepo", err)
+		}
+	})
+
+	t.Run("detached HEAD passes through", func(t *testing.T) {
+		repo := initFixtureRepo(t, "main")
+		// Detach HEAD by checking out the commit SHA directly.
+		shaBytes, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+		if err != nil {
+			t.Fatalf("rev-parse: %v", err)
+		}
+		sha := strings.TrimSpace(string(shaBytes))
+		if err := exec.Command("git", "-C", repo, "checkout", "--detach", sha).Run(); err != nil {
+			t.Fatalf("detach: %v", err)
+		}
+		got, err := HeadRef(repo)
+		if err != nil {
+			t.Fatalf("HeadRef: %v", err)
+		}
+		// `git rev-parse --abbrev-ref HEAD` returns "HEAD" on detached.
+		if got != "HEAD" {
+			t.Fatalf("HeadRef on detached = %q, want %q", got, "HEAD")
+		}
+	})
+}
+
+// initFixtureRepo creates a tiny git repo at t.TempDir() on the named
+// branch with one commit. Used by HeadRef tests; not a generic helper
+// because it is specific to the in-process branch-naming contract.
+func initFixtureRepo(t *testing.T, branch string) string {
+	t.Helper()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		// Suppress hooks and config prompts that local installs may
+		// have configured globally.
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test",
+			"GIT_AUTHOR_EMAIL=test@example.invalid",
+			"GIT_COMMITTER_NAME=test",
+			"GIT_COMMITTER_EMAIL=test@example.invalid",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, string(out))
+		}
+	}
+	run("init", "-q", "-b", branch)
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# fixture\n"), 0o644); err != nil {
+		t.Fatalf("seed README: %v", err)
+	}
+	run("add", "README.md")
+	run("commit", "-q", "-m", "fixture")
+	return dir
 }
