@@ -28,11 +28,13 @@ func (s *SurrealLLMConfigStore) EnsureProfilesSchemaExtensions(ctx context.Conte
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	// DEFAULT '' / now is critical: the legacy SaveLLMConfig (still
-	// invoked by old pods AND by the boot-race fallback in the
-	// adapter) writes only the legacy fields. Without DEFAULTs the
+	// DEFAULT '' / now is critical: the legacy SaveLLMConfig is still
+	// invoked by old pods during a rolling deploy (they run pre-profile
+	// code that writes only the legacy fields). Without DEFAULTs the
 	// SurrealDB schema rejects the UPSERT with "Found NONE for field
 	// `active_profile_id` ... but expected a string" on a fresh row.
+	// (The slice-4 cleanup removed the in-process boot-race fallback in
+	// the cli adapter, but old-pod legacy writes during rollout remain.)
 	_, err := surrealdb.Query[interface{}](ctx, db, `
 		DEFINE FIELD IF NOT EXISTS active_profile_id ON ca_llm_config TYPE string DEFAULT '';
 		DEFINE FIELD IF NOT EXISTS updated_at ON ca_llm_config TYPE datetime DEFAULT time::now();

@@ -870,13 +870,20 @@ func migrationsPath() string {
 // llmConfigAdapter bridges db.SurrealLLMConfigStore and rest.LLMConfigStore
 // to avoid a circular import between the db and rest packages.
 //
-// LLM provider profiles slice 1: SaveLLMConfig now routes through the
-// active profile when one exists (D7) via WriteActiveProfilePatchWithRetry,
-// which goes through writeActiveProfileWithLegacyMirror to dual-write
-// the active profile and the legacy mirror row in one BEGIN/COMMIT
-// (codex-H2). When no active profile exists yet (extreme boot-race),
-// the adapter falls back to the legacy SaveLLMConfig path so the
-// migration can pick up the legacy bytes (bob-L1).
+// LLM provider profiles slice 1: SaveLLMConfig routes through the active
+// profile via WriteActiveProfilePatchWithRetry, which goes through
+// writeActiveProfileWithLegacyMirror to dual-write the active profile and
+// the legacy mirror row in one BEGIN/COMMIT (codex-H2).
+//
+// Slice 4 (cleanup): the prior bob-L1 boot-race fallback to
+// SurrealLLMConfigStore.SaveLLMConfig has been removed. The migration
+// (db.MigrateToProfiles) runs synchronously in runServe before the HTTP
+// listener accepts traffic and is mandatory for boot — if it fails the
+// process exits non-zero. Therefore by the time any handler invokes this
+// adapter, an active profile always exists. If LoadActiveProfileIDAndVersion
+// returns an empty id post-boot, that's a real invariant violation (e.g.
+// operator hand-edited the row) and we surface it as an explicit error
+// rather than silently writing through the legacy path.
 type llmConfigAdapter struct {
 	store        *db.SurrealLLMConfigStore
 	profileStore *db.SurrealLLMProfileStore // nil in pre-profile or test wirings
@@ -909,81 +916,48 @@ func (a *llmConfigAdapter) LoadLLMConfig() (*rest.LLMConfigRecord, error) {
 }
 
 func (a *llmConfigAdapter) SaveLLMConfig(rec *rest.LLMConfigRecord) error {
-	// LLM provider profiles slice 1: legacy PUT /admin/llm-config now
+	// LLM provider profiles slice 1: legacy PUT /admin/llm-config
 	// translates to a PATCH against the ACTIVE profile (D7), going
 	// through writeActiveProfileWithLegacyMirror so the legacy mirror
 	// row stays in sync (codex-H2). The patch is "set every field"
 	// because this endpoint's contract is total replacement of the
 	// effective config.
 	//
-	// When no active profile exists yet (extreme narrow boot-race
-	// window where the request arrives before MigrateToProfiles
-	// completes), fall through to the legacy SaveLLMConfig — the
-	// boot-time migration will pick up the legacy bytes and seed
-	// Default from them.
+	// Slice 4: the prior boot-race fallback to legacy SaveLLMConfig has
+	// been removed. db.MigrateToProfiles runs synchronously in runServe
+	// before the HTTP listener starts, so by the time any handler reaches
+	// this method, an active profile is guaranteed to exist (or the
+	// process never reached "ready"). If we observe an empty id here,
+	// surface it loudly rather than write through legacy bytes that the
+	// resolver would have to reconcile.
 	ctx := context.Background()
+	if a.profileStore == nil || a.surrealDB == nil {
+		return fmt.Errorf("llm config adapter not wired with profile store; check cli/serve.go boot ordering")
+	}
 	activeID, _, err := a.store.LoadActiveProfileIDAndVersion(ctx)
-	if err == nil && activeID != "" && a.profileStore != nil && a.surrealDB != nil {
-		// Encrypt the api_key once, here. Empty plaintext sealed = ""
-		// (cipher contract). The helpers expect the SEALED form.
-		sealed, encErr := a.profileStore.EncryptedAPIKey(rec.APIKey)
-		if encErr != nil {
-			if errors.Is(encErr, db.ErrEncryptionKeyRequired) {
-				return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, encErr)
-			}
-			return encErr
-		}
-		patch := db.ProfilePatch{
-			Provider:                 rec.Provider,
-			BaseURL:                  rec.BaseURL,
-			APIKey:                   sealed,
-			APIKeyMode:               db.APIKeyModeSet(),
-			SummaryModel:             rec.SummaryModel,
-			ReviewModel:              rec.ReviewModel,
-			AskModel:                 rec.AskModel,
-			KnowledgeModel:           rec.KnowledgeModel,
-			ArchitectureDiagramModel: rec.ArchitectureDiagramModel,
-			ReportModel:              rec.ReportModel,
-			DraftModel:               rec.DraftModel,
-			TimeoutSecs:              rec.TimeoutSecs,
-			AdvancedMode:             rec.AdvancedMode,
-			FieldsPresent: db.ProfilePatchFields{
-				Provider:                 true,
-				BaseURL:                  true,
-				SummaryModel:             true,
-				ReviewModel:              true,
-				AskModel:                 true,
-				KnowledgeModel:           true,
-				ArchitectureDiagramModel: true,
-				ReportModel:              true,
-				DraftModel:               true,
-				TimeoutSecs:              true,
-				AdvancedMode:             true,
-			},
-		}
-		// If api_key plaintext is empty, route through Clear so the
-		// helper writes api_key='' rather than leaving a stale value.
-		// Empty sealed bytes already encode "no key" semantically,
-		// but going through Clear documents intent.
-		if rec.APIKey == "" {
-			patch.APIKey = ""
-			patch.APIKeyMode = db.APIKeyModeClear()
-		}
-		if _, err := db.WriteActiveProfilePatchWithRetry(ctx, a.surrealDB, a.store, patch); err != nil {
-			if errors.Is(err, db.ErrEncryptionKeyRequired) {
-				return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, err)
-			}
-			return err
-		}
-		return nil
+	if err != nil {
+		return fmt.Errorf("load active profile: %w", err)
+	}
+	if activeID == "" {
+		// Should be impossible post-MigrateToProfiles. Treat as an
+		// invariant violation rather than a recoverable boot-race.
+		return fmt.Errorf("no active LLM profile (post-migration invariant violated; use /admin/llm-profiles to create or activate a profile)")
 	}
 
-	// Boot-race fallback (bob-L1): no active profile yet. Write through
-	// the legacy path; the migration will pick up these bytes.
-	err = a.store.SaveLLMConfig(&db.LLMConfigRecord{
+	// Encrypt the api_key once, here. Empty plaintext sealed = ""
+	// (cipher contract). The helpers expect the SEALED form.
+	sealed, encErr := a.profileStore.EncryptedAPIKey(rec.APIKey)
+	if encErr != nil {
+		if errors.Is(encErr, db.ErrEncryptionKeyRequired) {
+			return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, encErr)
+		}
+		return encErr
+	}
+	patch := db.ProfilePatch{
 		Provider:                 rec.Provider,
 		BaseURL:                  rec.BaseURL,
-		APIKey:                   rec.APIKey,
+		APIKey:                   sealed,
+		APIKeyMode:               db.APIKeyModeSet(),
 		SummaryModel:             rec.SummaryModel,
 		ReviewModel:              rec.ReviewModel,
 		AskModel:                 rec.AskModel,
@@ -993,14 +967,35 @@ func (a *llmConfigAdapter) SaveLLMConfig(rec *rest.LLMConfigRecord) error {
 		DraftModel:               rec.DraftModel,
 		TimeoutSecs:              rec.TimeoutSecs,
 		AdvancedMode:             rec.AdvancedMode,
-	})
-	// Bridge the db-package sentinel into the rest-package sentinel so
-	// handleUpdateLLMConfig can map it to a 422 without importing
-	// internal/db. errors.Is matches across the wrap.
-	if errors.Is(err, db.ErrEncryptionKeyRequired) {
-		return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, err)
+		FieldsPresent: db.ProfilePatchFields{
+			Provider:                 true,
+			BaseURL:                  true,
+			SummaryModel:             true,
+			ReviewModel:              true,
+			AskModel:                 true,
+			KnowledgeModel:           true,
+			ArchitectureDiagramModel: true,
+			ReportModel:              true,
+			DraftModel:               true,
+			TimeoutSecs:              true,
+			AdvancedMode:             true,
+		},
 	}
-	return err
+	// If api_key plaintext is empty, route through Clear so the helper
+	// writes api_key='' rather than leaving a stale value. Empty sealed
+	// bytes already encode "no key" semantically, but going through
+	// Clear documents intent.
+	if rec.APIKey == "" {
+		patch.APIKey = ""
+		patch.APIKeyMode = db.APIKeyModeClear()
+	}
+	if _, werr := db.WriteActiveProfilePatchWithRetry(ctx, a.surrealDB, a.store, patch); werr != nil {
+		if errors.Is(werr, db.ErrEncryptionKeyRequired) {
+			return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, werr)
+		}
+		return werr
+	}
+	return nil
 }
 
 // llmStoreResolverAdapter bridges *db.SurrealLLMConfigStore to the narrow
