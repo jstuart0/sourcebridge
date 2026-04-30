@@ -77,7 +77,7 @@ func gqlQuery(t *testing.T, ts *httptest.Server, token, query string) map[string
 
 func TestIndexFixtureRepo(t *testing.T) {
 	idx := indexer.NewIndexer(nil)
-	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestIndexFixtureRepo(t *testing.T) {
 func TestIndexPerformance(t *testing.T) {
 	start := time.Now()
 	idx := indexer.NewIndexer(nil)
-	_, err := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	_, err := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestGraphQLRepositories(t *testing.T) {
 
 	// Index and store
 	idx := indexer.NewIndexer(nil)
-	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestGraphQLSymbolSearch(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestRemoveRepository(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	repo, _ := store.StoreIndexResult(result)
 
 	// Verify it exists
@@ -246,7 +246,7 @@ func TestRemoveRepository(t *testing.T) {
 
 func TestModuleExtraction(t *testing.T) {
 	idx := indexer.NewIndexer(nil)
-	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestModuleExtraction(t *testing.T) {
 
 func TestTestExtraction(t *testing.T) {
 	idx := indexer.NewIndexer(nil)
-	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, err := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestCLIIndexOutputsProgress(t *testing.T) {
 	}
 
 	idx := indexer.NewIndexer(progressFn)
-	_, err := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	_, err := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestGraphStoreStats(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	store.StoreIndexResult(result)
 
 	stats := store.Stats()
@@ -354,7 +354,7 @@ func TestContentSearch(t *testing.T) {
 	store := graph.NewStore()
 
 	idx := indexer.NewIndexer(nil)
-	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath())
+	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	repo, _ := store.StoreIndexResult(result)
 
 	results := store.SearchContent(repo.ID, "ProcessPayment", 10)
