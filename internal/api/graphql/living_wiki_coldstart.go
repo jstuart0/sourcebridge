@@ -291,6 +291,19 @@ func buildColdStartRunner(
 			"skip_needs_fixup", len(skipNeedsFixup),
 			"model_identity", modelIdentity)
 
+		// ── Phase 3: Build live link resolver (LD-4 / LD-11) ─────────────────────
+		plannedIDsForResolver := make(map[string]struct{}, len(pages))
+		for _, p := range pages {
+			plannedIDsForResolver[p.ID] = struct{}{}
+		}
+		liveResolver := lworch.NewLivePageStatusResolver(
+			lworch.ReadySet(alreadyPublished),
+			plannedIDsForResolver,
+		)
+		for i := range regenerate {
+			regenerate[i].Input.LinkResolver = liveResolver
+		}
+
 		// Write status='generating' ONLY for the regenerate bucket × sinks (CR13).
 		// skipFully rows stay 'ready' (untouched); skipNeedsFixup rows stay 'ready'
 		// with fixup_status='pending' (untouched until Phase 3's fix-up pass).
@@ -582,6 +595,30 @@ func buildColdStartRunner(
 		// drained. This ensures the terminal state (all pages Ready/Failed) is
 		// reflected before the job is declared complete.
 		dispatchIndex(runCtx, "final")
+
+		// ── Phase 3: Stub fix-up pass ─────────────────────────────────────────
+		if publishStatusStore != nil && (err == nil || lworch.IsPartialGenerationError(err)) {
+			fixupReq := lworch.FixupRequest{
+				RepoID:       repoID,
+				PlannedPages: pages,
+				StatusStore:  publishStatusStore,
+				Writers:      writers,
+				PageStore:    lwOrch.Store(),
+				PR:           pr,
+			}
+			fixupResult, fixupErr := lworch.RunStubFixup(runCtx, fixupReq)
+			if fixupErr != nil {
+				slog.Warn("livingwiki/coldstart: fix-up pass encountered an error",
+					"repo_id", repoID, "error", fixupErr)
+			} else if fixupResult.PagesFixedUp > 0 || fixupResult.PagesFailed > 0 {
+				slog.Info("livingwiki/coldstart: fix-up pass complete",
+					"repo_id", repoID,
+					"fixed_up", fixupResult.PagesFixedUp,
+					"deferred", fixupResult.PagesDeferred,
+					"failed", fixupResult.PagesFailed)
+				dispatchIndex(runCtx, "post-fixup")
+			}
+		}
 
 		elapsed := time.Since(start)
 
@@ -1745,17 +1782,20 @@ func streamDispatchPage(
 		}
 
 		// Success — record the fingerprint so next run can skip this page.
+		// Phase 3: record stub state so fix-up pass knows which pages need re-render.
+		fixupStatus := livingwiki.FixupStatusNone
+		if page.HasStubMarkers() {
+			fixupStatus = livingwiki.FixupStatusPending
+		}
 		writeStatus(livingwiki.SetReadyArgs{
 			RepoID:          repoID,
 			PageID:          page.ID,
 			SinkKind:        sinkKind,
 			IntegrationName: integrationName,
 			Fingerprint:     fingerprint,
-			// HasStubs is always false here: the orchestrator's persistence
-			// loop fires OnPageReady only after a fully-resolved page passes
-			// the quality gate. Stub-link fixup (Phase 3) updates this later.
-			HasStubs:    false,
-			FixupStatus: livingwiki.FixupStatusNone,
+			HasStubs:        page.HasStubMarkers(),
+			StubTargetIDs:   page.StubTargetIDs(),
+			FixupStatus:     fixupStatus,
 		})
 	}
 }

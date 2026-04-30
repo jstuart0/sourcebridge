@@ -577,6 +577,10 @@ func effectiveSoftFailureThreshold(cfg Config) int {
 //
 // After all pages are processed, open the PR (PR mode) or call Writer.WriteFiles
 // (direct-publish mode).
+// Store returns the PageStore that backs this Orchestrator.
+// Called by the Phase 3 fix-up pass in the coldstart handler.
+func (o *Orchestrator) Store() PageStore { return o.store }
+
 func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (GenerateResult, error) {
 	cfg := mergeConfig(o.cfg, req.Config)
 	// Recompute window/threshold defaults in case mergeConfig produced a
