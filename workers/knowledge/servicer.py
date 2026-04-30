@@ -57,6 +57,7 @@ from workers.knowledge.streaming import (
     HeartbeatPump,
     phase_marker,
     progress_event,
+    run_with_heartbeat,
 )
 from workers.knowledge.summary_nodes import SurrealSummaryNodeCache
 from workers.knowledge.types import CliffNotesResult
@@ -1236,8 +1237,13 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
         )
 
-        try:
-            result, usage = await generate_learning_path(
+        # codex r2 C1: spawn the LLM call as a task and pump phase-only
+        # heartbeats so the orchestrator's UpdatedAt stays fresh
+        # through long single-LLM-call generations. Never shields the
+        # work task — cancellation propagates upward and the
+        # try/finally tears down the task.
+        work_task = asyncio.create_task(
+            generate_learning_path(
                 provider=provider,
                 repository_name=request.repository_name,
                 audience=audience,
@@ -1245,9 +1251,23 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 snapshot_json=snapshot,
                 focus_area=request.focus_area,
                 model_override=model_override,
-            )
+            ),
+            name=f"learning-path-{request.repository_id}",
+        )
+        try:
+            async for prog in run_with_heartbeat(
+                work_task,
+                phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
+                message="Generating learning path",
+            ):
+                yield knowledge_pb2.GenerateLearningPathStreamMessage(progress=prog)
+            result, usage = await work_task
         except asyncio.CancelledError:
             log.warning("learning_path_stream_cancelled", repository_id=request.repository_id)
+            if not work_task.done():
+                work_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
+                    await asyncio.wait_for(work_task, timeout=5.0)
             if job_logger is not None:
                 with contextlib.suppress(Exception):
                     await job_logger.warn(
@@ -1256,6 +1276,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                         message="Stream cancelled by client",
                         payload={"repository_id": request.repository_id},
                     )
+                    await job_logger.close()
             raise
         except Exception as exc:
             if job_logger is not None:
@@ -1362,8 +1383,11 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
         )
 
-        try:
-            result, usage = await generate_architecture_diagram(
+        # codex r2 C1: heartbeat the LLM call so the orchestrator's
+        # UpdatedAt stays fresh; the 10-min reaper would otherwise
+        # kill healthy long generations.
+        work_task = asyncio.create_task(
+            generate_architecture_diagram(
                 provider=provider,
                 repository_name=request.repository_name,
                 audience=audience,
@@ -1371,9 +1395,26 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 snapshot_json=snapshot,
                 deterministic_diagram_json=request.deterministic_diagram_json,
                 model_override=model_override,
-            )
+            ),
+            name=f"arch-diagram-{request.repository_id}",
+        )
+        try:
+            async for prog in run_with_heartbeat(
+                work_task,
+                phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
+                message="Generating architecture diagram",
+            ):
+                yield knowledge_pb2.GenerateArchitectureDiagramStreamMessage(progress=prog)
+            result, usage = await work_task
         except asyncio.CancelledError:
             log.warning("architecture_diagram_stream_cancelled", repository_id=request.repository_id)
+            if not work_task.done():
+                work_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
+                    await asyncio.wait_for(work_task, timeout=5.0)
+            if job_logger is not None:
+                with contextlib.suppress(Exception):
+                    await job_logger.close()
             raise
         except Exception as exc:
             if job_logger is not None:
@@ -1507,8 +1548,11 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
         )
 
-        try:
-            result, usage = await generate_workflow_story(
+        # codex r2 C1: heartbeat the LLM call so the orchestrator's
+        # UpdatedAt stays fresh; the 10-min reaper would otherwise
+        # kill healthy long generations.
+        work_task = asyncio.create_task(
+            generate_workflow_story(
                 provider=provider,
                 repository_name=request.repository_name,
                 audience=audience,
@@ -1519,9 +1563,26 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 execution_path_json=request.execution_path_json,
                 model_override=model_override,
                 snapshot_json=snapshot,
-            )
+            ),
+            name=f"workflow-story-{request.repository_id}",
+        )
+        try:
+            async for prog in run_with_heartbeat(
+                work_task,
+                phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
+                message="Generating workflow story",
+            ):
+                yield knowledge_pb2.GenerateWorkflowStoryStreamMessage(progress=prog)
+            result, usage = await work_task
         except asyncio.CancelledError:
             log.warning("workflow_story_stream_cancelled", repository_id=request.repository_id)
+            if not work_task.done():
+                work_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
+                    await asyncio.wait_for(work_task, timeout=5.0)
+            if job_logger is not None:
+                with contextlib.suppress(Exception):
+                    await job_logger.close()
             raise
         except Exception as exc:
             import traceback
@@ -1638,8 +1699,11 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
         )
 
-        try:
-            result, usage = await explain_system(
+        # codex r2 C1: heartbeat the LLM call so the orchestrator's
+        # UpdatedAt stays fresh; the 10-min reaper would otherwise
+        # kill healthy long generations.
+        work_task = asyncio.create_task(
+            explain_system(
                 provider=provider,
                 repository_name=request.repository_name,
                 audience=audience,
@@ -1647,9 +1711,26 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 question=request.question,
                 snapshot_json=snapshot,
                 model_override=model_override,
-            )
+            ),
+            name=f"explain-system-{request.repository_id}",
+        )
+        try:
+            async for prog in run_with_heartbeat(
+                work_task,
+                phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
+                message="Explaining system",
+            ):
+                yield knowledge_pb2.ExplainSystemStreamMessage(progress=prog)
+            result, usage = await work_task
         except asyncio.CancelledError:
             log.warning("explain_system_stream_cancelled", repository_id=request.repository_id)
+            if not work_task.done():
+                work_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
+                    await asyncio.wait_for(work_task, timeout=5.0)
+            if job_logger is not None:
+                with contextlib.suppress(Exception):
+                    await job_logger.close()
             raise
         except Exception as exc:
             if job_logger is not None:
@@ -1739,8 +1820,11 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
         )
 
-        try:
-            result, usage = await generate_code_tour(
+        # codex r2 C1: heartbeat the LLM call so the orchestrator's
+        # UpdatedAt stays fresh; the 10-min reaper would otherwise
+        # kill healthy long generations.
+        work_task = asyncio.create_task(
+            generate_code_tour(
                 provider=provider,
                 repository_name=request.repository_name,
                 audience=audience,
@@ -1748,9 +1832,26 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 snapshot_json=snapshot,
                 theme=request.theme,
                 model_override=model_override,
-            )
+            ),
+            name=f"code-tour-{request.repository_id}",
+        )
+        try:
+            async for prog in run_with_heartbeat(
+                work_task,
+                phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
+                message="Generating code tour",
+            ):
+                yield knowledge_pb2.GenerateCodeTourStreamMessage(progress=prog)
+            result, usage = await work_task
         except asyncio.CancelledError:
             log.warning("code_tour_stream_cancelled", repository_id=request.repository_id)
+            if not work_task.done():
+                work_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
+                    await asyncio.wait_for(work_task, timeout=5.0)
+            if job_logger is not None:
+                with contextlib.suppress(Exception):
+                    await job_logger.close()
             raise
         except Exception as exc:
             if job_logger is not None:
@@ -1926,14 +2027,37 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 name=f"report-engine-{request.report_id}",
             )
             try:
+                # codex r2 C1: track wall-clock since last engine
+                # progress event so we can emit a fallback heartbeat
+                # when the engine is mid-LLM-call and not pushing
+                # events. Cadence: heartbeat_interval_secs() (default
+                # 30s, env-tunable), distinct from the 1s queue poll.
+                from workers.knowledge.streaming import heartbeat_interval_secs
+                hb_interval = heartbeat_interval_secs()
+                last_event_at = asyncio.get_running_loop().time()
                 while not engine_task.done():
                     try:
                         evt = await asyncio.wait_for(progress_queue.get(), timeout=1.0)
                         yield report_pb2.GenerateReportStreamMessage(progress=evt)
+                        last_event_at = asyncio.get_running_loop().time()
                     except TimeoutError:
-                        # No progress in the last second; loop and check
-                        # task.done() so we exit promptly when the
-                        # engine finishes.
+                        # No engine event in the last second. Emit a
+                        # phase-only heartbeat if it has been
+                        # >= hb_interval seconds since the last real
+                        # event so the orchestrator's UpdatedAt stays
+                        # fresh.
+                        now = asyncio.get_running_loop().time()
+                        if now - last_event_at >= hb_interval:
+                            yield report_pb2.GenerateReportStreamMessage(
+                                progress=progress_event(
+                                    phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
+                                    completed_units=0,
+                                    total_units=0,
+                                    unit_kind="report_progress",
+                                    message="Generating report",
+                                )
+                            )
+                            last_event_at = now
                         continue
                 # Drain any remaining progress events the engine pushed
                 # right before completing.
