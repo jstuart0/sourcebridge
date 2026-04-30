@@ -284,80 +284,12 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 	impactReport.OldCommitSHA = oldCommitSHA
 	impactReport.NewCommitSHA = newCommitSHA
 
-	// Mark knowledge artifacts stale — selectively if the feature flag is on,
-	// otherwise fall back to the legacy blanket behavior. In both cases the
-	// resulting StaleArtifacts / StaleArtifactReasons list is then recorded
-	// on the impact report for downstream consumers.
-	if r.KnowledgeStore != nil && selectiveInvalidationEnabled() {
-		symbolIDs := make([]string, 0, len(impactReport.SymbolsModified)+len(impactReport.SymbolsRemoved))
-		for _, sc := range impactReport.SymbolsModified {
-			if sc.SymbolID != "" {
-				symbolIDs = append(symbolIDs, sc.SymbolID)
-			}
-		}
-		for _, sc := range impactReport.SymbolsRemoved {
-			if sc.SymbolID != "" {
-				symbolIDs = append(symbolIDs, sc.SymbolID)
-			}
-		}
-		var filePaths []string
-		for _, fd := range impactReport.FilesChanged {
-			if fd.Status == "added" {
-				continue
-			}
-			if fd.Path != "" {
-				filePaths = append(filePaths, fd.Path)
-			}
-			// Renamed files: evidence still references the pre-rename path.
-			if fd.Status == "renamed" && fd.OldPath != "" && fd.OldPath != fd.Path {
-				filePaths = append(filePaths, fd.OldPath)
-			}
-		}
-		reasons := knowledgepkg.MarkStaleForImpact(
-			r.KnowledgeStore,
-			id,
-			symbolIDs,
-			filePaths,
-			impactReport.ID,
-			selectiveInvalidationMaxChanges(),
-		)
-		impactReport.StaleArtifactReasons = reasons
-		for _, reason := range reasons {
-			impactReport.StaleArtifacts = append(impactReport.StaleArtifacts, reason.ArtifactID)
-		}
-	} else {
-		// Legacy blanket path. Preserve the previous behavior of listing
-		// pre-stale artifacts on the report so the UI keeps its old signal.
-		if r.KnowledgeStore != nil {
-			for _, a := range r.KnowledgeStore.GetKnowledgeArtifacts(id) {
-				if a.Stale || a.Status != knowledgepkg.StatusReady {
-					impactReport.StaleArtifacts = append(impactReport.StaleArtifacts, a.ID)
-				}
-			}
-		}
-		knowledgepkg.MarkAllStale(r.KnowledgeStore, id)
-	}
-	if impactReport.StaleArtifacts == nil {
-		impactReport.StaleArtifacts = []string{}
-	}
-	if impactReport.StaleArtifactReasons == nil {
-		impactReport.StaleArtifactReasons = []graphstore.StaleArtifactReason{}
-	}
-
-	// Persist the report after invalidation so StaleArtifacts reflects the
-	// surgically-chosen set (not the pre-stale snapshot).
-	r.getStore(ctx).StoreImpactReport(id, impactReport)
-
-	// Phase 2: delta-driven auto-regeneration. No-op when the mode is off.
-	// Shadow mode logs what it would do; live mode actually enqueues. Runs
-	// in a goroutine so the reindex mutation returns promptly; the driver
-	// uses its own background context.
-	if deltaRegenMode() != DeltaRegenModeOff && len(impactReport.StaleArtifacts) > 0 {
-		staleIDs := make([]string, len(impactReport.StaleArtifacts))
-		copy(staleIDs, impactReport.StaleArtifacts)
-		reportID := impactReport.ID
-		go r.enqueueStaleArtifactRefresh(id, staleIDs, reportID)
-	}
+	// Run the invalidation policy + persistence + auto-regen launch
+	// through the shared helper. The change-watch router (Phase 1.C)
+	// will call the same helper after its own delta-only refresh, so
+	// the reindex mutation and change-event paths follow identical
+	// invalidation rules.
+	r.applyImpactFromChange(ctx, id, impactReport)
 
 	slog.Info("impact analysis complete",
 		"id", impactReport.ID,
