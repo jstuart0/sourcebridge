@@ -152,3 +152,29 @@ func TestEnvOverride(t *testing.T) {
 		t.Errorf("expected port 9090 from env, got %d", cfg.Server.HTTPPort)
 	}
 }
+
+func TestSecurityEnvBinding(t *testing.T) {
+	cases := map[string]struct {
+		env   string
+		value string
+		check func(*Config) string
+	}{
+		"encryption_key":        {"SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY", "test-passphrase-1", func(c *Config) string { return c.Security.EncryptionKey }},
+		"jwt_secret":            {"SOURCEBRIDGE_SECURITY_JWT_SECRET", "test-jwt-2", func(c *Config) string { return c.Security.JWTSecret }},
+		"github_webhook_secret": {"SOURCEBRIDGE_SECURITY_GITHUB_WEBHOOK_SECRET", "gh-3", func(c *Config) string { return c.Security.GitHubWebhookSecret }},
+		"gitlab_webhook_secret": {"SOURCEBRIDGE_SECURITY_GITLAB_WEBHOOK_SECRET", "gl-4", func(c *Config) string { return c.Security.GitLabWebhookSecret }},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			os.Setenv(tc.env, tc.value)
+			defer os.Unsetenv(tc.env)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+			if got := tc.check(cfg); got != tc.value {
+				t.Errorf("%s: expected %q from env %s, got %q", name, tc.value, tc.env, got)
+			}
+		})
+	}
+}
