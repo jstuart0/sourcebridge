@@ -165,6 +165,55 @@ def heartbeat_interval_secs() -> float:
         return DEFAULT_HEARTBEAT_SECS
 
 
+async def run_with_heartbeat(work_task, phase, message, *, interval_secs=None):
+    """Yield periodic phase-only progress messages while a single
+    work task runs. Designed for single-call RPCs (LearningPath,
+    ArchitectureDiagram, etc.) that have no internal step-by-step
+    counters but still need to keep the orchestrator's UpdatedAt
+    fresh so the 10-min reaper does not kill a healthy long LLM
+    call (codex r2 C1).
+
+    Each yielded KnowledgeStreamProgress carries phase=<phase>,
+    total_units=0, unit_kind="" (empty per Decision 4b), and the
+    supplied message. The Go-side stream driver treats total_units
+    == 0 as "phase-only progress" and parks the bar at the bucket
+    minimum; the heartbeat's role is purely keeping the heartbeat
+    fresh and letting the UI confirm work is in progress.
+
+    Cancellation contract identical to HeartbeatPump.run_until: never
+    shields the work task; outer cancellation propagates upward; the
+    caller's try/finally is responsible for cancelling and bounded-
+    awaiting the work task.
+    """
+    interval = interval_secs if interval_secs is not None else heartbeat_interval_secs()
+    loop = asyncio.get_running_loop()
+    while not work_task.done():
+        sleep_task = loop.create_task(asyncio.sleep(interval))
+        try:
+            done, _ = await asyncio.wait(
+                {work_task, sleep_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except asyncio.CancelledError:
+            sleep_task.cancel()
+            with contextlib.suppress(BaseException):
+                await sleep_task
+            raise
+        if sleep_task not in done:
+            sleep_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sleep_task
+        if work_task.done():
+            break
+        yield progress_event(
+            phase=phase,
+            completed_units=0,
+            total_units=0,
+            unit_kind="",
+            message=message,
+        )
+
+
 class HeartbeatPump:
     """Yields heartbeat progress messages on a fixed cadence.
 

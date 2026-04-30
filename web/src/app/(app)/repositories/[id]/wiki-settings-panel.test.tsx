@@ -280,6 +280,8 @@ describe("WikiSettingsPanel — State 2 (corrupt/partial state)", () => {
         repoName="my-repo"
         initialSettings={{
           enabled: true,
+          livingWikiOverviewEnabled: true,
+          livingWikiDetailedEnabled: false,
           mode: "PR_REVIEW",
           sinks: [],
           excludePaths: [],
@@ -402,6 +404,8 @@ describe("WikiSettingsPanel — State 3 (cold-start running)", () => {
 
 const enabledIdleSettings: RepositoryLivingWikiSettings = {
   enabled: true,
+  livingWikiOverviewEnabled: true,
+  livingWikiDetailedEnabled: false,
   mode: "PR_REVIEW",
   sinks: [
     {
@@ -529,6 +533,8 @@ describe("WikiSettingsPanel — State 4 (enabled idle)", () => {
 
 const baseEnabledSettings: Omit<RepositoryLivingWikiSettings, "lastJobResult"> = {
   enabled: true,
+  livingWikiOverviewEnabled: true,
+  livingWikiDetailedEnabled: false,
   mode: "PR_REVIEW",
   sinks: [
     {

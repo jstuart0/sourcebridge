@@ -157,17 +157,9 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         # from cfg.llm.knowledge_model when constructing the servicer.
         self._default_model_id = (default_model_id or "").strip()
         self._selector = StrategySelector()
-        # CA-122: published strategy reference for in-flight cliff
-        # notes runs. The streaming GenerateCliffNotes method's
-        # HeartbeatPump polls .progress_snapshot() on this. Set when
-        # the hierarchical strategy is constructed mid-call; cleared
-        # in the streaming method's finally block. None at all other
-        # times. Single-flight per servicer instance is fine in
-        # practice because each servicer call runs on a fresh
-        # asyncio task and we only need this set during that one
-        # call's lifetime — the streaming method captures it before
-        # spawning the work task and clears it in finally.
-        self._active_cliff_notes_strategy = None
+        # CA-122 / codex r2 H3: per-call strategy plumbing is
+        # request-local (see GenerateCliffNotes for the holder
+        # pattern); no servicer-instance state for in-flight runs.
 
     def _resolve_request_provider(self, context: grpc.aio.ServicerContext) -> tuple[LLMProvider, str | None]:
         override = resolve_llm_override(context)
@@ -325,6 +317,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         model_override: str | None,
         job_logger: SurrealJobLogger | None = None,
         render_meta=None,
+        on_strategy_ready=None,
     ) -> tuple[CliffNotesResult, LLMUsageRecord, SelectionResult, dict[str, int | bool]]:
         """Walk the preference chain and run the first viable strategy.
 
@@ -401,6 +394,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     snapshot_json=snapshot,
                     job_logger=job_logger,
                     render_meta=render_meta,
+                    on_strategy_ready=on_strategy_ready,
                 )
                 return result, usage, selection, diagnostics
             except SnapshotTooLargeError as exc:
@@ -435,6 +429,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         snapshot_json: str,
         job_logger: SurrealJobLogger | None = None,
         render_meta=None,
+        on_strategy_ready=None,
     ) -> tuple[CliffNotesResult, LLMUsageRecord, dict[str, int | bool]]:
         """Actually run a single strategy and produce the final cliff
         notes result. Kept separate from the chain walker so the logic
@@ -452,6 +447,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 snapshot_json=snapshot_json,
                 job_logger=job_logger,
                 render_meta=render_meta,
+                on_strategy_ready=on_strategy_ready,
             )
 
         # Single-shot and long-context strategies both produce the
@@ -479,6 +475,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         snapshot_json: str | None = None,
         job_logger: SurrealJobLogger | None = None,
         render_meta=None,
+        on_strategy_ready=None,
     ) -> tuple[CliffNotesResult, LLMUsageRecord, dict[str, int | bool]]:
         """Run the Phase 3 hierarchical pipeline for cliff notes.
 
@@ -712,13 +709,14 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             provider=provider,
             config=cfg,
         )
-        # CA-122: publish the strategy so the GenerateCliffNotes
-        # streaming method's HeartbeatPump can poll its
-        # progress_snapshot() while the long-running build_tree call
-        # runs in a background task. Reset to None at the end of the
-        # outer servicer method (success or failure paths both clear
-        # it in finally).
-        self._active_cliff_notes_strategy = strategy
+        # CA-122 / codex r2 H3: publish the strategy via the per-call
+        # callback (request-local; no servicer-instance state). The
+        # GenerateCliffNotes streaming method captures a per-call
+        # holder list in its closure and the heartbeat pump reads
+        # progress_snapshot() from it. Concurrent cliff-notes streams
+        # therefore see only their own strategy.
+        if on_strategy_ready is not None:
+            on_strategy_ready(strategy)
 
         render_only = bool(getattr(render_meta, "render_only", False))
         selected_section_titles = list(getattr(render_meta, "selected_section_titles", None) or [])
@@ -976,11 +974,21 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
 
         # Spawn the strategy chain in a task so the heartbeat pump can
         # poll progress while it runs, and so cancellation can tear it
-        # down deterministically. The pump's snapshot accessor reads
-        # the active strategy via self._active_cliff_notes_strategy
-        # (set by _run_cliff_notes_strategy_chain when a hierarchical
-        # strategy is dispatched).
-        self._active_cliff_notes_strategy = None  # reset per-call
+        # down deterministically. The strategy chain calls
+        # on_strategy_ready(strategy) when a hierarchical strategy is
+        # dispatched; the closure below captures it so concurrent
+        # cliff-notes streams cannot read each other's strategy
+        # (codex r2 H3).
+        active_strategy: list[Any] = [None]  # holder; set by callback below
+
+        def _on_strategy_ready(strategy_obj):
+            active_strategy[0] = strategy_obj
+
+        # codex r2 M5: track whether job_logger.close() has already
+        # run on the success path so the finally block doesn't
+        # double-close.
+        job_logger_closed = [False]
+
         work_task: asyncio.Task | None = None
         try:
             work_task = asyncio.create_task(
@@ -993,6 +1001,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     model_override=model_override,
                     job_logger=job_logger,
                     render_meta=render_meta,
+                    on_strategy_ready=_on_strategy_ready,
                 ),
                 name=f"cliff-notes-{request.repository_id}",
             )
@@ -1011,7 +1020,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             )
 
             def _snapshot_fn() -> dict:
-                strat = self._active_cliff_notes_strategy
+                strat = active_strategy[0]
                 if strat is None or not hasattr(strat, "progress_snapshot"):
                     # Non-hierarchical strategy or not yet started.
                     return {
@@ -1081,11 +1090,14 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                         "cliff_notes_strategy_cleanup_error",
                         repository_id=request.repository_id,
                     )
-            # job_logger is closed at the END of the success path so
-            # buffered logs flush even on cancellation. Done after the
-            # final yield below in the success arm; here we just close
-            # on cleanup paths.
-            self._active_cliff_notes_strategy = None
+            # codex r2 M5: job_logger MUST close on every path. The
+            # success path closes it inline before yielding the final
+            # message; here we close on cancellation/error paths so
+            # buffered logs flush deterministically.
+            if job_logger is not None and not job_logger_closed[0]:
+                with contextlib.suppress(Exception):
+                    await job_logger.close()
+                    job_logger_closed[0] = True
 
         log.info(
             "cliff_notes_strategy_selection",
@@ -1166,6 +1178,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 },
             )
             await job_logger.close()
+            job_logger_closed[0] = True
 
         # Final terminal message — must be last.
         yield knowledge_pb2.GenerateCliffNotesStreamMessage(final=response)

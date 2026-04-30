@@ -1075,6 +1075,14 @@ func (o *Orchestrator) runJob(item *workItem) {
 
 	// Run with retry loop.
 	var lastErr error
+	// CA-122 Phase 5b / codex r2 H1: track whether THIS goroutine has
+	// already claimed finalization for this jobID across retries.
+	// claimAttempted means the goroutine made a claim attempt;
+	// claimWon means the attempt returned true (we own the terminal
+	// write). Without this, the post-loop block could re-attempt
+	// claimFinalization and potentially overwrite a reaper's
+	// terminal write with our own finalizeFailed.
+	var claimAttempted, claimWon bool
 	maxAttempts := req.MaxAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = o.cfg.Retry.MaxAttempts
@@ -1151,8 +1159,15 @@ func (o *Orchestrator) runJob(item *workItem) {
 			!o.cfg.Retry.ShouldRetryWithMax(attempt, maxAttempts, err)
 
 		var claimed bool
-		if isTerminalExit {
+		if isTerminalExit && !claimAttempted {
 			claimed = o.claimFinalization(jobID)
+			claimAttempted = true
+			claimWon = claimed
+		} else if isTerminalExit {
+			// Defense-in-depth: should not occur in practice (the loop
+			// only iterates one terminal exit per attempt), but if it
+			// does, honor the prior claim result.
+			claimed = claimWon
 		}
 
 		cancel()
@@ -1209,19 +1224,34 @@ func (o *Orchestrator) runJob(item *workItem) {
 
 	// Post-loop terminal: retries exhausted or non-retryable error
 	// broke the loop. Honor the claim decided at the last attempt's
-	// terminal-exit branch above.
-	if o.claimFinalization(jobID) {
-		// Re-claim is a no-op if the same goroutine already claimed
-		// in the loop above; this branch handles the case where the
-		// loop broke without claiming (e.g., a future code path that
-		// didn't hit the isTerminalExit assignment). Defense in depth.
+	// terminal-exit branch above (codex r2 H1).
+	if !claimAttempted {
+		// Defensive — every path that breaks the loop should have set
+		// claimAttempted. If we get here without one, attempt the
+		// claim now so the reaper-vs-us race is resolved.
+		claimWon = o.claimFinalization(jobID)
+		claimAttempted = true
+	}
+	if claimWon {
 		o.finalizeFailed(jobID, req, lastErr)
 	} else {
-		// Already claimed this jobID earlier (retry-cap exhausted or
-		// non-retryable error path), so we are still the owner.
-		// finalizeFailed proceeds as the terminal write.
-		o.finalizeFailed(jobID, req, lastErr)
+		// Reaper (or another path) won the claim; do not write a
+		// terminal status here — that would race with the winning
+		// writer's terminal status.
+		slog.Info("run goroutine: post-loop failure but claim was lost; writing no terminal status",
+			"job_id", jobID,
+			"event", "run_goroutine_yield_to_reaper",
+			"last_error", lastErrString(lastErr))
 	}
+}
+
+// lastErrString returns a non-nil error's Error() or empty string.
+// Helper for log fields.
+func lastErrString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // finalizeReady transitions the job to ready, records metrics, and emits
