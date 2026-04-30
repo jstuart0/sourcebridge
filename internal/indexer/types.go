@@ -86,9 +86,20 @@ type FileResult struct {
 }
 
 // IndexResult contains the full indexing result for a repository.
+//
+// Branch records the git branch the indexed working tree was on when
+// the result was produced. It is populated by the per-file refresh
+// entry point (Indexer.IndexFiles, Phase 1.B) and consumed by the
+// freshness envelope on MCP responses so a CI push to main while an
+// agent works on feature/x cannot mark the agent's context stale on
+// the wrong branch. Existing IndexRepository / IndexRepositoryIncremental
+// callers still produce results without Branch set; the JSON tag is
+// `omitempty` so additive change is safe for all existing
+// serialization paths.
 type IndexResult struct {
 	RepoName       string       `json:"repo_name"`
 	RepoPath       string       `json:"repo_path"`
+	Branch         string       `json:"branch,omitempty"`
 	Files          []FileResult `json:"files"`
 	TotalFiles     int          `json:"total_files"`
 	TotalSymbols   int          `json:"total_symbols"`
