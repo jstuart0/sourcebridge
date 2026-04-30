@@ -2622,7 +2622,10 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 	req := &llm.EnqueueRequest{
 		Subsystem: llm.Subsystem("living_wiki"),
 		JobType:   jobType,
-		TargetKey: fmt.Sprintf("lw:%s:%s", defaultTenantID, input.RepositoryID),
+		// CR12 Part B: mode-aware TargetKey ensures that starting a Detailed run
+		// while an Overview run is already in-flight (or vice-versa) does not
+		// de-duplicate the two jobs. The lw_ suffix mirrors GenerationMode constants.
+		TargetKey: fmt.Sprintf("lw:%s:%s:%s", defaultTenantID, input.RepositoryID, GenerationModeLWDetailed),
 		RepoID:    input.RepositoryID,
 		// R3 slice 3: living-wiki cold-start runs LLM jobs (page generation,
 		// understanding, etc.). Stamp llm_provider for Monitor + per-provider
@@ -2654,7 +2657,9 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 			r.LivingWikiRepoStore,
 			r.ClusterStore,
 			r.KnowledgeStore,
-			nil, // metrics: fall back to lwmetrics.Default
+			nil,                          // metrics: fall back to lwmetrics.Default
+			r.LLMResolver,                // for FrozenResolver + fingerprint model identity (CR5, LD-7)
+			r.LivingWikiPagePublishStore, // for per-page dispatch state (Phase 1)
 		),
 	}
 

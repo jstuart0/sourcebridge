@@ -646,6 +646,8 @@ func TestBuildColdStartRunnerNilOrchestratorReturnsNotice(t *testing.T) {
 		nil,           // no cluster store
 		nil,           // no knowledge store
 		nil,           // no metrics collector (falls back to Default)
+		nil,           // no llmResolver (Phase 1)
+		nil,           // no publishStatusStore (Phase 1)
 	)
 
 	rt := &fakeRuntime{jobID: "nil-orch-job"}
@@ -1060,6 +1062,8 @@ func TestColdStartSinkResultsPersistedInJobResult(t *testing.T) {
 		nil,   // no cluster store
 		nil,   // no knowledge store
 		nil,   // no metrics collector (falls back to Default)
+		nil,   // no llmResolver (Phase 1)
+		nil,   // no publishStatusStore (Phase 1)
 	)
 
 	// Override: run via csRunnerFromPages so we can inject the planned pages
@@ -1171,6 +1175,8 @@ func TestColdStartSystemicAbortEmitsMetric(t *testing.T) {
 		cs,
 		nil, // no knowledge store
 		mc,
+		nil, // no llmResolver (Phase 1)
+		nil, // no publishStatusStore (Phase 1)
 	)
 
 	rt := &fakeRuntime{jobID: "job-systemic-metric"}
@@ -1221,6 +1227,7 @@ func TestColdStartExclusionInvariantPartialContent(t *testing.T) {
 		jrs,
 		nil, nil, cs, nil,
 		mc,
+		nil, nil, // no llmResolver, no publishStatusStore (Phase 1)
 	)
 
 	rt := &fakeRuntime{jobID: "job-invariant-partial"}
@@ -1273,6 +1280,7 @@ func TestColdStartExclusionInvariantSystemicAbort(t *testing.T) {
 		jrs,
 		nil, nil, cs, nil,
 		mc,
+		nil, nil, // no llmResolver, no publishStatusStore (Phase 1)
 	)
 
 	rt := &fakeRuntime{jobID: "job-invariant-systemic"}

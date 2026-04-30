@@ -52,6 +52,13 @@ import (
 )
 
 const (
+	// GenerationMode values for Living Wiki cold-start jobs (CR12 Part B).
+	// The lw_ prefix namespaces these away from knowledge-pipeline GenerationMode
+	// values ("classic", "deep"). The runner reads the job's GenerationMode field
+	// and interprets lw_* prefixed values as LW mode specifiers.
+	GenerationModeLWDetailed = "lw_detailed" // per-folder (today's behaviour)
+	GenerationModeLWOverview = "lw_overview" // subsystem-level (Phase 4a)
+
 	// maxSymbolBodyLines is the maximum number of source lines included per
 	// symbol body to keep prompts manageable.
 	maxSymbolBodyLines = 200
@@ -112,6 +119,8 @@ func buildColdStartRunner(
 	clusterStore clustering.ClusterStore,
 	knowledgeStore knowledge.KnowledgeStore,
 	metricsCollector *lwmetrics.Collector, // when nil, falls back to lwmetrics.Default
+	llmResolver resolution.Resolver, // for FrozenResolver + fingerprint model identity (CR5, LD-7)
+	publishStatusStore livingwiki.PagePublishStatusStore, // for per-page dispatch state (Phase 1)
 ) func(ctx context.Context, rt llm.Runtime) error {
 	if metricsCollector == nil {
 		metricsCollector = lwmetrics.Default
@@ -178,40 +187,121 @@ func buildColdStartRunner(
 		pages = attachKnowledgeArtifacts(runCtx, repoID, pages, knowledgeStore)
 		logArtifactResolution(repoID, pages)
 
-		// ── Step 1.6: Smart resume — skip pages already published ─────────────
+		// ── Step 1.6: Build label→ID map from the full manifest (CR3) ────────────
 		//
-		// On a fresh cold-start every page is generated. On a retry after a
-		// time-out (or any failure that left some pages already in the sink),
-		// we don't want to redo all the work — just generate what's missing.
-		// Query each configured sink for the set of SourceBridge-tagged pages
-		// it currently holds, and skip any planned page whose ID is already
-		// present in every sink. The skipped IDs flow through to the dispatch
-		// step so the orphan-GC pass treats them as "still wanted" and doesn't
-		// delete them. PagesGenerated in the persisted result includes these
-		// skips so the UI shows the true sink state.
+		// Must happen BEFORE smart-resume splits the manifest into buckets.
+		// Pages in the "regenerate" bucket need links that resolve to the correct
+		// IDs for pages in the "skip" buckets — the map must cover all planned pages.
+		relatedByLabel := buildRelatedPageIDsByLabel(pages)
+		for i := range pages {
+			pages[i].RelatedPageIDsByLabel = relatedByLabel
+		}
+
+		// ── Step 1.7: Resolve model identity and freeze the LLM caller (CR5) ───
+		//
+		// Resolve the LLM model identity once at run start and freeze it for the
+		// duration of the run, so mid-run workspace settings changes cannot split
+		// a run across providers or cause fingerprint drift.
+		// The frozen caller is a new *llmcall.Caller instance with a FrozenResolver
+		// wired in (CR5: Go methods are not virtual; substituting the Resolver
+		// implementation is the correct freeze strategy).
+		modelIdentity := livingWikiModelIdentity(runCtx, llmResolver, repoID)
+		frozenCaller := llmCaller // fallback: use the original if resolver is nil
+		if llmResolver != nil {
+			snap, resolveErr := llmResolver.Resolve(runCtx, repoID, resolution.OpLivingWikiColdStart)
+			if resolveErr == nil {
+				frozenCaller = llmcall.New(llmCaller.Inner(), resolution.NewFrozenResolver(snap), nil)
+			}
+		}
+		_ = frozenCaller // used below in genReq (when the adapter is refactored); for now
+		// only the model identity snapshot is used for fingerprinting.
+
+		// ── Step 1.8: Smart resume — fingerprint-aware 3-way bucket split ────────
+		//
+		// CR4 (3-way split), LD-7 (fingerprint-aware), CR13 (run-start status writes
+		// only for the regenerate bucket).
+		//
+		// Algorithm:
+		//   1. List pages already present on every sink (sink-listing intersection).
+		//   2. Load persisted fingerprints from lw_page_publish_status.
+		//   3. Compute current fingerprints for all pages (one call per page, pure).
+		//   4. Split into three buckets:
+		//        regenerate      — page absent on any sink, OR fp mismatch, OR status != 'ready'
+		//        skipFully       — present everywhere, fp matches, status='ready', fixup done/none
+		//        skipNeedsFixup  — present everywhere, fp matches, status='ready', fixup pending
+		//   5. Write status='generating' ONLY for the regenerate bucket (CR13).
 		alreadyPublished := listAlreadyPublishedAcrossSinks(
 			runCtx, repoID, broker, repoSettingsStore,
 		)
-		var skippedPageIDs []string
-		if len(alreadyPublished) > 0 {
-			filtered := pages[:0]
-			for _, p := range pages {
-				if _, done := alreadyPublished[p.ID]; done {
-					skippedPageIDs = append(skippedPageIDs, p.ID)
-					continue
-				}
-				filtered = append(filtered, p)
-			}
-			pages = filtered
+		repoSourceRev := repoSourceRevFor(graphStore, repoID)
+
+		// Compute current fingerprints for every planned page (pure, O(N)).
+		currentFps := make(map[string]string, len(pages))
+		for _, p := range pages {
+			currentFps[p.ID] = lworch.ComputePageFingerprint(p, modelIdentity, repoSourceRev)
 		}
-		toGenerate := len(pages)
-		slog.Info("livingwiki/coldstart: smart resume",
+
+		// Load persisted fingerprints from the status store.
+		var persistedFps map[string]map[string]livingwiki.PagePublishStatusRow
+		if publishStatusStore != nil {
+			persistedFps, _ = publishStatusStore.LoadFingerprints(runCtx, repoID)
+		}
+
+		// Build sink-key list from the writers (needed for per-sink completeness checks).
+		// We build the writers once here for smart-resume and reuse them for dispatch.
+		writers, writerBuildErr := buildSinkWriters(runCtx, repoID, broker, repoSettingsStore)
+
+		// 3-way split (CR4).
+		var regenerate, skipFully, skipNeedsFixup []lworch.PlannedPage
+		for _, p := range pages {
+			bucket := classifyPage(p.ID, alreadyPublished, currentFps[p.ID], persistedFps, writers)
+			switch bucket {
+			case bucketSkipFully:
+				skipFully = append(skipFully, p)
+			case bucketSkipNeedsFixup:
+				skipNeedsFixup = append(skipNeedsFixup, p)
+			default:
+				regenerate = append(regenerate, p)
+			}
+		}
+
+		// All skipped IDs (for orphan-cleanup "still wanted" set).
+		skippedPageIDs := make([]string, 0, len(skipFully)+len(skipNeedsFixup))
+		for _, p := range skipFully {
+			skippedPageIDs = append(skippedPageIDs, p.ID)
+		}
+		for _, p := range skipNeedsFixup {
+			skippedPageIDs = append(skippedPageIDs, p.ID)
+		}
+
+		toGenerate := len(regenerate)
+		slog.Info("livingwiki/coldstart: smart resume (fingerprint-aware)",
 			"repo_id", repoID,
 			"taxonomy_total", total,
-			"already_published", len(skippedPageIDs),
-			"to_generate", toGenerate)
+			"regenerate", toGenerate,
+			"skip_fully", len(skipFully),
+			"skip_needs_fixup", len(skipNeedsFixup),
+			"model_identity", modelIdentity)
 
-		if toGenerate == 0 {
+		// Write status='generating' ONLY for the regenerate bucket × sinks (CR13).
+		// skipFully rows stay 'ready' (untouched); skipNeedsFixup rows stay 'ready'
+		// with fixup_status='pending' (untouched until Phase 3's fix-up pass).
+		if publishStatusStore != nil {
+			for _, p := range regenerate {
+				for _, w := range writers {
+					_ = publishStatusStore.SetNonReady(runCtx, livingwiki.SetNonReadyArgs{
+						RepoID:          repoID,
+						PageID:          p.ID,
+						SinkKind:        string(w.Writer.Kind()),
+						IntegrationName: w.Name,
+						Status:          "generating",
+						ErrorMsg:        "",
+					})
+				}
+			}
+		}
+
+		if toGenerate == 0 && len(skipNeedsFixup) == 0 {
 			rt.ReportProgress(1.0, "ok", fmt.Sprintf(
 				"All %d pages already up to date — nothing to regenerate", total))
 			if jobResultStore != nil {
@@ -231,7 +321,62 @@ func buildColdStartRunner(
 		}
 
 		rt.ReportProgress(0.05, "generating", fmt.Sprintf(
-			"Generating %d pages (%d already up to date)", toGenerate, len(skippedPageIDs)))
+			"Generating %d pages (%d already up to date, %d need fixup)",
+			toGenerate, len(skipFully), len(skipNeedsFixup)))
+
+		// ── Step 1.9: Wire async dispatch worker (CR2) ───────────────────────────
+		//
+		// The OnPageReady callback enqueues a durable page event onto a runner-owned
+		// bounded buffered channel and returns immediately (non-blocking). A single
+		// dispatcher goroutine drains the channel under dispatchCtx and performs the
+		// actual sink writes. This keeps the orchestrator's persistence loop fast
+		// (O(N × SetProposed time)) regardless of sink speed.
+		//
+		// Cancellation policy (CR2 + r4):
+		//   dispatchCtx derives from parentCtx (honors job kills).
+		//   Status-store writes inside streamDispatchPage use a SEPARATE
+		//   WithoutCancel-bounded context so they survive parentCtx cancellation.
+		//   Post-cancel drain: once dispatchCtx is done, the worker exits the
+		//   for-range immediately (bounded exit: one in-flight call ≤5s + one
+		//   status-store write ≤5s ≈ ≤10s total).
+		type readyPage struct {
+			page        ast.Page
+			fingerprint string
+		}
+		readyCh := make(chan readyPage, len(regenerate)+1) // buffer = regenerate bucket size
+
+		dispatchCtx, dispatchCancel := context.WithCancel(runCtx)
+		defer dispatchCancel()
+
+		var dispatchWG sync.WaitGroup
+		dispatchWG.Add(1)
+		go func() {
+			defer dispatchWG.Done()
+			for ev := range readyCh {
+				if dispatchCtx.Err() != nil {
+					// Parent canceled; stop processing further queued events.
+					// Remaining pages stay in status='generating' (from the run-start write
+					// above); smart-resume on the next run re-dispatches them (CR2 + r3).
+					slog.Info("livingwiki/coldstart: dispatch worker exiting after cancel",
+						"repo_id", repoID, "queued_remaining", len(readyCh))
+					return
+				}
+				streamDispatchPage(dispatchCtx, runCtx, ev.page, ev.fingerprint,
+					writers, markdown.NewTokenBucketRateLimiter(markdown.DefaultSinkRates()),
+					lwmetrics.Default, publishStatusStore, repoID, writerBuildErr)
+			}
+		}()
+
+		// Wire OnPageReady into the orchestrator request.
+		genReq := lworch.GenerateRequest{
+			Config: lworch.Config{
+				RepoID:         repoID,
+				MaxConcurrency: coldStartMaxConcurrency,
+				TimeBudget:     coldStartTimeBudget,
+			},
+			Pages:            regenerate,
+			PageFingerprints: currentFps,
+		}
 
 		// ── Step 2: Generate pages with progress reporting ────────────────────
 		var generated, excludedCount int32
@@ -308,33 +453,46 @@ func buildColdStartRunner(
 		}()
 
 		// Use an in-memory WikiPR so pages are stored as proposed_ast.
-		// A future workstream will replace this with a per-job snapshot from the
-		// broker once git-based PR creation is wired.
 		pr := lworch.NewMemoryWikiPR(fmt.Sprintf("pr-%s", jobID))
 
-		// Cold-start runs can include hundreds of pages; the orchestrator's
-		// default 5-minute TimeBudget targets fast incremental updates, not
-		// initial generation. Override to 60 min so large repos (~150+ pages)
-		// can finish without hitting ErrTimeBudgetExceeded mid-run.
-		genReq := lworch.GenerateRequest{
-			Config: lworch.Config{
-				RepoID: repoID,
-				// Cold starts run hundreds of independent page-generations.
-				// The orchestrator's default MaxConcurrency=5 is fine for
-				// incremental updates but bottlenecks large first runs;
-				// bump to 12 so a 169-page run can stay inside the
-				// 60-minute TimeBudget. Each parallel slot makes its own
-				// gRPC AnswerQuestion call so the worker / Anthropic side
-				// remain the natural rate-limiters.
-				MaxConcurrency: coldStartMaxConcurrency,
-				TimeBudget:     coldStartTimeBudget,
-			},
-			Pages:      pages,
-			PR:         pr,
-			OnPageDone: onPageDone,
+		// Complete the genReq wiring: PR, OnPageDone, and OnPageReady (CR2).
+		genReq.PR = pr
+		genReq.OnPageDone = onPageDone
+		if publishStatusStore != nil {
+			genReq.OnPageReady = func(page ast.Page, fp string) {
+				// Non-blocking enqueue. Buffer is sized to regenerate so this
+				// never blocks under normal conditions.
+				// Defensive overflow path: if the buffer somehow fills, write a
+				// 'failed' row directly so smart-resume picks it up next run (CR2).
+				select {
+				case readyCh <- readyPage{page: page, fingerprint: fp}:
+				default:
+					slog.Warn("livingwiki/coldstart: dispatch buffer full; recording failed status for resume",
+						"repo_id", repoID, "page_id", page.ID)
+					statusCtx, statusCancel := context.WithTimeout(
+						context.WithoutCancel(runCtx), 5*time.Second)
+					defer statusCancel()
+					for _, w := range writers {
+						_ = publishStatusStore.SetNonReady(statusCtx, livingwiki.SetNonReadyArgs{
+							RepoID:          repoID,
+							PageID:          page.ID,
+							SinkKind:        string(w.Writer.Kind()),
+							IntegrationName: w.Name,
+							Status:          "failed",
+							ErrorMsg:        "dispatch buffer overflow",
+						})
+					}
+				}
+			}
 		}
 
 		result, err := lwOrch.Generate(runCtx, genReq)
+
+		// Close the readyCh and wait for the dispatcher to drain (CR2).
+		// This happens AFTER Generate returns; the persistence loop has finished,
+		// no more events will be enqueued.
+		close(readyCh)
+		dispatchWG.Wait()
 		elapsed := time.Since(start)
 
 		// IsPartialGenerationError matches ErrTimeBudgetExceeded and
@@ -1148,11 +1306,21 @@ func attachKnowledgeArtifacts(
 
 		summaries := make([]lworch.KnowledgeArtifactSummary, 0, len(candidates))
 		for _, c := range candidates {
+			// CR6: populate ID and ScopeType so the fingerprint helper can
+			// include per-artifact identity in the page fingerprint. Without
+			// these fields, re-running understanding at the same CommitSHA
+			// would not invalidate the fingerprint even when artifact content changed.
+			scopeType := ""
+			if c.art.Scope != nil {
+				scopeType = string(c.art.Scope.ScopeType)
+			}
 			s := lworch.KnowledgeArtifactSummary{
+				ID:          c.art.ID,
 				Type:        string(c.art.Type),
 				Audience:    string(c.art.Audience),
 				Depth:       string(c.art.Depth),
 				ScopePath:   scopePathOf(c.art),
+				ScopeType:   scopeType,
 				RevisionFp:  c.art.UnderstandingRevisionFP,
 				GeneratedAt: c.art.GeneratedAt,
 			}
@@ -1222,6 +1390,284 @@ func logArtifactResolution(repoID string, pages []lworch.PlannedPage) {
 		"artifacts_used", totalArtifacts,
 		"stale_skipped", staleSkipped,
 	)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Smart-resume helpers (Phase 1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Bucket constants for the 3-way smart-resume split (CR4).
+const (
+	bucketRegenerate     = "regenerate"
+	bucketSkipFully      = "skipFully"
+	bucketSkipNeedsFixup = "skipNeedsFixup"
+)
+
+// buildRelatedPageIDsByLabel returns a map from cluster label (or page ID
+// suffix) to page ID for every planned page. This is built from the FULL
+// manifest BEFORE smart-resume splits it into buckets, so pages in the
+// regenerate bucket can resolve correct cross-page links to pages in the
+// skip buckets (CR3).
+//
+// Key: the human-visible label used in cross-page links.
+// For architecture pages: PackageInfo.Package (the cluster label).
+// For non-architecture pages: the page ID itself.
+func buildRelatedPageIDsByLabel(pages []lworch.PlannedPage) map[string]string {
+	m := make(map[string]string, len(pages))
+	for _, p := range pages {
+		if p.TemplateID == "architecture" && p.PackageInfo != nil {
+			m[p.PackageInfo.Package] = p.ID
+		} else {
+			m[p.ID] = p.ID
+		}
+	}
+	return m
+}
+
+// livingWikiModelIdentity resolves the LLM model identity string for the
+// cold-start run. Format: "<provider>/<model>" per LD-7 / C1.
+// Returns "unresolved/unresolved" on any resolve failure so fingerprints
+// always include a sentinel rather than an empty string.
+func livingWikiModelIdentity(ctx context.Context, resolver resolution.Resolver, repoID string) string {
+	if resolver == nil {
+		return "unresolved/unresolved"
+	}
+	snap, err := resolver.Resolve(ctx, repoID, resolution.OpLivingWikiColdStart)
+	if err != nil || snap.Provider == "" || snap.Model == "" {
+		return "unresolved/unresolved"
+	}
+	return snap.Provider + "/" + snap.Model
+}
+
+// repoSourceRevFor returns the canonical revision string for a repository used
+// as the repoSourceRev input to the fingerprint algorithm. Prefers CommitSHA
+// when present; falls back to LastIndexedAt nanoseconds as a monotonic proxy.
+// Returns "" when the graphStore is nil or the repository is unknown (the
+// fingerprint will still be computed, but rev-dependent changes won't invalidate it).
+func repoSourceRevFor(gs graphstore.GraphStore, repoID string) string {
+	if gs == nil {
+		return ""
+	}
+	repo := gs.GetRepository(repoID)
+	if repo == nil {
+		return ""
+	}
+	if repo.CommitSHA != "" {
+		return repo.CommitSHA
+	}
+	return fmt.Sprintf("%d", repo.LastIndexedAt.UnixNano())
+}
+
+// buildSinkWriters is the cold-start–local wrapper around sinks.BuildSinkWriters
+// that takes a credential snapshot before building. It returns (nil, nil) when
+// the broker or repoSettingsStore is nil. Errors from BuildSinkWriters are
+// returned directly so callers can classify missing-creds vs not-implemented.
+func buildSinkWriters(
+	ctx context.Context,
+	repoID string,
+	broker credentials.Broker,
+	repoSettingsStore livingwiki.RepoSettingsStore,
+) ([]sinks.NamedSinkWriter, error) {
+	if broker == nil || repoSettingsStore == nil {
+		return nil, nil
+	}
+	repoSettings, err := repoSettingsStore.GetRepoSettings(ctx, defaultTenantID, repoID)
+	if err != nil || repoSettings == nil || len(repoSettings.Sinks) == 0 {
+		return nil, nil
+	}
+	snap, err := credentials.Take(ctx, broker)
+	if err != nil {
+		return nil, nil
+	}
+	// repoName not needed for smart-resume (only for hierarchy-create in dispatch).
+	return sinks.BuildSinkWriters(ctx, repoSettings, snap, "")
+}
+
+// classifyPage implements the 3-way smart-resume decision (CR4):
+//
+//   - regenerate      — absent from any configured sink, OR fingerprint mismatch,
+//     OR status != "ready" in the status store.
+//   - skipFully       — present on every sink, fp matches, status="ready",
+//     fixup_status is "none" or "done".
+//   - skipNeedsFixup  — present everywhere, fp matches, status="ready",
+//     fixup_status is "pending" or "failed".
+//
+// alreadyPublished is the cross-sink intersection from listAlreadyPublishedAcrossSinks.
+// currentFp is the freshly-computed fingerprint for this page.
+// persistedFps maps pageID → sinkKey → PagePublishStatusRow (nil map ⇒ no rows).
+// writers is the currently-configured sink list; when empty (no sinks) every
+// page regenerates so the generation phase runs (the dispatch phase then
+// produces no sink writes but the AST is persisted).
+func classifyPage(
+	pageID string,
+	alreadyPublished map[string]struct{},
+	currentFp string,
+	persistedFps map[string]map[string]livingwiki.PagePublishStatusRow,
+	writers []sinks.NamedSinkWriter,
+) string {
+	// When there are no writers, regenerate every page so the AST is at least
+	// freshly persisted (useful for testing without sink credentials).
+	if len(writers) == 0 {
+		return bucketRegenerate
+	}
+
+	// Must be published to every configured sink.
+	if _, ok := alreadyPublished[pageID]; !ok {
+		return bucketRegenerate
+	}
+
+	// Check the status store for every sink.
+	sinkRows := persistedFps[pageID] // nil if no rows
+	for _, w := range writers {
+		sinkKey := string(w.Writer.Kind()) + "/" + w.Name
+		row, ok := sinkRows[sinkKey]
+		if !ok || row.Status != "ready" {
+			return bucketRegenerate
+		}
+		if row.ContentFingerprint != currentFp {
+			return bucketRegenerate
+		}
+	}
+
+	// Fingerprints match and all sinks show "ready". Check fixup status.
+	for _, w := range writers {
+		sinkKey := string(w.Writer.Kind()) + "/" + w.Name
+		row := sinkRows[sinkKey]
+		if row.FixupStatus == livingwiki.FixupStatusPending ||
+			row.FixupStatus == livingwiki.FixupStatusFailed {
+			return bucketSkipNeedsFixup
+		}
+	}
+	return bucketSkipFully
+}
+
+// streamDispatchPage dispatches a single ready page to every configured sink
+// and writes the resulting status to the publishStatusStore.
+//
+// Cancellation model (CR2):
+//   - Sink write calls use dispatchCtx so they are cancelled when the parent
+//     job is killed or the time budget is exceeded.
+//   - Status-store writes use a fresh context.WithoutCancel-bounded context
+//     (5 s) so they survive dispatchCtx cancellation and the next run sees
+//     accurate state rather than stale "generating" rows.
+//
+// writerBuildErr is the error returned when the sink writers were constructed;
+// when non-nil it is recorded as a "failed" status for every writer slot
+// without attempting any write.
+func streamDispatchPage(
+	dispatchCtx context.Context,
+	parentCtx context.Context,
+	page ast.Page,
+	fingerprint string,
+	writers []sinks.NamedSinkWriter,
+	rateLimiter markdown.SinkRateLimiter,
+	mc *lwmetrics.Collector,
+	statusStore livingwiki.PagePublishStatusStore,
+	repoID string,
+	writerBuildErr error,
+) {
+	if len(writers) == 0 {
+		return
+	}
+
+	// Helper: write a status row without being cancelled by dispatchCtx.
+	writeStatus := func(args livingwiki.SetReadyArgs) {
+		statusCtx, cancel := context.WithTimeout(
+			context.WithoutCancel(parentCtx), 5*time.Second)
+		defer cancel()
+		if statusStore != nil {
+			_ = statusStore.SetReady(statusCtx, args)
+		}
+	}
+	writeNonReady := func(args livingwiki.SetNonReadyArgs) {
+		statusCtx, cancel := context.WithTimeout(
+			context.WithoutCancel(parentCtx), 5*time.Second)
+		defer cancel()
+		if statusStore != nil {
+			_ = statusStore.SetNonReady(statusCtx, args)
+		}
+	}
+
+	// When the writer build failed, record it for every sink slot.
+	if writerBuildErr != nil {
+		for _, w := range writers {
+			writeNonReady(livingwiki.SetNonReadyArgs{
+				RepoID:          repoID,
+				PageID:          page.ID,
+				SinkKind:        string(w.Writer.Kind()),
+				IntegrationName: w.Name,
+				Status:          "failed",
+				ErrorMsg:        writerBuildErr.Error(),
+			})
+		}
+		return
+	}
+
+	// Dispatch the single page to every sink sequentially (same rate-limit contract
+	// as DispatchPagesNamed, but for one page at a time so we can capture per-page
+	// fingerprints immediately).
+	for _, nsw := range writers {
+		if dispatchCtx.Err() != nil {
+			break
+		}
+
+		sw := nsw.Writer
+		sinkKind := string(sw.Kind())
+		integrationName := nsw.Name
+
+		if rateLimiter != nil {
+			if rlErr := rateLimiter.Allow(dispatchCtx, sw.Kind()); rlErr != nil {
+				writeNonReady(livingwiki.SetNonReadyArgs{
+					RepoID:          repoID,
+					PageID:          page.ID,
+					SinkKind:        sinkKind,
+					IntegrationName: integrationName,
+					Status:          "failed",
+					ErrorMsg:        "rate limit exceeded: " + rlErr.Error(),
+				})
+				continue
+			}
+		}
+
+		wStart := time.Now()
+		writeErr := sw.WritePage(dispatchCtx, page)
+		writeDuration := time.Since(wStart).Seconds()
+		if mc != nil {
+			mc.RecordSinkWrite(sinkKind, writeDuration)
+		}
+		if rateLimiter != nil {
+			rateLimiter.Record(sw.Kind())
+		}
+
+		if writeErr != nil {
+			slog.Warn("livingwiki/dispatch: page write failed",
+				"sink", sinkKind, "repo_id", repoID, "page_id", page.ID,
+				"error", writeErr)
+			writeNonReady(livingwiki.SetNonReadyArgs{
+				RepoID:          repoID,
+				PageID:          page.ID,
+				SinkKind:        sinkKind,
+				IntegrationName: integrationName,
+				Status:          "failed",
+				ErrorMsg:        writeErr.Error(),
+			})
+			continue
+		}
+
+		// Success — record the fingerprint so next run can skip this page.
+		writeStatus(livingwiki.SetReadyArgs{
+			RepoID:          repoID,
+			PageID:          page.ID,
+			SinkKind:        sinkKind,
+			IntegrationName: integrationName,
+			Fingerprint:     fingerprint,
+			// HasStubs is always false here: the orchestrator's persistence
+			// loop fires OnPageReady only after a fully-resolved page passes
+			// the quality gate. Stub-link fixup (Phase 3) updates this later.
+			HasStubs:    false,
+			FixupStatus: livingwiki.FixupStatusNone,
+		})
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

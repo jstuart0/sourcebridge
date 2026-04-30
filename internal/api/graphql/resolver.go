@@ -79,6 +79,7 @@ type Resolver struct {
 	LivingWikiRepoStore          livingwiki.RepoSettingsStore  // per-repo living-wiki opt-in; nil when unavailable
 	LivingWikiJobResultStore     livingwiki.JobResultStore     // per-run job result history; nil when unavailable
 	LivingWikiLiveOrchestrator   *lworch.Orchestrator          // living-wiki page-generation orchestrator; nil when feature unavailable
+	LivingWikiPagePublishStore   livingwiki.PagePublishStatusStore // per-page dispatch state (Phase 1); nil skips fingerprint tracking
 	TrashStore                   trash.Store                   // soft-delete recycle bin; nil when the feature is disabled or unavailable
 	QA                 *qa.Orchestrator           // server-side deep-QA orchestrator; nil when server-side QA is disabled
 	SearchSvc          *search.Service            // hybrid retrieval backbone; nil falls back to legacy substring search
