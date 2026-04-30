@@ -84,13 +84,6 @@ func NewSurrealLLMProfileStore(client *SurrealDB, opts ...LLMProfileStoreOption)
 	return s
 }
 
-// Cipher returns the underlying cipher. Used by the migration helper
-// (which needs the cipher to re-encrypt legacy plaintext api_keys under
-// sbenc:v1) and by tests asserting cipher wiring.
-func (s *SurrealLLMProfileStore) Cipher() secretcipher.Cipher {
-	return s.cipher
-}
-
 // Profile is the persisted profile record. APIKey is plaintext at this
 // layer (encryption is handled transparently by the store). APIKeySet
 // and APIKeyHint are populated by the store on Load for caller-facing
