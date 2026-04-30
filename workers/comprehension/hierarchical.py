@@ -195,6 +195,15 @@ class HierarchicalStrategy:
             "packages": 0,
             "root": 0,
         }
+        # CA-122: phase-local run-time progress counters. Reset at each
+        # phase transition so within-bucket math at the orchestrator
+        # uses honest "this phase's completion ratio," never global
+        # tree-node counts (which would mix cache hits with run-time
+        # work). Snapshot accessor: progress_snapshot().
+        self._progress_phase: str = ""
+        self._progress_completed: int = 0
+        self._progress_total: int = 0
+        self._progress_message: str = ""
 
     def capability_requirements(self) -> CapabilityRequirements:
         # Hierarchical is the floor strategy — every LLM call is small
@@ -203,6 +212,50 @@ class HierarchicalStrategy:
             min_context_tokens=2048,
             min_instruction_following="low",
         )
+
+    def progress_snapshot(self) -> dict:
+        """Return the current phase-local run-time progress counters.
+
+        CA-122 / Decision 4a: phase-local counters reset on every
+        phase transition. The orchestrator's stream→DB driver maps
+        (phase, completed_units, total_units) into the bucketed
+        progress fraction. Cache-hit counters ride along as
+        diagnostic-only fields — never the progress numerator.
+
+        Called by HeartbeatPump from the servicer to build a
+        KnowledgeStreamProgress message every ~30s.
+        """
+        # Map internal phase strings (matching the existing progress
+        # callback contract: "leaves", "files", "packages", "root",
+        # "ready") into the proto KnowledgePhase enum names. The
+        # servicer translates these back to enum values.
+        return {
+            "phase": self._progress_phase,
+            "completed_units": self._progress_completed,
+            "total_units": self._progress_total,
+            "unit_kind": "summary_units" if self._progress_phase else "",
+            "message": self._progress_message,
+            "leaf_cache_hits": self._cache_hits.get("leaves", 0),
+            "file_cache_hits": self._cache_hits.get("files", 0),
+            "package_cache_hits": self._cache_hits.get("packages", 0),
+            "root_cache_hits": self._cache_hits.get("root", 0),
+        }
+
+    def _set_phase_progress(
+        self,
+        phase: str,
+        *,
+        completed: int = 0,
+        total: int = 0,
+        message: str = "",
+    ) -> None:
+        """Reset phase-local counters at a phase boundary or update them
+        within a phase. Called from build_tree and the per-stage
+        helpers below."""
+        self._progress_phase = phase
+        self._progress_completed = completed
+        self._progress_total = total
+        self._progress_message = message
 
     async def build_tree(
         self,
@@ -259,6 +312,13 @@ class HierarchicalStrategy:
             },
         )
         await _maybe_await(progress("leaves", 0.05, f"Summarizing {len(leaf_units)} segments"))
+        # CA-122: phase boundary — reset phase-local counters.
+        self._set_phase_progress(
+            "leaves",
+            completed=0,
+            total=len(leaf_units),
+            message=f"Summarizing {len(leaf_units)} segments",
+        )
 
         tree = SummaryTree(
             corpus_id=corpus.corpus_id,
@@ -303,6 +363,12 @@ class HierarchicalStrategy:
         # Level 1 — file summaries.
         if file_units:
             await _maybe_await(progress("files", 0.55, f"Summarizing {len(file_units)} files"))
+            self._set_phase_progress(
+                "files",
+                completed=0,
+                total=len(file_units),
+                message=f"Summarizing {len(file_units)} files",
+            )
             stage_started = monotonic()
             log.info(
                 "hierarchical_stage_started",
@@ -344,6 +410,12 @@ class HierarchicalStrategy:
         # Level 2 — package summaries.
         if package_units:
             await _maybe_await(progress("packages", 0.8, f"Summarizing {len(package_units)} packages"))
+            self._set_phase_progress(
+                "packages",
+                completed=0,
+                total=len(package_units),
+                message=f"Summarizing {len(package_units)} packages",
+            )
             stage_started = monotonic()
             log.info(
                 "hierarchical_stage_started",
@@ -385,6 +457,12 @@ class HierarchicalStrategy:
         # Level 3 — root summary.
         if root_units:
             await _maybe_await(progress("root", 0.95, "Summarizing repository"))
+            self._set_phase_progress(
+                "root",
+                completed=0,
+                total=1,
+                message="Summarizing repository",
+            )
             stage_started = monotonic()
             log.info(
                 "hierarchical_stage_started",
@@ -437,6 +515,12 @@ class HierarchicalStrategy:
             },
         )
         await _maybe_await(progress("ready", 1.0, "Hierarchical summary tree built"))
+        self._set_phase_progress(
+            "ready",
+            completed=1,
+            total=1,
+            message="Hierarchical summary tree built",
+        )
         return tree
 
     async def _emit_stage_checkpoint(self, stage: str, tree: SummaryTree) -> None:
@@ -492,6 +576,13 @@ class HierarchicalStrategy:
                 await self._summarize_leaf(corpus, unit, tree)
             async with completed_lock:
                 completed += 1
+                # CA-122: advance phase-local counters on every
+                # completion so the heartbeat pump sees a smooth
+                # progression (rather than only the 10%-tick batched
+                # log message). Snapshot reads are cheap; the lock
+                # is already held for the log path.
+                self._progress_completed = completed
+                self._progress_message = f"Summarized {completed}/{total} segments"
                 if completed % max(1, total // 10) == 0 or completed == total:
                     # Progress range 0.05 → 0.55 for leaves.
                     pct = 0.05 + 0.5 * (completed / total)
@@ -534,6 +625,13 @@ class HierarchicalStrategy:
                 await summarize(corpus, unit, tree)
             async with completed_lock:
                 completed += 1
+                # CA-122: advance phase-local counters on every unit
+                # completion so the heartbeat pump (running in the
+                # servicer) sees granular progress for files / packages.
+                # Phase already set by the caller in build_tree; we
+                # only update the run-time counter here.
+                self._progress_completed = completed
+                self._progress_message = f"{stage.capitalize()} {completed}/{total}"
                 if completed == total or completed % max(1, total // 5) == 0:
                     log.info(
                         "hierarchical_stage_progress",
