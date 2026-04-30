@@ -87,7 +87,21 @@ func (idx *Indexer) IndexFiles(
 }
 
 // IndexRepository scans and indexes a local repository.
-func (idx *Indexer) IndexRepository(ctx context.Context, repoPath string) (*IndexResult, error) {
+//
+// reason is required and must be one of the named RepoIndexFullReason
+// constants (ReasonInitialOnboard or ReasonOperatorRebuild). The guard
+// exists to keep the change-watch router (Phase 1.C) from accidentally
+// reaching this whole-tree path: a router-driven invocation has no
+// legitimate reason value to pass, so it can't compile against the
+// signature, much less call it. See
+// thoughts/shared/plans/2026-04-29-mcp-edits-feedback-loop.md (v5,
+// "Audit of latent full-reindex paths") for the full audit context
+// and Phase 1 done-definition test #10 for the runtime assertion.
+func (idx *Indexer) IndexRepository(ctx context.Context, repoPath string, reason RepoIndexFullReason) (*IndexResult, error) {
+	if err := validateFullReindexReason(reason); err != nil {
+		slog.Error("IndexRepository called without valid reason", "reason", reason.String(), "repo_path", repoPath)
+		return nil, err
+	}
 	repoID := uuid.New().String()
 
 	// Phase 1: Scan

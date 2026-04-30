@@ -202,7 +202,12 @@ func (s *Service) runImport(repoID, repoName, repoPath string, isRemote bool, to
 	}
 
 	idx := indexer.NewIndexer(nil)
-	result, err := idx.IndexRepository(ctx, localPath)
+	// Initial onboarding path: indexing.Service is invoked from both
+	// the AddRepository GraphQL mutation and the MCP `index_repository`
+	// tool — both are first-touch flows for a brand-new repo. Per the
+	// latent-full-reindex audit (plan v5), every IndexRepository
+	// caller must pass a typed reason.
+	result, err := idx.IndexRepository(ctx, localPath, indexer.ReasonInitialOnboard)
 	if err != nil {
 		s.store.SetRepositoryError(repoID, fmt.Errorf("indexing repository: %w", err))
 		return

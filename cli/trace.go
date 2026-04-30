@@ -66,7 +66,11 @@ func runTrace(cmd *cobra.Command, args []string) error {
 	}
 
 	idx := indexer.NewIndexer(nil)
-	result, err := idx.IndexRepository(cmd.Context(), repoPath)
+	// `sourcebridge trace` runs an indexing pass under operator
+	// control to drive the trace analysis; per the latent-full-reindex
+	// audit (plan v5), every IndexRepository caller must pass a typed
+	// reason.
+	result, err := idx.IndexRepository(cmd.Context(), repoPath, indexer.ReasonOperatorRebuild)
 	if err != nil {
 		return fmt.Errorf("indexing repository: %w", err)
 	}

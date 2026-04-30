@@ -210,7 +210,13 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 	if len(previousHashes) > 0 {
 		result, err = idx.IndexRepositoryIncremental(ctx, localPath, previousHashes, previousFiles)
 	} else {
-		result, err = idx.IndexRepository(ctx, localPath)
+		// Operator-driven rebuild path: ReindexRepository is the manual
+		// "rebuild from scratch" surface (UI button or scheduled job
+		// acting on behalf of an operator). Per the latent-full-reindex
+		// audit (plan v5), every IndexRepository caller must pass a
+		// typed reason; the change-watch router (Phase 1.C) has no
+		// reason value to pass and therefore cannot reach this path.
+		result, err = idx.IndexRepository(ctx, localPath, indexer.ReasonOperatorRebuild)
 	}
 	if err != nil {
 		r.getStore(ctx).SetRepositoryError(id, err)
