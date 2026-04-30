@@ -1138,15 +1138,28 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                         yield knowledge_pb2.GenerateCliffNotesStreamMessage(
                             phase=phase_marker(proto_phase)
                         )
-                # codex r2b M3: when we are NOT emitting hierarchical
-                # phase markers, the heartbeat pump's progress event
-                # may carry a hierarchical phase from
-                # strategy.progress_snapshot(). Force its phase to
-                # UNSPECIFIED so the Go driver doesn't try to bucket-
-                # map it against the collapsed map and accidentally
-                # land on bucketMin == 0.
+                # codex r2b M3 + r2c: when we are NOT emitting
+                # hierarchical phase markers, the heartbeat pump's
+                # progress event may carry a hierarchical phase and
+                # phase-local completed/total counters from
+                # strategy.progress_snapshot(). The Go driver maps
+                # those against the collapsed bucket map. Force phase
+                # to UNSPECIFIED so the bucket isn't recomputed each
+                # tick, AND zero the counters so the Go driver parks
+                # at bucket-min (no fake fractional motion). The
+                # stream still keeps UpdatedAt fresh because the
+                # progress event itself is enough heartbeat for the
+                # reaper. The collapsed-scope progress contract is
+                # therefore: SNAPSHOT bucket-min -> RENDER bucket-min
+                # -> FINALIZING bucket-min, with phase markers driving
+                # the only motion. Non-monotonic phase-local counters
+                # would have produced 20% -> 5% regressions otherwise
+                # (codex r2c Medium).
                 if not emit_hierarchical_phases:
                     prog.phase = knowledge_progress_pb2.KNOWLEDGE_PHASE_UNSPECIFIED
+                    prog.completed_units = 0
+                    prog.total_units = 0
+                    prog.unit_kind = ""
                 yield knowledge_pb2.GenerateCliffNotesStreamMessage(progress=prog)
 
             # Work task is done. Await it to surface the result or
