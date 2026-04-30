@@ -67,7 +67,10 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	}
 
 	idx := indexer.NewIndexer(progressFn)
-	result, err := idx.IndexRepository(context.Background(), repoPath)
+	// `sourcebridge index` is the operator-driven first-touch CLI for
+	// indexing a repo; per the latent-full-reindex audit (plan v5),
+	// every IndexRepository caller must pass a typed reason.
+	result, err := idx.IndexRepository(context.Background(), repoPath, indexer.ReasonInitialOnboard)
 	if err != nil {
 		return fmt.Errorf("indexing failed: %w", err)
 	}

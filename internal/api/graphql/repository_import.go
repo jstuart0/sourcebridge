@@ -56,7 +56,10 @@ func (r *mutationResolver) importRepository(repoID, repoName, repoPath string, i
 	}
 
 	idx := indexer.NewIndexer(nil)
-	result, err := idx.IndexRepository(ctx, localPath)
+	// Initial onboarding path: AddRepository drives the first full
+	// index for a brand-new repo. Per the latent-full-reindex audit
+	// (plan v5), every IndexRepository caller must pass a typed reason.
+	result, err := idx.IndexRepository(ctx, localPath, indexer.ReasonInitialOnboard)
 	if err != nil {
 		store.SetRepositoryError(repoID, fmt.Errorf("indexing repository: %w", err))
 		return
