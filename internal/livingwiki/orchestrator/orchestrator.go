@@ -1396,117 +1396,15 @@ func (r *TaxonomyResolver) Resolve(ctx context.Context, pkgGraph []PackageGraphI
 	// 1a. Architecture pages — cluster-based (primary signal).
 	//
 	// When clusters are available, emit one architecture page per cluster
-	// using the cluster label as the page scope. Callers/Callees are derived
-	// from pre-computed package dependency edges if a PackageDepsProvider has
-	// been wired in via WithPackageDeps.
+	// using the cluster label as the page scope. Uses archPageID for backward
+	// compatibility; new callers use ResolveOverview / ResolveDetailed.
 	if len(clusters) > 0 {
-		// Build package-level dependency lookup once.
-		var pkgDepByPkg map[string]*graph.StoredPackageDependencies
-		if r.pkgDeps != nil {
-			all := r.pkgDeps.GetPackageDependencies(r.repoID)
-			pkgDepByPkg = make(map[string]*graph.StoredPackageDependencies, len(all))
-			for _, d := range all {
-				pkgDepByPkg[d.Package] = d
-			}
-		}
-
-		// Build a symbol-level package → cluster label lookup so we can
-		// emit cross-cluster labels instead of raw package paths.
-		symsForCluster := make(map[string][]string) // clusterLabel → []package
-		if pkgDepByPkg != nil {
-			// Use the exported symbols we already fetched to derive which
-			// packages belong to which cluster. We rely on MemberPackages when
-			// populated; otherwise we fall back to the representative symbols.
-			for _, cs := range clusters {
-				seen := make(map[string]struct{})
-				for _, pkg := range cs.MemberPackages {
-					if _, ok := seen[pkg]; !ok {
-						seen[pkg] = struct{}{}
-						symsForCluster[cs.Label] = append(symsForCluster[cs.Label], pkg)
-					}
-				}
-			}
-		}
-
-		// Build the reverse map: package path → cluster label.
-		pkgToCluster := make(map[string]string)
-		for clusterLabel, pkgs := range symsForCluster {
-			for _, pkg := range pkgs {
-				pkgToCluster[pkg] = clusterLabel
-			}
-		}
-
-		for _, cs := range clusters {
-			archInput := baseInput
-			archInput.Audience = quality.AudienceEngineers
-
-			// Derive cross-cluster callers/callees.
-			var callerLabels, calleeLabels []string
-			if pkgDepByPkg != nil && len(cs.MemberPackages) > 0 {
-				memberSet := make(map[string]struct{}, len(cs.MemberPackages))
-				for _, pkg := range cs.MemberPackages {
-					memberSet[pkg] = struct{}{}
-				}
-
-				seenCallers := make(map[string]struct{})
-				seenCallees := make(map[string]struct{})
-
-				for _, pkg := range cs.MemberPackages {
-					dep, ok := pkgDepByPkg[pkg]
-					if !ok {
-						continue
-					}
-					// ImportedBy → callers (other clusters that import us).
-					for _, byPkg := range dep.ImportedBy {
-						if _, inCluster := memberSet[byPkg]; inCluster {
-							continue // intra-cluster edge — skip
-						}
-						label, ok := pkgToCluster[byPkg]
-						if !ok {
-							continue // orphan package — no architecture page
-						}
-						if _, seen := seenCallers[label]; !seen {
-							seenCallers[label] = struct{}{}
-							callerLabels = append(callerLabels, label)
-						}
-					}
-					// Imports → callees (other clusters we import).
-					for _, importPkg := range dep.Imports {
-						if _, inCluster := memberSet[importPkg]; inCluster {
-							continue // intra-cluster edge — skip
-						}
-						label, ok := pkgToCluster[importPkg]
-						if !ok {
-							continue // external/stdlib import — no architecture page
-						}
-						if _, seen := seenCallees[label]; !seen {
-							seenCallees[label] = struct{}{}
-							calleeLabels = append(calleeLabels, label)
-						}
-					}
-				}
-				sort.Strings(callerLabels)
-				sort.Strings(calleeLabels)
-			}
-
-			pages = append(pages, PlannedPage{
-				ID:         archPageID(r.repoID, cs.Label),
-				TemplateID: "architecture",
-				Audience:   quality.AudienceEngineers,
-				Input:      archInput,
-				PackageInfo: &ArchitecturePackageInfo{
-					Package:        cs.Label,
-					Callers:        callerLabels,
-					Callees:        calleeLabels,
-					MemberPackages: cs.MemberPackages,
-				},
-			})
-		}
+		pages = append(pages, r.resolveClusterArchPages(baseInput, clusters, archPageID)...)
 	} else {
 		// 1b. Architecture pages — package-path fallback.
 		//
 		// Clusters are absent or stale: fall back to one architecture page
-		// per unique Package value, preserving the pre-Sprint-2 behaviour.
+		// per unique Package value, preserving the pre-Phase-4a behaviour.
 		seen := make(map[string]bool)
 		var orderedPkgs []string
 		for _, s := range syms {
@@ -1541,36 +1439,7 @@ func (r *TaxonomyResolver) Resolve(ctx context.Context, pkgGraph []PackageGraphI
 		}
 	}
 
-	// 2. API reference page (one per repo).
-	apiInput := baseInput
-	apiInput.Audience = quality.AudienceEngineers
-	pages = append(pages, PlannedPage{
-		ID:         apiRefPageID(r.repoID),
-		TemplateID: "api_reference",
-		Audience:   quality.AudienceEngineers,
-		Input:      apiInput,
-	})
-
-	// 3. System overview page (product audience is the default).
-	sysInput := baseInput
-	sysInput.Audience = quality.AudienceProduct
-	pages = append(pages, PlannedPage{
-		ID:         sysOverviewPageID(r.repoID),
-		TemplateID: "system_overview",
-		Audience:   quality.AudienceProduct,
-		Input:      sysInput,
-	})
-
-	// 4. Glossary page.
-	glossInput := baseInput
-	glossInput.Audience = quality.AudienceEngineers
-	pages = append(pages, PlannedPage{
-		ID:         glossaryPageID(r.repoID),
-		TemplateID: "glossary",
-		Audience:   quality.AudienceEngineers,
-		Input:      glossInput,
-	})
-
+	pages = append(pages, r.resolveRepoWidePages(baseInput)...)
 	return pages, nil
 }
 
@@ -1597,13 +1466,317 @@ func Manifest(planned PlannedPage) manifest.DependencyManifest {
 	return m
 }
 
-// archPageID derives the stable page ID for an architecture page.
+// archPageID derives the stable page ID for a legacy architecture page (arch. prefix).
+// Kept for backward compatibility with pre-Phase-4a pages until orphan cleanup removes them.
 func archPageID(repoID, pkg string) string {
 	slug := replacePathChars(pkg)
 	if repoID != "" {
 		return repoID + ".arch." + slug
 	}
 	return "arch." + slug
+}
+
+// OverviewPageID derives the stable page ID for an Overview-mode architecture page.
+// Format: "<repoID>.overview.<slug>" where slug is the cluster label with path chars replaced.
+// The "overview." prefix is the canonical namespace for subsystem-level pages (LD-8).
+func OverviewPageID(repoID, clusterLabel string) string {
+	slug := replacePathChars(clusterLabel)
+	if repoID != "" {
+		return repoID + ".overview." + slug
+	}
+	return "overview." + slug
+}
+
+// DetailPageID derives the stable page ID for a Detailed-mode architecture page.
+// Format: "<repoID>.detail.<slug>" where slug is the package/dir path with path chars replaced.
+// The "detail." prefix is the canonical namespace for per-folder pages (LD-8).
+func DetailPageID(repoID, pkg string) string {
+	slug := replacePathChars(pkg)
+	if repoID != "" {
+		return repoID + ".detail." + slug
+	}
+	return "detail." + slug
+}
+
+// maxOverviewFallbackPages is the cap for per-top-level-directory Overview pages
+// when cluster data is absent. Prevents the fallback from producing hundreds of pages.
+const maxOverviewFallbackPages = 25
+
+// ResolveOverview returns the Overview-mode taxonomy for this repository:
+// one architecture page per cluster (subsystem-level), plus the shared repo-wide pages.
+// Page IDs use the ".overview." prefix per LD-8.
+//
+// When clusters is empty, ResolveOverview returns only the repo-wide pages
+// (api_reference, system_overview, glossary) with zero architecture pages, because
+// Overview mode requires cluster data to produce meaningful subsystem pages.
+// The caller (UI/runner) should surface "re-index required for Overview mode" in this case.
+func (r *TaxonomyResolver) ResolveOverview(ctx context.Context, pkgGraph []PackageGraphInfo, clusters []clustering.ClusterSummary, now time.Time) ([]PlannedPage, error) {
+	syms, err := r.symbolGraph.ExportedSymbols(r.repoID)
+	if err != nil {
+		return nil, fmt.Errorf("taxonomy: fetching symbols: %w", err)
+	}
+	_ = syms // repo-wide pages may use symbol data in the future; retain for consistency
+
+	baseInput := templates.GenerateInput{
+		RepoID:      r.repoID,
+		SymbolGraph: r.symbolGraph,
+		GitLog:      r.gitLog,
+		LLM:         r.llm,
+		Now:         now,
+	}
+
+	var pages []PlannedPage
+
+	if len(clusters) > 0 {
+		pages = append(pages, r.resolveClusterArchPages(baseInput, clusters, OverviewPageID)...)
+	}
+	// When clusters is empty: no architecture pages for Overview (LD-13 / plan decisions).
+
+	pages = append(pages, r.resolveRepoWidePages(baseInput)...)
+	return pages, nil
+}
+
+// ResolveDetailed returns the Detailed-mode taxonomy for this repository:
+// one architecture page per top-level package or directory, plus the shared repo-wide pages.
+// Page IDs use the ".detail." prefix per LD-8.
+//
+// When clusters are available, they take precedence (cluster-based Detailed pages).
+// When clusters are absent, the fallback emits one page per unique top-level directory
+// derived from the symbol graph, capped at maxOverviewFallbackPages.
+func (r *TaxonomyResolver) ResolveDetailed(ctx context.Context, pkgGraph []PackageGraphInfo, clusters []clustering.ClusterSummary, now time.Time) ([]PlannedPage, error) {
+	syms, err := r.symbolGraph.ExportedSymbols(r.repoID)
+	if err != nil {
+		return nil, fmt.Errorf("taxonomy: fetching symbols: %w", err)
+	}
+
+	baseInput := templates.GenerateInput{
+		RepoID:      r.repoID,
+		SymbolGraph: r.symbolGraph,
+		GitLog:      r.gitLog,
+		LLM:         r.llm,
+		Now:         now,
+	}
+
+	var pages []PlannedPage
+
+	if len(clusters) > 0 {
+		// Cluster-based Detailed pages — same pages as Overview but under ".detail." prefix.
+		pages = append(pages, r.resolveClusterArchPages(baseInput, clusters, DetailPageID)...)
+	} else {
+		// Package-path fallback: one page per top-level directory, capped at maxOverviewFallbackPages.
+		pages = append(pages, r.resolveTopLevelDirPages(baseInput, syms, pkgGraph)...)
+	}
+
+	pages = append(pages, r.resolveRepoWidePages(baseInput)...)
+	return pages, nil
+}
+
+// ResolveForMode resolves the taxonomy for the given generation mode.
+// mode must be one of GenerationModeLWOverview or GenerationModeLWDetailed
+// (package constants defined in the graphql package, mirrored here as string literals).
+// Unknown mode values fall back to Detailed behaviour.
+func (r *TaxonomyResolver) ResolveForMode(ctx context.Context, mode string, pkgGraph []PackageGraphInfo, clusters []clustering.ClusterSummary, now time.Time) ([]PlannedPage, error) {
+	switch mode {
+	case "lw_overview":
+		return r.ResolveOverview(ctx, pkgGraph, clusters, now)
+	default: // "lw_detailed" and any unknown mode → Detailed for forward compat
+		return r.ResolveDetailed(ctx, pkgGraph, clusters, now)
+	}
+}
+
+// resolveClusterArchPages generates one architecture PlannedPage per cluster
+// using the given pageIDFn to compute each page's ID. This is shared between
+// Overview and Detailed modes so the cluster analysis logic is not duplicated.
+func (r *TaxonomyResolver) resolveClusterArchPages(
+	baseInput templates.GenerateInput,
+	clusters []clustering.ClusterSummary,
+	pageIDFn func(repoID, label string) string,
+) []PlannedPage {
+	// Build package-level dependency lookup once.
+	var pkgDepByPkg map[string]*graph.StoredPackageDependencies
+	if r.pkgDeps != nil {
+		all := r.pkgDeps.GetPackageDependencies(r.repoID)
+		pkgDepByPkg = make(map[string]*graph.StoredPackageDependencies, len(all))
+		for _, d := range all {
+			pkgDepByPkg[d.Package] = d
+		}
+	}
+
+	// Build a symbol-level package → cluster label lookup.
+	symsForCluster := make(map[string][]string) // clusterLabel → []package
+	pkgToCluster := make(map[string]string)
+	if pkgDepByPkg != nil {
+		for _, cs := range clusters {
+			seen := make(map[string]struct{})
+			for _, pkg := range cs.MemberPackages {
+				if _, ok := seen[pkg]; !ok {
+					seen[pkg] = struct{}{}
+					symsForCluster[cs.Label] = append(symsForCluster[cs.Label], pkg)
+				}
+			}
+		}
+		for clusterLabel, pkgs := range symsForCluster {
+			for _, pkg := range pkgs {
+				pkgToCluster[pkg] = clusterLabel
+			}
+		}
+	}
+
+	var pages []PlannedPage
+	for _, cs := range clusters {
+		archInput := baseInput
+		archInput.Audience = quality.AudienceEngineers
+
+		var callerLabels, calleeLabels []string
+		if pkgDepByPkg != nil && len(cs.MemberPackages) > 0 {
+			memberSet := make(map[string]struct{}, len(cs.MemberPackages))
+			for _, pkg := range cs.MemberPackages {
+				memberSet[pkg] = struct{}{}
+			}
+			seenCallers := make(map[string]struct{})
+			seenCallees := make(map[string]struct{})
+			for _, pkg := range cs.MemberPackages {
+				dep, ok := pkgDepByPkg[pkg]
+				if !ok {
+					continue
+				}
+				for _, byPkg := range dep.ImportedBy {
+					if _, inCluster := memberSet[byPkg]; inCluster {
+						continue
+					}
+					label, ok := pkgToCluster[byPkg]
+					if !ok {
+						continue
+					}
+					if _, seen := seenCallers[label]; !seen {
+						seenCallers[label] = struct{}{}
+						callerLabels = append(callerLabels, label)
+					}
+				}
+				for _, importPkg := range dep.Imports {
+					if _, inCluster := memberSet[importPkg]; inCluster {
+						continue
+					}
+					label, ok := pkgToCluster[importPkg]
+					if !ok {
+						continue
+					}
+					if _, seen := seenCallees[label]; !seen {
+						seenCallees[label] = struct{}{}
+						calleeLabels = append(calleeLabels, label)
+					}
+				}
+			}
+			sort.Strings(callerLabels)
+			sort.Strings(calleeLabels)
+		}
+
+		pages = append(pages, PlannedPage{
+			ID:         pageIDFn(r.repoID, cs.Label),
+			TemplateID: "architecture",
+			Audience:   quality.AudienceEngineers,
+			Input:      archInput,
+			PackageInfo: &ArchitecturePackageInfo{
+				Package:        cs.Label,
+				Callers:        callerLabels,
+				Callees:        calleeLabels,
+				MemberPackages: cs.MemberPackages,
+			},
+		})
+	}
+	return pages
+}
+
+// resolveTopLevelDirPages generates one architecture PlannedPage per unique top-level
+// directory derived from the symbol graph, capped at maxOverviewFallbackPages.
+// This is the package-path fallback for Detailed mode when clusters are absent.
+func (r *TaxonomyResolver) resolveTopLevelDirPages(
+	baseInput templates.GenerateInput,
+	syms []templates.Symbol,
+	pkgGraph []PackageGraphInfo,
+) []PlannedPage {
+	// Collect top-level directories (first path component of each package).
+	topLevelSeen := make(map[string]bool)
+	var topLevelDirs []string
+	for _, s := range syms {
+		if s.Package == "" {
+			continue
+		}
+		// Extract the top-level directory: everything up to the first "/".
+		topDir := s.Package
+		if idx := strings.Index(s.Package, "/"); idx >= 0 {
+			topDir = s.Package[:idx]
+		}
+		if !topLevelSeen[topDir] {
+			topLevelSeen[topDir] = true
+			topLevelDirs = append(topLevelDirs, topDir)
+		}
+	}
+	sort.Strings(topLevelDirs)
+
+	// Cap at maxOverviewFallbackPages.
+	if len(topLevelDirs) > maxOverviewFallbackPages {
+		topLevelDirs = topLevelDirs[:maxOverviewFallbackPages]
+	}
+
+	graphByPkg := make(map[string]PackageGraphInfo)
+	for _, g := range pkgGraph {
+		graphByPkg[g.Package] = g
+	}
+
+	var pages []PlannedPage
+	for _, topDir := range topLevelDirs {
+		gi := graphByPkg[topDir]
+		archInput := baseInput
+		archInput.Audience = quality.AudienceEngineers
+
+		pages = append(pages, PlannedPage{
+			ID:         DetailPageID(r.repoID, topDir),
+			TemplateID: "architecture",
+			Audience:   quality.AudienceEngineers,
+			Input:      archInput,
+			PackageInfo: &ArchitecturePackageInfo{
+				Package: topDir,
+				Callers: gi.Callers,
+				Callees: gi.Callees,
+			},
+		})
+	}
+	return pages
+}
+
+// resolveRepoWidePages generates the shared repo-wide pages (api_reference,
+// system_overview, glossary) that are identical across Overview and Detailed modes.
+func (r *TaxonomyResolver) resolveRepoWidePages(baseInput templates.GenerateInput) []PlannedPage {
+	apiInput := baseInput
+	apiInput.Audience = quality.AudienceEngineers
+
+	sysInput := baseInput
+	sysInput.Audience = quality.AudienceProduct
+
+	glossInput := baseInput
+	glossInput.Audience = quality.AudienceEngineers
+
+	return []PlannedPage{
+		{
+			ID:         apiRefPageID(r.repoID),
+			TemplateID: "api_reference",
+			Audience:   quality.AudienceEngineers,
+			Input:      apiInput,
+		},
+		{
+			ID:         sysOverviewPageID(r.repoID),
+			TemplateID: "system_overview",
+			Audience:   quality.AudienceProduct,
+			Input:      sysInput,
+		},
+		{
+			ID:         glossaryPageID(r.repoID),
+			TemplateID: "glossary",
+			Audience:   quality.AudienceEngineers,
+			Input:      glossInput,
+		},
+	}
 }
 
 func apiRefPageID(repoID string) string {

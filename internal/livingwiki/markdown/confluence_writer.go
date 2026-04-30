@@ -825,19 +825,25 @@ func (cw *ConfluenceWriter) ensureHierarchy(ctx context.Context) error {
 // parentExternalIDForPage determines which parent page a new content page
 // should be created under, expressed as a SourceBridge external ID.
 //
-// Routing rules (v1):
-//   - Pages whose ID matches <repoID>.arch.* → Architecture section
+// Routing rules (v2 — Phase 4a):
+//   - Pages whose ID matches <repoID>.arch.*     → Architecture section (legacy)
+//   - Pages whose ID matches <repoID>.overview.* → Architecture section (Overview mode)
+//   - Pages whose ID matches <repoID>.detail.*   → Architecture section (Detailed mode)
 //   - All other pages → root page
 //
+// All three architecture prefixes route to the same Architecture section so the
+// hierarchy is consistent regardless of which mode generated the page.
 // Returns "" when hierarchy is disabled (no RepoID configured).
 func (cw *ConfluenceWriter) parentExternalIDForPage(pageID string) string {
 	rootID, archID := cw.cfg.hierarchyExternalIDs()
 	if rootID == "" {
 		return ""
 	}
-	prefix := cw.cfg.RepoID + ".arch."
-	if strings.HasPrefix(pageID, prefix) {
-		return archID
+	repoPrefix := cw.cfg.RepoID + "."
+	for _, archPrefix := range []string{"arch.", "overview.", "detail."} {
+		if strings.HasPrefix(pageID, repoPrefix+archPrefix) {
+			return archID
+		}
 	}
 	return rootID
 }
@@ -970,9 +976,22 @@ func HumanizePageID(externalID string) string {
 	}
 
 	// Special case: arch.* → "Architecture: <path with / separators>"
+	// (legacy prefix — kept for backward compat with pre-Phase-4a pages)
 	if parts[0] == "arch" && len(parts) > 1 {
 		rest := strings.Join(parts[1:], "/")
 		return "Architecture: " + rest
+	}
+
+	// Phase 4a: overview.* → "Overview: <slug with / separators>"
+	if parts[0] == "overview" && len(parts) > 1 {
+		rest := strings.Join(parts[1:], "/")
+		return "Overview: " + rest
+	}
+
+	// Phase 4a: detail.* → "Detail: <path with / separators>"
+	if parts[0] == "detail" && len(parts) > 1 {
+		rest := strings.Join(parts[1:], "/")
+		return "Detail: " + rest
 	}
 
 	// Special case: well-known single-segment IDs.

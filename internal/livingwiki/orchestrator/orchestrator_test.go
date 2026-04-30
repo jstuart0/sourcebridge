@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sourcebridge/sourcebridge/internal/clustering"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/manifest"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
@@ -937,6 +938,298 @@ func findSamplesDir(t *testing.T) string {
 		t.Fatalf("creating samples dir: %v", err)
 	}
 	return dir
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4a: Overview / Detailed mode taxonomy tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// threeClusterSummaries returns three ClusterSummary values for use in tests.
+func threeClusterSummaries() []clustering.ClusterSummary {
+	return []clustering.ClusterSummary{
+		{Label: "auth_subsystem", MemberPackages: []string{"internal/auth"}},
+		{Label: "billing_subsystem", MemberPackages: []string{"internal/billing"}},
+		{Label: "api_gateway", MemberPackages: []string{"internal/api"}},
+	}
+}
+
+// multiPackageGraph returns symbols spread across 30 packages under 5 top-level dirs.
+type multiPackageGraph struct{}
+
+func (multiPackageGraph) ExportedSymbols(_ string) ([]templates.Symbol, error) {
+	var syms []templates.Symbol
+	topDirs := []string{"cmd", "internal", "pkg", "tools", "vendor"}
+	// 6 packages per top-level dir → 30 packages total.
+	for _, dir := range topDirs {
+		for i := 0; i < 6; i++ {
+			syms = append(syms, templates.Symbol{
+				Package:    fmt.Sprintf("%s/sub%d", dir, i),
+				Name:       fmt.Sprintf("Sym%d", i),
+				Signature:  "func Sym()",
+				DocComment: "A symbol.",
+				FilePath:   fmt.Sprintf("%s/sub%d/file.go", dir, i),
+				StartLine:  1,
+				EndLine:    5,
+			})
+		}
+	}
+	return syms, nil
+}
+
+// TestResolveOverviewEmitsClusterScopedPages verifies that ResolveOverview produces
+// one overview.* page per cluster plus the 3 repo-wide pages.
+func TestResolveOverviewEmitsClusterScopedPages(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	resolver := orchestrator.NewTaxonomyResolver("test-repo", twoPackageGraph{}, nil, nil)
+	clusters := threeClusterSummaries()
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+
+	pages, err := resolver.ResolveOverview(ctx, nil, clusters, now)
+	if err != nil {
+		t.Fatalf("ResolveOverview: %v", err)
+	}
+
+	// 3 cluster pages + 3 repo-wide = 6 total.
+	if len(pages) != 6 {
+		t.Errorf("expected 6 pages, got %d", len(pages))
+		for _, p := range pages {
+			t.Logf("  %q (%s)", p.ID, p.TemplateID)
+		}
+	}
+
+	const repoPrefix = "test-repo.overview."
+	for _, cs := range clusters {
+		wantID := orchestrator.OverviewPageID("test-repo", cs.Label)
+		if !strings.HasPrefix(wantID, repoPrefix) {
+			t.Errorf("OverviewPageID(%q) = %q, expected %q prefix", cs.Label, wantID, repoPrefix)
+		}
+		found := false
+		for _, p := range pages {
+			if p.ID == wantID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("page %q not found in results", wantID)
+		}
+	}
+}
+
+// TestResolveDetailedEmitsPackageScopedPages verifies that ResolveDetailed with
+// clusters emits one detail.* page per cluster plus the 3 repo-wide pages.
+func TestResolveDetailedEmitsPackageScopedPages(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	resolver := orchestrator.NewTaxonomyResolver("test-repo", twoPackageGraph{}, nil, nil)
+	clusters := threeClusterSummaries()
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+
+	pages, err := resolver.ResolveDetailed(ctx, nil, clusters, now)
+	if err != nil {
+		t.Fatalf("ResolveDetailed: %v", err)
+	}
+
+	// 3 cluster pages + 3 repo-wide = 6 total.
+	if len(pages) != 6 {
+		t.Errorf("expected 6 pages, got %d", len(pages))
+		for _, p := range pages {
+			t.Logf("  %q (%s)", p.ID, p.TemplateID)
+		}
+	}
+
+	const repoPrefix = "test-repo.detail."
+	for _, cs := range clusters {
+		wantID := orchestrator.DetailPageID("test-repo", cs.Label)
+		if !strings.HasPrefix(wantID, repoPrefix) {
+			t.Errorf("DetailPageID(%q) = %q, expected %q prefix", cs.Label, wantID, repoPrefix)
+		}
+		found := false
+		for _, p := range pages {
+			if p.ID == wantID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("page %q not found in results", wantID)
+		}
+	}
+}
+
+// TestResolveBothModesDedupesRepoWidePages verifies that calling ResolveForMode
+// for both overview and detailed produces no duplicated repo-wide page IDs.
+func TestResolveBothModesDedupesRepoWidePages(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	resolver := orchestrator.NewTaxonomyResolver("test-repo", twoPackageGraph{}, nil, nil)
+	clusters := threeClusterSummaries()
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+
+	ovPages, err := resolver.ResolveForMode(ctx, "lw_overview", nil, clusters, now)
+	if err != nil {
+		t.Fatalf("ResolveForMode(lw_overview): %v", err)
+	}
+	detPages, err := resolver.ResolveForMode(ctx, "lw_detailed", nil, clusters, now)
+	if err != nil {
+		t.Fatalf("ResolveForMode(lw_detailed): %v", err)
+	}
+
+	repoWideTemplates := map[string]bool{
+		"api_reference":   true,
+		"system_overview": true,
+		"glossary":        true,
+	}
+
+	// Combine all pages and count how many times each repo-wide template appears.
+	combined := append(ovPages, detPages...)
+	counts := make(map[string]int)
+	for _, p := range combined {
+		if repoWideTemplates[p.TemplateID] {
+			counts[p.TemplateID]++
+		}
+	}
+	// Each repo-wide template should appear in each mode exactly once → 2 total when combined.
+	for tmpl := range repoWideTemplates {
+		if counts[tmpl] != 2 {
+			t.Errorf("template %q appears %d times across both modes, expected 2 (one per mode)", tmpl, counts[tmpl])
+		}
+	}
+
+	// Verify the IDs within each mode are unique.
+	for _, pages := range [][]orchestrator.PlannedPage{ovPages, detPages} {
+		seen := make(map[string]bool)
+		for _, p := range pages {
+			if seen[p.ID] {
+				t.Errorf("duplicate page ID %q in result set", p.ID)
+			}
+			seen[p.ID] = true
+		}
+	}
+}
+
+// TestResolveDetailedFallbackWhenNoClusters verifies that Detailed mode emits
+// top-level-dir pages under the detail. prefix when clusters are absent.
+func TestResolveDetailedFallbackWhenNoClusters(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// multiPackageGraph has 30 packages under 5 top-level dirs (cmd, internal, pkg, tools, vendor).
+	resolver := orchestrator.NewTaxonomyResolver("test-repo", multiPackageGraph{}, nil, nil)
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+
+	pages, err := resolver.ResolveDetailed(ctx, nil, nil /* no clusters */, now)
+	if err != nil {
+		t.Fatalf("ResolveDetailed (no clusters): %v", err)
+	}
+
+	archPages := filterByTemplate(pages, "architecture")
+
+	// 5 top-level dirs → 5 detail.* architecture pages.
+	if len(archPages) != 5 {
+		t.Errorf("expected 5 architecture pages for 5 top-level dirs, got %d", len(archPages))
+		for _, p := range archPages {
+			t.Logf("  %q", p.ID)
+		}
+	}
+
+	// All architecture pages must carry the detail. prefix.
+	for _, p := range archPages {
+		if !strings.HasPrefix(p.ID, "test-repo.detail.") {
+			t.Errorf("architecture page %q missing detail. prefix", p.ID)
+		}
+	}
+
+	// Expected top dirs (alphabetical order, capped at 25 — here only 5).
+	expectedTopDirs := []string{"cmd", "internal", "pkg", "tools", "vendor"}
+	for _, dir := range expectedTopDirs {
+		wantID := orchestrator.DetailPageID("test-repo", dir)
+		found := false
+		for _, p := range archPages {
+			if p.ID == wantID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected page %q not found; arch pages: %v",
+				wantID, pageIDs(archPages))
+		}
+	}
+}
+
+// TestResolveDetailedFallbackCappedAt25 verifies that the top-level-dir fallback
+// emits at most 25 architecture pages even when more than 25 dirs are present.
+func TestResolveDetailedFallbackCappedAt25(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// Build a graph with 30 distinct top-level dirs.
+	resolver := orchestrator.NewTaxonomyResolver("test-repo", manyTopDirsGraph{}, nil, nil)
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+
+	pages, err := resolver.ResolveDetailed(ctx, nil, nil, now)
+	if err != nil {
+		t.Fatalf("ResolveDetailed (30 dirs): %v", err)
+	}
+
+	archPages := filterByTemplate(pages, "architecture")
+	if len(archPages) > 25 {
+		t.Errorf("expected at most 25 architecture pages, got %d", len(archPages))
+	}
+}
+
+// manyTopDirsGraph returns one symbol per unique top-level dir (30 dirs total).
+type manyTopDirsGraph struct{}
+
+func (manyTopDirsGraph) ExportedSymbols(_ string) ([]templates.Symbol, error) {
+	var syms []templates.Symbol
+	for i := 0; i < 30; i++ {
+		syms = append(syms, templates.Symbol{
+			Package:    fmt.Sprintf("dir%02d/sub", i),
+			Name:       "Sym",
+			Signature:  "func Sym()",
+			DocComment: "A symbol.",
+			FilePath:   fmt.Sprintf("dir%02d/sub/file.go", i),
+			StartLine:  1,
+			EndLine:    2,
+		})
+	}
+	return syms, nil
+}
+
+// TestOverviewPageIDPrefix verifies the OverviewPageID helper produces the correct format.
+func TestOverviewPageIDPrefix(t *testing.T) {
+	t.Parallel()
+	got := orchestrator.OverviewPageID("repo", "auth_subsystem")
+	want := "repo.overview.auth_subsystem"
+	if got != want {
+		t.Errorf("OverviewPageID = %q, want %q", got, want)
+	}
+}
+
+// TestDetailPageIDPrefix verifies the DetailPageID helper produces the correct format,
+// including replacing "/" with "." in the slug.
+func TestDetailPageIDPrefix(t *testing.T) {
+	t.Parallel()
+	got := orchestrator.DetailPageID("repo", "internal/api/middleware")
+	want := "repo.detail.internal.api.middleware"
+	if got != want {
+		t.Errorf("DetailPageID = %q, want %q", got, want)
+	}
+}
+
+// pageIDs returns the IDs of all pages in a slice (for test failure diagnostics).
+func pageIDs(pages []orchestrator.PlannedPage) []string {
+	ids := make([]string, len(pages))
+	for i, p := range pages {
+		ids[i] = p.ID
+	}
+	return ids
 }
 
 // writeSampleFile writes a sample wiki file under samples/wiki-example/.

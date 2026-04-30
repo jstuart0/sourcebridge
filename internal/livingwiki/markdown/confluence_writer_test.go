@@ -1189,3 +1189,61 @@ func TestConfluence_Hierarchy_DisabledWhenNoRepoID(t *testing.T) {
 		t.Error("content page was not written when hierarchy is disabled")
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4a: HumanizePageID prefix tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestHumanizePageIDOverviewPrefix verifies that HumanizePageID converts an
+// overview.* page ID into an "Overview: <slug>" title.
+func TestHumanizePageIDOverviewPrefix(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		id   string
+		want string
+	}{
+		// No-repo-prefix form (used when repoID == "").
+		{"overview.auth_subsystem", "Overview: auth_subsystem"},
+		// UUID repo-id prefix gets stripped before branch matching.
+		{"a1b2c3d4-e5f6-7890-abcd-ef1234567890.overview.auth_subsystem", "Overview: auth_subsystem"},
+		// Multi-segment slug (slashes were replaced by dots in the page ID).
+		{"overview.internal.auth", "Overview: internal/auth"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.id, func(t *testing.T) {
+			t.Parallel()
+			got := markdown.HumanizePageID(tc.id)
+			if got != tc.want {
+				t.Errorf("HumanizePageID(%q) = %q, want %q", tc.id, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHumanizePageIDDetailPrefix verifies that HumanizePageID converts a
+// detail.* page ID into a "Detail: <path>" title, restoring "/" separators.
+func TestHumanizePageIDDetailPrefix(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		id   string
+		want string
+	}{
+		// No-repo-prefix form.
+		{"detail.internal.api.middleware", "Detail: internal/api/middleware"},
+		// UUID repo-id prefix gets stripped.
+		{"a1b2c3d4-e5f6-7890-abcd-ef1234567890.detail.internal.api.middleware", "Detail: internal/api/middleware"},
+		// Single-segment slug.
+		{"detail.cmd", "Detail: cmd"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.id, func(t *testing.T) {
+			t.Parallel()
+			got := markdown.HumanizePageID(tc.id)
+			if got != tc.want {
+				t.Errorf("HumanizePageID(%q) = %q, want %q", tc.id, got, tc.want)
+			}
+		})
+	}
+}
