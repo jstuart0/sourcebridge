@@ -11,9 +11,9 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
 import { authFetch } from "@/lib/auth-fetch";
 
-import { InlineRenamePill } from "./inline-rename-pill";
 import { ProfileEditor, type ProfileResponse } from "./profile-editor";
 import { ProfileList } from "./profile-list";
+import { ProfileNamePill } from "./profile-name-pill";
 import { SwitchProfileDialog } from "./switch-profile-dialog";
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -478,34 +478,19 @@ export default function AdminLLMPage() {
               >
                 Active: {activeProfile.name}
               </span>
-            ) : !isMultiProfileMode && profiles && profiles.length === 1 ? (
-              // Slice 4 polish (UX intake §2.2): the N=1 header pill is
-              // an inline-rename affordance. Click swaps to <input>;
-              // Enter/blur commits via PUT /admin/llm-profiles/<id>.
-              // The data-testid stays "header-profile-pill" on the
-              // outer span so existing slice-2 tests still locate it,
-              // and the new component exposes its own granular test-ids.
-              <span data-testid="header-profile-pill">
-                <InlineRenamePill
-                  profileId={profiles[0].id}
-                  currentName={headerActiveProfileName}
-                  prefix="Profile: "
-                  onRenamed={() => {
-                    loadAll();
-                  }}
-                  testIdPrefix="header-profile-pill"
-                />
-              </span>
-            ) : !isMultiProfileMode ? (
-              // Edge case: profiles list is null/empty mid-load. Fall
-              // back to the static pill until the list arrives.
-              <span
-                data-testid="header-profile-pill"
-                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-raised)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]"
-                title="Editing the workspace's current LLM profile"
-              >
-                Profile: {headerActiveProfileName}
-              </span>
+            ) : !isMultiProfileMode && profiles && profiles[0] ? (
+              // Slice 4 inline-rename UX polish: in N=1 the static
+              // pill becomes a click-to-edit affordance. The editor
+              // grid below intentionally hides the name field in
+              // N=1, so this pill is the only rename surface for
+              // single-profile workspaces.
+              <ProfileNamePill
+                profileId={profiles[0].id}
+                currentName={headerActiveProfileName}
+                onRenamed={loadAll}
+                disabled={editorDisabled}
+                testIdPrefix="header-profile-pill"
+              />
             ) : null}
             {!isMultiProfileMode && (
               <Button

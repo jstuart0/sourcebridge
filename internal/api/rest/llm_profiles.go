@@ -14,8 +14,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/maskutil"
 )
+
+// llmListActiveFilterAllSubsystems returns a ListFilter that asks the
+// store for every active job across all subsystems. Used by the
+// active-job-count endpoint (slice 4 polish). Returning an explicit
+// helper makes the intent legible at the call site.
+func llmListActiveFilterAllSubsystems() llm.ListFilter {
+	return llm.ListFilter{}
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Profile-aware admin REST contract (LLM provider profiles slice 1)
@@ -343,6 +352,39 @@ func (s *Server) handleActivateLLMProfile(w http.ResponseWriter, r *http.Request
 		s.llmResolver.InvalidateLocal()
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleActiveLLMJobCount returns the count of currently-active
+// LLM-backed jobs, used by the SwitchProfileDialog so an admin sees
+// how many in-flight calls would keep using the OLD profile if they
+// proceeded with a switch. The number is informational — switching
+// does not interrupt jobs (the FrozenResolver pattern means in-flight
+// jobs already have a frozen credential snapshot for their lifetime).
+//
+// Slice 4 polish (UX intake §4.1 #2). Read-only, no auth-state
+// mutation. Returns 0 when the job store is not wired.
+//
+// "LLM-backed" is the (Status pending|generating) AND (llm_provider
+// non-empty) intersection — the clustering subsystem reuses the queue
+// machinery but does not make LLM calls; it has llm_provider=""
+// throughout.
+func (s *Server) handleActiveLLMJobCount(w http.ResponseWriter, r *http.Request) {
+	if s.jobStore == nil {
+		writeJSON(w, http.StatusOK, map[string]int{"count": 0})
+		return
+	}
+	jobs := s.jobStore.ListActive(llmListActiveFilterAllSubsystems())
+	count := 0
+	for _, j := range jobs {
+		if j == nil {
+			continue
+		}
+		if j.LLMProvider == "" {
+			continue
+		}
+		count++
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"count": count})
 }
 
 // canonicalProfileID accepts either a bare record id ("default-migrated")

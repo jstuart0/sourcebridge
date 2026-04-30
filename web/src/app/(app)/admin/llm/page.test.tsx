@@ -206,7 +206,9 @@ describe("AdminLLMPage — N=1 layout (progressive disclosure)", () => {
 
     // Header has the [+ Add profile] button + the Profile pill.
     expect(screen.getByTestId("header-add-profile")).toBeInTheDocument();
-    expect(screen.getByTestId("header-profile-pill")).toBeInTheDocument();
+    // Slice 4 inline-rename UX: the pill is now an editable
+    // ProfileNamePill component (display mode by default).
+    expect(screen.getByTestId("header-profile-pill-display")).toBeInTheDocument();
   });
 
   it("uses legacy GET active_profile_name for the header pill (slice-1-flag #2)", async () => {
@@ -237,9 +239,11 @@ describe("AdminLLMPage — N=1 layout (progressive disclosure)", () => {
 
     render(<AdminLLMPage />);
     await waitFor(() => {
-      expect(screen.getByTestId("header-profile-pill")).toBeInTheDocument();
+      // Slice 4 inline-rename UX: pill is now an editable
+      // ProfileNamePill (display mode is the -display testid).
+      expect(screen.getByTestId("header-profile-pill-display")).toBeInTheDocument();
     });
-    expect(screen.getByTestId("header-profile-pill").textContent).toMatch(
+    expect(screen.getByTestId("header-profile-pill-display").textContent).toMatch(
       /Default \(legacy-source-of-truth\)/,
     );
   });

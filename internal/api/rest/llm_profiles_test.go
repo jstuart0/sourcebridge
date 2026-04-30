@@ -16,6 +16,27 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/sourcebridge/sourcebridge/internal/config"
+	"github.com/sourcebridge/sourcebridge/internal/llm"
+)
+
+// Local aliases used by the slice-4 active-job-count tests so the
+// new test cases don't have to rename existing references throughout
+// the file.
+type (
+	llmgo_Job       = llm.Job
+	llmgo_JobStatus = llm.JobStatus
+	llmgo_Subsystem = llm.Subsystem
+)
+
+// nolint:unused
+var (
+	llmgo_NewMemStore        = llm.NewMemStore
+	llmgo_StatusPending      = llm.StatusPending
+	llmgo_StatusGenerating   = llm.StatusGenerating
+	llmgo_StatusReady        = llm.StatusReady
+	llmgo_StatusFailed       = llm.StatusFailed
+	llmgo_SubsystemKnowledge = llm.SubsystemKnowledge
+	llmgo_SubsystemClustering = llm.SubsystemClustering
 )
 
 // minimalConfig returns the bare-minimum *config.Config needed by the
@@ -196,6 +217,10 @@ func newServerWithProfileStore(t *testing.T, fake *fakeProfileStoreAdapter) *Ser
 	r := chi.NewRouter()
 	r.Get("/api/v1/admin/llm-profiles", s.handleListLLMProfiles)
 	r.Post("/api/v1/admin/llm-profiles", s.handleCreateLLMProfile)
+	// Slice 4: in-flight LLM-job count, route ordered before {id}
+	// to avoid being shadowed by the chi pattern match (mirrors the
+	// router.go ordering exactly).
+	r.Get("/api/v1/admin/llm-profiles/active-job-count", s.handleActiveLLMJobCount)
 	r.Get("/api/v1/admin/llm-profiles/{id}", s.handleGetLLMProfile)
 	r.Put("/api/v1/admin/llm-profiles/{id}", s.handleUpdateLLMProfile)
 	r.Delete("/api/v1/admin/llm-profiles/{id}", s.handleDeleteLLMProfile)
@@ -683,5 +708,63 @@ func TestHandler_LegacyGetLLMConfigBannerOnMissingActive(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	if !body.ActiveProfileMissing {
 		t.Errorf("active_profile_missing: got false, want true")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Slice 4 polish: in-flight LLM-job count
+// ─────────────────────────────────────────────────────────────────────
+
+func TestHandler_ActiveLLMJobCount_NoStoreReturnsZero(t *testing.T) {
+	// When the job store is not wired (e.g. embedded mode without
+	// SurrealDB), the endpoint must not 500 — it returns 0 so the
+	// SwitchProfileDialog renders the no-warning path.
+	fake := newFakeStoreAdapter()
+	s := newServerWithProfileStore(t, fake)
+	// jobStore left nil deliberately.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/llm-profiles/active-job-count", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]int
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["count"] != 0 {
+		t.Errorf("count: got %d, want 0", body["count"])
+	}
+}
+
+func TestHandler_ActiveLLMJobCount_FiltersByLLMProvider(t *testing.T) {
+	// LLM-backed = (Status pending|generating) AND (LLMProvider != "").
+	// The clustering subsystem reuses the queue but never makes LLM
+	// calls, so its jobs have LLMProvider="" and must NOT count.
+	fake := newFakeStoreAdapter()
+	store := llmgo_NewMemStore()
+	for _, j := range []*llmgo_Job{
+		// Active + LLM-backed (counts):
+		{ID: "j1", Status: llmgo_StatusPending, LLMProvider: "openai", Subsystem: llmgo_SubsystemKnowledge, JobType: "x"},
+		{ID: "j2", Status: llmgo_StatusGenerating, LLMProvider: "anthropic", Subsystem: llmgo_SubsystemKnowledge, JobType: "x"},
+		// Active + non-LLM (does not count — clustering reuses queue):
+		{ID: "j3", Status: llmgo_StatusGenerating, LLMProvider: "", Subsystem: llmgo_SubsystemClustering, JobType: "x"},
+		// Terminal + LLM-backed (does not count):
+		{ID: "j4", Status: llmgo_StatusReady, LLMProvider: "openai", Subsystem: llmgo_SubsystemKnowledge, JobType: "x"},
+		{ID: "j5", Status: llmgo_StatusFailed, LLMProvider: "ollama", Subsystem: llmgo_SubsystemKnowledge, JobType: "x"},
+	} {
+		_, _ = store.Create(j)
+	}
+	s := newServerWithProfileStore(t, fake)
+	s.jobStore = store
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/llm-profiles/active-job-count", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]int
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["count"] != 2 {
+		t.Errorf("count: got %d, want 2 (j1 + j2 are active + LLM-backed; j3 is active but non-LLM; j4/j5 are terminal)", body["count"])
 	}
 }

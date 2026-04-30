@@ -9,12 +9,20 @@ import { Button } from "@/components/ui/button";
 import { authFetch } from "@/lib/auth-fetch";
 
 // ─────────────────────────────────────────────────────────────────────────
-// Switch-profile confirmation dialog — slice 2.
+// Switch-profile confirmation dialog — slice 2 + slice 4 polish.
 //
 // Modal text matches ruby UX §4.1 VERBATIM. The intake explicitly
 // flagged "weakening this language ('are you sure?') loses the user's
 // actual question (what happens to my running jobs?)". So the copy
 // here is the contract; tests assert it.
+//
+// Slice 4 polish (UX intake §4.1 #2): when N > 0 LLM-backed jobs are
+// currently active, the modal mentions the count above the standard
+// copy so the admin knows how many in-flight calls will keep running
+// against the OLD profile. The count comes from a small read-only
+// GET /admin/llm-profiles/active-job-count endpoint. The fetch is
+// best-effort: a failure or absent count does not block confirmation
+// (the standard copy still answers "what happens to my running jobs?").
 //
 // Activates the picked profile via POST /admin/llm-profiles/{id}/activate.
 // On success calls onActivated; on cancel or close, no-op.
@@ -55,11 +63,39 @@ export function SwitchProfileDialog({
 }: SwitchProfileDialogProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Slice 4 polish: in-flight LLM-job count.
+  // null = not yet fetched (or fetch failed); a number = render the
+  // job-count line. Negative or 0 → render the "no jobs in flight"
+  // optimistic message. The fetch is best-effort: a failure does NOT
+  // block confirmation.
+  const [activeJobCount, setActiveJobCount] = useState<number | null>(null);
 
   useEffect(() => {
     if (open) {
       setError(null);
       setSubmitting(false);
+      setActiveJobCount(null);
+      // Best-effort job-count probe. Cap latency at the network
+      // default; on failure (or 503 in embedded mode) leave the count
+      // null so the modal renders without the count line.
+      let cancelled = false;
+      void (async () => {
+        try {
+          const res = await authFetch(
+            "/api/v1/admin/llm-profiles/active-job-count",
+          );
+          if (!res.ok) return;
+          const data = (await res.json()) as { count?: number };
+          if (!cancelled && typeof data.count === "number") {
+            setActiveJobCount(data.count);
+          }
+        } catch {
+          /* best-effort; ignore */
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
   }, [open]);
 
@@ -115,6 +151,19 @@ export function SwitchProfileDialog({
             chosen specifically to answer the user's actual question
             (what happens to running jobs?) without being scary. */}
         <div className="mt-3 space-y-3 text-sm text-[var(--text-secondary)]" data-testid="switch-profile-body">
+          {activeJobCount !== null && activeJobCount > 0 ? (
+            <p
+              data-testid="switch-profile-job-count"
+              className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-[var(--text-primary)]"
+            >
+              <strong>
+                {activeJobCount} {activeJobCount === 1 ? "LLM job is" : "LLM jobs are"} currently
+                in flight.
+              </strong>{" "}
+              {activeJobCount === 1 ? "It" : "They"} will keep using{" "}
+              <strong>{fromProfileName}</strong> until completion.
+            </p>
+          ) : null}
           <p>
             Switching from <strong className="text-[var(--text-primary)]">{fromProfileName}</strong> to{" "}
             <strong className="text-[var(--text-primary)]">{toProfileName}</strong>. Jobs already running keep

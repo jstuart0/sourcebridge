@@ -766,6 +766,12 @@ func (s *Server) setupRouter() {
 		// advances on every write (codex-H2 / r1d).
 		r.Get("/api/v1/admin/llm-profiles", s.handleListLLMProfiles)
 		r.Post("/api/v1/admin/llm-profiles", s.handleCreateLLMProfile)
+		// Slice 4 polish: count of currently-active LLM-backed jobs.
+		// Used by the SwitchProfileDialog so an admin sees how many
+		// in-flight jobs are running on the current profile when they
+		// confirm a switch. Read-only; route ordered before {id}
+		// to avoid being shadowed by canonicalProfileID parsing.
+		r.Get("/api/v1/admin/llm-profiles/active-job-count", s.handleActiveLLMJobCount)
 		r.Get("/api/v1/admin/llm-profiles/{id}", s.handleGetLLMProfile)
 		r.Put("/api/v1/admin/llm-profiles/{id}", s.handleUpdateLLMProfile)
 		r.Delete("/api/v1/admin/llm-profiles/{id}", s.handleDeleteLLMProfile)
