@@ -29,6 +29,7 @@ type Config struct {
 	Trash         TrashConfig         `mapstructure:"trash"`
 	QA            QAConfig            `mapstructure:"qa"`
 	LivingWiki    LivingWikiConfig    `mapstructure:"living_wiki"`
+	ChangeWatch   ChangeWatchConfig   `mapstructure:"change_watch"`
 }
 
 // ComprehensionConfig holds tunables for the LLM job orchestrator and
@@ -368,6 +369,64 @@ type LivingWikiConfig struct {
 	MaxConcurrentJobsPerTenant int `mapstructure:"max_concurrent_jobs_per_tenant"`
 }
 
+// ChangeWatchConfig controls the in-process change-watch feedback loop
+// (Phase 1.C of the MCP-edits plan,
+// thoughts/shared/plans/2026-04-29-mcp-edits-feedback-loop.md).
+//
+// Environment variable prefix: SOURCEBRIDGE_CHANGE_WATCH_*
+//
+// The feedback loop is the closed pipeline that detects changes (passive
+// fsnotify or in-process record_change), routes them through a per-repo
+// rate-limited router with delta-only guardrails, and surgically
+// re-derives the symbol tier so subsequent MCP reads return fresh
+// answers with honest freshness metadata. Default off through Phase 1
+// burn-in; flipped at the end of Phase 1.E.
+//
+// Example (config.toml):
+//
+//	[change_watch]
+//	enabled                = false
+//	debounce_ms            = 2000
+//	rate_limit_per_min     = 30
+//	repo_breaker_per_min   = 60
+//	t0_budget_ms           = 100
+type ChangeWatchConfig struct {
+	// Enabled is the umbrella feature flag that gates the watcher and
+	// the router. When false (the Phase 1.C default), the watcher does
+	// not start and the router accepts no events. The freshness
+	// envelope on MCP responses is independent of this flag — it ships
+	// enabled (additive metadata) so MCP consumers can rely on the
+	// contract from day one.
+	// SOURCEBRIDGE_CHANGE_WATCH_ENABLED.
+	Enabled bool `mapstructure:"enabled"`
+
+	// DebounceMs is the per-repo debounce window for fsnotify events.
+	// Default 2000ms (Balanced mode). Phase 4 makes this per-repo
+	// configurable via the repository-mode column (Fast=500ms,
+	// Balanced=2000ms, Strict=30000ms); for 1.C only the Balanced
+	// default is wired. SOURCEBRIDGE_CHANGE_WATCH_DEBOUNCE_MS.
+	DebounceMs int `mapstructure:"debounce_ms"`
+
+	// RateLimitPerMin caps router events per (repository, source.kind)
+	// per minute. Default 30. Per-kind throttle applied alongside the
+	// per-repo aggregate breaker below.
+	// SOURCEBRIDGE_CHANGE_WATCH_RATE_LIMIT_PER_MIN.
+	RateLimitPerMin int `mapstructure:"rate_limit_per_min"`
+
+	// RepoBreakerPerMin trips the per-repo aggregate circuit breaker
+	// (across all source.kind values combined) when sustained traffic
+	// stays above this rate for 5 consecutive minutes. Default 60.
+	// SOURCEBRIDGE_CHANGE_WATCH_REPO_BREAKER_PER_MIN.
+	RepoBreakerPerMin int `mapstructure:"repo_breaker_per_min"`
+
+	// T0BudgetMs is the hard ceiling for synchronous T0 refresh on read
+	// (the IndexFiles call invoked from the read path when the requested
+	// file is dirty). Beyond this budget the router serves current data
+	// with freshness.partial_refresh=true. Default 100ms.
+	// SOURCEBRIDGE_CHANGE_WATCH_T0_BUDGET_MS.
+	T0BudgetMs int `mapstructure:"t0_budget_ms"`
+}
+
 // Defaults returns a Config with all default values.
 func Defaults() *Config {
 	return &Config{
@@ -457,6 +516,13 @@ func Defaults() *Config {
 			EventTimeout:               "5m",
 			SchedulerInterval:          "15m",
 			MaxConcurrentJobsPerTenant: 5,
+		},
+		ChangeWatch: ChangeWatchConfig{
+			Enabled:           false, // umbrella flag default-off through Phase 1 burn-in
+			DebounceMs:        2000,  // Balanced default; Phase 4 wires the per-repo mode column
+			RateLimitPerMin:   30,    // per-(repo, source.kind) throttle
+			RepoBreakerPerMin: 60,    // per-repo aggregate breaker (5min sustained)
+			T0BudgetMs:        100,   // T0 sync-refresh-on-read hard ceiling
 		},
 	}
 }
@@ -549,6 +615,11 @@ func Load() (*Config, error) {
 	v.SetDefault("living_wiki.notion_webhook_secret", "")
 	v.SetDefault("living_wiki.scheduler_interval", cfg.LivingWiki.SchedulerInterval)
 	v.SetDefault("living_wiki.max_concurrent_jobs_per_tenant", cfg.LivingWiki.MaxConcurrentJobsPerTenant)
+	v.SetDefault("change_watch.enabled", cfg.ChangeWatch.Enabled)
+	v.SetDefault("change_watch.debounce_ms", cfg.ChangeWatch.DebounceMs)
+	v.SetDefault("change_watch.rate_limit_per_min", cfg.ChangeWatch.RateLimitPerMin)
+	v.SetDefault("change_watch.repo_breaker_per_min", cfg.ChangeWatch.RepoBreakerPerMin)
+	v.SetDefault("change_watch.t0_budget_ms", cfg.ChangeWatch.T0BudgetMs)
 
 	// Try reading config file (not required)
 	if err := v.ReadInConfig(); err != nil {
@@ -623,6 +694,18 @@ func (c *Config) Validate() error {
 		if c.Worker.TLS.CAPath == "" {
 			return fmt.Errorf("worker.tls.ca_path is required when worker.tls.enabled is true")
 		}
+	}
+	if c.ChangeWatch.DebounceMs < 0 {
+		return fmt.Errorf("invalid change_watch.debounce_ms: %d (must be >= 0)", c.ChangeWatch.DebounceMs)
+	}
+	if c.ChangeWatch.RateLimitPerMin < 0 {
+		return fmt.Errorf("invalid change_watch.rate_limit_per_min: %d (must be >= 0)", c.ChangeWatch.RateLimitPerMin)
+	}
+	if c.ChangeWatch.RepoBreakerPerMin < 0 {
+		return fmt.Errorf("invalid change_watch.repo_breaker_per_min: %d (must be >= 0)", c.ChangeWatch.RepoBreakerPerMin)
+	}
+	if c.ChangeWatch.T0BudgetMs < 0 {
+		return fmt.Errorf("invalid change_watch.t0_budget_ms: %d (must be >= 0)", c.ChangeWatch.T0BudgetMs)
 	}
 	return nil
 }
