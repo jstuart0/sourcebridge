@@ -92,6 +92,36 @@ ready-made starting point without copy-pasting manifests.
   Generic kustomize base at `deploy/kubernetes/base/` for OSS Kubernetes
   deployments. `dev` branch added to the push trigger.
 
+- **MCP-edits feedback-loop scaffolding (Phase 1.A — refactors only).** Five
+  small public-API changes that downstream Phase 1.B–1.E slices will compile
+  against. No behavior change for existing call sites; the umbrella
+  `SOURCEBRIDGE_CHANGE_WATCH_ENABLED` flag flips with the watcher in 1.C.
+  - `git.IsIgnoredPath(repoPath, relPath string) bool` — extracted from
+    `ScanRepository`'s inline filtering so the upcoming change-watch pipeline
+    and the indexer share one source of truth for ignored paths.
+  - `git.HeadRef(repoPath string) (string, error)` — thin wrapper over
+    `GetGitMetadata` that returns just the branch name and surfaces
+    `git.ErrNotAGitRepo` when there's no `.git` entry, instead of the
+    silent `(nil, nil)` the existing helper returns.
+  - `indexer.IndexResult.Branch string \`json:"branch,omitempty"\`` — new
+    optional field; existing `IndexRepository`/`IndexRepositoryIncremental`
+    callers leave it empty (and the JSON tag's `omitempty` keeps the
+    serialized shape unchanged for every current consumer).
+  - `indexer.Indexer.IndexFiles(ctx, repoPath, files, branch, prev)` —
+    signature stub; body returns `indexer.ErrIndexFilesNotImplemented`. The
+    Phase 1.B implementation will land the per-file refresh path the
+    change-watch router calls; locking the signature here lets downstream
+    slices compile.
+  - `indexer.RepoIndexFullReason` enum + precondition guard on
+    `IndexRepository`. Every existing caller now passes a typed reason
+    (`ReasonInitialOnboard` or `ReasonOperatorRebuild`); the change-watch
+    router has no reason value to pass and therefore cannot reach the
+    whole-tree path.
+  Internally: the post-`ComputeImpact` block in the `ReindexRepository`
+  GraphQL mutation has been extracted into a reusable
+  `applyImpactFromChange` helper with full behavior preservation. Phase 1.B
+  ships next.
+
 ### Changed
 
 - **Credential model** (`792ca64`). HTTP clients for all living-wiki sinks
