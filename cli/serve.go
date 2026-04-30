@@ -292,6 +292,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	var gitConfigStore rest.GitConfigStore
 	var gitConfigStoreConcrete *db.SurrealGitConfigStore // typed handle for the resolver
 	var llmConfigStore rest.LLMConfigStore
+	var llmConfigStoreConcrete *db.SurrealLLMConfigStore     // typed handle for profile-aware adapter wiring
+	var llmProfileStore *db.SurrealLLMProfileStore           // typed handle for profile-aware adapter wiring
+	var llmStoreAdapterFromProfiles resolution.LLMConfigStore // profile-aware adapter assembled in the external-storage branch
 	var queueControlStore rest.QueueControlStore
 	var tokenStore auth.APITokenStore
 	var oidcStateStore auth.OIDCStateStore
@@ -354,23 +357,29 @@ func runServe(cmd *cobra.Command, args []string) error {
 		// cache, so an admin save on replica A is visible to replica B
 		// on the very next worker LLM call.
 		//
-		// Slice 3: api_key column is encrypted at rest with the
+		// Slice 3 (R3): api_key column is encrypted at rest with the
 		// versioned sbenc:v1 envelope. The encryption key comes from
 		// cfg.Security.EncryptionKey; the OSS escape hatch
 		// (SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY) is consulted from env
 		// at boot and forwarded as a store option.
-		lcsOpts := []db.LLMConfigStoreOption{
-			db.WithLLMConfigEncryptionKey(cfg.Security.EncryptionKey),
+		//
+		// LLM provider profiles slice 1 (librarian-M1): build the cipher
+		// ONCE and pass it to BOTH the legacy ca_llm_config store AND
+		// the new ca_llm_profile store via With…Cipher. This ensures
+		// both rows are encrypted under identical key material with
+		// identical legacy-warn rate-limiting state.
+		allowUnencLLM := strings.EqualFold(os.Getenv("SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY"), "true")
+		llmCipher := secretcipher.NewAESGCMCipher(cfg.Security.EncryptionKey, allowUnencLLM)
+		if !llmCipher.HasKey() {
+			if llmCipher.AllowsUnencrypted() {
+				slog.Warn("llm config: SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY=true — admin saves of api_key may land in plaintext on disk (OSS dev only)")
+			} else {
+				slog.Warn("llm config: SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY is unset — admin saves of api_key will return 422 unless ALLOW_UNENCRYPTED is on (set the encryption key in production)")
+			}
 		}
-		if strings.EqualFold(os.Getenv("SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY"), "true") {
-			slog.Warn("llm config: SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY=true — admin saves of api_key may land in plaintext on disk (OSS dev only)")
-			lcsOpts = append(lcsOpts, db.WithLLMConfigAllowUnencrypted(true))
-		}
-		if cfg.Security.EncryptionKey == "" {
-			slog.Warn("llm config: SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY is unset — admin saves of api_key will return 422 unless ALLOW_UNENCRYPTED is on (set the encryption key in production)")
-		}
-		lcs := db.NewSurrealLLMConfigStore(surrealDB, lcsOpts...)
-		llmConfigStore = &llmConfigAdapter{store: lcs}
+		lcs := db.NewSurrealLLMConfigStore(surrealDB, db.WithLLMConfigCipher(llmCipher))
+		lps := db.NewSurrealLLMProfileStore(surrealDB, db.WithLLMProfileCipher(llmCipher))
+		llmConfigStore = &llmConfigAdapter{store: lcs, profileStore: lps, surrealDB: surrealDB}
 		queueControlStore = &queueControlAdapter{store: db.NewSurrealQueueControlStore(surrealDB)}
 
 		// Living-wiki settings store + resolver (UI > env > default precedence).
@@ -396,6 +405,56 @@ func runServe(cmd *cobra.Command, args []string) error {
 			NotionWebhookSecret:     cfg.LivingWiki.NotionWebhookSecret,
 		}
 		lwResolver = livingwiki.NewResolver(lwStore, lwEnv, 0)
+
+		// LLM provider profiles slice 1 (codex-H4 + bob/codex H1):
+		// schema-ensure runs in dependency order BEFORE MigrateToProfiles
+		// and BEFORE the resolver / REST handlers mount.
+		//
+		//   1. lps.EnsureSchema                                 — ca_llm_profile table + UNIQUE INDEX
+		//   2. lcs.EnsureProfilesSchemaExtensions               — active_profile_id + updated_at on ca_llm_config
+		//   3. lwRepoStore (concrete).EnsureProfilesSchemaExtensions — living_wiki_llm_override.profile_id
+		//   4. db.MigrateToProfiles                             — seed Default profile from legacy or env
+		//
+		// All three schema-ensure steps are idempotent. Migration is
+		// idempotent on the deterministic record id ca_llm_profile:default-migrated;
+		// concurrent boots converge via SurrealDB's BEGIN/COMMIT serialization.
+		bootCtx, bootCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		if err := lps.EnsureSchema(bootCtx); err != nil {
+			bootCancel()
+			return fmt.Errorf("ensure ca_llm_profile schema: %w", err)
+		}
+		if err := lcs.EnsureProfilesSchemaExtensions(bootCtx); err != nil {
+			bootCancel()
+			return fmt.Errorf("ensure ca_llm_config profile-extensions schema: %w", err)
+		}
+		if lwRepoStoreConcrete, ok := lwRepoStore.(*db.LivingWikiRepoSettingsStore); ok && lwRepoStoreConcrete != nil {
+			if err := lwRepoStoreConcrete.EnsureProfilesSchemaExtensions(bootCtx); err != nil {
+				bootCancel()
+				return fmt.Errorf("ensure lw_repo_settings profile-extensions schema: %w", err)
+			}
+		}
+		if err := db.MigrateToProfiles(bootCtx, surrealDB, lcs, lps, llmCipher, allowUnencLLM, cfg.LLM); err != nil {
+			bootCancel()
+			return fmt.Errorf("llm profile migration failed: %w", err)
+		}
+		bootCancel()
+
+		// Build the profile-aware resolver adapter (codex-H2 + H3 +
+		// codex-M5). The adapter implements both LLMConfigStore (so the
+		// existing DefaultResolver can reach it) AND ProfileLookupStore
+		// (so slice 3's per-repo override can fetch a specific profile
+		// by id). Reconciliation is handled via a small concrete-type
+		// shim that adapts db.reconcileLegacyToActive into the
+		// resolution.ProfileAwareReconciler interface.
+		llmProfileStore = lps
+		llmConfigStoreConcrete = lcs
+		profileAdapter := resolution.NewProfileAwareLLMResolverAdapter(
+			&profileAwareConfigStoreShim{store: lcs},
+			&profileAwareProfileStoreShim{store: lps},
+			&profileAwareReconcilerShim{surrealDB: surrealDB},
+			slog.Default(),
+		)
+		llmStoreAdapterFromProfiles = profileAdapter
 	}
 	if tokenStore == nil {
 		tokenStore = auth.NewAPITokenStore()
@@ -414,20 +473,42 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// in every replica — version-keyed cache makes admin saves visible
 	// cross-replica without polling or restart.
 	//
-	// IMPORTANT: the resolver uses the *same* SurrealLLMConfigStore
-	// instance as the REST admin handlers above, so encryption settings
-	// (cfg.Security.EncryptionKey + ALLOW_UNENCRYPTED) apply uniformly.
+	// LLM provider profiles slice 1: the resolver's view of the
+	// workspace layer is the new ProfileAwareLLMResolverAdapter
+	// (assembled above in the external-storage branch). It owns:
+	//   - dual-read fallback for the truly-pre-migration window (D8 / codex-H3),
+	//   - rolling-deploy reconciliation via the version watermark (codex-H2 / r1c),
+	//   - active-profile-missing banner state (codex-H3),
+	//   - per-repo profile lookup for slice 3.
+	//
 	// Two stores against the same row would each track their own
 	// loadedLegacyOnce, producing duplicate WARNs on legacy reads — not
 	// a correctness bug but messier than necessary.
 	var llmStoreAdapter resolution.LLMConfigStore
 	if cfg.Storage.SurrealMode == "external" && surrealDB != nil {
-		// Recover the encryption-aware instance constructed above.
-		// llmConfigStore is the rest.LLMConfigStore interface; the
-		// underlying *db.SurrealLLMConfigStore is reachable via the
-		// adapter we wrap it in.
-		if adapter, ok := llmConfigStore.(*llmConfigAdapter); ok && adapter != nil {
-			llmStoreAdapter = &llmStoreResolverAdapter{store: adapter.store}
+		llmStoreAdapter = llmStoreAdapterFromProfiles
+	}
+	// Defensive: keep the typed concrete stores reachable even when the
+	// adapter is the new profile-aware one. Tests that exercise the
+	// pre-profile shape can still reach lcs via llmConfigStoreConcrete.
+	_ = llmConfigStoreConcrete
+	_ = llmProfileStore
+
+	// LLM provider profiles slice 1: build the rest-facing adapter
+	// that the new /admin/llm-profiles handlers will reach. nil when
+	// running embedded (no SurrealDB) — handlers return 503 in that
+	// case via their own nil-store check.
+	var llmProfileRestAdapter rest.LLMProfileStoreAdapter
+	if llmProfileStore != nil && llmConfigStoreConcrete != nil && surrealDB != nil {
+		var resolverAdapter *resolution.ProfileAwareLLMResolverAdapter
+		if pa, ok := llmStoreAdapterFromProfiles.(*resolution.ProfileAwareLLMResolverAdapter); ok {
+			resolverAdapter = pa
+		}
+		llmProfileRestAdapter = &llmProfileStoreAdapter{
+			lcs:             llmConfigStoreConcrete,
+			lps:             llmProfileStore,
+			surrealDB:       surrealDB,
+			resolverAdapter: resolverAdapter,
 		}
 	}
 
@@ -586,6 +667,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		rest.WithGitConfigStore(gitConfigStore),
 		rest.WithGitResolver(gitResolver),
 		rest.WithLLMConfigStore(llmConfigStore),
+		rest.WithLLMProfileStore(llmProfileRestAdapter),
 		rest.WithLLMResolver(llmResolver),
 		rest.WithLLMCaller(llmCaller),
 		rest.WithQueueControlStore(queueControlStore),
@@ -765,8 +847,18 @@ func migrationsPath() string {
 
 // llmConfigAdapter bridges db.SurrealLLMConfigStore and rest.LLMConfigStore
 // to avoid a circular import between the db and rest packages.
+//
+// LLM provider profiles slice 1: SaveLLMConfig now routes through the
+// active profile when one exists (D7) via WriteActiveProfilePatchWithRetry,
+// which goes through writeActiveProfileWithLegacyMirror to dual-write
+// the active profile and the legacy mirror row in one BEGIN/COMMIT
+// (codex-H2). When no active profile exists yet (extreme boot-race),
+// the adapter falls back to the legacy SaveLLMConfig path so the
+// migration can pick up the legacy bytes (bob-L1).
 type llmConfigAdapter struct {
-	store *db.SurrealLLMConfigStore
+	store        *db.SurrealLLMConfigStore
+	profileStore *db.SurrealLLMProfileStore // nil in pre-profile or test wirings
+	surrealDB    *db.SurrealDB              // nil in pre-profile or test wirings
 }
 
 type queueControlAdapter struct {
@@ -795,7 +887,78 @@ func (a *llmConfigAdapter) LoadLLMConfig() (*rest.LLMConfigRecord, error) {
 }
 
 func (a *llmConfigAdapter) SaveLLMConfig(rec *rest.LLMConfigRecord) error {
-	err := a.store.SaveLLMConfig(&db.LLMConfigRecord{
+	// LLM provider profiles slice 1: legacy PUT /admin/llm-config now
+	// translates to a PATCH against the ACTIVE profile (D7), going
+	// through writeActiveProfileWithLegacyMirror so the legacy mirror
+	// row stays in sync (codex-H2). The patch is "set every field"
+	// because this endpoint's contract is total replacement of the
+	// effective config.
+	//
+	// When no active profile exists yet (extreme narrow boot-race
+	// window where the request arrives before MigrateToProfiles
+	// completes), fall through to the legacy SaveLLMConfig — the
+	// boot-time migration will pick up the legacy bytes and seed
+	// Default from them.
+	ctx := context.Background()
+	activeID, _, err := a.store.LoadActiveProfileIDAndVersion(ctx)
+	if err == nil && activeID != "" && a.profileStore != nil && a.surrealDB != nil {
+		// Encrypt the api_key once, here. Empty plaintext sealed = ""
+		// (cipher contract). The helpers expect the SEALED form.
+		sealed, encErr := a.profileStore.EncryptedAPIKey(rec.APIKey)
+		if encErr != nil {
+			if errors.Is(encErr, db.ErrEncryptionKeyRequired) {
+				return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, encErr)
+			}
+			return encErr
+		}
+		patch := db.ProfilePatch{
+			Provider:                 rec.Provider,
+			BaseURL:                  rec.BaseURL,
+			APIKey:                   sealed,
+			APIKeyMode:               db.APIKeyModeSet(),
+			SummaryModel:             rec.SummaryModel,
+			ReviewModel:              rec.ReviewModel,
+			AskModel:                 rec.AskModel,
+			KnowledgeModel:           rec.KnowledgeModel,
+			ArchitectureDiagramModel: rec.ArchitectureDiagramModel,
+			ReportModel:              rec.ReportModel,
+			DraftModel:               rec.DraftModel,
+			TimeoutSecs:              rec.TimeoutSecs,
+			AdvancedMode:             rec.AdvancedMode,
+			FieldsPresent: db.ProfilePatchFields{
+				Provider:                 true,
+				BaseURL:                  true,
+				SummaryModel:             true,
+				ReviewModel:              true,
+				AskModel:                 true,
+				KnowledgeModel:           true,
+				ArchitectureDiagramModel: true,
+				ReportModel:              true,
+				DraftModel:               true,
+				TimeoutSecs:              true,
+				AdvancedMode:             true,
+			},
+		}
+		// If api_key plaintext is empty, route through Clear so the
+		// helper writes api_key='' rather than leaving a stale value.
+		// Empty sealed bytes already encode "no key" semantically,
+		// but going through Clear documents intent.
+		if rec.APIKey == "" {
+			patch.APIKey = ""
+			patch.APIKeyMode = db.APIKeyModeClear()
+		}
+		if _, err := db.WriteActiveProfilePatchWithRetry(ctx, a.surrealDB, a.store, patch); err != nil {
+			if errors.Is(err, db.ErrEncryptionKeyRequired) {
+				return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, err)
+			}
+			return err
+		}
+		return nil
+	}
+
+	// Boot-race fallback (bob-L1): no active profile yet. Write through
+	// the legacy path; the migration will pick up these bytes.
+	err = a.store.SaveLLMConfig(&db.LLMConfigRecord{
 		Provider:                 rec.Provider,
 		BaseURL:                  rec.BaseURL,
 		APIKey:                   rec.APIKey,
@@ -953,6 +1116,396 @@ func classifyTelemetryLLMProviderKind(provider string) string {
 	default:
 		return "cloud"
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// LLM provider profiles slice 1 — REST adapter (rest.LLMProfileStoreAdapter)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Bridges the rest package's narrow profile-store interface into the
+// concrete db package. Owns:
+//   - the BEGIN/COMMIT helper invocations + retry loops,
+//   - the active-profile-id pre-check on DELETE (D5),
+//   - the active-profile-missing accessor (codex-H3),
+//   - the LogProfileSwitched slog emission on activate (bob-M2 / ruby-L1).
+
+type llmProfileStoreAdapter struct {
+	lcs           *db.SurrealLLMConfigStore
+	lps           *db.SurrealLLMProfileStore
+	surrealDB     *db.SurrealDB
+	resolverAdapter *resolution.ProfileAwareLLMResolverAdapter // for the ActiveProfileMissing accessor
+}
+
+func (a *llmProfileStoreAdapter) ListProfiles(ctx context.Context) ([]rest.ProfileResponse, error) {
+	profiles, err := a.lps.ListProfiles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	activeID, _, _ := a.lcs.LoadActiveProfileIDAndVersion(ctx)
+	out := make([]rest.ProfileResponse, 0, len(profiles))
+	for _, p := range profiles {
+		out = append(out, profileToResponse(p, activeID))
+	}
+	return out, nil
+}
+
+func (a *llmProfileStoreAdapter) GetProfile(ctx context.Context, id string) (*rest.ProfileResponse, error) {
+	p, err := a.lps.LoadProfile(ctx, id)
+	if err != nil {
+		if errors.Is(err, db.ErrProfileNotFound) {
+			return nil, rest.ErrProfileNotFound
+		}
+		return nil, err
+	}
+	activeID, _, _ := a.lcs.LoadActiveProfileIDAndVersion(ctx)
+	resp := profileToResponse(*p, activeID)
+	return &resp, nil
+}
+
+func (a *llmProfileStoreAdapter) CreateProfile(ctx context.Context, req rest.ProfileCreateRequest) (string, error) {
+	id, err := a.lps.CreateProfile(ctx, db.ProfileCreate{
+		Name:                     req.Name,
+		Provider:                 req.Provider,
+		BaseURL:                  req.BaseURL,
+		APIKey:                   req.APIKey,
+		SummaryModel:             req.SummaryModel,
+		ReviewModel:              req.ReviewModel,
+		AskModel:                 req.AskModel,
+		KnowledgeModel:           req.KnowledgeModel,
+		ArchitectureDiagramModel: req.ArchitectureDiagramModel,
+		ReportModel:              req.ReportModel,
+		DraftModel:               req.DraftModel,
+		TimeoutSecs:              req.TimeoutSecs,
+		AdvancedMode:             req.AdvancedMode,
+	})
+	if err != nil {
+		return "", translateProfileStoreErr(err)
+	}
+	// Bump workspace.version + advance active watermark so the resolver
+	// invalidates its cache on the next probe and so the watermark
+	// stays in lockstep with the version on every new-code write.
+	if _, bumpErr := db.BumpVersionAfterCreate(ctx, a.surrealDB, a.lcs); bumpErr != nil {
+		// The profile is already created; surface the bump failure
+		// but do not roll back. Subsequent writes will eventually bump.
+		slog.Warn("llm profile create: workspace.version bump failed (profile is created; resolver may serve stale until next write)",
+			"id", id, "error", bumpErr)
+	}
+	return id, nil
+}
+
+func (a *llmProfileStoreAdapter) UpdateProfile(ctx context.Context, id string, req rest.ProfileUpdateRequest) error {
+	// Determine whether the target is the active profile. The choice
+	// of helper depends on this; on a raced activation between this
+	// pre-check and the BEGIN/COMMIT, the helper's CAS guard surfaces
+	// ErrTargetNoLongerActive (codex-r1e Low / r1d M2).
+	activeID, _, err := a.lcs.LoadActiveProfileIDAndVersion(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Apply name + non-key string fields via the store's UpdateProfile,
+	// which knows pointer-patch semantics + name uniqueness. Then,
+	// separately, run the CAS-guarded version bump + dual-write so
+	// downstream replicas observe the change. Two-phase write: the
+	// row update is the source of truth; the helper makes the
+	// version cell + watermark advance.
+	patch := db.ProfileUpdate{
+		Name:                     req.Name,
+		Provider:                 req.Provider,
+		BaseURL:                  req.BaseURL,
+		APIKey:                   req.APIKey,
+		ClearAPIKey:              req.ClearAPIKey,
+		SummaryModel:             req.SummaryModel,
+		ReviewModel:              req.ReviewModel,
+		AskModel:                 req.AskModel,
+		KnowledgeModel:           req.KnowledgeModel,
+		ArchitectureDiagramModel: req.ArchitectureDiagramModel,
+		ReportModel:              req.ReportModel,
+		DraftModel:               req.DraftModel,
+		TimeoutSecs:              req.TimeoutSecs,
+		AdvancedMode:             req.AdvancedMode,
+	}
+	if err := a.lps.UpdateProfile(ctx, id, patch); err != nil {
+		return translateProfileStoreErr(err)
+	}
+
+	// If the updated profile is the active one, run a dual-write batch
+	// that mirrors the new contents to the legacy row + bumps version.
+	// Otherwise just bump version + advance active watermark.
+	if id == activeID {
+		// Re-load the profile to capture the post-update sealed api_key
+		// bytes and current scalar fields, then dual-write.
+		p, loadErr := a.lps.LoadProfile(ctx, id)
+		if loadErr != nil {
+			return translateProfileStoreErr(loadErr)
+		}
+		sealed, encErr := a.lps.EncryptedAPIKey(p.APIKey)
+		if encErr != nil {
+			return translateProfileStoreErr(encErr)
+		}
+		patchHelper := db.ProfilePatch{
+			Provider:                 p.Provider,
+			BaseURL:                  p.BaseURL,
+			APIKey:                   sealed,
+			APIKeyMode:               db.APIKeyModeSet(),
+			SummaryModel:             p.SummaryModel,
+			ReviewModel:              p.ReviewModel,
+			AskModel:                 p.AskModel,
+			KnowledgeModel:           p.KnowledgeModel,
+			ArchitectureDiagramModel: p.ArchitectureDiagramModel,
+			ReportModel:              p.ReportModel,
+			DraftModel:               p.DraftModel,
+			TimeoutSecs:              p.TimeoutSecs,
+			AdvancedMode:             p.AdvancedMode,
+			FieldsPresent: db.ProfilePatchFields{
+				Provider:                 true,
+				BaseURL:                  true,
+				SummaryModel:             true,
+				ReviewModel:              true,
+				AskModel:                 true,
+				KnowledgeModel:           true,
+				ArchitectureDiagramModel: true,
+				ReportModel:              true,
+				DraftModel:               true,
+				TimeoutSecs:              true,
+				AdvancedMode:             true,
+			},
+		}
+		if p.APIKey == "" {
+			patchHelper.APIKey = ""
+			patchHelper.APIKeyMode = db.APIKeyModeClear()
+		}
+		_, bumpErr := db.WriteActiveProfilePatchWithRetry(ctx, a.surrealDB, a.lcs, patchHelper)
+		if bumpErr != nil {
+			return translateProfileStoreErr(bumpErr)
+		}
+	} else {
+		// Non-active edit: bump workspace.version + advance active
+		// watermark so the resolver picks up the change on the next
+		// version probe (codex-M5 cache-invalidation invariant).
+		if _, bumpErr := db.BumpVersionAfterCreate(ctx, a.surrealDB, a.lcs); bumpErr != nil {
+			slog.Warn("llm profile update: workspace.version bump failed (profile updated; resolver may serve stale until next write)",
+				"id", id, "error", bumpErr)
+		}
+	}
+	return nil
+}
+
+func (a *llmProfileStoreAdapter) DeleteProfile(ctx context.Context, id string) error {
+	activeID, _, err := a.lcs.LoadActiveProfileIDAndVersion(ctx)
+	if err != nil {
+		return err
+	}
+	if id == activeID {
+		// D5: refuse delete-of-active at the API layer with 409.
+		return rest.ErrProfileActiveDeleteForbidden
+	}
+	// First check existence — if the profile is gone, surface 404.
+	if _, loadErr := a.lps.LoadProfile(ctx, id); loadErr != nil {
+		return translateProfileStoreErr(loadErr)
+	}
+	// Run the CAS-guarded delete (which also zeros the api_key
+	// ciphertext via xander-M1 inside the BEGIN/COMMIT batch).
+	if _, helperErr := db.DeleteNonActiveWithRetry(ctx, a.surrealDB, a.lcs, id); helperErr != nil {
+		return translateProfileStoreErr(helperErr)
+	}
+	return nil
+}
+
+func (a *llmProfileStoreAdapter) ActivateProfile(ctx context.Context, id, by string) error {
+	// Pre-check the target exists; the helper will THROW
+	// profile_not_found inside BEGIN/COMMIT, but a friendlier 404
+	// avoids the round trip in the common case.
+	if _, err := a.lps.LoadProfile(ctx, id); err != nil {
+		return translateProfileStoreErr(err)
+	}
+	oldActiveID, _, _ := a.lcs.LoadActiveProfileIDAndVersion(ctx)
+	newVersion, err := db.ActivateProfileWithRetry(ctx, a.surrealDB, a.lcs, id)
+	if err != nil {
+		return translateProfileStoreErr(err)
+	}
+	resolution.LogProfileSwitched(slog.Default(), oldActiveID, id, by, newVersion)
+	return nil
+}
+
+func (a *llmProfileStoreAdapter) ActiveProfileMissing() bool {
+	if a.resolverAdapter == nil {
+		return false
+	}
+	return a.resolverAdapter.ActiveProfileMissing()
+}
+
+func (a *llmProfileStoreAdapter) ActiveProfileID(ctx context.Context) (string, error) {
+	id, _, err := a.lcs.LoadActiveProfileIDAndVersion(ctx)
+	return id, err
+}
+
+func profileToResponse(p db.Profile, activeID string) rest.ProfileResponse {
+	return rest.ProfileResponse{
+		ID:                       p.ID,
+		Name:                     p.Name,
+		Provider:                 p.Provider,
+		BaseURL:                  p.BaseURL,
+		APIKeySet:                p.APIKey != "",
+		APIKeyHint:               rest.MaskAPIKeyHint(p.APIKey),
+		SummaryModel:             p.SummaryModel,
+		ReviewModel:              p.ReviewModel,
+		AskModel:                 p.AskModel,
+		KnowledgeModel:           p.KnowledgeModel,
+		ArchitectureDiagramModel: p.ArchitectureDiagramModel,
+		ReportModel:              p.ReportModel,
+		DraftModel:               p.DraftModel,
+		TimeoutSecs:              p.TimeoutSecs,
+		AdvancedMode:             p.AdvancedMode,
+		IsActive:                 p.ID == activeID,
+		CreatedAt:                rest.FormatProfileTime(p.CreatedAt),
+		UpdatedAt:                rest.FormatProfileTime(p.UpdatedAt),
+	}
+}
+
+// translateProfileStoreErr maps db sentinels into rest sentinels so
+// rest handlers can errors.Is without importing internal/db.
+func translateProfileStoreErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, db.ErrProfileNotFound):
+		return rest.ErrProfileNotFound
+	case errors.Is(err, db.ErrDuplicateProfileName):
+		return rest.ErrDuplicateProfileName
+	case errors.Is(err, db.ErrProfileNameRequired):
+		return rest.ErrProfileNameRequired
+	case errors.Is(err, db.ErrProfileNameTooLong):
+		return rest.ErrProfileNameTooLong
+	case errors.Is(err, db.ErrTargetNoLongerActive):
+		return rest.ErrProfileTargetNoLongerActive
+	case errors.Is(err, db.ErrVersionConflict):
+		return rest.ErrProfileVersionConflict
+	case errors.Is(err, db.ErrEncryptionKeyRequired):
+		return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, err)
+	default:
+		return err
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// LLM provider profiles slice 1 — adapter shims (codex-H2 / H3 / M5)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// These three shims bridge concrete db package types into the narrow
+// interfaces resolution.ProfileAwareLLMResolverAdapter expects. The
+// adapter lives in internal/llm/resolution and cannot import
+// internal/db (cycle); the shims sit at the cli/serve.go layer where
+// the cross-package wiring is allowed.
+
+// profileAwareConfigStoreShim bridges *db.SurrealLLMConfigStore →
+// resolution.ProfileAwareConfigStore. The shim materializes a
+// resolution.ConfigSnapshot from db.LLMConfigSnapshot, copying every
+// field across (no business logic in the shim itself).
+type profileAwareConfigStoreShim struct {
+	store *db.SurrealLLMConfigStore
+}
+
+func (s *profileAwareConfigStoreShim) LoadConfigSnapshot(ctx context.Context) (*resolution.ConfigSnapshot, error) {
+	dbSnap, err := s.store.LoadConfigSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if dbSnap == nil {
+		return nil, nil
+	}
+	return &resolution.ConfigSnapshot{
+		ActiveProfileID:                dbSnap.ActiveProfileID,
+		Version:                        dbSnap.Version,
+		UpdatedAt:                      dbSnap.UpdatedAt,
+		LegacyProvider:                 dbSnap.LegacyProvider,
+		LegacyBaseURL:                  dbSnap.LegacyBaseURL,
+		LegacyAPIKey:                   dbSnap.LegacyAPIKey,
+		LegacySummaryModel:             dbSnap.LegacySummaryModel,
+		LegacyReviewModel:              dbSnap.LegacyReviewModel,
+		LegacyAskModel:                 dbSnap.LegacyAskModel,
+		LegacyKnowledgeModel:           dbSnap.LegacyKnowledgeModel,
+		LegacyArchitectureDiagramModel: dbSnap.LegacyArchitectureDiagramModel,
+		LegacyReportModel:              dbSnap.LegacyReportModel,
+		LegacyDraftModel:               dbSnap.LegacyDraftModel,
+		LegacyTimeoutSecs:              dbSnap.LegacyTimeoutSecs,
+		LegacyAdvancedMode:             dbSnap.LegacyAdvancedMode,
+	}, nil
+}
+
+func (s *profileAwareConfigStoreShim) LoadLLMConfigVersion() (uint64, error) {
+	return s.store.LoadLLMConfigVersion()
+}
+
+// profileAwareProfileStoreShim bridges *db.SurrealLLMProfileStore →
+// resolution.ProfileAwareProfileStore. Translates db.Profile (with a
+// cleartext APIKey field) into resolution.WorkspaceRecord.
+type profileAwareProfileStoreShim struct {
+	store *db.SurrealLLMProfileStore
+}
+
+func (s *profileAwareProfileStoreShim) LoadProfileForResolution(ctx context.Context, profileID string) (*resolution.WorkspaceRecord, error) {
+	p, err := s.store.LoadProfile(ctx, profileID)
+	if err != nil {
+		if errors.Is(err, db.ErrProfileNotFound) {
+			return nil, resolution.ErrProfileNotFound
+		}
+		return nil, err
+	}
+	return &resolution.WorkspaceRecord{
+		Provider:                  p.Provider,
+		BaseURL:                   p.BaseURL,
+		APIKey:                    p.APIKey,
+		SummaryModel:              p.SummaryModel,
+		ReviewModel:               p.ReviewModel,
+		AskModel:                  p.AskModel,
+		KnowledgeModel:            p.KnowledgeModel,
+		ArchitectureDiagramModel:  p.ArchitectureDiagramModel,
+		ReportModel:               p.ReportModel,
+		DraftModel:                p.DraftModel,
+		TimeoutSecs:               p.TimeoutSecs,
+		AdvancedMode:              p.AdvancedMode,
+		ProfileID:                 p.ID,
+		UpdatedAt:                 p.UpdatedAt,
+		LastLegacyVersionConsumed: p.LastLegacyVersionConsumed,
+	}, nil
+}
+
+func (s *profileAwareProfileStoreShim) LoadAllProfileIDs(ctx context.Context) ([]string, error) {
+	return s.store.LoadAllProfileIDs(ctx)
+}
+
+// profileAwareReconcilerShim adapts the package-private
+// db.reconcileLegacyToActive helper into the
+// resolution.ProfileAwareReconciler interface. The actual helper is
+// invoked via the exported wrapper db.ReconcileLegacyToActive (added
+// alongside this shim) so the shim doesn't need internal db access.
+type profileAwareReconcilerShim struct {
+	surrealDB *db.SurrealDB
+}
+
+func (s *profileAwareReconcilerShim) ReconcileLegacyToActive(
+	ctx context.Context,
+	observedVersion uint64,
+	observedWatermark uint64,
+	activeID string,
+) (resolution.ReconcileResult, error) {
+	dbResult, err := db.ReconcileLegacyToActiveExported(ctx, s.surrealDB, observedVersion, observedWatermark, activeID)
+	if err != nil {
+		// Translate db sentinels → resolution sentinels so the adapter
+		// can errors.Is against its own.
+		if errors.Is(err, db.ErrVersionConflict) {
+			return resolution.ReconcileResult{}, resolution.ErrVersionConflict
+		}
+		if errors.Is(err, db.ErrWatermarkConflict) {
+			return resolution.ReconcileResult{}, resolution.ErrWatermarkConflict
+		}
+		return resolution.ReconcileResult{}, err
+	}
+	return resolution.ReconcileResult{
+		ActuallyWrote: dbResult.ActuallyWrote,
+		NewWatermark:  dbResult.NewWatermark,
+	}, nil
 }
 
 // slogLivingWikiLogger bridges webhook.Logger to the global slog logger.

@@ -5,9 +5,11 @@ package resolution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/sourcebridge/sourcebridge/internal/config"
 )
@@ -51,6 +53,12 @@ type Snapshot struct {
 	// (e.g. env-only or builtin path). Used by capability caches to
 	// invalidate themselves on workspace save.
 	Version uint64
+
+	// ActiveProfileID is the workspace's active profile id at resolve
+	// time, threaded through to LogResolved for operator grep. Empty
+	// when the workspace layer is empty (env-only / builtin) OR when
+	// the dual-read legacy fallback is serving (truly pre-migration).
+	ActiveProfileID string
 }
 
 // LLMConfigStore is the narrow interface the resolver needs from the
@@ -61,6 +69,35 @@ type LLMConfigStore interface {
 	LoadLLMConfig() (*WorkspaceRecord, error)
 	LoadLLMConfigVersion() (uint64, error)
 }
+
+// ProfileLookupStore is the narrow interface the per-repo override
+// path uses to fetch a specific profile by id (slice 3). Slice 1 wires
+// the adapter that implements this in addition to LLMConfigStore so
+// the type surface is in place from day one.
+//
+// LoadProfileForResolution returns a *WorkspaceRecord (with api_key
+// decrypted) for an arbitrary profile id, not necessarily the active
+// one. Returns ErrProfileNotFound for unknown id.
+//
+// LoadAllProfileIDs is a diagnostics affordance; not on the hot
+// resolver path.
+type ProfileLookupStore interface {
+	LoadProfileForResolution(ctx context.Context, profileID string) (*WorkspaceRecord, error)
+	LoadAllProfileIDs(ctx context.Context) ([]string, error)
+}
+
+// ErrProfileNotFound is the resolver-package mirror of
+// db.ErrProfileNotFound. The adapter translates the db sentinel to
+// this one so the resolution package doesn't import internal/db.
+var ErrProfileNotFound = errors.New("llm profile not found")
+
+// ErrActiveProfileMissing is the sentinel returned by the adapter
+// when active_profile_id points at a deleted/missing profile row
+// (codex-H3). The resolver translates this to an "empty workspace
+// overlay" + a banner-driving accessor on the adapter; it is NOT
+// silently fallen-back to legacy fields (that would resurrect stale
+// credentials and mask DB damage).
+var ErrActiveProfileMissing = errors.New("active_profile_id points at a missing profile row; admin repair required")
 
 // WorkspaceRecord is the resolver-internal view of the saved workspace
 // LLM config. It mirrors db.LLMConfigRecord but lives in this package so
@@ -79,6 +116,22 @@ type WorkspaceRecord struct {
 	TimeoutSecs              int
 	AdvancedMode             bool
 	Version                  uint64
+
+	// ProfileID is the active profile's record id at the time the
+	// record was loaded. Empty when the dual-read fallback returned a
+	// legacy-overlay record (truly pre-migration). Used purely for the
+	// LogResolved structured log line; not part of any decision logic.
+	ProfileID string
+
+	// UpdatedAt is the profile's `updated_at` (or for legacy-fallback
+	// overlays, ca_llm_config:default.updated_at). Observability only.
+	UpdatedAt time.Time
+
+	// LastLegacyVersionConsumed is the profile's reconciliation
+	// watermark (codex-H2 / r1b). Compared against `workspace.version`
+	// in the resolver's adapter to detect old-pod legacy writes.
+	// Empty/zero in legacy-fallback overlays.
+	LastLegacyVersionConsumed uint64
 }
 
 // Operation group strings used internally by the resolver. These map ops
@@ -396,6 +449,11 @@ func (r *DefaultResolver) overlayWorkspaceFromRecord(snap *Snapshot, rec *Worksp
 		mark(FieldTimeoutSecs)
 	}
 	snap.Version = rec.Version
+	// ActiveProfileID is informational (LogResolved field). Empty when
+	// the workspace overlay came from the dual-read legacy fallback
+	// (truly pre-migration), since there is no active profile in that
+	// case.
+	snap.ActiveProfileID = rec.ProfileID
 }
 
 // workspaceModelForOp picks the per-op model from a WorkspaceRecord.

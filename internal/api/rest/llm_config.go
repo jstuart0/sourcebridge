@@ -51,6 +51,15 @@ type llmConfigResponse struct {
 	DraftModel               string `json:"draft_model"`
 	TimeoutSecs              int    `json:"timeout_secs"`
 	AdvancedMode             bool   `json:"advanced_mode"`
+
+	// LLM provider profiles slice 1 (ian-M1 / codex-H3): legacy GET
+	// response is back-compat-extended so new clients can render
+	// "you're editing the '<name>' profile" + the repair banner when
+	// the active profile is missing. Existing clients ignore these
+	// (omitempty).
+	ActiveProfileID      string `json:"active_profile_id,omitempty"`
+	ActiveProfileName    string `json:"active_profile_name,omitempty"`
+	ActiveProfileMissing bool   `json:"active_profile_missing,omitempty"`
 }
 
 type updateLLMConfigRequest struct {
@@ -178,6 +187,22 @@ func (s *Server) handleGetLLMConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if capabilities.IsAvailable("per_op_models", capabilities.NormalizeEdition(s.cfg.Edition)) {
 		resp.ReportModel = eff.ReportModel
+	}
+
+	// LLM provider profiles slice 1: surface active-profile metadata
+	// + repair-banner state on the legacy GET (ian-M1 / codex-H3).
+	// Existing clients ignore the new fields; new clients render
+	// "you're editing the '<name>' profile" and the missing-profile
+	// banner. Skip when the profile-store adapter is unavailable
+	// (embedded mode) so the legacy shape stays clean.
+	if s.llmProfileStore != nil {
+		if activeID, idErr := s.llmProfileStore.ActiveProfileID(r.Context()); idErr == nil && activeID != "" {
+			resp.ActiveProfileID = activeID
+			if profile, profErr := s.llmProfileStore.GetProfile(r.Context(), activeID); profErr == nil && profile != nil {
+				resp.ActiveProfileName = profile.Name
+			}
+		}
+		resp.ActiveProfileMissing = s.llmProfileStore.ActiveProfileMissing()
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

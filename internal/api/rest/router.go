@@ -242,6 +242,7 @@ type Server struct {
 	desktopAuth        DesktopAuthSessionStore
 	gitConfigStore     GitConfigStore                 // persists git tokens/SSH config across restarts
 	llmConfigStore     LLMConfigStore                 // persists LLM provider/model config across restarts
+	llmProfileStore    LLMProfileStoreAdapter         // LLM provider profiles slice 1: profile CRUD + active pointer
 	queueControlStore  QueueControlStore              // persists queue intake controls across restarts
 	enterpriseDB       interface{}                    // *surrealdb.DB when available, type-asserted in enterprise_routes.go
 	repoChecker        middleware.RepoAccessChecker   // set by enterprise build to enable tenant repo filtering
@@ -704,6 +705,19 @@ func (s *Server) setupRouter() {
 		r.Get("/api/v1/admin/llm-config", s.handleGetLLMConfig)
 		r.Put("/api/v1/admin/llm-config", s.handleUpdateLLMConfig)
 		r.Get("/api/v1/admin/llm-models", s.handleListLLMModels)
+
+		// LLM provider profiles (slice 1). Additive surface; legacy
+		// /admin/llm-config remains as the active-profile back-compat
+		// path. Writes go through the BEGIN/COMMIT helpers in
+		// internal/db so workspace.version is bumped, the legacy
+		// mirror row stays in sync, and the active-profile watermark
+		// advances on every write (codex-H2 / r1d).
+		r.Get("/api/v1/admin/llm-profiles", s.handleListLLMProfiles)
+		r.Post("/api/v1/admin/llm-profiles", s.handleCreateLLMProfile)
+		r.Get("/api/v1/admin/llm-profiles/{id}", s.handleGetLLMProfile)
+		r.Put("/api/v1/admin/llm-profiles/{id}", s.handleUpdateLLMProfile)
+		r.Delete("/api/v1/admin/llm-profiles/{id}", s.handleDeleteLLMProfile)
+		r.Post("/api/v1/admin/llm-profiles/{id}/activate", s.handleActivateLLMProfile)
 
 		// Git configuration
 		r.Get("/api/v1/admin/git-config", s.handleGetGitConfig)
