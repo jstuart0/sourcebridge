@@ -1,16 +1,76 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 SourceBridge Contributors
+
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
 import { authFetch } from "@/lib/auth-fetch";
-import { cn } from "@/lib/utils";
-import { ModelCombobox, type ModelOption } from "@/components/llm/ModelCombobox";
 
-interface LLMConfigState {
+import { ProfileEditor, type ProfileResponse } from "./profile-editor";
+import { ProfileList } from "./profile-list";
+import { SwitchProfileDialog } from "./switch-profile-dialog";
+
+// ─────────────────────────────────────────────────────────────────────────
+// /admin/llm — slice 2 of LLM provider profiles.
+//
+// Information architecture (UX intake §2.1, option C — single page that
+// reshapes by N). The state machine is:
+//
+//                     fetch /admin/llm-profiles
+//                            │
+//        active_profile_missing? ──yes──▶ render REPAIR BANNER on top,
+//                            │            disable editor + list, prompt
+//                            │            user to pick + activate
+//                            no
+//                            │
+//          profiles.length ──┤
+//             │              │              │
+//             0              1            >=2
+//             │              │              │
+//             │              │              │
+//             │              │              ▼
+//             │              │     N>=2 LAYOUT
+//             │              │     - profile list (top)
+//             │              │     - active pill at top
+//             │              │     - editor below (selected profile)
+//             │              │
+//             │              ▼
+//             │     N=1 LAYOUT (looks like today's /admin/llm exactly)
+//             │     - profile name pill in header
+//             │     - + Add profile button
+//             │     - editor (today's grid)
+//             │
+//             ▼
+//   "loading; migration may still be running" — auto-refresh once;
+//   if still empty, typed error banner pointing at runbook
+//
+// Slice-1-flag absorption (each is enforced in code below):
+//
+//   #1: ProfileResponse.is_active and active_profile_missing come from
+//       the LIST response. We never recompute these client-side. The
+//       repair banner gating is exactly `active_profile_missing === true`.
+//
+//   #2: Legacy GET /admin/llm-config carries new fields
+//       (active_profile_id, active_profile_name, active_profile_missing).
+//       We use active_profile_name to render the N=1 layout's "you're
+//       editing the 'Default' profile" pill so the pill stays correct
+//       even on a non-N=1 transition.
+//
+//   #3: PUT /admin/llm-profiles/{id} can return
+//       `409 target_no_longer_active` when concurrent activation
+//       happens during the user's edit. The editor surfaces a window
+//       CustomEvent; we listen for it here, refetch the profile list,
+//       and render an inline conflict-resolution panel with three
+//       actions (retry-against-now-active / switch-back-and-retry /
+//       discard).
+// ─────────────────────────────────────────────────────────────────────────
+
+interface LegacyLLMConfigResponse {
   provider: string;
   base_url: string;
   api_key_set: boolean;
@@ -24,10 +84,24 @@ interface LLMConfigState {
   draft_model: string;
   timeout_secs: number;
   advanced_mode: boolean;
+  // slice-1-flag #2: legacy GET extension fields
+  active_profile_id?: string;
+  active_profile_name?: string;
+  active_profile_missing?: boolean;
 }
 
-interface AdminConfigWorker {
-  worker: { address: string };
+interface ListProfilesResponse {
+  profiles: ProfileResponse[];
+  active_profile_missing: boolean;
+}
+
+interface ConflictState {
+  /** the profile id we tried to PUT and got 409 on */
+  targetProfileId: string;
+  /** display name of the target (frozen at the time of conflict) */
+  targetProfileName: string;
+  /** the hint copy from the server */
+  hint: string;
 }
 
 async function handleApiError(res: Response): Promise<string> {
@@ -44,274 +118,277 @@ async function handleApiError(res: Response): Promise<string> {
   return text || `HTTP ${res.status}`;
 }
 
-const providerDefaults: Record<string, { baseURL: string; model: string }> = {
-  openai: { baseURL: "https://api.openai.com/v1", model: "gpt-4o" },
-  anthropic: { baseURL: "https://api.anthropic.com", model: "claude-sonnet-4-20250514" },
-  ollama: { baseURL: "http://localhost:11434", model: "" },
-  vllm: { baseURL: "http://localhost:8000/v1", model: "" },
-  "llama-cpp": { baseURL: "http://localhost:8080/v1", model: "" },
-  sglang: { baseURL: "http://localhost:30000/v1", model: "" },
-  lmstudio: { baseURL: "http://localhost:1234/v1", model: "" },
-  gemini: {
-    baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
-    model: "gemini-2.5-flash",
-  },
-  openrouter: { baseURL: "https://openrouter.ai/api/v1", model: "google/gemini-2.5-flash" },
-};
-
-function isLocalProvider(provider: string): boolean {
-  return ["ollama", "vllm", "llama-cpp", "sglang", "lmstudio"].includes(provider);
-}
-
-function formatRelativeSaved(ts: number | null): string {
-  if (!ts) return "";
-  const secs = Math.floor((Date.now() - ts) / 1000);
-  if (secs < 5) return "just now";
-  if (secs < 60) return `${secs}s ago`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
+const RUNBOOK_PATH = "/docs/admin-runbooks/llm-config.md";
 
 export default function AdminLLMPage() {
-  const isEnterprise = process.env.NEXT_PUBLIC_EDITION === "enterprise";
-
-  const [serverConfig, setServerConfig] = useState<LLMConfigState | null>(null);
+  const [profiles, setProfiles] = useState<ProfileResponse[] | null>(null);
+  const [activeProfileMissing, setActiveProfileMissing] = useState(false);
+  const [legacyConfig, setLegacyConfig] = useState<LegacyLLMConfigResponse | null>(null);
   const [workerAddr, setWorkerAddr] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [emptyRetryAttempts, setEmptyRetryAttempts] = useState(0);
 
-  // Editable state
-  const [provider, setProvider] = useState("");
-  const [baseURL, setBaseURL] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [summaryModel, setSummaryModel] = useState("");
-  const [reviewModel, setReviewModel] = useState("");
-  const [askModel, setAskModel] = useState("");
-  const [knowledgeModel, setKnowledgeModel] = useState("");
-  const [architectureDiagramModel, setArchitectureDiagramModel] = useState("");
-  const [reportModel, setReportModel] = useState("");
-  const [timeoutSecs, setTimeoutSecs] = useState(900);
-  const [advancedMode, setAdvancedMode] = useState(false);
-  const [draftModel, setDraftModel] = useState("");
+  // Editor target — the profile selected in the editor below the list.
+  // In N=1 mode this is just the single profile. In N>=2 mode the user
+  // picks via [Edit] on a row.
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
 
-  // Saved-snapshot baseline for dirty detection
-  const savedSnapshotRef = useRef<string>("");
+  // Switch-profile dialog state.
+  const [switchDialog, setSwitchDialog] = useState<{
+    fromName: string;
+    toId: string;
+    toName: string;
+  } | null>(null);
+
+  // 409 target_no_longer_active conflict state. Driven by the
+  // CustomEvent dispatched from ProfileEditor (slice-1-flag #3).
+  const [conflict, setConflict] = useState<ConflictState | null>(null);
+
+  // Repair-picker for active_profile_missing.
+  const [repairTargetId, setRepairTargetId] = useState<string>("");
+  const [repairBusy, setRepairBusy] = useState(false);
+  const [repairError, setRepairError] = useState<string | null>(null);
+
+  // Last-saved breadcrumb in the header.
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
-  const [, setTick] = useState(0); // triggers "saved Xm ago" updates
+  const [, setTick] = useState(0);
+  const emptyRetryTimerRef = useRef<number | null>(null);
 
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
-
-  // Models list
-  const [models, setModels] = useState<ModelOption[]>([]);
-  const [modelFilter, setModelFilter] = useState("");
-  const [modelsLoading, setModelsLoading] = useState(false);
-  const [modelsError, setModelsError] = useState<string | null>(null);
-
-  const currentSnapshot = useMemo(() => {
-    return JSON.stringify({
-      provider,
-      baseURL,
-      summaryModel,
-      reviewModel,
-      askModel,
-      knowledgeModel,
-      architectureDiagramModel,
-      reportModel,
-      draftModel,
-      timeoutSecs,
-      advancedMode,
-    });
-  }, [
-    provider,
-    baseURL,
-    summaryModel,
-    reviewModel,
-    askModel,
-    knowledgeModel,
-    architectureDiagramModel,
-    reportModel,
-    draftModel,
-    timeoutSecs,
-    advancedMode,
-  ]);
-
-  const dirty = savedSnapshotRef.current !== "" && currentSnapshot !== savedSnapshotRef.current;
-  const hasPendingApiKey = apiKey.length > 0;
-
-  const fetchModels = useCallback(async (prov: string, url: string) => {
-    setModelsLoading(true);
-    setModelsError(null);
-    try {
-      const params = new URLSearchParams();
-      if (prov) params.set("provider", prov);
-      if (url) params.set("base_url", url);
-      const res = await authFetch(`/api/v1/admin/llm-models?${params}`);
-      if (!res.ok) throw new Error(await handleApiError(res));
-      const data = await res.json();
-      setModels(data.models || []);
-      if (data.error) setModelsError(data.error);
-    } catch (e) {
-      setModels([]);
-      setModelsError((e as Error).message);
+  const fetchProfiles = useCallback(async (): Promise<ListProfilesResponse | null> => {
+    const res = await authFetch("/api/v1/admin/llm-profiles");
+    if (!res.ok) {
+      throw new Error(await handleApiError(res));
     }
-    setModelsLoading(false);
+    return (await res.json()) as ListProfilesResponse;
   }, []);
 
-  const loadConfig = useCallback(async () => {
+  const fetchLegacyConfig = useCallback(async (): Promise<LegacyLLMConfigResponse | null> => {
+    const res = await authFetch("/api/v1/admin/llm-config");
+    if (!res.ok) return null;
+    return (await res.json()) as LegacyLLMConfigResponse;
+  }, []);
+
+  const fetchWorker = useCallback(async (): Promise<string | null> => {
     try {
-      const [cfgRes, wkRes] = await Promise.all([
-        authFetch("/api/v1/admin/llm-config"),
-        authFetch("/api/v1/admin/config"),
+      const res = await authFetch("/api/v1/admin/config");
+      if (!res.ok) return null;
+      const wk = await res.json();
+      return wk.worker?.address ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const loadAll = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const [list, legacy, worker] = await Promise.all([
+        fetchProfiles(),
+        fetchLegacyConfig(),
+        fetchWorker(),
       ]);
-      if (!cfgRes.ok) throw new Error(await handleApiError(cfgRes));
-      const cfg = (await cfgRes.json()) as LLMConfigState;
-      setServerConfig(cfg);
-      setProvider(cfg.provider || "ollama");
-      setBaseURL(cfg.base_url || "");
-      setSummaryModel(cfg.summary_model || "");
-      setReviewModel(cfg.review_model || "");
-      setAskModel(cfg.ask_model || "");
-      setKnowledgeModel(cfg.knowledge_model || "");
-      setArchitectureDiagramModel(cfg.architecture_diagram_model || "");
-      setReportModel(cfg.report_model || "");
-      setTimeoutSecs(cfg.timeout_secs || 900);
-      setAdvancedMode(cfg.advanced_mode || false);
-      setDraftModel(cfg.draft_model || "");
-
-      savedSnapshotRef.current = JSON.stringify({
-        provider: cfg.provider || "ollama",
-        baseURL: cfg.base_url || "",
-        summaryModel: cfg.summary_model || "",
-        reviewModel: cfg.review_model || "",
-        askModel: cfg.ask_model || "",
-        knowledgeModel: cfg.knowledge_model || "",
-        architectureDiagramModel: cfg.architecture_diagram_model || "",
-        reportModel: cfg.report_model || "",
-        draftModel: cfg.draft_model || "",
-        timeoutSecs: cfg.timeout_secs || 900,
-        advancedMode: cfg.advanced_mode || false,
-      });
-
-      if (wkRes.ok) {
-        const wk = (await wkRes.json()) as AdminConfigWorker;
-        setWorkerAddr(wk.worker?.address || null);
+      if (list) {
+        setProfiles(list.profiles);
+        setActiveProfileMissing(list.active_profile_missing);
+        // Auto-select an editor target. Prefer the active profile;
+        // otherwise the first profile in the list. If the user already
+        // picked a profile via [Edit], keep that selection if it's
+        // still in the list.
+        setSelectedProfileId((prev) => {
+          if (prev && list.profiles.some((p) => p.id === prev)) return prev;
+          const active = list.profiles.find((p) => p.is_active);
+          if (active) return active.id;
+          return list.profiles[0]?.id ?? null;
+        });
+        // Pre-fill the repair picker with the first profile if needed.
+        if (list.active_profile_missing && list.profiles.length > 0) {
+          setRepairTargetId((prev) => prev || list.profiles[0].id);
+        }
       }
-
-      fetchModels(cfg.provider || "ollama", cfg.base_url || "");
+      if (legacy) {
+        setLegacyConfig(legacy);
+      }
+      setWorkerAddr(worker);
     } catch (e) {
       setLoadError((e as Error).message);
     }
-  }, [fetchModels]);
+  }, [fetchProfiles, fetchLegacyConfig, fetchWorker]);
 
   useEffect(() => {
-    loadConfig();
-  }, [loadConfig]);
+    loadAll();
+  }, [loadAll]);
 
-  // Re-render every 30s so "saved Xm ago" stays fresh
+  // Empty-state safety net — codex-H1 guarantees the migration eagerly
+  // seeds Default at boot, so this branch should virtually never fire
+  // in practice. If it does, the migration is in flight or a partial
+  // failure left zero profiles. We auto-retry once after 1.5s; if
+  // still empty we surface a typed runbook-pointing banner.
+  useEffect(() => {
+    if (profiles && profiles.length === 0 && !activeProfileMissing && emptyRetryAttempts < 1) {
+      if (emptyRetryTimerRef.current) {
+        window.clearTimeout(emptyRetryTimerRef.current);
+      }
+      emptyRetryTimerRef.current = window.setTimeout(() => {
+        setEmptyRetryAttempts((n) => n + 1);
+        loadAll();
+      }, 1500);
+    }
+    return () => {
+      if (emptyRetryTimerRef.current) {
+        window.clearTimeout(emptyRetryTimerRef.current);
+        emptyRetryTimerRef.current = null;
+      }
+    };
+  }, [profiles, activeProfileMissing, emptyRetryAttempts, loadAll]);
+
+  // Re-render every 30s so "saved Xm ago" stays fresh.
   useEffect(() => {
     if (!lastSavedAt) return;
     const id = setInterval(() => setTick((t) => t + 1), 30_000);
     return () => clearInterval(id);
   }, [lastSavedAt]);
 
-  const filteredModels = useMemo(() => {
-    if (!modelFilter) return models;
-    const f = modelFilter.toLowerCase();
-    return models.filter(
-      (m) => m.id.toLowerCase().includes(f) || (m.name && m.name.toLowerCase().includes(f))
-    );
-  }, [modelFilter, models]);
+  // Slice-1-flag #3: listen for the editor's CustomEvent so we can
+  // open the panel-scoped 409 conflict resolution UI.
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      const ce = ev as CustomEvent<{ profileId: string; hint: string }>;
+      const targetId = ce.detail?.profileId ?? "";
+      const targetProfile = profiles?.find((p) => p.id === targetId);
+      setConflict({
+        targetProfileId: targetId,
+        targetProfileName: targetProfile?.name ?? targetId,
+        hint:
+          ce.detail?.hint ??
+          "Another writer activated a different profile during your edit.",
+      });
+      // Refresh the list so the user sees the now-active profile
+      // immediately, and the repair-picker / dropdowns reflect truth.
+      loadAll();
+    };
+    window.addEventListener("sourcebridge:profile-target-no-longer-active", handler);
+    return () => {
+      window.removeEventListener("sourcebridge:profile-target-no-longer-active", handler);
+    };
+  }, [profiles, loadAll]);
 
-  function handleProviderChange(next: string) {
-    setProvider(next);
-    const defaults = providerDefaults[next];
-    if (defaults) {
-      setBaseURL(defaults.baseURL);
-      if (defaults.model) {
-        setSummaryModel(defaults.model);
-        setReviewModel(defaults.model);
-        setAskModel(defaults.model);
-        setKnowledgeModel(defaults.model);
-        setArchitectureDiagramModel(defaults.model);
-        if (isEnterprise) setReportModel(defaults.model);
-      }
-      fetchModels(next, defaults.baseURL);
-    }
-  }
+  const profileCount = profiles?.length ?? 0;
+  const activeProfile = profiles?.find((p) => p.is_active) ?? null;
+  const selectedProfile = profiles?.find((p) => p.id === selectedProfileId) ?? null;
 
-  async function saveLLMConfig() {
-    if (saving) return;
-    setSaving(true);
-    setMessage(null);
-    setSuccess(false);
+  const handleAddProfile = useCallback(async () => {
+    // Create a new profile with sensible defaults. The user lands in
+    // the editor below to fill it in. We don't pop a modal — the page
+    // already has the right shape for editing one profile.
+    const seedName = computeSeedName(profiles ?? []);
     try {
-      const body: Record<string, unknown> = {
-        provider,
-        base_url: baseURL,
-        summary_model: summaryModel,
-        review_model: reviewModel,
-        ask_model: askModel,
-        knowledge_model: knowledgeModel,
-        architecture_diagram_model: architectureDiagramModel,
-        draft_model: draftModel,
-        timeout_secs: timeoutSecs,
-        advanced_mode: advancedMode,
-      };
-      if (isEnterprise) body.report_model = reportModel;
-      if (apiKey) body.api_key = apiKey;
-
-      const res = await authFetch("/api/v1/admin/llm-config", {
-        method: "PUT",
+      const res = await authFetch("/api/v1/admin/llm-profiles", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          name: seedName,
+          provider: activeProfile?.provider ?? "ollama",
+          base_url: activeProfile?.base_url ?? "http://localhost:11434",
+          summary_model: "",
+          review_model: "",
+          ask_model: "",
+          knowledge_model: "",
+          architecture_diagram_model: "",
+          draft_model: "",
+          timeout_secs: 900,
+          advanced_mode: false,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(await handleApiError(res));
+      }
+      const data = (await res.json()) as { id: string };
+      // Refetch so the new profile shows up; then select it for edit.
+      await loadAll();
+      setSelectedProfileId(data.id);
+    } catch (e) {
+      setLoadError((e as Error).message);
+    }
+  }, [profiles, activeProfile, loadAll]);
+
+  const handleSwitchRequested = useCallback(
+    (toId: string) => {
+      const target = profiles?.find((p) => p.id === toId);
+      const fromName = activeProfile?.name ?? "current profile";
+      if (!target) return;
+      setSwitchDialog({
+        fromName,
+        toId,
+        toName: target.name,
+      });
+    },
+    [profiles, activeProfile],
+  );
+
+  const handleRepair = useCallback(async () => {
+    if (!repairTargetId) return;
+    setRepairBusy(true);
+    setRepairError(null);
+    try {
+      const idPath = encodeURIComponent(repairTargetId);
+      const res = await authFetch(`/api/v1/admin/llm-profiles/${idPath}/activate`, {
+        method: "POST",
       });
       if (!res.ok) throw new Error(await handleApiError(res));
-      const data = await res.json();
-      setMessage("LLM configuration saved." + (data.note ? ` ${data.note}` : ""));
-      setSuccess(true);
-      setApiKey("");
-      setLastSavedAt(Date.now());
-      // Refresh snapshot so dirty indicator clears
-      savedSnapshotRef.current = currentSnapshot;
-      // Pull the server-echoed state (e.g. api_key_hint updates)
-      loadConfig();
+      await loadAll();
     } catch (e) {
-      setSuccess(false);
-      setMessage(`Error: ${(e as Error).message}`);
+      setRepairError((e as Error).message);
+    } finally {
+      setRepairBusy(false);
     }
-    setSaving(false);
-  }
+  }, [repairTargetId, loadAll]);
 
-  async function testConnection() {
-    setTestResult(null);
-    const res = await authFetch("/api/v1/admin/test-llm", { method: "POST" });
-    const data = await res.json();
-    setTestResult(JSON.stringify(data, null, 2));
-  }
+  // 409 conflict resolution actions:
+  const conflictRetryOnNowActive = useCallback(() => {
+    // Switch the editor target to the currently-active profile (which
+    // is now the "winner"), so the user can re-paste their edits if
+    // they want them on the now-active profile.
+    if (activeProfile) {
+      setSelectedProfileId(activeProfile.id);
+    }
+    setConflict(null);
+  }, [activeProfile]);
 
-  const fieldWrapClass = "grid gap-1.5";
-  const labelClass = "text-sm font-medium text-[var(--text-primary)]";
-  const helpTextClass = "text-xs text-[var(--text-secondary)]";
-  const inputClass =
-    "h-11 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)]";
-  const monoInputClass = `${inputClass} font-mono`;
-  const selectClass = inputClass;
-  const stackClass = "grid gap-4 max-w-[32rem]";
-  const codeBlockClass =
-    "rounded-[var(--radius-md)] bg-black/20 p-3 font-mono text-sm whitespace-pre-wrap text-[var(--text-primary)]";
-  const messageClass = (ok: boolean) =>
-    cn(
-      "rounded-[var(--radius-md)] border px-3 py-2 text-sm",
-      ok
-        ? "border-[var(--color-success,#22c55e)] bg-[rgba(34,197,94,0.1)] text-[var(--color-success,#22c55e)]"
-        : "border-[var(--color-error,#ef4444)] bg-[rgba(239,68,68,0.1)] text-[var(--color-error,#ef4444)]"
+  const conflictKeepOriginalTarget = useCallback(() => {
+    // Keep the editor on the same profile (the user's intended target),
+    // which is now NON-active. Subsequent saves go through the
+    // non-active write path (which is allowed) so the user's edits land
+    // on the originally-targeted profile even though it's no longer
+    // active. The user can re-activate later if they want.
+    if (conflict) {
+      setSelectedProfileId(conflict.targetProfileId);
+    }
+    setConflict(null);
+  }, [conflict]);
+
+  const conflictDiscard = useCallback(() => {
+    // Trigger a hydrate-from-server: changing selectedProfileId resets
+    // the editor's local state from the (now-fresh) profile prop. The
+    // simplest way is to bounce the selection.
+    if (selectedProfileId) {
+      const id = selectedProfileId;
+      setSelectedProfileId(null);
+      setTimeout(() => setSelectedProfileId(id), 0);
+    }
+    setConflict(null);
+  }, [selectedProfileId]);
+
+  // Loading shell.
+  if (profiles === null && loadError === null) {
+    return (
+      <PageFrame>
+        <PageHeader eyebrow="Admin" title="LLM configuration" />
+        <Panel>
+          <p className="text-sm text-[var(--text-secondary)]">Loading…</p>
+        </Panel>
+      </PageFrame>
     );
+  }
 
   if (loadError) {
     return (
@@ -321,10 +398,69 @@ export default function AdminLLMPage() {
           <p className="text-sm text-[var(--color-error,#ef4444)]">
             Could not load LLM configuration: {loadError}
           </p>
+          <div className="mt-3">
+            <Button variant="secondary" size="sm" onClick={loadAll}>
+              Retry
+            </Button>
+          </div>
         </Panel>
       </PageFrame>
     );
   }
+
+  // Empty-state safety net (post one auto-retry).
+  if (profiles && profiles.length === 0) {
+    if (emptyRetryAttempts < 1) {
+      return (
+        <PageFrame>
+          <PageHeader eyebrow="Admin" title="LLM configuration" />
+          <Panel>
+            <p className="text-sm text-[var(--text-secondary)]" data-testid="empty-loading-hint">
+              Loading… migration may still be running. Refreshing automatically.
+            </p>
+          </Panel>
+        </PageFrame>
+      );
+    }
+    return (
+      <PageFrame>
+        <PageHeader eyebrow="Admin" title="LLM configuration" />
+        <Panel>
+          <div role="alert" data-testid="empty-runbook-banner" className="space-y-2">
+            <p className="text-sm font-medium text-[var(--color-error,#ef4444)]">
+              No LLM profiles found. The boot-time migration may have failed or hasn&apos;t run yet.
+            </p>
+            <p className="text-sm text-[var(--text-secondary)]">
+              See the{" "}
+              <a
+                href={RUNBOOK_PATH}
+                className="underline hover:text-[var(--text-primary)]"
+                target="_blank"
+                rel="noreferrer"
+              >
+                LLM-config admin runbook
+              </a>{" "}
+              for recovery steps. You can also retry the page load.
+            </p>
+            <div>
+              <Button variant="secondary" size="sm" onClick={loadAll}>
+                Retry
+              </Button>
+            </div>
+          </div>
+        </Panel>
+      </PageFrame>
+    );
+  }
+
+  const isMultiProfileMode = profileCount >= 2;
+  const editorDisabled = activeProfileMissing;
+
+  // Derive the "you're editing the 'X' profile" pill name. Slice-1-flag
+  // #2: legacy GET response provides active_profile_name. We use that
+  // for the N=1 header pill so it stays correct on a non-N=1 transition.
+  const headerActiveProfileName =
+    legacyConfig?.active_profile_name || activeProfile?.name || profiles?.[0]?.name || "Default";
 
   return (
     <PageFrame>
@@ -333,318 +469,211 @@ export default function AdminLLMPage() {
         title="LLM configuration"
         description="Provider, model, and per-operation overrides for code analysis, review, and chat."
         actions={
-          <div className="flex items-center gap-3">
-            {dirty ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-raised)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]">
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-                Unsaved changes
+          <div className="flex flex-wrap items-center gap-2">
+            {isMultiProfileMode && activeProfile ? (
+              <span
+                data-testid="header-active-pill"
+                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-success,#22c55e)] bg-[rgba(34,197,94,0.1)] px-2.5 py-1 text-xs font-medium text-[var(--color-success,#22c55e)]"
+              >
+                Active: {activeProfile.name}
               </span>
-            ) : lastSavedAt ? (
+            ) : !isMultiProfileMode ? (
+              <span
+                data-testid="header-profile-pill"
+                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-raised)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]"
+                title="Editing the workspace's current LLM profile"
+              >
+                Profile: {headerActiveProfileName}
+              </span>
+            ) : null}
+            {!isMultiProfileMode && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleAddProfile}
+                disabled={editorDisabled}
+                data-testid="header-add-profile"
+              >
+                + Add profile
+              </Button>
+            )}
+            {lastSavedAt && (
               <span className="text-xs text-[var(--text-tertiary)]">
                 Saved {formatRelativeSaved(lastSavedAt)}
               </span>
-            ) : null}
+            )}
           </div>
         }
       />
 
-      <Panel className="mb-4">
-        <div className={stackClass}>
-          <div className={fieldWrapClass}>
-            <label className={labelClass}>Provider</label>
-            <select
-              value={provider}
-              onChange={(e) => handleProviderChange(e.target.value)}
-              className={selectClass}
-            >
-              <option value="ollama">Ollama (Local)</option>
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
-              <option value="vllm">vLLM (Local)</option>
-              <option value="llama-cpp">llama.cpp (Local)</option>
-              <option value="sglang">SGLang (Local)</option>
-              <option value="lmstudio">LM Studio (Local)</option>
-              <option value="gemini">Google Gemini</option>
-              <option value="openrouter">OpenRouter</option>
-            </select>
+      {/* Repair banner — slice-1-flag #1: gated only by active_profile_missing
+          from the LIST response, never recomputed client-side. */}
+      {activeProfileMissing && (
+        <Panel className="mb-4 border-[var(--color-error,#ef4444)]" data-testid="repair-banner">
+          <div className="space-y-3">
+            <div>
+              <h3 className="text-base font-semibold text-[var(--color-error,#ef4444)]">
+                Active profile is missing
+              </h3>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                The workspace has profiles, but the active-profile pointer no longer matches any of them.
+                Pick a profile to activate. Editing is disabled until you do.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="grid gap-1.5 text-sm">
+                <span className="text-xs font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+                  Pick profile to activate
+                </span>
+                <select
+                  value={repairTargetId}
+                  onChange={(e) => setRepairTargetId(e.target.value)}
+                  disabled={repairBusy}
+                  data-testid="repair-picker"
+                  className="h-11 min-w-[16rem] rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)]"
+                >
+                  {profiles?.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button
+                variant="primary"
+                size="md"
+                onClick={handleRepair}
+                disabled={repairBusy || !repairTargetId}
+                data-testid="repair-activate"
+              >
+                {repairBusy ? "Activating…" : "Activate"}
+              </Button>
+            </div>
+            {repairError ? (
+              <div
+                role="alert"
+                className="rounded-[var(--control-radius)] border border-[var(--color-error,#ef4444)] bg-[color:var(--color-error-subtle,rgba(239,68,68,0.08))] px-3 py-2 text-xs text-[var(--color-error,#ef4444)]"
+              >
+                {repairError}
+              </div>
+            ) : null}
           </div>
+        </Panel>
+      )}
 
-          <div className={fieldWrapClass}>
-            <label className={labelClass}>Base URL</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={baseURL}
-                onChange={(e) => setBaseURL(e.target.value)}
-                placeholder={providerDefaults[provider]?.baseURL || "http://localhost:11434"}
-                className={`flex-1 ${monoInputClass}`}
-              />
+      {/* 409 conflict resolution panel — slice-1-flag #3. Panel-scoped, not
+          a toast (UX intake §6: error states for destructive ops are
+          panel-scoped so the user has time to read and decide). */}
+      {conflict && (
+        <Panel className="mb-4 border-amber-400" data-testid="conflict-banner">
+          <div className="space-y-3">
+            <div>
+              <h3 className="text-base font-semibold text-amber-400">
+                Profile &quot;{conflict.targetProfileName}&quot; is no longer active
+              </h3>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                Your edits were not saved. {conflict.hint} Pick how to proceed:
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={conflictRetryOnNowActive}
+                disabled={!activeProfile}
+                data-testid="conflict-retry-active"
+              >
+                Edit the now-active profile{activeProfile ? ` (${activeProfile.name})` : ""}
+              </Button>
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => fetchModels(provider, baseURL)}
-                disabled={modelsLoading}
+                onClick={conflictKeepOriginalTarget}
+                data-testid="conflict-keep-target"
               >
-                {modelsLoading ? "Loading..." : "Refresh models"}
+                Keep editing &quot;{conflict.targetProfileName}&quot; (now non-active)
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={conflictDiscard}
+                data-testid="conflict-discard"
+              >
+                Discard edits
               </Button>
             </div>
-            <p className={helpTextClass}>
-              {provider === "ollama" || provider === "vllm"
-                ? "Required for local providers. Include /v1 suffix for OpenAI-compatible endpoints."
-                : provider === "llama-cpp"
-                ? "llama.cpp server with OpenAI-compatible API. Supports speculative decoding when launched with --model-draft."
-                : provider === "sglang"
-                ? "SGLang server with OpenAI-compatible API. Supports EAGLE-based speculative decoding at launch."
-                : provider === "lmstudio"
-                ? "LM Studio with OpenAI-compatible API. Supports per-request speculative decoding via draft model."
-                : provider === "openrouter"
-                ? "OpenRouter uses the OpenAI-compatible API. Models from 300+ providers available."
-                : provider === "gemini"
-                ? "Google Gemini uses an OpenAI-compatible endpoint. Default URL works for most setups."
-                : "Default URL for this provider. Change it to use a custom proxy or endpoint."}
-            </p>
           </div>
+        </Panel>
+      )}
 
-          {(provider === "anthropic" ||
-            provider === "openai" ||
-            provider === "gemini" ||
-            provider === "openrouter") && (
-            <div className={fieldWrapClass}>
-              <label className={labelClass}>API Key</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={
-                    serverConfig?.api_key_set
-                      ? "Key is configured (enter new to replace)"
-                      : provider === "anthropic"
-                      ? "sk-ant-..."
-                      : provider === "gemini"
-                      ? "AIza..."
-                      : "sk-..."
-                  }
-                  className={`flex-1 ${monoInputClass}`}
-                />
-                {serverConfig?.api_key_set && (
-                  <span className="whitespace-nowrap font-mono text-xs text-[var(--color-success,#22c55e)]">
-                    {serverConfig.api_key_hint || "Configured"}
-                  </span>
-                )}
-              </div>
-              <p className={helpTextClass}>
-                Required for cloud providers. After saving a new key, click &quot;Refresh models&quot; to load
-                the model list.
-              </p>
+      {/* List rendered only when N>=2 (progressive disclosure). */}
+      {isMultiProfileMode && profiles && (
+        <Panel className="mb-4">
+          <ProfileList
+            profiles={profiles}
+            selectedProfileId={selectedProfileId ?? ""}
+            disabled={editorDisabled}
+            onSelectForEdit={(id) => setSelectedProfileId(id)}
+            onActivateRequested={handleSwitchRequested}
+            onAddProfile={handleAddProfile}
+            onDeleted={loadAll}
+            onDuplicated={(id) => {
+              loadAll();
+              setSelectedProfileId(id);
+            }}
+          />
+        </Panel>
+      )}
+
+      {/* Editor — always present unless we hit empty-state. In N=1 mode
+          this looks exactly like today's /admin/llm grid. In N>=2 mode
+          it picks up the "Profile name" + "Make active" affordances. */}
+      {selectedProfile && (
+        <Panel
+          className="mb-4"
+          data-testid={isMultiProfileMode ? "editor-panel-multi" : "editor-panel-single"}
+        >
+          {isMultiProfileMode && (
+            <div className="mb-3 text-sm text-[var(--text-secondary)]">
+              <span className="font-medium text-[var(--text-primary)]">
+                Editing: {selectedProfile.name}
+              </span>
+              {selectedProfile.is_active && (
+                <span className="ml-2 inline-flex items-center rounded-full border border-[var(--color-success,#22c55e)] bg-[rgba(34,197,94,0.1)] px-2 py-0.5 text-xs font-medium text-[var(--color-success,#22c55e)]">
+                  Active
+                </span>
+              )}
             </div>
           )}
+          <ProfileEditor
+            profile={selectedProfile}
+            multiProfileMode={isMultiProfileMode}
+            disabled={editorDisabled}
+            onSaved={() => {
+              setLastSavedAt(Date.now());
+              loadAll();
+            }}
+            onActivateRequested={() => handleSwitchRequested(selectedProfile.id)}
+            testIdPrefix={isMultiProfileMode ? "editor-multi" : "editor-single"}
+          />
+        </Panel>
+      )}
 
-          {provider === "lmstudio" && (
-            <div className={fieldWrapClass}>
-              <label className={labelClass}>Draft Model (Speculative Decoding)</label>
-              <input
-                type="text"
-                value={draftModel}
-                onChange={(e) => setDraftModel(e.target.value)}
-                placeholder="e.g. lmstudio-community/Qwen2.5-0.5B-Instruct-GGUF"
-                className={monoInputClass}
-              />
-              <p className={helpTextClass}>
-                Optional. Smaller model used for speculative decoding. LM Studio sends candidate tokens from
-                this model and verifies them with the main model in a single pass, improving throughput
-                1.5-3x.
-              </p>
-            </div>
-          )}
-
-          <div className={fieldWrapClass}>
-            <label className={labelClass}>Model {advancedMode && "(Analysis / Default)"}</label>
-            {models.length > 20 ? (
-              <input
-                type="text"
-                value={modelFilter}
-                onChange={(e) => setModelFilter(e.target.value)}
-                placeholder="Filter models..."
-                className={inputClass}
-              />
-            ) : null}
-            <ModelCombobox
-              value={summaryModel}
-              onChange={(v) => {
-                setSummaryModel(v);
-                if (!advancedMode) {
-                  setReviewModel(v);
-                  setAskModel(v);
-                  setKnowledgeModel(v);
-                  setArchitectureDiagramModel(v);
-                  if (isEnterprise) setReportModel(v);
-                }
-              }}
-              models={filteredModels}
-              placeholder={
-                models.length > 0
-                  ? "Pick from list or type a custom model ID"
-                  : providerDefaults[provider]?.model || "model name"
-              }
-              className={monoInputClass}
-            />
-            <p className={helpTextClass}>
-              {modelsLoading
-                ? "Loading available models..."
-                : modelsError
-                ? `Could not load models: ${modelsError}`
-                : models.length > 0
-                ? `${models.length} model${models.length !== 1 ? "s" : ""} available. Start typing to filter or enter a custom model ID.`
-                : "Used for code summaries, reviews, and chat. All operations use the same model by default."}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <label className="relative inline-flex cursor-pointer items-center">
-              <input
-                type="checkbox"
-                checked={advancedMode}
-                onChange={(e) => {
-                  const next = e.target.checked;
-                  setAdvancedMode(next);
-                  if (!next) {
-                    setReviewModel(summaryModel);
-                    setAskModel(summaryModel);
-                    setKnowledgeModel(summaryModel);
-                    setArchitectureDiagramModel(summaryModel);
-                    if (isEnterprise) setReportModel(summaryModel);
-                  }
-                }}
-                className="peer sr-only"
-              />
-              <div className="peer h-5 w-9 rounded-full bg-[var(--border-default)] after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-[hsl(var(--accent-hue,250),60%,60%)] peer-checked:after:translate-x-full peer-checked:after:border-white" />
-            </label>
-            <div>
-              <span className={labelClass}>Advanced: Per-operation models</span>
-              <p className={helpTextClass}>
-                Use different models for different operation types. Turning this off resets all operations
-                to the default model.
-              </p>
-            </div>
-          </div>
-
-          {advancedMode && (
-            <div className="space-y-4 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-raised)] p-4">
-              <p className="text-sm text-[var(--text-secondary)]">
-                Assign models to operation groups. The default model above is used for Analysis. Empty fields
-                fall back to the default.
-              </p>
-
-              {(
-                [
-                  {
-                    label: "Code Review",
-                    key: "review",
-                    value: reviewModel,
-                    setter: setReviewModel,
-                    badge: "Medium ~5K tok",
-                    help: "reviewCode (all templates)",
-                  },
-                  {
-                    label: "Discussion & Q&A",
-                    key: "discussion",
-                    value: askModel,
-                    setter: setAskModel,
-                    badge: "Medium ~1-5K tok",
-                    help: "discussCode, answerQuestion",
-                  },
-                  {
-                    label: "Knowledge Generation",
-                    key: "knowledge",
-                    value: knowledgeModel,
-                    setter: setKnowledgeModel,
-                    badge: "High ~10-37K tok",
-                    help: "cliffNotes, learningPath, codeTour, workflowStory, explainSystem",
-                  },
-                  {
-                    label: "Architecture Diagrams",
-                    key: "architecture",
-                    value: architectureDiagramModel,
-                    setter: setArchitectureDiagramModel,
-                    badge: "Visual reasoning",
-                    help: "AI-generated architecture diagrams. Benefits from vision / reasoning models.",
-                  },
-                  ...(isEnterprise
-                    ? [
-                        {
-                          label: "Reports",
-                          key: "report",
-                          value: reportModel,
-                          setter: setReportModel,
-                          badge: "High long-form",
-                          help: "architecture baseline, SWOT, due diligence, portfolio and compliance reports",
-                        },
-                      ]
-                    : []),
-                ] as const
-              ).map((group) => (
-                <div key={group.key} className={fieldWrapClass}>
-                  <div className="flex items-center gap-2">
-                    <label className={labelClass}>{group.label}</label>
-                    <span className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-base)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-secondary)]">
-                      {group.badge}
-                    </span>
-                  </div>
-                  <ModelCombobox
-                    value={group.value}
-                    onChange={group.setter}
-                    models={filteredModels}
-                    placeholder={summaryModel || "same as default"}
-                    className={monoInputClass}
-                  />
-                  <p className={helpTextClass}>{group.help}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className={fieldWrapClass}>
-            <label className={labelClass}>Timeout (seconds)</label>
-            <input
-              type="number"
-              value={timeoutSecs}
-              onChange={(e) => setTimeoutSecs(parseInt(e.target.value) || 900)}
-              min={5}
-              max={3600}
-              className="h-11 w-32 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)]"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button onClick={saveLLMConfig} disabled={saving || (!dirty && !hasPendingApiKey)}>
-              {saving ? "Saving..." : "Save"}
-            </Button>
-            <Button variant="secondary" onClick={testConnection}>
-              Test Connection
-            </Button>
-          </div>
-
-          {message && <p className={messageClass(success)}>{message}</p>}
-          {testResult && <pre className={codeBlockClass}>{testResult}</pre>}
-        </div>
-      </Panel>
-
-      {isLocalProvider(provider) && (
+      {selectedProfile && isLocalProvider(selectedProfile.provider) && (
         <Panel className="mb-4">
           <h3 className="mb-2 text-base font-semibold text-[var(--text-primary)]">
             Speculative Decoding
           </h3>
           <p className="text-sm text-[var(--text-secondary)]">
-            {provider === "lmstudio"
+            {selectedProfile.provider === "lmstudio"
               ? "LM Studio supports per-request speculative decoding via the Draft Model field above. Configure a smaller draft model for 1.5-3x throughput improvement."
-              : provider === "llama-cpp"
-              ? "llama.cpp supports speculative decoding when launched with --model-draft. Performance metrics (tokens/sec, acceptance rate) appear in operation results."
-              : provider === "sglang"
-              ? "SGLang supports EAGLE-based speculative decoding configured at server launch. Performance metrics appear in operation results."
-              : provider === "vllm"
-              ? "vLLM supports EAGLE3 speculative decoding configured at server launch. Performance metrics appear in operation results."
-              : "Performance metrics (tokens/sec) from your local inference server appear in operation results when available."}
+              : selectedProfile.provider === "llama-cpp"
+                ? "llama.cpp supports speculative decoding when launched with --model-draft. Performance metrics (tokens/sec, acceptance rate) appear in operation results."
+                : selectedProfile.provider === "sglang"
+                  ? "SGLang supports EAGLE-based speculative decoding configured at server launch. Performance metrics appear in operation results."
+                  : selectedProfile.provider === "vllm"
+                    ? "vLLM supports EAGLE3 speculative decoding configured at server launch. Performance metrics appear in operation results."
+                    : "Performance metrics (tokens/sec) from your local inference server appear in operation results when available."}
           </p>
           <p className="mt-1 text-xs text-[var(--text-secondary)]">
             Tip: Higher tokens/sec indicates speculative decoding is working. Acceptance rate below 60% means
@@ -666,6 +695,52 @@ export default function AdminLLMPage() {
           </p>
         </Panel>
       )}
+
+      {switchDialog && (
+        <SwitchProfileDialog
+          open
+          fromProfileName={switchDialog.fromName}
+          toProfileId={switchDialog.toId}
+          toProfileName={switchDialog.toName}
+          onClose={() => setSwitchDialog(null)}
+          onActivated={() => {
+            setSwitchDialog(null);
+            loadAll();
+          }}
+        />
+      )}
     </PageFrame>
   );
+}
+
+function isLocalProvider(provider: string): boolean {
+  return ["ollama", "vllm", "llama-cpp", "sglang", "lmstudio"].includes(provider);
+}
+
+function formatRelativeSaved(ts: number | null): string {
+  if (!ts) return "";
+  const secs = Math.floor((Date.now() - ts) / 1000);
+  if (secs < 5) return "just now";
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+// Picks a fresh seed name like "Profile 2", "Profile 3", etc. that
+// doesn't collide with existing names (case-insensitive). Slice 2's
+// `+ Add profile` lands the user in the editor immediately, so the
+// name is editable before the first Save.
+function computeSeedName(profiles: ProfileResponse[]): string {
+  const taken = new Set(profiles.map((p) => p.name.toLowerCase().trim()));
+  let n = profiles.length + 1;
+  for (let i = 0; i < 100; i++) {
+    const candidate = `Profile ${n}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+    n++;
+  }
+  return `Profile ${Date.now()}`;
 }
