@@ -101,3 +101,6 @@ docs/essays/
 # Demo seed and benchmark data (lives in sourcebridge-ai/demo repo)
 benchmark-results/
 demo-seed/
+
+# Claude worktree subdirs (locked agent worktrees, not for source control)
+.claude/worktrees/

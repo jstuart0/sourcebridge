@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/surrealdb/surrealdb.go"
+
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/secretcipher"
 )
@@ -860,4 +862,158 @@ func TestIntegration_ConcurrentActivateAndRead(t *testing.T) {
 	}
 	close(stop)
 	wg.Wait()
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Slice-4 codex-r2 High #1: profile-PUT must CAS against the caller's
+// intended target id. If activation flips the active profile out from
+// under the writer, the strict variant returns ErrTargetNoLongerActive
+// and does NOT mirror the original target's fields onto the new active.
+// ─────────────────────────────────────────────────────────────────────
+
+func TestIntegration_WriteActiveByID_RejectsRacedActivation(t *testing.T) {
+	hs := newHelperStores(t, "test-key", false)
+	ctx := context.Background()
+	if err := MigrateToProfiles(ctx, hs.surreal, hs.lcs, hs.lps, hs.cipher, false, config.LLMConfig{Provider: "anthropic"}); err != nil {
+		t.Fatal(err)
+	}
+	// Create a second profile B.
+	bID, err := hs.lps.CreateProfile(ctx, ProfileCreate{Name: "B", Provider: "openai"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BumpVersionAfterCreate(ctx, hs.surreal, hs.lcs); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-update state for B (so we can detect corruption).
+	bBefore, err := hs.lps.LoadProfile(ctx, bID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the race: while the caller's intended target is the
+	// migrated Default profile (still active), another writer flips
+	// active to B. The strict helper observes the mismatch and
+	// returns ErrTargetNoLongerActive without writing.
+	if _, err := ActivateProfileWithRetry(ctx, hs.surreal, hs.lcs, bID); err != nil {
+		t.Fatal(err)
+	}
+
+	patch := ProfilePatch{
+		Provider:   "anthropic", // Default's provider — this is what the user intended
+		APIKey:     "",
+		APIKeyMode: APIKeyModeKeep(),
+		FieldsPresent: ProfilePatchFields{
+			Provider: true,
+		},
+	}
+	_, err = WriteActiveProfilePatchByIDWithRetry(
+		ctx, hs.surreal, hs.lps, hs.lcs,
+		MigratedProfileRecordID, // intent: edit the (now-no-longer-active) Default
+		patch,
+	)
+	if !errors.Is(err, ErrTargetNoLongerActive) {
+		t.Fatalf("expected ErrTargetNoLongerActive when activation flipped underneath, got %v", err)
+	}
+
+	// B (the now-active profile) MUST NOT have been corrupted with
+	// Default's fields. Provider stays "openai".
+	bAfter, err := hs.lps.LoadProfile(ctx, bID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bAfter.Provider != "openai" || bAfter.Provider != bBefore.Provider {
+		t.Errorf("B.provider corrupted: got %q, want openai (race-fix codex-r2 High #1)", bAfter.Provider)
+	}
+}
+
+func TestIntegration_WriteActiveByID_AcceptsCorrectTarget(t *testing.T) {
+	// Sanity: when the intended target IS the current active, the
+	// strict helper writes through normally.
+	hs := newHelperStores(t, "test-key", false)
+	ctx := context.Background()
+	if err := MigrateToProfiles(ctx, hs.surreal, hs.lcs, hs.lps, hs.cipher, false, config.LLMConfig{Provider: "anthropic"}); err != nil {
+		t.Fatal(err)
+	}
+	patch := ProfilePatch{
+		Provider:   "ollama",
+		APIKeyMode: APIKeyModeKeep(),
+		FieldsPresent: ProfilePatchFields{
+			Provider: true,
+		},
+	}
+	_, err := WriteActiveProfilePatchByIDWithRetry(
+		ctx, hs.surreal, hs.lps, hs.lcs,
+		MigratedProfileRecordID,
+		patch,
+	)
+	if err != nil {
+		t.Fatalf("strict variant on correct target: %v", err)
+	}
+	p, err := hs.lps.LoadProfile(ctx, MigratedProfileRecordID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Provider != "ollama" {
+		t.Errorf("active.provider after write: got %q, want ollama", p.Provider)
+	}
+}
+
+func TestIntegration_WriteActiveByID_DetectsMissingProfile(t *testing.T) {
+	// codex-r2 High #2: when active_profile_id points at a missing
+	// row (data corruption / direct DB delete), the strict helper
+	// returns ErrProfileNotFound rather than silently no-op'ing the
+	// row update while still bumping the legacy mirror.
+	hs := newHelperStores(t, "test-key", false)
+	ctx := context.Background()
+	if err := MigrateToProfiles(ctx, hs.surreal, hs.lcs, hs.lps, hs.cipher, false, config.LLMConfig{Provider: "anthropic"}); err != nil {
+		t.Fatal(err)
+	}
+	// Manually delete the active profile row WITHOUT going through
+	// the API (simulates manual surreal sql purge or a backup-restore
+	// from a pre-profiles snapshot). The active_profile_id pointer
+	// stays set; the row is gone.
+	dbConn := hs.surreal.DB()
+	if dbConn == nil {
+		t.Fatal("surreal db nil")
+	}
+	_, _ = surrealdb.Query[interface{}](ctx, dbConn,
+		`DELETE FROM type::thing('ca_llm_profile', $rid) RETURN NONE;`,
+		map[string]any{"rid": "default-migrated"},
+	)
+	// Confirm the pointer still points at the now-missing row.
+	activeID, _, err := hs.lcs.LoadActiveProfileIDAndVersion(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activeID != MigratedProfileRecordID {
+		t.Fatalf("activeID: got %q, want %q (test setup invariant)", activeID, MigratedProfileRecordID)
+	}
+
+	patch := ProfilePatch{
+		Provider:   "openai",
+		APIKeyMode: APIKeyModeKeep(),
+		FieldsPresent: ProfilePatchFields{
+			Provider: true,
+		},
+	}
+	// With intendedActiveID set: should detect missing.
+	_, err = WriteActiveProfilePatchByIDWithRetry(
+		ctx, hs.surreal, hs.lps, hs.lcs,
+		MigratedProfileRecordID, patch,
+	)
+	if !errors.Is(err, ErrProfileNotFound) {
+		t.Errorf("strict variant w/ missing profile: got %v, want ErrProfileNotFound", err)
+	}
+
+	// With empty intendedActiveID (legacy PUT semantics): should
+	// also detect missing — the helper checks the current active
+	// pointer's profile.
+	_, err = WriteActiveProfilePatchByIDWithRetry(
+		ctx, hs.surreal, hs.lps, hs.lcs,
+		"", patch,
+	)
+	if !errors.Is(err, ErrProfileNotFound) {
+		t.Errorf("legacy variant w/ missing profile: got %v, want ErrProfileNotFound", err)
+	}
 }

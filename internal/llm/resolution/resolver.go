@@ -673,6 +673,7 @@ func (r *DefaultResolver) applyRepoOverrideFromProfile(ctx context.Context, snap
 			"profile_id", profileID)
 		return
 	}
+	// llmprofile:allow — r.profileStore is the ProfileLookupStore interface (line 224); the AST lint flags the method name regardless of receiver type, so escape-hatch annotation is required.
 	rec, err := r.profileStore.LoadProfileForResolution(ctx, profileID)
 	if err != nil {
 		if errors.Is(err, ErrProfileNotFound) {

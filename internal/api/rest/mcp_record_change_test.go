@@ -478,7 +478,7 @@ func TestRecordChange_RejectsOversizedFiles(t *testing.T) {
 	files := make([]map[string]interface{}, recordChangeMaxFiles+1)
 	for i := range files {
 		files[i] = map[string]interface{}{
-			"path":   "src/file" + itoa(i) + ".go",
+			"path":   "src/file" + itoaMcpHelper(i) + ".go",
 			"status": "modified",
 		}
 	}
@@ -568,7 +568,7 @@ func TestRecordChange_RejectsOversizedRequirementIDs(t *testing.T) {
 
 	ids := make([]string, recordChangeMaxRequirementIDs+1)
 	for i := range ids {
-		ids[i] = "REQ-" + itoa(i)
+		ids[i] = "REQ-" + itoaMcpHelper(i)
 	}
 	_, tr := invokeRecordChange(t, h, sess, map[string]interface{}{
 		"repository_id":   h.repoID,
@@ -587,7 +587,7 @@ func TestRecordChange_RejectsOversizedRequirementIDs(t *testing.T) {
 // itoa is a tiny inline shim — the changewatch package has its own
 // version; keeping a local one here so we don't depend on package
 // internals.
-func itoa(n int) string {
+func itoaMcpHelper(n int) string {
 	if n == 0 {
 		return "0"
 	}

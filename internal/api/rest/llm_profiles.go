@@ -174,6 +174,16 @@ var ErrProfileTargetNoLongerActive = errors.New("intended active profile is no l
 // version_conflict body when the retry cap is exhausted).
 var ErrProfileVersionConflict = errors.New("ca_llm_config version changed since read; retry cap exhausted")
 
+// ErrNoActiveProfile is returned by the legacy SaveLLMConfig fallback
+// path when ca_llm_config.active_profile_id points at a profile id
+// that does not exist in ca_llm_profile (corrupted state — manual DB
+// surgery, replicated migration race, or rogue purge). Maps to HTTP
+// 503 with a runbook pointer per codex-r2 High #2. Distinct from
+// ErrProfileNotFound (which is "this specific id was queried but not
+// found"); ErrNoActiveProfile is "the workspace's active pointer is
+// dangling and no LLM call can resolve until an admin repairs it."
+var ErrNoActiveProfile = errors.New("workspace active_profile_id points to a missing profile; the active pointer needs to be repaired (see docs/admin-runbooks/llm-config.md)")
+
 // ─────────────────────────────────────────────────────────────────────────
 // Handlers
 // ─────────────────────────────────────────────────────────────────────────
@@ -185,8 +195,7 @@ func (s *Server) handleListLLMProfiles(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	ctx := r.Context()
-	profiles, err := s.llmProfileStore.ListProfiles(ctx)
+	profiles, err := s.llmProfileStore.ListProfiles(r.Context())
 	if err != nil {
 		slog.Error("list llm profiles failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -194,42 +203,44 @@ func (s *Server) handleListLLMProfiles(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
-	// Slice-4 (codex-r2 Low): compute active_profile_missing from the
-	// LIVE active_profile_id + the listed profiles, rather than relying
-	// on the resolver adapter's last-resolve latch. The latch is only
-	// updated when the runtime resolver hits the gap on an LLM call;
-	// database damage that occurs between resolves would otherwise be
-	// invisible to the admin UI until the next worker call.
+	// Slice 4 codex-r2 Low #5: compute active_profile_missing
+	// directly from the profile list + active id lookup, rather than
+	// relying on the resolver adapter's last-resolve latch. The latch
+	// only updates when the runtime resolver hits the gap on an LLM
+	// call; database damage that occurs between resolves would
+	// otherwise be invisible to the admin UI until the next call.
 	//
-	// Fall back to the resolver latch if (a) the live id lookup fails
-	// (DB outage — don't silently report "not missing" when we can't
-	// check) or (b) activeID is empty (pre-migration / fresh-install
-	// state where the latch already reflects the answer).
-	var missing bool
-	activeID, idErr := s.llmProfileStore.ActiveProfileID(ctx)
-	switch {
-	case idErr != nil:
-		missing = s.llmProfileStore.ActiveProfileMissing()
-	case activeID == "":
-		missing = s.llmProfileStore.ActiveProfileMissing()
-	default:
+	// Fall back to the resolver latch if the live lookup fails (DB
+	// outage), so we don't silently report "not missing" when we
+	// can't actually check.
+	activeMissing := false
+	activeID, idErr := s.llmProfileStore.ActiveProfileID(r.Context())
+	if idErr != nil {
+		// Fall back to the resolver latch when the live lookup
+		// fails. The latch is the secondary signal — it's whatever
+		// the resolver last observed before the outage.
+		activeMissing = s.llmProfileStore.ActiveProfileMissing()
+	} else if activeID == "" {
+		// No active id at all (pre-migration / fresh-install racing).
+		// The resolver latch already reflects this state when it has
+		// been hit.
+		activeMissing = s.llmProfileStore.ActiveProfileMissing()
+	} else {
 		// Active id is set: confirm it appears in the listed profiles.
-		// This is the "deleted while pointer still set" case the banner
-		// is meant to catch.
-		present := false
-		for i := range profiles {
-			if profiles[i].ID == activeID {
-				present = true
+		// Listing already happened above, so this is O(N) over a
+		// small N.
+		found := false
+		for _, p := range profiles {
+			if p.ID == activeID {
+				found = true
 				break
 			}
 		}
-		missing = !present
+		activeMissing = !found
 	}
-
 	resp := map[string]interface{}{
 		"profiles":               profiles,
-		"active_profile_missing": missing,
+		"active_profile_missing": activeMissing,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

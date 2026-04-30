@@ -84,6 +84,15 @@ func NewSurrealLLMProfileStore(client *SurrealDB, opts ...LLMProfileStoreOption)
 	return s
 }
 
+// Slice 4 codex-r2 Low #6: the Cipher() getter that previously
+// surfaced here was removed. The librarian-M1 decision in the plan
+// review explicitly rejected exposing the cipher through a getter —
+// the cipher is constructed once in cli/serve.go and threaded into
+// both stores via With…Cipher options. The migration receives the
+// cipher directly as a parameter; tests construct test ciphers via
+// the option API. There is no production caller that needs the
+// getter.
+
 // Profile is the persisted profile record. APIKey is plaintext at this
 // layer (encryption is handled transparently by the store). APIKeySet
 // and APIKeyHint are populated by the store on Load for caller-facing
