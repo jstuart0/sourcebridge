@@ -1089,9 +1089,23 @@ func (a *llmConfigAdapter) SaveLLMConfig(rec *rest.LLMConfigRecord) error {
 		patch.APIKey = ""
 		patch.APIKeyMode = db.APIKeyModeClear()
 	}
-	if _, werr := db.WriteActiveProfilePatchWithRetry(ctx, a.surrealDB, a.store, patch); werr != nil {
+	// Slice-4 (codex-r2 High #2): use the existence-verifying variant.
+	// `intendedActiveID == ""` keeps "current at helper entry" semantics
+	// (legacy PUT has no specific target id), but the variant verifies
+	// the current active profile row exists before issuing the batch.
+	// If active_profile_id is non-empty but the profile row is missing
+	// (data damage / direct DB delete), returns ErrProfileNotFound so
+	// we do NOT silently bump the legacy mirror with a no-op profile
+	// update underneath it.
+	if _, werr := db.WriteActiveProfilePatchByIDWithRetry(ctx, a.surrealDB, a.profileStore, a.store, "", patch); werr != nil {
 		if errors.Is(werr, db.ErrEncryptionKeyRequired) {
 			return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, werr)
+		}
+		// ErrProfileNotFound here means active_profile_id pointed at a
+		// missing row. Map to the no-active-profile sentinel so the REST
+		// layer can return a clear actionable error rather than a 500.
+		if errors.Is(werr, db.ErrProfileNotFound) {
+			return fmt.Errorf("active LLM profile is missing (active_profile_id points at a deleted row); use /admin/llm-profiles to repair")
 		}
 		return werr
 	}
@@ -1398,7 +1412,14 @@ func (a *llmProfileStoreAdapter) UpdateProfile(ctx context.Context, id string, r
 			patchHelper.APIKey = ""
 			patchHelper.APIKeyMode = db.APIKeyModeClear()
 		}
-		_, bumpErr := db.WriteActiveProfilePatchWithRetry(ctx, a.surrealDB, a.lcs, patchHelper)
+		// Slice-4 (codex-r2 High #1): pass `id` as intendedActiveID so
+		// the helper rejects with ErrTargetNoLongerActive if a concurrent
+		// activation moved the active pointer between this adapter's
+		// pre-check and the helper's BEGIN. Without this guard, the
+		// helper's "write into whichever profile happens to be active"
+		// semantics would corrupt the now-active profile with the
+		// reloaded fields of `id`.
+		_, bumpErr := db.WriteActiveProfilePatchByIDWithRetry(ctx, a.surrealDB, a.lps, a.lcs, id, patchHelper)
 		if bumpErr != nil {
 			return translateProfileStoreErr(bumpErr)
 		}

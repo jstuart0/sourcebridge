@@ -290,6 +290,15 @@ func writeActiveProfileWithLegacyMirror(
 	}
 	legacySetFull += "version = $new_version, updated_at = type::datetime($now)"
 
+	// Slice-4 (codex-r2 High #2 / r2b Medium): in-batch existence guard.
+	// SurrealDB UPDATE on a missing record is a silent no-op. Without
+	// this guard, an out-of-band delete (or pre-existing data damage)
+	// of the active profile row would let the legacy-mirror UPDATE land
+	// alone — version bumps, watermark advances, but the profile fields
+	// the caller intended to write went nowhere. The resolver would
+	// then report active_profile_missing while the caller observed
+	// success. Catch it inside the BEGIN so the THROW rolls back the
+	// whole batch atomically.
 	sql := fmt.Sprintf(`
 		BEGIN;
 		LET $cur = (SELECT version, active_profile_id FROM ca_llm_config:default)[0];
@@ -298,6 +307,10 @@ func writeActiveProfileWithLegacyMirror(
 		};
 		IF $cur.active_profile_id != $intended_active_id {
 			THROW "ca_llm_config_version_changed";
+		};
+		LET $existing = (SELECT id FROM type::thing('ca_llm_profile', $profile_rid))[0];
+		IF $existing == NONE {
+			THROW "profile_not_found";
 		};
 		LET $new_version = $cur.version + 1;
 		UPDATE type::thing('ca_llm_profile', $profile_rid) SET %s;
@@ -590,9 +603,19 @@ const helperRetryCap = 3
 // WriteActiveProfilePatchWithRetry resolves the currently-active
 // profile via lcs.LoadActiveProfileIDAndVersion, applies the patch via
 // writeActiveProfileWithLegacyMirror, and retries on ErrVersionConflict
-// up to helperRetryCap. On retry, the active id is re-checked: if it
-// differs from the original observation, returns ErrTargetNoLongerActive
-// (codex-r1e Low; the API maps this to 409 target_no_longer_active).
+// up to helperRetryCap. The "current active at helper-entry time" is
+// the writer's target — used by the legacy /admin/llm-config PUT path
+// where the caller has no specific profile id in mind, only "the
+// active one." If the active id changes during the retry window,
+// returns ErrTargetNoLongerActive (codex-r1e Low; the API maps this to
+// 409 target_no_longer_active).
+//
+// For profile-PUT callers that DO have an intended target id (the
+// admin updating profile A while another admin races to activate B),
+// use WriteActiveProfilePatchByIDWithRetry instead — it adds an
+// additional CAS guard `intendedActiveID == current_active_at_first_read`
+// so an admin's edits cannot land on a profile they did not target
+// (codex-r2 High #1).
 //
 // patch.APIKey must be the SEALED form (post-cipher.Encrypt). The
 // caller is responsible for cipher.Encrypt; we don't pass a cipher
@@ -605,6 +628,63 @@ func WriteActiveProfilePatchWithRetry(
 	lcs *SurrealLLMConfigStore,
 	patch ProfilePatch,
 ) (uint64, error) {
+	return writeActiveProfilePatchInternal(ctx, surrealDB, lcs, patch, "")
+}
+
+// WriteActiveProfilePatchByIDWithRetry is the strict variant: the
+// caller passes the profile id they intended to write. If at the time
+// of helper entry the current active profile is something else, the
+// helper returns ErrTargetNoLongerActive without writing anything
+// (codex-r2 High #1).
+//
+// In addition, the helper verifies the target profile row exists. If
+// active_profile_id points at a missing row (data corruption), returns
+// ErrProfileNotFound rather than silently no-op'ing the row update
+// while still bumping the legacy mirror (codex-r2 High #2).
+//
+// Empty intendedActiveID falls through to "current at helper entry"
+// semantics — for callers (the legacy /admin/llm-config PUT) that do
+// not have a specific target id. Existence check still runs on the
+// current active profile id loaded at helper entry.
+func WriteActiveProfilePatchByIDWithRetry(
+	ctx context.Context,
+	surrealDB *SurrealDB,
+	lps *SurrealLLMProfileStore,
+	lcs *SurrealLLMConfigStore,
+	intendedActiveID string,
+	patch ProfilePatch,
+) (uint64, error) {
+	idToVerify := intendedActiveID
+	if idToVerify == "" && lcs != nil {
+		// Legacy PUT: no caller-provided target. Verify the CURRENT
+		// active profile (the one we'd write into) exists.
+		currentActiveID, _, err := lcs.LoadActiveProfileIDAndVersion(ctx)
+		if err != nil {
+			return 0, err
+		}
+		idToVerify = currentActiveID
+	}
+	if idToVerify != "" && lps != nil {
+		if _, err := lps.LoadProfile(ctx, idToVerify); err != nil {
+			if errors.Is(err, ErrProfileNotFound) {
+				return 0, ErrProfileNotFound
+			}
+			return 0, fmt.Errorf("verify active profile exists: %w", err)
+		}
+	}
+	return writeActiveProfilePatchInternal(ctx, surrealDB, lcs, patch, intendedActiveID)
+}
+
+// writeActiveProfilePatchInternal is the shared implementation backing
+// both WriteActiveProfilePatchWithRetry (intendedActiveID == "") and
+// WriteActiveProfilePatchByIDWithRetry (intendedActiveID set).
+func writeActiveProfilePatchInternal(
+	ctx context.Context,
+	surrealDB *SurrealDB,
+	lcs *SurrealLLMConfigStore,
+	patch ProfilePatch,
+	intendedActiveID string,
+) (uint64, error) {
 	if surrealDB == nil || lcs == nil {
 		return 0, fmt.Errorf("write active profile: stores not configured")
 	}
@@ -614,6 +694,17 @@ func WriteActiveProfilePatchWithRetry(
 	}
 	if originalActiveID == "" {
 		return 0, fmt.Errorf("write active profile: no active profile yet (boot race or pre-migration)")
+	}
+	// Strict-mode CAS (codex-r2 High #1): if the caller has an intended
+	// target id, that id MUST be the current active profile at first
+	// read. A concurrent activation between the caller's intent-resolution
+	// (e.g. the adapter loading the active id outside this helper) and
+	// helper entry counts as ErrTargetNoLongerActive. Without this guard,
+	// the helper would write the caller's payload into whichever profile
+	// happens to be active when the helper runs — corrupting the new
+	// active profile with the old active profile's reloaded fields.
+	if intendedActiveID != "" && originalActiveID != intendedActiveID {
+		return 0, ErrTargetNoLongerActive
 	}
 
 	for attempt := 0; attempt < helperRetryCap; attempt++ {
