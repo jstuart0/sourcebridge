@@ -1086,16 +1086,33 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 "package_summaries": knowledge_progress_pb2.KNOWLEDGE_PHASE_PACKAGE_SUMMARIES,
                 "root_synthesis": knowledge_progress_pb2.KNOWLEDGE_PHASE_ROOT_SYNTHESIS,
             }
+            # codex r2b M3: hierarchical phase markers (LEAF_SUMMARIES
+            # / FILE_SUMMARIES / PACKAGE_SUMMARIES / ROOT_SYNTHESIS)
+            # only have a Go-side bucket on the hierarchical bucket
+            # map, which is selected only for repository-scope
+            # cliff-notes artifacts (see rpcBucketForArtifact in
+            # internal/api/graphql/knowledge_stream_driver.go). For
+            # file/module/symbol scopes the Go driver uses the
+            # collapsed map and bucketMin returns 0 for those phases,
+            # which would regress the progress bar from the snapshot
+            # floor. We therefore only surface hierarchical phase
+            # markers when scope_type == "repository". Non-repository
+            # scopes follow the collapsed contract: SNAPSHOT -> RENDER
+            # -> FINALIZING. Render is in both bucket maps so it's
+            # always safe.
+            emit_hierarchical_phases = scope_type == "repository"
             pump = HeartbeatPump(_snapshot_fn)
             async for prog in pump.run_until(work_task):
-                # codex r2 M3: emit LEAF_SUMMARIES exactly once, the
-                # first time we observe a hierarchical strategy in
-                # play. The heartbeat pump's progress event already
-                # carries the right phase; this extra phase marker
-                # exists so the Go-side stream driver can advance the
-                # bucketed progress floor cleanly when the
-                # hierarchical pipeline starts.
-                if not leaf_summaries_emitted and active_strategy[0] is not None and hasattr(active_strategy[0], "progress_snapshot"):
+                # codex r2 M3 + r2b: emit LEAF_SUMMARIES exactly once,
+                # the first time we observe a hierarchical strategy
+                # in play, AND only on repository scope (see comment
+                # above for why).
+                if (
+                    emit_hierarchical_phases
+                    and not leaf_summaries_emitted
+                    and active_strategy[0] is not None
+                    and hasattr(active_strategy[0], "progress_snapshot")
+                ):
                     yield knowledge_pb2.GenerateCliffNotesStreamMessage(
                         phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_LEAF_SUMMARIES)
                     )
@@ -1104,14 +1121,32 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 # the strategy chain pushed via _on_phase. This is
                 # what surfaces the RENDER transition just before
                 # renderer.render, instead of waiting until the
-                # whole strategy chain returns.
+                # whole strategy chain returns. RENDER is in both
+                # bucket maps so it's always safe to surface; the
+                # hierarchical-only phases are gated by scope.
                 while pending_phases:
                     name = pending_phases.pop(0)
+                    if (
+                        not emit_hierarchical_phases
+                        and name in {"leaf_summaries", "file_summaries", "package_summaries", "root_synthesis"}
+                    ):
+                        # Skip hierarchical phase markers on non-
+                        # repository scopes (see r2b M3 above).
+                        continue
                     proto_phase = phase_name_to_proto.get(name)
                     if proto_phase is not None:
                         yield knowledge_pb2.GenerateCliffNotesStreamMessage(
                             phase=phase_marker(proto_phase)
                         )
+                # codex r2b M3: when we are NOT emitting hierarchical
+                # phase markers, the heartbeat pump's progress event
+                # may carry a hierarchical phase from
+                # strategy.progress_snapshot(). Force its phase to
+                # UNSPECIFIED so the Go driver doesn't try to bucket-
+                # map it against the collapsed map and accidentally
+                # land on bucketMin == 0.
+                if not emit_hierarchical_phases:
+                    prog.phase = knowledge_progress_pb2.KNOWLEDGE_PHASE_UNSPECIFIED
                 yield knowledge_pb2.GenerateCliffNotesStreamMessage(progress=prog)
 
             # Work task is done. Await it to surface the result or
@@ -1301,115 +1336,125 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
 
         provider, model_override = self._resolve_request_provider(context)
         job_logger = self._resolve_job_logger(context)
-        if job_logger is not None:
-            await job_logger.info(
-                phase="snapshot",
-                event="generate_learning_path_started",
-                message="Learning path request received by worker",
-                payload={"repository_id": request.repository_id, "depth": depth, "audience": audience},
-            )
-
-        # Phase: RENDER
-        yield knowledge_pb2.GenerateLearningPathStreamMessage(
-            phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
-        )
-
-        # codex r2 C1: spawn the LLM call as a task and pump phase-only
-        # heartbeats so the orchestrator's UpdatedAt stays fresh
-        # through long single-LLM-call generations. Never shields the
-        # work task — cancellation propagates upward and the
-        # try/finally tears down the task.
-        work_task = asyncio.create_task(
-            generate_learning_path(
-                provider=provider,
-                repository_name=request.repository_name,
-                audience=audience,
-                depth=depth,
-                snapshot_json=snapshot,
-                focus_area=request.focus_area,
-                model_override=model_override,
-            ),
-            name=f"learning-path-{request.repository_id}",
-        )
+        # codex r2b M4: outer try/finally so job_logger.close() runs
+        # even on cancellation between work_task success and the
+        # FINALIZING / final-response yields. Inner branches set
+        # job_logger_closed=True to prevent double-close.
+        job_logger_closed = [False]
         try:
-            async for prog in run_with_heartbeat(
-                work_task,
-                phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
-                message="Generating learning path",
-            ):
-                yield knowledge_pb2.GenerateLearningPathStreamMessage(progress=prog)
-            result, usage = await work_task
-        except asyncio.CancelledError:
-            log.warning("learning_path_stream_cancelled", repository_id=request.repository_id)
-            if not work_task.done():
-                work_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
-                    await asyncio.wait_for(work_task, timeout=5.0)
             if job_logger is not None:
-                with contextlib.suppress(Exception):
-                    await job_logger.warn(
-                        phase="cancelled",
-                        event="generate_learning_path_cancelled",
-                        message="Stream cancelled by client",
-                        payload={"repository_id": request.repository_id},
-                    )
-                    await job_logger.close()
-            raise
-        except Exception as exc:
-            if job_logger is not None:
-                with contextlib.suppress(Exception):
-                    await job_logger.error(
-                        phase="failed",
-                        event="generate_learning_path_failed",
-                        message="Learning path generation failed in worker",
-                        payload={"error": str(exc)},
-                    )
-                    await job_logger.close()
-            log.error("generate_learning_path_failed", error=str(exc))
-            await context.abort(
-                grpc.StatusCode.INTERNAL,
-                f"Learning path generation failed: {exc}",
-            )
-            return
-
-        # Phase: FINALIZING
-        yield knowledge_pb2.GenerateLearningPathStreamMessage(
-            phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
-        )
-
-        steps = []
-        for step in result.steps:
-            steps.append(
-                knowledge_pb2.LearningStep(
-                    order=step.order,
-                    title=step.title,
-                    objective=step.objective,
-                    content=step.content,
-                    file_paths=step.file_paths,
-                    symbol_ids=step.symbol_ids,
-                    estimated_time=step.estimated_time,
-                    prerequisite_steps=step.prerequisite_steps,
-                    difficulty=step.difficulty,
-                    exercises=step.exercises,
-                    checkpoint=step.checkpoint,
-                    confidence=step.confidence,
-                    refinement_status=step.refinement_status,
+                await job_logger.info(
+                    phase="snapshot",
+                    event="generate_learning_path_started",
+                    message="Learning path request received by worker",
+                    payload={"repository_id": request.repository_id, "depth": depth, "audience": audience},
                 )
+
+            # Phase: RENDER
+            yield knowledge_pb2.GenerateLearningPathStreamMessage(
+                phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
             )
 
-        response = knowledge_pb2.GenerateLearningPathResponse(
-            steps=steps,
-            usage=_llm_usage_proto(usage),
-        )
-        if job_logger is not None:
-            await job_logger.info(
-                phase="ready",
-                event="generate_learning_path_completed",
-                message="Learning path response ready",
-                payload={"steps": len(steps), "input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens},
+            # codex r2 C1: spawn the LLM call as a task and pump phase-only
+            # heartbeats so the orchestrator's UpdatedAt stays fresh
+            # through long single-LLM-call generations. Never shields the
+            # work task — cancellation propagates upward and the
+            # try/finally tears down the task.
+            work_task = asyncio.create_task(
+                generate_learning_path(
+                    provider=provider,
+                    repository_name=request.repository_name,
+                    audience=audience,
+                    depth=depth,
+                    snapshot_json=snapshot,
+                    focus_area=request.focus_area,
+                    model_override=model_override,
+                ),
+                name=f"learning-path-{request.repository_id}",
             )
-            await job_logger.close()
-        yield knowledge_pb2.GenerateLearningPathStreamMessage(final=response)
+            try:
+                async for prog in run_with_heartbeat(
+                    work_task,
+                    phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
+                    message="Generating learning path",
+                ):
+                    yield knowledge_pb2.GenerateLearningPathStreamMessage(progress=prog)
+                result, usage = await work_task
+            except asyncio.CancelledError:
+                log.warning("learning_path_stream_cancelled", repository_id=request.repository_id)
+                if not work_task.done():
+                    work_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
+                        await asyncio.wait_for(work_task, timeout=5.0)
+                if job_logger is not None:
+                    with contextlib.suppress(Exception):
+                        await job_logger.warn(
+                            phase="cancelled",
+                            event="generate_learning_path_cancelled",
+                            message="Stream cancelled by client",
+                            payload={"repository_id": request.repository_id},
+                        )
+                raise
+            except Exception as exc:
+                if job_logger is not None:
+                    with contextlib.suppress(Exception):
+                        await job_logger.error(
+                            phase="failed",
+                            event="generate_learning_path_failed",
+                            message="Learning path generation failed in worker",
+                            payload={"error": str(exc)},
+                        )
+                log.error("generate_learning_path_failed", error=str(exc))
+                await context.abort(
+                    grpc.StatusCode.INTERNAL,
+                    f"Learning path generation failed: {exc}",
+                )
+                return
+
+            # Phase: FINALIZING
+            yield knowledge_pb2.GenerateLearningPathStreamMessage(
+                phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
+            )
+
+            steps = []
+            for step in result.steps:
+                steps.append(
+                    knowledge_pb2.LearningStep(
+                        order=step.order,
+                        title=step.title,
+                        objective=step.objective,
+                        content=step.content,
+                        file_paths=step.file_paths,
+                        symbol_ids=step.symbol_ids,
+                        estimated_time=step.estimated_time,
+                        prerequisite_steps=step.prerequisite_steps,
+                        difficulty=step.difficulty,
+                        exercises=step.exercises,
+                        checkpoint=step.checkpoint,
+                        confidence=step.confidence,
+                        refinement_status=step.refinement_status,
+                    )
+                )
+
+            response = knowledge_pb2.GenerateLearningPathResponse(
+                steps=steps,
+                usage=_llm_usage_proto(usage),
+            )
+            if job_logger is not None:
+                await job_logger.info(
+                    phase="ready",
+                    event="generate_learning_path_completed",
+                    message="Learning path response ready",
+                    payload={"steps": len(steps), "input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens},
+                )
+                await job_logger.close()
+                job_logger_closed[0] = True
+            yield knowledge_pb2.GenerateLearningPathStreamMessage(final=response)
+        finally:
+            if job_logger is not None and not job_logger_closed[0]:
+                with contextlib.suppress(Exception):
+                    await job_logger.close()
+                    job_logger_closed[0] = True
 
     async def GenerateArchitectureDiagram(  # noqa: N802
         self,
@@ -1447,125 +1492,132 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
 
         provider, model_override = self._resolve_request_provider(context)
         job_logger = self._resolve_job_logger(context)
-        if job_logger is not None:
-            await job_logger.info(
-                phase="snapshot",
-                event="generate_architecture_diagram_started",
-                message="Architecture diagram request received by worker",
-                payload={"repository_id": request.repository_id, "depth": depth, "audience": audience},
-            )
-
-        # Phase: RENDER
-        yield knowledge_pb2.GenerateArchitectureDiagramStreamMessage(
-            phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
-        )
-
-        # codex r2 C1: heartbeat the LLM call so the orchestrator's
-        # UpdatedAt stays fresh; the 10-min reaper would otherwise
-        # kill healthy long generations.
-        work_task = asyncio.create_task(
-            generate_architecture_diagram(
-                provider=provider,
-                repository_name=request.repository_name,
-                audience=audience,
-                depth=depth,
-                snapshot_json=snapshot,
-                deterministic_diagram_json=request.deterministic_diagram_json,
-                model_override=model_override,
-            ),
-            name=f"arch-diagram-{request.repository_id}",
-        )
+        # codex r2b M4: outer try/finally so job_logger.close() runs
+        # even on cancellation between work_task success and the
+        # FINALIZING / final-response yields.
+        job_logger_closed = [False]
         try:
-            async for prog in run_with_heartbeat(
-                work_task,
-                phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
-                message="Generating architecture diagram",
-            ):
-                yield knowledge_pb2.GenerateArchitectureDiagramStreamMessage(progress=prog)
-            result, usage = await work_task
-        except asyncio.CancelledError:
-            log.warning("architecture_diagram_stream_cancelled", repository_id=request.repository_id)
-            if not work_task.done():
-                work_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
-                    await asyncio.wait_for(work_task, timeout=5.0)
             if job_logger is not None:
-                with contextlib.suppress(Exception):
-                    await job_logger.close()
-            raise
-        except Exception as exc:
-            if job_logger is not None:
-                with contextlib.suppress(Exception):
-                    await job_logger.error(
-                        phase="failed",
-                        event="generate_architecture_diagram_failed",
-                        message="Architecture diagram generation failed in worker",
-                        payload={"error": str(exc)},
+                await job_logger.info(
+                    phase="snapshot",
+                    event="generate_architecture_diagram_started",
+                    message="Architecture diagram request received by worker",
+                    payload={"repository_id": request.repository_id, "depth": depth, "audience": audience},
+                )
+
+            # Phase: RENDER
+            yield knowledge_pb2.GenerateArchitectureDiagramStreamMessage(
+                phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
+            )
+
+            # codex r2 C1: heartbeat the LLM call so the orchestrator's
+            # UpdatedAt stays fresh; the 10-min reaper would otherwise
+            # kill healthy long generations.
+            work_task = asyncio.create_task(
+                generate_architecture_diagram(
+                    provider=provider,
+                    repository_name=request.repository_name,
+                    audience=audience,
+                    depth=depth,
+                    snapshot_json=snapshot,
+                    deterministic_diagram_json=request.deterministic_diagram_json,
+                    model_override=model_override,
+                ),
+                name=f"arch-diagram-{request.repository_id}",
+            )
+            try:
+                async for prog in run_with_heartbeat(
+                    work_task,
+                    phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
+                    message="Generating architecture diagram",
+                ):
+                    yield knowledge_pb2.GenerateArchitectureDiagramStreamMessage(progress=prog)
+                result, usage = await work_task
+            except asyncio.CancelledError:
+                log.warning("architecture_diagram_stream_cancelled", repository_id=request.repository_id)
+                if not work_task.done():
+                    work_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
+                        await asyncio.wait_for(work_task, timeout=5.0)
+                raise
+            except Exception as exc:
+                if job_logger is not None:
+                    with contextlib.suppress(Exception):
+                        await job_logger.error(
+                            phase="failed",
+                            event="generate_architecture_diagram_failed",
+                            message="Architecture diagram generation failed in worker",
+                            payload={"error": str(exc)},
+                        )
+                log.error("generate_architecture_diagram_failed", error=str(exc))
+                await context.abort(
+                    grpc.StatusCode.INTERNAL,
+                    f"Architecture diagram generation failed: {exc}",
+                )
+                return
+
+            # Phase: FINALIZING
+            yield knowledge_pb2.GenerateArchitectureDiagramStreamMessage(
+                phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
+            )
+
+            evidence = []
+            for ev in result.get("evidence", []):
+                evidence.append(
+                    knowledge_pb2.KnowledgeEvidence(
+                        source_type=ev.source_type,
+                        source_id=ev.source_id,
+                        file_path=ev.file_path,
+                        line_start=ev.line_start,
+                        line_end=ev.line_end,
+                        rationale=ev.rationale,
                     )
+                )
+            detail_evidence = []
+            for ev in result.get("detail_evidence", []):
+                detail_evidence.append(
+                    knowledge_pb2.KnowledgeEvidence(
+                        source_type=ev.source_type,
+                        source_id=ev.source_id,
+                        file_path=ev.file_path,
+                        line_start=ev.line_start,
+                        line_end=ev.line_end,
+                        rationale=ev.rationale,
+                    )
+                )
+            response = knowledge_pb2.GenerateArchitectureDiagramResponse(
+                mermaid_source=str(result.get("mermaid_source", "")),
+                raw_mermaid_source=str(result.get("raw_mermaid_source", "")),
+                validation_status=str(result.get("validation_status", "")),
+                repair_summary=str(result.get("repair_summary", "")),
+                diagram_summary=str(result.get("diagram_summary", "")),
+                evidence=evidence,
+                inferred_edges=[str(item) for item in result.get("inferred_edges", [])],
+                usage=_llm_usage_proto(usage),
+                detail_mermaid_source=str(result.get("detail_mermaid_source", "")),
+                detail_raw_mermaid_source=str(result.get("detail_raw_mermaid_source", "")),
+                detail_validation_status=str(result.get("detail_validation_status", "")),
+                detail_repair_summary=str(result.get("detail_repair_summary", "")),
+                detail_diagram_summary=str(result.get("detail_diagram_summary", "")),
+                detail_subsystem_name=str(result.get("detail_subsystem_name", "")),
+                detail_candidate_subsystems=[str(item) for item in result.get("detail_candidate_subsystems", [])],
+                detail_evidence=detail_evidence,
+            )
+            if job_logger is not None:
+                await job_logger.info(
+                    phase="ready",
+                    event="generate_architecture_diagram_completed",
+                    message="Architecture diagram response ready",
+                    payload={"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens},
+                )
+                await job_logger.close()
+                job_logger_closed[0] = True
+            yield knowledge_pb2.GenerateArchitectureDiagramStreamMessage(final=response)
+        finally:
+            if job_logger is not None and not job_logger_closed[0]:
+                with contextlib.suppress(Exception):
                     await job_logger.close()
-            log.error("generate_architecture_diagram_failed", error=str(exc))
-            await context.abort(
-                grpc.StatusCode.INTERNAL,
-                f"Architecture diagram generation failed: {exc}",
-            )
-            return
-
-        # Phase: FINALIZING
-        yield knowledge_pb2.GenerateArchitectureDiagramStreamMessage(
-            phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
-        )
-
-        evidence = []
-        for ev in result.get("evidence", []):
-            evidence.append(
-                knowledge_pb2.KnowledgeEvidence(
-                    source_type=ev.source_type,
-                    source_id=ev.source_id,
-                    file_path=ev.file_path,
-                    line_start=ev.line_start,
-                    line_end=ev.line_end,
-                    rationale=ev.rationale,
-                )
-            )
-        detail_evidence = []
-        for ev in result.get("detail_evidence", []):
-            detail_evidence.append(
-                knowledge_pb2.KnowledgeEvidence(
-                    source_type=ev.source_type,
-                    source_id=ev.source_id,
-                    file_path=ev.file_path,
-                    line_start=ev.line_start,
-                    line_end=ev.line_end,
-                    rationale=ev.rationale,
-                )
-            )
-        response = knowledge_pb2.GenerateArchitectureDiagramResponse(
-            mermaid_source=str(result.get("mermaid_source", "")),
-            raw_mermaid_source=str(result.get("raw_mermaid_source", "")),
-            validation_status=str(result.get("validation_status", "")),
-            repair_summary=str(result.get("repair_summary", "")),
-            diagram_summary=str(result.get("diagram_summary", "")),
-            evidence=evidence,
-            inferred_edges=[str(item) for item in result.get("inferred_edges", [])],
-            usage=_llm_usage_proto(usage),
-            detail_mermaid_source=str(result.get("detail_mermaid_source", "")),
-            detail_raw_mermaid_source=str(result.get("detail_raw_mermaid_source", "")),
-            detail_validation_status=str(result.get("detail_validation_status", "")),
-            detail_repair_summary=str(result.get("detail_repair_summary", "")),
-            detail_diagram_summary=str(result.get("detail_diagram_summary", "")),
-            detail_subsystem_name=str(result.get("detail_subsystem_name", "")),
-            detail_candidate_subsystems=[str(item) for item in result.get("detail_candidate_subsystems", [])],
-            detail_evidence=detail_evidence,
-        )
-        if job_logger is not None:
-            await job_logger.info(
-                phase="ready",
-                event="generate_architecture_diagram_completed",
-                message="Architecture diagram response ready",
-                payload={"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens},
-            )
-            await job_logger.close()
-        yield knowledge_pb2.GenerateArchitectureDiagramStreamMessage(final=response)
+                    job_logger_closed[0] = True
 
     async def GenerateWorkflowStory(  # noqa: N802
         self,
@@ -1608,125 +1660,132 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
 
         provider, model_override = self._resolve_request_provider(context)
         job_logger = self._resolve_job_logger(context)
-        if job_logger is not None:
-            await job_logger.info(
-                phase="snapshot",
-                event="generate_workflow_story_started",
-                message="Workflow story request received by worker",
-                payload={
-                    "repository_id": request.repository_id,
-                    "scope_type": scope_type,
-                    "scope_path": request.scope_path,
-                },
-            )
-
-        # Phase: RENDER
-        yield knowledge_pb2.GenerateWorkflowStoryStreamMessage(
-            phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
-        )
-
-        # codex r2 C1: heartbeat the LLM call so the orchestrator's
-        # UpdatedAt stays fresh; the 10-min reaper would otherwise
-        # kill healthy long generations.
-        work_task = asyncio.create_task(
-            generate_workflow_story(
-                provider=provider,
-                repository_name=request.repository_name,
-                audience=audience,
-                depth=depth,
-                scope_type=scope_type,
-                scope_path=request.scope_path,
-                anchor_label=request.anchor_label,
-                execution_path_json=request.execution_path_json,
-                model_override=model_override,
-                snapshot_json=snapshot,
-            ),
-            name=f"workflow-story-{request.repository_id}",
-        )
+        # codex r2b M4: outer try/finally so job_logger.close() runs
+        # even on cancellation between work_task success and the
+        # FINALIZING / final-response yields.
+        job_logger_closed = [False]
         try:
-            async for prog in run_with_heartbeat(
-                work_task,
-                phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
-                message="Generating workflow story",
-            ):
-                yield knowledge_pb2.GenerateWorkflowStoryStreamMessage(progress=prog)
-            result, usage = await work_task
-        except asyncio.CancelledError:
-            log.warning("workflow_story_stream_cancelled", repository_id=request.repository_id)
-            if not work_task.done():
-                work_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
-                    await asyncio.wait_for(work_task, timeout=5.0)
             if job_logger is not None:
-                with contextlib.suppress(Exception):
-                    await job_logger.close()
-            raise
-        except Exception as exc:
-            import traceback
+                await job_logger.info(
+                    phase="snapshot",
+                    event="generate_workflow_story_started",
+                    message="Workflow story request received by worker",
+                    payload={
+                        "repository_id": request.repository_id,
+                        "scope_type": scope_type,
+                        "scope_path": request.scope_path,
+                    },
+                )
 
-            if job_logger is not None:
-                with contextlib.suppress(Exception):
-                    await job_logger.error(
-                        phase="failed",
-                        event="generate_workflow_story_failed",
-                        message="Workflow story generation failed in worker",
-                        payload={"error": str(exc)},
-                    )
-                    await job_logger.close()
-            log.error("generate_workflow_story_failed", error=str(exc), traceback=traceback.format_exc())
-            await context.abort(
-                grpc.StatusCode.INTERNAL,
-                f"Workflow story generation failed: {exc}",
+            # Phase: RENDER
+            yield knowledge_pb2.GenerateWorkflowStoryStreamMessage(
+                phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
             )
-            return
 
-        # Phase: FINALIZING
-        yield knowledge_pb2.GenerateWorkflowStoryStreamMessage(
-            phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
-        )
+            # codex r2 C1: heartbeat the LLM call so the orchestrator's
+            # UpdatedAt stays fresh; the 10-min reaper would otherwise
+            # kill healthy long generations.
+            work_task = asyncio.create_task(
+                generate_workflow_story(
+                    provider=provider,
+                    repository_name=request.repository_name,
+                    audience=audience,
+                    depth=depth,
+                    scope_type=scope_type,
+                    scope_path=request.scope_path,
+                    anchor_label=request.anchor_label,
+                    execution_path_json=request.execution_path_json,
+                    model_override=model_override,
+                    snapshot_json=snapshot,
+                ),
+                name=f"workflow-story-{request.repository_id}",
+            )
+            try:
+                async for prog in run_with_heartbeat(
+                    work_task,
+                    phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
+                    message="Generating workflow story",
+                ):
+                    yield knowledge_pb2.GenerateWorkflowStoryStreamMessage(progress=prog)
+                result, usage = await work_task
+            except asyncio.CancelledError:
+                log.warning("workflow_story_stream_cancelled", repository_id=request.repository_id)
+                if not work_task.done():
+                    work_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
+                        await asyncio.wait_for(work_task, timeout=5.0)
+                raise
+            except Exception as exc:
+                import traceback
 
-        sections = []
-        for sec in result.sections:
-            evidence = []
-            for ev in sec.evidence:
-                evidence.append(
-                    knowledge_pb2.KnowledgeEvidence(
-                        source_type=ev.source_type,
-                        source_id=ev.source_id,
-                        file_path=ev.file_path,
-                        line_start=ev.line_start,
-                        line_end=ev.line_end,
-                        rationale=ev.rationale,
+                if job_logger is not None:
+                    with contextlib.suppress(Exception):
+                        await job_logger.error(
+                            phase="failed",
+                            event="generate_workflow_story_failed",
+                            message="Workflow story generation failed in worker",
+                            payload={"error": str(exc)},
+                        )
+                log.error("generate_workflow_story_failed", error=str(exc), traceback=traceback.format_exc())
+                await context.abort(
+                    grpc.StatusCode.INTERNAL,
+                    f"Workflow story generation failed: {exc}",
+                )
+                return
+
+            # Phase: FINALIZING
+            yield knowledge_pb2.GenerateWorkflowStoryStreamMessage(
+                phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
+            )
+
+            sections = []
+            for sec in result.sections:
+                evidence = []
+                for ev in sec.evidence:
+                    evidence.append(
+                        knowledge_pb2.KnowledgeEvidence(
+                            source_type=ev.source_type,
+                            source_id=ev.source_id,
+                            file_path=ev.file_path,
+                            line_start=ev.line_start,
+                            line_end=ev.line_end,
+                            rationale=ev.rationale,
+                        )
+                    )
+                sections.append(
+                    knowledge_pb2.KnowledgeSection(
+                        title=sec.title,
+                        content=sec.content,
+                        summary=sec.summary,
+                        confidence=sec.confidence,
+                        inferred=sec.inferred,
+                        evidence=evidence,
                     )
                 )
-            sections.append(
-                knowledge_pb2.KnowledgeSection(
-                    title=sec.title,
-                    content=sec.content,
-                    summary=sec.summary,
-                    confidence=sec.confidence,
-                    inferred=sec.inferred,
-                    evidence=evidence,
-                )
-            )
 
-        response = knowledge_pb2.GenerateWorkflowStoryResponse(
-            sections=sections,
-            usage=_llm_usage_proto(usage),
-        )
-        if job_logger is not None:
-            await job_logger.info(
-                phase="ready",
-                event="generate_workflow_story_completed",
-                message="Workflow story response ready",
-                payload={
-                    "sections": len(sections),
-                    "input_tokens": usage.input_tokens,
-                    "output_tokens": usage.output_tokens,
-                },
+            response = knowledge_pb2.GenerateWorkflowStoryResponse(
+                sections=sections,
+                usage=_llm_usage_proto(usage),
             )
-            await job_logger.close()
-        yield knowledge_pb2.GenerateWorkflowStoryStreamMessage(final=response)
+            if job_logger is not None:
+                await job_logger.info(
+                    phase="ready",
+                    event="generate_workflow_story_completed",
+                    message="Workflow story response ready",
+                    payload={
+                        "sections": len(sections),
+                        "input_tokens": usage.input_tokens,
+                        "output_tokens": usage.output_tokens,
+                    },
+                )
+                await job_logger.close()
+                job_logger_closed[0] = True
+            yield knowledge_pb2.GenerateWorkflowStoryStreamMessage(final=response)
+        finally:
+            if job_logger is not None and not job_logger_closed[0]:
+                with contextlib.suppress(Exception):
+                    await job_logger.close()
+                    job_logger_closed[0] = True
 
     async def ExplainSystem(  # noqa: N802
         self,
@@ -1763,88 +1822,95 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
 
         provider, model_override = self._resolve_request_provider(context)
         job_logger = self._resolve_job_logger(context)
-        if job_logger is not None:
-            await job_logger.info(
-                phase="snapshot",
-                event="explain_system_started",
-                message="Explain system request received by worker",
-                payload={"repository_id": request.repository_id, "depth": depth, "audience": audience},
-            )
-
-        # Phase: RENDER
-        yield knowledge_pb2.ExplainSystemStreamMessage(
-            phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
-        )
-
-        # codex r2 C1: heartbeat the LLM call so the orchestrator's
-        # UpdatedAt stays fresh; the 10-min reaper would otherwise
-        # kill healthy long generations.
-        work_task = asyncio.create_task(
-            explain_system(
-                provider=provider,
-                repository_name=request.repository_name,
-                audience=audience,
-                depth=depth,
-                question=request.question,
-                snapshot_json=snapshot,
-                model_override=model_override,
-            ),
-            name=f"explain-system-{request.repository_id}",
-        )
+        # codex r2b M4: outer try/finally so job_logger.close() runs
+        # even on cancellation between work_task success and the
+        # FINALIZING / final-response yields.
+        job_logger_closed = [False]
         try:
-            async for prog in run_with_heartbeat(
-                work_task,
-                phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
-                message="Explaining system",
-            ):
-                yield knowledge_pb2.ExplainSystemStreamMessage(progress=prog)
-            result, usage = await work_task
-        except asyncio.CancelledError:
-            log.warning("explain_system_stream_cancelled", repository_id=request.repository_id)
-            if not work_task.done():
-                work_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
-                    await asyncio.wait_for(work_task, timeout=5.0)
             if job_logger is not None:
+                await job_logger.info(
+                    phase="snapshot",
+                    event="explain_system_started",
+                    message="Explain system request received by worker",
+                    payload={"repository_id": request.repository_id, "depth": depth, "audience": audience},
+                )
+
+            # Phase: RENDER
+            yield knowledge_pb2.ExplainSystemStreamMessage(
+                phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
+            )
+
+            # codex r2 C1: heartbeat the LLM call so the orchestrator's
+            # UpdatedAt stays fresh; the 10-min reaper would otherwise
+            # kill healthy long generations.
+            work_task = asyncio.create_task(
+                explain_system(
+                    provider=provider,
+                    repository_name=request.repository_name,
+                    audience=audience,
+                    depth=depth,
+                    question=request.question,
+                    snapshot_json=snapshot,
+                    model_override=model_override,
+                ),
+                name=f"explain-system-{request.repository_id}",
+            )
+            try:
+                async for prog in run_with_heartbeat(
+                    work_task,
+                    phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
+                    message="Explaining system",
+                ):
+                    yield knowledge_pb2.ExplainSystemStreamMessage(progress=prog)
+                result, usage = await work_task
+            except asyncio.CancelledError:
+                log.warning("explain_system_stream_cancelled", repository_id=request.repository_id)
+                if not work_task.done():
+                    work_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
+                        await asyncio.wait_for(work_task, timeout=5.0)
+                raise
+            except Exception as exc:
+                if job_logger is not None:
+                    with contextlib.suppress(Exception):
+                        await job_logger.error(
+                            phase="failed",
+                            event="explain_system_failed",
+                            message="Explain system failed in worker",
+                            payload={"error": str(exc)},
+                        )
+                log.error("explain_system_failed", error=str(exc))
+                await context.abort(
+                    grpc.StatusCode.INTERNAL,
+                    f"System explanation failed: {exc}",
+                )
+                return
+
+            # Phase: FINALIZING
+            yield knowledge_pb2.ExplainSystemStreamMessage(
+                phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
+            )
+
+            response = knowledge_pb2.ExplainSystemResponse(
+                explanation=result.explanation,
+                evidence=[],
+                usage=_llm_usage_proto(usage),
+            )
+            if job_logger is not None:
+                await job_logger.info(
+                    phase="ready",
+                    event="explain_system_completed",
+                    message="Explain system response ready",
+                    payload={"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens},
+                )
+                await job_logger.close()
+                job_logger_closed[0] = True
+            yield knowledge_pb2.ExplainSystemStreamMessage(final=response)
+        finally:
+            if job_logger is not None and not job_logger_closed[0]:
                 with contextlib.suppress(Exception):
                     await job_logger.close()
-            raise
-        except Exception as exc:
-            if job_logger is not None:
-                with contextlib.suppress(Exception):
-                    await job_logger.error(
-                        phase="failed",
-                        event="explain_system_failed",
-                        message="Explain system failed in worker",
-                        payload={"error": str(exc)},
-                    )
-                    await job_logger.close()
-            log.error("explain_system_failed", error=str(exc))
-            await context.abort(
-                grpc.StatusCode.INTERNAL,
-                f"System explanation failed: {exc}",
-            )
-            return
-
-        # Phase: FINALIZING
-        yield knowledge_pb2.ExplainSystemStreamMessage(
-            phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
-        )
-
-        response = knowledge_pb2.ExplainSystemResponse(
-            explanation=result.explanation,
-            evidence=[],
-            usage=_llm_usage_proto(usage),
-        )
-        if job_logger is not None:
-            await job_logger.info(
-                phase="ready",
-                event="explain_system_completed",
-                message="Explain system response ready",
-                payload={"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens},
-            )
-            await job_logger.close()
-        yield knowledge_pb2.ExplainSystemStreamMessage(final=response)
+                    job_logger_closed[0] = True
 
     async def GenerateCodeTour(  # noqa: N802
         self,
@@ -1884,104 +1950,111 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
 
         provider, model_override = self._resolve_request_provider(context)
         job_logger = self._resolve_job_logger(context)
-        if job_logger is not None:
-            await job_logger.info(
-                phase="snapshot",
-                event="generate_code_tour_started",
-                message="Code tour request received by worker",
-                payload={"repository_id": request.repository_id, "depth": depth, "audience": audience},
-            )
-
-        # Phase: RENDER
-        yield knowledge_pb2.GenerateCodeTourStreamMessage(
-            phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
-        )
-
-        # codex r2 C1: heartbeat the LLM call so the orchestrator's
-        # UpdatedAt stays fresh; the 10-min reaper would otherwise
-        # kill healthy long generations.
-        work_task = asyncio.create_task(
-            generate_code_tour(
-                provider=provider,
-                repository_name=request.repository_name,
-                audience=audience,
-                depth=depth,
-                snapshot_json=snapshot,
-                theme=request.theme,
-                model_override=model_override,
-            ),
-            name=f"code-tour-{request.repository_id}",
-        )
+        # codex r2b M4: outer try/finally so job_logger.close() runs
+        # even on cancellation between work_task success and the
+        # FINALIZING / final-response yields.
+        job_logger_closed = [False]
         try:
-            async for prog in run_with_heartbeat(
-                work_task,
-                phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
-                message="Generating code tour",
-            ):
-                yield knowledge_pb2.GenerateCodeTourStreamMessage(progress=prog)
-            result, usage = await work_task
-        except asyncio.CancelledError:
-            log.warning("code_tour_stream_cancelled", repository_id=request.repository_id)
-            if not work_task.done():
-                work_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
-                    await asyncio.wait_for(work_task, timeout=5.0)
             if job_logger is not None:
-                with contextlib.suppress(Exception):
-                    await job_logger.close()
-            raise
-        except Exception as exc:
-            if job_logger is not None:
-                with contextlib.suppress(Exception):
-                    await job_logger.error(
-                        phase="failed",
-                        event="generate_code_tour_failed",
-                        message="Code tour generation failed in worker",
-                        payload={"error": str(exc)},
-                    )
-                    await job_logger.close()
-            log.error("generate_code_tour_failed", error=str(exc))
-            await context.abort(
-                grpc.StatusCode.INTERNAL,
-                f"Code tour generation failed: {exc}",
-            )
-            return
-
-        # Phase: FINALIZING
-        yield knowledge_pb2.GenerateCodeTourStreamMessage(
-            phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
-        )
-
-        stops = []
-        for stop in result.stops:
-            stops.append(
-                knowledge_pb2.CodeTourStop(
-                    order=stop.order,
-                    title=stop.title,
-                    description=stop.description,
-                    file_path=stop.file_path,
-                    line_start=stop.line_start,
-                    line_end=stop.line_end,
-                    trail=stop.trail,
-                    modification_hints=stop.modification_hints,
-                    confidence=stop.confidence,
-                    refinement_status=stop.refinement_status,
+                await job_logger.info(
+                    phase="snapshot",
+                    event="generate_code_tour_started",
+                    message="Code tour request received by worker",
+                    payload={"repository_id": request.repository_id, "depth": depth, "audience": audience},
                 )
+
+            # Phase: RENDER
+            yield knowledge_pb2.GenerateCodeTourStreamMessage(
+                phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
             )
 
-        response = knowledge_pb2.GenerateCodeTourResponse(
-            stops=stops,
-            usage=_llm_usage_proto(usage),
-        )
-        if job_logger is not None:
-            await job_logger.info(
-                phase="ready",
-                event="generate_code_tour_completed",
-                message="Code tour response ready",
-                payload={"stops": len(stops), "input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens},
+            # codex r2 C1: heartbeat the LLM call so the orchestrator's
+            # UpdatedAt stays fresh; the 10-min reaper would otherwise
+            # kill healthy long generations.
+            work_task = asyncio.create_task(
+                generate_code_tour(
+                    provider=provider,
+                    repository_name=request.repository_name,
+                    audience=audience,
+                    depth=depth,
+                    snapshot_json=snapshot,
+                    theme=request.theme,
+                    model_override=model_override,
+                ),
+                name=f"code-tour-{request.repository_id}",
             )
-            await job_logger.close()
-        yield knowledge_pb2.GenerateCodeTourStreamMessage(final=response)
+            try:
+                async for prog in run_with_heartbeat(
+                    work_task,
+                    phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
+                    message="Generating code tour",
+                ):
+                    yield knowledge_pb2.GenerateCodeTourStreamMessage(progress=prog)
+                result, usage = await work_task
+            except asyncio.CancelledError:
+                log.warning("code_tour_stream_cancelled", repository_id=request.repository_id)
+                if not work_task.done():
+                    work_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
+                        await asyncio.wait_for(work_task, timeout=5.0)
+                raise
+            except Exception as exc:
+                if job_logger is not None:
+                    with contextlib.suppress(Exception):
+                        await job_logger.error(
+                            phase="failed",
+                            event="generate_code_tour_failed",
+                            message="Code tour generation failed in worker",
+                            payload={"error": str(exc)},
+                        )
+                log.error("generate_code_tour_failed", error=str(exc))
+                await context.abort(
+                    grpc.StatusCode.INTERNAL,
+                    f"Code tour generation failed: {exc}",
+                )
+                return
+
+            # Phase: FINALIZING
+            yield knowledge_pb2.GenerateCodeTourStreamMessage(
+                phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
+            )
+
+            stops = []
+            for stop in result.stops:
+                stops.append(
+                    knowledge_pb2.CodeTourStop(
+                        order=stop.order,
+                        title=stop.title,
+                        description=stop.description,
+                        file_path=stop.file_path,
+                        line_start=stop.line_start,
+                        line_end=stop.line_end,
+                        trail=stop.trail,
+                        modification_hints=stop.modification_hints,
+                        confidence=stop.confidence,
+                        refinement_status=stop.refinement_status,
+                    )
+                )
+
+            response = knowledge_pb2.GenerateCodeTourResponse(
+                stops=stops,
+                usage=_llm_usage_proto(usage),
+            )
+            if job_logger is not None:
+                await job_logger.info(
+                    phase="ready",
+                    event="generate_code_tour_completed",
+                    message="Code tour response ready",
+                    payload={"stops": len(stops), "input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens},
+                )
+                await job_logger.close()
+                job_logger_closed[0] = True
+            yield knowledge_pb2.GenerateCodeTourStreamMessage(final=response)
+        finally:
+            if job_logger is not None and not job_logger_closed[0]:
+                with contextlib.suppress(Exception):
+                    await job_logger.close()
+                    job_logger_closed[0] = True
 
     async def _generate_report(
         self,
