@@ -186,10 +186,11 @@ func AgentAdded(input string) string {
 //
 // The router-level half (where the watcher's detected branch is
 // compared against the change event's claimed branch BEFORE IndexFiles
-// is even invoked) lands in Phase 1.C; this test exercises only the
-// in-process boundary. A separate placeholder test below
-// (TestIndexFiles_RouterBranchMismatch_DeferredTo1C) marks the
-// deferred half so 1.C has a hook to fill in.
+// is even invoked) lives in Phase 1.C as
+// internal/changewatch.TestRouter_RejectsBranchMismatch; the
+// indexer-side guard below (TestIndexFiles_RouterBranchMismatchHookedTo1C)
+// pins the cross-package reference so a rename of the canonical test
+// surfaces here too.
 func TestIndexFiles_BranchMismatchRejected(t *testing.T) {
 	repo := testfixtures.LargeGoRepo(t, testfixtures.LargeGoRepoSpec{
 		FileCount:      10,
@@ -248,26 +249,28 @@ func TestIndexFiles_BranchMatchAccepted(t *testing.T) {
 	}
 }
 
-// TestIndexFiles_RouterBranchMismatch_DeferredTo1C is a placeholder
-// for the router-level half of Phase 1 done-definition test #12. It
-// is skipped here because the changewatch router does not exist yet
-// (Phase 1.C work). The test name and skip-message are pinned so 1.C
-// has a clean hook to fill in.
+// TestIndexFiles_RouterBranchMismatchHookedTo1C is the cross-phase
+// pointer for the router-level half of Phase 1 done-definition test
+// #12. The canonical assertion lives in
+// internal/changewatch.TestRouter_RejectsBranchMismatch (Phase 1.C).
 //
-// What the deferred test must cover:
-//   - Watcher detects an fsnotify event on branch feature/x.
-//   - Router builds a ChangeEvent with branch="feature/x".
-//   - Router compares ChangeEvent.branch against
-//     git.HeadRef(repoPath); on the happy path they match.
-//   - Branch-mismatch path: a record_change event claims branch="main"
-//     while the working tree HEAD is on feature/x. The router rejects
-//     the event with rejected_branch_mismatch BEFORE IndexFiles is
-//     invoked; both branches are in the structured log.
-//
-// Mirrors the 1.A pattern (TestIndexRepository_RouterPathDeferred)
-// established for cross-phase placeholders.
-func TestIndexFiles_RouterBranchMismatch_DeferredTo1C(t *testing.T) {
-	t.Skip("router-level branch-mismatch validation lands in Phase 1.C (internal/changewatch); this in-process test covers only the indexer boundary")
+// We can't import internal/changewatch from internal/indexer (that's
+// the wrong direction — changewatch imports indexer for IndexResult
+// and Indexer), so this test verifies via source scan that the
+// canonical test still exists in the changewatch package. A future
+// rename or accidental delete of the canonical test fails this guard
+// at the indexer boundary, which is where readers expect to find the
+// branch-threading invariant documented.
+func TestIndexFiles_RouterBranchMismatchHookedTo1C(t *testing.T) {
+	canonicalTest := "TestRouter_RejectsBranchMismatch"
+	pkgFile := filepath.Join("..", "changewatch", "router_test.go")
+	body, err := os.ReadFile(pkgFile)
+	if err != nil {
+		t.Fatalf("cannot read internal/changewatch/router_test.go: %v (Phase 1.C must ship this file)", err)
+	}
+	if !strings.Contains(string(body), "func "+canonicalTest+"(") {
+		t.Errorf("internal/changewatch/router_test.go is missing %q — the router-level branch-mismatch test (#12 router half) must live in the changewatch package. Update both this guard and the canonical test if the test name changes.", canonicalTest)
+	}
 }
 
 // TestIndexFiles_EmptyFilesRejected covers the input-validation
