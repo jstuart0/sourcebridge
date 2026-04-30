@@ -210,6 +210,57 @@ func itos(b bool) string {
 	return "false"
 }
 
+// TestIsIgnoredDir covers the directory-side filter the change-watch
+// watcher uses during its initial walk. Distinct from IsIgnoredPath:
+// no unknown-language rule (directories don't have language
+// extensions), so a plain "pkg0" directory is NOT ignored.
+//
+// This test is load-bearing for Phase 1 done-definition test #1
+// (external integration). A regression that re-introduces the
+// unknown-language rule on the directory path would silently disable
+// the watcher's recursive subscription, making out-of-band edits
+// invisible to the loop.
+func TestIsIgnoredDir(t *testing.T) {
+	cases := []struct {
+		name    string
+		dir     string
+		ignored bool
+	}{
+		{"empty path", "", false},
+		{"root dot", ".", false},
+		{"plain package dir", "pkg0", false},
+		{"nested plain dir", "src/api", false},
+		{"another plain dir", "internal/changewatch", false},
+
+		{"node_modules", "node_modules", true},
+		{"nested node_modules", "src/node_modules", true},
+		{"vendor", "vendor", true},
+		{"nested vendor", "third_party/vendor", true},
+		{".git", ".git", true},
+		{".git nested", ".git/objects", true},
+
+		{"hidden dir", ".github", true},
+		{"hidden nested dir", "src/.cache", true},
+		{"hidden component anywhere", "src/.foo/bar", true},
+
+		// IsIgnoredPath would return true for "Makefile" because
+		// DetectLanguage("Makefile") is empty. IsIgnoredDir must not
+		// — Makefile is a perfectly valid directory name (it isn't
+		// usually one, but the helper is for directories so the rule
+		// should not depend on language detection).
+		{"directory with no extension", "Makefile", false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := IsIgnoredDir("/repo", c.dir)
+			if got != c.ignored {
+				t.Fatalf("IsIgnoredDir(%q) = %v, want %v", c.dir, got, c.ignored)
+			}
+		})
+	}
+}
+
 // TestHeadRef_LocksTheContract pins the four cases the change-watch
 // router (Phase 1.C) and IndexFiles entry point (Phase 1.B) depend
 // on:

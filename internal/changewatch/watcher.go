@@ -126,6 +126,14 @@ func (w *Watcher) SetNow(now func() time.Time) {
 // Returns an error when fsnotify cannot add the path (typically
 // inotify per-process limits on Linux). The operator runbook
 // documents how to raise the limit.
+//
+// We resolve symlinks on the input path before storing it. fsnotify
+// reports events with the filesystem's *real* path, not the symlinked
+// path the caller passed in (most visibly on macOS where /var is a
+// symlink to /private/var, but also any operator-mounted symlink in
+// the repo path). Without EvalSymlinks the prefix-match in classify
+// would fail to associate events with their repo, which surfaced as a
+// 1.C bug discovered during the integration test write-up.
 func (w *Watcher) Watch(repoID, repoPath string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -135,6 +143,15 @@ func (w *Watcher) Watch(repoID, repoPath string) error {
 	abs, err := filepath.Abs(repoPath)
 	if err != nil {
 		return fmt.Errorf("resolving repo path: %w", err)
+	}
+	// Resolve symlinks so the stored repoPath matches the path fsnotify
+	// reports in event names. EvalSymlinks errors on missing paths;
+	// surface them so a caller wiring up a deleted-then-recreated repo
+	// gets an actionable error instead of mysterious silence.
+	if resolved, evalErr := filepath.EvalSymlinks(abs); evalErr == nil {
+		abs = resolved
+	} else {
+		return fmt.Errorf("resolving symlinks on repo path: %w", evalErr)
 	}
 	if _, exists := w.repos[repoID]; exists {
 		return fmt.Errorf("changewatch.Watcher: repo %q already watched", repoID)
@@ -163,7 +180,11 @@ func (w *Watcher) Watch(repoID, repoPath string) error {
 			return nil
 		}
 		rel = filepath.ToSlash(rel)
-		if rel != "." && git.IsIgnoredPath(abs, rel) {
+		// Use IsIgnoredDir (component-name + hidden rules) here; the
+		// IsIgnoredPath unknown-language rule is for files only and
+		// would prune every legitimate package directory whose name
+		// happens not to end in ".go"/".py"/etc.
+		if rel != "." && git.IsIgnoredDir(abs, rel) {
 			return filepath.SkipDir
 		}
 		if err := w.fsw.Add(path); err != nil {
@@ -266,13 +287,29 @@ func (w *Watcher) handleEvent(ev fsnotify.Event) {
 	if relPath == "" {
 		return
 	}
-	// Filter ignored paths (node_modules, .git, vendor, etc.). The walker
-	// already skipped the dirs at watch-time but new subdirs that appear
-	// later still get raw events through the parent dir we are watching.
+
+	// Special-case CREATE events on directories: a newly-created
+	// directory must be added to the fsnotify watch list before we can
+	// see further events under it. We stat early so the IsIgnoredPath
+	// filter (which is file-shaped) doesn't reject the dir on its name
+	// alone.
+	status := classifyOp(ev.Op)
+	if status == FileChangeAdded {
+		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
+			if !git.IsIgnoredDir(repoPath, relPath) {
+				w.mu.Lock()
+				_ = w.fsw.Add(ev.Name)
+				w.mu.Unlock()
+			}
+			return // directory creation isn't itself a delta
+		}
+	}
+
+	// File-shaped filter: ignored paths (node_modules / .git / vendor /
+	// hidden / unknown-language).
 	if git.IsIgnoredPath(repoPath, relPath) {
 		return
 	}
-	status := classifyOp(ev.Op)
 	if status == "" {
 		return // CHMOD-only / unrecognized op
 	}
@@ -282,13 +319,6 @@ func (w *Watcher) handleEvent(ev fsnotify.Event) {
 	repo := w.repos[repoID]
 	if repo == nil {
 		return
-	}
-	// If a directory was just created, recursively add it so we see
-	// subsequent events. Best-effort.
-	if status == FileChangeAdded {
-		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
-			_ = w.fsw.Add(ev.Name)
-		}
 	}
 
 	// Coalesce: delete-after-create within the same batch becomes a
