@@ -3,7 +3,26 @@
 
 package graph
 
-import "github.com/sourcebridge/sourcebridge/internal/indexer"
+import (
+	"errors"
+
+	"github.com/sourcebridge/sourcebridge/internal/indexer"
+)
+
+// ErrMergeNotSupported is returned by GraphStore.MergeIndexResult when
+// the implementation does not support per-file merge semantics. The
+// SurrealDB-backed store returns this in Phase 1.C; the per-file
+// primitives are scheduled for the freshness-state migration in
+// Phase 2 of the MCP-edits feedback-loop plan.
+//
+// Callers in the change-watch path (Phase 1.C) should treat this as
+// "the operator is using a backend that doesn't yet support
+// change-watch" and surface it through the freshness envelope rather
+// than panicking. The umbrella SOURCEBRIDGE_CHANGE_WATCH_ENABLED flag
+// is default-off in Phase 1.C precisely so this surface does not get
+// exercised in production until Phase 2 lands the SurrealDB merge
+// primitives.
+var ErrMergeNotSupported = errors.New("graphstore: MergeIndexResult not supported by this backend")
 
 // RepositoryMeta holds mutable metadata fields for a repository.
 type RepositoryMeta struct {
@@ -30,6 +49,38 @@ type GraphStore interface {
 	CreateRepository(name, path string) (*Repository, error)
 	StoreIndexResult(result *indexer.IndexResult) (*Repository, error)
 	ReplaceIndexResult(repoID string, result *indexer.IndexResult) (*Repository, error)
+	// MergeIndexResult applies a per-file delta to the existing graph
+	// state for repoID. Only rows whose file path is in affectedPaths
+	// are touched; every other file (and its symbols, imports, edges)
+	// is preserved with its existing IDs.
+	//
+	// Semantics per affectedPath:
+	//   - If the path appears in result.Files, the existing file row
+	//     (and its symbols and imports) is dropped and re-inserted with
+	//     fresh UUIDs from the merged result. Edges (call graph,
+	//     test linkage) keyed to the dropped symbols are removed.
+	//   - If the path does NOT appear in result.Files, the existing
+	//     file row (and its symbols, imports, and dependent edges) is
+	//     dropped — this is the deletion case.
+	//   - If the path is in result.Files but not currently in the store,
+	//     the file is inserted as net-new.
+	//
+	// After per-file delta application, modules are re-derived (cheap)
+	// and the relations slice from result is re-inserted; both are
+	// derived from the merged file set by indexer.IndexFiles, so this
+	// is idempotent. Repository metadata aggregates (FileCount,
+	// FunctionCount, ClassCount, LastIndexedAt) are recomputed.
+	//
+	// MergeIndexResult is the only graphstore mutation the change-watch
+	// router (Phase 1.C) calls. ReplaceIndexResult atomically replaces
+	// every row for the repo, which would clobber the per-file delta;
+	// the router cannot use it.
+	//
+	// Returns ErrMergeNotSupported when the implementation does not
+	// support per-file merge semantics (e.g. the SurrealDB backend in
+	// Phase 1.C, which lacks the per-file primitives that land alongside
+	// the freshness-state migration in Phase 2).
+	MergeIndexResult(repoID string, affectedPaths []string, result *indexer.IndexResult) (*Repository, error)
 	ListRepositories() []*Repository
 	GetRepository(id string) *Repository
 	GetRepositoryByPath(path string) *Repository

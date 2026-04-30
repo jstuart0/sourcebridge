@@ -6,6 +6,7 @@ package graph
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -566,6 +567,331 @@ func (s *Store) ReplaceIndexResult(repoID string, result *indexer.IndexResult) (
 	repo.IndexError = ""
 
 	return repo, nil
+}
+
+// MergeIndexResult applies a per-file delta. See GraphStore.MergeIndexResult
+// for the contract.
+//
+// Implementation strategy (in-memory store):
+//
+//  1. Look up existing file IDs by path for the repo. Build the
+//     affectedSet from affectedPaths so the per-file logic is O(|affected|)
+//     rather than O(|files|^2).
+//
+//  2. For each affected path: if a file row exists, walk its symbols and
+//     remove every dependent record (call-graph edges in/out, test-linkage
+//     edges keyed to those symbols, requirement-link edges, and the file's
+//     imports). Then drop the file and symbol rows themselves.
+//
+//  3. Walk result.Files. For each file whose path is in affectedSet,
+//     re-insert the file row and its symbols/imports with fresh UUIDs
+//     (matching ReplaceIndexResult's pattern). Symbol-ID rewriting uses
+//     a per-call idMap so the relation-rewriting in step 4 stays
+//     consistent.
+//
+//  4. result.Relations has been recomputed by indexer.IndexFiles over
+//     the *merged* file set (every symbol referenced by every relation
+//     either survived as an existing store row, or was just inserted in
+//     step 3). The merge translates each relation's SourceID/TargetID
+//     from result-space symbol IDs into store-space symbol IDs:
+//     newly-inserted symbols use the per-call idMap; carry-forward
+//     symbols are looked up by the (file_path, name, kind, start_line)
+//     tuple from the existing store. Relations whose endpoints can't be
+//     resolved are dropped silently (matches existing IndexResult store
+//     semantics — see ReplaceIndexResult's idMap handling).
+//
+//  5. Modules are re-derived wholesale from result.Modules over the
+//     merged file set (cheap; IndexFiles already recomputed them).
+//
+//  6. Repository aggregates (FileCount, FunctionCount, ClassCount,
+//     LastIndexedAt) are recomputed.
+//
+// Locking: a single big-write lock for the duration of the merge. The
+// store's other methods take s.mu.RLock for reads, so this serializes
+// against concurrent mutations as expected.
+func (s *Store) MergeIndexResult(repoID string, affectedPaths []string, result *indexer.IndexResult) (*Repository, error) {
+	if result == nil {
+		return nil, fmt.Errorf("nil IndexResult")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	repo := s.repos[repoID]
+	if repo == nil {
+		return nil, fmt.Errorf("repository not found: %s", repoID)
+	}
+
+	// Build the affected set for O(1) membership tests below.
+	affectedSet := make(map[string]bool, len(affectedPaths))
+	for _, p := range affectedPaths {
+		affectedSet[p] = true
+	}
+
+	// --- Step 1: index the existing store rows by path so the per-file
+	// drop logic is fast. ---
+	existingFileByPath := make(map[string]*File)
+	for _, fid := range s.repoFiles[repoID] {
+		if f := s.files[fid]; f != nil {
+			existingFileByPath[f.Path] = f
+		}
+	}
+
+	// Pre-build a lookup table over carry-forward symbols so we can
+	// resolve cross-file relation endpoints in step 4. The natural key
+	// is (file_path, qualified_name, kind, start_line) — the same tuple
+	// the indexer uses internally to identify symbols across re-parses.
+	carryForwardSymKey := make(map[string]string) // key → existing store symbol ID
+	for _, sid := range s.repoSymbols[repoID] {
+		ss := s.symbols[sid]
+		if ss == nil {
+			continue
+		}
+		// Skip symbols whose file is in the affected set — those will
+		// be dropped and re-inserted with fresh IDs.
+		if affectedSet[ss.FilePath] {
+			continue
+		}
+		k := storeSymbolLookupKey(ss.FilePath, ss.QualifiedName, ss.Kind, ss.StartLine)
+		carryForwardSymKey[k] = sid
+	}
+
+	// --- Step 2: drop every record whose file is in affectedSet. ---
+	for path := range affectedSet {
+		f := existingFileByPath[path]
+		if f == nil {
+			continue // never existed; nothing to drop
+		}
+		// Drop every symbol on this file and every relation keyed to it.
+		for _, sid := range s.fileSymbols[f.ID] {
+			// Call graph: outbound edges (this symbol → callees).
+			for _, calleeID := range s.callGraph[sid] {
+				s.reverseCallGraph[calleeID] = removeFromSlice(s.reverseCallGraph[calleeID], sid)
+			}
+			delete(s.callGraph, sid)
+			// Call graph: inbound edges (this symbol ← callers).
+			for _, callerID := range s.reverseCallGraph[sid] {
+				s.callGraph[callerID] = removeFromSlice(s.callGraph[callerID], sid)
+			}
+			delete(s.reverseCallGraph, sid)
+			// Test linkage: this symbol may be a tested-by target OR a
+			// test-symbol source. Drop both directions.
+			delete(s.testedByGraph, sid)
+			for tgt, testers := range s.testedByGraph {
+				if filtered := removeFromSlice(testers, sid); len(filtered) != len(testers) {
+					if len(filtered) == 0 {
+						delete(s.testedByGraph, tgt)
+					} else {
+						s.testedByGraph[tgt] = filtered
+					}
+				}
+			}
+			// Requirement-link edges keyed to this symbol.
+			for _, lid := range s.symLinks[sid] {
+				if l := s.links[lid]; l != nil {
+					// Remove from req-side index too.
+					s.reqLinks[l.RequirementID] = removeFromSlice(s.reqLinks[l.RequirementID], lid)
+					delete(s.links, lid)
+				}
+				s.repoLinks[repoID] = removeFromSlice(s.repoLinks[repoID], lid)
+			}
+			delete(s.symLinks, sid)
+			// Drop the symbol itself.
+			delete(s.symbols, sid)
+			s.repoSymbols[repoID] = removeFromSlice(s.repoSymbols[repoID], sid)
+		}
+		// Drop the file's symbol-list index.
+		delete(s.fileSymbols, f.ID)
+		// Drop imports keyed to this file.
+		newImports := make([]StoredImport, 0, len(s.imports))
+		for _, imp := range s.imports {
+			if imp.FileID != f.ID {
+				newImports = append(newImports, imp)
+			}
+		}
+		s.imports = newImports
+		// Drop the file row itself.
+		delete(s.files, f.ID)
+		s.repoFiles[repoID] = removeFromSlice(s.repoFiles[repoID], f.ID)
+	}
+
+	// --- Step 3: re-insert the affected files from result. Files in
+	// affectedSet but absent from result.Files are deletions; they were
+	// already dropped above and we leave them dropped. ---
+	idMap := make(map[string]string) // result-space symbol ID → store-space symbol ID
+	for _, fr := range result.Files {
+		if !affectedSet[fr.Path] {
+			continue
+		}
+		fileID := uuid.New().String()
+		s.files[fileID] = &File{
+			ID:          fileID,
+			RepoID:      repoID,
+			Path:        fr.Path,
+			Language:    fr.Language,
+			LineCount:   fr.LineCount,
+			ContentHash: fr.ContentHash,
+			AIScore:     fr.AIScore,
+			AISignals:   fr.AISignals,
+		}
+		s.repoFiles[repoID] = append(s.repoFiles[repoID], fileID)
+
+		for _, sym := range fr.Symbols {
+			symID := uuid.New().String()
+			idMap[sym.ID] = symID
+			s.symbols[symID] = &StoredSymbol{
+				ID:            symID,
+				RepoID:        repoID,
+				FileID:        fileID,
+				Name:          sym.Name,
+				QualifiedName: sym.QualifiedName,
+				Kind:          string(sym.Kind),
+				Language:      sym.Language,
+				FilePath:      sym.FilePath,
+				StartLine:     sym.StartLine,
+				EndLine:       sym.EndLine,
+				Signature:     sym.Signature,
+				DocComment:    sym.DocComment,
+				IsTest:        sym.IsTest,
+			}
+			s.repoSymbols[repoID] = append(s.repoSymbols[repoID], symID)
+			s.fileSymbols[fileID] = append(s.fileSymbols[fileID], symID)
+		}
+		for _, imp := range fr.Imports {
+			s.imports = append(s.imports, StoredImport{
+				FileID: fileID,
+				Path:   imp.Path,
+				Line:   imp.Line,
+			})
+		}
+	}
+
+	// --- Step 4: re-insert relations. SourceID/TargetID in result are
+	// indexer-space IDs; we map them to store-space via idMap (newly-
+	// inserted) or via carryForwardSymKey (carry-forward).
+	//
+	// indexer.IndexFiles recomputes Relations over the merged file set,
+	// so every relation in result.Relations is a current edge. The two
+	// cases for each endpoint:
+	//   - The symbol was just inserted in step 3 → idMap has the new ID.
+	//   - The symbol was carry-forward (its file wasn't in affectedSet)
+	//     → look it up by (file_path, qualified_name, kind, start_line)
+	//     against the store's carry-forward index.
+	//
+	// We need a quick lookup from result-space symbol ID → result-space
+	// (file_path, qualified_name, kind, start_line) so we can drive the
+	// carry-forward fallback. Build it up from result.Files.
+	resultSymTuple := make(map[string]string, result.TotalSymbols)
+	for _, fr := range result.Files {
+		for _, sym := range fr.Symbols {
+			resultSymTuple[sym.ID] = storeSymbolLookupKey(sym.FilePath, sym.QualifiedName, string(sym.Kind), sym.StartLine)
+		}
+	}
+	resolveSymID := func(resultID string) (string, bool) {
+		if newID, ok := idMap[resultID]; ok {
+			return newID, true
+		}
+		if tuple, ok := resultSymTuple[resultID]; ok {
+			if existingID, ok2 := carryForwardSymKey[tuple]; ok2 {
+				return existingID, true
+			}
+		}
+		return "", false
+	}
+
+	for _, rel := range result.Relations {
+		sourceID, ok1 := resolveSymID(rel.SourceID)
+		targetID, ok2 := resolveSymID(rel.TargetID)
+		if !ok1 || !ok2 {
+			// Endpoint resolution failed — drop silently. Matches the
+			// existing ReplaceIndexResult policy when an idMap entry is
+			// missing.
+			continue
+		}
+		switch rel.Type {
+		case indexer.RelationCalls:
+			// Avoid duplicate insertion if the relation was carry-forward
+			// from a file outside affectedSet (its source/target both
+			// existed pre-merge and the call edge survived the drop).
+			if !sliceContains(s.callGraph[sourceID], targetID) {
+				s.callGraph[sourceID] = append(s.callGraph[sourceID], targetID)
+			}
+			if !sliceContains(s.reverseCallGraph[targetID], sourceID) {
+				s.reverseCallGraph[targetID] = append(s.reverseCallGraph[targetID], sourceID)
+			}
+		case indexer.RelationTests:
+			// Edge convention from ReplaceIndexResult: SourceID = test
+			// symbol; TargetID = symbol-being-tested; testedByGraph is
+			// keyed by target.
+			if !sliceContains(s.testedByGraph[targetID], sourceID) {
+				s.testedByGraph[targetID] = append(s.testedByGraph[targetID], sourceID)
+			}
+		}
+	}
+
+	// --- Step 5: modules. Drop existing modules and re-insert from
+	// result.Modules (IndexFiles already recomputed them). Cheap.
+	for _, modID := range s.repoModules[repoID] {
+		delete(s.modules, modID)
+	}
+	delete(s.repoModules, repoID)
+	for _, mod := range result.Modules {
+		modID := uuid.New().String()
+		s.modules[modID] = &StoredModule{
+			ID:        modID,
+			RepoID:    repoID,
+			Name:      mod.Name,
+			Path:      mod.Path,
+			FileCount: mod.FileCount,
+		}
+		s.repoModules[repoID] = append(s.repoModules[repoID], modID)
+	}
+
+	// --- Step 6: recompute repo aggregates. ---
+	funcCount := 0
+	classCount := 0
+	for _, sid := range s.repoSymbols[repoID] {
+		ss := s.symbols[sid]
+		if ss == nil {
+			continue
+		}
+		switch indexer.SymbolKind(ss.Kind) {
+		case indexer.SymbolFunction, indexer.SymbolMethod:
+			funcCount++
+		case indexer.SymbolClass, indexer.SymbolStruct, indexer.SymbolInterface, indexer.SymbolEnum, indexer.SymbolTrait:
+			classCount++
+		}
+	}
+	repo.FileCount = len(s.repoFiles[repoID])
+	repo.FunctionCount = funcCount
+	repo.ClassCount = classCount
+	repo.LastIndexedAt = time.Now()
+	repo.Status = "ready"
+	repo.IndexError = ""
+	if result.Branch != "" {
+		repo.Branch = result.Branch
+	}
+
+	return repo, nil
+}
+
+// storeSymbolLookupKey is the stable cross-reindex identifier for a
+// symbol used by MergeIndexResult to resolve carry-forward relation
+// endpoints. The tuple is intentionally narrow — start-line + qualified
+// name + kind catches the vast majority of cases, and edges that fail
+// to resolve are dropped (matching ReplaceIndexResult's policy).
+func storeSymbolLookupKey(filePath, qualifiedName, kind string, startLine int) string {
+	return filePath + "\x00" + qualifiedName + "\x00" + kind + "\x00" + strconv.Itoa(startLine)
+}
+
+// sliceContains returns true when target is already in slice.
+func sliceContains(slice []string, target string) bool {
+	for _, s := range slice {
+		if s == target {
+			return true
+		}
+	}
+	return false
 }
 
 // UpdateRepositoryMeta updates mutable metadata fields on a repository.

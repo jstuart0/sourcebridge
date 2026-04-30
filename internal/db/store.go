@@ -711,6 +711,27 @@ func (s *SurrealStore) ReplaceIndexResult(repoID string, result *indexer.IndexRe
 	return s.GetRepository(repoID), nil
 }
 
+// MergeIndexResult is the per-file delta entry point used by the
+// change-watch router (Phase 1.C). The SurrealDB-backed store does not
+// yet support per-file merge semantics — the queries that selectively
+// drop a file's symbols/imports/edges and re-insert them while
+// preserving the rest of the repo land alongside the freshness-state
+// migration in Phase 2 of the MCP-edits feedback-loop plan.
+//
+// Returning ErrMergeNotSupported here is the deliberate fail-closed
+// choice. The umbrella SOURCEBRIDGE_CHANGE_WATCH_ENABLED flag is
+// default-off in 1.C, so this surface is not exercised in production
+// until Phase 2 lands the per-file primitives. If an operator flips
+// the flag on while running the SurrealDB backend before Phase 2, the
+// router surfaces this error through the freshness envelope rather
+// than silently corrupting state.
+func (s *SurrealStore) MergeIndexResult(repoID string, affectedPaths []string, result *indexer.IndexResult) (*graph.Repository, error) {
+	_ = repoID
+	_ = affectedPaths
+	_ = result
+	return nil, graph.ErrMergeNotSupported
+}
+
 // UpdateRepositoryMeta updates mutable metadata fields on a repository.
 func (s *SurrealStore) UpdateRepositoryMeta(id string, meta graph.RepositoryMeta) {
 	db := s.client.DB()

@@ -52,6 +52,17 @@ func (f *TenantFilteredStore) ReplaceIndexResult(repoID string, result *indexer.
 	return f.inner.ReplaceIndexResult(repoID, result)
 }
 
+// MergeIndexResult enforces the tenant gate before delegating to the
+// inner store. Same access discipline as ReplaceIndexResult — events
+// for repos a tenant cannot access are rejected before reaching the
+// shared store.
+func (f *TenantFilteredStore) MergeIndexResult(repoID string, affectedPaths []string, result *indexer.IndexResult) (*Repository, error) {
+	if !f.hasAccess(repoID) {
+		return nil, fmt.Errorf("repository not found")
+	}
+	return f.inner.MergeIndexResult(repoID, affectedPaths, result)
+}
+
 func (f *TenantFilteredStore) ListRepositories() []*Repository {
 	all := f.inner.ListRepositories()
 	filtered := make([]*Repository, 0, len(all))
