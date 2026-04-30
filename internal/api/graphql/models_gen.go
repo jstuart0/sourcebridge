@@ -728,6 +728,29 @@ type LivingWikiJobResult struct {
 	ErrorMessage    *string `json:"errorMessage,omitempty"`
 }
 
+// LivingWikiOnDemandPageResult reports the outcome of an on-demand page
+// generation request.
+type LivingWikiOnDemandPageResult struct {
+	// pageId is the SourceBridge external ID of the page that was generated
+	// (e.g. "<repoID>.detail.internal.api"). Non-null on success.
+	PageID string `json:"pageId"`
+	// dispatched is true when the page was successfully written to at least one
+	// configured sink (Confluence, Notion, or git_repo).
+	Dispatched bool `json:"dispatched"`
+}
+
+// LivingWikiOnDemandPageSpec identifies a single page for on-demand generation.
+// Exactly one of folder or symbol must be provided; supplying both is a
+// validation error (extension code: INVALID_PAGE_SPEC).
+type LivingWikiOnDemandPageSpec struct {
+	// folder is a relative source path (e.g. "internal/api") whose Detailed-mode
+	// architecture page should be regenerated and dispatched.
+	Folder *string `json:"folder,omitempty"`
+	// symbol is the fully-qualified symbol identifier (e.g. "internal/auth.Middleware")
+	// whose detail page should be regenerated and dispatched.
+	Symbol *string `json:"symbol,omitempty"`
+}
+
 // LivingWikiSettings is the UI-managed living-wiki configuration.
 //
 // Secret fields (tokens, webhook secrets) are never returned in plaintext.

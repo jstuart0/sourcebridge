@@ -2619,14 +2619,23 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 		sinkKind = strings.ToLower(string(settings.Sinks[0].Kind))
 	}
 
+	// Phase 4a: derive the generation mode from repo settings (CR12 Part B).
+	// When Overview-only, use lw_overview. Otherwise default to lw_detailed
+	// (covers Detailed-only, both-enabled, neither-enabled). Phase 4b will
+	// enqueue two separate jobs for the "both enabled" case.
+	jobMode := GenerationModeLWDetailed
+	if settings.LivingWikiOverviewEnabled && !settings.LivingWikiDetailedEnabled {
+		jobMode = GenerationModeLWOverview
+	}
+
 	req := &llm.EnqueueRequest{
 		Subsystem: llm.Subsystem("living_wiki"),
 		JobType:   jobType,
-		// CR12 Part B: mode-aware TargetKey ensures that starting a Detailed run
-		// while an Overview run is already in-flight (or vice-versa) does not
-		// de-duplicate the two jobs. The lw_ suffix mirrors GenerationMode constants.
-		TargetKey: fmt.Sprintf("lw:%s:%s:%s", defaultTenantID, input.RepositoryID, GenerationModeLWDetailed),
-		RepoID:    input.RepositoryID,
+		// CR12 Part B: mode-aware TargetKey so Detailed and Overview jobs for the
+		// same repo don't de-duplicate each other when both are in-flight.
+		TargetKey:      fmt.Sprintf("lw:%s:%s:%s", defaultTenantID, input.RepositoryID, jobMode),
+		GenerationMode: jobMode,
+		RepoID:         input.RepositoryID,
 		// R3 slice 3: living-wiki cold-start runs LLM jobs (page generation,
 		// understanding, etc.). Stamp llm_provider for Monitor + per-provider
 		// metrics. Use OpLivingWikiColdStart unless this is regen.
@@ -2660,6 +2669,7 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 			nil,                          // metrics: fall back to lwmetrics.Default
 			r.LLMResolver,                // for FrozenResolver + fingerprint model identity (CR5, LD-7)
 			r.LivingWikiPagePublishStore, // for per-page dispatch state (Phase 1)
+			jobMode,                      // Phase 4a: mode-aware taxonomy
 		),
 	}
 
@@ -2733,11 +2743,6 @@ func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID 
 	})
 }
 
-// SetRepositoryLLMOverride is implemented in
-// repository_llm_override.resolvers.go.
-//
-// ClearRepositoryLLMOverride is implemented in
-// repository_llm_override.resolvers.go.
 
 // MoveToTrash is the resolver for the moveToTrash field.
 func (r *mutationResolver) MoveToTrash(ctx context.Context, typeArg TrashableType, id string, reason *string) (*TrashEntry, error) {
@@ -3950,7 +3955,6 @@ func (r *repositoryLivingWikiSettingsResolver) LastJobResult(ctx context.Context
 	return mapLivingWikiJobResult(result), nil
 }
 
-// LlmOverride is implemented in repository_llm_override.resolvers.go.
 
 // Mutation returns MutationResolver implementation.
 func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }

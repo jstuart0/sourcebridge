@@ -201,6 +201,17 @@ type Mutation {
   retryLivingWikiJob(repositoryId: ID!, retryExcludedOnly: Boolean): EnableLivingWikiResult!
 
   """
+  generateLivingWikiPageOnDemand generates a single Detailed-mode Living Wiki
+  page for the requested folder or symbol and dispatches it to all configured
+  sinks. Returns an error with extension code LIVING_WIKI_DETAILED_DISABLED
+  when the repository does not have Detailed mode enabled.
+  """
+  generateLivingWikiPageOnDemand(
+    repositoryId: ID!,
+    pageSpec: LivingWikiOnDemandPageSpec!
+  ): LivingWikiOnDemandPageResult!
+
+  """
   setRepositoryLLMOverride sets or updates the per-repository LLM override.
   Patch semantics: omitted fields leave the saved value unchanged; empty
   strings clear non-secret fields back to workspace inheritance; apiKey
@@ -1891,4 +1902,43 @@ type EnableLivingWikiResult {
   The UI renders this as an informational banner (not a toast).
   """
   notice: String
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4a: On-demand single-page generation (Detailed mode drill-down)
+# ─────────────────────────────────────────────────────────────────────────────
+
+"""
+LivingWikiOnDemandPageSpec identifies a single page for on-demand generation.
+Exactly one of folder or symbol must be provided; supplying both is a
+validation error (extension code: INVALID_PAGE_SPEC).
+"""
+input LivingWikiOnDemandPageSpec {
+  """
+  folder is a relative source path (e.g. "internal/api") whose Detailed-mode
+  architecture page should be regenerated and dispatched.
+  """
+  folder: String
+  """
+  symbol is the fully-qualified symbol identifier (e.g. "internal/auth.Middleware")
+  whose detail page should be regenerated and dispatched.
+  """
+  symbol: String
+}
+
+"""
+LivingWikiOnDemandPageResult reports the outcome of an on-demand page
+generation request.
+"""
+type LivingWikiOnDemandPageResult {
+  """
+  pageId is the SourceBridge external ID of the page that was generated
+  (e.g. "<repoID>.detail.internal.api"). Non-null on success.
+  """
+  pageId: String!
+  """
+  dispatched is true when the page was successfully written to at least one
+  configured sink (Confluence, Notion, or git_repo).
+  """
+  dispatched: Boolean!
 }

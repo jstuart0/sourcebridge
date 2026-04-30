@@ -129,7 +129,11 @@ func buildColdStartRunner(
 	metricsCollector *lwmetrics.Collector, // when nil, falls back to lwmetrics.Default
 	llmResolver resolution.Resolver, // for FrozenResolver + fingerprint model identity (CR5, LD-7)
 	publishStatusStore livingwiki.PagePublishStatusStore, // for per-page dispatch state (Phase 1)
+	mode string, // Phase 4a: "lw_overview" or "lw_detailed"; empty defaults to lw_detailed
 ) func(ctx context.Context, rt llm.Runtime) error {
+	if mode == "" {
+		mode = GenerationModeLWDetailed
+	}
 	if metricsCollector == nil {
 		metricsCollector = lwmetrics.Default
 	}
@@ -151,7 +155,7 @@ func buildColdStartRunner(
 
 		if len(excludedPageIDs) > 0 {
 			// retryExcludedOnly path: scope to previously-excluded pages.
-			full, err := resolveTaxonomy(runCtx, repoID, graphStore, llmCaller, clusterStore)
+			full, err := resolveTaxonomyForMode(runCtx, mode, repoID, graphStore, llmCaller, clusterStore)
 			if err != nil {
 				return fmt.Errorf("living-wiki: taxonomy resolution failed: %w", err)
 			}
@@ -171,7 +175,7 @@ func buildColdStartRunner(
 		} else {
 			// Full cold-start path.
 			var err error
-			pages, err = resolveTaxonomy(runCtx, repoID, graphStore, llmCaller, clusterStore)
+			pages, err = resolveTaxonomyForMode(runCtx, mode, repoID, graphStore, llmCaller, clusterStore)
 			if err != nil {
 				return fmt.Errorf("living-wiki: taxonomy resolution failed: %w", err)
 			}
@@ -704,6 +708,7 @@ func buildColdStartRunner(
 				broker, repoSettingsStore,
 				repoName,
 				&status, &failCat, &errMsg,
+				mode,
 			)
 		}
 
@@ -796,6 +801,7 @@ func dispatchGeneratedPages(
 	status *string,
 	failCat *coldstart.FailureCategory,
 	errMsg *string,
+	mode string, // Phase 4a: scopes orphan cleanup to the mode's prefix
 ) []livingwiki.SinkWriteResult {
 	if broker == nil || repoSettingsStore == nil {
 		return nil
@@ -906,6 +912,18 @@ func dispatchGeneratedPages(
 	// Any repo where the field was never touched keeps the default-on behaviour.
 	orphanCleanEnabled := !repoSettings.AutoCleanOrphansDisabled()
 	if dispatchStatus == "ok" && orphanCleanEnabled {
+		// Compute the mode-specific orphan cleanup prefix (Phase 4a / H1).
+		// For legacy "lw_detailed" and unknown modes, clean the full repoID prefix
+		// (backward compat with pre-4a arch.* pages). For "lw_overview", scope
+		// cleanup to only the overview.* pages to avoid nuking detail.* pages.
+		orphanPrefix := repoID + "."
+		switch mode {
+		case GenerationModeLWOverview:
+			orphanPrefix = repoID + ".overview."
+		case GenerationModeLWDetailed:
+			orphanPrefix = repoID + ".detail."
+		}
+
 		// currentIDs is the union of:
 		//   - hierarchy pages (root + Architecture section) — always "wanted"
 		//   - pages just generated
@@ -919,11 +937,12 @@ func dispatchGeneratedPages(
 			currentIDs = append(currentIDs, p.ID)
 		}
 		currentIDs = append(currentIDs, skippedPageIDs...)
+
 		for _, nsw := range writers {
-			gcResult := sinks.RunOrphanCleanup(ctx, nsw.Writer, repoID, currentIDs)
+			gcResult := sinks.RunOrphanCleanupForPrefix(ctx, nsw.Writer, repoID, orphanPrefix, currentIDs)
 			if gcResult.Deleted > 0 || len(gcResult.Errors) > 0 {
 				slog.Info("livingwiki/dispatch: orphan cleanup done",
-					"sink", nsw.Name, "repo_id", repoID,
+					"sink", nsw.Name, "repo_id", repoID, "prefix", orphanPrefix,
 					"deleted", gcResult.Deleted, "errors", len(gcResult.Errors))
 			}
 		}
@@ -1025,7 +1044,16 @@ func listAlreadyPublishedAcrossSinks(
 // LLM caller, and clusterStore may be nil; the resolver degrades gracefully
 // (no LLM-dependent pages will be generated and the package-path heuristic
 // is used for architecture pages, but the job won't hard-fail).
+//
+// resolveTaxonomy is the legacy backward-compat wrapper (lw_detailed mode).
 func resolveTaxonomy(ctx context.Context, repoID string, gs graphstore.GraphStore, lc *llmcall.Caller, cs clustering.ClusterStore) ([]lworch.PlannedPage, error) {
+	return resolveTaxonomyForMode(ctx, GenerationModeLWDetailed, repoID, gs, lc, cs)
+}
+
+// resolveTaxonomyForMode derives the planned-page taxonomy for the given mode.
+// mode must be one of GenerationModeLWOverview / GenerationModeLWDetailed; an
+// empty or unrecognized mode falls back to Detailed behavior.
+func resolveTaxonomyForMode(ctx context.Context, mode, repoID string, gs graphstore.GraphStore, lc *llmcall.Caller, cs clustering.ClusterStore) ([]lworch.PlannedPage, error) {
 	var sg templates.SymbolGraph
 	if gs != nil {
 		sg = &graphStoreSymbolGraph{store: gs}
@@ -1092,7 +1120,7 @@ func resolveTaxonomy(ctx context.Context, repoID string, gs graphstore.GraphStor
 	if gs != nil {
 		tr.WithPackageDeps(gs)
 	}
-	return tr.Resolve(ctx, nil, clusterSummaries, time.Now())
+	return tr.ResolveForMode(ctx, mode, nil, clusterSummaries, time.Now())
 }
 
 // buildExclusionReasons extracts human-readable gate-violation messages from

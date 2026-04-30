@@ -71,6 +71,7 @@ func TestDispatchGeneratedPagesSinkAuthFailureClassifiesAsAuth(t *testing.T) {
 		repoStore,
 		"test-repo",
 		&status, &failCat, &errMsg,
+		GenerationModeLWDetailed,
 	)
 
 	if status != "failed" {
