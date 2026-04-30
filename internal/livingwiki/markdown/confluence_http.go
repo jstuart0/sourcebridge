@@ -520,8 +520,21 @@ func (c *HTTPConfluenceClient) EnsurePage(ctx context.Context, snap credentials.
 		metadata[propParentExternalID] = parentExternalID
 	}
 
-	if err := c.createPage(ctx, auth, externalID, body, metadata); err != nil {
-		return "", fmt.Errorf("confluence_http: EnsurePage create %q: %w", externalID, err)
+	createErr := c.createPage(ctx, auth, externalID, body, metadata)
+	if createErr != nil {
+		// CR7: A 409 Conflict response means another writer (same pod via a
+		// different goroutine, or a different pod) created this page concurrently.
+		// Recover gracefully by re-looking up the page by its external ID or
+		// title — the page now exists and we should return its numeric ID.
+		var apiErr *ConfluenceAPIError
+		if errors.As(createErr, &apiErr) && apiErr.StatusCode == http.StatusConflict {
+			conflictPageID, lookupErr := c.findPageIDByExternalID(ctx, auth, externalID, metadata)
+			if lookupErr == nil && conflictPageID != "" {
+				return conflictPageID, nil
+			}
+			// Lookup failed too — surface the original 409 so the caller can decide.
+		}
+		return "", fmt.Errorf("confluence_http: EnsurePage create %q: %w", externalID, createErr)
 	}
 
 	// Resolve the new page's numeric ID.

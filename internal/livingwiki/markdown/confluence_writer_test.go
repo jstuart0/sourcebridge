@@ -6,7 +6,10 @@ package markdown_test
 import (
 	"bytes"
 	"context"
+	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1246,4 +1249,161 @@ func TestHumanizePageIDDetailPrefix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4a: CR7 hierarchy lock tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestEnsureHierarchyParallelWritersSerializeCreateAttempts verifies that two
+// ConfluenceWriter instances sharing the same HierarchyLockKey create the
+// hierarchy pages exactly once (not once per writer) when WritePage is called
+// concurrently from different goroutines.
+func TestEnsureHierarchyParallelWritersSerializeCreateAttempts(t *testing.T) {
+	t.Parallel()
+
+	// Shared in-memory client — both writers use the same Confluence "space".
+	client := markdown.NewMemoryConfluenceClient()
+	sharedCfg := markdown.ConfluenceWriterConfig{
+		SpaceKey:         "ENG",
+		RepoID:           "cr7-test-repo",
+		RepoName:         "CR7 Test Repo",
+		HierarchyLockKey: "cr7-test|ENG|cr7-test-repo",
+	}
+
+	writerA := markdown.NewConfluenceWriter(client, sharedCfg)
+	writerB := markdown.NewConfluenceWriter(client, sharedCfg)
+
+	page := confluenceTestPage()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var errA, errB error
+	go func() {
+		defer wg.Done()
+		errA = writerA.WritePage(confCtx, page)
+	}()
+	go func() {
+		defer wg.Done()
+		errB = writerB.WritePage(confCtx, page)
+	}()
+	wg.Wait()
+
+	if errA != nil {
+		t.Errorf("writerA.WritePage: %v", errA)
+	}
+	if errB != nil {
+		t.Errorf("writerB.WritePage: %v", errB)
+	}
+
+	// With the process-wide lock, the two hierarchy pages (root + arch section)
+	// must each have been created exactly once — not twice (once per writer).
+	// EnsureCreateCount == 2 means root created 1 time + arch section created
+	// 1 time; the second writer saw them already exist and skipped the create.
+	if client.EnsureCreateCount != 2 {
+		t.Errorf("EnsureCreateCount = %d, want 2 (root + arch section created once each)", client.EnsureCreateCount)
+	}
+}
+
+// TestEnsureHierarchyTransientErrorIsRetryable verifies that a transient 5xx
+// error on the first WritePage call does not permanently break the writer —
+// the second WritePage call retries the hierarchy setup and succeeds.
+func TestEnsureHierarchyTransientErrorIsRetryable(t *testing.T) {
+	t.Parallel()
+
+	var callCount atomic.Int32
+	// flakyClient wraps a MemoryConfluenceClient and returns a 503 on the first
+	// EnsurePage call, then delegates to the real implementation.
+	inner := markdown.NewMemoryConfluenceClient()
+	flaky := &flakyEnsurePageClient{
+		MemoryConfluenceClient: inner,
+		failUntil:              1, // fail the first EnsurePage call
+		statusCode:             http.StatusServiceUnavailable,
+		callCount:              &callCount,
+	}
+
+	writer := markdown.NewConfluenceWriter(flaky, markdown.ConfluenceWriterConfig{
+		SpaceKey: "ENG",
+		RepoID:   "transient-test-repo",
+		RepoName: "Transient Test Repo",
+		// No HierarchyLockKey: uses fallback key.
+	})
+
+	page := confluenceTestPage()
+
+	// First WritePage: 503 → expect hierarchy error.
+	if err := writer.WritePage(confCtx, page); err == nil {
+		t.Fatal("expected error on first WritePage (503), got nil")
+	}
+
+	// Second WritePage: 503 is gone → expect success.
+	if err := writer.WritePage(confCtx, page); err != nil {
+		t.Fatalf("expected second WritePage to succeed after transient error, got: %v", err)
+	}
+
+	// Verify the page was actually written on the second attempt.
+	xhtml, _, err := inner.GetPage(confCtx, page.ID)
+	if err != nil || xhtml == nil {
+		t.Error("page not found in inner client after successful second WritePage")
+	}
+}
+
+// TestHierarchyLockKeyEmptyUsesFallbackKey verifies that when HierarchyLockKey
+// is empty, ensureHierarchy synthesizes "fallback|<SpaceKey>|<RepoID>" and
+// concurrent writers ARE serialized via that synthesized key.
+func TestHierarchyLockKeyEmptyUsesFallbackKey(t *testing.T) {
+	t.Parallel()
+
+	client := markdown.NewMemoryConfluenceClient()
+	// Both writers omit HierarchyLockKey but share SpaceKey + RepoID.
+	cfg := markdown.ConfluenceWriterConfig{
+		SpaceKey: "FALLBACK",
+		RepoID:   "fallback-test-repo",
+		RepoName: "Fallback Test Repo",
+		// HierarchyLockKey intentionally empty — fallback key should kick in.
+	}
+
+	w1 := markdown.NewConfluenceWriter(client, cfg)
+	w2 := markdown.NewConfluenceWriter(client, cfg)
+
+	page := confluenceTestPage()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var e1, e2 error
+	go func() { defer wg.Done(); e1 = w1.WritePage(confCtx, page) }()
+	go func() { defer wg.Done(); e2 = w2.WritePage(confCtx, page) }()
+	wg.Wait()
+
+	if e1 != nil {
+		t.Errorf("w1.WritePage: %v", e1)
+	}
+	if e2 != nil {
+		t.Errorf("w2.WritePage: %v", e2)
+	}
+	// Fallback key must serialize: 2 creates total (root + arch), not 4.
+	if client.EnsureCreateCount != 2 {
+		t.Errorf("EnsureCreateCount = %d, want 2 (fallback key must serialize)", client.EnsureCreateCount)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test helpers for CR7
+// ─────────────────────────────────────────────────────────────────────────────
+
+// flakyEnsurePageClient wraps MemoryConfluenceClient and returns a configurable
+// HTTP error for the first `failUntil` EnsurePage calls, then delegates normally.
+type flakyEnsurePageClient struct {
+	*markdown.MemoryConfluenceClient
+	failUntil  int
+	statusCode int
+	callCount  *atomic.Int32
+}
+
+func (f *flakyEnsurePageClient) EnsurePage(ctx context.Context, externalID, title, parentExternalID string, body []byte) (string, error) {
+	n := int(f.callCount.Add(1))
+	if n <= f.failUntil {
+		return "", &markdown.ConfluenceAPIError{StatusCode: f.statusCode, Message: "transient test error"}
+	}
+	return f.MemoryConfluenceClient.EnsurePage(ctx, externalID, title, parentExternalID, body)
 }

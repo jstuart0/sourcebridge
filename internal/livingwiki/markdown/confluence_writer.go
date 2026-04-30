@@ -67,6 +67,7 @@ package markdown
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -507,9 +508,13 @@ type confluencePageRecord struct {
 // MemoryConfluenceClient is a thread-safe in-memory implementation of
 // [ConfluenceClient] for use in tests and development.
 type MemoryConfluenceClient struct {
-	pages    map[string]*confluencePageRecord // externalID → record
-	numericIDs map[string]string             // externalID → fake numeric Confluence page ID
-	nextID   int
+	mu         sync.Mutex
+	pages      map[string]*confluencePageRecord // externalID → record
+	numericIDs map[string]string               // externalID → fake numeric Confluence page ID
+	nextID     int
+	// EnsureCreateCount is the number of times EnsurePage created a new page
+	// (as opposed to returning an existing one). Used in concurrency tests.
+	EnsureCreateCount int
 }
 
 // NewMemoryConfluenceClient creates an empty [MemoryConfluenceClient].
@@ -523,6 +528,8 @@ func NewMemoryConfluenceClient() *MemoryConfluenceClient {
 
 // GetPage implements [ConfluenceClient].
 func (m *MemoryConfluenceClient) GetPage(_ context.Context, externalID string) ([]byte, ConfluenceProperties, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	rec, ok := m.pages[externalID]
 	if !ok {
 		return nil, nil, nil
@@ -539,6 +546,8 @@ func (m *MemoryConfluenceClient) GetPage(_ context.Context, externalID string) (
 
 // UpsertPage implements [ConfluenceClient].
 func (m *MemoryConfluenceClient) UpsertPage(_ context.Context, externalID string, xhtml []byte, metadata ConfluenceProperties) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	body := make([]byte, len(xhtml))
 	copy(body, xhtml)
 	props := make(ConfluenceProperties, len(metadata))
@@ -552,6 +561,8 @@ func (m *MemoryConfluenceClient) UpsertPage(_ context.Context, externalID string
 // GetBlockByExternalID implements [ConfluenceClient] by parsing the stored
 // XHTML to find the macro with the matching block ID parameter.
 func (m *MemoryConfluenceClient) GetBlockByExternalID(_ context.Context, pageExternalID string, blockExternalID ast.BlockID) ([]byte, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	rec, ok := m.pages[pageExternalID]
 	if !ok {
 		return nil, false, nil
@@ -568,6 +579,8 @@ func (m *MemoryConfluenceClient) GetBlockByExternalID(_ context.Context, pageExt
 // ListPagesByExternalIDPrefix implements [ConfluenceClient] by scanning the
 // in-memory page map for keys with the given prefix.
 func (m *MemoryConfluenceClient) ListPagesByExternalIDPrefix(_ context.Context, prefix string) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var out []string
 	for id := range m.pages {
 		if strings.HasPrefix(id, prefix) {
@@ -580,6 +593,8 @@ func (m *MemoryConfluenceClient) ListPagesByExternalIDPrefix(_ context.Context, 
 // DeletePage implements [ConfluenceClient] by removing the page from the
 // in-memory map. Returns nil when the page does not exist (idempotent).
 func (m *MemoryConfluenceClient) DeletePage(_ context.Context, externalID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.pages, externalID)
 	delete(m.numericIDs, externalID)
 	return nil
@@ -590,10 +605,13 @@ func (m *MemoryConfluenceClient) DeletePage(_ context.Context, externalID string
 // cases. Existing pages are left unchanged (the body argument is ignored for
 // pre-existing pages).
 func (m *MemoryConfluenceClient) EnsurePage(_ context.Context, externalID, title string, _ string, body []byte) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if numID, ok := m.numericIDs[externalID]; ok {
 		return numID, nil
 	}
-	// Create the page.
+	// Create the page — track the count for concurrency tests.
+	m.EnsureCreateCount++
 	cp := make([]byte, len(body))
 	copy(cp, body)
 	m.pages[externalID] = &confluencePageRecord{
@@ -612,6 +630,8 @@ func (m *MemoryConfluenceClient) EnsurePage(_ context.Context, externalID, title
 // NumericPageID returns the fake Confluence numeric page ID for the given
 // external ID. Returns "" when the page does not exist. Used in tests.
 func (m *MemoryConfluenceClient) NumericPageID(externalID string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.numericIDs[externalID]
 }
 
@@ -729,6 +749,18 @@ type ConfluenceWriterConfig struct {
 	// RepoName is the human-readable repository name. Used as the title of the
 	// auto-generated "<RepoName> Living Wiki" root page.
 	RepoName string
+
+	// HierarchyLockKey is an opaque identifier used to serialize concurrent
+	// ensureHierarchy calls across ConfluenceWriter instances in the same process.
+	// The factory (NewConfluenceSinkWriter) MUST populate this to a stable, unique
+	// value per (siteURL, SpaceKey, RepoID) so that parallel jobs writing to the
+	// same Confluence space do not race on hierarchy-page creation.
+	//
+	// If empty AND SpaceKey or RepoID is non-empty, ensureHierarchy synthesizes
+	// a fallback key of "fallback|<SpaceKey>|<RepoID>" to maintain safety even
+	// when a future caller omits this field. A truly empty key (all three fields
+	// empty) disables process-wide serialization — acceptable only in tests.
+	HierarchyLockKey string
 }
 
 // hierarchyExternalIDs returns the stable external IDs for the root and
@@ -766,8 +798,16 @@ type ConfluenceWriter struct {
 	cfg    ConfluenceWriterConfig
 
 	// hierarchyOnce guards the one-time creation of the root and Architecture
-	// section pages. Concurrent WritePage calls will all block until the first
-	// caller has created the pages; subsequent callers proceed immediately.
+	// section pages within a single writer instance. Concurrent WritePage calls
+	// block until the first caller has run the creation logic; subsequent
+	// callers (same writer) short-circuit because the once is already spent.
+	//
+	// Transient errors (5xx / network / deadline) reset hierarchyOnce so the
+	// next WritePage call retries without requiring a writer restart. Permanent
+	// errors (401/403/404) stay sticky and are not retried.
+	//
+	// Cross-writer serialization is handled by the process-wide mutex in
+	// ensureHierarchy (keyed on HierarchyLockKey), not by this field.
 	hierarchyOnce sync.Once
 	hierarchyErr  error // non-nil when EnsurePage calls fail during setup
 }
@@ -778,11 +818,39 @@ func NewConfluenceWriter(client ConfluenceClient, cfg ConfluenceWriterConfig) *C
 }
 
 // ensureHierarchy creates the root and Architecture section pages exactly once
-// per writer lifetime. It is called from WritePage under a sync.Once so
-// concurrent page writes block until the hierarchy exists.
+// per writer lifetime. It is called from WritePage so concurrent page writes
+// block until the hierarchy exists.
+//
+// Concurrency model (CR7):
+//  1. A process-wide mutex (keyed by cfg.HierarchyLockKey) serializes concurrent
+//     ensureHierarchy calls across different ConfluenceWriter instances that
+//     share the same Confluence space. This prevents two parallel jobs from
+//     racing on the create-page calls.
+//  2. Within a single writer, hierarchyOnce prevents repeated execution once the
+//     hierarchy has been created successfully. On transient errors (5xx / network)
+//     the once is reset so the next WritePage call retries; permanent errors
+//     (401/403/404 on space) remain sticky.
 //
 // When cfg.RepoID is empty the hierarchy is disabled and this is a no-op.
 func (cw *ConfluenceWriter) ensureHierarchy(ctx context.Context) error {
+	// Compute the process-wide lock key. Fall back to a synthesized key when
+	// HierarchyLockKey is empty but the space/repo are known.
+	key := cw.cfg.HierarchyLockKey
+	if key == "" && (cw.cfg.SpaceKey != "" || cw.cfg.RepoID != "") {
+		key = "fallback|" + cw.cfg.SpaceKey + "|" + cw.cfg.RepoID
+	}
+
+	mu := hierarchyLockFor(key)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Reset the once if the previous attempt ended with a transient error so
+	// the next call retries. Permanent errors remain sticky.
+	if cw.hierarchyErr != nil && isHierarchyTransientError(cw.hierarchyErr) {
+		cw.hierarchyOnce = sync.Once{}
+		cw.hierarchyErr = nil
+	}
+
 	cw.hierarchyOnce.Do(func() {
 		rootID, archID := cw.cfg.hierarchyExternalIDs()
 		if rootID == "" {
@@ -820,6 +888,27 @@ func (cw *ConfluenceWriter) ensureHierarchy(ctx context.Context) error {
 		}
 	})
 	return cw.hierarchyErr
+}
+
+// isHierarchyTransientError reports whether the error is safe to retry on the
+// next WritePage call. 5xx Confluence API errors, network errors, and deadline
+// exceeded are considered transient. Auth errors (401/403) and missing-space
+// errors (404) are permanent and should not be retried automatically.
+func isHierarchyTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// context.DeadlineExceeded and context.Canceled are transient.
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	// Confluence 5xx responses are transient.
+	var ce *ConfluenceAPIError
+	if errors.As(err, &ce) {
+		return ce.StatusCode >= 500
+	}
+	// Any other error (network, DNS, TLS) is treated as transient.
+	return true
 }
 
 // parentExternalIDForPage determines which parent page a new content page

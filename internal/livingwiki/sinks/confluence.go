@@ -81,11 +81,18 @@ func NewConfluenceSinkWriter(site, spaceKey, parentPageID, repoID, repoName stri
 		client:   httpClient,
 		snapshot: snapshot,
 	}
+	// HierarchyLockKey serializes concurrent ensureHierarchy calls across writer
+	// instances that target the same Confluence space + repo (CR7). The key is
+	// stable for the lifetime of the process: it is derived from the constructor
+	// parameters rather than from runtime credentials.
+	hierarchyLockKey := site + "|" + spaceKey + "|" + repoID
+
 	writer := markdown.NewConfluenceWriter(bound, markdown.ConfluenceWriterConfig{
-		SpaceKey:     spaceKey,
-		ParentPageID: parentPageID,
-		RepoID:       repoID,
-		RepoName:     repoName,
+		SpaceKey:         spaceKey,
+		ParentPageID:     parentPageID,
+		RepoID:           repoID,
+		RepoName:         repoName,
+		HierarchyLockKey: hierarchyLockKey,
 	})
 	return &ConfluenceSinkWriter{
 		writer: writer,

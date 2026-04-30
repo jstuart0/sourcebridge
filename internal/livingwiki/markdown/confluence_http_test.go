@@ -474,3 +474,100 @@ func TestHTTPConfluenceClient_MalformedJSON(t *testing.T) {
 		t.Fatal("expected error for malformed JSON, got nil")
 	}
 }
+
+// ─── TestEnsurePageHandlesCreateConflict ─────────────────────────────────────
+
+// TestEnsurePageHandlesCreateConflict verifies that EnsurePage recovers from
+// a 409 Conflict on the create attempt (cross-pod race) by re-looking up the
+// existing page and returning its numeric ID.
+func TestEnsurePageHandlesCreateConflict(t *testing.T) {
+	t.Parallel()
+
+	const (
+		externalID = "test-repo.overview.auth"
+		title      = "Overview: auth"
+		pageID     = "pid-conflict-page"
+	)
+
+	// conflictTestServer behaves like the real Confluence mock but returns 409
+	// on the first POST /pages call, then serves the title-lookup and property
+	// responses so EnsurePage can find the page "another pod" already created.
+	var createAttempts int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		// Space resolution.
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/spaces"):
+			key := r.URL.Query().Get("keys")
+			type result struct {
+				ID  string `json:"id"`
+				Key string `json:"key"`
+			}
+			results := []result{}
+			if key != "" {
+				results = append(results, result{ID: "space-" + key, Key: key})
+			}
+			writeConfluenceJSON(w, http.StatusOK, map[string]interface{}{"results": results})
+
+		// Title search: page does NOT exist before the 409; exists after it.
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/pages") && r.URL.Query().Get("title") != "":
+			if createAttempts > 0 && r.URL.Query().Get("title") == title {
+				type result struct {
+					ID    string `json:"id"`
+					Title string `json:"title"`
+				}
+				writeConfluenceJSON(w, http.StatusOK, map[string]interface{}{
+					"results": []result{{ID: pageID, Title: title}},
+				})
+			} else {
+				writeConfluenceJSON(w, http.StatusOK, map[string]interface{}{"results": []interface{}{}})
+			}
+
+		// Scan all pages (full-scan fallback path).
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/pages"):
+			writeConfluenceJSON(w, http.StatusOK, map[string]interface{}{"results": []interface{}{}, "_links": map[string]string{}})
+
+		// Property list for a page: return the sourcebridge_page_id property.
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/properties"):
+			pid := extractConfluencePageID(strings.TrimSuffix(r.URL.Path, "/properties"))
+			if pid == pageID {
+				writeConfluenceJSON(w, http.StatusOK, map[string]interface{}{
+					"results": []map[string]interface{}{
+						{
+							"id":      "prop-1",
+							"key":     confluencePropertyKey,
+							"value":   externalID,
+							"version": map[string]int{"number": 1},
+						},
+					},
+				})
+			} else {
+				writeConfluenceJSON(w, http.StatusOK, map[string]interface{}{"results": []interface{}{}})
+			}
+
+		// Create page — returns 409 to simulate a concurrent-create conflict.
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/pages"):
+			createAttempts++
+			writeConfluenceJSON(w, http.StatusConflict, map[string]interface{}{
+				"errors": []map[string]string{{"title": "A page with this title already exists"}},
+			})
+
+		default:
+			t.Logf("conflict test srv: unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := newConfluenceClientWithTransport(srv.URL)
+	gotPageID, err := client.EnsurePage(context.Background(), testSnap, externalID, title, "" /* no parent */, []byte("<p>hello</p>"))
+	if err != nil {
+		t.Fatalf("EnsurePage: expected conflict recovery, got error: %v", err)
+	}
+	if gotPageID != pageID {
+		t.Errorf("EnsurePage recovered page ID = %q, want %q", gotPageID, pageID)
+	}
+	if createAttempts != 1 {
+		t.Errorf("expected exactly 1 create attempt, got %d", createAttempts)
+	}
+}
