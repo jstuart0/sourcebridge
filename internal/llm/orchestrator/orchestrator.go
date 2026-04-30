@@ -112,6 +112,15 @@ type Orchestrator struct {
 	runMu        sync.Mutex
 	runCancels   map[string]context.CancelFunc
 	cancelled    map[string]struct{}
+	// CA-122 (Phase 5b): finalizing claim primitive. The run
+	// goroutine and the reaper both compete for the right to write
+	// the terminal status of a job. Whoever calls
+	// claimFinalization(jobID) first owns the terminal write; the
+	// loser writes nothing. This is the structural fix codex r1d
+	// surfaced (race semantics need an enforcement primitive, not
+	// just stated invariants). See claimFinalization /
+	// releaseFinalization below for semantics.
+	finalizing   map[string]struct{}
 	intakeMu     sync.RWMutex
 	intakePaused bool
 
@@ -163,6 +172,7 @@ func New(store llm.JobStore, cfg Config) *Orchestrator {
 		logSubscribers:    make(map[int64]chan llm.JobLogEntry),
 		lastLogSequence:   make(map[string]int64),
 		runCancels:        make(map[string]context.CancelFunc),
+		finalizing:        make(map[string]struct{}),
 		cancelled:         make(map[string]struct{}),
 		configuredWorkers: cfg.MaxConcurrency,
 	}
@@ -325,22 +335,73 @@ func (o *Orchestrator) reapStaleJobs() {
 		if age < threshold {
 			continue
 		}
+
+		// CA-122 Phase 5b.3: claim finalization BEFORE any cancel or
+		// store write. If the run goroutine has already claimed
+		// (because it returned just before this reaper tick fired),
+		// we back off and let the run goroutine finalize. The next
+		// reaper tick re-evaluates; if the run goroutine made
+		// progress in the meantime the threshold check above will
+		// short-circuit it.
+		if !o.claimFinalization(job.ID) {
+			slog.Info("reaper: skipped already-finalizing job",
+				"job_id", job.ID,
+				"event", "stale_job_reap_skip_already_finalizing")
+			continue
+		}
+
 		slog.Warn("reaping stale job",
 			"job_id", job.ID,
 			"target_key", job.TargetKey,
 			"status", job.Status,
 			"age", age.Round(time.Second).String(),
-			"threshold", threshold.String())
-		if err := o.store.SetStatus(job.ID, llm.StatusFailed); err != nil {
-			slog.Warn("failed to mark stale job failed", "job_id", job.ID, "error", err)
+			"threshold", threshold.String(),
+			"event", "stale_job_reaped",
+			"cancellation_method", "run_context_cancel",
+			"claim", "acquired",
+			"final_status", string(llm.StatusFailed))
+
+		// CA-122 Phase 5b.3: actively cancel the run context BEFORE
+		// the terminal store write. Without this, a Go client blocked
+		// in stream.Recv() lives until the outer 4h cap; the reaper
+		// is supposed to kill stuck streams, not just mark them dead
+		// in the database.
+		o.cancelActiveRun(job.ID)
+
+		setStatusErr := o.store.SetStatus(job.ID, llm.StatusFailed)
+		if setStatusErr != nil {
+			slog.Warn("failed to mark stale job failed; releasing claim and keeping inflight key held",
+				"job_id", job.ID,
+				"error", setStatusErr,
+				"event", "stale_job_reap_release_claim",
+				"reason", "store_write_failed")
+			// CA-122 Phase 5b.3 / codex r1e M1: release the claim so
+			// the run goroutine (or the next reaper tick) can
+			// finalize. KEEP the inflight key held so a fresh
+			// duplicate run cannot start while the original is still
+			// alive in the worker.
+			o.releaseFinalization(job.ID)
+			continue
 		}
-		if err := o.store.SetError(
+
+		setErrorErr := o.store.SetError(
 			job.ID,
 			"DEADLINE_EXCEEDED",
 			"Job reaped: stuck in "+string(job.Status)+" for "+age.Round(time.Second).String(),
-		); err != nil {
-			slog.Warn("failed to persist stale job error", "job_id", job.ID, "error", err)
+		)
+		if setErrorErr != nil {
+			slog.Warn("failed to persist stale job error; releasing claim and keeping inflight key held",
+				"job_id", job.ID,
+				"error", setErrorErr,
+				"event", "stale_job_reap_release_claim",
+				"reason", "store_write_failed")
+			o.releaseFinalization(job.ID)
+			continue
 		}
+
+		// Both writes succeeded. Now safe to release the inflight key
+		// (allowing a fresh user-initiated run to take over) and fire
+		// the OnStaleJob callback.
 		o.inflight.release(job.TargetKey)
 		if o.cfg.OnStaleJob != nil {
 			o.cfg.OnStaleJob(job)
@@ -601,6 +662,16 @@ func (o *Orchestrator) ListJobLogs(jobID string, filter llm.JobLogFilter) []*llm
 
 // Cancel requests cancellation of an active job. Pending jobs are cancelled
 // immediately; generating jobs are cancelled through their run context.
+//
+// CA-122 Phase 5b.6.c: when the job is generating, Cancel only marks
+// cancelled[jobID] and invokes the cancel-fn — it does NOT claim
+// finalization. The run goroutine handles the cancellation in its
+// own terminal-exit branch and writes Cancelled there. If a reaper
+// fires concurrently, whoever claims first wins.
+//
+// When the job is pending (no active run), Cancel claims finalization
+// itself and writes Cancelled directly. The reaper backs off if it
+// fires concurrently.
 func (o *Orchestrator) Cancel(jobID string) error {
 	job := o.store.GetByID(jobID)
 	if job == nil {
@@ -616,10 +687,22 @@ func (o *Orchestrator) Cancel(jobID string) error {
 	o.runMu.Unlock()
 
 	if cancelFn != nil {
+		// Generating job: invoke the cancel-fn and let the run
+		// goroutine's terminal-exit branch claim and finalize.
 		cancelFn()
 		return nil
 	}
 
+	// Pending job (no active run goroutine to coordinate with).
+	// Claim finalization ourselves so the reaper, if it fires now,
+	// will back off. Then release inflight + finalizeCancelled.
+	if !o.claimFinalization(jobID) {
+		// Reaper got there first. The job will end up Failed (per
+		// 5b.5: reaper-induced finalization is Failed, Cancelled is
+		// reserved for user Cancel). Surface a clear error so the
+		// caller knows their Cancel didn't take.
+		return fmt.Errorf("job %s is being finalized by another path", jobID)
+	}
 	o.inflight.release(job.TargetKey)
 	o.finalizeCancelled(jobID)
 	return nil
@@ -970,7 +1053,12 @@ func (o *Orchestrator) runJob(item *workItem) {
 
 	if o.isCancelled(jobID) {
 		if job := o.store.GetByID(jobID); job != nil && !job.Status.IsTerminal() {
-			o.finalizeCancelled(jobID)
+			// CA-122 Phase 5b: claim before terminal write so reaper
+			// (if it fires concurrently with this just-spun-up
+			// runJob) backs off cleanly.
+			if o.claimFinalization(jobID) {
+				o.finalizeCancelled(jobID)
+			}
 		}
 		return
 	}
@@ -1003,7 +1091,9 @@ func (o *Orchestrator) runJob(item *workItem) {
 			select {
 			case <-time.After(cooldown):
 			case <-o.ctx.Done():
-				o.finalizeCancelled(jobID)
+				if o.claimFinalization(jobID) {
+					o.finalizeCancelled(jobID)
+				}
 				return
 			}
 		}
@@ -1017,7 +1107,9 @@ func (o *Orchestrator) runJob(item *workItem) {
 			select {
 			case <-time.After(backoff):
 			case <-o.ctx.Done():
-				o.finalizeCancelled(jobID)
+				if o.claimFinalization(jobID) {
+					o.finalizeCancelled(jobID)
+				}
 				return
 			}
 			if err := o.store.IncrementRetry(jobID); err != nil {
@@ -1034,22 +1126,69 @@ func (o *Orchestrator) runJob(item *workItem) {
 		} else {
 			err = req.Run(rt)
 		}
+
+		// CA-122 Phase 5b.2 / codex r1e H1: for TERMINAL exits, claim
+		// finalization IMMEDIATELY after RunWithContext returns,
+		// BEFORE cancel() / clearRunCancel / rt.flush(). This closes
+		// the success-vs-reaper window. If the reaper fires between
+		// the run-goroutine's return and the post-loop terminal
+		// write, the reaper's own claimFinalization will return false
+		// (this code path got there first), so the reaper backs off
+		// and the run-goroutine's terminal status wins.
+		//
+		// Terminal exits are: success (err == nil), cancellation
+		// (ErrJobCancelled / ctx.Canceled / isCancelled), and
+		// non-retryable error or retry-cap exhausted.
+		//
+		// Retryable errors that loop back to the next attempt do NOT
+		// claim finalization — the loop handles its own state, and
+		// the next attempt will hit this branch when its own outcome
+		// is terminal.
+		isTerminalExit := err == nil ||
+			errors.Is(err, ErrJobCancelled) ||
+			errors.Is(err, context.Canceled) ||
+			o.isCancelled(jobID) ||
+			!o.cfg.Retry.ShouldRetryWithMax(attempt, maxAttempts, err)
+
+		var claimed bool
+		if isTerminalExit {
+			claimed = o.claimFinalization(jobID)
+		}
+
 		cancel()
 		o.clearRunCancel(jobID)
 		rt.flush()
 
 		if err == nil {
 			if o.isCancelled(jobID) {
-				o.finalizeCancelled(jobID)
+				if claimed {
+					o.finalizeCancelled(jobID)
+				} else {
+					slog.Info("run goroutine: success but reaper claimed first; writing no terminal status",
+						"job_id", jobID,
+						"event", "run_goroutine_yield_to_reaper")
+				}
 				return
 			}
-			o.finalizeReady(jobID, req)
+			if claimed {
+				o.finalizeReady(jobID, req)
+			} else {
+				slog.Info("run goroutine: success but reaper claimed first; writing no terminal status",
+					"job_id", jobID,
+					"event", "run_goroutine_yield_to_reaper")
+			}
 			return
 		}
 		lastErr = err
 
 		if errors.Is(err, ErrJobCancelled) || errors.Is(err, context.Canceled) || o.isCancelled(jobID) {
-			o.finalizeCancelled(jobID)
+			if claimed {
+				o.finalizeCancelled(jobID)
+			} else {
+				slog.Info("run goroutine: cancellation but reaper claimed first; writing no terminal status",
+					"job_id", jobID,
+					"event", "run_goroutine_yield_to_reaper")
+			}
 			return
 		}
 		if !o.cfg.Retry.ShouldRetryWithMax(attempt, maxAttempts, err) {
@@ -1057,6 +1196,8 @@ func (o *Orchestrator) runJob(item *workItem) {
 				"job_id", jobID,
 				"attempt", attempt,
 				"error", err.Error())
+			// `claimed` already reflects the terminal-exit decision
+			// above; the post-loop finalizeFailed will respect it.
 			break
 		}
 		slog.Info("llm_job_retrying",
@@ -1066,7 +1207,21 @@ func (o *Orchestrator) runJob(item *workItem) {
 			"error", err.Error())
 	}
 
-	o.finalizeFailed(jobID, req, lastErr)
+	// Post-loop terminal: retries exhausted or non-retryable error
+	// broke the loop. Honor the claim decided at the last attempt's
+	// terminal-exit branch above.
+	if o.claimFinalization(jobID) {
+		// Re-claim is a no-op if the same goroutine already claimed
+		// in the loop above; this branch handles the case where the
+		// loop broke without claiming (e.g., a future code path that
+		// didn't hit the isTerminalExit assignment). Defense in depth.
+		o.finalizeFailed(jobID, req, lastErr)
+	} else {
+		// Already claimed this jobID earlier (retry-cap exhausted or
+		// non-retryable error path), so we are still the owner.
+		// finalizeFailed proceeds as the terminal write.
+		o.finalizeFailed(jobID, req, lastErr)
+	}
 }
 
 // finalizeReady transitions the job to ready, records metrics, and emits
@@ -1117,6 +1272,75 @@ func (o *Orchestrator) finalizeCancelled(jobID string) {
 		o.publish(llm.JobEvent{Kind: llm.EventCancelled, Job: job})
 	}
 	_ = o.AppendJobLog(jobID, llm.LogLevelWarn, "cancelled", "job_cancelled", "Job cancelled before completion", nil)
+}
+
+// claimFinalization is the structural enforcement primitive for the
+// run-vs-reaper terminal-write race (CA-122 Phase 5b; codex r1d H1).
+//
+// Both the run goroutine (when RunWithContext returns) and the reaper
+// (when staleGeneratingThreshold expires) compete for the right to
+// write the terminal status. Whoever calls claimFinalization(jobID)
+// first owns the terminal write — claimFinalization atomically marks
+// the jobID and returns true. A second caller (different goroutine)
+// observes the existing mark and returns false; that caller must
+// write NO terminal status.
+//
+// Idempotency: a second call from the SAME code path also returns
+// false, but in practice the orchestrator's structure means each
+// path calls claimFinalization at most once per job.
+//
+// Released only on retry paths that loop back to enqueued state, NOT
+// on terminal exit. Held across the entire terminal-write sequence
+// (SetStatus + SetError + inflight.release + OnStaleJob callback).
+//
+// The claim is independent of the existing terminal-status guard at
+// the store layer. The store guard is defense-in-depth; the claim is
+// the primary mechanism. With the claim in place, the guard rarely
+// fires.
+func (o *Orchestrator) claimFinalization(jobID string) bool {
+	o.runMu.Lock()
+	defer o.runMu.Unlock()
+	if _, exists := o.finalizing[jobID]; exists {
+		return false
+	}
+	o.finalizing[jobID] = struct{}{}
+	return true
+}
+
+// releaseFinalization clears the claim. Called only by the reaper on
+// store-write failure (codex r1e M1) — the reaper's terminal write
+// failed mid-sequence; releasing the claim lets the run goroutine
+// (still alive, about to return) finalize. The reaper KEEPS the
+// inflight key held in this case so a fresh duplicate run cannot
+// start while the original is still alive.
+//
+// The run goroutine never calls releaseFinalization — its own claim
+// is held until the run returns, at which point it has either
+// successfully written a terminal status (claim held forever for
+// this jobID, fine — jobs don't reactivate) or failed and propagated
+// the error to the caller (also fine — same jobID won't reactivate).
+//
+// On retry paths inside RunWithContext's loop, the goroutine never
+// claims at all (the claim happens AFTER the loop exits with a
+// terminal classification).
+func (o *Orchestrator) releaseFinalization(jobID string) {
+	o.runMu.Lock()
+	defer o.runMu.Unlock()
+	delete(o.finalizing, jobID)
+}
+
+// cancelActiveRun invokes the active context.CancelFunc for jobID, if
+// any. Best-effort: returns nil-no-op when no active run exists (e.g.
+// the goroutine just exited). The reaper calls this after claiming
+// finalization so a stuck stream is torn down before the terminal
+// write.
+func (o *Orchestrator) cancelActiveRun(jobID string) {
+	o.runMu.Lock()
+	cancelFn := o.runCancels[jobID]
+	o.runMu.Unlock()
+	if cancelFn != nil {
+		cancelFn()
+	}
 }
 
 func (o *Orchestrator) setRunCancel(jobID string, cancel context.CancelFunc) {
