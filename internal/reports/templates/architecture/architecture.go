@@ -259,8 +259,17 @@ func (t *Template) GeneratePackagePage(ctx context.Context, input templates.Gene
 	// Append a "Related pages" block when caller/callee cluster labels are known.
 	// Each label is rendered as a Confluence cross-page link so readers can
 	// navigate directly to the related architecture page.
+	var stubTargetIDs []string
 	if len(pkg.Callers) > 0 || len(pkg.Callees) > 0 {
-		relatedXHTML := buildRelatedPagesXHTML(input.RepoID, pkg.Callers, pkg.Callees)
+		var relatedXHTML string
+		relatedXHTML, stubTargetIDs = buildRelatedPagesXHTML(
+			input.RepoID,
+			pageID,
+			pkg.Callers,
+			pkg.Callees,
+			input.RelatedPageIDsByLabel,
+			input.LinkResolver,
+		)
 		relID := ast.GenerateBlockID(pageID, "Related pages", ast.BlockKindFreeform, 0)
 		blocks = append(blocks, ast.Block{
 			ID:   relID,
@@ -292,8 +301,9 @@ func (t *Template) GeneratePackagePage(ctx context.Context, input templates.Gene
 				{SignatureChangeIn: staleSymbols},
 			},
 		},
-		Blocks:     blocks,
-		Provenance: ast.Provenance{GeneratedAt: now, ModelID: "llm"},
+		Blocks:            blocks,
+		Provenance:        ast.Provenance{GeneratedAt: now, ModelID: "llm"},
+		StubTargetPageIDs: stubTargetIDs,
 	}
 
 	return page, nil
@@ -648,10 +658,37 @@ func renderLLMOutput(pageID, pkg string, llmOut string, now time.Time) []ast.Blo
 	return blocks
 }
 
+// RebuildRelatedPagesXHTML is the exported entry point for the Phase 3 fix-up
+// pass. It calls buildRelatedPagesXHTML with the caller-supplied resolver and
+// returns the fresh XHTML alongside the stub target IDs (nil when resolver
+// never stubs, e.g. NullLinkResolver{}).
+//
+// This function exists so the orchestrator's fixup.go can call it without
+// importing the unexported buildRelatedPagesXHTML. Pass orchestrator.NullLinkResolver{}
+// to clear all stubs (fix-up path).
+func RebuildRelatedPagesXHTML(
+	repoID, sourcePageID string,
+	callers, callees []string,
+	relatedByLabel map[string]string,
+	resolver templates.LinkResolver,
+) (xhtml string, stubTargetIDs []string) {
+	return buildRelatedPagesXHTML(repoID, sourcePageID, callers, callees, relatedByLabel, resolver)
+}
+
 // buildRelatedPagesXHTML generates the XHTML body for the "Related pages" block.
 // Each caller/callee is a cluster label; the corresponding architecture page
 // title is derived via HumanizePageID so the Confluence ac:link resolves.
-func buildRelatedPagesXHTML(repoID string, callers, callees []string) string {
+//
+// When resolver is non-nil and resolver.ShouldStub(sourcePageID, targetPageID)
+// returns true, the link is wrapped in a Confluence info macro so readers know
+// the target is still being generated. stubTargetIDs collects the page IDs that
+// were rendered as stubs so the caller can persist them in lw_page_publish_status.
+func buildRelatedPagesXHTML(
+	repoID, sourcePageID string,
+	callers, callees []string,
+	relatedByLabel map[string]string,
+	resolver templates.LinkResolver,
+) (xhtml string, stubTargetIDs []string) {
 	var sb strings.Builder
 	sb.WriteString("<h2>Related pages</h2>\n")
 
@@ -663,20 +700,50 @@ func buildRelatedPagesXHTML(repoID string, callers, callees []string) string {
 		sb.WriteString(heading)
 		sb.WriteString("</strong></p>\n<ul>\n")
 		for _, label := range labels {
-			pid := pageIDFor(repoID, label)
+			var pid string
+			if relatedByLabel != nil {
+				if resolved, ok := relatedByLabel[label]; ok {
+					pid = resolved
+				}
+			}
+			if pid == "" {
+				pid = pageIDFor(repoID, label)
+			}
 			title := markdown.HumanizePageID(pid)
-			sb.WriteString(`  <li><ac:link><ri:page ri:content-title="`)
-			sb.WriteString(xmlEscapeSimple(title))
-			sb.WriteString(`"/><ac:link-body>`)
-			sb.WriteString(xmlEscapeSimple(label))
-			sb.WriteString(`</ac:link-body></ac:link></li>`)
-			sb.WriteString("\n")
+
+			if resolver != nil && resolver.ShouldStub(sourcePageID, pid) {
+				stubTargetIDs = append(stubTargetIDs, pid)
+				sb.WriteString("  <li>")
+				sb.WriteString(buildStubMacroXHTML(label, title))
+				sb.WriteString("</li>\n")
+			} else {
+				sb.WriteString(`  <li><ac:link><ri:page ri:content-title="`)
+				sb.WriteString(xmlEscapeSimple(title))
+				sb.WriteString(`"/><ac:link-body>`)
+				sb.WriteString(xmlEscapeSimple(label))
+				sb.WriteString(`</ac:link-body></ac:link></li>`)
+				sb.WriteString("\n")
+			}
 		}
 		sb.WriteString("</ul>\n")
 	}
 
 	buildList("Used by:", callers)
 	buildList("Dependencies:", callees)
+	return sb.String(), stubTargetIDs
+}
+
+// buildStubMacroXHTML returns the Confluence info-macro XHTML for a single
+// stub link, appearing inline in the list item.
+func buildStubMacroXHTML(label, title string) string {
+	var sb strings.Builder
+	sb.WriteString(`<ac:structured-macro ac:name="info">`)
+	sb.WriteString(`<ac:rich-text-body><p>📝 Generating — <strong>`)
+	sb.WriteString(xmlEscapeSimple(label))
+	sb.WriteString(`</strong> (`)
+	sb.WriteString(xmlEscapeSimple(title))
+	sb.WriteString(`) will link here once ready.</p></ac:rich-text-body>`)
+	sb.WriteString(`</ac:structured-macro>`)
 	return sb.String()
 }
 

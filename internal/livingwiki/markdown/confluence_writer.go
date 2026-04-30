@@ -158,7 +158,19 @@ func inlineMarkdownToXHTMLInto(out *strings.Builder, s string) {
 			textStart, textEnd, urlEnd, _ := parseMdLinkAt(s, 0)
 			textPart := s[textStart:textEnd]
 			url := s[textEnd+2 : urlEnd] // s[textEnd+2:urlEnd] skips "]("
-			if strings.HasPrefix(url, confluencePageScheme) {
+			if strings.HasPrefix(url, confluencePageStubScheme) {
+				// Internal SourceBridge stub link (Phase 3 / LD-4). Render as a
+				// Confluence info macro so readers know the target is still generating.
+				// See the confluencePageStubScheme constant for the full contract.
+				pageTitle := url[len(confluencePageStubScheme):]
+				out.WriteString(`<ac:structured-macro ac:name="info">`)
+				out.WriteString(`<ac:rich-text-body><p>📝 Generating — <strong>`)
+				out.WriteString(xmlEscape(textPart))
+				out.WriteString(`</strong> (`)
+				out.WriteString(xmlEscape(pageTitle))
+				out.WriteString(`) will link here once ready.</p></ac:rich-text-body>`)
+				out.WriteString(`</ac:structured-macro>`)
+			} else if strings.HasPrefix(url, confluencePageScheme) {
 				// Confluence cross-page link — emit <ac:link> macro.
 				pageTitle := url[len(confluencePageScheme):]
 				out.WriteString(`<ac:link>`)
@@ -225,6 +237,16 @@ func inlineMarkdownToXHTMLInto(out *strings.Builder, s string) {
 //	→ <ac:link><ri:page ri:content-title="Architecture: internal/auth"/>…</ac:link>
 const confluencePageScheme = "confluence-page:"
 
+// confluencePageStubScheme is an internal SourceBridge protocol URL — NOT a
+// standard URL scheme. It is used exclusively by the Living Wiki stub-and-fix-up
+// pass (Phase 3 of the incremental-publish redesign, LD-4). When a markdown
+// link with this scheme is encountered during XHTML rendering, it is wrapped in
+// a Confluence info macro rather than emitted as a bare ac:link.
+//
+// Do not remove this branch without first removing the corresponding emitter in
+// internal/reports/templates/architecture/architecture.go's buildRelatedPagesXHTML.
+const confluencePageStubScheme = "confluence-page-stub:"
+
 // parseMdLinkAt parses a markdown link "[text](url)" that starts at s[at].
 // Returns (textStart, textEnd, urlEnd, valid) where:
 //
@@ -255,7 +277,8 @@ func parseMdLinkAt(s string, at int) (textStart, textEnd, urlEnd int, valid bool
 	url := s[urlStart:urlEnd]
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") &&
 		!strings.HasPrefix(url, "/") && !strings.HasPrefix(url, "#") &&
-		!strings.HasPrefix(url, confluencePageScheme) {
+		!strings.HasPrefix(url, confluencePageScheme) &&
+		!strings.HasPrefix(url, confluencePageStubScheme) {
 		return 0, 0, 0, false
 	}
 	return at + 1, textEnd, urlEnd, true

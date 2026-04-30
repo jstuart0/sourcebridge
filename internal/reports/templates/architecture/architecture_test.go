@@ -374,3 +374,91 @@ func TestGeneratePackagePage_PackageDoc(t *testing.T) {
 		t.Error("user prompt should contain the package-level doc text")
 	}
 }
+
+// TestArchitectureTemplateEmitsStubForUnreadyTargets asserts that when the
+// LinkResolver marks a target as unready, GeneratePackagePage emits a
+// Confluence info-macro stub instead of a bare ac:link (Phase 3 / LD-4).
+// The test also verifies that page.StubTargetPageIDs is populated.
+func TestArchitectureTemplateEmitsStubForUnreadyTargets(t *testing.T) {
+	t.Parallel()
+
+	llm := &capturingLLM{response: minimalLLMResponse}
+	// Provide at least one exported symbol so the package does not take the
+	// empty-package early-return path (which skips buildRelatedPagesXHTML).
+	graph := &stubSymbolGraph{syms: []templates.Symbol{
+		{
+			Package:   "src/auth",
+			Name:      "Verify",
+			Signature: "func Verify(token string) error",
+		},
+	}}
+
+	// callerPageID is in the same mode (arch) as the page under test.
+	const (
+		sourcePageID = "arch.src-auth"
+		callerPageID = "arch.src-users"
+		callerPkg    = "src/users"
+	)
+
+	// allStubResolver stubs every same-mode link whose target appears in planned.
+	allStub := stubAllResolver{planned: map[string]struct{}{callerPageID: {}}}
+
+	tmpl := architecture.New()
+	input := templates.GenerateInput{
+		RepoID:      "test-repo",
+		PageID:      sourcePageID,
+		Audience:    quality.AudienceEngineers,
+		SymbolGraph: graph,
+		LLM:         llm,
+		Now:         time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		// RelatedPageIDsByLabel maps the caller package path to callerPageID.
+		RelatedPageIDsByLabel: map[string]string{callerPkg: callerPageID},
+		LinkResolver:          allStub,
+	}
+
+	page, err := tmpl.GeneratePackagePage(context.Background(), input, architecture.PackageInfo{
+		Package: "src/auth",
+		Callers: []string{callerPkg},
+	})
+	if err != nil {
+		t.Fatalf("GeneratePackagePage: %v", err)
+	}
+
+	// The page must have at least one stub target recorded.
+	if !page.HasStubMarkers() {
+		t.Fatal("expected page.HasStubMarkers() == true; got false")
+	}
+	if len(page.StubTargetIDs()) == 0 || page.StubTargetIDs()[0] != callerPageID {
+		t.Errorf("StubTargetIDs = %v; want [%q]", page.StubTargetIDs(), callerPageID)
+	}
+
+	// Find the "Related pages" freeform block and assert it contains the info macro.
+	const relatedPagesHeading = "Related pages"
+	var relatedBlock *ast.Block
+	for i := range page.Blocks {
+		if page.Blocks[i].Kind == ast.BlockKindFreeform {
+			// The Related pages block is a freeform block; check its raw XHTML.
+			relatedBlock = &page.Blocks[i]
+			break
+		}
+	}
+	if relatedBlock == nil {
+		t.Fatal("no freeform (Related pages) block found in generated page")
+	}
+	xhtml := relatedBlock.Content.Freeform.Raw
+	if !strings.Contains(xhtml, `ac:name="info"`) {
+		t.Errorf("Related pages XHTML should contain an info macro for unready target; got:\n%s", xhtml)
+	}
+	_ = relatedPagesHeading
+}
+
+// stubAllResolver is a templates.LinkResolver that stubs every link whose
+// target appears in its planned set (ignoring cross-mode for simplicity).
+type stubAllResolver struct {
+	planned map[string]struct{}
+}
+
+func (r stubAllResolver) ShouldStub(_, targetPageID string) bool {
+	_, ok := r.planned[targetPageID]
+	return ok
+}
