@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestIsIgnoredPath_DecisionParityWithScanRepository is Phase 1.A
@@ -265,6 +266,77 @@ func TestHeadRef_LocksTheContract(t *testing.T) {
 			t.Fatalf("HeadRef on detached = %q, want %q", got, "HEAD")
 		}
 	})
+}
+
+// TestHeadRef_FastPath pins the latency contract HeadRef must hit on
+// the IndexFiles hot path. Phase 1.B's IndexFiles validates the
+// caller's branch under the 100ms T0 budget; if HeadRef were to shell
+// out via `git rev-parse --abbrev-ref HEAD` (~30-90ms on macOS), the
+// validation alone would consume most of the budget. The fast path
+// reads .git/HEAD directly and is microsecond-scale on a hot inode
+// cache.
+//
+// The assertion target is intentionally conservative: 5ms. The actual
+// observed cost is ~10-50µs on a workstation; 5ms gives generous CI
+// slack while still failing loudly if HeadRef ever regresses to a
+// subprocess fork.
+func TestHeadRef_FastPath(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git binary not available: %v", err)
+	}
+	repo := initFixtureRepo(t, "main")
+
+	// Warm any inode cache (the first stat on a fresh tmpfs may hit
+	// the disk; subsequent calls are what the IndexFiles hot path
+	// experiences).
+	_, _ = HeadRef(repo)
+
+	const iterations = 20
+	var total time.Duration
+	for i := 0; i < iterations; i++ {
+		t0 := time.Now()
+		got, err := HeadRef(repo)
+		total += time.Since(t0)
+		if err != nil {
+			t.Fatalf("HeadRef: %v", err)
+		}
+		if got != "main" {
+			t.Fatalf("HeadRef = %q, want %q", got, "main")
+		}
+	}
+	avg := total / iterations
+	if avg > 5*time.Millisecond {
+		t.Fatalf("HeadRef averaged %s over %d iterations, exceeds 5ms fast-path budget; the fast path may be regressing to a subprocess call (which would consume the 100ms IndexFiles T0 budget on its own)", avg, iterations)
+	}
+	t.Logf("HeadRef fast-path avg over %d iterations: %s", iterations, avg)
+}
+
+// TestHeadRef_WorktreeFile covers the .git-as-file case (linked
+// worktrees, submodules). The fast path resolves the gitdir pointer
+// and reads the actual HEAD; if it can't, it must fall back to the
+// slow path cleanly rather than miscategorize the path as ErrNotAGitRepo.
+func TestHeadRef_WorktreeFile(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git binary not available: %v", err)
+	}
+
+	primary := initFixtureRepo(t, "main")
+
+	// Create a linked worktree on a feature branch.
+	worktreeRoot := t.TempDir()
+	worktreePath := filepath.Join(worktreeRoot, "wt")
+	cmd := exec.Command("git", "-C", primary, "worktree", "add", "-b", "feature/wt", worktreePath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, string(out))
+	}
+
+	got, err := HeadRef(worktreePath)
+	if err != nil {
+		t.Fatalf("HeadRef on worktree: %v", err)
+	}
+	if got != "feature/wt" {
+		t.Fatalf("HeadRef worktree = %q, want %q", got, "feature/wt")
+	}
 }
 
 // initFixtureRepo creates a tiny git repo at t.TempDir() on the named

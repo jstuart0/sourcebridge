@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -34,43 +35,67 @@ func NewIndexer(progressFn func(ProgressEvent)) *Indexer {
 	}
 }
 
-// ErrIndexFilesNotImplemented is returned by IndexFiles in Phase 1.A
-// before the per-file refresh implementation lands in Phase 1.B. The
-// signature is locked here so the change-watch router (Phase 1.C) and
-// freshness envelope (Phase 1.C) can compile against it; calling
-// IndexFiles in 1.A is a programming error and the sentinel surfaces
-// it loudly.
-var ErrIndexFilesNotImplemented = fmt.Errorf("indexer.IndexFiles: not implemented yet (Phase 1.B)")
+// ErrBranchMismatch is returned by IndexFiles when the caller's claimed
+// branch does not match git.HeadRef(repoPath) on the working tree. The
+// router (Phase 1.C) treats this as a structured rejection condition
+// (rejected_branch_mismatch) and logs both branches for diagnosis. It
+// is the Risk #4 condition the plan calls out: a CI push to main while
+// an agent works on feature/x must not silently corrupt the agent's
+// branch-scoped freshness state.
+var ErrBranchMismatch = fmt.Errorf("indexer.IndexFiles: branch mismatch")
+
+// ErrEmptyFiles is returned by IndexFiles when called with an empty
+// files slice. The router (Phase 1.C) enforces the non-empty-delta
+// guardrail at its own boundary; the indexer surfaces this as a
+// programming error so a regression that lets an empty delta through
+// the router is caught loudly.
+var ErrEmptyFiles = fmt.Errorf("indexer.IndexFiles: files must be non-empty")
+
+// ErrPreviousResultRequired is returned by IndexFiles when called with
+// a nil previousResult. The router only invokes IndexFiles after a
+// prior IndexRepository / IndexRepositoryIncremental has produced an
+// IndexResult; calling without one is a programming error.
+var ErrPreviousResultRequired = fmt.Errorf("indexer.IndexFiles: previousResult must be non-nil")
 
 // IndexFiles re-parses only the listed files and merges the result
-// into previousResult. The branch argument is required and is recorded
-// on the returned IndexResult so freshness propagates correctly: a CI
-// push to main while an agent works on feature/x must not mark the
-// agent's context stale on the wrong branch.
+// into a copy of previousResult. The branch argument is required and
+// recorded on the returned IndexResult so freshness propagates
+// correctly: a CI push to main while an agent works on feature/x must
+// not mark the agent's context stale on the wrong branch.
 //
-// Phase 1.A note: this is a signature stub. The body returns
-// ErrIndexFilesNotImplemented. The implementation lands in Phase 1.B
-// (per the plan at
-// thoughts/shared/plans/2026-04-29-mcp-edits-feedback-loop.md, PF-3).
-// The signature is fixed here so downstream slices (the change-watch
-// router, the freshness envelope, the T0 sync-refresh path) can
-// compile against it.
-//
-// Contract for the eventual implementation (Phase 1.B):
-//   - Validates branch against git.HeadRef(repoPath); rejects mismatches.
+// Behavior:
+//   - Validates branch against git.HeadRef(repoPath). On mismatch,
+//     returns ErrBranchMismatch with both branches in the wrapped error
+//     message; the router translates that to rejected_branch_mismatch.
 //   - For each file in `files`, runs the same per-file parse path
-//     IndexRepositoryIncremental uses internally.
-//   - Does NOT walk the rest of the repo (that's the 100ms T0 budget
-//     violation IndexRepositoryIncremental cannot avoid).
-//   - Merges the per-file outputs into a copy of previousResult,
-//     keyed by path.
-//   - Recomputes per-IndexResult aggregates (TotalFiles, TotalSymbols,
-//     TotalRelations, Modules) over the merged file set.
-//   - Returns the merged result; previousResult is not mutated.
+//     IndexRepositoryIncremental uses internally (read → tree-sitter
+//     parse → content-hash → AI-generated heuristics). Does NOT walk
+//     the rest of the repo: walking is the cost IndexRepositoryIncremental
+//     cannot escape, and it blows the 100ms T0 budget on any non-trivial
+//     repo even when most files hash-skip.
+//   - A file that does not exist on disk is treated as a deletion: it
+//     is removed from the merged file set.
+//   - A file whose extension is not a recognized language (per
+//     git.DetectLanguage) is skipped — kept as-is in the merged set if
+//     it was previously indexed, dropped if it is new.
+//   - A read or parse error for a single file does not fail the whole
+//     batch; the error is appended to result.Errors and the file is
+//     left as-is in the merged set (carry forward the prior FileResult
+//     if any).
+//   - After merging, recomputes per-IndexResult aggregates (TotalFiles,
+//     TotalSymbols, Modules, Relations, TotalRelations) over the merged
+//     file set so downstream consumers (freshness envelope, MCP reads)
+//     see internally-consistent state. The aggregate recompute is the
+//     dominant cost; the pre-flight spike measured ~10ms for the call
+//     graph on a 500-file fixture, leaving ~7x headroom under the 100ms
+//     budget.
+//   - previousResult is never mutated; the merged result is a fresh
+//     IndexResult with copies of the carried-forward FileResults.
 //
-// Existing callers of IndexRepository and IndexRepositoryIncremental
-// are unchanged. The change-watch router added in Phase 1.C calls only
-// IndexFiles.
+// IndexFiles is the only entry point the change-watch router (Phase
+// 1.C) calls. IndexRepository (full reindex, gated by RepoIndexFullReason)
+// and IndexRepositoryIncremental (full-tree incremental scan) are
+// unchanged for their existing callers — the router cannot reach them.
 func (idx *Indexer) IndexFiles(
 	ctx context.Context,
 	repoPath string,
@@ -78,13 +103,181 @@ func (idx *Indexer) IndexFiles(
 	branch string,
 	previousResult *IndexResult,
 ) (*IndexResult, error) {
-	_ = ctx
-	_ = repoPath
-	_ = files
-	_ = branch
-	_ = previousResult
-	return nil, ErrIndexFilesNotImplemented
+	if len(files) == 0 {
+		return nil, ErrEmptyFiles
+	}
+	if previousResult == nil {
+		return nil, ErrPreviousResultRequired
+	}
+
+	// Branch validation: HeadRef returns ErrNotAGitRepo for a non-git
+	// directory; the router never invokes IndexFiles on such a path
+	// (the watcher only fires for indexed repos, which are always git
+	// working trees), so we surface that as a regular wrapped error
+	// rather than a special case. A real branch mismatch (the
+	// load-bearing Risk #4 condition) returns ErrBranchMismatch.
+	headBranch, err := git.HeadRef(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("validating branch against working tree: %w", err)
+	}
+	if headBranch != branch {
+		return nil, fmt.Errorf("%w: claimed=%q head=%q", ErrBranchMismatch, branch, headBranch)
+	}
+
+	// Build a path → index lookup over previousResult.Files so the
+	// per-file merge is O(len(files)) rather than O(len(files) * |prev|).
+	prevByPath := make(map[string]int, len(previousResult.Files))
+	for i, f := range previousResult.Files {
+		prevByPath[f.Path] = i
+	}
+
+	// Materialize a fresh slice with all the carry-forward entries up
+	// front. We will overwrite or drop entries as we process the
+	// affected files; new files (not in prevByPath) get appended.
+	merged := make([]FileResult, len(previousResult.Files))
+	copy(merged, previousResult.Files)
+	// Track positions to drop (deletions). Process in a second pass so
+	// indices stay stable while we iterate the affected-file list.
+	dropIndices := map[int]bool{}
+
+	var perFileErrors []string
+
+	for _, relPath := range files {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		absPath := filepath.Join(repoPath, relPath)
+
+		// Deletion: file no longer exists on disk.
+		if _, statErr := osStatFn(absPath); statErr != nil {
+			if osIsNotExistFn(statErr) {
+				if idx, ok := prevByPath[relPath]; ok {
+					dropIndices[idx] = true
+				}
+				// Otherwise: a file we never had and that doesn't exist;
+				// nothing to do.
+				continue
+			}
+			perFileErrors = append(perFileErrors, fmt.Sprintf("stat %s: %s", relPath, statErr))
+			continue
+		}
+
+		language := git.DetectLanguage(relPath)
+		if GetLanguageConfig(language) == nil {
+			// Unknown / unsupported language: keep any prior entry as-is
+			// (so a previously-indexed file with a now-unsupported
+			// extension doesn't accidentally drop out), drop net-new
+			// unsupported files.
+			continue
+		}
+
+		content, readErr := git.ReadFile(absPath)
+		if readErr != nil {
+			perFileErrors = append(perFileErrors, fmt.Sprintf("read %s: %s", relPath, readErr))
+			continue
+		}
+
+		fileResult, parseErr := idx.parser.ParseFile(ctx, relPath, language, content)
+		if parseErr != nil {
+			perFileErrors = append(perFileErrors, fmt.Sprintf("parse %s: %s", relPath, parseErr))
+			continue
+		}
+
+		hash := sha256.Sum256(content)
+		fileResult.ContentHash = hex.EncodeToString(hash[:])
+
+		aiResult := DetectAIGenerated(string(content), language, fileResult.Symbols)
+		fileResult.AIScore = aiResult.Score
+		fileResult.AISignals = aiResult.Signals
+
+		if i, ok := prevByPath[relPath]; ok {
+			merged[i] = *fileResult
+			delete(dropIndices, i) // a carry-forward we updated is not a drop
+		} else {
+			merged = append(merged, *fileResult)
+		}
+	}
+
+	// Apply deletions. Build a new slice rather than slicing in place so
+	// the caller's previousResult.Files backing array is never touched.
+	if len(dropIndices) > 0 {
+		filtered := make([]FileResult, 0, len(merged)-len(dropIndices))
+		for i, f := range merged {
+			if dropIndices[i] {
+				continue
+			}
+			filtered = append(filtered, f)
+		}
+		merged = filtered
+	}
+
+	// Build the fresh result. Carry forward repo identity from the
+	// previous result, record the new branch, and recompute aggregates
+	// over the merged file set.
+	result := &IndexResult{
+		RepoName: previousResult.RepoName,
+		RepoPath: previousResult.RepoPath,
+		Branch:   branch,
+		Files:    merged,
+	}
+	result.TotalFiles = len(result.Files)
+	for _, f := range result.Files {
+		result.TotalSymbols += len(f.Symbols)
+	}
+
+	// Carry forward errors that survived the merge: every error from a
+	// previousResult.Files entry whose path wasn't in the affected-file
+	// set is still relevant; perFileErrors are this call's incremental
+	// errors. Errors recorded against an affected file in previousResult
+	// are dropped because we just re-parsed that file successfully (or
+	// recorded a fresh error).
+	affected := make(map[string]bool, len(files))
+	for _, p := range files {
+		affected[p] = true
+	}
+	for _, prevErr := range previousResult.Errors {
+		// Carry forward any prior error whose subject file wasn't in
+		// the affected set. The error format isn't structured enough
+		// for path extraction in every case; carry forward the whole
+		// list and dedup at result-consumer level if needed. The
+		// alternative — try to parse the error string — is fragile and
+		// not worth the complexity for a list that is typically empty.
+		_ = prevErr
+	}
+	// Pragmatic choice: do not carry forward previousResult.Errors. The
+	// freshness envelope on MCP reads will surface only the most recent
+	// IndexResult's errors, and the previous indexer pass already
+	// reported its own errors at its own slog/log site. Re-reporting
+	// them here risks double-counting in downstream telemetry.
+	result.Errors = perFileErrors
+
+	// Modules: cheap O(n) walk over file paths. Recompute over the
+	// merged set so a deletion or new package directory is reflected.
+	result.Modules = ExtractModules(result.Files)
+
+	// Call graph + test linkage: recompute over the merged set so
+	// cross-file edges that the per-file delta invalidated (e.g. the
+	// affected file no longer exports a symbol that other files were
+	// linked to) are re-resolved correctly. This is the dominant cost;
+	// the spike measured ~10ms on a 500-file fixture.
+	result.Relations = idx.resolveCallGraph(result)
+	result.Relations = append(result.Relations, idx.resolveTestLinkage(result)...)
+	result.TotalRelations = idx.countRelations(result) + len(result.Relations)
+
+	return result, nil
 }
+
+// osStatFn / osIsNotExistFn are package-level vars so the tests in
+// this package can swap out the filesystem boundary without bringing
+// in a heavyweight fs abstraction. They default to the real os
+// functions and are not part of the exported API.
+var (
+	osStatFn       = os.Stat
+	osIsNotExistFn = os.IsNotExist
+)
 
 // IndexRepository scans and indexes a local repository.
 //
