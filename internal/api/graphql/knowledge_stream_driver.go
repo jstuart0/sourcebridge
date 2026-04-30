@@ -16,8 +16,9 @@ import (
 
 // CA-122 / Phase 6: real-progress stream-to-DB bridge.
 //
-// runStreamProgressDriver replaces the synthetic-curve ticker
-// (runProgressTicker) for streaming knowledge RPCs. The driver
+// runStreamProgressDriver replaces the deleted synthetic-curve ticker
+// (formerly runProgressTicker in knowledge_job.go) for streaming
+// knowledge RPCs. The driver
 // receives KnowledgeStreamEvent values from the worker via the
 // llmcall.JobMetadata.OnProgress callback, maps them to per-RPC
 // bucketed progress fractions, and writes BOTH rt.ReportProgress
@@ -294,8 +295,8 @@ func (d *streamProgressDriver) logWriteErr(err error, kind string) {
 // this and calls Close() on the returned driver after the streaming
 // RPC returns.
 //
-// Embedding the *Resolver as a method receiver matches the existing
-// startProgressTicker / startUnderstandingProgressTicker pattern.
+// Embedding the *Resolver as a method receiver matches the resolver-
+// helper pattern used elsewhere in this package.
 func (r *Resolver) runStreamProgressDriver(
 	ctx context.Context,
 	rt llm.Runtime,

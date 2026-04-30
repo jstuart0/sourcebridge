@@ -455,9 +455,14 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 			"scope_type":     string(scope.ScopeType),
 			"scope_path":     scope.ScopePath,
 		})
-		stopProgress := r.startUnderstandingProgressTicker(rt, understanding.ID)
-		defer stopProgress()
-		resp, err := r.LLMCaller.GenerateCliffNotesWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, understanding.ID, "build_repository_understanding"), &knowledgev1.GenerateCliffNotesRequest{
+		// CA-122 codex r2 H2: real-progress stream driver replaces the
+		// synthetic ticker so the orchestrator's UpdatedAt only stays
+		// fresh when the worker is genuinely making progress. The
+		// understanding row is the progress sink (not an artifact);
+		// hierarchical bucket map fits a repository-scope cliff-notes
+		// build.
+		streamDriver := r.runUnderstandingStreamDriver(runCtx, rt, understanding.ID, rpcBucketHierarchical)
+		resp, err := r.LLMCaller.GenerateCliffNotesWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, understanding.ID, "build_repository_understanding", streamDriver.OnProgress()), &knowledgev1.GenerateCliffNotesRequest{
 			RepositoryId:   repo.ID,
 			RepositoryName: repo.Name,
 			Audience:       string(knowledgepkg.AudienceDeveloper),
@@ -468,6 +473,9 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 			ScopePath:      scope.ScopePath,
 			SnapshotJson:   string(snapshotJSON),
 		})
+		// MUST close the driver before any terminal-state write (codex
+		// r1b M5 driver-drain rule).
+		streamDriver.Close()
 		if err != nil {
 			markRepositoryUnderstandingFailed(r.KnowledgeStore, &knowledgepkg.Artifact{RepositoryID: repo.ID}, scope, snap.SourceRevision, err)
 			return err
@@ -1876,8 +1884,11 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 		rt.ReportSnapshotBytes(len(snapJSON))
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(existing.ID, 0.1, "snapshot", "Snapshot assembled")
-		stopProgress := r.startProgressTicker(rt, existing.ID)
-		defer stopProgress()
+		// CA-122 codex r2 H2: real-progress stream driver replaces
+		// the deleted synthetic-curve ticker. Each switch case spawns
+		// a per-RPC driver, attaches it via llmJobMetadataWithProgress,
+		// and Close()s it BEFORE any SupersedeArtifact / terminal write
+		// (codex r1b M5 driver-drain rule).
 
 		persistUsage := func(usage *commonv1.LLMUsage) {
 			if usage == nil {
@@ -1917,7 +1928,8 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					renderPlan.RelevanceProfile,
 				)
 			}
-			resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, existing.ID, "cliff_notes"), &knowledgev1.GenerateCliffNotesRequest{
+			streamDriver := r.runStreamProgressDriver(bgCtx, rt, existing.ID, rpcBucketForArtifact(existing))
+			resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, existing.ID, "cliff_notes", streamDriver.OnProgress()), &knowledgev1.GenerateCliffNotesRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -1928,6 +1940,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				ScopePath:      scope.ScopePath,
 				SnapshotJson:   string(snapJSON),
 			})
+			streamDriver.Close()
 			if err != nil {
 				slog.Error("refresh cliff notes failed", "artifact_id", existing.ID, "error", err)
 				markRepositoryUnderstandingFailed(r.KnowledgeStore, existing, scope, snap.SourceRevision, err)
@@ -2005,7 +2018,8 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					return fmt.Errorf("failed to unmarshal architecture prompt bundle: %w", err)
 				}
 			}
-			resp, err := r.LLMCaller.GenerateArchitectureDiagramWithJob(runCtx, repo.ID, resolution.OpArchitectureDiagram, llmJobMetadata(rt, existing.ID, "architecture_diagram"), &knowledgev1.GenerateArchitectureDiagramRequest{
+			streamDriver := r.runStreamProgressDriver(runCtx, rt, existing.ID, rpcBucketCollapsed)
+			resp, err := r.LLMCaller.GenerateArchitectureDiagramWithJob(runCtx, repo.ID, resolution.OpArchitectureDiagram, llmJobMetadataWithProgress(rt, existing.ID, "architecture_diagram", streamDriver.OnProgress()), &knowledgev1.GenerateArchitectureDiagramRequest{
 				RepositoryId:             repo.ID,
 				RepositoryName:           repo.Name,
 				Audience:                 string(existing.Audience),
@@ -2015,6 +2029,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				SnapshotJson:             string(architecturePromptJSON),
 				DeterministicDiagramJson: string(scaffoldJSON),
 			})
+			streamDriver.Close()
 			if err != nil {
 				slog.Error("refresh architecture diagram failed", "artifact_id", existing.ID, "error", err)
 				return err
@@ -2054,7 +2069,8 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					enrichedSnapJSON = enriched
 				}
 			}
-			resp, err := r.LLMCaller.GenerateLearningPathWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, existing.ID, "learning_path"), &knowledgev1.GenerateLearningPathRequest{
+			streamDriver := r.runStreamProgressDriver(runCtx, rt, existing.ID, rpcBucketCollapsed)
+			resp, err := r.LLMCaller.GenerateLearningPathWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, existing.ID, "learning_path", streamDriver.OnProgress()), &knowledgev1.GenerateLearningPathRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -2063,6 +2079,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				DepthEnum:      protoDepth(existing.Depth),
 				SnapshotJson:   string(enrichedSnapJSON),
 			})
+			streamDriver.Close()
 			if err != nil {
 				slog.Error("refresh learning path failed", "artifact_id", existing.ID, "error", err)
 				return err
@@ -2100,7 +2117,8 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					enrichedSnapJSON = enriched
 				}
 			}
-			resp, err := r.LLMCaller.GenerateCodeTourWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, existing.ID, "code_tour"), &knowledgev1.GenerateCodeTourRequest{
+			streamDriver := r.runStreamProgressDriver(runCtx, rt, existing.ID, rpcBucketCollapsed)
+			resp, err := r.LLMCaller.GenerateCodeTourWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, existing.ID, "code_tour", streamDriver.OnProgress()), &knowledgev1.GenerateCodeTourRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -2109,6 +2127,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				DepthEnum:      protoDepth(existing.Depth),
 				SnapshotJson:   string(enrichedSnapJSON),
 			})
+			streamDriver.Close()
 			if err != nil {
 				slog.Error("refresh code tour failed", "artifact_id", existing.ID, "error", err)
 				return err
@@ -2157,7 +2176,8 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					enrichedSnapJSON = enriched
 				}
 			}
-			resp, err := r.LLMCaller.GenerateWorkflowStoryWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, existing.ID, "workflow_story"), &knowledgev1.GenerateWorkflowStoryRequest{
+			streamDriver := r.runStreamProgressDriver(runCtx, rt, existing.ID, rpcBucketCollapsed)
+			resp, err := r.LLMCaller.GenerateWorkflowStoryWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, existing.ID, "workflow_story", streamDriver.OnProgress()), &knowledgev1.GenerateWorkflowStoryRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -2168,6 +2188,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				ScopePath:      scope.ScopePath,
 				SnapshotJson:   string(enrichedSnapJSON),
 			})
+			streamDriver.Close()
 			if err != nil {
 				slog.Error("refresh workflow story failed", "artifact_id", existing.ID, "error", err)
 				return err
