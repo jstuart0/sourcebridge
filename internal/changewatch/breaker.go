@@ -97,14 +97,22 @@ func (b *windowBreaker) observe(now time.Time) {
 	b.advanceTo(now)
 	b.counts[0]++
 	if b.allOverThreshold() {
-		// Trip: stay open for the next minute. After the cooldown the
-		// next observe rebuilds the window from zero, giving the system
-		// a chance to recover.
-		b.cooldown = b.head.Add(1 * time.Minute)
+		// Trip: stay open until at least one full minute *after* the
+		// most-recently-observed minute has elapsed. Cooldown lands at
+		// the start of the minute *two* after head so the entire next
+		// minute is blocked, not just up-to-but-not-including its start.
+		// Recovery is governed by the post-cooldown observe() rebuilding
+		// the window from zero — a sustained-overload repo will trip
+		// again on its next saturated minute.
+		b.cooldown = b.head.Add(2 * time.Minute)
 	}
 }
 
 // tripped reports whether the breaker is currently open at time `now`.
+// "Open until cooldown" semantics: once tripped, the breaker stays open
+// for the entirety of the next minute. Open-status reads do not advance
+// the window — only observe() does — so a quiet repo that hits cooldown
+// resets only when an observe call lands after the window.
 func (b *windowBreaker) tripped(now time.Time) bool {
 	if b.ratePerMin <= 0 {
 		return false

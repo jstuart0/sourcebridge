@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sourcebridge/sourcebridge/internal/git"
@@ -96,7 +97,18 @@ type Router struct {
 	indexer       Indexer
 	impactApplier ImpactApplier
 	branches      BranchValidator
-	now           func() time.Time
+
+	// nowFn is the time source used by every router operation. Stored
+	// behind atomic.Pointer (not r.mu) so callers reading the clock from
+	// inside a critical section don't re-enter the lock — that lock
+	// ordering caused the original 1.C deadlock (Submit → timeNow with
+	// r.mu held). atomic.Pointer is the minimum-cost shape that gives
+	// us "lock-free read, occasional write from SetNow."
+	//
+	// Always non-nil after construction (NewRouter seeds it with
+	// time.Now). callers go through r.timeNow() so the indirection is
+	// invisible at the call sites.
+	nowFn atomic.Pointer[func() time.Time]
 
 	mu       sync.Mutex
 	prev     map[string]*indexer.IndexResult // repoID → cached previous IndexResult
@@ -165,13 +177,14 @@ func NewRouter(
 		indexer:       idx,
 		impactApplier: impact,
 		branches:      branches,
-		now:           time.Now,
 		prev:          make(map[string]*indexer.IndexResult),
 		rates:         make(map[rateKey]*tokenBucket),
 		breakers:      make(map[string]*windowBreaker),
 		dedup:         make(map[string]time.Time),
 		freshness:     make(map[string]freshnessRecord),
 	}
+	defaultNow := func() time.Time { return time.Now() }
+	r.nowFn.Store(&defaultNow)
 	return r
 }
 
@@ -202,11 +215,16 @@ func (r *Router) SetEventBus(bus chan<- routerEvent) {
 }
 
 // SetNow overrides the time source for tests. Production callers leave
-// the default (time.Now).
+// the default (time.Now). Stored atomically so it's safe to read from
+// inside a critical section that already holds r.mu without re-entering
+// the lock.
 func (r *Router) SetNow(now func() time.Time) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.now = now
+	if now == nil {
+		fallback := func() time.Time { return time.Now() }
+		r.nowFn.Store(&fallback)
+		return
+	}
+	r.nowFn.Store(&now)
 }
 
 // SeedPrevious primes the per-repo IndexResult cache with the result
@@ -231,7 +249,7 @@ func (r *Router) SeedPrevious(repoID string, result *indexer.IndexResult) {
 	if _, ok := r.freshness[repoID]; !ok {
 		r.freshness[repoID] = freshnessRecord{
 			Branch:         result.Branch,
-			LastVerifiedAt: r.now(),
+			LastVerifiedAt: r.timeNow(),
 			Tier:           "T0",
 			State:          "fresh",
 		}
@@ -541,17 +559,17 @@ func (r *Router) publish(ev *ChangeEvent, outcome SubmitOutcome, err error) {
 	}
 }
 
-// timeNow is a small wrapper around r.now so callers don't have to
-// know about the SetNow override hook. Always returns the configured
-// clock's current time.
+// timeNow returns the current time per the configured clock. Reads the
+// clock pointer atomically so callers may invoke timeNow from inside a
+// critical section without taking r.mu — that lock ordering caused the
+// original 1.C deadlock. Always returns a sane time even if SetNow has
+// never been called (NewRouter seeds the default time.Now).
 func (r *Router) timeNow() time.Time {
-	r.mu.Lock()
-	now := r.now
-	r.mu.Unlock()
-	if now == nil {
+	fn := r.nowFn.Load()
+	if fn == nil {
 		return time.Now()
 	}
-	return now()
+	return (*fn)()
 }
 
 // breakerFor lazily creates a per-repo breaker. Caller must hold r.mu.
