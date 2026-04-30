@@ -7,7 +7,9 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -20,7 +22,9 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/keepalive"
 
+	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
 	contractsv1 "github.com/sourcebridge/sourcebridge/gen/go/contracts/v1"
 	enterprisev1 "github.com/sourcebridge/sourcebridge/gen/go/enterprise/v1"
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
@@ -288,6 +292,24 @@ func New(address string, tlsCfg TLSConfig, opts ...Option) (*Client, error) {
 			grpc.MaxCallRecvMsgSize(50*1024*1024),
 			grpc.MaxCallSendMsgSize(50*1024*1024),
 		),
+		// CA-122: gRPC transport keepalive on the channel. Time=60s
+		// fires a PING after 60s of application silence; Timeout=20s
+		// kills the connection if the worker doesn't ACK within 20s.
+		// PermitWithoutStream=false ensures we don't ping while there
+		// are no active RPCs (the worker pod can park).
+		//
+		// Why these numbers: the application stream emits a heartbeat
+		// every ~30s (default; tunable via worker env), so transport
+		// keepalive only fires when the application has been quiet for
+		// a full minute — signalling a genuinely broken transport
+		// rather than a slow phase. Sub-30s pings would collide with
+		// the application heartbeat; >60s would let a half-dead pod
+		// black-hole bytes for too long.
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                60 * time.Second,
+			Timeout:             20 * time.Second,
+			PermitWithoutStream: false,
+		}),
 	}
 	c.dialOpts = dialOpts
 
@@ -451,6 +473,14 @@ func (c *Client) rotateForCandidate(cand tlsreload.Candidate) error {
 			grpc.MaxCallRecvMsgSize(50*1024*1024),
 			grpc.MaxCallSendMsgSize(50*1024*1024),
 		),
+		// CA-122: keepalive on the rotated bundle so a half-dead worker
+		// is detected within ~80s post-rotation, same as the initial
+		// dial. See dialOpts construction in New() for rationale.
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                60 * time.Second,
+			Timeout:             20 * time.Second,
+			PermitWithoutStream: false,
+		}),
 	}
 
 	newConn, err := grpc.NewClient(c.address, dialOpts...)
@@ -839,6 +869,114 @@ func (c *Client) Address() string {
 // errClientClosed is returned by RPC methods after Close().
 var errClientClosed = fmt.Errorf("worker client closed")
 
+// errMissingFinal is returned when a knowledge/report stream ends
+// (io.EOF) without delivering a final terminal message. Indicates a
+// worker bug or a transport-level truncation; never expected on a
+// healthy run.
+var errMissingFinal = fmt.Errorf("knowledge stream ended without final message")
+
+// KnowledgeStreamEvent is the Go DTO carrying a single non-terminal
+// stream message (phase marker or progress heartbeat) translated out
+// of the per-RPC oneof envelope. Exactly one of {Phase, Progress} is
+// set per event; both being non-nil is a programming bug, both being
+// nil means an unrecognized oneof arm (forward-compat: log and skip).
+//
+// The terminal "final" message is NOT delivered through this DTO --
+// each Client.Generate*() method returns the final response payload
+// directly so callers don't have to reach into the proto envelope.
+type KnowledgeStreamEvent struct {
+	Phase    *commonv1.KnowledgeStreamPhaseMarker
+	Progress *commonv1.KnowledgeStreamProgress
+}
+
+// CallOptions carries per-call hooks applied to a single Client
+// knowledge-method invocation. Future per-call hooks (cancellation
+// reasons, retry policies, telemetry tags) extend this struct without
+// changing the public method signatures.
+//
+// CA-122 / Decision 4c: chosen over a positional callback parameter so
+// the seven Client methods all share a single signature shape:
+// (ctx, req, opts ...CallOption). The companion JobMetadata.OnProgress
+// at the llmcall.Caller boundary is the orchestrator-facing API; this
+// CallOptions struct is the Client-facing API; the Caller is the
+// bridge between them.
+type CallOptions struct {
+	// OnProgress receives every phase + progress event drained from
+	// the worker stream, in order. Runs on the stream.Recv() goroutine
+	// and MUST be nonblocking -- a slow handler becomes gRPC
+	// backpressure. The orchestrator-side adapter buffers via a small
+	// channel so DB latency cannot stall the stream.
+	OnProgress func(KnowledgeStreamEvent)
+}
+
+// CallOption mutates CallOptions. Use the With* constructors below.
+type CallOption func(*CallOptions)
+
+// WithProgressHandler attaches a stream-event handler to a Client
+// knowledge call. The handler runs on the stream.Recv() goroutine and
+// MUST be nonblocking. Pass through llmcall.JobMetadata.OnProgress
+// from the orchestrator-side adapter.
+func WithProgressHandler(fn func(KnowledgeStreamEvent)) CallOption {
+	return func(o *CallOptions) { o.OnProgress = fn }
+}
+
+// applyCallOptions reduces a variadic options list to a single
+// CallOptions value. Internal helper for the streaming wrappers.
+func applyCallOptions(opts []CallOption) CallOptions {
+	var co CallOptions
+	for _, o := range opts {
+		if o != nil {
+			o(&co)
+		}
+	}
+	return co
+}
+
+// isRepositoryScope reports whether a knowledge request's scope_type
+// represents a whole-repository run (which gets the long
+// admin-tunable safety-net timeout). Empty scope_type is treated as
+// repository for backwards compatibility with callers that never set
+// it (the original cliff-notes path). Anything else (module, file,
+// symbol, requirement) keeps the tighter per-scope cap.
+func isRepositoryScope(scopeType string) bool {
+	s := strings.ToLower(strings.TrimSpace(scopeType))
+	return s == "" || s == "repository" || s == "repo"
+}
+
+// timeoutForKnowledgeRPC computes the outer safety-net timeout for a
+// knowledge RPC given its scope type. Repository-scoped runs honor
+// the admin-configured cap (default 4h, tunable via /admin/knowledge).
+// Non-repository scopes cap at min(admin-cap, per-scope cap) so a
+// runaway file-scope call cannot consume the full repository budget.
+func (c *Client) timeoutForKnowledgeRPC(scopeType string) time.Duration {
+	repoCap := c.repositoryKnowledgeTimeout()
+	if isRepositoryScope(scopeType) {
+		return repoCap
+	}
+	scoped := timeoutForKnowledgeScope(scopeType)
+	return minDuration(repoCap, scoped)
+}
+
+// dispatchKnowledgeStreamEvent forwards a non-terminal stream event
+// (phase or progress) to the optional OnProgress handler. Centralized
+// so every wrapper handles unrecognized arms uniformly (log + skip).
+func dispatchKnowledgeStreamEvent(handler func(KnowledgeStreamEvent), phase *commonv1.KnowledgeStreamPhaseMarker, progress *commonv1.KnowledgeStreamProgress) {
+	if handler == nil {
+		return
+	}
+	if phase != nil {
+		handler(KnowledgeStreamEvent{Phase: phase})
+		return
+	}
+	if progress != nil {
+		handler(KnowledgeStreamEvent{Progress: progress})
+		return
+	}
+	// Unknown / nil arm: do nothing. Forward-compat: we don't log
+	// here because the recv loop sees every message anyway and a
+	// future arm we don't recognize is benign at this layer.
+}
+
 // AnalyzeSymbol calls the reasoning worker with the given request and timeout.
 func (c *Client) AnalyzeSymbol(ctx context.Context, req *reasoningv1.AnalyzeSymbolRequest) (*reasoningv1.AnalyzeSymbolResponse, error) {
 	b := c.acquire()
@@ -1093,29 +1231,59 @@ func (c *Client) SimulateChange(ctx context.Context, req *reasoningv1.SimulateCh
 	return b.reasoning.SimulateChange(ctx, req)
 }
 
-// GenerateCliffNotes calls the knowledge worker to generate cliff notes.
-// Timeout is scoped to the request: repository-level calls get 600s,
-// module-level 300s, and file/symbol-level 120s.
-func (c *Client) GenerateCliffNotes(ctx context.Context, req *knowledgev1.GenerateCliffNotesRequest) (*knowledgev1.GenerateCliffNotesResponse, error) {
+// GenerateCliffNotes calls the knowledge worker to generate cliff
+// notes. The RPC is server-streaming (CA-122): the worker emits phase
+// markers and progress heartbeats before delivering a single terminal
+// response. Repository-scope calls honor the admin-configured
+// safety-net timeout (default 4h, tunable via /admin/knowledge).
+// Non-repository scopes (module, file, symbol) cap at the smaller of
+// (admin cap, per-scope cap).
+//
+// Pass WithProgressHandler(fn) to receive phase + progress events as
+// they arrive. The handler runs on the stream.Recv() goroutine and
+// MUST be nonblocking.
+func (c *Client) GenerateCliffNotes(ctx context.Context, req *knowledgev1.GenerateCliffNotesRequest, opts ...CallOption) (*knowledgev1.GenerateCliffNotesResponse, error) {
+	co := applyCallOptions(opts)
 	b := c.acquire()
 	if b == nil {
 		return nil, errClientClosed
 	}
 	defer c.release(b)
-	timeout := timeoutForKnowledgeScope(req.GetScopeType())
-	if strings.EqualFold(strings.TrimSpace(req.GetScopeType()), "repository") || strings.TrimSpace(req.GetScopeType()) == "" {
-		timeout = c.repositoryKnowledgeTimeout()
-	} else {
-		timeout = minDuration(c.repositoryKnowledgeTimeout(), timeout)
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeoutForKnowledgeRPC(req.GetScopeType()))
 	defer cancel()
-	return b.knowledge.GenerateCliffNotes(ctx, req)
+	stream, err := b.knowledge.GenerateCliffNotes(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var final *knowledgev1.GenerateCliffNotesResponse
+	for {
+		msg, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch ev := msg.GetEvent().(type) {
+		case *knowledgev1.GenerateCliffNotesStreamMessage_Phase:
+			dispatchKnowledgeStreamEvent(co.OnProgress, ev.Phase, nil)
+		case *knowledgev1.GenerateCliffNotesStreamMessage_Progress:
+			dispatchKnowledgeStreamEvent(co.OnProgress, nil, ev.Progress)
+		case *knowledgev1.GenerateCliffNotesStreamMessage_Final:
+			final = ev.Final
+		}
+	}
+	if final == nil {
+		return nil, errMissingFinal
+	}
+	return final, nil
 }
 
-// GenerateLearningPath calls the knowledge worker to generate a learning path.
-// Learning paths are always repository-scoped today.
-func (c *Client) GenerateLearningPath(ctx context.Context, req *knowledgev1.GenerateLearningPathRequest) (*knowledgev1.GenerateLearningPathResponse, error) {
+// GenerateLearningPath calls the knowledge worker to generate a
+// learning path. Server-streaming (CA-122). Learning paths are always
+// repository-scoped today; the cap is the admin-tunable safety-net.
+func (c *Client) GenerateLearningPath(ctx context.Context, req *knowledgev1.GenerateLearningPathRequest, opts ...CallOption) (*knowledgev1.GenerateLearningPathResponse, error) {
+	co := applyCallOptions(opts)
 	b := c.acquire()
 	if b == nil {
 		return nil, errClientClosed
@@ -1123,12 +1291,39 @@ func (c *Client) GenerateLearningPath(ctx context.Context, req *knowledgev1.Gene
 	defer c.release(b)
 	ctx, cancel := context.WithTimeout(ctx, c.repositoryKnowledgeTimeout())
 	defer cancel()
-	return b.knowledge.GenerateLearningPath(ctx, req)
+	stream, err := b.knowledge.GenerateLearningPath(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var final *knowledgev1.GenerateLearningPathResponse
+	for {
+		msg, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch ev := msg.GetEvent().(type) {
+		case *knowledgev1.GenerateLearningPathStreamMessage_Phase:
+			dispatchKnowledgeStreamEvent(co.OnProgress, ev.Phase, nil)
+		case *knowledgev1.GenerateLearningPathStreamMessage_Progress:
+			dispatchKnowledgeStreamEvent(co.OnProgress, nil, ev.Progress)
+		case *knowledgev1.GenerateLearningPathStreamMessage_Final:
+			final = ev.Final
+		}
+	}
+	if final == nil {
+		return nil, errMissingFinal
+	}
+	return final, nil
 }
 
-// GenerateArchitectureDiagram calls the knowledge worker to generate an AI architecture diagram.
-// Architecture diagrams are repository-scoped today.
-func (c *Client) GenerateArchitectureDiagram(ctx context.Context, req *knowledgev1.GenerateArchitectureDiagramRequest) (*knowledgev1.GenerateArchitectureDiagramResponse, error) {
+// GenerateArchitectureDiagram calls the knowledge worker to generate
+// an AI architecture diagram. Server-streaming (CA-122). Architecture
+// diagrams are repository-scoped today.
+func (c *Client) GenerateArchitectureDiagram(ctx context.Context, req *knowledgev1.GenerateArchitectureDiagramRequest, opts ...CallOption) (*knowledgev1.GenerateArchitectureDiagramResponse, error) {
+	co := applyCallOptions(opts)
 	b := c.acquire()
 	if b == nil {
 		return nil, errClientClosed
@@ -1136,48 +1331,118 @@ func (c *Client) GenerateArchitectureDiagram(ctx context.Context, req *knowledge
 	defer c.release(b)
 	ctx, cancel := context.WithTimeout(ctx, c.repositoryKnowledgeTimeout())
 	defer cancel()
-	return b.knowledge.GenerateArchitectureDiagram(ctx, req)
+	stream, err := b.knowledge.GenerateArchitectureDiagram(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var final *knowledgev1.GenerateArchitectureDiagramResponse
+	for {
+		msg, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch ev := msg.GetEvent().(type) {
+		case *knowledgev1.GenerateArchitectureDiagramStreamMessage_Phase:
+			dispatchKnowledgeStreamEvent(co.OnProgress, ev.Phase, nil)
+		case *knowledgev1.GenerateArchitectureDiagramStreamMessage_Progress:
+			dispatchKnowledgeStreamEvent(co.OnProgress, nil, ev.Progress)
+		case *knowledgev1.GenerateArchitectureDiagramStreamMessage_Final:
+			final = ev.Final
+		}
+	}
+	if final == nil {
+		return nil, errMissingFinal
+	}
+	return final, nil
 }
 
-// GenerateWorkflowStory calls the knowledge worker to generate a workflow story.
-func (c *Client) GenerateWorkflowStory(ctx context.Context, req *knowledgev1.GenerateWorkflowStoryRequest) (*knowledgev1.GenerateWorkflowStoryResponse, error) {
+// GenerateWorkflowStory calls the knowledge worker to generate a
+// workflow story. Server-streaming (CA-122). Honors per-scope timeout
+// (repository scope: admin cap; other scopes: tighter cap).
+func (c *Client) GenerateWorkflowStory(ctx context.Context, req *knowledgev1.GenerateWorkflowStoryRequest, opts ...CallOption) (*knowledgev1.GenerateWorkflowStoryResponse, error) {
+	co := applyCallOptions(opts)
 	b := c.acquire()
 	if b == nil {
 		return nil, errClientClosed
 	}
 	defer c.release(b)
-	timeout := timeoutForKnowledgeScope(req.GetScopeType())
-	if strings.EqualFold(strings.TrimSpace(req.GetScopeType()), "repository") || strings.TrimSpace(req.GetScopeType()) == "" {
-		timeout = c.repositoryKnowledgeTimeout()
-	} else {
-		timeout = minDuration(c.repositoryKnowledgeTimeout(), timeout)
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeoutForKnowledgeRPC(req.GetScopeType()))
 	defer cancel()
-	return b.knowledge.GenerateWorkflowStory(ctx, req)
+	stream, err := b.knowledge.GenerateWorkflowStory(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var final *knowledgev1.GenerateWorkflowStoryResponse
+	for {
+		msg, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch ev := msg.GetEvent().(type) {
+		case *knowledgev1.GenerateWorkflowStoryStreamMessage_Phase:
+			dispatchKnowledgeStreamEvent(co.OnProgress, ev.Phase, nil)
+		case *knowledgev1.GenerateWorkflowStoryStreamMessage_Progress:
+			dispatchKnowledgeStreamEvent(co.OnProgress, nil, ev.Progress)
+		case *knowledgev1.GenerateWorkflowStoryStreamMessage_Final:
+			final = ev.Final
+		}
+	}
+	if final == nil {
+		return nil, errMissingFinal
+	}
+	return final, nil
 }
 
-// ExplainSystem calls the knowledge worker for a whole-system explanation.
-func (c *Client) ExplainSystem(ctx context.Context, req *knowledgev1.ExplainSystemRequest) (*knowledgev1.ExplainSystemResponse, error) {
+// ExplainSystem calls the knowledge worker for a whole-system
+// explanation. Server-streaming (CA-122). Honors per-scope timeout.
+func (c *Client) ExplainSystem(ctx context.Context, req *knowledgev1.ExplainSystemRequest, opts ...CallOption) (*knowledgev1.ExplainSystemResponse, error) {
+	co := applyCallOptions(opts)
 	b := c.acquire()
 	if b == nil {
 		return nil, errClientClosed
 	}
 	defer c.release(b)
-	timeout := timeoutForKnowledgeScope(req.GetScopeType())
-	if strings.EqualFold(strings.TrimSpace(req.GetScopeType()), "repository") || strings.TrimSpace(req.GetScopeType()) == "" {
-		timeout = c.repositoryKnowledgeTimeout()
-	} else {
-		timeout = minDuration(c.repositoryKnowledgeTimeout(), timeout)
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeoutForKnowledgeRPC(req.GetScopeType()))
 	defer cancel()
-	return b.knowledge.ExplainSystem(ctx, req)
+	stream, err := b.knowledge.ExplainSystem(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var final *knowledgev1.ExplainSystemResponse
+	for {
+		msg, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch ev := msg.GetEvent().(type) {
+		case *knowledgev1.ExplainSystemStreamMessage_Phase:
+			dispatchKnowledgeStreamEvent(co.OnProgress, ev.Phase, nil)
+		case *knowledgev1.ExplainSystemStreamMessage_Progress:
+			dispatchKnowledgeStreamEvent(co.OnProgress, nil, ev.Progress)
+		case *knowledgev1.ExplainSystemStreamMessage_Final:
+			final = ev.Final
+		}
+	}
+	if final == nil {
+		return nil, errMissingFinal
+	}
+	return final, nil
 }
 
-// GenerateCodeTour calls the knowledge worker to generate a code tour.
-// Code tours are always repository-scoped today.
-func (c *Client) GenerateCodeTour(ctx context.Context, req *knowledgev1.GenerateCodeTourRequest) (*knowledgev1.GenerateCodeTourResponse, error) {
+// GenerateCodeTour calls the knowledge worker to generate a code
+// tour. Server-streaming (CA-122). Code tours are always
+// repository-scoped today.
+func (c *Client) GenerateCodeTour(ctx context.Context, req *knowledgev1.GenerateCodeTourRequest, opts ...CallOption) (*knowledgev1.GenerateCodeTourResponse, error) {
+	co := applyCallOptions(opts)
 	b := c.acquire()
 	if b == nil {
 		return nil, errClientClosed
@@ -1185,12 +1450,41 @@ func (c *Client) GenerateCodeTour(ctx context.Context, req *knowledgev1.Generate
 	defer c.release(b)
 	ctx, cancel := context.WithTimeout(ctx, c.repositoryKnowledgeTimeout())
 	defer cancel()
-	return b.knowledge.GenerateCodeTour(ctx, req)
+	stream, err := b.knowledge.GenerateCodeTour(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var final *knowledgev1.GenerateCodeTourResponse
+	for {
+		msg, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch ev := msg.GetEvent().(type) {
+		case *knowledgev1.GenerateCodeTourStreamMessage_Phase:
+			dispatchKnowledgeStreamEvent(co.OnProgress, ev.Phase, nil)
+		case *knowledgev1.GenerateCodeTourStreamMessage_Progress:
+			dispatchKnowledgeStreamEvent(co.OnProgress, nil, ev.Progress)
+		case *knowledgev1.GenerateCodeTourStreamMessage_Final:
+			final = ev.Final
+		}
+	}
+	if final == nil {
+		return nil, errMissingFinal
+	}
+	return final, nil
 }
 
-// GenerateReport calls the enterprise report worker to generate a professional report.
-// Reports can take a long time (30+ sections × LLM calls) so the timeout is generous.
-func (c *Client) GenerateReport(ctx context.Context, req *enterprisev1.GenerateReportRequest) (*enterprisev1.GenerateReportResponse, error) {
+// GenerateReport calls the enterprise report worker to generate a
+// professional report. Server-streaming (CA-122). The report engine's
+// internal progress callback is surfaced as KnowledgeStreamProgress
+// events with unit_kind="report_progress" so the GraphQL UI shows
+// real fine-grained progress.
+func (c *Client) GenerateReport(ctx context.Context, req *enterprisev1.GenerateReportRequest, opts ...CallOption) (*enterprisev1.GenerateReportResponse, error) {
+	co := applyCallOptions(opts)
 	b := c.acquire()
 	if b == nil {
 		return nil, errClientClosed
@@ -1198,7 +1492,32 @@ func (c *Client) GenerateReport(ctx context.Context, req *enterprisev1.GenerateR
 	defer c.release(b)
 	ctx, cancel := context.WithTimeout(ctx, c.repositoryKnowledgeTimeout())
 	defer cancel()
-	return b.enterpriseReport.GenerateReport(ctx, req)
+	stream, err := b.enterpriseReport.GenerateReport(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var final *enterprisev1.GenerateReportResponse
+	for {
+		msg, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch ev := msg.GetEvent().(type) {
+		case *enterprisev1.GenerateReportStreamMessage_Phase:
+			dispatchKnowledgeStreamEvent(co.OnProgress, ev.Phase, nil)
+		case *enterprisev1.GenerateReportStreamMessage_Progress:
+			dispatchKnowledgeStreamEvent(co.OnProgress, nil, ev.Progress)
+		case *enterprisev1.GenerateReportStreamMessage_Final:
+			final = ev.Final
+		}
+	}
+	if final == nil {
+		return nil, errMissingFinal
+	}
+	return final, nil
 }
 
 // DetectContracts calls the contracts worker to detect API contracts in files.
