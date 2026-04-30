@@ -54,7 +54,7 @@ type fakeProfileStoreAdapter struct {
 	mu                   sync.Mutex
 	profiles             map[string]ProfileResponse
 	activeID             string
-	activeIDErr          error // Slice 4: simulate ActiveProfileID(ctx) DB outage
+	activeIDErr          error
 	activeProfileMissing bool
 	listErr              error
 	getErr               error
@@ -295,11 +295,11 @@ func TestHandler_ListProfiles_BannerOnMissingActive(t *testing.T) {
 }
 
 func TestHandler_ListProfiles_BannerOnLiveActiveIDMismatch(t *testing.T) {
-	// codex-r2 Low (slice 4): when activeID is non-empty but does NOT
-	// appear in the profile list (data corruption between resolves),
-	// the list handler MUST compute active_profile_missing=true even
-	// when the resolver latch is still false (it has not yet observed
-	// the gap because no LLM Resolve has fired since the corruption).
+	// codex-r2b Low: when activeID is non-empty but does NOT appear in
+	// the profile list (data corruption between resolves), the list
+	// handler MUST compute active_profile_missing=true even when the
+	// resolver latch is still false (it has not yet observed the gap
+	// because no LLM Resolve has fired since the corruption).
 	fake := newFakeStoreAdapter()
 	fake.profiles["ca_llm_profile:a"] = ProfileResponse{
 		ID:       "ca_llm_profile:a",
@@ -326,10 +326,9 @@ func TestHandler_ListProfiles_BannerOnLiveActiveIDMismatch(t *testing.T) {
 }
 
 func TestHandler_ListProfiles_NoBannerWhenActiveIDPresent(t *testing.T) {
-	// codex-r2 Low (slice 4): when activeID is non-empty AND appears in
-	// the profile list, banner MUST be false even if the resolver latch
-	// is somehow stuck on true (defensive — once the live signal is
-	// healthy, the latch is moot).
+	// codex-r2b Low: positive control. When activeID matches a profile
+	// in the list, active_profile_missing must be false regardless of
+	// the resolver latch.
 	fake := newFakeStoreAdapter()
 	fake.profiles["ca_llm_profile:a"] = ProfileResponse{
 		ID:       "ca_llm_profile:a",
@@ -337,7 +336,7 @@ func TestHandler_ListProfiles_NoBannerWhenActiveIDPresent(t *testing.T) {
 		IsActive: true,
 	}
 	fake.activeID = "ca_llm_profile:a"
-	fake.activeProfileMissing = true // pretend latch is stuck
+	fake.activeProfileMissing = false
 	s := newServerWithProfileStore(t, fake)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/llm-profiles", nil)
@@ -348,15 +347,15 @@ func TestHandler_ListProfiles_NoBannerWhenActiveIDPresent(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	missing, _ := body["active_profile_missing"].(bool)
 	if missing {
-		t.Errorf("active_profile_missing: got true, want false (live id present in list should override stale latch)")
+		t.Errorf("active_profile_missing: got true, want false")
 	}
 }
 
 func TestHandler_ListProfiles_BannerWhenActiveIDLookupFailsButLatched(t *testing.T) {
-	// codex-r2 Low (slice 4): when ActiveProfileID(ctx) errors (DB
-	// outage), the handler falls back to the resolver latch. If the
-	// latch is true, the banner must be rendered (don't silently say
-	// "not missing" when we can't actually check).
+	// codex-r2b Low: when ActiveProfileID(ctx) errors (DB outage), the
+	// handler falls back to the resolver latch. If the latch is true,
+	// the banner must be rendered (don't silently say "not missing"
+	// when we can't actually check).
 	fake := newFakeStoreAdapter()
 	fake.profiles["ca_llm_profile:a"] = ProfileResponse{ID: "ca_llm_profile:a", Name: "A"}
 	fake.activeID = ""

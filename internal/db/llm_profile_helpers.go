@@ -290,6 +290,12 @@ func writeActiveProfileWithLegacyMirror(
 	}
 	legacySetFull += "version = $new_version, updated_at = type::datetime($now)"
 
+	// codex-r2b Medium: in-batch existence guard. Before issuing the
+	// profile UPDATE, prove the row exists inside the same BEGIN. A
+	// SurrealDB UPDATE on a missing row is a silent no-op; without
+	// this guard, an out-of-band delete between the helper's preflight
+	// LoadProfile and the BEGIN would let the legacy mirror UPDATE
+	// land alone (corrupting the rolling-deploy invariant).
 	sql := fmt.Sprintf(`
 		BEGIN;
 		LET $cur = (SELECT version, active_profile_id FROM ca_llm_config:default)[0];
@@ -298,6 +304,10 @@ func writeActiveProfileWithLegacyMirror(
 		};
 		IF $cur.active_profile_id != $intended_active_id {
 			THROW "ca_llm_config_version_changed";
+		};
+		LET $existing = (SELECT id FROM type::thing('ca_llm_profile', $profile_rid))[0];
+		IF $existing == NONE {
+			THROW "profile_not_found";
 		};
 		LET $new_version = $cur.version + 1;
 		UPDATE type::thing('ca_llm_profile', $profile_rid) SET %s;
