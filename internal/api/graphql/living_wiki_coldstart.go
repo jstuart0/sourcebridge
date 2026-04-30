@@ -39,6 +39,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/coldstart"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/credentials"
+	"github.com/sourcebridge/sourcebridge/internal/livingwiki/indexpage"
 	lwmetrics "github.com/sourcebridge/sourcebridge/internal/livingwiki/metrics"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/markdown"
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
@@ -80,6 +81,13 @@ const (
 	// bodies; each additional artifact adds ~1–4 KB. Three deep artifacts
 	// cover the curated analysis without approaching model context limits.
 	maxArtifactsPerCluster = 3
+
+	// indexUpdateEvery is the number of OnPageDone callbacks (page completions)
+	// after which the Living Wiki index page is re-dispatched to all configured
+	// sinks. The 30s heartbeat ticker provides the time-based trigger; this
+	// constant provides the completion-count-based trigger. Whichever fires
+	// first re-dispatches the index (Phase 2).
+	indexUpdateEvery = 10
 )
 
 // buildColdStartRunner returns the RunWithContext closure for a living-wiki
@@ -301,6 +309,64 @@ func buildColdStartRunner(
 			}
 		}
 
+		// ── Phase 2: Initial index dispatch ──────────────────────────────────────
+		//
+		// Publish the combined Living Wiki index page BEFORE generation starts so
+		// the user sees a "Pending" list within seconds of triggering a cold-start.
+		// This is the "user sees something within 30 seconds" guarantee from CR1.
+		//
+		// Serialization: indexMutexFor guards against concurrent Overview + Detailed
+		// jobs (LD-12) writing to the same <repoID>.__index__ page. The mutex is
+		// package-level (M3) — closure-local would not serialize across parallel
+		// buildColdStartRunner closures for the same repo.
+		//
+		// First-write-fails gating: if the initial dispatch fails (wrong space key,
+		// auth error, etc.), we log a warning and skip ALL subsequent index updates
+		// for this run. Per-page stream-publish (Phase 1) is unaffected — the index
+		// is enhancement, not core. The job does NOT fail due to index errors.
+		allPageIDs := make([]string, len(pages))
+		for i, p := range pages {
+			allPageIDs[i] = p.ID
+		}
+		var indexFailed int32 // 1 if first write failed; atomic for goroutine access
+
+		dispatchIndex := func(ctx context.Context, label string) {
+			if atomic.LoadInt32(&indexFailed) != 0 {
+				return
+			}
+			if len(writers) == 0 {
+				return
+			}
+			var statuses []livingwiki.PagePublishStatusRow
+			if publishStatusStore != nil {
+				statuses, _ = publishStatusStore.ListByRepo(ctx, repoID)
+			}
+			indexPage := indexpage.RenderIndexPage(repoID, allPageIDs, statuses, time.Now())
+			mu := indexMutexFor(repoID)
+			mu.Lock()
+			defer mu.Unlock()
+
+			for _, nsw := range writers {
+				writeCtx, writeCancel := context.WithTimeout(ctx, 10*time.Second)
+				writeErr := nsw.Writer.WritePage(writeCtx, indexPage)
+				writeCancel()
+				if writeErr != nil {
+					slog.Warn("livingwiki/index: failed to write index page",
+						"repo_id", repoID, "sink", nsw.Writer.Kind(),
+						"label", label, "error", writeErr)
+					if label == "initial" {
+						atomic.StoreInt32(&indexFailed, 1)
+					}
+				} else {
+					slog.Info("livingwiki/index: index page written",
+						"repo_id", repoID, "sink", nsw.Writer.Kind(), "label", label)
+				}
+			}
+		}
+
+		// Dispatch the initial index synchronously before generation begins.
+		dispatchIndex(runCtx, "initial")
+
 		if toGenerate == 0 && len(skipNeedsFixup) == 0 {
 			rt.ReportProgress(1.0, "ok", fmt.Sprintf(
 				"All %d pages already up to date — nothing to regenerate", total))
@@ -381,6 +447,9 @@ func buildColdStartRunner(
 		// ── Step 2: Generate pages with progress reporting ────────────────────
 		var generated, excludedCount int32
 		var excludedIDsAcc atomicStringSlice
+		// indexUpdateCount tracks how many OnPageDone callbacks have fired;
+		// used to trigger a mid-run index update every indexUpdateEvery pages.
+		var indexUpdateCount int32
 
 		onPageDone := func(pageID string, wasExcluded bool, _ string) {
 			if wasExcluded {
@@ -397,6 +466,16 @@ func buildColdStartRunner(
 			}
 			rt.ReportProgress(progress, "generating",
 				fmt.Sprintf("%d/%d pages complete", done, toGenerate))
+
+			// Phase 2: trigger an index update every indexUpdateEvery page completions.
+			// OnPageDone fires from per-page goroutines (mozart's locked surface);
+			// dispatchIndex is goroutine-safe (mutex-protected) and runs quickly.
+			n := int(atomic.AddInt32(&indexUpdateCount, 1))
+			if n%indexUpdateEvery == 0 {
+				// Use runCtx (not dispatchCtx) so index updates outlast the
+				// per-page dispatch goroutine's cancellation window.
+				go dispatchIndex(runCtx, "periodic")
+			}
 		}
 
 		// Heartbeat: tick liveness every 30s while Generate runs so the
@@ -448,6 +527,11 @@ func buildColdStartRunner(
 					}
 					rt.ReportProgress(p, "generating",
 						fmt.Sprintf("%d/%d pages complete", done, toGenerate))
+					// Phase 2: refresh the index page on every 30s heartbeat tick.
+					// Run in a goroutine so a slow sink write does not delay the next
+					// heartbeat. runCtx (not hbCtx) so the write can complete even if
+					// the heartbeat goroutine is stopped first.
+					go dispatchIndex(runCtx, "heartbeat")
 				}
 			}
 		}()
@@ -493,6 +577,12 @@ func buildColdStartRunner(
 		// no more events will be enqueued.
 		close(readyCh)
 		dispatchWG.Wait()
+
+		// Phase 2: dispatch the final index page after all stream-dispatch has
+		// drained. This ensures the terminal state (all pages Ready/Failed) is
+		// reflected before the job is declared complete.
+		dispatchIndex(runCtx, "final")
+
 		elapsed := time.Since(start)
 
 		// IsPartialGenerationError matches ErrTimeBudgetExceeded and
