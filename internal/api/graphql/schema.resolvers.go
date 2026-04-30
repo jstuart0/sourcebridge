@@ -35,6 +35,8 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 	"github.com/sourcebridge/sourcebridge/internal/version"
+
+	"github.com/vektah/gqlparser/v2/gqlerror"
 )
 
 // AddRepository is the resolver for the addRepository field.
@@ -2720,7 +2722,7 @@ func (r *mutationResolver) DisableLivingWikiForRepo(ctx context.Context, reposit
 // current repo settings. When retryExcludedOnly is true the job is scoped
 // to pages that were excluded in the most recent run (the "Retry excluded
 // pages" CTA). When false (or nil), a full cold-start is triggered.
-func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool) (*EnableLivingWikiResult, error) {
+func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool, mode *LivingWikiBuildMode) (*EnableLivingWikiResult, error) {
 	if r.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
@@ -2733,14 +2735,122 @@ func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID 
 		current = defaultRepoSettings(repositoryID)
 	}
 
-	// Delegate to EnableLivingWikiForRepo so all the gating logic (global
-	// enabled, kill-switch, orchestrator nil checks) runs exactly once.
-	return r.EnableLivingWikiForRepo(ctx, EnableLivingWikiForRepoInput{
+	// Build input, preserving existing mode flags by default.
+	input := EnableLivingWikiForRepoInput{
 		RepositoryID:      repositoryID,
 		Mode:              RepoWikiMode(current.Mode),
 		Sinks:             repoSinksToInputs(current.Sinks),
 		RetryExcludedOnly: retryExcludedOnly,
-	})
+	}
+
+	// Mode override: if both modes are off and no explicit mode given, error.
+	bothOff := !current.LivingWikiOverviewEnabled && !current.LivingWikiDetailedEnabled
+	if bothOff && (mode == nil || *mode == LivingWikiBuildModeAllEnabled) {
+		return nil, &gqlerror.Error{
+			Message:    "Both Overview and Detailed modes are disabled. Enable at least one mode first.",
+			Extensions: map[string]any{"code": "LIVING_WIKI_BOTH_MODES_DISABLED"},
+		}
+	}
+
+	if mode != nil {
+		switch *mode {
+		case LivingWikiBuildModeOverview:
+			t, f := true, false
+			input.LivingWikiOverviewEnabled = &t
+			input.LivingWikiDetailedEnabled = &f
+		case LivingWikiBuildModeDetailed:
+			t, f := true, false
+			input.LivingWikiOverviewEnabled = &f
+			input.LivingWikiDetailedEnabled = &t
+		// ALL_ENABLED: preserve existing flags (no override needed)
+		}
+	}
+
+	// Delegate to EnableLivingWikiForRepo so all the gating logic (global
+	// enabled, kill-switch, orchestrator nil checks) runs exactly once.
+	return r.EnableLivingWikiForRepo(ctx, input)
+}
+
+// SetLivingWikiModeFlags resolves Mutation.setLivingWikiModeFlags.
+func (r *mutationResolver) SetLivingWikiModeFlags(ctx context.Context, repositoryID string, overviewEnabled bool, detailedEnabled bool) (*RepositoryLivingWikiSettings, error) {
+	if r.LivingWikiRepoStore == nil {
+		return nil, fmt.Errorf("living-wiki repo store not configured")
+	}
+
+	current, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	if err != nil {
+		return nil, fmt.Errorf("load repo settings: %w", err)
+	}
+	if current == nil {
+		current = defaultRepoSettings(repositoryID)
+	}
+
+	current.LivingWikiOverviewEnabled = overviewEnabled
+	current.LivingWikiDetailedEnabled = detailedEnabled
+	current.UpdatedAt = time.Now()
+	current.UpdatedBy = userIDFromContext(ctx)
+
+	if err := r.LivingWikiRepoStore.SetRepoSettings(ctx, *current); err != nil {
+		return nil, fmt.Errorf("persist mode flags: %w", err)
+	}
+
+	return mapRepoLivingWikiSettings(current), nil
+}
+
+// TriggerLivingWikiColdStartAllEnabled resolves Mutation.triggerLivingWikiColdStartAllEnabled.
+func (r *mutationResolver) TriggerLivingWikiColdStartAllEnabled(ctx context.Context, repositoryID string) ([]*EnableLivingWikiResult, error) {
+	if r.LivingWikiRepoStore == nil {
+		return nil, fmt.Errorf("living-wiki repo store not configured")
+	}
+
+	current, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	if err != nil {
+		return nil, fmt.Errorf("load repo settings: %w", err)
+	}
+	if current == nil {
+		current = defaultRepoSettings(repositoryID)
+	}
+
+	var results []*EnableLivingWikiResult
+
+	// Enqueue Overview job if enabled.
+	if current.LivingWikiOverviewEnabled {
+		t, f := true, false
+		input := EnableLivingWikiForRepoInput{
+			RepositoryID:              repositoryID,
+			Mode:                      RepoWikiMode(current.Mode),
+			Sinks:                     repoSinksToInputs(current.Sinks),
+			LivingWikiOverviewEnabled: &t,
+			LivingWikiDetailedEnabled: &f,
+		}
+		res, err := r.EnableLivingWikiForRepo(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("enqueue overview job: %w", err)
+		}
+		results = append(results, res)
+	}
+
+	// Enqueue Detailed job if enabled.
+	if current.LivingWikiDetailedEnabled {
+		f, t := false, true
+		input := EnableLivingWikiForRepoInput{
+			RepositoryID:              repositoryID,
+			Mode:                      RepoWikiMode(current.Mode),
+			Sinks:                     repoSinksToInputs(current.Sinks),
+			LivingWikiOverviewEnabled: &f,
+			LivingWikiDetailedEnabled: &t,
+		}
+		res, err := r.EnableLivingWikiForRepo(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("enqueue detailed job: %w", err)
+		}
+		results = append(results, res)
+	}
+
+	if results == nil {
+		results = []*EnableLivingWikiResult{}
+	}
+	return results, nil
 }
 
 
