@@ -209,6 +209,16 @@ func WithLivingWikiJobResultStore(rs livingwiki.JobResultStore) ServerOption {
 	return func(s *Server) { s.livingWikiJobResultStore = rs }
 }
 
+// WithLivingWikiPagePublishStore wires the per-page-per-sink dispatch state
+// store introduced in Phase 1 of the incremental-publish redesign. Backs
+// content-aware smart-resume (3-way bucket split: regenerate / skipFully /
+// skipNeedsFixup) and the async dispatcher's preserve-on-failure semantics
+// (SetReady / SetNonReady split). When nil, smart-resume falls back to
+// sink-presence-only behavior — pages skip without fingerprint validation.
+func WithLivingWikiPagePublishStore(s2 livingwiki.PagePublishStatusStore) ServerOption {
+	return func(s *Server) { s.livingWikiPagePublishStore = s2 }
+}
+
 // WithLivingWikiLiveOrchestrator wires the living-wiki page-generation
 // orchestrator into the GraphQL resolver so the cold-start job goroutine
 // (R5) can call Generate directly. When nil, cold-start jobs return a
@@ -264,6 +274,7 @@ type Server struct {
 	livingWikiRepoStore          livingwiki.RepoSettingsStore  // per-repo living-wiki opt-in; nil = feature unavailable
 	livingWikiDispatcher         *webhook.Dispatcher           // nil = feature not started or kill-switch active
 	livingWikiJobResultStore     livingwiki.JobResultStore     // nil = job result history unavailable
+	livingWikiPagePublishStore   livingwiki.PagePublishStatusStore // per-page dispatch state (Phase 1 of incremental-publish redesign); nil = smart-resume falls back to sink-presence-only
 	livingWikiLiveOrchestrator   *lworch.Orchestrator          // living-wiki page-generation orchestrator; nil = feature unavailable
 	clusterRunner                *clustering.Runner            // subsystem clustering job dispatcher; nil = feature disabled
 	healthChecker                *HealthChecker                // shared DB+worker probe; nil = embedded/test mode, handlers fall back to local checks
@@ -633,6 +644,7 @@ func (s *Server) setupRouter() {
 			LivingWikiResolver:         s.livingWikiResolver,
 			LivingWikiRepoStore:        s.livingWikiRepoStore,
 			LivingWikiJobResultStore:   s.livingWikiJobResultStore,
+			LivingWikiPagePublishStore: s.livingWikiPagePublishStore,
 			LivingWikiLiveOrchestrator: s.livingWikiLiveOrchestrator,
 			ClusteringHook:             s.clusteringHookFunc(),
 			ClusterStore:               gqlClusterStore,

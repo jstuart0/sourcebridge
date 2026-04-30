@@ -611,6 +611,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 		lwJobResultStore = db.NewLivingWikiJobResultStore(surrealDB)
 	}
 
+	// Living-wiki per-page publish-status store (Phase 1 of incremental-publish
+	// redesign). Backs the 3-way smart-resume bucket split (regenerate /
+	// skipFully / skipNeedsFixup, CR4) and the async dispatcher's
+	// preserve-on-failure SetReady/SetNonReady contract (CR9). Same external-
+	// mode gate as the job-result store — embedded mode falls back to
+	// sink-presence-only smart-resume.
+	var lwPagePublishStore livingwiki.PagePublishStatusStore
+	if cfg.Storage.SurrealMode == "external" {
+		lwPagePublishStore = db.NewLivingWikiPagePublishStatusStore(surrealDB)
+	}
+
 	// Living-wiki metrics collector (R8).
 	// Registered once at boot; the /metrics handler calls WritePrometheusText.
 	_ = lwmetrics.Default // ensures the package-level collector is initialized
@@ -682,6 +693,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		rest.WithLivingWikiRepoStore(lwRepoStore),
 		rest.WithLivingWikiDispatcher(lwDispatcher),
 		rest.WithLivingWikiJobResultStore(lwJobResultStore),
+		rest.WithLivingWikiPagePublishStore(lwPagePublishStore),
 		rest.WithLivingWikiLiveOrchestrator(func() *lworch.Orchestrator {
 			if lwDispatcher == nil {
 				return nil
