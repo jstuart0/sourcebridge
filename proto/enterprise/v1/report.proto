@@ -5,10 +5,29 @@ package sourcebridge.enterprise.v1;
 option go_package = "github.com/sourcebridge/sourcebridge/gen/go/enterprise/v1;enterprisev1";
 
 import "common/v1/types.proto";
+import "common/v1/knowledge_progress.proto";
 
 // EnterpriseReportService hosts enterprise-only report generation RPCs.
+//
+// GenerateReport is server-streaming (CA-122). The report engine
+// already exposes a fine-grained progress callback internally
+// (workers/reports/engine.py); the streaming refactor surfaces those
+// fractions to the orchestrator as KnowledgeStreamProgress events with
+// unit_kind="report_progress" so the GraphQL UI shows real progress
+// instead of a synthetic time-based curve. See thoughts/shared/plans/
+// 2026-04-29-deep-cliffnotes-deadline-exceeded.md (Decision 4b).
 service EnterpriseReportService {
-  rpc GenerateReport(GenerateReportRequest) returns (GenerateReportResponse);
+  rpc GenerateReport(GenerateReportRequest) returns (stream GenerateReportStreamMessage);
+}
+
+// GenerateReportStreamMessage envelopes the GenerateReport server
+// stream. Exactly one of {phase, progress, final} is set per message.
+message GenerateReportStreamMessage {
+  oneof event {
+    sourcebridge.common.v1.KnowledgeStreamPhaseMarker phase = 1;
+    sourcebridge.common.v1.KnowledgeStreamProgress progress = 2;
+    GenerateReportResponse final = 3;
+  }
 }
 
 message GenerateReportRequest {

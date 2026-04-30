@@ -1,4 +1,5 @@
 from common.v1 import types_pb2 as _types_pb2
+from common.v1 import knowledge_progress_pb2 as _knowledge_progress_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
@@ -27,6 +28,66 @@ DEPTH_UNSPECIFIED: Depth
 DEPTH_SUMMARY: Depth
 DEPTH_MEDIUM: Depth
 DEPTH_DEEP: Depth
+
+class GenerateCliffNotesStreamMessage(_message.Message):
+    __slots__ = ("phase", "progress", "final")
+    PHASE_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_FIELD_NUMBER: _ClassVar[int]
+    FINAL_FIELD_NUMBER: _ClassVar[int]
+    phase: _knowledge_progress_pb2.KnowledgeStreamPhaseMarker
+    progress: _knowledge_progress_pb2.KnowledgeStreamProgress
+    final: GenerateCliffNotesResponse
+    def __init__(self, phase: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamPhaseMarker, _Mapping]] = ..., progress: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamProgress, _Mapping]] = ..., final: _Optional[_Union[GenerateCliffNotesResponse, _Mapping]] = ...) -> None: ...
+
+class GenerateLearningPathStreamMessage(_message.Message):
+    __slots__ = ("phase", "progress", "final")
+    PHASE_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_FIELD_NUMBER: _ClassVar[int]
+    FINAL_FIELD_NUMBER: _ClassVar[int]
+    phase: _knowledge_progress_pb2.KnowledgeStreamPhaseMarker
+    progress: _knowledge_progress_pb2.KnowledgeStreamProgress
+    final: GenerateLearningPathResponse
+    def __init__(self, phase: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamPhaseMarker, _Mapping]] = ..., progress: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamProgress, _Mapping]] = ..., final: _Optional[_Union[GenerateLearningPathResponse, _Mapping]] = ...) -> None: ...
+
+class GenerateArchitectureDiagramStreamMessage(_message.Message):
+    __slots__ = ("phase", "progress", "final")
+    PHASE_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_FIELD_NUMBER: _ClassVar[int]
+    FINAL_FIELD_NUMBER: _ClassVar[int]
+    phase: _knowledge_progress_pb2.KnowledgeStreamPhaseMarker
+    progress: _knowledge_progress_pb2.KnowledgeStreamProgress
+    final: GenerateArchitectureDiagramResponse
+    def __init__(self, phase: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamPhaseMarker, _Mapping]] = ..., progress: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamProgress, _Mapping]] = ..., final: _Optional[_Union[GenerateArchitectureDiagramResponse, _Mapping]] = ...) -> None: ...
+
+class GenerateWorkflowStoryStreamMessage(_message.Message):
+    __slots__ = ("phase", "progress", "final")
+    PHASE_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_FIELD_NUMBER: _ClassVar[int]
+    FINAL_FIELD_NUMBER: _ClassVar[int]
+    phase: _knowledge_progress_pb2.KnowledgeStreamPhaseMarker
+    progress: _knowledge_progress_pb2.KnowledgeStreamProgress
+    final: GenerateWorkflowStoryResponse
+    def __init__(self, phase: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamPhaseMarker, _Mapping]] = ..., progress: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamProgress, _Mapping]] = ..., final: _Optional[_Union[GenerateWorkflowStoryResponse, _Mapping]] = ...) -> None: ...
+
+class ExplainSystemStreamMessage(_message.Message):
+    __slots__ = ("phase", "progress", "final")
+    PHASE_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_FIELD_NUMBER: _ClassVar[int]
+    FINAL_FIELD_NUMBER: _ClassVar[int]
+    phase: _knowledge_progress_pb2.KnowledgeStreamPhaseMarker
+    progress: _knowledge_progress_pb2.KnowledgeStreamProgress
+    final: ExplainSystemResponse
+    def __init__(self, phase: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamPhaseMarker, _Mapping]] = ..., progress: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamProgress, _Mapping]] = ..., final: _Optional[_Union[ExplainSystemResponse, _Mapping]] = ...) -> None: ...
+
+class GenerateCodeTourStreamMessage(_message.Message):
+    __slots__ = ("phase", "progress", "final")
+    PHASE_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_FIELD_NUMBER: _ClassVar[int]
+    FINAL_FIELD_NUMBER: _ClassVar[int]
+    phase: _knowledge_progress_pb2.KnowledgeStreamPhaseMarker
+    progress: _knowledge_progress_pb2.KnowledgeStreamProgress
+    final: GenerateCodeTourResponse
+    def __init__(self, phase: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamPhaseMarker, _Mapping]] = ..., progress: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamProgress, _Mapping]] = ..., final: _Optional[_Union[GenerateCodeTourResponse, _Mapping]] = ...) -> None: ...
 
 class GenerateCliffNotesRequest(_message.Message):
     __slots__ = ("repository_id", "repository_name", "audience", "depth", "snapshot_json", "scope_type", "scope_path", "audience_enum", "depth_enum")

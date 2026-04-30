@@ -23,9 +23,10 @@ _sym_db = _symbol_database.Default()
 
 
 from common.v1 import types_pb2 as common_dot_v1_dot_types__pb2
+from common.v1 import knowledge_progress_pb2 as common_dot_v1_dot_knowledge__progress__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1a\x65nterprise/v1/report.proto\x12\x1asourcebridge.enterprise.v1\x1a\x15\x63ommon/v1/types.proto\"\xb3\x03\n\x15GenerateReportRequest\x12\x11\n\treport_id\x18\x01 \x01(\t\x12\x13\n\x0breport_name\x18\x02 \x01(\t\x12\x13\n\x0breport_type\x18\x03 \x01(\t\x12\x10\n\x08\x61udience\x18\x04 \x01(\t\x12\x16\n\x0erepository_ids\x18\x05 \x03(\t\x12\x19\n\x11selected_sections\x18\x06 \x03(\t\x12\x18\n\x10include_diagrams\x18\x07 \x01(\x08\x12\x10\n\x08loe_mode\x18\x08 \x01(\t\x12\x12\n\noutput_dir\x18\t \x01(\t\x12\x16\n\x0erepo_data_json\x18\n \x01(\t\x12 \n\x18section_definitions_json\x18\x0b \x01(\t\x12\x16\n\x0emodel_override\x18\x0c \x01(\t\x12\x16\n\x0e\x61nalysis_depth\x18\r \x01(\t\x12\x1f\n\x17include_recommendations\x18\x0e \x01(\x08\x12\x13\n\x0binclude_loe\x18\x0f \x01(\x08\x12\x1b\n\x13style_system_prompt\x18\x10 \x01(\t\x12\x1b\n\x13style_section_rules\x18\x11 \x01(\t\"\x8d\x02\n\x16GenerateReportResponse\x12\x10\n\x08markdown\x18\x01 \x01(\t\x12\x15\n\rsection_count\x18\x02 \x01(\x05\x12\x12\n\nword_count\x18\x03 \x01(\x05\x12\x16\n\x0e\x65vidence_count\x18\x04 \x01(\x05\x12\x13\n\x0b\x63ontent_dir\x18\x05 \x01(\t\x12\x41\n\x08sections\x18\x06 \x03(\x0b\x32/.sourcebridge.enterprise.v1.ReportSectionResult\x12/\n\x05usage\x18\x07 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage\x12\x15\n\revidence_json\x18\x08 \x01(\t\"\x93\x01\n\x13ReportSectionResult\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05title\x18\x02 \x01(\t\x12\x10\n\x08\x63\x61tegory\x18\x03 \x01(\t\x12\x0e\n\x06status\x18\x04 \x01(\t\x12\x12\n\nword_count\x18\x05 \x01(\x05\x12\x13\n\x0b\x64uration_ms\x18\x06 \x01(\x05\x12\x15\n\rerror_message\x18\x07 \x01(\t2\x92\x01\n\x17\x45nterpriseReportService\x12w\n\x0eGenerateReport\x12\x31.sourcebridge.enterprise.v1.GenerateReportRequest\x1a\x32.sourcebridge.enterprise.v1.GenerateReportResponseBHZFgithub.com/sourcebridge/sourcebridge/gen/go/enterprise/v1;enterprisev1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1a\x65nterprise/v1/report.proto\x12\x1asourcebridge.enterprise.v1\x1a\x15\x63ommon/v1/types.proto\x1a\"common/v1/knowledge_progress.proto\"\xf5\x01\n\x1bGenerateReportStreamMessage\x12\x43\n\x05phase\x18\x01 \x01(\x0b\x32\x32.sourcebridge.common.v1.KnowledgeStreamPhaseMarkerH\x00\x12\x43\n\x08progress\x18\x02 \x01(\x0b\x32/.sourcebridge.common.v1.KnowledgeStreamProgressH\x00\x12\x43\n\x05\x66inal\x18\x03 \x01(\x0b\x32\x32.sourcebridge.enterprise.v1.GenerateReportResponseH\x00\x42\x07\n\x05\x65vent\"\xb3\x03\n\x15GenerateReportRequest\x12\x11\n\treport_id\x18\x01 \x01(\t\x12\x13\n\x0breport_name\x18\x02 \x01(\t\x12\x13\n\x0breport_type\x18\x03 \x01(\t\x12\x10\n\x08\x61udience\x18\x04 \x01(\t\x12\x16\n\x0erepository_ids\x18\x05 \x03(\t\x12\x19\n\x11selected_sections\x18\x06 \x03(\t\x12\x18\n\x10include_diagrams\x18\x07 \x01(\x08\x12\x10\n\x08loe_mode\x18\x08 \x01(\t\x12\x12\n\noutput_dir\x18\t \x01(\t\x12\x16\n\x0erepo_data_json\x18\n \x01(\t\x12 \n\x18section_definitions_json\x18\x0b \x01(\t\x12\x16\n\x0emodel_override\x18\x0c \x01(\t\x12\x16\n\x0e\x61nalysis_depth\x18\r \x01(\t\x12\x1f\n\x17include_recommendations\x18\x0e \x01(\x08\x12\x13\n\x0binclude_loe\x18\x0f \x01(\x08\x12\x1b\n\x13style_system_prompt\x18\x10 \x01(\t\x12\x1b\n\x13style_section_rules\x18\x11 \x01(\t\"\x8d\x02\n\x16GenerateReportResponse\x12\x10\n\x08markdown\x18\x01 \x01(\t\x12\x15\n\rsection_count\x18\x02 \x01(\x05\x12\x12\n\nword_count\x18\x03 \x01(\x05\x12\x16\n\x0e\x65vidence_count\x18\x04 \x01(\x05\x12\x13\n\x0b\x63ontent_dir\x18\x05 \x01(\t\x12\x41\n\x08sections\x18\x06 \x03(\x0b\x32/.sourcebridge.enterprise.v1.ReportSectionResult\x12/\n\x05usage\x18\x07 \x01(\x0b\x32 .sourcebridge.common.v1.LLMUsage\x12\x15\n\revidence_json\x18\x08 \x01(\t\"\x93\x01\n\x13ReportSectionResult\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05title\x18\x02 \x01(\t\x12\x10\n\x08\x63\x61tegory\x18\x03 \x01(\t\x12\x0e\n\x06status\x18\x04 \x01(\t\x12\x12\n\nword_count\x18\x05 \x01(\x05\x12\x13\n\x0b\x64uration_ms\x18\x06 \x01(\x05\x12\x15\n\rerror_message\x18\x07 \x01(\t2\x99\x01\n\x17\x45nterpriseReportService\x12~\n\x0eGenerateReport\x12\x31.sourcebridge.enterprise.v1.GenerateReportRequest\x1a\x37.sourcebridge.enterprise.v1.GenerateReportStreamMessage0\x01\x42HZFgithub.com/sourcebridge/sourcebridge/gen/go/enterprise/v1;enterprisev1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,12 +34,14 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'enterprise.v1.report_pb2', 
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'ZFgithub.com/sourcebridge/sourcebridge/gen/go/enterprise/v1;enterprisev1'
-  _globals['_GENERATEREPORTREQUEST']._serialized_start=82
-  _globals['_GENERATEREPORTREQUEST']._serialized_end=517
-  _globals['_GENERATEREPORTRESPONSE']._serialized_start=520
-  _globals['_GENERATEREPORTRESPONSE']._serialized_end=789
-  _globals['_REPORTSECTIONRESULT']._serialized_start=792
-  _globals['_REPORTSECTIONRESULT']._serialized_end=939
-  _globals['_ENTERPRISEREPORTSERVICE']._serialized_start=942
-  _globals['_ENTERPRISEREPORTSERVICE']._serialized_end=1088
+  _globals['_GENERATEREPORTSTREAMMESSAGE']._serialized_start=118
+  _globals['_GENERATEREPORTSTREAMMESSAGE']._serialized_end=363
+  _globals['_GENERATEREPORTREQUEST']._serialized_start=366
+  _globals['_GENERATEREPORTREQUEST']._serialized_end=801
+  _globals['_GENERATEREPORTRESPONSE']._serialized_start=804
+  _globals['_GENERATEREPORTRESPONSE']._serialized_end=1073
+  _globals['_REPORTSECTIONRESULT']._serialized_start=1076
+  _globals['_REPORTSECTIONRESULT']._serialized_end=1223
+  _globals['_ENTERPRISEREPORTSERVICE']._serialized_start=1226
+  _globals['_ENTERPRISEREPORTSERVICE']._serialized_end=1379
 # @@protoc_insertion_point(module_scope)

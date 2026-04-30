@@ -27,6 +27,28 @@ if _version_not_supported:
 
 class KnowledgeServiceStub(object):
     """KnowledgeService handles LLM-powered codebase knowledge generation.
+
+    All seven RPCs are server-streaming (CA-122). Each method emits a
+    stream of *StreamMessage values whose oneof carries one of:
+    * phase   -- a KnowledgeStreamPhaseMarker emitted at every phase
+    transition so the client can deterministically update
+    the user-facing phase label.
+    * progress -- a KnowledgeStreamProgress heartbeat carrying RUN-TIME
+    (completed_units/total_units) counters and an
+    optional human-readable message. Emitted on a
+    periodic cadence (default 30s) within a phase.
+    * final    -- the terminal payload carrying the response body. Last
+    message on the stream. Exactly one final message is
+    emitted per successful call; absence of a final
+    message before EOF is an error.
+
+    The streaming shape replaces the prior unary methods because
+    repository-scoped knowledge generation (especially deep cliff notes)
+    is inherently a multi-phase incrementally-producing operation. The
+    per-call wall-clock deadline that bounded the unary calls is replaced
+    by an outer safety-net deadline (operator-tunable, default 4h) plus
+    gRPC keepalive on the channel, plus a 10-min reaper that actively
+    cancels stuck runs. See thoughts/shared/plans/2026-04-29-deep-cliffnotes-deadline-exceeded.md.
     """
 
     def __init__(self, channel):
@@ -35,40 +57,62 @@ class KnowledgeServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.GenerateCliffNotes = channel.unary_unary(
+        self.GenerateCliffNotes = channel.unary_stream(
                 '/sourcebridge.knowledge.v1.KnowledgeService/GenerateCliffNotes',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesRequest.SerializeToString,
-                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesResponse.FromString,
+                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesStreamMessage.FromString,
                 _registered_method=True)
-        self.GenerateLearningPath = channel.unary_unary(
+        self.GenerateLearningPath = channel.unary_stream(
                 '/sourcebridge.knowledge.v1.KnowledgeService/GenerateLearningPath',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathRequest.SerializeToString,
-                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathResponse.FromString,
+                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathStreamMessage.FromString,
                 _registered_method=True)
-        self.GenerateArchitectureDiagram = channel.unary_unary(
+        self.GenerateArchitectureDiagram = channel.unary_stream(
                 '/sourcebridge.knowledge.v1.KnowledgeService/GenerateArchitectureDiagram',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramRequest.SerializeToString,
-                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramResponse.FromString,
+                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramStreamMessage.FromString,
                 _registered_method=True)
-        self.GenerateWorkflowStory = channel.unary_unary(
+        self.GenerateWorkflowStory = channel.unary_stream(
                 '/sourcebridge.knowledge.v1.KnowledgeService/GenerateWorkflowStory',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryRequest.SerializeToString,
-                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryResponse.FromString,
+                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryStreamMessage.FromString,
                 _registered_method=True)
-        self.ExplainSystem = channel.unary_unary(
+        self.ExplainSystem = channel.unary_stream(
                 '/sourcebridge.knowledge.v1.KnowledgeService/ExplainSystem',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemRequest.SerializeToString,
-                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemResponse.FromString,
+                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemStreamMessage.FromString,
                 _registered_method=True)
-        self.GenerateCodeTour = channel.unary_unary(
+        self.GenerateCodeTour = channel.unary_stream(
                 '/sourcebridge.knowledge.v1.KnowledgeService/GenerateCodeTour',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourRequest.SerializeToString,
-                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourResponse.FromString,
+                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourStreamMessage.FromString,
                 _registered_method=True)
 
 
 class KnowledgeServiceServicer(object):
     """KnowledgeService handles LLM-powered codebase knowledge generation.
+
+    All seven RPCs are server-streaming (CA-122). Each method emits a
+    stream of *StreamMessage values whose oneof carries one of:
+    * phase   -- a KnowledgeStreamPhaseMarker emitted at every phase
+    transition so the client can deterministically update
+    the user-facing phase label.
+    * progress -- a KnowledgeStreamProgress heartbeat carrying RUN-TIME
+    (completed_units/total_units) counters and an
+    optional human-readable message. Emitted on a
+    periodic cadence (default 30s) within a phase.
+    * final    -- the terminal payload carrying the response body. Last
+    message on the stream. Exactly one final message is
+    emitted per successful call; absence of a final
+    message before EOF is an error.
+
+    The streaming shape replaces the prior unary methods because
+    repository-scoped knowledge generation (especially deep cliff notes)
+    is inherently a multi-phase incrementally-producing operation. The
+    per-call wall-clock deadline that bounded the unary calls is replaced
+    by an outer safety-net deadline (operator-tunable, default 4h) plus
+    gRPC keepalive on the channel, plus a 10-min reaper that actively
+    cancels stuck runs. See thoughts/shared/plans/2026-04-29-deep-cliffnotes-deadline-exceeded.md.
     """
 
     def GenerateCliffNotes(self, request, context):
@@ -116,35 +160,35 @@ class KnowledgeServiceServicer(object):
 
 def add_KnowledgeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'GenerateCliffNotes': grpc.unary_unary_rpc_method_handler(
+            'GenerateCliffNotes': grpc.unary_stream_rpc_method_handler(
                     servicer.GenerateCliffNotes,
                     request_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesRequest.FromString,
-                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesResponse.SerializeToString,
+                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesStreamMessage.SerializeToString,
             ),
-            'GenerateLearningPath': grpc.unary_unary_rpc_method_handler(
+            'GenerateLearningPath': grpc.unary_stream_rpc_method_handler(
                     servicer.GenerateLearningPath,
                     request_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathRequest.FromString,
-                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathResponse.SerializeToString,
+                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathStreamMessage.SerializeToString,
             ),
-            'GenerateArchitectureDiagram': grpc.unary_unary_rpc_method_handler(
+            'GenerateArchitectureDiagram': grpc.unary_stream_rpc_method_handler(
                     servicer.GenerateArchitectureDiagram,
                     request_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramRequest.FromString,
-                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramResponse.SerializeToString,
+                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramStreamMessage.SerializeToString,
             ),
-            'GenerateWorkflowStory': grpc.unary_unary_rpc_method_handler(
+            'GenerateWorkflowStory': grpc.unary_stream_rpc_method_handler(
                     servicer.GenerateWorkflowStory,
                     request_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryRequest.FromString,
-                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryResponse.SerializeToString,
+                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryStreamMessage.SerializeToString,
             ),
-            'ExplainSystem': grpc.unary_unary_rpc_method_handler(
+            'ExplainSystem': grpc.unary_stream_rpc_method_handler(
                     servicer.ExplainSystem,
                     request_deserializer=knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemRequest.FromString,
-                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemResponse.SerializeToString,
+                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemStreamMessage.SerializeToString,
             ),
-            'GenerateCodeTour': grpc.unary_unary_rpc_method_handler(
+            'GenerateCodeTour': grpc.unary_stream_rpc_method_handler(
                     servicer.GenerateCodeTour,
                     request_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourRequest.FromString,
-                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourResponse.SerializeToString,
+                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourStreamMessage.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -156,6 +200,28 @@ def add_KnowledgeServiceServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class KnowledgeService(object):
     """KnowledgeService handles LLM-powered codebase knowledge generation.
+
+    All seven RPCs are server-streaming (CA-122). Each method emits a
+    stream of *StreamMessage values whose oneof carries one of:
+    * phase   -- a KnowledgeStreamPhaseMarker emitted at every phase
+    transition so the client can deterministically update
+    the user-facing phase label.
+    * progress -- a KnowledgeStreamProgress heartbeat carrying RUN-TIME
+    (completed_units/total_units) counters and an
+    optional human-readable message. Emitted on a
+    periodic cadence (default 30s) within a phase.
+    * final    -- the terminal payload carrying the response body. Last
+    message on the stream. Exactly one final message is
+    emitted per successful call; absence of a final
+    message before EOF is an error.
+
+    The streaming shape replaces the prior unary methods because
+    repository-scoped knowledge generation (especially deep cliff notes)
+    is inherently a multi-phase incrementally-producing operation. The
+    per-call wall-clock deadline that bounded the unary calls is replaced
+    by an outer safety-net deadline (operator-tunable, default 4h) plus
+    gRPC keepalive on the channel, plus a 10-min reaper that actively
+    cancels stuck runs. See thoughts/shared/plans/2026-04-29-deep-cliffnotes-deadline-exceeded.md.
     """
 
     @staticmethod
@@ -169,12 +235,12 @@ class KnowledgeService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(
+        return grpc.experimental.unary_stream(
             request,
             target,
             '/sourcebridge.knowledge.v1.KnowledgeService/GenerateCliffNotes',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesRequest.SerializeToString,
-            knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesResponse.FromString,
+            knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesStreamMessage.FromString,
             options,
             channel_credentials,
             insecure,
@@ -196,12 +262,12 @@ class KnowledgeService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(
+        return grpc.experimental.unary_stream(
             request,
             target,
             '/sourcebridge.knowledge.v1.KnowledgeService/GenerateLearningPath',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathRequest.SerializeToString,
-            knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathResponse.FromString,
+            knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathStreamMessage.FromString,
             options,
             channel_credentials,
             insecure,
@@ -223,12 +289,12 @@ class KnowledgeService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(
+        return grpc.experimental.unary_stream(
             request,
             target,
             '/sourcebridge.knowledge.v1.KnowledgeService/GenerateArchitectureDiagram',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramRequest.SerializeToString,
-            knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramResponse.FromString,
+            knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramStreamMessage.FromString,
             options,
             channel_credentials,
             insecure,
@@ -250,12 +316,12 @@ class KnowledgeService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(
+        return grpc.experimental.unary_stream(
             request,
             target,
             '/sourcebridge.knowledge.v1.KnowledgeService/GenerateWorkflowStory',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryRequest.SerializeToString,
-            knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryResponse.FromString,
+            knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryStreamMessage.FromString,
             options,
             channel_credentials,
             insecure,
@@ -277,12 +343,12 @@ class KnowledgeService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(
+        return grpc.experimental.unary_stream(
             request,
             target,
             '/sourcebridge.knowledge.v1.KnowledgeService/ExplainSystem',
             knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemRequest.SerializeToString,
-            knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemResponse.FromString,
+            knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemStreamMessage.FromString,
             options,
             channel_credentials,
             insecure,
@@ -304,12 +370,12 @@ class KnowledgeService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(
+        return grpc.experimental.unary_stream(
             request,
             target,
             '/sourcebridge.knowledge.v1.KnowledgeService/GenerateCodeTour',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourRequest.SerializeToString,
-            knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourResponse.FromString,
+            knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourStreamMessage.FromString,
             options,
             channel_credentials,
             insecure,

@@ -22,6 +22,106 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// GenerateReportStreamMessage envelopes the GenerateReport server
+// stream. Exactly one of {phase, progress, final} is set per message.
+type GenerateReportStreamMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Event:
+	//
+	//	*GenerateReportStreamMessage_Phase
+	//	*GenerateReportStreamMessage_Progress
+	//	*GenerateReportStreamMessage_Final
+	Event         isGenerateReportStreamMessage_Event `protobuf_oneof:"event"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GenerateReportStreamMessage) Reset() {
+	*x = GenerateReportStreamMessage{}
+	mi := &file_enterprise_v1_report_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GenerateReportStreamMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GenerateReportStreamMessage) ProtoMessage() {}
+
+func (x *GenerateReportStreamMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_enterprise_v1_report_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GenerateReportStreamMessage.ProtoReflect.Descriptor instead.
+func (*GenerateReportStreamMessage) Descriptor() ([]byte, []int) {
+	return file_enterprise_v1_report_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *GenerateReportStreamMessage) GetEvent() isGenerateReportStreamMessage_Event {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+func (x *GenerateReportStreamMessage) GetPhase() *v1.KnowledgeStreamPhaseMarker {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateReportStreamMessage_Phase); ok {
+			return x.Phase
+		}
+	}
+	return nil
+}
+
+func (x *GenerateReportStreamMessage) GetProgress() *v1.KnowledgeStreamProgress {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateReportStreamMessage_Progress); ok {
+			return x.Progress
+		}
+	}
+	return nil
+}
+
+func (x *GenerateReportStreamMessage) GetFinal() *GenerateReportResponse {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateReportStreamMessage_Final); ok {
+			return x.Final
+		}
+	}
+	return nil
+}
+
+type isGenerateReportStreamMessage_Event interface {
+	isGenerateReportStreamMessage_Event()
+}
+
+type GenerateReportStreamMessage_Phase struct {
+	Phase *v1.KnowledgeStreamPhaseMarker `protobuf:"bytes,1,opt,name=phase,proto3,oneof"`
+}
+
+type GenerateReportStreamMessage_Progress struct {
+	Progress *v1.KnowledgeStreamProgress `protobuf:"bytes,2,opt,name=progress,proto3,oneof"`
+}
+
+type GenerateReportStreamMessage_Final struct {
+	Final *GenerateReportResponse `protobuf:"bytes,3,opt,name=final,proto3,oneof"`
+}
+
+func (*GenerateReportStreamMessage_Phase) isGenerateReportStreamMessage_Event() {}
+
+func (*GenerateReportStreamMessage_Progress) isGenerateReportStreamMessage_Event() {}
+
+func (*GenerateReportStreamMessage_Final) isGenerateReportStreamMessage_Event() {}
+
 type GenerateReportRequest struct {
 	state                  protoimpl.MessageState `protogen:"open.v1"`
 	ReportId               string                 `protobuf:"bytes,1,opt,name=report_id,json=reportId,proto3" json:"report_id,omitempty"`
@@ -47,7 +147,7 @@ type GenerateReportRequest struct {
 
 func (x *GenerateReportRequest) Reset() {
 	*x = GenerateReportRequest{}
-	mi := &file_enterprise_v1_report_proto_msgTypes[0]
+	mi := &file_enterprise_v1_report_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -59,7 +159,7 @@ func (x *GenerateReportRequest) String() string {
 func (*GenerateReportRequest) ProtoMessage() {}
 
 func (x *GenerateReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_enterprise_v1_report_proto_msgTypes[0]
+	mi := &file_enterprise_v1_report_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -72,7 +172,7 @@ func (x *GenerateReportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateReportRequest.ProtoReflect.Descriptor instead.
 func (*GenerateReportRequest) Descriptor() ([]byte, []int) {
-	return file_enterprise_v1_report_proto_rawDescGZIP(), []int{0}
+	return file_enterprise_v1_report_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *GenerateReportRequest) GetReportId() string {
@@ -210,7 +310,7 @@ type GenerateReportResponse struct {
 
 func (x *GenerateReportResponse) Reset() {
 	*x = GenerateReportResponse{}
-	mi := &file_enterprise_v1_report_proto_msgTypes[1]
+	mi := &file_enterprise_v1_report_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -222,7 +322,7 @@ func (x *GenerateReportResponse) String() string {
 func (*GenerateReportResponse) ProtoMessage() {}
 
 func (x *GenerateReportResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_enterprise_v1_report_proto_msgTypes[1]
+	mi := &file_enterprise_v1_report_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -235,7 +335,7 @@ func (x *GenerateReportResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateReportResponse.ProtoReflect.Descriptor instead.
 func (*GenerateReportResponse) Descriptor() ([]byte, []int) {
-	return file_enterprise_v1_report_proto_rawDescGZIP(), []int{1}
+	return file_enterprise_v1_report_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GenerateReportResponse) GetMarkdown() string {
@@ -309,7 +409,7 @@ type ReportSectionResult struct {
 
 func (x *ReportSectionResult) Reset() {
 	*x = ReportSectionResult{}
-	mi := &file_enterprise_v1_report_proto_msgTypes[2]
+	mi := &file_enterprise_v1_report_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -321,7 +421,7 @@ func (x *ReportSectionResult) String() string {
 func (*ReportSectionResult) ProtoMessage() {}
 
 func (x *ReportSectionResult) ProtoReflect() protoreflect.Message {
-	mi := &file_enterprise_v1_report_proto_msgTypes[2]
+	mi := &file_enterprise_v1_report_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -334,7 +434,7 @@ func (x *ReportSectionResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportSectionResult.ProtoReflect.Descriptor instead.
 func (*ReportSectionResult) Descriptor() ([]byte, []int) {
-	return file_enterprise_v1_report_proto_rawDescGZIP(), []int{2}
+	return file_enterprise_v1_report_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ReportSectionResult) GetKey() string {
@@ -390,7 +490,12 @@ var File_enterprise_v1_report_proto protoreflect.FileDescriptor
 
 const file_enterprise_v1_report_proto_rawDesc = "" +
 	"\n" +
-	"\x1aenterprise/v1/report.proto\x12\x1asourcebridge.enterprise.v1\x1a\x15common/v1/types.proto\"\xb3\x05\n" +
+	"\x1aenterprise/v1/report.proto\x12\x1asourcebridge.enterprise.v1\x1a\x15common/v1/types.proto\x1a\"common/v1/knowledge_progress.proto\"\x8d\x02\n" +
+	"\x1bGenerateReportStreamMessage\x12J\n" +
+	"\x05phase\x18\x01 \x01(\v22.sourcebridge.common.v1.KnowledgeStreamPhaseMarkerH\x00R\x05phase\x12M\n" +
+	"\bprogress\x18\x02 \x01(\v2/.sourcebridge.common.v1.KnowledgeStreamProgressH\x00R\bprogress\x12J\n" +
+	"\x05final\x18\x03 \x01(\v22.sourcebridge.enterprise.v1.GenerateReportResponseH\x00R\x05finalB\a\n" +
+	"\x05event\"\xb3\x05\n" +
 	"\x15GenerateReportRequest\x12\x1b\n" +
 	"\treport_id\x18\x01 \x01(\tR\breportId\x12\x1f\n" +
 	"\vreport_name\x18\x02 \x01(\tR\n" +
@@ -434,9 +539,9 @@ const file_enterprise_v1_report_proto_rawDesc = "" +
 	"word_count\x18\x05 \x01(\x05R\twordCount\x12\x1f\n" +
 	"\vduration_ms\x18\x06 \x01(\x05R\n" +
 	"durationMs\x12#\n" +
-	"\rerror_message\x18\a \x01(\tR\ferrorMessage2\x92\x01\n" +
-	"\x17EnterpriseReportService\x12w\n" +
-	"\x0eGenerateReport\x121.sourcebridge.enterprise.v1.GenerateReportRequest\x1a2.sourcebridge.enterprise.v1.GenerateReportResponseBHZFgithub.com/sourcebridge/sourcebridge/gen/go/enterprise/v1;enterprisev1b\x06proto3"
+	"\rerror_message\x18\a \x01(\tR\ferrorMessage2\x99\x01\n" +
+	"\x17EnterpriseReportService\x12~\n" +
+	"\x0eGenerateReport\x121.sourcebridge.enterprise.v1.GenerateReportRequest\x1a7.sourcebridge.enterprise.v1.GenerateReportStreamMessage0\x01BHZFgithub.com/sourcebridge/sourcebridge/gen/go/enterprise/v1;enterprisev1b\x06proto3"
 
 var (
 	file_enterprise_v1_report_proto_rawDescOnce sync.Once
@@ -450,23 +555,29 @@ func file_enterprise_v1_report_proto_rawDescGZIP() []byte {
 	return file_enterprise_v1_report_proto_rawDescData
 }
 
-var file_enterprise_v1_report_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_enterprise_v1_report_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_enterprise_v1_report_proto_goTypes = []any{
-	(*GenerateReportRequest)(nil),  // 0: sourcebridge.enterprise.v1.GenerateReportRequest
-	(*GenerateReportResponse)(nil), // 1: sourcebridge.enterprise.v1.GenerateReportResponse
-	(*ReportSectionResult)(nil),    // 2: sourcebridge.enterprise.v1.ReportSectionResult
-	(*v1.LLMUsage)(nil),            // 3: sourcebridge.common.v1.LLMUsage
+	(*GenerateReportStreamMessage)(nil),   // 0: sourcebridge.enterprise.v1.GenerateReportStreamMessage
+	(*GenerateReportRequest)(nil),         // 1: sourcebridge.enterprise.v1.GenerateReportRequest
+	(*GenerateReportResponse)(nil),        // 2: sourcebridge.enterprise.v1.GenerateReportResponse
+	(*ReportSectionResult)(nil),           // 3: sourcebridge.enterprise.v1.ReportSectionResult
+	(*v1.KnowledgeStreamPhaseMarker)(nil), // 4: sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	(*v1.KnowledgeStreamProgress)(nil),    // 5: sourcebridge.common.v1.KnowledgeStreamProgress
+	(*v1.LLMUsage)(nil),                   // 6: sourcebridge.common.v1.LLMUsage
 }
 var file_enterprise_v1_report_proto_depIdxs = []int32{
-	2, // 0: sourcebridge.enterprise.v1.GenerateReportResponse.sections:type_name -> sourcebridge.enterprise.v1.ReportSectionResult
-	3, // 1: sourcebridge.enterprise.v1.GenerateReportResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	0, // 2: sourcebridge.enterprise.v1.EnterpriseReportService.GenerateReport:input_type -> sourcebridge.enterprise.v1.GenerateReportRequest
-	1, // 3: sourcebridge.enterprise.v1.EnterpriseReportService.GenerateReport:output_type -> sourcebridge.enterprise.v1.GenerateReportResponse
-	3, // [3:4] is the sub-list for method output_type
-	2, // [2:3] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	4, // 0: sourcebridge.enterprise.v1.GenerateReportStreamMessage.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	5, // 1: sourcebridge.enterprise.v1.GenerateReportStreamMessage.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
+	2, // 2: sourcebridge.enterprise.v1.GenerateReportStreamMessage.final:type_name -> sourcebridge.enterprise.v1.GenerateReportResponse
+	3, // 3: sourcebridge.enterprise.v1.GenerateReportResponse.sections:type_name -> sourcebridge.enterprise.v1.ReportSectionResult
+	6, // 4: sourcebridge.enterprise.v1.GenerateReportResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	1, // 5: sourcebridge.enterprise.v1.EnterpriseReportService.GenerateReport:input_type -> sourcebridge.enterprise.v1.GenerateReportRequest
+	0, // 6: sourcebridge.enterprise.v1.EnterpriseReportService.GenerateReport:output_type -> sourcebridge.enterprise.v1.GenerateReportStreamMessage
+	6, // [6:7] is the sub-list for method output_type
+	5, // [5:6] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_enterprise_v1_report_proto_init() }
@@ -474,13 +585,18 @@ func file_enterprise_v1_report_proto_init() {
 	if File_enterprise_v1_report_proto != nil {
 		return
 	}
+	file_enterprise_v1_report_proto_msgTypes[0].OneofWrappers = []any{
+		(*GenerateReportStreamMessage_Phase)(nil),
+		(*GenerateReportStreamMessage_Progress)(nil),
+		(*GenerateReportStreamMessage_Final)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_enterprise_v1_report_proto_rawDesc), len(file_enterprise_v1_report_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

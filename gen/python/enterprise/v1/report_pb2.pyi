@@ -1,4 +1,5 @@
 from common.v1 import types_pb2 as _types_pb2
+from common.v1 import knowledge_progress_pb2 as _knowledge_progress_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
@@ -6,6 +7,16 @@ from collections.abc import Iterable as _Iterable, Mapping as _Mapping
 from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
+
+class GenerateReportStreamMessage(_message.Message):
+    __slots__ = ("phase", "progress", "final")
+    PHASE_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_FIELD_NUMBER: _ClassVar[int]
+    FINAL_FIELD_NUMBER: _ClassVar[int]
+    phase: _knowledge_progress_pb2.KnowledgeStreamPhaseMarker
+    progress: _knowledge_progress_pb2.KnowledgeStreamProgress
+    final: GenerateReportResponse
+    def __init__(self, phase: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamPhaseMarker, _Mapping]] = ..., progress: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamProgress, _Mapping]] = ..., final: _Optional[_Union[GenerateReportResponse, _Mapping]] = ...) -> None: ...
 
 class GenerateReportRequest(_message.Message):
     __slots__ = ("report_id", "report_name", "report_type", "audience", "repository_ids", "selected_sections", "include_diagrams", "loe_mode", "output_dir", "repo_data_json", "section_definitions_json", "model_override", "analysis_depth", "include_recommendations", "include_loe", "style_system_prompt", "style_section_rules")

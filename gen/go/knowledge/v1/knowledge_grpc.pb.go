@@ -32,19 +32,41 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // KnowledgeService handles LLM-powered codebase knowledge generation.
+//
+// All seven RPCs are server-streaming (CA-122). Each method emits a
+// stream of *StreamMessage values whose oneof carries one of:
+//   - phase   -- a KnowledgeStreamPhaseMarker emitted at every phase
+//     transition so the client can deterministically update
+//     the user-facing phase label.
+//   - progress -- a KnowledgeStreamProgress heartbeat carrying RUN-TIME
+//     (completed_units/total_units) counters and an
+//     optional human-readable message. Emitted on a
+//     periodic cadence (default 30s) within a phase.
+//   - final    -- the terminal payload carrying the response body. Last
+//     message on the stream. Exactly one final message is
+//     emitted per successful call; absence of a final
+//     message before EOF is an error.
+//
+// The streaming shape replaces the prior unary methods because
+// repository-scoped knowledge generation (especially deep cliff notes)
+// is inherently a multi-phase incrementally-producing operation. The
+// per-call wall-clock deadline that bounded the unary calls is replaced
+// by an outer safety-net deadline (operator-tunable, default 4h) plus
+// gRPC keepalive on the channel, plus a 10-min reaper that actively
+// cancels stuck runs. See thoughts/shared/plans/2026-04-29-deep-cliffnotes-deadline-exceeded.md.
 type KnowledgeServiceClient interface {
 	// GenerateCliffNotes produces a structured cliff-notes report for a repository.
-	GenerateCliffNotes(ctx context.Context, in *GenerateCliffNotesRequest, opts ...grpc.CallOption) (*GenerateCliffNotesResponse, error)
+	GenerateCliffNotes(ctx context.Context, in *GenerateCliffNotesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GenerateCliffNotesStreamMessage], error)
 	// GenerateLearningPath produces a guided learning path for a repository.
-	GenerateLearningPath(ctx context.Context, in *GenerateLearningPathRequest, opts ...grpc.CallOption) (*GenerateLearningPathResponse, error)
+	GenerateLearningPath(ctx context.Context, in *GenerateLearningPathRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GenerateLearningPathStreamMessage], error)
 	// GenerateArchitectureDiagram produces an AI-authored Mermaid architecture diagram.
-	GenerateArchitectureDiagram(ctx context.Context, in *GenerateArchitectureDiagramRequest, opts ...grpc.CallOption) (*GenerateArchitectureDiagramResponse, error)
+	GenerateArchitectureDiagram(ctx context.Context, in *GenerateArchitectureDiagramRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GenerateArchitectureDiagramStreamMessage], error)
 	// GenerateWorkflowStory produces a grounded narrative for how a workflow is used.
-	GenerateWorkflowStory(ctx context.Context, in *GenerateWorkflowStoryRequest, opts ...grpc.CallOption) (*GenerateWorkflowStoryResponse, error)
+	GenerateWorkflowStory(ctx context.Context, in *GenerateWorkflowStoryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GenerateWorkflowStoryStreamMessage], error)
 	// ExplainSystem produces a transient whole-system explanation.
-	ExplainSystem(ctx context.Context, in *ExplainSystemRequest, opts ...grpc.CallOption) (*ExplainSystemResponse, error)
+	ExplainSystem(ctx context.Context, in *ExplainSystemRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ExplainSystemStreamMessage], error)
 	// GenerateCodeTour produces a guided code tour for a repository.
-	GenerateCodeTour(ctx context.Context, in *GenerateCodeTourRequest, opts ...grpc.CallOption) (*GenerateCodeTourResponse, error)
+	GenerateCodeTour(ctx context.Context, in *GenerateCodeTourRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GenerateCodeTourStreamMessage], error)
 }
 
 type knowledgeServiceClient struct {
@@ -55,84 +77,160 @@ func NewKnowledgeServiceClient(cc grpc.ClientConnInterface) KnowledgeServiceClie
 	return &knowledgeServiceClient{cc}
 }
 
-func (c *knowledgeServiceClient) GenerateCliffNotes(ctx context.Context, in *GenerateCliffNotesRequest, opts ...grpc.CallOption) (*GenerateCliffNotesResponse, error) {
+func (c *knowledgeServiceClient) GenerateCliffNotes(ctx context.Context, in *GenerateCliffNotesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GenerateCliffNotesStreamMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GenerateCliffNotesResponse)
-	err := c.cc.Invoke(ctx, KnowledgeService_GenerateCliffNotes_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &KnowledgeService_ServiceDesc.Streams[0], KnowledgeService_GenerateCliffNotes_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[GenerateCliffNotesRequest, GenerateCliffNotesStreamMessage]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
 
-func (c *knowledgeServiceClient) GenerateLearningPath(ctx context.Context, in *GenerateLearningPathRequest, opts ...grpc.CallOption) (*GenerateLearningPathResponse, error) {
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KnowledgeService_GenerateCliffNotesClient = grpc.ServerStreamingClient[GenerateCliffNotesStreamMessage]
+
+func (c *knowledgeServiceClient) GenerateLearningPath(ctx context.Context, in *GenerateLearningPathRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GenerateLearningPathStreamMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GenerateLearningPathResponse)
-	err := c.cc.Invoke(ctx, KnowledgeService_GenerateLearningPath_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &KnowledgeService_ServiceDesc.Streams[1], KnowledgeService_GenerateLearningPath_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[GenerateLearningPathRequest, GenerateLearningPathStreamMessage]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
 
-func (c *knowledgeServiceClient) GenerateArchitectureDiagram(ctx context.Context, in *GenerateArchitectureDiagramRequest, opts ...grpc.CallOption) (*GenerateArchitectureDiagramResponse, error) {
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KnowledgeService_GenerateLearningPathClient = grpc.ServerStreamingClient[GenerateLearningPathStreamMessage]
+
+func (c *knowledgeServiceClient) GenerateArchitectureDiagram(ctx context.Context, in *GenerateArchitectureDiagramRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GenerateArchitectureDiagramStreamMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GenerateArchitectureDiagramResponse)
-	err := c.cc.Invoke(ctx, KnowledgeService_GenerateArchitectureDiagram_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &KnowledgeService_ServiceDesc.Streams[2], KnowledgeService_GenerateArchitectureDiagram_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[GenerateArchitectureDiagramRequest, GenerateArchitectureDiagramStreamMessage]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
 
-func (c *knowledgeServiceClient) GenerateWorkflowStory(ctx context.Context, in *GenerateWorkflowStoryRequest, opts ...grpc.CallOption) (*GenerateWorkflowStoryResponse, error) {
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KnowledgeService_GenerateArchitectureDiagramClient = grpc.ServerStreamingClient[GenerateArchitectureDiagramStreamMessage]
+
+func (c *knowledgeServiceClient) GenerateWorkflowStory(ctx context.Context, in *GenerateWorkflowStoryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GenerateWorkflowStoryStreamMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GenerateWorkflowStoryResponse)
-	err := c.cc.Invoke(ctx, KnowledgeService_GenerateWorkflowStory_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &KnowledgeService_ServiceDesc.Streams[3], KnowledgeService_GenerateWorkflowStory_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[GenerateWorkflowStoryRequest, GenerateWorkflowStoryStreamMessage]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
 
-func (c *knowledgeServiceClient) ExplainSystem(ctx context.Context, in *ExplainSystemRequest, opts ...grpc.CallOption) (*ExplainSystemResponse, error) {
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KnowledgeService_GenerateWorkflowStoryClient = grpc.ServerStreamingClient[GenerateWorkflowStoryStreamMessage]
+
+func (c *knowledgeServiceClient) ExplainSystem(ctx context.Context, in *ExplainSystemRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ExplainSystemStreamMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ExplainSystemResponse)
-	err := c.cc.Invoke(ctx, KnowledgeService_ExplainSystem_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &KnowledgeService_ServiceDesc.Streams[4], KnowledgeService_ExplainSystem_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[ExplainSystemRequest, ExplainSystemStreamMessage]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
 
-func (c *knowledgeServiceClient) GenerateCodeTour(ctx context.Context, in *GenerateCodeTourRequest, opts ...grpc.CallOption) (*GenerateCodeTourResponse, error) {
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KnowledgeService_ExplainSystemClient = grpc.ServerStreamingClient[ExplainSystemStreamMessage]
+
+func (c *knowledgeServiceClient) GenerateCodeTour(ctx context.Context, in *GenerateCodeTourRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GenerateCodeTourStreamMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GenerateCodeTourResponse)
-	err := c.cc.Invoke(ctx, KnowledgeService_GenerateCodeTour_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &KnowledgeService_ServiceDesc.Streams[5], KnowledgeService_GenerateCodeTour_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[GenerateCodeTourRequest, GenerateCodeTourStreamMessage]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KnowledgeService_GenerateCodeTourClient = grpc.ServerStreamingClient[GenerateCodeTourStreamMessage]
 
 // KnowledgeServiceServer is the server API for KnowledgeService service.
 // All implementations must embed UnimplementedKnowledgeServiceServer
 // for forward compatibility.
 //
 // KnowledgeService handles LLM-powered codebase knowledge generation.
+//
+// All seven RPCs are server-streaming (CA-122). Each method emits a
+// stream of *StreamMessage values whose oneof carries one of:
+//   - phase   -- a KnowledgeStreamPhaseMarker emitted at every phase
+//     transition so the client can deterministically update
+//     the user-facing phase label.
+//   - progress -- a KnowledgeStreamProgress heartbeat carrying RUN-TIME
+//     (completed_units/total_units) counters and an
+//     optional human-readable message. Emitted on a
+//     periodic cadence (default 30s) within a phase.
+//   - final    -- the terminal payload carrying the response body. Last
+//     message on the stream. Exactly one final message is
+//     emitted per successful call; absence of a final
+//     message before EOF is an error.
+//
+// The streaming shape replaces the prior unary methods because
+// repository-scoped knowledge generation (especially deep cliff notes)
+// is inherently a multi-phase incrementally-producing operation. The
+// per-call wall-clock deadline that bounded the unary calls is replaced
+// by an outer safety-net deadline (operator-tunable, default 4h) plus
+// gRPC keepalive on the channel, plus a 10-min reaper that actively
+// cancels stuck runs. See thoughts/shared/plans/2026-04-29-deep-cliffnotes-deadline-exceeded.md.
 type KnowledgeServiceServer interface {
 	// GenerateCliffNotes produces a structured cliff-notes report for a repository.
-	GenerateCliffNotes(context.Context, *GenerateCliffNotesRequest) (*GenerateCliffNotesResponse, error)
+	GenerateCliffNotes(*GenerateCliffNotesRequest, grpc.ServerStreamingServer[GenerateCliffNotesStreamMessage]) error
 	// GenerateLearningPath produces a guided learning path for a repository.
-	GenerateLearningPath(context.Context, *GenerateLearningPathRequest) (*GenerateLearningPathResponse, error)
+	GenerateLearningPath(*GenerateLearningPathRequest, grpc.ServerStreamingServer[GenerateLearningPathStreamMessage]) error
 	// GenerateArchitectureDiagram produces an AI-authored Mermaid architecture diagram.
-	GenerateArchitectureDiagram(context.Context, *GenerateArchitectureDiagramRequest) (*GenerateArchitectureDiagramResponse, error)
+	GenerateArchitectureDiagram(*GenerateArchitectureDiagramRequest, grpc.ServerStreamingServer[GenerateArchitectureDiagramStreamMessage]) error
 	// GenerateWorkflowStory produces a grounded narrative for how a workflow is used.
-	GenerateWorkflowStory(context.Context, *GenerateWorkflowStoryRequest) (*GenerateWorkflowStoryResponse, error)
+	GenerateWorkflowStory(*GenerateWorkflowStoryRequest, grpc.ServerStreamingServer[GenerateWorkflowStoryStreamMessage]) error
 	// ExplainSystem produces a transient whole-system explanation.
-	ExplainSystem(context.Context, *ExplainSystemRequest) (*ExplainSystemResponse, error)
+	ExplainSystem(*ExplainSystemRequest, grpc.ServerStreamingServer[ExplainSystemStreamMessage]) error
 	// GenerateCodeTour produces a guided code tour for a repository.
-	GenerateCodeTour(context.Context, *GenerateCodeTourRequest) (*GenerateCodeTourResponse, error)
+	GenerateCodeTour(*GenerateCodeTourRequest, grpc.ServerStreamingServer[GenerateCodeTourStreamMessage]) error
 	mustEmbedUnimplementedKnowledgeServiceServer()
 }
 
@@ -143,23 +241,23 @@ type KnowledgeServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedKnowledgeServiceServer struct{}
 
-func (UnimplementedKnowledgeServiceServer) GenerateCliffNotes(context.Context, *GenerateCliffNotesRequest) (*GenerateCliffNotesResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GenerateCliffNotes not implemented")
+func (UnimplementedKnowledgeServiceServer) GenerateCliffNotes(*GenerateCliffNotesRequest, grpc.ServerStreamingServer[GenerateCliffNotesStreamMessage]) error {
+	return status.Error(codes.Unimplemented, "method GenerateCliffNotes not implemented")
 }
-func (UnimplementedKnowledgeServiceServer) GenerateLearningPath(context.Context, *GenerateLearningPathRequest) (*GenerateLearningPathResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GenerateLearningPath not implemented")
+func (UnimplementedKnowledgeServiceServer) GenerateLearningPath(*GenerateLearningPathRequest, grpc.ServerStreamingServer[GenerateLearningPathStreamMessage]) error {
+	return status.Error(codes.Unimplemented, "method GenerateLearningPath not implemented")
 }
-func (UnimplementedKnowledgeServiceServer) GenerateArchitectureDiagram(context.Context, *GenerateArchitectureDiagramRequest) (*GenerateArchitectureDiagramResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GenerateArchitectureDiagram not implemented")
+func (UnimplementedKnowledgeServiceServer) GenerateArchitectureDiagram(*GenerateArchitectureDiagramRequest, grpc.ServerStreamingServer[GenerateArchitectureDiagramStreamMessage]) error {
+	return status.Error(codes.Unimplemented, "method GenerateArchitectureDiagram not implemented")
 }
-func (UnimplementedKnowledgeServiceServer) GenerateWorkflowStory(context.Context, *GenerateWorkflowStoryRequest) (*GenerateWorkflowStoryResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GenerateWorkflowStory not implemented")
+func (UnimplementedKnowledgeServiceServer) GenerateWorkflowStory(*GenerateWorkflowStoryRequest, grpc.ServerStreamingServer[GenerateWorkflowStoryStreamMessage]) error {
+	return status.Error(codes.Unimplemented, "method GenerateWorkflowStory not implemented")
 }
-func (UnimplementedKnowledgeServiceServer) ExplainSystem(context.Context, *ExplainSystemRequest) (*ExplainSystemResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ExplainSystem not implemented")
+func (UnimplementedKnowledgeServiceServer) ExplainSystem(*ExplainSystemRequest, grpc.ServerStreamingServer[ExplainSystemStreamMessage]) error {
+	return status.Error(codes.Unimplemented, "method ExplainSystem not implemented")
 }
-func (UnimplementedKnowledgeServiceServer) GenerateCodeTour(context.Context, *GenerateCodeTourRequest) (*GenerateCodeTourResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GenerateCodeTour not implemented")
+func (UnimplementedKnowledgeServiceServer) GenerateCodeTour(*GenerateCodeTourRequest, grpc.ServerStreamingServer[GenerateCodeTourStreamMessage]) error {
+	return status.Error(codes.Unimplemented, "method GenerateCodeTour not implemented")
 }
 func (UnimplementedKnowledgeServiceServer) mustEmbedUnimplementedKnowledgeServiceServer() {}
 func (UnimplementedKnowledgeServiceServer) testEmbeddedByValue()                          {}
@@ -182,113 +280,71 @@ func RegisterKnowledgeServiceServer(s grpc.ServiceRegistrar, srv KnowledgeServic
 	s.RegisterService(&KnowledgeService_ServiceDesc, srv)
 }
 
-func _KnowledgeService_GenerateCliffNotes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GenerateCliffNotesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+func _KnowledgeService_GenerateCliffNotes_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(GenerateCliffNotesRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(KnowledgeServiceServer).GenerateCliffNotes(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: KnowledgeService_GenerateCliffNotes_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KnowledgeServiceServer).GenerateCliffNotes(ctx, req.(*GenerateCliffNotesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(KnowledgeServiceServer).GenerateCliffNotes(m, &grpc.GenericServerStream[GenerateCliffNotesRequest, GenerateCliffNotesStreamMessage]{ServerStream: stream})
 }
 
-func _KnowledgeService_GenerateLearningPath_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GenerateLearningPathRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KnowledgeService_GenerateCliffNotesServer = grpc.ServerStreamingServer[GenerateCliffNotesStreamMessage]
+
+func _KnowledgeService_GenerateLearningPath_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(GenerateLearningPathRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(KnowledgeServiceServer).GenerateLearningPath(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: KnowledgeService_GenerateLearningPath_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KnowledgeServiceServer).GenerateLearningPath(ctx, req.(*GenerateLearningPathRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(KnowledgeServiceServer).GenerateLearningPath(m, &grpc.GenericServerStream[GenerateLearningPathRequest, GenerateLearningPathStreamMessage]{ServerStream: stream})
 }
 
-func _KnowledgeService_GenerateArchitectureDiagram_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GenerateArchitectureDiagramRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KnowledgeService_GenerateLearningPathServer = grpc.ServerStreamingServer[GenerateLearningPathStreamMessage]
+
+func _KnowledgeService_GenerateArchitectureDiagram_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(GenerateArchitectureDiagramRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(KnowledgeServiceServer).GenerateArchitectureDiagram(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: KnowledgeService_GenerateArchitectureDiagram_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KnowledgeServiceServer).GenerateArchitectureDiagram(ctx, req.(*GenerateArchitectureDiagramRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(KnowledgeServiceServer).GenerateArchitectureDiagram(m, &grpc.GenericServerStream[GenerateArchitectureDiagramRequest, GenerateArchitectureDiagramStreamMessage]{ServerStream: stream})
 }
 
-func _KnowledgeService_GenerateWorkflowStory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GenerateWorkflowStoryRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KnowledgeService_GenerateArchitectureDiagramServer = grpc.ServerStreamingServer[GenerateArchitectureDiagramStreamMessage]
+
+func _KnowledgeService_GenerateWorkflowStory_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(GenerateWorkflowStoryRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(KnowledgeServiceServer).GenerateWorkflowStory(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: KnowledgeService_GenerateWorkflowStory_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KnowledgeServiceServer).GenerateWorkflowStory(ctx, req.(*GenerateWorkflowStoryRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(KnowledgeServiceServer).GenerateWorkflowStory(m, &grpc.GenericServerStream[GenerateWorkflowStoryRequest, GenerateWorkflowStoryStreamMessage]{ServerStream: stream})
 }
 
-func _KnowledgeService_ExplainSystem_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ExplainSystemRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KnowledgeService_GenerateWorkflowStoryServer = grpc.ServerStreamingServer[GenerateWorkflowStoryStreamMessage]
+
+func _KnowledgeService_ExplainSystem_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ExplainSystemRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(KnowledgeServiceServer).ExplainSystem(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: KnowledgeService_ExplainSystem_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KnowledgeServiceServer).ExplainSystem(ctx, req.(*ExplainSystemRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(KnowledgeServiceServer).ExplainSystem(m, &grpc.GenericServerStream[ExplainSystemRequest, ExplainSystemStreamMessage]{ServerStream: stream})
 }
 
-func _KnowledgeService_GenerateCodeTour_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GenerateCodeTourRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KnowledgeService_ExplainSystemServer = grpc.ServerStreamingServer[ExplainSystemStreamMessage]
+
+func _KnowledgeService_GenerateCodeTour_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(GenerateCodeTourRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(KnowledgeServiceServer).GenerateCodeTour(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: KnowledgeService_GenerateCodeTour_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KnowledgeServiceServer).GenerateCodeTour(ctx, req.(*GenerateCodeTourRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(KnowledgeServiceServer).GenerateCodeTour(m, &grpc.GenericServerStream[GenerateCodeTourRequest, GenerateCodeTourStreamMessage]{ServerStream: stream})
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type KnowledgeService_GenerateCodeTourServer = grpc.ServerStreamingServer[GenerateCodeTourStreamMessage]
 
 // KnowledgeService_ServiceDesc is the grpc.ServiceDesc for KnowledgeService service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -296,32 +352,38 @@ func _KnowledgeService_GenerateCodeTour_Handler(srv interface{}, ctx context.Con
 var KnowledgeService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "sourcebridge.knowledge.v1.KnowledgeService",
 	HandlerType: (*KnowledgeServiceServer)(nil),
-	Methods: []grpc.MethodDesc{
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
 		{
-			MethodName: "GenerateCliffNotes",
-			Handler:    _KnowledgeService_GenerateCliffNotes_Handler,
+			StreamName:    "GenerateCliffNotes",
+			Handler:       _KnowledgeService_GenerateCliffNotes_Handler,
+			ServerStreams: true,
 		},
 		{
-			MethodName: "GenerateLearningPath",
-			Handler:    _KnowledgeService_GenerateLearningPath_Handler,
+			StreamName:    "GenerateLearningPath",
+			Handler:       _KnowledgeService_GenerateLearningPath_Handler,
+			ServerStreams: true,
 		},
 		{
-			MethodName: "GenerateArchitectureDiagram",
-			Handler:    _KnowledgeService_GenerateArchitectureDiagram_Handler,
+			StreamName:    "GenerateArchitectureDiagram",
+			Handler:       _KnowledgeService_GenerateArchitectureDiagram_Handler,
+			ServerStreams: true,
 		},
 		{
-			MethodName: "GenerateWorkflowStory",
-			Handler:    _KnowledgeService_GenerateWorkflowStory_Handler,
+			StreamName:    "GenerateWorkflowStory",
+			Handler:       _KnowledgeService_GenerateWorkflowStory_Handler,
+			ServerStreams: true,
 		},
 		{
-			MethodName: "ExplainSystem",
-			Handler:    _KnowledgeService_ExplainSystem_Handler,
+			StreamName:    "ExplainSystem",
+			Handler:       _KnowledgeService_ExplainSystem_Handler,
+			ServerStreams: true,
 		},
 		{
-			MethodName: "GenerateCodeTour",
-			Handler:    _KnowledgeService_GenerateCodeTour_Handler,
+			StreamName:    "GenerateCodeTour",
+			Handler:       _KnowledgeService_GenerateCodeTour_Handler,
+			ServerStreams: true,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
 	Metadata: "knowledge/v1/knowledge.proto",
 }
