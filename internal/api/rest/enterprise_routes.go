@@ -104,6 +104,22 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 	// Wire the report generator to call the Python worker via gRPC.
 	// The callback collects REAL repository data from the GraphStore so
 	// the LLM has actual evidence to write about (not hallucinations).
+	//
+	// CA-122 codex r2 M5 — known gap: the SetReportGenerator callback
+	// signature does not accept a context.Context (it lives in the
+	// enterprise package's API surface), so we pass context.Background()
+	// here. That means an HTTP client disconnect or upstream route
+	// timeout WILL NOT propagate to the worker stream; the gRPC call
+	// runs to completion or to the orchestrator's 4h
+	// knowledge_rpc_safety_net_timeout, whichever is shorter.
+	//
+	// The other six knowledge RPCs (cliff notes, architecture diagram,
+	// learning path, code tour, workflow story, explain system, build
+	// repository understanding) DO honor cancellation because they
+	// thread the GraphQL request context through. Report cancellation
+	// is the one remaining gap; resolving it requires extending the
+	// SetReportGenerator callback signature in the enterprise package
+	// to accept a context, which is a follow-up tracked in CHANGELOG.
 	if s.llmCaller != nil && s.llmCaller.IsAvailable() {
 		ectx.API.SetReportGenerator(func(reportID, reportType, audience, repoDataJSON, sectionDefsJSON, outputDir string, repoIDs, selectedSections []string, includeDiagrams, includeRecommendations, includeLOE bool, loeMode, reportName, analysisDepth, styleSystemPrompt, styleSectionRules string) (string, int, int, int, string, error) {
 			// Collect actual repo data from the graph and knowledge stores
@@ -119,6 +135,7 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 			if len(repoIDs) > 0 {
 				repoIDHint = repoIDs[0]
 			}
+			// context.Background() — see M5 documentation block above.
 			resp, err := s.llmCaller.GenerateReport(context.Background(), repoIDHint, resolution.OpReportGenerate, &enterprisev1.GenerateReportRequest{
 				ReportId:               reportID,
 				ReportName:             reportName,
