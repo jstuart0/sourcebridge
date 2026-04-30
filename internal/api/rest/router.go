@@ -620,6 +620,17 @@ func (s *Server) setupRouter() {
 		gqlClusterStore = cs
 	}
 
+	// Slice 3 of the LLM provider profiles plan: thread the profile
+	// lookup adapter into the GraphQL resolver so the per-repo
+	// override mutation can validate referenced profiles + populate
+	// profileName at field-resolve time. The rest profile-store
+	// adapter satisfies graphql.LLMProfileLookup (LookupProfileName).
+	// Nil-safe: pre-profile / embedded mode degrades gracefully.
+	var gqlProfileLookup graphql.LLMProfileLookup
+	if s.llmProfileStore != nil {
+		gqlProfileLookup = s.llmProfileStore
+	}
+
 	// GraphQL server
 	gqlSrv := handler.NewDefaultServer(graphql.NewExecutableSchema(graphql.Config{
 		Resolvers: &graphql.Resolver{
@@ -640,6 +651,7 @@ func (s *Server) setupRouter() {
 			SearchSvc:          s.searchSvc,
 			ReqBooster:         s.reqBooster,
 			QA:                 s.qaResolverOrchestrator(),
+			LLMProfileLookup:           gqlProfileLookup,
 			LivingWikiStore:            s.livingWikiStore,
 			LivingWikiResolver:         s.livingWikiResolver,
 			LivingWikiRepoStore:        s.livingWikiRepoStore,

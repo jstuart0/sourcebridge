@@ -106,10 +106,23 @@ func IsLivingWikiOp(op string) bool {
 type Source string
 
 const (
+	// SourceRepoOverride marks a field that came from a per-repo
+	// inline override (provider/base_url/api_key/model fields set
+	// directly on the lw_repo_settings.living_wiki_llm_override row).
 	SourceRepoOverride Source = "repo_override"
-	SourceWorkspace    Source = "workspace"
-	SourceEnvFallback  Source = "env_fallback"
-	SourceBuiltin      Source = "builtin"
+
+	// SourceRepoOverrideProfile marks a field that came from a per-repo
+	// override that references a saved profile by id (slice 3 of the
+	// LLM provider profiles plan). The override row carries
+	// profile_id; the resolver fetches that profile via
+	// ProfileLookupStore and overlays its fields. Operators can grep
+	// for this label to confirm a per-repo "use a saved profile"
+	// override is taking effect.
+	SourceRepoOverrideProfile Source = "repo_override_profile"
+
+	SourceWorkspace   Source = "workspace"
+	SourceEnvFallback Source = "env_fallback"
+	SourceBuiltin     Source = "builtin"
 )
 
 // Field names used in Snapshot.Sources.

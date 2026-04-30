@@ -2112,10 +2112,23 @@ export function WikiSettingsPanel({
 
         {/* Per-repository LLM override — collapsed by default. Applies to
             every repo-scoped LLM op (not just living-wiki), but lives on
-            this panel since the storage is alongside the wiki settings. */}
+            this panel since the storage is alongside the wiki settings.
+
+            Slice 3 of the LLM provider profiles plan: the override has
+            three modes (workspace inherit / saved profile / inline).
+            profileMissing detects the deleted-profile signal: if a
+            saved profileId carries no profileName, the GraphQL field
+            resolver couldn't resolve the name (returned a non-fatal
+            error with extensions.code = "PROFILE_NO_LONGER_EXISTS").
+            The section renders an inline resolution panel when this
+            flag is true. */}
         <RepositoryLLMOverrideSection
           repoId={repoId}
           override={settings?.llmOverride ?? null}
+          profileMissing={
+            !!settings?.llmOverride?.profileId &&
+            !settings.llmOverride.profileName
+          }
           onSaved={(next) => {
             // Sync the override back into local panel state so the
             // saved-state hint reflects the latest save without a refetch.

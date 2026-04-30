@@ -879,7 +879,26 @@ type Repository struct {
 //
 // The api_key is never returned in plaintext. apiKeySet=true means a key
 // cipher is saved; apiKeyHint is a masked preview ("sk-ant-...abcd").
+//
+// Slice 3 of the LLM provider profiles plan adds a "saved-profile" mode:
+// when profileId is non-empty, the resolver uses the referenced profile's
+// values instead of the inline fields below. profileName is a read-only
+// convenience for the UI (resolved at field-resolve time against
+// ca_llm_profile). The mutation enforces mutual exclusion: setting
+// profileId clears the inline fields atomically server-side.
 type RepositoryLLMOverride struct {
+	// profileId references a saved profile (ca_llm_profile:<id>) when the
+	// override is in "saved-profile" mode. null when the override is in
+	// inline mode (today's per-field semantics). Stable record id; UI uses
+	// it as the dropdown selection key.
+	ProfileID *string `json:"profileId,omitempty"`
+	// profileName is the human-readable name of the referenced profile,
+	// resolved against ca_llm_profile at field-resolve time. null when
+	// profileId is null OR when the referenced profile no longer exists.
+	// When the profile is missing, the field resolver also returns a
+	// GraphQL error with extensions.code = "PROFILE_NO_LONGER_EXISTS" so
+	// the UI can render the resolution panel.
+	ProfileName              *string    `json:"profileName,omitempty"`
 	Provider                 *string    `json:"provider,omitempty"`
 	BaseURL                  *string    `json:"baseURL,omitempty"`
 	APIKeySet                bool       `json:"apiKeySet"`
@@ -907,7 +926,28 @@ type RepositoryLLMOverride struct {
 //   - clearAPIKey: true → drop the saved cipher (revert to workspace key)
 //     Empty-string apiKey is treated as omitted to avoid ambiguous
 //     password-field UX.
+//
+// Slice 3 of the LLM provider profiles plan adds the three-mode
+// discriminator:
+//   - profileId non-empty → switch to "saved-profile" mode; server
+//     atomically clears all inline fields (provider, baseURL, api_key,
+//     models). The saved row is { profile_id: <id> } and resolution
+//     fetches that profile.
+//   - clearProfile: true → drop the saved profile_id (revert to inline
+//     mode); inline fields below are preserved if also sent in the same
+//     patch (mutually independent).
+//   - Both omitted → today's behavior (inline-only patch).
+//   - Sending profileId pointing at a deleted profile → mutation returns
+//     a GraphQL error with extensions.code = "PROFILE_NO_LONGER_EXISTS"
+//     so the UI can render the resolution panel without persisting a
+//     stale reference.
+//
+// clearProfile mirrors the existing clearAPIKey precedent: an explicit
+// boolean to disambiguate "clear" from "leave alone" (profileId="" is
+// treated as "leave alone" for symmetry with the password-field UX).
 type RepositoryLLMOverrideInput struct {
+	ProfileID                *string `json:"profileId,omitempty"`
+	ClearProfile             *bool   `json:"clearProfile,omitempty"`
 	Provider                 *string `json:"provider,omitempty"`
 	BaseURL                  *string `json:"baseURL,omitempty"`
 	APIKey                   *string `json:"apiKey,omitempty"`

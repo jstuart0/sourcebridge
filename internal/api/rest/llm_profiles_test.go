@@ -156,6 +156,24 @@ func (f *fakeProfileStoreAdapter) ActiveProfileID(_ context.Context) (string, er
 	return f.activeID, nil
 }
 
+// LookupProfileName implements the slice-3 LLMProfileLookup-shaped
+// method on the rest adapter. Returns the saved profile's name when
+// the id exists, or ("", false, nil) for missing ids — matching the
+// real adapter's distinction between "deleted" and "DB outage".
+func (f *fakeProfileStoreAdapter) LookupProfileName(_ context.Context, profileID string) (string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if profileID == "" {
+		return "", false, nil
+	}
+	for _, p := range f.profiles {
+		if p.ID == profileID {
+			return p.Name, true, nil
+		}
+	}
+	return "", false, nil
+}
+
 // newServerWithProfileStore constructs a minimal Server with just
 // the profile-store wired and the new routes mounted. Used by every
 // handler test below.

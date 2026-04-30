@@ -136,6 +136,14 @@ type surrealLivingWikiRepoSettings struct {
 // field. See thoughts/shared/plans/2026-04-29-workspace-llm-source-of-truth-r2.md
 // section 5.1 for the full rationale.
 type surrealLivingWikiLLMOverride struct {
+	// ProfileID points at a saved profile (ca_llm_profile:<id>) when the
+	// override is in "saved-profile" mode (slice 3 of the LLM provider
+	// profiles plan). Empty means "inline override" (today's behavior).
+	// The schema-ensure step in slice 1 added this field with a string
+	// default so legacy rows that pre-date slice 3 read back as empty,
+	// preserving today's semantics.
+	ProfileID string `json:"profile_id,omitempty"`
+
 	Provider     string `json:"provider,omitempty"`
 	BaseURL      string `json:"base_url,omitempty"`
 	APIKeyCipher string `json:"api_key_cipher,omitempty"`
@@ -210,6 +218,7 @@ func (r *surrealLivingWikiRepoSettings) toSettings(decryptAPIKey func(string) (s
 	// the resolver's overlay logic.
 	if r.LLMOverride != nil {
 		ov := &livingwiki.LLMOverride{
+			ProfileID:                r.LLMOverride.ProfileID,
 			Provider:                 r.LLMOverride.Provider,
 			BaseURL:                  r.LLMOverride.BaseURL,
 			AdvancedMode:             r.LLMOverride.AdvancedMode,
@@ -374,10 +383,21 @@ func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, setting
 	// expects (the legacy DTO reads `model` only).
 	llmOverrideClause := ""
 	if settings.LLMOverride != nil && !settings.LLMOverride.IsEmpty() {
+		// Slice 3: only encrypt+persist a non-empty api_key when in
+		// inline mode. In saved-profile mode (ProfileID != "") the
+		// GraphQL mutation has already cleared the inline fields; the
+		// resolver fetches the profile's api_key via ProfileLookupStore
+		// at resolve time, so persisting the inline cipher here would
+		// be dead bytes that contradict the mode. Pass an empty string
+		// to encryptOverrideAPIKey when the inline APIKey is empty —
+		// that path returns "" without invoking the cipher (avoids the
+		// ErrEncryptionKeyRequired path on a row that doesn't actually
+		// carry a key).
 		cipher, err := s.encryptOverrideAPIKey(settings.LLMOverride.APIKey)
 		if err != nil {
 			return fmt.Errorf("living-wiki repo override api key encrypt: %w", err)
 		}
+		vars["llm_override_profile_id"] = settings.LLMOverride.ProfileID
 		vars["llm_override_provider"] = settings.LLMOverride.Provider
 		vars["llm_override_base_url"] = settings.LLMOverride.BaseURL
 		vars["llm_override_api_key_cipher"] = cipher
@@ -394,6 +414,7 @@ func (s *LivingWikiRepoSettingsStore) SetRepoSettings(c context.Context, setting
 		// answer. Drop in a follow-up after one stable release cycle.
 		vars["llm_override_legacy_model"] = settings.LLMOverride.SummaryModel
 		llmOverrideClause = `living_wiki_llm_override = {
+			profile_id:                 $llm_override_profile_id,
 			provider:                   $llm_override_provider,
 			base_url:                   $llm_override_base_url,
 			api_key_cipher:             $llm_override_api_key_cipher,

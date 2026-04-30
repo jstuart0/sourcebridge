@@ -166,7 +166,19 @@ type RepoOverrideStore interface {
 // Mirrors the workspace advanced-mode area list exactly so the per-repo
 // surface and workspace surface stay aligned. Empty fields fall through
 // to the workspace layer.
+//
+// Slice 3 of the LLM provider profiles plan adds ProfileID. When set,
+// the resolver fetches that profile via ProfileLookupStore and overlays
+// its fields with source label SourceRepoOverrideProfile. Inline fields
+// below are ignored when ProfileID is non-empty; the GraphQL mutation
+// enforces mutual exclusion at write time.
 type RepoOverride struct {
+	// ProfileID points at a saved profile. Non-empty means the resolver
+	// uses that profile's values as the per-repo overlay (slice 3 of
+	// the LLM provider profiles plan). Empty means "inline override"
+	// — the rest of the fields apply.
+	ProfileID string
+
 	Provider string
 	BaseURL  string
 	APIKey   string // already-decrypted
@@ -207,10 +219,11 @@ type Resolver interface {
 // DefaultResolver implements Resolver against a workspace store, an optional
 // per-repo override store, and an env-bootstrap snapshot taken from cfg.LLM.
 type DefaultResolver struct {
-	store     LLMConfigStore
-	repoStore RepoOverrideStore
-	envBoot   config.LLMConfig
-	log       *slog.Logger
+	store        LLMConfigStore
+	repoStore    RepoOverrideStore
+	profileStore ProfileLookupStore // slice 3: nil-safe; only used when override.ProfileID != ""
+	envBoot      config.LLMConfig
+	log          *slog.Logger
 
 	mu       sync.Mutex
 	cache    *WorkspaceRecord // last successful fetch
@@ -226,15 +239,33 @@ type DefaultResolver struct {
 // fills this in). store may be nil only when running in embedded/in-memory
 // mode where no DB is available; in that case Resolve always falls through
 // to the env-bootstrap layer.
+//
+// Backwards-compat: callers that don't yet wire the slice-3
+// ProfileLookupStore should use NewWithProfileLookup with profileStore=nil
+// (or just keep calling New, which defaults profileStore to nil). When
+// profileStore is nil, per-repo overrides that carry a non-empty
+// ProfileID degrade gracefully: the resolver logs a Warn and treats the
+// override as a no-op for that resolve so we never silently leak the
+// workspace api_key for a repo that intended a different profile.
 func New(store LLMConfigStore, repoStore RepoOverrideStore, envBoot config.LLMConfig, log *slog.Logger) *DefaultResolver {
+	return NewWithProfileLookup(store, repoStore, nil, envBoot, log)
+}
+
+// NewWithProfileLookup is the slice-3 constructor that accepts the
+// ProfileLookupStore needed to resolve per-repo "use a saved profile"
+// overrides. The profile lookup is invoked only when an override row's
+// ProfileID is non-empty; otherwise the inline-override path runs
+// exactly as before.
+func NewWithProfileLookup(store LLMConfigStore, repoStore RepoOverrideStore, profileStore ProfileLookupStore, envBoot config.LLMConfig, log *slog.Logger) *DefaultResolver {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &DefaultResolver{
-		store:     store,
-		repoStore: repoStore,
-		envBoot:   envBoot,
-		log:       log,
+		store:        store,
+		repoStore:    repoStore,
+		profileStore: profileStore,
+		envBoot:      envBoot,
+		log:          log,
 	}
 }
 
@@ -546,6 +577,13 @@ func overrideModelForOp(ov *RepoOverride, group string) string {
 // DraftModel is overlaid separately because, like the workspace, it is
 // not selected by op group — it accompanies the main model for
 // speculative decoding.
+//
+// Slice 3 (LLM provider profiles): if the override carries a non-empty
+// ProfileID, the resolver fetches that profile via ProfileLookupStore
+// and overlays its values with source label SourceRepoOverrideProfile.
+// Failures (profile deleted, store unreachable) degrade to "no override
+// applied" with a Warn log — never silently leak workspace credentials
+// for a repo that explicitly chose a different profile.
 func (r *DefaultResolver) applyRepoOverride(ctx context.Context, snap *Snapshot, repoID, op string) {
 	if r.repoStore == nil || repoID == "" {
 		return
@@ -559,6 +597,34 @@ func (r *DefaultResolver) applyRepoOverride(ctx context.Context, snap *Snapshot,
 	if ov == nil {
 		return
 	}
+	// Slice 3: three-mode discrimination. The GraphQL mutation
+	// enforces mutual exclusion at write time (saving with ProfileID
+	// non-empty clears inline fields atomically; saving with
+	// clearProfile=true clears ProfileID), so a well-behaved write
+	// path produces rows where AT MOST one mode is populated. The
+	// resolver is defensive against pathological rows where both are
+	// set: per the slice-3 instruction, inline-mode wins on collision
+	// because (a) it preserves today's behavior for any pre-slice-3
+	// row that somehow grew a stray ProfileID, and (b) inline values
+	// are concrete material the user explicitly typed, while a
+	// ProfileID could be a stale leftover from a deleted profile.
+	// This is a defense-in-depth choice — production rows should
+	// never reach this branch.
+	hasInline := ov.Provider != "" || ov.BaseURL != "" || ov.APIKey != "" ||
+		ov.SummaryModel != "" || ov.ReviewModel != "" || ov.AskModel != "" ||
+		ov.KnowledgeModel != "" || ov.ArchitectureDiagramModel != "" ||
+		ov.ReportModel != "" || ov.DraftModel != ""
+	if ov.ProfileID != "" && !hasInline {
+		r.applyRepoOverrideFromProfile(ctx, snap, repoID, ov.ProfileID)
+		return
+	}
+	r.applyRepoOverrideInline(snap, ov)
+}
+
+// applyRepoOverrideInline is the legacy (R2) per-field overlay. Lifted
+// out so the profile-mode branch above can early-return without
+// duplicating the inline path.
+func (r *DefaultResolver) applyRepoOverrideInline(snap *Snapshot, ov *RepoOverride) {
 	if ov.Provider != "" {
 		snap.Provider = ov.Provider
 		snap.Sources[FieldProvider] = SourceRepoOverride
@@ -578,5 +644,86 @@ func (r *DefaultResolver) applyRepoOverride(ctx context.Context, snap *Snapshot,
 	if ov.DraftModel != "" {
 		snap.DraftModel = ov.DraftModel
 		snap.Sources[FieldDraftModel] = SourceRepoOverride
+	}
+}
+
+// applyRepoOverrideFromProfile fetches the referenced profile and
+// overlays its fields with source label SourceRepoOverrideProfile. The
+// per-op model is picked from the profile's per-area fields the same
+// way the workspace overlay picks from WorkspaceRecord (the profile
+// schema mirrors the workspace's, by design).
+//
+// Failure modes (each treated as "no override applied" with a Warn):
+//   - profileStore is nil → resolver wasn't wired for slice 3 yet.
+//     This is a configuration bug; without the lookup we cannot
+//     resolve the override. Falling through to workspace is the
+//     safest behavior — never leak workspace credentials for a repo
+//     that intended a different profile silently.
+//   - ErrProfileNotFound → the referenced profile was deleted (the
+//     activate-handler refuses to delete the active profile, but a
+//     non-active profile referenced by a per-repo override CAN be
+//     deleted; ruby-M2). The GraphQL field resolver surfaces this to
+//     the UI as a typed error so the user can repair the override.
+//   - other store errors → DB hiccup; same handling as the workspace
+//     overlay's outage path (Warn + serve last-known workspace).
+func (r *DefaultResolver) applyRepoOverrideFromProfile(ctx context.Context, snap *Snapshot, repoID, profileID string) {
+	if r.profileStore == nil {
+		r.log.Warn("llm resolver: per-repo override references a profile but ProfileLookupStore is not wired; falling back to workspace",
+			"repo_id", repoID,
+			"profile_id", profileID)
+		return
+	}
+	rec, err := r.profileStore.LoadProfileForResolution(ctx, profileID)
+	if err != nil {
+		if errors.Is(err, ErrProfileNotFound) {
+			r.log.Warn("llm resolver: per-repo override references a deleted profile; falling back to workspace",
+				"repo_id", repoID,
+				"profile_id", profileID)
+			return
+		}
+		r.log.Warn("llm resolver: per-repo override profile fetch failed; falling back to workspace",
+			"repo_id", repoID,
+			"profile_id", profileID,
+			"error", err)
+		return
+	}
+	if rec == nil {
+		// Defensive: well-behaved ProfileLookupStore returns
+		// ErrProfileNotFound for missing rows, but a misbehaving
+		// implementation could return (nil, nil). Treat as not-found.
+		r.log.Warn("llm resolver: per-repo override profile fetch returned nil; falling back to workspace",
+			"repo_id", repoID,
+			"profile_id", profileID)
+		return
+	}
+
+	// Overlay the profile's fields with source label
+	// SourceRepoOverrideProfile so operators can grep for it. The
+	// per-op model is picked the same way the workspace overlay picks
+	// (workspaceModelForOp) — the profile mirrors the workspace
+	// shape, so reusing that helper is correct.
+	if rec.Provider != "" {
+		snap.Provider = rec.Provider
+		snap.Sources[FieldProvider] = SourceRepoOverrideProfile
+	}
+	if rec.BaseURL != "" {
+		snap.BaseURL = rec.BaseURL
+		snap.Sources[FieldBaseURL] = SourceRepoOverrideProfile
+	}
+	if rec.APIKey != "" {
+		snap.APIKey = rec.APIKey
+		snap.Sources[FieldAPIKey] = SourceRepoOverrideProfile
+	}
+	if model := workspaceModelForOp(rec, snap.OperationGroup); model != "" {
+		snap.Model = model
+		snap.Sources[FieldModel] = SourceRepoOverrideProfile
+	}
+	if rec.DraftModel != "" {
+		snap.DraftModel = rec.DraftModel
+		snap.Sources[FieldDraftModel] = SourceRepoOverrideProfile
+	}
+	if rec.TimeoutSecs > 0 {
+		snap.TimeoutSecs = rec.TimeoutSecs
+		snap.Sources[FieldTimeoutSecs] = SourceRepoOverrideProfile
 	}
 }

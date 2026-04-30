@@ -24,7 +24,31 @@ import "time"
 // The api_key field holds plaintext at this layer; the SurrealDB store
 // encrypts/decrypts via the same sbenc:v1 envelope used by
 // ca_llm_config.api_key (see internal/db/llm_config_store.go).
+//
+// Slice 3 of the LLM provider profiles plan adds ProfileID. The override
+// is now a three-mode discriminator (per plan D3 / option (c)):
+//
+//   1. Workspace (no override row at all) — handled by the absence of
+//      this struct on RepositoryLivingWikiSettings.LLMOverride.
+//   2. Saved-profile reference — ProfileID is non-empty; the resolver
+//      fetches that profile via ProfileLookupStore and uses its values.
+//      Inline fields are cleared atomically server-side when this mode
+//      is selected.
+//   3. Inline override — ProfileID is empty; today's per-field semantics
+//      apply (provider/base_url/api_key/model fields).
+//
+// Server-side mutual exclusion: the GraphQL mutation clears inline fields
+// when ProfileID is set non-empty, and clears ProfileID when clearProfile
+// is sent. The resolver is defensive: if both are somehow present, the
+// profile reference wins (deterministic, matches plan §"Resolver wiring").
 type LLMOverride struct {
+	// ProfileID points at a saved profile (ca_llm_profile:<id>). When
+	// non-empty, the resolver fetches that profile via
+	// ProfileLookupStore and overlays its values; inline fields below
+	// are ignored. Empty means "inline override" (today's behavior).
+	// Slice 3 of the LLM provider profiles plan.
+	ProfileID string `json:"profile_id,omitempty"`
+
 	// Provider, BaseURL are optional. Empty fields fall through to the
 	// workspace layer in the resolver.
 	Provider string `json:"provider,omitempty"`
@@ -62,11 +86,19 @@ type LLMOverride struct {
 // IsEmpty reports whether the override has no fields set. Used by
 // callers to decide between "leave the override untouched" and "this
 // override is a no-op, treat as no override".
+//
+// Slice 3: a non-empty ProfileID counts as "set" even when every inline
+// field is blank — that's the "saved profile reference" mode and must be
+// preserved on save. Without this, a profile-mode save with no inline
+// fields would be silently dropped by the GraphQL mutation's empty-row
+// collapse (see SetRepositoryLLMOverride in
+// internal/api/graphql/repository_llm_override.resolvers.go).
 func (o *LLMOverride) IsEmpty() bool {
 	if o == nil {
 		return true
 	}
-	return o.Provider == "" &&
+	return o.ProfileID == "" &&
+		o.Provider == "" &&
 		o.BaseURL == "" &&
 		o.APIKey == "" &&
 		!o.AdvancedMode &&

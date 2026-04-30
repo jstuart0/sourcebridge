@@ -42,6 +42,29 @@ type GitConfigLoader interface {
 	LoadGitConfig() (token, sshKeyPath string, err error)
 }
 
+// LLMProfileLookup is the narrow read-side interface the GraphQL layer
+// uses to (a) validate that a per-repo override's profileId references
+// an existing profile at save time, and (b) resolve profileName for the
+// RepositoryLLMOverride.profileName field at read time.
+//
+// Slice 3 of the LLM provider profiles plan introduces this. The cli
+// wiring layer (cli/serve.go) implements it on top of the slice-1
+// SurrealLLMProfileStore via a small adapter; tests use an in-memory
+// fake. The interface is intentionally narrow: GraphQL never needs to
+// see profile credentials, so we don't expose api_key, base_url, etc.
+// here — only the existence/name pair.
+//
+// LookupProfileName returns:
+//   - ("Default", true, nil) when the profile exists.
+//   - ("", false, nil) when the profile is missing (deleted). This
+//     drives the PROFILE_NO_LONGER_EXISTS error code on the field +
+//     mutation.
+//   - ("", false, err) on store failures (DB outage etc.) — caller
+//     surfaces a generic error.
+type LLMProfileLookup interface {
+	LookupProfileName(ctx context.Context, profileID string) (name string, exists bool, err error)
+}
+
 // This file will not be regenerated automatically.
 //
 // It serves as dependency injection for your app, add any dependencies you require here.
@@ -74,6 +97,12 @@ type Resolver struct {
 	GitResolver gitres.Resolver
 	ComprehensionStore comprehension.Store        // comprehension settings + model capabilities; nil when unavailable
 	HealthChecker      *health.Checker            // shared DB+worker health probe; nil = no live checks (embedded/test mode)
+	// LLMProfileLookup resolves profile id → name and "exists" for the
+	// per-repo override path (slice 3). Nil when running pre-profile
+	// (embedded mode); the GraphQL field/mutation degrade gracefully
+	// (mutations skip the validation step; the field returns nil for
+	// profileName but never PROFILE_NO_LONGER_EXISTS without proof).
+	LLMProfileLookup             LLMProfileLookup
 	LivingWikiStore              livingwiki.Store              // living-wiki UI settings; nil when unavailable
 	LivingWikiResolver           *livingwiki.Resolver          // resolved living-wiki settings (UI + env fallback)
 	LivingWikiRepoStore          livingwiki.RepoSettingsStore  // per-repo living-wiki opt-in; nil when unavailable

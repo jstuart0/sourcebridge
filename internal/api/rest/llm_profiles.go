@@ -40,6 +40,13 @@ import (
 // profile store + write helpers. The cli/serve.go layer wires the
 // concrete *db.SurrealLLMProfileStore + *db.SurrealLLMConfigStore
 // behind this interface so the rest package doesn't import internal/db.
+//
+// Slice 3 of the LLM provider profiles plan adds LookupProfileName
+// (used by the GraphQL per-repo override path: validate-on-save + name
+// resolution at field-resolve time). The same adapter implementation
+// serves both REST and GraphQL — the rest.Server already holds the
+// adapter; the router exposes it to the GraphQL resolver via a small
+// wrapper that satisfies graphql.LLMProfileLookup.
 type LLMProfileStoreAdapter interface {
 	ListProfiles(ctx context.Context) ([]ProfileResponse, error)
 	GetProfile(ctx context.Context, id string) (*ProfileResponse, error)
@@ -49,6 +56,10 @@ type LLMProfileStoreAdapter interface {
 	ActivateProfile(ctx context.Context, id, by string) error
 	ActiveProfileMissing() bool
 	ActiveProfileID(ctx context.Context) (string, error)
+	// LookupProfileName returns (name, exists, err) for a profile id.
+	// Returns ("", false, nil) when the profile is missing — distinct
+	// from a DB outage. Slice 3 of the LLM provider profiles plan.
+	LookupProfileName(ctx context.Context, profileID string) (name string, exists bool, err error)
 }
 
 // WithLLMProfileStore wires the profile-store adapter into the server.

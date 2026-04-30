@@ -223,6 +223,8 @@ export const REPOSITORY_QUERY = gql`
           errorMessage
         }
         llmOverride {
+          profileId
+          profileName
           provider
           baseURL
           apiKeySet
@@ -1628,6 +1630,8 @@ export const UPDATE_REPOSITORY_LIVING_WIKI_SETTINGS_MUTATION = gql`
 // ─────────────────────────────────────────────────────────────────────────────
 
 const REPO_LLM_OVERRIDE_FIELDS = `
+  profileId
+  profileName
   provider
   baseURL
   apiKeySet

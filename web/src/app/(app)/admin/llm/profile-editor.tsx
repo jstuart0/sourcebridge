@@ -37,26 +37,12 @@ import { cn } from "@/lib/utils";
 //   job — the panel-scoped resolution UI lives in page.tsx).
 // ─────────────────────────────────────────────────────────────────────────
 
-export interface ProfileResponse {
-  id: string;
-  name: string;
-  provider: string;
-  base_url: string;
-  api_key_set: boolean;
-  api_key_hint?: string;
-  summary_model: string;
-  review_model: string;
-  ask_model: string;
-  knowledge_model: string;
-  architecture_diagram_model: string;
-  report_model?: string;
-  draft_model: string;
-  timeout_secs: number;
-  advanced_mode: boolean;
-  is_active: boolean;
-  created_at?: string;
-  updated_at?: string;
-}
+// Slice 3 of the LLM provider profiles plan: ProfileResponse moved to
+// `@/lib/llm/profile` so the per-repo override picker can share the
+// type without an awkward cross-(app) import. Re-exported here so
+// existing slice-2 imports keep working unchanged.
+export type { ProfileResponse } from "@/lib/llm/profile";
+import type { ProfileResponse } from "@/lib/llm/profile";
 
 export interface ProfileEditorHandle {
   /** snapshot of the *saved* state for dirty detection */

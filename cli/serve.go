@@ -527,7 +527,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
-	llmResolver := resolution.New(llmStoreAdapter, repoOverrideAdapter, cfg.LLM, slog.Default())
+	// Slice 3: thread the profile-aware adapter through as the
+	// ProfileLookupStore so the resolver can resolve per-repo
+	// "use a saved profile" overrides. Falls back to nil (degrade
+	// gracefully with a Warn log) when running pre-profile shape
+	// (embedded / in-memory mode where llmStoreAdapterFromProfiles
+	// was never built).
+	var profileLookupForResolver resolution.ProfileLookupStore
+	if pa, ok := llmStoreAdapterFromProfiles.(resolution.ProfileLookupStore); ok && pa != nil {
+		profileLookupForResolver = pa
+	}
+	llmResolver := resolution.NewWithProfileLookup(llmStoreAdapter, repoOverrideAdapter, profileLookupForResolver, cfg.LLM, slog.Default())
 
 	// R3 slice 2: build the runtime git-credential resolver. Mirrors the
 	// LLM resolver above. cfg.Git is the env-bootstrap layer (captured by
@@ -1051,6 +1061,12 @@ func (a *lwRepoOverrideAdapter) LoadLLMOverride(ctx context.Context, repoID stri
 		return nil, nil
 	}
 	return &resolution.RepoOverride{
+		// Slice 3 of the LLM provider profiles plan: when ProfileID is
+		// non-empty, the resolver fetches that profile via
+		// ProfileLookupStore and uses its values instead of the
+		// inline fields below. The GraphQL mutation enforces mutual
+		// exclusion at write time, but the resolver is defensive.
+		ProfileID:                settings.LLMOverride.ProfileID,
 		Provider:                 settings.LLMOverride.Provider,
 		BaseURL:                  settings.LLMOverride.BaseURL,
 		APIKey:                   settings.LLMOverride.APIKey,
@@ -1350,6 +1366,31 @@ func (a *llmProfileStoreAdapter) ActiveProfileMissing() bool {
 func (a *llmProfileStoreAdapter) ActiveProfileID(ctx context.Context) (string, error) {
 	id, _, err := a.lcs.LoadActiveProfileIDAndVersion(ctx)
 	return id, err
+}
+
+// LookupProfileName implements graphql.LLMProfileLookup. Slice 3 of the
+// LLM provider profiles plan: the GraphQL per-repo override path needs
+// to (a) validate that a referenced profile exists at mutation time
+// (returning PROFILE_NO_LONGER_EXISTS otherwise) and (b) populate
+// profileName on read. Both call paths come through this single method.
+//
+// Returns ("", false, nil) when the profile is missing — the caller
+// distinguishes "deleted profile" (false) from "DB outage" (err != nil)
+// so the UI surfaces the resolution panel only when we have proof of
+// deletion. Per ian-M3 the lookup is direct (no cache in v1); profile
+// reads are cheap enough that a memoization layer would be over-eager.
+func (a *llmProfileStoreAdapter) LookupProfileName(ctx context.Context, profileID string) (string, bool, error) {
+	if profileID == "" {
+		return "", false, nil
+	}
+	p, err := a.lps.LoadProfile(ctx, profileID)
+	if err != nil {
+		if errors.Is(err, db.ErrProfileNotFound) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return p.Name, true, nil
 }
 
 func profileToResponse(p db.Profile, activeID string) rest.ProfileResponse {

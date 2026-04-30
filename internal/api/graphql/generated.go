@@ -822,6 +822,8 @@ type ComplexityRoot struct {
 		BaseURL                  func(childComplexity int) int
 		DraftModel               func(childComplexity int) int
 		KnowledgeModel           func(childComplexity int) int
+		ProfileID                func(childComplexity int) int
+		ProfileName              func(childComplexity int) int
 		Provider                 func(childComplexity int) int
 		ReportModel              func(childComplexity int) int
 		ReviewModel              func(childComplexity int) int
@@ -5719,6 +5721,20 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.RepositoryLLMOverride.KnowledgeModel(childComplexity), true
+
+	case "RepositoryLLMOverride.profileId":
+		if e.complexity.RepositoryLLMOverride.ProfileID == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.ProfileID(childComplexity), true
+
+	case "RepositoryLLMOverride.profileName":
+		if e.complexity.RepositoryLLMOverride.ProfileName == nil {
+			break
+		}
+
+		return e.complexity.RepositoryLLMOverride.ProfileName(childComplexity), true
 
 	case "RepositoryLLMOverride.provider":
 		if e.complexity.RepositoryLLMOverride.Provider == nil {
@@ -33687,6 +33703,10 @@ func (ec *executionContext) fieldContext_Mutation_setRepositoryLLMOverride(ctx c
 		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
+			case "profileId":
+				return ec.fieldContext_RepositoryLLMOverride_profileId(ctx, field)
+			case "profileName":
+				return ec.fieldContext_RepositoryLLMOverride_profileName(ctx, field)
 			case "provider":
 				return ec.fieldContext_RepositoryLLMOverride_provider(ctx, field)
 			case "baseURL":
@@ -39873,6 +39893,88 @@ func (ec *executionContext) fieldContext_Repository_livingWikiSettings(_ context
 	return fc, nil
 }
 
+func (ec *executionContext) _RepositoryLLMOverride_profileId(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_profileId(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.ProfileID, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_profileId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RepositoryLLMOverride_profileName(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_RepositoryLLMOverride_profileName(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.ProfileName, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_RepositoryLLMOverride_profileName(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepositoryLLMOverride",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _RepositoryLLMOverride_provider(ctx context.Context, field graphql.CollectedField, obj *RepositoryLLMOverride) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_RepositoryLLMOverride_provider(ctx, field)
 	if err != nil {
@@ -40999,6 +41101,10 @@ func (ec *executionContext) fieldContext_RepositoryLivingWikiSettings_llmOverrid
 		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
+			case "profileId":
+				return ec.fieldContext_RepositoryLLMOverride_profileId(ctx, field)
+			case "profileName":
+				return ec.fieldContext_RepositoryLLMOverride_profileName(ctx, field)
 			case "provider":
 				return ec.fieldContext_RepositoryLLMOverride_provider(ctx, field)
 			case "baseURL":
@@ -51548,13 +51654,27 @@ func (ec *executionContext) unmarshalInputRepositoryLLMOverrideInput(ctx context
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"provider", "baseURL", "apiKey", "clearAPIKey", "advancedMode", "summaryModel", "reviewModel", "askModel", "knowledgeModel", "architectureDiagramModel", "reportModel", "draftModel"}
+	fieldsInOrder := [...]string{"profileId", "clearProfile", "provider", "baseURL", "apiKey", "clearAPIKey", "advancedMode", "summaryModel", "reviewModel", "askModel", "knowledgeModel", "architectureDiagramModel", "reportModel", "draftModel"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
 			continue
 		}
 		switch k {
+		case "profileId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("profileId"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ProfileID = data
+		case "clearProfile":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("clearProfile"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ClearProfile = data
 		case "provider":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("provider"))
 			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
@@ -57939,6 +58059,10 @@ func (ec *executionContext) _RepositoryLLMOverride(ctx context.Context, sel ast.
 		switch field.Name {
 		case "__typename":
 			out.Values[i] = graphql.MarshalString("RepositoryLLMOverride")
+		case "profileId":
+			out.Values[i] = ec._RepositoryLLMOverride_profileId(ctx, field, obj)
+		case "profileName":
+			out.Values[i] = ec._RepositoryLLMOverride_profileName(ctx, field, obj)
 		case "provider":
 			out.Values[i] = ec._RepositoryLLMOverride_provider(ctx, field, obj)
 		case "baseURL":
