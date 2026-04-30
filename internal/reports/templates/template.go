@@ -135,6 +135,39 @@ type GenerateInput struct {
 
 	// Config carries template-specific configuration flags.
 	Config TemplateConfig
+
+	// LinkResolver, when non-nil, is consulted by templates that emit
+	// cross-page links (e.g. the architecture template's "Related pages"
+	// block). Templates call ShouldStub(sourcePageID, targetPageID) to decide
+	// whether to emit a bare ac:link or a "📝 Generating" stub info-macro.
+	//
+	// When nil, templates treat all targets as ready (equivalent to
+	// NullLinkResolver{}). Callers in the coldstart runner set this to a
+	// livePageStatusResolver; fix-up re-renders pass NullLinkResolver{} to
+	// ensure all stubs are cleared.
+	LinkResolver LinkResolver
+}
+
+// LinkResolver decides at render-time whether a cross-page link should be
+// emitted as a Confluence info-macro stub ("📝 Generating") instead of a
+// bare ac:link. The interface is defined here (not in the orchestrator) so
+// the architecture template can reference it without creating a circular
+// import: templates → architecture → templates is acyclic; orchestrator →
+// architecture is fine; orchestrator → templates is fine.
+//
+// Implementations:
+//   - NullLinkResolver{} in orchestrator — never stubs; used in fix-up re-renders.
+//   - AllStubLinkResolver{} in orchestrator — always stubs manifest targets; tests.
+//   - livePageStatusResolver in orchestrator — real implementation used by coldstart.
+type LinkResolver interface {
+	// ShouldStub reports whether the link from sourcePageID to targetPageID
+	// should be rendered as a stub info-macro rather than a bare ac:link.
+	//
+	// Returns false for cross-mode links (LD-11), dangling references, and
+	// targets that are already ready on every configured sink.
+	// Returns true when the target is in the same mode (or is a repo-wide page)
+	// and has not yet been published on at least one sink.
+	ShouldStub(sourcePageID, targetPageID string) bool
 }
 
 // TemplateConfig holds optional configuration that some templates honour.

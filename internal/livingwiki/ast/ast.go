@@ -285,7 +285,24 @@ type Page struct {
 
 	// Provenance records generation metadata.
 	Provenance Provenance
+
+	// StubTargetPageIDs is the list of page IDs that were rendered as stub
+	// info-macros in this page because those targets were not yet published
+	// at render time (Phase 3 stub-and-fix-up, LD-4). Non-nil only when at
+	// least one stub was emitted; the slice is populated by the architecture
+	// template's buildRelatedPagesXHTML and propagated to lw_page_publish_status
+	// (has_stubs=true, stub_target_page_ids) by streamDispatchPage.
+	// After the fix-up pass, this field is nil on the re-rendered page.
+	StubTargetPageIDs []string
 }
+
+// HasStubMarkers reports whether this page was rendered with at least one stub
+// info-macro for an unready cross-page link.
+func (p *Page) HasStubMarkers() bool { return len(p.StubTargetPageIDs) > 0 }
+
+// StubTargetIDs returns the slice of page IDs that were stubbed in this page.
+// Returns nil when the page has no stubs (equivalent to HasStubMarkers() == false).
+func (p *Page) StubTargetIDs() []string { return p.StubTargetPageIDs }
 
 // OverlayMeta records who diverged a block in a specific sink.
 type OverlayMeta struct {
