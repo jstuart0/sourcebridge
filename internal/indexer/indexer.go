@@ -34,6 +34,58 @@ func NewIndexer(progressFn func(ProgressEvent)) *Indexer {
 	}
 }
 
+// ErrIndexFilesNotImplemented is returned by IndexFiles in Phase 1.A
+// before the per-file refresh implementation lands in Phase 1.B. The
+// signature is locked here so the change-watch router (Phase 1.C) and
+// freshness envelope (Phase 1.C) can compile against it; calling
+// IndexFiles in 1.A is a programming error and the sentinel surfaces
+// it loudly.
+var ErrIndexFilesNotImplemented = fmt.Errorf("indexer.IndexFiles: not implemented yet (Phase 1.B)")
+
+// IndexFiles re-parses only the listed files and merges the result
+// into previousResult. The branch argument is required and is recorded
+// on the returned IndexResult so freshness propagates correctly: a CI
+// push to main while an agent works on feature/x must not mark the
+// agent's context stale on the wrong branch.
+//
+// Phase 1.A note: this is a signature stub. The body returns
+// ErrIndexFilesNotImplemented. The implementation lands in Phase 1.B
+// (per the plan at
+// thoughts/shared/plans/2026-04-29-mcp-edits-feedback-loop.md, PF-3).
+// The signature is fixed here so downstream slices (the change-watch
+// router, the freshness envelope, the T0 sync-refresh path) can
+// compile against it.
+//
+// Contract for the eventual implementation (Phase 1.B):
+//   - Validates branch against git.HeadRef(repoPath); rejects mismatches.
+//   - For each file in `files`, runs the same per-file parse path
+//     IndexRepositoryIncremental uses internally.
+//   - Does NOT walk the rest of the repo (that's the 100ms T0 budget
+//     violation IndexRepositoryIncremental cannot avoid).
+//   - Merges the per-file outputs into a copy of previousResult,
+//     keyed by path.
+//   - Recomputes per-IndexResult aggregates (TotalFiles, TotalSymbols,
+//     TotalRelations, Modules) over the merged file set.
+//   - Returns the merged result; previousResult is not mutated.
+//
+// Existing callers of IndexRepository and IndexRepositoryIncremental
+// are unchanged. The change-watch router added in Phase 1.C calls only
+// IndexFiles.
+func (idx *Indexer) IndexFiles(
+	ctx context.Context,
+	repoPath string,
+	files []string,
+	branch string,
+	previousResult *IndexResult,
+) (*IndexResult, error) {
+	_ = ctx
+	_ = repoPath
+	_ = files
+	_ = branch
+	_ = previousResult
+	return nil, ErrIndexFilesNotImplemented
+}
+
 // IndexRepository scans and indexes a local repository.
 func (idx *Indexer) IndexRepository(ctx context.Context, repoPath string) (*IndexResult, error) {
 	repoID := uuid.New().String()
