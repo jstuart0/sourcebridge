@@ -282,6 +282,12 @@ func (s *MemStore) UpdateKnowledgeArtifactProgressWithPhase(id string, progress 
 	if a == nil {
 		return fmt.Errorf("artifact %s not found", id)
 	}
+	// CA-122 codex r2 M1: terminal artifacts must not have their
+	// progress / phase / message re-stamped by a late stream-driver
+	// flush or a stalled goroutine. Mirrors the surreal store guard.
+	if a.Status == StatusReady || a.Status == StatusFailed {
+		return nil
+	}
 	a.Progress = progress
 	if phase != "" {
 		a.ProgressPhase = phase

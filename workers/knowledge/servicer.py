@@ -319,6 +319,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         job_logger: SurrealJobLogger | None = None,
         render_meta=None,
         on_strategy_ready=None,
+        on_phase=None,
     ) -> tuple[CliffNotesResult, LLMUsageRecord, SelectionResult, dict[str, int | bool]]:
         """Walk the preference chain and run the first viable strategy.
 
@@ -396,6 +397,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     job_logger=job_logger,
                     render_meta=render_meta,
                     on_strategy_ready=on_strategy_ready,
+                    on_phase=on_phase,
                 )
                 return result, usage, selection, diagnostics
             except SnapshotTooLargeError as exc:
@@ -431,6 +433,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         job_logger: SurrealJobLogger | None = None,
         render_meta=None,
         on_strategy_ready=None,
+        on_phase=None,
     ) -> tuple[CliffNotesResult, LLMUsageRecord, dict[str, int | bool]]:
         """Actually run a single strategy and produce the final cliff
         notes result. Kept separate from the chain walker so the logic
@@ -449,7 +452,19 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 job_logger=job_logger,
                 render_meta=render_meta,
                 on_strategy_ready=on_strategy_ready,
+                on_phase=on_phase,
             )
+        # codex r2 M3: non-hierarchical strategies (single_shot,
+        # long_context_direct) collapse the SNAPSHOT -> RENDER ->
+        # FINALIZING flow. Signal the RENDER transition before the
+        # blocking strategy.build_tree call so the Go-side bucket
+        # advances correctly.
+        if on_phase is not None:
+            try:
+                on_phase("render")
+            except Exception:
+                # Phase callbacks must never break generation.
+                log.exception("on_phase callback raised; ignoring")
 
         # Single-shot and long-context strategies both produce the
         # final CliffNotesResult directly inside build_tree; they
@@ -477,6 +492,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         job_logger: SurrealJobLogger | None = None,
         render_meta=None,
         on_strategy_ready=None,
+        on_phase=None,
     ) -> tuple[CliffNotesResult, LLMUsageRecord, dict[str, int | bool]]:
         """Run the Phase 3 hierarchical pipeline for cliff notes.
 
@@ -847,6 +863,22 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 model_override=model_override,
             )
             await emit_job_log("llm", "cliff_notes_renderer_started", "Final cliff notes render started", None)
+            # codex r2 M3: signal the RENDER phase transition BEFORE
+            # the slow renderer.render LLM call. Without this the
+            # outer GenerateCliffNotes only emits RENDER after
+            # _run_cliff_notes_strategy_chain returns, which is too
+            # late — the slow render work is reported under the prior
+            # hierarchical phase label and the progress bar stays in
+            # the PACKAGE_SUMMARIES / ROOT_SYNTHESIS buckets while
+            # rendering. on_phase is best-effort: the streaming
+            # generator drains it via a side-channel queue, but if
+            # the queue is full or the callback raises we never block
+            # the work task.
+            if on_phase is not None:
+                try:
+                    on_phase("render")
+                except Exception:
+                    log.exception("on_phase callback raised; ignoring")
             result, usage = await renderer.render(
                 tree,
                 repository_name=request.repository_name,
@@ -985,6 +1017,17 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         def _on_strategy_ready(strategy_obj):
             active_strategy[0] = strategy_obj
 
+        # codex r2 M3: in-band phase signals from the strategy chain.
+        # The strategy code calls on_phase("render") just before the
+        # slow renderer.render LLM call so the Go-side stream driver
+        # can advance the bucketed progress floor at the actual
+        # transition. Pending phases queue up here and the streaming
+        # generator drains them on the next heartbeat tick.
+        pending_phases: list[str] = []
+
+        def _on_phase(phase_name: str) -> None:
+            pending_phases.append(phase_name)
+
         # codex r2 M5: track whether job_logger.close() has already
         # run on the success path so the finally block doesn't
         # double-close.
@@ -1003,22 +1046,24 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     job_logger=job_logger,
                     render_meta=render_meta,
                     on_strategy_ready=_on_strategy_ready,
+                    on_phase=_on_phase,
                 ),
                 name=f"cliff-notes-{request.repository_id}",
             )
 
-            # Yield the LEAF_SUMMARIES phase marker once the strategy
-            # has had a moment to start. We don't know yet whether the
-            # strategy is hierarchical (only the chain knows after
-            # capability gating); the heartbeat pump will surface the
-            # right phase based on the strategy's own progress_snapshot.
-            # For now we mark LEAF_SUMMARIES as the first work phase;
-            # if the strategy chooses a non-hierarchical path, the
-            # heartbeat pump's snapshot will report
-            # KNOWLEDGE_PHASE_UNSPECIFIED until RENDER kicks in.
-            yield knowledge_pb2.GenerateCliffNotesStreamMessage(
-                phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_LEAF_SUMMARIES)
-            )
+            # codex r2 M3: do NOT emit LEAF_SUMMARIES eagerly here.
+            # Whether the chain settles on the hierarchical strategy is
+            # only known once on_strategy_ready fires (capability
+            # gating happens inside _run_cliff_notes_strategy_chain).
+            # For non-repository scopes / single-shot / long-context
+            # strategies, LEAF_SUMMARIES has no bucket on the Go-side
+            # collapsed map (bucketMin == 0) which would regress the
+            # progress bar from snapshot bucket-min back to zero.
+            # Instead, emit LEAF_SUMMARIES from inside the heartbeat
+            # loop as soon as a hierarchical strategy is observed; the
+            # heartbeat pump's first iteration runs after a short
+            # interval, by which point the strategy chain will have
+            # selected and published.
 
             def _snapshot_fn() -> dict:
                 strat = active_strategy[0]
@@ -1033,8 +1078,40 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     }
                 return strat.progress_snapshot()
 
+            leaf_summaries_emitted = False
+            phase_name_to_proto = {
+                "render": knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
+                "leaf_summaries": knowledge_progress_pb2.KNOWLEDGE_PHASE_LEAF_SUMMARIES,
+                "file_summaries": knowledge_progress_pb2.KNOWLEDGE_PHASE_FILE_SUMMARIES,
+                "package_summaries": knowledge_progress_pb2.KNOWLEDGE_PHASE_PACKAGE_SUMMARIES,
+                "root_synthesis": knowledge_progress_pb2.KNOWLEDGE_PHASE_ROOT_SYNTHESIS,
+            }
             pump = HeartbeatPump(_snapshot_fn)
             async for prog in pump.run_until(work_task):
+                # codex r2 M3: emit LEAF_SUMMARIES exactly once, the
+                # first time we observe a hierarchical strategy in
+                # play. The heartbeat pump's progress event already
+                # carries the right phase; this extra phase marker
+                # exists so the Go-side stream driver can advance the
+                # bucketed progress floor cleanly when the
+                # hierarchical pipeline starts.
+                if not leaf_summaries_emitted and active_strategy[0] is not None and hasattr(active_strategy[0], "progress_snapshot"):
+                    yield knowledge_pb2.GenerateCliffNotesStreamMessage(
+                        phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_LEAF_SUMMARIES)
+                    )
+                    leaf_summaries_emitted = True
+                # codex r2 M3: drain any in-band phase transitions
+                # the strategy chain pushed via _on_phase. This is
+                # what surfaces the RENDER transition just before
+                # renderer.render, instead of waiting until the
+                # whole strategy chain returns.
+                while pending_phases:
+                    name = pending_phases.pop(0)
+                    proto_phase = phase_name_to_proto.get(name)
+                    if proto_phase is not None:
+                        yield knowledge_pb2.GenerateCliffNotesStreamMessage(
+                            phase=phase_marker(proto_phase)
+                        )
                 yield knowledge_pb2.GenerateCliffNotesStreamMessage(progress=prog)
 
             # Work task is done. Await it to surface the result or

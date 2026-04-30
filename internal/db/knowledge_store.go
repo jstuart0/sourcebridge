@@ -561,8 +561,14 @@ func (s *SurrealStore) UpdateKnowledgeArtifactProgressWithPhase(id string, progr
 		sql += `, progress_message = $message`
 		vars["message"] = message
 	}
-	// deleted_at IS NONE — don't update trashed artifacts.
-	sql += ` WHERE deleted_at IS NONE`
+	// CA-122 codex r2 M1 + r1b M5: do not re-stamp progress on a
+	// terminal artifact. status NOT IN ['ready', 'failed'] mirrors
+	// the equivalent guard already present on the repository
+	// understanding row's progress writer. Late progress writes from
+	// a slow stream-driver flush or a stalled goroutine MUST NOT
+	// resurrect a terminal row's progress, phase, or message.
+	// deleted_at IS NONE keeps the existing trashed-artifact guard.
+	sql += ` WHERE deleted_at IS NONE AND status NOT IN ['ready', 'failed']`
 	_, err := queryOne[interface{}](ctx(), db, sql, vars)
 	return err
 }

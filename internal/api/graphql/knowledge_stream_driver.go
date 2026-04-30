@@ -172,19 +172,37 @@ func newStreamProgressDriver(
 
 // OnProgress returns the handler suitable for
 // worker.WithProgressHandler. The handler runs on the gRPC
-// stream.Recv() goroutine; it MUST be nonblocking. We push events
-// onto the bounded channel; under sustained pressure the oldest
-// event is dropped (channel-full case is handled by select-default).
+// stream.Recv() goroutine; it MUST be nonblocking. Under sustained
+// pressure (DB write slower than stream cadence) we keep the NEWEST
+// event by discarding the oldest queued event and enqueueing the new
+// one (codex r2 M2). Progress is monotonic — preserving the latest
+// phase / counter is what the UI needs; older events are stale.
 func (d *streamProgressDriver) OnProgress() func(worker.KnowledgeStreamEvent) {
 	return func(ev worker.KnowledgeStreamEvent) {
+		newEv := streamEvent{Phase: ev.Phase, Progress: ev.Progress}
+		// Fast path: capacity available.
 		select {
-		case d.events <- streamEvent{Phase: ev.Phase, Progress: ev.Progress}:
+		case d.events <- newEv:
+			return
 		default:
-			// Channel full: best-effort drop. Progress is monotonic;
-			// the next event supersedes the dropped one. We do not
-			// log here — gRPC stream.Recv goroutine doesn't want
-			// extra slog calls; the writer-queue depth metric in
-			// Phase 9 is the right surface for catching backpressure.
+		}
+		// Slow path: queue full. Drop one stale event then enqueue.
+		// Both ops are non-blocking so a concurrent writer-goroutine
+		// drain or a second OnProgress invocation cannot deadlock the
+		// gRPC Recv goroutine; in the worst case we fall through and
+		// drop the new event, which is no worse than the previous
+		// "drop newest" behavior.
+		select {
+		case <-d.events:
+		default:
+		}
+		select {
+		case d.events <- newEv:
+		default:
+			// We did not log here — gRPC stream.Recv goroutine
+			// must not block on slog. Backpressure is observable via
+			// knowledge_progress_write_errors_total spikes, plus the
+			// Phase 9 writer-queue depth metric.
 		}
 	}
 }
