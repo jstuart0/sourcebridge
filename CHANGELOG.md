@@ -122,6 +122,51 @@ ready-made starting point without copy-pasting manifests.
   `applyImpactFromChange` helper with full behavior preservation. Phase 1.B
   ships next.
 
+- **MCP-edits feedback-loop — IndexFiles per-file delta (Phase 1.B).**
+  Replaces the `ErrIndexFilesNotImplemented` stub from 1.A with the real
+  per-file refresh entry point. The change-watch router (Phase 1.C) and the
+  T0 sync-refresh path (also 1.C) will both call `IndexFiles` exclusively;
+  the function parses only the listed files, merges into a copy of
+  `previousResult`, and recomputes per-`IndexResult` aggregates over the
+  merged file set. Existing `IndexRepository` and
+  `IndexRepositoryIncremental` callers are unchanged.
+  - New sentinel errors: `indexer.ErrBranchMismatch` (load-bearing for
+    Risk #4 — a CI push to `main` while an agent works on `feature/x`
+    must not silently corrupt the agent's branch-scoped freshness state),
+    `indexer.ErrEmptyFiles`, `indexer.ErrPreviousResultRequired`. The
+    branch-mismatch wrapped message includes both claimed and head
+    branches so the router's `rejected_branch_mismatch` log entry has
+    the diagnostic data the plan specifies.
+  - Performance: `git.HeadRef` now reads `.git/HEAD` directly (microsecond
+    scale) and falls back to `git rev-parse` only for uncommon cases.
+    The previous implementation shelled out unconditionally (~30-90 ms
+    per call on macOS / shared CI runners), which would have consumed
+    most of the 100 ms IndexFiles T0 budget on a single subprocess fork.
+    Worktrees (`.git` as a file with a gitdir pointer) and detached
+    HEADs are handled in the fast path. The defense-in-depth contract is
+    preserved: every IndexFiles call still validates the claimed branch
+    against the working-tree HEAD.
+  - Phase 1 done-definition tests landed: #6 (IndexFiles 100 ms budget on
+    a >= 500-file fixture — observed ~12 ms wall-clock with ~8x headroom),
+    #12 in-process half (branch threading + branch-mismatch rejection;
+    the router-level half lands in 1.C with a `t.Skip` placeholder
+    `TestIndexFiles_RouterBranchMismatch_DeferredTo1C` carrying the
+    contract forward), and #11's deferred end-to-end half (the
+    `ReindexRepository` GraphQL mutation drives the indexer end-to-end
+    against an on-disk fixture and reaches `applyImpactFromChange` with
+    a real `ImpactReport` that produces the same observable post-state
+    the helper-level test asserts for the synthetic-input case).
+  - New shared scaffolding: `internal/indexer/testfixtures.LargeGoRepo`
+    materializes a synthetic Go repository (default 500 files across 10
+    package buckets, configurable) at `t.TempDir`, git-init'd on the
+    configured branch with one initial commit. `WriteFile` / `Commit` /
+    `Branch` helpers let tests simulate out-of-band edits, commit them,
+    or switch branches. Used by both #6 and #11's e2e half so the e2e
+    test does not have to build a one-off fixture harness.
+  - The `SOURCEBRIDGE_CHANGE_WATCH_ENABLED` umbrella flag remains off;
+    nothing in 1.B is reachable from production paths until the watcher
+    + router land in 1.C and the flag flips at the end of 1.E burn-in.
+
 ### Changed
 
 - **Credential model** (`792ca64`). HTTP clients for all living-wiki sinks
