@@ -33,6 +33,7 @@ type fakeProfileStoreAdapter struct {
 	mu                   sync.Mutex
 	profiles             map[string]ProfileResponse
 	activeID             string
+	activeIDErr          error // Slice 4: simulate ActiveProfileID(ctx) DB outage
 	activeProfileMissing bool
 	listErr              error
 	getErr               error
@@ -153,6 +154,9 @@ func (f *fakeProfileStoreAdapter) ActiveProfileMissing() bool {
 func (f *fakeProfileStoreAdapter) ActiveProfileID(_ context.Context) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.activeIDErr != nil {
+		return "", f.activeIDErr
+	}
 	return f.activeID, nil
 }
 
@@ -262,6 +266,91 @@ func TestHandler_ListProfiles_BannerOnMissingActive(t *testing.T) {
 	missing, _ := body["active_profile_missing"].(bool)
 	if !missing {
 		t.Errorf("active_profile_missing: got false, want true")
+	}
+}
+
+func TestHandler_ListProfiles_BannerOnLiveActiveIDMismatch(t *testing.T) {
+	// codex-r2 Low (slice 4): when activeID is non-empty but does NOT
+	// appear in the profile list (data corruption between resolves),
+	// the list handler MUST compute active_profile_missing=true even
+	// when the resolver latch is still false (it has not yet observed
+	// the gap because no LLM Resolve has fired since the corruption).
+	fake := newFakeStoreAdapter()
+	fake.profiles["ca_llm_profile:a"] = ProfileResponse{
+		ID:       "ca_llm_profile:a",
+		Name:     "A",
+		IsActive: false,
+	}
+	fake.activeID = "ca_llm_profile:gone-after-purge"
+	fake.activeProfileMissing = false // resolver latch hasn't been hit yet
+	s := newServerWithProfileStore(t, fake)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/llm-profiles", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]interface{}
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	missing, _ := body["active_profile_missing"].(bool)
+	if !missing {
+		t.Errorf("active_profile_missing: got false, want true (live id check should detect the gap even when the resolver latch is stale)")
+	}
+}
+
+func TestHandler_ListProfiles_NoBannerWhenActiveIDPresent(t *testing.T) {
+	// codex-r2 Low (slice 4): when activeID is non-empty AND appears in
+	// the profile list, banner MUST be false even if the resolver latch
+	// is somehow stuck on true (defensive — once the live signal is
+	// healthy, the latch is moot).
+	fake := newFakeStoreAdapter()
+	fake.profiles["ca_llm_profile:a"] = ProfileResponse{
+		ID:       "ca_llm_profile:a",
+		Name:     "A",
+		IsActive: true,
+	}
+	fake.activeID = "ca_llm_profile:a"
+	fake.activeProfileMissing = true // pretend latch is stuck
+	s := newServerWithProfileStore(t, fake)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/llm-profiles", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	var body map[string]interface{}
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	missing, _ := body["active_profile_missing"].(bool)
+	if missing {
+		t.Errorf("active_profile_missing: got true, want false (live id present in list should override stale latch)")
+	}
+}
+
+func TestHandler_ListProfiles_BannerWhenActiveIDLookupFailsButLatched(t *testing.T) {
+	// codex-r2 Low (slice 4): when ActiveProfileID(ctx) errors (DB
+	// outage), the handler falls back to the resolver latch. If the
+	// latch is true, the banner must be rendered (don't silently say
+	// "not missing" when we can't actually check).
+	fake := newFakeStoreAdapter()
+	fake.profiles["ca_llm_profile:a"] = ProfileResponse{ID: "ca_llm_profile:a", Name: "A"}
+	fake.activeID = ""
+	fake.activeIDErr = errors.New("simulated db outage")
+	fake.activeProfileMissing = true
+	s := newServerWithProfileStore(t, fake)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/llm-profiles", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]interface{}
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	missing, _ := body["active_profile_missing"].(bool)
+	if !missing {
+		t.Errorf("active_profile_missing: got false, want true (latch fallback when live lookup errors)")
 	}
 }
 

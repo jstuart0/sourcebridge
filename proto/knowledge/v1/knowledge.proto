@@ -5,27 +5,109 @@ package sourcebridge.knowledge.v1;
 option go_package = "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1;knowledgev1";
 
 import "common/v1/types.proto";
+import "common/v1/knowledge_progress.proto";
 
 // KnowledgeService handles LLM-powered codebase knowledge generation.
+//
+// All seven RPCs are server-streaming (CA-122). Each method emits a
+// stream of *StreamMessage values whose oneof carries one of:
+//   * phase   -- a KnowledgeStreamPhaseMarker emitted at every phase
+//                transition so the client can deterministically update
+//                the user-facing phase label.
+//   * progress -- a KnowledgeStreamProgress heartbeat carrying RUN-TIME
+//                 (completed_units/total_units) counters and an
+//                 optional human-readable message. Emitted on a
+//                 periodic cadence (default 30s) within a phase.
+//   * final    -- the terminal payload carrying the response body. Last
+//                 message on the stream. Exactly one final message is
+//                 emitted per successful call; absence of a final
+//                 message before EOF is an error.
+//
+// The streaming shape replaces the prior unary methods because
+// repository-scoped knowledge generation (especially deep cliff notes)
+// is inherently a multi-phase incrementally-producing operation. The
+// per-call wall-clock deadline that bounded the unary calls is replaced
+// by an outer safety-net deadline (operator-tunable, default 4h) plus
+// gRPC keepalive on the channel, plus a 10-min reaper that actively
+// cancels stuck runs. See thoughts/shared/plans/2026-04-29-deep-cliffnotes-deadline-exceeded.md.
 service KnowledgeService {
   // GenerateCliffNotes produces a structured cliff-notes report for a repository.
-  rpc GenerateCliffNotes(GenerateCliffNotesRequest) returns (GenerateCliffNotesResponse);
+  rpc GenerateCliffNotes(GenerateCliffNotesRequest) returns (stream GenerateCliffNotesStreamMessage);
 
   // GenerateLearningPath produces a guided learning path for a repository.
-  rpc GenerateLearningPath(GenerateLearningPathRequest) returns (GenerateLearningPathResponse);
+  rpc GenerateLearningPath(GenerateLearningPathRequest) returns (stream GenerateLearningPathStreamMessage);
 
   // GenerateArchitectureDiagram produces an AI-authored Mermaid architecture diagram.
-  rpc GenerateArchitectureDiagram(GenerateArchitectureDiagramRequest) returns (GenerateArchitectureDiagramResponse);
+  rpc GenerateArchitectureDiagram(GenerateArchitectureDiagramRequest) returns (stream GenerateArchitectureDiagramStreamMessage);
 
   // GenerateWorkflowStory produces a grounded narrative for how a workflow is used.
-  rpc GenerateWorkflowStory(GenerateWorkflowStoryRequest) returns (GenerateWorkflowStoryResponse);
+  rpc GenerateWorkflowStory(GenerateWorkflowStoryRequest) returns (stream GenerateWorkflowStoryStreamMessage);
 
   // ExplainSystem produces a transient whole-system explanation.
-  rpc ExplainSystem(ExplainSystemRequest) returns (ExplainSystemResponse);
+  rpc ExplainSystem(ExplainSystemRequest) returns (stream ExplainSystemStreamMessage);
 
   // GenerateCodeTour produces a guided code tour for a repository.
-  rpc GenerateCodeTour(GenerateCodeTourRequest) returns (GenerateCodeTourResponse);
+  rpc GenerateCodeTour(GenerateCodeTourRequest) returns (stream GenerateCodeTourStreamMessage);
+}
 
+// GenerateCliffNotesStreamMessage is the per-message envelope on the
+// GenerateCliffNotes server stream. Exactly one of {phase, progress,
+// final} is set per message.
+message GenerateCliffNotesStreamMessage {
+  oneof event {
+    sourcebridge.common.v1.KnowledgeStreamPhaseMarker phase = 1;
+    sourcebridge.common.v1.KnowledgeStreamProgress progress = 2;
+    GenerateCliffNotesResponse final = 3;
+  }
+}
+
+// GenerateLearningPathStreamMessage envelopes the GenerateLearningPath
+// server stream.
+message GenerateLearningPathStreamMessage {
+  oneof event {
+    sourcebridge.common.v1.KnowledgeStreamPhaseMarker phase = 1;
+    sourcebridge.common.v1.KnowledgeStreamProgress progress = 2;
+    GenerateLearningPathResponse final = 3;
+  }
+}
+
+// GenerateArchitectureDiagramStreamMessage envelopes the
+// GenerateArchitectureDiagram server stream.
+message GenerateArchitectureDiagramStreamMessage {
+  oneof event {
+    sourcebridge.common.v1.KnowledgeStreamPhaseMarker phase = 1;
+    sourcebridge.common.v1.KnowledgeStreamProgress progress = 2;
+    GenerateArchitectureDiagramResponse final = 3;
+  }
+}
+
+// GenerateWorkflowStoryStreamMessage envelopes the GenerateWorkflowStory
+// server stream.
+message GenerateWorkflowStoryStreamMessage {
+  oneof event {
+    sourcebridge.common.v1.KnowledgeStreamPhaseMarker phase = 1;
+    sourcebridge.common.v1.KnowledgeStreamProgress progress = 2;
+    GenerateWorkflowStoryResponse final = 3;
+  }
+}
+
+// ExplainSystemStreamMessage envelopes the ExplainSystem server stream.
+message ExplainSystemStreamMessage {
+  oneof event {
+    sourcebridge.common.v1.KnowledgeStreamPhaseMarker phase = 1;
+    sourcebridge.common.v1.KnowledgeStreamProgress progress = 2;
+    ExplainSystemResponse final = 3;
+  }
+}
+
+// GenerateCodeTourStreamMessage envelopes the GenerateCodeTour server
+// stream.
+message GenerateCodeTourStreamMessage {
+  oneof event {
+    sourcebridge.common.v1.KnowledgeStreamPhaseMarker phase = 1;
+    sourcebridge.common.v1.KnowledgeStreamProgress progress = 2;
+    GenerateCodeTourResponse final = 3;
+  }
 }
 
 enum Audience {

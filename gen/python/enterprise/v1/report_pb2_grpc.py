@@ -27,6 +27,14 @@ if _version_not_supported:
 
 class EnterpriseReportServiceStub(object):
     """EnterpriseReportService hosts enterprise-only report generation RPCs.
+
+    GenerateReport is server-streaming (CA-122). The report engine
+    already exposes a fine-grained progress callback internally
+    (workers/reports/engine.py); the streaming refactor surfaces those
+    fractions to the orchestrator as KnowledgeStreamProgress events with
+    unit_kind="report_progress" so the GraphQL UI shows real progress
+    instead of a synthetic time-based curve. See thoughts/shared/plans/
+    2026-04-29-deep-cliffnotes-deadline-exceeded.md (Decision 4b).
     """
 
     def __init__(self, channel):
@@ -35,15 +43,23 @@ class EnterpriseReportServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.GenerateReport = channel.unary_unary(
+        self.GenerateReport = channel.unary_stream(
                 '/sourcebridge.enterprise.v1.EnterpriseReportService/GenerateReport',
                 request_serializer=enterprise_dot_v1_dot_report__pb2.GenerateReportRequest.SerializeToString,
-                response_deserializer=enterprise_dot_v1_dot_report__pb2.GenerateReportResponse.FromString,
+                response_deserializer=enterprise_dot_v1_dot_report__pb2.GenerateReportStreamMessage.FromString,
                 _registered_method=True)
 
 
 class EnterpriseReportServiceServicer(object):
     """EnterpriseReportService hosts enterprise-only report generation RPCs.
+
+    GenerateReport is server-streaming (CA-122). The report engine
+    already exposes a fine-grained progress callback internally
+    (workers/reports/engine.py); the streaming refactor surfaces those
+    fractions to the orchestrator as KnowledgeStreamProgress events with
+    unit_kind="report_progress" so the GraphQL UI shows real progress
+    instead of a synthetic time-based curve. See thoughts/shared/plans/
+    2026-04-29-deep-cliffnotes-deadline-exceeded.md (Decision 4b).
     """
 
     def GenerateReport(self, request, context):
@@ -55,10 +71,10 @@ class EnterpriseReportServiceServicer(object):
 
 def add_EnterpriseReportServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'GenerateReport': grpc.unary_unary_rpc_method_handler(
+            'GenerateReport': grpc.unary_stream_rpc_method_handler(
                     servicer.GenerateReport,
                     request_deserializer=enterprise_dot_v1_dot_report__pb2.GenerateReportRequest.FromString,
-                    response_serializer=enterprise_dot_v1_dot_report__pb2.GenerateReportResponse.SerializeToString,
+                    response_serializer=enterprise_dot_v1_dot_report__pb2.GenerateReportStreamMessage.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -70,6 +86,14 @@ def add_EnterpriseReportServiceServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class EnterpriseReportService(object):
     """EnterpriseReportService hosts enterprise-only report generation RPCs.
+
+    GenerateReport is server-streaming (CA-122). The report engine
+    already exposes a fine-grained progress callback internally
+    (workers/reports/engine.py); the streaming refactor surfaces those
+    fractions to the orchestrator as KnowledgeStreamProgress events with
+    unit_kind="report_progress" so the GraphQL UI shows real progress
+    instead of a synthetic time-based curve. See thoughts/shared/plans/
+    2026-04-29-deep-cliffnotes-deadline-exceeded.md (Decision 4b).
     """
 
     @staticmethod
@@ -83,12 +107,12 @@ class EnterpriseReportService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(
+        return grpc.experimental.unary_stream(
             request,
             target,
             '/sourcebridge.enterprise.v1.EnterpriseReportService/GenerateReport',
             enterprise_dot_v1_dot_report__pb2.GenerateReportRequest.SerializeToString,
-            enterprise_dot_v1_dot_report__pb2.GenerateReportResponse.FromString,
+            enterprise_dot_v1_dot_report__pb2.GenerateReportStreamMessage.FromString,
             options,
             channel_credentials,
             insecure,

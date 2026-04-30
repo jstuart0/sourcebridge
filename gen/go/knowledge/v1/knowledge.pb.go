@@ -123,6 +123,609 @@ func (Depth) EnumDescriptor() ([]byte, []int) {
 	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{1}
 }
 
+// GenerateCliffNotesStreamMessage is the per-message envelope on the
+// GenerateCliffNotes server stream. Exactly one of {phase, progress,
+// final} is set per message.
+type GenerateCliffNotesStreamMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Event:
+	//
+	//	*GenerateCliffNotesStreamMessage_Phase
+	//	*GenerateCliffNotesStreamMessage_Progress
+	//	*GenerateCliffNotesStreamMessage_Final
+	Event         isGenerateCliffNotesStreamMessage_Event `protobuf_oneof:"event"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GenerateCliffNotesStreamMessage) Reset() {
+	*x = GenerateCliffNotesStreamMessage{}
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GenerateCliffNotesStreamMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GenerateCliffNotesStreamMessage) ProtoMessage() {}
+
+func (x *GenerateCliffNotesStreamMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GenerateCliffNotesStreamMessage.ProtoReflect.Descriptor instead.
+func (*GenerateCliffNotesStreamMessage) Descriptor() ([]byte, []int) {
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *GenerateCliffNotesStreamMessage) GetEvent() isGenerateCliffNotesStreamMessage_Event {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+func (x *GenerateCliffNotesStreamMessage) GetPhase() *v1.KnowledgeStreamPhaseMarker {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateCliffNotesStreamMessage_Phase); ok {
+			return x.Phase
+		}
+	}
+	return nil
+}
+
+func (x *GenerateCliffNotesStreamMessage) GetProgress() *v1.KnowledgeStreamProgress {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateCliffNotesStreamMessage_Progress); ok {
+			return x.Progress
+		}
+	}
+	return nil
+}
+
+func (x *GenerateCliffNotesStreamMessage) GetFinal() *GenerateCliffNotesResponse {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateCliffNotesStreamMessage_Final); ok {
+			return x.Final
+		}
+	}
+	return nil
+}
+
+type isGenerateCliffNotesStreamMessage_Event interface {
+	isGenerateCliffNotesStreamMessage_Event()
+}
+
+type GenerateCliffNotesStreamMessage_Phase struct {
+	Phase *v1.KnowledgeStreamPhaseMarker `protobuf:"bytes,1,opt,name=phase,proto3,oneof"`
+}
+
+type GenerateCliffNotesStreamMessage_Progress struct {
+	Progress *v1.KnowledgeStreamProgress `protobuf:"bytes,2,opt,name=progress,proto3,oneof"`
+}
+
+type GenerateCliffNotesStreamMessage_Final struct {
+	Final *GenerateCliffNotesResponse `protobuf:"bytes,3,opt,name=final,proto3,oneof"`
+}
+
+func (*GenerateCliffNotesStreamMessage_Phase) isGenerateCliffNotesStreamMessage_Event() {}
+
+func (*GenerateCliffNotesStreamMessage_Progress) isGenerateCliffNotesStreamMessage_Event() {}
+
+func (*GenerateCliffNotesStreamMessage_Final) isGenerateCliffNotesStreamMessage_Event() {}
+
+// GenerateLearningPathStreamMessage envelopes the GenerateLearningPath
+// server stream.
+type GenerateLearningPathStreamMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Event:
+	//
+	//	*GenerateLearningPathStreamMessage_Phase
+	//	*GenerateLearningPathStreamMessage_Progress
+	//	*GenerateLearningPathStreamMessage_Final
+	Event         isGenerateLearningPathStreamMessage_Event `protobuf_oneof:"event"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GenerateLearningPathStreamMessage) Reset() {
+	*x = GenerateLearningPathStreamMessage{}
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GenerateLearningPathStreamMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GenerateLearningPathStreamMessage) ProtoMessage() {}
+
+func (x *GenerateLearningPathStreamMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GenerateLearningPathStreamMessage.ProtoReflect.Descriptor instead.
+func (*GenerateLearningPathStreamMessage) Descriptor() ([]byte, []int) {
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *GenerateLearningPathStreamMessage) GetEvent() isGenerateLearningPathStreamMessage_Event {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+func (x *GenerateLearningPathStreamMessage) GetPhase() *v1.KnowledgeStreamPhaseMarker {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateLearningPathStreamMessage_Phase); ok {
+			return x.Phase
+		}
+	}
+	return nil
+}
+
+func (x *GenerateLearningPathStreamMessage) GetProgress() *v1.KnowledgeStreamProgress {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateLearningPathStreamMessage_Progress); ok {
+			return x.Progress
+		}
+	}
+	return nil
+}
+
+func (x *GenerateLearningPathStreamMessage) GetFinal() *GenerateLearningPathResponse {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateLearningPathStreamMessage_Final); ok {
+			return x.Final
+		}
+	}
+	return nil
+}
+
+type isGenerateLearningPathStreamMessage_Event interface {
+	isGenerateLearningPathStreamMessage_Event()
+}
+
+type GenerateLearningPathStreamMessage_Phase struct {
+	Phase *v1.KnowledgeStreamPhaseMarker `protobuf:"bytes,1,opt,name=phase,proto3,oneof"`
+}
+
+type GenerateLearningPathStreamMessage_Progress struct {
+	Progress *v1.KnowledgeStreamProgress `protobuf:"bytes,2,opt,name=progress,proto3,oneof"`
+}
+
+type GenerateLearningPathStreamMessage_Final struct {
+	Final *GenerateLearningPathResponse `protobuf:"bytes,3,opt,name=final,proto3,oneof"`
+}
+
+func (*GenerateLearningPathStreamMessage_Phase) isGenerateLearningPathStreamMessage_Event() {}
+
+func (*GenerateLearningPathStreamMessage_Progress) isGenerateLearningPathStreamMessage_Event() {}
+
+func (*GenerateLearningPathStreamMessage_Final) isGenerateLearningPathStreamMessage_Event() {}
+
+// GenerateArchitectureDiagramStreamMessage envelopes the
+// GenerateArchitectureDiagram server stream.
+type GenerateArchitectureDiagramStreamMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Event:
+	//
+	//	*GenerateArchitectureDiagramStreamMessage_Phase
+	//	*GenerateArchitectureDiagramStreamMessage_Progress
+	//	*GenerateArchitectureDiagramStreamMessage_Final
+	Event         isGenerateArchitectureDiagramStreamMessage_Event `protobuf_oneof:"event"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GenerateArchitectureDiagramStreamMessage) Reset() {
+	*x = GenerateArchitectureDiagramStreamMessage{}
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GenerateArchitectureDiagramStreamMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GenerateArchitectureDiagramStreamMessage) ProtoMessage() {}
+
+func (x *GenerateArchitectureDiagramStreamMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GenerateArchitectureDiagramStreamMessage.ProtoReflect.Descriptor instead.
+func (*GenerateArchitectureDiagramStreamMessage) Descriptor() ([]byte, []int) {
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *GenerateArchitectureDiagramStreamMessage) GetEvent() isGenerateArchitectureDiagramStreamMessage_Event {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+func (x *GenerateArchitectureDiagramStreamMessage) GetPhase() *v1.KnowledgeStreamPhaseMarker {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateArchitectureDiagramStreamMessage_Phase); ok {
+			return x.Phase
+		}
+	}
+	return nil
+}
+
+func (x *GenerateArchitectureDiagramStreamMessage) GetProgress() *v1.KnowledgeStreamProgress {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateArchitectureDiagramStreamMessage_Progress); ok {
+			return x.Progress
+		}
+	}
+	return nil
+}
+
+func (x *GenerateArchitectureDiagramStreamMessage) GetFinal() *GenerateArchitectureDiagramResponse {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateArchitectureDiagramStreamMessage_Final); ok {
+			return x.Final
+		}
+	}
+	return nil
+}
+
+type isGenerateArchitectureDiagramStreamMessage_Event interface {
+	isGenerateArchitectureDiagramStreamMessage_Event()
+}
+
+type GenerateArchitectureDiagramStreamMessage_Phase struct {
+	Phase *v1.KnowledgeStreamPhaseMarker `protobuf:"bytes,1,opt,name=phase,proto3,oneof"`
+}
+
+type GenerateArchitectureDiagramStreamMessage_Progress struct {
+	Progress *v1.KnowledgeStreamProgress `protobuf:"bytes,2,opt,name=progress,proto3,oneof"`
+}
+
+type GenerateArchitectureDiagramStreamMessage_Final struct {
+	Final *GenerateArchitectureDiagramResponse `protobuf:"bytes,3,opt,name=final,proto3,oneof"`
+}
+
+func (*GenerateArchitectureDiagramStreamMessage_Phase) isGenerateArchitectureDiagramStreamMessage_Event() {
+}
+
+func (*GenerateArchitectureDiagramStreamMessage_Progress) isGenerateArchitectureDiagramStreamMessage_Event() {
+}
+
+func (*GenerateArchitectureDiagramStreamMessage_Final) isGenerateArchitectureDiagramStreamMessage_Event() {
+}
+
+// GenerateWorkflowStoryStreamMessage envelopes the GenerateWorkflowStory
+// server stream.
+type GenerateWorkflowStoryStreamMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Event:
+	//
+	//	*GenerateWorkflowStoryStreamMessage_Phase
+	//	*GenerateWorkflowStoryStreamMessage_Progress
+	//	*GenerateWorkflowStoryStreamMessage_Final
+	Event         isGenerateWorkflowStoryStreamMessage_Event `protobuf_oneof:"event"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GenerateWorkflowStoryStreamMessage) Reset() {
+	*x = GenerateWorkflowStoryStreamMessage{}
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GenerateWorkflowStoryStreamMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GenerateWorkflowStoryStreamMessage) ProtoMessage() {}
+
+func (x *GenerateWorkflowStoryStreamMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GenerateWorkflowStoryStreamMessage.ProtoReflect.Descriptor instead.
+func (*GenerateWorkflowStoryStreamMessage) Descriptor() ([]byte, []int) {
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GenerateWorkflowStoryStreamMessage) GetEvent() isGenerateWorkflowStoryStreamMessage_Event {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+func (x *GenerateWorkflowStoryStreamMessage) GetPhase() *v1.KnowledgeStreamPhaseMarker {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateWorkflowStoryStreamMessage_Phase); ok {
+			return x.Phase
+		}
+	}
+	return nil
+}
+
+func (x *GenerateWorkflowStoryStreamMessage) GetProgress() *v1.KnowledgeStreamProgress {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateWorkflowStoryStreamMessage_Progress); ok {
+			return x.Progress
+		}
+	}
+	return nil
+}
+
+func (x *GenerateWorkflowStoryStreamMessage) GetFinal() *GenerateWorkflowStoryResponse {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateWorkflowStoryStreamMessage_Final); ok {
+			return x.Final
+		}
+	}
+	return nil
+}
+
+type isGenerateWorkflowStoryStreamMessage_Event interface {
+	isGenerateWorkflowStoryStreamMessage_Event()
+}
+
+type GenerateWorkflowStoryStreamMessage_Phase struct {
+	Phase *v1.KnowledgeStreamPhaseMarker `protobuf:"bytes,1,opt,name=phase,proto3,oneof"`
+}
+
+type GenerateWorkflowStoryStreamMessage_Progress struct {
+	Progress *v1.KnowledgeStreamProgress `protobuf:"bytes,2,opt,name=progress,proto3,oneof"`
+}
+
+type GenerateWorkflowStoryStreamMessage_Final struct {
+	Final *GenerateWorkflowStoryResponse `protobuf:"bytes,3,opt,name=final,proto3,oneof"`
+}
+
+func (*GenerateWorkflowStoryStreamMessage_Phase) isGenerateWorkflowStoryStreamMessage_Event() {}
+
+func (*GenerateWorkflowStoryStreamMessage_Progress) isGenerateWorkflowStoryStreamMessage_Event() {}
+
+func (*GenerateWorkflowStoryStreamMessage_Final) isGenerateWorkflowStoryStreamMessage_Event() {}
+
+// ExplainSystemStreamMessage envelopes the ExplainSystem server stream.
+type ExplainSystemStreamMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Event:
+	//
+	//	*ExplainSystemStreamMessage_Phase
+	//	*ExplainSystemStreamMessage_Progress
+	//	*ExplainSystemStreamMessage_Final
+	Event         isExplainSystemStreamMessage_Event `protobuf_oneof:"event"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExplainSystemStreamMessage) Reset() {
+	*x = ExplainSystemStreamMessage{}
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExplainSystemStreamMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExplainSystemStreamMessage) ProtoMessage() {}
+
+func (x *ExplainSystemStreamMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExplainSystemStreamMessage.ProtoReflect.Descriptor instead.
+func (*ExplainSystemStreamMessage) Descriptor() ([]byte, []int) {
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ExplainSystemStreamMessage) GetEvent() isExplainSystemStreamMessage_Event {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+func (x *ExplainSystemStreamMessage) GetPhase() *v1.KnowledgeStreamPhaseMarker {
+	if x != nil {
+		if x, ok := x.Event.(*ExplainSystemStreamMessage_Phase); ok {
+			return x.Phase
+		}
+	}
+	return nil
+}
+
+func (x *ExplainSystemStreamMessage) GetProgress() *v1.KnowledgeStreamProgress {
+	if x != nil {
+		if x, ok := x.Event.(*ExplainSystemStreamMessage_Progress); ok {
+			return x.Progress
+		}
+	}
+	return nil
+}
+
+func (x *ExplainSystemStreamMessage) GetFinal() *ExplainSystemResponse {
+	if x != nil {
+		if x, ok := x.Event.(*ExplainSystemStreamMessage_Final); ok {
+			return x.Final
+		}
+	}
+	return nil
+}
+
+type isExplainSystemStreamMessage_Event interface {
+	isExplainSystemStreamMessage_Event()
+}
+
+type ExplainSystemStreamMessage_Phase struct {
+	Phase *v1.KnowledgeStreamPhaseMarker `protobuf:"bytes,1,opt,name=phase,proto3,oneof"`
+}
+
+type ExplainSystemStreamMessage_Progress struct {
+	Progress *v1.KnowledgeStreamProgress `protobuf:"bytes,2,opt,name=progress,proto3,oneof"`
+}
+
+type ExplainSystemStreamMessage_Final struct {
+	Final *ExplainSystemResponse `protobuf:"bytes,3,opt,name=final,proto3,oneof"`
+}
+
+func (*ExplainSystemStreamMessage_Phase) isExplainSystemStreamMessage_Event() {}
+
+func (*ExplainSystemStreamMessage_Progress) isExplainSystemStreamMessage_Event() {}
+
+func (*ExplainSystemStreamMessage_Final) isExplainSystemStreamMessage_Event() {}
+
+// GenerateCodeTourStreamMessage envelopes the GenerateCodeTour server
+// stream.
+type GenerateCodeTourStreamMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Event:
+	//
+	//	*GenerateCodeTourStreamMessage_Phase
+	//	*GenerateCodeTourStreamMessage_Progress
+	//	*GenerateCodeTourStreamMessage_Final
+	Event         isGenerateCodeTourStreamMessage_Event `protobuf_oneof:"event"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GenerateCodeTourStreamMessage) Reset() {
+	*x = GenerateCodeTourStreamMessage{}
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GenerateCodeTourStreamMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GenerateCodeTourStreamMessage) ProtoMessage() {}
+
+func (x *GenerateCodeTourStreamMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GenerateCodeTourStreamMessage.ProtoReflect.Descriptor instead.
+func (*GenerateCodeTourStreamMessage) Descriptor() ([]byte, []int) {
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *GenerateCodeTourStreamMessage) GetEvent() isGenerateCodeTourStreamMessage_Event {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+func (x *GenerateCodeTourStreamMessage) GetPhase() *v1.KnowledgeStreamPhaseMarker {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateCodeTourStreamMessage_Phase); ok {
+			return x.Phase
+		}
+	}
+	return nil
+}
+
+func (x *GenerateCodeTourStreamMessage) GetProgress() *v1.KnowledgeStreamProgress {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateCodeTourStreamMessage_Progress); ok {
+			return x.Progress
+		}
+	}
+	return nil
+}
+
+func (x *GenerateCodeTourStreamMessage) GetFinal() *GenerateCodeTourResponse {
+	if x != nil {
+		if x, ok := x.Event.(*GenerateCodeTourStreamMessage_Final); ok {
+			return x.Final
+		}
+	}
+	return nil
+}
+
+type isGenerateCodeTourStreamMessage_Event interface {
+	isGenerateCodeTourStreamMessage_Event()
+}
+
+type GenerateCodeTourStreamMessage_Phase struct {
+	Phase *v1.KnowledgeStreamPhaseMarker `protobuf:"bytes,1,opt,name=phase,proto3,oneof"`
+}
+
+type GenerateCodeTourStreamMessage_Progress struct {
+	Progress *v1.KnowledgeStreamProgress `protobuf:"bytes,2,opt,name=progress,proto3,oneof"`
+}
+
+type GenerateCodeTourStreamMessage_Final struct {
+	Final *GenerateCodeTourResponse `protobuf:"bytes,3,opt,name=final,proto3,oneof"`
+}
+
+func (*GenerateCodeTourStreamMessage_Phase) isGenerateCodeTourStreamMessage_Event() {}
+
+func (*GenerateCodeTourStreamMessage_Progress) isGenerateCodeTourStreamMessage_Event() {}
+
+func (*GenerateCodeTourStreamMessage_Final) isGenerateCodeTourStreamMessage_Event() {}
+
 // GenerateCliffNotesRequest carries the assembled repository snapshot for the
 // Python worker to synthesize into cliff notes. The Go API side assembles the
 // snapshot from the graph store and serializes it as JSON.
@@ -143,7 +746,7 @@ type GenerateCliffNotesRequest struct {
 
 func (x *GenerateCliffNotesRequest) Reset() {
 	*x = GenerateCliffNotesRequest{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[0]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -155,7 +758,7 @@ func (x *GenerateCliffNotesRequest) String() string {
 func (*GenerateCliffNotesRequest) ProtoMessage() {}
 
 func (x *GenerateCliffNotesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[0]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -168,7 +771,7 @@ func (x *GenerateCliffNotesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateCliffNotesRequest.ProtoReflect.Descriptor instead.
 func (*GenerateCliffNotesRequest) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{0}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GenerateCliffNotesRequest) GetRepositoryId() string {
@@ -245,7 +848,7 @@ type GenerateCliffNotesResponse struct {
 
 func (x *GenerateCliffNotesResponse) Reset() {
 	*x = GenerateCliffNotesResponse{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[1]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -257,7 +860,7 @@ func (x *GenerateCliffNotesResponse) String() string {
 func (*GenerateCliffNotesResponse) ProtoMessage() {}
 
 func (x *GenerateCliffNotesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[1]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -270,7 +873,7 @@ func (x *GenerateCliffNotesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateCliffNotesResponse.ProtoReflect.Descriptor instead.
 func (*GenerateCliffNotesResponse) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{1}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GenerateCliffNotesResponse) GetSections() []*KnowledgeSection {
@@ -310,7 +913,7 @@ type GenerateArchitectureDiagramRequest struct {
 
 func (x *GenerateArchitectureDiagramRequest) Reset() {
 	*x = GenerateArchitectureDiagramRequest{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[2]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -322,7 +925,7 @@ func (x *GenerateArchitectureDiagramRequest) String() string {
 func (*GenerateArchitectureDiagramRequest) ProtoMessage() {}
 
 func (x *GenerateArchitectureDiagramRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[2]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -335,7 +938,7 @@ func (x *GenerateArchitectureDiagramRequest) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use GenerateArchitectureDiagramRequest.ProtoReflect.Descriptor instead.
 func (*GenerateArchitectureDiagramRequest) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{2}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GenerateArchitectureDiagramRequest) GetRepositoryId() string {
@@ -418,7 +1021,7 @@ type GenerateArchitectureDiagramResponse struct {
 
 func (x *GenerateArchitectureDiagramResponse) Reset() {
 	*x = GenerateArchitectureDiagramResponse{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[3]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -430,7 +1033,7 @@ func (x *GenerateArchitectureDiagramResponse) String() string {
 func (*GenerateArchitectureDiagramResponse) ProtoMessage() {}
 
 func (x *GenerateArchitectureDiagramResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[3]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -443,7 +1046,7 @@ func (x *GenerateArchitectureDiagramResponse) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use GenerateArchitectureDiagramResponse.ProtoReflect.Descriptor instead.
 func (*GenerateArchitectureDiagramResponse) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{3}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GenerateArchitectureDiagramResponse) GetMermaidSource() string {
@@ -578,7 +1181,7 @@ type CliffNotesDiagnostics struct {
 
 func (x *CliffNotesDiagnostics) Reset() {
 	*x = CliffNotesDiagnostics{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[4]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -590,7 +1193,7 @@ func (x *CliffNotesDiagnostics) String() string {
 func (*CliffNotesDiagnostics) ProtoMessage() {}
 
 func (x *CliffNotesDiagnostics) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[4]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -603,7 +1206,7 @@ func (x *CliffNotesDiagnostics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CliffNotesDiagnostics.ProtoReflect.Descriptor instead.
 func (*CliffNotesDiagnostics) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{4}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CliffNotesDiagnostics) GetCachedNodes() int32 {
@@ -707,7 +1310,7 @@ type GenerateLearningPathRequest struct {
 
 func (x *GenerateLearningPathRequest) Reset() {
 	*x = GenerateLearningPathRequest{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[5]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -719,7 +1322,7 @@ func (x *GenerateLearningPathRequest) String() string {
 func (*GenerateLearningPathRequest) ProtoMessage() {}
 
 func (x *GenerateLearningPathRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[5]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -732,7 +1335,7 @@ func (x *GenerateLearningPathRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateLearningPathRequest.ProtoReflect.Descriptor instead.
 func (*GenerateLearningPathRequest) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{5}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GenerateLearningPathRequest) GetRepositoryId() string {
@@ -801,7 +1404,7 @@ type GenerateLearningPathResponse struct {
 
 func (x *GenerateLearningPathResponse) Reset() {
 	*x = GenerateLearningPathResponse{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[6]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -813,7 +1416,7 @@ func (x *GenerateLearningPathResponse) String() string {
 func (*GenerateLearningPathResponse) ProtoMessage() {}
 
 func (x *GenerateLearningPathResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[6]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -826,7 +1429,7 @@ func (x *GenerateLearningPathResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateLearningPathResponse.ProtoReflect.Descriptor instead.
 func (*GenerateLearningPathResponse) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{6}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GenerateLearningPathResponse) GetSteps() []*LearningStep {
@@ -862,7 +1465,7 @@ type GenerateWorkflowStoryRequest struct {
 
 func (x *GenerateWorkflowStoryRequest) Reset() {
 	*x = GenerateWorkflowStoryRequest{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[7]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -874,7 +1477,7 @@ func (x *GenerateWorkflowStoryRequest) String() string {
 func (*GenerateWorkflowStoryRequest) ProtoMessage() {}
 
 func (x *GenerateWorkflowStoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[7]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -887,7 +1490,7 @@ func (x *GenerateWorkflowStoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateWorkflowStoryRequest.ProtoReflect.Descriptor instead.
 func (*GenerateWorkflowStoryRequest) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{7}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GenerateWorkflowStoryRequest) GetRepositoryId() string {
@@ -977,7 +1580,7 @@ type GenerateWorkflowStoryResponse struct {
 
 func (x *GenerateWorkflowStoryResponse) Reset() {
 	*x = GenerateWorkflowStoryResponse{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[8]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -989,7 +1592,7 @@ func (x *GenerateWorkflowStoryResponse) String() string {
 func (*GenerateWorkflowStoryResponse) ProtoMessage() {}
 
 func (x *GenerateWorkflowStoryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[8]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1002,7 +1605,7 @@ func (x *GenerateWorkflowStoryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateWorkflowStoryResponse.ProtoReflect.Descriptor instead.
 func (*GenerateWorkflowStoryResponse) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{8}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *GenerateWorkflowStoryResponse) GetSections() []*KnowledgeSection {
@@ -1040,7 +1643,7 @@ type LearningStep struct {
 
 func (x *LearningStep) Reset() {
 	*x = LearningStep{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[9]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1052,7 +1655,7 @@ func (x *LearningStep) String() string {
 func (*LearningStep) ProtoMessage() {}
 
 func (x *LearningStep) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[9]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1065,7 +1668,7 @@ func (x *LearningStep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LearningStep.ProtoReflect.Descriptor instead.
 func (*LearningStep) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{9}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *LearningStep) GetOrder() int32 {
@@ -1176,7 +1779,7 @@ type ExplainSystemRequest struct {
 
 func (x *ExplainSystemRequest) Reset() {
 	*x = ExplainSystemRequest{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[10]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1188,7 +1791,7 @@ func (x *ExplainSystemRequest) String() string {
 func (*ExplainSystemRequest) ProtoMessage() {}
 
 func (x *ExplainSystemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[10]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1201,7 +1804,7 @@ func (x *ExplainSystemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExplainSystemRequest.ProtoReflect.Descriptor instead.
 func (*ExplainSystemRequest) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{10}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ExplainSystemRequest) GetRepositoryId() string {
@@ -1271,7 +1874,7 @@ type ExplainSystemResponse struct {
 
 func (x *ExplainSystemResponse) Reset() {
 	*x = ExplainSystemResponse{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[11]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1283,7 +1886,7 @@ func (x *ExplainSystemResponse) String() string {
 func (*ExplainSystemResponse) ProtoMessage() {}
 
 func (x *ExplainSystemResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[11]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1296,7 +1899,7 @@ func (x *ExplainSystemResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExplainSystemResponse.ProtoReflect.Descriptor instead.
 func (*ExplainSystemResponse) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{11}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ExplainSystemResponse) GetExplanation() string {
@@ -1337,7 +1940,7 @@ type GenerateCodeTourRequest struct {
 
 func (x *GenerateCodeTourRequest) Reset() {
 	*x = GenerateCodeTourRequest{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[12]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1349,7 +1952,7 @@ func (x *GenerateCodeTourRequest) String() string {
 func (*GenerateCodeTourRequest) ProtoMessage() {}
 
 func (x *GenerateCodeTourRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[12]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1362,7 +1965,7 @@ func (x *GenerateCodeTourRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateCodeTourRequest.ProtoReflect.Descriptor instead.
 func (*GenerateCodeTourRequest) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{12}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *GenerateCodeTourRequest) GetRepositoryId() string {
@@ -1431,7 +2034,7 @@ type GenerateCodeTourResponse struct {
 
 func (x *GenerateCodeTourResponse) Reset() {
 	*x = GenerateCodeTourResponse{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[13]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1443,7 +2046,7 @@ func (x *GenerateCodeTourResponse) String() string {
 func (*GenerateCodeTourResponse) ProtoMessage() {}
 
 func (x *GenerateCodeTourResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[13]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1456,7 +2059,7 @@ func (x *GenerateCodeTourResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateCodeTourResponse.ProtoReflect.Descriptor instead.
 func (*GenerateCodeTourResponse) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{13}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GenerateCodeTourResponse) GetStops() []*CodeTourStop {
@@ -1491,7 +2094,7 @@ type CodeTourStop struct {
 
 func (x *CodeTourStop) Reset() {
 	*x = CodeTourStop{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[14]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1503,7 +2106,7 @@ func (x *CodeTourStop) String() string {
 func (*CodeTourStop) ProtoMessage() {}
 
 func (x *CodeTourStop) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[14]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1516,7 +2119,7 @@ func (x *CodeTourStop) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CodeTourStop.ProtoReflect.Descriptor instead.
 func (*CodeTourStop) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{14}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *CodeTourStop) GetOrder() int32 {
@@ -1605,7 +2208,7 @@ type KnowledgeSection struct {
 
 func (x *KnowledgeSection) Reset() {
 	*x = KnowledgeSection{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[15]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1617,7 +2220,7 @@ func (x *KnowledgeSection) String() string {
 func (*KnowledgeSection) ProtoMessage() {}
 
 func (x *KnowledgeSection) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[15]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1630,7 +2233,7 @@ func (x *KnowledgeSection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KnowledgeSection.ProtoReflect.Descriptor instead.
 func (*KnowledgeSection) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{15}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *KnowledgeSection) GetTitle() string {
@@ -1697,7 +2300,7 @@ type KnowledgeEvidence struct {
 
 func (x *KnowledgeEvidence) Reset() {
 	*x = KnowledgeEvidence{}
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[16]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1709,7 +2312,7 @@ func (x *KnowledgeEvidence) String() string {
 func (*KnowledgeEvidence) ProtoMessage() {}
 
 func (x *KnowledgeEvidence) ProtoReflect() protoreflect.Message {
-	mi := &file_knowledge_v1_knowledge_proto_msgTypes[16]
+	mi := &file_knowledge_v1_knowledge_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1722,7 +2325,7 @@ func (x *KnowledgeEvidence) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KnowledgeEvidence.ProtoReflect.Descriptor instead.
 func (*KnowledgeEvidence) Descriptor() ([]byte, []int) {
-	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{16}
+	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *KnowledgeEvidence) GetSourceType() string {
@@ -1771,7 +2374,37 @@ var File_knowledge_v1_knowledge_proto protoreflect.FileDescriptor
 
 const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"\n" +
-	"\x1cknowledge/v1/knowledge.proto\x12\x19sourcebridge.knowledge.v1\x1a\x15common/v1/types.proto\"\x89\x03\n" +
+	"\x1cknowledge/v1/knowledge.proto\x12\x19sourcebridge.knowledge.v1\x1a\x15common/v1/types.proto\x1a\"common/v1/knowledge_progress.proto\"\x94\x02\n" +
+	"\x1fGenerateCliffNotesStreamMessage\x12J\n" +
+	"\x05phase\x18\x01 \x01(\v22.sourcebridge.common.v1.KnowledgeStreamPhaseMarkerH\x00R\x05phase\x12M\n" +
+	"\bprogress\x18\x02 \x01(\v2/.sourcebridge.common.v1.KnowledgeStreamProgressH\x00R\bprogress\x12M\n" +
+	"\x05final\x18\x03 \x01(\v25.sourcebridge.knowledge.v1.GenerateCliffNotesResponseH\x00R\x05finalB\a\n" +
+	"\x05event\"\x98\x02\n" +
+	"!GenerateLearningPathStreamMessage\x12J\n" +
+	"\x05phase\x18\x01 \x01(\v22.sourcebridge.common.v1.KnowledgeStreamPhaseMarkerH\x00R\x05phase\x12M\n" +
+	"\bprogress\x18\x02 \x01(\v2/.sourcebridge.common.v1.KnowledgeStreamProgressH\x00R\bprogress\x12O\n" +
+	"\x05final\x18\x03 \x01(\v27.sourcebridge.knowledge.v1.GenerateLearningPathResponseH\x00R\x05finalB\a\n" +
+	"\x05event\"\xa6\x02\n" +
+	"(GenerateArchitectureDiagramStreamMessage\x12J\n" +
+	"\x05phase\x18\x01 \x01(\v22.sourcebridge.common.v1.KnowledgeStreamPhaseMarkerH\x00R\x05phase\x12M\n" +
+	"\bprogress\x18\x02 \x01(\v2/.sourcebridge.common.v1.KnowledgeStreamProgressH\x00R\bprogress\x12V\n" +
+	"\x05final\x18\x03 \x01(\v2>.sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponseH\x00R\x05finalB\a\n" +
+	"\x05event\"\x9a\x02\n" +
+	"\"GenerateWorkflowStoryStreamMessage\x12J\n" +
+	"\x05phase\x18\x01 \x01(\v22.sourcebridge.common.v1.KnowledgeStreamPhaseMarkerH\x00R\x05phase\x12M\n" +
+	"\bprogress\x18\x02 \x01(\v2/.sourcebridge.common.v1.KnowledgeStreamProgressH\x00R\bprogress\x12P\n" +
+	"\x05final\x18\x03 \x01(\v28.sourcebridge.knowledge.v1.GenerateWorkflowStoryResponseH\x00R\x05finalB\a\n" +
+	"\x05event\"\x8a\x02\n" +
+	"\x1aExplainSystemStreamMessage\x12J\n" +
+	"\x05phase\x18\x01 \x01(\v22.sourcebridge.common.v1.KnowledgeStreamPhaseMarkerH\x00R\x05phase\x12M\n" +
+	"\bprogress\x18\x02 \x01(\v2/.sourcebridge.common.v1.KnowledgeStreamProgressH\x00R\bprogress\x12H\n" +
+	"\x05final\x18\x03 \x01(\v20.sourcebridge.knowledge.v1.ExplainSystemResponseH\x00R\x05finalB\a\n" +
+	"\x05event\"\x90\x02\n" +
+	"\x1dGenerateCodeTourStreamMessage\x12J\n" +
+	"\x05phase\x18\x01 \x01(\v22.sourcebridge.common.v1.KnowledgeStreamPhaseMarkerH\x00R\x05phase\x12M\n" +
+	"\bprogress\x18\x02 \x01(\v2/.sourcebridge.common.v1.KnowledgeStreamProgressH\x00R\bprogress\x12K\n" +
+	"\x05final\x18\x03 \x01(\v23.sourcebridge.knowledge.v1.GenerateCodeTourResponseH\x00R\x05finalB\a\n" +
+	"\x05event\"\x89\x03\n" +
 	"\x19GenerateCliffNotesRequest\x12#\n" +
 	"\rrepository_id\x18\x01 \x01(\tR\frepositoryId\x12'\n" +
 	"\x0frepository_name\x18\x02 \x01(\tR\x0erepositoryName\x12\x1a\n" +
@@ -1961,14 +2594,14 @@ const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"\rDEPTH_SUMMARY\x10\x01\x12\x10\n" +
 	"\fDEPTH_MEDIUM\x10\x02\x12\x0e\n" +
 	"\n" +
-	"DEPTH_DEEP\x10\x032\xbd\x06\n" +
-	"\x10KnowledgeService\x12\x81\x01\n" +
-	"\x12GenerateCliffNotes\x124.sourcebridge.knowledge.v1.GenerateCliffNotesRequest\x1a5.sourcebridge.knowledge.v1.GenerateCliffNotesResponse\x12\x87\x01\n" +
-	"\x14GenerateLearningPath\x126.sourcebridge.knowledge.v1.GenerateLearningPathRequest\x1a7.sourcebridge.knowledge.v1.GenerateLearningPathResponse\x12\x9c\x01\n" +
-	"\x1bGenerateArchitectureDiagram\x12=.sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest\x1a>.sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse\x12\x8a\x01\n" +
-	"\x15GenerateWorkflowStory\x127.sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest\x1a8.sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse\x12r\n" +
-	"\rExplainSystem\x12/.sourcebridge.knowledge.v1.ExplainSystemRequest\x1a0.sourcebridge.knowledge.v1.ExplainSystemResponse\x12{\n" +
-	"\x10GenerateCodeTour\x122.sourcebridge.knowledge.v1.GenerateCodeTourRequest\x1a3.sourcebridge.knowledge.v1.GenerateCodeTourResponseBFZDgithub.com/sourcebridge/sourcebridge/gen/go/knowledge/v1;knowledgev1b\x06proto3"
+	"DEPTH_DEEP\x10\x032\xe8\x06\n" +
+	"\x10KnowledgeService\x12\x88\x01\n" +
+	"\x12GenerateCliffNotes\x124.sourcebridge.knowledge.v1.GenerateCliffNotesRequest\x1a:.sourcebridge.knowledge.v1.GenerateCliffNotesStreamMessage0\x01\x12\x8e\x01\n" +
+	"\x14GenerateLearningPath\x126.sourcebridge.knowledge.v1.GenerateLearningPathRequest\x1a<.sourcebridge.knowledge.v1.GenerateLearningPathStreamMessage0\x01\x12\xa3\x01\n" +
+	"\x1bGenerateArchitectureDiagram\x12=.sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest\x1aC.sourcebridge.knowledge.v1.GenerateArchitectureDiagramStreamMessage0\x01\x12\x91\x01\n" +
+	"\x15GenerateWorkflowStory\x127.sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest\x1a=.sourcebridge.knowledge.v1.GenerateWorkflowStoryStreamMessage0\x01\x12y\n" +
+	"\rExplainSystem\x12/.sourcebridge.knowledge.v1.ExplainSystemRequest\x1a5.sourcebridge.knowledge.v1.ExplainSystemStreamMessage0\x01\x12\x82\x01\n" +
+	"\x10GenerateCodeTour\x122.sourcebridge.knowledge.v1.GenerateCodeTourRequest\x1a8.sourcebridge.knowledge.v1.GenerateCodeTourStreamMessage0\x01BFZDgithub.com/sourcebridge/sourcebridge/gen/go/knowledge/v1;knowledgev1b\x06proto3"
 
 var (
 	file_knowledge_v1_knowledge_proto_rawDescOnce sync.Once
@@ -1983,72 +2616,98 @@ func file_knowledge_v1_knowledge_proto_rawDescGZIP() []byte {
 }
 
 var file_knowledge_v1_knowledge_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_knowledge_v1_knowledge_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_knowledge_v1_knowledge_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_knowledge_v1_knowledge_proto_goTypes = []any{
-	(Audience)(0),                               // 0: sourcebridge.knowledge.v1.Audience
-	(Depth)(0),                                  // 1: sourcebridge.knowledge.v1.Depth
-	(*GenerateCliffNotesRequest)(nil),           // 2: sourcebridge.knowledge.v1.GenerateCliffNotesRequest
-	(*GenerateCliffNotesResponse)(nil),          // 3: sourcebridge.knowledge.v1.GenerateCliffNotesResponse
-	(*GenerateArchitectureDiagramRequest)(nil),  // 4: sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest
-	(*GenerateArchitectureDiagramResponse)(nil), // 5: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse
-	(*CliffNotesDiagnostics)(nil),               // 6: sourcebridge.knowledge.v1.CliffNotesDiagnostics
-	(*GenerateLearningPathRequest)(nil),         // 7: sourcebridge.knowledge.v1.GenerateLearningPathRequest
-	(*GenerateLearningPathResponse)(nil),        // 8: sourcebridge.knowledge.v1.GenerateLearningPathResponse
-	(*GenerateWorkflowStoryRequest)(nil),        // 9: sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest
-	(*GenerateWorkflowStoryResponse)(nil),       // 10: sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse
-	(*LearningStep)(nil),                        // 11: sourcebridge.knowledge.v1.LearningStep
-	(*ExplainSystemRequest)(nil),                // 12: sourcebridge.knowledge.v1.ExplainSystemRequest
-	(*ExplainSystemResponse)(nil),               // 13: sourcebridge.knowledge.v1.ExplainSystemResponse
-	(*GenerateCodeTourRequest)(nil),             // 14: sourcebridge.knowledge.v1.GenerateCodeTourRequest
-	(*GenerateCodeTourResponse)(nil),            // 15: sourcebridge.knowledge.v1.GenerateCodeTourResponse
-	(*CodeTourStop)(nil),                        // 16: sourcebridge.knowledge.v1.CodeTourStop
-	(*KnowledgeSection)(nil),                    // 17: sourcebridge.knowledge.v1.KnowledgeSection
-	(*KnowledgeEvidence)(nil),                   // 18: sourcebridge.knowledge.v1.KnowledgeEvidence
-	(*v1.LLMUsage)(nil),                         // 19: sourcebridge.common.v1.LLMUsage
+	(Audience)(0),                                    // 0: sourcebridge.knowledge.v1.Audience
+	(Depth)(0),                                       // 1: sourcebridge.knowledge.v1.Depth
+	(*GenerateCliffNotesStreamMessage)(nil),          // 2: sourcebridge.knowledge.v1.GenerateCliffNotesStreamMessage
+	(*GenerateLearningPathStreamMessage)(nil),        // 3: sourcebridge.knowledge.v1.GenerateLearningPathStreamMessage
+	(*GenerateArchitectureDiagramStreamMessage)(nil), // 4: sourcebridge.knowledge.v1.GenerateArchitectureDiagramStreamMessage
+	(*GenerateWorkflowStoryStreamMessage)(nil),       // 5: sourcebridge.knowledge.v1.GenerateWorkflowStoryStreamMessage
+	(*ExplainSystemStreamMessage)(nil),               // 6: sourcebridge.knowledge.v1.ExplainSystemStreamMessage
+	(*GenerateCodeTourStreamMessage)(nil),            // 7: sourcebridge.knowledge.v1.GenerateCodeTourStreamMessage
+	(*GenerateCliffNotesRequest)(nil),                // 8: sourcebridge.knowledge.v1.GenerateCliffNotesRequest
+	(*GenerateCliffNotesResponse)(nil),               // 9: sourcebridge.knowledge.v1.GenerateCliffNotesResponse
+	(*GenerateArchitectureDiagramRequest)(nil),       // 10: sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest
+	(*GenerateArchitectureDiagramResponse)(nil),      // 11: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse
+	(*CliffNotesDiagnostics)(nil),                    // 12: sourcebridge.knowledge.v1.CliffNotesDiagnostics
+	(*GenerateLearningPathRequest)(nil),              // 13: sourcebridge.knowledge.v1.GenerateLearningPathRequest
+	(*GenerateLearningPathResponse)(nil),             // 14: sourcebridge.knowledge.v1.GenerateLearningPathResponse
+	(*GenerateWorkflowStoryRequest)(nil),             // 15: sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest
+	(*GenerateWorkflowStoryResponse)(nil),            // 16: sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse
+	(*LearningStep)(nil),                             // 17: sourcebridge.knowledge.v1.LearningStep
+	(*ExplainSystemRequest)(nil),                     // 18: sourcebridge.knowledge.v1.ExplainSystemRequest
+	(*ExplainSystemResponse)(nil),                    // 19: sourcebridge.knowledge.v1.ExplainSystemResponse
+	(*GenerateCodeTourRequest)(nil),                  // 20: sourcebridge.knowledge.v1.GenerateCodeTourRequest
+	(*GenerateCodeTourResponse)(nil),                 // 21: sourcebridge.knowledge.v1.GenerateCodeTourResponse
+	(*CodeTourStop)(nil),                             // 22: sourcebridge.knowledge.v1.CodeTourStop
+	(*KnowledgeSection)(nil),                         // 23: sourcebridge.knowledge.v1.KnowledgeSection
+	(*KnowledgeEvidence)(nil),                        // 24: sourcebridge.knowledge.v1.KnowledgeEvidence
+	(*v1.KnowledgeStreamPhaseMarker)(nil),            // 25: sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	(*v1.KnowledgeStreamProgress)(nil),               // 26: sourcebridge.common.v1.KnowledgeStreamProgress
+	(*v1.LLMUsage)(nil),                              // 27: sourcebridge.common.v1.LLMUsage
 }
 var file_knowledge_v1_knowledge_proto_depIdxs = []int32{
-	0,  // 0: sourcebridge.knowledge.v1.GenerateCliffNotesRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
-	1,  // 1: sourcebridge.knowledge.v1.GenerateCliffNotesRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
-	17, // 2: sourcebridge.knowledge.v1.GenerateCliffNotesResponse.sections:type_name -> sourcebridge.knowledge.v1.KnowledgeSection
-	19, // 3: sourcebridge.knowledge.v1.GenerateCliffNotesResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	6,  // 4: sourcebridge.knowledge.v1.GenerateCliffNotesResponse.diagnostics:type_name -> sourcebridge.knowledge.v1.CliffNotesDiagnostics
-	0,  // 5: sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
-	1,  // 6: sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
-	18, // 7: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse.evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
-	19, // 8: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	18, // 9: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse.detail_evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
-	0,  // 10: sourcebridge.knowledge.v1.GenerateLearningPathRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
-	1,  // 11: sourcebridge.knowledge.v1.GenerateLearningPathRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
-	11, // 12: sourcebridge.knowledge.v1.GenerateLearningPathResponse.steps:type_name -> sourcebridge.knowledge.v1.LearningStep
-	19, // 13: sourcebridge.knowledge.v1.GenerateLearningPathResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	0,  // 14: sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
-	1,  // 15: sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
-	17, // 16: sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse.sections:type_name -> sourcebridge.knowledge.v1.KnowledgeSection
-	19, // 17: sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	18, // 18: sourcebridge.knowledge.v1.ExplainSystemResponse.evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
-	19, // 19: sourcebridge.knowledge.v1.ExplainSystemResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	0,  // 20: sourcebridge.knowledge.v1.GenerateCodeTourRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
-	1,  // 21: sourcebridge.knowledge.v1.GenerateCodeTourRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
-	16, // 22: sourcebridge.knowledge.v1.GenerateCodeTourResponse.stops:type_name -> sourcebridge.knowledge.v1.CodeTourStop
-	19, // 23: sourcebridge.knowledge.v1.GenerateCodeTourResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	18, // 24: sourcebridge.knowledge.v1.KnowledgeSection.evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
-	2,  // 25: sourcebridge.knowledge.v1.KnowledgeService.GenerateCliffNotes:input_type -> sourcebridge.knowledge.v1.GenerateCliffNotesRequest
-	7,  // 26: sourcebridge.knowledge.v1.KnowledgeService.GenerateLearningPath:input_type -> sourcebridge.knowledge.v1.GenerateLearningPathRequest
-	4,  // 27: sourcebridge.knowledge.v1.KnowledgeService.GenerateArchitectureDiagram:input_type -> sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest
-	9,  // 28: sourcebridge.knowledge.v1.KnowledgeService.GenerateWorkflowStory:input_type -> sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest
-	12, // 29: sourcebridge.knowledge.v1.KnowledgeService.ExplainSystem:input_type -> sourcebridge.knowledge.v1.ExplainSystemRequest
-	14, // 30: sourcebridge.knowledge.v1.KnowledgeService.GenerateCodeTour:input_type -> sourcebridge.knowledge.v1.GenerateCodeTourRequest
-	3,  // 31: sourcebridge.knowledge.v1.KnowledgeService.GenerateCliffNotes:output_type -> sourcebridge.knowledge.v1.GenerateCliffNotesResponse
-	8,  // 32: sourcebridge.knowledge.v1.KnowledgeService.GenerateLearningPath:output_type -> sourcebridge.knowledge.v1.GenerateLearningPathResponse
-	5,  // 33: sourcebridge.knowledge.v1.KnowledgeService.GenerateArchitectureDiagram:output_type -> sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse
-	10, // 34: sourcebridge.knowledge.v1.KnowledgeService.GenerateWorkflowStory:output_type -> sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse
-	13, // 35: sourcebridge.knowledge.v1.KnowledgeService.ExplainSystem:output_type -> sourcebridge.knowledge.v1.ExplainSystemResponse
-	15, // 36: sourcebridge.knowledge.v1.KnowledgeService.GenerateCodeTour:output_type -> sourcebridge.knowledge.v1.GenerateCodeTourResponse
-	31, // [31:37] is the sub-list for method output_type
-	25, // [25:31] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	25, // 0: sourcebridge.knowledge.v1.GenerateCliffNotesStreamMessage.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	26, // 1: sourcebridge.knowledge.v1.GenerateCliffNotesStreamMessage.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
+	9,  // 2: sourcebridge.knowledge.v1.GenerateCliffNotesStreamMessage.final:type_name -> sourcebridge.knowledge.v1.GenerateCliffNotesResponse
+	25, // 3: sourcebridge.knowledge.v1.GenerateLearningPathStreamMessage.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	26, // 4: sourcebridge.knowledge.v1.GenerateLearningPathStreamMessage.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
+	14, // 5: sourcebridge.knowledge.v1.GenerateLearningPathStreamMessage.final:type_name -> sourcebridge.knowledge.v1.GenerateLearningPathResponse
+	25, // 6: sourcebridge.knowledge.v1.GenerateArchitectureDiagramStreamMessage.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	26, // 7: sourcebridge.knowledge.v1.GenerateArchitectureDiagramStreamMessage.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
+	11, // 8: sourcebridge.knowledge.v1.GenerateArchitectureDiagramStreamMessage.final:type_name -> sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse
+	25, // 9: sourcebridge.knowledge.v1.GenerateWorkflowStoryStreamMessage.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	26, // 10: sourcebridge.knowledge.v1.GenerateWorkflowStoryStreamMessage.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
+	16, // 11: sourcebridge.knowledge.v1.GenerateWorkflowStoryStreamMessage.final:type_name -> sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse
+	25, // 12: sourcebridge.knowledge.v1.ExplainSystemStreamMessage.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	26, // 13: sourcebridge.knowledge.v1.ExplainSystemStreamMessage.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
+	19, // 14: sourcebridge.knowledge.v1.ExplainSystemStreamMessage.final:type_name -> sourcebridge.knowledge.v1.ExplainSystemResponse
+	25, // 15: sourcebridge.knowledge.v1.GenerateCodeTourStreamMessage.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	26, // 16: sourcebridge.knowledge.v1.GenerateCodeTourStreamMessage.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
+	21, // 17: sourcebridge.knowledge.v1.GenerateCodeTourStreamMessage.final:type_name -> sourcebridge.knowledge.v1.GenerateCodeTourResponse
+	0,  // 18: sourcebridge.knowledge.v1.GenerateCliffNotesRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
+	1,  // 19: sourcebridge.knowledge.v1.GenerateCliffNotesRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
+	23, // 20: sourcebridge.knowledge.v1.GenerateCliffNotesResponse.sections:type_name -> sourcebridge.knowledge.v1.KnowledgeSection
+	27, // 21: sourcebridge.knowledge.v1.GenerateCliffNotesResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	12, // 22: sourcebridge.knowledge.v1.GenerateCliffNotesResponse.diagnostics:type_name -> sourcebridge.knowledge.v1.CliffNotesDiagnostics
+	0,  // 23: sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
+	1,  // 24: sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
+	24, // 25: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse.evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
+	27, // 26: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	24, // 27: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse.detail_evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
+	0,  // 28: sourcebridge.knowledge.v1.GenerateLearningPathRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
+	1,  // 29: sourcebridge.knowledge.v1.GenerateLearningPathRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
+	17, // 30: sourcebridge.knowledge.v1.GenerateLearningPathResponse.steps:type_name -> sourcebridge.knowledge.v1.LearningStep
+	27, // 31: sourcebridge.knowledge.v1.GenerateLearningPathResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	0,  // 32: sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
+	1,  // 33: sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
+	23, // 34: sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse.sections:type_name -> sourcebridge.knowledge.v1.KnowledgeSection
+	27, // 35: sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	24, // 36: sourcebridge.knowledge.v1.ExplainSystemResponse.evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
+	27, // 37: sourcebridge.knowledge.v1.ExplainSystemResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	0,  // 38: sourcebridge.knowledge.v1.GenerateCodeTourRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
+	1,  // 39: sourcebridge.knowledge.v1.GenerateCodeTourRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
+	22, // 40: sourcebridge.knowledge.v1.GenerateCodeTourResponse.stops:type_name -> sourcebridge.knowledge.v1.CodeTourStop
+	27, // 41: sourcebridge.knowledge.v1.GenerateCodeTourResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	24, // 42: sourcebridge.knowledge.v1.KnowledgeSection.evidence:type_name -> sourcebridge.knowledge.v1.KnowledgeEvidence
+	8,  // 43: sourcebridge.knowledge.v1.KnowledgeService.GenerateCliffNotes:input_type -> sourcebridge.knowledge.v1.GenerateCliffNotesRequest
+	13, // 44: sourcebridge.knowledge.v1.KnowledgeService.GenerateLearningPath:input_type -> sourcebridge.knowledge.v1.GenerateLearningPathRequest
+	10, // 45: sourcebridge.knowledge.v1.KnowledgeService.GenerateArchitectureDiagram:input_type -> sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest
+	15, // 46: sourcebridge.knowledge.v1.KnowledgeService.GenerateWorkflowStory:input_type -> sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest
+	18, // 47: sourcebridge.knowledge.v1.KnowledgeService.ExplainSystem:input_type -> sourcebridge.knowledge.v1.ExplainSystemRequest
+	20, // 48: sourcebridge.knowledge.v1.KnowledgeService.GenerateCodeTour:input_type -> sourcebridge.knowledge.v1.GenerateCodeTourRequest
+	2,  // 49: sourcebridge.knowledge.v1.KnowledgeService.GenerateCliffNotes:output_type -> sourcebridge.knowledge.v1.GenerateCliffNotesStreamMessage
+	3,  // 50: sourcebridge.knowledge.v1.KnowledgeService.GenerateLearningPath:output_type -> sourcebridge.knowledge.v1.GenerateLearningPathStreamMessage
+	4,  // 51: sourcebridge.knowledge.v1.KnowledgeService.GenerateArchitectureDiagram:output_type -> sourcebridge.knowledge.v1.GenerateArchitectureDiagramStreamMessage
+	5,  // 52: sourcebridge.knowledge.v1.KnowledgeService.GenerateWorkflowStory:output_type -> sourcebridge.knowledge.v1.GenerateWorkflowStoryStreamMessage
+	6,  // 53: sourcebridge.knowledge.v1.KnowledgeService.ExplainSystem:output_type -> sourcebridge.knowledge.v1.ExplainSystemStreamMessage
+	7,  // 54: sourcebridge.knowledge.v1.KnowledgeService.GenerateCodeTour:output_type -> sourcebridge.knowledge.v1.GenerateCodeTourStreamMessage
+	49, // [49:55] is the sub-list for method output_type
+	43, // [43:49] is the sub-list for method input_type
+	43, // [43:43] is the sub-list for extension type_name
+	43, // [43:43] is the sub-list for extension extendee
+	0,  // [0:43] is the sub-list for field type_name
 }
 
 func init() { file_knowledge_v1_knowledge_proto_init() }
@@ -2056,13 +2715,43 @@ func file_knowledge_v1_knowledge_proto_init() {
 	if File_knowledge_v1_knowledge_proto != nil {
 		return
 	}
+	file_knowledge_v1_knowledge_proto_msgTypes[0].OneofWrappers = []any{
+		(*GenerateCliffNotesStreamMessage_Phase)(nil),
+		(*GenerateCliffNotesStreamMessage_Progress)(nil),
+		(*GenerateCliffNotesStreamMessage_Final)(nil),
+	}
+	file_knowledge_v1_knowledge_proto_msgTypes[1].OneofWrappers = []any{
+		(*GenerateLearningPathStreamMessage_Phase)(nil),
+		(*GenerateLearningPathStreamMessage_Progress)(nil),
+		(*GenerateLearningPathStreamMessage_Final)(nil),
+	}
+	file_knowledge_v1_knowledge_proto_msgTypes[2].OneofWrappers = []any{
+		(*GenerateArchitectureDiagramStreamMessage_Phase)(nil),
+		(*GenerateArchitectureDiagramStreamMessage_Progress)(nil),
+		(*GenerateArchitectureDiagramStreamMessage_Final)(nil),
+	}
+	file_knowledge_v1_knowledge_proto_msgTypes[3].OneofWrappers = []any{
+		(*GenerateWorkflowStoryStreamMessage_Phase)(nil),
+		(*GenerateWorkflowStoryStreamMessage_Progress)(nil),
+		(*GenerateWorkflowStoryStreamMessage_Final)(nil),
+	}
+	file_knowledge_v1_knowledge_proto_msgTypes[4].OneofWrappers = []any{
+		(*ExplainSystemStreamMessage_Phase)(nil),
+		(*ExplainSystemStreamMessage_Progress)(nil),
+		(*ExplainSystemStreamMessage_Final)(nil),
+	}
+	file_knowledge_v1_knowledge_proto_msgTypes[5].OneofWrappers = []any{
+		(*GenerateCodeTourStreamMessage_Phase)(nil),
+		(*GenerateCodeTourStreamMessage_Progress)(nil),
+		(*GenerateCodeTourStreamMessage_Final)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_knowledge_v1_knowledge_proto_rawDesc), len(file_knowledge_v1_knowledge_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   17,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

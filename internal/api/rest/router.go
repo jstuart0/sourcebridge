@@ -276,6 +276,7 @@ type Server struct {
 	livingWikiJobResultStore     livingwiki.JobResultStore     // nil = job result history unavailable
 	livingWikiPagePublishStore   livingwiki.PagePublishStatusStore // per-page dispatch state (Phase 1 of incremental-publish redesign); nil = smart-resume falls back to sink-presence-only
 	livingWikiLiveOrchestrator   *lworch.Orchestrator          // living-wiki page-generation orchestrator; nil = feature unavailable
+	knowledgeSettingsStore       KnowledgeSettingsStore        // CA-122: operator-tunable knowledge-RPC safety-net timeout; nil = embedded mode (boot env-default only)
 	clusterRunner                *clustering.Runner            // subsystem clustering job dispatcher; nil = feature disabled
 	healthChecker                *HealthChecker                // shared DB+worker probe; nil = embedded/test mode, handlers fall back to local checks
 
@@ -712,6 +713,16 @@ func (s *Server) setupRouter() {
 		r.Post("/api/v1/admin/test-worker", s.handleAdminTestWorker)
 		r.Post("/api/v1/admin/test-llm", s.handleAdminTestLLM)
 		r.Get("/api/v1/admin/knowledge", s.handleAdminKnowledgeStatus)
+
+		// CA-122: operator-tunable knowledge-RPC safety-net timeout. The
+		// outer cap on per-call repository-scoped knowledge generation
+		// (cliff notes, learning path, architecture diagram, workflow
+		// story, system explanation, code tour, enterprise report).
+		// Distinct from the per-phase reaper which fires on "no
+		// progress in 10 min." Default 4h, range 30 min – 24 h.
+		// Validation: PUT rejects out-of-range with HTTP 400.
+		r.Get("/api/v1/admin/knowledge/timeout", s.handleGetKnowledgeTimeout)
+		r.Put("/api/v1/admin/knowledge/timeout", s.handlePutKnowledgeTimeout)
 
 		// LLM job monitor (Phase 2c)
 		r.Get("/api/v1/admin/llm/activity", s.handleLLMActivity)

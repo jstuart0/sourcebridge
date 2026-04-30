@@ -13,7 +13,9 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -153,11 +155,99 @@ func runServe(cmd *cobra.Command, args []string) error {
 			"storage.surreal_mode", cfg.Storage.SurrealMode)
 	}
 
+	// CA-122: operator-tunable knowledge-RPC safety-net timeout.
+	//
+	// The provider closure is read on every dispatch of one of the seven
+	// knowledge / report streaming RPCs in internal/worker/client.go and
+	// supplies the OUTER context.WithTimeout for repository-scope calls.
+	// (The 10-min reaper at orchestrator.go:297-348 covers the
+	// "no progress" failure mode separately.)
+	//
+	// Resolution order at every call:
+	//   1. Live read from ca_knowledge_settings:current via the store.
+	//   2. On store success: return that value (defensively clamped).
+	//   3. On store error: return the last successful value (LKG).
+	//   4. On no LKG yet: return the boot-time env default
+	//      (SOURCEBRIDGE_KNOWLEDGE_TIMEOUT_SECS_DEFAULT, default 4h).
+	//
+	// We cache for 5s to amortize the read across many concurrent
+	// dispatches while still surfacing operator changes quickly.
+	//
+	// Embedded mode (no external Surreal): the store is nil and the
+	// closure always returns the boot-time env default.
+	var knowledgeSettingsStore *db.KnowledgeSettingsStore
+	if cfg.Storage.SurrealMode == "external" && surrealDB != nil {
+		knowledgeSettingsStore = db.NewKnowledgeSettingsStore(surrealDB)
+		// Best-effort schema ensure + seed at boot. Missing schema
+		// makes Get error rather than corrupt; seeding is idempotent
+		// (CREATE IF NOT EXISTS-equivalent inside the store).
+		bootCtx, cancelBoot := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := knowledgeSettingsStore.EnsureSchema(bootCtx); err != nil {
+			slog.Warn("knowledge settings: ensure schema failed; reads will degrade to env default",
+				"error", err)
+		}
+		seedSecs := db.KnowledgeTimeoutDefaultSecs
+		if raw := os.Getenv("SOURCEBRIDGE_KNOWLEDGE_TIMEOUT_SECS_DEFAULT"); raw != "" {
+			if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && v > 0 {
+				seedSecs = v
+			}
+		}
+		if err := knowledgeSettingsStore.Seed(bootCtx, seedSecs); err != nil {
+			slog.Warn("knowledge settings: seed failed; reads will degrade to env default",
+				"error", err)
+		}
+		cancelBoot()
+	}
+
+	// Boot-time env default for the closure's fallback path.
+	bootDefaultTimeout := time.Duration(db.KnowledgeTimeoutDefaultSecs) * time.Second
+	if raw := os.Getenv("SOURCEBRIDGE_KNOWLEDGE_TIMEOUT_SECS_DEFAULT"); raw != "" {
+		if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && v > 0 {
+			bootDefaultTimeout = time.Duration(v) * time.Second
+		}
+	}
+
+	// 5s cache + LKG state, guarded by a mutex so concurrent dispatches
+	// see consistent reads. The closure is called on the gRPC dispatch
+	// hot path; we keep the locked region tiny.
+	var (
+		ktMu     sync.Mutex
+		ktCached time.Duration
+		ktExpiry time.Time
+		ktLKG    time.Duration
+		ktWarnAt time.Time // throttle warn logs to once per 5 min
+	)
+
 	knowledgeTimeoutProvider := func() time.Duration {
-		// TimeoutSecs is for individual LLM completions (default 30s).
-		// Knowledge generation is a multi-step pipeline that takes much
-		// longer — use the dedicated constant (default 30 minutes).
-		return worker.TimeoutKnowledgeRepository
+		ktMu.Lock()
+		defer ktMu.Unlock()
+		now := time.Now()
+		if ktCached > 0 && now.Before(ktExpiry) {
+			return ktCached
+		}
+		if knowledgeSettingsStore == nil {
+			return bootDefaultTimeout
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		d, err := knowledgeSettingsStore.Get(ctx)
+		if err != nil {
+			// Throttled warn — don't spam every 5s on a sustained outage.
+			if now.Sub(ktWarnAt) > 5*time.Minute {
+				slog.Warn("knowledge timeout: live read failed; using last-known-good or env default",
+					"error", err,
+					"lkg_seconds", int(ktLKG/time.Second))
+				ktWarnAt = now
+			}
+			if ktLKG > 0 {
+				return ktLKG
+			}
+			return bootDefaultTimeout
+		}
+		ktCached = d
+		ktExpiry = now.Add(5 * time.Second)
+		ktLKG = d
+		return d
 	}
 
 	// Initialize worker client.
@@ -710,6 +800,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 			}
 			return lwDispatcher.LiveOrchestrator()
 		}()),
+		// CA-122: thread the knowledge-settings store so the
+		// /api/v1/admin/knowledge/timeout endpoints can read+write the
+		// safety-net cap. nil in embedded mode is fine — the handlers
+		// return 503.
+		rest.WithKnowledgeSettingsStore(func() rest.KnowledgeSettingsStore {
+			if knowledgeSettingsStore == nil {
+				return nil
+			}
+			return knowledgeSettingsStore
+		}()),
 	)
 
 	// Initialize OIDC if configured
@@ -870,13 +970,20 @@ func migrationsPath() string {
 // llmConfigAdapter bridges db.SurrealLLMConfigStore and rest.LLMConfigStore
 // to avoid a circular import between the db and rest packages.
 //
-// LLM provider profiles slice 1: SaveLLMConfig now routes through the
-// active profile when one exists (D7) via WriteActiveProfilePatchWithRetry,
-// which goes through writeActiveProfileWithLegacyMirror to dual-write
-// the active profile and the legacy mirror row in one BEGIN/COMMIT
-// (codex-H2). When no active profile exists yet (extreme boot-race),
-// the adapter falls back to the legacy SaveLLMConfig path so the
-// migration can pick up the legacy bytes (bob-L1).
+// LLM provider profiles slice 1: SaveLLMConfig routes through the active
+// profile via WriteActiveProfilePatchWithRetry, which goes through
+// writeActiveProfileWithLegacyMirror to dual-write the active profile and
+// the legacy mirror row in one BEGIN/COMMIT (codex-H2).
+//
+// Slice 4 (cleanup): the prior bob-L1 boot-race fallback to
+// SurrealLLMConfigStore.SaveLLMConfig has been removed. The migration
+// (db.MigrateToProfiles) runs synchronously in runServe before the HTTP
+// listener accepts traffic and is mandatory for boot — if it fails the
+// process exits non-zero. Therefore by the time any handler invokes this
+// adapter, an active profile always exists. If LoadActiveProfileIDAndVersion
+// returns an empty id post-boot, that's a real invariant violation (e.g.
+// operator hand-edited the row) and we surface it as an explicit error
+// rather than silently writing through the legacy path.
 type llmConfigAdapter struct {
 	store        *db.SurrealLLMConfigStore
 	profileStore *db.SurrealLLMProfileStore // nil in pre-profile or test wirings
@@ -909,81 +1016,48 @@ func (a *llmConfigAdapter) LoadLLMConfig() (*rest.LLMConfigRecord, error) {
 }
 
 func (a *llmConfigAdapter) SaveLLMConfig(rec *rest.LLMConfigRecord) error {
-	// LLM provider profiles slice 1: legacy PUT /admin/llm-config now
+	// LLM provider profiles slice 1: legacy PUT /admin/llm-config
 	// translates to a PATCH against the ACTIVE profile (D7), going
 	// through writeActiveProfileWithLegacyMirror so the legacy mirror
 	// row stays in sync (codex-H2). The patch is "set every field"
 	// because this endpoint's contract is total replacement of the
 	// effective config.
 	//
-	// When no active profile exists yet (extreme narrow boot-race
-	// window where the request arrives before MigrateToProfiles
-	// completes), fall through to the legacy SaveLLMConfig — the
-	// boot-time migration will pick up the legacy bytes and seed
-	// Default from them.
+	// Slice 4: the prior boot-race fallback to legacy SaveLLMConfig has
+	// been removed. db.MigrateToProfiles runs synchronously in runServe
+	// before the HTTP listener starts, so by the time any handler reaches
+	// this method, an active profile is guaranteed to exist (or the
+	// process never reached "ready"). If we observe an empty id here,
+	// surface it loudly rather than write through legacy bytes that the
+	// resolver would have to reconcile.
 	ctx := context.Background()
+	if a.profileStore == nil || a.surrealDB == nil {
+		return fmt.Errorf("llm config adapter not wired with profile store; check cli/serve.go boot ordering")
+	}
 	activeID, _, err := a.store.LoadActiveProfileIDAndVersion(ctx)
-	if err == nil && activeID != "" && a.profileStore != nil && a.surrealDB != nil {
-		// Encrypt the api_key once, here. Empty plaintext sealed = ""
-		// (cipher contract). The helpers expect the SEALED form.
-		sealed, encErr := a.profileStore.EncryptedAPIKey(rec.APIKey)
-		if encErr != nil {
-			if errors.Is(encErr, db.ErrEncryptionKeyRequired) {
-				return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, encErr)
-			}
-			return encErr
-		}
-		patch := db.ProfilePatch{
-			Provider:                 rec.Provider,
-			BaseURL:                  rec.BaseURL,
-			APIKey:                   sealed,
-			APIKeyMode:               db.APIKeyModeSet(),
-			SummaryModel:             rec.SummaryModel,
-			ReviewModel:              rec.ReviewModel,
-			AskModel:                 rec.AskModel,
-			KnowledgeModel:           rec.KnowledgeModel,
-			ArchitectureDiagramModel: rec.ArchitectureDiagramModel,
-			ReportModel:              rec.ReportModel,
-			DraftModel:               rec.DraftModel,
-			TimeoutSecs:              rec.TimeoutSecs,
-			AdvancedMode:             rec.AdvancedMode,
-			FieldsPresent: db.ProfilePatchFields{
-				Provider:                 true,
-				BaseURL:                  true,
-				SummaryModel:             true,
-				ReviewModel:              true,
-				AskModel:                 true,
-				KnowledgeModel:           true,
-				ArchitectureDiagramModel: true,
-				ReportModel:              true,
-				DraftModel:               true,
-				TimeoutSecs:              true,
-				AdvancedMode:             true,
-			},
-		}
-		// If api_key plaintext is empty, route through Clear so the
-		// helper writes api_key='' rather than leaving a stale value.
-		// Empty sealed bytes already encode "no key" semantically,
-		// but going through Clear documents intent.
-		if rec.APIKey == "" {
-			patch.APIKey = ""
-			patch.APIKeyMode = db.APIKeyModeClear()
-		}
-		if _, err := db.WriteActiveProfilePatchWithRetry(ctx, a.surrealDB, a.store, patch); err != nil {
-			if errors.Is(err, db.ErrEncryptionKeyRequired) {
-				return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, err)
-			}
-			return err
-		}
-		return nil
+	if err != nil {
+		return fmt.Errorf("load active profile: %w", err)
+	}
+	if activeID == "" {
+		// Should be impossible post-MigrateToProfiles. Treat as an
+		// invariant violation rather than a recoverable boot-race.
+		return fmt.Errorf("no active LLM profile (post-migration invariant violated; use /admin/llm-profiles to create or activate a profile)")
 	}
 
-	// Boot-race fallback (bob-L1): no active profile yet. Write through
-	// the legacy path; the migration will pick up these bytes.
-	err = a.store.SaveLLMConfig(&db.LLMConfigRecord{
+	// Encrypt the api_key once, here. Empty plaintext sealed = ""
+	// (cipher contract). The helpers expect the SEALED form.
+	sealed, encErr := a.profileStore.EncryptedAPIKey(rec.APIKey)
+	if encErr != nil {
+		if errors.Is(encErr, db.ErrEncryptionKeyRequired) {
+			return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, encErr)
+		}
+		return encErr
+	}
+	patch := db.ProfilePatch{
 		Provider:                 rec.Provider,
 		BaseURL:                  rec.BaseURL,
-		APIKey:                   rec.APIKey,
+		APIKey:                   sealed,
+		APIKeyMode:               db.APIKeyModeSet(),
 		SummaryModel:             rec.SummaryModel,
 		ReviewModel:              rec.ReviewModel,
 		AskModel:                 rec.AskModel,
@@ -993,14 +1067,49 @@ func (a *llmConfigAdapter) SaveLLMConfig(rec *rest.LLMConfigRecord) error {
 		DraftModel:               rec.DraftModel,
 		TimeoutSecs:              rec.TimeoutSecs,
 		AdvancedMode:             rec.AdvancedMode,
-	})
-	// Bridge the db-package sentinel into the rest-package sentinel so
-	// handleUpdateLLMConfig can map it to a 422 without importing
-	// internal/db. errors.Is matches across the wrap.
-	if errors.Is(err, db.ErrEncryptionKeyRequired) {
-		return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, err)
+		FieldsPresent: db.ProfilePatchFields{
+			Provider:                 true,
+			BaseURL:                  true,
+			SummaryModel:             true,
+			ReviewModel:              true,
+			AskModel:                 true,
+			KnowledgeModel:           true,
+			ArchitectureDiagramModel: true,
+			ReportModel:              true,
+			DraftModel:               true,
+			TimeoutSecs:              true,
+			AdvancedMode:             true,
+		},
 	}
-	return err
+	// If api_key plaintext is empty, route through Clear so the helper
+	// writes api_key='' rather than leaving a stale value. Empty sealed
+	// bytes already encode "no key" semantically, but going through
+	// Clear documents intent.
+	if rec.APIKey == "" {
+		patch.APIKey = ""
+		patch.APIKeyMode = db.APIKeyModeClear()
+	}
+	// Slice-4 (codex-r2 High #2): use the existence-verifying variant.
+	// `intendedActiveID == ""` keeps "current at helper entry" semantics
+	// (legacy PUT has no specific target id), but the variant verifies
+	// the current active profile row exists before issuing the batch.
+	// If active_profile_id is non-empty but the profile row is missing
+	// (data damage / direct DB delete), returns ErrProfileNotFound so
+	// we do NOT silently bump the legacy mirror with a no-op profile
+	// update underneath it.
+	if _, werr := db.WriteActiveProfilePatchByIDWithRetry(ctx, a.surrealDB, a.profileStore, a.store, "", patch); werr != nil {
+		if errors.Is(werr, db.ErrEncryptionKeyRequired) {
+			return fmt.Errorf("%w: %v", rest.ErrLLMEncryptionKeyRequired, werr)
+		}
+		// ErrProfileNotFound here means active_profile_id pointed at a
+		// missing row. Map to the no-active-profile sentinel so the REST
+		// layer can return a clear actionable error rather than a 500.
+		if errors.Is(werr, db.ErrProfileNotFound) {
+			return fmt.Errorf("active LLM profile is missing (active_profile_id points at a deleted row); use /admin/llm-profiles to repair")
+		}
+		return werr
+	}
+	return nil
 }
 
 // llmStoreResolverAdapter bridges *db.SurrealLLMConfigStore to the narrow
@@ -1303,7 +1412,14 @@ func (a *llmProfileStoreAdapter) UpdateProfile(ctx context.Context, id string, r
 			patchHelper.APIKey = ""
 			patchHelper.APIKeyMode = db.APIKeyModeClear()
 		}
-		_, bumpErr := db.WriteActiveProfilePatchWithRetry(ctx, a.surrealDB, a.lcs, patchHelper)
+		// Slice-4 (codex-r2 High #1): pass `id` as intendedActiveID so
+		// the helper rejects with ErrTargetNoLongerActive if a concurrent
+		// activation moved the active pointer between this adapter's
+		// pre-check and the helper's BEGIN. Without this guard, the
+		// helper's "write into whichever profile happens to be active"
+		// semantics would corrupt the now-active profile with the
+		// reloaded fields of `id`.
+		_, bumpErr := db.WriteActiveProfilePatchByIDWithRetry(ctx, a.surrealDB, a.lps, a.lcs, id, patchHelper)
 		if bumpErr != nil {
 			return translateProfileStoreErr(bumpErr)
 		}

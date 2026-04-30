@@ -27,8 +27,16 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // EnterpriseReportService hosts enterprise-only report generation RPCs.
+//
+// GenerateReport is server-streaming (CA-122). The report engine
+// already exposes a fine-grained progress callback internally
+// (workers/reports/engine.py); the streaming refactor surfaces those
+// fractions to the orchestrator as KnowledgeStreamProgress events with
+// unit_kind="report_progress" so the GraphQL UI shows real progress
+// instead of a synthetic time-based curve. See thoughts/shared/plans/
+// 2026-04-29-deep-cliffnotes-deadline-exceeded.md (Decision 4b).
 type EnterpriseReportServiceClient interface {
-	GenerateReport(ctx context.Context, in *GenerateReportRequest, opts ...grpc.CallOption) (*GenerateReportResponse, error)
+	GenerateReport(ctx context.Context, in *GenerateReportRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GenerateReportStreamMessage], error)
 }
 
 type enterpriseReportServiceClient struct {
@@ -39,23 +47,40 @@ func NewEnterpriseReportServiceClient(cc grpc.ClientConnInterface) EnterpriseRep
 	return &enterpriseReportServiceClient{cc}
 }
 
-func (c *enterpriseReportServiceClient) GenerateReport(ctx context.Context, in *GenerateReportRequest, opts ...grpc.CallOption) (*GenerateReportResponse, error) {
+func (c *enterpriseReportServiceClient) GenerateReport(ctx context.Context, in *GenerateReportRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GenerateReportStreamMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GenerateReportResponse)
-	err := c.cc.Invoke(ctx, EnterpriseReportService_GenerateReport_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &EnterpriseReportService_ServiceDesc.Streams[0], EnterpriseReportService_GenerateReport_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[GenerateReportRequest, GenerateReportStreamMessage]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EnterpriseReportService_GenerateReportClient = grpc.ServerStreamingClient[GenerateReportStreamMessage]
 
 // EnterpriseReportServiceServer is the server API for EnterpriseReportService service.
 // All implementations must embed UnimplementedEnterpriseReportServiceServer
 // for forward compatibility.
 //
 // EnterpriseReportService hosts enterprise-only report generation RPCs.
+//
+// GenerateReport is server-streaming (CA-122). The report engine
+// already exposes a fine-grained progress callback internally
+// (workers/reports/engine.py); the streaming refactor surfaces those
+// fractions to the orchestrator as KnowledgeStreamProgress events with
+// unit_kind="report_progress" so the GraphQL UI shows real progress
+// instead of a synthetic time-based curve. See thoughts/shared/plans/
+// 2026-04-29-deep-cliffnotes-deadline-exceeded.md (Decision 4b).
 type EnterpriseReportServiceServer interface {
-	GenerateReport(context.Context, *GenerateReportRequest) (*GenerateReportResponse, error)
+	GenerateReport(*GenerateReportRequest, grpc.ServerStreamingServer[GenerateReportStreamMessage]) error
 	mustEmbedUnimplementedEnterpriseReportServiceServer()
 }
 
@@ -66,8 +91,8 @@ type EnterpriseReportServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedEnterpriseReportServiceServer struct{}
 
-func (UnimplementedEnterpriseReportServiceServer) GenerateReport(context.Context, *GenerateReportRequest) (*GenerateReportResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GenerateReport not implemented")
+func (UnimplementedEnterpriseReportServiceServer) GenerateReport(*GenerateReportRequest, grpc.ServerStreamingServer[GenerateReportStreamMessage]) error {
+	return status.Error(codes.Unimplemented, "method GenerateReport not implemented")
 }
 func (UnimplementedEnterpriseReportServiceServer) mustEmbedUnimplementedEnterpriseReportServiceServer() {
 }
@@ -91,23 +116,16 @@ func RegisterEnterpriseReportServiceServer(s grpc.ServiceRegistrar, srv Enterpri
 	s.RegisterService(&EnterpriseReportService_ServiceDesc, srv)
 }
 
-func _EnterpriseReportService_GenerateReport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GenerateReportRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+func _EnterpriseReportService_GenerateReport_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(GenerateReportRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(EnterpriseReportServiceServer).GenerateReport(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: EnterpriseReportService_GenerateReport_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(EnterpriseReportServiceServer).GenerateReport(ctx, req.(*GenerateReportRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(EnterpriseReportServiceServer).GenerateReport(m, &grpc.GenericServerStream[GenerateReportRequest, GenerateReportStreamMessage]{ServerStream: stream})
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EnterpriseReportService_GenerateReportServer = grpc.ServerStreamingServer[GenerateReportStreamMessage]
 
 // EnterpriseReportService_ServiceDesc is the grpc.ServiceDesc for EnterpriseReportService service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -115,12 +133,13 @@ func _EnterpriseReportService_GenerateReport_Handler(srv interface{}, ctx contex
 var EnterpriseReportService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "sourcebridge.enterprise.v1.EnterpriseReportService",
 	HandlerType: (*EnterpriseReportServiceServer)(nil),
-	Methods: []grpc.MethodDesc{
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
 		{
-			MethodName: "GenerateReport",
-			Handler:    _EnterpriseReportService_GenerateReport_Handler,
+			StreamName:    "GenerateReport",
+			Handler:       _EnterpriseReportService_GenerateReport_Handler,
+			ServerStreams: true,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
 	Metadata: "enterprise/v1/report.proto",
 }

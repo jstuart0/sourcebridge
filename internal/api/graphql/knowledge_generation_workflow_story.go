@@ -123,21 +123,23 @@ func (s workflowStoryGenerationService) Generate(ctx context.Context) (*Knowledg
 			}
 		}
 
-		stopProgress := r.startProgressTicker(rt, artifact.ID)
-		resp, err := r.LLMCaller.GenerateWorkflowStoryWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, artifact.ID, "workflow_story"), &knowledgev1.GenerateWorkflowStoryRequest{
-			RepositoryId:      repo.ID,
-			RepositoryName:    repo.Name,
-			Audience:          audience,
-			AudienceEnum:      protoAudience(knowledgepkg.Audience(audience)),
-			Depth:             depth,
-			DepthEnum:         protoDepth(knowledgepkg.Depth(depth)),
-			ScopeType:         string(scope.ScopeType),
-			ScopePath:         scope.ScopePath,
-			AnchorLabel:       anchorLabel,
-			ExecutionPathJson: executionPathJSON,
-			SnapshotJson:      string(enrichedSnapJSON),
-		})
-		stopProgress()
+		streamDriver := r.runStreamProgressDriver(runCtx, rt, artifact.ID, rpcBucketCollapsed)
+		resp, err := r.LLMCaller.GenerateWorkflowStoryWithJob(runCtx, repo.ID, resolution.OpKnowledge,
+			llmJobMetadataWithProgress(rt, artifact.ID, "workflow_story", streamDriver.OnProgress()),
+			&knowledgev1.GenerateWorkflowStoryRequest{
+				RepositoryId:      repo.ID,
+				RepositoryName:    repo.Name,
+				Audience:          audience,
+				AudienceEnum:      protoAudience(knowledgepkg.Audience(audience)),
+				Depth:             depth,
+				DepthEnum:         protoDepth(knowledgepkg.Depth(depth)),
+				ScopeType:         string(scope.ScopeType),
+				ScopePath:         scope.ScopePath,
+				AnchorLabel:       anchorLabel,
+				ExecutionPathJson: executionPathJSON,
+				SnapshotJson:      string(enrichedSnapJSON),
+			})
+		streamDriver.Close()
 		if err != nil {
 			slog.Error("workflow story generation failed", "artifact_id", artifact.ID, "error", err)
 			return err

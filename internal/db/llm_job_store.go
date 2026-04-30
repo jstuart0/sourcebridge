@@ -467,6 +467,26 @@ func (s *SurrealStore) SetStatus(id string, status llm.JobStatus) error {
 		return fmt.Errorf("database not connected")
 	}
 
+	// CA-122 Phase 5b.4: defense-in-depth terminal-status guard.
+	// Adds a WHERE clause that rejects writes attempting to
+	// transition AWAY from one terminal status into a different
+	// terminal status. The orchestrator's claimFinalization
+	// primitive is the primary mechanism — only one writer reaches
+	// SetStatus with a terminal status per job — but this guard
+	// catches anything that escapes (a future code path the
+	// orchestrator hasn't been taught about, a direct test/admin
+	// write) without silently corrupting state.
+	//
+	// The guard allows: pending->generating, generating->ready/
+	// failed/cancelled, and same-status writes (no-op). It blocks:
+	// ready->failed, ready->cancelled, failed->ready, failed->
+	// cancelled, cancelled->ready, cancelled->failed.
+
+	terminalGuard := `(
+		(status != 'ready' AND status != 'failed' AND status != 'cancelled')
+		OR status = $status
+	)`
+
 	// Choose the SQL based on the destination status so we can stamp
 	// started_at/completed_at atomically with the status write.
 	switch status {
@@ -475,7 +495,8 @@ func (s *SurrealStore) SetStatus(id string, status llm.JobStatus) error {
 			`UPDATE type::thing('ca_llm_job', $id) SET
 				status = $status,
 				started_at = time::now(),
-				updated_at = time::now()`,
+				updated_at = time::now()
+			  WHERE `+terminalGuard,
 			map[string]any{"id": id, "status": string(status)})
 		return err
 	case llm.StatusReady:
@@ -486,7 +507,8 @@ func (s *SurrealStore) SetStatus(id string, status llm.JobStatus) error {
 				error_code = '',
 				error_message = '',
 				completed_at = time::now(),
-				updated_at = time::now()`,
+				updated_at = time::now()
+			  WHERE `+terminalGuard,
 			map[string]any{"id": id, "status": string(status)})
 		return err
 	case llm.StatusFailed, llm.StatusCancelled:
@@ -494,14 +516,16 @@ func (s *SurrealStore) SetStatus(id string, status llm.JobStatus) error {
 			`UPDATE type::thing('ca_llm_job', $id) SET
 				status = $status,
 				completed_at = time::now(),
-				updated_at = time::now()`,
+				updated_at = time::now()
+			  WHERE `+terminalGuard,
 			map[string]any{"id": id, "status": string(status)})
 		return err
 	default:
 		_, err := queryOne[interface{}](ctx(), db,
 			`UPDATE type::thing('ca_llm_job', $id) SET
 				status = $status,
-				updated_at = time::now()`,
+				updated_at = time::now()
+			  WHERE `+terminalGuard,
 			map[string]any{"id": id, "status": string(status)})
 		return err
 	}
@@ -554,6 +578,11 @@ func (s *SurrealStore) Heartbeat(id string) error {
 }
 
 // SetError marks the job failed with a classified error code.
+//
+// CA-122 Phase 5b.4: defense-in-depth terminal-status guard. Allows
+// the write only when the job is not already terminal in a different
+// status. (status='failed' OR not terminal). This prevents the reaper
+// from overwriting a successful ready or user-cancelled.
 func (s *SurrealStore) SetError(id string, code, message string) error {
 	db := s.client.DB()
 	if db == nil {
@@ -565,7 +594,11 @@ func (s *SurrealStore) SetError(id string, code, message string) error {
 			error_code = $code,
 			error_message = $message,
 			completed_at = time::now(),
-			updated_at = time::now()`,
+			updated_at = time::now()
+		  WHERE (
+			(status != 'ready' AND status != 'failed' AND status != 'cancelled')
+			OR status = $status
+		  )`,
 		map[string]any{
 			"id":      id,
 			"status":  string(llm.StatusFailed),

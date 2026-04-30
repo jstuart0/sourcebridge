@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+// Package matches the existing proto/common/v1/types.proto so the new
+// shared types live alongside other cross-package primitives.
+package sourcebridge.common.v1;
+
+option go_package = "github.com/sourcebridge/sourcebridge/gen/go/common/v1;commonv1";
+
+// KnowledgePhase identifies a coarse phase of a knowledge generation
+// pipeline (cliff notes, learning path, architecture diagram, workflow
+// story, system explanation, code tour, enterprise report).
+//
+// The Go orchestrator uses these markers to update the user-facing
+// progress bar deterministically, instead of inferring a phase label
+// from elapsed wall-clock time. Each streaming RPC emits a
+// KnowledgeStreamPhaseMarker once per phase transition (the boundary
+// between coarse work units, e.g. snapshot prep -> leaf summaries) and
+// a KnowledgeStreamProgress on a periodic cadence within each phase
+// carrying run-time completion counters.
+//
+// Hierarchical RPCs (cliff notes repository-scope) walk the full phase
+// list. Single-call RPCs (learning path, architecture diagram, workflow
+// story, system explanation, code tour) collapse the middle phases
+// into RENDER. The enterprise report RPC has its own engine-internal
+// progress callback whose fractions map onto the RENDER bucket.
+enum KnowledgePhase {
+  KNOWLEDGE_PHASE_UNSPECIFIED = 0;
+  KNOWLEDGE_PHASE_SNAPSHOT = 1;          // input snapshot prep, retrieval, condensation
+  KNOWLEDGE_PHASE_LEAF_SUMMARIES = 2;    // hierarchical: per-leaf summarization pass
+  KNOWLEDGE_PHASE_FILE_SUMMARIES = 3;    // hierarchical: per-file summarization pass
+  KNOWLEDGE_PHASE_PACKAGE_SUMMARIES = 4; // hierarchical: per-package summarization pass
+  KNOWLEDGE_PHASE_ROOT_SYNTHESIS = 5;    // hierarchical: root synthesis from package summaries
+  KNOWLEDGE_PHASE_RENDER = 6;            // result generation (single-call RPCs spend most time here)
+  KNOWLEDGE_PHASE_FINALIZING = 7;        // result assembly, diagnostics computation
+}
+
+// KnowledgeStreamProgress is a periodic heartbeat carrying RUN-TIME
+// counters of work completed in this run. The Python worker emits one
+// every ~30s within a phase (configurable via
+// SOURCEBRIDGE_KNOWLEDGE_STREAM_HEARTBEAT_SECS) plus one immediately
+// after every phase transition.
+//
+// IMPORTANT: completed_units / total_units are RUN-TIME counters of
+// work the worker has actually performed in this run. Cache-hit
+// counters (leaf_cache_hits, file_cache_hits, package_cache_hits,
+// root_cache_hits) are diagnostic-only fields preserved for
+// observability and telemetry. They are NOT progress numerators --
+// driving the bar from cache hits would be a UX lie (warm cache: 100%
+// before root finishes; cold cache: 0% until end).
+//
+// For RPCs that are a single LLM call (no internal step-by-step
+// progress to expose), total_units == 0. The orchestrator-side driver
+// treats total_units == 0 as "phase-only progress" and parks the bar
+// at the bucket minimum until the next phase transition. This is
+// honest -- no fraction of a single LLM call can be "completed" until
+// the call returns.
+message KnowledgeStreamProgress {
+  KnowledgePhase phase = 1;
+  int32 completed_units = 2;       // run-time: nodes/sections/passes done in this phase
+  int32 total_units = 3;           // run-time: total nodes/sections/passes for this phase
+  string unit_kind = 4;            // see Decision 4b in the plan; "summary_units" for hierarchical, "report_progress" for the enterprise report engine fraction, "" (empty) for single-call RPCs
+  string message = 5;              // human-readable status, e.g. "Summarized 1240/6800 segments"
+
+  // Diagnostic cache-hit counters. Optional. NOT progress numerators.
+  // Preserved for the existing diagnostics row and for telemetry about
+  // repeat-run efficiency.
+  int32 leaf_cache_hits = 10;
+  int32 file_cache_hits = 11;
+  int32 package_cache_hits = 12;
+  int32 root_cache_hits = 13;
+}
+
+// KnowledgeStreamPhaseMarker fires once per phase transition so the
+// client can update the phase label deterministically. The detail
+// field is optional context (for example the strategy name on the
+// RENDER phase).
+message KnowledgeStreamPhaseMarker {
+  KnowledgePhase phase = 1;
+  string detail = 2;
+}

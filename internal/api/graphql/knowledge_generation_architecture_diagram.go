@@ -110,12 +110,12 @@ func (s architectureDiagramGenerationService) Generate(ctx context.Context) (*Kn
 			}
 		}
 
-		stopProgress := r.startProgressTicker(rt, artifact.ID)
+		streamDriver := r.runStreamProgressDriver(runCtx, rt, artifact.ID, rpcBucketCollapsed)
 		resp, err := r.LLMCaller.GenerateArchitectureDiagramWithJob(
 			runCtx,
 			repo.ID,
 			resolution.OpArchitectureDiagram,
-			llmJobMetadata(rt, artifact.ID, "architecture_diagram"),
+			llmJobMetadataWithProgress(rt, artifact.ID, "architecture_diagram", streamDriver.OnProgress()),
 			&knowledgev1.GenerateArchitectureDiagramRequest{
 				RepositoryId:             repo.ID,
 				RepositoryName:           repo.Name,
@@ -127,7 +127,7 @@ func (s architectureDiagramGenerationService) Generate(ctx context.Context) (*Kn
 				DeterministicDiagramJson: string(scaffoldJSON),
 			},
 		)
-		stopProgress()
+		streamDriver.Close()
 		if err != nil {
 			slog.Error("architecture diagram generation failed", "artifact_id", artifact.ID, "error", err)
 			return err

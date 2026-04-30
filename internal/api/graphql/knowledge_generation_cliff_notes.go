@@ -194,7 +194,9 @@ func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeAr
 			"audience":       audience,
 		})
 
-		stopProgress := r.startProgressTicker(rt, artifact.ID)
+		// CA-122 Phase 6/7: replace the synthetic ticker with a
+		// stream-driven progress driver that consumes phase + progress
+		// events from the worker via JobMetadata.OnProgress.
 		bgCtx := runCtx
 		if renderPlan.RenderOnly {
 			bgCtx = withCliffNotesRenderMetadata(
@@ -215,18 +217,24 @@ func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeAr
 			"render_only":     renderPlan.RenderOnly,
 			"selected_titles": renderPlan.SelectedSectionTitles,
 		})
-		resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, artifact.ID, "cliff_notes"), &knowledgev1.GenerateCliffNotesRequest{
-			RepositoryId:   repo.ID,
-			RepositoryName: repo.Name,
-			Audience:       audience,
-			AudienceEnum:   protoAudience(knowledgepkg.Audience(audience)),
-			Depth:          depth,
-			DepthEnum:      protoDepth(knowledgepkg.Depth(depth)),
-			ScopeType:      string(scope.ScopeType),
-			ScopePath:      scope.ScopePath,
-			SnapshotJson:   string(enrichedCliffSnapJSON),
-		})
-		stopProgress()
+		streamDriver := r.runStreamProgressDriver(bgCtx, rt, artifact.ID, rpcBucketForArtifact(artifact))
+		resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge,
+			llmJobMetadataWithProgress(rt, artifact.ID, "cliff_notes", streamDriver.OnProgress()),
+			&knowledgev1.GenerateCliffNotesRequest{
+				RepositoryId:   repo.ID,
+				RepositoryName: repo.Name,
+				Audience:       audience,
+				AudienceEnum:   protoAudience(knowledgepkg.Audience(audience)),
+				Depth:          depth,
+				DepthEnum:      protoDepth(knowledgepkg.Depth(depth)),
+				ScopeType:      string(scope.ScopeType),
+				ScopePath:      scope.ScopePath,
+				SnapshotJson:   string(enrichedCliffSnapJSON),
+			})
+		// MUST close BEFORE any terminal artifact-state writes
+		// (codex r1b M5 driver-drain rule). The persist* helpers
+		// below run only after Close returns.
+		streamDriver.Close()
 		if err != nil {
 			appendJobLog(r.Orchestrator, rt, llm.LogLevelError, "llm", "worker_failed", "Worker cliff notes request failed", map[string]any{
 				"duration_ms": time.Since(genStart).Milliseconds(),

@@ -16,6 +16,7 @@ import (
 	requirementsv1 "github.com/sourcebridge/sourcebridge/gen/go/requirements/v1"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
+	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
 // fakeWorker captures the outgoing context for the most recent call so
@@ -66,27 +67,27 @@ func (f *fakeWorker) ReviewFile(ctx context.Context, _ *reasoningv1.ReviewFileRe
 	f.record(ctx, "ReviewFile")
 	return &reasoningv1.ReviewFileResponse{}, nil
 }
-func (f *fakeWorker) GenerateCliffNotes(ctx context.Context, _ *knowledgev1.GenerateCliffNotesRequest) (*knowledgev1.GenerateCliffNotesResponse, error) {
+func (f *fakeWorker) GenerateCliffNotes(ctx context.Context, _ *knowledgev1.GenerateCliffNotesRequest, _ ...worker.CallOption) (*knowledgev1.GenerateCliffNotesResponse, error) {
 	f.record(ctx, "GenerateCliffNotes")
 	return &knowledgev1.GenerateCliffNotesResponse{}, nil
 }
-func (f *fakeWorker) GenerateLearningPath(ctx context.Context, _ *knowledgev1.GenerateLearningPathRequest) (*knowledgev1.GenerateLearningPathResponse, error) {
+func (f *fakeWorker) GenerateLearningPath(ctx context.Context, _ *knowledgev1.GenerateLearningPathRequest, _ ...worker.CallOption) (*knowledgev1.GenerateLearningPathResponse, error) {
 	f.record(ctx, "GenerateLearningPath")
 	return &knowledgev1.GenerateLearningPathResponse{}, nil
 }
-func (f *fakeWorker) GenerateArchitectureDiagram(ctx context.Context, _ *knowledgev1.GenerateArchitectureDiagramRequest) (*knowledgev1.GenerateArchitectureDiagramResponse, error) {
+func (f *fakeWorker) GenerateArchitectureDiagram(ctx context.Context, _ *knowledgev1.GenerateArchitectureDiagramRequest, _ ...worker.CallOption) (*knowledgev1.GenerateArchitectureDiagramResponse, error) {
 	f.record(ctx, "GenerateArchitectureDiagram")
 	return &knowledgev1.GenerateArchitectureDiagramResponse{}, nil
 }
-func (f *fakeWorker) GenerateWorkflowStory(ctx context.Context, _ *knowledgev1.GenerateWorkflowStoryRequest) (*knowledgev1.GenerateWorkflowStoryResponse, error) {
+func (f *fakeWorker) GenerateWorkflowStory(ctx context.Context, _ *knowledgev1.GenerateWorkflowStoryRequest, _ ...worker.CallOption) (*knowledgev1.GenerateWorkflowStoryResponse, error) {
 	f.record(ctx, "GenerateWorkflowStory")
 	return &knowledgev1.GenerateWorkflowStoryResponse{}, nil
 }
-func (f *fakeWorker) GenerateCodeTour(ctx context.Context, _ *knowledgev1.GenerateCodeTourRequest) (*knowledgev1.GenerateCodeTourResponse, error) {
+func (f *fakeWorker) GenerateCodeTour(ctx context.Context, _ *knowledgev1.GenerateCodeTourRequest, _ ...worker.CallOption) (*knowledgev1.GenerateCodeTourResponse, error) {
 	f.record(ctx, "GenerateCodeTour")
 	return &knowledgev1.GenerateCodeTourResponse{}, nil
 }
-func (f *fakeWorker) ExplainSystem(ctx context.Context, _ *knowledgev1.ExplainSystemRequest) (*knowledgev1.ExplainSystemResponse, error) {
+func (f *fakeWorker) ExplainSystem(ctx context.Context, _ *knowledgev1.ExplainSystemRequest, _ ...worker.CallOption) (*knowledgev1.ExplainSystemResponse, error) {
 	f.record(ctx, "ExplainSystem")
 	return &knowledgev1.ExplainSystemResponse{}, nil
 }
@@ -98,7 +99,7 @@ func (f *fakeWorker) ExtractSpecs(ctx context.Context, _ *requirementsv1.Extract
 	f.record(ctx, "ExtractSpecs")
 	return &requirementsv1.ExtractSpecsResponse{}, nil
 }
-func (f *fakeWorker) GenerateReport(ctx context.Context, _ *enterprisev1.GenerateReportRequest) (*enterprisev1.GenerateReportResponse, error) {
+func (f *fakeWorker) GenerateReport(ctx context.Context, _ *enterprisev1.GenerateReportRequest, _ ...worker.CallOption) (*enterprisev1.GenerateReportResponse, error) {
 	f.record(ctx, "GenerateReport")
 	return &enterprisev1.GenerateReportResponse{}, nil
 }

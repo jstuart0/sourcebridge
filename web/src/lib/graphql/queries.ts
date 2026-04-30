@@ -1675,11 +1675,13 @@ export const CLEAR_REPOSITORY_LLM_OVERRIDE_MUTATION = gql`
 `;
 
 export const RETRY_LIVING_WIKI_JOB_MUTATION = gql`
-  mutation RetryLivingWikiJob($repositoryId: ID!, $retryExcludedOnly: Boolean) {
-    retryLivingWikiJob(repositoryId: $repositoryId, retryExcludedOnly: $retryExcludedOnly) {
+  mutation RetryLivingWikiJob($repositoryId: ID!, $retryExcludedOnly: Boolean, $mode: LivingWikiBuildMode) {
+    retryLivingWikiJob(repositoryId: $repositoryId, retryExcludedOnly: $retryExcludedOnly, mode: $mode) {
       settings {
         enabled
         mode
+        livingWikiOverviewEnabled
+        livingWikiDetailedEnabled
         sinks {
           kind
           integrationName
@@ -1694,6 +1696,39 @@ export const RETRY_LIVING_WIKI_JOB_MUTATION = gql`
           failureCategory
           errorMessage
         }
+      }
+      jobId
+      notice
+    }
+  }
+`;
+
+export const SET_LIVING_WIKI_MODE_FLAGS_MUTATION = gql`
+  mutation SetLivingWikiModeFlags($repositoryId: ID!, $overviewEnabled: Boolean!, $detailedEnabled: Boolean!) {
+    setLivingWikiModeFlags(repositoryId: $repositoryId, overviewEnabled: $overviewEnabled, detailedEnabled: $detailedEnabled) {
+      enabled
+      livingWikiOverviewEnabled
+      livingWikiDetailedEnabled
+      mode
+      sinks {
+        kind
+        integrationName
+        audience
+        editPolicy
+      }
+      lastRunAt
+      updatedAt
+    }
+  }
+`;
+
+export const TRIGGER_LIVING_WIKI_COLD_START_ALL_ENABLED_MUTATION = gql`
+  mutation TriggerLivingWikiColdStartAllEnabled($repositoryId: ID!) {
+    triggerLivingWikiColdStartAllEnabled(repositoryId: $repositoryId) {
+      settings {
+        enabled
+        livingWikiOverviewEnabled
+        livingWikiDetailedEnabled
       }
       jobId
       notice

@@ -91,6 +91,9 @@ type Query {
   modelCapabilities: [ModelCapabilityProfile!]!
   modelCapability(modelId: String!): ModelCapabilityProfile
 
+  setLivingWikiModeFlags(repositoryId: ID!, overviewEnabled: Boolean!, detailedEnabled: Boolean!): RepositoryLivingWikiSettings!
+  triggerLivingWikiColdStartAllEnabled(repositoryId: ID!): [EnableLivingWikiResult!]!
+
   # Recycle bin (soft-delete) — see docs/user/recycle-bin.md (forthcoming)
   trashedItems(repositoryId: ID, types: [TrashableType!], limit: Int = 50, offset: Int = 0, search: String): TrashConnection!
   trashRetentionDays: Int!
@@ -198,7 +201,7 @@ type Mutation {
   the new job (same shape as enableLivingWikiForRepo so the UI can reuse the
   same progress-tracking path).
   """
-  retryLivingWikiJob(repositoryId: ID!, retryExcludedOnly: Boolean): EnableLivingWikiResult!
+  retryLivingWikiJob(repositoryId: ID!, retryExcludedOnly: Boolean, mode: LivingWikiBuildMode): EnableLivingWikiResult!
 
   """
   generateLivingWikiPageOnDemand generates a single Detailed-mode Living Wiki
@@ -1659,6 +1662,8 @@ type RepositoryLivingWikiSettings {
   UI to render saved-state without leaking the secret.
   """
   llmOverride: RepositoryLLMOverride
+  livingWikiOverviewEnabled: Boolean!
+  livingWikiDetailedEnabled: Boolean!
 }
 
 """
@@ -1907,6 +1912,12 @@ type EnableLivingWikiResult {
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase 4a: On-demand single-page generation (Detailed mode drill-down)
 # ─────────────────────────────────────────────────────────────────────────────
+
+enum LivingWikiBuildMode {
+  OVERVIEW
+  DETAILED
+  ALL_ENABLED
+}
 
 """
 LivingWikiOnDemandPageSpec identifies a single page for on-demand generation.

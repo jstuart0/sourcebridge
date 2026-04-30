@@ -118,18 +118,20 @@ func (s learningPathGenerationService) Generate(ctx context.Context) (*Knowledge
 			}
 		}
 
-		stopProgress := r.startProgressTicker(rt, artifact.ID)
-		resp, err := r.LLMCaller.GenerateLearningPathWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, artifact.ID, "learning_path"), &knowledgev1.GenerateLearningPathRequest{
-			RepositoryId:   repo.ID,
-			RepositoryName: repo.Name,
-			Audience:       audience,
-			AudienceEnum:   protoAudience(knowledgepkg.Audience(audience)),
-			Depth:          depth,
-			DepthEnum:      protoDepth(knowledgepkg.Depth(depth)),
-			SnapshotJson:   string(enrichedSnapJSON),
-			FocusArea:      focusArea,
-		})
-		stopProgress()
+		streamDriver := r.runStreamProgressDriver(runCtx, rt, artifact.ID, rpcBucketCollapsed)
+		resp, err := r.LLMCaller.GenerateLearningPathWithJob(runCtx, repo.ID, resolution.OpKnowledge,
+			llmJobMetadataWithProgress(rt, artifact.ID, "learning_path", streamDriver.OnProgress()),
+			&knowledgev1.GenerateLearningPathRequest{
+				RepositoryId:   repo.ID,
+				RepositoryName: repo.Name,
+				Audience:       audience,
+				AudienceEnum:   protoAudience(knowledgepkg.Audience(audience)),
+				Depth:          depth,
+				DepthEnum:      protoDepth(knowledgepkg.Depth(depth)),
+				SnapshotJson:   string(enrichedSnapJSON),
+				FocusArea:      focusArea,
+			})
+		streamDriver.Close()
 		if err != nil {
 			slog.Error("learning path generation failed", "artifact_id", artifact.ID, "error", err)
 			return err

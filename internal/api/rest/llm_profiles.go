@@ -176,7 +176,8 @@ func (s *Server) handleListLLMProfiles(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	profiles, err := s.llmProfileStore.ListProfiles(r.Context())
+	ctx := r.Context()
+	profiles, err := s.llmProfileStore.ListProfiles(ctx)
 	if err != nil {
 		slog.Error("list llm profiles failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -184,9 +185,42 @@ func (s *Server) handleListLLMProfiles(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	// Slice-4 (codex-r2 Low): compute active_profile_missing from the
+	// LIVE active_profile_id + the listed profiles, rather than relying
+	// on the resolver adapter's last-resolve latch. The latch is only
+	// updated when the runtime resolver hits the gap on an LLM call;
+	// database damage that occurs between resolves would otherwise be
+	// invisible to the admin UI until the next worker call.
+	//
+	// Fall back to the resolver latch if (a) the live id lookup fails
+	// (DB outage — don't silently report "not missing" when we can't
+	// check) or (b) activeID is empty (pre-migration / fresh-install
+	// state where the latch already reflects the answer).
+	var missing bool
+	activeID, idErr := s.llmProfileStore.ActiveProfileID(ctx)
+	switch {
+	case idErr != nil:
+		missing = s.llmProfileStore.ActiveProfileMissing()
+	case activeID == "":
+		missing = s.llmProfileStore.ActiveProfileMissing()
+	default:
+		// Active id is set: confirm it appears in the listed profiles.
+		// This is the "deleted while pointer still set" case the banner
+		// is meant to catch.
+		present := false
+		for i := range profiles {
+			if profiles[i].ID == activeID {
+				present = true
+				break
+			}
+		}
+		missing = !present
+	}
+
 	resp := map[string]interface{}{
 		"profiles":               profiles,
-		"active_profile_missing": s.llmProfileStore.ActiveProfileMissing(),
+		"active_profile_missing": missing,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
