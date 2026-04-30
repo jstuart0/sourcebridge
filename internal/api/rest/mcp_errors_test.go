@@ -72,9 +72,11 @@ func TestMCP_ErrorEnvelope_Structured(t *testing.T) {
 
 // TestMCP_ErrorEnvelope_PlainError asserts that handlers returning a
 // plain error (fmt.Errorf, not *mcpToolError) still produce a valid
-// envelope — content is complete, _meta is omitted. Vanilla clients
-// work either way; structured clients just don't get metadata when
-// the code path hasn't been migrated yet.
+// envelope — content is complete; Meta is populated with the
+// _meta.freshness key (Phase 1.C of the MCP-edits plan adds this on
+// every response, success and error alike, so consumers can rely on
+// the contract being uniform). Plain errors do not surface a
+// _meta.sourcebridge structured-error block; structured errors do.
 func TestMCP_ErrorEnvelope_PlainError(t *testing.T) {
 	h := newTestHarness(t)
 	sess := h.createSession()
@@ -98,5 +100,23 @@ func TestMCP_ErrorEnvelope_PlainError(t *testing.T) {
 	if len(result.Content) == 0 || result.Content[0].Text == "" {
 		t.Error("expected a complete content[].text even for plain errors")
 	}
-	// Meta may be nil for plain errors — both outcomes are valid MCP.
+	// Phase 1.C: every MCP response carries the _meta.freshness
+	// envelope, including plain-error responses. We don't assert on
+	// the envelope's specific state here (the test harness wires no
+	// router → default-fresh shape); only that the key exists so
+	// consumers can rely on the contract being uniform.
+	if result.Meta == nil {
+		t.Fatalf("expected _meta to be populated with freshness on plain errors")
+	}
+	if _, ok := result.Meta["freshness"]; !ok {
+		t.Errorf("expected _meta.freshness on plain errors; got keys %v", keys(result.Meta))
+	}
+}
+
+func keys(m map[string]interface{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }

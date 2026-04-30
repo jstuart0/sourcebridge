@@ -240,12 +240,47 @@ func (r *Router) SeedPrevious(repoID string, result *indexer.IndexResult) {
 
 // FreshnessFor returns the most recent freshness record for repoID, or
 // the zero value when the router has never routed an event for that
-// repo. The freshness adapter (internal/api/rest/mcp_freshness.go)
-// reads this for envelope construction.
+// repo. Internal callers within this package use this; external
+// callers use FreshnessForExport, which returns the public-typed
+// shape.
 func (r *Router) FreshnessFor(repoID string) freshnessRecord {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.freshness[repoID]
+}
+
+// FreshnessExport is the package-public freshness shape exposed to
+// external callers (the MCP freshness adapter at
+// internal/api/rest/mcp_freshness.go). Mirrors the unexported
+// freshnessRecord field-for-field; we keep the internal type
+// unexported so the router stays in control of the ownership story.
+type FreshnessExport struct {
+	State          string
+	Tier           string
+	Branch         string
+	IndexedCommit  string
+	LastVerifiedAt time.Time
+	Reason         string
+	PartialRefresh bool
+}
+
+// FreshnessForExport is the exported variant of FreshnessFor for
+// callers outside this package. Returns the zero FreshnessExport when
+// the router has never routed an event for repoID; the envelope
+// handler treats that as "default fresh."
+func (r *Router) FreshnessForExport(repoID string) FreshnessExport {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec := r.freshness[repoID]
+	return FreshnessExport{
+		State:          rec.State,
+		Tier:           rec.Tier,
+		Branch:         rec.Branch,
+		IndexedCommit:  rec.IndexedCommit,
+		LastVerifiedAt: rec.LastVerifiedAt,
+		Reason:         rec.Reason,
+		PartialRefresh: rec.PartialRefresh,
+	}
 }
 
 // PreviousResult returns the most recent cached IndexResult for repoID,
