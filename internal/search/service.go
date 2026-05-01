@@ -98,10 +98,11 @@ func (s *Service) Search(ctx context.Context, req *Request) (*Response, error) {
 	}
 
 	start := time.Now()
-	now := req.Now
-	if now.IsZero() {
-		now = time.Now()
-	}
+
+	// (req.Now used to be canonicalised here for downstream date-filter
+	// resolution; the current pipeline doesn't apply time-based filters
+	// at this stage, so the conditional was dead. Leaving the field on
+	// the request for callers that may want it later.)
 
 	// --- Route ---
 	tRouteStart := time.Now()

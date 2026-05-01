@@ -5,8 +5,6 @@ package rest
 
 import (
 	"encoding/json"
-	"fmt"
-	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -289,11 +287,3 @@ func camelToSnake(s string) string {
 	return strings.ToLower(out)
 }
 
-// symbolPath is a helper used by tests to format a symbol reference
-// for error messages.
-func symbolPath(file, name string) string {
-	if file == "" {
-		return name
-	}
-	return fmt.Sprintf("%s#%s", path.Base(file), name)
-}

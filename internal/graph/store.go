@@ -2027,7 +2027,7 @@ func (s *Store) RecomputePackageDependencies(repoID string) {
 	filePaths := make(map[string]string)
 	for _, fid := range s.repoFiles[repoID] {
 		if f := s.files[fid]; f != nil {
-			dir := f.Path
+			var dir string
 			if idx := strings.LastIndex(f.Path, "/"); idx >= 0 {
 				dir = f.Path[:idx]
 			} else {

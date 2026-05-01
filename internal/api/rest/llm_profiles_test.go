@@ -21,7 +21,11 @@ import (
 
 // Local aliases used by the slice-4 active-job-count tests so the
 // new test cases don't have to rename existing references throughout
-// the file.
+// the file. JobStatus and Subsystem are kept alongside Job for
+// completeness even though only Job is currently referenced — keeping
+// the alias set together makes adding the next test case trivial.
+//
+//nolint:unused // Convenience aliases; kept as a set for ergonomics.
 type (
 	llmgo_Job       = llm.Job
 	llmgo_JobStatus = llm.JobStatus

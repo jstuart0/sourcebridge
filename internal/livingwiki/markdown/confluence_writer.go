@@ -1761,31 +1761,9 @@ func extractCDATA(s string) string {
 // Shared helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-// buildAnchorsForPage builds a StructuralAnchor for each block in blocks.
-// It walks the blocks to compute the current heading path and same-kind ordinal
-// at each level. This is the same anchoring used by the markdown writer.
-func buildAnchorsForPage(blocks []ast.Block) []ast.StructuralAnchor {
-	anchors := make([]ast.StructuralAnchor, len(blocks))
-	headingPath := ""
-	kindCounters := make(map[string]int) // headingPath+kind → count
-
-	for i, blk := range blocks {
-		key := headingPath + string(blk.Kind)
-		ordinal := kindCounters[key]
-		kindCounters[key]++
-		anchors[i] = ast.StructuralAnchor{
-			HeadingPath: headingPath,
-			Kind:        blk.Kind,
-			Ordinal:     ordinal,
-		}
-		if blk.Kind == ast.BlockKindHeading && blk.Content.Heading != nil {
-			headingPath = blk.Content.Heading.Text
-			// Reset kind counters for blocks under the new heading.
-			kindCounters = make(map[string]int)
-		}
-	}
-	return anchors
-}
+// (buildAnchorsForPage used to live here for writers that needed to
+// pre-compute anchors per page; the current Confluence/Notion paths
+// derive anchors inline as they emit blocks. Removed to satisfy lint.)
 
 // Compile-time check: ConfluenceWriter satisfies no public interface currently
 // because WritePage needs a context (unlike the sync SinkWriter interface).

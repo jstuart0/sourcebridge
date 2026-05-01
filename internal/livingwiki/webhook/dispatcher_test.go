@@ -19,36 +19,11 @@ import (
 // Stub orchestrator for testing
 // ─────────────────────────────────────────────────────────────────────────────
 
-// calls records which orchestrator methods were invoked and with which args.
-type calls struct {
-	mu sync.Mutex
-	// Each field name matches the orchestrator method called.
-	generateIncremental    []orchestrator.IncrementalRequest
-	applyReviewerCommits   [][3]any // [repoID, prID, commits]
-	promoteWithWatermark   [][2]string // [repoID, prID]
-	discardWithWatermark   [][2]string // [repoID, prID]
-	handleSinkEdit         []string // [repoID]
-	pollAndReconcile       []string // [repoID]
-}
-
-func (c *calls) add(method string, args ...any) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	switch method {
-	case "generateIncremental":
-		c.generateIncremental = append(c.generateIncremental, args[0].(orchestrator.IncrementalRequest))
-	case "applyReviewerCommits":
-		c.applyReviewerCommits = append(c.applyReviewerCommits, [3]any{args[0], args[1], args[2]})
-	case "promoteWithWatermark":
-		c.promoteWithWatermark = append(c.promoteWithWatermark, [2]string{args[0].(string), args[1].(string)})
-	case "discardWithWatermark":
-		c.discardWithWatermark = append(c.discardWithWatermark, [2]string{args[0].(string), args[1].(string)})
-	case "handleSinkEdit":
-		c.handleSinkEdit = append(c.handleSinkEdit, args[0].(string))
-	case "pollAndReconcile":
-		c.pollAndReconcile = append(c.pollAndReconcile, args[0].(string))
-	}
-}
+// (A `calls` recording struct used to live here as part of an early
+// approach that wrapped a real *orchestrator.Orchestrator with method
+// recording. The current tests instead verify the dispatcher's
+// observable side-effects on the watermark store, so the recording
+// struct has no callers. Removed to satisfy lint.)
 
 // stubOrchestrator wraps a real *orchestrator.Orchestrator with call recording.
 // We use the real orchestrator struct but replace it with a nil-safe version

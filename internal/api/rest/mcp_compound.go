@@ -339,13 +339,12 @@ func (h *mcpHandler) callImpactSummary(session *mcpSession, args json.RawMessage
 	if len(params.Files) == 0 && len(params.Symbols) == 0 {
 		return nil, errInvalidArguments("either files or symbols must be provided")
 	}
-	hops := params.MaxCallerHops
-	if hops <= 0 {
-		hops = 1
-	}
-	if hops > 3 {
-		hops = 3
-	}
+	// MaxCallerHops is advertised in the tool schema (default 1, cap 3)
+	// but the current impl walks exactly one hop — see the "1 hop for
+	// simplicity; the tool exposes the cap" comment below. The capping
+	// logic is intentionally absent here until multi-hop is implemented;
+	// the schema doc is honest about the current behaviour by saying
+	// "default 1".
 
 	// Collect the target symbols.
 	var targets []string

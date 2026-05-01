@@ -77,17 +77,10 @@ func writeFile(t *testing.T, dir, filename, content string) {
 	}
 }
 
-// currentSHA returns HEAD SHA of the repo.
-func currentSHA(t *testing.T, dir string) string {
-	t.Helper()
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("rev-parse HEAD: %v", err)
-	}
-	return strings.TrimSpace(string(out))
-}
+// (currentSHA used to live here as a helper for tests that asserted on
+// the rev-parse HEAD output; the current gitcli tests use the gitCLI's
+// own ResolveRef path instead, so the helper has no callers. Removed
+// to satisfy lint.)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GitCLIDiffProvider tests

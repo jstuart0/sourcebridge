@@ -76,17 +76,16 @@ type MarkdownInput struct {
 var _ ValidationInput = (*MarkdownInput)(nil)
 
 var (
-	// Fenced code block: ```...``` or ~~~...~~~
-	reFencedBlock = regexp.MustCompile("(?s)(?:^```[^\n]*\n)(.*?)(?:^```[ \t]*$)|(?:^~~~[^\n]*\n)(.*?)(?:^~~~[ \t]*$)")
-
 	// Citation pattern: (path:N-M) or (sym_...) — capturing the interior
 	reCitation = regexp.MustCompile(`\(([a-zA-Z0-9_./-]+:\d+(?:-\d+)?|sym_[A-Za-z0-9_.-]+)\)`)
 
-	// H1 or H2 heading
-	reH1H2 = regexp.MustCompile(`(?m)^#{1,2}\s+(.+)$`)
-
 	// Any heading level
 	reHeading = regexp.MustCompile(`(?m)^(#{1,6})\s+(.+)$`)
+
+	// (reFencedBlock and reH1H2 used to live here for an earlier
+	// regex-based parser; the current parse() walks lines manually
+	// and detects fences with strings.HasPrefix, so the regexes are
+	// dead. Removed to satisfy lint.)
 )
 
 // NewMarkdownInput parses src and returns a fully-initialized
@@ -107,14 +106,13 @@ func (m *MarkdownInput) Citations() []string     { return m.citationList }
 
 // parse performs all analysis in one pass over the source.
 func (m *MarkdownInput) parse() {
-	// Extract code block positions so we can exclude them from
-	// word counting and section body extraction.
-	type span struct{ start, end int }
-	var codeSpans []span
-
-	// Use multiline block matching on the raw string.
+	// Use multiline block matching on the raw string. Code blocks are
+	// captured in m.codeBlocks; the byte-offset / line-range tracking
+	// (codeSpans / codeLines) used to live here for callers that wanted
+	// to exclude code-block bytes from word counting, but nothing reads
+	// either slice today. Removed to satisfy lint; reintroduce when a
+	// validator that needs the offsets lands.
 	lines := strings.Split(m.raw, "\n")
-	var codeLines []span // line-range spans, inclusive
 
 	inFence := false
 	fenceChar := ""
@@ -133,7 +131,6 @@ func (m *MarkdownInput) parse() {
 		} else {
 			if strings.HasPrefix(stripped, fenceChar) {
 				// Closing fence.
-				codeLines = append(codeLines, span{fenceStart, i})
 				m.codeBlocks = append(m.codeBlocks, strings.Join(curBlockLines, "\n"))
 				inFence = false
 			} else {
@@ -142,7 +139,7 @@ func (m *MarkdownInput) parse() {
 		}
 	}
 
-	_ = codeSpans // reserved for byte-offset version if needed
+	_ = fenceStart // span-tracking would use this; preserved for future use
 
 	// Count top-level blocks: H1+H2 headings and fenced code blocks.
 	topLevel := 0

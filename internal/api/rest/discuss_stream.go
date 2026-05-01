@@ -33,9 +33,10 @@ type discussStreamRequest struct {
 
 // handleDiscussStream is the SSE delivery path for discuss_code. It
 // runs the same underlying AnswerQuestionStream RPC that the MCP
-// path uses, flattening each AnswerDelta into an SSE `event: token`
-// frame. The terminal frame is `event: done` with the resolved
-// references + usage, so consumers always know when to stop reading.
+// path uses, flattening each AnswerQuestionStreamResponse into an SSE
+// `event: token` frame. The terminal frame is `event: done` with the
+// resolved references + usage, so consumers always know when to stop
+// reading.
 //
 // Browser fetch clients can read this endpoint via the Streams API
 // with `text/event-stream`; simple consumers can also treat the body
@@ -92,7 +93,7 @@ func (s *Server) handleDiscussStream(w http.ResponseWriter, r *http.Request) {
 		r.Context(),
 		req.RepositoryID,
 		resolution.OpDiscussStream,
-		&reasoningv1.AnswerQuestionRequest{
+		&reasoningv1.AnswerQuestionStreamRequest{
 			Question:     question,
 			RepositoryId: req.RepositoryID,
 			FilePath:     req.FilePath,

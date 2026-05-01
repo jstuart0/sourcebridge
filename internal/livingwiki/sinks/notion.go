@@ -70,14 +70,10 @@ func NewNotionSinkWriter(databaseID string, snapshot credentials.Snapshot) *Noti
 	}
 }
 
-// newNotionSinkWriterFromClient constructs a NotionSinkWriter from an existing
-// NotionClient. Used in tests to inject a fake client.
-func newNotionSinkWriterFromClient(client markdown.NotionClient) *NotionSinkWriter {
-	return &NotionSinkWriter{
-		writer: markdown.NewNotionWriter(client, markdown.NotionWriterConfig{}),
-		kind:   markdown.SinkKindNotion,
-	}
-}
+// (newNotionSinkWriterFromClient used to live here as a test
+// constructor accepting a pre-built NotionClient; the current notion-
+// sink tests build the client + writer inline. Removed to satisfy
+// lint.)
 
 // Kind implements SinkWriter.
 func (n *NotionSinkWriter) Kind() markdown.SinkKind {

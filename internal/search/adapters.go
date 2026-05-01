@@ -418,27 +418,9 @@ func tokenOverlapScore(tokens []string, s *graph.StoredSymbol) float64 {
 	return score / (1.0 + float64(len(tokens))*0.5)
 }
 
-// substringScore is the legacy FTS-fallback scoring function. It is
-// intentionally simple — just enough to order substring hits sensibly
-// when BM25 isn't wired up.
-func substringScore(q, name, qual string) float64 {
-	if name == q {
-		return 1.0
-	}
-	if strings.HasSuffix(qual, "."+q) || strings.HasSuffix(qual, ":"+q) {
-		return 0.85
-	}
-	if strings.HasPrefix(name, q) {
-		return 0.7
-	}
-	if strings.Contains(name, q) {
-		return 0.55
-	}
-	if strings.Contains(qual, q) {
-		return 0.4
-	}
-	return 0.2
-}
+// (substringScore used to live here as a legacy FTS-fallback scorer;
+// the current adapter wires BM25 + embeddings rather than substring
+// fallback, so the helper is dead. Removed to satisfy lint.)
 
 func sortCandidatesByScore(cs []*Candidate) {
 	// Small-N sort; stable bubble-sort-style pass is plenty and avoids

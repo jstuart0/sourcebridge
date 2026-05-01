@@ -786,9 +786,7 @@ func pageIDFromWikiPath(path string) string {
 		return ""
 	}
 	s := path[len("wiki/"):]
-	if strings.HasSuffix(s, ".md") {
-		s = s[:len(s)-len(".md")]
-	}
+	s = strings.TrimSuffix(s, ".md")
 	return s
 }
 
