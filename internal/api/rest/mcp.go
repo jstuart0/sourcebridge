@@ -146,7 +146,7 @@ type workerStreamingCaller interface {
 	mcpWorkerCaller
 	AnswerQuestionStream(
 		ctx context.Context,
-		req *reasoningv1.AnswerQuestionRequest,
+		req *reasoningv1.AnswerQuestionStreamRequest,
 	) (reasoningv1.ReasoningService_AnswerQuestionStreamClient, context.CancelFunc, error)
 }
 
@@ -174,7 +174,7 @@ func (a *mcpLLMCallerAdapter) AnswerQuestion(ctx context.Context, req *reasoning
 	return a.caller.AnswerQuestion(ctx, req.GetRepositoryId(), a.unaryOp, req)
 }
 
-func (a *mcpLLMCallerAdapter) AnswerQuestionStream(ctx context.Context, req *reasoningv1.AnswerQuestionRequest) (reasoningv1.ReasoningService_AnswerQuestionStreamClient, context.CancelFunc, error) {
+func (a *mcpLLMCallerAdapter) AnswerQuestionStream(ctx context.Context, req *reasoningv1.AnswerQuestionStreamRequest) (reasoningv1.ReasoningService_AnswerQuestionStreamClient, context.CancelFunc, error) {
 	return a.caller.AnswerQuestionStream(ctx, req.GetRepositoryId(), a.streamOp, req)
 }
 
@@ -183,16 +183,16 @@ var _ mcpWorkerCaller = (*mcpLLMCallerAdapter)(nil)
 var _ workerStreamingCaller = (*mcpLLMCallerAdapter)(nil)
 
 // streamDiscussion runs the server-streaming AnswerQuestionStream RPC
-// and forwards each AnswerDelta's content fragment to the given
-// ContentEmitter. Returns a synthetic AnswerQuestionResponse whose
-// `answer` field is the concatenation of all emitted deltas, so the
-// caller's final MCP tool result has the same shape the unary path
+// and forwards each AnswerQuestionStreamResponse's content fragment to
+// the given ContentEmitter. Returns a synthetic AnswerQuestionResponse
+// whose `answer` field is the concatenation of all emitted deltas, so
+// the caller's final MCP tool result has the same shape the unary path
 // returns. The function blocks until the server sends a terminal
 // frame (finished=true), io.EOF, or an error.
 func streamDiscussion(
 	ctx context.Context,
 	caller workerStreamingCaller,
-	req *reasoningv1.AnswerQuestionRequest,
+	req *reasoningv1.AnswerQuestionStreamRequest,
 	emitter *ContentEmitter,
 ) (*reasoningv1.AnswerQuestionResponse, error) {
 	stream, cancel, err := caller.AnswerQuestionStream(ctx, req)
@@ -202,8 +202,8 @@ func streamDiscussion(
 	defer cancel()
 
 	var (
-		buf     strings.Builder
-		final   *reasoningv1.AnswerDelta
+		buf   strings.Builder
+		final *reasoningv1.AnswerQuestionStreamResponse
 	)
 	for {
 		delta, recvErr := stream.Recv()
@@ -1484,10 +1484,6 @@ func (h *mcpHandler) callExplainCodeCtx(ctx context.Context, session *mcpSession
 	fullQuestion := fmt.Sprintf("%s\n\n```\n%s\n```", question, code)
 
 	emitter := ContentEmitterFromContext(ctx)
-	req := &reasoningv1.AnswerQuestionRequest{
-		Question:     fullQuestion,
-		RepositoryId: params.RepositoryID,
-	}
 
 	// Prefer the streaming path when the caller is listening for
 	// deltas (progress token present in the MCP request). Otherwise
@@ -1495,6 +1491,10 @@ func (h *mcpHandler) callExplainCodeCtx(ctx context.Context, session *mcpSession
 	// exact same payload they would have before.
 	streamingClient, ok := h.worker.(workerStreamingCaller)
 	if emitter == nil || !ok {
+		unaryReq := &reasoningv1.AnswerQuestionRequest{
+			Question:     fullQuestion,
+			RepositoryId: params.RepositoryID,
+		}
 		unaryCtx, cancel := context.WithTimeout(context.Background(), worker.TimeoutDiscussion)
 		defer cancel()
 		// llmcall:allow — h.worker is the mcpWorkerCaller interface,
@@ -1503,7 +1503,7 @@ func (h *mcpHandler) callExplainCodeCtx(ctx context.Context, session *mcpSession
 		// interface, so we allowlist this single line. Tests inject
 		// their own mocks satisfying mcpWorkerCaller; both paths go
 		// through llmcall.Caller for real RPCs.
-		resp, err := h.worker.AnswerQuestion(unaryCtx, req)
+		resp, err := h.worker.AnswerQuestion(unaryCtx, unaryReq)
 		if err != nil {
 			return nil, fmt.Errorf("AI worker timed out or failed: %v", err)
 		}
@@ -1512,7 +1512,11 @@ func (h *mcpHandler) callExplainCodeCtx(ctx context.Context, session *mcpSession
 		}, nil
 	}
 
-	resp, err := streamDiscussion(ctx, streamingClient, req, emitter)
+	streamReq := &reasoningv1.AnswerQuestionStreamRequest{
+		Question:     fullQuestion,
+		RepositoryId: params.RepositoryID,
+	}
+	resp, err := streamDiscussion(ctx, streamingClient, streamReq, emitter)
 	if err != nil {
 		return nil, fmt.Errorf("AI worker timed out or failed: %v", err)
 	}
