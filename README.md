@@ -388,13 +388,32 @@ make build
 
 ### Running Locally
 
+SourceBridge runs three processes in development. The API server embeds
+SurrealDB by default, so you do not need a separate database
+container — just start the three processes below in their own terminals
+and you have a working stack.
+
 ```bash
-# Start the API server (builds first)
+# Terminal 1 — API server (builds first)
 make dev
 
-# In a separate terminal, start the web UI in dev mode
+# Terminal 2 — Next.js web UI
 make dev-web
+
+# Terminal 3 — Python AI worker (required for agentic features,
+# embeddings, and code review). Run after `make build-worker`.
+make dev-worker
 ```
+
+The worker can also be invoked directly via the registered console
+script: `cd workers && uv run sourcebridge-worker`. Both forms are
+equivalent; `make dev-worker` is the canonical entry point used
+throughout the docs.
+
+Start the worker before (or shortly after) the API server. Agentic and
+embedding features activate when the worker is reachable on
+`localhost:50051`; without the worker the API server still serves
+indexing, browsing, and CRUD.
 
 ### Testing
 

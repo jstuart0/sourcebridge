@@ -670,7 +670,14 @@ func TestLogin_ResolveLoginServerURL_Chain(t *testing.T) {
 }
 
 // TestLogin_SetupNotDone_ClearError verifies that a local server with
-// setup_done=false gives a clear "visit /setup" error.
+// setup_done=false gives a clear, actionable error pointing at the real
+// initialization paths: the `/login` browser flow (which doubles as the
+// setup screen) and the `POST /auth/setup` API for headless setups.
+//
+// Regression guard for tester-report Issue 4 (Pazaryna 2026-04-30): the
+// previous message pointed at `/setup`, a path neither the API server
+// nor the Next.js web app serves, so users hit a 404 before they could
+// initialize. CA-124.
 func TestLogin_SetupNotDone_ClearError(t *testing.T) {
 	srv := newLoginTestServer(t, loginTestServerCfg{
 		localAuth:   true,
@@ -684,8 +691,22 @@ func TestLogin_SetupNotDone_ClearError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for setup not done, got nil")
 	}
-	if !strings.Contains(err.Error(), "setup") {
-		t.Errorf("error should mention setup; got: %v", err)
+	msg := err.Error()
+	// New message must:
+	//   - point at /login (the working setup URL), NOT /setup (404)
+	//   - include the API curl one-liner for headless contexts
+	//   - keep the server URL embedded so users can copy-paste
+	if !strings.Contains(msg, srv.URL+"/login") {
+		t.Errorf("error should reference %s/login (the real setup URL); got: %v", srv.URL, err)
+	}
+	if strings.Contains(msg, srv.URL+"/setup") {
+		t.Errorf("error must not reference the broken /setup path; got: %v", err)
+	}
+	if !strings.Contains(msg, "/auth/setup") {
+		t.Errorf("error should include the POST /auth/setup API path for headless setups; got: %v", err)
+	}
+	if !strings.Contains(msg, "curl") {
+		t.Errorf("error should include a curl one-liner so headless users can complete setup; got: %v", err)
 	}
 }
 
