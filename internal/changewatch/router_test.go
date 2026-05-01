@@ -84,8 +84,9 @@ func (s *stubBranches) HeadRef(_ string) (string, error) {
 }
 
 // stubImpact is the test-side ImpactApplier. It records every call.
+// (atomic.Int64 already serializes the increments, so no separate
+// mutex is needed.)
 type stubImpact struct {
-	mu    sync.Mutex
 	calls atomic.Int64
 }
 
@@ -295,9 +296,6 @@ func TestRouter_OnlyCallsIndexFiles(t *testing.T) {
 	// We do this here rather than via go/packages or static analysis
 	// because the interface lives in the same package — the simplest
 	// correct check.
-	type method struct {
-		Name string
-	}
 	want := map[string]bool{"IndexFiles": true}
 	disallowed := map[string]bool{
 		"IndexRepository":            true,

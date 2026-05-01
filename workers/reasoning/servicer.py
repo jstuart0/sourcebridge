@@ -52,13 +52,17 @@ def _language_name(proto_lang: int) -> str:
     return _LANGUAGE_MAP.get(proto_lang, "unknown")
 
 
-def _build_discussion_context(request: reasoning_pb2.AnswerQuestionRequest) -> str:
+def _build_discussion_context(
+    request: reasoning_pb2.AnswerQuestionRequest
+    | reasoning_pb2.AnswerQuestionStreamRequest,
+) -> str:
     """Assemble the `context_code` blob the discussion prompt expects.
 
-    Shared by AnswerQuestion (unary) and AnswerQuestionStream. Keeping
-    it in one place means the two RPCs can never drift on what the
-    model sees, which matters because the streaming answer should be
-    exactly the unary answer produced token-by-token.
+    Shared by AnswerQuestion (unary) and AnswerQuestionStream. The two
+    request messages have identical field shape today; keeping the
+    helper polymorphic over both means the two RPCs can never drift on
+    what the model sees, which matters because the streaming answer
+    should be exactly the unary answer produced token-by-token.
     """
     parts: list[str] = []
     if request.context_code:
@@ -208,15 +212,16 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
 
     async def AnswerQuestionStream(  # noqa: N802
         self,
-        request: reasoning_pb2.AnswerQuestionRequest,
+        request: reasoning_pb2.AnswerQuestionStreamRequest,
         context: grpc.aio.ServicerContext,
     ):
         """Stream a natural-language answer as the LLM generates it.
 
         Wire shape mirrors AnswerQuestion's prompt assembly so both
         variants share the same behavior — only the delivery differs.
-        Emits one AnswerDelta per visible text chunk, then a terminal
-        frame (finished=True) carrying referenced_symbols + usage.
+        Emits one AnswerQuestionStreamResponse per visible text chunk,
+        then a terminal frame (finished=True) carrying
+        referenced_symbols + usage.
         """
         log.info("answer_question_stream", question=request.question[:80])
 
@@ -233,17 +238,19 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
                 max_tokens=max_tokens,
             ):
                 if delta is not None:
-                    yield reasoning_pb2.AnswerDelta(content_delta=delta)
+                    yield reasoning_pb2.AnswerQuestionStreamResponse(
+                        content_delta=delta
+                    )
                     continue
                 # Terminal frame: assemble the references + usage proto
                 # the unary caller would have returned and send it as the
-                # last AnswerDelta with finished=True set.
+                # last AnswerQuestionStreamResponse with finished=True.
                 assert final_answer is not None and usage is not None
                 ref_symbols = [
                     types_pb2.CodeSymbol(qualified_name=ref)
                     for ref in final_answer.references
                 ]
-                yield reasoning_pb2.AnswerDelta(
+                yield reasoning_pb2.AnswerQuestionStreamResponse(
                     finished=True,
                     referenced_symbols=ref_symbols,
                     usage=_llm_usage_proto(usage),

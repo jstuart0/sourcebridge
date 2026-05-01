@@ -249,6 +249,22 @@ func TestIsIgnoredDir(t *testing.T) {
 		// usually one, but the helper is for directories so the rule
 		// should not depend on language detection).
 		{"directory with no extension", "Makefile", false},
+
+		// Build-artifact directories the canonical ignore set covers.
+		// Pinned here so a regression that drops one of these from
+		// DefaultIgnorePatterns is caught at unit-test time. Tester
+		// report 2026-04-30 (Pazaryna): `sourcebridge review` walked
+		// a Next.js project's .next/ tree because the review walker
+		// kept its own four-entry skip list instead of deferring here.
+		// CA-124.
+		{".next (Next.js build)", ".next", true},
+		{"dist (bundlers)", "dist", true},
+		{"build (generic)", "build", true},
+		{"out (Next.js export, IDEs, bundlers)", "out", true},
+		{"target (Rust, Maven)", "target", true},
+		{"nested .next", "web/.next", true},
+		{"nested dist", "packages/foo/dist", true},
+		{"nested out", "packages/foo/out", true},
 	}
 
 	for _, c := range cases {

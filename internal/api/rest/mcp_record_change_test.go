@@ -128,8 +128,6 @@ func TestRecordChange_VisibleWhenDispatcherWired(t *testing.T) {
 	disp := &stubRecordChangeDispatcher{}
 	h.handler.changeDispatcher = disp
 	sess := h.createSession()
-	if _, err := json.Marshal(sess); err != nil { /* keep linter happy */
-	}
 	resp := h.sendRPC(sess, 1, "initialize", map[string]interface{}{
 		"protocolVersion": mcpProtocolVersion,
 		"capabilities":    map[string]interface{}{},

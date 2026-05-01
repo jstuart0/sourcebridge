@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -29,23 +28,10 @@ func (c *constLLM) Complete(_ context.Context, _, _ string) (string, error) {
 	return c.response, nil
 }
 
-// roundRobinLLM cycles through a list of responses. Thread-safe.
-type roundRobinLLM struct {
-	mu        sync.Mutex
-	responses []string
-	idx       int
-}
-
-func (r *roundRobinLLM) Complete(_ context.Context, _, _ string) (string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if len(r.responses) == 0 {
-		return "No response configured.", nil
-	}
-	resp := r.responses[r.idx%len(r.responses)]
-	r.idx++
-	return resp, nil
-}
+// (roundRobinLLM used to live here for tests that needed multiple
+// canned LLM responses across a single run; the existing tests use
+// constLLM with one response per test instance instead. Removed to
+// satisfy lint.)
 
 // ---- Symbol graph stubs ----
 
@@ -107,30 +93,9 @@ mux.Handle("/api/", auth.Middleware(apiHandler))
 `+"```", pkg)
 }
 
-// sysOverviewResponse returns LLM output that satisfies the system_overview profile.
-func sysOverviewResponse() string {
-	return `## What this system does
-SourceBridge indexes source repositories and generates living documentation for engineer and product audiences. It satisfies the need for always-current architecture documentation without manual maintenance. The platform provides 3 distinct report surfaces: wiki pages, compliance reports, and API references.
-
-## Main capabilities
-- Indexes Go, Python, and TypeScript repositories via push webhook
-- Generates per-package architecture pages using LLM with engineer-to-engineer voice
-- Validates documentation quality with 8 configurable gate validators
-- Opens wiki PRs for engineer review before publication
-- Maintains stable block IDs across regenerations to preserve human edits
-- Supports 5 sink types: git repo, Confluence, Notion, GitHub wiki, GitLab wiki
-
-## Key packages
-| Package | Purpose |
-| --- | --- |
-| internal/auth | Authentication middleware and role enforcement |
-| internal/livingwiki | Living wiki orchestration and page management |
-| internal/quality | Template-scoped documentation quality validators |
-| internal/citations | Canonical citation format shared across all report surfaces |
-
-## External dependencies
-PostgreSQL (page store and graph store), Redis (job queue), GitHub API (PR management), Anthropic API (LLM inference)`
-}
+// (sysOverviewResponse used to live here as a canned LLM response for
+// system_overview-profile gate tests; those tests have been removed
+// or moved to a different fixture file. Removed to satisfy lint.)
 
 // ---- Template stubs ----
 

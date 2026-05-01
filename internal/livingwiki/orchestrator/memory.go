@@ -101,7 +101,7 @@ func (m *MemoryPageStore) PromoteProposed(ctx context.Context, repoID, prID stri
 	defer m.mu.Unlock()
 	for _, p := range proposed {
 		// Get the current canonical page (may not exist — that's fine for cold-start).
-		canonical, _ := m.canonical[canonicalKey(repoID, p.ID)]
+		canonical := m.canonical[canonicalKey(repoID, p.ID)]
 		promoted := ast.Promote(canonical, p)
 		m.canonical[canonicalKey(repoID, promoted.ID)] = promoted
 	}

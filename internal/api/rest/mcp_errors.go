@@ -109,17 +109,13 @@ func errSymbolNotFound(name, filePath string) *mcpToolError {
 	}
 }
 
-func errModelUnavailable(detail string) *mcpToolError {
-	msg := "The configured LLM is unreachable."
-	if detail != "" {
-		msg = msg + " " + detail
-	}
-	return &mcpToolError{
-		Code:        MCPErrModelUnavailable,
-		Message:     msg,
-		Remediation: "Degrade to non-LLM tools (search_symbols, get_callers, …) or retry after the provider recovers.",
-	}
-}
+// (errModelUnavailable lived here as a constructor for the
+// MCPErrModelUnavailable code, but no MCP tool currently produces that
+// error path — explain_code surfaces the worker timeout via a generic
+// fmt.Errorf and ask_question returns a structured payload instead of
+// a tool error. The MCPErrModelUnavailable code is kept as part of the
+// taxonomy so when an MCP tool does want to surface "LLM unreachable"
+// distinctly, the constructor can be reintroduced trivially.)
 
 func errCapabilityDisabled(capName string) *mcpToolError {
 	return &mcpToolError{

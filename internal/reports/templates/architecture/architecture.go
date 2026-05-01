@@ -575,21 +575,10 @@ func capLines(s string, n int) string {
 	return strings.Join(lines[:n], "\n") + fmt.Sprintf("\n// … (%d lines truncated)", len(lines)-n)
 }
 
-// oneLineSummary returns the first sentence of a doc comment, or the full
-// comment if it has no sentence boundary.
-func oneLineSummary(doc string) string {
-	doc = strings.TrimSpace(doc)
-	if doc == "" {
-		return ""
-	}
-	if idx := strings.IndexByte(doc, '.'); idx >= 0 && idx < 120 {
-		return doc[:idx+1]
-	}
-	if len(doc) > 120 {
-		return doc[:120] + "…"
-	}
-	return doc
-}
+// (oneLineSummary used to live here as a doc-comment summarizer for
+// the per-symbol bullet rendering; the current architecture template
+// streams full doc comments to the LLM and lets the model do the
+// summarising. Removed to satisfy lint.)
 
 // renderLLMOutput parses the LLM markdown output and wraps each H2 section
 // in a stable [ast.Block]. This is a best-effort parser: each H2 heading
