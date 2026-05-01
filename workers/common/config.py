@@ -4,7 +4,93 @@ from __future__ import annotations
 
 import os
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
+
+# Supported provider sets. Kept as module-level frozensets so validators,
+# the factories in workers/common/{llm,embedding}/config.py, and tests
+# all consume one source of truth. Adding a provider means editing this
+# file plus the corresponding factory dispatch — single grep target.
+#
+# Tester report 2026-04-30 (Pazaryna) Issue 3 + R2 / CA-125: pre-fix,
+# unknown providers reached the factory and crashed the worker mid-init
+# with NotImplementedError / ValueError. The validator below rejects
+# unknown values at config-load time with an actionable message naming
+# the supported set.
+SUPPORTED_LLM_PROVIDERS: frozenset[str] = frozenset({
+    "anthropic",
+    "openai",
+    "ollama",
+    "vllm",
+    "llama-cpp",
+    "sglang",
+    "gemini",
+    "openrouter",
+    "lmstudio",
+})
+
+SUPPORTED_EMBEDDING_PROVIDERS: frozenset[str] = frozenset({
+    "ollama",
+    "openai",
+    "openai-compatible",
+})
+
+
+def _coerce_provider(
+    value: object,
+    allowed: frozenset[str],
+    label: str,
+    *,
+    required: bool,
+) -> str:
+    """Normalize and validate a provider string against ``allowed``.
+
+    - Coerces ``value`` to a stripped ``str`` (defensively — env vars
+      arrive as strings, but the validator runs in ``mode='before'``
+      so anything could in theory land here).
+    - Empty string: returned as-is when ``required=False`` (signals
+      "fall back"); raises when ``required=True``.
+    - Unknown value: raises ``ValueError`` with an actionable message
+      listing the supported providers in stable alphabetical order
+      and, for the embedding case, the well-known anthropic-isn't-here
+      gotcha that the tester report flagged.
+    """
+    if value is None:
+        text = ""
+    else:
+        text = str(value).strip()
+
+    if not text:
+        if required:
+            raise ValueError(
+                f"{label} is required. Set one of: {_format_supported(allowed)}."
+            )
+        return ""
+
+    if text in allowed:
+        return text
+
+    msg = (
+        f"{label} {text!r} is not supported. "
+        f"Supported {label}s: {_format_supported(allowed)}."
+    )
+    # Embedding-specific guidance: the tester report (Pazaryna 2026-04-30)
+    # found a real user setting embedding_provider=anthropic because the
+    # README's LLM-providers table listed anthropic as a first-class
+    # provider. Naming the gotcha in the error itself short-circuits
+    # the next user's stack-trace-spelunking session.
+    if label == "embedding provider" and text == "anthropic":
+        msg += (
+            " Anthropic does not offer an embeddings API as of 2026; "
+            "use 'ollama' (the default), 'openai', or 'openai-compatible' "
+            "for a self-hosted endpoint."
+        )
+    raise ValueError(msg)
+
+
+def _format_supported(allowed: frozenset[str]) -> str:
+    """Return the supported set as a stable-ordered, quoted, comma list."""
+    return ", ".join(repr(v) for v in sorted(allowed))
 
 
 class WorkerConfig(BaseSettings):
@@ -80,6 +166,41 @@ class WorkerConfig(BaseSettings):
     # Deployment must exceed this value so the kubelet's SIGKILL is
     # the outer bound, not the inner one. Today that's 3900s (65min).
     shutdown_grace_seconds: int = 3600
+
+    @field_validator("llm_provider", mode="before")
+    @classmethod
+    def _validate_llm_provider(cls, v: object) -> str:
+        """Reject unknown LLM providers at config-load time with an
+        actionable message naming the supported set. Empty string is
+        rejected here — llm_provider is required.
+
+        See SUPPORTED_LLM_PROVIDERS for the canonical list. Adding a new
+        provider requires editing both the set and the factory dispatch
+        in workers/common/llm/config.py:create_llm_provider.
+        """
+        return _coerce_provider(v, SUPPORTED_LLM_PROVIDERS, "LLM provider", required=True)
+
+    @field_validator("embedding_provider", mode="before")
+    @classmethod
+    def _validate_embedding_provider(cls, v: object) -> str:
+        """Reject unknown embedding providers at config-load time.
+
+        Pre-fix, setting SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER=anthropic
+        (a reasonable guess for a user reading the LLM-providers table
+        in the README) crashed the worker mid-init with NotImplementedError.
+        The error here names the supported set and explains why
+        Anthropic is not on it (no embeddings API as of 2026).
+        """
+        return _coerce_provider(v, SUPPORTED_EMBEDDING_PROVIDERS, "embedding provider", required=True)
+
+    @field_validator("llm_report_provider", mode="before")
+    @classmethod
+    def _validate_llm_report_provider(cls, v: object) -> str:
+        """Reject unknown report-LLM providers. Empty string is allowed
+        — it signals "fall back to llm_provider for reports too" (the
+        existing semantics in workers/common/llm/config.py:create_report_provider).
+        """
+        return _coerce_provider(v, SUPPORTED_LLM_PROVIDERS, "report LLM provider", required=False)
 
     def model_post_init(self, __context: object) -> None:
         self.test_mode = self._fallback_bool_env(

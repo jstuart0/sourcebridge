@@ -39,6 +39,34 @@ ask_model     = "qwen3:32b"
 # review_model  = "Qwen/Qwen2.5-32B-Instruct"
 # ask_model     = "Qwen/Qwen2.5-32B-Instruct"
 
+# ─── Embedding provider ───────────────────────────────────────────
+# Embeddings power semantic search and are independent from the LLM
+# provider above. Defaults to Ollama because it requires no API key
+# and runs alongside any local-LLM setup.
+#
+# Supported providers (worker rejects anything else at startup):
+#   ollama             — local; default; pulls a model like nomic-embed-text
+#   openai             — OpenAI's hosted embeddings API (text-embedding-3-*)
+#   openai-compatible  — any self-hosted endpoint exposing the OpenAI
+#                        embeddings API shape (vLLM, llama.cpp, LocalAI, …)
+#
+# Anthropic is intentionally NOT supported for embeddings — Anthropic
+# does not offer an embeddings API as of 2026. Set ``provider`` here
+# independently of the LLM provider above.
+#
+# Env-var equivalents use the SOURCEBRIDGE_WORKER_EMBEDDING_ prefix:
+#   SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER=ollama
+#   SOURCEBRIDGE_WORKER_EMBEDDING_MODEL=nomic-embed-text
+#   SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL=http://localhost:11434
+#   SOURCEBRIDGE_WORKER_EMBEDDING_API_KEY=
+#   SOURCEBRIDGE_WORKER_EMBEDDING_DIMENSION=768
+# [worker.embedding]
+# provider = "ollama"
+# model = "nomic-embed-text"
+# base_url = "http://localhost:11434"
+# api_key = ""
+# dimension = 768
+
 [server]
 http_port = 8080
 grpc_port = 50051
