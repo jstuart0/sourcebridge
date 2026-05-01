@@ -20,7 +20,7 @@ type scriptedSynth struct {
 	errOnCall int // turn (1-indexed) that returns an error instead
 }
 
-func (s *scriptedSynth) SupportsTools() bool { return s.support }
+func (s *scriptedSynth) SupportsTools(_ context.Context) bool { return s.support }
 
 func (s *scriptedSynth) AnswerQuestionWithTools(_ context.Context, req AgentTurnRequest) (AgentTurn, error) {
 	s.recv = append(s.recv, req)

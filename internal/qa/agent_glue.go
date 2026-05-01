@@ -17,16 +17,19 @@ import (
 // in order:
 //
 //  1. agent synthesizer wired
-//  2. provider/model supports tool use (synth.SupportsTools())
+//  2. provider/model supports tool use (synth.SupportsTools(ctx))
 //  3. agentic enabled globally, OR canary coin-flip lands within
 //     AgenticRetrievalCanaryPct for this (repo, time-bucket) pair
 //
 // Any gate miss → false, deepAsk falls through to single-shot.
-func (o *Orchestrator) shouldUseAgenticPath(repoID string) bool {
+//
+// ctx is threaded into SupportsTools so lazy-probe implementations
+// (CA-126 / Wave 3) can do an on-demand probe with proper cancellation.
+func (o *Orchestrator) shouldUseAgenticPath(ctx context.Context, repoID string) bool {
 	if o == nil || o.agent == nil {
 		return false
 	}
-	if !o.agent.SupportsTools() {
+	if !o.agent.SupportsTools(ctx) {
 		return false
 	}
 	if o.agentEnabled {

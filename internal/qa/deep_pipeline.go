@@ -46,7 +46,7 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 	// Agentic route — only when enabled (or canary-sampled), the
 	// worker supports tool use, and a dispatcher is wireable. Falls
 	// through to single-shot on any gate miss.
-	if o.shouldUseAgenticPath(in.RepositoryID) {
+	if o.shouldUseAgenticPath(ctx, in.RepositoryID) {
 		if ar, err := o.runAgentic(ctx, in, kind, result, started); err == nil && ar != nil {
 			return ar, nil
 		}
