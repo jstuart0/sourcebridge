@@ -36,13 +36,52 @@ logging:
 
 Code reasoning features (review, discussion, explanation) require an LLM provider.
 
-### Supported Providers
+### Supported LLM Providers
 
-| Provider | Environment Variable |
-|----------|---------------------|
-| OpenAI | `OPENAI_API_KEY` |
-| Anthropic | `ANTHROPIC_API_KEY` |
-| Local (Ollama) | `OLLAMA_URL` |
+Configure via `SOURCEBRIDGE_WORKER_LLM_PROVIDER` or `[worker] llm_provider` in
+`config.toml`. The worker validates the value at startup and refuses to start
+with an unknown provider, printing an actionable error that names the supported
+set.
+
+| Provider | Config value |
+|----------|-------------|
+| Anthropic | `anthropic` |
+| OpenAI | `openai` |
+| Ollama (local) | `ollama` |
+| vLLM | `vllm` |
+| llama.cpp | `llama-cpp` |
+| SGLang | `sglang` |
+| Google Gemini | `gemini` |
+| OpenRouter | `openrouter` |
+| LM Studio | `lmstudio` |
+
+### Supported Embedding Providers
+
+Embeddings are configured independently from the LLM provider. Use
+`SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER` or `[worker.embedding] provider` in
+`config.toml`. As with LLM providers, an unknown value is rejected at startup.
+
+| Provider | Config value | Notes |
+|----------|-------------|-------|
+| Ollama | `ollama` | Default. Requires a model like `nomic-embed-text`. |
+| OpenAI | `openai` | OpenAI hosted embeddings (`text-embedding-3-*`). |
+| OpenAI-compatible | `openai-compatible` | Any self-hosted endpoint with the OpenAI embeddings API shape. |
+
+**Note:** `anthropic` is not a valid embedding provider — Anthropic does not
+offer an embeddings API. Setting it produces an error at startup that names
+this explicitly.
+
+Embedding env vars use the `SOURCEBRIDGE_WORKER_EMBEDDING_` prefix:
+
+```bash
+SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER=ollama
+SOURCEBRIDGE_WORKER_EMBEDDING_MODEL=nomic-embed-text
+SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL=http://localhost:11434
+SOURCEBRIDGE_WORKER_EMBEDDING_DIMENSION=768
+```
+
+See `config.toml.example` for the full `[worker.embedding]` section with
+comments.
 
 ### Test Mode
 

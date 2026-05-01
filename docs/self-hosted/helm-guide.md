@@ -114,6 +114,40 @@ kubectl -n sourcebridge get svc
 | `secrets.stripeSecretKey` | Stripe API key | `""` |
 | `secrets.stripeWebhookSecret` | Stripe webhook signing secret | `""` |
 
+## First-run: bootstrapping the admin account
+
+After the chart is installed and the API pod is ready, use the CLI to set the
+initial admin password. This is the recommended path for scripted and CI
+deployments.
+
+```bash
+# Expose the API locally
+kubectl -n sourcebridge port-forward svc/sourcebridge-api 8080:8080 &
+
+# Bootstrap the admin account (interactive)
+sourcebridge setup admin --server http://localhost:8080
+
+# Or non-interactive (CI / provisioning scripts):
+echo "$ADMIN_PW" | sourcebridge setup admin \
+    --server http://localhost:8080 --password-stdin
+```
+
+On success, `setup admin` saves the returned session token to
+`~/.sourcebridge/token`. Subsequent `sourcebridge index` and `sourcebridge ask`
+commands work without additional flags.
+
+If you're running this as part of an automated provisioning flow and don't want
+the session token saved to the operator machine:
+
+```bash
+echo "$ADMIN_PW" | sourcebridge setup admin \
+    --server http://localhost:8080 --password-stdin --no-save
+```
+
+See [CLI Reference](../user/cli-reference.md#sourcebridge-setup-admin) for the
+full flag surface including `--password-file` and the `SOURCEBRIDGE_PASSWORD`
+env var.
+
 ## Example: Minimal Installation
 
 Single replica, no ingress, default storage:

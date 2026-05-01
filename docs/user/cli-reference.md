@@ -142,6 +142,12 @@ sourcebridge login [flags]
 | `--server <url>` | string | `SOURCEBRIDGE_URL` env or `~/.sourcebridge/server` | SourceBridge server URL. Required on first login. |
 | `--method <method>` | string | `auto` | Auth flow: `auto`, `oidc`, or `local`. `auto` prefers OIDC when both are available. |
 | `--no-open` | bool | `false` | Print the OIDC auth URL instead of opening a browser. |
+| `--password-stdin` | bool | `false` | (`--method local` only) Read the password from stdin (one line). Recommended for CI. |
+| `--password-file <path>` | string | — | (`--method local` only) Read the password from a file. Warns to stderr if mode is more permissive than 0600. |
+
+`SOURCEBRIDGE_PASSWORD` is also accepted as a last-resort env var for
+`--method local`. Supplying more than one of these at the same time is refused.
+`--password <value>` is absent by design (leaks into shell history and `ps`).
 
 ### Server URL resolution
 
@@ -259,9 +265,105 @@ sourcebridge import /path/to/requirements.md [flags]
 
 ## `sourcebridge setup`
 
-Parent command group for integration setup subcommands. Currently contains
-`setup claude` (documented above). Additional clients will be added here in
-future releases.
+Parent command group for integration setup subcommands. Contains `setup claude`
+and `setup admin`.
+
+---
+
+## `sourcebridge setup admin`
+
+Initialize the admin password on a fresh self-hosted SourceBridge server. Posts
+to `POST /auth/setup`, validates the password client-side (minimum 8 characters),
+and saves the returned session token to `~/.sourcebridge/token` (mode 0600) so
+the next CLI command works without a separate `sourcebridge login`.
+
+This is the recommended first step after deploying a new server, and the natural
+CI/scripted-install path.
+
+```bash
+sourcebridge setup admin [flags]
+```
+
+### Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--server <url>` | string | `SOURCEBRIDGE_URL` env or `~/.sourcebridge/server` | SourceBridge server URL. |
+| `--password-stdin` | bool | `false` | Read the admin password from stdin (one line). Recommended for CI. Never appears in shell history or process listings. |
+| `--password-file <path>` | string | — | Read the admin password from a file (single line). Warns to stderr if file mode is more permissive than 0600. |
+| `--no-save` | bool | `false` | Skip writing the returned session token to `~/.sourcebridge/token`. |
+
+`SOURCEBRIDGE_PASSWORD` is also accepted as a last-resort env var. Supplying
+more than one password vector at the same time is refused with a "pick exactly
+one" error.
+
+`--password <value>` is intentionally absent — passing a password on the
+command line leaks it into shell history and `/proc/<pid>/cmdline`.
+
+### Server URL resolution
+
+Same chain as `sourcebridge login`:
+
+1. `--server` flag
+2. `SOURCEBRIDGE_URL` environment variable
+3. `~/.sourcebridge/server` (previously saved by a prior `login`)
+
+### Examples
+
+**Interactive** — prompts twice with confirmation, like `passwd(1)`:
+
+```bash
+sourcebridge setup admin --server https://sourcebridge.example.com
+```
+
+**CI / scripted** — pipe the password from an environment variable:
+
+```bash
+echo "$ADMIN_PW" | sourcebridge setup admin \
+    --server https://sourcebridge.example.com --password-stdin
+```
+
+**Mounted secret file**:
+
+```bash
+sourcebridge setup admin \
+    --server https://sourcebridge.example.com \
+    --password-file /etc/sourcebridge/admin-password
+```
+
+**Env var**:
+
+```bash
+SOURCEBRIDGE_PASSWORD="$ADMIN_PW" sourcebridge setup admin \
+    --server https://sourcebridge.example.com
+```
+
+### After setup
+
+By default the returned session token is saved and you're immediately
+authenticated:
+
+```bash
+sourcebridge index <path-to-repo>
+sourcebridge ask "What does this repo do?"
+```
+
+If you ran with `--no-save`, authenticate explicitly:
+
+```bash
+sourcebridge login --server https://sourcebridge.example.com --method local
+```
+
+### Error: server already initialized
+
+If the server is already initialized, the command exits with:
+
+```
+this server is already initialized. Run `sourcebridge login --server <url> --method local` to authenticate ...
+```
+
+This is a benign error for re-run provisioning scripts — the admin account
+was already created on a previous run.
 
 ---
 
@@ -303,6 +405,11 @@ sourcebridge review /path/to/repo --template security
 | `--template` | Review template | `security` |
 
 **Templates:** `security`, `solid`, `performance`, `reliability`, `maintainability`
+
+When given a directory, the walker skips non-source directories using the same
+ignore list as the indexer: `node_modules`, `.git`, `vendor`, `__pycache__`,
+`.next`, `dist`, `build`, `out`, `target`, and others. Any future addition to
+that shared list is picked up by `review` automatically.
 
 ---
 

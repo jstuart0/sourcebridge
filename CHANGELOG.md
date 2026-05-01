@@ -6,6 +6,125 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ## [Unreleased]
 
+Theme: **Pazaryna — first-run reliability.** Five fixes and features that close
+the gap between what a new self-hoster reads and what actually works: a
+scriptable admin-bootstrap command, non-interactive login, lazy agentic-feature
+activation (so worker startup order no longer matters), fail-fast provider
+validation in the Python worker, and walker hardening in `sourcebridge review`.
+CI is now green again after a proto-naming lint break and a flaky wall-clock
+test.
+
+### Added
+
+- **`sourcebridge setup admin` — scriptable admin bootstrap** (`876c798`,
+  CA-127). New subcommand under `sourcebridge setup` that posts to
+  `POST /auth/setup`, validates the password client-side (≥8 chars), saves
+  the returned session token to `~/.sourcebridge/token` (0600), and prints
+  copy-paste-ready next steps with the actual server URL. Supports all three
+  non-interactive password vectors (see Changed below). Returns a 409-aware
+  error pointing at `sourcebridge login` when the server is already
+  initialized. Use `--no-save` to skip writing the session token (useful when
+  bootstrapping a server you don't intend to use from this machine).
+
+- **Non-interactive password input for `sourcebridge login` and `sourcebridge
+  setup admin`** (`876c798`, CA-127). Three vectors, in strict precedence
+  order — exactly one may be set at a time; supplying more than one is
+  refused with a "pick exactly one" error:
+  - `--password-stdin` — reads one line from stdin. Recommended for CI
+    (`echo "$ADMIN_PW" | sourcebridge ...`). Never appears in shell history
+    or `/proc/<pid>/cmdline`.
+  - `--password-file <path>` — reads from a file; warns to stderr if file
+    mode is more permissive than 0600.
+  - `SOURCEBRIDGE_PASSWORD` — env var; last resort.
+  `--password <value>` is intentionally absent (would leak into shell history
+  and `ps`).
+
+- **`out` added to the canonical ignored-directory set** (`201548a`, CA-124).
+  `git.DefaultIgnorePatterns` now includes `out` (Next.js static export, Java
+  IDEs, several bundlers). The indexer, change-watch, and `sourcebridge review`
+  walker all benefit.
+
+### Changed
+
+- **`sourcebridge review` walker uses the canonical ignore list** (`201548a`,
+  CA-124). The walk no longer maintains its own four-entry skip list
+  (`node_modules`, `.git`, `vendor`, `__pycache__`). It now calls
+  `git.IsIgnoredDir` — the same helper the indexer and change-watch pipeline
+  use — so `.next/`, `dist/`, `build/`, `out/`, `target/`, and any future
+  additions to `DefaultIgnorePatterns` are automatically skipped. The internal
+  `findReviewableFiles` helper is now unit-testable and covered by
+  `cli/review_walker_test.go`.
+
+- **Agentic features activate lazily instead of at API server boot** (`9d15856`,
+  CA-126). Previously the API server probed the worker once during startup
+  with six 5-second retries; if all attempts failed the agentic synthesizer
+  was never wired and agentic features stayed disabled for the pod's entire
+  lifetime — meaning starting the worker after the API server did nothing.
+  Now `LazyAgentSynth` defers the probe to the first agentic-eligible request.
+  The probe has a 2-second timeout and coalesces concurrent first-request bursts
+  via single-flight. A success is cached (and re-validated when the workspace
+  LLM config version changes); a failure is retried after a 60-second cooldown.
+  A best-effort boot probe still runs in the background: on success it hot-warms
+  the cache; on failure it prints a one-line stderr warning (`warning: AI worker
+  not reachable at <addr>; ... Start the worker with: make dev-worker`) without
+  installing the cooldown, so the first real agentic request after the worker
+  comes up activates immediately.
+
+- **Worker config validates providers at startup, not at first call** (`f6f9951`,
+  CA-125). `WorkerConfig` now runs pydantic `field_validator`s on
+  `llm_provider`, `embedding_provider`, and `llm_report_provider` at
+  config-load time. Unknown values produce an actionable error naming the
+  supported set rather than a mid-init `NotImplementedError` or bare
+  `ValueError`. Anthropic is explicitly noted as unsupported for embeddings in
+  the error message. The factory functions retain their own guards as defense
+  in depth (the pydantic validator is bypassed by `model_copy(update=...)`,
+  the path per-request overrides take). Supported sets: LLM — `anthropic`,
+  `openai`, `ollama`, `vllm`, `llama-cpp`, `sglang`, `gemini`, `openrouter`,
+  `lmstudio`; embedding — `ollama`, `openai`, `openai-compatible`.
+
+- **Login error message points at `/login`, not `/setup`** (`201548a`, CA-124).
+  The "setup not done" error from `sourcebridge login` now directs users to
+  `/login` (where Next.js handles initial setup automatically) and includes a
+  curl one-liner for headless setups via `POST /auth/setup`.
+
+- **`make dev-worker` is now the canonical worker entry point** (`201548a`,
+  CA-124). `Makefile` gained a `dev-worker` target; the README and CLAUDE.md
+  were updated to use it everywhere. The previous instruction
+  (`cd workers && uv run python -m workers`) broke because absolute imports
+  fail when the CWD is `workers/`.
+
+### Fixed
+
+- **`sourcebridge login` error no longer sends users to a 404** (`201548a`,
+  CA-124). The "setup not complete" error previously named `/setup`, which
+  returns 404. It now names `/login` and provides a curl fallback.
+
+### Internal
+
+- **Proto naming — `AnswerQuestionStream` gets distinct request/response types**
+  (`75b5108`, CA-128). `buf` STANDARD lint requires distinct types per RPC.
+  `AnswerQuestionStreamRequest` is introduced (field-for-field copy of
+  `AnswerQuestionRequest` today, separately evolvable). `AnswerDelta` is
+  renamed `AnswerQuestionStreamResponse`. Wire-compatible: proto3 messages
+  with the same field tags are indistinguishable on the wire. Generated Go
+  and Python stubs regenerated; all consumers updated.
+
+- **67 Go lint errors resolved across the tree** (`75b5108`, CA-128). Mix:
+  49 unused symbols, 6 ineffassign, 6 gosimple, 3 staticcheck, 2 errcheck.
+  Dead code removed where callers are gone; `//nolint:unused` applied where
+  retention is intentional (backward-compat shims, option-pattern parity,
+  canonical reference lists).
+
+- **Flaky `TestIndexFiles_DeltaBudgetUnder100ms` replaced with a ratio gate**
+  (`75b5108`, CA-128). The old test asserted a 100 ms absolute wall-clock
+  ceiling on the single-file delta — marginal on shared CI runners where
+  scheduler jitter can push a 14 ms operation past 100 ms. The replacement
+  uses a ratio gate (delta/baseline ≤ 0.25) which is hardware-independent,
+  plus a 500 ms sanity ceiling for catastrophic regressions where both paths
+  blow up.
+
+---
+
 Theme: **Living wiki runtime activation.** The living-wiki feature shipped
 as compiled-but-inert code in the prior release; this workstream makes it
 actually run. A user can now enable the feature for a specific repo, choose
