@@ -12,7 +12,7 @@ be checked before a release tag is pushed.
 - [ ] Version constant in `cli/version.go` (or equivalent) bumped
 - [ ] Docker images build cleanly for `linux/amd64` and `linux/arm64`
 
-## Deploying to production (thor cluster)
+## Deploying to production
 
 ```bash
 # 1. Build and push images
