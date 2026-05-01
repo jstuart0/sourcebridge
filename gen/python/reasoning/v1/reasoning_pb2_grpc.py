@@ -52,8 +52,8 @@ class ReasoningServiceStub(object):
                 _registered_method=True)
         self.AnswerQuestionStream = channel.unary_stream(
                 '/sourcebridge.reasoning.v1.ReasoningService/AnswerQuestionStream',
-                request_serializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionRequest.SerializeToString,
-                response_deserializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerDelta.FromString,
+                request_serializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionStreamRequest.SerializeToString,
+                response_deserializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionStreamResponse.FromString,
                 _registered_method=True)
         self.ReviewFile = channel.unary_unary(
                 '/sourcebridge.reasoning.v1.ReasoningService/ReviewFile',
@@ -124,11 +124,15 @@ class ReasoningServiceServicer(object):
 
     def AnswerQuestionStream(self, request, context):
         """AnswerQuestionStream is the server-streaming variant of AnswerQuestion.
-        The server emits zero-or-more AnswerDelta messages containing incremental
-        text chunks while the model is generating, followed by a terminal
-        AnswerDelta with `finished = true` carrying the final usage stats. This
-        lets callers render tokens progressively instead of waiting for the whole
-        answer. Semantics of the request are identical to AnswerQuestion.
+        The server emits zero-or-more AnswerQuestionStreamResponse messages
+        containing incremental text chunks while the model is generating,
+        followed by a terminal response with `finished = true` carrying the
+        final usage stats. This lets callers render tokens progressively
+        instead of waiting for the whole answer. The request shape mirrors
+        AnswerQuestionRequest field-for-field today; it has its own message
+        type so the streaming variant can evolve independently (e.g., add
+        streaming-only knobs like keepalive_ms) without forcing a wire
+        change on the unary path.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -239,8 +243,8 @@ def add_ReasoningServiceServicer_to_server(servicer, server):
             ),
             'AnswerQuestionStream': grpc.unary_stream_rpc_method_handler(
                     servicer.AnswerQuestionStream,
-                    request_deserializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionRequest.FromString,
-                    response_serializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerDelta.SerializeToString,
+                    request_deserializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionStreamRequest.FromString,
+                    response_serializer=reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionStreamResponse.SerializeToString,
             ),
             'ReviewFile': grpc.unary_unary_rpc_method_handler(
                     servicer.ReviewFile,
@@ -390,8 +394,8 @@ class ReasoningService(object):
             request,
             target,
             '/sourcebridge.reasoning.v1.ReasoningService/AnswerQuestionStream',
-            reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionRequest.SerializeToString,
-            reasoning_dot_v1_dot_reasoning__pb2.AnswerDelta.FromString,
+            reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionStreamRequest.SerializeToString,
+            reasoning_dot_v1_dot_reasoning__pb2.AnswerQuestionStreamResponse.FromString,
             options,
             channel_credentials,
             insecure,

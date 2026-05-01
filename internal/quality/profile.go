@@ -200,16 +200,9 @@ func AllDefaultProfiles() []Profile {
 	return out
 }
 
-// ruleFor returns the ValidatorRule for the given ValidatorID in this
-// profile, or (ValidatorRule{Level: LevelOff}, false) when not present.
-func (p Profile) ruleFor(id ValidatorID) (ValidatorRule, bool) {
-	for _, r := range p.Rules {
-		if r.ValidatorID == id {
-			return r, true
-		}
-	}
-	return ValidatorRule{Level: LevelOff}, false
-}
+// (Profile.ruleFor used to live here; the validator dispatch loop now
+// iterates Rules directly rather than looking up by ValidatorID, so
+// the helper has no callers. Removed to satisfy lint.)
 
 // String returns a human-readable identifier for the profile.
 func (p Profile) String() string {

@@ -121,7 +121,7 @@ func RunStubFixup(ctx context.Context, req FixupRequest) (FixupResult, error) {
 			continue
 		}
 
-		pageRows, _ := allRows[pageID]
+		pageRows := allRows[pageID]
 		allTargetsReady := true
 		for _, row := range pageRows {
 			for _, tgt := range row.StubTargetPageIDs {

@@ -92,6 +92,13 @@ func withTool(name string) progressOption {
 	return func(e *ProgressEvent) { e.ToolName = name }
 }
 
+// withDetail is part of the progressOption family; not currently used
+// by any agent_loop emit but kept for symmetry with withTool /
+// withDuration / withTermination so future progress events can populate
+// Detail without reintroducing the helper.
+//
+//nolint:unused // Convenience option kept for parity with the rest of
+// the option set.
 func withDetail(s string) progressOption {
 	return func(e *ProgressEvent) { e.Detail = s }
 }

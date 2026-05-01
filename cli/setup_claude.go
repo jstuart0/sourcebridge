@@ -114,10 +114,9 @@ type apiWarningDTO struct {
 	Detail string `json:"detail"`
 }
 
-// capabilitiesResponse is used to check agent_setup availability.
-type capabilitiesResponse struct {
-	Capabilities []string `json:"capabilities"`
-}
+// (capabilitiesResponse used to live here for an /capabilities endpoint
+// probe; the agent_setup availability check now reads the new edition-
+// aware /v1/edition response instead. Removed to satisfy lint.)
 
 // sanitizeStatusBody bounds and sanitizes a non-2xx HTTP response body
 // before it is printed to the user's terminal. Caps at 512 bytes,

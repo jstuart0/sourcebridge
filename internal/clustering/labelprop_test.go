@@ -4,24 +4,10 @@
 package clustering
 
 import (
-	"sort"
 	"testing"
 
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 )
-
-// groupOf extracts the set of node IDs in the same cluster as the given node.
-func groupOf(labels map[string]string, nodeID string) []string {
-	label := labels[nodeID]
-	var group []string
-	for id, lbl := range labels {
-		if lbl == label {
-			group = append(group, id)
-		}
-	}
-	sort.Strings(group)
-	return group
-}
 
 // uniqueLabels counts the distinct cluster labels in a label map.
 func uniqueLabels(labels map[string]string) int {

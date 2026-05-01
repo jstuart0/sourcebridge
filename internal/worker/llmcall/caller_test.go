@@ -35,7 +35,7 @@ func (f *fakeWorker) AnswerQuestion(ctx context.Context, _ *reasoningv1.AnswerQu
 	f.record(ctx, "AnswerQuestion")
 	return &reasoningv1.AnswerQuestionResponse{Answer: "ok"}, nil
 }
-func (f *fakeWorker) AnswerQuestionStream(ctx context.Context, _ *reasoningv1.AnswerQuestionRequest) (reasoningv1.ReasoningService_AnswerQuestionStreamClient, context.CancelFunc, error) {
+func (f *fakeWorker) AnswerQuestionStream(ctx context.Context, _ *reasoningv1.AnswerQuestionStreamRequest) (reasoningv1.ReasoningService_AnswerQuestionStreamClient, context.CancelFunc, error) {
 	f.record(ctx, "AnswerQuestionStream")
 	return nil, func() {}, errors.New("stream not implemented in fake")
 }
@@ -259,7 +259,7 @@ func TestCaller_StreamHeadersAttachedBeforeOpen(t *testing.T) {
 	res := resolution.New(store, nil, config.LLMConfig{}, nil)
 	fw := &fakeWorker{}
 	c := New(fw, res, nil)
-	_, _, _ = c.AnswerQuestionStream(context.Background(), "", resolution.OpDiscussStream, &reasoningv1.AnswerQuestionRequest{})
+	_, _, _ = c.AnswerQuestionStream(context.Background(), "", resolution.OpDiscussStream, &reasoningv1.AnswerQuestionStreamRequest{})
 	md, ok := metadata.FromOutgoingContext(fw.lastCtx)
 	if !ok {
 		t.Fatal("expected metadata to be attached before stream open")

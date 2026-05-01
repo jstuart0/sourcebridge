@@ -246,10 +246,7 @@ func isLLMBackedEnqueue(req *llm.EnqueueRequest) bool {
 	case llm.SubsystemClustering:
 		return strings.TrimSpace(req.JobType) == "relabel_clusters"
 	}
-	if string(req.Subsystem) == "living_wiki" {
-		return true
-	}
-	return false
+	return string(req.Subsystem) == "living_wiki"
 }
 
 // staleJobThreshold is how long an active job can go without any store update
@@ -1228,9 +1225,10 @@ func (o *Orchestrator) runJob(item *workItem) {
 	if !claimAttempted {
 		// Defensive — every path that breaks the loop should have set
 		// claimAttempted. If we get here without one, attempt the
-		// claim now so the reaper-vs-us race is resolved.
+		// claim now so the reaper-vs-us race is resolved. (We don't
+		// re-set claimAttempted here because the function returns
+		// after this block; lint flags the dead store.)
 		claimWon = o.claimFinalization(jobID)
-		claimAttempted = true
 	}
 	if claimWon {
 		o.finalizeFailed(jobID, req, lastErr)

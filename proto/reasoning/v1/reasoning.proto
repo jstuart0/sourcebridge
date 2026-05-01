@@ -18,12 +18,16 @@ service ReasoningService {
   rpc AnswerQuestion(AnswerQuestionRequest) returns (AnswerQuestionResponse);
 
   // AnswerQuestionStream is the server-streaming variant of AnswerQuestion.
-  // The server emits zero-or-more AnswerDelta messages containing incremental
-  // text chunks while the model is generating, followed by a terminal
-  // AnswerDelta with `finished = true` carrying the final usage stats. This
-  // lets callers render tokens progressively instead of waiting for the whole
-  // answer. Semantics of the request are identical to AnswerQuestion.
-  rpc AnswerQuestionStream(AnswerQuestionRequest) returns (stream AnswerDelta);
+  // The server emits zero-or-more AnswerQuestionStreamResponse messages
+  // containing incremental text chunks while the model is generating,
+  // followed by a terminal response with `finished = true` carrying the
+  // final usage stats. This lets callers render tokens progressively
+  // instead of waiting for the whole answer. The request shape mirrors
+  // AnswerQuestionRequest field-for-field today; it has its own message
+  // type so the streaming variant can evolve independently (e.g., add
+  // streaming-only knobs like keepalive_ms) without forcing a wire
+  // change on the unary path.
+  rpc AnswerQuestionStream(AnswerQuestionStreamRequest) returns (stream AnswerQuestionStreamResponse);
 
   // ReviewFile performs a template-based code review of a file
   rpc ReviewFile(ReviewFileRequest) returns (ReviewFileResponse);
@@ -121,18 +125,36 @@ message AnswerQuestionResponse {
   sourcebridge.common.v1.LLMUsage usage = 3;
 }
 
-// AnswerDelta is one frame on the AnswerQuestionStream wire. Most frames
-// contain just an incremental `content_delta` (text appended to the running
-// answer). The final frame sets `finished = true` and carries the resolved
-// `referenced_symbols` and `usage`; consumers must treat that frame as the
-// signal to stop rendering deltas.
+// AnswerQuestionStreamRequest is the request type for the streaming
+// variant of AnswerQuestion. Field shape mirrors AnswerQuestionRequest
+// 1:1 today — both RPCs assemble the same prompt — but having its own
+// message type lets the streaming path evolve independently (e.g., add
+// streaming-only keepalive_ms or chunk_size knobs) without breaking the
+// unary wire. The two types use the same field tags so prompt-assembly
+// helpers can be shared by reading them through structurally-identical
+// accessors.
+message AnswerQuestionStreamRequest {
+  string question = 1;
+  string repository_id = 2;
+  repeated sourcebridge.common.v1.CodeSymbol context_symbols = 3;
+  int32 max_tokens = 4;
+  string context_code = 5;
+  string file_path = 6;
+  sourcebridge.common.v1.Language language = 7;
+}
+
+// AnswerQuestionStreamResponse is one frame on the AnswerQuestionStream
+// wire. Most frames contain just an incremental `content_delta` (text
+// appended to the running answer). The final frame sets `finished = true`
+// and carries the resolved `referenced_symbols` and `usage`; consumers
+// must treat that frame as the signal to stop rendering deltas.
 //
 // Non-content frames set `progress` to a structured event describing a
 // phase change inside the agentic loop (planning, tool_call,
 // synthesizing). These let the Go relay forward intermediate progress
 // to MCP's ContentEmitter so streaming clients can show "agent is
 // calling search_evidence..." without waiting for the full answer.
-message AnswerDelta {
+message AnswerQuestionStreamResponse {
   string content_delta = 1;
   bool finished = 2;
   // Populated only on the terminal frame.

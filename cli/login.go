@@ -319,8 +319,11 @@ func validateMethod(method string, info *desktopInfoResponse, serverURL string) 
 		if !info.SetupDone {
 			return fmt.Errorf(
 				"this server hasn't been initialized yet.\n"+
-					"Visit %s/setup to complete initial setup first.",
-				serverURL,
+					"Open %s/login in a browser and set the admin password, then re-run `sourcebridge login`.\n"+
+					"For headless / CI environments, set up via the API:\n"+
+					"  curl -X POST %s/auth/setup -H 'Content-Type: application/json' -d '{\"password\":\"YOUR_ADMIN_PASSWORD\"}'\n"+
+					"(password must be at least 8 characters).",
+				serverURL, serverURL,
 			)
 		}
 	}

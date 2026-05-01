@@ -286,8 +286,12 @@ func pollJobResult(ctx context.Context, c *gqlClient, cfg config, jobID string) 
 				pagesGenerated := 0
 				if msg != "" {
 					// progressMessage format: "Generated N/M pages" — extract N.
+					// Sscanf parse errors are intentionally ignored: a
+					// malformed message degrades gracefully to pagesGenerated=0
+					// and the caller asserts on the final job state, not on
+					// the parsed counter.
 					var n2, m int
-					fmt.Sscanf(msg, "Generated %d/%d", &n2, &m)
+					_, _ = fmt.Sscanf(msg, "Generated %d/%d", &n2, &m)
 					pagesGenerated = n2
 				}
 				return pagesGenerated, status, nil

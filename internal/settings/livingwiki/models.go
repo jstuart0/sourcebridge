@@ -77,8 +77,15 @@ type Settings struct {
 // has been stored. The UI displays this to communicate "a value exists".
 const SecretSentinel = "********"
 
-// secretFields lists field names that carry credentials and must be encrypted
-// at rest. The Store implementation uses this list; callers use MaskSecrets.
+// secretFields lists field names that carry credentials and must be
+// encrypted at rest. Kept as the canonical reference for which fields
+// the settings layer treats as secret; MaskSecrets currently checks
+// each field by name inline rather than iterating this slice. The
+// list lives here so the next refactor that wants a data-driven
+// MaskSecrets has the source of truth ready.
+//
+//nolint:unused // Reference list; see MaskSecrets and the secret-handling
+// audit notes.
 var secretFields = []string{
 	"github_token",
 	"gitlab_token",
