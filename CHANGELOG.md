@@ -365,6 +365,66 @@ ready-made starting point without copy-pasting manifests.
     Phase 1; nothing in 1.D is reachable from production paths until
     1.E flips the flag.
 
+- **MCP-edits feedback-loop — Phase 1 closing (1.E burn-in).** The
+  no-new-feature-code phase that gates the `SOURCEBRIDGE_CHANGE_WATCH_ENABLED`
+  flag-flip behind a final integration sweep, an operator runbook,
+  and a verified done-definition. Phase 1's full commit chain
+  (1.A → 1.B → 1.C → 1.D → 1.E) is ready for review.
+  - **Cross-package integration sweep** at
+    `tests/integration/phase1_changewatch_test.go`. Exercises the full
+    closed loop in the order a real edit travels: fsnotify Watcher
+    detects external edit → Router validates schema + branch +
+    delta-only guardrails → IndexFiles under T0 budget →
+    MergeIndexResult → ImpactApplier → freshness envelope updated.
+    Confirms the package-boundary wiring (watcher → router →
+    FreshnessForExport, the same path the MCP envelope adapter reads)
+    beyond what individual sub-phase tests cover.
+  - **Operator runbook stub** at `docs/admin/change-watch.md`. Covers
+    what change-watch does, what flag-flip activates, what disabling
+    does, tuning knobs, observability checklist for the first week,
+    rollback procedure, Phase 1 readiness summary, and explicit list
+    of what flag-flip does NOT activate (Phase 2-5 deferrals).
+  - **All 15 Phase 1 done-definition tests** verified green:
+    - #1 + #3 — `TestIntegration_ExternalEditFlowsToFreshness` (1.C)
+    - #2 + #5 — `TestIntegration_RecordChange_FlowsToFreshness` (1.C
+      router-level) + `TestRecordChange_HappyPath` (1.D tool-level)
+    - #6 — `TestIndexFiles_DeltaBudgetUnder100ms` (1.B)
+    - #7 — `TestPassiveOnly_Phase1DoneDef7` (1.D, 5 scenarios) —
+      load-bearing for the `record_change`-never-required non-goal
+    - #8 — `TestRouter_RejectsEmptyDelta` +
+      `TestRouter_RejectsInvalidPaths` (1.C)
+    - #9 — `TestRouter_MultiTenantContainment` (1.C)
+    - #10 — `TestRepoIndexFullReason_GuardRefusesUnspecified` (1.A)
+      + `TestRouter_OnlyCallsIndexFiles` (1.C) +
+      `TestIndexRepository_RouterHasNoFullReindexCallPath` (1.C)
+    - #11 — `applyImpactFromChange` extraction regression (helper
+      level 1.A; e2e 1.B)
+    - #12 — `TestIndexFiles_BranchMismatchRejected` /
+      `TestIndexFiles_BranchMatchAccepted` (1.B in-process half) +
+      `TestRouter_RejectsBranchMismatch` /
+      `TestRouter_AcceptsRefsHeadsBranchEquivalent` (1.C router half)
+    - #13 — `TestRouter_PerRepoBreakerTrips` (1.C)
+    - #14 — `TestRouter_DedupByContentHashAcrossSourceKinds` +
+      `TestRouter_DedupByEventIDIdempotency` (1.C)
+    - #15 — `git.IsIgnoredPath` parity (1.A) + `TestIsIgnoredDir`
+      directory-side parity (1.C)
+  - **What flag-flip activates after Phase 1.E**: passive fsnotify
+    detection, per-repo router with delta-only guardrails, per-(repo,
+    source.kind) rate limit + per-repo aggregate breaker, branch
+    mismatch rejection, multi-tenant containment, freshness envelope
+    on every MCP response, the `record_change` MCP tool (opt-in,
+    never required), HTTP ingress at
+    `POST /v1/connectors/{id}/events`, path-normalization contract.
+  - **What flag-flip does NOT activate** (deferred to later phases):
+    `Fast / Balanced / Strict` mode picker (Phase 4),
+    `mark-suspect`/`auto-resolve` link state machine (Phase 2), web
+    UI freshness chips and change feed (Phase 5), compound-tool
+    `LINK_INVALIDATED` refusal (Phase 2), GitHub webhook + App
+    connector (Phase 2), `/admin/connectors` admin UI (Phase 2),
+    schema promotion `0.x → 1.0` (Phase 2 after the schema-stability
+    checkpoint), T2/T3 surgical re-derivation (Phase 3), persistent
+    `ca_change_event` table (Phase 5).
+
 ### Changed
 
 - **Credential model** (`792ca64`). HTTP clients for all living-wiki sinks
