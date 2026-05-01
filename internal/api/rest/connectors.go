@@ -83,10 +83,12 @@ func (s *Server) handleConnectorEvent(w http.ResponseWriter, r *http.Request) {
 
 	// Stamp ingress-time fields. The router validates the schema; we
 	// fill in fields the connector should NOT have authority over:
-	// - source.kind is derived from the connector id prefix when not
-	//   set (e.g. "github-webhook:repo-1234" → SourceKindGitHubWebhook).
-	//   Connectors MAY set this field; the router validates against the
-	//   recognized enum so a bad value is rejected at schema time.
+	// - source.kind is locked to HTTP-ingress-family kinds — a remote
+	//   caller cannot claim to be the in-process record_change tool or
+	//   the in-process fsnotify watcher. Phase 2's GitHub connector
+	//   will specialize via translator code that stamps
+	//   "github_webhook" / "github_app" before reaching this handler;
+	//   in 1.D the only HTTP-ingress kind is the generic one.
 	// - trust.received_via is always "http_ingress" — connectors cannot
 	//   claim "in_process".
 	// - trust.verified is true only when the connector's auth context
@@ -96,11 +98,15 @@ func (s *Server) handleConnectorEvent(w http.ResponseWriter, r *http.Request) {
 	if ev.Source.ConnectorID == "" {
 		ev.Source.ConnectorID = connectorID
 	}
-	if ev.Source.Kind == "" {
-		// HTTP ingress without a specific connector kind defaults to the
-		// generic SourceKindHTTPIngress. Phase 2's GitHub connector will
-		// stamp its specific kind ("github_webhook" / "github_app") via
-		// its own translator before reaching this handler.
+	// Lock source.kind regardless of body claim. A caller that posts
+	// source.kind="mcp_record_change" or "fsnotify_local" must NOT be
+	// able to spoof an in-process connector — those kinds carry
+	// different downstream trust assumptions. In 1.D the HTTP ingress
+	// only ever stamps SourceKindHTTPIngress; future phases that ship
+	// translator-pre-stamped kinds (github_webhook, github_app) will
+	// register their own routes, not relay through this generic
+	// handler.
+	if !isAcceptableHTTPIngressKind(ev.Source.Kind) {
 		ev.Source.Kind = changewatch.SourceKindHTTPIngress
 	}
 	ev.Trust = changewatch.Trust{
@@ -195,6 +201,26 @@ func connectorOutcomeStatus(outcome changewatch.SubmitOutcome) int {
 // /v1/connectors/* surface this so a caller probing the path gets a
 // distinct shape from "endpoint doesn't exist."
 var ErrConnectorAPIDisabled = errors.New("connector_api: disabled by operator")
+
+// isAcceptableHTTPIngressKind returns true when the source.kind in a
+// posted ChangeEvent is allowed to flow through the HTTP ingress
+// without being overwritten. The set is a small whitelist:
+//
+//   - SourceKindHTTPIngress — the generic 1.D kind
+//
+// Future kinds added by Phase 2 connectors (github_webhook, github_app)
+// will not relay through this handler — they will register their own
+// routes that pre-stamp the kind via translator code. A remote caller
+// claiming to be `mcp_record_change` or `fsnotify_local` is silently
+// rewritten to SourceKindHTTPIngress; we don't reject because the rest
+// of the event may still be valid.
+func isAcceptableHTTPIngressKind(k changewatch.SourceKind) bool {
+	switch k {
+	case changewatch.SourceKindHTTPIngress:
+		return true
+	}
+	return false
+}
 
 // connectorIDFromHost is a tiny helper for tests: pulls the connector
 // id from a path like "/v1/connectors/github-webhook:repo-1234/events".

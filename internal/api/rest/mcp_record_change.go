@@ -12,8 +12,42 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+	"unicode"
 
 	"github.com/sourcebridge/sourcebridge/internal/changewatch"
+)
+
+// Bounds applied at the tool boundary to defend against malicious or
+// buggy callers. Rejection is structured (errInvalidArguments) so
+// capability-aware clients can react.
+//
+// These bounds are intentionally generous — any well-behaved agent
+// stays an order of magnitude under them. The point is to fail safe
+// when the bound matters (e.g. a buggy agent in a tight loop, a
+// malicious agent trying to fill the freshness reason with attacker-
+// controlled UI bytes).
+const (
+	// recordChangeMaxFiles caps the per-call delta. The MCP body cap
+	// (mcpMaxBodySize = 1 MiB) makes hitting this hard, but a separate
+	// limit makes the contract explicit. Real agent edits are <100
+	// files even on a big refactor.
+	recordChangeMaxFiles = 1024
+
+	// recordChangeMaxIntentLen bounds Intent. Intent flows into the
+	// freshness envelope's `reason` and into structured logs; capping
+	// here keeps the audit trail readable and prevents log-injection-
+	// shaped abuse via newlines / control chars (we also strip those).
+	recordChangeMaxIntentLen = 1024
+
+	// recordChangeMaxRequirementIDs caps the attribution list. 100 is
+	// well above any documented use; we choose it as the bound so a
+	// runaway agent doesn't fill the audit trail.
+	recordChangeMaxRequirementIDs = 100
+
+	// recordChangeMaxRequirementIDLen bounds each requirement ID.
+	// Long enough for "PROJECT-12345/sub-issue-678" style ids without
+	// being a vector for log spam.
+	recordChangeMaxRequirementIDLen = 256
 )
 
 // Phase 1.D — `record_change` MCP tool.
@@ -245,6 +279,23 @@ func (h *mcpHandler) callRecordChange(session *mcpSession, args json.RawMessage)
 	if len(req.Files) == 0 {
 		return nil, errInvalidArguments("files is required and must be non-empty (the delta-only invariant)")
 	}
+	if len(req.Files) > recordChangeMaxFiles {
+		return nil, errInvalidArguments(fmt.Sprintf("files length %d exceeds the per-call cap of %d", len(req.Files), recordChangeMaxFiles))
+	}
+	if len(req.Intent) > recordChangeMaxIntentLen {
+		return nil, errInvalidArguments(fmt.Sprintf("intent length %d exceeds cap %d", len(req.Intent), recordChangeMaxIntentLen))
+	}
+	if len(req.RequirementIDs) > recordChangeMaxRequirementIDs {
+		return nil, errInvalidArguments(fmt.Sprintf("requirement_ids length %d exceeds cap %d", len(req.RequirementIDs), recordChangeMaxRequirementIDs))
+	}
+	for i, rid := range req.RequirementIDs {
+		if len(rid) > recordChangeMaxRequirementIDLen {
+			return nil, errInvalidArguments(fmt.Sprintf("requirement_ids[%d] length %d exceeds cap %d", i, len(rid), recordChangeMaxRequirementIDLen))
+		}
+	}
+	// Strip control characters from Intent to avoid log-injection /
+	// terminal-escape abuse. Unicode printable / whitespace stays.
+	req.Intent = sanitizeIntent(req.Intent)
 
 	// Multi-tenant boundary. checkRepoAccess returns the same opaque
 	// error string regardless of which constraint failed (allowed-list,
@@ -320,6 +371,13 @@ func (h *mcpHandler) callRecordChange(session *mcpSession, args json.RawMessage)
 		},
 	}
 
+	// Use context.Background() — NOT the session's context — because
+	// the router runs IndexFiles + impact-application work on the
+	// caller's behalf and we want it to complete even if the agent
+	// disconnects mid-call. The router's own T0 budget bounds wall
+	// time, and the per-(repo, source.kind) rate limit + per-repo
+	// breaker bound concurrent calls, so a malicious caller cannot
+	// hold an unbounded number of background routines via this path.
 	outcome, submitErr := h.changeDispatcher.Submit(context.Background(), ev)
 
 	resp := recordChangeResponse{
@@ -431,6 +489,38 @@ func actorDisplayFromSession(session *mcpSession) string {
 		return session.claims.UserID
 	}
 	return ""
+}
+
+// sanitizeIntent strips control characters and other non-printable
+// runes from a free-text Intent string. Whitespace (space, tab,
+// regular newlines) survives so multi-line intents are still
+// readable, but ASCII control bytes / terminal escapes / null bytes
+// are removed. Defense against log-injection and terminal-escape
+// abuse via the structured-log path that records `intent`.
+//
+// Returns a fresh string. Idempotent.
+func sanitizeIntent(s string) string {
+	if s == "" {
+		return s
+	}
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r':
+			// Allow common whitespace.
+			out = append(out, r)
+		case unicode.IsControl(r):
+			// Drop other control runes.
+			continue
+		case !unicode.IsPrint(r) && !unicode.IsSpace(r):
+			// Drop non-printable / non-whitespace runes (zero-width
+			// joiners, BIDI overrides, etc.).
+			continue
+		default:
+			out = append(out, r)
+		}
+	}
+	return string(out)
 }
 
 // newRecordChangeEventID generates a connector-stamped event ID. Format

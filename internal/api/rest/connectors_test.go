@@ -310,6 +310,62 @@ func TestConnectorEvent_DisallowsUnknownFields(t *testing.T) {
 	}
 }
 
+// TestConnectorEvent_LockdownInProcessSourceKinds — a remote caller
+// MUST NOT be able to claim source.kind="mcp_record_change" or
+// "fsnotify_local" through the HTTP ingress. Those kinds are reserved
+// for in-process connectors that have different downstream trust
+// assumptions; spoofing them via HTTP would be a privilege-escalation
+// shape.
+//
+// The handler silently rewrites disallowed kinds to SourceKindHTTPIngress
+// rather than rejecting outright — the rest of the event may still be
+// valid. We assert the rewrite happened.
+func TestConnectorEvent_LockdownInProcessSourceKinds(t *testing.T) {
+	for _, spoofKind := range []changewatch.SourceKind{
+		changewatch.SourceKindMCPRecordChange,
+		changewatch.SourceKindFsnotifyLocal,
+	} {
+		t.Run(string(spoofKind), func(t *testing.T) {
+			disp := &stubChangeDispatcher{}
+			srv := &Server{changeDispatcher: disp}
+			ev := validEvent()
+			ev.Source.Kind = spoofKind
+			rec := httptest.NewRecorder()
+			srv.handleConnectorEvent(rec, makeConnectorRequest(t, "evil-connector", ev))
+
+			got := disp.lastCall()
+			if got == nil {
+				t.Fatalf("dispatcher not called (status=%d body=%s)", rec.Code, rec.Body.String())
+			}
+			if got.Source.Kind != changewatch.SourceKindHTTPIngress {
+				t.Errorf("source.kind=%q, want %q (HTTP ingress must lock down to http_ingress; in-process kinds reserved)",
+					got.Source.Kind, changewatch.SourceKindHTTPIngress)
+			}
+		})
+	}
+}
+
+// TestConnectorEvent_AcceptsHTTPIngressSourceKind — the inverse
+// contract: when source.kind is the legitimate HTTP-ingress kind, it
+// passes through unchanged.
+func TestConnectorEvent_AcceptsHTTPIngressSourceKind(t *testing.T) {
+	disp := &stubChangeDispatcher{}
+	srv := &Server{changeDispatcher: disp}
+	ev := validEvent()
+	ev.Source.Kind = changewatch.SourceKindHTTPIngress
+	rec := httptest.NewRecorder()
+	srv.handleConnectorEvent(rec, makeConnectorRequest(t, "ok-connector", ev))
+
+	got := disp.lastCall()
+	if got == nil {
+		t.Fatalf("dispatcher not called")
+	}
+	if got.Source.Kind != changewatch.SourceKindHTTPIngress {
+		t.Errorf("source.kind=%q, want %q (legitimate kind must pass through)",
+			got.Source.Kind, changewatch.SourceKindHTTPIngress)
+	}
+}
+
 // TestConnectorIDFromPath_Helper — the small URL-parse shim used by
 // tests is stable over the documented path shape.
 func TestConnectorIDFromPath_Helper(t *testing.T) {

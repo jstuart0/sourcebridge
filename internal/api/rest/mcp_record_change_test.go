@@ -466,6 +466,139 @@ func TestRecordChange_DefenseInDepthOnNilDispatcher(t *testing.T) {
 	}
 }
 
+// TestRecordChange_RejectsOversizedFiles — defense against a runaway
+// agent or malicious caller flooding the dispatcher with a single
+// massive call. The cap is generous (1024) but it exists.
+func TestRecordChange_RejectsOversizedFiles(t *testing.T) {
+	h := newTestHarness(t)
+	disp := &stubRecordChangeDispatcher{}
+	h.handler.changeDispatcher = disp
+	sess := h.createSession()
+
+	files := make([]map[string]interface{}, recordChangeMaxFiles+1)
+	for i := range files {
+		files[i] = map[string]interface{}{
+			"path":   "src/file" + itoa(i) + ".go",
+			"status": "modified",
+		}
+	}
+	_, tr := invokeRecordChange(t, h, sess, map[string]interface{}{
+		"repository_id": h.repoID,
+		"branch":        "main",
+		"files":         files,
+	})
+	if tr == nil || !tr.IsError {
+		t.Fatalf("expected tool error for oversized files; got nothing")
+	}
+	if disp.callCount() != 0 {
+		t.Errorf("dispatcher called despite oversized files; want 0 calls")
+	}
+}
+
+// TestRecordChange_RejectsOversizedIntent — Intent flows into log lines
+// and the freshness envelope. A malicious agent that sends a megabyte
+// of intent should be rejected at the boundary, not after it lands in
+// the audit trail.
+func TestRecordChange_RejectsOversizedIntent(t *testing.T) {
+	h := newTestHarness(t)
+	disp := &stubRecordChangeDispatcher{}
+	h.handler.changeDispatcher = disp
+	sess := h.createSession()
+
+	bigIntent := strings.Repeat("a", recordChangeMaxIntentLen+1)
+	_, tr := invokeRecordChange(t, h, sess, map[string]interface{}{
+		"repository_id": h.repoID,
+		"branch":        "main",
+		"intent":        bigIntent,
+		"files":         []map[string]interface{}{{"path": "src/main.go"}},
+	})
+	if tr == nil || !tr.IsError {
+		t.Fatalf("expected tool error for oversized intent")
+	}
+	if disp.callCount() != 0 {
+		t.Errorf("dispatcher called despite oversized intent")
+	}
+}
+
+// TestRecordChange_StripsControlCharsFromIntent — log-injection
+// defense. ASCII control bytes and terminal escapes are stripped at
+// the boundary so the structured-log entry stays clean.
+func TestRecordChange_StripsControlCharsFromIntent(t *testing.T) {
+	h := newTestHarness(t)
+	disp := &stubRecordChangeDispatcher{}
+	h.handler.changeDispatcher = disp
+	sess := h.createSession()
+
+	dirty := "refactor\x1b[31m red \x1b[0m \x00 done\x07"
+	_, _ = invokeRecordChange(t, h, sess, map[string]interface{}{
+		"repository_id": h.repoID,
+		"branch":        "main",
+		"intent":        dirty,
+		"files":         []map[string]interface{}{{"path": "src/main.go"}},
+	})
+	got := disp.lastCall()
+	if got == nil {
+		t.Fatal("dispatcher not called")
+	}
+	if strings.ContainsAny(got.Source.Intent, "\x1b\x00\x07") {
+		t.Errorf("source.intent retained control chars: %q", got.Source.Intent)
+	}
+	// Whitespace tabs and newlines should survive — they're benign.
+	multiLine := "refactor\nextract method"
+	disp.calls = nil
+	_, _ = invokeRecordChange(t, h, sess, map[string]interface{}{
+		"repository_id": h.repoID,
+		"branch":        "main",
+		"intent":        multiLine,
+		"files":         []map[string]interface{}{{"path": "src/main.go"}},
+	})
+	got = disp.lastCall()
+	if !strings.Contains(got.Source.Intent, "\n") {
+		t.Errorf("source.intent stripped a benign newline: %q", got.Source.Intent)
+	}
+}
+
+// TestRecordChange_RejectsOversizedRequirementIDs — same defense for
+// the requirement_ids attribution list.
+func TestRecordChange_RejectsOversizedRequirementIDs(t *testing.T) {
+	h := newTestHarness(t)
+	disp := &stubRecordChangeDispatcher{}
+	h.handler.changeDispatcher = disp
+	sess := h.createSession()
+
+	ids := make([]string, recordChangeMaxRequirementIDs+1)
+	for i := range ids {
+		ids[i] = "REQ-" + itoa(i)
+	}
+	_, tr := invokeRecordChange(t, h, sess, map[string]interface{}{
+		"repository_id":   h.repoID,
+		"branch":          "main",
+		"requirement_ids": ids,
+		"files":           []map[string]interface{}{{"path": "src/main.go"}},
+	})
+	if tr == nil || !tr.IsError {
+		t.Fatalf("expected tool error for oversized requirement_ids")
+	}
+	if disp.callCount() != 0 {
+		t.Errorf("dispatcher called despite oversized requirement_ids")
+	}
+}
+
+// itoa is a tiny inline shim — the changewatch package has its own
+// version; keeping a local one here so we don't depend on package
+// internals.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	s := ""
+	for n > 0 {
+		s = string(byte('0'+n%10)) + s
+		n /= 10
+	}
+	return s
+}
+
 // TestNewRecordChangeEventID_FormatAndUniqueness — small white-box
 // check on the connector-side ID stamper. Format must be "rc-<32hex>"
 // and IDs must collide-resist over a tight loop.
