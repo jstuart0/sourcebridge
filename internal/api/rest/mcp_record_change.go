@@ -461,4 +461,3 @@ func (h *mcpHandler) recordChangeToolDefIfAvailable() *mcpToolDefinition {
 	def := recordChangeToolDef()
 	return &def
 }
-
