@@ -1265,11 +1265,11 @@ func (c *Client) GenerateCliffNotes(ctx context.Context, req *knowledgev1.Genera
 			return nil, err
 		}
 		switch ev := msg.GetEvent().(type) {
-		case *knowledgev1.GenerateCliffNotesStreamMessage_Phase:
+		case *knowledgev1.KnowledgeServiceGenerateCliffNotesResponse_Phase:
 			dispatchKnowledgeStreamEvent(co.OnProgress, ev.Phase, nil)
-		case *knowledgev1.GenerateCliffNotesStreamMessage_Progress:
+		case *knowledgev1.KnowledgeServiceGenerateCliffNotesResponse_Progress:
 			dispatchKnowledgeStreamEvent(co.OnProgress, nil, ev.Progress)
-		case *knowledgev1.GenerateCliffNotesStreamMessage_Final:
+		case *knowledgev1.KnowledgeServiceGenerateCliffNotesResponse_Final:
 			final = ev.Final
 		}
 	}
@@ -1305,11 +1305,11 @@ func (c *Client) GenerateLearningPath(ctx context.Context, req *knowledgev1.Gene
 			return nil, err
 		}
 		switch ev := msg.GetEvent().(type) {
-		case *knowledgev1.GenerateLearningPathStreamMessage_Phase:
+		case *knowledgev1.KnowledgeServiceGenerateLearningPathResponse_Phase:
 			dispatchKnowledgeStreamEvent(co.OnProgress, ev.Phase, nil)
-		case *knowledgev1.GenerateLearningPathStreamMessage_Progress:
+		case *knowledgev1.KnowledgeServiceGenerateLearningPathResponse_Progress:
 			dispatchKnowledgeStreamEvent(co.OnProgress, nil, ev.Progress)
-		case *knowledgev1.GenerateLearningPathStreamMessage_Final:
+		case *knowledgev1.KnowledgeServiceGenerateLearningPathResponse_Final:
 			final = ev.Final
 		}
 	}
@@ -1345,11 +1345,11 @@ func (c *Client) GenerateArchitectureDiagram(ctx context.Context, req *knowledge
 			return nil, err
 		}
 		switch ev := msg.GetEvent().(type) {
-		case *knowledgev1.GenerateArchitectureDiagramStreamMessage_Phase:
+		case *knowledgev1.KnowledgeServiceGenerateArchitectureDiagramResponse_Phase:
 			dispatchKnowledgeStreamEvent(co.OnProgress, ev.Phase, nil)
-		case *knowledgev1.GenerateArchitectureDiagramStreamMessage_Progress:
+		case *knowledgev1.KnowledgeServiceGenerateArchitectureDiagramResponse_Progress:
 			dispatchKnowledgeStreamEvent(co.OnProgress, nil, ev.Progress)
-		case *knowledgev1.GenerateArchitectureDiagramStreamMessage_Final:
+		case *knowledgev1.KnowledgeServiceGenerateArchitectureDiagramResponse_Final:
 			final = ev.Final
 		}
 	}
@@ -1385,11 +1385,11 @@ func (c *Client) GenerateWorkflowStory(ctx context.Context, req *knowledgev1.Gen
 			return nil, err
 		}
 		switch ev := msg.GetEvent().(type) {
-		case *knowledgev1.GenerateWorkflowStoryStreamMessage_Phase:
+		case *knowledgev1.KnowledgeServiceGenerateWorkflowStoryResponse_Phase:
 			dispatchKnowledgeStreamEvent(co.OnProgress, ev.Phase, nil)
-		case *knowledgev1.GenerateWorkflowStoryStreamMessage_Progress:
+		case *knowledgev1.KnowledgeServiceGenerateWorkflowStoryResponse_Progress:
 			dispatchKnowledgeStreamEvent(co.OnProgress, nil, ev.Progress)
-		case *knowledgev1.GenerateWorkflowStoryStreamMessage_Final:
+		case *knowledgev1.KnowledgeServiceGenerateWorkflowStoryResponse_Final:
 			final = ev.Final
 		}
 	}
@@ -1424,11 +1424,11 @@ func (c *Client) ExplainSystem(ctx context.Context, req *knowledgev1.ExplainSyst
 			return nil, err
 		}
 		switch ev := msg.GetEvent().(type) {
-		case *knowledgev1.ExplainSystemStreamMessage_Phase:
+		case *knowledgev1.KnowledgeServiceExplainSystemResponse_Phase:
 			dispatchKnowledgeStreamEvent(co.OnProgress, ev.Phase, nil)
-		case *knowledgev1.ExplainSystemStreamMessage_Progress:
+		case *knowledgev1.KnowledgeServiceExplainSystemResponse_Progress:
 			dispatchKnowledgeStreamEvent(co.OnProgress, nil, ev.Progress)
-		case *knowledgev1.ExplainSystemStreamMessage_Final:
+		case *knowledgev1.KnowledgeServiceExplainSystemResponse_Final:
 			final = ev.Final
 		}
 	}
@@ -1464,11 +1464,11 @@ func (c *Client) GenerateCodeTour(ctx context.Context, req *knowledgev1.Generate
 			return nil, err
 		}
 		switch ev := msg.GetEvent().(type) {
-		case *knowledgev1.GenerateCodeTourStreamMessage_Phase:
+		case *knowledgev1.KnowledgeServiceGenerateCodeTourResponse_Phase:
 			dispatchKnowledgeStreamEvent(co.OnProgress, ev.Phase, nil)
-		case *knowledgev1.GenerateCodeTourStreamMessage_Progress:
+		case *knowledgev1.KnowledgeServiceGenerateCodeTourResponse_Progress:
 			dispatchKnowledgeStreamEvent(co.OnProgress, nil, ev.Progress)
-		case *knowledgev1.GenerateCodeTourStreamMessage_Final:
+		case *knowledgev1.KnowledgeServiceGenerateCodeTourResponse_Final:
 			final = ev.Final
 		}
 	}
@@ -1506,11 +1506,11 @@ func (c *Client) GenerateReport(ctx context.Context, req *enterprisev1.GenerateR
 			return nil, err
 		}
 		switch ev := msg.GetEvent().(type) {
-		case *enterprisev1.GenerateReportStreamMessage_Phase:
+		case *enterprisev1.EnterpriseReportServiceGenerateReportResponse_Phase:
 			dispatchKnowledgeStreamEvent(co.OnProgress, ev.Phase, nil)
-		case *enterprisev1.GenerateReportStreamMessage_Progress:
+		case *enterprisev1.EnterpriseReportServiceGenerateReportResponse_Progress:
 			dispatchKnowledgeStreamEvent(co.OnProgress, nil, ev.Progress)
-		case *enterprisev1.GenerateReportStreamMessage_Final:
+		case *enterprisev1.EnterpriseReportServiceGenerateReportResponse_Final:
 			final = ev.Final
 		}
 	}

@@ -29,7 +29,7 @@ DEPTH_SUMMARY: Depth
 DEPTH_MEDIUM: Depth
 DEPTH_DEEP: Depth
 
-class GenerateCliffNotesStreamMessage(_message.Message):
+class KnowledgeServiceGenerateCliffNotesResponse(_message.Message):
     __slots__ = ("phase", "progress", "final")
     PHASE_FIELD_NUMBER: _ClassVar[int]
     PROGRESS_FIELD_NUMBER: _ClassVar[int]
@@ -39,7 +39,7 @@ class GenerateCliffNotesStreamMessage(_message.Message):
     final: GenerateCliffNotesResponse
     def __init__(self, phase: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamPhaseMarker, _Mapping]] = ..., progress: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamProgress, _Mapping]] = ..., final: _Optional[_Union[GenerateCliffNotesResponse, _Mapping]] = ...) -> None: ...
 
-class GenerateLearningPathStreamMessage(_message.Message):
+class KnowledgeServiceGenerateLearningPathResponse(_message.Message):
     __slots__ = ("phase", "progress", "final")
     PHASE_FIELD_NUMBER: _ClassVar[int]
     PROGRESS_FIELD_NUMBER: _ClassVar[int]
@@ -49,7 +49,7 @@ class GenerateLearningPathStreamMessage(_message.Message):
     final: GenerateLearningPathResponse
     def __init__(self, phase: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamPhaseMarker, _Mapping]] = ..., progress: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamProgress, _Mapping]] = ..., final: _Optional[_Union[GenerateLearningPathResponse, _Mapping]] = ...) -> None: ...
 
-class GenerateArchitectureDiagramStreamMessage(_message.Message):
+class KnowledgeServiceGenerateArchitectureDiagramResponse(_message.Message):
     __slots__ = ("phase", "progress", "final")
     PHASE_FIELD_NUMBER: _ClassVar[int]
     PROGRESS_FIELD_NUMBER: _ClassVar[int]
@@ -59,7 +59,7 @@ class GenerateArchitectureDiagramStreamMessage(_message.Message):
     final: GenerateArchitectureDiagramResponse
     def __init__(self, phase: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamPhaseMarker, _Mapping]] = ..., progress: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamProgress, _Mapping]] = ..., final: _Optional[_Union[GenerateArchitectureDiagramResponse, _Mapping]] = ...) -> None: ...
 
-class GenerateWorkflowStoryStreamMessage(_message.Message):
+class KnowledgeServiceGenerateWorkflowStoryResponse(_message.Message):
     __slots__ = ("phase", "progress", "final")
     PHASE_FIELD_NUMBER: _ClassVar[int]
     PROGRESS_FIELD_NUMBER: _ClassVar[int]
@@ -69,7 +69,7 @@ class GenerateWorkflowStoryStreamMessage(_message.Message):
     final: GenerateWorkflowStoryResponse
     def __init__(self, phase: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamPhaseMarker, _Mapping]] = ..., progress: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamProgress, _Mapping]] = ..., final: _Optional[_Union[GenerateWorkflowStoryResponse, _Mapping]] = ...) -> None: ...
 
-class ExplainSystemStreamMessage(_message.Message):
+class KnowledgeServiceExplainSystemResponse(_message.Message):
     __slots__ = ("phase", "progress", "final")
     PHASE_FIELD_NUMBER: _ClassVar[int]
     PROGRESS_FIELD_NUMBER: _ClassVar[int]
@@ -79,7 +79,7 @@ class ExplainSystemStreamMessage(_message.Message):
     final: ExplainSystemResponse
     def __init__(self, phase: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamPhaseMarker, _Mapping]] = ..., progress: _Optional[_Union[_knowledge_progress_pb2.KnowledgeStreamProgress, _Mapping]] = ..., final: _Optional[_Union[ExplainSystemResponse, _Mapping]] = ...) -> None: ...
 
-class GenerateCodeTourStreamMessage(_message.Message):
+class KnowledgeServiceGenerateCodeTourResponse(_message.Message):
     __slots__ = ("phase", "progress", "final")
     PHASE_FIELD_NUMBER: _ClassVar[int]
     PROGRESS_FIELD_NUMBER: _ClassVar[int]

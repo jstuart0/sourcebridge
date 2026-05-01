@@ -8,7 +8,7 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
-class GenerateReportStreamMessage(_message.Message):
+class EnterpriseReportServiceGenerateReportResponse(_message.Message):
     __slots__ = ("phase", "progress", "final")
     PHASE_FIELD_NUMBER: _ClassVar[int]
     PROGRESS_FIELD_NUMBER: _ClassVar[int]

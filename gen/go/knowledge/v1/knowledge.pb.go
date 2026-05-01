@@ -123,35 +123,38 @@ func (Depth) EnumDescriptor() ([]byte, []int) {
 	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{1}
 }
 
-// GenerateCliffNotesStreamMessage is the per-message envelope on the
+// KnowledgeServiceGenerateCliffNotesResponse is the per-message envelope on the
 // GenerateCliffNotes server stream. Exactly one of {phase, progress,
-// final} is set per message.
-type GenerateCliffNotesStreamMessage struct {
+// final} is set per message. Service-prefixed name satisfies buf
+// STANDARD's RPC_RESPONSE_STANDARD_NAME rule; the inner final-payload
+// message keeps the bare GenerateCliffNotesResponse name where domain
+// callers consume it.
+type KnowledgeServiceGenerateCliffNotesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Event:
 	//
-	//	*GenerateCliffNotesStreamMessage_Phase
-	//	*GenerateCliffNotesStreamMessage_Progress
-	//	*GenerateCliffNotesStreamMessage_Final
-	Event         isGenerateCliffNotesStreamMessage_Event `protobuf_oneof:"event"`
+	//	*KnowledgeServiceGenerateCliffNotesResponse_Phase
+	//	*KnowledgeServiceGenerateCliffNotesResponse_Progress
+	//	*KnowledgeServiceGenerateCliffNotesResponse_Final
+	Event         isKnowledgeServiceGenerateCliffNotesResponse_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GenerateCliffNotesStreamMessage) Reset() {
-	*x = GenerateCliffNotesStreamMessage{}
+func (x *KnowledgeServiceGenerateCliffNotesResponse) Reset() {
+	*x = KnowledgeServiceGenerateCliffNotesResponse{}
 	mi := &file_knowledge_v1_knowledge_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GenerateCliffNotesStreamMessage) String() string {
+func (x *KnowledgeServiceGenerateCliffNotesResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GenerateCliffNotesStreamMessage) ProtoMessage() {}
+func (*KnowledgeServiceGenerateCliffNotesResponse) ProtoMessage() {}
 
-func (x *GenerateCliffNotesStreamMessage) ProtoReflect() protoreflect.Message {
+func (x *KnowledgeServiceGenerateCliffNotesResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_knowledge_v1_knowledge_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -163,95 +166,98 @@ func (x *GenerateCliffNotesStreamMessage) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GenerateCliffNotesStreamMessage.ProtoReflect.Descriptor instead.
-func (*GenerateCliffNotesStreamMessage) Descriptor() ([]byte, []int) {
+// Deprecated: Use KnowledgeServiceGenerateCliffNotesResponse.ProtoReflect.Descriptor instead.
+func (*KnowledgeServiceGenerateCliffNotesResponse) Descriptor() ([]byte, []int) {
 	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *GenerateCliffNotesStreamMessage) GetEvent() isGenerateCliffNotesStreamMessage_Event {
+func (x *KnowledgeServiceGenerateCliffNotesResponse) GetEvent() isKnowledgeServiceGenerateCliffNotesResponse_Event {
 	if x != nil {
 		return x.Event
 	}
 	return nil
 }
 
-func (x *GenerateCliffNotesStreamMessage) GetPhase() *v1.KnowledgeStreamPhaseMarker {
+func (x *KnowledgeServiceGenerateCliffNotesResponse) GetPhase() *v1.KnowledgeStreamPhaseMarker {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateCliffNotesStreamMessage_Phase); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateCliffNotesResponse_Phase); ok {
 			return x.Phase
 		}
 	}
 	return nil
 }
 
-func (x *GenerateCliffNotesStreamMessage) GetProgress() *v1.KnowledgeStreamProgress {
+func (x *KnowledgeServiceGenerateCliffNotesResponse) GetProgress() *v1.KnowledgeStreamProgress {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateCliffNotesStreamMessage_Progress); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateCliffNotesResponse_Progress); ok {
 			return x.Progress
 		}
 	}
 	return nil
 }
 
-func (x *GenerateCliffNotesStreamMessage) GetFinal() *GenerateCliffNotesResponse {
+func (x *KnowledgeServiceGenerateCliffNotesResponse) GetFinal() *GenerateCliffNotesResponse {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateCliffNotesStreamMessage_Final); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateCliffNotesResponse_Final); ok {
 			return x.Final
 		}
 	}
 	return nil
 }
 
-type isGenerateCliffNotesStreamMessage_Event interface {
-	isGenerateCliffNotesStreamMessage_Event()
+type isKnowledgeServiceGenerateCliffNotesResponse_Event interface {
+	isKnowledgeServiceGenerateCliffNotesResponse_Event()
 }
 
-type GenerateCliffNotesStreamMessage_Phase struct {
+type KnowledgeServiceGenerateCliffNotesResponse_Phase struct {
 	Phase *v1.KnowledgeStreamPhaseMarker `protobuf:"bytes,1,opt,name=phase,proto3,oneof"`
 }
 
-type GenerateCliffNotesStreamMessage_Progress struct {
+type KnowledgeServiceGenerateCliffNotesResponse_Progress struct {
 	Progress *v1.KnowledgeStreamProgress `protobuf:"bytes,2,opt,name=progress,proto3,oneof"`
 }
 
-type GenerateCliffNotesStreamMessage_Final struct {
+type KnowledgeServiceGenerateCliffNotesResponse_Final struct {
 	Final *GenerateCliffNotesResponse `protobuf:"bytes,3,opt,name=final,proto3,oneof"`
 }
 
-func (*GenerateCliffNotesStreamMessage_Phase) isGenerateCliffNotesStreamMessage_Event() {}
+func (*KnowledgeServiceGenerateCliffNotesResponse_Phase) isKnowledgeServiceGenerateCliffNotesResponse_Event() {
+}
 
-func (*GenerateCliffNotesStreamMessage_Progress) isGenerateCliffNotesStreamMessage_Event() {}
+func (*KnowledgeServiceGenerateCliffNotesResponse_Progress) isKnowledgeServiceGenerateCliffNotesResponse_Event() {
+}
 
-func (*GenerateCliffNotesStreamMessage_Final) isGenerateCliffNotesStreamMessage_Event() {}
+func (*KnowledgeServiceGenerateCliffNotesResponse_Final) isKnowledgeServiceGenerateCliffNotesResponse_Event() {
+}
 
-// GenerateLearningPathStreamMessage envelopes the GenerateLearningPath
-// server stream.
-type GenerateLearningPathStreamMessage struct {
+// KnowledgeServiceGenerateLearningPathResponse envelopes the
+// GenerateLearningPath server stream.
+type KnowledgeServiceGenerateLearningPathResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Event:
 	//
-	//	*GenerateLearningPathStreamMessage_Phase
-	//	*GenerateLearningPathStreamMessage_Progress
-	//	*GenerateLearningPathStreamMessage_Final
-	Event         isGenerateLearningPathStreamMessage_Event `protobuf_oneof:"event"`
+	//	*KnowledgeServiceGenerateLearningPathResponse_Phase
+	//	*KnowledgeServiceGenerateLearningPathResponse_Progress
+	//	*KnowledgeServiceGenerateLearningPathResponse_Final
+	Event         isKnowledgeServiceGenerateLearningPathResponse_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GenerateLearningPathStreamMessage) Reset() {
-	*x = GenerateLearningPathStreamMessage{}
+func (x *KnowledgeServiceGenerateLearningPathResponse) Reset() {
+	*x = KnowledgeServiceGenerateLearningPathResponse{}
 	mi := &file_knowledge_v1_knowledge_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GenerateLearningPathStreamMessage) String() string {
+func (x *KnowledgeServiceGenerateLearningPathResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GenerateLearningPathStreamMessage) ProtoMessage() {}
+func (*KnowledgeServiceGenerateLearningPathResponse) ProtoMessage() {}
 
-func (x *GenerateLearningPathStreamMessage) ProtoReflect() protoreflect.Message {
+func (x *KnowledgeServiceGenerateLearningPathResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_knowledge_v1_knowledge_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -263,95 +269,98 @@ func (x *GenerateLearningPathStreamMessage) ProtoReflect() protoreflect.Message 
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GenerateLearningPathStreamMessage.ProtoReflect.Descriptor instead.
-func (*GenerateLearningPathStreamMessage) Descriptor() ([]byte, []int) {
+// Deprecated: Use KnowledgeServiceGenerateLearningPathResponse.ProtoReflect.Descriptor instead.
+func (*KnowledgeServiceGenerateLearningPathResponse) Descriptor() ([]byte, []int) {
 	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *GenerateLearningPathStreamMessage) GetEvent() isGenerateLearningPathStreamMessage_Event {
+func (x *KnowledgeServiceGenerateLearningPathResponse) GetEvent() isKnowledgeServiceGenerateLearningPathResponse_Event {
 	if x != nil {
 		return x.Event
 	}
 	return nil
 }
 
-func (x *GenerateLearningPathStreamMessage) GetPhase() *v1.KnowledgeStreamPhaseMarker {
+func (x *KnowledgeServiceGenerateLearningPathResponse) GetPhase() *v1.KnowledgeStreamPhaseMarker {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateLearningPathStreamMessage_Phase); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateLearningPathResponse_Phase); ok {
 			return x.Phase
 		}
 	}
 	return nil
 }
 
-func (x *GenerateLearningPathStreamMessage) GetProgress() *v1.KnowledgeStreamProgress {
+func (x *KnowledgeServiceGenerateLearningPathResponse) GetProgress() *v1.KnowledgeStreamProgress {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateLearningPathStreamMessage_Progress); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateLearningPathResponse_Progress); ok {
 			return x.Progress
 		}
 	}
 	return nil
 }
 
-func (x *GenerateLearningPathStreamMessage) GetFinal() *GenerateLearningPathResponse {
+func (x *KnowledgeServiceGenerateLearningPathResponse) GetFinal() *GenerateLearningPathResponse {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateLearningPathStreamMessage_Final); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateLearningPathResponse_Final); ok {
 			return x.Final
 		}
 	}
 	return nil
 }
 
-type isGenerateLearningPathStreamMessage_Event interface {
-	isGenerateLearningPathStreamMessage_Event()
+type isKnowledgeServiceGenerateLearningPathResponse_Event interface {
+	isKnowledgeServiceGenerateLearningPathResponse_Event()
 }
 
-type GenerateLearningPathStreamMessage_Phase struct {
+type KnowledgeServiceGenerateLearningPathResponse_Phase struct {
 	Phase *v1.KnowledgeStreamPhaseMarker `protobuf:"bytes,1,opt,name=phase,proto3,oneof"`
 }
 
-type GenerateLearningPathStreamMessage_Progress struct {
+type KnowledgeServiceGenerateLearningPathResponse_Progress struct {
 	Progress *v1.KnowledgeStreamProgress `protobuf:"bytes,2,opt,name=progress,proto3,oneof"`
 }
 
-type GenerateLearningPathStreamMessage_Final struct {
+type KnowledgeServiceGenerateLearningPathResponse_Final struct {
 	Final *GenerateLearningPathResponse `protobuf:"bytes,3,opt,name=final,proto3,oneof"`
 }
 
-func (*GenerateLearningPathStreamMessage_Phase) isGenerateLearningPathStreamMessage_Event() {}
+func (*KnowledgeServiceGenerateLearningPathResponse_Phase) isKnowledgeServiceGenerateLearningPathResponse_Event() {
+}
 
-func (*GenerateLearningPathStreamMessage_Progress) isGenerateLearningPathStreamMessage_Event() {}
+func (*KnowledgeServiceGenerateLearningPathResponse_Progress) isKnowledgeServiceGenerateLearningPathResponse_Event() {
+}
 
-func (*GenerateLearningPathStreamMessage_Final) isGenerateLearningPathStreamMessage_Event() {}
+func (*KnowledgeServiceGenerateLearningPathResponse_Final) isKnowledgeServiceGenerateLearningPathResponse_Event() {
+}
 
-// GenerateArchitectureDiagramStreamMessage envelopes the
+// KnowledgeServiceGenerateArchitectureDiagramResponse envelopes the
 // GenerateArchitectureDiagram server stream.
-type GenerateArchitectureDiagramStreamMessage struct {
+type KnowledgeServiceGenerateArchitectureDiagramResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Event:
 	//
-	//	*GenerateArchitectureDiagramStreamMessage_Phase
-	//	*GenerateArchitectureDiagramStreamMessage_Progress
-	//	*GenerateArchitectureDiagramStreamMessage_Final
-	Event         isGenerateArchitectureDiagramStreamMessage_Event `protobuf_oneof:"event"`
+	//	*KnowledgeServiceGenerateArchitectureDiagramResponse_Phase
+	//	*KnowledgeServiceGenerateArchitectureDiagramResponse_Progress
+	//	*KnowledgeServiceGenerateArchitectureDiagramResponse_Final
+	Event         isKnowledgeServiceGenerateArchitectureDiagramResponse_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GenerateArchitectureDiagramStreamMessage) Reset() {
-	*x = GenerateArchitectureDiagramStreamMessage{}
+func (x *KnowledgeServiceGenerateArchitectureDiagramResponse) Reset() {
+	*x = KnowledgeServiceGenerateArchitectureDiagramResponse{}
 	mi := &file_knowledge_v1_knowledge_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GenerateArchitectureDiagramStreamMessage) String() string {
+func (x *KnowledgeServiceGenerateArchitectureDiagramResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GenerateArchitectureDiagramStreamMessage) ProtoMessage() {}
+func (*KnowledgeServiceGenerateArchitectureDiagramResponse) ProtoMessage() {}
 
-func (x *GenerateArchitectureDiagramStreamMessage) ProtoReflect() protoreflect.Message {
+func (x *KnowledgeServiceGenerateArchitectureDiagramResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_knowledge_v1_knowledge_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -363,98 +372,98 @@ func (x *GenerateArchitectureDiagramStreamMessage) ProtoReflect() protoreflect.M
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GenerateArchitectureDiagramStreamMessage.ProtoReflect.Descriptor instead.
-func (*GenerateArchitectureDiagramStreamMessage) Descriptor() ([]byte, []int) {
+// Deprecated: Use KnowledgeServiceGenerateArchitectureDiagramResponse.ProtoReflect.Descriptor instead.
+func (*KnowledgeServiceGenerateArchitectureDiagramResponse) Descriptor() ([]byte, []int) {
 	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *GenerateArchitectureDiagramStreamMessage) GetEvent() isGenerateArchitectureDiagramStreamMessage_Event {
+func (x *KnowledgeServiceGenerateArchitectureDiagramResponse) GetEvent() isKnowledgeServiceGenerateArchitectureDiagramResponse_Event {
 	if x != nil {
 		return x.Event
 	}
 	return nil
 }
 
-func (x *GenerateArchitectureDiagramStreamMessage) GetPhase() *v1.KnowledgeStreamPhaseMarker {
+func (x *KnowledgeServiceGenerateArchitectureDiagramResponse) GetPhase() *v1.KnowledgeStreamPhaseMarker {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateArchitectureDiagramStreamMessage_Phase); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateArchitectureDiagramResponse_Phase); ok {
 			return x.Phase
 		}
 	}
 	return nil
 }
 
-func (x *GenerateArchitectureDiagramStreamMessage) GetProgress() *v1.KnowledgeStreamProgress {
+func (x *KnowledgeServiceGenerateArchitectureDiagramResponse) GetProgress() *v1.KnowledgeStreamProgress {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateArchitectureDiagramStreamMessage_Progress); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateArchitectureDiagramResponse_Progress); ok {
 			return x.Progress
 		}
 	}
 	return nil
 }
 
-func (x *GenerateArchitectureDiagramStreamMessage) GetFinal() *GenerateArchitectureDiagramResponse {
+func (x *KnowledgeServiceGenerateArchitectureDiagramResponse) GetFinal() *GenerateArchitectureDiagramResponse {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateArchitectureDiagramStreamMessage_Final); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateArchitectureDiagramResponse_Final); ok {
 			return x.Final
 		}
 	}
 	return nil
 }
 
-type isGenerateArchitectureDiagramStreamMessage_Event interface {
-	isGenerateArchitectureDiagramStreamMessage_Event()
+type isKnowledgeServiceGenerateArchitectureDiagramResponse_Event interface {
+	isKnowledgeServiceGenerateArchitectureDiagramResponse_Event()
 }
 
-type GenerateArchitectureDiagramStreamMessage_Phase struct {
+type KnowledgeServiceGenerateArchitectureDiagramResponse_Phase struct {
 	Phase *v1.KnowledgeStreamPhaseMarker `protobuf:"bytes,1,opt,name=phase,proto3,oneof"`
 }
 
-type GenerateArchitectureDiagramStreamMessage_Progress struct {
+type KnowledgeServiceGenerateArchitectureDiagramResponse_Progress struct {
 	Progress *v1.KnowledgeStreamProgress `protobuf:"bytes,2,opt,name=progress,proto3,oneof"`
 }
 
-type GenerateArchitectureDiagramStreamMessage_Final struct {
+type KnowledgeServiceGenerateArchitectureDiagramResponse_Final struct {
 	Final *GenerateArchitectureDiagramResponse `protobuf:"bytes,3,opt,name=final,proto3,oneof"`
 }
 
-func (*GenerateArchitectureDiagramStreamMessage_Phase) isGenerateArchitectureDiagramStreamMessage_Event() {
+func (*KnowledgeServiceGenerateArchitectureDiagramResponse_Phase) isKnowledgeServiceGenerateArchitectureDiagramResponse_Event() {
 }
 
-func (*GenerateArchitectureDiagramStreamMessage_Progress) isGenerateArchitectureDiagramStreamMessage_Event() {
+func (*KnowledgeServiceGenerateArchitectureDiagramResponse_Progress) isKnowledgeServiceGenerateArchitectureDiagramResponse_Event() {
 }
 
-func (*GenerateArchitectureDiagramStreamMessage_Final) isGenerateArchitectureDiagramStreamMessage_Event() {
+func (*KnowledgeServiceGenerateArchitectureDiagramResponse_Final) isKnowledgeServiceGenerateArchitectureDiagramResponse_Event() {
 }
 
-// GenerateWorkflowStoryStreamMessage envelopes the GenerateWorkflowStory
-// server stream.
-type GenerateWorkflowStoryStreamMessage struct {
+// KnowledgeServiceGenerateWorkflowStoryResponse envelopes the
+// GenerateWorkflowStory server stream.
+type KnowledgeServiceGenerateWorkflowStoryResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Event:
 	//
-	//	*GenerateWorkflowStoryStreamMessage_Phase
-	//	*GenerateWorkflowStoryStreamMessage_Progress
-	//	*GenerateWorkflowStoryStreamMessage_Final
-	Event         isGenerateWorkflowStoryStreamMessage_Event `protobuf_oneof:"event"`
+	//	*KnowledgeServiceGenerateWorkflowStoryResponse_Phase
+	//	*KnowledgeServiceGenerateWorkflowStoryResponse_Progress
+	//	*KnowledgeServiceGenerateWorkflowStoryResponse_Final
+	Event         isKnowledgeServiceGenerateWorkflowStoryResponse_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GenerateWorkflowStoryStreamMessage) Reset() {
-	*x = GenerateWorkflowStoryStreamMessage{}
+func (x *KnowledgeServiceGenerateWorkflowStoryResponse) Reset() {
+	*x = KnowledgeServiceGenerateWorkflowStoryResponse{}
 	mi := &file_knowledge_v1_knowledge_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GenerateWorkflowStoryStreamMessage) String() string {
+func (x *KnowledgeServiceGenerateWorkflowStoryResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GenerateWorkflowStoryStreamMessage) ProtoMessage() {}
+func (*KnowledgeServiceGenerateWorkflowStoryResponse) ProtoMessage() {}
 
-func (x *GenerateWorkflowStoryStreamMessage) ProtoReflect() protoreflect.Message {
+func (x *KnowledgeServiceGenerateWorkflowStoryResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_knowledge_v1_knowledge_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -466,94 +475,98 @@ func (x *GenerateWorkflowStoryStreamMessage) ProtoReflect() protoreflect.Message
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GenerateWorkflowStoryStreamMessage.ProtoReflect.Descriptor instead.
-func (*GenerateWorkflowStoryStreamMessage) Descriptor() ([]byte, []int) {
+// Deprecated: Use KnowledgeServiceGenerateWorkflowStoryResponse.ProtoReflect.Descriptor instead.
+func (*KnowledgeServiceGenerateWorkflowStoryResponse) Descriptor() ([]byte, []int) {
 	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *GenerateWorkflowStoryStreamMessage) GetEvent() isGenerateWorkflowStoryStreamMessage_Event {
+func (x *KnowledgeServiceGenerateWorkflowStoryResponse) GetEvent() isKnowledgeServiceGenerateWorkflowStoryResponse_Event {
 	if x != nil {
 		return x.Event
 	}
 	return nil
 }
 
-func (x *GenerateWorkflowStoryStreamMessage) GetPhase() *v1.KnowledgeStreamPhaseMarker {
+func (x *KnowledgeServiceGenerateWorkflowStoryResponse) GetPhase() *v1.KnowledgeStreamPhaseMarker {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateWorkflowStoryStreamMessage_Phase); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateWorkflowStoryResponse_Phase); ok {
 			return x.Phase
 		}
 	}
 	return nil
 }
 
-func (x *GenerateWorkflowStoryStreamMessage) GetProgress() *v1.KnowledgeStreamProgress {
+func (x *KnowledgeServiceGenerateWorkflowStoryResponse) GetProgress() *v1.KnowledgeStreamProgress {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateWorkflowStoryStreamMessage_Progress); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateWorkflowStoryResponse_Progress); ok {
 			return x.Progress
 		}
 	}
 	return nil
 }
 
-func (x *GenerateWorkflowStoryStreamMessage) GetFinal() *GenerateWorkflowStoryResponse {
+func (x *KnowledgeServiceGenerateWorkflowStoryResponse) GetFinal() *GenerateWorkflowStoryResponse {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateWorkflowStoryStreamMessage_Final); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateWorkflowStoryResponse_Final); ok {
 			return x.Final
 		}
 	}
 	return nil
 }
 
-type isGenerateWorkflowStoryStreamMessage_Event interface {
-	isGenerateWorkflowStoryStreamMessage_Event()
+type isKnowledgeServiceGenerateWorkflowStoryResponse_Event interface {
+	isKnowledgeServiceGenerateWorkflowStoryResponse_Event()
 }
 
-type GenerateWorkflowStoryStreamMessage_Phase struct {
+type KnowledgeServiceGenerateWorkflowStoryResponse_Phase struct {
 	Phase *v1.KnowledgeStreamPhaseMarker `protobuf:"bytes,1,opt,name=phase,proto3,oneof"`
 }
 
-type GenerateWorkflowStoryStreamMessage_Progress struct {
+type KnowledgeServiceGenerateWorkflowStoryResponse_Progress struct {
 	Progress *v1.KnowledgeStreamProgress `protobuf:"bytes,2,opt,name=progress,proto3,oneof"`
 }
 
-type GenerateWorkflowStoryStreamMessage_Final struct {
+type KnowledgeServiceGenerateWorkflowStoryResponse_Final struct {
 	Final *GenerateWorkflowStoryResponse `protobuf:"bytes,3,opt,name=final,proto3,oneof"`
 }
 
-func (*GenerateWorkflowStoryStreamMessage_Phase) isGenerateWorkflowStoryStreamMessage_Event() {}
+func (*KnowledgeServiceGenerateWorkflowStoryResponse_Phase) isKnowledgeServiceGenerateWorkflowStoryResponse_Event() {
+}
 
-func (*GenerateWorkflowStoryStreamMessage_Progress) isGenerateWorkflowStoryStreamMessage_Event() {}
+func (*KnowledgeServiceGenerateWorkflowStoryResponse_Progress) isKnowledgeServiceGenerateWorkflowStoryResponse_Event() {
+}
 
-func (*GenerateWorkflowStoryStreamMessage_Final) isGenerateWorkflowStoryStreamMessage_Event() {}
+func (*KnowledgeServiceGenerateWorkflowStoryResponse_Final) isKnowledgeServiceGenerateWorkflowStoryResponse_Event() {
+}
 
-// ExplainSystemStreamMessage envelopes the ExplainSystem server stream.
-type ExplainSystemStreamMessage struct {
+// KnowledgeServiceExplainSystemResponse envelopes the ExplainSystem
+// server stream.
+type KnowledgeServiceExplainSystemResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Event:
 	//
-	//	*ExplainSystemStreamMessage_Phase
-	//	*ExplainSystemStreamMessage_Progress
-	//	*ExplainSystemStreamMessage_Final
-	Event         isExplainSystemStreamMessage_Event `protobuf_oneof:"event"`
+	//	*KnowledgeServiceExplainSystemResponse_Phase
+	//	*KnowledgeServiceExplainSystemResponse_Progress
+	//	*KnowledgeServiceExplainSystemResponse_Final
+	Event         isKnowledgeServiceExplainSystemResponse_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ExplainSystemStreamMessage) Reset() {
-	*x = ExplainSystemStreamMessage{}
+func (x *KnowledgeServiceExplainSystemResponse) Reset() {
+	*x = KnowledgeServiceExplainSystemResponse{}
 	mi := &file_knowledge_v1_knowledge_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ExplainSystemStreamMessage) String() string {
+func (x *KnowledgeServiceExplainSystemResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ExplainSystemStreamMessage) ProtoMessage() {}
+func (*KnowledgeServiceExplainSystemResponse) ProtoMessage() {}
 
-func (x *ExplainSystemStreamMessage) ProtoReflect() protoreflect.Message {
+func (x *KnowledgeServiceExplainSystemResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_knowledge_v1_knowledge_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -565,95 +578,96 @@ func (x *ExplainSystemStreamMessage) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ExplainSystemStreamMessage.ProtoReflect.Descriptor instead.
-func (*ExplainSystemStreamMessage) Descriptor() ([]byte, []int) {
+// Deprecated: Use KnowledgeServiceExplainSystemResponse.ProtoReflect.Descriptor instead.
+func (*KnowledgeServiceExplainSystemResponse) Descriptor() ([]byte, []int) {
 	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *ExplainSystemStreamMessage) GetEvent() isExplainSystemStreamMessage_Event {
+func (x *KnowledgeServiceExplainSystemResponse) GetEvent() isKnowledgeServiceExplainSystemResponse_Event {
 	if x != nil {
 		return x.Event
 	}
 	return nil
 }
 
-func (x *ExplainSystemStreamMessage) GetPhase() *v1.KnowledgeStreamPhaseMarker {
+func (x *KnowledgeServiceExplainSystemResponse) GetPhase() *v1.KnowledgeStreamPhaseMarker {
 	if x != nil {
-		if x, ok := x.Event.(*ExplainSystemStreamMessage_Phase); ok {
+		if x, ok := x.Event.(*KnowledgeServiceExplainSystemResponse_Phase); ok {
 			return x.Phase
 		}
 	}
 	return nil
 }
 
-func (x *ExplainSystemStreamMessage) GetProgress() *v1.KnowledgeStreamProgress {
+func (x *KnowledgeServiceExplainSystemResponse) GetProgress() *v1.KnowledgeStreamProgress {
 	if x != nil {
-		if x, ok := x.Event.(*ExplainSystemStreamMessage_Progress); ok {
+		if x, ok := x.Event.(*KnowledgeServiceExplainSystemResponse_Progress); ok {
 			return x.Progress
 		}
 	}
 	return nil
 }
 
-func (x *ExplainSystemStreamMessage) GetFinal() *ExplainSystemResponse {
+func (x *KnowledgeServiceExplainSystemResponse) GetFinal() *ExplainSystemResponse {
 	if x != nil {
-		if x, ok := x.Event.(*ExplainSystemStreamMessage_Final); ok {
+		if x, ok := x.Event.(*KnowledgeServiceExplainSystemResponse_Final); ok {
 			return x.Final
 		}
 	}
 	return nil
 }
 
-type isExplainSystemStreamMessage_Event interface {
-	isExplainSystemStreamMessage_Event()
+type isKnowledgeServiceExplainSystemResponse_Event interface {
+	isKnowledgeServiceExplainSystemResponse_Event()
 }
 
-type ExplainSystemStreamMessage_Phase struct {
+type KnowledgeServiceExplainSystemResponse_Phase struct {
 	Phase *v1.KnowledgeStreamPhaseMarker `protobuf:"bytes,1,opt,name=phase,proto3,oneof"`
 }
 
-type ExplainSystemStreamMessage_Progress struct {
+type KnowledgeServiceExplainSystemResponse_Progress struct {
 	Progress *v1.KnowledgeStreamProgress `protobuf:"bytes,2,opt,name=progress,proto3,oneof"`
 }
 
-type ExplainSystemStreamMessage_Final struct {
+type KnowledgeServiceExplainSystemResponse_Final struct {
 	Final *ExplainSystemResponse `protobuf:"bytes,3,opt,name=final,proto3,oneof"`
 }
 
-func (*ExplainSystemStreamMessage_Phase) isExplainSystemStreamMessage_Event() {}
+func (*KnowledgeServiceExplainSystemResponse_Phase) isKnowledgeServiceExplainSystemResponse_Event() {}
 
-func (*ExplainSystemStreamMessage_Progress) isExplainSystemStreamMessage_Event() {}
+func (*KnowledgeServiceExplainSystemResponse_Progress) isKnowledgeServiceExplainSystemResponse_Event() {
+}
 
-func (*ExplainSystemStreamMessage_Final) isExplainSystemStreamMessage_Event() {}
+func (*KnowledgeServiceExplainSystemResponse_Final) isKnowledgeServiceExplainSystemResponse_Event() {}
 
-// GenerateCodeTourStreamMessage envelopes the GenerateCodeTour server
-// stream.
-type GenerateCodeTourStreamMessage struct {
+// KnowledgeServiceGenerateCodeTourResponse envelopes the
+// GenerateCodeTour server stream.
+type KnowledgeServiceGenerateCodeTourResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Event:
 	//
-	//	*GenerateCodeTourStreamMessage_Phase
-	//	*GenerateCodeTourStreamMessage_Progress
-	//	*GenerateCodeTourStreamMessage_Final
-	Event         isGenerateCodeTourStreamMessage_Event `protobuf_oneof:"event"`
+	//	*KnowledgeServiceGenerateCodeTourResponse_Phase
+	//	*KnowledgeServiceGenerateCodeTourResponse_Progress
+	//	*KnowledgeServiceGenerateCodeTourResponse_Final
+	Event         isKnowledgeServiceGenerateCodeTourResponse_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GenerateCodeTourStreamMessage) Reset() {
-	*x = GenerateCodeTourStreamMessage{}
+func (x *KnowledgeServiceGenerateCodeTourResponse) Reset() {
+	*x = KnowledgeServiceGenerateCodeTourResponse{}
 	mi := &file_knowledge_v1_knowledge_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GenerateCodeTourStreamMessage) String() string {
+func (x *KnowledgeServiceGenerateCodeTourResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GenerateCodeTourStreamMessage) ProtoMessage() {}
+func (*KnowledgeServiceGenerateCodeTourResponse) ProtoMessage() {}
 
-func (x *GenerateCodeTourStreamMessage) ProtoReflect() protoreflect.Message {
+func (x *KnowledgeServiceGenerateCodeTourResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_knowledge_v1_knowledge_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -665,66 +679,69 @@ func (x *GenerateCodeTourStreamMessage) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GenerateCodeTourStreamMessage.ProtoReflect.Descriptor instead.
-func (*GenerateCodeTourStreamMessage) Descriptor() ([]byte, []int) {
+// Deprecated: Use KnowledgeServiceGenerateCodeTourResponse.ProtoReflect.Descriptor instead.
+func (*KnowledgeServiceGenerateCodeTourResponse) Descriptor() ([]byte, []int) {
 	return file_knowledge_v1_knowledge_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *GenerateCodeTourStreamMessage) GetEvent() isGenerateCodeTourStreamMessage_Event {
+func (x *KnowledgeServiceGenerateCodeTourResponse) GetEvent() isKnowledgeServiceGenerateCodeTourResponse_Event {
 	if x != nil {
 		return x.Event
 	}
 	return nil
 }
 
-func (x *GenerateCodeTourStreamMessage) GetPhase() *v1.KnowledgeStreamPhaseMarker {
+func (x *KnowledgeServiceGenerateCodeTourResponse) GetPhase() *v1.KnowledgeStreamPhaseMarker {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateCodeTourStreamMessage_Phase); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateCodeTourResponse_Phase); ok {
 			return x.Phase
 		}
 	}
 	return nil
 }
 
-func (x *GenerateCodeTourStreamMessage) GetProgress() *v1.KnowledgeStreamProgress {
+func (x *KnowledgeServiceGenerateCodeTourResponse) GetProgress() *v1.KnowledgeStreamProgress {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateCodeTourStreamMessage_Progress); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateCodeTourResponse_Progress); ok {
 			return x.Progress
 		}
 	}
 	return nil
 }
 
-func (x *GenerateCodeTourStreamMessage) GetFinal() *GenerateCodeTourResponse {
+func (x *KnowledgeServiceGenerateCodeTourResponse) GetFinal() *GenerateCodeTourResponse {
 	if x != nil {
-		if x, ok := x.Event.(*GenerateCodeTourStreamMessage_Final); ok {
+		if x, ok := x.Event.(*KnowledgeServiceGenerateCodeTourResponse_Final); ok {
 			return x.Final
 		}
 	}
 	return nil
 }
 
-type isGenerateCodeTourStreamMessage_Event interface {
-	isGenerateCodeTourStreamMessage_Event()
+type isKnowledgeServiceGenerateCodeTourResponse_Event interface {
+	isKnowledgeServiceGenerateCodeTourResponse_Event()
 }
 
-type GenerateCodeTourStreamMessage_Phase struct {
+type KnowledgeServiceGenerateCodeTourResponse_Phase struct {
 	Phase *v1.KnowledgeStreamPhaseMarker `protobuf:"bytes,1,opt,name=phase,proto3,oneof"`
 }
 
-type GenerateCodeTourStreamMessage_Progress struct {
+type KnowledgeServiceGenerateCodeTourResponse_Progress struct {
 	Progress *v1.KnowledgeStreamProgress `protobuf:"bytes,2,opt,name=progress,proto3,oneof"`
 }
 
-type GenerateCodeTourStreamMessage_Final struct {
+type KnowledgeServiceGenerateCodeTourResponse_Final struct {
 	Final *GenerateCodeTourResponse `protobuf:"bytes,3,opt,name=final,proto3,oneof"`
 }
 
-func (*GenerateCodeTourStreamMessage_Phase) isGenerateCodeTourStreamMessage_Event() {}
+func (*KnowledgeServiceGenerateCodeTourResponse_Phase) isKnowledgeServiceGenerateCodeTourResponse_Event() {
+}
 
-func (*GenerateCodeTourStreamMessage_Progress) isGenerateCodeTourStreamMessage_Event() {}
+func (*KnowledgeServiceGenerateCodeTourResponse_Progress) isKnowledgeServiceGenerateCodeTourResponse_Event() {
+}
 
-func (*GenerateCodeTourStreamMessage_Final) isGenerateCodeTourStreamMessage_Event() {}
+func (*KnowledgeServiceGenerateCodeTourResponse_Final) isKnowledgeServiceGenerateCodeTourResponse_Event() {
+}
 
 // GenerateCliffNotesRequest carries the assembled repository snapshot for the
 // Python worker to synthesize into cliff notes. The Go API side assembles the
@@ -2374,33 +2391,33 @@ var File_knowledge_v1_knowledge_proto protoreflect.FileDescriptor
 
 const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"\n" +
-	"\x1cknowledge/v1/knowledge.proto\x12\x19sourcebridge.knowledge.v1\x1a\x15common/v1/types.proto\x1a\"common/v1/knowledge_progress.proto\"\x94\x02\n" +
-	"\x1fGenerateCliffNotesStreamMessage\x12J\n" +
+	"\x1cknowledge/v1/knowledge.proto\x12\x19sourcebridge.knowledge.v1\x1a\x15common/v1/types.proto\x1a\"common/v1/knowledge_progress.proto\"\x9f\x02\n" +
+	"*KnowledgeServiceGenerateCliffNotesResponse\x12J\n" +
 	"\x05phase\x18\x01 \x01(\v22.sourcebridge.common.v1.KnowledgeStreamPhaseMarkerH\x00R\x05phase\x12M\n" +
 	"\bprogress\x18\x02 \x01(\v2/.sourcebridge.common.v1.KnowledgeStreamProgressH\x00R\bprogress\x12M\n" +
 	"\x05final\x18\x03 \x01(\v25.sourcebridge.knowledge.v1.GenerateCliffNotesResponseH\x00R\x05finalB\a\n" +
-	"\x05event\"\x98\x02\n" +
-	"!GenerateLearningPathStreamMessage\x12J\n" +
+	"\x05event\"\xa3\x02\n" +
+	",KnowledgeServiceGenerateLearningPathResponse\x12J\n" +
 	"\x05phase\x18\x01 \x01(\v22.sourcebridge.common.v1.KnowledgeStreamPhaseMarkerH\x00R\x05phase\x12M\n" +
 	"\bprogress\x18\x02 \x01(\v2/.sourcebridge.common.v1.KnowledgeStreamProgressH\x00R\bprogress\x12O\n" +
 	"\x05final\x18\x03 \x01(\v27.sourcebridge.knowledge.v1.GenerateLearningPathResponseH\x00R\x05finalB\a\n" +
-	"\x05event\"\xa6\x02\n" +
-	"(GenerateArchitectureDiagramStreamMessage\x12J\n" +
+	"\x05event\"\xb1\x02\n" +
+	"3KnowledgeServiceGenerateArchitectureDiagramResponse\x12J\n" +
 	"\x05phase\x18\x01 \x01(\v22.sourcebridge.common.v1.KnowledgeStreamPhaseMarkerH\x00R\x05phase\x12M\n" +
 	"\bprogress\x18\x02 \x01(\v2/.sourcebridge.common.v1.KnowledgeStreamProgressH\x00R\bprogress\x12V\n" +
 	"\x05final\x18\x03 \x01(\v2>.sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponseH\x00R\x05finalB\a\n" +
-	"\x05event\"\x9a\x02\n" +
-	"\"GenerateWorkflowStoryStreamMessage\x12J\n" +
+	"\x05event\"\xa5\x02\n" +
+	"-KnowledgeServiceGenerateWorkflowStoryResponse\x12J\n" +
 	"\x05phase\x18\x01 \x01(\v22.sourcebridge.common.v1.KnowledgeStreamPhaseMarkerH\x00R\x05phase\x12M\n" +
 	"\bprogress\x18\x02 \x01(\v2/.sourcebridge.common.v1.KnowledgeStreamProgressH\x00R\bprogress\x12P\n" +
 	"\x05final\x18\x03 \x01(\v28.sourcebridge.knowledge.v1.GenerateWorkflowStoryResponseH\x00R\x05finalB\a\n" +
-	"\x05event\"\x8a\x02\n" +
-	"\x1aExplainSystemStreamMessage\x12J\n" +
+	"\x05event\"\x95\x02\n" +
+	"%KnowledgeServiceExplainSystemResponse\x12J\n" +
 	"\x05phase\x18\x01 \x01(\v22.sourcebridge.common.v1.KnowledgeStreamPhaseMarkerH\x00R\x05phase\x12M\n" +
 	"\bprogress\x18\x02 \x01(\v2/.sourcebridge.common.v1.KnowledgeStreamProgressH\x00R\bprogress\x12H\n" +
 	"\x05final\x18\x03 \x01(\v20.sourcebridge.knowledge.v1.ExplainSystemResponseH\x00R\x05finalB\a\n" +
-	"\x05event\"\x90\x02\n" +
-	"\x1dGenerateCodeTourStreamMessage\x12J\n" +
+	"\x05event\"\x9b\x02\n" +
+	"(KnowledgeServiceGenerateCodeTourResponse\x12J\n" +
 	"\x05phase\x18\x01 \x01(\v22.sourcebridge.common.v1.KnowledgeStreamPhaseMarkerH\x00R\x05phase\x12M\n" +
 	"\bprogress\x18\x02 \x01(\v2/.sourcebridge.common.v1.KnowledgeStreamProgressH\x00R\bprogress\x12K\n" +
 	"\x05final\x18\x03 \x01(\v23.sourcebridge.knowledge.v1.GenerateCodeTourResponseH\x00R\x05finalB\a\n" +
@@ -2594,14 +2611,14 @@ const file_knowledge_v1_knowledge_proto_rawDesc = "" +
 	"\rDEPTH_SUMMARY\x10\x01\x12\x10\n" +
 	"\fDEPTH_MEDIUM\x10\x02\x12\x0e\n" +
 	"\n" +
-	"DEPTH_DEEP\x10\x032\xe8\x06\n" +
-	"\x10KnowledgeService\x12\x88\x01\n" +
-	"\x12GenerateCliffNotes\x124.sourcebridge.knowledge.v1.GenerateCliffNotesRequest\x1a:.sourcebridge.knowledge.v1.GenerateCliffNotesStreamMessage0\x01\x12\x8e\x01\n" +
-	"\x14GenerateLearningPath\x126.sourcebridge.knowledge.v1.GenerateLearningPathRequest\x1a<.sourcebridge.knowledge.v1.GenerateLearningPathStreamMessage0\x01\x12\xa3\x01\n" +
-	"\x1bGenerateArchitectureDiagram\x12=.sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest\x1aC.sourcebridge.knowledge.v1.GenerateArchitectureDiagramStreamMessage0\x01\x12\x91\x01\n" +
-	"\x15GenerateWorkflowStory\x127.sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest\x1a=.sourcebridge.knowledge.v1.GenerateWorkflowStoryStreamMessage0\x01\x12y\n" +
-	"\rExplainSystem\x12/.sourcebridge.knowledge.v1.ExplainSystemRequest\x1a5.sourcebridge.knowledge.v1.ExplainSystemStreamMessage0\x01\x12\x82\x01\n" +
-	"\x10GenerateCodeTour\x122.sourcebridge.knowledge.v1.GenerateCodeTourRequest\x1a8.sourcebridge.knowledge.v1.GenerateCodeTourStreamMessage0\x01BFZDgithub.com/sourcebridge/sourcebridge/gen/go/knowledge/v1;knowledgev1b\x06proto3"
+	"DEPTH_DEEP\x10\x032\xab\a\n" +
+	"\x10KnowledgeService\x12\x93\x01\n" +
+	"\x12GenerateCliffNotes\x124.sourcebridge.knowledge.v1.GenerateCliffNotesRequest\x1aE.sourcebridge.knowledge.v1.KnowledgeServiceGenerateCliffNotesResponse0\x01\x12\x99\x01\n" +
+	"\x14GenerateLearningPath\x126.sourcebridge.knowledge.v1.GenerateLearningPathRequest\x1aG.sourcebridge.knowledge.v1.KnowledgeServiceGenerateLearningPathResponse0\x01\x12\xae\x01\n" +
+	"\x1bGenerateArchitectureDiagram\x12=.sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest\x1aN.sourcebridge.knowledge.v1.KnowledgeServiceGenerateArchitectureDiagramResponse0\x01\x12\x9c\x01\n" +
+	"\x15GenerateWorkflowStory\x127.sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest\x1aH.sourcebridge.knowledge.v1.KnowledgeServiceGenerateWorkflowStoryResponse0\x01\x12\x84\x01\n" +
+	"\rExplainSystem\x12/.sourcebridge.knowledge.v1.ExplainSystemRequest\x1a@.sourcebridge.knowledge.v1.KnowledgeServiceExplainSystemResponse0\x01\x12\x8d\x01\n" +
+	"\x10GenerateCodeTour\x122.sourcebridge.knowledge.v1.GenerateCodeTourRequest\x1aC.sourcebridge.knowledge.v1.KnowledgeServiceGenerateCodeTourResponse0\x01BFZDgithub.com/sourcebridge/sourcebridge/gen/go/knowledge/v1;knowledgev1b\x06proto3"
 
 var (
 	file_knowledge_v1_knowledge_proto_rawDescOnce sync.Once
@@ -2618,54 +2635,54 @@ func file_knowledge_v1_knowledge_proto_rawDescGZIP() []byte {
 var file_knowledge_v1_knowledge_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_knowledge_v1_knowledge_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_knowledge_v1_knowledge_proto_goTypes = []any{
-	(Audience)(0),                                    // 0: sourcebridge.knowledge.v1.Audience
-	(Depth)(0),                                       // 1: sourcebridge.knowledge.v1.Depth
-	(*GenerateCliffNotesStreamMessage)(nil),          // 2: sourcebridge.knowledge.v1.GenerateCliffNotesStreamMessage
-	(*GenerateLearningPathStreamMessage)(nil),        // 3: sourcebridge.knowledge.v1.GenerateLearningPathStreamMessage
-	(*GenerateArchitectureDiagramStreamMessage)(nil), // 4: sourcebridge.knowledge.v1.GenerateArchitectureDiagramStreamMessage
-	(*GenerateWorkflowStoryStreamMessage)(nil),       // 5: sourcebridge.knowledge.v1.GenerateWorkflowStoryStreamMessage
-	(*ExplainSystemStreamMessage)(nil),               // 6: sourcebridge.knowledge.v1.ExplainSystemStreamMessage
-	(*GenerateCodeTourStreamMessage)(nil),            // 7: sourcebridge.knowledge.v1.GenerateCodeTourStreamMessage
-	(*GenerateCliffNotesRequest)(nil),                // 8: sourcebridge.knowledge.v1.GenerateCliffNotesRequest
-	(*GenerateCliffNotesResponse)(nil),               // 9: sourcebridge.knowledge.v1.GenerateCliffNotesResponse
-	(*GenerateArchitectureDiagramRequest)(nil),       // 10: sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest
-	(*GenerateArchitectureDiagramResponse)(nil),      // 11: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse
-	(*CliffNotesDiagnostics)(nil),                    // 12: sourcebridge.knowledge.v1.CliffNotesDiagnostics
-	(*GenerateLearningPathRequest)(nil),              // 13: sourcebridge.knowledge.v1.GenerateLearningPathRequest
-	(*GenerateLearningPathResponse)(nil),             // 14: sourcebridge.knowledge.v1.GenerateLearningPathResponse
-	(*GenerateWorkflowStoryRequest)(nil),             // 15: sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest
-	(*GenerateWorkflowStoryResponse)(nil),            // 16: sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse
-	(*LearningStep)(nil),                             // 17: sourcebridge.knowledge.v1.LearningStep
-	(*ExplainSystemRequest)(nil),                     // 18: sourcebridge.knowledge.v1.ExplainSystemRequest
-	(*ExplainSystemResponse)(nil),                    // 19: sourcebridge.knowledge.v1.ExplainSystemResponse
-	(*GenerateCodeTourRequest)(nil),                  // 20: sourcebridge.knowledge.v1.GenerateCodeTourRequest
-	(*GenerateCodeTourResponse)(nil),                 // 21: sourcebridge.knowledge.v1.GenerateCodeTourResponse
-	(*CodeTourStop)(nil),                             // 22: sourcebridge.knowledge.v1.CodeTourStop
-	(*KnowledgeSection)(nil),                         // 23: sourcebridge.knowledge.v1.KnowledgeSection
-	(*KnowledgeEvidence)(nil),                        // 24: sourcebridge.knowledge.v1.KnowledgeEvidence
-	(*v1.KnowledgeStreamPhaseMarker)(nil),            // 25: sourcebridge.common.v1.KnowledgeStreamPhaseMarker
-	(*v1.KnowledgeStreamProgress)(nil),               // 26: sourcebridge.common.v1.KnowledgeStreamProgress
-	(*v1.LLMUsage)(nil),                              // 27: sourcebridge.common.v1.LLMUsage
+	(Audience)(0), // 0: sourcebridge.knowledge.v1.Audience
+	(Depth)(0),    // 1: sourcebridge.knowledge.v1.Depth
+	(*KnowledgeServiceGenerateCliffNotesResponse)(nil),          // 2: sourcebridge.knowledge.v1.KnowledgeServiceGenerateCliffNotesResponse
+	(*KnowledgeServiceGenerateLearningPathResponse)(nil),        // 3: sourcebridge.knowledge.v1.KnowledgeServiceGenerateLearningPathResponse
+	(*KnowledgeServiceGenerateArchitectureDiagramResponse)(nil), // 4: sourcebridge.knowledge.v1.KnowledgeServiceGenerateArchitectureDiagramResponse
+	(*KnowledgeServiceGenerateWorkflowStoryResponse)(nil),       // 5: sourcebridge.knowledge.v1.KnowledgeServiceGenerateWorkflowStoryResponse
+	(*KnowledgeServiceExplainSystemResponse)(nil),               // 6: sourcebridge.knowledge.v1.KnowledgeServiceExplainSystemResponse
+	(*KnowledgeServiceGenerateCodeTourResponse)(nil),            // 7: sourcebridge.knowledge.v1.KnowledgeServiceGenerateCodeTourResponse
+	(*GenerateCliffNotesRequest)(nil),                           // 8: sourcebridge.knowledge.v1.GenerateCliffNotesRequest
+	(*GenerateCliffNotesResponse)(nil),                          // 9: sourcebridge.knowledge.v1.GenerateCliffNotesResponse
+	(*GenerateArchitectureDiagramRequest)(nil),                  // 10: sourcebridge.knowledge.v1.GenerateArchitectureDiagramRequest
+	(*GenerateArchitectureDiagramResponse)(nil),                 // 11: sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse
+	(*CliffNotesDiagnostics)(nil),                               // 12: sourcebridge.knowledge.v1.CliffNotesDiagnostics
+	(*GenerateLearningPathRequest)(nil),                         // 13: sourcebridge.knowledge.v1.GenerateLearningPathRequest
+	(*GenerateLearningPathResponse)(nil),                        // 14: sourcebridge.knowledge.v1.GenerateLearningPathResponse
+	(*GenerateWorkflowStoryRequest)(nil),                        // 15: sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest
+	(*GenerateWorkflowStoryResponse)(nil),                       // 16: sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse
+	(*LearningStep)(nil),                                        // 17: sourcebridge.knowledge.v1.LearningStep
+	(*ExplainSystemRequest)(nil),                                // 18: sourcebridge.knowledge.v1.ExplainSystemRequest
+	(*ExplainSystemResponse)(nil),                               // 19: sourcebridge.knowledge.v1.ExplainSystemResponse
+	(*GenerateCodeTourRequest)(nil),                             // 20: sourcebridge.knowledge.v1.GenerateCodeTourRequest
+	(*GenerateCodeTourResponse)(nil),                            // 21: sourcebridge.knowledge.v1.GenerateCodeTourResponse
+	(*CodeTourStop)(nil),                                        // 22: sourcebridge.knowledge.v1.CodeTourStop
+	(*KnowledgeSection)(nil),                                    // 23: sourcebridge.knowledge.v1.KnowledgeSection
+	(*KnowledgeEvidence)(nil),                                   // 24: sourcebridge.knowledge.v1.KnowledgeEvidence
+	(*v1.KnowledgeStreamPhaseMarker)(nil),                       // 25: sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	(*v1.KnowledgeStreamProgress)(nil),                          // 26: sourcebridge.common.v1.KnowledgeStreamProgress
+	(*v1.LLMUsage)(nil),                                         // 27: sourcebridge.common.v1.LLMUsage
 }
 var file_knowledge_v1_knowledge_proto_depIdxs = []int32{
-	25, // 0: sourcebridge.knowledge.v1.GenerateCliffNotesStreamMessage.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
-	26, // 1: sourcebridge.knowledge.v1.GenerateCliffNotesStreamMessage.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
-	9,  // 2: sourcebridge.knowledge.v1.GenerateCliffNotesStreamMessage.final:type_name -> sourcebridge.knowledge.v1.GenerateCliffNotesResponse
-	25, // 3: sourcebridge.knowledge.v1.GenerateLearningPathStreamMessage.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
-	26, // 4: sourcebridge.knowledge.v1.GenerateLearningPathStreamMessage.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
-	14, // 5: sourcebridge.knowledge.v1.GenerateLearningPathStreamMessage.final:type_name -> sourcebridge.knowledge.v1.GenerateLearningPathResponse
-	25, // 6: sourcebridge.knowledge.v1.GenerateArchitectureDiagramStreamMessage.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
-	26, // 7: sourcebridge.knowledge.v1.GenerateArchitectureDiagramStreamMessage.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
-	11, // 8: sourcebridge.knowledge.v1.GenerateArchitectureDiagramStreamMessage.final:type_name -> sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse
-	25, // 9: sourcebridge.knowledge.v1.GenerateWorkflowStoryStreamMessage.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
-	26, // 10: sourcebridge.knowledge.v1.GenerateWorkflowStoryStreamMessage.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
-	16, // 11: sourcebridge.knowledge.v1.GenerateWorkflowStoryStreamMessage.final:type_name -> sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse
-	25, // 12: sourcebridge.knowledge.v1.ExplainSystemStreamMessage.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
-	26, // 13: sourcebridge.knowledge.v1.ExplainSystemStreamMessage.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
-	19, // 14: sourcebridge.knowledge.v1.ExplainSystemStreamMessage.final:type_name -> sourcebridge.knowledge.v1.ExplainSystemResponse
-	25, // 15: sourcebridge.knowledge.v1.GenerateCodeTourStreamMessage.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
-	26, // 16: sourcebridge.knowledge.v1.GenerateCodeTourStreamMessage.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
-	21, // 17: sourcebridge.knowledge.v1.GenerateCodeTourStreamMessage.final:type_name -> sourcebridge.knowledge.v1.GenerateCodeTourResponse
+	25, // 0: sourcebridge.knowledge.v1.KnowledgeServiceGenerateCliffNotesResponse.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	26, // 1: sourcebridge.knowledge.v1.KnowledgeServiceGenerateCliffNotesResponse.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
+	9,  // 2: sourcebridge.knowledge.v1.KnowledgeServiceGenerateCliffNotesResponse.final:type_name -> sourcebridge.knowledge.v1.GenerateCliffNotesResponse
+	25, // 3: sourcebridge.knowledge.v1.KnowledgeServiceGenerateLearningPathResponse.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	26, // 4: sourcebridge.knowledge.v1.KnowledgeServiceGenerateLearningPathResponse.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
+	14, // 5: sourcebridge.knowledge.v1.KnowledgeServiceGenerateLearningPathResponse.final:type_name -> sourcebridge.knowledge.v1.GenerateLearningPathResponse
+	25, // 6: sourcebridge.knowledge.v1.KnowledgeServiceGenerateArchitectureDiagramResponse.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	26, // 7: sourcebridge.knowledge.v1.KnowledgeServiceGenerateArchitectureDiagramResponse.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
+	11, // 8: sourcebridge.knowledge.v1.KnowledgeServiceGenerateArchitectureDiagramResponse.final:type_name -> sourcebridge.knowledge.v1.GenerateArchitectureDiagramResponse
+	25, // 9: sourcebridge.knowledge.v1.KnowledgeServiceGenerateWorkflowStoryResponse.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	26, // 10: sourcebridge.knowledge.v1.KnowledgeServiceGenerateWorkflowStoryResponse.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
+	16, // 11: sourcebridge.knowledge.v1.KnowledgeServiceGenerateWorkflowStoryResponse.final:type_name -> sourcebridge.knowledge.v1.GenerateWorkflowStoryResponse
+	25, // 12: sourcebridge.knowledge.v1.KnowledgeServiceExplainSystemResponse.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	26, // 13: sourcebridge.knowledge.v1.KnowledgeServiceExplainSystemResponse.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
+	19, // 14: sourcebridge.knowledge.v1.KnowledgeServiceExplainSystemResponse.final:type_name -> sourcebridge.knowledge.v1.ExplainSystemResponse
+	25, // 15: sourcebridge.knowledge.v1.KnowledgeServiceGenerateCodeTourResponse.phase:type_name -> sourcebridge.common.v1.KnowledgeStreamPhaseMarker
+	26, // 16: sourcebridge.knowledge.v1.KnowledgeServiceGenerateCodeTourResponse.progress:type_name -> sourcebridge.common.v1.KnowledgeStreamProgress
+	21, // 17: sourcebridge.knowledge.v1.KnowledgeServiceGenerateCodeTourResponse.final:type_name -> sourcebridge.knowledge.v1.GenerateCodeTourResponse
 	0,  // 18: sourcebridge.knowledge.v1.GenerateCliffNotesRequest.audience_enum:type_name -> sourcebridge.knowledge.v1.Audience
 	1,  // 19: sourcebridge.knowledge.v1.GenerateCliffNotesRequest.depth_enum:type_name -> sourcebridge.knowledge.v1.Depth
 	23, // 20: sourcebridge.knowledge.v1.GenerateCliffNotesResponse.sections:type_name -> sourcebridge.knowledge.v1.KnowledgeSection
@@ -2697,12 +2714,12 @@ var file_knowledge_v1_knowledge_proto_depIdxs = []int32{
 	15, // 46: sourcebridge.knowledge.v1.KnowledgeService.GenerateWorkflowStory:input_type -> sourcebridge.knowledge.v1.GenerateWorkflowStoryRequest
 	18, // 47: sourcebridge.knowledge.v1.KnowledgeService.ExplainSystem:input_type -> sourcebridge.knowledge.v1.ExplainSystemRequest
 	20, // 48: sourcebridge.knowledge.v1.KnowledgeService.GenerateCodeTour:input_type -> sourcebridge.knowledge.v1.GenerateCodeTourRequest
-	2,  // 49: sourcebridge.knowledge.v1.KnowledgeService.GenerateCliffNotes:output_type -> sourcebridge.knowledge.v1.GenerateCliffNotesStreamMessage
-	3,  // 50: sourcebridge.knowledge.v1.KnowledgeService.GenerateLearningPath:output_type -> sourcebridge.knowledge.v1.GenerateLearningPathStreamMessage
-	4,  // 51: sourcebridge.knowledge.v1.KnowledgeService.GenerateArchitectureDiagram:output_type -> sourcebridge.knowledge.v1.GenerateArchitectureDiagramStreamMessage
-	5,  // 52: sourcebridge.knowledge.v1.KnowledgeService.GenerateWorkflowStory:output_type -> sourcebridge.knowledge.v1.GenerateWorkflowStoryStreamMessage
-	6,  // 53: sourcebridge.knowledge.v1.KnowledgeService.ExplainSystem:output_type -> sourcebridge.knowledge.v1.ExplainSystemStreamMessage
-	7,  // 54: sourcebridge.knowledge.v1.KnowledgeService.GenerateCodeTour:output_type -> sourcebridge.knowledge.v1.GenerateCodeTourStreamMessage
+	2,  // 49: sourcebridge.knowledge.v1.KnowledgeService.GenerateCliffNotes:output_type -> sourcebridge.knowledge.v1.KnowledgeServiceGenerateCliffNotesResponse
+	3,  // 50: sourcebridge.knowledge.v1.KnowledgeService.GenerateLearningPath:output_type -> sourcebridge.knowledge.v1.KnowledgeServiceGenerateLearningPathResponse
+	4,  // 51: sourcebridge.knowledge.v1.KnowledgeService.GenerateArchitectureDiagram:output_type -> sourcebridge.knowledge.v1.KnowledgeServiceGenerateArchitectureDiagramResponse
+	5,  // 52: sourcebridge.knowledge.v1.KnowledgeService.GenerateWorkflowStory:output_type -> sourcebridge.knowledge.v1.KnowledgeServiceGenerateWorkflowStoryResponse
+	6,  // 53: sourcebridge.knowledge.v1.KnowledgeService.ExplainSystem:output_type -> sourcebridge.knowledge.v1.KnowledgeServiceExplainSystemResponse
+	7,  // 54: sourcebridge.knowledge.v1.KnowledgeService.GenerateCodeTour:output_type -> sourcebridge.knowledge.v1.KnowledgeServiceGenerateCodeTourResponse
 	49, // [49:55] is the sub-list for method output_type
 	43, // [43:49] is the sub-list for method input_type
 	43, // [43:43] is the sub-list for extension type_name
@@ -2716,34 +2733,34 @@ func file_knowledge_v1_knowledge_proto_init() {
 		return
 	}
 	file_knowledge_v1_knowledge_proto_msgTypes[0].OneofWrappers = []any{
-		(*GenerateCliffNotesStreamMessage_Phase)(nil),
-		(*GenerateCliffNotesStreamMessage_Progress)(nil),
-		(*GenerateCliffNotesStreamMessage_Final)(nil),
+		(*KnowledgeServiceGenerateCliffNotesResponse_Phase)(nil),
+		(*KnowledgeServiceGenerateCliffNotesResponse_Progress)(nil),
+		(*KnowledgeServiceGenerateCliffNotesResponse_Final)(nil),
 	}
 	file_knowledge_v1_knowledge_proto_msgTypes[1].OneofWrappers = []any{
-		(*GenerateLearningPathStreamMessage_Phase)(nil),
-		(*GenerateLearningPathStreamMessage_Progress)(nil),
-		(*GenerateLearningPathStreamMessage_Final)(nil),
+		(*KnowledgeServiceGenerateLearningPathResponse_Phase)(nil),
+		(*KnowledgeServiceGenerateLearningPathResponse_Progress)(nil),
+		(*KnowledgeServiceGenerateLearningPathResponse_Final)(nil),
 	}
 	file_knowledge_v1_knowledge_proto_msgTypes[2].OneofWrappers = []any{
-		(*GenerateArchitectureDiagramStreamMessage_Phase)(nil),
-		(*GenerateArchitectureDiagramStreamMessage_Progress)(nil),
-		(*GenerateArchitectureDiagramStreamMessage_Final)(nil),
+		(*KnowledgeServiceGenerateArchitectureDiagramResponse_Phase)(nil),
+		(*KnowledgeServiceGenerateArchitectureDiagramResponse_Progress)(nil),
+		(*KnowledgeServiceGenerateArchitectureDiagramResponse_Final)(nil),
 	}
 	file_knowledge_v1_knowledge_proto_msgTypes[3].OneofWrappers = []any{
-		(*GenerateWorkflowStoryStreamMessage_Phase)(nil),
-		(*GenerateWorkflowStoryStreamMessage_Progress)(nil),
-		(*GenerateWorkflowStoryStreamMessage_Final)(nil),
+		(*KnowledgeServiceGenerateWorkflowStoryResponse_Phase)(nil),
+		(*KnowledgeServiceGenerateWorkflowStoryResponse_Progress)(nil),
+		(*KnowledgeServiceGenerateWorkflowStoryResponse_Final)(nil),
 	}
 	file_knowledge_v1_knowledge_proto_msgTypes[4].OneofWrappers = []any{
-		(*ExplainSystemStreamMessage_Phase)(nil),
-		(*ExplainSystemStreamMessage_Progress)(nil),
-		(*ExplainSystemStreamMessage_Final)(nil),
+		(*KnowledgeServiceExplainSystemResponse_Phase)(nil),
+		(*KnowledgeServiceExplainSystemResponse_Progress)(nil),
+		(*KnowledgeServiceExplainSystemResponse_Final)(nil),
 	}
 	file_knowledge_v1_knowledge_proto_msgTypes[5].OneofWrappers = []any{
-		(*GenerateCodeTourStreamMessage_Phase)(nil),
-		(*GenerateCodeTourStreamMessage_Progress)(nil),
-		(*GenerateCodeTourStreamMessage_Final)(nil),
+		(*KnowledgeServiceGenerateCodeTourResponse_Phase)(nil),
+		(*KnowledgeServiceGenerateCodeTourResponse_Progress)(nil),
+		(*KnowledgeServiceGenerateCodeTourResponse_Final)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

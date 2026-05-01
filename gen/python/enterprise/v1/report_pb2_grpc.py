@@ -46,7 +46,7 @@ class EnterpriseReportServiceStub(object):
         self.GenerateReport = channel.unary_stream(
                 '/sourcebridge.enterprise.v1.EnterpriseReportService/GenerateReport',
                 request_serializer=enterprise_dot_v1_dot_report__pb2.GenerateReportRequest.SerializeToString,
-                response_deserializer=enterprise_dot_v1_dot_report__pb2.GenerateReportStreamMessage.FromString,
+                response_deserializer=enterprise_dot_v1_dot_report__pb2.EnterpriseReportServiceGenerateReportResponse.FromString,
                 _registered_method=True)
 
 
@@ -74,7 +74,7 @@ def add_EnterpriseReportServiceServicer_to_server(servicer, server):
             'GenerateReport': grpc.unary_stream_rpc_method_handler(
                     servicer.GenerateReport,
                     request_deserializer=enterprise_dot_v1_dot_report__pb2.GenerateReportRequest.FromString,
-                    response_serializer=enterprise_dot_v1_dot_report__pb2.GenerateReportStreamMessage.SerializeToString,
+                    response_serializer=enterprise_dot_v1_dot_report__pb2.EnterpriseReportServiceGenerateReportResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -112,7 +112,7 @@ class EnterpriseReportService(object):
             target,
             '/sourcebridge.enterprise.v1.EnterpriseReportService/GenerateReport',
             enterprise_dot_v1_dot_report__pb2.GenerateReportRequest.SerializeToString,
-            enterprise_dot_v1_dot_report__pb2.GenerateReportStreamMessage.FromString,
+            enterprise_dot_v1_dot_report__pb2.EnterpriseReportServiceGenerateReportResponse.FromString,
             options,
             channel_credentials,
             insecure,

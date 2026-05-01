@@ -36,7 +36,7 @@ const (
 // instead of a synthetic time-based curve. See thoughts/shared/plans/
 // 2026-04-29-deep-cliffnotes-deadline-exceeded.md (Decision 4b).
 type EnterpriseReportServiceClient interface {
-	GenerateReport(ctx context.Context, in *GenerateReportRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GenerateReportStreamMessage], error)
+	GenerateReport(ctx context.Context, in *GenerateReportRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[EnterpriseReportServiceGenerateReportResponse], error)
 }
 
 type enterpriseReportServiceClient struct {
@@ -47,13 +47,13 @@ func NewEnterpriseReportServiceClient(cc grpc.ClientConnInterface) EnterpriseRep
 	return &enterpriseReportServiceClient{cc}
 }
 
-func (c *enterpriseReportServiceClient) GenerateReport(ctx context.Context, in *GenerateReportRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GenerateReportStreamMessage], error) {
+func (c *enterpriseReportServiceClient) GenerateReport(ctx context.Context, in *GenerateReportRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[EnterpriseReportServiceGenerateReportResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &EnterpriseReportService_ServiceDesc.Streams[0], EnterpriseReportService_GenerateReport_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[GenerateReportRequest, GenerateReportStreamMessage]{ClientStream: stream}
+	x := &grpc.GenericClientStream[GenerateReportRequest, EnterpriseReportServiceGenerateReportResponse]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func (c *enterpriseReportServiceClient) GenerateReport(ctx context.Context, in *
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type EnterpriseReportService_GenerateReportClient = grpc.ServerStreamingClient[GenerateReportStreamMessage]
+type EnterpriseReportService_GenerateReportClient = grpc.ServerStreamingClient[EnterpriseReportServiceGenerateReportResponse]
 
 // EnterpriseReportServiceServer is the server API for EnterpriseReportService service.
 // All implementations must embed UnimplementedEnterpriseReportServiceServer
@@ -80,7 +80,7 @@ type EnterpriseReportService_GenerateReportClient = grpc.ServerStreamingClient[G
 // instead of a synthetic time-based curve. See thoughts/shared/plans/
 // 2026-04-29-deep-cliffnotes-deadline-exceeded.md (Decision 4b).
 type EnterpriseReportServiceServer interface {
-	GenerateReport(*GenerateReportRequest, grpc.ServerStreamingServer[GenerateReportStreamMessage]) error
+	GenerateReport(*GenerateReportRequest, grpc.ServerStreamingServer[EnterpriseReportServiceGenerateReportResponse]) error
 	mustEmbedUnimplementedEnterpriseReportServiceServer()
 }
 
@@ -91,7 +91,7 @@ type EnterpriseReportServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedEnterpriseReportServiceServer struct{}
 
-func (UnimplementedEnterpriseReportServiceServer) GenerateReport(*GenerateReportRequest, grpc.ServerStreamingServer[GenerateReportStreamMessage]) error {
+func (UnimplementedEnterpriseReportServiceServer) GenerateReport(*GenerateReportRequest, grpc.ServerStreamingServer[EnterpriseReportServiceGenerateReportResponse]) error {
 	return status.Error(codes.Unimplemented, "method GenerateReport not implemented")
 }
 func (UnimplementedEnterpriseReportServiceServer) mustEmbedUnimplementedEnterpriseReportServiceServer() {
@@ -121,11 +121,11 @@ func _EnterpriseReportService_GenerateReport_Handler(srv interface{}, stream grp
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(EnterpriseReportServiceServer).GenerateReport(m, &grpc.GenericServerStream[GenerateReportRequest, GenerateReportStreamMessage]{ServerStream: stream})
+	return srv.(EnterpriseReportServiceServer).GenerateReport(m, &grpc.GenericServerStream[GenerateReportRequest, EnterpriseReportServiceGenerateReportResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type EnterpriseReportService_GenerateReportServer = grpc.ServerStreamingServer[GenerateReportStreamMessage]
+type EnterpriseReportService_GenerateReportServer = grpc.ServerStreamingServer[EnterpriseReportServiceGenerateReportResponse]
 
 // EnterpriseReportService_ServiceDesc is the grpc.ServiceDesc for EnterpriseReportService service.
 // It's only intended for direct use with grpc.RegisterService,

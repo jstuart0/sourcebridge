@@ -60,32 +60,32 @@ class KnowledgeServiceStub(object):
         self.GenerateCliffNotes = channel.unary_stream(
                 '/sourcebridge.knowledge.v1.KnowledgeService/GenerateCliffNotes',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesRequest.SerializeToString,
-                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesStreamMessage.FromString,
+                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateCliffNotesResponse.FromString,
                 _registered_method=True)
         self.GenerateLearningPath = channel.unary_stream(
                 '/sourcebridge.knowledge.v1.KnowledgeService/GenerateLearningPath',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathRequest.SerializeToString,
-                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathStreamMessage.FromString,
+                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateLearningPathResponse.FromString,
                 _registered_method=True)
         self.GenerateArchitectureDiagram = channel.unary_stream(
                 '/sourcebridge.knowledge.v1.KnowledgeService/GenerateArchitectureDiagram',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramRequest.SerializeToString,
-                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramStreamMessage.FromString,
+                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateArchitectureDiagramResponse.FromString,
                 _registered_method=True)
         self.GenerateWorkflowStory = channel.unary_stream(
                 '/sourcebridge.knowledge.v1.KnowledgeService/GenerateWorkflowStory',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryRequest.SerializeToString,
-                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryStreamMessage.FromString,
+                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateWorkflowStoryResponse.FromString,
                 _registered_method=True)
         self.ExplainSystem = channel.unary_stream(
                 '/sourcebridge.knowledge.v1.KnowledgeService/ExplainSystem',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemRequest.SerializeToString,
-                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemStreamMessage.FromString,
+                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceExplainSystemResponse.FromString,
                 _registered_method=True)
         self.GenerateCodeTour = channel.unary_stream(
                 '/sourcebridge.knowledge.v1.KnowledgeService/GenerateCodeTour',
                 request_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourRequest.SerializeToString,
-                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourStreamMessage.FromString,
+                response_deserializer=knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateCodeTourResponse.FromString,
                 _registered_method=True)
 
 
@@ -163,32 +163,32 @@ def add_KnowledgeServiceServicer_to_server(servicer, server):
             'GenerateCliffNotes': grpc.unary_stream_rpc_method_handler(
                     servicer.GenerateCliffNotes,
                     request_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesRequest.FromString,
-                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesStreamMessage.SerializeToString,
+                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateCliffNotesResponse.SerializeToString,
             ),
             'GenerateLearningPath': grpc.unary_stream_rpc_method_handler(
                     servicer.GenerateLearningPath,
                     request_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathRequest.FromString,
-                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathStreamMessage.SerializeToString,
+                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateLearningPathResponse.SerializeToString,
             ),
             'GenerateArchitectureDiagram': grpc.unary_stream_rpc_method_handler(
                     servicer.GenerateArchitectureDiagram,
                     request_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramRequest.FromString,
-                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramStreamMessage.SerializeToString,
+                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateArchitectureDiagramResponse.SerializeToString,
             ),
             'GenerateWorkflowStory': grpc.unary_stream_rpc_method_handler(
                     servicer.GenerateWorkflowStory,
                     request_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryRequest.FromString,
-                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryStreamMessage.SerializeToString,
+                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateWorkflowStoryResponse.SerializeToString,
             ),
             'ExplainSystem': grpc.unary_stream_rpc_method_handler(
                     servicer.ExplainSystem,
                     request_deserializer=knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemRequest.FromString,
-                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemStreamMessage.SerializeToString,
+                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceExplainSystemResponse.SerializeToString,
             ),
             'GenerateCodeTour': grpc.unary_stream_rpc_method_handler(
                     servicer.GenerateCodeTour,
                     request_deserializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourRequest.FromString,
-                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourStreamMessage.SerializeToString,
+                    response_serializer=knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateCodeTourResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -240,7 +240,7 @@ class KnowledgeService(object):
             target,
             '/sourcebridge.knowledge.v1.KnowledgeService/GenerateCliffNotes',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesRequest.SerializeToString,
-            knowledge_dot_v1_dot_knowledge__pb2.GenerateCliffNotesStreamMessage.FromString,
+            knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateCliffNotesResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -267,7 +267,7 @@ class KnowledgeService(object):
             target,
             '/sourcebridge.knowledge.v1.KnowledgeService/GenerateLearningPath',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathRequest.SerializeToString,
-            knowledge_dot_v1_dot_knowledge__pb2.GenerateLearningPathStreamMessage.FromString,
+            knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateLearningPathResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -294,7 +294,7 @@ class KnowledgeService(object):
             target,
             '/sourcebridge.knowledge.v1.KnowledgeService/GenerateArchitectureDiagram',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramRequest.SerializeToString,
-            knowledge_dot_v1_dot_knowledge__pb2.GenerateArchitectureDiagramStreamMessage.FromString,
+            knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateArchitectureDiagramResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -321,7 +321,7 @@ class KnowledgeService(object):
             target,
             '/sourcebridge.knowledge.v1.KnowledgeService/GenerateWorkflowStory',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryRequest.SerializeToString,
-            knowledge_dot_v1_dot_knowledge__pb2.GenerateWorkflowStoryStreamMessage.FromString,
+            knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateWorkflowStoryResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -348,7 +348,7 @@ class KnowledgeService(object):
             target,
             '/sourcebridge.knowledge.v1.KnowledgeService/ExplainSystem',
             knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemRequest.SerializeToString,
-            knowledge_dot_v1_dot_knowledge__pb2.ExplainSystemStreamMessage.FromString,
+            knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceExplainSystemResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -375,7 +375,7 @@ class KnowledgeService(object):
             target,
             '/sourcebridge.knowledge.v1.KnowledgeService/GenerateCodeTour',
             knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourRequest.SerializeToString,
-            knowledge_dot_v1_dot_knowledge__pb2.GenerateCodeTourStreamMessage.FromString,
+            knowledge_dot_v1_dot_knowledge__pb2.KnowledgeServiceGenerateCodeTourResponse.FromString,
             options,
             channel_credentials,
             insecure,

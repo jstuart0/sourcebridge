@@ -17,12 +17,16 @@ import "common/v1/knowledge_progress.proto";
 // instead of a synthetic time-based curve. See thoughts/shared/plans/
 // 2026-04-29-deep-cliffnotes-deadline-exceeded.md (Decision 4b).
 service EnterpriseReportService {
-  rpc GenerateReport(GenerateReportRequest) returns (stream GenerateReportStreamMessage);
+  rpc GenerateReport(GenerateReportRequest) returns (stream EnterpriseReportServiceGenerateReportResponse);
 }
 
-// GenerateReportStreamMessage envelopes the GenerateReport server
-// stream. Exactly one of {phase, progress, final} is set per message.
-message GenerateReportStreamMessage {
+// EnterpriseReportServiceGenerateReportResponse envelopes the
+// GenerateReport server stream. Exactly one of {phase, progress, final}
+// is set per message. Service-prefixed name satisfies buf STANDARD's
+// RPC_RESPONSE_STANDARD_NAME rule; the inner final-payload message
+// keeps the bare GenerateReportResponse name where domain callers
+// consume it.
+message EnterpriseReportServiceGenerateReportResponse {
   oneof event {
     sourcebridge.common.v1.KnowledgeStreamPhaseMarker phase = 1;
     sourcebridge.common.v1.KnowledgeStreamProgress progress = 2;

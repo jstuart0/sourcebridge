@@ -946,7 +946,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         self,
         request: knowledge_pb2.GenerateCliffNotesRequest,
         context: grpc.aio.ServicerContext,
-    ) -> AsyncIterator[knowledge_pb2.GenerateCliffNotesStreamMessage]:
+    ) -> AsyncIterator[knowledge_pb2.KnowledgeServiceGenerateCliffNotesResponse]:
         """Generate cliff notes for a repository from its assembled snapshot.
 
         CA-122: Server-streaming. Emits phase markers at every coarse
@@ -1001,7 +1001,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             )
 
         # Phase: SNAPSHOT
-        yield knowledge_pb2.GenerateCliffNotesStreamMessage(
+        yield knowledge_pb2.KnowledgeServiceGenerateCliffNotesResponse(
             phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_SNAPSHOT)
         )
 
@@ -1113,7 +1113,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     and active_strategy[0] is not None
                     and hasattr(active_strategy[0], "progress_snapshot")
                 ):
-                    yield knowledge_pb2.GenerateCliffNotesStreamMessage(
+                    yield knowledge_pb2.KnowledgeServiceGenerateCliffNotesResponse(
                         phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_LEAF_SUMMARIES)
                     )
                     leaf_summaries_emitted = True
@@ -1135,7 +1135,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                         continue
                     proto_phase = phase_name_to_proto.get(name)
                     if proto_phase is not None:
-                        yield knowledge_pb2.GenerateCliffNotesStreamMessage(
+                        yield knowledge_pb2.KnowledgeServiceGenerateCliffNotesResponse(
                             phase=phase_marker(proto_phase)
                         )
                 # codex r2b M3 + r2c: when we are NOT emitting
@@ -1160,7 +1160,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     prog.completed_units = 0
                     prog.total_units = 0
                     prog.unit_kind = ""
-                yield knowledge_pb2.GenerateCliffNotesStreamMessage(progress=prog)
+                yield knowledge_pb2.KnowledgeServiceGenerateCliffNotesResponse(progress=prog)
 
             # Work task is done. Await it to surface the result or
             # exception; never blocks because pump exited only when
@@ -1239,7 +1239,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             )
 
         # Phase: RENDER
-        yield knowledge_pb2.GenerateCliffNotesStreamMessage(
+        yield knowledge_pb2.KnowledgeServiceGenerateCliffNotesResponse(
             phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
         )
 
@@ -1270,7 +1270,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             )
 
         # Phase: FINALIZING
-        yield knowledge_pb2.GenerateCliffNotesStreamMessage(
+        yield knowledge_pb2.KnowledgeServiceGenerateCliffNotesResponse(
             phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
         )
 
@@ -1307,13 +1307,13 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             job_logger_closed[0] = True
 
         # Final terminal message — must be last.
-        yield knowledge_pb2.GenerateCliffNotesStreamMessage(final=response)
+        yield knowledge_pb2.KnowledgeServiceGenerateCliffNotesResponse(final=response)
 
     async def GenerateLearningPath(  # noqa: N802
         self,
         request: knowledge_pb2.GenerateLearningPathRequest,
         context: grpc.aio.ServicerContext,
-    ) -> AsyncIterator[knowledge_pb2.GenerateLearningPathStreamMessage]:
+    ) -> AsyncIterator[knowledge_pb2.KnowledgeServiceGenerateLearningPathResponse]:
         """Generate a learning path for a repository from its snapshot.
 
         CA-122: Server-streaming. Single-call generator -- no internal
@@ -1338,7 +1338,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             return
 
         # Phase: SNAPSHOT
-        yield knowledge_pb2.GenerateLearningPathStreamMessage(
+        yield knowledge_pb2.KnowledgeServiceGenerateLearningPathResponse(
             phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_SNAPSHOT)
         )
 
@@ -1364,7 +1364,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 )
 
             # Phase: RENDER
-            yield knowledge_pb2.GenerateLearningPathStreamMessage(
+            yield knowledge_pb2.KnowledgeServiceGenerateLearningPathResponse(
                 phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
             )
 
@@ -1391,7 +1391,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
                     message="Generating learning path",
                 ):
-                    yield knowledge_pb2.GenerateLearningPathStreamMessage(progress=prog)
+                    yield knowledge_pb2.KnowledgeServiceGenerateLearningPathResponse(progress=prog)
                 result, usage = await work_task
             except asyncio.CancelledError:
                 log.warning("learning_path_stream_cancelled", repository_id=request.repository_id)
@@ -1425,7 +1425,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 return
 
             # Phase: FINALIZING
-            yield knowledge_pb2.GenerateLearningPathStreamMessage(
+            yield knowledge_pb2.KnowledgeServiceGenerateLearningPathResponse(
                 phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
             )
 
@@ -1462,7 +1462,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 )
                 await job_logger.close()
                 job_logger_closed[0] = True
-            yield knowledge_pb2.GenerateLearningPathStreamMessage(final=response)
+            yield knowledge_pb2.KnowledgeServiceGenerateLearningPathResponse(final=response)
         finally:
             if job_logger is not None and not job_logger_closed[0]:
                 with contextlib.suppress(Exception):
@@ -1473,7 +1473,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         self,
         request: knowledge_pb2.GenerateArchitectureDiagramRequest,
         context: grpc.aio.ServicerContext,
-    ) -> AsyncIterator[knowledge_pb2.GenerateArchitectureDiagramStreamMessage]:
+    ) -> AsyncIterator[knowledge_pb2.KnowledgeServiceGenerateArchitectureDiagramResponse]:
         """Generate an AI-authored Mermaid architecture diagram.
 
         CA-122: Server-streaming. Single-call generator.
@@ -1496,7 +1496,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             return
 
         # Phase: SNAPSHOT
-        yield knowledge_pb2.GenerateArchitectureDiagramStreamMessage(
+        yield knowledge_pb2.KnowledgeServiceGenerateArchitectureDiagramResponse(
             phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_SNAPSHOT)
         )
 
@@ -1519,7 +1519,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 )
 
             # Phase: RENDER
-            yield knowledge_pb2.GenerateArchitectureDiagramStreamMessage(
+            yield knowledge_pb2.KnowledgeServiceGenerateArchitectureDiagramResponse(
                 phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
             )
 
@@ -1544,7 +1544,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
                     message="Generating architecture diagram",
                 ):
-                    yield knowledge_pb2.GenerateArchitectureDiagramStreamMessage(progress=prog)
+                    yield knowledge_pb2.KnowledgeServiceGenerateArchitectureDiagramResponse(progress=prog)
                 result, usage = await work_task
             except asyncio.CancelledError:
                 log.warning("architecture_diagram_stream_cancelled", repository_id=request.repository_id)
@@ -1570,7 +1570,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 return
 
             # Phase: FINALIZING
-            yield knowledge_pb2.GenerateArchitectureDiagramStreamMessage(
+            yield knowledge_pb2.KnowledgeServiceGenerateArchitectureDiagramResponse(
                 phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
             )
 
@@ -1625,7 +1625,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 )
                 await job_logger.close()
                 job_logger_closed[0] = True
-            yield knowledge_pb2.GenerateArchitectureDiagramStreamMessage(final=response)
+            yield knowledge_pb2.KnowledgeServiceGenerateArchitectureDiagramResponse(final=response)
         finally:
             if job_logger is not None and not job_logger_closed[0]:
                 with contextlib.suppress(Exception):
@@ -1636,7 +1636,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         self,
         request: knowledge_pb2.GenerateWorkflowStoryRequest,
         context: grpc.aio.ServicerContext,
-    ) -> AsyncIterator[knowledge_pb2.GenerateWorkflowStoryStreamMessage]:
+    ) -> AsyncIterator[knowledge_pb2.KnowledgeServiceGenerateWorkflowStoryResponse]:
         """Generate a grounded workflow story for a repository scope.
 
         CA-122: Server-streaming. Single-call generator.
@@ -1661,7 +1661,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             return
 
         # Phase: SNAPSHOT
-        yield knowledge_pb2.GenerateWorkflowStoryStreamMessage(
+        yield knowledge_pb2.KnowledgeServiceGenerateWorkflowStoryResponse(
             phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_SNAPSHOT)
         )
 
@@ -1691,7 +1691,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 )
 
             # Phase: RENDER
-            yield knowledge_pb2.GenerateWorkflowStoryStreamMessage(
+            yield knowledge_pb2.KnowledgeServiceGenerateWorkflowStoryResponse(
                 phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
             )
 
@@ -1719,7 +1719,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
                     message="Generating workflow story",
                 ):
-                    yield knowledge_pb2.GenerateWorkflowStoryStreamMessage(progress=prog)
+                    yield knowledge_pb2.KnowledgeServiceGenerateWorkflowStoryResponse(progress=prog)
                 result, usage = await work_task
             except asyncio.CancelledError:
                 log.warning("workflow_story_stream_cancelled", repository_id=request.repository_id)
@@ -1747,7 +1747,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 return
 
             # Phase: FINALIZING
-            yield knowledge_pb2.GenerateWorkflowStoryStreamMessage(
+            yield knowledge_pb2.KnowledgeServiceGenerateWorkflowStoryResponse(
                 phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
             )
 
@@ -1793,7 +1793,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 )
                 await job_logger.close()
                 job_logger_closed[0] = True
-            yield knowledge_pb2.GenerateWorkflowStoryStreamMessage(final=response)
+            yield knowledge_pb2.KnowledgeServiceGenerateWorkflowStoryResponse(final=response)
         finally:
             if job_logger is not None and not job_logger_closed[0]:
                 with contextlib.suppress(Exception):
@@ -1804,7 +1804,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         self,
         request: knowledge_pb2.ExplainSystemRequest,
         context: grpc.aio.ServicerContext,
-    ) -> AsyncIterator[knowledge_pb2.ExplainSystemStreamMessage]:
+    ) -> AsyncIterator[knowledge_pb2.KnowledgeServiceExplainSystemResponse]:
         """Generate a transient whole-system explanation.
 
         CA-122: Server-streaming. Single-call generator.
@@ -1824,7 +1824,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             return
 
         # Phase: SNAPSHOT
-        yield knowledge_pb2.ExplainSystemStreamMessage(
+        yield knowledge_pb2.KnowledgeServiceExplainSystemResponse(
             phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_SNAPSHOT)
         )
 
@@ -1849,7 +1849,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 )
 
             # Phase: RENDER
-            yield knowledge_pb2.ExplainSystemStreamMessage(
+            yield knowledge_pb2.KnowledgeServiceExplainSystemResponse(
                 phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
             )
 
@@ -1874,7 +1874,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
                     message="Explaining system",
                 ):
-                    yield knowledge_pb2.ExplainSystemStreamMessage(progress=prog)
+                    yield knowledge_pb2.KnowledgeServiceExplainSystemResponse(progress=prog)
                 result, usage = await work_task
             except asyncio.CancelledError:
                 log.warning("explain_system_stream_cancelled", repository_id=request.repository_id)
@@ -1900,7 +1900,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 return
 
             # Phase: FINALIZING
-            yield knowledge_pb2.ExplainSystemStreamMessage(
+            yield knowledge_pb2.KnowledgeServiceExplainSystemResponse(
                 phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
             )
 
@@ -1918,7 +1918,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 )
                 await job_logger.close()
                 job_logger_closed[0] = True
-            yield knowledge_pb2.ExplainSystemStreamMessage(final=response)
+            yield knowledge_pb2.KnowledgeServiceExplainSystemResponse(final=response)
         finally:
             if job_logger is not None and not job_logger_closed[0]:
                 with contextlib.suppress(Exception):
@@ -1929,7 +1929,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         self,
         request: knowledge_pb2.GenerateCodeTourRequest,
         context: grpc.aio.ServicerContext,
-    ) -> AsyncIterator[knowledge_pb2.GenerateCodeTourStreamMessage]:
+    ) -> AsyncIterator[knowledge_pb2.KnowledgeServiceGenerateCodeTourResponse]:
         """Generate a code tour for a repository from its assembled snapshot.
 
         CA-122: Server-streaming. Single-call generator.
@@ -1952,7 +1952,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             return
 
         # Phase: SNAPSHOT
-        yield knowledge_pb2.GenerateCodeTourStreamMessage(
+        yield knowledge_pb2.KnowledgeServiceGenerateCodeTourResponse(
             phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_SNAPSHOT)
         )
 
@@ -1977,7 +1977,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 )
 
             # Phase: RENDER
-            yield knowledge_pb2.GenerateCodeTourStreamMessage(
+            yield knowledge_pb2.KnowledgeServiceGenerateCodeTourResponse(
                 phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
             )
 
@@ -2002,7 +2002,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
                     message="Generating code tour",
                 ):
-                    yield knowledge_pb2.GenerateCodeTourStreamMessage(progress=prog)
+                    yield knowledge_pb2.KnowledgeServiceGenerateCodeTourResponse(progress=prog)
                 result, usage = await work_task
             except asyncio.CancelledError:
                 log.warning("code_tour_stream_cancelled", repository_id=request.repository_id)
@@ -2028,7 +2028,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 return
 
             # Phase: FINALIZING
-            yield knowledge_pb2.GenerateCodeTourStreamMessage(
+            yield knowledge_pb2.KnowledgeServiceGenerateCodeTourResponse(
                 phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
             )
 
@@ -2062,7 +2062,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 )
                 await job_logger.close()
                 job_logger_closed[0] = True
-            yield knowledge_pb2.GenerateCodeTourStreamMessage(final=response)
+            yield knowledge_pb2.KnowledgeServiceGenerateCodeTourResponse(final=response)
         finally:
             if job_logger is not None and not job_logger_closed[0]:
                 with contextlib.suppress(Exception):
@@ -2073,7 +2073,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         self,
         request: Any,
         context: grpc.aio.ServicerContext,
-    ) -> AsyncIterator[report_pb2.GenerateReportStreamMessage]:
+    ) -> AsyncIterator[report_pb2.EnterpriseReportServiceGenerateReportResponse]:
         """Generate a professional multi-section report.
 
         CA-122: Server-streaming. The report engine already exposes a
@@ -2109,7 +2109,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     section_defs = json.loads(request.section_definitions_json)
 
             # Phase: SNAPSHOT
-            yield report_pb2.GenerateReportStreamMessage(
+            yield report_pb2.EnterpriseReportServiceGenerateReportResponse(
                 phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_SNAPSHOT)
             )
 
@@ -2150,7 +2150,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             config.model_override = report_model or None
 
             # Phase: RENDER
-            yield report_pb2.GenerateReportStreamMessage(
+            yield report_pb2.EnterpriseReportServiceGenerateReportResponse(
                 phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER)
             )
 
@@ -2201,7 +2201,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 while not engine_task.done():
                     try:
                         evt = await asyncio.wait_for(progress_queue.get(), timeout=1.0)
-                        yield report_pb2.GenerateReportStreamMessage(progress=evt)
+                        yield report_pb2.EnterpriseReportServiceGenerateReportResponse(progress=evt)
                         last_event_at = asyncio.get_running_loop().time()
                     except TimeoutError:
                         # No engine event in the last second. Emit a
@@ -2211,7 +2211,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                         # fresh.
                         now = asyncio.get_running_loop().time()
                         if now - last_event_at >= hb_interval:
-                            yield report_pb2.GenerateReportStreamMessage(
+                            yield report_pb2.EnterpriseReportServiceGenerateReportResponse(
                                 progress=progress_event(
                                     phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
                                     completed_units=0,
@@ -2225,7 +2225,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 # Drain any remaining progress events the engine pushed
                 # right before completing.
                 while not progress_queue.empty():
-                    yield report_pb2.GenerateReportStreamMessage(progress=progress_queue.get_nowait())
+                    yield report_pb2.EnterpriseReportServiceGenerateReportResponse(progress=progress_queue.get_nowait())
                 # Surface engine result or exception.
                 result = await engine_task
             except asyncio.CancelledError:
@@ -2244,7 +2244,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                         log.exception("report_engine_cleanup_error", report_id=request.report_id)
 
             # Phase: FINALIZING
-            yield report_pb2.GenerateReportStreamMessage(
+            yield report_pb2.EnterpriseReportServiceGenerateReportResponse(
                 phase=phase_marker(knowledge_progress_pb2.KNOWLEDGE_PHASE_FINALIZING)
             )
 
@@ -2288,7 +2288,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     operation="report_generation",
                 ),
             )
-            yield report_pb2.GenerateReportStreamMessage(final=response)
+            yield report_pb2.EnterpriseReportServiceGenerateReportResponse(final=response)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

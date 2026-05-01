@@ -72,7 +72,7 @@ type scriptStep struct {
 	pause time.Duration
 }
 
-func (s *fakeKnowledgeServer) GenerateCliffNotes(req *knowledgev1.GenerateCliffNotesRequest, stream grpc.ServerStreamingServer[knowledgev1.GenerateCliffNotesStreamMessage]) error {
+func (s *fakeKnowledgeServer) GenerateCliffNotes(req *knowledgev1.GenerateCliffNotesRequest, stream grpc.ServerStreamingServer[knowledgev1.KnowledgeServiceGenerateCliffNotesResponse]) error {
 	for _, step := range s.script {
 		if step.pause > 0 {
 			select {
@@ -88,19 +88,19 @@ func (s *fakeKnowledgeServer) GenerateCliffNotes(req *knowledgev1.GenerateCliffN
 		if step.returnEOF {
 			return nil
 		}
-		var msg *knowledgev1.GenerateCliffNotesStreamMessage
+		var msg *knowledgev1.KnowledgeServiceGenerateCliffNotesResponse
 		switch {
 		case step.phase != nil:
-			msg = &knowledgev1.GenerateCliffNotesStreamMessage{
-				Event: &knowledgev1.GenerateCliffNotesStreamMessage_Phase{Phase: step.phase},
+			msg = &knowledgev1.KnowledgeServiceGenerateCliffNotesResponse{
+				Event: &knowledgev1.KnowledgeServiceGenerateCliffNotesResponse_Phase{Phase: step.phase},
 			}
 		case step.progress != nil:
-			msg = &knowledgev1.GenerateCliffNotesStreamMessage{
-				Event: &knowledgev1.GenerateCliffNotesStreamMessage_Progress{Progress: step.progress},
+			msg = &knowledgev1.KnowledgeServiceGenerateCliffNotesResponse{
+				Event: &knowledgev1.KnowledgeServiceGenerateCliffNotesResponse_Progress{Progress: step.progress},
 			}
 		case step.finalCN != nil:
-			msg = &knowledgev1.GenerateCliffNotesStreamMessage{
-				Event: &knowledgev1.GenerateCliffNotesStreamMessage_Final{Final: step.finalCN},
+			msg = &knowledgev1.KnowledgeServiceGenerateCliffNotesResponse{
+				Event: &knowledgev1.KnowledgeServiceGenerateCliffNotesResponse_Final{Final: step.finalCN},
 			}
 		default:
 			return fmt.Errorf("scriptStep has no payload")
@@ -112,7 +112,7 @@ func (s *fakeKnowledgeServer) GenerateCliffNotes(req *knowledgev1.GenerateCliffN
 	return nil
 }
 
-func (s *fakeKnowledgeServer) GenerateReport(req *enterprisev1.GenerateReportRequest, stream grpc.ServerStreamingServer[enterprisev1.GenerateReportStreamMessage]) error {
+func (s *fakeKnowledgeServer) GenerateReport(req *enterprisev1.GenerateReportRequest, stream grpc.ServerStreamingServer[enterprisev1.EnterpriseReportServiceGenerateReportResponse]) error {
 	for _, step := range s.script {
 		if step.pause > 0 {
 			select {
@@ -128,19 +128,19 @@ func (s *fakeKnowledgeServer) GenerateReport(req *enterprisev1.GenerateReportReq
 		if step.returnEOF {
 			return nil
 		}
-		var msg *enterprisev1.GenerateReportStreamMessage
+		var msg *enterprisev1.EnterpriseReportServiceGenerateReportResponse
 		switch {
 		case step.phase != nil:
-			msg = &enterprisev1.GenerateReportStreamMessage{
-				Event: &enterprisev1.GenerateReportStreamMessage_Phase{Phase: step.phase},
+			msg = &enterprisev1.EnterpriseReportServiceGenerateReportResponse{
+				Event: &enterprisev1.EnterpriseReportServiceGenerateReportResponse_Phase{Phase: step.phase},
 			}
 		case step.progress != nil:
-			msg = &enterprisev1.GenerateReportStreamMessage{
-				Event: &enterprisev1.GenerateReportStreamMessage_Progress{Progress: step.progress},
+			msg = &enterprisev1.EnterpriseReportServiceGenerateReportResponse{
+				Event: &enterprisev1.EnterpriseReportServiceGenerateReportResponse_Progress{Progress: step.progress},
 			}
 		case step.finalRep != nil:
-			msg = &enterprisev1.GenerateReportStreamMessage{
-				Event: &enterprisev1.GenerateReportStreamMessage_Final{Final: step.finalRep},
+			msg = &enterprisev1.EnterpriseReportServiceGenerateReportResponse{
+				Event: &enterprisev1.EnterpriseReportServiceGenerateReportResponse_Final{Final: step.finalRep},
 			}
 		default:
 			return fmt.Errorf("scriptStep has no payload")

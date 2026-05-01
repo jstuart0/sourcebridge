@@ -14,7 +14,7 @@ class EnterpriseReportServicer(report_pb2_grpc.EnterpriseReportServiceServicer):
 
     CA-122: GenerateReport is server-streaming. The shim is a thin
     delegator to KnowledgeServicer._generate_report which produces an
-    AsyncIterator[GenerateReportStreamMessage].
+    AsyncIterator[EnterpriseReportServiceGenerateReportResponse].
     """
 
     def __init__(self, knowledge_servicer: KnowledgeServicer) -> None:
@@ -24,6 +24,6 @@ class EnterpriseReportServicer(report_pb2_grpc.EnterpriseReportServiceServicer):
         self,
         request: report_pb2.GenerateReportRequest,
         context: grpc.aio.ServicerContext,
-    ) -> AsyncIterator[report_pb2.GenerateReportStreamMessage]:
+    ) -> AsyncIterator[report_pb2.EnterpriseReportServiceGenerateReportResponse]:
         async for msg in self._knowledge_servicer._generate_report(request, context):
             yield msg

@@ -32,28 +32,31 @@ import "common/v1/knowledge_progress.proto";
 // cancels stuck runs. See thoughts/shared/plans/2026-04-29-deep-cliffnotes-deadline-exceeded.md.
 service KnowledgeService {
   // GenerateCliffNotes produces a structured cliff-notes report for a repository.
-  rpc GenerateCliffNotes(GenerateCliffNotesRequest) returns (stream GenerateCliffNotesStreamMessage);
+  rpc GenerateCliffNotes(GenerateCliffNotesRequest) returns (stream KnowledgeServiceGenerateCliffNotesResponse);
 
   // GenerateLearningPath produces a guided learning path for a repository.
-  rpc GenerateLearningPath(GenerateLearningPathRequest) returns (stream GenerateLearningPathStreamMessage);
+  rpc GenerateLearningPath(GenerateLearningPathRequest) returns (stream KnowledgeServiceGenerateLearningPathResponse);
 
   // GenerateArchitectureDiagram produces an AI-authored Mermaid architecture diagram.
-  rpc GenerateArchitectureDiagram(GenerateArchitectureDiagramRequest) returns (stream GenerateArchitectureDiagramStreamMessage);
+  rpc GenerateArchitectureDiagram(GenerateArchitectureDiagramRequest) returns (stream KnowledgeServiceGenerateArchitectureDiagramResponse);
 
   // GenerateWorkflowStory produces a grounded narrative for how a workflow is used.
-  rpc GenerateWorkflowStory(GenerateWorkflowStoryRequest) returns (stream GenerateWorkflowStoryStreamMessage);
+  rpc GenerateWorkflowStory(GenerateWorkflowStoryRequest) returns (stream KnowledgeServiceGenerateWorkflowStoryResponse);
 
   // ExplainSystem produces a transient whole-system explanation.
-  rpc ExplainSystem(ExplainSystemRequest) returns (stream ExplainSystemStreamMessage);
+  rpc ExplainSystem(ExplainSystemRequest) returns (stream KnowledgeServiceExplainSystemResponse);
 
   // GenerateCodeTour produces a guided code tour for a repository.
-  rpc GenerateCodeTour(GenerateCodeTourRequest) returns (stream GenerateCodeTourStreamMessage);
+  rpc GenerateCodeTour(GenerateCodeTourRequest) returns (stream KnowledgeServiceGenerateCodeTourResponse);
 }
 
-// GenerateCliffNotesStreamMessage is the per-message envelope on the
+// KnowledgeServiceGenerateCliffNotesResponse is the per-message envelope on the
 // GenerateCliffNotes server stream. Exactly one of {phase, progress,
-// final} is set per message.
-message GenerateCliffNotesStreamMessage {
+// final} is set per message. Service-prefixed name satisfies buf
+// STANDARD's RPC_RESPONSE_STANDARD_NAME rule; the inner final-payload
+// message keeps the bare GenerateCliffNotesResponse name where domain
+// callers consume it.
+message KnowledgeServiceGenerateCliffNotesResponse {
   oneof event {
     sourcebridge.common.v1.KnowledgeStreamPhaseMarker phase = 1;
     sourcebridge.common.v1.KnowledgeStreamProgress progress = 2;
@@ -61,9 +64,9 @@ message GenerateCliffNotesStreamMessage {
   }
 }
 
-// GenerateLearningPathStreamMessage envelopes the GenerateLearningPath
-// server stream.
-message GenerateLearningPathStreamMessage {
+// KnowledgeServiceGenerateLearningPathResponse envelopes the
+// GenerateLearningPath server stream.
+message KnowledgeServiceGenerateLearningPathResponse {
   oneof event {
     sourcebridge.common.v1.KnowledgeStreamPhaseMarker phase = 1;
     sourcebridge.common.v1.KnowledgeStreamProgress progress = 2;
@@ -71,9 +74,9 @@ message GenerateLearningPathStreamMessage {
   }
 }
 
-// GenerateArchitectureDiagramStreamMessage envelopes the
+// KnowledgeServiceGenerateArchitectureDiagramResponse envelopes the
 // GenerateArchitectureDiagram server stream.
-message GenerateArchitectureDiagramStreamMessage {
+message KnowledgeServiceGenerateArchitectureDiagramResponse {
   oneof event {
     sourcebridge.common.v1.KnowledgeStreamPhaseMarker phase = 1;
     sourcebridge.common.v1.KnowledgeStreamProgress progress = 2;
@@ -81,9 +84,9 @@ message GenerateArchitectureDiagramStreamMessage {
   }
 }
 
-// GenerateWorkflowStoryStreamMessage envelopes the GenerateWorkflowStory
-// server stream.
-message GenerateWorkflowStoryStreamMessage {
+// KnowledgeServiceGenerateWorkflowStoryResponse envelopes the
+// GenerateWorkflowStory server stream.
+message KnowledgeServiceGenerateWorkflowStoryResponse {
   oneof event {
     sourcebridge.common.v1.KnowledgeStreamPhaseMarker phase = 1;
     sourcebridge.common.v1.KnowledgeStreamProgress progress = 2;
@@ -91,8 +94,9 @@ message GenerateWorkflowStoryStreamMessage {
   }
 }
 
-// ExplainSystemStreamMessage envelopes the ExplainSystem server stream.
-message ExplainSystemStreamMessage {
+// KnowledgeServiceExplainSystemResponse envelopes the ExplainSystem
+// server stream.
+message KnowledgeServiceExplainSystemResponse {
   oneof event {
     sourcebridge.common.v1.KnowledgeStreamPhaseMarker phase = 1;
     sourcebridge.common.v1.KnowledgeStreamProgress progress = 2;
@@ -100,9 +104,9 @@ message ExplainSystemStreamMessage {
   }
 }
 
-// GenerateCodeTourStreamMessage envelopes the GenerateCodeTour server
-// stream.
-message GenerateCodeTourStreamMessage {
+// KnowledgeServiceGenerateCodeTourResponse envelopes the
+// GenerateCodeTour server stream.
+message KnowledgeServiceGenerateCodeTourResponse {
   oneof event {
     sourcebridge.common.v1.KnowledgeStreamPhaseMarker phase = 1;
     sourcebridge.common.v1.KnowledgeStreamProgress progress = 2;
