@@ -26,6 +26,7 @@ import (
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 	requirementsv1 "github.com/sourcebridge/sourcebridge/gen/go/requirements/v1"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
+	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
 // WorkerLLM is the narrow set of LLM-bearing worker RPCs that Caller
@@ -53,20 +54,27 @@ type WorkerLLM interface {
 	AnalyzeSymbol(ctx context.Context, req *reasoningv1.AnalyzeSymbolRequest) (*reasoningv1.AnalyzeSymbolResponse, error)
 	ReviewFile(ctx context.Context, req *reasoningv1.ReviewFileRequest) (*reasoningv1.ReviewFileResponse, error)
 
-	// Knowledge service
-	GenerateCliffNotes(ctx context.Context, req *knowledgev1.GenerateCliffNotesRequest) (*knowledgev1.GenerateCliffNotesResponse, error)
-	GenerateLearningPath(ctx context.Context, req *knowledgev1.GenerateLearningPathRequest) (*knowledgev1.GenerateLearningPathResponse, error)
-	GenerateArchitectureDiagram(ctx context.Context, req *knowledgev1.GenerateArchitectureDiagramRequest) (*knowledgev1.GenerateArchitectureDiagramResponse, error)
-	GenerateWorkflowStory(ctx context.Context, req *knowledgev1.GenerateWorkflowStoryRequest) (*knowledgev1.GenerateWorkflowStoryResponse, error)
-	GenerateCodeTour(ctx context.Context, req *knowledgev1.GenerateCodeTourRequest) (*knowledgev1.GenerateCodeTourResponse, error)
-	ExplainSystem(ctx context.Context, req *knowledgev1.ExplainSystemRequest) (*knowledgev1.ExplainSystemResponse, error)
+	// Knowledge service.
+	//
+	// CA-122: All seven knowledge/report RPCs are now server-streaming,
+	// with a uniform variadic ...worker.CallOption parameter for
+	// per-call hooks (most importantly worker.WithProgressHandler for
+	// surfacing phase + progress events). Returning the final response
+	// and an error keeps every caller's existing call-site shape;
+	// callers that don't need progress events simply pass no options.
+	GenerateCliffNotes(ctx context.Context, req *knowledgev1.GenerateCliffNotesRequest, opts ...worker.CallOption) (*knowledgev1.GenerateCliffNotesResponse, error)
+	GenerateLearningPath(ctx context.Context, req *knowledgev1.GenerateLearningPathRequest, opts ...worker.CallOption) (*knowledgev1.GenerateLearningPathResponse, error)
+	GenerateArchitectureDiagram(ctx context.Context, req *knowledgev1.GenerateArchitectureDiagramRequest, opts ...worker.CallOption) (*knowledgev1.GenerateArchitectureDiagramResponse, error)
+	GenerateWorkflowStory(ctx context.Context, req *knowledgev1.GenerateWorkflowStoryRequest, opts ...worker.CallOption) (*knowledgev1.GenerateWorkflowStoryResponse, error)
+	GenerateCodeTour(ctx context.Context, req *knowledgev1.GenerateCodeTourRequest, opts ...worker.CallOption) (*knowledgev1.GenerateCodeTourResponse, error)
+	ExplainSystem(ctx context.Context, req *knowledgev1.ExplainSystemRequest, opts ...worker.CallOption) (*knowledgev1.ExplainSystemResponse, error)
 
 	// Requirements service
 	EnrichRequirement(ctx context.Context, req *requirementsv1.EnrichRequirementRequest) (*requirementsv1.EnrichRequirementResponse, error)
 	ExtractSpecs(ctx context.Context, req *requirementsv1.ExtractSpecsRequest) (*requirementsv1.ExtractSpecsResponse, error)
 
-	// Enterprise reports
-	GenerateReport(ctx context.Context, req *enterprisev1.GenerateReportRequest) (*enterprisev1.GenerateReportResponse, error)
+	// Enterprise reports (server-streaming; CA-122).
+	GenerateReport(ctx context.Context, req *enterprisev1.GenerateReportRequest, opts ...worker.CallOption) (*enterprisev1.GenerateReportResponse, error)
 }
 
 // Caller is the LLM-aware adapter around a WorkerLLM. Every protected RPC
@@ -173,10 +181,31 @@ func (c *Caller) withResolved(ctx context.Context, repoID, op string, jobID, art
 // can attach to a single RPC. Most callers leave this zero; the living-
 // wiki and knowledge pipelines use it to thread orchestrator metadata
 // through to the worker for per-job tracing.
+//
+// CA-122 / Decision 4c: OnProgress is the orchestrator-facing callback
+// for streaming knowledge RPCs. The Caller wraps it in
+// worker.WithProgressHandler(...) when forwarding to the underlying
+// Client.Generate* method, so each Caller method exposes a single
+// consistent shape: (ctx, repoID, op, jm, req). The handler runs on
+// the gRPC stream.Recv() goroutine; the orchestrator-side adapter
+// must dispatch through a buffered channel so DB-write latency does
+// not become gRPC backpressure.
 type JobMetadata struct {
 	JobID      string
 	ArtifactID string
 	JobType    string
+	OnProgress func(worker.KnowledgeStreamEvent)
+}
+
+// progressOpts converts a JobMetadata into the variadic
+// worker.CallOption slice forwarded to the underlying Client method.
+// Returns an empty slice when OnProgress is nil so callers without
+// progress handling pay no extra allocation per call.
+func (jm JobMetadata) progressOpts() []worker.CallOption {
+	if jm.OnProgress == nil {
+		return nil
+	}
+	return []worker.CallOption{worker.WithProgressHandler(jm.OnProgress)}
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -268,15 +297,19 @@ func (c *Caller) ReviewFile(ctx context.Context, repoID, op string, req *reasoni
 	return c.inner.ReviewFile(ctx, req)
 }
 
-// GenerateCliffNotesWithJob is the JobMetadata-aware wrapper used by the
-// knowledge pipeline; non-knowledge callers can use GenerateCliffNotes
-// which omits job metadata.
+// GenerateCliffNotesWithJob is the JobMetadata-aware wrapper used by
+// the knowledge pipeline; non-knowledge callers can use
+// GenerateCliffNotes which omits job metadata.
+//
+// CA-122: forwards JobMetadata.OnProgress to the underlying streaming
+// Client.GenerateCliffNotes via worker.WithProgressHandler so phase +
+// progress events surface through the orchestrator's progress driver.
 func (c *Caller) GenerateCliffNotesWithJob(ctx context.Context, repoID, op string, jm JobMetadata, req *knowledgev1.GenerateCliffNotesRequest) (*knowledgev1.GenerateCliffNotesResponse, error) {
 	ctx, _, err := c.withResolved(ctx, repoID, op, jm.JobID, jm.ArtifactID, jm.JobType)
 	if err != nil {
 		return nil, err
 	}
-	return c.inner.GenerateCliffNotes(ctx, req)
+	return c.inner.GenerateCliffNotes(ctx, req, jm.progressOpts()...)
 }
 
 func (c *Caller) GenerateCliffNotes(ctx context.Context, repoID, op string, req *knowledgev1.GenerateCliffNotesRequest) (*knowledgev1.GenerateCliffNotesResponse, error) {
@@ -288,7 +321,7 @@ func (c *Caller) GenerateLearningPathWithJob(ctx context.Context, repoID, op str
 	if err != nil {
 		return nil, err
 	}
-	return c.inner.GenerateLearningPath(ctx, req)
+	return c.inner.GenerateLearningPath(ctx, req, jm.progressOpts()...)
 }
 
 func (c *Caller) GenerateLearningPath(ctx context.Context, repoID, op string, req *knowledgev1.GenerateLearningPathRequest) (*knowledgev1.GenerateLearningPathResponse, error) {
@@ -300,7 +333,7 @@ func (c *Caller) GenerateArchitectureDiagramWithJob(ctx context.Context, repoID,
 	if err != nil {
 		return nil, err
 	}
-	return c.inner.GenerateArchitectureDiagram(ctx, req)
+	return c.inner.GenerateArchitectureDiagram(ctx, req, jm.progressOpts()...)
 }
 
 func (c *Caller) GenerateArchitectureDiagram(ctx context.Context, repoID, op string, req *knowledgev1.GenerateArchitectureDiagramRequest) (*knowledgev1.GenerateArchitectureDiagramResponse, error) {
@@ -312,7 +345,7 @@ func (c *Caller) GenerateWorkflowStoryWithJob(ctx context.Context, repoID, op st
 	if err != nil {
 		return nil, err
 	}
-	return c.inner.GenerateWorkflowStory(ctx, req)
+	return c.inner.GenerateWorkflowStory(ctx, req, jm.progressOpts()...)
 }
 
 func (c *Caller) GenerateWorkflowStory(ctx context.Context, repoID, op string, req *knowledgev1.GenerateWorkflowStoryRequest) (*knowledgev1.GenerateWorkflowStoryResponse, error) {
@@ -324,19 +357,26 @@ func (c *Caller) GenerateCodeTourWithJob(ctx context.Context, repoID, op string,
 	if err != nil {
 		return nil, err
 	}
-	return c.inner.GenerateCodeTour(ctx, req)
+	return c.inner.GenerateCodeTour(ctx, req, jm.progressOpts()...)
 }
 
 func (c *Caller) GenerateCodeTour(ctx context.Context, repoID, op string, req *knowledgev1.GenerateCodeTourRequest) (*knowledgev1.GenerateCodeTourResponse, error) {
 	return c.GenerateCodeTourWithJob(ctx, repoID, op, JobMetadata{}, req)
 }
 
-func (c *Caller) ExplainSystem(ctx context.Context, repoID, op string, req *knowledgev1.ExplainSystemRequest) (*knowledgev1.ExplainSystemResponse, error) {
-	ctx, _, err := c.withResolved(ctx, repoID, op, "", "", "")
+// ExplainSystemWithJob is the JobMetadata-aware variant of ExplainSystem.
+// CA-122: ExplainSystem is now streaming, so OnProgress is honored.
+// Most callers use the no-job ExplainSystem variant.
+func (c *Caller) ExplainSystemWithJob(ctx context.Context, repoID, op string, jm JobMetadata, req *knowledgev1.ExplainSystemRequest) (*knowledgev1.ExplainSystemResponse, error) {
+	ctx, _, err := c.withResolved(ctx, repoID, op, jm.JobID, jm.ArtifactID, jm.JobType)
 	if err != nil {
 		return nil, err
 	}
-	return c.inner.ExplainSystem(ctx, req)
+	return c.inner.ExplainSystem(ctx, req, jm.progressOpts()...)
+}
+
+func (c *Caller) ExplainSystem(ctx context.Context, repoID, op string, req *knowledgev1.ExplainSystemRequest) (*knowledgev1.ExplainSystemResponse, error) {
+	return c.ExplainSystemWithJob(ctx, repoID, op, JobMetadata{}, req)
 }
 
 func (c *Caller) EnrichRequirement(ctx context.Context, repoID, op string, req *requirementsv1.EnrichRequirementRequest) (*requirementsv1.EnrichRequirementResponse, error) {
@@ -355,10 +395,17 @@ func (c *Caller) ExtractSpecs(ctx context.Context, repoID, op string, req *requi
 	return c.inner.ExtractSpecs(ctx, req)
 }
 
-func (c *Caller) GenerateReport(ctx context.Context, repoID, op string, req *enterprisev1.GenerateReportRequest) (*enterprisev1.GenerateReportResponse, error) {
-	ctx, _, err := c.withResolved(ctx, repoID, op, "", "", "")
+// GenerateReportWithJob is the JobMetadata-aware variant of GenerateReport.
+// CA-122: GenerateReport is now streaming and surfaces the engine's
+// fine-grained progress fractions via OnProgress.
+func (c *Caller) GenerateReportWithJob(ctx context.Context, repoID, op string, jm JobMetadata, req *enterprisev1.GenerateReportRequest) (*enterprisev1.GenerateReportResponse, error) {
+	ctx, _, err := c.withResolved(ctx, repoID, op, jm.JobID, jm.ArtifactID, jm.JobType)
 	if err != nil {
 		return nil, err
 	}
-	return c.inner.GenerateReport(ctx, req)
+	return c.inner.GenerateReport(ctx, req, jm.progressOpts()...)
+}
+
+func (c *Caller) GenerateReport(ctx context.Context, repoID, op string, req *enterprisev1.GenerateReportRequest) (*enterprisev1.GenerateReportResponse, error) {
+	return c.GenerateReportWithJob(ctx, repoID, op, JobMetadata{}, req)
 }

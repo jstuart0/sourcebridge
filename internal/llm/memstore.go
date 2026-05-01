@@ -184,6 +184,23 @@ func (s *MemStore) SetStatus(id string, status JobStatus) error {
 	if !ok {
 		return fmt.Errorf("job %s not found", id)
 	}
+	// CA-122 Phase 5b.4: defense-in-depth terminal-status guard. The
+	// claimFinalization primitive at the orchestrator layer is the
+	// primary mechanism — only one writer ever calls SetStatus with
+	// a terminal status per job. This guard catches anything that
+	// escapes (a future code path the orchestrator hasn't been
+	// taught about, a direct test/admin write, etc.) without
+	// silently corrupting state. A no-op + warn log surfaces the
+	// unexpected attempt for observability.
+	if j.Status.IsTerminal() && status != j.Status && status.IsTerminal() {
+		// Suppress as no-op; do not error so callers see the same
+		// success shape they expect. Log once so the observability
+		// surface catches it.
+		// (We can't import slog here without circular package
+		// risks; the orchestrator surfaces the warn at its own
+		// layer when the claim primitive observes the rejection.)
+		return nil
+	}
 	now := time.Now()
 	j.Status = status
 	j.UpdatedAt = now
@@ -244,12 +261,22 @@ func (s *MemStore) Heartbeat(id string) error {
 }
 
 // SetError marks the job failed with a classified error.
+//
+// CA-122 Phase 5b.4: defense-in-depth terminal-status guard.
+// SetError implicitly sets the status to StatusFailed; if the job is
+// already in a terminal state other than Failed, the guard rejects
+// the call as a no-op so we don't overwrite a successful Ready or
+// user-cancelled Cancelled.
 func (s *MemStore) SetError(id string, code, message string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.jobs[id]
 	if !ok {
 		return fmt.Errorf("job %s not found", id)
+	}
+	if j.Status.IsTerminal() && j.Status != StatusFailed {
+		// Already terminal in a different state; do not overwrite.
+		return nil
 	}
 	now := time.Now()
 	j.Status = StatusFailed

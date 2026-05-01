@@ -35,6 +35,8 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 	"github.com/sourcebridge/sourcebridge/internal/version"
+
+	"github.com/vektah/gqlparser/v2/gqlerror"
 )
 
 // AddRepository is the resolver for the addRepository field.
@@ -391,9 +393,14 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 			"scope_type":     string(scope.ScopeType),
 			"scope_path":     scope.ScopePath,
 		})
-		stopProgress := r.startUnderstandingProgressTicker(rt, understanding.ID)
-		defer stopProgress()
-		resp, err := r.LLMCaller.GenerateCliffNotesWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, understanding.ID, "build_repository_understanding"), &knowledgev1.GenerateCliffNotesRequest{
+		// CA-122 codex r2 H2: real-progress stream driver replaces the
+		// synthetic ticker so the orchestrator's UpdatedAt only stays
+		// fresh when the worker is genuinely making progress. The
+		// understanding row is the progress sink (not an artifact);
+		// hierarchical bucket map fits a repository-scope cliff-notes
+		// build.
+		streamDriver := r.runUnderstandingStreamDriver(runCtx, rt, understanding.ID, rpcBucketHierarchical)
+		resp, err := r.LLMCaller.GenerateCliffNotesWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, understanding.ID, "build_repository_understanding", streamDriver.OnProgress()), &knowledgev1.GenerateCliffNotesRequest{
 			RepositoryId:   repo.ID,
 			RepositoryName: repo.Name,
 			Audience:       string(knowledgepkg.AudienceDeveloper),
@@ -404,6 +411,9 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 			ScopePath:      scope.ScopePath,
 			SnapshotJson:   string(snapshotJSON),
 		})
+		// MUST close the driver before any terminal-state write (codex
+		// r1b M5 driver-drain rule).
+		streamDriver.Close()
 		if err != nil {
 			markRepositoryUnderstandingFailed(r.KnowledgeStore, &knowledgepkg.Artifact{RepositoryID: repo.ID}, scope, snap.SourceRevision, err)
 			return err
@@ -1812,8 +1822,11 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 		rt.ReportSnapshotBytes(len(snapJSON))
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(existing.ID, 0.1, "snapshot", "Snapshot assembled")
-		stopProgress := r.startProgressTicker(rt, existing.ID)
-		defer stopProgress()
+		// CA-122 codex r2 H2: real-progress stream driver replaces
+		// the deleted synthetic-curve ticker. Each switch case spawns
+		// a per-RPC driver, attaches it via llmJobMetadataWithProgress,
+		// and Close()s it BEFORE any SupersedeArtifact / terminal write
+		// (codex r1b M5 driver-drain rule).
 
 		persistUsage := func(usage *commonv1.LLMUsage) {
 			if usage == nil {
@@ -1853,7 +1866,8 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					renderPlan.RelevanceProfile,
 				)
 			}
-			resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, existing.ID, "cliff_notes"), &knowledgev1.GenerateCliffNotesRequest{
+			streamDriver := r.runStreamProgressDriver(bgCtx, rt, existing.ID, rpcBucketForArtifact(existing))
+			resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, existing.ID, "cliff_notes", streamDriver.OnProgress()), &knowledgev1.GenerateCliffNotesRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -1864,6 +1878,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				ScopePath:      scope.ScopePath,
 				SnapshotJson:   string(snapJSON),
 			})
+			streamDriver.Close()
 			if err != nil {
 				slog.Error("refresh cliff notes failed", "artifact_id", existing.ID, "error", err)
 				markRepositoryUnderstandingFailed(r.KnowledgeStore, existing, scope, snap.SourceRevision, err)
@@ -1941,7 +1956,8 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					return fmt.Errorf("failed to unmarshal architecture prompt bundle: %w", err)
 				}
 			}
-			resp, err := r.LLMCaller.GenerateArchitectureDiagramWithJob(runCtx, repo.ID, resolution.OpArchitectureDiagram, llmJobMetadata(rt, existing.ID, "architecture_diagram"), &knowledgev1.GenerateArchitectureDiagramRequest{
+			streamDriver := r.runStreamProgressDriver(runCtx, rt, existing.ID, rpcBucketCollapsed)
+			resp, err := r.LLMCaller.GenerateArchitectureDiagramWithJob(runCtx, repo.ID, resolution.OpArchitectureDiagram, llmJobMetadataWithProgress(rt, existing.ID, "architecture_diagram", streamDriver.OnProgress()), &knowledgev1.GenerateArchitectureDiagramRequest{
 				RepositoryId:             repo.ID,
 				RepositoryName:           repo.Name,
 				Audience:                 string(existing.Audience),
@@ -1951,6 +1967,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				SnapshotJson:             string(architecturePromptJSON),
 				DeterministicDiagramJson: string(scaffoldJSON),
 			})
+			streamDriver.Close()
 			if err != nil {
 				slog.Error("refresh architecture diagram failed", "artifact_id", existing.ID, "error", err)
 				return err
@@ -1990,7 +2007,8 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					enrichedSnapJSON = enriched
 				}
 			}
-			resp, err := r.LLMCaller.GenerateLearningPathWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, existing.ID, "learning_path"), &knowledgev1.GenerateLearningPathRequest{
+			streamDriver := r.runStreamProgressDriver(runCtx, rt, existing.ID, rpcBucketCollapsed)
+			resp, err := r.LLMCaller.GenerateLearningPathWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, existing.ID, "learning_path", streamDriver.OnProgress()), &knowledgev1.GenerateLearningPathRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -1999,6 +2017,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				DepthEnum:      protoDepth(existing.Depth),
 				SnapshotJson:   string(enrichedSnapJSON),
 			})
+			streamDriver.Close()
 			if err != nil {
 				slog.Error("refresh learning path failed", "artifact_id", existing.ID, "error", err)
 				return err
@@ -2036,7 +2055,8 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					enrichedSnapJSON = enriched
 				}
 			}
-			resp, err := r.LLMCaller.GenerateCodeTourWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, existing.ID, "code_tour"), &knowledgev1.GenerateCodeTourRequest{
+			streamDriver := r.runStreamProgressDriver(runCtx, rt, existing.ID, rpcBucketCollapsed)
+			resp, err := r.LLMCaller.GenerateCodeTourWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, existing.ID, "code_tour", streamDriver.OnProgress()), &knowledgev1.GenerateCodeTourRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -2045,6 +2065,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				DepthEnum:      protoDepth(existing.Depth),
 				SnapshotJson:   string(enrichedSnapJSON),
 			})
+			streamDriver.Close()
 			if err != nil {
 				slog.Error("refresh code tour failed", "artifact_id", existing.ID, "error", err)
 				return err
@@ -2093,7 +2114,8 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 					enrichedSnapJSON = enriched
 				}
 			}
-			resp, err := r.LLMCaller.GenerateWorkflowStoryWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, existing.ID, "workflow_story"), &knowledgev1.GenerateWorkflowStoryRequest{
+			streamDriver := r.runStreamProgressDriver(runCtx, rt, existing.ID, rpcBucketCollapsed)
+			resp, err := r.LLMCaller.GenerateWorkflowStoryWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, existing.ID, "workflow_story", streamDriver.OnProgress()), &knowledgev1.GenerateWorkflowStoryRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       string(existing.Audience),
@@ -2104,6 +2126,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 				ScopePath:      scope.ScopePath,
 				SnapshotJson:   string(enrichedSnapJSON),
 			})
+			streamDriver.Close()
 			if err != nil {
 				slog.Error("refresh workflow story failed", "artifact_id", existing.ID, "error", err)
 				return err
@@ -2658,7 +2681,7 @@ func (r *mutationResolver) DisableLivingWikiForRepo(ctx context.Context, reposit
 // current repo settings. When retryExcludedOnly is true the job is scoped
 // to pages that were excluded in the most recent run (the "Retry excluded
 // pages" CTA). When false (or nil), a full cold-start is triggered.
-func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool) (*EnableLivingWikiResult, error) {
+func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool, mode *LivingWikiBuildMode) (*EnableLivingWikiResult, error) {
 	if r.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
@@ -2671,14 +2694,122 @@ func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID 
 		current = defaultRepoSettings(repositoryID)
 	}
 
-	// Delegate to EnableLivingWikiForRepo so all the gating logic (global
-	// enabled, kill-switch, orchestrator nil checks) runs exactly once.
-	return r.EnableLivingWikiForRepo(ctx, EnableLivingWikiForRepoInput{
+	// Build input, preserving existing mode flags by default.
+	input := EnableLivingWikiForRepoInput{
 		RepositoryID:      repositoryID,
 		Mode:              RepoWikiMode(current.Mode),
 		Sinks:             repoSinksToInputs(current.Sinks),
 		RetryExcludedOnly: retryExcludedOnly,
-	})
+	}
+
+	// Mode override: if both modes are off and no explicit mode given, error.
+	bothOff := !current.LivingWikiOverviewEnabled && !current.LivingWikiDetailedEnabled
+	if bothOff && (mode == nil || *mode == LivingWikiBuildModeAllEnabled) {
+		return nil, &gqlerror.Error{
+			Message:    "Both Overview and Detailed modes are disabled. Enable at least one mode first.",
+			Extensions: map[string]any{"code": "LIVING_WIKI_BOTH_MODES_DISABLED"},
+		}
+	}
+
+	if mode != nil {
+		switch *mode {
+		case LivingWikiBuildModeOverview:
+			t, f := true, false
+			input.LivingWikiOverviewEnabled = &t
+			input.LivingWikiDetailedEnabled = &f
+		case LivingWikiBuildModeDetailed:
+			t, f := true, false
+			input.LivingWikiOverviewEnabled = &f
+			input.LivingWikiDetailedEnabled = &t
+		// ALL_ENABLED: preserve existing flags (no override needed)
+		}
+	}
+
+	// Delegate to EnableLivingWikiForRepo so all the gating logic (global
+	// enabled, kill-switch, orchestrator nil checks) runs exactly once.
+	return r.EnableLivingWikiForRepo(ctx, input)
+}
+
+// SetLivingWikiModeFlags resolves Mutation.setLivingWikiModeFlags.
+func (r *mutationResolver) SetLivingWikiModeFlags(ctx context.Context, repositoryID string, overviewEnabled bool, detailedEnabled bool) (*RepositoryLivingWikiSettings, error) {
+	if r.LivingWikiRepoStore == nil {
+		return nil, fmt.Errorf("living-wiki repo store not configured")
+	}
+
+	current, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	if err != nil {
+		return nil, fmt.Errorf("load repo settings: %w", err)
+	}
+	if current == nil {
+		current = defaultRepoSettings(repositoryID)
+	}
+
+	current.LivingWikiOverviewEnabled = overviewEnabled
+	current.LivingWikiDetailedEnabled = detailedEnabled
+	current.UpdatedAt = time.Now()
+	current.UpdatedBy = userIDFromContext(ctx)
+
+	if err := r.LivingWikiRepoStore.SetRepoSettings(ctx, *current); err != nil {
+		return nil, fmt.Errorf("persist mode flags: %w", err)
+	}
+
+	return mapRepoLivingWikiSettings(current), nil
+}
+
+// TriggerLivingWikiColdStartAllEnabled resolves Mutation.triggerLivingWikiColdStartAllEnabled.
+func (r *mutationResolver) TriggerLivingWikiColdStartAllEnabled(ctx context.Context, repositoryID string) ([]*EnableLivingWikiResult, error) {
+	if r.LivingWikiRepoStore == nil {
+		return nil, fmt.Errorf("living-wiki repo store not configured")
+	}
+
+	current, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	if err != nil {
+		return nil, fmt.Errorf("load repo settings: %w", err)
+	}
+	if current == nil {
+		current = defaultRepoSettings(repositoryID)
+	}
+
+	var results []*EnableLivingWikiResult
+
+	// Enqueue Overview job if enabled.
+	if current.LivingWikiOverviewEnabled {
+		t, f := true, false
+		input := EnableLivingWikiForRepoInput{
+			RepositoryID:              repositoryID,
+			Mode:                      RepoWikiMode(current.Mode),
+			Sinks:                     repoSinksToInputs(current.Sinks),
+			LivingWikiOverviewEnabled: &t,
+			LivingWikiDetailedEnabled: &f,
+		}
+		res, err := r.EnableLivingWikiForRepo(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("enqueue overview job: %w", err)
+		}
+		results = append(results, res)
+	}
+
+	// Enqueue Detailed job if enabled.
+	if current.LivingWikiDetailedEnabled {
+		f, t := false, true
+		input := EnableLivingWikiForRepoInput{
+			RepositoryID:              repositoryID,
+			Mode:                      RepoWikiMode(current.Mode),
+			Sinks:                     repoSinksToInputs(current.Sinks),
+			LivingWikiOverviewEnabled: &f,
+			LivingWikiDetailedEnabled: &t,
+		}
+		res, err := r.EnableLivingWikiForRepo(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("enqueue detailed job: %w", err)
+		}
+		results = append(results, res)
+	}
+
+	if results == nil {
+		results = []*EnableLivingWikiResult{}
+	}
+	return results, nil
 }
 
 

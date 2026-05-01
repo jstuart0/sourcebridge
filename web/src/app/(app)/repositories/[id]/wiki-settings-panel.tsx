@@ -48,6 +48,8 @@ import {
   DISABLE_LIVING_WIKI_FOR_REPO_MUTATION,
   UPDATE_REPOSITORY_LIVING_WIKI_SETTINGS_MUTATION,
   RETRY_LIVING_WIKI_JOB_MUTATION,
+  SET_LIVING_WIKI_MODE_FLAGS_MUTATION,
+  TRIGGER_LIVING_WIKI_COLD_START_ALL_ENABLED_MUTATION,
 } from "@/lib/graphql/queries";
 import {
   RepositoryLLMOverrideSection,
@@ -98,6 +100,8 @@ export interface LivingWikiJobResult {
 
 export interface RepositoryLivingWikiSettings {
   enabled: boolean;
+  livingWikiOverviewEnabled: boolean;
+  livingWikiDetailedEnabled: boolean;
   mode: RepoWikiMode;
   sinks: RepoWikiSink[];
   excludePaths: string[];
@@ -923,14 +927,31 @@ function humanizeFailure(result: LivingWikiJobResult): {
     };
   }
 
-  // Authentication failure — credentials are wrong or expired.
+  // Authentication failure — credentials are wrong or expired. Auth
+  // failures don't get a Retry button — retrying with the same bad
+  // credentials will just fail again. The banner instead surfaces a
+  // "Fix credentials" link to the settings page (rendered separately
+  // by FailureBanner).
   if (category === "auth") {
     return {
       title: "Authentication failed",
       detail:
         raw ||
         "A configured sink rejected our credentials. Check the Living Wiki settings page to confirm the token and email are still valid.",
-      action: "Fix credentials in Settings → Living Wiki, then retry.",
+      action: "Fix credentials",
+    };
+  }
+
+  // Transient failure (rate limit, brief upstream blip). The system
+  // expects retry to succeed; banner copy uses "temporary error" so the
+  // user knows it's not a deeper problem.
+  if (category === "transient") {
+    return {
+      title: "Hit a temporary error",
+      detail:
+        raw ||
+        "A temporary error stopped this run. Retrying usually works.",
+      action: "Retry",
     };
   }
 
@@ -1107,8 +1128,9 @@ function FailureBanner({
 
   // Everything else — transient, auth, raw failures, etc. — flows through
   // the humanizer so the user sees plain-language guidance instead of the
-  // backend's diagnostic string. Auth banner additionally surfaces the
-  // settings link the user actually needs.
+  // backend's diagnostic string. Auth gets a "Fix credentials" link
+  // instead of a Retry button (retrying with the same bad credentials
+  // would just fail again). Other categories get a Retry button.
   if (result.status === "failed" || (category && category !== "")) {
     const { title, detail, action } = humanizeFailure(result);
     const variant = category === "auth" ? "error" : "warning";
@@ -1117,20 +1139,21 @@ function FailureBanner({
         <div className="mt-2 space-y-2">
           <p className="text-xs text-[var(--text-secondary)]">{detail}</p>
           <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
-            <button
-              type="button"
-              onClick={onRetry}
-              className="underline underline-offset-2"
-            >
-              {action}
-            </button>
-            {category === "auth" && (
+            {category === "auth" ? (
               <Link
                 href="/settings/living-wiki"
                 className="underline underline-offset-2"
               >
-                Open Living Wiki settings
+                {action}
               </Link>
+            ) : (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="underline underline-offset-2"
+              >
+                {action}
+              </button>
             )}
           </div>
         </div>
@@ -1565,6 +1588,10 @@ function EnabledSummary({
 
   const [, retryMutation] = useMutation(RETRY_LIVING_WIKI_JOB_MUTATION);
   const [, enableMutation] = useMutation(ENABLE_LIVING_WIKI_FOR_REPO_MUTATION);
+  const [, setModeFlagsMutation] = useMutation(SET_LIVING_WIKI_MODE_FLAGS_MUTATION);
+  const [, triggerAllEnabledMutation] = useMutation(TRIGGER_LIVING_WIKI_COLD_START_ALL_ENABLED_MUTATION);
+  const [modeFlagError, setModeFlagError] = useState<string | null>(null);
+  const [modeFlagSaving, setModeFlagSaving] = useState(false);
 
   const jobResult = settings.lastJobResult;
   const jobStatus = jobResult?.status;
@@ -1642,6 +1669,88 @@ function EnabledSummary({
     onSettingsUpdated(settings);
   };
 
+  const handleToggleModeFlag = async (flag: "overview" | "detailed", value: boolean) => {
+    setModeFlagSaving(true);
+    setModeFlagError(null);
+    const overviewEnabled = flag === "overview" ? value : settings.livingWikiOverviewEnabled;
+    const detailedEnabled = flag === "detailed" ? value : settings.livingWikiDetailedEnabled;
+    const result = await setModeFlagsMutation({
+      repositoryId: repoId,
+      overviewEnabled,
+      detailedEnabled,
+    });
+    setModeFlagSaving(false);
+    if (result.error) {
+      setModeFlagError(result.error.message);
+      return;
+    }
+    if (result.data?.setLivingWikiModeFlags) {
+      onSettingsUpdated(result.data.setLivingWikiModeFlags as RepositoryLivingWikiSettings);
+    }
+  };
+
+  const handleBuildOverview = async () => {
+    setRegenerating(true);
+    setRegenError(null);
+    const LivingWikiBuildModeOverview = "OVERVIEW" as const;
+    const result = await retryMutation({
+      repositoryId: repoId,
+      retryExcludedOnly: false,
+      mode: LivingWikiBuildModeOverview,
+    });
+    if (result.error) {
+      setRegenError(result.error.message);
+      setRegenerating(false);
+      return;
+    }
+    const jobId = result.data?.retryLivingWikiJob?.jobId;
+    if (jobId) {
+      setRegenJobId(jobId);
+    } else {
+      setRegenerating(false);
+    }
+  };
+
+  const handleBuildDetailed = async () => {
+    setRegenerating(true);
+    setRegenError(null);
+    const LivingWikiBuildModeDetailed = "DETAILED" as const;
+    const result = await retryMutation({
+      repositoryId: repoId,
+      retryExcludedOnly: false,
+      mode: LivingWikiBuildModeDetailed,
+    });
+    if (result.error) {
+      setRegenError(result.error.message);
+      setRegenerating(false);
+      return;
+    }
+    const jobId = result.data?.retryLivingWikiJob?.jobId;
+    if (jobId) {
+      setRegenJobId(jobId);
+    } else {
+      setRegenerating(false);
+    }
+  };
+
+  const handleBuildAllEnabled = async () => {
+    setRegenerating(true);
+    setRegenError(null);
+    const results = await triggerAllEnabledMutation({ repositoryId: repoId });
+    if (results.error) {
+      setRegenError(results.error.message);
+      setRegenerating(false);
+      return;
+    }
+    const jobs = results.data?.triggerLivingWikiColdStartAllEnabled ?? [];
+    const firstJobId = jobs[0]?.jobId;
+    if (firstJobId) {
+      setRegenJobId(firstJobId);
+    } else {
+      setRegenerating(false);
+    }
+  };
+
   const sinkSummary = settings.sinks
     .map((s) => `${SINK_LABELS[s.kind]} (${AUDIENCE_LABELS[s.audience]})`)
     .join(", ");
@@ -1684,12 +1793,64 @@ function EnabledSummary({
             </div>
           </div>
 
-          {/* Last run */}
-          <p className="text-xs text-[var(--text-tertiary)]">
-            Mode: {settings.mode === "PR_REVIEW" ? "PR Review" : "Direct Publish"}
-            {" · "}
-            Last run: {formatRelative(settings.lastRunAt)}
-          </p>
+          {/* Mode flags + last run */}
+          <div className="space-y-3">
+            {/* Both-modes-off banner */}
+            {!settings.livingWikiOverviewEnabled && !settings.livingWikiDetailedEnabled && (
+              <div className="flex items-start gap-3 rounded-[var(--panel-radius)] border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+                <span className="mt-0.5 shrink-0 text-amber-400" aria-hidden="true">&#9888;</span>
+                <div className="flex-1">
+                  <p className="font-medium text-amber-400">No build modes enabled</p>
+                  <p className="mt-0.5 text-xs text-amber-300/80">
+                    Enable at least one mode to generate wiki pages.
+                  </p>
+                  <button
+                    type="button"
+                    className="mt-2 text-xs font-medium text-amber-400 hover:underline"
+                    disabled={modeFlagSaving}
+                    onClick={() => void handleToggleModeFlag("overview", true)}
+                  >
+                    Re-enable Overview
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Mode toggles */}
+            <div className="flex flex-wrap gap-4">
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 cursor-pointer accent-[var(--accent-primary)]"
+                  checked={settings.livingWikiOverviewEnabled}
+                  disabled={modeFlagSaving}
+                  onChange={(e) => void handleToggleModeFlag("overview", e.target.checked)}
+                  aria-label="Overview mode"
+                />
+                <span className="font-medium text-[var(--text-primary)]">Overview</span>
+                <span className="text-xs text-[var(--text-tertiary)]">High-level module summaries</span>
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 cursor-pointer accent-[var(--accent-primary)]"
+                  checked={settings.livingWikiDetailedEnabled}
+                  disabled={modeFlagSaving}
+                  onChange={(e) => void handleToggleModeFlag("detailed", e.target.checked)}
+                  aria-label="Detailed mode"
+                />
+                <span className="font-medium text-[var(--text-primary)]">Detailed</span>
+                <span className="text-xs text-[var(--text-tertiary)]">Symbol-level API docs</span>
+              </label>
+            </div>
+            {modeFlagError && <p className="text-xs text-[var(--color-error,#ef4444)]">{modeFlagError}</p>}
+
+            <p className="text-xs text-[var(--text-tertiary)]">
+              Mode: {settings.mode === "PR_REVIEW" ? "PR Review" : "Direct Publish"}
+              {" · "}
+              Last run: {formatRelative(settings.lastRunAt)}
+            </p>
+          </div>
 
           {/* Failure banner */}
           {hasFailed && jobResult && (
@@ -1748,7 +1909,8 @@ function EnabledSummary({
               variant="secondary"
               size="sm"
               onClick={() => void handleRegenerate()}
-              disabled={regenerating}
+              disabled={regenerating || (!settings.livingWikiOverviewEnabled && !settings.livingWikiDetailedEnabled)}
+              title={(!settings.livingWikiOverviewEnabled && !settings.livingWikiDetailedEnabled) ? "Enable at least one mode to regenerate" : undefined}
             >
               {regenerating ? (
                 <>
@@ -1759,6 +1921,43 @@ function EnabledSummary({
                 "Regenerate now"
               )}
             </Button>
+            {(settings.livingWikiOverviewEnabled || settings.livingWikiDetailedEnabled) && (
+              <>
+                {settings.livingWikiOverviewEnabled && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void handleBuildOverview()}
+                    disabled={regenerating}
+                    title="Build Overview pages only"
+                  >
+                    Build Overview
+                  </Button>
+                )}
+                {settings.livingWikiDetailedEnabled && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void handleBuildDetailed()}
+                    disabled={regenerating}
+                    title="Build Detailed pages only"
+                  >
+                    Build Detailed
+                  </Button>
+                )}
+                {settings.livingWikiOverviewEnabled && settings.livingWikiDetailedEnabled && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void handleBuildAllEnabled()}
+                    disabled={regenerating}
+                    title="Build both Overview and Detailed pages"
+                  >
+                    Build All Enabled
+                  </Button>
+                )}
+              </>
+            )}
             <button
               type="button"
               onClick={() => setShowDisableDialog(true)}

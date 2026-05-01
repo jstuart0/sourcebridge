@@ -36,7 +36,9 @@ func defaultRepoSettings(repoID string) *livingwiki.RepositoryLivingWikiSettings
 		Sinks:             []livingwiki.RepoWikiSink{},
 		ExcludePaths:      []string{},
 		StaleWhenStrategy: livingwiki.StaleStrategyDirect,
-		MaxPagesPerJob:    50,
+		MaxPagesPerJob:            50,
+		LivingWikiOverviewEnabled: true,
+		LivingWikiDetailedEnabled: false,
 	}
 }
 
@@ -82,7 +84,9 @@ func mapRepoLivingWikiSettings(s *livingwiki.RepositoryLivingWikiSettings) *Repo
 		ExcludePaths:      nonNilStringSlice(s.ExcludePaths),
 		StaleWhenStrategy: RepoStaleWhenStrategy(s.StaleWhenStrategy),
 		MaxPagesPerJob:    s.MaxPagesPerJob,
-		AutoCleanOrphans:  autoClean,
+		AutoCleanOrphans:          autoClean,
+		LivingWikiOverviewEnabled: s.LivingWikiOverviewEnabled,
+		LivingWikiDetailedEnabled: s.LivingWikiDetailedEnabled,
 	}
 	gql.RepoID = s.RepoID // non-schema field; set after literal to survive gqlgen regen
 	if gql.MaxPagesPerJob == 0 {

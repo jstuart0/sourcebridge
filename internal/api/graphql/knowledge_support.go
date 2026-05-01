@@ -1232,11 +1232,12 @@ func (r *Resolver) ensureFreshRepositoryUnderstanding(
 		rt.ReportProgress(0.12, "understanding", "Building repository understanding")
 	}
 	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Building repository understanding")
+	streamDriver := r.runStreamProgressDriver(ctx, rt, artifact.ID, rpcBucketHierarchical)
 	resp, err := r.LLMCaller.GenerateCliffNotesWithJob(
 		ctx,
 		repo.ID,
 		resolution.OpKnowledge,
-		llmJobMetadata(rt, artifact.ID, "build_repository_understanding"),
+		llmJobMetadataWithProgress(rt, artifact.ID, "build_repository_understanding", streamDriver.OnProgress()),
 		&knowledgev1.GenerateCliffNotesRequest{
 			RepositoryId:   repo.ID,
 			RepositoryName: repo.Name,
@@ -1248,6 +1249,7 @@ func (r *Resolver) ensureFreshRepositoryUnderstanding(
 			SnapshotJson:   string(snapshotJSON),
 		},
 	)
+	streamDriver.Close()
 	if err != nil {
 		markRepositoryUnderstandingFailed(r.KnowledgeStore, artifact, repoScope, sourceRevision, err)
 		return nil, false, err
@@ -1841,17 +1843,21 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 			rt.ReportProgress(0.05, "deepening", "Deepening critical cliff note sections")
 			markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(artifact.ID), selectedTitles, knowledgepkg.RefinementRunning, "")
 			bgCtx := withCliffNotesRenderMetadata(runCtx, true, selectedTitles, string(knowledgepkg.DepthMedium), "product_core")
-			resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, artifact.ID, "cliff_notes_deepen"), &knowledgev1.GenerateCliffNotesRequest{
-				RepositoryId:   repo.ID,
-				RepositoryName: repo.Name,
-				Audience:       string(artifact.Audience),
-				AudienceEnum:   protoAudience(artifact.Audience),
-				Depth:          string(knowledgepkg.DepthDeep),
-				DepthEnum:      protoDepth(knowledgepkg.DepthDeep),
-				ScopeType:      string(scope.ScopeType),
-				ScopePath:      scope.ScopePath,
-				SnapshotJson:   string(snapshotJSON),
-			})
+			streamDriver := r.runStreamProgressDriver(bgCtx, rt, artifact.ID, rpcBucketForArtifact(artifact))
+			resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge,
+				llmJobMetadataWithProgress(rt, artifact.ID, "cliff_notes_deepen", streamDriver.OnProgress()),
+				&knowledgev1.GenerateCliffNotesRequest{
+					RepositoryId:   repo.ID,
+					RepositoryName: repo.Name,
+					Audience:       string(artifact.Audience),
+					AudienceEnum:   protoAudience(artifact.Audience),
+					Depth:          string(knowledgepkg.DepthDeep),
+					DepthEnum:      protoDepth(knowledgepkg.DepthDeep),
+					ScopeType:      string(scope.ScopeType),
+					ScopePath:      scope.ScopePath,
+					SnapshotJson:   string(snapshotJSON),
+				})
+			streamDriver.Close()
 			if err != nil {
 				markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(artifact.ID), selectedTitles, knowledgepkg.RefinementFailed, err.Error())
 				return err

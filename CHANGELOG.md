@@ -457,6 +457,44 @@ ready-made starting point without copy-pasting manifests.
   validation on every subsequent UPSERT. Migration 039 backfills both fields
   on the existing row, and the UPSERT path now always sets them explicitly.
 
+- **Deep cliff-notes "DEADLINE_EXCEEDED" reaper races** (CA-122,
+  `01779d3`...`0b92350`). The seven knowledge gRPCs (cliff notes,
+  architecture diagram, learning path, code tour, workflow story,
+  explain system, build repository understanding, plus enterprise
+  reports) were unary calls with no liveness signal. When the
+  hierarchical pipeline took longer than the orchestrator's 10-minute
+  stale-job reaper window, the reaper marked the job failed mid-run
+  and the gRPC stream got a confusing `DEADLINE_EXCEEDED`. Each RPC
+  is now server-streaming, with phase markers (`SNAPSHOT`,
+  `LEAF_SUMMARIES`, `FILE_SUMMARIES`, `PACKAGE_SUMMARIES`,
+  `ROOT_SYNTHESIS`, `RENDER`, `FINALIZING`) and per-phase progress
+  events bridged into the existing `ca_knowledge_artifact` row via a
+  bounded-channel writer goroutine. The single-call RPCs (no internal
+  step counters) emit a phase-only heartbeat every 30s
+  (`SOURCEBRIDGE_KNOWLEDGE_STREAM_HEARTBEAT_SECS`-tunable) so the
+  orchestrator's `UpdatedAt` stays fresh through a multi-minute
+  single LLM call. The reaper now actively cancels active gRPC
+  streams instead of just marking the job failed; first-claimant-
+  wins finalization prevents the reaper and the run goroutine from
+  racing terminal writes; artifact progress writers no-op once the
+  artifact is `ready` or `failed` so a late stream-driver flush
+  cannot resurrect a terminal row. The synthetic 5-second progress
+  ticker is fully deleted (`startProgressTicker` /
+  `runProgressTicker` / `progressPhaseLabel` are gone). One known
+  gap, documented in
+  `internal/api/rest/enterprise_routes.go`: the enterprise
+  `SetReportGenerator` callback still runs on `context.Background()`,
+  so HTTP client disconnects do not cancel an in-flight report; the
+  signature change is tracked as a follow-up. New operator config:
+  `sourcebridge.knowledge.rpc_safety_net_timeout` (default 4h) is
+  the hard cap once the streaming heartbeat is established, set via
+  `POST /api/v1/admin/knowledge/rpc-safety-net-timeout`. New stream
+  bucket maps in `internal/api/graphql/knowledge_stream_driver.go`
+  give file/symbol/module cliff-notes scopes a collapsed
+  `SNAPSHOT -> RENDER -> FINALIZING` progress contract that does not
+  regress when the worker's hierarchical strategy uses internal
+  phase counters.
+
 ---
 
 Theme: **Living wiki + auto-extracted doc templates.** SourceBridge can now

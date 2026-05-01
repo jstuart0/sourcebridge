@@ -116,10 +116,11 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 		enrichedSnapshotJSON := snapshotJSON
 		rt.ReportProgress(0.1, "snapshot", "Seed snapshot assembled")
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Seed snapshot assembled")
-		stopProgress := r.startProgressTicker(rt, artifact.ID)
-		defer stopProgress()
+		// CA-122 Phase 6/7: stream-driven progress for the seed pipeline.
+		streamDriver := r.runStreamProgressDriver(runCtx, rt, artifact.ID, rpcBucketForArtifact(artifact))
+		defer streamDriver.Close()
 
-		jm := llmJobMetadata(rt, artifact.ID, string(key.Type))
+		jm := llmJobMetadataWithProgress(rt, artifact.ID, string(key.Type), streamDriver.OnProgress())
 		switch key.Type {
 		case knowledgepkg.ArtifactCliffNotes:
 			resp, err := r.LLMCaller.GenerateCliffNotesWithJob(runCtx, repo.ID, resolution.OpKnowledge, jm, &knowledgev1.GenerateCliffNotesRequest{

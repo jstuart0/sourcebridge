@@ -13,7 +13,9 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -153,11 +155,99 @@ func runServe(cmd *cobra.Command, args []string) error {
 			"storage.surreal_mode", cfg.Storage.SurrealMode)
 	}
 
+	// CA-122: operator-tunable knowledge-RPC safety-net timeout.
+	//
+	// The provider closure is read on every dispatch of one of the seven
+	// knowledge / report streaming RPCs in internal/worker/client.go and
+	// supplies the OUTER context.WithTimeout for repository-scope calls.
+	// (The 10-min reaper at orchestrator.go:297-348 covers the
+	// "no progress" failure mode separately.)
+	//
+	// Resolution order at every call:
+	//   1. Live read from ca_knowledge_settings:current via the store.
+	//   2. On store success: return that value (defensively clamped).
+	//   3. On store error: return the last successful value (LKG).
+	//   4. On no LKG yet: return the boot-time env default
+	//      (SOURCEBRIDGE_KNOWLEDGE_TIMEOUT_SECS_DEFAULT, default 4h).
+	//
+	// We cache for 5s to amortize the read across many concurrent
+	// dispatches while still surfacing operator changes quickly.
+	//
+	// Embedded mode (no external Surreal): the store is nil and the
+	// closure always returns the boot-time env default.
+	var knowledgeSettingsStore *db.KnowledgeSettingsStore
+	if cfg.Storage.SurrealMode == "external" && surrealDB != nil {
+		knowledgeSettingsStore = db.NewKnowledgeSettingsStore(surrealDB)
+		// Best-effort schema ensure + seed at boot. Missing schema
+		// makes Get error rather than corrupt; seeding is idempotent
+		// (CREATE IF NOT EXISTS-equivalent inside the store).
+		bootCtx, cancelBoot := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := knowledgeSettingsStore.EnsureSchema(bootCtx); err != nil {
+			slog.Warn("knowledge settings: ensure schema failed; reads will degrade to env default",
+				"error", err)
+		}
+		seedSecs := db.KnowledgeTimeoutDefaultSecs
+		if raw := os.Getenv("SOURCEBRIDGE_KNOWLEDGE_TIMEOUT_SECS_DEFAULT"); raw != "" {
+			if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && v > 0 {
+				seedSecs = v
+			}
+		}
+		if err := knowledgeSettingsStore.Seed(bootCtx, seedSecs); err != nil {
+			slog.Warn("knowledge settings: seed failed; reads will degrade to env default",
+				"error", err)
+		}
+		cancelBoot()
+	}
+
+	// Boot-time env default for the closure's fallback path.
+	bootDefaultTimeout := time.Duration(db.KnowledgeTimeoutDefaultSecs) * time.Second
+	if raw := os.Getenv("SOURCEBRIDGE_KNOWLEDGE_TIMEOUT_SECS_DEFAULT"); raw != "" {
+		if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && v > 0 {
+			bootDefaultTimeout = time.Duration(v) * time.Second
+		}
+	}
+
+	// 5s cache + LKG state, guarded by a mutex so concurrent dispatches
+	// see consistent reads. The closure is called on the gRPC dispatch
+	// hot path; we keep the locked region tiny.
+	var (
+		ktMu     sync.Mutex
+		ktCached time.Duration
+		ktExpiry time.Time
+		ktLKG    time.Duration
+		ktWarnAt time.Time // throttle warn logs to once per 5 min
+	)
+
 	knowledgeTimeoutProvider := func() time.Duration {
-		// TimeoutSecs is for individual LLM completions (default 30s).
-		// Knowledge generation is a multi-step pipeline that takes much
-		// longer — use the dedicated constant (default 30 minutes).
-		return worker.TimeoutKnowledgeRepository
+		ktMu.Lock()
+		defer ktMu.Unlock()
+		now := time.Now()
+		if ktCached > 0 && now.Before(ktExpiry) {
+			return ktCached
+		}
+		if knowledgeSettingsStore == nil {
+			return bootDefaultTimeout
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		d, err := knowledgeSettingsStore.Get(ctx)
+		if err != nil {
+			// Throttled warn — don't spam every 5s on a sustained outage.
+			if now.Sub(ktWarnAt) > 5*time.Minute {
+				slog.Warn("knowledge timeout: live read failed; using last-known-good or env default",
+					"error", err,
+					"lkg_seconds", int(ktLKG/time.Second))
+				ktWarnAt = now
+			}
+			if ktLKG > 0 {
+				return ktLKG
+			}
+			return bootDefaultTimeout
+		}
+		ktCached = d
+		ktExpiry = now.Add(5 * time.Second)
+		ktLKG = d
+		return d
 	}
 
 	// Initialize worker client.
@@ -709,6 +799,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 				return nil
 			}
 			return lwDispatcher.LiveOrchestrator()
+		}()),
+		// CA-122: thread the knowledge-settings store so the
+		// /api/v1/admin/knowledge/timeout endpoints can read+write the
+		// safety-net cap. nil in embedded mode is fine — the handlers
+		// return 503.
+		rest.WithKnowledgeSettingsStore(func() rest.KnowledgeSettingsStore {
+			if knowledgeSettingsStore == nil {
+				return nil
+			}
+			return knowledgeSettingsStore
 		}()),
 	)
 

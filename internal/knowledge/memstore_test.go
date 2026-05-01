@@ -468,3 +468,48 @@ func TestStoreRepositoryUnderstandingZerosProgressOnTerminalStage(t *testing.T) 
 		})
 	}
 }
+
+// CA-122 codex r2 M1: terminal artifact rows must reject late progress
+// writes from the streaming progress driver. Without the guard, a
+// stalled stream-driver flush after SupersedeArtifact could resurrect
+// the artifact's progress / phase / message and confuse the UI.
+func TestUpdateKnowledgeArtifactProgressIgnoresTerminalArtifacts(t *testing.T) {
+	for _, status := range []ArtifactStatus{StatusReady, StatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			s := NewMemStore()
+			stored, err := s.StoreKnowledgeArtifact(&Artifact{
+				RepositoryID: "repo-1",
+				Type:         ArtifactCliffNotes,
+				Audience:     AudienceDeveloper,
+				Depth:        DepthMedium,
+				Status:       StatusGenerating,
+				Progress:     0.5,
+			})
+			if err != nil {
+				t.Fatalf("StoreKnowledgeArtifact: %v", err)
+			}
+			// Mid-flight progress write should land while still
+			// generating.
+			if err := s.UpdateKnowledgeArtifactProgressWithPhase(stored.ID, 0.6, "render", "rendering"); err != nil {
+				t.Fatalf("mid-flight progress: %v", err)
+			}
+			midFlight := s.GetKnowledgeArtifact(stored.ID)
+			if midFlight.Progress != 0.6 || midFlight.ProgressPhase != "render" || midFlight.ProgressMessage != "rendering" {
+				t.Fatalf("expected mid-flight progress to land: %+v", midFlight)
+			}
+			// Now flip to terminal and try a late write.
+			if err := s.UpdateKnowledgeArtifactStatus(stored.ID, status); err != nil {
+				t.Fatalf("UpdateKnowledgeArtifactStatus: %v", err)
+			}
+			terminal := s.GetKnowledgeArtifact(stored.ID)
+			beforeLate := *terminal
+			if err := s.UpdateKnowledgeArtifactProgressWithPhase(stored.ID, 0.42, "queued", "Late stream-driver flush"); err != nil {
+				t.Fatalf("late progress should be a silent no-op, got: %v", err)
+			}
+			after := s.GetKnowledgeArtifact(stored.ID)
+			if after.Progress != beforeLate.Progress || after.ProgressPhase != beforeLate.ProgressPhase || after.ProgressMessage != beforeLate.ProgressMessage {
+				t.Fatalf("late progress re-stamped terminal artifact (status %s):\nbefore: %+v\nafter:  %+v", status, beforeLate, *after)
+			}
+		})
+	}
+}

@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/worker"
 	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 )
 
@@ -33,6 +34,18 @@ func llmJobMetadata(rt llm.Runtime, artifactID, jobType string) llmcall.JobMetad
 	if rt != nil {
 		jm.JobID = rt.JobID()
 	}
+	return jm
+}
+
+// llmJobMetadataWithProgress is the same as llmJobMetadata but also
+// attaches the supplied OnProgress handler so streaming events drive
+// real-progress UI updates (CA-122 Phase 6/7). Pass the handler from
+// streamProgressDriver.OnProgress(); call driver.Close() AFTER the
+// streaming RPC returns and BEFORE writing any terminal artifact
+// status (codex r1b M5 driver-drain rule).
+func llmJobMetadataWithProgress(rt llm.Runtime, artifactID, jobType string, onProgress func(worker.KnowledgeStreamEvent)) llmcall.JobMetadata {
+	jm := llmJobMetadata(rt, artifactID, jobType)
+	jm.OnProgress = onProgress
 	return jm
 }
 

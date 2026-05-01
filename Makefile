@@ -74,6 +74,7 @@ install-vscode: package-vscode
 
 # Proto
 PROTO_SOURCES = $(PROTO_DIR)/common/v1/types.proto \
+	$(PROTO_DIR)/common/v1/knowledge_progress.proto \
 	$(PROTO_DIR)/reasoning/v1/reasoning.proto \
 	$(PROTO_DIR)/linking/v1/linking.proto \
 	$(PROTO_DIR)/requirements/v1/requirements.proto \

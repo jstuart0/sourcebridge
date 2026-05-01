@@ -118,18 +118,20 @@ func (s codeTourGenerationService) Generate(ctx context.Context) (*KnowledgeArti
 			}
 		}
 
-		stopProgress := r.startProgressTicker(rt, artifact.ID)
-		resp, err := r.LLMCaller.GenerateCodeTourWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadata(rt, artifact.ID, "code_tour"), &knowledgev1.GenerateCodeTourRequest{
-			RepositoryId:   repo.ID,
-			RepositoryName: repo.Name,
-			Audience:       audience,
-			AudienceEnum:   protoAudience(knowledgepkg.Audience(audience)),
-			Depth:          depth,
-			DepthEnum:      protoDepth(knowledgepkg.Depth(depth)),
-			SnapshotJson:   string(enrichedSnapJSON),
-			Theme:          theme,
-		})
-		stopProgress()
+		streamDriver := r.runStreamProgressDriver(runCtx, rt, artifact.ID, rpcBucketCollapsed)
+		resp, err := r.LLMCaller.GenerateCodeTourWithJob(runCtx, repo.ID, resolution.OpKnowledge,
+			llmJobMetadataWithProgress(rt, artifact.ID, "code_tour", streamDriver.OnProgress()),
+			&knowledgev1.GenerateCodeTourRequest{
+				RepositoryId:   repo.ID,
+				RepositoryName: repo.Name,
+				Audience:       audience,
+				AudienceEnum:   protoAudience(knowledgepkg.Audience(audience)),
+				Depth:          depth,
+				DepthEnum:      protoDepth(knowledgepkg.Depth(depth)),
+				SnapshotJson:   string(enrichedSnapJSON),
+				Theme:          theme,
+			})
+		streamDriver.Close()
 		if err != nil {
 			slog.Error("code tour generation failed", "artifact_id", artifact.ID, "error", err)
 			return err

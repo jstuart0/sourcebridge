@@ -37,104 +37,13 @@ func setKnowledgeQueueHeartbeatInterval(interval time.Duration) {
 	knowledgeQueueHeartbeatIntervalNanos.Store(int64(interval))
 }
 
-// progressPhaseLabel returns the user-facing label for a synthesised
-// progress value. The orchestrator can't observe worker pipeline stages
-// directly (the gRPC call is one opaque blocking call) so the ticker
-// approximates the leaves → files → packages → root → finalise sequence
-// from elapsed progress. Shared by every progress ticker so the popover,
-// admin monitor and repo page see the same labels at the same percentages.
-func progressPhaseLabel(p float64) string {
-	switch {
-	case p < 0.2:
-		return "Building understanding · summarising leaves"
-	case p < 0.4:
-		return "Building understanding · summarising files"
-	case p < 0.6:
-		return "Building understanding · summarising packages"
-	case p < 0.8:
-		return "Building understanding · synthesising root"
-	default:
-		return "Building understanding · finalising"
-	}
-}
-
-// progressWriter is the per-row store callback for a progress ticker.
-// Lets one ticker drive any progress-bearing entity (knowledge artifact
-// or repository understanding row) without duplicating the goroutine and
-// curve logic.
+// progressWriter is the per-row store callback shared between the
+// streaming progress driver (knowledge_stream_driver.go) and the
+// queue-wait heartbeat. The synthetic-curve ticker that previously
+// owned this type was deleted in CA-122 once every knowledge RPC
+// became server-streaming and could surface real per-phase progress
+// to the orchestrator's UpdatedAt heartbeat.
 type progressWriter func(progress float64, phase, message string) error
-
-// runProgressTicker drives the synthetic progress curve used while a
-// blocking gRPC call is in flight. The curve is identical for every
-// caller (artifact and understanding alike) — past failure mode this
-// prevents: each store had its own copy of the same curve and label
-// switch, drifting subtly so the artifact bar and the understanding bar
-// disagreed by 5–10 percentage points at the same wall-clock moment.
-func runProgressTicker(ctx context.Context, rt llm.Runtime, write progressWriter, logFields ...any) {
-	tick := time.NewTicker(5 * time.Second)
-	defer tick.Stop()
-	p := 0.15
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-			switch {
-			case p < 0.6:
-				p += 0.02
-			case p < 0.8:
-				p += 0.005
-			case p < 0.95:
-				p += 0.001
-			}
-			if p > 0.95 {
-				p = 0.95
-			}
-			msg := progressPhaseLabel(p)
-			rt.ReportProgress(p, "generating", msg)
-			if err := write(p, "generating", msg); err != nil {
-				knowledgeProgressWriteErrorsTotal.Add(1)
-				args := append([]any{
-					"event", "knowledge_progress_write_failed",
-					"phase", "generating",
-					"error", err,
-				}, logFields...)
-				slog.Warn("knowledge_progress_write_failed", args...)
-			}
-		}
-	}
-}
-
-// startProgressTicker launches a goroutine that steadily advances both
-// the llm.Job progress (via rt) and the knowledge artifact progress
-// (via the store) while a long-running gRPC call is blocking. Without
-// this, the progress bar stays at 10% for the entire hierarchical build.
-//
-// Returns a cancel function that stops the ticker.
-func (r *Resolver) startProgressTicker(rt llm.Runtime, artifactID string) context.CancelFunc {
-	ctx, cancel := context.WithCancel(context.Background())
-	go runProgressTicker(ctx, rt,
-		func(p float64, phase, msg string) error {
-			return r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifactID, p, phase, msg)
-		},
-		"artifact_id", artifactID,
-	)
-	return cancel
-}
-
-// startUnderstandingProgressTicker mirrors startProgressTicker but writes
-// to the ca_repository_understanding row instead of the artifact row.
-// Both share the same curve and labels via runProgressTicker.
-func (r *Resolver) startUnderstandingProgressTicker(rt llm.Runtime, understandingID string) context.CancelFunc {
-	ctx, cancel := context.WithCancel(context.Background())
-	go runProgressTicker(ctx, rt,
-		func(p float64, phase, msg string) error {
-			return r.KnowledgeStore.UpdateRepositoryUnderstandingProgress(understandingID, p, phase, msg)
-		},
-		"understanding_id", understandingID,
-	)
-	return cancel
-}
 
 // knowledgeJobTargetKey returns the canonical dedupe key the orchestrator
 // uses for a knowledge artifact generation job. Matching keys collapse to
