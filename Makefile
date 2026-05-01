@@ -208,7 +208,7 @@ ci: lint test
 # Benchmarks
 BENCHMARK_RESULTS_DIR ?= benchmarks/results/local
 REPORT_RESULTS_DIR ?= benchmarks/results/report-quality-live
-REPORT_BASE_URL ?= https://sourcebridge-enterprise.xmojo.net
+REPORT_BASE_URL ?= http://localhost:8080
 REPORT_REPO_NAME ?= MACU Residence
 
 benchmark-comprehension-fake:
