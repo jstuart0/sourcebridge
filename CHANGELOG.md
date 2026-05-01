@@ -261,6 +261,110 @@ ready-made starting point without copy-pasting manifests.
     - **#15 dir-side** — `TestIsIgnoredDir`: 16 cases pinning the new
       `git.IsIgnoredDir` helper.
 
+- **MCP-edits feedback-loop — connector ingress + `record_change` MCP
+  tool (Phase 1.D).** Lands the public HTTP ingress and the in-process
+  MCP-tool connector. Together with the fsnotify watcher (1.C) these
+  are the three Phase 1 connectors that share the canonical
+  `ChangeEvent` schema and funnel through the same `changewatch.Router`
+  dispatch path. Both surfaces stay default-off through Phase 1.E
+  burn-in.
+  - **HTTP ingress endpoint** at `POST /v1/connectors/{id}/events`,
+    behind `SOURCEBRIDGE_CONNECTOR_API_ENABLED` (default false). Auth:
+    bearer/JWT through the same middleware as other authenticated
+    routes (HMAC-SHA256 specific to GitHub webhooks lands in Phase 2).
+    Trust stamping locks `received_via=http_ingress`,
+    `verification_method=bearer`; connectors cannot claim `in_process`
+    via the body. Source.kind is locked to HTTP-ingress-family kinds —
+    a remote caller posting `mcp_record_change` or `fsnotify_local`
+    is silently rewritten to `http_ingress` (those kinds are reserved
+    for in-process connectors with different downstream trust
+    assumptions; spoofing them remotely is a privilege-escalation
+    shape). `DisallowUnknownFields` on JSON decoding so 0.x callers
+    fail loudly when they hit the 1.0 schema rather than silently
+    degrading. Outcome → HTTP-status mapping documented as part of the
+    Connector API contract: 202 (indexing/deduped), 429 (rate_limited),
+    503 (breaker_tripped / change_watch_disabled), 400 (schema /
+    no-delta / invalid-paths), 409 (branch_mismatch / unknown_repo),
+    500 (unmapped outcomes — alarms loudly so a missing case lights up
+    in tests).
+  - **`record_change` MCP tool**, the in-process MCP-tool connector
+    named in plan v5 §Phase 1 > 4. Inputs: `repository_id`, `files[]`,
+    `branch`, optional `intent`, optional `requirement_ids[]`. Output:
+    `{accepted, change_id, routed_to, reason, branch, file_count}`.
+    Adoption posture per plan v4 decision #4 — easy, never required:
+    tool description leads with "Optional"; tool is hidden from
+    `tools/list` when the change-watch dispatcher is nil so agents
+    don't discover a no-op tool; defense-in-depth path returns
+    structured `CAPABILITY_DISABLED` if a hand-crafted `tools/call`
+    reaches the handler with the dispatcher unwired.
+  - **Trust contract**: `Source.Actor` is derived from the MCP
+    session's authenticated identity (`session.claims.UserID@OrgID`),
+    NOT from tool args — agents cannot lie about being human.
+    `Trust.ReceivedVia="in_process"` stamped at the connector boundary
+    so an in-process call cannot claim http transport (the inverse
+    spoofing direction).
+  - **Path-normalization contract** (plan v5 HIGH fix L3) is enforced
+    at three points: `changewatch.NormalizePath` at both ingress
+    surfaces (clean MCP / 400 errors), and re-validated by the router
+    via `ChangeEvent.Validate` (defense in depth). Contract: repo-
+    relative; Unix forward-slash separators only (rejects backslash —
+    we don't silently `filepath.ToSlash` so caller-side bugs don't
+    slip through); no leading `./` or `/`; no trailing `/`; no `..`
+    components; no `//` or `/./` tricks. Case-handling: caller's
+    casing is preserved verbatim (Linux is case-sensitive at FS level;
+    macOS/Windows are case-insensitive at FS but git treats every
+    path case-sensitively regardless — the helper matches git's
+    worldview).
+  - **Multi-tenant boundary**: `record_change` calls `checkRepoAccess`
+    against the session's allowed-repo list + the enterprise
+    `MCPPermissionChecker` before any router work. An agent targeting
+    an inaccessible repo gets the standard "not found" error (no
+    fingerprinting of which repos exist). HTTP ingress relies on the
+    auth middleware identity + the router's per-repo state isolation.
+  - **Defensive bounds at the tool boundary**: per-call cap of 1024
+    files, 1024-byte intent, 100 requirement IDs (256 bytes each).
+    Intent is sanitized — ASCII control bytes / non-printable runes
+    stripped to defend against log-injection / terminal-escape via
+    the structured-log path that records `intent`. Whitespace
+    (space/tab/newline/CR) survives so multi-line intents stay
+    readable.
+  - **`Linking.InvalidateGraceHours` already configurable** (was 24h
+    hardcoded; surfaced as `linking.invalidate_grace_hours` /
+    `SOURCEBRIDGE_LINKING_INVALIDATE_GRACE_HOURS` in the slice 4
+    config-source-of-truth work — covers nice-to-have L1 from plan v5
+    without a new flag).
+  - Phase 1 done-definition tests landed:
+    - **#7 passive-only correctness** —
+      `TestPassiveOnly_Phase1DoneDef7`: five scenarios (single-file
+      write, multi-file refactor, file addition, file deletion, file
+      rename) on a real on-disk fixture with the in-process
+      `record_change` MCP tool *never invoked*. Each scenario asserts
+      the freshness envelope advances, state transitions correctly,
+      `IndexFiles` is called for the affected paths, and the impact
+      applier runs. **Load-bearing for the non-goal**: if this test
+      ever fails, the change in question violates "no SourceBridge
+      feature shall be built that requires `record_change` for
+      correctness" and must be revised. Do NOT make the test pass by
+      adding `record_change` calls to it.
+  - HTTP ingress per-tool tests cover dispatcher-unwired (503),
+    happy path (202 with trust populated + connector_id stamped),
+    URL→connector_id stamping when body omits it, default `http_ingress`
+    kind, trust-overridden-from-body, bad JSON (400), unknown-fields
+    rejection (`DisallowUnknownFields`), every router outcome → HTTP
+    status mapping, unknown-outcome→500 alarm.
+  - `record_change` per-tool tests cover hidden-vs-visible in
+    tools/list, happy path with full ChangeEvent shape verification,
+    status defaults, path normalization rejection, rename-without-old-
+    path rejection, empty-files rejection, tenant-boundary rejection,
+    every router outcome → `accepted` boolean mapping, actor always
+    derived from session, defense-in-depth on nil dispatcher, plus
+    the four xander-pass security tests (oversized files / intent /
+    requirement_ids; control-char stripping).
+  - The `SOURCEBRIDGE_CHANGE_WATCH_ENABLED` umbrella flag remains off,
+    and `SOURCEBRIDGE_CONNECTOR_API_ENABLED` defaults off through
+    Phase 1; nothing in 1.D is reachable from production paths until
+    1.E flips the flag.
+
 ### Changed
 
 - **Credential model** (`792ca64`). HTTP clients for all living-wiki sinks
