@@ -342,6 +342,14 @@ type mcpHandler struct {
 	// callSearchSymbols routes through it for ranked results; when
 	// nil, the legacy substring path is used for rollback safety.
 	searchSvc *search.Service
+
+	// freshness powers the additive _meta.freshness envelope on every
+	// MCP tool response (Phase 1.C of the MCP-edits plan). When nil
+	// the envelope still ships, reporting state="fresh" with no
+	// timestamp — the "no change-watch wired, you're reading the
+	// operator-indexed state" semantics. Wired at server-assembly time
+	// against the change-watch router.
+	freshness FreshnessProvider
 }
 
 // mcpLocalChans holds the per-pod delivery channels for an SSE session.
@@ -1057,11 +1065,25 @@ func (h *mcpHandler) handleToolsCallCtx(ctx context.Context, session *mcpSession
 		h.auditLogger.LogToolCall(session.claims.OrgID, session.claims.UserID, params.Name, repoID, elapsed.Milliseconds(), toolErr)
 	}
 
+	// Build the additive _meta.freshness envelope. The repoID is best-
+	// effort extracted from the tool arguments; tools that don't carry
+	// repository_id (cross-repo or system-level tools) get the default-
+	// fresh envelope. The envelope ships on every response — error and
+	// success alike — so MCP consumers can rely on the contract being
+	// uniform.
+	repoIDForFreshness := extractRepoID(params.Arguments)
+	freshness := freshnessEnvelope(h.freshness, repoIDForFreshness)
+
 	if toolErr != nil {
+		errMeta := toolErrorMeta(toolErr)
+		if errMeta == nil {
+			errMeta = make(map[string]interface{})
+		}
+		errMeta["freshness"] = freshness
 		return successResponse(msg.ID, mcpToolResult{
 			Content: []mcpContent{{Type: "text", Text: toolErr.Error()}},
 			IsError: true,
-			Meta:    toolErrorMeta(toolErr),
+			Meta:    errMeta,
 		})
 	}
 
@@ -1071,11 +1093,17 @@ func (h *mcpHandler) handleToolsCallCtx(ctx context.Context, session *mcpSession
 		return successResponse(msg.ID, mcpToolResult{
 			Content: []mcpContent{{Type: "text", Text: "Failed to serialize result"}},
 			IsError: true,
+			Meta: map[string]interface{}{
+				"freshness": freshness,
+			},
 		})
 	}
 
 	return successResponse(msg.ID, mcpToolResult{
 		Content: []mcpContent{{Type: "text", Text: string(resultJSON)}},
+		Meta: map[string]interface{}{
+			"freshness": freshness,
+		},
 	})
 }
 

@@ -167,6 +167,100 @@ ready-made starting point without copy-pasting manifests.
     nothing in 1.B is reachable from production paths until the watcher
     + router land in 1.C and the flag flips at the end of 1.E burn-in.
 
+- **MCP-edits feedback-loop — change-watch router + watcher + freshness
+  envelope (Phase 1.C).** Lands the in-process feedback loop: a passive
+  `internal/changewatch.Watcher` driven by `fsnotify`, the
+  `internal/changewatch.Router` that all connectors funnel through, and
+  the `_meta.freshness` envelope on every MCP tool response. The
+  umbrella `SOURCEBRIDGE_CHANGE_WATCH_ENABLED` flag remains off — Phase
+  1.E flips it after burn-in. Production code paths see no change yet.
+  - **`internal/changewatch.Router`**: single Submit entry point all
+    connectors share. Schema validation → flag gate → repo resolve →
+    per-repo aggregate breaker (60/min × 5min across all source kinds
+    combined) → per-(repo, source.kind) token bucket → dedup window
+    (event_id idempotency + content-hash collapse so fsnotify and
+    record_change observing the same edit produce one routed event)
+    → branch validation against `git.HeadRef` (rejects mismatch) →
+    `Indexer.IndexFiles` under a 100 ms T0 budget → containment
+    assertion (no merged file outside the declared affected set) →
+    `GraphStore.MergeIndexResult` → impact report + existing
+    `applyImpactFromChange` policy → freshness envelope update.
+    Goroutine-safe; the clock reference is stored behind
+    `sync/atomic.Pointer` so callers reading time from inside a
+    critical section don't re-enter the mutex.
+  - **`internal/changewatch.Watcher`**: in-process passive connector.
+    `fsnotify.Watcher` watching every non-ignored directory under each
+    indexed repo, debouncing raw kernel events into per-repo batches,
+    stamping a `ChangeEvent` per batch, and submitting to the router.
+    macOS support: the watcher resolves symlinks on the input path
+    (`filepath.EvalSymlinks`) so the stored repoPath matches the path
+    fsnotify reports in event names — without this the
+    `/var → /private/var` symlink on macOS made the prefix-match in
+    classify silently miss every event for `t.TempDir()`-based repos.
+  - **`git.IsIgnoredDir`**: directory-side filter sharing the
+    component-name and hidden-prefix rules with `IsIgnoredPath` but
+    skipping the unknown-language rule. The watcher uses this during
+    its initial walk so plain package directories like `pkg0` aren't
+    pruned by the file-shaped rule.
+  - **`_meta.freshness` envelope on every MCP tool response** (added
+    in this slice — see prior commit `7903efe`). Surfaces `state`,
+    `tier`, `branch`, `indexed_commit`, `last_verified_at`, `reason`,
+    `partial_refresh` to every consumer. Default-fresh when no
+    provider is wired so disabling change-watch never breaks the wire
+    contract.
+  - **`GraphStore.MergeIndexResult`** (added in commit `056c9b6`):
+    per-file delta merge that drops dependent records on the affected
+    files and re-inserts them while preserving carry-forward
+    Symbol IDs. Production `Store` implements it; the SurrealDB-backed
+    persistence path returns `ErrMergeNotSupported` (1.C surfaces this
+    through the freshness envelope as `state: "suspect"` rather than
+    failing loudly; full SurrealDB merge ships in Phase 4).
+  - **Per-repo aggregate circuit breaker semantics**: opens when 5
+    consecutive minutes are at or above the configured threshold;
+    cooldown lasts the full minute after the last saturated minute
+    (head + 2 min), so the very next event is rejected rather than
+    landing on the cooldown boundary.
+  - Phase 1 done-definition tests landed:
+    - **#1 + #3** — `TestIntegration_ExternalEditFlowsToFreshness`:
+      real fsnotify watcher attached to a real on-disk git working
+      tree (`testfixtures.LargeGoRepo`), real `os.WriteFile` performed
+      outside any SourceBridge code, real branch validation against
+      the working tree (`HeadRefBranchValidator`), real Router
+      pipeline, real `FreshnessForExport` read by the same MCP
+      envelope adapter consumers go through. ~300 ms wall-clock with
+      a tightened 200 ms debounce.
+    - **#2 + #5** — `TestIntegration_RecordChange_FlowsToFreshness`:
+      router-level in-process record_change path. The public MCP tool
+      surface ships in 1.D; this test pins the router-level contract
+      so 1.D's wire-up only needs to exercise the HTTP/MCP plumbing on
+      top.
+    - **#8** — `TestRouter_RejectsEmptyDelta` +
+      `TestRouter_RejectsInvalidPaths`: router rejects empty `files[]`
+      and path-traversal attempts before any dispatch.
+    - **#9** — `TestRouter_MultiTenantContainment`: events for tenant
+      A's repo do not mutate tenant B's freshness envelope or trigger
+      any IndexFiles call against B's path.
+    - **#10 router half** — `TestIndexRepository_RouterHasNoFullReindexCallPath`:
+      AST-walks `internal/changewatch/*.go` (production sources only)
+      and fails on any selector expression naming `IndexRepository` or
+      `IndexRepositoryIncremental`. Replaces 1.A's `t.Skip` placeholder.
+    - **#12 router half** — `TestRouter_RejectsBranchMismatch` +
+      `TestRouter_AcceptsRefsHeadsBranchEquivalent`. The indexer-side
+      `TestIndexFiles_RouterBranchMismatchHookedTo1C` pins the
+      cross-package reference so a future rename of the canonical test
+      surfaces at the indexer boundary too. Replaces 1.B's `t.Skip`
+      placeholder.
+    - **#13** — `TestRouter_PerRepoBreakerTrips`: drives 30 fsnotify +
+      30 record_change events per minute for 5 minutes (each kind under
+      its 100/min throttle, but 60/min combined per-repo) and verifies
+      the breaker trips on minute 6.
+    - **#14** — `TestRouter_DedupByContentHashAcrossSourceKinds` +
+      `TestRouter_DedupByEventIDIdempotency`: same content_hash from two
+      source kinds collapses to one routed event; same event_id replayed
+      collapses too.
+    - **#15 dir-side** — `TestIsIgnoredDir`: 16 cases pinning the new
+      `git.IsIgnoredDir` helper.
+
 ### Changed
 
 - **Credential model** (`792ca64`). HTTP clients for all living-wiki sinks

@@ -54,6 +54,41 @@ var defaultIgnoreSet = func() map[string]bool {
 	return s
 }()
 
+// IsIgnoredDir returns true when relDir (a forward-slash, repo-relative
+// path) should be skipped during a directory walk. Mirrors the
+// directory-side rules ScanRepository uses inline (defaultIgnoreSet
+// component match plus hidden-component prefix). The unknown-language
+// rule from IsIgnoredPath is deliberately NOT applied here because
+// directories don't have language extensions — applying it would prune
+// every non-ignored directory whose name doesn't end in ".go" / ".py"
+// / etc.
+//
+// The change-watch watcher (internal/changewatch) calls this during
+// its initial directory walk so it doesn't accidentally skip every
+// non-source-named directory. ScanRepository keeps its inline check
+// to avoid an extra function call on the indexer's hot path.
+func IsIgnoredDir(repoPath, relDir string) bool {
+	_ = repoPath // reserved; see IsIgnoredPath godoc
+
+	clean := strings.TrimPrefix(relDir, "./")
+	if clean == "" || clean == "." {
+		return false
+	}
+	parts := strings.Split(clean, "/")
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		if defaultIgnoreSet[part] {
+			return true
+		}
+		if strings.HasPrefix(part, ".") {
+			return true
+		}
+	}
+	return false
+}
+
 // IsIgnoredPath returns true if relPath (a forward-slash, repo-relative
 // path) should be skipped by the scanner under the same rules
 // ScanRepository applies inline today.

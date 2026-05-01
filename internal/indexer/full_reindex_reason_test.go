@@ -6,18 +6,22 @@ package indexer
 import (
 	"context"
 	"errors"
+	"go/ast"
+	goparser "go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 // TestRepoIndexFullReason_GuardRefusesUnspecified is half of Phase 1.A
 // done-definition test #10 (the runtime-assertion half). The other
 // half — "the router has no code path that reaches IndexRepository or
-// IndexRepositoryIncremental" — lands in Phase 1.C alongside the
-// router itself; documented in this file's
-// TestIndexRepository_RouterPathDeferred placeholder.
+// IndexRepositoryIncremental" — lands as
+// TestIndexRepository_RouterHasNoFullReindexCallPath in this file
+// (Phase 1.C) and exercises an AST scan over internal/changewatch.
 //
 // Both halves prove the same invariant: an accidental change-event
 // invocation of the whole-tree reindex cannot succeed. This test
@@ -99,16 +103,74 @@ func TestRepoIndexFullReason_StringStability(t *testing.T) {
 	}
 }
 
-// TestIndexRepository_RouterPathDeferred is a placeholder marker for
-// the second half of Phase 1.A done-definition test #10: "the router
-// has no code path that reaches IndexRepositoryIncremental or
-// IndexRepository." The router does not exist yet (it ships in
-// Phase 1.C, package internal/changewatch), so the assertion is
-// deferred to that slice's test suite. Documented here so a reviewer
-// reading the test file in 1.A sees what's covered and what isn't.
+// TestIndexRepository_RouterHasNoFullReindexCallPath is the second half
+// of Phase 1 done-definition test #10: the router (`internal/changewatch`,
+// shipped in Phase 1.C) has no code path that reaches
+// IndexRepositoryIncremental or IndexRepository.
 //
-// Per Phase 1.A scope: only the runtime-side guard is exercised; the
-// build-time import-graph assertion is part of Phase 1.C.
-func TestIndexRepository_RouterPathDeferred(t *testing.T) {
-	t.Skip("router does not exist yet; the no-call-paths-from-router half of test #10 lands in Phase 1.C alongside internal/changewatch")
+// Implementation: AST-walk every non-test Go file in
+// internal/changewatch, looking for any selector expression whose Sel
+// name matches one of the disallowed entry-points. We allow
+// "IndexFiles" since that's the contract method, and we ignore comments
+// and string literals (only real identifier references count).
+//
+// This is mechanical proof, not a runtime check: a future refactor that
+// wires the full-reindex paths into the router turns this red on the
+// next test run, before any production traffic reaches the change.
+func TestIndexRepository_RouterHasNoFullReindexCallPath(t *testing.T) {
+	disallowed := map[string]bool{
+		"IndexRepository":            true,
+		"IndexRepositoryIncremental": true,
+	}
+
+	// Locate the changewatch package source. The test runs with the
+	// indexer package as the working directory, so we walk relative.
+	pkgDir := filepath.Join("..", "changewatch")
+	if _, err := os.Stat(pkgDir); err != nil {
+		t.Fatalf("cannot locate internal/changewatch package source at %q: %v (Phase 1.C must ship it)", pkgDir, err)
+	}
+
+	fset := token.NewFileSet()
+	pkgs, err := goparser.ParseDir(fset, pkgDir, func(fi os.FileInfo) bool {
+		// Production-side files only. Skip _test.go because the test
+		// harness's stubIndexer interface assertion is a deliberate
+		// surface check, not a router call path.
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, goparser.ParseComments)
+	if err != nil {
+		t.Fatalf("goparser.ParseDir: %v", err)
+	}
+
+	type violation struct {
+		File string
+		Line int
+		Name string
+	}
+	var violations []violation
+
+	for _, pkg := range pkgs {
+		for fname, file := range pkg.Files {
+			ast.Inspect(file, func(n ast.Node) bool {
+				sel, ok := n.(*ast.SelectorExpr)
+				if !ok || sel.Sel == nil {
+					return true
+				}
+				if disallowed[sel.Sel.Name] {
+					pos := fset.Position(sel.Pos())
+					violations = append(violations, violation{
+						File: fname,
+						Line: pos.Line,
+						Name: sel.Sel.Name,
+					})
+				}
+				return true
+			})
+		}
+	}
+
+	if len(violations) > 0 {
+		for _, v := range violations {
+			t.Errorf("internal/changewatch %s:%d references %q — the router must NOT reach the full-reindex paths. See plan v5 audit of latent full-reindex paths.", v.File, v.Line, v.Name)
+		}
+	}
 }
