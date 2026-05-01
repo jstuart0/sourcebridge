@@ -143,17 +143,39 @@ func newTestCmd() *cobra.Command {
 	return cmd
 }
 
-// resetLoginFlags resets all login flag vars to zero values.
+// resetLoginFlags resets all login flag vars to zero values, including
+// the non-interactive password input flags (CA-127). Tests must call
+// this before AND after using the login command (or t.Cleanup) so a
+// vector set in one test doesn't leak into the next.
 func resetLoginFlags() {
 	loginServer = ""
 	loginMethod = "auto"
 	loginNoOpen = false
+	loginPasswordInput = PasswordInputFlags{}
+	// Defensive: clear the env var unconditionally. T.Setenv would be
+	// the cleaner shape but resetLoginFlags isn't passed *testing.T.
+	_ = os.Unsetenv("SOURCEBRIDGE_PASSWORD")
 }
 
 // runLoginInTempHome sets HOME to a temp dir, resets login flags, runs
 // runLoginWith, and returns the written token and server files.
+//
+// CA-127 callers can use runLoginInTempHomeConfig instead to set
+// loginPasswordInput / SOURCEBRIDGE_PASSWORD AFTER the internal flag
+// reset (so the configuration survives until runLoginWith executes).
 func runLoginInTempHome(t *testing.T, serverURL string, method string, noOpen bool,
 	opener browserOpener, pwdReader passwordReader) (tokenContent, serverContent string, err error) {
+	return runLoginInTempHomeConfig(t, serverURL, method, noOpen, opener, pwdReader, nil)
+}
+
+// runLoginInTempHomeConfig is the configurable shape: callers pass a
+// `configure` callback that runs AFTER the internal resetLoginFlags
+// and BEFORE runLoginWith. Use this when a test needs to set
+// loginPasswordInput.Stdin / loginPasswordInput.File or the
+// SOURCEBRIDGE_PASSWORD env var (CA-127, tester report Issue 5).
+func runLoginInTempHomeConfig(t *testing.T, serverURL string, method string, noOpen bool,
+	opener browserOpener, pwdReader passwordReader,
+	configure func()) (tokenContent, serverContent string, err error) {
 	t.Helper()
 
 	homeDir := t.TempDir()
@@ -164,6 +186,9 @@ func runLoginInTempHome(t *testing.T, serverURL string, method string, noOpen bo
 	loginServer = serverURL
 	loginMethod = method
 	loginNoOpen = noOpen
+	if configure != nil {
+		configure()
+	}
 	defer resetLoginFlags()
 
 	cmd := newTestCmd()
@@ -707,6 +732,67 @@ func TestLogin_SetupNotDone_ClearError(t *testing.T) {
 	}
 	if !strings.Contains(msg, "curl") {
 		t.Errorf("error should include a curl one-liner so headless users can complete setup; got: %v", err)
+	}
+}
+
+// TestLogin_Local_NonInteractivePassword_Stdin verifies that
+// `--password-stdin` bypasses the interactive prompt — the canonical
+// CI flow for `sourcebridge login --method local`. CA-127, tester
+// report Issue 5.
+func TestLogin_Local_NonInteractivePassword_Stdin(t *testing.T) {
+	srv := newLoginTestServer(t, loginTestServerCfg{
+		localAuth:       true,
+		setupDone:       true,
+		oidcEnabled:     false,
+		localLoginToken: "ca_local_token_stdin",
+	})
+	defer srv.Close()
+
+	// Replace stdin with our pipe so --password-stdin reads from it.
+	stdinReader, stdinWriter, _ := os.Pipe()
+	origStdin := os.Stdin
+	os.Stdin = stdinReader
+	t.Cleanup(func() { os.Stdin = origStdin })
+	go func() {
+		_, _ = stdinWriter.WriteString("ci-secret-pw\n")
+		_ = stdinWriter.Close()
+	}()
+
+	// Interactive reader should NOT be called when --password-stdin
+	// resolves successfully. Returning an error here would surface as
+	// the test failure.
+	pwd := &fakePasswordReader{err: stringError("interactive prompt should have been bypassed")}
+
+	token, _, err := runLoginInTempHomeConfig(t, srv.URL, "local", false,
+		(&fakeBrowserOpener{}).open, pwd.read,
+		func() { loginPasswordInput.Stdin = true })
+	if err != nil {
+		t.Fatalf("runLogin: %v", err)
+	}
+	if token != "ca_local_token_stdin" {
+		t.Errorf("token = %q, want ca_local_token_stdin", token)
+	}
+}
+
+// TestLogin_Local_NonInteractivePassword_Env confirms the env-var path.
+func TestLogin_Local_NonInteractivePassword_Env(t *testing.T) {
+	srv := newLoginTestServer(t, loginTestServerCfg{
+		localAuth:       true,
+		setupDone:       true,
+		localLoginToken: "ca_local_token_env",
+	})
+	defer srv.Close()
+
+	pwd := &fakePasswordReader{err: stringError("interactive prompt should have been bypassed")}
+
+	token, _, err := runLoginInTempHomeConfig(t, srv.URL, "local", false,
+		(&fakeBrowserOpener{}).open, pwd.read,
+		func() { t.Setenv("SOURCEBRIDGE_PASSWORD", "env-secret-pw") })
+	if err != nil {
+		t.Fatalf("runLogin: %v", err)
+	}
+	if token != "ca_local_token_env" {
+		t.Errorf("token = %q, want ca_local_token_env", token)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"net/http"
 	"net/url"
@@ -44,15 +45,21 @@ Use --no-open to print the auth URL instead of launching a browser
 }
 
 var (
-	loginServer string
-	loginMethod string
-	loginNoOpen bool
+	loginServer        string
+	loginMethod        string
+	loginNoOpen        bool
+	loginPasswordInput PasswordInputFlags
 )
 
 func init() {
 	loginCmd.Flags().StringVar(&loginServer, "server", "", "SourceBridge server URL")
 	loginCmd.Flags().StringVar(&loginMethod, "method", "auto", "Auth method: auto, oidc, or local")
 	loginCmd.Flags().BoolVar(&loginNoOpen, "no-open", false, "Print the auth URL instead of opening a browser")
+	// Non-interactive password vectors (CA-127, tester report Issue 5).
+	// Wired via the shared PasswordInputFlags so `sourcebridge setup admin`
+	// and any future password-accepting subcommand share the same flag
+	// names, precedence, and validation surface.
+	loginPasswordInput.RegisterFlags(loginCmd.Flags().BoolVar, loginCmd.Flags().StringVar)
 }
 
 // browserOpener is a small seam so tests can inject a fake opener.
@@ -159,6 +166,37 @@ type desktopLocalLoginResp struct {
 
 func runLogin(cmd *cobra.Command, args []string) error {
 	return runLoginWith(cmd, defaultBrowserOpener, defaultPasswordReader)
+}
+
+// resolveLocalPassword decides where the admin password comes from for
+// the local-auth flow. Precedence (CA-127, tester report Issue 5):
+//
+//  1. --password-stdin
+//  2. --password-file
+//  3. SOURCEBRIDGE_PASSWORD env
+//  4. interactive prompt (the original behavior)
+//
+// Returns the password and a source label so callers can mention the
+// source in error/audit messages without re-implementing precedence.
+func resolveLocalPassword(
+	flags PasswordInputFlags,
+	stdin io.Reader,
+	pwdReader passwordReader,
+) (string, PasswordSource, error) {
+	pw, src, err := flags.ResolveNonInteractive(stdin)
+	if err != nil {
+		return "", PasswordSourceNone, err
+	}
+	if src != PasswordSourceNone {
+		return pw, src, nil
+	}
+	// Fall through to interactive — preserves the original behavior
+	// when none of the non-interactive vectors are set.
+	pw, err = pwdReader("Admin password: ")
+	if err != nil {
+		return "", PasswordSourceNone, err
+	}
+	return pw, PasswordSourceNone, nil
 }
 
 func runLoginWith(cmd *cobra.Command, opener browserOpener, pwdReader passwordReader) error {
@@ -433,14 +471,23 @@ func pollOIDCSession(ctx context.Context, serverURL, sessionID string, deadline 
 	}
 }
 
-// runLocalFlow prompts for the admin password and exchanges it for a token.
+// runLocalFlow obtains the admin password (per CA-127 precedence) and
+// exchanges it for a token. The password vector resolution short-circuits
+// the interactive prompt when --password-stdin / --password-file /
+// SOURCEBRIDGE_PASSWORD is set; otherwise prompts via pwdReader.
 func runLocalFlow(ctx context.Context, serverURL string, pwdReader passwordReader) (string, error) {
-	password, err := pwdReader("Admin password: ")
+	password, src, err := resolveLocalPassword(loginPasswordInput, os.Stdin, pwdReader)
 	if err != nil {
 		return "", err
 	}
 	if password == "" {
 		return "", fmt.Errorf("password cannot be empty")
+	}
+	if src != PasswordSourceNone {
+		// Quiet acknowledgement so non-interactive runs don't appear to
+		// have hung. Goes to stderr to avoid corrupting --json or piped
+		// stdout consumers.
+		fmt.Fprintf(os.Stderr, "Using admin password from %s.\n", src)
 	}
 
 	payload := map[string]string{
