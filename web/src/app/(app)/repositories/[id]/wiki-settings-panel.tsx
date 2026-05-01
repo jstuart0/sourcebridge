@@ -927,14 +927,31 @@ function humanizeFailure(result: LivingWikiJobResult): {
     };
   }
 
-  // Authentication failure — credentials are wrong or expired.
+  // Authentication failure — credentials are wrong or expired. Auth
+  // failures don't get a Retry button — retrying with the same bad
+  // credentials will just fail again. The banner instead surfaces a
+  // "Fix credentials" link to the settings page (rendered separately
+  // by FailureBanner).
   if (category === "auth") {
     return {
       title: "Authentication failed",
       detail:
         raw ||
         "A configured sink rejected our credentials. Check the Living Wiki settings page to confirm the token and email are still valid.",
-      action: "Fix credentials in Settings → Living Wiki, then retry.",
+      action: "Fix credentials",
+    };
+  }
+
+  // Transient failure (rate limit, brief upstream blip). The system
+  // expects retry to succeed; banner copy uses "temporary error" so the
+  // user knows it's not a deeper problem.
+  if (category === "transient") {
+    return {
+      title: "Hit a temporary error",
+      detail:
+        raw ||
+        "A temporary error stopped this run. Retrying usually works.",
+      action: "Retry",
     };
   }
 
@@ -1111,8 +1128,9 @@ function FailureBanner({
 
   // Everything else — transient, auth, raw failures, etc. — flows through
   // the humanizer so the user sees plain-language guidance instead of the
-  // backend's diagnostic string. Auth banner additionally surfaces the
-  // settings link the user actually needs.
+  // backend's diagnostic string. Auth gets a "Fix credentials" link
+  // instead of a Retry button (retrying with the same bad credentials
+  // would just fail again). Other categories get a Retry button.
   if (result.status === "failed" || (category && category !== "")) {
     const { title, detail, action } = humanizeFailure(result);
     const variant = category === "auth" ? "error" : "warning";
@@ -1121,20 +1139,21 @@ function FailureBanner({
         <div className="mt-2 space-y-2">
           <p className="text-xs text-[var(--text-secondary)]">{detail}</p>
           <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
-            <button
-              type="button"
-              onClick={onRetry}
-              className="underline underline-offset-2"
-            >
-              {action}
-            </button>
-            {category === "auth" && (
+            {category === "auth" ? (
               <Link
                 href="/settings/living-wiki"
                 className="underline underline-offset-2"
               >
-                Open Living Wiki settings
+                {action}
               </Link>
+            ) : (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="underline underline-offset-2"
+              >
+                {action}
+              </button>
             )}
           </div>
         </div>
