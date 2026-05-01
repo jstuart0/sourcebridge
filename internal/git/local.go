@@ -39,7 +39,7 @@ var DefaultIgnorePatterns = []string{
 	"vendor", "dist", "build", ".next", ".cache",
 	"target", "bin", "obj", ".idea", ".vscode",
 	".DS_Store", "coverage", ".mypy_cache", ".ruff_cache",
-	".pytest_cache", ".tox", "gen",
+	".pytest_cache", ".tox", "gen", "out",
 }
 
 // defaultIgnoreSet is the precomputed lookup for DefaultIgnorePatterns.

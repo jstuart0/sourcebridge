@@ -29,10 +29,10 @@ make proto          # Regenerate protobuf stubs
 # Quick start with Docker
 docker compose up
 
-# Local development
+# Local development (run each in its own terminal)
 make dev            # Start API server
-make dev-web        # Start web frontend (separate terminal)
-cd workers && uv run python -m workers  # Start worker (separate terminal)
+make dev-web        # Start web frontend
+make dev-worker     # Start Python AI worker (required for agentic + embeddings + review)
 ```
 
 ## Configuration
@@ -84,3 +84,10 @@ When you encounter a `CODEAWARE_` or `codeaware` reference:
 
 - Never commit credentials or `.env` files
 - Always specify namespace explicitly with kubectl
+
+## Plane Project
+
+- Workspace: agile-solutions-group
+- Project ID: d3fa4bd8-1177-4364-88a7-aae69698b75d
+- Project Name: CodeAware
+- Identifier: CA

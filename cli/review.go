@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sourcebridge/sourcebridge/internal/config"
+	"github.com/sourcebridge/sourcebridge/internal/git"
 )
 
 var reviewImplCmd = &cobra.Command{
@@ -53,27 +54,10 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot access %s: %w", absPath, err)
 	}
 
-	// If directory, find source files to review
+	// If directory, find source files to review.
 	var filesToReview []string
 	if info.IsDir() {
-		err = filepath.Walk(absPath, func(path string, fi os.FileInfo, err error) error {
-			if err != nil {
-				return nil
-			}
-			if fi.IsDir() {
-				base := filepath.Base(path)
-				if base == "node_modules" || base == ".git" || base == "vendor" || base == "__pycache__" {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			ext := filepath.Ext(path)
-			switch ext {
-			case ".go", ".py", ".ts", ".js", ".java", ".rs", ".cs", ".cpp", ".rb":
-				filesToReview = append(filesToReview, path)
-			}
-			return nil
-		})
+		filesToReview, err = findReviewableFiles(absPath)
 		if err != nil {
 			return fmt.Errorf("walking directory: %w", err)
 		}
@@ -143,6 +127,76 @@ func runReview(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// reviewableExtensions lists the file extensions the review walker
+// considers source code worth sending to the reviewer. Lower-case,
+// dotted (".go", ".py", ...). Kept package-private so the walker and
+// its tests share one source of truth.
+var reviewableExtensions = map[string]bool{
+	".go":   true,
+	".py":   true,
+	".ts":   true,
+	".js":   true,
+	".java": true,
+	".rs":   true,
+	".cs":   true,
+	".cpp":  true,
+	".rb":   true,
+}
+
+// findReviewableFiles walks rootDir and returns every file whose
+// extension is recognized as reviewable source code. Directories are
+// pruned via git.IsIgnoredDir, which is driven by
+// git.DefaultIgnorePatterns — the same source of truth the indexer
+// and change-watch walkers consume. This means a single addition
+// (e.g. ".parcel-cache") in DefaultIgnorePatterns picks up here
+// automatically; the walker has no parallel skip list of its own.
+//
+// rootDir must be an absolute path to a directory; behavior on a
+// relative path or a file is undefined (callers stat first). The
+// returned paths are absolute.
+//
+// Tester report 2026-04-30 (Pazaryna) Issue 6 / CA-124: extracted from
+// runReview so the walker is unit-testable without standing up a
+// Python worker subprocess.
+func findReviewableFiles(rootDir string) ([]string, error) {
+	var files []string
+	err := filepath.Walk(rootDir, func(path string, fi os.FileInfo, err error) error {
+		if err != nil {
+			// Permission errors and the like are ignored — matches the
+			// pre-extraction behavior so existing users see no change.
+			return nil
+		}
+		if fi.IsDir() {
+			// Never ignore the root itself; otherwise a user passing a
+			// directory whose name happens to match the ignore set
+			// (e.g. `sourcebridge review ./dist`) would get an empty
+			// result with no warning.
+			if path == rootDir {
+				return nil
+			}
+			relDir, relErr := filepath.Rel(rootDir, path)
+			if relErr != nil {
+				// Defensive: Rel against a descendant of rootDir
+				// shouldn't fail. If it does, surface no skip so we
+				// don't accidentally prune the user's repo.
+				return nil
+			}
+			if git.IsIgnoredDir(rootDir, filepath.ToSlash(relDir)) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if reviewableExtensions[filepath.Ext(path)] {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
 func findWorkersDir() string {

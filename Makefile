@@ -1,7 +1,7 @@
 .PHONY: all build build-go build-web build-worker build-vscode test test-go test-web test-worker test-vscode \
 	lint lint-go lint-web lint-worker lint-vscode package-vscode install-vscode \
 	proto proto-clean docker-build docker-up docker-down \
-	dev dev-web dev-go clean migrate help integration-test test-integration smoke-test phase-gate ci \
+	dev dev-web dev-go dev-worker clean migrate help integration-test test-integration smoke-test phase-gate ci \
 	test-livingwiki-integration test-livingwiki-smoke \
 	benchmark-comprehension-fake benchmark-comprehension-local benchmark-comprehension-report \
 	benchmark-report-quality-live
@@ -117,6 +117,17 @@ dev-go: build-go
 dev-web:
 	cd web && npm run dev
 
+# Run the Python AI worker. Required for agentic features, embeddings,
+# and code review — the API server runs without it but agentic / embedding
+# features stay disabled until this process is reachable on
+# localhost:50051. Run in a separate terminal alongside `make dev`.
+#
+# Equivalent: `cd workers && uv run sourcebridge-worker` (the project
+# defines a console script at workers/pyproject.toml). Both invocations
+# are interchangeable; this target is the canonical answer used in docs.
+dev-worker:
+	uv run --project workers python -m workers
+
 # Clean
 clean:
 	rm -rf bin/ gen/ web/.next web/node_modules/.cache
@@ -228,6 +239,7 @@ help:
 	@echo "  docker-down                  - Stop Docker Compose"
 	@echo "  dev                          - Run Go server in dev mode"
 	@echo "  dev-web                      - Run Next.js dev server"
+	@echo "  dev-worker                   - Run Python AI worker (required for agentic + embeddings + review)"
 	@echo "  clean                        - Remove build artifacts"
 	@echo "  migrate                      - Run database migrations"
 	@echo "  test-integration             - Run Surreal-backed integration tests (requires Docker)"
