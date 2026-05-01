@@ -386,6 +386,25 @@ make build-web
 make build
 ```
 
+### Container Images
+
+Pre-built images are published on every push to `main` (and on `v*` tags) to
+both registries below, with identical tags:
+
+| Registry | Image |
+|----------|-------|
+| GitHub Container Registry | `ghcr.io/sourcebridge-ai/sourcebridge-{api,worker,web}` |
+| Docker Hub | `sourcebridge/sourcebridge-{api,worker,web}` |
+
+Tag policy:
+
+- `sha-<short>` — the seven-character commit SHA of the build (e.g. `sha-9d15856`)
+- `latest` — moves with the latest `main` commit
+- `vX.Y.Z` and `stable` — set when a `v*` tag is pushed (no prerelease suffix)
+
+For local image builds (mirrors the CI tag policy), see
+[`scripts/build-and-deploy.sh`](scripts/build-and-deploy.sh) — `--help` for usage.
+
 ### Running Locally
 
 SourceBridge runs three processes in development. The API server embeds
