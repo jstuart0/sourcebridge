@@ -22,6 +22,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/api/middleware"
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 	"github.com/sourcebridge/sourcebridge/internal/capabilities"
+	"github.com/sourcebridge/sourcebridge/internal/changewatch"
 	"github.com/sourcebridge/sourcebridge/internal/clustering"
 	"github.com/sourcebridge/sourcebridge/internal/indexing"
 	"github.com/sourcebridge/sourcebridge/internal/installassets"
@@ -880,6 +881,22 @@ func (s *Server) setupRouter() {
 		}
 		if s.mcpToolExtender != nil {
 			s.mcp.toolExtender = s.mcpToolExtender
+		}
+		// Wire the change-watch dispatcher for the record_change MCP
+		// tool (Phase 1.D). When nil the tool is hidden from
+		// tools/list. The same dispatcher already feeds the HTTP
+		// ingress via s.handleConnectorEvent, so both connectors share
+		// one router instance.
+		if s.changeDispatcher != nil {
+			s.mcp.changeDispatcher = s.changeDispatcher
+			// Wire the freshness provider when the dispatcher is a
+			// *changewatch.Router (the production case). The type
+			// assertion is the only place the rest package reaches
+			// into changewatch's concrete type — every other code
+			// path goes through interfaces.
+			if router, ok := s.changeDispatcher.(*changewatch.Router); ok {
+				s.mcp.freshness = NewRouterFreshnessProvider(router)
+			}
 		}
 		// SSE endpoint: behind auth (JWT or API token)
 		r.Group(func(r chi.Router) {
