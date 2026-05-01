@@ -23,7 +23,13 @@ type AgentSynthesizer interface {
 	// SupportsTools reports whether the provider/model behind this
 	// synthesizer can do structured tool use. When false, the loop
 	// falls back to the single-shot path.
-	SupportsTools() bool
+	//
+	// The ctx parameter is consumed by lazy-probe implementations
+	// (CA-126 / Wave 3) that do an on-demand capability probe with
+	// a short deadline; the synchronous WorkerAgentSynthesizer ignores
+	// it. Callers must pass a real ctx so cancellation reaches the
+	// probe RPC.
+	SupportsTools(ctx context.Context) bool
 }
 
 // AgentTurnRequest is the orchestrator-side request for one turn.
@@ -166,7 +172,7 @@ func (o *Orchestrator) RunAgentLoopWithBudget(
 	dispatcher *AgentToolDispatcher,
 	wallClock time.Duration,
 ) (*AgentLoopResult, error) {
-	if synth == nil || !synth.SupportsTools() {
+	if synth == nil || !synth.SupportsTools(ctx) {
 		return nil, errors.New("agent loop called but synthesizer lacks tool support")
 	}
 	if dispatcher == nil {

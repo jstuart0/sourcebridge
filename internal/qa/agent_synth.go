@@ -11,6 +11,7 @@ import (
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
+	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 )
 
 // WorkerAgentSynthesizer adapts a worker client + its
@@ -40,8 +41,14 @@ type WorkerAgentSynthesizer struct {
 // agentWorkerCaller is the narrow surface we need from
 // *llmcall.Caller. Kept as an interface so tests can inject a fake
 // without importing grpc.
+//
+// GetProviderCapabilities is needed by the lazy-probe path
+// (LazyAgentSynth, CA-126). The synchronous WorkerAgentSynthesizer
+// only consumes IsAvailable() + AnswerQuestionWithTools, but the
+// interface unifies the surface so tests can use one fake for both.
 type agentWorkerCaller interface {
 	AnswerQuestionWithTools(ctx context.Context, repoID, op string, req *reasoningv1.AnswerQuestionWithToolsRequest) (*reasoningv1.AnswerQuestionWithToolsResponse, error)
+	GetProviderCapabilities(ctx context.Context, repoID, op string) (*llmcall.CapabilitiesResponse, error)
 	IsAvailable() bool
 }
 
@@ -76,7 +83,11 @@ func (s *WorkerAgentSynthesizer) ProbedVersion() uint64 {
 }
 
 // SupportsTools mirrors the capability bit.
-func (s *WorkerAgentSynthesizer) SupportsTools() bool {
+//
+// ctx is part of the AgentSynthesizer interface for lazy-probe
+// implementations (CA-126 / Wave 3); this synchronous impl ignores it
+// because the bit was decided at construction time.
+func (s *WorkerAgentSynthesizer) SupportsTools(_ context.Context) bool {
 	if s == nil || s.worker == nil {
 		return false
 	}

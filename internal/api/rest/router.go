@@ -457,62 +457,60 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		if s.searchSvc != nil {
 			o = o.WithSearcher(&qaSearcher{svc: s.searchSvc})
 		}
-		// Agentic path — only wires when the provider supports tool
-		// use (probed at startup). When the probe fails or returns
-		// unsupported, the orchestrator stays on single-shot
-		// regardless of AgenticRetrievalEnabled.
+		// Agentic path — wired through a LazyAgentSynth (CA-126,
+		// tester report Issue 2 / Wave 3) so the worker's capability
+		// probe is deferred to the first agentic-eligible request and
+		// re-attempted on failure with a cooldown.
 		//
-		// Probe with retry: the API and the worker come up in parallel
-		// under a rolling deploy. If the API pod wins the race, the
-		// first probe fails with "connection refused" and the pod
-		// stays single-shot for its entire lifetime while the sibling
-		// pod (probed seconds later) is wired. We retry for up to 30s
-		// so both pods converge to the same capability state. A
-		// single run against two pods with split agentic-enablement
-		// corrupts benchmarks and produces flaky prod traffic.
-		if s.llmCaller != nil && s.llmCaller.IsAvailable() {
-			var capsWrap *llmcall.CapabilitiesResponse
-			var err error
-			for attempt := 1; attempt <= 6; attempt++ {
-				capsWrap, err = s.llmCaller.GetProviderCapabilities(context.Background(), "", resolution.OpProviderCapabilities)
-				if err == nil {
-					break
-				}
-				slog.Warn("agent synth: capability probe attempt failed; retrying",
-					"attempt", attempt, "error", err)
-				time.Sleep(5 * time.Second)
+		// Pre-CA-126 design: a 30s synchronous probe-with-retry at
+		// boot. If every attempt failed (e.g. API server boots first
+		// in `make dev` and the user starts the worker afterwards),
+		// the synthesizer was never wired and agentic features stayed
+		// disabled for the pod's entire lifetime. The lazy provider
+		// fixes that case AND continues to handle the K8s rolling-
+		// restart race correctly (first real request triggers the
+		// probe; the worker is up by then).
+		//
+		// We always wire the lazy provider — even when llmCaller is
+		// nil — because the orchestrator's shouldUseAgenticPath gate
+		// short-circuits on a nil caller without burning a probe.
+		if s.llmCaller != nil {
+			versionSrc := &resolverVersionSource{r: s.llmResolver}
+			lazyAgent := qa.NewLazyAgentSynth(s.llmCaller, versionSrc, qa.LazyAgentSynthOptions{
+				// Per-request probe deadline. The first agentic request
+				// after a cold start blocks on this; 2s is the sweet
+				// spot — long enough that a healthy worker on the
+				// loopback wins comfortably, short enough that a wedged
+				// worker doesn't stall user-visible latency.
+				Timeout: 2 * time.Second,
+				// Cooldown between failed-probe re-attempts. 60s matches
+				// the pre-CA-126 worst-case experience while bounding
+				// retry pressure when the worker is genuinely down.
+				Cooldown: 60 * time.Second,
+			})
+			o = o.WithAgentSynthesizer(lazyAgent).
+				WithAgenticEnabled(cfg.QA.AgenticRetrievalEnabled).
+				WithAgenticCanaryPct(cfg.QA.AgenticRetrievalCanaryPct)
+			o = o.WithQuestionProfiler(qa.NewWorkerQuestionProfiler(s.llmCaller))
+			o = o.WithDecomposer(qa.NewWorkerDecomposer(s.llmCaller), s.llmCaller)
+			slog.Info("agent synth: lazy provider wired",
+				"agentic_enabled", cfg.QA.AgenticRetrievalEnabled,
+				"canary_pct", cfg.QA.AgenticRetrievalCanaryPct,
+				"smart_classifier", cfg.QA.SmartClassifierEnabled,
+				"query_decomposition", cfg.QA.QueryDecompositionEnabled,
+				"prompt_caching", cfg.QA.PromptCachingEnabled,
+			)
+
+			// Best-effort boot probe — does NOT block boot. Hot-warms
+			// the cache for the K8s rolling-restart case (worker is
+			// usually up within seconds of the API). Local-dev users
+			// who start the worker after `make dev` see the warning
+			// goroutine below and are told what to run.
+			workerAddr := cfg.Worker.Address
+			if workerAddr == "" {
+				workerAddr = "(unknown address)"
 			}
-			if err != nil {
-				slog.Warn("agent synth: provider capability probe failed after retries; agentic disabled",
-					"error", err)
-			} else if capsWrap != nil && capsWrap.Resp.GetToolUseSupported() {
-				caps := capsWrap.Resp
-				// Pair the cached tool-support bit with the resolver
-				// snapshot version observed at probe time. A workspace
-				// save bumps the version; the synthesizer's IsStale()
-				// check (against the resolver's current version) lets
-				// the orchestrator re-probe before its next agentic
-				// turn so a configmap→workspace cutover is reflected
-				// without a pod restart.
-				agent := qa.NewWorkerAgentSynthesizerWithVersion(s.llmCaller, true, capsWrap.Version)
-				o = o.WithAgentSynthesizer(agent).
-					WithAgenticEnabled(cfg.QA.AgenticRetrievalEnabled).
-					WithAgenticCanaryPct(cfg.QA.AgenticRetrievalCanaryPct)
-				o = o.WithQuestionProfiler(qa.NewWorkerQuestionProfiler(s.llmCaller))
-				o = o.WithDecomposer(qa.NewWorkerDecomposer(s.llmCaller), s.llmCaller)
-				slog.Info("agent synth: wired",
-					"provider", caps.GetProvider(),
-					"model", caps.GetModel(),
-					"enabled", cfg.QA.AgenticRetrievalEnabled,
-					"canary_pct", cfg.QA.AgenticRetrievalCanaryPct,
-					"smart_classifier", cfg.QA.SmartClassifierEnabled,
-					"query_decomposition", cfg.QA.QueryDecompositionEnabled,
-					"prompt_caching", cfg.QA.PromptCachingEnabled,
-					"capability_probed_version", capsWrap.Version)
-			} else if capsWrap != nil {
-				slog.Info("agent synth: provider does not support tool use; agentic disabled",
-					"provider", capsWrap.Resp.GetProvider(), "model", capsWrap.Resp.GetModel())
-			}
+			go bootProbeAndWarn(lazyAgent, workerAddr)
 		}
 		s.qaOrchestrator = o
 		// Publish the server-side QA state to the telemetry counters
