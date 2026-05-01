@@ -350,6 +350,19 @@ type mcpHandler struct {
 	// operator-indexed state" semantics. Wired at server-assembly time
 	// against the change-watch router.
 	freshness FreshnessProvider
+
+	// changeDispatcher backs the in-process record_change MCP tool
+	// (Phase 1.D of the MCP-edits plan). When nil, the tool is hidden
+	// from tools/list entirely so agents don't discover a no-op tool;
+	// a hand-crafted tools/call with name="record_change" against a
+	// nil dispatcher returns MCPErrCapabilityDisabled (defense in
+	// depth). Wired at server-assembly time when change_watch.enabled
+	// is true.
+	//
+	// The interface decouples the rest package from concrete
+	// *changewatch.Router so the same tool can be exercised in tests
+	// with a stub dispatcher.
+	changeDispatcher ChangeEventDispatcher
 }
 
 // mcpLocalChans holds the per-pod delivery channels for an SSE session.
@@ -947,6 +960,13 @@ func (h *mcpHandler) baseTools() []mcpToolDefinition {
 	tools = append(tools, h.compoundToolDefs()...)
 	tools = append(tools, h.crossRepoToolDef())
 	tools = append(tools, h.clusteringToolDefs()...)
+	// Phase 1.D — record_change. Only surfaced when the change-watch
+	// dispatcher is wired at server-assembly time (i.e.,
+	// change_watch.enabled=true). Hidden otherwise so agents don't
+	// discover a no-op tool.
+	if def := h.recordChangeToolDefIfAvailable(); def != nil {
+		tools = append(tools, *def)
+	}
 	return tools
 }
 
@@ -1048,6 +1068,9 @@ func (h *mcpHandler) handleToolsCallCtx(ctx context.Context, session *mcpSession
 		result, toolErr = h.callGetSubsystemByID(session, params.Arguments)
 	case "get_subsystem":
 		result, toolErr = h.callGetSubsystem(session, params.Arguments)
+	// Phase 1.D — change-watch in-process connector tool.
+	case "record_change":
+		result, toolErr = h.callRecordChange(session, params.Arguments)
 	default:
 		// Try enterprise tool extender
 		if h.toolExtender != nil {

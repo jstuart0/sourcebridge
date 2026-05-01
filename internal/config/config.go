@@ -30,6 +30,7 @@ type Config struct {
 	QA            QAConfig            `mapstructure:"qa"`
 	LivingWiki    LivingWikiConfig    `mapstructure:"living_wiki"`
 	ChangeWatch   ChangeWatchConfig   `mapstructure:"change_watch"`
+	ConnectorAPI  ConnectorAPIConfig  `mapstructure:"connector_api"`
 }
 
 // ComprehensionConfig holds tunables for the LLM job orchestrator and
@@ -157,6 +158,17 @@ type LinkingConfig struct {
 	MinConfidenceUI        float64 `mapstructure:"min_confidence_ui"`
 	MinConfidenceCodeLens  float64 `mapstructure:"min_confidence_codelens"`
 	MinConfidencePRComment float64 `mapstructure:"min_confidence_pr_comment"`
+
+	// InvalidateGraceHours is the grace window after a code change before
+	// dependent links are flagged as invalidated by the change-watch
+	// pipeline. Default 24 hours (the plan v5 nice-to-have L1). The
+	// window covers cases where an agent makes a multi-commit edit
+	// sequence (refactor + tests + doc updates) — invalidating links on
+	// the first commit and not the last would create churn the operator
+	// needs to ignore. Zero or negative disables the grace window
+	// (links invalidate immediately on the next router event).
+	// SOURCEBRIDGE_LINKING_INVALIDATE_GRACE_HOURS.
+	InvalidateGraceHours int `mapstructure:"invalidate_grace_hours"`
 }
 
 // UIConfig holds user interface settings.
@@ -427,6 +439,33 @@ type ChangeWatchConfig struct {
 	T0BudgetMs int `mapstructure:"t0_budget_ms"`
 }
 
+// ConnectorAPIConfig controls the public HTTP ingress for change-watch
+// connectors (Phase 1.D of the MCP-edits plan). The endpoint at
+// POST /v1/connectors/{id}/events accepts ChangeEvent payloads from
+// external connectors (GitHub, GitLab, custom) and dispatches them to
+// the same in-process router as the fsnotify watcher and the
+// record_change MCP tool.
+//
+// Environment variable prefix: SOURCEBRIDGE_CONNECTOR_API_*
+//
+// The endpoint is **internal/unstable** through Phase 1; the schema
+// promotion to 1.0 (and operator-facing public docs) ship in Phase 2
+// after the schema-stability checkpoint passes. Default off through
+// Phase 1; flipped at the end of Phase 2 burn-in.
+//
+// Example (config.toml):
+//
+//	[connector_api]
+//	enabled = false
+type ConnectorAPIConfig struct {
+	// Enabled gates the public HTTP ingress. When false (the Phase 1
+	// default) the route returns 404 just like any other unregistered
+	// endpoint — connectors that probe the path see no fingerprint of
+	// the SourceBridge install.
+	// SOURCEBRIDGE_CONNECTOR_API_ENABLED.
+	Enabled bool `mapstructure:"enabled"`
+}
+
 // Defaults returns a Config with all default values.
 func Defaults() *Config {
 	return &Config{
@@ -470,6 +509,7 @@ func Defaults() *Config {
 			MinConfidenceUI:        0.5,
 			MinConfidenceCodeLens:  0.7,
 			MinConfidencePRComment: 0.8,
+			InvalidateGraceHours:   24, // 24h grace before dependent links transition to invalidated
 		},
 		UI: UIConfig{
 			Theme:          "dark",
@@ -523,6 +563,9 @@ func Defaults() *Config {
 			RateLimitPerMin:   30,    // per-(repo, source.kind) throttle
 			RepoBreakerPerMin: 60,    // per-repo aggregate breaker (5min sustained)
 			T0BudgetMs:        100,   // T0 sync-refresh-on-read hard ceiling
+		},
+		ConnectorAPI: ConnectorAPIConfig{
+			Enabled: false, // public HTTP ingress default-off through Phase 1; flipped end of Phase 2
 		},
 	}
 }
@@ -620,6 +663,8 @@ func Load() (*Config, error) {
 	v.SetDefault("change_watch.rate_limit_per_min", cfg.ChangeWatch.RateLimitPerMin)
 	v.SetDefault("change_watch.repo_breaker_per_min", cfg.ChangeWatch.RepoBreakerPerMin)
 	v.SetDefault("change_watch.t0_budget_ms", cfg.ChangeWatch.T0BudgetMs)
+	v.SetDefault("connector_api.enabled", cfg.ConnectorAPI.Enabled)
+	v.SetDefault("linking.invalidate_grace_hours", cfg.Linking.InvalidateGraceHours)
 
 	// Try reading config file (not required)
 	if err := v.ReadInConfig(); err != nil {
@@ -706,6 +751,9 @@ func (c *Config) Validate() error {
 	}
 	if c.ChangeWatch.T0BudgetMs < 0 {
 		return fmt.Errorf("invalid change_watch.t0_budget_ms: %d (must be >= 0)", c.ChangeWatch.T0BudgetMs)
+	}
+	if c.Linking.InvalidateGraceHours < 0 {
+		return fmt.Errorf("invalid linking.invalidate_grace_hours: %d (must be >= 0; 0 disables the grace window)", c.Linking.InvalidateGraceHours)
 	}
 	return nil
 }

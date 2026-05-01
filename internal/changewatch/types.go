@@ -212,15 +212,23 @@ const (
 	// (1.D ships the public tool; 1.C accepts the same kind from
 	// direct router callers used by tests).
 	SourceKindMCPRecordChange SourceKind = "mcp_record_change"
+
+	// SourceKindHTTPIngress — generic HTTP-ingress connector (1.D).
+	// Used by callers posting to POST /v1/connectors/{id}/events when
+	// a more specific connector kind hasn't shipped yet. Phase 2
+	// specializes this with `github_webhook`, `github_app`, etc.;
+	// in 1.D the only HTTP-ingress callers are operators wiring custom
+	// integrations against the (unstable) 0.x schema.
+	SourceKindHTTPIngress SourceKind = "http_ingress"
 )
 
-// IsValid reports whether the kind is one of the recognized 1.C
+// IsValid reports whether the kind is one of the recognized 1.C/1.D
 // values. Future phases will add more cases (github_webhook,
 // gitlab_webhook, ci_hook, ide_plugin, lsp_bridge, agent_native,
 // manual_admin, etc.).
 func (k SourceKind) IsValid() bool {
 	switch k {
-	case SourceKindFsnotifyLocal, SourceKindMCPRecordChange:
+	case SourceKindFsnotifyLocal, SourceKindMCPRecordChange, SourceKindHTTPIngress:
 		return true
 	}
 	return false

@@ -22,6 +22,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/api/middleware"
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 	"github.com/sourcebridge/sourcebridge/internal/capabilities"
+	"github.com/sourcebridge/sourcebridge/internal/changewatch"
 	"github.com/sourcebridge/sourcebridge/internal/clustering"
 	"github.com/sourcebridge/sourcebridge/internal/indexing"
 	"github.com/sourcebridge/sourcebridge/internal/installassets"
@@ -292,6 +293,22 @@ type Server struct {
 	// (which is env-bootstrap only after R3 — captured by VALUE inside
 	// the resolver and never mutated post-boot).
 	gitResolver gitres.Resolver // nil only in test/embedded mode without a workspace store
+
+	// changeDispatcher is the boundary the change-watch HTTP ingress
+	// (POST /v1/connectors/{id}/events) and the record_change MCP tool
+	// dispatch through. Wired at server-assembly time when
+	// change_watch.enabled is true; nil otherwise (the HTTP route
+	// returns 503; the MCP tool returns a structured "disabled"
+	// response). The interface decouples the rest package from the
+	// concrete *changewatch.Router so tests substitute a stub.
+	changeDispatcher ChangeEventDispatcher
+}
+
+// WithChangeDispatcher injects the change-watch dispatcher (typically
+// *changewatch.Router) at server-assembly time. Pass nil to leave the
+// HTTP ingress and the record_change MCP tool reporting disabled.
+func WithChangeDispatcher(d ChangeEventDispatcher) ServerOption {
+	return func(s *Server) { s.changeDispatcher = d }
 }
 
 // qaResolverOrchestrator exposes the server's QA orchestrator to the
@@ -794,6 +811,20 @@ func (s *Server) setupRouter() {
 		r.Get("/api/v1/diagrams/{repoId}/export/json", s.handleExportDiagramJSON)
 	})
 
+	// Change-watch connector ingress (Phase 1.D). Behind the
+	// connector_api.enabled feature flag — default off through Phase 1.
+	// When the flag is off the route is never registered, so external
+	// probes see a 404 with no fingerprint of the SourceBridge install.
+	// Authentication: bearer token / JWT through the same middleware
+	// as the other authenticated routes; HMAC validation specific to
+	// GitHub webhooks lands in Phase 2.
+	if s.cfg != nil && s.cfg.ConnectorAPI.Enabled {
+		r.Group(func(r chi.Router) {
+			r.Use(auth.MiddlewareWithTokens(s.jwtMgr, s.tokenStore))
+			r.Post("/v1/connectors/{id}/events", s.handleConnectorEvent)
+		})
+	}
+
 	// MCP (Model Context Protocol) routes
 	if s.cfg.MCP.Enabled {
 		sessionTTL := time.Duration(s.cfg.MCP.SessionTTL) * time.Second
@@ -850,6 +881,22 @@ func (s *Server) setupRouter() {
 		}
 		if s.mcpToolExtender != nil {
 			s.mcp.toolExtender = s.mcpToolExtender
+		}
+		// Wire the change-watch dispatcher for the record_change MCP
+		// tool (Phase 1.D). When nil the tool is hidden from
+		// tools/list. The same dispatcher already feeds the HTTP
+		// ingress via s.handleConnectorEvent, so both connectors share
+		// one router instance.
+		if s.changeDispatcher != nil {
+			s.mcp.changeDispatcher = s.changeDispatcher
+			// Wire the freshness provider when the dispatcher is a
+			// *changewatch.Router (the production case). The type
+			// assertion is the only place the rest package reaches
+			// into changewatch's concrete type — every other code
+			// path goes through interfaces.
+			if router, ok := s.changeDispatcher.(*changewatch.Router); ok {
+				s.mcp.freshness = NewRouterFreshnessProvider(router)
+			}
 		}
 		// SSE endpoint: behind auth (JWT or API token)
 		r.Group(func(r chi.Router) {
