@@ -64,22 +64,10 @@ func writeCloseTag(w io.Writer, name string) error {
 	return err
 }
 
-// writeSelfClosingTag writes a self-closing XML tag.
-func writeSelfClosingTag(w io.Writer, name string, attrs ...string) error {
-	if len(attrs)%2 != 0 {
-		panic(fmt.Sprintf("confluence_storage: writeSelfClosingTag %q: odd attrs slice length", name))
-	}
-	if _, err := fmt.Fprintf(w, "<%s", name); err != nil {
-		return err
-	}
-	for i := 0; i < len(attrs); i += 2 {
-		if _, err := fmt.Fprintf(w, ` %s="%s"`, attrs[i], xmlEscape(attrs[i+1])); err != nil {
-			return err
-		}
-	}
-	_, err := fmt.Fprint(w, " />")
-	return err
-}
+// (writeSelfClosingTag used to live here; the current Confluence
+// storage emitter writes self-closing tags inline at the call site
+// when needed, so the helper has no consumers. Removed to satisfy
+// lint.)
 
 // writeText writes XML-escaped text content.
 func writeText(w io.Writer, text string) error {

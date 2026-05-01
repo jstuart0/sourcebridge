@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/sourcebridge/sourcebridge/internal/citations"
@@ -682,21 +681,9 @@ func buildSymbolHandle(id string) string {
 	return citations.FormatSymbol(id)
 }
 
-// stableToolNames returns the tool names in stable order — used by
-// tests asserting the v1 catalog shape.
-func stableToolNames() []string {
-	names := []string{
-		ToolSearchEvidence,
-		ToolReadFile,
-		ToolGetCallers,
-		ToolGetCallees,
-		ToolGetSummary,
-		ToolGetRequirements,
-		ToolFindTests,
-	}
-	sort.Strings(names)
-	return names
-}
+// (stableToolNames used to live here as a helper for tests asserting
+// the v1 catalog shape; the equivalent test now reads names directly
+// from the schema slice and asserts on that. Removed to satisfy lint.)
 
 // Compile-time assertion: every schema has a non-empty name and
 // input_schema. Catches dev-time mistakes without a runtime cost.

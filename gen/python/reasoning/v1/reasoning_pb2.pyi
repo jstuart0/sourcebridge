@@ -79,7 +79,25 @@ class AnswerQuestionResponse(_message.Message):
     usage: _types_pb2.LLMUsage
     def __init__(self, answer: _Optional[str] = ..., referenced_symbols: _Optional[_Iterable[_Union[_types_pb2.CodeSymbol, _Mapping]]] = ..., usage: _Optional[_Union[_types_pb2.LLMUsage, _Mapping]] = ...) -> None: ...
 
-class AnswerDelta(_message.Message):
+class AnswerQuestionStreamRequest(_message.Message):
+    __slots__ = ("question", "repository_id", "context_symbols", "max_tokens", "context_code", "file_path", "language")
+    QUESTION_FIELD_NUMBER: _ClassVar[int]
+    REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
+    CONTEXT_SYMBOLS_FIELD_NUMBER: _ClassVar[int]
+    MAX_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    CONTEXT_CODE_FIELD_NUMBER: _ClassVar[int]
+    FILE_PATH_FIELD_NUMBER: _ClassVar[int]
+    LANGUAGE_FIELD_NUMBER: _ClassVar[int]
+    question: str
+    repository_id: str
+    context_symbols: _containers.RepeatedCompositeFieldContainer[_types_pb2.CodeSymbol]
+    max_tokens: int
+    context_code: str
+    file_path: str
+    language: _types_pb2.Language
+    def __init__(self, question: _Optional[str] = ..., repository_id: _Optional[str] = ..., context_symbols: _Optional[_Iterable[_Union[_types_pb2.CodeSymbol, _Mapping]]] = ..., max_tokens: _Optional[int] = ..., context_code: _Optional[str] = ..., file_path: _Optional[str] = ..., language: _Optional[_Union[_types_pb2.Language, str]] = ...) -> None: ...
+
+class AnswerQuestionStreamResponse(_message.Message):
     __slots__ = ("content_delta", "finished", "referenced_symbols", "usage", "progress")
     CONTENT_DELTA_FIELD_NUMBER: _ClassVar[int]
     FINISHED_FIELD_NUMBER: _ClassVar[int]

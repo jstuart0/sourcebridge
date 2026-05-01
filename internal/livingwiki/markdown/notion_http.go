@@ -210,10 +210,10 @@ func (n *HTTPNotionClient) UpdateBlock(ctx context.Context, snap credentials.Sna
 	// (works when the client constructed the page and remembers Notion's IDs).
 	// In practice callers should pass the Notion block UUID obtained during creation.
 	path := "/blocks/" + blockExternalID
-	type patchPayload struct {
-		Type    string      `json:"type"`
-		Payload interface{} `json:"paragraph,omitempty"` // simplified for the common case
-	}
+	// Notion's PATCH /blocks/{id} accepts the same block-shaped payload
+	// the upsert path emits, minus the "object" and "external_id" fields
+	// which are read-only on update. We marshal the typed block, drop
+	// those two keys, then send the resulting raw map.
 	data, err := json.Marshal(block)
 	if err != nil {
 		return fmt.Errorf("marshal block: %w", err)

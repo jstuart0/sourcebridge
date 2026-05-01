@@ -149,6 +149,12 @@ func (r *Resolver) getStore(ctx context.Context) graph.GraphStore {
 // fall back to the legacy GitConfigLoader path. The legacy path cannot
 // surface IntegrityError — it only ever returns env-shadowed values —
 // so production deployments MUST wire the resolver.
+//
+//nolint:unused // Backward-compat shim: every active caller now uses
+// resolveGitCredentialsForOp(ctx, "<op>") so the structured log line
+// carries op context. This zero-arg form is kept for older tests that
+// haven't been updated and is asserted as allowlisted in
+// internal/git/resolution/lint_test.go (resolveGitCredentials).
 func (r *Resolver) resolveGitCredentials(ctx context.Context) (token, sshKeyPath string, err error) {
 	return r.resolveGitCredentialsForOp(ctx, "graphql")
 }

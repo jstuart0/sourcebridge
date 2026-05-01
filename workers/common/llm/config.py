@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import os
 
-from workers.common.config import WorkerConfig
+from workers.common.config import (
+    SUPPORTED_LLM_PROVIDERS,
+    WorkerConfig,
+    _format_supported,
+)
 from workers.common.llm.anthropic import AnthropicProvider
 from workers.common.llm.fake import FakeLLMProvider
 from workers.common.llm.openai_compat import OpenAICompatProvider
@@ -111,7 +115,17 @@ def create_llm_provider(config: WorkerConfig) -> LLMProvider:
             timeout=float(config.llm_timeout) if config.llm_timeout else None,
         )
     else:
-        raise ValueError(f"Unknown LLM provider: {config.llm_provider}")
+        # Defense in depth: WorkerConfig._validate_llm_provider catches
+        # this at config-load time, but per-request overrides via
+        # config.model_copy(update=...) skip validators in pydantic v2 by
+        # default. The actionable message below mirrors the validator's
+        # so a metadata-driven override carrying a typo doesn't crash
+        # the worker mid-request with a confusing stack trace.
+        # Tester report 2026-04-30 (Pazaryna) R2 / CA-125.
+        raise ValueError(
+            f"LLM provider {config.llm_provider!r} is not supported. "
+            f"Supported LLM providers: {_format_supported(SUPPORTED_LLM_PROVIDERS)}."
+        )
 
 
 def create_llm_provider_for_request(
