@@ -292,6 +292,22 @@ type Server struct {
 	// (which is env-bootstrap only after R3 — captured by VALUE inside
 	// the resolver and never mutated post-boot).
 	gitResolver gitres.Resolver // nil only in test/embedded mode without a workspace store
+
+	// changeDispatcher is the boundary the change-watch HTTP ingress
+	// (POST /v1/connectors/{id}/events) and the record_change MCP tool
+	// dispatch through. Wired at server-assembly time when
+	// change_watch.enabled is true; nil otherwise (the HTTP route
+	// returns 503; the MCP tool returns a structured "disabled"
+	// response). The interface decouples the rest package from the
+	// concrete *changewatch.Router so tests substitute a stub.
+	changeDispatcher ChangeEventDispatcher
+}
+
+// WithChangeDispatcher injects the change-watch dispatcher (typically
+// *changewatch.Router) at server-assembly time. Pass nil to leave the
+// HTTP ingress and the record_change MCP tool reporting disabled.
+func WithChangeDispatcher(d ChangeEventDispatcher) ServerOption {
+	return func(s *Server) { s.changeDispatcher = d }
 }
 
 // qaResolverOrchestrator exposes the server's QA orchestrator to the
@@ -793,6 +809,20 @@ func (s *Server) setupRouter() {
 		r.Get("/api/v1/diagrams/{repoId}/export/mermaid", s.handleExportDiagramMermaid)
 		r.Get("/api/v1/diagrams/{repoId}/export/json", s.handleExportDiagramJSON)
 	})
+
+	// Change-watch connector ingress (Phase 1.D). Behind the
+	// connector_api.enabled feature flag — default off through Phase 1.
+	// When the flag is off the route is never registered, so external
+	// probes see a 404 with no fingerprint of the SourceBridge install.
+	// Authentication: bearer token / JWT through the same middleware
+	// as the other authenticated routes; HMAC validation specific to
+	// GitHub webhooks lands in Phase 2.
+	if s.cfg != nil && s.cfg.ConnectorAPI.Enabled {
+		r.Group(func(r chi.Router) {
+			r.Use(auth.MiddlewareWithTokens(s.jwtMgr, s.tokenStore))
+			r.Post("/v1/connectors/{id}/events", s.handleConnectorEvent)
+		})
+	}
 
 	// MCP (Model Context Protocol) routes
 	if s.cfg.MCP.Enabled {
