@@ -1071,10 +1071,11 @@ func (c *Client) SynthesizeDecomposedAnswer(ctx context.Context, req *reasoningv
 }
 
 // AnswerQuestionStream opens a server-streaming discussion RPC. Callers
-// receive AnswerDelta frames as the model generates output, then a
-// terminal frame with `finished=true` carrying the final usage and
-// referenced_symbols. The deadline matches the unary variant so callers
-// get identical timeout semantics whether they chose to stream or not.
+// receive AnswerQuestionStreamResponse frames as the model generates
+// output, then a terminal frame with `finished=true` carrying the final
+// usage and referenced_symbols. The deadline matches the unary variant
+// so callers get identical timeout semantics whether they chose to
+// stream or not.
 //
 // The returned stream handle is responsible for cancellation on error;
 // the caller should read until io.EOF (or a transport error) and then
@@ -1087,7 +1088,7 @@ func (c *Client) SynthesizeDecomposedAnswer(ctx context.Context, req *reasoningv
 // the bundle release so callers retain the same single-cancel API.
 func (c *Client) AnswerQuestionStream(
 	ctx context.Context,
-	req *reasoningv1.AnswerQuestionRequest,
+	req *reasoningv1.AnswerQuestionStreamRequest,
 ) (reasoningv1.ReasoningService_AnswerQuestionStreamClient, context.CancelFunc, error) {
 	b := c.acquire()
 	if b == nil {

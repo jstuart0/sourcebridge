@@ -26,24 +26,6 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Stub dispatcher
-// ─────────────────────────────────────────────────────────────────────────────
-
-// stubDispatcher captures submitted events for assertion.
-type stubDispatcher struct {
-	events  []webhook.WebhookEvent
-	rejectErr error // when non-nil, Submit returns this error
-}
-
-func (s *stubDispatcher) Submit(_ context.Context, event webhook.WebhookEvent) error {
-	if s.rejectErr != nil {
-		return s.rejectErr
-	}
-	s.events = append(s.events, event)
-	return nil
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -55,47 +37,11 @@ func signBody(t *testing.T, body []byte, secret string) string {
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-// setupConfluenceRouter builds a chi.Router with the Confluence webhook
-// registered and returns it alongside the stub dispatcher.
-func setupConfluenceRouter(t *testing.T, secret string) (*chi.Mux, *stubDispatcher) {
-	t.Helper()
-	stub := &stubDispatcher{}
-	// We need a real *webhook.Dispatcher to satisfy the type; we use a wrapper
-	// that delegates Submit to our stub. Since Dispatcher is a concrete struct,
-	// we take advantage of the fact that RegisterLivingWikiRoutes accepts a
-	// DispatcherSubmitter interface in the refactored form.
-	//
-	// NOTE: Because RegisterLivingWikiRoutes accepts *webhook.Dispatcher (a
-	// concrete type), we exercise it by building a minimal real dispatcher
-	// that wraps a real WatermarkStore but redirects submit via a test helper.
-	// The HTTP handler tests focus on request parsing and signature validation,
-	// not on dispatcher internals (covered in dispatcher_test.go).
-	wm := orchestrator.NewMemoryWatermarkStore()
-	deps := webhook.DispatcherDeps{
-		WatermarkStore: wm,
-		Logger:         webhook.NoopLogger{},
-	}
-	cfg := webhook.DispatcherConfig{
-		WorkerCount:    1,
-		MaxQueueDepth:  10,
-		EventTimeout:   0, // uses default
-	}
-	d := webhook.NewDispatcher(deps, cfg)
-	_ = d.Start(context.Background())
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		_ = d.Stop(ctx)
-	})
-
-	r := chi.NewRouter()
-	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{
-		Dispatcher:              d,
-		ConfluenceWebhookSecret: secret,
-	})
-	_ = stub // kept for reference; actual events go through d
-	return r, stub
-}
+// (Note: a stubDispatcher + setupConfluenceRouter helper used to live
+// here, but the tests below construct their dispatcher inline and
+// verify behaviour against the real *webhook.Dispatcher instead of a
+// stub. Kept the comment so the next contributor doesn't recreate the
+// abstraction by accident.)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Confluence signature validation tests

@@ -42,7 +42,9 @@ type CachedEmbedder struct {
 	cap  int
 	ttl  time.Duration
 	data map[string]cacheEntry
-	lru  []string // oldest-first; we rebuild it lazily, which is fine at this size
+	// (lru ordering used to live here for size-capped eviction; the
+	// current cache evicts purely on TTL, so the oldest-first slice is
+	// no longer maintained. Removed to satisfy lint.)
 
 	// breaker
 	consecutiveFails atomic.Int64

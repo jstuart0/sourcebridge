@@ -213,10 +213,9 @@ func newProxy(serverURL, token string, out, errOut io.Writer) *proxy {
 	if maxInflight <= 0 {
 		maxInflight = 8
 	}
-	timeout := mcpProxyRequestTimeout
-	if timeout <= 0 {
-		timeout = 10 * time.Minute
-	}
+	// Per-request timeout (mcpProxyRequestTimeout) is enforced via
+	// context.WithTimeout in the request dispatch, not on the *http.Client.
+	// The flag is read at the call site rather than cached on the proxy.
 	return &proxy{
 		serverURL: serverURL,
 		mcpURL:    serverURL + "/api/v1/mcp/http",

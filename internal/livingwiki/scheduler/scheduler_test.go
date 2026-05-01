@@ -67,23 +67,15 @@ func (f *fakeRepoStore) RepositoriesUsingSink(_ context.Context, _, _ string) ([
 	return nil, nil
 }
 
-// submittedEvents collects events submitted to a stub dispatcher.
-type submittedEvents struct {
-	mu     sync.Mutex
-	events []webhook.WebhookEvent
-}
-
-func (s *submittedEvents) add(e webhook.WebhookEvent) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.events = append(s.events, e)
-}
-
-func (s *submittedEvents) count() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.events)
-}
+// submittedEvents is the placeholder return-value type from
+// makeDispatcher. The current scheduler tests don't assert on the
+// dispatcher's submission stream — they verify scheduler behaviour
+// (jitter, eligibility, throttling) and treat the dispatcher as a
+// real-but-not-inspected dependency. The empty struct preserves the
+// (*Dispatcher, *submittedEvents) signature so future tests that DO
+// want to inspect submissions can drop in fields without changing the
+// helper signature.
+type submittedEvents struct{}
 
 // makeRepo returns a minimal enabled repo, optionally with a past LastRunAt.
 func makeRepo(id string, lastRunAt *time.Time) livingwiki.RepositoryLivingWikiSettings {

@@ -186,7 +186,9 @@ var emptyHeadlineTitles = map[string]bool{
 	"note": true, "misc": true, "miscellaneous": true, "other": true,
 }
 
-var reSentenceEnd = regexp.MustCompile(`[.!?]`)
+// (reSentenceEnd used to live here for splitting bodies on sentence
+// boundaries; the current empty-headline validator counts non-empty
+// lines instead of sentences. Removed to satisfy lint.)
 
 func (e emptyHeadlineValidator) Validate(input ValidationInput, _ ValidatorConfig) []Violation {
 	var violations []Violation

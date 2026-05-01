@@ -80,9 +80,7 @@ func parseSSE(r io.Reader) <-chan sseEvent {
 				field = line[:i]
 				value = line[i+1:]
 				// Per spec: if value starts with a single space, remove it.
-				if strings.HasPrefix(value, " ") {
-					value = value[1:]
-				}
+				value = strings.TrimPrefix(value, " ")
 			} else {
 				field = line
 			}

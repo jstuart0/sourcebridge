@@ -45,7 +45,7 @@ import (
 type WorkerLLM interface {
 	// Reasoning service
 	AnswerQuestion(ctx context.Context, req *reasoningv1.AnswerQuestionRequest) (*reasoningv1.AnswerQuestionResponse, error)
-	AnswerQuestionStream(ctx context.Context, req *reasoningv1.AnswerQuestionRequest) (reasoningv1.ReasoningService_AnswerQuestionStreamClient, context.CancelFunc, error)
+	AnswerQuestionStream(ctx context.Context, req *reasoningv1.AnswerQuestionStreamRequest) (reasoningv1.ReasoningService_AnswerQuestionStreamClient, context.CancelFunc, error)
 	AnswerQuestionWithTools(ctx context.Context, req *reasoningv1.AnswerQuestionWithToolsRequest) (*reasoningv1.AnswerQuestionWithToolsResponse, error)
 	ClassifyQuestion(ctx context.Context, req *reasoningv1.ClassifyQuestionRequest) (*reasoningv1.ClassifyQuestionResponse, error)
 	DecomposeQuestion(ctx context.Context, req *reasoningv1.DecomposeQuestionRequest) (*reasoningv1.DecomposeQuestionResponse, error)
@@ -220,7 +220,7 @@ func (c *Caller) AnswerQuestion(ctx context.Context, repoID, op string, req *rea
 	return c.inner.AnswerQuestion(ctx, req)
 }
 
-func (c *Caller) AnswerQuestionStream(ctx context.Context, repoID, op string, req *reasoningv1.AnswerQuestionRequest) (reasoningv1.ReasoningService_AnswerQuestionStreamClient, context.CancelFunc, error) {
+func (c *Caller) AnswerQuestionStream(ctx context.Context, repoID, op string, req *reasoningv1.AnswerQuestionStreamRequest) (reasoningv1.ReasoningService_AnswerQuestionStreamClient, context.CancelFunc, error) {
 	ctx, _, err := c.withResolved(ctx, repoID, op, "", "", "")
 	if err != nil {
 		return nil, func() {}, err
