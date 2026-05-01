@@ -220,8 +220,11 @@ func (w *Watcher) Unwatch(repoID string) {
 		repo.timer.Stop()
 	}
 	// fsnotify.Remove is per-path; we walk the repo subtree to remove
-	// every directory we added in Watch.
-	filepath.Walk(repo.repoPath, func(path string, info os.FileInfo, _ error) error {
+	// every directory we added in Watch. Walk errors (permission
+	// changes, races with deletion) are best-effort during teardown
+	// and intentionally not returned: we still want to drop the repo
+	// from our tracking maps below.
+	_ = filepath.Walk(repo.repoPath, func(path string, info os.FileInfo, _ error) error {
 		if info != nil && info.IsDir() {
 			_ = w.fsw.Remove(path)
 		}

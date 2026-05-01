@@ -219,10 +219,9 @@ func extractConfluencePageID(path string) string {
 	return parts[0]
 }
 
-// newConfluenceHTTPClient is a convenience wrapper around newConfluenceClientWithTransport.
-func newConfluenceHTTPClient(srv *httptest.Server) *HTTPConfluenceClient {
-	return newConfluenceClientWithTransport(srv.URL)
-}
+// (newConfluenceHTTPClient used to wrap newConfluenceClientWithTransport,
+// but every call site now invokes newConfluenceClientWithTransport
+// directly. Removed to satisfy lint.)
 
 // confluencePageKeys returns the keys of a pages map for diagnostic output.
 func confluencePageKeys(pages map[string]string) []string {

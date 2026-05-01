@@ -50,6 +50,10 @@ type MergeOptions struct {
 //   - User-edited region: return MergeResult with Action "skip-user-modified".
 //     --force overwrites.
 //   - --ci + skip: returns an error so the caller can exit non-zero.
+//
+//nolint:unused // Intentionally retained as a package-private primitive
+// (see doc comment). MergeFileWithHash wraps it; if both go unused
+// drop both.
 func mergeFile(path, generated string, opts MergeOptions) (MergeResult, error) {
 	existing, readErr := os.ReadFile(path)
 	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {

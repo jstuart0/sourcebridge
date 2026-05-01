@@ -136,7 +136,7 @@ func TestWriteFrontmatter_ZeroManifest(t *testing.T) {
 	if err := manifest.WriteFrontmatter(&buf, manifest.DependencyManifest{}, body); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(buf.Bytes()) != string(body) {
+	if buf.String() != string(body) {
 		t.Errorf("zero manifest should write body only, got: %q", buf.String())
 	}
 }

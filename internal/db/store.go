@@ -1172,7 +1172,7 @@ func (s *SurrealStore) RecomputePackageDependencies(repoID string) {
 		if r.FilePath == "" || r.ImportPath == "" {
 			continue
 		}
-		fromPkg := r.FilePath
+		var fromPkg string
 		if idx := strings.LastIndex(r.FilePath, "/"); idx >= 0 {
 			fromPkg = r.FilePath[:idx]
 		} else {
@@ -2820,13 +2820,10 @@ func (c *surrealCluster) toCluster() clustering.Cluster {
 	}
 }
 
-// surrealClusterMember is the SurrealDB representation of a cluster_member record.
-type surrealClusterMember struct {
-	ID        *models.RecordID `json:"id,omitempty"`
-	ClusterID string           `json:"cluster_id"`
-	SymbolID  string           `json:"symbol_id"`
-	RepoID    string           `json:"repo_id"`
-}
+// (surrealClusterMember used to live here as the row shape for inline
+// cluster_member ops; the current ReplaceClusters flow batches inserts
+// via raw SurrealDB statements and doesn't materialise the row type in
+// Go. Removed to satisfy lint.)
 
 // ReplaceClusters atomically deletes all existing clusters for the repository
 // and inserts the new set in a single BEGIN/COMMIT transaction batch. Readers

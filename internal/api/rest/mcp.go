@@ -716,13 +716,12 @@ func (h *mcpHandler) safeDispatchCtx(ctx context.Context, session *mcpSession, m
 // Method dispatch
 // ---------------------------------------------------------------------------
 
-func (h *mcpHandler) dispatch(session *mcpSession, msg jsonRPCRequest) jsonRPCResponse {
-	return h.dispatchCtx(context.Background(), session, msg)
-}
-
-// dispatchCtx is the context-carrying flavor used by the streaming
-// handler. Only tool calls currently consume the context; other
-// methods ignore it for backwards compatibility.
+// dispatchCtx is the context-carrying entry point invoked by both the
+// streaming and non-streaming HTTP handlers. Only tool calls currently
+// consume the context; other methods ignore it for backwards
+// compatibility. (A non-context wrapper used to live here; it was
+// removed when every caller was updated to pass an explicit context —
+// the streaming SSE flow always has one to forward to ContentEmitter.)
 func (h *mcpHandler) dispatchCtx(ctx context.Context, session *mcpSession, msg jsonRPCRequest) jsonRPCResponse {
 	// initialize is always allowed (it's how you start)
 	if msg.Method == "initialize" {
@@ -970,31 +969,9 @@ func (h *mcpHandler) baseTools() []mcpToolDefinition {
 	return tools
 }
 
-// baseToolsWithoutPhase1a returns the pre-Phase-1a tool list — used by
-// the tools/list ordering when we later split by capability registry.
-// Not currently wired; reserved for Phase 3.
-func (h *mcpHandler) baseToolsCore() []mcpToolDefinition {
-	tools := h.baseTools()
-	core := make([]mcpToolDefinition, 0, len(tools))
-	phase1aNames := map[string]bool{
-		"get_callers": true, "get_callees": true, "get_file_imports": true,
-		"get_architecture_diagram": true, "get_recent_changes": true,
-	}
-	for _, t := range tools {
-		if !phase1aNames[t.Name] {
-			core = append(core, t)
-		}
-	}
-	return core
-}
-
 // ---------------------------------------------------------------------------
 // tools/call
 // ---------------------------------------------------------------------------
-
-func (h *mcpHandler) handleToolsCall(session *mcpSession, msg jsonRPCRequest) jsonRPCResponse {
-	return h.handleToolsCallCtx(context.Background(), session, msg)
-}
 
 // handleToolsCallCtx is the context-aware variant. The context
 // carries the ContentEmitter from the streaming HTTP handler so
@@ -1310,11 +1287,11 @@ func packSymbolResults(symbols []*graphstore.StoredSymbol, total int) map[string
 // Tool: explain_code
 // ---------------------------------------------------------------------------
 
-func (h *mcpHandler) callExplainCode(session *mcpSession, args json.RawMessage) (interface{}, error) {
-	return h.callExplainCodeCtx(context.Background(), session, args)
-}
+// (Note: a non-context callExplainCode wrapper used to live here.
+// All callers now invoke callExplainCodeCtx directly through
+// handleToolsCallCtx; the wrapper was removed when nothing in the
+// dispatch chain still needed the context-less signature.)
 
-// callExplainCodeCtx is the streaming-capable variant. When a
 // ---------------------------------------------------------------------------
 // Tool: ask_question
 // ---------------------------------------------------------------------------

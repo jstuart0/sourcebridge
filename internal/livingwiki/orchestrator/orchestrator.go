@@ -623,7 +623,9 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 				cat := classifySoftFailure(err)
 				excl := newSoftFailureExcludedPage(planned, cat, err)
 				outcome = pageOutcome{excluded: excl}
-				err = nil
+				// err is intentionally NOT propagated — the soft-failure
+				// is captured in `outcome` and the goroutine returns nil
+				// below so the errgroup keeps the rest of the run alive.
 			}
 
 			outcomesMu.Lock()
@@ -964,20 +966,18 @@ func (s *softFailureWindow) record(category string) {
 	s.head = (s.head + 1) % s.window
 }
 
-func (s *softFailureWindow) recordFailure(category string) { s.record(category) }
-func (s *softFailureWindow) recordSuccess()                { s.record("") }
+// recordSuccess marks one slot as a success (clears the soft-failure
+// counter for that slot when it slides out of the window).
+func (s *softFailureWindow) recordSuccess() { s.record("") }
 
-func (s *softFailureWindow) exceeded(category string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.byCat[category] >= s.threshold
-}
-
-func (s *softFailureWindow) countFor(category string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.byCat[category]
-}
+// (recordFailure / exceeded / countFor used to live here for callers
+// that wanted to record + check + report separately. The atomic
+// recordAndCheck below replaces all three by returning the count and
+// the threshold verdict in one critical section, eliminating the
+// race where a between-call increment caused the error message to
+// disagree with the count that crossed the threshold. Removed to
+// satisfy lint; reintroduce if a non-atomic read-only check is ever
+// genuinely needed.)
 
 // recordAndCheck records a failure for the given category and atomically
 // returns the new count and whether the breaker has tripped. Use this

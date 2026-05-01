@@ -1004,38 +1004,12 @@ func (a *llmConfigAdapter) SaveLLMConfig(rec *rest.LLMConfigRecord) error {
 	return nil
 }
 
-// llmStoreResolverAdapter bridges *db.SurrealLLMConfigStore to the narrow
-// resolution.LLMConfigStore interface. The resolver does not import
-// internal/db (which would create a cycle), so the adapter lives here.
-type llmStoreResolverAdapter struct {
-	store *db.SurrealLLMConfigStore
-}
-
-func (a *llmStoreResolverAdapter) LoadLLMConfig() (*resolution.WorkspaceRecord, error) {
-	rec, err := a.store.LoadLLMConfig()
-	if err != nil || rec == nil {
-		return nil, err
-	}
-	return &resolution.WorkspaceRecord{
-		Provider:                 rec.Provider,
-		BaseURL:                  rec.BaseURL,
-		APIKey:                   rec.APIKey,
-		SummaryModel:             rec.SummaryModel,
-		ReviewModel:              rec.ReviewModel,
-		AskModel:                 rec.AskModel,
-		KnowledgeModel:           rec.KnowledgeModel,
-		ArchitectureDiagramModel: rec.ArchitectureDiagramModel,
-		ReportModel:              rec.ReportModel,
-		DraftModel:               rec.DraftModel,
-		TimeoutSecs:              rec.TimeoutSecs,
-		AdvancedMode:             rec.AdvancedMode,
-		Version:                  rec.Version,
-	}, nil
-}
-
-func (a *llmStoreResolverAdapter) LoadLLMConfigVersion() (uint64, error) {
-	return a.store.LoadLLMConfigVersion()
-}
+// (Note: an llmStoreResolverAdapter for *db.SurrealLLMConfigStore used
+// to live here, but the wiring path now uses the resolver-aware
+// LLMConfigStore implementation in internal/llm/profilestore directly,
+// so the adapter no longer has callers. Removed to satisfy lint; can
+// be reintroduced if a future wiring path needs to bridge the legacy
+// SurrealLLMConfigStore type into resolution again.)
 
 // lwRepoOverrideAdapter bridges *db.LivingWikiRepoSettingsStore to the
 // narrow resolution.RepoOverrideStore interface.
