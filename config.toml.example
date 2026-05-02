@@ -4,10 +4,22 @@
 # with nested keys joined by underscores, e.g. SOURCEBRIDGE_LLM_BASE_URL.
 
 # ─── Telemetry ─────────────────────────────────────────────────────
-# Anonymous usage data helps us improve SourceBridge. No PII is collected.
-# Disable via SOURCEBRIDGE_TELEMETRY=off or DO_NOT_TRACK=1.
+# SourceBridge writes two distinct telemetry surfaces. See TELEMETRY.md
+# for the full disclosure of what each one collects.
+#
+# 1. External anonymous install ping → telemetry.sourcebridge.ai
+# 2. Local funnel/adoption events    → SurrealDB (this install only)
+#
+# Either can be disabled independently. Disabling [telemetry] enabled
+# disables BOTH (it is the global gate).
+#
+# Env override: SOURCEBRIDGE_TELEMETRY=off, SOURCEBRIDGE_FUNNEL_TELEMETRY=off,
+# or DO_NOT_TRACK=1 force the corresponding setting to false regardless
+# of the file value. Env "on" tokens cannot re-enable a config-disabled
+# setting.
 # [telemetry]
-# enabled = true
+# enabled = true         # default true; gates BOTH surfaces
+# funnel_enabled = true  # default true; gates only the local funnel surface
 
 # ─── Cloud mode (Anthropic) — best quality, requires API key ───────
 # [llm]

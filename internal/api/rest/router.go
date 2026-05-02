@@ -30,6 +30,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/db"
 	"github.com/sourcebridge/sourcebridge/internal/events"
 	"github.com/sourcebridge/sourcebridge/internal/featureflags"
+	"github.com/sourcebridge/sourcebridge/internal/funnel"
 	gitres "github.com/sourcebridge/sourcebridge/internal/git/resolution"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexing"
@@ -72,6 +73,13 @@ func WithDesktopAuthStore(store DesktopAuthSessionStore) ServerOption {
 // WithKnowledgeStore sets the knowledge persistence store.
 func WithKnowledgeStore(ks knowledge.KnowledgeStore) ServerOption {
 	return func(s *Server) { s.knowledgeStore = ks }
+}
+
+// WithFunnelStore wires the funnel/adoption-event persistence store.
+// When nil (embedded mode or funnel telemetry disabled), event recording
+// is a no-op; the FunnelStore interface's nil-receiver contract covers it.
+func WithFunnelStore(fs funnel.FunnelStore) ServerOption {
+	return func(s *Server) { s.funnelStore = fs }
 }
 
 // WithJobStore sets the persistent llm.JobStore used by the orchestrator.
@@ -246,6 +254,7 @@ type Server struct {
 	oidc                       *auth.OIDCProvider
 	store                      graphstore.GraphStore
 	knowledgeStore             knowledge.KnowledgeStore
+	funnelStore                funnel.FunnelStore         // local funnel/adoption event store; nil when telemetry disabled
 	jobStore                   llm.JobStore               // persistent store for llm.Job records; defaults to MemStore
 	orchestrator               *orchestrator.Orchestrator // shared LLM job orchestrator (created in NewServer)
 	worker                     *worker.Client
@@ -369,6 +378,10 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 	if store == nil {
 		store = graphstore.NewStore()
 	}
+	telemetryCfg := config.TelemetryConfig{Enabled: true, FunnelEnabled: true}
+	if cfg != nil {
+		telemetryCfg = cfg.Telemetry
+	}
 	s := &Server{
 		cfg:         cfg,
 		localAuth:   localAuth,
@@ -376,7 +389,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		store:       store,
 		worker:      workerClient,
 		eventBus:    events.NewBus(),
-		flags:       featureflags.LoadFromEnv(),
+		flags:       featureflags.LoadFromEnvWithConfig(telemetryCfg),
 		tokenStore:  auth.NewAPITokenStore(),
 		desktopAuth: NewMemoryDesktopAuthStore(),
 		OnDemand:    NewOnDemandTracker(),

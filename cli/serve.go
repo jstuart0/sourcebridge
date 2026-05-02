@@ -24,6 +24,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/db"
+	"github.com/sourcebridge/sourcebridge/internal/funnel"
 	gitres "github.com/sourcebridge/sourcebridge/internal/git/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/health"
@@ -680,11 +681,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 		healthChecker = health.New(nil, workerClient)
 	}
 
+	// Funnel/adoption-event store. Only wired when running against an
+	// external SurrealDB (embedded mode has no migration-backed table).
+	// When nil, WithFunnelStore is a no-op and event recording is silent.
+	var funnelStore funnel.FunnelStore
+	if cfg.Storage.SurrealMode == "external" {
+		funnelStore = funnel.NewSurrealFunnelStore(surrealDB)
+	}
+
 	// Create HTTP server
 	server := rest.NewServer(cfg, localAuth, jwtMgr, store, workerClient,
 		rest.WithEnterpriseDB(surrealDB.DB()),
 		rest.WithHealthChecker(healthChecker),
 		rest.WithKnowledgeStore(knowledgeStore),
+		rest.WithFunnelStore(funnelStore),
 		rest.WithJobStore(jobStore),
 		rest.WithGitConfigStore(gitConfigStore),
 		rest.WithGitResolver(gitResolver),
@@ -733,6 +743,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		version.Version,
 		cfg.Edition,
 		dataDir,
+		telemetry.WithConfig(cfg.Telemetry),
 		telemetry.WithLLMProviderKind(classifyTelemetryLLMProviderKind(cfg.LLM.Provider)),
 		telemetry.WithCountProvider(&telemetryCountProvider{store: store}),
 	)

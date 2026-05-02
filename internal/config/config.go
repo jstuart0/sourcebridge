@@ -11,6 +11,54 @@ import (
 	"github.com/spf13/viper"
 )
 
+// TelemetryConfig holds all telemetry opt-out settings.
+//
+// Two telemetry surfaces exist:
+//  1. External anonymous install ping → telemetry.sourcebridge.ai (gated by Enabled).
+//  2. Local funnel/adoption events    → SurrealDB on this install (gated by Enabled AND FunnelEnabled).
+//
+// Disabling Enabled silences both surfaces. FunnelEnabled only gates the
+// local funnel surface; the external ping is unaffected by it alone.
+//
+// Env semantics (Decision 5): env "off" tokens force a surface disabled
+// regardless of the config-file value.  Env "on" tokens cannot re-enable
+// a surface that the config-file has disabled.
+type TelemetryConfig struct {
+	// Enabled toggles all telemetry for the install. Default true.
+	// Read from config.toml [telemetry] enabled. Cannot be set via
+	// env directly — see EnvOverride.
+	Enabled bool `mapstructure:"enabled"`
+	// FunnelEnabled toggles funnel/adoption telemetry specifically.
+	// Default true. Forced false when Enabled is false. Read from
+	// config.toml [telemetry] funnel_enabled.
+	FunnelEnabled bool `mapstructure:"funnel_enabled"`
+	// EnvOverride captures the parsed SOURCEBRIDGE_TELEMETRY env value.
+	// It can ONLY force telemetry off (when *EnvOverride == false);
+	// env "on" tokens cannot re-enable a config-disabled setting (Decision 5).
+	// nil when env is unset or token is ambiguous. Not read from mapstructure;
+	// populated manually after viper load.
+	EnvOverride *bool `mapstructure:"-"`
+	// FunnelEnvOverride captures the parsed SOURCEBRIDGE_FUNNEL_TELEMETRY
+	// env value. Same one-way semantics as EnvOverride.
+	FunnelEnvOverride *bool `mapstructure:"-"`
+}
+
+// parseTelemetryEnvToken returns a *bool representing the parsed env
+// token, or nil if the token is empty or ambiguous. Tokens are matched
+// case-insensitively after trimming.
+func parseTelemetryEnvToken(s string) *bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "off", "no", "false", "0", "disabled":
+		f := false
+		return &f
+	case "on", "yes", "true", "1", "enabled":
+		t := true
+		return &t
+	}
+	return nil
+}
+
 // Config holds the complete application configuration.
 type Config struct {
 	Env           string              `mapstructure:"env"`     // development, production
@@ -32,6 +80,7 @@ type Config struct {
 	ChangeWatch   ChangeWatchConfig   `mapstructure:"change_watch"`
 	ConnectorAPI  ConnectorAPIConfig  `mapstructure:"connector_api"`
 	Shutdown      ShutdownConfig      `mapstructure:"shutdown"`
+	Telemetry     TelemetryConfig     `mapstructure:"telemetry"`
 }
 
 // ComprehensionConfig holds tunables for the LLM job orchestrator and
@@ -602,6 +651,10 @@ func Defaults() *Config {
 			// (grace_seconds + preStop-sleep + 60s slack). CA-142.
 			GraceSeconds: 3600,
 		},
+		Telemetry: TelemetryConfig{
+			Enabled:       true,
+			FunnelEnabled: true,
+		},
 	}
 }
 
@@ -701,6 +754,8 @@ func Load() (*Config, error) {
 	v.SetDefault("connector_api.enabled", cfg.ConnectorAPI.Enabled)
 	v.SetDefault("linking.invalidate_grace_hours", cfg.Linking.InvalidateGraceHours)
 	v.SetDefault("shutdown.grace_seconds", cfg.Shutdown.GraceSeconds)
+	v.SetDefault("telemetry.enabled", cfg.Telemetry.Enabled)
+	v.SetDefault("telemetry.funnel_enabled", cfg.Telemetry.FunnelEnabled)
 
 	// Try reading config file (not required)
 	if err := v.ReadInConfig(); err != nil {
@@ -711,6 +766,20 @@ func Load() (*Config, error) {
 
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("error parsing config: %w", err)
+	}
+
+	// Parse telemetry env-override tokens manually. Viper's bool binding
+	// rejects tokens like "off", "no", "disabled"; we use a custom parser
+	// that returns a *bool so the policy layer (GloballyEnabled /
+	// FunnelGloballyEnabled in internal/telemetry/effective.go) can
+	// distinguish "explicitly off", "explicitly on", and "unset". Only
+	// the "off" direction is honoured at decision time — env "on" cannot
+	// re-enable a config-disabled setting (Decision 5).
+	if raw := os.Getenv("SOURCEBRIDGE_TELEMETRY"); raw != "" {
+		cfg.Telemetry.EnvOverride = parseTelemetryEnvToken(raw)
+	}
+	if raw := os.Getenv("SOURCEBRIDGE_FUNNEL_TELEMETRY"); raw != "" {
+		cfg.Telemetry.FunnelEnvOverride = parseTelemetryEnvToken(raw)
 	}
 
 	// Generate JWT secret if not set

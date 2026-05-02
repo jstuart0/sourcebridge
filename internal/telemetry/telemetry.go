@@ -39,6 +39,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/sourcebridge/sourcebridge/internal/config"
 )
 
 // DefaultEndpoint is the telemetry collection endpoint.
@@ -84,19 +86,19 @@ type CountProvider interface {
 
 // Tracker manages anonymous telemetry.
 type Tracker struct {
-	endpoint       string
-	installationID string
-	version        string
-	edition        string
-	dataDir        string
-	startTime      time.Time
-	enabled        bool
-	interval       time.Duration
+	endpoint        string
+	installationID  string
+	version         string
+	edition         string
+	dataDir         string
+	startTime       time.Time
+	enabled         bool
+	interval        time.Duration
 	llmProviderKind string
-	provider       CountProvider
-	client         *http.Client
-	once           sync.Once
-	stopCh         chan struct{}
+	provider        CountProvider
+	client          *http.Client
+	once            sync.Once
+	stopCh          chan struct{}
 }
 
 // Option configures the tracker.
@@ -121,6 +123,13 @@ func WithCountProvider(p CountProvider) Option {
 // Expected values are "local" or "cloud".
 func WithLLMProviderKind(kind string) Option {
 	return func(t *Tracker) { t.llmProviderKind = strings.TrimSpace(strings.ToLower(kind)) }
+}
+
+// WithConfig wires the config-backed telemetry settings into the tracker so
+// that isEnabled() uses the shared GloballyEnabled policy (Decision 5).
+// When not set, the tracker falls back to the legacy env-only path.
+func WithConfig(cfg config.TelemetryConfig) Option {
+	return func(t *Tracker) { t.enabled = GloballyEnabled(cfg) }
 }
 
 // New creates a telemetry tracker. Call Start() to begin pinging.
@@ -305,22 +314,43 @@ func resolvePlatform() string {
 	return runtime.GOOS + "/" + runtime.GOARCH
 }
 
-// isEnabled checks environment variables and returns whether telemetry is on.
+// isEnabled is the legacy env-only telemetry gate, used when New() is called
+// without WithConfig. It delegates to GloballyEnabled with a synthetic
+// TelemetryConfig that reflects the raw SOURCEBRIDGE_TELEMETRY env token.
+//
+// Behavior change vs. the pre-Phase-2 implementation: env "on" no longer
+// forces telemetry true when the config file has disabled it. In this
+// env-only path the config Enabled field is always true (no file was
+// supplied), so env "on" is a no-op in practice — but the key contract is
+// that calling-code using WithConfig can no longer be re-enabled by env
+// (Decision 5). This function stays for back-compat with call sites that
+// don't yet pass WithConfig; production callers in cli/serve.go should
+// use WithConfig(cfg.Telemetry) so the full chain is honoured.
 func isEnabled() bool {
-	// Check SOURCEBRIDGE_TELEMETRY (primary opt-out)
-	val := strings.ToLower(strings.TrimSpace(os.Getenv("SOURCEBRIDGE_TELEMETRY")))
-	switch val {
-	case "off", "false", "no", "0", "disabled":
-		return false
-	case "on", "true", "yes", "1", "enabled":
-		return true
+	cfg := config.TelemetryConfig{
+		Enabled:       true, // default; WithConfig overrides this with the real file value
+		FunnelEnabled: true,
 	}
-
-	// Check DO_NOT_TRACK (community standard)
-	if os.Getenv("DO_NOT_TRACK") == "1" {
-		return false
+	raw := os.Getenv("SOURCEBRIDGE_TELEMETRY")
+	if raw != "" {
+		cfg.EnvOverride = parseTelemetryEnvTokenLegacy(raw)
 	}
+	return GloballyEnabled(cfg)
+}
 
-	// Default: enabled
-	return true
+// parseTelemetryEnvTokenLegacy converts the SOURCEBRIDGE_TELEMETRY string to a
+// *bool using the same token set as config.parseTelemetryEnvToken but
+// without importing the config package (avoiding a cycle). Returns nil on
+// ambiguous/empty input.
+func parseTelemetryEnvTokenLegacy(s string) *bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "off", "no", "false", "0", "disabled":
+		f := false
+		return &f
+	case "on", "yes", "true", "1", "enabled":
+		t := true
+		return &t
+	}
+	return nil
 }
