@@ -16,9 +16,19 @@ GEN_DIR = gen
 # the docker images (via build-args). Override on the command line for
 # verification builds, e.g.:
 #   make build-web VERSION=v0.0.0-test COMMIT=abc1234 BUILD_DATE=2026-05-01T00:00:00Z
+#
+# The two-step `?=` then `:=` pattern is intentional: `?=` honors a value
+# inherited from the environment / command line, then `:=` snapshots the
+# result so subsequent recipes don't re-run the $(shell ...) calls. Without
+# the `:=` snapshot, recursive expansion would let BUILD_DATE drift across
+# recipes and VERSION would re-shell-out per use — violating the
+# "computed once" contract.
 VERSION    ?= $(shell ./scripts/version.sh)
+VERSION    := $(VERSION)
 COMMIT     ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+COMMIT     := $(COMMIT)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+BUILD_DATE := $(BUILD_DATE)
 EDITION    ?= oss
 
 GO_LDFLAGS := -X github.com/sourcebridge/sourcebridge/internal/version.Version=$(VERSION) \

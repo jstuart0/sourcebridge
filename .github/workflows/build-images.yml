@@ -140,6 +140,17 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
+          # CA-136: pin the canonical OCI labels to the values from the
+          # `prepare` job. metadata-action otherwise emits its own
+          # version/revision/created based on github.ref / github.sha,
+          # which would silently override the LABEL set in our Dockerfiles
+          # at the registry layer (Docker labels are single-valued — the
+          # last writer wins). Pinning these three keeps `docker inspect`
+          # and the Dockerfile labels consistent.
+          labels: |
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+            org.opencontainers.image.revision=${{ needs.prepare.outputs.commit }}
+            org.opencontainers.image.created=${{ needs.prepare.outputs.build_date }}
 
       - name: Build and push ${{ matrix.name }}
         uses: docker/build-push-action@v6
