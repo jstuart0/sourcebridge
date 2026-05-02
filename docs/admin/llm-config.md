@@ -867,9 +867,9 @@ cannot reliably meet frontier citation-density requirements.
 
 | Tier | `QualityGateTier` constant | Typical models |
 |---|---|---|
-| `frontier` | `modeltier.TierFrontier` | Claude, GPT-4-class, Gemini Ultra |
-| `mid` | `modeltier.TierMid` | GPT-3.5-class, Gemini Flash, mid-size open-weights |
-| `local` | `modeltier.TierLocal` | Ollama-served models, <30B open-weights (qwen3, llama3, phi4, etc.) |
+| `frontier` | `modeltier.TierFrontier` | Claude (all), GPT-4o, GPT-4.1, o1, o3, Gemini Pro/Ultra |
+| `mid` | `modeltier.TierMid` | gpt-4o-mini, o1-mini, o3-mini, Gemini Flash, open-weights ≥70B (llama3.1:70b, qwen3:72b) |
+| `local` | `modeltier.TierLocal` | Ollama/vLLM/llama-cpp-served models, open-weights <70B (qwen3:32b, llama3:8b, phi4, etc.) |
 | *(empty)* | `modeltier.TierUnknown` | Unclassified — falls back to pattern matching, then TierLocal |
 
 `TierUnknown` is the zero value. Production code must never rely on
