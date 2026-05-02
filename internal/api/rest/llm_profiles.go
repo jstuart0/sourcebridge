@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -404,6 +405,12 @@ func (s *Server) handleActiveLLMJobCount(w http.ResponseWriter, r *http.Request)
 func canonicalProfileID(raw string) string {
 	if raw == "" {
 		return ""
+	}
+	// chi v5 returns the raw path segment when r.URL.RawPath is set, so the
+	// frontend's encodeURIComponent leaves the colon as %3A and the literal
+	// `:` check below misses. Decode first so both forms canonicalize.
+	if decoded, err := url.PathUnescape(raw); err == nil {
+		raw = decoded
 	}
 	if strings.Contains(raw, ":") {
 		return raw

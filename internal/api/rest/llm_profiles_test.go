@@ -675,6 +675,28 @@ func TestHandler_DeleteProfile_404(t *testing.T) {
 	}
 }
 
+func TestHandler_DeleteProfile_PercentEncodedID_204(t *testing.T) {
+	// Frontend uses encodeURIComponent on the full record id, so the colon
+	// arrives as %3A. Chi v5 returns the raw path segment, not a decoded
+	// one — canonicalProfileID must URL-decode before splitting.
+	fake := newFakeStoreAdapter()
+	fake.profiles["ca_llm_profile:g3j30dgw5fhpxav9t4me"] = ProfileResponse{
+		ID:   "ca_llm_profile:g3j30dgw5fhpxav9t4me",
+		Name: "X",
+	}
+	s := newServerWithProfileStore(t, fake)
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/v1/admin/llm-profiles/ca_llm_profile%3Ag3j30dgw5fhpxav9t4me", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Errorf("status: got %d, want 204, body=%s", w.Code, w.Body.String())
+	}
+	if fake.deletedLast != "ca_llm_profile:g3j30dgw5fhpxav9t4me" {
+		t.Errorf("delete: target not propagated, got %q", fake.deletedLast)
+	}
+}
+
 func TestHandler_DeleteProfile_409Active(t *testing.T) {
 	// D5: cannot delete active.
 	fake := newFakeStoreAdapter()
@@ -735,6 +757,8 @@ func TestCanonicalProfileID(t *testing.T) {
 		{"ca_llm_profile:abc", "ca_llm_profile:abc"},
 		{"", ""},
 		{"default-migrated", "ca_llm_profile:default-migrated"},
+		{"ca_llm_profile%3Aabc", "ca_llm_profile:abc"},
+		{"ca_llm_profile%3Adefault-migrated", "ca_llm_profile:default-migrated"},
 	}
 	for _, c := range cases {
 		got := canonicalProfileID(c.in)
