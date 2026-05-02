@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import os
-from typing import Tuple
 
 
-def _resolve_version() -> Tuple[str, str, str]:
+def _resolve_version() -> tuple[str, str, str]:
     """Resolve the worker's (version, commit, build_date) tuple.
 
     Resolution priority (matches scripts/version.sh contract):

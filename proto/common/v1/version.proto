@@ -21,12 +21,14 @@ option go_package = "github.com/sourcebridge/sourcebridge/gen/go/common/v1;commo
 
 // VersionService exposes process-level metadata about the running worker.
 service VersionService {
-  rpc GetVersion(GetVersionRequest) returns (VersionInfo);
+  rpc GetVersion(GetVersionRequest) returns (GetVersionResponse);
 }
 
 message GetVersionRequest {}
 
-message VersionInfo {
+// GetVersionResponse is the response shape — buf STANDARD lint requires
+// per-RPC distinct request/response message names.
+message GetVersionResponse {
   // The canonical SourceBridge version string. Format follows
   // scripts/version.sh — SemVer-2 with prerelease/build-metadata.
   string version = 1;

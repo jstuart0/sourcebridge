@@ -38,7 +38,7 @@ class VersionServiceStub(object):
         self.GetVersion = channel.unary_unary(
                 '/sourcebridge.common.v1.VersionService/GetVersion',
                 request_serializer=common_dot_v1_dot_version__pb2.GetVersionRequest.SerializeToString,
-                response_deserializer=common_dot_v1_dot_version__pb2.VersionInfo.FromString,
+                response_deserializer=common_dot_v1_dot_version__pb2.GetVersionResponse.FromString,
                 _registered_method=True)
 
 
@@ -58,7 +58,7 @@ def add_VersionServiceServicer_to_server(servicer, server):
             'GetVersion': grpc.unary_unary_rpc_method_handler(
                     servicer.GetVersion,
                     request_deserializer=common_dot_v1_dot_version__pb2.GetVersionRequest.FromString,
-                    response_serializer=common_dot_v1_dot_version__pb2.VersionInfo.SerializeToString,
+                    response_serializer=common_dot_v1_dot_version__pb2.GetVersionResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -88,7 +88,7 @@ class VersionService(object):
             target,
             '/sourcebridge.common.v1.VersionService/GetVersion',
             common_dot_v1_dot_version__pb2.GetVersionRequest.SerializeToString,
-            common_dot_v1_dot_version__pb2.VersionInfo.FromString,
+            common_dot_v1_dot_version__pb2.GetVersionResponse.FromString,
             options,
             channel_credentials,
             insecure,

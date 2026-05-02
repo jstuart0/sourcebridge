@@ -23,8 +23,8 @@ class VersionServicer(version_pb2_grpc.VersionServiceServicer):
         self,
         request: version_pb2.GetVersionRequest,
         context: grpc.aio.ServicerContext,
-    ) -> version_pb2.VersionInfo:
-        return version_pb2.VersionInfo(
+    ) -> version_pb2.GetVersionResponse:
+        return version_pb2.GetVersionResponse(
             version=__version__,
             commit=__commit__,
             build_date=__build_date__,

@@ -8,7 +8,7 @@ class GetVersionRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
-class VersionInfo(_message.Message):
+class GetVersionResponse(_message.Message):
     __slots__ = ("version", "commit", "build_date")
     VERSION_FIELD_NUMBER: _ClassVar[int]
     COMMIT_FIELD_NUMBER: _ClassVar[int]

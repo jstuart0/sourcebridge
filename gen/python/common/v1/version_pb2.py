@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x17\x63ommon/v1/version.proto\x12\x16sourcebridge.common.v1\"\x13\n\x11GetVersionRequest\"B\n\x0bVersionInfo\x12\x0f\n\x07version\x18\x01 \x01(\t\x12\x0e\n\x06\x63ommit\x18\x02 \x01(\t\x12\x12\n\nbuild_date\x18\x03 \x01(\t2n\n\x0eVersionService\x12\\\n\nGetVersion\x12).sourcebridge.common.v1.GetVersionRequest\x1a#.sourcebridge.common.v1.VersionInfoB@Z>github.com/sourcebridge/sourcebridge/gen/go/common/v1;commonv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x17\x63ommon/v1/version.proto\x12\x16sourcebridge.common.v1\"\x13\n\x11GetVersionRequest\"I\n\x12GetVersionResponse\x12\x0f\n\x07version\x18\x01 \x01(\t\x12\x0e\n\x06\x63ommit\x18\x02 \x01(\t\x12\x12\n\nbuild_date\x18\x03 \x01(\t2u\n\x0eVersionService\x12\x63\n\nGetVersion\x12).sourcebridge.common.v1.GetVersionRequest\x1a*.sourcebridge.common.v1.GetVersionResponseB@Z>github.com/sourcebridge/sourcebridge/gen/go/common/v1;commonv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -34,8 +34,8 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._serialized_options = b'Z>github.com/sourcebridge/sourcebridge/gen/go/common/v1;commonv1'
   _globals['_GETVERSIONREQUEST']._serialized_start=51
   _globals['_GETVERSIONREQUEST']._serialized_end=70
-  _globals['_VERSIONINFO']._serialized_start=72
-  _globals['_VERSIONINFO']._serialized_end=138
-  _globals['_VERSIONSERVICE']._serialized_start=140
-  _globals['_VERSIONSERVICE']._serialized_end=250
+  _globals['_GETVERSIONRESPONSE']._serialized_start=72
+  _globals['_GETVERSIONRESPONSE']._serialized_end=145
+  _globals['_VERSIONSERVICE']._serialized_start=147
+  _globals['_VERSIONSERVICE']._serialized_end=264
 # @@protoc_insertion_point(module_scope)

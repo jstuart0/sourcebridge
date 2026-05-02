@@ -43,7 +43,7 @@ const (
 //
 // VersionService exposes process-level metadata about the running worker.
 type VersionServiceClient interface {
-	GetVersion(ctx context.Context, in *GetVersionRequest, opts ...grpc.CallOption) (*VersionInfo, error)
+	GetVersion(ctx context.Context, in *GetVersionRequest, opts ...grpc.CallOption) (*GetVersionResponse, error)
 }
 
 type versionServiceClient struct {
@@ -54,9 +54,9 @@ func NewVersionServiceClient(cc grpc.ClientConnInterface) VersionServiceClient {
 	return &versionServiceClient{cc}
 }
 
-func (c *versionServiceClient) GetVersion(ctx context.Context, in *GetVersionRequest, opts ...grpc.CallOption) (*VersionInfo, error) {
+func (c *versionServiceClient) GetVersion(ctx context.Context, in *GetVersionRequest, opts ...grpc.CallOption) (*GetVersionResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(VersionInfo)
+	out := new(GetVersionResponse)
 	err := c.cc.Invoke(ctx, VersionService_GetVersion_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -70,7 +70,7 @@ func (c *versionServiceClient) GetVersion(ctx context.Context, in *GetVersionReq
 //
 // VersionService exposes process-level metadata about the running worker.
 type VersionServiceServer interface {
-	GetVersion(context.Context, *GetVersionRequest) (*VersionInfo, error)
+	GetVersion(context.Context, *GetVersionRequest) (*GetVersionResponse, error)
 	mustEmbedUnimplementedVersionServiceServer()
 }
 
@@ -81,7 +81,7 @@ type VersionServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedVersionServiceServer struct{}
 
-func (UnimplementedVersionServiceServer) GetVersion(context.Context, *GetVersionRequest) (*VersionInfo, error) {
+func (UnimplementedVersionServiceServer) GetVersion(context.Context, *GetVersionRequest) (*GetVersionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVersion not implemented")
 }
 func (UnimplementedVersionServiceServer) mustEmbedUnimplementedVersionServiceServer() {}

@@ -72,7 +72,9 @@ func (*GetVersionRequest) Descriptor() ([]byte, []int) {
 	return file_common_v1_version_proto_rawDescGZIP(), []int{0}
 }
 
-type VersionInfo struct {
+// GetVersionResponse is the response shape — buf STANDARD lint requires
+// per-RPC distinct request/response message names.
+type GetVersionResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The canonical SourceBridge version string. Format follows
 	// scripts/version.sh — SemVer-2 with prerelease/build-metadata.
@@ -85,20 +87,20 @@ type VersionInfo struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *VersionInfo) Reset() {
-	*x = VersionInfo{}
+func (x *GetVersionResponse) Reset() {
+	*x = GetVersionResponse{}
 	mi := &file_common_v1_version_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *VersionInfo) String() string {
+func (x *GetVersionResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*VersionInfo) ProtoMessage() {}
+func (*GetVersionResponse) ProtoMessage() {}
 
-func (x *VersionInfo) ProtoReflect() protoreflect.Message {
+func (x *GetVersionResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_common_v1_version_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -110,26 +112,26 @@ func (x *VersionInfo) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use VersionInfo.ProtoReflect.Descriptor instead.
-func (*VersionInfo) Descriptor() ([]byte, []int) {
+// Deprecated: Use GetVersionResponse.ProtoReflect.Descriptor instead.
+func (*GetVersionResponse) Descriptor() ([]byte, []int) {
 	return file_common_v1_version_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *VersionInfo) GetVersion() string {
+func (x *GetVersionResponse) GetVersion() string {
 	if x != nil {
 		return x.Version
 	}
 	return ""
 }
 
-func (x *VersionInfo) GetCommit() string {
+func (x *GetVersionResponse) GetCommit() string {
 	if x != nil {
 		return x.Commit
 	}
 	return ""
 }
 
-func (x *VersionInfo) GetBuildDate() string {
+func (x *GetVersionResponse) GetBuildDate() string {
 	if x != nil {
 		return x.BuildDate
 	}
@@ -141,15 +143,15 @@ var File_common_v1_version_proto protoreflect.FileDescriptor
 const file_common_v1_version_proto_rawDesc = "" +
 	"\n" +
 	"\x17common/v1/version.proto\x12\x16sourcebridge.common.v1\"\x13\n" +
-	"\x11GetVersionRequest\"^\n" +
-	"\vVersionInfo\x12\x18\n" +
+	"\x11GetVersionRequest\"e\n" +
+	"\x12GetVersionResponse\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x16\n" +
 	"\x06commit\x18\x02 \x01(\tR\x06commit\x12\x1d\n" +
 	"\n" +
-	"build_date\x18\x03 \x01(\tR\tbuildDate2n\n" +
-	"\x0eVersionService\x12\\\n" +
+	"build_date\x18\x03 \x01(\tR\tbuildDate2u\n" +
+	"\x0eVersionService\x12c\n" +
 	"\n" +
-	"GetVersion\x12).sourcebridge.common.v1.GetVersionRequest\x1a#.sourcebridge.common.v1.VersionInfoB@Z>github.com/sourcebridge/sourcebridge/gen/go/common/v1;commonv1b\x06proto3"
+	"GetVersion\x12).sourcebridge.common.v1.GetVersionRequest\x1a*.sourcebridge.common.v1.GetVersionResponseB@Z>github.com/sourcebridge/sourcebridge/gen/go/common/v1;commonv1b\x06proto3"
 
 var (
 	file_common_v1_version_proto_rawDescOnce sync.Once
@@ -165,12 +167,12 @@ func file_common_v1_version_proto_rawDescGZIP() []byte {
 
 var file_common_v1_version_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_common_v1_version_proto_goTypes = []any{
-	(*GetVersionRequest)(nil), // 0: sourcebridge.common.v1.GetVersionRequest
-	(*VersionInfo)(nil),       // 1: sourcebridge.common.v1.VersionInfo
+	(*GetVersionRequest)(nil),  // 0: sourcebridge.common.v1.GetVersionRequest
+	(*GetVersionResponse)(nil), // 1: sourcebridge.common.v1.GetVersionResponse
 }
 var file_common_v1_version_proto_depIdxs = []int32{
 	0, // 0: sourcebridge.common.v1.VersionService.GetVersion:input_type -> sourcebridge.common.v1.GetVersionRequest
-	1, // 1: sourcebridge.common.v1.VersionService.GetVersion:output_type -> sourcebridge.common.v1.VersionInfo
+	1, // 1: sourcebridge.common.v1.VersionService.GetVersion:output_type -> sourcebridge.common.v1.GetVersionResponse
 	1, // [1:2] is the sub-list for method output_type
 	0, // [0:1] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
