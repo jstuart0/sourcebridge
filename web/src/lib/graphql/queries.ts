@@ -194,6 +194,8 @@ export const REPOSITORY_QUERY = gql`
       }
       livingWikiSettings {
         enabled
+        livingWikiOverviewEnabled
+        livingWikiDetailedEnabled
         mode
         sinks {
           kind
@@ -1531,6 +1533,8 @@ export const ENABLE_LIVING_WIKI_FOR_REPO_MUTATION = gql`
     enableLivingWikiForRepo(input: $input) {
       settings {
         enabled
+        livingWikiOverviewEnabled
+        livingWikiDetailedEnabled
         mode
         sinks {
           kind
@@ -1569,6 +1573,8 @@ export const DISABLE_LIVING_WIKI_FOR_REPO_MUTATION = gql`
   mutation DisableLivingWikiForRepo($repositoryId: ID!) {
     disableLivingWikiForRepo(repositoryId: $repositoryId) {
       enabled
+      livingWikiOverviewEnabled
+      livingWikiDetailedEnabled
       mode
       sinks {
         kind
@@ -1589,6 +1595,8 @@ export const UPDATE_REPOSITORY_LIVING_WIKI_SETTINGS_MUTATION = gql`
   mutation UpdateRepositoryLivingWikiSettings($input: UpdateRepositoryLivingWikiSettingsInput!) {
     updateRepositoryLivingWikiSettings(input: $input) {
       enabled
+      livingWikiOverviewEnabled
+      livingWikiDetailedEnabled
       mode
       sinks {
         kind
