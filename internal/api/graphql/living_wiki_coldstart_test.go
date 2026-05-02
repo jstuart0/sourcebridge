@@ -636,27 +636,15 @@ func TestColdStartJobAppearsInSharedActivityFeed(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestBuildColdStartRunnerNilOrchestratorReturnsNotice(t *testing.T) {
-	runner := buildColdStartRunner(
-		nil, // nil orchestrator
-		"test-repo",
-		"default",
-		nil, // no graph store
-		nil, // no worker client
-		nil, // no llmcall.Caller
-		nil, // no excluded page IDs
-		"unknown",
-		nil,                      // no job result store
-		nil,                      // no broker
-		nil,                      // no repo settings store
-		nil,                      // no cluster store
-		nil,                      // no knowledge store
-		nil,                      // no metrics collector (falls back to Default)
-		nil,                      // no llmResolver (Phase 1)
-		nil,                      // no publishStatusStore (Phase 1)
-		GenerationModeLWDetailed, // mode
-		nil,                      // no comprehensionStore (CA-150 Phase 4)
-		500, nil,                 // CA-146: maxPagesPerJob=500, no per-run override
-	)
+	runner := buildColdStartRunner(coldStartConfig{
+		LWOrch:           nil, // nil orchestrator
+		RepoID:           "test-repo",
+		TenantID:         "default",
+		SinkKind:         "unknown",
+		Mode:             GenerationModeLWDetailed,
+		MaxPagesPerJob:   500,
+		PageCountOverride: nil,
+	})
 
 	rt := &fakeRuntime{jobID: "nil-orch-job"}
 	if err := runner(context.Background(), rt); err != nil {
@@ -1056,27 +1044,17 @@ func TestColdStartSinkResultsPersistedInJobResult(t *testing.T) {
 	pages := csPlannedPages("sink-result-repo.glossary", "glossary")
 
 	// Run the cold-start runner with the broker and repo settings store wired.
-	runner := buildColdStartRunner(
-		lwOrch,
-		"sink-result-repo",
-		"default",
-		nil, // no graph store (taxonomy resolution skipped; pages provided via test)
-		nil, // no worker client
-		nil, // no llmcall.Caller
-		nil, // no excluded page IDs (full cold-start path)
-		"confluence",
-		jrs,
-		broker,
-		repoSettingsStore,
-		nil,                      // no cluster store
-		nil,                      // no knowledge store
-		nil,                      // no metrics collector (falls back to Default)
-		nil,                      // no llmResolver (Phase 1)
-		nil,                      // no publishStatusStore (Phase 1)
-		GenerationModeLWDetailed, // mode
-		nil,                      // no comprehensionStore (CA-150 Phase 4)
-		500, nil,                 // CA-146: maxPagesPerJob=500, no per-run override
-	)
+	runner := buildColdStartRunner(coldStartConfig{
+		LWOrch:            lwOrch,
+		RepoID:            "sink-result-repo",
+		TenantID:          "default",
+		SinkKind:          "confluence",
+		JobResultStore:    jrs,
+		Broker:            broker,
+		RepoSettingsStore: repoSettingsStore,
+		Mode:              GenerationModeLWDetailed,
+		MaxPagesPerJob:    500,
+	})
 
 	// Override: run via csRunnerFromPages so we can inject the planned pages
 	// directly rather than going through resolveTaxonomy (which needs a graph store).
@@ -1172,27 +1150,18 @@ func TestColdStartSystemicAbortEmitsMetric(t *testing.T) {
 	// MaxConcurrency=1, threshold=max(1+1,15)=15. After 15 same-category failures the breaker trips.
 	cs := csClusterStore(20)
 
-	runner := buildColdStartRunner(
-		lwOrch,
-		"systemic-test-repo",
-		"default",
-		newStubGraphStore(), // provides the symbol-graph adapter; empty returns no symbols
-		nil,                 // no worker client
-		nil,                 // no llmcall.Caller
-		nil,                 // full cold-start path (not retry-excluded)
-		"confluence",
-		jrs,
-		nil, // no broker
-		nil, // no repo settings store
-		cs,
-		nil, // no knowledge store
-		mc,
-		nil,                      // no llmResolver (Phase 1)
-		nil,                      // no publishStatusStore (Phase 1)
-		GenerationModeLWDetailed, // mode
-		nil,                      // no comprehensionStore (CA-150 Phase 4)
-		500, nil,                 // CA-146: maxPagesPerJob=500, no per-run override
-	)
+	runner := buildColdStartRunner(coldStartConfig{
+		LWOrch:           lwOrch,
+		RepoID:           "systemic-test-repo",
+		TenantID:         "default",
+		GraphStore:       newStubGraphStore(),
+		SinkKind:         "confluence",
+		JobResultStore:   jrs,
+		ClusterStore:     cs,
+		MetricsCollector: mc,
+		Mode:             GenerationModeLWDetailed,
+		MaxPagesPerJob:   500,
+	})
 
 	rt := &fakeRuntime{jobID: "job-systemic-metric"}
 	// The runner returns a non-nil error when the orchestrator returns ErrSystemicSoftFailures
@@ -1232,21 +1201,18 @@ func TestColdStartExclusionInvariantPartialContent(t *testing.T) {
 	// Two clusters → two architecture pages → both fail quality gate → two exclusions.
 	cs := csClusterStore(2)
 
-	runner := buildColdStartRunner(
-		lwOrch,
-		"invariant-partial-repo",
-		"default",
-		newStubGraphStore(),
-		nil, nil, nil, // no worker client, LLM caller, excluded page IDs
-		"git_repo",
-		jrs,
-		nil, nil, cs, nil,
-		mc,
-		nil, nil, // no llmResolver, no publishStatusStore (Phase 1)
-		GenerationModeLWDetailed, // mode
-		nil,                      // no comprehensionStore (CA-150 Phase 4)
-		500, nil,                 // CA-146: maxPagesPerJob=500, no per-run override
-	)
+	runner := buildColdStartRunner(coldStartConfig{
+		LWOrch:           lwOrch,
+		RepoID:           "invariant-partial-repo",
+		TenantID:         "default",
+		GraphStore:       newStubGraphStore(),
+		SinkKind:         "git_repo",
+		JobResultStore:   jrs,
+		ClusterStore:     cs,
+		MetricsCollector: mc,
+		Mode:             GenerationModeLWDetailed,
+		MaxPagesPerJob:   500,
+	})
 
 	rt := &fakeRuntime{jobID: "job-invariant-partial"}
 	_ = runner(context.Background(), rt)
@@ -1288,21 +1254,18 @@ func TestColdStartExclusionInvariantSystemicAbort(t *testing.T) {
 	jrs := livingwiki.NewMemJobResultStore()
 	cs := csClusterStore(20)
 
-	runner := buildColdStartRunner(
-		lwOrch,
-		"invariant-systemic-repo",
-		"default",
-		newStubGraphStore(),
-		nil, nil, nil,
-		"confluence",
-		jrs,
-		nil, nil, cs, nil,
-		mc,
-		nil, nil, // no llmResolver, no publishStatusStore (Phase 1)
-		GenerationModeLWDetailed, // mode
-		nil,                      // no comprehensionStore (CA-150 Phase 4)
-		500, nil,                 // CA-146: maxPagesPerJob=500, no per-run override
-	)
+	runner := buildColdStartRunner(coldStartConfig{
+		LWOrch:           lwOrch,
+		RepoID:           "invariant-systemic-repo",
+		TenantID:         "default",
+		GraphStore:       newStubGraphStore(),
+		SinkKind:         "confluence",
+		JobResultStore:   jrs,
+		ClusterStore:     cs,
+		MetricsCollector: mc,
+		Mode:             GenerationModeLWDetailed,
+		MaxPagesPerJob:   500,
+	})
 
 	rt := &fakeRuntime{jobID: "job-invariant-systemic"}
 	_ = runner(context.Background(), rt)
@@ -1524,17 +1487,18 @@ func TestColdStart_TierResolvedExactlyOncePerRun(t *testing.T) {
 		&csPassingTemplate{id: "glossary"},
 	), lworch.NewMemoryPageStore())
 
-	runner := buildColdStartRunner(
-		lwOrch, "tier-once-repo", "default",
-		newStubGraphStore(), nil, nil, nil,
-		"git_repo",
-		jrs, nil, nil, nil, nil,
-		mc,
-		resolver, nil,
-		GenerationModeLWDetailed,
-		nil,
-		500, nil, // CA-146: maxPagesPerJob=500, no per-run override
-	)
+	runner := buildColdStartRunner(coldStartConfig{
+		LWOrch:           lwOrch,
+		RepoID:           "tier-once-repo",
+		TenantID:         "default",
+		GraphStore:       newStubGraphStore(),
+		SinkKind:         "git_repo",
+		JobResultStore:   jrs,
+		MetricsCollector: mc,
+		LLMResolver:      resolver,
+		Mode:             GenerationModeLWDetailed,
+		MaxPagesPerJob:   500,
+	})
 
 	rt := &fakeRuntime{jobID: "tier-once-job"}
 	_ = runner(context.Background(), rt)
@@ -1567,17 +1531,18 @@ func TestColdStart_StoreError_FallsBackToTierLocal(t *testing.T) {
 	jrs := livingwiki.NewMemJobResultStore()
 	lwOrch := csLWOrch(&csPassingTemplate{id: "glossary"})
 
-	runner := buildColdStartRunner(
-		lwOrch, "store-err-repo", "default",
-		newStubGraphStore(), nil, nil, nil,
-		"git_repo",
-		jrs, nil, nil, nil, nil,
-		mc,
-		&errorLLMResolver{}, nil,
-		GenerationModeLWDetailed,
-		nil,
-		500, nil, // CA-146: maxPagesPerJob=500, no per-run override
-	)
+	runner := buildColdStartRunner(coldStartConfig{
+		LWOrch:           lwOrch,
+		RepoID:           "store-err-repo",
+		TenantID:         "default",
+		GraphStore:       newStubGraphStore(),
+		SinkKind:         "git_repo",
+		JobResultStore:   jrs,
+		MetricsCollector: mc,
+		LLMResolver:      &errorLLMResolver{},
+		Mode:             GenerationModeLWDetailed,
+		MaxPagesPerJob:   500,
+	})
 
 	rt := &fakeRuntime{jobID: "store-err-job"}
 	_ = runner(context.Background(), rt)
@@ -1613,17 +1578,18 @@ func TestColdStart_AdminMutationMidRun_TemplatesUseFrozenCaller(t *testing.T) {
 	jrs := livingwiki.NewMemJobResultStore()
 	lwOrch := csLWOrch(&csPassingTemplate{id: "glossary"})
 
-	runner := buildColdStartRunner(
-		lwOrch, "mutation-mid-run-repo", "default",
-		newStubGraphStore(), nil, nil, nil,
-		"git_repo",
-		jrs, nil, nil, nil, nil,
-		mc,
-		resolver, nil,
-		GenerationModeLWDetailed,
-		nil,
-		500, nil, // CA-146: maxPagesPerJob=500, no per-run override
-	)
+	runner := buildColdStartRunner(coldStartConfig{
+		LWOrch:           lwOrch,
+		RepoID:           "mutation-mid-run-repo",
+		TenantID:         "default",
+		GraphStore:       newStubGraphStore(),
+		SinkKind:         "git_repo",
+		JobResultStore:   jrs,
+		MetricsCollector: mc,
+		LLMResolver:      resolver,
+		Mode:             GenerationModeLWDetailed,
+		MaxPagesPerJob:   500,
+	})
 
 	rt := &fakeRuntime{jobID: "mutation-mid-run-job"}
 	_ = runner(context.Background(), rt)
@@ -1654,17 +1620,18 @@ func TestColdStart_TierUnknown_FallsBackToFrontier_LogsWarn(t *testing.T) {
 	jrs := livingwiki.NewMemJobResultStore()
 	lwOrch := csLWOrch(&csPassingTemplate{id: "glossary"})
 
-	runner := buildColdStartRunner(
-		lwOrch, "tier-unk-repo", "default",
-		newStubGraphStore(), nil, nil, nil,
-		"git_repo",
-		jrs, nil, nil, nil, nil,
-		mc,
-		nil, nil, // nil resolver → resolveErr → TierLocal
-		GenerationModeLWDetailed,
-		nil,
-		500, nil, // CA-146: maxPagesPerJob=500, no per-run override
-	)
+	runner := buildColdStartRunner(coldStartConfig{
+		LWOrch:           lwOrch,
+		RepoID:           "tier-unk-repo",
+		TenantID:         "default",
+		GraphStore:       newStubGraphStore(),
+		SinkKind:         "git_repo",
+		JobResultStore:   jrs,
+		MetricsCollector: mc,
+		// nil LLMResolver → resolveErr → TierLocal (D16)
+		Mode:           GenerationModeLWDetailed,
+		MaxPagesPerJob: 500,
+	})
 
 	rt := &fakeRuntime{jobID: "tier-unk-job"}
 	_ = runner(context.Background(), rt)
@@ -1720,18 +1687,19 @@ func TestColdStart_PerRepoOverride_DerivesTierFromOverride(t *testing.T) {
 	jrs := livingwiki.NewMemJobResultStore()
 	lwOrch := csLWOrch(&csPassingTemplate{id: "glossary"})
 
-	runner := buildColdStartRunner(
-		lwOrch, "override-repo", "default",
-		newStubGraphStore(), nil, nil, nil,
-		"git_repo",
-		jrs, nil, nil, nil, nil,
-		mc,
-		overrideResolver, // per-repo resolver → returns ollama/qwen3:7b
-		nil,
-		GenerationModeLWDetailed,
-		nil,      // comprehensionStore nil → falls through to ClassifyByPattern
-		500, nil, // CA-146: maxPagesPerJob=500, no per-run override
-	)
+	runner := buildColdStartRunner(coldStartConfig{
+		LWOrch:           lwOrch,
+		RepoID:           "override-repo",
+		TenantID:         "default",
+		GraphStore:       newStubGraphStore(),
+		SinkKind:         "git_repo",
+		JobResultStore:   jrs,
+		MetricsCollector: mc,
+		LLMResolver:      overrideResolver, // per-repo resolver → returns ollama/qwen3:7b
+		// ComprehensionStore nil → falls through to ClassifyByPattern
+		Mode:           GenerationModeLWDetailed,
+		MaxPagesPerJob: 500,
+	})
 
 	rt := &fakeRuntime{jobID: "override-tier-job"}
 	_ = runner(context.Background(), rt)
@@ -2052,18 +2020,18 @@ func TestColdStart_MaxPagesPerJobCap(t *testing.T) {
 
 	// maxPagesPerJob=3 — less than the planned 5 (2 arch + 3 repo-wide).
 	// Repo-wide pages (3) are always retained; architecture pages truncated to 0.
-	runner := buildColdStartRunner(
-		lwOrch, "cap-test-repo", "default",
-		newStubGraphStore(), nil, nil, nil,
-		"git_repo",
-		jrs, nil, nil, cs, nil,
-		mc,
-		nil, nil,
-		GenerationModeLWDetailed,
-		nil,
-		3,   // maxPagesPerJob
-		nil, // no per-run override
-	)
+	runner := buildColdStartRunner(coldStartConfig{
+		LWOrch:           lwOrch,
+		RepoID:           "cap-test-repo",
+		TenantID:         "default",
+		GraphStore:       newStubGraphStore(),
+		SinkKind:         "git_repo",
+		JobResultStore:   jrs,
+		ClusterStore:     cs,
+		MetricsCollector: mc,
+		Mode:             GenerationModeLWDetailed,
+		MaxPagesPerJob:   3, // triggers repo_setting cap
+	})
 
 	rt := &fakeRuntime{jobID: "cap-test-job"}
 	_ = runner(context.Background(), rt)
@@ -2106,18 +2074,19 @@ func TestColdStart_PageCountOverride_WinsOverRepoSetting(t *testing.T) {
 	lwOrch := lworch.New(lworch.Config{RepoID: "override-cap-repo"}, reg, store)
 
 	override := 4
-	runner := buildColdStartRunner(
-		lwOrch, "override-cap-repo", "default",
-		newStubGraphStore(), nil, nil, nil,
-		"git_repo",
-		jrs, nil, nil, cs, nil,
-		mc,
-		nil, nil,
-		GenerationModeLWDetailed,
-		nil,
-		10,        // maxPagesPerJob (loose, would not cap on its own)
-		&override, // per-run override wins
-	)
+	runner := buildColdStartRunner(coldStartConfig{
+		LWOrch:            lwOrch,
+		RepoID:            "override-cap-repo",
+		TenantID:          "default",
+		GraphStore:        newStubGraphStore(),
+		SinkKind:          "git_repo",
+		JobResultStore:    jrs,
+		ClusterStore:      cs,
+		MetricsCollector:  mc,
+		Mode:              GenerationModeLWDetailed,
+		MaxPagesPerJob:    10,       // loose, would not cap on its own
+		PageCountOverride: &override, // per-run override wins
+	})
 
 	rt := &fakeRuntime{jobID: "override-cap-job"}
 	_ = runner(context.Background(), rt)
@@ -2169,19 +2138,19 @@ func TestColdStart_ExcludedOnlyRetry_SkipsCap(t *testing.T) {
 		"excluded-cap-repo.detail.module.1",
 		"excluded-cap-repo.detail.module.2",
 	}
-	runner := buildColdStartRunner(
-		lwOrch, "excluded-cap-repo", "default",
-		newStubGraphStore(), nil, nil,
-		excludedIDs, // non-empty → retryExcludedOnly path
-		"git_repo",
-		jrs, nil, nil, cs, nil,
-		mc,
-		nil, nil,
-		GenerationModeLWDetailed,
-		nil,
-		1,   // maxPagesPerJob = 1 (very tight — should be bypassed)
-		nil, // no per-run override
-	)
+	runner := buildColdStartRunner(coldStartConfig{
+		LWOrch:          lwOrch,
+		RepoID:          "excluded-cap-repo",
+		TenantID:        "default",
+		GraphStore:      newStubGraphStore(),
+		ExcludedPageIDs: excludedIDs, // non-empty → retryExcludedOnly path
+		SinkKind:        "git_repo",
+		JobResultStore:  jrs,
+		ClusterStore:    cs,
+		MetricsCollector: mc,
+		Mode:            GenerationModeLWDetailed,
+		MaxPagesPerJob:  1, // very tight — should be bypassed on excluded-only path
+	})
 
 	rt := &fakeRuntime{jobID: "excluded-cap-job"}
 	_ = runner(context.Background(), rt)
@@ -2220,18 +2189,18 @@ func TestColdStart_DeterministicTruncation(t *testing.T) {
 		store := lworch.NewMemoryPageStore()
 		lwOrch := lworch.New(lworch.Config{RepoID: repoID}, reg, store)
 
-		runner := buildColdStartRunner(
-			lwOrch, repoID, "default",
-			newStubGraphStore(), nil, nil, nil,
-			"git_repo",
-			jrs, nil, nil, cs, nil,
-			mc,
-			nil, nil,
-			GenerationModeLWDetailed,
-			nil,
-			5, // maxPagesPerJob=5 (caps 7→5)
-			nil,
-		)
+		runner := buildColdStartRunner(coldStartConfig{
+			LWOrch:           lwOrch,
+			RepoID:           repoID,
+			TenantID:         "default",
+			GraphStore:       newStubGraphStore(),
+			SinkKind:         "git_repo",
+			JobResultStore:   jrs,
+			ClusterStore:     cs,
+			MetricsCollector: mc,
+			Mode:             GenerationModeLWDetailed,
+			MaxPagesPerJob:   5, // caps 7→5
+		})
 		_ = runner(context.Background(), &fakeRuntime{jobID: "det-job-" + repoID})
 
 		// Extract the "planned page count" log line and return it.

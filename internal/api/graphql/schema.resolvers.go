@@ -2702,28 +2702,28 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 		// the UI; smart-resume (commit 15be8a8) skips already-published
 		// pages so the explicit retry is cheap.
 		MaxAttempts: 1,
-		RunWithContext: buildColdStartRunner(
-			r.LivingWikiLiveOrchestrator,
-			input.RepositoryID,
-			defaultTenantID,
-			r.getStore(ctx),
-			r.Worker,
-			r.LLMCaller,
-			excludedPageIDs,
-			sinkKind,
-			r.LivingWikiJobResultStore,
-			r.livingWikiBroker(),
-			r.LivingWikiRepoStore,
-			r.ClusterStore,
-			r.KnowledgeStore,
-			nil,                              // metrics: fall back to lwmetrics.Default
-			r.LLMResolver,                    // for FrozenResolver + fingerprint model identity (CR5, LD-7)
-			r.LivingWikiPagePublishStore,     // for per-page dispatch state (Phase 1)
-			jobMode,                          // Phase 4a: mode-aware taxonomy
-			r.ComprehensionStore,             // for quality-gate tier registry lookup (CA-150 Phase 4)
-			effectiveSettings.MaxPagesPerJob, // CA-146: repo-level cap (now wired)
-			input.PageCountOverride,          // CA-146: per-run override (nil = use repo setting)
-		),
+		RunWithContext: buildColdStartRunner(coldStartConfig{
+			LWOrch:             r.LivingWikiLiveOrchestrator,
+			RepoID:             input.RepositoryID,
+			TenantID:           defaultTenantID,
+			GraphStore:         r.getStore(ctx),
+			WorkerClient:       r.Worker,
+			LLMCaller:          r.LLMCaller,
+			ExcludedPageIDs:    excludedPageIDs,
+			SinkKind:           sinkKind,
+			JobResultStore:     r.LivingWikiJobResultStore,
+			Broker:             r.livingWikiBroker(),
+			RepoSettingsStore:  r.LivingWikiRepoStore,
+			ClusterStore:       r.ClusterStore,
+			KnowledgeStore:     r.KnowledgeStore,
+			MetricsCollector:   nil,                              // fall back to lwmetrics.Default
+			LLMResolver:        r.LLMResolver,                    // for FrozenResolver + fingerprint model identity (CR5, LD-7)
+			PublishStatusStore: r.LivingWikiPagePublishStore,     // for per-page dispatch state (Phase 1)
+			Mode:               jobMode,                          // Phase 4a: mode-aware taxonomy
+			ComprehensionStore: r.ComprehensionStore,             // for quality-gate tier registry lookup (CA-150 Phase 4)
+			MaxPagesPerJob:     effectiveSettings.MaxPagesPerJob, // CA-146: repo-level cap (now wired)
+			PageCountOverride:  input.PageCountOverride,          // CA-146: per-run override (nil = use repo setting)
+		}),
 	}
 
 	job, err := r.Orchestrator.Enqueue(req)
@@ -2773,7 +2773,7 @@ func (r *mutationResolver) DisableLivingWikiForRepo(ctx context.Context, reposit
 // current repo settings. When retryExcludedOnly is true the job is scoped
 // to pages that were excluded in the most recent run (the "Retry excluded
 // pages" CTA). When false (or nil), a full cold-start is triggered.
-func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool, mode *LivingWikiBuildMode, pageCountOverride *int) (*EnableLivingWikiResult, error) {
+func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool, mode *LivingWikiBuildMode, pageCountOverride *int, selectedPageIds []string, planSignature *string) (*EnableLivingWikiResult, error) {
 	// CA-142: refuse new cold-start jobs during graceful drain.
 	if err := r.checkServerDraining(); err != nil {
 		return nil, err
@@ -2791,13 +2791,15 @@ func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID 
 	}
 
 	// Build input, preserving existing mode flags by default.
-	// CA-146: forward pageCountOverride as-is (nil = no override).
+	// CA-146: forward pageCountOverride, selectedPageIds, and planSignature as-is.
 	input := EnableLivingWikiForRepoInput{
 		RepositoryID:      repositoryID,
 		Mode:              RepoWikiMode(current.Mode),
 		Sinks:             repoSinksToInputs(current.Sinks),
 		RetryExcludedOnly: retryExcludedOnly,
 		PageCountOverride: pageCountOverride,
+		SelectedPageIds:   selectedPageIds,
+		PlanSignature:     planSignature,
 	}
 
 	// Mode override: if both modes are off and no explicit mode given, error.
@@ -4538,6 +4540,11 @@ func (r *queryResolver) RepositoriesUsingSink(ctx context.Context, integrationNa
 		})
 	}
 	return out, nil
+}
+
+// PreviewLivingWikiPlan is the resolver for the previewLivingWikiPlan field.
+func (r *queryResolver) PreviewLivingWikiPlan(ctx context.Context, repositoryID string, mode *LivingWikiBuildMode, pageCountOverride *int) (*LivingWikiPlan, error) {
+	panic(fmt.Errorf("not implemented: PreviewLivingWikiPlan - previewLivingWikiPlan"))
 }
 
 // Files is the resolver for the files field.

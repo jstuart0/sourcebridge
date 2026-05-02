@@ -92,57 +92,65 @@ const (
 	indexUpdateEvery = 10
 )
 
+// coldStartConfig consolidates the parameters for buildColdStartRunner.
+// Phase 0: introduced to replace the 20-positional-parameter signature so
+// subsequent phases (Phase 1+) can add fields without cascading call-site
+// churn. All fields map 1:1 to the former positional parameters.
+type coldStartConfig struct {
+	LWOrch             *lworch.Orchestrator
+	RepoID             string
+	TenantID           string
+	GraphStore         graphstore.GraphStore
+	WorkerClient       *worker.Client
+	LLMCaller          *llmcall.Caller // post-slice-2: LLM-aware adapter (resolved metadata)
+	ExcludedPageIDs    []string        // non-nil+non-empty ⇒ retryExcludedOnly path
+	SinkKind           string
+	JobResultStore     livingwiki.JobResultStore
+	Broker             credentials.Broker
+	RepoSettingsStore  livingwiki.RepoSettingsStore
+	ClusterStore       clustering.ClusterStore
+	KnowledgeStore     knowledge.KnowledgeStore
+	MetricsCollector   *lwmetrics.Collector // when nil, falls back to lwmetrics.Default
+	LLMResolver        resolution.Resolver  // for FrozenResolver + fingerprint model identity (CR5, LD-7)
+	PublishStatusStore livingwiki.PagePublishStatusStore // for per-page dispatch state (Phase 1)
+	Mode               string                            // Phase 4a: "lw_overview" or "lw_detailed"; empty defaults to lw_detailed
+	ComprehensionStore comprehension.Store               // for quality-gate tier registry lookup (CA-150 Phase 4)
+	MaxPagesPerJob     int                               // CA-146: repo setting cap; 0 = no cap (new repos get 500 via migration)
+	PageCountOverride  *int                              // CA-146: per-run override; nil = use MaxPagesPerJob
+	// Phase 2 will add: PlannedPages []lworch.PlannedPage (pre-resolved+filtered)
+}
+
 // buildColdStartRunner returns the RunWithContext closure for a living-wiki
 // cold-start (or retry-excluded) job. It is injected into llm.EnqueueRequest
 // by EnableLivingWikiForRepo and RetryLivingWikiJob.
 //
-// When lwOrch is nil the function returns a fallback that immediately marks
+// When cfg.LWOrch is nil the function returns a fallback that immediately marks
 // the job complete with a notice — so callers do not need to guard.
 //
-// retryExcludedOnly: when true, only pages whose IDs appear in
-// excludedPageIDs are included in the generation run (the "Retry excluded
-// pages" CTA path). When false, TaxonomyResolver derives the full page set.
+// retryExcludedOnly: when true (cfg.ExcludedPageIDs non-empty), only pages
+// whose IDs appear in ExcludedPageIDs are included in the generation run
+// (the "Retry excluded pages" CTA path). When false, TaxonomyResolver
+// derives the full page set.
 //
-// sinkKind is the label recorded in Prometheus (e.g. "confluence", "git_repo").
-// Pass "" when the sink kind is unknown.
+// cfg.SinkKind is the label recorded in Prometheus (e.g. "confluence",
+// "git_repo"). Pass "" when the sink kind is unknown.
 //
-// broker and repoSettingsStore power the post-generation sink dispatch phase.
-// When either is nil the dispatch phase is skipped; pages remain in the
-// proposed_ast store only (same behaviour as before this wiring landed).
+// cfg.Broker and cfg.RepoSettingsStore power the post-generation sink
+// dispatch phase. When either is nil the dispatch phase is skipped; pages
+// remain in the proposed_ast store only.
 //
-// knowledgeStore, when non-nil, is queried for pre-computed knowledge artifacts.
-// Fresh artifacts (matching the current understanding revisionFp) are attached
-// to each architecture cluster's PackageInfo so the template can use curated
-// analysis as its primary LLM context instead of generating from scratch.
-func buildColdStartRunner(
-	lwOrch *lworch.Orchestrator,
-	repoID string,
-	tenantID string,
-	graphStore graphstore.GraphStore,
-	workerClient *worker.Client,
-	llmCaller *llmcall.Caller, // post-slice-2: LLM-aware adapter (resolved metadata)
-	excludedPageIDs []string, // non-nil+non-empty ⇒ retryExcludedOnly path
-	sinkKind string,
-	jobResultStore livingwiki.JobResultStore,
-	broker credentials.Broker,
-	repoSettingsStore livingwiki.RepoSettingsStore,
-	clusterStore clustering.ClusterStore,
-	knowledgeStore knowledge.KnowledgeStore,
-	metricsCollector *lwmetrics.Collector, // when nil, falls back to lwmetrics.Default
-	llmResolver resolution.Resolver, // for FrozenResolver + fingerprint model identity (CR5, LD-7)
-	publishStatusStore livingwiki.PagePublishStatusStore, // for per-page dispatch state (Phase 1)
-	mode string, // Phase 4a: "lw_overview" or "lw_detailed"; empty defaults to lw_detailed
-	comprehensionStore comprehension.Store, // for quality-gate tier registry lookup (CA-150 Phase 4)
-	maxPagesPerJob int, // CA-146: repo setting cap; 0 = no cap (new repos get 500 via migration)
-	pageCountOverride *int, // CA-146: per-run override; nil = use maxPagesPerJob
-) func(ctx context.Context, rt llm.Runtime) error {
-	if mode == "" {
-		mode = GenerationModeLWDetailed
+// cfg.KnowledgeStore, when non-nil, is queried for pre-computed knowledge
+// artifacts. Fresh artifacts are attached to each architecture cluster's
+// PackageInfo so the template can use curated analysis as its primary LLM
+// context instead of generating from scratch.
+func buildColdStartRunner(cfg coldStartConfig) func(ctx context.Context, rt llm.Runtime) error {
+	if cfg.Mode == "" {
+		cfg.Mode = GenerationModeLWDetailed
 	}
-	if metricsCollector == nil {
-		metricsCollector = lwmetrics.Default
+	if cfg.MetricsCollector == nil {
+		cfg.MetricsCollector = lwmetrics.Default
 	}
-	if lwOrch == nil {
+	if cfg.LWOrch == nil {
 		return func(_ context.Context, rt llm.Runtime) error {
 			rt.ReportProgress(1.0, "unavailable", "Living-wiki orchestrator not configured")
 			return nil
@@ -167,8 +175,8 @@ func buildColdStartRunner(
 			snap       resolution.Snapshot
 			resolveErr error
 		)
-		if llmResolver != nil {
-			snap, resolveErr = llmResolver.Resolve(runCtx, repoID, resolution.OpLivingWikiColdStart)
+		if cfg.LLMResolver != nil {
+			snap, resolveErr = cfg.LLMResolver.Resolve(runCtx, cfg.RepoID, resolution.OpLivingWikiColdStart)
 		} else {
 			resolveErr = errors.New("llmResolver is nil")
 		}
@@ -183,17 +191,17 @@ func buildColdStartRunner(
 
 		// Frozen caller — built from the same snap. ALL downstream LLM calls
 		// (taxonomy, page generation, retries) use frozenCaller, not the live
-		// llmCaller, so mid-run admin mutations cannot split a run's identity.
-		// Guard: only freeze when llmCaller is non-nil (tests may pass nil).
-		frozenCaller := llmCaller
-		if resolveErr == nil && llmCaller != nil {
-			frozenCaller = llmcall.New(llmCaller.Inner(), resolution.NewFrozenResolver(snap), nil)
+		// cfg.LLMCaller, so mid-run admin mutations cannot split a run's identity.
+		// Guard: only freeze when cfg.LLMCaller is non-nil (tests may pass nil).
+		frozenCaller := cfg.LLMCaller
+		if resolveErr == nil && cfg.LLMCaller != nil {
+			frozenCaller = llmcall.New(cfg.LLMCaller.Inner(), resolution.NewFrozenResolver(snap), nil)
 		}
 
 		// Quality-gate tier — same snap. On resolveErr, fall back to TierLocal
 		// (D16 — consistent with pattern-match fallback; the whole point of
 		// CA-150 is to NOT reproduce the outage on a transient resolve failure).
-		tierFn := newRegistryTierFunc(comprehensionStore) // private helper, D5
+		tierFn := newRegistryTierFunc(cfg.ComprehensionStore) // private helper, D5
 		tierResolution := modeltier.Resolution{
 			Tier:   modeltier.TierLocal,
 			Source: "fallback",
@@ -205,7 +213,7 @@ func buildColdStartRunner(
 		if tierResolution.Err != nil {
 			slog.Warn("livingwiki/coldstart: tier resolution error — pattern fallback applied",
 				"job_id", jobID,
-				"repo_id", repoID,
+				"repo_id", cfg.RepoID,
 				"provider", snap.Provider,
 				"model", snap.Model,
 				"tier", tierResolution.Tier,
@@ -215,7 +223,7 @@ func buildColdStartRunner(
 		} else {
 			slog.Info("livingwiki/coldstart: resolved quality-gate tier",
 				"job_id", jobID,
-				"repo_id", repoID,
+				"repo_id", cfg.RepoID,
 				"provider", snap.Provider,
 				"model", snap.Model,
 				"tier", tierResolution.Tier,
@@ -229,14 +237,14 @@ func buildColdStartRunner(
 		// PlannedPage.Input.LLM is bound to the snapshot resolved above.
 		var pages []lworch.PlannedPage
 
-		if len(excludedPageIDs) > 0 {
+		if len(cfg.ExcludedPageIDs) > 0 {
 			// retryExcludedOnly path: scope to previously-excluded pages.
-			full, err := resolveTaxonomyForMode(runCtx, mode, repoID, graphStore, frozenCaller, clusterStore)
+			full, err := resolveTaxonomyForMode(runCtx, cfg.Mode, cfg.RepoID, cfg.GraphStore, frozenCaller, cfg.ClusterStore)
 			if err != nil {
 				return fmt.Errorf("living-wiki: taxonomy resolution failed: %w", err)
 			}
-			wanted := make(map[string]bool, len(excludedPageIDs))
-			for _, id := range excludedPageIDs {
+			wanted := make(map[string]bool, len(cfg.ExcludedPageIDs))
+			for _, id := range cfg.ExcludedPageIDs {
 				wanted[id] = true
 			}
 			for _, p := range full {
@@ -251,14 +259,13 @@ func buildColdStartRunner(
 		} else {
 			// Full cold-start path.
 			var err error
-			pages, err = resolveTaxonomyForMode(runCtx, mode, repoID, graphStore, frozenCaller, clusterStore)
+			pages, err = resolveTaxonomyForMode(runCtx, cfg.Mode, cfg.RepoID, cfg.GraphStore, frozenCaller, cfg.ClusterStore)
 			if err != nil {
 				return fmt.Errorf("living-wiki: taxonomy resolution failed: %w", err)
 			}
 		}
 
-		preCap := len(pages)
-		if preCap == 0 {
+		if len(pages) == 0 {
 			rt.ReportProgress(1.0, "ok", "No pages to generate for this repository")
 			return nil
 		}
@@ -268,73 +275,33 @@ func buildColdStartRunner(
 		// Tally breakdown by template role before any truncation so the log
 		// reflects what the taxonomy actually produced.
 		var clusterPageCount, repoWidePageCount, topLevelDirPageCount int
-		repoWideTemplateIDs := map[string]bool{
-			"api_reference":   true,
-			"system_overview": true,
-			"glossary":        true,
-		}
 		for _, p := range pages {
-			if repoWideTemplateIDs[p.TemplateID] {
+			switch classifyPageType(p.TemplateID) {
+			case pageTypeRepoWide:
 				repoWidePageCount++
-			} else if p.TemplateID == "architecture" {
+			case pageTypeArchitecture:
 				clusterPageCount++
-			} else {
+			default:
 				topLevelDirPageCount++
 			}
 		}
 
-		// Determine effective cap and cap_source.
-		// Cap is only applied on the full cold-start path — retryExcludedOnly
-		// callers named specific pages; capping silently discards that request.
-		capSource := "none"
-		capValue := 0
-		excludedOnlyRetry := len(excludedPageIDs) > 0
-
-		if !excludedOnlyRetry {
-			effectiveCap := 0
-			if pageCountOverride != nil {
-				effectiveCap = *pageCountOverride
-				capSource = "per_run_override"
-			} else if maxPagesPerJob > 0 {
-				effectiveCap = maxPagesPerJob
-				capSource = "repo_setting"
-			}
-
-			if effectiveCap > 0 && preCap > effectiveCap {
-				capValue = effectiveCap
-				// Truncate: repo-wide pages (always 3) are retained;
-				// architecture / top-level-dir pages are truncated in stable order.
-				var repoWide, rest []lworch.PlannedPage
-				for _, p := range pages {
-					if repoWideTemplateIDs[p.TemplateID] {
-						repoWide = append(repoWide, p)
-					} else {
-						rest = append(rest, p)
-					}
-				}
-				allowForRest := effectiveCap - len(repoWide)
-				if allowForRest < 0 {
-					allowForRest = 0
-				}
-				if len(rest) > allowForRest {
-					rest = rest[:allowForRest]
-				}
-				pages = append(repoWide, rest...)
-			} else {
-				// Planned set fits within cap — no truncation.
-				capSource = "none"
-				capValue = 0
-			}
-		}
+		// Apply the page-count cap via the shared helper (extracted from the
+		// inline block that formerly lived here). excludedOnlyRetry = true
+		// bypasses the cap entirely.
+		excludedOnlyRetry := len(cfg.ExcludedPageIDs) > 0
+		pages, capSource, capValue, _, preCap := applyPageCap(
+			pages, cfg.MaxPagesPerJob, cfg.PageCountOverride, excludedOnlyRetry,
+		)
 
 		total := len(pages)
 
 		// Emit the planning log with all resolved values.
-		planningMsg := buildPlanningSummary(mode, total, clusterPageCount, topLevelDirPageCount,
+		planningMsg := buildPlanningSummary(cfg.Mode, total, clusterPageCount, topLevelDirPageCount,
 			repoWidePageCount, capSource, capValue, preCap)
 		slog.Info("livingwiki/coldstart: planned page count",
-			"repo_id", repoID,
-			"mode", mode,
+			"repo_id", cfg.RepoID,
+			"mode", cfg.Mode,
 			"cluster_pages", clusterPageCount,
 			"top_level_dir_pages", topLevelDirPageCount,
 			"repo_wide_pages", repoWidePageCount,
@@ -355,8 +322,8 @@ func buildColdStartRunner(
 		// current repo-level understanding's RevisionFP. Artifacts whose
 		// revisionFp does not match the current understanding are skipped so the
 		// template never presents stale curated data as ground truth.
-		pages = attachKnowledgeArtifacts(runCtx, repoID, pages, knowledgeStore)
-		logArtifactResolution(repoID, pages)
+		pages = attachKnowledgeArtifacts(runCtx, cfg.RepoID, pages, cfg.KnowledgeStore)
+		logArtifactResolution(cfg.RepoID, pages)
 
 		// ── Step 1.6: Build label→ID map from the full manifest (CR3) ────────────
 		//
@@ -383,9 +350,9 @@ func buildColdStartRunner(
 		//        skipNeedsFixup  — present everywhere, fp matches, status='ready', fixup pending
 		//   5. Write status='generating' ONLY for the regenerate bucket (CR13).
 		alreadyPublished := listAlreadyPublishedAcrossSinks(
-			runCtx, repoID, broker, repoSettingsStore,
+			runCtx, cfg.RepoID, cfg.Broker, cfg.RepoSettingsStore,
 		)
-		repoSourceRev := repoSourceRevFor(graphStore, repoID)
+		repoSourceRev := repoSourceRevFor(cfg.GraphStore, cfg.RepoID)
 
 		// Compute current fingerprints for every planned page (pure, O(N)).
 		currentFps := make(map[string]string, len(pages))
@@ -395,13 +362,13 @@ func buildColdStartRunner(
 
 		// Load persisted fingerprints from the status store.
 		var persistedFps map[string]map[string]livingwiki.PagePublishStatusRow
-		if publishStatusStore != nil {
-			persistedFps, _ = publishStatusStore.LoadFingerprints(runCtx, repoID)
+		if cfg.PublishStatusStore != nil {
+			persistedFps, _ = cfg.PublishStatusStore.LoadFingerprints(runCtx, cfg.RepoID)
 		}
 
 		// Build sink-key list from the writers (needed for per-sink completeness checks).
 		// We build the writers once here for smart-resume and reuse them for dispatch.
-		writers, writerBuildErr := buildSinkWriters(runCtx, repoID, broker, repoSettingsStore)
+		writers, writerBuildErr := buildSinkWriters(runCtx, cfg.RepoID, cfg.Broker, cfg.RepoSettingsStore)
 
 		// 3-way split (CR4).
 		var regenerate, skipFully, skipNeedsFixup []lworch.PlannedPage
@@ -428,7 +395,7 @@ func buildColdStartRunner(
 
 		toGenerate := len(regenerate)
 		slog.Info("livingwiki/coldstart: smart resume (fingerprint-aware)",
-			"repo_id", repoID,
+			"repo_id", cfg.RepoID,
 			"taxonomy_total", total,
 			"regenerate", toGenerate,
 			"skip_fully", len(skipFully),
@@ -451,11 +418,11 @@ func buildColdStartRunner(
 		// Write status='generating' ONLY for the regenerate bucket × sinks (CR13).
 		// skipFully rows stay 'ready' (untouched); skipNeedsFixup rows stay 'ready'
 		// with fixup_status='pending' (untouched until Phase 3's fix-up pass).
-		if publishStatusStore != nil {
+		if cfg.PublishStatusStore != nil {
 			for _, p := range regenerate {
 				for _, w := range writers {
-					_ = publishStatusStore.SetNonReady(runCtx, livingwiki.SetNonReadyArgs{
-						RepoID:          repoID,
+					_ = cfg.PublishStatusStore.SetNonReady(runCtx, livingwiki.SetNonReadyArgs{
+						RepoID:          cfg.RepoID,
 						PageID:          p.ID,
 						SinkKind:        string(w.Writer.Kind()),
 						IntegrationName: w.Name,
@@ -495,11 +462,11 @@ func buildColdStartRunner(
 				return
 			}
 			var statuses []livingwiki.PagePublishStatusRow
-			if publishStatusStore != nil {
-				statuses, _ = publishStatusStore.ListByRepo(ctx, repoID)
+			if cfg.PublishStatusStore != nil {
+				statuses, _ = cfg.PublishStatusStore.ListByRepo(ctx, cfg.RepoID)
 			}
-			indexPage := indexpage.RenderIndexPage(repoID, allPageIDs, statuses, time.Now())
-			mu := indexMutexFor(repoID)
+			indexPage := indexpage.RenderIndexPage(cfg.RepoID, allPageIDs, statuses, time.Now())
+			mu := indexMutexFor(cfg.RepoID)
 			mu.Lock()
 			defer mu.Unlock()
 
@@ -509,14 +476,14 @@ func buildColdStartRunner(
 				writeCancel()
 				if writeErr != nil {
 					slog.Warn("livingwiki/index: failed to write index page",
-						"repo_id", repoID, "sink", nsw.Writer.Kind(),
+						"repo_id", cfg.RepoID, "sink", nsw.Writer.Kind(),
 						"label", label, "error", writeErr)
 					if label == "initial" {
 						atomic.StoreInt32(&indexFailed, 1)
 					}
 				} else {
 					slog.Info("livingwiki/index: index page written",
-						"repo_id", repoID, "sink", nsw.Writer.Kind(), "label", label)
+						"repo_id", cfg.RepoID, "sink", nsw.Writer.Kind(), "label", label)
 				}
 			}
 		}
@@ -527,10 +494,10 @@ func buildColdStartRunner(
 		if toGenerate == 0 && len(skipNeedsFixup) == 0 {
 			rt.ReportProgress(1.0, "ok", fmt.Sprintf(
 				"All %d pages already up to date — nothing to regenerate", total))
-			if jobResultStore != nil {
+			if cfg.JobResultStore != nil {
 				now := time.Now()
-				_ = jobResultStore.Save(runCtx, tenantID, &livingwiki.LivingWikiJobResult{
-					RepoID:         repoID,
+				_ = cfg.JobResultStore.Save(runCtx, cfg.TenantID, &livingwiki.LivingWikiJobResult{
+					RepoID:         cfg.RepoID,
 					JobID:          jobID,
 					StartedAt:      start,
 					CompletedAt:    &now,
@@ -539,7 +506,7 @@ func buildColdStartRunner(
 					Status:         "ok",
 				})
 			}
-			lwmetrics.Default.RecordJob("ok", sinkKind, time.Since(start).Seconds())
+			lwmetrics.Default.RecordJob("ok", cfg.SinkKind, time.Since(start).Seconds())
 			return nil
 		}
 
@@ -581,19 +548,19 @@ func buildColdStartRunner(
 					// Remaining pages stay in status='generating' (from the run-start write
 					// above); smart-resume on the next run re-dispatches them (CR2 + r3).
 					slog.Info("livingwiki/coldstart: dispatch worker exiting after cancel",
-						"repo_id", repoID, "queued_remaining", len(readyCh))
+						"repo_id", cfg.RepoID, "queued_remaining", len(readyCh))
 					return
 				}
 				streamDispatchPage(dispatchCtx, runCtx, ev.page, ev.fingerprint,
 					writers, markdown.NewTokenBucketRateLimiter(markdown.DefaultSinkRates()),
-					lwmetrics.Default, publishStatusStore, repoID, writerBuildErr)
+					lwmetrics.Default, cfg.PublishStatusStore, cfg.RepoID, writerBuildErr)
 			}
 		}()
 
 		// Wire OnPageReady into the orchestrator request.
 		genReq := lworch.GenerateRequest{
 			Config: lworch.Config{
-				RepoID:         repoID,
+				RepoID:         cfg.RepoID,
 				MaxConcurrency: coldStartMaxConcurrency,
 				TimeBudget:     coldStartTimeBudget,
 			},
@@ -659,7 +626,7 @@ func buildColdStartRunner(
 		//     30s is well within budget and gives one full retry-grace
 		//     window for any transient DB blip.
 		slog.Info("livingwiki/coldstart: heartbeat goroutine started",
-			"job_id", jobID, "repo_id", repoID, "tick_interval", "30s")
+			"job_id", jobID, "repo_id", cfg.RepoID, "tick_interval", "30s")
 		hbCtx, hbStop := context.WithCancel(runCtx)
 		defer hbStop()
 		go func() {
@@ -678,7 +645,7 @@ func buildColdStartRunner(
 					// a 30-min window before it kills the job.
 					if hbErr := rt.Heartbeat(); hbErr != nil {
 						slog.Debug("livingwiki/coldstart: heartbeat failed (already warned by runtime)",
-							"job_id", jobID, "repo_id", repoID,
+							"job_id", jobID, "repo_id", cfg.RepoID,
 							"error", hbErr.Error())
 					}
 					done := int(atomic.LoadInt32(&generated)) + int(atomic.LoadInt32(&excludedCount))
@@ -703,7 +670,7 @@ func buildColdStartRunner(
 		// Complete the genReq wiring: PR, OnPageDone, and OnPageReady (CR2).
 		genReq.PR = pr
 		genReq.OnPageDone = onPageDone
-		if publishStatusStore != nil {
+		if cfg.PublishStatusStore != nil {
 			genReq.OnPageReady = func(page ast.Page, fp string) {
 				// Non-blocking enqueue. Buffer is sized to regenerate so this
 				// never blocks under normal conditions.
@@ -713,13 +680,13 @@ func buildColdStartRunner(
 				case readyCh <- readyPage{page: page, fingerprint: fp}:
 				default:
 					slog.Warn("livingwiki/coldstart: dispatch buffer full; recording failed status for resume",
-						"repo_id", repoID, "page_id", page.ID)
+						"repo_id", cfg.RepoID, "page_id", page.ID)
 					statusCtx, statusCancel := context.WithTimeout(
 						context.WithoutCancel(runCtx), 5*time.Second)
 					defer statusCancel()
 					for _, w := range writers {
-						_ = publishStatusStore.SetNonReady(statusCtx, livingwiki.SetNonReadyArgs{
-							RepoID:          repoID,
+						_ = cfg.PublishStatusStore.SetNonReady(statusCtx, livingwiki.SetNonReadyArgs{
+							RepoID:          cfg.RepoID,
 							PageID:          page.ID,
 							SinkKind:        string(w.Writer.Kind()),
 							IntegrationName: w.Name,
@@ -731,7 +698,7 @@ func buildColdStartRunner(
 			}
 		}
 
-		result, err := lwOrch.Generate(runCtx, genReq)
+		result, err := cfg.LWOrch.Generate(runCtx, genReq)
 
 		// Close the readyCh and wait for the dispatcher to drain (CR2).
 		// This happens AFTER Generate returns; the persistence loop has finished,
@@ -745,22 +712,22 @@ func buildColdStartRunner(
 		dispatchIndex(runCtx, "final")
 
 		// ── Phase 3: Stub fix-up pass ─────────────────────────────────────────
-		if publishStatusStore != nil && (err == nil || lworch.IsPartialGenerationError(err)) {
+		if cfg.PublishStatusStore != nil && (err == nil || lworch.IsPartialGenerationError(err)) {
 			fixupReq := lworch.FixupRequest{
-				RepoID:       repoID,
+				RepoID:       cfg.RepoID,
 				PlannedPages: pages,
-				StatusStore:  publishStatusStore,
+				StatusStore:  cfg.PublishStatusStore,
 				Writers:      writers,
-				PageStore:    lwOrch.Store(),
+				PageStore:    cfg.LWOrch.Store(),
 				PR:           pr,
 			}
 			fixupResult, fixupErr := lworch.RunStubFixup(runCtx, fixupReq)
 			if fixupErr != nil {
 				slog.Warn("livingwiki/coldstart: fix-up pass encountered an error",
-					"repo_id", repoID, "error", fixupErr)
+					"repo_id", cfg.RepoID, "error", fixupErr)
 			} else if fixupResult.PagesFixedUp > 0 || fixupResult.PagesFailed > 0 {
 				slog.Info("livingwiki/coldstart: fix-up pass complete",
-					"repo_id", repoID,
+					"repo_id", cfg.RepoID,
 					"fixed_up", fixupResult.PagesFixedUp,
 					"deferred", fixupResult.PagesDeferred,
 					"failed", fixupResult.PagesFailed)
@@ -804,7 +771,7 @@ func buildColdStartRunner(
 			// extracts the structured detail from the error chain via
 			// errors.As; returns "" if the error doesn't carry one (which
 			// is then clamped to "unknown" inside RecordColdStartSystemicAbort).
-			metricsCollector.RecordColdStartSystemicAbort(
+			cfg.MetricsCollector.RecordColdStartSystemicAbort(
 				lworch.SystemicAbortCategory(err))
 		case err != nil && isPartial:
 			// Soft abort with partial persistence (time-budget) — surface as partial.
@@ -840,19 +807,19 @@ func buildColdStartRunner(
 			// Best-effort: fall back to an empty string if the store is nil or
 			// the repo is not found; the sink writer will substitute repoID.
 			var repoName string
-			if graphStore != nil {
-				if repo := graphStore.GetRepository(repoID); repo != nil {
+			if cfg.GraphStore != nil {
+				if repo := cfg.GraphStore.GetRepository(cfg.RepoID); repo != nil {
 					repoName = repo.Name
 				}
 			}
 
 			sinkResults = dispatchGeneratedPages(
-				runCtx, repoID, tenantID,
+				runCtx, cfg.RepoID, cfg.TenantID,
 				result.Generated, skippedPageIDs,
-				broker, repoSettingsStore,
+				cfg.Broker, cfg.RepoSettingsStore,
 				repoName,
 				&status, &failCat, &errMsg,
-				mode,
+				cfg.Mode,
 			)
 		}
 
@@ -869,7 +836,7 @@ func buildColdStartRunner(
 		))
 
 		// ── Step 5: Persist LivingWikiJobResult ───────────────────────────────
-		if jobResultStore != nil {
+		if cfg.JobResultStore != nil {
 			now := time.Now()
 			// Codex r1b [High]: derive PagesExcluded, ExcludedPageIDs, and
 			// ExclusionFailureCategories all from result.Excluded so the
@@ -889,7 +856,7 @@ func buildColdStartRunner(
 			reasons := buildExclusionReasons(result.Excluded)
 
 			jobResult := &livingwiki.LivingWikiJobResult{
-				RepoID:                     repoID,
+				RepoID:                     cfg.RepoID,
 				JobID:                      jobID,
 				StartedAt:                  start,
 				CompletedAt:                &now,
@@ -904,14 +871,14 @@ func buildColdStartRunner(
 				FailureCategory:            string(failCat),
 				ErrorMessage:               errMsg,
 			}
-			if saveErr := jobResultStore.Save(runCtx, tenantID, jobResult); saveErr != nil {
+			if saveErr := cfg.JobResultStore.Save(runCtx, cfg.TenantID, jobResult); saveErr != nil {
 				slog.Warn("living-wiki: failed to persist job result",
-					"job_id", jobID, "repo_id", repoID, "error", saveErr)
+					"job_id", jobID, "repo_id", cfg.RepoID, "error", saveErr)
 			}
 		}
 
 		// ── Step 6: Prometheus counter ────────────────────────────────────────
-		metricsCollector.RecordJob(status, sinkKind, elapsed.Seconds())
+		cfg.MetricsCollector.RecordJob(status, cfg.SinkKind, elapsed.Seconds())
 
 		if err != nil {
 			return fmt.Errorf("living-wiki generation failed: %w", err)
