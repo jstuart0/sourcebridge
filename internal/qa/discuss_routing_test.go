@@ -98,7 +98,28 @@ func TestOrchestrator_DiscussShapePreserved(t *testing.T) {
 			byID:        map[string]string{"sym-auth": "Indexed symbol: auth.Handle"},
 			filePathsBy: map[string]string{"sym-auth": "auth/handler.go"},
 			inFile: map[string][]SymbolContextRef{
-				"auth/handler.go": {{ID: "sym-auth", Name: "Handle", QualifiedName: "auth.Handle"}},
+				"auth/handler.go": {
+					{
+						ID:            "sym-auth",
+						Name:          "Handle",
+						QualifiedName: "auth.Handle",
+						FilePath:      "auth/handler.go",
+						StartLine:     2,
+						EndLine:       2,
+						Signature:     "func Handle()",
+					},
+				},
+			},
+			details: map[string]SymbolDetail{
+				"sym-auth": {
+					ID:            "sym-auth",
+					Name:          "Handle",
+					QualifiedName: "auth.Handle",
+					FilePath:      "auth/handler.go",
+					StartLine:     2,
+					EndLine:       2,
+					Signature:     "func Handle()",
+				},
 			},
 		}).
 		WithFileReader(&fakeFileReader{files: map[string]string{"auth/handler.go": "package auth\nfunc Handle() {}"}})

@@ -266,7 +266,33 @@ func (s *qaSymbolLookup) SymbolFilePath(id string) string {
 }
 
 func (s *qaSymbolLookup) SymbolDetails(id string) (qa.SymbolDetail, bool) {
-	return qa.SymbolDetail{}, false
+	if s == nil || s.store == nil || id == "" {
+		return qa.SymbolDetail{}, false
+	}
+	sym := s.store.GetSymbol(id)
+	if sym == nil {
+		return qa.SymbolDetail{}, false
+	}
+	// Always populate identity from StoredSymbol so callers can
+	// render a non-blank label even when ok=false (Decision 5 / plan).
+	detail := qa.SymbolDetail{
+		ID:            sym.ID,
+		Name:          sym.Name,
+		QualifiedName: sym.QualifiedName,
+		Kind:          sym.Kind,
+		Language:      sym.Language,
+		DocComment:    sym.DocComment,
+	}
+	// Decision 5: ok=true means "safe to attempt source slicing."
+	// Gate on all three validity conditions.
+	if sym.FilePath == "" || sym.StartLine <= 0 || sym.EndLine < sym.StartLine {
+		return detail, false
+	}
+	detail.FilePath = sym.FilePath
+	detail.StartLine = sym.StartLine
+	detail.EndLine = sym.EndLine
+	detail.Signature = sym.Signature
+	return detail, true
 }
 
 func (s *qaSymbolLookup) SymbolsInFile(repoID, filePath string) []qa.SymbolContextRef {
@@ -280,6 +306,10 @@ func (s *qaSymbolLookup) SymbolsInFile(repoID, filePath string) []qa.SymbolConte
 			ID:            sym.ID,
 			Name:          sym.Name,
 			QualifiedName: sym.QualifiedName,
+			FilePath:      sym.FilePath,
+			StartLine:     sym.StartLine,
+			EndLine:       sym.EndLine,
+			Signature:     sym.Signature,
 		})
 	}
 	return out
