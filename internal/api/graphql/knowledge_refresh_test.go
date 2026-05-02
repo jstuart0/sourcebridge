@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,24 +16,52 @@ import (
 
 // Captures slog output for assertion. Every test installs and restores the
 // default logger via this helper.
+//
+// CA-136: enqueueStaleArtifactRefresh in live mode fires `slog.Warn`
+// from a background goroutine that the test never joins. Unsynchronized
+// reads of the shared bytes.Buffer raced with the handler's writes,
+// producing intermittent `go test -race` failures (CI run 25242941735
+// against 5520a1c). The lockedWriter below serializes writes against
+// reads without changing the observable test API.
 type logCapture struct {
+	mu  sync.Mutex
 	buf *bytes.Buffer
 	old *slog.Logger
 }
 
-func captureSlog(t *testing.T) *logCapture {
-	t.Helper()
-	buf := &bytes.Buffer{}
-	handler := slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})
-	old := slog.Default()
-	slog.SetDefault(slog.New(handler))
-	t.Cleanup(func() { slog.SetDefault(old) })
-	return &logCapture{buf: buf, old: old}
+// lockedWriter wraps a *bytes.Buffer so concurrent slog handler writes
+// happen-before the test goroutine's reads via the same mutex.
+type lockedWriter struct {
+	mu  *sync.Mutex
+	buf *bytes.Buffer
 }
 
-func (lc *logCapture) text() string { return lc.buf.String() }
+func (lw *lockedWriter) Write(p []byte) (int, error) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	return lw.buf.Write(p)
+}
+
+func captureSlog(t *testing.T) *logCapture {
+	t.Helper()
+	lc := &logCapture{buf: &bytes.Buffer{}}
+	handler := slog.NewTextHandler(
+		&lockedWriter{mu: &lc.mu, buf: lc.buf},
+		&slog.HandlerOptions{Level: slog.LevelDebug},
+	)
+	lc.old = slog.Default()
+	slog.SetDefault(slog.New(handler))
+	t.Cleanup(func() { slog.SetDefault(lc.old) })
+	return lc
+}
+
+func (lc *logCapture) text() string {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	return lc.buf.String()
+}
 func (lc *logCapture) contains(s string) bool {
-	return strings.Contains(lc.buf.String(), s)
+	return strings.Contains(lc.text(), s)
 }
 
 // seedStaleArtifact creates a ready+stale artifact in the given mode.
