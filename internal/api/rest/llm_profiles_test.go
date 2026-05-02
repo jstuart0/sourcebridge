@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -34,12 +35,12 @@ type (
 
 // nolint:unused
 var (
-	llmgo_NewMemStore        = llm.NewMemStore
-	llmgo_StatusPending      = llm.StatusPending
-	llmgo_StatusGenerating   = llm.StatusGenerating
-	llmgo_StatusReady        = llm.StatusReady
-	llmgo_StatusFailed       = llm.StatusFailed
-	llmgo_SubsystemKnowledge = llm.SubsystemKnowledge
+	llmgo_NewMemStore         = llm.NewMemStore
+	llmgo_StatusPending       = llm.StatusPending
+	llmgo_StatusGenerating    = llm.StatusGenerating
+	llmgo_StatusReady         = llm.StatusReady
+	llmgo_StatusFailed        = llm.StatusFailed
+	llmgo_SubsystemKnowledge  = llm.SubsystemKnowledge
 	llmgo_SubsystemClustering = llm.SubsystemClustering
 )
 
@@ -71,6 +72,30 @@ type fakeProfileStoreAdapter struct {
 	deletedLast          string
 	activatedLast        string
 	activatedBy          string
+	// canonicalizeOnEmit mirrors the post-fix behavior of the real
+	// SurrealDB-backed store (internal/db/llm_profile_store.go's
+	// extractRecordIDString → canonicalizeRecordIDString): record-id
+	// strings are stripped of the SurrealDB-Go U+27E8/U+27E9 angle
+	// brackets on read so they match plain-string columns. Tests that
+	// exercise the bracket/no-bracket asymmetry set this true; legacy
+	// tests leave it false to preserve their existing behavior.
+	canonicalizeOnEmit bool
+}
+
+// fakeCanonicalizeRecordIDString mirrors the production canonicalizer in
+// internal/db/llm_profile_store.go. Kept local to the rest tests so the
+// fake doesn't pull in the db package just to model the post-fix contract.
+func fakeCanonicalizeRecordIDString(s string) string {
+	idx := strings.IndexByte(s, ':')
+	if idx < 0 {
+		return s
+	}
+	table, key := s[:idx], s[idx+1:]
+	const open, close = "⟨", "⟩"
+	if strings.HasPrefix(key, open) && strings.HasSuffix(key, close) {
+		key = strings.TrimSuffix(strings.TrimPrefix(key, open), close)
+	}
+	return table + ":" + key
 }
 
 func newFakeStoreAdapter() *fakeProfileStoreAdapter {
@@ -86,8 +111,15 @@ func (f *fakeProfileStoreAdapter) ListProfiles(_ context.Context) ([]ProfileResp
 		return nil, f.listErr
 	}
 	out := make([]ProfileResponse, 0, len(f.profiles))
+	activeID := f.activeID
+	if f.canonicalizeOnEmit {
+		activeID = fakeCanonicalizeRecordIDString(activeID)
+	}
 	for _, p := range f.profiles {
-		p.IsActive = p.ID == f.activeID
+		if f.canonicalizeOnEmit {
+			p.ID = fakeCanonicalizeRecordIDString(p.ID)
+		}
+		p.IsActive = p.ID == activeID
 		out = append(out, p)
 	}
 	return out, nil
@@ -182,6 +214,9 @@ func (f *fakeProfileStoreAdapter) ActiveProfileID(_ context.Context) (string, er
 	if f.activeIDErr != nil {
 		return "", f.activeIDErr
 	}
+	if f.canonicalizeOnEmit {
+		return fakeCanonicalizeRecordIDString(f.activeID), nil
+	}
 	return f.activeID, nil
 }
 
@@ -240,8 +275,8 @@ func newServerWithProfileStore(t *testing.T, fake *fakeProfileStoreAdapter) *Ser
 // surfaces alongside.
 type nullConfigStore struct{}
 
-func (nullConfigStore) LoadLLMConfig() (*LLMConfigRecord, error)   { return nil, nil }
-func (nullConfigStore) SaveLLMConfig(_ *LLMConfigRecord) error     { return nil }
+func (nullConfigStore) LoadLLMConfig() (*LLMConfigRecord, error) { return nil, nil }
+func (nullConfigStore) SaveLLMConfig(_ *LLMConfigRecord) error   { return nil }
 
 // ─────────────────────────────────────────────────────────────────────────
 // List
@@ -379,6 +414,75 @@ func TestHandler_ListProfiles_BannerWhenActiveIDLookupFailsButLatched(t *testing
 	missing, _ := body["active_profile_missing"].(bool)
 	if !missing {
 		t.Errorf("active_profile_missing: got false, want true (latch fallback when live lookup errors)")
+	}
+}
+
+// TestHandler_ListProfiles_RecordIDBracketAsymmetry is the regression test for the
+// SurrealDB-Go-v1.4.0 record-id stringification asymmetry that broke the deployed
+// LLM profile picker (see thoughts/shared/investigations/2026-05-01-llm-profile-picker-broken-deployed.md).
+//
+// The bug: surrealdb-go's models.RecordID.String() wraps record-id keys containing
+// non-alphanumeric characters in U+27E8 / U+27E9 brackets — e.g. the migrated id
+// "default-migrated" stringifies as "ca_llm_profile:⟨default-migrated⟩". Meanwhile
+// the legacy active_profile_id column is a plain string and persists the unbracketed
+// form. The list handler did literal `p.ID == activeID`, so the bracketed listed id
+// never matched the unbracketed active id → active_profile_missing=true, is_active=false
+// for every profile, and the admin UI locked the editor + showed the repair banner.
+//
+// The fix canonicalizes record-id strings on read in internal/db/llm_profile_store.go
+// (extractRecordIDString → canonicalizeRecordIDString). After the fix, both the listed
+// p.ID and the active id come through unbracketed. This test models that contract at
+// the handler boundary: the fake adapter is given the bracketed STORED form on the
+// listed profile and the unbracketed form on the active id (mirroring the production
+// asymmetry), and the fake canonicalizes on emit (mirroring what the real store now
+// does post-fix). The handler must then report active_profile_missing=false and the
+// listed profile's is_active=true.
+//
+// Pre-fix this could not be exercised because the original fake did
+// `p.IsActive = p.ID == f.activeID` directly — the same bug shape as the handler —
+// without any seam to express the bracket/no-bracket asymmetry. That's the test gap
+// that allowed the bug through.
+func TestHandler_ListProfiles_RecordIDBracketAsymmetry(t *testing.T) {
+	fake := newFakeStoreAdapter()
+	// Plant the raw (pre-canonicalization) shapes the live thor SurrealDB returns:
+	// the listed profile id is what models.RecordID.String() emits (bracketed); the
+	// active_profile_id column is a plain string (unbracketed).
+	const bracketedListedID = "ca_llm_profile:⟨default-migrated⟩"
+	const canonicalID = "ca_llm_profile:default-migrated"
+	fake.canonicalizeOnEmit = true
+	fake.profiles[canonicalID] = ProfileResponse{
+		ID:   bracketedListedID, // stored shape
+		Name: "Default",
+	}
+	fake.activeID = canonicalID // already unbracketed (plain-string column)
+	fake.activeProfileMissing = false
+
+	s := newServerWithProfileStore(t, fake)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/llm-profiles", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if missing, _ := body["active_profile_missing"].(bool); missing {
+		t.Errorf("active_profile_missing: got true, want false (canonicalization on read should make the listed id and active id agree)")
+	}
+	profiles, ok := body["profiles"].([]interface{})
+	if !ok || len(profiles) != 1 {
+		t.Fatalf("expected exactly one profile in response; got %v", body["profiles"])
+	}
+	prof, _ := profiles[0].(map[string]interface{})
+	if id, _ := prof["id"].(string); id != canonicalID {
+		t.Errorf("listed profile id: got %q, want %q (unbracketed canonical form)", id, canonicalID)
+	}
+	if isActive, _ := prof["is_active"].(bool); !isActive {
+		t.Errorf("listed profile is_active: got false, want true (canonicalized listed id should match canonicalized active id)")
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/surrealdb/surrealdb.go/pkg/models"
+
 	"github.com/sourcebridge/sourcebridge/internal/secretcipher"
 )
 
@@ -193,6 +195,114 @@ func TestSplitRecordID(t *testing.T) {
 				c.in, gotTable, gotID, gotOK, c.wantTable, c.wantID, c.wantOK)
 		}
 	}
+}
+
+// TestCanonicalizeRecordIDString locks in the SurrealDB-Go-v1.4.0 bracket-stripping
+// contract: models.RecordID.String() wraps keys containing non-alphanumeric chars
+// (e.g. hyphens) in U+27E8 / U+27E9 mathematical angle brackets, but plain-string
+// columns persist the unbracketed form. We normalize to the unbracketed form on
+// read so the two sources agree under string equality.
+func TestCanonicalizeRecordIDString(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"hyphen key, bracketed", "ca_llm_profile:⟨default-migrated⟩", "ca_llm_profile:default-migrated"},
+		{"alnum key, no brackets", "ca_llm_profile:abc123", "ca_llm_profile:abc123"},
+		{"underscore key, no brackets", "ca_llm_profile:default_migrated", "ca_llm_profile:default_migrated"},
+		{"unbracketed hyphen key (legacy plain string)", "ca_llm_profile:default-migrated", "ca_llm_profile:default-migrated"},
+		{"empty", "", ""},
+		{"no colon", "abc", "abc"},
+		{"only opening bracket (malformed)", "ca_llm_profile:⟨default-migrated", "ca_llm_profile:⟨default-migrated"},
+		{"only closing bracket (malformed)", "ca_llm_profile:default-migrated⟩", "ca_llm_profile:default-migrated⟩"},
+		{"empty key with brackets", "ca_llm_profile:⟨⟩", "ca_llm_profile:"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := canonicalizeRecordIDString(c.in)
+			if got != c.want {
+				t.Errorf("canonicalizeRecordIDString(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// TestExtractRecordIDString_BracketStripping ensures that when the SurrealDB SDK
+// hands us a models.RecordID whose String() form is bracketed (because the key
+// contains non-alphanumeric characters), extractRecordIDString returns the
+// unbracketed canonical form. This is the production scenario for the migrated
+// "default-migrated" profile id.
+func TestExtractRecordIDString_BracketStripping(t *testing.T) {
+	cases := []struct {
+		name string
+		val  any
+		want string
+	}{
+		{
+			name: "models.RecordID with hyphenated key (SDK brackets it)",
+			val:  models.RecordID{Table: "ca_llm_profile", ID: "default-migrated"},
+			want: "ca_llm_profile:default-migrated",
+		},
+		{
+			name: "*models.RecordID with hyphenated key",
+			val:  &models.RecordID{Table: "ca_llm_profile", ID: "default-migrated"},
+			want: "ca_llm_profile:default-migrated",
+		},
+		{
+			name: "models.RecordID with alnum key (no brackets either way)",
+			val:  models.RecordID{Table: "ca_llm_profile", ID: "abc123"},
+			want: "ca_llm_profile:abc123",
+		},
+		{
+			name: "string literal (legacy plain-string column, already unbracketed)",
+			val:  "ca_llm_profile:default-migrated",
+			want: "ca_llm_profile:default-migrated",
+		},
+		{
+			name: "string literal that somehow already has brackets",
+			val:  "ca_llm_profile:⟨default-migrated⟩",
+			want: "ca_llm_profile:default-migrated",
+		},
+	}
+
+	// Sanity check: confirm the SDK actually does bracket the hyphenated key.
+	// If a future SDK version stops doing this, the bracket-stripping becomes
+	// dead code (still safe), but this log surfaces the change so we can
+	// revisit canonicalizeRecordIDString. (String() is a pointer-receiver
+	// method on models.RecordID, so we have to take an addressable variable.)
+	rec := models.RecordID{Table: "ca_llm_profile", ID: "default-migrated"}
+	if got := rec.String(); !strings.ContainsAny(got, "⟨⟩") {
+		t.Logf("note: SDK no longer brackets hyphenated keys (got %q); canonicalizer is now defensive-only", got)
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			row := map[string]interface{}{"id": c.val}
+			got := extractRecordIDString(row, "id")
+			if got != c.want {
+				t.Errorf("extractRecordIDString(%v) = %q, want %q", c.val, got, c.want)
+			}
+		})
+	}
+
+	// Missing / nil / wrong-key paths.
+	t.Run("missing key", func(t *testing.T) {
+		if got := extractRecordIDString(map[string]interface{}{}, "id"); got != "" {
+			t.Errorf("missing key: got %q, want empty", got)
+		}
+	})
+	t.Run("nil value", func(t *testing.T) {
+		if got := extractRecordIDString(map[string]interface{}{"id": nil}, "id"); got != "" {
+			t.Errorf("nil value: got %q, want empty", got)
+		}
+	})
+	t.Run("nil *models.RecordID", func(t *testing.T) {
+		var p *models.RecordID
+		if got := extractRecordIDString(map[string]interface{}{"id": p}, "id"); got != "" {
+			t.Errorf("nil pointer: got %q, want empty", got)
+		}
+	})
 }
 
 func TestIsUniqueIndexViolation(t *testing.T) {
