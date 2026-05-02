@@ -709,7 +709,7 @@ export default function RepositoryDetailPage() {
   const urlTab = searchParams.get("tab");
   const tab: Tab = (urlTab && ["files", "symbols", "requirements", "specs", "analysis", "impact", "architecture", "related", "knowledge", "subsystems", "settings"].includes(urlTab))
     ? (urlTab as Tab)
-    : "files";
+    : "knowledge";
   const [symbolQuery, setSymbolQuery] = useState("");
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [symbolView, setSymbolView] = useState<"list" | "tree">("list");
@@ -2570,6 +2570,29 @@ export default function RepositoryDetailPage() {
       {/* Knowledge Tab */}
       {tab === "knowledge" && (
         <div className="space-y-6">
+          {knowledgeArtifacts.length === 0 && !knowledgeResult.fetching && (
+            <Panel variant="accent" className="overflow-hidden">
+              <div className="flex flex-col items-center justify-center px-8 py-16 text-center">
+                <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                </div>
+                <h3 className="text-base font-semibold text-[var(--text-primary)]">Get to know this repository</h3>
+                <p className="mt-2 max-w-sm text-sm text-[var(--text-secondary)]">
+                  Generate a Field Guide to get oriented fast — purpose, architecture, key patterns, and entry points.
+                </p>
+                <div className="mt-6">
+                  <Button onClick={handleGenerateCliffNotes} disabled={knowledgeLoading || isCliffNotesGenerating || !features.cliffNotes}>
+                    {knowledgeLoading || isCliffNotesGenerating ? "Generating..." : "Generate Field Guide"}
+                  </Button>
+                </div>
+                {!features.cliffNotes ? (
+                  <p className="mt-3 text-xs text-[var(--text-tertiary)]">
+                    Field-guide generation is not enabled on this server. Contact your administrator to configure an LLM provider.
+                  </p>
+                ) : null}
+              </div>
+            </Panel>
+          )}
           <Panel variant="accent" className="overflow-hidden">
             <div className="border-b border-[var(--border-subtle)] px-6 py-5">
               <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
