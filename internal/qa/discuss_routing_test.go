@@ -48,12 +48,20 @@ type fakeSymbolLookup struct {
 	byID        map[string]string
 	filePathsBy map[string]string
 	inFile      map[string][]SymbolContextRef
+	details     map[string]SymbolDetail
 }
 
 func (f *fakeSymbolLookup) SymbolContext(id string) string  { return f.byID[id] }
 func (f *fakeSymbolLookup) SymbolFilePath(id string) string { return f.filePathsBy[id] }
 func (f *fakeSymbolLookup) SymbolsInFile(repoID, filePath string) []SymbolContextRef {
 	return f.inFile[filePath]
+}
+func (f *fakeSymbolLookup) SymbolDetails(id string) (SymbolDetail, bool) {
+	if f.details == nil {
+		return SymbolDetail{}, false
+	}
+	d, ok := f.details[id]
+	return d, ok
 }
 
 type fakeFileReader struct{ files map[string]string }

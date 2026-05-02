@@ -265,6 +265,10 @@ func (s *qaSymbolLookup) SymbolFilePath(id string) string {
 	return sym.FilePath
 }
 
+func (s *qaSymbolLookup) SymbolDetails(id string) (qa.SymbolDetail, bool) {
+	return qa.SymbolDetail{}, false
+}
+
 func (s *qaSymbolLookup) SymbolsInFile(repoID, filePath string) []qa.SymbolContextRef {
 	if s == nil || s.store == nil || repoID == "" || filePath == "" {
 		return nil
