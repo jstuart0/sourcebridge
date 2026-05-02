@@ -8,6 +8,19 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ### Added
 
+- **Graceful drain for in-flight Living Wiki cold-starts** (CA-142).
+  SIGTERM no longer races with the reaper to kill long-running Living Wiki
+  jobs. `BeginDrain` now sets `o.draining = true` on the LLM orchestrator so
+  `reapStaleJobs` skips `StatusGenerating` jobs for the full drain window (up
+  to `SOURCEBRIDGE_SHUTDOWN_GRACE_SECONDS`, default 3600s). A public
+  `MarkDraining(bool)` method is exposed for testing. A 5 s K8s endpoint
+  propagation settle delay is inserted between `BeginDrain` and `AwaitDrain`.
+  Seven structured log events added (`server_drain_handler_armed`,
+  `drain_await_begin`, `drain_progress`, `drain_workers_wait_complete`,
+  `http_shutdown_complete`, `received_sigterm`, `reaper_skipped_during_drain`).
+  Worker Helm template gains a `startupProbe` matching the kustomize base.
+  See `docs/admin/api-drain.md` for operator runbook.
+
 - **Per-run page count override for Living Wiki cold-starts** (CA-146).
   New optional `pageCountOverride: Int` field on `enableLivingWikiForRepo`
   and `retryLivingWikiJob` lets operators cap the number of pages generated

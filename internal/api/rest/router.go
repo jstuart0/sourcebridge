@@ -420,6 +420,8 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			s.orchestrator.SetIntakePaused(rec.IntakePaused)
 		}
 	}
+	slog.Info("server drain handler armed",
+		"event", "server_drain_handler_armed")
 
 	// Worker lanes — shared by search.embed and qa.synthesize so they
 	// don't starve each other under load.
@@ -1089,6 +1091,7 @@ func (s *Server) BeginDrain(source string) (first bool) {
 	)
 	if s.orchestrator != nil {
 		s.orchestrator.SetIntakePaused(true)
+		s.orchestrator.MarkDraining(true)
 	}
 	return true
 }
@@ -1109,13 +1112,50 @@ func (s *Server) AwaitDrain(ctx context.Context) error {
 		return nil
 	}
 	if s.orchestrator != nil {
+		inFlight := s.orchestrator.InFlightCount()
+		onDemand := int64(0)
+		if s.OnDemand != nil {
+			onDemand = s.OnDemand.Count()
+		}
+		slog.Info("drain await begin",
+			"in_flight", inFlight,
+			"on_demand", onDemand,
+			"event", "drain_await_begin")
+
 		eventCh, unsub := s.orchestrator.Subscribe()
 		defer unsub()
+
+		// progressTicker fires every 30s for operator visibility.
+		progressTicker := time.NewTicker(30 * time.Second)
+		defer progressTicker.Stop()
+		// recheckTicker fires frequently so we don't rely solely on job events
+		// to detect drain completion. The inflight counter is decremented by a
+		// deferred call in runJob AFTER the final job event is published, so
+		// checking the count only on event receipt can miss the decrement.
+		// A 50ms poll is imperceptible in practice and resolves within a
+		// sub-second window even for the last in-flight job. CA-142.
+		recheckTicker := time.NewTicker(50 * time.Millisecond)
+		defer recheckTicker.Stop()
+		start := time.Now()
 
 		for s.orchestrator.InFlightCount() > 0 {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
+			case <-progressTicker.C:
+				slog.Info("drain progress",
+					"in_flight", s.orchestrator.InFlightCount(),
+					"on_demand", func() int64 {
+						if s.OnDemand != nil {
+							return s.OnDemand.Count()
+						}
+						return 0
+					}(),
+					"elapsed_s", time.Since(start).Round(time.Second).String(),
+					"event", "drain_progress")
+			case <-recheckTicker.C:
+				// Poll so we don't get stuck if an inflight.release fires
+				// after the last job event has already been consumed.
 			case <-eventCh:
 				// re-check on every job event
 			}

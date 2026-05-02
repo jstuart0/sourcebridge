@@ -14,10 +14,14 @@ import (
 // resolution begin (via Admit) so the drain logic in AwaitDrain can
 // rely on the count being accurate throughout the whole request
 // lifetime — not just during the LLM call. CA-142.
+//
+// count uses atomic.Int64 so Count() can read without holding mu (safe
+// for logging). Admit and Release use atomic operations too; mu+cond is
+// used only by WaitZero for its blocking wait.
 type OnDemandTracker struct {
 	mu    sync.Mutex
 	cond  *sync.Cond
-	count int64
+	count atomic.Int64
 }
 
 // Admission is a live token that represents one admitted on-demand
@@ -37,9 +41,7 @@ func NewOnDemandTracker() *OnDemandTracker {
 // token. The caller MUST defer admission.Release() immediately after
 // calling Admit so the counter is always decremented.
 func (t *OnDemandTracker) Admit() *Admission {
-	t.mu.Lock()
-	t.count++
-	t.mu.Unlock()
+	t.count.Add(1)
 	return &Admission{t: t}
 }
 
@@ -47,18 +49,20 @@ func (t *OnDemandTracker) Admit() *Admission {
 // WaitZero. It is idempotent and safe to call from a defer.
 func (a *Admission) Release() {
 	t := a.t
-	t.mu.Lock()
-	if t.count > 0 {
-		t.count--
+	// Guard against double-release driving count negative.
+	if t.count.Load() > 0 {
+		t.count.Add(-1)
 	}
+	// Wake WaitZero waiters so they can re-check the count.
+	t.mu.Lock()
 	t.cond.Broadcast()
 	t.mu.Unlock()
 }
 
 // Count returns the current number of admitted (in-flight) requests.
-// Used for logging; no locking guarantees freshness across calls.
+// Uses an atomic load — safe for logging without holding mu.
 func (t *OnDemandTracker) Count() int64 {
-	return atomic.LoadInt64(&t.count)
+	return t.count.Load()
 }
 
 // WaitZero blocks until the in-flight count reaches zero or ctx is
@@ -67,13 +71,15 @@ func (t *OnDemandTracker) Count() int64 {
 func (t *OnDemandTracker) WaitZero(ctx context.Context) error {
 	// Wake the waiter when the context finishes so it can stop blocking.
 	stop := context.AfterFunc(ctx, func() {
+		t.mu.Lock()
 		t.cond.Broadcast()
+		t.mu.Unlock()
 	})
 	defer stop()
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for t.count > 0 {
+	for t.count.Load() > 0 {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

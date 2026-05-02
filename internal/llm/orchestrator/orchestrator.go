@@ -393,6 +393,10 @@ func (o *Orchestrator) reapStaleJobs() {
 		// CancelAndWait timeout). Pending jobs may still be reaped since
 		// they will never be picked up once workers stop.
 		if o.draining.Load() && job.Status == llm.StatusGenerating {
+			slog.Info("reaper: skipping generating job during drain",
+				"job_id", job.ID,
+				"target_key", job.TargetKey,
+				"event", "reaper_skipped_during_drain")
 			continue
 		}
 
@@ -655,6 +659,13 @@ func (o *Orchestrator) queueFor(priority llm.JobPriority) chan *workItem {
 	default:
 		return o.interactiveQ
 	}
+}
+
+// MarkDraining sets the draining flag that gates the reaper. Call with true
+// at drain-start so generating jobs are not reaped during the AwaitDrain
+// window; call with false on recovery (or rely on process exit). CA-142.
+func (o *Orchestrator) MarkDraining(b bool) {
+	o.draining.Store(b)
 }
 
 // SetIntakePaused toggles whether the orchestrator accepts new work. It does

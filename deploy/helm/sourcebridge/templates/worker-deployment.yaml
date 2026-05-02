@@ -97,6 +97,16 @@ spec:
           # `grpc:` probe handler does not support mTLS client authentication.
           # The wrapper script conditionally adds -tls flags based on
           # SOURCEBRIDGE_WORKER_TLS_ENABLED. Matches kustomize base worker.yaml.
+          # CA-142: parity with kustomize base worker.yaml:111-117.
+          # Gives the worker up to 90s (5 + 3*30) to come up cold
+          # (Python imports + ML client warmup) before readiness takes over.
+          startupProbe:
+            exec:
+              command: ["/usr/local/bin/sourcebridge-health-probe.sh"]
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            failureThreshold: 30
+            timeoutSeconds: 3
           readinessProbe:
             exec:
               command: ["/usr/local/bin/sourcebridge-health-probe.sh"]

@@ -814,7 +814,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Wait for SIGTERM/SIGINT or a fatal server error.
 	select {
 	case sig := <-sigCh:
-		slog.Info("received shutdown signal", "signal", sig)
+		slog.Info("received sigterm",
+			"signal", sig,
+			"event", "received_sigterm")
 		close(shutdownDone) // satisfy the Once logic below
 	case err := <-errCh:
 		return fmt.Errorf("server error: %w", err)
@@ -827,6 +829,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if first {
 			slog.Info("server drain initiated", "grace_seconds", graceSeconds, "event", "begindrain_via_sigterm")
 		}
+
+		// Allow K8s endpoints controller to propagate the readiness failure
+		// to upstream load-balancers before we stop accepting connections.
+		// Without this settle window, requests can arrive after drain starts
+		// but before traffic shifts away from this pod. CA-142 plan step 1.8.
+		slog.Info("livingwiki/drain: settle period after BeginDrain", "duration_ms", 5000)
+		time.Sleep(5 * time.Second)
 
 		// ── Step 2: wait for in-flight LLM jobs and on-demand requests ──────
 		graceCtx, graceCancel := context.WithTimeout(context.Background(), graceDur)
@@ -847,6 +856,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 				slog.Warn("orchestrator worker drain timed out", "err", err)
 			}
 		}
+		slog.Info("drain workers wait complete", "event", "drain_workers_wait_complete")
 
 		// ── Step 4: shut down HTTP listeners ─────────────────────────────────
 		const httpShutdownTimeout = 30 * time.Second
@@ -860,6 +870,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 			// best-effort — loopback-only listener, failure is not fatal
 			_ = internalServer.Shutdown(httpShutdownCtx)
 		}
+		slog.Info("http shutdown complete", "event", "http_shutdown_complete")
 
 		// ── Step 5: component cleanup (event bus, dispatcher) ────────────────
 		// Uses its own context so cleanup is not bounded by the spent HTTP
