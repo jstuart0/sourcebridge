@@ -886,7 +886,7 @@ func (s *Server) setupRouter() {
 		r.Post("/api/v1/tokens/revoke-user", s.handleRevokeUserTokens)
 		r.Delete("/api/v1/tokens/{id}", s.handleRevokeToken)
 		r.Post("/api/v1/tokens/current/revoke", s.handleRevokeCurrentToken)
-		r.Post("/api/v1/telemetry", s.handleTelemetryEvent)
+		r.With(httprate.LimitByIP(20, 1*time.Minute)).Post("/api/v1/telemetry", s.handleTelemetryEvent)
 
 		// Data export
 		r.Get("/api/v1/export/traceability", s.handleExportTraceability)
