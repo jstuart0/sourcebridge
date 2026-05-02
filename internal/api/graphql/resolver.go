@@ -43,20 +43,27 @@ type GitConfigLoader interface {
 }
 
 // DrainAdmitter is the interface the GraphQL resolver uses to (a) check
-// whether the server is draining and (b) admit on-demand Living Wiki
-// requests to the drain counter before any work begins. CA-142.
+// whether the server is draining and (b) atomically admit on-demand Living
+// Wiki requests to the drain counter. CA-142.
 //
 // The concrete implementation is *rest.serverDrainAdmitter,
 // wired via graphql.Resolver.DrainAdmitter at server construction. Nil
 // means drain protection is not active (embedded mode, tests).
 type DrainAdmitter interface {
 	// IsDraining returns true when the server has received SIGTERM or a
-	// /internal/begin-drain call and is waiting for jobs to finish.
+	// /internal/begin-drain call and is waiting for jobs to finish. Used
+	// by cold-start mutations that do not count toward the on-demand total.
 	IsDraining() bool
-	// AdmitOnDemand increments the in-flight on-demand counter and
-	// returns a token. The caller MUST call Release() exactly once
-	// (typically via defer) when the request completes.
-	AdmitOnDemand() interface{ Release() }
+
+	// TryAdmitOnDemand atomically checks whether the server is draining
+	// and, if not, increments the in-flight counter. Returns (token, true)
+	// when admitted, or (nil, false) when the server is draining.
+	//
+	// The check and increment happen under the same mutex that BeginDrain
+	// uses to flip the draining flag, so there is no window between
+	// passing the gate and incrementing the counter. The caller MUST call
+	// token.Release() exactly once (typically via defer) when admitted.
+	TryAdmitOnDemand() (token interface{ Release() }, admitted bool)
 }
 
 // LLMProfileLookup is the narrow read-side interface the GraphQL layer

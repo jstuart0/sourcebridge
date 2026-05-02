@@ -10,6 +10,16 @@ import (
 	"time"
 )
 
+// mustAdmit calls TryAdmit and fails the test if admission is rejected.
+func mustAdmit(t *testing.T, tr *OnDemandTracker) *Admission {
+	t.Helper()
+	adm, ok := tr.TryAdmit()
+	if !ok {
+		t.Fatal("TryAdmit returned false (draining) unexpectedly")
+	}
+	return adm
+}
+
 // TestOnDemandTrackerAdmitRelease verifies basic admit/release semantics.
 func TestOnDemandTrackerAdmitRelease(t *testing.T) {
 	t.Parallel()
@@ -19,8 +29,8 @@ func TestOnDemandTrackerAdmitRelease(t *testing.T) {
 		t.Fatalf("expected count=0, got %d", tr.Count())
 	}
 
-	a1 := tr.Admit()
-	a2 := tr.Admit()
+	a1 := mustAdmit(t, tr)
+	a2 := mustAdmit(t, tr)
 	if tr.Count() != 2 {
 		t.Fatalf("expected count=2 after two admits, got %d", tr.Count())
 	}
@@ -60,7 +70,7 @@ func TestOnDemandTrackerWaitZeroBlocksUntilRelease(t *testing.T) {
 	t.Parallel()
 
 	tr := NewOnDemandTracker()
-	adm := tr.Admit()
+	adm := mustAdmit(t, tr)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -91,7 +101,7 @@ func TestOnDemandTrackerWaitZeroCancelled(t *testing.T) {
 	t.Parallel()
 
 	tr := NewOnDemandTracker()
-	_ = tr.Admit() // never released — keeps count at 1
+	_ = mustAdmit(t, tr) // never released — keeps count at 1
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -117,7 +127,12 @@ func TestOnDemandTrackerConcurrentAdmitRelease(t *testing.T) {
 		go func() {
 			startAll.Done()
 			startAll.Wait() // all goroutines start together
-			adm := tr.Admit()
+			adm, ok := tr.TryAdmit()
+			if !ok {
+				// Admission rejected means MarkDraining was called concurrently;
+				// that's fine for this concurrent test.
+				return
+			}
 			time.Sleep(time.Millisecond)
 			adm.Release()
 		}()
@@ -134,16 +149,110 @@ func TestOnDemandTrackerConcurrentAdmitRelease(t *testing.T) {
 	}
 }
 
-// TestOnDemandTrackerAdmissionDuringDrain verifies that Admit/Release work
-// correctly after a drain flag is set externally (the tracker itself is
-// stateless about drain; this is a wiring concern tested here for completeness).
-func TestOnDemandTrackerAdmissionDuringDrain(t *testing.T) {
+// TestOnDemandTrackerTryAdmitRejectsDuringDrain verifies TryAdmit returns
+// (nil, false) after MarkDraining is called. CA-142.
+func TestOnDemandTrackerTryAdmitRejectsDuringDrain(t *testing.T) {
+	t.Parallel()
+
+	tr := NewOnDemandTracker()
+	tr.MarkDraining()
+
+	adm, ok := tr.TryAdmit()
+	if ok {
+		t.Fatal("TryAdmit should return false after MarkDraining")
+	}
+	if adm != nil {
+		t.Fatal("TryAdmit should return nil admission after MarkDraining")
+	}
+	if tr.Count() != 0 {
+		t.Fatalf("expected count=0 after rejected TryAdmit, got %d", tr.Count())
+	}
+}
+
+// TestOnDemandTrackerMarkDrainingIdempotent verifies MarkDraining is safe
+// to call multiple times and does not panic. CA-142.
+func TestOnDemandTrackerMarkDrainingIdempotent(t *testing.T) {
+	t.Parallel()
+
+	tr := NewOnDemandTracker()
+	tr.MarkDraining()
+	tr.MarkDraining() // must not panic or corrupt state
+
+	if !tr.IsDraining() {
+		t.Fatal("expected IsDraining to be true")
+	}
+}
+
+// TestOnDemandTrackerTryAdmitAtomicWithMarkDraining verifies the atomicity
+// guarantee: if MarkDraining fires while a TryAdmit goroutine is in flight,
+// exactly one of them wins cleanly — either the admission is granted (count=1,
+// not draining at admit time) or rejected (count=0, draining at admit time).
+// Under the race detector, any missed lock would produce a data-race failure.
+// CA-142.
+func TestOnDemandTrackerTryAdmitAtomicWithMarkDraining(t *testing.T) {
+	t.Parallel()
+
+	const trials = 200
+	for i := 0; i < trials; i++ {
+		tr := NewOnDemandTracker()
+
+		// Two goroutines race: one calls TryAdmit, the other calls MarkDraining.
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		var (
+			admitted bool
+			adm      *Admission
+		)
+
+		go func() {
+			defer wg.Done()
+			adm, admitted = tr.TryAdmit()
+		}()
+		go func() {
+			defer wg.Done()
+			tr.MarkDraining()
+		}()
+
+		wg.Wait()
+
+		if admitted {
+			// Admitted before drain: count must be 1 (or 0 if released),
+			// no negative or inconsistent state.
+			if tr.Count() < 0 {
+				t.Fatalf("trial %d: count went negative after atomic admit", i)
+			}
+			adm.Release()
+			if tr.Count() != 0 {
+				t.Fatalf("trial %d: count=%d after release; expected 0", i, tr.Count())
+			}
+		} else {
+			// Rejected: count must be 0.
+			if tr.Count() != 0 {
+				t.Fatalf("trial %d: count=%d after rejected TryAdmit; expected 0", i, tr.Count())
+			}
+		}
+	}
+}
+
+// TestOnDemandTrackerAdmissionDuringDrainReachesZero verifies WaitZero
+// completes after an in-flight admission releases, even when MarkDraining
+// has been called. CA-142.
+func TestOnDemandTrackerAdmissionDuringDrainReachesZero(t *testing.T) {
 	t.Parallel()
 
 	tr := NewOnDemandTracker()
 
-	// Simulate drain: one active admission, then WaitZero races with Release.
-	adm := tr.Admit()
+	// Admit before drain starts.
+	adm := mustAdmit(t, tr)
+
+	// Now begin drain — future admits are blocked.
+	tr.MarkDraining()
+
+	// Subsequent admit must be rejected.
+	if _, ok := tr.TryAdmit(); ok {
+		t.Fatal("TryAdmit should return false after MarkDraining")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

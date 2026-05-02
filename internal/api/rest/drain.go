@@ -37,26 +37,36 @@ import (
 // rest package to avoid an import cycle (graphql imports rest for types
 // would be circular — we pass the interface value at wiring time instead).
 //
-// Pointer receiver satisfies graphql.DrainAdmitter:
+// *serverDrainAdmitter satisfies graphql.DrainAdmitter:
 //
-//	IsDraining() bool
-//	AdmitOnDemand() graphql.OnDemandToken
-//
-// *Admission satisfies graphql.OnDemandToken via its Release() method.
+//	TryAdmitOnDemand() (interface{ Release() }, bool)
 type serverDrainAdmitter struct {
 	s *Server
 }
 
-// IsDraining implements graphql.DrainAdmitter.
+// IsDraining implements graphql.DrainAdmitter. Used by cold-start mutations
+// that check drain state but do not count toward the on-demand tracker total.
 func (a *serverDrainAdmitter) IsDraining() bool {
 	return a.s.IsDraining()
 }
 
-// AdmitOnDemand implements graphql.DrainAdmitter. Returns an *Admission
-// which has a Release() method matching the interface{ Release() } return type.
-func (a *serverDrainAdmitter) AdmitOnDemand() interface{ Release() } {
-	return a.s.OnDemand.Admit()
+// TryAdmitOnDemand implements graphql.DrainAdmitter. Delegates to the
+// OnDemandTracker's atomic TryAdmit so the draining check and counter
+// increment happen under the same mutex as BeginDrain's MarkDraining call.
+// Returns (nil, false) when the server is draining; (admission, true) otherwise.
+func (a *serverDrainAdmitter) TryAdmitOnDemand() (interface{ Release() }, bool) {
+	if a.s.OnDemand == nil {
+		// No tracker configured (e.g. minimal test server) — admit unconditionally.
+		return noopRelease{}, true
+	}
+	return a.s.OnDemand.TryAdmit()
 }
+
+// noopRelease is a Release() token used when the OnDemand tracker is not
+// configured. Calling Release is a no-op.
+type noopRelease struct{}
+
+func (noopRelease) Release() {}
 
 // DrainAdmitterFor returns a *serverDrainAdmitter. Callers assign it
 // to the graphql.DrainAdmitter field; the assignment compiles because
@@ -133,12 +143,20 @@ func (s *Server) handleDebugSlowJob(w http.ResponseWriter, r *http.Request) {
 		TargetKey: "debug:slow_job:" + strconv.FormatInt(time.Now().UnixNano(), 10),
 		Priority:  llm.PriorityMaintenance,
 		RunWithContext: func(ctx context.Context, _ llm.Runtime) error {
+			start := time.Now()
 			slog.Info("debug slow-job: sleeping", "seconds", seconds, "event", "debug_slow_job_start")
 			select {
 			case <-time.After(sleepDur):
 				slog.Info("debug slow-job: done", "seconds", seconds, "event", "debug_slow_job_done")
 			case <-ctx.Done():
-				slog.Info("debug slow-job: cancelled", "event", "debug_slow_job_cancelled")
+				// Return the cancellation error so the orchestrator records a
+				// cancelled (non-nil) terminal state. Returning nil here would
+				// mark the job as successful, which breaks Phase 4.7 timeout
+				// validation that expects a cancelled terminal state. CA-142.
+				slog.Info("debug slow-job: cancelled",
+					"event", "debug_slow_job_cancelled",
+					"elapsed_ms", time.Since(start).Milliseconds())
+				return ctx.Err()
 			}
 			return nil
 		},

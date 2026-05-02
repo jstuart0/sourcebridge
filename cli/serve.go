@@ -8,13 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -751,9 +751,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// SOURCEBRIDGE_INTERNAL_LISTEN_ADDR overrides it (Helm internalPort).
 	// Serves the preStop hook target POST /internal/begin-drain.
 	// No auth required: loopback enforces locality (CA-142).
+	//
+	// IMPORTANT: the address MUST resolve to a loopback interface. If it
+	// does not, startup is aborted. This prevents an operator misconfiguration
+	// (e.g. SOURCEBRIDGE_INTERNAL_LISTEN_ADDR=0.0.0.0:8081) from exposing the
+	// unauthenticated /internal/begin-drain endpoint to the network.
 	internalListenAddr := "127.0.0.1:8081"
 	if v := os.Getenv("SOURCEBRIDGE_INTERNAL_LISTEN_ADDR"); v != "" {
 		internalListenAddr = v
+	}
+	if err := validateLoopbackAddr(internalListenAddr); err != nil {
+		return fmt.Errorf("SOURCEBRIDGE_INTERNAL_LISTEN_ADDR is not loopback (%q): %w — "+
+			"the internal /begin-drain endpoint is unauthenticated and must only be reachable from localhost", internalListenAddr, err)
 	}
 	internalServer := &http.Server{
 		Addr:         internalListenAddr,
@@ -772,9 +781,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 	go func() {
-		slog.Info("starting internal server", "addr", "127.0.0.1:8081")
+		slog.Info("starting internal server", "addr", internalListenAddr)
 		if err := internalServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Warn("internal server error", "err", err)
+			// The Kubernetes preStop hook depends on this listener. A bind failure
+			// means drain will never be triggered by preStop — fail fast so the
+			// operator sees the problem immediately rather than discovering it
+			// during a rolling deploy. CA-142.
+			slog.Error("internal server bind failed — preStop hook will not function; aborting", "addr", internalListenAddr, "err", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -797,33 +811,38 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	graceDur := time.Duration(graceSeconds) * time.Second
 
-	// Signal handling: use a Once so re-delivered SIGTERM is a no-op.
-	// A background goroutine drains the channel after the first signal.
+	// Signal handling: receive the first SIGTERM/SIGINT in the main
+	// goroutine, then start a drain goroutine that handles subsequent
+	// re-deliveries as no-ops. Starting the re-delivery drainer BEFORE
+	// the first receive would race with the main select — if the goroutine
+	// wins the first signal, BeginDrain/AwaitDrain/CancelAndWait never run
+	// and the pod gets SIGKILLed at grace deadline. CA-142.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	var shutdownOnce sync.Once
-	shutdownDone := make(chan struct{})
-
-	go func() {
-		// Drain re-delivered signals silently so they don't block.
-		for range sigCh {
-		}
-	}()
-
 	// Wait for SIGTERM/SIGINT or a fatal server error.
+	var firstSig os.Signal
 	select {
-	case sig := <-sigCh:
+	case firstSig = <-sigCh:
 		slog.Info("received sigterm",
-			"signal", sig,
+			"signal", firstSig,
 			"event", "received_sigterm")
-		close(shutdownDone) // satisfy the Once logic below
 	case err := <-errCh:
 		return fmt.Errorf("server error: %w", err)
 	}
 
+	// After the first signal is consumed, drain any re-deliveries silently
+	// so the channel never blocks SIGTERM-redelivery (e.g. from kubelet
+	// sending multiple SIGTERM). This goroutine starts only AFTER the main
+	// goroutine has already received the first signal, so there is no race.
+	go func() {
+		for sig := range sigCh {
+			slog.Info("livingwiki/drain: sigterm_redelivery_ignored", "signal", sig)
+		}
+	}()
+
 	var shutdownErr error
-	shutdownOnce.Do(func() {
+	func() {
 		// ── Step 1: begin drain — flip readiness, pause orchestrator intake ──
 		first := server.BeginDrain("sigterm")
 		if first {
@@ -881,7 +900,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if err := server.FinishShutdown(compCtx); err != nil {
 			slog.Warn("server component shutdown error", "err", err)
 		}
-	})
+	}()
 
 	// schedCancel() is called by defer above, ensuring the scheduler
 	// goroutine exits after the dispatcher has drained.
@@ -889,6 +908,33 @@ func runServe(cmd *cobra.Command, args []string) error {
 	close(sigCh)
 	slog.Info("server stopped")
 	return shutdownErr
+}
+
+// validateLoopbackAddr ensures the host portion of addr resolves to a loopback
+// address. Returns an error if the host is empty, unresolvable, or not loopback.
+// CA-142: the internal server is unauthenticated; loopback bind is the only
+// access control — we must fail startup if the operator has misconfigured it.
+func validateLoopbackAddr(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid address %q: %w", addr, err)
+	}
+	if host == "" {
+		// A bare ":port" bind listens on all interfaces — not loopback.
+		return fmt.Errorf("address %q binds on all interfaces (empty host); must be 127.0.0.1, ::1, or localhost", addr)
+	}
+	// Resolve the hostname so "localhost" works regardless of /etc/hosts.
+	ips, err := net.LookupHost(host)
+	if err != nil {
+		return fmt.Errorf("cannot resolve host %q: %w", host, err)
+	}
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip != nil && ip.IsLoopback() {
+			return nil
+		}
+	}
+	return fmt.Errorf("host %q does not resolve to a loopback address (resolved: %v)", host, ips)
 }
 
 func startAuthCleanupLoop(name string, cleaner auth.CleanupCapable) {

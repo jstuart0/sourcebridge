@@ -2925,11 +2925,13 @@ func (r *mutationResolver) TriggerLivingWikiColdStartAllEnabled(ctx context.Cont
 func (r *mutationResolver) GenerateLivingWikiPageOnDemand(ctx context.Context, repositoryID string, pageSpec LivingWikiOnDemandPageSpec) (*LivingWikiOnDemandPageResult, error) {
 	// CA-142: gate BEFORE any other work so the admission counter accurately
 	// reflects the full request lifetime (settings load, LLM resolution,
-	// page generation). The drain check and Admit are paired atomically via
-	// the same DrainAdmitter so there is no window between passing the check
-	// and incrementing the counter.
+	// page generation). TryAdmitOnDemand atomically checks draining state
+	// and increments the counter under the same mutex that BeginDrain uses,
+	// closing the TOCTOU window that existed when IsDraining and AdmitOnDemand
+	// were separate calls.
 	if r.DrainAdmitter != nil {
-		if r.DrainAdmitter.IsDraining() {
+		admission, admitted := r.DrainAdmitter.TryAdmitOnDemand()
+		if !admitted {
 			return nil, &gqlerror.Error{
 				Message: "The server is draining for a graceful restart. " +
 					"On-demand generation is temporarily unavailable. " +
@@ -2939,7 +2941,6 @@ func (r *mutationResolver) GenerateLivingWikiPageOnDemand(ctx context.Context, r
 				},
 			}
 		}
-		admission := r.DrainAdmitter.AdmitOnDemand()
 		defer admission.Release()
 	}
 

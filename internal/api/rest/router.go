@@ -1093,6 +1093,12 @@ func (s *Server) BeginDrain(source string) (first bool) {
 		s.orchestrator.SetIntakePaused(true)
 		s.orchestrator.MarkDraining(true)
 	}
+	// Mark the on-demand tracker as draining under the same lock that
+	// TryAdmit uses, so no new on-demand admission can slip through
+	// after BeginDrain returns. CA-142.
+	if s.OnDemand != nil {
+		s.OnDemand.MarkDraining()
+	}
 	return true
 }
 
