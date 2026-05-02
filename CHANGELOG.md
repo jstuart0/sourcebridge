@@ -86,6 +86,13 @@ CA-146 (page-count transparency and per-run override).
 
 ### Changed
 
+- **Repository detail page now opens on the Field Guide tab by default** (CA-60).
+  The fallback tab for `/repositories/[id]` changed from `files` to `knowledge`
+  (Field Guide). Direct links using `?tab=knowledge` continue to work unchanged.
+  When no Field Guide artifacts exist yet, the tab renders a prominent
+  "Generate Field Guide" CTA in place of the empty state. All other tabs are
+  unaffected.
+
 - **`MaxPagesPerJob` default raised from 50 to 500, and is now wired as a real
   cap** (CA-146). Previously, `MaxPagesPerJob` was stored in the database and
   surfaced in the Settings UI but was never applied to cold-start jobs —
