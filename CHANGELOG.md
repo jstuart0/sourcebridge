@@ -44,6 +44,25 @@ test.
   IDEs, several bundlers). The indexer, change-watch, and `sourcebridge review`
   walker all benefit.
 
+- **Visible app version + auto-versioning across releases & dev builds**
+  (CA-136). Every running SourceBridge instance now displays a version
+  string derived from git, baked into the Go binary via `-ldflags` and
+  the web bundle via `NEXT_PUBLIC_*`, and exposed at
+  `GET /api/v1/version` (public, unauthenticated), `sourcebridge --version`,
+  the sidebar footer, the **Admin → System status → Build info** card,
+  and the OCI image labels (`org.opencontainers.image.version` and
+  friends). Tagged releases produce bare-tag versions
+  (`v1.2.3`); commits past the last tag produce `<tag>-dev.N+g<sha>`;
+  pull-request builds produce `<tag>-pr<N>+g<sha>`; local builds
+  produce `<tag>-local+g<sha>[.dirty]`. The grammar is implemented by
+  `scripts/version.sh` (9-case shell test in `tests/scripts/`) and
+  consumed identically by the Makefile, the three Dockerfiles,
+  `docker-compose.yml`, `build-images.yml`, and `oss-release.yml`.
+  The Python worker also exposes a gRPC `VersionService.GetVersion`
+  used by the API server to report the worker version. See the new
+  [docs/admin/build-info.md](docs/admin/build-info.md) for full
+  reference.
+
 ### Changed
 
 - **`sourcebridge review` walker uses the canonical ignore list** (`201548a`,
@@ -98,6 +117,16 @@ test.
 - **`sourcebridge login` error no longer sends users to a 404** (`201548a`,
   CA-124). The "setup not complete" error previously named `/setup`, which
   returns 404. It now names `/login` and provides a curl fallback.
+
+- **Flaky `-race` violation in
+  `internal/api/graphql/knowledge_refresh_test.go`** (`993c332`, CA-136).
+  `captureSlog` previously created an unsynchronized `*bytes.Buffer` and
+  pointed `slog.SetDefault` at it. `enqueueStaleArtifactRefresh` in live
+  mode fires `slog.Warn` from a background goroutine the test never
+  joins — the handler raced the test's buffer reads. The fix wraps the
+  buffer in a `sync.Mutex`-protected writer; the function under test is
+  unchanged. Closes the deploy-gate intermittency seen in CI run
+  25242941735.
 
 ### Internal
 

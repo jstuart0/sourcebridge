@@ -465,6 +465,42 @@ For production and multi-team deployments:
 - [Upgrade Guide](docs/self-hosted/upgrade.md) -- Version upgrades and migrations
 - [Backup and Restore](docs/admin/backup-restore.md) -- Data protection procedures
 
+## Versioning
+
+Every SourceBridge build carries a version string that's derived from
+git — no hand-editing, no manifest bumping. The same string is reported
+by the running API server, the Python worker, the Next.js web bundle,
+and the OCI image labels.
+
+| Build context | Version | Example |
+|---|---|---|
+| Tagged release (`git tag v1.2.3`) | `<tag>` | `v1.2.3` |
+| `main` between releases | `<tag>-dev.<N>+g<sha>` | `v0.9.0-rc.3-dev.216+g956607e` |
+| Pull-request build | `<tag>-pr<NUMBER>+g<sha>` | `v0.9.0-rc.3-pr147+g956607e` |
+| Local `make build` | `<tag>-local+g<sha>[.dirty]` | `v0.9.0-rc.3-local+g956607e.dirty` |
+| No git context (source tarball) | `0.0.0-unknown` | `0.0.0-unknown` |
+
+The grammar is implemented by `scripts/version.sh`, which the Makefile,
+the Dockerfiles, and the GitHub Actions workflows all consume. To find
+your build:
+
+- **Web UI**: sidebar footer (always visible) or **Admin → System
+  status → Build info** (full payload + copy-to-clipboard for support
+  tickets).
+- **HTTP**: `curl https://<your-server>/api/v1/version` (no auth
+  required).
+- **CLI**: `sourcebridge --version`.
+- **Image**: `docker inspect <image> | jq '.[0].Config.Labels'` —
+  surfaces `org.opencontainers.image.version` and friends.
+
+To cut a release: push a `v*` tag. The release workflow takes care of
+binary builds, image labels, the Homebrew tap formula, and the GitHub
+release page. There is no version file to bump by hand.
+
+See [docs/admin/build-info.md](docs/admin/build-info.md) for the full
+build-info reference (debugging mismatches between the web bundle and
+the API server during a rolling deploy, etc.).
+
 ## Documentation
 
 - [Getting Started](docs/user/getting-started.md)

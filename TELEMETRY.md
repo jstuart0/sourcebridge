@@ -9,7 +9,7 @@ information is ever collected.
 | Field | Example | Purpose |
 |-------|---------|---------|
 | Installation ID | `a1b2c3d4-...` | Random UUID generated on first run. Not linked to any person. |
-| Version | `0.5.0` | Which version is deployed |
+| Version | `v0.9.0-rc.3-dev.216+g956607e` | Which version is deployed. Computed by `scripts/version.sh` and baked in via Go ldflags at build time; see [docs/admin/build-info.md](docs/admin/build-info.md). |
 | Edition | `oss` | OSS or enterprise |
 | Platform | `linux/amd64` | OS and architecture |
 | Repo count | `12` | How many repositories are indexed (count only, no names) |
