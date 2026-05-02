@@ -40,6 +40,19 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ### Fixed
 
+- **`OnPageDone` now fires after persistence** (CA-145, CA-143). Progress
+  counter and smart-resume now agree on which pages are durably stored.
+  Previously, `OnPageDone` fired before the post-Wait persistence loop, so
+  the in-memory completion set could exceed the persisted set; on
+  interruption and retry, smart-resume saw a smaller persisted set than
+  progress had reported, leading to apparent regressions and
+  double-generation of pages the user saw counted. Phase 1 (`1317cec`)
+  moved the callsite; Phase 2 adds three orchestrator tests
+  (`TestRetryResume_ProgressMatchesPersistedSet_PR`,
+  `TestRetryResume_ProgressMatchesPersistedSet_DirectPublish`,
+  `TestRetryResume_NoProgressOnHardError`) and one cold-start runner test
+  (`TestRetryResume_SmartResumeMatchesProgress`) locking the contract.
+
 - **Quality gates no longer reject all local-LLM Living Wiki output**
   (`c0a7bbb`–`41c0d5a`, reconcile `3145077`, CA-150). Living Wiki generation
   now calibrates quality-gate thresholds against the LLM's capability tier

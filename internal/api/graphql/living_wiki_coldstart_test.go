@@ -1744,6 +1744,219 @@ func TestColdStart_PerRepoOverride_DerivesTierFromOverride(t *testing.T) {
 	}
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CA-145+CA-143: smart-resume contract
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestRetryResume_SmartResumeMatchesProgress verifies the contract that binds
+// CA-145 (progress counter) to CA-143 (retry-resume correctness):
+//
+//   "The set of pages that OnPageDone reports as complete equals the set of
+//    pages that smart-resume classifies as skipFully on the next run."
+//
+// Setup: N=8 pages. We pre-seed the publishStatusStore with K=5 pages at
+// status="ready" with matching fingerprints, simulating the durable state
+// that the post-Wait persistence loop would have written before an interrupt.
+// We then call classifyPage for each planned page with:
+//   - alreadyPublished containing the K seeded page IDs.
+//   - persistedFps from the seeded store.
+//   - one stub sink (so writers is non-empty; with empty writers every page
+//     regenerates regardless).
+//
+// Assertions:
+//   - Exactly K pages classify as skipFully.
+//   - Exactly N-K pages classify as regenerate.
+//
+// This locks Decision D4 from the CA-145+CA-143 plan: "what fires OnPageDone
+// equals what smart-resume sees," because Phase 1 moved OnPageDone to fire
+// AFTER SetProposed/SetCanonical returns nil — the same persistence event that
+// smart-resume reads via LoadFingerprints.
+func TestRetryResume_SmartResumeMatchesProgress(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	const N, K = 8, 5
+
+	// Build N planned pages with deterministic IDs and fingerprints.
+	pages := make([]lworch.PlannedPage, N)
+	for i := range pages {
+		repoID := fmt.Sprintf("rr-sr-%d", i)
+		pages[i] = lworch.PlannedPage{
+			ID:         fmt.Sprintf("%s.glossary", repoID),
+			TemplateID: "glossary",
+			Audience:   quality.AudienceEngineers,
+			Input: templates.GenerateInput{
+				RepoID:   repoID,
+				Audience: quality.AudienceEngineers,
+				Now:      time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC),
+			},
+		}
+	}
+
+	const (
+		stubSinkKind  = "CONFLUENCE"
+		stubSinkName  = "eng-docs"
+		modelID       = "test-provider/test-model"
+		repoSourceRev = ""
+	)
+
+	// Compute fingerprints for the first K pages (simulating what the persistence
+	// loop would have written via dispatchGeneratedPages → streamDispatchPage →
+	// publishStatusStore.SetReady).
+	store := newMemPagePublishStatusStore()
+	for i := 0; i < K; i++ {
+		fp := lworch.ComputePageFingerprint(pages[i], modelID, repoSourceRev)
+		_ = store.SetReady(ctx, livingwiki.SetReadyArgs{
+			RepoID:          "test-repo",
+			PageID:          pages[i].ID,
+			SinkKind:        stubSinkKind,
+			IntegrationName: stubSinkName,
+			Fingerprint:     fp,
+			FixupStatus:     livingwiki.FixupStatusNone,
+		})
+	}
+
+	// Load persisted fingerprints — mirrors what buildColdStartRunner does at
+	// smart-resume time (living_wiki_coldstart.go:313-315).
+	persistedFps, err := store.LoadFingerprints(ctx, "test-repo")
+	if err != nil {
+		t.Fatalf("LoadFingerprints: %v", err)
+	}
+
+	// Build the alreadyPublished set with the K page IDs that are in the store
+	// (simulates what listAlreadyPublishedAcrossSinks would return if the sink
+	// already has those pages committed).
+	alreadyPublished := make(map[string]struct{}, K)
+	for i := 0; i < K; i++ {
+		alreadyPublished[pages[i].ID] = struct{}{}
+	}
+
+	// Build a stub NamedSinkWriter so writers is non-empty. When writers is
+	// empty, classifyPage always returns bucketRegenerate regardless of status.
+	stubWriters := []sinks.NamedSinkWriter{
+		{Name: stubSinkName, Writer: &stubSinkWriterForResume{kind: markdown.SinkKindConfluence}},
+	}
+
+	// Compute current fingerprints for every page — same O(N) sweep the runner does.
+	currentFps := make(map[string]string, N)
+	for _, p := range pages {
+		currentFps[p.ID] = lworch.ComputePageFingerprint(p, modelID, repoSourceRev)
+	}
+
+	// Classify every page using the same function the runner calls.
+	var regenerate, skipFully []string
+	for _, p := range pages {
+		bucket := classifyPage(p.ID, alreadyPublished, currentFps[p.ID], persistedFps, stubWriters)
+		switch bucket {
+		case bucketSkipFully:
+			skipFully = append(skipFully, p.ID)
+		default:
+			regenerate = append(regenerate, p.ID)
+		}
+	}
+
+	if got := len(skipFully); got != K {
+		t.Errorf("skipFully count: got %d, want %d (pages durably persisted in prior run)", got, K)
+	}
+	if got := len(regenerate); got != N-K {
+		t.Errorf("regenerate count: got %d, want %d (pages not yet persisted)", got, N-K)
+	}
+
+	// Cross-check: the K skipFully IDs are exactly the IDs we seeded.
+	seededIDs := make(map[string]struct{}, K)
+	for i := 0; i < K; i++ {
+		seededIDs[pages[i].ID] = struct{}{}
+	}
+	for _, id := range skipFully {
+		if _, ok := seededIDs[id]; !ok {
+			t.Errorf("skipFully contains unexpected page %q (not in seeded set)", id)
+		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test fixtures for CA-145+CA-143 smart-resume test
+// ─────────────────────────────────────────────────────────────────────────────
+
+// memPagePublishStatusStore is a minimal in-memory PagePublishStatusStore for
+// the smart-resume test. It implements only the methods exercised by the test
+// (SetReady + LoadFingerprints); the others are no-ops.
+type memPagePublishStatusStore struct {
+	mu   sync.Mutex
+	rows map[string]map[string]livingwiki.PagePublishStatusRow // pageID → sinkKey → row
+}
+
+func newMemPagePublishStatusStore() *memPagePublishStatusStore {
+	return &memPagePublishStatusStore{
+		rows: make(map[string]map[string]livingwiki.PagePublishStatusRow),
+	}
+}
+
+func (m *memPagePublishStatusStore) SetReady(_ context.Context, args livingwiki.SetReadyArgs) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sinkKey := args.SinkKind + "/" + args.IntegrationName
+	if m.rows[args.PageID] == nil {
+		m.rows[args.PageID] = make(map[string]livingwiki.PagePublishStatusRow)
+	}
+	fs := args.FixupStatus
+	if fs == "" {
+		if args.HasStubs {
+			fs = livingwiki.FixupStatusPending
+		} else {
+			fs = livingwiki.FixupStatusNone
+		}
+	}
+	m.rows[args.PageID][sinkKey] = livingwiki.PagePublishStatusRow{
+		RepoID:             args.RepoID,
+		PageID:             args.PageID,
+		SinkKind:           args.SinkKind,
+		IntegrationName:    args.IntegrationName,
+		Status:             "ready",
+		ContentFingerprint: args.Fingerprint,
+		HasStubs:           args.HasStubs,
+		FixupStatus:        fs,
+	}
+	return nil
+}
+
+func (m *memPagePublishStatusStore) SetNonReady(_ context.Context, _ livingwiki.SetNonReadyArgs) error {
+	return nil
+}
+
+func (m *memPagePublishStatusStore) LoadFingerprints(_ context.Context, _ string) (map[string]map[string]livingwiki.PagePublishStatusRow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]map[string]livingwiki.PagePublishStatusRow, len(m.rows))
+	for pageID, sinkMap := range m.rows {
+		out[pageID] = make(map[string]livingwiki.PagePublishStatusRow, len(sinkMap))
+		for sinkKey, row := range sinkMap {
+			out[pageID][sinkKey] = row
+		}
+	}
+	return out, nil
+}
+
+func (m *memPagePublishStatusStore) ListByRepo(_ context.Context, _ string) ([]livingwiki.PagePublishStatusRow, error) {
+	return nil, nil
+}
+
+func (m *memPagePublishStatusStore) UpdateFixupStatus(_ context.Context, _ livingwiki.UpdateFixupStatusArgs) error {
+	return nil
+}
+
+// stubSinkWriterForResume is a no-op SinkWriter for use in the smart-resume
+// classifyPage test. It only needs to satisfy Kind() so classifyPage can
+// compute the sinkKey.
+type stubSinkWriterForResume struct {
+	kind markdown.SinkKind
+}
+
+func (s *stubSinkWriterForResume) Kind() markdown.SinkKind { return s.kind }
+func (s *stubSinkWriterForResume) WritePage(_ context.Context, _ ast.Page) error {
+	return nil
+}
+
 // TestNewRegistryTierFunc_NormalizesModelCaseAndWhitespace verifies xander M3:
 // model IDs registered in lowercase are matched regardless of the caller's
 // casing or surrounding whitespace in the lookup key.
