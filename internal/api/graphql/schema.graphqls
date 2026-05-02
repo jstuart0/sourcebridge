@@ -91,9 +91,6 @@ type Query {
   modelCapabilities: [ModelCapabilityProfile!]!
   modelCapability(modelId: String!): ModelCapabilityProfile
 
-  setLivingWikiModeFlags(repositoryId: ID!, overviewEnabled: Boolean!, detailedEnabled: Boolean!): RepositoryLivingWikiSettings!
-  triggerLivingWikiColdStartAllEnabled(repositoryId: ID!): [EnableLivingWikiResult!]!
-
   # Recycle bin (soft-delete) — see docs/user/recycle-bin.md (forthcoming)
   trashedItems(repositoryId: ID, types: [TrashableType!], limit: Int = 50, offset: Int = 0, search: String): TrashConnection!
   trashRetentionDays: Int!
@@ -202,6 +199,20 @@ type Mutation {
   same progress-tracking path).
   """
   retryLivingWikiJob(repositoryId: ID!, retryExcludedOnly: Boolean, mode: LivingWikiBuildMode): EnableLivingWikiResult!
+
+  """
+  setLivingWikiModeFlags toggles the per-repository Overview/Detailed
+  mode flags without triggering a build. Returns the updated
+  RepositoryLivingWikiSettings record.
+  """
+  setLivingWikiModeFlags(repositoryId: ID!, overviewEnabled: Boolean!, detailedEnabled: Boolean!): RepositoryLivingWikiSettings!
+
+  """
+  triggerLivingWikiColdStartAllEnabled enqueues a separate cold-start
+  job for each enabled mode (Overview + Detailed = 2 jobs with distinct
+  TargetKeys). Returns the EnableLivingWikiResult for each job.
+  """
+  triggerLivingWikiColdStartAllEnabled(repositoryId: ID!): [EnableLivingWikiResult!]!
 
   """
   generateLivingWikiPageOnDemand generates a single Detailed-mode Living Wiki
