@@ -119,11 +119,17 @@ proto-clean:
 	rm -rf $(GEN_DIR)
 
 # Docker
+# CA-136: export the same VERSION/COMMIT/BUILD_DATE/EDITION values the Go
+# ldflags use, so docker compose builds produce images that match what
+# `make build` would. Direct `docker compose up` (without make) falls back
+# to the docker-compose.yml defaults (VERSION=0.0.0-local).
 docker-build:
-	docker compose build
+	VERSION="$(VERSION)" COMMIT="$(COMMIT)" BUILD_DATE="$(BUILD_DATE)" EDITION="$(EDITION)" \
+		docker compose build
 
 docker-up:
-	docker compose up -d
+	VERSION="$(VERSION)" COMMIT="$(COMMIT)" BUILD_DATE="$(BUILD_DATE)" EDITION="$(EDITION)" \
+		docker compose up -d
 
 docker-down:
 	docker compose down

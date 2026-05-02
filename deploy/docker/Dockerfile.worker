@@ -2,6 +2,13 @@
 ARG PYTHON_BASE_IMAGE=python:3.12-slim
 FROM ${PYTHON_BASE_IMAGE} AS builder
 
+# CA-136: build-time version metadata. Builder stage doesn't actually
+# use them but declaring here keeps both stages symmetric.
+ARG VERSION=0.0.0-unknown
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
+ARG EDITION=oss
+
 WORKDIR /app
 
 # Install uv
@@ -16,6 +23,19 @@ RUN uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
 # Runtime stage
 ARG PYTHON_BASE_IMAGE=python:3.12-slim
 FROM ${PYTHON_BASE_IMAGE}
+
+# Redeclare CA-136 ARGs in the runtime stage (Docker ARG is per-FROM).
+ARG VERSION=0.0.0-unknown
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
+ARG EDITION=oss
+
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.source="https://github.com/sourcebridge-ai/sourcebridge" \
+      org.opencontainers.image.title="sourcebridge-${EDITION}-worker" \
+      org.opencontainers.image.description="SourceBridge AI worker (${EDITION})"
 
 WORKDIR /app
 
@@ -45,6 +65,13 @@ COPY gen/python/ ./gen/python/
 COPY workers/pyproject.toml ./
 
 ENV PYTHONPATH="/app/gen/python:${PYTHONPATH}"
+
+# CA-136: bake the worker's version metadata into a Python module so
+# `from workers import __version__` works without any env-var dance at
+# runtime. Local `make dev-worker` uses SOURCEBRIDGE_VERSION env var
+# instead (gitignored); this file is only present in built images.
+RUN printf '__version__ = "%s"\n__commit__ = "%s"\n__build_date__ = "%s"\n' \
+    "${VERSION}" "${COMMIT}" "${BUILD_DATE}" > workers/_version.py
 
 RUN uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
 

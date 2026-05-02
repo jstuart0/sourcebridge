@@ -45,6 +45,16 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile.sourcebridge
+      # CA-136: pass through version metadata so docker compose builds
+      # bake real values into the binary and OCI labels. Defaults
+      # preserve raw `docker compose up` behavior — the resulting image
+      # is labeled "0.0.0-local"/"unknown". Use `make docker-build` to
+      # have the Makefile compute and inject git-derived values.
+      args:
+        VERSION: ${VERSION:-0.0.0-local}
+        COMMIT: ${COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        EDITION: ${EDITION:-oss}
     ports:
       - "${SOURCEBRIDGE_API_PORT:-8080}:8080"
     environment:
@@ -74,6 +84,11 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile.worker
+      args:
+        VERSION: ${VERSION:-0.0.0-local}
+        COMMIT: ${COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        EDITION: ${EDITION:-oss}
     ports:
       - "${SOURCEBRIDGE_WORKER_PORT:-50051}:50051"
     environment:
@@ -125,6 +140,11 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile.web
+      args:
+        VERSION: ${VERSION:-0.0.0-local}
+        COMMIT: ${COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        EDITION: ${EDITION:-oss}
     ports:
       - "${SOURCEBRIDGE_WEB_PORT:-3000}:3000"
     environment:

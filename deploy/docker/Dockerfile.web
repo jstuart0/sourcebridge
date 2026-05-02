@@ -22,15 +22,38 @@ ARG NEXT_PUBLIC_POSTHOG_HOST="https://us.i.posthog.com"
 # AppearanceProvider know to render the enterprise nav (Reports,
 # Compliance, Enterprise admin). OSS builds leave it unset → "oss".
 ARG NEXT_PUBLIC_EDITION=""
+# CA-136: build-time version metadata. Inlined into the Next.js
+# bundle (NEXT_PUBLIC_* are inlined at build time).
+ARG VERSION=0.0.0-unknown
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
+ARG EDITION=oss
 ENV NEXT_PUBLIC_POSTHOG_KEY=${NEXT_PUBLIC_POSTHOG_KEY}
 ENV NEXT_PUBLIC_POSTHOG_HOST=${NEXT_PUBLIC_POSTHOG_HOST}
 ENV NEXT_PUBLIC_EDITION=${NEXT_PUBLIC_EDITION}
+ENV NEXT_PUBLIC_VERSION=${VERSION}
+ENV NEXT_PUBLIC_COMMIT=${COMMIT}
+ENV NEXT_PUBLIC_BUILD_DATE=${BUILD_DATE}
 
 RUN npm run build && mkdir -p /app/public
 
 # Runtime stage
 ARG NODE_BASE_IMAGE=node:22-alpine
 FROM ${NODE_BASE_IMAGE}
+
+# Redeclare CA-136 ARGs in the runtime stage so the LABEL substitutions
+# below resolve to real values (Docker scopes ARG per FROM).
+ARG VERSION=0.0.0-unknown
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
+ARG EDITION=oss
+
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.source="https://github.com/sourcebridge-ai/sourcebridge" \
+      org.opencontainers.image.title="sourcebridge-${EDITION}-web" \
+      org.opencontainers.image.description="SourceBridge web UI (${EDITION})"
 
 WORKDIR /app
 
