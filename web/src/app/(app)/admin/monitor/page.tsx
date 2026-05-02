@@ -18,6 +18,7 @@ import {
 import type { LLMJobView } from "@/lib/llm/job-types";
 import { disableJobAlerts, enableJobAlerts, jobAlertsEnabled, notifyJobEvent } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
+import { InFlightPagesPanel } from "./in-flight-pages-panel";
 
 /**
  * Generation Monitor page (/admin/monitor).
@@ -891,6 +892,11 @@ function JobDetailDrawer({ job, onClose }: { job: JobView; onClose: () => void }
             ) : null}
           </dl>
         </section>
+
+        {/* CA-144: In-flight pages panel — only for running living_wiki jobs */}
+        {job.subsystem === "living_wiki" && job.status === "generating" && (
+          <InFlightPagesPanel jobId={job.id} />
+        )}
 
         <JobLogsPanel job={job} />
 

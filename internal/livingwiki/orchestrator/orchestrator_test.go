@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1499,4 +1500,230 @@ func writeSampleFile(repoRoot, relPath string, content []byte) error {
 		return err
 	}
 	return os.WriteFile(targetDir+"/"+filename, content, 0o644)
+}
+
+// ---- CA-144 Tracker integration tests ----
+
+// blockingTemplate is a stubTemplate that blocks on a channel before returning.
+// The test can release pages one at a time to control the in-flight count.
+type blockingTemplate struct {
+	id       string
+	markdown string
+	release  chan struct{} // test sends to unblock each in-flight Generate call
+}
+
+func (b *blockingTemplate) ID() string { return b.id }
+
+func (b *blockingTemplate) Generate(ctx context.Context, input templates.GenerateInput) (ast.Page, error) {
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+		return ast.Page{}, ctx.Err()
+	}
+	pageID := input.RepoID + "." + b.id
+	return ast.Page{
+		ID: pageID,
+		Manifest: manifest.DependencyManifest{
+			PageID:   pageID,
+			Template: b.id,
+			Audience: string(input.Audience),
+		},
+		Blocks: []ast.Block{
+			{
+				ID:   ast.GenerateBlockID(pageID, "", ast.BlockKindParagraph, 0),
+				Kind: ast.BlockKindParagraph,
+				Content: ast.BlockContent{Paragraph: &ast.ParagraphContent{
+					Markdown: b.markdown,
+				}},
+				Owner:      ast.OwnerGenerated,
+				LastChange: ast.BlockChange{Timestamp: input.Now, Source: "sourcebridge"},
+			},
+		},
+		Provenance: ast.Provenance{GeneratedAt: input.Now},
+	}, nil
+}
+
+// TestOrchestrator_InFlightPagesEmptyAfterGenerate asserts that a successful run
+// leaves the in-flight tracker empty for that jobID.
+func TestOrchestrator_InFlightPagesEmptyAfterGenerate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	const passMarkdown = "Middleware wraps an HTTP handler. No behavioral claims here."
+	pages := make([]orchestrator.PlannedPage, 3)
+	for i := range pages {
+		input := makeBaseInput(nil, nil)
+		input.RepoID = fmt.Sprintf("repo-%d", i)
+		pages[i] = orchestrator.PlannedPage{
+			ID:         fmt.Sprintf("p%d.glossary", i),
+			TemplateID: "glossary",
+			Audience:   quality.AudienceEngineers,
+			Input:      input,
+		}
+	}
+
+	pass := &stubTemplate{id: "glossary", markdown: passMarkdown}
+	reg := orchestrator.NewMapRegistry(pass)
+	store := orchestrator.NewMemoryPageStore()
+	pr := orchestrator.NewMemoryWikiPR("pr-infl-empty")
+
+	orch := orchestrator.New(orchestrator.Config{RepoID: repoID}, reg, store)
+	const jobID = "job-infl-empty"
+	_, err := orch.Generate(ctx, orchestrator.GenerateRequest{
+		Pages:   pages,
+		PR:      pr,
+		LLMTier: modeltier.TierFrontier,
+		JobID:   jobID,
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	snap := orch.InFlightPages(jobID)
+	if len(snap) != 0 {
+		t.Errorf("expected empty in-flight after successful Generate, got %d: %v", len(snap), snap)
+	}
+}
+
+// TestOrchestrator_InFlightDuringSlowPage asserts that pages stuck in the LLM
+// are visible via InFlightPages mid-run.
+func TestOrchestrator_InFlightDuringSlowPage(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// Use blocking template so we can observe in-flight state.
+	release := make(chan struct{}, 5)
+	bt := &blockingTemplate{
+		id:       "blocking",
+		markdown: "Middleware wraps an HTTP handler. No behavioral claims here.",
+		release:  release,
+	}
+	reg := orchestrator.NewMapRegistry(bt)
+	store := orchestrator.NewMemoryPageStore()
+	pr := orchestrator.NewMemoryWikiPR("pr-infl-slow")
+
+	orch := orchestrator.New(orchestrator.Config{
+		RepoID:         repoID,
+		MaxConcurrency: 5,
+	}, reg, store)
+
+	const jobID = "job-infl-slow"
+	const numPages = 3
+	pages := make([]orchestrator.PlannedPage, numPages)
+	for i := range pages {
+		input := makeBaseInput(nil, nil)
+		input.RepoID = fmt.Sprintf("repo-%d", i)
+		pages[i] = orchestrator.PlannedPage{
+			ID:         fmt.Sprintf("p%d.blocking", i),
+			TemplateID: "blocking",
+			Audience:   quality.AudienceEngineers,
+			Input:      input,
+		}
+	}
+
+	// Run Generate in the background; it blocks until we release.
+	done := make(chan error, 1)
+	go func() {
+		_, err := orch.Generate(ctx, orchestrator.GenerateRequest{
+			Pages:   pages,
+			PR:      pr,
+			LLMTier: modeltier.TierFrontier,
+			JobID:   jobID,
+		})
+		done <- err
+	}()
+
+	// Wait until all pages are in-flight.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(orch.InFlightPages(jobID)) == numPages {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	snap := orch.InFlightPages(jobID)
+	if len(snap) != numPages {
+		t.Errorf("expected %d in-flight pages, got %d: %v", numPages, len(snap), snap)
+	}
+
+	// Release all pages so Generate can finish.
+	for i := 0; i < numPages; i++ {
+		release <- struct{}{}
+	}
+
+	if err := <-done; err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	// After Generate returns, tracker must be empty.
+	snap = orch.InFlightPages(jobID)
+	if len(snap) != 0 {
+		t.Errorf("expected empty in-flight after Generate, got %d", len(snap))
+	}
+}
+
+// TestOrchestrator_OnPageStartFiresWithAttempt2OnRetry asserts that OnPageStart
+// fires twice for a page that requires a retry (attempt=1 then attempt=2).
+func TestOrchestrator_OnPageStartFiresWithAttempt2OnRetry(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// architecture/for-engineers profile: citation_density is a gate.
+	// The failing content has no citation; the passing content has one.
+	const failMD = "This package returns an error when authentication fails."
+	const passMD = "This package returns an error when authentication fails. (internal/auth/auth.go:12-25)"
+
+	const pageID = "test.architecture"
+	failPass := &stubFailThenPassTemplate{
+		id:      "architecture",
+		failing: failMD,
+		passing: passMD,
+	}
+	reg := orchestrator.NewMapRegistry(failPass)
+	store := orchestrator.NewMemoryPageStore()
+	pr := orchestrator.NewMemoryWikiPR("pr-retry-start")
+
+	orch := orchestrator.New(orchestrator.Config{RepoID: repoID}, reg, store)
+
+	var mu sync.Mutex
+	var calls []int // attempt numbers recorded by OnPageStart
+	const jobID = "job-retry-start"
+
+	pages := []orchestrator.PlannedPage{
+		{
+			ID:         pageID,
+			TemplateID: "architecture",
+			Audience:   quality.AudienceEngineers,
+			Input:      makeBaseInput(nil, nil),
+		},
+	}
+
+	_, err := orch.Generate(ctx, orchestrator.GenerateRequest{
+		Pages:   pages,
+		PR:      pr,
+		LLMTier: modeltier.TierFrontier,
+		JobID:   jobID,
+		OnPageStart: func(pid string, attempt int, _ time.Time) {
+			if pid == pageID {
+				mu.Lock()
+				calls = append(calls, attempt)
+				mu.Unlock()
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	// The stubFailThenPassTemplate fails on attempt 1 and passes on attempt 2.
+	// OnPageStart should fire for attempt 1 at goroutine entry and attempt 2
+	// when the retry begins.
+	if len(calls) < 2 {
+		t.Fatalf("expected at least 2 OnPageStart calls, got %d: %v", len(calls), calls)
+	}
+	if calls[0] != 1 || calls[1] != 2 {
+		t.Errorf("expected [1 2] attempt sequence, got %v", calls)
+	}
 }

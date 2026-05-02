@@ -29,6 +29,18 @@ All notable changes to SourceBridge are documented here. The format follows
   that lands, every release-please-merged tag requires a manual re-push to
   fire downstream workflows. RELEASING.md documents the manual unblock.
 
+- **Per-page in-flight visibility for Living Wiki cold-starts** (CA-144).
+  Operators can now see which pages are mid-generation in the admin Monitor
+  when a Living Wiki cold-start is running. New REST endpoint
+  `GET /api/v1/admin/llm/jobs/{id}/livingwiki/in-flight` returns sorted
+  in-flight pages with elapsed time and a stuck-page warn-dot (yellow dot
+  when elapsed exceeds 3× the run's median, or 300s flat before 3
+  completions). Structured `slog` events (`page generation started`,
+  `page generation retrying`, `page generation finished`) carry `job_id`,
+  `page_id`, `template_id`, and `duration_ms` for headless operators using
+  log aggregation. The in-flight panel mounts under the expanded job row in
+  the Monitor UI for all running `living_wiki` jobs, polled every 2s.
+
 - **GraphQL `VersionInfo` reaches API parity with REST `/api/v1/version`**
   (`aeb92d8`, CA-138). The `VersionInfo` type now exposes all 7 fields
   the REST endpoint reports: `version`, `commit`, `buildDate`, `goVersion`,

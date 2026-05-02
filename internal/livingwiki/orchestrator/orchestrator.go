@@ -469,6 +469,12 @@ type GenerateRequest struct {
 	// Optional — used for observability (error logs on TierUnknown).
 	// When empty, job-level log fields are omitted.
 	JobID string
+
+	// OnPageStart is called when a page begins (or retries) generation.
+	// Fires from the per-page goroutine — callers MUST be goroutine-safe.
+	// It is safe to leave nil; the orchestrator's own tracker is populated
+	// independently of this callback (CA-144).
+	OnPageStart OnPageStartFunc
 }
 
 // GenerateResult summarises the outcome of a generation run.
@@ -544,6 +550,15 @@ const (
 	SoftFailureCategoryTemplateInternal    = "template_internal"
 )
 
+// OnPageStartFunc is called when a page begins generation (or re-enters
+// generation on a retry attempt). Fires from the per-page goroutine — callers
+// MUST be goroutine-safe. It is safe to leave nil.
+//
+// pageID is the planned page's ID (e.g. "arch.auth").
+// attempt is 1 for the first attempt and 2 for the retry.
+// startedAt is the wall-clock time the attempt began.
+type OnPageStartFunc func(pageID string, attempt int, startedAt time.Time)
+
 // Orchestrator is the living-wiki generation orchestrator.
 // Construct with [New].
 type Orchestrator struct {
@@ -551,6 +566,7 @@ type Orchestrator struct {
 	registry TemplateRegistry
 	store    PageStore
 	debounce *repoDebounceTracker // per-repo 60s debounce for incremental regen
+	tracker  *pageRunTracker      // in-flight page liveness tracker (CA-144)
 }
 
 // New creates a new Orchestrator. registry and store must be non-nil.
@@ -569,7 +585,7 @@ func New(cfg Config, registry TemplateRegistry, store PageStore) *Orchestrator {
 	}
 	cfg.SoftFailureWindow = effectiveSoftFailureWindow(cfg)
 	cfg.SoftFailureThreshold = effectiveSoftFailureThreshold(cfg)
-	return &Orchestrator{cfg: cfg, registry: registry, store: store, debounce: newRepoDebounceTracker()}
+	return &Orchestrator{cfg: cfg, registry: registry, store: store, debounce: newRepoDebounceTracker(), tracker: newPageRunTracker()}
 }
 
 // effectiveSoftFailureWindow returns the sliding-window size, applying the
@@ -616,6 +632,22 @@ func effectiveSoftFailureThreshold(cfg Config) int {
 // Called by the Phase 3 fix-up pass in the coldstart handler.
 func (o *Orchestrator) Store() PageStore { return o.store }
 
+// InFlightPages returns a sorted (by StartedAt ascending) snapshot of pages
+// that are currently mid-generation for the given jobID. Returns an empty
+// (non-nil) slice when the job is not tracked or has no in-flight pages.
+// Safe for concurrent use.
+func (o *Orchestrator) InFlightPages(jobID string) []InFlightPage {
+	return o.tracker.Snapshot(jobID)
+}
+
+// MedianCompletedPageMs returns the rolling median duration (in milliseconds)
+// of completed pages for the given jobID, and whether the value is meaningful.
+// Returns (0, false) when fewer than 3 pages have completed — callers should
+// fall back to a flat threshold in that case.
+func (o *Orchestrator) MedianCompletedPageMs(jobID string) (int64, bool) {
+	return o.tracker.MedianCompletedMs(jobID)
+}
+
 func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (GenerateResult, error) {
 	cfg := mergeConfig(o.cfg, req.Config)
 	// Recompute window/threshold defaults in case mergeConfig produced a
@@ -649,10 +681,63 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 	eg, egCtx := errgroup.WithContext(runCtx)
 	eg.SetLimit(cfg.MaxConcurrency)
 
+	// pageIDs collects the IDs of all pages we start tracking so the
+	// deferred error-path sweep can remove them if Generate returns an error.
+	pageIDs := make([]string, len(req.Pages))
+	for i, p := range req.Pages {
+		pageIDs[i] = p.ID
+	}
+
+	// Deferred error-path sweep: removes any remaining in-flight entries for
+	// this job when Generate returns with an error. The success path drains the
+	// tracker page-by-page in the persistence loop; this sweep is the safety
+	// net for hard-error and errgroup-cancellation exits only.
+	var generateErr error
+	defer func() {
+		if generateErr != nil {
+			o.tracker.RemoveMany(req.JobID, pageIDs)
+		}
+		// Final unconditional clear drops the per-job completion window and
+		// any zombie entries, regardless of success or error.
+		o.tracker.Clear(req.JobID)
+	}()
+
 	for idx, planned := range req.Pages {
 		idx, planned := idx, planned // capture for goroutine
 		eg.Go(func() error {
-			outcome, err := o.generateOnePage(egCtx, cfg, planned, tier)
+			// Record this page as in-flight immediately upon goroutine start.
+			pageStartedAt := time.Now()
+			o.tracker.Start(req.JobID, planned.ID, planned.TemplateID, 1)
+			slog.Info("livingwiki/orchestrator: page generation started",
+				"job_id", req.JobID,
+				"repo_id", cfg.RepoID,
+				"page_id", planned.ID,
+				"template_id", planned.TemplateID,
+				"attempt", 1,
+				"started_at", pageStartedAt,
+			)
+			if req.OnPageStart != nil {
+				req.OnPageStart(planned.ID, 1, pageStartedAt)
+			}
+
+			// onAttemptStart fires when generateOnePage enters attempt 2 (retry).
+			onAttemptStart := func(attempt int) {
+				retryAt := time.Now()
+				o.tracker.Start(req.JobID, planned.ID, planned.TemplateID, attempt)
+				slog.Info("livingwiki/orchestrator: page generation retrying",
+					"job_id", req.JobID,
+					"repo_id", cfg.RepoID,
+					"page_id", planned.ID,
+					"template_id", planned.TemplateID,
+					"attempt", attempt,
+					"started_at", retryAt,
+				)
+				if req.OnPageStart != nil {
+					req.OnPageStart(planned.ID, attempt, retryAt)
+				}
+			}
+
+			outcome, err := o.generateOnePage(egCtx, cfg, planned, tier, onAttemptStart)
 			if err != nil {
 				// Whole-run cancellation (parent ctx, deadline, or
 				// peer goroutine errored): propagate so eg.Wait can
@@ -755,6 +840,14 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 		files[wikiFilePath(outcome.page.ID)] = outcome.rendered
 	}
 
+	// Build a lookup from pageID → PlannedPage for use in finish-log emission
+	// in the persistence loops below.
+	plannedByID := make(map[string]PlannedPage, len(req.Pages))
+	for _, p := range req.Pages {
+		plannedByID[p.ID] = p
+	}
+	_ = plannedByID // used below in persistence loops
+
 	// Decide whether to persist partials.
 	shouldPersist := genErr == nil || IsPartialGenerationError(genErr)
 
@@ -795,6 +888,29 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 				if req.OnPageDone != nil {
 					req.OnPageDone(page.ID, false, "")
 				}
+				// Remove from tracker after OnPageDone; record duration for median.
+				// StartedAt is still in the tracker at this point (goroutine adds on
+				// start, persistence loop removes on completion — not the goroutine).
+				{
+					snap := o.tracker.Snapshot(req.JobID)
+					var durationMs int64
+					for _, entry := range snap {
+						if entry.PageID == page.ID {
+							durationMs = time.Since(entry.StartedAt).Milliseconds()
+							break
+						}
+					}
+					o.tracker.RecordCompletion(req.JobID, durationMs)
+					o.tracker.Remove(req.JobID, page.ID)
+					slog.Info("livingwiki/orchestrator: page generation finished",
+						"job_id", req.JobID,
+						"repo_id", cfg.RepoID,
+						"page_id", page.ID,
+						"template_id", page.Manifest.Template,
+						"duration_ms", durationMs,
+						"excluded", false,
+					)
+				}
 			}
 			if req.Writer != nil && len(files) > 0 {
 				if err := req.Writer.WriteFiles(persistCtx, files); err != nil {
@@ -834,6 +950,27 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 				if req.OnPageDone != nil {
 					req.OnPageDone(page.ID, false, "")
 				}
+				// Remove from tracker after OnPageDone; record duration for median.
+				{
+					snap := o.tracker.Snapshot(req.JobID)
+					var durationMs int64
+					for _, entry := range snap {
+						if entry.PageID == page.ID {
+							durationMs = time.Since(entry.StartedAt).Milliseconds()
+							break
+						}
+					}
+					o.tracker.RecordCompletion(req.JobID, durationMs)
+					o.tracker.Remove(req.JobID, page.ID)
+					slog.Info("livingwiki/orchestrator: page generation finished",
+						"job_id", req.JobID,
+						"repo_id", cfg.RepoID,
+						"page_id", page.ID,
+						"template_id", page.Manifest.Template,
+						"duration_ms", durationMs,
+						"excluded", false,
+					)
+				}
 			}
 			body := buildPRBody(persisted, excluded)
 			if err := req.PR.Open(persistCtx, cfg.PRBranch, cfg.PRTitle, body, files); err != nil {
@@ -855,13 +992,42 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 	// this sweep — consistent with "no progress reporting on hard failure."
 	// Warn semantics match goroutine-era parity: only ExclusionReasonLLMError
 	// populates the warning field (no semantic widening; see CA-145-followup-1).
-	if shouldPersist && req.OnPageDone != nil {
+	if shouldPersist {
 		for _, ex := range excluded {
 			warn := ""
 			if ex.Reason == ExclusionReasonLLMError {
 				warn = ex.FailureCategory
 			}
-			req.OnPageDone(ex.PageID, true, warn)
+			if req.OnPageDone != nil {
+				req.OnPageDone(ex.PageID, true, warn)
+			}
+			// Remove from tracker after OnPageDone fires (mirrors success path).
+			{
+				snap := o.tracker.Snapshot(req.JobID)
+				var durationMs int64
+				for _, entry := range snap {
+					if entry.PageID == ex.PageID {
+						durationMs = time.Since(entry.StartedAt).Milliseconds()
+						break
+					}
+				}
+				o.tracker.Remove(req.JobID, ex.PageID)
+				tmplID := ex.TemplateID
+				if tmplID == "" {
+					if p, ok := plannedByID[ex.PageID]; ok {
+						tmplID = p.TemplateID
+					}
+				}
+				slog.Info("livingwiki/orchestrator: page generation finished",
+					"job_id", req.JobID,
+					"repo_id", cfg.RepoID,
+					"page_id", ex.PageID,
+					"template_id", tmplID,
+					"duration_ms", durationMs,
+					"excluded", true,
+					"exclusion_reason", ex.Reason,
+				)
+			}
 		}
 	}
 
@@ -884,6 +1050,8 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 		PRID:      prID,
 		Duration:  time.Since(start),
 	}
+	// Set generateErr so the deferred error-path sweep can see it.
+	generateErr = genErr
 	if genErr != nil {
 		return result, genErr
 	}
@@ -1086,7 +1254,10 @@ func graphMetricsForPage(cfg Config, pageID string) quality.ValidatorConfig {
 // tier is the quality-gate calibration tier threaded from GenerateRequest.LLMTier
 // via Generate; it is captured once per run (not once per page) by the Generate
 // caller so all pages in a run use a consistent tier.
-func (o *Orchestrator) generateOnePage(ctx context.Context, cfg Config, planned PlannedPage, tier modeltier.QualityGateTier) (pageOutcome, error) {
+//
+// onAttemptStart, when non-nil, is called before the LLM call on attempt 2
+// (the retry). The orchestrator wires this to the tracker + start log.
+func (o *Orchestrator) generateOnePage(ctx context.Context, cfg Config, planned PlannedPage, tier modeltier.QualityGateTier, onAttemptStart func(attempt int)) (pageOutcome, error) {
 	tmpl, ok := o.registry.Lookup(planned.TemplateID)
 	if !ok {
 		// Wrap the sentinel so callers can distinguish "config bug, hard-fail"
@@ -1114,10 +1285,16 @@ func (o *Orchestrator) generateOnePage(ctx context.Context, cfg Config, planned 
 	for attempt := 1; attempt <= 2; attempt++ {
 		var err error
 
-		// On retry, inject the rejection reason into the prompt.
+		// On retry, fire the onAttemptStart callback and inject the rejection
+		// reason into the prompt.
 		input := planned.Input
-		if attempt == 2 && hasProfile {
-			input = injectRetryHint(input, firstResult.RetryPromptFragment())
+		if attempt == 2 {
+			if onAttemptStart != nil {
+				onAttemptStart(attempt)
+			}
+			if hasProfile {
+				input = injectRetryHint(input, firstResult.RetryPromptFragment())
+			}
 		}
 
 		page, err = callTemplate(ctx, tmpl, input, planned.PackageInfo)

@@ -245,7 +245,7 @@ func (o *Orchestrator) RefreshPage(
 	// Staleness refresh: no Snapshot available at this call site; use
 	// TierFrontier to preserve pre-CA-150 gate behavior for page refreshes.
 	// CA-150 Phase 4 covers cold-start + on-demand only.
-	outcome, err := o.generateOnePage(ctx, cfg, planned, modeltier.TierFrontier)
+	outcome, err := o.generateOnePage(ctx, cfg, planned, modeltier.TierFrontier, nil)
 	if err != nil {
 		return ast.Page{}, fmt.Errorf("RefreshPage(%q): generate: %w", planned.ID, err)
 	}
