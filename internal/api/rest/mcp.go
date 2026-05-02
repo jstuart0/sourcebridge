@@ -25,6 +25,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
 	"github.com/sourcebridge/sourcebridge/internal/search"
+	"github.com/sourcebridge/sourcebridge/internal/version"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 
@@ -38,9 +39,18 @@ import (
 const (
 	mcpProtocolVersion = "2025-11-25"
 	mcpServerName      = "sourcebridge"
-	mcpServerVersion   = "1.0.0"
 	mcpMaxBodySize     = 1 << 20 // 1MB
 )
+
+// mcpServerVersion returns the build-time version of the SourceBridge MCP
+// server. Reads from internal/version (the same symbol /api/v1/version,
+// admin/status, GraphQL Query.version, and the telemetry sender all use)
+// so every visible version surface on a given binary reports the same
+// string. Was a hardcoded "1.0.0" constant before CA-137.
+//
+// Kept as a function (not a var) so it cannot be ldflag-mutated and so
+// callers can't accidentally cache a stale value at package init.
+func mcpServerVersion() string { return version.Version }
 
 // ---------------------------------------------------------------------------
 // JSON-RPC types
@@ -812,7 +822,7 @@ func (h *mcpHandler) handleInitialize(session *mcpSession, msg jsonRPCRequest) j
 		},
 		"serverInfo": map[string]interface{}{
 			"name":    mcpServerName,
-			"version": mcpServerVersion,
+			"version": mcpServerVersion(),
 		},
 	})
 }
@@ -825,7 +835,7 @@ func (h *mcpHandler) experimentalCapabilities() map[string]interface{} {
 	features := capabilities.AvailableNames(h.edition)
 	return map[string]interface{}{
 		"edition":  string(h.edition),
-		"version":  mcpServerVersion,
+		"version":  mcpServerVersion(),
 		"features": features,
 		"latency_classes": map[string]interface{}{
 			"fast_read":    "<= 100ms",

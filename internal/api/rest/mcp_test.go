@@ -19,6 +19,7 @@ import (
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
+	"github.com/sourcebridge/sourcebridge/internal/version"
 
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 )
@@ -406,6 +407,37 @@ func TestMCP_InitializeHandshake(t *testing.T) {
 	}
 	if serverInfo["name"] != mcpServerName {
 		t.Errorf("expected server name %s, got %v", mcpServerName, serverInfo["name"])
+	}
+	// CA-137: serverInfo.version must report the same string as
+	// internal/version.Version (i.e. the same string /api/v1/version,
+	// admin/status, GraphQL Query.version, and telemetry pings report).
+	// In test builds (no ldflags) this is "dev". In release builds it is
+	// the git-derived version per scripts/version.sh.
+	if got := serverInfo["version"]; got != version.Version {
+		t.Errorf("expected serverInfo.version=%q (matching internal/version.Version), got %v", version.Version, got)
+	}
+	if version.Version == "" {
+		t.Error("internal/version.Version must never be empty; check ldflags or default")
+	}
+
+	// CA-137: experimental.sourcebridge.version must also report the
+	// build version. The capability registry exposes it for clients that
+	// want to surface "I am talking to SourceBridge vX" in their tool
+	// list without having to re-issue an initialize.
+	caps, ok := result["capabilities"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected capabilities in result")
+	}
+	exp, ok := caps["experimental"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected capabilities.experimental in result")
+	}
+	sb, ok := exp["sourcebridge"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected capabilities.experimental.sourcebridge in result")
+	}
+	if got := sb["version"]; got != version.Version {
+		t.Errorf("expected experimental.sourcebridge.version=%q, got %v", version.Version, got)
 	}
 }
 
