@@ -187,3 +187,27 @@ func repoSinksToInputs(sinks []livingwiki.RepoWikiSink) []*RepoWikiSinkInput {
 	return out
 }
 
+// deriveLivingWikiJobMode determines the cold-start job's GenerationMode
+// from the EFFECTIVE mode flags (persisted row + transient input
+// overrides). Overview-only → lw_overview. All other shapes
+// (detailed-only, both-on, both-off) → lw_detailed.
+//
+// The "both-on" case is handled upstream by TriggerLivingWikiColdStartAllEnabled,
+// which calls EnableLivingWikiForRepo twice with distinct transient overrides
+// (one Overview-only, one Detailed-only) so this helper sees an effective
+// shape that maps to a single mode per call.
+//
+// Pure function: no I/O, no side effects. Tested directly via unit
+// tests in living_wiki_mode_flags_test.go.
+//
+// CA-138: extracted from EnableLivingWikiForRepo's inline derivation
+// (formerly schema.resolvers.go:2588) so the logic is testable in
+// isolation and the override-flag plumbing fix has direct test
+// coverage.
+func deriveLivingWikiJobMode(s livingwiki.RepositoryLivingWikiSettings) string {
+	if s.LivingWikiOverviewEnabled && !s.LivingWikiDetailedEnabled {
+		return GenerationModeLWOverview
+	}
+	return GenerationModeLWDetailed
+}
+

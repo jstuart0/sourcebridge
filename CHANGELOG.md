@@ -8,6 +8,71 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ### Added
 
+- **Auto-version-bump-on-merge via release-please** (`<PENDING>`, CA-147).
+  Adopted [release-please](https://github.com/googleapis/release-please) to
+  automate version bumping and changelog generation. Conventional-commit PRs
+  to main now drive an always-current Release PR; merging it cuts the next
+  tag, which fires `oss-release.yml` (when `RELEASE_PLEASE_TOKEN` is
+  provisioned) for the existing binary build / Docker image / cosign /
+  Homebrew tap pipeline. Manifest-MINIMAL: tracks only the canonical release
+  surfaces — git tags (root, `release-type: go`) and
+  `plugins/vscode/package.json` (separate VSCode-marketplace cadence,
+  tagged as `sourcebridge-vscode-vX.Y.Z`). The web bundle, Python worker,
+  and example app are decorative — explicitly NOT bumped to avoid churn.
+  CHANGELOG storytelling preserved as much as possible via
+  `changelog-sections` config (Keep-a-Changelog mapping). `oss-release.yml`
+  patched to set `generate_release_notes: false` so release-please owns
+  release-note text. Both tag-triggered workflows tightened to SemVer-shaped
+  globs to avoid plugin-tag collisions. RELEASING.md fully rewritten;
+  CONTRIBUTING.md gains a "Commit messages" section explaining conventional
+  commits. Token provisioning (GH App preferred) tracked in CA-149 — until
+  that lands, every release-please-merged tag requires a manual re-push to
+  fire downstream workflows. RELEASING.md documents the manual unblock.
+
+- **GraphQL `VersionInfo` reaches API parity with REST `/api/v1/version`**
+  (`<PENDING>`, CA-138). The `VersionInfo` type now exposes all 7 fields
+  the REST endpoint reports: `version`, `commit`, `buildDate`, `goVersion`,
+  `edition`, `buildEdition`, `workerVersion`. Identical cached worker-version
+  lookup is shared between REST and GraphQL via a new `Resolver.WorkerVersion`
+  function-shaped DI wired from `rest.NewServer`. A new parity test in
+  `internal/api/rest/graphql_version_parity_test.go` asserts both surfaces
+  return field-for-field identical responses for every config shape.
+
+### Fixed
+
+- **Living Wiki mode-override flag plumbing in `EnableLivingWikiForRepo`**
+  (`<PENDING>`, CA-138). The resolver previously built a fresh
+  `RepositoryLivingWikiSettings` from scratch on every call, which (a)
+  ignored the input's `LivingWikiOverviewEnabled` / `LivingWikiDetailedEnabled`
+  override pointers AND (b) wiped any persisted mode flags from prior
+  `setLivingWikiModeFlags` calls. Effect:
+  `triggerLivingWikiColdStart(mode: OVERVIEW)` and
+  `triggerLivingWikiColdStartAllEnabled` did not actually drive distinct
+  cold-start jobs by mode, and every UI save reset the persisted mode flags
+  to zero. The fix:
+  - Load existing settings; persist a merged record that preserves all
+    pre-existing fields the input doesn't explicitly overwrite.
+  - Treat `LivingWikiOverviewEnabled` / `LivingWikiDetailedEnabled` as
+    TRANSIENT — they drive per-job mode derivation only, never the
+    persisted row. Persistence for mode flags remains owned by
+    `setLivingWikiModeFlags`.
+  - Clear `DisabledAt` on re-enable (matches `UpdateRepositoryLivingWikiSettings`
+    semantics).
+  - Extracted the job-mode derivation into `deriveLivingWikiJobMode` for
+    direct unit-test coverage (no orchestrator stub needed).
+  Nine new tests in `living_wiki_mode_flags_test.go` cover the contract
+  (`Test*Override*` and `TestDeriveLivingWikiJobMode_*`).
+
+- **gqlgen drift untangle** (`<PENDING>`, CA-138). `gqlgen.yml` now
+  preserves the two override pointers via `extraFields` with explicit
+  `overrideTags: 'json:"-"'`. Resolver-ownership inversion: four
+  resolvers that gqlgen kept duplicating into `schema.resolvers.go`
+  (`GenerateLivingWikiPageOnDemand`, `SetRepositoryLLMOverride`,
+  `ClearRepositoryLLMOverride`, `LlmOverride`) now live exclusively in
+  `schema.resolvers.go`; `living_wiki_on_demand.go` deleted, the helpers
+  in `repository_llm_override.resolvers.go` retained. `gqlgen generate`
+  is now idempotent (verified via consecutive runs producing zero diff).
+
 - **MCP server reports git-derived version** (`47adbad`, CA-137). The
   SourceBridge MCP server (`internal/api/rest/mcp.go`) previously
   hardcoded `mcpServerVersion = "1.0.0"` in its `initialize` response's

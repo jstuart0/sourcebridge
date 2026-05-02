@@ -8,6 +8,7 @@ package graphql
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 )
@@ -178,5 +179,329 @@ func TestMapRepoLivingWikiSettingsExposesModeFlagsInGQL(t *testing.T) {
 	}
 	if gql.LivingWikiDetailedEnabled {
 		t.Error("GQL detailedEnabled should be false")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CA-138: deriveLivingWikiJobMode + override-flag plumbing fix.
+//
+// These tests verify the fix for the latent override-flag plumbing bug
+// surfaced by codex r1 against the prior CA-138 plan. The bug:
+// EnableLivingWikiForRepo built a fresh settings record from scratch,
+// ignoring the input's LivingWikiOverviewEnabled / LivingWikiDetailedEnabled
+// override pointers AND wiping any prior persisted mode flags. Effect:
+// triggerLivingWikiColdStart(mode: OVERVIEW) etc. did not actually drive
+// distinct cold-start jobs.
+//
+// The CA-138 fix: load existing settings, persist canonical row WITHOUT
+// applying the override pointers, then derive jobMode from a job-local
+// merged copy. The override pointers are TRANSIENT — they affect job
+// mode only, never the persisted row. setLivingWikiModeFlags remains
+// the source of truth for persisted mode flags.
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestDeriveLivingWikiJobMode_OverviewOnly_LWOverview(t *testing.T) {
+	got := deriveLivingWikiJobMode(livingwiki.RepositoryLivingWikiSettings{
+		LivingWikiOverviewEnabled: true,
+		LivingWikiDetailedEnabled: false,
+	})
+	if got != GenerationModeLWOverview {
+		t.Errorf("overview-only: got %q, want %q", got, GenerationModeLWOverview)
+	}
+}
+
+func TestDeriveLivingWikiJobMode_DetailedOnly_LWDetailed(t *testing.T) {
+	got := deriveLivingWikiJobMode(livingwiki.RepositoryLivingWikiSettings{
+		LivingWikiOverviewEnabled: false,
+		LivingWikiDetailedEnabled: true,
+	})
+	if got != GenerationModeLWDetailed {
+		t.Errorf("detailed-only: got %q, want %q", got, GenerationModeLWDetailed)
+	}
+}
+
+func TestDeriveLivingWikiJobMode_BothEnabled_LWDetailed(t *testing.T) {
+	// "Both enabled" is the upstream-handled case (TriggerLivingWikiColdStartAllEnabled
+	// calls EnableLivingWikiForRepo twice with distinct overrides). When the
+	// EFFECTIVE settings reach the helper with both flags on, we use lw_detailed
+	// as the fallback — but that's never the in-flight case for a single job.
+	got := deriveLivingWikiJobMode(livingwiki.RepositoryLivingWikiSettings{
+		LivingWikiOverviewEnabled: true,
+		LivingWikiDetailedEnabled: true,
+	})
+	if got != GenerationModeLWDetailed {
+		t.Errorf("both-enabled: got %q, want %q", got, GenerationModeLWDetailed)
+	}
+}
+
+func TestDeriveLivingWikiJobMode_BothDisabled_LWDetailed(t *testing.T) {
+	got := deriveLivingWikiJobMode(livingwiki.RepositoryLivingWikiSettings{})
+	if got != GenerationModeLWDetailed {
+		t.Errorf("both-disabled: got %q, want %q", got, GenerationModeLWDetailed)
+	}
+}
+
+// modeFlagsResolverWithSinks returns a mutationResolver pre-seeded with
+// the given mode flags AND a configured git_repo sink so EnableLivingWikiForRepo
+// can proceed past sink validation.
+func modeFlagsResolverWithSinks(repoID string, overview, detailed bool) (*mutationResolver, *livingwiki.RepoSettingsMemStore) {
+	store := livingwiki.NewRepoSettingsMemStore()
+	_ = store.SetRepoSettings(context.Background(), livingwiki.RepositoryLivingWikiSettings{
+		TenantID:                  "default",
+		RepoID:                    repoID,
+		Enabled:                   true,
+		LivingWikiOverviewEnabled: overview,
+		LivingWikiDetailedEnabled: detailed,
+		Sinks:                     []livingwiki.RepoWikiSink{{Kind: livingwiki.RepoWikiSinkGitRepo}},
+	})
+	return &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: store}}, store
+}
+
+// TestEnableLivingWikiForRepo_OverviewOverride_DoesNotPersistFlags is the
+// regression guard for the codex r1 High 2 finding. With the transient-
+// overrides pattern, calling EnableLivingWikiForRepo with an OVERVIEW
+// override on a repo whose persisted flags are both-on must:
+//   - persist the row WITHOUT mutating the existing mode flags
+//   - return successfully
+// The job mode itself is verified by the deriveLivingWikiJobMode tests above.
+func TestEnableLivingWikiForRepo_OverviewOverride_DoesNotPersistFlags(t *testing.T) {
+	r, store := modeFlagsResolverWithSinks("repo-override-1", true, true)
+
+	t_ := true
+	f_ := false
+	input := EnableLivingWikiForRepoInput{
+		RepositoryID:              "repo-override-1",
+		Mode:                      RepoWikiModePrReview,
+		Sinks:                     []*RepoWikiSinkInput{{Kind: RepoWikiSinkKindGitRepo}},
+		LivingWikiOverviewEnabled: &t_,
+		LivingWikiDetailedEnabled: &f_,
+	}
+	if _, err := r.EnableLivingWikiForRepo(context.Background(), input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	saved, _ := store.GetRepoSettings(context.Background(), "default", "repo-override-1")
+	if saved == nil {
+		t.Fatal("expected settings persisted")
+	}
+	if !saved.LivingWikiOverviewEnabled {
+		t.Error("transient overview-override must NOT clear the persisted overviewEnabled flag")
+	}
+	if !saved.LivingWikiDetailedEnabled {
+		t.Error("transient overview-override must NOT clear the persisted detailedEnabled flag")
+	}
+}
+
+// TestEnableLivingWikiForRepo_DetailedOverride_DoesNotPersistFlags mirrors
+// the above for DETAILED override.
+func TestEnableLivingWikiForRepo_DetailedOverride_DoesNotPersistFlags(t *testing.T) {
+	r, store := modeFlagsResolverWithSinks("repo-override-2", true, true)
+
+	t_ := true
+	f_ := false
+	input := EnableLivingWikiForRepoInput{
+		RepositoryID:              "repo-override-2",
+		Mode:                      RepoWikiModePrReview,
+		Sinks:                     []*RepoWikiSinkInput{{Kind: RepoWikiSinkKindGitRepo}},
+		LivingWikiOverviewEnabled: &f_,
+		LivingWikiDetailedEnabled: &t_,
+	}
+	if _, err := r.EnableLivingWikiForRepo(context.Background(), input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	saved, _ := store.GetRepoSettings(context.Background(), "default", "repo-override-2")
+	if saved == nil {
+		t.Fatal("expected settings persisted")
+	}
+	if !saved.LivingWikiOverviewEnabled {
+		t.Error("transient detailed-override must NOT clear the persisted overviewEnabled flag")
+	}
+	if !saved.LivingWikiDetailedEnabled {
+		t.Error("transient detailed-override must NOT clear the persisted detailedEnabled flag")
+	}
+}
+
+// TestEnableLivingWikiForRepo_NoOverride_PreservesPersistedFlags is a
+// regression guard against the secondary form of the bug: the prior
+// from-scratch struct build wiped the persisted mode flags on every UI
+// save. With the load-and-merge pattern, a UI save with no override
+// pointers must preserve whatever setLivingWikiModeFlags had previously
+// persisted.
+func TestEnableLivingWikiForRepo_NoOverride_PreservesPersistedFlags(t *testing.T) {
+	// Seed: overview=true, detailed=false (from a hypothetical setLivingWikiModeFlags call).
+	r, store := modeFlagsResolverWithSinks("repo-override-3", true, false)
+
+	// UI-save-shaped call — no override pointers.
+	input := EnableLivingWikiForRepoInput{
+		RepositoryID: "repo-override-3",
+		Mode:         RepoWikiModePrReview,
+		Sinks:        []*RepoWikiSinkInput{{Kind: RepoWikiSinkKindGitRepo}},
+	}
+	if _, err := r.EnableLivingWikiForRepo(context.Background(), input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	saved, _ := store.GetRepoSettings(context.Background(), "default", "repo-override-3")
+	if saved == nil {
+		t.Fatal("expected settings persisted")
+	}
+	if !saved.LivingWikiOverviewEnabled {
+		t.Error("UI save with no overrides must preserve persisted overviewEnabled (was true, now false)")
+	}
+	if saved.LivingWikiDetailedEnabled {
+		t.Errorf("UI save with no overrides must preserve persisted detailedEnabled (was false, now %v)", saved.LivingWikiDetailedEnabled)
+	}
+}
+
+// TestEnableLivingWikiForRepo_ReEnable_ClearsDisabledAt verifies the
+// codex r1 Medium 1 finding: the fix MUST clear DisabledAt on re-enable
+// to match UpdateRepositoryLivingWikiSettings semantics.
+func TestEnableLivingWikiForRepo_ReEnable_ClearsDisabledAt(t *testing.T) {
+	store := livingwiki.NewRepoSettingsMemStore()
+	pastTime := time.Now().Add(-1 * time.Hour)
+	_ = store.SetRepoSettings(context.Background(), livingwiki.RepositoryLivingWikiSettings{
+		TenantID:   "default",
+		RepoID:     "repo-redisable",
+		Enabled:    false,
+		DisabledAt: &pastTime,
+		Sinks:      []livingwiki.RepoWikiSink{{Kind: livingwiki.RepoWikiSinkGitRepo}},
+	})
+	r := &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: store}}
+
+	input := EnableLivingWikiForRepoInput{
+		RepositoryID: "repo-redisable",
+		Mode:         RepoWikiModePrReview,
+		Sinks:        []*RepoWikiSinkInput{{Kind: RepoWikiSinkKindGitRepo}},
+	}
+	if _, err := r.EnableLivingWikiForRepo(context.Background(), input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	saved, _ := store.GetRepoSettings(context.Background(), "default", "repo-redisable")
+	if saved == nil {
+		t.Fatal("expected settings persisted")
+	}
+	if !saved.Enabled {
+		t.Error("re-enable should set Enabled=true")
+	}
+	if saved.DisabledAt != nil {
+		t.Errorf("re-enable must clear DisabledAt; still set to %v", saved.DisabledAt)
+	}
+}
+
+// TestEnableLivingWikiForRepo_NewRepo_BuildsDefaults verifies the
+// load-and-merge pattern doesn't fail on a repo that has no prior
+// settings row (existing == nil case). All seed defaults must apply,
+// INCLUDING the mode flags (overview=true, detailed=false per LD-13)
+// — without those, the UI would show "No build modes enabled" right
+// after the user clicks Enable for a brand-new repo. (Codex r2
+// Medium finding.)
+func TestEnableLivingWikiForRepo_NewRepo_BuildsDefaults(t *testing.T) {
+	store := livingwiki.NewRepoSettingsMemStore()
+	r := &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: store}}
+
+	input := EnableLivingWikiForRepoInput{
+		RepositoryID: "repo-new",
+		Mode:         RepoWikiModePrReview,
+		Sinks:        []*RepoWikiSinkInput{{Kind: RepoWikiSinkKindGitRepo}},
+	}
+	if _, err := r.EnableLivingWikiForRepo(context.Background(), input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	saved, _ := store.GetRepoSettings(context.Background(), "default", "repo-new")
+	if saved == nil {
+		t.Fatal("expected settings persisted")
+	}
+	if !saved.Enabled {
+		t.Error("expected Enabled=true on new repo")
+	}
+	if saved.StaleWhenStrategy != livingwiki.StaleStrategyDirect {
+		t.Errorf("expected StaleStrategy=DIRECT default, got %q", saved.StaleWhenStrategy)
+	}
+	if saved.MaxPagesPerJob != 50 {
+		t.Errorf("expected MaxPagesPerJob=50 default, got %d", saved.MaxPagesPerJob)
+	}
+	// Codex r2 Medium: first-time enable must seed mode-flag defaults.
+	if !saved.LivingWikiOverviewEnabled {
+		t.Error("expected LivingWikiOverviewEnabled=true on new repo (LD-13 default)")
+	}
+	if saved.LivingWikiDetailedEnabled {
+		t.Error("expected LivingWikiDetailedEnabled=false on new repo (LD-13 default)")
+	}
+}
+
+// TestTriggerLivingWikiColdStartAllEnabled_PreservesPersistedFlags
+// verifies the trigger-all path's persistence invariant. The two
+// delegated EnableLivingWikiForRepo calls both pass transient overrides
+// (Overview-only then Detailed-only) but neither must touch the
+// persisted row's mode flags — the row stays "both on" throughout.
+// (Codex r2 Low 1 — full trigger-all call-site contract.)
+func TestTriggerLivingWikiColdStartAllEnabled_PreservesPersistedFlags(t *testing.T) {
+	r, store := modeFlagsResolverWithSinks("repo-trigger-all", true, true)
+
+	if _, err := r.TriggerLivingWikiColdStartAllEnabled(context.Background(), "repo-trigger-all"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	saved, _ := store.GetRepoSettings(context.Background(), "default", "repo-trigger-all")
+	if saved == nil {
+		t.Fatal("expected settings persisted")
+	}
+	if !saved.LivingWikiOverviewEnabled {
+		t.Error("triggerAll must NOT clear persisted overviewEnabled")
+	}
+	if !saved.LivingWikiDetailedEnabled {
+		t.Error("triggerAll must NOT clear persisted detailedEnabled")
+	}
+}
+
+// TestRetryLivingWikiJob_OverviewOverride_PreservesPersistedFlags is
+// the explicit retry-path persistence assertion. Calling retry with an
+// OVERVIEW mode override sets a transient pointer in the input — the
+// persisted row's flags must NOT change as a result. (Codex r2 Low 1
+// — full retry call-site contract.)
+func TestRetryLivingWikiJob_OverviewOverride_PreservesPersistedFlags(t *testing.T) {
+	// Seed: overview=false, detailed=true. Retry with mode=OVERVIEW
+	// passes transient overrides; persisted flags must survive.
+	r, store := modeFlagsResolverWithSinks("repo-retry-1", false, true)
+
+	mode := LivingWikiBuildModeOverview
+	if _, err := r.RetryLivingWikiJob(context.Background(), "repo-retry-1", nil, &mode); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	saved, _ := store.GetRepoSettings(context.Background(), "default", "repo-retry-1")
+	if saved == nil {
+		t.Fatal("expected settings persisted")
+	}
+	if saved.LivingWikiOverviewEnabled {
+		t.Error("retry(OVERVIEW) must NOT mutate persisted overviewEnabled (was false, now true)")
+	}
+	if !saved.LivingWikiDetailedEnabled {
+		t.Error("retry(OVERVIEW) must NOT mutate persisted detailedEnabled (was true, now false)")
+	}
+}
+
+// TestRetryLivingWikiJob_DetailedOverride_PreservesPersistedFlags
+// mirrors the above for a DETAILED override.
+func TestRetryLivingWikiJob_DetailedOverride_PreservesPersistedFlags(t *testing.T) {
+	r, store := modeFlagsResolverWithSinks("repo-retry-2", true, false)
+
+	mode := LivingWikiBuildModeDetailed
+	if _, err := r.RetryLivingWikiJob(context.Background(), "repo-retry-2", nil, &mode); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	saved, _ := store.GetRepoSettings(context.Background(), "default", "repo-retry-2")
+	if saved == nil {
+		t.Fatal("expected settings persisted")
+	}
+	if !saved.LivingWikiOverviewEnabled {
+		t.Error("retry(DETAILED) must NOT mutate persisted overviewEnabled (was true, now false)")
+	}
+	if saved.LivingWikiDetailedEnabled {
+		t.Error("retry(DETAILED) must NOT mutate persisted detailedEnabled (was false, now true)")
 	}
 }

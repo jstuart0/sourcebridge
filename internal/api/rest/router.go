@@ -694,6 +694,17 @@ func (s *Server) setupRouter() {
 			LivingWikiLiveOrchestrator: s.livingWikiLiveOrchestrator,
 			ClusteringHook:             s.clusteringHookFunc(),
 			ClusterStore:               gqlClusterStore,
+			// CA-138: share the REST server's cached worker-version
+			// lookup with the GraphQL resolver so /api/v1/version and
+			// the GraphQL `version { workerVersion }` field return
+			// identical cached results without flooding the worker.
+			// Closure preserves the package-private versionLookup.
+			WorkerVersion: func(ctx context.Context) string {
+				if s.workerVersionLookup == nil {
+					return ""
+				}
+				return s.workerVersionLookup.get(ctx)
+			},
 		},
 	}))
 

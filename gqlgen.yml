@@ -55,3 +55,21 @@ models:
           the lastJobResult and llmOverride field resolvers can query their
           respective stores. Not part of the GraphQL schema — populated by
           mapRepoLivingWikiSettings.
+  EnableLivingWikiForRepoInput:
+    extraFields:
+      LivingWikiOverviewEnabled:
+        type: "*bool"
+        overrideTags: 'json:"-"'
+        description: |-
+          Internal: mode-override flag set by RetryLivingWikiJob and
+          TriggerLivingWikiColdStartAllEnabled before delegating to
+          EnableLivingWikiForRepo. Not part of the GraphQL schema — never
+          set from the wire. EnableLivingWikiForRepo treats these
+          overrides as TRANSIENT (per-job mode derivation only); they
+          are NOT persisted to the repo settings row. The persistence
+          source of truth for mode flags is setLivingWikiModeFlags.
+      LivingWikiDetailedEnabled:
+        type: "*bool"
+        overrideTags: 'json:"-"'
+        description: |-
+          Internal: see LivingWikiOverviewEnabled.

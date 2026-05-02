@@ -318,9 +318,20 @@ type PlatformHealth {
 }
 
 type VersionInfo {
+  """The git-derived version string, e.g. v0.9.0-rc.3-dev.226+g22a003a."""
   version: String!
+  """Full git SHA of the build commit."""
   commit: String!
+  """RFC3339 build timestamp."""
   buildDate: String!
+  """Go runtime version of the API server (e.g. go1.25.9). Reports the API server's runtime only; the worker may run a different toolchain."""
+  goVersion: String!
+  """Edition resolved from runtime config (cfg.Edition). Source of truth for what the operator deployed."""
+  edition: String!
+  """Edition baked into the binary at build time. Informational; surfaces parity gaps when build-arg and runtime-config disagree."""
+  buildEdition: String!
+  """Worker version reported by the gRPC VersionService. Empty string when worker is nil/unreachable/slow."""
+  workerVersion: String!
 }
 
 type MutationResult {

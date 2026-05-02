@@ -353,8 +353,16 @@ type EnableLivingWikiForRepoInput struct {
 	// were excluded in the most recent job (from lw_job_results.excluded_page_ids).
 	// Used by the "Retry excluded pages" CTA. Defaults to false (full run).
 	RetryExcludedOnly *bool `json:"retryExcludedOnly,omitempty"`
-	LivingWikiOverviewEnabled *bool `json:"-"`
+	// Internal: see LivingWikiOverviewEnabled.
 	LivingWikiDetailedEnabled *bool `json:"-"`
+	// Internal: mode-override flag set by RetryLivingWikiJob and
+	// TriggerLivingWikiColdStartAllEnabled before delegating to
+	// EnableLivingWikiForRepo. Not part of the GraphQL schema — never
+	// set from the wire. EnableLivingWikiForRepo treats these
+	// overrides as TRANSIENT (per-job mode derivation only); they
+	// are NOT persisted to the repo settings row. The persistence
+	// source of truth for mode flags is setLivingWikiModeFlags.
+	LivingWikiOverviewEnabled *bool `json:"-"`
 }
 
 type EnableLivingWikiResult struct {
@@ -1012,9 +1020,9 @@ type RepositoryLivingWikiSettings struct {
 	// ops. Returns null when no override exists. The api_key is never
 	// returned in plaintext — apiKeySet+apiKeyHint expose enough for the
 	// UI to render saved-state without leaking the secret.
-	LlmOverride *RepositoryLLMOverride `json:"llmOverride,omitempty"`
-	LivingWikiOverviewEnabled bool `json:"livingWikiOverviewEnabled"`
-	LivingWikiDetailedEnabled bool `json:"livingWikiDetailedEnabled"`
+	LlmOverride               *RepositoryLLMOverride `json:"llmOverride,omitempty"`
+	LivingWikiOverviewEnabled bool                   `json:"livingWikiOverviewEnabled"`
+	LivingWikiDetailedEnabled bool                   `json:"livingWikiDetailedEnabled"`
 	// Internal: the repo ID, threaded through from the parent resolver so
 	// the lastJobResult and llmOverride field resolvers can query their
 	// respective stores. Not part of the GraphQL schema — populated by
@@ -1382,9 +1390,20 @@ type UpdateRequirementFieldsInput struct {
 }
 
 type VersionInfo struct {
-	Version   string `json:"version"`
-	Commit    string `json:"commit"`
+	// The git-derived version string, e.g. v0.9.0-rc.3-dev.226+g22a003a.
+	Version string `json:"version"`
+	// Full git SHA of the build commit.
+	Commit string `json:"commit"`
+	// RFC3339 build timestamp.
 	BuildDate string `json:"buildDate"`
+	// Go runtime version of the API server (e.g. go1.25.9). Reports the API server's runtime only; the worker may run a different toolchain.
+	GoVersion string `json:"goVersion"`
+	// Edition resolved from runtime config (cfg.Edition). Source of truth for what the operator deployed.
+	Edition string `json:"edition"`
+	// Edition baked into the binary at build time. Informational; surfaces parity gaps when build-arg and runtime-config disagree.
+	BuildEdition string `json:"buildEdition"`
+	// Worker version reported by the gRPC VersionService. Empty string when worker is nil/unreachable/slow.
+	WorkerVersion string `json:"workerVersion"`
 }
 
 type Confidence string
@@ -2225,6 +2244,63 @@ func (e Language) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+type LivingWikiBuildMode string
+
+const (
+	LivingWikiBuildModeOverview   LivingWikiBuildMode = "OVERVIEW"
+	LivingWikiBuildModeDetailed   LivingWikiBuildMode = "DETAILED"
+	LivingWikiBuildModeAllEnabled LivingWikiBuildMode = "ALL_ENABLED"
+)
+
+var AllLivingWikiBuildMode = []LivingWikiBuildMode{
+	LivingWikiBuildModeOverview,
+	LivingWikiBuildModeDetailed,
+	LivingWikiBuildModeAllEnabled,
+}
+
+func (e LivingWikiBuildMode) IsValid() bool {
+	switch e {
+	case LivingWikiBuildModeOverview, LivingWikiBuildModeDetailed, LivingWikiBuildModeAllEnabled:
+		return true
+	}
+	return false
+}
+
+func (e LivingWikiBuildMode) String() string {
+	return string(e)
+}
+
+func (e *LivingWikiBuildMode) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = LivingWikiBuildMode(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid LivingWikiBuildMode", str)
+	}
+	return nil
+}
+
+func (e LivingWikiBuildMode) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *LivingWikiBuildMode) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e LivingWikiBuildMode) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
 type RepoStaleWhenStrategy string
 
 const (
@@ -3055,62 +3131,6 @@ func (e *UpstreamStatus) UnmarshalJSON(b []byte) error {
 }
 
 func (e UpstreamStatus) MarshalJSON() ([]byte, error) {
-	var buf bytes.Buffer
-	e.MarshalGQL(&buf)
-	return buf.Bytes(), nil
-}
-
-type LivingWikiBuildMode string
-
-const (
-	LivingWikiBuildModeOverview   LivingWikiBuildMode = "OVERVIEW"
-	LivingWikiBuildModeDetailed   LivingWikiBuildMode = "DETAILED"
-	LivingWikiBuildModeAllEnabled LivingWikiBuildMode = "ALL_ENABLED"
-)
-
-var AllLivingWikiBuildMode = []LivingWikiBuildMode{
-	LivingWikiBuildModeOverview,
-	LivingWikiBuildModeDetailed,
-	LivingWikiBuildModeAllEnabled,
-}
-
-func (e LivingWikiBuildMode) IsValid() bool {
-	switch e {
-	case LivingWikiBuildModeOverview, LivingWikiBuildModeDetailed, LivingWikiBuildModeAllEnabled:
-		return true
-	}
-	return false
-}
-
-func (e LivingWikiBuildMode) String() string {
-	return string(e)
-}
-
-func (e *LivingWikiBuildMode) UnmarshalGQL(v any) error {
-	str, ok := v.(string)
-	if !ok {
-		return fmt.Errorf("enums must be strings")
-	}
-	*e = LivingWikiBuildMode(str)
-	if !e.IsValid() {
-		return fmt.Errorf("%s is not a valid LivingWikiBuildMode", str)
-	}
-	return nil
-}
-
-func (e LivingWikiBuildMode) MarshalGQL(w io.Writer) {
-	fmt.Fprint(w, strconv.Quote(e.String()))
-}
-
-func (e *LivingWikiBuildMode) UnmarshalJSON(b []byte) error {
-	s, err := strconv.Unquote(string(b))
-	if err != nil {
-		return err
-	}
-	return e.UnmarshalGQL(s)
-}
-
-func (e LivingWikiBuildMode) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	e.MarshalGQL(&buf)
 	return buf.Bytes(), nil

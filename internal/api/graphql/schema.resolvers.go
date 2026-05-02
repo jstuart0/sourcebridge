@@ -7,6 +7,7 @@ package graphql
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/99designs/gqlgen/graphql"
 	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
 	contractsv1 "github.com/sourcebridge/sourcebridge/gen/go/contracts/v1"
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
@@ -27,15 +29,18 @@ import (
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
+	"github.com/sourcebridge/sourcebridge/internal/livingwiki/coldstart"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/governance"
+	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
+	"github.com/sourcebridge/sourcebridge/internal/quality"
+	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
 	"github.com/sourcebridge/sourcebridge/internal/requirements"
 	"github.com/sourcebridge/sourcebridge/internal/search"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 	"github.com/sourcebridge/sourcebridge/internal/version"
-
 	"github.com/vektah/gqlparser/v2/gqlerror"
 )
 
@@ -2515,19 +2520,62 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 		}
 	}
 
-	// Build the settings record.
-	settings := livingwiki.RepositoryLivingWikiSettings{
-		TenantID:          defaultTenantID,
-		RepoID:            input.RepositoryID,
-		Enabled:           true,
-		Mode:              livingwiki.RepoWikiMode(input.Mode.String()),
-		Sinks:             mappedSinks,
-		StaleWhenStrategy: livingwiki.StaleStrategyDirect,
-		MaxPagesPerJob:    50,
-		UpdatedAt:         time.Now(),
-		UpdatedBy:         userIDFromContext(ctx),
+	// CA-138: load existing settings before persisting so prior state
+	// (mode flags from setLivingWikiModeFlags, LLMOverride, exclusions,
+	// orphan-cleanup preference, etc.) is preserved across this save.
+	// The previous from-scratch build wiped that state on every call,
+	// which made setLivingWikiModeFlags effectively transient and caused
+	// the override-flag plumbing bug surfaced by codex r1.
+	//
+	// First-time enable (existing == nil): seed from defaultRepoSettings
+	// so a brand-new row picks up the established LD-13 default
+	// (LivingWikiOverviewEnabled=true, LivingWikiDetailedEnabled=false).
+	// Without this seed, codex r2 noted, a first UI enable would land
+	// with both mode flags off — the UI would show "No build modes
+	// enabled" right after the user clicked Enable.
+	//
+	// Note: this is a read-modify-write on the settings row; concurrent
+	// EnableLivingWikiForRepo calls for the same repo could race. The
+	// pre-existing code already had a write-without-load pattern with
+	// the same race window; this change does not widen the race.
+	existing, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, input.RepositoryID)
+	if err != nil {
+		return nil, fmt.Errorf("load existing repo settings: %w", err)
 	}
 
+	var settings livingwiki.RepositoryLivingWikiSettings
+	if existing != nil {
+		settings = *existing
+	} else {
+		// First-time enable: seed from the canonical default so mode
+		// flags and other defaults match defaultRepoSettings.
+		settings = *defaultRepoSettings(input.RepositoryID)
+	}
+	settings.TenantID = defaultTenantID
+	settings.RepoID = input.RepositoryID
+	settings.Enabled = true
+	// Re-enable: clear DisabledAt to match UpdateRepositoryLivingWikiSettings
+	// semantics (lines ~2447-2454). A repo that was previously disabled and
+	// is now being re-enabled must not retain its disabled-at timestamp.
+	settings.DisabledAt = nil
+	settings.Mode = livingwiki.RepoWikiMode(input.Mode.String())
+	settings.Sinks = mappedSinks
+	if settings.StaleWhenStrategy == "" {
+		settings.StaleWhenStrategy = livingwiki.StaleStrategyDirect
+	}
+	if settings.MaxPagesPerJob == 0 {
+		settings.MaxPagesPerJob = 50
+	}
+	settings.UpdatedAt = time.Now()
+	settings.UpdatedBy = userIDFromContext(ctx)
+
+	// CA-138: input.LivingWikiOverviewEnabled / LivingWikiDetailedEnabled
+	// are TRANSIENT mode-override pointers — they drive per-job mode
+	// derivation but are NOT persisted to the settings row. Persistence
+	// for mode flags is owned by setLivingWikiModeFlags. This split
+	// preserves the both-enabled case in trigger paths: each call enqueues
+	// a distinct overview or detailed job without overwriting the other's
+	// persisted flag.
 	if err := r.LivingWikiRepoStore.SetRepoSettings(ctx, settings); err != nil {
 		return nil, fmt.Errorf("persist repo settings: %w", err)
 	}
@@ -2580,14 +2628,21 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 		sinkKind = strings.ToLower(string(settings.Sinks[0].Kind))
 	}
 
-	// Phase 4a: derive the generation mode from repo settings (CR12 Part B).
-	// When Overview-only, use lw_overview. Otherwise default to lw_detailed
-	// (covers Detailed-only, both-enabled, neither-enabled). Phase 4b will
-	// enqueue two separate jobs for the "both enabled" case.
-	jobMode := GenerationModeLWDetailed
-	if settings.LivingWikiOverviewEnabled && !settings.LivingWikiDetailedEnabled {
-		jobMode = GenerationModeLWOverview
+	// CA-138: derive the generation mode from EFFECTIVE settings (persisted
+	// row + transient input overrides). The override pointers on input
+	// (LivingWikiOverviewEnabled / LivingWikiDetailedEnabled, both
+	// json:"-") are applied here only — never persisted. This makes
+	// triggerLivingWikiColdStart(mode: OVERVIEW) and the corresponding
+	// DETAILED variant produce the right job mode even when the
+	// persisted row's flags would derive a different mode.
+	effectiveSettings := settings
+	if input.LivingWikiOverviewEnabled != nil {
+		effectiveSettings.LivingWikiOverviewEnabled = *input.LivingWikiOverviewEnabled
 	}
+	if input.LivingWikiDetailedEnabled != nil {
+		effectiveSettings.LivingWikiDetailedEnabled = *input.LivingWikiDetailedEnabled
+	}
+	jobMode := deriveLivingWikiJobMode(effectiveSettings)
 
 	req := &llm.EnqueueRequest{
 		Subsystem: llm.Subsystem("living_wiki"),
@@ -2721,7 +2776,7 @@ func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID 
 			t, f := true, false
 			input.LivingWikiOverviewEnabled = &f
 			input.LivingWikiDetailedEnabled = &t
-		// ALL_ENABLED: preserve existing flags (no override needed)
+			// ALL_ENABLED: preserve existing flags (no override needed)
 		}
 	}
 
@@ -2812,6 +2867,419 @@ func (r *mutationResolver) TriggerLivingWikiColdStartAllEnabled(ctx context.Cont
 	return results, nil
 }
 
+// GenerateLivingWikiPageOnDemand implements Mutation.generateLivingWikiPageOnDemand.
+//
+// Validation order:
+//  1. LivingWikiRepoStore must be configured; the repo's settings must have
+//     LivingWikiDetailedEnabled = true.
+//  2. Exactly one of pageSpec.Folder or pageSpec.Symbol must be non-nil and
+//     non-empty. Both or neither returns INVALID_PAGE_SPEC.
+//  3. lwOrch must be configured (returns a user-facing error when nil).
+func (r *mutationResolver) GenerateLivingWikiPageOnDemand(ctx context.Context, repositoryID string, pageSpec LivingWikiOnDemandPageSpec) (*LivingWikiOnDemandPageResult, error) {
+	// ── 1. Gate: Detailed mode must be enabled ────────────────────────────────
+	if r.LivingWikiRepoStore == nil {
+		return nil, fmt.Errorf("living-wiki repo store not configured")
+	}
+	settings, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	if err != nil {
+		return nil, fmt.Errorf("load repo settings: %w", err)
+	}
+	if settings == nil || !settings.LivingWikiDetailedEnabled {
+		return nil, &gqlerror.Error{
+			Message: "On-demand drill-down requires Detailed mode to be enabled for this repository. " +
+				"Enable Detailed mode in the Living Wiki settings panel and try again.",
+			Extensions: map[string]interface{}{
+				"code": "LIVING_WIKI_DETAILED_DISABLED",
+			},
+		}
+	}
+
+	// ── 2. Validate pageSpec — exactly one of folder / symbol ─────────────────
+	hasFolder := pageSpec.Folder != nil && *pageSpec.Folder != ""
+	hasSymbol := pageSpec.Symbol != nil && *pageSpec.Symbol != ""
+	if hasFolder && hasSymbol {
+		return nil, &gqlerror.Error{
+			Message: "pageSpec must contain exactly one of folder or symbol, not both.",
+			Extensions: map[string]interface{}{
+				"code": "INVALID_PAGE_SPEC",
+			},
+		}
+	}
+	if !hasFolder && !hasSymbol {
+		return nil, &gqlerror.Error{
+			Message: "pageSpec must contain exactly one of folder or symbol.",
+			Extensions: map[string]interface{}{
+				"code": "INVALID_PAGE_SPEC",
+			},
+		}
+	}
+
+	// ── 3. Derive the page ID ─────────────────────────────────────────────────
+	//
+	// Both folder and symbol requests produce a detail.* page covering the
+	// folder/package scope. Symbol-scoped pages are architecture pages for the
+	// containing package — the caller uses the symbol identifier as the scope
+	// path.
+	var scope string
+	if hasFolder {
+		scope = *pageSpec.Folder
+	} else {
+		scope = *pageSpec.Symbol
+	}
+	pageID := lworch.DetailPageID(repositoryID, scope)
+
+	// ── 4. Require the orchestrator ───────────────────────────────────────────
+	if r.LivingWikiLiveOrchestrator == nil {
+		return nil, fmt.Errorf("living-wiki orchestrator not configured")
+	}
+	lwOrch := r.LivingWikiLiveOrchestrator
+
+	// ── 5. Build the single PlannedPage ──────────────────────────────────────
+	var sg templates.SymbolGraph
+	gs := r.getStore(ctx)
+	if gs != nil {
+		sg = &graphStoreSymbolGraph{store: gs}
+	}
+	var llmTemplateCaller templates.LLMCaller
+	if r.LLMCaller != nil && r.LLMCaller.IsAvailable() {
+		llmTemplateCaller = &coldStartLLMCaller{
+			caller: r.LLMCaller,
+			repoID: repositoryID,
+			op:     resolution.OpLivingWikiColdStart,
+		}
+	}
+
+	baseInput := templates.GenerateInput{
+		RepoID:      repositoryID,
+		SymbolGraph: sg,
+		LLM:         llmTemplateCaller,
+		Now:         time.Now(),
+	}
+
+	page := lworch.PlannedPage{
+		ID:         pageID,
+		TemplateID: "architecture",
+		Audience:   quality.AudienceEngineers,
+		Input:      baseInput,
+		PackageInfo: &lworch.ArchitecturePackageInfo{
+			Package: scope,
+		},
+	}
+
+	// ── 6. Generate the single page ───────────────────────────────────────────
+	genReq := lworch.GenerateRequest{
+		Config: lworch.Config{
+			RepoID:         repositoryID,
+			MaxConcurrency: 1,
+			TimeBudget:     coldStartTimeBudget,
+		},
+		Pages: []lworch.PlannedPage{page},
+	}
+
+	result, genErr := lwOrch.Generate(ctx, genReq)
+	if genErr != nil && !lworch.IsPartialGenerationError(genErr) {
+		return nil, fmt.Errorf("on-demand generation failed: %w", genErr)
+	}
+
+	// ── 7. Dispatch to sinks ──────────────────────────────────────────────────
+	var repoName string
+	if gs != nil {
+		if repo := gs.GetRepository(repositoryID); repo != nil {
+			repoName = repo.Name
+		}
+	}
+
+	var (
+		status  = "ok"
+		failCat = coldstart.FailureCategoryNone
+		errMsg  string
+	)
+
+	var dispatched bool
+	if len(result.Generated) > 0 {
+		sinkResults := dispatchGeneratedPages(
+			ctx, repositoryID, defaultTenantID,
+			result.Generated, nil, /* no skippedPageIDs for on-demand */
+			r.livingWikiBroker(), r.LivingWikiRepoStore,
+			repoName,
+			&status, &failCat, &errMsg,
+			GenerationModeLWDetailed,
+		)
+		// Dispatch succeeded when at least one sink wrote the page.
+		for _, sr := range sinkResults {
+			if sr.PagesWritten > 0 {
+				dispatched = true
+				break
+			}
+		}
+	}
+
+	return &LivingWikiOnDemandPageResult{
+		PageID:     pageID,
+		Dispatched: dispatched,
+	}, nil
+}
+
+// SetRepositoryLLMOverride is the resolver for the setRepositoryLLMOverride
+// field. Patch semantics: omitted (nil) fields preserve the saved value;
+// empty-string non-secret fields clear that field back to workspace
+// inheritance; non-empty values overwrite. apiKey has its own clearAPIKey
+// flag (see schema docs).
+//
+// Returns a GraphQL error with extension code "ENCRYPTION_KEY_REQUIRED"
+// when the request includes a non-empty apiKey but the server's
+// SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY is not configured. The UI uses
+// this code to render a clear actionable message.
+//
+// Slice 3 of the LLM provider profiles plan adds the three-mode
+// discriminator. profileId / clearProfile patch logic:
+//
+//   - input.ClearProfile == true: drop the saved profile_id (revert to
+//     inline mode). Inline fields below are still patched as usual; the
+//     two are mutually independent inputs by design (matches existing
+//     clearAPIKey precedent per ian-M2).
+//
+//   - input.ProfileID != nil && *input.ProfileID != "": switch to
+//     "saved-profile" mode. The new profile_id is validated against
+//     LLMProfileLookup; if the profile is missing the mutation returns
+//     a GraphQL error with extensions.code = "PROFILE_NO_LONGER_EXISTS"
+//     so the UI can render the resolution panel without persisting a
+//     stale reference. ALL inline fields are atomically cleared
+//     (provider, baseURL, api_key, models) so the saved row carries
+//     only { profile_id: <id> } — one mode per row.
+//
+//   - input.ProfileID nil OR pointer-to-empty-string: leave the saved
+//     profile_id unchanged (matches the password-field UX precedent
+//     for apiKey).
+//
+// Mutual exclusion is enforced server-side: the UI is the surface for
+// the three-mode radio, but a malformed mutation that sends both a
+// non-empty profileId AND inline fields STILL produces a one-mode row
+// (profile mode wins; inline fields silently dropped). This is the
+// safer invariant because a stale UI cache cannot accidentally write a
+// half-and-half row.
+func (r *mutationResolver) SetRepositoryLLMOverride(ctx context.Context, repositoryID string, input RepositoryLLMOverrideInput) (*RepositoryLLMOverride, error) {
+	if r.LivingWikiRepoStore == nil {
+		return nil, fmt.Errorf("living-wiki repo store not configured")
+	}
+
+	// Slice 3: validate the referenced profile BEFORE loading the
+	// settings row. If the profile is gone we return an actionable
+	// error and never touch the override row, preserving the user's
+	// previous state for the resolution-panel flow.
+	if input.ProfileID != nil && *input.ProfileID != "" {
+		if r.LLMProfileLookup != nil {
+			name, exists, lerr := r.LLMProfileLookup.LookupProfileName(ctx, *input.ProfileID)
+			if lerr != nil {
+				return nil, fmt.Errorf("validate profileId: %w", lerr)
+			}
+			if !exists {
+				return nil, &gqlerror.Error{
+					Path:    graphql.GetPath(ctx),
+					Message: "The selected profile no longer exists. Pick another profile, switch to inline override, or revert to workspace inheritance.",
+					Extensions: map[string]interface{}{
+						"code":      "PROFILE_NO_LONGER_EXISTS",
+						"profileId": *input.ProfileID,
+					},
+				}
+			}
+			// Carry the resolved name on a request-local helper so the
+			// returned RepositoryLLMOverride.profileName field reflects
+			// the just-saved value without an extra round-trip. Stored
+			// in ctx-via-no-op? Simpler: use the var name directly when
+			// we build the response below.
+			_ = name
+		}
+		// LLMProfileLookup nil (embedded mode / pre-slice-3 wiring) —
+		// skip validation. The resolver still degrades gracefully at
+		// resolve time (Warn log + workspace fallback).
+	}
+
+	current, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	if err != nil {
+		return nil, fmt.Errorf("load repo settings: %w", err)
+	}
+	if current == nil {
+		current = defaultRepoSettings(repositoryID)
+	}
+
+	// Start from existing override (or empty) and apply the patch.
+	ov := current.LLMOverride
+	if ov == nil {
+		ov = &livingwiki.LLMOverride{}
+	} else {
+		// Copy so we don't mutate the in-memory record before save.
+		copyOv := *ov
+		ov = &copyOv
+	}
+
+	// Slice 3: profile-id patch. clearProfile takes precedence over an
+	// explicit profileId so a UI race ("clearProfile + profileId in the
+	// same patch") never silently leaves both set.
+	clearingProfile := input.ClearProfile != nil && *input.ClearProfile
+	settingProfile := input.ProfileID != nil && *input.ProfileID != ""
+	if clearingProfile {
+		ov.ProfileID = ""
+	} else if settingProfile {
+		ov.ProfileID = *input.ProfileID
+		// Mutual exclusion: setting ProfileID atomically clears every
+		// inline field. The mutation can be sent with inline fields
+		// also populated (a stale UI, a malformed client) and the
+		// server still produces a one-mode row.
+		ov.Provider = ""
+		ov.BaseURL = ""
+		ov.APIKey = ""
+		ov.AdvancedMode = false
+		ov.SummaryModel = ""
+		ov.ReviewModel = ""
+		ov.AskModel = ""
+		ov.KnowledgeModel = ""
+		ov.ArchitectureDiagramModel = ""
+		ov.ReportModel = ""
+		ov.DraftModel = ""
+	}
+
+	// Inline-field patch. When the patch is in profile mode, the
+	// atomic-clear above already wiped these to empty; the input
+	// pointers below would re-stamp them, but the inline field
+	// branch is gated on `!settingProfile` so they are skipped — a
+	// profile-mode save NEVER persists inline fields.
+	if !settingProfile {
+		// String fields: nil = leave alone, "" = clear, non-empty = set.
+		if input.Provider != nil {
+			ov.Provider = *input.Provider
+		}
+		if input.BaseURL != nil {
+			ov.BaseURL = *input.BaseURL
+		}
+		if input.SummaryModel != nil {
+			ov.SummaryModel = *input.SummaryModel
+		}
+		if input.ReviewModel != nil {
+			ov.ReviewModel = *input.ReviewModel
+		}
+		if input.AskModel != nil {
+			ov.AskModel = *input.AskModel
+		}
+		if input.KnowledgeModel != nil {
+			ov.KnowledgeModel = *input.KnowledgeModel
+		}
+		if input.ArchitectureDiagramModel != nil {
+			ov.ArchitectureDiagramModel = *input.ArchitectureDiagramModel
+		}
+		if input.ReportModel != nil {
+			ov.ReportModel = *input.ReportModel
+		}
+		if input.DraftModel != nil {
+			ov.DraftModel = *input.DraftModel
+		}
+
+		// Bool field: nil = leave alone, present = set.
+		if input.AdvancedMode != nil {
+			ov.AdvancedMode = *input.AdvancedMode
+		}
+
+		// apiKey patch semantics:
+		//   - clearAPIKey true → drop the saved cipher.
+		//   - apiKey present and non-empty → replace.
+		//   - apiKey nil OR present-but-empty → leave the saved cipher alone.
+		//     (Empty-string is treated as "leave alone" to avoid ambiguous UX
+		//     on a password field that submits an empty value when the user
+		//     never touched it.)
+		if input.ClearAPIKey != nil && *input.ClearAPIKey {
+			ov.APIKey = ""
+		} else if input.APIKey != nil && *input.APIKey != "" {
+			ov.APIKey = *input.APIKey
+		}
+	}
+
+	// Stamp metadata.
+	ov.UpdatedAt = time.Now()
+	ov.UpdatedBy = userIDFromContext(ctx)
+
+	// If the patch resulted in a fully empty override (all fields blank,
+	// AND no profile_id), behave like clearRepositoryLLMOverride: drop
+	// the row entirely. Slice 3: a saved profile_id counts as "set"
+	// (LLMOverride.IsEmpty checks ProfileID), so a profile-mode save
+	// is never silently dropped.
+	if ov.IsEmpty() {
+		current.LLMOverride = nil
+	} else {
+		current.LLMOverride = ov
+	}
+
+	current.UpdatedAt = time.Now()
+	current.UpdatedBy = userIDFromContext(ctx)
+
+	if err := r.LivingWikiRepoStore.SetRepoSettings(ctx, *current); err != nil {
+		// Map the encryption-key-required sentinel into a GraphQL error
+		// with an extension code so the UI can render a precise message.
+		if errors.Is(err, livingwiki.ErrEncryptionKeyRequired) {
+			return nil, &gqlerror.Error{
+				Path:    graphql.GetPath(ctx),
+				Message: "Cannot save API key: SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY is not set on the server. Set the encryption key (32+ random bytes, base64-encoded) and restart, or omit the apiKey field to save other settings only.",
+				Extensions: map[string]interface{}{
+					"code": "ENCRYPTION_KEY_REQUIRED",
+				},
+			}
+		}
+		return nil, fmt.Errorf("persist repo settings: %w", err)
+	}
+
+	// Re-load to get the saved value (so the cipher round-trip + masking
+	// reflects what's actually persisted, not what the request claimed).
+	saved, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	if err != nil {
+		return nil, fmt.Errorf("reload repo settings after save: %w", err)
+	}
+	if saved == nil || saved.LLMOverride == nil {
+		// Whole-row save with empty override → return an empty masked view.
+		return &RepositoryLLMOverride{}, nil
+	}
+	out := mapLLMOverrideMasked(saved.LLMOverride)
+	// Slice 3: populate profileName on the response so the UI doesn't
+	// need a follow-up GET. Direct lookup matches ian-M3 (no cache in
+	// v1; profile-name fetches are cheap by design).
+	if out.ProfileID != nil && *out.ProfileID != "" && r.LLMProfileLookup != nil {
+		name, exists, lerr := r.LLMProfileLookup.LookupProfileName(ctx, *out.ProfileID)
+		if lerr == nil && exists {
+			n := name
+			out.ProfileName = &n
+		}
+		// On lookup error or "exists=false", leave profileName nil. We
+		// already validated existence at the top of the mutation, so
+		// an exists=false here is only possible under a vanishingly
+		// rare race (profile deleted between mutation save and reload).
+		// The next read pass will surface PROFILE_NO_LONGER_EXISTS.
+	}
+	return out, nil
+}
+
+// ClearRepositoryLLMOverride removes the per-repository LLM override
+// entirely. Returns the updated RepositoryLivingWikiSettings record.
+func (r *mutationResolver) ClearRepositoryLLMOverride(ctx context.Context, repositoryID string) (*RepositoryLivingWikiSettings, error) {
+	if r.LivingWikiRepoStore == nil {
+		return nil, fmt.Errorf("living-wiki repo store not configured")
+	}
+
+	current, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	if err != nil {
+		return nil, fmt.Errorf("load repo settings: %w", err)
+	}
+	if current == nil {
+		// Nothing to clear; return an empty default record so the UI
+		// can render a "no override; inheriting workspace" hint.
+		current = defaultRepoSettings(repositoryID)
+	}
+	current.LLMOverride = nil
+	current.UpdatedAt = time.Now()
+	current.UpdatedBy = userIDFromContext(ctx)
+
+	if err := r.LivingWikiRepoStore.SetRepoSettings(ctx, *current); err != nil {
+		return nil, fmt.Errorf("persist repo settings: %w", err)
+	}
+	return mapRepoLivingWikiSettings(current), nil
+}
 
 // MoveToTrash is the resolver for the moveToTrash field.
 func (r *mutationResolver) MoveToTrash(ctx context.Context, typeArg TrashableType, id string, reason *string) (*TrashEntry, error) {
@@ -2896,12 +3364,37 @@ func (r *queryResolver) ServiceHealth(ctx context.Context) (*PlatformHealth, err
 	}, nil
 }
 
-// Version is the resolver for the version field.
+// Version is the resolver for the version field. CA-138: extended from
+// 3 fields to 7 to reach API parity with REST /api/v1/version. The
+// resolver MUST match REST's semantics field-for-field — there's a
+// parity test in internal/api/rest/graphql_version_parity_test.go.
+//
+// Edition source-of-truth precedence (matches CA-136 REST handler):
+//   - r.Config.Edition (runtime config) when set; this is what the
+//     operator deployed as.
+//   - "unknown" otherwise. r.Config can be nil in tests that
+//     construct Resolver{} without wiring; nil-safe by design.
+//
+// workerVersion uses the same cached lookup as REST so a high-cadence
+// GraphQL client sees identical, cached results — no extra worker
+// gRPC traffic.
 func (r *queryResolver) Version(ctx context.Context) (*VersionInfo, error) {
+	edition := "unknown"
+	if r.Config != nil && r.Config.Edition != "" {
+		edition = r.Config.Edition
+	}
+	workerVer := ""
+	if r.WorkerVersion != nil {
+		workerVer = r.WorkerVersion(ctx)
+	}
 	return &VersionInfo{
-		Version:   version.Version,
-		Commit:    version.Commit,
-		BuildDate: version.BuildDate,
+		Version:       version.Version,
+		Commit:        version.Commit,
+		BuildDate:     version.BuildDate,
+		GoVersion:     version.GoRuntime(),
+		Edition:       edition,
+		BuildEdition:  version.Edition,
+		WorkerVersion: workerVer,
 	}, nil
 }
 
@@ -4024,6 +4517,69 @@ func (r *repositoryLivingWikiSettingsResolver) LastJobResult(ctx context.Context
 	return mapLivingWikiJobResult(result), nil
 }
 
+// LlmOverride is the field resolver for RepositoryLivingWikiSettings.llmOverride.
+// Loads the override from the repo store and returns a masked GraphQL
+// view (api_key is never returned in plaintext).
+//
+// Returns nil when no override exists for the repo. Errors propagate as
+// GraphQL errors so the caller surfaces "couldn't load" rather than
+// silently rendering a stale value.
+//
+// Slice 3 of the LLM provider profiles plan: when the override is in
+// "saved-profile" mode (ProfileID non-empty), the field resolver
+// populates profileName via LLMProfileLookup. If the referenced profile
+// has been deleted, the resolver returns the override (with profileId
+// set, profileName nil) AND a non-fatal GraphQL error carrying
+// extensions.code = "PROFILE_NO_LONGER_EXISTS" via the gqlgen
+// AddError plumbing — but pragmatic gqlgen wiring is to return the data
+// AND the error from the resolver (gqlgen sends both as a partial
+// response). The UI listens for this extension code and renders the
+// resolution panel; it does NOT navigate away or hide the override.
+func (r *repositoryLivingWikiSettingsResolver) LlmOverride(ctx context.Context, obj *RepositoryLivingWikiSettings) (*RepositoryLLMOverride, error) {
+	if r.LivingWikiRepoStore == nil {
+		return nil, nil
+	}
+	if obj == nil || obj.RepoID == "" {
+		return nil, nil
+	}
+	settings, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, obj.RepoID)
+	if err != nil {
+		return nil, fmt.Errorf("load repo settings for llmOverride: %w", err)
+	}
+	if settings == nil || settings.LLMOverride == nil {
+		return nil, nil
+	}
+	out := mapLLMOverrideMasked(settings.LLMOverride)
+	// Slice 3: enrich profileName from the profile store. Resolution
+	// failure handling:
+	//   - exists=true → populate profileName.
+	//   - exists=false → leave profileName nil AND return a structured
+	//     error (data + error) so the UI's resolution-panel listener
+	//     fires.
+	//   - lookup fails entirely → log + leave profileName nil; do NOT
+	//     surface PROFILE_NO_LONGER_EXISTS without proof. A DB outage
+	//     should not be misrendered as "your profile is deleted".
+	if out.ProfileID != nil && *out.ProfileID != "" && r.LLMProfileLookup != nil {
+		name, exists, lerr := r.LLMProfileLookup.LookupProfileName(ctx, *out.ProfileID)
+		if lerr != nil {
+			// Generic lookup failure — surface but do NOT misclassify.
+			return out, fmt.Errorf("lookup profileName: %w", lerr)
+		}
+		if !exists {
+			return out, &gqlerror.Error{
+				Path:    graphql.GetPath(ctx),
+				Message: "The profile referenced by this repository's override no longer exists. Pick another profile, switch to inline override, or revert to workspace inheritance.",
+				Extensions: map[string]interface{}{
+					"code":      "PROFILE_NO_LONGER_EXISTS",
+					"profileId": *out.ProfileID,
+				},
+			}
+		}
+		n := name
+		out.ProfileName = &n
+	}
+	return out, nil
+}
 
 // Mutation returns MutationResolver implementation.
 func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }

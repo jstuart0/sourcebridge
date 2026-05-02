@@ -120,6 +120,14 @@ type Resolver struct {
 	// ClusterStore provides cluster lookups for Living Wiki taxonomy resolution.
 	// When nil, resolveTaxonomy falls back to the package-path heuristic.
 	ClusterStore clustering.ClusterStore
+	// WorkerVersion returns the worker's reported version string,
+	// empty when the worker is nil/unreachable/slow. Wired from the
+	// REST server's cached lookup (internal/api/rest/version.go) so
+	// the GraphQL Query.version field reads the same cached value
+	// as REST /api/v1/version. Nil-safe: tests construct Resolver
+	// without WorkerVersion and the resolver returns "" for that
+	// field. CA-138.
+	WorkerVersion func(ctx context.Context) string
 }
 
 // getStore returns the per-request tenant-filtered store when available,
