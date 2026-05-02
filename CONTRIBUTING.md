@@ -149,6 +149,38 @@ Use descriptive branch names with a type prefix:
 - `test/review-integration` -- Test additions
 - `chore/update-deps` -- Dependency updates
 
+### Commit messages
+
+We use [conventional commits](https://www.conventionalcommits.org/) to drive
+automated version bumping (see [RELEASING.md](./RELEASING.md)). PR titles and
+squash-merge messages follow:
+
+```
+<type>(<scope>): <subject>
+```
+
+| Type | What it means | Triggers |
+|---|---|---|
+| `feat` | New feature | Minor bump (0.9 → 0.10) |
+| `fix` | Bug fix | Patch bump (0.9.0 → 0.9.1) |
+| `perf` | Performance improvement | Patch bump |
+| `refactor` | Code restructuring, no behavior change | Patch bump |
+| `docs` | Documentation only | No version bump |
+| `deps` | Dependency update | Patch bump |
+| `revert` | Revert a prior commit | Triggers next-greater-than-reverted bump |
+| `build`, `ci`, `test`, `chore` | Tooling / housekeeping | No CHANGELOG entry |
+
+`scope` is the ticket ID (`ca-138`) or affected subsystem (`graphql`, `worker`,
+`web`). A `feat!:` commit (or any commit with a `BREAKING CHANGE:` footer)
+triggers a major bump — but while we're on 0.x, breaking changes promote the
+minor instead, same effect.
+
+Conventional-commit conformance is **not** strictly enforced (release-please
+tolerates non-conforming commits gracefully — they just don't produce a
+CHANGELOG entry), but it's the easiest way to keep the release cadence smooth.
+Squash-merge titles get the most weight; the squashed commit message is what
+release-please reads.
+
 ### Making a Pull Request
 
 1. Create a branch from `main`:

@@ -1,37 +1,183 @@
 # SourceBridge Release Process
 
-This document describes the steps to cut a SourceBridge release. All items must
-be checked before a release tag is pushed.
+SourceBridge uses [release-please](https://github.com/googleapis/release-please)
+to automate version bumping and changelog generation. Most releases require
+zero manual intervention: write conventional-commit PRs, merge them, then
+merge the Release PR release-please opens.
 
-## Pre-flight checklist
+## Standard release flow (release-please-driven)
 
-- [ ] `make ci` passes cleanly (lint + all tests)
+1. **Write conventional-commit PRs.** PR titles and squash-merge messages
+   follow `<type>(<scope>): <subject>` (e.g. `feat(ca-138): extend GraphQL
+   VersionInfo`). Allowed types and the changelog section they map to:
+
+   | Type | CHANGELOG section | Notes |
+   |---|---|---|
+   | `feat` | Added | Triggers a minor bump |
+   | `fix` | Fixed | Triggers a patch bump |
+   | `perf` | Changed | Patch bump |
+   | `refactor` | Changed | Patch bump |
+   | `docs` | Documentation | No version bump |
+   | `deps` | Changed | Patch bump |
+   | `revert` | Removed | Triggers next-greater-than-reverted bump |
+   | `build` / `ci` / `test` / `chore` | Changed (hidden) | No section in CHANGELOG |
+
+   `feat!:` or any commit with a `BREAKING CHANGE:` footer triggers a
+   major bump. While we're on 0.x (per `bump-minor-pre-major: true`),
+   breaking changes promote the minor instead — same effect.
+
+2. **release-please opens (or updates) a Release PR** every time `main`
+   advances. The PR shows:
+   - The next version computed from accumulated conventional commits
+     since the last release.
+   - The auto-generated CHANGELOG diff (Keep-a-Changelog format via
+     `changelog-sections` config).
+
+3. **Review the Release PR.** Spot-check the version, the CHANGELOG, and
+   any version-tracked manifests. If a release should carry a narrative
+   beyond the mechanical CHANGELOG, write it now in the GitHub Release
+   body — release-please writes the auto-generated CHANGELOG; the human
+   story lives in the Release body.
+
+4. **Run Living-Wiki Tier 1/2/3 validation** (below) if the release
+   touches `internal/livingwiki/`.
+
+5. **Merge the Release PR.** This creates the tag (e.g. `v0.10.0`).
+
+   **If `RELEASE_PLEASE_TOKEN` is provisioned** (a GitHub App or PAT —
+   see "Provisioning the release-please token" below): the tag push
+   automatically triggers `oss-release.yml` (binary build, Docker image
+   build, cosign signing per CA-139, GitHub Release publish, Homebrew
+   tap update) and `build-images.yml` (component image build + cosign
+   signing). Done.
+
+   **If `RELEASE_PLEASE_TOKEN` is NOT yet provisioned** (CA-149 follow-up
+   state): GitHub suppresses workflow-on-workflow chains when the
+   trigger token is the default `GITHUB_TOKEN`. release-please will
+   cut the tag, but downstream workflows will NOT fire automatically.
+   **Manual unblock**: re-push the tag from a local checkout with a
+   human-credentialled remote:
+   ```bash
+   git fetch origin --tags
+   git push origin :refs/tags/v0.10.0    # delete and re-push
+   git push origin v0.10.0
+   ```
+   Now `oss-release.yml` and `build-images.yml` fire as expected.
+
+6. **Verify the published release.**
+   - `cosign verify` the published images per the recipes in
+     [`docs/admin/build-info.md`](docs/admin/build-info.md#verifying-signed-images).
+   - Confirm the Homebrew tap commit landed.
+   - Sanity-check the Release page on GitHub: assets attached,
+     SHA256SUMS present, body has both the release-please CHANGELOG
+     content and any human narrative.
+
+## VSCode extension release
+
+The `plugins/vscode` directory tracks its own version chain. release-please
+opens a separate Release PR with the tag shape `sourcebridge-vscode-vX.Y.Z`,
+distinct from the root `vX.Y.Z`. Merge the plugin PR independently of the
+main release cadence.
+
+The plugin tags do NOT trigger `oss-release.yml` or `build-images.yml`
+(per the SemVer-shaped tag glob in those workflows). The plugin's
+publish path is its own (VSCode marketplace), separate from this repo's
+binary/image release pipeline.
+
+## Provisioning the release-please token (one-time setup)
+
+Until this is done, manual tag re-push is required after every
+release-please merge (see step 5 above). Tracked in CA-149.
+
+**Option A: GitHub App (preferred for organizations)**
+
+1. Create a new GitHub App on the SourceBridge org with these permissions:
+   - **Contents**: Read & Write
+   - **Pull requests**: Read & Write
+   - **Issues**: Read & Write
+2. Install the app on the `sourcebridge-ai/sourcebridge` repo only.
+3. Generate and download the App's private key.
+4. In repo settings → Secrets and variables → Actions, add:
+   - `RELEASE_PLEASE_APP_ID` = the app's numeric ID
+   - `RELEASE_PLEASE_PRIVATE_KEY` = the private key contents
+5. Update `.github/workflows/release-please.yml` to mint a token via
+   `actions/create-github-app-token@v1` and pass it as `token:` to the
+   release-please action. Replace the
+   `secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN` fallback.
+
+**Option B: Fine-grained Personal Access Token (lighter setup)**
+
+1. As a maintainer, create a fine-grained PAT scoped to the repo with:
+   - Contents: Read & Write
+   - Pull requests: Read & Write
+   - Issues: Read & Write
+2. Add as repo secret `RELEASE_PLEASE_TOKEN`.
+3. The existing workflow's `secrets.RELEASE_PLEASE_TOKEN ||
+   secrets.GITHUB_TOKEN` expression picks it up automatically.
+
+**Why this matters**: tags created with the default `GITHUB_TOKEN` do NOT
+trigger downstream `on: push: tags` workflows. Without one of these tokens
+provisioned, release-please can cut a tag but `oss-release.yml` and
+`build-images.yml` won't fire — meaning no binary publish, no image build,
+no cosign signing, no Homebrew tap update.
+
+## Manual fallback
+
+If release-please is broken or you need an out-of-band release:
+
+1. Edit `CHANGELOG.md` manually: move `[Unreleased]` content under a
+   new `[vX.Y.Z] - <date>` heading.
+2. Update `.release-please-manifest.json` so release-please's next run
+   doesn't re-propose the same version: set the package's value to
+   `X.Y.Z`.
+3. Commit those edits, tag the commit, push the branch and tag
+   explicitly (avoid `git push --tags`, which can push unrelated stale
+   local tags — this repo has at least one such dangling tag from
+   prior PR-merge superseding):
+
+   ```bash
+   git commit -m "chore(release): vX.Y.Z"
+   git tag vX.Y.Z
+   git push origin main          # push the release commit
+   git push origin vX.Y.Z        # push only the tag we just created
+   ```
+
+4. The existing `oss-release.yml` and `build-images.yml` workflows fire
+   on the tag push.
+
+This path also works for prerelease/RC tags. release-please supports
+prereleases via PR titles like `chore: release v0.10.0-rc.1`, but the
+manual flow is more direct when cadence is non-routine.
+
+## Stale instructions removed
+
+Prior versions of this file mentioned a "version constant in `cli/version.go`
+(or equivalent)" that needed bumping. Both have been obsoleted:
+
+- **CA-136** moved the version surface to `internal/version` ldflag-injection;
+  `scripts/version.sh` derives the value from git at build time.
+- **CA-147** automated tag creation via release-please; the operator no
+  longer hand-bumps anything.
+
+If you encounter a copy of these instructions in fork/branch documentation,
+delete them — they're misleading.
+
+## Pre-flight checklist (per Release PR)
+
+Before merging a Release PR:
+
+- [ ] `make ci` passes cleanly (lint + all tests) on the latest main commit
 - [ ] `go vet ./...` clean
 - [ ] No open SEV-1 / SEV-2 issues on main
-- [ ] CHANGELOG.md updated with release notes
-- [ ] Version constant in `cli/version.go` (or equivalent) bumped
+- [ ] CHANGELOG diff in the Release PR looks correct (release-please-generated)
 - [ ] Docker images build cleanly for `linux/amd64` and `linux/arm64`
-
-## Deploying to production
-
-```bash
-# 1. Build and push images
-make docker-build
-docker push YOUR_REGISTRY/sourcebridge:vX.Y.Z
-
-# 2. Update image tags in manifests or Helm values
-# 3. Apply with kustomize or helm upgrade
-kubectl -n sourcebridge set image deployment/sourcebridge-api \
-    sourcebridge-api=YOUR_REGISTRY/sourcebridge:vX.Y.Z
-kubectl -n sourcebridge rollout status deployment/sourcebridge-api
-
-# 4. Verify pods are healthy
-kubectl -n sourcebridge get pods
-```
+      (verified by the most recent `build-images.yml` run on main)
+- [ ] If touching Living Wiki paths: Living-Wiki Tier 1/2/3 validation below
 
 ## Living Wiki release validation
 
 **This section must be completed for any release that touches:**
+
 - `internal/livingwiki/`
 - `internal/settings/livingwiki/`
 - `internal/db/livingwiki_*`
@@ -40,9 +186,9 @@ kubectl -n sourcebridge get pods
 - `cmd/livingwiki-smoke/`
 
 All eight steps below must be verified. Check each box and fill in the
-observed result. Attach the activity-feed screenshot to the release PR.
+observed result. Attach the activity-feed screenshot to the Release PR.
 
-### Tier 1 — Unit-integration test (must pass before release PR is merged)
+### Tier 1 — Unit-integration test (must pass before Release PR is merged)
 
 - [ ] `go test -tags integration ./internal/livingwiki/... -v -run ^TestLivingWikiE2E` passes
   - Run: `make test-livingwiki-integration`
@@ -176,12 +322,12 @@ If any Tier 2 or Tier 3 step fails after deploy:
    kubectl -n sourcebridge rollout status deployment/sourcebridge-api
    ```
 
-3. DB migrations (036) are forward-compatible. Rolling back the binary does not
+3. DB migrations are forward-compatible. Rolling back the binary does not
    require reverting the migration — the new tables are ignored by the old binary.
 
 ### Release sign-off
 
-Before tagging the release:
+Before merging the release-please PR:
 
 - [ ] All Tier 1 tests pass (`make test-livingwiki-integration`)
 - [ ] Tier 2 smoke passed (attach job log URL or Slack screenshot)

@@ -3,7 +3,12 @@ name: OSS Release
 on:
   push:
     tags:
-      - "v*"
+      # CA-147: SemVer-shaped tags only. Excludes plugin tags
+      # (sourcebridge-vscode-vX.Y.Z) emitted by release-please for
+      # the plugins/vscode package. The plugin has its own marketplace
+      # cadence and shouldn't fire the OSS binary build.
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
 
 permissions:
   contents: write
@@ -171,7 +176,13 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
-          generate_release_notes: true
+          # CA-147: release-please owns the release notes / changelog
+          # text now. Setting this to false avoids release-please's
+          # PR body and the auto-generated notes fighting for the
+          # same release body. release-please writes the release
+          # body when it merges its PR; this step then UPDATES the
+          # release with the binary assets without clobbering it.
+          generate_release_notes: false
           # SemVer prerelease tags contain a `-` (e.g. v0.8.0-rc.1,
           # v0.8.0-beta.2, v1.0.0-alpha). softprops/action-gh-release
           # doesn't auto-detect from the tag name, so we flag

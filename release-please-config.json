@@ -1,0 +1,36 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "include-v-in-tag": true,
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": false,
+  "separate-pull-requests": true,
+  "changelog-sections": [
+    {"type": "feat", "section": "Added", "hidden": false},
+    {"type": "fix", "section": "Fixed", "hidden": false},
+    {"type": "perf", "section": "Changed", "hidden": false},
+    {"type": "refactor", "section": "Changed", "hidden": false},
+    {"type": "deps", "section": "Changed", "hidden": false},
+    {"type": "revert", "section": "Removed", "hidden": false},
+    {"type": "docs", "section": "Documentation", "hidden": false},
+    {"type": "build", "section": "Changed", "hidden": true},
+    {"type": "ci", "section": "Changed", "hidden": true},
+    {"type": "test", "section": "Changed", "hidden": true},
+    {"type": "chore", "section": "Changed", "hidden": true}
+  ],
+  "packages": {
+    ".": {
+      "release-type": "go",
+      "component": "sourcebridge",
+      "include-component-in-tag": false,
+      "changelog-path": "CHANGELOG.md",
+      "exclude-paths": ["plugins/vscode"]
+    },
+    "plugins/vscode": {
+      "release-type": "node",
+      "component": "sourcebridge-vscode",
+      "include-component-in-tag": true,
+      "tag-separator": "-",
+      "changelog-path": "CHANGELOG.md"
+    }
+  }
+}

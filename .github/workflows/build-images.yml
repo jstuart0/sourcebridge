@@ -6,7 +6,11 @@ on:
       - main
       - dev
     tags:
-      - "v*"
+      # CA-147: SemVer-shaped tags only. Excludes plugin tags
+      # (sourcebridge-vscode-vX.Y.Z) emitted by release-please for
+      # the plugins/vscode package — those don't ship Docker images.
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
   pull_request:
     branches:
       - main

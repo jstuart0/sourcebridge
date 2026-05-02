@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 SourceBridge Contributors
+#
+# CA-147: release-please opens (or updates) a Release PR for every push to
+# main. Merging the Release PR cuts the next tag, which fires the
+# tag-triggered oss-release.yml and build-images.yml pipelines (binary
+# build, Docker image build, cosign keyless signing per CA-139, GitHub
+# Release publish, Homebrew tap update).
+#
+# IMPORTANT: token selection.
+#
+# release-please cuts a tag; that tag triggers oss-release.yml and
+# build-images.yml. GitHub deliberately suppresses workflow-on-workflow
+# chains when the trigger token is the default GITHUB_TOKEN
+# (https://docs.github.com/en/actions/using-workflows/triggering-a-workflow#triggering-a-workflow-from-a-workflow).
+# If we use the default token, the release tag will be created but NO
+# downstream binary build / image build / cosign signing / tap update
+# will fire. The release will appear half-published.
+#
+# To get the full chain, configure a GitHub App or PAT with
+# contents:write + pull-requests:write + issues:write and store it in
+# repo secrets as RELEASE_PLEASE_TOKEN. The expression below falls back
+# to github.token when the secret is empty so the workflow can still
+# open release PRs in the bootstrap phase (without triggering downstream
+# tag workflows). Once the secret is provisioned, downstream workflows
+# will fire on the next release-please tag.
+#
+# Provisioning runbook: see RELEASING.md ("Provisioning the
+# release-please token"). Tracked in CA-149.
+
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+# Workflow-level permissions kept minimal; per-job grants escalate.
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      # release-please needs:
+      #   contents:       read+write the repo, create the release tag
+      #   pull-requests:  open/update the release PR
+      #   issues:         apply release-please's default labels
+      # Branch-protection bypass is NOT required: release-please opens
+      # PRs through the normal review flow; it does not direct-push
+      # to main.
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      # SHA-pinned: googleapis/release-please-action@v4.4.1
+      # Verify pin: curl -fsSL https://api.github.com/repos/googleapis/release-please-action/git/refs/tags/v4.4.1
+      - name: release-please
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
