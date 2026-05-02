@@ -207,6 +207,34 @@ type RepoWriter interface {
 	WriteFiles(ctx context.Context, files map[string][]byte) error
 }
 
+// PageKind classifies the taxonomy origin of a PlannedPage.
+//
+// Required because cluster-Detailed pages and top-level-dir fallback pages
+// BOTH emit TemplateID = "architecture", so TemplateID alone cannot distinguish
+// them. Set by the taxonomy resolver in ResolveOverview / ResolveDetailed;
+// consumed by the GraphQL plan preview and cold-start tally to group pages into
+// the correct LivingWikiPageType bucket.
+//
+// The zero value PageKindUnknown is preserved for legacy persisted plans
+// (smart-resume) that predate this field; classifyPageType falls back to
+// TemplateID-based heuristics for that case.
+type PageKind int
+
+const (
+	// PageKindUnknown is the zero value — used for legacy plans that did not
+	// populate Kind. classifyPageType falls back to TemplateID for this case.
+	PageKindUnknown PageKind = iota
+	// PageKindRepoWide marks the three skeleton pages (api_reference,
+	// system_overview, glossary) that are always generated.
+	PageKindRepoWide
+	// PageKindCluster marks an architecture page generated from a cluster
+	// summary (ResolveOverview or ResolveDetailed with non-empty clusters).
+	PageKindCluster
+	// PageKindTopLevelDir marks an architecture page generated from the
+	// top-level-dir fallback path (ResolveDetailed with empty clusters).
+	PageKindTopLevelDir
+)
+
 // PlannedPage is one page the orchestrator intends to generate.
 type PlannedPage struct {
 	// ID is the stable page ID (e.g. "arch.auth", "api_reference", "system_overview").
@@ -214,6 +242,11 @@ type PlannedPage struct {
 
 	// TemplateID is the ID of the template to use (e.g. "architecture", "api_reference").
 	TemplateID string
+
+	// Kind classifies the taxonomy origin of this page. Set by the taxonomy
+	// resolver; zero value (PageKindUnknown) triggers TemplateID-based fallback
+	// in classifyPageType for legacy persisted plans.
+	Kind PageKind
 
 	// Audience is the target audience for this page.
 	Audience quality.Audience
@@ -1673,6 +1706,7 @@ func (r *TaxonomyResolver) Resolve(ctx context.Context, pkgGraph []PackageGraphI
 			pages = append(pages, PlannedPage{
 				ID:         archPageID(r.repoID, pkg),
 				TemplateID: "architecture",
+				Kind:       PageKindTopLevelDir,
 				Audience:   quality.AudienceEngineers,
 				Input:      archInput,
 				PackageInfo: &ArchitecturePackageInfo{
@@ -1919,6 +1953,7 @@ func (r *TaxonomyResolver) resolveClusterArchPages(
 		pages = append(pages, PlannedPage{
 			ID:         pageIDFn(r.repoID, cs.Label),
 			TemplateID: "architecture",
+			Kind:       PageKindCluster,
 			Audience:   quality.AudienceEngineers,
 			Input:      archInput,
 			PackageInfo: &ArchitecturePackageInfo{
@@ -1978,6 +2013,7 @@ func (r *TaxonomyResolver) resolveTopLevelDirPages(
 		pages = append(pages, PlannedPage{
 			ID:         DetailPageID(r.repoID, topDir),
 			TemplateID: "architecture",
+			Kind:       PageKindTopLevelDir,
 			Audience:   quality.AudienceEngineers,
 			Input:      archInput,
 			PackageInfo: &ArchitecturePackageInfo{
@@ -2006,18 +2042,21 @@ func (r *TaxonomyResolver) resolveRepoWidePages(baseInput templates.GenerateInpu
 		{
 			ID:         apiRefPageID(r.repoID),
 			TemplateID: "api_reference",
+			Kind:       PageKindRepoWide,
 			Audience:   quality.AudienceEngineers,
 			Input:      apiInput,
 		},
 		{
 			ID:         sysOverviewPageID(r.repoID),
 			TemplateID: "system_overview",
+			Kind:       PageKindRepoWide,
 			Audience:   quality.AudienceProduct,
 			Input:      sysInput,
 		},
 		{
 			ID:         glossaryPageID(r.repoID),
 			TemplateID: "glossary",
+			Kind:       PageKindRepoWide,
 			Audience:   quality.AudienceEngineers,
 			Input:      glossInput,
 		},

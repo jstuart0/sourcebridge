@@ -33,24 +33,30 @@ var repoWideTemplateIDs = map[string]bool{
 	"glossary":        true,
 }
 
-// GraphQL LivingWikiPageType enum string values (must match
-// LivingWikiPageType in schema.graphqls).
-const (
-	pageTypeRepoWide     = "REPO_WIDE"
-	pageTypeArchitecture = "ARCHITECTURE"
-	pageTypeTopLevelDir  = "TOP_LEVEL_DIR"
-)
-
-// classifyPageType returns the LivingWikiPageType enum value for a template
-// ID. Used by both cold-start tally and the preview resolver.
-func classifyPageType(templateID string) string {
-	if repoWideTemplateIDs[templateID] {
-		return pageTypeRepoWide
+// classifyPageType returns the LivingWikiPageType enum for a planned page.
+// It prefers the explicit Kind field; falls back to TemplateID heuristics for
+// legacy persisted plans (smart-resume) where Kind == PageKindUnknown.
+//
+// TODO: remove the PageKindUnknown fallback once all persisted plans (smart-
+// resume cache, audit logs) populate Kind.
+func classifyPageType(p lworch.PlannedPage) LivingWikiPageType {
+	switch p.Kind {
+	case lworch.PageKindRepoWide:
+		return LivingWikiPageTypeRepoWide
+	case lworch.PageKindCluster:
+		return LivingWikiPageTypeArchitecture
+	case lworch.PageKindTopLevelDir:
+		return LivingWikiPageTypeTopLevelDir
 	}
-	if templateID == templateIDArchitecture {
-		return pageTypeArchitecture
+	// Legacy fallback: PageKindUnknown (zero value). Used for persisted plans
+	// that predate the Kind field. Remove once all call paths populate Kind.
+	if repoWideTemplateIDs[p.TemplateID] {
+		return LivingWikiPageTypeRepoWide
 	}
-	return pageTypeTopLevelDir
+	if p.TemplateID == templateIDArchitecture {
+		return LivingWikiPageTypeArchitecture
+	}
+	return LivingWikiPageTypeTopLevelDir
 }
 
 // computePlanSignature returns a deterministic hex-encoded sha256 over the
@@ -117,7 +123,10 @@ func applyPageCap(
 		capValue = effectiveCap
 		var repoWide, rest []lworch.PlannedPage
 		for _, p := range pages {
-			if repoWideTemplateIDs[p.TemplateID] {
+			// Prefer Kind when set; fall back to TemplateID for legacy plans.
+			isRepoWide := p.Kind == lworch.PageKindRepoWide ||
+				(p.Kind == lworch.PageKindUnknown && repoWideTemplateIDs[p.TemplateID])
+			if isRepoWide {
 				repoWide = append(repoWide, p)
 			} else {
 				rest = append(rest, p)

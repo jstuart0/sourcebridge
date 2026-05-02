@@ -276,10 +276,10 @@ func buildColdStartRunner(cfg coldStartConfig) func(ctx context.Context, rt llm.
 		// reflects what the taxonomy actually produced.
 		var clusterPageCount, repoWidePageCount, topLevelDirPageCount int
 		for _, p := range pages {
-			switch classifyPageType(p.TemplateID) {
-			case pageTypeRepoWide:
+			switch classifyPageType(p) {
+			case LivingWikiPageTypeRepoWide:
 				repoWidePageCount++
-			case pageTypeArchitecture:
+			case LivingWikiPageTypeArchitecture:
 				clusterPageCount++
 			default:
 				topLevelDirPageCount++

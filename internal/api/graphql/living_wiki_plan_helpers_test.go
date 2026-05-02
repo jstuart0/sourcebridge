@@ -219,29 +219,71 @@ func TestComputePlanSignature_DiffersOnInputChange(t *testing.T) {
 // classifyPageType tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestClassifyPageType_AllBranches(t *testing.T) {
+// TestClassifyPageType_KindRepoWide verifies that an explicit PageKindRepoWide
+// field returns LivingWikiPageTypeRepoWide regardless of TemplateID.
+func TestClassifyPageType_KindRepoWide(t *testing.T) {
+	t.Parallel()
+	got := classifyPageType(lworch.PlannedPage{Kind: lworch.PageKindRepoWide, TemplateID: "api_reference"})
+	if got != LivingWikiPageTypeRepoWide {
+		t.Errorf("got %q, want %q", got, LivingWikiPageTypeRepoWide)
+	}
+}
+
+// TestClassifyPageType_KindCluster verifies that an explicit PageKindCluster
+// field returns LivingWikiPageTypeArchitecture.
+func TestClassifyPageType_KindCluster(t *testing.T) {
+	t.Parallel()
+	got := classifyPageType(lworch.PlannedPage{Kind: lworch.PageKindCluster, TemplateID: "architecture"})
+	if got != LivingWikiPageTypeArchitecture {
+		t.Errorf("got %q, want %q", got, LivingWikiPageTypeArchitecture)
+	}
+}
+
+// TestClassifyPageType_KindTopLevelDir verifies that an explicit PageKindTopLevelDir
+// field returns LivingWikiPageTypeTopLevelDir — this pins the C1 bug where both
+// cluster and top-level-dir pages shared TemplateID "architecture".
+func TestClassifyPageType_KindTopLevelDir(t *testing.T) {
+	t.Parallel()
+	got := classifyPageType(lworch.PlannedPage{Kind: lworch.PageKindTopLevelDir, TemplateID: "architecture"})
+	if got != LivingWikiPageTypeTopLevelDir {
+		t.Errorf("got %q, want %q", got, LivingWikiPageTypeTopLevelDir)
+	}
+}
+
+// TestClassifyPageType_LegacyTemplateIDFallback verifies that PageKindUnknown
+// (zero value) falls back to TemplateID-based classification for legacy persisted
+// plans. A repo-wide template ID must return RepoWide.
+func TestClassifyPageType_LegacyTemplateIDFallback(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		templateID string
-		want       string
+		want       LivingWikiPageType
 	}{
-		{"api_reference", pageTypeRepoWide},
-		{"system_overview", pageTypeRepoWide},
-		{"glossary", pageTypeRepoWide},
-		{"architecture", pageTypeArchitecture},
-		{"top_level_dir", pageTypeTopLevelDir},
-		{"some_other_template", pageTypeTopLevelDir},
-		{"", pageTypeTopLevelDir},
+		{"api_reference", LivingWikiPageTypeRepoWide},
+		{"system_overview", LivingWikiPageTypeRepoWide},
+		{"glossary", LivingWikiPageTypeRepoWide},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.templateID, func(t *testing.T) {
 			t.Parallel()
-			got := classifyPageType(tc.templateID)
+			got := classifyPageType(lworch.PlannedPage{Kind: lworch.PageKindUnknown, TemplateID: tc.templateID})
 			if got != tc.want {
-				t.Errorf("classifyPageType(%q) = %q, want %q", tc.templateID, got, tc.want)
+				t.Errorf("classifyPageType(Unknown, %q) = %q, want %q", tc.templateID, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestClassifyPageType_LegacyArchitectureAmbiguous documents the known limitation
+// of the legacy fallback: a PageKindUnknown page with TemplateID "architecture"
+// is classified as ARCHITECTURE (best-effort; indistinguishable from cluster vs
+// top-level-dir for legacy plans).
+func TestClassifyPageType_LegacyArchitectureAmbiguous(t *testing.T) {
+	t.Parallel()
+	got := classifyPageType(lworch.PlannedPage{Kind: lworch.PageKindUnknown, TemplateID: "architecture"})
+	if got != LivingWikiPageTypeArchitecture {
+		t.Errorf("got %q, want %q (legacy best-effort fallback)", got, LivingWikiPageTypeArchitecture)
 	}
 }
 
