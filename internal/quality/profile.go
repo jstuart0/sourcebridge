@@ -3,7 +3,11 @@
 
 package quality
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
+)
 
 // Template identifies the page template.
 type Template string
@@ -57,7 +61,13 @@ type ValidatorRule struct {
 type Profile struct {
 	Template Template
 	Audience Audience
-	Rules    []ValidatorRule
+	// Tier is the quality-gate calibration tier that was used when this
+	// profile was materialized. TierUnknown (zero value) means "not yet
+	// resolved"; callers should call DefaultProfile with an explicit tier
+	// rather than relying on zero-value behavior. Phase 2 sets this
+	// explicitly on every materialized profile.
+	Tier  modeltier.QualityGateTier
+	Rules []ValidatorRule
 }
 
 // defaultProfiles encodes the per-template, per-audience gate/warning

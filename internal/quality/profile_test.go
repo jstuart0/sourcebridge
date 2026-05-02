@@ -6,6 +6,7 @@ package quality_test
 import (
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 )
 
@@ -155,6 +156,17 @@ func TestAllDefaultProfiles_NoDuplicates(t *testing.T) {
 			t.Errorf("AllDefaultProfiles: duplicate profile for %s", key)
 		}
 		seen[key] = true
+	}
+}
+
+// TestProfile_TierFieldExists verifies that the Tier field is present on
+// quality.Profile and that its zero value is modeltier.TierUnknown (not
+// silently treated as TierFrontier). Phase 2 will populate this field
+// explicitly on every materialized profile.
+func TestProfile_TierFieldExists(t *testing.T) {
+	var p quality.Profile
+	if p.Tier != modeltier.TierUnknown {
+		t.Errorf("Profile{}.Tier = %q, want TierUnknown (%q)", p.Tier, modeltier.TierUnknown)
 	}
 }
 
