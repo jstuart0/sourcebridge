@@ -5,11 +5,13 @@ package rest
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 )
 
@@ -177,6 +179,12 @@ func (s *Server) handleUpdateModelCapabilities(w http.ResponseWriter, r *http.Re
 	}
 	if mc.ModelID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "modelId is required"})
+		return
+	}
+	if _, ok := modeltier.Parse(string(mc.QualityGateTier)); !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("invalid qualityGateTier %q: must be one of \"frontier\", \"mid\", \"local\", or \"\" (unknown)", mc.QualityGateTier),
+		})
 		return
 	}
 	if err := s.comprehensionStore.SetModelCapabilities(&mc); err != nil {

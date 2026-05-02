@@ -6,11 +6,13 @@ package db
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/uuid"
 	surrealdb "github.com/surrealdb/surrealdb.go"
 	"github.com/surrealdb/surrealdb.go/pkg/models"
 
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 )
 
@@ -96,11 +98,21 @@ type surrealModelCapabilities struct {
 	LastProbedAt           surrealTime      `json:"last_probed_at"`
 	Source                 string           `json:"source"`
 	Notes                  string           `json:"notes"`
+	QualityGateTier        string           `json:"quality_gate_tier"`
 	CreatedAt              surrealTime      `json:"created_at"`
 	UpdatedAt              surrealTime      `json:"updated_at"`
 }
 
 func (r *surrealModelCapabilities) toModelCapabilities() *comprehension.ModelCapabilities {
+	tier, ok := modeltier.Parse(r.QualityGateTier)
+	if !ok {
+		slog.Warn("model_capabilities_invalid_tier",
+			"model_id", r.ModelID,
+			"stored_value", r.QualityGateTier,
+		)
+		tier = modeltier.TierUnknown
+	}
+
 	mc := &comprehension.ModelCapabilities{
 		ID:                     recordIDString(r.ID),
 		ModelID:                r.ModelID,
@@ -118,6 +130,7 @@ func (r *surrealModelCapabilities) toModelCapabilities() *comprehension.ModelCap
 		CostPer1kOutput:        r.CostPer1kOutput,
 		Source:                 r.Source,
 		Notes:                  r.Notes,
+		QualityGateTier:        tier,
 		UpdatedAt:              r.UpdatedAt.Time,
 	}
 	if !r.LastProbedAt.Time.IsZero() {
@@ -316,6 +329,7 @@ func (s *SurrealStore) SetModelCapabilities(mc *comprehension.ModelCapabilities)
 				cost_per_1k_output = $cost_output,
 				source = $source,
 				notes = $notes,
+				quality_gate_tier = $quality_gate_tier,
 				updated_at = time::now()
 			WHERE model_id = $model_id)
 		ELSE
@@ -336,6 +350,7 @@ func (s *SurrealStore) SetModelCapabilities(mc *comprehension.ModelCapabilities)
 				cost_per_1k_output = $cost_output,
 				source = $source,
 				notes = $notes,
+				quality_gate_tier = $quality_gate_tier,
 				updated_at = time::now())
 		END;
 	`
@@ -361,6 +376,7 @@ func (s *SurrealStore) SetModelCapabilities(mc *comprehension.ModelCapabilities)
 		"cost_output":           mc.CostPer1kOutput,
 		"source":                mc.Source,
 		"notes":                 mc.Notes,
+		"quality_gate_tier":     string(mc.QualityGateTier),
 	}
 
 	_, err := surrealdb.Query[interface{}](ctx(), db, sql, vars)

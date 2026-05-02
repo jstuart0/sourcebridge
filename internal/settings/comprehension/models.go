@@ -6,6 +6,8 @@ package comprehension
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 )
 
 // ScopeType determines the level of configuration inheritance.
@@ -80,8 +82,7 @@ func DefaultSettings() Settings {
 	}
 }
 
-// ModelCapabilities describes what a model can do. Mirrors the Python
-// ModelCapabilities dataclass in workers/comprehension/capabilities.py.
+// ModelCapabilities describes what a model can do.
 type ModelCapabilities struct {
 	ID                     string         `json:"id,omitempty"`
 	ModelID                string         `json:"modelId"`
@@ -98,9 +99,10 @@ type ModelCapabilities struct {
 	CostPer1kInput         *float64       `json:"costPer1kInput,omitempty"`
 	CostPer1kOutput        *float64       `json:"costPer1kOutput,omitempty"`
 	LastProbedAt           *time.Time     `json:"lastProbedAt,omitempty"`
-	Source                 string         `json:"source"`
-	Notes                  string         `json:"notes,omitempty"`
-	UpdatedAt              time.Time      `json:"updatedAt"`
+	Source                 string                  `json:"source"`
+	Notes                  string                  `json:"notes,omitempty"`
+	QualityGateTier        modeltier.QualityGateTier `json:"qualityGateTier"`
+	UpdatedAt              time.Time               `json:"updatedAt"`
 }
 
 // MarshalLongContextQuality serializes the LongContextQuality map to JSON

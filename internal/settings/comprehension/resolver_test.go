@@ -5,6 +5,8 @@ package comprehension
 
 import (
 	"testing"
+
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 )
 
 func TestResolve_DefaultsWhenEmpty(t *testing.T) {
@@ -188,6 +190,37 @@ func TestMemStore_ModelCapabilitiesCRUD(t *testing.T) {
 	mc, _ = store.GetModelCapabilities("claude-sonnet-4-6")
 	if mc != nil {
 		t.Error("expected nil after delete")
+	}
+}
+
+func TestMemStore_ModelCapabilities_QualityGateTier_RoundTrip(t *testing.T) {
+	store := NewMemStore()
+
+	for _, tier := range []modeltier.QualityGateTier{
+		modeltier.TierFrontier,
+		modeltier.TierMid,
+		modeltier.TierLocal,
+		modeltier.TierUnknown,
+	} {
+		mc := &ModelCapabilities{
+			ModelID:         "test-model-" + string(tier),
+			Provider:        "test",
+			QualityGateTier: tier,
+			Source:          "builtin",
+		}
+		if err := store.SetModelCapabilities(mc); err != nil {
+			t.Fatalf("SetModelCapabilities(%s): %v", tier, err)
+		}
+		got, err := store.GetModelCapabilities(mc.ModelID)
+		if err != nil {
+			t.Fatalf("GetModelCapabilities(%s): %v", mc.ModelID, err)
+		}
+		if got == nil {
+			t.Fatalf("expected record for tier %q, got nil", tier)
+		}
+		if got.QualityGateTier != tier {
+			t.Errorf("tier round-trip: stored %q, got %q", tier, got.QualityGateTier)
+		}
 	}
 }
 
