@@ -6,6 +6,7 @@ resources:
   - configmap.yaml
   - surrealdb.yaml
   - api.yaml
+  - api-pdb.yaml
   - worker.yaml
   - web.yaml
   - ingress.yaml

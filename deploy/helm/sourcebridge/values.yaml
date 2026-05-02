@@ -64,6 +64,12 @@ api:
     pullPolicy: IfNotPresent
   replicas: 1
   port: 8080
+  # -- Internal listener port (loopback only). The preStop hook curls
+  # this port. Must match SOURCEBRIDGE_INTERNAL_LISTEN_ADDR if you
+  # override that env var. To avoid drift, do not change internalPort
+  # without also setting SOURCEBRIDGE_INTERNAL_LISTEN_ADDR accordingly.
+  # CA-142.
+  internalPort: 8081
   resources:
     requests:
       cpu: 250m
@@ -79,6 +85,23 @@ api:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  # ── Graceful drain / rolling-update settings (CA-142) ──────────────
+  # terminationGracePeriodSeconds MUST be >= shutdownGraceSeconds +
+  # preStopSleepSeconds + 60 (slack). Default values satisfy this:
+  #   3600 + 10 + 60 = 3670 < 3900.
+  # Increase shutdownGraceSeconds if you have jobs longer than 60 min.
+  # Reduce if you want faster pod replacement at the cost of shorter
+  # drain windows.
+  terminationGracePeriodSeconds: 3900
+  shutdownGraceSeconds: 3600
+  preStopSleepSeconds: 10
+  maxSurge: 1
+  maxUnavailable: 0
+  # -- PodDisruptionBudget settings
+  podDisruptionBudget:
+    # -- When true, creates a PDB with minAvailable=1 so voluntary
+    # disruptions cannot take all API pods offline simultaneously.
+    enabled: true
 
 # ─── Web Frontend ────────────────────────────────────────────────────
 web:
@@ -125,6 +148,11 @@ worker:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  # ── Graceful drain / rolling-update settings (CA-142) ──────────────
+  terminationGracePeriodSeconds: 3900
+  shutdownGraceSeconds: 3600
+  maxSurge: 1
+  maxUnavailable: 0
 
 # ─── SurrealDB ───────────────────────────────────────────────────────
 surrealdb:

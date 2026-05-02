@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/99designs/gqlgen/graphql/handler"
@@ -24,27 +26,27 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	"github.com/sourcebridge/sourcebridge/internal/changewatch"
 	"github.com/sourcebridge/sourcebridge/internal/clustering"
-	"github.com/sourcebridge/sourcebridge/internal/indexing"
-	"github.com/sourcebridge/sourcebridge/internal/installassets"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/db"
 	"github.com/sourcebridge/sourcebridge/internal/events"
 	"github.com/sourcebridge/sourcebridge/internal/featureflags"
 	gitres "github.com/sourcebridge/sourcebridge/internal/git/resolution"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
+	"github.com/sourcebridge/sourcebridge/internal/indexing"
+	"github.com/sourcebridge/sourcebridge/internal/installassets"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
+	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
+	"github.com/sourcebridge/sourcebridge/internal/livingwiki/webhook"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
-	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
-	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
-	"github.com/sourcebridge/sourcebridge/internal/livingwiki/webhook"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
 	"github.com/sourcebridge/sourcebridge/internal/search"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 	"github.com/sourcebridge/sourcebridge/internal/trash"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
+	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 )
 
 // ServerOption configures optional Server parameters.
@@ -237,50 +239,50 @@ func WithHealthChecker(hc *HealthChecker) ServerOption {
 
 // Server is the HTTP API server.
 type Server struct {
-	cfg                *config.Config
-	router             chi.Router
-	localAuth          *auth.LocalAuth
-	jwtMgr             *auth.JWTManager
-	oidc               *auth.OIDCProvider
-	store              graphstore.GraphStore
-	knowledgeStore     knowledge.KnowledgeStore
-	jobStore           llm.JobStore               // persistent store for llm.Job records; defaults to MemStore
-	orchestrator       *orchestrator.Orchestrator // shared LLM job orchestrator (created in NewServer)
-	worker             *worker.Client
-	eventBus           *events.Bus
-	flags              featureflags.Flags
-	tokenStore         auth.APITokenStore
-	desktopAuth        DesktopAuthSessionStore
-	gitConfigStore     GitConfigStore                 // persists git tokens/SSH config across restarts
-	llmConfigStore     LLMConfigStore                 // persists LLM provider/model config across restarts
-	llmProfileStore    LLMProfileStoreAdapter         // LLM provider profiles slice 1: profile CRUD + active pointer
-	queueControlStore  QueueControlStore              // persists queue intake controls across restarts
-	enterpriseDB       interface{}                    // *surrealdb.DB when available, type-asserted in enterprise_routes.go
-	repoChecker        middleware.RepoAccessChecker   // set by enterprise build to enable tenant repo filtering
-	mcp                *mcpHandler                    // MCP protocol handler (nil when disabled)
-	mcpPermChecker     MCPPermissionChecker           // deferred to mcp handler at setup
-	mcpAuditLogger     MCPAuditLogger                 // deferred to mcp handler at setup
-	mcpToolExtender    MCPToolExtender                // deferred to mcp handler at setup
-	comprehensionStore comprehension.Store            // comprehension settings + model capabilities
-	summaryNodeStore   comprehension.SummaryNodeStore // cached summary tree nodes
-	cache              db.Cache                       // shared KV cache (memory or Redis); nil = MCP session store falls back to in-memory
-	trashStore         trash.Store                    // soft-delete recycle bin; nil = feature disabled
-	qaOrchestrator     *qa.Orchestrator               // server-side deep-QA orchestrator; nil = server-side QA disabled
-	workerLanes        *worker.Lanes                  // shared lane registry used by search + qa
-	searchSvc          *search.Service                // hybrid retrieval backbone; always set in NewServer
-	reqBooster         *search.RequirementBooster     // repo-scoped requirement link cache; feeds searchSvc boosters
-	searchMetrics      *search.Metrics                // in-process ring buffer of per-stage latency / success
-	livingWikiStore              livingwiki.Store              // living-wiki UI settings store; nil = feature unavailable
-	livingWikiResolver           *livingwiki.Resolver          // merged living-wiki config (UI + env); nil = only env applies
-	livingWikiRepoStore          livingwiki.RepoSettingsStore  // per-repo living-wiki opt-in; nil = feature unavailable
-	livingWikiDispatcher         *webhook.Dispatcher           // nil = feature not started or kill-switch active
-	livingWikiJobResultStore     livingwiki.JobResultStore     // nil = job result history unavailable
-	livingWikiPagePublishStore   livingwiki.PagePublishStatusStore // per-page dispatch state (Phase 1 of incremental-publish redesign); nil = smart-resume falls back to sink-presence-only
-	livingWikiLiveOrchestrator   *lworch.Orchestrator          // living-wiki page-generation orchestrator; nil = feature unavailable
-	knowledgeSettingsStore       KnowledgeSettingsStore        // CA-122: operator-tunable knowledge-RPC safety-net timeout; nil = embedded mode (boot env-default only)
-	clusterRunner                *clustering.Runner            // subsystem clustering job dispatcher; nil = feature disabled
-	healthChecker                *HealthChecker                // shared DB+worker probe; nil = embedded/test mode, handlers fall back to local checks
-	workerVersionLookup          *versionLookup                // best-effort cache for worker GetVersion (CA-136); nil = workerVersion always "" in /api/v1/version
+	cfg                        *config.Config
+	router                     chi.Router
+	localAuth                  *auth.LocalAuth
+	jwtMgr                     *auth.JWTManager
+	oidc                       *auth.OIDCProvider
+	store                      graphstore.GraphStore
+	knowledgeStore             knowledge.KnowledgeStore
+	jobStore                   llm.JobStore               // persistent store for llm.Job records; defaults to MemStore
+	orchestrator               *orchestrator.Orchestrator // shared LLM job orchestrator (created in NewServer)
+	worker                     *worker.Client
+	eventBus                   *events.Bus
+	flags                      featureflags.Flags
+	tokenStore                 auth.APITokenStore
+	desktopAuth                DesktopAuthSessionStore
+	gitConfigStore             GitConfigStore                    // persists git tokens/SSH config across restarts
+	llmConfigStore             LLMConfigStore                    // persists LLM provider/model config across restarts
+	llmProfileStore            LLMProfileStoreAdapter            // LLM provider profiles slice 1: profile CRUD + active pointer
+	queueControlStore          QueueControlStore                 // persists queue intake controls across restarts
+	enterpriseDB               interface{}                       // *surrealdb.DB when available, type-asserted in enterprise_routes.go
+	repoChecker                middleware.RepoAccessChecker      // set by enterprise build to enable tenant repo filtering
+	mcp                        *mcpHandler                       // MCP protocol handler (nil when disabled)
+	mcpPermChecker             MCPPermissionChecker              // deferred to mcp handler at setup
+	mcpAuditLogger             MCPAuditLogger                    // deferred to mcp handler at setup
+	mcpToolExtender            MCPToolExtender                   // deferred to mcp handler at setup
+	comprehensionStore         comprehension.Store               // comprehension settings + model capabilities
+	summaryNodeStore           comprehension.SummaryNodeStore    // cached summary tree nodes
+	cache                      db.Cache                          // shared KV cache (memory or Redis); nil = MCP session store falls back to in-memory
+	trashStore                 trash.Store                       // soft-delete recycle bin; nil = feature disabled
+	qaOrchestrator             *qa.Orchestrator                  // server-side deep-QA orchestrator; nil = server-side QA disabled
+	workerLanes                *worker.Lanes                     // shared lane registry used by search + qa
+	searchSvc                  *search.Service                   // hybrid retrieval backbone; always set in NewServer
+	reqBooster                 *search.RequirementBooster        // repo-scoped requirement link cache; feeds searchSvc boosters
+	searchMetrics              *search.Metrics                   // in-process ring buffer of per-stage latency / success
+	livingWikiStore            livingwiki.Store                  // living-wiki UI settings store; nil = feature unavailable
+	livingWikiResolver         *livingwiki.Resolver              // merged living-wiki config (UI + env); nil = only env applies
+	livingWikiRepoStore        livingwiki.RepoSettingsStore      // per-repo living-wiki opt-in; nil = feature unavailable
+	livingWikiDispatcher       *webhook.Dispatcher               // nil = feature not started or kill-switch active
+	livingWikiJobResultStore   livingwiki.JobResultStore         // nil = job result history unavailable
+	livingWikiPagePublishStore livingwiki.PagePublishStatusStore // per-page dispatch state (Phase 1 of incremental-publish redesign); nil = smart-resume falls back to sink-presence-only
+	livingWikiLiveOrchestrator *lworch.Orchestrator              // living-wiki page-generation orchestrator; nil = feature unavailable
+	knowledgeSettingsStore     KnowledgeSettingsStore            // CA-122: operator-tunable knowledge-RPC safety-net timeout; nil = embedded mode (boot env-default only)
+	clusterRunner              *clustering.Runner                // subsystem clustering job dispatcher; nil = feature disabled
+	healthChecker              *HealthChecker                    // shared DB+worker probe; nil = embedded/test mode, handlers fall back to local checks
+	workerVersionLookup        *versionLookup                    // best-effort cache for worker GetVersion (CA-136); nil = workerVersion always "" in /api/v1/version
 
 	// LLM source-of-truth (single resolver shared with the GraphQL resolver
 	// and llmcall.Caller). The Server owns the resolver so handleGetLLMConfig
@@ -304,6 +306,21 @@ type Server struct {
 	// response). The interface decouples the rest package from the
 	// concrete *changewatch.Router so tests substitute a stub.
 	changeDispatcher ChangeEventDispatcher
+
+	// CA-142: graceful-drain lifecycle state.
+	// serverDraining is set once (CAS) when SIGTERM or the preStop hook
+	// triggers BeginDrain. It gates /readyz, new Living Wiki mutations,
+	// and on-demand generation admissions.
+	serverDraining atomic.Bool
+	drainingOnce   sync.Once
+	drainingAt     time.Time
+	drainingMu     sync.Mutex
+	// OnDemand counts active on-demand Living Wiki page-generation
+	// requests. Admitted before settings/LLM resolution begin so
+	// AwaitDrain sees the full request lifetime. Wired into the GraphQL
+	// Resolver via DrainAdmitter so the resolver has no direct dep on
+	// *rest.Server. CA-142.
+	OnDemand *OnDemandTracker
 }
 
 // WithChangeDispatcher injects the change-watch dispatcher (typically
@@ -362,6 +379,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		flags:       featureflags.LoadFromEnv(),
 		tokenStore:  auth.NewAPITokenStore(),
 		desktopAuth: NewMemoryDesktopAuthStore(),
+		OnDemand:    NewOnDemandTracker(),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -668,23 +686,23 @@ func (s *Server) setupRouter() {
 	// GraphQL server
 	gqlSrv := handler.NewDefaultServer(graphql.NewExecutableSchema(graphql.Config{
 		Resolvers: &graphql.Resolver{
-			Store:              s.store,
-			KnowledgeStore:     s.knowledgeStore,
-			Worker:             s.worker,
-			LLMCaller:          s.llmCaller,
-			LLMResolver:        s.llmResolver,
-			Orchestrator:       s.orchestrator,
-			Config:             s.cfg,
-			EventBus:           s.eventBus,
-			Flags:              s.flags,
-			GitConfig:          gitConfigLoaderFromStore(s.gitConfigStore),
-			GitResolver:        s.gitResolver,
-			ComprehensionStore: s.comprehensionStore,
-			HealthChecker:      s.healthChecker,
-			TrashStore:         s.trashStore,
-			SearchSvc:          s.searchSvc,
-			ReqBooster:         s.reqBooster,
-			QA:                 s.qaResolverOrchestrator(),
+			Store:                      s.store,
+			KnowledgeStore:             s.knowledgeStore,
+			Worker:                     s.worker,
+			LLMCaller:                  s.llmCaller,
+			LLMResolver:                s.llmResolver,
+			Orchestrator:               s.orchestrator,
+			Config:                     s.cfg,
+			EventBus:                   s.eventBus,
+			Flags:                      s.flags,
+			GitConfig:                  gitConfigLoaderFromStore(s.gitConfigStore),
+			GitResolver:                s.gitResolver,
+			ComprehensionStore:         s.comprehensionStore,
+			HealthChecker:              s.healthChecker,
+			TrashStore:                 s.trashStore,
+			SearchSvc:                  s.searchSvc,
+			ReqBooster:                 s.reqBooster,
+			QA:                         s.qaResolverOrchestrator(),
 			LLMProfileLookup:           gqlProfileLookup,
 			LivingWikiStore:            s.livingWikiStore,
 			LivingWikiResolver:         s.livingWikiResolver,
@@ -705,6 +723,11 @@ func (s *Server) setupRouter() {
 				}
 				return s.workerVersionLookup.get(ctx)
 			},
+			// CA-142: drain admitter so the GraphQL resolver can gate
+			// Living Wiki mutations and count on-demand requests without
+			// a direct dependency on *rest.Server. The concrete type
+			// (*serverDrainAdmitter) satisfies graphql.DrainAdmitter.
+			DrainAdmitter: s.DrainAdmitterFor(),
 		},
 	}))
 
@@ -774,11 +797,22 @@ func (s *Server) setupRouter() {
 		r.Get("/api/v1/admin/llm/control", s.handleGetQueueControl)
 		r.Put("/api/v1/admin/llm/control", s.handleUpdateQueueControl)
 		r.Post("/api/v1/admin/llm/drain", s.handleDrainQueue)
+		// CA-142: admin endpoint to initiate graceful server drain via the
+		// public API. Idempotent — returns current drain state whether or
+		// not this call was the first to flip the flag.
+		r.Post("/api/v1/admin/llm/server-drain", s.handleAdminServerDrain)
+		// CA-142: debug slow-job endpoint for drain validation (Phase 4).
+		// Only registered when SOURCEBRIDGE_DEBUG_ENDPOINTS=true.
+		if getEnvBool("SOURCEBRIDGE_DEBUG_ENDPOINTS") {
+			r.Post("/api/v1/admin/debug/slow-job", s.handleDebugSlowJob)
+		}
 		r.Get("/api/v1/admin/llm/jobs/{id}", s.handleLLMJobDetail)
 		r.Get("/api/v1/admin/llm/jobs/{id}/logs", s.handleLLMJobLogs)
 		r.Get("/api/v1/admin/llm/jobs/{id}/logs/stream", s.handleLLMJobLogStream)
 		r.Post("/api/v1/admin/llm/jobs/{id}/cancel", s.handleLLMJobCancel)
 		r.Post("/api/v1/admin/llm/jobs/{id}/retry", s.handleLLMJobRetry)
+		// CA-144: per-page in-flight visibility for living-wiki cold-starts.
+		r.Get("/api/v1/admin/llm/jobs/{id}/livingwiki/in-flight", s.handleLivingWikiInFlight)
 
 		// LLM configuration
 		r.Get("/api/v1/admin/llm-config", s.handleGetLLMConfig)
@@ -1018,6 +1052,106 @@ func (s *Server) setupRouter() {
 // Handler returns the HTTP handler.
 func (s *Server) Handler() http.Handler {
 	return s.router
+}
+
+// InternalHandler returns an http.Handler for the internal loopback
+// listener (127.0.0.1:8081). Only lifecycle-management routes are
+// registered here; no auth middleware is required because the loopback
+// bind enforces locality. CA-142.
+func (s *Server) InternalHandler() http.Handler {
+	r := chi.NewRouter()
+	// POST /internal/begin-drain — invoked by the Kubernetes preStop hook.
+	r.Post("/internal/begin-drain", s.handleBeginDrainInternal)
+	return r
+}
+
+// BeginDrain atomically flips the server into draining state and pauses
+// the LLM orchestrator's job intake. Returns true if this call was the
+// first to flip the flag, false if drain was already in progress.
+// Safe to call from multiple goroutines (preStop hook and SIGTERM handler).
+func (s *Server) BeginDrain(source string) (first bool) {
+	if s == nil {
+		return false
+	}
+	if !s.serverDraining.CompareAndSwap(false, true) {
+		// Already draining — log the redundant source for observability.
+		slog.Info("begin_drain: already draining, ignoring redundant trigger",
+			"source", source,
+			"event", "begindrain_duplicate")
+		return false
+	}
+	s.drainingMu.Lock()
+	s.drainingAt = time.Now()
+	s.drainingMu.Unlock()
+	slog.Info("begin_drain",
+		"source", source,
+		"event", "begindrain",
+	)
+	if s.orchestrator != nil {
+		s.orchestrator.SetIntakePaused(true)
+	}
+	return true
+}
+
+// IsDraining reports whether the server is in drain state.
+func (s *Server) IsDraining() bool {
+	if s == nil {
+		return false
+	}
+	return s.serverDraining.Load()
+}
+
+// AwaitDrain waits until both the orchestrator in-flight count and the
+// on-demand tracker reach zero, or ctx is cancelled. Returns nil when
+// both queues are empty, ctx.Err() on timeout.
+func (s *Server) AwaitDrain(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if s.orchestrator != nil {
+		eventCh, unsub := s.orchestrator.Subscribe()
+		defer unsub()
+
+		for s.orchestrator.InFlightCount() > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-eventCh:
+				// re-check on every job event
+			}
+		}
+	}
+	if s.OnDemand != nil {
+		if err := s.OnDemand.WaitZero(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// FinishShutdown shuts down stateful components that must outlive HTTP
+// connections: the event bus and the living-wiki dispatcher. Call this
+// AFTER httpServer.Shutdown and internalServer.Shutdown have returned.
+// Uses its own context so component cleanup is not bounded by the
+// already-spent HTTP-shutdown budget. CA-142 Medium #4.
+func (s *Server) FinishShutdown(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if s.eventBus != nil {
+		if err := s.eventBus.Shutdown(ctx); err != nil {
+			slog.Warn("event bus shutdown error", "err", err)
+		}
+	}
+	// Living-wiki dispatcher drain — budget provided by the caller.
+	if s.livingWikiDispatcher != nil {
+		if err := s.livingWikiDispatcher.Stop(ctx); err != nil {
+			slog.Warn("living-wiki dispatcher did not drain cleanly within timeout",
+				"err", err,
+			)
+		}
+	}
+	return nil
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {

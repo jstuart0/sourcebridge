@@ -6,6 +6,12 @@ metadata:
     {{- include "sourcebridge.worker.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.worker.replicas }}
+  # CA-142: parity with kustomize base — zero unavailable during rolling update.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: {{ .Values.worker.maxSurge | default 1 }}
+      maxUnavailable: {{ .Values.worker.maxUnavailable | default 0 }}
   selector:
     matchLabels:
       {{- include "sourcebridge.worker.selectorLabels" . | nindent 6 }}
@@ -18,6 +24,8 @@ spec:
         checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ include "sourcebridge.serviceAccountName" . }}
+      # CA-142: matches kustomize base worker.yaml:59 (65 min = grace + slack).
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds | default 3900 }}
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -79,19 +87,29 @@ spec:
                   key: embedding-api-key
                   optional: true
             {{- end }}
+            - name: SOURCEBRIDGE_WORKER_SHUTDOWN_GRACE_SECONDS
+              value: {{ .Values.worker.shutdownGraceSeconds | default 3600 | quote }}
             {{- range $key, $value := .Values.worker.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+          # CA-142: exec probes via sourcebridge-health-probe.sh — the built-in
+          # `grpc:` probe handler does not support mTLS client authentication.
+          # The wrapper script conditionally adds -tls flags based on
+          # SOURCEBRIDGE_WORKER_TLS_ENABLED. Matches kustomize base worker.yaml.
           readinessProbe:
-            grpc:
-              port: 50051
+            exec:
+              command: ["/usr/local/bin/sourcebridge-health-probe.sh"]
             initialDelaySeconds: 10
             periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
           livenessProbe:
-            grpc:
-              port: 50051
+            exec:
+              command: ["/usr/local/bin/sourcebridge-health-probe.sh"]
             initialDelaySeconds: 20
             periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}

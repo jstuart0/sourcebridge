@@ -41,6 +41,21 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	// CA-142: flip NOT_SERVING immediately on drain so the load balancer
+	// stops routing new requests to this pod before SIGTERM arrives.
+	if s != nil && s.IsDraining() {
+		resp := readinessResponse{
+			Status: "unavailable",
+			Components: map[string]componentStatus{
+				"api": {Status: "unavailable", Detail: "server is draining"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
 	resp := readinessResponse{
 		Status:     "ready",
 		Components: make(map[string]componentStatus),

@@ -6,6 +6,13 @@ metadata:
     {{- include "sourcebridge.api.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.api.replicas }}
+  # CA-142: maxUnavailable=0 keeps at least one healthy pod serving during
+  # a rolling update while the draining pod waits for in-flight jobs.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: {{ .Values.api.maxSurge | default 1 }}
+      maxUnavailable: {{ .Values.api.maxUnavailable | default 0 }}
   selector:
     matchLabels:
       {{- include "sourcebridge.api.selectorLabels" . | nindent 6 }}
@@ -18,6 +25,8 @@ spec:
         checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ include "sourcebridge.serviceAccountName" . }}
+      # CA-142: must exceed shutdownGraceSeconds + preStopSleepSeconds + 60s slack.
+      terminationGracePeriodSeconds: {{ .Values.api.terminationGracePeriodSeconds | default 3900 }}
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -72,6 +81,15 @@ spec:
                   name: {{ include "sourcebridge.fullname" . }}-secrets
                   key: surrealdb-password
             {{- end }}
+            # CA-142: drain grace window. Maps to [shutdown].grace_seconds
+            # via Viper's SOURCEBRIDGE_ prefix + dot→underscore rule.
+            - name: SOURCEBRIDGE_SHUTDOWN_GRACE_SECONDS
+              value: {{ .Values.api.shutdownGraceSeconds | default 3600 | quote }}
+            # CA-142: wire internalPort into the server bind address so the
+            # preStop curl target matches the actual listener. Changing
+            # internalPort without this would silently break preStop.
+            - name: SOURCEBRIDGE_INTERNAL_LISTEN_ADDR
+              value: "127.0.0.1:{{ .Values.api.internalPort | default 8081 }}"
             {{- range $key, $value := .Values.api.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
@@ -82,11 +100,27 @@ spec:
               port: http
             initialDelaySeconds: 15
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /readyz
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # CA-142: preStop hook calls the internal listener before SIGTERM
+          # so BeginDrain executes before any requests can arrive. The sleep
+          # gives load-balancer endpoint removal time to propagate.
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    curl -fsS -XPOST http://127.0.0.1:{{ .Values.api.internalPort | default 8081 }}/internal/begin-drain || true
+                    sleep {{ .Values.api.preStopSleepSeconds | default 10 }}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}

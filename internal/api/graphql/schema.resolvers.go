@@ -2501,12 +2501,34 @@ func (r *mutationResolver) UpdateRepositoryLivingWikiSettings(ctx context.Contex
 	return mapRepoLivingWikiSettings(current), nil
 }
 
+// checkServerDraining returns a SERVER_DRAINING gqlerror if the server is
+// in drain state. Living Wiki cold-start and on-demand mutations call this
+// at the top of their handlers so new jobs are not admitted during a rolling
+// restart. CA-142.
+func (r *Resolver) checkServerDraining() error {
+	if r.DrainAdmitter != nil && r.DrainAdmitter.IsDraining() {
+		return &gqlerror.Error{
+			Message: "The server is draining for a graceful restart. " +
+				"Living Wiki operations are temporarily unavailable. " +
+				"Please retry in a few minutes.",
+			Extensions: map[string]any{
+				"code": "SERVER_DRAINING",
+			},
+		}
+	}
+	return nil
+}
+
 // EnableLivingWikiForRepo resolves Mutation.enableLivingWikiForRepo.
 //
 // Saves the settings (enabled=true) and enqueues a living-wiki cold-start
 // job that is visible via the existing llm/activity polling feed (R5).
 // The kill-switch and global-enabled flags gate whether a job is queued.
 func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input EnableLivingWikiForRepoInput) (*EnableLivingWikiResult, error) {
+	// CA-142: refuse new cold-start jobs during graceful drain.
+	if err := r.checkServerDraining(); err != nil {
+		return nil, err
+	}
 	if r.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
@@ -2752,6 +2774,10 @@ func (r *mutationResolver) DisableLivingWikiForRepo(ctx context.Context, reposit
 // to pages that were excluded in the most recent run (the "Retry excluded
 // pages" CTA). When false (or nil), a full cold-start is triggered.
 func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool, mode *LivingWikiBuildMode) (*EnableLivingWikiResult, error) {
+	// CA-142: refuse new cold-start jobs during graceful drain.
+	if err := r.checkServerDraining(); err != nil {
+		return nil, err
+	}
 	if r.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
@@ -2828,6 +2854,10 @@ func (r *mutationResolver) SetLivingWikiModeFlags(ctx context.Context, repositor
 
 // TriggerLivingWikiColdStartAllEnabled resolves Mutation.triggerLivingWikiColdStartAllEnabled.
 func (r *mutationResolver) TriggerLivingWikiColdStartAllEnabled(ctx context.Context, repositoryID string) ([]*EnableLivingWikiResult, error) {
+	// CA-142: refuse new cold-start jobs during graceful drain.
+	if err := r.checkServerDraining(); err != nil {
+		return nil, err
+	}
 	if r.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
@@ -2891,6 +2921,26 @@ func (r *mutationResolver) TriggerLivingWikiColdStartAllEnabled(ctx context.Cont
 //     non-empty. Both or neither returns INVALID_PAGE_SPEC.
 //  3. lwOrch must be configured (returns a user-facing error when nil).
 func (r *mutationResolver) GenerateLivingWikiPageOnDemand(ctx context.Context, repositoryID string, pageSpec LivingWikiOnDemandPageSpec) (*LivingWikiOnDemandPageResult, error) {
+	// CA-142: gate BEFORE any other work so the admission counter accurately
+	// reflects the full request lifetime (settings load, LLM resolution,
+	// page generation). The drain check and Admit are paired atomically via
+	// the same DrainAdmitter so there is no window between passing the check
+	// and incrementing the counter.
+	if r.DrainAdmitter != nil {
+		if r.DrainAdmitter.IsDraining() {
+			return nil, &gqlerror.Error{
+				Message: "The server is draining for a graceful restart. " +
+					"On-demand generation is temporarily unavailable. " +
+					"Please retry in a few minutes.",
+				Extensions: map[string]any{
+					"code": "SERVER_DRAINING",
+				},
+			}
+		}
+		admission := r.DrainAdmitter.AdmitOnDemand()
+		defer admission.Release()
+	}
+
 	// ── 1. Gate: Detailed mode must be enabled ────────────────────────────────
 	if r.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")

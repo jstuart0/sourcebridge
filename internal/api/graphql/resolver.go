@@ -42,6 +42,23 @@ type GitConfigLoader interface {
 	LoadGitConfig() (token, sshKeyPath string, err error)
 }
 
+// DrainAdmitter is the interface the GraphQL resolver uses to (a) check
+// whether the server is draining and (b) admit on-demand Living Wiki
+// requests to the drain counter before any work begins. CA-142.
+//
+// The concrete implementation is *rest.serverDrainAdmitter,
+// wired via graphql.Resolver.DrainAdmitter at server construction. Nil
+// means drain protection is not active (embedded mode, tests).
+type DrainAdmitter interface {
+	// IsDraining returns true when the server has received SIGTERM or a
+	// /internal/begin-drain call and is waiting for jobs to finish.
+	IsDraining() bool
+	// AdmitOnDemand increments the in-flight on-demand counter and
+	// returns a token. The caller MUST call Release() exactly once
+	// (typically via defer) when the request completes.
+	AdmitOnDemand() interface{ Release() }
+}
+
 // LLMProfileLookup is the narrow read-side interface the GraphQL layer
 // uses to (a) validate that a per-repo override's profileId references
 // an existing profile at save time, and (b) resolve profileName for the
@@ -70,9 +87,9 @@ type LLMProfileLookup interface {
 // It serves as dependency injection for your app, add any dependencies you require here.
 
 type Resolver struct {
-	Store              graph.GraphStore
-	KnowledgeStore     knowledge.KnowledgeStore   // nil when knowledge persistence is unavailable
-	Worker             *worker.Client             // nil when AI features are unavailable
+	Store          graph.GraphStore
+	KnowledgeStore knowledge.KnowledgeStore // nil when knowledge persistence is unavailable
+	Worker         *worker.Client           // nil when AI features are unavailable
 	// LLMCaller is the LLM-aware adapter around Worker. All GraphQL
 	// resolvers that perform LLM-bearing RPCs must call LLMCaller.<RPC>
 	// rather than Worker.<RPC> directly so workspace-saved settings are
@@ -82,38 +99,38 @@ type Resolver struct {
 	// llmcall.Caller goes through it directly; resolvers that need to
 	// inspect the resolved snapshot (e.g. for telemetry stamping) can
 	// also call Resolve. Nil only in tests / embedded mode.
-	LLMResolver resolution.Resolver
-	Orchestrator       *orchestrator.Orchestrator // nil when llm orchestration is unavailable (degraded mode)
-	Config             *config.Config             // application configuration
-	EventBus           *events.Bus                // in-process event bus for SSE notifications
-	Flags              featureflags.Flags         // backend startup-time feature flags
-	GitConfig          GitConfigLoader            // legacy; nil-safe — when GitResolver is set it's authoritative
+	LLMResolver  resolution.Resolver
+	Orchestrator *orchestrator.Orchestrator // nil when llm orchestration is unavailable (degraded mode)
+	Config       *config.Config             // application configuration
+	EventBus     *events.Bus                // in-process event bus for SSE notifications
+	Flags        featureflags.Flags         // backend startup-time feature flags
+	GitConfig    GitConfigLoader            // legacy; nil-safe — when GitResolver is set it's authoritative
 	// GitResolver is the runtime git-credential resolver (R3 slice 2).
 	// All clone / fetch / upstream-probe call sites resolve credentials
 	// through this resolver so an admin save on replica A is visible to
 	// replica B on the very next op (version-cell pattern). When nil,
 	// resolveGitCredentials falls back to the legacy GitConfig loader
 	// (test wiring) and finally r.Config.Git (in-memory env bootstrap).
-	GitResolver gitres.Resolver
-	ComprehensionStore comprehension.Store        // comprehension settings + model capabilities; nil when unavailable
-	HealthChecker      *health.Checker            // shared DB+worker health probe; nil = no live checks (embedded/test mode)
+	GitResolver        gitres.Resolver
+	ComprehensionStore comprehension.Store // comprehension settings + model capabilities; nil when unavailable
+	HealthChecker      *health.Checker     // shared DB+worker health probe; nil = no live checks (embedded/test mode)
 	// LLMProfileLookup resolves profile id → name and "exists" for the
 	// per-repo override path (slice 3). Nil when running pre-profile
 	// (embedded mode); the GraphQL field/mutation degrade gracefully
 	// (mutations skip the validation step; the field returns nil for
 	// profileName but never PROFILE_NO_LONGER_EXISTS without proof).
-	LLMProfileLookup             LLMProfileLookup
-	LivingWikiStore              livingwiki.Store              // living-wiki UI settings; nil when unavailable
-	LivingWikiResolver           *livingwiki.Resolver          // resolved living-wiki settings (UI + env fallback)
-	LivingWikiRepoStore          livingwiki.RepoSettingsStore  // per-repo living-wiki opt-in; nil when unavailable
-	LivingWikiJobResultStore     livingwiki.JobResultStore     // per-run job result history; nil when unavailable
-	LivingWikiLiveOrchestrator   *lworch.Orchestrator          // living-wiki page-generation orchestrator; nil when feature unavailable
-	LivingWikiPagePublishStore   livingwiki.PagePublishStatusStore // per-page dispatch state (Phase 1); nil skips fingerprint tracking
-	TrashStore                   trash.Store                   // soft-delete recycle bin; nil when the feature is disabled or unavailable
-	QA                 *qa.Orchestrator           // server-side deep-QA orchestrator; nil when server-side QA is disabled
-	SearchSvc          *search.Service            // hybrid retrieval backbone; nil falls back to legacy substring search
-	ReqBooster         *search.RequirementBooster // requirement-link cache; link mutations call Invalidate so subsequent searches see fresh links
-	LivingWikiAuditLog governance.AuditLog        // audit trail for credential rotations and settings changes; nil disables audit logging
+	LLMProfileLookup           LLMProfileLookup
+	LivingWikiStore            livingwiki.Store                  // living-wiki UI settings; nil when unavailable
+	LivingWikiResolver         *livingwiki.Resolver              // resolved living-wiki settings (UI + env fallback)
+	LivingWikiRepoStore        livingwiki.RepoSettingsStore      // per-repo living-wiki opt-in; nil when unavailable
+	LivingWikiJobResultStore   livingwiki.JobResultStore         // per-run job result history; nil when unavailable
+	LivingWikiLiveOrchestrator *lworch.Orchestrator              // living-wiki page-generation orchestrator; nil when feature unavailable
+	LivingWikiPagePublishStore livingwiki.PagePublishStatusStore // per-page dispatch state (Phase 1); nil skips fingerprint tracking
+	TrashStore                 trash.Store                       // soft-delete recycle bin; nil when the feature is disabled or unavailable
+	QA                         *qa.Orchestrator                  // server-side deep-QA orchestrator; nil when server-side QA is disabled
+	SearchSvc                  *search.Service                   // hybrid retrieval backbone; nil falls back to legacy substring search
+	ReqBooster                 *search.RequirementBooster        // requirement-link cache; link mutations call Invalidate so subsequent searches see fresh links
+	LivingWikiAuditLog         governance.AuditLog               // audit trail for credential rotations and settings changes; nil disables audit logging
 	// ClusteringHook is called after each successful index run with (repoID,
 	// commitSHA) to enqueue an async clustering job. Nil = clustering disabled.
 	ClusteringHook func(repoID, commitSHA string)
@@ -128,6 +145,13 @@ type Resolver struct {
 	// without WorkerVersion and the resolver returns "" for that
 	// field. CA-138.
 	WorkerVersion func(ctx context.Context) string
+	// DrainAdmitter gates Living Wiki mutation admissions during a
+	// graceful server drain. When the server is draining, new cold-start
+	// and on-demand requests are rejected with SERVER_DRAINING. On-demand
+	// requests that pass the gate are counted so AwaitDrain waits for
+	// them. Nil in embedded/test mode — drain protection is inactive.
+	// CA-142.
+	DrainAdmitter DrainAdmitter
 }
 
 // getStore returns the per-request tenant-filtered store when available,
@@ -158,11 +182,12 @@ func (r *Resolver) getStore(ctx context.Context) graph.GraphStore {
 // surface IntegrityError — it only ever returns env-shadowed values —
 // so production deployments MUST wire the resolver.
 //
-//nolint:unused // Backward-compat shim: every active caller now uses
 // resolveGitCredentialsForOp(ctx, "<op>") so the structured log line
 // carries op context. This zero-arg form is kept for older tests that
 // haven't been updated and is asserted as allowlisted in
 // internal/git/resolution/lint_test.go (resolveGitCredentials).
+//
+//nolint:unused // Backward-compat shim: every active caller now uses
 func (r *Resolver) resolveGitCredentials(ctx context.Context) (token, sshKeyPath string, err error) {
 	return r.resolveGitCredentialsForOp(ctx, "graphql")
 }

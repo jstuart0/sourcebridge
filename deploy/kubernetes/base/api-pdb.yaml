@@ -1,0 +1,20 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sourcebridge-api-pdb
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/name: sourcebridge-api
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: api
+# CA-142: ensures at least one API pod is available during voluntary
+# disruptions (node drains, cluster upgrades). This does NOT protect
+# against rolling updates (those are governed by strategy.rollingUpdate
+# in the Deployment). It protects against simultaneous eviction of all
+# pods by the cluster autoscaler or manual node maintenance.
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sourcebridge-api
+      app.kubernetes.io/part-of: sourcebridge

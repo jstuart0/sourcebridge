@@ -1,0 +1,156 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 SourceBridge Contributors
+
+// Package rest — CA-142 graceful-drain endpoints.
+//
+// POST /api/v1/admin/llm/server-drain (public, admin-authed)
+//   Initiates graceful server drain. Idempotent — safe to call multiple
+//   times; subsequent calls return the current drain state without
+//   starting a second drain.
+//
+// POST /api/v1/admin/debug/slow-job?seconds=N (public, admin-authed)
+//   Enqueues a real orchestrator job that sleeps for N seconds.
+//   Only registered when SOURCEBRIDGE_DEBUG_ENDPOINTS=true.
+//   Used for drain validation in Phase 4 of CA-142.
+//
+// POST /internal/begin-drain (internal :8081 listener, loopback-only)
+//   Called by the Kubernetes preStop hook via curl to initiate drain
+//   before SIGTERM is delivered. Bound exclusively on 127.0.0.1:8081
+//   so no auth middleware is required — loopback enforces locality.
+
+package rest
+
+import (
+	"context"
+	"net/http"
+	"os"
+	"strconv"
+	"time"
+
+	"log/slog"
+
+	"github.com/sourcebridge/sourcebridge/internal/llm"
+)
+
+// serverDrainAdmitter wraps *Server to implement graphql.DrainAdmitter.
+// The graphql package defines the interface; we implement it here in the
+// rest package to avoid an import cycle (graphql imports rest for types
+// would be circular — we pass the interface value at wiring time instead).
+//
+// Pointer receiver satisfies graphql.DrainAdmitter:
+//
+//	IsDraining() bool
+//	AdmitOnDemand() graphql.OnDemandToken
+//
+// *Admission satisfies graphql.OnDemandToken via its Release() method.
+type serverDrainAdmitter struct {
+	s *Server
+}
+
+// IsDraining implements graphql.DrainAdmitter.
+func (a *serverDrainAdmitter) IsDraining() bool {
+	return a.s.IsDraining()
+}
+
+// AdmitOnDemand implements graphql.DrainAdmitter. Returns an *Admission
+// which has a Release() method matching the interface{ Release() } return type.
+func (a *serverDrainAdmitter) AdmitOnDemand() interface{ Release() } {
+	return a.s.OnDemand.Admit()
+}
+
+// DrainAdmitterFor returns a *serverDrainAdmitter. Callers assign it
+// to the graphql.DrainAdmitter field; the assignment compiles because
+// *serverDrainAdmitter implements graphql.DrainAdmitter structurally.
+func (s *Server) DrainAdmitterFor() *serverDrainAdmitter {
+	return &serverDrainAdmitter{s: s}
+}
+
+// getEnvBool returns true when the environment variable is set to "true",
+// "1", or "yes" (case-insensitive).
+func getEnvBool(key string) bool {
+	switch os.Getenv(key) {
+	case "true", "1", "yes", "TRUE", "YES":
+		return true
+	default:
+		return false
+	}
+}
+
+// handleAdminServerDrain initiates graceful server drain via the public
+// admin API. Idempotent: returns the current drain state whether or not
+// this call was the first.
+//
+// Response 200:
+//
+//	{"status":"drain_initiated","draining_since":"<RFC3339>"}
+//	{"status":"already_draining","draining_since":"<RFC3339>"}
+func (s *Server) handleAdminServerDrain(w http.ResponseWriter, r *http.Request) {
+	first := s.BeginDrain("admin_api")
+	status := "drain_initiated"
+	if !first {
+		status = "already_draining"
+	}
+	s.drainingMu.Lock()
+	since := s.drainingAt
+	s.drainingMu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":         status,
+		"draining_since": since.UTC().Format(time.RFC3339),
+	})
+}
+
+// handleBeginDrainInternal is the preStop hook target. Bound only on the
+// internal :8081 listener (127.0.0.1) so no auth is required.
+// Returns 204 No Content.
+func (s *Server) handleBeginDrainInternal(w http.ResponseWriter, r *http.Request) {
+	first := s.BeginDrain("prestop_hook")
+	if first {
+		slog.Info("prestop hook triggered begin_drain", "event", "begindrain_via_prestop")
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDebugSlowJob enqueues a real orchestrator job that sleeps for N
+// seconds. Registered only when SOURCEBRIDGE_DEBUG_ENDPOINTS=true.
+// Used for drain validation (CA-142 Phase 4).
+//
+// Query param: seconds (int, 1-3600, default 30).
+func (s *Server) handleDebugSlowJob(w http.ResponseWriter, r *http.Request) {
+	if s.orchestrator == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "orchestrator not configured"})
+		return
+	}
+	seconds := 30
+	if raw := r.URL.Query().Get("seconds"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 1 && n <= 3600 {
+			seconds = n
+		}
+	}
+	sleepDur := time.Duration(seconds) * time.Second
+	req := &llm.EnqueueRequest{
+		Subsystem: "debug",
+		JobType:   "slow_job",
+		TargetKey: "debug:slow_job:" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Priority:  llm.PriorityMaintenance,
+		RunWithContext: func(ctx context.Context, _ llm.Runtime) error {
+			slog.Info("debug slow-job: sleeping", "seconds", seconds, "event", "debug_slow_job_start")
+			select {
+			case <-time.After(sleepDur):
+				slog.Info("debug slow-job: done", "seconds", seconds, "event", "debug_slow_job_done")
+			case <-ctx.Done():
+				slog.Info("debug slow-job: cancelled", "event", "debug_slow_job_cancelled")
+			}
+			return nil
+		},
+	}
+	job, err := s.orchestrator.Enqueue(req)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"status":  "enqueued",
+		"job_id":  job.ID,
+		"seconds": seconds,
+	})
+}

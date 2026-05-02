@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -27,24 +28,24 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/health"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
-	"github.com/sourcebridge/sourcebridge/internal/llm"
-	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
-	"github.com/sourcebridge/sourcebridge/internal/secretcipher"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/assembly"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/credentials"
 	lwmetrics "github.com/sourcebridge/sourcebridge/internal/livingwiki/metrics"
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/scheduler"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/webhook"
+	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
+	"github.com/sourcebridge/sourcebridge/internal/qa"
+	"github.com/sourcebridge/sourcebridge/internal/secretcipher"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 	"github.com/sourcebridge/sourcebridge/internal/telemetry"
-	"github.com/sourcebridge/sourcebridge/internal/qa"
 	"github.com/sourcebridge/sourcebridge/internal/trash"
 	"github.com/sourcebridge/sourcebridge/internal/version"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
-	"github.com/sourcebridge/sourcebridge/internal/worker/tlsreload"
 	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
+	"github.com/sourcebridge/sourcebridge/internal/worker/tlsreload"
 )
 
 var serveCmd = &cobra.Command{
@@ -292,8 +293,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	var gitConfigStore rest.GitConfigStore
 	var gitConfigStoreConcrete *db.SurrealGitConfigStore // typed handle for the resolver
 	var llmConfigStore rest.LLMConfigStore
-	var llmConfigStoreConcrete *db.SurrealLLMConfigStore     // typed handle for profile-aware adapter wiring
-	var llmProfileStore *db.SurrealLLMProfileStore           // typed handle for profile-aware adapter wiring
+	var llmConfigStoreConcrete *db.SurrealLLMConfigStore      // typed handle for profile-aware adapter wiring
+	var llmProfileStore *db.SurrealLLMProfileStore            // typed handle for profile-aware adapter wiring
 	var llmStoreAdapterFromProfiles resolution.LLMConfigStore // profile-aware adapter assembled in the external-storage branch
 	var queueControlStore rest.QueueControlStore
 	var tokenStore auth.APITokenStore
@@ -746,12 +747,34 @@ func runServe(cmd *cobra.Command, args []string) error {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Start server
+	// Internal server — bound on 127.0.0.1:8081 (loopback only) unless
+	// SOURCEBRIDGE_INTERNAL_LISTEN_ADDR overrides it (Helm internalPort).
+	// Serves the preStop hook target POST /internal/begin-drain.
+	// No auth required: loopback enforces locality (CA-142).
+	internalListenAddr := "127.0.0.1:8081"
+	if v := os.Getenv("SOURCEBRIDGE_INTERNAL_LISTEN_ADDR"); v != "" {
+		internalListenAddr = v
+	}
+	internalServer := &http.Server{
+		Addr:         internalListenAddr,
+		Handler:      server.InternalHandler(),
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+		IdleTimeout:  30 * time.Second,
+	}
+
+	// Start servers
 	errCh := make(chan error, 1)
 	go func() {
 		slog.Info("starting server", "port", cfg.Server.HTTPPort, "url", cfg.Server.PublicBaseURL)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
+		}
+	}()
+	go func() {
+		slog.Info("starting internal server", "addr", "127.0.0.1:8081")
+		if err := internalServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Warn("internal server error", "err", err)
 		}
 	}()
 
@@ -767,33 +790,94 @@ func runServe(cmd *cobra.Command, args []string) error {
 		go startDesktopAuthCleanupLoop("desktop_auth_sessions", cleaner)
 	}
 
-	// Wait for shutdown signal
+	// Drain grace duration from config, defaulting to 3600s.
+	graceSeconds := 3600
+	if cfg.Shutdown.GraceSeconds > 0 {
+		graceSeconds = cfg.Shutdown.GraceSeconds
+	}
+	graceDur := time.Duration(graceSeconds) * time.Second
+
+	// Signal handling: use a Once so re-delivered SIGTERM is a no-op.
+	// A background goroutine drains the channel after the first signal.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	var shutdownOnce sync.Once
+	shutdownDone := make(chan struct{})
+
+	go func() {
+		// Drain re-delivered signals silently so they don't block.
+		for range sigCh {
+		}
+	}()
+
+	// Wait for SIGTERM/SIGINT or a fatal server error.
 	select {
 	case sig := <-sigCh:
 		slog.Info("received shutdown signal", "signal", sig)
+		close(shutdownDone) // satisfy the Once logic below
 	case err := <-errCh:
 		return fmt.Errorf("server error: %w", err)
 	}
 
-	// Graceful shutdown
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	var shutdownErr error
+	shutdownOnce.Do(func() {
+		// ── Step 1: begin drain — flip readiness, pause orchestrator intake ──
+		first := server.BeginDrain("sigterm")
+		if first {
+			slog.Info("server drain initiated", "grace_seconds", graceSeconds, "event", "begindrain_via_sigterm")
+		}
 
-	slog.Info("shutting down server")
-	if err := httpServer.Shutdown(ctx); err != nil {
-		return fmt.Errorf("shutdown error: %w", err)
-	}
-	if err := server.Shutdown(ctx); err != nil {
-		return fmt.Errorf("server component shutdown error: %w", err)
-	}
+		// ── Step 2: wait for in-flight LLM jobs and on-demand requests ──────
+		graceCtx, graceCancel := context.WithTimeout(context.Background(), graceDur)
+		defer graceCancel()
+		slog.Info("waiting for in-flight jobs to drain", "grace_seconds", graceSeconds)
+		if waitErr := server.AwaitDrain(graceCtx); waitErr != nil {
+			slog.Warn("drain wait timed out or cancelled",
+				"err", waitErr,
+				"event", "drain_timeout",
+			)
+		}
+		slog.Info("drain complete", "event", "drain_complete")
 
-	// schedCancel() is called by defer above, ensuring the scheduler goroutine
-	// exits after the dispatcher has drained.
+		// ── Step 3: cancel orchestrator worker goroutines ────────────────────
+		if orch := server.Orchestrator(); orch != nil {
+			const workerDrainTimeout = 30 * time.Second
+			if err := orch.CancelAndWait(workerDrainTimeout); err != nil {
+				slog.Warn("orchestrator worker drain timed out", "err", err)
+			}
+		}
+
+		// ── Step 4: shut down HTTP listeners ─────────────────────────────────
+		const httpShutdownTimeout = 30 * time.Second
+		httpShutdownCtx, httpShutdownCancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
+		defer httpShutdownCancel()
+		slog.Info("shutting down HTTP listeners")
+		if err := httpServer.Shutdown(httpShutdownCtx); err != nil {
+			slog.Warn("public HTTP server shutdown error", "err", err)
+		}
+		if internalServer != nil {
+			// best-effort — loopback-only listener, failure is not fatal
+			_ = internalServer.Shutdown(httpShutdownCtx)
+		}
+
+		// ── Step 5: component cleanup (event bus, dispatcher) ────────────────
+		// Uses its own context so cleanup is not bounded by the spent HTTP
+		// shutdown budget (codex r3 Medium #4).
+		const componentShutdownTimeout = 30 * time.Second
+		compCtx, compCancel := context.WithTimeout(context.Background(), componentShutdownTimeout)
+		defer compCancel()
+		if err := server.FinishShutdown(compCtx); err != nil {
+			slog.Warn("server component shutdown error", "err", err)
+		}
+	})
+
+	// schedCancel() is called by defer above, ensuring the scheduler
+	// goroutine exits after the dispatcher has drained.
+	signal.Stop(sigCh)
+	close(sigCh)
 	slog.Info("server stopped")
-	return nil
+	return shutdownErr
 }
 
 func startAuthCleanupLoop(name string, cleaner auth.CleanupCapable) {
@@ -1091,9 +1175,9 @@ func (p *telemetryCountProvider) TelemetryCounts() (repos, users int, features [
 	}
 
 	counts = map[string]int{
-		"total_files":        totalFiles,
-		"total_symbols":      totalSymbols,
-		"qa_asks_total_14d":  qa.AsksTotal14d(),
+		"total_files":       totalFiles,
+		"total_symbols":     totalSymbols,
+		"qa_asks_total_14d": qa.AsksTotal14d(),
 	}
 
 	// Merge in trash (recycle bin) counters. These are process-start
@@ -1133,9 +1217,9 @@ func classifyTelemetryLLMProviderKind(provider string) string {
 //   - the LogProfileSwitched slog emission on activate (bob-M2 / ruby-L1).
 
 type llmProfileStoreAdapter struct {
-	lcs           *db.SurrealLLMConfigStore
-	lps           *db.SurrealLLMProfileStore
-	surrealDB     *db.SurrealDB
+	lcs             *db.SurrealLLMConfigStore
+	lps             *db.SurrealLLMProfileStore
+	surrealDB       *db.SurrealDB
 	resolverAdapter *resolution.ProfileAwareLLMResolverAdapter // for the ActiveProfileMissing accessor
 }
 

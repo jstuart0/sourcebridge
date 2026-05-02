@@ -1,0 +1,17 @@
+{{- if .Values.api.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-api-pdb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sourcebridge.api.labels" . | nindent 4 }}
+# CA-142: ensures at least one API pod is available during voluntary
+# disruptions (node drains, cluster upgrades). Does not affect rolling
+# updates — those are governed by strategy.rollingUpdate in the Deployment.
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "sourcebridge.api.selectorLabels" . | nindent 6 }}
+{{- end }}

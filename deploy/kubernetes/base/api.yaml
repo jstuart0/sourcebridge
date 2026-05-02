@@ -22,25 +22,23 @@ metadata:
     app.kubernetes.io/name: sourcebridge-api
     app.kubernetes.io/part-of: sourcebridge
     app.kubernetes.io/component: api
-  # Reloader annotation deliberately NOT applied here — codex r2 High
-  # on R3 followups T1.7 caught a real bug. The API process gives its
-  # orchestrator only ~10s on SIGTERM (cli/serve.go:677-685 and
-  # internal/llm/orchestrator/orchestrator.go:183-185 cancel the root
-  # context immediately), so a Reloader-triggered restart would cancel
-  # any in-flight 30+ minute knowledge job that lives inside an API
-  # pod's RPC dispatch. The API hot-reloads its mTLS material in-
-  # process via tlsreload.Watcher (R3 slice 4), so cert rotation
-  # already lands without a restart. Adding Reloader as a "safety net"
-  # would re-create the in-flight cancellation problem T1.8 fixes on
-  # the worker side.
-  #
-  # If we ever need a backup restart path here, add an API drain slice
-  # first: stop readiness, pause queue intake, stop accepting new
-  # HTTP job starts, allow active orchestrator jobs to finish with a
-  # grace window comparable to repository knowledge timeout, set
-  # terminationGracePeriodSeconds accordingly.
+  # Reloader annotation deliberately NOT applied here — see comment
+  # above. CA-142 ships the API drain slice this block described:
+  # readiness flip on SIGTERM, intake pause, 3900s grace window
+  # (matching the worker), and terminationGracePeriodSeconds set below.
 spec:
   replicas: 2
+  # CA-142: maxUnavailable=0 ensures at least one healthy pod is always
+  # serving while the draining pod waits for in-flight jobs. The surge
+  # pod (maxSurge=1) starts serving immediately if the cluster has spare
+  # capacity — there is no inherent single-replica unavailability. Risk:
+  # if the cluster has no spare capacity the surge pod may stay pending
+  # until the draining pod releases its resources. See plan D5/R2.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: sourcebridge-api
@@ -52,6 +50,9 @@ spec:
         app.kubernetes.io/part-of: sourcebridge
         app.kubernetes.io/component: api
     spec:
+      # CA-142: must exceed shutdown.grace_seconds (3600) plus preStop
+      # sleep (10s) plus slack. 3900s = 65 min matches the worker.
+      terminationGracePeriodSeconds: 3900
       containers:
         - name: sourcebridge-api
           image: ghcr.io/sourcebridge-ai/sourcebridge-api:latest
@@ -65,6 +66,12 @@ spec:
                 name: sourcebridge-config
             - secretRef:
                 name: sourcebridge-secrets
+          env:
+            # CA-142: sets the drain grace window for the API process.
+            # SOURCEBRIDGE_SHUTDOWN_GRACE_SECONDS maps to [shutdown].grace_seconds
+            # via Viper's dot→underscore rule + SOURCEBRIDGE_ prefix.
+            - name: SOURCEBRIDGE_SHUTDOWN_GRACE_SECONDS
+              value: "3600"
           volumeMounts:
             - name: repo-cache
               mountPath: /data/repo-cache
@@ -100,6 +107,22 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 3
+          # CA-142: preStop hook calls the internal listener before SIGTERM
+          # so BeginDrain executes before any requests can be sent to the
+          # pod by a slow endpoint controller. The sleep gives endpoints
+          # time to be removed from all load balancer backends. The curl
+          # uses 127.0.0.1:8081 (internal loopback listener, no auth
+          # required). If the curl fails (e.g. server already shutting
+          # down) we continue anyway via `|| true`.
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    curl -fsS -XPOST http://127.0.0.1:8081/internal/begin-drain || true
+                    sleep 10
       volumes:
         - name: repo-cache
           persistentVolumeClaim:

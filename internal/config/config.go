@@ -31,6 +31,7 @@ type Config struct {
 	LivingWiki    LivingWikiConfig    `mapstructure:"living_wiki"`
 	ChangeWatch   ChangeWatchConfig   `mapstructure:"change_watch"`
 	ConnectorAPI  ConnectorAPIConfig  `mapstructure:"connector_api"`
+	Shutdown      ShutdownConfig      `mapstructure:"shutdown"`
 }
 
 // ComprehensionConfig holds tunables for the LLM job orchestrator and
@@ -466,6 +467,33 @@ type ConnectorAPIConfig struct {
 	Enabled bool `mapstructure:"enabled"`
 }
 
+// ShutdownConfig controls the graceful-drain behaviour on SIGTERM.
+// CA-142: mirrors the worker's drain pattern so in-flight Living Wiki
+// cold-start jobs (and any long-running LLM orchestrator job) can
+// complete before the pod is SIGKILLed.
+//
+// Environment variable: SOURCEBRIDGE_SHUTDOWN_GRACE_SECONDS
+// (Viper maps [shutdown].grace_seconds → SOURCEBRIDGE_SHUTDOWN_GRACE_SECONDS
+// via the dot→underscore rule and the SOURCEBRIDGE_ prefix.)
+//
+// The Kubernetes terminationGracePeriodSeconds on the API Deployment
+// MUST exceed this value by at least preStop-sleep + 60 s of slack.
+// With grace_seconds=3600 the manifest sets 3900 s (65 min).
+//
+// Example (config.toml):
+//
+//	[shutdown]
+//	grace_seconds = 3600
+type ShutdownConfig struct {
+	// GraceSeconds is the upper bound the process waits for in-flight
+	// LLM jobs to complete after SIGTERM before force-exiting.
+	// Default 3600 (60 min) — matches the Living Wiki cold-start
+	// time budget. Zero means "wait forever" (not recommended for
+	// production; kubelet's SIGKILL is the outer bound).
+	// SOURCEBRIDGE_SHUTDOWN_GRACE_SECONDS.
+	GraceSeconds int `mapstructure:"grace_seconds"`
+}
+
 // Defaults returns a Config with all default values.
 func Defaults() *Config {
 	return &Config{
@@ -567,6 +595,13 @@ func Defaults() *Config {
 		ConnectorAPI: ConnectorAPIConfig{
 			Enabled: false, // public HTTP ingress default-off through Phase 1; flipped end of Phase 2
 		},
+		Shutdown: ShutdownConfig{
+			// 3600s = 60 minutes — matches the Living Wiki cold-start time budget
+			// (coldStartTimeBudget in internal/api/graphql/living_wiki_coldstart.go).
+			// terminationGracePeriodSeconds on the API Deployment is set to 3900s
+			// (grace_seconds + preStop-sleep + 60s slack). CA-142.
+			GraceSeconds: 3600,
+		},
 	}
 }
 
@@ -665,6 +700,7 @@ func Load() (*Config, error) {
 	v.SetDefault("change_watch.t0_budget_ms", cfg.ChangeWatch.T0BudgetMs)
 	v.SetDefault("connector_api.enabled", cfg.ConnectorAPI.Enabled)
 	v.SetDefault("linking.invalidate_grace_hours", cfg.Linking.InvalidateGraceHours)
+	v.SetDefault("shutdown.grace_seconds", cfg.Shutdown.GraceSeconds)
 
 	// Try reading config file (not required)
 	if err := v.ReadInConfig(); err != nil {

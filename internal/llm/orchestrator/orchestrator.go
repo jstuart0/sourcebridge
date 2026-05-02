@@ -29,6 +29,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -109,9 +110,9 @@ type Orchestrator struct {
 	prewarmQ     chan *workItem
 	workers      sync.WaitGroup
 
-	runMu        sync.Mutex
-	runCancels   map[string]context.CancelFunc
-	cancelled    map[string]struct{}
+	runMu      sync.Mutex
+	runCancels map[string]context.CancelFunc
+	cancelled  map[string]struct{}
 	// CA-122 (Phase 5b): finalizing claim primitive. The run
 	// goroutine and the reaper both compete for the right to write
 	// the terminal status of a job. Whoever calls
@@ -127,6 +128,12 @@ type Orchestrator struct {
 	// shutdown lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// CA-142: draining is set to true by CancelAndWait (or the legacy
+	// Shutdown path) before workers are told to stop. When true, the
+	// reaper skips StatusGenerating jobs so it does not race with the
+	// graceful drain and kill jobs that are still running.
+	draining atomic.Bool
 
 	// subscribers for JobEvent delivery.
 	subMu       sync.RWMutex
@@ -190,7 +197,18 @@ func New(store llm.JobStore, cfg Config) *Orchestrator {
 
 // Shutdown stops accepting new work and waits for running jobs to drain.
 // It is safe to call multiple times.
+//
+// Contract (CA-142): Shutdown(graceful) is the all-in-one path used by
+// existing callers (tests, Server.Shutdown). It cancels the root context
+// immediately (which releases worker goroutines) and then waits for them
+// to exit up to graceful. Eager cancel is preserved here so existing
+// callers do not time out or leak workers.
+//
+// The new cli/serve.go path uses CancelAndWait instead: it calls
+// o.cancel() explicitly AFTER AwaitDrain so in-flight jobs can finish,
+// then waits for worker goroutine cleanup.
 func (o *Orchestrator) Shutdown(graceful time.Duration) error {
+	o.draining.Store(true)
 	o.cancel()
 
 	done := make(chan struct{})
@@ -203,6 +221,27 @@ func (o *Orchestrator) Shutdown(graceful time.Duration) error {
 		return nil
 	case <-time.After(graceful):
 		return fmt.Errorf("orchestrator shutdown timed out after %s", graceful)
+	}
+}
+
+// CancelAndWait signals worker goroutines to exit (by cancelling the root
+// context) and waits for all of them to finish, up to timeout. It does NOT
+// cancel in-flight job run-contexts — callers are expected to have already
+// called AwaitDrain (which waits for in-flight jobs to complete naturally)
+// before calling CancelAndWait. CA-142.
+func (o *Orchestrator) CancelAndWait(timeout time.Duration) error {
+	o.draining.Store(true)
+	o.cancel()
+	done := make(chan struct{})
+	go func() {
+		o.workers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("orchestrator worker drain timed out after %s", timeout)
 	}
 }
 
@@ -259,9 +298,9 @@ func isLLMBackedEnqueue(req *llm.EnqueueRequest) bool {
 // embedded in the prompt) can legitimately take several minutes, during which
 // no per-page progress update fires. 10 min was killing real jobs mid-flight.
 const (
-	staleGeneratingThreshold          = 10 * time.Minute
+	staleGeneratingThreshold           = 10 * time.Minute
 	staleGeneratingThresholdLivingWiki = 30 * time.Minute
-	stalePendingThreshold             = 45 * time.Minute
+	stalePendingThreshold              = 45 * time.Minute
 )
 
 // generatingThresholdFor returns the per-job stall threshold based on the
@@ -305,6 +344,15 @@ func (o *Orchestrator) reapStaleJobs() {
 	active := o.store.ListActive(llm.ListFilter{})
 	now := time.Now()
 	for _, job := range active {
+		// CA-142: during a graceful drain the process is intentionally
+		// waiting for generating jobs to finish. Do not reap them — they
+		// are still running and will complete (or be cancelled by the
+		// CancelAndWait timeout). Pending jobs may still be reaped since
+		// they will never be picked up once workers stop.
+		if o.draining.Load() && job.Status == llm.StatusGenerating {
+			continue
+		}
+
 		age := now.Sub(job.UpdatedAt)
 		threshold := generatingThresholdFor(job)
 		if job.Status == llm.StatusPending {
@@ -630,11 +678,11 @@ func (o *Orchestrator) AppendJobLog(jobID string, level llm.JobLogLevel, phase, 
 		}
 	}
 	entry, err := o.store.AppendLog(&llm.JobLogEntry{
-		JobID:       job.ID,
-		RepoID:      job.RepoID,
-		ArtifactID:  job.ArtifactID,
-		Subsystem:   job.Subsystem,
-		JobType:     job.JobType,
+		JobID:      job.ID,
+		RepoID:     job.RepoID,
+		ArtifactID: job.ArtifactID,
+		Subsystem:  job.Subsystem,
+		JobType:    job.JobType,
 		// R3 slice 3: mirror the parent job's LLMProvider so per-log-line
 		// queries / metrics can attribute work without joining the job row.
 		LLMProvider: job.LLMProvider,
