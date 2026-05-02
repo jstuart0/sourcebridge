@@ -105,6 +105,30 @@ observability dashboards and alerting:
 {app="sourcebridge-api"} | json | event = "drain_progress" | in_flight > 0
 ```
 
+## Pre-deploy preflight
+
+Before pushing a release that touches drain semantics, manifests, or anything
+that triggers a pod restart, run:
+
+```bash
+scripts/deploy-preflight.sh
+```
+
+It checks: kubectl context, Argo CD app health, Image-Updater status, no
+in-flight Living Wiki cold-starts, last GHA build-images run is green. Pass
+`--allow-active-jobs` to override the in-flight check if you accept the cost.
+
+### First-rollout caveat (one-time)
+
+The very first rollout that ships drain primitives (CA-142 onward) is itself
+unprotected: the OLD pod has no drain code, so its SIGTERM uses the
+pre-CA-142 30-second grace window. Any in-flight Living Wiki cold-start on
+the old pod dies. **This is unavoidable until the new image is running.**
+Subsequent rollouts use the new drain primitives.
+
+Mitigation: schedule the CA-142 rollout for a quiet window. Verify with
+`scripts/deploy-preflight.sh` that no cold-start is in flight, then push.
+
 ## Image-updater re-enable sequence
 
 When Argo CD Image Updater is paused for a manual rollout (e.g. to upgrade the
