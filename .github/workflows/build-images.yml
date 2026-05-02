@@ -22,7 +22,37 @@ env:
   DOCKERHUB_NAMESPACE: sourcebridge
 
 jobs:
+  # CA-136: compute the version once so all three images are labeled with
+  # the SAME string. Full git history is required for `git describe` and
+  # the rev-list count, so fetch-depth: 0 + fetch-tags: true. PR_NUMBER
+  # is exported here so version.sh's pull_request branch never falls
+  # through to the parsing fallback.
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version:    ${{ steps.compute.outputs.version }}
+      commit:     ${{ steps.compute.outputs.commit }}
+      build_date: ${{ steps.compute.outputs.build_date }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - id: compute
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          chmod +x scripts/version.sh
+          v=$(./scripts/version.sh)
+          c=$(git rev-parse HEAD)
+          d=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "Computed version: $v"
+          echo "version=$v"    >> "$GITHUB_OUTPUT"
+          echo "commit=$c"     >> "$GITHUB_OUTPUT"
+          echo "build_date=$d" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -32,21 +62,27 @@ jobs:
             image: sourcebridge-api
             dockerfile: deploy/docker/Dockerfile.sourcebridge
             context: .
-            build_args: ""
+            edition: oss
+            extra_build_args: ""
           - name: worker
             image: sourcebridge-worker
             dockerfile: deploy/docker/Dockerfile.worker
             context: .
-            build_args: ""
+            edition: oss
+            extra_build_args: ""
           - name: web
             image: sourcebridge-web
             dockerfile: deploy/docker/Dockerfile.web
             context: .
-            build_args: "NEXT_PUBLIC_EDITION=oss"
+            edition: oss
+            extra_build_args: "NEXT_PUBLIC_EDITION=oss"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -114,6 +150,16 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: ${{ matrix.build_args }}
+          # CA-136: VERSION/COMMIT/BUILD_DATE/EDITION come from the
+          # `prepare` job's outputs so all three images are labeled
+          # with the same string. matrix.extra_build_args carries
+          # any image-specific extras (e.g. NEXT_PUBLIC_EDITION for
+          # the web image).
+          build-args: |
+            ${{ matrix.extra_build_args }}
+            VERSION=${{ needs.prepare.outputs.version }}
+            COMMIT=${{ needs.prepare.outputs.commit }}
+            BUILD_DATE=${{ needs.prepare.outputs.build_date }}
+            EDITION=${{ matrix.edition }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}

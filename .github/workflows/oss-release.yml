@@ -10,7 +10,9 @@ permissions:
   packages: write
 
 env:
-  GO_VERSION: "1.24"
+  # Match go.mod (1.25.0). The previous 1.24 setting relied on the
+  # toolchain auto-download which produced subtly different builds.
+  GO_VERSION: "1.25"
 
 jobs:
   build-binaries:
@@ -37,6 +39,11 @@ jobs:
             runner: macos-14
     steps:
       - uses: actions/checkout@v4
+        with:
+          # CA-136: full history so the binary's BuildDate / commit can
+          # be derived consistently with the release tag.
+          fetch-depth: 0
+          fetch-tags: true
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -50,7 +57,17 @@ jobs:
           if [ "${{ matrix.goos }}" = "windows" ]; then
             BINARY_NAME=sourcebridge.exe
           fi
-          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
+          # CA-136: ldflags now target internal/version.* (the single
+          # source of truth across the CLI flag, GraphQL Query.version,
+          # REST /api/v1/admin/status, REST /api/v1/version, and the
+          # telemetry ping). The previous -X main.version=... pointed
+          # at a since-removed symbol and was a silent no-op.
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build -ldflags="-s -w \
+            -X github.com/sourcebridge/sourcebridge/internal/version.Version=${{ github.ref_name }} \
+            -X github.com/sourcebridge/sourcebridge/internal/version.Commit=${{ github.sha }} \
+            -X github.com/sourcebridge/sourcebridge/internal/version.BuildDate=${BUILD_DATE} \
+            -X github.com/sourcebridge/sourcebridge/internal/version.Edition=oss" \
             -o dist/${BINARY_NAME} ./cmd/sourcebridge
       - name: Package
         run: |
@@ -76,17 +93,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # CA-136: full history for any in-image tooling that walks git.
+          fetch-depth: 0
+          fetch-tags: true
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        run: |
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: deploy/docker/Dockerfile.sourcebridge
           push: true
           tags: ghcr.io/${{ github.repository }}/sourcebridge:${{ github.ref_name }}
+          # CA-136: bake the release tag into ldflags + OCI labels.
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}
+            EDITION=oss
 
   release:
     needs: [build-binaries, build-docker]
