@@ -40,7 +40,7 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ### Fixed
 
-- **`OnPageDone` now fires after persistence** (CA-145, CA-143). Progress
+- **`OnPageDone` now fires after persistence** (`1317cec`+`c597468`, CA-145, CA-143). Progress
   counter and smart-resume now agree on which pages are durably stored.
   Previously, `OnPageDone` fired before the post-Wait persistence loop, so
   the in-memory completion set could exceed the persisted set; on
