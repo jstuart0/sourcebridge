@@ -280,6 +280,7 @@ type Server struct {
 	knowledgeSettingsStore       KnowledgeSettingsStore        // CA-122: operator-tunable knowledge-RPC safety-net timeout; nil = embedded mode (boot env-default only)
 	clusterRunner                *clustering.Runner            // subsystem clustering job dispatcher; nil = feature disabled
 	healthChecker                *HealthChecker                // shared DB+worker probe; nil = embedded/test mode, handlers fall back to local checks
+	workerVersionLookup          *versionLookup                // best-effort cache for worker GetVersion (CA-136); nil = workerVersion always "" in /api/v1/version
 
 	// LLM source-of-truth (single resolver shared with the GraphQL resolver
 	// and llmcall.Caller). The Server owns the resolver so handleGetLLMConfig
@@ -536,6 +537,12 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		s.clusterRunner = clustering.NewRunner(cs, clustering.NewOrchestratorDispatcher(s.orchestrator))
 	}
 
+	// Worker version lookup (CA-136). Phase 2 leaves probe=nil — the
+	// worker has no GetVersion RPC yet, so /api/v1/version returns
+	// workerVersion: "". Phase 3 will inject a real probe via
+	// WithWorkerVersionProbe ServerOption that calls the gRPC method.
+	s.workerVersionLookup = newVersionLookup(30*time.Second, nil)
+
 	s.setupRouter()
 	return s
 }
@@ -588,6 +595,14 @@ func (s *Server) setupRouter() {
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/readyz", s.handleReadyz)
 	r.Get("/metrics", s.handleMetrics)
+
+	// Public version endpoint (CA-136). Returns build metadata for the
+	// running API server plus a best-effort worker version. Intentionally
+	// unauthenticated — version strings are not sensitive (commit sha is
+	// already exposed via /api/v1/admin/status; build date and runtime
+	// metadata are innocuous). Used by the web sidebar footer + admin
+	// Build Info card to fetch runtime fields not baked into the bundle.
+	r.Get("/api/v1/version", s.handleVersion)
 
 	// Install script — serves the embedded SourceBridge installer at the
 	// origin so users can run:
