@@ -113,6 +113,12 @@ ollama pull qwen3:32b
 docker compose -f docker-compose.hub.yml up -d
 ```
 
+> **Quality gates**: Living Wiki evaluates generated pages against tier-aware thresholds.
+> `qwen3:32b` is classified as `TierLocal` automatically, which uses relaxed thresholds
+> appropriate for open-weight models. No configuration required for the default install.
+> To override the tier for a specific model, set it in **Admin → Comprehension → Model
+> Registry**. See [`docs/admin/llm-config.md`](docs/admin/llm-config.md#capability-tiers-and-quality-gates).
+
 #### OpenRouter (access to 100+ models)
 
 ```bash

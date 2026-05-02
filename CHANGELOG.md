@@ -6,6 +6,16 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ## [Unreleased]
 
+**Living Wiki cold-start reliability campaign** (2026-05-02 outage remediation). On
+2026-05-02 a Living Wiki cold-start on a default Ollama install produced 12 pages that
+were all rejected by quality gates, with no per-page progress signal, broken retry-resume,
+and a pod restart that killed the job mid-flight. Seven tickets fixed the structural causes:
+CA-150 (tier-aware quality gates so local models pass), CA-145 + CA-143 (progress counter
+and retry-resume now agree on durable state), CA-142 (graceful drain protects in-flight
+jobs from Argo Image Updater rollouts), CA-141 (heartbeat-stale reaper detects stuck jobs
+in ~5 min instead of ~32 min), CA-144 (per-page in-flight visibility in admin Monitor),
+CA-146 (page-count transparency and per-run override).
+
 ### Added
 
 - **Graceful drain for in-flight Living Wiki cold-starts** (CA-142).
@@ -102,6 +112,18 @@ All notable changes to SourceBridge are documented here. The format follows
   `TestRetryResume_ProgressMatchesPersistedSet_DirectPublish`,
   `TestRetryResume_NoProgressOnHardError`) and one cold-start runner test
   (`TestRetryResume_SmartResumeMatchesProgress`) locking the contract.
+
+- **Stale-job reaper detects stuck Living Wiki jobs in ~5 min instead of ~32 min**
+  (`1b61436`+`d21d373`, CA-141). The reaper tick is dropped from 60 s to 15 s, and a
+  heartbeat-stale threshold (5 min since last heartbeat) is applied specifically to
+  `living_wiki` jobs, which already emit a heartbeat every 30 s. Previously, the
+  reaper used a flat 30-minute wall-clock threshold and a 60-second tick, so a wedged
+  cold-start was not reaped until `30 min + ≤60 s ≈ 32 min` after it stalled. Healthy
+  long-running jobs are unaffected: they heartbeat continuously, so the 5-minute
+  heartbeat-stale window never fires on a running job. Other subsystems that do not
+  emit heartbeats retain the existing 30-minute threshold. Composed with CA-142's drain
+  guard: the faster reaper does not race with graceful shutdown because CA-142's
+  `o.draining` check fires first.
 
 - **Quality gates no longer reject all local-LLM Living Wiki output**
   (`c0a7bbb`–`41c0d5a`, reconcile `3145077`, CA-150). Living Wiki generation
