@@ -141,3 +141,130 @@ If `/api/v1/version` reports `version: "dev"`:
    in a custom build path.
 3. Check the GHA workflow's `prepare` job output (`Computed version: …`)
    — that's the value that should have flowed through.
+
+## MCP server version surface (CA-137)
+
+The SourceBridge MCP server (the streamable-HTTP endpoint at
+`/api/v1/mcp`, served by `internal/api/rest/mcp.go`) reports the same
+git-derived version as `/api/v1/version` in two places:
+
+- `serverInfo.version` on the MCP `initialize` response.
+- `experimental.sourcebridge.version` in the capabilities block.
+
+To verify, send an `initialize` request and read both fields:
+
+```bash
+curl -fsS -X POST https://sourcebridge.xmojo.net/api/v1/mcp \
+  -H "Authorization: Bearer $(cat ~/.sourcebridge/token)" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"verify","version":"1.0"}}}' \
+  | jq '.result | {server: .serverInfo.version, capability: .capabilities.experimental.sourcebridge.version}'
+```
+
+Both values must equal whatever `curl /api/v1/version | jq -r .version`
+returns.
+
+The MCP **protocol** version (`mcpProtocolVersion = "2025-11-25"`) is a
+separate negotiation surface and does not change with the build version.
+
+## Verifying signed images (CA-139)
+
+Every SourceBridge OSS image (api/web/worker) on `main`, `dev`, or a
+tagged release is signed with [Sigstore cosign](https://www.sigstore.dev/)
+keyless OIDC. The signature is published next to the image in GHCR (and
+Docker Hub when configured). Pull-request builds are **not** signed —
+fork PRs don't get an OIDC token, and signing them would clutter the
+Sigstore Rekor log without adding trust.
+
+Two recipes, depending on how strict the deployment policy is:
+
+### Strict (production / tagged release only)
+
+For deployments that must accept only tagged release images:
+
+```bash
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/sourcebridge-ai/sourcebridge/\.github/workflows/(build-images|oss-release)\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z][0-9A-Za-z.-]*)?$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/sourcebridge-ai/sourcebridge-api:v0.9.0
+```
+
+The regex accepts only SemVer-shaped release tags (`vX.Y.Z`, plus
+optional prerelease/build-metadata segments such as `-rc.1` or
+`+sha.abc`). Images built from `main` or `dev` — including the homelab's
+continuous deploys — fail this check by design.
+
+### Permissive (development / continuous-deploy main+dev)
+
+For homelab/staging deployments that pull `main` or `dev` images:
+
+```bash
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/sourcebridge-ai/sourcebridge/\.github/workflows/(build-images|oss-release)\.yml@refs/(heads/(main|dev)|tags/v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z][0-9A-Za-z.-]*)?)$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/sourcebridge-ai/sourcebridge-api:sha-abc1234
+```
+
+This regex matches every signed SourceBridge image. Use it for
+non-production verification.
+
+### What the regex enforces
+
+Both recipes:
+
+- **Lock the repository** to `sourcebridge-ai/sourcebridge`. A signature
+  produced from a fork or a different repo never passes.
+- **Lock the workflow file** to either `build-images.yml` (which signs
+  the three component images `sourcebridge-{api,web,worker}` on push to
+  main/dev or on a tag) or `oss-release.yml` (which signs the separate
+  combined release image at `ghcr.io/<owner>/<repo>/sourcebridge:<tag>`
+  on a tag). Both workflow identities are accepted because both produce
+  legitimately-signed images.
+- **Lock the OIDC issuer** to GitHub Actions
+  (`token.actions.githubusercontent.com`). An attacker can't slot in a
+  signature from a different federated identity provider.
+- **Reject pull-request builds** by omitting `refs/pull/...` from the
+  regex. PRs intentionally don't sign.
+
+### Docker Hub mirror
+
+If you pull from Docker Hub (`docker.io/sourcebridge/...`) instead of
+GHCR, the same signature exists there. Substitute the registry in the
+verify command:
+
+```bash
+cosign verify \
+  --certificate-identity-regexp '...same as above...' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  docker.io/sourcebridge/sourcebridge-api:v0.9.0
+```
+
+If Docker Hub credentials weren't configured at the time the image was
+built (forks, repos without `DOCKERHUB_USERNAME`), the image only exists
+on GHCR. Verify against GHCR instead.
+
+### When verification fails
+
+Common causes:
+
+- **Unsigned PR build.** Don't run PR images in production; they're not
+  meant for it.
+- **Stale cosign.** Upgrade to cosign >= 2.4.x. Earlier versions had
+  Rekor / Fulcio compatibility quirks.
+- **Wrong registry.** GHCR signatures don't automatically apply to
+  Docker Hub manifests unless the dual-publish path was active when the
+  image was built.
+- **Tag drift.** The signature is bound to the digest, not the tag. If
+  someone retagged the image manually, the digest changes and the sig
+  no longer applies. Verify by digest (`@sha256:...`) when in doubt:
+  `cosign verify ... ghcr.io/.../sourcebridge-api@sha256:abcdef...`
+
+The signature is also human-inspectable through Sigstore's transparency
+log:
+
+```bash
+cosign verify --output json ... \
+  | jq '.[0].optional.Bundle.Payload.logIndex'
+# look up that index at https://search.sigstore.dev/
+```

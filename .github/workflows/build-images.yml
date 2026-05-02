@@ -54,6 +54,15 @@ jobs:
   build:
     needs: prepare
     runs-on: ubuntu-latest
+    # CA-139: cosign keyless OIDC signing requires id-token: write at the
+    # job level. The workflow-level permissions block above (contents:read,
+    # packages:write) is otherwise unchanged; this block re-asserts it
+    # because per-job permissions REPLACE rather than extend the
+    # workflow-level set.
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -153,6 +162,11 @@ jobs:
             org.opencontainers.image.created=${{ needs.prepare.outputs.build_date }}
 
       - name: Build and push ${{ matrix.name }}
+        # CA-139: id is required so steps.build.outputs.digest is reachable
+        # by the downstream cosign-sign step. build-push-action@v6 emits
+        # the manifest digest as `digest`. Signing by digest (not tag) is
+        # mandatory — tags are mutable, digests aren't.
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
@@ -174,3 +188,44 @@ jobs:
             EDITION=${{ matrix.edition }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      # CA-139: Sigstore cosign keyless OIDC signing.
+      #
+      # The signature lives next to the image in the registry (cosign
+      # uses a derived tag like sha256-<digest>.sig). Sigstore Fulcio
+      # issues an ephemeral cert tied to the GHA OIDC identity; Rekor
+      # records the signature in its public transparency log.
+      #
+      # Pinned by SHA so a malicious or accidental v4 retag can't change
+      # what runs in our pipeline. v4.1.1 ships cosign v2.4.x.
+      # Keep the human-readable tag in the comment so future bumps are
+      # deliberate rather than mechanical.
+      - name: Install cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      # Sign the GHCR image we just pushed. cosign sign --yes skips the
+      # interactive Y/N prompt that would otherwise hang in CI.
+      - name: Sign GHCR image (keyless)
+        if: github.event_name != 'pull_request'
+        run: |
+          cosign sign --yes \
+            "${GHCR_REGISTRY}/${GHCR_NAMESPACE}/${IMAGE}@${DIGEST}"
+        env:
+          GHCR_REGISTRY: ${{ env.GHCR_REGISTRY }}
+          GHCR_NAMESPACE: ${{ env.GHCR_NAMESPACE }}
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      # Sign the Docker Hub image too if dual-publish is enabled.
+      # Reuses the same Fulcio cert / Rekor entry — cosign creates a
+      # second signature manifest at the new registry.
+      - name: Sign Docker Hub image (keyless)
+        if: steps.dockerhub.outputs.publish == 'true'
+        run: |
+          cosign sign --yes \
+            "${DOCKERHUB_NAMESPACE}/${IMAGE}@${DIGEST}"
+        env:
+          DOCKERHUB_NAMESPACE: ${{ env.DOCKERHUB_NAMESPACE }}
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}

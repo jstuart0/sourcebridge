@@ -6,6 +6,30 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **MCP server reports git-derived version** (`47adbad`, CA-137). The
+  SourceBridge MCP server (`internal/api/rest/mcp.go`) previously
+  hardcoded `mcpServerVersion = "1.0.0"` in its `initialize` response's
+  `serverInfo.version` and the `experimental.sourcebridge.version`
+  capability. It now reads `internal/version.Version` — the same symbol
+  `/api/v1/version`, `/api/v1/admin/status`, GraphQL `Query.version`,
+  and the telemetry sender all use. Every visible version surface on a
+  given binary now reports the same string. The MCP **protocol** version
+  (`mcpProtocolVersion = "2025-11-25"`) is unchanged.
+
+- **Sigstore cosign keyless OIDC signing for OSS images** (`<PENDING>`,
+  CA-139). All three OSS images (`sourcebridge-api`, `sourcebridge-web`,
+  `sourcebridge-worker`) plus the combined release image are signed with
+  cosign keyless OIDC on every push to `main`/`dev` and on tagged
+  releases. Signatures live next to images in GHCR (and Docker Hub when
+  configured). No keys to manage — uses the GHA OIDC token bound to the
+  workflow identity, with Fulcio-issued ephemeral certs and Rekor
+  transparency-log entries. Pull-request builds are deliberately not
+  signed. See `docs/admin/build-info.md` for the verification regex
+  (strict / permissive recipes), what it enforces, and how to verify by
+  digest when tags drift.
+
 Theme: **Pazaryna — first-run reliability.** Five fixes and features that close
 the gap between what a new self-hoster reads and what actually works: a
 scriptable admin-bootstrap command, non-interactive login, lazy agentic-feature

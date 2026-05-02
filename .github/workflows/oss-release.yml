@@ -91,6 +91,14 @@ jobs:
 
   build-docker:
     runs-on: ubuntu-latest
+    # CA-139: cosign keyless OIDC signing requires id-token: write at the
+    # job level. Workflow-level permissions (contents:write, packages:write)
+    # are REPLACED by the per-job block, so re-list packages:write here. The
+    # `release` job further down keeps contents:write on its own.
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -105,7 +113,8 @@ jobs:
       - id: meta
         run: |
           echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+      - id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: deploy/docker/Dockerfile.sourcebridge
@@ -117,6 +126,21 @@ jobs:
             COMMIT=${{ github.sha }}
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
             EDITION=oss
+      # CA-139: sign the tagged release image. Note that build-images.yml
+      # also fires on tagged pushes and signs the three component images
+      # (sourcebridge-{api,web,worker}) — this workflow signs the separate
+      # combined image at ghcr.io/<owner>/<repo>/sourcebridge:<tag>. The
+      # verification regex in docs/admin/build-info.md trusts both
+      # workflow identities.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+      - name: Sign release image (keyless)
+        run: |
+          cosign sign --yes \
+            "ghcr.io/${REPO}/sourcebridge@${DIGEST}"
+        env:
+          REPO: ${{ github.repository }}
+          DIGEST: ${{ steps.build.outputs.digest }}
 
   release:
     needs: [build-binaries, build-docker]
