@@ -100,6 +100,12 @@ CA-146 (page-count transparency and per-run override).
 
 ### Fixed
 
+- **discuss / Q&A**: When `discussCode` is anchored on a symbol, the LLM prompt now
+  includes the symbol's actual implementation source sliced from the file by line range,
+  instead of relying on metadata plus a whole-file dump. Token cost on long files is
+  meaningfully reduced and answer quality on symbol-scoped discuss threads improves.
+  (CA-107)
+
 - **`OnPageDone` now fires after persistence** (`1317cec`+`c597468`, CA-145, CA-143). Progress
   counter and smart-resume now agree on which pages are durably stored.
   Previously, `OnPageDone` fired before the post-Wait persistence loop, so

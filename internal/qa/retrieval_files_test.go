@@ -160,6 +160,65 @@ func TestBestSnippet_OversizedFileSkipped(t *testing.T) {
 	}
 }
 
+func TestSliceLines(t *testing.T) {
+	cases := []struct {
+		name     string
+		content  string
+		start    int
+		end      int
+		expected string
+	}{
+		{
+			name: "one-line range", content: "a\nb\nc",
+			start: 2, end: 2, expected: "b",
+		},
+		{
+			name: "multi-line range", content: "a\nb\nc\nd",
+			start: 2, end: 3, expected: "b\nc",
+		},
+		{
+			// start <= 0 is treated as an invalid bound per doc comment
+			// ("Returns "" for … zero/negative bounds").
+			name: "start zero returns empty", content: "a\nb",
+			start: 0, end: 1, expected: "",
+		},
+		{
+			// Negative start is also an invalid bound.
+			name: "start negative returns empty", content: "a\nb",
+			start: -5, end: 1, expected: "",
+		},
+		{
+			name: "end clamp high", content: "a\nb",
+			start: 1, end: 99, expected: "a\nb",
+		},
+		{
+			name: "empty content", content: "",
+			start: 1, end: 1, expected: "",
+		},
+		{
+			name: "end < start", content: "a\nb\nc",
+			start: 3, end: 1, expected: "",
+		},
+		{
+			name: "zero bounds", content: "a\nb",
+			start: 0, end: 0, expected: "",
+		},
+		{
+			name: "full file", content: "a\nb\nc",
+			start: 1, end: 3, expected: "a\nb\nc",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sliceLines(tc.content, tc.start, tc.end)
+			if got != tc.expected {
+				t.Errorf("sliceLines(%q, %d, %d) = %q, want %q",
+					tc.content, tc.start, tc.end, got, tc.expected)
+			}
+		})
+	}
+}
+
 func TestIsTestPath(t *testing.T) {
 	cases := map[string]bool{
 		"tests/foo.test.ts":          true,

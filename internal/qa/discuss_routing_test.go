@@ -60,8 +60,16 @@ func (f *fakeSymbolLookup) SymbolDetails(id string) (SymbolDetail, bool) {
 	if f.details == nil {
 		return SymbolDetail{}, false
 	}
-	d, ok := f.details[id]
-	return d, ok
+	d, found := f.details[id]
+	if !found {
+		return SymbolDetail{}, false
+	}
+	// Mirror the real adapter's validity gate: ok=true only when
+	// FilePath, StartLine, and EndLine are all usable for slicing.
+	if d.FilePath == "" || d.StartLine <= 0 || d.EndLine < d.StartLine {
+		return d, false
+	}
+	return d, true
 }
 
 type fakeFileReader struct{ files map[string]string }
@@ -108,6 +116,15 @@ func TestOrchestrator_DiscussShapePreserved(t *testing.T) {
 						EndLine:       2,
 						Signature:     "func Handle()",
 					},
+					{
+						ID:            "sym-helper",
+						Name:          "helper",
+						QualifiedName: "auth.helper",
+						FilePath:      "auth/handler.go",
+						StartLine:     4,
+						EndLine:       4,
+						Signature:     "func helper() bool",
+					},
 				},
 			},
 			details: map[string]SymbolDetail{
@@ -119,6 +136,15 @@ func TestOrchestrator_DiscussShapePreserved(t *testing.T) {
 					StartLine:     2,
 					EndLine:       2,
 					Signature:     "func Handle()",
+				},
+				"sym-helper": {
+					ID:            "sym-helper",
+					Name:          "helper",
+					QualifiedName: "auth.helper",
+					FilePath:      "auth/handler.go",
+					StartLine:     4,
+					EndLine:       4,
+					Signature:     "func helper() bool",
 				},
 			},
 		}).
@@ -140,7 +166,7 @@ func TestOrchestrator_DiscussShapePreserved(t *testing.T) {
 	if res.Answer == "" {
 		t.Fatal("expected answer")
 	}
-	// Context includes artifact, requirement, symbol, and file blocks.
+	// Context includes artifact, requirement, and symbol blocks.
 	// Fakes return simplified payloads; assertions check the strings
 	// they actually emit (real adapters add more envelope text).
 	prompt := synth.lastReq.GetContextCode()
@@ -148,11 +174,28 @@ func TestOrchestrator_DiscussShapePreserved(t *testing.T) {
 		"ARTIFACT CONTEXT HERE",
 		"REQ-42 description",
 		"Indexed symbol: auth.Handle",
-		"package auth",
+		// Decision 1: range-pin succeeded so the labeled block is present.
+		"## auth/handler.go:2-2",
+		"func Handle() {}",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("context missing %q\ncontext:\n%s", want, prompt)
 		}
+	}
+	// Decision 1: whole-file dump is suppressed when range-pin succeeds.
+	// "package auth" only appears in line 1 of the fixture file; it must
+	// not appear in the prompt when the range-pin slices only line 2.
+	if strings.Contains(prompt, "package auth") {
+		t.Errorf("whole-file dump not suppressed; found \"package auth\" in context:\n%s", prompt)
+	}
+	if strings.Count(prompt, "package auth\nfunc Handle() {}") != 0 {
+		t.Errorf("whole-file string appeared in context (should be suppressed)")
+	}
+	// The sliced source line appears exactly once (not duplicated by a
+	// whole-file dump or a second pin).
+	if strings.Count(prompt, "func Handle() {}") != 1 {
+		t.Errorf("expected \"func Handle() {}\" exactly once, got %d",
+			strings.Count(prompt, "func Handle() {}"))
 	}
 	// Conversation history made it into the prompt envelope.
 	if !strings.Contains(synth.lastReq.GetQuestion(), "earlier turn about sessions") {
@@ -166,9 +209,139 @@ func TestOrchestrator_DiscussShapePreserved(t *testing.T) {
 	if res.Usage.Model != "claude-sonnet" || res.Usage.InputTokens != 100 {
 		t.Errorf("usage not propagated: %+v", res.Usage)
 	}
-	// Context symbols sent to the worker.
-	if len(synth.lastReq.GetContextSymbols()) == 0 {
-		t.Errorf("expected context_symbols on synthesis request")
+	// Context symbols: pinned sym-auth + non-pinned peer sym-helper (dedup
+	// removes the duplicate SymbolsInFile entry for sym-auth).
+	syms := synth.lastReq.GetContextSymbols()
+	if len(syms) != 2 {
+		t.Fatalf("expected 2 context_symbols (pinned + peer), got %d: %+v", len(syms), syms)
+	}
+	// Pinned ref is index 0 (Stage 3d appends before SymbolsInFile loop).
+	pinned := syms[0]
+	if pinned.GetId() != "sym-auth" {
+		t.Errorf("syms[0].id = %q, want \"sym-auth\"", pinned.GetId())
+	}
+	if pinned.GetName() != "Handle" {
+		t.Errorf("syms[0].name = %q, want \"Handle\"", pinned.GetName())
+	}
+	if pinned.GetQualifiedName() != "auth.Handle" {
+		t.Errorf("syms[0].qualified_name = %q, want \"auth.Handle\"", pinned.GetQualifiedName())
+	}
+	// Phase 3: Signature and Location wired into proto.
+	if pinned.GetSignature() != "func Handle()" {
+		t.Errorf("syms[0].signature = %q, want \"func Handle()\"", pinned.GetSignature())
+	}
+	if pinned.GetLocation() == nil {
+		t.Fatal("syms[0].location is nil; expected populated Location")
+	}
+	if pinned.GetLocation().GetPath() != "auth/handler.go" {
+		t.Errorf("syms[0].location.path = %q, want \"auth/handler.go\"", pinned.GetLocation().GetPath())
+	}
+	if pinned.GetLocation().GetStartLine() != 2 {
+		t.Errorf("syms[0].location.start_line = %d, want 2", pinned.GetLocation().GetStartLine())
+	}
+	if pinned.GetLocation().GetEndLine() != 2 {
+		t.Errorf("syms[0].location.end_line = %d, want 2", pinned.GetLocation().GetEndLine())
+	}
+	// Non-pinned peer: sym-helper carries Signature from Phase 2 SymbolsInFile enrichment.
+	var helperSym *commonv1.CodeSymbol
+	for _, s := range syms {
+		if s.GetId() == "sym-helper" {
+			helperSym = s
+			break
+		}
+	}
+	if helperSym == nil {
+		t.Fatal("sym-helper not found in context_symbols")
+	}
+	if helperSym.GetSignature() != "func helper() bool" {
+		t.Errorf("sym-helper.signature = %q, want \"func helper() bool\"", helperSym.GetSignature())
+	}
+}
+
+// TestOrchestrator_DiscussSymbolFallbackWhenNoLineRange exercises the known-but-
+// unsliceable path: SymbolDetails returns (SymbolDetail{Name, QualifiedName}, false)
+// because line-range fields are zero. Stage 3d must fall back to the legacy whole-file
+// path and still populate context_symbols identity fields.
+func TestOrchestrator_DiscussSymbolFallbackWhenNoLineRange(t *testing.T) {
+	reader := &fakeDeepReader{
+		understanding: &knowledge.RepositoryUnderstanding{
+			Stage: knowledge.UnderstandingReady, TreeStatus: knowledge.UnderstandingTreeComplete,
+			CorpusID: "corpus",
+		},
+		nodes: []comprehension.SummaryNode{},
+	}
+	synth := &fakeSynth{
+		available: true,
+		resp: &reasoningv1.AnswerQuestionResponse{
+			Answer: "Authentication uses magic links.",
+			Usage:  &commonv1.LLMUsage{Model: "claude-sonnet", InputTokens: 100, OutputTokens: 20},
+		},
+	}
+	// details map has an entry with identity but zero line-range — the fake
+	// returns (detail, false), exercising the known-but-unsliceable contract.
+	o := New(synth, reader, nil, DefaultConfig()).
+		WithSymbolLookup(&fakeSymbolLookup{
+			byID:        map[string]string{"sym-auth": "Indexed symbol: auth.Handle"},
+			filePathsBy: map[string]string{"sym-auth": "auth/handler.go"},
+			inFile:      map[string][]SymbolContextRef{},
+			details: map[string]SymbolDetail{
+				// Identity populated, line-range zero — ok=false from fake.
+				"sym-auth": {
+					Name:          "Handle",
+					QualifiedName: "auth.Handle",
+					// FilePath, StartLine, EndLine intentionally zero so
+					// fakeSymbolLookup.SymbolDetails returns (detail, false).
+					// The fake returns ok=true only when the key exists AND
+					// the struct has a non-empty FilePath + positive line range.
+					// Since FilePath is "", ok=false is forced.
+				},
+			},
+		}).
+		WithFileReader(&fakeFileReader{files: map[string]string{"auth/handler.go": "package auth\nfunc Handle() {}"}})
+
+	in := AskInput{
+		RepositoryID: "repo-1",
+		Question:     "how does auth work?",
+		Mode:         ModeDeep,
+		SymbolID:     "sym-auth",
+	}
+	res, err := o.Ask(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Answer == "" {
+		t.Fatal("expected answer")
+	}
+	prompt := synth.lastReq.GetContextCode()
+
+	// Fallback fires: whole-file content appears in the prompt.
+	if !strings.Contains(prompt, "package auth\nfunc Handle() {}") {
+		t.Errorf("expected whole-file fallback content in context:\n%s", prompt)
+	}
+	// No labeled block emitted (range-pin did not succeed).
+	if strings.Contains(prompt, "## auth/handler.go:") {
+		t.Errorf("labeled block should not appear when range-pin fails:\n%s", prompt)
+	}
+
+	// Context symbol identity is still populated even on ok=false.
+	syms := synth.lastReq.GetContextSymbols()
+	if len(syms) == 0 {
+		t.Fatal("expected at least one context_symbol")
+	}
+	pinned := syms[0]
+	if pinned.GetName() != "Handle" {
+		t.Errorf("syms[0].name = %q, want \"Handle\"", pinned.GetName())
+	}
+	if pinned.GetQualifiedName() != "auth.Handle" {
+		t.Errorf("syms[0].qualified_name = %q, want \"auth.Handle\"", pinned.GetQualifiedName())
+	}
+	// Signature absent because range-pin failed (ok=false path skips it).
+	if pinned.GetSignature() != "" {
+		t.Errorf("syms[0].signature = %q, want \"\" (no signature on fallback path)", pinned.GetSignature())
+	}
+	// Location nil when range-pin failed.
+	if pinned.GetLocation() != nil {
+		t.Errorf("syms[0].location should be nil when range-pin fails, got %+v", pinned.GetLocation())
 	}
 }
 
