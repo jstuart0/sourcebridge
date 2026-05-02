@@ -98,9 +98,9 @@ func NewSurrealLLMProfileStore(client *SurrealDB, opts ...LLMProfileStoreOption)
 // and APIKeyHint are populated by the store on Load for caller-facing
 // shapes that must NEVER include the api_key (REST list endpoint).
 type Profile struct {
-	ID                       string    // SurrealDB record id, e.g. "ca_llm_profile:default-migrated"
-	Name                     string    // displayed verbatim (preserves user casing/whitespace)
-	NameKey                  string    // normalized uniqueness key: lowercase(trim(name))
+	ID                       string // SurrealDB record id, e.g. "ca_llm_profile:default-migrated"
+	Name                     string // displayed verbatim (preserves user casing/whitespace)
+	NameKey                  string // normalized uniqueness key: lowercase(trim(name))
 	Provider                 string
 	BaseURL                  string
 	APIKey                   string // decrypted; never logged
@@ -338,20 +338,41 @@ func extractRecordIDString(row map[string]interface{}, key string) string {
 	if !ok || v == nil {
 		return ""
 	}
+	var raw string
 	switch t := v.(type) {
 	case string:
-		return t
+		raw = t
 	case models.RecordID:
-		return t.String()
+		raw = t.String()
 	case *models.RecordID:
 		if t == nil {
 			return ""
 		}
-		return t.String()
+		raw = t.String()
+	default:
+		// Defensive: fall back to fmt %v for any future SDK shape that
+		// stringifies cleanly.
+		raw = fmt.Sprintf("%v", v)
 	}
-	// Defensive: fall back to fmt %v for any future SDK shape that
-	// stringifies cleanly.
-	return fmt.Sprintf("%v", v)
+	return canonicalizeRecordIDString(raw)
+}
+
+// canonicalizeRecordIDString strips the U+27E8 / U+27E9 mathematical-angle
+// brackets that surrealdb-go v1.4.0's models.RecordID.String() wraps around
+// keys containing characters outside [A-Za-z0-9_]. We normalize on read so
+// the returned form matches plain-string columns like ca_llm_config.active_profile_id,
+// which are persisted unbracketed and never round-trip through models.RecordID.
+func canonicalizeRecordIDString(s string) string {
+	idx := strings.IndexByte(s, ':')
+	if idx < 0 {
+		return s
+	}
+	table, key := s[:idx], s[idx+1:]
+	const open, close = "⟨", "⟩"
+	if strings.HasPrefix(key, open) && strings.HasSuffix(key, close) {
+		key = strings.TrimSuffix(strings.TrimPrefix(key, open), close)
+	}
+	return table + ":" + key
 }
 
 // extractTime reads a datetime field from a SurrealDB row. The SDK
