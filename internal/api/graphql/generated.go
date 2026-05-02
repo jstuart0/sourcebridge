@@ -686,7 +686,7 @@ type ComplexityRoot struct {
 		RemoveRepositoryResult               func(childComplexity int, id string) int
 		ResetComprehensionSettings           func(childComplexity int, scopeType string, scopeKey *string) int
 		RestoreFromTrash                     func(childComplexity int, typeArg TrashableType, id string, resolveConflict *RestoreConflictResolution, rename *string) int
-		RetryLivingWikiJob                   func(childComplexity int, repositoryID string, retryExcludedOnly *bool, mode *LivingWikiBuildMode) int
+		RetryLivingWikiJob                   func(childComplexity int, repositoryID string, retryExcludedOnly *bool, mode *LivingWikiBuildMode, pageCountOverride *int) int
 		ReviewCode                           func(childComplexity int, input ReviewCodeInput) int
 		SetLivingWikiModeFlags               func(childComplexity int, repositoryID string, overviewEnabled bool, detailedEnabled bool) int
 		SetRepositoryLLMOverride             func(childComplexity int, repositoryID string, input RepositoryLLMOverrideInput) int
@@ -1164,7 +1164,7 @@ type MutationResolver interface {
 	UpdateRepositoryLivingWikiSettings(ctx context.Context, input UpdateRepositoryLivingWikiSettingsInput) (*RepositoryLivingWikiSettings, error)
 	EnableLivingWikiForRepo(ctx context.Context, input EnableLivingWikiForRepoInput) (*EnableLivingWikiResult, error)
 	DisableLivingWikiForRepo(ctx context.Context, repositoryID string) (*RepositoryLivingWikiSettings, error)
-	RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool, mode *LivingWikiBuildMode) (*EnableLivingWikiResult, error)
+	RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool, mode *LivingWikiBuildMode, pageCountOverride *int) (*EnableLivingWikiResult, error)
 	SetLivingWikiModeFlags(ctx context.Context, repositoryID string, overviewEnabled bool, detailedEnabled bool) (*RepositoryLivingWikiSettings, error)
 	TriggerLivingWikiColdStartAllEnabled(ctx context.Context, repositoryID string) ([]*EnableLivingWikiResult, error)
 	GenerateLivingWikiPageOnDemand(ctx context.Context, repositoryID string, pageSpec LivingWikiOnDemandPageSpec) (*LivingWikiOnDemandPageResult, error)
@@ -4706,7 +4706,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.RetryLivingWikiJob(childComplexity, args["repositoryId"].(string), args["retryExcludedOnly"].(*bool), args["mode"].(*LivingWikiBuildMode)), true
+		return e.complexity.Mutation.RetryLivingWikiJob(childComplexity, args["repositoryId"].(string), args["retryExcludedOnly"].(*bool), args["mode"].(*LivingWikiBuildMode), args["pageCountOverride"].(*int)), true
 
 	case "Mutation.reviewCode":
 		if e.complexity.Mutation.ReviewCode == nil {
@@ -8735,6 +8735,11 @@ func (ec *executionContext) field_Mutation_retryLivingWikiJob_args(ctx context.C
 		return nil, err
 	}
 	args["mode"] = arg2
+	arg3, err := ec.field_Mutation_retryLivingWikiJob_argsPageCountOverride(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["pageCountOverride"] = arg3
 	return args, nil
 }
 func (ec *executionContext) field_Mutation_retryLivingWikiJob_argsRepositoryID(
@@ -8788,6 +8793,24 @@ func (ec *executionContext) field_Mutation_retryLivingWikiJob_argsMode(
 	}
 
 	var zeroVal *LivingWikiBuildMode
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_retryLivingWikiJob_argsPageCountOverride(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*int, error) {
+	if _, ok := rawArgs["pageCountOverride"]; !ok {
+		var zeroVal *int
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("pageCountOverride"))
+	if tmp, ok := rawArgs["pageCountOverride"]; ok {
+		return ec.unmarshalOInt2ᚖint(ctx, tmp)
+	}
+
+	var zeroVal *int
 	return zeroVal, nil
 }
 
@@ -34052,7 +34075,7 @@ func (ec *executionContext) _Mutation_retryLivingWikiJob(ctx context.Context, fi
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
 		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Mutation().RetryLivingWikiJob(rctx, fc.Args["repositoryId"].(string), fc.Args["retryExcludedOnly"].(*bool), fc.Args["mode"].(*LivingWikiBuildMode))
+		return ec.resolvers.Mutation().RetryLivingWikiJob(rctx, fc.Args["repositoryId"].(string), fc.Args["retryExcludedOnly"].(*bool), fc.Args["mode"].(*LivingWikiBuildMode), fc.Args["pageCountOverride"].(*int))
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -52038,7 +52061,7 @@ func (ec *executionContext) unmarshalInputEnableLivingWikiForRepoInput(ctx conte
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"repositoryId", "mode", "sinks", "retryExcludedOnly"}
+	fieldsInOrder := [...]string{"repositoryId", "mode", "sinks", "retryExcludedOnly", "pageCountOverride"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -52073,6 +52096,13 @@ func (ec *executionContext) unmarshalInputEnableLivingWikiForRepoInput(ctx conte
 				return it, err
 			}
 			it.RetryExcludedOnly = data
+		case "pageCountOverride":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("pageCountOverride"))
+			data, err := ec.unmarshalOInt2ᚖint(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.PageCountOverride = data
 		}
 	}
 

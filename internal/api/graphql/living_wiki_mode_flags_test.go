@@ -7,8 +7,11 @@ package graphql
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/vektah/gqlparser/v2/gqlerror"
 
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 )
@@ -66,7 +69,7 @@ func TestSetLivingWikiModeFlagsMutationPersists(t *testing.T) {
 func TestRetryLivingWikiJobBothModesOffReturnsError(t *testing.T) {
 	r, _ := modeFlagsResolver("repo-2", false, false)
 
-	_, err := r.RetryLivingWikiJob(context.Background(), "repo-2", nil, nil)
+	_, err := r.RetryLivingWikiJob(context.Background(), "repo-2", nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error when both modes are off")
 	}
@@ -75,7 +78,7 @@ func TestRetryLivingWikiJobBothModesOffReturnsError(t *testing.T) {
 func TestRetryLivingWikiJobAllEnabledModeWithBothOff(t *testing.T) {
 	r, _ := modeFlagsResolver("repo-2b", false, false)
 	m := LivingWikiBuildModeAllEnabled
-	_, err := r.RetryLivingWikiJob(context.Background(), "repo-2b", nil, &m)
+	_, err := r.RetryLivingWikiJob(context.Background(), "repo-2b", nil, &m, nil)
 	if err == nil {
 		t.Fatal("expected error when ALL_ENABLED but both modes are off")
 	}
@@ -87,7 +90,7 @@ func TestRetryLivingWikiJobOverviewModeOverride(t *testing.T) {
 	mode := LivingWikiBuildModeOverview
 	// No orchestrator configured, so it will gate at the orchestrator nil check.
 	// We just verify no "both modes disabled" error is returned.
-	_, err := r.RetryLivingWikiJob(context.Background(), "repo-3", nil, &mode)
+	_, err := r.RetryLivingWikiJob(context.Background(), "repo-3", nil, &mode, nil)
 	// Error may be nil (gated by no-orchestrator notice path) or a non-mode error.
 	// The key assertion: the error is NOT "LIVING_WIKI_BOTH_MODES_DISABLED".
 	if err != nil {
@@ -100,7 +103,7 @@ func TestRetryLivingWikiJobOverviewModeOverride(t *testing.T) {
 func TestRetryLivingWikiJobDetailedModeOverride(t *testing.T) {
 	r, _ := modeFlagsResolver("repo-4", false, false)
 	mode := LivingWikiBuildModeDetailed
-	_, err := r.RetryLivingWikiJob(context.Background(), "repo-4", nil, &mode)
+	_, err := r.RetryLivingWikiJob(context.Background(), "repo-4", nil, &mode, nil)
 	if err != nil {
 		if err.Error() == "Both Overview and Detailed modes are disabled. Enable at least one mode first." {
 			t.Errorf("DETAILED mode override should bypass both-modes-off check, got: %v", err)
@@ -263,6 +266,7 @@ func modeFlagsResolverWithSinks(repoID string, overview, detailed bool) (*mutati
 // override on a repo whose persisted flags are both-on must:
 //   - persist the row WITHOUT mutating the existing mode flags
 //   - return successfully
+//
 // The job mode itself is verified by the deriveLivingWikiJobMode tests above.
 func TestEnableLivingWikiForRepo_OverviewOverride_DoesNotPersistFlags(t *testing.T) {
 	r, store := modeFlagsResolverWithSinks("repo-override-1", true, true)
@@ -420,8 +424,8 @@ func TestEnableLivingWikiForRepo_NewRepo_BuildsDefaults(t *testing.T) {
 	if saved.StaleWhenStrategy != livingwiki.StaleStrategyDirect {
 		t.Errorf("expected StaleStrategy=DIRECT default, got %q", saved.StaleWhenStrategy)
 	}
-	if saved.MaxPagesPerJob != 50 {
-		t.Errorf("expected MaxPagesPerJob=50 default, got %d", saved.MaxPagesPerJob)
+	if saved.MaxPagesPerJob != 500 {
+		t.Errorf("expected MaxPagesPerJob=500 default (CA-146: raised from 50), got %d", saved.MaxPagesPerJob)
 	}
 	// Codex r2 Medium: first-time enable must seed mode-flag defaults.
 	if !saved.LivingWikiOverviewEnabled {
@@ -468,7 +472,7 @@ func TestRetryLivingWikiJob_OverviewOverride_PreservesPersistedFlags(t *testing.
 	r, store := modeFlagsResolverWithSinks("repo-retry-1", false, true)
 
 	mode := LivingWikiBuildModeOverview
-	if _, err := r.RetryLivingWikiJob(context.Background(), "repo-retry-1", nil, &mode); err != nil {
+	if _, err := r.RetryLivingWikiJob(context.Background(), "repo-retry-1", nil, &mode, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -490,7 +494,7 @@ func TestRetryLivingWikiJob_DetailedOverride_PreservesPersistedFlags(t *testing.
 	r, store := modeFlagsResolverWithSinks("repo-retry-2", true, false)
 
 	mode := LivingWikiBuildModeDetailed
-	if _, err := r.RetryLivingWikiJob(context.Background(), "repo-retry-2", nil, &mode); err != nil {
+	if _, err := r.RetryLivingWikiJob(context.Background(), "repo-retry-2", nil, &mode, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -504,4 +508,81 @@ func TestRetryLivingWikiJob_DetailedOverride_PreservesPersistedFlags(t *testing.
 	if saved.LivingWikiDetailedEnabled {
 		t.Error("retry(DETAILED) must NOT mutate persisted detailedEnabled (was false, now true)")
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CA-146: pageCountOverride validation tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestRetryLivingWikiJob_PageCountOverride_Zero_ReturnsError(t *testing.T) {
+	r, _ := modeFlagsResolverWithSinks("pco-zero", true, false)
+	v := 0
+	_, err := r.RetryLivingWikiJob(context.Background(), "pco-zero", nil, nil, &v)
+	if err == nil {
+		t.Fatal("expected error for pageCountOverride=0")
+	}
+	if !isLivingWikiInvalidPageCountOverrideError(err) {
+		t.Errorf("expected LIVING_WIKI_INVALID_PAGE_COUNT_OVERRIDE error, got: %v", err)
+	}
+}
+
+func TestRetryLivingWikiJob_PageCountOverride_Negative_ReturnsError(t *testing.T) {
+	r, _ := modeFlagsResolverWithSinks("pco-neg", true, false)
+	v := -5
+	_, err := r.RetryLivingWikiJob(context.Background(), "pco-neg", nil, nil, &v)
+	if err == nil {
+		t.Fatal("expected error for pageCountOverride=-5")
+	}
+	if !isLivingWikiInvalidPageCountOverrideError(err) {
+		t.Errorf("expected LIVING_WIKI_INVALID_PAGE_COUNT_OVERRIDE error, got: %v", err)
+	}
+}
+
+func TestRetryLivingWikiJob_PageCountOverride_TooLarge_ReturnsError(t *testing.T) {
+	r, _ := modeFlagsResolverWithSinks("pco-big", true, false)
+	v := 501
+	_, err := r.RetryLivingWikiJob(context.Background(), "pco-big", nil, nil, &v)
+	if err == nil {
+		t.Fatal("expected error for pageCountOverride=501")
+	}
+	if !isLivingWikiInvalidPageCountOverrideError(err) {
+		t.Errorf("expected LIVING_WIKI_INVALID_PAGE_COUNT_OVERRIDE error, got: %v", err)
+	}
+}
+
+func TestRetryLivingWikiJob_PageCountOverride_Nil_NoError(t *testing.T) {
+	// nil override = no-override path; should not fail on validation.
+	r, _ := modeFlagsResolverWithSinks("pco-nil", true, false)
+	_, err := r.RetryLivingWikiJob(context.Background(), "pco-nil", nil, nil, nil)
+	// Error may be non-nil due to orchestrator not configured, but NOT an
+	// INVALID_PAGE_COUNT_OVERRIDE error.
+	if err != nil && isLivingWikiInvalidPageCountOverrideError(err) {
+		t.Errorf("nil override should not trigger validation error, got: %v", err)
+	}
+}
+
+func TestRetryLivingWikiJob_PageCountOverride_Valid_NoError(t *testing.T) {
+	// Valid override (1..500) — should not fail on validation.
+	r, _ := modeFlagsResolverWithSinks("pco-valid", true, false)
+	v := 42
+	_, err := r.RetryLivingWikiJob(context.Background(), "pco-valid", nil, nil, &v)
+	if err != nil && isLivingWikiInvalidPageCountOverrideError(err) {
+		t.Errorf("valid override (42) should not trigger validation error, got: %v", err)
+	}
+}
+
+// isLivingWikiInvalidPageCountOverrideError checks whether the error is a
+// GraphQL error with the LIVING_WIKI_INVALID_PAGE_COUNT_OVERRIDE extension code.
+func isLivingWikiInvalidPageCountOverrideError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// gqlerror.Error has a plain Extensions field (not a method).
+	if e, ok := err.(*gqlerror.Error); ok {
+		if code, _ := e.Extensions["code"].(string); code == "LIVING_WIKI_INVALID_PAGE_COUNT_OVERRIDE" {
+			return true
+		}
+	}
+	// Also check plain string match in case of wrapping.
+	return strings.Contains(err.Error(), "LIVING_WIKI_INVALID_PAGE_COUNT_OVERRIDE")
 }

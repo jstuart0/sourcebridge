@@ -1683,8 +1683,8 @@ export const CLEAR_REPOSITORY_LLM_OVERRIDE_MUTATION = gql`
 `;
 
 export const RETRY_LIVING_WIKI_JOB_MUTATION = gql`
-  mutation RetryLivingWikiJob($repositoryId: ID!, $retryExcludedOnly: Boolean, $mode: LivingWikiBuildMode) {
-    retryLivingWikiJob(repositoryId: $repositoryId, retryExcludedOnly: $retryExcludedOnly, mode: $mode) {
+  mutation RetryLivingWikiJob($repositoryId: ID!, $retryExcludedOnly: Boolean, $mode: LivingWikiBuildMode, $pageCountOverride: Int) {
+    retryLivingWikiJob(repositoryId: $repositoryId, retryExcludedOnly: $retryExcludedOnly, mode: $mode, pageCountOverride: $pageCountOverride) {
       settings {
         enabled
         mode

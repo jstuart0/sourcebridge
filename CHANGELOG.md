@@ -8,6 +8,17 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ### Added
 
+- **Per-run page count override for Living Wiki cold-starts** (CA-146).
+  New optional `pageCountOverride: Int` field on `enableLivingWikiForRepo`
+  and `retryLivingWikiJob` lets operators cap the number of pages generated
+  for a single run without changing the persisted `MaxPagesPerJob` setting.
+  Valid range 1–500. The UI surfaces this as a collapsible "Run options"
+  section inline with the Build Overview / Build Detailed buttons. The cap
+  is skipped on targeted-retry paths (`retryExcludedOnly: true`) so
+  explicitly-named pages are never silently discarded. A structured planning
+  log line (`livingwiki/coldstart: planned page count`) is now emitted at
+  the start of every run stating the page breakdown and applied cap.
+
 - **Auto-version-bump-on-merge via release-please** (`e02fd92`, CA-147).
   Adopted [release-please](https://github.com/googleapis/release-please) to
   automate version bumping and changelog generation. Conventional-commit PRs
@@ -49,6 +60,20 @@ All notable changes to SourceBridge are documented here. The format follows
   function-shaped DI wired from `rest.NewServer`. A new parity test in
   `internal/api/rest/graphql_version_parity_test.go` asserts both surfaces
   return field-for-field identical responses for every config shape.
+
+### Changed
+
+- **`MaxPagesPerJob` default raised from 50 to 500, and is now wired as a real
+  cap** (CA-146). Previously, `MaxPagesPerJob` was stored in the database and
+  surfaced in the Settings UI but was never applied to cold-start jobs —
+  effectively a placebo. It is now wired into `buildColdStartRunner` and
+  applied after taxonomy resolution on every cold-start. The default is raised
+  from 50 to 500 so that existing repos with the never-touched default do not
+  experience silent truncation after upgrading. Repos whose `MaxPagesPerJob`
+  was exactly 50 (the prior default) are automatically migrated to 500 by
+  migration `055_lw_max_pages_default_500.surql`. Operators who deliberately
+  set a value other than 50 retain their custom value. The planning log line
+  now records `cap_source=repo_setting` when this cap fires.
 
 ### Fixed
 

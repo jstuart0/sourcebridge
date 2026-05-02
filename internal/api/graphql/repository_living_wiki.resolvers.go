@@ -19,8 +19,31 @@
 package graphql
 
 import (
+	"github.com/vektah/gqlparser/v2/gqlerror"
+
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 )
+
+// checkServerDraining returns a SERVER_DRAINING gqlerror if the server is
+// in drain state. Living Wiki cold-start and on-demand mutations call this
+// at the top of their handlers so new jobs are not admitted during a rolling
+// restart. CA-142.
+//
+// Note: defined here (rather than schema.resolvers.go) so gqlgen regen does
+// not move it to the warning block on each schema change.
+func (r *Resolver) checkServerDraining() error {
+	if r.DrainAdmitter != nil && r.DrainAdmitter.IsDraining() {
+		return &gqlerror.Error{
+			Message: "The server is draining for a graceful restart. " +
+				"Living Wiki operations are temporarily unavailable. " +
+				"Please retry in a few minutes.",
+			Extensions: map[string]any{
+				"code": "SERVER_DRAINING",
+			},
+		}
+	}
+	return nil
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers used by schema.resolvers.go
@@ -29,14 +52,14 @@ import (
 // defaultRepoSettings returns a zero-value settings record for the given repo.
 func defaultRepoSettings(repoID string) *livingwiki.RepositoryLivingWikiSettings {
 	return &livingwiki.RepositoryLivingWikiSettings{
-		TenantID:          defaultTenantID,
-		RepoID:            repoID,
-		Enabled:           false,
-		Mode:              livingwiki.RepoWikiModePRReview,
-		Sinks:             []livingwiki.RepoWikiSink{},
-		ExcludePaths:      []string{},
-		StaleWhenStrategy: livingwiki.StaleStrategyDirect,
-		MaxPagesPerJob:            50,
+		TenantID:                  defaultTenantID,
+		RepoID:                    repoID,
+		Enabled:                   false,
+		Mode:                      livingwiki.RepoWikiModePRReview,
+		Sinks:                     []livingwiki.RepoWikiSink{},
+		ExcludePaths:              []string{},
+		StaleWhenStrategy:         livingwiki.StaleStrategyDirect,
+		MaxPagesPerJob:            500,
 		LivingWikiOverviewEnabled: true,
 		LivingWikiDetailedEnabled: false,
 	}
@@ -79,18 +102,18 @@ func mapRepoLivingWikiSettings(s *livingwiki.RepositoryLivingWikiSettings) *Repo
 		autoClean = *s.AutoCleanOrphans
 	}
 	gql := &RepositoryLivingWikiSettings{
-		Enabled:           s.Enabled,
-		Mode:              RepoWikiMode(s.Mode),
-		ExcludePaths:      nonNilStringSlice(s.ExcludePaths),
-		StaleWhenStrategy: RepoStaleWhenStrategy(s.StaleWhenStrategy),
-		MaxPagesPerJob:    s.MaxPagesPerJob,
+		Enabled:                   s.Enabled,
+		Mode:                      RepoWikiMode(s.Mode),
+		ExcludePaths:              nonNilStringSlice(s.ExcludePaths),
+		StaleWhenStrategy:         RepoStaleWhenStrategy(s.StaleWhenStrategy),
+		MaxPagesPerJob:            s.MaxPagesPerJob,
 		AutoCleanOrphans:          autoClean,
 		LivingWikiOverviewEnabled: s.LivingWikiOverviewEnabled,
 		LivingWikiDetailedEnabled: s.LivingWikiDetailedEnabled,
 	}
 	gql.RepoID = s.RepoID // non-schema field; set after literal to survive gqlgen regen
 	if gql.MaxPagesPerJob == 0 {
-		gql.MaxPagesPerJob = 50
+		gql.MaxPagesPerJob = 500
 	}
 	if s.Mode == "" {
 		gql.Mode = RepoWikiModePrReview
@@ -210,4 +233,3 @@ func deriveLivingWikiJobMode(s livingwiki.RepositoryLivingWikiSettings) string {
 	}
 	return GenerationModeLWDetailed
 }
-

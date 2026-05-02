@@ -1378,7 +1378,7 @@ function StageBForm({
         <FieldLabel
           label="Max pages per job"
           htmlFor="max-pages"
-          help="Caps page generation per scheduler run. Prevents runaway regen on large repos. Default 50."
+          help="Caps pages generated per cold-start and per scheduled run. Default 500."
         />
         <input
           id="max-pages"
@@ -1592,6 +1592,8 @@ function EnabledSummary({
   const [, triggerAllEnabledMutation] = useMutation(TRIGGER_LIVING_WIKI_COLD_START_ALL_ENABLED_MUTATION);
   const [modeFlagError, setModeFlagError] = useState<string | null>(null);
   const [modeFlagSaving, setModeFlagSaving] = useState(false);
+  // CA-146: per-run page count override (one-shot; reset after run completes).
+  const [pageCountOverride, setPageCountOverride] = useState<number | "">("");
 
   const jobResult = settings.lastJobResult;
   const jobStatus = jobResult?.status;
@@ -1665,6 +1667,7 @@ function EnabledSummary({
   const handleRegenComplete = () => {
     setRegenerating(false);
     setRegenJobId(null);
+    setPageCountOverride(""); // CA-146: one-shot override, reset after run
     // Caller should re-fetch settings; for now just clear the state.
     onSettingsUpdated(settings);
   };
@@ -1697,6 +1700,8 @@ function EnabledSummary({
       repositoryId: repoId,
       retryExcludedOnly: false,
       mode: LivingWikiBuildModeOverview,
+      // CA-146: pass override only when set (undefined = use repo setting).
+      pageCountOverride: pageCountOverride !== "" ? pageCountOverride : undefined,
     });
     if (result.error) {
       setRegenError(result.error.message);
@@ -1719,6 +1724,8 @@ function EnabledSummary({
       repositoryId: repoId,
       retryExcludedOnly: false,
       mode: LivingWikiBuildModeDetailed,
+      // CA-146: pass override only when set (undefined = use repo setting).
+      pageCountOverride: pageCountOverride !== "" ? pageCountOverride : undefined,
     });
     if (result.error) {
       setRegenError(result.error.message);
@@ -1966,6 +1973,47 @@ function EnabledSummary({
               Disable
             </button>
           </div>
+
+          {/* CA-146: Run options — page count override (one-shot, not persisted) */}
+          {(settings.livingWikiOverviewEnabled || settings.livingWikiDetailedEnabled) && !regenerating && (
+            <details className="group">
+              <summary className="cursor-pointer list-none text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] [&::-webkit-details-marker]:hidden">
+                <span className="flex items-center gap-1">
+                  <span className="transition-transform group-open:rotate-90">▶</span>
+                  Run options
+                  {pageCountOverride !== "" && (
+                    <span className="ml-1 rounded bg-[var(--bg-surface)] px-1.5 py-0.5 text-xs text-[var(--text-secondary)]">
+                      · page cap {pageCountOverride}
+                    </span>
+                  )}
+                </span>
+              </summary>
+              <div className="mt-3 pl-4">
+                <label
+                  htmlFor="run-page-count-override"
+                  className="block text-sm font-medium text-[var(--text-primary)]"
+                >
+                  Page count override
+                </label>
+                <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
+                  One-shot cap for this run only. Leave blank to use the Max pages per job setting.
+                </p>
+                <input
+                  id="run-page-count-override"
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={pageCountOverride}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setPageCountOverride(v === "" ? "" : Number(v));
+                  }}
+                  placeholder="e.g. 10"
+                  className="mt-1.5 h-9 w-28 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-focus)]"
+                />
+              </div>
+            </details>
+          )}
         </>
       )}
 

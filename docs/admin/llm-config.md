@@ -922,3 +922,12 @@ The exact per-tier thresholds for every `(template, audience)` combination
 live in `internal/quality/profile.go`. The `tierOverrides` map documents
 which validators change between tiers and in which direction. Reading it
 is the authoritative reference for operators tuning gate behaviour.
+
+---
+
+## Living Wiki page-count and ops behavior
+
+For how Living Wiki determines the number of pages to generate, how
+`MaxPagesPerJob` works, the per-run `pageCountOverride`, and the
+targeted-retry cap exemption, see
+[`docs/admin/living-wiki-ops.md`](living-wiki-ops.md).

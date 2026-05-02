@@ -353,6 +353,12 @@ type EnableLivingWikiForRepoInput struct {
 	// were excluded in the most recent job (from lw_job_results.excluded_page_ids).
 	// Used by the "Retry excluded pages" CTA. Defaults to false (full run).
 	RetryExcludedOnly *bool `json:"retryExcludedOnly,omitempty"`
+	// pageCountOverride caps the number of pages generated for this single run
+	// only — it is not persisted. Valid range: 1..500. When omitted, the repo's
+	// MaxPagesPerJob setting is used (default 500). When retryExcludedOnly is
+	// true, this field is ignored (the targeted-retry path generates exactly the
+	// explicitly-named pages and does not apply any cap).
+	PageCountOverride *int `json:"pageCountOverride,omitempty"`
 	// Internal: see LivingWikiOverviewEnabled.
 	LivingWikiDetailedEnabled *bool `json:"-"`
 	// Internal: mode-override flag set by RetryLivingWikiJob and

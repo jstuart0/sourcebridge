@@ -198,7 +198,7 @@ type Mutation {
   the new job (same shape as enableLivingWikiForRepo so the UI can reuse the
   same progress-tracking path).
   """
-  retryLivingWikiJob(repositoryId: ID!, retryExcludedOnly: Boolean, mode: LivingWikiBuildMode): EnableLivingWikiResult!
+  retryLivingWikiJob(repositoryId: ID!, retryExcludedOnly: Boolean, mode: LivingWikiBuildMode, pageCountOverride: Int): EnableLivingWikiResult!
 
   """
   setLivingWikiModeFlags toggles the per-repository Overview/Detailed
@@ -1915,6 +1915,14 @@ input EnableLivingWikiForRepoInput {
   Used by the "Retry excluded pages" CTA. Defaults to false (full run).
   """
   retryExcludedOnly: Boolean
+  """
+  pageCountOverride caps the number of pages generated for this single run
+  only — it is not persisted. Valid range: 1..500. When omitted, the repo's
+  MaxPagesPerJob setting is used (default 500). When retryExcludedOnly is
+  true, this field is ignored (the targeted-retry path generates exactly the
+  explicitly-named pages and does not apply any cap).
+  """
+  pageCountOverride: Int
 }
 
 type EnableLivingWikiResult {

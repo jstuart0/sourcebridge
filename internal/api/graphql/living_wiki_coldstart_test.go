@@ -34,15 +34,15 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/coldstart"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/credentials"
-	lwmetrics "github.com/sourcebridge/sourcebridge/internal/livingwiki/metrics"
+	"github.com/sourcebridge/sourcebridge/internal/livingwiki/manifest"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/markdown"
+	lwmetrics "github.com/sourcebridge/sourcebridge/internal/livingwiki/metrics"
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/sinks"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
-	"github.com/sourcebridge/sourcebridge/internal/livingwiki/manifest"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
@@ -291,7 +291,7 @@ func TestColdStartJobVisibleInActivityFeed(t *testing.T) {
 
 	req := &llm.EnqueueRequest{
 		Subsystem:      llm.Subsystem("living_wiki"),
-		LLMProvider:   "test",
+		LLMProvider:    "test",
 		JobType:        "living_wiki_cold_start",
 		TargetKey:      "lw:default:test-repo",
 		RepoID:         "test-repo",
@@ -589,12 +589,12 @@ func TestColdStartJobAppearsInSharedActivityFeed(t *testing.T) {
 	}()
 
 	req := &llm.EnqueueRequest{
-		Subsystem: llm.Subsystem("living_wiki"),
-		LLMProvider:   "test",
-		JobType:   "living_wiki_cold_start",
-		TargetKey: "lw:default:feed-test",
-		RepoID:    "feed-test",
-		Priority:  llm.PriorityInteractive,
+		Subsystem:   llm.Subsystem("living_wiki"),
+		LLMProvider: "test",
+		JobType:     "living_wiki_cold_start",
+		TargetKey:   "lw:default:feed-test",
+		RepoID:      "feed-test",
+		Priority:    llm.PriorityInteractive,
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
 			rt.ReportProgress(0.1, "generating", "testing")
 			select {
@@ -637,24 +637,25 @@ func TestColdStartJobAppearsInSharedActivityFeed(t *testing.T) {
 
 func TestBuildColdStartRunnerNilOrchestratorReturnsNotice(t *testing.T) {
 	runner := buildColdStartRunner(
-		nil,           // nil orchestrator
+		nil, // nil orchestrator
 		"test-repo",
 		"default",
-		nil,           // no graph store
-		nil,           // no worker client
-		nil,           // no llmcall.Caller
-		nil,           // no excluded page IDs
+		nil, // no graph store
+		nil, // no worker client
+		nil, // no llmcall.Caller
+		nil, // no excluded page IDs
 		"unknown",
-		nil,           // no job result store
-		nil,           // no broker
-		nil,           // no repo settings store
-		nil,           // no cluster store
-		nil,           // no knowledge store
-		nil,           // no metrics collector (falls back to Default)
-		nil,           // no llmResolver (Phase 1)
-		nil,           // no publishStatusStore (Phase 1)
+		nil,                      // no job result store
+		nil,                      // no broker
+		nil,                      // no repo settings store
+		nil,                      // no cluster store
+		nil,                      // no knowledge store
+		nil,                      // no metrics collector (falls back to Default)
+		nil,                      // no llmResolver (Phase 1)
+		nil,                      // no publishStatusStore (Phase 1)
 		GenerationModeLWDetailed, // mode
-		nil,           // no comprehensionStore (CA-150 Phase 4)
+		nil,                      // no comprehensionStore (CA-150 Phase 4)
+		500, nil,                 // CA-146: maxPagesPerJob=500, no per-run override
 	)
 
 	rt := &fakeRuntime{jobID: "nil-orch-job"}
@@ -939,8 +940,8 @@ type csFakeBroker struct {
 	snap credentials.Snapshot
 }
 
-func (b *csFakeBroker) GitHub(_ context.Context) (string, error)  { return b.snap.GitHubToken, nil }
-func (b *csFakeBroker) GitLab(_ context.Context) (string, error)  { return b.snap.GitLabToken, nil }
+func (b *csFakeBroker) GitHub(_ context.Context) (string, error) { return b.snap.GitHubToken, nil }
+func (b *csFakeBroker) GitLab(_ context.Context) (string, error) { return b.snap.GitLabToken, nil }
 func (b *csFakeBroker) ConfluenceSite(_ context.Context) (string, error) {
 	return b.snap.ConfluenceSite, nil
 }
@@ -1059,21 +1060,22 @@ func TestColdStartSinkResultsPersistedInJobResult(t *testing.T) {
 		lwOrch,
 		"sink-result-repo",
 		"default",
-		nil,   // no graph store (taxonomy resolution skipped; pages provided via test)
-		nil,   // no worker client
-		nil,   // no llmcall.Caller
-		nil,   // no excluded page IDs (full cold-start path)
+		nil, // no graph store (taxonomy resolution skipped; pages provided via test)
+		nil, // no worker client
+		nil, // no llmcall.Caller
+		nil, // no excluded page IDs (full cold-start path)
 		"confluence",
 		jrs,
 		broker,
 		repoSettingsStore,
-		nil,   // no cluster store
-		nil,   // no knowledge store
-		nil,   // no metrics collector (falls back to Default)
-		nil,   // no llmResolver (Phase 1)
-		nil,   // no publishStatusStore (Phase 1)
+		nil,                      // no cluster store
+		nil,                      // no knowledge store
+		nil,                      // no metrics collector (falls back to Default)
+		nil,                      // no llmResolver (Phase 1)
+		nil,                      // no publishStatusStore (Phase 1)
 		GenerationModeLWDetailed, // mode
-		nil,   // no comprehensionStore (CA-150 Phase 4)
+		nil,                      // no comprehensionStore (CA-150 Phase 4)
+		500, nil,                 // CA-146: maxPagesPerJob=500, no per-run override
 	)
 
 	// Override: run via csRunnerFromPages so we can inject the planned pages
@@ -1185,10 +1187,11 @@ func TestColdStartSystemicAbortEmitsMetric(t *testing.T) {
 		cs,
 		nil, // no knowledge store
 		mc,
-		nil, // no llmResolver (Phase 1)
-		nil, // no publishStatusStore (Phase 1)
+		nil,                      // no llmResolver (Phase 1)
+		nil,                      // no publishStatusStore (Phase 1)
 		GenerationModeLWDetailed, // mode
-		nil, // no comprehensionStore (CA-150 Phase 4)
+		nil,                      // no comprehensionStore (CA-150 Phase 4)
+		500, nil,                 // CA-146: maxPagesPerJob=500, no per-run override
 	)
 
 	rt := &fakeRuntime{jobID: "job-systemic-metric"}
@@ -1242,6 +1245,7 @@ func TestColdStartExclusionInvariantPartialContent(t *testing.T) {
 		nil, nil, // no llmResolver, no publishStatusStore (Phase 1)
 		GenerationModeLWDetailed, // mode
 		nil,                      // no comprehensionStore (CA-150 Phase 4)
+		500, nil,                 // CA-146: maxPagesPerJob=500, no per-run override
 	)
 
 	rt := &fakeRuntime{jobID: "job-invariant-partial"}
@@ -1297,6 +1301,7 @@ func TestColdStartExclusionInvariantSystemicAbort(t *testing.T) {
 		nil, nil, // no llmResolver, no publishStatusStore (Phase 1)
 		GenerationModeLWDetailed, // mode
 		nil,                      // no comprehensionStore (CA-150 Phase 4)
+		500, nil,                 // CA-146: maxPagesPerJob=500, no per-run override
 	)
 
 	rt := &fakeRuntime{jobID: "job-invariant-systemic"}
@@ -1528,6 +1533,7 @@ func TestColdStart_TierResolvedExactlyOncePerRun(t *testing.T) {
 		resolver, nil,
 		GenerationModeLWDetailed,
 		nil,
+		500, nil, // CA-146: maxPagesPerJob=500, no per-run override
 	)
 
 	rt := &fakeRuntime{jobID: "tier-once-job"}
@@ -1570,6 +1576,7 @@ func TestColdStart_StoreError_FallsBackToTierLocal(t *testing.T) {
 		&errorLLMResolver{}, nil,
 		GenerationModeLWDetailed,
 		nil,
+		500, nil, // CA-146: maxPagesPerJob=500, no per-run override
 	)
 
 	rt := &fakeRuntime{jobID: "store-err-job"}
@@ -1615,6 +1622,7 @@ func TestColdStart_AdminMutationMidRun_TemplatesUseFrozenCaller(t *testing.T) {
 		resolver, nil,
 		GenerationModeLWDetailed,
 		nil,
+		500, nil, // CA-146: maxPagesPerJob=500, no per-run override
 	)
 
 	rt := &fakeRuntime{jobID: "mutation-mid-run-job"}
@@ -1655,6 +1663,7 @@ func TestColdStart_TierUnknown_FallsBackToFrontier_LogsWarn(t *testing.T) {
 		nil, nil, // nil resolver → resolveErr → TierLocal
 		GenerationModeLWDetailed,
 		nil,
+		500, nil, // CA-146: maxPagesPerJob=500, no per-run override
 	)
 
 	rt := &fakeRuntime{jobID: "tier-unk-job"}
@@ -1720,7 +1729,8 @@ func TestColdStart_PerRepoOverride_DerivesTierFromOverride(t *testing.T) {
 		overrideResolver, // per-repo resolver → returns ollama/qwen3:7b
 		nil,
 		GenerationModeLWDetailed,
-		nil, // comprehensionStore nil → falls through to ClassifyByPattern
+		nil,      // comprehensionStore nil → falls through to ClassifyByPattern
+		500, nil, // CA-146: maxPagesPerJob=500, no per-run override
 	)
 
 	rt := &fakeRuntime{jobID: "override-tier-job"}
@@ -1751,8 +1761,8 @@ func TestColdStart_PerRepoOverride_DerivesTierFromOverride(t *testing.T) {
 // TestRetryResume_SmartResumeMatchesProgress verifies the contract that binds
 // CA-145 (progress counter) to CA-143 (retry-resume correctness):
 //
-//   "The set of pages that OnPageDone reports as complete equals the set of
-//    pages that smart-resume classifies as skipFully on the next run."
+//	"The set of pages that OnPageDone reports as complete equals the set of
+//	 pages that smart-resume classifies as skipFully on the next run."
 //
 // Setup: N=8 pages. We pre-seed the publishStatusStore with K=5 pages at
 // status="ready" with matching fingerprints, simulating the durable state
@@ -1984,5 +1994,271 @@ func TestNewRegistryTierFunc_NormalizesModelCaseAndWhitespace(t *testing.T) {
 	}
 	if got.Tier != modeltier.TierLocal {
 		t.Errorf("expected tier=local from registry, got %q", got.Tier)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CA-146: Page-count cap + per-run override tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestBuildPlanningSummary verifies the human-readable summary helper covers
+// the key cap_source branches.
+func TestBuildPlanningSummary(t *testing.T) {
+	t.Parallel()
+
+	got := buildPlanningSummary("lw_detailed", 9, 6, 0, 3, "none", 0, 9)
+	if !strings.Contains(got, "mode=lw_detailed") {
+		t.Errorf("expected mode prefix; got %q", got)
+	}
+	if !strings.Contains(got, "6 cluster") {
+		t.Errorf("expected cluster count; got %q", got)
+	}
+
+	got = buildPlanningSummary("lw_detailed", 5, 3, 0, 3, "repo_setting", 5, 9)
+	if !strings.Contains(got, "capped at 5 from MaxPagesPerJob") {
+		t.Errorf("expected repo_setting cap note; got %q", got)
+	}
+
+	got = buildPlanningSummary("lw_detailed", 4, 1, 0, 3, "per_run_override", 4, 9)
+	if !strings.Contains(got, "capped at 4 from pageCountOverride") {
+		t.Errorf("expected per_run_override cap note; got %q", got)
+	}
+}
+
+// TestColdStart_MaxPagesPerJobCap verifies that when maxPagesPerJob < planned set,
+// the cap is applied and repo-wide pages are always retained.
+//
+// Setup: 2 clusters (→ 2 architecture pages) + 3 repo-wide = 5 planned.
+// Cap: maxPagesPerJob=3 → repo-wide (3) kept, architecture pages truncated to 0.
+func TestColdStart_MaxPagesPerJobCap(t *testing.T) {
+	// No t.Parallel() — swaps global slog.Default; must not race with other tests.
+
+	var logBuf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	jrs := livingwiki.NewMemJobResultStore()
+	mc := lwmetrics.NewCollector()
+	cs := csClusterStore(2) // 2 cluster-arch pages
+	reg := lworch.NewMapRegistry(
+		&csPassingTemplate{id: "architecture"},
+		&csPassingTemplate{id: "api_reference"},
+		&csPassingTemplate{id: "system_overview"},
+		&csPassingTemplate{id: "glossary"},
+	)
+	store := lworch.NewMemoryPageStore()
+	lwOrch := lworch.New(lworch.Config{RepoID: "cap-test-repo"}, reg, store)
+
+	// maxPagesPerJob=3 — less than the planned 5 (2 arch + 3 repo-wide).
+	// Repo-wide pages (3) are always retained; architecture pages truncated to 0.
+	runner := buildColdStartRunner(
+		lwOrch, "cap-test-repo", "default",
+		newStubGraphStore(), nil, nil, nil,
+		"git_repo",
+		jrs, nil, nil, cs, nil,
+		mc,
+		nil, nil,
+		GenerationModeLWDetailed,
+		nil,
+		3,   // maxPagesPerJob
+		nil, // no per-run override
+	)
+
+	rt := &fakeRuntime{jobID: "cap-test-job"}
+	_ = runner(context.Background(), rt)
+
+	logStr := logBuf.String()
+	if !strings.Contains(logStr, "cap_source=repo_setting") {
+		t.Errorf("expected cap_source=repo_setting in log; log:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, "pre_cap_total=5") {
+		t.Errorf("expected pre_cap_total=5 in log; log:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, "total=3") {
+		t.Errorf("expected total=3 (capped) in log; log:\n%s", logStr)
+	}
+}
+
+// TestColdStart_PageCountOverride_WinsOverRepoSetting verifies that a per-run
+// pageCountOverride takes precedence over settings.MaxPagesPerJob.
+//
+// Setup: 2 clusters + 3 repo-wide = 5 planned.
+// maxPagesPerJob=10 (no cap by itself), override=4 → cap at 4.
+func TestColdStart_PageCountOverride_WinsOverRepoSetting(t *testing.T) {
+	// No t.Parallel() — swaps global slog.Default; must not race with other tests.
+
+	var logBuf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	jrs := livingwiki.NewMemJobResultStore()
+	mc := lwmetrics.NewCollector()
+	cs := csClusterStore(2)
+	reg := lworch.NewMapRegistry(
+		&csPassingTemplate{id: "architecture"},
+		&csPassingTemplate{id: "api_reference"},
+		&csPassingTemplate{id: "system_overview"},
+		&csPassingTemplate{id: "glossary"},
+	)
+	store := lworch.NewMemoryPageStore()
+	lwOrch := lworch.New(lworch.Config{RepoID: "override-cap-repo"}, reg, store)
+
+	override := 4
+	runner := buildColdStartRunner(
+		lwOrch, "override-cap-repo", "default",
+		newStubGraphStore(), nil, nil, nil,
+		"git_repo",
+		jrs, nil, nil, cs, nil,
+		mc,
+		nil, nil,
+		GenerationModeLWDetailed,
+		nil,
+		10,        // maxPagesPerJob (loose, would not cap on its own)
+		&override, // per-run override wins
+	)
+
+	rt := &fakeRuntime{jobID: "override-cap-job"}
+	_ = runner(context.Background(), rt)
+
+	logStr := logBuf.String()
+	if !strings.Contains(logStr, "cap_source=per_run_override") {
+		t.Errorf("expected cap_source=per_run_override in log; log:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, "total=4") {
+		t.Errorf("expected total=4 (override wins) in log; log:\n%s", logStr)
+	}
+}
+
+// TestColdStart_ExcludedOnlyRetry_SkipsCap verifies that when retryExcludedOnly
+// is true (len(excludedPageIDs)>0), the cap is NOT applied regardless of
+// maxPagesPerJob, and the log records cap_source=none + excluded_only_retry=true.
+//
+// Setup: inject 3 excluded page IDs directly; maxPagesPerJob=1 (very tight).
+// All 3 pages must survive (cap skipped on excluded-only path).
+func TestColdStart_ExcludedOnlyRetry_SkipsCap(t *testing.T) {
+	// No t.Parallel() — swaps global slog.Default; must not race with other tests.
+
+	var logBuf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	jrs := livingwiki.NewMemJobResultStore()
+	mc := lwmetrics.NewCollector()
+	// 3 clusters → labels "module-0", "module-1", "module-2".
+	// In lw_detailed mode, DetailPageID("excluded-cap-repo", "module-0") =
+	// "excluded-cap-repo.detail.module.0" (replacePathChars: '-' → '.').
+	cs := csClusterStore(3)
+
+	reg := lworch.NewMapRegistry(
+		&csPassingTemplate{id: "architecture"},
+		&csPassingTemplate{id: "api_reference"},
+		&csPassingTemplate{id: "system_overview"},
+		&csPassingTemplate{id: "glossary"},
+	)
+	store := lworch.NewMemoryPageStore()
+	lwOrch := lworch.New(lworch.Config{RepoID: "excluded-cap-repo"}, reg, store)
+
+	// maxPagesPerJob=1, but retryExcludedOnly path must bypass the cap.
+	// We pass the real taxonomy page IDs so the runner's filter finds them;
+	// non-empty excludedIDs triggers the retryExcludedOnly branch.
+	excludedIDs := []string{
+		"excluded-cap-repo.detail.module.0",
+		"excluded-cap-repo.detail.module.1",
+		"excluded-cap-repo.detail.module.2",
+	}
+	runner := buildColdStartRunner(
+		lwOrch, "excluded-cap-repo", "default",
+		newStubGraphStore(), nil, nil,
+		excludedIDs, // non-empty → retryExcludedOnly path
+		"git_repo",
+		jrs, nil, nil, cs, nil,
+		mc,
+		nil, nil,
+		GenerationModeLWDetailed,
+		nil,
+		1,   // maxPagesPerJob = 1 (very tight — should be bypassed)
+		nil, // no per-run override
+	)
+
+	rt := &fakeRuntime{jobID: "excluded-cap-job"}
+	_ = runner(context.Background(), rt)
+
+	logStr := logBuf.String()
+	if !strings.Contains(logStr, "excluded_only_retry=true") {
+		t.Errorf("expected excluded_only_retry=true in log; log:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, "cap_source=none") {
+		t.Errorf("expected cap_source=none (cap bypassed) in log; log:\n%s", logStr)
+	}
+}
+
+// TestColdStart_DeterministicTruncation verifies that calling the runner twice
+// with the same inputs produces the same surviving page set (stable order).
+func TestColdStart_DeterministicTruncation(t *testing.T) {
+	// No t.Parallel() — swaps global slog.Default inside run(); must not race
+	// with other tests whose goroutines (heartbeat, dispatch) outlive the call.
+
+	// Helper: run once with maxPagesPerJob=5 and collect the planning log line.
+	run := func(repoID string) string {
+		var logBuf strings.Builder
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+		defer slog.SetDefault(prev)
+
+		jrs := livingwiki.NewMemJobResultStore()
+		mc := lwmetrics.NewCollector()
+		cs := csClusterStore(4) // 4 arch + 3 repo-wide = 7 planned
+		reg := lworch.NewMapRegistry(
+			&csPassingTemplate{id: "architecture"},
+			&csPassingTemplate{id: "api_reference"},
+			&csPassingTemplate{id: "system_overview"},
+			&csPassingTemplate{id: "glossary"},
+		)
+		store := lworch.NewMemoryPageStore()
+		lwOrch := lworch.New(lworch.Config{RepoID: repoID}, reg, store)
+
+		runner := buildColdStartRunner(
+			lwOrch, repoID, "default",
+			newStubGraphStore(), nil, nil, nil,
+			"git_repo",
+			jrs, nil, nil, cs, nil,
+			mc,
+			nil, nil,
+			GenerationModeLWDetailed,
+			nil,
+			5, // maxPagesPerJob=5 (caps 7→5)
+			nil,
+		)
+		_ = runner(context.Background(), &fakeRuntime{jobID: "det-job-" + repoID})
+
+		// Extract the "planned page count" log line and return it.
+		for _, line := range strings.Split(logBuf.String(), "\n") {
+			if strings.Contains(line, "planned page count") {
+				return line
+			}
+		}
+		return ""
+	}
+
+	first := run("det-repo")
+	second := run("det-repo")
+
+	if first == "" {
+		t.Fatal("planning log line not found on first run")
+	}
+	// Compare only the stable fields (strip the timestamp prefix which
+	// changes between runs; everything from msg= onward is stable).
+	stableSubstr := func(line string) string {
+		if idx := strings.Index(line, "msg="); idx >= 0 {
+			return line[idx:]
+		}
+		return line
+	}
+	if stableSubstr(first) != stableSubstr(second) {
+		t.Errorf("determinism violated:\nfirst:  %q\nsecond: %q",
+			stableSubstr(first), stableSubstr(second))
 	}
 }

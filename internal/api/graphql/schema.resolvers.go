@@ -2501,24 +2501,6 @@ func (r *mutationResolver) UpdateRepositoryLivingWikiSettings(ctx context.Contex
 	return mapRepoLivingWikiSettings(current), nil
 }
 
-// checkServerDraining returns a SERVER_DRAINING gqlerror if the server is
-// in drain state. Living Wiki cold-start and on-demand mutations call this
-// at the top of their handlers so new jobs are not admitted during a rolling
-// restart. CA-142.
-func (r *Resolver) checkServerDraining() error {
-	if r.DrainAdmitter != nil && r.DrainAdmitter.IsDraining() {
-		return &gqlerror.Error{
-			Message: "The server is draining for a graceful restart. " +
-				"Living Wiki operations are temporarily unavailable. " +
-				"Please retry in a few minutes.",
-			Extensions: map[string]any{
-				"code": "SERVER_DRAINING",
-			},
-		}
-	}
-	return nil
-}
-
 // EnableLivingWikiForRepo resolves Mutation.enableLivingWikiForRepo.
 //
 // Saves the settings (enabled=true) and enqueues a living-wiki cold-start
@@ -2553,6 +2535,22 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 		if s.Kind != livingwiki.RepoWikiSinkGitRepo && strings.TrimSpace(s.IntegrationName) == "" {
 			notice := fmt.Sprintf("The %s sink (#%d) needs an integration name. For Confluence enter the space key (e.g. SD); for Notion enter the database ID.", s.Kind, i+1)
 			return &EnableLivingWikiResult{Notice: &notice}, nil
+		}
+	}
+
+	// CA-146: validate the per-run page count override (1..500) at input
+	// parsing time — before saving settings — so invalid values always
+	// produce an error regardless of global-enabled state or orchestrator.
+	if input.PageCountOverride != nil {
+		v := *input.PageCountOverride
+		if v < 1 || v > 500 {
+			return nil, &gqlerror.Error{
+				Message: fmt.Sprintf(
+					"pageCountOverride must be between 1 and 500 (got %d)", v),
+				Extensions: map[string]any{
+					"code": "LIVING_WIKI_INVALID_PAGE_COUNT_OVERRIDE",
+				},
+			}
 		}
 	}
 
@@ -2600,7 +2598,7 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 		settings.StaleWhenStrategy = livingwiki.StaleStrategyDirect
 	}
 	if settings.MaxPagesPerJob == 0 {
-		settings.MaxPagesPerJob = 50
+		settings.MaxPagesPerJob = 500
 	}
 	settings.UpdatedAt = time.Now()
 	settings.UpdatedBy = userIDFromContext(ctx)
@@ -2718,11 +2716,13 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 			r.LivingWikiRepoStore,
 			r.ClusterStore,
 			r.KnowledgeStore,
-			nil,                          // metrics: fall back to lwmetrics.Default
-			r.LLMResolver,                // for FrozenResolver + fingerprint model identity (CR5, LD-7)
-			r.LivingWikiPagePublishStore, // for per-page dispatch state (Phase 1)
-			jobMode,                      // Phase 4a: mode-aware taxonomy
-			r.ComprehensionStore,         // for quality-gate tier registry lookup (CA-150 Phase 4)
+			nil,                              // metrics: fall back to lwmetrics.Default
+			r.LLMResolver,                    // for FrozenResolver + fingerprint model identity (CR5, LD-7)
+			r.LivingWikiPagePublishStore,     // for per-page dispatch state (Phase 1)
+			jobMode,                          // Phase 4a: mode-aware taxonomy
+			r.ComprehensionStore,             // for quality-gate tier registry lookup (CA-150 Phase 4)
+			effectiveSettings.MaxPagesPerJob, // CA-146: repo-level cap (now wired)
+			input.PageCountOverride,          // CA-146: per-run override (nil = use repo setting)
 		),
 	}
 
@@ -2773,7 +2773,7 @@ func (r *mutationResolver) DisableLivingWikiForRepo(ctx context.Context, reposit
 // current repo settings. When retryExcludedOnly is true the job is scoped
 // to pages that were excluded in the most recent run (the "Retry excluded
 // pages" CTA). When false (or nil), a full cold-start is triggered.
-func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool, mode *LivingWikiBuildMode) (*EnableLivingWikiResult, error) {
+func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool, mode *LivingWikiBuildMode, pageCountOverride *int) (*EnableLivingWikiResult, error) {
 	// CA-142: refuse new cold-start jobs during graceful drain.
 	if err := r.checkServerDraining(); err != nil {
 		return nil, err
@@ -2791,11 +2791,13 @@ func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID 
 	}
 
 	// Build input, preserving existing mode flags by default.
+	// CA-146: forward pageCountOverride as-is (nil = no override).
 	input := EnableLivingWikiForRepoInput{
 		RepositoryID:      repositoryID,
 		Mode:              RepoWikiMode(current.Mode),
 		Sinks:             repoSinksToInputs(current.Sinks),
 		RetryExcludedOnly: retryExcludedOnly,
+		PageCountOverride: pageCountOverride,
 	}
 
 	// Mode override: if both modes are off and no explicit mode given, error.

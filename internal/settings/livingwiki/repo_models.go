@@ -28,14 +28,14 @@ import "time"
 // Slice 3 of the LLM provider profiles plan adds ProfileID. The override
 // is now a three-mode discriminator (per plan D3 / option (c)):
 //
-//   1. Workspace (no override row at all) — handled by the absence of
-//      this struct on RepositoryLivingWikiSettings.LLMOverride.
-//   2. Saved-profile reference — ProfileID is non-empty; the resolver
-//      fetches that profile via ProfileLookupStore and uses its values.
-//      Inline fields are cleared atomically server-side when this mode
-//      is selected.
-//   3. Inline override — ProfileID is empty; today's per-field semantics
-//      apply (provider/base_url/api_key/model fields).
+//  1. Workspace (no override row at all) — handled by the absence of
+//     this struct on RepositoryLivingWikiSettings.LLMOverride.
+//  2. Saved-profile reference — ProfileID is non-empty; the resolver
+//     fetches that profile via ProfileLookupStore and uses its values.
+//     Inline fields are cleared atomically server-side when this mode
+//     is selected.
+//  3. Inline override — ProfileID is empty; today's per-field semantics
+//     apply (provider/base_url/api_key/model fields).
 //
 // Server-side mutual exclusion: the GraphQL mutation clears inline fields
 // when ProfileID is set non-empty, and clears ProfileID when clearProfile
@@ -137,8 +137,8 @@ type RepositoryLivingWikiSettings struct {
 	// StaleWhenStrategy controls how stale-detection walks dependencies.
 	StaleWhenStrategy StaleStrategy `json:"stale_when_strategy"`
 
-	// MaxPagesPerJob caps page generation per scheduler tick to prevent
-	// runaway regen. Default 50.
+	// MaxPagesPerJob caps page generation per cold-start and per scheduler run.
+	// Default 500. Wired as a real cap since CA-146 (was previously a no-op).
 	MaxPagesPerJob int `json:"max_pages_per_job,omitempty"`
 
 	// LastRunAt is the timestamp of the most recent completed regen pass.
@@ -231,7 +231,7 @@ const (
 type RepoWikiEditPolicy string
 
 const (
-	RepoWikiEditPolicyProposePR    RepoWikiEditPolicy = "PROPOSE_PR"
+	RepoWikiEditPolicyProposePR     RepoWikiEditPolicy = "PROPOSE_PR"
 	RepoWikiEditPolicyDirectPublish RepoWikiEditPolicy = "DIRECT_PUBLISH"
 )
 

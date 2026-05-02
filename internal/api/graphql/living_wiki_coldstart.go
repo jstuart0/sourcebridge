@@ -133,6 +133,8 @@ func buildColdStartRunner(
 	publishStatusStore livingwiki.PagePublishStatusStore, // for per-page dispatch state (Phase 1)
 	mode string, // Phase 4a: "lw_overview" or "lw_detailed"; empty defaults to lw_detailed
 	comprehensionStore comprehension.Store, // for quality-gate tier registry lookup (CA-150 Phase 4)
+	maxPagesPerJob int, // CA-146: repo setting cap; 0 = no cap (new repos get 500 via migration)
+	pageCountOverride *int, // CA-146: per-run override; nil = use maxPagesPerJob
 ) func(ctx context.Context, rt llm.Runtime) error {
 	if mode == "" {
 		mode = GenerationModeLWDetailed
@@ -255,11 +257,94 @@ func buildColdStartRunner(
 			}
 		}
 
-		total := len(pages)
-		if total == 0 {
+		preCap := len(pages)
+		if preCap == 0 {
 			rt.ReportProgress(1.0, "ok", "No pages to generate for this repository")
 			return nil
 		}
+
+		// ── CA-146: Page-count cap + planning log ─────────────────────────────
+		//
+		// Tally breakdown by template role before any truncation so the log
+		// reflects what the taxonomy actually produced.
+		var clusterPageCount, repoWidePageCount, topLevelDirPageCount int
+		repoWideTemplateIDs := map[string]bool{
+			"api_reference":   true,
+			"system_overview": true,
+			"glossary":        true,
+		}
+		for _, p := range pages {
+			if repoWideTemplateIDs[p.TemplateID] {
+				repoWidePageCount++
+			} else if p.TemplateID == "architecture" {
+				clusterPageCount++
+			} else {
+				topLevelDirPageCount++
+			}
+		}
+
+		// Determine effective cap and cap_source.
+		// Cap is only applied on the full cold-start path — retryExcludedOnly
+		// callers named specific pages; capping silently discards that request.
+		capSource := "none"
+		capValue := 0
+		excludedOnlyRetry := len(excludedPageIDs) > 0
+
+		if !excludedOnlyRetry {
+			effectiveCap := 0
+			if pageCountOverride != nil {
+				effectiveCap = *pageCountOverride
+				capSource = "per_run_override"
+			} else if maxPagesPerJob > 0 {
+				effectiveCap = maxPagesPerJob
+				capSource = "repo_setting"
+			}
+
+			if effectiveCap > 0 && preCap > effectiveCap {
+				capValue = effectiveCap
+				// Truncate: repo-wide pages (always 3) are retained;
+				// architecture / top-level-dir pages are truncated in stable order.
+				var repoWide, rest []lworch.PlannedPage
+				for _, p := range pages {
+					if repoWideTemplateIDs[p.TemplateID] {
+						repoWide = append(repoWide, p)
+					} else {
+						rest = append(rest, p)
+					}
+				}
+				allowForRest := effectiveCap - len(repoWide)
+				if allowForRest < 0 {
+					allowForRest = 0
+				}
+				if len(rest) > allowForRest {
+					rest = rest[:allowForRest]
+				}
+				pages = append(repoWide, rest...)
+			} else {
+				// Planned set fits within cap — no truncation.
+				capSource = "none"
+				capValue = 0
+			}
+		}
+
+		total := len(pages)
+
+		// Emit the planning log with all resolved values.
+		planningMsg := buildPlanningSummary(mode, total, clusterPageCount, topLevelDirPageCount,
+			repoWidePageCount, capSource, capValue, preCap)
+		slog.Info("livingwiki/coldstart: planned page count",
+			"repo_id", repoID,
+			"mode", mode,
+			"cluster_pages", clusterPageCount,
+			"top_level_dir_pages", topLevelDirPageCount,
+			"repo_wide_pages", repoWidePageCount,
+			"pre_cap_total", preCap,
+			"total", total,
+			"cap_source", capSource,
+			"cap_value", capValue,
+			"excluded_only_retry", excludedOnlyRetry,
+		)
+		rt.ReportProgress(0.01, "planning", planningMsg)
 
 		// ── Step 1.5: Attach knowledge artifacts to architecture pages ─────────
 		//
@@ -459,8 +544,8 @@ func buildColdStartRunner(
 		}
 
 		rt.ReportProgress(0.05, "generating", fmt.Sprintf(
-			"Generating %d pages (%d already up to date, %d need fixup)",
-			toGenerate, len(skipFully), len(skipNeedsFixup)))
+			"Generating %d pages (%s; %d already up to date, %d need fixup)",
+			toGenerate, planningMsg, len(skipFully), len(skipNeedsFixup)))
 
 		// ── Step 1.9: Wire async dispatch worker (CR2) ───────────────────────────
 		//
