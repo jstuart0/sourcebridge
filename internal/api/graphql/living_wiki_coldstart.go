@@ -542,7 +542,9 @@ func buildColdStartRunner(
 				fmt.Sprintf("%d/%d pages complete", done, toGenerate))
 
 			// Phase 2: trigger an index update every indexUpdateEvery page completions.
-			// OnPageDone fires from per-page goroutines (mozart's locked surface);
+			// OnPageDone now fires from the orchestrator's single-goroutine persistence
+			// loop (CA-145+CA-143); atomics here are harmless rather than required, but
+			// retained for consistency with the heartbeat reader at line ~597.
 			// dispatchIndex is goroutine-safe (mutex-protected) and runs quickly.
 			n := int(atomic.AddInt32(&indexUpdateCount, 1))
 			if n%indexUpdateEvery == 0 {

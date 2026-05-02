@@ -374,14 +374,22 @@ type Config struct {
 	SoftFailureThreshold int
 }
 
-// OnPageDoneFunc is called after each page completes generation (success,
-// exclusion, or partial warning). The callback is invoked from the page's
-// generation goroutine; implementations must be concurrency-safe.
+// OnPageDoneFunc is called after each page reaches its final durable state —
+// either after a successful SetCanonical/SetProposed (success or
+// excluded-but-recorded), or as part of the post-loop sweep over pages
+// excluded by gate failure / soft failure. Fires from the post-Wait
+// persistence phase (single goroutine), so callers can rely on the ordering
+// reflecting persistence completion. Does NOT fire on hard-error paths
+// (shouldPersist == false).
 //
 // pageID is the planned page's ID (e.g. "arch.auth").
 // excluded is true when the page failed quality gates twice and was excluded.
 // warning is non-empty when the page was included but a non-fatal validation
 // issue occurred. It is empty for clean successes and full exclusions.
+//
+// This callback has no durability contract of its own. On process restart,
+// smart-resume rebuilds progress from the durable store, not from a record
+// of which callbacks fired.
 type OnPageDoneFunc func(pageID string, excluded bool, warning string)
 
 // GenerateRequest carries the inputs for a single cold-start generation run.
@@ -402,11 +410,15 @@ type GenerateRequest struct {
 	// May be nil when PR mode is active.
 	Writer RepoWriter
 
-	// OnPageDone is called after each page is processed (success, excluded, or
-	// warning). It is safe to leave nil. Used by the cold-start job goroutine to
-	// update the llm.Job progress record as pages complete. The total page count
-	// is known before generation starts (len(Pages)), enabling a determinate
-	// progress bar from the first callback.
+	// OnPageDone is called after each page reaches its final durable state (see
+	// [OnPageDoneFunc] for the full contract). It is safe to leave nil. Used by
+	// the cold-start job goroutine to update the llm.Job progress record as pages
+	// persist. The total page count is known before generation starts (len(Pages)),
+	// enabling a determinate progress bar from the first callback.
+	//
+	// Fires from the post-Wait persistence loop (single goroutine), AFTER
+	// OnPageReady, so callers can rely on sink-dispatch being queued before
+	// progress increments.
 	OnPageDone OnPageDoneFunc
 
 	// OnPageReady, when non-nil, is invoked synchronously inside the orchestrator's
@@ -423,9 +435,12 @@ type GenerateRequest struct {
 	//   - Fires ONLY when shouldPersist=true (i.e. genErr == nil or IsPartialGenerationError).
 	//     On hard aborts, the persistence loop is skipped and OnPageReady never fires —
 	//     preserving the all-or-nothing-on-hard-abort contract (mozart locked surface).
-	//   - OnPageDone continues to fire per-page-immediately from the per-page goroutine
-	//     (unchanged). OnPageReady fires later, in the post-Wait persistence loop.
-	//     Two callbacks, two events.
+	//   - OnPageDone now also fires from the post-Wait persistence loop (CA-145+CA-143):
+	//     after OnPageReady is queued for each successfully persisted page, and from a
+	//     post-loop sweep for excluded pages. Both callbacks fire from the same single
+	//     goroutine; OnPageDone is invoked AFTER OnPageReady so that callers can rely
+	//     on sink-dispatch having been queued before progress increments. On hard
+	//     aborts (shouldPersist=false), neither callback fires.
 	//
 	// fingerprint is the value from PageFingerprints[page.ID], pre-computed at
 	// planning time and passed through unchanged. The orchestrator does not interpret it.
@@ -706,21 +721,6 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 				sw.recordSuccess()
 			}
 
-			// Notify the caller (e.g. cold-start job progress reporter)
-			// after each page completes. The callback is
-			// concurrency-safe by contract.
-			if req.OnPageDone != nil {
-				switch {
-				case outcome.excluded != nil:
-					warn := ""
-					if outcome.excluded.Reason == ExclusionReasonLLMError {
-						warn = outcome.excluded.FailureCategory
-					}
-					req.OnPageDone(planned.ID, true, warn)
-				default:
-					req.OnPageDone(planned.ID, false, "")
-				}
-			}
 			return nil
 		})
 	}
@@ -790,6 +790,11 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 					}
 					req.OnPageReady(page, fp)
 				}
+				// OnPageDone fires after OnPageReady so callers can rely on
+				// sink-dispatch being queued before progress increments.
+				if req.OnPageDone != nil {
+					req.OnPageDone(page.ID, false, "")
+				}
 			}
 			if req.Writer != nil && len(files) > 0 {
 				if err := req.Writer.WriteFiles(persistCtx, files); err != nil {
@@ -824,6 +829,11 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 					}
 					req.OnPageReady(page, fp)
 				}
+				// OnPageDone fires after OnPageReady so callers can rely on
+				// sink-dispatch being queued before progress increments.
+				if req.OnPageDone != nil {
+					req.OnPageDone(page.ID, false, "")
+				}
 			}
 			body := buildPRBody(persisted, excluded)
 			if err := req.PR.Open(persistCtx, cfg.PRBranch, cfg.PRTitle, body, files); err != nil {
@@ -834,6 +844,24 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 				return GenerateResult{Generated: persisted, Excluded: excluded, PRID: prID, Duration: time.Since(start)},
 					fmt.Errorf("orchestrator: opening PR: %w (also: %v)", err, genErr)
 			}
+		}
+	}
+
+	// Excluded-page sweep (CA-145+CA-143): fire OnPageDone for excluded pages
+	// after the persistence loop and bulk write complete. Excluded pages never
+	// enter the per-page persistence loop above, so they need a separate pass.
+	// Positioned here so that a bulk-write failure (Writer.WriteFiles /
+	// PR.Open returning an error above) short-circuits via early return BEFORE
+	// this sweep — consistent with "no progress reporting on hard failure."
+	// Warn semantics match goroutine-era parity: only ExclusionReasonLLMError
+	// populates the warning field (no semantic widening; see CA-145-followup-1).
+	if shouldPersist && req.OnPageDone != nil {
+		for _, ex := range excluded {
+			warn := ""
+			if ex.Reason == ExclusionReasonLLMError {
+				warn = ex.FailureCategory
+			}
+			req.OnPageDone(ex.PageID, true, warn)
 		}
 	}
 
