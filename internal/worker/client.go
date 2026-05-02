@@ -117,6 +117,7 @@ type clientBundle struct {
 	knowledge        knowledgev1.KnowledgeServiceClient
 	enterpriseReport enterprisev1.EnterpriseReportServiceClient
 	contracts        contractsv1.ContractsServiceClient
+	versionSvc       commonv1.VersionServiceClient
 	health           healthpb.HealthClient
 	inflight         atomic.Int64
 	closing          atomic.Bool
@@ -362,6 +363,7 @@ func buildBundle(conn *grpc.ClientConn) *clientBundle {
 		knowledge:        knowledgev1.NewKnowledgeServiceClient(conn),
 		enterpriseReport: enterprisev1.NewEnterpriseReportServiceClient(conn),
 		contracts:        contractsv1.NewContractsServiceClient(conn),
+		versionSvc:       commonv1.NewVersionServiceClient(conn),
 		health:           healthpb.NewHealthClient(conn),
 	}
 }
@@ -842,6 +844,24 @@ func (c *Client) CheckHealth(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return resp.GetStatus() == healthpb.HealthCheckResponse_SERVING, nil
+}
+
+// GetWorkerVersion calls VersionService.GetVersion on the worker and
+// returns the version string. The caller's context governs the timeout
+// (the public /api/v1/version handler caps at 250ms via versionLookup).
+// CA-136.
+func (c *Client) GetWorkerVersion(ctx context.Context) (string, error) {
+	b := c.acquire()
+	if b == nil {
+		return "", fmt.Errorf("worker client closed")
+	}
+	defer c.release(b)
+
+	resp, err := b.versionSvc.GetVersion(ctx, &commonv1.GetVersionRequest{})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetVersion(), nil
 }
 
 // Close shuts down the gRPC connection. Idempotent and safe to call

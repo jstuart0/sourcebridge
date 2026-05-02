@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 SourceBridge Contributors
+//
+// VersionService is intentionally a separate service. Version is process
+// metadata, not a domain capability — attaching it to ReasoningService /
+// KnowledgeService / ContractsService etc. would tie a status surface to
+// the wrong conceptual boundary. The standard gRPC health service also
+// can't carry this metadata.
+//
+// Build-time injection: workers/_version.py is generated at image build
+// (Dockerfile.worker echoes __version__/__commit__/__build_date__ from
+// build-args), then workers/__init__.py reads it. Local `make dev-worker`
+// passes SOURCEBRIDGE_{VERSION,COMMIT,BUILD_DATE} env vars instead, so
+// the worker reports the same string as the Go binary.
+
+syntax = "proto3";
+
+package sourcebridge.common.v1;
+
+option go_package = "github.com/sourcebridge/sourcebridge/gen/go/common/v1;commonv1";
+
+// VersionService exposes process-level metadata about the running worker.
+service VersionService {
+  rpc GetVersion(GetVersionRequest) returns (VersionInfo);
+}
+
+message GetVersionRequest {}
+
+message VersionInfo {
+  // The canonical SourceBridge version string. Format follows
+  // scripts/version.sh — SemVer-2 with prerelease/build-metadata.
+  string version = 1;
+
+  // Full git SHA the binary was built from.
+  string commit = 2;
+
+  // RFC 3339 UTC timestamp of the build.
+  string build_date = 3;
+}

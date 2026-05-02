@@ -18,6 +18,7 @@ _GEN_PYTHON = os.path.join(os.path.dirname(__file__), "..", "gen", "python")
 if _GEN_PYTHON not in sys.path:
     sys.path.insert(0, os.path.abspath(_GEN_PYTHON))
 
+from common.v1 import version_pb2, version_pb2_grpc  # noqa: E402
 from contracts.v1 import contracts_pb2, contracts_pb2_grpc  # noqa: E402
 from enterprise.v1 import report_pb2, report_pb2_grpc  # noqa: E402
 from knowledge.v1 import knowledge_pb2, knowledge_pb2_grpc  # noqa: E402
@@ -25,6 +26,7 @@ from linking.v1 import linking_pb2, linking_pb2_grpc  # noqa: E402
 from reasoning.v1 import reasoning_pb2, reasoning_pb2_grpc  # noqa: E402
 from requirements.v1 import requirements_pb2, requirements_pb2_grpc  # noqa: E402
 
+from workers import __version__ as _worker_version  # noqa: E402
 from workers.common.config import WorkerConfig  # noqa: E402
 from workers.common.embedding.config import create_embedding_provider  # noqa: E402
 from workers.common.llm.factory import create_llm_provider, create_report_provider  # noqa: E402
@@ -35,6 +37,7 @@ from workers.knowledge.summary_nodes import SurrealSummaryNodeCache  # noqa: E40
 from workers.linking.servicer import LinkingServicer  # noqa: E402
 from workers.reasoning.servicer import ReasoningServicer  # noqa: E402
 from workers.requirements.servicer import RequirementsServicer  # noqa: E402
+from workers.version_servicer import VersionServicer  # noqa: E402
 
 
 def configure_logging() -> None:
@@ -67,6 +70,7 @@ async def serve() -> None:
         llm_provider=config.llm_provider,
         embedding_provider=config.embedding_provider,
         test_mode=config.test_mode,
+        version=_worker_version,
     )
 
     # --- Initialize providers (long-lived, connection-pooled) ---
@@ -116,6 +120,9 @@ async def serve() -> None:
     contracts_servicer = ContractsServicer()
     contracts_pb2_grpc.add_ContractsServiceServicer_to_server(contracts_servicer, server)
 
+    version_servicer = VersionServicer()
+    version_pb2_grpc.add_VersionServiceServicer_to_server(version_servicer, server)
+
     # --- Health service ---
     health_servicer = health.aio.HealthServicer()
     health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
@@ -131,6 +138,7 @@ async def serve() -> None:
         health_pb2.HealthCheckResponse.SERVING,
     )
     await health_servicer.set("sourcebridge.contracts.v1.ContractsService", health_pb2.HealthCheckResponse.SERVING)
+    await health_servicer.set("sourcebridge.common.v1.VersionService", health_pb2.HealthCheckResponse.SERVING)
 
     # --- Server reflection ---
     service_names = (
@@ -140,6 +148,7 @@ async def serve() -> None:
         knowledge_pb2.DESCRIPTOR.services_by_name["KnowledgeService"].full_name,
         report_pb2.DESCRIPTOR.services_by_name["EnterpriseReportService"].full_name,
         contracts_pb2.DESCRIPTOR.services_by_name["ContractsService"].full_name,
+        version_pb2.DESCRIPTOR.services_by_name["VersionService"].full_name,
         health_pb2.DESCRIPTOR.services_by_name["Health"].full_name,
         reflection.SERVICE_NAME,
     )
@@ -266,6 +275,7 @@ async def serve() -> None:
         "sourcebridge.knowledge.v1.KnowledgeService",
         "sourcebridge.enterprise.v1.EnterpriseReportService",
         "sourcebridge.contracts.v1.ContractsService",
+        "sourcebridge.common.v1.VersionService",
     ):
         await health_servicer.set(service_name, health_pb2.HealthCheckResponse.NOT_SERVING)
     log.info("worker_drain_started", grace_seconds=config.shutdown_grace_seconds)

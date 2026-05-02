@@ -72,6 +72,10 @@ proto/**/*.pb.go
 proto/**/v1/*_grpc.pb.go
 workers/common/proto/
 
+# Generated at image build by deploy/docker/Dockerfile.worker (CA-136).
+# Local make dev-worker uses SOURCEBRIDGE_VERSION env var instead.
+workers/_version.py
+
 # Secrets
 secrets/*.yaml
 !secrets/templates/

@@ -537,11 +537,14 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		s.clusterRunner = clustering.NewRunner(cs, clustering.NewOrchestratorDispatcher(s.orchestrator))
 	}
 
-	// Worker version lookup (CA-136). Phase 2 leaves probe=nil — the
-	// worker has no GetVersion RPC yet, so /api/v1/version returns
-	// workerVersion: "". Phase 3 will inject a real probe via
-	// WithWorkerVersionProbe ServerOption that calls the gRPC method.
-	s.workerVersionLookup = newVersionLookup(30*time.Second, nil)
+	// Worker version lookup (CA-136). When a worker client is available,
+	// wire the gRPC probe so /api/v1/version reports the worker's version.
+	// Cached for 30s; per-call timeout governed by the public handler.
+	var workerProbe func(ctx context.Context) (string, error)
+	if s.worker != nil {
+		workerProbe = s.worker.GetWorkerVersion
+	}
+	s.workerVersionLookup = newVersionLookup(30*time.Second, workerProbe)
 
 	s.setupRouter()
 	return s
