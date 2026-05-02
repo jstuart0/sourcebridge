@@ -314,6 +314,13 @@ const (
 	// subsystem unambiguously signals a worker wedge — the heartbeat goroutine
 	// ticks every 30 s, so 5 min tolerates 9 consecutive missed ticks.
 	heartbeatStaleThreshold = 5 * time.Minute
+
+	// reaperTickInterval is the period between reapStaleJobs sweeps (CA-141).
+	// At 15 s, worst-case reap lag is threshold + 15 s. For heartbeat-emitting
+	// subsystems (5 min threshold) that is 5 min 15 s, down from ~32 min.
+	// Do not lower below heartbeatStaleThreshold / 2 (2.5 min) — ticking faster
+	// than the heartbeat period wastes CPU with no correctness benefit.
+	reaperTickInterval = 15 * time.Second
 )
 
 // subsystemEmitsHeartbeats returns true for subsystems whose dispatcher calls
@@ -359,7 +366,7 @@ func generatingThresholdFor(job *llm.Job) (time.Duration, string) {
 // threshold + 15 s — for heartbeat-emitting subsystems (5 min threshold)
 // that is 5 min 15 s, down from the previous ~32 min.
 func (o *Orchestrator) reaper() {
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(reaperTickInterval)
 	defer ticker.Stop()
 	for {
 		select {
