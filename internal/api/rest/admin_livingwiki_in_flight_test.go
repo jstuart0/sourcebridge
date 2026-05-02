@@ -116,6 +116,155 @@ func (b *blockingRestTemplate) Generate(ctx context.Context, input templates.Gen
 	}, nil
 }
 
+// TestHandleLivingWikiInFlight_PerJobIsolation asserts that the in-flight
+// endpoint for job-A returns only job-A's pages, and the endpoint for job-B
+// returns only job-B's pages, even when both jobs are running concurrently on
+// the same orchestrator.
+func TestHandleLivingWikiInFlight_PerJobIsolation(t *testing.T) {
+	releaseA := make(chan struct{}, 4)
+	releaseB := make(chan struct{}, 4)
+	btA := &blockingRestTemplate{id: "glossary", release: releaseA}
+	btB := &blockingRestTemplate{id: "glossary", release: releaseB}
+
+	// Register both templates under the same template ID — the orchestrator
+	// uses the first-registered match, but each job uses distinct PlannedPage
+	// inputs so their tracker entries are separate. We need two distinct
+	// orchestrators to get fully independent job tracking without template-ID
+	// collisions in the registry lookup path.
+	regA := lworch.NewMapRegistry(btA)
+	regB := lworch.NewMapRegistry(btB)
+	storeA := lworch.NewMemoryPageStore()
+	storeB := lworch.NewMemoryPageStore()
+	prA := lworch.NewMemoryWikiPR("pr-isolation-a")
+	prB := lworch.NewMemoryWikiPR("pr-isolation-b")
+
+	orchA := lworch.New(lworch.Config{RepoID: "iso-test-a", MaxConcurrency: 5}, regA, storeA)
+	orchB := lworch.New(lworch.Config{RepoID: "iso-test-b", MaxConcurrency: 5}, regB, storeB)
+
+	const (
+		jobA    = "job-iso-a"
+		jobB    = "job-iso-b"
+		numEach = 2
+	)
+
+	makePages := func(jobPrefix string) []lworch.PlannedPage {
+		pages := make([]lworch.PlannedPage, numEach)
+		for i := range pages {
+			pages[i] = lworch.PlannedPage{
+				ID:         jobPrefix + ".p" + string(rune('0'+i)) + ".glossary",
+				TemplateID: "glossary",
+				Audience:   quality.AudienceEngineers,
+				Input: templates.GenerateInput{
+					RepoID:   jobPrefix,
+					Audience: quality.AudienceEngineers,
+					Now:      time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC),
+				},
+			}
+		}
+		return pages
+	}
+
+	doneA := make(chan error, 1)
+	doneB := make(chan error, 1)
+
+	go func() {
+		_, err := orchA.Generate(context.Background(), lworch.GenerateRequest{
+			Pages:   makePages(jobA),
+			PR:      prA,
+			LLMTier: modeltier.TierFrontier,
+			JobID:   jobA,
+		})
+		doneA <- err
+	}()
+	go func() {
+		_, err := orchB.Generate(context.Background(), lworch.GenerateRequest{
+			Pages:   makePages(jobB),
+			PR:      prB,
+			LLMTier: modeltier.TierFrontier,
+			JobID:   jobB,
+		})
+		doneB <- err
+	}()
+
+	// Wait until both jobs have all their pages in-flight.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(orchA.InFlightPages(jobA)) == numEach && len(orchB.InFlightPages(jobB)) == numEach {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(orchA.InFlightPages(jobA)) != numEach {
+		t.Fatalf("job-A: expected %d in-flight, got %d", numEach, len(orchA.InFlightPages(jobA)))
+	}
+	if len(orchB.InFlightPages(jobB)) != numEach {
+		t.Fatalf("job-B: expected %d in-flight, got %d", numEach, len(orchB.InFlightPages(jobB)))
+	}
+
+	// REST endpoint for job-A (via orchA) must return ONLY job-A's pages.
+	sA := &Server{livingWikiLiveOrchestrator: orchA}
+	reqA, recA := buildInFlightRequest(t, jobA)
+	inFlightTestHandler(sA).ServeHTTP(recA, reqA)
+	if recA.Code != http.StatusOK {
+		t.Fatalf("job-A endpoint: expected 200, got %d", recA.Code)
+	}
+	var bodyA livingWikiInFlightResponse
+	if err := json.NewDecoder(recA.Body).Decode(&bodyA); err != nil {
+		t.Fatalf("job-A decode: %v", err)
+	}
+	if len(bodyA.Pages) != numEach {
+		t.Errorf("job-A: expected %d pages, got %d", numEach, len(bodyA.Pages))
+	}
+	for _, p := range bodyA.Pages {
+		if p.PageID[:len(jobA)] != jobA {
+			t.Errorf("job-A response contains page from wrong job: %q", p.PageID)
+		}
+	}
+
+	// REST endpoint for job-B (via orchB) must return ONLY job-B's pages.
+	sB := &Server{livingWikiLiveOrchestrator: orchB}
+	reqB, recB := buildInFlightRequest(t, jobB)
+	inFlightTestHandler(sB).ServeHTTP(recB, reqB)
+	if recB.Code != http.StatusOK {
+		t.Fatalf("job-B endpoint: expected 200, got %d", recB.Code)
+	}
+	var bodyB livingWikiInFlightResponse
+	if err := json.NewDecoder(recB.Body).Decode(&bodyB); err != nil {
+		t.Fatalf("job-B decode: %v", err)
+	}
+	if len(bodyB.Pages) != numEach {
+		t.Errorf("job-B: expected %d pages, got %d", numEach, len(bodyB.Pages))
+	}
+	for _, p := range bodyB.Pages {
+		if p.PageID[:len(jobB)] != jobB {
+			t.Errorf("job-B response contains page from wrong job: %q", p.PageID)
+		}
+	}
+
+	// Cross-check: job-A's pages must not appear in job-B's result (and vice versa).
+	aIDs := make(map[string]bool)
+	for _, p := range bodyA.Pages {
+		aIDs[p.PageID] = true
+	}
+	for _, p := range bodyB.Pages {
+		if aIDs[p.PageID] {
+			t.Errorf("page %q appears in both job-A and job-B responses", p.PageID)
+		}
+	}
+
+	// Release both jobs to let Generate finish cleanly.
+	for i := 0; i < numEach; i++ {
+		releaseA <- struct{}{}
+		releaseB <- struct{}{}
+	}
+	if err := <-doneA; err != nil {
+		t.Fatalf("orchA.Generate: %v", err)
+	}
+	if err := <-doneB; err != nil {
+		t.Fatalf("orchB.Generate: %v", err)
+	}
+}
+
 // TestHandleLivingWikiInFlight_PopulatedList asserts 200 + populated response
 // when pages are genuinely in-flight.
 func TestHandleLivingWikiInFlight_PopulatedList(t *testing.T) {

@@ -1662,6 +1662,67 @@ func TestOrchestrator_InFlightDuringSlowPage(t *testing.T) {
 	}
 }
 
+// panicTemplate recovers the panic internally and returns it as an error so
+// the errgroup goroutine does not crash the test process.
+type panicTemplate struct{ id string }
+
+func (p *panicTemplate) ID() string { return p.id }
+
+func (p *panicTemplate) Generate(_ context.Context, _ templates.GenerateInput) (page ast.Page, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("template panicked: %v", r)
+		}
+	}()
+	panic("deliberate panic for tracker test")
+}
+
+// TestOrchestratorTrackerClearsOnPanic asserts that the deferred Clear in
+// Generate leaves InFlightPages empty even when a template's Generate call
+// panics. The panic is recovered inside the template so the errgroup goroutine
+// converts it to a soft-failure exclusion (the orchestrator's standard error
+// handling path); Generate returns nil but the page is excluded. The deferred
+// Clear must still fire and drain the tracker for the given jobID.
+func TestOrchestratorTrackerClearsOnPanic(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	tmpl := &panicTemplate{id: "glossary"}
+	reg := orchestrator.NewMapRegistry(tmpl)
+	store := orchestrator.NewMemoryPageStore()
+	pr := orchestrator.NewMemoryWikiPR("pr-panic-clear")
+
+	orch := orchestrator.New(orchestrator.Config{RepoID: "panic-repo"}, reg, store)
+
+	const jobID = "job-panic-clear"
+	result, err := orch.Generate(ctx, orchestrator.GenerateRequest{
+		Pages: []orchestrator.PlannedPage{
+			{
+				ID:         "panic-repo.glossary",
+				TemplateID: "glossary",
+				Audience:   quality.AudienceEngineers,
+				Input:      makeBaseInput(nil, nil),
+			},
+		},
+		PR:      pr,
+		LLMTier: modeltier.TierFrontier,
+		JobID:   jobID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected Generate error: %v", err)
+	}
+	// The panicking page must appear as an excluded page (llm_error soft failure).
+	if len(result.Excluded) == 0 {
+		t.Error("expected the panicking page to be in result.Excluded")
+	}
+
+	// The tracker's deferred Clear must have fired — InFlightPages must be empty.
+	snap := orch.InFlightPages(jobID)
+	if len(snap) != 0 {
+		t.Errorf("expected empty in-flight after panicking Generate, got %d entries: %v", len(snap), snap)
+	}
+}
+
 // TestOrchestrator_OnPageStartFiresWithAttempt2OnRetry asserts that OnPageStart
 // fires twice for a page that requires a retry (attempt=1 then attempt=2).
 func TestOrchestrator_OnPageStartFiresWithAttempt2OnRetry(t *testing.T) {
