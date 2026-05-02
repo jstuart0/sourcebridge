@@ -45,8 +45,10 @@ import (
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/sinks"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
+	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
@@ -130,6 +132,7 @@ func buildColdStartRunner(
 	llmResolver resolution.Resolver, // for FrozenResolver + fingerprint model identity (CR5, LD-7)
 	publishStatusStore livingwiki.PagePublishStatusStore, // for per-page dispatch state (Phase 1)
 	mode string, // Phase 4a: "lw_overview" or "lw_detailed"; empty defaults to lw_detailed
+	comprehensionStore comprehension.Store, // for quality-gate tier registry lookup (CA-150 Phase 4)
 ) func(ctx context.Context, rt llm.Runtime) error {
 	if mode == "" {
 		mode = GenerationModeLWDetailed
@@ -150,12 +153,72 @@ func buildColdStartRunner(
 
 		rt.ReportProgress(0.0, "planning", "Resolving page taxonomy")
 
-		// ── Step 1: Resolve the page taxonomy ─────────────────────────────────
+		// ── Step 1.65 (NEW at r3): Resolve LLM identity ONCE before taxonomy ─────
+		//
+		// Resolve, freeze, and derive quality-gate tier from the SAME Snapshot so
+		// model fingerprint, frozen caller, planned-page LLM injection, and
+		// quality-gate tier all refer to the same model. (codex r1c HIGH #1: r2's
+		// resolve-after-taxonomy left PlannedPage.Input.LLM bound to the live
+		// caller while tier was derived from the snapshot, producing identity
+		// divergence on mid-run admin mutations.)
+		var (
+			snap       resolution.Snapshot
+			resolveErr error
+		)
+		if llmResolver != nil {
+			snap, resolveErr = llmResolver.Resolve(runCtx, repoID, resolution.OpLivingWikiColdStart)
+		} else {
+			resolveErr = errors.New("llmResolver is nil")
+		}
+
+		// modelIdentity — fingerprint key. On resolveErr or empty fields, use
+		// "unresolved/unresolved" sentinel (matches the deleted
+		// livingWikiModelIdentity helper's behavior).
+		modelIdentity := "unresolved/unresolved"
+		if resolveErr == nil && snap.Provider != "" && snap.Model != "" {
+			modelIdentity = snap.Provider + "/" + snap.Model
+		}
+
+		// Frozen caller — built from the same snap. ALL downstream LLM calls
+		// (taxonomy, page generation, retries) use frozenCaller, not the live
+		// llmCaller, so mid-run admin mutations cannot split a run's identity.
+		// Guard: only freeze when llmCaller is non-nil (tests may pass nil).
+		frozenCaller := llmCaller
+		if resolveErr == nil && llmCaller != nil {
+			frozenCaller = llmcall.New(llmCaller.Inner(), resolution.NewFrozenResolver(snap), nil)
+		}
+
+		// Quality-gate tier — same snap. On resolveErr, fall back to TierLocal
+		// (D16 — consistent with pattern-match fallback; the whole point of
+		// CA-150 is to NOT reproduce the outage on a transient resolve failure).
+		tierFn := newRegistryTierFunc(comprehensionStore) // private helper, D5
+		tierResolution := modeltier.Resolution{
+			Tier:   modeltier.TierLocal,
+			Source: "fallback",
+			Err:    resolveErr,
+		}
+		if resolveErr == nil {
+			tierResolution = tierFn(runCtx, snap.Provider, snap.Model)
+		}
+		slog.Info("livingwiki/coldstart: resolved quality-gate tier",
+			"job_id", jobID,
+			"repo_id", repoID,
+			"provider", snap.Provider,
+			"model", snap.Model,
+			"tier", tierResolution.Tier,
+			"source", tierResolution.Source,
+			"err", tierResolution.Err,
+		)
+
+		// ── Step 1: Resolve the page taxonomy (uses frozenCaller) ─────────────
+		//
+		// resolveTaxonomyForMode receives the frozen caller so every
+		// PlannedPage.Input.LLM is bound to the snapshot resolved above.
 		var pages []lworch.PlannedPage
 
 		if len(excludedPageIDs) > 0 {
 			// retryExcludedOnly path: scope to previously-excluded pages.
-			full, err := resolveTaxonomyForMode(runCtx, mode, repoID, graphStore, llmCaller, clusterStore)
+			full, err := resolveTaxonomyForMode(runCtx, mode, repoID, graphStore, frozenCaller, clusterStore)
 			if err != nil {
 				return fmt.Errorf("living-wiki: taxonomy resolution failed: %w", err)
 			}
@@ -175,7 +238,7 @@ func buildColdStartRunner(
 		} else {
 			// Full cold-start path.
 			var err error
-			pages, err = resolveTaxonomyForMode(runCtx, mode, repoID, graphStore, llmCaller, clusterStore)
+			pages, err = resolveTaxonomyForMode(runCtx, mode, repoID, graphStore, frozenCaller, clusterStore)
 			if err != nil {
 				return fmt.Errorf("living-wiki: taxonomy resolution failed: %w", err)
 			}
@@ -208,25 +271,6 @@ func buildColdStartRunner(
 		for i := range pages {
 			pages[i].RelatedPageIDsByLabel = relatedByLabel
 		}
-
-		// ── Step 1.7: Resolve model identity and freeze the LLM caller (CR5) ───
-		//
-		// Resolve the LLM model identity once at run start and freeze it for the
-		// duration of the run, so mid-run workspace settings changes cannot split
-		// a run across providers or cause fingerprint drift.
-		// The frozen caller is a new *llmcall.Caller instance with a FrozenResolver
-		// wired in (CR5: Go methods are not virtual; substituting the Resolver
-		// implementation is the correct freeze strategy).
-		modelIdentity := livingWikiModelIdentity(runCtx, llmResolver, repoID)
-		frozenCaller := llmCaller // fallback: use the original if resolver is nil
-		if llmResolver != nil {
-			snap, resolveErr := llmResolver.Resolve(runCtx, repoID, resolution.OpLivingWikiColdStart)
-			if resolveErr == nil {
-				frozenCaller = llmcall.New(llmCaller.Inner(), resolution.NewFrozenResolver(snap), nil)
-			}
-		}
-		_ = frozenCaller // used below in genReq (when the adapter is refactored); for now
-		// only the model identity snapshot is used for fingerprinting.
 
 		// ── Step 1.8: Smart resume — fingerprint-aware 3-way bucket split ────────
 		//
@@ -459,6 +503,7 @@ func buildColdStartRunner(
 			},
 			Pages:            regenerate,
 			PageFingerprints: currentFps,
+			LLMTier:          tierResolution.Tier, // resolved once at Step 1.65; CA-150 Phase 4
 		}
 
 		// ── Step 2: Generate pages with progress reporting ────────────────────
@@ -1053,6 +1098,11 @@ func resolveTaxonomy(ctx context.Context, repoID string, gs graphstore.GraphStor
 // resolveTaxonomyForMode derives the planned-page taxonomy for the given mode.
 // mode must be one of GenerationModeLWOverview / GenerationModeLWDetailed; an
 // empty or unrecognized mode falls back to Detailed behavior.
+//
+// lc is the FROZEN caller (per the Step 1.65 freeze in callers); the
+// coldStartLLMCaller wraps it so every PlannedPage.Input.LLM is bound to the
+// same snapshot used for tier resolution. This eliminates mid-run identity
+// divergence from admin mutations. (codex r1c HIGH #1)
 func resolveTaxonomyForMode(ctx context.Context, mode, repoID string, gs graphstore.GraphStore, lc *llmcall.Caller, cs clustering.ClusterStore) ([]lworch.PlannedPage, error) {
 	var sg templates.SymbolGraph
 	if gs != nil {
@@ -1579,19 +1629,35 @@ func buildRelatedPageIDsByLabel(pages []lworch.PlannedPage) map[string]string {
 	return m
 }
 
-// livingWikiModelIdentity resolves the LLM model identity string for the
-// cold-start run. Format: "<provider>/<model>" per LD-7 / C1.
-// Returns "unresolved/unresolved" on any resolve failure so fingerprints
-// always include a sentinel rather than an empty string.
-func livingWikiModelIdentity(ctx context.Context, resolver resolution.Resolver, repoID string) string {
-	if resolver == nil {
-		return "unresolved/unresolved"
+// newRegistryTierFunc returns a TierFunc that consults the model registry,
+// falling back to ClassifyByPattern when the model is not registered or
+// registry I/O fails. Defined here (not in modeltier) because it depends on
+// comprehension.Store; see plan D5 for the import-cycle-avoidance rationale.
+//
+// Two production callers (codex r1c HIGH #3): cold-start runner
+// (buildColdStartRunner Step 1.65) and GenerateLivingWikiPageOnDemand in
+// schema.resolvers.go. Both live in package graphql, so this helper stays
+// private to the package.
+//
+// Note: GetModelCapabilities looks up by model string alone (store.go:29-30).
+// For OpenRouter routes like "anthropic/claude-3-5-sonnet" the caller must
+// register under the full routed model string if they want registry-level
+// override; the pattern-match fallback still applies the strip-list heuristic.
+func newRegistryTierFunc(store comprehension.Store) modeltier.TierFunc {
+	return func(ctx context.Context, provider, model string) modeltier.Resolution {
+		if store != nil {
+			cap, err := store.GetModelCapabilities(model)
+			if err != nil {
+				res := modeltier.ClassifyByPattern(provider, model)
+				res.Err = err
+				return res
+			}
+			if cap != nil && cap.QualityGateTier.IsValid() && cap.QualityGateTier != modeltier.TierUnknown {
+				return modeltier.Resolution{Tier: cap.QualityGateTier, Source: "registry"}
+			}
+		}
+		return modeltier.ClassifyByPattern(provider, model)
 	}
-	snap, err := resolver.Resolve(ctx, repoID, resolution.OpLivingWikiColdStart)
-	if err != nil || snap.Provider == "" || snap.Model == "" {
-		return "unresolved/unresolved"
-	}
-	return snap.Provider + "/" + snap.Model
 }
 
 // repoSourceRevFor returns the canonical revision string for a repository used

@@ -42,6 +42,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -435,6 +436,19 @@ type GenerateRequest struct {
 	// the matching fingerprint to OnPageReady for each persisted page.
 	// May be nil; OnPageReady receives an empty fingerprint in that case.
 	PageFingerprints map[string]string
+
+	// LLMTier is the quality-gate calibration tier for this run, resolved once
+	// by the cold-start runner or on-demand handler from the Snapshot
+	// (provider + model) before calling Generate. The orchestrator threads it
+	// into every generateOnePage call so all per-page profile selections use
+	// the same tier. Callers MUST populate this field; leaving it at
+	// TierUnknown causes an error-level log and defensive frontier fallback.
+	//
+	// Both production callers (buildColdStartRunner in living_wiki_coldstart.go
+	// and GenerateLivingWikiPageOnDemand in schema.resolvers.go) are
+	// responsible for computing this exactly once per run via
+	// newRegistryTierFunc. The orchestrator itself does NOT call the classifier.
+	LLMTier modeltier.QualityGateTier
 }
 
 // GenerateResult summarises the outcome of a generation run.
@@ -595,6 +609,18 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 	runCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 
+	// Capture tier from the request once so every per-page goroutine closure
+	// shares the same value. Log error-level when tier is TierUnknown —
+	// production callers must always populate this field; the run continues
+	// (DefaultProfile's defensive frontier fallback keeps it alive) but the
+	// log signals a caller bug that should be fixed.
+	tier := req.LLMTier
+	if tier == modeltier.TierUnknown {
+		slog.Error("livingwiki/orchestrator: LLMTier is TierUnknown — caller failed to populate; falling through to defensive frontier fallback",
+			"repo_id", req.Config.RepoID,
+			"pages_count", len(req.Pages))
+	}
+
 	outcomes := make([]pageOutcome, len(req.Pages))
 	var outcomesMu sync.Mutex
 	sw := newSoftFailureWindow(cfg.SoftFailureWindow, cfg.SoftFailureThreshold)
@@ -605,7 +631,7 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 	for idx, planned := range req.Pages {
 		idx, planned := idx, planned // capture for goroutine
 		eg.Go(func() error {
-			outcome, err := o.generateOnePage(egCtx, cfg, planned)
+			outcome, err := o.generateOnePage(egCtx, cfg, planned, tier)
 			if err != nil {
 				// Whole-run cancellation (parent ctx, deadline, or
 				// peer goroutine errored): propagate so eg.Wait can
@@ -1023,7 +1049,10 @@ func graphMetricsForPage(cfg Config, pageID string) quality.ValidatorConfig {
 }
 
 // generateOnePage runs the template + validator loop for a single planned page.
-func (o *Orchestrator) generateOnePage(ctx context.Context, cfg Config, planned PlannedPage) (pageOutcome, error) {
+// tier is the quality-gate calibration tier threaded from GenerateRequest.LLMTier
+// via Generate; it is captured once per run (not once per page) by the Generate
+// caller so all pages in a run use a consistent tier.
+func (o *Orchestrator) generateOnePage(ctx context.Context, cfg Config, planned PlannedPage, tier modeltier.QualityGateTier) (pageOutcome, error) {
 	tmpl, ok := o.registry.Lookup(planned.TemplateID)
 	if !ok {
 		// Wrap the sentinel so callers can distinguish "config bug, hard-fail"
@@ -1033,11 +1062,13 @@ func (o *Orchestrator) generateOnePage(ctx context.Context, cfg Config, planned 
 		return pageOutcome{}, fmt.Errorf("%w: %q", errTemplateNotFound, planned.TemplateID)
 	}
 
-	// CA-150 Phase 2 placeholder; Phase 4 wires real tier from req.LLMTier.
+	// tier is threaded from GenerateRequest.LLMTier (resolved once per run
+	// by the caller, not once per page). Phase 4 cutover: replaced the
+	// TierFrontier placeholder with the real threaded value.
 	profile, hasProfile := quality.DefaultProfile(
 		quality.Template(planned.TemplateID),
 		planned.Audience,
-		modeltier.TierFrontier,
+		tier,
 	)
 
 	var (

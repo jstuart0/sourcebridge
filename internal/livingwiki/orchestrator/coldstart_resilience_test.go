@@ -16,6 +16,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/manifest"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
 )
@@ -134,7 +135,7 @@ func TestSoftFailureOnLLMError(t *testing.T) {
 	store := orchestrator.NewMemoryPageStore()
 	pr := orchestrator.NewMemoryWikiPR("pr-soft")
 	orch := orchestrator.New(orchestrator.Config{RepoID: "test"}, reg, store)
-	result, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr})
+	result, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr, LLMTier: modeltier.TierFrontier})
 	if err != nil {
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
@@ -194,7 +195,7 @@ func TestAbortsOnSystemicFailure(t *testing.T) {
 		MaxConcurrency: 1, // serialize so completion order is deterministic
 	}, reg, store)
 
-	_, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr})
+	_, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr, LLMTier: modeltier.TierFrontier})
 	if err == nil {
 		t.Fatalf("expected ErrSystemicSoftFailures, got nil")
 	}
@@ -265,7 +266,7 @@ func TestSlidingWindowDoesNotFalseAbortUnderConcurrency(t *testing.T) {
 		MaxConcurrency: 12,
 	}, reg, store)
 
-	result, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr})
+	result, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr, LLMTier: modeltier.TierFrontier})
 	if err != nil {
 		t.Fatalf("Generate returned unexpected error: %v", err)
 	}
@@ -315,7 +316,7 @@ func TestTimeBudgetAbortPersistsCompletedPages(t *testing.T) {
 		TimeBudget:     50 * time.Millisecond,
 	}, reg, store)
 
-	result, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr})
+	result, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr, LLMTier: modeltier.TierFrontier})
 	if !errors.Is(err, orchestrator.ErrTimeBudgetExceeded) {
 		t.Fatalf("expected ErrTimeBudgetExceeded; got %v", err)
 	}
@@ -367,7 +368,7 @@ func TestPersistenceFailureMidLoopReportsOnlyDurablePages(t *testing.T) {
 		MaxConcurrency: 1, // serialize so rejection is deterministic
 	}, reg, store)
 
-	result, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr})
+	result, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr, LLMTier: modeltier.TierFrontier})
 	if err == nil {
 		t.Fatalf("expected error from rejected SetProposed; got nil")
 	}
@@ -510,7 +511,7 @@ func TestTemplateNotFoundIsFatal(t *testing.T) {
 	}
 
 	orch := orchestrator.New(orchestrator.Config{RepoID: "test"}, reg, store)
-	_, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr})
+	_, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr, LLMTier: modeltier.TierFrontier})
 	if err == nil {
 		t.Fatalf("expected fatal error for unknown template; got nil")
 	}

@@ -31,6 +31,7 @@ import (
 
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/manifest"
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 )
 
 // StalePageSignal records one page that has become stale due to a code diff.
@@ -241,7 +242,10 @@ func (o *Orchestrator) RefreshPage(
 	cfg := o.cfg
 	cfg.RepoID = repoID
 
-	outcome, err := o.generateOnePage(ctx, cfg, planned)
+	// Staleness refresh: no Snapshot available at this call site; use
+	// TierFrontier to preserve pre-CA-150 gate behavior for page refreshes.
+	// CA-150 Phase 4 covers cold-start + on-demand only.
+	outcome, err := o.generateOnePage(ctx, cfg, planned, modeltier.TierFrontier)
 	if err != nil {
 		return ast.Page{}, fmt.Errorf("RefreshPage(%q): generate: %w", planned.ID, err)
 	}

@@ -19,6 +19,7 @@ import (
 
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/manifest"
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
 )
@@ -490,7 +491,10 @@ func (o *Orchestrator) generateAndReconcileOne(
 		Input:      buildInputFromManifest(ap.Manifest, cfg),
 	}
 
-	outcome, err := o.generateOnePage(ctx, cfg, planned)
+	// Incremental regen: no Snapshot available at this call site; use
+	// TierFrontier to preserve pre-CA-150 gate behavior for incremental
+	// updates. CA-150 Phase 4 covers cold-start + on-demand only.
+	outcome, err := o.generateOnePage(ctx, cfg, planned, modeltier.TierFrontier)
 	if err != nil {
 		return ast.Page{}, nil, err
 	}

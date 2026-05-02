@@ -29,6 +29,7 @@ import (
 	lwmetrics "github.com/sourcebridge/sourcebridge/internal/livingwiki/metrics"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/webhook"
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
@@ -280,6 +281,7 @@ func TestLivingWikiE2E_ColdStart(t *testing.T) {
 		Pages:      pages,
 		PR:         pr,
 		OnPageDone: onPageDone,
+		LLMTier:    modeltier.TierFrontier,
 	})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -412,7 +414,7 @@ func TestLivingWikiE2E_RegenPassIdempotent(t *testing.T) {
 
 	// First run.
 	pr1 := orchestrator.NewMemoryWikiPR("pr-regen-1")
-	result1, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr1})
+	result1, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr1, LLMTier: modeltier.TierFrontier})
 	if err != nil {
 		t.Fatalf("Generate pass 1: %v", err)
 	}
@@ -422,7 +424,7 @@ func TestLivingWikiE2E_RegenPassIdempotent(t *testing.T) {
 
 	// Second run — simulates a scheduler tick / manual refresh.
 	pr2 := orchestrator.NewMemoryWikiPR("pr-regen-2")
-	result2, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr2})
+	result2, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr2, LLMTier: modeltier.TierFrontier})
 	if err != nil {
 		t.Fatalf("Generate pass 2: %v", err)
 	}
@@ -617,8 +619,9 @@ func TestLivingWikiE2E_PartialContent(t *testing.T) {
 	}
 
 	result, err := orch.Generate(ctx, orchestrator.GenerateRequest{
-		Pages: pages,
-		PR:    pr,
+		Pages:   pages,
+		PR:      pr,
+		LLMTier: modeltier.TierFrontier,
 	})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -710,7 +713,7 @@ func TestLivingWikiE2E_RetryExcludedOnly(t *testing.T) {
 	}
 
 	pr1 := orchestrator.NewMemoryWikiPR("pr-retry-1")
-	result1, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr1})
+	result1, err := orch.Generate(ctx, orchestrator.GenerateRequest{Pages: pages, PR: pr1, LLMTier: modeltier.TierFrontier})
 	if err != nil {
 		t.Fatalf("Generate pass 1: %v", err)
 	}
@@ -733,8 +736,9 @@ func TestLivingWikiE2E_RetryExcludedOnly(t *testing.T) {
 	var retryAttempts int64
 	pr2 := orchestrator.NewMemoryWikiPR("pr-retry-2")
 	result2, err := orch.Generate(ctx, orchestrator.GenerateRequest{
-		Pages: retryPages,
-		PR:    pr2,
+		Pages:   retryPages,
+		PR:      pr2,
+		LLMTier: modeltier.TierFrontier,
 		OnPageDone: func(pageID string, excluded bool, warning string) {
 			atomic.AddInt64(&retryAttempts, 1)
 		},

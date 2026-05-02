@@ -14,13 +14,17 @@ package graphql
 
 import (
 	"context"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
+	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 )
 
@@ -203,6 +207,82 @@ func TestOnDemandMutationRejectsInvalidPageSpec(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGenerateLivingWikiPageOnDemand_ResolvesTierAndFreezes verifies that the
+// on-demand path resolves the tier via newRegistryTierFunc + ClassifyByPattern
+// and sets GenerateRequest.LLMTier accordingly. (codex r1c HIGH #3; CA-150 Phase 4)
+//
+// Test shape:
+//   - Mock LLMResolver returning Snapshot{Provider: "ollama", Model: "qwen3:32b"}.
+//   - Mock ComprehensionStore returning nil for that model (pattern fallback fires).
+//   - ClassifyByPattern("ollama", "qwen3:32b") → TierMid (32B ≥ 30B threshold).
+//   - Assert the resolved-tier log line fires with tier=mid.
+//   - Assert the run completes without error (TierUnknown error log must NOT fire).
+func TestGenerateLivingWikiPageOnDemand_ResolvesTierAndFreezes(t *testing.T) {
+	// No t.Parallel() — swaps global slog.Default; must not race with other tests.
+
+	// Capture slog to assert tier log.
+	var logBuf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	const repoID = "on-demand-tier-repo"
+
+	repoStore := livingwiki.NewRepoSettingsMemStore()
+	_ = repoStore.SetRepoSettings(context.Background(), livingwiki.RepositoryLivingWikiSettings{
+		TenantID:                  "default",
+		RepoID:                    repoID,
+		Enabled:                   true,
+		LivingWikiDetailedEnabled: true,
+	})
+
+	// Resolver returns ollama/qwen3:32b — ClassifyByPattern → TierMid.
+	resolver := &stubLLMResolver{provider: "ollama", model: "qwen3:32b"}
+
+	// Comprehension store with no entry for qwen3:32b → falls through to pattern.
+	comprStore := comprehension.NewMemStore()
+
+	r := &mutationResolver{Resolver: &Resolver{
+		LivingWikiRepoStore:        repoStore,
+		LivingWikiLiveOrchestrator: onDemandOrch(),
+		LLMResolver:                resolver,
+		ComprehensionStore:         comprStore,
+	}}
+
+	folder := "internal/api"
+	result, err := r.GenerateLivingWikiPageOnDemand(
+		context.Background(),
+		repoID,
+		LivingWikiOnDemandPageSpec{Folder: &folder},
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	logStr := logBuf.String()
+
+	// Tier log line must appear exactly once with tier=mid.
+	if !strings.Contains(logStr, "tier=mid") {
+		t.Errorf("expected tier=mid in on-demand resolved-tier log; log:\n%s", logStr)
+	}
+	// Provider must be ollama.
+	if !strings.Contains(logStr, "provider=ollama") {
+		t.Errorf("expected provider=ollama in resolved-tier log; log:\n%s", logStr)
+	}
+	// TierUnknown error log must NOT fire.
+	if strings.Contains(logStr, "LLMTier is TierUnknown") {
+		t.Errorf("unexpected TierUnknown error log; on-demand path must set LLMTier; log:\n%s", logStr)
+	}
+
+	// Verify the resolved tier is TierMid (not TierUnknown or TierFrontier).
+	// qwen3:32b → 32B ≥ 30B threshold → TierMid.
+	wantTier := modeltier.TierMid
+	_ = wantTier // asserted via log above; direct result doesn't expose the tier
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

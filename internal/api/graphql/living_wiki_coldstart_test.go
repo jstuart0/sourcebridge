@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,7 +39,9 @@ import (
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/sinks"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/manifest"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
@@ -176,9 +179,10 @@ func csRunnerFromPages(
 		var excludedIDsAcc atomicStringSlice
 
 		genReq := lworch.GenerateRequest{
-			Config: lworch.Config{RepoID: repoID},
-			Pages:  pages,
-			PR:     lworch.NewMemoryWikiPR(fmt.Sprintf("pr-%s", jobID)),
+			Config:  lworch.Config{RepoID: repoID},
+			Pages:   pages,
+			PR:      lworch.NewMemoryWikiPR(fmt.Sprintf("pr-%s", jobID)),
+			LLMTier: modeltier.TierFrontier,
 			OnPageDone: func(pageID string, wasExcluded bool, _ string) {
 				if wasExcluded {
 					atomic.AddInt32(&excludedCount, 1)
@@ -649,6 +653,7 @@ func TestBuildColdStartRunnerNilOrchestratorReturnsNotice(t *testing.T) {
 		nil,           // no llmResolver (Phase 1)
 		nil,           // no publishStatusStore (Phase 1)
 		GenerationModeLWDetailed, // mode
+		nil,           // no comprehensionStore (CA-150 Phase 4)
 	)
 
 	rt := &fakeRuntime{jobID: "nil-orch-job"}
@@ -961,9 +966,10 @@ func TestColdStartSinkWiringDispatchesGeneratedPages(t *testing.T) {
 	pr := lworch.NewMemoryWikiPR("pr-dispatch-test")
 
 	genReq := lworch.GenerateRequest{
-		Config: lworch.Config{RepoID: "dispatch-repo"},
-		Pages:  planned,
-		PR:     pr,
+		Config:  lworch.Config{RepoID: "dispatch-repo"},
+		Pages:   planned,
+		PR:      pr,
+		LLMTier: modeltier.TierFrontier,
 	}
 	result, err := lwOrch.Generate(context.Background(), genReq)
 	if err != nil {
@@ -1066,6 +1072,7 @@ func TestColdStartSinkResultsPersistedInJobResult(t *testing.T) {
 		nil,   // no llmResolver (Phase 1)
 		nil,   // no publishStatusStore (Phase 1)
 		GenerationModeLWDetailed, // mode
+		nil,   // no comprehensionStore (CA-150 Phase 4)
 	)
 
 	// Override: run via csRunnerFromPages so we can inject the planned pages
@@ -1180,6 +1187,7 @@ func TestColdStartSystemicAbortEmitsMetric(t *testing.T) {
 		nil, // no llmResolver (Phase 1)
 		nil, // no publishStatusStore (Phase 1)
 		GenerationModeLWDetailed, // mode
+		nil, // no comprehensionStore (CA-150 Phase 4)
 	)
 
 	rt := &fakeRuntime{jobID: "job-systemic-metric"}
@@ -1232,6 +1240,7 @@ func TestColdStartExclusionInvariantPartialContent(t *testing.T) {
 		mc,
 		nil, nil, // no llmResolver, no publishStatusStore (Phase 1)
 		GenerationModeLWDetailed, // mode
+		nil,                      // no comprehensionStore (CA-150 Phase 4)
 	)
 
 	rt := &fakeRuntime{jobID: "job-invariant-partial"}
@@ -1286,6 +1295,7 @@ func TestColdStartExclusionInvariantSystemicAbort(t *testing.T) {
 		mc,
 		nil, nil, // no llmResolver, no publishStatusStore (Phase 1)
 		GenerationModeLWDetailed, // mode
+		nil,                      // no comprehensionStore (CA-150 Phase 4)
 	)
 
 	rt := &fakeRuntime{jobID: "job-invariant-systemic"}
@@ -1347,9 +1357,10 @@ func csRunnerFromPagesWithSinks(
 		var excludedIDsAcc atomicStringSlice
 
 		genReq := lworch.GenerateRequest{
-			Config: lworch.Config{RepoID: repoID},
-			Pages:  pages,
-			PR:     lworch.NewMemoryWikiPR(fmt.Sprintf("pr-%s", jobID)),
+			Config:  lworch.Config{RepoID: repoID},
+			Pages:   pages,
+			PR:      lworch.NewMemoryWikiPR(fmt.Sprintf("pr-%s", jobID)),
+			LLMTier: modeltier.TierFrontier,
 			OnPageDone: func(pageID string, wasExcluded bool, _ string) {
 				if wasExcluded {
 					atomic.AddInt32(&excludedCount, 1)
@@ -1424,5 +1435,232 @@ func csRunnerFromPagesWithSinks(
 			return fmt.Errorf("living-wiki generation failed: %w", err)
 		}
 		return nil
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CA-150 Phase 4 tests: tier resolution plumbing
+// ─────────────────────────────────────────────────────────────────────────────
+
+// countingLLMResolver wraps a stubLLMResolver and counts Resolve calls.
+type countingLLMResolver struct {
+	inner     *stubLLMResolver
+	callCount int
+	mu        sync.Mutex
+}
+
+func newCountingLLMResolver(provider, model string) *countingLLMResolver {
+	return &countingLLMResolver{inner: &stubLLMResolver{provider: provider, model: model}}
+}
+
+func (c *countingLLMResolver) Resolve(ctx context.Context, repoID, op string) (resolution.Snapshot, error) {
+	c.mu.Lock()
+	c.callCount++
+	c.mu.Unlock()
+	return c.inner.Resolve(ctx, repoID, op)
+}
+
+func (c *countingLLMResolver) InvalidateLocal() { c.inner.InvalidateLocal() }
+
+func (c *countingLLMResolver) Count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.callCount
+}
+
+// mutatingLLMResolver returns a different Snapshot after the first call,
+// simulating a mid-run admin mutation to workspace LLM settings.
+type mutatingLLMResolver struct {
+	firstProvider, firstModel   string
+	secondProvider, secondModel string
+	callCount                   int
+	mu                          sync.Mutex
+}
+
+func (m *mutatingLLMResolver) Resolve(_ context.Context, _, _ string) (resolution.Snapshot, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.callCount++
+	if m.callCount == 1 {
+		return resolution.Snapshot{Provider: m.firstProvider, Model: m.firstModel, TimeoutSecs: 60}, nil
+	}
+	return resolution.Snapshot{Provider: m.secondProvider, Model: m.secondModel, TimeoutSecs: 60}, nil
+}
+
+func (m *mutatingLLMResolver) InvalidateLocal() {}
+
+// errorLLMResolver returns an error on every Resolve call.
+type errorLLMResolver struct{}
+
+func (e *errorLLMResolver) Resolve(_ context.Context, _, _ string) (resolution.Snapshot, error) {
+	return resolution.Snapshot{}, fmt.Errorf("simulated store error: no resolver configured")
+}
+
+func (e *errorLLMResolver) InvalidateLocal() {}
+
+// TestColdStart_TierResolvedExactlyOncePerRun verifies that the LLM resolver is
+// called exactly once per cold-start run regardless of how many pages are
+// generated. (CA-150 Phase 4 acceptance criterion)
+func TestColdStart_TierResolvedExactlyOncePerRun(t *testing.T) {
+	// No t.Parallel() — swaps global slog.Default; must not race with other tests.
+
+	var logBuf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	resolver := newCountingLLMResolver("anthropic", "claude-opus-4-7")
+	mc := lwmetrics.NewCollector()
+	jrs := livingwiki.NewMemJobResultStore()
+
+	lwOrch := lworch.New(lworch.Config{RepoID: "tier-once-repo"}, lworch.NewMapRegistry(
+		&csPassingTemplate{id: "architecture"},
+		&csPassingTemplate{id: "glossary"},
+	), lworch.NewMemoryPageStore())
+
+	runner := buildColdStartRunner(
+		lwOrch, "tier-once-repo", "default",
+		newStubGraphStore(), nil, nil, nil,
+		"git_repo",
+		jrs, nil, nil, nil, nil,
+		mc,
+		resolver, nil,
+		GenerationModeLWDetailed,
+		nil,
+	)
+
+	rt := &fakeRuntime{jobID: "tier-once-job"}
+	_ = runner(context.Background(), rt)
+
+	// Resolver must have been called exactly once (Step 1.65 only; the old
+	// livingWikiModelIdentity helper was deleted in CA-150 Phase 4).
+	if got := resolver.Count(); got != 1 {
+		t.Errorf("resolver.Resolve called %d times, want exactly 1", got)
+	}
+
+	logStr := logBuf.String()
+	count := strings.Count(logStr, "resolved quality-gate tier")
+	if count != 1 {
+		t.Errorf("'resolved quality-gate tier' log appeared %d times, want 1\nlog:\n%s", count, logStr)
+	}
+}
+
+// TestColdStart_StoreError_FallsBackToTierLocal verifies D16: when the resolver
+// returns an error, the cold-start runner falls back to TierLocal (NOT
+// TierFrontier) so a transient DB blip doesn't reproduce the CA-150 outage.
+func TestColdStart_StoreError_FallsBackToTierLocal(t *testing.T) {
+	// No t.Parallel() — swaps global slog.Default; must not race with other tests.
+
+	var logBuf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	mc := lwmetrics.NewCollector()
+	jrs := livingwiki.NewMemJobResultStore()
+	lwOrch := csLWOrch(&csPassingTemplate{id: "glossary"})
+
+	runner := buildColdStartRunner(
+		lwOrch, "store-err-repo", "default",
+		newStubGraphStore(), nil, nil, nil,
+		"git_repo",
+		jrs, nil, nil, nil, nil,
+		mc,
+		&errorLLMResolver{}, nil,
+		GenerationModeLWDetailed,
+		nil,
+	)
+
+	rt := &fakeRuntime{jobID: "store-err-job"}
+	_ = runner(context.Background(), rt)
+
+	logStr := logBuf.String()
+	if !strings.Contains(logStr, "tier=local") {
+		t.Errorf("expected tier=local in log after resolver error; log:\n%s", logStr)
+	}
+	if strings.Contains(logStr, "tier=frontier") {
+		t.Errorf("unexpected tier=frontier; expected TierLocal fallback on resolver error; log:\n%s", logStr)
+	}
+}
+
+// TestColdStart_AdminMutationMidRun_TemplatesUseFrozenCaller verifies that the
+// quality-gate tier is derived from the FIRST Resolve call (frozen at Step 1.65)
+// and NOT from any subsequent Resolve call (mid-run admin mutation). (codex r1c HIGH #1)
+func TestColdStart_AdminMutationMidRun_TemplatesUseFrozenCaller(t *testing.T) {
+	// No t.Parallel() — swaps global slog.Default; must not race with other tests.
+
+	var logBuf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	resolver := &mutatingLLMResolver{
+		firstProvider:  "anthropic",
+		firstModel:     "claude-opus-4-7",
+		secondProvider: "ollama",
+		secondModel:    "qwen3:7b",
+	}
+
+	mc := lwmetrics.NewCollector()
+	jrs := livingwiki.NewMemJobResultStore()
+	lwOrch := csLWOrch(&csPassingTemplate{id: "glossary"})
+
+	runner := buildColdStartRunner(
+		lwOrch, "mutation-mid-run-repo", "default",
+		newStubGraphStore(), nil, nil, nil,
+		"git_repo",
+		jrs, nil, nil, nil, nil,
+		mc,
+		resolver, nil,
+		GenerationModeLWDetailed,
+		nil,
+	)
+
+	rt := &fakeRuntime{jobID: "mutation-mid-run-job"}
+	_ = runner(context.Background(), rt)
+
+	logStr := logBuf.String()
+	if !strings.Contains(logStr, "provider=anthropic") {
+		t.Errorf("expected provider=anthropic in resolved-tier log (frozen from first call); log:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, "tier=frontier") {
+		t.Errorf("expected tier=frontier (anthropic is frontier); log:\n%s", logStr)
+	}
+	if strings.Contains(logStr, "provider=ollama") {
+		t.Errorf("unexpected provider=ollama; mid-run mutation should be frozen out; log:\n%s", logStr)
+	}
+}
+
+// TestColdStart_TierUnknown_FallsBackToFrontier_LogsWarn verifies the nil-resolver
+// fallback path produces TierLocal (not TierFrontier), consistent with D16.
+func TestColdStart_TierUnknown_FallsBackToFrontier_LogsWarn(t *testing.T) {
+	// No t.Parallel() — swaps global slog.Default; must not race with other tests.
+
+	var logBuf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	mc := lwmetrics.NewCollector()
+	jrs := livingwiki.NewMemJobResultStore()
+	lwOrch := csLWOrch(&csPassingTemplate{id: "glossary"})
+
+	runner := buildColdStartRunner(
+		lwOrch, "tier-unk-repo", "default",
+		newStubGraphStore(), nil, nil, nil,
+		"git_repo",
+		jrs, nil, nil, nil, nil,
+		mc,
+		nil, nil, // nil resolver → resolveErr → TierLocal
+		GenerationModeLWDetailed,
+		nil,
+	)
+
+	rt := &fakeRuntime{jobID: "tier-unk-job"}
+	_ = runner(context.Background(), rt)
+
+	logStr := logBuf.String()
+	if !strings.Contains(logStr, "tier=local") {
+		t.Errorf("expected tier=local when resolver is nil (D16 fallback); log:\n%s", logStr)
 	}
 }

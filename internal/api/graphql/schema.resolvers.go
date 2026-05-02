@@ -35,6 +35,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
+	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
 	"github.com/sourcebridge/sourcebridge/internal/requirements"
@@ -2694,6 +2695,7 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 			r.LLMResolver,                // for FrozenResolver + fingerprint model identity (CR5, LD-7)
 			r.LivingWikiPagePublishStore, // for per-page dispatch state (Phase 1)
 			jobMode,                      // Phase 4a: mode-aware taxonomy
+			r.ComprehensionStore,         // for quality-gate tier registry lookup (CA-150 Phase 4)
 		),
 	}
 
@@ -2942,16 +2944,54 @@ func (r *mutationResolver) GenerateLivingWikiPageOnDemand(ctx context.Context, r
 	}
 	lwOrch := r.LivingWikiLiveOrchestrator
 
-	// ── 5. Build the single PlannedPage ──────────────────────────────────────
+	// ── 5. Resolve+freeze LLM identity and derive quality-gate tier ─────────
+	//
+	// Same pattern as cold-start Step 1.65 so on-demand generation also has
+	// identity-consistent (snap, frozen-caller, tier). (codex r1c HIGH #3.)
+	var (
+		onDemandSnap       resolution.Snapshot
+		onDemandResolveErr error
+	)
+	if r.LLMResolver != nil {
+		onDemandSnap, onDemandResolveErr = r.LLMResolver.Resolve(ctx, repositoryID, resolution.OpLivingWikiColdStart)
+	} else {
+		onDemandResolveErr = errors.New("llmResolver is nil")
+	}
+
+	frozenCaller := r.LLMCaller
+	if onDemandResolveErr == nil && r.LLMCaller != nil {
+		frozenCaller = llmcall.New(r.LLMCaller.Inner(), resolution.NewFrozenResolver(onDemandSnap), nil)
+	}
+
+	onDemandTierFn := newRegistryTierFunc(r.ComprehensionStore)
+	onDemandTierResolution := modeltier.Resolution{
+		Tier:   modeltier.TierLocal,
+		Source: "fallback",
+		Err:    onDemandResolveErr,
+	}
+	if onDemandResolveErr == nil {
+		onDemandTierResolution = onDemandTierFn(ctx, onDemandSnap.Provider, onDemandSnap.Model)
+	}
+	slog.Info("livingwiki/on-demand: resolved quality-gate tier",
+		"repo_id", repositoryID,
+		"page_id", pageID,
+		"provider", onDemandSnap.Provider,
+		"model", onDemandSnap.Model,
+		"tier", onDemandTierResolution.Tier,
+		"source", onDemandTierResolution.Source,
+		"err", onDemandTierResolution.Err,
+	)
+
+	// ── 6. Build the single PlannedPage ──────────────────────────────────────
 	var sg templates.SymbolGraph
 	gs := r.getStore(ctx)
 	if gs != nil {
 		sg = &graphStoreSymbolGraph{store: gs}
 	}
 	var llmTemplateCaller templates.LLMCaller
-	if r.LLMCaller != nil && r.LLMCaller.IsAvailable() {
+	if frozenCaller != nil && frozenCaller.IsAvailable() {
 		llmTemplateCaller = &coldStartLLMCaller{
-			caller: r.LLMCaller,
+			caller: frozenCaller,
 			repoID: repositoryID,
 			op:     resolution.OpLivingWikiColdStart,
 		}
@@ -2974,14 +3014,18 @@ func (r *mutationResolver) GenerateLivingWikiPageOnDemand(ctx context.Context, r
 		},
 	}
 
-	// ── 6. Generate the single page ───────────────────────────────────────────
+	// ── 7. Generate the single page ───────────────────────────────────────────
 	genReq := lworch.GenerateRequest{
 		Config: lworch.Config{
 			RepoID:         repositoryID,
 			MaxConcurrency: 1,
 			TimeBudget:     coldStartTimeBudget,
+			// DirectPublish: on-demand pages are generated and dispatched to sinks
+			// immediately — no PR review flow. PR is not set and must not be nil.
+			DirectPublish: true,
 		},
-		Pages: []lworch.PlannedPage{page},
+		Pages:   []lworch.PlannedPage{page},
+		LLMTier: onDemandTierResolution.Tier, // resolved above; CA-150 Phase 4
 	}
 
 	result, genErr := lwOrch.Generate(ctx, genReq)
@@ -2989,7 +3033,7 @@ func (r *mutationResolver) GenerateLivingWikiPageOnDemand(ctx context.Context, r
 		return nil, fmt.Errorf("on-demand generation failed: %w", genErr)
 	}
 
-	// ── 7. Dispatch to sinks ──────────────────────────────────────────────────
+	// ── 8. Dispatch to sinks ──────────────────────────────────────────────────
 	var repoName string
 	if gs != nil {
 		if repo := gs.GetRepository(repositoryID); repo != nil {
