@@ -179,6 +179,25 @@ Sigstore Rekor log without adding trust.
 
 Two recipes, depending on how strict the deployment policy is:
 
+### Image tag formats (read this before copy-pasting)
+
+Tags differ by image **family** and by **workflow**:
+
+- **Component images** (`sourcebridge-api`, `sourcebridge-web`,
+  `sourcebridge-worker`) come from `build-images.yml`. Their semver tag
+  uses `docker/metadata-action`'s `{{version}}` form, which **strips
+  the leading `v`**. The release-tagged version is therefore
+  `sourcebridge-api:0.9.0` (not `v0.9.0`). Other tags include
+  `:sha-abc1234`, `:main`, `:dev`, and `:latest`.
+- **Combined release image** (`ghcr.io/<owner>/<repo>/sourcebridge`)
+  comes from `oss-release.yml` and uses the raw `${{ github.ref_name }}`
+  — so the tag IS `v0.9.0` here. Different workflow, different image,
+  different tag shape.
+
+Both are signed; the verification regex below covers both. The git tag
+pinned in the certificate identity is always `v`-prefixed regardless of
+how the Docker tag is formatted.
+
 ### Strict (production / tagged release only)
 
 For deployments that must accept only tagged release images:
@@ -187,7 +206,16 @@ For deployments that must accept only tagged release images:
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/sourcebridge-ai/sourcebridge/\.github/workflows/(build-images|oss-release)\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z][0-9A-Za-z.-]*)?$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/sourcebridge-ai/sourcebridge-api:v0.9.0
+  ghcr.io/sourcebridge-ai/sourcebridge-api:0.9.0
+```
+
+For the combined release image:
+
+```bash
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/sourcebridge-ai/sourcebridge/\.github/workflows/(build-images|oss-release)\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z][0-9A-Za-z.-]*)?$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/sourcebridge-ai/sourcebridge/sourcebridge:v0.9.0
 ```
 
 The regex accepts only SemVer-shaped release tags (`vX.Y.Z`, plus
@@ -237,7 +265,7 @@ verify command:
 cosign verify \
   --certificate-identity-regexp '...same as above...' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  docker.io/sourcebridge/sourcebridge-api:v0.9.0
+  docker.io/sourcebridge/sourcebridge-api:0.9.0
 ```
 
 If Docker Hub credentials weren't configured at the time the image was
@@ -250,8 +278,13 @@ Common causes:
 
 - **Unsigned PR build.** Don't run PR images in production; they're not
   meant for it.
-- **Stale cosign.** Upgrade to cosign >= 2.4.x. Earlier versions had
-  Rekor / Fulcio compatibility quirks.
+- **Stale cosign.** Use a current cosign release. The CI installer
+  pinned by both workflows (`sigstore/cosign-installer@v4.1.1`)
+  currently installs cosign v3.0.5 by default; older clients (v2.4.x and
+  earlier) may have Rekor / Fulcio compatibility quirks against today's
+  signatures and will struggle to read OCI 1.1 signature referrers.
+  Upgrade to cosign v3.x (or at least a current v2 release) for
+  reliable verification.
 - **Wrong registry.** GHCR signatures don't automatically apply to
   Docker Hub manifests unless the dual-publish path was active when the
   image was built.

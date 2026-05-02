@@ -133,7 +133,7 @@ jobs:
       # verification regex in docs/admin/build-info.md trusts both
       # workflow identities.
       - name: Install cosign
-        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1 (cosign v3.0.5)
       - name: Sign release image (keyless)
         run: |
           cosign sign --yes \

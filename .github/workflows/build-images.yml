@@ -197,12 +197,12 @@ jobs:
       # records the signature in its public transparency log.
       #
       # Pinned by SHA so a malicious or accidental v4 retag can't change
-      # what runs in our pipeline. v4.1.1 ships cosign v2.4.x.
-      # Keep the human-readable tag in the comment so future bumps are
-      # deliberate rather than mechanical.
+      # what runs in our pipeline. v4.1.1 currently installs cosign
+      # v3.0.5 by default. Keep the human-readable tag in the comment so
+      # future bumps are deliberate rather than mechanical.
       - name: Install cosign
         if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1 (cosign v3.0.5)
 
       # Sign the GHCR image we just pushed. cosign sign --yes skips the
       # interactive Y/N prompt that would otherwise hang in CI.
