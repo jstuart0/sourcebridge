@@ -35,7 +35,6 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
-	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
 	"github.com/sourcebridge/sourcebridge/internal/requirements"
@@ -43,6 +42,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 	"github.com/sourcebridge/sourcebridge/internal/version"
+	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
 	"github.com/vektah/gqlparser/v2/gqlerror"
 )
 
@@ -2246,6 +2246,11 @@ func (r *mutationResolver) UpdateModelCapabilities(ctx context.Context, input Up
 		return nil, fmt.Errorf("comprehension settings not configured")
 	}
 
+	// Normalize modelId so the registry key matches newRegistryTierFunc's
+	// lookup normalization. "Qwen3:32B" stored as-is would miss a lookup for
+	// "qwen3:32b", silently bypassing the registry override.
+	input.ModelID = strings.ToLower(strings.TrimSpace(input.ModelID))
+
 	// Get existing or create new
 	mc, err := r.ComprehensionStore.GetModelCapabilities(input.ModelID)
 	if err != nil {
@@ -2972,15 +2977,26 @@ func (r *mutationResolver) GenerateLivingWikiPageOnDemand(ctx context.Context, r
 	if onDemandResolveErr == nil {
 		onDemandTierResolution = onDemandTierFn(ctx, onDemandSnap.Provider, onDemandSnap.Model)
 	}
-	slog.Info("livingwiki/on-demand: resolved quality-gate tier",
-		"repo_id", repositoryID,
-		"page_id", pageID,
-		"provider", onDemandSnap.Provider,
-		"model", onDemandSnap.Model,
-		"tier", onDemandTierResolution.Tier,
-		"source", onDemandTierResolution.Source,
-		"err", onDemandTierResolution.Err,
-	)
+	if onDemandTierResolution.Err != nil {
+		slog.Warn("livingwiki/on-demand: tier resolution error — pattern fallback applied",
+			"repo_id", repositoryID,
+			"page_id", pageID,
+			"provider", onDemandSnap.Provider,
+			"model", onDemandSnap.Model,
+			"tier", onDemandTierResolution.Tier,
+			"source", onDemandTierResolution.Source,
+			"err", onDemandTierResolution.Err,
+		)
+	} else {
+		slog.Info("livingwiki/on-demand: resolved quality-gate tier",
+			"repo_id", repositoryID,
+			"page_id", pageID,
+			"provider", onDemandSnap.Provider,
+			"model", onDemandSnap.Model,
+			"tier", onDemandTierResolution.Tier,
+			"source", onDemandTierResolution.Source,
+		)
+	}
 
 	// ── 6. Build the single PlannedPage ──────────────────────────────────────
 	var sg templates.SymbolGraph

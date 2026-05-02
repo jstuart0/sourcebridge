@@ -36,13 +36,15 @@ const (
 	// Pro/Ultra, and similarly capable hosted frontier models.
 	TierFrontier QualityGateTier = "frontier"
 
-	// TierMid covers capable open-weights models ≥30B parameters and
+	// TierMid covers capable open-weights models ≥70B parameters and
 	// efficient mid-size hosted variants (e.g. gpt-4o-mini, gemini-flash).
 	TierMid QualityGateTier = "mid"
 
-	// TierLocal covers smaller open-weights models typically run via Ollama,
-	// vLLM, llama.cpp, or similar local inference servers. Default OSS
-	// install with config.toml.example ships qwen3:32b which maps here.
+	// TierLocal covers open-weights models <70B parameters typically run via
+	// Ollama, vLLM, llama.cpp, or similar local inference servers. The default
+	// OSS install (config.toml.example: qwen3:32b) maps here so citation-density
+	// and vagueness gates are relaxed and fresh installs cannot hit the
+	// "all pages rejected" outage symptom.
 	TierLocal QualityGateTier = "local"
 )
 

@@ -270,10 +270,10 @@ type KnowledgeArtifactSummary struct {
 	// the page fingerprint (CR6).
 	ID string
 
-	Type        string // e.g. "cliff_notes", "architecture_diagram"
-	Audience    string
-	Depth       string // "summary", "medium", or "deep"
-	ScopePath   string // module / package path the artifact covers
+	Type      string // e.g. "cliff_notes", "architecture_diagram"
+	Audience  string
+	Depth     string // "summary", "medium", or "deep"
+	ScopePath string // module / package path the artifact covers
 
 	// ScopeType is the knowledge.ScopeType ("repository" / "module" / "file" /
 	// "symbol" / "requirement"). Combined with ScopePath this fully identifies
@@ -281,7 +281,7 @@ type KnowledgeArtifactSummary struct {
 	ScopeType string
 
 	Sections    []KnowledgeSection
-	RevisionFp  string    // matches understanding revisionFp
+	RevisionFp  string // matches understanding revisionFp
 	GeneratedAt time.Time
 }
 
@@ -320,12 +320,12 @@ type GraphMetricsProvider interface {
 // ConstGraphMetrics is a [GraphMetricsProvider] that always returns fixed values.
 // Useful in tests to satisfy the architectural_relevance gate without a real graph.
 type ConstGraphMetrics struct {
-	PageRefs     int
+	PageRefs       int
 	GraphRelations int
 }
 
-func (c ConstGraphMetrics) PageReferenceCount(_, _ string) int  { return c.PageRefs }
-func (c ConstGraphMetrics) GraphRelationCount(_, _ string) int  { return c.GraphRelations }
+func (c ConstGraphMetrics) PageReferenceCount(_, _ string) int { return c.PageRefs }
+func (c ConstGraphMetrics) GraphRelationCount(_, _ string) int { return c.GraphRelations }
 
 // Config controls the orchestrator's behaviour.
 type Config struct {
@@ -449,6 +449,11 @@ type GenerateRequest struct {
 	// responsible for computing this exactly once per run via
 	// newRegistryTierFunc. The orchestrator itself does NOT call the classifier.
 	LLMTier modeltier.QualityGateTier
+
+	// JobID is the opaque job identifier for the current cold-start run.
+	// Optional — used for observability (error logs on TierUnknown).
+	// When empty, job-level log fields are omitted.
+	JobID string
 }
 
 // GenerateResult summarises the outcome of a generation run.
@@ -509,19 +514,19 @@ type ExcludedPage struct {
 
 // Reason values for [ExcludedPage.Reason].
 const (
-	ExclusionReasonGateFailure  = "gate_failure"
-	ExclusionReasonLLMError     = "llm_error"
-	ExclusionReasonRenderError  = "render_error"
+	ExclusionReasonGateFailure = "gate_failure"
+	ExclusionReasonLLMError    = "llm_error"
+	ExclusionReasonRenderError = "render_error"
 )
 
 // Soft-failure category values for [ExcludedPage.FailureCategory].
 const (
-	SoftFailureCategoryDeadlineExceeded   = "deadline_exceeded"
+	SoftFailureCategoryDeadlineExceeded    = "deadline_exceeded"
 	SoftFailureCategoryProviderUnavailable = "provider_unavailable"
-	SoftFailureCategoryProviderCompute    = "provider_compute"
-	SoftFailureCategoryLLMEmpty           = "llm_empty"
-	SoftFailureCategoryRenderError        = "render_error"
-	SoftFailureCategoryTemplateInternal   = "template_internal"
+	SoftFailureCategoryProviderCompute     = "provider_compute"
+	SoftFailureCategoryLLMEmpty            = "llm_empty"
+	SoftFailureCategoryRenderError         = "render_error"
+	SoftFailureCategoryTemplateInternal    = "template_internal"
 )
 
 // Orchestrator is the living-wiki generation orchestrator.
@@ -617,6 +622,7 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 	tier := req.LLMTier
 	if tier == modeltier.TierUnknown {
 		slog.Error("livingwiki/orchestrator: LLMTier is TierUnknown — caller failed to populate; falling through to defensive frontier fallback",
+			"job_id", req.JobID,
 			"repo_id", req.Config.RepoID,
 			"pages_count", len(req.Pages))
 	}
@@ -867,9 +873,9 @@ func newSoftFailureExcludedPage(planned PlannedPage, category string, cause erro
 		reason = ExclusionReasonRenderError
 	}
 	return &ExcludedPage{
-		PageID:     planned.ID,
-		TemplateID: planned.TemplateID,
-		Reason:     reason,
+		PageID:          planned.ID,
+		TemplateID:      planned.TemplateID,
+		Reason:          reason,
 		FailureCategory: category,
 		// Synthetic SecondResult so buildExclusionReasons surfaces the
 		// underlying error in the existing UI/PR rendering paths.

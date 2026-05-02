@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -181,6 +182,10 @@ func (s *Server) handleUpdateModelCapabilities(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 		return
 	}
+	// Normalize modelId (lowercase + trim) before validation so the registry
+	// key is always canonical. "Qwen3:32B" → "qwen3:32b" on write, so the
+	// registry lookup in newRegistryTierFunc (which also normalizes) will hit.
+	mc.ModelID = strings.ToLower(strings.TrimSpace(mc.ModelID))
 	if mc.ModelID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "modelId is required"})
 		return
@@ -189,12 +194,19 @@ func (s *Server) handleUpdateModelCapabilities(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "modelId exceeds 512 character limit"})
 		return
 	}
-	if _, ok := modeltier.Parse(string(mc.QualityGateTier)); !ok {
+
+	// Parse normalizes case and whitespace; assign back so the store receives
+	// a canonical value ("LOCAL" → "local"). Without this, Surreal's ASSERT
+	// fires a 500 and MemStore silently stores the unnormalized string.
+	tier, ok := modeltier.Parse(string(mc.QualityGateTier))
+	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": fmt.Sprintf("invalid qualityGateTier %q: must be one of \"frontier\", \"mid\", \"local\", or \"\" (unknown)", mc.QualityGateTier),
 		})
 		return
 	}
+	mc.QualityGateTier = tier
+
 	if err := s.comprehensionStore.SetModelCapabilities(&mc); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

@@ -218,6 +218,83 @@ func TestAdminComprehension_ModelIDLengthCap_GetAndDeleteReject(t *testing.T) {
 	}
 }
 
+// TestAdminComprehension_TierNormalization verifies that uppercase / whitespace
+// tier values are normalized before store write (MED #2 fix).
+func TestAdminComprehension_TierNormalization(t *testing.T) {
+	for _, tc := range []struct {
+		input    string
+		wantTier string
+	}{
+		{"LOCAL", "local"},
+		{"FRONTIER", "frontier"},
+		{"MID", "mid"},
+		{" local ", "local"},
+		{" Frontier\t", "frontier"},
+	} {
+		t.Run("tier="+tc.input, func(t *testing.T) {
+			s := newComprehensionTestServer(t, featureflags.Flags{})
+
+			body, _ := json.Marshal(map[string]any{
+				"modelId":         "test-model",
+				"provider":        "test",
+				"qualityGateTier": tc.input,
+				"source":          "manual",
+			})
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/comprehension/models/test-model", bytes.NewBuffer(body))
+			w := httptest.NewRecorder()
+
+			s.handleUpdateModelCapabilities(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("tier=%q: expected 200, got %d: %s", tc.input, w.Code, w.Body.String())
+			}
+			// Verify the store holds the normalized value.
+			mc, err := s.comprehensionStore.GetModelCapabilities("test-model")
+			if err != nil {
+				t.Fatalf("store.GetModelCapabilities: %v", err)
+			}
+			if mc == nil {
+				t.Fatal("model not found in store after PUT")
+			}
+			if string(mc.QualityGateTier) != tc.wantTier {
+				t.Errorf("stored tier = %q, want %q", mc.QualityGateTier, tc.wantTier)
+			}
+		})
+	}
+}
+
+// TestAdminComprehension_ModelIDNormalization verifies that mixed-case / padded
+// modelId values are normalized to lowercase+trim before store write (MED #3 fix).
+func TestAdminComprehension_ModelIDNormalization(t *testing.T) {
+	s := newComprehensionTestServer(t, featureflags.Flags{})
+
+	body, _ := json.Marshal(map[string]any{
+		"modelId":  "  Qwen3:32B  ",
+		"provider": "ollama",
+		"source":   "manual",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/comprehension/models/Qwen3:32B", bytes.NewBuffer(body))
+	w := httptest.NewRecorder()
+
+	s.handleUpdateModelCapabilities(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Should be stored under normalized key.
+	mc, err := s.comprehensionStore.GetModelCapabilities("qwen3:32b")
+	if err != nil {
+		t.Fatalf("store.GetModelCapabilities: %v", err)
+	}
+	if mc == nil {
+		t.Fatal("model not found under normalized key 'qwen3:32b' after PUT with 'Qwen3:32B'")
+	}
+	if mc.ModelID != "qwen3:32b" {
+		t.Errorf("stored ModelID = %q, want %q", mc.ModelID, "qwen3:32b")
+	}
+}
+
 func TestHandleUpdateComprehensionSettingsLeavesOrchestratorUnchangedWhenDisabled(t *testing.T) {
 	s := newComprehensionTestServer(t, featureflags.Flags{})
 

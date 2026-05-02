@@ -5,10 +5,17 @@ package comprehension
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 )
+
+// ErrInvalidQualityGateTier is returned by SetModelCapabilities when the
+// QualityGateTier field contains a value that is not one of the four defined
+// tier strings. Both MemStore and SurrealStore validate before writing so that
+// invalid values never reach the database ASSERT constraint.
+var ErrInvalidQualityGateTier = errors.New("qualityGateTier must be one of \"\", \"frontier\", \"mid\", \"local\"")
 
 // ScopeType determines the level of configuration inheritance.
 // Order from broadest to most specific: workspace > corpus_type > artifact_type > user.
@@ -84,25 +91,25 @@ func DefaultSettings() Settings {
 
 // ModelCapabilities describes what a model can do.
 type ModelCapabilities struct {
-	ID                     string         `json:"id,omitempty"`
-	ModelID                string         `json:"modelId"`
-	Provider               string         `json:"provider"`
-	DeclaredContextTokens  int            `json:"declaredContextTokens"`
-	EffectiveContextTokens int            `json:"effectiveContextTokens"`
-	LongContextQuality     map[int]string `json:"longContextQuality,omitempty"`
-	InstructionFollowing   string         `json:"instructionFollowing"`
-	JSONMode               string         `json:"jsonMode"`
-	ToolUse                string         `json:"toolUse"`
-	ExtractionGrade        string         `json:"extractionGrade"`
-	CreativeGrade          string         `json:"creativeGrade"`
-	EmbeddingModel         bool           `json:"embeddingModel"`
-	CostPer1kInput         *float64       `json:"costPer1kInput,omitempty"`
-	CostPer1kOutput        *float64       `json:"costPer1kOutput,omitempty"`
-	LastProbedAt           *time.Time     `json:"lastProbedAt,omitempty"`
-	Source                 string                  `json:"source"`
-	Notes                  string                  `json:"notes,omitempty"`
+	ID                     string                    `json:"id,omitempty"`
+	ModelID                string                    `json:"modelId"`
+	Provider               string                    `json:"provider"`
+	DeclaredContextTokens  int                       `json:"declaredContextTokens"`
+	EffectiveContextTokens int                       `json:"effectiveContextTokens"`
+	LongContextQuality     map[int]string            `json:"longContextQuality,omitempty"`
+	InstructionFollowing   string                    `json:"instructionFollowing"`
+	JSONMode               string                    `json:"jsonMode"`
+	ToolUse                string                    `json:"toolUse"`
+	ExtractionGrade        string                    `json:"extractionGrade"`
+	CreativeGrade          string                    `json:"creativeGrade"`
+	EmbeddingModel         bool                      `json:"embeddingModel"`
+	CostPer1kInput         *float64                  `json:"costPer1kInput,omitempty"`
+	CostPer1kOutput        *float64                  `json:"costPer1kOutput,omitempty"`
+	LastProbedAt           *time.Time                `json:"lastProbedAt,omitempty"`
+	Source                 string                    `json:"source"`
+	Notes                  string                    `json:"notes,omitempty"`
 	QualityGateTier        modeltier.QualityGateTier `json:"qualityGateTier"`
-	UpdatedAt              time.Time               `json:"updatedAt"`
+	UpdatedAt              time.Time                 `json:"updatedAt"`
 }
 
 // MarshalLongContextQuality serializes the LongContextQuality map to JSON

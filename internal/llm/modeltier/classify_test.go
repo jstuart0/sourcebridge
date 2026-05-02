@@ -52,35 +52,37 @@ func TestClassifyByPattern(t *testing.T) {
 		{"gemini", "gemini-ultra", modeltier.TierFrontier, "pattern"},
 		{"gemini", "gemini-nano", modeltier.TierLocal, "pattern"},
 
-		// ── Ollama: size-parser cases (D10 spec) ──────────────────────────
-		// qwen3:32b → mid (32 ≥ 30, < 70)
-		{"ollama", "qwen3:32b", modeltier.TierMid, "pattern"},
-		// qwen3:7b → local (7 < 30)
+		// ── Ollama: size-parser cases (CA-150 fix: ≥70B→mid, <70B→local) ───
+		// qwen3:32b → local (32 < 70; default OSS install path)
+		{"ollama", "qwen3:32b", modeltier.TierLocal, "pattern"},
+		// qwen3:7b → local (7 < 70)
 		{"ollama", "qwen3:7b", modeltier.TierLocal, "pattern"},
 		// qwen3.5:4b → local
 		{"ollama", "qwen3.5:4b", modeltier.TierLocal, "pattern"},
-		// llama3.1:70b → frontier (70 ≥ 70)
-		{"ollama", "llama3.1:70b", modeltier.TierFrontier, "pattern"},
-		// Quantized suffix stripped before parse: qwen3:32b-q4_K_M → 32b → mid
-		{"ollama", "qwen3:32b-q4_K_M", modeltier.TierMid, "pattern"},
-		// fp16 suffix: llama3.1:70b-instruct-fp16 → 70b → frontier
-		{"ollama", "llama3.1:70b-instruct-fp16", modeltier.TierFrontier, "pattern"},
+		// llama3.1:70b → mid (70 ≥ 70, but not frontier — OSS deployment)
+		{"ollama", "llama3.1:70b", modeltier.TierMid, "pattern"},
+		// Quantized suffix stripped before parse: qwen3:32b-q4_K_M → 32b → local
+		{"ollama", "qwen3:32b-q4_K_M", modeltier.TierLocal, "pattern"},
+		// fp16 suffix: llama3.1:70b-instruct-fp16 → 70b → mid (not frontier)
+		{"ollama", "llama3.1:70b-instruct-fp16", modeltier.TierMid, "pattern"},
 		// phi4:14b-q6_K → 14b → local
 		{"ollama", "phi4:14b-q6_K", modeltier.TierLocal, "pattern"},
-		// MoE model qwen3:30b-a3b — total params 30B → mid
-		{"ollama", "qwen3:30b-a3b", modeltier.TierMid, "pattern"},
+		// MoE model qwen3:30b-a3b — total params 30B < 70 → local
+		{"ollama", "qwen3:30b-a3b", modeltier.TierLocal, "pattern"},
 		// Embedding model — no size token, embedding fast path
 		{"ollama", "nomic-embed-text", modeltier.TierLocal, "pattern"},
 		// Bare "llama" (no size token) → local
 		{"ollama", "llama", modeltier.TierLocal, "pattern"},
 
 		// ── vLLM, llama-cpp, sglang, lmstudio (same size logic) ──────────
-		{"vllm", "meta-llama/llama-3-70b-instruct", modeltier.TierFrontier, "pattern"},
+		// 70b → mid (not frontier; locally-served)
+		{"vllm", "meta-llama/llama-3-70b-instruct", modeltier.TierMid, "pattern"},
 		{"llama-cpp", "phi4:14b", modeltier.TierLocal, "pattern"},
-		{"sglang", "qwen3:32b", modeltier.TierMid, "pattern"},
+		// qwen3:32b → local (32 < 70)
+		{"sglang", "qwen3:32b", modeltier.TierLocal, "pattern"},
 		{"lmstudio", "llama3.1:8b", modeltier.TierLocal, "pattern"},
 
-		// ── OpenRouter prefix-strip ───────────────────────────────────────
+		// ── OpenRouter prefix-strip (only google/, anthropic/, openai/) ──
 		// google/ → gemini classifier
 		{"openrouter", "google/gemini-1.5-pro", modeltier.TierFrontier, "pattern"},
 		{"openrouter", "google/gemini-1.5-flash", modeltier.TierMid, "pattern"},
@@ -89,8 +91,12 @@ func TestClassifyByPattern(t *testing.T) {
 		// openai/ → openai classifier
 		{"openrouter", "openai/gpt-4o-mini", modeltier.TierMid, "pattern"},
 		{"openrouter", "openai/gpt-4o", modeltier.TierFrontier, "pattern"},
-		// meta/ → generic (no size tag → fallback)
+		// meta/ NOT stripped → classifyGenericModel → size parser → 70b → mid
+		{"openrouter", "meta/llama-3.1-70b", modeltier.TierMid, "pattern"},
+		// meta/ NOT stripped, no size tag → classifyGenericModel → fallback
 		{"openrouter", "meta/llama3", modeltier.TierLocal, ""},
+		// mistralai/ NOT stripped → classifyGenericModel → no size tag → mid (mistral family fallback)
+		{"openrouter", "mistralai/mistral-large-latest", modeltier.TierMid, ""},
 
 		// ── Unknown provider ──────────────────────────────────────────────
 		// Unknown provider + known claude family name
@@ -176,13 +182,13 @@ func TestClassifyByPattern_OpenRouterPrefixStrip(t *testing.T) {
 }
 
 // TestClassifyByPattern_OllamaSizeParser exercises the extractOllamaBillions
-// logic for the edge cases in D10 spec.
+// logic for the edge cases in the CA-150 plan (thresholds: ≥70B→mid, <70B→local).
 func TestClassifyByPattern_OllamaSizeParser(t *testing.T) {
 	cases := []classifyCase{
-		// Quantized suffix stripped: 32b is the size, q4_K_M is the quant
-		{"ollama", "qwen3:32b-q4_K_M", modeltier.TierMid, "pattern"},
-		// MoE: 30b-a3b — "a3b" is NOT a second size token; total params = 30b
-		{"ollama", "qwen3:30b-a3b", modeltier.TierMid, "pattern"},
+		// Quantized suffix stripped: 32b is the size, q4_K_M is the quant → local
+		{"ollama", "qwen3:32b-q4_K_M", modeltier.TierLocal, "pattern"},
+		// MoE: 30b-a3b — total params 30B < 70 → local
+		{"ollama", "qwen3:30b-a3b", modeltier.TierLocal, "pattern"},
 		// phi4:14b-q6_K → 14b → local
 		{"ollama", "phi4:14b-q6_K", modeltier.TierLocal, "pattern"},
 		// Embedding model (no size token)
@@ -191,12 +197,14 @@ func TestClassifyByPattern_OllamaSizeParser(t *testing.T) {
 		{"ollama", "llama", modeltier.TierLocal, "pattern"},
 		// Decimal billion count (hypothetical future model)
 		{"ollama", "some-model:3.5b", modeltier.TierLocal, "pattern"},
-		// Large model 70b boundary
-		{"ollama", "llama3.1:70b", modeltier.TierFrontier, "pattern"},
-		// Just below 70b
-		{"ollama", "llama3.1:65b", modeltier.TierMid, "pattern"},
-		// Just below 30b
+		// 70b boundary — exactly 70 → mid
+		{"ollama", "llama3.1:70b", modeltier.TierMid, "pattern"},
+		// Just below 70b → local
+		{"ollama", "llama3.1:65b", modeltier.TierLocal, "pattern"},
+		// Just below 30b → local
 		{"ollama", "qwen3:29b", modeltier.TierLocal, "pattern"},
+		// qwen3:32b — the default OSS install model → local (CA-150 HIGH #1)
+		{"ollama", "qwen3:32b", modeltier.TierLocal, "pattern"},
 	}
 	for _, c := range cases {
 		t.Run(c.provider+"/"+c.model, func(t *testing.T) {

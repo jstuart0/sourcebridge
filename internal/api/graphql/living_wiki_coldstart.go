@@ -40,8 +40,8 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/coldstart"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/credentials"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/indexpage"
-	lwmetrics "github.com/sourcebridge/sourcebridge/internal/livingwiki/metrics"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/markdown"
+	lwmetrics "github.com/sourcebridge/sourcebridge/internal/livingwiki/metrics"
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/sinks"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
@@ -200,15 +200,26 @@ func buildColdStartRunner(
 		if resolveErr == nil {
 			tierResolution = tierFn(runCtx, snap.Provider, snap.Model)
 		}
-		slog.Info("livingwiki/coldstart: resolved quality-gate tier",
-			"job_id", jobID,
-			"repo_id", repoID,
-			"provider", snap.Provider,
-			"model", snap.Model,
-			"tier", tierResolution.Tier,
-			"source", tierResolution.Source,
-			"err", tierResolution.Err,
-		)
+		if tierResolution.Err != nil {
+			slog.Warn("livingwiki/coldstart: tier resolution error — pattern fallback applied",
+				"job_id", jobID,
+				"repo_id", repoID,
+				"provider", snap.Provider,
+				"model", snap.Model,
+				"tier", tierResolution.Tier,
+				"source", tierResolution.Source,
+				"err", tierResolution.Err,
+			)
+		} else {
+			slog.Info("livingwiki/coldstart: resolved quality-gate tier",
+				"job_id", jobID,
+				"repo_id", repoID,
+				"provider", snap.Provider,
+				"model", snap.Model,
+				"tier", tierResolution.Tier,
+				"source", tierResolution.Source,
+			)
+		}
 
 		// ── Step 1: Resolve the page taxonomy (uses frozenCaller) ─────────────
 		//
@@ -504,6 +515,7 @@ func buildColdStartRunner(
 			Pages:            regenerate,
 			PageFingerprints: currentFps,
 			LLMTier:          tierResolution.Tier, // resolved once at Step 1.65; CA-150 Phase 4
+			JobID:            jobID,
 		}
 
 		// ── Step 2: Generate pages with progress reporting ────────────────────

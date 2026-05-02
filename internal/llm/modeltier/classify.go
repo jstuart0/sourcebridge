@@ -93,21 +93,16 @@ func ClassifyByPattern(provider, model string) Resolution {
 	return classifyGenericModel(model)
 }
 
-// openRouterPrefixes maps known vendor prefixes used in OpenRouter model IDs
-// to their canonical provider name so the inner model family can be
-// reclassified.
+// openRouterPrefixes lists the vendor prefixes that OpenRouter embeds in model
+// IDs and that SourceBridge has explicit fast-path classifiers for. Only three
+// hosted providers are listed here, matching the final plan (D10). All other
+// OpenRouter model IDs (meta/, mistralai/, deepseek/, etc.) are NOT stripped —
+// they fall through to classifyGenericModel where the size parser runs first,
+// so "meta/llama-3.1-70b" → size=70B → TierMid as intended.
 var openRouterPrefixes = []string{
 	"google/",
 	"anthropic/",
 	"openai/",
-	"meta/",
-	"meta-llama/",
-	"mistralai/",
-	"cohere/",
-	"x-ai/",
-	"deepseek/",
-	"qwen/",
-	"microsoft/",
 }
 
 func classifyOpenRouterModel(model string) Resolution {
@@ -238,29 +233,52 @@ func classifyLocalModel(model string) Resolution {
 	return classifyGenericModel(model)
 }
 
-// classifyByBillions maps a raw parameter count (in billions) to a tier.
+// classifyByBillions maps a raw parameter count (in billions) to a tier for
+// open-weight / locally-served models (Ollama, vLLM, llama-cpp, sglang,
+// lmstudio, and generic OpenRouter pass-through).
+//
 // Thresholds:
-//   - ≥ 70B → frontier (llama3.1:70b, qwen3:72b, etc.)
-//   - ≥ 30B → mid (qwen3:32b, qwen3:30b-a3b MoE, etc.)
-//   - <  30B → local
+//   - ≥ 70B → mid   (llama3.1:70b, qwen3:72b — large OSS; still not frontier)
+//   - <  70B → local (qwen3:32b, qwen3:7b, etc. — default OSS install range)
+//
+// CA-150 rationale: the default OSS install ships qwen3:32b. Any size below 70B
+// is classified as local so that the local-tier gate relaxations (no
+// citation_density gate, vagueness demoted to warning) apply out of the box and
+// the "all pages rejected" outage symptom cannot recur on a fresh install.
+//
+// TierFrontier is NEVER returned here. Frontier is reserved for hosted-provider
+// fast paths (Anthropic, OpenAI gpt-4o/o1/o3, Gemini pro/ultra) and for
+// explicit registry overrides. An operator who self-hosts llama3.1:70b gets
+// TierMid and the associated relaxed gates; to apply strict frontier gates they
+// must register that model explicitly with qualityGateTier="frontier".
 func classifyByBillions(b float64) Resolution {
-	switch {
-	case b >= 70:
-		return Resolution{Tier: TierFrontier, Source: "pattern"}
-	case b >= 30:
+	if b >= 70 {
 		return Resolution{Tier: TierMid, Source: "pattern"}
-	default:
-		return Resolution{Tier: TierLocal, Source: "pattern"}
 	}
+	return Resolution{Tier: TierLocal, Source: "pattern"}
 }
 
 // classifyGenericModel is the last-resort classifier applied when provider is
 // unknown or the provider-specific classifier found no match. It inspects
 // model family names for well-known patterns before giving up.
+//
+// Size parsing runs FIRST so that OpenRouter pass-through models like
+// "meta/llama-3.1-70b" (prefix already stripped by the caller, or not matched)
+// resolve via parameter count rather than hitting a family-name shortcut that
+// would skip the size token. Only when no size token exists do family-name
+// rules apply.
 func classifyGenericModel(model string) Resolution {
 	// Claude family served through a non-anthropic provider route.
 	if strings.Contains(model, "claude") {
 		return Resolution{Tier: TierFrontier, Source: "pattern"}
+	}
+
+	// Size-parser fast path: if the model string carries an explicit Nb token
+	// (e.g. "llama-3.1-70b-instruct", "mistral-large-123b") use it before any
+	// family-name heuristic. This keeps OpenRouter non-stripped prefixes
+	// (meta/, mistralai/, etc.) consistent with the Ollama size-parser path.
+	if b, ok := extractOllamaBillions(model); ok {
+		return classifyByBillions(b)
 	}
 
 	// Llama without a size tag (bare "llama", "llama2", etc.) — conservative.
@@ -268,37 +286,25 @@ func classifyGenericModel(model string) Resolution {
 		return Resolution{Tier: TierLocal, Source: "pattern"}
 	}
 
-	// Phi family from Microsoft — small models.
+	// Phi family from Microsoft — small models (phi4 at 14b, phi-3-medium, etc.).
+	// Size token already handled by the top-level size-parser above; if we reach
+	// here the model name carried no Nb token.
 	if strings.HasPrefix(model, "phi") {
-		// phi4 at 14b is local; phi-3-medium at 14b is also local.
-		// Extract size if present.
-		if b, ok := extractOllamaBillions(model); ok {
-			return classifyByBillions(b)
-		}
 		return Resolution{Tier: TierLocal, Source: "pattern"}
 	}
 
-	// Qwen/Qwen2/Qwen3 without a tag.
+	// Qwen/Qwen2/Qwen3 without a size tag.
 	if strings.HasPrefix(model, "qwen") {
-		if b, ok := extractOllamaBillions(model); ok {
-			return classifyByBillions(b)
-		}
 		return Resolution{Tier: TierLocal, Source: "pattern"}
 	}
 
-	// Mistral / Mixtral family.
+	// Mistral / Mixtral family without a size tag — default mid (Mixtral-8x7B ~mid).
 	if strings.HasPrefix(model, "mistral") || strings.HasPrefix(model, "mixtral") {
-		if b, ok := extractOllamaBillions(model); ok {
-			return classifyByBillions(b)
-		}
-		return Resolution{Tier: TierMid, Source: "pattern"} // Mixtral-8x7B ~mid
+		return Resolution{Tier: TierMid, Source: "pattern"}
 	}
 
-	// Deepseek family.
+	// Deepseek family without a size tag.
 	if strings.HasPrefix(model, "deepseek") {
-		if b, ok := extractOllamaBillions(model); ok {
-			return classifyByBillions(b)
-		}
 		return Resolution{Tier: TierMid, Source: "pattern"}
 	}
 

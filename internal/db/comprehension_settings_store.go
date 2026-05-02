@@ -304,6 +304,9 @@ func (s *SurrealStore) GetModelCapabilities(modelID string) (*comprehension.Mode
 }
 
 func (s *SurrealStore) SetModelCapabilities(mc *comprehension.ModelCapabilities) error {
+	if !mc.QualityGateTier.IsValid() {
+		return comprehension.ErrInvalidQualityGateTier
+	}
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")

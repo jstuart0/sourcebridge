@@ -77,6 +77,9 @@ func (m *MemStore) GetModelCapabilities(modelID string) (*ModelCapabilities, err
 }
 
 func (m *MemStore) SetModelCapabilities(mc *ModelCapabilities) error {
+	if !mc.QualityGateTier.IsValid() {
+		return ErrInvalidQualityGateTier
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.capabilities[mc.ModelID] = mc

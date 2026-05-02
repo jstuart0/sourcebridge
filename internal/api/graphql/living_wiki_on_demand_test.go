@@ -266,9 +266,10 @@ func TestGenerateLivingWikiPageOnDemand_ResolvesTierAndFreezes(t *testing.T) {
 
 	logStr := logBuf.String()
 
-	// Tier log line must appear exactly once with tier=mid.
-	if !strings.Contains(logStr, "tier=mid") {
-		t.Errorf("expected tier=mid in on-demand resolved-tier log; log:\n%s", logStr)
+	// Tier log line must appear exactly once with tier=local.
+	// CA-150 fix: qwen3:32b is 32B < 70B threshold → TierLocal (default OSS install).
+	if !strings.Contains(logStr, "tier=local") {
+		t.Errorf("expected tier=local in on-demand resolved-tier log; log:\n%s", logStr)
 	}
 	// Provider must be ollama.
 	if !strings.Contains(logStr, "provider=ollama") {
@@ -279,9 +280,8 @@ func TestGenerateLivingWikiPageOnDemand_ResolvesTierAndFreezes(t *testing.T) {
 		t.Errorf("unexpected TierUnknown error log; on-demand path must set LLMTier; log:\n%s", logStr)
 	}
 
-	// Verify the resolved tier is TierMid (not TierUnknown or TierFrontier).
-	// qwen3:32b → 32B ≥ 30B threshold → TierMid.
-	wantTier := modeltier.TierMid
+	// qwen3:32b → 32B < 70B threshold → TierLocal (CA-150 HIGH #1: default OSS install gets relaxed gates).
+	wantTier := modeltier.TierLocal
 	_ = wantTier // asserted via log above; direct result doesn't expose the tier
 }
 
