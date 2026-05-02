@@ -11,6 +11,13 @@ import { StatCard } from "@/components/ui/stat-card";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { authFetch } from "@/lib/auth-fetch";
 import { HEALTH_QUERY } from "@/lib/graphql/queries";
+import {
+  buildInfo,
+  fetchRuntimeBuildInfo,
+  formatBuildInfoMarkdown,
+  shortCommit,
+  type RuntimeBuildInfo,
+} from "@/lib/version";
 
 interface AdminStatus {
   version: string;
@@ -25,21 +32,39 @@ export default function AdminStatusPage() {
   const [status, setStatus] = useState<AdminStatus | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [healthResult] = useQuery({ query: HEALTH_QUERY });
+  const [runtime, setRuntime] = useState<RuntimeBuildInfo | null>(null);
+  const [copyOk, setCopyOk] = useState(false);
 
   const refetchStatus = useCallback(async () => {
     const res = await authFetch("/api/v1/admin/status");
     if (res.ok) setStatus(await res.json());
   }, []);
 
+  const refetchRuntime = useCallback(async () => {
+    setRuntime(await fetchRuntimeBuildInfo());
+  }, []);
+
   useEffect(() => {
     refetchStatus();
-  }, [refetchStatus]);
+    refetchRuntime();
+  }, [refetchStatus, refetchRuntime]);
 
   async function testEndpoint(path: string) {
     setTestResult(null);
     const res = await authFetch(path, { method: "POST" });
     const data = await res.json();
     setTestResult(JSON.stringify(data, null, 2));
+  }
+
+  async function copyBuildInfo() {
+    const md = formatBuildInfoMarkdown(runtime);
+    try {
+      await navigator.clipboard.writeText(md);
+      setCopyOk(true);
+      setTimeout(() => setCopyOk(false), 2000);
+    } catch {
+      setCopyOk(false);
+    }
   }
 
   const codeBlockClass =
@@ -60,7 +85,7 @@ export default function AdminStatusPage() {
               <StatCard
                 label="Version"
                 value={status.version}
-                detail={`Commit ${status.commit?.slice(0, 8) || "—"}`}
+                detail={`Commit ${shortCommit(status.commit)}`}
               />
               <StatCard label="Uptime" value={status.uptime} />
               <Panel>
@@ -75,6 +100,51 @@ export default function AdminStatusPage() {
           )}
         </div>
 
+        <Panel>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-base font-semibold text-[var(--text-primary)]">Build info</h3>
+            <Button variant="secondary" onClick={copyBuildInfo}>
+              {copyOk ? "Copied" : "Copy build info"}
+            </Button>
+          </div>
+          <p className="mb-3 text-sm text-[var(--text-secondary)]">
+            Paste this block into a support ticket so engineers know exactly which build you&apos;re running.
+            The web bundle and the API server may report different versions during a rolling deploy.
+          </p>
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-[max-content_1fr]">
+            <BuildField
+              label="Web bundle"
+              value={`${buildInfo.version} (commit ${shortCommit(buildInfo.commit)}, built ${buildInfo.buildDate})`}
+            />
+            {runtime ? (
+              <>
+                <BuildField
+                  label="API server"
+                  value={`${runtime.version} (commit ${shortCommit(runtime.commit)}, built ${runtime.buildDate})`}
+                />
+                <BuildField label="Go runtime" value={runtime.goVersion} />
+                <BuildField
+                  label="Edition"
+                  value={
+                    runtime.buildEdition && runtime.buildEdition !== runtime.edition
+                      ? `${runtime.edition} (build flavor: ${runtime.buildEdition})`
+                      : runtime.edition
+                  }
+                />
+                <BuildField
+                  label="Worker"
+                  value={runtime.workerVersion || "(unavailable)"}
+                />
+              </>
+            ) : (
+              <BuildField
+                label="API server"
+                value="(unavailable — could not reach /api/v1/version)"
+              />
+            )}
+          </dl>
+        </Panel>
+
         <div className="flex flex-wrap gap-3">
           <Button onClick={() => testEndpoint("/api/v1/admin/test-worker")}>Test Worker</Button>
           <Button onClick={() => testEndpoint("/api/v1/admin/test-llm")}>Test LLM</Button>
@@ -82,6 +152,7 @@ export default function AdminStatusPage() {
             variant="secondary"
             onClick={() => {
               refetchStatus();
+              refetchRuntime();
               setTestResult(null);
             }}
           >
@@ -114,5 +185,14 @@ export default function AdminStatusPage() {
         )}
       </div>
     </PageFrame>
+  );
+}
+
+function BuildField({ label, value }: { label: string; value: string }) {
+  return (
+    <>
+      <dt className="text-[var(--text-secondary)]">{label}</dt>
+      <dd className="font-mono text-[var(--text-primary)]">{value}</dd>
+    </>
   );
 }

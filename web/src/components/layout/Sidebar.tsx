@@ -6,11 +6,28 @@ import { usePathname } from "next/navigation";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { getNavigation, type ProductEdition } from "@/lib/navigation";
 import { Brand, BrandEnterprise } from "@/components/brand/Logo";
+import { buildInfo } from "@/lib/version";
 import { cn } from "@/lib/utils";
 
 const edition: ProductEdition =
   process.env.NEXT_PUBLIC_EDITION === "enterprise" ? "enterprise" : "oss";
 const navItems = getNavigation(edition);
+
+/**
+ * Abbreviates a version string for the collapsed-sidebar chip. Strips
+ * the build-metadata portion (+g<sha>[.dirty]) and any prerelease past
+ * the first segment. Examples:
+ *   v1.2.3                                   → v1.2.3
+ *   v0.9.0-rc.3-dev.216+g956607e             → v0.9.0
+ *   0.0.0-unknown                            → 0.0.0
+ */
+function abbreviateVersion(v: string): string {
+  if (!v || v === "dev") return "dev";
+  const noBuild = v.split("+")[0];
+  // For prereleases, keep just the base "vX.Y.Z" so the chip stays narrow.
+  const match = noBuild.match(/^(v?\d+\.\d+\.\d+)/);
+  return match ? match[1] : noBuild;
+}
 
 export function Sidebar({
   onCollapseChange,
@@ -98,6 +115,32 @@ export function Sidebar({
         })}
       </nav>
 
+      {/*
+        Version footer (CA-136). Always-visible, low-ceremony glance at
+        the running build. Clicking opens the admin Build Info page.
+        When sidebar is collapsed, shows an abbreviated chip so the
+        version is still discoverable.
+      */}
+      <Link
+        href="/admin/status"
+        className={cn(
+          "mt-auto block border-t border-[var(--border-subtle)] pt-3",
+          "text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]",
+          collapsed ? "px-1 text-center" : "px-2"
+        )}
+        title={`SourceBridge ${buildInfo.version} — click for build info`}
+      >
+        {collapsed ? (
+          <span className="font-mono">{abbreviateVersion(buildInfo.version)}</span>
+        ) : (
+          <>
+            <div className="text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">
+              Version
+            </div>
+            <div className="truncate font-mono">{buildInfo.version}</div>
+          </>
+        )}
+      </Link>
     </>
   );
 
