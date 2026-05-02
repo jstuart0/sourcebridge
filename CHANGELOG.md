@@ -8,7 +8,7 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ### Added
 
-- **Auto-version-bump-on-merge via release-please** (`<PENDING>`, CA-147).
+- **Auto-version-bump-on-merge via release-please** (`e02fd92`, CA-147).
   Adopted [release-please](https://github.com/googleapis/release-please) to
   automate version bumping and changelog generation. Conventional-commit PRs
   to main now drive an always-current Release PR; merging it cuts the next
@@ -30,7 +30,7 @@ All notable changes to SourceBridge are documented here. The format follows
   fire downstream workflows. RELEASING.md documents the manual unblock.
 
 - **GraphQL `VersionInfo` reaches API parity with REST `/api/v1/version`**
-  (`<PENDING>`, CA-138). The `VersionInfo` type now exposes all 7 fields
+  (`aeb92d8`, CA-138). The `VersionInfo` type now exposes all 7 fields
   the REST endpoint reports: `version`, `commit`, `buildDate`, `goVersion`,
   `edition`, `buildEdition`, `workerVersion`. Identical cached worker-version
   lookup is shared between REST and GraphQL via a new `Resolver.WorkerVersion`
@@ -41,7 +41,7 @@ All notable changes to SourceBridge are documented here. The format follows
 ### Fixed
 
 - **Living Wiki mode-override flag plumbing in `EnableLivingWikiForRepo`**
-  (`<PENDING>`, CA-138). The resolver previously built a fresh
+  (`aeb92d8`, CA-138). The resolver previously built a fresh
   `RepositoryLivingWikiSettings` from scratch on every call, which (a)
   ignored the input's `LivingWikiOverviewEnabled` / `LivingWikiDetailedEnabled`
   override pointers AND (b) wiped any persisted mode flags from prior
@@ -63,7 +63,7 @@ All notable changes to SourceBridge are documented here. The format follows
   Nine new tests in `living_wiki_mode_flags_test.go` cover the contract
   (`Test*Override*` and `TestDeriveLivingWikiJobMode_*`).
 
-- **gqlgen drift untangle** (`<PENDING>`, CA-138). `gqlgen.yml` now
+- **gqlgen drift untangle** (`aeb92d8`, CA-138). `gqlgen.yml` now
   preserves the two override pointers via `extraFields` with explicit
   `overrideTags: 'json:"-"'`. Resolver-ownership inversion: four
   resolvers that gqlgen kept duplicating into `schema.resolvers.go`
@@ -83,7 +83,7 @@ All notable changes to SourceBridge are documented here. The format follows
   given binary now reports the same string. The MCP **protocol** version
   (`mcpProtocolVersion = "2025-11-25"`) is unchanged.
 
-- **Sigstore cosign keyless OIDC signing for OSS images** (`<PENDING>`,
+- **Sigstore cosign keyless OIDC signing for OSS images** (`c10694c`,
   CA-139). All three OSS images (`sourcebridge-api`, `sourcebridge-web`,
   `sourcebridge-worker`) plus the combined release image are signed with
   cosign keyless OIDC on every push to `main`/`dev` and on tagged
