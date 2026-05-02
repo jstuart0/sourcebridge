@@ -162,26 +162,92 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 			pinnedBlocks = append(pinnedBlocks, block)
 		}
 	}
+	pinnedSource := false
 	if in.SymbolID != "" && o.symbols != nil {
+		// 1. Metadata block (qualified name, signature, doc comment).
+		//    SymbolContext formats a markdown block from the same
+		//    StoredSymbol that SymbolDetails returns structured below.
+		//    The dual call is intentional — formatting and structured
+		//    access have different consumers (prompt text vs.
+		//    SymbolContextRef -> proto.CodeSymbol). The store hit is
+		//    cheap and the alternative (folding both into one method)
+		//    would couple metadata-block formatting to structured-field
+		//    access.
 		if block := o.symbols.SymbolContext(in.SymbolID); block != "" {
 			pinnedBlocks = append(pinnedBlocks, block)
 		}
-		// Opportunistically also pin the symbol's file so the LLM
-		// has line-level context, not just metadata.
-		if in.FilePath == "" {
-			if fp := o.symbols.SymbolFilePath(in.SymbolID); fp != "" {
-				in.FilePath = fp
+		// 2. Source slice — pinned by line range when available.
+		detail, ok := o.symbols.SymbolDetails(in.SymbolID)
+		if ok && o.files != nil {
+			if raw, err := o.files.ReadRepoFile(in.RepositoryID, detail.FilePath); err == nil && raw != "" {
+				if slice := sliceLines(raw, detail.StartLine, detail.EndLine); slice != "" {
+					pinnedBlocks = append(pinnedBlocks,
+						fmt.Sprintf("## %s:%d-%d\n```\n%s\n```", detail.FilePath, detail.StartLine, detail.EndLine, slice))
+					pinnedSource = true
+					// detail.FilePath is authoritative when range-pin succeeds;
+					// overwrite any caller-supplied (possibly stale) path.
+					in.FilePath = detail.FilePath
+				}
 			}
 		}
-		contextSymbols = append(contextSymbols, SymbolContextRef{ID: in.SymbolID})
+		// 3. Fallback: when range-pin failed and no file path is set,
+		//    use the legacy SymbolFilePath so we never return less
+		//    context than today on stores without populated line ranges.
+		if !pinnedSource && in.FilePath == "" {
+			if legacyFP := o.symbols.SymbolFilePath(in.SymbolID); legacyFP != "" {
+				in.FilePath = legacyFP
+			}
+		}
+		// Construct the pinned-symbol context ref with full identity +
+		// location + signature so buildProtoContextSymbols can wire
+		// Signature AND Location into the proto. Per Decision 5,
+		// SymbolDetails returns identity-populated even when ok=false,
+		// so context_symbols[0] never renders as a blank label — we
+		// just don't carry line-range when the slice attempt failed.
+		// detail.ID is empty if the symbol is unknown to the store; we
+		// still record in.SymbolID so the worker has something to
+		// attach the question to.
+		pinnedRef := SymbolContextRef{
+			ID:            in.SymbolID,
+			Name:          detail.Name,
+			QualifiedName: detail.QualifiedName,
+		}
+		if ok {
+			pinnedRef.FilePath = detail.FilePath
+			pinnedRef.StartLine = detail.StartLine
+			pinnedRef.EndLine = detail.EndLine
+			pinnedRef.Signature = detail.Signature
+		}
+		contextSymbols = append(contextSymbols, pinnedRef)
 	}
-	if in.FilePath != "" && in.Code == "" && o.files != nil {
+	// The whole-file branch only fires when: (a) the caller passed
+	// FilePath without SymbolID — pinnedSource stays false and we dump
+	// the file as before — or (b) Stage 3d's range-pin failed and the
+	// legacy fallback set FilePath. When the range-pin succeeded we skip
+	// the whole-file dump (Decision 1 — token-budget win). Suppressing
+	// this branch when pinnedSource=true is intentional even if the
+	// caller passed both SymbolID and FilePath; the slice is the
+	// high-signal block.
+	if in.FilePath != "" && in.Code == "" && o.files != nil && !pinnedSource {
 		if content, err := o.files.ReadRepoFile(in.RepositoryID, in.FilePath); err == nil && content != "" {
 			pinnedBlocks = append(pinnedBlocks, content)
 		}
 		if o.symbols != nil {
-			contextSymbols = append(contextSymbols, o.symbols.SymbolsInFile(in.RepositoryID, in.FilePath)...)
+			contextSymbols = appendSymbolsInFileDedup(
+				contextSymbols,
+				o.symbols.SymbolsInFile(in.RepositoryID, in.FilePath),
+				in.SymbolID,
+			)
 		}
+	} else if pinnedSource && o.symbols != nil && in.FilePath != "" {
+		// Range-pinned: skip whole-file but still surface the file's
+		// other symbols for context_symbols. Dedup against the symbol
+		// we already pinned so it doesn't appear twice.
+		contextSymbols = appendSymbolsInFileDedup(
+			contextSymbols,
+			o.symbols.SymbolsInFile(in.RepositoryID, in.FilePath),
+			in.SymbolID,
+		)
 	}
 
 	// Stage 4: deterministic assembly.
@@ -377,21 +443,49 @@ func symbolRefFromProto(sym *commonv1.CodeSymbol) AskReference {
 	}
 }
 
+// appendSymbolsInFileDedup appends extras to dst, skipping any entry
+// whose ID matches pinnedID (which Stage 3d already appended for the
+// explicitly-pinned symbol). Pass pinnedID="" to disable the skip.
+func appendSymbolsInFileDedup(dst, extras []SymbolContextRef, pinnedID string) []SymbolContextRef {
+	for _, ref := range extras {
+		if pinnedID != "" && ref.ID == pinnedID {
+			continue
+		}
+		dst = append(dst, ref)
+	}
+	return dst
+}
+
 // buildProtoContextSymbols maps orchestrator-level symbol refs to the
-// proto CodeSymbol shape the synthesis worker consumes. Only the ID
-// and QualifiedName/Name are populated — that's what the worker's
-// template uses today, and keeps the wire payload small.
+// proto CodeSymbol shape the synthesis worker consumes. Signature and
+// Location are wired through when populated on the ref — the worker's
+// _build_discussion_context reads both to emit a non-stub signature
+// block and to anchor references.
 func buildProtoContextSymbols(refs []SymbolContextRef) []*commonv1.CodeSymbol {
 	if len(refs) == 0 {
 		return nil
 	}
 	out := make([]*commonv1.CodeSymbol, 0, len(refs))
 	for _, r := range refs {
-		out = append(out, &commonv1.CodeSymbol{
+		cs := &commonv1.CodeSymbol{
 			Id:            r.ID,
 			Name:          r.Name,
 			QualifiedName: r.QualifiedName,
-		})
+			Signature:     r.Signature,
+		}
+		// Wire Location only when the structured fields are populated.
+		// Stage 3d's pinned ref carries them on the ok=true path; the
+		// SymbolsInFile-sourced peers carry them after Phase 2's adapter
+		// enrichment. Zero values (StartLine == 0) signal "no range" —
+		// leave Location nil rather than emit a meaningless 0:0 range.
+		if r.FilePath != "" && r.StartLine > 0 {
+			cs.Location = &commonv1.FileLocation{
+				Path:      r.FilePath,
+				StartLine: int32(r.StartLine),
+				EndLine:   int32(r.EndLine),
+			}
+		}
+		out = append(out, cs)
 	}
 	return out
 }

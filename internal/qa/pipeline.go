@@ -77,6 +77,25 @@ type RequirementLookup interface {
 	RequirementLabelsForSymbols(symbolIDs []string) []string
 }
 
+// SymbolDetail bundles the structured fields a single
+// GraphStore.GetSymbol call already returns. Returned by value so
+// callers don't need a nil-check; an unknown or invalid symbol is
+// signalled by ok=false from SymbolDetails. Optional fields (Kind,
+// Language, DocComment) are populated when the underlying store has
+// them and are zero-valued otherwise.
+type SymbolDetail struct {
+	ID            string
+	Name          string
+	QualifiedName string
+	FilePath      string
+	StartLine     int
+	EndLine       int
+	Signature     string
+	Kind          string
+	Language      string
+	DocComment    string
+}
+
 // SymbolLookup resolves a symbol ID and a file path to context,
 // mirroring the discussCode resolver's symbol handling:
 //   - SymbolContext: indexed-symbol metadata block (qualified name,
@@ -85,18 +104,34 @@ type RequirementLookup interface {
 //     can opportunistically add the full file as context.
 //   - SymbolsInFile: IDs + display names of every symbol in a file,
 //     used to populate context_symbols on the synthesis request.
+//   - SymbolDetails: structured fields for a symbol in a single store
+//     round-trip; ok=true means safe to attempt source slicing.
 type SymbolLookup interface {
 	SymbolContext(symbolID string) string
 	SymbolFilePath(symbolID string) string
 	SymbolsInFile(repoID, filePath string) []SymbolContextRef
+	// SymbolDetails returns the symbol's identity, file path, 1-based
+	// inclusive line range, and signature in a single store round-trip.
+	// ok=true means "safe to attempt source slicing" — the implementer
+	// must return ok=false unless FilePath != "", StartLine > 0, and
+	// EndLine >= StartLine. Callers must guard on ok before slicing
+	// source; do NOT use ok=false to infer "symbol unknown" (use
+	// SymbolFilePath or graph queries for existence).
+	SymbolDetails(symbolID string) (SymbolDetail, bool)
 }
 
 // SymbolContextRef is the minimal identifier shape used for
-// context_symbols on the synthesis request.
+// context_symbols on the synthesis request. FilePath, StartLine,
+// EndLine, and Signature are populated where available; older callers
+// that set only ID/Name/QualifiedName keep working (zero values are safe).
 type SymbolContextRef struct {
 	ID            string
 	Name          string
 	QualifiedName string
+	FilePath      string
+	StartLine     int
+	EndLine       int
+	Signature     string
 }
 
 // FileReader reads a file within a repo clone, with the same
