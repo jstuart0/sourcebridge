@@ -54,6 +54,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/manifest"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/markdown"
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates/architecture"
@@ -1032,9 +1033,11 @@ func (o *Orchestrator) generateOnePage(ctx context.Context, cfg Config, planned 
 		return pageOutcome{}, fmt.Errorf("%w: %q", errTemplateNotFound, planned.TemplateID)
 	}
 
+	// CA-150 Phase 2 placeholder; Phase 4 wires real tier from req.LLMTier.
 	profile, hasProfile := quality.DefaultProfile(
 		quality.Template(planned.TemplateID),
 		planned.Audience,
+		modeltier.TierFrontier,
 	)
 
 	var (

@@ -5,6 +5,7 @@ package quality
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 )
@@ -13,11 +14,11 @@ import (
 type Template string
 
 const (
-	TemplateArchitecture  Template = "architecture"
-	TemplateAPIReference  Template = "api_reference"
-	TemplateADR           Template = "adr"
-	TemplateGlossary      Template = "glossary"
-	TemplateActivityLog   Template = "activity_log"
+	TemplateArchitecture   Template = "architecture"
+	TemplateAPIReference   Template = "api_reference"
+	TemplateADR            Template = "adr"
+	TemplateGlossary       Template = "glossary"
+	TemplateActivityLog    Template = "activity_log"
 	TemplateSystemOverview Template = "system_overview"
 )
 
@@ -55,29 +56,41 @@ type ValidatorRule struct {
 	Config      ValidatorConfig // zero fields inherit global defaults
 }
 
-// Profile is the set of validator rules for a specific template+audience
+// Profile is the set of validator rules for a specific template+audience+tier
 // combination. Customer overrides are applied on top of defaults at
 // runtime via a registration API (not implemented yet).
+//
+// Tier must always be set explicitly on a materialized profile; the zero
+// value (TierUnknown) signals that the profile has not been resolved.
+// Callers MUST NOT treat Profile{}.Tier as TierFrontier.
 type Profile struct {
 	Template Template
 	Audience Audience
 	// Tier is the quality-gate calibration tier that was used when this
 	// profile was materialized. TierUnknown (zero value) means "not yet
 	// resolved"; callers should call DefaultProfile with an explicit tier
-	// rather than relying on zero-value behavior. Phase 2 sets this
-	// explicitly on every materialized profile.
+	// rather than relying on zero-value behavior.
 	Tier  modeltier.QualityGateTier
 	Rules []ValidatorRule
 }
 
-// defaultProfiles encodes the per-template, per-audience gate/warning
-// table from the plan's Q.2 section as Go literals.
-// These are the source of truth for default behavior; customer overrides
-// layer on top via a future registration API.
-var defaultProfiles = []Profile{
+// String returns a human-readable identifier for the profile.
+func (p Profile) String() string {
+	return fmt.Sprintf("%s/%s/%s", p.Template, p.Audience, p.Tier)
+}
+
+// --- Base profiles (frontier) ---
+
+// baseProfiles encodes the per-template, per-audience gate/warning table
+// from the plan's Q.2 section as Go literals. Every entry is the frontier
+// (TierFrontier) base; tier overrides are applied by applyOverrides.
+// These are the source of truth for default frontier behavior; customer
+// overrides layer on top via a future registration API.
+var baseProfiles = []Profile{
 	{
 		Template: TemplateArchitecture,
 		Audience: AudienceEngineers,
+		Tier:     modeltier.TierFrontier,
 		Rules: []ValidatorRule{
 			{ValidatorID: ValidatorCitationDensity, Level: LevelGate,
 				Config: ValidatorConfig{CitationDensityWordsPerCitation: 200}},
@@ -96,6 +109,7 @@ var defaultProfiles = []Profile{
 	{
 		Template: TemplateArchitecture,
 		Audience: AudienceProduct,
+		Tier:     modeltier.TierFrontier,
 		Rules: []ValidatorRule{
 			{ValidatorID: ValidatorVagueness, Level: LevelGate},
 			{ValidatorID: ValidatorFactualGrounding, Level: LevelGate},
@@ -112,6 +126,7 @@ var defaultProfiles = []Profile{
 	{
 		Template: TemplateAPIReference,
 		Audience: AudienceEngineers,
+		Tier:     modeltier.TierFrontier,
 		Rules: []ValidatorRule{
 			// Higher citation density for API reference: inline examples mandatory.
 			{ValidatorID: ValidatorCitationDensity, Level: LevelGate,
@@ -128,6 +143,7 @@ var defaultProfiles = []Profile{
 	{
 		Template: TemplateADR,
 		Audience: AudienceEngineers,
+		Tier:     modeltier.TierFrontier,
 		Rules: []ValidatorRule{
 			{ValidatorID: ValidatorFactualGrounding, Level: LevelGate},
 			{ValidatorID: ValidatorVagueness, Level: LevelGate},
@@ -142,6 +158,7 @@ var defaultProfiles = []Profile{
 	{
 		Template: TemplateGlossary,
 		Audience: AudienceEngineers,
+		Tier:     modeltier.TierFrontier,
 		Rules: []ValidatorRule{
 			// Mechanical extraction: only factual_grounding applies.
 			// Voice validators (vagueness, reading_level) don't apply.
@@ -151,6 +168,7 @@ var defaultProfiles = []Profile{
 	{
 		Template: TemplateActivityLog,
 		Audience: AudienceEngineers,
+		Tier:     modeltier.TierFrontier,
 		Rules: []ValidatorRule{
 			{ValidatorID: ValidatorFactualGrounding, Level: LevelGate},
 			// Numbers everywhere; vagueness gate matters.
@@ -162,6 +180,7 @@ var defaultProfiles = []Profile{
 	{
 		Template: TemplateSystemOverview,
 		Audience: AudienceEngineers,
+		Tier:     modeltier.TierFrontier,
 		Rules: []ValidatorRule{
 			{ValidatorID: ValidatorVagueness, Level: LevelGate},
 			// architectural_relevance ensures we don't summarize a system
@@ -176,6 +195,7 @@ var defaultProfiles = []Profile{
 	{
 		Template: TemplateSystemOverview,
 		Audience: AudienceProduct,
+		Tier:     modeltier.TierFrontier,
 		Rules: []ValidatorRule{
 			{ValidatorID: ValidatorVagueness, Level: LevelGate},
 			{ValidatorID: ValidatorArchitecturalRelevance, Level: LevelGate,
@@ -189,32 +209,233 @@ var defaultProfiles = []Profile{
 	},
 }
 
-// DefaultProfile returns the built-in profile for the given template and
-// audience. Returns (Profile{}, false) when no profile is defined for the
-// combination; callers should fall back to a sensible default or skip
-// validation for unknown combinations.
-func DefaultProfile(template Template, audience Audience) (Profile, bool) {
-	for _, p := range defaultProfiles {
+// --- Tier override table ---
+
+// tierRuleOverride describes a delta from the frontier base for one validator.
+// Level is a pointer: nil means "no level change"; non-nil means "set this level."
+// Config merges field-by-field: zero fields leave base unchanged, non-zero fields
+// overwrite base. Per D14a: *GateLevel is mandated, NOT a sentinel string.
+type tierRuleOverride struct {
+	ValidatorID ValidatorID
+	Level       *GateLevel      // nil = no Level change; non-nil = replace Level
+	Config      ValidatorConfig // zero fields = no config override; non-zero = override
+}
+
+// profileKey is the lookup key for the tierOverrides map.
+type profileKey struct {
+	Template Template
+	Audience Audience
+	Tier     modeltier.QualityGateTier
+}
+
+// Level value helpers — take addresses of named vars, not literals.
+var (
+	_levelGate    = LevelGate
+	_levelWarning = LevelWarning
+)
+
+// tierOverrides maps a (template, audience, tier) triple to the list of
+// per-validator deltas from the frontier base. Only entries that DIFFER
+// from the frontier base are listed. Per D14a: Level is *GateLevel
+// (nil = unchanged); Config merges field-by-field (zero = unchanged).
+var tierOverrides = map[profileKey][]tierRuleOverride{
+	// --- architecture / for-engineers ---
+	{TemplateArchitecture, AudienceEngineers, modeltier.TierMid}: {
+		{ValidatorID: ValidatorCitationDensity, Level: &_levelGate,
+			Config: ValidatorConfig{CitationDensityWordsPerCitation: 300}},
+	},
+	{TemplateArchitecture, AudienceEngineers, modeltier.TierLocal}: {
+		{ValidatorID: ValidatorCitationDensity, Level: &_levelWarning,
+			Config: ValidatorConfig{CitationDensityWordsPerCitation: 400}},
+		{ValidatorID: ValidatorVagueness, Level: &_levelWarning},
+		{ValidatorID: ValidatorReadingLevel, Level: &_levelWarning,
+			Config: ValidatorConfig{ReadingLevelFloor: 40}},
+		// Config-only override: BlockCount stays at base level (warning),
+		// only thresholds change.
+		{ValidatorID: ValidatorBlockCount,
+			Config: ValidatorConfig{BlockCountMin: 1, BlockCountMax: 20}},
+	},
+
+	// --- api_reference / for-engineers ---
+	{TemplateAPIReference, AudienceEngineers, modeltier.TierMid}: {
+		{ValidatorID: ValidatorCitationDensity, Level: &_levelGate,
+			Config: ValidatorConfig{CitationDensityWordsPerCitation: 200}},
+		{ValidatorID: ValidatorCodeExamplePresent, Level: &_levelWarning},
+		{ValidatorID: ValidatorReadingLevel,
+			Config: ValidatorConfig{ReadingLevelFloor: 45}},
+	},
+	{TemplateAPIReference, AudienceEngineers, modeltier.TierLocal}: {
+		{ValidatorID: ValidatorCitationDensity, Level: &_levelGate,
+			Config: ValidatorConfig{CitationDensityWordsPerCitation: 300}},
+		{ValidatorID: ValidatorCodeExamplePresent, Level: &_levelWarning},
+		{ValidatorID: ValidatorVagueness, Level: &_levelWarning},
+		{ValidatorID: ValidatorReadingLevel,
+			Config: ValidatorConfig{ReadingLevelFloor: 40}},
+	},
+
+	// --- adr / for-engineers ---
+	{TemplateADR, AudienceEngineers, modeltier.TierMid}: {
+		{ValidatorID: ValidatorCitationDensity, Level: &_levelWarning,
+			Config: ValidatorConfig{CitationDensityWordsPerCitation: 300}},
+		{ValidatorID: ValidatorReadingLevel,
+			Config: ValidatorConfig{ReadingLevelFloor: 38}},
+	},
+	{TemplateADR, AudienceEngineers, modeltier.TierLocal}: {
+		{ValidatorID: ValidatorCitationDensity, Level: &_levelWarning,
+			Config: ValidatorConfig{CitationDensityWordsPerCitation: 400}},
+		{ValidatorID: ValidatorVagueness, Level: &_levelWarning},
+		{ValidatorID: ValidatorReadingLevel,
+			Config: ValidatorConfig{ReadingLevelFloor: 35}},
+	},
+
+	// --- system_overview / for-engineers ---
+	{TemplateSystemOverview, AudienceEngineers, modeltier.TierMid}: {
+		{ValidatorID: ValidatorArchitecturalRelevance, Level: &_levelGate,
+			Config: ValidatorConfig{ArchRelevanceMinPageRefs: 2, ArchRelevanceMinGraphRelations: 4}},
+		{ValidatorID: ValidatorReadingLevel,
+			Config: ValidatorConfig{ReadingLevelFloor: 45}},
+	},
+	{TemplateSystemOverview, AudienceEngineers, modeltier.TierLocal}: {
+		{ValidatorID: ValidatorArchitecturalRelevance, Level: &_levelGate,
+			Config: ValidatorConfig{ArchRelevanceMinPageRefs: 1, ArchRelevanceMinGraphRelations: 3}},
+		{ValidatorID: ValidatorVagueness, Level: &_levelWarning},
+		{ValidatorID: ValidatorReadingLevel,
+			Config: ValidatorConfig{ReadingLevelFloor: 40}},
+	},
+
+	// Glossary and ActivityLog are tier-invariant: they are mechanical
+	// extraction (factual correctness, not voice polish). No overrides needed.
+}
+
+// --- Materializer ---
+
+// lookupBaseProfile returns a deep copy of the frontier base profile for the
+// given template and audience, or (Profile{}, false) when not defined.
+func lookupBaseProfile(template Template, audience Audience) (Profile, bool) {
+	for _, p := range baseProfiles {
 		if p.Template == template && p.Audience == audience {
-			return p, true
+			// Deep-copy Rules so callers can safely mutate.
+			cp := p
+			cp.Rules = make([]ValidatorRule, len(p.Rules))
+			copy(cp.Rules, p.Rules)
+			return cp, true
 		}
 	}
 	return Profile{}, false
 }
 
-// AllDefaultProfiles returns a copy of all built-in profiles in a
-// deterministic order matching the plan's template table.
-func AllDefaultProfiles() []Profile {
-	out := make([]Profile, len(defaultProfiles))
-	copy(out, defaultProfiles)
-	return out
+// mergeProfileConfig returns a ValidatorConfig that uses override values where
+// non-zero and falls back to base otherwise. Named mergeProfileConfig (not
+// mergeConfig) to avoid the name collision with run.go's unexported mergeConfig.
+func mergeProfileConfig(base, override ValidatorConfig) ValidatorConfig {
+	merged := base
+	if override.CitationDensityWordsPerCitation > 0 {
+		merged.CitationDensityWordsPerCitation = override.CitationDensityWordsPerCitation
+	}
+	if override.ReadingLevelFloor > 0 {
+		merged.ReadingLevelFloor = override.ReadingLevelFloor
+	}
+	if override.ArchRelevanceMinPageRefs > 0 {
+		merged.ArchRelevanceMinPageRefs = override.ArchRelevanceMinPageRefs
+	}
+	if override.ArchRelevanceMinGraphRelations > 0 {
+		merged.ArchRelevanceMinGraphRelations = override.ArchRelevanceMinGraphRelations
+	}
+	if override.BlockCountMin > 0 {
+		merged.BlockCountMin = override.BlockCountMin
+	}
+	if override.BlockCountMax > 0 {
+		merged.BlockCountMax = override.BlockCountMax
+	}
+	// PageReferenceCount and GraphRelationCount come only from the caller
+	// (graph-store injection); they are never overridden by tier config.
+	return merged
 }
 
-// (Profile.ruleFor used to live here; the validator dispatch loop now
-// iterates Rules directly rather than looking up by ValidatorID, so
-// the helper has no callers. Removed to satisfy lint.)
+// applyOverrides materializes a tier-effective profile from the frontier base
+// by applying each override in overrides. Returns a new Profile with Tier unset
+// (caller sets it). Validators not mentioned in overrides keep base behavior.
+func applyOverrides(base Profile, overrides []tierRuleOverride) Profile {
+	// Deep-copy Rules so mutations are safe.
+	effective := base
+	effective.Rules = make([]ValidatorRule, len(base.Rules))
+	copy(effective.Rules, base.Rules)
 
-// String returns a human-readable identifier for the profile.
-func (p Profile) String() string {
-	return fmt.Sprintf("%s/%s", p.Template, p.Audience)
+	for _, ov := range overrides {
+		idx := -1
+		for i, r := range effective.Rules {
+			if r.ValidatorID == ov.ValidatorID {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			// Override references a validator that is not in the base profile.
+			// Log a warning and skip — do NOT add a new rule (D14a).
+			slog.Warn("quality/profile: tier override references absent validator",
+				slog.String("validator", string(ov.ValidatorID)),
+				slog.String("template", string(base.Template)),
+				slog.String("audience", string(base.Audience)))
+			continue
+		}
+		if ov.Level != nil {
+			effective.Rules[idx].Level = *ov.Level
+		}
+		effective.Rules[idx].Config = mergeProfileConfig(effective.Rules[idx].Config, ov.Config)
+	}
+	return effective
+}
+
+// DefaultProfile returns the built-in profile for the given template, audience,
+// and quality-gate tier. Returns (Profile{}, false) when no base profile is
+// defined for the combination; callers should fall back to a sensible default
+// or skip validation for unknown combinations.
+//
+// If tier is TierUnknown, a slog.Warn is emitted and TierFrontier is used
+// as a fallback. Callers MUST normalize the tier before calling this function;
+// TierUnknown is an explicit bug signal, not a silent default.
+func DefaultProfile(template Template, audience Audience, tier modeltier.QualityGateTier) (Profile, bool) {
+	if tier == modeltier.TierUnknown {
+		slog.Warn("quality/profile: TierUnknown passed to DefaultProfile; falling back to frontier (callers MUST normalize)",
+			slog.String("template", string(template)),
+			slog.String("audience", string(audience)),
+			slog.String("source", "DefaultProfile_TierUnknown_fallback"))
+		tier = modeltier.TierFrontier
+	}
+
+	base, ok := lookupBaseProfile(template, audience)
+	if !ok {
+		return Profile{}, false
+	}
+
+	if tier == modeltier.TierFrontier {
+		base.Tier = modeltier.TierFrontier
+		return base, true
+	}
+
+	overrides := tierOverrides[profileKey{template, audience, tier}]
+	effective := applyOverrides(base, overrides)
+	effective.Tier = tier
+	return effective, true
+}
+
+// AllDefaultProfiles returns the materialized cross-product: every
+// (template, audience, tier) triple's effective profile in a deterministic
+// order. The frontier profiles appear first, followed by mid and local.
+func AllDefaultProfiles() []Profile {
+	tiers := []modeltier.QualityGateTier{
+		modeltier.TierFrontier,
+		modeltier.TierMid,
+		modeltier.TierLocal,
+	}
+	var out []Profile
+	for _, base := range baseProfiles {
+		for _, tier := range tiers {
+			p, ok := DefaultProfile(base.Template, base.Audience, tier)
+			if ok {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
 }

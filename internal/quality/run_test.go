@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 )
 
@@ -30,7 +31,7 @@ The RS256 public key set is fetched on startup from the JWKS endpoint.
 ` + "```go\nmiddleware := auth.New(auth.Config{JWKSEndpoint: cfg.JWKS})\n```\n"
 
 	input := quality.NewMarkdownInput(src)
-	profile, ok := quality.DefaultProfile(quality.TemplateArchitecture, quality.AudienceEngineers)
+	profile, ok := quality.DefaultProfile(quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierFrontier)
 	if !ok {
 		t.Fatal("profile not found")
 	}
@@ -57,7 +58,7 @@ Various configuration options are available. The system handles various
 error states gracefully in some cases. No code example. No citations.
 `
 	input := quality.NewMarkdownInput(src)
-	profile, _ := quality.DefaultProfile(quality.TemplateArchitecture, quality.AudienceEngineers)
+	profile, _ := quality.DefaultProfile(quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierFrontier)
 	result := quality.Run(profile, input, quality.ValidatorConfig{}, 1)
 
 	if result.Decision != quality.RetryWithReasons {
@@ -75,7 +76,7 @@ func TestRun_Reject(t *testing.T) {
 Various options exist. No citations. No code.
 `
 	input := quality.NewMarkdownInput(src)
-	profile, _ := quality.DefaultProfile(quality.TemplateArchitecture, quality.AudienceEngineers)
+	profile, _ := quality.DefaultProfile(quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierFrontier)
 	result := quality.Run(profile, input, quality.ValidatorConfig{}, 2)
 
 	if result.Decision != quality.RetryReject {
@@ -115,11 +116,13 @@ func TestRetryPromptFragment_Content(t *testing.T) {
 	}
 }
 
-// TestQualityReportMarkdown_AllPass verifies clean output when all checks pass.
+// TestQualityReportMarkdown_AllPass verifies clean output when all checks pass
+// and that the tier appears in the profile header line.
 func TestQualityReportMarkdown_AllPass(t *testing.T) {
 	result := quality.ValidationResult{
 		ProfileTemplate: quality.TemplateArchitecture,
 		ProfileAudience: quality.AudienceEngineers,
+		ProfileTier:     modeltier.TierFrontier,
 		AttemptNumber:   1,
 		GatesPassed:     true,
 	}
@@ -130,14 +133,42 @@ func TestQualityReportMarkdown_AllPass(t *testing.T) {
 	if !strings.Contains(md, "All quality checks passed") {
 		t.Errorf("QualityReportMarkdown: expected pass message, got: %q", md)
 	}
+	if !strings.Contains(md, "frontier") {
+		t.Errorf("QualityReportMarkdown: expected tier 'frontier' in header, got: %q", md)
+	}
+}
+
+// TestValidationResult_ProfileTier verifies that Run() populates
+// ValidationResult.ProfileTier from the profile's Tier field.
+func TestValidationResult_ProfileTier(t *testing.T) {
+	src := `## Overview
+
+The service handles requests. (internal/service/handler.go:1-10)
+`
+	input := quality.NewMarkdownInput(src)
+	for _, tier := range []modeltier.QualityGateTier{modeltier.TierFrontier, modeltier.TierMid, modeltier.TierLocal} {
+		profile, ok := quality.DefaultProfile(quality.TemplateArchitecture, quality.AudienceEngineers, tier)
+		if !ok {
+			t.Fatalf("DefaultProfile returned false for tier %s", tier)
+		}
+		result := quality.Run(profile, input, quality.ValidatorConfig{
+			PageReferenceCount: 3,
+			GraphRelationCount: 5,
+		}, 1)
+		if result.ProfileTier != tier {
+			t.Errorf("Run() ProfileTier: got %q, want %q", result.ProfileTier, tier)
+		}
+	}
 }
 
 // TestQualityReportMarkdown_WithGatesAndWarnings validates the structure
-// of a result that has both gate failures and warnings.
+// of a result that has both gate failures and warnings, and that the tier
+// line appears in the output (D17).
 func TestQualityReportMarkdown_WithGatesAndWarnings(t *testing.T) {
 	result := quality.ValidationResult{
 		ProfileTemplate: quality.TemplateArchitecture,
 		ProfileAudience: quality.AudienceEngineers,
+		ProfileTier:     modeltier.TierLocal,
 		AttemptNumber:   1,
 		GatesPassed:     false,
 		Gates: []quality.RuleResult{
@@ -176,6 +207,10 @@ func TestQualityReportMarkdown_WithGatesAndWarnings(t *testing.T) {
 	// Suggestion should appear.
 	if !strings.Contains(md, "use a number") {
 		t.Errorf("QualityReportMarkdown: expected suggestion in output")
+	}
+	// Tier annotation should appear (D17).
+	if !strings.Contains(md, "local") {
+		t.Errorf("QualityReportMarkdown: expected tier 'local' in header, got: %q", md)
 	}
 }
 

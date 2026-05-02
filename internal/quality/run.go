@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 )
 
 // RetryDecision is returned alongside a ValidationResult to tell the
@@ -35,9 +37,10 @@ const (
 // ValidationResult is the complete output of a validation run.
 // It is JSON-serializable for storage and PR-description rendering.
 type ValidationResult struct {
-	// Profile identifies the template+audience combination that was applied.
-	ProfileTemplate Template `json:"profile_template"`
-	ProfileAudience Audience `json:"profile_audience"`
+	// Profile identifies the template+audience+tier combination that was applied.
+	ProfileTemplate Template                  `json:"profile_template"`
+	ProfileAudience Audience                  `json:"profile_audience"`
+	ProfileTier     modeltier.QualityGateTier `json:"profile_tier"`
 
 	// Gates contains rules that fired at gate level.
 	Gates []RuleResult `json:"gates,omitempty"`
@@ -77,6 +80,7 @@ func Run(profile Profile, input ValidationInput, baseConfig ValidatorConfig, att
 	result := ValidationResult{
 		ProfileTemplate: profile.Template,
 		ProfileAudience: profile.Audience,
+		ProfileTier:     profile.Tier,
 		AttemptNumber:   attempt,
 		RunAt:           time.Now().UTC(),
 	}
@@ -169,8 +173,8 @@ func (r ValidationResult) QualityReportMarkdown() string {
 
 	sb.WriteString("## Quality report\n\n")
 	sb.WriteString(fmt.Sprintf(
-		"**Profile:** `%s` / `%s` | **Attempt:** %d | **Gates passed:** %v\n\n",
-		r.ProfileTemplate, r.ProfileAudience, r.AttemptNumber, r.GatesPassed,
+		"**Profile:** `%s` / `%s` / `%s` | **Attempt:** %d | **Gates passed:** %v\n\n",
+		r.ProfileTemplate, r.ProfileAudience, r.ProfileTier, r.AttemptNumber, r.GatesPassed,
 	))
 
 	if r.GatesPassed && len(r.Warnings) == 0 {

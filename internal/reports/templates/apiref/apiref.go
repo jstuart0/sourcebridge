@@ -44,6 +44,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/citations"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/manifest"
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
 )
@@ -238,8 +239,9 @@ func (t *Template) Generate(ctx context.Context, input templates.GenerateInput) 
 }
 
 // ValidatorProfile returns the Q.2 profile for the APIReference template.
+// Report templates are not tier-aware in CA-150; see CA-150-followup-H if a use case emerges.
 func ValidatorProfile(audience quality.Audience) (quality.Profile, bool) {
-	return quality.DefaultProfile(quality.TemplateAPIReference, audience)
+	return quality.DefaultProfile(quality.TemplateAPIReference, audience, modeltier.TierFrontier)
 }
 
 // pageIDFor derives the stable page ID for the API reference page.
