@@ -142,6 +142,82 @@ func TestAdminComprehension_GetModelCapabilities_RouteParam(t *testing.T) {
 	}
 }
 
+// TestAdminComprehension_ModelIDLengthCap_UpdateRejects600Chars verifies xander M1:
+// modelId longer than 512 characters is rejected with 400 on PUT, GET, and DELETE.
+func TestAdminComprehension_ModelIDLengthCap_UpdateRejects600Chars(t *testing.T) {
+	s := newComprehensionTestServer(t, featureflags.Flags{})
+
+	longID := strings.Repeat("a", 600)
+	body, _ := json.Marshal(map[string]any{
+		"modelId":         longID,
+		"provider":        "test",
+		"qualityGateTier": "local",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/comprehension/models/"+longID, bytes.NewBuffer(body))
+	w := httptest.NewRecorder()
+
+	s.handleUpdateModelCapabilities(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for 600-char modelId, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.Contains(resp["error"], "512") {
+		t.Errorf("error message should mention 512-char limit, got: %q", resp["error"])
+	}
+}
+
+// TestAdminComprehension_ModelIDLengthCap_GetAndDeleteReject verifies the
+// 512-char cap is enforced on GET and DELETE URL params as well.
+func TestAdminComprehension_ModelIDLengthCap_GetAndDeleteReject(t *testing.T) {
+	longID := strings.Repeat("b", 600)
+
+	for _, tc := range []struct {
+		name    string
+		method  string
+		handler func(s *Server) http.HandlerFunc
+	}{
+		{
+			name:   "GET",
+			method: http.MethodGet,
+			handler: func(s *Server) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) { s.handleGetModelCapabilities(w, r) }
+			},
+		},
+		{
+			name:   "DELETE",
+			method: http.MethodDelete,
+			handler: func(s *Server) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) { s.handleDeleteModelCapabilities(w, r) }
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newComprehensionTestServer(t, featureflags.Flags{})
+			// Wire a chi router so URLParam is populated.
+			router := chi.NewRouter()
+			path := "/api/v1/admin/comprehension/models/{modelId}"
+			switch tc.method {
+			case http.MethodGet:
+				router.Get(path, tc.handler(s))
+			case http.MethodDelete:
+				router.Delete(path, tc.handler(s))
+			}
+
+			req := httptest.NewRequest(tc.method, "/api/v1/admin/comprehension/models/"+longID, nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("%s: expected 400 for 600-char modelId, got %d: %s", tc.name, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestHandleUpdateComprehensionSettingsLeavesOrchestratorUnchangedWhenDisabled(t *testing.T) {
 	s := newComprehensionTestServer(t, featureflags.Flags{})
 

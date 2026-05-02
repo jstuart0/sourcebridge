@@ -40,6 +40,20 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ### Fixed
 
+- **Quality gates no longer reject all local-LLM Living Wiki output** (CA-150).
+  Living Wiki generation now calibrates quality-gate thresholds against the LLM's
+  capability tier (`frontier` / `mid` / `local`). Local models served via Ollama
+  or other open-weight providers previously hit frontier citation-density and
+  vagueness gates they structurally cannot satisfy, producing 100% exclusion.
+  The tier is set per-model in Admin → Comprehension → Model Registry
+  (`/admin/comprehension/models`) or falls back to pattern-matching on the
+  provider/model name. A transient registry error falls back to `TierLocal`
+  rather than reproducing the outage (D16). Also fixes the `wordsPerCitation`
+  message-clarity bug: zero-citation pages no longer report a nonsensical
+  "1 per ~N words" ratio in the violation message. See
+  [`docs/admin/llm-config.md`](docs/admin/llm-config.md#capability-tiers-and-quality-gates)
+  for the operator runbook.
+
 - **Living Wiki mode-override flag plumbing in `EnableLivingWikiForRepo`**
   (`aeb92d8`, CA-138). The resolver previously built a fresh
   `RepositoryLivingWikiSettings` from scratch on every call, which (a)

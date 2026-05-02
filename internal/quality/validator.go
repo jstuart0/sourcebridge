@@ -315,20 +315,31 @@ func (c citationDensityValidator) Validate(input ValidationInput, cfg ValidatorC
 		return nil
 	}
 
-	return []Violation{{
-		Line: 0,
-		Message: fmt.Sprintf(
+	var msg string
+	if parsedCount == 0 {
+		msg = fmt.Sprintf(
+			"citation density too low: 0 citations for %d words (need ≥1 per %d words)",
+			words, threshold,
+		)
+	} else {
+		msg = fmt.Sprintf(
 			"citation density too low: %d citation(s) for %d words (need ≥1 per %d words; have 1 per ~%d words)",
 			parsedCount, words, threshold, wordsPerCitation(words, parsedCount),
-		),
-		Suggestion: "Add source citations in the format (path:start-end) to ground assertions " +
-			"in indexed code.",
+		)
+	}
+	return []Violation{{
+		Line:       0,
+		Message:    msg,
+		Suggestion: "Add source citations in the format (path:start-end) to ground assertions in indexed code.",
 	}}
 }
 
+// wordsPerCitation returns the words-per-citation ratio. Returns 0 when
+// there are no citations — denotes "no citations" rather than misleading
+// callers into thinking 1-per-words is the actual ratio.
 func wordsPerCitation(words, citations int) int {
 	if citations == 0 {
-		return words
+		return 0
 	}
 	return words / citations
 }

@@ -192,6 +192,37 @@ func TestCitationDensity_EmptyPage(t *testing.T) {
 	}
 }
 
+// TestCitationDensity_ZeroCitations_CleanMessage asserts that when there are
+// zero citations the violation message uses the zero-citations branch ("0
+// citations for") and does NOT contain the "1 per ~" ratio text (which would
+// be nonsensical when the denominator is 0).
+func TestCitationDensity_ZeroCitations_CleanMessage(t *testing.T) {
+	// ~80 words, no parseable citations, threshold=50 → fires.
+	src := `## Router
+
+The router dispatches incoming HTTP requests to the correct handler based on
+the URL path and method. Middleware is applied in registration order.
+Each route handler runs in its own goroutine. Panics are recovered and
+converted to 500 responses. The router supports prefix-matching and exact
+matching simultaneously.
+`
+	input := quality.NewMarkdownInput(src)
+	v, _ := quality.ValidatorByID(quality.ValidatorCitationDensity)
+	got := v.Validate(input, quality.ValidatorConfig{CitationDensityWordsPerCitation: 50})
+	if len(got) == 0 {
+		t.Fatal("CitationDensity: expected at least 1 violation for zero-citation prose")
+	}
+	msg := got[0].Message
+	if strings.Contains(msg, "1 per ~") {
+		t.Errorf("CitationDensity zero-citation message must not contain '1 per ~'; got: %q", msg)
+	}
+	if !strings.Contains(msg, "0 citations for") {
+		t.Errorf("CitationDensity zero-citation message must contain '0 citations for'; got: %q", msg)
+	}
+	// Confirm the fmt.Sprintf formatting is not escaped.
+	_ = fmt.Sprintf("message: %s", msg)
+}
+
 // --- reading_level ---
 
 func TestReadingLevel_Clean(t *testing.T) {

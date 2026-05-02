@@ -154,6 +154,10 @@ func (s *Server) handleGetModelCapabilities(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	modelID := chi.URLParam(r, "modelId")
+	if len(modelID) > 512 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "modelId exceeds 512 character limit"})
+		return
+	}
 	mc, err := s.comprehensionStore.GetModelCapabilities(modelID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -181,6 +185,10 @@ func (s *Server) handleUpdateModelCapabilities(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "modelId is required"})
 		return
 	}
+	if len(mc.ModelID) > 512 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "modelId exceeds 512 character limit"})
+		return
+	}
 	if _, ok := modeltier.Parse(string(mc.QualityGateTier)); !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": fmt.Sprintf("invalid qualityGateTier %q: must be one of \"frontier\", \"mid\", \"local\", or \"\" (unknown)", mc.QualityGateTier),
@@ -201,6 +209,10 @@ func (s *Server) handleDeleteModelCapabilities(w http.ResponseWriter, r *http.Re
 		return
 	}
 	modelID := chi.URLParam(r, "modelId")
+	if len(modelID) > 512 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "modelId exceeds 512 character limit"})
+		return
+	}
 	if err := s.comprehensionStore.DeleteModelCapabilities(modelID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

@@ -1291,6 +1291,172 @@ func TestGenerate_RejectsTierUnknown_ErrorLog(t *testing.T) {
 	}
 }
 
+// ──────────────────────────────────────────────────────��──────────────────────
+// CA-150 Phase 6: tier-aware gate integration tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// localTierTemplate returns a page whose markdown contains exactly 1 citation
+// per ~350 words, satisfying the local-tier citation_density warning threshold
+// (400 words/citation) but exceeding the frontier threshold (200 words/citation).
+// The prose uses short sentences for a high Flesch reading-ease score.
+type localTierTemplate struct{ id string }
+
+func (l *localTierTemplate) ID() string { return l.id }
+
+func (l *localTierTemplate) Generate(_ context.Context, input templates.GenerateInput) (ast.Page, error) {
+	pageID := input.RepoID + "." + l.id
+	// ~350 words, 1 citation in the one paragraph that uses assertion verbs.
+	// Frontier citation_density threshold=200 → ceil(350/200)=2 citations needed
+	// → frontier gate fires. Local citation_density threshold=400 is a warning,
+	// not a gate, so local tier passes.
+	//
+	// Factual_grounding fires when a paragraph has assertion verbs AND no citation.
+	// Every paragraph here that uses assertion-pattern words includes the single
+	// citation; purely descriptive paragraphs use no assertion verbs.
+	//
+	// Prose uses short sentences for a high Flesch reading-ease score.
+	const prose = `## Auth middleware
+
+The auth middleware is the entry point for all authenticated HTTP traffic.
+Its design goal is simplicity: one unit of code, one responsibility.
+Stateless token verification means no server-side session lookup is required.
+
+## Token format and claims
+
+The middleware operates on JWTs signed with RS256.
+Tokens carry user identity claims: user ID, roles, and expiry timestamp.
+The key pair is asymmetric — the service holds only the public key.
+Claim structure is documented in the identity contract for the platform.
+
+## Role-based access model
+
+Role enforcement is layered on top of identity.
+Two roles are in use: admin and standard user.
+Admins have full resource access. Standard users are view-only.
+Role membership is derived from the token at the time of each request.
+No database query is required for role evaluation.
+
+## RSA key management
+
+The public key is an RSA 2048-bit PEM-encoded certificate.
+It is loaded from disk on service startup and held in memory.
+A key rotation requires a service restart. Hot reload is not implemented.
+Key material is never logged or included in error responses.
+
+## Expiry and clock skew
+
+Tokens have a one-hour lifespan measured from the iat claim.
+A five-second clock-skew tolerance is applied at the boundary.
+Expired tokens are a hard rejection with no retry or refresh path.
+
+## Session and CSRF posture
+
+The design is stateless: no session IDs, no CSRF tokens, no refresh tokens.
+Each request is fully self-describing from its bearer token alone.
+This simplifies the threat surface considerably.
+
+## Implementation
+
+The middleware validates the JWT, injects claims into the request context,
+and forwards to the next handler on success. (internal/auth/middleware.go:10-40)
+`
+	return ast.Page{
+		ID: pageID,
+		Blocks: []ast.Block{
+			{
+				ID:   ast.GenerateBlockID(pageID, "", ast.BlockKindParagraph, 0),
+				Kind: ast.BlockKindParagraph,
+				Content: ast.BlockContent{Paragraph: &ast.ParagraphContent{
+					Markdown: prose,
+				}},
+				Owner: ast.OwnerGenerated,
+			},
+		},
+	}, nil
+}
+
+// TestGenerateOnePage_LocalTier_PassesWithRelaxedThresholds verifies that
+// prose with ~1 citation per 350 words passes quality gates when the run
+// uses TierLocal. At this density the local citation_density rule is a
+// warning (not a gate), so the page is not excluded.
+func TestGenerateOnePage_LocalTier_PassesWithRelaxedThresholds(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	tmpl := &localTierTemplate{id: "architecture"}
+	reg := orchestrator.NewMapRegistry(tmpl)
+	store := orchestrator.NewMemoryPageStore()
+	pr := orchestrator.NewMemoryWikiPR("pr-local-tier")
+
+	orch := orchestrator.New(orchestrator.Config{RepoID: "local-tier-repo"}, reg, store)
+
+	input := makeBaseInput(twoPackageGraph{}, nil)
+	input.RepoID = "local-tier-repo"
+	pages := []orchestrator.PlannedPage{
+		{
+			ID:         "local-tier-repo.architecture",
+			TemplateID: "architecture",
+			Audience:   quality.AudienceEngineers,
+			Input:      input,
+		},
+	}
+
+	result, err := orch.Generate(ctx, orchestrator.GenerateRequest{
+		Pages:   pages,
+		PR:      pr,
+		LLMTier: modeltier.TierLocal,
+	})
+	if err != nil {
+		t.Fatalf("Generate (local tier): %v", err)
+	}
+	if len(result.Excluded) > 0 {
+		t.Errorf("TierLocal: expected 0 excluded pages, got %d: %+v", len(result.Excluded), result.Excluded)
+	}
+	if len(result.Generated) != 1 {
+		t.Errorf("TierLocal: expected 1 generated page, got %d", len(result.Generated))
+	}
+}
+
+// TestGenerateOnePage_FrontierTier_StillRejectsLowDensity locks backward
+// compatibility: the same ~350-word/1-citation prose that passes under
+// TierLocal is rejected under TierFrontier (which needs ≥2 citations for
+// ~350 words at the 200-words/citation threshold).
+func TestGenerateOnePage_FrontierTier_StillRejectsLowDensity(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	tmpl := &localTierTemplate{id: "architecture"}
+	reg := orchestrator.NewMapRegistry(tmpl)
+	store := orchestrator.NewMemoryPageStore()
+	pr := orchestrator.NewMemoryWikiPR("pr-frontier-tier")
+
+	orch := orchestrator.New(orchestrator.Config{RepoID: "frontier-tier-repo"}, reg, store)
+
+	input := makeBaseInput(twoPackageGraph{}, nil)
+	input.RepoID = "frontier-tier-repo"
+	pages := []orchestrator.PlannedPage{
+		{
+			ID:         "frontier-tier-repo.architecture",
+			TemplateID: "architecture",
+			Audience:   quality.AudienceEngineers,
+			Input:      input,
+		},
+	}
+
+	result, err := orch.Generate(ctx, orchestrator.GenerateRequest{
+		Pages:   pages,
+		PR:      pr,
+		LLMTier: modeltier.TierFrontier,
+	})
+	if err != nil {
+		t.Fatalf("Generate (frontier tier): %v", err)
+	}
+	if len(result.Excluded) != 1 {
+		t.Errorf("TierFrontier: expected 1 excluded page (low citation density), got %d (generated=%d)",
+			len(result.Excluded), len(result.Generated))
+	}
+}
+
 // TestOverviewPageIDPrefix verifies the OverviewPageID helper produces the correct format.
 func TestOverviewPageIDPrefix(t *testing.T) {
 	t.Parallel()

@@ -13,6 +13,15 @@ SourceBridge is a requirement-aware code comprehension platform — a "field gui
 - **Web UI** (`web/`) — Next.js 15 / React 19 dashboard
 - **Proto** (`proto/`) — gRPC service definitions
 
+**Capability tiers and quality gates**: Living Wiki generation applies tiered
+quality-gate thresholds so that local/open-weight models (Ollama, smaller
+open-weights) are not uniformly rejected by gates calibrated for frontier
+models. The three tiers are `frontier`, `mid`, and `local`; an unregistered
+model falls back to pattern-matching on provider/model name. Tiers are set
+per-model in the Admin → Comprehension → Model Registry (`/admin/comprehension/models`).
+See [`docs/admin/llm-config.md`](docs/admin/llm-config.md#capability-tiers-and-quality-gates)
+for the full operator runbook and threshold table reference.
+
 ## Building
 
 ```bash

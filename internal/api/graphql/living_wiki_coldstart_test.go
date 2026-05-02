@@ -45,6 +45,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/manifest"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
+	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 )
 
@@ -1662,5 +1663,113 @@ func TestColdStart_TierUnknown_FallsBackToFrontier_LogsWarn(t *testing.T) {
 	logStr := logBuf.String()
 	if !strings.Contains(logStr, "tier=local") {
 		t.Errorf("expected tier=local when resolver is nil (D16 fallback); log:\n%s", logStr)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CA-150 Phase 6: per-repo override tier derivation + registry normalization
+// ─────────────────────────────────────────────────────────────────────────────
+
+// recordingTierFunc is a TierFunc that records the provider/model it was called
+// with, so tests can assert that tier resolution uses the correct override.
+type recordingTierFunc struct {
+	mu       sync.Mutex
+	provider string
+	model    string
+	tier     modeltier.QualityGateTier
+}
+
+func (r *recordingTierFunc) Resolve(_ context.Context, provider, model string) modeltier.Resolution {
+	r.mu.Lock()
+	r.provider = provider
+	r.model = model
+	r.mu.Unlock()
+	return modeltier.Resolution{Tier: r.tier, Source: "test-recording"}
+}
+
+// TestColdStart_PerRepoOverride_DerivesTierFromOverride verifies that when a
+// repo-level LLM override resolves to a different (provider, model) than the
+// workspace default, the quality-gate tier is derived from the override's
+// resolved snapshot — not from the workspace default.
+//
+// Concretely: workspace default resolves to "anthropic/claude-opus-4-7"
+// (frontier); the per-repo resolver returns "ollama/qwen3:7b" (local, 7B < 30B).
+// The cold-start runner must log provider=ollama, model=qwen3:7b, and tier=local.
+func TestColdStart_PerRepoOverride_DerivesTierFromOverride(t *testing.T) {
+	// No t.Parallel() — swaps global slog.Default; must not race with other tests.
+
+	var logBuf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	// Per-repo resolver returns the local-model override (ollama/qwen3:7b).
+	// Pattern: ollama + 7B < 30B → TierLocal.
+	overrideResolver := &stubLLMResolver{provider: "ollama", model: "qwen3:7b"}
+
+	mc := lwmetrics.NewCollector()
+	jrs := livingwiki.NewMemJobResultStore()
+	lwOrch := csLWOrch(&csPassingTemplate{id: "glossary"})
+
+	runner := buildColdStartRunner(
+		lwOrch, "override-repo", "default",
+		newStubGraphStore(), nil, nil, nil,
+		"git_repo",
+		jrs, nil, nil, nil, nil,
+		mc,
+		overrideResolver, // per-repo resolver → returns ollama/qwen3:7b
+		nil,
+		GenerationModeLWDetailed,
+		nil, // comprehensionStore nil → falls through to ClassifyByPattern
+	)
+
+	rt := &fakeRuntime{jobID: "override-tier-job"}
+	_ = runner(context.Background(), rt)
+
+	logStr := logBuf.String()
+	// The resolved tier log must show the override provider/model.
+	if !strings.Contains(logStr, "provider=ollama") {
+		t.Errorf("expected provider=ollama in tier-resolution log (override should win); log:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, "model=qwen3:7b") {
+		t.Errorf("expected model=qwen3:7b in tier-resolution log (override should win); log:\n%s", logStr)
+	}
+	// ClassifyByPattern for ollama/qwen3:7b → 7B < 30B → TierLocal.
+	if !strings.Contains(logStr, "tier=local") {
+		t.Errorf("expected tier=local for ollama/qwen3:7b (7B < 30B); log:\n%s", logStr)
+	}
+	// Workspace default (anthropic) must NOT appear as the resolved provider.
+	if strings.Contains(logStr, "provider=anthropic") {
+		t.Errorf("unexpected provider=anthropic — workspace default must not override the per-repo resolver; log:\n%s", logStr)
+	}
+}
+
+// TestNewRegistryTierFunc_NormalizesModelCaseAndWhitespace verifies xander M3:
+// model IDs registered in lowercase are matched regardless of the caller's
+// casing or surrounding whitespace in the lookup key.
+func TestNewRegistryTierFunc_NormalizesModelCaseAndWhitespace(t *testing.T) {
+	t.Parallel()
+
+	store := comprehension.NewMemStore()
+	// Register under canonical lowercase key.
+	if err := store.SetModelCapabilities(&comprehension.ModelCapabilities{
+		ModelID:         "qwen3:32b",
+		Provider:        "ollama",
+		QualityGateTier: modeltier.TierLocal,
+		Source:          "builtin",
+	}); err != nil {
+		t.Fatalf("SetModelCapabilities: %v", err)
+	}
+
+	tierFn := newRegistryTierFunc(store)
+
+	// Lookup with mixed case and surrounding whitespace.
+	got := tierFn(context.Background(), "  Ollama  ", "  Qwen3:32B  ")
+
+	if got.Source != "registry" {
+		t.Errorf("expected source=registry (store hit), got %q — normalization may not be applied", got.Source)
+	}
+	if got.Tier != modeltier.TierLocal {
+		t.Errorf("expected tier=local from registry, got %q", got.Tier)
 	}
 }

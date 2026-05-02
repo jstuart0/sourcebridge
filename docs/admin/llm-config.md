@@ -852,3 +852,73 @@ The compile-time assertion `var _ WorkerLLM = (*worker.Client)(nil)` in
 `internal/worker/llmcall/interface_test.go` catches the third leg —
 adding to the interface without implementing it on `*worker.Client`
 breaks the build immediately.
+
+---
+
+## Capability tiers and quality gates
+
+Living Wiki generation evaluates each generated page against a quality
+profile before accepting it. The quality gates are **tier-aware**: the
+same gate that rejects low-density prose from a frontier model may be
+relaxed to a warning (or have a looser threshold) for a local model that
+cannot reliably meet frontier citation-density requirements.
+
+### The three tiers
+
+| Tier | `QualityGateTier` constant | Typical models |
+|---|---|---|
+| `frontier` | `modeltier.TierFrontier` | Claude, GPT-4-class, Gemini Ultra |
+| `mid` | `modeltier.TierMid` | GPT-3.5-class, Gemini Flash, mid-size open-weights |
+| `local` | `modeltier.TierLocal` | Ollama-served models, <30B open-weights (qwen3, llama3, phi4, etc.) |
+| *(empty)* | `modeltier.TierUnknown` | Unclassified — falls back to pattern matching, then TierLocal |
+
+`TierUnknown` is the zero value. Production code must never rely on
+zero-value semantics for tier; the cold-start runner logs an ERROR when
+it receives `TierUnknown` and the run falls through to the defensive
+frontier profile (CA-150 D16: resolveErr → TierLocal).
+
+### How to set the tier for a model
+
+Go to **Admin → Comprehension → Model Registry** (`/admin/comprehension/models`).
+Create or update an entry for the model and set `qualityGateTier` to
+`frontier`, `mid`, or `local`. The registry key is the **model string
+alone** (not `provider/model`) — if two providers use the same model
+name, register them under distinct model IDs (e.g. `openrouter/anthropic/claude-3-5-sonnet`).
+
+This is distinct from the active-model selection at **Admin → LLM**
+(`/admin/llm`): the LLM page controls *which* model runs, while the
+Model Registry controls *how strictly* the quality gates evaluate the
+output.
+
+### Pattern-match fallback
+
+When a model is not in the registry the resolver calls
+`modeltier.ClassifyByPattern(provider, model)`, which matches against a
+built-in table of provider name prefixes and model name substrings (most
+specific first). Operators whose provider is not in the built-in table
+will land on `TierLocal` by default; to get a different tier, add an
+explicit registry entry.
+
+Operators can inspect which tier was resolved for a run by grepping the
+structured log:
+
+```bash
+kubectl -n sourcebridge logs -l app=sourcebridge-api --tail=500 \
+  | grep "resolved quality-gate tier"
+```
+
+Each line includes `tier`, `source` (`registry` or `pattern`), and any
+lookup error, alongside `provider` and `model`.
+
+### Registry normalization
+
+Model IDs are lower-cased and whitespace-trimmed before registry lookup,
+so `"  Qwen3:32B  "` hits a `"qwen3:32b"` entry. Register models in
+lowercase to rely on this normalization.
+
+### Threshold table
+
+The exact per-tier thresholds for every `(template, audience)` combination
+live in `internal/quality/profile.go`. The `tierOverrides` map documents
+which validators change between tiers and in which direction. Reading it
+is the authoritative reference for operators tuning gate behaviour.

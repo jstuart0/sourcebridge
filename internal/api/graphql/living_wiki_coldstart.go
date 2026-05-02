@@ -1645,6 +1645,11 @@ func buildRelatedPageIDsByLabel(pages []lworch.PlannedPage) map[string]string {
 // override; the pattern-match fallback still applies the strip-list heuristic.
 func newRegistryTierFunc(store comprehension.Store) modeltier.TierFunc {
 	return func(ctx context.Context, provider, model string) modeltier.Resolution {
+		// Normalize before lookup so "  Qwen3:32B  " hits a "qwen3:32b"
+		// registry entry. Xander M3: prevents silent registry bypass via
+		// case/whitespace variation in operator-supplied model strings.
+		model = strings.ToLower(strings.TrimSpace(model))
+		provider = strings.ToLower(strings.TrimSpace(provider))
 		if store != nil {
 			cap, err := store.GetModelCapabilities(model)
 			if err != nil {
