@@ -184,9 +184,9 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 					pinnedBlocks = append(pinnedBlocks,
 						fmt.Sprintf("## %s:%d-%d\n```\n%s\n```", detail.FilePath, detail.StartLine, detail.EndLine, slice))
 					pinnedSource = true
-					if in.FilePath == "" {
-						in.FilePath = detail.FilePath
-					}
+					// detail.FilePath is authoritative when range-pin succeeds;
+					// overwrite any caller-supplied (possibly stale) path.
+					in.FilePath = detail.FilePath
 				}
 			}
 		}

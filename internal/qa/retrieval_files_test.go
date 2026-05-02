@@ -207,6 +207,12 @@ func TestSliceLines(t *testing.T) {
 			name: "full file", content: "a\nb\nc",
 			start: 1, end: 3, expected: "a\nb\nc",
 		},
+		{
+			// start beyond file length — stale graph range against a now-shorter
+			// file must not pin the last line and suppress the fallback path.
+			name: "start-beyond-EOF", content: "a\nb\nc",
+			start: 999, end: 1000, expected: "",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -345,6 +345,112 @@ func TestOrchestrator_DiscussSymbolFallbackWhenNoLineRange(t *testing.T) {
 	}
 }
 
+// TestOrchestrator_DiscussAuthoritativeFilePath verifies that when a caller
+// passes both SymbolID and a stale/wrong FilePath, the pipeline overwrites
+// in.FilePath with detail.FilePath once the range-pin succeeds. The worker
+// request, the labeled source block, and the SymbolsInFile peer lookup must
+// all use the symbol-store's authoritative path, not the caller-supplied one.
+func TestOrchestrator_DiscussAuthoritativeFilePath(t *testing.T) {
+	reader := &fakeDeepReader{
+		understanding: &knowledge.RepositoryUnderstanding{
+			Stage: knowledge.UnderstandingReady, TreeStatus: knowledge.UnderstandingTreeComplete,
+			CorpusID: "corpus",
+		},
+		nodes: []comprehension.SummaryNode{},
+	}
+	synth := &fakeSynth{
+		available: true,
+		resp: &reasoningv1.AnswerQuestionResponse{
+			Answer: "Auth answer.",
+			Usage:  &commonv1.LLMUsage{Model: "claude-sonnet", InputTokens: 10, OutputTokens: 5},
+		},
+	}
+	o := New(synth, reader, nil, DefaultConfig()).
+		WithSymbolLookup(&fakeSymbolLookup{
+			byID:        map[string]string{"sym-auth": "Indexed symbol: auth.Handle"},
+			filePathsBy: map[string]string{"sym-auth": "auth/handler.go"},
+			inFile: map[string][]SymbolContextRef{
+				"auth/handler.go": {
+					{
+						ID:            "sym-auth",
+						Name:          "Handle",
+						QualifiedName: "auth.Handle",
+						FilePath:      "auth/handler.go",
+						StartLine:     1,
+						EndLine:       1,
+						Signature:     "func Handle()",
+					},
+					{
+						ID:            "sym-peer",
+						Name:          "peer",
+						QualifiedName: "auth.peer",
+						FilePath:      "auth/handler.go",
+						StartLine:     2,
+						EndLine:       2,
+						Signature:     "func peer()",
+					},
+				},
+				// No entry for "wrong.go" — peer lookup on wrong path yields nothing.
+			},
+			details: map[string]SymbolDetail{
+				"sym-auth": {
+					ID:            "sym-auth",
+					Name:          "Handle",
+					QualifiedName: "auth.Handle",
+					FilePath:      "auth/handler.go",
+					StartLine:     1,
+					EndLine:       1,
+					Signature:     "func Handle()",
+				},
+			},
+		}).
+		WithFileReader(&fakeFileReader{files: map[string]string{
+			"auth/handler.go": "func Handle() {}",
+		}})
+
+	// Caller passes SymbolID with a stale/wrong FilePath.
+	in := AskInput{
+		RepositoryID: "repo-1",
+		Question:     "how does auth work?",
+		Mode:         ModeDeep,
+		SymbolID:     "sym-auth",
+		FilePath:     "wrong.go",
+	}
+	res, err := o.Ask(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Answer == "" {
+		t.Fatal("expected answer")
+	}
+	prompt := synth.lastReq.GetContextCode()
+
+	// Labeled block must use the authoritative path, not "wrong.go".
+	if !strings.Contains(prompt, "## auth/handler.go:") {
+		t.Errorf("expected labeled block with auth/handler.go, not found in context:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "## wrong.go:") {
+		t.Errorf("stale path wrong.go must not appear in labeled block:\n%s", prompt)
+	}
+
+	// Worker request FilePath must be the authoritative path.
+	if got := synth.lastReq.GetFilePath(); got != "auth/handler.go" {
+		t.Errorf("GetFilePath() = %q, want %q", got, "auth/handler.go")
+	}
+
+	// SymbolsInFile peer dedup used auth/handler.go (sym-peer appears) not wrong.go.
+	syms := synth.lastReq.GetContextSymbols()
+	foundPeer := false
+	for _, s := range syms {
+		if s.GetId() == "sym-peer" {
+			foundPeer = true
+		}
+	}
+	if !foundPeer {
+		t.Errorf("sym-peer should appear via SymbolsInFile(auth/handler.go); got symbols: %+v", syms)
+	}
+}
+
 func TestOrchestrator_DiscussFlattensToLegacyShape(t *testing.T) {
 	// This tests the helper used by the GraphQL adapter — verifies
 	// that the 5 reference variants flatten to strings that mirror
