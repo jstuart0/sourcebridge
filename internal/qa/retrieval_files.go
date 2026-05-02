@@ -284,6 +284,31 @@ func bestSnippet(absPath string, tokens []string, maxLines int, maxBytes int64) 
 	return strings.Join(window, "\n"), start + 1, end, nil
 }
 
+// sliceLines returns lines[start-1:end] from a 1-based inclusive
+// [start, end] window. It clamps start to [1, len(lines)] and end to
+// [start, len(lines)]. Returns "" for empty content, zero/negative
+// bounds, or end < start.
+func sliceLines(content string, start, end int) string {
+	if content == "" || end < start || start <= 0 || end <= 0 {
+		return ""
+	}
+	lines := strings.Split(content, "\n")
+	n := len(lines)
+	if start < 1 {
+		start = 1
+	}
+	if start > n {
+		start = n
+	}
+	if end < start {
+		return ""
+	}
+	if end > n {
+		end = n
+	}
+	return strings.Join(lines[start-1:end], "\n")
+}
+
 // isTestPath identifies files that live under tests/ or follow the
 // common *_test.*, *.test.* naming.
 func isTestPath(path string) bool {
