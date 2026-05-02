@@ -869,6 +869,10 @@ func mapModelCapability(mc *comprehension.ModelCapabilities) *ModelCapabilityPro
 	if !mc.UpdatedAt.IsZero() {
 		p.UpdatedAt = &mc.UpdatedAt
 	}
+	if mc.QualityGateTier != "" {
+		s := string(mc.QualityGateTier)
+		p.QualityGateTier = &s
+	}
 	return p
 }
 

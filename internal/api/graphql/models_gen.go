@@ -808,6 +808,7 @@ type ModelCapabilityProfile struct {
 	Source                 string     `json:"source"`
 	Notes                  *string    `json:"notes,omitempty"`
 	UpdatedAt              *time.Time `json:"updatedAt,omitempty"`
+	QualityGateTier        *string    `json:"qualityGateTier,omitempty"`
 }
 
 type Module struct {
@@ -1355,6 +1356,7 @@ type UpdateModelCapabilitiesInput struct {
 	EmbeddingModel         *bool   `json:"embeddingModel,omitempty"`
 	Source                 *string `json:"source,omitempty"`
 	Notes                  *string `json:"notes,omitempty"`
+	QualityGateTier        *string `json:"qualityGateTier,omitempty"`
 }
 
 type UpdateRepositoryKnowledgeSettingsInput struct {

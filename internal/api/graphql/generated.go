@@ -635,6 +635,7 @@ type ComplexityRoot struct {
 		ModelID                func(childComplexity int) int
 		Notes                  func(childComplexity int) int
 		Provider               func(childComplexity int) int
+		QualityGateTier        func(childComplexity int) int
 		Source                 func(childComplexity int) int
 		ToolUse                func(childComplexity int) int
 		UpdatedAt              func(childComplexity int) int
@@ -4194,6 +4195,13 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.ModelCapabilityProfile.Provider(childComplexity), true
+
+	case "ModelCapabilityProfile.qualityGateTier":
+		if e.complexity.ModelCapabilityProfile.QualityGateTier == nil {
+			break
+		}
+
+		return e.complexity.ModelCapabilityProfile.QualityGateTier(childComplexity), true
 
 	case "ModelCapabilityProfile.source":
 		if e.complexity.ModelCapabilityProfile.Source == nil {
@@ -30409,6 +30417,47 @@ func (ec *executionContext) fieldContext_ModelCapabilityProfile_updatedAt(_ cont
 	return fc, nil
 }
 
+func (ec *executionContext) _ModelCapabilityProfile_qualityGateTier(ctx context.Context, field graphql.CollectedField, obj *ModelCapabilityProfile) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_ModelCapabilityProfile_qualityGateTier(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.QualityGateTier, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOString2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_ModelCapabilityProfile_qualityGateTier(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ModelCapabilityProfile",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Module_id(ctx context.Context, field graphql.CollectedField, obj *Module) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_Module_id(ctx, field)
 	if err != nil {
@@ -33472,6 +33521,8 @@ func (ec *executionContext) fieldContext_Mutation_updateModelCapabilities(ctx co
 				return ec.fieldContext_ModelCapabilityProfile_notes(ctx, field)
 			case "updatedAt":
 				return ec.fieldContext_ModelCapabilityProfile_updatedAt(ctx, field)
+			case "qualityGateTier":
+				return ec.fieldContext_ModelCapabilityProfile_qualityGateTier(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type ModelCapabilityProfile", field.Name)
 		},
@@ -38487,6 +38538,8 @@ func (ec *executionContext) fieldContext_Query_modelCapabilities(_ context.Conte
 				return ec.fieldContext_ModelCapabilityProfile_notes(ctx, field)
 			case "updatedAt":
 				return ec.fieldContext_ModelCapabilityProfile_updatedAt(ctx, field)
+			case "qualityGateTier":
+				return ec.fieldContext_ModelCapabilityProfile_qualityGateTier(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type ModelCapabilityProfile", field.Name)
 		},
@@ -38564,6 +38617,8 @@ func (ec *executionContext) fieldContext_Query_modelCapability(ctx context.Conte
 				return ec.fieldContext_ModelCapabilityProfile_notes(ctx, field)
 			case "updatedAt":
 				return ec.fieldContext_ModelCapabilityProfile_updatedAt(ctx, field)
+			case "qualityGateTier":
+				return ec.fieldContext_ModelCapabilityProfile_qualityGateTier(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type ModelCapabilityProfile", field.Name)
 		},
@@ -53030,7 +53085,7 @@ func (ec *executionContext) unmarshalInputUpdateModelCapabilitiesInput(ctx conte
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"modelId", "provider", "declaredContextTokens", "effectiveContextTokens", "instructionFollowing", "jsonMode", "toolUse", "extractionGrade", "creativeGrade", "embeddingModel", "source", "notes"}
+	fieldsInOrder := [...]string{"modelId", "provider", "declaredContextTokens", "effectiveContextTokens", "instructionFollowing", "jsonMode", "toolUse", "extractionGrade", "creativeGrade", "embeddingModel", "source", "notes", "qualityGateTier"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -53121,6 +53176,13 @@ func (ec *executionContext) unmarshalInputUpdateModelCapabilitiesInput(ctx conte
 				return it, err
 			}
 			it.Notes = data
+		case "qualityGateTier":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("qualityGateTier"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.QualityGateTier = data
 		}
 	}
 
@@ -56882,6 +56944,8 @@ func (ec *executionContext) _ModelCapabilityProfile(ctx context.Context, sel ast
 			out.Values[i] = ec._ModelCapabilityProfile_notes(ctx, field, obj)
 		case "updatedAt":
 			out.Values[i] = ec._ModelCapabilityProfile_updatedAt(ctx, field, obj)
+		case "qualityGateTier":
+			out.Values[i] = ec._ModelCapabilityProfile_qualityGateTier(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}

@@ -37,11 +37,13 @@ interface ModelCapability {
   lastProbedAt?: string;
   source: string;
   notes?: string;
+  qualityGateTier?: string;
 }
 
 const GRADE_OPTIONS = ["low", "medium", "high"];
 const JSON_MODE_OPTIONS = ["none", "prompted", "native"];
 const TOOL_USE_OPTIONS = ["none", "supported", "native"];
+const TIER_OPTIONS = ["", "frontier", "mid", "local"];
 
 function gradeBadge(grade: string) {
   const colors: Record<string, string> = {
@@ -61,6 +63,25 @@ function gradeBadge(grade: string) {
       )}
     >
       {grade}
+    </span>
+  );
+}
+
+function tierBadge(tier?: string) {
+  const colors: Record<string, string> = {
+    frontier: "bg-green-500/20 text-green-400 border-green-500/30",
+    mid: "bg-amber-500/20 text-amber-400 border-amber-500/30",
+    local: "bg-gray-500/20 text-gray-400 border-gray-500/30",
+  };
+  const label = tier || "";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium",
+        colors[label] || "bg-[var(--bg-hover)] text-[var(--text-muted)] border-[var(--border-subtle)]"
+      )}
+    >
+      {label || "auto"}
     </span>
   );
 }
@@ -93,6 +114,7 @@ export default function ModelsPage() {
     creativeGrade: "low",
     embeddingModel: false,
     source: "manual",
+    qualityGateTier: "",
   });
 
   const fetchWithAuth = useCallback(async (path: string, options?: RequestInit) => {
@@ -186,6 +208,7 @@ export default function ModelsPage() {
           creativeGrade: "low",
           embeddingModel: false,
           source: "manual",
+          qualityGateTier: "",
         });
         setMessage("Model added.");
         await loadModels();
@@ -256,6 +279,19 @@ export default function ModelsPage() {
           >
             {TOOL_USE_OPTIONS.map((g) => (
               <option key={g} value={g}>{g}</option>
+            ))}
+          </select>
+        </td>
+        <td className="py-3 pr-3">
+          <select
+            className={selectClass}
+            value={form.qualityGateTier ?? ""}
+            onChange={(e) => setForm({ ...form, qualityGateTier: e.target.value })}
+            aria-label="Tier"
+            style={{ width: 110 }}
+          >
+            {TIER_OPTIONS.map((t) => (
+              <option key={t} value={t}>{t === "" ? "— auto-detect —" : t}</option>
             ))}
           </select>
         </td>
@@ -397,6 +433,19 @@ export default function ModelsPage() {
                 ))}
               </select>
             </div>
+            <div>
+              <label className="mb-1 block text-xs text-[var(--text-secondary)]">Quality-gate tier (optional)</label>
+              <select
+                className={selectClass}
+                value={newModel.qualityGateTier ?? ""}
+                onChange={(e) => setNewModel({ ...newModel, qualityGateTier: e.target.value })}
+                aria-label="Tier"
+              >
+                {TIER_OPTIONS.map((t) => (
+                  <option key={t} value={t}>{t === "" ? "— auto-detect —" : t}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="mt-3 flex gap-2">
             <Button variant="primary" size="sm" onClick={handleAddModel} disabled={saving || !newModel.modelId}>
@@ -421,6 +470,7 @@ export default function ModelsPage() {
                 <th className="pb-2 pr-3 font-medium">Instruction</th>
                 <th className="pb-2 pr-3 font-medium">JSON</th>
                 <th className="pb-2 pr-3 font-medium">Tool Use</th>
+                <th className="pb-2 pr-3 font-medium" title="Controls quality gate strictness: frontier=strictest, local=most relaxed">Tier</th>
                 <th className="pb-2 pr-3 font-medium">Source</th>
                 <th className="pb-2 font-medium">Actions</th>
               </tr>
@@ -442,6 +492,7 @@ export default function ModelsPage() {
                     <td className="py-2.5 pr-3">{gradeBadge(m.instructionFollowing)}</td>
                     <td className="py-2.5 pr-3">{gradeBadge(m.jsonMode)}</td>
                     <td className="py-2.5 pr-3">{gradeBadge(m.toolUse)}</td>
+                    <td className="py-2.5 pr-3">{tierBadge(m.qualityGateTier)}</td>
                     <td className="py-2.5 pr-3 text-[var(--text-muted)]">{m.source}</td>
                     <td className="py-2.5">
                       <div className="flex gap-1">
@@ -466,7 +517,7 @@ export default function ModelsPage() {
               )}
               {generationModels.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-[var(--text-secondary)]">
+                  <td colSpan={9} className="py-8 text-center text-[var(--text-secondary)]">
                     No models registered. Add a model or seed from builtin profiles.
                   </td>
                 </tr>

@@ -33,6 +33,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/governance"
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
@@ -2294,6 +2295,13 @@ func (r *mutationResolver) UpdateModelCapabilities(ctx context.Context, input Up
 	}
 	if input.Notes != nil {
 		mc.Notes = *input.Notes
+	}
+	if input.QualityGateTier != nil {
+		tier, ok := modeltier.Parse(*input.QualityGateTier)
+		if !ok {
+			return nil, fmt.Errorf("invalid qualityGateTier %q: must be one of \"\", \"frontier\", \"mid\", \"local\"", *input.QualityGateTier)
+		}
+		mc.QualityGateTier = tier
 	}
 
 	if err := r.ComprehensionStore.SetModelCapabilities(mc); err != nil {
