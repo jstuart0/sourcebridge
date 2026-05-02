@@ -415,6 +415,21 @@ func (s *MemStore) ListLogs(jobID string, filter JobLogFilter) []*JobLogEntry {
 	return out
 }
 
+// ForceUpdatedAt directly sets UpdatedAt on the stored job to t. This is
+// provided for testing scenarios (e.g. reaper threshold assertions) that need
+// to simulate a stale job without waiting for real time to pass. It must not
+// be used in production paths.
+func (s *MemStore) ForceUpdatedAt(id string, t time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, ok := s.jobs[id]
+	if !ok {
+		return fmt.Errorf("job %s not found", id)
+	}
+	j.UpdatedAt = t
+	return nil
+}
+
 // cloneJob returns a deep-enough copy of the job record. Pointer fields
 // (timestamps) are independently allocated so callers cannot mutate the
 // stored record via returned references.

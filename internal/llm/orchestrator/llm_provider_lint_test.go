@@ -209,10 +209,11 @@ func isStringLiteral(e ast.Expr, want string) bool {
 }
 
 // isLivingWikiStringLiteral matches:
-//   "living_wiki"            — bare string (won't compile against
-//                                Subsystem typed field, but we still
-//                                pattern-match for completeness)
-//   llm.Subsystem("living_wiki") — type conversion form
+//
+//	"living_wiki"            — bare string (won't compile against
+//	                             Subsystem typed field, but we still
+//	                             pattern-match for completeness)
+//	llm.Subsystem("living_wiki") — type conversion form
 func isLivingWikiStringLiteral(e ast.Expr) bool {
 	if isStringLiteral(e, "living_wiki") {
 		return true

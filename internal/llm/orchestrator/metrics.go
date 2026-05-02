@@ -88,12 +88,12 @@ type Snapshot struct {
 
 // SubsystemStats aggregates metrics across every job type in a subsystem.
 type SubsystemStats struct {
-	Total        int   `json:"total"`
-	Succeeded    int   `json:"succeeded"`
-	Failed       int   `json:"failed"`
-	Cancelled    int   `json:"cancelled"`
-	P50LatencyMs int64 `json:"p50_latency_ms"`
-	P95LatencyMs int64 `json:"p95_latency_ms"`
+	Total        int     `json:"total"`
+	Succeeded    int     `json:"succeeded"`
+	Failed       int     `json:"failed"`
+	Cancelled    int     `json:"cancelled"`
+	P50LatencyMs int64   `json:"p50_latency_ms"`
+	P95LatencyMs int64   `json:"p95_latency_ms"`
 	SuccessRate  float64 `json:"success_rate"`
 }
 

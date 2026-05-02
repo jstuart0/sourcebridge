@@ -297,26 +297,69 @@ func isLLMBackedEnqueue(req *llm.EnqueueRequest) bool {
 // call inside one page (especially architecture pages with full source bodies
 // embedded in the prompt) can legitimately take several minutes, during which
 // no per-page progress update fires. 10 min was killing real jobs mid-flight.
+//
+// Note (CA-141): as of 2026-05-02, living_wiki is in the heartbeat allow-list
+// (subsystemEmitsHeartbeats), so staleGeneratingThresholdLivingWiki is dormant
+// for normal flows — kept as a safety net if Heartbeat() ticks ever stop firing
+// in the dispatcher. Audit internal/api/graphql/living_wiki_coldstart.go:521-539
+// before relying on this comment.
 const (
 	staleGeneratingThreshold           = 10 * time.Minute
 	staleGeneratingThresholdLivingWiki = 30 * time.Minute
 	stalePendingThreshold              = 45 * time.Minute
+
+	// heartbeatStaleThreshold is the shorter staleness window applied to
+	// subsystems whose dispatcher calls rt.Heartbeat() regularly (currently
+	// only living_wiki). UpdatedAt staleness >5 min for a heartbeating
+	// subsystem unambiguously signals a worker wedge — the heartbeat goroutine
+	// ticks every 30 s, so 5 min tolerates 9 consecutive missed ticks.
+	heartbeatStaleThreshold = 5 * time.Minute
 )
 
-// generatingThresholdFor returns the per-job stall threshold based on the
-// job's subsystem. Living-wiki cold-start runs are explicitly long-running.
-func generatingThresholdFor(job *llm.Job) time.Duration {
-	if job.Subsystem == "living_wiki" {
-		return staleGeneratingThresholdLivingWiki
+// subsystemEmitsHeartbeats returns true for subsystems whose dispatcher calls
+// rt.Heartbeat() at least once per heartbeatStaleThreshold/2 (i.e. ≤2.5 min).
+// The shorter heartbeatStaleThreshold is applied to these subsystems, reducing
+// stuck-job detection from ~32 min to ~5 min 15 s.
+//
+// Audit before adding entries:
+//   - grep `rt.Heartbeat()` in the subsystem's dispatcher and confirm the tick
+//     interval is ≤ heartbeatStaleThreshold / 2.
+//   - Before adding subsystem X: grep `rt.Heartbeat()` in X's dispatcher and
+//     confirm tick interval ≤ heartbeatStaleThreshold / 2 (i.e. ≤2.5 min).
+//   - A false positive here (listing a subsystem that doesn't heartbeat) causes
+//     false reaps of healthy long-running calls.
+var subsystemEmitsHeartbeats = func(subsystem string) bool {
+	switch subsystem {
+	case "living_wiki":
+		return true
 	}
-	return staleGeneratingThreshold
+	return false
+}
+
+// generatingThresholdFor returns the per-job stall threshold and a label
+// string for log triage. The label is one of: "heartbeat_stale",
+// "living_wiki_wall", "generating_wall".
+func generatingThresholdFor(job *llm.Job) (time.Duration, string) {
+	if subsystemEmitsHeartbeats(string(job.Subsystem)) {
+		return heartbeatStaleThreshold, "heartbeat_stale"
+	}
+	// defense-in-depth: if living_wiki is ever removed from subsystemEmitsHeartbeats,
+	// fall back to the 30-min ceiling rather than the shorter staleGeneratingThreshold.
+	if job.Subsystem == "living_wiki" {
+		return staleGeneratingThresholdLivingWiki, "living_wiki_wall"
+	}
+	return staleGeneratingThreshold, "generating_wall"
 }
 
 // reaper periodically scans for jobs stuck in pending/generating and marks
 // them failed. This prevents stale jobs from permanently blocking dedupe
 // after a worker crash, timeout, or deployment.
+//
+// Tick cadence is 15 s (CA-141). At 15 s, worst-case reap lag is
+// threshold + 15 s — for heartbeat-emitting subsystems (5 min threshold)
+// that is 5 min 15 s, down from the previous ~32 min.
 func (o *Orchestrator) reaper() {
-	ticker := time.NewTicker(60 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -354,9 +397,10 @@ func (o *Orchestrator) reapStaleJobs() {
 		}
 
 		age := now.Sub(job.UpdatedAt)
-		threshold := generatingThresholdFor(job)
+		threshold, thresholdKind := generatingThresholdFor(job)
 		if job.Status == llm.StatusPending {
 			threshold = stalePendingThreshold
+			thresholdKind = "pending_wall"
 		}
 		// Jobs waiting for a knowledge generation slot show phase
 		// "queued" or "backoff". When alive they heartbeat every few
@@ -376,6 +420,7 @@ func (o *Orchestrator) reapStaleJobs() {
 		if (job.ProgressPhase == "queued" || job.ProgressPhase == "backoff") &&
 			age < staleGeneratingThreshold {
 			threshold = stalePendingThreshold
+			thresholdKind = "pending_wall"
 		}
 		if age < threshold {
 			continue
@@ -401,6 +446,7 @@ func (o *Orchestrator) reapStaleJobs() {
 			"status", job.Status,
 			"age", age.Round(time.Second).String(),
 			"threshold", threshold.String(),
+			"threshold_kind", thresholdKind,
 			"event", "stale_job_reaped",
 			"cancellation_method", "run_context_cancel",
 			"claim", "acquired",

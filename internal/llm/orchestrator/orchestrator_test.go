@@ -50,10 +50,10 @@ func TestOrchestratorEnqueueRunsJobToCompletion(t *testing.T) {
 
 	var ran atomic.Bool
 	job, err := orch.Enqueue(&llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "cliff_notes",
-		TargetKey: "repo-1:cliff_notes:dev:medium",
+		JobType:     "cliff_notes",
+		TargetKey:   "repo-1:cliff_notes:dev:medium",
 		Run: func(rt llm.Runtime) error {
 			rt.ReportProgress(0.5, "mid", "halfway")
 			rt.ReportTokens(1000, 500)
@@ -93,10 +93,10 @@ func TestOrchestratorDedupeReturnsSameJob(t *testing.T) {
 	// Use a channel gate so the first job parks until we signal it.
 	gate := make(chan struct{})
 	firstReq := &llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "cliff_notes",
-		TargetKey: "repo-1:dedupe",
+		JobType:     "cliff_notes",
+		TargetKey:   "repo-1:dedupe",
 		Run: func(rt llm.Runtime) error {
 			<-gate
 			return nil
@@ -117,10 +117,10 @@ func TestOrchestratorDedupeReturnsSameJob(t *testing.T) {
 	// Second request with the same target key should dedupe.
 	var secondRan atomic.Bool
 	second, err := orch.Enqueue(&llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "cliff_notes",
-		TargetKey: "repo-1:dedupe",
+		JobType:     "cliff_notes",
+		TargetKey:   "repo-1:dedupe",
 		Run: func(rt llm.Runtime) error {
 			secondRan.Store(true)
 			return nil
@@ -163,12 +163,12 @@ func TestOrchestratorInflightReleasesAfterTerminalJob(t *testing.T) {
 	// needing to race a real failure.
 	deadID := "dead-job-from-prior-race"
 	if _, err := orch.store.Create(&llm.Job{
-		ID:        deadID,
-		Subsystem: llm.SubsystemReasoning,
+		ID:          deadID,
+		Subsystem:   llm.SubsystemReasoning,
 		LLMProvider: "test",
-		JobType:   "discuss_code",
-		TargetKey: targetKey,
-		Status:    llm.StatusFailed,
+		JobType:     "discuss_code",
+		TargetKey:   targetKey,
+		Status:      llm.StatusFailed,
 	}); err != nil {
 		t.Fatalf("seed dead job: %v", err)
 	}
@@ -183,10 +183,10 @@ func TestOrchestratorInflightReleasesAfterTerminalJob(t *testing.T) {
 	// job — instead it should release the stale claim and run fresh.
 	var ran atomic.Bool
 	freshJob, err := orch.Enqueue(&llm.EnqueueRequest{
-		Subsystem: llm.SubsystemReasoning,
+		Subsystem:   llm.SubsystemReasoning,
 		LLMProvider: "test",
-		JobType:   "discuss_code",
-		TargetKey: targetKey,
+		JobType:     "discuss_code",
+		TargetKey:   targetKey,
 		Run: func(rt llm.Runtime) error {
 			ran.Store(true)
 			return nil
@@ -225,10 +225,10 @@ func TestOrchestratorBoundedConcurrency(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			_, err := orch.Enqueue(&llm.EnqueueRequest{
-				Subsystem: llm.SubsystemKnowledge,
+				Subsystem:   llm.SubsystemKnowledge,
 				LLMProvider: "test",
-				JobType:   "cliff_notes",
-				TargetKey: fmt.Sprintf("repo-1:concurrency:%d", i),
+				JobType:     "cliff_notes",
+				TargetKey:   fmt.Sprintf("repo-1:concurrency:%d", i),
 				Run: func(rt llm.Runtime) error {
 					n := running.Add(1)
 					for {
@@ -277,10 +277,10 @@ func TestOrchestratorReconfigureMaxConcurrency(t *testing.T) {
 
 	for i := 0; i < 6; i++ {
 		_, err := orch.Enqueue(&llm.EnqueueRequest{
-			Subsystem: llm.SubsystemKnowledge,
+			Subsystem:   llm.SubsystemKnowledge,
 			LLMProvider: "test",
-			JobType:   "cliff_notes",
-			TargetKey: fmt.Sprintf("repo-1:reconfigure:%d", i),
+			JobType:     "cliff_notes",
+			TargetKey:   fmt.Sprintf("repo-1:reconfigure:%d", i),
 			Run: func(rt llm.Runtime) error {
 				started.Add(1)
 				running.Add(1)
@@ -318,10 +318,10 @@ func TestOrchestratorReconfigureMaxConcurrency(t *testing.T) {
 	secondWaveRelease := make(chan struct{})
 	for i := 0; i < 2; i++ {
 		_, err := orch.Enqueue(&llm.EnqueueRequest{
-			Subsystem: llm.SubsystemKnowledge,
+			Subsystem:   llm.SubsystemKnowledge,
 			LLMProvider: "test",
-			JobType:   "cliff_notes",
-			TargetKey: fmt.Sprintf("repo-1:reconfigure:second:%d", i),
+			JobType:     "cliff_notes",
+			TargetKey:   fmt.Sprintf("repo-1:reconfigure:second:%d", i),
 			Run: func(rt llm.Runtime) error {
 				secondWaveRunning.Add(1)
 				defer secondWaveRunning.Add(-1)
@@ -367,10 +367,10 @@ func TestOrchestratorRetryOnTransientError(t *testing.T) {
 
 	var attempts atomic.Int32
 	job, err := orch.Enqueue(&llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "cliff_notes",
-		TargetKey: "repo-1:retry-transient",
+		JobType:     "cliff_notes",
+		TargetKey:   "repo-1:retry-transient",
 		Run: func(rt llm.Runtime) error {
 			n := attempts.Add(1)
 			if n < 3 {
@@ -413,10 +413,10 @@ func TestOrchestratorNonRetryableFailsFast(t *testing.T) {
 
 	var attempts atomic.Int32
 	job, err := orch.Enqueue(&llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "cliff_notes",
-		TargetKey: "repo-1:snapshot-too-large",
+		JobType:     "cliff_notes",
+		TargetKey:   "repo-1:snapshot-too-large",
 		Run: func(rt llm.Runtime) error {
 			attempts.Add(1)
 			return errors.New("snapshot too large (cliff_notes:repository): ~45000 tokens exceeds budget 24000")
@@ -446,10 +446,10 @@ func TestOrchestratorPublishesEvents(t *testing.T) {
 	defer unsubscribe()
 
 	_, err := orch.Enqueue(&llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "cliff_notes",
-		TargetKey: "repo-1:events",
+		JobType:     "cliff_notes",
+		TargetKey:   "repo-1:events",
 		Run: func(rt llm.Runtime) error {
 			rt.ReportProgress(0.25, "building", "building")
 			time.Sleep(15 * time.Millisecond) // cross the debounce window
@@ -487,10 +487,10 @@ func TestOrchestratorMetricsRecord(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		_, err := orch.Enqueue(&llm.EnqueueRequest{
-			Subsystem: llm.SubsystemKnowledge,
+			Subsystem:   llm.SubsystemKnowledge,
 			LLMProvider: "test",
-			JobType:   "cliff_notes",
-			TargetKey: fmt.Sprintf("repo-1:metrics:%d", i),
+			JobType:     "cliff_notes",
+			TargetKey:   fmt.Sprintf("repo-1:metrics:%d", i),
 			Run: func(rt llm.Runtime) error {
 				time.Sleep(2 * time.Millisecond)
 				return nil
@@ -551,10 +551,10 @@ func TestSubsystemBreakerCooldownDelaysNextJobAfterProviderComputeFailures(t *te
 	})
 
 	first, err := orch.Enqueue(&llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "cliff_notes",
-		TargetKey: "repo-1:breaker:first",
+		JobType:     "cliff_notes",
+		TargetKey:   "repo-1:breaker:first",
 		Run: func(rt llm.Runtime) error {
 			return errors.New("Error code: 500 - {'error': {'code': 500, 'message': 'Compute error.', 'type': 'server_error'}}")
 		},
@@ -570,10 +570,10 @@ func TestSubsystemBreakerCooldownDelaysNextJobAfterProviderComputeFailures(t *te
 	start := time.Now()
 	var ranAt atomic.Int64
 	second, err := orch.Enqueue(&llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "learning_path",
-		TargetKey: "repo-1:breaker:second",
+		JobType:     "learning_path",
+		TargetKey:   "repo-1:breaker:second",
 		Run: func(rt llm.Runtime) error {
 			ranAt.Store(time.Now().UnixNano())
 			return nil
@@ -601,10 +601,10 @@ func TestEnqueueSyncWaitsForTerminalState(t *testing.T) {
 
 	var captured string
 	job, err := orch.EnqueueSync(context.Background(), &llm.EnqueueRequest{
-		Subsystem: llm.SubsystemReasoning,
+		Subsystem:   llm.SubsystemReasoning,
 		LLMProvider: "test",
-		JobType:   "analyze_symbol",
-		TargetKey: "reasoning:analyze:sym-1",
+		JobType:     "analyze_symbol",
+		TargetKey:   "reasoning:analyze:sym-1",
 		Run: func(rt llm.Runtime) error {
 			// Simulate a worker call that produces a payload.
 			time.Sleep(10 * time.Millisecond)
@@ -628,10 +628,10 @@ func TestEnqueueSyncPropagatesFailureStatus(t *testing.T) {
 	orch := newTestOrchestrator(t, Config{MaxConcurrency: 1})
 
 	job, err := orch.EnqueueSync(context.Background(), &llm.EnqueueRequest{
-		Subsystem: llm.SubsystemReasoning,
+		Subsystem:   llm.SubsystemReasoning,
 		LLMProvider: "test",
-		JobType:   "review",
-		TargetKey: "reasoning:review:fail",
+		JobType:     "review",
+		TargetKey:   "reasoning:review:fail",
 		Run: func(rt llm.Runtime) error {
 			return errors.New("LLM returned empty content (review)")
 		},
@@ -655,10 +655,10 @@ func TestEnqueueSyncReturnsImmediatelyOnDedupeHit(t *testing.T) {
 	_ = store // unused; we need to reach into orch's store instead
 	// Easier: run a job to completion first, then EnqueueSync the same target.
 	first, err := orch.EnqueueSync(context.Background(), &llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "cliff_notes",
-		TargetKey: "repo-1:enqueuesync-dedupe",
+		JobType:     "cliff_notes",
+		TargetKey:   "repo-1:enqueuesync-dedupe",
 		Run: func(rt llm.Runtime) error {
 			return nil
 		},
@@ -672,10 +672,10 @@ func TestEnqueueSyncReturnsImmediatelyOnDedupeHit(t *testing.T) {
 	// terminal a second request starts fresh. So this tests that a
 	// fast second job still works correctly via EnqueueSync.
 	second, err := orch.EnqueueSync(context.Background(), &llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "cliff_notes",
-		TargetKey: "repo-1:enqueuesync-dedupe",
+		JobType:     "cliff_notes",
+		TargetKey:   "repo-1:enqueuesync-dedupe",
 		Run: func(rt llm.Runtime) error {
 			return nil
 		},
@@ -699,10 +699,10 @@ func TestEnqueueSyncRespectsContextCancellation(t *testing.T) {
 	done := make(chan error)
 	go func() {
 		_, err := orch.EnqueueSync(ctx, &llm.EnqueueRequest{
-			Subsystem: llm.SubsystemReasoning,
+			Subsystem:   llm.SubsystemReasoning,
 			LLMProvider: "test",
-			JobType:   "analyze_symbol",
-			TargetKey: "reasoning:analyze:ctx",
+			JobType:     "analyze_symbol",
+			TargetKey:   "reasoning:analyze:ctx",
 			Run: func(rt llm.Runtime) error {
 				<-blocker
 				return nil
@@ -752,10 +752,10 @@ func TestEnqueueRejectedWhenIntakePaused(t *testing.T) {
 	orch.SetIntakePaused(true)
 
 	_, err := orch.Enqueue(&llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "cliff_notes",
-		TargetKey: "repo-1:paused",
+		JobType:     "cliff_notes",
+		TargetKey:   "repo-1:paused",
 		Run: func(rt llm.Runtime) error {
 			return nil
 		},
@@ -771,10 +771,10 @@ func TestDrainPendingCancelsQueuedJobs(t *testing.T) {
 	firstStarted := make(chan struct{})
 
 	_, err := orch.Enqueue(&llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "cliff_notes",
-		TargetKey: "repo-1:running",
+		JobType:     "cliff_notes",
+		TargetKey:   "repo-1:running",
 		Run: func(rt llm.Runtime) error {
 			close(firstStarted)
 			<-block
@@ -787,10 +787,10 @@ func TestDrainPendingCancelsQueuedJobs(t *testing.T) {
 	<-firstStarted
 
 	pending, err := orch.Enqueue(&llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "learning_path",
-		TargetKey: "repo-1:pending",
+		JobType:     "learning_path",
+		TargetKey:   "repo-1:pending",
 		Run: func(rt llm.Runtime) error {
 			return nil
 		},
@@ -837,10 +837,10 @@ func TestRuntimeHeartbeatAdvancesUpdatedAt(t *testing.T) {
 	closureDone := make(chan struct{})
 
 	job, err := orch.Enqueue(&llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "heartbeat_test",
-		TargetKey: "heartbeat-1",
+		JobType:     "heartbeat_test",
+		TargetKey:   "heartbeat-1",
 		Run: func(rt llm.Runtime) error {
 			// Capture UpdatedAt at t=0 (after initial heartbeat).
 			if err := rt.Heartbeat(); err != nil {
@@ -889,10 +889,10 @@ func TestRuntimeHeartbeatIsNoopOnTerminalJob(t *testing.T) {
 
 	// Run a job to completion and capture its terminal UpdatedAt.
 	job, err := orch.Enqueue(&llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "heartbeat_terminal_test",
-		TargetKey: "heartbeat-terminal-1",
+		JobType:     "heartbeat_terminal_test",
+		TargetKey:   "heartbeat-terminal-1",
 		Run: func(rt llm.Runtime) error {
 			rt.ReportProgress(1.0, "ok", "done")
 			return nil
@@ -940,10 +940,10 @@ func TestRuntimeHeartbeatBypassesProgressDebounce(t *testing.T) {
 	out := make(chan result, 1)
 
 	_, err := orch.Enqueue(&llm.EnqueueRequest{
-		Subsystem: llm.SubsystemKnowledge,
+		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
-		JobType:   "heartbeat_debounce_test",
-		TargetKey: "heartbeat-debounce-1",
+		JobType:     "heartbeat_debounce_test",
+		TargetKey:   "heartbeat-debounce-1",
 		Run: func(rt llm.Runtime) error {
 			rt.ReportProgress(0.5, "mid", "first")
 			afterProgress1 := orch.GetJob(rt.JobID()).UpdatedAt
@@ -982,5 +982,252 @@ func TestRuntimeHeartbeatBypassesProgressDebounce(t *testing.T) {
 	if !r.afterHB.After(r.afterProgress2) {
 		t.Errorf("Heartbeat did not advance UpdatedAt: progress2=%s, hb=%s",
 			r.afterProgress2, r.afterHB)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CA-141 — heartbeat-stale threshold + faster reaper tick
+//
+// These tests lock the behavior of subsystemEmitsHeartbeats, the heartbeat-
+// stale threshold (5 min), the defense-in-depth fallback for living_wiki, the
+// queued-phase threshold override, and the non-heartbeat (wall-clock) path for
+// other subsystems.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// backdate stamps job's UpdatedAt to now-age directly in the MemStore, bypassing
+// the normal Update path so the reaper sees a stale timestamp without waiting.
+func backdate(t *testing.T, orch *Orchestrator, jobID string, age time.Duration) {
+	t.Helper()
+	ms := orch.store.(*llm.MemStore)
+	if err := ms.ForceUpdatedAt(jobID, time.Now().Add(-age)); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+}
+
+// TestReaper_HeartbeatStale_LivingWiki_Reaped — a living_wiki job whose
+// UpdatedAt is >5 min stale is reaped within a single reapStaleJobs call.
+// Locks the heartbeat-stale path (threshold_kind=heartbeat_stale).
+func TestReaper_HeartbeatStale_LivingWiki_Reaped(t *testing.T) {
+	orch := newTestOrchestrator(t, Config{MaxConcurrency: 0}) // MaxConcurrency 0 keeps jobs pending
+
+	job, err := orch.Enqueue(&llm.EnqueueRequest{
+		Subsystem:   "living_wiki",
+		LLMProvider: "test",
+		JobType:     "cold_start",
+		TargetKey:   "ca141-lw-stale-1",
+		Run: func(rt llm.Runtime) error {
+			select {} // never completes; won't run with MaxConcurrency=0
+		},
+	})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	// Force the job into StatusGenerating so the heartbeat-stale branch applies.
+	if err := orch.store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
+		t.Fatalf("set generating: %v", err)
+	}
+	// Back-date UpdatedAt past the heartbeat threshold (5 min + 1 s margin).
+	backdate(t, orch, job.ID, heartbeatStaleThreshold+time.Second)
+
+	orch.reapStaleJobs()
+
+	got := orch.GetJob(job.ID)
+	if got == nil || got.Status != llm.StatusFailed {
+		t.Fatalf("expected job reaped (StatusFailed), got status=%v", got.Status)
+	}
+}
+
+// TestReaper_HeartbeatStale_LivingWiki_HealthyHeartbeat_NotReaped — a
+// living_wiki job whose UpdatedAt is only 1 min stale (recent heartbeat) is
+// NOT reaped even though 1 min > some arbitrary old threshold. Locks the
+// "fresh heartbeat = healthy" invariant.
+func TestReaper_HeartbeatStale_LivingWiki_HealthyHeartbeat_NotReaped(t *testing.T) {
+	orch := newTestOrchestrator(t, Config{MaxConcurrency: 0})
+
+	job, err := orch.Enqueue(&llm.EnqueueRequest{
+		Subsystem:   "living_wiki",
+		LLMProvider: "test",
+		JobType:     "cold_start",
+		TargetKey:   "ca141-lw-fresh-1",
+		Run: func(rt llm.Runtime) error {
+			select {}
+		},
+	})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if err := orch.store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
+		t.Fatalf("set generating: %v", err)
+	}
+	// 1 min stale — well below 5 min heartbeatStaleThreshold.
+	backdate(t, orch, job.ID, time.Minute)
+
+	orch.reapStaleJobs()
+
+	got := orch.GetJob(job.ID)
+	if got == nil || got.Status != llm.StatusGenerating {
+		t.Fatalf("expected job still generating, got status=%v", got.Status)
+	}
+}
+
+// TestReaper_LivingWiki_FallbackWallClock_IfRemovedFromAllowList — when
+// subsystemEmitsHeartbeats returns false for living_wiki (simulating the allow-
+// list entry being removed), a job 7 min stale is NOT reaped (30-min ceiling),
+// but a job 31 min stale IS reaped (threshold_kind=living_wiki_wall). Locks the
+// defense-in-depth branch so it cannot be deleted as "dead code". H1 guard.
+func TestReaper_LivingWiki_FallbackWallClock_IfRemovedFromAllowList(t *testing.T) {
+	// Override the allow-list for the duration of this test only.
+	orig := subsystemEmitsHeartbeats
+	subsystemEmitsHeartbeats = func(subsystem string) bool { return false }
+	t.Cleanup(func() { subsystemEmitsHeartbeats = orig })
+
+	// Sub-case A: 7 min stale — below 30-min ceiling, should NOT be reaped.
+	t.Run("7min_not_reaped", func(t *testing.T) {
+		orch := newTestOrchestrator(t, Config{MaxConcurrency: 0})
+		job, err := orch.Enqueue(&llm.EnqueueRequest{
+			Subsystem:   "living_wiki",
+			LLMProvider: "test",
+			JobType:     "cold_start",
+			TargetKey:   "ca141-fallback-7min",
+			Run:         func(rt llm.Runtime) error { select {} },
+		})
+		if err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		if err := orch.store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
+			t.Fatalf("set generating: %v", err)
+		}
+		backdate(t, orch, job.ID, 7*time.Minute)
+		orch.reapStaleJobs()
+		got := orch.GetJob(job.ID)
+		if got == nil || got.Status != llm.StatusGenerating {
+			t.Fatalf("expected NOT reaped (7 min < 30 min ceiling), got status=%v", got.Status)
+		}
+	})
+
+	// Sub-case B: 31 min stale — exceeds 30-min ceiling, SHOULD be reaped.
+	t.Run("31min_reaped_living_wiki_wall", func(t *testing.T) {
+		orch := newTestOrchestrator(t, Config{MaxConcurrency: 0})
+		job, err := orch.Enqueue(&llm.EnqueueRequest{
+			Subsystem:   "living_wiki",
+			LLMProvider: "test",
+			JobType:     "cold_start",
+			TargetKey:   "ca141-fallback-31min",
+			Run:         func(rt llm.Runtime) error { select {} },
+		})
+		if err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		if err := orch.store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
+			t.Fatalf("set generating: %v", err)
+		}
+		backdate(t, orch, job.ID, staleGeneratingThresholdLivingWiki+time.Second)
+		orch.reapStaleJobs()
+		got := orch.GetJob(job.ID)
+		if got == nil || got.Status != llm.StatusFailed {
+			t.Fatalf("expected reaped (31 min > 30 min ceiling, living_wiki_wall), got status=%v", got.Status)
+		}
+	})
+}
+
+// TestReaper_HeartbeatStale_LivingWiki_QueuedPhase_NotReapedEarly — a queued
+// living_wiki job 6 min stale is NOT reaped because the queued-phase override
+// (stalePendingThreshold=45 min) beats heartbeatStaleThreshold (5 min). The
+// paired sub-case confirms that the same job in StatusGenerating IS reaped.
+// M1 guard: locks queued-phase precedence over heartbeat-stale path.
+func TestReaper_HeartbeatStale_LivingWiki_QueuedPhase_NotReapedEarly(t *testing.T) {
+	// Sub-case A: StatusPending + phase="queued", 6 min stale → NOT reaped.
+	t.Run("queued_not_reaped", func(t *testing.T) {
+		orch := newTestOrchestrator(t, Config{MaxConcurrency: 0})
+		job, err := orch.Enqueue(&llm.EnqueueRequest{
+			Subsystem:   "living_wiki",
+			LLMProvider: "test",
+			JobType:     "cold_start",
+			TargetKey:   "ca141-queued-notreaped",
+			Run:         func(rt llm.Runtime) error { select {} },
+		})
+		if err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		// Job is StatusPending; set progress phase to "queued".
+		if err := orch.store.SetProgress(job.ID, 0, "queued", ""); err != nil {
+			t.Fatalf("set progress: %v", err)
+		}
+		// 6 min stale — above heartbeatStaleThreshold but within queued override.
+		backdate(t, orch, job.ID, 6*time.Minute)
+		orch.reapStaleJobs()
+		got := orch.GetJob(job.ID)
+		if got == nil || got.Status.IsTerminal() {
+			t.Fatalf("expected queued job NOT reaped (45-min override wins), got status=%v", got.Status)
+		}
+	})
+
+	// Sub-case B: same job but StatusGenerating, 6 min stale → IS reaped
+	// (heartbeat-stale path kicks in; no queued override).
+	t.Run("generating_reaped", func(t *testing.T) {
+		orch := newTestOrchestrator(t, Config{MaxConcurrency: 0})
+		job, err := orch.Enqueue(&llm.EnqueueRequest{
+			Subsystem:   "living_wiki",
+			LLMProvider: "test",
+			JobType:     "cold_start",
+			TargetKey:   "ca141-generating-reaped",
+			Run:         func(rt llm.Runtime) error { select {} },
+		})
+		if err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		if err := orch.store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
+			t.Fatalf("set generating: %v", err)
+		}
+		backdate(t, orch, job.ID, 6*time.Minute)
+		orch.reapStaleJobs()
+		got := orch.GetJob(job.ID)
+		if got == nil || got.Status != llm.StatusFailed {
+			t.Fatalf("expected generating job reaped (heartbeat_stale), got status=%v", got.Status)
+		}
+	})
+}
+
+// TestReaper_NonHeartbeatSubsystem_Knowledge_UsesWallClockThreshold — a
+// knowledge job 6 min stale is NOT reaped (6 min < 10 min staleGeneratingThreshold).
+// Confirms non-heartbeat subsystems are unchanged by CA-141.
+func TestReaper_NonHeartbeatSubsystem_Knowledge_UsesWallClockThreshold(t *testing.T) {
+	orch := newTestOrchestrator(t, Config{MaxConcurrency: 0})
+
+	job, err := orch.Enqueue(&llm.EnqueueRequest{
+		Subsystem:   llm.SubsystemKnowledge,
+		LLMProvider: "test",
+		JobType:     "cliff_notes",
+		TargetKey:   "ca141-knowledge-6min",
+		Run:         func(rt llm.Runtime) error { select {} },
+	})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if err := orch.store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
+		t.Fatalf("set generating: %v", err)
+	}
+	// 6 min: above heartbeatStaleThreshold (5 min) but below staleGeneratingThreshold (10 min).
+	// If CA-141 incorrectly applied heartbeat-stale to knowledge, this would reap the job.
+	backdate(t, orch, job.ID, 6*time.Minute)
+
+	orch.reapStaleJobs()
+
+	got := orch.GetJob(job.ID)
+	if got == nil || got.Status != llm.StatusGenerating {
+		t.Fatalf("expected knowledge job NOT reaped at 6 min (wall-clock threshold is 10 min), got status=%v", got.Status)
+	}
+}
+
+// TestRuntimeHeartbeatAdvancesUpdatedAt_LivingWikiInAllowList adds an assertion
+// to the existing heartbeat test cross-linking subsystemEmitsHeartbeats to the
+// living_wiki dispatcher. If the allow-list entry is removed this assertion breaks,
+// forcing a reviewer to notice the heartbeat contract has changed. Step 1.9.
+func TestRuntimeHeartbeatAdvancesUpdatedAt_LivingWikiInAllowList(t *testing.T) {
+	if !subsystemEmitsHeartbeats("living_wiki") {
+		t.Fatal("living_wiki must be in the heartbeat allow-list (subsystemEmitsHeartbeats); " +
+			"removing it silently degrades stuck-job detection from ~5 min to ~32 min — " +
+			"see CA-141 plan step 1.9")
 	}
 }
