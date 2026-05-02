@@ -21,8 +21,16 @@ reviews, and architecture awareness.`,
 }
 
 // SetVersion populates the cobra Version field so `sourcebridge --version`
-// works. Called from cmd/sourcebridge/main.go with the value of main.version,
-// which is overridden at build time via -ldflags="-X main.version=vX.Y.Z".
+// works. Called from cmd/sourcebridge/main.go with the value of
+// internal/version.Version, which is the single source of truth across the
+// CLI flag, GraphQL Query.version, REST /api/v1/admin/status, REST
+// /api/v1/version, and the telemetry ping. The value is overridden at
+// build time via:
+//
+//	-ldflags "-X github.com/sourcebridge/sourcebridge/internal/version.Version=vX.Y.Z"
+//
+// See scripts/version.sh and the Makefile for the build-time wiring that
+// computes and injects this value.
 //
 // We use SetVersionTemplate to format as "sourcebridge version <X>" so the
 // installer's `awk '{print $NF}'` upgrade-detection works without parsing

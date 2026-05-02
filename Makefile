@@ -2,7 +2,7 @@
 	lint lint-go lint-web lint-worker lint-vscode package-vscode install-vscode \
 	proto proto-clean docker-build docker-up docker-down \
 	dev dev-web dev-go dev-worker clean migrate help integration-test test-integration smoke-test phase-gate ci \
-	test-livingwiki-integration test-livingwiki-smoke \
+	test-livingwiki-integration test-livingwiki-smoke test-scripts \
 	benchmark-comprehension-fake benchmark-comprehension-local benchmark-comprehension-report \
 	benchmark-report-quality-live
 
@@ -11,16 +11,35 @@ GO_MIGRATE_BIN = bin/migrate
 PROTO_DIR = proto
 GEN_DIR = gen
 
+# Version metadata. Computed once at make-invocation time and propagated
+# to the Go binary (via ldflags), the web bundle (via NEXT_PUBLIC_*), and
+# the docker images (via build-args). Override on the command line for
+# verification builds, e.g.:
+#   make build-web VERSION=v0.0.0-test COMMIT=abc1234 BUILD_DATE=2026-05-01T00:00:00Z
+VERSION    ?= $(shell ./scripts/version.sh)
+COMMIT     ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+EDITION    ?= oss
+
+GO_LDFLAGS := -X github.com/sourcebridge/sourcebridge/internal/version.Version=$(VERSION) \
+              -X github.com/sourcebridge/sourcebridge/internal/version.Commit=$(COMMIT) \
+              -X github.com/sourcebridge/sourcebridge/internal/version.BuildDate=$(BUILD_DATE) \
+              -X github.com/sourcebridge/sourcebridge/internal/version.Edition=$(EDITION)
+
 all: build
 
 # Build
 build: build-go build-web build-vscode
 
 build-go:
-	go build -o $(GO_BIN) ./cmd/sourcebridge
+	go build -ldflags="$(GO_LDFLAGS)" -o $(GO_BIN) ./cmd/sourcebridge
 
 build-web:
-	cd web && npm ci && npm run build
+	cd web && npm ci && \
+		NEXT_PUBLIC_VERSION="$(VERSION)" \
+		NEXT_PUBLIC_COMMIT="$(COMMIT)" \
+		NEXT_PUBLIC_BUILD_DATE="$(BUILD_DATE)" \
+		npm run build
 
 build-worker:
 	cd workers && uv sync
@@ -115,7 +134,11 @@ dev-go: build-go
 	./$(GO_BIN) serve
 
 dev-web:
-	cd web && npm run dev
+	cd web && \
+		NEXT_PUBLIC_VERSION="$(VERSION)" \
+		NEXT_PUBLIC_COMMIT="$(COMMIT)" \
+		NEXT_PUBLIC_BUILD_DATE="$(BUILD_DATE)" \
+		npm run dev
 
 # Run the Python AI worker. Required for agentic features, embeddings,
 # and code review — the API server runs without it but agentic / embedding
@@ -125,7 +148,15 @@ dev-web:
 # Equivalent: `cd workers && uv run sourcebridge-worker` (the project
 # defines a console script at workers/pyproject.toml). Both invocations
 # are interchangeable; this target is the canonical answer used in docs.
+#
+# Exports SOURCEBRIDGE_{VERSION,COMMIT,BUILD_DATE} so the worker reports
+# the same string as the Go binary. Without this, the worker would
+# fall back to importlib.metadata and report the pyproject.toml version
+# (0.1.0), causing local Go/worker version drift.
 dev-worker:
+	SOURCEBRIDGE_VERSION="$(VERSION)" \
+	SOURCEBRIDGE_COMMIT="$(COMMIT)" \
+	SOURCEBRIDGE_BUILD_DATE="$(BUILD_DATE)" \
 	uv run --project workers python -m workers
 
 # Clean
@@ -134,7 +165,7 @@ clean:
 
 # Migration
 migrate:
-	go build -o $(GO_MIGRATE_BIN) ./cmd/migrate
+	go build -ldflags="$(GO_LDFLAGS)" -o $(GO_MIGRATE_BIN) ./cmd/migrate
 	./$(GO_MIGRATE_BIN)
 
 # Integration tests
@@ -201,8 +232,12 @@ ifeq ($(PHASE),11)
 endif
 	@echo "=== Phase $(PHASE) Gate PASSED ==="
 
-# Pre-push check: mirrors CI pipeline locally (lint + test)
-ci: lint test
+# Shell-script tests (currently: scripts/version.sh)
+test-scripts:
+	bash tests/scripts/version_test.sh
+
+# Pre-push check: mirrors CI pipeline locally (lint + test + scripts)
+ci: lint test test-scripts
 	@echo "=== All CI checks passed ==="
 
 # Benchmarks
