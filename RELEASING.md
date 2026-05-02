@@ -86,8 +86,26 @@ binary/image release pipeline.
 
 ## Provisioning the release-please token (one-time setup)
 
-Until this is done, manual tag re-push is required after every
-release-please merge (see step 5 above). Tracked in CA-149.
+Two distinct repo settings need attention to get the full automated flow.
+Until both are done, the workflow will fail before opening release PRs OR
+the tags will fail to trigger downstream workflows. Tracked in CA-149.
+
+### Gate 1: enable GHA PR creation (required for ANY token-fallback path)
+
+Repo settings → Actions → General → "Workflow permissions" → check
+**"Allow GitHub Actions to create and approve pull requests"**.
+
+Without this, even with `secrets.RELEASE_PLEASE_TOKEN` set to the default
+`GITHUB_TOKEN`, the workflow fails with:
+```
+release-please failed: GitHub Actions is not permitted to create or
+approve pull requests.
+```
+A GitHub App token (option A below) **bypasses this gate** because its
+identity isn't `GITHUB_TOKEN`. A fine-grained PAT (option B) requires
+this toggle to be ON.
+
+### Gate 2: provision a non-default token (required for downstream-workflow continuity)
 
 **Option A: GitHub App (preferred for organizations)**
 
