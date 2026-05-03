@@ -521,6 +521,8 @@ func TestMCP_ToolsList(t *testing.T) {
 		"get_field_guide",
 		// CA-153 Phase 2c change impact tool
 		"predict_change_impact",
+		// CA-153 Phase 3 AI-augmented diff review tool
+		"get_review_for_diff",
 		// Subsystem clustering tools (Sprint 1 — F5)
 		"get_subsystems", "get_subsystem_by_id", "get_subsystem",
 	}

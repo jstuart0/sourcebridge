@@ -130,6 +130,59 @@ func (h *mcpHandler) prompts() []promptEntry {
 		},
 		{
 			def: mcpPromptDefinition{
+				Name:        "review_diff_with_sourcebridge",
+				Description: "Run a full AI-augmented diff review via get_review_for_diff, then follow up on each affected symbol using get_requirements_for_symbol.",
+				Arguments: []mcpPromptArgument{
+					{Name: "repository_id", Description: "Repository ID", Required: true},
+					{Name: "commit_range", Description: "Git commit range (e.g. \"HEAD~3..HEAD\"). One of commit_range or files is required.", Required: false},
+					{Name: "files", Description: "Comma-separated list of repo-relative file paths to review. One of commit_range or files is required.", Required: false},
+				},
+			},
+			renderer: func(args map[string]string) (*mcpPromptGetResult, error) {
+				if args["repository_id"] == "" {
+					return nil, errInvalidArguments("review_diff_with_sourcebridge requires repository_id")
+				}
+				if args["commit_range"] == "" && args["files"] == "" {
+					return nil, errInvalidArguments("review_diff_with_sourcebridge requires one of commit_range or files")
+				}
+				rangeOrFiles := ""
+				if args["commit_range"] != "" {
+					rangeOrFiles = fmt.Sprintf("commit_range: \"%s\"", args["commit_range"])
+				} else {
+					rangeOrFiles = fmt.Sprintf("files: [%q]", args["files"])
+				}
+				text := fmt.Sprintf(
+					"Run a full AI-augmented diff review for repository_id=%s.\n\n"+
+						"Step 1: Call get_review_for_diff with:\n"+
+						"  repository_id: %q\n"+
+						"  %s\n"+
+						"  include_ai_review: true\n\n"+
+						"Note: with include_ai_review: true, this tool may take 30-90 seconds. "+
+						"If the client has a short timeout, consider calling with include_ai_review: false first "+
+						"to get the structural report immediately, then re-call with include_ai_review: true for AI findings.\n\n"+
+						"Step 2: For each finding in the response:\n"+
+						"  - Note the file_path and severity.\n"+
+						"  - For HIGH and MEDIUM severity findings, call get_requirements_for_symbol for the affected symbol "+
+						"to surface which requirements may be impacted.\n\n"+
+						"Step 3: Review the unlinked_public_surface list. For any public symbol with no linked requirement, "+
+						"consider whether the change creates new user-facing behavior that should be traced to a requirement.\n\n"+
+						"Step 4: Summarize:\n"+
+						"  - Total findings by severity (HIGH / MEDIUM / LOW / INFO).\n"+
+						"  - Which requirements are at risk (from linked_requirements and the per-symbol follow-up).\n"+
+						"  - Recommended actions before merging.",
+					args["repository_id"], args["repository_id"], rangeOrFiles,
+				)
+				return &mcpPromptGetResult{
+					Description: fmt.Sprintf("AI-augmented diff review for repository %s", args["repository_id"]),
+					Messages: []mcpPromptMessage{{
+						Role:    "user",
+						Content: mcpContent{Type: "text", Text: text},
+					}},
+				}, nil
+			},
+		},
+		{
+			def: mcpPromptDefinition{
 				Name:        "why_is_this_test_failing",
 				Description: "Ask ask_question to diagnose a failing test file, using call graph + test linkage to identify what it actually exercises.",
 				Arguments: []mcpPromptArgument{
