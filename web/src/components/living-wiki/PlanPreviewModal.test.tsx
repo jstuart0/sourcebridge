@@ -405,6 +405,258 @@ describe("Cancel button", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Stale-plan handling (Phase 4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface LivingWikiPlanFull {
+  planSignature: string;
+  mode: string;
+  modeTooltip: string;
+  summary: string;
+  totalPages: number;
+  preCap: number;
+  capSource: string;
+  capValue: number;
+  notice: null;
+  pages: PlanPage[];
+}
+
+function makeFreshPlan(pages: PlanPage[], sig = "sig-fresh999"): LivingWikiPlanFull {
+  return {
+    planSignature: sig,
+    mode: "lw_detailed",
+    modeTooltip: "Detailed mode",
+    summary: "fresh plan",
+    totalPages: pages.length,
+    preCap: pages.length,
+    capSource: "none",
+    capValue: 0,
+    notice: null,
+    pages,
+  };
+}
+
+describe("stale-plan handling", () => {
+  it("shows stale banner when freshPlanFromError is provided", () => {
+    setupQuerySuccess();
+    const freshPlan = makeFreshPlan(ALL_PAGES);
+
+    render(
+      <PlanPreviewModal
+        open={true}
+        onOpenChange={vi.fn()}
+        repositoryId="repo-1"
+        intent={DEFAULT_INTENT}
+        intentLabel="Build"
+        pageCountOverride={null}
+        freshPlanFromError={freshPlan}
+        onConfirm={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByTestId("plan-preview-stale-banner")).toBeInTheDocument();
+    expect(
+      screen.getByText(/The plan changed/),
+    ).toBeInTheDocument();
+  });
+
+  it("replaces page list with freshPlan pages on stale", () => {
+    setupQuerySuccess(ARCH_PAGES); // original plan: only arch pages (no repo-wide)
+    const newArchPage: PlanPage = {
+      id: "arch-new",
+      templateId: "architecture",
+      title: "New Subsystem",
+      pageType: "ARCHITECTURE",
+      subsystem: "new",
+      audience: "ENGINEER",
+      required: false,
+    };
+    const freshPlan = makeFreshPlan([...REPO_WIDE_PAGES, ...ARCH_PAGES, newArchPage]);
+
+    render(
+      <PlanPreviewModal
+        open={true}
+        onOpenChange={vi.fn()}
+        repositoryId="repo-1"
+        intent={DEFAULT_INTENT}
+        intentLabel="Build"
+        pageCountOverride={null}
+        freshPlanFromError={freshPlan}
+        onConfirm={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    // New page from freshPlan must be present
+    expect(screen.getByText("New Subsystem")).toBeInTheDocument();
+    // Repo-wide pages from freshPlan also present
+    expect(screen.getAllByText("Always included")).toHaveLength(REPO_WIDE_PAGES.length);
+  });
+
+  it("preserves user deselections where page IDs still exist after stale", async () => {
+    setupQuerySuccess();
+    const onConfirm = vi.fn().mockResolvedValue(undefined);
+
+    const { rerender } = render(
+      <PlanPreviewModal
+        open={true}
+        onOpenChange={vi.fn()}
+        repositoryId="repo-1"
+        intent={DEFAULT_INTENT}
+        intentLabel="Build"
+        pageCountOverride={null}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    // Uncheck arch-1
+    const checkboxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    await act(async () => {
+      fireEvent.click(checkboxes[0]); // unchecks arch-1
+    });
+
+    // Simulate stale error: fresh plan still contains arch-1 and arch-2
+    const freshPlan = makeFreshPlan(ALL_PAGES);
+    rerender(
+      <PlanPreviewModal
+        open={true}
+        onOpenChange={vi.fn()}
+        repositoryId="repo-1"
+        intent={DEFAULT_INTENT}
+        intentLabel="Build"
+        pageCountOverride={null}
+        freshPlanFromError={freshPlan}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    // arch-1 must still be unchecked (preserved deselection)
+    const updatedCheckboxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    const arch1Checkbox = updatedCheckboxes.find((cb) => cb.getAttribute("aria-label") === "Auth Subsystem");
+    expect(arch1Checkbox).toBeDefined();
+    expect(arch1Checkbox!.checked).toBe(false);
+
+    // arch-2 must still be checked (was not deselected)
+    const arch2Checkbox = updatedCheckboxes.find((cb) => cb.getAttribute("aria-label") === "Billing Subsystem");
+    expect(arch2Checkbox).toBeDefined();
+    expect(arch2Checkbox!.checked).toBe(true);
+  });
+
+  it("drops deselections for pages that were removed in freshPlan", async () => {
+    setupQuerySuccess();
+    const onConfirm = vi.fn().mockResolvedValue(undefined);
+
+    const { rerender } = render(
+      <PlanPreviewModal
+        open={true}
+        onOpenChange={vi.fn()}
+        repositoryId="repo-1"
+        intent={DEFAULT_INTENT}
+        intentLabel="Build"
+        pageCountOverride={null}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    // Uncheck arch-2 (which will be removed in freshPlan)
+    const checkboxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    await act(async () => {
+      fireEvent.click(checkboxes[1]); // unchecks arch-2
+    });
+
+    // Fresh plan removes arch-2, keeps arch-1
+    const freshPlanPages: PlanPage[] = [
+      ...REPO_WIDE_PAGES,
+      ARCH_PAGES[0], // arch-1 only, arch-2 removed
+    ];
+    const freshPlan = makeFreshPlan(freshPlanPages);
+    rerender(
+      <PlanPreviewModal
+        open={true}
+        onOpenChange={vi.fn()}
+        repositoryId="repo-1"
+        intent={DEFAULT_INTENT}
+        intentLabel="Build"
+        pageCountOverride={null}
+        freshPlanFromError={freshPlan}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    // Only arch-1 checkbox should exist now (arch-2 was removed from fresh plan)
+    const updatedCheckboxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    expect(updatedCheckboxes).toHaveLength(1); // only arch-1
+
+    // arch-1 must be checked (was not deselected before stale)
+    expect(updatedCheckboxes[0].checked).toBe(true);
+  });
+
+  it("new pages in freshPlan default to checked", async () => {
+    setupQuerySuccess();
+    const onConfirm = vi.fn().mockResolvedValue(undefined);
+
+    const newArchPage: PlanPage = {
+      id: "arch-new",
+      templateId: "architecture",
+      title: "Brand New Subsystem",
+      pageType: "ARCHITECTURE",
+      subsystem: "new",
+      audience: "ENGINEER",
+      required: false,
+    };
+    const freshPlan = makeFreshPlan([...ALL_PAGES, newArchPage]);
+
+    render(
+      <PlanPreviewModal
+        open={true}
+        onOpenChange={vi.fn()}
+        repositoryId="repo-1"
+        intent={DEFAULT_INTENT}
+        intentLabel="Build"
+        pageCountOverride={null}
+        freshPlanFromError={freshPlan}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    // The new arch page should be checked by default
+    const newPageCheckbox = screen.getByRole("checkbox", { name: "Brand New Subsystem" }) as HTMLInputElement;
+    expect(newPageCheckbox.checked).toBe(true);
+  });
+
+  it("disables Build button after stale until user interacts with checkbox", async () => {
+    setupQuerySuccess();
+    const onConfirm = vi.fn().mockResolvedValue(undefined);
+
+    const freshPlan = makeFreshPlan(ALL_PAGES);
+
+    render(
+      <PlanPreviewModal
+        open={true}
+        onOpenChange={vi.fn()}
+        repositoryId="repo-1"
+        intent={DEFAULT_INTENT}
+        intentLabel="Build"
+        pageCountOverride={null}
+        freshPlanFromError={freshPlan}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    // Build button must be disabled immediately after stale
+    const buildBtn = screen.getByRole("button", { name: "Build" });
+    expect(buildBtn).toBeDisabled();
+
+    // After any checkbox interaction, Build should re-enable
+    const checkboxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    await act(async () => {
+      fireEvent.click(checkboxes[0]);
+    });
+
+    expect(buildBtn).not.toBeDisabled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Debounced refetch on pageCountOverride change
 // ─────────────────────────────────────────────────────────────────────────────
 

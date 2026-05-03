@@ -41,6 +41,12 @@ export interface PlanPreviewModalProps {
   intentLabel: string;
   /** Per-run page count override from the settings panel (null = use repo setting) */
   pageCountOverride: number | null;
+  /**
+   * When the parent catches a LIVING_WIKI_PLAN_STALE error it passes the fresh plan
+   * here. The modal re-renders in place, preserving existing deselections where possible.
+   * Pass undefined (or omit) on first open.
+   */
+  freshPlanFromError?: LivingWikiPlan;
   /** Called when the user confirms. Never throws — errors handled upstream. */
   onConfirm: (selection: {
     selectedPageIds: string[] | null;
@@ -219,6 +225,7 @@ export function PlanPreviewModal({
   intent,
   intentLabel,
   pageCountOverride,
+  freshPlanFromError,
   onConfirm,
 }: PlanPreviewModalProps) {
   // ── query ──────────────────────────────────────────────────────────────────
@@ -242,6 +249,8 @@ export function PlanPreviewModal({
       setQueryKey((k) => k + 1);
       // Reset selection when modal reopens
       setUncheckedIds(new Set());
+      setStaleBanner(null);
+      setUserReviewedAfterStale(false);
     }
     prevOpenRef.current = open;
   }, [open]);
@@ -259,11 +268,51 @@ export function PlanPreviewModal({
     requestPolicy: "network-only",
   });
 
-  const plan = data?.previewLivingWikiPlan ?? null;
+  const fetchedPlan = data?.previewLivingWikiPlan ?? null;
+
+  // ── stale-plan banner state ────────────────────────────────────────────────
+  // staleBanner holds the fresh plan delivered via freshPlanFromError (LIVING_WIKI_PLAN_STALE).
+  // The modal stays open, replaces the page list with the fresh plan, and preserves
+  // the user's existing deselections where IDs still exist.
+  const [staleBanner, setStaleBanner] = useState<{ freshPlan: LivingWikiPlan } | null>(null);
+  // userReviewedAfterStale tracks whether the user has interacted with a checkbox
+  // since the stale banner appeared. Build is disabled until true.
+  const [userReviewedAfterStale, setUserReviewedAfterStale] = useState(false);
+
+  // The rendered plan is the fresh plan from a stale error (if present), otherwise
+  // the fetched plan from the query.
+  const plan = staleBanner?.freshPlan ?? fetchedPlan;
 
   // ── selection state ────────────────────────────────────────────────────────
   // Track which non-required page IDs are unchecked. Absent = checked.
   const [uncheckedIds, setUncheckedIds] = useState<Set<string>>(new Set());
+
+  // When freshPlanFromError arrives (parent signals LIVING_WIKI_PLAN_STALE):
+  // diff-and-merge: preserve deselections where IDs still exist in fresh plan,
+  // drop deselections for removed IDs, new IDs default to checked.
+  const prevFreshPlanRef = useRef<LivingWikiPlan | undefined>(undefined);
+  useEffect(() => {
+    if (!freshPlanFromError) return;
+    if (freshPlanFromError === prevFreshPlanRef.current) return;
+    prevFreshPlanRef.current = freshPlanFromError;
+
+    const freshNonRequired = freshPlanFromError.pages
+      .filter((p) => !p.required)
+      .map((p) => p.id);
+    const freshIdSet = new Set(freshNonRequired);
+
+    // Preserve only deselections that still exist in the fresh plan.
+    setUncheckedIds((prev) => {
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (freshIdSet.has(id)) next.add(id);
+      }
+      return next;
+    });
+
+    setStaleBanner({ freshPlan: freshPlanFromError });
+    setUserReviewedAfterStale(false);
+  }, [freshPlanFromError]);
 
   const togglePage = (id: string, checked: boolean) => {
     setUncheckedIds((prev) => {
@@ -275,6 +324,10 @@ export function PlanPreviewModal({
       }
       return next;
     });
+    // Any checkbox interaction after a stale banner satisfies the re-confirmation gate.
+    if (staleBanner !== null) {
+      setUserReviewedAfterStale(true);
+    }
   };
 
   // ── derived counts ─────────────────────────────────────────────────────────
@@ -329,7 +382,9 @@ export function PlanPreviewModal({
     MODE_TOOLTIP[intent.mode] ||
     "";
 
-  const primaryDisabled = fetching || confirming;
+  // Build is disabled during: loading, confirming, or stale-plan pending re-confirmation.
+  const stalePendingReview = staleBanner !== null && !userReviewedAfterStale;
+  const primaryDisabled = fetching || confirming || stalePendingReview;
 
   // ─────────────────────────────────────────────────────────────────────────
   // Render
@@ -416,15 +471,39 @@ export function PlanPreviewModal({
               )}
 
               {!fetching && !error && plan && (
-                <PageList
-                  plan={plan}
-                  uncheckedIds={uncheckedIds}
-                  onToggle={togglePage}
-                />
+                <>
+                  {/* Stale-plan banner — shown when LIVING_WIKI_PLAN_STALE was returned */}
+                  {staleBanner !== null && (
+                    <div
+                      data-testid="plan-preview-stale-banner"
+                      role="status"
+                      className="mb-4 flex items-start gap-2 rounded-[var(--radius-sm)] border border-[var(--warning-border,#f59e0b)] bg-[var(--warning-bg,#fef3c7)] px-3 py-2 text-xs text-[var(--warning-text,#92400e)]"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                        aria-hidden="true"
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575L6.457 1.047ZM8 5a.75.75 0 0 1 .75.75v2.5a.75.75 0 0 1-1.5 0v-2.5A.75.75 0 0 1 8 5Zm0 6a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                      <span>
+                        The plan changed — new or removed pages are highlighted below. Your existing deselections are preserved where possible.
+                      </span>
+                    </div>
+                  )}
+                  <PageList
+                    plan={plan}
+                    uncheckedIds={uncheckedIds}
+                    onToggle={togglePage}
+                  />
+                </>
               )}
-
-              {/* Phase 4 placeholder for stale-plan banner */}
-              <div data-testid="plan-preview-stale-banner" />
             </div>
 
           {/* Divider */}
@@ -448,7 +527,7 @@ export function PlanPreviewModal({
               </Dialog.Close>
 
               <Tooltip.Provider delayDuration={0}>
-                <Tooltip.Root open={fetching ? undefined : false}>
+                <Tooltip.Root open={(fetching || stalePendingReview) ? undefined : false}>
                   <Tooltip.Trigger asChild>
                     {/* span wrapper: disabled buttons don't fire pointer events */}
                     <span>
@@ -468,7 +547,9 @@ export function PlanPreviewModal({
                       sideOffset={6}
                       className="z-[200] rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-xs text-[var(--text-secondary)] shadow-lg"
                     >
-                      Loading plan…
+                      {stalePendingReview
+                        ? "Plan changed — review the updated list, then click Build."
+                        : "Loading plan…"}
                       <Tooltip.Arrow className="fill-[var(--bg-elevated)]" />
                     </Tooltip.Content>
                   </Tooltip.Portal>
