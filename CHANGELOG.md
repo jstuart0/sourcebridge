@@ -75,6 +75,22 @@ CA-146 (page-count transparency and per-run override).
   log aggregation. The in-flight panel mounts under the expanded job row in
   the Monitor UI for all running `living_wiki` jobs, polled every 2s.
 
+- **Plan preview modal for Living Wiki cold-starts** (CA-146). Before clicking
+  Build (Overview, Detailed, Regenerate, or Retry), operators now see the exact
+  page set that would be generated — grouped into Repository pages (always
+  included), Subsystem pages (one per cluster, Detailed mode), and Package pages
+  (top-level-dir fallback). Non-required pages can be deselected; repository
+  pages are locked with an "Always included" badge. A mode pill with a tooltip
+  explains the generation scope. When the plan changes between preview and Build
+  (cluster re-index, `MaxPagesPerJob` change in another tab), the modal stays
+  open and shows an inline warning banner with the fresh plan; existing
+  deselections are preserved where IDs still exist and the Build button
+  re-disables until the user re-confirms. The "Build anyway (plan unavailable)"
+  fallback only appears when the preview query itself fails. Backend exposes a
+  new `previewLivingWikiPlan` query and threads `selectedPageIds` +
+  `planSignature` through `enableLivingWikiForRepo` and `retryLivingWikiJob`.
+  See `docs/admin/living-wiki-ops.md` for the operator runbook.
+
 - **GraphQL `VersionInfo` reaches API parity with REST `/api/v1/version`**
   (`aeb92d8`, CA-138). The `VersionInfo` type now exposes all 7 fields
   the REST endpoint reports: `version`, `commit`, `buildDate`, `goVersion`,

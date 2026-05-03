@@ -1,0 +1,414 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 SourceBridge Contributors
+//
+// CA-146 Phase 0: unit tests for the shared plan-helper functions extracted
+// into living_wiki_plan_helpers.go.
+
+package graphql
+
+import (
+	"fmt"
+	"testing"
+
+	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// applyPageCap tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+func makePlannedPages(templateIDs ...string) []lworch.PlannedPage {
+	pages := make([]lworch.PlannedPage, len(templateIDs))
+	for i, tid := range templateIDs {
+		pages[i] = lworch.PlannedPage{ID: "page-" + tid + "-" + string(rune('a'+i)), TemplateID: tid}
+	}
+	return pages
+}
+
+func TestApplyPageCap_FitsWithinCap(t *testing.T) {
+	t.Parallel()
+	// 3 repo-wide + 2 architecture = 5 pages; cap = 10 → no truncation.
+	pages := makePlannedPages("api_reference", "system_overview", "glossary", "architecture", "architecture")
+	out, capSource, capValue, _, preCap := applyPageCap(pages, 10, nil, false)
+	if len(out) != 5 {
+		t.Errorf("expected 5 pages, got %d", len(out))
+	}
+	if capSource != "none" {
+		t.Errorf("expected capSource=none when fits within cap, got %q", capSource)
+	}
+	if capValue != 0 {
+		t.Errorf("expected capValue=0 when capSource=none, got %d", capValue)
+	}
+	if preCap != 5 {
+		t.Errorf("expected preCap=5, got %d", preCap)
+	}
+}
+
+func TestApplyPageCap_TruncatesPastCap_RepoSetting(t *testing.T) {
+	t.Parallel()
+	// 3 repo-wide + 4 architecture = 7 pages; cap = 5 → truncate to 3 repo-wide + 2 arch.
+	pages := makePlannedPages("api_reference", "system_overview", "glossary",
+		"architecture", "architecture", "architecture", "architecture")
+	out, capSource, capValue, _, preCap := applyPageCap(pages, 5, nil, false)
+	if len(out) != 5 {
+		t.Errorf("expected 5 pages after cap, got %d", len(out))
+	}
+	if capSource != "repo_setting" {
+		t.Errorf("expected capSource=repo_setting, got %q", capSource)
+	}
+	if capValue != 5 {
+		t.Errorf("expected capValue=5, got %d", capValue)
+	}
+	if preCap != 7 {
+		t.Errorf("expected preCap=7, got %d", preCap)
+	}
+	// Repo-wide pages must all be present.
+	repoWideCount := 0
+	for _, p := range out {
+		if repoWideTemplateIDs[p.TemplateID] {
+			repoWideCount++
+		}
+	}
+	if repoWideCount != 3 {
+		t.Errorf("expected 3 repo-wide pages in output, got %d", repoWideCount)
+	}
+}
+
+func TestApplyPageCap_TruncatesPastCap_PerRunOverride(t *testing.T) {
+	t.Parallel()
+	// maxPagesPerJob = 100 (loose), but override = 4 → override wins.
+	pages := makePlannedPages("api_reference", "system_overview", "glossary",
+		"architecture", "architecture", "top_level_dir")
+	override := 4
+	out, capSource, capValue, _, _ := applyPageCap(pages, 100, &override, false)
+	if len(out) != 4 {
+		t.Errorf("expected 4 pages after per-run override cap, got %d", len(out))
+	}
+	if capSource != "per_run_override" {
+		t.Errorf("expected capSource=per_run_override, got %q", capSource)
+	}
+	if capValue != 4 {
+		t.Errorf("expected capValue=4, got %d", capValue)
+	}
+}
+
+func TestApplyPageCap_RetryExcludedOnlyBypassesCap(t *testing.T) {
+	t.Parallel()
+	// maxPagesPerJob = 1 (very tight), but excludedOnlyRetry bypasses cap entirely.
+	pages := makePlannedPages("architecture", "architecture", "architecture")
+	out, capSource, capValue, _, _ := applyPageCap(pages, 1, nil, true)
+	if len(out) != 3 {
+		t.Errorf("expected all 3 pages returned when excludedOnlyRetry=true, got %d", len(out))
+	}
+	if capSource != "none" {
+		t.Errorf("expected capSource=none on excludedOnlyRetry path, got %q", capSource)
+	}
+	if capValue != 0 {
+		t.Errorf("expected capValue=0 on excludedOnlyRetry path, got %d", capValue)
+	}
+}
+
+func TestApplyPageCap_CapLessThanRepoWide_ClampsAllowToZero(t *testing.T) {
+	t.Parallel()
+	// Cap = 2, but there are 3 repo-wide pages: allowForRest clamps to 0.
+	// Output must still contain all 3 repo-wide pages (repo-wide always retained).
+	pages := makePlannedPages("api_reference", "system_overview", "glossary",
+		"architecture", "architecture")
+	out, capSource, capValue, _, _ := applyPageCap(pages, 2, nil, false)
+	// allowForRest = 2 - 3 = -1 → clamped to 0. arch pages truncated entirely.
+	// Output = 3 repo-wide (cap is not enforced against repo-wide pages themselves).
+	if len(out) != 3 {
+		t.Errorf("expected 3 pages (all repo-wide, no arch), got %d", len(out))
+	}
+	if capSource != "repo_setting" {
+		t.Errorf("expected capSource=repo_setting, got %q", capSource)
+	}
+	if capValue != 2 {
+		t.Errorf("expected capValue=2, got %d", capValue)
+	}
+}
+
+func TestApplyPageCap_ExactFit(t *testing.T) {
+	t.Parallel()
+	// preCap == effectiveCap exactly → no truncation, capSource="none".
+	pages := makePlannedPages("api_reference", "system_overview", "glossary", "architecture")
+	out, capSource, capValue, _, _ := applyPageCap(pages, 4, nil, false)
+	if len(out) != 4 {
+		t.Errorf("expected 4 pages on exact fit, got %d", len(out))
+	}
+	if capSource != "none" {
+		t.Errorf("expected capSource=none on exact fit, got %q", capSource)
+	}
+	if capValue != 0 {
+		t.Errorf("expected capValue=0 on exact fit (capSource=none), got %d", capValue)
+	}
+}
+
+func TestApplyPageCap_NoCap_ZeroMaxPages(t *testing.T) {
+	t.Parallel()
+	// maxPagesPerJob = 0 → no cap.
+	pages := makePlannedPages("architecture", "architecture", "architecture")
+	out, capSource, capValue, effectiveCap, _ := applyPageCap(pages, 0, nil, false)
+	if len(out) != 3 {
+		t.Errorf("expected all 3 pages, got %d", len(out))
+	}
+	if capSource != "none" {
+		t.Errorf("expected capSource=none when maxPagesPerJob=0, got %q", capSource)
+	}
+	if capValue != 0 {
+		t.Errorf("expected capValue=0, got %d", capValue)
+	}
+	if effectiveCap != 0 {
+		t.Errorf("expected effectiveCap=0, got %d", effectiveCap)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// computePlanSignature tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestComputePlanSignature_StableAcrossCalls(t *testing.T) {
+	t.Parallel()
+	ids := []string{"page-arch-a", "page-glossary-b", "page-api-c"}
+	sig1 := computePlanSignature(ids, "lw_detailed", 50)
+	sig2 := computePlanSignature(ids, "lw_detailed", 50)
+	if sig1 != sig2 {
+		t.Errorf("signature not stable: %q vs %q", sig1, sig2)
+	}
+	if len(sig1) != 64 {
+		t.Errorf("expected 64-char hex sha256, got len=%d: %q", len(sig1), sig1)
+	}
+}
+
+func TestComputePlanSignature_DeterministicAcrossOrder(t *testing.T) {
+	t.Parallel()
+	ids1 := []string{"alpha", "beta", "gamma"}
+	ids2 := []string{"gamma", "alpha", "beta"}
+	sig1 := computePlanSignature(ids1, "lw_detailed", 10)
+	sig2 := computePlanSignature(ids2, "lw_detailed", 10)
+	if sig1 != sig2 {
+		t.Errorf("signature varies by input order; want deterministic:\n  ids1=%v: %q\n  ids2=%v: %q",
+			ids1, sig1, ids2, sig2)
+	}
+}
+
+func TestComputePlanSignature_DiffersOnInputChange(t *testing.T) {
+	t.Parallel()
+	base := []string{"page-a", "page-b"}
+	sig := computePlanSignature(base, "lw_detailed", 50)
+
+	// Change page IDs.
+	diffIDs := computePlanSignature([]string{"page-a", "page-c"}, "lw_detailed", 50)
+	if sig == diffIDs {
+		t.Error("signature did not change when page ID set changed")
+	}
+
+	// Change mode.
+	diffMode := computePlanSignature(base, "lw_overview", 50)
+	if sig == diffMode {
+		t.Error("signature did not change when mode changed")
+	}
+
+	// Change effectiveCap.
+	diffCap := computePlanSignature(base, "lw_detailed", 99)
+	if sig == diffCap {
+		t.Error("signature did not change when effectiveCap changed")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// classifyPageType tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestClassifyPageType_KindRepoWide verifies that an explicit PageKindRepoWide
+// field returns LivingWikiPageTypeRepoWide regardless of TemplateID.
+func TestClassifyPageType_KindRepoWide(t *testing.T) {
+	t.Parallel()
+	got := classifyPageType(lworch.PlannedPage{Kind: lworch.PageKindRepoWide, TemplateID: "api_reference"})
+	if got != LivingWikiPageTypeRepoWide {
+		t.Errorf("got %q, want %q", got, LivingWikiPageTypeRepoWide)
+	}
+}
+
+// TestClassifyPageType_KindCluster verifies that an explicit PageKindCluster
+// field returns LivingWikiPageTypeArchitecture.
+func TestClassifyPageType_KindCluster(t *testing.T) {
+	t.Parallel()
+	got := classifyPageType(lworch.PlannedPage{Kind: lworch.PageKindCluster, TemplateID: "architecture"})
+	if got != LivingWikiPageTypeArchitecture {
+		t.Errorf("got %q, want %q", got, LivingWikiPageTypeArchitecture)
+	}
+}
+
+// TestClassifyPageType_KindTopLevelDir verifies that an explicit PageKindTopLevelDir
+// field returns LivingWikiPageTypeTopLevelDir — this pins the C1 bug where both
+// cluster and top-level-dir pages shared TemplateID "architecture".
+func TestClassifyPageType_KindTopLevelDir(t *testing.T) {
+	t.Parallel()
+	got := classifyPageType(lworch.PlannedPage{Kind: lworch.PageKindTopLevelDir, TemplateID: "architecture"})
+	if got != LivingWikiPageTypeTopLevelDir {
+		t.Errorf("got %q, want %q", got, LivingWikiPageTypeTopLevelDir)
+	}
+}
+
+// TestClassifyPageType_LegacyTemplateIDFallback verifies that PageKindUnknown
+// (zero value) falls back to TemplateID-based classification for legacy persisted
+// plans. A repo-wide template ID must return RepoWide.
+func TestClassifyPageType_LegacyTemplateIDFallback(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		templateID string
+		want       LivingWikiPageType
+	}{
+		{"api_reference", LivingWikiPageTypeRepoWide},
+		{"system_overview", LivingWikiPageTypeRepoWide},
+		{"glossary", LivingWikiPageTypeRepoWide},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.templateID, func(t *testing.T) {
+			t.Parallel()
+			got := classifyPageType(lworch.PlannedPage{Kind: lworch.PageKindUnknown, TemplateID: tc.templateID})
+			if got != tc.want {
+				t.Errorf("classifyPageType(Unknown, %q) = %q, want %q", tc.templateID, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestClassifyPageType_LegacyArchitectureAmbiguous documents the known limitation
+// of the legacy fallback: a PageKindUnknown page with TemplateID "architecture"
+// is classified as ARCHITECTURE (best-effort; indistinguishable from cluster vs
+// top-level-dir for legacy plans).
+func TestClassifyPageType_LegacyArchitectureAmbiguous(t *testing.T) {
+	t.Parallel()
+	got := classifyPageType(lworch.PlannedPage{Kind: lworch.PageKindUnknown, TemplateID: "architecture"})
+	if got != LivingWikiPageTypeArchitecture {
+		t.Errorf("got %q, want %q (legacy best-effort fallback)", got, LivingWikiPageTypeArchitecture)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// applyPageSelection tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// makeMixedPages returns a page slice with n architecture pages and the 3
+// canonical repo-wide pages. Used as a fixture for applyPageSelection tests.
+func makeMixedPages(n int) []lworch.PlannedPage {
+	pages := make([]lworch.PlannedPage, 0, n+3)
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("arch-%d", i)
+		pages = append(pages, lworch.PlannedPage{
+			ID:         id,
+			TemplateID: "architecture",
+			Kind:       lworch.PageKindCluster,
+		})
+	}
+	// Repo-wide pages with explicit Kind.
+	pages = append(pages,
+		lworch.PlannedPage{ID: "rw-api", TemplateID: "api_reference", Kind: lworch.PageKindRepoWide},
+		lworch.PlannedPage{ID: "rw-sysov", TemplateID: "system_overview", Kind: lworch.PageKindRepoWide},
+		lworch.PlannedPage{ID: "rw-glossary", TemplateID: "glossary", Kind: lworch.PageKindRepoWide},
+	)
+	return pages
+}
+
+// TestApplyPageSelection_NilPassthrough verifies that nil selectedIDs returns
+// the original slice unchanged (passthrough — no filter applied).
+func TestApplyPageSelection_NilPassthrough(t *testing.T) {
+	t.Parallel()
+	pages := makeMixedPages(3)
+	out := applyPageSelection(pages, nil)
+	if len(out) != len(pages) {
+		t.Errorf("nil selectedIDs should return all pages; got %d, want %d", len(out), len(pages))
+	}
+}
+
+// TestApplyPageSelection_EmptyListRetainsOnlyRepoWide verifies that an
+// explicit empty slice (non-nil) retains only repo-wide pages.
+func TestApplyPageSelection_EmptyListRetainsOnlyRepoWide(t *testing.T) {
+	t.Parallel()
+	pages := makeMixedPages(4) // 4 arch + 3 repo-wide
+	out := applyPageSelection(pages, []string{})
+	if len(out) != 3 {
+		t.Errorf("empty selectedIDs should retain only 3 repo-wide pages; got %d", len(out))
+	}
+	for _, p := range out {
+		if p.Kind != lworch.PageKindRepoWide {
+			t.Errorf("non-repo-wide page %q survived empty selection filter", p.ID)
+		}
+	}
+}
+
+// TestApplyPageSelection_ExplicitSelectionRetainsSelectionPlusRepoWide verifies
+// that [arch-0, arch-2] retains those two + all 3 repo-wide pages, dropping the rest.
+func TestApplyPageSelection_ExplicitSelectionRetainsSelectionPlusRepoWide(t *testing.T) {
+	t.Parallel()
+	pages := makeMixedPages(5) // arch-0..arch-4 + 3 repo-wide
+	out := applyPageSelection(pages, []string{"arch-0", "arch-2"})
+	// Expected: arch-0, arch-2, rw-api, rw-sysov, rw-glossary = 5 pages.
+	if len(out) != 5 {
+		t.Errorf("expected 5 pages (2 selected + 3 repo-wide), got %d", len(out))
+	}
+	ids := make(map[string]bool, len(out))
+	for _, p := range out {
+		ids[p.ID] = true
+	}
+	for _, want := range []string{"arch-0", "arch-2", "rw-api", "rw-sysov", "rw-glossary"} {
+		if !ids[want] {
+			t.Errorf("expected page %q in output but not found; output IDs: %v", want, ids)
+		}
+	}
+	for _, drop := range []string{"arch-1", "arch-3", "arch-4"} {
+		if ids[drop] {
+			t.Errorf("page %q should have been dropped by selection filter but survived", drop)
+		}
+	}
+}
+
+// TestApplyPageSelection_LegacyRepoWideFallback verifies that legacy pages
+// (Kind == PageKindUnknown) with repo-wide templateIDs are still retained by
+// an empty selection (the TemplateID-based fallback for legacy plans).
+func TestApplyPageSelection_LegacyRepoWideFallback(t *testing.T) {
+	t.Parallel()
+	pages := []lworch.PlannedPage{
+		{ID: "arch-x", TemplateID: "architecture", Kind: lworch.PageKindUnknown},
+		// Legacy repo-wide pages: Kind==Unknown, TemplateID in repoWideTemplateIDs.
+		{ID: "legacy-api", TemplateID: "api_reference", Kind: lworch.PageKindUnknown},
+		{ID: "legacy-gloss", TemplateID: "glossary", Kind: lworch.PageKindUnknown},
+	}
+	out := applyPageSelection(pages, []string{}) // empty = only repo-wide
+	if len(out) != 2 {
+		t.Errorf("expected 2 legacy repo-wide pages, got %d", len(out))
+	}
+	ids := map[string]bool{}
+	for _, p := range out {
+		ids[p.ID] = true
+	}
+	if !ids["legacy-api"] || !ids["legacy-gloss"] {
+		t.Errorf("legacy repo-wide pages should survive empty selection; got %v", ids)
+	}
+	if ids["arch-x"] {
+		t.Error("arch-x (unknown Kind, architecture template) should have been dropped")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// modeTooltip tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestModeTooltip_BothModes(t *testing.T) {
+	t.Parallel()
+	if tip := modeTooltip(GenerationModeLWDetailed); tip == "" {
+		t.Errorf("expected non-empty tooltip for %s", GenerationModeLWDetailed)
+	}
+	if tip := modeTooltip(GenerationModeLWOverview); tip == "" {
+		t.Errorf("expected non-empty tooltip for %s", GenerationModeLWOverview)
+	}
+	if tip := modeTooltip("unknown_mode"); tip != "" {
+		t.Errorf("expected empty tooltip for unknown mode, got %q", tip)
+	}
+	if tip := modeTooltip(""); tip != "" {
+		t.Errorf("expected empty tooltip for empty mode, got %q", tip)
+	}
+}

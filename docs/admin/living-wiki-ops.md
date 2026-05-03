@@ -111,6 +111,119 @@ for these runs so the reason for skipping the cap is unambiguous.
 
 ---
 
+## Plan preview before Build
+
+When an operator clicks **Build Overview**, **Build Detailed**, **Regenerate**,
+or **Retry** on the repository's Living Wiki settings page, a plan preview modal
+opens before the job is enqueued. The modal shows the exact pages that would be
+generated for this run so the operator can review the list, deselect optional
+pages, and confirm their intent.
+
+### What the preview shows
+
+The modal groups pages into three sections:
+
+| Group | Included pages |
+|---|---|
+| **Repository pages** | Always generated — `api_reference`, `system_overview`, `glossary`. Cannot be deselected. |
+| **Subsystem pages** | One page per detected code cluster (Detailed mode only). |
+| **Package pages** | One page per top-level directory, rendered when no clusters are detected. |
+
+The mode pill in the header (Detailed / Overview) carries a tooltip explaining
+the generation scope for the selected mode.
+
+### `previewLivingWikiPlan` query
+
+The preview is backed by a synchronous GraphQL query:
+
+```graphql
+query {
+  previewLivingWikiPlan(
+    repositoryId: "repo:abc123"
+    mode: DETAILED
+    pageCountOverride: 10   # optional; mirrors the per-run override
+  ) {
+    planSignature
+    mode
+    modeTooltip
+    totalPages
+    preCap
+    capSource
+    capValue
+    notice
+    pages {
+      id
+      templateId
+      title
+      pageType   # REPO_WIDE | ARCHITECTURE | TOP_LEVEL_DIR
+      subsystem
+      audience
+      required
+    }
+  }
+}
+```
+
+The query resolves the same taxonomy the cold-start runner would use. Cost is
+50–200 ms per call; no caching is applied (every modal open refetches).
+
+When `notice` is non-null and `totalPages` is 0, the system is paused (kill-switch
+or globally-disabled) — the modal shows the notice instead of the page list.
+
+### Selection contract
+
+`selectedPageIds` uses nullable-list semantics:
+
+| Value | Meaning |
+|---|---|
+| `null` / omitted | No filter — build the full plan (today's default). |
+| `[]` empty array | Explicit empty selection — build only the 3 repo-wide pages. |
+| `["id1", "id2"]` | Explicit selection — build repo-wide pages plus the listed IDs. |
+
+Repository-wide pages (`api_reference`, `system_overview`, `glossary`) are always
+generated regardless of what is in `selectedPageIds`.
+
+### Plan signature and staleness protection
+
+`previewLivingWikiPlan` returns a `planSignature` — a SHA-256 hash over the
+sorted page IDs, the generation mode, and the effective page cap. When
+`selectedPageIds` is supplied to `enableLivingWikiForRepo` or `retryLivingWikiJob`,
+`planSignature` is required and must match the current plan.
+
+If the plan has changed between preview and Build (e.g. a re-index added a cluster,
+or `MaxPagesPerJob` was changed in another tab), the mutation rejects with:
+
+```json
+{
+  "errors": [{
+    "message": "Living Wiki plan has changed since preview; re-review and try again",
+    "extensions": {
+      "code": "LIVING_WIKI_PLAN_STALE",
+      "freshPlan": { ... }
+    }
+  }]
+}
+```
+
+The fresh plan is embedded in `extensions.freshPlan` so the UI can re-render
+the modal in a single round-trip. The user's existing deselections are preserved
+for any page IDs that still appear in the fresh plan; removed pages are silently
+dropped; new pages default to checked. The Build button is re-disabled until the
+user interacts with at least one checkbox, forcing explicit re-confirmation.
+
+### When the modal does NOT appear
+
+The preview modal is skipped on two paths:
+
+- **`retryExcludedOnly: true`** (Retry excluded pages CTA) — the page set is
+  already explicitly determined from the previous job's `excluded_page_ids`. No
+  modal, no signature validation.
+- **`ALL_ENABLED` mode** — fires two separate cold-start jobs (Overview + Detailed)
+  and is outside the scope of per-mode preview. The `previewLivingWikiPlan` query
+  rejects `mode: ALL_ENABLED` with extension code `PREVIEW_MODE_NOT_SUPPORTED`.
+
+---
+
 ## Verifying page-count behavior from logs
 
 ```bash

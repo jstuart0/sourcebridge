@@ -1788,3 +1788,119 @@ func TestOrchestrator_OnPageStartFiresWithAttempt2OnRetry(t *testing.T) {
 		t.Errorf("expected [1 2] attempt sequence, got %v", calls)
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CA-146 Phase 0.5: PageKind population tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestResolveDetailed_ClustersPresent_KindCluster verifies that when clusters
+// are non-empty, ResolveDetailed sets Kind = PageKindCluster on architecture
+// pages and Kind = PageKindRepoWide on the three repo-wide pages.
+func TestResolveDetailed_ClustersPresent_KindCluster(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	resolver := orchestrator.NewTaxonomyResolver("test-repo", twoPackageGraph{}, nil, nil)
+	clusters := threeClusterSummaries()
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+
+	pages, err := resolver.ResolveDetailed(ctx, nil, clusters, now)
+	if err != nil {
+		t.Fatalf("ResolveDetailed: %v", err)
+	}
+
+	repoWideTemplates := map[string]bool{
+		"api_reference":   true,
+		"system_overview": true,
+		"glossary":        true,
+	}
+	for _, p := range pages {
+		if repoWideTemplates[p.TemplateID] {
+			if p.Kind != orchestrator.PageKindRepoWide {
+				t.Errorf("repo-wide page %q: got Kind=%v, want PageKindRepoWide", p.ID, p.Kind)
+			}
+		} else {
+			// Architecture pages from clusters must be PageKindCluster.
+			if p.Kind != orchestrator.PageKindCluster {
+				t.Errorf("cluster arch page %q: got Kind=%v, want PageKindCluster", p.ID, p.Kind)
+			}
+		}
+	}
+}
+
+// TestResolveDetailed_NoClusters_KindTopLevelDir verifies that when clusters
+// are empty, ResolveDetailed sets Kind = PageKindTopLevelDir on architecture
+// pages emitted by the top-level-dir fallback. This is the regression test for
+// codex r1 C1: both cluster and top-level-dir pages share TemplateID "architecture",
+// so TemplateID alone cannot distinguish them.
+func TestResolveDetailed_NoClusters_KindTopLevelDir(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	resolver := orchestrator.NewTaxonomyResolver("test-repo", multiPackageGraph{}, nil, nil)
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+
+	pages, err := resolver.ResolveDetailed(ctx, nil, nil /* no clusters */, now)
+	if err != nil {
+		t.Fatalf("ResolveDetailed (no clusters): %v", err)
+	}
+
+	for _, p := range pages {
+		if p.TemplateID != "architecture" {
+			continue
+		}
+		if p.Kind != orchestrator.PageKindTopLevelDir {
+			t.Errorf("top-level-dir fallback page %q: got Kind=%v, want PageKindTopLevelDir", p.ID, p.Kind)
+		}
+	}
+}
+
+// TestResolveOverview_ClustersPresent_KindCluster verifies that when clusters
+// are non-empty, ResolveOverview sets Kind = PageKindCluster on architecture
+// pages.
+func TestResolveOverview_ClustersPresent_KindCluster(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	resolver := orchestrator.NewTaxonomyResolver("test-repo", twoPackageGraph{}, nil, nil)
+	clusters := threeClusterSummaries()
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+
+	pages, err := resolver.ResolveOverview(ctx, nil, clusters, now)
+	if err != nil {
+		t.Fatalf("ResolveOverview: %v", err)
+	}
+
+	for _, p := range pages {
+		if p.TemplateID != "architecture" {
+			continue
+		}
+		if p.Kind != orchestrator.PageKindCluster {
+			t.Errorf("cluster arch page %q: got Kind=%v, want PageKindCluster", p.ID, p.Kind)
+		}
+	}
+}
+
+// TestResolveOverview_NoClusters_RepoWideOnly verifies that when clusters are
+// empty, ResolveOverview emits only the 3 repo-wide pages (all PageKindRepoWide).
+func TestResolveOverview_NoClusters_RepoWideOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	resolver := orchestrator.NewTaxonomyResolver("test-repo", twoPackageGraph{}, nil, nil)
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+
+	pages, err := resolver.ResolveOverview(ctx, nil, nil /* no clusters */, now)
+	if err != nil {
+		t.Fatalf("ResolveOverview (no clusters): %v", err)
+	}
+
+	if len(pages) != 3 {
+		t.Errorf("expected 3 repo-wide pages, got %d", len(pages))
+	}
+	for _, p := range pages {
+		if p.Kind != orchestrator.PageKindRepoWide {
+			t.Errorf("page %q: got Kind=%v, want PageKindRepoWide", p.ID, p.Kind)
+		}
+	}
+}
