@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 SourceBridge Contributors
 //
-// CA-146 Phase 0: shared helpers for Living Wiki plan preview and cold-start.
+// CA-146 Phase 0+2: shared helpers for Living Wiki plan preview and cold-start.
 //
 // This file holds constants, classification helpers, and the cap/signature
 // functions that are consumed by BOTH living_wiki_coldstart.go and the
@@ -144,6 +144,78 @@ func applyPageCap(
 
 	// Fits within cap (or no cap) — no truncation.
 	return pages, "none", 0, effectiveCap, preCap
+}
+
+// applyPageSelection filters pages by an optional selection list.
+// Repo-wide pages (Kind == PageKindRepoWide, with TemplateID fallback for
+// legacy plans) are ALWAYS retained regardless of selectedIDs.
+//
+// selectedIDs semantics (codex r1 C2 nullable-list contract):
+//
+//	nil      → no filter; pages returned unchanged (passthrough).
+//	[]       → explicit empty selection; only repo-wide pages retained.
+//	[a,b,c]  → explicit selection; repo-wide + pages whose ID ∈ {a,b,c}
+//	           retained, rest dropped.
+//
+// Stable order is preserved.
+func applyPageSelection(pages []lworch.PlannedPage, selectedIDs []string) []lworch.PlannedPage {
+	if selectedIDs == nil {
+		return pages
+	}
+	wanted := make(map[string]bool, len(selectedIDs))
+	for _, id := range selectedIDs {
+		wanted[id] = true
+	}
+	out := pages[:0]
+	for _, p := range pages {
+		isRepoWide := p.Kind == lworch.PageKindRepoWide ||
+			(p.Kind == lworch.PageKindUnknown && repoWideTemplateIDs[p.TemplateID])
+		if isRepoWide || wanted[p.ID] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// buildPlanFromPages constructs a LivingWikiPlan from a cap-applied page slice
+// and the resolved cap metadata. Used to populate the freshPlan extension on
+// LIVING_WIKI_PLAN_STALE errors so the client can present the current plan
+// without a second round-trip.
+func buildPlanFromPages(
+	pages []lworch.PlannedPage,
+	mode string,
+	effectiveCap int,
+	capSource string,
+	capValue int,
+	preCap int,
+	summary string,
+) *LivingWikiPlan {
+	planSig := computePlanSignature(pageIDsOf(pages), mode, effectiveCap)
+	gqlPages := make([]*LivingWikiPlanPage, 0, len(pages))
+	for _, p := range pages {
+		gqlPages = append(gqlPages, plannedPageToGQL(p))
+	}
+	return &LivingWikiPlan{
+		PlanSignature: planSig,
+		Mode:          mode,
+		ModeTooltip:   modeTooltip(mode),
+		Summary:       summary,
+		TotalPages:    len(pages),
+		PreCap:        preCap,
+		CapSource:     capSource,
+		CapValue:      capValue,
+		Pages:         gqlPages,
+	}
+}
+
+// pageIDsOf extracts IDs from a page slice; helper for buildPlanFromPages and
+// computePlanSignature call sites.
+func pageIDsOf(pages []lworch.PlannedPage) []string {
+	ids := make([]string, len(pages))
+	for i, p := range pages {
+		ids[i] = p.ID
+	}
+	return ids
 }
 
 // modeTooltip returns the operator-facing tooltip for a mode string.

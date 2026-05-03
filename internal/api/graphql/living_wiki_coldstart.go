@@ -115,9 +115,14 @@ type coldStartConfig struct {
 	PublishStatusStore livingwiki.PagePublishStatusStore // for per-page dispatch state (Phase 1)
 	Mode               string                            // Phase 4a: "lw_overview" or "lw_detailed"; empty defaults to lw_detailed
 	ComprehensionStore comprehension.Store               // for quality-gate tier registry lookup (CA-150 Phase 4)
-	MaxPagesPerJob     int                               // CA-146: repo setting cap; 0 = no cap (new repos get 500 via migration)
-	PageCountOverride  *int                              // CA-146: per-run override; nil = use MaxPagesPerJob
-	// Phase 2 will add: PlannedPages []lworch.PlannedPage (pre-resolved+filtered)
+	MaxPagesPerJob    int   // CA-146: repo setting cap; 0 = no cap (new repos get 500 via migration)
+	PageCountOverride *int  // CA-146: per-run override; nil = use MaxPagesPerJob
+	// CA-146 Phase 2 (codex r1 H1): nullable-list selection contract.
+	// nil = no filter (passthrough). [] = explicit empty (only repo-wide pages).
+	// [ids...] = explicit selection (repo-wide + named IDs retained).
+	// Signature validation happens in the resolver body; the closure applies
+	// applyPageSelection after taxonomy resolution.
+	SelectedPageIDs []string
 }
 
 // buildColdStartRunner returns the RunWithContext closure for a living-wiki
@@ -270,10 +275,32 @@ func buildColdStartRunner(cfg coldStartConfig) func(ctx context.Context, rt llm.
 			return nil
 		}
 
+		// ── CA-146 Phase 2: Apply selection filter ────────────────────────────
+		//
+		// rawPreFilterTotal records len(pages) BEFORE applyPageSelection so the
+		// planning slog line exposes how many pages the full taxonomy produced.
+		// When cfg.SelectedPageIDs is nil this is a passthrough (no-op).
+		// Signature validation happened in the resolver body; the closure only
+		// applies the filter (codex r1 H1 — closure re-resolves for snapshot
+		// consistency, resolver validates then discards).
+		//
+		// retryExcludedOnly (len(ExcludedPageIDs)>0) is mutually exclusive with
+		// SelectedPageIDs (rejected by the resolver with LIVING_WIKI_INPUT_CONFLICT).
+		rawPreFilterTotal := len(pages)
+		pages = applyPageSelection(pages, cfg.SelectedPageIDs)
+
+		if len(pages) == 0 {
+			rt.ReportProgress(1.0, "ok", "No pages remain after selection filter")
+			return nil
+		}
+
 		// ── CA-146: Page-count cap + planning log ─────────────────────────────
 		//
-		// Tally breakdown by template role before any truncation so the log
-		// reflects what the taxonomy actually produced.
+		// Tally breakdown by template role AFTER selection, BEFORE cap so the log
+		// reflects the post-filter composition.
+		// raw_pre_filter_total — len(pages) before applyPageSelection (full taxonomy)
+		// pre_cap_total        — len(pages) after applyPageSelection, before applyPageCap
+		// total                — len(pages) after applyPageCap (final)
 		var clusterPageCount, repoWidePageCount, topLevelDirPageCount int
 		for _, p := range pages {
 			switch classifyPageType(p) {
@@ -305,6 +332,7 @@ func buildColdStartRunner(cfg coldStartConfig) func(ctx context.Context, rt llm.
 			"cluster_pages", clusterPageCount,
 			"top_level_dir_pages", topLevelDirPageCount,
 			"repo_wide_pages", repoWidePageCount,
+			"raw_pre_filter_total", rawPreFilterTotal,
 			"pre_cap_total", preCap,
 			"total", total,
 			"cap_source", capSource,

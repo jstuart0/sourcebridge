@@ -7,6 +7,7 @@
 package graphql
 
 import (
+	"fmt"
 	"testing"
 
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
@@ -284,6 +285,111 @@ func TestClassifyPageType_LegacyArchitectureAmbiguous(t *testing.T) {
 	got := classifyPageType(lworch.PlannedPage{Kind: lworch.PageKindUnknown, TemplateID: "architecture"})
 	if got != LivingWikiPageTypeArchitecture {
 		t.Errorf("got %q, want %q (legacy best-effort fallback)", got, LivingWikiPageTypeArchitecture)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// applyPageSelection tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// makeMixedPages returns a page slice with n architecture pages and the 3
+// canonical repo-wide pages. Used as a fixture for applyPageSelection tests.
+func makeMixedPages(n int) []lworch.PlannedPage {
+	pages := make([]lworch.PlannedPage, 0, n+3)
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("arch-%d", i)
+		pages = append(pages, lworch.PlannedPage{
+			ID:         id,
+			TemplateID: "architecture",
+			Kind:       lworch.PageKindCluster,
+		})
+	}
+	// Repo-wide pages with explicit Kind.
+	pages = append(pages,
+		lworch.PlannedPage{ID: "rw-api", TemplateID: "api_reference", Kind: lworch.PageKindRepoWide},
+		lworch.PlannedPage{ID: "rw-sysov", TemplateID: "system_overview", Kind: lworch.PageKindRepoWide},
+		lworch.PlannedPage{ID: "rw-glossary", TemplateID: "glossary", Kind: lworch.PageKindRepoWide},
+	)
+	return pages
+}
+
+// TestApplyPageSelection_NilPassthrough verifies that nil selectedIDs returns
+// the original slice unchanged (passthrough — no filter applied).
+func TestApplyPageSelection_NilPassthrough(t *testing.T) {
+	t.Parallel()
+	pages := makeMixedPages(3)
+	out := applyPageSelection(pages, nil)
+	if len(out) != len(pages) {
+		t.Errorf("nil selectedIDs should return all pages; got %d, want %d", len(out), len(pages))
+	}
+}
+
+// TestApplyPageSelection_EmptyListRetainsOnlyRepoWide verifies that an
+// explicit empty slice (non-nil) retains only repo-wide pages.
+func TestApplyPageSelection_EmptyListRetainsOnlyRepoWide(t *testing.T) {
+	t.Parallel()
+	pages := makeMixedPages(4) // 4 arch + 3 repo-wide
+	out := applyPageSelection(pages, []string{})
+	if len(out) != 3 {
+		t.Errorf("empty selectedIDs should retain only 3 repo-wide pages; got %d", len(out))
+	}
+	for _, p := range out {
+		if p.Kind != lworch.PageKindRepoWide {
+			t.Errorf("non-repo-wide page %q survived empty selection filter", p.ID)
+		}
+	}
+}
+
+// TestApplyPageSelection_ExplicitSelectionRetainsSelectionPlusRepoWide verifies
+// that [arch-0, arch-2] retains those two + all 3 repo-wide pages, dropping the rest.
+func TestApplyPageSelection_ExplicitSelectionRetainsSelectionPlusRepoWide(t *testing.T) {
+	t.Parallel()
+	pages := makeMixedPages(5) // arch-0..arch-4 + 3 repo-wide
+	out := applyPageSelection(pages, []string{"arch-0", "arch-2"})
+	// Expected: arch-0, arch-2, rw-api, rw-sysov, rw-glossary = 5 pages.
+	if len(out) != 5 {
+		t.Errorf("expected 5 pages (2 selected + 3 repo-wide), got %d", len(out))
+	}
+	ids := make(map[string]bool, len(out))
+	for _, p := range out {
+		ids[p.ID] = true
+	}
+	for _, want := range []string{"arch-0", "arch-2", "rw-api", "rw-sysov", "rw-glossary"} {
+		if !ids[want] {
+			t.Errorf("expected page %q in output but not found; output IDs: %v", want, ids)
+		}
+	}
+	for _, drop := range []string{"arch-1", "arch-3", "arch-4"} {
+		if ids[drop] {
+			t.Errorf("page %q should have been dropped by selection filter but survived", drop)
+		}
+	}
+}
+
+// TestApplyPageSelection_LegacyRepoWideFallback verifies that legacy pages
+// (Kind == PageKindUnknown) with repo-wide templateIDs are still retained by
+// an empty selection (the TemplateID-based fallback for legacy plans).
+func TestApplyPageSelection_LegacyRepoWideFallback(t *testing.T) {
+	t.Parallel()
+	pages := []lworch.PlannedPage{
+		{ID: "arch-x", TemplateID: "architecture", Kind: lworch.PageKindUnknown},
+		// Legacy repo-wide pages: Kind==Unknown, TemplateID in repoWideTemplateIDs.
+		{ID: "legacy-api", TemplateID: "api_reference", Kind: lworch.PageKindUnknown},
+		{ID: "legacy-gloss", TemplateID: "glossary", Kind: lworch.PageKindUnknown},
+	}
+	out := applyPageSelection(pages, []string{}) // empty = only repo-wide
+	if len(out) != 2 {
+		t.Errorf("expected 2 legacy repo-wide pages, got %d", len(out))
+	}
+	ids := map[string]bool{}
+	for _, p := range out {
+		ids[p.ID] = true
+	}
+	if !ids["legacy-api"] || !ids["legacy-gloss"] {
+		t.Errorf("legacy repo-wide pages should survive empty selection; got %v", ids)
+	}
+	if ids["arch-x"] {
+		t.Error("arch-x (unknown Kind, architecture template) should have been dropped")
 	}
 }
 
