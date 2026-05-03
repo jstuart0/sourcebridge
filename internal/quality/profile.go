@@ -271,6 +271,12 @@ var tierOverrides = map[profileKey][]tierRuleOverride{
 		{ValidatorID: ValidatorVagueness, Level: &_levelWarning},
 		{ValidatorID: ValidatorReadingLevel,
 			Config: ValidatorConfig{ReadingLevelFloor: 40}},
+		// CA-152: factual_grounding demoted to warning at TierLocal — local LLMs
+		// (qwen3 class) don't reliably emit citations in the strict (path:N-N)
+		// format the validator's regex requires. Production evidence: dick's
+		// investigation 2026-05-02-qwen3-living-wiki-failures.md. Original
+		// CA-150 followup-B.
+		{ValidatorID: ValidatorFactualGrounding, Level: &_levelWarning},
 	},
 
 	// --- adr / for-engineers ---
@@ -301,10 +307,36 @@ var tierOverrides = map[profileKey][]tierRuleOverride{
 		{ValidatorID: ValidatorVagueness, Level: &_levelWarning},
 		{ValidatorID: ValidatorReadingLevel,
 			Config: ValidatorConfig{ReadingLevelFloor: 40}},
+		// Note: factual_grounding is not in the system_overview/engineers base
+		// profile (the template doesn't gate on citations). No override needed.
 	},
 
-	// Glossary and ActivityLog are tier-invariant: they are mechanical
-	// extraction (factual correctness, not voice polish). No overrides needed.
+	// --- system_overview / for-product ---
+	// CA-152: AudienceProduct was missing from TierLocal entirely — only
+	// AudienceEngineers had overrides. A product-audience cold-start would hit
+	// frontier thresholds for vagueness. Mirror the engineers entries for
+	// validators that appear in both the engineers and product base profiles.
+	// (factual_grounding is not in the product base — no override needed.)
+	{TemplateSystemOverview, AudienceProduct, modeltier.TierLocal}: {
+		{ValidatorID: ValidatorArchitecturalRelevance, Level: &_levelGate,
+			Config: ValidatorConfig{ArchRelevanceMinPageRefs: 1, ArchRelevanceMinGraphRelations: 3}},
+		{ValidatorID: ValidatorVagueness, Level: &_levelWarning},
+		{ValidatorID: ValidatorReadingLevel,
+			Config: ValidatorConfig{ReadingLevelFloor: 40}},
+	},
+
+	// --- glossary / for-engineers ---
+	// CA-152: factual_grounding demoted to warning at TierLocal. Glossary
+	// paragraphs for symbols with empty FilePath emit no citation; doc-comments
+	// with assertion verbs then fire the gate. Zero-LLM template cannot self-fix
+	// on retry. Production evidence: dick's investigation
+	// 2026-05-02-qwen3-living-wiki-failures.md.
+	{TemplateGlossary, AudienceEngineers, modeltier.TierLocal}: {
+		{ValidatorID: ValidatorFactualGrounding, Level: &_levelWarning},
+	},
+
+	// ActivityLog is tier-invariant: numerical extraction where behavioral
+	// assertions are always accompanied by data. No overrides needed.
 }
 
 // --- Materializer ---

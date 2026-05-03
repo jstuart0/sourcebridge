@@ -338,11 +338,11 @@ func TestDefaultProfile_ThresholdTable(t *testing.T) {
 		ValidatorID quality.ValidatorID
 		WantLevel   quality.GateLevel
 		// Zero means "don't assert" for numeric fields.
-		WantCitationDensity    int
-		WantReadingLevelFloor  float64
-		WantArchRefsMin        int
-		WantArchRelationsMin   int
-		WantBlockCountMin      int
+		WantCitationDensity   int
+		WantReadingLevelFloor float64
+		WantArchRefsMin       int
+		WantArchRelationsMin  int
+		WantBlockCountMin     int
 	}
 
 	table := []row{
@@ -473,6 +473,148 @@ func TestDefaultProfile_ThresholdTable(t *testing.T) {
 	}
 }
 
+// TestEffectiveProfile_FactualGroundingWarningAtLocal verifies that
+// factual_grounding is demoted to LevelWarning at TierLocal for the two
+// templates whose base profiles include that validator (api_reference and
+// glossary). It also asserts that frontier still gates — the override must
+// only fire at local. CA-152 followup-B.
+//
+// system_overview/engineers is intentionally excluded: that base profile does
+// not include factual_grounding (the template doesn't gate on citations), so
+// no override is needed or applied there.
+func TestEffectiveProfile_FactualGroundingWarningAtLocal(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		Template quality.Template
+		Audience quality.Audience
+	}{
+		{quality.TemplateAPIReference, quality.AudienceEngineers},
+		{quality.TemplateGlossary, quality.AudienceEngineers},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(string(tc.Template)+"/"+string(tc.Audience), func(t *testing.T) {
+			t.Parallel()
+
+			local, ok := quality.DefaultProfile(tc.Template, tc.Audience, modeltier.TierLocal)
+			if !ok {
+				t.Fatalf("DefaultProfile(%s, %s, local) returned false", tc.Template, tc.Audience)
+			}
+			foundLocal := false
+			for _, r := range local.Rules {
+				if r.ValidatorID == quality.ValidatorFactualGrounding {
+					foundLocal = true
+					if r.Level != quality.LevelWarning {
+						t.Errorf("[%s/%s/local] factual_grounding Level = %q, want warning",
+							tc.Template, tc.Audience, r.Level)
+					}
+				}
+			}
+			if !foundLocal {
+				t.Errorf("[%s/%s/local] factual_grounding rule not found", tc.Template, tc.Audience)
+			}
+
+			frontier, ok := quality.DefaultProfile(tc.Template, tc.Audience, modeltier.TierFrontier)
+			if !ok {
+				t.Fatalf("DefaultProfile(%s, %s, frontier) returned false", tc.Template, tc.Audience)
+			}
+			foundFrontier := false
+			for _, r := range frontier.Rules {
+				if r.ValidatorID == quality.ValidatorFactualGrounding {
+					foundFrontier = true
+					if r.Level != quality.LevelGate {
+						t.Errorf("[%s/%s/frontier] factual_grounding Level = %q, want gate",
+							tc.Template, tc.Audience, r.Level)
+					}
+				}
+			}
+			if !foundFrontier {
+				t.Errorf("[%s/%s/frontier] factual_grounding rule not found", tc.Template, tc.Audience)
+			}
+		})
+	}
+}
+
+// TestEffectiveProfile_SystemOverviewProductLocal_HasOverrides verifies that
+// system_overview/AudienceProduct/TierLocal has the same relaxed overrides as
+// system_overview/AudienceEngineers/TierLocal for the validators shared by
+// both base profiles. CA-152 added the product entry — this test locks it.
+func TestEffectiveProfile_SystemOverviewProductLocal_HasOverrides(t *testing.T) {
+	t.Parallel()
+
+	engLocal, ok := quality.DefaultProfile(quality.TemplateSystemOverview, quality.AudienceEngineers, modeltier.TierLocal)
+	if !ok {
+		t.Fatal("DefaultProfile(system_overview, engineers, local) returned false")
+	}
+	prodLocal, ok := quality.DefaultProfile(quality.TemplateSystemOverview, quality.AudienceProduct, modeltier.TierLocal)
+	if !ok {
+		t.Fatal("DefaultProfile(system_overview, product, local) returned false")
+	}
+
+	// Both audiences must have vagueness as a warning (not gate) at local.
+	for _, r := range engLocal.Rules {
+		if r.ValidatorID == quality.ValidatorVagueness && r.Level != quality.LevelWarning {
+			t.Errorf("engineers/local vagueness Level = %q, want warning", r.Level)
+		}
+	}
+	for _, r := range prodLocal.Rules {
+		if r.ValidatorID == quality.ValidatorVagueness && r.Level != quality.LevelWarning {
+			t.Errorf("product/local vagueness Level = %q, want warning", r.Level)
+		}
+	}
+
+	// Both must have reading_level floor relaxed to 40 at local.
+	for _, r := range engLocal.Rules {
+		if r.ValidatorID == quality.ValidatorReadingLevel && r.Config.ReadingLevelFloor != 40 {
+			t.Errorf("engineers/local reading_level floor = %.1f, want 40", r.Config.ReadingLevelFloor)
+		}
+	}
+	for _, r := range prodLocal.Rules {
+		if r.ValidatorID == quality.ValidatorReadingLevel && r.Config.ReadingLevelFloor != 40 {
+			t.Errorf("product/local reading_level floor = %.1f, want 40", r.Config.ReadingLevelFloor)
+		}
+	}
+
+	// Both must have arch_relevance relaxed (refs>=1, rels>=3) at local.
+	for _, r := range engLocal.Rules {
+		if r.ValidatorID == quality.ValidatorArchitecturalRelevance {
+			if r.Config.ArchRelevanceMinPageRefs != 1 {
+				t.Errorf("engineers/local arch_relevance MinPageRefs = %d, want 1",
+					r.Config.ArchRelevanceMinPageRefs)
+			}
+			if r.Config.ArchRelevanceMinGraphRelations != 3 {
+				t.Errorf("engineers/local arch_relevance MinGraphRelations = %d, want 3",
+					r.Config.ArchRelevanceMinGraphRelations)
+			}
+		}
+	}
+	for _, r := range prodLocal.Rules {
+		if r.ValidatorID == quality.ValidatorArchitecturalRelevance {
+			if r.Config.ArchRelevanceMinPageRefs != 1 {
+				t.Errorf("product/local arch_relevance MinPageRefs = %d, want 1",
+					r.Config.ArchRelevanceMinPageRefs)
+			}
+			if r.Config.ArchRelevanceMinGraphRelations != 3 {
+				t.Errorf("product/local arch_relevance MinGraphRelations = %d, want 3",
+					r.Config.ArchRelevanceMinGraphRelations)
+			}
+		}
+	}
+
+	// Product audience does not have factual_grounding in its base — no override
+	// expected there. Verify that product/frontier vagueness is still a gate
+	// (the override only fires at local).
+	prodFrontier, ok := quality.DefaultProfile(quality.TemplateSystemOverview, quality.AudienceProduct, modeltier.TierFrontier)
+	if !ok {
+		t.Fatal("DefaultProfile(system_overview, product, frontier) returned false")
+	}
+	for _, r := range prodFrontier.Rules {
+		if r.ValidatorID == quality.ValidatorVagueness && r.Level != quality.LevelGate {
+			t.Errorf("product/frontier vagueness Level = %q, want gate", r.Level)
+		}
+	}
+}
+
 // --- helpers ---
 
 func gateSet(p quality.Profile) map[quality.ValidatorID]bool {
@@ -525,4 +667,3 @@ func requireOff(t *testing.T, profile string, offs map[quality.ValidatorID]bool,
 		t.Errorf("%s: expected %s to be off", profile, id)
 	}
 }
-

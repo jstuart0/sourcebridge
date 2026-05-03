@@ -439,7 +439,7 @@ func TestTierFixtures_ThresholdsBehaveAsDocumented(t *testing.T) {
 		assertDecision(t, modeltier.TierLocal, localResult, quality.RetryPass)
 		for _, w := range localResult.Warnings {
 			if w.ValidatorID == quality.ValidatorBlockCount {
-				t.Errorf("tier=local: block_count warning fired with 1 block "+
+				t.Errorf("tier=local: block_count warning fired with 1 block " +
 					"and min=1; expected no warning")
 			}
 		}
@@ -481,6 +481,47 @@ func TestTierFixtures_ThresholdsBehaveAsDocumented(t *testing.T) {
 		assertNoGateFor(t, modeltier.TierLocal, localResult, quality.ValidatorArchitecturalRelevance)
 		assertDecision(t, modeltier.TierLocal, localResult, quality.RetryPass)
 	})
+}
+
+// TestTierFixtures_FactualGrounding_QwenShapedOutput is the CA-152 lock-test.
+// It proves that the production failure mode (qwen3.6-shaped output with zero
+// citations and behavioral assertion verbs) is REJECTED at TierFrontier and
+// PASSES with a warning at TierLocal after the followup-B override is applied.
+//
+// The fixture (api_reference_qwen3_no_citations.md) is representative of
+// qwen3.6:27b-q4_K_M output: plain prose, behavioral verbs (accepts, returns,
+// validates, stores, etc.), no parseable (path:N-N) citations.
+func TestTierFixtures_FactualGrounding_QwenShapedOutput(t *testing.T) {
+	t.Parallel()
+	input := loadFixture(t, "api_reference_qwen3_no_citations.md")
+
+	// Guard: fixture must contain behavioral assertion verbs so the validator
+	// has something to flag. We verify by checking that frontier rejects it.
+	base := quality.ValidatorConfig{}
+
+	// TierFrontier: factual_grounding is a gate. Paragraphs with assertion
+	// verbs and no citations => gate fires => RetryReject.
+	frontierResult := runFixture(t, quality.TemplateAPIReference, quality.AudienceEngineers, modeltier.TierFrontier, input, base)
+	assertGatesFire(t, modeltier.TierFrontier, frontierResult)
+	foundFGGate := false
+	for _, g := range frontierResult.Gates {
+		if g.ValidatorID == quality.ValidatorFactualGrounding {
+			foundFGGate = true
+		}
+	}
+	if !foundFGGate {
+		t.Errorf("tier=frontier: expected factual_grounding gate violation on qwen3-shaped fixture; gates=%v",
+			ruleIDs(frontierResult.Gates))
+	}
+	assertDecision(t, modeltier.TierFrontier, frontierResult, quality.RetryReject)
+
+	// TierLocal: factual_grounding is demoted to warning (CA-152). The key
+	// assertion is that factual_grounding does NOT fire as a gate — it appears
+	// as a warning. citation_density may still gate if the fixture has no
+	// citations, but factual_grounding specifically must not be the blocker.
+	localResult := runFixture(t, quality.TemplateAPIReference, quality.AudienceEngineers, modeltier.TierLocal, input, base)
+	assertNoGateFor(t, modeltier.TierLocal, localResult, quality.ValidatorFactualGrounding)
+	assertWarningPresent(t, modeltier.TierLocal, localResult, quality.ValidatorFactualGrounding)
 }
 
 // countValidCitations counts how many strings in the raw citation slice
