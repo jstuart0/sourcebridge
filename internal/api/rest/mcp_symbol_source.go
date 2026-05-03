@@ -6,7 +6,9 @@ package rest
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/source"
 )
@@ -167,12 +169,15 @@ func (h *mcpHandler) symbolSourceToolDefs() []mcpToolDefinition {
 		},
 		{
 			Name: "get_symbol_context",
-			Description: "Return a single-call bundle of a symbol's source plus first-hop callers, callees, " +
-				"and file imports. Eliminates the 2-round-trip tax of search_symbols → file read. " +
-				"Provide either `symbol_id` or `(file_path, symbol_name)`. " +
-				"When `call_graph` or `file_imports` capabilities are disabled, the bundle degrades " +
-				"gracefully: the `symbol` and source are always returned; missing sections are signalled " +
-				"by `degraded: true` and `degraded_reason`.",
+			Description: "Single-call bundle of a symbol's source plus first-hop callers, callees " +
+				"(capped at 20 each), and the file's imports (capped at 50). " +
+				"Eliminates the 2x token tax of search_symbols → file read. " +
+				"Provide either `symbol_id` (fast path) or the `(file_path, symbol_name)` pair. " +
+				"When the operator has disabled `call_graph` or `file_imports`, the corresponding " +
+				"arrays are empty and the response carries `degraded: true` with `degraded_reason` " +
+				"explaining which capability is off — check this field before treating empty arrays " +
+				"as \"no callers exist.\" Only depth=1 is supported in this release; " +
+				"`depth > 1` returns INVALID_ARGUMENTS.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -181,10 +186,206 @@ func (h *mcpHandler) symbolSourceToolDefs() []mcpToolDefinition {
 					"symbol_name":   map[string]interface{}{"type": "string", "description": "Name of the target symbol (required unless symbol_id is provided)"},
 					"line_start":    map[string]interface{}{"type": "integer", "description": "Optional disambiguator when the same name appears multiple times in the file"},
 					"symbol_id":     map[string]interface{}{"type": "string", "description": "Optional fast-path identifier — bypasses (file_path, symbol_name) resolution"},
-					"context_lines": map[string]interface{}{"type": "integer", "description": "Lines of surrounding context to prepend/append (default 0; values > 10 are silently clamped to 10)"},
+					"depth":         map[string]interface{}{"type": "integer", "description": "Walk depth (default 1; only depth=1 is supported in this release)"},
 				},
 				"required": []string{"repository_id"},
 			},
 		},
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — get_symbol_context: bundled symbol + callers + callees + imports
+// ---------------------------------------------------------------------------
+
+// Truncation caps for the bundled response (D4 / plan Phase 3.3).
+const (
+	mcpContextCallersTruncLimit = 20
+	mcpContextCalleesTruncLimit = 20
+	mcpContextImportsTruncLimit = 50
+)
+
+// getSymbolContextResult is the wire shape returned by get_symbol_context.
+// The Symbol payload is always present when no error is returned. When a
+// contributing capability (call_graph, file_imports) is disabled, the
+// corresponding array is empty and Degraded is true. DegradedReason is
+// always set when Degraded is true; it is omitted (omitempty) when Degraded
+// is false.
+type getSymbolContextResult struct {
+	Symbol  getSymbolSourceResult `json:"symbol"`
+	Callers []callGraphSymbol     `json:"callers"`
+	Callees []callGraphSymbol     `json:"callees"`
+	Imports []fileImport          `json:"imports"`
+	Depth   int                   `json:"depth"`
+	// Truncated is true when any list was cut to its cap.
+	Truncated bool `json:"truncated"`
+	// Degraded is true when call_graph and/or file_imports is disabled.
+	Degraded bool `json:"degraded"`
+	// DegradedReason is always set when Degraded is true; omitted otherwise.
+	DegradedReason string `json:"degraded_reason,omitempty"`
+}
+
+func (h *mcpHandler) callGetSymbolContext(session *mcpSession, args json.RawMessage) (interface{}, error) {
+	var params struct {
+		symbolRefParams
+		Depth int `json:"depth"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return nil, errInvalidArguments(err.Error())
+	}
+	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+		return nil, err
+	}
+
+	// Normalise depth: zero means "use default" (1).
+	depth := params.Depth
+	if depth == 0 {
+		depth = 1
+	}
+	if depth > 1 {
+		return nil, errInvalidArguments("depth > 1 is not yet supported (CA-151 ships depth=1 only)")
+	}
+
+	// Resolve symbol + read source. context_lines=0 keeps the bundle compact;
+	// callers/callees already provide the surrounding context.
+	symbolResult, sym, err := h.buildSymbolSource(session, params.symbolRefParams, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	// Capability checks (Decision D4) via the injected checker so tests can
+	// flip capabilities without mutating package globals.
+	checker := h.capabilityChecker
+	if checker == nil {
+		// Production default; should always be wired by router.go.
+		checker = capabilities.IsAvailable
+	}
+	callGraphAvailable := checker("call_graph", h.edition)
+	fileImportsAvailable := checker("file_imports", h.edition)
+
+	// Build degraded_reason (D4).
+	var degraded bool
+	var degradedReasons []string
+	if !callGraphAvailable {
+		degraded = true
+		degradedReasons = append(degradedReasons, "call_graph capability disabled for this edition")
+	}
+	if !fileImportsAvailable {
+		degraded = true
+		degradedReasons = append(degradedReasons, "file_imports capability disabled for this edition")
+	}
+	degradedReason := strings.Join(degradedReasons, "; ")
+	if !degraded {
+		degradedReason = ""
+	}
+
+	var truncated bool
+
+	// --- Callers ---
+	callers := make([]callGraphSymbol, 0)
+	if callGraphAvailable {
+		callerIDs := h.store.GetCallers(sym.ID)
+		if len(callerIDs) > mcpContextCallersTruncLimit {
+			callerIDs = callerIDs[:mcpContextCallersTruncLimit]
+			truncated = true
+		}
+		if len(callerIDs) > 0 {
+			symMap := h.store.GetSymbolsByIDs(callerIDs)
+			for _, id := range callerIDs {
+				s := symMap[id]
+				if s == nil {
+					// Caller was indexed but the symbol was removed in a
+					// partial re-index. Skip silently — don't fail the bundle.
+					continue
+				}
+				callers = append(callers, callGraphSymbol{
+					SymbolID:     s.ID,
+					FilePath:     s.FilePath,
+					SymbolName:   s.Name,
+					Kind:         s.Kind,
+					StartLine:    s.StartLine,
+					EndLine:      s.EndLine,
+					IsTest:       s.IsTest,
+					HopsFromRoot: 1,
+				})
+			}
+		}
+	}
+
+	// --- Callees ---
+	callees := make([]callGraphSymbol, 0)
+	if callGraphAvailable {
+		calleeIDs := h.store.GetCallees(sym.ID)
+		if len(calleeIDs) > mcpContextCalleesTruncLimit {
+			calleeIDs = calleeIDs[:mcpContextCalleesTruncLimit]
+			truncated = true
+		}
+		if len(calleeIDs) > 0 {
+			symMap := h.store.GetSymbolsByIDs(calleeIDs)
+			for _, id := range calleeIDs {
+				s := symMap[id]
+				if s == nil {
+					// Callee was indexed but later removed. Skip silently.
+					continue
+				}
+				callees = append(callees, callGraphSymbol{
+					SymbolID:     s.ID,
+					FilePath:     s.FilePath,
+					SymbolName:   s.Name,
+					Kind:         s.Kind,
+					StartLine:    s.StartLine,
+					EndLine:      s.EndLine,
+					IsTest:       s.IsTest,
+					HopsFromRoot: 1,
+				})
+			}
+		}
+	}
+
+	// --- Imports ---
+	imports := make([]fileImport, 0)
+	if fileImportsAvailable {
+		allImports := h.store.GetImports(params.RepositoryID)
+
+		// Build a file-ID → file-path map (same pattern as callGetFileImports).
+		// O(repo-files) per call; acceptable for depth=1 — see plan Phase 3.3.
+		files := h.store.GetFiles(params.RepositoryID)
+		fileIDToPath := make(map[string]string, len(files))
+		pathToFileID := make(map[string]string, len(files))
+		for _, f := range files {
+			fileIDToPath[f.ID] = f.Path
+			pathToFileID[f.Path] = f.ID
+		}
+
+		targetFileID := pathToFileID[sym.FilePath]
+
+		// Collect all matching imports first, then cap.
+		var matchingImports []fileImport
+		for _, imp := range allImports {
+			if imp.FileID != targetFileID {
+				continue
+			}
+			matchingImports = append(matchingImports, fileImport{
+				Path:  imp.Path,
+				Line:  imp.Line,
+				Depth: 1,
+			})
+		}
+		if len(matchingImports) > mcpContextImportsTruncLimit {
+			matchingImports = matchingImports[:mcpContextImportsTruncLimit]
+			truncated = true
+		}
+		imports = matchingImports
+	}
+
+	return getSymbolContextResult{
+		Symbol:         symbolResult,
+		Callers:        callers,
+		Callees:        callees,
+		Imports:        imports,
+		Depth:          depth,
+		Truncated:      truncated,
+		Degraded:       degraded,
+		DegradedReason: degradedReason,
+	}, nil
 }
