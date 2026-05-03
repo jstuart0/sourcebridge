@@ -515,6 +515,8 @@ func TestMCP_ToolsList(t *testing.T) {
 		"get_requirements_for_symbol", "get_symbols_for_requirement",
 		// CA-153 Phase 1b gap-audit tools
 		"get_orphan_symbols", "get_uncovered_requirements",
+		// CA-153 Phase 2b field guide tool
+		"get_field_guide",
 		// Subsystem clustering tools (Sprint 1 — F5)
 		"get_subsystems", "get_subsystem_by_id", "get_subsystem",
 	}

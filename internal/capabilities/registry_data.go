@@ -164,6 +164,18 @@ var Registry = []Capability{
 		LatencyClass: "fast_read",
 	},
 
+	// ---- Field guides (Phase 2b, CA-153) ----
+	// get_field_guide routes to one of four pre-seeded artifact types via the
+	// format enum: cliff_notes, learning_path, code_tour, workflow_story.
+	// All variants are synchronous reads — no LLM call at MCP-call time.
+	{
+		Name:         "field_guides",
+		Description:  "Multi-format field guides (cliff notes, learning path, code tour, workflow story) read synchronously from pre-seeded knowledge artifacts.",
+		Editions:     []Edition{EditionOSS, EditionEnterprise},
+		MCPToolNames: []string{"get_field_guide"},
+		LatencyClass: "fast_read",
+	},
+
 	// ---- Gap audit (Phase 1b, CA-153) ----
 	{
 		Name:         "gap_audit",
