@@ -377,6 +377,80 @@ func TestMCP_GetRequirementsForSymbol_CrossRepoLeakageBlocked(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// get_requirements_for_symbol — cross-repo requirement leak (P1 #3 regression)
+// ---------------------------------------------------------------------------
+
+// TestMCP_GetRequirementsForSymbol_CrossRepoReqLeakageBlocked verifies that
+// when a link row points from a repo-A symbol to a requirement stored in repo B
+// (cross-repo mis-data), the handler does NOT include that requirement in the
+// response for a repo-A query. Before the P1 #3 fix, the hydration loop did
+// not filter by repoID, allowing other repos' requirement titles and external
+// IDs to leak.
+func TestMCP_GetRequirementsForSymbol_CrossRepoReqLeakageBlocked(t *testing.T) {
+	h := newTestHarness(t)
+	fix := seedRequirementLinkingFixture(t, h)
+	sess := h.createSession()
+
+	// The fixture already has a cross-repo link: Sym6 (repo B) → Req1 (repo A).
+	// For P1 #3 we need the INVERSE: a repo-A symbol linked to a repo-B requirement.
+	// Seed a "foreign" requirement directly into repo B, then link Sym1 (repo A) to it.
+	h.store.StoreRequirement(fix.RepoBID, &graphstore.StoredRequirement{
+		ID:         "foreign-req-1",
+		ExternalID: "FOREIGN-1",
+		Title:      "Foreign repo B requirement — must not leak",
+		Priority:   "high",
+	})
+	foreignReq := h.store.GetRequirementByExternalID(fix.RepoBID, "FOREIGN-1")
+	if foreignReq == nil {
+		t.Fatal("failed to retrieve foreign requirement from repo B")
+	}
+
+	// Store a link from repo-A's Sym1 to the foreign (repo-B) requirement.
+	h.store.StoreLink(fix.RepoAID, &graphstore.StoredLink{
+		RequirementID: foreignReq.ID,
+		SymbolID:      fix.Sym1ID,
+		Confidence:    0.9,
+		Source:        "manual",
+	})
+
+	// Query Sym1 under repo A — should return Req1 (the legitimate repo-A
+	// requirement) but NOT the foreign repo-B requirement.
+	resp := h.sendRPC(sess, 50, "tools/call", map[string]interface{}{
+		"name": "get_requirements_for_symbol",
+		"arguments": map[string]interface{}{
+			"repository_id": fix.RepoAID,
+			"symbol_id":     fix.Sym1ID,
+		},
+	})
+
+	result := parseRequirementLinkingResult(t, resp)
+	reqs, _ := result["requirements"].([]interface{})
+
+	// Verify the foreign requirement is NOT present.
+	for _, r := range reqs {
+		req := r.(map[string]interface{})
+		if req["external_id"] == "FOREIGN-1" {
+			t.Errorf("cross-repo requirement leak: FOREIGN-1 from repo B must not appear in repo A results (P1 #3 regression)")
+		}
+		if title, _ := req["title"].(string); strings.Contains(title, "Foreign repo B") {
+			t.Errorf("cross-repo requirement title leaked: %q", title)
+		}
+	}
+
+	// Req1 (the valid repo-A requirement) should still be present.
+	foundReq1 := false
+	for _, r := range reqs {
+		req := r.(map[string]interface{})
+		if req["id"] == fix.Req1ID {
+			foundReq1 = true
+		}
+	}
+	if !foundReq1 {
+		t.Errorf("Req1 (repo-A legitimate requirement) should still appear after cross-repo filtering")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // get_requirements_for_symbol — no links (empty array, not error)
 // ---------------------------------------------------------------------------
 
@@ -1326,10 +1400,19 @@ func TestMCP_GetChangedRequirements_HappyPath_CommitRange(t *testing.T) {
 	runGit("init", "-b", "main")
 	runGit("config", "user.email", "test@test.test")
 	runGit("config", "user.name", "Test User")
+
+	// Commit 1 — base so HEAD~1..HEAD is a non-empty range.
+	if err := os.WriteFile(filepath.Join(repoDir, "init.go"), []byte("package pkg\n"), 0644); err != nil {
+		t.Fatalf("WriteFile init.go: %v", err)
+	}
+	runGit("add", "init.go")
+	runGit("commit", "-m", "initial commit")
+
+	// Commit 2 (HEAD) — adds service.go; this is the commit the range covers.
 	if err := os.WriteFile(filepath.Join(repoDir, "service.go"), []byte("package pkg\n"), 0644); err != nil {
 		t.Fatalf("WriteFile service.go: %v", err)
 	}
-	runGit("add", ".")
+	runGit("add", "service.go")
 	runGit("commit", "-m", "add service.go")
 
 	h := newTestHarness(t)
@@ -1346,7 +1429,7 @@ func TestMCP_GetChangedRequirements_HappyPath_CommitRange(t *testing.T) {
 		"name": "get_changed_requirements",
 		"arguments": map[string]interface{}{
 			"repository_id": fix.RepoID,
-			"commit_range":  "HEAD~0..HEAD",
+			"commit_range":  "HEAD~1..HEAD",
 		},
 	})
 
@@ -1354,8 +1437,8 @@ func TestMCP_GetChangedRequirements_HappyPath_CommitRange(t *testing.T) {
 	result := parseRequirementLinkingResult(t, resp)
 
 	// Response must echo the commit_range.
-	if got, _ := result["commit_range"].(string); got != "HEAD~0..HEAD" {
-		t.Errorf("commit_range: got %q, want %q", got, "HEAD~0..HEAD")
+	if got, _ := result["commit_range"].(string); got != "HEAD~1..HEAD" {
+		t.Errorf("commit_range: got %q, want %q", got, "HEAD~1..HEAD")
 	}
 	// The git commit touches service.go, which contains HandleCreate and HandleDelete.
 	// Both are linked to Req1; HandleDelete is also linked to Req2.

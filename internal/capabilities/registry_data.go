@@ -130,10 +130,15 @@ var Registry = []Capability{
 		LatencyClass: "indexing_op",
 	},
 	{
-		Name:         "compound_workflows",
-		Description:  "Server-orchestrated workflow tools: review a diff against linked requirements, summarize impact, onboard a new contributor.",
-		Editions:     []Edition{EditionOSS, EditionEnterprise},
-		MCPToolNames: []string{"review_diff_against_requirements", "impact_summary", "onboard_new_contributor"},
+		Name:        "compound_workflows",
+		Description: "Server-orchestrated workflow tools: review a diff against linked requirements (with optional AI findings), summarize impact, onboard a new contributor.",
+		Editions:    []Edition{EditionOSS, EditionEnterprise},
+		MCPToolNames: []string{
+			"review_diff_against_requirements",
+			"impact_summary",
+			"onboard_new_contributor",
+			"get_review_for_diff",
+		},
 		LatencyClass: "search",
 	},
 
@@ -201,19 +206,6 @@ var Registry = []Capability{
 		Name:        "agent_setup",
 		Description: "Generate a .claude/CLAUDE.md skill card and .mcp.json configuration for Claude Code integration.",
 		Editions:    []Edition{EditionOSS, EditionEnterprise},
-	},
-
-	// ---- Code review (Phase 3, CA-153) ----
-	// get_review_for_diff extends review_diff_against_requirements with an
-	// optional AI-review pass. Gated behind include_ai_review (default false)
-	// so structural-only usage requires no worker connection.
-	{
-		Name:          "code_review",
-		Description:   "AI-augmented diff review: structural diff report (touched files, linked requirements, unlinked public surface) plus optional per-file, per-template AI findings.",
-		Editions:      []Edition{EditionOSS, EditionEnterprise},
-		MCPToolNames:  []string{"get_review_for_diff"},
-		RequiresModel: true,
-		LatencyClass:  "llm",
 	},
 
 	// ---- Enterprise-only capabilities (no MCP tools yet — Phase 3 adds them) ----

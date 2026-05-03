@@ -185,14 +185,25 @@ func TestCallReviewDiffAgainstRequirements_CommitRangeHappyPath(t *testing.T) {
 		}
 	}
 
-	// Bootstrap a minimal git repo with a synthetic commit.
+	// Bootstrap a minimal git repo with two commits so we can form a valid
+	// A..B range. Commit 1 (HEAD~1): adds init.go. Commit 2 (HEAD): adds api.go.
+	// The range HEAD~1..HEAD covers only the second commit (api.go).
 	runGitCmd("init", "-b", "main")
 	runGitCmd("config", "user.email", "test@test.test")
 	runGitCmd("config", "user.name", "Test User")
+
+	// Commit 1 — establishes the base so HEAD~1..HEAD is a non-empty range.
+	if err := os.WriteFile(filepath.Join(repoDir, "init.go"), []byte("package pkg\n"), 0644); err != nil {
+		t.Fatalf("WriteFile init.go: %v", err)
+	}
+	runGitCmd("add", "init.go")
+	runGitCmd("commit", "-m", "initial commit")
+
+	// Commit 2 (HEAD) — adds api.go; this is the commit the range covers.
 	if err := os.WriteFile(filepath.Join(repoDir, "api.go"), []byte("package pkg\n"), 0644); err != nil {
 		t.Fatalf("WriteFile api.go: %v", err)
 	}
-	runGitCmd("add", ".")
+	runGitCmd("add", "api.go")
 	runGitCmd("commit", "-m", "add api.go")
 
 	// Seed the store with a repo pointing to repoDir (via ClonePath) and
@@ -212,7 +223,7 @@ func TestCallReviewDiffAgainstRequirements_CommitRangeHappyPath(t *testing.T) {
 		"name": "review_diff_against_requirements",
 		"arguments": map[string]interface{}{
 			"repository_id": repoID,
-			"commit_range":  "HEAD~0..HEAD",
+			"commit_range":  "HEAD~1..HEAD",
 		},
 	})
 
@@ -223,8 +234,8 @@ func TestCallReviewDiffAgainstRequirements_CommitRangeHappyPath(t *testing.T) {
 	if got, _ := result["repository_id"].(string); got != repoID {
 		t.Errorf("repository_id: got %q, want %q", got, repoID)
 	}
-	if got, _ := result["commit_range"].(string); got != "HEAD~0..HEAD" {
-		t.Errorf("commit_range: got %q, want %q", got, "HEAD~0..HEAD")
+	if got, _ := result["commit_range"].(string); got != "HEAD~1..HEAD" {
+		t.Errorf("commit_range: got %q, want %q", got, "HEAD~1..HEAD")
 	}
 
 	// The result must have the standard shape keys regardless of content.
@@ -240,7 +251,8 @@ func TestCallReviewDiffAgainstRequirements_CommitRangeHappyPath(t *testing.T) {
 
 	// The parser fix (Phase 2a.1) moved \x1e to the start of the format
 	// string so that --name-only file lines are captured correctly.
-	// touched_files must now contain the one file committed above.
+	// touched_files must now contain api.go (added in the HEAD commit,
+	// which is included in the range HEAD~1..HEAD).
 	tfs, _ := result["touched_files"].([]interface{})
 	if len(tfs) == 0 {
 		t.Fatalf("touched_files is empty — runGitLog parser fix may have regressed; expected api.go to appear")

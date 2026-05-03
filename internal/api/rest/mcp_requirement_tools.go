@@ -265,6 +265,13 @@ func (h *mcpHandler) callGetRequirementsForSymbol(session *mcpSession, args json
 		if !ok {
 			continue
 		}
+		// Cross-repo isolation: only surface requirements that belong to the
+		// requested repository. A link row may point to a requirement stored
+		// under a different repo (cross-repo mis-data); skip those to prevent
+		// leaking other repos' requirement titles and external IDs.
+		if req.RepoID != params.RepositoryID {
+			continue
+		}
 		requirements = append(requirements, requirementSummary{
 			ID:         req.ID,
 			ExternalID: req.ExternalID,

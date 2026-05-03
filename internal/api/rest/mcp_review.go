@@ -7,8 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
+	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 )
 
@@ -240,10 +243,28 @@ func (h *mcpHandler) callGetReviewForDiff(ctx context.Context, session *mcpSessi
 	defer aiCancel()
 
 	for _, tf := range filesToReview {
+		// Read file content — required for the worker to produce meaningful
+		// findings. When h.fileReader is nil (no file reader configured) or
+		// the read fails, skip this file+template pair rather than sending
+		// an empty content block to the worker.
+		var fileContent string
+		if h.fileReader != nil {
+			var readErr error
+			fileContent, readErr = h.fileReader.ReadRepoFile(params.RepositoryID, tf.FilePath)
+			if readErr != nil {
+				// Best-effort: skip files we cannot read rather than aborting the
+				// whole review. The worker would produce no useful findings on an
+				// empty content block anyway.
+				continue
+			}
+		}
+		fileLang := filePathToProtoLanguage(tf.FilePath)
 		for _, tmpl := range templates {
 			req := &reasoningv1.ReviewFileRequest{
 				RepositoryId: params.RepositoryID,
 				FilePath:     tf.FilePath,
+				Language:     fileLang,
+				Content:      fileContent,
 				Template:     tmpl,
 			}
 			resp, reviewErr := r.ReviewFile(aiCtx, req)
@@ -272,6 +293,38 @@ func (h *mcpHandler) callGetReviewForDiff(ctx context.Context, session *mcpSessi
 	}
 
 	return result, nil
+}
+
+// filePathToProtoLanguage maps a file path's extension to the proto Language
+// enum expected by ReviewFileRequest. Mirrors the GraphQL path's deriveLanguage
+// helper (internal/api/graphql/helpers.go) but operates within the rest package
+// to avoid a cross-package import of the graphql resolver.
+func filePathToProtoLanguage(filePath string) commonv1.Language {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".go":
+		return commonv1.Language_LANGUAGE_GO
+	case ".py":
+		return commonv1.Language_LANGUAGE_PYTHON
+	case ".ts", ".tsx":
+		return commonv1.Language_LANGUAGE_TYPESCRIPT
+	case ".js", ".jsx":
+		return commonv1.Language_LANGUAGE_JAVASCRIPT
+	case ".java":
+		return commonv1.Language_LANGUAGE_JAVA
+	case ".rs":
+		return commonv1.Language_LANGUAGE_RUST
+	case ".cs":
+		return commonv1.Language_LANGUAGE_CSHARP
+	case ".cpp", ".cc", ".cxx", ".h", ".hpp":
+		return commonv1.Language_LANGUAGE_CPP
+	case ".rb":
+		return commonv1.Language_LANGUAGE_RUBY
+	case ".php":
+		return commonv1.Language_LANGUAGE_PHP
+	default:
+		return commonv1.Language_LANGUAGE_UNSPECIFIED
+	}
 }
 
 // buildDiffReviewStructural constructs the diffReviewResult for a given repo

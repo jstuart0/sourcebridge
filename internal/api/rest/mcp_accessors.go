@@ -814,21 +814,28 @@ func runGitLogSymbol(ctx context.Context, gitRoot, filePath string, startLine, e
 	return commits, nil
 }
 
-// runGitLog shells out to `git log --pretty=... -n LIMIT -- PATH` and
-// parses the output. The format string uses a unit-separator so we can
+// runGitLog shells out to `git log --pretty=... -n LIMIT [rangeFilter] [-- PATH]`
+// and parses the output. The format string uses a unit-separator so we can
 // split commit records reliably even when subjects contain tabs.
+//
+// rangeFilter, when non-empty, is a git commit range such as "HEAD~3..HEAD".
+// When provided it is inserted before the path separator so git constrains the
+// walk to exactly those commits; the -n limit acts as a safety cap on top.
 //
 // The record separator \x1e is placed at the BEGINNING of the format
 // string so that each commit's metadata block and its --name-only file
 // list stay in the same split segment. Placing it at the end causes the
 // file names for commit N to land in the segment parsed as commit N+1's
 // header, making len(fields) < 5 and silently dropping those blocks.
-func runGitLog(ctx context.Context, gitRoot, pathFilter string, limit int) ([]recentChange, error) {
+func runGitLog(ctx context.Context, gitRoot, pathFilter string, limit int, rangeFilter ...string) ([]recentChange, error) {
 	const sep = "\x1f"    // unit separator (between header fields)
 	const recSep = "\x1e" // record separator (before each commit header)
 	format := recSep + strings.Join([]string{"%H", "%an", "%ae", "%aI", "%s"}, sep)
 
 	args := []string{"-C", gitRoot, "log", fmt.Sprintf("--pretty=format:%s", format), fmt.Sprintf("-n%d", limit), "--name-only"}
+	if len(rangeFilter) > 0 && rangeFilter[0] != "" {
+		args = append(args, rangeFilter[0])
+	}
 	if pathFilter != "" {
 		args = append(args, "--", pathFilter)
 	}

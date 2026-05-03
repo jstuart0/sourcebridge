@@ -6,13 +6,16 @@ package rest
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/sourcebridge/sourcebridge/internal/indexer"
-
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
+	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
+	"github.com/sourcebridge/sourcebridge/internal/indexer"
 )
 
 // ---------------------------------------------------------------------------
@@ -504,10 +507,27 @@ func TestMCP_GetReviewForDiff_ResponseShape(t *testing.T) {
 
 	jsonBytes := []byte(text)
 
+	// Promoted embedded-struct fields from diffReviewResult.
+	// repository_id: always present (repo scope).
+	// commit_range: omitempty — present when a range was supplied (absent here
+	//   because sendReviewRPC uses files:, not commit_range:).
+	// summary: omitempty — only populated by include_synthesis:true (legacy path),
+	//   not by get_review_for_diff's AI pass; correctly absent here.
+	// The three fields are structurally present on the type; we assert the two
+	// that the call site populates and note the third in the comment above.
+	promotedFields := []string{"repository_id"}
+	for _, field := range promotedFields {
+		if !strings.Contains(string(jsonBytes), `"`+field+`"`) {
+			t.Errorf("response JSON missing promoted embedded field %q", field)
+		}
+	}
+
 	requiredFields := []string{
+		// Structural diff fields.
 		"touched_files",
 		"linked_requirements",
 		"unlinked_public_surface",
+		// AI-review layer fields.
 		"findings",
 		"risk_score",
 		"degraded",
@@ -530,6 +550,141 @@ func TestMCP_GetReviewForDiff_ResponseShape(t *testing.T) {
 	}
 	if findings := result["findings"]; findings == nil {
 		t.Error("findings must not be null")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: commit_range is forwarded to git log, not ignored (P1 #2)
+// ---------------------------------------------------------------------------
+
+// TestMCP_GetReviewForDiff_CommitRange_Correctness creates a real git repo
+// with two commits touching different files, then calls get_review_for_diff
+// with a commit_range that covers only the FIRST commit. It asserts that only
+// the file from that specific commit appears in touched_files — not the file
+// from the subsequent (HEAD) commit, which would happen if the commit_range
+// were ignored and the tool fell back to "last N commits on HEAD".
+func TestMCP_GetReviewForDiff_CommitRange_Correctness(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available in PATH; skipping commit_range correctness test")
+	}
+
+	repoDir := t.TempDir()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	runGit("init", "-b", "main")
+	runGit("config", "user.email", "test@test.test")
+	runGit("config", "user.name", "Test User")
+
+	// Commit 1: only first.go exists.
+	if err := os.WriteFile(filepath.Join(repoDir, "first.go"), []byte("package pkg\n"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	runGit("add", "first.go")
+	runGit("commit", "-m", "add first.go")
+
+	// Commit 2 (HEAD): only second.go added.
+	if err := os.WriteFile(filepath.Join(repoDir, "second.go"), []byte("package pkg\n"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	runGit("add", "second.go")
+	runGit("commit", "-m", "add second.go")
+
+	// Seed a repo whose clone path points to our git checkout, with both files indexed.
+	h, repoID := newReviewHarnessWithFiles(t, []string{"first.go", "second.go"})
+	h.store.UpdateRepositoryMeta(repoID, graphstore.RepositoryMeta{
+		ClonePath: repoDir,
+	})
+	sess := h.createSession()
+
+	// Request only the range that covers the LAST commit (HEAD~1..HEAD),
+	// which touched second.go. Before P1 #2 fix the commit_range was ignored
+	// and the tool fell back to "last N commits", which would include both.
+	// With the fix, only second.go (touched by HEAD) must appear.
+	resp := h.sendRPC(sess, 1, "tools/call", map[string]interface{}{
+		"name": "get_review_for_diff",
+		"arguments": map[string]interface{}{
+			"repository_id": repoID,
+			"commit_range":  "HEAD~1..HEAD",
+		},
+	})
+
+	result := parseReviewResult(t, resp)
+	tfs, _ := result["touched_files"].([]interface{})
+
+	touchedPaths := make(map[string]bool)
+	for _, entry := range tfs {
+		m, _ := entry.(map[string]interface{})
+		if fp, _ := m["file_path"].(string); fp != "" {
+			touchedPaths[fp] = true
+		}
+	}
+
+	// second.go must be present (it was touched by the HEAD commit).
+	if !touchedPaths["second.go"] {
+		t.Errorf("expected second.go in touched_files for range HEAD~1..HEAD; got: %v", touchedPaths)
+	}
+	// first.go must NOT be present (it belongs to HEAD~1, which is outside the range HEAD~1..HEAD).
+	if touchedPaths["first.go"] {
+		t.Errorf("first.go must not be in touched_files for range HEAD~1..HEAD (P1 #2 regression: commit_range was ignored and both commits were included)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: AI pass populates Content and Language on ReviewFileRequest (P1 #1)
+// ---------------------------------------------------------------------------
+
+// TestMCP_GetReviewForDiff_AIPath_PopulatesContent verifies that when
+// include_ai_review is true and h.fileReader is set, the ReviewFileRequest
+// sent to the worker has a non-empty Content and a non-UNSPECIFIED Language.
+// Prior to the P1 #1 fix the request was built with empty Content and
+// Language_LANGUAGE_UNSPECIFIED, causing the worker to produce irrelevant findings.
+func TestMCP_GetReviewForDiff_AIPath_PopulatesContent(t *testing.T) {
+	h, repoID := newReviewHarnessWithFiles(t, []string{"api.go"})
+
+	var capturedReq *reasoningv1.ReviewFileRequest
+	reviewer := &mockReviewCaller{
+		available: true,
+		reviewFunc: func(_ context.Context, req *reasoningv1.ReviewFileRequest) (*reasoningv1.ReviewFileResponse, error) {
+			capturedReq = req
+			return &reasoningv1.ReviewFileResponse{
+				Template: req.GetTemplate(),
+				Findings: []*reasoningv1.ReviewFinding{},
+			}, nil
+		},
+	}
+	h.handler.worker = reviewer
+
+	// Wire a mockFileReader so ReadRepoFile returns predictable content.
+	fr := newMockFileReader()
+	fr.add(repoID, "api.go", "package main\n\nfunc Api() {}\n")
+	h.handler.fileReader = fr
+
+	sess := h.createSession()
+	resp := sendReviewRPC(h, sess, repoID, map[string]interface{}{
+		"include_ai_review": true,
+		"templates":         []string{"security"},
+	})
+
+	// The response itself must succeed.
+	result := parseReviewResult(t, resp)
+	if degraded, _ := result["degraded"].(bool); degraded {
+		t.Errorf("expected degraded: false; got degraded_reason: %v", result["degraded_reason"])
+	}
+
+	if capturedReq == nil {
+		t.Fatal("ReviewFile was not called — capturedReq is nil")
+	}
+	if capturedReq.Content == "" {
+		t.Error("ReviewFileRequest.Content must not be empty; file content was not populated (P1 #1 regression)")
+	}
+	if capturedReq.Language == 0 { // 0 == LANGUAGE_UNSPECIFIED
+		t.Error("ReviewFileRequest.Language must not be LANGUAGE_UNSPECIFIED for a .go file (P1 #1 regression)")
 	}
 }
 

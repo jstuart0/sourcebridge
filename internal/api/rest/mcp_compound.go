@@ -149,7 +149,7 @@ func (h *mcpHandler) resolveDiffTouchedSymbols(repoID, commitRange string, files
 		if commitRange != "" {
 			limit = 10
 		}
-		commits, err := runGitLog(context.Background(), gitRoot, "", limit)
+		commits, err := runGitLog(context.Background(), gitRoot, "", limit, commitRange)
 		if err != nil {
 			return nil, nil, fmt.Errorf("git log for commit range: %v", err)
 		}
