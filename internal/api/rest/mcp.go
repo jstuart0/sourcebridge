@@ -1074,6 +1074,9 @@ func (h *mcpHandler) handleToolsCallCtx(ctx context.Context, session *mcpSession
 		result, toolErr = h.callGetTestsForSymbol(session, params.Arguments)
 	case "get_entry_points":
 		result, toolErr = h.callGetEntryPoints(session, params.Arguments)
+	// Phase 2 — symbol source tools (CA-151).
+	case "get_symbol_source":
+		result, toolErr = h.callGetSymbolSource(session, params.Arguments)
 	// Phase 3.2 — indexing lifecycle tools.
 	case "index_repository":
 		result, toolErr = h.callIndexRepository(session, params.Arguments)
