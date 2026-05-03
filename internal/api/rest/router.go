@@ -924,6 +924,7 @@ func (s *Server) setupRouter() {
 				caller:   s.llmCaller,
 				unaryOp:  resolution.OpMCPExplain,
 				streamOp: resolution.OpMCPDiscussStream,
+				reviewOp: resolution.OpMCPReview,
 			}
 		}
 		s.mcp = newMCPHandlerWithEdition(s.store, s.knowledgeStore, mcpWorker, s.cfg.MCP.Repos, sessionTTL, keepalive, s.cfg.MCP.MaxSessions, s.cache, capabilities.NormalizeEdition(s.cfg.Edition))

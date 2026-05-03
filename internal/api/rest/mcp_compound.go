@@ -46,7 +46,7 @@ func (h *mcpHandler) compoundToolDefs() []mcpToolDefinition {
 	return []mcpToolDefinition{
 		{
 			Name: "review_diff_against_requirements",
-			Description: "Compound workflow: given a diff or commit range, identify touched files/symbols, look up any requirements linked to those symbols, flag public symbols that have no linked requirements, and return a structured report. Optional include_synthesis: true runs an ask_question pass to narrate the risk summary.",
+			Description: "Compound workflow: given a diff or commit range, identify touched files/symbols, look up any requirements linked to those symbols, flag public symbols that have no linked requirements, and return a structured report. Optional include_synthesis: true runs an ask_question pass to narrate the risk summary. (legacy — use get_review_for_diff for AI findings)",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -60,7 +60,7 @@ func (h *mcpHandler) compoundToolDefs() []mcpToolDefinition {
 		},
 		{
 			Name:        "impact_summary",
-			Description: "Compound workflow: for the given symbols (or every symbol in the given files), return transitive callers, tests that exercise them, and any linked requirements. Server-side composition over get_callers + get_tests_for_symbol + get_requirements.",
+			Description: "Compound workflow: for the given symbols (or every symbol in the given files), return transitive callers, tests that exercise them, and any linked requirements. Server-side composition over get_callers + get_tests_for_symbol + get_requirements. (legacy — use predict_change_impact for diff/test/requirement bundling)",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -85,7 +85,7 @@ func (h *mcpHandler) compoundToolDefs() []mcpToolDefinition {
 		},
 		{
 			Name:        "onboard_new_contributor",
-			Description: "Compound workflow: return an ordered reading list for a developer new to the repo — top entry points sorted by recent change activity, each with its cliff notes and authors. Composes get_entry_points + get_recent_changes + get_cliff_notes.",
+			Description: "Compound workflow: return an ordered reading list for a developer new to the repo — top entry points sorted by recent change activity, each with its cliff notes and authors. Composes get_entry_points + get_recent_changes + get_cliff_notes. (legacy — use get_field_guide with format=learning_path)",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
