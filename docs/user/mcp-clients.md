@@ -217,6 +217,33 @@ instance, `get_symbol_context` still returns the symbol's source but sets
 `degraded: true` and `degraded_reason` in the response, with the affected
 arrays (`callers`/`callees` or `imports`) empty.
 
+## Moat-track tools (CA-153)
+
+Eight tools that lift SourceBridge's MCP surface from "agents can search
+code" to "agents can answer requirement-traceability questions, identify
+gaps, predict change impact, and pull a structured AI review for a diff."
+All eight are OSS + Enterprise.
+
+| Tool | What it does | Requires worker? |
+|------|--------------|-----------------|
+| `get_requirements_for_symbol` | Return requirements linked to a symbol | No |
+| `get_symbols_for_requirement` | Return symbols linked to a requirement | No |
+| `get_changed_requirements` | Requirements affected by a diff scope (file- or commit-range-anchored) | No |
+| `get_orphan_symbols` | Cursor-paginated symbols with no linked requirement. Each page performs a full repo scan; the cursor slices output only, not scan cost. | No |
+| `get_uncovered_requirements` | Cursor-paginated requirements with no linked symbol. Same full-scan caveat; hard cap at 10,000 requirements (`scan_truncated: true` if hit). | No |
+| `get_field_guide` | Fetch `cliff_notes`, `learning_path`, `code_tour`, or `workflow_story` for a path or symbol scope. Reads pre-seeded artifacts; generation is triggered via the web UI, not this tool. | No (read); generation is worker-upstream |
+| `predict_change_impact` | Blast radius + affected requirements + affected tests for a proposed change. Depth capped at 1 for this release. | No |
+| `get_review_for_diff` | Structural diff review (default) with optional AI review pipeline (`include_ai_review: true`). The AI path calls `ReviewFile` per touched file × template under a 90-second deadline; degrades gracefully (`degraded: true`) when the worker is unavailable. | Only if `include_ai_review: true` |
+
+The legacy tools `review_diff_against_requirements`, `impact_summary`, and
+`onboard_new_contributor` remain functional and coexist with their moat-track
+counterparts. Their descriptions now carry `(legacy — use <successor>)` markers
+to guide agent discovery.
+
+A companion prompt **`review_diff_with_sourcebridge`** encodes the multi-step
+workflow for agents using `get_review_for_diff`. It includes a latency warning
+(30–90 seconds for the AI path). Request it via `prompts/get`.
+
 ---
 
 ## 4. Self-hosting MCP

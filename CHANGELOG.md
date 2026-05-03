@@ -18,6 +18,82 @@ CA-146 (page-count transparency and per-run override).
 
 ### Added
 
+- **Eight moat-track MCP tools: requirement traceability, gap audit, field
+  guide, change-impact prediction, and AI diff review** (CA-153).
+
+  *Requirement-linking tools (new `requirement_linking` capability, OSS + Enterprise):*
+
+  - **`get_requirements_for_symbol`** — given a symbol, return the requirements
+    linked to it. Wraps `GetLinksForSymbol` + `GetRequirementsByIDs`.
+  - **`get_symbols_for_requirement`** — given a requirement, return the symbols
+    linked to it. Wraps `GetLinksForRequirement` + `GetSymbolsByIDs`.
+  - **`get_changed_requirements`** — given a diff scope (file-anchored or
+    commit-range-anchored), return the requirements affected. Lives in
+    `mcp_requirement_tools.go` alongside the linking tools.
+
+  *Gap-audit tools (new `gap_audit` capability, OSS + Enterprise):*
+
+  - **`get_orphan_symbols`** — symbols with no linked requirement. Cursor-paginated.
+    Note: each page performs a full repo scan; the cursor slices the output, it
+    does not reduce the per-page scan cost.
+  - **`get_uncovered_requirements`** — requirements with no linked symbol.
+    Cursor-paginated with the same full-scan per page. A hard scan cap
+    (`maxUncoveredReqScan = 10000`) prevents runaway queries; the response
+    includes `scan_truncated: true` if the cap was hit.
+
+  *Field guide (new `field_guides` capability, OSS + Enterprise):*
+
+  - **`get_field_guide`** — fetch `cliff_notes`, `learning_path`, `code_tour`,
+    or `workflow_story` for a path or symbol scope. The `format` enum routes to
+    one of four artifact types, all pre-seeded by `seedRepositoryFieldGuide`
+    at index time. Read-only: if an artifact has not been generated yet, the
+    tool returns the same "not generated yet" empty-payload response as
+    `get_cliff_notes`. Generation is triggered via the SourceBridge web UI.
+
+  *Change-impact prediction (extends existing `change_impact` capability):*
+
+  - **`predict_change_impact`** — bundled response with symbol blast radius,
+    affected requirements, and affected tests (paths + names) for a proposed
+    change (file-anchored, commit-range-anchored, or symbol-anchored).
+    Depth is capped at 1 for this release; `depth > 1` is rejected. The
+    test-symbol set is pre-resolved once per call (O(n+k) rather than O(n×k)).
+    The existing `impact_summary` tool remains functional (coexistence per D1).
+
+  *AI diff review (extends existing `compound_workflows` capability):*
+
+  - **`get_review_for_diff`** — extends `review_diff_against_requirements` with
+    an optional AI review pipeline. `include_ai_review: false` (default) returns
+    the structural review only. `include_ai_review: true` invokes the LLM
+    worker's `ReviewFile` per touched file × template under a 90-second context
+    deadline. The AI path requires the `workerReviewCaller` interface and
+    `IsAvailable()` to return true; when the worker is nil, does not implement
+    the interface, or reports unavailable, the tool degrades gracefully
+    (`degraded: true`, `degraded_reason: "..."`) rather than erroring.
+    The existing `review_diff_against_requirements` tool remains functional
+    (coexistence per D1).
+  - **Companion prompt `review_diff_with_sourcebridge`** — encodes the
+    multi-step workflow for agents using `get_review_for_diff`. Includes a
+    latency warning (30–90 seconds for the AI path).
+
+  *Internal changes shipped as part of this campaign:*
+
+  - **`mcpToolHandlerFunc` dispatcher** — the 26-case `tools/call` switch
+    (`mcp.go`) is replaced by a `map[string]mcpToolHandlerFunc` with a
+    `noCtxHandler` adapter for non-ctx tools and a `(*mcpHandler).registerTool`
+    helper that panics on duplicate registration.
+  - **`OpMCPReview` op constant** added to `KnownOps`; `deriveOperationGroup`
+    routes it to `GroupReview`.
+  - **`workerReviewCaller` interface** — additive sibling to `mcpWorkerCaller`;
+    `mcpLLMCallerAdapter` satisfies both via a `reviewOp` field plumbed through
+    `router.go`.
+  - **`TestDispatchMapCoversBaseTools`** — catches entries missing from the
+    dispatch map (inverse of CA-151's `TestRegistry_AllMCPToolsExistInBaseTools`).
+  - **`runGitLog` parser fix (`mcp_accessors.go`)** — the `\x1e` record separator
+    was moved from the end of the `--pretty=format` string to the beginning.
+    Before this fix, `commit_range`-anchored compound tools returned empty
+    `FilesTouched` because file-name lines from each commit landed in the next
+    commit's header parser. Fixed in Phase 2a.1 (commit `b4feb67`).
+
 - **`get_symbol_source` and `get_symbol_context` MCP tools** (CA-151).
   Two new tools close the 2x token tax that agents paid following up
   `search_symbols` with a separate `Read`. `get_symbol_source` returns a
@@ -128,6 +204,23 @@ CA-146 (page-count transparency and per-run override).
   return field-for-field identical responses for every config shape.
 
 ### Changed
+
+- **Tool descriptions for `review_diff_against_requirements`, `impact_summary`,
+  and `onboard_new_contributor` updated with legacy markers** (CA-153). Each
+  tool description now appends `(legacy — use get_review_for_diff)`,
+  `(legacy — use predict_change_impact)`, and `(legacy — use get_field_guide)`
+  respectively, so agent discovery surfaces the moat-track successors. All
+  three legacy tools remain fully functional; this is a coexistence pattern
+  (D1), not a deprecation.
+
+- **`runGitLog` parser fix: `\x1e` record separator moved to start of
+  `--pretty=format` string** (CA-153, `mcp_accessors.go`, commit `b4feb67`).
+  Before this fix, commit-range-anchored compound tools (`review_diff_against_requirements`
+  and its successors) returned empty `FilesTouched` because the trailing
+  separator caused file-name lines from each commit to land in the next commit's
+  header parser. Fixed: separator now leads each record so each commit's files
+  parse under the correct header. Callers that depended on the prior empty-files
+  behavior should not exist — the prior behavior was a bug.
 
 - **Repository detail page now opens on the Field Guide tab by default** (CA-60).
   The fallback tab for `/repositories/[id]` changed from `files` to `knowledge`
