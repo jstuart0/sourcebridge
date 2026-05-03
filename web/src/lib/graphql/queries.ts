@@ -1525,6 +1525,35 @@ export const LIVING_WIKI_GLOBAL_SETTINGS_QUERY = gql`
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Living Wiki — plan preview query
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const PREVIEW_LIVING_WIKI_PLAN_QUERY = gql`
+  query PreviewLivingWikiPlan($repositoryId: ID!, $mode: LivingWikiBuildMode, $pageCountOverride: Int) {
+    previewLivingWikiPlan(repositoryId: $repositoryId, mode: $mode, pageCountOverride: $pageCountOverride) {
+      planSignature
+      mode
+      modeTooltip
+      summary
+      totalPages
+      preCap
+      capSource
+      capValue
+      notice
+      pages {
+        id
+        templateId
+        title
+        pageType
+        subsystem
+        audience
+        required
+      }
+    }
+  }
+`;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Living Wiki — per-repo mutations
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1683,8 +1712,8 @@ export const CLEAR_REPOSITORY_LLM_OVERRIDE_MUTATION = gql`
 `;
 
 export const RETRY_LIVING_WIKI_JOB_MUTATION = gql`
-  mutation RetryLivingWikiJob($repositoryId: ID!, $retryExcludedOnly: Boolean, $mode: LivingWikiBuildMode, $pageCountOverride: Int) {
-    retryLivingWikiJob(repositoryId: $repositoryId, retryExcludedOnly: $retryExcludedOnly, mode: $mode, pageCountOverride: $pageCountOverride) {
+  mutation RetryLivingWikiJob($repositoryId: ID!, $retryExcludedOnly: Boolean, $mode: LivingWikiBuildMode, $pageCountOverride: Int, $selectedPageIds: [String!], $planSignature: String) {
+    retryLivingWikiJob(repositoryId: $repositoryId, retryExcludedOnly: $retryExcludedOnly, mode: $mode, pageCountOverride: $pageCountOverride, selectedPageIds: $selectedPageIds, planSignature: $planSignature) {
       settings {
         enabled
         mode

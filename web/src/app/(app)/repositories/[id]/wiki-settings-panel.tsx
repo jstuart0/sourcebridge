@@ -55,6 +55,10 @@ import {
   RepositoryLLMOverrideSection,
   type RepositoryLLMOverride,
 } from "./repository-llm-override-section";
+import {
+  PlanPreviewModal,
+  type PlanModalIntent,
+} from "@/components/living-wiki/PlanPreviewModal";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -1592,6 +1596,9 @@ function EnabledSummary({
   const [, triggerAllEnabledMutation] = useMutation(TRIGGER_LIVING_WIKI_COLD_START_ALL_ENABLED_MUTATION);
   const [modeFlagError, setModeFlagError] = useState<string | null>(null);
   const [modeFlagSaving, setModeFlagSaving] = useState(false);
+
+  // CA-146: Plan preview modal state. null = closed.
+  const [planModalIntent, setPlanModalIntent] = useState<PlanModalIntent | null>(null);
   // CA-146: per-run page count override (one-shot; reset after run completes).
   const [pageCountOverride, setPageCountOverride] = useState<number | "">("");
 
@@ -1615,42 +1622,21 @@ function EnabledSummary({
     setTimeout(() => editButtonRef.current?.focus(), 50);
   };
 
-  const handleRegenerate = async () => {
-    setRegenerating(true);
-    setRegenError(null);
-    const result = await retryMutation({
-      repositoryId: repoId,
-      retryExcludedOnly: false,
-    });
-    if (result.error) {
-      setRegenError(result.error.message);
-      setRegenerating(false);
-      return;
-    }
-    const jobId = result.data?.retryLivingWikiJob?.jobId;
-    if (jobId) {
-      setRegenJobId(jobId);
-    } else {
-      setRegenerating(false);
-    }
+  const handleRegenerate = () => {
+    // CA-146: route through plan preview modal.
+    // Prefer detailed if enabled (shows more pages in the preview).
+    const mode: "OVERVIEW" | "DETAILED" = settings.livingWikiDetailedEnabled
+      ? "DETAILED"
+      : "OVERVIEW";
+    setPlanModalIntent({ kind: "regenerate", mode });
   };
 
-  const handleRetry = async () => {
-    const result = await enableMutation({
-      input: {
-        repositoryId: repoId,
-        mode: settings.mode,
-        sinks: settings.sinks.map((s) => ({
-          kind: s.kind,
-          integrationName: s.integrationName,
-          audience: s.audience,
-        })),
-      },
-    });
-    if (result.data?.enableLivingWikiForRepo?.jobId) {
-      setRegenJobId(result.data.enableLivingWikiForRepo.jobId);
-      setRegenerating(true);
-    }
+  const handleRetry = () => {
+    // CA-146: route through plan preview modal.
+    const mode: "OVERVIEW" | "DETAILED" = settings.livingWikiDetailedEnabled
+      ? "DETAILED"
+      : "OVERVIEW";
+    setPlanModalIntent({ kind: "retry", mode });
   };
 
   const handleRetryExcluded = async () => {
@@ -1692,52 +1678,74 @@ function EnabledSummary({
     }
   };
 
-  const handleBuildOverview = async () => {
-    setRegenerating(true);
-    setRegenError(null);
-    const LivingWikiBuildModeOverview = "OVERVIEW" as const;
-    const result = await retryMutation({
-      repositoryId: repoId,
-      retryExcludedOnly: false,
-      mode: LivingWikiBuildModeOverview,
-      // CA-146: pass override only when set (undefined = use repo setting).
-      pageCountOverride: pageCountOverride !== "" ? pageCountOverride : undefined,
-    });
-    if (result.error) {
-      setRegenError(result.error.message);
-      setRegenerating(false);
-      return;
-    }
-    const jobId = result.data?.retryLivingWikiJob?.jobId;
-    if (jobId) {
-      setRegenJobId(jobId);
-    } else {
-      setRegenerating(false);
-    }
+  const handleBuildOverview = () => {
+    // CA-146: route through plan preview modal.
+    setPlanModalIntent({ kind: "enable", mode: "OVERVIEW" });
   };
 
-  const handleBuildDetailed = async () => {
+  const handleBuildDetailed = () => {
+    // CA-146: route through plan preview modal.
+    setPlanModalIntent({ kind: "enable", mode: "DETAILED" });
+  };
+
+  // CA-146: modal confirm — fires the appropriate mutation based on intent kind.
+  const handlePlanModalConfirm = async ({
+    selectedPageIds,
+    planSignature,
+  }: {
+    selectedPageIds: string[] | null;
+    planSignature: string | null;
+  }) => {
+    const intent = planModalIntent;
+    if (!intent) return;
+
+    setPlanModalIntent(null);
     setRegenerating(true);
     setRegenError(null);
-    const LivingWikiBuildModeDetailed = "DETAILED" as const;
-    const result = await retryMutation({
-      repositoryId: repoId,
-      retryExcludedOnly: false,
-      mode: LivingWikiBuildModeDetailed,
-      // CA-146: pass override only when set (undefined = use repo setting).
-      pageCountOverride: pageCountOverride !== "" ? pageCountOverride : undefined,
-    });
-    if (result.error) {
-      setRegenError(result.error.message);
-      setRegenerating(false);
-      return;
-    }
-    const jobId = result.data?.retryLivingWikiJob?.jobId;
-    if (jobId) {
-      setRegenJobId(jobId);
+
+    let result: { error?: { message: string }; data?: Record<string, { jobId?: string }> } | undefined;
+
+    if (intent.kind === "retry") {
+      // handleRetry path: re-enable from scratch using enableMutation
+      result = await enableMutation({
+        input: {
+          repositoryId: repoId,
+          mode: settings.mode,
+          sinks: settings.sinks.map((s) => ({
+            kind: s.kind,
+            integrationName: s.integrationName,
+            audience: s.audience,
+          })),
+          ...(selectedPageIds !== null ? { selectedPageIds } : {}),
+          ...(planSignature !== null ? { planSignature } : {}),
+        },
+      });
+      const jobId = (result?.data as { enableLivingWikiForRepo?: { jobId?: string } })?.enableLivingWikiForRepo?.jobId;
+      if (jobId) {
+        setRegenJobId(jobId);
+        return;
+      }
     } else {
-      setRegenerating(false);
+      // handleBuildOverview / handleBuildDetailed / handleRegenerate — all use retryMutation
+      result = await retryMutation({
+        repositoryId: repoId,
+        retryExcludedOnly: false,
+        mode: intent.mode,
+        pageCountOverride: pageCountOverride !== "" ? pageCountOverride : undefined,
+        ...(selectedPageIds !== null ? { selectedPageIds } : {}),
+        ...(planSignature !== null ? { planSignature } : {}),
+      });
+      const jobId = (result?.data as { retryLivingWikiJob?: { jobId?: string } })?.retryLivingWikiJob?.jobId;
+      if (jobId) {
+        setRegenJobId(jobId);
+        return;
+      }
     }
+
+    if (result?.error) {
+      setRegenError(result.error.message);
+    }
+    setRegenerating(false);
   };
 
   const handleBuildAllEnabled = async () => {
@@ -2025,6 +2033,27 @@ function EnabledSummary({
             onDisabled(s);
           }}
           onClose={() => setShowDisableDialog(false)}
+        />
+      )}
+
+      {/* CA-146: Plan preview modal */}
+      {planModalIntent && (
+        <PlanPreviewModal
+          open={planModalIntent !== null}
+          onOpenChange={(open) => {
+            if (!open) setPlanModalIntent(null);
+          }}
+          repositoryId={repoId}
+          intent={planModalIntent}
+          intentLabel={
+            planModalIntent.kind === "enable"
+              ? "Build"
+              : planModalIntent.kind === "regenerate"
+                ? "Regenerate"
+                : "Retry"
+          }
+          pageCountOverride={pageCountOverride !== "" ? pageCountOverride : null}
+          onConfirm={handlePlanModalConfirm}
         />
       )}
     </div>
