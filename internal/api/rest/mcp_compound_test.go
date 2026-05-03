@@ -166,15 +166,9 @@ func TestCallReviewDiffAgainstRequirements_ExplicitFilesHappyPath(t *testing.T) 
 
 // TestCallReviewDiffAgainstRequirements_CommitRangeHappyPath exercises the
 // commit_range code path end-to-end using a hermetic git repo in t.TempDir().
-//
-// Known limitation (pre-existing bug in runGitLog, documented here as a pin):
-// runGitLog uses a --pretty=format record-separator that is placed at the END
-// of the commit header, so --name-only file names for commit N land in the
-// block parsed as commit N+1's header. This causes FilesTouched to always be
-// empty regardless of the git history, meaning touched_files is [] when no
-// explicit files are provided. This test pins the current (broken) behavior
-// so that a fix in Phase 2a.1 or later can flip the assertion to confirm
-// files ARE populated after the parser is corrected.
+// This test also verifies the Phase 2a.1 runGitLog parser fix: the \x1e
+// record separator is now placed at the START of the format string so that
+// --name-only file lines for each commit land in the correct split segment.
 func TestCallReviewDiffAgainstRequirements_CommitRangeHappyPath(t *testing.T) {
 	// Verify git is available on this machine; skip cleanly if not.
 	if _, err := exec.LookPath("git"); err != nil {
@@ -244,17 +238,15 @@ func TestCallReviewDiffAgainstRequirements_CommitRangeHappyPath(t *testing.T) {
 		t.Error("unlinked_public_surface key missing from response")
 	}
 
-	// NOTE: Due to the pre-existing runGitLog parser bug (record separator
-	// placed after the commit header causes --name-only file names to be
-	// parsed as a separate orphan block), touched_files is currently empty
-	// even though the git commit touched api.go. This assertion pins that
-	// broken behavior; it should be updated to expect api.go once the
-	// parser is fixed.
+	// The parser fix (Phase 2a.1) moved \x1e to the start of the format
+	// string so that --name-only file lines are captured correctly.
+	// touched_files must now contain the one file committed above.
 	tfs, _ := result["touched_files"].([]interface{})
-	if len(tfs) != 0 {
-		// If this assertion starts failing, the parser bug has been fixed
-		// and this test should be updated to assert api.go is present.
-		t.Logf("NOTE: touched_files is no longer empty (%d entries) — runGitLog parser may be fixed; update this test", len(tfs))
+	if len(tfs) == 0 {
+		t.Fatalf("touched_files is empty — runGitLog parser fix may have regressed; expected api.go to appear")
+	}
+	if touchedEntry := touchedFileByPath(result, "api.go"); touchedEntry == nil {
+		t.Errorf("touched_files: expected entry for api.go; got %v", tfs)
 	}
 }
 
