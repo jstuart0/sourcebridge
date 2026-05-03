@@ -132,3 +132,12 @@ func errInvalidArguments(detail string) *mcpToolError {
 		Remediation: "Check the tool's input_schema in tools/list and retry with valid parameters.",
 	}
 }
+
+//nolint:unused // consumed by get_symbol_source handler in Phase 2 (CA-151)
+func errRepositoryStale(filePath string) *mcpToolError {
+	return &mcpToolError{
+		Code:        MCPErrRepositoryStale,
+		Message:     fmt.Sprintf("Source file %s is unavailable — likely deleted or moved since the last index.", filePath),
+		Remediation: "Call refresh_repository to re-index, then retry.",
+	}
+}

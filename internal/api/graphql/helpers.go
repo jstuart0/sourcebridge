@@ -19,6 +19,7 @@ import (
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
+	"github.com/sourcebridge/sourcebridge/internal/source"
 )
 
 // clientTypeFromContext returns the client type for the current request.
@@ -246,19 +247,14 @@ func readSourceFileLimited(repoRoot, relPath string, maxBytes int64) (string, er
 	return string(data), nil
 }
 
-// extractSymbolContext extracts the source lines for a symbol from file content.
+// extractSymbolContext extracts the source lines for a symbol from file
+// content using the canonical 1-based inclusive [start, end] semantics.
+//
+// Pre-CA-151 this had a divergent behavior on startLine <= 0 (clamped
+// to 1, returned everything). Now matches qa/REST contract: returns ""
+// on non-positive start. See internal/source/lines.go.
 func extractSymbolContext(content string, startLine, endLine int) string {
-	lines := strings.Split(content, "\n")
-	if startLine < 1 {
-		startLine = 1
-	}
-	if endLine > len(lines) {
-		endLine = len(lines)
-	}
-	if startLine > len(lines) {
-		return ""
-	}
-	return strings.Join(lines[startLine-1:endLine], "\n")
+	return source.SliceLines(content, startLine, endLine)
 }
 
 // languageToProto converts a GraphQL Language enum value to the proto Language enum.

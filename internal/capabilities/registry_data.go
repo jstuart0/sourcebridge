@@ -79,6 +79,21 @@ var Registry = []Capability{
 		MCPToolNames: []string{"get_callers", "get_callees"},
 		LatencyClass: "fast_read",
 	},
+	// Decision D3 (CA-151): one capability gates both new tools rather than
+	// splitting them. get_symbol_context's primary value is the source payload;
+	// callers/callees/imports are an enrichment layer that degrades gracefully
+	// via the `degraded` flag when call_graph or file_imports is disabled.
+	// Splitting into multiple capabilities would expose two tools that do
+	// identical work in degraded mode — wasteful for capability-constrained
+	// clients. Matches the existing convention: call_graph gates two tools,
+	// indexing_lifecycle gates three.
+	{
+		Name:         "symbol_source",
+		Description:  "Read a symbol's source bytes and (optionally) a bundled call-graph + imports context.",
+		Editions:     []Edition{EditionOSS, EditionEnterprise},
+		MCPToolNames: []string{"get_symbol_source", "get_symbol_context"},
+		LatencyClass: "fast_read",
+	},
 	{
 		Name:         "file_imports",
 		Description:  "Read direct and transitive import relationships for a file.",

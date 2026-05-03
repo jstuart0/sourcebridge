@@ -98,10 +98,10 @@ func TestExtractSymbolContext(t *testing.T) {
 		t.Errorf("got %q, want %q", got, "line2\nline3\nline4")
 	}
 
-	// Start before line 1
+	// Start before line 1 — returns "" (CA-151: aligned with qa/REST contract)
 	got = extractSymbolContext(content, 0, 2)
-	if got != "line1\nline2" {
-		t.Errorf("got %q, want %q", got, "line1\nline2")
+	if got != "" {
+		t.Errorf("got %q, want %q (non-positive start must return empty)", got, "")
 	}
 
 	// End beyond file length
@@ -120,6 +120,19 @@ func TestExtractSymbolContext(t *testing.T) {
 	got = extractSymbolContext(content, 3, 3)
 	if got != "line3" {
 		t.Errorf("got %q, want %q", got, "line3")
+	}
+}
+
+// TestExtractSymbolContext_NonPositiveStart_ReturnsEmpty pins the post-CA-151
+// contract: a non-positive startLine must return "" (not the entire file from
+// line 1). Both callers in schema.resolvers.go pass sym.StartLine which the
+// indexer guarantees is >= 1, so this path should never fire in production.
+func TestExtractSymbolContext_NonPositiveStart_ReturnsEmpty(t *testing.T) {
+	content := "a\nb\nc\nd\ne"
+	for _, start := range []int{0, -1, -100} {
+		if got := extractSymbolContext(content, start, 5); got != "" {
+			t.Errorf("extractSymbolContext(content, %d, 5) = %q, want empty string", start, got)
+		}
 	}
 }
 

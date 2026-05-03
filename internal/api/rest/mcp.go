@@ -373,7 +373,33 @@ type mcpHandler struct {
 	// *changewatch.Router so the same tool can be exercised in tests
 	// with a stub dispatcher.
 	changeDispatcher ChangeEventDispatcher
+
+	// fileReader provides path-traversal-safe file reads keyed by repo ID.
+	// Production binding is *qaFileReader (wired in router.go); tests inject
+	// a stub via WithFileReader. When nil, get_symbol_source and
+	// get_symbol_context return a "file reader not configured" error.
+	fileReader fileReader
+
+	// capabilityChecker is the indirection that lets tests flip a capability
+	// off without mutating package globals. Defaults to capabilities.IsAvailable
+	// in production wiring; tests inject a stub via WithCapabilityChecker.
+	capabilityChecker capabilityCheckFunc
 }
+
+// fileReader is the minimal interface for reading source files from a repo
+// clone. Production binding is *qaFileReader; tests can substitute a mock
+// without standing up a real clone on disk.
+type fileReader interface {
+	ReadRepoFile(repoID, filePath string) (string, error)
+}
+
+// capabilityCheckFunc is the function type for checking whether a named
+// capability is available for a given edition. Mirrors capabilities.IsAvailable.
+type capabilityCheckFunc func(name string, edition capabilities.Edition) bool
+
+// Compile-time guard: ensures *qaFileReader satisfies the fileReader interface.
+// A signature drift on qaFileReader is caught at build time, not runtime.
+var _ fileReader = (*qaFileReader)(nil)
 
 // mcpLocalChans holds the per-pod delivery channels for an SSE session.
 type mcpLocalChans struct {
@@ -442,6 +468,22 @@ func newMCPHandlerWithEdition(store graphstore.GraphStore, ks knowledge.Knowledg
 	// This loop just closes channels for SSE sessions whose persistent state
 	// has expired, so the handleSSE goroutine returns.
 	go h.reapLocalChans()
+	return h
+}
+
+// WithFileReader sets the file reader for get_symbol_source and
+// get_symbol_context. Intended for test injection; production wiring
+// happens directly in router.go.
+func (h *mcpHandler) WithFileReader(fr fileReader) *mcpHandler {
+	h.fileReader = fr
+	return h
+}
+
+// WithCapabilityChecker sets the capability-check function, enabling tests
+// to flip a capability on/off without mutating package globals.
+// Production wiring assigns capabilities.IsAvailable directly in router.go.
+func (h *mcpHandler) WithCapabilityChecker(c capabilityCheckFunc) *mcpHandler {
+	h.capabilityChecker = c
 	return h
 }
 
@@ -963,6 +1005,7 @@ func (h *mcpHandler) baseTools() []mcpToolDefinition {
 		},
 	}
 	tools = append(tools, h.phase1aToolDefs()...)
+	tools = append(tools, h.symbolSourceToolDefs()...)
 	tools = append(tools, h.getTestsForSymbolToolDef())
 	tools = append(tools, h.getEntryPointsToolDef())
 	tools = append(tools, h.lifecycleToolDefs()...)

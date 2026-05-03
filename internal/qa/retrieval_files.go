@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/sourcebridge/sourcebridge/internal/source"
 )
 
 // FileEvidence is a scored file-level retrieval candidate packed into
@@ -284,22 +286,11 @@ func bestSnippet(absPath string, tokens []string, maxLines int, maxBytes int64) 
 	return strings.Join(window, "\n"), start + 1, end, nil
 }
 
-// sliceLines returns lines[start-1:end] from a 1-based inclusive [start, end]
-// window. Returns "" if start <= 0, end < start, content is empty, OR start >
-// len(lines).
+// sliceLines is a thin wrapper around source.SliceLines to preserve the
+// unexported call sites in this package without changes. See
+// internal/source/lines.go for the canonical contract.
 func sliceLines(content string, start, end int) string {
-	if content == "" || end < start || start <= 0 || end <= 0 {
-		return ""
-	}
-	lines := strings.Split(content, "\n")
-	n := len(lines)
-	if start > n {
-		return ""
-	}
-	if end > n {
-		end = n
-	}
-	return strings.Join(lines[start-1:end], "\n")
+	return source.SliceLines(content, start, end)
 }
 
 // isTestPath identifies files that live under tests/ or follow the

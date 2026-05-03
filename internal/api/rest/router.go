@@ -307,6 +307,12 @@ type Server struct {
 	// concrete *changewatch.Router so tests substitute a stub.
 	changeDispatcher ChangeEventDispatcher
 
+	// qaLocator is the QA repo locator created in NewServer and consumed by
+	// setupRouter when wiring mcpHandler.fileReader (CA-151). Kept on the
+	// struct so both methods share the same instance without threading it
+	// through function signatures.
+	qaLocator *qaRepoLocator
+
 	// CA-142: graceful-drain lifecycle state.
 	// serverDraining is set once (CAS) when SIGTERM or the preStop hook
 	// triggers BeginDrain. It gates /readyz, new Living Wiki mutations,
@@ -462,12 +468,12 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		}
 		o := qa.New(s.llmCaller, reader, s.workerLanes, qaOrchCfg)
 		if s.store != nil {
-			locator := newQARepoLocator(s.store, cfg.Storage.RepoCachePath)
-			o = o.WithRepoLocator(locator)
+			s.qaLocator = newQARepoLocator(s.store, cfg.Storage.RepoCachePath)
+			o = o.WithRepoLocator(s.qaLocator)
 			o = o.WithGraphExpander(qa.NewGraphExpander(&qaGraphAdapter{store: s.store}, &qaGraphLookup{store: s.store}))
 			o = o.WithRequirementLookup(&qaRequirementLookup{store: s.store})
 			o = o.WithSymbolLookup(&qaSymbolLookup{store: s.store})
-			o = o.WithFileReader(&qaFileReader{locator: locator})
+			o = o.WithFileReader(&qaFileReader{locator: s.qaLocator})
 		}
 		if s.knowledgeStore != nil {
 			o = o.WithArtifactLookup(&qaArtifactLookup{store: s.knowledgeStore})
@@ -978,6 +984,13 @@ func (s *Server) setupRouter() {
 				s.mcp.freshness = NewRouterFreshnessProvider(router)
 			}
 		}
+		// Wire file reader (CA-151): nil-safe — when s.qaLocator is nil (no store),
+		// fileReader stays nil and the new symbol-source tools return a
+		// "file reader not configured" error rather than panicking.
+		if s.qaLocator != nil {
+			s.mcp.fileReader = &qaFileReader{locator: s.qaLocator}
+		}
+		s.mcp.capabilityChecker = capabilities.IsAvailable
 		// SSE endpoint: behind auth (JWT or API token)
 		r.Group(func(r chi.Router) {
 			r.Use(auth.MiddlewareWithTokens(s.jwtMgr, s.tokenStore))
