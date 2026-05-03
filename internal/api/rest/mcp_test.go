@@ -511,6 +511,8 @@ func TestMCP_ToolsList(t *testing.T) {
 		"index_repository", "get_index_status", "refresh_repository",
 		// Phase 2.1 compound workflow tools
 		"review_diff_against_requirements", "impact_summary", "onboard_new_contributor",
+		// CA-153 Phase 1a requirement-linking tools
+		"get_requirements_for_symbol", "get_symbols_for_requirement",
 		// Subsystem clustering tools (Sprint 1 — F5)
 		"get_subsystems", "get_subsystem_by_id", "get_subsystem",
 	}

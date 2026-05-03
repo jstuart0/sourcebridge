@@ -153,6 +153,17 @@ var Registry = []Capability{
 		LatencyClass: "fast_read",
 	},
 
+	// ---- Requirement linking (Phase 1a, CA-153) ----
+	// get_changed_requirements (Phase 2d) will be appended to MCPToolNames
+	// when that phase ships.
+	{
+		Name:         "requirement_linking",
+		Description:  "Bidirectional traceability between code symbols and requirements: forward (code→spec) and inverse (spec→code).",
+		Editions:     []Edition{EditionOSS, EditionEnterprise},
+		MCPToolNames: []string{"get_requirements_for_symbol", "get_symbols_for_requirement"},
+		LatencyClass: "fast_read",
+	},
+
 	// ---- Subsystem clustering ----
 	{
 		Name:         "subsystem_clustering",
