@@ -47,6 +47,7 @@ const (
 	OpQAAgentTurn          = "qa.agent_turn"
 	OpMCPExplain           = "mcp.explain"
 	OpMCPDiscussStream     = "mcp.discuss_stream"
+	OpMCPReview            = "mcp.review"
 	OpDiscussStream        = "discuss.stream"
 	OpClusteringRelabel    = "clustering.relabel"
 	OpReportGenerate       = "report.generate"
@@ -75,6 +76,7 @@ var KnownOps = map[string]struct{}{
 	OpQAAgentTurn:          {},
 	OpMCPExplain:           {},
 	OpMCPDiscussStream:     {},
+	OpMCPReview:            {},
 	OpDiscussStream:        {},
 	OpClusteringRelabel:    {},
 	OpReportGenerate:       {},

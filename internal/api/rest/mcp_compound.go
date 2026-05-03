@@ -46,7 +46,7 @@ func (h *mcpHandler) compoundToolDefs() []mcpToolDefinition {
 	return []mcpToolDefinition{
 		{
 			Name: "review_diff_against_requirements",
-			Description: "Compound workflow: given a diff or commit range, identify touched files/symbols, look up any requirements linked to those symbols, flag public symbols that have no linked requirements, and return a structured report. Optional include_synthesis: true runs an ask_question pass to narrate the risk summary.",
+			Description: "Compound workflow: given a diff or commit range, identify touched files/symbols, look up any requirements linked to those symbols, flag public symbols that have no linked requirements, and return a structured report. Optional include_synthesis: true runs an ask_question pass to narrate the risk summary. (legacy — use get_review_for_diff for AI findings)",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -60,7 +60,7 @@ func (h *mcpHandler) compoundToolDefs() []mcpToolDefinition {
 		},
 		{
 			Name:        "impact_summary",
-			Description: "Compound workflow: for the given symbols (or every symbol in the given files), return transitive callers, tests that exercise them, and any linked requirements. Server-side composition over get_callers + get_tests_for_symbol + get_requirements.",
+			Description: "Compound workflow: for the given symbols (or every symbol in the given files), return transitive callers, tests that exercise them, and any linked requirements. Server-side composition over get_callers + get_tests_for_symbol + get_requirements. (legacy — use predict_change_impact for diff/test/requirement bundling)",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -85,7 +85,7 @@ func (h *mcpHandler) compoundToolDefs() []mcpToolDefinition {
 		},
 		{
 			Name:        "onboard_new_contributor",
-			Description: "Compound workflow: return an ordered reading list for a developer new to the repo — top entry points sorted by recent change activity, each with its cliff notes and authors. Composes get_entry_points + get_recent_changes + get_cliff_notes.",
+			Description: "Compound workflow: return an ordered reading list for a developer new to the repo — top entry points sorted by recent change activity, each with its cliff notes and authors. Composes get_entry_points + get_recent_changes + get_cliff_notes. (legacy — use get_field_guide with format=learning_path)",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -117,6 +117,71 @@ type diffReviewResult struct {
 	Summary              string                   `json:"summary,omitempty"`
 }
 
+// resolveDiffTouchedSymbols resolves the set of files and symbols affected by
+// a diff. It is the shared core of review_diff_against_requirements,
+// get_changed_requirements (Phase 2d), and predict_change_impact (Phase 2c).
+//
+// Input branching:
+//   - If files is non-empty, those files are used as-is.
+//   - Otherwise commitRange (or the most recent commit when empty) is used to
+//     discover touched files via runGitLog.
+//
+// Returns the file-level summary (ready for TouchedFiles in diffReviewResult)
+// and the flat list of symbol IDs across all touched files.
+func (h *mcpHandler) resolveDiffTouchedSymbols(repoID, commitRange string, files []string) ([]diffReviewFile, []string, error) {
+	var touchedFiles []string
+	if len(files) > 0 {
+		touchedFiles = files
+	} else {
+		repo := h.store.GetRepository(repoID)
+		if repo == nil {
+			return nil, nil, errRepositoryNotIndexed(repoID)
+		}
+		gitRoot := repo.ClonePath
+		if gitRoot == "" {
+			gitRoot = repo.Path
+		}
+		if gitRoot == "" {
+			return nil, nil, fmt.Errorf("repository has no git root on disk and no explicit files were provided")
+		}
+
+		limit := 1
+		if commitRange != "" {
+			limit = 10
+		}
+		commits, err := runGitLog(context.Background(), gitRoot, "", limit, commitRange)
+		if err != nil {
+			return nil, nil, fmt.Errorf("git log for commit range: %v", err)
+		}
+		seen := map[string]bool{}
+		for _, c := range commits {
+			for _, f := range c.FilesTouched {
+				if seen[f] {
+					continue
+				}
+				seen[f] = true
+				touchedFiles = append(touchedFiles, f)
+			}
+		}
+	}
+
+	var reviewFiles []diffReviewFile
+	var symbolIDs []string
+	for _, fp := range touchedFiles {
+		fileSymbols := h.store.GetSymbolsByFile(repoID, fp)
+		names := make([]string, 0, len(fileSymbols))
+		for _, s := range fileSymbols {
+			names = append(names, s.Name)
+			symbolIDs = append(symbolIDs, s.ID)
+		}
+		reviewFiles = append(reviewFiles, diffReviewFile{
+			FilePath: fp,
+			Symbols:  names,
+		})
+	}
+	return reviewFiles, symbolIDs, nil
+}
+
 func (h *mcpHandler) callReviewDiffAgainstRequirements(session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID     string   `json:"repository_id"`
@@ -131,63 +196,17 @@ func (h *mcpHandler) callReviewDiffAgainstRequirements(session *mcpSession, args
 		return nil, err
 	}
 
-	// Resolve touched files. If the caller provided explicit files,
-	// use them. Otherwise pull the most recent commit's files via
-	// the file-level get_recent_changes helper.
-	var touchedFiles []string
-	if len(params.Files) > 0 {
-		touchedFiles = params.Files
-	} else {
-		repo := h.store.GetRepository(params.RepositoryID)
-		if repo == nil {
-			return nil, errRepositoryNotIndexed(params.RepositoryID)
-		}
-		gitRoot := repo.ClonePath
-		if gitRoot == "" {
-			gitRoot = repo.Path
-		}
-		if gitRoot == "" {
-			return nil, fmt.Errorf("repository has no git root on disk and no explicit files were provided")
-		}
-
-		limit := 1
-		if params.CommitRange != "" {
-			limit = 10
-		}
-		commits, err := runGitLog(context.Background(), gitRoot, "", limit)
-		if err != nil {
-			return nil, fmt.Errorf("git log for commit range: %v", err)
-		}
-		seen := map[string]bool{}
-		for _, c := range commits {
-			for _, f := range c.FilesTouched {
-				if seen[f] {
-					continue
-				}
-				seen[f] = true
-				touchedFiles = append(touchedFiles, f)
-			}
-		}
+	touchedFileEntries, touchedSymbolIDs, err := h.resolveDiffTouchedSymbols(
+		params.RepositoryID, params.CommitRange, params.Files,
+	)
+	if err != nil {
+		return nil, err
 	}
 
-	// For each file, pull its symbols from the store.
 	result := diffReviewResult{
 		RepositoryID: params.RepositoryID,
 		CommitRange:  params.CommitRange,
-	}
-
-	var touchedSymbolIDs []string
-	for _, fp := range touchedFiles {
-		fileSymbols := h.store.GetSymbolsByFile(params.RepositoryID, fp)
-		names := make([]string, 0, len(fileSymbols))
-		for _, s := range fileSymbols {
-			names = append(names, s.Name)
-			touchedSymbolIDs = append(touchedSymbolIDs, s.ID)
-		}
-		result.TouchedFiles = append(result.TouchedFiles, diffReviewFile{
-			FilePath: fp,
-			Symbols:  names,
-		})
+		TouchedFiles: touchedFileEntries,
 	}
 
 	// Find requirements linked to any touched symbol.

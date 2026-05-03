@@ -388,3 +388,18 @@ func TestResolve_MultiReplicaSeesNewVersion(t *testing.T) {
 			snap.Provider, snap.APIKey)
 	}
 }
+
+// TestDeriveOperationGroup_OpMCPReview asserts that OpMCPReview maps to the
+// GroupReview group (same as OpReview) and NOT to the default GroupAnalysis.
+// This ensures the MCP AI-review path uses the review-tuned model configuration
+// rather than falling through to the analysis defaults (P2 fix for CA-153 r1).
+func TestDeriveOperationGroup_OpMCPReview(t *testing.T) {
+	got := deriveOperationGroup(OpMCPReview)
+	if got != GroupReview {
+		t.Errorf("deriveOperationGroup(OpMCPReview) = %q, want %q (GroupReview)", got, GroupReview)
+	}
+	// Sanity-check that OpReview (the GraphQL counterpart) also returns GroupReview.
+	if got2 := deriveOperationGroup(OpReview); got2 != GroupReview {
+		t.Errorf("deriveOperationGroup(OpReview) = %q, want %q", got2, GroupReview)
+	}
+}

@@ -130,10 +130,15 @@ var Registry = []Capability{
 		LatencyClass: "indexing_op",
 	},
 	{
-		Name:         "compound_workflows",
-		Description:  "Server-orchestrated workflow tools: review a diff against linked requirements, summarize impact, onboard a new contributor.",
-		Editions:     []Edition{EditionOSS, EditionEnterprise},
-		MCPToolNames: []string{"review_diff_against_requirements", "impact_summary", "onboard_new_contributor"},
+		Name:        "compound_workflows",
+		Description: "Server-orchestrated workflow tools: review a diff against linked requirements (with optional AI findings), summarize impact, onboard a new contributor.",
+		Editions:    []Edition{EditionOSS, EditionEnterprise},
+		MCPToolNames: []string{
+			"review_diff_against_requirements",
+			"impact_summary",
+			"onboard_new_contributor",
+			"get_review_for_diff",
+		},
 		LatencyClass: "search",
 	},
 
@@ -149,7 +154,41 @@ var Registry = []Capability{
 		Name:         "change_impact",
 		Description:  "Change-impact reports over recent commits.",
 		Editions:     []Edition{EditionOSS, EditionEnterprise},
-		MCPToolNames: []string{"get_impact_report"},
+		MCPToolNames: []string{"get_impact_report", "predict_change_impact"},
+		LatencyClass: "fast_read",
+	},
+
+	// ---- Requirement linking (Phase 1a + 2d, CA-153) ----
+	{
+		Name:        "requirement_linking",
+		Description: "Bidirectional traceability between code symbols and requirements: forward (code→spec), inverse (spec→code), and diff-anchored (diff→affected requirements).",
+		Editions:    []Edition{EditionOSS, EditionEnterprise},
+		MCPToolNames: []string{
+			"get_requirements_for_symbol",
+			"get_symbols_for_requirement",
+			"get_changed_requirements",
+		},
+		LatencyClass: "fast_read",
+	},
+
+	// ---- Field guides (Phase 2b, CA-153) ----
+	// get_field_guide routes to one of four pre-seeded artifact types via the
+	// format enum: cliff_notes, learning_path, code_tour, workflow_story.
+	// All variants are synchronous reads — no LLM call at MCP-call time.
+	{
+		Name:         "field_guides",
+		Description:  "Multi-format field guides (cliff notes, learning path, code tour, workflow story) read synchronously from pre-seeded knowledge artifacts.",
+		Editions:     []Edition{EditionOSS, EditionEnterprise},
+		MCPToolNames: []string{"get_field_guide"},
+		LatencyClass: "fast_read",
+	},
+
+	// ---- Gap audit (Phase 1b, CA-153) ----
+	{
+		Name:         "gap_audit",
+		Description:  "O(n) repo-wide gap scans: orphan symbols (code with no linked requirement) and uncovered requirements (spec with no linked code).",
+		Editions:     []Edition{EditionOSS, EditionEnterprise},
+		MCPToolNames: []string{"get_orphan_symbols", "get_uncovered_requirements"},
 		LatencyClass: "fast_read",
 	},
 

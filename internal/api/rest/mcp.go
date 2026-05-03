@@ -160,6 +160,17 @@ type workerStreamingCaller interface {
 	) (reasoningv1.ReasoningService_AnswerQuestionStreamClient, context.CancelFunc, error)
 }
 
+// workerReviewCaller is the optional AI-review extension. The MCP
+// get_review_for_diff tool uses it when include_ai_review is true;
+// otherwise it falls back to structural-only output with degraded: true.
+// Kept separate from mcpWorkerCaller (and workerStreamingCaller) so
+// existing test mocks that don't implement ReviewFile don't have to
+// change until Phase 3 when the tool lands.
+type workerReviewCaller interface {
+	mcpWorkerCaller
+	ReviewFile(ctx context.Context, req *reasoningv1.ReviewFileRequest) (*reasoningv1.ReviewFileResponse, error)
+}
+
 // mcpLLMCallerAdapter adapts an *llmcall.Caller to the mcp* worker
 // interfaces. It binds the resolver op to the MCP-specific constants so
 // every RPC the MCP server makes is stamped with workspace-resolved
@@ -168,12 +179,14 @@ type workerStreamingCaller interface {
 // repoID is supplied per-call by the MCP tool from the request payload;
 // the adapter forwards it into the resolver via the Caller wrapper. We
 // bind the *op* at adapter-construction time because every MCP unary
-// answer goes through the explain_code tool (OpMCPExplain) and every
-// MCP stream goes through the discuss_stream tool (OpMCPDiscussStream).
+// answer goes through the explain_code tool (OpMCPExplain), every MCP
+// stream goes through the discuss_stream tool (OpMCPDiscussStream), and
+// every MCP file review goes through the review tool (OpMCPReview).
 type mcpLLMCallerAdapter struct {
 	caller   *llmcall.Caller
 	unaryOp  string
 	streamOp string
+	reviewOp string
 }
 
 func (a *mcpLLMCallerAdapter) IsAvailable() bool {
@@ -188,9 +201,14 @@ func (a *mcpLLMCallerAdapter) AnswerQuestionStream(ctx context.Context, req *rea
 	return a.caller.AnswerQuestionStream(ctx, req.GetRepositoryId(), a.streamOp, req)
 }
 
-// Compile-time check.
+func (a *mcpLLMCallerAdapter) ReviewFile(ctx context.Context, req *reasoningv1.ReviewFileRequest) (*reasoningv1.ReviewFileResponse, error) {
+	return a.caller.ReviewFile(ctx, req.GetRepositoryId(), a.reviewOp, req)
+}
+
+// Compile-time checks.
 var _ mcpWorkerCaller = (*mcpLLMCallerAdapter)(nil)
 var _ workerStreamingCaller = (*mcpLLMCallerAdapter)(nil)
+var _ workerReviewCaller = (*mcpLLMCallerAdapter)(nil)
 
 // streamDiscussion runs the server-streaming AnswerQuestionStream RPC
 // and forwards each AnswerQuestionStreamResponse's content fragment to
@@ -384,6 +402,23 @@ type mcpHandler struct {
 	// off without mutating package globals. Defaults to capabilities.IsAvailable
 	// in production wiring; tests inject a stub via WithCapabilityChecker.
 	capabilityChecker capabilityCheckFunc
+
+	// toolDispatch maps tool name → handler function. Populated at
+	// construction by per-phase register*Tools functions. The dispatch
+	// path in handleToolsCallCtx consults this map first; enterprise
+	// extender tools fall through to toolExtender.CallTool. Drift between
+	// this map and baseTools() is caught in both directions:
+	//   - TestRegistry_AllMCPToolsExistInBaseTools (capability→baseTools)
+	//   - TestDispatchMapCoversBaseTools (baseTools→dispatch)
+	// Tools are registered into h.toolDispatch at handler construction by
+	// per-phase register*Tools functions. To add a new tool: define its
+	// handler, register it in the appropriate register*Tools fn, add it to
+	// baseTools() (or a *ToolDefs() slice), declare its capability in
+	// internal/capabilities/registry_data.go. Drift between the dispatch
+	// map and baseTools() is caught both directions by
+	// TestRegistry_AllMCPToolsExistInBaseTools (capability→base) and
+	// TestDispatchMapCoversBaseTools (base→dispatch).
+	toolDispatch map[string]mcpToolHandlerFunc
 }
 
 // fileReader is the minimal interface for reading source files from a repo
@@ -396,6 +431,37 @@ type fileReader interface {
 // capabilityCheckFunc is the function type for checking whether a named
 // capability is available for a given edition. Mirrors capabilities.IsAvailable.
 type capabilityCheckFunc func(name string, edition capabilities.Edition) bool
+
+// ---------------------------------------------------------------------------
+// Dispatcher types and helpers
+// ---------------------------------------------------------------------------
+
+// mcpToolHandlerFunc is the uniform handler signature for all MCP tools in
+// the dispatch map. ctx is the live request context (used by tools that
+// need it for timeout/cancellation; ignored by the others via noCtxHandler).
+type mcpToolHandlerFunc func(h *mcpHandler, ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error)
+
+// noCtxHandler adapts a (session, args) handler — the shape used by 24 of
+// the 26 existing tools — into the dispatcher's (ctx, session, args)
+// signature. The two ctx-taking tools (explain_code and ask_question)
+// register their handlers directly without this adapter.
+func noCtxHandler(fn func(*mcpHandler, *mcpSession, json.RawMessage) (interface{}, error)) mcpToolHandlerFunc {
+	return func(h *mcpHandler, _ context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
+		return fn(h, s, a)
+	}
+}
+
+// registerTool installs a handler in the dispatch map. Panics on duplicate
+// registration so collisions surface at construction (which always runs in
+// tests) rather than as silent overwrites where the second registration
+// wins. All register*Tools functions MUST use this helper rather than direct
+// map assignment.
+func (h *mcpHandler) registerTool(name string, fn mcpToolHandlerFunc) {
+	if _, exists := h.toolDispatch[name]; exists {
+		panic(fmt.Sprintf("duplicate tool registration: %s", name))
+	}
+	h.toolDispatch[name] = fn
+}
 
 // Compile-time guard: ensures *qaFileReader satisfies the fileReader interface.
 // A signature drift on qaFileReader is caught at build time, not runtime.
@@ -463,12 +529,76 @@ func newMCPHandlerWithEdition(store graphstore.GraphStore, ks knowledge.Knowledg
 			}
 		}
 	}
+	// Registration must run after all field assignments above.
+	// Each register*Tools function may close over handler fields (e.g.
+	// h.worker, h.knowledgeStore); all must be set before this block.
+	h.toolDispatch = make(map[string]mcpToolHandlerFunc)
+	registerCoreTools(h)
+	registerRequirementLinkingTools(h)
+	registerGapAuditTools(h)
+	registerFieldGuideTools(h)
+	registerChangeImpactTools(h)
+	registerReviewTools(h)
+
 	// Start pod-local chans reaper — TTL cleanup of session state itself is
 	// handled by sessionStore (Redis TTL, or the memory store's own reaper).
 	// This loop just closes channels for SSE sessions whose persistent state
 	// has expired, so the handleSSE goroutine returns.
 	go h.reapLocalChans()
 	return h
+}
+
+// registerCoreTools populates h.toolDispatch with all 26 existing MCP
+// tools. It is called once, at the end of newMCPHandlerWithEdition, after
+// every handler field is set.
+//
+// Convention:
+//   - Tools whose handler does NOT need the live request context (24/26)
+//     are wrapped via noCtxHandler, which discards the context parameter.
+//   - Tools that need context for timeout/cancellation propagation
+//     (explain_code, ask_question) register their handlers directly using
+//     the full mcpToolHandlerFunc signature.
+func registerCoreTools(h *mcpHandler) {
+	// Non-ctx tools (24).
+	h.registerTool("search_symbols", noCtxHandler((*mcpHandler).callSearchSymbols))
+	h.registerTool("get_requirements", noCtxHandler((*mcpHandler).callGetRequirements))
+	h.registerTool("get_impact_report", noCtxHandler((*mcpHandler).callGetImpactReport))
+	h.registerTool("get_cliff_notes", noCtxHandler((*mcpHandler).callGetCliffNotes))
+	h.registerTool("get_callers", noCtxHandler((*mcpHandler).callGetCallers))
+	h.registerTool("get_callees", noCtxHandler((*mcpHandler).callGetCallees))
+	h.registerTool("get_file_imports", noCtxHandler((*mcpHandler).callGetFileImports))
+	h.registerTool("get_architecture_diagram", noCtxHandler((*mcpHandler).callGetArchitectureDiagram))
+	h.registerTool("get_recent_changes", noCtxHandler((*mcpHandler).callGetRecentChanges))
+	h.registerTool("get_tests_for_symbol", noCtxHandler((*mcpHandler).callGetTestsForSymbol))
+	h.registerTool("get_entry_points", noCtxHandler((*mcpHandler).callGetEntryPoints))
+	h.registerTool("get_symbol_source", noCtxHandler((*mcpHandler).callGetSymbolSource))
+	h.registerTool("get_symbol_context", noCtxHandler((*mcpHandler).callGetSymbolContext))
+	h.registerTool("index_repository", noCtxHandler((*mcpHandler).callIndexRepository))
+	h.registerTool("get_index_status", noCtxHandler((*mcpHandler).callGetIndexStatus))
+	h.registerTool("refresh_repository", noCtxHandler((*mcpHandler).callRefreshRepository))
+	h.registerTool("review_diff_against_requirements", noCtxHandler((*mcpHandler).callReviewDiffAgainstRequirements))
+	h.registerTool("impact_summary", noCtxHandler((*mcpHandler).callImpactSummary))
+	h.registerTool("onboard_new_contributor", noCtxHandler((*mcpHandler).callOnboardNewContributor))
+	h.registerTool("get_cross_repo_impact", noCtxHandler((*mcpHandler).callGetCrossRepoImpact))
+	h.registerTool("get_subsystems", noCtxHandler((*mcpHandler).callGetSubsystems))
+	h.registerTool("get_subsystem_by_id", noCtxHandler((*mcpHandler).callGetSubsystemByID))
+	h.registerTool("get_subsystem", noCtxHandler((*mcpHandler).callGetSubsystem))
+	// record_change is always registered in the dispatch map for defense-in-depth.
+	// The handler itself checks h.changeDispatcher and returns MCPErrCapabilityDisabled
+	// when nil. The tool is hidden from tools/list (baseTools) via
+	// recordChangeToolDefIfAvailable returning nil, so agents don't discover it
+	// when the dispatcher is unwired — but a hand-crafted tools/call is handled
+	// gracefully rather than returning "Unknown tool".
+	h.registerTool("record_change", noCtxHandler((*mcpHandler).callRecordChange))
+
+	// Ctx-bearing tools (2): registered directly without noCtxHandler because
+	// their handlers need the live request context for timeout/cancellation.
+	h.registerTool("explain_code", func(h *mcpHandler, ctx context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
+		return h.callExplainCodeCtx(ctx, s, a)
+	})
+	h.registerTool("ask_question", func(h *mcpHandler, ctx context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
+		return h.callAskQuestion(ctx, s, a)
+	})
 }
 
 // WithFileReader sets the file reader for get_symbol_source and
@@ -1010,6 +1140,11 @@ func (h *mcpHandler) baseTools() []mcpToolDefinition {
 	tools = append(tools, h.getEntryPointsToolDef())
 	tools = append(tools, h.lifecycleToolDefs()...)
 	tools = append(tools, h.compoundToolDefs()...)
+	tools = append(tools, h.requirementToolDefs()...)
+	tools = append(tools, h.gapAuditToolDefs()...)
+	tools = append(tools, h.fieldGuideToolDefs()...)
+	tools = append(tools, h.changeImpactToolDefs()...)
+	tools = append(tools, h.reviewToolDefs()...)
 	tools = append(tools, h.crossRepoToolDef())
 	tools = append(tools, h.clusteringToolDefs()...)
 	// Phase 1.D — record_change. Only surfaced when the change-watch
@@ -1045,78 +1180,13 @@ func (h *mcpHandler) handleToolsCallCtx(ctx context.Context, session *mcpSession
 	var result interface{}
 	var toolErr error
 
-	switch params.Name {
-	case "search_symbols":
-		result, toolErr = h.callSearchSymbols(session, params.Arguments)
-	case "explain_code":
-		result, toolErr = h.callExplainCodeCtx(ctx, session, params.Arguments)
-	case "get_requirements":
-		result, toolErr = h.callGetRequirements(session, params.Arguments)
-	case "get_impact_report":
-		result, toolErr = h.callGetImpactReport(session, params.Arguments)
-	case "get_cliff_notes":
-		result, toolErr = h.callGetCliffNotes(session, params.Arguments)
-	case "ask_question":
-		result, toolErr = h.callAskQuestion(ctx, session, params.Arguments)
-	// Phase 1a accessor tools (see mcp_accessors.go).
-	case "get_callers":
-		result, toolErr = h.callGetCallers(session, params.Arguments)
-	case "get_callees":
-		result, toolErr = h.callGetCallees(session, params.Arguments)
-	case "get_file_imports":
-		result, toolErr = h.callGetFileImports(session, params.Arguments)
-	case "get_architecture_diagram":
-		result, toolErr = h.callGetArchitectureDiagram(session, params.Arguments)
-	case "get_recent_changes":
-		result, toolErr = h.callGetRecentChanges(session, params.Arguments)
-	// Phase 1b tools.
-	case "get_tests_for_symbol":
-		result, toolErr = h.callGetTestsForSymbol(session, params.Arguments)
-	case "get_entry_points":
-		result, toolErr = h.callGetEntryPoints(session, params.Arguments)
-	// Phase 2 / Phase 3 — symbol source tools (CA-151).
-	// NOTE: This switch is at 26 cases after CA-151 (get_symbol_source +
-	// get_symbol_context). Once it exceeds 25, extract to a
-	// map[string]mcpToolHandlerFunc registered alongside baseTools().
-	// Don't silently grow it past that boundary.
-	case "get_symbol_source":
-		result, toolErr = h.callGetSymbolSource(session, params.Arguments)
-	case "get_symbol_context":
-		result, toolErr = h.callGetSymbolContext(session, params.Arguments)
-	// Phase 3.2 — indexing lifecycle tools.
-	case "index_repository":
-		result, toolErr = h.callIndexRepository(session, params.Arguments)
-	case "get_index_status":
-		result, toolErr = h.callGetIndexStatus(session, params.Arguments)
-	case "refresh_repository":
-		result, toolErr = h.callRefreshRepository(session, params.Arguments)
-	// Phase 2.1 — compound workflow tools.
-	case "review_diff_against_requirements":
-		result, toolErr = h.callReviewDiffAgainstRequirements(session, params.Arguments)
-	case "impact_summary":
-		result, toolErr = h.callImpactSummary(session, params.Arguments)
-	case "onboard_new_contributor":
-		result, toolErr = h.callOnboardNewContributor(session, params.Arguments)
-	// Phase 3.4 — enterprise-only cross-repo tool.
-	case "get_cross_repo_impact":
-		result, toolErr = h.callGetCrossRepoImpact(session, params.Arguments)
-	// Subsystem clustering tools.
-	case "get_subsystems":
-		result, toolErr = h.callGetSubsystems(session, params.Arguments)
-	case "get_subsystem_by_id":
-		result, toolErr = h.callGetSubsystemByID(session, params.Arguments)
-	case "get_subsystem":
-		result, toolErr = h.callGetSubsystem(session, params.Arguments)
-	// Phase 1.D — change-watch in-process connector tool.
-	case "record_change":
-		result, toolErr = h.callRecordChange(session, params.Arguments)
-	default:
-		// Try enterprise tool extender
-		if h.toolExtender != nil {
-			result, toolErr = h.toolExtender.CallTool(ctx, session, params.Name, params.Arguments)
-		} else {
-			return errorResponse(msg.ID, -32601, fmt.Sprintf("Unknown tool: %s", params.Name))
-		}
+	if fn, ok := h.toolDispatch[params.Name]; ok {
+		result, toolErr = fn(h, ctx, session, params.Arguments)
+	} else if h.toolExtender != nil {
+		// MCPToolExtender method is CallTool (verified at mcp.go:131-134) — NOT HandleToolCall.
+		result, toolErr = h.toolExtender.CallTool(ctx, session, params.Name, params.Arguments)
+	} else {
+		return errorResponse(msg.ID, -32601, fmt.Sprintf("Unknown tool: %s", params.Name))
 	}
 
 	elapsed := time.Since(start)

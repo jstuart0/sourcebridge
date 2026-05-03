@@ -511,6 +511,18 @@ func TestMCP_ToolsList(t *testing.T) {
 		"index_repository", "get_index_status", "refresh_repository",
 		// Phase 2.1 compound workflow tools
 		"review_diff_against_requirements", "impact_summary", "onboard_new_contributor",
+		// CA-153 Phase 1a requirement-linking tools
+		"get_requirements_for_symbol", "get_symbols_for_requirement",
+		// CA-153 Phase 2d diff→requirements tool
+		"get_changed_requirements",
+		// CA-153 Phase 1b gap-audit tools
+		"get_orphan_symbols", "get_uncovered_requirements",
+		// CA-153 Phase 2b field guide tool
+		"get_field_guide",
+		// CA-153 Phase 2c change impact tool
+		"predict_change_impact",
+		// CA-153 Phase 3 AI-augmented diff review tool
+		"get_review_for_diff",
 		// Subsystem clustering tools (Sprint 1 — F5)
 		"get_subsystems", "get_subsystem_by_id", "get_subsystem",
 	}

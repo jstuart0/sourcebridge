@@ -313,7 +313,7 @@ func (r *DefaultResolver) InvalidateLocal() {
 // resolver's own workspaceModelForOp / overrideModelForOp.
 func deriveOperationGroup(op string) string {
 	switch op {
-	case OpReview:
+	case OpReview, OpMCPReview:
 		return GroupReview
 	case OpDiscussion, OpDiscussStream, OpMCPDiscussStream, OpQASynth, OpQADeepSynth, OpQAAgentTurn, OpMCPExplain:
 		return GroupDiscussion

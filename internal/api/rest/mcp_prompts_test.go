@@ -25,7 +25,12 @@ func TestMCP_PromptsList(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	expected := []string{"review_security_of_file", "explain_requirement_implementation", "why_is_this_test_failing"}
+	expected := []string{
+		"review_security_of_file",
+		"explain_requirement_implementation",
+		"review_diff_with_sourcebridge",
+		"why_is_this_test_failing",
+	}
 	names := make(map[string]bool, len(body.Prompts))
 	for _, p := range body.Prompts {
 		names[p.Name] = true
@@ -92,6 +97,61 @@ func TestMCP_PromptsGet_UnknownPrompt(t *testing.T) {
 	})
 	if resp.Error == nil {
 		t.Fatal("expected JSON-RPC error for unknown prompt")
+	}
+}
+
+func TestMCP_PromptsGet_ReviewDiffWithSourcebridge(t *testing.T) {
+	h := newTestHarness(t)
+	sess := h.createSession()
+
+	// commit_range variant.
+	resp := h.sendRPC(sess, 2, "prompts/get", map[string]interface{}{
+		"name": "review_diff_with_sourcebridge",
+		"arguments": map[string]interface{}{
+			"repository_id": h.repoID,
+			"commit_range":  "HEAD~3..HEAD",
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	raw, _ := json.Marshal(resp.Result)
+	var body mcpPromptGetResult
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(body.Messages) == 0 {
+		t.Fatal("expected at least one message in rendered prompt")
+	}
+	text := body.Messages[0].Content.Text
+	if !strings.Contains(text, "30-90 seconds") {
+		t.Errorf("rendered text should contain latency warning '30-90 seconds'; got: %s", text)
+	}
+	if !strings.Contains(text, "HEAD~3..HEAD") {
+		t.Errorf("rendered text should contain the commit_range argument; got: %s", text)
+	}
+
+	// files variant — ensure it works when files is provided and commit_range is absent.
+	resp2 := h.sendRPC(sess, 3, "prompts/get", map[string]interface{}{
+		"name": "review_diff_with_sourcebridge",
+		"arguments": map[string]interface{}{
+			"repository_id": h.repoID,
+			"files":         "main.go,api.go",
+		},
+	})
+	if resp2.Error != nil {
+		t.Fatalf("unexpected error (files variant): %v", resp2.Error)
+	}
+
+	// missing both commit_range and files — should error.
+	resp3 := h.sendRPC(sess, 4, "prompts/get", map[string]interface{}{
+		"name": "review_diff_with_sourcebridge",
+		"arguments": map[string]interface{}{
+			"repository_id": h.repoID,
+		},
+	})
+	if resp3.Error == nil {
+		t.Error("expected JSON-RPC error when neither commit_range nor files is provided")
 	}
 }
 

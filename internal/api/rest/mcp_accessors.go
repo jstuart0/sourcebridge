@@ -814,15 +814,28 @@ func runGitLogSymbol(ctx context.Context, gitRoot, filePath string, startLine, e
 	return commits, nil
 }
 
-// runGitLog shells out to `git log --pretty=... -n LIMIT -- PATH` and
-// parses the output. The format string uses a unit-separator so we can
+// runGitLog shells out to `git log --pretty=... -n LIMIT [rangeFilter] [-- PATH]`
+// and parses the output. The format string uses a unit-separator so we can
 // split commit records reliably even when subjects contain tabs.
-func runGitLog(ctx context.Context, gitRoot, pathFilter string, limit int) ([]recentChange, error) {
-	const sep = "\x1f" // unit separator
-	const recSep = "\x1e" // record separator
-	format := strings.Join([]string{"%H", "%an", "%ae", "%aI", "%s"}, sep) + recSep
+//
+// rangeFilter, when non-empty, is a git commit range such as "HEAD~3..HEAD".
+// When provided it is inserted before the path separator so git constrains the
+// walk to exactly those commits; the -n limit acts as a safety cap on top.
+//
+// The record separator \x1e is placed at the BEGINNING of the format
+// string so that each commit's metadata block and its --name-only file
+// list stay in the same split segment. Placing it at the end causes the
+// file names for commit N to land in the segment parsed as commit N+1's
+// header, making len(fields) < 5 and silently dropping those blocks.
+func runGitLog(ctx context.Context, gitRoot, pathFilter string, limit int, rangeFilter ...string) ([]recentChange, error) {
+	const sep = "\x1f"    // unit separator (between header fields)
+	const recSep = "\x1e" // record separator (before each commit header)
+	format := recSep + strings.Join([]string{"%H", "%an", "%ae", "%aI", "%s"}, sep)
 
 	args := []string{"-C", gitRoot, "log", fmt.Sprintf("--pretty=format:%s", format), fmt.Sprintf("-n%d", limit), "--name-only"}
+	if len(rangeFilter) > 0 && rangeFilter[0] != "" {
+		args = append(args, rangeFilter[0])
+	}
 	if pathFilter != "" {
 		args = append(args, "--", pathFilter)
 	}
@@ -833,10 +846,12 @@ func runGitLog(ctx context.Context, gitRoot, pathFilter string, limit int) ([]re
 		return nil, err
 	}
 
-	// With --name-only, each commit looks like:
-	//   <fmt>\x1e\n<file1>\n<file2>\n\n
-	// Splitting on recSep gives us commit blocks; the first line of
-	// each block is the format line, the rest (if any) are the files.
+	// With --name-only and \x1e at the start of the format string, the
+	// output looks like:
+	//   \x1e<sha>\x1f<author>\x1f<email>\x1f<date>\x1f<subject>\n<file1>\n<file2>\n\n\x1e<sha2>...
+	// Splitting on recSep gives: ["", "<sha>\x1f...\n<file1>...", "<sha2>..."]
+	// The leading empty segment is skipped; each subsequent segment contains
+	// a commit header on its first line and its file list on the remaining lines.
 	raw := strings.Split(string(out), recSep)
 	var commits []recentChange
 	for _, block := range raw {
