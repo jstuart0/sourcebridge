@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sourcebridge/sourcebridge/internal/auth"
+	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
@@ -502,6 +503,8 @@ func TestMCP_ToolsList(t *testing.T) {
 		"search_symbols", "explain_code", "get_requirements", "get_impact_report", "get_cliff_notes", "ask_question",
 		// Phase 1a accessor tools
 		"get_callers", "get_callees", "get_file_imports", "get_architecture_diagram", "get_recent_changes",
+		// CA-151 symbol source tools
+		"get_symbol_source", "get_symbol_context",
 		// Phase 1b accessor tools
 		"get_tests_for_symbol", "get_entry_points",
 		// Phase 3.2 lifecycle tools
@@ -1986,5 +1989,27 @@ func TestMCP_StreamableHTTP_StreamingToolCall(t *testing.T) {
 	}
 	if !strings.Contains(body, `"jsonrpc":"2.0"`) || !strings.Contains(body, `"id":2`) {
 		t.Errorf("expected JSON-RPC response in SSE data, got:\n%s", body)
+	}
+}
+
+// TestRegistry_AllMCPToolsExistInBaseTools ensures every MCP tool name declared
+// in capabilities.Registry actually exists in mcpHandler.baseTools(). This is the
+// drift-detection test: adding a capability entry without wiring the tool into the
+// dispatch switch causes this test to fail before the regression reaches production.
+func TestRegistry_AllMCPToolsExistInBaseTools(t *testing.T) {
+	h := newTestHarness(t)
+	tools := h.handler.baseTools()
+
+	toolNames := make(map[string]bool, len(tools))
+	for _, td := range tools {
+		toolNames[td.Name] = true
+	}
+
+	for _, cap := range capabilities.Registry {
+		for _, toolName := range cap.MCPToolNames {
+			if !toolNames[toolName] {
+				t.Errorf("capability %q declares MCP tool %q which is not in baseTools()", cap.Name, toolName)
+			}
+		}
 	}
 }

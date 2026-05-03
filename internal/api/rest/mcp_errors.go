@@ -132,3 +132,11 @@ func errInvalidArguments(detail string) *mcpToolError {
 		Remediation: "Check the tool's input_schema in tools/list and retry with valid parameters.",
 	}
 }
+
+func errRepositoryStale(filePath string) *mcpToolError {
+	return &mcpToolError{
+		Code:        MCPErrRepositoryStale,
+		Message:     fmt.Sprintf("Source file %s is unavailable — likely deleted or moved since the last index.", filePath),
+		Remediation: "Call refresh_repository to re-index, then retry.",
+	}
+}
