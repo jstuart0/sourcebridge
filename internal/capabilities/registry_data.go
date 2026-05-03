@@ -149,7 +149,7 @@ var Registry = []Capability{
 		Name:         "change_impact",
 		Description:  "Change-impact reports over recent commits.",
 		Editions:     []Edition{EditionOSS, EditionEnterprise},
-		MCPToolNames: []string{"get_impact_report"},
+		MCPToolNames: []string{"get_impact_report", "predict_change_impact"},
 		LatencyClass: "fast_read",
 	},
 

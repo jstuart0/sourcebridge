@@ -517,6 +517,8 @@ func TestMCP_ToolsList(t *testing.T) {
 		"get_orphan_symbols", "get_uncovered_requirements",
 		// CA-153 Phase 2b field guide tool
 		"get_field_guide",
+		// CA-153 Phase 2c change impact tool
+		"predict_change_impact",
 		// Subsystem clustering tools (Sprint 1 — F5)
 		"get_subsystems", "get_subsystem_by_id", "get_subsystem",
 	}
