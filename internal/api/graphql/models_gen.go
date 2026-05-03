@@ -778,8 +778,9 @@ type LivingWikiOnDemandPageSpec struct {
 
 // LivingWikiPlan is a deterministic preview of the page set a Living Wiki
 // cold-start would produce. The planSignature must be echoed back on
-// enableLivingWikiForRepo when selectedPageIds is non-empty; otherwise the
-// mutation rejects with extension code LIVING_WIKI_PLAN_STALE.
+// enableLivingWikiForRepo whenever selectedPageIds is supplied (including an
+// empty list); otherwise the mutation rejects with extension code
+// LIVING_WIKI_PLAN_STALE.
 type LivingWikiPlan struct {
 	PlanSignature string `json:"planSignature"`
 	Mode          string `json:"mode"`

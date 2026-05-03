@@ -64,7 +64,7 @@ interface LivingWikiPlanPage {
   required: boolean;
 }
 
-interface LivingWikiPlan {
+export interface LivingWikiPlan {
   planSignature: string;
   mode: string;
   modeTooltip: string;
@@ -347,11 +347,15 @@ export function PlanPreviewModal({
     if (confirming) return;
     setConfirming(true);
     try {
-      if (!plan || uncheckedIds.size === 0) {
-        // All non-required checked (or no plan) — "no filter" path
+      if (!plan) {
+        // No plan available — "Build anyway" fallback path (should not normally
+        // reach here; the footer only renders the primary button when plan exists).
         await onConfirm({ selectedPageIds: null, planSignature: null });
       } else {
-        // At least one non-required page was deselected
+        // Plan is loaded: always send the checked non-required IDs + planSignature
+        // so the server validates freshness regardless of whether the user
+        // deselected anything. Reserve null+null for the query-failure "Build anyway"
+        // escape hatch only (handleBuildAnyway below).
         const selectedNonRequired = nonRequiredPages
           .filter((p) => !uncheckedIds.has(p.id))
           .map((p) => p.id);
@@ -470,7 +474,20 @@ export function PlanPreviewModal({
                 </div>
               )}
 
-              {!fetching && !error && plan && (
+              {!fetching && !error && plan && (plan.notice || plan.totalPages === 0) && (
+                <div
+                  data-testid="plan-preview-notice"
+                  role="status"
+                  className="flex items-start gap-2 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-secondary)]"
+                >
+                  <InfoIcon className="mt-0.5 shrink-0 text-[var(--text-tertiary)]" />
+                  <span>
+                    {plan.notice ?? "No pages available to build for this repository."}
+                  </span>
+                </div>
+              )}
+
+              {!fetching && !error && plan && !plan.notice && plan.totalPages > 0 && (
                 <>
                   {/* Stale-plan banner — shown when LIVING_WIKI_PLAN_STALE was returned */}
                   {staleBanner !== null && (
@@ -511,9 +528,9 @@ export function PlanPreviewModal({
 
           {/* Footer */}
           <div className="shrink-0 flex items-center justify-between gap-3 px-6 py-4">
-            {/* Counter */}
+            {/* Counter — hidden when notice is active (no buildable pages) */}
             <p className="text-xs text-[var(--text-tertiary)]">
-              {plan && !fetching && !error
+              {plan && !fetching && !error && !plan.notice && plan.totalPages > 0
                 ? `${totalSelected} of ${totalPages} selected (${requiredCount} required)`
                 : null}
             </p>
@@ -526,35 +543,38 @@ export function PlanPreviewModal({
                 </Button>
               </Dialog.Close>
 
-              <Tooltip.Provider delayDuration={0}>
-                <Tooltip.Root open={(fetching || stalePendingReview) ? undefined : false}>
-                  <Tooltip.Trigger asChild>
-                    {/* span wrapper: disabled buttons don't fire pointer events */}
-                    <span>
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        disabled={primaryDisabled}
-                        onClick={handleConfirm}
+              {/* Build button — hidden only when plan is loaded and has a notice or zero pages */}
+              {!(plan && (plan.notice || plan.totalPages === 0)) && (
+                <Tooltip.Provider delayDuration={0}>
+                  <Tooltip.Root open={(fetching || stalePendingReview) ? undefined : false}>
+                    <Tooltip.Trigger asChild>
+                      {/* span wrapper: disabled buttons don't fire pointer events */}
+                      <span>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          disabled={primaryDisabled}
+                          onClick={handleConfirm}
+                        >
+                          {intentLabel}
+                        </Button>
+                      </span>
+                    </Tooltip.Trigger>
+                    <Tooltip.Portal>
+                      <Tooltip.Content
+                        side="top"
+                        sideOffset={6}
+                        className="z-[200] rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-xs text-[var(--text-secondary)] shadow-lg"
                       >
-                        {intentLabel}
-                      </Button>
-                    </span>
-                  </Tooltip.Trigger>
-                  <Tooltip.Portal>
-                    <Tooltip.Content
-                      side="top"
-                      sideOffset={6}
-                      className="z-[200] rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-xs text-[var(--text-secondary)] shadow-lg"
-                    >
-                      {stalePendingReview
-                        ? "Plan changed — review the updated list, then click Build."
-                        : "Loading plan…"}
-                      <Tooltip.Arrow className="fill-[var(--bg-elevated)]" />
-                    </Tooltip.Content>
-                  </Tooltip.Portal>
-                </Tooltip.Root>
-              </Tooltip.Provider>
+                        {stalePendingReview
+                          ? "Plan changed — review the updated list, then click Build."
+                          : "Loading plan…"}
+                        <Tooltip.Arrow className="fill-[var(--bg-elevated)]" />
+                      </Tooltip.Content>
+                    </Tooltip.Portal>
+                  </Tooltip.Root>
+                </Tooltip.Provider>
+              )}
             </div>
           </div>
         </Dialog.Content>

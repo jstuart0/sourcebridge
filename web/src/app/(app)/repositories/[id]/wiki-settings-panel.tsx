@@ -58,6 +58,7 @@ import {
 import {
   PlanPreviewModal,
   type PlanModalIntent,
+  type LivingWikiPlan,
 } from "@/components/living-wiki/PlanPreviewModal";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1599,6 +1600,9 @@ function EnabledSummary({
 
   // CA-146: Plan preview modal state. null = closed.
   const [planModalIntent, setPlanModalIntent] = useState<PlanModalIntent | null>(null);
+  // CA-146: fresh plan received from LIVING_WIKI_PLAN_STALE error — passed into
+  // the modal so it can re-render in place without closing. null = not in stale state.
+  const [planFreshPlanFromError, setPlanFreshPlanFromError] = useState<LivingWikiPlan | null>(null);
   // CA-146: per-run page count override (one-shot; reset after run completes).
   const [pageCountOverride, setPageCountOverride] = useState<number | "">("");
 
@@ -1628,6 +1632,7 @@ function EnabledSummary({
     const mode: "OVERVIEW" | "DETAILED" = settings.livingWikiDetailedEnabled
       ? "DETAILED"
       : "OVERVIEW";
+    setPlanFreshPlanFromError(null);
     setPlanModalIntent({ kind: "regenerate", mode });
   };
 
@@ -1636,6 +1641,7 @@ function EnabledSummary({
     const mode: "OVERVIEW" | "DETAILED" = settings.livingWikiDetailedEnabled
       ? "DETAILED"
       : "OVERVIEW";
+    setPlanFreshPlanFromError(null);
     setPlanModalIntent({ kind: "retry", mode });
   };
 
@@ -1680,15 +1686,22 @@ function EnabledSummary({
 
   const handleBuildOverview = () => {
     // CA-146: route through plan preview modal.
+    setPlanFreshPlanFromError(null);
     setPlanModalIntent({ kind: "enable", mode: "OVERVIEW" });
   };
 
   const handleBuildDetailed = () => {
     // CA-146: route through plan preview modal.
+    setPlanFreshPlanFromError(null);
     setPlanModalIntent({ kind: "enable", mode: "DETAILED" });
   };
 
   // CA-146: modal confirm — fires the appropriate mutation based on intent kind.
+  //
+  // The modal is NOT unmounted before the mutation runs. On LIVING_WIKI_PLAN_STALE
+  // we set planFreshPlanFromError so the modal re-renders with the fresh plan and
+  // stale banner; the user must re-review before clicking Build again.
+  // The modal only closes on a successful enqueue or an explicit Cancel.
   const handlePlanModalConfirm = async ({
     selectedPageIds,
     planSignature,
@@ -1699,11 +1712,12 @@ function EnabledSummary({
     const intent = planModalIntent;
     if (!intent) return;
 
-    setPlanModalIntent(null);
+    // Do NOT close the modal here — keep it open until we know the outcome.
     setRegenerating(true);
     setRegenError(null);
 
-    let result: { error?: { message: string }; data?: Record<string, { jobId?: string }> } | undefined;
+    type MutationResult = { error?: { message: string; graphQLErrors?: Array<{ message: string; extensions?: Record<string, unknown> }> }; data?: Record<string, { jobId?: string }> };
+    let result: MutationResult | undefined;
 
     if (intent.kind === "retry") {
       // handleRetry path: re-enable from scratch using enableMutation
@@ -1722,6 +1736,8 @@ function EnabledSummary({
       });
       const jobId = (result?.data as { enableLivingWikiForRepo?: { jobId?: string } })?.enableLivingWikiForRepo?.jobId;
       if (jobId) {
+        setPlanModalIntent(null);
+        setPlanFreshPlanFromError(null);
         setRegenJobId(jobId);
         return;
       }
@@ -1737,12 +1753,30 @@ function EnabledSummary({
       });
       const jobId = (result?.data as { retryLivingWikiJob?: { jobId?: string } })?.retryLivingWikiJob?.jobId;
       if (jobId) {
+        setPlanModalIntent(null);
+        setPlanFreshPlanFromError(null);
         setRegenJobId(jobId);
         return;
       }
     }
 
     if (result?.error) {
+      // Check for LIVING_WIKI_PLAN_STALE — keep modal open, show fresh plan.
+      const staleError = result.error.graphQLErrors?.find(
+        (e) => e.extensions?.["code"] === "LIVING_WIKI_PLAN_STALE",
+      );
+      if (staleError) {
+        const freshPlan = staleError.extensions?.["freshPlan"] as LivingWikiPlan | undefined;
+        if (freshPlan) {
+          setPlanFreshPlanFromError(freshPlan);
+          // Do NOT close the modal; do NOT set regenError.
+          setRegenerating(false);
+          return;
+        }
+      }
+      // Any other error: close modal and surface the error message.
+      setPlanModalIntent(null);
+      setPlanFreshPlanFromError(null);
       setRegenError(result.error.message);
     }
     setRegenerating(false);
@@ -2041,7 +2075,10 @@ function EnabledSummary({
         <PlanPreviewModal
           open={planModalIntent !== null}
           onOpenChange={(open) => {
-            if (!open) setPlanModalIntent(null);
+            if (!open) {
+              setPlanModalIntent(null);
+              setPlanFreshPlanFromError(null);
+            }
           }}
           repositoryId={repoId}
           intent={planModalIntent}
@@ -2053,6 +2090,7 @@ function EnabledSummary({
                 : "Retry"
           }
           pageCountOverride={pageCountOverride !== "" ? pageCountOverride : null}
+          freshPlanFromError={planFreshPlanFromError ?? undefined}
           onConfirm={handlePlanModalConfirm}
         />
       )}

@@ -283,19 +283,19 @@ describe("Build button state", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("onConfirm payload", () => {
-  it("sends selectedPageIds: null + planSignature: null when all non-required pages checked", async () => {
+  it("sends selectedPageIds (all non-required) + planSignature when all non-required pages checked", async () => {
     setupQuerySuccess();
     const { onConfirm } = renderModal();
 
-    // All checked by default
+    // All checked by default — plan is loaded, so always send signature
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Build" }));
     });
 
     await waitFor(() => {
       expect(onConfirm).toHaveBeenCalledWith({
-        selectedPageIds: null,
-        planSignature: null,
+        selectedPageIds: ARCH_PAGES.map((p) => p.id), // [arch-1, arch-2] — all non-required
+        planSignature: "sig-abc123",
       });
     });
   });
@@ -653,6 +653,74 @@ describe("stale-plan handling", () => {
     });
 
     expect(buildBtn).not.toBeDisabled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notice / empty-plan rendering (Fix 3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("notice and empty-plan rendering", () => {
+  function setupQueryWithNotice(notice: string | null, pages: PlanPage[] = []) {
+    vi.mocked(useQuery).mockReturnValue([
+      {
+        fetching: false,
+        data: {
+          previewLivingWikiPlan: {
+            planSignature: "sig-notice",
+            mode: "lw_detailed",
+            modeTooltip: "Detailed mode",
+            summary: "0 of 0",
+            totalPages: pages.length,
+            preCap: pages.length,
+            capSource: "none",
+            capValue: 0,
+            notice,
+            pages,
+          },
+        },
+        error: undefined,
+        stale: false,
+      } as UseQueryState,
+      vi.fn(),
+    ]);
+  }
+
+  it("shows notice when plan.notice is non-null and renders only Cancel button", () => {
+    setupQueryWithNotice("Living Wiki is globally disabled by an administrator.");
+    const { onConfirm } = renderModal();
+
+    // Notice text is shown
+    expect(screen.getByTestId("plan-preview-notice")).toBeInTheDocument();
+    expect(
+      screen.getByText("Living Wiki is globally disabled by an administrator."),
+    ).toBeInTheDocument();
+
+    // Cancel is present
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+
+    // Build button must NOT be present
+    expect(screen.queryByRole("button", { name: "Build" })).toBeNull();
+
+    // onConfirm must never be called (no Build button to click)
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("shows empty-state notice and only Cancel when plan.totalPages === 0 and no notice string", () => {
+    setupQueryWithNotice(null, []); // notice: null, pages: [], totalPages: 0
+    renderModal();
+
+    // Generic empty-state notice must be shown
+    expect(screen.getByTestId("plan-preview-notice")).toBeInTheDocument();
+    expect(
+      screen.getByText("No pages available to build for this repository."),
+    ).toBeInTheDocument();
+
+    // Cancel is present
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+
+    // Build button must NOT be present
+    expect(screen.queryByRole("button", { name: "Build" })).toBeNull();
   });
 });
 
