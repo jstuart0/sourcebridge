@@ -18,6 +18,33 @@ CA-146 (page-count transparency and per-run override).
 
 ### Added
 
+- **`get_symbol_source` and `get_symbol_context` MCP tools** (CA-151).
+  Two new tools close the 2x token tax that agents paid following up
+  `search_symbols` with a separate `Read`. `get_symbol_source` returns a
+  symbol's source bytes plus name/qualified_name/kind/signature/language/line
+  range in a flat JSON shape (`context_lines` clamped `[0, 10]`; `source_note`
+  warning emitted when source exceeds 500 lines). `get_symbol_context` bundles
+  that with first-hop callers, callees (capped at 20 each), and the file's
+  imports (capped at 50) so an agent can ground a single question in one
+  round-trip. Both tools are gated by a new `symbol_source` capability (OSS +
+  Enterprise) and accept a `symbol_id` fast path. When the `call_graph` or
+  `file_imports` capability is disabled, `get_symbol_context` returns the
+  symbol payload with the affected arrays empty and `degraded: true` plus a
+  `degraded_reason` field (reasons joined with `"; "` when both are off) rather
+  than erroring out. Errors flow through the existing structured envelope; a new
+  `REPOSITORY_STALE` constructor surfaces the file-deleted-since-index case with
+  a `refresh_repository` remediation hint. Internal cleanup: the three
+  near-duplicate line-slicing helpers in REST, QA, and GraphQL are consolidated
+  into a new `internal/source/` package exporting `SliceLines(content, start,
+  end)` with 1-based inclusive semantics; a new
+  `TestRegistry_AllMCPToolsExistInBaseTools` test catches drift between the
+  capability registry and the live tool surface. **Behavior change:** the GraphQL
+  `symbolContext` internal helper (`extractSymbolContext`) now returns `""` on
+  non-positive `startLine` instead of clamping to line 1. Callers passing
+  `startLine >= 1` (the only valid range; both call sites at
+  `schema.resolvers.go:616, 1033` use the indexer-provided value which is always
+  `>= 1`) are unaffected.
+
 - **Graceful drain for in-flight Living Wiki cold-starts** (CA-142).
   SIGTERM no longer races with the reaper to kill long-running Living Wiki
   jobs. `BeginDrain` now sets `o.draining = true` on the LLM orchestrator so

@@ -3,8 +3,9 @@
 SourceBridge exposes its indexed repositories as an **MCP server** over HTTP.
 Any MCP client — Codex, Claude Code, Cursor, Claude Desktop, the `mcp-remote`
 proxy — can connect and call tools like `search_symbols`, `explain_code`,
-`get_requirements`, `get_impact_report`, and `get_cliff_notes` against any
-repo indexed in SourceBridge.
+`get_symbol_source`, `get_symbol_context`, `get_requirements`,
+`get_impact_report`, and `get_cliff_notes` against any repo indexed in
+SourceBridge.
 
 This doc covers:
 
@@ -197,15 +198,24 @@ connection forever.
 | `get_subsystems` | List the repo's clusters with representative symbols and cross-cluster call counts | No |
 | `get_subsystem_by_id` | Full member list for a known cluster ID | No |
 | `get_subsystem` | The cluster a given symbol belongs to plus 5 peer symbols | No |
+| `get_symbol_source` | Return a symbol's source bytes plus identity/location/signature | No |
+| `get_symbol_context` | Bundle of source + first-hop callers, callees, and file imports | No |
 
-`search_symbols`, `get_requirements`, `get_impact_report`, and the three
-`get_subsystem*` tools work even if the worker is down. `explain_code`
-returns an error if the worker is unreachable.
+`search_symbols`, `get_requirements`, `get_impact_report`, `get_symbol_source`,
+`get_symbol_context`, and the three `get_subsystem*` tools work even if the
+worker is down. `explain_code` returns an error if the worker is unreachable.
 
 The subsystem tools are gated by a `subsystem_clustering` capability on
 the server. Clustering runs as an async job after each index; while a
 cluster job is in flight, `get_subsystems` returns the previous result
 with `status: "stale"`.
+
+Both `get_symbol_source` and `get_symbol_context` are gated by the
+`symbol_source` capability (enabled on OSS and Enterprise by default). When
+the `call_graph` or `file_imports` capability is disabled on a self-hosted
+instance, `get_symbol_context` still returns the symbol's source but sets
+`degraded: true` and `degraded_reason` in the response, with the affected
+arrays (`callers`/`callees` or `imports`) empty.
 
 ---
 
