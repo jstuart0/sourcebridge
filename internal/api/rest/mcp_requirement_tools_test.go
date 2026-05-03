@@ -4,10 +4,15 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/sourcebridge/sourcebridge/internal/auth"
+	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
 )
@@ -691,5 +696,437 @@ func TestMCP_GetSymbolsForRequirement_Pagination(t *testing.T) {
 	}
 	if tc, _ := result["total_count"].(float64); tc != 3 {
 		t.Errorf("page 1: total_count should be 3, got %v", tc)
+	}
+}
+
+// ===========================================================================
+// Phase 1b — gap-audit tools
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// get_orphan_symbols
+// ---------------------------------------------------------------------------
+
+// TestMCP_GetOrphanSymbols_HappyPath verifies that only symbols with no links
+// are returned; linked symbols (Sym1, Sym2, Sym3) must not appear.
+func TestMCP_GetOrphanSymbols_HappyPath(t *testing.T) {
+	h := newTestHarness(t)
+	fix := seedRequirementLinkingFixture(t, h)
+	sess := h.createSession()
+
+	resp := h.sendRPC(sess, 20, "tools/call", map[string]interface{}{
+		"name": "get_orphan_symbols",
+		"arguments": map[string]interface{}{
+			"repository_id": fix.RepoAID,
+		},
+	})
+
+	result := parseRequirementLinkingResult(t, resp)
+
+	orphans, _ := result["orphan_symbols"].([]interface{})
+	// Sym4 and Sym5 are orphans; Sym1, Sym2, Sym3 are linked.
+	if len(orphans) != 2 {
+		t.Fatalf("expected 2 orphan symbols, got %d: %v", len(orphans), orphans)
+	}
+
+	// Collect orphan IDs and confirm they match expected orphans.
+	gotIDs := make(map[string]bool)
+	for _, o := range orphans {
+		sym := o.(map[string]interface{})
+		id, _ := sym["symbol_id"].(string)
+		gotIDs[id] = true
+		if sym["symbol_name"] == "" {
+			t.Error("symbol_name must not be empty")
+		}
+		if sym["file_path"] == "" {
+			t.Error("file_path must not be empty")
+		}
+	}
+	if !gotIDs[fix.Sym4ID] {
+		t.Errorf("Sym4 (Orphan) should be in orphan_symbols")
+	}
+	if !gotIDs[fix.Sym5ID] {
+		t.Errorf("Sym5 (internalHelper) should be in orphan_symbols")
+	}
+
+	if tc, _ := result["total_count"].(float64); tc != 2 {
+		t.Errorf("total_count: got %v, want 2", tc)
+	}
+}
+
+// TestMCP_GetOrphanSymbols_NoOrphans verifies that when every symbol has at
+// least one link, orphan_symbols is empty and total_count is 0.
+func TestMCP_GetOrphanSymbols_NoOrphans(t *testing.T) {
+	h := newTestHarness(t)
+	fix := seedRequirementLinkingFixture(t, h)
+	sess := h.createSession()
+
+	// Link the two remaining orphan symbols (Sym4 and Sym5) so none are orphans.
+	h.store.StoreLink(fix.RepoAID, &graphstore.StoredLink{
+		RequirementID: fix.Req1ID,
+		SymbolID:      fix.Sym4ID,
+		Confidence:    0.5,
+		Source:        "manual",
+	})
+	h.store.StoreLink(fix.RepoAID, &graphstore.StoredLink{
+		RequirementID: fix.Req2ID,
+		SymbolID:      fix.Sym5ID,
+		Confidence:    0.5,
+		Source:        "manual",
+	})
+
+	resp := h.sendRPC(sess, 21, "tools/call", map[string]interface{}{
+		"name": "get_orphan_symbols",
+		"arguments": map[string]interface{}{
+			"repository_id": fix.RepoAID,
+		},
+	})
+
+	result := parseRequirementLinkingResult(t, resp)
+
+	orphans, _ := result["orphan_symbols"].([]interface{})
+	if len(orphans) != 0 {
+		t.Errorf("expected 0 orphan symbols, got %d", len(orphans))
+	}
+	if tc, _ := result["total_count"].(float64); tc != 0 {
+		t.Errorf("total_count: got %v, want 0", tc)
+	}
+	if result["next_cursor"] != nil {
+		t.Errorf("next_cursor should be null when result is empty, got %v", result["next_cursor"])
+	}
+}
+
+// TestMCP_GetOrphanSymbols_AllOrphans verifies that when no requirements exist
+// (and thus no links), all symbols are returned as orphans.
+func TestMCP_GetOrphanSymbols_AllOrphans(t *testing.T) {
+	h := newTestHarness(t)
+	// Use a fresh harness with the standard fixture but a repo that has
+	// no links seeded at all — create a new repo for this purpose.
+	sess := h.createSession()
+
+	result2 := &indexer.IndexResult{
+		RepoName: "orphan-all-repo",
+		RepoPath: "/tmp/orphan-all-repo",
+		Files: []indexer.FileResult{
+			{
+				Path:     "a.go",
+				Language: "go",
+				Symbols: []indexer.Symbol{
+					{Name: "FuncA", Kind: "function", Language: "go", FilePath: "a.go", StartLine: 1, EndLine: 5},
+					{Name: "FuncB", Kind: "function", Language: "go", FilePath: "a.go", StartLine: 6, EndLine: 10},
+				},
+			},
+		},
+	}
+	repo, err := h.store.StoreIndexResult(result2)
+	if err != nil {
+		t.Fatalf("StoreIndexResult: %v", err)
+	}
+	// No requirements, no links — all symbols are orphans.
+
+	resp := h.sendRPC(sess, 22, "tools/call", map[string]interface{}{
+		"name": "get_orphan_symbols",
+		"arguments": map[string]interface{}{
+			"repository_id": repo.ID,
+		},
+	})
+
+	result := parseRequirementLinkingResult(t, resp)
+	orphans, _ := result["orphan_symbols"].([]interface{})
+	if len(orphans) != 2 {
+		t.Fatalf("expected 2 orphan symbols (all symbols are orphans), got %d", len(orphans))
+	}
+	if tc, _ := result["total_count"].(float64); tc != 2 {
+		t.Errorf("total_count: got %v, want 2", tc)
+	}
+}
+
+// TestMCP_GetOrphanSymbols_Pagination seeds more than 50 orphan symbols and
+// verifies that:
+//   - Page 1 returns exactly 50 items with next_cursor set.
+//   - Page 2 returns the remainder with next_cursor null.
+func TestMCP_GetOrphanSymbols_Pagination(t *testing.T) {
+	h := newTestHarness(t)
+	sess := h.createSession()
+
+	// Build a repo with 60 symbols, none linked.
+	const symCount = 60
+	syms := make([]indexer.Symbol, symCount)
+	for i := range syms {
+		syms[i] = indexer.Symbol{
+			Name:      fmt.Sprintf("OrphanFunc%03d", i),
+			Kind:      "function",
+			Language:  "go",
+			FilePath:  "orphans.go",
+			StartLine: i*3 + 1,
+			EndLine:   i*3 + 2,
+		}
+	}
+	result := &indexer.IndexResult{
+		RepoName: "orphan-paginate-repo",
+		RepoPath: "/tmp/orphan-paginate-repo",
+		Files: []indexer.FileResult{
+			{Path: "orphans.go", Language: "go", Symbols: syms},
+		},
+	}
+	repo, err := h.store.StoreIndexResult(result)
+	if err != nil {
+		t.Fatalf("StoreIndexResult: %v", err)
+	}
+
+	// Page 1: default limit (50).
+	resp1 := h.sendRPC(sess, 23, "tools/call", map[string]interface{}{
+		"name": "get_orphan_symbols",
+		"arguments": map[string]interface{}{
+			"repository_id": repo.ID,
+		},
+	})
+	r1 := parseRequirementLinkingResult(t, resp1)
+	page1, _ := r1["orphan_symbols"].([]interface{})
+	if len(page1) != 50 {
+		t.Errorf("page 1: expected 50 orphans, got %d", len(page1))
+	}
+	if tc, _ := r1["total_count"].(float64); tc != symCount {
+		t.Errorf("page 1: total_count: got %v, want %d", tc, symCount)
+	}
+	cursor, _ := r1["next_cursor"].(string)
+	if cursor == "" {
+		t.Fatalf("page 1: expected next_cursor to be set, got nil/empty")
+	}
+
+	// Page 2: follow the cursor.
+	resp2 := h.sendRPC(sess, 24, "tools/call", map[string]interface{}{
+		"name": "get_orphan_symbols",
+		"arguments": map[string]interface{}{
+			"repository_id": repo.ID,
+			"cursor":        cursor,
+		},
+	})
+	r2 := parseRequirementLinkingResult(t, resp2)
+	page2, _ := r2["orphan_symbols"].([]interface{})
+	if len(page2) != symCount-50 {
+		t.Errorf("page 2: expected %d orphans, got %d", symCount-50, len(page2))
+	}
+	if r2["next_cursor"] != nil {
+		t.Errorf("page 2: next_cursor should be null (last page), got %v", r2["next_cursor"])
+	}
+}
+
+// TestMCP_GetOrphanSymbols_LimitClamp verifies that a limit above 200 is
+// silently clamped to 200 (matches the Phase 0 / CA-151 silent-clamp convention).
+func TestMCP_GetOrphanSymbols_LimitClamp(t *testing.T) {
+	h := newTestHarness(t)
+	sess := h.createSession()
+
+	// Build a repo with 250 unlinked symbols.
+	const symCount = 250
+	syms := make([]indexer.Symbol, symCount)
+	for i := range syms {
+		syms[i] = indexer.Symbol{
+			Name:      fmt.Sprintf("ClampFunc%03d", i),
+			Kind:      "function",
+			Language:  "go",
+			FilePath:  "clamp.go",
+			StartLine: i*2 + 1,
+			EndLine:   i*2 + 2,
+		}
+	}
+	result := &indexer.IndexResult{
+		RepoName: "clamp-test-repo",
+		RepoPath: "/tmp/clamp-test-repo",
+		Files: []indexer.FileResult{
+			{Path: "clamp.go", Language: "go", Symbols: syms},
+		},
+	}
+	repo, err := h.store.StoreIndexResult(result)
+	if err != nil {
+		t.Fatalf("StoreIndexResult: %v", err)
+	}
+
+	resp := h.sendRPC(sess, 25, "tools/call", map[string]interface{}{
+		"name": "get_orphan_symbols",
+		"arguments": map[string]interface{}{
+			"repository_id": repo.ID,
+			"limit":         500,
+		},
+	})
+
+	r := parseRequirementLinkingResult(t, resp)
+	page, _ := r["orphan_symbols"].([]interface{})
+	if len(page) != 200 {
+		t.Errorf("limit clamp: expected 200 results (capped from 500), got %d", len(page))
+	}
+	if tc, _ := r["total_count"].(float64); tc != symCount {
+		t.Errorf("total_count should reflect full orphan count %d, got %v", symCount, tc)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// get_uncovered_requirements
+// ---------------------------------------------------------------------------
+
+// TestMCP_GetUncoveredRequirements_HappyPath seeds requirements with a mix of
+// covered and uncovered; verifies only uncovered ones are returned.
+func TestMCP_GetUncoveredRequirements_HappyPath(t *testing.T) {
+	h := newTestHarness(t)
+	fix := seedRequirementLinkingFixture(t, h)
+	sess := h.createSession()
+
+	// Fixture: Req1 → Sym1+Sym2 (covered), Req2 → Sym3 (covered), Req3 → none (uncovered).
+	resp := h.sendRPC(sess, 30, "tools/call", map[string]interface{}{
+		"name": "get_uncovered_requirements",
+		"arguments": map[string]interface{}{
+			"repository_id": fix.RepoAID,
+		},
+	})
+
+	result := parseRequirementLinkingResult(t, resp)
+
+	uncovered, _ := result["uncovered_requirements"].([]interface{})
+	if len(uncovered) != 1 {
+		t.Fatalf("expected 1 uncovered requirement, got %d: %v", len(uncovered), uncovered)
+	}
+
+	req0 := uncovered[0].(map[string]interface{})
+	if req0["id"] != fix.Req3ID {
+		t.Errorf("uncovered req id: got %v, want %s", req0["id"], fix.Req3ID)
+	}
+	if req0["title"] != "Uncovered requirement" {
+		t.Errorf("title: got %v, want 'Uncovered requirement'", req0["title"])
+	}
+	if req0["external_id"] != "TEST-3" {
+		t.Errorf("external_id: got %v, want TEST-3", req0["external_id"])
+	}
+
+	if tc, _ := result["total_count"].(float64); tc != 1 {
+		t.Errorf("total_count: got %v, want 1", tc)
+	}
+	if st, _ := result["scan_truncated"].(bool); st {
+		t.Errorf("scan_truncated should be false for a small fixture")
+	}
+}
+
+// TestMCP_GetUncoveredRequirements_NoUncovered verifies that when every
+// requirement is linked, uncovered_requirements is empty.
+func TestMCP_GetUncoveredRequirements_NoUncovered(t *testing.T) {
+	h := newTestHarness(t)
+	fix := seedRequirementLinkingFixture(t, h)
+	sess := h.createSession()
+
+	// Link Req3 (the previously uncovered requirement) to Sym4.
+	h.store.StoreLink(fix.RepoAID, &graphstore.StoredLink{
+		RequirementID: fix.Req3ID,
+		SymbolID:      fix.Sym4ID,
+		Confidence:    0.5,
+		Source:        "manual",
+	})
+
+	resp := h.sendRPC(sess, 31, "tools/call", map[string]interface{}{
+		"name": "get_uncovered_requirements",
+		"arguments": map[string]interface{}{
+			"repository_id": fix.RepoAID,
+		},
+	})
+
+	result := parseRequirementLinkingResult(t, resp)
+
+	uncovered, _ := result["uncovered_requirements"].([]interface{})
+	if len(uncovered) != 0 {
+		t.Errorf("expected 0 uncovered requirements, got %d", len(uncovered))
+	}
+	if tc, _ := result["total_count"].(float64); tc != 0 {
+		t.Errorf("total_count: got %v, want 0", tc)
+	}
+	if result["next_cursor"] != nil {
+		t.Errorf("next_cursor should be null, got %v", result["next_cursor"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMCP_GetUncoveredRequirements_ScanTruncated
+//
+// Strategy: the production constant maxUncoveredReqScan = 10000 makes it
+// impractical to seed 10001 real rows in a test. Instead we use a thin
+// GraphStore wrapper (truncatingGraphStore) that satisfies the GraphStore
+// interface by delegating all calls to the underlying *Store except for
+// GetRequirements, which reports a total one greater than maxUncoveredReqScan
+// when the caller requests maxUncoveredReqScan items. This exercises the
+// exact truncation branch in callGetUncoveredRequirements without seeding
+// any extra rows.
+// ---------------------------------------------------------------------------
+
+// truncatingGraphStore wraps a *graphstore.Store and overrides GetRequirements
+// to simulate a repo whose total requirement count exceeds maxUncoveredReqScan.
+type truncatingGraphStore struct {
+	graphstore.GraphStore
+}
+
+func (s truncatingGraphStore) GetRequirements(repoID string, limit, offset int) ([]*graphstore.StoredRequirement, int) {
+	reqs, total := s.GraphStore.GetRequirements(repoID, limit, offset)
+	// Simulate a store that has one more requirement than the scan cap when
+	// the caller asks for exactly maxUncoveredReqScan rows at offset 0.
+	if limit == maxUncoveredReqScan && offset == 0 {
+		total = maxUncoveredReqScan + 1
+	}
+	return reqs, total
+}
+
+func TestMCP_GetUncoveredRequirements_ScanTruncated(t *testing.T) {
+	realStore := graphstore.NewStore()
+
+	// Seed a repo with a handful of requirements (no links — they will all be
+	// "uncovered" in the filtered result, but that's irrelevant to this test).
+	repo, err := realStore.StoreIndexResult(&indexer.IndexResult{
+		RepoName: "truncated-req-repo",
+		RepoPath: "/tmp/truncated-req-repo",
+	})
+	if err != nil {
+		t.Fatalf("StoreIndexResult: %v", err)
+	}
+	realStore.StoreRequirement(repo.ID, &graphstore.StoredRequirement{
+		ID:    "tr-req-1",
+		Title: "Truncation test requirement",
+	})
+
+	// Wire the handler with the wrapping store.
+	wrappedStore := truncatingGraphStore{realStore}
+	worker := &mockWorkerCaller{available: true}
+	ks := newMockKnowledgeStore()
+	h := newMCPHandlerWithEdition(wrappedStore, ks, worker, "", 1*time.Hour, 30*time.Second, 100, nil, capabilities.EditionOSS)
+
+	// Create a session.
+	chans := &mcpLocalChans{
+		eventCh: make(chan []byte, 64),
+		done:    make(chan struct{}),
+	}
+	sess := &mcpSession{
+		id:          "trunc-session-1",
+		claims:      &auth.Claims{UserID: "user-1", OrgID: "org-1"},
+		initialized: true,
+		createdAt:   time.Now(),
+		lastUsed:    time.Now(),
+		chans:       chans,
+	}
+	_ = h.sessionStore.Save(context.Background(), sess.toState(), time.Hour)
+	h.localChans.Store(sess.id, chans)
+
+	th := &mcpTestHarness{
+		handler: h,
+		store:   realStore,
+		worker:  worker,
+		ks:      ks,
+		repoID:  repo.ID,
+	}
+
+	resp := th.sendRPC(sess, 32, "tools/call", map[string]interface{}{
+		"name": "get_uncovered_requirements",
+		"arguments": map[string]interface{}{
+			"repository_id": repo.ID,
+		},
+	})
+
+	result := parseRequirementLinkingResult(t, resp)
+	if st, _ := result["scan_truncated"].(bool); !st {
+		t.Errorf("scan_truncated should be true when store total > maxUncoveredReqScan")
 	}
 }

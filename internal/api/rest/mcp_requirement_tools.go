@@ -11,6 +11,7 @@ import (
 )
 
 // Phase 1a — requirement-linking tools.
+// Phase 1b — gap-audit tools.
 //
 // Two fast-read tools that expose the bidirectional traceability graph
 // between code symbols and tracked requirements:
@@ -18,15 +19,33 @@ import (
 //   get_requirements_for_symbol — given a symbol, return all requirements
 //     linked to it. The inverse direction is get_symbols_for_requirement.
 //     Together they let an agent answer "what does this function
-//     implement?" and "which functions implement this requirement?"
+//     implements?" and "which functions implement this requirement?"
 //     without an LLM call.
 //
 //   get_symbols_for_requirement — given a requirement (by UUID or
 //     external ID), return all symbols linked to it.
 //
-// Both tools share the requirementSummary and symbolSummary structs
+// Two O(n) gap-audit tools (Phase 1b):
+//
+//   get_orphan_symbols — repo-wide scan returning symbols with no linked
+//     requirement. Cursor-paginated over the post-filter result set.
+//
+//   get_uncovered_requirements — repo-wide scan returning requirements
+//     with no linked symbol. Cursor-paginated. Hard-caps the scan at
+//     maxUncoveredReqScan rows; sets scan_truncated when hit.
+//
+// All four tools share the requirementSummary and symbolSummary structs
 // defined here. Phases 2c, 2d, and 3 reuse these structs to avoid
 // duplicating the traceability field set.
+
+// maxUncoveredReqScan is the maximum number of requirements loaded from the
+// store in a single get_uncovered_requirements scan. Repos with more
+// requirements than this threshold still return partial results, but
+// scan_truncated is set to true in the response so callers know the result
+// set is incomplete.
+//
+// Named constant per dexter L1 — never use the raw number inline.
+const maxUncoveredReqScan = 10000
 
 // ---------------------------------------------------------------------------
 // Shared response sub-structs
@@ -57,9 +76,8 @@ type symbolSummary struct {
 // Tool definitions
 // ---------------------------------------------------------------------------
 
-// requirementToolDefs returns the tool definitions for the requirement-linking
-// tools. Phase 1b will add the gap-audit tool defs (get_orphan_symbols,
-// get_uncovered_requirements) here once that phase ships.
+// requirementToolDefs returns the tool definitions for the Phase 1a
+// requirement-linking tools.
 func (h *mcpHandler) requirementToolDefs() []mcpToolDefinition {
 	return []mcpToolDefinition{
 		{
@@ -371,4 +389,201 @@ func (h *mcpHandler) resolveRequirement(repoID, requirementID string) *graphstor
 func registerRequirementLinkingTools(h *mcpHandler) {
 	h.registerTool("get_requirements_for_symbol", noCtxHandler((*mcpHandler).callGetRequirementsForSymbol))
 	h.registerTool("get_symbols_for_requirement", noCtxHandler((*mcpHandler).callGetSymbolsForRequirement))
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1b — gap-audit tools
+// ---------------------------------------------------------------------------
+
+// gapAuditToolDefs returns the tool definitions for the Phase 1b gap-audit
+// tools. Called from baseTools() alongside requirementToolDefs.
+func (h *mcpHandler) gapAuditToolDefs() []mcpToolDefinition {
+	paginationProps := paginationToolProps(50, 200)
+	return []mcpToolDefinition{
+		{
+			Name: "get_orphan_symbols",
+			Description: "Returns symbols with no linked requirements (coverage gap: code not traced to any spec). " +
+				"Each page performs a full repo scan — the filtering step cannot be pushed into the store index. " +
+				"Use `limit` to set a single-page budget. " +
+				"For repos with >5K symbols, consider requesting a large single page rather than paginating, " +
+				"to avoid paying the scan cost repeatedly.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": mergeMaps(map[string]interface{}{
+					"repository_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Repository ID",
+					},
+				}, paginationProps),
+				"required": []string{"repository_id"},
+			},
+		},
+		{
+			Name: "get_uncovered_requirements",
+			Description: "Returns requirements with no linked symbol (coverage gap: spec not traced to any code). " +
+				"Each page performs a full repo scan (capped at " + fmt.Sprintf("%d", maxUncoveredReqScan) + " requirements). " +
+				"If the repo has more requirements than the scan cap, `scan_truncated` is set to true. " +
+				"For repos with >5K requirements, consider requesting a large single page rather than paginating, " +
+				"to avoid paying the scan cost repeatedly.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": mergeMaps(map[string]interface{}{
+					"repository_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Repository ID",
+					},
+				}, paginationProps),
+				"required": []string{"repository_id"},
+			},
+		},
+	}
+}
+
+// mergeMaps returns a shallow merge of two map[string]interface{} values.
+// Keys in b overwrite keys in a. Used to compose JSON schema fragments.
+func mergeMaps(a, b map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(a)+len(b))
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// get_orphan_symbols
+// ---------------------------------------------------------------------------
+
+func (h *mcpHandler) callGetOrphanSymbols(session *mcpSession, args json.RawMessage) (interface{}, error) {
+	var params struct {
+		RepositoryID string `json:"repository_id"`
+		paginationArgs
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return nil, errInvalidArguments(err.Error())
+	}
+
+	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+		return nil, err
+	}
+
+	offset, err := decodeCursor(params.Cursor)
+	if err != nil {
+		return nil, errInvalidArguments(err.Error())
+	}
+
+	// Full repo scan — limit=0, offset=0 fetches all symbols. The second
+	// return value (total before pagination) is discarded because we need the
+	// post-filter count, not the raw symbol count.
+	allSyms, _ := h.store.GetSymbols(params.RepositoryID, nil, nil, 0, 0)
+
+	// Filter to symbols with no non-rejected links.
+	orphans := make([]*graphstore.StoredSymbol, 0)
+	for _, sym := range allSyms {
+		links := h.store.GetLinksForSymbol(sym.ID, false /* includeRejected */)
+		if len(links) == 0 {
+			orphans = append(orphans, sym)
+		}
+	}
+
+	// Cursor-paginate the post-filter result. Silent clamp to cap=200.
+	page, nextCursor, total := paginateSlice(orphans, offset, params.Limit, 50, 200)
+
+	summaries := make([]symbolSummary, 0, len(page))
+	for _, sym := range page {
+		summaries = append(summaries, symbolSummary{
+			SymbolID:   sym.ID,
+			SymbolName: sym.Name,
+			FilePath:   sym.FilePath,
+			Kind:       sym.Kind,
+			Language:   sym.Language,
+		})
+	}
+
+	return map[string]interface{}{
+		"orphan_symbols": summaries,
+		"total_count":    total,
+		"next_cursor":    nullableString(nextCursor),
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// get_uncovered_requirements
+// ---------------------------------------------------------------------------
+
+func (h *mcpHandler) callGetUncoveredRequirements(session *mcpSession, args json.RawMessage) (interface{}, error) {
+	var params struct {
+		RepositoryID string `json:"repository_id"`
+		paginationArgs
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return nil, errInvalidArguments(err.Error())
+	}
+
+	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+		return nil, err
+	}
+
+	offset, err := decodeCursor(params.Cursor)
+	if err != nil {
+		return nil, errInvalidArguments(err.Error())
+	}
+
+	// Fetch up to maxUncoveredReqScan requirements. The second return value
+	// is the total number of requirements in the repo (before our limit),
+	// which lets us detect truncation without a separate COUNT query.
+	reqs, totalInStore := h.store.GetRequirements(params.RepositoryID, maxUncoveredReqScan, 0)
+	scanTruncated := totalInStore > maxUncoveredReqScan
+
+	// Filter to requirements with no non-rejected links.
+	uncovered := make([]*graphstore.StoredRequirement, 0)
+	for _, req := range reqs {
+		links := h.store.GetLinksForRequirement(req.ID, false /* includeRejected */)
+		if len(links) == 0 {
+			uncovered = append(uncovered, req)
+		}
+	}
+
+	// Cursor-paginate the post-filter result. Silent clamp to cap=200.
+	page, nextCursor, total := paginateSlice(uncovered, offset, params.Limit, 50, 200)
+
+	summaries := make([]requirementSummary, 0, len(page))
+	for _, req := range page {
+		summaries = append(summaries, requirementSummary{
+			ID:         req.ID,
+			ExternalID: req.ExternalID,
+			Title:      req.Title,
+			Priority:   req.Priority,
+		})
+	}
+
+	return map[string]interface{}{
+		"uncovered_requirements": summaries,
+		"total_count":            total,
+		"next_cursor":            nullableString(nextCursor),
+		"scan_truncated":         scanTruncated,
+	}, nil
+}
+
+// nullableString returns nil for an empty string so the JSON output is null
+// rather than "" for next_cursor when there is no next page.
+func nullableString(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// ---------------------------------------------------------------------------
+// registerGapAuditTools
+// ---------------------------------------------------------------------------
+
+// registerGapAuditTools registers the Phase 1b gap-audit tools into the
+// handler's dispatch map. Called from newMCPHandlerWithEdition after
+// registerRequirementLinkingTools.
+func registerGapAuditTools(h *mcpHandler) {
+	h.registerTool("get_orphan_symbols", noCtxHandler((*mcpHandler).callGetOrphanSymbols))
+	h.registerTool("get_uncovered_requirements", noCtxHandler((*mcpHandler).callGetUncoveredRequirements))
 }

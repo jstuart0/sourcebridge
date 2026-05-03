@@ -164,6 +164,15 @@ var Registry = []Capability{
 		LatencyClass: "fast_read",
 	},
 
+	// ---- Gap audit (Phase 1b, CA-153) ----
+	{
+		Name:         "gap_audit",
+		Description:  "O(n) repo-wide gap scans: orphan symbols (code with no linked requirement) and uncovered requirements (spec with no linked code).",
+		Editions:     []Edition{EditionOSS, EditionEnterprise},
+		MCPToolNames: []string{"get_orphan_symbols", "get_uncovered_requirements"},
+		LatencyClass: "fast_read",
+	},
+
 	// ---- Subsystem clustering ----
 	{
 		Name:         "subsystem_clustering",

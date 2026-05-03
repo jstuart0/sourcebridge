@@ -535,6 +535,7 @@ func newMCPHandlerWithEdition(store graphstore.GraphStore, ks knowledge.Knowledg
 	h.toolDispatch = make(map[string]mcpToolHandlerFunc)
 	registerCoreTools(h)
 	registerRequirementLinkingTools(h)
+	registerGapAuditTools(h)
 
 	// Start pod-local chans reaper — TTL cleanup of session state itself is
 	// handled by sessionStore (Redis TTL, or the memory store's own reaper).
@@ -1137,6 +1138,7 @@ func (h *mcpHandler) baseTools() []mcpToolDefinition {
 	tools = append(tools, h.lifecycleToolDefs()...)
 	tools = append(tools, h.compoundToolDefs()...)
 	tools = append(tools, h.requirementToolDefs()...)
+	tools = append(tools, h.gapAuditToolDefs()...)
 	tools = append(tools, h.crossRepoToolDef())
 	tools = append(tools, h.clusteringToolDefs()...)
 	// Phase 1.D — record_change. Only surfaced when the change-watch
