@@ -4542,11 +4542,6 @@ func (r *queryResolver) RepositoriesUsingSink(ctx context.Context, integrationNa
 	return out, nil
 }
 
-// PreviewLivingWikiPlan is the resolver for the previewLivingWikiPlan field.
-func (r *queryResolver) PreviewLivingWikiPlan(ctx context.Context, repositoryID string, mode *LivingWikiBuildMode, pageCountOverride *int) (*LivingWikiPlan, error) {
-	panic(fmt.Errorf("not implemented: PreviewLivingWikiPlan - previewLivingWikiPlan"))
-}
-
 // Files is the resolver for the files field.
 func (r *repositoryResolver) Files(ctx context.Context, obj *Repository, limit *int, offset *int, path *string) (*FileConnection, error) {
 	store := r.getStore(ctx)
