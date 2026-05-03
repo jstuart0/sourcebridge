@@ -513,6 +513,8 @@ func TestMCP_ToolsList(t *testing.T) {
 		"review_diff_against_requirements", "impact_summary", "onboard_new_contributor",
 		// CA-153 Phase 1a requirement-linking tools
 		"get_requirements_for_symbol", "get_symbols_for_requirement",
+		// CA-153 Phase 2d diff→requirements tool
+		"get_changed_requirements",
 		// CA-153 Phase 1b gap-audit tools
 		"get_orphan_symbols", "get_uncovered_requirements",
 		// CA-153 Phase 2b field guide tool

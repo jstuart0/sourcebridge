@@ -7,6 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1128,5 +1131,446 @@ func TestMCP_GetUncoveredRequirements_ScanTruncated(t *testing.T) {
 	result := parseRequirementLinkingResult(t, resp)
 	if st, _ := result["scan_truncated"].(bool); !st {
 		t.Errorf("scan_truncated should be true when store total > maxUncoveredReqScan")
+	}
+}
+
+// ===========================================================================
+// Phase 2d — get_changed_requirements
+// ===========================================================================
+
+// seedChangedRequirementsFixture creates a small repository with:
+//   - "service.go" — HandleCreate (linked to Req1), HandleDelete (linked to Req1+Req2)
+//   - "utils.go"   — ParseID (linked to Req2), FormatOutput (NO links — unlinked)
+//   - Req1, Req2, Req3 (Req3 has no symbol links — uncovered)
+//
+// Returns the repo ID plus the fixture IDs needed by the tests.
+type changedReqsFixture struct {
+	RepoID         string
+	Req1ID         string
+	Req2ID         string
+	Req3ID         string
+	HandleCreateID string
+	HandleDeleteID string
+	ParseIDSymID   string
+	FormatOutputID string
+}
+
+func seedChangedReqsFixture(t *testing.T, h *mcpTestHarness) changedReqsFixture {
+	t.Helper()
+
+	result := &indexer.IndexResult{
+		RepoName: "changed-reqs-repo",
+		RepoPath: "/tmp/changed-reqs-repo",
+		Files: []indexer.FileResult{
+			{
+				Path:     "service.go",
+				Language: "go",
+				Symbols: []indexer.Symbol{
+					{Name: "HandleCreate", Kind: "function", Language: "go",
+						FilePath: "service.go", StartLine: 1, EndLine: 20},
+					{Name: "HandleDelete", Kind: "function", Language: "go",
+						FilePath: "service.go", StartLine: 21, EndLine: 40},
+				},
+			},
+			{
+				Path:     "utils.go",
+				Language: "go",
+				Symbols: []indexer.Symbol{
+					{Name: "ParseID", Kind: "function", Language: "go",
+						FilePath: "utils.go", StartLine: 1, EndLine: 15},
+					{Name: "FormatOutput", Kind: "function", Language: "go",
+						FilePath: "utils.go", StartLine: 16, EndLine: 30},
+				},
+			},
+		},
+	}
+	repo, err := h.store.ReplaceIndexResult(h.repoID, result)
+	if err != nil {
+		t.Fatalf("ReplaceIndexResult: %v", err)
+	}
+	h.repoID = repo.ID
+
+	handleCreateID := lookupSymID(t, h, repo.ID, "service.go", "HandleCreate")
+	handleDeleteID := lookupSymID(t, h, repo.ID, "service.go", "HandleDelete")
+	parseIDSymID := lookupSymID(t, h, repo.ID, "utils.go", "ParseID")
+	formatOutputID := lookupSymID(t, h, repo.ID, "utils.go", "FormatOutput")
+
+	h.store.StoreRequirement(repo.ID, &graphstore.StoredRequirement{
+		ID: "cr-req-1", ExternalID: "CR-1", Title: "Create endpoint", Priority: "high",
+	})
+	h.store.StoreRequirement(repo.ID, &graphstore.StoredRequirement{
+		ID: "cr-req-2", ExternalID: "CR-2", Title: "Delete and parse", Priority: "medium",
+	})
+	h.store.StoreRequirement(repo.ID, &graphstore.StoredRequirement{
+		ID: "cr-req-3", ExternalID: "CR-3", Title: "Uncovered req", Priority: "low",
+	})
+
+	req1 := h.store.GetRequirementByExternalID(repo.ID, "CR-1")
+	req2 := h.store.GetRequirementByExternalID(repo.ID, "CR-2")
+	req3 := h.store.GetRequirementByExternalID(repo.ID, "CR-3")
+	if req1 == nil || req2 == nil || req3 == nil {
+		t.Fatal("failed to retrieve seeded requirements")
+	}
+
+	// HandleCreate → Req1
+	h.store.StoreLink(repo.ID, &graphstore.StoredLink{
+		RequirementID: req1.ID, SymbolID: handleCreateID, Confidence: 0.9, Source: "semantic",
+	})
+	// HandleDelete → Req1 AND Req2
+	h.store.StoreLink(repo.ID, &graphstore.StoredLink{
+		RequirementID: req1.ID, SymbolID: handleDeleteID, Confidence: 0.7, Source: "semantic",
+	})
+	h.store.StoreLink(repo.ID, &graphstore.StoredLink{
+		RequirementID: req2.ID, SymbolID: handleDeleteID, Confidence: 0.8, Source: "comment",
+	})
+	// ParseID → Req2
+	h.store.StoreLink(repo.ID, &graphstore.StoredLink{
+		RequirementID: req2.ID, SymbolID: parseIDSymID, Confidence: 0.85, Source: "comment",
+	})
+	// FormatOutput — no links (unlinked touched symbol case)
+
+	return changedReqsFixture{
+		RepoID:         repo.ID,
+		Req1ID:         req1.ID,
+		Req2ID:         req2.ID,
+		Req3ID:         req3.ID,
+		HandleCreateID: handleCreateID,
+		HandleDeleteID: handleDeleteID,
+		ParseIDSymID:   parseIDSymID,
+		FormatOutputID: formatOutputID,
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HappyPath — file-anchored input
+// ---------------------------------------------------------------------------
+
+func TestMCP_GetChangedRequirements_HappyPath_Files(t *testing.T) {
+	h := newTestHarness(t)
+	fix := seedChangedReqsFixture(t, h)
+	sess := h.createSession()
+
+	// Touch service.go only — HandleCreate (Req1) and HandleDelete (Req1+Req2).
+	resp := h.sendRPC(sess, 200, "tools/call", map[string]interface{}{
+		"name": "get_changed_requirements",
+		"arguments": map[string]interface{}{
+			"repository_id": fix.RepoID,
+			"files":         []string{"service.go"},
+		},
+	})
+
+	result := parseRequirementLinkingResult(t, resp)
+
+	changedReqs, _ := result["changed_requirements"].([]interface{})
+	// Req1 is reachable from both HandleCreate and HandleDelete;
+	// Req2 is reachable from HandleDelete. Req3 has no links → not in result.
+	if len(changedReqs) != 2 {
+		t.Fatalf("expected 2 changed requirements, got %d: %v", len(changedReqs), changedReqs)
+	}
+
+	// Collect returned req IDs.
+	gotIDs := map[string]bool{}
+	for _, r := range changedReqs {
+		req := r.(map[string]interface{})
+		id, _ := req["id"].(string)
+		gotIDs[id] = true
+
+		// linked_to_symbols must be populated.
+		linked, _ := req["linked_to_symbols"].([]interface{})
+		if len(linked) == 0 {
+			t.Errorf("requirement %s: linked_to_symbols must not be empty", id)
+		}
+	}
+	if !gotIDs[fix.Req1ID] {
+		t.Errorf("Req1 should be in changed_requirements")
+	}
+	if !gotIDs[fix.Req2ID] {
+		t.Errorf("Req2 should be in changed_requirements")
+	}
+
+	// No unlinked touched symbols — both service.go symbols have links.
+	unlinked, _ := result["unlinked_touched_symbols"].([]interface{})
+	if len(unlinked) != 0 {
+		t.Errorf("expected 0 unlinked_touched_symbols, got %d: %v", len(unlinked), unlinked)
+	}
+
+	// Echo fields must be present.
+	if got, _ := result["repository_id"].(string); got != fix.RepoID {
+		t.Errorf("repository_id: got %q, want %q", got, fix.RepoID)
+	}
+	files, _ := result["files"].([]interface{})
+	if len(files) != 1 {
+		t.Errorf("files echo: expected 1 entry, got %v", files)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HappyPath — commit_range input (real git repo in TempDir)
+// ---------------------------------------------------------------------------
+
+func TestMCP_GetChangedRequirements_HappyPath_CommitRange(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available in PATH; skipping commit_range test")
+	}
+
+	repoDir := t.TempDir()
+
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	runGit("init", "-b", "main")
+	runGit("config", "user.email", "test@test.test")
+	runGit("config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoDir, "service.go"), []byte("package pkg\n"), 0644); err != nil {
+		t.Fatalf("WriteFile service.go: %v", err)
+	}
+	runGit("add", ".")
+	runGit("commit", "-m", "add service.go")
+
+	h := newTestHarness(t)
+	fix := seedChangedReqsFixture(t, h)
+
+	// Point the stored repo's clone path to our real git checkout.
+	h.store.UpdateRepositoryMeta(fix.RepoID, graphstore.RepositoryMeta{
+		ClonePath: repoDir,
+	})
+
+	sess := h.createSession()
+
+	resp := h.sendRPC(sess, 201, "tools/call", map[string]interface{}{
+		"name": "get_changed_requirements",
+		"arguments": map[string]interface{}{
+			"repository_id": fix.RepoID,
+			"commit_range":  "HEAD~0..HEAD",
+		},
+	})
+
+	// The git root is valid — call must succeed.
+	result := parseRequirementLinkingResult(t, resp)
+
+	// Response must echo the commit_range.
+	if got, _ := result["commit_range"].(string); got != "HEAD~0..HEAD" {
+		t.Errorf("commit_range: got %q, want %q", got, "HEAD~0..HEAD")
+	}
+	// The git commit touches service.go, which contains HandleCreate and HandleDelete.
+	// Both are linked to Req1; HandleDelete is also linked to Req2.
+	changedReqs, _ := result["changed_requirements"].([]interface{})
+	if len(changedReqs) == 0 {
+		t.Errorf("expected at least one changed requirement via commit_range, got 0")
+	}
+	// Standard shape keys must be present.
+	if _, ok := result["unlinked_touched_symbols"]; !ok {
+		t.Error("unlinked_touched_symbols key missing from response")
+	}
+	if _, ok := result["_meta"]; !ok {
+		t.Error("_meta key missing from response")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// NoTouchedSymbols — empty file list → empty arrays, no error
+// ---------------------------------------------------------------------------
+
+func TestMCP_GetChangedRequirements_NoTouchedSymbols(t *testing.T) {
+	h := newTestHarness(t)
+	fix := seedChangedReqsFixture(t, h)
+	sess := h.createSession()
+
+	// Pass a file that exists in the repo but has no symbols, or doesn't exist.
+	// Using a non-existent file gives us zero symbols without an error.
+	resp := h.sendRPC(sess, 202, "tools/call", map[string]interface{}{
+		"name": "get_changed_requirements",
+		"arguments": map[string]interface{}{
+			"repository_id": fix.RepoID,
+			"files":         []string{"nonexistent_file.go"},
+		},
+	})
+
+	result := parseRequirementLinkingResult(t, resp)
+
+	changedReqs, _ := result["changed_requirements"].([]interface{})
+	if len(changedReqs) != 0 {
+		t.Errorf("expected 0 changed_requirements, got %d", len(changedReqs))
+	}
+	unlinked, _ := result["unlinked_touched_symbols"].([]interface{})
+	if len(unlinked) != 0 {
+		t.Errorf("expected 0 unlinked_touched_symbols, got %d", len(unlinked))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AllUnlinked — touched symbols with no requirement links
+// ---------------------------------------------------------------------------
+
+func TestMCP_GetChangedRequirements_AllUnlinked(t *testing.T) {
+	h := newTestHarness(t)
+	fix := seedChangedReqsFixture(t, h)
+	sess := h.createSession()
+
+	// utils.go: ParseID (linked to Req2) and FormatOutput (no links).
+	// Touch ONLY the file containing FormatOutput — but ParseID is also in
+	// utils.go, so we seed a repo with a file that has only an unlinked symbol.
+	unlinkedOnlyResult := &indexer.IndexResult{
+		RepoName: "unlinked-only-repo",
+		RepoPath: "/tmp/unlinked-only-repo",
+		Files: []indexer.FileResult{
+			{
+				Path:     "orphan.go",
+				Language: "go",
+				Symbols: []indexer.Symbol{
+					{Name: "OrphanFunc", Kind: "function", Language: "go",
+						FilePath: "orphan.go", StartLine: 1, EndLine: 10},
+				},
+			},
+		},
+	}
+	repo, err := h.store.StoreIndexResult(unlinkedOnlyResult)
+	if err != nil {
+		t.Fatalf("StoreIndexResult: %v", err)
+	}
+	// No links stored for OrphanFunc.
+
+	resp := h.sendRPC(sess, 203, "tools/call", map[string]interface{}{
+		"name": "get_changed_requirements",
+		"arguments": map[string]interface{}{
+			"repository_id": repo.ID,
+			"files":         []string{"orphan.go"},
+		},
+	})
+
+	result := parseRequirementLinkingResult(t, resp)
+
+	changedReqs, _ := result["changed_requirements"].([]interface{})
+	if len(changedReqs) != 0 {
+		t.Errorf("expected 0 changed_requirements (all symbols unlinked), got %d", len(changedReqs))
+	}
+	unlinked, _ := result["unlinked_touched_symbols"].([]interface{})
+	if len(unlinked) != 1 {
+		t.Fatalf("expected 1 unlinked_touched_symbol, got %d: %v", len(unlinked), unlinked)
+	}
+	sym := unlinked[0].(map[string]interface{})
+	if sym["symbol_name"] != "OrphanFunc" {
+		t.Errorf("unlinked symbol name: got %v, want OrphanFunc", sym["symbol_name"])
+	}
+	if sym["file_path"] != "orphan.go" {
+		t.Errorf("unlinked symbol file_path: got %v, want orphan.go", sym["file_path"])
+	}
+	_ = fix // fixture used only to initialise the harness
+}
+
+// ---------------------------------------------------------------------------
+// DeduplicatedRequirements — same requirement linked from multiple touched symbols
+// ---------------------------------------------------------------------------
+
+func TestMCP_GetChangedRequirements_DeduplicatedRequirements(t *testing.T) {
+	h := newTestHarness(t)
+	fix := seedChangedReqsFixture(t, h)
+	sess := h.createSession()
+
+	// Touch service.go — HandleCreate and HandleDelete both link to Req1.
+	// Req1 should appear exactly once; linked_to_symbols should list both sym IDs.
+	resp := h.sendRPC(sess, 204, "tools/call", map[string]interface{}{
+		"name": "get_changed_requirements",
+		"arguments": map[string]interface{}{
+			"repository_id": fix.RepoID,
+			"files":         []string{"service.go"},
+		},
+	})
+
+	result := parseRequirementLinkingResult(t, resp)
+
+	changedReqs, _ := result["changed_requirements"].([]interface{})
+
+	// Find Req1 and verify it appears exactly once.
+	var req1Entry map[string]interface{}
+	req1Count := 0
+	for _, r := range changedReqs {
+		req := r.(map[string]interface{})
+		if req["id"] == fix.Req1ID {
+			req1Count++
+			req1Entry = req
+		}
+	}
+	if req1Count != 1 {
+		t.Errorf("Req1 should appear exactly once in changed_requirements, got %d", req1Count)
+	}
+
+	// linked_to_symbols must contain both HandleCreate and HandleDelete.
+	linked, _ := req1Entry["linked_to_symbols"].([]interface{})
+	if len(linked) != 2 {
+		t.Errorf("Req1 linked_to_symbols: expected 2 (HandleCreate + HandleDelete), got %d: %v", len(linked), linked)
+	}
+	linkedSet := map[string]bool{}
+	for _, l := range linked {
+		linkedSet[l.(string)] = true
+	}
+	if !linkedSet[fix.HandleCreateID] {
+		t.Errorf("linked_to_symbols missing HandleCreateID %s", fix.HandleCreateID)
+	}
+	if !linkedSet[fix.HandleDeleteID] {
+		t.Errorf("linked_to_symbols missing HandleDeleteID %s", fix.HandleDeleteID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// NeitherInputProvided — no commit_range or files → errInvalidArguments
+// ---------------------------------------------------------------------------
+
+func TestMCP_GetChangedRequirements_NeitherInputProvided(t *testing.T) {
+	h := newTestHarness(t)
+	fix := seedChangedReqsFixture(t, h)
+	sess := h.createSession()
+
+	resp := h.sendRPC(sess, 205, "tools/call", map[string]interface{}{
+		"name": "get_changed_requirements",
+		"arguments": map[string]interface{}{
+			"repository_id": fix.RepoID,
+			// commit_range and files both absent
+		},
+	})
+
+	text, isErr := parseToolText(resp)
+	if !isErr {
+		t.Fatalf("expected error when neither commit_range nor files provided, got success: %s", text)
+	}
+	if !strings.Contains(strings.ToLower(text), "commit_range") &&
+		!strings.Contains(strings.ToLower(text), "files") &&
+		!strings.Contains(strings.ToLower(text), "required") {
+		t.Errorf("error message should mention the missing fields, got: %s", text)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// RepoNotFound
+// ---------------------------------------------------------------------------
+
+func TestMCP_GetChangedRequirements_RepoNotFound(t *testing.T) {
+	h := newTestHarness(t)
+	sess := h.createSession()
+
+	resp := h.sendRPC(sess, 206, "tools/call", map[string]interface{}{
+		"name": "get_changed_requirements",
+		"arguments": map[string]interface{}{
+			"repository_id": "nonexistent-repo-id-xyz",
+			"files":         []string{"service.go"},
+		},
+	})
+
+	text, isErr := parseToolText(resp)
+	if !isErr {
+		t.Fatalf("expected error for nonexistent repo, got success: %s", text)
+	}
+	// Must surface a meaningful error — not found, not indexed, access denied etc.
+	ltext := strings.ToLower(text)
+	if !strings.Contains(ltext, "not found") &&
+		!strings.Contains(ltext, "not indexed") &&
+		!strings.Contains(ltext, "access") &&
+		!strings.Contains(ltext, "repository") {
+		t.Errorf("error message should reference the repository, got: %s", text)
 	}
 }
