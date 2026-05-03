@@ -778,6 +778,101 @@ func TestMCP_GetSymbolContext_FileImportsDisabled_Degraded(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// TestMCP_GetSymbolContext_DegradedBoth — both call_graph AND file_imports
+// disabled; callers, callees, and imports all empty; degraded=true;
+// degraded_reason contains both capability names joined with "; ".
+// Pins the separator as the wire contract for multi-reason degraded responses.
+// ---------------------------------------------------------------------------
+
+func TestMCP_GetSymbolContext_DegradedBoth(t *testing.T) {
+	h := newTestHarness(t)
+	seedSymbolContextData(t, h)
+	sess := h.createSession()
+
+	// Inject a capability checker that disables both call_graph and file_imports.
+	h.handler.WithCapabilityChecker(func(name string, _ capabilities.Edition) bool {
+		return name != "call_graph" && name != "file_imports"
+	})
+
+	resp := h.sendRPC(sess, 12, "tools/call", map[string]interface{}{
+		"name": "get_symbol_context",
+		"arguments": map[string]interface{}{
+			"repository_id": h.repoID,
+			"file_path":     "main.go",
+			"symbol_name":   "HandleRequest",
+		},
+	})
+	text, isErr := parseToolText(resp)
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+
+	var result getSymbolContextResult
+	if err := json.Unmarshal([]byte(text), &result); err != nil {
+		t.Fatalf("parse result: %v", err)
+	}
+
+	if !result.Degraded {
+		t.Error("degraded should be true when both call_graph and file_imports are disabled")
+	}
+	// Both capability names must appear in the reason.
+	if !strings.Contains(result.DegradedReason, "call_graph") {
+		t.Errorf("degraded_reason should mention call_graph: %q", result.DegradedReason)
+	}
+	if !strings.Contains(result.DegradedReason, "file_imports") {
+		t.Errorf("degraded_reason should mention file_imports: %q", result.DegradedReason)
+	}
+	// Separator contract: multiple reasons are joined with "; " (wire format).
+	if !strings.Contains(result.DegradedReason, "; ") {
+		t.Errorf("degraded_reason should join multiple reasons with \"; \": %q", result.DegradedReason)
+	}
+
+	// All three arrays must be empty.
+	if len(result.Callers) != 0 {
+		t.Errorf("callers should be empty when call_graph disabled, got %d", len(result.Callers))
+	}
+	if len(result.Callees) != 0 {
+		t.Errorf("callees should be empty when call_graph disabled, got %d", len(result.Callees))
+	}
+	if len(result.Imports) != 0 {
+		t.Errorf("imports should be empty when file_imports disabled, got %d", len(result.Imports))
+	}
+
+	// Symbol.Source must still be present — symbol retrieval is never gated.
+	if result.Symbol.Source == "" {
+		t.Error("symbol.source must be present even when both capabilities are degraded")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMCP_GetSymbolContext_DepthNegativeRejected — depth=-1 must return
+// INVALID_ARGUMENTS rather than being silently treated as depth=1.
+// ---------------------------------------------------------------------------
+
+func TestMCP_GetSymbolContext_DepthNegativeRejected(t *testing.T) {
+	h := newTestHarness(t)
+	seedSymbolContextData(t, h)
+	sess := h.createSession()
+
+	resp := h.sendRPC(sess, 13, "tools/call", map[string]interface{}{
+		"name": "get_symbol_context",
+		"arguments": map[string]interface{}{
+			"repository_id": h.repoID,
+			"file_path":     "main.go",
+			"symbol_name":   "HandleRequest",
+			"depth":         -1,
+		},
+	})
+	text, isErr := parseToolText(resp)
+	if !isErr {
+		t.Fatalf("expected INVALID_ARGUMENTS for depth=-1, got success: %s", text)
+	}
+	if !strings.Contains(text, MCPErrInvalidArguments) && !strings.Contains(text, "depth") {
+		t.Errorf("error should mention depth or INVALID_ARGUMENTS: %q", text)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TestMCP_GetSymbolContext_SymbolNotFound
 // ---------------------------------------------------------------------------
 

@@ -562,4 +562,115 @@ func TestMCP_GetSymbolSource_ContextLines_OverCapClamps(t *testing.T) {
 	if !strings.Contains(result.Source, "ParseJSON") {
 		t.Errorf("source should contain ParseJSON: %q", result.Source)
 	}
+	// context_lines echo must reflect the post-clamp value (10, not 15).
+	if result.ContextLines != mcpSymbolContextLinesCap {
+		t.Errorf("context_lines echo: got %d, want %d (clamped cap)", result.ContextLines, mcpSymbolContextLinesCap)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMCP_GetSymbolSource_ContextLinesEcho — explicitly supplied context_lines
+// is echoed back in the response at the clamped value (plan Phase 2.3).
+// ---------------------------------------------------------------------------
+
+func TestMCP_GetSymbolSource_ContextLinesEcho(t *testing.T) {
+	h := newTestHarness(t)
+	seedSymbolSourceData(t, h)
+	sess := h.createSession()
+
+	resp := h.sendRPC(sess, 10, "tools/call", map[string]interface{}{
+		"name": "get_symbol_source",
+		"arguments": map[string]interface{}{
+			"repository_id": h.repoID,
+			"file_path":     "main.go",
+			"symbol_name":   "HandleRequest",
+			"context_lines": 3,
+		},
+	})
+	text, isErr := parseToolText(resp)
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+
+	var result getSymbolSourceResult
+	if err := json.Unmarshal([]byte(text), &result); err != nil {
+		t.Fatalf("parse result: %v", err)
+	}
+
+	// context_lines=3 is within [0, 10] so no clamping; echo must be 3.
+	if result.ContextLines != 3 {
+		t.Errorf("context_lines echo: got %d, want 3", result.ContextLines)
+	}
+	if result.Source == "" {
+		t.Error("source must not be empty")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMCP_GetSymbolSource_FileShrankSinceIndex — ReadRepoFile succeeds but
+// the file has fewer lines than sym.EndLine (file was truncated after
+// indexing). SliceLines returns "" → handler maps this to MCPErrRepositoryStale.
+// This is distinct from FileDeletedSinceIndex, which tests a missing file.
+// Pins mcp_symbol_source.go:113-115 (empty-source → stale path).
+// ---------------------------------------------------------------------------
+
+func TestMCP_GetSymbolSource_FileShrankSinceIndex(t *testing.T) {
+	h := newTestHarness(t)
+	sess := h.createSession()
+
+	// Seed a symbol at lines 100–120.
+	result := &indexer.IndexResult{
+		RepoName: "shrank-repo",
+		RepoPath: "/tmp/shrank-repo",
+		Files: []indexer.FileResult{
+			{
+				Path:      "shrank.go",
+				Language:  "go",
+				LineCount: 120,
+				Symbols: []indexer.Symbol{
+					{
+						ID: "shrank-sym", Name: "LateFunc",
+						QualifiedName: "main.LateFunc", Kind: "function",
+						Language: "go", FilePath: "shrank.go",
+						StartLine: 100, EndLine: 120,
+					},
+				},
+			},
+		},
+	}
+	repo, err := h.store.ReplaceIndexResult(h.repoID, result)
+	if err != nil {
+		t.Fatalf("ReplaceIndexResult: %v", err)
+	}
+	h.repoID = repo.ID
+
+	// Wire a file reader that returns content with only ~50 lines — the file
+	// has been truncated since indexing. SliceLines(content, 100, 120) will
+	// return "" because the content ends before line 100.
+	shrunkLines := make([]string, 50)
+	shrunkLines[0] = "package main"
+	shrunkLines[1] = ""
+	shrunkLines[2] = "// file was truncated"
+	for i := 3; i < 50; i++ {
+		shrunkLines[i] = fmt.Sprintf("// line %d", i+1)
+	}
+	fr := newMockFileReader()
+	fr.add(h.repoID, "shrank.go", strings.Join(shrunkLines, "\n"))
+	h.handler.WithFileReader(fr)
+
+	resp := h.sendRPC(sess, 11, "tools/call", map[string]interface{}{
+		"name": "get_symbol_source",
+		"arguments": map[string]interface{}{
+			"repository_id": h.repoID,
+			"file_path":     "shrank.go",
+			"symbol_name":   "LateFunc",
+		},
+	})
+	text, isErr := parseToolText(resp)
+	if !isErr {
+		t.Fatalf("expected stale error when file is shorter than indexed symbol range, got: %s", text)
+	}
+	if !strings.Contains(text, MCPErrRepositoryStale) && !strings.Contains(text, "unavailable") {
+		t.Errorf("expected stale error, got: %q", text)
+	}
 }

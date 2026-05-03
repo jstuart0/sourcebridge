@@ -38,6 +38,9 @@ type getSymbolSourceResult struct {
 	Signature     string `json:"signature,omitempty"`
 	Source        string `json:"source"`
 	SourceNote    string `json:"source_note,omitempty"`
+	// ContextLines echoes the post-clamp context_lines value so callers can
+	// confirm which clamped value was applied (plan Phase 2.3).
+	ContextLines int `json:"context_lines,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +69,7 @@ func (h *mcpHandler) callGetSymbolSource(session *mcpSession, args json.RawMessa
 	if err != nil {
 		return nil, err
 	}
+	result.ContextLines = contextLines
 	return result, nil
 }
 
@@ -238,9 +242,15 @@ func (h *mcpHandler) callGetSymbolContext(session *mcpSession, args json.RawMess
 	}
 
 	// Normalise depth: zero means "use default" (1).
+	// Negative values are rejected (not silently clamped) because depth is a
+	// discrete semantic parameter — depth=1 means "first hop", and a negative
+	// depth has no meaningful interpretation. Symmetric rejection: < 1 and > 1.
 	depth := params.Depth
 	if depth == 0 {
 		depth = 1
+	}
+	if depth < 1 {
+		return nil, errInvalidArguments("depth must be >= 1 (got negative value)")
 	}
 	if depth > 1 {
 		return nil, errInvalidArguments("depth > 1 is not yet supported (CA-151 ships depth=1 only)")
@@ -274,6 +284,9 @@ func (h *mcpHandler) callGetSymbolContext(session *mcpSession, args json.RawMess
 		degraded = true
 		degradedReasons = append(degradedReasons, "file_imports capability disabled for this edition")
 	}
+	// degraded_reason joins multiple reasons with "; " — chosen over "and"
+	// conjunction because it generalises cleanly to 3+ items without the
+	// repetitive "x and y and z" form.
 	degradedReason := strings.Join(degradedReasons, "; ")
 	if !degraded {
 		degradedReason = ""

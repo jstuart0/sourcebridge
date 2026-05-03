@@ -133,7 +133,6 @@ func errInvalidArguments(detail string) *mcpToolError {
 	}
 }
 
-//nolint:unused // consumed by get_symbol_source handler in Phase 2 (CA-151)
 func errRepositoryStale(filePath string) *mcpToolError {
 	return &mcpToolError{
 		Code:        MCPErrRepositoryStale,
