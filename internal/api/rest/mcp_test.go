@@ -1331,6 +1331,8 @@ func TestMCP_NotificationIgnored(t *testing.T) {
 	body := `{"jsonrpc":"2.0","method":"notifications/initialized"}`
 	req := httptest.NewRequest("POST", "/api/v1/mcp/message?sessionId="+sess.id, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	ctx := context.WithValue(req.Context(), auth.ClaimsKey, &auth.Claims{UserID: "user-1", OrgID: "org-1"})
+	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
 	h.handler.handleMessage(rr, req)
@@ -1498,10 +1500,13 @@ func TestMCP_FullHTTPFlow(t *testing.T) {
 	// block on write after we stop reading.
 	go io.Copy(io.Discard, pr) //nolint:errcheck
 
-	// Send initialize via message endpoint (SSE handler still running)
+	// Send initialize via message endpoint (SSE handler still running).
+	// Inject claims for user-1 — the same identity used to open the SSE session.
 	initBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"%s","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}`, mcpProtocolVersion)
 	msgReq := httptest.NewRequest("POST", "/api/v1/mcp/message?sessionId="+sessionID, strings.NewReader(initBody))
 	msgReq.Header.Set("Content-Type", "application/json")
+	msgCtx := context.WithValue(msgReq.Context(), auth.ClaimsKey, &auth.Claims{UserID: "user-1"})
+	msgReq = msgReq.WithContext(msgCtx)
 	msgRR := httptest.NewRecorder()
 	h.handler.handleMessage(msgRR, msgReq)
 

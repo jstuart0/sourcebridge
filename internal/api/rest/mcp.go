@@ -778,6 +778,24 @@ func (h *mcpHandler) handleMessage(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFromState(state, chans)
 	sess.lastUsed = time.Now()
 
+	// SEC-1: verify the authenticated caller owns this session.
+	// The auth middleware (now required on this route) populates claims.
+	// Empty UserID means the session was persisted without an owner — invalid; 403 from day one.
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		http.Error(w, "unauthenticated", http.StatusUnauthorized)
+		return
+	}
+	if state.UserID == "" || state.UserID != claims.UserID {
+		slog.Warn("mcp_session_ownership_mismatch",
+			"session_id", state.ID,
+			"session_owner", state.UserID,
+			"claims_user", claims.UserID,
+		)
+		http.Error(w, "forbidden: session ownership mismatch", http.StatusForbidden)
+		return
+	}
+
 	body, err := io.ReadAll(io.LimitReader(r.Body, mcpMaxBodySize+1))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})

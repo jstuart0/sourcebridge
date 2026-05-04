@@ -1024,13 +1024,13 @@ func (s *Server) setupRouter() {
 			s.mcp.fileReader = &qaFileReader{locator: s.qaLocator}
 		}
 		s.mcp.capabilityChecker = capabilities.IsAvailable
-		// SSE endpoint: behind auth (JWT or API token)
+		// SSE + message endpoints: behind auth (JWT or API token).
+		// Session ownership re-verified against authenticated identity per Slice 7 / SEC-1.
 		r.Group(func(r chi.Router) {
 			r.Use(s.authMiddleware())
 			r.Get("/api/v1/mcp/sse", s.mcp.handleSSE)
+			r.Post("/api/v1/mcp/message", s.mcp.handleMessage)
 		})
-		// Message endpoint: session-based auth (no JWT middleware — session owns auth)
-		r.Post("/api/v1/mcp/message", s.mcp.handleMessage)
 		// Streamable HTTP transport: auth on every request (for Codex, etc.)
 		r.Group(func(r chi.Router) {
 			r.Use(s.authMiddleware())
