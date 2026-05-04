@@ -144,11 +144,11 @@ type Resolver struct {
 	// construction; new code should read r.Deps.Flags directly. Sync via
 	// syncResolverDepsFromAppDeps in resolver_deps.go.
 	Flags featureflags.Flags // backend startup-time feature flags
-	// Plan is the entitlement plan resolved once at boot via BootCurrentPlan().
+	// Plan is the entitlement plan resolved at boot via BootCurrentPlan().
 	// Per-request capability resolution reads this field instead of calling
 	// currentPlan() (which reads env vars) on every GraphQL request.
-	// Zero value maps to planLevel 0, equivalent to PlanOSS — safe for tests
-	// that don't set this field explicitly.
+	// Zero value normalized to PlanOSS at the resolveCapabilities call site
+	// for backward composite-literal construction compatibility.
 	Plan      entitlements.Plan
 	GitConfig GitConfigLoader // legacy; nil-safe — when GitResolver is set it's authoritative
 	// GitResolver is the runtime git-credential resolver (R3 slice 2).
@@ -486,9 +486,19 @@ func featureToCapability(feature entitlements.Feature) string {
 }
 
 func (r *Resolver) resolveCapabilities() resolvedCapabilities {
+	// Normalize zero-value Plan to PlanOSS so direct resolver construction
+	// (tests, extensions) matches the pre-Slice-3 behavior where currentPlan()
+	// returned PlanOSS when no env var was set. Without this, a zero-value
+	// Resolver would compute Billing: true (r.Plan "" != entitlements.PlanOSS
+	// "oss") — incorrect for the no-plan / OSS case.
+	plan := r.Plan
+	if plan == "" {
+		plan = entitlements.PlanOSS
+	}
+
 	hasWorker := r.Worker != nil
 	hasKnowledge := r.KnowledgeStore != nil
-	checker := entitlements.NewChecker(r.Plan)
+	checker := entitlements.NewChecker(plan)
 
 	// allow gates a plan-level feature through the entitlements checker.
 	// When featureToCapability returns a non-empty capability name for
@@ -496,7 +506,7 @@ func (r *Resolver) resolveCapabilities() resolvedCapabilities {
 	// the resolver path is unified. Today no Feature has a registry
 	// counterpart (see featureToCapability), so this always falls through
 	// to the entitlements path — the structure is the extension point.
-	edition := capabilities.NormalizeEdition(string(r.Plan))
+	edition := capabilities.NormalizeEdition(string(plan))
 	allow := func(feature entitlements.Feature) bool {
 		if cap := featureToCapability(feature); cap != "" {
 			return capabilities.IsAvailable(cap, edition)
@@ -525,7 +535,7 @@ func (r *Resolver) resolveCapabilities() resolvedCapabilities {
 			AuditLog:        allow(entitlements.FeatureAuditLog),
 			Webhooks:        allow(entitlements.FeatureWebhooks),
 			CustomTemplates: hasWorker && allow(entitlements.FeatureCustomTemplates),
-			Billing:         r.Plan != entitlements.PlanOSS,
+			Billing:         plan != entitlements.PlanOSS,
 
 			CliffNotes:           hasKnowledge && hasWorker && allow(entitlements.FeatureCliffNotes),
 			LearningPaths:        hasKnowledge && hasWorker && allow(entitlements.FeatureLearningPaths),
