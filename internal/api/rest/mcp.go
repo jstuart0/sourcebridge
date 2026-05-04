@@ -503,6 +503,9 @@ func (c *mcpLocalChans) closeDone() {
 	c.doneOnce.Do(func() { close(c.done) })
 }
 
+// newMCPHandler constructs an MCP handler with EditionOSS as the default.
+// Preserved for tests and any external constructor that doesn't pass an edition.
+// New code should call newMCPHandlerWithEdition(...) directly.
 func newMCPHandler(store graphstore.GraphStore, ks knowledge.KnowledgeStore, w mcpWorkerCaller, repos string, sessionTTL, keepalive time.Duration, maxSessions int, cache db.Cache) *mcpHandler {
 	return newMCPHandlerWithEdition(store, ks, w, repos, sessionTTL, keepalive, maxSessions, cache, capabilities.EditionOSS)
 }
@@ -593,8 +596,9 @@ func (h *mcpHandler) coreTools() []mcpTool {
 	}
 
 	tools := []mcpTool{
-		// Non-ctx tools.
-		{Definition: defByName["search_symbols"], Handler: noCtxHandler((*mcpHandler).callSearchSymbols)},
+		// MCP-3: search_symbols promoted to ctx-bearing registration so request
+		// cancellation propagates through searchSymbolsHybrid into search.Service.
+		{Definition: defByName["search_symbols"], Handler: withCtxHandler((*mcpHandler).callSearchSymbols)},
 		{Definition: defByName["get_requirements"], Handler: noCtxHandler((*mcpHandler).callGetRequirements)},
 		{Definition: defByName["get_impact_report"], Handler: noCtxHandler((*mcpHandler).callGetImpactReport)},
 		{Definition: defByName["get_cliff_notes"], Handler: noCtxHandler((*mcpHandler).callGetCliffNotes)},
@@ -704,11 +708,14 @@ func (h *mcpHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enforce max sessions
-	if h.maxSessions > 0 && h.sessionCount() >= h.maxSessions {
-		slog.Warn("mcp max sessions reached", "current_sessions", h.sessionCount(), "max_sessions", h.maxSessions)
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many MCP sessions"})
-		return
+	// Enforce max sessions. MCP-5: count cached once — Redis-backed stores
+	// incur a round-trip per call; two calls for one guard is wasteful.
+	if h.maxSessions > 0 {
+		if count := h.sessionCount(); count >= h.maxSessions {
+			slog.Warn("mcp max sessions reached", "current_sessions", count, "max_sessions", h.maxSessions)
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many MCP sessions"})
+			return
+		}
 	}
 
 	claims := auth.GetClaims(r.Context())
@@ -1315,15 +1322,11 @@ func extractRepoID(args json.RawMessage) string {
 // Tool: search_symbols
 // ---------------------------------------------------------------------------
 
-func (h *mcpHandler) callSearchSymbols(session *mcpSession, args json.RawMessage) (interface{}, error) {
-	var params struct {
-		RepositoryID string `json:"repository_id"`
-		Query        string `json:"query"`
-		Kind         string `json:"kind"`
-		FilePath     string `json:"file_path"`
-		Limit        int    `json:"limit"`
-		Offset       int    `json:"offset"`
-	}
+// callSearchSymbols is the MCP handler for search_symbols. MCP-3: now
+// accepts ctx so request-cancellation propagates through searchSymbolsHybrid
+// and its underlying search.Service.Search call.
+func (h *mcpHandler) callSearchSymbols(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
+	var params symbolSearchParams
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
@@ -1342,7 +1345,7 @@ func (h *mcpHandler) callSearchSymbols(session *mcpSession, args json.RawMessage
 	// transport keeps the symbol-only envelope shape (plan §Phase 3 —
 	// "preserve the symbol-only outward MCP result shape").
 	if h.searchSvc != nil && params.FilePath == "" && params.Query != "" {
-		return h.searchSymbolsHybrid(session, params)
+		return h.searchSymbolsHybrid(ctx, session, params)
 	}
 
 	var kindPtr *string
@@ -1387,10 +1390,11 @@ func (h *mcpHandler) callSearchSymbols(session *mcpSession, args json.RawMessage
 	return packSymbolResults(symbols, total), nil
 }
 
-// symbolSearchParams narrows the callSearchSymbols args for the
-// hybrid branch without pulling the full type declaration to the
-// package scope.
-type symbolSearchParams = struct {
+// symbolSearchParams narrows the callSearchSymbols args for the hybrid branch.
+// Named struct (not a type alias) so it is a first-class type with a stable
+// declaration site. MCP-4: converted from `type symbolSearchParams = struct{...}`
+// (alias of an anonymous struct) to a named struct — same fields, no behaviour change.
+type symbolSearchParams struct {
 	RepositoryID string `json:"repository_id"`
 	Query        string `json:"query"`
 	Kind         string `json:"kind"`
@@ -1402,9 +1406,9 @@ type symbolSearchParams = struct {
 // searchSymbolsHybrid routes the MCP search_symbols call through the
 // hybrid retrieval service, projecting each result back into the
 // symbol-only envelope that existing MCP clients (including Claude
-// Code) expect.
-func (h *mcpHandler) searchSymbolsHybrid(session *mcpSession, params symbolSearchParams) (interface{}, error) {
-	ctx := context.Background()
+// Code) expect. MCP-3: ctx threads the live request context so
+// cancellation propagates into search.Service.Search.
+func (h *mcpHandler) searchSymbolsHybrid(ctx context.Context, session *mcpSession, params symbolSearchParams) (interface{}, error) {
 	req := &search.Request{
 		Repo:  params.RepositoryID,
 		Query: params.Query,
