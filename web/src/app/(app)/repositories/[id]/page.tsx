@@ -965,7 +965,15 @@ export default function RepositoryDetailPage() {
   const features = useFeatures();
   const symbolScopedAnalysisEnabled = features.symbolScopedAnalysis;
   const [subsystemsRefreshKey, setSubsystemsRefreshKey] = useState(0);
-  const [knowledgeLoading, setKnowledgeLoading] = useState(false);
+  const [loadingOps, setLoadingOps] = useState<Set<string>>(new Set());
+  const isLoading = (op: string) => loadingOps.has(op);
+  const startLoading = (op: string) =>
+    setLoadingOps((prev) => new Set(prev).add(op));
+  const finishLoading = (op: string) =>
+    setLoadingOps((prev) => { const n = new Set(prev); n.delete(op); return n; });
+  // Derived: true when any knowledge operation is in flight.
+  // Kept for any code that needs a global gate; individual buttons should prefer isLoading(op).
+  const knowledgeLoading = loadingOps.size > 0;
   const [copiedSetupCmd, setCopiedSetupCmd] = useState(false);
   const [useExistingToken, setUseExistingToken] = useState(false);
   const serverCaps = useServerCapabilities();
@@ -1305,7 +1313,7 @@ export default function RepositoryDetailPage() {
       repositoryId: repoId,
       metadata: { scopeType, scopePath: scopePath || null, audience: knowledgeAudience, depth: knowledgeDepth },
     });
-    setKnowledgeLoading(true);
+    startLoading("cliff-notes-generate");
     try {
       await generateCliffNotes({
         input: {
@@ -1320,7 +1328,7 @@ export default function RepositoryDetailPage() {
       reexecuteKnowledge({ requestPolicy: "network-only" });
       reexecuteScopeChildren({ requestPolicy: "network-only" });
     } finally {
-      setKnowledgeLoading(false);
+      finishLoading("cliff-notes-generate");
     }
   }
 
@@ -1330,7 +1338,7 @@ export default function RepositoryDetailPage() {
 
   async function handleGenerateScopedCliffNotes() {
     if (!symbolScopeType) return;
-    setKnowledgeLoading(true);
+    startLoading("scoped-cliff-notes-generate");
     try {
       await generateCliffNotes({
         input: {
@@ -1345,25 +1353,25 @@ export default function RepositoryDetailPage() {
       reexecuteSymbolKnowledge({ requestPolicy: "network-only" });
       reexecuteSymbolChildren({ requestPolicy: "network-only" });
     } finally {
-      setKnowledgeLoading(false);
+      finishLoading("scoped-cliff-notes-generate");
     }
   }
 
   async function handleRefreshScopedArtifact() {
     if (!currentScopedCliffNotes) return;
-    setKnowledgeLoading(true);
+    startLoading("scoped-artifact-refresh");
     try {
       await refreshArtifact({ id: currentScopedCliffNotes.id });
       reexecuteSymbolKnowledge({ requestPolicy: "network-only" });
       reexecuteSymbolChildren({ requestPolicy: "network-only" });
     } finally {
-      setKnowledgeLoading(false);
+      finishLoading("scoped-artifact-refresh");
     }
   }
 
   async function handleScopedFollowUp() {
     if (!currentScopedCliffNotes || !symbolChatQuestion.trim()) return;
-    setKnowledgeLoading(true);
+    startLoading("scoped-follow-up");
     try {
       const question = symbolChatQuestion.trim();
       const historyPayload = symbolChatMessages.map((message) =>
@@ -1390,22 +1398,22 @@ export default function RepositoryDetailPage() {
         setSymbolChatQuestion("");
       }
     } finally {
-      setKnowledgeLoading(false);
+      finishLoading("scoped-follow-up");
     }
   }
 
   async function handleGenerateLearningPath() {
-    setKnowledgeLoading(true);
+    startLoading("learning-path-generate");
     try {
       await generateLearningPath({ input: { repositoryId: repoId, audience: knowledgeAudience, depth: knowledgeDepth, generationMode: knowledgeGenerationMode } });
       reexecuteKnowledge({ requestPolicy: "network-only" });
     } finally {
-      setKnowledgeLoading(false);
+      finishLoading("learning-path-generate");
     }
   }
 
   async function handleBuildRepositoryUnderstanding() {
-    setKnowledgeLoading(true);
+    startLoading("understanding-build");
     setUnderstandingDedupeNote(false);
     const wasBuilding = understandingBuilding;
     try {
@@ -1437,12 +1445,12 @@ export default function RepositoryDetailPage() {
       reexecuteRepo({ requestPolicy: "network-only" });
       void fetchRepoJobs();
     } finally {
-      setKnowledgeLoading(false);
+      finishLoading("understanding-build");
     }
   }
 
   async function handleSaveRepositoryGenerationMode(nextMode: RepositoryGenerationMode) {
-    setKnowledgeLoading(true);
+    startLoading("generation-mode-save");
     try {
       await updateRepositoryKnowledgeSettings({
         input: {
@@ -1452,17 +1460,17 @@ export default function RepositoryDetailPage() {
       });
       reexecuteRepo({ requestPolicy: "network-only" });
     } finally {
-      setKnowledgeLoading(false);
+      finishLoading("generation-mode-save");
     }
   }
 
   async function handleGenerateCodeTour() {
-    setKnowledgeLoading(true);
+    startLoading("code-tour-generate");
     try {
       await generateCodeTour({ input: { repositoryId: repoId, audience: knowledgeAudience, depth: knowledgeDepth, generationMode: knowledgeGenerationMode } });
       reexecuteKnowledge({ requestPolicy: "network-only" });
     } finally {
-      setKnowledgeLoading(false);
+      finishLoading("code-tour-generate");
     }
   }
 
@@ -1486,7 +1494,7 @@ export default function RepositoryDetailPage() {
       repositoryId: repoId,
       metadata: { scopeType: knowledgeScopeType, scopePath: knowledgeScopePath || null },
     });
-    setKnowledgeLoading(true);
+    startLoading("workflow-story-generate");
     try {
       await generateWorkflowStory({
         input: {
@@ -1502,29 +1510,29 @@ export default function RepositoryDetailPage() {
       });
       reexecuteKnowledge({ requestPolicy: "network-only" });
     } finally {
-      setKnowledgeLoading(false);
+      finishLoading("workflow-story-generate");
     }
   }
 
   async function handleRefreshArtifact(artifactId: string) {
-    setKnowledgeLoading(true);
+    startLoading(`artifact-refresh:${artifactId}`);
     try {
       await refreshArtifact({ id: artifactId });
       reexecuteKnowledge({ requestPolicy: "network-only" });
       reexecuteScopeChildren({ requestPolicy: "network-only" });
     } finally {
-      setKnowledgeLoading(false);
+      finishLoading(`artifact-refresh:${artifactId}`);
     }
   }
 
   async function handleExplainSystem() {
-    if (!explainQuestion.trim() || knowledgeLoading) return;
+    if (!explainQuestion.trim() || isLoading("explain-system")) return;
     trackEvent({
       event: "explain_scope_used",
       repositoryId: repoId,
       metadata: { scopeType: knowledgeScopeType, scopePath: knowledgeScopePath || null },
     });
-    setKnowledgeLoading(true);
+    startLoading("explain-system");
     setExplainResult(null);
     try {
       const res = await explainSystem({
@@ -1540,7 +1548,7 @@ export default function RepositoryDetailPage() {
       });
       if (res.data?.explainSystem) setExplainResult(res.data.explainSystem);
     } finally {
-      setKnowledgeLoading(false);
+      finishLoading("explain-system");
     }
   }
 
