@@ -23,6 +23,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/api/rest"
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 	"github.com/sourcebridge/sourcebridge/internal/config"
+	"github.com/sourcebridge/sourcebridge/internal/security"
 	"github.com/sourcebridge/sourcebridge/internal/db"
 	gitres "github.com/sourcebridge/sourcebridge/internal/git/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/graph"
@@ -100,6 +101,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 			"enabled", true,
 			"advice", "tokens with missing role default to admin; disable after migration 056 has been confirmed")
 	}
+
+	// Check for credentials that are still at the insecure sentinel value
+	// injected by docker-compose.hub.yml when no .env is present (INFRA-1).
+	// Emits a banner at boot and re-fires every 60 seconds until the process
+	// exits.  Does not block startup — purely advisory.
+	insecureCtx, insecureCancel := context.WithCancel(context.Background())
+	defer insecureCancel()
+	security.WarnInsecureDefaults(insecureCtx, []security.CredentialCheck{
+		{Label: "SURREAL_PASS", Value: cfg.Storage.SurrealPass},
+		{Label: "JWT_SECRET", Value: cfg.Security.JWTSecret},
+		{Label: "GRPC_AUTH_SECRET", Value: cfg.Security.GRPCAuthSecret},
+	}, 60*time.Second)
 
 	// Connect to database
 	surrealDB := db.NewSurrealDB(cfg.Storage)

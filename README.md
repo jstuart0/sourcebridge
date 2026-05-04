@@ -73,6 +73,35 @@ docker compose -f docker-compose.hub.yml up -d
 
 Open [http://localhost:3000](http://localhost:3000) and create your admin account.
 
+> **Security: set your secrets before exposing SourceBridge to a network.**
+>
+> The default compose file uses sentinel values (`INSECURE-DEFAULT-CHANGE-ME-NOW`)
+> for the database password, gRPC shared secret, and JWT signing key.  These are
+> intentionally loud and self-identifying — the API server will emit a repeating
+> warning until they are replaced.
+>
+> Run the init script once before starting the stack:
+>
+> ```bash
+> # Generates .env with strong random values (chmod 0600)
+> curl -O https://raw.githubusercontent.com/sourcebridge-ai/sourcebridge/main/scripts/init-hub-secrets.sh
+> chmod +x init-hub-secrets.sh && ./init-hub-secrets.sh
+>
+> # Then start the stack — it picks up .env automatically
+> docker compose -f docker-compose.hub.yml up -d
+> ```
+>
+> **Environment variables the init script sets:**
+>
+> | Variable | Purpose |
+> |---|---|
+> | `SURREAL_PASS` | SurrealDB admin password (also controls `SURREAL_USER`, default `root`) |
+> | `SOURCEBRIDGE_GRPC_SECRET` | Shared secret between the API server and the AI worker |
+> | `SOURCEBRIDGE_JWT_SECRET` | JWT signing key for all user sessions |
+>
+> To rotate secrets later, run `./init-hub-secrets.sh --force`.
+> All active sessions will be invalidated.
+
 > **Using a cloud LLM?** Pass your provider config inline:
 >
 > ```bash
@@ -130,9 +159,19 @@ docker compose -f docker-compose.hub.yml up -d
 
 #### Production secrets
 
-For production, pin your JWT and gRPC secrets instead of using defaults:
+Run `scripts/init-hub-secrets.sh` (recommended) to generate a `.env` with strong
+random values for `SURREAL_PASS`, `SOURCEBRIDGE_GRPC_SECRET`, and
+`SOURCEBRIDGE_JWT_SECRET`.  The compose file reads them automatically.
 
 ```bash
+./scripts/init-hub-secrets.sh          # creates .env (chmod 0600)
+docker compose -f docker-compose.hub.yml up -d
+```
+
+Or set them inline without a `.env`:
+
+```bash
+SURREAL_PASS=$(openssl rand -hex 32) \
 SOURCEBRIDGE_JWT_SECRET=$(openssl rand -hex 32) \
 SOURCEBRIDGE_GRPC_SECRET=$(openssl rand -hex 32) \
 SOURCEBRIDGE_LLM_PROVIDER=anthropic \

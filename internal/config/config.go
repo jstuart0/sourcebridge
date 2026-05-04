@@ -689,6 +689,7 @@ func Load() (*Config, error) {
 	v.SetDefault("llm.report_model", cfg.LLM.ReportModel)
 	v.SetDefault("llm.timeout_seconds", cfg.LLM.TimeoutSecs)
 	v.SetDefault("security.jwt_secret", "")
+	v.SetDefault("security.grpc_auth_secret", "")
 	v.SetDefault("security.jwt_ttl_minutes", cfg.Security.JWTTTLMinutes)
 	v.SetDefault("security.encryption_key", "")
 	v.SetDefault("security.csrf_enabled", cfg.Security.CSRFEnabled)
