@@ -801,85 +801,184 @@ export const IMPACT_REPORTS_QUERY = gql`
 // Knowledge Engine
 // ---------------------------------------------------------------------------
 
+// ─── Reusable GraphQL fragments (ruby H-3 / DS-3) ────────────────────────────
+//
+// Three shapes exist across knowledge artifact operations:
+//   KnowledgeArtifactCoreFields   — minimal shape (Learning Path, Code Tour)
+//   KnowledgeArtifactScopedFields — adds audience/depth/scope (Cliff Notes,
+//                                   Workflow Story, Refresh, Arch Diagram)
+//   KnowledgeArtifactQueryFields  — full shape for polling query
+//
+// Living Wiki mutations use their own LivingWiki* fragments.
+
+const KNOWLEDGE_SECTION_CORE_FIELDS = `
+  id
+  title
+  content
+  summary
+  confidence
+  orderIndex
+  evidence {
+    id
+    sourceType
+    filePath
+    lineStart
+    lineEnd
+    rationale
+  }
+`;
+
+const KNOWLEDGE_SECTION_SCOPED_FIELDS = `
+  ${KNOWLEDGE_SECTION_CORE_FIELDS}
+  metadata
+  sectionKey
+  inferred
+`;
+
+const KNOWLEDGE_SECTION_QUERY_FIELDS = `
+  ${KNOWLEDGE_SECTION_SCOPED_FIELDS}
+  artifactId
+  summary
+  refinementStatus
+  evidence {
+    id
+    sectionId
+    sourceType
+    sourceId
+    filePath
+    lineStart
+    lineEnd
+    rationale
+  }
+`;
+
+/** Minimal shape — Learning Path, Code Tour. */
+const KNOWLEDGE_ARTIFACT_CORE_FIELDS = `
+  id
+  type
+  status
+  progress
+  progressPhase
+  progressMessage
+  stale
+  errorCode
+  errorMessage
+  understandingId
+  understandingRevisionFp
+  refreshAvailable
+  generatedAt
+  sections {
+    ${KNOWLEDGE_SECTION_CORE_FIELDS}
+  }
+`;
+
+/** Adds audience/depth/scope — Cliff Notes, Workflow Story, Refresh, Architecture Diagram. */
+const KNOWLEDGE_ARTIFACT_SCOPED_FIELDS = `
+  ${KNOWLEDGE_ARTIFACT_CORE_FIELDS}
+  repositoryId
+  audience
+  depth
+  scope {
+    scopeType
+    scopePath
+    modulePath
+    filePath
+    symbolName
+  }
+  sections {
+    ${KNOWLEDGE_SECTION_SCOPED_FIELDS}
+  }
+`;
+
+/** Full shape for polling query — adds generationMode, rendererVersion, dependencies, refinementUnits, sourceRevision. */
+const KNOWLEDGE_ARTIFACT_QUERY_FIELDS = `
+  ${KNOWLEDGE_ARTIFACT_SCOPED_FIELDS}
+  generationMode
+  rendererVersion
+  dependencies {
+    dependencyType
+    targetId
+    targetRevisionFp
+  }
+  refinementUnits {
+    id
+    artifactId
+    sectionKey
+    sectionTitle
+    refinementType
+    status
+    attemptCount
+    understandingId
+    evidenceRevisionFp
+    rendererVersion
+    lastError
+    metadata
+    createdAt
+    updatedAt
+  }
+  createdAt
+  updatedAt
+  sourceRevision {
+    commitSha
+    branch
+    contentFingerprint
+  }
+  sections {
+    ${KNOWLEDGE_SECTION_QUERY_FIELDS}
+  }
+`;
+
+const LIVING_WIKI_SETTINGS_BARE_FIELDS = `
+  enabled
+  livingWikiOverviewEnabled
+  livingWikiDetailedEnabled
+  mode
+  sinks {
+    kind
+    integrationName
+    audience
+    editPolicy
+  }
+  excludePaths
+  staleWhenStrategy
+  maxPagesPerJob
+  lastRunAt
+  updatedAt
+`;
+
+const LIVING_WIKI_JOB_RESULT_FIELDS = `
+  jobId
+  startedAt
+  completedAt
+  pagesPlanned
+  pagesGenerated
+  pagesExcluded
+  excludedPageIds
+  generatedPageTitles
+  exclusionReasons
+  exclusionFailureCategories
+  status
+  failureCategory
+  errorMessage
+`;
+
+const LIVING_WIKI_SETTINGS_RESULT_FIELDS = `
+  settings {
+    ${LIVING_WIKI_SETTINGS_BARE_FIELDS}
+    lastJobResult {
+      ${LIVING_WIKI_JOB_RESULT_FIELDS}
+    }
+  }
+  jobId
+  notice
+`;
+
+// ─── End fragments ────────────────────────────────────────────────────────────
+
 export const KNOWLEDGE_ARTIFACTS_QUERY = gql`
   query KnowledgeArtifacts($repositoryId: ID!, $scopeType: KnowledgeScopeType, $scopePath: String) {
     knowledgeArtifacts(repositoryId: $repositoryId, scopeType: $scopeType, scopePath: $scopePath) {
-      id
-      repositoryId
-      type
-      audience
-      depth
-      scope {
-        scopeType
-        scopePath
-        modulePath
-        filePath
-        symbolName
-      }
-      status
-      progress
-      progressPhase
-      progressMessage
-      stale
-      errorCode
-      errorMessage
-      understandingId
-      understandingRevisionFp
-      generationMode
-      rendererVersion
-      dependencies {
-        dependencyType
-        targetId
-        targetRevisionFp
-      }
-      refinementUnits {
-        id
-        artifactId
-        sectionKey
-        sectionTitle
-        refinementType
-        status
-        attemptCount
-        understandingId
-        evidenceRevisionFp
-        rendererVersion
-        lastError
-        metadata
-        createdAt
-        updatedAt
-      }
-      refreshAvailable
-      generatedAt
-      createdAt
-      updatedAt
-      sourceRevision {
-        commitSha
-        branch
-        contentFingerprint
-      }
-      sections {
-        id
-        artifactId
-        title
-        content
-        summary
-        metadata
-        sectionKey
-        refinementStatus
-        confidence
-        inferred
-        orderIndex
-        evidence {
-          id
-          sectionId
-          sourceType
-          sourceId
-          filePath
-          lineStart
-          lineEnd
-          rationale
-        }
-      }
+      ${KNOWLEDGE_ARTIFACT_QUERY_FIELDS}
     }
   }
 `;
@@ -953,46 +1052,7 @@ export const EXECUTION_PATH_QUERY = gql`
 export const GENERATE_CLIFF_NOTES_MUTATION = gql`
   mutation GenerateCliffNotes($input: GenerateCliffNotesInput!) {
     generateCliffNotes(input: $input) {
-      id
-      repositoryId
-      type
-      audience
-      depth
-      scope {
-        scopeType
-        scopePath
-        modulePath
-        filePath
-        symbolName
-      }
-      status
-      progress
-      progressPhase
-      progressMessage
-      stale
-      errorCode
-      errorMessage
-      understandingId
-      understandingRevisionFp
-      refreshAvailable
-      generatedAt
-      sections {
-        id
-        title
-        content
-        summary
-        confidence
-        inferred
-        orderIndex
-        evidence {
-          id
-          sourceType
-          filePath
-          lineStart
-          lineEnd
-          rationale
-        }
-      }
+      ${KNOWLEDGE_ARTIFACT_SCOPED_FIELDS}
     }
   }
 `;
@@ -1000,35 +1060,7 @@ export const GENERATE_CLIFF_NOTES_MUTATION = gql`
 export const GENERATE_LEARNING_PATH_MUTATION = gql`
   mutation GenerateLearningPath($input: GenerateLearningPathInput!) {
     generateLearningPath(input: $input) {
-      id
-      type
-      status
-      progress
-      progressPhase
-      progressMessage
-      stale
-      errorCode
-      errorMessage
-      understandingId
-      understandingRevisionFp
-      refreshAvailable
-      generatedAt
-      sections {
-        id
-        title
-        content
-        summary
-        confidence
-        orderIndex
-        evidence {
-          id
-          sourceType
-          filePath
-          lineStart
-          lineEnd
-          rationale
-        }
-      }
+      ${KNOWLEDGE_ARTIFACT_CORE_FIELDS}
     }
   }
 `;
@@ -1036,40 +1068,7 @@ export const GENERATE_LEARNING_PATH_MUTATION = gql`
 export const GENERATE_ARCHITECTURE_DIAGRAM_MUTATION = gql`
   mutation GenerateArchitectureDiagram($input: GenerateArchitectureDiagramInput!) {
     generateArchitectureDiagram(input: $input) {
-      id
-      repositoryId
-      type
-      audience
-      depth
-      status
-      progress
-      progressPhase
-      progressMessage
-      stale
-      errorCode
-      errorMessage
-      understandingId
-      understandingRevisionFp
-      refreshAvailable
-      generatedAt
-      sections {
-        id
-        title
-        content
-        summary
-        metadata
-        confidence
-        inferred
-        orderIndex
-        evidence {
-          id
-          sourceType
-          filePath
-          lineStart
-          lineEnd
-          rationale
-        }
-      }
+      ${KNOWLEDGE_ARTIFACT_SCOPED_FIELDS}
     }
   }
 `;
@@ -1077,35 +1076,7 @@ export const GENERATE_ARCHITECTURE_DIAGRAM_MUTATION = gql`
 export const GENERATE_CODE_TOUR_MUTATION = gql`
   mutation GenerateCodeTour($input: GenerateCodeTourInput!) {
     generateCodeTour(input: $input) {
-      id
-      type
-      status
-      progress
-      progressPhase
-      progressMessage
-      stale
-      errorCode
-      errorMessage
-      understandingId
-      understandingRevisionFp
-      refreshAvailable
-      generatedAt
-      sections {
-        id
-        title
-        content
-        summary
-        confidence
-        orderIndex
-        evidence {
-          id
-          sourceType
-          filePath
-          lineStart
-          lineEnd
-          rationale
-        }
-      }
+      ${KNOWLEDGE_ARTIFACT_CORE_FIELDS}
     }
   }
 `;
@@ -1113,46 +1084,7 @@ export const GENERATE_CODE_TOUR_MUTATION = gql`
 export const GENERATE_WORKFLOW_STORY_MUTATION = gql`
   mutation GenerateWorkflowStory($input: GenerateWorkflowStoryInput!) {
     generateWorkflowStory(input: $input) {
-      id
-      repositoryId
-      type
-      audience
-      depth
-      scope {
-        scopeType
-        scopePath
-        modulePath
-        filePath
-        symbolName
-      }
-      status
-      progress
-      progressPhase
-      progressMessage
-      stale
-      errorCode
-      errorMessage
-      understandingId
-      understandingRevisionFp
-      refreshAvailable
-      generatedAt
-      sections {
-        id
-        title
-        content
-        summary
-        confidence
-        inferred
-        orderIndex
-        evidence {
-          id
-          sourceType
-          filePath
-          lineStart
-          lineEnd
-          rationale
-        }
-      }
+      ${KNOWLEDGE_ARTIFACT_SCOPED_FIELDS}
     }
   }
 `;
@@ -1171,46 +1103,7 @@ export const EXPLAIN_SYSTEM_MUTATION = gql`
 export const REFRESH_KNOWLEDGE_ARTIFACT_MUTATION = gql`
   mutation RefreshKnowledgeArtifact($id: ID!) {
     refreshKnowledgeArtifact(id: $id) {
-      id
-      repositoryId
-      type
-      audience
-      depth
-      scope {
-        scopeType
-        scopePath
-        modulePath
-        filePath
-        symbolName
-      }
-      status
-      progress
-      progressPhase
-      progressMessage
-      stale
-      errorCode
-      errorMessage
-      understandingId
-      understandingRevisionFp
-      refreshAvailable
-      generatedAt
-      sections {
-        id
-        title
-        content
-        summary
-        confidence
-        inferred
-        orderIndex
-        evidence {
-          id
-          sourceType
-          filePath
-          lineStart
-          lineEnd
-          rationale
-        }
-      }
+      ${KNOWLEDGE_ARTIFACT_SCOPED_FIELDS}
     }
   }
 `;
@@ -1560,40 +1453,7 @@ export const PREVIEW_LIVING_WIKI_PLAN_QUERY = gql`
 export const ENABLE_LIVING_WIKI_FOR_REPO_MUTATION = gql`
   mutation EnableLivingWikiForRepo($input: EnableLivingWikiForRepoInput!) {
     enableLivingWikiForRepo(input: $input) {
-      settings {
-        enabled
-        livingWikiOverviewEnabled
-        livingWikiDetailedEnabled
-        mode
-        sinks {
-          kind
-          integrationName
-          audience
-          editPolicy
-        }
-        excludePaths
-        staleWhenStrategy
-        maxPagesPerJob
-        lastRunAt
-        updatedAt
-        lastJobResult {
-          jobId
-          startedAt
-          completedAt
-          pagesPlanned
-          pagesGenerated
-          pagesExcluded
-          excludedPageIds
-          generatedPageTitles
-          exclusionReasons
-          exclusionFailureCategories
-          status
-          failureCategory
-          errorMessage
-        }
-      }
-      jobId
-      notice
+      ${LIVING_WIKI_SETTINGS_RESULT_FIELDS}
     }
   }
 `;
@@ -1601,21 +1461,7 @@ export const ENABLE_LIVING_WIKI_FOR_REPO_MUTATION = gql`
 export const DISABLE_LIVING_WIKI_FOR_REPO_MUTATION = gql`
   mutation DisableLivingWikiForRepo($repositoryId: ID!) {
     disableLivingWikiForRepo(repositoryId: $repositoryId) {
-      enabled
-      livingWikiOverviewEnabled
-      livingWikiDetailedEnabled
-      mode
-      sinks {
-        kind
-        integrationName
-        audience
-        editPolicy
-      }
-      excludePaths
-      staleWhenStrategy
-      maxPagesPerJob
-      lastRunAt
-      updatedAt
+      ${LIVING_WIKI_SETTINGS_BARE_FIELDS}
     }
   }
 `;
@@ -1623,35 +1469,9 @@ export const DISABLE_LIVING_WIKI_FOR_REPO_MUTATION = gql`
 export const UPDATE_REPOSITORY_LIVING_WIKI_SETTINGS_MUTATION = gql`
   mutation UpdateRepositoryLivingWikiSettings($input: UpdateRepositoryLivingWikiSettingsInput!) {
     updateRepositoryLivingWikiSettings(input: $input) {
-      enabled
-      livingWikiOverviewEnabled
-      livingWikiDetailedEnabled
-      mode
-      sinks {
-        kind
-        integrationName
-        audience
-        editPolicy
-      }
-      excludePaths
-      staleWhenStrategy
-      maxPagesPerJob
-      lastRunAt
-      updatedAt
+      ${LIVING_WIKI_SETTINGS_BARE_FIELDS}
       lastJobResult {
-        jobId
-        startedAt
-        completedAt
-        pagesPlanned
-        pagesGenerated
-        pagesExcluded
-        excludedPageIds
-        generatedPageTitles
-        exclusionReasons
-        exclusionFailureCategories
-        status
-        failureCategory
-        errorMessage
+        ${LIVING_WIKI_JOB_RESULT_FIELDS}
       }
     }
   }
@@ -1714,28 +1534,7 @@ export const CLEAR_REPOSITORY_LLM_OVERRIDE_MUTATION = gql`
 export const RETRY_LIVING_WIKI_JOB_MUTATION = gql`
   mutation RetryLivingWikiJob($repositoryId: ID!, $retryExcludedOnly: Boolean, $mode: LivingWikiBuildMode, $pageCountOverride: Int, $selectedPageIds: [String!], $planSignature: String) {
     retryLivingWikiJob(repositoryId: $repositoryId, retryExcludedOnly: $retryExcludedOnly, mode: $mode, pageCountOverride: $pageCountOverride, selectedPageIds: $selectedPageIds, planSignature: $planSignature) {
-      settings {
-        enabled
-        mode
-        livingWikiOverviewEnabled
-        livingWikiDetailedEnabled
-        sinks {
-          kind
-          integrationName
-          audience
-        }
-        lastJobResult {
-          jobId
-          pagesPlanned
-          pagesGenerated
-          pagesExcluded
-          status
-          failureCategory
-          errorMessage
-        }
-      }
-      jobId
-      notice
+      ${LIVING_WIKI_SETTINGS_RESULT_FIELDS}
     }
   }
 `;
