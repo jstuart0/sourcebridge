@@ -64,6 +64,11 @@ const (
 	// job. It reuses the existing queue/dedup/concurrency machinery even
 	// though no LLM calls are made — the job is CPU-bound, not LLM-bound.
 	SubsystemClustering Subsystem = "clustering"
+	// SubsystemLivingWiki is used by the living-wiki cold-start pipeline.
+	// It is the only subsystem that emits heartbeats (see subsystemEmitsHeartbeats
+	// in internal/llm/orchestrator/orchestrator.go) and always enqueues with
+	// MaxAttempts:1 because retry policy is handled by the inner orchestrator.
+	SubsystemLivingWiki Subsystem = "living_wiki"
 )
 
 // JobPriority controls queue preference. Higher-priority jobs should be

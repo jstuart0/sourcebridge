@@ -271,7 +271,7 @@ var ErrLLMProviderRequired = errors.New("llm provider required: LLM-backed enque
 // Mirrors the same rule as internal/llm/orchestrator/llm_provider_lint_test.go:
 //   - SubsystemKnowledge / SubsystemReasoning / SubsystemRequirements /
 //     SubsystemLinking / SubsystemContracts / SubsystemQA — always
-//   - "living_wiki" subsystem string — always
+//   - SubsystemLivingWiki — always
 //   - SubsystemClustering with JobType == "relabel_clusters" — only
 //     this single CPU-vs-LLM split inside clustering
 func isLLMBackedEnqueue(req *llm.EnqueueRequest) bool {
@@ -285,7 +285,7 @@ func isLLMBackedEnqueue(req *llm.EnqueueRequest) bool {
 	case llm.SubsystemClustering:
 		return strings.TrimSpace(req.JobType) == "relabel_clusters"
 	}
-	return string(req.Subsystem) == "living_wiki"
+	return req.Subsystem == llm.SubsystemLivingWiki
 }
 
 // staleJobThreshold is how long an active job can go without any store update
@@ -337,7 +337,7 @@ const (
 //     false reaps of healthy long-running calls.
 var subsystemEmitsHeartbeats = func(subsystem string) bool {
 	switch subsystem {
-	case "living_wiki":
+	case string(llm.SubsystemLivingWiki):
 		return true
 	}
 	return false
@@ -352,7 +352,7 @@ func generatingThresholdFor(job *llm.Job) (time.Duration, string) {
 	}
 	// defense-in-depth: if living_wiki is ever removed from subsystemEmitsHeartbeats,
 	// fall back to the 30-min ceiling rather than the shorter staleGeneratingThreshold.
-	if job.Subsystem == "living_wiki" {
+	if job.Subsystem == llm.SubsystemLivingWiki {
 		return staleGeneratingThresholdLivingWiki, "living_wiki_wall"
 	}
 	return staleGeneratingThreshold, "generating_wall"

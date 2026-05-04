@@ -426,7 +426,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		if s.knowledgeStore != nil && job.ArtifactID != "" {
 			_ = s.knowledgeStore.SetArtifactFailed(job.ArtifactID, "DEADLINE_EXCEEDED", "Generation timed out — please retry")
 		}
-		if s.livingWikiJobResultStore != nil && job.Subsystem == "living_wiki" {
+		if s.livingWikiJobResultStore != nil && job.Subsystem == llm.SubsystemLivingWiki {
 			persistStaleLivingWikiResult(s.livingWikiJobResultStore, job)
 		}
 	}

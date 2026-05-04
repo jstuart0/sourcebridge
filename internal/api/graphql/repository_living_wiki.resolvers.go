@@ -398,7 +398,7 @@ func enqueueWikiJob(
 	}
 
 	req := &llm.EnqueueRequest{
-		Subsystem: llm.Subsystem("living_wiki"),
+		Subsystem: llm.SubsystemLivingWiki,
 		JobType:   jobType,
 		// CR12 Part B: mode-aware TargetKey so Detailed and Overview jobs for the
 		// same repo don't de-duplicate each other when both are in-flight.
