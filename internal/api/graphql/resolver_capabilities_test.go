@@ -6,6 +6,7 @@ package graphql
 import (
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	"github.com/sourcebridge/sourcebridge/internal/entitlements"
 )
 
@@ -48,5 +49,69 @@ func TestResolveCapabilities_PlanEnterprise_BillingTrue(t *testing.T) {
 	caps := r.resolveCapabilities()
 	if !caps.features.Billing {
 		t.Fatalf("PlanEnterprise resolver should produce Billing: true, got false")
+	}
+}
+
+// TestFeatureToCapability_ExactMatchMappings documents which Feature constants
+// map to a capability-registry entry and why others don't (semantic mismatch or
+// no registry counterpart). This is a table test so additions to featureToCapability
+// are automatically covered; it also serves as living documentation of the
+// featureToCapability decision rationale.
+func TestFeatureToCapability_ExactMatchMappings(t *testing.T) {
+	// mapped: Feature → expected non-empty capability name.
+	// Both axes must gate the feature identically (see featureToCapability doc).
+	mapped := []struct {
+		feature entitlements.Feature
+		wantCap string
+		reason  string
+	}{
+		{
+			feature: entitlements.FeatureAuditLog,
+			wantCap: capabilities.CapAuditLog,
+			reason:  "enterprise-only in both entitlements (PlanEnterprise) and capability registry (EditionEnterprise); semantically equivalent",
+		},
+	}
+	for _, tc := range mapped {
+		got := featureToCapability(tc.feature)
+		if got != tc.wantCap {
+			t.Errorf("featureToCapability(%q) = %q; want %q (%s)", tc.feature, got, tc.wantCap, tc.reason)
+		}
+	}
+
+	// unmapped: Feature constants that are intentionally NOT routed through
+	// the capability registry (semantic mismatch — plan-gated on entitlements
+	// axis but no equivalent registry entry, or the two axes disagree for some
+	// plan/edition combinations).
+	unmapped := []struct {
+		feature entitlements.Feature
+		reason  string
+	}{
+		{entitlements.FeatureSSO, "plan-gated (team+); no CapSSOIdentity registry entry with equivalent semantics"},
+		{entitlements.FeatureMultiTenant, "plan-gated (team+); no equivalent capability entry"},
+		{entitlements.FeatureLinearConnector, "plan-gated; no equivalent capability entry"},
+		{entitlements.FeatureJiraConnector, "plan-gated; no equivalent capability entry"},
+		{entitlements.FeatureGitHubApp, "plan-gated; no equivalent capability entry"},
+		{entitlements.FeatureGitLabApp, "plan-gated; no equivalent capability entry"},
+		{entitlements.FeatureWebhooks, "plan-gated; no equivalent capability entry"},
+		{entitlements.FeatureJetBrains, "plan-gated; no equivalent capability entry"},
+		{entitlements.FeatureCustomTemplates, "plan-gated (enterprise); no equivalent capability entry"},
+		{entitlements.FeatureHelmChart, "plan-gated (enterprise); no equivalent capability entry"},
+		{entitlements.FeatureCliffNotes, "plan-gated; knowledge features use a separate hasWorker+hasKnowledge guard"},
+		{entitlements.FeatureLearningPaths, "plan-gated; knowledge features use a separate hasWorker+hasKnowledge guard"},
+		{entitlements.FeatureCodeTours, "plan-gated; knowledge features use a separate hasWorker+hasKnowledge guard"},
+		{entitlements.FeatureSystemExplain, "plan-gated; knowledge features use a separate hasWorker+hasKnowledge guard"},
+		{entitlements.FeatureMultiAudienceKnowledge, "plan-gated (team+); no equivalent capability entry"},
+		{entitlements.FeatureCustomKnowledgeTemplates, "plan-gated (enterprise); no equivalent capability entry"},
+		{entitlements.FeatureAdvancedLearningPaths, "plan-gated (team+); no equivalent capability entry"},
+		{entitlements.FeatureSlideGeneration, "plan-gated (enterprise); no equivalent capability entry"},
+		{entitlements.FeaturePodcastGeneration, "plan-gated (enterprise); no equivalent capability entry"},
+		{entitlements.FeatureKnowledgeScheduling, "plan-gated (enterprise); no equivalent capability entry"},
+		{entitlements.FeatureKnowledgeExport, "plan-gated (team+); no equivalent capability entry"},
+	}
+	for _, tc := range unmapped {
+		got := featureToCapability(tc.feature)
+		if got != "" {
+			t.Errorf("featureToCapability(%q) = %q; want empty (unmapped: %s)", tc.feature, got, tc.reason)
+		}
 	}
 }

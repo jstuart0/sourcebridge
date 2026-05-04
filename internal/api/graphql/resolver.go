@@ -469,20 +469,47 @@ type resolvedCapabilities struct {
 // Preserved public surface: entitlements.NewChecker and IsAllowed remain
 // available for external consumers and tests — this adapter only affects
 // how resolveCapabilities routes its internal queries.
+// featureToCapability maps an entitlements.Feature to its semantically
+// equivalent capability-registry name, or "" if no equivalent exists.
+//
+// When the return value is non-empty, resolveCapabilities routes the check
+// through capabilities.IsAvailable(cap, edition) instead of the entitlements
+// checker. This unifies the two gating axes for features where the semantics
+// are genuinely equivalent.
+//
+// Mapping rationale (update this table when adding or removing entries):
+//
+//	Feature            Cap             Basis
+//	FeatureAuditLog    CapAuditLog     Both enterprise-only; capability registry
+//	                                   entry mirrors the entitlements gate
+//	                                   exactly. (entitlements.go:91 = PlanEnterprise;
+//	                                   registry_data.go:236 = EditionEnterprise)
+//
+// Near-miss features intentionally NOT mapped (semantic mismatch):
+//
+//	FeatureSSO, FeatureMultiTenant, connectors, JetBrains — plan-gated on
+//	the entitlements axis; no semantically equivalent capability-registry
+//	entry exists today. Do not add entries here without verifying the two
+//	gating axes agree for every plan/edition combination.
+//
+// Capabilities-only features (no Feature constant; no entry possible here):
+//
+//	CapSubsystemClustering, CapAgentSetup — queried directly in
+//	resolveCapabilities via capabilities.IsAvailable.
+//
+// Preserved public surface: entitlements.NewChecker and IsAllowed remain
+// available for external consumers and tests — this adapter only affects
+// how resolveCapabilities routes its internal queries.
 func featureToCapability(feature entitlements.Feature) string {
-	// No entitlements.Feature currently has a semantically equivalent
-	// capability-registry entry. SubsystemClustering and AgentSetup are
-	// capabilities-only (no corresponding Feature constant); they are
-	// queried via capabilities.IsAvailable(capabilities.Cap*, edition)
-	// directly in resolveCapabilities below.
-	//
-	// Extension point: when a Feature gains a semantically equivalent
-	// capability-registry counterpart, add a case here and remove the
-	// entitlements check from resolveCapabilities. Example:
-	//   case entitlements.FeatureSSO:
-	//       return capabilities.CapSSOIdentity
-	_ = feature // suppress unused-parameter warning while the switch is empty
-	return ""
+	switch feature {
+	case entitlements.FeatureAuditLog:
+		// Enterprise-only in both systems; semantically equivalent.
+		// Entitlements: PlanEnterprise (entitlements.go:91).
+		// Capability registry: EditionEnterprise (registry_data.go:236).
+		return capabilities.CapAuditLog
+	default:
+		return ""
+	}
 }
 
 func (r *Resolver) resolveCapabilities() resolvedCapabilities {
