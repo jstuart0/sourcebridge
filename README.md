@@ -510,6 +510,18 @@ For production and multi-team deployments:
 - [Upgrade Guide](docs/self-hosted/upgrade.md) -- Version upgrades and migrations
 - [Backup and Restore](docs/admin/backup-restore.md) -- Data protection procedures
 
+### Migrating external uptime monitors
+
+Prior to Phase 5, the paths `/healthz` and `/readyz` were exposed via the public Ingress. They have been removed from public routing — those paths still exist on the API pod (kubelet probes them directly via pod IP), but they are no longer reachable at `https://<host>/healthz` or `https://<host>/readyz`.
+
+**If you run an external uptime check against either of those paths, update it to:**
+
+```
+https://<host>/api/health
+```
+
+This endpoint returns `{"ok":true}` with HTTP 200 and requires no authentication. It was added in the same release cycle and is the intended public health signal for external monitors, CDN origin checks, and load balancer health probes that operate outside the cluster.
+
 ## Versioning
 
 Every SourceBridge build carries a version string that's derived from

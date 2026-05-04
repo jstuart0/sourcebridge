@@ -42,15 +42,18 @@ data:
   SOURCEBRIDGE_SERVER_PUBLIC_BASE_URL: "https://sourcebridge.example.com"
   # API server LLM settings
   SOURCEBRIDGE_LLM_PROVIDER: "ollama"
-  SOURCEBRIDGE_LLM_BASE_URL: "http://localhost:11434/v1"
+  # Override in your overlay — localhost is not reachable inside the cluster.
+  SOURCEBRIDGE_LLM_BASE_URL: "CHANGE-ME-set-via-overlay"
   SOURCEBRIDGE_LLM_SUMMARY_MODEL: "qwen2.5:32b"
   # Worker LLM settings
   SOURCEBRIDGE_WORKER_LLM_PROVIDER: "ollama"
-  SOURCEBRIDGE_WORKER_LLM_BASE_URL: "http://localhost:11434/v1"
+  # Override in your overlay — localhost is not reachable inside the cluster.
+  SOURCEBRIDGE_WORKER_LLM_BASE_URL: "CHANGE-ME-set-via-overlay"
   SOURCEBRIDGE_WORKER_LLM_MODEL: "qwen2.5:32b"
   # Worker embedding settings
   SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER: "ollama"
-  SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL: "http://localhost:11434"
+  # Override in your overlay — localhost is not reachable inside the cluster.
+  SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL: "CHANGE-ME-set-via-overlay"
   SOURCEBRIDGE_WORKER_EMBEDDING_MODEL: "nomic-embed-text"
   SOURCEBRIDGE_WORKER_EMBEDDING_DIMENSION: "768"
   # Knowledge generation pressure controls

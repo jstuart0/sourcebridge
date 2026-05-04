@@ -13,18 +13,11 @@ resources:
   - api-pdb.yaml
   - worker.yaml
   - web.yaml
+  - api-servicemonitor.yaml
   - ingress.yaml
   - networkpolicy.yaml
 
-# Canonical image names for the OSS build.
-# Overlays rewrite these via the `images:` block — change newName to
-# your registry and newTag to the specific SHA or version you're deploying.
-#
-# Example overlay patch:
-#   images:
-#     - name: ghcr.io/sourcebridge-ai/sourcebridge-api
-#       newName: ghcr.io/your-org/sourcebridge-api
-#       newTag: sha-abc1234
+# Image refs — overlays rewrite via `images:` block (newName/newTag) for per-cluster registries.
 images:
   - name: ghcr.io/sourcebridge-ai/sourcebridge-api
   - name: ghcr.io/sourcebridge-ai/sourcebridge-worker

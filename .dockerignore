@@ -15,6 +15,7 @@ workers/.venv
 
 # Build artifacts
 bin/
+benchmark-results/
 
 # Documentation (not needed in images)
 docs/

@@ -1,0 +1,23 @@
+# Requires Prometheus Operator. If absent, omit this resource via overlay or install kube-prometheus-stack.
+# https://github.com/prometheus-operator/prometheus-operator
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: sourcebridge-api
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/name: sourcebridge-api
+    app.kubernetes.io/part-of: sourcebridge
+    # Add the label your Prometheus instance selects on, e.g.:
+    #   release: kube-prometheus
+    # Check: kubectl get prometheus -A -o jsonpath='{..serviceMonitorSelector}'
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sourcebridge-api
+      app.kubernetes.io/part-of: sourcebridge
+  endpoints:
+    - port: http          # named port on the sourcebridge-api Service (targetPort: 8080)
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

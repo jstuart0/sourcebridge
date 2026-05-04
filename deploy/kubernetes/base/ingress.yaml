@@ -29,27 +29,6 @@ spec:
             name: sourcebridge-api
             port:
               number: 8080
-      - path: /healthz
-        pathType: Exact
-        backend:
-          service:
-            name: sourcebridge-api
-            port:
-              number: 8080
-      - path: /readyz
-        pathType: Exact
-        backend:
-          service:
-            name: sourcebridge-api
-            port:
-              number: 8080
-      - path: /metrics
-        pathType: Exact
-        backend:
-          service:
-            name: sourcebridge-api
-            port:
-              number: 8080
       - path: /
         pathType: Prefix
         backend:
