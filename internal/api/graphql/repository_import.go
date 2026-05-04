@@ -81,7 +81,7 @@ func (r *mutationResolver) importRepository(repoID, repoName, repoPath string, i
 		})
 		commitSHA = gitMeta.CommitSHA
 	}
-	if knowledgePrewarmOnIndexEnabled() {
+	if r.Flags.KnowledgePrewarmOnIndexEnabled {
 		go r.seedRepositoryFieldGuide(repoID)
 	}
 	// Enqueue async clustering job. Must not block the indexing pipeline.

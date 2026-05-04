@@ -1398,8 +1398,24 @@ const (
 // invalidation is disabled, forces off — without selective invalidation,
 // StaleArtifacts carries the legacy pre-stale collected set (wrong
 // semantics) and auto-regen would thrash through every ready artifact.
+//
+// Preserved for boot-time and test compatibility. Request/workflow hot
+// paths should use deltaRegenModeWithFlags to avoid re-reading env vars
+// after process start.
 func deltaRegenMode() DeltaRegenMode {
-	if !selectiveInvalidationEnabled() {
+	return deltaRegenModeWithFlags(selectiveInvalidationEnabled())
+}
+
+// deltaRegenModeWithFlags is the boot-flag variant of deltaRegenMode.
+// It accepts the boot-resolved selectiveInvalidation boolean instead of
+// re-reading SOURCEBRIDGE_SELECTIVE_INVALIDATION from the environment,
+// so changing the env after boot cannot alter the behavior of in-flight
+// request paths. The env var SOURCEBRIDGE_DELTA_REGEN_MODE is still
+// read here because it is expected to be stable after boot; the
+// selectiveInvalidation gate is the volatile one that Slice 4 locked
+// at boot via featureflags.Flags.
+func deltaRegenModeWithFlags(selectiveInvalidation bool) DeltaRegenMode {
+	if !selectiveInvalidation {
 		return DeltaRegenModeOff
 	}
 	raw := strings.TrimSpace(strings.ToLower(os.Getenv("SOURCEBRIDGE_DELTA_REGEN_MODE")))

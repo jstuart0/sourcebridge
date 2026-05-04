@@ -293,7 +293,7 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 	// will call the same helper after its own delta-only refresh, so
 	// the reindex mutation and change-event paths follow identical
 	// invalidation rules.
-	r.applyImpactFromChange(ctx, id, impactReport)
+	r.applyImpactFromChange(ctx, id, impactReport, r.Flags.SelectiveInvalidationEnabled)
 
 	slog.Info("impact analysis complete",
 		"id", impactReport.ID,

@@ -23,6 +23,11 @@ import (
 // guaranteeing both the reindex mutation AND change events follow the
 // same invalidation policy.
 //
+// selectiveInvalidation must be the boot-resolved value from
+// r.Flags.SelectiveInvalidationEnabled. It is passed explicitly so
+// changing the environment after process start cannot alter the
+// behavior of an in-flight request path.
+//
 // Side effects (must remain identical to the inline original):
 //   - mutates impactReport.StaleArtifacts and StaleArtifactReasons.
 //   - calls knowledgepkg.MarkStaleForImpact OR MarkAllStale on
@@ -40,12 +45,13 @@ func (r *mutationResolver) applyImpactFromChange(
 	ctx context.Context,
 	repoID string,
 	impactReport *graphstore.ImpactReport,
+	selectiveInvalidation bool,
 ) {
 	// Mark knowledge artifacts stale — selectively if the feature flag is on,
 	// otherwise fall back to the legacy blanket behavior. In both cases the
 	// resulting StaleArtifacts / StaleArtifactReasons list is then recorded
 	// on the impact report for downstream consumers.
-	if r.KnowledgeStore != nil && selectiveInvalidationEnabled() {
+	if r.KnowledgeStore != nil && selectiveInvalidation {
 		symbolIDs := make([]string, 0, len(impactReport.SymbolsModified)+len(impactReport.SymbolsRemoved))
 		for _, sc := range impactReport.SymbolsModified {
 			if sc.SymbolID != "" {
@@ -109,7 +115,9 @@ func (r *mutationResolver) applyImpactFromChange(
 	// Shadow mode logs what it would do; live mode actually enqueues. Runs
 	// in a goroutine so the reindex mutation returns promptly; the driver
 	// uses its own background context.
-	if deltaRegenMode() != DeltaRegenModeOff && len(impactReport.StaleArtifacts) > 0 {
+	// deltaRegenModeWithFlags uses the boot-resolved selectiveInvalidation flag
+	// so a runtime env change cannot alter this gate for in-flight requests.
+	if deltaRegenModeWithFlags(selectiveInvalidation) != DeltaRegenModeOff && len(impactReport.StaleArtifacts) > 0 {
 		staleIDs := make([]string, len(impactReport.StaleArtifacts))
 		copy(staleIDs, impactReport.StaleArtifacts)
 		reportID := impactReport.ID

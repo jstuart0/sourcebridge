@@ -52,7 +52,6 @@ import (
 // directly); the difference here is that the algorithm runs through
 // the helper exactly as the resolver now invokes it.
 func TestApplyImpactFromChange_SelectivePath_PreservesBehavior(t *testing.T) {
-	t.Setenv("SOURCEBRIDGE_SELECTIVE_INVALIDATION", "true")
 	t.Setenv("SOURCEBRIDGE_DELTA_REGEN_MODE", "off") // gate off the goroutine in this test
 
 	ctx := context.Background()
@@ -76,7 +75,7 @@ func TestApplyImpactFromChange_SelectivePath_PreservesBehavior(t *testing.T) {
 		},
 	}
 
-	r.applyImpactFromChange(ctx, repoID, report)
+	r.applyImpactFromChange(ctx, repoID, report, true /* selectiveInvalidation */)
 
 	// Selective path: hit is stale, miss is not.
 	hitState := r.KnowledgeStore.GetKnowledgeArtifact(hit.ID)
@@ -128,7 +127,6 @@ func TestApplyImpactFromChange_SelectivePath_PreservesBehavior(t *testing.T) {
 // contain the first two but not the third; after the helper runs,
 // all three must be marked stale.
 func TestApplyImpactFromChange_BlanketPath_PreservesBehavior(t *testing.T) {
-	t.Setenv("SOURCEBRIDGE_SELECTIVE_INVALIDATION", "false")
 	t.Setenv("SOURCEBRIDGE_DELTA_REGEN_MODE", "off")
 
 	ctx := context.Background()
@@ -166,7 +164,7 @@ func TestApplyImpactFromChange_BlanketPath_PreservesBehavior(t *testing.T) {
 		RepositoryID: repoID,
 	}
 
-	r.applyImpactFromChange(ctx, repoID, report)
+	r.applyImpactFromChange(ctx, repoID, report, false /* selectiveInvalidation: off → blanket path */)
 
 	// MarkAllStale side effect: every artifact in the repo is now stale.
 	if !store.GetKnowledgeArtifact(alreadyStale.ID).Stale {
@@ -220,7 +218,7 @@ func TestApplyImpactFromChange_NilGuards(t *testing.T) {
 		RepositoryID: "repo-nil",
 	}
 	// Must not panic.
-	r.applyImpactFromChange(ctx, "repo-nil", report)
+	r.applyImpactFromChange(ctx, "repo-nil", report, false /* selectiveInvalidation: false covers the nil-guard path */)
 
 	if report.StaleArtifacts == nil {
 		t.Fatalf("StaleArtifacts should be initialized to empty slice, got nil")
@@ -240,7 +238,6 @@ func TestApplyImpactFromChange_NilGuards(t *testing.T) {
 // the regen driver to do work — we just need to confirm the
 // persistence happens synchronously, before the helper returns).
 func TestApplyImpactFromChange_PersistsBeforeGoroutineLaunch(t *testing.T) {
-	t.Setenv("SOURCEBRIDGE_SELECTIVE_INVALIDATION", "true")
 	t.Setenv("SOURCEBRIDGE_DELTA_REGEN_MODE", "off")
 
 	ctx := context.Background()
@@ -256,7 +253,7 @@ func TestApplyImpactFromChange_PersistsBeforeGoroutineLaunch(t *testing.T) {
 			{SymbolID: "sym-x", ChangeType: "modified"},
 		},
 	}
-	r.applyImpactFromChange(ctx, repoID, report)
+	r.applyImpactFromChange(ctx, repoID, report, true /* selectiveInvalidation */)
 
 	persisted := r.Store.GetLatestImpactReport(repoID)
 	if persisted == nil {
