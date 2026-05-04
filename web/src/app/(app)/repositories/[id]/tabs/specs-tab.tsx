@@ -153,9 +153,9 @@ export function SpecsTab({ repoId }: SpecsTabProps) {
                     <p className="text-sm font-medium text-[var(--text-primary)]">{spec.text}</p>
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                        spec.confidence === "high" ? "bg-emerald-500/10 text-emerald-500" :
-                        spec.confidence === "medium" ? "bg-amber-500/10 text-amber-500" :
-                        "bg-gray-500/10 text-gray-400"
+                        spec.confidence === "high" ? "bg-[var(--confidence-high)]/10 text-[var(--confidence-high)]" :
+                        spec.confidence === "medium" ? "bg-[var(--confidence-medium)]/10 text-[var(--confidence-medium)]" :
+                        "bg-[var(--confidence-low)]/10 text-[var(--confidence-low)]"
                       }`}>
                         {spec.confidence}
                       </span>

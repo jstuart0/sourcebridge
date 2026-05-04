@@ -32,10 +32,10 @@ export interface TraceabilityMatrixProps {
 }
 
 const confidenceClasses: Record<string, string> = {
-  VERIFIED: "bg-[var(--confidence-high,#22c55e)] ring-2 ring-[var(--confidence-high,#22c55e)]",
-  HIGH: "bg-[var(--accent-primary,#3b82f6)]",
-  MEDIUM: "bg-[var(--confidence-medium,#eab308)]",
-  LOW: "bg-[var(--confidence-low,#94a3b8)]",
+  VERIFIED: "bg-[var(--confidence-high)] ring-2 ring-[var(--confidence-high)]",
+  HIGH: "bg-[var(--accent-primary)]",
+  MEDIUM: "bg-[var(--confidence-medium)]",
+  LOW: "bg-[var(--confidence-low)]",
 };
 
 export function TraceabilityMatrix({

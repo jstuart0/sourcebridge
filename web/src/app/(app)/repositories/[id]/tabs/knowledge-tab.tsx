@@ -1037,9 +1037,9 @@ export function KnowledgeTab({
   const confidenceClass = (confidence: string) =>
     cn(
       "rounded-full px-1.5 py-0.5 text-xs text-white",
-      confidence === "HIGH" ? "bg-[var(--confidence-high,#22c55e)]"
-        : confidence === "MEDIUM" ? "bg-[var(--confidence-medium,#f59e0b)]"
-        : "bg-[var(--confidence-low,#ef4444)]",
+      confidence === "HIGH" ? "bg-[var(--confidence-high)]"
+        : confidence === "MEDIUM" ? "bg-[var(--confidence-medium)]"
+        : "bg-[var(--confidence-low)]",
     );
 
   // ---------------------------------------------------------------------------

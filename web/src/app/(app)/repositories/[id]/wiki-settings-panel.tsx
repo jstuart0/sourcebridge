@@ -1533,7 +1533,7 @@ function DisableDialog({
           <Button
             onClick={() => void handleDisable()}
             disabled={disabling}
-            className="bg-rose-600 text-white hover:bg-rose-700"
+            variant="danger"
           >
             {disabling ? (
               <>

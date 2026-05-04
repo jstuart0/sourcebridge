@@ -15,6 +15,8 @@ const buttonVariants = cva(
           "border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-2.5 text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
         ghost:
           "border-transparent bg-transparent px-3 py-2 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+        danger:
+          "border-transparent bg-[var(--danger-bg)] px-4 py-2.5 text-[var(--danger-text)] hover:bg-[var(--danger-bg-hover)]",
       },
       size: {
         sm: "h-10 px-3 text-xs",

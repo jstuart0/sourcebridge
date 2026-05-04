@@ -274,7 +274,7 @@ export function SettingsTab({
         </p>
         <Button
           onClick={() => setRemoveRepoConfirmOpen(true)}
-          className="bg-rose-600 text-white hover:bg-rose-700"
+          variant="danger"
         >
           Remove Repository
         </Button>

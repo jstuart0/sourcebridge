@@ -392,10 +392,10 @@ export function SymbolsTab({
     cn(
       "rounded-full px-1.5 py-0.5 text-xs text-white",
       confidence === "HIGH"
-        ? "bg-[var(--confidence-high,#22c55e)]"
+        ? "bg-[var(--confidence-high)]"
         : confidence === "MEDIUM"
-          ? "bg-[var(--confidence-medium,#f59e0b)]"
-          : "bg-[var(--confidence-low,#ef4444)]",
+          ? "bg-[var(--confidence-medium)]"
+          : "bg-[var(--confidence-low)]",
     );
 
   function renderScopedCliffNotesSection(section: KnowledgeSection) {
