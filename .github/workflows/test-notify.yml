@@ -1,4 +1,5 @@
-name: Deploy
+# Renamed from deploy.yml in 2026-05-04 audit refactor (Phase 5 Slice 6) — runs tests on push to main and notifies; no actual deployment occurs.
+name: Test and Notify
 
 on:
   push:

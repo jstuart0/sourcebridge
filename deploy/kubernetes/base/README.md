@@ -76,6 +76,66 @@ Optional keys (leave empty to disable):
 | `SOURCEBRIDGE_GIT_DEFAULT_TOKEN` | Workspace default git PAT (R3 slice 2: now a *bootstrap* — UI saves win at runtime) |
 | `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY` | Required if you save credentials via the UI |
 
+## Storage class requirements
+
+### SurrealDB StatefulSet PVC (`surrealdb.yaml`)
+
+The `volumeClaimTemplate` carries a `storageClassName: CHANGE-ME-set-with-Retain-policy`
+placeholder.  **Operators must replace this with a StorageClass that has
+`reclaimPolicy: Retain`** before the StatefulSet is first applied.  Using a
+`Delete`-policy class means a `kubectl delete pvc` (or a cluster-level
+namespace teardown) will permanently destroy the database volume.
+
+```bash
+# Check the reclaim policy of a StorageClass:
+kubectl get storageclass <class-name> -o jsonpath='{.reclaimPolicy}'
+
+# Patch an existing class to Retain (irreversible for existing PVs):
+kubectl patch storageclass <class-name> \
+  -p '{"reclaimPolicy":"Retain"}'
+```
+
+Override the placeholder in an overlay:
+```yaml
+patches:
+  - target:
+      kind: StatefulSet
+      name: surrealdb
+    patch: |
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: <your-retain-class>
+```
+
+### API repo-cache PVC (`api.yaml`)
+
+The `sourcebridge-repo-cache` PVC uses `accessModes: [ReadWriteMany]` (RWX)
+so all API replicas share the same repo-cache directory.  **Most default
+StorageClasses do not support RWX.**  The PVC carries a
+`storageClassName: CHANGE-ME-set-rwx-class` placeholder.
+
+Supported RWX backends:
+
+| Backend | CSI Provisioner |
+|---|---|
+| NFS subdir provisioner | `cluster.local/nfs-subdir-external-provisioner` |
+| CephFS (Rook) | `rook-ceph.cephfs.csi.ceph.com` |
+| Longhorn Shared | `driver.longhorn.io` (with `accessMode: ReadWriteMany`) |
+| AWS EFS | `efs.csi.aws.com` |
+| Azure Files | `file.csi.azure.com` |
+
+Override the placeholder in an overlay:
+```yaml
+patches:
+  - target:
+      kind: PersistentVolumeClaim
+      name: sourcebridge-repo-cache
+    patch: |
+      - op: replace
+        path: /spec/storageClassName
+        value: <your-rwx-class>
+```
+
 ## Deploying from base directly
 
 ```bash

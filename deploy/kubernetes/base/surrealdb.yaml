@@ -1,3 +1,20 @@
+# OPERATOR RESPONSIBILITY — storageClassName:
+# The volumeClaimTemplate below sets storageClassName to a placeholder
+# value.  Before applying, operators MUST replace it with a StorageClass
+# whose reclaimPolicy is "Retain" so that deleting the StatefulSet (or its
+# PVC) does NOT destroy the SurrealDB data volume.
+#
+# Create a Retain-policy StorageClass, e.g. for a Ceph/RBD cluster:
+#   kubectl patch storageclass <your-class> \
+#     -p '{"reclaimPolicy":"Retain"}'
+# Then set storageClassName in the overlay:
+#   images: []
+#   patches:
+#     - target: {kind: StatefulSet, name: surrealdb}
+#       patch: |
+#         - op: replace
+#           path: /spec/volumeClaimTemplates/0/spec/storageClassName
+#           value: <your-retain-class>
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -98,6 +115,10 @@ spec:
         name: surrealdb-data
       spec:
         accessModes: ["ReadWriteOnce"]
+        # CHANGE-ME: replace with a StorageClass that has reclaimPolicy: Retain
+        # so that PVC deletion does not destroy the database volume.
+        # See the top-of-file comment for the overlay patch pattern.
+        storageClassName: CHANGE-ME-set-with-Retain-policy
         resources:
           requests:
             storage: 10Gi

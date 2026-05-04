@@ -27,7 +27,9 @@ spec:
         fsGroup: 1000
       containers:
         - name: sourcebridge-web
-          image: ghcr.io/sourcebridge-ai/sourcebridge-web:latest
+          # Tag must be overridden by an overlay images: block.
+          # See kustomization.yaml images: entries — the overlay sets newTag.
+          image: ghcr.io/sourcebridge-ai/sourcebridge-web:pin-via-overlay-do-not-use
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

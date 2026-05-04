@@ -1,3 +1,22 @@
+# OPERATOR RESPONSIBILITY — ReadWriteMany storageClassName:
+# This PVC uses accessMode ReadWriteMany (RWX) so that all API replicas can
+# share a single repo-cache volume.  RWX is NOT supported by most default
+# StorageClasses (e.g. local-path, Ceph RBD, OpenEBS Jiva).
+#
+# Before applying, replace storageClassName with a class that provides RWX.
+# Common choices:
+#   - NFS-backed provisioner (e.g. nfs-client, nfs-subdir)
+#   - CephFS (provisioner: rook-ceph.cephfs.csi.ceph.com)
+#   - Longhorn "Shared" volumes (accessModes: RWX)
+#   - AWS EFS CSI driver (efs.csi.aws.com)
+#
+# Override via an overlay patch, e.g.:
+#   patches:
+#     - target: {kind: PersistentVolumeClaim, name: sourcebridge-repo-cache}
+#       patch: |
+#         - op: replace
+#           path: /spec/storageClassName
+#           value: <your-rwx-class>
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -9,6 +28,10 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
+  # CHANGE-ME: replace with a StorageClass that supports ReadWriteMany.
+  # See the top-of-file comment for supported backends and the overlay
+  # patch pattern.
+  storageClassName: CHANGE-ME-set-rwx-class
   resources:
     requests:
       storage: 10Gi
@@ -60,7 +83,9 @@ spec:
         fsGroup: 1000
       containers:
         - name: sourcebridge-api
-          image: ghcr.io/sourcebridge-ai/sourcebridge-api:latest
+          # Tag must be overridden by an overlay images: block.
+          # See kustomization.yaml images: entries — the overlay sets newTag.
+          image: ghcr.io/sourcebridge-ai/sourcebridge-api:pin-via-overlay-do-not-use
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
