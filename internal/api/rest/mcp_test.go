@@ -1724,9 +1724,11 @@ func TestMCP_StreamableHTTP_DeleteSession(t *testing.T) {
 		t.Fatal("no session ID")
 	}
 
-	// Delete the session
+	// Delete the session — must carry the same claims that created it (SEC-1 ownership check).
 	delReq := httptest.NewRequest("DELETE", "/api/v1/mcp/http", nil)
 	delReq.Header.Set("Mcp-Session-Id", sessionID)
+	delCtx := context.WithValue(delReq.Context(), auth.ClaimsKey, &auth.Claims{UserID: "user-1"})
+	delReq = delReq.WithContext(delCtx)
 	delRR := httptest.NewRecorder()
 	h.handler.handleStreamableHTTPDelete(delRR, delReq)
 
