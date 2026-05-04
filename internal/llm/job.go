@@ -71,6 +71,28 @@ const (
 	SubsystemLivingWiki Subsystem = "living_wiki"
 )
 
+// AllSubsystems is the canonical list of every Subsystem constant defined in
+// this package. It exists so lint/coverage tests can iterate the complete set
+// without maintaining a separate hand-rolled slice that silently diverges when
+// new constants are added.
+//
+// Maintenance contract: whenever a new Subsystem constant is added above, its
+// value MUST be appended here. The syncJobOp lint test
+// (TestSyncJobOpCoversAllLLMSubsystems in internal/api/graphql) iterates this
+// slice to verify that syncJobOp has an explicit mapping for every subsystem —
+// omitting a new constant from AllSubsystems would make that test pass silently
+// for a subsystem that has no documented mapping.
+var AllSubsystems = []Subsystem{
+	SubsystemKnowledge,
+	SubsystemReasoning,
+	SubsystemRequirements,
+	SubsystemLinking,
+	SubsystemContracts,
+	SubsystemQA,
+	SubsystemClustering,
+	SubsystemLivingWiki,
+}
+
 // JobPriority controls queue preference. Higher-priority jobs should be
 // scheduled before background maintenance and prewarm work.
 type JobPriority string

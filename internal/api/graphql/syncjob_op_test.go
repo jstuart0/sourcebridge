@@ -20,7 +20,14 @@ import (
 // Expected mappings are maintained here in parallel with the switch in
 // resolver.go. When a mapping changes, update BOTH.
 //
-// Subsystems deliberately omitted from syncJobOp:
+// The test iterates llm.AllSubsystems (the canonical list maintained in
+// internal/llm/job.go) instead of a local hand-rolled slice. Adding a new
+// Subsystem constant requires updating llm.AllSubsystems in the same commit,
+// which means the test will fail for the new subsystem until an expectedOp
+// entry is also added here — closing the gap that Slice 7 left open.
+//
+// Subsystems in the explicit OpAnalysis allowlist below fall to the syncJobOp
+// default for a documented reason (not an accidental omission):
 //   - SubsystemLivingWiki: routed through livingWikiOpForJobType, not
 //     runSyncLLMJob / syncJobOp. No switch case needed.
 //   - SubsystemClustering: CPU-bound background job; no LLM call.
@@ -43,41 +50,36 @@ func TestSyncJobOpCoversAllLLMSubsystems(t *testing.T) {
 		llm.SubsystemLinking:      resolution.OpAnalysis,
 		llm.SubsystemContracts:    resolution.OpAnalysis,
 		llm.SubsystemQA:           resolution.OpQASynth, // fallback path (empty jobType)
-		// SubsystemClustering: falls to OpAnalysis by default (no LLM calls;
-		// CPU-bound job). Explicit here so a future reader understands the
-		// default is intentional, not an oversight.
+		// SubsystemClustering falls to OpAnalysis by default. ALLOWLISTED: CPU-bound
+		// background job with no LLM calls; the OpAnalysis default is intentional.
+		// Do NOT remove from expectedOp — it must appear here to confirm the intent
+		// rather than silently passing because the switch has no case for it.
 		llm.SubsystemClustering: resolution.OpAnalysis,
-		// SubsystemLivingWiki: NOT routed through syncJobOp in production.
-		// livingWikiOpForJobType handles the op mapping for living-wiki jobs.
-		// syncJobOp falls through to OpAnalysis for this subsystem, which is
-		// the documented behaviour (the actual living-wiki path never calls
-		// syncJobOp). Listed here so the test enumerates the full set and
-		// documents the "not a real mapping" intent.
+		// SubsystemLivingWiki falls to OpAnalysis by default. ALLOWLISTED: NOT
+		// routed through syncJobOp in production — livingWikiOpForJobType handles
+		// the op mapping for living-wiki jobs. The actual living-wiki path never
+		// calls syncJobOp; the fallthrough to OpAnalysis is the documented,
+		// expected behavior. Listed here (not omitted) so the test enumerates the
+		// full set and documents the "not a real mapping" intent.
 		llm.SubsystemLivingWiki: resolution.OpAnalysis,
 	}
 
-	// Enumerate every Subsystem constant so a new addition triggers a
-	// compile-time "not in expectedOp" detection below.
-	allSubsystems := []llm.Subsystem{
-		llm.SubsystemKnowledge,
-		llm.SubsystemReasoning,
-		llm.SubsystemRequirements,
-		llm.SubsystemLinking,
-		llm.SubsystemContracts,
-		llm.SubsystemQA,
-		llm.SubsystemClustering,
-		llm.SubsystemLivingWiki,
-	}
-
-	// Verify the expected map covers every entry in allSubsystems.
-	for _, sub := range allSubsystems {
+	// Iterate llm.AllSubsystems — the canonical list from internal/llm/job.go.
+	// A new Subsystem constant that is not added to AllSubsystems will not be
+	// discovered here, but the AllSubsystems maintenance contract (documented
+	// in job.go) means the constant and AllSubsystems must change together.
+	// This is simpler and more explicit than AST parsing, and the compile-time
+	// contract means a missing AllSubsystems update is detectable at code review.
+	for _, sub := range llm.AllSubsystems {
 		if _, ok := expectedOp[sub]; !ok {
-			t.Errorf("subsystem %q has no expected-op entry in this test; add it to expectedOp and document its mapping", sub)
+			t.Errorf("subsystem %q is in llm.AllSubsystems but has no expected-op entry in this test; "+
+				"add it to expectedOp and document its mapping (or add to the OpAnalysis allowlist above "+
+				"if it legitimately falls through)", sub)
 		}
 	}
 
 	// Verify syncJobOp returns the expected op for each subsystem.
-	for _, sub := range allSubsystems {
+	for _, sub := range llm.AllSubsystems {
 		want := expectedOp[sub]
 		got := syncJobOp(sub, "") // empty jobType exercises the default path
 		if got != want {
