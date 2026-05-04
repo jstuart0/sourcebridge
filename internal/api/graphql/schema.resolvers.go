@@ -113,12 +113,7 @@ func (r *mutationResolver) RemoveRepository(ctx context.Context, id string) (boo
 
 // RemoveRepositoryResult is the resolver for the removeRepositoryResult field.
 func (r *mutationResolver) RemoveRepositoryResult(ctx context.Context, id string) (*MutationResult, error) {
-	ok, err := r.RemoveRepository(ctx, id)
-	if err != nil {
-		message := err.Error()
-		return &MutationResult{Success: false, Error: &message}, nil
-	}
-	return &MutationResult{Success: ok}, nil
+	return boolToMutationResult(r.RemoveRepository(ctx, id))
 }
 
 // ReindexRepository is the resolver for the reindexRepository field.
@@ -1508,12 +1503,7 @@ func (r *mutationResolver) UnlinkRepos(ctx context.Context, linkID string) (bool
 
 // UnlinkReposResult is the resolver for the unlinkReposResult field.
 func (r *mutationResolver) UnlinkReposResult(ctx context.Context, linkID string) (*MutationResult, error) {
-	ok, err := r.UnlinkRepos(ctx, linkID)
-	if err != nil {
-		message := err.Error()
-		return &MutationResult{Success: false, Error: &message}, nil
-	}
-	return &MutationResult{Success: ok}, nil
+	return boolToMutationResult(r.UnlinkRepos(ctx, linkID))
 }
 
 // DetectContracts is the resolver for the detectContracts field.
@@ -1606,12 +1596,7 @@ func (r *mutationResolver) DetectContracts(ctx context.Context, repoID string) (
 
 // DetectContractsResult is the resolver for the detectContractsResult field.
 func (r *mutationResolver) DetectContractsResult(ctx context.Context, repoID string) (*MutationResult, error) {
-	ok, err := r.DetectContracts(ctx, repoID)
-	if err != nil {
-		message := err.Error()
-		return &MutationResult{Success: false, Error: &message}, nil
-	}
-	return &MutationResult{Success: ok}, nil
+	return boolToMutationResult(r.DetectContracts(ctx, repoID))
 }
 
 // GenerateCliffNotes is the resolver for the generateCliffNotes field.
@@ -2313,12 +2298,7 @@ func (r *mutationResolver) DeleteModelCapabilities(ctx context.Context, modelID 
 
 // DeleteModelCapabilitiesResult is the resolver for the deleteModelCapabilitiesResult field.
 func (r *mutationResolver) DeleteModelCapabilitiesResult(ctx context.Context, modelID string) (*MutationResult, error) {
-	ok, err := r.DeleteModelCapabilities(ctx, modelID)
-	if err != nil {
-		message := err.Error()
-		return &MutationResult{Success: false, Error: &message}, nil
-	}
-	return &MutationResult{Success: ok}, nil
+	return boolToMutationResult(r.DeleteModelCapabilities(ctx, modelID))
 }
 
 // UpdateLivingWikiSettings is the resolver for the updateLivingWikiSettings field.
