@@ -43,6 +43,7 @@ import {
 import { useServerCapabilities } from "@/lib/use-server-capabilities";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
@@ -63,7 +64,7 @@ import {
   type SourceTarget,
 } from "@/lib/source-target";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
-import { cn } from "@/lib/utils";
+import { cn, getServerOrigin } from "@/lib/utils";
 import { LazyScoreBreakdown } from "@/components/understanding-score";
 import { ImpactReportPanel } from "@/components/impact-report";
 import { ChangeSimulationPanel } from "@/components/change-simulation";
@@ -71,6 +72,7 @@ import { ArchitectureDiagram } from "@/components/architecture/ArchitectureDiagr
 import { RelatedReposPanel } from "@/components/federation/RelatedReposPanel";
 import { CreateRequirementDialog } from "@/components/requirements/CreateRequirementDialog";
 import { UpstreamStalenessPill } from "@/components/repository/UpstreamStalenessPill";
+import { RepositoryDetailSkeleton } from "./repository-detail-skeleton";
 import { WikiSettingsPanel } from "./wiki-settings-panel";
 import { ClaudeCodeWizard } from "./_components/claude-code-wizard";
 import { ClusterTable } from "@/components/subsystems/ClusterTable";
@@ -730,6 +732,7 @@ export default function RepositoryDetailPage() {
   const [symbolChatByScope, setSymbolChatByScope] = useState<Record<string, SymbolChatMessage[]>>({});
   const [specExtracting, setSpecExtracting] = useState(false);
   const [specExtractionResult, setSpecExtractionResult] = useState<string | null>(null);
+  const [specExtractionStatus, setSpecExtractionStatus] = useState<"error" | "success" | null>(null);
   const [specConfidenceFilter, setSpecConfidenceFilter] = useState<string | null>(null);
   const [repoJobs, setRepoJobs] = useState<RepoJobActivityResponse | null>(null);
   const [repoJobsError, setRepoJobsError] = useState<string | null>(null);
@@ -1227,13 +1230,16 @@ export default function RepositoryDetailPage() {
     trackEvent({ event: "spec_extraction_triggered", repositoryId: repoId });
     setSpecExtracting(true);
     setSpecExtractionResult(null);
+    setSpecExtractionStatus(null);
     try {
       const res = await triggerSpecExtraction({ input: { repositoryId: repoId } });
       if (res.data?.triggerSpecExtraction) {
         const r = res.data.triggerSpecExtraction;
         setSpecExtractionResult(`Discovered ${r.discovered} specs from ${r.totalCandidates} candidates`);
+        setSpecExtractionStatus("success");
       } else if (res.error) {
         setSpecExtractionResult(`Extraction failed: ${res.error.message}`);
+        setSpecExtractionStatus("error");
       }
       reexecuteDiscoveredReqs({ requestPolicy: "network-only" });
     } finally {
@@ -1793,12 +1799,29 @@ export default function RepositoryDetailPage() {
     return () => clearInterval(interval);
   }, [hasGeneratingScopedArtifact, reexecuteSymbolKnowledge, reexecuteSymbolChildren]);
 
-  if (!repo && !repoResult.fetching) {
+  if (repoResult.fetching) {
     return (
       <PageFrame>
-        <Panel>
-          <p className="text-sm text-[var(--text-secondary)]">Repository not found.</p>
-        </Panel>
+        <RepositoryDetailSkeleton />
+      </PageFrame>
+    );
+  }
+
+  if (!repo) {
+    return (
+      <PageFrame>
+        <EmptyState
+          title="Repository not found"
+          description="This repository may have been removed or the link is outdated."
+          actions={
+            <button
+              onClick={() => router.push("/repositories")}
+              className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+            >
+              Back to repositories
+            </button>
+          }
+        />
       </PageFrame>
     );
   }
@@ -2343,7 +2366,11 @@ export default function RepositoryDetailPage() {
             </select>
           </div>
           {specExtractionResult && (
-            <div className={`mb-4 rounded-[var(--control-radius)] border px-3 py-2 text-sm ${specExtractionResult.startsWith("Extraction failed") ? "border-red-500/30 bg-red-500/10 text-red-500" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"}`}>
+            <div className={`mb-4 rounded-[var(--control-radius)] border px-3 py-2 text-sm ${
+              specExtractionStatus === "error"
+                ? "border-[var(--danger-border,#dc2626)] bg-[var(--danger-bg,rgba(239,68,68,0.1))] text-[var(--danger-text,#ef4444)]"
+                : "border-[var(--success-border,rgba(34,197,94,0.3))] bg-[var(--success-bg,rgba(34,197,94,0.1))] text-[var(--success-text,#22c55e)]"
+            }`}>
               {specExtractionResult}
             </div>
           )}
@@ -3733,18 +3760,13 @@ export default function RepositoryDetailPage() {
                           <p className="text-sm text-[var(--text-secondary)]">Run this command, replacing <code className="rounded bg-[var(--bg-subtle)] px-1 py-0.5 text-xs">&lt;paste-here&gt;</code> with your token.</p>
                           <div className="mt-1.5 flex items-center gap-2">
                             <code className="min-w-0 flex-1 overflow-x-auto rounded bg-[var(--bg-subtle)] px-3 py-2 text-xs font-mono text-[var(--text-primary)]">
-                              {typeof window !== "undefined"
-                                ? `sourcebridge setup claude --server ${window.location.protocol}//${window.location.host} --token <paste-here> --repo-id ${repoId}`
-                                : `sourcebridge setup claude --server <your-server-url> --token <paste-here> --repo-id ${repoId}`}
+                              {`sourcebridge setup claude --server ${getServerOrigin()} --token <paste-here> --repo-id ${repoId}`}
                             </code>
                             <button
                               type="button"
                               onClick={() => {
-                                const host = typeof window !== "undefined"
-                                  ? `${window.location.protocol}//${window.location.host}`
-                                  : "<your-server-url>";
                                 void navigator.clipboard.writeText(
-                                  `sourcebridge setup claude --server ${host} --token <paste-here> --repo-id ${repoId}`
+                                  `sourcebridge setup claude --server ${getServerOrigin()} --token <paste-here> --repo-id ${repoId}`
                                 );
                                 setCopiedSetupCmd(true);
                                 setTimeout(() => setCopiedSetupCmd(false), 2000);
