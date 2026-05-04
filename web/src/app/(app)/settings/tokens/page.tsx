@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
 import { authFetch } from "@/lib/auth-fetch";
@@ -42,6 +43,7 @@ export default function SettingsTokensPage() {
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
 
   const [newName, setNewName] = useState(() => {
     const raw = searchParams.get("suggested_name");
@@ -98,8 +100,8 @@ export default function SettingsTokensPage() {
     setCreating(false);
   }
 
-  async function revoke(id: string) {
-    if (!confirm("Revoke this token? Any client using it will lose access.")) return;
+  async function revokeConfirmed(id: string) {
+    setRevokeConfirmId(null);
     try {
       const res = await authFetch(`/api/v1/tokens/${encodeURIComponent(id)}`, {
         method: "DELETE",
@@ -202,7 +204,11 @@ export default function SettingsTokensPage() {
                     {t.client_type ? <span>Client: {t.client_type}</span> : null}
                   </div>
                 </div>
-                <Button size="sm" variant="secondary" onClick={() => revoke(t.id)}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setRevokeConfirmId(t.id)}
+                >
                   Revoke
                 </Button>
               </li>
@@ -210,6 +216,17 @@ export default function SettingsTokensPage() {
           </ul>
         )}
       </Panel>
+
+      <ConfirmDialog
+        open={revokeConfirmId !== null}
+        title="Revoke token"
+        body="Revoke this token? Any client using it will lose access."
+        confirmLabel="Revoke"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={() => revokeConfirmId !== null && revokeConfirmed(revokeConfirmId)}
+        onCancel={() => setRevokeConfirmId(null)}
+      />
     </div>
   );
 }

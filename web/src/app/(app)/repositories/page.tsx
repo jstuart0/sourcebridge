@@ -13,6 +13,7 @@ import {
 } from "@/lib/graphql/queries";
 import { useEventStream, ServerEvent } from "@/lib/sse";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
@@ -66,6 +67,7 @@ export default function RepositoriesPage() {
   const [bulkResults, setBulkResults] = useState<{ name: string; status: string; error?: string }[]>([]);
   const [bulkImporting, setBulkImporting] = useState(false);
   const [pendingRedirectRepoId, setPendingRedirectRepoId] = useState<string | null>(null);
+  const [removeConfirm, setRemoveConfirm] = useState<{ id: string; name: string } | null>(null);
 
   const repos: Repository[] = result.data?.repositories || [];
 
@@ -186,9 +188,13 @@ export default function RepositoriesPage() {
     reexecute({ requestPolicy: "network-only" });
   }
 
-  async function handleRemoveRepo(id: string, name: string) {
-    if (!confirm(`Remove repository "${name}"? This cannot be undone.`)) return;
-    await removeRepo({ id });
+  async function handleRemoveRepoConfirmed(id: string) {
+    setRemoveConfirm(null);
+    const res = await removeRepo({ id });
+    if (res.error) {
+      setAddError(`Failed to remove repository: ${res.error.message}`);
+      return;
+    }
     reexecute({ requestPolicy: "network-only" });
   }
 
@@ -337,7 +343,7 @@ export default function RepositoriesPage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => handleRemoveRepo(repo.id, repo.name)}
+                    onClick={() => setRemoveConfirm({ id: repo.id, name: repo.name })}
                     title="Remove repository"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -434,6 +440,17 @@ export default function RepositoriesPage() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={removeConfirm !== null}
+        title="Remove repository"
+        body={`Remove repository "${removeConfirm?.name}"? This cannot be undone.`}
+        confirmLabel="Remove"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={() => removeConfirm !== null && handleRemoveRepoConfirmed(removeConfirm.id)}
+        onCancel={() => setRemoveConfirm(null)}
+      />
     </PageFrame>
   );
 }

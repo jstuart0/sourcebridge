@@ -42,6 +42,7 @@ import {
 } from "@/lib/understanding";
 import { useServerCapabilities } from "@/lib/use-server-capabilities";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
@@ -738,6 +739,8 @@ export default function RepositoryDetailPage() {
   const [understandingDedupeNote, setUnderstandingDedupeNote] = useState(false);
   const seenRepoTerminalRef = useRef<Record<string, string>>({});
   const locallyCancelledJobsRef = useRef<Record<string, number>>({});
+
+  const [removeRepoConfirmOpen, setRemoveRepoConfirmOpen] = useState(false);
 
   const [repoResult, reexecuteRepo] = useQuery({ query: REPOSITORY_QUERY, variables: { id: repoId } });
   const [globalWikiResult] = useQuery({ query: LIVING_WIKI_GLOBAL_SETTINGS_QUERY });
@@ -3817,17 +3820,26 @@ export default function RepositoryDetailPage() {
               Removing this repository will delete all indexed data, symbols, and requirement links.
             </p>
             <Button
-              onClick={() => {
-                if (confirm(`Remove "${repo?.name}"? This cannot be undone.`)) {
-                  removeRepo({ id: repoId }).then(() => {
-                    window.location.href = "/repositories";
-                  });
-                }
-              }}
+              onClick={() => setRemoveRepoConfirmOpen(true)}
               className="bg-rose-600 text-white hover:bg-rose-700"
             >
               Remove Repository
             </Button>
+            <ConfirmDialog
+              open={removeRepoConfirmOpen}
+              title="Remove repository"
+              body={`Remove "${repo?.name}"? This cannot be undone.`}
+              confirmLabel="Remove"
+              cancelLabel="Cancel"
+              destructive
+              onConfirm={async () => {
+                setRemoveRepoConfirmOpen(false);
+                const res = await removeRepo({ id: repoId });
+                if (res.error) return;
+                router.push("/repositories");
+              }}
+              onCancel={() => setRemoveRepoConfirmOpen(false)}
+            />
           </div>
         </Panel>
       )}

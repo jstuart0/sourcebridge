@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
@@ -102,6 +103,7 @@ export default function ModelsPage() {
 
   // Add new model form
   const [showAdd, setShowAdd] = useState(false);
+  const [deleteConfirmModelId, setDeleteConfirmModelId] = useState<string | null>(null);
   const [newModel, setNewModel] = useState<Partial<ModelCapability>>({
     modelId: "",
     provider: "",
@@ -172,8 +174,8 @@ export default function ModelsPage() {
     }
   };
 
-  const handleDelete = async (modelId: string) => {
-    if (!confirm(`Delete capability profile for "${modelId}"?`)) return;
+  const handleDeleteConfirmed = async (modelId: string) => {
+    setDeleteConfirmModelId(null);
     try {
       await fetchWithAuth(`/api/v1/admin/comprehension/models/${encodeURIComponent(modelId)}`, {
         method: "DELETE",
@@ -504,7 +506,7 @@ export default function ModelsPage() {
                         </button>
                         {m.source !== "builtin" && (
                           <button
-                            onClick={() => handleDelete(m.modelId)}
+                            onClick={() => setDeleteConfirmModelId(m.modelId)}
                             className="text-xs text-red-400 hover:underline"
                           >
                             Delete
@@ -562,6 +564,17 @@ export default function ModelsPage() {
           </div>
         </Panel>
       )}
+
+      <ConfirmDialog
+        open={deleteConfirmModelId !== null}
+        title="Delete capability profile"
+        body={`Delete capability profile for "${deleteConfirmModelId}"?`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={() => deleteConfirmModelId !== null && handleDeleteConfirmed(deleteConfirmModelId)}
+        onCancel={() => setDeleteConfirmModelId(null)}
+      />
     </PageFrame>
   );
 }
