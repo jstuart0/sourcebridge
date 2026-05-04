@@ -1694,6 +1694,14 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 		slog.Warn("refresh: repo source unavailable, docs will be omitted", "repo_id", repo.ID, "error", repoRootErr)
 	}
 
+	// Each artifact type delegates refresh to its own generation service.
+	// Slice 5b: cliff notes routes through cliffNotesGenerationService.RefreshFromExisting.
+	// Remaining types still use the inline enqueueKnowledgeJob closure below
+	// (replaced one at a time in Slices 5c–5f).
+	if existing.Type == knowledgepkg.ArtifactCliffNotes {
+		return cliffNotesGenerationService{resolver: r.Resolver}.RefreshFromExisting(ctx, existing)
+	}
+
 	// The refresh runs through the orchestrator like the dedicated
 	// Generate* mutations. We don't know the snapshot size until we
 	// assemble it inside the closure, so snapshotBytes is reported via
@@ -1735,93 +1743,6 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 		}
 
 		switch existing.Type {
-		case knowledgepkg.ArtifactCliffNotes:
-			scopeUnderstanding, reusedUnderstanding := attachFreshUnderstanding(r.KnowledgeStore, existing, scope, snap.SourceRevision)
-			renderPlan := cliffNotesRenderPlanForArtifact(r.KnowledgeStore, existing, snap.SourceRevision, scopeUnderstanding)
-			if scopeUnderstanding == nil {
-				if _, err := seedRepositoryUnderstanding(r.KnowledgeStore, existing, scope, snap.SourceRevision, knowledgepkg.UnderstandingBuildingTree); err != nil {
-					slog.Warn("failed to seed repository understanding", "artifact_id", existing.ID, "error", err)
-				}
-			}
-			if reusedUnderstanding {
-				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
-				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(existing.ID, 0.12, "understanding", "Using cached repository understanding")
-			}
-			bgCtx := runCtx
-			if renderPlan.RenderOnly {
-				bgCtx = withCliffNotesRenderMetadata(
-					bgCtx,
-					true,
-					renderPlan.SelectedSectionTitles,
-					renderPlan.UnderstandingDepth,
-					renderPlan.RelevanceProfile,
-				)
-			}
-			streamDriver := r.runStreamProgressDriver(bgCtx, rt, existing.ID, rpcBucketForArtifact(existing))
-			resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, existing.ID, "cliff_notes", streamDriver.OnProgress()), &knowledgev1.GenerateCliffNotesRequest{
-				RepositoryId:   repo.ID,
-				RepositoryName: repo.Name,
-				Audience:       string(existing.Audience),
-				AudienceEnum:   protoAudience(existing.Audience),
-				Depth:          string(existing.Depth),
-				DepthEnum:      protoDepth(existing.Depth),
-				ScopeType:      string(scope.ScopeType),
-				ScopePath:      scope.ScopePath,
-				SnapshotJson:   string(snapJSON),
-			})
-			streamDriver.Close()
-			if err != nil {
-				slog.Error("refresh cliff notes failed", "artifact_id", existing.ID, "error", err)
-				markRepositoryUnderstandingFailed(r.KnowledgeStore, existing, scope, snap.SourceRevision, err)
-				return err
-			}
-			understanding, err := updateUnderstandingForCliffNotes(r.KnowledgeStore, existing, scope, snap.SourceRevision, resp, knowledgepkg.UnderstandingReady)
-			if err != nil {
-				slog.Warn("failed to update repository understanding", "artifact_id", existing.ID, "error", err)
-			}
-			persistUsage(resp.Usage)
-			sections := make([]knowledgepkg.Section, len(resp.Sections))
-			for i, sec := range resp.Sections {
-				refinementStatus := strings.TrimSpace(sec.RefinementStatus)
-				if refinementStatus == "" {
-					refinementStatus = "light"
-				}
-				sections[i] = knowledgepkg.Section{
-					Title:            sec.Title,
-					Content:          sec.Content,
-					Summary:          sec.Summary,
-					Metadata:         cliffNotesSectionMetadataJSON(knowledgepkg.ArtifactCliffNotes, understanding, refinementStatus, sec.Title, len(sec.Evidence) > 0),
-					Confidence:       mapProtoConfidence(sec.Confidence),
-					Inferred:         sec.Inferred,
-					Evidence:         mapProtoEvidence(sec.Evidence),
-					SectionKey:       knowledgepkg.SectionKeyForTitle(sec.Title),
-					RefinementStatus: refinementStatus,
-				}
-			}
-			if renderPlan.RenderOnly && len(renderPlan.SelectedSectionTitles) > 0 {
-				selected := make(map[string]struct{}, len(renderPlan.SelectedSectionTitles))
-				for _, title := range renderPlan.SelectedSectionTitles {
-					selected[title] = struct{}{}
-				}
-				sections = knowledgepkg.MergeSectionsByTitle(r.KnowledgeStore.GetKnowledgeSections(existing.ID), sections, selected)
-			}
-			if err := r.KnowledgeStore.SupersedeArtifact(existing.ID, sections); err != nil {
-				return err
-			}
-			syncCliffNotesRefinementUnits(r.KnowledgeStore, existing, sections, understanding)
-			if existing.GenerationMode != knowledgepkg.GenerationModeClassic && existing.Depth != knowledgepkg.DepthSummary {
-				targets := cliffNotesDeepeningTargets(r.KnowledgeStore, existing)
-				slog.Info("cliff_notes_deepening_targets_evaluated",
-					"artifact_id", existing.ID,
-					"target_count", len(targets),
-					"targets", targets,
-				)
-				if len(targets) > 0 {
-					if err := r.enqueueCliffNotesDeepening(repo, existing, scope, snap.SourceRevision, snapJSON, targets); err != nil {
-						slog.Warn("failed to enqueue refreshed cliff notes deepening", "artifact_id", existing.ID, "error", err)
-					}
-				}
-			}
 		case knowledgepkg.ArtifactArchitectureDiagram:
 			architecturePromptJSON := snapJSON
 			var understandingForDiagram *knowledgepkg.RepositoryUnderstanding

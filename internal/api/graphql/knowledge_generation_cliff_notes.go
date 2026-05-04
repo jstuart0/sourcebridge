@@ -470,7 +470,126 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 }
 
 // RefreshFromExisting re-runs the generation pipeline against an existing
-// artifact, replacing its sections in place. Implemented in Phase 1 Slice 5b.
+// artifact, replacing its sections in place (Phase 1 Slice 5b).
+//
+// It mirrors the assembly + enqueue pattern of Generate, but reads audience,
+// depth, and scope from the existing artifact rather than caller input so the
+// re-run is semantically identical to the original generation request.
 func (s cliffNotesGenerationService) RefreshFromExisting(ctx context.Context, existing *knowledgepkg.Artifact) (*KnowledgeArtifact, error) {
-	panic("TODO: implemented in Phase 1 Slice 5b")
+	r := s.resolver
+
+	repo := r.getStore(ctx).GetRepository(existing.RepositoryID)
+	if repo == nil {
+		return nil, fmt.Errorf("repository %s not found", existing.RepositoryID)
+	}
+
+	scope := knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository}
+	if existing.Scope != nil {
+		scope = existing.Scope.Normalize()
+	}
+	audience := string(existing.Audience)
+	depth := string(existing.Depth)
+	generationMode := existing.GenerationMode
+
+	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
+	repoRoot, repoRootErr := resolveRepoSourcePath(repo)
+	if repoRootErr != nil {
+		slog.Warn("cliff notes refresh: repo source unavailable, docs will be omitted",
+			"repo_id", repo.ID, "error", repoRootErr)
+	}
+
+	capturedStore := r.getStore(ctx)
+	err := r.enqueueKnowledgeJob(ctx, existing, "refresh:cliff_notes", 0, func(runCtx context.Context, rt llm.Runtime) error {
+		var (
+			snap *knowledgepkg.KnowledgeSnapshot
+			err  error
+		)
+		if scope.ScopeType == knowledgepkg.ScopeRepository {
+			snap, err = assembler.Assemble(repo.ID, repoRoot)
+		} else {
+			snap, err = assembler.AssembleScoped(repo.ID, repoRoot, scope)
+		}
+		if err != nil {
+			slog.Error("cliff notes refresh assemble failed", "artifact_id", existing.ID, "error", err)
+			return err
+		}
+		snapJSON, err := json.Marshal(snap)
+		if err != nil {
+			slog.Error("cliff notes refresh serialize failed", "artifact_id", existing.ID, "error", err)
+			return err
+		}
+		rt.ReportSnapshotBytes(len(snapJSON))
+
+		understanding := (*knowledgepkg.RepositoryUnderstanding)(nil)
+		reusedUnderstanding := false
+		renderPlan := cliffNotesRenderPlan{}
+		if artifactUsesUnderstanding(generationMode) {
+			understanding, reusedUnderstanding = attachFreshUnderstanding(r.KnowledgeStore, existing, scope, snap.SourceRevision)
+			if understanding == nil {
+				if _, err := seedRepositoryUnderstanding(r.KnowledgeStore, existing, scope, snap.SourceRevision, knowledgepkg.UnderstandingBuildingTree); err != nil {
+					slog.Warn("cliff notes refresh: failed to seed repository understanding", "artifact_id", existing.ID, "error", err)
+				}
+			} else {
+				renderPlan = cliffNotesRenderPlanForArtifact(r.KnowledgeStore, existing, snap.SourceRevision, understanding)
+			}
+		}
+
+		enrichedCliffSnapJSON := snapJSON
+		if depth == "deep" && scope.ScopeType != knowledgepkg.ScopeRepository && r.KnowledgeStore != nil {
+			repoCliffKey := knowledgepkg.ArtifactKey{
+				RepositoryID: repo.ID,
+				Type:         knowledgepkg.ArtifactCliffNotes,
+				Audience:     knowledgepkg.Audience(audience),
+				Depth:        knowledgepkg.DepthMedium,
+				Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
+			}.Normalized()
+			if repoCliff := r.KnowledgeStore.GetArtifactByKey(repoCliffKey); repoCliff != nil && repoCliff.Status == knowledgepkg.StatusReady {
+				sections := r.KnowledgeStore.GetKnowledgeSections(repoCliff.ID)
+				if len(sections) > 0 {
+					var analysis []map[string]string
+					for _, sec := range sections {
+						analysis = append(analysis, map[string]string{
+							"title":   sec.Title,
+							"content": sec.Content,
+							"summary": sec.Summary,
+						})
+					}
+					var snapMap map[string]interface{}
+					if err := json.Unmarshal(snapJSON, &snapMap); err == nil {
+						snapMap["_pre_analysis"] = analysis
+						if enriched, err := json.Marshal(snapMap); err == nil {
+							enrichedCliffSnapJSON = enriched
+						}
+					}
+				}
+			}
+		}
+
+		params := cliffNotesRunParams{
+			repo:                  repo,
+			artifact:              existing,
+			snap:                  snap,
+			snapJSON:              snapJSON,
+			enrichedCliffSnapJSON: enrichedCliffSnapJSON,
+			scope:                 scope,
+			generationMode:        generationMode,
+			audience:              audience,
+			depth:                 depth,
+			clientType:            clientTypeFromContext(runCtx),
+			snapshotSizeBytes:     len(snapJSON),
+			understanding:         understanding,
+			reusedUnderstanding:   reusedUnderstanding,
+			renderPlan:            renderPlan,
+		}
+		return s.runGenerationPipeline(runCtx, rt, capturedStore, params)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("enqueue cliff notes refresh job: %w", err)
+	}
+
+	updated := r.KnowledgeStore.GetKnowledgeArtifact(existing.ID)
+	if updated == nil {
+		return nil, fmt.Errorf("artifact %s not found after refresh", existing.ID)
+	}
+	return mapKnowledgeArtifact(updated), nil
 }
