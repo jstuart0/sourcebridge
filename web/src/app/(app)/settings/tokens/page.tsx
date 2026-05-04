@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
 import { authFetch } from "@/lib/auth-fetch";
@@ -113,6 +114,7 @@ export default function SettingsTokensPage() {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const inputClass =
     "h-11 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)]";
 
@@ -127,7 +129,7 @@ export default function SettingsTokensPage() {
       <Panel className="space-y-4">
         <h3 className="text-base font-semibold text-[var(--text-primary)]">Create token</h3>
         <form onSubmit={createToken} className="flex flex-col gap-3 sm:flex-row">
-          <input
+          <Input
             type="text"
             value={newName}
             onChange={(e) => {
@@ -136,7 +138,7 @@ export default function SettingsTokensPage() {
             }}
             placeholder="e.g. Laptop CLI, VS Code, CI runner"
             required
-            className={`flex-1 ${inputClass}`}
+            className="flex-1"
           />
           <Button type="submit" disabled={creating || !newName.trim()}>
             {creating ? "Creating…" : "Create token"}

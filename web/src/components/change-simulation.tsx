@@ -5,6 +5,8 @@ import { useMutation } from "urql";
 import { SIMULATE_CHANGE_MUTATION } from "@/lib/graphql/queries";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ImpactReportPanel, type ImpactReportData } from "@/components/impact-report";
 
 interface ResolvedSymbol {
@@ -77,6 +79,7 @@ export function ChangeSimulationPanel({ repositoryId }: { repositoryId: string }
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const inputClass =
     "w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]";
 
@@ -90,34 +93,32 @@ export function ChangeSimulationPanel({ repositoryId }: { repositoryId: string }
           Describe a hypothetical change to see its projected impact on the codebase.
         </p>
 
-        <textarea
+        <Textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder='Describe the change... e.g., "Add a required email field to the User struct"'
           rows={3}
           maxLength={2000}
-          className={`${inputClass} min-h-[5rem] resize-y`}
+          className="resize-y"
         />
 
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1 block text-xs text-[var(--text-secondary)]">Anchor file (optional)</label>
-            <input
+            <Input
               type="text"
               value={anchorFile}
               onChange={(e) => setAnchorFile(e.target.value)}
               placeholder="e.g., internal/graph/impact.go"
-              className={inputClass}
             />
           </div>
           <div>
             <label className="mb-1 block text-xs text-[var(--text-secondary)]">Anchor symbol (optional)</label>
-            <input
+            <Input
               type="text"
               value={anchorSymbol}
               onChange={(e) => setAnchorSymbol(e.target.value)}
               placeholder="e.g., ComputeImpact"
-              className={inputClass}
             />
           </div>
         </div>

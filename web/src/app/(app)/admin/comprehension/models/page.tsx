@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Input } from "@/components/ui/input";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
@@ -232,17 +233,15 @@ export default function ModelsPage() {
       <tr className="border-b border-[var(--border-subtle)]">
         <td className="py-3 pr-3 font-mono text-[var(--text-primary)]">{model.modelId}</td>
         <td className="py-3 pr-3">
-          <input
-            className={inputClass}
+          <Input
             value={form.provider || ""}
             onChange={(e) => setForm({ ...form, provider: e.target.value })}
             style={{ width: 100 }}
           />
         </td>
         <td className="py-3 pr-3">
-          <input
+          <Input
             type="number"
-            className={inputClass}
             value={form.effectiveContextTokens || 0}
             onChange={(e) => setForm({ ...form, effectiveContextTokens: Number(e.target.value) })}
             style={{ width: 90 }}
@@ -392,8 +391,7 @@ export default function ModelsPage() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div>
               <label className="mb-1 block text-xs text-[var(--text-secondary)]">Model ID</label>
-              <input
-                className={inputClass}
+              <Input
                 placeholder="e.g., llama3:8b"
                 value={newModel.modelId || ""}
                 onChange={(e) => setNewModel({ ...newModel, modelId: e.target.value })}
@@ -401,8 +399,7 @@ export default function ModelsPage() {
             </div>
             <div>
               <label className="mb-1 block text-xs text-[var(--text-secondary)]">Provider</label>
-              <input
-                className={inputClass}
+              <Input
                 placeholder="e.g., ollama"
                 value={newModel.provider || ""}
                 onChange={(e) => setNewModel({ ...newModel, provider: e.target.value })}
@@ -410,9 +407,8 @@ export default function ModelsPage() {
             </div>
             <div>
               <label className="mb-1 block text-xs text-[var(--text-secondary)]">Context tokens</label>
-              <input
+              <Input
                 type="number"
-                className={inputClass}
                 value={newModel.effectiveContextTokens || 4096}
                 onChange={(e) =>
                   setNewModel({

@@ -11,6 +11,7 @@ import {
   DISCUSS_CODE_MUTATION,
 } from "@/lib/graphql/queries";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
 import { SourceRefLink } from "@/components/source/SourceRefLink";
 import { SourceViewerPane } from "@/components/source/SourceViewerPane";
@@ -381,6 +382,7 @@ export function SymbolsTab({
   }
 
   // Style helpers (local to this component)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const inputClass =
     "rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:border-[var(--accent-primary)] focus:outline-none";
   const listContainerClass = "max-h-[60vh] overflow-y-auto";
@@ -460,12 +462,12 @@ export function SymbolsTab({
       <div>
         {/* Search + view toggle row */}
         <div className="mb-3 flex items-center gap-3">
-          <input
+          <Input
             type="text"
             value={symbolQuery}
             onChange={(e) => setSymbolQuery(e.target.value)}
             placeholder="Search symbols..."
-            className={`${inputClass} min-w-0 flex-1`}
+            className="min-w-0 flex-1"
           />
           <div className="flex shrink-0 gap-1 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] p-1">
             {(["list", "tree"] as const).map((v) => (
@@ -724,7 +726,7 @@ export function SymbolsTab({
                         )}
                       </div>
                       <div className="mt-4 flex gap-2">
-                        <input
+                        <Input
                           type="text"
                           value={symbolChatQuestion}
                           onChange={(e) => setSymbolChatQuestion(e.target.value)}
@@ -734,7 +736,7 @@ export function SymbolsTab({
                             }
                           }}
                           placeholder={selectedSymbolNode ? `Ask about ${selectedSymbolNode.name}...` : "Ask about this file..."}
-                          className={`${inputClass} flex-1`}
+                          className="flex-1"
                         />
                         <Button onClick={handleScopedFollowUp} disabled={knowledgeLoading || !symbolChatQuestion.trim()}>
                           {knowledgeLoading ? "Thinking..." : "Ask"}

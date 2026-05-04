@@ -5,6 +5,7 @@ import { useMutation } from "urql";
 import { DISCUSS_CODE_MUTATION } from "@/lib/graphql/queries";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { SourceRefLink } from "@/components/source/SourceRefLink";
 import { cn } from "@/lib/utils";
 
@@ -262,6 +263,7 @@ export function ImpactReportPanel({ report, repositoryId }: { report: ImpactRepo
     ? `${report.oldCommitSha.slice(0, 7)}..${report.newCommitSha.slice(0, 7)}`
     : null;
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const inputClass =
     "h-10 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)]";
 
@@ -301,13 +303,13 @@ export function ImpactReportPanel({ report, repositoryId }: { report: ImpactRepo
           Ask questions about what changed, why it might matter, or what to watch out for.
         </p>
         <div className="flex gap-2">
-          <input
+          <Input
             type="text"
             value={chatQuestion}
             onChange={(e) => setChatQuestion(e.target.value)}
             placeholder="What changed and why? What should I review first?"
             onKeyDown={(e) => { if (e.key === "Enter") handleChat(); }}
-            className={`${inputClass} flex-1`}
+            className="flex-1"
           />
           <Button onClick={handleChat} disabled={chatLoading || !chatQuestion.trim()}>
             {chatLoading ? "Thinking..." : "Ask"}

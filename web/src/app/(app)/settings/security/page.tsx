@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
 import { authFetch } from "@/lib/auth-fetch";
@@ -63,6 +64,7 @@ export default function SettingsSecurityPage() {
     setSaving(false);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const inputClass =
     "h-11 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)]";
   const labelClass = "text-sm font-medium text-[var(--text-primary)]";
@@ -85,38 +87,35 @@ export default function SettingsSecurityPage() {
         <form onSubmit={submit} className="grid max-w-md gap-4">
           <div className="grid gap-1.5">
             <label className={labelClass}>Current password</label>
-            <input
+            <Input
               type="password"
               value={oldPw}
               onChange={(e) => setOldPw(e.target.value)}
               required
               autoComplete="current-password"
-              className={inputClass}
             />
           </div>
           <div className="grid gap-1.5">
             <label className={labelClass}>New password</label>
-            <input
+            <Input
               type="password"
               value={newPw}
               onChange={(e) => setNewPw(e.target.value)}
               required
               minLength={8}
               autoComplete="new-password"
-              className={inputClass}
             />
             <p className="text-xs text-[var(--text-tertiary)]">Minimum 8 characters.</p>
           </div>
           <div className="grid gap-1.5">
             <label className={labelClass}>Confirm new password</label>
-            <input
+            <Input
               type="password"
               value={confirmPw}
               onChange={(e) => setConfirmPw(e.target.value)}
               required
               minLength={8}
               autoComplete="new-password"
-              className={inputClass}
             />
           </div>
 

@@ -8,6 +8,7 @@ import {
   REVIEW_CODE_MUTATION,
 } from "@/lib/graphql/queries";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
 import { cn } from "@/lib/utils";
 import { trackEvent } from "@/lib/telemetry";
@@ -135,6 +136,7 @@ export function AnalysisTab({
   // Any of the three ops in flight — used for the results panel placeholder
   const anyBusy = analyzeBusy || discussBusy || reviewBusy;
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const inputClass =
     "h-11 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)]";
   const inputCompactClass =
@@ -149,12 +151,12 @@ export function AnalysisTab({
           <h3 className="mb-4 text-lg font-semibold text-[var(--text-primary)]">
             Select Symbol to Analyze
           </h3>
-          <input
+          <Input
             type="text"
             value={symbolQuery}
             onChange={(e) => setSymbolQuery(e.target.value)}
             placeholder="Search symbols..."
-            className={`${inputClass} mb-3`}
+            className="mb-3"
           />
           <div className="max-h-[40vh] overflow-y-auto">
             {symbols.map((sym) => (
@@ -180,12 +182,12 @@ export function AnalysisTab({
 
         <Panel className="mt-4">
           <h3 className="mb-3 text-lg font-semibold text-[var(--text-primary)]">Discuss Code</h3>
-          <input
+          <Input
             type="text"
             value={discussQuestion}
             onChange={(e) => setDiscussQuestion(e.target.value)}
             placeholder="Ask a question about this code..."
-            className={`${inputClass} mb-3`}
+            className="mb-3"
           />
           <Button onClick={handleDiscuss} disabled={discussBusy || !discussQuestion.trim()}>
             {discussBusy ? "Thinking..." : "Ask"}
@@ -194,12 +196,12 @@ export function AnalysisTab({
 
         <Panel className="mt-4">
           <h3 className="mb-3 text-lg font-semibold text-[var(--text-primary)]">Review Code</h3>
-          <input
+          <Input
             type="text"
             value={reviewFile}
             onChange={(e) => setReviewFile(e.target.value)}
             placeholder="File path (e.g. internal/api/rest/router.go)"
-            className={`${inputClass} mb-3`}
+            className="mb-3"
           />
           <div className="flex flex-wrap gap-2">
             <select

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
 import { authFetch } from "@/lib/auth-fetch";
@@ -548,12 +549,11 @@ export default function LivingWikiSettingsPage() {
                 help='The subdomain of your Atlassian Cloud site. For example, if your Confluence URL is mycompany.atlassian.net, enter "mycompany".'
                 required
               />
-              <input
+              <Input
                 type="text"
                 value={confluenceSite}
                 onChange={(e) => setConfluenceSite(e.target.value)}
                 placeholder="mycompany"
-                className={inputClass}
                 autoComplete="off"
                 spellCheck={false}
               />

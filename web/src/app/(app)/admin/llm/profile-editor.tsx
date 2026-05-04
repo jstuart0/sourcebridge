@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ModelCombobox, type ModelOption } from "@/components/llm/ModelCombobox";
 import { authFetch } from "@/lib/auth-fetch";
 import { cn } from "@/lib/utils";
@@ -411,14 +412,13 @@ export function ProfileEditor({
           <label className={labelClass} htmlFor={`${testIdPrefix}-name`}>
             Profile name
           </label>
-          <input
+          <Input
             id={`${testIdPrefix}-name`}
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={disabled}
             maxLength={64}
-            className={inputClass}
             placeholder="e.g. Anthropic prod"
             data-testid={`${testIdPrefix}-name-input`}
           />
@@ -445,13 +445,13 @@ export function ProfileEditor({
       <div className={fieldWrapClass}>
         <label className={labelClass}>Base URL</label>
         <div className="flex items-center gap-2">
-          <input
+          <Input
             type="text"
             value={baseURL}
             onChange={(e) => setBaseURL(e.target.value)}
             placeholder={def.defaultBaseURL}
             disabled={disabled}
-            className={`flex-1 ${monoInputClass}`}
+            className="flex-1 font-mono"
           />
           <Button
             variant="secondary"
@@ -483,7 +483,7 @@ export function ProfileEditor({
         <div className={fieldWrapClass}>
           <label className={labelClass}>API Key</label>
           <div className="flex items-center gap-2">
-            <input
+            <Input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
@@ -497,7 +497,7 @@ export function ProfileEditor({
                       ? "AIza..."
                       : "sk-..."
               }
-              className={`flex-1 ${monoInputClass}`}
+              className="flex-1 font-mono"
             />
             {profile.api_key_set && (
               <span className="whitespace-nowrap font-mono text-xs text-[var(--color-success,#22c55e)]">
@@ -515,13 +515,13 @@ export function ProfileEditor({
       {def.supportsDraftModel && (
         <div className={fieldWrapClass}>
           <label className={labelClass}>Draft Model (Speculative Decoding)</label>
-          <input
+          <Input
             type="text"
             value={draftModel}
             onChange={(e) => setDraftModel(e.target.value)}
             disabled={disabled}
             placeholder="e.g. lmstudio-community/Qwen2.5-0.5B-Instruct-GGUF"
-            className={monoInputClass}
+            className="font-mono"
           />
           <p className={helpTextClass}>
             Optional. Smaller model used for speculative decoding. LM Studio sends candidate tokens from this
@@ -533,13 +533,12 @@ export function ProfileEditor({
       <div className={fieldWrapClass}>
         <label className={labelClass}>Model {advancedMode && "(Analysis / Default)"}</label>
         {models.length > 20 ? (
-          <input
+          <Input
             type="text"
             value={modelFilter}
             onChange={(e) => setModelFilter(e.target.value)}
             disabled={disabled}
             placeholder="Filter models..."
-            className={inputClass}
           />
         ) : null}
         <ModelCombobox

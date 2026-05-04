@@ -12,6 +12,7 @@ import {
 import { clearStoredToken } from "@/lib/auth-token-store";
 import { authFetch } from "@/lib/auth-fetch";
 import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
 import { Panel as UiPanel } from "@/components/ui/panel";
 
 type AdminTab = "billing" | "sso" | "audit" | "notifications" | "team" | "settings";
@@ -249,11 +250,11 @@ function SSOPanel({ orgId, apiBase }: PanelProps) {
           <>
             <div className="mb-2">
               <label className={labelClass}>Issuer URL</label>
-              <input value={issuerURL} onChange={(e) => setIssuerURL(e.target.value)} placeholder="https://auth.example.com" className={inputClass} />
+              <Input value={issuerURL} onChange={(e) => setIssuerURL(e.target.value)} placeholder="https://auth.example.com" />
             </div>
             <div className="mb-2">
               <label className={labelClass}>Client ID</label>
-              <input value={clientID} onChange={(e) => setClientID(e.target.value)} placeholder="your-client-id" className={inputClass} />
+              <Input value={clientID} onChange={(e) => setClientID(e.target.value)} placeholder="your-client-id" />
             </div>
           </>
         )}
@@ -262,11 +263,11 @@ function SSOPanel({ orgId, apiBase }: PanelProps) {
           <>
             <div className="mb-2">
               <label className={labelClass}>IdP Metadata URL</label>
-              <input value={metadataURL} onChange={(e) => setMetadataURL(e.target.value)} placeholder="https://idp.example.com/metadata" className={inputClass} />
+              <Input value={metadataURL} onChange={(e) => setMetadataURL(e.target.value)} placeholder="https://idp.example.com/metadata" />
             </div>
             <div className="mb-2">
               <label className={labelClass}>Entity ID</label>
-              <input value={entityID} onChange={(e) => setEntityID(e.target.value)} placeholder="https://app.sourcebridge.dev" className={inputClass} />
+              <Input value={entityID} onChange={(e) => setEntityID(e.target.value)} placeholder="https://app.sourcebridge.dev" />
             </div>
           </>
         )}
@@ -394,15 +395,15 @@ function NotificationsPanel({ orgId, apiBase }: PanelProps) {
 
         <div className="mb-2">
           <label className={labelClass}>SMTP Host</label>
-          <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="smtp.example.com" className={inputClass} />
+          <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="smtp.example.com" />
         </div>
         <div className="mb-2">
           <label className={labelClass}>Port</label>
-          <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="587" className={inputClass} />
+          <Input value={port} onChange={(e) => setPort(e.target.value)} placeholder="587" />
         </div>
         <div className="mb-2">
           <label className={labelClass}>From Address</label>
-          <input value={fromAddr} onChange={(e) => setFromAddr(e.target.value)} placeholder="noreply@example.com" className={inputClass} />
+          <Input value={fromAddr} onChange={(e) => setFromAddr(e.target.value)} placeholder="noreply@example.com" />
         </div>
         <div className="mb-3">
           <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--text-primary)]">
@@ -462,13 +463,12 @@ function TeamPanel({ orgId, apiBase }: PanelProps) {
       <div className={`${sectionCardClass} mb-4`}>
         <h4 className="mb-2 font-medium text-[var(--text-primary)]">Invite Member</h4>
         <form onSubmit={handleInvite} className="flex flex-col gap-2 sm:flex-row">
-          <input
+          <Input
             type="email"
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
             placeholder="email@example.com"
             required
-            className={inputClass}
           />
           <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} className={`${inputClass} sm:w-auto`}>
             <option value="admin">Admin</option>
@@ -585,11 +585,11 @@ function SettingsPanel({ orgId, apiBase }: PanelProps) {
       <div className={sectionCardClass}>
         <div className="mb-3">
           <label className={labelClass}>Organization Name</label>
-          <input value={orgName} onChange={(e) => setOrgName(e.target.value)} className={inputClass} />
+          <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} />
         </div>
         <div className="mb-3">
           <label className={labelClass}>Data Retention (days)</label>
-          <input value={retention} onChange={(e) => setRetention(e.target.value)} type="number" min="30" max="365" className={inputClass} />
+          <Input value={retention} onChange={(e) => setRetention(e.target.value)} type="number" min="30" max="365" />
         </div>
         <div className="mb-3">
           <label className={labelClass}>Default Role for New Members</label>
@@ -623,7 +623,7 @@ function SettingsPanel({ orgId, apiBase }: PanelProps) {
               <div>
                 <label className={labelClass}>Notification Recipients</label>
                 <div className="flex gap-2">
-                  <input value={aiEmailInput} onChange={(e) => setAiEmailInput(e.target.value)} placeholder="email@example.com" className={inputClass}
+                  <Input value={aiEmailInput} onChange={(e) => setAiEmailInput(e.target.value)} placeholder="email@example.com"
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (aiEmailInput.trim() && !aiEmails.includes(aiEmailInput.trim())) { setAiEmails([...aiEmails, aiEmailInput.trim()]); setAiEmailInput(""); } } }} />
                   <button type="button" onClick={() => { if (aiEmailInput.trim() && !aiEmails.includes(aiEmailInput.trim())) { setAiEmails([...aiEmails, aiEmailInput.trim()]); setAiEmailInput(""); } }} className={secondaryButtonClass}>Add</button>
                 </div>

@@ -17,6 +17,7 @@ import {
 } from "@/lib/graphql/queries";
 import { useFeatures } from "@/lib/features";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
 import {
   JobProgress,
@@ -1534,13 +1535,13 @@ export function KnowledgeTab({
                       Ask focused questions about {scopeTitle()} without leaving this view.
                     </p>
                     <div className="flex gap-2">
-                      <input
+                      <Input
                         type="text"
                         value={explainQuestion}
                         onChange={(e) => setExplainQuestion(e.target.value)}
                         placeholder={`Ask about ${scopeTitle()}...`}
                         onKeyDown={(e) => { if (e.key === "Enter") handleExplainSystem(); }}
-                        className={`${inputClass} flex-1`}
+                        className="flex-1"
                       />
                       <Button onClick={handleExplainSystem} disabled={knowledgeLoading || !explainQuestion.trim()}>
                         {knowledgeLoading ? "Thinking..." : "Ask"}

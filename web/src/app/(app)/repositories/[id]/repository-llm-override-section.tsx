@@ -46,6 +46,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "urql";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { authFetch } from "@/lib/auth-fetch";
 import { cn } from "@/lib/utils";
 import type { ProfileResponse, ListProfilesResponse } from "@/lib/llm/profile";
@@ -393,6 +394,7 @@ export function RepositoryLLMOverrideSection({
   const helpClass = "mt-1 text-xs text-[var(--text-tertiary)]";
   const inputClass =
     "mt-1 h-10 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-focus)] disabled:opacity-60";
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const monoInputClass = `${inputClass} font-mono`;
   const fieldWrapperClass = "grid gap-1";
 
@@ -638,20 +640,20 @@ export function RepositoryLLMOverrideSection({
 
             <div className={fieldWrapperClass}>
               <label className={labelClass}>Base URL</label>
-              <input
+              <Input
                 type="text"
                 value={baseURL}
                 onChange={(e) => setBaseURL(e.target.value)}
                 placeholder="(leave blank to inherit)"
                 disabled={saving}
-                className={monoInputClass}
+                className="mt-1 font-mono"
               />
             </div>
 
             {showAPIKeyField && (
               <div className={fieldWrapperClass}>
                 <label className={labelClass}>API Key</label>
-                <input
+                <Input
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
@@ -661,7 +663,7 @@ export function RepositoryLLMOverrideSection({
                       : "Leave blank to inherit the workspace API key."
                   }
                   disabled={saving || clearAPIKey}
-                  className={monoInputClass}
+                  className="mt-1 font-mono"
                 />
                 {initial?.apiKeySet && (
                   <label className="mt-2 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
@@ -716,13 +718,13 @@ export function RepositoryLLMOverrideSection({
               <label className={labelClass}>
                 Model {advancedMode && "(Analysis / Default)"}
               </label>
-              <input
+              <Input
                 type="text"
                 value={summaryModel}
                 onChange={(e) => setSummaryModel(e.target.value)}
                 placeholder="(leave blank to inherit)"
                 disabled={saving}
-                className={monoInputClass}
+                className="mt-1 font-mono"
               />
             </div>
 
@@ -730,70 +732,70 @@ export function RepositoryLLMOverrideSection({
               <div className="space-y-3 rounded-[var(--control-radius)] border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3">
                 <div className={fieldWrapperClass}>
                   <label className={labelClass}>Code Review</label>
-                  <input
+                  <Input
                     type="text"
                     value={reviewModel}
                     onChange={(e) => setReviewModel(e.target.value)}
                     placeholder="(blank inherits)"
                     disabled={saving}
-                    className={monoInputClass}
+                    className="mt-1 font-mono"
                   />
                 </div>
                 <div className={fieldWrapperClass}>
                   <label className={labelClass}>Discussion &amp; Q&amp;A</label>
-                  <input
+                  <Input
                     type="text"
                     value={askModel}
                     onChange={(e) => setAskModel(e.target.value)}
                     placeholder="(blank inherits)"
                     disabled={saving}
-                    className={monoInputClass}
+                    className="mt-1 font-mono"
                   />
                 </div>
                 <div className={fieldWrapperClass}>
                   <label className={labelClass}>Knowledge Generation</label>
-                  <input
+                  <Input
                     type="text"
                     value={knowledgeModel}
                     onChange={(e) => setKnowledgeModel(e.target.value)}
                     placeholder="(blank inherits)"
                     disabled={saving}
-                    className={monoInputClass}
+                    className="mt-1 font-mono"
                   />
                 </div>
                 <div className={fieldWrapperClass}>
                   <label className={labelClass}>Architecture Diagrams</label>
-                  <input
+                  <Input
                     type="text"
                     value={architectureDiagramModel}
                     onChange={(e) => setArchitectureDiagramModel(e.target.value)}
                     placeholder="(blank inherits)"
                     disabled={saving}
-                    className={monoInputClass}
+                    className="mt-1 font-mono"
                   />
                 </div>
                 {isEnterprise && (
                   <div className={fieldWrapperClass}>
                     <label className={labelClass}>Reports</label>
-                    <input
+                    <Input
                       type="text"
                       value={reportModel}
                       onChange={(e) => setReportModel(e.target.value)}
                       placeholder="(blank inherits)"
                       disabled={saving}
-                      className={monoInputClass}
+                      className="mt-1 font-mono"
                     />
                   </div>
                 )}
                 <div className={fieldWrapperClass}>
                   <label className={labelClass}>Draft Model (Speculative Decoding)</label>
-                  <input
+                  <Input
                     type="text"
                     value={draftModel}
                     onChange={(e) => setDraftModel(e.target.value)}
                     placeholder="(blank inherits; LM Studio / llama.cpp / SGLang only)"
                     disabled={saving}
-                    className={monoInputClass}
+                    className="mt-1 font-mono"
                   />
                 </div>
               </div>

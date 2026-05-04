@@ -1,6 +1,8 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 // Shape of a requirement for form purposes. Kept narrow — only the
 // fields a user can author. Deliberately not importing the generated
@@ -73,12 +75,11 @@ export function RequirementForm({
   return (
     <div className={cn("space-y-4", className)}>
       <Field label="Title" required hint={titleMissing ? "Title is required" : undefined} hintTone={titleMissing ? "error" : undefined}>
-        <input
+        <Input
           type="text"
           value={values.title}
           disabled={disabled}
           onChange={(e) => update("title", e.target.value)}
-          className={inputClass}
           placeholder="A short, action-oriented name"
           autoFocus={mode === "create"}
         />
@@ -92,22 +93,21 @@ export function RequirementForm({
             : "Changing this will not break existing links (links use an internal ID)"
         }
       >
-        <input
+        <Input
           type="text"
           value={values.externalId}
           disabled={disabled}
           onChange={(e) => update("externalId", e.target.value)}
-          className={inputClass}
           placeholder="PROJ-123"
         />
       </Field>
 
       <Field label="Description">
-        <textarea
+        <Textarea
           value={values.description}
           disabled={disabled}
           onChange={(e) => update("description", e.target.value)}
-          className={cn(inputClass, "min-h-[96px]")}
+          className="min-h-[96px]"
           rows={4}
           placeholder="What the requirement is about."
         />
@@ -115,12 +115,11 @@ export function RequirementForm({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Source" hint={mode === "create" ? 'Defaults to "manual" if blank' : undefined}>
-          <input
+          <Input
             type="text"
             value={values.source}
             disabled={disabled}
             onChange={(e) => update("source", e.target.value)}
-            className={inputClass}
             placeholder="manual, markdown, jira, linear…"
           />
         </Field>
@@ -142,22 +141,21 @@ export function RequirementForm({
       </div>
 
       <Field label="Tags" hint="Comma or whitespace separated. Server trims, dedupes, and normalizes.">
-        <input
+        <Input
           type="text"
           value={values.tags}
           disabled={disabled}
           onChange={(e) => update("tags", e.target.value)}
-          className={inputClass}
           placeholder="auth, security, backend"
         />
       </Field>
 
       <Field label="Acceptance criteria" hint="One per line.">
-        <textarea
+        <Textarea
           value={values.acceptanceCriteria}
           disabled={disabled}
           onChange={(e) => update("acceptanceCriteria", e.target.value)}
-          className={cn(inputClass, "min-h-[96px] font-mono text-sm")}
+          className="min-h-[96px] font-mono text-sm"
           rows={4}
           placeholder={"User can sign in\nSession persists across reload"}
         />
