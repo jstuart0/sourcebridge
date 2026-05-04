@@ -523,6 +523,8 @@ func TestMCP_ToolsList(t *testing.T) {
 		"get_changed_symbols",
 		// CA-154 Phase 2b find_importers tool
 		"find_importers",
+		// CA-154 Phase 3 blast radius tool
+		"get_blast_radius",
 		// CA-153 Phase 2b field guide tool
 		"get_field_guide",
 		// CA-153 Phase 2c change impact tool
