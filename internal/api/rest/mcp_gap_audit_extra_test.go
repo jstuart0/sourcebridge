@@ -47,20 +47,20 @@ import (
 
 // gapAuditExtraFixture holds IDs seeded for the gap-audit-extra tests.
 type gapAuditExtraFixture struct {
-	RepoID string
+	RepoID  string
 	RepoBID string // second repo for cross-repo isolation
 
 	// Symbols in RepoA.
-	DeadSymID      string // "DeadFunc" — no callers, not public
-	LiveSymID      string // "liveFunc" — has a caller
-	PublicSymID    string // "PublicHandler" — no callers but exported (Go)
-	TestOnlySymID  string // "internalHelper" — callers are test-only
-	TestSymID      string // "TestDeadFunc" — IsTest=true
-	TestedSymID    string // "TestedFunc" — has a persisted RelationTests edge
-	CallerSymID    string // "callerFunc" — caller of LiveSym
-	TestCallerID   string // "TestLiveFunc" — IsTest caller of TestOnlySym
-	ClassSymID     string // "MyClass" — kind=class (for kind-filter test)
-	UntestedFnID   string // "untestedFn" — no test linkage whatsoever
+	DeadSymID     string // "DeadFunc" — no callers, not public
+	LiveSymID     string // "liveFunc" — has a caller
+	PublicSymID   string // "PublicHandler" — no callers but exported (Go)
+	TestOnlySymID string // "internalHelper" — callers are test-only
+	TestSymID     string // "TestDeadFunc" — IsTest=true
+	TestedSymID   string // "TestedFunc" — has a persisted RelationTests edge
+	CallerSymID   string // "callerFunc" — caller of LiveSym
+	TestCallerID  string // "TestLiveFunc" — IsTest caller of TestOnlySym
+	ClassSymID    string // "MyClass" — kind=class (for kind-filter test)
+	UntestedFnID  string // "untestedFn" — no test linkage whatsoever
 
 	// Symbols in RepoB.
 	RepoBSymID string
@@ -333,8 +333,8 @@ func TestMCP_FindDeadCode_ExcludeTestOnlyCallers(t *testing.T) {
 	resp := h.sendRPC(sess, 4, "tools/call", map[string]interface{}{
 		"name": "find_dead_code",
 		"arguments": map[string]interface{}{
-			"repository_id":           fix.RepoID,
-			"exclude_entry_points":    false,
+			"repository_id":             fix.RepoID,
+			"exclude_entry_points":      false,
 			"exclude_test_only_callers": true,
 		},
 	})
@@ -364,8 +364,8 @@ func TestMCP_FindDeadCode_ExcludeTestOnlyCallers(t *testing.T) {
 	resp2 := h.sendRPC(sess, 5, "tools/call", map[string]interface{}{
 		"name": "find_dead_code",
 		"arguments": map[string]interface{}{
-			"repository_id":           fix.RepoID,
-			"exclude_entry_points":    false,
+			"repository_id":             fix.RepoID,
+			"exclude_entry_points":      false,
 			"exclude_test_only_callers": false,
 		},
 	})
@@ -529,7 +529,7 @@ func TestMCP_GetUntestedSymbols_NameHeuristic(t *testing.T) {
 	resp := h.sendRPC(sess, 12, "tools/call", map[string]interface{}{
 		"name": "get_untested_symbols",
 		"arguments": map[string]interface{}{
-			"repository_id":        fix.RepoID,
+			"repository_id":          fix.RepoID,
 			"include_name_heuristic": false,
 		},
 	})
@@ -547,7 +547,7 @@ func TestMCP_GetUntestedSymbols_NameHeuristic(t *testing.T) {
 	resp2 := h.sendRPC(sess, 13, "tools/call", map[string]interface{}{
 		"name": "get_untested_symbols",
 		"arguments": map[string]interface{}{
-			"repository_id":        fix.RepoID,
+			"repository_id":          fix.RepoID,
 			"include_name_heuristic": true,
 		},
 	})

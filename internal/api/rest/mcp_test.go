@@ -1531,7 +1531,7 @@ type pipeResponseWriter struct {
 	pw     *io.PipeWriter
 }
 
-func (w *pipeResponseWriter) Header() http.Header        { return w.header }
+func (w *pipeResponseWriter) Header() http.Header         { return w.header }
 func (w *pipeResponseWriter) WriteHeader(int)             {}
 func (w *pipeResponseWriter) Flush()                      {}
 func (w *pipeResponseWriter) Write(b []byte) (int, error) { return w.pw.Write(b) }

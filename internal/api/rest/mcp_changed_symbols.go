@@ -44,7 +44,8 @@ func (h *mcpHandler) changedSymbolsToolDefs() []mcpToolDefinition {
 				"of the same symbol set: changed_files (symbols grouped by file path) and " +
 				"changed_symbols (flat deduped list). " +
 				"Requires at least one of commit_range or files. " +
-				"No LLM call — all data is sourced from the indexed symbol graph.",
+				"No LLM call — all data is sourced from the indexed symbol graph. " +
+				"Note: does NOT distinguish added/modified/removed (change_type deferred — symbol-level diff fingerprints are not yet stored).",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -84,14 +85,14 @@ type changedFile struct {
 
 // changedSymbolsResult is the full get_changed_symbols response.
 type changedSymbolsResult struct {
-	RepositoryID       string          `json:"repository_id"`
-	CommitRange        string          `json:"commit_range,omitempty"`
-	Files              []string        `json:"files,omitempty"`
-	ChangedFiles       []changedFile   `json:"changed_files"`
-	ChangedSymbols     []symbolSummary `json:"changed_symbols"`
-	ChangedSymbolCount int             `json:"changed_symbol_count"`
-	ChangedFileCount   int             `json:"changed_file_count"`
-	Truncated          bool            `json:"truncated"`
+	RepositoryID       string                 `json:"repository_id"`
+	CommitRange        string                 `json:"commit_range,omitempty"`
+	Files              []string               `json:"files,omitempty"`
+	ChangedFiles       []changedFile          `json:"changed_files"`
+	ChangedSymbols     []symbolSummary        `json:"changed_symbols"`
+	ChangedSymbolCount int                    `json:"changed_symbol_count"`
+	ChangedFileCount   int                    `json:"changed_file_count"`
+	Truncated          bool                   `json:"truncated"`
 	Meta               map[string]interface{} `json:"_meta,omitempty"`
 }
 

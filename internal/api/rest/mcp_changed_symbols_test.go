@@ -29,6 +29,8 @@ import (
 //   - CrossRepoIsolation: symbol from repo B, request says repo A → not returned
 //   - RepoNotFound: MCPErrRepositoryNotIndexed
 //   - EmptyDiff: valid files list that touches no known files → empty arrays, no error
+//   - HydratesViaGetSymbolsByIDs: regression guard — symbols hydrated from flat
+//     ID list (GetSymbolsByIDs), not from name-based lookup (dexter M4)
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -586,5 +588,52 @@ func TestMCP_GetChangedSymbols_EmptyDiff(t *testing.T) {
 	// truncated must be false.
 	if trunc, _ := result["truncated"].(bool); trunc {
 		t.Error("truncated: want false for empty diff, got true")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMCP_GetChangedSymbols_HydratesViaGetSymbolsByIDs
+// ---------------------------------------------------------------------------
+
+// TestMCP_GetChangedSymbols_HydratesViaGetSymbolsByIDs is a regression guard
+// for dexter M4: the implementation must hydrate changed_symbols from the flat
+// ID list via GetSymbolsByIDs — NOT from name-based lookup. This matters when
+// two symbols share a name across different files; only the IDs that were
+// actually touched by the diff should appear.
+func TestMCP_GetChangedSymbols_HydratesViaGetSymbolsByIDs(t *testing.T) {
+	h := newTestHarness(t)
+	fix := seedChangedSymbolsFixture(t, h)
+	sess := h.createSession()
+
+	// Request only "a.go" — only FuncA must appear, NOT FuncB or FuncC
+	// (which live in "b.go"). This verifies that hydration uses the ID list
+	// produced by resolveDiffTouchedSymbols for "a.go" only, not a name scan.
+	resp := h.sendRPC(sess, 9, "tools/call", map[string]interface{}{
+		"name": "get_changed_symbols",
+		"arguments": map[string]interface{}{
+			"repository_id": fix.RepoID,
+			"files":         []string{"a.go"},
+		},
+	})
+
+	result := parseChangedSymbolsResult(t, resp)
+	ids := flatSymbolIDsFromChangedSymbols(t, result)
+
+	// FuncA must be present.
+	if !containsID(ids, fix.FuncAID) {
+		t.Errorf("FuncA (%s) missing from changed_symbols for files=[a.go]", fix.FuncAID)
+	}
+
+	// FuncB and FuncC must NOT be present (they are in b.go, not a.go).
+	if containsID(ids, fix.FuncBID) {
+		t.Errorf("FuncB (%s) must not appear in changed_symbols for files=[a.go] (wrong hydration source)", fix.FuncBID)
+	}
+	if containsID(ids, fix.FuncCID) {
+		t.Errorf("FuncC (%s) must not appear in changed_symbols for files=[a.go] (wrong hydration source)", fix.FuncCID)
+	}
+
+	// Exactly 1 symbol expected.
+	if len(ids) != 1 {
+		t.Errorf("changed_symbol_count: want 1, got %d (IDs: %v)", len(ids), ids)
 	}
 }

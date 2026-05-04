@@ -57,6 +57,7 @@ import (
 type brTestSymInfo struct {
 	FilePath string
 	Name     string
+	IsTest   bool
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +98,7 @@ func (h *mcpHandler) blastRadiusToolDefs() []mcpToolDefinition {
 					},
 					"depth": map[string]interface{}{
 						"type":        "integer",
-						"description": "BFS depth (default 3, max 5). depth=1 returns only direct callers.",
+						"description": "BFS depth (default 3, max 5). Inputs > 5 are clamped to 5. depth=1 returns only direct callers.",
 					},
 					"include_tests": map[string]interface{}{
 						"type":        "boolean",
@@ -106,6 +107,10 @@ func (h *mcpHandler) blastRadiusToolDefs() []mcpToolDefinition {
 					"include_requirements": map[string]interface{}{
 						"type":        "boolean",
 						"description": "Aggregate linked requirements per depth layer (default true).",
+					},
+					"include_test_callers": map[string]interface{}{
+						"type":        "boolean",
+						"description": "Include test symbols in the caller graph BFS (default false). When false, symbols where IsTest=true are skipped during BFS hydration.",
 					},
 				},
 				"required": []string{"repository_id"},
@@ -146,17 +151,19 @@ type blastRadiusDepthLayer struct {
 
 // blastRadiusResult is the full get_blast_radius response.
 type blastRadiusResult struct {
-	RepositoryID      string                  `json:"repository_id"`
-	SymbolID          string                  `json:"symbol_id"`
-	SymbolName        string                  `json:"symbol_name"`
-	FilePath          string                  `json:"file_path"`
-	Depth             int                     `json:"depth"`
-	OverallRiskScore  float64                 `json:"overall_risk_score"`
-	DirectCallerCount int                     `json:"direct_caller_count"`
-	TotalAffectedCount int                    `json:"total_affected_count"`
-	Truncated         bool                    `json:"truncated"`
-	ImpactByDepth     []blastRadiusDepthLayer `json:"impact_by_depth"`
-	Meta              map[string]interface{}  `json:"_meta,omitempty"`
+	RepositoryID         string                  `json:"repository_id"`
+	SymbolID             string                  `json:"symbol_id"`
+	SymbolName           string                  `json:"symbol_name"`
+	FilePath             string                  `json:"file_path"`
+	Depth                int                     `json:"depth"`
+	OverallRiskScore     float64                 `json:"overall_risk_score"`
+	DirectCallerCount    int                     `json:"direct_caller_count"`
+	TotalAffectedCount   int                     `json:"total_affected_count"`
+	Truncated            bool                    `json:"truncated"`
+	ImpactByDepth        []blastRadiusDepthLayer `json:"impact_by_depth"`
+	AffectedRequirements []requirementSummary    `json:"affected_requirements,omitempty"`
+	AffectedTests        []blastRadiusTestMatch  `json:"affected_tests,omitempty"`
+	Meta                 map[string]interface{}  `json:"_meta,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +181,8 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 		// Default true; explicit false opts out.
 		IncludeTests        *bool `json:"include_tests"`
 		IncludeRequirements *bool `json:"include_requirements"`
+		// Default false; explicit true includes test symbols in BFS.
+		IncludeTestCallers *bool `json:"include_test_callers"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, errInvalidArguments(err.Error())
@@ -182,13 +191,17 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 		return nil, err
 	}
 
-	// Validate depth.
+	// Validate / clamp depth.
+	// D3 contract: depth < 1 → reject; depth > 5 → clamp to 5 (no error).
 	depth := params.Depth
 	if depth == 0 {
 		depth = 3
 	}
+	if depth < 1 {
+		return nil, errInvalidArguments("depth must be >= 1")
+	}
 	if depth > 5 {
-		return nil, errInvalidArguments("depth must be between 1 and 5 (inclusive)")
+		depth = 5 // clamp per D3 contract — do NOT return an error
 	}
 
 	// Default include_tests / include_requirements to true when not supplied.
@@ -199,6 +212,12 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 	includeRequirements := true
 	if params.IncludeRequirements != nil {
 		includeRequirements = *params.IncludeRequirements
+	}
+
+	// Default include_test_callers to false when not supplied.
+	includeTestCallers := false
+	if params.IncludeTestCallers != nil {
+		includeTestCallers = *params.IncludeTestCallers
 	}
 
 	repoID := params.RepositoryID
@@ -249,7 +268,7 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 	testSymsByID := make(map[string]brTestSymInfo, len(allSyms))
 	for _, sym := range allSyms {
 		if sym.IsTest {
-			testSymsByID[sym.ID] = brTestSymInfo{FilePath: sym.FilePath, Name: sym.Name}
+			testSymsByID[sym.ID] = brTestSymInfo{FilePath: sym.FilePath, Name: sym.Name, IsTest: true}
 		}
 	}
 
@@ -299,6 +318,10 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 
 	// -----------------------------------------------------------------------
 	// Hydration + projection — group by depth (root excluded).
+	//
+	// include_test_callers (default false): when false, symbols marked IsTest
+	// are excluded from impact_by_depth (they remain in testSymsByID for the
+	// aggregateTestsForLayer pass, which uses them directly).
 	// -----------------------------------------------------------------------
 	byDepth := make(map[int][]callGraphSymbolBR)
 	for id, hop := range visited {
@@ -307,6 +330,10 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 		}
 		sym := h.store.GetSymbol(id)
 		if sym == nil {
+			continue
+		}
+		// Skip test symbols from the caller graph when includeTestCallers=false.
+		if !includeTestCallers && sym.IsTest {
 			continue
 		}
 		byDepth[hop] = append(byDepth[hop], callGraphSymbolBR{
@@ -387,6 +414,55 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 	}
 
 	// -----------------------------------------------------------------------
+	// Build top-level dedup unions for AffectedRequirements and AffectedTests
+	// (mirrors mcp_change_impact.go dedup logic; deduped across all depth layers).
+	// -----------------------------------------------------------------------
+	var topLevelReqs []requirementSummary
+	var topLevelTests []blastRadiusTestMatch
+
+	if includeRequirements {
+		reqConfByID := map[string]float64{}
+		reqByID := map[string]requirementSummary{}
+		for _, layer := range layers {
+			for _, req := range layer.Requirements {
+				if req.Confidence > reqConfByID[req.ID] {
+					reqConfByID[req.ID] = req.Confidence
+					reqByID[req.ID] = req
+				}
+			}
+		}
+		for _, rs := range reqByID {
+			topLevelReqs = append(topLevelReqs, rs)
+		}
+		sort.Slice(topLevelReqs, func(i, j int) bool {
+			if topLevelReqs[i].ExternalID != topLevelReqs[j].ExternalID {
+				return topLevelReqs[i].ExternalID < topLevelReqs[j].ExternalID
+			}
+			return topLevelReqs[i].ID < topLevelReqs[j].ID
+		})
+	}
+
+	if includeTests {
+		type testKey struct{ filePath, testName string }
+		seenTests := map[testKey]bool{}
+		for _, layer := range layers {
+			for _, tm := range layer.TestMatches {
+				k := testKey{tm.FilePath, tm.TestName}
+				if !seenTests[k] {
+					seenTests[k] = true
+					topLevelTests = append(topLevelTests, tm)
+				}
+			}
+		}
+		sort.Slice(topLevelTests, func(i, j int) bool {
+			if topLevelTests[i].FilePath != topLevelTests[j].FilePath {
+				return topLevelTests[i].FilePath < topLevelTests[j].FilePath
+			}
+			return topLevelTests[i].TestName < topLevelTests[j].TestName
+		})
+	}
+
+	// -----------------------------------------------------------------------
 	// Build _meta.
 	// -----------------------------------------------------------------------
 	meta := map[string]interface{}{
@@ -402,17 +478,19 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 	}
 
 	result := blastRadiusResult{
-		RepositoryID:       repoID,
-		SymbolID:           root.ID,
-		SymbolName:         root.Name,
-		FilePath:           root.FilePath,
-		Depth:              depth,
-		OverallRiskScore:   overallRisk,
-		DirectCallerCount:  directCallerCount,
-		TotalAffectedCount: totalAffected,
-		Truncated:          truncated,
-		ImpactByDepth:      layers,
-		Meta:               meta,
+		RepositoryID:         repoID,
+		SymbolID:             root.ID,
+		SymbolName:           root.Name,
+		FilePath:             root.FilePath,
+		Depth:                depth,
+		OverallRiskScore:     overallRisk,
+		DirectCallerCount:    directCallerCount,
+		TotalAffectedCount:   totalAffected,
+		Truncated:            truncated,
+		ImpactByDepth:        layers,
+		AffectedRequirements: topLevelReqs,
+		AffectedTests:        topLevelTests,
+		Meta:                 meta,
 	}
 	return result, nil
 }

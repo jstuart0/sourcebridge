@@ -129,10 +129,10 @@ type deadSymbolResult struct {
 
 func (h *mcpHandler) callFindDeadCode(session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
-		RepositoryID            string   `json:"repository_id"`
-		ExcludeEntryPoints      *bool    `json:"exclude_entry_points"`
-		ExcludeTestOnlyCallers  bool     `json:"exclude_test_only_callers"`
-		Kinds                   []string `json:"kinds"`
+		RepositoryID           string   `json:"repository_id"`
+		ExcludeEntryPoints     *bool    `json:"exclude_entry_points"`
+		ExcludeTestOnlyCallers bool     `json:"exclude_test_only_callers"`
+		Kinds                  []string `json:"kinds"`
 		paginationArgs
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
@@ -260,7 +260,7 @@ func (h *mcpHandler) callFindDeadCode(session *mcpSession, args json.RawMessage)
 		"next_cursor":    nullableString(nextCursor),
 		"scan_truncated": scanTruncated,
 		"_meta": map[string]interface{}{
-			"exclude_entry_points":     excludeEPs,
+			"exclude_entry_points":      excludeEPs,
 			"exclude_test_only_callers": params.ExcludeTestOnlyCallers,
 		},
 	}, nil
