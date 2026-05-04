@@ -31,6 +31,7 @@ import (
 
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
+	"github.com/sourcebridge/sourcebridge/internal/livingwiki/coldstart"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 )
@@ -420,7 +421,8 @@ func enqueueWikiJob(
 		// the UI; smart-resume (commit 15be8a8) skips already-published
 		// pages so the explicit retry is cheap.
 		MaxAttempts: 1,
-		RunWithContext: buildColdStartRunner(coldStartConfig{
+		// GQL-5: delegate via the coldstart package boundary.
+		RunWithContext: coldstart.BuildRunner(coldstart.Config{
 			LWOrch:             r.LivingWikiLiveOrchestrator,
 			RepoID:             input.RepositoryID,
 			TenantID:           defaultTenantID,

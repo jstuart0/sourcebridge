@@ -8,6 +8,11 @@
 // (Phase 1) living_wiki_plan_preview.go resolver. Extracting them here
 // removes inline duplication and gives the preview resolver a stable,
 // tested foundation.
+//
+// GQL-5: applyPageCap and applyPageSelection have moved to
+// internal/livingwiki/coldstart/runner.go (exported as ApplyPageCap and
+// ApplyPageSelection). The package-private shims in living_wiki_coldstart.go
+// delegate to those exports so existing call sites remain unchanged.
 
 package graphql
 
@@ -79,102 +84,6 @@ func computePlanSignature(pageIDs []string, mode string, effectiveCap int) strin
 	h.Write([]byte("|"))
 	h.Write([]byte(strconv.Itoa(effectiveCap)))
 	return hex.EncodeToString(h.Sum(nil))
-}
-
-// applyPageCap applies the effective page count cap to the planned page list.
-// Repo-wide pages are always retained; architecture/top-level-dir pages are
-// truncated in stable order. Mirrors the inline logic that previously lived
-// at coldstart.go:286-328 (now rewritten to call this helper).
-//
-// When excludedOnlyRetry is true no cap is applied — the caller named specific
-// pages and silently discarding them would betray that intent.
-//
-// Returns:
-//
-//	out        — post-cap page slice (same slice when no truncation)
-//	capSource  — "none" | "repo_setting" | "per_run_override"
-//	capValue   — the numeric cap used; 0 when capSource == "none"
-//	effectiveCap — the resolved cap (0 = no cap)
-//	preCap     — len(pages) before truncation
-func applyPageCap(
-	pages []lworch.PlannedPage,
-	maxPagesPerJob int,
-	pageCountOverride *int,
-	excludedOnlyRetry bool,
-) (out []lworch.PlannedPage, capSource string, capValue int, effectiveCap int, preCap int) {
-	preCap = len(pages)
-	capSource = "none"
-	capValue = 0
-	effectiveCap = 0
-
-	if excludedOnlyRetry {
-		return pages, capSource, capValue, effectiveCap, preCap
-	}
-
-	if pageCountOverride != nil {
-		effectiveCap = *pageCountOverride
-		capSource = "per_run_override"
-	} else if maxPagesPerJob > 0 {
-		effectiveCap = maxPagesPerJob
-		capSource = "repo_setting"
-	}
-
-	if effectiveCap > 0 && preCap > effectiveCap {
-		capValue = effectiveCap
-		var repoWide, rest []lworch.PlannedPage
-		for _, p := range pages {
-			// Prefer Kind when set; fall back to TemplateID for legacy plans.
-			isRepoWide := p.Kind == lworch.PageKindRepoWide ||
-				(p.Kind == lworch.PageKindUnknown && repoWideTemplateIDs[p.TemplateID])
-			if isRepoWide {
-				repoWide = append(repoWide, p)
-			} else {
-				rest = append(rest, p)
-			}
-		}
-		allowForRest := effectiveCap - len(repoWide)
-		if allowForRest < 0 {
-			allowForRest = 0
-		}
-		if len(rest) > allowForRest {
-			rest = rest[:allowForRest]
-		}
-		return append(repoWide, rest...), capSource, capValue, effectiveCap, preCap
-	}
-
-	// Fits within cap (or no cap) — no truncation.
-	return pages, "none", 0, effectiveCap, preCap
-}
-
-// applyPageSelection filters pages by an optional selection list.
-// Repo-wide pages (Kind == PageKindRepoWide, with TemplateID fallback for
-// legacy plans) are ALWAYS retained regardless of selectedIDs.
-//
-// selectedIDs semantics (codex r1 C2 nullable-list contract):
-//
-//	nil      → no filter; pages returned unchanged (passthrough).
-//	[]       → explicit empty selection; only repo-wide pages retained.
-//	[a,b,c]  → explicit selection; repo-wide + pages whose ID ∈ {a,b,c}
-//	           retained, rest dropped.
-//
-// Stable order is preserved.
-func applyPageSelection(pages []lworch.PlannedPage, selectedIDs []string) []lworch.PlannedPage {
-	if selectedIDs == nil {
-		return pages
-	}
-	wanted := make(map[string]bool, len(selectedIDs))
-	for _, id := range selectedIDs {
-		wanted[id] = true
-	}
-	out := pages[:0]
-	for _, p := range pages {
-		isRepoWide := p.Kind == lworch.PageKindRepoWide ||
-			(p.Kind == lworch.PageKindUnknown && repoWideTemplateIDs[p.TemplateID])
-		if isRepoWide || wanted[p.ID] {
-			out = append(out, p)
-		}
-	}
-	return out
 }
 
 // buildPlanFromPages constructs a LivingWikiPlan from a cap-applied page slice
