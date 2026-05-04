@@ -1676,6 +1676,23 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 	if repo == nil {
 		return nil, fmt.Errorf("repository %s not found", existing.RepositoryID)
 	}
+
+	// Validate the artifact type BEFORE mutating status/progress.
+	// Previously the type-switch came after, so an unsupported type (e.g.
+	// slide_outline, audio_briefing_script) would leave the artifact stuck in
+	// "generating" after the resolver returned the error synchronously.
+	// Now we check support first; only supported types proceed to mutation.
+	switch existing.Type {
+	case knowledgepkg.ArtifactCliffNotes,
+		knowledgepkg.ArtifactArchitectureDiagram,
+		knowledgepkg.ArtifactLearningPath,
+		knowledgepkg.ArtifactCodeTour,
+		knowledgepkg.ArtifactWorkflowStory:
+		// Supported — proceed below.
+	default:
+		return nil, fmt.Errorf("unsupported artifact type: %s", existing.Type)
+	}
+
 	if err := r.KnowledgeStore.UpdateKnowledgeArtifactProgress(id, 0); err != nil {
 		return nil, err
 	}
@@ -1700,6 +1717,8 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 	case knowledgepkg.ArtifactWorkflowStory:
 		return workflowStoryGenerationService{resolver: r.Resolver}.RefreshFromExisting(ctx, existing)
 	default:
+		// Unreachable: the type-guard above returns before we mutate state.
+		// Kept for exhaustiveness; the compiler requires it.
 		return nil, fmt.Errorf("unsupported artifact type: %s", existing.Type)
 	}
 }

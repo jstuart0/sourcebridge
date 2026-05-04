@@ -5,13 +5,16 @@ package graphql
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
+	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
 // Captures slog output for assertion. Every test installs and restores the
@@ -413,5 +416,74 @@ func TestEnqueueStaleArtifactRefresh_ShadowVsLiveDecisionParity(t *testing.T) {
 		if shadow[i] != live[i] {
 			t.Fatalf("priority parity failed at index %d: shadow=%q live=%q", i, shadow[i], live[i])
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// H1 regression: RefreshKnowledgeArtifact must validate type BEFORE mutating
+// status/progress. Previously an unsupported type left the artifact stuck in
+// "generating" because status was set before the type switch.
+// ---------------------------------------------------------------------------
+
+// seedUnsupportedArtifact creates an artifact whose type is not handled by the
+// refresh dispatcher (slide_outline, audio_briefing_script, etc.).
+func seedUnsupportedArtifact(t *testing.T, store *knowledgepkg.MemStore, repoID string) *knowledgepkg.Artifact {
+	t.Helper()
+	// Use a type string that is not one of the five supported generation types.
+	a, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+		RepositoryID:   repoID,
+		Type:           knowledgepkg.ArtifactType("slide_outline"),
+		Audience:       knowledgepkg.AudienceDeveloper,
+		Depth:          knowledgepkg.DepthMedium,
+		GenerationMode: knowledgepkg.GenerationModeClassic,
+		Status:         knowledgepkg.StatusPending,
+	})
+	if err != nil {
+		t.Fatalf("StoreKnowledgeArtifact: %v", err)
+	}
+	if err := store.UpdateKnowledgeArtifactStatus(a.ID, knowledgepkg.StatusReady); err != nil {
+		t.Fatalf("UpdateKnowledgeArtifactStatus: %v", err)
+	}
+	return store.GetKnowledgeArtifact(a.ID)
+}
+
+func TestRefreshKnowledgeArtifact_UnsupportedType_DoesNotLeaveGenerating(t *testing.T) {
+	// Arrange: a repository in the graph store + an artifact of an unsupported type.
+	graphStore := graphstore.NewStore()
+	repo, err := graphStore.CreateRepository("test-repo", "/tmp/test-repo")
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	knowledgeStore := knowledgepkg.NewMemStore()
+	artifact := seedUnsupportedArtifact(t, knowledgeStore, repo.ID)
+
+	// Wire up a resolver with a non-nil Worker (zero-value Client — enough to pass
+	// the nil-check; the unsupported-type guard returns before any Worker method is called).
+	r := &mutationResolver{&Resolver{
+		KnowledgeStore: knowledgeStore,
+		Store:          graphStore,
+		Worker:         &worker.Client{},
+	}}
+
+	// Act: refresh should return an error (unsupported type).
+	_, gotErr := r.RefreshKnowledgeArtifact(context.Background(), artifact.ID)
+	if gotErr == nil {
+		t.Fatal("expected error for unsupported artifact type, got nil")
+	}
+	if !strings.Contains(gotErr.Error(), "unsupported artifact type") {
+		t.Fatalf("expected 'unsupported artifact type' error, got: %v", gotErr)
+	}
+
+	// Assert: artifact must NOT be stuck in "generating" — the type guard fires
+	// before status mutation, so status remains "ready".
+	after := knowledgeStore.GetKnowledgeArtifact(artifact.ID)
+	if after == nil {
+		t.Fatal("artifact disappeared from store")
+	}
+	if after.Status == knowledgepkg.StatusGenerating {
+		t.Fatalf("artifact left in 'generating' state after unsupported-type refresh — H1 regression")
+	}
+	if after.Status != knowledgepkg.StatusReady {
+		t.Fatalf("expected artifact to remain 'ready', got %q", after.Status)
 	}
 }
