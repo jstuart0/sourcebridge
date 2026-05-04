@@ -155,18 +155,16 @@ func (r *runtime) writeProgressLocked(now time.Time) {
 // lets the orchestrator persist a consistent code into ca_llm_job and the
 // Monitor page render the same human-readable titles everywhere.
 //
-// The classifier is intentionally a copy rather than a direct reference
-// to keep the orchestrator package free of graphql imports.
+// This function is a thin wrapper around [llm.ClassifyLLMError]; the string
+// codes are the stable API surface exposed to callers and the database.
 func ClassifyError(err error) string {
 	if err == nil {
 		return ""
 	}
+	// Fine-grained gRPC code check for codes that map to distinct string
+	// values not covered by ClassifyLLMError's coarser enum.
 	if st, ok := grpcstatus.FromError(err); ok {
 		switch st.Code() {
-		case codes.DeadlineExceeded:
-			return "DEADLINE_EXCEEDED"
-		case codes.Unavailable:
-			return "WORKER_UNAVAILABLE"
 		case codes.InvalidArgument:
 			return "INVALID_ARGUMENT"
 		case codes.NotFound:
@@ -175,22 +173,22 @@ func ClassifyError(err error) string {
 			return "UNAUTHORIZED"
 		}
 	}
-	msg := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(msg, "llm returned empty content"):
-		return "LLM_EMPTY"
-	case strings.Contains(msg, "compute error"), strings.Contains(msg, "server_error"):
-		return "PROVIDER_COMPUTE"
-	case strings.Contains(msg, "snapshot too large"), strings.Contains(msg, "exceeds budget"):
-		return "SNAPSHOT_TOO_LARGE"
-	case strings.Contains(msg, "deadline exceeded"), strings.Contains(msg, "context deadline"):
-		return "DEADLINE_EXCEEDED"
-	case strings.Contains(msg, "connection refused"),
-		strings.Contains(msg, "transport is closing"),
-		strings.Contains(msg, "unavailable"):
-		return "WORKER_UNAVAILABLE"
-	case strings.Contains(msg, "orchestrator is shutting down"):
+	// Check for orchestrator shutdown before the generic classifier so it
+	// gets its own distinct code.
+	if strings.Contains(strings.ToLower(err.Error()), "orchestrator is shutting down") {
 		return "ORCHESTRATOR_SHUTDOWN"
+	}
+	switch llm.ClassifyLLMError(err) {
+	case llm.ErrTimeout:
+		return "DEADLINE_EXCEEDED"
+	case llm.ErrUnavailable:
+		return "WORKER_UNAVAILABLE"
+	case llm.ErrComputeError:
+		return "PROVIDER_COMPUTE"
+	case llm.ErrTransient:
+		return "LLM_EMPTY"
+	case llm.ErrTerminal:
+		return "SNAPSHOT_TOO_LARGE"
 	}
 	return "INTERNAL"
 }

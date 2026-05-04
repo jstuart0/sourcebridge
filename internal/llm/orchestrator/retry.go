@@ -5,11 +5,9 @@ package orchestrator
 
 import (
 	"errors"
-	"strings"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	grpcstatus "google.golang.org/grpc/status"
+	"github.com/sourcebridge/sourcebridge/internal/llm"
 )
 
 // RetryPolicy controls how the orchestrator retries transiently-failing jobs.
@@ -89,34 +87,21 @@ func (p RetryPolicy) ShouldRetryWithMax(attempt, maxAttempts int, err error) boo
 //
 // Callers that want stricter classification can wrap this with their own
 // allowlist.
+//
+// This function is a thin wrapper around [llm.ClassifyLLMError].
 func IsRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
-	if st, ok := grpcstatus.FromError(err); ok {
-		switch st.Code() {
-		case codes.DeadlineExceeded, codes.Unavailable, codes.ResourceExhausted, codes.Aborted:
-			return true
-		case codes.InvalidArgument, codes.NotFound, codes.PermissionDenied,
-			codes.Unauthenticated, codes.AlreadyExists, codes.FailedPrecondition:
-			return false
-		}
-	}
-
-	msg := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(msg, "snapshot too large"), strings.Contains(msg, "exceeds budget"):
+	cls := llm.ClassifyLLMError(err)
+	switch cls {
+	case llm.ErrTerminal:
 		return false
-	case strings.Contains(msg, "llm returned empty content"):
-		return true
-	case strings.Contains(msg, "compute error"), strings.Contains(msg, "server_error"):
-		return true
-	case strings.Contains(msg, "deadline exceeded"), strings.Contains(msg, "context deadline"):
-		return true
-	case strings.Contains(msg, "connection refused"), strings.Contains(msg, "unavailable"):
+	default:
+		// ErrTransient, ErrComputeError, ErrTimeout, ErrUnavailable, ErrUnknown
+		// are all retryable (unknown is treated as transient once).
 		return true
 	}
-	return true
 }
 
 // ErrMaxAttemptsExceeded is returned by the orchestrator when a job has

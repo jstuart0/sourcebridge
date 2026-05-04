@@ -55,6 +55,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/manifest"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/markdown"
+	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/quality"
 	"github.com/sourcebridge/sourcebridge/internal/reports/templates"
@@ -1154,8 +1155,8 @@ type pageOutcome struct {
 
 // classifySoftFailure maps a per-page generation error to a normalized
 // category used by the systemic-failure breaker and by [ExcludedPage.FailureCategory].
-// The mapping mirrors patterns from internal/llm/orchestrator/runtime.go:ClassifyError
-// but at a coarser granularity suitable for "is the LLM provider broken" detection.
+// The mapping is a thin wrapper around [llm.ClassifyLLMError] at a coarser
+// granularity suitable for "is the LLM provider broken" detection.
 func classifySoftFailure(err error) string {
 	if err == nil {
 		return ""
@@ -1163,21 +1164,19 @@ func classifySoftFailure(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return SoftFailureCategoryDeadlineExceeded
 	}
-	msg := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(msg, "deadline exceeded"), strings.Contains(msg, "context deadline"):
-		return SoftFailureCategoryDeadlineExceeded
-	case strings.Contains(msg, "connection refused"),
-		strings.Contains(msg, "transport is closing"),
-		strings.Contains(msg, "unavailable"):
-		return SoftFailureCategoryProviderUnavailable
-	case strings.Contains(msg, "compute error"), strings.Contains(msg, "server_error"):
-		return SoftFailureCategoryProviderCompute
-	case strings.Contains(msg, "llm returned empty content"),
-		strings.Contains(msg, "empty content"):
-		return SoftFailureCategoryLLMEmpty
-	case strings.Contains(msg, "render"):
+	// Render errors don't match any LLM error class; check before delegating.
+	if strings.Contains(strings.ToLower(err.Error()), "render") {
 		return SoftFailureCategoryRenderError
+	}
+	switch llm.ClassifyLLMError(err) {
+	case llm.ErrTimeout:
+		return SoftFailureCategoryDeadlineExceeded
+	case llm.ErrUnavailable:
+		return SoftFailureCategoryProviderUnavailable
+	case llm.ErrComputeError:
+		return SoftFailureCategoryProviderCompute
+	case llm.ErrTransient:
+		return SoftFailureCategoryLLMEmpty
 	}
 	return SoftFailureCategoryTemplateInternal
 }
