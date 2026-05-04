@@ -17,6 +17,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 	gitres "github.com/sourcebridge/sourcebridge/internal/git/resolution"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
+	"github.com/sourcebridge/sourcebridge/internal/indexing/pathutil"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 	"github.com/sourcebridge/sourcebridge/internal/source"
@@ -54,11 +55,7 @@ func clientTypeFromContext(ctx context.Context) string {
 }
 
 func isGitURL(path string) bool {
-	return strings.HasPrefix(path, "http://") ||
-		strings.HasPrefix(path, "https://") ||
-		strings.HasPrefix(path, "git://") ||
-		strings.HasPrefix(path, "git@") ||
-		strings.HasSuffix(path, ".git")
+	return pathutil.IsGitURL(path)
 }
 
 // normalizeGitURL normalizes a git URL for deduplication.
@@ -139,8 +136,7 @@ func gitPullCmd(ctx context.Context, repoDir, token, sshKeyPath string) *exec.Cm
 
 // sanitizeRepoName creates a filesystem-safe name from a repository name.
 func sanitizeRepoName(name string) string {
-	r := strings.NewReplacer("/", "-", "\\", "-", " ", "-", ":", "-")
-	return r.Replace(name)
+	return pathutil.SanitizeRepoName(name, pathutil.GraphQLLegacyPolicy)
 }
 
 // resolveRepoSourcePath returns the local filesystem path for a repository.
@@ -182,26 +178,7 @@ func resolveRepoSourcePath(repo *graphstore.Repository) (string, error) {
 // safeJoinPath safely joins a repository root with a repository-relative file
 // path, rejecting path traversal attempts.
 func safeJoinPath(repoRoot, relPath string) (string, error) {
-	// Normalize: strip leading ./ and reject absolute paths
-	relPath = strings.TrimPrefix(relPath, "./")
-	if filepath.IsAbs(relPath) {
-		return "", fmt.Errorf("absolute path not allowed: %s", relPath)
-	}
-
-	joined := filepath.Join(repoRoot, filepath.FromSlash(relPath))
-	absJoined, err := filepath.Abs(joined)
-	if err != nil {
-		return "", fmt.Errorf("resolving path: %w", err)
-	}
-	absRoot, err := filepath.Abs(repoRoot)
-	if err != nil {
-		return "", fmt.Errorf("resolving repo root: %w", err)
-	}
-	// Ensure the resolved path is within the repo root
-	if !strings.HasPrefix(absJoined, absRoot+string(filepath.Separator)) && absJoined != absRoot {
-		return "", fmt.Errorf("path traversal rejected: %s", relPath)
-	}
-	return absJoined, nil
+	return pathutil.SafeJoinRepoPath(repoRoot, relPath)
 }
 
 // readSourceFile reads a file from disk within a repository.

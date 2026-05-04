@@ -28,6 +28,7 @@ import (
 	gitres "github.com/sourcebridge/sourcebridge/internal/git/resolution"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
+	"github.com/sourcebridge/sourcebridge/internal/indexing/pathutil"
 )
 
 // GitCredentialsFunc returns the default token + ssh key path for the
@@ -251,13 +252,7 @@ func (s *Service) runImport(repoID, repoName, repoPath string, isRemote bool, to
 
 // IsGitURL reports whether the given path is a remote git URL.
 func IsGitURL(s string) bool {
-	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
-		return true
-	}
-	if strings.HasPrefix(s, "git@") || strings.HasPrefix(s, "ssh://") || strings.HasPrefix(s, "git://") {
-		return true
-	}
-	return false
+	return pathutil.IsGitURL(s)
 }
 
 // NormalizeGitURL removes any auth material from an HTTPS URL and
@@ -313,22 +308,7 @@ func GitCloneCmd(ctx context.Context, repoURL, targetDir, token, sshKeyPath stri
 // clone-dir convention; if a caller needs it, it can use any safe
 // directory name it wants.
 func sanitizeRepoName(name string) string {
-	if name == "" {
-		return "repo"
-	}
-	out := make([]rune, 0, len(name))
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
-			out = append(out, r)
-		case r == ' ', r == '/', r == '\\':
-			out = append(out, '-')
-		}
-	}
-	if len(out) == 0 {
-		return "repo"
-	}
-	return string(out)
+	return pathutil.SanitizeRepoName(name, pathutil.StrictPolicy)
 }
 
 // deriveRepoName picks a sensible display name from a path or URL

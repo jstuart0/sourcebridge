@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
+	"github.com/sourcebridge/sourcebridge/internal/indexing/pathutil"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
@@ -80,22 +82,10 @@ func (l *qaRepoLocator) LocateRepoClone(repoID string) (string, bool) {
 	return "", false
 }
 
-// sanitizeRepoNameForQA mirrors sanitizeRepoName in
-// internal/api/graphql/helpers.go. Duplicated here rather than
-// exported because the other variant is unexported and changing its
-// visibility would leak package internals unnecessarily — the rule
-// is intentionally narrow (replace / and : with -).
+// sanitizeRepoNameForQA returns a filesystem-safe repo name for use in the QA
+// cache path. Delegates to pathutil.SanitizeRepoName with StrictPolicy.
 func sanitizeRepoNameForQA(name string) string {
-	out := make([]rune, 0, len(name))
-	for _, r := range name {
-		switch r {
-		case '/', ':':
-			out = append(out, '-')
-		default:
-			out = append(out, r)
-		}
-	}
-	return string(out)
+	return pathutil.SanitizeRepoName(name, pathutil.StrictPolicy)
 }
 
 // qaGraphLookup adapts the graph store's symbol lookup to
@@ -340,27 +330,10 @@ func (r *qaFileReader) ReadRepoFile(repoID, filePath string) (string, error) {
 	return string(data), nil
 }
 
-// safeJoinRepoPath duplicates safeJoinPath from internal/api/graphql
-// for the same layering reason as the artifact helper above. Rejects
-// absolute paths and any join that escapes the repo root.
+// safeJoinRepoPath rejects absolute paths and any join that escapes the repo
+// root. Delegates to pathutil.SafeJoinRepoPath.
 func safeJoinRepoPath(repoRoot, relPath string) (string, error) {
-	relPath = trimPrefix(relPath, "./")
-	if filepath.IsAbs(relPath) {
-		return "", fmt.Errorf("absolute path not allowed: %s", relPath)
-	}
-	joined := filepath.Join(repoRoot, filepath.FromSlash(relPath))
-	absJoined, err := filepath.Abs(joined)
-	if err != nil {
-		return "", fmt.Errorf("resolving path: %w", err)
-	}
-	absRoot, err := filepath.Abs(repoRoot)
-	if err != nil {
-		return "", fmt.Errorf("resolving repo root: %w", err)
-	}
-	if absJoined != absRoot && !hasPrefix(absJoined, absRoot+string(filepath.Separator)) {
-		return "", fmt.Errorf("path traversal rejected: %s", relPath)
-	}
-	return absJoined, nil
+	return pathutil.SafeJoinRepoPath(repoRoot, relPath)
 }
 
 // local helpers to avoid pulling strings just for these calls; a
@@ -410,15 +383,8 @@ func joinLines(ps []string) string {
 	}
 	return string(b)
 }
-func trimPrefix(s, pfx string) string {
-	if len(s) >= len(pfx) && s[:len(pfx)] == pfx {
-		return s[len(pfx):]
-	}
-	return s
-}
-func hasPrefix(s, pfx string) bool {
-	return len(s) >= len(pfx) && s[:len(pfx)] == pfx
-}
+func trimPrefix(s, pfx string) string { return strings.TrimPrefix(s, pfx) }
+func hasPrefix(s, pfx string) bool    { return strings.HasPrefix(s, pfx) }
 
 // qaSearcher adapts the hybrid retrieval service to qa.Searcher. The
 // bridge is narrow on purpose — internal/qa doesn't know about
