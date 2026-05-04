@@ -111,6 +111,12 @@ type Resolver struct {
 	Config       *config.Config             // application configuration
 	EventBus     *events.Bus                // in-process event bus for SSE notifications
 	Flags        featureflags.Flags         // backend startup-time feature flags
+	// Plan is the entitlement plan resolved once at boot via BootCurrentPlan().
+	// Per-request capability resolution reads this field instead of calling
+	// currentPlan() (which reads env vars) on every GraphQL request.
+	// Zero value maps to planLevel 0, equivalent to PlanOSS — safe for tests
+	// that don't set this field explicitly.
+	Plan entitlements.Plan
 	GitConfig    GitConfigLoader            // legacy; nil-safe — when GitResolver is set it's authoritative
 	// GitResolver is the runtime git-credential resolver (R3 slice 2).
 	// All clone / fetch / upstream-probe call sites resolve credentials
@@ -346,7 +352,7 @@ type resolvedCapabilities struct {
 func (r *Resolver) resolveCapabilities() resolvedCapabilities {
 	hasWorker := r.Worker != nil
 	hasKnowledge := r.KnowledgeStore != nil
-	checker := entitlements.NewChecker(currentPlan())
+	checker := entitlements.NewChecker(r.Plan)
 
 	allow := func(feature entitlements.Feature) bool {
 		return checker.IsAllowed(feature).Allowed
@@ -362,6 +368,7 @@ func (r *Resolver) resolveCapabilities() resolvedCapabilities {
 	discussCode := hasWorker
 	reviewCode := hasWorker
 
+	planStr := capabilities.NormalizeEdition(string(r.Plan))
 	return resolvedCapabilities{
 		features: &Features{
 			MultiTenant:     allow(entitlements.FeatureMultiTenant),
@@ -373,15 +380,15 @@ func (r *Resolver) resolveCapabilities() resolvedCapabilities {
 			AuditLog:        allow(entitlements.FeatureAuditLog),
 			Webhooks:        allow(entitlements.FeatureWebhooks),
 			CustomTemplates: hasWorker && allow(entitlements.FeatureCustomTemplates),
-			Billing:         currentPlan() != entitlements.PlanOSS,
+			Billing:         r.Plan != entitlements.PlanOSS,
 
 			CliffNotes:           hasKnowledge && hasWorker && allow(entitlements.FeatureCliffNotes),
 			LearningPaths:        hasKnowledge && hasWorker && allow(entitlements.FeatureLearningPaths),
 			CodeTours:            hasKnowledge && hasWorker && allow(entitlements.FeatureCodeTours),
 			SystemExplain:        hasKnowledge && hasWorker && allow(entitlements.FeatureSystemExplain),
 			SymbolScopedAnalysis: hasKnowledge && hasWorker && allow(entitlements.FeatureCliffNotes),
-			SubsystemClustering:  capabilities.IsAvailable("subsystem_clustering", capabilities.NormalizeEdition(string(currentPlan()))),
-			AgentSetup:           capabilities.IsAvailable("agent_setup", capabilities.NormalizeEdition(string(currentPlan()))),
+			SubsystemClustering:  capabilities.IsAvailable("subsystem_clustering", planStr),
+			AgentSetup:           capabilities.IsAvailable("agent_setup", planStr),
 
 			MultiAudienceKnowledge:   hasKnowledge && hasWorker && allow(entitlements.FeatureMultiAudienceKnowledge),
 			CustomKnowledgeTemplates: hasKnowledge && hasWorker && allow(entitlements.FeatureCustomKnowledgeTemplates),
@@ -419,4 +426,12 @@ func currentPlan() entitlements.Plan {
 		return entitlements.PlanEnterprise
 	}
 	return entitlements.PlanOSS
+}
+
+// BootCurrentPlan is the exported boot-time entry point for resolving the
+// entitlement plan from SOURCEBRIDGE_PLAN / SOURCEBRIDGE_EDITION env vars.
+// Called once from rest.NewServer so the resolved plan is stored on the
+// Resolver.Plan field and reused for every request — no per-request env reads.
+func BootCurrentPlan() entitlements.Plan {
+	return currentPlan()
 }

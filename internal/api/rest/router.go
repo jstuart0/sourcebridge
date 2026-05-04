@@ -713,6 +713,7 @@ func (s *Server) setupRouter() {
 			Config:                     s.cfg,
 			EventBus:                   s.eventBus,
 			Flags:                      s.flags,
+			Plan:                       graphql.BootCurrentPlan(),
 			GitConfig:                  gitConfigLoaderFromStore(s.gitConfigStore),
 			GitResolver:                s.gitResolver,
 			ComprehensionStore:         s.comprehensionStore,
