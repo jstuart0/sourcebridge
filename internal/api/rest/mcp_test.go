@@ -519,6 +519,8 @@ func TestMCP_ToolsList(t *testing.T) {
 		"get_orphan_symbols", "get_uncovered_requirements",
 		// CA-154 Phase 1 gap-audit-extra tools
 		"find_dead_code", "get_untested_symbols",
+		// CA-154 Phase 2a changed-symbols tool
+		"get_changed_symbols",
 		// CA-153 Phase 2b field guide tool
 		"get_field_guide",
 		// CA-153 Phase 2c change impact tool
