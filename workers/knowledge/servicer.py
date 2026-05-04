@@ -157,9 +157,13 @@ def _llm_usage_proto(usage_record, provider: LLMProvider | None = None, *, opera
     # record (set by LLMUsageRecord or LLMResponse adapters), then fall back to
     # the calling provider context, then leave empty so the Go-side
     # providerFromUsage() heuristic can resolve from the model name.
+    # Defense-in-depth: treat the historic "llm" sentinel as missing so it
+    # cannot flow into the proto even if a callsite is missed.
+    _raw_provider = getattr(usage_record, "provider", None) or getattr(usage_record, "provider_name", None)
+    if _raw_provider == "llm":
+        _raw_provider = None
     resolved = (
-        getattr(usage_record, "provider", None)
-        or getattr(usage_record, "provider_name", None)
+        _raw_provider
         or (provider and _provider_name(provider))
         or ""
     )

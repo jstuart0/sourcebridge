@@ -593,7 +593,7 @@ async def generate_workflow_story(
     )
 
     usage = LLMUsageRecord(
-        provider="llm",
+        provider=(response.provider_name or "") if response else "",
         model=response.model if response else "fallback",
         input_tokens=response.input_tokens if response else 0,
         output_tokens=response.output_tokens if response else 0,

@@ -746,7 +746,7 @@ class CliffNotesRenderer:
                     apply_deep_quality_gates=(depth == "deep" and (scope_type or "repository") == "repository"),
                 )
                 usage = LLMUsageRecord(
-                    provider="llm",
+                    provider=response.provider_name or "",
                     model=response.model,
                     input_tokens=response.input_tokens,
                     output_tokens=response.output_tokens,
@@ -769,7 +769,7 @@ class CliffNotesRenderer:
                 scope_path=scope_path,
             )
             usage = LLMUsageRecord(
-                provider="llm",
+                provider=getattr(self.provider, "provider_name", "") or "",
                 model=self.model_override or "fallback",
                 input_tokens=0,
                 output_tokens=0,
@@ -900,7 +900,7 @@ class CliffNotesRenderer:
                 output_tokens += response.output_tokens
                 model_used = response.model or model_used
         usage = LLMUsageRecord(
-            provider="llm",
+            provider=getattr(self.provider, "provider_name", "") or "",
             model=model_used,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -1059,7 +1059,7 @@ class CliffNotesRenderer:
             evidence_store_text=evidence_store_text,
         )
         usage = LLMUsageRecord(
-            provider="llm",
+            provider=getattr(self.provider, "provider_name", "") or "",
             model=model_used,
             input_tokens=input_tokens,
             output_tokens=output_tokens,

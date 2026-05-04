@@ -59,7 +59,7 @@ async def discuss_code(
     answer = _parse_discussion(response.content)
 
     usage = LLMUsageRecord(
-        provider="llm",
+        provider=response.provider_name or "",
         model=response.model,
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,
@@ -125,7 +125,7 @@ async def discuss_code_stream(
         related_requirements=reqs,
     )
     usage = LLMUsageRecord(
-        provider="llm",
+        provider=getattr(provider, "provider_name", "") or "",
         model=getattr(provider, "default_model", "") or getattr(provider, "model", ""),
         input_tokens=input_tokens,
         output_tokens=output_tokens,

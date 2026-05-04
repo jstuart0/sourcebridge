@@ -191,7 +191,7 @@ async def generate_learning_path(
                     step.refinement_status = ""
 
     usage = LLMUsageRecord(
-        provider="llm",
+        provider=response.provider_name or "",
         model=response.model,
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,

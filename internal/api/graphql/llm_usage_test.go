@@ -88,6 +88,23 @@ func TestProviderFromUsage(t *testing.T) {
 			usage:    &commonv1.LLMUsage{Model: "some-model"},
 			expected: "unknown", // not "llm"
 		},
+		{
+			// Defense-in-depth: if Python missed a callsite and "llm" is set
+			// explicitly in Provider, Go falls through to model heuristic.
+			name:     "explicit llm sentinel falls through to model heuristic openai",
+			usage:    &commonv1.LLMUsage{Provider: "llm", Model: "gpt-4o"},
+			expected: "openai",
+		},
+		{
+			name:     "explicit llm sentinel falls through to model heuristic anthropic",
+			usage:    &commonv1.LLMUsage{Provider: "llm", Model: "claude-3-opus"},
+			expected: "anthropic",
+		},
+		{
+			name:     "explicit llm sentinel with unknown model yields unknown not llm",
+			usage:    &commonv1.LLMUsage{Provider: "llm", Model: "qwen3:32b"},
+			expected: "unknown",
+		},
 	}
 
 	for _, tc := range tests {

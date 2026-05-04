@@ -23,7 +23,10 @@ func providerFromUsage(usage *commonv1.LLMUsage) string {
 	if usage == nil {
 		return "unknown"
 	}
-	if usage.Provider != "" {
+	// Defense-in-depth: treat the historic "llm" sentinel as missing.
+	// Well-behaved workers now emit "" or the real provider name; this guard
+	// protects against any callsite that was missed in the Python cleanup.
+	if usage.Provider != "" && usage.Provider != "llm" {
 		return usage.Provider
 	}
 	if idx := strings.Index(usage.Model, "/"); idx > 0 {

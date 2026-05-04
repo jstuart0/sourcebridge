@@ -78,7 +78,7 @@ async def summarize_function(
     summary = _parse_summary(response.content, SummaryLevel.FUNCTION, name, ch)
 
     usage = LLMUsageRecord(
-        provider="llm",
+        provider=response.provider_name or "",
         model=response.model,
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,
@@ -112,7 +112,7 @@ async def summarize_file(
     summary = _parse_summary(response.content, SummaryLevel.FILE, file_path, ch)
 
     usage = LLMUsageRecord(
-        provider="llm",
+        provider=response.provider_name or "",
         model=response.model,
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,
@@ -146,7 +146,7 @@ async def summarize_module(
     summary = _parse_summary(response.content, SummaryLevel.MODULE, module_name, ch)
 
     usage = LLMUsageRecord(
-        provider="llm",
+        provider=response.provider_name or "",
         model=response.model,
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,

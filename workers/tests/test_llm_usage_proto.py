@@ -10,10 +10,12 @@ from __future__ import annotations
 import pytest
 
 from workers.common.llm.fake import FakeLLMProvider
+from workers.common.llm.provider import LLMResponse
 from workers.knowledge.servicer import _llm_usage_proto as knowledge_llm_usage_proto
 from workers.knowledge.servicer import _provider_name as knowledge_provider_name
 from workers.reasoning.servicer import _llm_usage_proto as reasoning_llm_usage_proto
 from workers.reasoning.servicer import _provider_name as reasoning_provider_name
+from workers.reasoning.types import LLMUsageRecord
 
 
 # ---------------------------------------------------------------------------
@@ -166,3 +168,121 @@ def test_llm_usage_proto_no_operation_attr(fn):
 
     proto = fn(_MinimalRecord())
     assert proto.operation == ""
+
+
+# ---------------------------------------------------------------------------
+# Defense-in-depth: "llm" sentinel must never flow through either helper.
+# Codex r2 C1 — each producer now sets provider="" or real name, but the
+# helper provides a backstop for any site that gets missed in the future.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fn", [reasoning_llm_usage_proto, knowledge_llm_usage_proto])
+def test_llm_usage_proto_rejects_llm_sentinel_from_record(fn):
+    """The 'llm' sentinel on the record is treated as missing; Go heuristic resolves."""
+    usage = _FakeUsageRecord(model="gpt-4o", provider="llm")
+    proto = fn(usage)
+    assert proto.provider != "llm", "corrupt 'llm' sentinel must never survive _llm_usage_proto"
+    # provider is empty; Go will resolve via model-name heuristic
+    assert proto.provider == ""
+
+
+@pytest.mark.parametrize("fn", [reasoning_llm_usage_proto, knowledge_llm_usage_proto])
+def test_llm_usage_proto_rejects_llm_sentinel_falls_through_to_provider_arg(fn):
+    """When usage.provider='llm', fall through to the provider argument."""
+    usage = _FakeUsageRecord(model="gpt-4o", provider="llm")
+    proto = fn(usage, _OpenAICompatLike())
+    assert proto.provider == "openai", "should use provider arg when record sentinel is 'llm'"
+
+
+# ---------------------------------------------------------------------------
+# Per-producer-site tests: simulate what each worker module used to do
+# (provider="llm") and verify the proto no longer carries the sentinel.
+# These are regression guards for codex r2 C1.
+# ---------------------------------------------------------------------------
+
+
+def _response_with_provider(provider_name: str | None = None) -> LLMResponse:
+    """Build an LLMResponse as a real producer would after fixing provider="llm"."""
+    return LLMResponse(
+        content="...",
+        model="qwen3:32b",
+        input_tokens=100,
+        output_tokens=50,
+        provider_name=provider_name,
+    )
+
+
+def _usage_from_response(response: LLMResponse, operation: str) -> LLMUsageRecord:
+    """Mimic the fixed producer pattern: provider=response.provider_name or ''."""
+    return LLMUsageRecord(
+        provider=response.provider_name or "",
+        model=response.model,
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
+        operation=operation,
+    )
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "cliff_notes",
+        "learning_path",
+        "code_tour",
+        "workflow_story",
+        "explain_system",
+        "explain",
+        "discussion",
+        "review",
+        "summary",
+    ],
+)
+def test_producer_site_no_provider_name_yields_empty_not_sentinel(operation):
+    """Each producer site: when provider_name is None (e.g. FakeLLMProvider),
+    the resulting LLMUsageRecord.provider is '' — not 'llm'."""
+    response = _response_with_provider(provider_name=None)
+    usage = _usage_from_response(response, operation)
+    assert usage.provider != "llm", f"operation={operation}: provider must not be 'llm'"
+    assert usage.provider == "", f"operation={operation}: no provider_name → empty string"
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "cliff_notes",
+        "learning_path",
+        "code_tour",
+        "workflow_story",
+        "explain_system",
+        "explain",
+        "discussion",
+        "review",
+        "summary",
+    ],
+)
+def test_producer_site_ollama_provider_name_flows_through(operation):
+    """Each producer site: when provider_name='ollama', it flows through correctly."""
+    response = _response_with_provider(provider_name="ollama")
+    usage = _usage_from_response(response, operation)
+    assert usage.provider == "ollama", f"operation={operation}: expected 'ollama'"
+
+
+@pytest.mark.parametrize("fn", [reasoning_llm_usage_proto, knowledge_llm_usage_proto])
+def test_llm_usage_proto_ollama_producer_round_trip(fn):
+    """Full round-trip: ollama provider_name flows through _llm_usage_proto to proto."""
+    response = _response_with_provider(provider_name="ollama")
+    usage = _usage_from_response(response, "cliff_notes")
+    proto = fn(usage)
+    assert proto.provider == "ollama"
+    assert proto.provider != "llm"
+
+
+@pytest.mark.parametrize("fn", [reasoning_llm_usage_proto, knowledge_llm_usage_proto])
+def test_llm_usage_proto_no_provider_name_round_trip(fn):
+    """Full round-trip: missing provider_name → empty proto.provider (Go resolves)."""
+    response = _response_with_provider(provider_name=None)
+    usage = _usage_from_response(response, "cliff_notes")
+    proto = fn(usage)
+    assert proto.provider == ""
+    assert proto.provider != "llm"
