@@ -521,6 +521,8 @@ func TestMCP_ToolsList(t *testing.T) {
 		"find_dead_code", "get_untested_symbols",
 		// CA-154 Phase 2a changed-symbols tool
 		"get_changed_symbols",
+		// CA-154 Phase 2b find_importers tool
+		"find_importers",
 		// CA-153 Phase 2b field guide tool
 		"get_field_guide",
 		// CA-153 Phase 2c change impact tool

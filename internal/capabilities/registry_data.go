@@ -183,6 +183,17 @@ var Registry = []Capability{
 		LatencyClass: "fast_read",
 	},
 
+	// ---- Code dependencies (Phase 2b, CA-154) ----
+	// find_importers returns the packages that import a given file's package.
+	// Package-level granularity only; file-level deferred to follow-up CA.
+	{
+		Name:         "code_dependencies",
+		Description:  "Package-level dependency queries: find which packages import a given package (find_importers).",
+		Editions:     []Edition{EditionOSS, EditionEnterprise},
+		MCPToolNames: []string{"find_importers"},
+		LatencyClass: "fast_read",
+	},
+
 	// ---- Gap audit (Phase 1b, CA-153; extended CA-154) ----
 	{
 		Name:         "gap_audit",
