@@ -56,6 +56,7 @@ spec:
               mountPath: /data
           securityContext:
             allowPrivilegeEscalation: false
+            runAsNonRoot: false   # required: chown needs uid 0; pod-level runAsNonRoot:true would otherwise reject this initContainer (codex r2 H2 fix)
             runAsUser: 0
             capabilities:
               drop: ["ALL"]

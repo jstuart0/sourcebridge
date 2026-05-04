@@ -1,6 +1,9 @@
 # Example: vLLM with EAGLE3 speculative decoding
 # Requires NVIDIA GPU with sufficient VRAM for target + draft model
 # Uses vLLM v1 engine for best performance
+#
+# Image pinned to v0.20.1 (latest stable as of 2026-05-04 per Docker Hub).
+# CPU requests added per codex r2 M1 audit. Override via kustomize overlay.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -21,7 +24,7 @@ spec:
     spec:
       containers:
       - name: vllm
-        image: vllm/vllm-openai:latest
+        image: vllm/vllm-openai:v0.20.1
         args:
           - "serve"
           - "meta-llama/Llama-3.1-8B-Instruct"
@@ -47,6 +50,7 @@ spec:
           protocol: TCP
         resources:
           requests:
+            cpu: "2"
             memory: "16Gi"
           limits:
             memory: "32Gi"

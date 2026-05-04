@@ -40,6 +40,22 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ok"))
 }
 
+// handleApiHealth serves GET /api/health — the public-ingress-reachable health
+// probe. Slice 4 removed /healthz from the public Ingress and updated the
+// README to direct uptime monitors to /api/health; this handler is the Go API
+// side of that path so requests routed through Ingress (/api/* → sourcebridge-api)
+// resolve correctly. The Next.js web container exposes the same path for
+// in-pod / kubelet probes; both coexist by design (codex r2 C1 fix).
+//
+// Intentionally trivial — no upstream dependency, no auth. If the process is
+// alive and serving HTTP, it returns 200. Operators who need deep readiness
+// (DB, worker) should use /readyz instead.
+func (s *Server) handleApiHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	// CA-142: flip NOT_SERVING immediately on drain so the load balancer
 	// stops routing new requests to this pod before SIGTERM arrives.

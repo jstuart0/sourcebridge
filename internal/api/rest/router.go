@@ -707,6 +707,12 @@ func (s *Server) setupRouter() {
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/readyz", s.handleReadyz)
 	r.Get("/metrics", s.handleMetrics)
+	// /api/health: public-ingress-reachable liveness probe. The Ingress routes
+	// /api/* to sourcebridge-api, so this handler ensures uptime monitors
+	// pointing at https://<host>/api/health receive a valid 200 response.
+	// Mirrors the Next.js web/src/app/api/health/route.ts for the API path
+	// (codex r2 C1 fix).
+	r.Get("/api/health", s.handleApiHealth)
 
 	// Public version endpoint (CA-136). Returns build metadata for the
 	// running API server plus a best-effort worker version. Intentionally

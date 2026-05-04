@@ -114,29 +114,45 @@ func gitCloneCmd(ctx context.Context, repoURL, targetDir, token, sshKeyPath stri
 //
 // Resolution order:
 //  1. SOURCEBRIDGE_GIT_ASKPASS_HELPER env var (operator override / testing).
+//     Must be an absolute path, must exist, and must be executable. If the
+//     var is set but fails any of these checks the function returns an error
+//     immediately — no silent fallback, to surface misconfiguration early.
 //  2. A sibling binary next to the currently-running executable
 //     (covers `go run ./cmd/sourcebridge` and the default container layout
 //     where both binaries live under /usr/local/bin/).
-//  3. PATH lookup via exec.LookPath (covers $GOPATH/bin after `go install`).
 //
-// Returns ("", false) when the helper cannot be found; callers must fall
-// back gracefully (no shell-eval fallback — just skip token auth).
-func gitAskpassHelper() (string, bool) {
+// There is intentionally NO exec.LookPath / PATH fallback (SEC-8 / codex r2
+// H1). A binary earlier on PATH named "git-credential-helper" could receive
+// SOURCEBRIDGE_GIT_TOKEN. Operators who need a custom location must set the
+// override env var with an absolute path.
+//
+// Returns an error when the helper cannot be found or the override is invalid.
+// Callers must skip credential env vars when this returns an error — never
+// fall back to a shell-eval credential mechanism.
+func gitAskpassHelper() (string, error) {
 	if override := os.Getenv("SOURCEBRIDGE_GIT_ASKPASS_HELPER"); override != "" {
-		return override, true
+		if !filepath.IsAbs(override) {
+			return "", fmt.Errorf("SOURCEBRIDGE_GIT_ASKPASS_HELPER %q is not an absolute path; set an absolute path to the git-credential-helper binary", override)
+		}
+		info, err := os.Stat(override)
+		if err != nil {
+			return "", fmt.Errorf("SOURCEBRIDGE_GIT_ASKPASS_HELPER %q: %w", override, err)
+		}
+		// Check executable bit (owner, group, or other).
+		if info.Mode()&0o111 == 0 {
+			return "", fmt.Errorf("SOURCEBRIDGE_GIT_ASKPASS_HELPER %q exists but is not executable", override)
+		}
+		return override, nil
 	}
 	// Sibling binary next to the running process.
 	if exe, err := os.Executable(); err == nil {
 		candidate := filepath.Join(filepath.Dir(exe), "git-credential-helper")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, true
+		if info, err := os.Stat(candidate); err == nil && info.Mode()&0o111 != 0 {
+			return candidate, nil
 		}
 	}
-	// PATH lookup.
-	if p, err := exec.LookPath("git-credential-helper"); err == nil {
-		return p, true
-	}
-	return "", false
+	// No PATH lookup — see function comment for rationale.
+	return "", fmt.Errorf("git-credential-helper binary not found: set SOURCEBRIDGE_GIT_ASKPASS_HELPER to its absolute path or place it alongside the sourcebridge binary")
 }
 
 // gitPullCmd builds an exec.Cmd for git pull with optional authentication.
@@ -152,16 +168,19 @@ func gitPullCmd(ctx context.Context, repoDir, token, sshKeyPath string) *exec.Cm
 		// cmd.Env), never through a shell command string. This eliminates
 		// the shell-injection surface that existed when the credential was
 		// embedded in GIT_CONFIG_VALUE_0 as a shell function literal.
-		if helperPath, ok := gitAskpassHelper(); ok {
+		if helperPath, err := gitAskpassHelper(); err == nil {
 			cmd.Env = append(os.Environ(),
 				"GIT_ASKPASS="+helperPath,
 				"SOURCEBRIDGE_GIT_TOKEN="+token,
 			)
+		} else {
+			// Helper binary not found or misconfigured. Omit credential env
+			// vars entirely — git will prompt interactively (failing in
+			// non-interactive contexts) rather than evaluating shell code.
+			// This is logged at call sites that care; gitPullCmd is a pure
+			// command builder so it stays side-effect-free here.
+			_ = err
 		}
-		// If the helper binary is not found, we omit credential env vars.
-		// git will prompt interactively (which will fail in non-interactive
-		// contexts) rather than evaluating shell code — still safer than
-		// the previous fallback.
 	}
 	if sshKeyPath != "" {
 		// Codex r2 high fix: shell-safe quoting via gitres.BuildGitSSHCommand.

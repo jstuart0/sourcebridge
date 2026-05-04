@@ -5,6 +5,8 @@
 # For n-gram speculation (no extra model/VRAM needed):
 #   Replace --model-draft/--draft-max with:
 #   --spec-type ngram-simple --spec-ngram-min 2
+#
+# CPU requests added per codex r2 M1 audit. Override via kustomize overlay.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -52,6 +54,7 @@ spec:
           readOnly: true
         resources:
           requests:
+            cpu: "1"
             memory: "8Gi"
           limits:
             memory: "16Gi"

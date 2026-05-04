@@ -117,6 +117,27 @@ func TestHandleReadyz_NilHealthChecker_EmbeddedMode(t *testing.T) {
 	_ = body
 }
 
+// TestHandleApiHealth verifies the /api/health handler introduced by codex r2 C1.
+// The Ingress routes /api/* to sourcebridge-api; this test confirms the handler
+// returns 200 {"ok":true} so public uptime monitors resolve correctly.
+func TestHandleApiHealth(t *testing.T) {
+	s := &Server{}
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	rec := httptest.NewRecorder()
+	s.handleApiHealth(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	body := rec.Body.String()
+	if body != `{"ok":true}` {
+		t.Errorf("body = %q, want {\"ok\":true}", body)
+	}
+}
+
 // callReadyz is a helper that fires a GET /readyz against the server and
 // parses the JSON response body.
 func callReadyz(t *testing.T, s *Server) (*httptest.ResponseRecorder, readinessResponse) {
