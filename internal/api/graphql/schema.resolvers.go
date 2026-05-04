@@ -104,7 +104,7 @@ func (r *mutationResolver) AddRepository(ctx context.Context, input AddRepositor
 
 // RemoveRepository is the resolver for the removeRepository field.
 func (r *mutationResolver) RemoveRepository(ctx context.Context, id string) (bool, error) {
-	recordDeprecatedFieldRead("Mutation.removeRepository")
+	recordDeprecatedFieldReadCtx(ctx, "Mutation.removeRepository")
 	if r.getStore(ctx) == nil {
 		return false, fmt.Errorf("store not initialized")
 	}
@@ -1405,7 +1405,7 @@ func (r *mutationResolver) LinkRepos(ctx context.Context, sourceRepoID string, t
 
 // UnlinkRepos is the resolver for the unlinkRepos field.
 func (r *mutationResolver) UnlinkRepos(ctx context.Context, linkID string) (bool, error) {
-	recordDeprecatedFieldRead("Mutation.unlinkRepos")
+	recordDeprecatedFieldReadCtx(ctx, "Mutation.unlinkRepos")
 	store := r.getStore(ctx)
 	if store == nil {
 		return false, fmt.Errorf("store not initialized")
@@ -1424,7 +1424,7 @@ func (r *mutationResolver) UnlinkReposResult(ctx context.Context, linkID string)
 
 // DetectContracts is the resolver for the detectContracts field.
 func (r *mutationResolver) DetectContracts(ctx context.Context, repoID string) (bool, error) {
-	recordDeprecatedFieldRead("Mutation.detectContracts")
+	recordDeprecatedFieldReadCtx(ctx, "Mutation.detectContracts")
 	if r.Worker == nil {
 		return false, fmt.Errorf("AI features are unavailable — worker not connected")
 	}
@@ -1851,7 +1851,7 @@ func (r *mutationResolver) UpdateModelCapabilities(ctx context.Context, input Up
 
 // DeleteModelCapabilities is the resolver for the deleteModelCapabilities field.
 func (r *mutationResolver) DeleteModelCapabilities(ctx context.Context, modelID string) (bool, error) {
-	recordDeprecatedFieldRead("Mutation.deleteModelCapabilities")
+	recordDeprecatedFieldReadCtx(ctx, "Mutation.deleteModelCapabilities")
 	if r.ComprehensionStore == nil {
 		return false, fmt.Errorf("comprehension settings not configured")
 	}
@@ -3410,7 +3410,7 @@ func (r *queryResolver) TraceabilityMatrix(ctx context.Context, repositoryID str
 
 // RequirementLinks is the resolver for the requirementLinks field.
 func (r *queryResolver) RequirementLinks(ctx context.Context, requirementID string, limit *int, offset *int) ([]*RequirementLink, error) {
-	recordDeprecatedFieldRead("Query.requirementLinks")
+	recordDeprecatedFieldReadCtx(ctx, "Query.requirementLinks")
 	store := r.getStore(ctx)
 	if store == nil {
 		return nil, fmt.Errorf("store not initialized")
@@ -3859,7 +3859,7 @@ func (r *queryResolver) RepoLinks(ctx context.Context, repoID string) ([]*RepoLi
 
 // CrossRepoRefs is the resolver for the crossRepoRefs field.
 func (r *queryResolver) CrossRepoRefs(ctx context.Context, repoID string, refType *CrossRepoRefType, limit *int) ([]*CrossRepoRef, error) {
-	recordDeprecatedFieldRead("Query.crossRepoRefs")
+	recordDeprecatedFieldReadCtx(ctx, "Query.crossRepoRefs")
 	store := r.getStore(ctx)
 	if store == nil {
 		return nil, fmt.Errorf("store not initialized")
@@ -4007,7 +4007,7 @@ func (r *queryResolver) ComprehensionSettings(ctx context.Context, scopeType *st
 
 // ComprehensionSettingsList is the resolver for the comprehensionSettingsList field.
 func (r *queryResolver) ComprehensionSettingsList(ctx context.Context) ([]*ComprehensionSettings, error) {
-	recordDeprecatedFieldRead("Query.comprehensionSettingsList")
+	recordDeprecatedFieldReadCtx(ctx, "Query.comprehensionSettingsList")
 	if r.ComprehensionStore == nil {
 		return nil, fmt.Errorf("comprehension settings not configured")
 	}
