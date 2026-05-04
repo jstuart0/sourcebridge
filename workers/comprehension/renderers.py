@@ -26,6 +26,7 @@ from time import monotonic
 
 import structlog
 
+from workers.common.llm.errors import is_provider_compute_error
 from workers.common.llm.provider import (
     LLMProvider,
     LLMResponse,
@@ -398,32 +399,10 @@ Bad Testing example:
 }
 
 
-def _is_provider_compute_error(exc: Exception) -> bool:
-    """True for transient backend failures that the retry path should swallow.
-
-    The original predicate only caught "compute error" / "server_error", but
-    Ollama and OpenAI-compat clients surface a wider variety of transient
-    issues — timeouts, broken pipes, partial connection resets, gateway 5xx —
-    that all benefit from a backoff-and-retry. A timeout in particular is
-    indistinguishable from a slow GPU response on the first try.
-    """
-    text = str(exc).lower()
-    transient_markers = (
-        "compute error",
-        "server_error",
-        "request timed out",
-        "timeout",
-        "deadline exceeded",
-        "connection reset",
-        "connection refused",
-        "broken pipe",
-        "503",
-        "502",
-        "504",
-        "gateway",
-        "upstream",
-    )
-    return any(marker in text for marker in transient_markers)
+# Backward-compat alias — callers in this module and any extensions that
+# import _is_provider_compute_error from renderers.py continue to work.
+# The canonical implementation lives in workers.common.llm.errors.
+_is_provider_compute_error = is_provider_compute_error
 
 
 CLIFF_NOTES_RENDER_TEMPLATE = """\

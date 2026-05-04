@@ -44,6 +44,7 @@ from typing import Any
 
 import structlog
 
+from workers.common.llm.errors import is_provider_compute_error
 from workers.common.llm.provider import (
     LLMProvider,
     LLMResponse,
@@ -1434,31 +1435,10 @@ def _first_line(text: str) -> str:
     return ""
 
 
-def _is_provider_compute_error(exc: Exception) -> bool:
-    """True for transient backend failures that the retry path should swallow.
-
-    See `workers.comprehension.renderers._is_provider_compute_error` for the
-    same logic — kept in sync here because hierarchical.py drives the per-node
-    retry loop independently. Don't drift the two definitions; if you broaden
-    one, broaden both.
-    """
-    text = str(exc).lower()
-    transient_markers = (
-        "compute error",
-        "server_error",
-        "request timed out",
-        "timeout",
-        "deadline exceeded",
-        "connection reset",
-        "connection refused",
-        "broken pipe",
-        "503",
-        "502",
-        "504",
-        "gateway",
-        "upstream",
-    )
-    return any(marker in text for marker in transient_markers)
+# Backward-compat alias — the per-node retry loop here and any extensions that
+# import _is_provider_compute_error from hierarchical.py continue to work.
+# The canonical implementation lives in workers.common.llm.errors.
+_is_provider_compute_error = is_provider_compute_error
 
 
 async def _maybe_await(value: object) -> None:

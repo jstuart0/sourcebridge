@@ -29,6 +29,7 @@ from workers.common.grpc_metadata import (
 )
 from workers.common.llm.config import create_llm_provider_for_request
 from workers.common.llm.provider import LLMProvider, SnapshotTooLargeError
+from workers.common.servicer_utils import resolve_provider_for_context
 from workers.comprehension.adapters.code import CodeCorpus
 from workers.comprehension.corpus import walk_by_level
 from workers.comprehension.hierarchical import HierarchicalConfig, HierarchicalStrategy
@@ -207,40 +208,12 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         # pattern); no servicer-instance state for in-flight runs.
 
     def _resolve_request_provider(self, context: grpc.aio.ServicerContext) -> tuple[LLMProvider, str | None]:
-        override = resolve_llm_override(context)
-        if override is None or self._config is None:
-            return self._llm, resolve_model_override(context)
-        provider, model = create_llm_provider_for_request(
-            self._config,
-            provider=override.provider,
-            base_url=override.base_url,
-            api_key=override.api_key,
-            model=override.model,
-            draft_model=override.draft_model,
-            timeout_seconds=override.timeout_seconds,
-        )
-        return provider, model or None
+        """Backward-compat wrapper. New code should call resolve_provider_for_context directly."""
+        return resolve_provider_for_context(self._llm, self._config, context)
 
     def _resolve_report_provider(self, context: grpc.aio.ServicerContext) -> tuple[LLMProvider, str | None]:
-        override = resolve_llm_override(context)
-        if override is None:
-            model = resolve_model_override(context)
-            if self._report_llm is not None:
-                fallback_model = self._config.llm_report_model if self._config else None
-                return self._report_llm, model or fallback_model or None
-            return self._llm, model
-        if self._config is None:
-            return self._report_llm or self._llm, override.model or None
-        provider, model = create_llm_provider_for_request(
-            self._config,
-            provider=override.provider,
-            base_url=override.base_url,
-            api_key=override.api_key,
-            model=override.model,
-            draft_model=override.draft_model,
-            timeout_seconds=override.timeout_seconds,
-        )
-        return provider, model or None
+        """Backward-compat wrapper with self._report_llm fallback."""
+        return resolve_provider_for_context(self._llm, self._config, context, fallback_llm=self._report_llm)
 
     def _resolve_job_logger(self, context: grpc.aio.ServicerContext) -> SurrealJobLogger | None:
         if self._config is None:

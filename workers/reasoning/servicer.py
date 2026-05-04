@@ -12,6 +12,7 @@ from workers.common.embedding.provider import EmbeddingProvider
 from workers.common.grpc_metadata import resolve_llm_override, resolve_model_override
 from workers.common.llm.config import create_llm_provider_for_request
 from workers.common.llm.provider import LLMProvider
+from workers.common.servicer_utils import resolve_provider_for_context
 from workers.common.llm.tools import (
     AgentMessage,
     ToolCall,
@@ -161,19 +162,8 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
         self._config = worker_config
 
     def _resolve_provider(self, context: grpc.aio.ServicerContext) -> tuple[LLMProvider, str | None]:
-        override = resolve_llm_override(context)
-        if override is None or self._config is None:
-            return self._llm, resolve_model_override(context)
-        provider, model = create_llm_provider_for_request(
-            self._config,
-            provider=override.provider,
-            base_url=override.base_url,
-            api_key=override.api_key,
-            model=override.model,
-            draft_model=override.draft_model,
-            timeout_seconds=override.timeout_seconds,
-        )
-        return provider, model or None
+        """Backward-compat wrapper. New code should call resolve_provider_for_context directly."""
+        return resolve_provider_for_context(self._llm, self._config, context)
 
     async def AnalyzeSymbol(  # noqa: N802
         self,
