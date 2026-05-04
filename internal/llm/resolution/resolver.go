@@ -31,8 +31,9 @@ type Snapshot struct {
 	// OperationGroup is the resolver-internal op classification used when
 	// picking a per-op model from the workspace record (analysis / review /
 	// discussion / knowledge / report). Derived from the op string passed
-	// to Resolve.
-	OperationGroup string
+	// to Resolve. The type is config.OperationGroup for compile-time safety;
+	// convert with string(snap.OperationGroup) when passing to a string API.
+	OperationGroup config.OperationGroup
 
 	// Sources maps field name → the layer that supplied that field's value.
 	Sources map[string]Source
@@ -134,18 +135,22 @@ type WorkspaceRecord struct {
 	LastLegacyVersionConsumed uint64
 }
 
-// Operation group strings used internally by the resolver. These map ops
+// Operation group constants used internally by the resolver. These map ops
 // (the public Op* constants) to coarser groups so a single per-area model
 // field can apply to multiple ops (e.g., OpDiscussion + OpQASynth both
 // resolve to the workspace AskModel). Centralized here so callers and
-// tests reference the same string set.
+// tests reference the same constant set.
+//
+// The type is config.OperationGroup (defined in internal/config) so that
+// config.LLMConfig.ModelForOp can accept the value without a circular import.
+// Use string(group) to pass to APIs that still accept raw strings.
 const (
-	GroupAnalysis             = "analysis"
-	GroupReview               = "review"
-	GroupDiscussion           = "discussion"
-	GroupKnowledge            = "knowledge"
-	GroupArchitectureDiagram  = "architecture_diagram"
-	GroupReport               = "report"
+	GroupAnalysis            = config.OpGroupAnalysis
+	GroupReview              = config.OpGroupReview
+	GroupDiscussion          = config.OpGroupDiscussion
+	GroupKnowledge           = config.OpGroupKnowledge
+	GroupArchitectureDiagram = config.OpGroupArchitectureDiagram
+	GroupReport              = config.OpGroupReport
 )
 
 // RepoOverrideStore is the narrow interface the resolver needs to fetch
@@ -309,9 +314,9 @@ func (r *DefaultResolver) InvalidateLocal() {
 }
 
 // deriveOperationGroup maps the fine-grained op constants to the coarser
-// per-op model groups used by config.LLMConfig.ModelForOperation and the
-// resolver's own workspaceModelForOp / overrideModelForOp.
-func deriveOperationGroup(op string) string {
+// per-op model groups used by config.LLMConfig.ModelForOp and the resolver's
+// own workspaceModelForOp / overrideModelForOp.
+func deriveOperationGroup(op string) config.OperationGroup {
 	switch op {
 	case OpReview, OpMCPReview:
 		return GroupReview
@@ -356,7 +361,7 @@ func applyEnvBoot(snap *Snapshot, env config.LLMConfig) {
 		snap.APIKey = env.APIKey
 		snap.Sources[FieldAPIKey] = SourceEnvFallback
 	}
-	if model := env.ModelForOperation(snap.OperationGroup); model != "" {
+	if model := env.ModelForOp(snap.OperationGroup); model != "" {
 		snap.Model = model
 		snap.Sources[FieldModel] = SourceEnvFallback
 	}
@@ -488,10 +493,10 @@ func (r *DefaultResolver) overlayWorkspaceFromRecord(snap *Snapshot, rec *Worksp
 }
 
 // workspaceModelForOp picks the per-op model from a WorkspaceRecord.
-// Mirrors config.LLMConfig.ModelForOperation but operates on the resolver's
+// Mirrors config.LLMConfig.ModelForOp but operates on the resolver's
 // own struct shape. R2 added the architecture_diagram group; in advanced
 // mode it returns ArchitectureDiagramModel, falling back to SummaryModel.
-func workspaceModelForOp(rec *WorkspaceRecord, group string) string {
+func workspaceModelForOp(rec *WorkspaceRecord, group config.OperationGroup) string {
 	if rec == nil {
 		return ""
 	}
@@ -532,7 +537,7 @@ func workspaceModelForOp(rec *WorkspaceRecord, group string) string {
 // returns SummaryModel for every group (so a simple-mode override
 // applies to every area). When true, returns the per-area field if
 // non-empty, falling back to SummaryModel.
-func overrideModelForOp(ov *RepoOverride, group string) string {
+func overrideModelForOp(ov *RepoOverride, group config.OperationGroup) string {
 	if ov == nil {
 		return ""
 	}

@@ -36,6 +36,46 @@ const (
 	EditionEnterprise Edition = "enterprise"
 )
 
+// Capability name constants for every entry in Registry.
+// Surfaces that call IsAvailable, MCPToolGatedBy, or GraphQLFieldGatedBy
+// must use these constants rather than inline string literals so that a
+// rename in Registry is caught at compile time.
+//
+// Convention: one constant per Registry entry, named Cap<PascalCaseName>.
+// Append here whenever you add a new Registry entry in registry_data.go.
+const (
+	CapRepositoryIndexing  = "repository_indexing"
+	CapHybridSearch        = "hybrid_search"
+	CapCliffNotes          = "cliff_notes"
+	CapArchitectureDiagram = "architecture_diagram"
+	CapExplainCode         = "explain_code"
+	CapAgenticRetrieval    = "agentic_retrieval"
+	CapCallGraph           = "call_graph"
+	CapSymbolSource        = "symbol_source"
+	CapFileImports         = "file_imports"
+	CapGitHistory          = "git_history"
+	CapTestLinkage         = "test_linkage"
+	CapEntryPoints         = "entry_points"
+	CapIndexingLifecycle   = "indexing_lifecycle"
+	CapCompoundWorkflows   = "compound_workflows"
+	CapRequirements        = "requirements"
+	CapChangeImpact        = "change_impact"
+	CapRequirementLinking  = "requirement_linking"
+	CapFieldGuides         = "field_guides"
+	CapCodeDependencies    = "code_dependencies"
+	CapGapAudit            = "gap_audit"
+	CapSubsystemClustering = "subsystem_clustering"
+	CapAgentSetup          = "agent_setup"
+	CapEnterpriseReports   = "enterprise_reports"
+	CapSSOIdentity         = "sso_identity"
+	CapAuditLog            = "audit_log"
+	CapNotifications       = "notifications"
+	CapTeamManagement      = "team_management"
+	CapOrgSettings         = "org_settings"
+	CapCrossRepoImpact     = "cross_repo_impact"
+	CapPerOpModels         = "per_op_models"
+)
+
 // NormalizeEdition coerces any input (config strings, JWT claims,
 // env vars) to a valid Edition, defaulting to OSS.
 func NormalizeEdition(s string) Edition {

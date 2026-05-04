@@ -445,12 +445,62 @@ type resolvedCapabilities struct {
 	ideCapabilities *IDECapabilities
 }
 
+// featureToCapability maps an entitlements.Feature constant to its
+// corresponding capability-registry name (see capabilities.Registry).
+//
+// Semantic note: the two systems gate along DIFFERENT axes.
+// entitlements.Checker operates on plan level (OSS → free → team → enterprise).
+// capabilities.IsAvailable operates on edition (OSS vs enterprise).
+// A full 1:1 migration would collapse the four-tier plan model to two
+// edition tiers, silently granting team-only features to every enterprise
+// user and denying free-plan features to OSS users. That is a behavior
+// change, so this adapter is deliberately conservative:
+//
+//   - Features that have a semantically equivalent capability-registry entry
+//     (same gating semantics, verified by inspection) return the capability
+//     name. resolveCapabilities routes them through capabilities.IsAvailable.
+//   - Features that are ONLY plan-gated (multi-tenant, SSO, connectors, …)
+//     return "" and resolveCapabilities keeps using entitlements.IsAllowed.
+//
+// As the two systems converge (tracked in STRUCT-2), entries can be promoted
+// from "" to a capability name here, or new Registry entries added to mirror
+// the plan-level gates.
+//
+// Preserved public surface: entitlements.NewChecker and IsAllowed remain
+// available for external consumers and tests — this adapter only affects
+// how resolveCapabilities routes its internal queries.
+func featureToCapability(feature entitlements.Feature) string {
+	// No entitlements.Feature currently has a semantically equivalent
+	// capability-registry entry. SubsystemClustering and AgentSetup are
+	// capabilities-only (no corresponding Feature constant); they are
+	// queried via capabilities.IsAvailable(capabilities.Cap*, edition)
+	// directly in resolveCapabilities below.
+	//
+	// Extension point: when a Feature gains a semantically equivalent
+	// capability-registry counterpart, add a case here and remove the
+	// entitlements check from resolveCapabilities. Example:
+	//   case entitlements.FeatureSSO:
+	//       return capabilities.CapSSOIdentity
+	_ = feature // suppress unused-parameter warning while the switch is empty
+	return ""
+}
+
 func (r *Resolver) resolveCapabilities() resolvedCapabilities {
 	hasWorker := r.Worker != nil
 	hasKnowledge := r.KnowledgeStore != nil
 	checker := entitlements.NewChecker(r.Plan)
 
+	// allow gates a plan-level feature through the entitlements checker.
+	// When featureToCapability returns a non-empty capability name for
+	// the feature, route through capabilities.IsAvailable instead so
+	// the resolver path is unified. Today no Feature has a registry
+	// counterpart (see featureToCapability), so this always falls through
+	// to the entitlements path — the structure is the extension point.
+	edition := capabilities.NormalizeEdition(string(r.Plan))
 	allow := func(feature entitlements.Feature) bool {
+		if cap := featureToCapability(feature); cap != "" {
+			return capabilities.IsAvailable(cap, edition)
+		}
 		return checker.IsAllowed(feature).Allowed
 	}
 
@@ -464,7 +514,6 @@ func (r *Resolver) resolveCapabilities() resolvedCapabilities {
 	discussCode := hasWorker
 	reviewCode := hasWorker
 
-	planStr := capabilities.NormalizeEdition(string(r.Plan))
 	return resolvedCapabilities{
 		features: &Features{
 			MultiTenant:     allow(entitlements.FeatureMultiTenant),
@@ -483,8 +532,10 @@ func (r *Resolver) resolveCapabilities() resolvedCapabilities {
 			CodeTours:            hasKnowledge && hasWorker && allow(entitlements.FeatureCodeTours),
 			SystemExplain:        hasKnowledge && hasWorker && allow(entitlements.FeatureSystemExplain),
 			SymbolScopedAnalysis: hasKnowledge && hasWorker && allow(entitlements.FeatureCliffNotes),
-			SubsystemClustering:  capabilities.IsAvailable("subsystem_clustering", planStr),
-			AgentSetup:           capabilities.IsAvailable("agent_setup", planStr),
+			// Capability-registry features: no entitlements.Feature constant;
+			// queried by typed constant to avoid magic strings.
+			SubsystemClustering: capabilities.IsAvailable(capabilities.CapSubsystemClustering, edition),
+			AgentSetup:          capabilities.IsAvailable(capabilities.CapAgentSetup, edition),
 
 			MultiAudienceKnowledge:   hasKnowledge && hasWorker && allow(entitlements.FeatureMultiAudienceKnowledge),
 			CustomKnowledgeTemplates: hasKnowledge && hasWorker && allow(entitlements.FeatureCustomKnowledgeTemplates),

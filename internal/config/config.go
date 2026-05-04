@@ -118,6 +118,39 @@ type LLMConfig struct {
 	AdvancedMode             bool   `mapstructure:"advanced_mode"` // when true, per-operation models are active
 }
 
+// OperationGroup identifies the coarse LLM operation family used for per-operation
+// model selection in advanced mode. It is defined here (rather than in
+// internal/llm/resolution) so that config.LLMConfig.ModelForOp can accept the
+// typed value without introducing a circular import between the config and
+// resolution packages. resolution.OperationGroup is a type alias over this type
+// so callers can use either name.
+type OperationGroup string
+
+const (
+	// OpGroupAnalysis covers analysis-style LLM calls (default / fallback group).
+	OpGroupAnalysis OperationGroup = "analysis"
+	// OpGroupReview covers code-review LLM calls.
+	OpGroupReview OperationGroup = "review"
+	// OpGroupDiscussion covers discussion / Q&A LLM calls.
+	OpGroupDiscussion OperationGroup = "discussion"
+	// OpGroupKnowledge covers knowledge-generation LLM calls (cliff notes, etc.).
+	OpGroupKnowledge OperationGroup = "knowledge"
+	// OpGroupArchitectureDiagram covers architecture-diagram LLM calls.
+	OpGroupArchitectureDiagram OperationGroup = "architecture_diagram"
+	// OpGroupReport covers long-form report-generation LLM calls.
+	OpGroupReport OperationGroup = "report"
+)
+
+// ModelForOp is the type-safe variant of ModelForOperation. It accepts a typed
+// OperationGroup constant instead of a raw string, catching invalid group names
+// at compile time for internal callers.
+//
+// External callers and tests that already use ModelForOperation(string) are
+// unaffected — both methods co-exist.
+func (l *LLMConfig) ModelForOp(group OperationGroup) string {
+	return l.ModelForOperation(string(group))
+}
+
 // ModelForOperation returns the model to use for a given operation group.
 // In advanced mode, returns the per-operation model if configured.
 // In simple mode (or if the per-operation model is empty), returns SummaryModel.

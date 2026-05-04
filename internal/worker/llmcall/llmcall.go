@@ -135,7 +135,7 @@ func (c *Caller) withResolved(ctx context.Context, repoID, op string, jobID, art
 		"x-sb-llm-base-url", snap.BaseURL,
 		"x-sb-llm-api-key", snap.APIKey,
 		"x-sb-llm-draft-model", snap.DraftModel,
-		"x-sb-operation", snap.OperationGroup,
+		"x-sb-operation", string(snap.OperationGroup),
 	}
 	if snap.TimeoutSecs > 0 {
 		pairs = append(pairs, "x-sb-llm-timeout-seconds", strconv.Itoa(snap.TimeoutSecs))
