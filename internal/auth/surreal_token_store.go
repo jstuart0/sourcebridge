@@ -274,15 +274,13 @@ func tokenFromSurreal(record surrealAPIToken) *APIToken {
 	if record.ID != nil {
 		id = fmt.Sprint(record.ID.ID)
 	}
-	// If the DB row pre-dates migration 056 and the role field is empty,
-	// fall back to tokenRoleDefault ("user"). In practice migration 056 sets
-	// every pre-existing row to "admin"; this branch is only reachable during
-	// the narrow window between the DEFINE FIELD and the UPDATE within a single
-	// migration run.
-	role := record.Role
-	if role == "" {
-		role = tokenRoleDefault
-	}
+	// Preserve the raw DB role exactly as stored. Empty-role tokens
+	// (pre-migration 056 rows that were not yet backfilled) must arrive at
+	// rolesFromAPIToken with Role == "" so the legacyAdminDefault flag can
+	// fire its operator escape-hatch path. If we normalised to tokenRoleDefault
+	// here, the flag would never see an empty role and the SEC-2 rollback
+	// mechanism would be silently broken for Surreal-backed tokens.
+	// rolesFromAPIToken is the single place that converts "" → "user" or "admin".
 	return &APIToken{
 		ID:          id,
 		Name:        record.Name,
@@ -294,7 +292,7 @@ func tokenFromSurreal(record surrealAPIToken) *APIToken {
 		AuthMethod:  AuthMethod(record.AuthMethod),
 		DeviceLabel: record.DeviceLabel,
 		Metadata:    record.Metadata,
-		Role:        role,
+		Role:        record.Role, // raw — may be "" for pre-migration rows
 		CreatedAt:   record.CreatedAt,
 		ExpiresAt:   record.ExpiresAt,
 		LastUsedAt:  record.LastUsedAt,
