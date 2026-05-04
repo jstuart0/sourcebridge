@@ -411,13 +411,21 @@ export default function RepositoryDetailPage() {
         </Panel>
       )}
 
-      <div className="-mx-3 flex gap-2 overflow-x-auto scrollbar-none border-b border-[var(--border-subtle)] px-3 pb-4 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
+      <div
+        role="tablist"
+        aria-label="Repository workspace"
+        className="-mx-3 flex gap-2 overflow-x-auto scrollbar-none border-b border-[var(--border-subtle)] px-3 pb-4 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0"
+      >
         {tabs.map((t) => (
           <button
             key={t.key}
+            role="tab"
+            aria-selected={tab === t.key}
+            aria-controls={`tabpanel-${t.key}`}
+            id={`tab-${t.key}`}
             onClick={() => setActiveTab(t.key)}
             className={cn(
-              "shrink-0 rounded-[var(--control-radius)] border px-3 py-2 text-sm transition-colors",
+              "min-h-[44px] shrink-0 rounded-[var(--control-radius)] border px-3 py-2 text-sm transition-colors",
               tab === t.key
                 ? "border-[var(--nav-item-border)] bg-[var(--nav-item-bg-active)] font-medium text-[var(--text-primary)]"
                 : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
@@ -453,120 +461,130 @@ export default function RepositoryDetailPage() {
         )}
 
       {/* Files Tab */}
-      {tab === "files" && (
-        <FilesTab repoId={repoId} files={files} />
-      )}
+      <div role="tabpanel" id="tabpanel-files" aria-labelledby="tab-files" hidden={tab !== "files"}>
+        {tab === "files" && <FilesTab repoId={repoId} files={files} />}
+      </div>
 
       {/* Symbols Tab */}
-      {tab === "symbols" && (
-        <SymbolsTab
-          repoId={repoId}
-          symbols={symbols}
-          symbolsTotalCount={symbolsResult.data?.symbols?.totalCount ?? null}
-          symbolQuery={symbolQuery}
-          setSymbolQuery={setSymbolQuery}
-          selectedSymbol={selectedSymbol}
-          setSelectedSymbol={setSelectedSymbol}
-          symbolKindFilter={symbolKindFilter}
-          setSymbolKindFilter={setSymbolKindFilter}
-          symbolScopedAnalysisEnabled={symbolScopedAnalysisEnabled}
-          knowledgeLoading={knowledgeLoading}
-          startLoading={startLoading}
-          finishLoading={finishLoading}
-          isLoading={isLoading}
-          repoGenerationModeDefault={repoGenerationModeDefault}
-        />
-      )}
+      <div role="tabpanel" id="tabpanel-symbols" aria-labelledby="tab-symbols" hidden={tab !== "symbols"}>
+        {tab === "symbols" && (
+          <SymbolsTab
+            repoId={repoId}
+            symbols={symbols}
+            symbolsTotalCount={symbolsResult.data?.symbols?.totalCount ?? null}
+            symbolQuery={symbolQuery}
+            setSymbolQuery={setSymbolQuery}
+            selectedSymbol={selectedSymbol}
+            setSelectedSymbol={setSelectedSymbol}
+            symbolKindFilter={symbolKindFilter}
+            setSymbolKindFilter={setSymbolKindFilter}
+            symbolScopedAnalysisEnabled={symbolScopedAnalysisEnabled}
+            knowledgeLoading={knowledgeLoading}
+            startLoading={startLoading}
+            finishLoading={finishLoading}
+            isLoading={isLoading}
+            repoGenerationModeDefault={repoGenerationModeDefault}
+          />
+        )}
+      </div>
 
       {/* Requirements Tab */}
-      {tab === "requirements" && (
-        <RequirementsTab
-          repoId={repoId}
-          repoName={repo?.name || ""}
-          isAiLoading={isAiLoading}
-          runAiOp={runAiOp}
-        />
-      )}
+      <div role="tabpanel" id="tabpanel-requirements" aria-labelledby="tab-requirements" hidden={tab !== "requirements"}>
+        {tab === "requirements" && (
+          <RequirementsTab
+            repoId={repoId}
+            repoName={repo?.name || ""}
+            isAiLoading={isAiLoading}
+            runAiOp={runAiOp}
+          />
+        )}
+      </div>
 
       {/* Discovered Specs Tab */}
-      {tab === "specs" && (
-        <SpecsTab repoId={repoId} />
-      )}
+      <div role="tabpanel" id="tabpanel-specs" aria-labelledby="tab-specs" hidden={tab !== "specs"}>
+        {tab === "specs" && <SpecsTab repoId={repoId} />}
+      </div>
 
       {/* Analysis Tab */}
-      {tab === "analysis" && (
-        <AnalysisTab
-          repoId={repoId}
-          symbols={symbols}
-          symbolQuery={symbolQuery}
-          setSymbolQuery={setSymbolQuery}
-          selectedSymbolId={selectedSymbol}
-          setSelectedSymbolId={setSelectedSymbol}
-          isAiLoading={isAiLoading}
-          runAiOp={runAiOp}
-        />
-      )}
+      <div role="tabpanel" id="tabpanel-analysis" aria-labelledby="tab-analysis" hidden={tab !== "analysis"}>
+        {tab === "analysis" && (
+          <AnalysisTab
+            repoId={repoId}
+            symbols={symbols}
+            symbolQuery={symbolQuery}
+            setSymbolQuery={setSymbolQuery}
+            selectedSymbolId={selectedSymbol}
+            setSelectedSymbolId={setSelectedSymbol}
+            isAiLoading={isAiLoading}
+            runAiOp={runAiOp}
+          />
+        )}
+      </div>
 
       {/* Impact Tab */}
-      {tab === "impact" && (
-        <ImpactTab repoId={repoId} />
-      )}
+      <div role="tabpanel" id="tabpanel-impact" aria-labelledby="tab-impact" hidden={tab !== "impact"}>
+        {tab === "impact" && <ImpactTab repoId={repoId} />}
+      </div>
 
       {/* Architecture Tab */}
-      {tab === "architecture" && (
-        <ArchitectureTab repoId={repoId} setActiveTab={setActiveTab} />
-      )}
+      <div role="tabpanel" id="tabpanel-architecture" aria-labelledby="tab-architecture" hidden={tab !== "architecture"}>
+        {tab === "architecture" && <ArchitectureTab repoId={repoId} setActiveTab={setActiveTab} />}
+      </div>
 
       {/* Related Tab */}
-      {tab === "related" && (
-        <RelatedTab repoId={repoId} />
-      )}
+      <div role="tabpanel" id="tabpanel-related" aria-labelledby="tab-related" hidden={tab !== "related"}>
+        {tab === "related" && <RelatedTab repoId={repoId} />}
+      </div>
 
       {/* Knowledge Tab */}
-      {tab === "knowledge" && (
-        <KnowledgeTab
-          repoId={repoId}
-          repo={repo}
-          loadingOps={loadingOps}
-          startLoading={startLoading}
-          finishLoading={finishLoading}
-          isLoading={isLoading}
-          knowledgeLoading={knowledgeLoading}
-          currentUnderstanding={currentUnderstanding}
-          understandingBuilding={understandingBuilding}
-          understandingJob={understandingJob}
-          understandingDedupeNote={understandingDedupeNote}
-          setUnderstandingDedupeNote={setUnderstandingDedupeNote}
-          handleBuildRepositoryUnderstanding={handleBuildRepositoryUnderstanding}
-          repoJobs={repoJobs}
-          repoJobsError={repoJobsError}
-          repoActiveJobs={repoActiveJobs}
-          repoRecentJobs={repoRecentJobs}
-          cancellingJobIds={cancellingJobIds}
-          setCancellingJobIds={setCancellingJobIds}
-          fetchRepoJobs={fetchRepoJobs}
-          reexecuteRepo={reexecuteRepo}
-        />
-      )}
+      <div role="tabpanel" id="tabpanel-knowledge" aria-labelledby="tab-knowledge" hidden={tab !== "knowledge"}>
+        {tab === "knowledge" && (
+          <KnowledgeTab
+            repoId={repoId}
+            repo={repo}
+            loadingOps={loadingOps}
+            startLoading={startLoading}
+            finishLoading={finishLoading}
+            isLoading={isLoading}
+            knowledgeLoading={knowledgeLoading}
+            currentUnderstanding={currentUnderstanding}
+            understandingBuilding={understandingBuilding}
+            understandingJob={understandingJob}
+            understandingDedupeNote={understandingDedupeNote}
+            setUnderstandingDedupeNote={setUnderstandingDedupeNote}
+            handleBuildRepositoryUnderstanding={handleBuildRepositoryUnderstanding}
+            repoJobs={repoJobs}
+            repoJobsError={repoJobsError}
+            repoActiveJobs={repoActiveJobs}
+            repoRecentJobs={repoRecentJobs}
+            cancellingJobIds={cancellingJobIds}
+            setCancellingJobIds={setCancellingJobIds}
+            fetchRepoJobs={fetchRepoJobs}
+            reexecuteRepo={reexecuteRepo}
+          />
+        )}
+      </div>
 
       {/* Subsystems Tab */}
-      {tab === "subsystems" && features.subsystemClustering && repoId && (
-        <SubsystemsTab repoId={repoId} />
-      )}
+      <div role="tabpanel" id="tabpanel-subsystems" aria-labelledby="tab-subsystems" hidden={tab !== "subsystems"}>
+        {tab === "subsystems" && features.subsystemClustering && repoId && <SubsystemsTab repoId={repoId} />}
+      </div>
 
       {/* Settings Tab */}
-      {tab === "settings" && (
-        <SettingsTab
-          repoId={repoId}
-          repo={repo}
-          knowledgeLoading={knowledgeLoading}
-          startLoading={startLoading}
-          finishLoading={finishLoading}
-          repoGenerationModeDefault={repoGenerationModeDefault}
-          agentSetupEnabled={features.agentSetup}
-          onGenerationModeChange={() => reexecuteRepo({ requestPolicy: "network-only" })}
-        />
-      )}
+      <div role="tabpanel" id="tabpanel-settings" aria-labelledby="tab-settings" hidden={tab !== "settings"}>
+        {tab === "settings" && (
+          <SettingsTab
+            repoId={repoId}
+            repo={repo}
+            knowledgeLoading={knowledgeLoading}
+            startLoading={startLoading}
+            finishLoading={finishLoading}
+            repoGenerationModeDefault={repoGenerationModeDefault}
+            agentSetupEnabled={features.agentSetup}
+            onGenerationModeChange={() => reexecuteRepo({ requestPolicy: "network-only" })}
+          />
+        )}
+      </div>
     </PageFrame>
   );
 }

@@ -31,11 +31,23 @@ export function TopBar({ onMobileNavOpen }: { onMobileNavOpen?: () => void }) {
   const user = useCurrentUser();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const showAdmin = isAdminRole(user?.role);
   const adminActive = pathname.startsWith("/admin");
 
   useEffect(() => setMenuOpen(false), [pathname]);
+
+  // Focus first menuitem when menu opens; restore focus to trigger when it closes.
+  // menuRef and triggerRef are stable refs — intentionally omitted from deps.
+  useEffect(() => {
+    if (menuOpen) {
+      const first = menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]');
+      first?.focus();
+    } else if (menuRef.current) {
+      triggerRef.current?.focus();
+    }
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -45,7 +57,24 @@ export function TopBar({ onMobileNavOpen }: { onMobileNavOpen?: () => void }) {
       }
     }
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setMenuOpen(false);
+      if (e.key === "Escape") {
+        setMenuOpen(false);
+        return;
+      }
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const items = Array.from(
+        menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []
+      );
+      if (items.length === 0) return;
+      const focused = document.activeElement as HTMLElement;
+      const idx = items.indexOf(focused);
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        items[(idx + 1) % items.length]?.focus();
+      } else {
+        e.preventDefault();
+        items[(idx - 1 + items.length) % items.length]?.focus();
+      }
     }
     document.addEventListener("mousedown", handleClick);
     document.addEventListener("keydown", handleKey);
@@ -99,6 +128,7 @@ export function TopBar({ onMobileNavOpen }: { onMobileNavOpen?: () => void }) {
 
       <div className="relative" ref={menuRef}>
         <button
+          ref={triggerRef}
           type="button"
           onClick={() => setMenuOpen((open) => !open)}
           aria-haspopup="menu"

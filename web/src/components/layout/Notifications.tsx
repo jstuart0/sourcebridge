@@ -8,6 +8,7 @@ import { AppToastDetail, subscribeToToasts } from "@/lib/notifications";
 interface Toast {
   id: number;
   message: string;
+  isError?: boolean;
 }
 
 let nextId = 0;
@@ -39,9 +40,13 @@ function formatEvent(event: ServerEvent): string | null {
 export function Notifications() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const push = useCallback((message: string) => {
+  const dismiss = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const push = useCallback((message: string, isError?: boolean) => {
     const id = ++nextId;
-    setToasts((prev) => [...prev.slice(-4), { id, message }]);
+    setToasts((prev) => [...prev.slice(-4), { id, message, isError }]);
 
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -51,7 +56,7 @@ export function Notifications() {
   const handleEvent = useCallback((event: ServerEvent) => {
     const message = formatEvent(event);
     if (!message) return;
-    push(message);
+    push(message, event.type.endsWith(".failed"));
   }, [push]);
 
   useEventStream(handleEvent);
@@ -70,11 +75,22 @@ export function Notifications() {
       {toasts.map((toast) => (
         <div
           key={toast.id}
+          role={toast.isError ? "alert" : "status"}
+          aria-live={toast.isError ? "assertive" : "polite"}
+          aria-atomic="true"
           className="rounded-[var(--panel-radius)] border border-[var(--panel-border)] bg-[var(--panel-bg-glass)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--panel-shadow-strong)] backdrop-blur-[var(--panel-blur)]"
         >
           <div className="flex items-start gap-3">
-            <BellRing className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-primary)]" />
-            <span className="leading-6">{toast.message}</span>
+            <BellRing aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-primary)]" />
+            <span className="flex-1 leading-6">{toast.message}</span>
+            <button
+              type="button"
+              aria-label="Dismiss notification"
+              onClick={() => dismiss(toast.id)}
+              className="ml-1 mt-0.5 shrink-0 rounded p-0.5 text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-focus)]"
+            >
+              ×
+            </button>
           </div>
         </div>
       ))}
