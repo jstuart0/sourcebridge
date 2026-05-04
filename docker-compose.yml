@@ -129,7 +129,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "uv", "run", "python", "-c", "import grpc; ch = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=2)"]
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=localhost:50051"]
       interval: 5s
       timeout: 5s
       retries: 10
