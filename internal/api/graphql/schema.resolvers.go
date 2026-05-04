@@ -304,7 +304,7 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 		"affectedLinks", len(impactReport.AffectedLinks),
 		"affectedRequirements", len(impactReport.AffectedRequirements),
 		"staleArtifacts", len(impactReport.StaleArtifacts),
-		"selective", selectiveInvalidationEnabled(),
+		"selective", r.Flags.SelectiveInvalidationEnabled,
 	)
 
 	// Refresh cached understanding score
@@ -318,7 +318,7 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 		"commitSHA", updatedRepo.CommitSHA,
 	)
 
-	if knowledgePrewarmOnIndexEnabled() {
+	if r.Flags.KnowledgePrewarmOnIndexEnabled {
 		go r.seedRepositoryFieldGuide(id)
 	}
 
@@ -1957,7 +1957,7 @@ func (r *mutationResolver) UpdateLivingWikiSettings(ctx context.Context, input U
 		_ = r.LivingWikiAuditLog.Append(ctx, entry)
 	}
 
-	return mapLivingWikiSettings(livingwiki.MaskSecrets(*current)), nil
+	return mapLivingWikiSettings(livingwiki.MaskSecrets(*current), r.Flags.LivingWikiKillSwitch), nil
 }
 
 // TestLivingWikiConnection is the resolver for the testLivingWikiConnection field.
@@ -2155,7 +2155,7 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 	// Each path persists settings and returns a notice. Runs BEFORE signature
 	// validation to avoid paying taxonomy cost when the system is paused.
 	globalEnabled := r.isLivingWikiGloballyEnabled()
-	killSwitch := os.Getenv("SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH") == "true"
+	killSwitch := r.Flags.LivingWikiKillSwitch
 	gql := mapRepoLivingWikiSettings(&settings)
 
 	if !globalEnabled {
@@ -2379,7 +2379,7 @@ func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID 
 	// No-job gates (same as EnableLivingWikiForRepo step 4).
 	gql := mapRepoLivingWikiSettings(&settings)
 	globalEnabled := r.isLivingWikiGloballyEnabled()
-	killSwitch := os.Getenv("SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH") == "true"
+	killSwitch := r.Flags.LivingWikiKillSwitch
 	if !globalEnabled {
 		return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
 			"Living Wiki is not enabled globally. Enable it in the global settings panel, then jobs will start automatically.")
@@ -2461,7 +2461,7 @@ func (r *mutationResolver) TriggerLivingWikiColdStartAllEnabled(ctx context.Cont
 		gql := mapRepoLivingWikiSettings(&settings)
 
 		globalEnabled := r.isLivingWikiGloballyEnabled()
-		killSwitch := os.Getenv("SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH") == "true"
+		killSwitch := r.Flags.LivingWikiKillSwitch
 		if !globalEnabled {
 			return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
 				"Living Wiki is not enabled globally. Enable it in the global settings panel, then jobs will start automatically.")
@@ -4091,7 +4091,7 @@ func (r *queryResolver) LivingWikiSettings(ctx context.Context) (*LivingWikiSett
 	if err != nil {
 		return nil, err
 	}
-	return mapLivingWikiSettings(livingwiki.MaskSecrets(*s)), nil
+	return mapLivingWikiSettings(livingwiki.MaskSecrets(*s), r.Flags.LivingWikiKillSwitch), nil
 }
 
 // RepositoryLivingWikiSettings resolves Query.repositoryLivingWikiSettings.

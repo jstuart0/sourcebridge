@@ -14,7 +14,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
@@ -24,11 +23,11 @@ import (
 // Mapping helper
 // ─────────────────────────────────────────────────────────────────────────────
 
-func mapLivingWikiSettings(s livingwiki.Settings) *LivingWikiSettings {
+func mapLivingWikiSettings(s livingwiki.Settings, killSwitchActive bool) *LivingWikiSettings {
 	out := &LivingWikiSettings{
 		Enabled:          s.Enabled,
 		UpdatedBy:        strPtrIfNonEmpty(s.UpdatedBy),
-		KillSwitchActive: strings.EqualFold(os.Getenv("SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH"), "true"),
+		KillSwitchActive: killSwitchActive,
 	}
 	if s.WorkerCount > 0 {
 		v := s.WorkerCount

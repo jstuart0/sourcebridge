@@ -179,7 +179,7 @@ func TestMapLivingWikiSettings_ConfluenceSite(t *testing.T) {
 	s := livingwiki.Settings{
 		ConfluenceSite: "mycompany",
 	}
-	out := mapLivingWikiSettings(s)
+	out := mapLivingWikiSettings(s, false)
 	if out.ConfluenceSite == nil {
 		t.Fatal("expected ConfluenceSite to be set")
 	}
@@ -192,7 +192,7 @@ func TestMapLivingWikiSettings_ConfluenceSite_EmptyIsNil(t *testing.T) {
 	s := livingwiki.Settings{
 		ConfluenceSite: "",
 	}
-	out := mapLivingWikiSettings(s)
+	out := mapLivingWikiSettings(s, false)
 	if out.ConfluenceSite != nil {
 		t.Errorf("expected ConfluenceSite to be nil when empty, got %q", *out.ConfluenceSite)
 	}

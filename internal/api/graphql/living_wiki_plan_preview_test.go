@@ -364,9 +364,8 @@ func TestPreviewLivingWikiPlan_AllEnabled_ReturnsTypedError(t *testing.T) {
 // Note: KillSwitch subtest uses t.Setenv; cannot call t.Parallel on the parent.
 func TestPreviewLivingWikiPlan_KillSwitchOrDisabled_ReturnsTypedError(t *testing.T) {
 	t.Run("KillSwitch", func(t *testing.T) {
-		t.Setenv("SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH", "true")
-
 		r := previewResolver(t, defaultRepoSettingsForPreview(), true)
+		r.Flags.LivingWikiKillSwitch = true // inject via field — no env var needed
 		plan, err := r.PreviewLivingWikiPlan(context.Background(), testRepoID, nil, nil)
 		if err != nil {
 			t.Fatalf("expected nil error on kill-switch path, got: %v", err)

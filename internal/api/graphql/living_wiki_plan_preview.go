@@ -13,7 +13,6 @@ package graphql
 import (
 	"context"
 	"fmt"
-	"os"
 
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
@@ -50,7 +49,7 @@ func (r *queryResolver) PreviewLivingWikiPlan(
 	//
 	// Check before any heavy work. Returns a notice-bearing plan (not an error)
 	// so the UI can render the degraded banner rather than a generic error toast.
-	killSwitch := os.Getenv("SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH") == "true"
+	killSwitch := r.Flags.LivingWikiKillSwitch
 	globalEnabled := r.isLivingWikiGloballyEnabled()
 
 	if killSwitch || !globalEnabled {

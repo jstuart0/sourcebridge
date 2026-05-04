@@ -2331,10 +2331,10 @@ func TestEnableLivingWikiForRepo_SelectedWithoutSignatureRejected(t *testing.T) 
 // with a clearly invalid signature. This pins step-5 ordering: no-job gates
 // run BEFORE signature validation.
 func TestEnableLivingWikiForRepo_NoJobGatesSkipSignatureValidation(t *testing.T) {
-	// Not parallel — sets SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH env var.
-	t.Setenv("SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH", "true")
+	t.Parallel()
 
 	r, _ := enableResolverWithClusters(t, "ks-gate-repo", 2)
+	r.Flags.LivingWikiKillSwitch = true // inject via field — no env var needed
 
 	bogusSignature := "not-the-real-hash"
 	inp := enableInput("ks-gate-repo")

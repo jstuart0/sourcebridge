@@ -849,7 +849,7 @@ func (s *Server) setupRouter() {
 			r.Post("/api/v1/admin/llm/server-drain", s.handleAdminServerDrain)
 			// CA-142: debug slow-job endpoint for drain validation (Phase 4).
 			// Only registered when SOURCEBRIDGE_DEBUG_ENDPOINTS=true.
-			if getEnvBool("SOURCEBRIDGE_DEBUG_ENDPOINTS") {
+			if s.flags.DebugEndpointsEnabled {
 				r.Post("/api/v1/admin/debug/slow-job", s.handleDebugSlowJob)
 			}
 			r.Get("/api/v1/admin/llm/jobs/{id}", s.handleLLMJobDetail)
