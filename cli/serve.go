@@ -710,7 +710,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Create HTTP server
 	server := rest.NewServer(cfg, localAuth, jwtMgr, store, workerClient,
-		rest.WithEnterpriseDB(surrealDB.DB()),
+		rest.WithEnterpriseDB(surrealDB),
 		rest.WithHealthChecker(healthChecker),
 		rest.WithKnowledgeStore(knowledgeStore),
 		rest.WithJobStore(jobStore),

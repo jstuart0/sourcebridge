@@ -35,10 +35,14 @@ import (
 // Admin endpoints are behind JWT auth + tenant context extraction + RBAC.
 func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 	slog.Info("registerEnterpriseRoutes called", "enterpriseDB_nil", s.enterpriseDB == nil)
-	// Extract the raw SurrealDB handle if available
+	// Extract the raw SurrealDB handle if available. The EnterpriseDB interface
+	// guarantees DB() returns the underlying *surrealdb.DB (or nil in embedded
+	// mode). The former type-assertion s.enterpriseDB.(*surrealdb.DB) is gone;
+	// any type mismatch is now a compile-time error at the WithEnterpriseDB call
+	// site.
 	var rawDB *surrealdb.DB
 	if s.enterpriseDB != nil {
-		rawDB, _ = s.enterpriseDB.(*surrealdb.DB)
+		rawDB = s.enterpriseDB.DB()
 	}
 
 	ectx := routes.NewContext(

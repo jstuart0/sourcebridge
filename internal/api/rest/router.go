@@ -19,6 +19,7 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httprate"
+	surrealdb "github.com/surrealdb/surrealdb.go"
 
 	"github.com/sourcebridge/sourcebridge/internal/api/graphql"
 	"github.com/sourcebridge/sourcebridge/internal/api/middleware"
@@ -53,10 +54,23 @@ import (
 // ServerOption configures optional Server parameters.
 type ServerOption func(*Server)
 
-// WithEnterpriseDB passes a raw database handle for enterprise store persistence.
-// The value should be a *surrealdb.DB; it is stored as interface{} to avoid
-// importing the SurrealDB SDK in OSS builds.
-func WithEnterpriseDB(db interface{}) ServerOption {
+// EnterpriseDB is the interface the rest package requires for the enterprise
+// database handle. The single method gives enterprise_routes.go a typed
+// accessor to the underlying *surrealdb.DB without a runtime type-assertion.
+//
+// The concrete implementation is *db.SurrealDB (which already has DB()).
+// Any mismatch between the concrete type and this interface is caught at
+// compile time when the enterprise build calls WithEnterpriseDB.
+type EnterpriseDB interface {
+	// DB returns the raw *surrealdb.DB handle. May return nil when the
+	// store is running in embedded/disconnected mode.
+	DB() *surrealdb.DB
+}
+
+// WithEnterpriseDB passes the enterprise database handle for enterprise store
+// persistence. The concrete value must implement EnterpriseDB (i.e. expose a
+// DB() *surrealdb.DB accessor). Passing *db.SurrealDB directly satisfies this.
+func WithEnterpriseDB(db EnterpriseDB) ServerOption {
 	return func(s *Server) { s.enterpriseDB = db }
 }
 
@@ -266,7 +280,7 @@ type Server struct {
 	llmConfigStore             LLMConfigStore                    // persists LLM provider/model config across restarts
 	llmProfileStore            LLMProfileStoreAdapter            // LLM provider profiles slice 1: profile CRUD + active pointer
 	queueControlStore          QueueControlStore                 // persists queue intake controls across restarts
-	enterpriseDB               interface{}                       // *surrealdb.DB when available, type-asserted in enterprise_routes.go
+	enterpriseDB               EnterpriseDB                      // enterprise database handle; nil when enterprise build is not active
 	repoChecker                middleware.RepoAccessChecker      // set by enterprise build to enable tenant repo filtering
 	mcp                        *mcpHandler                       // MCP protocol handler (nil when disabled)
 	mcpPermChecker             MCPPermissionChecker              // deferred to mcp handler at setup
