@@ -435,15 +435,9 @@ func (h *mcpHandler) reviewToolsList() []mcpTool {
 		defByName[d.Name] = d
 	}
 	return []mcpTool{
-		// get_review_for_diff uses an anonymous closure (not noCtxHandler) because
-		// its handler needs the live request context for the 90-second AI-pass
-		// deadline. Slice 2 will replace this closure with withCtxHandler (MCP-2).
-		{
-			Definition: defByName["get_review_for_diff"],
-			Handler: func(hh *mcpHandler, ctx context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
-				return hh.callGetReviewForDiff(ctx, s, a)
-			},
-		},
+		// get_review_for_diff uses withCtxHandler (MCP-2) so the live request
+		// context threads through for the 90-second AI-pass deadline.
+		{Definition: defByName["get_review_for_diff"], Handler: withCtxHandler((*mcpHandler).callGetReviewForDiff)},
 	}
 }
 

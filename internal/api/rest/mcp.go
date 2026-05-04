@@ -441,13 +441,27 @@ type capabilityCheckFunc func(name string, edition capabilities.Edition) bool
 // need it for timeout/cancellation; ignored by the others via noCtxHandler).
 type mcpToolHandlerFunc func(h *mcpHandler, ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error)
 
-// noCtxHandler adapts a (session, args) handler — the shape used by 24 of
-// the 26 existing tools — into the dispatcher's (ctx, session, args)
-// signature. The two ctx-taking tools (explain_code and ask_question)
-// register their handlers directly without this adapter.
+// noCtxHandler adapts a (session, args) handler — the shape used by the
+// majority of tools — into the dispatcher's (ctx, session, args) signature.
+// The ctx-bearing tools (explain_code, ask_question, get_review_for_diff, and
+// search_symbols after MCP-3) use withCtxHandler instead.
 func noCtxHandler(fn func(*mcpHandler, *mcpSession, json.RawMessage) (interface{}, error)) mcpToolHandlerFunc {
 	return func(h *mcpHandler, _ context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
 		return fn(h, s, a)
+	}
+}
+
+// withCtxHandler wraps a method-expression that already takes context.Context
+// into the mcpToolHandlerFunc shape. Mirrors noCtxHandler for the ctx-bearing
+// tools (explain_code, ask_question, get_review_for_diff, search_symbols) that
+// previously used anonymous closures — the closures and this adapter have
+// identical semantics; the method-expression form is preferred because it is
+// harder to accidentally capture the wrong variable.
+//
+// 2 ctx-bearing tools registered via withCtxHandler (mirrors noCtxHandler).
+func withCtxHandler(fn func(*mcpHandler, context.Context, *mcpSession, json.RawMessage) (interface{}, error)) mcpToolHandlerFunc {
+	return func(h *mcpHandler, ctx context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
+		return fn(h, ctx, s, a)
 	}
 }
 
@@ -610,21 +624,10 @@ func (h *mcpHandler) coreTools() []mcpTool {
 		// when the dispatcher is unwired — but a hand-crafted tools/call is handled
 		// gracefully rather than returning "Unknown tool".
 		{Definition: recordChangeToolDef(), Handler: noCtxHandler((*mcpHandler).callRecordChange)},
-		// Ctx-bearing tools (2): registered via anonymous closures because
-		// their handlers need the live request context for timeout/cancellation.
-		// Slice 2 will replace these closures with withCtxHandler (MCP-2).
-		{
-			Definition: defByName["explain_code"],
-			Handler: func(h *mcpHandler, ctx context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
-				return h.callExplainCodeCtx(ctx, s, a)
-			},
-		},
-		{
-			Definition: defByName["ask_question"],
-			Handler: func(h *mcpHandler, ctx context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
-				return h.callAskQuestion(ctx, s, a)
-			},
-		},
+		// Ctx-bearing tools: registered via withCtxHandler (MCP-2) so method
+		// expressions are used instead of anonymous closures. noCtxHandler unchanged.
+		{Definition: defByName["explain_code"], Handler: withCtxHandler((*mcpHandler).callExplainCodeCtx)},
+		{Definition: defByName["ask_question"], Handler: withCtxHandler((*mcpHandler).callAskQuestion)},
 	}
 	return tools
 }
