@@ -1,3 +1,6 @@
+// Compatibility adapter: preserved as a public TS surface per the no-removal rule.
+// New code should compose @/components/ui/empty-state directly.
+
 "use client";
 
 import React from "react";

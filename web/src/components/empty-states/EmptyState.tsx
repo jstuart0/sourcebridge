@@ -1,3 +1,13 @@
+// Compatibility adapter: this file is the public TS surface for the legacy
+// empty-states prop shape (icon + action: {label, onClick}). It is intentionally
+// preserved under web/src/components/empty-states/ per the no-removal rule.
+//
+// New code should import from @/components/ui/empty-state directly, which uses the
+// canonical design-system shape (eyebrow + actions: ReactNode).
+//
+// This file keeps its own implementation because the two prop shapes are intentionally
+// different; bridging them would silently drop icon/action semantics.
+
 "use client";
 
 import React from "react";
