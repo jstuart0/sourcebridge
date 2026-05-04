@@ -2062,6 +2062,43 @@ func (h *mcpHandler) isRepoAllowed(_ *mcpSession, repoID string) bool {
 // clients POST JSON-RPC messages to a single endpoint and receive JSON
 // responses directly. Session tracking uses the Mcp-Session-Id header.
 
+// verifyMCPSessionOwner guards every streamable-HTTP path that operates on
+// an existing session. It rejects requests whose authenticated caller does
+// not match the session owner, preventing cross-user session hijacking.
+//
+// Rules (all three must hold to pass):
+//  1. Claims are present in the context (auth middleware ran).
+//  2. state.UserID is non-empty (no grace window for unowned sessions).
+//  3. state.UserID == claims.UserID (caller owns this session).
+//
+// Returns nil when all rules pass; an *HTTPError (403/401) otherwise.
+// The caller must write the error to the response and return immediately.
+func verifyMCPSessionOwner(ctx context.Context, state *mcpSessionState) error {
+	claims := auth.GetClaims(ctx)
+	if claims == nil {
+		return &httpError{code: http.StatusUnauthorized, msg: "unauthenticated"}
+	}
+	if state.UserID == "" || state.UserID != claims.UserID {
+		slog.Warn("mcp_session_ownership_mismatch",
+			"session_id", state.ID,
+			"session_owner", state.UserID,
+			"claims_user", claims.UserID,
+		)
+		return &httpError{code: http.StatusForbidden, msg: "forbidden: session ownership mismatch"}
+	}
+	return nil
+}
+
+// httpError is a minimal error carrier for HTTP handler checks that need to
+// return a status code alongside a message without pulling in a full response
+// type.
+type httpError struct {
+	code int
+	msg  string
+}
+
+func (e *httpError) Error() string { return e.msg }
+
 func (h *mcpHandler) handleStreamableHTTP(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -2126,9 +2163,15 @@ func (h *mcpHandler) handleStreamableHTTP(w http.ResponseWriter, r *http.Request
 
 	// Notifications (no ID) — acknowledge and done
 	if msg.ID == nil || string(msg.ID) == "" || string(msg.ID) == "null" {
-		// Look up session to update lastUsed if present
+		// Look up session to update lastUsed if present; enforce ownership
+		// to prevent user B from sending notifications into user A's session.
 		if sid := r.Header.Get("Mcp-Session-Id"); sid != "" {
 			if state, err := h.sessionStore.Get(r.Context(), sid); err == nil && state != nil {
+				if ownerErr := verifyMCPSessionOwner(r.Context(), state); ownerErr != nil {
+					he := ownerErr.(*httpError)
+					http.Error(w, he.msg, he.code)
+					return
+				}
 				state.LastUsed = time.Now()
 				_ = h.sessionStore.Save(r.Context(), state, h.sessionTTL)
 			}
@@ -2155,6 +2198,12 @@ func (h *mcpHandler) handleStreamableHTTP(w http.ResponseWriter, r *http.Request
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(errorResponse(msg.ID, -32600, "Invalid or expired session. Re-initialize."))
+		return
+	}
+	// SEC-1: enforce ownership before dispatching any method or streaming tool call.
+	if ownerErr := verifyMCPSessionOwner(r.Context(), state); ownerErr != nil {
+		he := ownerErr.(*httpError)
+		http.Error(w, he.msg, he.code)
 		return
 	}
 	sess := sessionFromState(state, nil)
@@ -2188,6 +2237,21 @@ func (h *mcpHandler) handleStreamableHTTPDelete(w http.ResponseWriter, r *http.R
 	if sessionID == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
+	}
+	// SEC-1: verify the authenticated caller owns this session before
+	// allowing termination. User B must not be able to terminate User A's session.
+	state, err := h.sessionStore.Get(r.Context(), sessionID)
+	if err != nil {
+		slog.Warn("mcp session load failed (delete)", "session_id", sessionID, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "session store unavailable"})
+		return
+	}
+	if state != nil {
+		if ownerErr := verifyMCPSessionOwner(r.Context(), state); ownerErr != nil {
+			he := ownerErr.(*httpError)
+			http.Error(w, he.msg, he.code)
+			return
+		}
 	}
 	if val, ok := h.localChans.LoadAndDelete(sessionID); ok {
 		val.(*mcpLocalChans).closeDone()
