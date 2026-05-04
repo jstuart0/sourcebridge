@@ -22,6 +22,7 @@ import (
 
 	"github.com/sourcebridge/sourcebridge/internal/api/graphql"
 	"github.com/sourcebridge/sourcebridge/internal/api/middleware"
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	"github.com/sourcebridge/sourcebridge/internal/changewatch"
@@ -239,6 +240,14 @@ func WithHealthChecker(hc *HealthChecker) ServerOption {
 
 // Server is the HTTP API server.
 type Server struct {
+	// AppDeps is the shared dependency registry constructed once in NewServer.
+	// It is populated after options are applied via a call to
+	// syncServerDepsFromAppDeps and passed to the GraphQL resolver via
+	// syncResolverDepsFromAppDeps. The existing lowercase fields below are
+	// preserved unchanged — they are the primary store; AppDeps mirrors them
+	// for consumers that need the canonical registry.
+	AppDeps *appdeps.AppDeps
+
 	cfg                        *config.Config
 	router                     chi.Router
 	localAuth                  *auth.LocalAuth
@@ -582,6 +591,56 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 	}
 	s.workerVersionLookup = newVersionLookup(30*time.Second, workerProbe)
 
+	// Build AppDeps — the shared dependency registry (Phase 2 Slice 5,
+	// STRUCT-1). Constructed once here after all fields are settled.
+	// The GraphQL resolver receives AppDeps via resolver.Deps and the sync
+	// call in setupRouter. syncServerDepsFromAppDeps writes AppDeps back into
+	// the Server's lowercase fields (idempotent — values already match).
+	{
+		var clusterStore clustering.ClusterStore
+		if cs, ok := s.store.(clustering.ClusterStore); ok {
+			clusterStore = cs
+		}
+		var profileLookup appdeps.LLMProfileLookup
+		if s.llmProfileStore != nil {
+			profileLookup = s.llmProfileStore
+		}
+		s.AppDeps = &appdeps.AppDeps{
+			KnowledgeStore:             s.knowledgeStore,
+			Worker:                     s.worker,
+			LLMCaller:                  s.llmCaller,
+			LLMResolver:                s.llmResolver,
+			Orchestrator:               s.orchestrator,
+			Config:                     s.cfg,
+			EventBus:                   s.eventBus,
+			Flags:                      s.flags,
+			GitResolver:                s.gitResolver,
+			ComprehensionStore:         s.comprehensionStore,
+			HealthChecker:              s.healthChecker,
+			TrashStore:                 s.trashStore,
+			SearchSvc:                  s.searchSvc,
+			ReqBooster:                 s.reqBooster,
+			QA:                         s.qaResolverOrchestrator(),
+			LLMProfileLookup:           profileLookup,
+			LivingWikiStore:            s.livingWikiStore,
+			LivingWikiResolver:         s.livingWikiResolver,
+			LivingWikiRepoStore:        s.livingWikiRepoStore,
+			LivingWikiJobResultStore:   s.livingWikiJobResultStore,
+			LivingWikiLiveOrchestrator: s.livingWikiLiveOrchestrator,
+			LivingWikiPagePublishStore: s.livingWikiPagePublishStore,
+			// LivingWikiAuditLog: enterprise-only; not stored on Server; left nil
+			// here (enterprise routes or tests may set it on the resolver directly).
+			ClusterStore:  clusterStore,
+			WorkerVersion: buildWorkerVersionFunc(s),
+			DrainAdmitter: s.DrainAdmitterFor(),
+		}
+		// syncServerDepsFromAppDeps is an idempotent identity sync: the Server
+		// already has these values from the WithXxx options applied above. It
+		// exists as cheap insurance so any future code reading s.AppDeps and the
+		// lowercase fields sees consistent state.
+		syncServerDepsFromAppDeps(s, s.AppDeps)
+	}
+
 	s.setupRouter()
 	return s
 }
@@ -701,53 +760,64 @@ func (s *Server) setupRouter() {
 		gqlProfileLookup = s.llmProfileStore
 	}
 
-	// GraphQL server
-	gqlSrv := handler.NewDefaultServer(graphql.NewExecutableSchema(graphql.Config{
-		Resolvers: &graphql.Resolver{
-			Store:                      s.store,
-			KnowledgeStore:             s.knowledgeStore,
-			Worker:                     s.worker,
-			LLMCaller:                  s.llmCaller,
-			LLMResolver:                s.llmResolver,
-			Orchestrator:               s.orchestrator,
-			Config:                     s.cfg,
-			EventBus:                   s.eventBus,
-			Flags:                      s.flags,
-			Plan:                       graphql.BootCurrentPlan(),
-			GitConfig:                  gitConfigLoaderFromStore(s.gitConfigStore),
-			GitResolver:                s.gitResolver,
-			ComprehensionStore:         s.comprehensionStore,
-			HealthChecker:              s.healthChecker,
-			TrashStore:                 s.trashStore,
-			SearchSvc:                  s.searchSvc,
-			ReqBooster:                 s.reqBooster,
-			QA:                         s.qaResolverOrchestrator(),
-			LLMProfileLookup:           gqlProfileLookup,
-			LivingWikiStore:            s.livingWikiStore,
-			LivingWikiResolver:         s.livingWikiResolver,
-			LivingWikiRepoStore:        s.livingWikiRepoStore,
-			LivingWikiJobResultStore:   s.livingWikiJobResultStore,
-			LivingWikiPagePublishStore: s.livingWikiPagePublishStore,
-			LivingWikiLiveOrchestrator: s.livingWikiLiveOrchestrator,
-			ClusteringHook:             s.clusteringHookFunc(),
-			ClusterStore:               gqlClusterStore,
-			// CA-138: share the REST server's cached worker-version
-			// lookup with the GraphQL resolver so /api/v1/version and
-			// the GraphQL `version { workerVersion }` field return
-			// identical cached results without flooding the worker.
-			// Closure preserves the package-private versionLookup.
-			WorkerVersion: func(ctx context.Context) string {
-				if s.workerVersionLookup == nil {
-					return ""
-				}
-				return s.workerVersionLookup.get(ctx)
-			},
-			// CA-142: drain admitter so the GraphQL resolver can gate
-			// Living Wiki mutations and count on-demand requests without
-			// a direct dependency on *rest.Server. The concrete type
-			// (*serverDrainAdmitter) satisfies graphql.DrainAdmitter.
-			DrainAdmitter: s.DrainAdmitterFor(),
+	// GraphQL server — resolver is extracted as a variable so we can attach
+	// Deps and call syncResolverDepsFromAppDeps after construction (STRUCT-1,
+	// Phase 2 Slice 5). The manual field assignments below are kept as
+	// defensive duplication; the sync call is idempotent.
+	gqlResolver := &graphql.Resolver{
+		Store:                      s.store,
+		KnowledgeStore:             s.knowledgeStore,
+		Worker:                     s.worker,
+		LLMCaller:                  s.llmCaller,
+		LLMResolver:                s.llmResolver,
+		Orchestrator:               s.orchestrator,
+		Config:                     s.cfg,
+		EventBus:                   s.eventBus,
+		Flags:                      s.flags,
+		Plan:                       graphql.BootCurrentPlan(),
+		GitConfig:                  gitConfigLoaderFromStore(s.gitConfigStore),
+		GitResolver:                s.gitResolver,
+		ComprehensionStore:         s.comprehensionStore,
+		HealthChecker:              s.healthChecker,
+		TrashStore:                 s.trashStore,
+		SearchSvc:                  s.searchSvc,
+		ReqBooster:                 s.reqBooster,
+		QA:                         s.qaResolverOrchestrator(),
+		LLMProfileLookup:           gqlProfileLookup,
+		LivingWikiStore:            s.livingWikiStore,
+		LivingWikiResolver:         s.livingWikiResolver,
+		LivingWikiRepoStore:        s.livingWikiRepoStore,
+		LivingWikiJobResultStore:   s.livingWikiJobResultStore,
+		LivingWikiPagePublishStore: s.livingWikiPagePublishStore,
+		LivingWikiLiveOrchestrator: s.livingWikiLiveOrchestrator,
+		ClusteringHook:             s.clusteringHookFunc(),
+		ClusterStore:               gqlClusterStore,
+		// CA-138: share the REST server's cached worker-version
+		// lookup with the GraphQL resolver so /api/v1/version and
+		// the GraphQL `version { workerVersion }` field return
+		// identical cached results without flooding the worker.
+		// Closure preserves the package-private versionLookup.
+		WorkerVersion: func(ctx context.Context) string {
+			if s.workerVersionLookup == nil {
+				return ""
+			}
+			return s.workerVersionLookup.get(ctx)
 		},
+		// CA-142: drain admitter so the GraphQL resolver can gate
+		// Living Wiki mutations and count on-demand requests without
+		// a direct dependency on *rest.Server. The concrete type
+		// (*serverDrainAdmitter) satisfies graphql.DrainAdmitter.
+		DrainAdmitter: s.DrainAdmitterFor(),
+	}
+	// Wire AppDeps into the resolver and sync all shared deps (idempotent).
+	// ClusteringHook is set above in the composite literal — it stays outside
+	// AppDeps by design (constructed as a closure at wiring time; see appdeps
+	// package doc for rationale).
+	gqlResolver.Deps = s.AppDeps
+	graphql.SyncResolverDepsFromAppDeps(gqlResolver, s.AppDeps)
+
+	gqlSrv := handler.NewDefaultServer(graphql.NewExecutableSchema(graphql.Config{
+		Resolvers: gqlResolver,
 	}))
 
 	// Protected API routes (accepts both JWT and API tokens)

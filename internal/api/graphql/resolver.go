@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sourcebridge/sourcebridge/internal/api/middleware"
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	"github.com/sourcebridge/sourcebridge/internal/clustering"
 	"github.com/sourcebridge/sourcebridge/internal/config"
@@ -94,61 +95,150 @@ type LLMProfileLookup interface {
 // It serves as dependency injection for your app, add any dependencies you require here.
 
 type Resolver struct {
-	Store          graph.GraphStore
+	// Deps is the shared dependency registry constructed once in rest.NewServer
+	// and propagated to the Resolver via syncResolverDepsFromAppDeps. New code
+	// should read from Deps rather than adding standalone fields. The explicit
+	// fields below are preserved for backward composite-literal construction
+	// (Resolver{KnowledgeStore: store, ...}) — embedding would break them.
+	// See internal/appdeps for the canonical registry.
+	Deps *appdeps.AppDeps
+
+	Store graph.GraphStore
+	// KnowledgeStore is preserved as an explicit field for backward
+	// composite-literal construction; new code should read r.Deps.KnowledgeStore
+	// directly. Sync via syncResolverDepsFromAppDeps in resolver_deps.go.
 	KnowledgeStore knowledge.KnowledgeStore // nil when knowledge persistence is unavailable
-	Worker         *worker.Client           // nil when AI features are unavailable
+	// Worker is preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.Worker directly. Sync via
+	// syncResolverDepsFromAppDeps in resolver_deps.go.
+	Worker *worker.Client // nil when AI features are unavailable
 	// LLMCaller is the LLM-aware adapter around Worker. All GraphQL
 	// resolvers that perform LLM-bearing RPCs must call LLMCaller.<RPC>
 	// rather than Worker.<RPC> directly so workspace-saved settings are
 	// attached to the outgoing gRPC metadata. Nil when Worker is nil.
+	// Preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.LLMCaller directly. Sync
+	// via syncResolverDepsFromAppDeps in resolver_deps.go.
 	LLMCaller *llmcall.Caller
 	// LLMResolver is the runtime LLM-config resolver. Today only the
 	// llmcall.Caller goes through it directly; resolvers that need to
 	// inspect the resolved snapshot (e.g. for telemetry stamping) can
 	// also call Resolve. Nil only in tests / embedded mode.
-	LLMResolver  resolution.Resolver
+	// Preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.LLMResolver directly. Sync
+	// via syncResolverDepsFromAppDeps in resolver_deps.go.
+	LLMResolver resolution.Resolver
+	// Orchestrator is preserved as an explicit field for backward
+	// composite-literal construction; new code should read r.Deps.Orchestrator
+	// directly. Sync via syncResolverDepsFromAppDeps in resolver_deps.go.
 	Orchestrator *orchestrator.Orchestrator // nil when llm orchestration is unavailable (degraded mode)
-	Config       *config.Config             // application configuration
-	EventBus     *events.Bus                // in-process event bus for SSE notifications
-	Flags        featureflags.Flags         // backend startup-time feature flags
+	// Config is preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.Config directly. Sync via
+	// syncResolverDepsFromAppDeps in resolver_deps.go.
+	Config *config.Config // application configuration
+	// EventBus is preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.EventBus directly. Sync via
+	// syncResolverDepsFromAppDeps in resolver_deps.go.
+	EventBus *events.Bus // in-process event bus for SSE notifications
+	// Flags is preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.Flags directly. Sync via
+	// syncResolverDepsFromAppDeps in resolver_deps.go.
+	Flags featureflags.Flags // backend startup-time feature flags
 	// Plan is the entitlement plan resolved once at boot via BootCurrentPlan().
 	// Per-request capability resolution reads this field instead of calling
 	// currentPlan() (which reads env vars) on every GraphQL request.
 	// Zero value maps to planLevel 0, equivalent to PlanOSS — safe for tests
 	// that don't set this field explicitly.
-	Plan entitlements.Plan
-	GitConfig    GitConfigLoader            // legacy; nil-safe — when GitResolver is set it's authoritative
+	Plan      entitlements.Plan
+	GitConfig GitConfigLoader // legacy; nil-safe — when GitResolver is set it's authoritative
 	// GitResolver is the runtime git-credential resolver (R3 slice 2).
 	// All clone / fetch / upstream-probe call sites resolve credentials
 	// through this resolver so an admin save on replica A is visible to
 	// replica B on the very next op (version-cell pattern). When nil,
 	// resolveGitCredentials falls back to the legacy GitConfig loader
 	// (test wiring) and finally r.Config.Git (in-memory env bootstrap).
-	GitResolver        gitres.Resolver
+	// Preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.GitResolver directly. Sync
+	// via syncResolverDepsFromAppDeps in resolver_deps.go.
+	GitResolver gitres.Resolver
+	// ComprehensionStore is preserved as an explicit field for backward
+	// composite-literal construction; new code should read
+	// r.Deps.ComprehensionStore directly. Sync via
+	// syncResolverDepsFromAppDeps in resolver_deps.go.
 	ComprehensionStore comprehension.Store // comprehension settings + model capabilities; nil when unavailable
-	HealthChecker      *health.Checker     // shared DB+worker health probe; nil = no live checks (embedded/test mode)
+	// HealthChecker is preserved as an explicit field for backward
+	// composite-literal construction; new code should read r.Deps.HealthChecker
+	// directly. Sync via syncResolverDepsFromAppDeps in resolver_deps.go.
+	HealthChecker *health.Checker // shared DB+worker health probe; nil = no live checks (embedded/test mode)
 	// LLMProfileLookup resolves profile id → name and "exists" for the
 	// per-repo override path (slice 3). Nil when running pre-profile
 	// (embedded mode); the GraphQL field/mutation degrade gracefully
 	// (mutations skip the validation step; the field returns nil for
 	// profileName but never PROFILE_NO_LONGER_EXISTS without proof).
-	LLMProfileLookup           LLMProfileLookup
-	LivingWikiStore            livingwiki.Store                  // living-wiki UI settings; nil when unavailable
-	LivingWikiResolver         *livingwiki.Resolver              // resolved living-wiki settings (UI + env fallback)
-	LivingWikiRepoStore        livingwiki.RepoSettingsStore      // per-repo living-wiki opt-in; nil when unavailable
-	LivingWikiJobResultStore   livingwiki.JobResultStore         // per-run job result history; nil when unavailable
-	LivingWikiLiveOrchestrator *lworch.Orchestrator              // living-wiki page-generation orchestrator; nil when feature unavailable
+	// Preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.LLMProfileLookup directly.
+	// Sync via syncResolverDepsFromAppDeps in resolver_deps.go.
+	LLMProfileLookup LLMProfileLookup
+	// LivingWikiStore is preserved as an explicit field for backward
+	// composite-literal construction; new code should read r.Deps.LivingWikiStore
+	// directly. Sync via syncResolverDepsFromAppDeps in resolver_deps.go.
+	LivingWikiStore livingwiki.Store // living-wiki UI settings; nil when unavailable
+	// LivingWikiResolver is preserved as an explicit field for backward
+	// composite-literal construction; new code should read
+	// r.Deps.LivingWikiResolver directly. Sync via syncResolverDepsFromAppDeps
+	// in resolver_deps.go.
+	LivingWikiResolver *livingwiki.Resolver // resolved living-wiki settings (UI + env fallback)
+	// LivingWikiRepoStore is preserved as an explicit field for backward
+	// composite-literal construction; new code should read
+	// r.Deps.LivingWikiRepoStore directly. Sync via syncResolverDepsFromAppDeps
+	// in resolver_deps.go.
+	LivingWikiRepoStore livingwiki.RepoSettingsStore // per-repo living-wiki opt-in; nil when unavailable
+	// LivingWikiJobResultStore is preserved as an explicit field for backward
+	// composite-literal construction; new code should read
+	// r.Deps.LivingWikiJobResultStore directly. Sync via
+	// syncResolverDepsFromAppDeps in resolver_deps.go.
+	LivingWikiJobResultStore livingwiki.JobResultStore // per-run job result history; nil when unavailable
+	// LivingWikiLiveOrchestrator is preserved as an explicit field for backward
+	// composite-literal construction; new code should read
+	// r.Deps.LivingWikiLiveOrchestrator directly. Sync via
+	// syncResolverDepsFromAppDeps in resolver_deps.go.
+	LivingWikiLiveOrchestrator *lworch.Orchestrator // living-wiki page-generation orchestrator; nil when feature unavailable
+	// LivingWikiPagePublishStore is preserved as an explicit field for backward
+	// composite-literal construction; new code should read
+	// r.Deps.LivingWikiPagePublishStore directly. Sync via
+	// syncResolverDepsFromAppDeps in resolver_deps.go.
 	LivingWikiPagePublishStore livingwiki.PagePublishStatusStore // per-page dispatch state (Phase 1); nil skips fingerprint tracking
-	TrashStore                 trash.Store                       // soft-delete recycle bin; nil when the feature is disabled or unavailable
-	QA                         *qa.Orchestrator                  // server-side deep-QA orchestrator; nil when server-side QA is disabled
-	SearchSvc                  *search.Service                   // hybrid retrieval backbone; nil falls back to legacy substring search
-	ReqBooster                 *search.RequirementBooster        // requirement-link cache; link mutations call Invalidate so subsequent searches see fresh links
-	LivingWikiAuditLog         governance.AuditLog               // audit trail for credential rotations and settings changes; nil disables audit logging
+	// TrashStore is preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.TrashStore directly. Sync via
+	// syncResolverDepsFromAppDeps in resolver_deps.go.
+	TrashStore trash.Store // soft-delete recycle bin; nil when the feature is disabled or unavailable
+	// QA is preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.QA directly. Sync via
+	// syncResolverDepsFromAppDeps in resolver_deps.go.
+	QA *qa.Orchestrator // server-side deep-QA orchestrator; nil when server-side QA is disabled
+	// SearchSvc is preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.SearchSvc directly. Sync via
+	// syncResolverDepsFromAppDeps in resolver_deps.go.
+	SearchSvc *search.Service // hybrid retrieval backbone; nil falls back to legacy substring search
+	// ReqBooster is preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.ReqBooster directly. Sync via
+	// syncResolverDepsFromAppDeps in resolver_deps.go.
+	ReqBooster *search.RequirementBooster // requirement-link cache; link mutations call Invalidate so subsequent searches see fresh links
+	// LivingWikiAuditLog is preserved as an explicit field for backward
+	// composite-literal construction; new code should read
+	// r.Deps.LivingWikiAuditLog directly. Sync via syncResolverDepsFromAppDeps
+	// in resolver_deps.go.
+	LivingWikiAuditLog governance.AuditLog // audit trail for credential rotations and settings changes; nil disables audit logging
 	// ClusteringHook is called after each successful index run with (repoID,
 	// commitSHA) to enqueue an async clustering job. Nil = clustering disabled.
+	// Not in AppDeps: this is a closure constructed at wiring time; see
+	// resolver_deps.go and the appdeps package doc for rationale.
 	ClusteringHook func(repoID, commitSHA string)
 	// ClusterStore provides cluster lookups for Living Wiki taxonomy resolution.
 	// When nil, resolveTaxonomy falls back to the package-path heuristic.
+	// Preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.ClusterStore directly. Sync via
+	// syncResolverDepsFromAppDeps in resolver_deps.go.
 	ClusterStore clustering.ClusterStore
 	// WorkerVersion returns the worker's reported version string,
 	// empty when the worker is nil/unreachable/slow. Wired from the
@@ -157,6 +247,9 @@ type Resolver struct {
 	// as REST /api/v1/version. Nil-safe: tests construct Resolver
 	// without WorkerVersion and the resolver returns "" for that
 	// field. CA-138.
+	// Preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.WorkerVersion directly. Sync
+	// via syncResolverDepsFromAppDeps in resolver_deps.go.
 	WorkerVersion func(ctx context.Context) string
 	// DrainAdmitter gates Living Wiki mutation admissions during a
 	// graceful server drain. When the server is draining, new cold-start
@@ -164,6 +257,9 @@ type Resolver struct {
 	// requests that pass the gate are counted so AwaitDrain waits for
 	// them. Nil in embedded/test mode — drain protection is inactive.
 	// CA-142.
+	// Preserved as an explicit field for backward composite-literal
+	// construction; new code should read r.Deps.DrainAdmitter directly. Sync
+	// via syncResolverDepsFromAppDeps in resolver_deps.go.
 	DrainAdmitter DrainAdmitter
 }
 
