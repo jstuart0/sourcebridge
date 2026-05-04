@@ -82,10 +82,14 @@ func (l *qaRepoLocator) LocateRepoClone(repoID string) (string, bool) {
 	return "", false
 }
 
-// sanitizeRepoNameForQA returns a filesystem-safe repo name for use in the QA
-// cache path. Delegates to pathutil.SanitizeRepoName with StrictPolicy.
+// sanitizeRepoNameForQA returns a repo name suitable for use in the QA fallback
+// cache path. Uses QALegacyPolicy (replace only '/' and ':' with '-', preserve
+// everything else) to match the pre-Slice-7 behavior so existing on-disk cache
+// directories remain resolvable. Do NOT switch to StrictPolicy here: the strict
+// policy drops non-alphanumeric chars (e.g. "my:project" → "myproject") and
+// would silently break lookups for repos whose names contain punctuation.
 func sanitizeRepoNameForQA(name string) string {
-	return pathutil.SanitizeRepoName(name, pathutil.StrictPolicy)
+	return pathutil.SanitizeRepoName(name, pathutil.QALegacyPolicy)
 }
 
 // qaGraphLookup adapts the graph store's symbol lookup to

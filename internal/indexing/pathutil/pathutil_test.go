@@ -44,6 +44,21 @@ func baseline_indexing_sanitizeRepoName(name string) string { //nolint:revive
 	return string(out)
 }
 
+// baseline_qa_sanitizeRepoName is a verbatim copy of the pre-Slice-7
+// sanitizeRepoNameForQA body from internal/api/rest/qa_deps.go.
+// Slice 7 (b50c087) incorrectly delegated this to StrictPolicy, which is more
+// aggressive (drops non-alphanumeric chars). The original body was:
+//
+//	strings.NewReplacer("/", "-", ":", "-").Replace(name)
+//
+// Only '/' and ':' are replaced; all other characters (spaces, backslashes,
+// non-ASCII, punctuation) are preserved verbatim. This baseline is kept frozen
+// so QALegacyPolicy can be verified against it.
+func baseline_qa_sanitizeRepoName(name string) string { //nolint:revive
+	r := strings.NewReplacer("/", "-", ":", "-")
+	return r.Replace(name)
+}
+
 // ---------------------------------------------------------------------------
 // Behavior-parity tests
 // ---------------------------------------------------------------------------
@@ -90,6 +105,46 @@ func TestSanitizeRepoName_BehaviorParity(t *testing.T) {
 		want = baseline_indexing_sanitizeRepoName(input)
 		if got != want {
 			t.Errorf("StrictPolicy(%q): got %q, want %q", input, got, want)
+		}
+
+		// QALegacyPolicy must match the pre-Slice-7 QA baseline.
+		// This guards against the regression introduced in b50c087 where
+		// sanitizeRepoNameForQA was mapped to StrictPolicy — a stricter policy
+		// that drops non-alphanumeric chars and rewrites spaces/backslashes,
+		// breaking fallback cache-directory resolution for repo names with
+		// colons, spaces, or other punctuation.
+		got = SanitizeRepoName(input, QALegacyPolicy)
+		want = baseline_qa_sanitizeRepoName(input)
+		if got != want {
+			t.Errorf("QALegacyPolicy(%q): got %q, want %q", input, got, want)
+		}
+	}
+
+	// Spot-check the critical QA cases that motivated this fix.
+	// These are the exact inputs where StrictPolicy and QALegacyPolicy diverge,
+	// demonstrating why mapping the QA helper to StrictPolicy was incorrect.
+	qaSpotChecks := []struct {
+		input       string
+		wantQA      string // QALegacyPolicy (correct)
+		wantStrict  string // StrictPolicy (wrong for QA)
+		shouldDiffer bool
+	}{
+		{"my:project", "my-project", "myproject", true},           // colon dropped by strict
+		{"user/repo", "user-repo", "user-repo", false},             // slash: both policies agree
+		{"my project", "my project", "my-project", true},          // space: preserved by QA, replaced by strict
+		{"back\\slash", "back\\slash", "back-slash", true},         // backslash: preserved by QA, replaced by strict
+		{"résumé", "résumé", "rsum", true},                        // non-ASCII: preserved by QA, dropped by strict
+		{"foo:bar/baz qux\\quux", "foo-bar-baz qux\\quux", "foo-bar-baz-qux-quux", true},
+	}
+	for _, tc := range qaSpotChecks {
+		gotQA := SanitizeRepoName(tc.input, QALegacyPolicy)
+		gotStrict := SanitizeRepoName(tc.input, StrictPolicy)
+
+		if gotQA != tc.wantQA {
+			t.Errorf("QALegacyPolicy spot-check(%q): got %q, want %q", tc.input, gotQA, tc.wantQA)
+		}
+		if tc.shouldDiffer && gotQA == gotStrict {
+			t.Errorf("QALegacyPolicy(%q)==StrictPolicy(%q)==%q — expected them to differ; QA policy is not strict enough or strict policy changed", tc.input, tc.input, gotQA)
 		}
 	}
 }

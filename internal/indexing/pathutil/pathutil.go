@@ -52,6 +52,15 @@ const (
 	// preserves all other characters including non-ASCII.
 	// Matches the pre-existing behavior in internal/api/graphql/helpers.go.
 	GraphQLLegacyPolicy
+
+	// QALegacyPolicy replaces only '/' and ':' with '-' and preserves
+	// everything else including spaces, backslashes, and non-ASCII.
+	// Matches the pre-existing behavior of sanitizeRepoNameForQA in
+	// internal/api/rest/qa_deps.go before Slice 7 (b50c087), which used:
+	//   strings.NewReplacer("/", "-", ":", "-").Replace(name)
+	// Used to compute fallback QA cache-directory paths so existing on-disk
+	// directories remain resolvable after the refactor.
+	QALegacyPolicy
 )
 
 // SanitizeRepoName returns a filesystem-safe form of a repo name according to
@@ -60,6 +69,9 @@ func SanitizeRepoName(name string, policy SanitizePolicy) string {
 	switch policy {
 	case GraphQLLegacyPolicy:
 		r := strings.NewReplacer("/", "-", "\\", "-", " ", "-", ":", "-")
+		return r.Replace(name)
+	case QALegacyPolicy:
+		r := strings.NewReplacer("/", "-", ":", "-")
 		return r.Replace(name)
 	default: // StrictPolicy
 		if name == "" {
