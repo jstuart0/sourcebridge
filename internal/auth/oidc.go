@@ -144,7 +144,13 @@ func (o *OIDCProvider) Exchange(ctx context.Context, state, code string) (string
 	}
 
 	slog.Info("OIDC login successful", "email", claims.Email, "sub", claims.Sub)
-	return o.jwtManager.GenerateToken(claims.Sub, claims.Email, claims.OrgID, claims.Role)
+	appliedRole := normalizeOIDCRole(claims.Role)
+	if appliedRole != claims.Role {
+		slog.Warn("oidc_role_normalized",
+			"claimed", claims.Role,
+			"applied", appliedRole)
+	}
+	return o.jwtManager.GenerateToken(claims.Sub, claims.Email, claims.OrgID, appliedRole)
 }
 
 func generateState() (string, error) {
