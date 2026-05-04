@@ -165,6 +165,8 @@ function renderCliffNotesSectionProvenance(section: KnowledgeSection) {
 
 export interface SymbolsTabProps {
   repoId: string;
+  /** True when this tab is the currently visible tab. Gates polling effects. */
+  active?: boolean;
   symbols: SymbolNode[];
   symbolsTotalCount: number | null;
   symbolQuery: string;
@@ -187,6 +189,7 @@ export interface SymbolsTabProps {
 
 export function SymbolsTab({
   repoId,
+  active = true,
   symbols,
   symbolsTotalCount,
   symbolQuery,
@@ -287,15 +290,17 @@ export function SymbolsTab({
     setSymbolChatQuestion("");
   }, [symbolScopeType, symbolScopePath]);
 
-  // Poll while artifacts are generating
+  // Poll while artifacts are generating — gated on `active` so the interval
+  // pauses when the user switches to another tab. State is preserved because
+  // this component stays mounted (hidden via the wrapper's `hidden` attribute).
   useEffect(() => {
-    if (!hasGeneratingScopedArtifact) return;
+    if (!active || !hasGeneratingScopedArtifact) return;
     const interval = setInterval(() => {
       reexecuteSymbolKnowledge({ requestPolicy: "network-only" });
       reexecuteSymbolChildren({ requestPolicy: "network-only" });
     }, 2000);
     return () => clearInterval(interval);
-  }, [hasGeneratingScopedArtifact, reexecuteSymbolKnowledge, reexecuteSymbolChildren]);
+  }, [active, hasGeneratingScopedArtifact, reexecuteSymbolKnowledge, reexecuteSymbolChildren]);
 
   // Handlers
   function openSource(target: SourceTarget) {

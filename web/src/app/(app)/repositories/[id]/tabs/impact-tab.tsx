@@ -11,16 +11,19 @@ import { ChangeSimulationPanel } from "@/components/change-simulation";
 
 interface ImpactTabProps {
   repoId: string;
+  /** True when this tab is the currently visible tab. Gates the initial query. */
+  active?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function ImpactTab({ repoId }: ImpactTabProps) {
+export function ImpactTab({ repoId, active = true }: ImpactTabProps) {
   const [impactResult] = useQuery({
     query: LATEST_IMPACT_REPORT_QUERY,
     variables: { repositoryId: repoId },
+    pause: !active,
   });
 
   return (

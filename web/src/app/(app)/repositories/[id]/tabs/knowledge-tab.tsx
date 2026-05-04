@@ -224,6 +224,8 @@ interface RepoJobActivityResponse {
 
 export interface KnowledgeTabProps {
   repoId: string;
+  /** True when this tab is the currently visible tab. Gates queries and effects. */
+  active?: boolean;
   repo: {
     id: string;
     name: string;
@@ -565,6 +567,7 @@ function artifactHasActiveJob(
 
 export function KnowledgeTab({
   repoId,
+  active = true,
   repo,
   loadingOps: _loadingOps,
   startLoading,
@@ -598,7 +601,9 @@ export function KnowledgeTab({
   const knowledgeDepth = (searchParams.get("depth") || "medium").toUpperCase();
   const knowledgeGenerationMode = (searchParams.get("mode") || "understanding_first").toUpperCase();
 
-  // Queries
+  // Queries — paused while the tab is not visible to avoid network work behind
+  // a hidden panel. State is retained across tab switches because this component
+  // stays mounted (hidden via the `hidden` attribute on the wrapper in page.tsx).
   const [knowledgeResult, reexecuteKnowledge] = useQuery({
     query: KNOWLEDGE_ARTIFACTS_QUERY,
     variables: {
@@ -606,6 +611,7 @@ export function KnowledgeTab({
       scopeType: knowledgeScopeType,
       scopePath: knowledgeScopeType === "REPOSITORY" ? undefined : knowledgeScopePath,
     },
+    pause: !active,
   });
   const [scopeChildrenResult, reexecuteScopeChildren] = useQuery({
     query: KNOWLEDGE_SCOPE_CHILDREN_QUERY,
@@ -616,6 +622,7 @@ export function KnowledgeTab({
       audience: knowledgeAudience,
       depth: knowledgeDepth,
     },
+    pause: !active,
   });
 
   const [executionRequested, setExecutionRequested] = useState(false);
@@ -624,6 +631,7 @@ export function KnowledgeTab({
   const [executionEntriesResult] = useQuery({
     query: EXECUTION_ENTRY_POINTS_QUERY,
     variables: { repositoryId: repoId },
+    pause: !active,
   });
   const executionInput = useMemo(() => {
     if (knowledgeScopeType === "SYMBOL" && knowledgeScopePath) {

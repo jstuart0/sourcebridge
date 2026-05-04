@@ -32,13 +32,15 @@ interface DiscoveredSpec {
 
 interface SpecsTabProps {
   repoId: string;
+  /** True when this tab is the currently visible tab. Gates the initial query. */
+  active?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function SpecsTab({ repoId }: SpecsTabProps) {
+export function SpecsTab({ repoId, active = true }: SpecsTabProps) {
   const [specExtracting, setSpecExtracting] = useState(false);
   const [specExtractionResult, setSpecExtractionResult] = useState<string | null>(null);
   const [specExtractionStatus, setSpecExtractionStatus] = useState<"error" | "success" | null>(null);
@@ -47,6 +49,7 @@ export function SpecsTab({ repoId }: SpecsTabProps) {
   const [discoveredReqsResult, reexecuteDiscoveredReqs] = useQuery({
     query: DISCOVERED_REQUIREMENTS_QUERY,
     variables: { repositoryId: repoId, limit: 100 },
+    pause: !active,
   });
 
   const [, triggerSpecExtraction] = useMutation(TRIGGER_SPEC_EXTRACTION_MUTATION);

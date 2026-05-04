@@ -28,6 +28,8 @@ interface ReqNode {
 interface RequirementsTabProps {
   repoId: string;
   repoName: string;
+  /** True when this tab is the currently visible tab. Gates queries and effects. */
+  active?: boolean;
   /** Per-op AI loading gate: true when "requirements:auto-link" is in flight */
   isAiLoading: (key: string) => boolean;
   runAiOp: (key: string, fn: () => Promise<void>) => Promise<void>;
@@ -40,6 +42,7 @@ interface RequirementsTabProps {
 export function RequirementsTab({
   repoId,
   repoName,
+  active = true,
   isAiLoading,
   runAiOp,
 }: RequirementsTabProps) {
@@ -50,6 +53,7 @@ export function RequirementsTab({
   const [reqsResult, reexecuteRequirements] = useQuery({
     query: REQUIREMENTS_QUERY,
     variables: { repositoryId: repoId, limit: 50 },
+    pause: !active,
   });
 
   const urqlClient = useClient();
@@ -58,7 +62,10 @@ export function RequirementsTab({
   const [extraReqs, setExtraReqs] = useState<ReqNode[]>([]);
   const [loadingMoreReqs, setLoadingMoreReqs] = useState(false);
 
+  // Paginated load gated on `active` — runs only when the tab is visible.
+  // Component stays mounted across tab switches so state is preserved.
   useEffect(() => {
+    if (!active) return;
     if (initialReqs.length < 50 || initialReqs.length >= reqsTotalCount) {
       return;
     }
@@ -88,7 +95,7 @@ export function RequirementsTab({
     })();
 
     return () => { cancelled = true; };
-  }, [initialReqs.length, reqsTotalCount, repoId, urqlClient]);
+  }, [active, initialReqs.length, reqsTotalCount, repoId, urqlClient]);
 
   const reqs: ReqNode[] = [...initialReqs, ...extraReqs];
 
