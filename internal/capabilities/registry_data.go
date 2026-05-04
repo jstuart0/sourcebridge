@@ -183,12 +183,12 @@ var Registry = []Capability{
 		LatencyClass: "fast_read",
 	},
 
-	// ---- Gap audit (Phase 1b, CA-153) ----
+	// ---- Gap audit (Phase 1b, CA-153; extended CA-154) ----
 	{
 		Name:         "gap_audit",
-		Description:  "O(n) repo-wide gap scans: orphan symbols (code with no linked requirement) and uncovered requirements (spec with no linked code).",
+		Description:  "O(n) repo-wide gap scans: orphan symbols (code with no linked requirement), uncovered requirements (spec with no linked code), dead code (symbols with no callers), and test-coverage gaps (symbols with no test linkage).",
 		Editions:     []Edition{EditionOSS, EditionEnterprise},
-		MCPToolNames: []string{"get_orphan_symbols", "get_uncovered_requirements"},
+		MCPToolNames: []string{"get_orphan_symbols", "get_uncovered_requirements", "find_dead_code", "get_untested_symbols"},
 		LatencyClass: "fast_read",
 	},
 
