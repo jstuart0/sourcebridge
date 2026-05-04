@@ -22,6 +22,28 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/source"
 )
 
+// checkRepoAccessGraphQL returns nil if the authenticated caller can access
+// the given repository via the per-request tenant-filtered store, or a
+// GraphQL-friendly error if not. It mirrors the repo-access check that Slice
+// 6 (ce682ed) added to the REST /api/v1/ask handler (SEC-5).
+//
+// Both the GraphQL Ask mutation and dispatchDiscussThroughOrchestrator call
+// qa.Orchestrator.Ask with a user-supplied repositoryID. Without this check,
+// the orchestrator's base-store dependencies bypass the tenant-filtered store
+// that the resolver normally uses, allowing any authenticated user to query
+// any repository by ID.
+func (r *Resolver) checkRepoAccessGraphQL(ctx context.Context, repositoryID string) error {
+	store := r.getStore(ctx)
+	if store == nil {
+		return fmt.Errorf("forbidden: repository not accessible")
+	}
+	repo := store.GetRepository(repositoryID)
+	if repo == nil {
+		return fmt.Errorf("forbidden: repository not found or not accessible")
+	}
+	return nil
+}
+
 // clientTypeFromContext returns the client type for the current request.
 // API tokens (VS Code, JetBrains) carry client_type; JWT sessions (web) do not.
 func clientTypeFromContext(ctx context.Context) string {

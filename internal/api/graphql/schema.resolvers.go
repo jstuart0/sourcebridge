@@ -977,6 +977,12 @@ func (r *mutationResolver) Ask(ctx context.Context, input AskInput) (*AskResult,
 			Usage: &AskUsage{},
 		}, nil
 	}
+	// SEC-5: verify repo access before passing the caller-controlled
+	// repositoryID to the QA orchestrator, which uses its base-store
+	// dependencies and would bypass the tenant-filtered store check.
+	if err := r.checkRepoAccessGraphQL(ctx, input.RepositoryID); err != nil {
+		return nil, err
+	}
 	qaIn := askInputToQA(input)
 	res, err := r.QA.Ask(ctx, qaIn)
 	if err != nil {

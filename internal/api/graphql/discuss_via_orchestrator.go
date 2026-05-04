@@ -25,6 +25,13 @@ import (
 // Clients that want structured references should use the new `ask`
 // mutation instead — it surfaces AskResult unchanged.
 func (r *mutationResolver) dispatchDiscussThroughOrchestrator(ctx context.Context, input DiscussCodeInput) (*DiscussionResult, error) {
+	// SEC-5: verify repo access before passing the caller-controlled
+	// repositoryID to the QA orchestrator.  Without this check, the
+	// orchestrator's base-store dependencies bypass the tenant-filtered
+	// store the resolver normally uses.
+	if err := r.checkRepoAccessGraphQL(ctx, input.RepositoryID); err != nil {
+		return nil, err
+	}
 	askInput := qa.AskInput{
 		RepositoryID:  input.RepositoryID,
 		Question:      input.Question,
