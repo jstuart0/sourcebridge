@@ -839,7 +839,25 @@ func (s *SurrealStore) StoreKnowledgeSections(artifactID string, sections []know
 		return fmt.Errorf("database not connected")
 	}
 
-	// Remove old sections first.
+	// Delete old evidence rows before deleting old sections.
+	// MemStore.StoreKnowledgeSections does this too (iterates s.sections[artifactID]
+	// and deletes from s.evidence); this keeps the two implementations in sync so
+	// refresh does not leave orphaned ca_knowledge_evidence rows in production.
+	type sectionIDRow struct {
+		ID string `json:"id"`
+	}
+	if existing, err := queryOne[[]sectionIDRow](ctx(), db,
+		"SELECT id FROM ca_knowledge_section WHERE artifact_id = $artifact_id",
+		map[string]any{"artifact_id": artifactID}); err == nil {
+		for _, row := range existing {
+			secID := row.ID
+			_, _ = queryOne[interface{}](ctx(), db,
+				"DELETE ca_knowledge_evidence WHERE section_id = $section_id",
+				map[string]any{"section_id": secID})
+		}
+	}
+
+	// Remove old sections.
 	_, _ = queryOne[interface{}](ctx(), db,
 		"DELETE ca_knowledge_section WHERE artifact_id = $artifact_id",
 		map[string]any{"artifact_id": artifactID})

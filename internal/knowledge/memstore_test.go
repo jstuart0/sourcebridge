@@ -147,6 +147,72 @@ func TestKnowledgeArtifactNotFound(t *testing.T) {
 	}
 }
 
+// TestStoreKnowledgeSections_CleansUpOldEvidence verifies that calling
+// StoreKnowledgeSections a second time (simulating a refresh) removes evidence
+// rows that belong to the replaced sections.
+//
+// This is the behavioral invariant that SurrealStore.StoreKnowledgeSections
+// must also satisfy (codex r2 H2): old evidence rows must not be left as
+// orphans when sections are replaced.
+func TestStoreKnowledgeSections_CleansUpOldEvidence(t *testing.T) {
+	s := NewMemStore()
+
+	artifact, err := s.StoreKnowledgeArtifact(&Artifact{
+		RepositoryID: "repo-1",
+		Type:         ArtifactCliffNotes,
+		Audience:     AudienceDeveloper,
+		Depth:        DepthMedium,
+		Status:       StatusReady,
+	})
+	if err != nil {
+		t.Fatalf("StoreKnowledgeArtifact: %v", err)
+	}
+
+	// First generation: store two sections and evidence for the first.
+	firstSections := []Section{
+		{Title: "System Purpose", Content: "First generation.", Confidence: ConfidenceHigh},
+		{Title: "Architecture", Content: "Initial arch.", Confidence: ConfidenceMedium},
+	}
+	if err := s.StoreKnowledgeSections(artifact.ID, firstSections); err != nil {
+		t.Fatalf("StoreKnowledgeSections (first): %v", err)
+	}
+	stored := s.GetKnowledgeSections(artifact.ID)
+	if len(stored) != 2 {
+		t.Fatalf("expected 2 sections, got %d", len(stored))
+	}
+	firstSectionID := stored[0].ID
+	if err := s.StoreKnowledgeEvidence(firstSectionID, []Evidence{
+		{SourceType: EvidenceFile, SourceID: "f1", FilePath: "main.go"},
+		{SourceType: EvidenceFile, SourceID: "f2", FilePath: "util.go"},
+	}); err != nil {
+		t.Fatalf("StoreKnowledgeEvidence: %v", err)
+	}
+	if n := len(s.GetKnowledgeEvidence(firstSectionID)); n != 2 {
+		t.Fatalf("expected 2 evidence rows after first generation, got %d", n)
+	}
+
+	// Second generation (refresh): replace with completely new sections.
+	newSections := []Section{
+		{Title: "System Purpose", Content: "Refreshed content.", Confidence: ConfidenceHigh},
+	}
+	if err := s.StoreKnowledgeSections(artifact.ID, newSections); err != nil {
+		t.Fatalf("StoreKnowledgeSections (refresh): %v", err)
+	}
+
+	// Old evidence rows for the replaced section must be gone.
+	if n := len(s.GetKnowledgeEvidence(firstSectionID)); n != 0 {
+		t.Fatalf("expected old evidence to be cleaned up on section replacement, got %d rows", n)
+	}
+	// New sections are present.
+	afterSections := s.GetKnowledgeSections(artifact.ID)
+	if len(afterSections) != 1 {
+		t.Fatalf("expected 1 section after refresh, got %d", len(afterSections))
+	}
+	if afterSections[0].Content != "Refreshed content." {
+		t.Fatalf("expected refreshed content, got %q", afterSections[0].Content)
+	}
+}
+
 func TestDeleteArtifactCleansUpSectionsAndEvidence(t *testing.T) {
 	s := NewMemStore()
 
