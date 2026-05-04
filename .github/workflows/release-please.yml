@@ -56,7 +56,7 @@ jobs:
       # SHA-pinned: googleapis/release-please-action@v4.4.1
       # Verify pin: curl -fsSL https://api.github.com/repos/googleapis/release-please-action/git/refs/tags/v4.4.1
       - name: release-please
-        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
