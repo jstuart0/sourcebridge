@@ -9,6 +9,7 @@ import (
 	"time"
 
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
+	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
@@ -17,6 +18,20 @@ import (
 type codeTourGenerationService struct {
 	resolver *Resolver
 	input    GenerateCodeTourInput
+}
+
+// codeTourRunParams bundles all inputs that runGenerationPipeline needs
+// beyond the receiver. Defined here so both Generate and (eventually)
+// RefreshFromExisting can build it with appropriate values.
+type codeTourRunParams struct {
+	repo           *graphstore.Repository
+	artifact       *knowledgepkg.Artifact
+	snap           *knowledgepkg.KnowledgeSnapshot
+	snapJSON       []byte
+	generationMode knowledgepkg.GenerationMode
+	audience       string
+	depth          string
+	theme          string
 }
 
 func (s codeTourGenerationService) Generate(ctx context.Context) (*KnowledgeArtifact, error) {
@@ -59,7 +74,6 @@ func (s codeTourGenerationService) Generate(ctx context.Context) (*KnowledgeArti
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
 	}
-	enrichedSnapJSON := snapJSON
 	key := knowledgepkg.ArtifactKey{
 		RepositoryID: repo.ID,
 		Type:         knowledgepkg.ArtifactCodeTour,
@@ -91,111 +105,151 @@ func (s codeTourGenerationService) Generate(ctx context.Context) (*KnowledgeArti
 	}
 	artifact.GenerationMode = generationMode
 	syncArtifactExecutionMetadata(r.KnowledgeStore, artifact)
-	store := r.getStore(ctx)
 
-	err = r.enqueueKnowledgeJob(ctx, artifact, "code_tour", len(enrichedSnapJSON), func(runCtx context.Context, rt llm.Runtime) error {
-		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
-		if artifactUsesUnderstanding(generationMode) {
-			if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
-				return err
-			} else {
-				if reused {
-					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
-					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
-				}
-				if understanding != nil {
-					if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
-						enrichedSnapJSON = enriched
-					}
-				}
-			}
-		}
-		if knowledgepkg.Depth(depth) == knowledgepkg.DepthDeep {
-			if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), enrichedSnapJSON); ok {
-				enrichedSnapJSON = enriched
-			}
-		}
-
-		streamDriver := r.runStreamProgressDriver(runCtx, rt, artifact.ID, rpcBucketCollapsed)
-		resp, err := r.LLMCaller.GenerateCodeTourWithJob(runCtx, repo.ID, resolution.OpKnowledge,
-			llmJobMetadataWithProgress(rt, artifact.ID, "code_tour", streamDriver.OnProgress()),
-			&knowledgev1.GenerateCodeTourRequest{
-				RepositoryId:   repo.ID,
-				RepositoryName: repo.Name,
-				Audience:       audience,
-				AudienceEnum:   protoAudience(knowledgepkg.Audience(audience)),
-				Depth:          depth,
-				DepthEnum:      protoDepth(knowledgepkg.Depth(depth)),
-				SnapshotJson:   string(enrichedSnapJSON),
-				Theme:          theme,
-			})
-		streamDriver.Close()
-		if err != nil {
-			slog.Error("code tour generation failed", "artifact_id", artifact.ID, "error", err)
-			return err
-		}
-
-		rt.ReportProgress(0.96, "llm", "LLM completed, persisting stops")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
-
-		if resp.Usage != nil {
-			storeLLMUsage(store, repo.ID, resp.Usage, "")
-			rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
-		}
-
-		sections := make([]knowledgepkg.Section, len(resp.Stops))
-		for i, stop := range resp.Stops {
-			summary := stop.Description
-			if len(summary) > 160 {
-				summary = summary[:160]
-			}
-			metaRaw, _ := json.Marshal(map[string]any{
-				"trail":              stop.Trail,
-				"modification_hints": stop.ModificationHints,
-			})
-			sections[i] = knowledgepkg.Section{
-				Title:            stop.Title,
-				Content:          stop.Description,
-				Summary:          summary,
-				Metadata:         string(metaRaw),
-				Confidence:       mapProtoConfidence(stop.Confidence),
-				RefinementStatus: stop.RefinementStatus,
-			}
-		}
-		if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
-			slog.Error("failed to store code tour sections", "artifact_id", artifact.ID, "error", err)
-			return err
-		}
-
-		storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
-		for i, stop := range resp.Stops {
-			if i >= len(storedSections) {
-				break
-			}
-			if stop.FilePath != "" {
-				_ = r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[i].ID, []knowledgepkg.Evidence{
-					{
-						SourceType: knowledgepkg.EvidenceFile,
-						FilePath:   stop.FilePath,
-						LineStart:  int(stop.LineStart),
-						LineEnd:    int(stop.LineEnd),
-						Rationale:  "Code tour stop location",
-					},
-				})
-			}
-		}
-
-		if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
-			slog.Error("failed to mark code tour ready", "artifact_id", artifact.ID, "error", err)
-		}
-		rt.ReportProgress(1.0, "ready", "Code tour ready")
-		slog.Info("code tour generation complete", "artifact_id", artifact.ID)
-		return nil
+	params := codeTourRunParams{
+		repo:           repo,
+		artifact:       artifact,
+		snap:           snap,
+		snapJSON:       snapJSON,
+		generationMode: generationMode,
+		audience:       audience,
+		depth:          depth,
+		theme:          theme,
+	}
+	capturedStore := r.getStore(ctx)
+	err = r.enqueueKnowledgeJob(ctx, artifact, "code_tour", len(snapJSON), func(runCtx context.Context, rt llm.Runtime) error {
+		return s.runGenerationPipeline(runCtx, rt, capturedStore, params)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("enqueue code tour job: %w", err)
 	}
 
 	return mapKnowledgeArtifact(artifact), nil
+}
+
+// runGenerationPipeline executes the code-tour LLM call and persistence
+// steps for the given artifact. It is called from the enqueueKnowledgeJob
+// closure in Generate and will be called from RefreshFromExisting once
+// Phase 1 Slice 5e lands.
+func (s codeTourGenerationService) runGenerationPipeline(
+	runCtx context.Context,
+	rt llm.Runtime,
+	store graphstore.GraphStore,
+	p codeTourRunParams,
+) error {
+	r := s.resolver
+	artifact := p.artifact
+	repo := p.repo
+	snap := p.snap
+	snapJSON := p.snapJSON
+	generationMode := p.generationMode
+	audience := p.audience
+	depth := p.depth
+	theme := p.theme
+
+	enrichedSnapJSON := snapJSON
+	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
+	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
+	if artifactUsesUnderstanding(generationMode) {
+		if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
+			return err
+		} else {
+			if reused {
+				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
+				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
+			}
+			if understanding != nil {
+				if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
+					enrichedSnapJSON = enriched
+				}
+			}
+		}
+	}
+	if knowledgepkg.Depth(depth) == knowledgepkg.DepthDeep {
+		if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), enrichedSnapJSON); ok {
+			enrichedSnapJSON = enriched
+		}
+	}
+
+	streamDriver := r.runStreamProgressDriver(runCtx, rt, artifact.ID, rpcBucketCollapsed)
+	resp, err := r.LLMCaller.GenerateCodeTourWithJob(runCtx, repo.ID, resolution.OpKnowledge,
+		llmJobMetadataWithProgress(rt, artifact.ID, "code_tour", streamDriver.OnProgress()),
+		&knowledgev1.GenerateCodeTourRequest{
+			RepositoryId:   repo.ID,
+			RepositoryName: repo.Name,
+			Audience:       audience,
+			AudienceEnum:   protoAudience(knowledgepkg.Audience(audience)),
+			Depth:          depth,
+			DepthEnum:      protoDepth(knowledgepkg.Depth(depth)),
+			SnapshotJson:   string(enrichedSnapJSON),
+			Theme:          theme,
+		})
+	streamDriver.Close()
+	if err != nil {
+		slog.Error("code tour generation failed", "artifact_id", artifact.ID, "error", err)
+		return err
+	}
+
+	rt.ReportProgress(0.96, "llm", "LLM completed, persisting stops")
+	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
+
+	if resp.Usage != nil {
+		storeLLMUsage(store, repo.ID, resp.Usage, "")
+		rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
+	}
+
+	sections := make([]knowledgepkg.Section, len(resp.Stops))
+	for i, stop := range resp.Stops {
+		summary := stop.Description
+		if len(summary) > 160 {
+			summary = summary[:160]
+		}
+		metaRaw, _ := json.Marshal(map[string]any{
+			"trail":              stop.Trail,
+			"modification_hints": stop.ModificationHints,
+		})
+		sections[i] = knowledgepkg.Section{
+			Title:            stop.Title,
+			Content:          stop.Description,
+			Summary:          summary,
+			Metadata:         string(metaRaw),
+			Confidence:       mapProtoConfidence(stop.Confidence),
+			RefinementStatus: stop.RefinementStatus,
+		}
+	}
+	if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
+		slog.Error("failed to store code tour sections", "artifact_id", artifact.ID, "error", err)
+		return err
+	}
+
+	storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
+	for i, stop := range resp.Stops {
+		if i >= len(storedSections) {
+			break
+		}
+		if stop.FilePath != "" {
+			_ = r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[i].ID, []knowledgepkg.Evidence{
+				{
+					SourceType: knowledgepkg.EvidenceFile,
+					FilePath:   stop.FilePath,
+					LineStart:  int(stop.LineStart),
+					LineEnd:    int(stop.LineEnd),
+					Rationale:  "Code tour stop location",
+				},
+			})
+		}
+	}
+
+	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
+		slog.Error("failed to mark code tour ready", "artifact_id", artifact.ID, "error", err)
+	}
+	rt.ReportProgress(1.0, "ready", "Code tour ready")
+	slog.Info("code tour generation complete", "artifact_id", artifact.ID)
+	return nil
+}
+
+// RefreshFromExisting re-runs the generation pipeline against an existing
+// artifact, replacing its sections in place. Implemented in Phase 1 Slice 5e.
+func (s codeTourGenerationService) RefreshFromExisting(ctx context.Context, existing *knowledgepkg.Artifact) (*KnowledgeArtifact, error) {
+	panic("TODO: implemented in Phase 1 Slice 5e")
 }

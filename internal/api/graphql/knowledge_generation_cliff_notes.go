@@ -9,6 +9,7 @@ import (
 	"time"
 
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
+	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
@@ -17,6 +18,26 @@ import (
 type cliffNotesGenerationService struct {
 	resolver *Resolver
 	input    GenerateCliffNotesInput
+}
+
+// cliffNotesRunParams bundles all inputs that runGenerationPipeline needs
+// beyond the receiver. Defined here so both Generate and (eventually)
+// RefreshFromExisting can build it with appropriate values.
+type cliffNotesRunParams struct {
+	repo                *graphstore.Repository
+	artifact            *knowledgepkg.Artifact
+	snap                *knowledgepkg.KnowledgeSnapshot
+	snapJSON            []byte
+	enrichedCliffSnapJSON []byte
+	scope               knowledgepkg.ArtifactScope
+	generationMode      knowledgepkg.GenerationMode
+	audience            string
+	depth               string
+	clientType          string
+	snapshotSizeBytes   int
+	understanding       *knowledgepkg.RepositoryUnderstanding
+	reusedUnderstanding bool
+	renderPlan          cliffNotesRenderPlan
 }
 
 func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeArtifact, error) {
@@ -124,7 +145,6 @@ func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeAr
 		}
 	}
 
-	store := r.getStore(ctx)
 	snapshotSizeBytes := len(snapJSON)
 	truncated := scope.ScopeType == knowledgepkg.ScopeRequirement && snap.SymbolCount >= 200
 	clientType := clientTypeFromContext(ctx)
@@ -172,234 +192,285 @@ func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeAr
 		}
 	}
 
-	err = r.enqueueKnowledgeJob(ctx, artifact, "cliff_notes", len(enrichedCliffSnapJSON), func(runCtx context.Context, rt llm.Runtime) (runErr error) {
-		defer func() {
-			if runErr != nil {
-				markRepositoryUnderstandingFailed(r.KnowledgeStore, artifact, scope, snap.SourceRevision, runErr)
-			}
-		}()
-		genStart := time.Now()
-		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
-		if reusedUnderstanding {
-			rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
-			_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
-		}
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "snapshot", "snapshot_assembled", "Snapshot assembled", map[string]any{
-			"snapshot_bytes": len(enrichedCliffSnapJSON),
-			"scope_type":     string(scope.ScopeType),
-			"scope_path":     scope.ScopePath,
-			"depth":          depth,
-			"audience":       audience,
-		})
-
-		// CA-122 Phase 6/7: replace the synthetic ticker with a
-		// stream-driven progress driver that consumes phase + progress
-		// events from the worker via JobMetadata.OnProgress.
-		bgCtx := runCtx
-		if renderPlan.RenderOnly {
-			bgCtx = withCliffNotesRenderMetadata(
-				bgCtx,
-				true,
-				renderPlan.SelectedSectionTitles,
-				renderPlan.UnderstandingDepth,
-				renderPlan.RelevanceProfile,
-			)
-		}
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "llm", "worker_dispatch", "Dispatching cliff notes request to worker", map[string]any{
-			"repository_id":   repo.ID,
-			"repository_name": repo.Name,
-			"scope_type":      string(scope.ScopeType),
-			"scope_path":      scope.ScopePath,
-			"depth":           depth,
-			"generation_mode": string(generationMode),
-			"render_only":     renderPlan.RenderOnly,
-			"selected_titles": renderPlan.SelectedSectionTitles,
-		})
-		streamDriver := r.runStreamProgressDriver(bgCtx, rt, artifact.ID, rpcBucketForArtifact(artifact))
-		resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge,
-			llmJobMetadataWithProgress(rt, artifact.ID, "cliff_notes", streamDriver.OnProgress()),
-			&knowledgev1.GenerateCliffNotesRequest{
-				RepositoryId:   repo.ID,
-				RepositoryName: repo.Name,
-				Audience:       audience,
-				AudienceEnum:   protoAudience(knowledgepkg.Audience(audience)),
-				Depth:          depth,
-				DepthEnum:      protoDepth(knowledgepkg.Depth(depth)),
-				ScopeType:      string(scope.ScopeType),
-				ScopePath:      scope.ScopePath,
-				SnapshotJson:   string(enrichedCliffSnapJSON),
-			})
-		// MUST close BEFORE any terminal artifact-state writes
-		// (codex r1b M5 driver-drain rule). The persist* helpers
-		// below run only after Close returns.
-		streamDriver.Close()
-		if err != nil {
-			appendJobLog(r.Orchestrator, rt, llm.LogLevelError, "llm", "worker_failed", "Worker cliff notes request failed", map[string]any{
-				"duration_ms": time.Since(genStart).Milliseconds(),
-			})
-			slog.Error("cliff_notes_generation_failed",
-				"artifact_id", artifact.ID,
-				"scope_type", string(scope.ScopeType),
-				"scope_path", scope.ScopePath,
-				"client_type", clientType,
-				"duration_ms", time.Since(genStart).Milliseconds(),
-				"error", err,
-			)
-			return err
-		}
-		understanding, err := updateUnderstandingForCliffNotes(r.KnowledgeStore, artifact, scope, snap.SourceRevision, resp, knowledgepkg.UnderstandingReady)
-		if err != nil {
-			slog.Warn("failed to update repository understanding", "artifact_id", artifact.ID, "error", err)
-		}
-
-		reusedSummaries := 0
-		leafCacheHits := 0
-		fileCacheHits := 0
-		packageCacheHits := 0
-		rootCacheHits := 0
-		if resp.Diagnostics != nil {
-			leafCacheHits = int(resp.Diagnostics.LeafCacheHits)
-			fileCacheHits = int(resp.Diagnostics.FileCacheHits)
-			packageCacheHits = int(resp.Diagnostics.PackageCacheHits)
-			rootCacheHits = int(resp.Diagnostics.RootCacheHits)
-			reusedSummaries = leafCacheHits + fileCacheHits + packageCacheHits + rootCacheHits
-			if err := r.Orchestrator.SetReuseStats(rt.JobID(), reusedSummaries, leafCacheHits, fileCacheHits, packageCacheHits, rootCacheHits); err != nil {
-				slog.Warn("failed to persist cliff notes reuse stats",
-					"job_id", rt.JobID(),
-					"artifact_id", artifact.ID,
-					"error", err)
-			}
-		}
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "llm", "worker_response_received", "Worker returned cliff notes response", map[string]any{
-			"duration_ms":        time.Since(genStart).Milliseconds(),
-			"section_count":      len(resp.Sections),
-			"reused_summaries":   reusedSummaries,
-			"leaf_cache_hits":    leafCacheHits,
-			"file_cache_hits":    fileCacheHits,
-			"package_cache_hits": packageCacheHits,
-			"root_cache_hits":    rootCacheHits,
-			"provider_compute_errors": func() int32 {
-				if resp.Diagnostics == nil {
-					return 0
-				}
-				return resp.Diagnostics.ProviderComputeErrors
-			}(),
-			"fallback_count": func() int32 {
-				if resp.Diagnostics == nil {
-					return 0
-				}
-				return resp.Diagnostics.FallbackCount
-			}(),
-		})
-		llmMessage := "LLM completed, persisting sections"
-		if reusedSummaries > 0 {
-			llmMessage = fmt.Sprintf("LLM completed, reused %d summaries, persisting sections", reusedSummaries)
-		}
-		rt.ReportProgress(0.96, "llm", llmMessage)
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", llmMessage)
-
-		if resp.Usage != nil {
-			storeLLMUsage(store, repo.ID, resp.Usage, "")
-			rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
-		}
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "persist", "persist_sections_started", "Persisting generated cliff note sections", map[string]any{
-			"section_count": len(resp.Sections),
-		})
-
-		sections := make([]knowledgepkg.Section, len(resp.Sections))
-		for i, sec := range resp.Sections {
-			refinementStatus := strings.TrimSpace(sec.RefinementStatus)
-			if refinementStatus == "" {
-				refinementStatus = "light"
-			}
-			sections[i] = knowledgepkg.Section{
-				Title:            sec.Title,
-				Content:          sec.Content,
-				Summary:          sec.Summary,
-				Metadata:         cliffNotesSectionMetadataJSON(knowledgepkg.ArtifactCliffNotes, understanding, refinementStatus, sec.Title, len(sec.Evidence) > 0),
-				Confidence:       mapProtoConfidence(sec.Confidence),
-				Inferred:         sec.Inferred,
-				SectionKey:       knowledgepkg.SectionKeyForTitle(sec.Title),
-				RefinementStatus: refinementStatus,
-			}
-		}
-		if renderPlan.RenderOnly && len(renderPlan.SelectedSectionTitles) > 0 {
-			selected := make(map[string]struct{}, len(renderPlan.SelectedSectionTitles))
-			for _, title := range renderPlan.SelectedSectionTitles {
-				selected[title] = struct{}{}
-			}
-			sections = knowledgepkg.MergeSectionsByTitle(r.KnowledgeStore.GetKnowledgeSections(artifact.ID), sections, selected)
-		}
-		if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
-			slog.Error("failed to store cliff notes sections", "artifact_id", artifact.ID, "error", err)
-			return err
-		}
-		syncCliffNotesRefinementUnits(r.KnowledgeStore, artifact, sections, understanding)
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "persist", "persist_sections_completed", "Stored cliff note sections", map[string]any{
-			"section_count": len(sections),
-		})
-
-		storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
-		for i, sec := range resp.Sections {
-			if i >= len(storedSections) {
-				break
-			}
-			if len(sec.Evidence) > 0 {
-				evidence := make([]knowledgepkg.Evidence, len(sec.Evidence))
-				for j, ev := range sec.Evidence {
-					evidence[j] = knowledgepkg.Evidence{
-						SourceType: knowledgepkg.EvidenceSourceType(ev.SourceType),
-						SourceID:   ev.SourceId,
-						FilePath:   ev.FilePath,
-						LineStart:  int(ev.LineStart),
-						LineEnd:    int(ev.LineEnd),
-						Rationale:  ev.Rationale,
-					}
-				}
-				_ = r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[i].ID, evidence)
-			}
-		}
-
-		if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
-			slog.Error("failed to mark cliff notes ready", "artifact_id", artifact.ID, "error", err)
-		}
-		if artifactUsesUnderstanding(generationMode) && depth != string(knowledgepkg.DepthSummary) {
-			targets := cliffNotesDeepeningTargets(r.KnowledgeStore, artifact)
-			slog.Info("cliff_notes_deepening_targets_evaluated",
-				"artifact_id", artifact.ID,
-				"target_count", len(targets),
-				"targets", targets,
-			)
-			if len(targets) > 0 {
-				if err := r.enqueueCliffNotesDeepening(repo, artifact, scope, snap.SourceRevision, enrichedCliffSnapJSON, targets); err != nil {
-					slog.Warn("failed to enqueue cliff notes deepening", "artifact_id", artifact.ID, "error", err)
-				}
-			}
-		}
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "ready", "artifact_ready", "Cliff notes artifact marked ready", map[string]any{
-			"section_count": len(sections),
-		})
-		readyMessage := "Cliff notes ready"
-		if reusedSummaries > 0 {
-			readyMessage = fmt.Sprintf("Cliff notes ready · reused %d summaries", reusedSummaries)
-		}
-		rt.ReportProgress(1.0, "ready", readyMessage)
-		slog.Info("cliff_notes_generation_completed",
-			"artifact_id", artifact.ID,
-			"scope_type", string(scope.ScopeType),
-			"scope_path", scope.ScopePath,
-			"client_type", clientType,
-			"duration_ms", time.Since(genStart).Milliseconds(),
-			"snapshot_size_bytes", snapshotSizeBytes,
-			"section_count", len(resp.Sections),
-			"reused_summaries", reusedSummaries,
-		)
-		return nil
+	params := cliffNotesRunParams{
+		repo:                  repo,
+		artifact:              artifact,
+		snap:                  snap,
+		snapJSON:              snapJSON,
+		enrichedCliffSnapJSON: enrichedCliffSnapJSON,
+		scope:                 scope,
+		generationMode:        generationMode,
+		audience:              audience,
+		depth:                 depth,
+		clientType:            clientType,
+		snapshotSizeBytes:     snapshotSizeBytes,
+		understanding:         understanding,
+		reusedUnderstanding:   reusedUnderstanding,
+		renderPlan:            renderPlan,
+	}
+	capturedStore := r.getStore(ctx)
+	err = r.enqueueKnowledgeJob(ctx, artifact, "cliff_notes", len(enrichedCliffSnapJSON), func(runCtx context.Context, rt llm.Runtime) error {
+		return s.runGenerationPipeline(runCtx, rt, capturedStore, params)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("enqueue cliff notes job: %w", err)
 	}
 
 	return mapKnowledgeArtifact(artifact), nil
+}
+
+// runGenerationPipeline executes the cliff-notes LLM call and persistence
+// steps for the given artifact. It is called from the enqueueKnowledgeJob
+// closure in Generate and will be called from RefreshFromExisting once
+// Phase 1 Slice 5b lands.
+func (s cliffNotesGenerationService) runGenerationPipeline(
+	runCtx context.Context,
+	rt llm.Runtime,
+	store graphstore.GraphStore,
+	p cliffNotesRunParams,
+) (runErr error) {
+	r := s.resolver
+	artifact := p.artifact
+	repo := p.repo
+	snap := p.snap
+	scope := p.scope
+	generationMode := p.generationMode
+	audience := p.audience
+	depth := p.depth
+	clientType := p.clientType
+	snapshotSizeBytes := p.snapshotSizeBytes
+	enrichedCliffSnapJSON := p.enrichedCliffSnapJSON
+	renderPlan := p.renderPlan
+	reusedUnderstanding := p.reusedUnderstanding
+	understanding := p.understanding
+
+	defer func() {
+		if runErr != nil {
+			markRepositoryUnderstandingFailed(r.KnowledgeStore, artifact, scope, snap.SourceRevision, runErr)
+		}
+	}()
+	genStart := time.Now()
+	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
+	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
+	if reusedUnderstanding {
+		rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
+		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
+	}
+	appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "snapshot", "snapshot_assembled", "Snapshot assembled", map[string]any{
+		"snapshot_bytes": len(enrichedCliffSnapJSON),
+		"scope_type":     string(scope.ScopeType),
+		"scope_path":     scope.ScopePath,
+		"depth":          depth,
+		"audience":       audience,
+	})
+
+	// CA-122 Phase 6/7: replace the synthetic ticker with a
+	// stream-driven progress driver that consumes phase + progress
+	// events from the worker via JobMetadata.OnProgress.
+	bgCtx := runCtx
+	if renderPlan.RenderOnly {
+		bgCtx = withCliffNotesRenderMetadata(
+			bgCtx,
+			true,
+			renderPlan.SelectedSectionTitles,
+			renderPlan.UnderstandingDepth,
+			renderPlan.RelevanceProfile,
+		)
+	}
+	appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "llm", "worker_dispatch", "Dispatching cliff notes request to worker", map[string]any{
+		"repository_id":   repo.ID,
+		"repository_name": repo.Name,
+		"scope_type":      string(scope.ScopeType),
+		"scope_path":      scope.ScopePath,
+		"depth":           depth,
+		"generation_mode": string(generationMode),
+		"render_only":     renderPlan.RenderOnly,
+		"selected_titles": renderPlan.SelectedSectionTitles,
+	})
+	streamDriver := r.runStreamProgressDriver(bgCtx, rt, artifact.ID, rpcBucketForArtifact(artifact))
+	resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge,
+		llmJobMetadataWithProgress(rt, artifact.ID, "cliff_notes", streamDriver.OnProgress()),
+		&knowledgev1.GenerateCliffNotesRequest{
+			RepositoryId:   repo.ID,
+			RepositoryName: repo.Name,
+			Audience:       audience,
+			AudienceEnum:   protoAudience(knowledgepkg.Audience(audience)),
+			Depth:          depth,
+			DepthEnum:      protoDepth(knowledgepkg.Depth(depth)),
+			ScopeType:      string(scope.ScopeType),
+			ScopePath:      scope.ScopePath,
+			SnapshotJson:   string(enrichedCliffSnapJSON),
+		})
+	// MUST close BEFORE any terminal artifact-state writes
+	// (codex r1b M5 driver-drain rule). The persist* helpers
+	// below run only after Close returns.
+	streamDriver.Close()
+	if err != nil {
+		appendJobLog(r.Orchestrator, rt, llm.LogLevelError, "llm", "worker_failed", "Worker cliff notes request failed", map[string]any{
+			"duration_ms": time.Since(genStart).Milliseconds(),
+		})
+		slog.Error("cliff_notes_generation_failed",
+			"artifact_id", artifact.ID,
+			"scope_type", string(scope.ScopeType),
+			"scope_path", scope.ScopePath,
+			"client_type", clientType,
+			"duration_ms", time.Since(genStart).Milliseconds(),
+			"error", err,
+		)
+		return err
+	}
+	understanding, err = updateUnderstandingForCliffNotes(r.KnowledgeStore, artifact, scope, snap.SourceRevision, resp, knowledgepkg.UnderstandingReady)
+	if err != nil {
+		slog.Warn("failed to update repository understanding", "artifact_id", artifact.ID, "error", err)
+	}
+
+	reusedSummaries := 0
+	leafCacheHits := 0
+	fileCacheHits := 0
+	packageCacheHits := 0
+	rootCacheHits := 0
+	if resp.Diagnostics != nil {
+		leafCacheHits = int(resp.Diagnostics.LeafCacheHits)
+		fileCacheHits = int(resp.Diagnostics.FileCacheHits)
+		packageCacheHits = int(resp.Diagnostics.PackageCacheHits)
+		rootCacheHits = int(resp.Diagnostics.RootCacheHits)
+		reusedSummaries = leafCacheHits + fileCacheHits + packageCacheHits + rootCacheHits
+		if err := r.Orchestrator.SetReuseStats(rt.JobID(), reusedSummaries, leafCacheHits, fileCacheHits, packageCacheHits, rootCacheHits); err != nil {
+			slog.Warn("failed to persist cliff notes reuse stats",
+				"job_id", rt.JobID(),
+				"artifact_id", artifact.ID,
+				"error", err)
+		}
+	}
+	appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "llm", "worker_response_received", "Worker returned cliff notes response", map[string]any{
+		"duration_ms":        time.Since(genStart).Milliseconds(),
+		"section_count":      len(resp.Sections),
+		"reused_summaries":   reusedSummaries,
+		"leaf_cache_hits":    leafCacheHits,
+		"file_cache_hits":    fileCacheHits,
+		"package_cache_hits": packageCacheHits,
+		"root_cache_hits":    rootCacheHits,
+		"provider_compute_errors": func() int32 {
+			if resp.Diagnostics == nil {
+				return 0
+			}
+			return resp.Diagnostics.ProviderComputeErrors
+		}(),
+		"fallback_count": func() int32 {
+			if resp.Diagnostics == nil {
+				return 0
+			}
+			return resp.Diagnostics.FallbackCount
+		}(),
+	})
+	llmMessage := "LLM completed, persisting sections"
+	if reusedSummaries > 0 {
+		llmMessage = fmt.Sprintf("LLM completed, reused %d summaries, persisting sections", reusedSummaries)
+	}
+	rt.ReportProgress(0.96, "llm", llmMessage)
+	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", llmMessage)
+
+	if resp.Usage != nil {
+		storeLLMUsage(store, repo.ID, resp.Usage, "")
+		rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
+	}
+	appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "persist", "persist_sections_started", "Persisting generated cliff note sections", map[string]any{
+		"section_count": len(resp.Sections),
+	})
+
+	sections := make([]knowledgepkg.Section, len(resp.Sections))
+	for i, sec := range resp.Sections {
+		refinementStatus := strings.TrimSpace(sec.RefinementStatus)
+		if refinementStatus == "" {
+			refinementStatus = "light"
+		}
+		sections[i] = knowledgepkg.Section{
+			Title:            sec.Title,
+			Content:          sec.Content,
+			Summary:          sec.Summary,
+			Metadata:         cliffNotesSectionMetadataJSON(knowledgepkg.ArtifactCliffNotes, understanding, refinementStatus, sec.Title, len(sec.Evidence) > 0),
+			Confidence:       mapProtoConfidence(sec.Confidence),
+			Inferred:         sec.Inferred,
+			SectionKey:       knowledgepkg.SectionKeyForTitle(sec.Title),
+			RefinementStatus: refinementStatus,
+		}
+	}
+	if renderPlan.RenderOnly && len(renderPlan.SelectedSectionTitles) > 0 {
+		selected := make(map[string]struct{}, len(renderPlan.SelectedSectionTitles))
+		for _, title := range renderPlan.SelectedSectionTitles {
+			selected[title] = struct{}{}
+		}
+		sections = knowledgepkg.MergeSectionsByTitle(r.KnowledgeStore.GetKnowledgeSections(artifact.ID), sections, selected)
+	}
+	if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
+		slog.Error("failed to store cliff notes sections", "artifact_id", artifact.ID, "error", err)
+		return err
+	}
+	syncCliffNotesRefinementUnits(r.KnowledgeStore, artifact, sections, understanding)
+	appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "persist", "persist_sections_completed", "Stored cliff note sections", map[string]any{
+		"section_count": len(sections),
+	})
+
+	storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
+	for i, sec := range resp.Sections {
+		if i >= len(storedSections) {
+			break
+		}
+		if len(sec.Evidence) > 0 {
+			evidence := make([]knowledgepkg.Evidence, len(sec.Evidence))
+			for j, ev := range sec.Evidence {
+				evidence[j] = knowledgepkg.Evidence{
+					SourceType: knowledgepkg.EvidenceSourceType(ev.SourceType),
+					SourceID:   ev.SourceId,
+					FilePath:   ev.FilePath,
+					LineStart:  int(ev.LineStart),
+					LineEnd:    int(ev.LineEnd),
+					Rationale:  ev.Rationale,
+				}
+			}
+			_ = r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[i].ID, evidence)
+		}
+	}
+
+	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
+		slog.Error("failed to mark cliff notes ready", "artifact_id", artifact.ID, "error", err)
+	}
+	if artifactUsesUnderstanding(generationMode) && depth != string(knowledgepkg.DepthSummary) {
+		targets := cliffNotesDeepeningTargets(r.KnowledgeStore, artifact)
+		slog.Info("cliff_notes_deepening_targets_evaluated",
+			"artifact_id", artifact.ID,
+			"target_count", len(targets),
+			"targets", targets,
+		)
+		if len(targets) > 0 {
+			if err := r.enqueueCliffNotesDeepening(repo, artifact, scope, snap.SourceRevision, enrichedCliffSnapJSON, targets); err != nil {
+				slog.Warn("failed to enqueue cliff notes deepening", "artifact_id", artifact.ID, "error", err)
+			}
+		}
+	}
+	appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "ready", "artifact_ready", "Cliff notes artifact marked ready", map[string]any{
+		"section_count": len(sections),
+	})
+	readyMessage := "Cliff notes ready"
+	if reusedSummaries > 0 {
+		readyMessage = fmt.Sprintf("Cliff notes ready · reused %d summaries", reusedSummaries)
+	}
+	rt.ReportProgress(1.0, "ready", readyMessage)
+	slog.Info("cliff_notes_generation_completed",
+		"artifact_id", artifact.ID,
+		"scope_type", string(scope.ScopeType),
+		"scope_path", scope.ScopePath,
+		"client_type", clientType,
+		"duration_ms", time.Since(genStart).Milliseconds(),
+		"snapshot_size_bytes", snapshotSizeBytes,
+		"section_count", len(resp.Sections),
+		"reused_summaries", reusedSummaries,
+	)
+	return nil
+}
+
+// RefreshFromExisting re-runs the generation pipeline against an existing
+// artifact, replacing its sections in place. Implemented in Phase 1 Slice 5b.
+func (s cliffNotesGenerationService) RefreshFromExisting(ctx context.Context, existing *knowledgepkg.Artifact) (*KnowledgeArtifact, error) {
+	panic("TODO: implemented in Phase 1 Slice 5b")
 }

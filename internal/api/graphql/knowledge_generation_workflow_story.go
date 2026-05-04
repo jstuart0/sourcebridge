@@ -9,6 +9,7 @@ import (
 	"time"
 
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
+	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
@@ -17,6 +18,22 @@ import (
 type workflowStoryGenerationService struct {
 	resolver *Resolver
 	input    GenerateWorkflowStoryInput
+}
+
+// workflowStoryRunParams bundles all inputs that runGenerationPipeline needs
+// beyond the receiver. Defined here so both Generate and (eventually)
+// RefreshFromExisting can build it with appropriate values.
+type workflowStoryRunParams struct {
+	repo              *graphstore.Repository
+	artifact          *knowledgepkg.Artifact
+	snap              *knowledgepkg.KnowledgeSnapshot
+	snapJSON          []byte
+	scope             knowledgepkg.ArtifactScope
+	generationMode    knowledgepkg.GenerationMode
+	audience          string
+	depth             string
+	anchorLabel       string
+	executionPathJSON string
 }
 
 func (s workflowStoryGenerationService) Generate(ctx context.Context) (*KnowledgeArtifact, error) {
@@ -96,97 +113,140 @@ func (s workflowStoryGenerationService) Generate(ctx context.Context) (*Knowledg
 		executionPathJSON = strings.TrimSpace(*input.ExecutionPathJSON)
 	}
 
-	enrichedSnapJSON := snapJSON
-	store := r.getStore(ctx)
-	err = r.enqueueKnowledgeJob(ctx, artifact, "workflow_story", len(enrichedSnapJSON), func(runCtx context.Context, rt llm.Runtime) error {
-		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
-		if artifactUsesUnderstanding(generationMode) {
-			if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
-				return err
-			} else {
-				if reused {
-					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
-					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
-				}
-				if understanding != nil {
-					if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
-						enrichedSnapJSON = enriched
-					}
-				}
-			}
-		}
-		if knowledgepkg.Depth(depth) == knowledgepkg.DepthDeep {
-			if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), enrichedSnapJSON); ok {
-				enrichedSnapJSON = enriched
-			}
-		}
-
-		streamDriver := r.runStreamProgressDriver(runCtx, rt, artifact.ID, rpcBucketCollapsed)
-		resp, err := r.LLMCaller.GenerateWorkflowStoryWithJob(runCtx, repo.ID, resolution.OpKnowledge,
-			llmJobMetadataWithProgress(rt, artifact.ID, "workflow_story", streamDriver.OnProgress()),
-			&knowledgev1.GenerateWorkflowStoryRequest{
-				RepositoryId:      repo.ID,
-				RepositoryName:    repo.Name,
-				Audience:          audience,
-				AudienceEnum:      protoAudience(knowledgepkg.Audience(audience)),
-				Depth:             depth,
-				DepthEnum:         protoDepth(knowledgepkg.Depth(depth)),
-				ScopeType:         string(scope.ScopeType),
-				ScopePath:         scope.ScopePath,
-				AnchorLabel:       anchorLabel,
-				ExecutionPathJson: executionPathJSON,
-				SnapshotJson:      string(enrichedSnapJSON),
-			})
-		streamDriver.Close()
-		if err != nil {
-			slog.Error("workflow story generation failed", "artifact_id", artifact.ID, "error", err)
-			return err
-		}
-
-		rt.ReportProgress(0.96, "llm", "LLM completed, persisting sections")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
-
-		if resp.Usage != nil {
-			storeLLMUsage(store, repo.ID, resp.Usage, "")
-			rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
-		}
-
-		sections := make([]knowledgepkg.Section, len(resp.Sections))
-		for i, sec := range resp.Sections {
-			sections[i] = knowledgepkg.Section{
-				Title:      sec.Title,
-				Content:    sec.Content,
-				Summary:    sec.Summary,
-				Confidence: mapProtoConfidence(sec.Confidence),
-				Inferred:   sec.Inferred,
-			}
-		}
-		if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
-			slog.Error("failed to store workflow story sections", "artifact_id", artifact.ID, "error", err)
-			return err
-		}
-
-		storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
-		for i, sec := range resp.Sections {
-			if i >= len(storedSections) {
-				break
-			}
-			if len(sec.Evidence) > 0 {
-				_ = r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[i].ID, mapProtoEvidence(sec.Evidence))
-			}
-		}
-
-		if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
-			slog.Error("failed to mark workflow story ready", "artifact_id", artifact.ID, "error", err)
-		}
-		rt.ReportProgress(1.0, "ready", "Workflow story ready")
-		slog.Info("workflow story generation complete", "artifact_id", artifact.ID)
-		return nil
+	params := workflowStoryRunParams{
+		repo:              repo,
+		artifact:          artifact,
+		snap:              snap,
+		snapJSON:          snapJSON,
+		scope:             scope,
+		generationMode:    generationMode,
+		audience:          audience,
+		depth:             depth,
+		anchorLabel:       anchorLabel,
+		executionPathJSON: executionPathJSON,
+	}
+	capturedStore := r.getStore(ctx)
+	err = r.enqueueKnowledgeJob(ctx, artifact, "workflow_story", len(snapJSON), func(runCtx context.Context, rt llm.Runtime) error {
+		return s.runGenerationPipeline(runCtx, rt, capturedStore, params)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("enqueue workflow story job: %w", err)
 	}
 
 	return mapKnowledgeArtifact(artifact), nil
+}
+
+// runGenerationPipeline executes the workflow-story LLM call and persistence
+// steps for the given artifact. It is called from the enqueueKnowledgeJob
+// closure in Generate and will be called from RefreshFromExisting once
+// Phase 1 Slice 5f lands.
+func (s workflowStoryGenerationService) runGenerationPipeline(
+	runCtx context.Context,
+	rt llm.Runtime,
+	store graphstore.GraphStore,
+	p workflowStoryRunParams,
+) error {
+	r := s.resolver
+	artifact := p.artifact
+	repo := p.repo
+	snap := p.snap
+	snapJSON := p.snapJSON
+	scope := p.scope
+	generationMode := p.generationMode
+	audience := p.audience
+	depth := p.depth
+	anchorLabel := p.anchorLabel
+	executionPathJSON := p.executionPathJSON
+
+	enrichedSnapJSON := snapJSON
+	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
+	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
+	if artifactUsesUnderstanding(generationMode) {
+		if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
+			return err
+		} else {
+			if reused {
+				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
+				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
+			}
+			if understanding != nil {
+				if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
+					enrichedSnapJSON = enriched
+				}
+			}
+		}
+	}
+	if knowledgepkg.Depth(depth) == knowledgepkg.DepthDeep {
+		if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), enrichedSnapJSON); ok {
+			enrichedSnapJSON = enriched
+		}
+	}
+
+	streamDriver := r.runStreamProgressDriver(runCtx, rt, artifact.ID, rpcBucketCollapsed)
+	resp, err := r.LLMCaller.GenerateWorkflowStoryWithJob(runCtx, repo.ID, resolution.OpKnowledge,
+		llmJobMetadataWithProgress(rt, artifact.ID, "workflow_story", streamDriver.OnProgress()),
+		&knowledgev1.GenerateWorkflowStoryRequest{
+			RepositoryId:      repo.ID,
+			RepositoryName:    repo.Name,
+			Audience:          audience,
+			AudienceEnum:      protoAudience(knowledgepkg.Audience(audience)),
+			Depth:             depth,
+			DepthEnum:         protoDepth(knowledgepkg.Depth(depth)),
+			ScopeType:         string(scope.ScopeType),
+			ScopePath:         scope.ScopePath,
+			AnchorLabel:       anchorLabel,
+			ExecutionPathJson: executionPathJSON,
+			SnapshotJson:      string(enrichedSnapJSON),
+		})
+	streamDriver.Close()
+	if err != nil {
+		slog.Error("workflow story generation failed", "artifact_id", artifact.ID, "error", err)
+		return err
+	}
+
+	rt.ReportProgress(0.96, "llm", "LLM completed, persisting sections")
+	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
+
+	if resp.Usage != nil {
+		storeLLMUsage(store, repo.ID, resp.Usage, "")
+		rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
+	}
+
+	sections := make([]knowledgepkg.Section, len(resp.Sections))
+	for i, sec := range resp.Sections {
+		sections[i] = knowledgepkg.Section{
+			Title:      sec.Title,
+			Content:    sec.Content,
+			Summary:    sec.Summary,
+			Confidence: mapProtoConfidence(sec.Confidence),
+			Inferred:   sec.Inferred,
+		}
+	}
+	if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
+		slog.Error("failed to store workflow story sections", "artifact_id", artifact.ID, "error", err)
+		return err
+	}
+
+	storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
+	for i, sec := range resp.Sections {
+		if i >= len(storedSections) {
+			break
+		}
+		if len(sec.Evidence) > 0 {
+			_ = r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[i].ID, mapProtoEvidence(sec.Evidence))
+		}
+	}
+
+	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
+		slog.Error("failed to mark workflow story ready", "artifact_id", artifact.ID, "error", err)
+	}
+	rt.ReportProgress(1.0, "ready", "Workflow story ready")
+	slog.Info("workflow story generation complete", "artifact_id", artifact.ID)
+	return nil
+}
+
+// RefreshFromExisting re-runs the generation pipeline against an existing
+// artifact, replacing its sections in place. Implemented in Phase 1 Slice 5f.
+func (s workflowStoryGenerationService) RefreshFromExisting(ctx context.Context, existing *knowledgepkg.Artifact) (*KnowledgeArtifact, error) {
+	panic("TODO: implemented in Phase 1 Slice 5f")
 }
