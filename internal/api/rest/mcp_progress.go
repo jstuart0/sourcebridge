@@ -124,7 +124,7 @@ func (h *mcpHandler) handleStreamingToolCall(
 	if !ok {
 		// No flusher means we can't really stream — fall back to synchronous.
 		// This is exceedingly rare in production (chi + net/http both flush).
-		resp := h.safeDispatch(sess, msg)
+		resp := h.safeDispatchCtx(r.Context(), sess, msg)
 		w.Header().Set("Content-Type", "application/json")
 		if sessionID != "" {
 			w.Header().Set("Mcp-Session-Id", sessionID)

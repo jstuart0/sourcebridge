@@ -871,7 +871,7 @@ func (h *mcpHandler) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := h.safeDispatch(sess, msg)
+	resp := h.safeDispatchCtx(r.Context(), sess, msg)
 	// Persist any state changes (initialized flag, lastUsed) back to the store.
 	if err := h.sessionStore.Save(r.Context(), sess.toState(), h.sessionTTL); err != nil {
 		slog.Warn("mcp session save failed", "session_id", sess.id, "error", err)
@@ -2186,7 +2186,7 @@ func (h *mcpHandler) handleStreamableHTTP(w http.ResponseWriter, r *http.Request
 			// chans intentionally nil — streamable HTTP is synchronous
 			// request/response with no pod-local delivery channel.
 		}
-		resp := h.safeDispatch(sess, msg)
+		resp := h.safeDispatchCtx(r.Context(), sess, msg)
 		// Persist initialized state + client info that dispatch just set.
 		if err := h.sessionStore.Save(r.Context(), sess.toState(), h.sessionTTL); err != nil {
 			slog.Error("mcp streamable session save failed", "error", err)
@@ -2262,7 +2262,7 @@ func (h *mcpHandler) handleStreamableHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	resp := h.safeDispatch(sess, msg)
+	resp := h.safeDispatchCtx(r.Context(), sess, msg)
 	if err := h.sessionStore.Save(r.Context(), sess.toState(), h.sessionTTL); err != nil {
 		slog.Warn("mcp session save failed", "session_id", sess.id, "error", err)
 	}
