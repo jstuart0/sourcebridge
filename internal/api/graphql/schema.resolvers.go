@@ -1703,6 +1703,9 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 	if existing.Type == knowledgepkg.ArtifactArchitectureDiagram {
 		return architectureDiagramGenerationService{resolver: r.Resolver}.RefreshFromExisting(ctx, existing)
 	}
+	if existing.Type == knowledgepkg.ArtifactLearningPath {
+		return learningPathGenerationService{resolver: r.Resolver}.RefreshFromExisting(ctx, existing)
+	}
 
 	// The refresh runs through the orchestrator like the dedicated
 	// Generate* mutations. We don't know the snapshot size until we
@@ -1745,54 +1748,6 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 		}
 
 		switch existing.Type {
-		case knowledgepkg.ArtifactLearningPath:
-			enrichedSnapJSON := snapJSON
-			if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, existing, snap.SourceRevision, snapJSON); err != nil {
-				return err
-			} else {
-				if reused {
-					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
-					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(existing.ID, 0.12, "understanding", "Using cached repository understanding")
-				}
-				if understanding != nil {
-					if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
-						enrichedSnapJSON = enriched
-					}
-				}
-			}
-			if existing.Depth == knowledgepkg.DepthDeep {
-				if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, existing.Audience, enrichedSnapJSON); ok {
-					enrichedSnapJSON = enriched
-				}
-			}
-			streamDriver := r.runStreamProgressDriver(runCtx, rt, existing.ID, rpcBucketCollapsed)
-			resp, err := r.LLMCaller.GenerateLearningPathWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, existing.ID, "learning_path", streamDriver.OnProgress()), &knowledgev1.GenerateLearningPathRequest{
-				RepositoryId:   repo.ID,
-				RepositoryName: repo.Name,
-				Audience:       string(existing.Audience),
-				AudienceEnum:   protoAudience(existing.Audience),
-				Depth:          string(existing.Depth),
-				DepthEnum:      protoDepth(existing.Depth),
-				SnapshotJson:   string(enrichedSnapJSON),
-			})
-			streamDriver.Close()
-			if err != nil {
-				slog.Error("refresh learning path failed", "artifact_id", existing.ID, "error", err)
-				return err
-			}
-			persistUsage(resp.Usage)
-			sections := make([]knowledgepkg.Section, len(resp.Steps))
-			for i, step := range resp.Steps {
-				sections[i] = knowledgepkg.Section{
-					Title:      step.Title,
-					Content:    step.Content,
-					Summary:    step.Objective,
-					Confidence: knowledgepkg.ConfidenceMedium,
-				}
-			}
-			if err := r.KnowledgeStore.SupersedeArtifact(existing.ID, sections); err != nil {
-				return err
-			}
 		case knowledgepkg.ArtifactCodeTour:
 			enrichedSnapJSON := snapJSON
 			if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, existing, snap.SourceRevision, snapJSON); err != nil {

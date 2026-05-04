@@ -254,7 +254,63 @@ func (s learningPathGenerationService) runGenerationPipeline(
 }
 
 // RefreshFromExisting re-runs the generation pipeline against an existing
-// artifact, replacing its sections in place. Implemented in Phase 1 Slice 5d.
+// artifact, replacing its sections in place (Phase 1 Slice 5d).
+//
+// audience and depth are read from the existing artifact's persisted fields.
+// focusArea is not persisted on the artifact, so it is omitted on refresh
+// (equivalent to the original generation default of no focus area).
 func (s learningPathGenerationService) RefreshFromExisting(ctx context.Context, existing *knowledgepkg.Artifact) (*KnowledgeArtifact, error) {
-	panic("TODO: implemented in Phase 1 Slice 5d")
+	r := s.resolver
+
+	repo := r.getStore(ctx).GetRepository(existing.RepositoryID)
+	if repo == nil {
+		return nil, fmt.Errorf("repository %s not found", existing.RepositoryID)
+	}
+
+	audience := string(existing.Audience)
+	depth := string(existing.Depth)
+	generationMode := existing.GenerationMode
+
+	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
+	repoRoot, repoRootErr := resolveRepoSourcePath(repo)
+	if repoRootErr != nil {
+		slog.Warn("learning path refresh: repo source unavailable, docs will be omitted",
+			"repo_id", repo.ID, "error", repoRootErr)
+	}
+
+	capturedStore := r.getStore(ctx)
+	err := r.enqueueKnowledgeJob(ctx, existing, "refresh:learning_path", 0, func(runCtx context.Context, rt llm.Runtime) error {
+		snap, err := assembler.Assemble(repo.ID, repoRoot)
+		if err != nil {
+			slog.Error("learning path refresh assemble failed", "artifact_id", existing.ID, "error", err)
+			return err
+		}
+		snapJSON, err := json.Marshal(snap)
+		if err != nil {
+			slog.Error("learning path refresh serialize failed", "artifact_id", existing.ID, "error", err)
+			return err
+		}
+		rt.ReportSnapshotBytes(len(snapJSON))
+
+		params := learningPathRunParams{
+			repo:           repo,
+			artifact:       existing,
+			snap:           snap,
+			snapJSON:       snapJSON,
+			generationMode: generationMode,
+			audience:       audience,
+			depth:          depth,
+			focusArea:      "",
+		}
+		return s.runGenerationPipeline(runCtx, rt, capturedStore, params)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("enqueue learning path refresh job: %w", err)
+	}
+
+	updated := r.KnowledgeStore.GetKnowledgeArtifact(existing.ID)
+	if updated == nil {
+		return nil, fmt.Errorf("artifact %s not found after refresh", existing.ID)
+	}
+	return mapKnowledgeArtifact(updated), nil
 }
