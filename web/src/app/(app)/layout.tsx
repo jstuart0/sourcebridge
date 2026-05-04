@@ -40,9 +40,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (!authed) {
     return (
-      <div className="ca-shell flex min-h-screen items-center justify-center px-6">
+      <div className="sb-shell flex min-h-screen items-center justify-center px-6">
         <div className="text-center">
-          <div className="ca-loading-spinner mx-auto mb-3 h-8 w-8 rounded-full border-2 border-[var(--border-default)] border-t-[var(--accent-primary)]" />
+          <div className="sb-loading-spinner mx-auto mb-3 h-8 w-8 rounded-full border-2 border-[var(--border-default)] border-t-[var(--accent-primary)]" />
           <p className="text-sm text-[var(--text-secondary)]">Loading workspace…</p>
         </div>
       </div>
@@ -51,7 +51,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
 
   return (
-    <div className="ca-shell ca-shell-grid" data-collapsed={sidebarCollapsed}>
+    <div className="sb-shell sb-shell-grid" data-collapsed={sidebarCollapsed}>
       <Sidebar
         onCollapseChange={setSidebarCollapsed}
         mobileOpen={mobileNavOpen}

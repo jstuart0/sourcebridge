@@ -27,48 +27,48 @@ body {
   outline-offset: 2px;
 }
 
-@keyframes ca-spin {
+@keyframes sb-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
-.ca-shell {
+.sb-shell {
   min-height: 100vh;
   background: transparent;
 }
 
-.ca-shell-grid {
+.sb-shell-grid {
   display: grid;
   min-height: 100vh;
   grid-template-columns: minmax(0, 1fr);
 }
 
 @media (min-width: 768px) {
-  html:has(.ca-shell-grid),
-  html:has(.ca-shell-grid) body {
+  html:has(.sb-shell-grid),
+  html:has(.sb-shell-grid) body {
     height: 100vh;
     overflow: hidden;
   }
 
-  .ca-shell-grid {
+  .sb-shell-grid {
     height: 100vh;
     overflow: hidden;
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   }
 
-  .ca-shell-grid[data-collapsed="true"] {
+  .sb-shell-grid[data-collapsed="true"] {
     grid-template-columns: var(--sidebar-collapsed-width) minmax(0, 1fr);
   }
 
-  .ca-shell-grid > main {
+  .sb-shell-grid > main {
     overflow-y: auto;
     height: 100vh;
   }
 }
 
-.ca-loading-spinner {
-  animation: ca-spin 0.85s linear infinite;
+.sb-loading-spinner {
+  animation: sb-spin 0.85s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
