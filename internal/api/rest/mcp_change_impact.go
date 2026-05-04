@@ -518,9 +518,24 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 // Registration
 // ---------------------------------------------------------------------------
 
+// changeImpactToolsList returns []mcpTool pairing the Phase 2c
+// predict_change_impact definition with its handler. Used by registerChangeImpactTools.
+func (h *mcpHandler) changeImpactToolsList() []mcpTool {
+	defs := h.changeImpactToolDefs()
+	defByName := make(map[string]mcpToolDefinition, len(defs))
+	for _, d := range defs {
+		defByName[d.Name] = d
+	}
+	return []mcpTool{
+		{Definition: defByName["predict_change_impact"], Handler: noCtxHandler((*mcpHandler).callPredictChangeImpact)},
+	}
+}
+
 // registerChangeImpactTools registers the Phase 2c predict_change_impact tool
 // into the handler's dispatch map. Called from newMCPHandlerWithEdition after
 // registerFieldGuideTools.
 func registerChangeImpactTools(h *mcpHandler) {
-	h.registerTool("predict_change_impact", noCtxHandler((*mcpHandler).callPredictChangeImpact))
+	for _, t := range h.changeImpactToolsList() {
+		h.registerTool(t)
+	}
 }

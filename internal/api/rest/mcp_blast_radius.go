@@ -596,9 +596,24 @@ func (h *mcpHandler) aggregateRequirementsForLayer(callers []callGraphSymbolBR, 
 // Registration
 // ---------------------------------------------------------------------------
 
+// blastRadiusToolsList returns []mcpTool pairing the Phase 3 get_blast_radius
+// definition with its handler. Used by registerBlastRadiusTools.
+func (h *mcpHandler) blastRadiusToolsList() []mcpTool {
+	defs := h.blastRadiusToolDefs()
+	defByName := make(map[string]mcpToolDefinition, len(defs))
+	for _, d := range defs {
+		defByName[d.Name] = d
+	}
+	return []mcpTool{
+		{Definition: defByName["get_blast_radius"], Handler: noCtxHandler((*mcpHandler).callGetBlastRadius)},
+	}
+}
+
 // registerBlastRadiusTools registers the Phase 3 get_blast_radius tool into
 // the handler's dispatch map. Called from newMCPHandlerWithEdition after
 // registerDependenciesTools.
 func registerBlastRadiusTools(h *mcpHandler) {
-	h.registerTool("get_blast_radius", noCtxHandler((*mcpHandler).callGetBlastRadius))
+	for _, t := range h.blastRadiusToolsList() {
+		h.registerTool(t)
+	}
 }

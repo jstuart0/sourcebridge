@@ -451,16 +451,27 @@ func noCtxHandler(fn func(*mcpHandler, *mcpSession, json.RawMessage) (interface{
 	}
 }
 
-// registerTool installs a handler in the dispatch map. Panics on duplicate
-// registration so collisions surface at construction (which always runs in
-// tests) rather than as silent overwrites where the second registration
-// wins. All register*Tools functions MUST use this helper rather than direct
-// map assignment.
-func (h *mcpHandler) registerTool(name string, fn mcpToolHandlerFunc) {
-	if _, exists := h.toolDispatch[name]; exists {
-		panic(fmt.Sprintf("duplicate tool registration: %s", name))
+// mcpTool bundles a tool's MCP definition and its dispatch handler so they
+// must be supplied together at registration time. Replaces the previous
+// pattern where the baseTools() list and the dispatch map were maintained
+// independently and could drift. Drift is still caught at test time by
+// TestDispatchMapCoversBaseTools (belt-and-suspenders).
+type mcpTool struct {
+	Definition mcpToolDefinition
+	Handler    mcpToolHandlerFunc
+}
+
+// registerTool atomically populates both the toolDispatch map and (via
+// the caller iterating the *Tools() slice) the baseTools listing for a
+// single tool. Panics on duplicate name — collisions surface at construction
+// (which always runs in tests) rather than as silent overwrites where the
+// second registration wins. All register*Tools functions MUST use this
+// helper rather than direct map assignment.
+func (h *mcpHandler) registerTool(t mcpTool) {
+	if _, exists := h.toolDispatch[t.Definition.Name]; exists {
+		panic(fmt.Sprintf("duplicate tool registration: %s", t.Definition.Name))
 	}
-	h.toolDispatch[name] = fn
+	h.toolDispatch[t.Definition.Name] = t.Handler
 }
 
 // Compile-time guard: ensures *qaFileReader satisfies the fileReader interface.
@@ -552,57 +563,80 @@ func newMCPHandlerWithEdition(store graphstore.GraphStore, ks knowledge.Knowledg
 	return h
 }
 
-// registerCoreTools populates h.toolDispatch with all 26 existing MCP
-// tools. It is called once, at the end of newMCPHandlerWithEdition, after
-// every handler field is set.
-//
-// Convention:
-//   - Tools whose handler does NOT need the live request context (24/26)
-//     are wrapped via noCtxHandler, which discards the context parameter.
-//   - Tools that need context for timeout/cancellation propagation
-//     (explain_code, ask_question) register their handlers directly using
-//     the full mcpToolHandlerFunc signature.
-func registerCoreTools(h *mcpHandler) {
-	// Non-ctx tools (24).
-	h.registerTool("search_symbols", noCtxHandler((*mcpHandler).callSearchSymbols))
-	h.registerTool("get_requirements", noCtxHandler((*mcpHandler).callGetRequirements))
-	h.registerTool("get_impact_report", noCtxHandler((*mcpHandler).callGetImpactReport))
-	h.registerTool("get_cliff_notes", noCtxHandler((*mcpHandler).callGetCliffNotes))
-	h.registerTool("get_callers", noCtxHandler((*mcpHandler).callGetCallers))
-	h.registerTool("get_callees", noCtxHandler((*mcpHandler).callGetCallees))
-	h.registerTool("get_file_imports", noCtxHandler((*mcpHandler).callGetFileImports))
-	h.registerTool("get_architecture_diagram", noCtxHandler((*mcpHandler).callGetArchitectureDiagram))
-	h.registerTool("get_recent_changes", noCtxHandler((*mcpHandler).callGetRecentChanges))
-	h.registerTool("get_tests_for_symbol", noCtxHandler((*mcpHandler).callGetTestsForSymbol))
-	h.registerTool("get_entry_points", noCtxHandler((*mcpHandler).callGetEntryPoints))
-	h.registerTool("get_symbol_source", noCtxHandler((*mcpHandler).callGetSymbolSource))
-	h.registerTool("get_symbol_context", noCtxHandler((*mcpHandler).callGetSymbolContext))
-	h.registerTool("index_repository", noCtxHandler((*mcpHandler).callIndexRepository))
-	h.registerTool("get_index_status", noCtxHandler((*mcpHandler).callGetIndexStatus))
-	h.registerTool("refresh_repository", noCtxHandler((*mcpHandler).callRefreshRepository))
-	h.registerTool("review_diff_against_requirements", noCtxHandler((*mcpHandler).callReviewDiffAgainstRequirements))
-	h.registerTool("impact_summary", noCtxHandler((*mcpHandler).callImpactSummary))
-	h.registerTool("onboard_new_contributor", noCtxHandler((*mcpHandler).callOnboardNewContributor))
-	h.registerTool("get_cross_repo_impact", noCtxHandler((*mcpHandler).callGetCrossRepoImpact))
-	h.registerTool("get_subsystems", noCtxHandler((*mcpHandler).callGetSubsystems))
-	h.registerTool("get_subsystem_by_id", noCtxHandler((*mcpHandler).callGetSubsystemByID))
-	h.registerTool("get_subsystem", noCtxHandler((*mcpHandler).callGetSubsystem))
-	// record_change is always registered in the dispatch map for defense-in-depth.
-	// The handler itself checks h.changeDispatcher and returns MCPErrCapabilityDisabled
-	// when nil. The tool is hidden from tools/list (baseTools) via
-	// recordChangeToolDefIfAvailable returning nil, so agents don't discover it
-	// when the dispatcher is unwired — but a hand-crafted tools/call is handled
-	// gracefully rather than returning "Unknown tool".
-	h.registerTool("record_change", noCtxHandler((*mcpHandler).callRecordChange))
+// coreTools returns the []mcpTool for every tool registered by registerCoreTools.
+// Each entry pairs the mcpToolDefinition (drawn from the same *ToolDefs helpers
+// that baseTools() uses) with its dispatch handler, so definition and handler
+// are always supplied together. registerCoreTools iterates this slice and calls
+// h.registerTool for each entry.
+func (h *mcpHandler) coreTools() []mcpTool {
+	// Pull all definitions from baseTools() (which includes the inline ones and
+	// those from every *ToolDefs() helper) so definitions and handlers reference
+	// the same source of truth and can't drift independently.
+	baseDefs := h.baseTools()
+	defByName := make(map[string]mcpToolDefinition, len(baseDefs))
+	for _, d := range baseDefs {
+		defByName[d.Name] = d
+	}
 
-	// Ctx-bearing tools (2): registered directly without noCtxHandler because
-	// their handlers need the live request context for timeout/cancellation.
-	h.registerTool("explain_code", func(h *mcpHandler, ctx context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
-		return h.callExplainCodeCtx(ctx, s, a)
-	})
-	h.registerTool("ask_question", func(h *mcpHandler, ctx context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
-		return h.callAskQuestion(ctx, s, a)
-	})
+	tools := []mcpTool{
+		// Non-ctx tools.
+		{Definition: defByName["search_symbols"], Handler: noCtxHandler((*mcpHandler).callSearchSymbols)},
+		{Definition: defByName["get_requirements"], Handler: noCtxHandler((*mcpHandler).callGetRequirements)},
+		{Definition: defByName["get_impact_report"], Handler: noCtxHandler((*mcpHandler).callGetImpactReport)},
+		{Definition: defByName["get_cliff_notes"], Handler: noCtxHandler((*mcpHandler).callGetCliffNotes)},
+		{Definition: defByName["get_callers"], Handler: noCtxHandler((*mcpHandler).callGetCallers)},
+		{Definition: defByName["get_callees"], Handler: noCtxHandler((*mcpHandler).callGetCallees)},
+		{Definition: defByName["get_file_imports"], Handler: noCtxHandler((*mcpHandler).callGetFileImports)},
+		{Definition: defByName["get_architecture_diagram"], Handler: noCtxHandler((*mcpHandler).callGetArchitectureDiagram)},
+		{Definition: defByName["get_recent_changes"], Handler: noCtxHandler((*mcpHandler).callGetRecentChanges)},
+		{Definition: defByName["get_tests_for_symbol"], Handler: noCtxHandler((*mcpHandler).callGetTestsForSymbol)},
+		{Definition: defByName["get_entry_points"], Handler: noCtxHandler((*mcpHandler).callGetEntryPoints)},
+		{Definition: defByName["get_symbol_source"], Handler: noCtxHandler((*mcpHandler).callGetSymbolSource)},
+		{Definition: defByName["get_symbol_context"], Handler: noCtxHandler((*mcpHandler).callGetSymbolContext)},
+		{Definition: defByName["index_repository"], Handler: noCtxHandler((*mcpHandler).callIndexRepository)},
+		{Definition: defByName["get_index_status"], Handler: noCtxHandler((*mcpHandler).callGetIndexStatus)},
+		{Definition: defByName["refresh_repository"], Handler: noCtxHandler((*mcpHandler).callRefreshRepository)},
+		{Definition: defByName["review_diff_against_requirements"], Handler: noCtxHandler((*mcpHandler).callReviewDiffAgainstRequirements)},
+		{Definition: defByName["impact_summary"], Handler: noCtxHandler((*mcpHandler).callImpactSummary)},
+		{Definition: defByName["onboard_new_contributor"], Handler: noCtxHandler((*mcpHandler).callOnboardNewContributor)},
+		{Definition: defByName["get_cross_repo_impact"], Handler: noCtxHandler((*mcpHandler).callGetCrossRepoImpact)},
+		{Definition: defByName["get_subsystems"], Handler: noCtxHandler((*mcpHandler).callGetSubsystems)},
+		{Definition: defByName["get_subsystem_by_id"], Handler: noCtxHandler((*mcpHandler).callGetSubsystemByID)},
+		{Definition: defByName["get_subsystem"], Handler: noCtxHandler((*mcpHandler).callGetSubsystem)},
+		// record_change is always registered in the dispatch map for defense-in-depth.
+		// The handler itself checks h.changeDispatcher and returns MCPErrCapabilityDisabled
+		// when nil. The tool is hidden from tools/list (baseTools) via
+		// recordChangeToolDefIfAvailable returning nil, so agents don't discover it
+		// when the dispatcher is unwired — but a hand-crafted tools/call is handled
+		// gracefully rather than returning "Unknown tool".
+		{Definition: recordChangeToolDef(), Handler: noCtxHandler((*mcpHandler).callRecordChange)},
+		// Ctx-bearing tools (2): registered via anonymous closures because
+		// their handlers need the live request context for timeout/cancellation.
+		// Slice 2 will replace these closures with withCtxHandler (MCP-2).
+		{
+			Definition: defByName["explain_code"],
+			Handler: func(h *mcpHandler, ctx context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
+				return h.callExplainCodeCtx(ctx, s, a)
+			},
+		},
+		{
+			Definition: defByName["ask_question"],
+			Handler: func(h *mcpHandler, ctx context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
+				return h.callAskQuestion(ctx, s, a)
+			},
+		},
+	}
+	return tools
+}
+
+// registerCoreTools populates h.toolDispatch with all core MCP tools by
+// iterating h.coreTools() and calling h.registerTool for each. Called once,
+// at the end of newMCPHandlerWithEdition, after every handler field is set.
+// Per-phase tools are registered by their own register*Tools helpers below.
+func registerCoreTools(h *mcpHandler) {
+	for _, t := range h.coreTools() {
+		h.registerTool(t)
+	}
 }
 
 // WithFileReader sets the file reader for get_symbol_source and

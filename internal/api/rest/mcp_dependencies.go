@@ -227,9 +227,24 @@ func packageDirMatch(pkgKey, dir string) bool {
 // Registration
 // ---------------------------------------------------------------------------
 
+// dependenciesToolsList returns []mcpTool pairing the Phase 2b find_importers
+// definition with its handler. Used by registerDependenciesTools.
+func (h *mcpHandler) dependenciesToolsList() []mcpTool {
+	defs := h.dependenciesToolDefs()
+	defByName := make(map[string]mcpToolDefinition, len(defs))
+	for _, d := range defs {
+		defByName[d.Name] = d
+	}
+	return []mcpTool{
+		{Definition: defByName["find_importers"], Handler: noCtxHandler((*mcpHandler).callFindImporters)},
+	}
+}
+
 // registerDependenciesTools registers the Phase 2b find_importers tool into
 // the handler's dispatch map. Called from newMCPHandlerWithEdition after
 // registerChangedSymbolsTools.
 func registerDependenciesTools(h *mcpHandler) {
-	h.registerTool("find_importers", noCtxHandler((*mcpHandler).callFindImporters))
+	for _, t := range h.dependenciesToolsList() {
+		h.registerTool(t)
+	}
 }

@@ -427,10 +427,25 @@ func (h *mcpHandler) callGetUntestedSymbols(session *mcpSession, args json.RawMe
 // registerGapAuditExtraTools
 // ---------------------------------------------------------------------------
 
+// gapAuditExtraTools returns []mcpTool pairing the CA-154 Phase 1 gap-audit
+// extra tool definitions with their handlers. Used by registerGapAuditExtraTools.
+func (h *mcpHandler) gapAuditExtraTools() []mcpTool {
+	defs := h.gapAuditExtraToolDefs()
+	defByName := make(map[string]mcpToolDefinition, len(defs))
+	for _, d := range defs {
+		defByName[d.Name] = d
+	}
+	return []mcpTool{
+		{Definition: defByName["find_dead_code"], Handler: noCtxHandler((*mcpHandler).callFindDeadCode)},
+		{Definition: defByName["get_untested_symbols"], Handler: noCtxHandler((*mcpHandler).callGetUntestedSymbols)},
+	}
+}
+
 // registerGapAuditExtraTools registers the CA-154 Phase 1 gap-audit tools
 // into the handler's dispatch map. Called from newMCPHandlerWithEdition after
 // registerGapAuditTools.
 func registerGapAuditExtraTools(h *mcpHandler) {
-	h.registerTool("find_dead_code", noCtxHandler((*mcpHandler).callFindDeadCode))
-	h.registerTool("get_untested_symbols", noCtxHandler((*mcpHandler).callGetUntestedSymbols))
+	for _, t := range h.gapAuditExtraTools() {
+		h.registerTool(t)
+	}
 }

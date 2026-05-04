@@ -235,9 +235,24 @@ func (h *mcpHandler) callGetChangedSymbols(session *mcpSession, args json.RawMes
 // Registration
 // ---------------------------------------------------------------------------
 
+// changedSymbolsToolsList returns []mcpTool pairing the Phase 2a
+// get_changed_symbols definition with its handler. Used by registerChangedSymbolsTools.
+func (h *mcpHandler) changedSymbolsToolsList() []mcpTool {
+	defs := h.changedSymbolsToolDefs()
+	defByName := make(map[string]mcpToolDefinition, len(defs))
+	for _, d := range defs {
+		defByName[d.Name] = d
+	}
+	return []mcpTool{
+		{Definition: defByName["get_changed_symbols"], Handler: noCtxHandler((*mcpHandler).callGetChangedSymbols)},
+	}
+}
+
 // registerChangedSymbolsTools registers the Phase 2a get_changed_symbols tool
 // into the handler's dispatch map. Called from newMCPHandlerWithEdition after
 // registerGapAuditExtraTools.
 func registerChangedSymbolsTools(h *mcpHandler) {
-	h.registerTool("get_changed_symbols", noCtxHandler((*mcpHandler).callGetChangedSymbols))
+	for _, t := range h.changedSymbolsToolsList() {
+		h.registerTool(t)
+	}
 }

@@ -426,13 +426,34 @@ func structuralRiskScore(r *diffReviewResult) float64 {
 // Registration
 // ---------------------------------------------------------------------------
 
+// reviewToolsList returns []mcpTool pairing the Phase 3 get_review_for_diff
+// definition with its ctx-bearing handler. Used by registerReviewTools.
+func (h *mcpHandler) reviewToolsList() []mcpTool {
+	defs := h.reviewToolDefs()
+	defByName := make(map[string]mcpToolDefinition, len(defs))
+	for _, d := range defs {
+		defByName[d.Name] = d
+	}
+	return []mcpTool{
+		// get_review_for_diff uses an anonymous closure (not noCtxHandler) because
+		// its handler needs the live request context for the 90-second AI-pass
+		// deadline. Slice 2 will replace this closure with withCtxHandler (MCP-2).
+		{
+			Definition: defByName["get_review_for_diff"],
+			Handler: func(hh *mcpHandler, ctx context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
+				return hh.callGetReviewForDiff(ctx, s, a)
+			},
+		},
+	}
+}
+
 // registerReviewTools registers the Phase 3 get_review_for_diff tool into
 // the handler's dispatch map. Called from newMCPHandlerWithEdition after
 // registerChangeImpactTools. get_review_for_diff is registered directly
 // (not via noCtxHandler) because its handler needs the live request context
 // for the 90-second AI-pass deadline.
 func registerReviewTools(h *mcpHandler) {
-	h.registerTool("get_review_for_diff", func(hh *mcpHandler, ctx context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
-		return hh.callGetReviewForDiff(ctx, s, a)
-	})
+	for _, t := range h.reviewToolsList() {
+		h.registerTool(t)
+	}
 }

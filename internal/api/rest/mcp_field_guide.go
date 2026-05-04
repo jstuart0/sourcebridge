@@ -272,9 +272,24 @@ func fieldGuideFormatToArtifactType(format string) knowledge.ArtifactType {
 // Registration
 // ---------------------------------------------------------------------------
 
+// fieldGuideToolsList returns []mcpTool pairing the Phase 2b get_field_guide
+// definition with its handler. Used by registerFieldGuideTools.
+func (h *mcpHandler) fieldGuideToolsList() []mcpTool {
+	defs := h.fieldGuideToolDefs()
+	defByName := make(map[string]mcpToolDefinition, len(defs))
+	for _, d := range defs {
+		defByName[d.Name] = d
+	}
+	return []mcpTool{
+		{Definition: defByName["get_field_guide"], Handler: noCtxHandler((*mcpHandler).callGetFieldGuide)},
+	}
+}
+
 // registerFieldGuideTools populates h.toolDispatch with the Phase 2b
 // get_field_guide tool. Called after registerCoreTools and the Phase 1
 // tool registrations inside newMCPHandlerWithEdition.
 func registerFieldGuideTools(h *mcpHandler) {
-	h.registerTool("get_field_guide", noCtxHandler((*mcpHandler).callGetFieldGuide))
+	for _, t := range h.fieldGuideToolsList() {
+		h.registerTool(t)
+	}
 }

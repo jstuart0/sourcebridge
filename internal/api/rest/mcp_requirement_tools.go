@@ -567,13 +567,29 @@ func (h *mcpHandler) resolveRequirement(repoID, requirementID string) *graphstor
 // Registration
 // ---------------------------------------------------------------------------
 
+// requirementLinkingTools returns []mcpTool pairing the Phase 1a
+// requirement-linking and Phase 2d get_changed_requirements definitions with
+// their handlers. Used by registerRequirementLinkingTools.
+func (h *mcpHandler) requirementLinkingTools() []mcpTool {
+	defs := h.requirementToolDefs()
+	defByName := make(map[string]mcpToolDefinition, len(defs))
+	for _, d := range defs {
+		defByName[d.Name] = d
+	}
+	return []mcpTool{
+		{Definition: defByName["get_requirements_for_symbol"], Handler: noCtxHandler((*mcpHandler).callGetRequirementsForSymbol)},
+		{Definition: defByName["get_symbols_for_requirement"], Handler: noCtxHandler((*mcpHandler).callGetSymbolsForRequirement)},
+		{Definition: defByName["get_changed_requirements"], Handler: noCtxHandler((*mcpHandler).callGetChangedRequirements)},
+	}
+}
+
 // registerRequirementLinkingTools registers the Phase 1a requirement-linking
 // tools and the Phase 2d get_changed_requirements tool into the handler's
 // dispatch map. Called from newMCPHandlerWithEdition after registerCoreTools.
 func registerRequirementLinkingTools(h *mcpHandler) {
-	h.registerTool("get_requirements_for_symbol", noCtxHandler((*mcpHandler).callGetRequirementsForSymbol))
-	h.registerTool("get_symbols_for_requirement", noCtxHandler((*mcpHandler).callGetSymbolsForRequirement))
-	h.registerTool("get_changed_requirements", noCtxHandler((*mcpHandler).callGetChangedRequirements))
+	for _, t := range h.requirementLinkingTools() {
+		h.registerTool(t)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -765,10 +781,25 @@ func nullableString(s string) interface{} {
 // registerGapAuditTools
 // ---------------------------------------------------------------------------
 
+// gapAuditTools returns []mcpTool pairing the Phase 1b gap-audit definitions
+// with their handlers. Used by registerGapAuditTools.
+func (h *mcpHandler) gapAuditTools() []mcpTool {
+	defs := h.gapAuditToolDefs()
+	defByName := make(map[string]mcpToolDefinition, len(defs))
+	for _, d := range defs {
+		defByName[d.Name] = d
+	}
+	return []mcpTool{
+		{Definition: defByName["get_orphan_symbols"], Handler: noCtxHandler((*mcpHandler).callGetOrphanSymbols)},
+		{Definition: defByName["get_uncovered_requirements"], Handler: noCtxHandler((*mcpHandler).callGetUncoveredRequirements)},
+	}
+}
+
 // registerGapAuditTools registers the Phase 1b gap-audit tools into the
 // handler's dispatch map. Called from newMCPHandlerWithEdition after
 // registerRequirementLinkingTools.
 func registerGapAuditTools(h *mcpHandler) {
-	h.registerTool("get_orphan_symbols", noCtxHandler((*mcpHandler).callGetOrphanSymbols))
-	h.registerTool("get_uncovered_requirements", noCtxHandler((*mcpHandler).callGetUncoveredRequirements))
+	for _, t := range h.gapAuditTools() {
+		h.registerTool(t)
+	}
 }
