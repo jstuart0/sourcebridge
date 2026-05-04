@@ -21,9 +21,36 @@ spec:
         app.kubernetes.io/part-of: sourcebridge
         app.kubernetes.io/component: database
     spec:
+      serviceAccountName: surrealdb
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+      # Ensure the PVC mount is owned by the surrealdb runtime user (65532)
+      # before the main container starts. This mirrors the surrealdb-init
+      # service in docker-compose.yml and handles fresh PVCs that default
+      # to root ownership.
+      initContainers:
+        - name: surrealdb-data-chown
+          image: alpine:3.20
+          command: ["chown", "-R", "65532:65532", "/data"]
+          volumeMounts:
+            - name: surrealdb-data
+              mountPath: /data
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 0
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "DAC_OVERRIDE"]
       containers:
         - name: surrealdb
           image: surrealdb/surrealdb:v2.2.1
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: false
           args: ["start", "--log", "info", "--user", "$(SURREAL_USER)", "--pass", "$(SURREAL_PASS)", "--bind", "0.0.0.0:8000", "file:/data/sourcebridge.db"]
           env:
             - name: SURREAL_USER

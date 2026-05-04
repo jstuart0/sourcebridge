@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker-allow-api-only
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/name: sourcebridge-worker
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: worker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sourcebridge-worker
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sourcebridge-api
+      ports:
+        - protocol: TCP
+          port: 50051

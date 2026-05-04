@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sourcebridge-config
+data:
+  # Flip mTLS on for production. Base stays "false" for OSS/dev compose
+  # (plaintext gRPC is the opt-in default per existing behavior).
+  # Requires cert-manager Issuer + Certificate manifests applied:
+  #   kubectl apply -f deploy/kubernetes/mtls-issuers.yaml
+  #   kubectl apply -f deploy/kubernetes/mtls-api-cert.yaml
+  #   kubectl apply -f deploy/kubernetes/mtls-worker-cert.yaml
+  SOURCEBRIDGE_WORKER_TLS_ENABLED: "true"

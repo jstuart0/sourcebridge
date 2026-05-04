@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sourcebridge
+resources:
+  - ../../base
+
+patches:
+  # Enable mTLS on the API↔worker gRPC channel.
+  # Cert-manager must be installed in the cluster and the
+  # deploy/kubernetes/mtls-issuers.yaml + mtls-api-cert.yaml +
+  # mtls-worker-cert.yaml manifests must be applied first so that
+  # cert-manager issues the leaf secrets before the worker starts.
+  # See the comment block in deploy/kubernetes/base/configmap.yaml
+  # for the full enablement procedure.
+  - path: configmap-patch.yaml
+    target:
+      kind: ConfigMap
+      name: sourcebridge-config

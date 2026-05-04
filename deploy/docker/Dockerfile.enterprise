@@ -12,6 +12,10 @@
 
 # Build stage
 ARG GO_BASE_IMAGE=golang:1.25-alpine
+# Declared before the first FROM so Docker treats it as a global ARG
+# accessible to both stages. Without this, the runtime FROM ${RUNTIME_BASE_IMAGE}
+# sees an empty value. Mirrors the pattern in Dockerfile.sourcebridge.
+ARG RUNTIME_BASE_IMAGE=alpine:3.20
 FROM ${GO_BASE_IMAGE} AS builder
 
 WORKDIR /app
@@ -42,6 +46,16 @@ RUN apk add --no-cache ca-certificates curl git
 COPY --from=builder /bin/sourcebridge /usr/local/bin/sourcebridge
 COPY --from=builder /bin/migrate /usr/local/bin/migrate
 COPY --from=builder /app/internal/db/migrations /migrations
+
+# Non-root runtime user. uid/gid 1000 matches the pod securityContext
+# runAsUser: 1000. Same paths as the OSS API image; enterprise adds no
+# additional writable directories beyond /data and /var/cache/sourcebridge.
+RUN addgroup -g 1000 -S sourcebridge \
+    && adduser -u 1000 -S sourcebridge -G sourcebridge \
+    && mkdir -p /data /var/cache/sourcebridge \
+    && chown -R sourcebridge:sourcebridge /data /var/cache/sourcebridge
+
+USER sourcebridge:sourcebridge
 
 EXPOSE 8080
 

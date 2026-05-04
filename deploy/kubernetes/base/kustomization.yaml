@@ -4,12 +4,17 @@ namespace: sourcebridge
 resources:
   - namespace.yaml
   - configmap.yaml
+  # ServiceAccounts must precede the workloads that reference them so
+  # that a first-time `kubectl apply` does not encounter
+  # "serviceaccount not found" warnings during object creation.
+  - serviceaccounts.yaml
   - surrealdb.yaml
   - api.yaml
   - api-pdb.yaml
   - worker.yaml
   - web.yaml
   - ingress.yaml
+  - networkpolicy.yaml
 
 # Canonical image names for the OSS build.
 # Overlays rewrite these via the `images:` block — change newName to

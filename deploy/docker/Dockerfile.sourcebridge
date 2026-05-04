@@ -68,6 +68,15 @@ COPY --from=builder /bin/sourcebridge /usr/local/bin/sourcebridge
 COPY --from=builder /bin/migrate /usr/local/bin/migrate
 COPY --from=builder /app/internal/db/migrations /migrations
 
+# Non-root runtime user. uid/gid 1000 matches the pod securityContext
+# runAsUser: 1000 in deploy/kubernetes/base/api.yaml.
+RUN addgroup -g 1000 -S sourcebridge \
+    && adduser -u 1000 -S sourcebridge -G sourcebridge \
+    && mkdir -p /data /var/cache/sourcebridge \
+    && chown -R sourcebridge:sourcebridge /data /var/cache/sourcebridge
+
+USER sourcebridge:sourcebridge
+
 EXPOSE 8080
 
 ENTRYPOINT ["sourcebridge"]

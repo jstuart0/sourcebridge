@@ -57,10 +57,20 @@ spec:
       # 5-minute slack for the orderly close-providers step that follows
       # server.stop.
       terminationGracePeriodSeconds: 3900
+      serviceAccountName: sourcebridge-worker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: sourcebridge-worker
           image: ghcr.io/sourcebridge-ai/sourcebridge-worker:latest
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: false
           ports:
             - containerPort: 50051
               name: grpc

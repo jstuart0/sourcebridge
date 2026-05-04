@@ -114,4 +114,20 @@ case "${TLS_ENABLED}" in
 esac
 PROBE_EOF
 
+# Non-root runtime user. uid/gid 1000 matches the pod securityContext
+# runAsUser: 1000 in deploy/kubernetes/base/worker.yaml.
+# Placed after all root-requiring RUN steps (apt installs, /usr/local/bin writes).
+# UV_CACHE_DIR and HF_HOME point to /tmp paths so the cache is writable
+# regardless of home-directory location, and survives under readOnlyRootFilesystem
+# if that is enabled in future.
+RUN groupadd -g 1000 sourcebridge \
+    && useradd -u 1000 -g 1000 -m -s /sbin/nologin sourcebridge \
+    && mkdir -p /tmp/uv-cache /tmp/hf-cache /var/cache/sourcebridge/workers \
+    && chown -R sourcebridge:sourcebridge /app /tmp/uv-cache /tmp/hf-cache /var/cache/sourcebridge
+
+ENV UV_CACHE_DIR=/tmp/uv-cache
+ENV HF_HOME=/tmp/hf-cache
+
+USER sourcebridge:sourcebridge
+
 CMD ["uv", "run", "python", "-m", "workers"]

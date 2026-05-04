@@ -53,10 +53,20 @@ spec:
       # CA-142: must exceed shutdown.grace_seconds (3600) plus preStop
       # sleep (10s) plus slack. 3900s = 65 min matches the worker.
       terminationGracePeriodSeconds: 3900
+      serviceAccountName: sourcebridge-api
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: sourcebridge-api
           image: ghcr.io/sourcebridge-ai/sourcebridge-api:latest
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: false
           ports:
             - containerPort: 8080
               name: http
