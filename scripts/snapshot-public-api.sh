@@ -13,7 +13,9 @@
 #                      struct fields with serialization tags) across internal/ cmd/ cli/
 #   rest-routes.txt  — r.{Get,Post,Put,Delete,Patch,Head,Options,Handle}(...) routes
 #                      extracted from internal/api/rest/router.go
-#   mcp-tools.txt    — h.registerTool("name", ...) tool names from internal/api/rest/mcp_*.go
+#   mcp-tools.txt    — MCP tool names from internal/api/rest/mcp_*.go (supports both
+#                      pre-Phase-3 h.registerTool("name",...) and post-Phase-3
+#                      mcpTool{Definition: defByName["name"],...} registration patterns)
 #   ts-exports.txt   — public TypeScript exports (capital-initial names) from
 #                      web/src/components/ and web/src/lib/
 #
@@ -96,16 +98,31 @@ fi
 echo "  [3/4] MCP tools (internal/api/rest/mcp_*.go)..."
 
 MCP_DIR="$REPO_ROOT/internal/api/rest"
-if ls "$MCP_DIR"/mcp_*.go >/dev/null 2>&1; then
-  grep -h 'h\.registerTool(' "$MCP_DIR"/mcp_*.go \
-    | grep -oE '"[a-z_]+"' \
-    | tr -d '"' \
-    | sort -u \
-    > "$OUTDIR/mcp-tools.txt"
+# Include mcp.go (coreTools lives there) alongside mcp_*.go files.
+MCP_FILES=( "$MCP_DIR"/mcp.go "$MCP_DIR"/mcp_*.go )
+if [[ -f "$MCP_DIR/mcp.go" ]] || ls "$MCP_DIR"/mcp_*.go >/dev/null 2>&1; then
+  {
+    # Pattern 1 (pre-Phase-3): h.registerTool("tool_name", ...)
+    grep -h 'h\.registerTool(' "${MCP_FILES[@]}" \
+      | grep -oE '"[a-z_]+"' \
+      | tr -d '"' \
+      || true
+    # Pattern 2 (post-Phase-3 Slice 1): Definition: defByName["tool_name"]
+    grep -h 'Definition:[[:space:]]*defByName\[' "${MCP_FILES[@]}" \
+      | grep -oE '"[a-z_]+"' \
+      | tr -d '"' \
+      || true
+    # Pattern 3 (record_change special case): Definition: recordChangeToolDef()
+    # Extract the Name field from recordChangeToolDef() return value
+    grep -h 'Name:.*"record_change"' "${MCP_FILES[@]}" \
+      | grep -oE '"[a-z_]+"' \
+      | tr -d '"' \
+      || true
+  } | sort -u > "$OUTDIR/mcp-tools.txt"
   MCP_COUNT=$(wc -l < "$OUTDIR/mcp-tools.txt" | tr -d ' ')
   echo "     -> $MCP_COUNT MCP tools registered"
 else
-  echo "     -> WARNING: no mcp_*.go files found in $MCP_DIR" >&2
+  echo "     -> WARNING: no MCP source files found in $MCP_DIR" >&2
   touch "$OUTDIR/mcp-tools.txt"
 fi
 
