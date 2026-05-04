@@ -109,6 +109,36 @@ func gitCloneCmd(ctx context.Context, repoURL, targetDir, token, sshKeyPath stri
 	return cmd
 }
 
+// gitAskpassHelper returns the absolute path to the git-credential-helper
+// binary that GIT_ASKPASS should point to.
+//
+// Resolution order:
+//  1. SOURCEBRIDGE_GIT_ASKPASS_HELPER env var (operator override / testing).
+//  2. A sibling binary next to the currently-running executable
+//     (covers `go run ./cmd/sourcebridge` and the default container layout
+//     where both binaries live under /usr/local/bin/).
+//  3. PATH lookup via exec.LookPath (covers $GOPATH/bin after `go install`).
+//
+// Returns ("", false) when the helper cannot be found; callers must fall
+// back gracefully (no shell-eval fallback — just skip token auth).
+func gitAskpassHelper() (string, bool) {
+	if override := os.Getenv("SOURCEBRIDGE_GIT_ASKPASS_HELPER"); override != "" {
+		return override, true
+	}
+	// Sibling binary next to the running process.
+	if exe, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(exe), "git-credential-helper")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, true
+		}
+	}
+	// PATH lookup.
+	if p, err := exec.LookPath("git-credential-helper"); err == nil {
+		return p, true
+	}
+	return "", false
+}
+
 // gitPullCmd builds an exec.Cmd for git pull with optional authentication.
 func gitPullCmd(ctx context.Context, repoDir, token, sshKeyPath string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", "pull", "--ff-only")
@@ -117,15 +147,21 @@ func gitPullCmd(ctx context.Context, repoDir, token, sshKeyPath string) *exec.Cm
 	cmd.Stderr = os.Stderr
 
 	if token != "" {
-		// Set credential helper to return the stored token.
-		// Shell-quote the token to prevent injection via special characters.
-		quoted := "'" + strings.ReplaceAll(token, "'", "'\\''") + "'"
-		cmd.Env = append(os.Environ(),
-			"GIT_ASKPASS=echo",
-			"GIT_CONFIG_COUNT=1",
-			"GIT_CONFIG_KEY_0=credential.helper",
-			fmt.Sprintf("GIT_CONFIG_VALUE_0=!f() { echo password=%s; }; f", quoted),
-		)
+		// SEC-8: use a pre-built helper binary via GIT_ASKPASS.
+		// The token is passed through SOURCEBRIDGE_GIT_TOKEN (an env var on
+		// cmd.Env), never through a shell command string. This eliminates
+		// the shell-injection surface that existed when the credential was
+		// embedded in GIT_CONFIG_VALUE_0 as a shell function literal.
+		if helperPath, ok := gitAskpassHelper(); ok {
+			cmd.Env = append(os.Environ(),
+				"GIT_ASKPASS="+helperPath,
+				"SOURCEBRIDGE_GIT_TOKEN="+token,
+			)
+		}
+		// If the helper binary is not found, we omit credential env vars.
+		// git will prompt interactively (which will fail in non-interactive
+		// contexts) rather than evaluating shell code — still safer than
+		// the previous fallback.
 	}
 	if sshKeyPath != "" {
 		// Codex r2 high fix: shell-safe quoting via gitres.BuildGitSSHCommand.

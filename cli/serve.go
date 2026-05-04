@@ -102,6 +102,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 			"advice", "tokens with missing role default to admin; disable after migration 056 has been confirmed")
 	}
 
+	// SEC-9: OSS single-tenant mode advisory.
+	// In OSS mode all repositories belong to tenant="default". There is no
+	// per-tenant repo isolation — any authenticated user can access any repo.
+	// This is the intended OSS posture: multi-tenant repo isolation is an
+	// enterprise feature. The warning fires once at boot so operators running
+	// a multi-user deployment are aware of the boundary.
+	// Follow-up enforcement design: CA-XXX.
+	slog.Warn(
+		"oss_single_tenant_mode: tenant=default; all authenticated users share all repositories. "+
+			"Multi-user deployments requiring per-user repo isolation need enterprise licensing. "+
+			"See README §\"OSS vs Enterprise tenancy\" and CA-XXX.",
+		"tenant", "default",
+		"mode", "oss-single-tenant",
+	)
+
 	// Check for credentials that are still at the insecure sentinel value
 	// injected by docker-compose.hub.yml when no .env is present (INFRA-1).
 	// Emits a banner at boot and re-fires every 60 seconds until the process

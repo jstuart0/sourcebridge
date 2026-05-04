@@ -1444,7 +1444,14 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self' https:")
+		// SEC-12: 'unsafe-eval' removed after static audit (docs/security/csp-audit-2026-05-04.md).
+		// The API server returns JSON/GraphQL — it never serves HTML or inline scripts,
+		// so script-src directives only matter for the API's own error pages (plain text).
+		// Static grep of web/src/: zero eval() / new Function() calls.
+		// Mermaid 11.x (web/node_modules/mermaid/dist/): zero eval occurrences (199 chunks verified).
+		// Next.js production build does not use eval; dev-mode webpack hot-reload does, but
+		// that runs in the web container (separate process), not under this CSP header.
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self' https:")
 		next.ServeHTTP(w, r)
 	})
 }

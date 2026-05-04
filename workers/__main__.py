@@ -140,19 +140,25 @@ async def serve() -> None:
     await health_servicer.set("sourcebridge.contracts.v1.ContractsService", health_pb2.HealthCheckResponse.SERVING)
     await health_servicer.set("sourcebridge.common.v1.VersionService", health_pb2.HealthCheckResponse.SERVING)
 
-    # --- Server reflection ---
-    service_names = (
-        reasoning_pb2.DESCRIPTOR.services_by_name["ReasoningService"].full_name,
-        linking_pb2.DESCRIPTOR.services_by_name["LinkingService"].full_name,
-        requirements_pb2.DESCRIPTOR.services_by_name["RequirementsService"].full_name,
-        knowledge_pb2.DESCRIPTOR.services_by_name["KnowledgeService"].full_name,
-        report_pb2.DESCRIPTOR.services_by_name["EnterpriseReportService"].full_name,
-        contracts_pb2.DESCRIPTOR.services_by_name["ContractsService"].full_name,
-        version_pb2.DESCRIPTOR.services_by_name["VersionService"].full_name,
-        health_pb2.DESCRIPTOR.services_by_name["Health"].full_name,
-        reflection.SERVICE_NAME,
-    )
-    reflection.enable_server_reflection(service_names, server)
+    # --- Server reflection (SEC-11) ---
+    # gRPC reflection advertises the full service schema to any caller,
+    # enabling unauthenticated method enumeration. It is useful for local
+    # development (grpcurl, grpc-ui) but should be off in production.
+    # Gate it behind WorkerConfig.debug (SOURCEBRIDGE_WORKER_DEBUG env var).
+    if config.debug:
+        service_names = (
+            reasoning_pb2.DESCRIPTOR.services_by_name["ReasoningService"].full_name,
+            linking_pb2.DESCRIPTOR.services_by_name["LinkingService"].full_name,
+            requirements_pb2.DESCRIPTOR.services_by_name["RequirementsService"].full_name,
+            knowledge_pb2.DESCRIPTOR.services_by_name["KnowledgeService"].full_name,
+            report_pb2.DESCRIPTOR.services_by_name["EnterpriseReportService"].full_name,
+            contracts_pb2.DESCRIPTOR.services_by_name["ContractsService"].full_name,
+            version_pb2.DESCRIPTOR.services_by_name["VersionService"].full_name,
+            health_pb2.DESCRIPTOR.services_by_name["Health"].full_name,
+            reflection.SERVICE_NAME,
+        )
+        reflection.enable_server_reflection(service_names, server)
+        log.info("grpc_reflection_enabled", reason="SOURCEBRIDGE_WORKER_DEBUG=true")
 
     # --- Start listening ---
     # mTLS (slice 4 of plan 2026-04-29-workspace-llm-source-of-truth-r2.md).

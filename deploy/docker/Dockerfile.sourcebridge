@@ -43,6 +43,10 @@ RUN GOWORK=off CGO_ENABLED=1 GOOS=linux go build -p 2 \
               -X github.com/sourcebridge/sourcebridge/internal/version.BuildDate=${BUILD_DATE} \
               -X github.com/sourcebridge/sourcebridge/internal/version.Edition=${EDITION}" \
     -o /bin/migrate ./cmd/migrate
+# SEC-8: GIT_ASKPASS helper — tiny binary that reads the token from an env
+# var and writes it to stdout. CGO is not needed for this binary.
+RUN GOWORK=off CGO_ENABLED=0 GOOS=linux go build -p 2 \
+    -o /bin/git-credential-helper ./cmd/git-credential-helper
 
 # Runtime stage
 ARG RUNTIME_BASE_IMAGE
@@ -66,6 +70,7 @@ RUN apk add --no-cache ca-certificates curl git
 
 COPY --from=builder /bin/sourcebridge /usr/local/bin/sourcebridge
 COPY --from=builder /bin/migrate /usr/local/bin/migrate
+COPY --from=builder /bin/git-credential-helper /usr/local/bin/git-credential-helper
 COPY --from=builder /app/internal/db/migrations /migrations
 
 # Non-root runtime user. uid/gid 1000 matches the pod securityContext

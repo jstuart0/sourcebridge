@@ -72,6 +72,9 @@ services:
       - SOURCEBRIDGE_WORKER_LLM_API_KEY=${SOURCEBRIDGE_LLM_API_KEY:-not-needed}
       - SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER=${SOURCEBRIDGE_EMBEDDING_PROVIDER:-ollama}
       - SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL=${SOURCEBRIDGE_EMBEDDING_BASE_URL:-${SOURCEBRIDGE_LLM_BASE_URL:-http://host.docker.internal:11434}}
+      # SEC-11: enable gRPC reflection in dev so grpcurl / grpc-ui work locally.
+      # Production deployments leave this unset → reflection is off.
+      - SOURCEBRIDGE_WORKER_DEBUG=true
     depends_on:
       surrealdb:
         condition: service_healthy

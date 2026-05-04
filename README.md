@@ -345,6 +345,22 @@ See [`config.toml.example`](config.toml.example) for a complete annotated exampl
 | `SOURCEBRIDGE_SECURITY_JWT_SECRET` | JWT signing secret | (required for auth) |
 | `SOURCEBRIDGE_SECURITY_MODE` | Security mode (`oss` or `enterprise`) | `oss` |
 
+## OSS vs Enterprise tenancy
+
+SourceBridge OSS uses **single-tenant mode**: all repositories are owned by the
+built-in `tenant=default` principal. Every authenticated user can access every
+repository — there is no per-user or per-team repo isolation.
+
+This is the intended OSS posture for small teams and individual use.
+
+**Multi-user deployments that require repo isolation** (i.e. user A cannot see
+user B's repositories) need the enterprise edition, which adds per-tenant
+`RepoAccessMiddleware` enforcement.
+
+The API server emits a one-time `oss_single_tenant_mode` warning at boot as a
+reminder. This is informational, not an error — it confirms that the OSS posture
+is active and expected.
+
 ## LLM Providers
 
 SourceBridge supports both cloud-hosted and local inference providers. Configure per-operation models for cost optimization (e.g., a smaller model for summaries, a larger one for reviews).

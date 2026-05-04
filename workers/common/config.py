@@ -140,6 +140,14 @@ class WorkerConfig(BaseSettings):
     # Test mode
     test_mode: bool = False
 
+    # Debug mode: gates gRPC server reflection (SEC-11).
+    # When False (the default), grpc-reflection is not registered — the
+    # service schema is not advertised to unauthenticated callers, which
+    # prevents enumeration of internal RPC methods in production.
+    # Set SOURCEBRIDGE_WORKER_DEBUG=true in dev compose to keep grpcurl
+    # working locally.
+    debug: bool = False
+
     # gRPC auth
     grpc_auth_secret: str = ""
 

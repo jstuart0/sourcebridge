@@ -99,6 +99,9 @@ services:
       - SOURCEBRIDGE_WORKER_SURREAL_USER=root
       - SOURCEBRIDGE_WORKER_SURREAL_PASS=root
       - SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET=${SOURCEBRIDGE_GRPC_SECRET:-dev-shared-secret}
+      # SEC-11: enable gRPC reflection in dev so grpcurl / grpc-ui work locally.
+      # Production deployments leave this unset → reflection is off.
+      - SOURCEBRIDGE_WORKER_DEBUG=true
 
       # ─── LLM Provider Configuration ──────────────────────────────────
       #
