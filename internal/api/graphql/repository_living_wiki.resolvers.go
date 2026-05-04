@@ -201,8 +201,12 @@ func mapLivingWikiJobResult(r *livingwiki.LivingWikiJobResult) *LivingWikiJobRes
 	return gql
 }
 
-// defaultTenantID is the tenant used for all single-tenant installs.
-// Multi-tenant installs will inject this from context in a future workstream.
+// defaultTenantID is used for all Living Wiki store operations in OSS mode.
+// Living Wiki does not yet support per-tenant isolation; multi-tenancy is
+// handled at the request middleware boundary by getStore(ctx) for non-Living-Wiki
+// resources. See thoughts/shared/audits/2026-05-04-system-audit-refactor.bob.md
+// (A-M4) for the audit context. TODO(CA-XXX): file follow-up to extend tenant
+// scoping into the LivingWiki store layer.
 const defaultTenantID = "default"
 
 // repoSinksToInputs converts stored sink models back to the GraphQL input
