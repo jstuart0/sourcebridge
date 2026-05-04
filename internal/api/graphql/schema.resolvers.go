@@ -1684,141 +1684,24 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 		return nil, err
 	}
 
-	scope := knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository}
-	if existing.Scope != nil {
-		scope = existing.Scope.Normalize()
-	}
-	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
-	repoRoot, repoRootErr := resolveRepoSourcePath(repo)
-	if repoRootErr != nil {
-		slog.Warn("refresh: repo source unavailable, docs will be omitted", "repo_id", repo.ID, "error", repoRootErr)
-	}
-
-	// Each artifact type delegates refresh to its own generation service.
-	// Slices 5b–5f replace these dispatches one at a time; the inline
-	// enqueueKnowledgeJob closure below handles only the remaining types.
-	if existing.Type == knowledgepkg.ArtifactCliffNotes {
+	// Dispatch to the per-type generation service. Each service owns its own
+	// assembly, enqueueKnowledgeJob call, and runGenerationPipeline execution.
+	// Phase 1 Slices 5b–5f replaced the 350-line inline switch body one arm
+	// at a time; this is the final thin dispatcher (Slice 5f).
+	switch existing.Type {
+	case knowledgepkg.ArtifactCliffNotes:
 		return cliffNotesGenerationService{resolver: r.Resolver}.RefreshFromExisting(ctx, existing)
-	}
-	if existing.Type == knowledgepkg.ArtifactArchitectureDiagram {
+	case knowledgepkg.ArtifactArchitectureDiagram:
 		return architectureDiagramGenerationService{resolver: r.Resolver}.RefreshFromExisting(ctx, existing)
-	}
-	if existing.Type == knowledgepkg.ArtifactLearningPath {
+	case knowledgepkg.ArtifactLearningPath:
 		return learningPathGenerationService{resolver: r.Resolver}.RefreshFromExisting(ctx, existing)
-	}
-	if existing.Type == knowledgepkg.ArtifactCodeTour {
+	case knowledgepkg.ArtifactCodeTour:
 		return codeTourGenerationService{resolver: r.Resolver}.RefreshFromExisting(ctx, existing)
+	case knowledgepkg.ArtifactWorkflowStory:
+		return workflowStoryGenerationService{resolver: r.Resolver}.RefreshFromExisting(ctx, existing)
+	default:
+		return nil, fmt.Errorf("unsupported artifact type: %s", existing.Type)
 	}
-
-	// The refresh runs through the orchestrator like the dedicated
-	// Generate* mutations. We don't know the snapshot size until we
-	// assemble it inside the closure, so snapshotBytes is reported via
-	// Runtime after assembly rather than up-front.
-	err := r.enqueueKnowledgeJob(ctx, existing, "refresh:"+string(existing.Type), 0, func(runCtx context.Context, rt llm.Runtime) error {
-		var (
-			snap *knowledgepkg.KnowledgeSnapshot
-			err  error
-		)
-		if scope.ScopeType == knowledgepkg.ScopeRepository {
-			snap, err = assembler.Assemble(repo.ID, repoRoot)
-		} else {
-			snap, err = assembler.AssembleScoped(repo.ID, repoRoot, scope)
-		}
-		if err != nil {
-			slog.Error("refresh assemble failed", "artifact_id", existing.ID, "error", err)
-			return err
-		}
-		snapJSON, err := json.Marshal(snap)
-		if err != nil {
-			slog.Error("refresh serialize failed", "artifact_id", existing.ID, "error", err)
-			return err
-		}
-		rt.ReportSnapshotBytes(len(snapJSON))
-		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(existing.ID, 0.1, "snapshot", "Snapshot assembled")
-		// CA-122 codex r2 H2: real-progress stream driver replaces
-		// the deleted synthetic-curve ticker. Each switch case spawns
-		// a per-RPC driver, attaches it via llmJobMetadataWithProgress,
-		// and Close()s it BEFORE any SupersedeArtifact / terminal write
-		// (codex r1b M5 driver-drain rule).
-
-		persistUsage := func(usage *commonv1.LLMUsage) {
-			if usage == nil {
-				return
-			}
-			storeLLMUsage(r.getStore(ctx), repo.ID, usage, "")
-			rt.ReportTokens(int(usage.InputTokens), int(usage.OutputTokens))
-		}
-
-		switch existing.Type {
-		case knowledgepkg.ArtifactWorkflowStory:
-			enrichedSnapJSON := snapJSON
-			if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, existing, snap.SourceRevision, snapJSON); err != nil {
-				return err
-			} else {
-				if reused {
-					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
-					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(existing.ID, 0.12, "understanding", "Using cached repository understanding")
-				}
-				if understanding != nil {
-					if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
-						enrichedSnapJSON = enriched
-					}
-				}
-			}
-			if existing.Depth == knowledgepkg.DepthDeep {
-				if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, existing.Audience, enrichedSnapJSON); ok {
-					enrichedSnapJSON = enriched
-				}
-			}
-			streamDriver := r.runStreamProgressDriver(runCtx, rt, existing.ID, rpcBucketCollapsed)
-			resp, err := r.LLMCaller.GenerateWorkflowStoryWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, existing.ID, "workflow_story", streamDriver.OnProgress()), &knowledgev1.GenerateWorkflowStoryRequest{
-				RepositoryId:   repo.ID,
-				RepositoryName: repo.Name,
-				Audience:       string(existing.Audience),
-				AudienceEnum:   protoAudience(existing.Audience),
-				Depth:          string(existing.Depth),
-				DepthEnum:      protoDepth(existing.Depth),
-				ScopeType:      string(scope.ScopeType),
-				ScopePath:      scope.ScopePath,
-				SnapshotJson:   string(enrichedSnapJSON),
-			})
-			streamDriver.Close()
-			if err != nil {
-				slog.Error("refresh workflow story failed", "artifact_id", existing.ID, "error", err)
-				return err
-			}
-			persistUsage(resp.Usage)
-			sections := make([]knowledgepkg.Section, len(resp.Sections))
-			for i, sec := range resp.Sections {
-				sections[i] = knowledgepkg.Section{
-					Title:      sec.Title,
-					Content:    sec.Content,
-					Summary:    sec.Summary,
-					Confidence: mapProtoConfidence(sec.Confidence),
-					Inferred:   sec.Inferred,
-					Evidence:   mapProtoEvidence(sec.Evidence),
-				}
-			}
-			if err := r.KnowledgeStore.SupersedeArtifact(existing.ID, sections); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("unsupported artifact type: %s", existing.Type)
-		}
-
-		rt.ReportProgress(1.0, "ready", "Refresh complete")
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("enqueue refresh job: %w", err)
-	}
-
-	updated := r.KnowledgeStore.GetKnowledgeArtifact(id)
-	if updated == nil {
-		return nil, fmt.Errorf("artifact %s not found after refresh", id)
-	}
-	return mapKnowledgeArtifact(updated), nil
 }
 
 // UpdateComprehensionSettings is the resolver for the updateComprehensionSettings field.

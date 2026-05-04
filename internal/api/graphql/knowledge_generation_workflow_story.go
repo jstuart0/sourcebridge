@@ -246,7 +246,77 @@ func (s workflowStoryGenerationService) runGenerationPipeline(
 }
 
 // RefreshFromExisting re-runs the generation pipeline against an existing
-// artifact, replacing its sections in place. Implemented in Phase 1 Slice 5f.
+// artifact, replacing its sections in place (Phase 1 Slice 5f).
+//
+// audience, depth, and scope are read from the existing artifact's persisted
+// fields. anchorLabel and executionPathJSON are not persisted on the artifact
+// and are omitted on refresh (same as the original generation defaults).
 func (s workflowStoryGenerationService) RefreshFromExisting(ctx context.Context, existing *knowledgepkg.Artifact) (*KnowledgeArtifact, error) {
-	panic("TODO: implemented in Phase 1 Slice 5f")
+	r := s.resolver
+
+	repo := r.getStore(ctx).GetRepository(existing.RepositoryID)
+	if repo == nil {
+		return nil, fmt.Errorf("repository %s not found", existing.RepositoryID)
+	}
+
+	scope := knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository}
+	if existing.Scope != nil {
+		scope = existing.Scope.Normalize()
+	}
+	audience := string(existing.Audience)
+	depth := string(existing.Depth)
+	generationMode := existing.GenerationMode
+
+	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
+	repoRoot, repoRootErr := resolveRepoSourcePath(repo)
+	if repoRootErr != nil {
+		slog.Warn("workflow story refresh: repo source unavailable, docs will be omitted",
+			"repo_id", repo.ID, "error", repoRootErr)
+	}
+
+	capturedStore := r.getStore(ctx)
+	err := r.enqueueKnowledgeJob(ctx, existing, "refresh:workflow_story", 0, func(runCtx context.Context, rt llm.Runtime) error {
+		var (
+			snap *knowledgepkg.KnowledgeSnapshot
+			err  error
+		)
+		if scope.ScopeType == knowledgepkg.ScopeRepository {
+			snap, err = assembler.Assemble(repo.ID, repoRoot)
+		} else {
+			snap, err = assembler.AssembleScoped(repo.ID, repoRoot, scope)
+		}
+		if err != nil {
+			slog.Error("workflow story refresh assemble failed", "artifact_id", existing.ID, "error", err)
+			return err
+		}
+		snapJSON, err := json.Marshal(snap)
+		if err != nil {
+			slog.Error("workflow story refresh serialize failed", "artifact_id", existing.ID, "error", err)
+			return err
+		}
+		rt.ReportSnapshotBytes(len(snapJSON))
+
+		params := workflowStoryRunParams{
+			repo:              repo,
+			artifact:          existing,
+			snap:              snap,
+			snapJSON:          snapJSON,
+			scope:             scope,
+			generationMode:    generationMode,
+			audience:          audience,
+			depth:             depth,
+			anchorLabel:       "",
+			executionPathJSON: "",
+		}
+		return s.runGenerationPipeline(runCtx, rt, capturedStore, params)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("enqueue workflow story refresh job: %w", err)
+	}
+
+	updated := r.KnowledgeStore.GetKnowledgeArtifact(existing.ID)
+	if updated == nil {
+		return nil, fmt.Errorf("artifact %s not found after refresh", existing.ID)
+	}
+	return mapKnowledgeArtifact(updated), nil
 }
