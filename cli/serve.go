@@ -80,6 +80,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Level: slog.LevelInfo,
 	})))
 
+	// Announce CSRF protection state so operators can verify the expected posture.
+	// Default is true (on). If an operator has explicitly disabled it, emit a
+	// warning — disabling CSRF is only appropriate for pure API-only deployments.
+	if cfg.Security.CSRFEnabled {
+		slog.Info("security_csrf_state", "enabled", true)
+	} else {
+		slog.Warn("security_csrf_disabled_by_config",
+			"enabled", false,
+			"advice", "regression; only for API-only deployments")
+	}
+
 	// Connect to database
 	surrealDB := db.NewSurrealDB(cfg.Storage)
 	if err := surrealDB.Connect(context.Background()); err != nil {

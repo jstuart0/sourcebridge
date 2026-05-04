@@ -5,6 +5,13 @@ import (
 	"testing"
 )
 
+func TestSecurityDefaultsCSRFEnabled(t *testing.T) {
+	cfg := Defaults()
+	if !cfg.Security.CSRFEnabled {
+		t.Error("Security.CSRFEnabled must default to true; found false — this is a security regression")
+	}
+}
+
 func TestDefaults(t *testing.T) {
 	cfg := Defaults()
 	if cfg.Server.HTTPPort != 8080 {
