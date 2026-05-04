@@ -5,6 +5,7 @@ package rest
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
 	"strings"
@@ -43,7 +44,7 @@ func csrfProtectionWithName(cookieName string) func(http.Handler) http.Handler {
 			}
 
 			headerToken := r.Header.Get(csrfTokenHeader)
-			if headerToken == "" || headerToken != cookie.Value {
+			if headerToken == "" || subtle.ConstantTimeCompare([]byte(headerToken), []byte(cookie.Value)) != 1 {
 				http.Error(w, `{"error":"CSRF token mismatch"}`, http.StatusForbidden)
 				return
 			}
