@@ -20,8 +20,8 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	"github.com/sourcebridge/sourcebridge/internal/clustering"
 	"github.com/sourcebridge/sourcebridge/internal/db"
-	"github.com/sourcebridge/sourcebridge/internal/indexing"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
+	"github.com/sourcebridge/sourcebridge/internal/indexing"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
 	"github.com/sourcebridge/sourcebridge/internal/search"
@@ -64,10 +64,10 @@ type jsonRPCRequest struct {
 }
 
 type jsonRPCResponse struct {
-	JSONRPC string      `json:"jsonrpc"`
+	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
-	Result  interface{} `json:"result,omitempty"`
-	Error   *jsonRPCError `json:"error,omitempty"`
+	Result  interface{}     `json:"result,omitempty"`
+	Error   *jsonRPCError   `json:"error,omitempty"`
 }
 
 type jsonRPCError struct {
@@ -330,10 +330,10 @@ type mcpHandler struct {
 	store          graphstore.GraphStore
 	knowledgeStore knowledge.KnowledgeStore
 	worker         mcpWorkerCaller
-	indexingSvc    *indexing.Service    // Phase-3 follow-on — drives end-to-end index_repository / refresh_repository
+	indexingSvc    *indexing.Service       // Phase-3 follow-on — drives end-to-end index_repository / refresh_repository
 	clusterStore   clustering.ClusterStore // subsystem clustering; nil when the store doesn't support it
-	edition        capabilities.Edition // drives tools/list filtering + initialize response
-	allowedRepos   map[string]bool      // nil = all repos allowed
+	edition        capabilities.Edition    // drives tools/list filtering + initialize response
+	allowedRepos   map[string]bool         // nil = all repos allowed
 	sessionTTL     time.Duration
 	keepalive      time.Duration
 	maxSessions    int
@@ -536,6 +536,10 @@ func newMCPHandlerWithEdition(store graphstore.GraphStore, ks knowledge.Knowledg
 	registerCoreTools(h)
 	registerRequirementLinkingTools(h)
 	registerGapAuditTools(h)
+	registerGapAuditExtraTools(h)
+	registerChangedSymbolsTools(h)
+	registerDependenciesTools(h)
+	registerBlastRadiusTools(h)
 	registerFieldGuideTools(h)
 	registerChangeImpactTools(h)
 	registerReviewTools(h)
@@ -946,7 +950,7 @@ func (h *mcpHandler) dispatchCtx(ctx context.Context, session *mcpSession, msg j
 
 func (h *mcpHandler) handleInitialize(session *mcpSession, msg jsonRPCRequest) jsonRPCResponse {
 	var params struct {
-		ProtocolVersion string `json:"protocolVersion"`
+		ProtocolVersion string   `json:"protocolVersion"`
 		Capabilities    struct{} `json:"capabilities"`
 		ClientInfo      struct {
 			Name    string `json:"name"`
@@ -1010,10 +1014,10 @@ func (h *mcpHandler) experimentalCapabilities() map[string]interface{} {
 		"version":  mcpServerVersion(),
 		"features": features,
 		"latency_classes": map[string]interface{}{
-			"fast_read":    "<= 100ms",
-			"search":       "100-500ms",
-			"llm":          "5-30s",
-			"indexing_op":  "seconds-to-minutes",
+			"fast_read":   "<= 100ms",
+			"search":      "100-500ms",
+			"llm":         "5-30s",
+			"indexing_op": "seconds-to-minutes",
 		},
 	}
 }
@@ -1142,6 +1146,10 @@ func (h *mcpHandler) baseTools() []mcpToolDefinition {
 	tools = append(tools, h.compoundToolDefs()...)
 	tools = append(tools, h.requirementToolDefs()...)
 	tools = append(tools, h.gapAuditToolDefs()...)
+	tools = append(tools, h.gapAuditExtraToolDefs()...)
+	tools = append(tools, h.changedSymbolsToolDefs()...)
+	tools = append(tools, h.dependenciesToolDefs()...)
+	tools = append(tools, h.blastRadiusToolDefs()...)
 	tools = append(tools, h.fieldGuideToolDefs()...)
 	tools = append(tools, h.changeImpactToolDefs()...)
 	tools = append(tools, h.reviewToolDefs()...)
@@ -1452,10 +1460,10 @@ func (h *mcpHandler) callAskQuestion(ctx context.Context, session *mcpSession, a
 	}
 	if !h.qaEnabled || h.qaOrchestrator == nil {
 		return map[string]interface{}{
-			"answer":        "Server-side QA is disabled on this deployment. Ask the operator to set SOURCEBRIDGE_QA_SERVER_SIDE_ENABLED=true.",
-			"error_kind":    "qa_disabled",
-			"references":    []interface{}{},
-			"diagnostics":   map[string]interface{}{"fallbackUsed": "server_side_disabled"},
+			"answer":      "Server-side QA is disabled on this deployment. Ask the operator to set SOURCEBRIDGE_QA_SERVER_SIDE_ENABLED=true.",
+			"error_kind":  "qa_disabled",
+			"references":  []interface{}{},
+			"diagnostics": map[string]interface{}{"fallbackUsed": "server_side_disabled"},
 		}, nil
 	}
 	mode := qa.Mode(strings.ToLower(params.Mode))

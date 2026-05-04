@@ -517,6 +517,14 @@ func TestMCP_ToolsList(t *testing.T) {
 		"get_changed_requirements",
 		// CA-153 Phase 1b gap-audit tools
 		"get_orphan_symbols", "get_uncovered_requirements",
+		// CA-154 Phase 1 gap-audit-extra tools
+		"find_dead_code", "get_untested_symbols",
+		// CA-154 Phase 2a changed-symbols tool
+		"get_changed_symbols",
+		// CA-154 Phase 2b find_importers tool
+		"find_importers",
+		// CA-154 Phase 3 blast radius tool
+		"get_blast_radius",
 		// CA-153 Phase 2b field guide tool
 		"get_field_guide",
 		// CA-153 Phase 2c change impact tool
@@ -1523,7 +1531,7 @@ type pipeResponseWriter struct {
 	pw     *io.PipeWriter
 }
 
-func (w *pipeResponseWriter) Header() http.Header        { return w.header }
+func (w *pipeResponseWriter) Header() http.Header         { return w.header }
 func (w *pipeResponseWriter) WriteHeader(int)             {}
 func (w *pipeResponseWriter) Flush()                      {}
 func (w *pipeResponseWriter) Write(b []byte) (int, error) { return w.pw.Write(b) }

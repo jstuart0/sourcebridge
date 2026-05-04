@@ -18,6 +18,71 @@ CA-146 (page-count transparency and per-run override).
 
 ### Added
 
+- **Six parity-track MCP tools: dead code, untested symbols, changed symbols,
+  package importers, and multi-hop blast radius** (CA-154).
+
+  *Gap-audit extensions (extends existing `gap_audit` capability, OSS + Enterprise):*
+
+  - **`find_dead_code`** — cursor-paginated list of symbols with no callers in
+    the call graph (dead-code candidates). Exported / public-named symbols are
+    excluded by default (`exclude_entry_points: true`) via the
+    `isLikelyPublicSymbol` name heuristic. Scan capped at 10,000 symbols per
+    page (`scan_truncated: true` when hit). Supports `kinds[]` filter and
+    `min_callers` threshold.
+  - **`get_untested_symbols`** — cursor-paginated list of symbols with no test
+    linkage (no persisted test edge and no adjacent-test-file heuristic match).
+    Same 10,000-symbol scan cap. Supports `kinds[]` filter and
+    `exclude_entry_points` toggle.
+
+  *Diff-anchored symbol enumeration (extends existing `change_impact` capability):*
+
+  - **`get_changed_symbols`** — given a diff scope (`commit_range` and/or
+    `files`), returns every code symbol touched by the diff in two projections:
+    `changed_files` (symbols grouped by file) and `changed_symbols` (flat
+    deduped list). Hydration via `GetSymbolsByIDs` (not name-based lookup) per
+    dexter M4. Global `max_symbols` cap with `truncated: true` flag. Does NOT
+    distinguish added/modified/removed (`change_type` deferred — symbol-level
+    diff fingerprints are not yet stored).
+
+  *Package dependency queries (new `code_dependencies` capability, OSS + Enterprise):*
+
+  - **`find_importers`** — returns the packages that import the package
+    containing a given file. Resolves `file_path` to its directory and looks up
+    the pre-computed `StoredPackageDependencies` record. Supports Go module-
+    qualified import paths via suffix-match. Cursor-paginated (default 50,
+    cap 200). Three discriminated `_meta.reason` values:
+    `"package_dependencies_not_computed"` when no deps have been computed for
+    the repo; `"package_has_no_recorded_importers"` when deps are present but
+    no record matches the requested package; no reason when a match is found
+    (even with an empty importers list). For runtime call relationships, use
+    `get_callers` instead. Each importer entry is a raw import-path string as
+    it appears in the importer's source.
+
+  *Multi-hop blast radius (extends existing `change_impact` capability):*
+
+  - **`get_blast_radius`** — BFS over the caller graph up to `depth` hops
+    (default 3, max 5; inputs > 5 are clamped to 5, not rejected). Returns
+    `impact_by_depth` (per-layer callers, test matches, requirements, and risk
+    score), top-level `affected_requirements` and `affected_tests` (deduped
+    unions across all layers), and an `overall_risk_score` (weighted by
+    1/depth^0.7). Cross-repo isolation: callers not in the repo's symbol set
+    are filtered at frontier expansion (per bob C2). Cap: 500 nodes; cap check
+    fires at hop boundary after full frontier expansion so shallow nodes are
+    never evicted (per bob H3). New `include_test_callers` parameter (default
+    `false`) excludes `IsTest` symbols from `impact_by_depth` callers.
+
+  *Internal changes shipped as part of this campaign:*
+
+  - **`registerGapAuditExtraTools`, `registerChangedSymbolsTools`,
+    `registerDependenciesTools`, `registerBlastRadiusTools`** — four new
+    registration blocks wired into `newMCPHandlerWithEdition` after the CA-153
+    blocks.
+  - **`capability_registry`** — `change_impact` description updated to mention
+    diff-anchored symbol enumeration and multi-hop blast radius; `gap_audit`
+    description extended with dead-code and test-coverage gap tools;
+    `code_dependencies` capability added for `find_importers`.
+  - **`TestMCP_ToolsList`** — updated to expect the six new tool names.
+
 - **Eight moat-track MCP tools: requirement traceability, gap audit, field
   guide, change-impact prediction, and AI diff review** (CA-153).
 

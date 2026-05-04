@@ -246,6 +246,22 @@ workflow for agents using `get_review_for_diff`. It includes a latency warning
 
 ---
 
+## Parity-track tools (CA-154)
+
+Six tools that extend the CA-153 surface with dead-code detection, test-coverage
+gap analysis, diff-anchored symbol enumeration, package dependency queries, and
+multi-hop blast-radius analysis. All six are OSS + Enterprise.
+
+| Tool | What it does | Capability | Requires worker? |
+|------|--------------|------------|-----------------|
+| `find_dead_code` | Cursor-paginated symbols with no callers (dead-code candidates). Excludes exported symbols by default. Full-repo scan capped at 10,000; `scan_truncated: true` when hit. Supports `kinds[]` filter. | `gap_audit` | No |
+| `get_untested_symbols` | Cursor-paginated symbols with no test linkage (no persisted edge, no adjacent-test heuristic match). Same 10,000-symbol scan cap. Supports `kinds[]` filter and `exclude_entry_points` toggle. | `gap_audit` | No |
+| `get_changed_symbols` | Symbols touched by a diff (`commit_range` and/or `files`). Returns `changed_files` (grouped) and `changed_symbols` (flat deduped). `max_symbols` cap + `truncated` flag. Does not distinguish added/modified/removed (`change_type` deferred). | `change_impact` | No |
+| `find_importers` | Packages that import the package containing a given file. Cursor-paginated (default 50, cap 200). Go module-qualified paths matched via suffix-match. `_meta.reason` discriminates uncomputed deps, no recorded importers, or valid empty set. For runtime call relationships use `get_callers` instead. Each entry is a raw import-path string as it appears in source. | `code_dependencies` | No |
+| `get_blast_radius` | Multi-hop BFS over the caller graph (default depth 3, max 5; depth > 5 clamped). Returns `impact_by_depth` layers (callers, test matches, requirements, risk score), top-level `affected_requirements` and `affected_tests` (deduped across all layers), and `overall_risk_score`. `include_test_callers` (default `false`) excludes test symbols from caller layers. Cross-repo isolation at frontier expansion; 500-node cap fires at hop boundary. | `change_impact` | No |
+
+---
+
 ## 4. Self-hosting MCP
 
 This section is for operators running their own SourceBridge instance. If

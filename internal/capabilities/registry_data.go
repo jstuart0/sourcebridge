@@ -9,14 +9,14 @@ package capabilities
 //
 // To add a capability:
 //
-//   1. Append a Capability to Registry below.
-//   2. Declare which editions offer it via the Editions field.
-//   3. List any MCP tools it gates in MCPToolNames (MCP tools/list
-//      filter will hide them on non-matching editions).
-//   4. List any GraphQL fields in GraphQLFields (resolver can check
-//      availability to return typed nulls instead of panicking).
-//   5. List any REST path prefixes in RESTRoutes (router can 404
-//      cleanly instead of returning 500s).
+//  1. Append a Capability to Registry below.
+//  2. Declare which editions offer it via the Editions field.
+//  3. List any MCP tools it gates in MCPToolNames (MCP tools/list
+//     filter will hide them on non-matching editions).
+//  4. List any GraphQL fields in GraphQLFields (resolver can check
+//     availability to return typed nulls instead of panicking).
+//  5. List any REST path prefixes in RESTRoutes (router can 404
+//     cleanly instead of returning 500s).
 //
 // registry_test.go asserts that every declared MCP tool actually
 // exists in the real mcpHandler.baseTools() surface. That's the
@@ -152,9 +152,9 @@ var Registry = []Capability{
 	},
 	{
 		Name:         "change_impact",
-		Description:  "Change-impact reports over recent commits.",
+		Description:  "Change-impact analysis: diff-anchored symbol enumeration (get_changed_symbols), multi-hop blast radius (get_blast_radius), impact reports, and change prediction.",
 		Editions:     []Edition{EditionOSS, EditionEnterprise},
-		MCPToolNames: []string{"get_impact_report", "predict_change_impact"},
+		MCPToolNames: []string{"get_impact_report", "predict_change_impact", "get_changed_symbols", "get_blast_radius"},
 		LatencyClass: "fast_read",
 	},
 
@@ -183,12 +183,23 @@ var Registry = []Capability{
 		LatencyClass: "fast_read",
 	},
 
-	// ---- Gap audit (Phase 1b, CA-153) ----
+	// ---- Code dependencies (Phase 2b, CA-154) ----
+	// find_importers returns the packages that import a given file's package.
+	// Package-level granularity only; file-level deferred to follow-up CA.
+	{
+		Name:         "code_dependencies",
+		Description:  "Package-level dependency queries: find which packages import a given package (find_importers).",
+		Editions:     []Edition{EditionOSS, EditionEnterprise},
+		MCPToolNames: []string{"find_importers"},
+		LatencyClass: "fast_read",
+	},
+
+	// ---- Gap audit (Phase 1b, CA-153; extended CA-154) ----
 	{
 		Name:         "gap_audit",
-		Description:  "O(n) repo-wide gap scans: orphan symbols (code with no linked requirement) and uncovered requirements (spec with no linked code).",
+		Description:  "O(n) repo-wide gap scans: orphan symbols (code with no linked requirement), uncovered requirements (spec with no linked code), dead code (symbols with no callers in the call graph), and test-coverage gaps (symbols with no test linkage). All four tools are cursor-paginated.",
 		Editions:     []Edition{EditionOSS, EditionEnterprise},
-		MCPToolNames: []string{"get_orphan_symbols", "get_uncovered_requirements"},
+		MCPToolNames: []string{"get_orphan_symbols", "get_uncovered_requirements", "find_dead_code", "get_untested_symbols"},
 		LatencyClass: "fast_read",
 	},
 
@@ -254,9 +265,9 @@ var Registry = []Capability{
 		LatencyClass: "search",
 	},
 	{
-		Name:         "per_op_models",
-		Description:  "Per-operation model overrides (review_model, ask_model, knowledge_model, report_model, …).",
-		Editions:     []Edition{EditionEnterprise},
+		Name:          "per_op_models",
+		Description:   "Per-operation model overrides (review_model, ask_model, knowledge_model, report_model, …).",
+		Editions:      []Edition{EditionEnterprise},
 		GraphQLFields: []string{"llmReportModel"},
 	},
 }
