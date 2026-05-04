@@ -5,31 +5,12 @@ from common.v1 import types_pb2
 from linking.v1 import linking_pb2
 
 from workers.common.embedding.fake import FakeEmbeddingProvider
-from workers.common.llm.fake import FakeLLMProvider
 from workers.linking.servicer import (
     LinkingServicer,
     _candidate_to_entity,
     _float_to_confidence_enum,
     _symbol_kind_name,
 )
-
-
-class MockServicerContext:
-    """Minimal mock for grpc.aio.ServicerContext."""
-
-    def __init__(self):
-        self.code = None
-        self.details = None
-
-    async def abort(self, code, details):
-        self.code = code
-        self.details = details
-        raise Exception(f"gRPC abort: {code} {details}")
-
-
-@pytest.fixture
-def llm():
-    return FakeLLMProvider()
 
 
 @pytest.fixture
@@ -40,11 +21,6 @@ def embedding():
 @pytest.fixture
 def servicer(llm, embedding):
     return LinkingServicer(llm, embedding)
-
-
-@pytest.fixture
-def context():
-    return MockServicerContext()
 
 
 def _make_candidate(

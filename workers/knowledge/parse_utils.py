@@ -18,6 +18,7 @@ import re
 from collections.abc import Callable, Iterable
 from typing import Any
 
+from workers.common.llm.parse import strip_llm_wrapping
 from workers.knowledge.evidence import is_valid_evidence_path
 from workers.knowledge.types import EvidenceRef
 
@@ -140,9 +141,12 @@ def normalize_section_object(raw: dict[str, object], *, title_summary_max_chars:
 def parse_json_sections(raw: str) -> list[dict[str, object]]:
     """Parse JSON array from LLM response, tolerating common LLM quirks."""
 
-    text = (raw or "").strip()
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    # strip_llm_wrapping handles both <think>...</think> blocks and common
+    # markdown code fences in one pass (PY-6 / librarian #9).
+    text = strip_llm_wrapping(raw or "")
 
+    # Fallback fence-stripping for edge cases strip_llm_wrapping may not cover
+    # (e.g. a second or inner fence after the outer one was already removed).
     if text.startswith("```"):
         first_newline = text.find("\n")
         text = text[first_newline + 1 :] if first_newline != -1 else text[3:]

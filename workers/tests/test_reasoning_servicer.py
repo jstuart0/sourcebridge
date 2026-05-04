@@ -6,26 +6,7 @@ from common.v1 import types_pb2
 from reasoning.v1 import reasoning_pb2
 
 from workers.common.embedding.fake import FakeEmbeddingProvider
-from workers.common.llm.fake import FakeLLMProvider
 from workers.reasoning.servicer import ReasoningServicer
-
-
-class MockServicerContext:
-    """Minimal mock for grpc.aio.ServicerContext."""
-
-    def __init__(self):
-        self.code = None
-        self.details = None
-
-    async def abort(self, code, details):
-        self.code = code
-        self.details = details
-        raise Exception(f"gRPC abort: {code} {details}")
-
-
-@pytest.fixture
-def llm():
-    return FakeLLMProvider()
 
 
 @pytest.fixture
@@ -36,11 +17,6 @@ def embedding():
 @pytest.fixture
 def servicer(llm, embedding):
     return ReasoningServicer(llm, embedding)
-
-
-@pytest.fixture
-def context():
-    return MockServicerContext()
 
 
 # ---------------------------------------------------------------------------

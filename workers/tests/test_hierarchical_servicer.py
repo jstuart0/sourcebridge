@@ -100,14 +100,14 @@ class _StubSummaryNodeCache:
     store_calls: list[tuple[str, str]] = field(default_factory=list)
     node_store_calls: list[tuple[str, str, str]] = field(default_factory=list)
 
-    async def load_tree(self, *, corpus_id: str, corpus_type: str = "code", strategy: str = "hierarchical"):
+    async def load_tree(self, *, corpus_id: str, corpus_type: str = "code", strategy: str = "hierarchical", depth: str = "medium"):
         return self.trees.get(corpus_id)
 
-    async def store_tree(self, tree, *, stage: str | None = None) -> None:
+    async def store_tree(self, tree, *, stage: str | None = None, depth: str = "medium") -> None:
         self.store_calls.append((tree.corpus_id, stage or ""))
         self.trees[tree.corpus_id] = tree
 
-    async def store_node(self, tree, node, *, stage: str | None = None) -> None:
+    async def store_node(self, tree, node, *, stage: str | None = None, depth: str = "medium") -> None:
         self.node_store_calls.append((tree.corpus_id, stage or "", node.unit_id))
         self.trees[tree.corpus_id] = tree
 

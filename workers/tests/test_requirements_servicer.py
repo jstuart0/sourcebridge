@@ -5,36 +5,12 @@ import pytest
 from common.v1 import types_pb2
 from requirements.v1 import requirements_pb2
 
-from workers.common.llm.fake import FakeLLMProvider
 from workers.requirements.servicer import RequirementsServicer
-
-
-class MockServicerContext:
-    """Minimal mock for grpc.aio.ServicerContext."""
-
-    def __init__(self):
-        self.code = None
-        self.details = None
-
-    async def abort(self, code, details):
-        self.code = code
-        self.details = details
-        raise Exception(f"gRPC abort: {code} {details}")
-
-
-@pytest.fixture
-def llm():
-    return FakeLLMProvider()
 
 
 @pytest.fixture
 def servicer(llm):
     return RequirementsServicer(llm)
-
-
-@pytest.fixture
-def context():
-    return MockServicerContext()
 
 
 SAMPLE_MARKDOWN = """\
