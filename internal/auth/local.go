@@ -104,7 +104,7 @@ func (a *LocalAuth) Login(password string) (string, error) {
 		return "", fmt.Errorf("invalid credentials")
 	}
 
-	return a.jwtManager.GenerateToken(a.user.ID, a.user.Email, "", "")
+	return a.jwtManager.GenerateToken(a.user.ID, a.user.Email, "", RoleAdmin)
 }
 
 // ChangePassword changes the user's password.

@@ -129,3 +129,25 @@ func TestLocalAuthChangePasswordWrongOld(t *testing.T) {
 		t.Error("expected error for wrong old password")
 	}
 }
+
+func TestLocalAuthLoginIssuesAdminRole(t *testing.T) {
+	mgr := NewJWTManager("test-secret", 60, "")
+	la := NewLocalAuth(mgr)
+
+	if _, err := la.Setup("password123"); err != nil {
+		t.Fatalf("Setup() error: %v", err)
+	}
+
+	token, err := la.Login("password123")
+	if err != nil {
+		t.Fatalf("Login() error: %v", err)
+	}
+
+	claims, err := mgr.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("ValidateToken() error: %v", err)
+	}
+	if claims.Role != RoleAdmin {
+		t.Errorf("expected role %q, got %q — bootstrap admin JWT must carry admin role", RoleAdmin, claims.Role)
+	}
+}
