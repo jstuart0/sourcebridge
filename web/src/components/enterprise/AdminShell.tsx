@@ -10,6 +10,7 @@ import {
   Users,
 } from "lucide-react";
 import { clearStoredToken } from "@/lib/auth-token-store";
+import { authFetch } from "@/lib/auth-fetch";
 import { cn } from "@/lib/utils";
 import { Panel as UiPanel } from "@/components/ui/panel";
 
@@ -48,7 +49,7 @@ function useEnterpriseFetch<T>(url: string) {
   const refetch = useCallback(() => {
     setLoading(true);
     setError(null);
-    fetch(url, { credentials: "include" })
+    authFetch(url, { credentials: "include" })
       .then(async (res) => {
         if (!res.ok) throw new Error(await handleApiError(res));
         return res.json();
@@ -204,7 +205,7 @@ function SSOPanel({ orgId, apiBase }: PanelProps) {
 
   async function handleSave() {
     setSaving(true);
-    await fetch(`${apiBase}/sso/${orgId}`, {
+    await authFetch(`${apiBase}/sso/${orgId}`, {
       method: "PUT",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -359,7 +360,7 @@ function NotificationsPanel({ orgId, apiBase }: PanelProps) {
 
   async function handleSave() {
     setSaving(true);
-    await fetch(`${apiBase}/notifications/${orgId}`, {
+    await authFetch(`${apiBase}/notifications/${orgId}`, {
       method: "PUT",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -371,7 +372,7 @@ function NotificationsPanel({ orgId, apiBase }: PanelProps) {
 
   async function handleTest() {
     setTestResult(null);
-    const res = await fetch(`${apiBase}/notifications/${orgId}/test`, {
+    const res = await authFetch(`${apiBase}/notifications/${orgId}/test`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -439,7 +440,7 @@ function TeamPanel({ orgId, apiBase }: PanelProps) {
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
     if (!inviteEmail.trim()) return;
-    await fetch(`${apiBase}/team/${orgId}/invite`, {
+    await authFetch(`${apiBase}/team/${orgId}/invite`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -551,7 +552,7 @@ function SettingsPanel({ orgId, apiBase }: PanelProps) {
 
   async function handleSave() {
     setSaving(true);
-    await fetch(`${apiBase}/settings/${orgId}`, {
+    await authFetch(`${apiBase}/settings/${orgId}`, {
       method: "PUT",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -702,7 +703,7 @@ function RepoDependenciesSection({ orgId, apiBase }: PanelProps) {
     if (!upstreamId.trim() || !downstreamId.trim()) return;
     setAdding(true);
     setError(null);
-    const res = await fetch(`${apiBase}/dependencies/${orgId}`, {
+    const res = await authFetch(`${apiBase}/dependencies/${orgId}`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -720,7 +721,7 @@ function RepoDependenciesSection({ orgId, apiBase }: PanelProps) {
   }
 
   async function handleRemove(up: string, down: string) {
-    await fetch(`${apiBase}/dependencies/${orgId}/${up}/${down}`, {
+    await authFetch(`${apiBase}/dependencies/${orgId}/${up}/${down}`, {
       method: "DELETE",
       credentials: "include",
     });

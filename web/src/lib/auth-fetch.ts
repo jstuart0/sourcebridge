@@ -21,7 +21,17 @@ function emitAuthFetchEvent(type: "401" | "429" | "503" | "network-fail", detail
   window.postMessage({ source: "auth-fetch", type, ...detail }, window.location.origin);
 }
 
-export async function authFetch(path: string, init?: RequestInit): Promise<Response> {
+export interface AuthFetchOptions extends RequestInit {
+  /** Optional base URL prepended to path. Useful when callers hold a
+   *  separate base (e.g. enterprise API root) and a relative sub-path. */
+  baseURL?: string;
+}
+
+export async function authFetch(path: string, opts: AuthFetchOptions = {}): Promise<Response> {
+  const { baseURL, ...init } = opts;
+  if (baseURL) {
+    path = `${baseURL}${path}`;
+  }
   const token = getStoredToken();
   if (token && isTokenExpired(token)) {
     clearStoredToken();
