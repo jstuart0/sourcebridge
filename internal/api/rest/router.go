@@ -356,6 +356,16 @@ func (s *Server) getStore(r *http.Request) graphstore.GraphStore {
 	return s.store
 }
 
+// authMiddleware returns the JWT+API-token middleware configured for this
+// server.  When Security.APITokenLegacyAdminDefault is true the middleware
+// treats tokens whose role field is empty as "admin" (operator escape hatch
+// during migration 056 rollout).  All call sites use this helper so the flag
+// is honoured consistently without duplicating the config read.
+func (s *Server) authMiddleware() func(http.Handler) http.Handler {
+	legacyAdmin := s.cfg != nil && s.cfg.Security.APITokenLegacyAdminDefault
+	return auth.MiddlewareWithTokensAndLegacyAdmin(s.jwtMgr, s.tokenStore, legacyAdmin)
+}
+
 // lazyRepoAccessMiddleware applies tenant repo filtering when a repoChecker
 // is configured. It reads s.repoChecker at request time (not at router setup
 // time) because enterprise initialization happens after the protected route
@@ -741,7 +751,7 @@ func (s *Server) setupRouter() {
 
 	// Protected API routes (accepts both JWT and API tokens)
 	r.Group(func(r chi.Router) {
-		r.Use(auth.MiddlewareWithTokens(s.jwtMgr, s.tokenStore))
+		r.Use(s.authMiddleware())
 		// Tenant repo filtering — repoChecker is set by registerEnterpriseRoutes
 		// (after this group is defined), so we read it lazily at request time.
 		r.Use(s.lazyRepoAccessMiddleware)
@@ -780,7 +790,7 @@ func (s *Server) setupRouter() {
 
 	// Admin API routes (requires auth, accepts both JWT and API tokens)
 	r.Group(func(r chi.Router) {
-		r.Use(auth.MiddlewareWithTokens(s.jwtMgr, s.tokenStore))
+		r.Use(s.authMiddleware())
 		r.Use(s.lazyRepoAccessMiddleware)
 		r.Get("/api/v1/admin/status", s.handleAdminStatus)
 		r.Get("/api/v1/admin/config", s.handleAdminConfig)
@@ -906,7 +916,7 @@ func (s *Server) setupRouter() {
 	// GitHub webhooks lands in Phase 2.
 	if s.cfg != nil && s.cfg.ConnectorAPI.Enabled {
 		r.Group(func(r chi.Router) {
-			r.Use(auth.MiddlewareWithTokens(s.jwtMgr, s.tokenStore))
+			r.Use(s.authMiddleware())
 			r.Post("/v1/connectors/{id}/events", s.handleConnectorEvent)
 		})
 	}
@@ -994,14 +1004,14 @@ func (s *Server) setupRouter() {
 		s.mcp.capabilityChecker = capabilities.IsAvailable
 		// SSE endpoint: behind auth (JWT or API token)
 		r.Group(func(r chi.Router) {
-			r.Use(auth.MiddlewareWithTokens(s.jwtMgr, s.tokenStore))
+			r.Use(s.authMiddleware())
 			r.Get("/api/v1/mcp/sse", s.mcp.handleSSE)
 		})
 		// Message endpoint: session-based auth (no JWT middleware — session owns auth)
 		r.Post("/api/v1/mcp/message", s.mcp.handleMessage)
 		// Streamable HTTP transport: auth on every request (for Codex, etc.)
 		r.Group(func(r chi.Router) {
-			r.Use(auth.MiddlewareWithTokens(s.jwtMgr, s.tokenStore))
+			r.Use(s.authMiddleware())
 			r.Post("/api/v1/mcp/http", s.mcp.handleStreamableHTTP)
 			r.Delete("/api/v1/mcp/http", s.mcp.handleStreamableHTTPDelete)
 		})

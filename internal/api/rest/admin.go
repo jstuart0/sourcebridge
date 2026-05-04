@@ -193,6 +193,11 @@ func (s *Server) handleAdminTestLLM(w http.ResponseWriter, r *http.Request) {
 
 type createTokenRequest struct {
 	Name string `json:"name"`
+	// Role is the effective role this token should carry.  Omitting the field
+	// or sending an empty string defaults to "user" (least privilege).  Only
+	// callers with an admin claim may request role "admin"; non-admins are
+	// rejected with 403 if they attempt role elevation.
+	Role string `json:"role,omitempty"`
 }
 
 func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
@@ -209,6 +214,22 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Default to least-privilege when the caller does not specify a role.
+	requestedRole := req.Role
+	if requestedRole == "" {
+		requestedRole = auth.RoleUser
+	}
+
+	// Only admin callers may mint admin-role tokens.  Non-admins attempting
+	// role elevation receive 403 with an explanatory message.
+	if requestedRole == auth.RoleAdmin {
+		claims := auth.GetClaims(r.Context())
+		if claims == nil || claims.Role != auth.RoleAdmin {
+			http.Error(w, `{"error":"only admin users may create admin-role tokens"}`, http.StatusForbidden)
+			return
+		}
+	}
+
 	userID, tenantID := currentActorIdentity(r)
 	tokenStr, record, err := s.tokenStore.CreateToken(r.Context(), auth.CreateTokenInput{
 		Name:       req.Name,
@@ -217,6 +238,7 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		Kind:       auth.TokenKindAdminAPI,
 		ClientType: "web_admin",
 		AuthMethod: auth.AuthMethodManual,
+		Role:       requestedRole,
 	})
 	if err != nil {
 		http.Error(w, `{"error":"failed to create token"}`, http.StatusInternalServerError)
@@ -228,6 +250,7 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		"name":       record.Name,
 		"prefix":     record.Prefix,
 		"token":      tokenStr, // only returned on creation
+		"role":       record.Role,
 		"created_at": record.CreatedAt,
 	})
 }

@@ -2069,3 +2069,19 @@ type LivingWikiOnDemandPageResult {
   """
   dispatched: Boolean!
 }
+
+"""
+CreateAPITokenInput is the input for minting a new API token via the GraphQL
+API.  Only admin callers may set role to "admin"; non-admins receive an error
+if they attempt role elevation.  Omitting role or passing null defaults to
+"user" (least privilege) — matching the REST POST /api/v1/tokens behaviour.
+"""
+input CreateAPITokenInput {
+  """name is a human-readable label for the token (required, non-empty)."""
+  name: String!
+  """
+  role is the effective role this token carries ("user" or "admin").
+  Defaults to "user" when omitted.  Only admin callers may set "admin".
+  """
+  role: String
+}

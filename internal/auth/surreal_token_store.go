@@ -36,10 +36,16 @@ type surrealAPIToken struct {
 	AuthMethod  string           `json:"auth_method,omitempty"`
 	DeviceLabel string           `json:"device_label,omitempty"`
 	Metadata    string           `json:"metadata,omitempty"`
-	CreatedAt   time.Time        `json:"created_at"`
-	ExpiresAt   *time.Time       `json:"expires_at,omitempty"`
-	LastUsedAt  *time.Time       `json:"last_used_at,omitempty"`
-	RevokedAt   *time.Time       `json:"revoked_at,omitempty"`
+	// Role is written on every new token (migration 056 backfills existing rows
+	// to "admin" to preserve pre-SEC-2 behaviour). Reads may return empty string
+	// only during the brief window between the schema-add and data-backfill
+	// within a single migration apply; tokenFromSurreal normalises that to
+	// tokenRoleDefault.
+	Role       string     `json:"role,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 }
 
 func NewSurrealAPITokenStore(dbp tokenDBProvider) *SurrealAPITokenStore {
@@ -68,12 +74,17 @@ func (s *SurrealAPITokenStore) CreateToken(ctx context.Context, input CreateToke
 	// for option<T> fields — they require the SurrealQL literal NONE.
 	// Only include optional fields as parameters when they have real values;
 	// otherwise substitute NONE directly in the query string.
+	role := input.Role
+	if role == "" {
+		role = tokenRoleDefault
+	}
 	params := map[string]any{
 		"id":         id,
 		"name":       input.Name,
 		"prefix":     prefix,
 		"token_hash": hashStr,
 		"token_kind": string(normalizeTokenKind(input.Kind)),
+		"role":       role,
 		"created_at": now,
 	}
 	setParam := func(key, value string) string {
@@ -104,6 +115,7 @@ func (s *SurrealAPITokenStore) CreateToken(ctx context.Context, input CreateToke
 			`+userClause+`,
 			`+tenantClause+`,
 			token_kind: $token_kind,
+			role: $role,
 			`+clientClause+`,
 			`+authClause+`,
 			`+deviceClause+`,
@@ -129,6 +141,7 @@ func (s *SurrealAPITokenStore) CreateToken(ctx context.Context, input CreateToke
 		AuthMethod:  input.AuthMethod,
 		DeviceLabel: input.DeviceLabel,
 		Metadata:    input.Metadata,
+		Role:        role,
 		CreatedAt:   now,
 		ExpiresAt:   input.ExpiresAt,
 	}, nil
@@ -261,6 +274,15 @@ func tokenFromSurreal(record surrealAPIToken) *APIToken {
 	if record.ID != nil {
 		id = fmt.Sprint(record.ID.ID)
 	}
+	// If the DB row pre-dates migration 056 and the role field is empty,
+	// fall back to tokenRoleDefault ("user"). In practice migration 056 sets
+	// every pre-existing row to "admin"; this branch is only reachable during
+	// the narrow window between the DEFINE FIELD and the UPDATE within a single
+	// migration run.
+	role := record.Role
+	if role == "" {
+		role = tokenRoleDefault
+	}
 	return &APIToken{
 		ID:          id,
 		Name:        record.Name,
@@ -272,6 +294,7 @@ func tokenFromSurreal(record surrealAPIToken) *APIToken {
 		AuthMethod:  AuthMethod(record.AuthMethod),
 		DeviceLabel: record.DeviceLabel,
 		Metadata:    record.Metadata,
+		Role:        role,
 		CreatedAt:   record.CreatedAt,
 		ExpiresAt:   record.ExpiresAt,
 		LastUsedAt:  record.LastUsedAt,

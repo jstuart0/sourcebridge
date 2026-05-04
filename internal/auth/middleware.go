@@ -34,7 +34,28 @@ func GetAPIToken(ctx context.Context) *APIToken {
 
 // MiddlewareWithTokens returns an HTTP middleware that validates JWT tokens
 // and also accepts API tokens (ca_... prefix) when a token store is provided.
+// New tokens default to RoleUser; existing tokens were backfilled to RoleAdmin
+// by migration 056 so their effective role is preserved.
+//
+// The legacyAdminDefault flag (Security.APITokenLegacyAdminDefault in config)
+// controls the fallback for tokens whose role field is still empty (e.g. a
+// row inserted between schema-add and data-backfill within a single migration
+// run). When false (the secure default), missing role → RoleUser. When true,
+// missing role → RoleAdmin (recreates pre-SEC-2 behaviour as an operator
+// escape hatch during migration).
 func MiddlewareWithTokens(jwtMgr *JWTManager, tokenStore APITokenStore) func(http.Handler) http.Handler {
+	return middlewareWithTokensAndFlag(jwtMgr, tokenStore, false)
+}
+
+// MiddlewareWithTokensAndLegacyAdmin is identical to MiddlewareWithTokens but
+// honours the legacyAdminDefault flag from config. Use this variant when you
+// have access to the server config; use MiddlewareWithTokens elsewhere (tests,
+// embedded mode) where the flag is always false.
+func MiddlewareWithTokensAndLegacyAdmin(jwtMgr *JWTManager, tokenStore APITokenStore, legacyAdminDefault bool) func(http.Handler) http.Handler {
+	return middlewareWithTokensAndFlag(jwtMgr, tokenStore, legacyAdminDefault)
+}
+
+func middlewareWithTokensAndFlag(jwtMgr *JWTManager, tokenStore APITokenStore, legacyAdminDefault bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Try Bearer token from Authorization header
@@ -59,11 +80,14 @@ func MiddlewareWithTokens(jwtMgr *JWTManager, tokenStore APITokenStore) func(htt
 					http.Error(w, `{"error":"invalid API token"}`, http.StatusUnauthorized)
 					return
 				}
-				// Create claims from API token
+				// Create claims from API token.  Role is read from the persisted
+				// record (set by migration 056 for existing tokens, written at
+				// creation time for new ones).  rolesFromAPIToken enforces
+				// least-privilege on any empty-role edge case.
 				claims := &Claims{
 					UserID: apiToken.UserID,
 					OrgID:  apiToken.TenantID,
-					Role:   "admin",
+					Role:   rolesFromAPIToken(apiToken, legacyAdminDefault),
 				}
 				ctx := context.WithValue(r.Context(), ClaimsKey, claims)
 				ctx = context.WithValue(ctx, APITokenKey, apiToken)
@@ -140,4 +164,28 @@ func extractBearerToken(r *http.Request) string {
 		return ""
 	}
 	return parts[1]
+}
+
+// rolesFromAPIToken resolves the effective role for an API token.
+//
+// Priority:
+//  1. The token's own Role field (always set for tokens minted post-migration).
+//  2. If Role is empty AND legacyAdminDefault is true → RoleAdmin (operator
+//     escape hatch that recreates the pre-SEC-2 behaviour).
+//  3. Otherwise → RoleUser (least privilege, the secure default).
+//
+// In practice branch 2/3 are only reachable during the very narrow window
+// between migration 056's DEFINE FIELD and its UPDATE statement — the
+// migration sets every pre-existing row to "admin" unconditionally.
+func rolesFromAPIToken(t *APIToken, legacyAdminDefault bool) string {
+	if t == nil {
+		return RoleUser
+	}
+	if t.Role != "" {
+		return t.Role
+	}
+	if legacyAdminDefault {
+		return RoleAdmin
+	}
+	return RoleUser
 }

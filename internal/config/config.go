@@ -190,6 +190,16 @@ type SecurityConfig struct {
 	OIDC                OIDCConfig `mapstructure:"oidc"`
 	GitHubWebhookSecret string     `mapstructure:"github_webhook_secret"`
 	GitLabWebhookSecret string     `mapstructure:"gitlab_webhook_secret"`
+	// APITokenLegacyAdminDefault controls the role assigned to API tokens whose
+	// role field is empty (i.e. tokens that somehow pre-date migration 056 and
+	// were not updated by the backfill).  Default false (least privilege: empty
+	// role → "user").  Set true temporarily during a rolling migration if
+	// pre-existing tokens must continue acting as admin until the backfill
+	// confirms it has run.  A startup warning is emitted when true.
+	//
+	// Config key: security.api_token_legacy_admin_default
+	// Env var:    SOURCEBRIDGE_SECURITY_API_TOKEN_LEGACY_ADMIN_DEFAULT
+	APITokenLegacyAdminDefault bool `mapstructure:"api_token_legacy_admin_default" toml:"api_token_legacy_admin_default" json:"api_token_legacy_admin_default"`
 }
 
 // OIDCConfig holds OpenID Connect settings for SSO integration.
@@ -650,6 +660,7 @@ func Load() (*Config, error) {
 	v.SetDefault("security.encryption_key", "")
 	v.SetDefault("security.csrf_enabled", cfg.Security.CSRFEnabled)
 	v.SetDefault("security.mode", cfg.Security.Mode)
+	v.SetDefault("security.api_token_legacy_admin_default", false)
 	v.SetDefault("security.github_webhook_secret", "")
 	v.SetDefault("security.gitlab_webhook_secret", "")
 	v.SetDefault("security.oidc.issuer_url", "")

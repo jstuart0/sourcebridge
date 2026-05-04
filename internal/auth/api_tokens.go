@@ -21,6 +21,11 @@ const (
 	TokenKindCIAPI      TokenKind = "ci_api"
 )
 
+// tokenRoleDefault is the role assigned to newly minted tokens when no role is
+// explicitly requested. Kept package-private because callers should never need
+// to reference it directly — use RoleAdmin / RoleUser from roles.go.
+const tokenRoleDefault = RoleUser
+
 type AuthMethod string
 
 const (
@@ -42,10 +47,15 @@ type APIToken struct {
 	AuthMethod  AuthMethod `json:"auth_method,omitempty"`
 	DeviceLabel string     `json:"device_label,omitempty"`
 	Metadata    string     `json:"metadata,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
-	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
-	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
+	// Role is the effective role this token grants when used as a Bearer
+	// credential.  New tokens default to RoleUser (least privilege).
+	// Pre-existing tokens were backfilled to RoleAdmin by migration 056 to
+	// preserve the behavior that existed before SEC-2 was fixed.
+	Role      string     `json:"role"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 }
 
 type CreateTokenInput struct {
@@ -58,6 +68,10 @@ type CreateTokenInput struct {
 	DeviceLabel string
 	Metadata    string
 	ExpiresAt   *time.Time
+	// Role is the effective role this token should carry.  Callers that do not
+	// set this field receive the default (RoleUser / "user").  Only callers with
+	// an admin claim may supply RoleAdmin here; the REST handler enforces this.
+	Role string `json:"role,omitempty"`
 }
 
 type APITokenStore interface {
@@ -94,6 +108,10 @@ func (s *MemoryAPITokenStore) CreateToken(_ context.Context, input CreateTokenIn
 	s.nextID++
 	id := fmt.Sprintf("%04x", s.nextID)
 	now := time.Now()
+	role := input.Role
+	if role == "" {
+		role = tokenRoleDefault
+	}
 	record := &APIToken{
 		ID:          id,
 		Name:        input.Name,
@@ -106,6 +124,7 @@ func (s *MemoryAPITokenStore) CreateToken(_ context.Context, input CreateTokenIn
 		AuthMethod:  input.AuthMethod,
 		DeviceLabel: input.DeviceLabel,
 		Metadata:    input.Metadata,
+		Role:        role,
 		CreatedAt:   now,
 		ExpiresAt:   input.ExpiresAt,
 	}

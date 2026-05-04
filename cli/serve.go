@@ -91,6 +91,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 			"advice", "regression; only for API-only deployments")
 	}
 
+	// Announce API-token legacy-admin-default state (SEC-2 / migration 056).
+	// When true, API tokens whose role field is empty fall back to "admin"
+	// instead of "user" — this recreates the pre-fix behaviour and should only
+	// be used as a temporary operator escape hatch during migration.
+	if cfg.Security.APITokenLegacyAdminDefault {
+		slog.Warn("api_token_legacy_admin_default",
+			"enabled", true,
+			"advice", "tokens with missing role default to admin; disable after migration 056 has been confirmed")
+	}
+
 	// Connect to database
 	surrealDB := db.NewSurrealDB(cfg.Storage)
 	if err := surrealDB.Connect(context.Background()); err != nil {
@@ -477,6 +487,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if desktopAuthStore == nil {
 		desktopAuthStore = rest.NewMemoryDesktopAuthStore()
 	}
+
+	// SEC-2 / migration 056: enumerate every API token still on role='admin' at
+	// boot so operators can audit and deliberately downgrade them.  Runs once at
+	// startup, not per-request.  Only meaningful when an external token store is
+	// live (in-memory mode has no persistent tokens from a previous version).
+	enumerateAdminTokens(context.Background(), tokenStore)
+
 	localAuth := auth.NewLocalAuth(jwtMgr, authPersister)
 
 	// Build the runtime LLM-config resolver. cfg.LLM is the env-bootstrap
@@ -980,6 +997,34 @@ func startDesktopAuthCleanupLoop(name string, cleaner interface {
 		}
 		if count > 0 {
 			slog.Info("auth cleanup completed", "target", name, "deleted", count)
+		}
+	}
+}
+
+// enumerateAdminTokens logs every API token whose role is "admin" so operators
+// can audit and deliberately downgrade them after migration 056.  One slog.Info
+// line per token (token_id, name, created_at).  Safe to call with any store
+// implementation; errors are logged as Warn and do not abort startup.
+// SEC-2 / migration 056.
+func enumerateAdminTokens(ctx context.Context, store auth.APITokenStore) {
+	if store == nil {
+		return
+	}
+	tokens, err := store.ListTokens(ctx)
+	if err != nil {
+		slog.Warn("api_token_role_admin_active: failed to list tokens for audit", "error", err)
+		return
+	}
+	for _, t := range tokens {
+		if t == nil || t.RevokedAt != nil {
+			continue
+		}
+		if t.Role == auth.RoleAdmin {
+			slog.Info("api_token_role_admin_active",
+				"token_id", t.ID,
+				"name", t.Name,
+				"created_at", t.CreatedAt,
+			)
 		}
 	}
 }

@@ -6,6 +6,82 @@ import (
 	"time"
 )
 
+// TestAPITokenRoleDefaultsToUser verifies that CreateToken stores RoleUser
+// when no role is requested.
+func TestAPITokenRoleDefaultsToUser(t *testing.T) {
+	store := NewAPITokenStore()
+	_, record, err := store.CreateToken(context.Background(), CreateTokenInput{
+		Name:   "No Role",
+		UserID: "user-1",
+		Kind:   TokenKindAdminAPI,
+	})
+	if err != nil {
+		t.Fatalf("CreateToken() error: %v", err)
+	}
+	if record.Role != RoleUser {
+		t.Fatalf("expected role %q, got %q", RoleUser, record.Role)
+	}
+}
+
+// TestAPITokenRoleAdminRoundTrips verifies that a token created with RoleAdmin
+// stores and retrieves that role.
+func TestAPITokenRoleAdminRoundTrips(t *testing.T) {
+	store := NewAPITokenStore()
+	rawToken, record, err := store.CreateToken(context.Background(), CreateTokenInput{
+		Name:   "Admin Token",
+		UserID: "user-1",
+		Kind:   TokenKindAdminAPI,
+		Role:   RoleAdmin,
+	})
+	if err != nil {
+		t.Fatalf("CreateToken() error: %v", err)
+	}
+	if record.Role != RoleAdmin {
+		t.Fatalf("expected role %q after create, got %q", RoleAdmin, record.Role)
+	}
+
+	// Round-trip through ValidateToken.
+	validated, err := store.ValidateToken(context.Background(), rawToken)
+	if err != nil {
+		t.Fatalf("ValidateToken() error: %v", err)
+	}
+	if validated == nil {
+		t.Fatal("expected token to validate")
+	}
+	if validated.Role != RoleAdmin {
+		t.Fatalf("expected role %q after validate, got %q", RoleAdmin, validated.Role)
+	}
+}
+
+// TestAPITokenRoleUserRoundTrips verifies that RoleUser survives a
+// ValidateToken round-trip.
+func TestAPITokenRoleUserRoundTrips(t *testing.T) {
+	store := NewAPITokenStore()
+	rawToken, record, err := store.CreateToken(context.Background(), CreateTokenInput{
+		Name:   "User Token",
+		UserID: "user-2",
+		Kind:   TokenKindAdminAPI,
+		Role:   RoleUser,
+	})
+	if err != nil {
+		t.Fatalf("CreateToken() error: %v", err)
+	}
+	if record.Role != RoleUser {
+		t.Fatalf("expected role %q after create, got %q", RoleUser, record.Role)
+	}
+
+	validated, err := store.ValidateToken(context.Background(), rawToken)
+	if err != nil {
+		t.Fatalf("ValidateToken() error: %v", err)
+	}
+	if validated == nil {
+		t.Fatal("expected token to validate")
+	}
+	if validated.Role != RoleUser {
+		t.Fatalf("expected role %q after validate, got %q", RoleUser, validated.Role)
+	}
+}
+
 func TestMemoryAPITokenStoreValidateAndRevoke(t *testing.T) {
 	store := NewAPITokenStore()
 	rawToken, record, err := store.CreateToken(context.Background(), CreateTokenInput{
