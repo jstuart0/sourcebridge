@@ -13,14 +13,25 @@
 //   - Mutation.enableLivingWikiForRepo
 //   - Mutation.disableLivingWikiForRepo
 //
-// This file holds only mapping helpers and cross-resolver utilities so they
+// This file holds mapping helpers and cross-resolver utilities so they
 // stay out of the large schema.resolvers.go file.
+//
+// GQL-3 helpers (Phase 1 Slice 3):
+//   - validateEnableLivingWikiInput — pure input validation (sinks, page count, selection shape)
+//   - persistLivingWikiSettings     — write settings to the store
+//   - persistSettingsAndNotice      — persist + return a notice result (no-job-gate paths)
+//   - enqueueWikiJob                — build cold-start runner and enqueue the LLM job
 
 package graphql
 
 import (
+	"context"
+	"fmt"
+	"strings"
+
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
+	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 )
 
@@ -232,4 +243,212 @@ func deriveLivingWikiJobMode(s livingwiki.RepositoryLivingWikiSettings) string {
 		return GenerationModeLWOverview
 	}
 	return GenerationModeLWDetailed
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GQL-3 helpers: extracted from EnableLivingWikiForRepo (Phase 1 Slice 3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// validateEnableLivingWikiInput performs all pure input validation for the
+// enableLivingWikiForRepo mutation and returns the mapped sinks so the caller
+// does not have to recompute them. It covers three groups:
+//
+//  1. Sink presence and integration-name checks (enable-specific).
+//  2. pageCountOverride range (1..500).
+//  3. Selection-shape invariants: retryExcludedOnly conflicts,
+//     planSignature required when selectedPageIds is non-nil.
+//
+// All checks are pure (no I/O) and fire before any settings load or
+// persistence. Extracted from the EnableLivingWikiForRepo inline body so
+// RetryLivingWikiJob can delegate to the same validation.
+func validateEnableLivingWikiInput(input EnableLivingWikiForRepoInput) ([]livingwiki.RepoWikiSink, error) {
+	// ── Group 1: Sink validation ─────────────────────────────────────────────
+	mappedSinks := mapSinkInputs(input.Sinks)
+	if len(mappedSinks) == 0 {
+		notice := "Select at least one sink (e.g. Confluence, Notion, Git repo) before enabling. Without a sink, no pages can be published."
+		return nil, &noticeOnlyError{notice: notice}
+	}
+	for i, s := range mappedSinks {
+		if s.Kind != livingwiki.RepoWikiSinkGitRepo && strings.TrimSpace(s.IntegrationName) == "" {
+			notice := fmt.Sprintf(
+				"The %s sink (#%d) needs an integration name. For Confluence enter the space key (e.g. SD); for Notion enter the database ID.",
+				s.Kind, i+1,
+			)
+			return nil, &noticeOnlyError{notice: notice}
+		}
+	}
+
+	// ── Group 2: pageCountOverride range ─────────────────────────────────────
+	if input.PageCountOverride != nil {
+		v := *input.PageCountOverride
+		if v < 1 || v > 500 {
+			return nil, &gqlerror.Error{
+				Message: fmt.Sprintf("pageCountOverride must be between 1 and 500 (got %d)", v),
+				Extensions: map[string]any{
+					"code": "LIVING_WIKI_INVALID_PAGE_COUNT_OVERRIDE",
+				},
+			}
+		}
+	}
+
+	// ── Group 3: Selection-shape invariants ───────────────────────────────────
+	if input.RetryExcludedOnly != nil && *input.RetryExcludedOnly && input.SelectedPageIds != nil {
+		return nil, &gqlerror.Error{
+			Message: "selectedPageIds cannot be combined with retryExcludedOnly=true",
+			Extensions: map[string]any{
+				"code": "LIVING_WIKI_INPUT_CONFLICT",
+			},
+		}
+	}
+	if input.SelectedPageIds != nil && (input.PlanSignature == nil || *input.PlanSignature == "") {
+		return nil, &gqlerror.Error{
+			Message: "planSignature is required when selectedPageIds is supplied (including the empty-list case)",
+			Extensions: map[string]any{
+				"code": "LIVING_WIKI_PLAN_SIGNATURE_REQUIRED",
+			},
+		}
+	}
+
+	return mappedSinks, nil
+}
+
+// noticeOnlyError is returned by validateEnableLivingWikiInput when the input
+// is structurally valid but the operation cannot proceed for user-facing
+// reasons (e.g. no sinks configured). The EnableLivingWikiForRepo resolver
+// turns this into an EnableLivingWikiResult{Notice: &notice} rather than a
+// GraphQL error, preserving the pre-extraction wire behaviour.
+type noticeOnlyError struct{ notice string }
+
+func (e *noticeOnlyError) Error() string { return e.notice }
+
+// persistLivingWikiSettings writes the settings row to the store.
+// Returns a wrapped error on failure.
+//
+// TODO(CA-XXX): RMW race documented at original schema.resolvers.go:2568-2572
+// — fixing requires CAS/optimistic locking on the settings store; deferred
+// to follow-up campaign.
+func persistLivingWikiSettings(ctx context.Context, store livingwiki.RepoSettingsStore, settings livingwiki.RepositoryLivingWikiSettings) error {
+	if err := store.SetRepoSettings(ctx, settings); err != nil {
+		return fmt.Errorf("persist repo settings: %w", err)
+	}
+	return nil
+}
+
+// persistSettingsAndNotice persists the settings row and returns a
+// EnableLivingWikiResult carrying the given notice string. Used by the three
+// no-job-gate paths (globally disabled, kill-switch, nil orchestrator) that
+// share the same persist-then-notice pattern.
+func persistSettingsAndNotice(
+	ctx context.Context,
+	store livingwiki.RepoSettingsStore,
+	settings livingwiki.RepositoryLivingWikiSettings,
+	gql *RepositoryLivingWikiSettings,
+	notice string,
+) (*EnableLivingWikiResult, error) {
+	if err := persistLivingWikiSettings(ctx, store, settings); err != nil {
+		return nil, err
+	}
+	return &EnableLivingWikiResult{Settings: gql, Notice: &notice}, nil
+}
+
+// enqueueWikiJob builds the cold-start runner and enqueues the living-wiki
+// LLM job via the orchestrator. It is called after settings have been
+// persisted. On orchestrator enqueue failure the error is surfaced as a
+// notice (the settings are already saved; a dispatch failure should not
+// roll back user intent).
+//
+// Parameters:
+//   - settings: the persisted settings row (used for sink/kind lookup).
+//   - effectiveSettings: settings with transient mode-flag overrides applied
+//     (used for MaxPagesPerJob cap and excludedPageIDs lookup).
+//   - jobMode: deriveLivingWikiJobMode(effectiveSettings).
+//   - input: the original mutation input (for RetryExcludedOnly, PageCountOverride,
+//     SelectedPageIds that drive the cold-start runner).
+//   - gql: pre-mapped GraphQL settings value for the result payload.
+func enqueueWikiJob(
+	ctx context.Context,
+	r *Resolver,
+	settings livingwiki.RepositoryLivingWikiSettings,
+	effectiveSettings livingwiki.RepositoryLivingWikiSettings,
+	jobMode string,
+	input EnableLivingWikiForRepoInput,
+	gql *RepositoryLivingWikiSettings,
+) (*EnableLivingWikiResult, error) {
+	retryExcluded := input.RetryExcludedOnly != nil && *input.RetryExcludedOnly
+	jobType := "living_wiki_cold_start"
+	if retryExcluded {
+		jobType = "living_wiki_retry_excluded"
+	}
+
+	// When retryExcludedOnly=true, look up the excluded page IDs from the
+	// most recent job result so the cold-start runner can scope its page set.
+	var excludedPageIDs []string
+	if retryExcluded && r.LivingWikiJobResultStore != nil {
+		if last, err := r.LivingWikiJobResultStore.LastResultForRepo(ctx, defaultTenantID, input.RepositoryID); err == nil && last != nil {
+			excludedPageIDs = last.ExcludedPageIDs
+		}
+	}
+
+	// Derive the primary sink kind for Prometheus labels from the first
+	// configured sink (fall back to "unknown" when no sinks are set).
+	sinkKind := "unknown"
+	if len(settings.Sinks) > 0 {
+		sinkKind = strings.ToLower(string(settings.Sinks[0].Kind))
+	}
+
+	req := &llm.EnqueueRequest{
+		Subsystem: llm.Subsystem("living_wiki"),
+		JobType:   jobType,
+		// CR12 Part B: mode-aware TargetKey so Detailed and Overview jobs for the
+		// same repo don't de-duplicate each other when both are in-flight.
+		TargetKey:      fmt.Sprintf("lw:%s:%s:%s", defaultTenantID, input.RepositoryID, jobMode),
+		GenerationMode: jobMode,
+		RepoID:         input.RepositoryID,
+		// R3 slice 3: living-wiki cold-start runs LLM jobs (page generation,
+		// understanding, etc.). Stamp llm_provider for Monitor + per-provider
+		// metrics. Use OpLivingWikiColdStart unless this is regen.
+		LLMProvider: r.resolveLLMProviderForOp(ctx, input.RepositoryID, livingWikiOpForJobType(jobType)),
+		Priority:    llm.PriorityInteractive,
+		// MaxAttempts=1 disables the LLM-orchestrator's within-job retry for
+		// cold-start. A failed cold-start has failure modes (page-level LLM
+		// timeouts, gate exclusions, provider unreachable) that are not
+		// transient enough to warrant a 5-second-backoff in-process retry.
+		// The retry would also append a duplicate row to lw_job_results
+		// (Save is append-only; see internal/settings/livingwiki/models.go),
+		// confusing the UI by showing two consecutive "failed" rows for what
+		// the user perceives as one cold-start. Users retry explicitly via
+		// the UI; smart-resume (commit 15be8a8) skips already-published
+		// pages so the explicit retry is cheap.
+		MaxAttempts: 1,
+		RunWithContext: buildColdStartRunner(coldStartConfig{
+			LWOrch:             r.LivingWikiLiveOrchestrator,
+			RepoID:             input.RepositoryID,
+			TenantID:           defaultTenantID,
+			GraphStore:         r.getStore(ctx),
+			WorkerClient:       r.Worker,
+			LLMCaller:          r.LLMCaller,
+			ExcludedPageIDs:    excludedPageIDs,
+			SinkKind:           sinkKind,
+			JobResultStore:     r.LivingWikiJobResultStore,
+			Broker:             r.livingWikiBroker(),
+			RepoSettingsStore:  r.LivingWikiRepoStore,
+			ClusterStore:       r.ClusterStore,
+			KnowledgeStore:     r.KnowledgeStore,
+			MetricsCollector:   nil,                              // fall back to lwmetrics.Default
+			LLMResolver:        r.LLMResolver,                    // for FrozenResolver + fingerprint model identity (CR5, LD-7)
+			PublishStatusStore: r.LivingWikiPagePublishStore,     // for per-page dispatch state (Phase 1)
+			Mode:               jobMode,                          // Phase 4a: mode-aware taxonomy
+			ComprehensionStore: r.ComprehensionStore,             // for quality-gate tier registry lookup (CA-150 Phase 4)
+			MaxPagesPerJob:     effectiveSettings.MaxPagesPerJob, // CA-146: repo-level cap (now wired)
+			PageCountOverride:  input.PageCountOverride,          // CA-146: per-run override (nil = use repo setting)
+			SelectedPageIDs:    input.SelectedPageIds,            // CA-146 Phase 2: nil-passthrough; closure handles (codex r1 H1)
+		}),
+	}
+
+	job, err := r.Orchestrator.Enqueue(req)
+	if err != nil {
+		notice := fmt.Sprintf("Settings saved but job dispatch failed: %s", err.Error())
+		return &EnableLivingWikiResult{Settings: gql, Notice: &notice}, nil
+	}
+	return &EnableLivingWikiResult{Settings: gql, JobID: &job.ID}, nil
 }

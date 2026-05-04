@@ -685,99 +685,15 @@ func (r *mutationResolver) DiscussCode(ctx context.Context, input DiscussCodeInp
 		return r.dispatchDiscussThroughOrchestrator(ctx, input)
 	}
 
-	contextParts := make([]string, 0, 4)
-	if input.ConversationHistory != nil && len(input.ConversationHistory) > 0 {
-		contextParts = append(contextParts, "Recent follow-up context:\n"+strings.Join(input.ConversationHistory, "\n\n"))
-	}
-	if input.ArtifactID != nil && *input.ArtifactID != "" && r.KnowledgeStore != nil {
-		if artifact := r.KnowledgeStore.GetKnowledgeArtifact(*input.ArtifactID); artifact != nil {
-			contextParts = append(contextParts, discussionContextFromArtifact(artifact))
-		}
-	}
-	if input.RequirementID != nil && *input.RequirementID != "" {
-		if req := r.getStore(ctx).GetRequirement(*input.RequirementID); req != nil {
-			contextParts = append(contextParts, fmt.Sprintf(
-				"Requirement context:\nID: %s\nTitle: %s\nDescription: %s",
-				req.ExternalID, req.Title, req.Description,
-			))
-		}
-	}
-
-	// Prefer provided code; otherwise use indexed symbol context; finally fall back to file reads.
-	var contextCode string
-	if input.Code != nil && *input.Code != "" {
-		contextCode = *input.Code
-		contextParts = append(contextParts, contextCode)
-	} else if input.SymbolID != nil && *input.SymbolID != "" {
-		if sym := r.getStore(ctx).GetSymbol(*input.SymbolID); sym != nil {
-			contextParts = append(contextParts, discussionContextFromStoredSymbol(sym))
-			if input.FilePath == nil || *input.FilePath == "" {
-				filePath := sym.FilePath
-				input.FilePath = &filePath
-			}
-			// Also read the actual source file so the LLM has full code context, not just metadata.
-			if input.FilePath != nil && *input.FilePath != "" {
-				repo := r.getStore(ctx).GetRepository(input.RepositoryID)
-				repoRoot, err := resolveRepoSourcePath(repo)
-				if err == nil {
-					content, err := readSourceFile(repoRoot, *input.FilePath)
-					if err == nil && content != "" {
-						contextParts = append(contextParts, content)
-					}
-				}
-			}
-		}
-	}
-	if len(contextParts) == 0 && input.FilePath != nil && *input.FilePath != "" {
-		repo := r.getStore(ctx).GetRepository(input.RepositoryID)
-		repoRoot, err := resolveRepoSourcePath(repo)
-		if err != nil {
-			return nil, fmt.Errorf("source unavailable: %w", err)
-		}
-		content, err := readSourceFile(repoRoot, *input.FilePath)
-		if err != nil {
-			return nil, fmt.Errorf("reading source: %w", err)
-		}
-		contextParts = append(contextParts, content)
-	}
-	contextCode = strings.TrimSpace(strings.Join(contextParts, "\n\n"))
-
-	if contextCode == "" {
-		return nil, fmt.Errorf("provide code, filePath, artifactId, or symbolId")
-	}
-
-	lang := commonv1.Language_LANGUAGE_UNSPECIFIED
-	if input.Language != nil {
-		lang = languageToProto(input.Language.String())
-	} else if input.FilePath != nil && *input.FilePath != "" {
-		lang = deriveLanguage(*input.FilePath)
-	}
-
-	// Build context symbols from the code
-	var contextSymbols []*commonv1.CodeSymbol
-	if input.SymbolID != nil && *input.SymbolID != "" {
-		if sym := r.getStore(ctx).GetSymbol(*input.SymbolID); sym != nil {
-			contextSymbols = append(contextSymbols, protoCodeSymbolFromStored(sym))
-		}
-	}
-	if input.FilePath != nil {
-		syms := r.getStore(ctx).GetSymbolsByFile(input.RepositoryID, *input.FilePath)
-		for _, s := range syms {
-			contextSymbols = append(contextSymbols, &commonv1.CodeSymbol{
-				Id:   s.ID,
-				Name: s.Name,
-			})
-		}
+	contextCode, contextSymbols, lang, filePathArg, err := assembleDiscussionContext(ctx, r.Resolver, input)
+	if err != nil {
+		return nil, err
 	}
 
 	var resp *reasoningv1.AnswerQuestionResponse
-	filePathArg := ""
-	if input.FilePath != nil {
-		filePathArg = *input.FilePath
-	}
 	targetKey := fmt.Sprintf("reasoning:discuss:%s:%s:%s",
 		input.RepositoryID, filePathArg, hashString(input.Question))
-	err := r.runSyncLLMJob(ctx, llm.SubsystemReasoning, "discuss_code", targetKey, input.RepositoryID,
+	err = r.runSyncLLMJob(ctx, llm.SubsystemReasoning, "discuss_code", targetKey, input.RepositoryID,
 		func(rt llm.Runtime) error {
 			var callErr error
 			resp, callErr = r.LLMCaller.AnswerQuestion(ctx, input.RepositoryID, resolution.OpDiscussion, &reasoningv1.AnswerQuestionRequest{
@@ -2478,38 +2394,19 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
 
-	// Validate sinks: a save with empty sinks would silently succeed and the
-	// cold-start dispatch would no-op with no user-visible feedback. Refuse
-	// the save and surface a notice the UI can render.
-	mappedSinks := mapSinkInputs(input.Sinks)
-	if len(mappedSinks) == 0 {
-		notice := "Select at least one sink (e.g. Confluence, Notion, Git repo) before enabling. Without a sink, no pages can be published."
-		return &EnableLivingWikiResult{Notice: &notice}, nil
-	}
-	for i, s := range mappedSinks {
-		// git_repo's integration name is auto-derived; everything else needs a
-		// user-supplied value (Confluence space key, Notion database ID, etc.).
-		if s.Kind != livingwiki.RepoWikiSinkGitRepo && strings.TrimSpace(s.IntegrationName) == "" {
-			notice := fmt.Sprintf("The %s sink (#%d) needs an integration name. For Confluence enter the space key (e.g. SD); for Notion enter the database ID.", s.Kind, i+1)
-			return &EnableLivingWikiResult{Notice: &notice}, nil
-		}
-	}
-
-	// ── Step 1: Validate pageCountOverride range (1..500) ────────────────────
+	// ── Step 1: Validate input ────────────────────────────────────────────────
 	//
-	// Validated before settings load so invalid values produce a fast, cheap
-	// error regardless of global-enabled state or orchestrator.
-	if input.PageCountOverride != nil {
-		v := *input.PageCountOverride
-		if v < 1 || v > 500 {
-			return nil, &gqlerror.Error{
-				Message: fmt.Sprintf(
-					"pageCountOverride must be between 1 and 500 (got %d)", v),
-				Extensions: map[string]any{
-					"code": "LIVING_WIKI_INVALID_PAGE_COUNT_OVERRIDE",
-				},
-			}
+	// validateEnableLivingWikiInput checks sinks, pageCountOverride range,
+	// and selection-shape invariants (retryExcludedOnly conflict,
+	// planSignature required). Pure: no I/O; fires before any settings load.
+	// Shape validation fires even when the system is paused so user-input
+	// errors are surfaced immediately rather than masked by gate notices.
+	mappedSinks, valErr := validateEnableLivingWikiInput(input)
+	if valErr != nil {
+		if ne, ok := valErr.(*noticeOnlyError); ok {
+			return &EnableLivingWikiResult{Notice: &ne.notice}, nil
 		}
+		return nil, valErr
 	}
 
 	// ── Step 2: Load + build defaulted settings, derive effectiveSettings and
@@ -2528,11 +2425,6 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 	// Without this seed, codex r2 noted, a first UI enable would land
 	// with both mode flags off — the UI would show "No build modes
 	// enabled" right after the user clicked Enable.
-	//
-	// Note: this is a read-modify-write on the settings row; concurrent
-	// EnableLivingWikiForRepo calls for the same repo could race. The
-	// pre-existing code already had a write-without-load pattern with
-	// the same race window; this change does not widen the race.
 	existing, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, input.RepositoryID)
 	if err != nil {
 		return nil, fmt.Errorf("load existing repo settings: %w", err)
@@ -2550,8 +2442,8 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 	settings.RepoID = input.RepositoryID
 	settings.Enabled = true
 	// Re-enable: clear DisabledAt to match UpdateRepositoryLivingWikiSettings
-	// semantics (lines ~2447-2454). A repo that was previously disabled and
-	// is now being re-enabled must not retain its disabled-at timestamp.
+	// semantics. A repo that was previously disabled and is now being
+	// re-enabled must not retain its disabled-at timestamp.
 	settings.DisabledAt = nil
 	settings.Mode = livingwiki.RepoWikiMode(input.Mode.String())
 	settings.Sinks = mappedSinks
@@ -2580,8 +2472,8 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 	}
 	jobMode := deriveLivingWikiJobMode(effectiveSettings)
 
-	// ── Step 3: Resolve frozenCaller (for use in signature-validation taxonomy
-	//            resolve below; same snap used so resolver+closure are symmetric)
+	// ── Step 3: Resolve frozenCaller (for signature-validation taxonomy;
+	//            same snap used in closure for resolver+closure symmetry)
 	var frozenCaller *llmcall.Caller
 	if r.LLMResolver != nil && r.LLMCaller != nil {
 		if snap, resolveErr := r.LLMResolver.Resolve(ctx, input.RepositoryID, resolution.OpLivingWikiColdStart); resolveErr == nil {
@@ -2589,92 +2481,34 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 		}
 	}
 
-	// ── Step 4: Selection input shape validation ──────────────────────────────
+	// ── Step 4: No-job gates ──────────────────────────────────────────────────
 	//
-	// CA-146 Phase 2: validate selection input shape BEFORE settings persistence,
-	// BEFORE no-job gates, BEFORE enqueue. Errors returned here become the
-	// GraphQL response; closure errors do not.
-	//
-	// Shape validation fires even when the system is paused (kill-switch, global
-	// disabled) — returning a gate notice while the caller supplied an invalid
-	// input combination would mask the real input bug.
-	if input.RetryExcludedOnly != nil && *input.RetryExcludedOnly &&
-		input.SelectedPageIds != nil {
-		return nil, &gqlerror.Error{
-			Message: "selectedPageIds cannot be combined with retryExcludedOnly=true",
-			Extensions: map[string]any{
-				"code": "LIVING_WIKI_INPUT_CONFLICT",
-			},
-		}
-	}
-	// (codex r1 C2) Nullable-list contract: nil = "no filter".
-	// Non-nil (even empty list) REQUIRES planSignature.
-	if input.SelectedPageIds != nil &&
-		(input.PlanSignature == nil || *input.PlanSignature == "") {
-		return nil, &gqlerror.Error{
-			Message: "planSignature is required when selectedPageIds is supplied (including the empty-list case)",
-			Extensions: map[string]any{
-				"code": "LIVING_WIKI_PLAN_SIGNATURE_REQUIRED",
-			},
-		}
-	}
-
-	// ── Step 5: No-job gates ──────────────────────────────────────────────────
-	//
-	// These gate on system state (kill-switch, global disabled, missing
-	// orchestrator). They return a notice payload with settings populated from
-	// the in-memory settings struct (NOT yet persisted — SetRepoSettings runs
-	// at step 7 after signature validation). This is safe: the caller receives
-	// the settings they submitted, which is what they'd see post-persist anyway.
-	//
-	// The no-job gates run AFTER shape validation (step 4) so user-input errors
-	// are surfaced immediately. They run BEFORE signature validation (step 6) to
-	// avoid paying the taxonomy cost when the system is paused.
+	// Gate on system state (kill-switch, global disabled, missing orchestrator).
+	// Each path persists settings and returns a notice. Runs BEFORE signature
+	// validation to avoid paying taxonomy cost when the system is paused.
 	globalEnabled := r.isLivingWikiGloballyEnabled()
 	killSwitch := os.Getenv("SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH") == "true"
-
 	gql := mapRepoLivingWikiSettings(&settings)
 
 	if !globalEnabled {
-		notice := "Living Wiki is not enabled globally. Enable it in the global settings panel, then jobs will start automatically."
-		if err := r.LivingWikiRepoStore.SetRepoSettings(ctx, settings); err != nil {
-			return nil, fmt.Errorf("persist repo settings: %w", err)
-		}
-		return &EnableLivingWikiResult{
-			Settings: gql,
-			Notice:   &notice,
-		}, nil
+		return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+			"Living Wiki is not enabled globally. Enable it in the global settings panel, then jobs will start automatically.")
 	}
-
 	if killSwitch {
-		notice := "Living wiki is paused via SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH. Settings are saved but no jobs will run until the kill-switch is unset."
-		if err := r.LivingWikiRepoStore.SetRepoSettings(ctx, settings); err != nil {
-			return nil, fmt.Errorf("persist repo settings: %w", err)
-		}
-		return &EnableLivingWikiResult{
-			Settings: gql,
-			Notice:   &notice,
-		}, nil
+		return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+			"Living wiki is paused via SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH. Settings are saved but no jobs will run until the kill-switch is unset.")
 	}
-
 	if r.Orchestrator == nil {
-		notice := "Living Wiki orchestrator is not available. Jobs will run when the server is fully configured."
-		if err := r.LivingWikiRepoStore.SetRepoSettings(ctx, settings); err != nil {
-			return nil, fmt.Errorf("persist repo settings: %w", err)
-		}
-		return &EnableLivingWikiResult{Settings: gql, Notice: &notice}, nil
+		return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+			"Living Wiki orchestrator is not available. Jobs will run when the server is fully configured.")
 	}
 
-	// ── Step 6: Signature validation against fresh taxonomy ──────────────────
+	// ── Step 5: Signature validation against fresh taxonomy ──────────────────
 	//
 	// CA-146 Phase 2: only when selectedPageIds is non-nil (codex r1 H2
 	// ordering — gates BEFORE taxonomy, validation BEFORE SetRepoSettings).
-	//
-	// Re-resolve taxonomy synchronously to recompute the current signature.
-	// The resolved slice is used ONLY to validate; we throw it away after.
-	// The closure will re-resolve for snapshot consistency (model identity /
-	// quality-gate tier / frozen caller all derive from one resolution —
-	// codex r1 H1).
+	// The resolved slice is used ONLY to validate; the closure re-resolves
+	// for snapshot consistency (codex r1 H1).
 	if input.SelectedPageIds != nil {
 		freshPages, taxErr := resolveTaxonomyForMode(
 			ctx, jobMode, input.RepositoryID,
@@ -2684,15 +2518,11 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 			return nil, fmt.Errorf("taxonomy resolution: %w", taxErr)
 		}
 
-		// Apply cap to mirror what the closure will see post-cap.
 		cappedForSig, capSource, capValue, effectiveCap, preCap :=
 			applyPageCap(freshPages, effectiveSettings.MaxPagesPerJob, input.PageCountOverride, false)
 
-		// Compute current signature against cap-applied page IDs.
 		currentSig := computePlanSignature(pageIDsOf(cappedForSig), jobMode, effectiveCap)
 		if currentSig != *input.PlanSignature {
-			// Build a fresh plan to return in the error extension so the
-			// client can present the new plan without a second round-trip.
 			var clusterCount, topCount, repoWideCount int
 			for _, p := range cappedForSig {
 				switch classifyPageType(p) {
@@ -2716,8 +2546,7 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 		}
 
 		// (codex r1 C2) Validate that every selected ID exists in the
-		// cap-applied current plan. Unknown IDs reject — silently dropping
-		// them would let stale clients submit and succeed.
+		// cap-applied current plan.
 		knownIDs := make(map[string]bool, len(cappedForSig))
 		for _, p := range cappedForSig {
 			knownIDs[p.ID] = true
@@ -2737,101 +2566,19 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 				},
 			}
 		}
-		// freshPages, cappedForSig discarded — closure re-resolves for
-		// snapshot consistency (codex r1 H1).
 	}
 
-	// ── Step 7: Persist settings ──────────────────────────────────────────────
+	// ── Step 6: Persist settings ──────────────────────────────────────────────
 	//
-	// Settings are persisted AFTER signature validation so a stale Build click
-	// cannot mutate stored settings before the error is returned
+	// Persisted AFTER signature validation so a stale Build click cannot
+	// mutate stored settings before the error is returned
 	// (TestEnableLivingWikiForRepo_StaleSignatureDoesNotPersistSettings).
-	if err := r.LivingWikiRepoStore.SetRepoSettings(ctx, settings); err != nil {
-		return nil, fmt.Errorf("persist repo settings: %w", err)
+	if err := persistLivingWikiSettings(ctx, r.LivingWikiRepoStore, settings); err != nil {
+		return nil, err
 	}
 
-	// ── Step 8: Build cold-start config + enqueue ─────────────────────────────
-	retryExcluded := input.RetryExcludedOnly != nil && *input.RetryExcludedOnly
-	jobType := "living_wiki_cold_start"
-	if retryExcluded {
-		jobType = "living_wiki_retry_excluded"
-	}
-
-	// When retryExcludedOnly=true, look up the excluded page IDs from the
-	// most recent job result so the cold-start runner can scope its page set.
-	var excludedPageIDs []string
-	if retryExcluded && r.LivingWikiJobResultStore != nil {
-		if last, err := r.LivingWikiJobResultStore.LastResultForRepo(ctx, defaultTenantID, input.RepositoryID); err == nil && last != nil {
-			excludedPageIDs = last.ExcludedPageIDs
-		}
-	}
-
-	// Derive the primary sink kind for Prometheus labels from the first
-	// configured sink (fall back to "unknown" when no sinks are set).
-	sinkKind := "unknown"
-	if len(settings.Sinks) > 0 {
-		sinkKind = strings.ToLower(string(settings.Sinks[0].Kind))
-	}
-
-	req := &llm.EnqueueRequest{
-		Subsystem: llm.Subsystem("living_wiki"),
-		JobType:   jobType,
-		// CR12 Part B: mode-aware TargetKey so Detailed and Overview jobs for the
-		// same repo don't de-duplicate each other when both are in-flight.
-		TargetKey:      fmt.Sprintf("lw:%s:%s:%s", defaultTenantID, input.RepositoryID, jobMode),
-		GenerationMode: jobMode,
-		RepoID:         input.RepositoryID,
-		// R3 slice 3: living-wiki cold-start runs LLM jobs (page generation,
-		// understanding, etc.). Stamp llm_provider for Monitor + per-provider
-		// metrics. Use OpLivingWikiColdStart unless this is regen.
-		LLMProvider: r.resolveLLMProviderForOp(ctx, input.RepositoryID, livingWikiOpForJobType(jobType)),
-		Priority:    llm.PriorityInteractive,
-		// MaxAttempts=1 disables the LLM-orchestrator's within-job retry for
-		// cold-start. A failed cold-start has failure modes (page-level LLM
-		// timeouts, gate exclusions, provider unreachable) that are not
-		// transient enough to warrant a 5-second-backoff in-process retry.
-		// The retry would also append a duplicate row to lw_job_results
-		// (Save is append-only; see internal/settings/livingwiki/models.go),
-		// confusing the UI by showing two consecutive "failed" rows for what
-		// the user perceives as one cold-start. Users retry explicitly via
-		// the UI; smart-resume (commit 15be8a8) skips already-published
-		// pages so the explicit retry is cheap.
-		MaxAttempts: 1,
-		RunWithContext: buildColdStartRunner(coldStartConfig{
-			LWOrch:             r.LivingWikiLiveOrchestrator,
-			RepoID:             input.RepositoryID,
-			TenantID:           defaultTenantID,
-			GraphStore:         r.getStore(ctx),
-			WorkerClient:       r.Worker,
-			LLMCaller:          r.LLMCaller,
-			ExcludedPageIDs:    excludedPageIDs,
-			SinkKind:           sinkKind,
-			JobResultStore:     r.LivingWikiJobResultStore,
-			Broker:             r.livingWikiBroker(),
-			RepoSettingsStore:  r.LivingWikiRepoStore,
-			ClusterStore:       r.ClusterStore,
-			KnowledgeStore:     r.KnowledgeStore,
-			MetricsCollector:   nil,                              // fall back to lwmetrics.Default
-			LLMResolver:        r.LLMResolver,                    // for FrozenResolver + fingerprint model identity (CR5, LD-7)
-			PublishStatusStore: r.LivingWikiPagePublishStore,     // for per-page dispatch state (Phase 1)
-			Mode:               jobMode,                          // Phase 4a: mode-aware taxonomy
-			ComprehensionStore: r.ComprehensionStore,             // for quality-gate tier registry lookup (CA-150 Phase 4)
-			MaxPagesPerJob:     effectiveSettings.MaxPagesPerJob, // CA-146: repo-level cap (now wired)
-			PageCountOverride:  input.PageCountOverride,          // CA-146: per-run override (nil = use repo setting)
-			SelectedPageIDs:    input.SelectedPageIds,            // CA-146 Phase 2: nil-passthrough; closure handles (codex r1 H1)
-		}),
-	}
-
-	job, err := r.Orchestrator.Enqueue(req)
-	if err != nil {
-		notice := fmt.Sprintf("Settings saved but job dispatch failed: %s", err.Error())
-		return &EnableLivingWikiResult{Settings: gql, Notice: &notice}, nil
-	}
-
-	return &EnableLivingWikiResult{
-		Settings: gql,
-		JobID:    &job.ID,
-	}, nil
+	// ── Step 7: Enqueue cold-start job ────────────────────────────────────────
+	return enqueueWikiJob(ctx, r.Resolver, settings, effectiveSettings, jobMode, input, gql)
 }
 
 // DisableLivingWikiForRepo resolves Mutation.disableLivingWikiForRepo.
@@ -2869,6 +2616,12 @@ func (r *mutationResolver) DisableLivingWikiForRepo(ctx context.Context, reposit
 // current repo settings. When retryExcludedOnly is true the job is scoped
 // to pages that were excluded in the most recent run (the "Retry excluded
 // pages" CTA). When false (or nil), a full cold-start is triggered.
+//
+// Calls the GQL-3 helpers directly instead of constructing a fake
+// EnableLivingWikiForRepoInput and re-entering EnableLivingWikiForRepo.
+// Enable-specific sink validation is skipped (existing settings already
+// passed validation). Selection-shape and no-job-gate checks are
+// preserved via validateEnableLivingWikiInput and the gate checks below.
 func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID string, retryExcludedOnly *bool, mode *LivingWikiBuildMode, pageCountOverride *int, selectedPageIds []string, planSignature *string) (*EnableLivingWikiResult, error) {
 	// CA-142: refuse new cold-start jobs during graceful drain.
 	if err := r.checkServerDraining(); err != nil {
@@ -2886,18 +2639,6 @@ func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID 
 		current = defaultRepoSettings(repositoryID)
 	}
 
-	// Build input, preserving existing mode flags by default.
-	// CA-146: forward pageCountOverride, selectedPageIds, and planSignature as-is.
-	input := EnableLivingWikiForRepoInput{
-		RepositoryID:      repositoryID,
-		Mode:              RepoWikiMode(current.Mode),
-		Sinks:             repoSinksToInputs(current.Sinks),
-		RetryExcludedOnly: retryExcludedOnly,
-		PageCountOverride: pageCountOverride,
-		SelectedPageIds:   selectedPageIds,
-		PlanSignature:     planSignature,
-	}
-
 	// Mode override: if both modes are off and no explicit mode given, error.
 	bothOff := !current.LivingWikiOverviewEnabled && !current.LivingWikiDetailedEnabled
 	if bothOff && (mode == nil || *mode == LivingWikiBuildModeAllEnabled) {
@@ -2907,23 +2648,89 @@ func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID 
 		}
 	}
 
+	// Build the effective settings for this retry, preserving all stored
+	// settings (sinks, mode flags, caps, etc.) and applying transient
+	// mode-flag overrides when the caller targets a specific mode.
+	settings := *current
+	settings.Enabled = true
+	settings.DisabledAt = nil
+	settings.UpdatedAt = time.Now()
+	settings.UpdatedBy = userIDFromContext(ctx)
+
+	effectiveSettings := settings
 	if mode != nil {
 		switch *mode {
 		case LivingWikiBuildModeOverview:
-			t, f := true, false
-			input.LivingWikiOverviewEnabled = &t
-			input.LivingWikiDetailedEnabled = &f
+			effectiveSettings.LivingWikiOverviewEnabled = true
+			effectiveSettings.LivingWikiDetailedEnabled = false
 		case LivingWikiBuildModeDetailed:
-			t, f := true, false
-			input.LivingWikiOverviewEnabled = &f
-			input.LivingWikiDetailedEnabled = &t
-			// ALL_ENABLED: preserve existing flags (no override needed)
+			effectiveSettings.LivingWikiOverviewEnabled = false
+			effectiveSettings.LivingWikiDetailedEnabled = true
+			// LivingWikiBuildModeAllEnabled: preserve stored flags (no override)
+		}
+	}
+	jobMode := deriveLivingWikiJobMode(effectiveSettings)
+
+	// Validate pageCountOverride range (1..500). This check applies equally
+	// to retry runs; a bad value should fail fast before any I/O.
+	if pageCountOverride != nil {
+		v := *pageCountOverride
+		if v < 1 || v > 500 {
+			return nil, &gqlerror.Error{
+				Message: fmt.Sprintf("pageCountOverride must be between 1 and 500 (got %d)", v),
+				Extensions: map[string]any{
+					"code": "LIVING_WIKI_INVALID_PAGE_COUNT_OVERRIDE",
+				},
+			}
 		}
 	}
 
-	// Delegate to EnableLivingWikiForRepo so all the gating logic (global
-	// enabled, kill-switch, orchestrator nil checks) runs exactly once.
-	return r.EnableLivingWikiForRepo(ctx, input)
+	// Selection-shape invariants (CA-146): retryExcludedOnly conflict and
+	// planSignature-required checks must still fire. Sink validation is not
+	// needed for retry (existing settings already passed it).
+	retryInput := EnableLivingWikiForRepoInput{
+		RepositoryID:      repositoryID,
+		RetryExcludedOnly: retryExcludedOnly,
+		SelectedPageIds:   selectedPageIds,
+		PlanSignature:     planSignature,
+		PageCountOverride: pageCountOverride,
+	}
+	if retryExcludedOnly != nil && *retryExcludedOnly && selectedPageIds != nil {
+		return nil, &gqlerror.Error{
+			Message: "selectedPageIds cannot be combined with retryExcludedOnly=true",
+			Extensions: map[string]any{"code": "LIVING_WIKI_INPUT_CONFLICT"},
+		}
+	}
+	if selectedPageIds != nil && (planSignature == nil || *planSignature == "") {
+		return nil, &gqlerror.Error{
+			Message: "planSignature is required when selectedPageIds is supplied (including the empty-list case)",
+			Extensions: map[string]any{"code": "LIVING_WIKI_PLAN_SIGNATURE_REQUIRED"},
+		}
+	}
+
+	// No-job gates (same as EnableLivingWikiForRepo step 4).
+	gql := mapRepoLivingWikiSettings(&settings)
+	globalEnabled := r.isLivingWikiGloballyEnabled()
+	killSwitch := os.Getenv("SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH") == "true"
+	if !globalEnabled {
+		return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+			"Living Wiki is not enabled globally. Enable it in the global settings panel, then jobs will start automatically.")
+	}
+	if killSwitch {
+		return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+			"Living wiki is paused via SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH. Settings are saved but no jobs will run until the kill-switch is unset.")
+	}
+	if r.Orchestrator == nil {
+		return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+			"Living Wiki orchestrator is not available. Jobs will run when the server is fully configured.")
+	}
+
+	// Persist the settings update (DisabledAt cleared, UpdatedAt stamped).
+	if err := persistLivingWikiSettings(ctx, r.LivingWikiRepoStore, settings); err != nil {
+		return nil, err
+	}
+
+	return enqueueWikiJob(ctx, r.Resolver, settings, effectiveSettings, jobMode, retryInput, gql)
 }
 
 // SetLivingWikiModeFlags resolves Mutation.setLivingWikiModeFlags.
@@ -2953,6 +2760,12 @@ func (r *mutationResolver) SetLivingWikiModeFlags(ctx context.Context, repositor
 }
 
 // TriggerLivingWikiColdStartAllEnabled resolves Mutation.triggerLivingWikiColdStartAllEnabled.
+//
+// Calls enqueueWikiJob directly (one call per enabled mode) instead of
+// constructing fake EnableLivingWikiForRepoInput and re-entering
+// EnableLivingWikiForRepo. Each mode's job dispatch runs the same no-job
+// gate checks (global disabled, kill-switch, nil orchestrator) that
+// EnableLivingWikiForRepo runs, so the per-mode result shape is identical.
 func (r *mutationResolver) TriggerLivingWikiColdStartAllEnabled(ctx context.Context, repositoryID string) ([]*EnableLivingWikiResult, error) {
 	// CA-142: refuse new cold-start jobs during graceful drain.
 	if err := r.checkServerDraining(); err != nil {
@@ -2970,38 +2783,54 @@ func (r *mutationResolver) TriggerLivingWikiColdStartAllEnabled(ctx context.Cont
 		current = defaultRepoSettings(repositoryID)
 	}
 
+	// triggerOneMode runs the no-job gates and then enqueues for a single mode.
+	// It mirrors what EnableLivingWikiForRepo does per-call so each result
+	// carries a notice when the system is gated.
+	triggerOneMode := func(overviewEnabled, detailedEnabled bool) (*EnableLivingWikiResult, error) {
+		settings := *current
+		settings.UpdatedAt = time.Now()
+		settings.UpdatedBy = userIDFromContext(ctx)
+		gql := mapRepoLivingWikiSettings(&settings)
+
+		globalEnabled := r.isLivingWikiGloballyEnabled()
+		killSwitch := os.Getenv("SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH") == "true"
+		if !globalEnabled {
+			return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+				"Living Wiki is not enabled globally. Enable it in the global settings panel, then jobs will start automatically.")
+		}
+		if killSwitch {
+			return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+				"Living wiki is paused via SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH. Settings are saved but no jobs will run until the kill-switch is unset.")
+		}
+		if r.Orchestrator == nil {
+			return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+				"Living Wiki orchestrator is not available. Jobs will run when the server is fully configured.")
+		}
+
+		effectiveSettings := settings
+		effectiveSettings.LivingWikiOverviewEnabled = overviewEnabled
+		effectiveSettings.LivingWikiDetailedEnabled = detailedEnabled
+		jobMode := deriveLivingWikiJobMode(effectiveSettings)
+		baseInput := EnableLivingWikiForRepoInput{RepositoryID: repositoryID}
+		return enqueueWikiJob(ctx, r.Resolver, settings, effectiveSettings, jobMode, baseInput, gql)
+	}
+
 	var results []*EnableLivingWikiResult
 
 	// Enqueue Overview job if enabled.
 	if current.LivingWikiOverviewEnabled {
-		t, f := true, false
-		input := EnableLivingWikiForRepoInput{
-			RepositoryID:              repositoryID,
-			Mode:                      RepoWikiMode(current.Mode),
-			Sinks:                     repoSinksToInputs(current.Sinks),
-			LivingWikiOverviewEnabled: &t,
-			LivingWikiDetailedEnabled: &f,
-		}
-		res, err := r.EnableLivingWikiForRepo(ctx, input)
-		if err != nil {
-			return nil, fmt.Errorf("enqueue overview job: %w", err)
+		res, enqErr := triggerOneMode(true, false)
+		if enqErr != nil {
+			return nil, fmt.Errorf("enqueue overview job: %w", enqErr)
 		}
 		results = append(results, res)
 	}
 
 	// Enqueue Detailed job if enabled.
 	if current.LivingWikiDetailedEnabled {
-		f, t := false, true
-		input := EnableLivingWikiForRepoInput{
-			RepositoryID:              repositoryID,
-			Mode:                      RepoWikiMode(current.Mode),
-			Sinks:                     repoSinksToInputs(current.Sinks),
-			LivingWikiOverviewEnabled: &f,
-			LivingWikiDetailedEnabled: &t,
-		}
-		res, err := r.EnableLivingWikiForRepo(ctx, input)
-		if err != nil {
-			return nil, fmt.Errorf("enqueue detailed job: %w", err)
+		res, enqErr := triggerOneMode(false, true)
+		if enqErr != nil {
+			return nil, fmt.Errorf("enqueue detailed job: %w", enqErr)
 		}
 		results = append(results, res)
 	}
