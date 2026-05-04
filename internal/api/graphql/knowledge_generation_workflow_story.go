@@ -9,7 +9,6 @@ import (
 	"time"
 
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
-	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
@@ -149,14 +148,7 @@ func (s workflowStoryGenerationService) Generate(ctx context.Context) (*Knowledg
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
 
 		if resp.Usage != nil {
-			store.StoreLLMUsage(&graphstore.LLMUsageRecord{
-				RepoID:       repo.ID,
-				Provider:     "llm",
-				Model:        resp.Usage.Model,
-				Operation:    resp.Usage.Operation,
-				InputTokens:  int(resp.Usage.InputTokens),
-				OutputTokens: int(resp.Usage.OutputTokens),
-			})
+			storeLLMUsage(store, repo.ID, resp.Usage, "")
 			rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
 		}
 

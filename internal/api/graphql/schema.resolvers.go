@@ -663,10 +663,7 @@ func (r *mutationResolver) AnalyzeSymbol(ctx context.Context, repositoryID strin
 		outTok := int(resp.Usage.OutputTokens)
 		result.InputTokens = &inTok
 		result.OutputTokens = &outTok
-		r.getStore(ctx).StoreLLMUsage(&graphstore.LLMUsageRecord{
-			RepoID: repositoryID, Provider: resp.Usage.Model, Model: resp.Usage.Model,
-			Operation: "analyze_symbol", InputTokens: int(resp.Usage.InputTokens), OutputTokens: int(resp.Usage.OutputTokens),
-		})
+		storeLLMUsage(r.getStore(ctx), repositoryID, resp.Usage, "analyze_symbol")
 	}
 	return result, nil
 }
@@ -851,10 +848,7 @@ func (r *mutationResolver) DiscussCode(ctx context.Context, input DiscussCodeInp
 		outTok := int(resp.Usage.OutputTokens)
 		result.InputTokens = &inTok
 		result.OutputTokens = &outTok
-		store.StoreLLMUsage(&graphstore.LLMUsageRecord{
-			RepoID: input.RepositoryID, Provider: resp.Usage.Model, Model: resp.Usage.Model,
-			Operation: "discuss_code", InputTokens: int(resp.Usage.InputTokens), OutputTokens: int(resp.Usage.OutputTokens),
-		})
+		storeLLMUsage(store, input.RepositoryID, resp.Usage, "discuss_code")
 	}
 	return result, nil
 }
@@ -945,10 +939,7 @@ func (r *mutationResolver) ReviewCode(ctx context.Context, input ReviewCodeInput
 		outTok := int(resp.Usage.OutputTokens)
 		result.InputTokens = &inTok
 		result.OutputTokens = &outTok
-		r.getStore(ctx).StoreLLMUsage(&graphstore.LLMUsageRecord{
-			RepoID: input.RepositoryID, Provider: resp.Usage.Model, Model: resp.Usage.Model,
-			Operation: "review_code", InputTokens: int(resp.Usage.InputTokens), OutputTokens: int(resp.Usage.OutputTokens),
-		})
+		storeLLMUsage(r.getStore(ctx), input.RepositoryID, resp.Usage, "review_code")
 	}
 
 	r.Resolver.publishEvent(events.EventReviewCompleted, map[string]interface{}{
@@ -1742,14 +1733,7 @@ func (r *mutationResolver) ExplainSystem(ctx context.Context, input ExplainSyste
 	}
 
 	if resp.Usage != nil {
-		r.getStore(ctx).StoreLLMUsage(&graphstore.LLMUsageRecord{
-			RepoID:       repo.ID,
-			Provider:     "llm",
-			Model:        resp.Usage.Model,
-			Operation:    resp.Usage.Operation,
-			InputTokens:  int(resp.Usage.InputTokens),
-			OutputTokens: int(resp.Usage.OutputTokens),
-		})
+		storeLLMUsage(r.getStore(ctx), repo.ID, resp.Usage, "")
 	}
 
 	result := &ExplainSystemResult{
@@ -1845,14 +1829,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 			if usage == nil {
 				return
 			}
-			r.getStore(ctx).StoreLLMUsage(&graphstore.LLMUsageRecord{
-				RepoID:       repo.ID,
-				Provider:     "llm",
-				Model:        usage.Model,
-				Operation:    usage.Operation,
-				InputTokens:  int(usage.InputTokens),
-				OutputTokens: int(usage.OutputTokens),
-			})
+			storeLLMUsage(r.getStore(ctx), repo.ID, usage, "")
 			rt.ReportTokens(int(usage.InputTokens), int(usage.OutputTokens))
 		}
 

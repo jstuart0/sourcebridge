@@ -123,13 +123,53 @@ def _selected_cliff_notes_strategy() -> str:
     return chain[0] if chain else "single_shot"
 
 
-def _llm_usage_proto(usage_record) -> types_pb2.LLMUsage:
-    """Convert an LLMUsageRecord to a proto LLMUsage message."""
+def _provider_name(provider: LLMProvider) -> str:
+    """Return the canonical provider name string for a given LLMProvider instance.
+
+    Resolution order:
+    1. ``provider.provider_name`` if the attribute exists and is non-empty
+       (set by OpenAICompatProvider and its subclasses).
+    2. Class-name heuristic: "anthropic" if the class name contains
+       "anthropic", otherwise "unknown".
+    """
+    name = getattr(provider, "provider_name", None)
+    if name:
+        return str(name)
+    cls_name = type(provider).__name__.lower()
+    if "anthropic" in cls_name:
+        return "anthropic"
+    return "unknown"
+
+
+def _llm_usage_proto(usage_record, provider: LLMProvider | None = None, *, operation: str = "") -> types_pb2.LLMUsage:
+    """Convert an LLMUsageRecord (or duck-typed usage object) to a proto LLMUsage message.
+
+    When *provider* is supplied the ``provider`` field is populated with the
+    canonical provider name resolved via :func:`_provider_name`.  If the
+    usage record itself carries a non-empty ``provider_name`` (set by the
+    LLM adapter — see ``LLMResponse.provider_name``), that value takes
+    precedence.
+
+    The *operation* kwarg overrides the record's own ``operation`` field when
+    the caller knows a more specific label.
+    """
+    # Resolution: prefer an explicit "provider" or "provider_name" field on the
+    # record (set by LLMUsageRecord or LLMResponse adapters), then fall back to
+    # the calling provider context, then leave empty so the Go-side
+    # providerFromUsage() heuristic can resolve from the model name.
+    resolved = (
+        getattr(usage_record, "provider", None)
+        or getattr(usage_record, "provider_name", None)
+        or (provider and _provider_name(provider))
+        or ""
+    )
+    op = operation or getattr(usage_record, "operation", "")
     return types_pb2.LLMUsage(
         model=usage_record.model,
         input_tokens=usage_record.input_tokens,
         output_tokens=usage_record.output_tokens,
-        operation=usage_record.operation,
+        operation=op,
+        provider=resolved,
     )
 
 
@@ -1276,7 +1316,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
 
         response = knowledge_pb2.GenerateCliffNotesResponse(
             sections=sections,
-            usage=_llm_usage_proto(usage),
+            usage=_llm_usage_proto(usage, provider),
             diagnostics=knowledge_pb2.CliffNotesDiagnostics(
                 cached_nodes=int(diagnostics.get("cached_nodes", 0)),
                 fallback_count=int(diagnostics.get("fallback_count", 0)),
@@ -1451,7 +1491,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
 
             response = knowledge_pb2.GenerateLearningPathResponse(
                 steps=steps,
-                usage=_llm_usage_proto(usage),
+                usage=_llm_usage_proto(usage, provider),
             )
             if job_logger is not None:
                 await job_logger.info(
@@ -1606,7 +1646,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 diagram_summary=str(result.get("diagram_summary", "")),
                 evidence=evidence,
                 inferred_edges=[str(item) for item in result.get("inferred_edges", [])],
-                usage=_llm_usage_proto(usage),
+                usage=_llm_usage_proto(usage, provider),
                 detail_mermaid_source=str(result.get("detail_mermaid_source", "")),
                 detail_raw_mermaid_source=str(result.get("detail_raw_mermaid_source", "")),
                 detail_validation_status=str(result.get("detail_validation_status", "")),
@@ -1778,7 +1818,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
 
             response = knowledge_pb2.GenerateWorkflowStoryResponse(
                 sections=sections,
-                usage=_llm_usage_proto(usage),
+                usage=_llm_usage_proto(usage, provider),
             )
             if job_logger is not None:
                 await job_logger.info(
@@ -1907,7 +1947,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             response = knowledge_pb2.ExplainSystemResponse(
                 explanation=result.explanation,
                 evidence=[],
-                usage=_llm_usage_proto(usage),
+                usage=_llm_usage_proto(usage, provider),
             )
             if job_logger is not None:
                 await job_logger.info(
@@ -2051,7 +2091,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
 
             response = knowledge_pb2.GenerateCodeTourResponse(
                 stops=stops,
-                usage=_llm_usage_proto(usage),
+                usage=_llm_usage_proto(usage, provider),
             )
             if job_logger is not None:
                 await job_logger.info(
@@ -2286,6 +2326,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     input_tokens=total_input,
                     output_tokens=total_output,
                     operation="report_generation",
+                    provider=_provider_name(report_provider),
                 ),
             )
             yield report_pb2.EnterpriseReportServiceGenerateReportResponse(final=response)

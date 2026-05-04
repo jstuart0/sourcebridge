@@ -88,13 +88,58 @@ def _build_discussion_context(
     return "\n\n".join(parts) if parts else "(no code context provided)"
 
 
-def _llm_usage_proto(usage_record) -> types_pb2.LLMUsage:
-    """Convert an LLMUsageRecord to a proto LLMUsage message."""
+def _provider_name(provider: LLMProvider) -> str:
+    """Return the canonical provider name string for a given LLMProvider instance.
+
+    Resolution order:
+    1. ``provider.provider_name`` if the attribute exists and is non-empty
+       (set by OpenAICompatProvider and its subclasses).
+    2. Class-name heuristic: "anthropic" if the class name contains
+       "anthropic", otherwise "unknown".
+
+    This is the single source of truth for populating the ``provider`` field
+    on ``types_pb2.LLMUsage`` messages sent back to the Go API.  It replaces
+    the earlier pattern of setting provider via class-name inspection scattered
+    across individual RPC handlers.
+    """
+    name = getattr(provider, "provider_name", None)
+    if name:
+        return str(name)
+    cls_name = type(provider).__name__.lower()
+    if "anthropic" in cls_name:
+        return "anthropic"
+    return "unknown"
+
+
+def _llm_usage_proto(usage_record, provider: LLMProvider | None = None, *, operation: str = "") -> types_pb2.LLMUsage:
+    """Convert an LLMUsageRecord (or duck-typed usage object) to a proto LLMUsage message.
+
+    When *provider* is supplied the ``provider`` field is populated with the
+    canonical provider name resolved via :func:`_provider_name`.  If the
+    usage record itself carries a non-empty ``provider_name`` (set by the
+    LLM adapter — see ``LLMResponse.provider_name``), that value takes
+    precedence.
+
+    The *operation* kwarg overrides the record's own ``operation`` field when
+    the caller knows a more specific label (e.g. "agent_turn").
+    """
+    # Resolution: prefer an explicit "provider" or "provider_name" field on the
+    # record (set by LLMUsageRecord or LLMResponse adapters), then fall back to
+    # the calling provider context, then leave empty so the Go-side
+    # providerFromUsage() heuristic can resolve from the model name.
+    resolved = (
+        getattr(usage_record, "provider", None)
+        or getattr(usage_record, "provider_name", None)
+        or (provider and _provider_name(provider))
+        or ""
+    )
+    op = operation or getattr(usage_record, "operation", "")
     return types_pb2.LLMUsage(
         model=usage_record.model,
         input_tokens=usage_record.input_tokens,
         output_tokens=usage_record.output_tokens,
-        operation=usage_record.operation,
+        operation=op,
+        provider=resolved,
     )
 
 
@@ -535,12 +580,7 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
                     for tc in turn_resp.turn.tool_calls
                 ],
             ),
-            usage=types_pb2.LLMUsage(
-                model=turn_resp.model,
-                input_tokens=turn_resp.input_tokens,
-                output_tokens=turn_resp.output_tokens,
-                operation="agent_turn",
-            ),
+            usage=_llm_usage_proto(turn_resp, provider, operation="agent_turn"),
             termination_hint=turn_resp.termination_hint,
             cache_creation_input_tokens=turn_resp.cache_creation_input_tokens,
             cache_read_input_tokens=turn_resp.cache_read_input_tokens,
@@ -587,12 +627,7 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
             symbol_candidates=list(result.symbol_candidates),
             file_candidates=list(result.file_candidates),
             topic_terms=list(result.topic_terms),
-            usage=types_pb2.LLMUsage(
-                model=result.model,
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
-                operation="classify_question",
-            ),
+            usage=_llm_usage_proto(result, provider, operation="classify_question"),
         )
 
     async def DecomposeQuestion(  # noqa: N802
@@ -622,12 +657,7 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
         return reasoning_pb2.DecomposeQuestionResponse(
             capability_supported=True,
             sub_questions=list(result.sub_questions),
-            usage=types_pb2.LLMUsage(
-                model=result.model,
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
-                operation="decompose_question",
-            ),
+            usage=_llm_usage_proto(result, provider, operation="decompose_question"),
         )
 
     async def SynthesizeDecomposedAnswer(  # noqa: N802
@@ -664,12 +694,7 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
 
         return reasoning_pb2.SynthesizeDecomposedAnswerResponse(
             answer=result.answer,
-            usage=types_pb2.LLMUsage(
-                model=result.model,
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
-                operation="synthesize_decomposed",
-            ),
+            usage=_llm_usage_proto(result, provider, operation="synthesize_decomposed"),
             cache_creation_input_tokens=result.cache_creation_input_tokens,
             cache_read_input_tokens=result.cache_read_input_tokens,
         )

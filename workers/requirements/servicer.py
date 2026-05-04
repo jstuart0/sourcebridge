@@ -182,6 +182,7 @@ class RequirementsServicer(requirements_pb2_grpc.RequirementsServiceServicer):
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
             operation="enrich",
+            provider=response.provider_name or getattr(provider, "provider_name", "") or "",
         )
 
         return requirements_pb2.EnrichRequirementResponse(
@@ -240,6 +241,7 @@ class RequirementsServicer(requirements_pb2_grpc.RequirementsServiceServicer):
                 input_tokens=result.usage.input_tokens,
                 output_tokens=result.usage.output_tokens,
                 operation="spec_extraction",
+                provider=getattr(provider, "provider_name", "") or "",
             )
 
         return requirements_pb2.ExtractSpecsResponse(
