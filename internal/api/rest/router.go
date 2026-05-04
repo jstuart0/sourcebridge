@@ -788,123 +788,145 @@ func (s *Server) setupRouter() {
 		r.Post("/api/v1/repositories/{repo_id}/clusters/relabel", s.handleRelabelClusters)
 	})
 
-	// Admin API routes (requires auth, accepts both JWT and API tokens)
+	// Authenticated routes — outer group populates claims and applies tenant
+	// repo filtering; inner subgroups split on required role.
+	//
+	// Middleware order: tokens → repo-access → role.
+	// Tokens populates claims; repo-access tightens repo IDs; role checks claims.
 	r.Group(func(r chi.Router) {
 		r.Use(s.authMiddleware())
 		r.Use(s.lazyRepoAccessMiddleware)
-		r.Get("/api/v1/admin/status", s.handleAdminStatus)
-		r.Get("/api/v1/admin/config", s.handleAdminConfig)
-		r.Put("/api/v1/admin/config", s.handleAdminUpdateConfig)
-		r.Post("/api/v1/admin/test-worker", s.handleAdminTestWorker)
-		r.Post("/api/v1/admin/test-llm", s.handleAdminTestLLM)
-		r.Get("/api/v1/admin/knowledge", s.handleAdminKnowledgeStatus)
 
-		// CA-122: operator-tunable knowledge-RPC safety-net timeout. The
-		// outer cap on per-call repository-scoped knowledge generation
-		// (cliff notes, learning path, architecture diagram, workflow
-		// story, system explanation, code tour, enterprise report).
-		// Distinct from the per-phase reaper which fires on "no
-		// progress in 10 min." Default 4h, range 30 min – 24 h.
-		// Validation: PUT rejects out-of-range with HTTP 400.
-		r.Get("/api/v1/admin/knowledge/timeout", s.handleGetKnowledgeTimeout)
-		r.Put("/api/v1/admin/knowledge/timeout", s.handlePutKnowledgeTimeout)
+		// Subgroup A: user-scoped token self-service (auth required, no role gate).
+		// Non-admin users manage ONLY their own tokens here. Handler-side
+		// enforcement (ownership checks, UserID filtering) is the second line of
+		// defence so a future route-group change cannot silently widen access.
+		r.Group(func(r chi.Router) {
+			// API token management — user self-service
+			r.Post("/api/v1/tokens", s.handleCreateToken)
+			r.Get("/api/v1/tokens", s.handleListTokens)
+			r.Get("/api/v1/tokens/current", s.handleCurrentToken)
+			r.Delete("/api/v1/tokens/{id}", s.handleRevokeToken)
+			r.Post("/api/v1/tokens/current/revoke", s.handleRevokeCurrentToken)
+		})
 
-		// LLM job monitor (Phase 2c)
-		r.Get("/api/v1/admin/llm/activity", s.handleLLMActivity)
-		r.Get("/api/v1/admin/llm/stream", s.handleLLMStream)
-		r.Get("/api/v1/admin/llm/control", s.handleGetQueueControl)
-		r.Put("/api/v1/admin/llm/control", s.handleUpdateQueueControl)
-		r.Post("/api/v1/admin/llm/drain", s.handleDrainQueue)
-		// CA-142: admin endpoint to initiate graceful server drain via the
-		// public API. Idempotent — returns current drain state whether or
-		// not this call was the first to flip the flag.
-		r.Post("/api/v1/admin/llm/server-drain", s.handleAdminServerDrain)
-		// CA-142: debug slow-job endpoint for drain validation (Phase 4).
-		// Only registered when SOURCEBRIDGE_DEBUG_ENDPOINTS=true.
-		if getEnvBool("SOURCEBRIDGE_DEBUG_ENDPOINTS") {
-			r.Post("/api/v1/admin/debug/slow-job", s.handleDebugSlowJob)
-		}
-		r.Get("/api/v1/admin/llm/jobs/{id}", s.handleLLMJobDetail)
-		r.Get("/api/v1/admin/llm/jobs/{id}/logs", s.handleLLMJobLogs)
-		r.Get("/api/v1/admin/llm/jobs/{id}/logs/stream", s.handleLLMJobLogStream)
-		r.Post("/api/v1/admin/llm/jobs/{id}/cancel", s.handleLLMJobCancel)
-		r.Post("/api/v1/admin/llm/jobs/{id}/retry", s.handleLLMJobRetry)
-		// CA-144: per-page in-flight visibility for living-wiki cold-starts.
-		r.Get("/api/v1/admin/llm/jobs/{id}/livingwiki/in-flight", s.handleLivingWikiInFlight)
+		// Subgroup B: admin-only routes (SEC-4 gate: requires "admin" role).
+		// All /api/v1/admin/* endpoints and cross-user token operations live here.
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RequireRole(auth.RoleAdmin))
 
-		// LLM configuration
-		r.Get("/api/v1/admin/llm-config", s.handleGetLLMConfig)
-		r.Put("/api/v1/admin/llm-config", s.handleUpdateLLMConfig)
-		r.Get("/api/v1/admin/llm-models", s.handleListLLMModels)
+			// Cross-user token administration
+			r.Post("/api/v1/tokens/revoke-user", s.handleRevokeUserTokens)
 
-		// LLM provider profiles (slice 1). Additive surface; legacy
-		// /admin/llm-config remains as the active-profile back-compat
-		// path. Writes go through the BEGIN/COMMIT helpers in
-		// internal/db so workspace.version is bumped, the legacy
-		// mirror row stays in sync, and the active-profile watermark
-		// advances on every write (codex-H2 / r1d).
-		r.Get("/api/v1/admin/llm-profiles", s.handleListLLMProfiles)
-		r.Post("/api/v1/admin/llm-profiles", s.handleCreateLLMProfile)
-		// Slice 4 polish: count of currently-active LLM-backed jobs.
-		// Used by the SwitchProfileDialog so an admin sees how many
-		// in-flight jobs are running on the current profile when they
-		// confirm a switch. Read-only; route ordered before {id}
-		// to avoid being shadowed by canonicalProfileID parsing.
-		r.Get("/api/v1/admin/llm-profiles/active-job-count", s.handleActiveLLMJobCount)
-		r.Get("/api/v1/admin/llm-profiles/{id}", s.handleGetLLMProfile)
-		r.Put("/api/v1/admin/llm-profiles/{id}", s.handleUpdateLLMProfile)
-		r.Delete("/api/v1/admin/llm-profiles/{id}", s.handleDeleteLLMProfile)
-		r.Post("/api/v1/admin/llm-profiles/{id}/activate", s.handleActivateLLMProfile)
+			// Admin status & config
+			r.Get("/api/v1/admin/status", s.handleAdminStatus)
+			r.Get("/api/v1/admin/config", s.handleAdminConfig)
+			r.Put("/api/v1/admin/config", s.handleAdminUpdateConfig)
+			r.Post("/api/v1/admin/test-worker", s.handleAdminTestWorker)
+			r.Post("/api/v1/admin/test-llm", s.handleAdminTestLLM)
+			r.Get("/api/v1/admin/knowledge", s.handleAdminKnowledgeStatus)
 
-		// Git configuration
-		r.Get("/api/v1/admin/git-config", s.handleGetGitConfig)
-		r.Put("/api/v1/admin/git-config", s.handleUpdateGitConfig)
+			// CA-122: operator-tunable knowledge-RPC safety-net timeout. The
+			// outer cap on per-call repository-scoped knowledge generation
+			// (cliff notes, learning path, architecture diagram, workflow
+			// story, system explanation, code tour, enterprise report).
+			// Distinct from the per-phase reaper which fires on "no
+			// progress in 10 min." Default 4h, range 30 min – 24 h.
+			// Validation: PUT rejects out-of-range with HTTP 400.
+			r.Get("/api/v1/admin/knowledge/timeout", s.handleGetKnowledgeTimeout)
+			r.Put("/api/v1/admin/knowledge/timeout", s.handlePutKnowledgeTimeout)
 
-		// Comprehension settings (Phase 6)
-		r.Get("/api/v1/admin/comprehension/settings", s.handleListComprehensionSettings)
-		r.Get("/api/v1/admin/comprehension/settings/effective", s.handleGetEffectiveComprehensionSettings)
-		r.Put("/api/v1/admin/comprehension/settings", s.handleUpdateComprehensionSettings)
-		r.Delete("/api/v1/admin/comprehension/settings", s.handleResetComprehensionSettings)
+			// LLM job monitor (Phase 2c)
+			r.Get("/api/v1/admin/llm/activity", s.handleLLMActivity)
+			r.Get("/api/v1/admin/llm/stream", s.handleLLMStream)
+			r.Get("/api/v1/admin/llm/control", s.handleGetQueueControl)
+			r.Put("/api/v1/admin/llm/control", s.handleUpdateQueueControl)
+			r.Post("/api/v1/admin/llm/drain", s.handleDrainQueue)
+			// CA-142: admin endpoint to initiate graceful server drain via the
+			// public API. Idempotent — returns current drain state whether or
+			// not this call was the first to flip the flag.
+			r.Post("/api/v1/admin/llm/server-drain", s.handleAdminServerDrain)
+			// CA-142: debug slow-job endpoint for drain validation (Phase 4).
+			// Only registered when SOURCEBRIDGE_DEBUG_ENDPOINTS=true.
+			if getEnvBool("SOURCEBRIDGE_DEBUG_ENDPOINTS") {
+				r.Post("/api/v1/admin/debug/slow-job", s.handleDebugSlowJob)
+			}
+			r.Get("/api/v1/admin/llm/jobs/{id}", s.handleLLMJobDetail)
+			r.Get("/api/v1/admin/llm/jobs/{id}/logs", s.handleLLMJobLogs)
+			r.Get("/api/v1/admin/llm/jobs/{id}/logs/stream", s.handleLLMJobLogStream)
+			r.Post("/api/v1/admin/llm/jobs/{id}/cancel", s.handleLLMJobCancel)
+			r.Post("/api/v1/admin/llm/jobs/{id}/retry", s.handleLLMJobRetry)
+			// CA-144: per-page in-flight visibility for living-wiki cold-starts.
+			r.Get("/api/v1/admin/llm/jobs/{id}/livingwiki/in-flight", s.handleLivingWikiInFlight)
 
-		// Model capabilities (Phase 6)
-		r.Get("/api/v1/admin/comprehension/models", s.handleListModelCapabilities)
-		r.Get("/api/v1/admin/comprehension/models/{modelId}", s.handleGetModelCapabilities)
-		r.Put("/api/v1/admin/comprehension/models", s.handleUpdateModelCapabilities)
-		r.Delete("/api/v1/admin/comprehension/models/{modelId}", s.handleDeleteModelCapabilities)
+			// LLM configuration
+			r.Get("/api/v1/admin/llm-config", s.handleGetLLMConfig)
+			r.Put("/api/v1/admin/llm-config", s.handleUpdateLLMConfig)
+			r.Get("/api/v1/admin/llm-models", s.handleListLLMModels)
 
-		// Summary node cache (Phase 7)
-		r.Get("/api/v1/admin/llm/corpus/{corpusId}/nodes", s.handleGetSummaryNodes)
-		r.Put("/api/v1/admin/llm/corpus/nodes", s.handleStoreSummaryNodes)
-		r.Post("/api/v1/admin/llm/corpus/{corpusId}/invalidate", s.handleInvalidateSummaryNodes)
+			// LLM provider profiles (slice 1). Additive surface; legacy
+			// /admin/llm-config remains as the active-profile back-compat
+			// path. Writes go through the BEGIN/COMMIT helpers in
+			// internal/db so workspace.version is bumped, the legacy
+			// mirror row stays in sync, and the active-profile watermark
+			// advances on every write (codex-H2 / r1d).
+			r.Get("/api/v1/admin/llm-profiles", s.handleListLLMProfiles)
+			r.Post("/api/v1/admin/llm-profiles", s.handleCreateLLMProfile)
+			// Slice 4 polish: count of currently-active LLM-backed jobs.
+			// Used by the SwitchProfileDialog so an admin sees how many
+			// in-flight jobs are running on the current profile when they
+			// confirm a switch. Read-only; route ordered before {id}
+			// to avoid being shadowed by canonicalProfileID parsing.
+			r.Get("/api/v1/admin/llm-profiles/active-job-count", s.handleActiveLLMJobCount)
+			r.Get("/api/v1/admin/llm-profiles/{id}", s.handleGetLLMProfile)
+			r.Put("/api/v1/admin/llm-profiles/{id}", s.handleUpdateLLMProfile)
+			r.Delete("/api/v1/admin/llm-profiles/{id}", s.handleDeleteLLMProfile)
+			r.Post("/api/v1/admin/llm-profiles/{id}/activate", s.handleActivateLLMProfile)
 
-		// Subsystem clustering stats
-		r.Get("/api/v1/admin/clustering/stats", s.handleClusteringStats)
+			// Git configuration
+			r.Get("/api/v1/admin/git-config", s.handleGetGitConfig)
+			r.Put("/api/v1/admin/git-config", s.handleUpdateGitConfig)
 
-		// Reports — enterprise only (registered via enterprise routes)
+			// Comprehension settings (Phase 6)
+			r.Get("/api/v1/admin/comprehension/settings", s.handleListComprehensionSettings)
+			r.Get("/api/v1/admin/comprehension/settings/effective", s.handleGetEffectiveComprehensionSettings)
+			r.Put("/api/v1/admin/comprehension/settings", s.handleUpdateComprehensionSettings)
+			r.Delete("/api/v1/admin/comprehension/settings", s.handleResetComprehensionSettings)
 
-		// API token management
-		r.Post("/api/v1/tokens", s.handleCreateToken)
-		r.Get("/api/v1/tokens", s.handleListTokens)
-		r.Get("/api/v1/tokens/current", s.handleCurrentToken)
-		r.Post("/api/v1/tokens/revoke-user", s.handleRevokeUserTokens)
-		r.Delete("/api/v1/tokens/{id}", s.handleRevokeToken)
-		r.Post("/api/v1/tokens/current/revoke", s.handleRevokeCurrentToken)
-		r.Post("/api/v1/telemetry", s.handleTelemetryEvent)
+			// Model capabilities (Phase 6)
+			r.Get("/api/v1/admin/comprehension/models", s.handleListModelCapabilities)
+			r.Get("/api/v1/admin/comprehension/models/{modelId}", s.handleGetModelCapabilities)
+			r.Put("/api/v1/admin/comprehension/models", s.handleUpdateModelCapabilities)
+			r.Delete("/api/v1/admin/comprehension/models/{modelId}", s.handleDeleteModelCapabilities)
 
-		// Data export
-		r.Get("/api/v1/export/traceability", s.handleExportTraceability)
-		r.Get("/api/v1/export/requirements", s.handleExportRequirements)
-		r.Get("/api/v1/export/symbols", s.handleExportSymbols)
-		r.Get("/api/v1/export/knowledge/{id}", s.handleExportKnowledgeArtifact)
+			// Summary node cache (Phase 7)
+			r.Get("/api/v1/admin/llm/corpus/{corpusId}/nodes", s.handleGetSummaryNodes)
+			r.Put("/api/v1/admin/llm/corpus/nodes", s.handleStoreSummaryNodes)
+			r.Post("/api/v1/admin/llm/corpus/{corpusId}/invalidate", s.handleInvalidateSummaryNodes)
 
-		// Diagram document API (structured architecture diagrams — read-only in OSS)
-		r.Get("/api/v1/diagrams/{repoId}", s.handleGetDiagramDocument)
-		r.Get("/api/v1/diagrams/{repoId}/structured", s.handleGetStructuredDiagram)
-		r.Put("/api/v1/diagrams/{repoId}", s.handlePutDiagramDocument)
-		r.Delete("/api/v1/diagrams/{repoId}", s.handleDeleteDiagramDocument)
-		r.Post("/api/v1/diagrams/{repoId}/import", s.handleImportMermaid)
-		r.Get("/api/v1/diagrams/{repoId}/export/mermaid", s.handleExportDiagramMermaid)
-		r.Get("/api/v1/diagrams/{repoId}/export/json", s.handleExportDiagramJSON)
+			// Subsystem clustering stats
+			r.Get("/api/v1/admin/clustering/stats", s.handleClusteringStats)
+
+			// Reports — enterprise only (registered via enterprise routes)
+
+			// Telemetry
+			r.Post("/api/v1/telemetry", s.handleTelemetryEvent)
+
+			// Data export
+			r.Get("/api/v1/export/traceability", s.handleExportTraceability)
+			r.Get("/api/v1/export/requirements", s.handleExportRequirements)
+			r.Get("/api/v1/export/symbols", s.handleExportSymbols)
+			r.Get("/api/v1/export/knowledge/{id}", s.handleExportKnowledgeArtifact)
+
+			// Diagram document API (structured architecture diagrams — read-only in OSS)
+			r.Get("/api/v1/diagrams/{repoId}", s.handleGetDiagramDocument)
+			r.Get("/api/v1/diagrams/{repoId}/structured", s.handleGetStructuredDiagram)
+			r.Put("/api/v1/diagrams/{repoId}", s.handlePutDiagramDocument)
+			r.Delete("/api/v1/diagrams/{repoId}", s.handleDeleteDiagramDocument)
+			r.Post("/api/v1/diagrams/{repoId}/import", s.handleImportMermaid)
+			r.Get("/api/v1/diagrams/{repoId}/export/mermaid", s.handleExportDiagramMermaid)
+			r.Get("/api/v1/diagrams/{repoId}/export/json", s.handleExportDiagramJSON)
+		})
 	})
 
 	// Change-watch connector ingress (Phase 1.D). Behind the

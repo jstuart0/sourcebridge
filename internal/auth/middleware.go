@@ -166,6 +166,32 @@ func extractBearerToken(r *http.Request) string {
 	return parts[1]
 }
 
+// RequireRole returns middleware that requires the authenticated caller to carry
+// the specified role. It must be applied AFTER MiddlewareWithTokens so that
+// claims are already populated in the request context.
+//
+// Behaviour:
+//   - Claims missing from context → 401 (should have been caught by
+//     MiddlewareWithTokens, but we defend in depth).
+//   - Claims present but role does not match → 403 with a descriptive message.
+//   - Role matches → call passes through to next.
+func RequireRole(role string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := r.Context().Value(ClaimsKey).(*Claims)
+			if !ok || claims == nil {
+				http.Error(w, "unauthenticated", http.StatusUnauthorized)
+				return
+			}
+			if claims.Role != role {
+				http.Error(w, "forbidden: requires "+role+" role", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // rolesFromAPIToken resolves the effective role for an API token.
 //
 // Priority:

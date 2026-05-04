@@ -261,6 +261,21 @@ func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to list tokens"}`, http.StatusInternalServerError)
 		return
 	}
+	// Non-admin callers see only their own tokens. Admin callers retain the
+	// ability to query across users via the ?user_id= filter in filterTokens.
+	// This server-side gate is defence-in-depth: even if a future route-group
+	// change accidentally widens the no-role subgroup, a non-admin cannot
+	// enumerate another user's tokens.
+	if claims := auth.GetClaims(r.Context()); claims != nil && claims.Role != auth.RoleAdmin {
+		callerID := claims.UserID
+		filtered := tokens[:0]
+		for _, t := range tokens {
+			if t.UserID == callerID {
+				filtered = append(filtered, t)
+			}
+		}
+		tokens = filtered
+	}
 	tokens = filterTokens(tokens, r)
 	writeJSON(w, http.StatusOK, tokens)
 }
@@ -270,6 +285,33 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		http.Error(w, `{"error":"token ID required"}`, http.StatusBadRequest)
 		return
+	}
+
+	// Non-admin callers may only revoke tokens they own. Admins may revoke any
+	// token. We load the token list to perform the ownership check; this is
+	// defence-in-depth so the ownership invariant holds regardless of how the
+	// route group evolves.
+	if claims := auth.GetClaims(r.Context()); claims != nil && claims.Role != auth.RoleAdmin {
+		tokens, err := s.tokenStore.ListTokens(r.Context())
+		if err != nil {
+			http.Error(w, `{"error":"failed to verify token ownership"}`, http.StatusInternalServerError)
+			return
+		}
+		var found bool
+		for _, t := range tokens {
+			if t.ID == id {
+				found = true
+				if t.UserID != claims.UserID {
+					http.Error(w, `{"error":"forbidden: token belongs to another user"}`, http.StatusForbidden)
+					return
+				}
+				break
+			}
+		}
+		if !found {
+			http.Error(w, `{"error":"token not found"}`, http.StatusNotFound)
+			return
+		}
 	}
 
 	if ok, err := s.tokenStore.RevokeToken(r.Context(), id); err != nil {
