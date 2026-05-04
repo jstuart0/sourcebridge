@@ -11,6 +11,29 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/qa"
 )
 
+// checkRepoAccess returns an error if the caller lacks access to repoID.
+// It uses the tenant-filtered store injected by RepoAccessMiddleware when
+// enterprise tenant filtering is active, falling back to the base store.
+// Returns non-nil when repoID is empty or the store cannot resolve the repo.
+func (s *Server) checkRepoAccess(r *http.Request, repoID string) error {
+	if repoID == "" {
+		return errRepoNotFound
+	}
+	store := s.getStore(r)
+	if store == nil || store.GetRepository(repoID) == nil {
+		return errRepoNotFound
+	}
+	return nil
+}
+
+// errRepoNotFound is the sentinel returned by checkRepoAccess when access is denied.
+// Using a package-level value avoids allocating on every forbidden request.
+var errRepoNotFound = &repoAccessError{"repository not found or access denied"}
+
+type repoAccessError struct{ msg string }
+
+func (e *repoAccessError) Error() string { return e.msg }
+
 // askRequest mirrors qa.AskInput on the REST wire. Field names are
 // camelCase to match the GraphQL input shape so callers can use the
 // same payload against either transport.
@@ -60,6 +83,12 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := req.toAskInput()
+	// SEC-5: verify the caller has access to the requested repository before
+	// allowing the QA orchestrator to reason over its indexed content.
+	if err := s.checkRepoAccess(r, in.RepositoryID); err != nil {
+		writeAskJSONErr(w, http.StatusForbidden, "forbidden: no access to repository")
+		return
+	}
 	res, err := s.qaOrchestrator.Ask(r.Context(), in)
 	if err != nil {
 		if qa.IsInvalidInput(err) {
