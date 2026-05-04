@@ -172,15 +172,17 @@ class Embedding(_message.Message):
     def __init__(self, id: _Optional[str] = ..., source_id: _Optional[str] = ..., source_type: _Optional[str] = ..., vector: _Optional[_Iterable[float]] = ..., model: _Optional[str] = ..., dimensions: _Optional[int] = ...) -> None: ...
 
 class LLMUsage(_message.Message):
-    __slots__ = ("model", "input_tokens", "output_tokens", "latency_ms", "operation")
+    __slots__ = ("model", "input_tokens", "output_tokens", "latency_ms", "operation", "provider")
     MODEL_FIELD_NUMBER: _ClassVar[int]
     INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
     OUTPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
     LATENCY_MS_FIELD_NUMBER: _ClassVar[int]
     OPERATION_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
     model: str
     input_tokens: int
     output_tokens: int
     latency_ms: float
     operation: str
-    def __init__(self, model: _Optional[str] = ..., input_tokens: _Optional[int] = ..., output_tokens: _Optional[int] = ..., latency_ms: _Optional[float] = ..., operation: _Optional[str] = ...) -> None: ...
+    provider: str
+    def __init__(self, model: _Optional[str] = ..., input_tokens: _Optional[int] = ..., output_tokens: _Optional[int] = ..., latency_ms: _Optional[float] = ..., operation: _Optional[str] = ..., provider: _Optional[str] = ...) -> None: ...

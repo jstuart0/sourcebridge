@@ -111,4 +111,10 @@ message LLMUsage {
   int32 output_tokens = 3;
   float latency_ms = 4;
   string operation = 5;
+  // provider is the LLM provider name (e.g. "openai", "anthropic", "ollama").
+  // Set by the worker at generation time; empty in legacy records produced
+  // before this field was added. Prefer providerFromUsage() over reading this
+  // field directly — it applies a heuristic fallback chain when the field is
+  // empty.
+  string provider = 6;
 }

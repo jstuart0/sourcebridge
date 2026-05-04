@@ -715,12 +715,18 @@ func (x *Embedding) GetDimensions() int32 {
 
 // LLMUsage tracks token usage for a request
 type LLMUsage struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Model         string                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
-	InputTokens   int32                  `protobuf:"varint,2,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
-	OutputTokens  int32                  `protobuf:"varint,3,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
-	LatencyMs     float32                `protobuf:"fixed32,4,opt,name=latency_ms,json=latencyMs,proto3" json:"latency_ms,omitempty"`
-	Operation     string                 `protobuf:"bytes,5,opt,name=operation,proto3" json:"operation,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Model        string                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	InputTokens  int32                  `protobuf:"varint,2,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
+	OutputTokens int32                  `protobuf:"varint,3,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
+	LatencyMs    float32                `protobuf:"fixed32,4,opt,name=latency_ms,json=latencyMs,proto3" json:"latency_ms,omitempty"`
+	Operation    string                 `protobuf:"bytes,5,opt,name=operation,proto3" json:"operation,omitempty"`
+	// provider is the LLM provider name (e.g. "openai", "anthropic", "ollama").
+	// Set by the worker at generation time; empty in legacy records produced
+	// before this field was added. Prefer providerFromUsage() over reading this
+	// field directly — it applies a heuristic fallback chain when the field is
+	// empty.
+	Provider      string `protobuf:"bytes,6,opt,name=provider,proto3" json:"provider,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -790,6 +796,13 @@ func (x *LLMUsage) GetOperation() string {
 	return ""
 }
 
+func (x *LLMUsage) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
 var File_common_v1_types_proto protoreflect.FileDescriptor
 
 const file_common_v1_types_proto_rawDesc = "" +
@@ -850,14 +863,15 @@ const file_common_v1_types_proto_rawDesc = "" +
 	"\x05model\x18\x05 \x01(\tR\x05model\x12\x1e\n" +
 	"\n" +
 	"dimensions\x18\x06 \x01(\x05R\n" +
-	"dimensions\"\xa5\x01\n" +
+	"dimensions\"\xc1\x01\n" +
 	"\bLLMUsage\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12!\n" +
 	"\finput_tokens\x18\x02 \x01(\x05R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x03 \x01(\x05R\foutputTokens\x12\x1d\n" +
 	"\n" +
 	"latency_ms\x18\x04 \x01(\x02R\tlatencyMs\x12\x1c\n" +
-	"\toperation\x18\x05 \x01(\tR\toperation*\xee\x01\n" +
+	"\toperation\x18\x05 \x01(\tR\toperation\x12\x1a\n" +
+	"\bprovider\x18\x06 \x01(\tR\bprovider*\xee\x01\n" +
 	"\bLanguage\x12\x18\n" +
 	"\x14LANGUAGE_UNSPECIFIED\x10\x00\x12\x0f\n" +
 	"\vLANGUAGE_GO\x10\x01\x12\x13\n" +
