@@ -1695,11 +1695,13 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 	}
 
 	// Each artifact type delegates refresh to its own generation service.
-	// Slice 5b: cliff notes routes through cliffNotesGenerationService.RefreshFromExisting.
-	// Remaining types still use the inline enqueueKnowledgeJob closure below
-	// (replaced one at a time in Slices 5c–5f).
+	// Slices 5b–5f replace these dispatches one at a time; the inline
+	// enqueueKnowledgeJob closure below handles only the remaining types.
 	if existing.Type == knowledgepkg.ArtifactCliffNotes {
 		return cliffNotesGenerationService{resolver: r.Resolver}.RefreshFromExisting(ctx, existing)
+	}
+	if existing.Type == knowledgepkg.ArtifactArchitectureDiagram {
+		return architectureDiagramGenerationService{resolver: r.Resolver}.RefreshFromExisting(ctx, existing)
 	}
 
 	// The refresh runs through the orchestrator like the dedicated
@@ -1743,62 +1745,6 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 		}
 
 		switch existing.Type {
-		case knowledgepkg.ArtifactArchitectureDiagram:
-			architecturePromptJSON := snapJSON
-			var understandingForDiagram *knowledgepkg.RepositoryUnderstanding
-			if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, existing, snap.SourceRevision, snapJSON); err != nil {
-				return err
-			} else {
-				understandingForDiagram = understanding
-				if reused {
-					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
-					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(existing.ID, 0.12, "understanding", "Using cached repository understanding")
-				}
-			}
-			scaffoldJSON, err := buildArchitectureDiagramScaffold(r.getStore(ctx), repo.ID)
-			if err != nil {
-				return err
-			}
-			var architectureBundle architectureDiagramPromptBundle
-			if promptJSON, err := buildArchitectureDiagramPromptBundle(r.KnowledgeStore, repo.ID, existing.Audience, snap, understandingForDiagram, scaffoldJSON); err != nil {
-				return err
-			} else {
-				architecturePromptJSON = promptJSON
-				if err := json.Unmarshal(promptJSON, &architectureBundle); err != nil {
-					return fmt.Errorf("failed to unmarshal architecture prompt bundle: %w", err)
-				}
-			}
-			streamDriver := r.runStreamProgressDriver(runCtx, rt, existing.ID, rpcBucketCollapsed)
-			resp, err := r.LLMCaller.GenerateArchitectureDiagramWithJob(runCtx, repo.ID, resolution.OpArchitectureDiagram, llmJobMetadataWithProgress(rt, existing.ID, "architecture_diagram", streamDriver.OnProgress()), &knowledgev1.GenerateArchitectureDiagramRequest{
-				RepositoryId:             repo.ID,
-				RepositoryName:           repo.Name,
-				Audience:                 string(existing.Audience),
-				AudienceEnum:             protoAudience(existing.Audience),
-				Depth:                    string(existing.Depth),
-				DepthEnum:                protoDepth(existing.Depth),
-				SnapshotJson:             string(architecturePromptJSON),
-				DeterministicDiagramJson: string(scaffoldJSON),
-			})
-			streamDriver.Close()
-			if err != nil {
-				slog.Error("refresh architecture diagram failed", "artifact_id", existing.ID, "error", err)
-				return err
-			}
-			persistUsage(resp.Usage)
-			sections := []knowledgepkg.Section{{
-				Title:            "AI Architecture Diagram",
-				SectionKey:       "ai_architecture_diagram",
-				Content:          resp.MermaidSource,
-				Summary:          resp.DiagramSummary,
-				Metadata:         architectureDiagramMetadataJSON(resp, &architectureBundle),
-				Confidence:       knowledgepkg.ConfidenceMedium,
-				Inferred:         len(resp.InferredEdges) > 0,
-				RefinementStatus: "light",
-				Evidence:         mapProtoEvidence(resp.Evidence),
-			}}
-			if err := r.KnowledgeStore.SupersedeArtifact(existing.ID, sections); err != nil {
-				return err
-			}
 		case knowledgepkg.ArtifactLearningPath:
 			enrichedSnapJSON := snapJSON
 			if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, existing, snap.SourceRevision, snapJSON); err != nil {

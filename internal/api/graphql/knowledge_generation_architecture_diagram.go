@@ -235,7 +235,66 @@ func (s architectureDiagramGenerationService) runGenerationPipeline(
 }
 
 // RefreshFromExisting re-runs the generation pipeline against an existing
-// artifact, replacing its sections in place. Implemented in Phase 1 Slice 5c.
+// artifact, replacing its sections in place (Phase 1 Slice 5c).
+//
+// It reads audience and depth from the existing artifact; the scaffold and
+// understanding are rebuilt fresh from the store so metadata round-trips
+// correctly through the prompt bundle.
 func (s architectureDiagramGenerationService) RefreshFromExisting(ctx context.Context, existing *knowledgepkg.Artifact) (*KnowledgeArtifact, error) {
-	panic("TODO: implemented in Phase 1 Slice 5c")
+	r := s.resolver
+
+	repo := r.getStore(ctx).GetRepository(existing.RepositoryID)
+	if repo == nil {
+		return nil, fmt.Errorf("repository %s not found", existing.RepositoryID)
+	}
+
+	audience := existing.Audience
+	depth := existing.Depth
+
+	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
+	repoRoot, repoRootErr := resolveRepoSourcePath(repo)
+	if repoRootErr != nil {
+		slog.Warn("architecture diagram refresh: repo source unavailable, docs will be omitted",
+			"repo_id", repo.ID, "error", repoRootErr)
+	}
+
+	capturedStore := r.getStore(ctx)
+	err := r.enqueueKnowledgeJob(ctx, existing, "refresh:architecture_diagram", 0, func(runCtx context.Context, rt llm.Runtime) error {
+		snap, err := assembler.Assemble(repo.ID, repoRoot)
+		if err != nil {
+			slog.Error("architecture diagram refresh assemble failed", "artifact_id", existing.ID, "error", err)
+			return err
+		}
+		snapJSON, err := json.Marshal(snap)
+		if err != nil {
+			slog.Error("architecture diagram refresh serialize failed", "artifact_id", existing.ID, "error", err)
+			return err
+		}
+		rt.ReportSnapshotBytes(len(snapJSON))
+
+		scaffoldJSON, err := buildArchitectureDiagramScaffold(capturedStore, repo.ID)
+		if err != nil {
+			return fmt.Errorf("architecture diagram refresh: build scaffold: %w", err)
+		}
+
+		params := architectureDiagramRunParams{
+			repo:         repo,
+			artifact:     existing,
+			snap:         snap,
+			snapJSON:     snapJSON,
+			scaffoldJSON: scaffoldJSON,
+			audience:     audience,
+			depth:        depth,
+		}
+		return s.runGenerationPipeline(runCtx, rt, capturedStore, params)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("enqueue architecture diagram refresh job: %w", err)
+	}
+
+	updated := r.KnowledgeStore.GetKnowledgeArtifact(existing.ID)
+	if updated == nil {
+		return nil, fmt.Errorf("artifact %s not found after refresh", existing.ID)
+	}
+	return mapKnowledgeArtifact(updated), nil
 }
