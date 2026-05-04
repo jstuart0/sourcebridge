@@ -16,13 +16,25 @@ func TestIsGitURL(t *testing.T) {
 		input string
 		want  bool
 	}{
+		// Scheme-prefixed URLs are unambiguously remote.
 		{"https://github.com/user/repo.git", true},
 		{"http://github.com/user/repo", true},
 		{"git://github.com/user/repo", true},
 		{"git@github.com:user/repo.git", true},
-		{"myrepo.git", true},
+		// Host-shaped .git suffix: hostname (contains dot) before first slash.
+		{"github.com/user/repo.git", true},
+		// Local paths — must be false regardless of .git suffix (codex M fix).
 		{"/home/user/project", false},
 		{"./relative/path", false},
+		{"/home/user/repos/myrepo.git", false},  // absolute local bare repo
+		{"./myrepo.git", false},                  // explicit relative local bare repo
+		{"../myrepo.git", false},                 // parent-relative local bare repo
+		// Bare name without hostname prefix: ambiguous, treated as local because
+		// there is no hostname-shaped prefix before the first slash.
+		// Pre-Slice-7 graphql accepted this (myrepo.git → true), but the
+		// consolidated pathutil.IsGitURL correctly rejects it to avoid
+		// misclassifying local bare-repo directories as remote clone targets.
+		{"myrepo.git", false},
 		{"", false},
 	}
 	for _, tc := range tests {

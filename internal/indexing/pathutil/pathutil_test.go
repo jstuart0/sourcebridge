@@ -208,22 +208,33 @@ func TestSafeJoinRepoPath_AllowsRootItself(t *testing.T) {
 	}
 }
 
-// TestIsGitURL covers all recognized URL patterns.
+// TestIsGitURL covers all recognized URL patterns, including local .git
+// directories that must NOT be classified as remote (codex M regression).
 func TestIsGitURL(t *testing.T) {
 	trueInputs := []string{
+		// Scheme-prefixed — always remote.
 		"http://github.com/user/repo",
 		"https://github.com/user/repo",
 		"git://github.com/user/repo",
 		"git@github.com:user/repo",
 		"ssh://git@github.com/user/repo",
+		// Host-shaped .git suffix — remote shorthand.
 		"github.com/user/repo.git",
+		"gitlab.example.com/org/project.git",
 	}
 	falseInputs := []string{
+		// Plain local paths.
 		"/home/user/repo",
 		"./local/repo",
 		"C:\\repos\\myrepo",
 		"not-a-url",
 		"",
+		// Local bare-repo paths with .git suffix — must remain local (codex M fix).
+		"/Users/x/repos/repo.git",         // absolute local bare repo
+		"/home/user/projects/mylib.git",    // absolute local bare repo
+		"./repo.git",                        // relative local bare repo
+		"../parent/repo.git",               // relative local bare repo (parent dir)
+		"repo.git",                          // bare local name — no hostname, ambiguous → local
 	}
 
 	for _, s := range trueInputs {

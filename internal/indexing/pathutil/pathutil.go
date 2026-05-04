@@ -94,17 +94,48 @@ func SanitizeRepoName(name string, policy SanitizePolicy) string {
 	}
 }
 
-// IsGitURL returns true if s looks like a git URL: http(s)://, git://, ssh://,
-// git@ prefix, or .git suffix.
+// IsGitURL returns true if s looks like a remote git URL.
 //
-// This uses the more complete check from internal/api/graphql/helpers.go which
-// includes the .git suffix, superseding the simpler check in
-// internal/indexing/service.go.
+// Scheme-prefixed URLs (http://, https://, git://, ssh://, git@) are always
+// classified as remote. For .git-suffix strings the function guards against
+// local bare-repo paths: absolute paths and explicit relative paths
+// (./repo.git, ../parent/repo.git) remain local. A bare name without a
+// slash (repo.git) is also treated as local because it is ambiguous without
+// network context. Only host-shaped strings with a dot before the first slash
+// are classified as remote shorthand (e.g. github.com/user/repo.git).
+//
+// Pre-Slice-7 the indexing layer only checked URL schemes; the graphql layer
+// also accepted the .git suffix but only on host-shaped strings. The consolidated
+// function preserves both behaviors while fixing the regression introduced in
+// b50c087 where /abs/path/repo.git was misclassified as remote.
 func IsGitURL(s string) bool {
-	return strings.HasPrefix(s, "http://") ||
+	// Scheme-prefixed URLs are unambiguously remote.
+	if strings.HasPrefix(s, "http://") ||
 		strings.HasPrefix(s, "https://") ||
 		strings.HasPrefix(s, "git://") ||
 		strings.HasPrefix(s, "git@") ||
-		strings.HasPrefix(s, "ssh://") ||
-		strings.HasSuffix(s, ".git")
+		strings.HasPrefix(s, "ssh://") {
+		return true
+	}
+
+	// .git suffix: only treat as remote when the string is host-shaped.
+	// Absolute paths, explicit relative paths, and bare names are local.
+	if strings.HasSuffix(s, ".git") {
+		if filepath.IsAbs(s) {
+			return false // /abs/path/repo.git — local bare repo
+		}
+		if strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../") {
+			return false // ./repo.git or ../parent/repo.git — local bare repo
+		}
+		// Require at least one slash and a hostname-shaped prefix (contains a
+		// dot before the first slash) to distinguish github.com/user/repo.git
+		// from a bare local name like repo.git.
+		slashIdx := strings.Index(s, "/")
+		if slashIdx > 0 && strings.Contains(s[:slashIdx], ".") {
+			return true // github.com/user/repo.git shape
+		}
+		return false // bare name (repo.git) or no hostname
+	}
+
+	return false
 }
