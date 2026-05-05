@@ -83,7 +83,7 @@ export function RepoJobsPopover({ repoId }: { repoId: string }) {
 
   const fetchActivity = useCallback(async () => {
     try {
-      const res = await authFetch(`/api/v1/admin/llm/activity?repo_id=${encodeURIComponent(repoId)}&limit=10`);
+      const res = await authFetch(`/api/v1/repositories/${encodeURIComponent(repoId)}/llm-activity?limit=10`);
       if (!res.ok) throw new Error(`activity endpoint returned ${res.status}`);
       const body = normalizeActivityResponse((await res.json()) as ActivityResponse);
       setData(body);
@@ -289,7 +289,7 @@ function RepoJobLogsPanel({ job }: { job: JobView }) {
 
   const fetchLogs = useCallback(async () => {
     try {
-      const res = await authFetch(`/api/v1/admin/llm/jobs/${encodeURIComponent(job.id)}/logs?limit=100`);
+      const res = await authFetch(`/api/v1/repositories/${encodeURIComponent(job.repo_id ?? "")}/llm-jobs/${encodeURIComponent(job.id)}/logs?limit=100`);
       if (!res.ok) throw new Error(`logs endpoint returned ${res.status}`);
       const body = (await res.json()) as { logs?: JobLogView[] };
       setLogs(Array.isArray(body.logs) ? body.logs : []);
@@ -297,7 +297,7 @@ function RepoJobLogsPanel({ job }: { job: JobView }) {
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load logs");
     }
-  }, [job.id]);
+  }, [job.id, job.repo_id]);
 
   useEffect(() => {
     void fetchLogs();

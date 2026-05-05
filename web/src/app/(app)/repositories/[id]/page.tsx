@@ -165,7 +165,7 @@ export default function RepositoryDetailPage() {
 
   const fetchRepoJobs = useCallback(async () => {
     try {
-      const res = await authFetch(`/api/v1/admin/llm/activity?repo_id=${encodeURIComponent(repoId)}&limit=40`);
+      const res = await authFetch(`/api/v1/repositories/${encodeURIComponent(repoId)}/llm-activity?limit=40`);
       if (!res.ok) {
         throw new Error(`job activity returned ${res.status}`);
       }

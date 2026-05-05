@@ -876,6 +876,17 @@ func (s *Server) setupRouter() {
 		// Subsystem clustering — list clusters and batch LLM relabel job.
 		r.Get("/api/v1/repositories/{repo_id}/clusters", s.handleListClusters)
 		r.Post("/api/v1/repositories/{repo_id}/clusters/relabel", s.handleRelabelClusters)
+
+		// Per-repository LLM job monitor — authenticated users with read access
+		// to the repo. These are the non-admin counterparts to the global
+		// /api/v1/admin/llm/* endpoints. Each handler verifies job.RepoID matches
+		// the path {id} so jobs from other repos are never leaked.
+		// Regression: audit-refactor Phase 0 Slice 4 moved the admin/llm routes
+		// behind RequireRole(admin), breaking the repo detail page for non-admins.
+		r.Get("/api/v1/repositories/{id}/llm-activity", s.handleRepoLLMActivity)
+		r.Get("/api/v1/repositories/{id}/llm-jobs/{job_id}", s.handleRepoLLMJobDetail)
+		r.Get("/api/v1/repositories/{id}/llm-jobs/{job_id}/logs", s.handleRepoLLMJobLogs)
+		r.Post("/api/v1/repositories/{id}/llm-jobs/{job_id}/cancel", s.handleRepoLLMJobCancel)
 	})
 
 	// Authenticated routes — outer group populates claims and applies tenant

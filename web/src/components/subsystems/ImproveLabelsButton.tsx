@@ -44,7 +44,7 @@ export function ImproveLabelsButton({ repoId, onComplete }: Props) {
   const pollJobStatus = useCallback(
     async (id: string) => {
       try {
-        const res = await authFetch(`/api/v1/admin/llm/jobs/${encodeURIComponent(id)}`);
+        const res = await authFetch(`/api/v1/repositories/${encodeURIComponent(repoId)}/llm-jobs/${encodeURIComponent(id)}`);
         if (!res.ok) return;
         const data = (await res.json()) as { status: JobStatus };
         const next = data.status;

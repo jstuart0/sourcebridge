@@ -1011,7 +1011,7 @@ export function KnowledgeTab({
     if (cancellingJobIds[jobId]) return;
     setCancellingJobIds((current) => ({ ...current, [jobId]: true }));
     try {
-      const res = await authFetch(`/api/v1/admin/llm/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+      const res = await authFetch(`/api/v1/repositories/${encodeURIComponent(repoId)}/llm-jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
       if (!res.ok) throw new Error(`cancel returned ${res.status}`);
       await fetchRepoJobs();
       reexecuteKnowledge({ requestPolicy: "network-only" });
