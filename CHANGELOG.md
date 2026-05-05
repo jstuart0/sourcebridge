@@ -373,6 +373,18 @@ CA-146 (page-count transparency and per-run override).
   (tracked as CA-168). See CA-163 and the investigation at
   `thoughts/shared/investigations/2026-05-05-living-wiki-broken-on-openrouter.md`.
 
+- Living Wiki ships substantially more pages on mid-tier models — `vagueness`
+  is now a warning at TierMid for `architecture/engineers`, `api_reference/engineers`,
+  `adr/engineers`, `system_overview/engineers`, and `system_overview/product`,
+  mirroring the CA-152 TierLocal pattern. `citation_density` is now a warning
+  at TierMid for `architecture/engineers` (the threshold of 1 citation per 300
+  words from CA-150 is preserved unchanged — only the level changes). Closes
+  the post-CA-163-deploy gap on Gemini Flash where 11/12 pages were excluded
+  with vague-quantifier and stub-paragraph citation violations after
+  `factual_grounding` had been demoted in CA-163. CA-164 + CA-165 — see
+  `thoughts/shared/investigations/2026-05-05-living-wiki-broken-on-openrouter.md`
+  and `thoughts/shared/plans/2026-05-05-deliver-tiermid-vagueness-and-citation-density.md`.
+
 - **discuss / Q&A**: When `discussCode` is anchored on a symbol, the LLM prompt now
   includes the symbol's actual implementation source sliced from the file by line range,
   instead of relying on metadata plus a whole-file dump. Token cost on long files is

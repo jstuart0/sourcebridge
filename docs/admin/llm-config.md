@@ -944,6 +944,30 @@ enforcement at TierMid or TierLocal can register a model in the Model Registry
 the strict frontier baseline. Warning-visibility for shipped pages is tracked
 as CA-168.
 
+**TierMid `vagueness` and `citation_density` calibration (CA-164 + CA-165)**:
+As of CA-164 + CA-165, the `vagueness` validator is treated as a **warning**
+(not a gate) at TierMid for `architecture/engineers`, `api_reference/engineers`,
+`adr/engineers`, `system_overview/engineers`, and `system_overview/product`.
+Mid-tier models (Gemini Flash family, gpt-4o-mini, o3-mini, ≥70B open-weights
+via OpenRouter) routinely emit normal English quantifiers ("various", "multiple",
+"many", "often", "occasionally", "several") that the `vagueness` regex flags
+absent an adjacent numeral; treating those as warnings allows pages to ship
+while preserving the signal. `(architecture, product, TierMid)` is intentionally
+NOT demoted — CA-152 did not demote at TierLocal for that audience, so the
+TierMid override mirrors that absence (Decision 1 — don't extrapolate beyond
+TierLocal).
+
+The `citation_density` validator is also demoted to **warning** at TierMid
+for `architecture/engineers` only — closing the post-CA-163-deploy stub-paragraph
+failure mode where short architecture detail sub-pages (17-25 words, 0 citations)
+were rejected by `citation_density` even though `factual_grounding` had already
+passed. The threshold (1 citation per 300 words, set by CA-150) is preserved
+unchanged; only the level flips from gate to warning. The same `qualityGateTier`
+override path (`/admin/comprehension/models`) lets operators force strict
+frontier-tier enforcement on a per-model basis if needed. The silent-shipment
+caveat from CA-163 still applies — successful-page warnings are not yet
+surfaced in the PR description (tracked as a follow-up).
+
 ---
 
 ## Living Wiki page-count and ops behavior
