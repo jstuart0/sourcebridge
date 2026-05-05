@@ -370,7 +370,7 @@ CA-146 (page-count transparency and per-run override).
   every paragraph with a behavioral assertion failed the gate without the
   `(path:N-N)` citation format that mid/local-tier models do not reliably emit.
   Affected pages now ship; warnings are not yet surfaced in the PR description
-  (tracked as a follow-up). See CA-163 and the investigation at
+  (tracked as CA-168). See CA-163 and the investigation at
   `thoughts/shared/investigations/2026-05-05-living-wiki-broken-on-openrouter.md`.
 
 - **discuss / Q&A**: When `discussCode` is anchored on a symbol, the LLM prompt now

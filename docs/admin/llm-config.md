@@ -940,9 +940,9 @@ description or in `lw_pages.warnings` — the orchestrator's `pageOutcome` does
 not propagate `ValidationResult` for non-excluded pages, and `buildPRBody()`
 renders quality reports only for excluded pages. Operators who need strict
 enforcement at TierMid or TierLocal can register a model in the Model Registry
-(`/admin/comprehension/models`) with `quality_gate_tier = frontier` to apply
+(`/admin/comprehension/models`) with `qualityGateTier` set to `frontier` to apply
 the strict frontier baseline. Warning-visibility for shipped pages is tracked
-as a follow-up.
+as CA-168.
 
 ---
 

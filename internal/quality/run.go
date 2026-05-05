@@ -18,8 +18,9 @@ import (
 type RetryDecision string
 
 const (
-	// RetryPass means all gates passed. The page may ship (warnings
-	// are attached to the PR description but do not block shipping).
+	// RetryPass means all gates passed. The page may ship. LevelWarning
+	// violations do not block shipping; surfacing them in the PR description
+	// is the caller's responsibility (Living Wiki currently does not — CA-168).
 	RetryPass RetryDecision = "pass"
 
 	// RetryWithReasons means one or more gates fired on the first

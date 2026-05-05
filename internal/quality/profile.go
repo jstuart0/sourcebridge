@@ -39,8 +39,10 @@ const (
 	// Gate failures trigger the retry policy.
 	LevelGate GateLevel = "gate"
 
-	// LevelWarning means the page ships but the violation is attached
-	// to the PR description for reviewer attention.
+	// LevelWarning means the page ships despite the violation. The quality
+	// package returns the warning in ValidationResult; surfacing it in the PR
+	// description or page record is the caller's responsibility. Living Wiki
+	// successful-page warning surfacing is currently incomplete (CA-168).
 	LevelWarning GateLevel = "warning"
 
 	// LevelOff means the validator is not applied for this
