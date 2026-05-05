@@ -22,6 +22,52 @@ per-model in the Admin → Comprehension → Model Registry (`/admin/comprehensi
 See [`docs/admin/llm-config.md`](docs/admin/llm-config.md#capability-tiers-and-quality-gates)
 for the full operator runbook and threshold table reference.
 
+## Recent refactors
+
+**2026-05-04 system audit refactor** (CA-155) — 74 commits, `a176b6f..89c85f3`.
+Full-codebase audit covering security hardening, GraphQL deduplication, subsystem
+registration, MCP tool refactor, web UI consolidation, and infrastructure
+hardening. No public surface removed.
+
+- Plan: [`thoughts/shared/plans/2026-05-04-system-audit-refactor.md`](thoughts/shared/plans/2026-05-04-system-audit-refactor.md)
+- Audit synthesis: [`thoughts/shared/audits/2026-05-04-system-audit-refactor.md`](thoughts/shared/audits/2026-05-04-system-audit-refactor.md)
+- Phase reports (codex r2):
+  - [`thoughts/shared/plans/2026-05-04-system-audit-refactor.codex-r2-phase0.md`](thoughts/shared/plans/2026-05-04-system-audit-refactor.codex-r2-phase0.md)
+  - [`thoughts/shared/plans/2026-05-04-system-audit-refactor.codex-r2-phase1.md`](thoughts/shared/plans/2026-05-04-system-audit-refactor.codex-r2-phase1.md)
+  - [`thoughts/shared/plans/2026-05-04-system-audit-refactor.codex-r2-phase2.md`](thoughts/shared/plans/2026-05-04-system-audit-refactor.codex-r2-phase2.md)
+  - [`thoughts/shared/plans/2026-05-04-system-audit-refactor.codex-r2-phase3.md`](thoughts/shared/plans/2026-05-04-system-audit-refactor.codex-r2-phase3.md)
+  - [`thoughts/shared/plans/2026-05-04-system-audit-refactor.codex-r2-phase4.md`](thoughts/shared/plans/2026-05-04-system-audit-refactor.codex-r2-phase4.md)
+  - [`thoughts/shared/plans/2026-05-04-system-audit-refactor.codex-r2-phase5.md`](thoughts/shared/plans/2026-05-04-system-audit-refactor.codex-r2-phase5.md)
+
+## Subsystem registration
+
+`internal/appdeps/appdeps.go` defines `AppDeps` — the canonical registry of
+shared application-layer dependencies. Both `rest.Server` and `graphql.Resolver`
+hold a `*AppDeps` pointer constructed once in `NewServer`.
+
+To add a new subsystem dependency:
+1. Add a field to `AppDeps` in `internal/appdeps/appdeps.go`.
+2. Add the matching field on `graphql.Resolver` (exported) and/or `rest.Server`
+   (unexported), as appropriate.
+3. Add one line to the relevant sync helper (`syncResolverDepsFromAppDeps` or
+   `syncServerDepsFromAppDeps`).
+
+`ClusteringHook` is intentionally absent from `AppDeps` — it is a closure
+constructed at wiring time and does not belong in the long-lived registry.
+
+## Legacy CodeAware naming
+
+This project was originally called **CodeAware** and still contains `CODEAWARE_*`
+environment variables, `codeaware` Kubernetes resource names, `ca_*` database
+table names, and other legacy references that are deliberately preserved to avoid
+breaking deployed infrastructure.
+
+Consult [`docs/codeaware-legacy-census.md`](docs/codeaware-legacy-census.md)
+before renaming anything. The census classifies each reference as KEEP (deployed
+infra dependency), DEFER (DB table / k8s resource), or RENAME (safe internal
+name). The `CODEAWARE_*` env vars in `internal/` are **KEEP** and must not be
+removed — they are runtime fallbacks alongside the `SOURCEBRIDGE_*` equivalents.
+
 ## Building
 
 ```bash

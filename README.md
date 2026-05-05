@@ -581,6 +581,12 @@ the API server during a rolling deploy, etc.).
 - [Web UI Guide](docs/user/web-ui-guide.md)
 - [Configuration](docs/admin/configuration.md)
 - [Troubleshooting](docs/admin/troubleshooting.md)
+- [Architecture: Living Wiki orchestrator contract](docs/architecture/livingwiki-orchestrator-contract.md)
+- [Architecture: MCP tool registration](docs/architecture/mcp-tool-registration.md)
+- [Security: CSP audit 2026-05-04](docs/security/csp-audit-2026-05-04.md)
+- [Admin runbook: init-hub-secrets](docs/admin-runbooks/init-hub-secrets.md)
+- [Admin runbook: CSRF and API token roles](docs/admin-runbooks/csrf-and-api-token-roles.md)
+- [Legacy name census (CodeAware → SourceBridge)](docs/codeaware-legacy-census.md)
 
 ## Contributing
 

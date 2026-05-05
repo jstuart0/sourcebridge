@@ -6,6 +6,60 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ## [Unreleased]
 
+**System audit refactor campaign** (CA-155, 2026-05-04, `a176b6f..89c85f3`). Full-codebase audit — 70 deduplicated findings (9 Critical, 23 High, 30 Medium, 18 Low), 74 commits across 5 phases, no public surface removed.
+
+### Security (Phase 0)
+
+- **Fixed**: CSRF protection verified on by default (`CSRFEnabled: true` default confirmed, test added) ([CA-155](https://plane.xmojo.net/agile-solutions-group/projects/d3fa4bd8-1177-4364-88a7-aae69698b75d/issues/797d0038-6493-49dc-8307-d7c54d3f6611/))
+- **Fixed**: OIDC role allowlist enforced — provider claims no longer set admin role without explicit configuration
+- **Fixed**: API token role field enforced — tokens with no role now default to `viewer`; migration writes `role='admin'` for all pre-existing tokens to preserve behavior
+- **Fixed**: User-scoped token routes (`/api/v1/tokens`) correctly separated from the `RequireRole(admin)` gate; non-admin users can manage their own tokens
+- **Fixed**: Bootstrap admin credential handling hardened; removal-guard CI script added to prevent accidental deletion of public surfaces
+- Commits: `a176b6f..8db8daa` (14 commits)
+
+### GraphQL refactor (Phase 1)
+
+- **Added**: `LLMUsage.Provider` field to `proto/common/v1/types.proto`; all 9+ Go call sites and the Python worker updated to populate it
+- **Refactored**: `schema.resolvers.go` reduced from 4857 to ~4317 lines via per-type delegation for `RefreshKnowledgeArtifact` (Cliff Notes, Architecture Diagram, Learning Path, Code Tour, Workflow Story each get a typed service)
+- **Fixed**: Gen-1 enterprise DB typing cleaned up
+- Commits: `8db8daa..4b279c7` (16 commits)
+
+### Subsystem registration and Living Wiki typing (Phase 2)
+
+- **Added**: `internal/appdeps` package — `AppDeps` struct is now the canonical single-construction dependency registry shared by `rest.Server` and `graphql.Resolver`; new subsystems register fields here (see CLAUDE.md "Subsystem registration")
+- **Added**: `capabilities`/`entitlements` mapping helper and sync-job-op lint; both packages remain (no-removal rule)
+- **Refactored**: Living Wiki types fully typed; `OpGroup` typed; `EnterpriseDB` typed
+- Commits: `4b279c7..5ebf943` (11 commits)
+
+### MCP tool refactor and Python servicer dedup (Phase 3)
+
+- **Refactored**: `mcpTool` struct introduced — definition and dispatch handler are now always registered together via `registerTool`; eliminates the prior pattern where `baseTools()` list and dispatch map could drift independently
+- **Added**: `withCtxHandler` adapter for context-bearing MCP tools; mirrors `noCtxHandler`
+- **Refactored**: Python worker servicer duplication eliminated; `ClassifyLLMError` extracted as canonical helper
+- **Added**: `pathutil` package; `AdminShell` `authFetch` helper
+- Commits: `5ebf943..135a9a0` (12 commits)
+
+### Web UI refactor (Phase 4)
+
+- **Refactored**: `EmptyState` components consolidated; `web/src/components/empty-states/*` retained as compatibility adapters re-exporting from `@/components/ui/empty-state`
+- **Refactored**: `RepositoryDetailPage` (`page.tsx`) reduced from 3836 to ~590 lines (~85%) by extracting 11 tab components
+- **Added**: Design tokens for confidence and danger states
+- **Refactored**: GraphQL fragments extracted (multi-shape pattern); avoids over-fetching
+- **Added**: WAI-ARIA roles for tabs, toast, and account menu; keyboard navigation
+- **Renamed**: CSS class prefix `ca-*` → `sb-*` (internal names only; no public surface removed); census at `docs/codeaware-legacy-census.md`
+- Commits: `135a9a0..dc58dcc` (13 commits)
+
+### Infrastructure hardening (Phase 5)
+
+- **Fixed**: `docker-compose.hub.yml` no longer ships working default credentials; sentinel values (`INSECURE-DEFAULT-CHANGE-ME-NOW`) trigger a repeating boot warning until replaced. Run `scripts/init-hub-secrets.sh` once before starting the stack
+- **Added**: Container liveness/readiness probes for all services; `/api/health` public endpoint (Next.js); `grpc_health_probe` for worker
+- **Fixed**: All container images now run as non-root (`USER` directives); per-workload `ServiceAccount` resources with `automountServiceAccountToken: false`; `SOURCEBRIDGE_WORKER_TLS_ENABLED` flag for mTLS in production overlay
+- **Fixed**: `/metrics`, `/healthz`, `/readyz` removed from Ingress exposure; `ServiceMonitor` added for Prometheus scrape
+- **Fixed**: All GitHub Actions pinned to 40-character commit SHAs; `.github/dependabot.yml` added for github-actions ecosystem
+- **Fixed**: CSP `unsafe-eval` removed from API server security headers; gRPC reflection gated behind `WorkerConfig.Debug`; git credential helper shell-quote vulnerability fixed
+- Follow-up tickets: [CA-156](https://plane.xmojo.net/agile-solutions-group/projects/d3fa4bd8-1177-4364-88a7-aae69698b75d/issues/f71f2a1d-cee6-4551-9dd4-b3cf0b58f79f/) (CSP CI enforcement), [CA-157](https://plane.xmojo.net/agile-solutions-group/projects/d3fa4bd8-1177-4364-88a7-aae69698b75d/issues/fc3a831e-17b5-492f-bd1c-c44be1cd3342/) (OSS multi-tenant design), [CA-158](https://plane.xmojo.net/agile-solutions-group/projects/d3fa4bd8-1177-4364-88a7-aae69698b75d/issues/8d2842cb-24bb-4e7c-9a91-71ffe6b5168c/) (EnableLivingWikiForRepo RMW race)
+- Commits: `dc58dcc..89c85f3` (8 commits)
+
 **Living Wiki cold-start reliability campaign** (2026-05-02 outage remediation). On
 2026-05-02 a Living Wiki cold-start on a default Ollama install produced 12 pages that
 were all rejected by quality gates, with no per-page progress signal, broken retry-resume,
