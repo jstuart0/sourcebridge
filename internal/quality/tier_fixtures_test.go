@@ -212,8 +212,9 @@ func TestTierFixtures_ThresholdsBehaveAsDocumented(t *testing.T) {
 
 	// vagueness / architecture/engineers
 	//
-	// Frontier (gate):   vague terms without adjacent numeral => gates fire.
-	// Mid      (gate):   same — mid inherits frontier vagueness gate.
+	// Frontier (gate):    vague terms without adjacent numeral => gates fire.
+	// Mid      (warning): CA-164 demoted vagueness to warning at TierMid —
+	//                     page ships despite vague quantifiers => RetryPass.
 	// Local    (warning): vagueness is demoted to warning => gates pass.
 	//
 	// Fixture: >=3 vague quantifiers without nearby digits; >=4 parseable
@@ -248,10 +249,12 @@ func TestTierFixtures_ThresholdsBehaveAsDocumented(t *testing.T) {
 		}
 		assertDecision(t, modeltier.TierFrontier, frontierResult, quality.RetryReject)
 
-		// Mid: vagueness is also a gate.
+		// Mid: CA-164 demoted vagueness to LevelWarning at TierMid. The fixture's
+		// vague quantifiers now produce a warning (not a gate), so the page ships.
 		midResult := runFixture(t, quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierMid, input, base)
-		assertGatesFire(t, modeltier.TierMid, midResult)
-		assertDecision(t, modeltier.TierMid, midResult, quality.RetryReject)
+		assertNoGateFor(t, modeltier.TierMid, midResult, quality.ValidatorVagueness)
+		assertWarningPresent(t, modeltier.TierMid, midResult, quality.ValidatorVagueness)
+		assertDecision(t, modeltier.TierMid, midResult, quality.RetryPass)
 
 		// Local: vagueness is a warning. Gates must pass.
 		localResult := runFixture(t, quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierLocal, input, base)

@@ -349,8 +349,9 @@ func TestDefaultProfile_ThresholdTable(t *testing.T) {
 		// --- citation_density: architecture/engineers ---
 		{quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierFrontier,
 			quality.ValidatorCitationDensity, quality.LevelGate, 200, 0, 0, 0, 0},
+		// CA-165: citation_density demoted to LevelWarning at TierMid; threshold 300 preserved.
 		{quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierMid,
-			quality.ValidatorCitationDensity, quality.LevelGate, 300, 0, 0, 0, 0},
+			quality.ValidatorCitationDensity, quality.LevelWarning, 300, 0, 0, 0, 0},
 		{quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierLocal,
 			quality.ValidatorCitationDensity, quality.LevelWarning, 400, 0, 0, 0, 0},
 
@@ -373,8 +374,9 @@ func TestDefaultProfile_ThresholdTable(t *testing.T) {
 		// --- vagueness: architecture/engineers ---
 		{quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierFrontier,
 			quality.ValidatorVagueness, quality.LevelGate, 0, 0, 0, 0, 0},
+		// CA-164: vagueness demoted to LevelWarning at TierMid (mirrors TierLocal).
 		{quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierMid,
-			quality.ValidatorVagueness, quality.LevelGate, 0, 0, 0, 0, 0},
+			quality.ValidatorVagueness, quality.LevelWarning, 0, 0, 0, 0, 0},
 		{quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierLocal,
 			quality.ValidatorVagueness, quality.LevelWarning, 0, 0, 0, 0, 0},
 
@@ -742,13 +744,8 @@ func TestEffectiveProfile_SystemOverviewProductLocal_HasOverrides(t *testing.T) 
 
 // TestEffectiveProfile_SystemOverviewProductMid_HasOverrides verifies that
 // system_overview/AudienceProduct/TierMid has the audience-symmetric overrides
-// added by CA-163 Decision 3. Without this fix, product/mid inherits frontier-
-// strict graph thresholds (rels>=5), stricter than engineers/mid (rels>=4).
-//
-// The vagueness assertion is deliberate: CA-163 Decision 2 explicitly defers
-// vagueness demotion at TierMid. This assertion pins the intent — if a future
-// fix demotes vagueness at TierMid product, this test breaks and forces an
-// explicit decision rather than silent drift.
+// added by CA-163 Decision 3, and that vagueness is now LevelWarning per
+// CA-164 Decision 1 (which supersedes CA-163 Decision 2).
 func TestEffectiveProfile_SystemOverviewProductMid_HasOverrides(t *testing.T) {
 	t.Parallel()
 
@@ -785,14 +782,13 @@ func TestEffectiveProfile_SystemOverviewProductMid_HasOverrides(t *testing.T) {
 			}
 		case quality.ValidatorVagueness:
 			foundVagueness = true
-			// CA-163 Decision 2 deliberately defers vagueness demotion at TierMid.
-			// This assertion pins the intent — if a future fix demotes vagueness at
-			// TierMid product, this test breaks and forces an explicit decision rather
-			// than silent drift.
-			if r.Level != quality.LevelGate {
-				t.Errorf("product/mid vagueness Level = %q, want gate — "+
-					"CA-163 Decision 2 deliberately preserves vagueness=gate at TierMid; "+
-					"update this assertion AND file a new decision if demotion is intentional",
+			// CA-164 Decision 1 supersedes CA-163 Decision 2 — vagueness demoted
+			// at TierMid for system_overview/product per the post-CA-163-deploy
+			// evidence (job 50583123-..., vagueness fires for "various" and similar).
+			if r.Level != quality.LevelWarning {
+				t.Errorf("product/mid vagueness Level = %q, want warning — "+
+					"CA-164 Decision 1 supersedes CA-163 Decision 2; "+
+					"update this assertion AND file a new decision if this changes",
 					r.Level)
 			}
 		}

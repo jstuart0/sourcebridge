@@ -245,12 +245,22 @@ var (
 var tierOverrides = map[profileKey][]tierRuleOverride{
 	// --- architecture / for-engineers ---
 	{TemplateArchitecture, AudienceEngineers, modeltier.TierMid}: {
-		{ValidatorID: ValidatorCitationDensity, Level: &_levelGate,
+		// CA-165: citation_density demoted to warning at TierMid for architecture/engineers;
+		// post-CA-163-deploy evidence (job 50583123-...) showed 9 architecture detail sub-pages
+		// failing on stub paragraphs (17-25 words, 0 citations). The 300 words/citation threshold
+		// (from CA-150) stays — only the level changes. See investigation
+		// thoughts/shared/investigations/2026-05-05-living-wiki-broken-on-openrouter.md.
+		{ValidatorID: ValidatorCitationDensity, Level: &_levelWarning,
 			Config: ValidatorConfig{CitationDensityWordsPerCitation: 300}},
 		// CA-163: factual_grounding demoted to warning at TierMid — Gemini Flash
 		// and other mid-tier models don't reliably emit (path:N-N) citations.
 		// Production evidence: thoughts/shared/investigations/2026-05-05-living-wiki-broken-on-openrouter.md.
 		{ValidatorID: ValidatorFactualGrounding, Level: &_levelWarning},
+		// CA-164: vagueness demoted at TierMid mirroring CA-152's TierLocal pattern;
+		// Gemini Flash et al emit normal English ("multiple", "various", "often")
+		// without adjacent numerals — see investigation
+		// thoughts/shared/investigations/2026-05-05-living-wiki-broken-on-openrouter.md.
+		{ValidatorID: ValidatorVagueness, Level: &_levelWarning},
 	},
 	{TemplateArchitecture, AudienceProduct, modeltier.TierMid}: {
 		// CA-163: factual_grounding demoted to warning at TierMid for product
@@ -288,6 +298,11 @@ var tierOverrides = map[profileKey][]tierRuleOverride{
 		// CA-163: factual_grounding demoted to warning at TierMid — same prompt-
 		// compliance failure mode as architecture/mid. See Decision 1.
 		{ValidatorID: ValidatorFactualGrounding, Level: &_levelWarning},
+		// CA-164: vagueness demoted at TierMid mirroring CA-152's TierLocal pattern;
+		// Gemini Flash et al emit normal English ("multiple", "various", "often")
+		// without adjacent numerals — see investigation
+		// thoughts/shared/investigations/2026-05-05-living-wiki-broken-on-openrouter.md.
+		{ValidatorID: ValidatorVagueness, Level: &_levelWarning},
 	},
 	{TemplateAPIReference, AudienceEngineers, modeltier.TierLocal}: {
 		{ValidatorID: ValidatorCitationDensity, Level: &_levelGate,
@@ -313,6 +328,11 @@ var tierOverrides = map[profileKey][]tierRuleOverride{
 		// CA-163: factual_grounding demoted to warning at TierMid — profile-
 		// completeness extension; same root cause as architecture/api_reference.
 		{ValidatorID: ValidatorFactualGrounding, Level: &_levelWarning},
+		// CA-164: vagueness demoted at TierMid mirroring CA-152's TierLocal pattern;
+		// Gemini Flash et al emit normal English ("multiple", "various", "often")
+		// without adjacent numerals — see investigation
+		// thoughts/shared/investigations/2026-05-05-living-wiki-broken-on-openrouter.md.
+		{ValidatorID: ValidatorVagueness, Level: &_levelWarning},
 	},
 	{TemplateADR, AudienceEngineers, modeltier.TierLocal}: {
 		{ValidatorID: ValidatorCitationDensity, Level: &_levelWarning,
@@ -331,6 +351,11 @@ var tierOverrides = map[profileKey][]tierRuleOverride{
 			Config: ValidatorConfig{ArchRelevanceMinPageRefs: 2, ArchRelevanceMinGraphRelations: 4}},
 		{ValidatorID: ValidatorReadingLevel,
 			Config: ValidatorConfig{ReadingLevelFloor: 45}},
+		// CA-164: vagueness demoted at TierMid mirroring CA-152's TierLocal pattern;
+		// Gemini Flash et al emit normal English ("multiple", "various", "often")
+		// without adjacent numerals — see investigation
+		// thoughts/shared/investigations/2026-05-05-living-wiki-broken-on-openrouter.md.
+		{ValidatorID: ValidatorVagueness, Level: &_levelWarning},
 	},
 	{TemplateSystemOverview, AudienceEngineers, modeltier.TierLocal}: {
 		{ValidatorID: ValidatorArchitecturalRelevance, Level: &_levelGate,
@@ -351,12 +376,20 @@ var tierOverrides = map[profileKey][]tierRuleOverride{
 	{TemplateSystemOverview, AudienceProduct, modeltier.TierMid}: {
 		// CA-163 (Decision 3): close the audience-asymmetry inversion — without
 		// this, product/mid inherits frontier-strict graph thresholds (rels>=5),
-		// stricter than engineers/mid (rels>=4). Note: vagueness is deliberately
-		// NOT included here (remains gate at TierMid for both audiences per Decision 2).
+		// stricter than engineers/mid (rels>=4).
+		// CA-164 (post-CA-163-deploy evidence): vagueness demoted at TierMid for
+		// system_overview/product. The CA-163 deferral (Decision 2) was based on no
+		// production data; the data is in (job 50583123-...) — vagueness fires for
+		// "various" and similar. CA-164 Decision 1 supersedes CA-163 Decision 2.
 		{ValidatorID: ValidatorArchitecturalRelevance, Level: &_levelGate,
 			Config: ValidatorConfig{ArchRelevanceMinPageRefs: 2, ArchRelevanceMinGraphRelations: 4}},
 		{ValidatorID: ValidatorReadingLevel,
 			Config: ValidatorConfig{ReadingLevelFloor: 45}},
+		// CA-164: vagueness demoted at TierMid mirroring CA-152's TierLocal pattern;
+		// Gemini Flash et al emit normal English ("multiple", "various", "often")
+		// without adjacent numerals — see investigation
+		// thoughts/shared/investigations/2026-05-05-living-wiki-broken-on-openrouter.md.
+		{ValidatorID: ValidatorVagueness, Level: &_levelWarning},
 	},
 	{TemplateSystemOverview, AudienceProduct, modeltier.TierLocal}: {
 		{ValidatorID: ValidatorArchitecturalRelevance, Level: &_levelGate,
