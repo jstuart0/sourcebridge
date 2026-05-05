@@ -59,15 +59,22 @@ const OUTBOUND_STRIP = new Set([
 ]);
 
 function resolveUpstream(): string {
-  // Resolution: client-bundle var (NEXT_PUBLIC_API_URL) wins, falling back
-  // to the dev-only proxy var (SOURCEBRIDGE_WEB_DEV_PROXY) for setups that
-  // don't want to expose the URL to the client bundle, then localhost:8080
-  // for `next dev` against a local API on the host.
-  return (
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.SOURCEBRIDGE_WEB_DEV_PROXY ||
-    'http://localhost:8080'
-  );
+  // IMPORTANT: NEXT_PUBLIC_* vars are inlined at build time by webpack's
+  // DefinePlugin in ALL compilation units — including server-side middleware.
+  // Do NOT use process.env.NEXT_PUBLIC_API_URL here; it will always resolve
+  // to the build-time default ("http://localhost:8080") regardless of what
+  // the container's runtime environment has set.
+  //
+  // Instead, read SOURCEBRIDGE_WEB_DEV_PROXY (no NEXT_PUBLIC_ prefix → not
+  // inlined → reads the actual runtime environment per request). Both
+  // docker-compose.yml and docker-compose.hub.yml already set this var to
+  // http://sourcebridge:8080. The Helm chart sets it at
+  // deploy/helm/sourcebridge/templates/web-deployment.yaml:51.
+  //
+  // NEXT_PUBLIC_API_URL is still used for the client bundle (Settings page
+  // display) via next.config.ts env:{} block — that path is intentionally
+  // build-time baked and separate from this server-side resolution.
+  return process.env.SOURCEBRIDGE_WEB_DEV_PROXY || 'http://localhost:8080';
 }
 
 function trustedClientIP(request: NextRequest): string | undefined {
