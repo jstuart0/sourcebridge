@@ -238,11 +238,22 @@ var (
 // per-validator deltas from the frontier base. Only entries that DIFFER
 // from the frontier base are listed. Per D14a: Level is *GateLevel
 // (nil = unchanged); Config merges field-by-field (zero = unchanged).
+// NOTE: When this map exceeds ~20 entries, split into a dedicated
+// profile_overrides.go in the same package, grouped by template. No API change required.
 var tierOverrides = map[profileKey][]tierRuleOverride{
 	// --- architecture / for-engineers ---
 	{TemplateArchitecture, AudienceEngineers, modeltier.TierMid}: {
 		{ValidatorID: ValidatorCitationDensity, Level: &_levelGate,
 			Config: ValidatorConfig{CitationDensityWordsPerCitation: 300}},
+		// CA-163: factual_grounding demoted to warning at TierMid — Gemini Flash
+		// and other mid-tier models don't reliably emit (path:N-N) citations.
+		// Production evidence: thoughts/shared/investigations/2026-05-05-living-wiki-broken-on-openrouter.md.
+		{ValidatorID: ValidatorFactualGrounding, Level: &_levelWarning},
+	},
+	{TemplateArchitecture, AudienceProduct, modeltier.TierMid}: {
+		// CA-163: factual_grounding demoted to warning at TierMid for product
+		// audience — same root cause as engineers/mid; see Decision 1.
+		{ValidatorID: ValidatorFactualGrounding, Level: &_levelWarning},
 	},
 	{TemplateArchitecture, AudienceEngineers, modeltier.TierLocal}: {
 		{ValidatorID: ValidatorCitationDensity, Level: &_levelWarning,
@@ -254,6 +265,15 @@ var tierOverrides = map[profileKey][]tierRuleOverride{
 		// only thresholds change.
 		{ValidatorID: ValidatorBlockCount,
 			Config: ValidatorConfig{BlockCountMin: 1, BlockCountMax: 20}},
+		// CA-163 (Decision 1b): factual_grounding demoted to warning at TierLocal
+		// for architecture — Ollama users hit this gate today. Bundles the CA-152
+		// pattern (api_reference/glossary) to its natural completion.
+		{ValidatorID: ValidatorFactualGrounding, Level: &_levelWarning},
+	},
+	{TemplateArchitecture, AudienceProduct, modeltier.TierLocal}: {
+		// CA-163 (Decision 1b): factual_grounding demoted to warning at TierLocal
+		// for architecture/product — mirrors engineers/local bundle above.
+		{ValidatorID: ValidatorFactualGrounding, Level: &_levelWarning},
 	},
 
 	// --- api_reference / for-engineers ---
@@ -263,6 +283,9 @@ var tierOverrides = map[profileKey][]tierRuleOverride{
 		{ValidatorID: ValidatorCodeExamplePresent, Level: &_levelWarning},
 		{ValidatorID: ValidatorReadingLevel,
 			Config: ValidatorConfig{ReadingLevelFloor: 45}},
+		// CA-163: factual_grounding demoted to warning at TierMid — same prompt-
+		// compliance failure mode as architecture/mid. See Decision 1.
+		{ValidatorID: ValidatorFactualGrounding, Level: &_levelWarning},
 	},
 	{TemplateAPIReference, AudienceEngineers, modeltier.TierLocal}: {
 		{ValidatorID: ValidatorCitationDensity, Level: &_levelGate,
@@ -285,6 +308,9 @@ var tierOverrides = map[profileKey][]tierRuleOverride{
 			Config: ValidatorConfig{CitationDensityWordsPerCitation: 300}},
 		{ValidatorID: ValidatorReadingLevel,
 			Config: ValidatorConfig{ReadingLevelFloor: 38}},
+		// CA-163: factual_grounding demoted to warning at TierMid — profile-
+		// completeness extension; same root cause as architecture/api_reference.
+		{ValidatorID: ValidatorFactualGrounding, Level: &_levelWarning},
 	},
 	{TemplateADR, AudienceEngineers, modeltier.TierLocal}: {
 		{ValidatorID: ValidatorCitationDensity, Level: &_levelWarning,
@@ -292,6 +318,9 @@ var tierOverrides = map[profileKey][]tierRuleOverride{
 		{ValidatorID: ValidatorVagueness, Level: &_levelWarning},
 		{ValidatorID: ValidatorReadingLevel,
 			Config: ValidatorConfig{ReadingLevelFloor: 35}},
+		// CA-163 (Decision 1b): factual_grounding demoted to warning at TierLocal
+		// for adr — Ollama users hit this gate today. Bundles the CA-152 pattern.
+		{ValidatorID: ValidatorFactualGrounding, Level: &_levelWarning},
 	},
 
 	// --- system_overview / for-engineers ---
@@ -317,6 +346,16 @@ var tierOverrides = map[profileKey][]tierRuleOverride{
 	// frontier thresholds for vagueness. Mirror the engineers entries for
 	// validators that appear in both the engineers and product base profiles.
 	// (factual_grounding is not in the product base — no override needed.)
+	{TemplateSystemOverview, AudienceProduct, modeltier.TierMid}: {
+		// CA-163 (Decision 3): close the audience-asymmetry inversion — without
+		// this, product/mid inherits frontier-strict graph thresholds (rels>=5),
+		// stricter than engineers/mid (rels>=4). Note: vagueness is deliberately
+		// NOT included here (remains gate at TierMid for both audiences per Decision 2).
+		{ValidatorID: ValidatorArchitecturalRelevance, Level: &_levelGate,
+			Config: ValidatorConfig{ArchRelevanceMinPageRefs: 2, ArchRelevanceMinGraphRelations: 4}},
+		{ValidatorID: ValidatorReadingLevel,
+			Config: ValidatorConfig{ReadingLevelFloor: 45}},
+	},
 	{TemplateSystemOverview, AudienceProduct, modeltier.TierLocal}: {
 		{ValidatorID: ValidatorArchitecturalRelevance, Level: &_levelGate,
 			Config: ValidatorConfig{ArchRelevanceMinPageRefs: 1, ArchRelevanceMinGraphRelations: 3}},
@@ -332,6 +371,11 @@ var tierOverrides = map[profileKey][]tierRuleOverride{
 	// on retry. Production evidence: dick's investigation
 	// 2026-05-02-qwen3-living-wiki-failures.md.
 	{TemplateGlossary, AudienceEngineers, modeltier.TierLocal}: {
+		{ValidatorID: ValidatorFactualGrounding, Level: &_levelWarning},
+	},
+	{TemplateGlossary, AudienceEngineers, modeltier.TierMid}: {
+		// CA-163: factual_grounding demoted to warning at TierMid — profile-
+		// completeness extension of CA-152's TierLocal fix. Same root cause.
 		{ValidatorID: ValidatorFactualGrounding, Level: &_levelWarning},
 	},
 
