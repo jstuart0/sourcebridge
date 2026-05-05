@@ -362,6 +362,17 @@ CA-146 (page-count transparency and per-run override).
 
 ### Fixed
 
+- **Living Wiki no longer rejects all pages on mid-tier models** (Gemini Flash family,
+  gpt-4o-mini, o3-mini, ≥70B open-weights via OpenRouter). The `factual_grounding`
+  quality gate is now a warning at TierMid for `architecture`, `api_reference`,
+  `adr`, `glossary`, and additionally a warning at TierLocal for `architecture`
+  and `adr` (extending CA-152's coverage). Closes a structural failure where
+  every paragraph with a behavioral assertion failed the gate without the
+  `(path:N-N)` citation format that mid/local-tier models do not reliably emit.
+  Affected pages now ship; warnings are not yet surfaced in the PR description
+  (tracked as a follow-up). See CA-163 and the investigation at
+  `thoughts/shared/investigations/2026-05-05-living-wiki-broken-on-openrouter.md`.
+
 - **discuss / Q&A**: When `discussCode` is anchored on a symbol, the LLM prompt now
   includes the symbol's actual implementation source sliced from the file by line range,
   instead of relying on metadata plus a whole-file dump. Token cost on long files is

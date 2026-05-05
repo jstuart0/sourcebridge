@@ -923,6 +923,27 @@ live in `internal/quality/profile.go`. The `tierOverrides` map documents
 which validators change between tiers and in which direction. Reading it
 is the authoritative reference for operators tuning gate behaviour.
 
+**TierMid and TierLocal `factual_grounding` calibration (CA-163)**: As of
+CA-163, the `factual_grounding` validator is treated as a **warning** (not a
+gate) at TierMid for the `architecture`, `api_reference`, `adr`, and `glossary`
+templates, and additionally at TierLocal for `architecture` and `adr` (extending
+CA-152's TierLocal coverage which originally covered only `api_reference` and
+`glossary`). Mid-tier models (Gemini Flash family, gpt-4o-mini, o3-mini, ≥70B
+open-weights via OpenRouter) and local-tier models do not reliably produce the
+`(path:N-N)` citation format that the validator requires; treating violations
+as warnings allows pages to ship while preserving the signal in the validation
+output.
+
+**Silent-shipment caveat**: Successful Living Wiki pages with `factual_grounding`
+warnings currently ship without surfacing the warning text in the PR
+description or in `lw_pages.warnings` — the orchestrator's `pageOutcome` does
+not propagate `ValidationResult` for non-excluded pages, and `buildPRBody()`
+renders quality reports only for excluded pages. Operators who need strict
+enforcement at TierMid or TierLocal can register a model in the Model Registry
+(`/admin/comprehension/models`) with `quality_gate_tier = frontier` to apply
+the strict frontier baseline. Warning-visibility for shipped pages is tracked
+as a follow-up.
+
 ---
 
 ## Living Wiki page-count and ops behavior
