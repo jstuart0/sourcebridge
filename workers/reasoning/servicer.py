@@ -9,10 +9,7 @@ from reasoning.v1 import reasoning_pb2, reasoning_pb2_grpc
 
 from workers.common.config import WorkerConfig
 from workers.common.embedding.provider import EmbeddingProvider
-from workers.common.grpc_metadata import resolve_llm_override, resolve_model_override
-from workers.common.llm.config import create_llm_provider_for_request
 from workers.common.llm.provider import LLMProvider
-from workers.common.servicer_utils import resolve_provider_for_context
 from workers.common.llm.tools import (
     AgentMessage,
     ToolCall,
@@ -22,6 +19,7 @@ from workers.common.llm.tools import (
     provider_supports_tool_use,
     run_agent_turn_anthropic,
 )
+from workers.common.servicer_utils import resolve_provider_for_context
 from workers.reasoning.classifier import classify_question
 from workers.reasoning.decomposer import (
     decompose_question,

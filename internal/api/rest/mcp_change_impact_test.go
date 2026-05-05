@@ -93,7 +93,6 @@ func seedChangeImpactFixture(t *testing.T, h *mcpTestHarness) changeImpactFixtur
 
 	handlerID := lookupSymID(t, h, repo.ID, "service.go", "HandleCreate")
 	helperID := lookupSymID(t, h, repo.ID, "service.go", "HelperFunc")
-	testSymID := lookupSymID(t, h, repo.ID, "service_test.go", "TestHandleCreate")
 
 	// Store the call edge HandleCreate → HelperFunc via a fresh index that
 	// includes the relation. We replace and look IDs up again.
@@ -132,7 +131,7 @@ func seedChangeImpactFixture(t *testing.T, h *mcpTestHarness) changeImpactFixtur
 	// Re-look up IDs after replace (store may regenerate them).
 	handlerID = lookupSymID(t, h, repo.ID, "service.go", "HandleCreate")
 	helperID = lookupSymID(t, h, repo.ID, "service.go", "HelperFunc")
-	testSymID = lookupSymID(t, h, repo.ID, "service_test.go", "TestHandleCreate")
+	testSymID := lookupSymID(t, h, repo.ID, "service_test.go", "TestHandleCreate")
 
 	// Requirements.
 	h.store.StoreRequirement(repo.ID, &graphstore.StoredRequirement{

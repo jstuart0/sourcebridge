@@ -11,7 +11,7 @@ import inspect
 import json
 import os
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import grpc
@@ -25,10 +25,7 @@ from workers.common.embedding.provider import EmbeddingProvider
 from workers.common.grpc_metadata import (
     resolve_cliff_notes_render_metadata,
     resolve_job_log_metadata,
-    resolve_llm_override,
-    resolve_model_override,
 )
-from workers.common.llm.config import create_llm_provider_for_request
 from workers.common.llm.provider import LLMProvider, SnapshotTooLargeError
 from workers.common.servicer_utils import resolve_provider_for_context
 from workers.comprehension.adapters.code import CodeCorpus

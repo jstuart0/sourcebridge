@@ -1329,16 +1329,6 @@ func resolvedKnowledgeGenerationMode(store comprehension.Store, repo *graphstore
 	return configuredKnowledgeGenerationModeDefault(store)
 }
 
-func knowledgePrewarmOnIndexEnabled() bool {
-	raw := strings.TrimSpace(strings.ToLower(os.Getenv("SOURCEBRIDGE_KNOWLEDGE_PREWARM_ON_INDEX")))
-	switch raw {
-	case "0", "false", "off", "no":
-		return false
-	default:
-		return true
-	}
-}
-
 // selectiveInvalidationEnabled toggles Phase 1 selective knowledge artifact
 // invalidation on reindex. When true, only artifacts whose evidence references
 // a changed symbol or file are marked stale. When false, the legacy blanket

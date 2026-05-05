@@ -341,7 +341,6 @@ type Server struct {
 	// triggers BeginDrain. It gates /readyz, new Living Wiki mutations,
 	// and on-demand generation admissions.
 	serverDraining atomic.Bool
-	drainingOnce   sync.Once
 	drainingAt     time.Time
 	drainingMu     sync.Mutex
 	// OnDemand counts active on-demand Living Wiki page-generation

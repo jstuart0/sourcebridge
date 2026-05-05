@@ -17,7 +17,6 @@ from workers.reasoning.servicer import _llm_usage_proto as reasoning_llm_usage_p
 from workers.reasoning.servicer import _provider_name as reasoning_provider_name
 from workers.reasoning.types import LLMUsageRecord
 
-
 # ---------------------------------------------------------------------------
 # _provider_name — module-level helpers in both servicers
 # ---------------------------------------------------------------------------

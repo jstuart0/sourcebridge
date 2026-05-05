@@ -10,21 +10,6 @@ import (
 	"testing"
 )
 
-// makeTestMiddleware builds a MiddlewareWithTokensAndLegacyAdmin handler around
-// a trivial "claims captured" endpoint so tests can inspect what role landed in
-// context.
-func makeTestMiddleware(t *testing.T, store APITokenStore, legacyAdminDefault bool) (http.Handler, *Claims) {
-	t.Helper()
-	var captured *Claims
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		captured = GetClaims(r.Context())
-		w.WriteHeader(http.StatusOK)
-	})
-	jwtMgr := NewJWTManager("test-secret-min-32-chars-padding!", 60, "oss")
-	mw := MiddlewareWithTokensAndLegacyAdmin(jwtMgr, store, legacyAdminDefault)
-	return mw(inner), captured
-}
-
 // issueTokenAndRun creates a token with the given role, issues the request, and
 // returns the claims captured by the inner handler.
 func issueTokenAndRun(t *testing.T, inputRole string, legacyAdminDefault bool) *Claims {

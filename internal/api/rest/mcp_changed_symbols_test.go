@@ -402,9 +402,7 @@ func TestMCP_GetChangedSymbols_MaxSymbolsCap(t *testing.T) {
 	// Build a repo with 15 symbols across 3 files (5 per file).
 	files := make([]indexer.FileResult, 3)
 	for fi := 0; fi < 3; fi++ {
-		fname := filepath.Join("pkg", filepath.Base(filepath.Join("file", string(rune('a'+fi))+".go")))
-		// Simpler: just use names like "file_a.go".
-		fname = string(rune('a'+fi)) + ".go"
+		fname := string(rune('a'+fi)) + ".go"
 		syms := make([]indexer.Symbol, 5)
 		for si := 0; si < 5; si++ {
 			syms[si] = indexer.Symbol{

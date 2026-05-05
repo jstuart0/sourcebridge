@@ -9,8 +9,6 @@ servicer with verbatim-identical bodies.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
-
 import grpc
 
 from workers.common.grpc_metadata import resolve_llm_override, resolve_model_override
@@ -22,8 +20,8 @@ def resolve_provider_for_context(
     llm: LLMProvider,
     config,
     context: grpc.aio.ServicerContext,
-    fallback_llm: Optional[LLMProvider] = None,
-) -> Tuple[LLMProvider, Optional[str]]:
+    fallback_llm: LLMProvider | None = None,
+) -> tuple[LLMProvider, str | None]:
     """Resolve the LLM provider for a gRPC request, honoring metadata overrides.
 
     Args:

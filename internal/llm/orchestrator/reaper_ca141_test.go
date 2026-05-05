@@ -8,13 +8,34 @@ package orchestrator
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 )
+
+// syncBuffer wraps bytes.Buffer with a mutex so concurrent slog writes
+// (from background goroutines) and test reads don't race.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // TestReaper_NonHeartbeatSubsystem_ReapedAt10Min — a knowledge job whose
 // UpdatedAt is staleGeneratingThreshold+1s (11 min) stale IS reaped and
@@ -23,21 +44,35 @@ import (
 //
 // Plan step 1.8d (CA-141 stage-11 punch-list item 1).
 func TestReaper_NonHeartbeatSubsystem_ReapedAt10Min(t *testing.T) {
-	orch := newTestOrchestrator(t, Config{MaxConcurrency: 0})
+	hold := make(chan struct{})
+	t.Cleanup(func() { close(hold) })
+
+	orch := newTestOrchestrator(t, Config{MaxConcurrency: 1})
 
 	job, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
 		JobType:     "cliff_notes",
 		TargetKey:   "ca141-knowledge-11min",
-		Run:         func(rt llm.Runtime) error { select {} },
+		RunWithContext: func(ctx context.Context, _ llm.Runtime) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-hold:
+				return nil
+			}
+		},
 	})
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	if err := orch.store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
-		t.Fatalf("set generating: %v", err)
-	}
+
+	// Wait for the worker to set StatusGenerating before backdating.
+	waitFor(t, 2*time.Second, func() bool {
+		j := orch.GetJob(job.ID)
+		return j != nil && j.Status == llm.StatusGenerating
+	})
+
 	// Backdate to staleGeneratingThreshold + 1s so we're just past the 10-min wall.
 	backdate(t, orch, job.ID, staleGeneratingThreshold+time.Second)
 
@@ -93,29 +128,47 @@ func TestReaper_LogsThresholdKind(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			orch := newTestOrchestrator(t, Config{MaxConcurrency: 0})
+			// Use a channel to hold the Run goroutine alive until the test is done.
+			// This prevents the worker from resetting UpdatedAt after backdate.
+			hold := make(chan struct{})
+			t.Cleanup(func() { close(hold) })
+
+			orch := newTestOrchestrator(t, Config{MaxConcurrency: 1})
 
 			job, err := orch.Enqueue(&llm.EnqueueRequest{
 				Subsystem:   tc.subsystem,
 				LLMProvider: "test",
 				JobType:     "test_job",
 				TargetKey:   "ca141-threshold-kind-" + string(tc.subsystem),
-				Run:         func(rt llm.Runtime) error { select {} },
+				RunWithContext: func(ctx context.Context, _ llm.Runtime) error {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-hold:
+						return nil
+					}
+				},
 			})
 			if err != nil {
 				t.Fatalf("enqueue: %v", err)
 			}
-			if err := orch.store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
-				t.Fatalf("set generating: %v", err)
-			}
+
+			// Wait for the worker to transition the job to StatusGenerating before
+			// backdating. This avoids a race where the worker's SetStatus call
+			// resets UpdatedAt after our backdate.
+			waitFor(t, 2*time.Second, func() bool {
+				j := orch.GetJob(job.ID)
+				return j != nil && j.Status == llm.StatusGenerating
+			})
+
 			backdate(t, orch, job.ID, tc.backdateBy)
 
-			// Redirect the default slog logger to a buffer so we can inspect
-			// the structured fields emitted by reapStaleJobs. Restore after.
-			var logBuf bytes.Buffer
+			// Use a mutex-protected buffer to avoid data races on writes from
+			// background goroutines that share the global slog logger.
+			logBuf := &syncBuffer{}
 			prev := slog.Default()
 			t.Cleanup(func() { slog.SetDefault(prev) })
-			slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+			slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
 
 			orch.reapStaleJobs()
 

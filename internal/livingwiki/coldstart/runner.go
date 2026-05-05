@@ -2310,9 +2310,7 @@ func RemoveIndexMutex(repoID string) {
 // orchestrator calls OnPageDone from multiple goroutines simultaneously, so
 // excluded page ID collection requires a lock.
 //
-// Both exported (Append/Snapshot) and unexported (append/snapshot) methods are
-// provided so this type can be used as the internal atomicStringSlice alias
-// from within the package.
+// AtomicStringSlice is a concurrency-safe string accumulator.
 type AtomicStringSlice struct {
 	mu  sync.Mutex
 	val []string
@@ -2339,6 +2337,3 @@ func (a *AtomicStringSlice) Snapshot() []string {
 	copy(cp, a.val)
 	return cp
 }
-
-// snapshot is an unexported alias for Snapshot, used within this package.
-func (a *AtomicStringSlice) snapshot() []string { return a.Snapshot() }

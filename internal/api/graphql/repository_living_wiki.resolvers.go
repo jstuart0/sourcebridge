@@ -209,23 +209,6 @@ func mapLivingWikiJobResult(r *livingwiki.LivingWikiJobResult) *LivingWikiJobRes
 // scoping into the LivingWiki store layer.
 const defaultTenantID = "default"
 
-// repoSinksToInputs converts stored sink models back to the GraphQL input
-// type so RetryLivingWikiJob can delegate to EnableLivingWikiForRepo without
-// duplicating settings.
-func repoSinksToInputs(sinks []livingwiki.RepoWikiSink) []*RepoWikiSinkInput {
-	out := make([]*RepoWikiSinkInput, 0, len(sinks))
-	for _, s := range sinks {
-		ep := RepoWikiEditPolicy(s.EditPolicy)
-		out = append(out, &RepoWikiSinkInput{
-			Kind:            RepoWikiSinkKind(s.Kind),
-			IntegrationName: s.IntegrationName,
-			Audience:        RepoWikiAudience(s.Audience),
-			EditPolicy:      &ep,
-		})
-	}
-	return out
-}
-
 // deriveLivingWikiJobMode determines the cold-start job's GenerationMode
 // from the EFFECTIVE mode flags (persisted row + transient input
 // overrides). Overview-only → lw_overview. All other shapes

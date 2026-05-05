@@ -242,7 +242,7 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 	enrichedCliffSnapJSON := p.enrichedCliffSnapJSON
 	renderPlan := p.renderPlan
 	reusedUnderstanding := p.reusedUnderstanding
-	understanding := p.understanding
+	var understanding *knowledgepkg.RepositoryUnderstanding
 
 	defer func() {
 		if runErr != nil {

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexing/pathutil"
@@ -387,9 +386,6 @@ func joinLines(ps []string) string {
 	}
 	return string(b)
 }
-func trimPrefix(s, pfx string) string { return strings.TrimPrefix(s, pfx) }
-func hasPrefix(s, pfx string) bool    { return strings.HasPrefix(s, pfx) }
-
 // qaSearcher adapts the hybrid retrieval service to qa.Searcher. The
 // bridge is narrow on purpose — internal/qa doesn't know about
 // search.Request/Response shapes.

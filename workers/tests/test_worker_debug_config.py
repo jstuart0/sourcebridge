@@ -7,7 +7,6 @@ Proves that:
   4. The field is not accidentally tied to test_mode.
 """
 
-import os
 
 import pytest
 

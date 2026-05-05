@@ -23,7 +23,6 @@ package rest
 import (
 	"context"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
@@ -73,17 +72,6 @@ func (noopRelease) Release() {}
 // *serverDrainAdmitter implements graphql.DrainAdmitter structurally.
 func (s *Server) DrainAdmitterFor() *serverDrainAdmitter {
 	return &serverDrainAdmitter{s: s}
-}
-
-// getEnvBool returns true when the environment variable is set to "true",
-// "1", or "yes" (case-insensitive).
-func getEnvBool(key string) bool {
-	switch os.Getenv(key) {
-	case "true", "1", "yes", "TRUE", "YES":
-		return true
-	default:
-		return false
-	}
 }
 
 // handleAdminServerDrain initiates graceful server drain via the public

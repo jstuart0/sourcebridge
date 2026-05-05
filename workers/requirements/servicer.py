@@ -8,8 +8,6 @@ from common.v1 import types_pb2
 from requirements.v1 import requirements_pb2, requirements_pb2_grpc
 
 from workers.common.config import WorkerConfig
-from workers.common.grpc_metadata import resolve_llm_override, resolve_model_override
-from workers.common.llm.config import create_llm_provider_for_request
 from workers.common.llm.provider import LLMProvider
 from workers.common.servicer_utils import resolve_provider_for_context
 from workers.requirements.csv_parser import parse_csv

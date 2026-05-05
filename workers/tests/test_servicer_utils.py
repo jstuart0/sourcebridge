@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from workers.common.llm.fake import FakeLLMProvider
 from workers.common.servicer_utils import resolve_provider_for_context
-
 
 # ---------------------------------------------------------------------------
 # Minimal mock of grpc.aio.ServicerContext
@@ -45,7 +42,7 @@ class _MockConfig:
         self.llm_timeout = llm_timeout
         self.llm_report_model = llm_report_model
 
-    def model_copy(self, *, update: dict) -> "_MockConfig":
+    def model_copy(self, *, update: dict) -> _MockConfig:
         """Pydantic-style model_copy for tests."""
         cfg = _MockConfig(
             llm_provider=update.get("llm_provider", self.llm_provider),

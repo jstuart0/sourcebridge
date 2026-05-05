@@ -1648,23 +1648,6 @@ func TestColdStart_TierUnknown_FallsBackToFrontier_LogsWarn(t *testing.T) {
 // CA-150 Phase 6: per-repo override tier derivation + registry normalization
 // ─────────────────────────────────────────────────────────────────────────────
 
-// recordingTierFunc is a TierFunc that records the provider/model it was called
-// with, so tests can assert that tier resolution uses the correct override.
-type recordingTierFunc struct {
-	mu       sync.Mutex
-	provider string
-	model    string
-	tier     modeltier.QualityGateTier
-}
-
-func (r *recordingTierFunc) Resolve(_ context.Context, provider, model string) modeltier.Resolution {
-	r.mu.Lock()
-	r.provider = provider
-	r.model = model
-	r.mu.Unlock()
-	return modeltier.Resolution{Tier: r.tier, Source: "test-recording"}
-}
-
 // TestColdStart_PerRepoOverride_DerivesTierFromOverride verifies that when a
 // repo-level LLM override resolves to a different (provider, model) than the
 // workspace default, the quality-gate tier is derived from the override's
@@ -2592,14 +2575,10 @@ func TestRetryLivingWikiJob_ForwardsSelectedPageIDs(t *testing.T) {
 
 	// Case 1: nil selectedPageIds — should NOT trigger signature required.
 	// (No orchestrator, so will gate at orchestrator-nil notice, not error.)
-	result, err := r.RetryLivingWikiJob(context.Background(), "retry-fwd-repo", nil, nil, nil, nil, nil)
+	_, err := r.RetryLivingWikiJob(context.Background(), "retry-fwd-repo", nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Errorf("nil selectedPageIds should not error (gated at orchestrator notice), got: %v", err)
 	}
-	if result != nil && result.Notice == nil {
-		// May return notice from orchestrator gate; that's fine.
-	}
-
 	// Case 2: non-nil empty selectedPageIds without signature → SIGNATURE_REQUIRED.
 	emptySelected := []string{}
 	_, err2 := r.RetryLivingWikiJob(context.Background(), "retry-fwd-repo", nil, nil, nil, emptySelected, nil)
