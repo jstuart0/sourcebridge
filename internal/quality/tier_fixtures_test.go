@@ -118,7 +118,7 @@ func TestTierFixtures_ThresholdsBehaveAsDocumented(t *testing.T) {
 	// citation_density / architecture/engineers
 	//
 	// Frontier (gate, 200): requires ceil(words/200) citations.
-	// Mid      (gate, 300): requires ceil(words/300) citations.
+	// Mid      (warn, 300): citation density is a warning, not a gate (CA-165).
 	// Local    (warn, 400): citation density is a warning, not a gate.
 	//
 	// Fixture: exactly 1 parseable citation; ~230 prose words.
@@ -150,7 +150,7 @@ func TestTierFixtures_ThresholdsBehaveAsDocumented(t *testing.T) {
 		assertGatesFire(t, modeltier.TierFrontier, frontierResult)
 		assertDecision(t, modeltier.TierFrontier, frontierResult, quality.RetryReject)
 
-		// Mid: citation_density gate at threshold=300. ceil(wc/300)=1 => passes.
+		// Mid: citation_density is a warning at threshold=300 (CA-165). ceil(wc/300)=1 => no violation at all.
 		midResult := runFixture(t, quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierMid, input, base)
 		assertNoGateFor(t, modeltier.TierMid, midResult, quality.ValidatorCitationDensity)
 		assertGatesPass(t, modeltier.TierMid, midResult)
@@ -697,6 +697,22 @@ func TestTierFixtures_CitationDensityArchStubParagraphs_ShipsAtMid(t *testing.T)
 		t.Errorf("TierFrontier: expected citation_density in Gates; gates=%v warnings=%v",
 			ruleIDs(frontierResult.Gates), ruleIDs(frontierResult.Warnings))
 	}
+
+	// Pre-flight isolation guard: the frontier gate set must be exactly
+	// {citation_density}. If factual_grounding or vagueness also fire as
+	// gates, the fixture is not properly isolated — a future edit may have
+	// introduced a regex-trigger verb or a vague quantifier. Catch that
+	// here before the behavioral assertions run (so the test fails loudly
+	// rather than passing accidentally with a contaminated fixture).
+	for _, g := range frontierResult.Gates {
+		if g.ValidatorID != quality.ValidatorCitationDensity {
+			t.Errorf("TierFrontier isolation: unexpected gate %q fired — fixture must trigger "+
+				"citation_density ONLY; check for assertion-pattern verbs (factual_grounding "+
+				"regex) or vague quantifiers (vagueness regex) in arch_eng_stub_paragraphs.md; "+
+				"gates=%v", g.ValidatorID, ruleIDs(frontierResult.Gates))
+		}
+	}
+
 	assertDecision(t, modeltier.TierFrontier, frontierResult, quality.RetryReject)
 
 	// TierMid: citation_density is demoted to LevelWarning (CA-165). No gate fires.

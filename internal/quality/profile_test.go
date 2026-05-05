@@ -713,7 +713,7 @@ func TestEffectiveProfile_VaguenessPolicy_AllProfiles(t *testing.T) {
 	}
 }
 
-// TestEffectiveProfile_CitationDensityArchitectureMid_HasOverride is the CA-165
+// TestEffectiveProfile_CitationDensityArchitectureMid_HasOverrides is the CA-165
 // spot-check. It locks the single in-place level change for
 // (architecture, engineers, TierMid) citation_density: the level must be
 // LevelWarning (demoted from LevelGate by CA-165) and the threshold must be
@@ -722,7 +722,7 @@ func TestEffectiveProfile_VaguenessPolicy_AllProfiles(t *testing.T) {
 //
 // The broader citation_density invariant test would be overkill for a 1-cell
 // change; this spot-check is right-sized per plan Decision 2.
-func TestEffectiveProfile_CitationDensityArchitectureMid_HasOverride(t *testing.T) {
+func TestEffectiveProfile_CitationDensityArchitectureMid_HasOverrides(t *testing.T) {
 	t.Parallel()
 
 	// Mid: citation_density must be LevelWarning with threshold=300.

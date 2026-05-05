@@ -968,6 +968,13 @@ frontier-tier enforcement on a per-model basis if needed. The silent-shipment
 caveat from CA-163 still applies — successful-page warnings are not yet
 surfaced in the PR description (tracked as a follow-up).
 
+Note: `api_reference/engineers/TierMid` still gates `citation_density` at
+threshold 200 words/citation — that calibration was deemed sufficient by the
+post-CA-163-deploy evidence (job `50583123` showed no api_reference
+citation_density violations). If a future Gemini-Flash-class run shows
+api_reference citation_density firing, that would warrant a separate
+calibration ticket.
+
 ---
 
 ## Living Wiki page-count and ops behavior

@@ -381,7 +381,12 @@ CA-146 (page-count transparency and per-run override).
   words from CA-150 is preserved unchanged — only the level changes). Closes
   the post-CA-163-deploy gap on Gemini Flash where 11/12 pages were excluded
   with vague-quantifier and stub-paragraph citation violations after
-  `factual_grounding` had been demoted in CA-163. CA-164 + CA-165 — see
+  `factual_grounding` had been demoted in CA-163. Confirmed by post-CA-163-deploy
+  job `50583123-70fe-49bb-a2d5-b62eaa09f8d4` on Gemini Flash showing 11/12 pages
+  excluded with vague-quantifier and stub-paragraph violations after factual_grounding
+  had been demoted in CA-163. Successful pages with vagueness or citation_density
+  warnings still ship without the warning text surfaced in the PR description
+  (tracked as a follow-up — see CA-168 follow-up scope). CA-164 + CA-165 — see
   `thoughts/shared/investigations/2026-05-05-living-wiki-broken-on-openrouter.md`
   and `thoughts/shared/plans/2026-05-05-deliver-tiermid-vagueness-and-citation-density.md`.
 
