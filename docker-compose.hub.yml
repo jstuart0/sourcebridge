@@ -17,11 +17,28 @@
 #   Pull a model: ollama pull qwen3:32b
 
 services:
+  # Pre-create the RocksDB directory and chown the named volume to the
+  # non-root user the SurrealDB image runs as (UID 65532). Without this,
+  # the first `up` fails with "Failed to create RocksDB directory:
+  # PermissionDenied" because Docker creates fresh named volumes as root.
+  surrealdb-init:
+    image: alpine:3.20
+    command:
+      - /bin/sh
+      - -lc
+      - mkdir -p /data/database.db && chown -R 65532:65532 /data
+    volumes:
+      - surrealdb-data:/data
+    restart: "no"
+
   surrealdb:
     image: surrealdb/surrealdb:v2.2.1
     command: start --user ${SURREAL_USER:-root} --pass ${SURREAL_PASS:-INSECURE-DEFAULT-CHANGE-ME-NOW} --log info file:/data/database.db
     volumes:
       - surrealdb-data:/data
+    depends_on:
+      surrealdb-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "/surreal", "is-ready", "--endpoint", "ws://localhost:8000"]
