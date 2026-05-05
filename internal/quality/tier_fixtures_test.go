@@ -483,6 +483,88 @@ func TestTierFixtures_ThresholdsBehaveAsDocumented(t *testing.T) {
 	})
 }
 
+// TestTierFixtures_FactualGroundingOnly_ShipsAtMidAndLocal proves that a page
+// whose SOLE blocker is factual_grounding actually ships at TierMid and TierLocal.
+//
+// The existing TestTierFixtures_FactualGrounding_QwenShapedOutput (CA-152) uses a
+// fixture with zero citations, which also trips citation_density at TierFrontier and
+// TierMid — a confound flagged by bob H1 / dexter M1. This test uses a fixture
+// (api_reference_fg_only.md) constructed so that:
+//   - citation_density passes at all tiers (5 valid citations in a ~290-word doc;
+//     ceil(wc/100)<=5 at frontier, ceil(wc/200)<=5 at mid, ceil(wc/300)<=5 at local)
+//   - code_example_present passes at all tiers (one fenced code block in the doc)
+//   - reading_level is never a gate (always warning)
+//   - only factual_grounding gates at TierFrontier (one paragraph with assertion verbs
+//     — "ensures", "rejected" — and no (path:N-N) citation in that paragraph)
+//
+// This directly addresses CA-163's core claim: a TierMid page whose sole quality
+// failure is factual_grounding now ships (Decision == RetryPass) rather than being
+// rejected.
+func TestTierFixtures_FactualGroundingOnly_ShipsAtMidAndLocal(t *testing.T) {
+	t.Parallel()
+	input := loadFixture(t, "api_reference_fg_only.md")
+
+	// Pre-flight guards: validate the fixture invariants before asserting behavior.
+	wc := input.WordCount()
+	citCount := countValidCitations(input.Citations())
+
+	// Guard: at TierFrontier citation_density threshold=100, need ceil(wc/100) <= citCount.
+	requiredAtFrontier := ceilDiv(wc, 100)
+	if citCount < requiredAtFrontier {
+		t.Fatalf("api_reference_fg_only: citation_density would gate at TierFrontier "+
+			"(need %d citations for wc=%d/threshold=100, have %d); "+
+			"fixture must have enough citations so only FG gates at frontier",
+			requiredAtFrontier, wc, citCount)
+	}
+
+	// Guard: at TierMid citation_density threshold=200, need ceil(wc/200) <= citCount.
+	requiredAtMid := ceilDiv(wc, 200)
+	if citCount < requiredAtMid {
+		t.Fatalf("api_reference_fg_only: citation_density would gate at TierMid "+
+			"(need %d citations for wc=%d/threshold=200, have %d)",
+			requiredAtMid, wc, citCount)
+	}
+
+	// Guard: code block present (code_example_present must pass at all tiers).
+	if len(input.CodeBlocks()) == 0 {
+		t.Fatalf("api_reference_fg_only: fixture must contain at least one code block "+
+			"so code_example_present passes at TierFrontier")
+	}
+
+	base := quality.ValidatorConfig{}
+
+	// TierFrontier: factual_grounding is a gate. The fixture has one paragraph
+	// with assertion verbs and no citation => FG fires. Decision is RetryReject.
+	frontierResult := runFixture(t, quality.TemplateAPIReference, quality.AudienceEngineers, modeltier.TierFrontier, input, base)
+	assertGatesFire(t, modeltier.TierFrontier, frontierResult)
+	foundFGGate := false
+	for _, g := range frontierResult.Gates {
+		if g.ValidatorID == quality.ValidatorFactualGrounding {
+			foundFGGate = true
+		}
+	}
+	if !foundFGGate {
+		t.Errorf("TierFrontier: expected factual_grounding in Gates; gates=%v warnings=%v",
+			ruleIDs(frontierResult.Gates), ruleIDs(frontierResult.Warnings))
+	}
+	assertDecision(t, modeltier.TierFrontier, frontierResult, quality.RetryReject)
+
+	// TierMid: factual_grounding is demoted to warning (CA-163). No gate fires.
+	// The page ships — this is the core CA-163 claim.
+	midResult := runFixture(t, quality.TemplateAPIReference, quality.AudienceEngineers, modeltier.TierMid, input, base)
+	assertNoGateFor(t, modeltier.TierMid, midResult, quality.ValidatorFactualGrounding)
+	assertGatesPass(t, modeltier.TierMid, midResult)
+	assertWarningPresent(t, modeltier.TierMid, midResult, quality.ValidatorFactualGrounding)
+	assertDecision(t, modeltier.TierMid, midResult, quality.RetryPass)
+
+	// TierLocal: same outcome as TierMid — FG is a warning, page ships.
+	localResult := runFixture(t, quality.TemplateAPIReference, quality.AudienceEngineers, modeltier.TierLocal, input, base)
+	assertNoGateFor(t, modeltier.TierLocal, localResult, quality.ValidatorFactualGrounding)
+	assertGatesPass(t, modeltier.TierLocal, localResult)
+	assertWarningPresent(t, modeltier.TierLocal, localResult, quality.ValidatorFactualGrounding)
+	assertDecision(t, modeltier.TierLocal, localResult, quality.RetryPass)
+}
+
 // TestTierFixtures_FactualGrounding_QwenShapedOutput is the CA-152 lock-test.
 // It proves that the production failure mode (qwen3.6-shaped output with zero
 // citations and behavioral assertion verbs) is REJECTED at TierFrontier and
@@ -491,6 +573,12 @@ func TestTierFixtures_ThresholdsBehaveAsDocumented(t *testing.T) {
 // The fixture (api_reference_qwen3_no_citations.md) is representative of
 // qwen3.6:27b-q4_K_M output: plain prose, behavioral verbs (accepts, returns,
 // validates, stores, etc.), no parseable (path:N-N) citations.
+//
+// NOTE: This test does NOT prove the page ships at TierLocal — the fixture has
+// zero citations, so citation_density also gates (confound). It only proves that
+// factual_grounding is NOT the gate-level blocker at TierLocal (it appears as a
+// warning). See TestTierFixtures_FactualGroundingOnly_ShipsAtMidAndLocal for the
+// isolation test that proves the page ships when FG is the sole blocker.
 func TestTierFixtures_FactualGrounding_QwenShapedOutput(t *testing.T) {
 	t.Parallel()
 	input := loadFixture(t, "api_reference_qwen3_no_citations.md")

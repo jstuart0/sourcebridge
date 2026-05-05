@@ -423,6 +423,32 @@ func TestDefaultProfile_ThresholdTable(t *testing.T) {
 			quality.ValidatorFactualGrounding, quality.LevelGate, 0, 0, 0, 0, 0},
 		{quality.TemplateActivityLog, quality.AudienceEngineers, modeltier.TierFrontier,
 			quality.ValidatorVagueness, quality.LevelGate, 0, 0, 0, 0, 0},
+
+		// --- CA-163 Phase 1: factual_grounding TierMid overrides (Decision 1) ---
+		{quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierMid,
+			quality.ValidatorFactualGrounding, quality.LevelWarning, 0, 0, 0, 0, 0},
+		{quality.TemplateArchitecture, quality.AudienceProduct, modeltier.TierMid,
+			quality.ValidatorFactualGrounding, quality.LevelWarning, 0, 0, 0, 0, 0},
+		{quality.TemplateAPIReference, quality.AudienceEngineers, modeltier.TierMid,
+			quality.ValidatorFactualGrounding, quality.LevelWarning, 0, 0, 0, 0, 0},
+		{quality.TemplateADR, quality.AudienceEngineers, modeltier.TierMid,
+			quality.ValidatorFactualGrounding, quality.LevelWarning, 0, 0, 0, 0, 0},
+		{quality.TemplateGlossary, quality.AudienceEngineers, modeltier.TierMid,
+			quality.ValidatorFactualGrounding, quality.LevelWarning, 0, 0, 0, 0, 0},
+
+		// --- CA-163 Phase 1: factual_grounding TierLocal overrides (Decision 1b bundle) ---
+		{quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierLocal,
+			quality.ValidatorFactualGrounding, quality.LevelWarning, 0, 0, 0, 0, 0},
+		{quality.TemplateArchitecture, quality.AudienceProduct, modeltier.TierLocal,
+			quality.ValidatorFactualGrounding, quality.LevelWarning, 0, 0, 0, 0, 0},
+		{quality.TemplateADR, quality.AudienceEngineers, modeltier.TierLocal,
+			quality.ValidatorFactualGrounding, quality.LevelWarning, 0, 0, 0, 0, 0},
+
+		// --- CA-163 Phase 2: system_overview/product/mid audience-symmetry fix (Decision 3) ---
+		{quality.TemplateSystemOverview, quality.AudienceProduct, modeltier.TierMid,
+			quality.ValidatorArchitecturalRelevance, quality.LevelGate, 0, 0, 2, 4, 0},
+		{quality.TemplateSystemOverview, quality.AudienceProduct, modeltier.TierMid,
+			quality.ValidatorReadingLevel, quality.LevelWarning, 0, 45, 0, 0, 0},
 	}
 
 	for _, tc := range table {
@@ -473,6 +499,101 @@ func TestDefaultProfile_ThresholdTable(t *testing.T) {
 	}
 }
 
+// TestEffectiveProfile_FactualGroundingPolicy_AllProfiles is the load-bearing invariant
+// for CA-150/CA-152/CA-163 quality-gate tier policy. Every (Template × Audience × Tier)
+// combination is iterated; FactualGrounding is asserted at LevelGate (frontier) or
+// LevelWarning (mid/local), with an allowlist for activity_log/engineers (which is not
+// current Living Wiki scope and whose report ValidatorProfile() hardcodes TierFrontier
+// — see internal/reports/templates/activitylog/activitylog.go:430).
+//
+// To intentionally change a cell's policy, update both the override in profile.go AND
+// this test's allowlist. A change to one without the other indicates either a forgotten
+// override or a regression.
+func TestEffectiveProfile_FactualGroundingPolicy_AllProfiles(t *testing.T) {
+	t.Parallel()
+
+	// fgPolicyKey mirrors profile.go's unexported profileKey for allowlist lookup.
+	type fgPolicyKey struct {
+		Template quality.Template
+		Audience quality.Audience
+		Tier     modeltier.QualityGateTier
+	}
+
+	// allowlist contains the (template, audience, tier) cells where factual_grounding
+	// is expected to remain LevelGate at TierMid or TierLocal. Each entry must
+	// include a rationale comment.
+	//
+	// activity_log/engineers at TierMid and TierLocal: deliberate exemption because
+	// (a) activity_log is not in current Living Wiki planning
+	//     (internal/api/graphql/living_wiki_plan_helpers.go:32-39 does not list it),
+	// (b) the activity_log report's ValidatorProfile() hardcodes TierFrontier
+	//     (internal/reports/templates/activitylog/activitylog.go:430), so mid/local
+	//     overrides do not affect activity_log output today, and
+	// (c) the optional LLM digest mode exists but is out of scope for CA-163.
+	allowlist := map[fgPolicyKey]quality.GateLevel{
+		{Template: quality.TemplateActivityLog, Audience: quality.AudienceEngineers, Tier: modeltier.TierMid}:   quality.LevelGate,
+		{Template: quality.TemplateActivityLog, Audience: quality.AudienceEngineers, Tier: modeltier.TierLocal}: quality.LevelGate,
+	}
+
+	allProfiles := quality.AllDefaultProfiles()
+	if len(allProfiles) == 0 {
+		t.Fatal("AllDefaultProfiles returned no profiles")
+	}
+
+	for _, p := range allProfiles {
+		p := p
+		t.Run(p.String(), func(t *testing.T) {
+			t.Parallel()
+
+			// Find the FactualGrounding rule in this materialized profile.
+			var fgRule *quality.ValidatorRule
+			for i := range p.Rules {
+				if p.Rules[i].ValidatorID == quality.ValidatorFactualGrounding {
+					fgRule = &p.Rules[i]
+					break
+				}
+			}
+
+			// If the base profile doesn't include FactualGrounding (e.g. system_overview),
+			// skip this cell — no policy assertion is applicable.
+			if fgRule == nil {
+				return
+			}
+
+			key := fgPolicyKey{Template: p.Template, Audience: p.Audience, Tier: p.Tier}
+
+			switch p.Tier {
+			case modeltier.TierFrontier:
+				// Every frontier cell with FactualGrounding must be a gate.
+				// This guards against accidental frontier-base regressions.
+				if fgRule.Level != quality.LevelGate {
+					t.Errorf("[%s] TierFrontier FactualGrounding Level = %q, want gate (frontier must never relax)",
+						p.String(), fgRule.Level)
+				}
+
+			case modeltier.TierMid, modeltier.TierLocal:
+				if wantLevel, isAllowlisted := allowlist[key]; isAllowlisted {
+					// Allowlisted cell: assert the explicitly documented exception level.
+					if fgRule.Level != wantLevel {
+						t.Errorf("[%s] FactualGrounding Level = %q, want %q (allowlisted cell; update allowlist and profile.go together)",
+							p.String(), fgRule.Level, wantLevel)
+					}
+				} else {
+					// All other mid/local cells: FactualGrounding must be a warning.
+					// A gate here means either a missing override (regression) or an
+					// intentional new exception that needs an allowlist entry.
+					if fgRule.Level != quality.LevelWarning {
+						t.Errorf("[%s] FactualGrounding Level = %q, want warning — "+
+							"add an allowlist entry to this test AND an inline comment in profile.go "+
+							"if this is intentional",
+							p.String(), fgRule.Level)
+					}
+				}
+			}
+		})
+	}
+}
+
 // TestEffectiveProfile_FactualGroundingWarningAtLocal verifies that
 // factual_grounding is demoted to LevelWarning at TierLocal for the two
 // templates whose base profiles include that validator (api_reference and
@@ -482,6 +603,10 @@ func TestDefaultProfile_ThresholdTable(t *testing.T) {
 // system_overview/engineers is intentionally excluded: that base profile does
 // not include factual_grounding (the template doesn't gate on citations), so
 // no override is needed or applied there.
+//
+// See TestEffectiveProfile_FactualGroundingPolicy_AllProfiles for the
+// policy-as-code invariant — this test predates it and is kept for grep
+// discoverability. The invariant is the load-bearing check.
 func TestEffectiveProfile_FactualGroundingWarningAtLocal(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -612,6 +737,75 @@ func TestEffectiveProfile_SystemOverviewProductLocal_HasOverrides(t *testing.T) 
 		if r.ValidatorID == quality.ValidatorVagueness && r.Level != quality.LevelGate {
 			t.Errorf("product/frontier vagueness Level = %q, want gate", r.Level)
 		}
+	}
+}
+
+// TestEffectiveProfile_SystemOverviewProductMid_HasOverrides verifies that
+// system_overview/AudienceProduct/TierMid has the audience-symmetric overrides
+// added by CA-163 Decision 3. Without this fix, product/mid inherits frontier-
+// strict graph thresholds (rels>=5), stricter than engineers/mid (rels>=4).
+//
+// The vagueness assertion is deliberate: CA-163 Decision 2 explicitly defers
+// vagueness demotion at TierMid. This assertion pins the intent — if a future
+// fix demotes vagueness at TierMid product, this test breaks and forces an
+// explicit decision rather than silent drift.
+func TestEffectiveProfile_SystemOverviewProductMid_HasOverrides(t *testing.T) {
+	t.Parallel()
+
+	p, ok := quality.DefaultProfile(quality.TemplateSystemOverview, quality.AudienceProduct, modeltier.TierMid)
+	if !ok {
+		t.Fatal("DefaultProfile(system_overview, product, mid) returned false")
+	}
+
+	foundArchRel := false
+	foundReadingLevel := false
+	foundVagueness := false
+
+	for _, r := range p.Rules {
+		switch r.ValidatorID {
+		case quality.ValidatorArchitecturalRelevance:
+			foundArchRel = true
+			if r.Level != quality.LevelGate {
+				t.Errorf("product/mid arch_relevance Level = %q, want gate", r.Level)
+			}
+			if r.Config.ArchRelevanceMinPageRefs != 2 {
+				t.Errorf("product/mid arch_relevance MinPageRefs = %d, want 2",
+					r.Config.ArchRelevanceMinPageRefs)
+			}
+			if r.Config.ArchRelevanceMinGraphRelations != 4 {
+				t.Errorf("product/mid arch_relevance MinGraphRelations = %d, want 4 "+
+					"(must match engineers/mid; product/mid must not inherit frontier-strict rels>=5)",
+					r.Config.ArchRelevanceMinGraphRelations)
+			}
+		case quality.ValidatorReadingLevel:
+			foundReadingLevel = true
+			if r.Config.ReadingLevelFloor != 45 {
+				t.Errorf("product/mid reading_level floor = %.1f, want 45",
+					r.Config.ReadingLevelFloor)
+			}
+		case quality.ValidatorVagueness:
+			foundVagueness = true
+			// CA-163 Decision 2 deliberately defers vagueness demotion at TierMid.
+			// This assertion pins the intent — if a future fix demotes vagueness at
+			// TierMid product, this test breaks and forces an explicit decision rather
+			// than silent drift.
+			if r.Level != quality.LevelGate {
+				t.Errorf("product/mid vagueness Level = %q, want gate — "+
+					"CA-163 Decision 2 deliberately preserves vagueness=gate at TierMid; "+
+					"update this assertion AND file a new decision if demotion is intentional",
+					r.Level)
+			}
+		}
+	}
+
+	if !foundArchRel {
+		t.Error("product/mid: architectural_relevance rule not found")
+	}
+	if !foundReadingLevel {
+		t.Error("product/mid: reading_level rule not found")
+	}
+	if !foundVagueness {
+		t.Error("product/mid: vagueness rule not found")
 	}
 }
 
