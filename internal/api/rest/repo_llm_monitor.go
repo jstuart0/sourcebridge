@@ -29,16 +29,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/sourcebridge/sourcebridge/internal/api/graphql"
+	"github.com/sourcebridge/sourcebridge/internal/events"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 )
 
 // ---- Shared helpers --------------------------------------------------------
 
 // listRepoLLMActivity returns the active and recent job views for a single
-// repository. It is called by both handleRepoLLMActivity (non-admin) and can
-// be called by the admin handler if needed. The caller is responsible for
-// validating the repoID before passing it here.
-func (s *Server) listRepoLLMActivity(repoID string, limit int, since time.Time) (active []monitorJobView, recent []monitorJobView) {
+// repository, plus the pending-queue snapshot needed for stats.
+// The caller is responsible for validating repoID before passing it here.
+func (s *Server) listRepoLLMActivity(repoID string, limit int, since time.Time) (active []monitorJobView, recent []monitorJobView, pending []*llm.Job) {
 	filter := llm.ListFilter{
 		RepoID: repoID,
 		Limit:  0, // no cap on active
@@ -48,7 +49,7 @@ func (s *Server) listRepoLLMActivity(repoID string, limit int, since time.Time) 
 	for _, j := range rawActive {
 		active = append(active, toMonitorJobView(j))
 	}
-	pending := s.orchestrator.PendingSnapshot(filter)
+	pending = s.orchestrator.PendingSnapshot(filter)
 	enrichQueueMetadata(active, pending, s.orchestrator.Metrics(), s.orchestrator.MaxConcurrency())
 
 	recentFilter := llm.ListFilter{
@@ -60,7 +61,7 @@ func (s *Server) listRepoLLMActivity(repoID string, limit int, since time.Time) 
 	for _, j := range rawRecent {
 		recent = append(recent, toMonitorJobView(j))
 	}
-	return active, recent
+	return active, recent, pending
 }
 
 // getRepoLLMJob looks up a job by id and verifies it belongs to repoID.
@@ -109,16 +110,49 @@ func (s *Server) handleRepoLLMActivity(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	active, recent := s.listRepoLLMActivity(repoID, limit, since)
+	active, recent, pending := s.listRepoLLMActivity(repoID, limit, since)
 
 	workerConnected := s.worker != nil && s.worker.IsAvailable()
 	health := computeMonitorHealth(workerConnected, len(active), recent)
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"health": health,
-		"active": active,
-		"recent": recent,
-	})
+	// Match the shape of monitorActivityResponse from handleLLMActivity
+	// so the web client can use one normalizer for both paths. The web's
+	// RepoJobActivityResponse interface in repositories/[id]/page.tsx
+	// requires `stats` (queue_depth/in_flight/max_concurrency); without
+	// it the page crashes with "Cannot read properties of undefined".
+	resp := monitorActivityResponse{
+		Health:  health,
+		Active:  active,
+		Recent:  recent,
+		Metrics: s.orchestrator.Metrics(),
+		Modes:   modeRollups(recent),
+		Control: monitorQueueControl{
+			IntakePaused: s.orchestrator.IntakePaused(),
+		},
+		ErrorCounters: monitorErrorCounters{
+			KnowledgeProgressWriteErrors: graphql.KnowledgeProgressWriteErrorsTotal(),
+			KnowledgeJobLogWriteErrors:   graphql.KnowledgeJobLogWriteErrorsTotal(),
+			EventBusHandlerErrors:        events.HandlerErrorsTotal(),
+		},
+		Stats: monitorStats{
+			InFlight:              len(active),
+			QueueDepth:            s.orchestrator.QueueDepth(),
+			GateWaiting:           gateWaitingCount(active),
+			TotalWaiting:          s.orchestrator.QueueDepth() + gateWaitingCount(active),
+			MaxConcurrency:        s.orchestrator.MaxConcurrency(),
+			ActivePoolSize:        s.orchestrator.ActiveWorkerCount(),
+			ConfiguredPoolSize:    s.orchestrator.MaxConcurrency(),
+			RecentReusedSummaries: totalReusedSummaries(recent),
+			ActiveClassic:         countGenerationMode(active, "classic"),
+			ActiveUnderstanding:   countGenerationMode(active, "understanding_first"),
+			RecentClassic:         countGenerationMode(recent, "classic"),
+			RecentUnderstanding:   countGenerationMode(recent, "understanding_first"),
+			PendingInteractive:    countPendingPriority(pending, llm.PriorityInteractive),
+			PendingMaintenance:    countPendingPriority(pending, llm.PriorityMaintenance),
+			PendingPrewarm:        countPendingPriority(pending, llm.PriorityPrewarm),
+		},
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleRepoLLMJobDetail handles GET /api/v1/repositories/{id}/llm-jobs/{job_id}.
