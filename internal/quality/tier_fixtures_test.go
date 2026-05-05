@@ -568,6 +568,156 @@ func TestTierFixtures_FactualGroundingOnly_ShipsAtMidAndLocal(t *testing.T) {
 	assertDecision(t, modeltier.TierLocal, localResult, quality.RetryPass)
 }
 
+// TestTierFixtures_VaguenessOnly_ShipsAtMidAndLocal proves that a page whose
+// SOLE blocker is vagueness actually ships at TierMid and TierLocal.
+//
+// The fixture (api_reference_vagueness_only.md) is constructed so that:
+//   - citation_density passes at all tiers (6 valid citations; at frontier
+//     threshold=100 need ceil(wc/100) citations; at mid threshold=200 need
+//     ceil(wc/200); at local threshold=300 need ceil(wc/300)).
+//   - code_example_present passes (one fenced code block).
+//   - factual_grounding passes (every paragraph with assertion verbs has a
+//     citation in the same paragraph; the vague-quantifier paragraph has no
+//     assertion verbs so FG does not fire there).
+//   - Only vagueness gates at TierFrontier — the middleware paragraph contains
+//     "Various", "Multiple", and "In some cases" without adjacent numerals.
+//
+// This directly addresses CA-164's core claim for api_reference: a TierMid page
+// whose sole quality failure is vagueness ships (Decision == RetryPass).
+func TestTierFixtures_VaguenessOnly_ShipsAtMidAndLocal(t *testing.T) {
+	t.Parallel()
+	input := loadFixture(t, "api_reference_vagueness_only.md")
+
+	wc := input.WordCount()
+	citCount := countValidCitations(input.Citations())
+
+	// Pre-flight guard: citation_density must pass at TierFrontier (threshold=100).
+	// If this fails, the fixture has too few citations and the vagueness-only
+	// isolation breaks (citation_density becomes a confound).
+	requiredAtFrontier := ceilDiv(wc, 100)
+	if citCount < requiredAtFrontier {
+		t.Fatalf("api_reference_vagueness_only: citation_density would gate at TierFrontier "+
+			"(need %d citations for wc=%d/threshold=100, have %d); "+
+			"fix the fixture so only vagueness gates at frontier",
+			requiredAtFrontier, wc, citCount)
+	}
+
+	// Pre-flight guard: citation_density must pass at TierMid (threshold=200).
+	requiredAtMid := ceilDiv(wc, 200)
+	if citCount < requiredAtMid {
+		t.Fatalf("api_reference_vagueness_only: citation_density would gate at TierMid "+
+			"(need %d citations for wc=%d/threshold=200, have %d)",
+			requiredAtMid, wc, citCount)
+	}
+
+	// Pre-flight guard: code block must be present so code_example_present passes
+	// at TierFrontier (it is a gate at frontier for api_reference/engineers).
+	if len(input.CodeBlocks()) == 0 {
+		t.Fatalf("api_reference_vagueness_only: fixture must contain at least one code block "+
+			"so code_example_present passes at TierFrontier")
+	}
+
+	base := quality.ValidatorConfig{}
+
+	// TierFrontier: vagueness is a gate. The fixture has paragraphs with vague
+	// quantifiers ("Various", "Multiple", "In some cases") without adjacent
+	// numerals => vagueness fires => Decision is RetryReject.
+	frontierResult := runFixture(t, quality.TemplateAPIReference, quality.AudienceEngineers, modeltier.TierFrontier, input, base)
+	assertGatesFire(t, modeltier.TierFrontier, frontierResult)
+	foundVaguenessGate := false
+	for _, g := range frontierResult.Gates {
+		if g.ValidatorID == quality.ValidatorVagueness {
+			foundVaguenessGate = true
+		}
+	}
+	if !foundVaguenessGate {
+		t.Errorf("TierFrontier: expected vagueness in Gates; gates=%v warnings=%v",
+			ruleIDs(frontierResult.Gates), ruleIDs(frontierResult.Warnings))
+	}
+	assertDecision(t, modeltier.TierFrontier, frontierResult, quality.RetryReject)
+
+	// TierMid: vagueness is demoted to warning (CA-164). No gate fires.
+	// The page ships — this is the core CA-164 claim for api_reference/engineers.
+	midResult := runFixture(t, quality.TemplateAPIReference, quality.AudienceEngineers, modeltier.TierMid, input, base)
+	assertNoGateFor(t, modeltier.TierMid, midResult, quality.ValidatorVagueness)
+	assertGatesPass(t, modeltier.TierMid, midResult)
+	assertWarningPresent(t, modeltier.TierMid, midResult, quality.ValidatorVagueness)
+	assertDecision(t, modeltier.TierMid, midResult, quality.RetryPass)
+
+	// TierLocal: same outcome as TierMid — vagueness is a warning, page ships.
+	// Proves CA-152's existing behavior is preserved alongside CA-164.
+	localResult := runFixture(t, quality.TemplateAPIReference, quality.AudienceEngineers, modeltier.TierLocal, input, base)
+	assertNoGateFor(t, modeltier.TierLocal, localResult, quality.ValidatorVagueness)
+	assertGatesPass(t, modeltier.TierLocal, localResult)
+	assertWarningPresent(t, modeltier.TierLocal, localResult, quality.ValidatorVagueness)
+	assertDecision(t, modeltier.TierLocal, localResult, quality.RetryPass)
+}
+
+// TestTierFixtures_CitationDensityArchStubParagraphs_ShipsAtMid reproduces the
+// post-deploy architecture detail sub-page failure mode: short stub paragraphs
+// (17-25 words each) with zero citations. Before CA-165, citation_density gated
+// at TierMid for architecture/engineers. After CA-165 it is a warning.
+//
+// The fixture (arch_eng_stub_paragraphs.md) is constructed so that:
+//   - 5 short paragraphs of ~15-20 words each, totalling <120 words.
+//   - Zero (path:N-N) citations — citation density is the sole quality issue.
+//   - No assertion verbs so factual_grounding does not fire.
+//   - No vagueness quantifiers so vagueness does not fire.
+//   - One fenced code block for completeness (code_example_present is a
+//     warning, not a gate, at frontier for architecture/engineers).
+//
+// Scope boundary note: TierLocal for architecture/engineers has
+// citation_density=LevelWarning (threshold=400) per CA-152's existing override.
+// With 0 citations the validator fires as a warning at TierLocal too, but since
+// it is a warning the page ships. This test asserts that explicitly.
+func TestTierFixtures_CitationDensityArchStubParagraphs_ShipsAtMid(t *testing.T) {
+	t.Parallel()
+	input := loadFixture(t, "arch_eng_stub_paragraphs.md")
+
+	// Pre-flight guard: fixture must have zero citations so citation_density fires.
+	citCount := countValidCitations(input.Citations())
+	if citCount != 0 {
+		t.Fatalf("arch_eng_stub_paragraphs: fixture must have 0 parseable citations "+
+			"to isolate citation_density failure mode; got %d", citCount)
+	}
+
+	base := quality.ValidatorConfig{}
+
+	// TierFrontier: citation_density is a gate (threshold=200).
+	// 0 citations for any non-zero word count => gate fires.
+	frontierResult := runFixture(t, quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierFrontier, input, base)
+	assertGatesFire(t, modeltier.TierFrontier, frontierResult)
+	foundCDGate := false
+	for _, g := range frontierResult.Gates {
+		if g.ValidatorID == quality.ValidatorCitationDensity {
+			foundCDGate = true
+		}
+	}
+	if !foundCDGate {
+		t.Errorf("TierFrontier: expected citation_density in Gates; gates=%v warnings=%v",
+			ruleIDs(frontierResult.Gates), ruleIDs(frontierResult.Warnings))
+	}
+	assertDecision(t, modeltier.TierFrontier, frontierResult, quality.RetryReject)
+
+	// TierMid: citation_density is demoted to LevelWarning (CA-165). No gate fires.
+	// The page ships — this is the core CA-165 claim for architecture/engineers
+	// stub-paragraph detail sub-pages (e.g., detail.benchmarks, detail.cli, etc.).
+	midResult := runFixture(t, quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierMid, input, base)
+	assertNoGateFor(t, modeltier.TierMid, midResult, quality.ValidatorCitationDensity)
+	assertGatesPass(t, modeltier.TierMid, midResult)
+	assertWarningPresent(t, modeltier.TierMid, midResult, quality.ValidatorCitationDensity)
+	assertDecision(t, modeltier.TierMid, midResult, quality.RetryPass)
+
+	// TierLocal: citation_density is already LevelWarning per CA-152's existing
+	// override (threshold=400). 0 citations still fires the validator but as a
+	// warning, not a gate — page ships. This scope boundary (TierLocal was never
+	// the CA-165 target) is documented here for future readers.
+	localResult := runFixture(t, quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierLocal, input, base)
+	assertNoGateFor(t, modeltier.TierLocal, localResult, quality.ValidatorCitationDensity)
+	assertGatesPass(t, modeltier.TierLocal, localResult)
+	assertDecision(t, modeltier.TierLocal, localResult, quality.RetryPass)
+}
+
 // TestTierFixtures_FactualGrounding_QwenShapedOutput is the CA-152 lock-test.
 // It proves that the production failure mode (qwen3.6-shaped output with zero
 // citations and behavioral assertion verbs) is REJECTED at TierFrontier and

@@ -451,6 +451,16 @@ func TestDefaultProfile_ThresholdTable(t *testing.T) {
 			quality.ValidatorArchitecturalRelevance, quality.LevelGate, 0, 0, 2, 4, 0},
 		{quality.TemplateSystemOverview, quality.AudienceProduct, modeltier.TierMid,
 			quality.ValidatorReadingLevel, quality.LevelWarning, 0, 45, 0, 0, 0},
+
+		// --- CA-164 Phase 3: vagueness TierMid overrides (4 remaining cells; arch/eng/mid already above) ---
+		{quality.TemplateAPIReference, quality.AudienceEngineers, modeltier.TierMid,
+			quality.ValidatorVagueness, quality.LevelWarning, 0, 0, 0, 0, 0},
+		{quality.TemplateADR, quality.AudienceEngineers, modeltier.TierMid,
+			quality.ValidatorVagueness, quality.LevelWarning, 0, 0, 0, 0, 0},
+		{quality.TemplateSystemOverview, quality.AudienceEngineers, modeltier.TierMid,
+			quality.ValidatorVagueness, quality.LevelWarning, 0, 0, 0, 0, 0},
+		{quality.TemplateSystemOverview, quality.AudienceProduct, modeltier.TierMid,
+			quality.ValidatorVagueness, quality.LevelWarning, 0, 0, 0, 0, 0},
 	}
 
 	for _, tc := range table {
@@ -593,6 +603,180 @@ func TestEffectiveProfile_FactualGroundingPolicy_AllProfiles(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestEffectiveProfile_VaguenessPolicy_AllProfiles is the load-bearing invariant
+// for CA-152 / CA-164 vagueness tier policy. Every (Template × Audience × Tier)
+// combination is iterated; ValidatorVagueness is asserted at LevelGate (frontier)
+// or LevelWarning (mid/local), with allowlist:
+//   - (activity_log, engineers): TierMid + TierLocal stay LevelGate. Rationale:
+//     activity_log report's ValidatorProfile() hardcodes TierFrontier
+//     (internal/reports/templates/activitylog/activitylog.go:430), and the
+//     template is not in current Living Wiki page planning
+//     (internal/api/graphql/living_wiki_plan_helpers.go:32-39).
+//   - (architecture, product): TierMid + TierLocal stay LevelGate. Rationale:
+//     CA-152 did not demote at TierLocal (no production evidence at that audience),
+//     so CA-164 mirrors that absence at TierMid (Decision 1 — don't extrapolate
+//     beyond TierLocal). Open Question Q1.
+//
+// To intentionally change a cell's policy, update both the override in profile.go
+// AND this test's allowlist. A change to one without the other indicates either
+// a forgotten override or a regression.
+func TestEffectiveProfile_VaguenessPolicy_AllProfiles(t *testing.T) {
+	t.Parallel()
+
+	type profileKey struct {
+		Template quality.Template
+		Audience quality.Audience
+		Tier     modeltier.QualityGateTier
+	}
+
+	// allowlist contains the (template, audience, tier) cells where vagueness
+	// is expected to remain LevelGate at TierMid or TierLocal. Each entry must
+	// include a rationale comment in this block.
+	//
+	// activity_log/engineers at TierMid and TierLocal: deliberate exemption because
+	// (a) activity_log is not in current Living Wiki planning
+	//     (internal/api/graphql/living_wiki_plan_helpers.go:32-39 does not list it),
+	// (b) the activity_log report's ValidatorProfile() hardcodes TierFrontier
+	//     (internal/reports/templates/activitylog/activitylog.go:430), so mid/local
+	//     overrides do not affect activity_log output today.
+	//
+	// architecture/product at TierMid and TierLocal: CA-152 did not demote
+	// vagueness at TierLocal for this cell (no production evidence at product audience),
+	// so CA-164 mirrors that absence at TierMid per Decision 1 discipline
+	// ("don't extrapolate beyond what TierLocal already does"). Tracked as Open Question Q1.
+	allowlist := map[profileKey]quality.GateLevel{
+		{Template: quality.TemplateActivityLog,  Audience: quality.AudienceEngineers, Tier: modeltier.TierMid}:   quality.LevelGate,
+		{Template: quality.TemplateActivityLog,  Audience: quality.AudienceEngineers, Tier: modeltier.TierLocal}: quality.LevelGate,
+		{Template: quality.TemplateArchitecture, Audience: quality.AudienceProduct,   Tier: modeltier.TierMid}:   quality.LevelGate,
+		{Template: quality.TemplateArchitecture, Audience: quality.AudienceProduct,   Tier: modeltier.TierLocal}: quality.LevelGate,
+	}
+
+	allProfiles := quality.AllDefaultProfiles()
+	if len(allProfiles) == 0 {
+		t.Fatal("AllDefaultProfiles returned no profiles")
+	}
+
+	for _, p := range allProfiles {
+		p := p
+		t.Run(p.String(), func(t *testing.T) {
+			t.Parallel()
+
+			// Find the Vagueness rule in this materialized profile.
+			var vagRule *quality.ValidatorRule
+			for i := range p.Rules {
+				if p.Rules[i].ValidatorID == quality.ValidatorVagueness {
+					vagRule = &p.Rules[i]
+					break
+				}
+			}
+
+			// If the base profile doesn't include Vagueness (e.g. glossary/engineers),
+			// skip this cell — no policy assertion is applicable.
+			if vagRule == nil {
+				return
+			}
+
+			key := profileKey{Template: p.Template, Audience: p.Audience, Tier: p.Tier}
+
+			switch p.Tier {
+			case modeltier.TierFrontier:
+				// Every frontier cell with Vagueness must be a gate.
+				// This guards against accidental frontier-base regressions.
+				if vagRule.Level != quality.LevelGate {
+					t.Errorf("[%s] TierFrontier Vagueness Level = %q, want gate (frontier must never relax)",
+						p.String(), vagRule.Level)
+				}
+
+			case modeltier.TierMid, modeltier.TierLocal:
+				if wantLevel, isAllowlisted := allowlist[key]; isAllowlisted {
+					// Allowlisted cell: assert the explicitly documented exception level.
+					if vagRule.Level != wantLevel {
+						t.Errorf("[%s] Vagueness Level = %q, want %q (allowlisted cell; update allowlist and profile.go together)",
+							p.String(), vagRule.Level, wantLevel)
+					}
+				} else {
+					// All other mid/local cells: Vagueness must be a warning.
+					// A gate here means either a missing override (regression) or an
+					// intentional new exception that needs an allowlist entry.
+					if vagRule.Level != quality.LevelWarning {
+						t.Errorf("[%s] Vagueness Level = %q, want warning — "+
+							"add an allowlist entry to this test AND an inline comment in profile.go "+
+							"if this is intentional",
+							p.String(), vagRule.Level)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestEffectiveProfile_CitationDensityArchitectureMid_HasOverride is the CA-165
+// spot-check. It locks the single in-place level change for
+// (architecture, engineers, TierMid) citation_density: the level must be
+// LevelWarning (demoted from LevelGate by CA-165) and the threshold must be
+// preserved at 300 words/citation (from CA-150). The frontier baseline is also
+// asserted to detect any accidental spillover.
+//
+// The broader citation_density invariant test would be overkill for a 1-cell
+// change; this spot-check is right-sized per plan Decision 2.
+func TestEffectiveProfile_CitationDensityArchitectureMid_HasOverride(t *testing.T) {
+	t.Parallel()
+
+	// Mid: citation_density must be LevelWarning with threshold=300.
+	mid, ok := quality.DefaultProfile(quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierMid)
+	if !ok {
+		t.Fatal("DefaultProfile(architecture, engineers, mid) returned false")
+	}
+
+	foundMid := false
+	for _, r := range mid.Rules {
+		if r.ValidatorID != quality.ValidatorCitationDensity {
+			continue
+		}
+		foundMid = true
+		if r.Level != quality.LevelWarning {
+			t.Errorf("architecture/engineers/mid citation_density Level = %q, want warning "+
+				"(CA-165 demoted from gate; revert needs a new Decision entry in the plan)",
+				r.Level)
+		}
+		if r.Config.CitationDensityWordsPerCitation != 300 {
+			t.Errorf("architecture/engineers/mid citation_density threshold = %d, want 300 "+
+				"(CA-165 preserves the CA-150 threshold; only Level changed)",
+				r.Config.CitationDensityWordsPerCitation)
+		}
+	}
+	if !foundMid {
+		t.Error("architecture/engineers/mid: citation_density rule not found")
+	}
+
+	// Frontier: citation_density must still be LevelGate with threshold=200.
+	frontier, ok := quality.DefaultProfile(quality.TemplateArchitecture, quality.AudienceEngineers, modeltier.TierFrontier)
+	if !ok {
+		t.Fatal("DefaultProfile(architecture, engineers, frontier) returned false")
+	}
+
+	foundFrontier := false
+	for _, r := range frontier.Rules {
+		if r.ValidatorID != quality.ValidatorCitationDensity {
+			continue
+		}
+		foundFrontier = true
+		if r.Level != quality.LevelGate {
+			t.Errorf("architecture/engineers/frontier citation_density Level = %q, want gate "+
+				"(CA-165 only demotes at TierMid; frontier base must be unchanged)",
+				r.Level)
+		}
+		if r.Config.CitationDensityWordsPerCitation != 200 {
+			t.Errorf("architecture/engineers/frontier citation_density threshold = %d, want 200 "+
+				"(frontier base threshold must be unchanged by CA-165)",
+				r.Config.CitationDensityWordsPerCitation)
+		}
+	}
+	if !foundFrontier {
+		t.Error("architecture/engineers/frontier: citation_density rule not found")
 	}
 }
 
