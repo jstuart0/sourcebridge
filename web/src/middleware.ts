@@ -102,6 +102,14 @@ export async function middleware(request: NextRequest): Promise<Response> {
   // upstream API container is stopped (kubelet liveness probe target). The
   // matcher below uses '/api/:path*' (no lookahead) because path-to-regexp
   // rejects capturing groups in Next.js 15; we guard here instead.
+  //
+  // CONVENTION (extend this guard if you add native /api/* routes): any new
+  // web/src/app/api/<name>/route.ts file is silently proxied to the upstream
+  // Go API by this middleware unless the route's path is added to the
+  // exclusion below. If you intend a new route to be served *natively* by
+  // Next.js (rare — most /api/* paths in this project are the Go API), add
+  // its prefix to the early-return condition. If unsure, use a non-`/api/`
+  // path or place the handler under a path that does not match the matcher.
   const { pathname } = new URL(request.url);
   if (pathname === '/api/health' || pathname.startsWith('/api/health/')) {
     // Let the App Router handle it natively.
