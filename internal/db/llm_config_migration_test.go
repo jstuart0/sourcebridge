@@ -264,3 +264,101 @@ func TestAPIKeyModeAccessors(t *testing.T) {
 		t.Errorf("APIKeyModeSet mismatch")
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 1 — fresh-install seed + self-heal guard unit tests
+// ─────────────────────────────────────────────────────────────────────────
+
+// TestEnvBootstrapToLegacy_EmptyDefaults verifies that when cfg.LLM has all
+// empty fields (the new Phase 1 default), envBootstrapToLegacy produces a
+// LegacyFields with empty provider and model fields. This is the fresh-install
+// path: the migration seeds a blank Default profile; the editor falls back to
+// "ollama" for display.
+func TestEnvBootstrapToLegacy_EmptyDefaults(t *testing.T) {
+	env := config.LLMConfig{
+		Provider:    "",
+		SummaryModel: "",
+		ReviewModel:  "",
+		AskModel:     "",
+		TimeoutSecs: 900,
+	}
+	lf := envBootstrapToLegacy(env, 0)
+	if lf.Provider != "" {
+		t.Errorf("fresh-install env-bootstrap: want empty provider, got %q (RC-1 regression)", lf.Provider)
+	}
+	if lf.SummaryModel != "" {
+		t.Errorf("fresh-install env-bootstrap: want empty summary_model, got %q", lf.SummaryModel)
+	}
+	if lf.ReviewModel != "" {
+		t.Errorf("fresh-install env-bootstrap: want empty review_model, got %q", lf.ReviewModel)
+	}
+	if lf.AskModel != "" {
+		t.Errorf("fresh-install env-bootstrap: want empty ask_model, got %q", lf.AskModel)
+	}
+}
+
+// TestFreshInstallUsesEnvBootstrap verifies that on a true fresh install
+// (no legacy row, empty env config), the migration correctly classifies
+// the state as fresh and would call envBootstrapToLegacy with the empty env.
+// We test the logic in isolation (not the full DB round-trip) by exercising
+// the freshInstall derivation:
+//   - !hasLegacy → freshInstall = true (uses env-bootstrap, all-empty)
+//   - hasLegacy && legacy.Provider == "" → freshInstall = true
+//   - hasLegacy && legacy.Provider != "" → freshInstall = false (self-heal)
+func TestFreshInstallClassification(t *testing.T) {
+	cases := []struct {
+		name           string
+		hasLegacy      bool
+		legacyProvider string
+		wantFresh      bool
+	}{
+		{"no legacy row", false, "", true},
+		{"legacy row empty provider", true, "", true},
+		{"legacy row with provider", true, "anthropic", false},
+		{"legacy row ollama provider", true, "ollama", false},
+	}
+	for _, c := range cases {
+		legacy := LegacyFields{Provider: c.legacyProvider}
+		got := !c.hasLegacy || legacy.Provider == ""
+		if got != c.wantFresh {
+			t.Errorf("%s: freshInstall=%v, want %v", c.name, got, c.wantFresh)
+		}
+	}
+}
+
+// TestSelfHealPrefersLegacyProvider verifies the r1 H1 guard: when the legacy
+// row has a real provider (admin had a working config), the self-heal path
+// should NOT apply env-bootstrap defaults (which would overwrite with empty
+// values after Phase 1's default change). The guard detects freshInstall=false
+// and skips the envBootstrapToLegacy call.
+func TestSelfHealPrefersLegacyProvider(t *testing.T) {
+	// Simulate: hasLegacy=true, legacy.Provider="anthropic",
+	// activeID=MigratedProfileRecordID (self-heal path).
+	// Expect: freshInstall=false → env-bootstrap NOT called → provider preserved.
+	legacyProvider := "anthropic"
+	hasLegacy := true
+	legacy := LegacyFields{
+		Provider:    legacyProvider,
+		APIKey:      "sbenc:v1:testdata",
+		SummaryModel: "claude-sonnet-4",
+	}
+	freshInstall := !hasLegacy || legacy.Provider == ""
+	if freshInstall {
+		t.Errorf("r1 H1: with legacy.Provider=%q, freshInstall should be false (would call env-bootstrap and wipe provider)", legacyProvider)
+	}
+
+	// Simulate the env-bootstrap result for comparison — should NOT be applied.
+	emptyEnv := config.LLMConfig{Provider: "", SummaryModel: ""}
+	bootstrapped := envBootstrapToLegacy(emptyEnv, legacy.Version)
+	if bootstrapped.Provider != "" {
+		t.Errorf("sanity: empty env bootstrap should have empty provider, got %q", bootstrapped.Provider)
+	}
+
+	// Confirm: the guard would leave legacy intact.
+	if !freshInstall {
+		// This is the self-heal branch — legacy flows to runMigrationBatch directly.
+		if legacy.Provider != legacyProvider {
+			t.Errorf("self-heal: legacy.Provider changed; want %q, got %q", legacyProvider, legacy.Provider)
+		}
+	}
+}

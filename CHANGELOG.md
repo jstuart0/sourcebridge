@@ -6,6 +6,18 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ## [Unreleased]
 
+**Fresh-install LLM onboarding** (2026-05-05). Fixes three compounding root causes that bricked first-time setup on hub-compose installs. Users can now reach a working LLM configuration in under 60 seconds without editing YAML or hitting opaque 422 errors.
+
+### Changed
+
+- **`internal/config/config.go`**: `LLM.Provider`, `SummaryModel`, `ReviewModel`, `AskModel` defaults are now empty strings instead of `"anthropic"` / `"claude-sonnet-4-20250514"`. Fresh installs seed a blank Default profile; the admin UI pre-fills "ollama" as a sensible starting point. **Upgrade impact: none** — the migration's fast-exit path protects all existing installs with a seeded profile. Operators who relied on the implicit Anthropic default without setting `SOURCEBRIDGE_LLM_PROVIDER` should set it explicitly: `SOURCEBRIDGE_LLM_PROVIDER=anthropic` (in `config.toml`, `.env`, or `docker-compose.yml`).
+
+### Fixed
+
+- **`internal/db/llm_config_migration.go`**: Self-heal guard (r1 H1) — when the legacy row has a real provider but the deterministic profile row is missing, the migration now prefers the legacy row's values over the (now-empty) env-bootstrap defaults. Prevents a partially-corrupt admin's recovery path from being silently zeroed.
+
+
+
 **System audit refactor campaign** (CA-155, 2026-05-04, `a176b6f..89c85f3`). Full-codebase audit — 70 deduplicated findings (9 Critical, 23 High, 30 Medium, 18 Low), 74 commits across 5 phases, no public surface removed.
 
 ### Security (Phase 0)

@@ -566,10 +566,19 @@ func Defaults() *Config {
 			SCIPEnabled:    true,
 		},
 		LLM: LLMConfig{
-			Provider:                 "anthropic",
-			SummaryModel:             "claude-sonnet-4-20250514",
-			ReviewModel:              "claude-sonnet-4-20250514",
-			AskModel:                 "claude-sonnet-4-20250514",
+			// Provider and model fields are intentionally empty so fresh
+			// installs seed a blank Default profile rather than an Anthropic
+			// profile the user hasn't configured (RC-1 fix — see
+			// thoughts/shared/investigations/2026-05-05-deliver-fresh-install-llm-onboarding.md).
+			// The profile editor falls back to "ollama" when provider is empty,
+			// giving users a sensible starting point without implying they have
+			// Anthropic credentials.
+			// To restore the prior Anthropic default, set
+			// SOURCEBRIDGE_LLM_PROVIDER=anthropic in your config.
+			Provider:                 "",
+			SummaryModel:             "",
+			ReviewModel:              "",
+			AskModel:                 "",
 			ArchitectureDiagramModel: "",
 			// 900s (15 min) covers any single LLM call from the slowest local
 			// models we've measured. The prior 30s default was ignored
@@ -780,8 +789,11 @@ func (c *Config) Validate() error {
 	if c.Storage.RedisMode != "memory" && c.Storage.RedisMode != "external" {
 		return fmt.Errorf("invalid Redis mode: %s (must be 'memory' or 'external')", c.Storage.RedisMode)
 	}
+	// Empty provider is allowed — it means "not yet configured" (fresh install).
+	// The migration seeds a blank Default profile; the admin UI pre-fills
+	// "ollama" so the user picks from there. Any non-empty value must be known.
 	validProviders := map[string]bool{"anthropic": true, "openai": true, "ollama": true, "vllm": true, "llama-cpp": true, "sglang": true, "lmstudio": true, "gemini": true, "openrouter": true}
-	if !validProviders[c.LLM.Provider] {
+	if c.LLM.Provider != "" && !validProviders[c.LLM.Provider] {
 		return fmt.Errorf("invalid LLM provider: %s", c.LLM.Provider)
 	}
 	if (c.LLM.Provider == "ollama" || c.LLM.Provider == "vllm" || c.LLM.Provider == "llama-cpp" || c.LLM.Provider == "sglang" || c.LLM.Provider == "lmstudio") && c.LLM.BaseURL == "" {

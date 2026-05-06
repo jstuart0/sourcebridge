@@ -23,8 +23,10 @@ func TestDefaults(t *testing.T) {
 	if cfg.Security.Mode != "oss" {
 		t.Errorf("expected oss security mode, got %s", cfg.Security.Mode)
 	}
-	if cfg.LLM.Provider != "anthropic" {
-		t.Errorf("expected anthropic provider, got %s", cfg.LLM.Provider)
+	// Provider is intentionally empty — fresh installs seed a blank Default
+	// profile; the admin UI falls back to "ollama" for display.
+	if cfg.LLM.Provider != "" {
+		t.Errorf("expected empty LLM provider default (RC-1 fix), got %q", cfg.LLM.Provider)
 	}
 }
 
@@ -157,6 +159,32 @@ func TestEnvOverride(t *testing.T) {
 	}
 	if cfg.Server.HTTPPort != 9090 {
 		t.Errorf("expected port 9090 from env, got %d", cfg.Server.HTTPPort)
+	}
+}
+
+// TestDefaults_LLMProvider_IsEmpty asserts that the zero value for LLM.Provider
+// is empty, not "anthropic". A future commit that re-introduces a non-empty
+// default would cause fresh installs to seed a misleading Default profile.
+// This test is a canary for that regression.
+func TestDefaults_LLMProvider_IsEmpty(t *testing.T) {
+	cfg := Defaults()
+	if cfg.LLM.Provider != "" {
+		t.Errorf("Defaults().LLM.Provider: want empty string (fresh-install-safe), got %q — "+
+			"reverting to a non-empty provider default breaks fresh hub installs by seeding "+
+			"a misconfigured Default profile. Set SOURCEBRIDGE_LLM_PROVIDER explicitly instead.", cfg.LLM.Provider)
+	}
+	if cfg.LLM.SummaryModel != "" {
+		t.Errorf("Defaults().LLM.SummaryModel: want empty, got %q", cfg.LLM.SummaryModel)
+	}
+	if cfg.LLM.ReviewModel != "" {
+		t.Errorf("Defaults().LLM.ReviewModel: want empty, got %q", cfg.LLM.ReviewModel)
+	}
+	if cfg.LLM.AskModel != "" {
+		t.Errorf("Defaults().LLM.AskModel: want empty, got %q", cfg.LLM.AskModel)
+	}
+	// TimeoutSecs must stay non-zero — it's unrelated to provider choice.
+	if cfg.LLM.TimeoutSecs == 0 {
+		t.Errorf("Defaults().LLM.TimeoutSecs: want non-zero, got 0")
 	}
 }
 

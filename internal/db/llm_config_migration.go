@@ -123,8 +123,20 @@ func MigrateToProfiles(
 		// Step 3: fresh-install / never-configured path. Seed Default
 		// from cfg.LLM env-bootstrap. Empty values are fine; the UI
 		// pre-fills whatever env supplied (or all-empty if no env).
+		//
+		// r1 H1 — self-heal guard: when the pointer exists but the profile
+		// row is missing AND the legacy row has a real provider, prefer the
+		// legacy row's values over the (possibly empty) env-bootstrap defaults.
+		// This protects the admin's recovery path when Phase 1's empty defaults
+		// are in effect — we do NOT silently zero a partially-corrupt operator
+		// config that had real values.
 		freshInstall := !hasLegacy || legacy.Provider == ""
-		if freshInstall {
+		if !freshInstall && activeID == MigratedProfileRecordID {
+			// Self-heal: legacy row has a real provider; use it directly.
+			slog.Warn("llm profile migration: self-heal preferring legacy row over env-bootstrap defaults",
+				"legacy_provider", legacy.Provider)
+			// legacy is already populated correctly; skip env-bootstrap below.
+		} else if freshInstall {
 			legacy = envBootstrapToLegacy(envBoot, legacy.Version)
 			// On true fresh install (no legacy row), observedLegacyVersion
 			// is 0 — that's correct for the CAS guard, since the existing
