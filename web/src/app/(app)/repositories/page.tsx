@@ -8,6 +8,7 @@ import { useMutation, useQuery } from "urql";
 import {
   ADD_REPOSITORY_MUTATION,
   IMPORT_REQUIREMENTS_MUTATION as IMPORT_REQUIREMENTS,
+  LIVING_WIKI_GLOBAL_SETTINGS_QUERY,
   REMOVE_REPOSITORY_MUTATION,
   REPOSITORIES_LIGHT_QUERY as REPOSITORIES,
 } from "@/lib/graphql/queries";
@@ -49,6 +50,7 @@ function statusTone(status: string) {
 export default function RepositoriesPage() {
   const router = useRouter();
   const [result, reexecute] = useQuery({ query: REPOSITORIES });
+  const [lwResult] = useQuery({ query: LIVING_WIKI_GLOBAL_SETTINGS_QUERY });
   const [, importReqs] = useMutation(IMPORT_REQUIREMENTS);
   const [, addRepo] = useMutation(ADD_REPOSITORY_MUTATION);
   const [, removeRepo] = useMutation(REMOVE_REPOSITORY_MUTATION);
@@ -70,6 +72,13 @@ export default function RepositoriesPage() {
   const [removeConfirm, setRemoveConfirm] = useState<{ id: string; name: string } | null>(null);
 
   const repos: Repository[] = result.data?.repositories || [];
+
+  // Show a banner when Living Wiki is globally disabled so the user knows
+  // they need to enable it in Settings before wiki features will work.
+  // null/undefined enabled counts as disabled (fresh install, no lw_settings row yet).
+  const lwSettings = lwResult.data?.livingWikiSettings;
+  const lwGlobalDisabled =
+    !lwResult.fetching && lwSettings != null && !lwSettings.enabled && !lwSettings.killSwitchActive;
 
   const handleSSEEvent = useCallback(
     (event: ServerEvent) => {
@@ -211,6 +220,29 @@ export default function RepositoriesPage() {
           </Button>
         }
       />
+
+      {lwGlobalDisabled && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-start gap-3 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3 text-sm"
+        >
+          <span className="mt-0.5 shrink-0 text-[var(--text-tertiary)]" aria-hidden="true">
+            ℹ
+          </span>
+          <p className="text-[var(--text-secondary)]">
+            Living Wiki is globally disabled on this server. To start generating wiki
+            pages for your repositories, enable it in{" "}
+            <Link
+              href="/settings/living-wiki"
+              className="font-medium text-[var(--accent-primary)] hover:underline"
+            >
+              Settings → Living Wiki
+            </Link>
+            .
+          </p>
+        </div>
+      )}
 
       {showAddForm ? (
         <Panel variant="elevated" className="max-w-3xl space-y-5">

@@ -89,6 +89,15 @@ services:
       - SOURCEBRIDGE_STORAGE_SURREAL_USER=root
       - SOURCEBRIDGE_STORAGE_SURREAL_PASS=root
       - SOURCEBRIDGE_STORAGE_REDIS_MODE=memory
+      # Repo cache: /data is owned by the 'sourcebr' user (UID 1000) inside the
+      # API container. Without this, the default './repo-cache' resolves to
+      # /repo-cache (root-owned) and every addRepository call fails with
+      # "permission denied" before the git clone even starts.
+      # Note: /data/repo-cache lives inside the container filesystem and is NOT
+      # persisted across container restarts by default. The cache is fully
+      # rebuildable from git, so this is acceptable. If you want crash-safe
+      # caching, add a named volume mount for /data/repo-cache.
+      - SOURCEBRIDGE_STORAGE_REPO_CACHE_PATH=/data/repo-cache
       - SOURCEBRIDGE_WORKER_ADDRESS=worker:50051
       - SOURCEBRIDGE_SECURITY_GRPC_AUTH_SECRET=${SOURCEBRIDGE_GRPC_SECRET:-dev-shared-secret}
       - SOURCEBRIDGE_SECURITY_JWT_SECRET=${SOURCEBRIDGE_JWT_SECRET:-dev-jwt-secret-change-me}
