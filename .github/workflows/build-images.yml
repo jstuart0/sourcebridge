@@ -15,6 +15,11 @@ on:
     branches:
       - main
       - dev
+  # CA-149: workflow_dispatch fallback (see oss-release.yml head comment
+  # for rationale). release-please.yml dispatches this when the canonical
+  # RELEASE_PLEASE_TOKEN isn't provisioned, so the SemVer-tagged image
+  # build fires even with the default GITHUB_TOKEN.
+  workflow_dispatch:
 
 permissions:
   contents: read

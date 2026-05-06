@@ -13,20 +13,25 @@
 # build-images.yml. GitHub deliberately suppresses workflow-on-workflow
 # chains when the trigger token is the default GITHUB_TOKEN
 # (https://docs.github.com/en/actions/using-workflows/triggering-a-workflow#triggering-a-workflow-from-a-workflow).
-# If we use the default token, the release tag will be created but NO
-# downstream binary build / image build / cosign signing / tap update
-# will fire. The release will appear half-published.
+# If we use the default token alone, the release tag will be created but
+# NO downstream binary build / image build / cosign signing / tap update
+# would fire on push:tags. The release would appear half-published.
 #
-# To get the full chain, configure a GitHub App or PAT with
-# contents:write + pull-requests:write + issues:write and store it in
-# repo secrets as RELEASE_PLEASE_TOKEN. The expression below falls back
-# to github.token when the secret is empty so the workflow can still
-# open release PRs in the bootstrap phase (without triggering downstream
-# tag workflows). Once the secret is provisioned, downstream workflows
-# will fire on the next release-please tag.
+# CANONICAL FIX: configure a GitHub App or PAT with contents:write +
+# pull-requests:write + issues:write and store it in repo secrets as
+# RELEASE_PLEASE_TOKEN. The expression below falls back to github.token
+# when the secret is empty so the workflow can still open release PRs in
+# the bootstrap phase. Once the secret is provisioned, the tag push fires
+# downstream workflows directly via push:tags. Provisioning runbook in
+# RELEASING.md ("Provisioning the release-please token"). Tracked in
+# CA-149.
 #
-# Provisioning runbook: see RELEASING.md ("Provisioning the
-# release-please token"). Tracked in CA-149.
+# CA-149 FALLBACK (this workflow): when RELEASE_PLEASE_TOKEN is empty, the
+# trailing "dispatch downstream workflows" step below explicitly fires
+# oss-release.yml + build-images.yml via gh workflow run. workflow_dispatch
+# events are *exempt* from the GITHUB_TOKEN recursion guard, so this works
+# without any token provisioning. The step is a no-op when the canonical
+# token is in use (avoids double runs).
 
 name: release-please
 
@@ -56,8 +61,48 @@ jobs:
       # SHA-pinned: googleapis/release-please-action@v4.4.1
       # Verify pin: curl -fsSL https://api.github.com/repos/googleapis/release-please-action/git/refs/tags/v4.4.1
       - name: release-please
+        id: release-please
         uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # CA-149 fallback. Only fires when:
+      #   1. release-please created a release for the root component (i.e.,
+      #      the SourceBridge OSS package — NOT a plugins/vscode-only release;
+      #      plugin tags don't fire oss-release.yml or build-images.yml anyway
+      #      per the SemVer-shaped tag glob in those workflows), AND
+      #   2. RELEASE_PLEASE_TOKEN isn't provisioned (i.e., we used the
+      #      default GITHUB_TOKEN, which won't trigger push:tags downstream).
+      #
+      # When RELEASE_PLEASE_TOKEN IS provisioned, the canonical token
+      # already triggered the downstream workflows via push:tags, so this
+      # step skips with a notice (avoids double runs).
+      #
+      # workflow_dispatch is exempt from the GITHUB_TOKEN recursion guard,
+      # so this step works with the default token. The dispatched
+      # workflow runs against the tag ref, with `github.ref_name` populated
+      # to the tag name — matching the push:tags behavior expected by both
+      # downstream workflows.
+      - name: dispatch downstream release workflows (CA-149 fallback)
+        if: ${{ steps.release-please.outputs['.--release_created'] == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_PLEASE_TOKEN_PRESENT: ${{ secrets.RELEASE_PLEASE_TOKEN != '' && 'true' || 'false' }}
+          TAG: ${{ steps.release-please.outputs['.--tag_name'] }}
+        run: |
+          set -euo pipefail
+          if [ "$RELEASE_PLEASE_TOKEN_PRESENT" = "true" ]; then
+            echo "::notice::RELEASE_PLEASE_TOKEN is provisioned; downstream workflows already triggered by canonical token. Skipping fallback dispatch."
+            exit 0
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::warning::Root component release_created=true but tag_name is empty; cannot dispatch downstream workflows."
+            exit 0
+          fi
+          echo "::notice::Dispatching oss-release.yml and build-images.yml on tag $TAG (CA-149 fallback)."
+          gh workflow run oss-release.yml --ref "$TAG" --repo "${{ github.repository }}" \
+            || echo "::warning::Failed to dispatch oss-release.yml on $TAG; trigger manually."
+          gh workflow run build-images.yml --ref "$TAG" --repo "${{ github.repository }}" \
+            || echo "::warning::Failed to dispatch build-images.yml on $TAG; trigger manually."
