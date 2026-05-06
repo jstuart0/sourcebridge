@@ -4,6 +4,13 @@ All notable changes to this extension are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this extension uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1](https://github.com/sourcebridge-ai/sourcebridge/compare/sourcebridge-vscode-v0.3.0...sourcebridge-vscode-v0.3.1) (2026-05-06)
+
+
+### Fixed
+
+* **audit-refactor:** phase 1 slice 6 — flatten remaining if-err-else nesting (GQL-7) ([27529fa](https://github.com/sourcebridge-ai/sourcebridge/commit/27529fa1b90743ebf17785f46b88c6e58d7324e5))
+
 ## [Unreleased]
 
 ### Added

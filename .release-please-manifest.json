@@ -1,4 +1,4 @@
 {
   ".": "0.9.0-rc.3",
-  "plugins/vscode": "0.3.0"
+  "plugins/vscode": "0.3.1"
 }

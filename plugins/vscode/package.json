@@ -2,7 +2,7 @@
   "name": "sourcebridge",
   "displayName": "SourceBridge.ai",
   "description": "SourceBridge.ai — Codebase field guide and context layer for VS Code. Explain, review, and connect specs to code when needed.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "sourcebridge",
   "license": "AGPL-3.0",
   "repository": {
