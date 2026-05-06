@@ -286,7 +286,16 @@ function Toggle({
   );
 }
 
-function Disclosure({ label, children }: { label: string; children: React.ReactNode }) {
+function Disclosure({
+  label,
+  children,
+  configured,
+}: {
+  label: string;
+  children: React.ReactNode;
+  /** When provided, renders a status badge beside the label. */
+  configured?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div className="border-t border-[var(--border-subtle)] pt-4">
@@ -295,7 +304,19 @@ function Disclosure({ label, children }: { label: string; children: React.ReactN
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center justify-between text-sm font-medium text-[var(--text-primary)] hover:text-[var(--accent-primary)]"
       >
-        <span>{label}</span>
+        <span className="flex items-center gap-2">
+          {label}
+          {configured === true && (
+            <span className="inline-flex items-center rounded-full border border-[var(--color-success,#22c55e)] bg-[rgba(34,197,94,0.1)] px-2 py-0.5 text-xs font-medium text-[#16a34a]">
+              Configured
+            </span>
+          )}
+          {configured === false && (
+            <span className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-subtle)] px-2 py-0.5 text-xs font-medium text-[var(--text-tertiary)]">
+              Not configured
+            </span>
+          )}
+        </span>
         <span className="text-xs text-[var(--text-secondary)]">{open ? "collapse" : "expand"}</span>
       </button>
       {open && <div className="mt-4 space-y-6">{children}</div>}
@@ -517,7 +538,7 @@ export default function LivingWikiSettingsPage() {
 
       {/* ── GitHub integration ── */}
       <Panel className="space-y-6">
-        <Disclosure label="GitHub integration">
+        <Disclosure label="GitHub integration" configured={!!githubToken}>
           <FieldLabel
             label="Personal Access Token (or App token)"
             help="A GitHub PAT or GitHub App installation token. Needs repo:read and pull_request:write scope to open wiki-diff PRs. Works with both PATs and GitHub App tokens — SourceBridge treats them identically."
@@ -529,7 +550,7 @@ export default function LivingWikiSettingsPage() {
 
       {/* ── GitLab integration ── */}
       <Panel className="space-y-6">
-        <Disclosure label="GitLab integration">
+        <Disclosure label="GitLab integration" configured={!!gitlabToken}>
           <FieldLabel
             label="PRIVATE-TOKEN"
             help="A GitLab personal or project access token. Needs read_repository and write_repository scope to commit wiki changes as merge requests."
@@ -541,7 +562,7 @@ export default function LivingWikiSettingsPage() {
 
       {/* ── Confluence integration ── */}
       <Panel className="space-y-6">
-        <Disclosure label="Confluence integration">
+        <Disclosure label="Confluence integration" configured={!!confluenceToken}>
           <div className="space-y-4">
             <div>
               <FieldLabel
@@ -594,7 +615,7 @@ export default function LivingWikiSettingsPage() {
 
       {/* ── Notion integration ── */}
       <Panel className="space-y-6">
-        <Disclosure label="Notion integration">
+        <Disclosure label="Notion integration" configured={!!notionToken}>
           <FieldLabel
             label="Integration token"
             help="Create an internal integration at notion.so/profile/integrations and share the target databases with it. The token starts with 'secret_'. SourceBridge uses this to read and write Notion page blocks."
