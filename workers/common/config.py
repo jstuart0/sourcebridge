@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import os
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
+
+# Maximum allowed value for llm_max_concurrent_calls (D9 / H1).
+# Enforced both here at config-load time and in GetProviderCapabilities on
+# the response path as defense in depth. See also the DB CHECK constraint
+# in Phase 5's migration.
+HARD_CONCURRENCY_CEILING: int = 256
 
 # Supported provider sets. Kept as module-level frozensets so validators,
 # the factories in workers/common/{llm,embedding}/config.py, and tests
@@ -148,6 +154,15 @@ class WorkerConfig(BaseSettings):
     # working locally.
     debug: bool = False
 
+    # Operator-declared upstream LLM parallelism.
+    # 0 = unknown/unbounded (default; Go orchestrator does not clamp).
+    # 1..256 = clamp orchestrator MaxConcurrency to this value.
+    # Seeded on first boot from SOURCEBRIDGE_LLM_PARALLEL_HINT when the
+    # DB profile row's max_concurrent_calls IS NULL (see Phase 5 migration).
+    # Never overrides an operator-set DB value. Config-level env var:
+    # SOURCEBRIDGE_WORKER_LLM_MAX_CONCURRENT_CALLS (or the shared hint).
+    llm_max_concurrent_calls: int = 0
+
     # gRPC auth
     grpc_auth_secret: str = ""
 
@@ -174,6 +189,26 @@ class WorkerConfig(BaseSettings):
     # Deployment must exceed this value so the kubelet's SIGKILL is
     # the outer bound, not the inner one. Today that's 3900s (65min).
     shutdown_grace_seconds: int = 3600
+
+    @field_validator("llm_max_concurrent_calls", mode="before")
+    @classmethod
+    def _validate_llm_max_concurrent_calls(cls, v: object) -> int:
+        """Clamp and validate the declared parallelism at config-load time.
+
+        Accepts int or str (env vars arrive as strings). Values outside
+        [0, HARD_CONCURRENCY_CEILING] are rejected with an actionable message.
+        """
+        try:
+            val = int(v)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"llm_max_concurrent_calls must be an integer, got {v!r}."
+            )
+        if val < 0 or val > HARD_CONCURRENCY_CEILING:
+            raise ValueError(
+                f"llm_max_concurrent_calls must be between 0 and {HARD_CONCURRENCY_CEILING}, got {val}."
+            )
+        return val
 
     @field_validator("llm_provider", mode="before")
     @classmethod
@@ -211,6 +246,20 @@ class WorkerConfig(BaseSettings):
         return _coerce_provider(v, SUPPORTED_LLM_PROVIDERS, "report LLM provider", required=False)
 
     def model_post_init(self, __context: object) -> None:
+        # Read SOURCEBRIDGE_LLM_PARALLEL_HINT as a fallback for
+        # llm_max_concurrent_calls when the primary env var is not set.
+        # This matches the seed-once pattern in Phase 5's envBootstrapToLegacy
+        # (Go side): the hint seeds the value only when not already set.
+        if self.llm_max_concurrent_calls == 0:
+            hint = os.getenv("SOURCEBRIDGE_LLM_PARALLEL_HINT", "").strip()
+            if hint:
+                try:
+                    val = int(hint)
+                    if 0 <= val <= HARD_CONCURRENCY_CEILING:
+                        self.llm_max_concurrent_calls = val
+                except (TypeError, ValueError):
+                    pass  # malformed hint — ignore silently; Phase 5 DB migration is authoritative
+
         self.test_mode = self._fallback_bool_env(
             current=self.test_mode,
             primary_env="SOURCEBRIDGE_WORKER_TEST_MODE",

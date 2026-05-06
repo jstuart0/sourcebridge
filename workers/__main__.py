@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hmac
 import logging
 import os
 import sys
@@ -29,6 +30,7 @@ from requirements.v1 import requirements_pb2, requirements_pb2_grpc  # noqa: E40
 from workers import __version__ as _worker_version  # noqa: E402
 from workers.common.config import WorkerConfig  # noqa: E402
 from workers.common.embedding.config import create_embedding_provider  # noqa: E402
+from workers.common.llm.concurrency_probe import OpenAICompatProbeBackend, run_startup_probe  # noqa: E402
 from workers.common.llm.factory import create_llm_provider, create_report_provider  # noqa: E402
 from workers.contracts.servicer import ContractsServicer  # noqa: E402
 from workers.enterprise.report_servicer import EnterpriseReportServicer  # noqa: E402
@@ -38,6 +40,127 @@ from workers.linking.servicer import LinkingServicer  # noqa: E402
 from workers.reasoning.servicer import ReasoningServicer  # noqa: E402
 from workers.requirements.servicer import RequirementsServicer  # noqa: E402
 from workers.version_servicer import VersionServicer  # noqa: E402
+
+
+_LOOPBACK_PREFIXES = ("127.", "::1", "localhost")
+_UNAUTHENTICATED_BIND_ADDRESSES = ("[::]", "0.0.0.0", "")
+
+
+def _is_non_loopback(addr: str) -> bool:
+    """Return True when the bind address is not a loopback address.
+
+    Examples of non-loopback (unauthenticated-exposure) addresses:
+      - [::]       (all IPv6 interfaces)
+      - 0.0.0.0   (all IPv4 interfaces)
+      - ""         (gRPC default, effectively 0.0.0.0)
+      - 192.168.x.x etc.
+
+    Examples of loopback:
+      - 127.0.0.1
+      - [::1]
+      - localhost
+      - ::1
+    """
+    # Strip brackets (IPv6 notation) and port parts.
+    # "[::1]:50051" → "::1"
+    # "[::]:50051"  → "::"  (non-loopback)
+    # "127.0.0.1:8080" → "127.0.0.1"
+    stripped = addr.strip("[]")
+    # Remove port suffix: everything after the last colon when it's not an IPv6 address.
+    # IPv6 addresses contain multiple colons; a simple "::1" still starts with "::1".
+    # We just check prefixes so we don't need to strip port here — the prefix match
+    # on "127.", "::1", "localhost" is sufficient.
+    return not any(stripped.startswith(p) for p in _LOOPBACK_PREFIXES)
+
+
+class _GrpcAuthInterceptor(grpc.aio.ServerInterceptor):
+    """gRPC ServerInterceptor that validates the x-sb-worker-secret metadata
+    header when grpc_auth_secret is configured.
+
+    When the secret is empty (default), all calls pass through unchanged —
+    backward-compatible with existing deployments (D10).
+
+    The interceptor accepts any of the comma-separated secrets in the
+    configured value, enabling zero-downtime secret rotation (R8 mitigation):
+    set old,new on both API and worker, restart both, then remove old.
+
+    Constant-time comparison (hmac.compare_digest) prevents timing-oracle
+    attacks on the secret value.
+
+    Implementation note: grpc.aio.ServerInterceptor uses intercept_service
+    which wraps RpcMethodHandlers. We wrap the handler's unary_unary,
+    unary_stream, stream_unary, and stream_stream callables to inject the
+    metadata check before each call.
+    """
+
+    _METADATA_KEY = "x-sb-worker-secret"
+
+    def __init__(self, secrets_csv: str) -> None:
+        # Split and strip; filter blanks so a trailing comma doesn't add an
+        # empty string that would match any client (including unauthenticated).
+        raw = [s.strip() for s in secrets_csv.split(",")]
+        self._secrets: list[bytes] = [s.encode() for s in raw if s]
+
+    def check_auth_metadata(self, metadata: dict[str, str]) -> bool:
+        """Return True when the metadata satisfies the auth requirement.
+
+        Extracted as a public method so tests can exercise auth logic without
+        wiring through grpc handler machinery.
+        """
+        if not self._secrets:
+            return True
+        provided = (metadata.get(self._METADATA_KEY) or "").encode()
+        if not provided:
+            return False
+        return any(hmac.compare_digest(provided, s) for s in self._secrets)
+
+    def _check_auth(self, context: grpc.ServicerContext) -> bool:
+        """Return True when the call is authenticated (or auth is disabled)."""
+        metadata = dict(context.invocation_metadata())
+        return self.check_auth_metadata(metadata)
+
+    def _wrap_handler(self, handler):
+        """Return a new RpcMethodHandler with auth checks injected."""
+        if handler is None:
+            return None
+
+        async def _check_and_call_unary(request, context):
+            if not self._check_auth(context):
+                await context.abort(
+                    grpc.StatusCode.UNAUTHENTICATED,
+                    "Missing or invalid x-sb-worker-secret header.",
+                )
+                return
+            return await original(request, context)
+
+        async def _check_and_call_stream(request_iter, context):
+            if not self._check_auth(context):
+                await context.abort(
+                    grpc.StatusCode.UNAUTHENTICATED,
+                    "Missing or invalid x-sb-worker-secret header.",
+                )
+                return
+            return await original(request_iter, context)
+
+        if handler.unary_unary:
+            original = handler.unary_unary
+            return handler._replace(unary_unary=_check_and_call_unary)
+        if handler.unary_stream:
+            original = handler.unary_stream
+            return handler._replace(unary_stream=_check_and_call_stream)
+        if handler.stream_unary:
+            original = handler.stream_unary
+            return handler._replace(stream_unary=_check_and_call_stream)
+        if handler.stream_stream:
+            original = handler.stream_stream
+            return handler._replace(stream_stream=_check_and_call_stream)
+        return handler
+
+    async def intercept_service(self, continuation, handler_call_details):
+        handler = await continuation(handler_call_details)
+        if not self._secrets:
+            return handler
+        return self._wrap_handler(handler)
 
 
 def configure_logging() -> None:
@@ -85,8 +208,26 @@ async def serve() -> None:
     embedding_provider = create_embedding_provider(config)
     summary_node_cache = SurrealSummaryNodeCache.from_config(config)
 
+    # D10: Warn if the worker will be exposed on a non-loopback address without
+    # authentication. This fires regardless of whether the capacity probe is used.
+    listen_addr_early = f"[::]:{config.grpc_port}"
+    bind_host = f"[::]"  # default gRPC bind host before port is chosen
+    if not config.tls_enabled and not config.grpc_auth_secret and _is_non_loopback(bind_host):
+        log.error(
+            "worker_grpc_unauthenticated_non_loopback_bind",
+            bind_addr=listen_addr_early,
+            message=(
+                "Worker is bound to a non-loopback address without TLS or shared-secret auth. "
+                "Set SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET (matched on both API and worker) "
+                "or enable mTLS to protect the gRPC port from LAN peers. "
+                "See docs/admin/llm-config.md for the setup guide."
+            ),
+        )
+
     # --- Build async gRPC server ---
+    auth_interceptor = _GrpcAuthInterceptor(config.grpc_auth_secret)
     server = grpc.aio.server(
+        interceptors=[auth_interceptor],
         options=[
             ("grpc.max_receive_message_length", 50 * 1024 * 1024),  # 50 MB
             ("grpc.max_send_message_length", 50 * 1024 * 1024),
@@ -230,6 +371,45 @@ async def serve() -> None:
         server.add_insecure_port(listen_addr)
     await server.start()
     log.info("worker_started", address=listen_addr, tls_enabled=config.tls_enabled)
+
+    # --- Background concurrency probe (async, non-blocking) ---
+    # Fires after server is serving to avoid delaying startup. The result is
+    # informational: a WARN fires when declared vs observed parallelism disagrees
+    # by >=2x. The declared value is never auto-overridden (D1).
+    # Only fires for local/self-hosted providers where a real concurrency limit
+    # is meaningful; frontier APIs (anthropic, openai, openrouter) are unbounded.
+    _LOCAL_PROBE_PROVIDERS = {"ollama", "vllm", "llama-cpp", "sglang", "lmstudio"}
+    if (
+        config.llm_provider in _LOCAL_PROBE_PROVIDERS
+        and not config.test_mode
+        and config.llm_max_concurrent_calls > 0
+    ):
+        base_url = config.llm_base_url
+        if not base_url:
+            _defaults = {
+                "ollama": "http://localhost:11434/v1",
+                "vllm": "http://localhost:8000/v1",
+                "llama-cpp": "http://localhost:8080/v1",
+                "sglang": "http://localhost:30000/v1",
+                "lmstudio": "http://localhost:1234/v1",
+            }
+            base_url = _defaults.get(config.llm_provider, "")
+
+        if base_url:
+            probe_backend = OpenAICompatProbeBackend(
+                base_url=base_url,
+                model=config.llm_model,
+                api_key=config.llm_api_key,
+            )
+            asyncio.create_task(
+                run_startup_probe(
+                    probe_backend,
+                    declared=config.llm_max_concurrent_calls,
+                    provider_name=config.llm_provider,
+                    model=config.llm_model,
+                ),
+                name="llm_concurrency_probe",
+            )
 
     # --- Graceful shutdown on signals ---
     #

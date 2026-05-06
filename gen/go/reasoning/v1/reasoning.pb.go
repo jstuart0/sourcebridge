@@ -2371,8 +2371,28 @@ type GetProviderCapabilitiesResponse struct {
 	// True when the provider supports prompt caching (informational —
 	// affects cost, not correctness).
 	PromptCachingSupported bool `protobuf:"varint,4,opt,name=prompt_caching_supported,json=promptCachingSupported,proto3" json:"prompt_caching_supported,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Maximum number of concurrent in-flight inference calls this
+	// provider/model can serve before requests queue. Meaningful only
+	// when max_concurrent_calls_known is true. When known and 0,
+	// the upstream is treated as effectively unbounded (frontier APIs).
+	//
+	// Encoding:
+	//
+	//	known=false, calls=0  → unknown (do not clamp)
+	//	known=true,  calls=0  → unbounded (frontier / OpenRouter)
+	//	known=true,  calls=N  → clamp to N (1 ≤ N ≤ 256)
+	//	known=true,  calls<0  → invalid; treat as (false, 0)
+	//
+	// Proto3 zero-default: old workers that do not set these fields
+	// return (known=false, calls=0) = "unknown" — fail-open behaviour.
+	// New API + old worker: orchestrator does not clamp (backward compat).
+	MaxConcurrentCalls int32 `protobuf:"varint,5,opt,name=max_concurrent_calls,json=maxConcurrentCalls,proto3" json:"max_concurrent_calls,omitempty"`
+	// True when max_concurrent_calls is meaningful. False on workers
+	// older than this proto change OR when the provider truly cannot
+	// report a value. When false, callers MUST NOT clamp on this field.
+	MaxConcurrentCallsKnown bool `protobuf:"varint,6,opt,name=max_concurrent_calls_known,json=maxConcurrentCallsKnown,proto3" json:"max_concurrent_calls_known,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *GetProviderCapabilitiesResponse) Reset() {
@@ -2429,6 +2449,20 @@ func (x *GetProviderCapabilitiesResponse) GetToolUseSupported() bool {
 func (x *GetProviderCapabilitiesResponse) GetPromptCachingSupported() bool {
 	if x != nil {
 		return x.PromptCachingSupported
+	}
+	return false
+}
+
+func (x *GetProviderCapabilitiesResponse) GetMaxConcurrentCalls() int32 {
+	if x != nil {
+		return x.MaxConcurrentCalls
+	}
+	return 0
+}
+
+func (x *GetProviderCapabilitiesResponse) GetMaxConcurrentCallsKnown() bool {
+	if x != nil {
+		return x.MaxConcurrentCallsKnown
 	}
 	return false
 }
@@ -2627,12 +2661,14 @@ const file_reasoning_v1_reasoning_proto_rawDesc = "" +
 	"\x05usage\x18\x02 \x01(\v2 .sourcebridge.common.v1.LLMUsageR\x05usage\x12=\n" +
 	"\x1bcache_creation_input_tokens\x18\x03 \x01(\x03R\x18cacheCreationInputTokens\x125\n" +
 	"\x17cache_read_input_tokens\x18\x04 \x01(\x03R\x14cacheReadInputTokens\" \n" +
-	"\x1eGetProviderCapabilitiesRequest\"\xbb\x01\n" +
+	"\x1eGetProviderCapabilitiesRequest\"\xaa\x02\n" +
 	"\x1fGetProviderCapabilitiesResponse\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12,\n" +
 	"\x12tool_use_supported\x18\x03 \x01(\bR\x10toolUseSupported\x128\n" +
-	"\x18prompt_caching_supported\x18\x04 \x01(\bR\x16promptCachingSupported2\xb1\f\n" +
+	"\x18prompt_caching_supported\x18\x04 \x01(\bR\x16promptCachingSupported\x120\n" +
+	"\x14max_concurrent_calls\x18\x05 \x01(\x05R\x12maxConcurrentCalls\x12;\n" +
+	"\x1amax_concurrent_calls_known\x18\x06 \x01(\bR\x17maxConcurrentCallsKnown2\xb1\f\n" +
 	"\x10ReasoningService\x12r\n" +
 	"\rAnalyzeSymbol\x12/.sourcebridge.reasoning.v1.AnalyzeSymbolRequest\x1a0.sourcebridge.reasoning.v1.AnalyzeSymbolResponse\x12\x84\x01\n" +
 	"\x13ExplainRelationship\x125.sourcebridge.reasoning.v1.ExplainRelationshipRequest\x1a6.sourcebridge.reasoning.v1.ExplainRelationshipResponse\x12u\n" +

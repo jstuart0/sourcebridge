@@ -332,3 +332,72 @@ async def test_explain_relationship_unimplemented(servicer, context):
 
     assert context.code == grpc.StatusCode.UNIMPLEMENTED
     assert "not yet implemented" in context.details.lower()
+
+
+# ---------------------------------------------------------------------------
+# GetProviderCapabilities — capacity fields (Phase 1)
+# ---------------------------------------------------------------------------
+
+
+async def test_get_provider_capabilities_unknown_when_no_config(llm, embedding, context):
+    """Without a WorkerConfig, max_concurrent_calls_known must be False."""
+    svc = ReasoningServicer(llm, embedding, worker_config=None)
+    request = reasoning_pb2.GetProviderCapabilitiesRequest()
+    response = await svc.GetProviderCapabilities(request, context)
+    assert not response.max_concurrent_calls_known
+    assert response.max_concurrent_calls == 0
+
+
+async def test_get_provider_capabilities_declared_finite(llm, embedding, context):
+    """A declared finite value propagates as known=True, calls=N."""
+    from workers.common.config import WorkerConfig
+
+    cfg = WorkerConfig(llm_provider="ollama", llm_max_concurrent_calls=8)
+    svc = ReasoningServicer(llm, embedding, worker_config=cfg)
+    request = reasoning_pb2.GetProviderCapabilitiesRequest()
+    response = await svc.GetProviderCapabilities(request, context)
+    assert response.max_concurrent_calls_known
+    assert response.max_concurrent_calls == 8
+
+
+async def test_get_provider_capabilities_clamps_to_256(llm, embedding, context):
+    """Values > 256 are clamped to 256 at the response layer (D9 defense in depth).
+
+    The WorkerConfig validator would reject 9999 at parse time, so we inject
+    directly by bypassing the validator to test the servicer-level clamp.
+    """
+    from workers.common.config import WorkerConfig
+
+    cfg = WorkerConfig(llm_provider="ollama")
+    # Bypass the pydantic validator to simulate a future schema change.
+    object.__setattr__(cfg, "llm_max_concurrent_calls", 9999)
+    svc = ReasoningServicer(llm, embedding, worker_config=cfg)
+    request = reasoning_pb2.GetProviderCapabilitiesRequest()
+    response = await svc.GetProviderCapabilities(request, context)
+    assert response.max_concurrent_calls == 256
+    assert response.max_concurrent_calls_known
+
+
+async def test_get_provider_capabilities_frontier_unbounded(llm, embedding, context):
+    """Frontier APIs (anthropic, openai, openrouter) report known=True, calls=0 (unbounded)."""
+    from workers.common.config import WorkerConfig
+
+    for provider in ("anthropic", "openai", "openrouter", "gemini"):
+        cfg = WorkerConfig(llm_provider=provider, llm_max_concurrent_calls=0)
+        svc = ReasoningServicer(llm, embedding, worker_config=cfg)
+        request = reasoning_pb2.GetProviderCapabilitiesRequest()
+        response = await svc.GetProviderCapabilities(request, context)
+        assert response.max_concurrent_calls_known, f"frontier {provider} should be known"
+        assert response.max_concurrent_calls == 0, f"frontier {provider} should be unbounded (0)"
+
+
+async def test_get_provider_capabilities_local_zero_is_unknown(llm, embedding, context):
+    """Local providers with declared=0 are unknown (not unbounded)."""
+    from workers.common.config import WorkerConfig
+
+    cfg = WorkerConfig(llm_provider="ollama", llm_max_concurrent_calls=0)
+    svc = ReasoningServicer(llm, embedding, worker_config=cfg)
+    request = reasoning_pb2.GetProviderCapabilitiesRequest()
+    response = await svc.GetProviderCapabilities(request, context)
+    assert not response.max_concurrent_calls_known
+    assert response.max_concurrent_calls == 0

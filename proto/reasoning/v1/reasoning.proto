@@ -444,4 +444,25 @@ message GetProviderCapabilitiesResponse {
   // True when the provider supports prompt caching (informational —
   // affects cost, not correctness).
   bool prompt_caching_supported = 4;
+
+  // Maximum number of concurrent in-flight inference calls this
+  // provider/model can serve before requests queue. Meaningful only
+  // when max_concurrent_calls_known is true. When known and 0,
+  // the upstream is treated as effectively unbounded (frontier APIs).
+  //
+  // Encoding:
+  //   known=false, calls=0  → unknown (do not clamp)
+  //   known=true,  calls=0  → unbounded (frontier / OpenRouter)
+  //   known=true,  calls=N  → clamp to N (1 ≤ N ≤ 256)
+  //   known=true,  calls<0  → invalid; treat as (false, 0)
+  //
+  // Proto3 zero-default: old workers that do not set these fields
+  // return (known=false, calls=0) = "unknown" — fail-open behaviour.
+  // New API + old worker: orchestrator does not clamp (backward compat).
+  int32 max_concurrent_calls = 5;
+
+  // True when max_concurrent_calls is meaningful. False on workers
+  // older than this proto change OR when the provider truly cannot
+  // report a value. When false, callers MUST NOT clamp on this field.
+  bool max_concurrent_calls_known = 6;
 }

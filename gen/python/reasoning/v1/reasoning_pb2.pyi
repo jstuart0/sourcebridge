@@ -408,13 +408,17 @@ class GetProviderCapabilitiesRequest(_message.Message):
     def __init__(self) -> None: ...
 
 class GetProviderCapabilitiesResponse(_message.Message):
-    __slots__ = ("provider", "model", "tool_use_supported", "prompt_caching_supported")
+    __slots__ = ("provider", "model", "tool_use_supported", "prompt_caching_supported", "max_concurrent_calls", "max_concurrent_calls_known")
     PROVIDER_FIELD_NUMBER: _ClassVar[int]
     MODEL_FIELD_NUMBER: _ClassVar[int]
     TOOL_USE_SUPPORTED_FIELD_NUMBER: _ClassVar[int]
     PROMPT_CACHING_SUPPORTED_FIELD_NUMBER: _ClassVar[int]
+    MAX_CONCURRENT_CALLS_FIELD_NUMBER: _ClassVar[int]
+    MAX_CONCURRENT_CALLS_KNOWN_FIELD_NUMBER: _ClassVar[int]
     provider: str
     model: str
     tool_use_supported: bool
     prompt_caching_supported: bool
-    def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ..., tool_use_supported: bool = ..., prompt_caching_supported: bool = ...) -> None: ...
+    max_concurrent_calls: int
+    max_concurrent_calls_known: bool
+    def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ..., tool_use_supported: bool = ..., prompt_caching_supported: bool = ..., max_concurrent_calls: _Optional[int] = ..., max_concurrent_calls_known: bool = ...) -> None: ...

@@ -7,7 +7,7 @@ import structlog
 from common.v1 import types_pb2
 from reasoning.v1 import reasoning_pb2, reasoning_pb2_grpc
 
-from workers.common.config import WorkerConfig
+from workers.common.config import HARD_CONCURRENCY_CEILING, WorkerConfig
 from workers.common.embedding.provider import EmbeddingProvider
 from workers.common.llm.provider import LLMProvider
 from workers.common.llm.tools import (
@@ -700,9 +700,32 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
         provider_name = getattr(provider, "__class__", type(provider)).__name__.lower()
         provider_key = "anthropic" if "anthropic" in provider_name else ""
         model = getattr(provider, "default_model", "") or getattr(provider, "model", "")
+
+        # Populate the new capacity fields (D3 / Phase 1).
+        # max_concurrent_calls is taken from the worker config (operator-declared).
+        # max_concurrent_calls_known is True when we have an explicit declaration
+        # (>0) or when the provider is a known-unbounded frontier API (see below).
+        # Hard-clamp to HARD_CONCURRENCY_CEILING as defense in depth (D9).
+        declared = 0
+        known = False
+
+        if self._config is not None:
+            declared = min(self._config.llm_max_concurrent_calls, HARD_CONCURRENCY_CEILING)
+            if declared > 0:
+                # Operator declared a finite value.
+                known = True
+            elif self._config.llm_provider in ("anthropic", "openai", "openrouter", "gemini"):
+                # These are frontier APIs with effectively unbounded parallelism.
+                # Return (known=True, calls=0) to signal "unbounded" so the
+                # orchestrator does not clamp (D3 encoding table).
+                known = True
+                declared = 0
+
         return reasoning_pb2.GetProviderCapabilitiesResponse(
             provider=provider_key,
             model=model,
             tool_use_supported=provider_supports_tool_use(provider_key, model),
             prompt_caching_supported=provider_supports_prompt_caching(provider_key),
+            max_concurrent_calls=declared,
+            max_concurrent_calls_known=known,
         )
