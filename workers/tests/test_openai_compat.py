@@ -159,7 +159,9 @@ def test_ollama_placeholder_api_key_is_suppressed(monkeypatch: pytest.MonkeyPatc
         provider_name="ollama",
     )
 
-    assert provider.client.api_key == ""
+    # openai>=2.34 rejects empty api_key at construction; the provider
+    # substitutes a sentinel that won't be transmitted to unauthenticated servers.
+    assert provider.client.api_key == "local-no-auth-required"
 
 
 def test_openai_provider_keeps_explicit_api_key(monkeypatch: pytest.MonkeyPatch) -> None:

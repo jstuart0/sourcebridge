@@ -182,13 +182,17 @@ class OpenAICompatProvider:
         timeout: float | None = None,
     ) -> None:
         normalized_api_key = _normalize_api_key(provider_name, api_key)
+        # openai>=2.34 rejects an empty api_key at construction time even for
+        # local providers that never use auth headers. Use a sentinel that
+        # won't be transmitted: local servers accept any non-empty string.
+        client_api_key = normalized_api_key or "local-no-auth-required"
         # Default of 900s (15 min) matches WorkerConfig.llm_timeout and is
         # tuned for slow local models (qwen3:32b, MoEs, large thinking
         # models). Callers can pass an explicit timeout sourced from the
         # admin-configured TimeoutSecs value.
         effective_timeout = 900.0 if timeout is None or timeout <= 0 else float(timeout)
         self.client = openai.AsyncOpenAI(
-            api_key=normalized_api_key,
+            api_key=client_api_key,
             base_url=base_url,
             timeout=effective_timeout,
             default_headers=extra_headers or {},
