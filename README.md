@@ -102,6 +102,19 @@ Open [http://localhost:3000](http://localhost:3000) and create your admin accoun
 > To rotate secrets later, run `./init-hub-secrets.sh --force`.
 > All active sessions will be invalidated.
 
+> **Encryption key: auto-generated on first boot, persisted in a named volume.**
+>
+> The `encryption-key-init` service in `docker-compose.hub.yml` generates a unique
+> 32-byte key on first boot and writes it to the `sourcebridge-secrets` named volume.
+> Subsequent `up` calls reuse the existing key — no environment variable setup needed
+> for encryption.
+>
+> **`docker compose down -v` deletes both data and the encryption key**, which means
+> all stored API keys (saved through `/admin/llm`) are unrecoverable without the key.
+> Back up the `sourcebridge-secrets` volume before any `-v` teardown.
+> See [`docs/admin/llm-config.md`](docs/admin/llm-config.md#wipe-and-re-enter) for the
+> wipe-and-re-enter procedure when you need to start fresh.
+
 > **Using a cloud LLM?** Pass your provider config inline:
 >
 > ```bash

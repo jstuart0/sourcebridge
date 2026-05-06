@@ -123,6 +123,14 @@ for the resolution order, the per-call structured-log verification
 ritual, encryption-at-rest details, and the operator runbook for
 removing API keys from the configmap.
 
+**Encryption at rest**: the API resolves `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE`
+(preferred) or `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY` (literal env) at startup; on
+hub-compose installs an init container auto-bootstraps the key into the
+`sourcebridge-secrets` volume — `docker compose up -d` works zero-touch.
+`docker compose down -v` deletes the volume and the key with it; see
+[`docs/admin-runbooks/encryption-key-setup.md`](docs/admin-runbooks/encryption-key-setup.md)
+for the resolution order, rotation procedure, and the `down -v` data-loss warning.
+
 ## Telemetry
 
 Anonymous install telemetry is sent from `internal/telemetry/telemetry.go` to

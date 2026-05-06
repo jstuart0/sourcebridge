@@ -135,6 +135,27 @@ docker compose restart worker
 SurrealDB data is stored in a named Docker volume (`surrealdb-data`). Data survives
 `docker compose down` but is removed by `docker compose down -v`.
 
+#### Encryption key (hub-compose installs)
+
+When using `docker-compose.hub.yml`, the `encryption-key-init` service runs on
+first `up` and generates 32 bytes of entropy via `od -An -tx1 | tr -d ' \n'`
+(Alpine-portable; `openssl` is not in `alpine:3.20` by default). The key is written
+to the `sourcebridge-secrets` named volume and read by the API container via
+`SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE`. Subsequent `up` calls reuse the
+existing file — the init container is idempotent.
+
+**Back up the `sourcebridge-secrets` volume before any `docker compose down -v`.** That
+flag removes all named volumes, including the encryption key and the SurrealDB data.
+If the key is lost, every API key stored through `/admin/llm` is unrecoverable.
+See [`docs/admin-runbooks/encryption-key-setup.md`](../admin-runbooks/encryption-key-setup.md)
+and [`docs/admin/llm-config.md`](../admin/llm-config.md#wipe-and-re-enter) for the
+full wipe-and-re-enter procedure.
+
+Operator escape hatch: setting `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY` as a literal
+env var still works, but when a file is present via `_FILE`, the **file wins**
+(Vault/Postgres convention). See the resolution order in
+[`docs/admin-runbooks/encryption-key-setup.md`](../admin-runbooks/encryption-key-setup.md#_file-indirection-docker--compose-deployments).
+
 ### Redis (optional — required for HA MCP)
 
 The bundled `docker compose` stack starts a Redis container by default.
