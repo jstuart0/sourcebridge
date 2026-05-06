@@ -422,3 +422,37 @@ class GetProviderCapabilitiesResponse(_message.Message):
     max_concurrent_calls: int
     max_concurrent_calls_known: bool
     def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ..., tool_use_supported: bool = ..., prompt_caching_supported: bool = ..., max_concurrent_calls: _Optional[int] = ..., max_concurrent_calls_known: bool = ...) -> None: ...
+
+class GetLLMGateSnapshotRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class GetLLMGateSnapshotResponse(_message.Message):
+    __slots__ = ("gates",)
+    GATES_FIELD_NUMBER: _ClassVar[int]
+    gates: _containers.RepeatedCompositeFieldContainer[LLMGateEntry]
+    def __init__(self, gates: _Optional[_Iterable[_Union[LLMGateEntry, _Mapping]]] = ...) -> None: ...
+
+class LLMGateEntry(_message.Message):
+    __slots__ = ("provider", "base_url_normalized", "kind", "in_flight", "queued", "max_concurrent", "retries_since_start", "recent_429_count", "tokens_per_second", "rpm")
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    BASE_URL_NORMALIZED_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    IN_FLIGHT_FIELD_NUMBER: _ClassVar[int]
+    QUEUED_FIELD_NUMBER: _ClassVar[int]
+    MAX_CONCURRENT_FIELD_NUMBER: _ClassVar[int]
+    RETRIES_SINCE_START_FIELD_NUMBER: _ClassVar[int]
+    RECENT_429_COUNT_FIELD_NUMBER: _ClassVar[int]
+    TOKENS_PER_SECOND_FIELD_NUMBER: _ClassVar[int]
+    RPM_FIELD_NUMBER: _ClassVar[int]
+    provider: str
+    base_url_normalized: str
+    kind: str
+    in_flight: int
+    queued: int
+    max_concurrent: int
+    retries_since_start: int
+    recent_429_count: int
+    tokens_per_second: float
+    rpm: int
+    def __init__(self, provider: _Optional[str] = ..., base_url_normalized: _Optional[str] = ..., kind: _Optional[str] = ..., in_flight: _Optional[int] = ..., queued: _Optional[int] = ..., max_concurrent: _Optional[int] = ..., retries_since_start: _Optional[int] = ..., recent_429_count: _Optional[int] = ..., tokens_per_second: _Optional[float] = ..., rpm: _Optional[int] = ...) -> None: ...

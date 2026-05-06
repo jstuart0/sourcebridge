@@ -314,6 +314,7 @@ type Server struct {
 	clusterRunner              *clustering.Runner                // subsystem clustering job dispatcher; nil = feature disabled
 	healthChecker              *HealthChecker                    // shared DB+worker probe; nil = embedded/test mode, handlers fall back to local checks
 	workerVersionLookup        *versionLookup                    // best-effort cache for worker GetVersion (CA-136); nil = workerVersion always "" in /api/v1/version
+	gateSnapshotCache          gateSnapshotCache                 // 1-second TTL cache for worker gate snapshot (Phase 7)
 
 	// encryptionKeySet is true when the API booted with a resolved encryption
 	// key (from SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE or the literal env

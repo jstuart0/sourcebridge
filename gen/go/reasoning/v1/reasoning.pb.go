@@ -2467,6 +2467,222 @@ func (x *GetProviderCapabilitiesResponse) GetMaxConcurrentCallsKnown() bool {
 	return false
 }
 
+// GetLLMGateSnapshotRequest is intentionally empty (not google.protobuf.Empty)
+// for forward compatibility — future filter fields (provider, kind) can be
+// added here without redeclaring the RPC.
+type GetLLMGateSnapshotRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetLLMGateSnapshotRequest) Reset() {
+	*x = GetLLMGateSnapshotRequest{}
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetLLMGateSnapshotRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetLLMGateSnapshotRequest) ProtoMessage() {}
+
+func (x *GetLLMGateSnapshotRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetLLMGateSnapshotRequest.ProtoReflect.Descriptor instead.
+func (*GetLLMGateSnapshotRequest) Descriptor() ([]byte, []int) {
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{32}
+}
+
+type GetLLMGateSnapshotResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Gates         []*LLMGateEntry        `protobuf:"bytes,1,rep,name=gates,proto3" json:"gates,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetLLMGateSnapshotResponse) Reset() {
+	*x = GetLLMGateSnapshotResponse{}
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetLLMGateSnapshotResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetLLMGateSnapshotResponse) ProtoMessage() {}
+
+func (x *GetLLMGateSnapshotResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetLLMGateSnapshotResponse.ProtoReflect.Descriptor instead.
+func (*GetLLMGateSnapshotResponse) Descriptor() ([]byte, []int) {
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *GetLLMGateSnapshotResponse) GetGates() []*LLMGateEntry {
+	if x != nil {
+		return x.Gates
+	}
+	return nil
+}
+
+// LLMGateEntry is one row in the gate snapshot — one entry per
+// (provider, base_url_normalized, kind) triple that has been
+// registered in the gate registry since the worker started.
+type LLMGateEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Canonical provider name (e.g. "ollama", "openai").
+	Provider string `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
+	// Normalized origin URL — "scheme://host:port" with path/query stripped.
+	// Host-gated providers collapse to the daemon origin; frontier providers
+	// use the raw base_url per Decision 1 in the concurrency plan.
+	BaseUrlNormalized string `protobuf:"bytes,2,opt,name=base_url_normalized,json=baseUrlNormalized,proto3" json:"base_url_normalized,omitempty"`
+	// "llm" or "embedding". Host-gated providers (Ollama, vLLM, …) emit one
+	// row per kind sharing a single max_concurrent and tokens_per_second.
+	Kind string `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	// Current number of LLM calls executing inside the semaphore right now.
+	InFlight int32 `protobuf:"varint,4,opt,name=in_flight,json=inFlight,proto3" json:"in_flight,omitempty"`
+	// Number of callers waiting for a semaphore slot (Decision 11 waiter count).
+	Queued int32 `protobuf:"varint,5,opt,name=queued,proto3" json:"queued,omitempty"`
+	// Effective semaphore size — the cap enforced by this gate.
+	MaxConcurrent int32 `protobuf:"varint,6,opt,name=max_concurrent,json=maxConcurrent,proto3" json:"max_concurrent,omitempty"`
+	// Cumulative retry count since the worker started.
+	RetriesSinceStart int64 `protobuf:"varint,7,opt,name=retries_since_start,json=retriesSinceStart,proto3" json:"retries_since_start,omitempty"`
+	// Cumulative 429 / RateLimitError count since the worker started.
+	Recent_429Count int64 `protobuf:"varint,8,opt,name=recent_429_count,json=recent429Count,proto3" json:"recent_429_count,omitempty"`
+	// Output tokens per second averaged over the last 60 seconds (60-second
+	// ring buffer). Zero means no completions have been recorded yet.
+	TokensPerSecond float64 `protobuf:"fixed64,9,opt,name=tokens_per_second,json=tokensPerSecond,proto3" json:"tokens_per_second,omitempty"`
+	// Configured requests-per-minute limit for this gate; 0 = no RPM limiter.
+	Rpm           int32 `protobuf:"varint,10,opt,name=rpm,proto3" json:"rpm,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LLMGateEntry) Reset() {
+	*x = LLMGateEntry{}
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LLMGateEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LLMGateEntry) ProtoMessage() {}
+
+func (x *LLMGateEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_reasoning_v1_reasoning_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LLMGateEntry.ProtoReflect.Descriptor instead.
+func (*LLMGateEntry) Descriptor() ([]byte, []int) {
+	return file_reasoning_v1_reasoning_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *LLMGateEntry) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *LLMGateEntry) GetBaseUrlNormalized() string {
+	if x != nil {
+		return x.BaseUrlNormalized
+	}
+	return ""
+}
+
+func (x *LLMGateEntry) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *LLMGateEntry) GetInFlight() int32 {
+	if x != nil {
+		return x.InFlight
+	}
+	return 0
+}
+
+func (x *LLMGateEntry) GetQueued() int32 {
+	if x != nil {
+		return x.Queued
+	}
+	return 0
+}
+
+func (x *LLMGateEntry) GetMaxConcurrent() int32 {
+	if x != nil {
+		return x.MaxConcurrent
+	}
+	return 0
+}
+
+func (x *LLMGateEntry) GetRetriesSinceStart() int64 {
+	if x != nil {
+		return x.RetriesSinceStart
+	}
+	return 0
+}
+
+func (x *LLMGateEntry) GetRecent_429Count() int64 {
+	if x != nil {
+		return x.Recent_429Count
+	}
+	return 0
+}
+
+func (x *LLMGateEntry) GetTokensPerSecond() float64 {
+	if x != nil {
+		return x.TokensPerSecond
+	}
+	return 0
+}
+
+func (x *LLMGateEntry) GetRpm() int32 {
+	if x != nil {
+		return x.Rpm
+	}
+	return 0
+}
+
 var File_reasoning_v1_reasoning_proto protoreflect.FileDescriptor
 
 const file_reasoning_v1_reasoning_proto_rawDesc = "" +
@@ -2668,7 +2884,22 @@ const file_reasoning_v1_reasoning_proto_rawDesc = "" +
 	"\x12tool_use_supported\x18\x03 \x01(\bR\x10toolUseSupported\x128\n" +
 	"\x18prompt_caching_supported\x18\x04 \x01(\bR\x16promptCachingSupported\x120\n" +
 	"\x14max_concurrent_calls\x18\x05 \x01(\x05R\x12maxConcurrentCalls\x12;\n" +
-	"\x1amax_concurrent_calls_known\x18\x06 \x01(\bR\x17maxConcurrentCallsKnown2\xb1\f\n" +
+	"\x1amax_concurrent_calls_known\x18\x06 \x01(\bR\x17maxConcurrentCallsKnown\"\x1b\n" +
+	"\x19GetLLMGateSnapshotRequest\"[\n" +
+	"\x1aGetLLMGateSnapshotResponse\x12=\n" +
+	"\x05gates\x18\x01 \x03(\v2'.sourcebridge.reasoning.v1.LLMGateEntryR\x05gates\"\xe2\x02\n" +
+	"\fLLMGateEntry\x12\x1a\n" +
+	"\bprovider\x18\x01 \x01(\tR\bprovider\x12.\n" +
+	"\x13base_url_normalized\x18\x02 \x01(\tR\x11baseUrlNormalized\x12\x12\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\x12\x1b\n" +
+	"\tin_flight\x18\x04 \x01(\x05R\binFlight\x12\x16\n" +
+	"\x06queued\x18\x05 \x01(\x05R\x06queued\x12%\n" +
+	"\x0emax_concurrent\x18\x06 \x01(\x05R\rmaxConcurrent\x12.\n" +
+	"\x13retries_since_start\x18\a \x01(\x03R\x11retriesSinceStart\x12(\n" +
+	"\x10recent_429_count\x18\b \x01(\x03R\x0erecent429Count\x12*\n" +
+	"\x11tokens_per_second\x18\t \x01(\x01R\x0ftokensPerSecond\x12\x10\n" +
+	"\x03rpm\x18\n" +
+	" \x01(\x05R\x03rpm2\xb5\r\n" +
 	"\x10ReasoningService\x12r\n" +
 	"\rAnalyzeSymbol\x12/.sourcebridge.reasoning.v1.AnalyzeSymbolRequest\x1a0.sourcebridge.reasoning.v1.AnalyzeSymbolResponse\x12\x84\x01\n" +
 	"\x13ExplainRelationship\x125.sourcebridge.reasoning.v1.ExplainRelationshipRequest\x1a6.sourcebridge.reasoning.v1.ExplainRelationshipResponse\x12u\n" +
@@ -2679,7 +2910,8 @@ const file_reasoning_v1_reasoning_proto_rawDesc = "" +
 	"\x11GenerateEmbedding\x123.sourcebridge.reasoning.v1.GenerateEmbeddingRequest\x1a4.sourcebridge.reasoning.v1.GenerateEmbeddingResponse\x12u\n" +
 	"\x0eSimulateChange\x120.sourcebridge.reasoning.v1.SimulateChangeRequest\x1a1.sourcebridge.reasoning.v1.SimulateChangeResponse\x12\x90\x01\n" +
 	"\x17AnswerQuestionWithTools\x129.sourcebridge.reasoning.v1.AnswerQuestionWithToolsRequest\x1a:.sourcebridge.reasoning.v1.AnswerQuestionWithToolsResponse\x12\x90\x01\n" +
-	"\x17GetProviderCapabilities\x129.sourcebridge.reasoning.v1.GetProviderCapabilitiesRequest\x1a:.sourcebridge.reasoning.v1.GetProviderCapabilitiesResponse\x12{\n" +
+	"\x17GetProviderCapabilities\x129.sourcebridge.reasoning.v1.GetProviderCapabilitiesRequest\x1a:.sourcebridge.reasoning.v1.GetProviderCapabilitiesResponse\x12\x81\x01\n" +
+	"\x12GetLLMGateSnapshot\x124.sourcebridge.reasoning.v1.GetLLMGateSnapshotRequest\x1a5.sourcebridge.reasoning.v1.GetLLMGateSnapshotResponse\x12{\n" +
 	"\x10ClassifyQuestion\x122.sourcebridge.reasoning.v1.ClassifyQuestionRequest\x1a3.sourcebridge.reasoning.v1.ClassifyQuestionResponse\x12~\n" +
 	"\x11DecomposeQuestion\x123.sourcebridge.reasoning.v1.DecomposeQuestionRequest\x1a4.sourcebridge.reasoning.v1.DecomposeQuestionResponse\x12\x99\x01\n" +
 	"\x1aSynthesizeDecomposedAnswer\x12<.sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerRequest\x1a=.sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerResponseBFZDgithub.com/sourcebridge/sourcebridge/gen/go/reasoning/v1;reasoningv1b\x06proto3"
@@ -2696,7 +2928,7 @@ func file_reasoning_v1_reasoning_proto_rawDescGZIP() []byte {
 	return file_reasoning_v1_reasoning_proto_rawDescData
 }
 
-var file_reasoning_v1_reasoning_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_reasoning_v1_reasoning_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_reasoning_v1_reasoning_proto_goTypes = []any{
 	(*AnalyzeSymbolRequest)(nil),               // 0: sourcebridge.reasoning.v1.AnalyzeSymbolRequest
 	(*AnalyzeSymbolResponse)(nil),              // 1: sourcebridge.reasoning.v1.AnalyzeSymbolResponse
@@ -2730,75 +2962,81 @@ var file_reasoning_v1_reasoning_proto_goTypes = []any{
 	(*SynthesizeDecomposedAnswerResponse)(nil), // 29: sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerResponse
 	(*GetProviderCapabilitiesRequest)(nil),     // 30: sourcebridge.reasoning.v1.GetProviderCapabilitiesRequest
 	(*GetProviderCapabilitiesResponse)(nil),    // 31: sourcebridge.reasoning.v1.GetProviderCapabilitiesResponse
-	(*v1.CodeSymbol)(nil),                      // 32: sourcebridge.common.v1.CodeSymbol
-	(*v1.LLMUsage)(nil),                        // 33: sourcebridge.common.v1.LLMUsage
-	(v1.Confidence)(0),                         // 34: sourcebridge.common.v1.Confidence
-	(v1.Language)(0),                           // 35: sourcebridge.common.v1.Language
-	(*v1.Embedding)(nil),                       // 36: sourcebridge.common.v1.Embedding
+	(*GetLLMGateSnapshotRequest)(nil),          // 32: sourcebridge.reasoning.v1.GetLLMGateSnapshotRequest
+	(*GetLLMGateSnapshotResponse)(nil),         // 33: sourcebridge.reasoning.v1.GetLLMGateSnapshotResponse
+	(*LLMGateEntry)(nil),                       // 34: sourcebridge.reasoning.v1.LLMGateEntry
+	(*v1.CodeSymbol)(nil),                      // 35: sourcebridge.common.v1.CodeSymbol
+	(*v1.LLMUsage)(nil),                        // 36: sourcebridge.common.v1.LLMUsage
+	(v1.Confidence)(0),                         // 37: sourcebridge.common.v1.Confidence
+	(v1.Language)(0),                           // 38: sourcebridge.common.v1.Language
+	(*v1.Embedding)(nil),                       // 39: sourcebridge.common.v1.Embedding
 }
 var file_reasoning_v1_reasoning_proto_depIdxs = []int32{
-	32, // 0: sourcebridge.reasoning.v1.AnalyzeSymbolRequest.symbol:type_name -> sourcebridge.common.v1.CodeSymbol
-	33, // 1: sourcebridge.reasoning.v1.AnalyzeSymbolResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	32, // 2: sourcebridge.reasoning.v1.ExplainRelationshipRequest.source:type_name -> sourcebridge.common.v1.CodeSymbol
-	32, // 3: sourcebridge.reasoning.v1.ExplainRelationshipRequest.target:type_name -> sourcebridge.common.v1.CodeSymbol
-	34, // 4: sourcebridge.reasoning.v1.ExplainRelationshipResponse.confidence:type_name -> sourcebridge.common.v1.Confidence
-	33, // 5: sourcebridge.reasoning.v1.ExplainRelationshipResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	32, // 6: sourcebridge.reasoning.v1.AnswerQuestionRequest.context_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
-	35, // 7: sourcebridge.reasoning.v1.AnswerQuestionRequest.language:type_name -> sourcebridge.common.v1.Language
-	32, // 8: sourcebridge.reasoning.v1.AnswerQuestionResponse.referenced_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
-	33, // 9: sourcebridge.reasoning.v1.AnswerQuestionResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	32, // 10: sourcebridge.reasoning.v1.AnswerQuestionStreamRequest.context_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
-	35, // 11: sourcebridge.reasoning.v1.AnswerQuestionStreamRequest.language:type_name -> sourcebridge.common.v1.Language
-	32, // 12: sourcebridge.reasoning.v1.AnswerQuestionStreamResponse.referenced_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
-	33, // 13: sourcebridge.reasoning.v1.AnswerQuestionStreamResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	35, // 0: sourcebridge.reasoning.v1.AnalyzeSymbolRequest.symbol:type_name -> sourcebridge.common.v1.CodeSymbol
+	36, // 1: sourcebridge.reasoning.v1.AnalyzeSymbolResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	35, // 2: sourcebridge.reasoning.v1.ExplainRelationshipRequest.source:type_name -> sourcebridge.common.v1.CodeSymbol
+	35, // 3: sourcebridge.reasoning.v1.ExplainRelationshipRequest.target:type_name -> sourcebridge.common.v1.CodeSymbol
+	37, // 4: sourcebridge.reasoning.v1.ExplainRelationshipResponse.confidence:type_name -> sourcebridge.common.v1.Confidence
+	36, // 5: sourcebridge.reasoning.v1.ExplainRelationshipResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	35, // 6: sourcebridge.reasoning.v1.AnswerQuestionRequest.context_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
+	38, // 7: sourcebridge.reasoning.v1.AnswerQuestionRequest.language:type_name -> sourcebridge.common.v1.Language
+	35, // 8: sourcebridge.reasoning.v1.AnswerQuestionResponse.referenced_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
+	36, // 9: sourcebridge.reasoning.v1.AnswerQuestionResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	35, // 10: sourcebridge.reasoning.v1.AnswerQuestionStreamRequest.context_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
+	38, // 11: sourcebridge.reasoning.v1.AnswerQuestionStreamRequest.language:type_name -> sourcebridge.common.v1.Language
+	35, // 12: sourcebridge.reasoning.v1.AnswerQuestionStreamResponse.referenced_symbols:type_name -> sourcebridge.common.v1.CodeSymbol
+	36, // 13: sourcebridge.reasoning.v1.AnswerQuestionStreamResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
 	8,  // 14: sourcebridge.reasoning.v1.AnswerQuestionStreamResponse.progress:type_name -> sourcebridge.reasoning.v1.ProgressEvent
-	35, // 15: sourcebridge.reasoning.v1.ReviewFileRequest.language:type_name -> sourcebridge.common.v1.Language
+	38, // 15: sourcebridge.reasoning.v1.ReviewFileRequest.language:type_name -> sourcebridge.common.v1.Language
 	11, // 16: sourcebridge.reasoning.v1.ReviewFileResponse.findings:type_name -> sourcebridge.reasoning.v1.ReviewFinding
-	33, // 17: sourcebridge.reasoning.v1.ReviewFileResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	36, // 18: sourcebridge.reasoning.v1.GenerateEmbeddingResponse.embedding:type_name -> sourcebridge.common.v1.Embedding
-	33, // 19: sourcebridge.reasoning.v1.GenerateEmbeddingResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	32, // 20: sourcebridge.reasoning.v1.SimulateChangeRequest.symbols:type_name -> sourcebridge.common.v1.CodeSymbol
+	36, // 17: sourcebridge.reasoning.v1.ReviewFileResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	39, // 18: sourcebridge.reasoning.v1.GenerateEmbeddingResponse.embedding:type_name -> sourcebridge.common.v1.Embedding
+	36, // 19: sourcebridge.reasoning.v1.GenerateEmbeddingResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	35, // 20: sourcebridge.reasoning.v1.SimulateChangeRequest.symbols:type_name -> sourcebridge.common.v1.CodeSymbol
 	15, // 21: sourcebridge.reasoning.v1.SimulateChangeResponse.resolved_symbols:type_name -> sourcebridge.reasoning.v1.SimulatedSymbolMatch
-	33, // 22: sourcebridge.reasoning.v1.SimulateChangeResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	36, // 22: sourcebridge.reasoning.v1.SimulateChangeResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
 	19, // 23: sourcebridge.reasoning.v1.AgentMessage.tool_calls:type_name -> sourcebridge.reasoning.v1.ToolCall
 	20, // 24: sourcebridge.reasoning.v1.AgentMessage.tool_results:type_name -> sourcebridge.reasoning.v1.ToolResult
 	18, // 25: sourcebridge.reasoning.v1.AnswerQuestionWithToolsRequest.messages:type_name -> sourcebridge.reasoning.v1.AgentMessage
 	17, // 26: sourcebridge.reasoning.v1.AnswerQuestionWithToolsRequest.tools:type_name -> sourcebridge.reasoning.v1.ToolSchema
 	18, // 27: sourcebridge.reasoning.v1.AnswerQuestionWithToolsResponse.turn:type_name -> sourcebridge.reasoning.v1.AgentMessage
-	33, // 28: sourcebridge.reasoning.v1.AnswerQuestionWithToolsResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	33, // 29: sourcebridge.reasoning.v1.ClassifyQuestionResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	33, // 30: sourcebridge.reasoning.v1.DecomposeQuestionResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	36, // 28: sourcebridge.reasoning.v1.AnswerQuestionWithToolsResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	36, // 29: sourcebridge.reasoning.v1.ClassifyQuestionResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	36, // 30: sourcebridge.reasoning.v1.DecomposeQuestionResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
 	28, // 31: sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerRequest.sub_answers:type_name -> sourcebridge.reasoning.v1.DecomposedSubAnswer
-	33, // 32: sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
-	0,  // 33: sourcebridge.reasoning.v1.ReasoningService.AnalyzeSymbol:input_type -> sourcebridge.reasoning.v1.AnalyzeSymbolRequest
-	2,  // 34: sourcebridge.reasoning.v1.ReasoningService.ExplainRelationship:input_type -> sourcebridge.reasoning.v1.ExplainRelationshipRequest
-	4,  // 35: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestion:input_type -> sourcebridge.reasoning.v1.AnswerQuestionRequest
-	6,  // 36: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionStream:input_type -> sourcebridge.reasoning.v1.AnswerQuestionStreamRequest
-	9,  // 37: sourcebridge.reasoning.v1.ReasoningService.ReviewFile:input_type -> sourcebridge.reasoning.v1.ReviewFileRequest
-	12, // 38: sourcebridge.reasoning.v1.ReasoningService.GenerateEmbedding:input_type -> sourcebridge.reasoning.v1.GenerateEmbeddingRequest
-	14, // 39: sourcebridge.reasoning.v1.ReasoningService.SimulateChange:input_type -> sourcebridge.reasoning.v1.SimulateChangeRequest
-	21, // 40: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionWithTools:input_type -> sourcebridge.reasoning.v1.AnswerQuestionWithToolsRequest
-	30, // 41: sourcebridge.reasoning.v1.ReasoningService.GetProviderCapabilities:input_type -> sourcebridge.reasoning.v1.GetProviderCapabilitiesRequest
-	23, // 42: sourcebridge.reasoning.v1.ReasoningService.ClassifyQuestion:input_type -> sourcebridge.reasoning.v1.ClassifyQuestionRequest
-	25, // 43: sourcebridge.reasoning.v1.ReasoningService.DecomposeQuestion:input_type -> sourcebridge.reasoning.v1.DecomposeQuestionRequest
-	27, // 44: sourcebridge.reasoning.v1.ReasoningService.SynthesizeDecomposedAnswer:input_type -> sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerRequest
-	1,  // 45: sourcebridge.reasoning.v1.ReasoningService.AnalyzeSymbol:output_type -> sourcebridge.reasoning.v1.AnalyzeSymbolResponse
-	3,  // 46: sourcebridge.reasoning.v1.ReasoningService.ExplainRelationship:output_type -> sourcebridge.reasoning.v1.ExplainRelationshipResponse
-	5,  // 47: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestion:output_type -> sourcebridge.reasoning.v1.AnswerQuestionResponse
-	7,  // 48: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionStream:output_type -> sourcebridge.reasoning.v1.AnswerQuestionStreamResponse
-	10, // 49: sourcebridge.reasoning.v1.ReasoningService.ReviewFile:output_type -> sourcebridge.reasoning.v1.ReviewFileResponse
-	13, // 50: sourcebridge.reasoning.v1.ReasoningService.GenerateEmbedding:output_type -> sourcebridge.reasoning.v1.GenerateEmbeddingResponse
-	16, // 51: sourcebridge.reasoning.v1.ReasoningService.SimulateChange:output_type -> sourcebridge.reasoning.v1.SimulateChangeResponse
-	22, // 52: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionWithTools:output_type -> sourcebridge.reasoning.v1.AnswerQuestionWithToolsResponse
-	31, // 53: sourcebridge.reasoning.v1.ReasoningService.GetProviderCapabilities:output_type -> sourcebridge.reasoning.v1.GetProviderCapabilitiesResponse
-	24, // 54: sourcebridge.reasoning.v1.ReasoningService.ClassifyQuestion:output_type -> sourcebridge.reasoning.v1.ClassifyQuestionResponse
-	26, // 55: sourcebridge.reasoning.v1.ReasoningService.DecomposeQuestion:output_type -> sourcebridge.reasoning.v1.DecomposeQuestionResponse
-	29, // 56: sourcebridge.reasoning.v1.ReasoningService.SynthesizeDecomposedAnswer:output_type -> sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerResponse
-	45, // [45:57] is the sub-list for method output_type
-	33, // [33:45] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	36, // 32: sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerResponse.usage:type_name -> sourcebridge.common.v1.LLMUsage
+	34, // 33: sourcebridge.reasoning.v1.GetLLMGateSnapshotResponse.gates:type_name -> sourcebridge.reasoning.v1.LLMGateEntry
+	0,  // 34: sourcebridge.reasoning.v1.ReasoningService.AnalyzeSymbol:input_type -> sourcebridge.reasoning.v1.AnalyzeSymbolRequest
+	2,  // 35: sourcebridge.reasoning.v1.ReasoningService.ExplainRelationship:input_type -> sourcebridge.reasoning.v1.ExplainRelationshipRequest
+	4,  // 36: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestion:input_type -> sourcebridge.reasoning.v1.AnswerQuestionRequest
+	6,  // 37: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionStream:input_type -> sourcebridge.reasoning.v1.AnswerQuestionStreamRequest
+	9,  // 38: sourcebridge.reasoning.v1.ReasoningService.ReviewFile:input_type -> sourcebridge.reasoning.v1.ReviewFileRequest
+	12, // 39: sourcebridge.reasoning.v1.ReasoningService.GenerateEmbedding:input_type -> sourcebridge.reasoning.v1.GenerateEmbeddingRequest
+	14, // 40: sourcebridge.reasoning.v1.ReasoningService.SimulateChange:input_type -> sourcebridge.reasoning.v1.SimulateChangeRequest
+	21, // 41: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionWithTools:input_type -> sourcebridge.reasoning.v1.AnswerQuestionWithToolsRequest
+	30, // 42: sourcebridge.reasoning.v1.ReasoningService.GetProviderCapabilities:input_type -> sourcebridge.reasoning.v1.GetProviderCapabilitiesRequest
+	32, // 43: sourcebridge.reasoning.v1.ReasoningService.GetLLMGateSnapshot:input_type -> sourcebridge.reasoning.v1.GetLLMGateSnapshotRequest
+	23, // 44: sourcebridge.reasoning.v1.ReasoningService.ClassifyQuestion:input_type -> sourcebridge.reasoning.v1.ClassifyQuestionRequest
+	25, // 45: sourcebridge.reasoning.v1.ReasoningService.DecomposeQuestion:input_type -> sourcebridge.reasoning.v1.DecomposeQuestionRequest
+	27, // 46: sourcebridge.reasoning.v1.ReasoningService.SynthesizeDecomposedAnswer:input_type -> sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerRequest
+	1,  // 47: sourcebridge.reasoning.v1.ReasoningService.AnalyzeSymbol:output_type -> sourcebridge.reasoning.v1.AnalyzeSymbolResponse
+	3,  // 48: sourcebridge.reasoning.v1.ReasoningService.ExplainRelationship:output_type -> sourcebridge.reasoning.v1.ExplainRelationshipResponse
+	5,  // 49: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestion:output_type -> sourcebridge.reasoning.v1.AnswerQuestionResponse
+	7,  // 50: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionStream:output_type -> sourcebridge.reasoning.v1.AnswerQuestionStreamResponse
+	10, // 51: sourcebridge.reasoning.v1.ReasoningService.ReviewFile:output_type -> sourcebridge.reasoning.v1.ReviewFileResponse
+	13, // 52: sourcebridge.reasoning.v1.ReasoningService.GenerateEmbedding:output_type -> sourcebridge.reasoning.v1.GenerateEmbeddingResponse
+	16, // 53: sourcebridge.reasoning.v1.ReasoningService.SimulateChange:output_type -> sourcebridge.reasoning.v1.SimulateChangeResponse
+	22, // 54: sourcebridge.reasoning.v1.ReasoningService.AnswerQuestionWithTools:output_type -> sourcebridge.reasoning.v1.AnswerQuestionWithToolsResponse
+	31, // 55: sourcebridge.reasoning.v1.ReasoningService.GetProviderCapabilities:output_type -> sourcebridge.reasoning.v1.GetProviderCapabilitiesResponse
+	33, // 56: sourcebridge.reasoning.v1.ReasoningService.GetLLMGateSnapshot:output_type -> sourcebridge.reasoning.v1.GetLLMGateSnapshotResponse
+	24, // 57: sourcebridge.reasoning.v1.ReasoningService.ClassifyQuestion:output_type -> sourcebridge.reasoning.v1.ClassifyQuestionResponse
+	26, // 58: sourcebridge.reasoning.v1.ReasoningService.DecomposeQuestion:output_type -> sourcebridge.reasoning.v1.DecomposeQuestionResponse
+	29, // 59: sourcebridge.reasoning.v1.ReasoningService.SynthesizeDecomposedAnswer:output_type -> sourcebridge.reasoning.v1.SynthesizeDecomposedAnswerResponse
+	47, // [47:60] is the sub-list for method output_type
+	34, // [34:47] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_reasoning_v1_reasoning_proto_init() }
@@ -2812,7 +3050,7 @@ func file_reasoning_v1_reasoning_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_reasoning_v1_reasoning_proto_rawDesc), len(file_reasoning_v1_reasoning_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   32,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

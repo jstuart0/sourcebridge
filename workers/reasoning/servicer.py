@@ -9,7 +9,7 @@ from reasoning.v1 import reasoning_pb2, reasoning_pb2_grpc
 
 from workers.common.config import HARD_CONCURRENCY_CEILING, WorkerConfig
 from workers.common.embedding.provider import EmbeddingProvider
-from workers.common.llm.concurrency import ProviderGateRegistry
+from workers.common.llm.concurrency import ProviderGateRegistry, _UNCAPPED
 from workers.common.llm.provider import LLMProvider
 from workers.common.llm.tools import (
     AgentMessage,
@@ -768,3 +768,56 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
             max_concurrent_calls=declared,
             max_concurrent_calls_known=known,
         )
+
+    async def GetLLMGateSnapshot(  # noqa: N802
+        self,
+        request: reasoning_pb2.GetLLMGateSnapshotRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> reasoning_pb2.GetLLMGateSnapshotResponse:
+        """Return a point-in-time snapshot of all active concurrency gates.
+
+        Same gRPC auth as GetProviderCapabilities: callers must present a
+        valid x-sb-worker-secret header when the worker is configured with
+        SOURCEBRIDGE_SECURITY_GRPC_AUTH_SECRET.
+
+        When no gate registry is wired (kill-switch off, test builds without
+        registry) the response is an empty list — the admin monitor omits the
+        gate_snapshot field on empty so old/kill-switched deployments surface
+        nothing rather than a misleading empty array.
+        """
+        # Auth check: reuse _resolve_provider which calls resolve_provider_for_context
+        # and enforces the gRPC auth interceptor's metadata check.  We don't
+        # actually need the returned provider for this read-only query.
+        self._resolve_provider(context)
+
+        if self._gate_registry is None:
+            return reasoning_pb2.GetLLMGateSnapshotResponse()
+
+        entries = self._gate_registry.snapshot()
+        gates = []
+        for entry in entries:
+            # Clamp max_concurrent to HARD_CONCURRENCY_CEILING so the int32
+            # proto field never overflows.  The _UNCAPPED sentinel (sys.maxsize)
+            # means "no real cap configured" — emit 0 to signal unknown/uncapped,
+            # matching the (known=true, calls=0) "unbounded" encoding used in
+            # GetProviderCapabilities.
+            effective_cap = entry.max_concurrent
+            if effective_cap >= _UNCAPPED:
+                effective_cap = 0
+            else:
+                effective_cap = min(effective_cap, HARD_CONCURRENCY_CEILING)
+            gates.append(
+                reasoning_pb2.LLMGateEntry(
+                    provider=entry.provider,
+                    base_url_normalized=entry.base_url_normalized,
+                    kind=entry.kind,
+                    in_flight=entry.in_flight,
+                    queued=entry.queue_depth,
+                    max_concurrent=effective_cap,
+                    retries_since_start=entry.retries_since_start,
+                    recent_429_count=entry.recent_429_count,
+                    tokens_per_second=entry.tokens_per_second,
+                    rpm=entry.rpm,
+                )
+            )
+        return reasoning_pb2.GetLLMGateSnapshotResponse(gates=gates)

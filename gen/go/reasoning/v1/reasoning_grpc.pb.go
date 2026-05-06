@@ -28,6 +28,7 @@ const (
 	ReasoningService_SimulateChange_FullMethodName             = "/sourcebridge.reasoning.v1.ReasoningService/SimulateChange"
 	ReasoningService_AnswerQuestionWithTools_FullMethodName    = "/sourcebridge.reasoning.v1.ReasoningService/AnswerQuestionWithTools"
 	ReasoningService_GetProviderCapabilities_FullMethodName    = "/sourcebridge.reasoning.v1.ReasoningService/GetProviderCapabilities"
+	ReasoningService_GetLLMGateSnapshot_FullMethodName         = "/sourcebridge.reasoning.v1.ReasoningService/GetLLMGateSnapshot"
 	ReasoningService_ClassifyQuestion_FullMethodName           = "/sourcebridge.reasoning.v1.ReasoningService/ClassifyQuestion"
 	ReasoningService_DecomposeQuestion_FullMethodName          = "/sourcebridge.reasoning.v1.ReasoningService/DecomposeQuestion"
 	ReasoningService_SynthesizeDecomposedAnswer_FullMethodName = "/sourcebridge.reasoning.v1.ReasoningService/SynthesizeDecomposedAnswer"
@@ -78,6 +79,15 @@ type ReasoningServiceClient interface {
 	// and caches the result so the agentic path can be gated without
 	// a per-request round-trip.
 	GetProviderCapabilities(ctx context.Context, in *GetProviderCapabilitiesRequest, opts ...grpc.CallOption) (*GetProviderCapabilitiesResponse, error)
+	// GetLLMGateSnapshot returns a point-in-time snapshot of all active
+	// per-provider concurrency gates in the worker. Used by the admin
+	// /api/v1/admin/llm/activity endpoint to surface real-time gate
+	// counters (in-flight, queued, tok/s) without a per-request round-trip.
+	//
+	// An explicit request struct (rather than google.protobuf.Empty) is
+	// used for forward compatibility: filter fields (provider, kind) can
+	// be added without redeclaring the RPC.
+	GetLLMGateSnapshot(ctx context.Context, in *GetLLMGateSnapshotRequest, opts ...grpc.CallOption) (*GetLLMGateSnapshotResponse, error)
 	// ClassifyQuestion runs a cheap LLM classifier (Haiku) that
 	// returns the question's likely class plus evidence-kind hints
 	// (needs_call_graph, needs_tests, ...) and advisory symbol /
@@ -210,6 +220,16 @@ func (c *reasoningServiceClient) GetProviderCapabilities(ctx context.Context, in
 	return out, nil
 }
 
+func (c *reasoningServiceClient) GetLLMGateSnapshot(ctx context.Context, in *GetLLMGateSnapshotRequest, opts ...grpc.CallOption) (*GetLLMGateSnapshotResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetLLMGateSnapshotResponse)
+	err := c.cc.Invoke(ctx, ReasoningService_GetLLMGateSnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *reasoningServiceClient) ClassifyQuestion(ctx context.Context, in *ClassifyQuestionRequest, opts ...grpc.CallOption) (*ClassifyQuestionResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ClassifyQuestionResponse)
@@ -285,6 +305,15 @@ type ReasoningServiceServer interface {
 	// and caches the result so the agentic path can be gated without
 	// a per-request round-trip.
 	GetProviderCapabilities(context.Context, *GetProviderCapabilitiesRequest) (*GetProviderCapabilitiesResponse, error)
+	// GetLLMGateSnapshot returns a point-in-time snapshot of all active
+	// per-provider concurrency gates in the worker. Used by the admin
+	// /api/v1/admin/llm/activity endpoint to surface real-time gate
+	// counters (in-flight, queued, tok/s) without a per-request round-trip.
+	//
+	// An explicit request struct (rather than google.protobuf.Empty) is
+	// used for forward compatibility: filter fields (provider, kind) can
+	// be added without redeclaring the RPC.
+	GetLLMGateSnapshot(context.Context, *GetLLMGateSnapshotRequest) (*GetLLMGateSnapshotResponse, error)
 	// ClassifyQuestion runs a cheap LLM classifier (Haiku) that
 	// returns the question's likely class plus evidence-kind hints
 	// (needs_call_graph, needs_tests, ...) and advisory symbol /
@@ -344,6 +373,9 @@ func (UnimplementedReasoningServiceServer) AnswerQuestionWithTools(context.Conte
 }
 func (UnimplementedReasoningServiceServer) GetProviderCapabilities(context.Context, *GetProviderCapabilitiesRequest) (*GetProviderCapabilitiesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetProviderCapabilities not implemented")
+}
+func (UnimplementedReasoningServiceServer) GetLLMGateSnapshot(context.Context, *GetLLMGateSnapshotRequest) (*GetLLMGateSnapshotResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetLLMGateSnapshot not implemented")
 }
 func (UnimplementedReasoningServiceServer) ClassifyQuestion(context.Context, *ClassifyQuestionRequest) (*ClassifyQuestionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ClassifyQuestion not implemented")
@@ -530,6 +562,24 @@ func _ReasoningService_GetProviderCapabilities_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ReasoningService_GetLLMGateSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLLMGateSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ReasoningServiceServer).GetLLMGateSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ReasoningService_GetLLMGateSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ReasoningServiceServer).GetLLMGateSnapshot(ctx, req.(*GetLLMGateSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ReasoningService_ClassifyQuestion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ClassifyQuestionRequest)
 	if err := dec(in); err != nil {
@@ -622,6 +672,10 @@ var ReasoningService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetProviderCapabilities",
 			Handler:    _ReasoningService_GetProviderCapabilities_Handler,
+		},
+		{
+			MethodName: "GetLLMGateSnapshot",
+			Handler:    _ReasoningService_GetLLMGateSnapshot_Handler,
 		},
 		{
 			MethodName: "ClassifyQuestion",

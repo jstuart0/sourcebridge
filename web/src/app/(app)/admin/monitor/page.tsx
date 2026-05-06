@@ -10,6 +10,7 @@ import { Panel } from "@/components/ui/panel";
 import { StatCard } from "@/components/ui/stat-card";
 import { authFetch } from "@/lib/auth-fetch";
 import { normalizeActivityResponse } from "@/lib/llm/activity";
+import type { LLMGateEntry } from "@/lib/llm/activity";
 import {
   JobProgress,
   formatElapsedMs,
@@ -140,6 +141,10 @@ interface ActivityResponse {
     pending_maintenance?: number;
     pending_prewarm?: number;
   };
+  // Present when the worker is reachable and has at least one active gate.
+  // Omitted entirely when the worker is unreachable or the wrapper is
+  // kill-switched (never an empty array — see Go handler omitempty).
+  gate_snapshot?: LLMGateEntry[];
 }
 
 const POLL_INTERVAL_MS = 2000;
@@ -485,6 +490,11 @@ export default function MonitorPage() {
           </div>
         </Panel>
       )}
+
+      {/* LLM Gate Activity — only rendered when gate_snapshot is present */}
+      {data?.gate_snapshot && data.gate_snapshot.length > 0 ? (
+        <LLMGateActivitySection gates={data.gate_snapshot} />
+      ) : null}
 
       {/* Zone 2 — Now running */}
       <Panel>
@@ -916,6 +926,83 @@ function JobDetailDrawer({ job, onClose }: { job: JobView; onClose: () => void }
         ) : null}
       </div>
     </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// LLM Gate Activity
+
+function LLMGateActivitySection({ gates }: { gates: LLMGateEntry[] }) {
+  return (
+    <Panel>
+      <header className="mb-4">
+        <h2 className="text-lg font-semibold text-[var(--text-primary)]">LLM Gate Activity</h2>
+        <p className="text-sm text-[var(--text-secondary)]">
+          Per-provider concurrency gate counters — live snapshot from the worker. One row per
+          provider + endpoint + kind combination.
+        </p>
+      </header>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-[var(--border-default)] text-left text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
+              <th className="py-2 pr-4">Provider</th>
+              <th className="py-2 pr-4">Endpoint</th>
+              <th className="py-2 pr-4">Kind</th>
+              <th className="py-2 pr-4">In-flight / Cap</th>
+              <th className="py-2 pr-4">Queued</th>
+              <th className="py-2 pr-4">Tok/s</th>
+              <th className="py-2 pr-4">429s</th>
+              <th className="py-2">Retries</th>
+            </tr>
+          </thead>
+          <tbody>
+            {gates.map((gate, idx) => (
+              <tr
+                key={`${gate.provider}:${gate.base_url_normalized}:${gate.kind}:${idx}`}
+                className="border-b border-[var(--border-subtle)]"
+              >
+                <td className="py-2 pr-4 font-mono text-xs text-[var(--text-primary)]">
+                  {gate.provider}
+                </td>
+                <td className="max-w-[180px] py-2 pr-4 font-mono text-xs text-[var(--text-secondary)]">
+                  <span className="block truncate" title={gate.base_url_normalized}>
+                    {gate.base_url_normalized || "—"}
+                  </span>
+                </td>
+                <td className="py-2 pr-4 text-xs text-[var(--text-secondary)]">{gate.kind}</td>
+                <td className="py-2 pr-4 text-xs text-[var(--text-primary)]">
+                  {gate.in_flight}&nbsp;/&nbsp;
+                  {gate.max_concurrent > 0 ? gate.max_concurrent : "∞"}
+                </td>
+                <td className="py-2 pr-4 text-xs text-[var(--text-secondary)]">
+                  {gate.queued > 0 ? (
+                    <span className="font-medium text-amber-600">{gate.queued}</span>
+                  ) : (
+                    gate.queued
+                  )}
+                </td>
+                <td className="py-2 pr-4 font-mono text-xs text-[var(--text-secondary)]">
+                  {gate.tokens_per_second > 0 ? gate.tokens_per_second.toFixed(1) : "—"}
+                </td>
+                <td className="py-2 pr-4 text-xs text-[var(--text-secondary)]">
+                  {gate.recent_429_count > 0 ? (
+                    <span className="font-medium text-[color:var(--color-error,#ef4444)]">
+                      {gate.recent_429_count}
+                    </span>
+                  ) : (
+                    gate.recent_429_count
+                  )}
+                </td>
+                <td className="py-2 text-xs text-[var(--text-secondary)]">
+                  {gate.retries_since_start}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   );
 }
 
