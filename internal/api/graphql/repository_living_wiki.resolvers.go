@@ -32,6 +32,7 @@ import (
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/coldstart"
+	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 )
@@ -384,6 +385,18 @@ func enqueueWikiJob(
 		sinkKind = strings.ToLower(string(settings.Sinks[0].Kind))
 	}
 
+	// Resolve UpstreamCapacityProvider via Deps; nil-safe for unit tests
+	// that construct Resolver without AppDeps. The orchestrator's clamp
+	// site at orchestrator.go nil-guards this too, so a nil here is benign
+	// (no clamp; cfg.MaxConcurrency stays at its configured value).
+	// ian flagged at mid-build that AppDeps.UpstreamCapacityProvider was
+	// populated in router.go but never consumed here, making Phase 2's
+	// capacity clamp a no-op in production cold-starts.
+	var upstreamCapProvider lworch.UpstreamCapacityProvider
+	if r.Deps != nil {
+		upstreamCapProvider = r.Deps.UpstreamCapacityProvider
+	}
+
 	req := &llm.EnqueueRequest{
 		Subsystem: llm.SubsystemLivingWiki,
 		JobType:   jobType,
@@ -431,6 +444,7 @@ func enqueueWikiJob(
 			MaxPagesPerJob:     effectiveSettings.MaxPagesPerJob, // CA-146: repo-level cap (now wired)
 			PageCountOverride:  input.PageCountOverride,          // CA-146: per-run override (nil = use repo setting)
 			SelectedPageIDs:    input.SelectedPageIds,            // CA-146 Phase 2: nil-passthrough; closure handles (codex r1 H1)
+			UpstreamCapacityProvider: upstreamCapProvider, // ian mid-build wiring fix; see helper above
 		}),
 	}
 
