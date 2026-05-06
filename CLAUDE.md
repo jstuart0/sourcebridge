@@ -24,6 +24,40 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-06 orchestrator capacity detection** — 8 commits, `e730009..e1fe4b1`.
+Fixes three compounding Living Wiki throughput issues end-to-end: capacity
+mismatch between orchestrator goroutine pool and upstream LLM, empty-content
+retry accounting, and `/no_think` suppression unreliability on Ollama.
+
+Load-bearing constraints for future-Claude:
+
+- `OpenAICompatProvider` has a provider-specific branch for Ollama-native
+  `/api/chat` dispatch (`think: false`) when `provider_name == "ollama"` and
+  `disable_thinking` is True. **Do not remove this thinking it's redundant.**
+  Ollama's OpenAI-compat shim silently ignores `chat_template_kwargs`,
+  `/no_think`, and top-level `think` / `extra_body.think` — verified
+  empirically against qwen3.5:9b + qwen3.6:27b (Mac Studio, Ollama 0.21.0).
+  The `chat_template_kwargs` path stays for llama.cpp users (works there).
+- The new `UpstreamCapacityProvider` interface on `coldstart.Config` clamps
+  `MaxConcurrency` to the upstream LLM's real parallelism. Cache invalidation
+  is per-profile-edit. Nil-safe end-to-end: `Resolver` constructed without
+  `Deps` in tests, orchestrator clamp site also nil-guards. The 256 hard
+  ceiling is enforced at three layers: SurrealDB `ASSERT`, Go-side adapter
+  clamp, and Python validation.
+- gRPC auth interceptor is wired both sides: Go `WithPerRPCCredentials`
+  (`internal/worker/client.go`) and Python `_GrpcAuthInterceptor`
+  (`workers/`). Honors `SOURCEBRIDGE_SECURITY_GRPC_AUTH_SECRET`
+  (comma-separated for rotation). Worker logs a startup WARN when bound to a
+  non-loopback address without a secret configured.
+- **Wiring fix (commit `e1fe4b1`, ian mid-build):** `AppDeps.UpstreamCapacityProvider`
+  was populated in `router.go` but never passed into `coldstart.Config{}` in
+  `repository_living_wiki.resolvers.go`, making Phase 2's capacity clamp a no-op
+  in every production cold-start. This fix is what makes the feature live.
+
+Plan: `thoughts/shared/plans/active-2026-05-06-deliver-orchestrator-capacity-detection.md`
+Investigation: `thoughts/shared/investigations/2026-05-06-ollama-think-suppression-empirical.md`
+Runbook: [`docs/admin/llm-config.md`](docs/admin/llm-config.md#backend-parallelism-and-the-max_concurrent_calls-field)
+
 **2026-05-05 web runtime API proxy fix** — 3 commits, `1fee78b..873bc53`.
 Replaces `next.config.ts rewrites()` with a Next.js middleware at
 `web/src/middleware.ts` that proxies `/api/*`, `/auth/*`, `/healthz`,
