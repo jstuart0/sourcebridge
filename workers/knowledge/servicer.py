@@ -280,11 +280,15 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
 
     def _resolve_request_provider(self, context: grpc.aio.ServicerContext) -> tuple[LLMProvider, str | None]:
         """Backward-compat wrapper. New code should call resolve_provider_for_context directly."""
-        return resolve_provider_for_context(self._llm, self._config, context)
+        provider, model, _ = resolve_provider_for_context(self._llm, self._config, context)
+        return provider, model
 
     def _resolve_report_provider(self, context: grpc.aio.ServicerContext) -> tuple[LLMProvider, str | None]:
         """Backward-compat wrapper with self._report_llm fallback."""
-        return resolve_provider_for_context(self._llm, self._config, context, fallback_llm=self._report_llm)
+        provider, model, _ = resolve_provider_for_context(
+            self._llm, self._config, context, fallback_llm=self._report_llm
+        )
+        return provider, model
 
     def _build_job_state_updater(
         self,

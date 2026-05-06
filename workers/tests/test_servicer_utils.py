@@ -65,7 +65,7 @@ def test_default_path_returns_default_llm():
     """No overrides in metadata → default llm returned."""
     llm = FakeLLMProvider()
     context = _MockContext()
-    provider, model = resolve_provider_for_context(llm, None, context)
+    provider, model, _ = resolve_provider_for_context(llm, None, context)
     assert provider is llm
     assert model is None
 
@@ -75,7 +75,7 @@ def test_default_path_with_config():
     llm = FakeLLMProvider()
     config = _MockConfig()
     context = _MockContext()
-    provider, model = resolve_provider_for_context(llm, config, context)
+    provider, model, _ = resolve_provider_for_context(llm, config, context)
     assert provider is llm
     assert model is None
 
@@ -94,7 +94,7 @@ def test_model_override_no_config():
     """
     llm = FakeLLMProvider()
     context = _MockContext({"x-sb-model": "claude-3-5-sonnet"})
-    provider, model = resolve_provider_for_context(llm, None, context)
+    provider, model, _ = resolve_provider_for_context(llm, None, context)
     assert provider is llm
     assert model == "claude-3-5-sonnet"
 
@@ -109,7 +109,7 @@ def test_fallback_llm_used_when_no_override():
     default_llm = FakeLLMProvider()
     report_llm = FakeLLMProvider()
     context = _MockContext()
-    provider, model = resolve_provider_for_context(default_llm, None, context, fallback_llm=report_llm)
+    provider, model, _ = resolve_provider_for_context(default_llm, None, context, fallback_llm=report_llm)
     assert provider is report_llm
     assert model is None
 
@@ -120,7 +120,7 @@ def test_fallback_llm_uses_report_model_from_config():
     report_llm = FakeLLMProvider()
     config = _MockConfig(llm_report_model="gpt-4o")
     context = _MockContext()
-    provider, model = resolve_provider_for_context(default_llm, config, context, fallback_llm=report_llm)
+    provider, model, _ = resolve_provider_for_context(default_llm, config, context, fallback_llm=report_llm)
     assert provider is report_llm
     assert model == "gpt-4o"
 
@@ -136,7 +136,7 @@ def test_fallback_llm_model_override_wins_over_config_report_model():
     report_llm = FakeLLMProvider()
     # No config: the full-override branch with config=None returns fallback_llm + model
     context = _MockContext({"x-sb-model": "claude-3-haiku"})
-    provider, model = resolve_provider_for_context(default_llm, None, context, fallback_llm=report_llm)
+    provider, model, _ = resolve_provider_for_context(default_llm, None, context, fallback_llm=report_llm)
     assert provider is report_llm
     assert model == "claude-3-haiku"
 
@@ -149,7 +149,7 @@ def test_no_fallback_llm_model_override_no_config():
     """
     llm = FakeLLMProvider()
     context = _MockContext({"x-sb-model": "gpt-3.5-turbo"})
-    provider, model = resolve_provider_for_context(llm, None, context)
+    provider, model, _ = resolve_provider_for_context(llm, None, context)
     assert provider is llm
     assert model == "gpt-3.5-turbo"
 
@@ -163,7 +163,7 @@ def test_full_override_no_config_returns_default_llm():
     """Full LLM override present but no config → default llm, override model."""
     llm = FakeLLMProvider()
     context = _MockContext({"x-sb-llm-provider": "anthropic", "x-sb-model": "claude-3-5-sonnet"})
-    provider, model = resolve_provider_for_context(llm, None, context)
+    provider, model, _ = resolve_provider_for_context(llm, None, context)
     # No config → cannot build a fresh provider; falls back to llm
     assert provider is llm
     assert model == "claude-3-5-sonnet"
@@ -174,7 +174,7 @@ def test_full_override_no_config_fallback_llm_returned():
     default_llm = FakeLLMProvider()
     report_llm = FakeLLMProvider()
     context = _MockContext({"x-sb-llm-provider": "anthropic", "x-sb-model": "claude-3-5-sonnet"})
-    provider, model = resolve_provider_for_context(default_llm, None, context, fallback_llm=report_llm)
+    provider, model, _ = resolve_provider_for_context(default_llm, None, context, fallback_llm=report_llm)
     assert provider is report_llm
     assert model == "claude-3-5-sonnet"
 

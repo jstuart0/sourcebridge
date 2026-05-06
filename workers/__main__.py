@@ -30,6 +30,7 @@ from requirements.v1 import requirements_pb2, requirements_pb2_grpc  # noqa: E40
 from workers import __version__ as _worker_version  # noqa: E402
 from workers.common.config import WorkerConfig  # noqa: E402
 from workers.common.embedding.config import create_embedding_provider  # noqa: E402
+from workers.common.llm.concurrency import ConcurrencyConfig, ProviderGateRegistry  # noqa: E402
 from workers.common.llm.concurrency_probe import OpenAICompatProbeBackend, run_startup_probe  # noqa: E402
 from workers.common.llm.factory import create_llm_provider, create_report_provider  # noqa: E402
 from workers.contracts.servicer import ContractsServicer  # noqa: E402
@@ -196,16 +197,28 @@ async def serve() -> None:
         version=_worker_version,
     )
 
+    # --- Construct concurrency gate registry (long-lived, shared across all servicers) ---
+    # ConcurrencyConfig.from_env() reads SOURCEBRIDGE_LLM_* env vars (Decision 7).
+    # The registry is threaded by reference into all factory calls and servicer
+    # constructors; plan v4 Phase 2 (wires the gate without activating real caps).
+    concurrency_config = ConcurrencyConfig.from_env()
+    gate_registry = ProviderGateRegistry(concurrency_config)
+    log.info(
+        "concurrency_gate_registry_initialized",
+        wrapper_enabled=concurrency_config.wrapper_enabled,
+        retry_max_attempts=concurrency_config.retry_max_attempts,
+    )
+
     # --- Initialize providers (long-lived, connection-pooled) ---
-    llm_provider = create_llm_provider(config)
-    report_llm = create_report_provider(config)
+    llm_provider = await create_llm_provider(config, gate_registry=gate_registry)
+    report_llm = await create_report_provider(config, gate_registry=gate_registry)
     if report_llm:
         log.info(
             "report_llm_provider_configured",
             provider=config.llm_report_provider or config.llm_provider,
             model=config.llm_report_model,
         )
-    embedding_provider = create_embedding_provider(config)
+    embedding_provider = await create_embedding_provider(config, gate_registry=gate_registry)
     summary_node_cache = SurrealSummaryNodeCache.from_config(config)
 
     # D10: Warn if the worker will be exposed on a non-loopback address without
@@ -235,7 +248,12 @@ async def serve() -> None:
     )
 
     # --- Register servicers ---
-    reasoning_servicer = ReasoningServicer(llm_provider, embedding_provider, worker_config=config)
+    reasoning_servicer = ReasoningServicer(
+        llm_provider,
+        embedding_provider,
+        worker_config=config,
+        gate_registry=gate_registry,
+    )
     reasoning_pb2_grpc.add_ReasoningServiceServicer_to_server(reasoning_servicer, server)
 
     linking_servicer = LinkingServicer(llm_provider, embedding_provider)
@@ -477,6 +495,10 @@ async def serve() -> None:
     # under any in-flight RPC.
     if hasattr(embedding_provider, "close"):
         await embedding_provider.close()
+
+    # Step 4: close the gate registry (cancels aggregator tasks; idempotent).
+    await gate_registry.close()
+    log.info("gate_registry_closed")
 
     log.info("worker_stopped")
 

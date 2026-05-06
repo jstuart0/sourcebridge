@@ -18,8 +18,8 @@ _parent = os.path.dirname(_here)
 if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
+from workers.common.cli_main import build_cli_runtime_provider  # noqa: E402
 from workers.common.config import WorkerConfig  # noqa: E402
-from workers.common.llm.config import create_llm_provider  # noqa: E402
 from workers.common.surreal import SurrealClient  # noqa: E402
 from workers.reasoning.discussion import discuss_code  # noqa: E402
 
@@ -872,29 +872,32 @@ async def main() -> None:
             "question_type": _question_type(question),
         }
 
-    provider = create_llm_provider(config)
-    with contextlib.redirect_stdout(sys.stderr):
-        answer, usage = await discuss_code(
-            provider,
-            question,
-            context_code,
-            context_metadata=context_metadata,
-        )
+    provider, gate_registry = await build_cli_runtime_provider(config)
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            answer, usage = await discuss_code(
+                provider,
+                question,
+                context_code,
+                context_metadata=context_metadata,
+            )
 
-    output = {
-        "answer": answer.answer,
-        "references": answer.references,
-        "related_requirements": answer.related_requirements,
-        "mode": mode,
-        "diagnostics": diagnostics,
-        "usage": {
-            "provider": usage.provider,
-            "model": usage.model,
-            "input_tokens": usage.input_tokens,
-            "output_tokens": usage.output_tokens,
-        },
-    }
-    print(json.dumps(output, indent=2))
+        output = {
+            "answer": answer.answer,
+            "references": answer.references,
+            "related_requirements": answer.related_requirements,
+            "mode": mode,
+            "diagnostics": diagnostics,
+            "usage": {
+                "provider": usage.provider,
+                "model": usage.model,
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+            },
+        }
+        print(json.dumps(output, indent=2))
+    finally:
+        await gate_registry.close()
 
 
 if __name__ == "__main__":

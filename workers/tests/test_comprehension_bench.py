@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -108,7 +108,12 @@ async def test_live_provider_mode_uses_configured_provider() -> None:
         ],
     }
 
-    with patch("workers.benchmarks.run_comprehension_bench.create_llm_provider", return_value=FakeLLMProvider()):
+    mock_registry = MagicMock()
+    mock_registry.close = AsyncMock()
+    with patch(
+        "workers.benchmarks.run_comprehension_bench.build_cli_runtime_provider",
+        new=AsyncMock(return_value=(FakeLLMProvider(), mock_registry)),
+    ):
         result = await _run_case(case, provider_mode_override="live")
 
     assert result.provider_mode == "live"
