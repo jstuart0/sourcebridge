@@ -1297,6 +1297,176 @@ and a reinforced no-think system prompt. Total attempt budget is 3
 
 ---
 
+## Operator concurrency tuning
+
+The Python worker enforces per-provider concurrency through a gate
+registry built from `workers/common/llm/concurrency.py`. Every LLM and
+embedding call passes through a provider gate that holds the semaphore,
+an optional RPM limiter, the retry loop, and the tok/s ring buffer.
+This section documents the operator-visible knobs.
+
+The gate registry is the **runtime source of truth** for in-worker LLM
+concurrency. The `GetProviderCapabilities.max_concurrent_calls` gRPC
+field (consumed by the Go orchestrator at
+`internal/qa/lazy_agent_synth.go:340`) is now sourced from the gate
+registry's effective cap for the resolved-context `(provider, base_url)`,
+not from the bootstrap config. Setting a per-provider env var changes
+both the worker's semaphore and the value the orchestrator uses to clamp
+its goroutine pool — the same knob applies on both sides.
+
+### Env var resolution order
+
+Resolution is first-match-wins, top to bottom.
+
+| Env var | Scope | Default | Notes |
+|---|---|---|---|
+| `SOURCEBRIDGE_LLM_PROVIDER_<NAME>_MAX_CONCURRENT` | per-provider LLM (or host-total for local providers) | see table below | `<NAME>` per canonical table; e.g., `SOURCEBRIDGE_LLM_PROVIDER_OLLAMA_MAX_CONCURRENT=4` |
+| `SOURCEBRIDGE_EMBEDDING_PROVIDER_<NAME>_MAX_CONCURRENT` | per-provider embedding (frontier only; ignored when host-gated) | same as LLM cap | unused for Ollama — host gate combines both kinds |
+| `SOURCEBRIDGE_LLM_PROVIDER_<NAME>_RPM` | per-provider rate limit | unset (no limiter) | applies to all providers; see tier-1 cloud values below |
+| `SOURCEBRIDGE_LLM_PROVIDER_OPENAI_COMPATIBLE_GATING` | `openai-compatible` gate mode | `host` | set to `per_kind` if pointing at a managed endpoint with separate chat/embedding quotas |
+| `SOURCEBRIDGE_LLM_CONCURRENCY_WRAPPER_ENABLED` | kill switch | `true` | set to `false` to revert to pre-refactor behavior without redeploy |
+| `SOURCEBRIDGE_LLM_RETRY_MAX_ATTEMPTS` | tenacity retry attempts | `5` | reduce to 2–3 on unreliable networks; increase risks storms |
+| `SOURCEBRIDGE_LLM_METRICS_AGGREGATION_INTERVAL_SECONDS` | gate-metrics log interval | `30` | lower to 5 for debugging; not for production steady-state |
+| `SOURCEBRIDGE_WORKER_LLM_MAX_CONCURRENT_CALLS` | **legacy seed** — seeds the active LLM provider's gate cap when no per-provider override is set | unset | deprecated for new deployments; preserved for backward compat |
+| `SOURCEBRIDGE_LLM_PARALLEL_HINT` | alias for the legacy seed above | unset | deprecated alias; kept for backward compat |
+
+**Canonical `<NAME>` tokens** (`key.upper().replace("-", "_")`):
+
+| Provider | Env-var token |
+|---|---|
+| `openai` | `OPENAI` |
+| `anthropic` | `ANTHROPIC` |
+| `ollama` | `OLLAMA` |
+| `vllm` | `VLLM` |
+| `llama-cpp` | `LLAMA_CPP` |
+| `sglang` | `SGLANG` |
+| `gemini` | `GEMINI` |
+| `openrouter` | `OPENROUTER` |
+| `lmstudio` | `LMSTUDIO` |
+| `openai-compatible` | `OPENAI_COMPATIBLE` |
+
+The worker validates env-var tokens at startup and rejects unknown
+spellings (e.g., `SOURCEBRIDGE_LLM_PROVIDER_OPENAICOMPAT_MAX_CONCURRENT`)
+with an actionable error naming the canonical table.
+
+### Default values by provider
+
+| Provider | Gating | LLM cap | Embedding cap | RPM default |
+|---|---|---|---|---|
+| `ollama` | host | 1 | (shared via host gate) | none |
+| `vllm` | host | 4 | (shared) | none |
+| `llama-cpp` | host | 4 | (shared) | none |
+| `sglang` | host | 4 | (shared) | none |
+| `lmstudio` | host | 2 | (shared) | none |
+| `openai-compatible` | host (operator-flippable to `per_kind`) | 4 | (shared) | none |
+| `openai` | per-kind | 8 | 16 | none |
+| `anthropic` | per-kind | 4 | n/a | none |
+| `gemini` | per-kind | 8 | 16 | none |
+| `openrouter` | per-kind | 8 | n/a | none |
+
+**Host vs. per-kind gating**: local providers (`ollama`, `vllm`,
+`llama-cpp`, `sglang`, `lmstudio`) use one host gate that combines LLM
+and embedding calls. Cloud providers (`openai`, `anthropic`, `gemini`,
+`openrouter`) use separate per-kind gates. `openai-compatible` defaults
+to host; flip with `SOURCEBRIDGE_LLM_PROVIDER_OPENAI_COMPATIBLE_GATING=per_kind`
+if the endpoint has separate chat vs. embedding quotas.
+
+These are conservative real caps, not sentinels. Operators with
+high-tier cloud accounts should raise the cap rather than disable the
+gate:
+
+```bash
+SOURCEBRIDGE_LLM_PROVIDER_OPENAI_MAX_CONCURRENT=64
+```
+
+The hard ceiling is 256 concurrent calls (enforced at the gate, the
+Go-side adapter clamp, and the SurrealDB `ASSERT` constraint).
+
+### Ollama: one knob covers everything
+
+For Ollama, `SOURCEBRIDGE_LLM_PROVIDER_OLLAMA_MAX_CONCURRENT` is the
+**only** concurrency knob needed. The host gate combines LLM and
+embedding calls against the same normalized origin
+(`http://localhost:11434` regardless of whether the SDK uses
+`/v1` or `/api`), so both kinds share one semaphore. There is no
+separate `SOURCEBRIDGE_EMBEDDING_PROVIDER_OLLAMA_MAX_CONCURRENT` — it
+is ignored for host-gated providers.
+
+Set it to match `OLLAMA_NUM_PARALLEL` on the Ollama daemon.
+
+### Capacity contract
+
+After this refactor, `GetProviderCapabilities.max_concurrent_calls` is
+sourced from the gate registry's effective cap for the **resolved
+context** `(provider, base_url)` — not from the bootstrap config. The
+Go orchestrator at `internal/qa/lazy_agent_synth.go:340` clamps
+`MaxConcurrency` to this value. Setting the per-provider env var changes
+both the worker's semaphore and the orchestrator's clamp in one step.
+
+When the wrapper is disabled via the kill switch, the legacy
+`SOURCEBRIDGE_WORKER_LLM_MAX_CONCURRENT_CALLS` / `SOURCEBRIDGE_LLM_PARALLEL_HINT`
+path is used instead (same behavior as before this refactor).
+
+### RPM values for tier-1 cloud accounts
+
+The defaults ship with no RPM limiter (`None`). Operators on high-tier
+accounts can layer on an RPM limit to prevent hitting provider-side
+rate ceilings under burst load.
+
+| Provider | Tier | Recommended env var |
+|---|---|---|
+| OpenAI | Tier 4 | `SOURCEBRIDGE_LLM_PROVIDER_OPENAI_RPM=10000` (chat models; per-model limits vary for embeddings — check the OpenAI usage dashboard) |
+| Anthropic | Tier 2 | `SOURCEBRIDGE_LLM_PROVIDER_ANTHROPIC_RPM=4000` (Claude 3.5 Sonnet; other models differ) |
+| Gemini | Tier 2 / Pro | per-model — see [Google's rate limit documentation](https://ai.google.dev/gemini-api/docs/rate-limits); set `SOURCEBRIDGE_LLM_PROVIDER_GEMINI_RPM=<value>` |
+| OpenRouter | varies | leave unset; OpenRouter enforces its own rate limits and returns 429s; the retry wrapper handles them |
+
+### Server-side companion knobs (Ollama)
+
+These variables go on the **Ollama daemon**, not in SourceBridge. They
+are the dominant bottleneck for Ollama throughput. Investigation
+`thoughts/shared/investigations/2026-05-06-diagnose-llm-throughput-rotten.md`
+confirmed that `OLLAMA_NUM_PARALLEL=1` (the stock default) is the
+single largest throughput bottleneck — more impactful than any
+SourceBridge-side tuning.
+
+| Ollama env var | Recommended value | Effect |
+|---|---|---|
+| `OLLAMA_NUM_PARALLEL` | `4`–`8` (sufficient RAM) / `2`–`4` (16–32 GB) / `1` (≤8 GB) | Max in-flight requests per daemon. **Set `SOURCEBRIDGE_LLM_PROVIDER_OLLAMA_MAX_CONCURRENT` to the same value.** |
+| `OLLAMA_KEEP_ALIVE` | `-1` or `24h` | Prevents model unload between Living Wiki pages and between consecutive jobs. Default `5m` causes full reload latency (~30–90 s) at the start of each page after idle. |
+| `OLLAMA_MAX_LOADED_MODELS` | number of distinct models the workload uses + 1 | Prevents model thrashing when `OLLAMA_NUM_PARALLEL > 1` and multiple models are configured. Default `1` is conservative; raise when you have LLM + embedding models that must coexist in VRAM. |
+
+Set these in your Ollama service file (e.g.,
+`/etc/systemd/system/ollama.service` `[Service] Environment=...` or
+`/Library/LaunchDaemons/com.ollama.serve.plist`) and restart the
+daemon. Then update `SOURCEBRIDGE_LLM_PROVIDER_OLLAMA_MAX_CONCURRENT`
+to match the new `OLLAMA_NUM_PARALLEL`.
+
+### Where to look in the UI
+
+Go to **Admin → Monitor** (`/admin/monitor`) on your SourceBridge
+instance.
+
+The **"LLM Gate Activity"** section shows live counters per active gate:
+
+| Column | What it means |
+|---|---|
+| Provider / endpoint | Gate key: provider name + normalized base URL |
+| Kind | `llm` or `embedding` |
+| In-flight / cap | Current in-flight calls vs. the gate's `max_concurrent` |
+| Queued | Calls waiting for a slot (Decision 11 waiter counter) |
+| tok/s | 60-second rolling tokens-per-second for this gate |
+| 429s | Rate-limit errors since the gate was created |
+| Retries | Total tenacity retry attempts since start |
+
+The per-job **tok/s pill** on each `ActiveJobCard` shows live
+throughput for that specific Living Wiki generation run.
+
+The underlying data comes from `GET /api/v1/admin/llm/activity`
+(`gate_snapshot` field), populated by the `GetLLMGateSnapshot` gRPC
+method on the worker's `ReasoningService`.
+
+---
+
 ## Living Wiki page-count and ops behavior
 
 For how Living Wiki determines the number of pages to generate, how
