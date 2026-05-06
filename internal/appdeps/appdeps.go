@@ -93,4 +93,10 @@ type AppDeps struct {
 	ClusterStore               clustering.ClusterStore
 	WorkerVersion              func(ctx context.Context) string
 	DrainAdmitter              DrainAdmitter
+	// EncryptionKeySet is true when the API has a resolved encryption key
+	// (from SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE or the literal env var).
+	// It is populated at wiring time from llmCipher.HasKey() and surfaced on
+	// GET /api/v1/admin/llm-profiles so the web UI can show the correct
+	// onboarding state (r1 Phase 2d).
+	EncryptionKeySet bool
 }

@@ -129,6 +129,22 @@ func runServe(cmd *cobra.Command, args []string) error {
 		{Label: "GRPC_AUTH_SECRET", Value: cfg.Security.GRPCAuthSecret},
 	}, 60*time.Second)
 
+	// r1 C1 — resolve the encryption key ONCE here, before any cipher
+	// or store construction, and write the result back into
+	// cfg.Security.EncryptionKey so all five downstream consumers
+	// (gitCipher, llmCipher, lwStore, lwRepoStore, and the empty-key
+	// warn check) see the resolved value without further plumbing.
+	// Resolution order: SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE >
+	// literal env / config.toml > empty (r1 H2).
+	{
+		resolvedKey, keySource, keyErr := cfg.Security.ResolveEncryptionKey()
+		if keyErr != nil {
+			slog.Error("encryption key resolution failed; proceeding with empty key", "err", keyErr)
+		}
+		cfg.Security.EncryptionKey = resolvedKey
+		slog.Info("encryption key source", "source", keySource)
+	}
+
 	// Connect to database
 	surrealDB := db.NewSurrealDB(cfg.Storage)
 	if err := surrealDB.Connect(context.Background()); err != nil {
@@ -136,6 +152,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	surrealDB.StartKeepalive()
 	defer surrealDB.Close()
+
+	// encryptionKeySet is true when the API has a resolved encryption key.
+	// Populated from llmCipher.HasKey() inside the external-store block and
+	// forwarded to the REST server as WithEncryptionKeySet(). It defaults to
+	// false (no key) which is the safe assumption for embedded/test mode.
+	var encryptionKeySet bool
 
 	// Choose the store implementation based on surreal mode.
 	var store graph.GraphStore
@@ -420,6 +442,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		// identical legacy-warn rate-limiting state.
 		allowUnencLLM := strings.EqualFold(os.Getenv("SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY"), "true")
 		llmCipher := secretcipher.NewAESGCMCipher(cfg.Security.EncryptionKey, allowUnencLLM)
+		encryptionKeySet = llmCipher.HasKey() // r1 Phase 2d: surfaced on /admin/llm-profiles
 		if !llmCipher.HasKey() {
 			if llmCipher.AllowsUnencrypted() {
 				slog.Warn("llm config: SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY=true — admin saves of api_key may land in plaintext on disk (OSS dev only)")
@@ -767,6 +790,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 			}
 			return lwDispatcher.LiveOrchestrator()
 		}()),
+		rest.WithEncryptionKeySet(encryptionKeySet),
 	)
 
 	// Initialize OIDC if configured

@@ -60,6 +60,10 @@ func syncServerDepsFromAppDeps(s *Server, deps *appdeps.AppDeps) {
 	// WorkerVersion and DrainAdmitter are closures/interfaces constructed from
 	// Server methods, not from standalone fields. They are set directly on
 	// AppDeps in the NewServer wiring block rather than synced here.
+
+	// EncryptionKeySet is a scalar bool set at wiring time; no write-back
+	// needed (AppDeps is the source of truth; s.encryptionKeySet is already
+	// set before AppDeps construction).
 }
 
 // buildWorkerVersionFunc returns the WorkerVersion closure used by both

@@ -242,6 +242,14 @@ secrets:
   # -- Redis password (optional — left empty means no auth).
   redisPassword: ""
 
+  # -- Encryption key for LLM API keys and git tokens stored in the database.
+  # Auto-generated (32 alphanumeric chars) on first install if left empty.
+  # helm.sh/resource-policy: keep ensures helm upgrade does NOT regenerate this.
+  # Losing this key means re-entering all encrypted secrets via the admin UI.
+  # Generate a custom key with: openssl rand -hex 32
+  # Format: 32+ bytes of cryptographic random, hex- or base64-encoded.
+  encryptionKey: ""
+
   # -- LLM API key (e.g. Anthropic, OpenAI).
   # Required when llm.provider is a cloud provider.
   # Not needed for Ollama or other local providers.

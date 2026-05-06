@@ -325,13 +325,18 @@ generate_env_file() {
     # Preserve existing values if .env already exists
     local existing_grpc_secret=""
     local existing_jwt_secret=""
+    local existing_encryption_key=""
     if [ -f "$env_file" ]; then
         existing_grpc_secret=$(grep -E '^SOURCEBRIDGE_GRPC_SECRET=' "$env_file" 2>/dev/null | cut -d= -f2- || true)
         existing_jwt_secret=$(grep -E '^SOURCEBRIDGE_JWT_SECRET=' "$env_file" 2>/dev/null | cut -d= -f2- || true)
+        existing_encryption_key=$(grep -E '^SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY=' "$env_file" 2>/dev/null | cut -d= -f2- || true)
     fi
 
     local grpc_secret="${existing_grpc_secret:-$(openssl rand -hex 16 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
     local jwt_secret="${existing_jwt_secret:-$(openssl rand -hex 32 2>/dev/null || head -c 64 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
+    # r1 M4: use openssl rand -hex 32 (macOS-portable; matches JWT/gRPC pattern).
+    # NOT base64 -w0 (GNU-only). Generates 64 hex chars = 32 bytes of entropy.
+    local encryption_key="${existing_encryption_key:-$(openssl rand -hex 32 2>/dev/null || head -c 64 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
 
     cat > "$env_file" <<EOF
 # SourceBridge.ai — Docker Compose environment
@@ -342,6 +347,11 @@ generate_env_file() {
 # --- Security ---
 SOURCEBRIDGE_GRPC_SECRET=${grpc_secret}
 SOURCEBRIDGE_JWT_SECRET=${jwt_secret}
+# Encryption key for LLM API keys and git tokens stored in the database.
+# 32+ bytes of cryptographic random, hex-encoded. Do NOT share or commit
+# this value. Back it up separately — losing it means re-entering all
+# encrypted secrets via the admin UI. See docs/admin/llm-config.md.
+SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY=${encryption_key}
 
 # --- LLM Provider ---
 SOURCEBRIDGE_LLM_PROVIDER=${LLM_PROVIDER}

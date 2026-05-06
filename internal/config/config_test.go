@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -185,6 +186,166 @@ func TestDefaults_LLMProvider_IsEmpty(t *testing.T) {
 	// TimeoutSecs must stay non-zero — it's unrelated to provider choice.
 	if cfg.LLM.TimeoutSecs == 0 {
 		t.Errorf("Defaults().LLM.TimeoutSecs: want non-zero, got 0")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 2 — ResolveEncryptionKey unit tests (r1 H2 resolution order, H4)
+// ─────────────────────────────────────────────────────────────────────────
+
+func TestResolveEncryptionKey_FileOnly(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "enc_key")
+	wantKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" // 64 hex chars = 32 bytes
+	if err := os.WriteFile(keyFile, []byte(wantKey+"\n"), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+	os.Setenv("SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE", keyFile)
+	defer os.Unsetenv("SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE")
+
+	sc := SecurityConfig{EncryptionKey: ""}
+	key, source, err := sc.ResolveEncryptionKey()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if key != wantKey {
+		t.Errorf("key: got %q, want %q", key, wantKey)
+	}
+	if source != "file" {
+		t.Errorf("source: got %q, want file", source)
+	}
+}
+
+func TestResolveEncryptionKey_LiteralEnvOnly(t *testing.T) {
+	os.Unsetenv("SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE")
+	wantKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	sc := SecurityConfig{EncryptionKey: wantKey}
+	key, source, err := sc.ResolveEncryptionKey()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if key != wantKey {
+		t.Errorf("key: got %q, want %q", key, wantKey)
+	}
+	if source != "literal-env" {
+		t.Errorf("source: got %q, want literal-env", source)
+	}
+}
+
+func TestResolveEncryptionKey_FileWinsOverEnv(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "enc_key")
+	fileKey := "FILE-KEY-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	if err := os.WriteFile(keyFile, []byte(fileKey), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+	os.Setenv("SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE", keyFile)
+	defer os.Unsetenv("SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE")
+
+	sc := SecurityConfig{EncryptionKey: "ENV-KEY-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}
+	key, source, err := sc.ResolveEncryptionKey()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if key != fileKey {
+		t.Errorf("file should win: got %q, want %q", key, fileKey)
+	}
+	if source != "file" {
+		t.Errorf("source: got %q, want file", source)
+	}
+}
+
+func TestResolveEncryptionKey_FileMissingFallsBackToEnv(t *testing.T) {
+	os.Setenv("SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE", "/tmp/nonexistent-enc-key-xyz")
+	defer os.Unsetenv("SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE")
+
+	wantKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	sc := SecurityConfig{EncryptionKey: wantKey}
+	key, source, err := sc.ResolveEncryptionKey()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if key != wantKey {
+		t.Errorf("key: got %q, want %q", key, wantKey)
+	}
+	if source != "file-missing-fallback-env" {
+		t.Errorf("source: got %q, want file-missing-fallback-env", source)
+	}
+}
+
+func TestResolveEncryptionKey_NeitherSet(t *testing.T) {
+	os.Unsetenv("SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE")
+	sc := SecurityConfig{EncryptionKey: ""}
+	key, source, err := sc.ResolveEncryptionKey()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if key != "" {
+		t.Errorf("key: got %q, want empty", key)
+	}
+	if source != "unset" {
+		t.Errorf("source: got %q, want unset", source)
+	}
+}
+
+func TestResolveEncryptionKey_EmptyFileFallsToEnv(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "empty_key")
+	if err := os.WriteFile(keyFile, []byte("   \n"), 0o600); err != nil {
+		t.Fatalf("write empty key file: %v", err)
+	}
+	os.Setenv("SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE", keyFile)
+	defer os.Unsetenv("SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE")
+
+	wantKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	sc := SecurityConfig{EncryptionKey: wantKey}
+	key, source, err := sc.ResolveEncryptionKey()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if key != wantKey {
+		t.Errorf("key: got %q, want %q (empty file should fall through to env)", key, wantKey)
+	}
+	if source != "file-missing-fallback-env" {
+		t.Errorf("source: got %q, want file-missing-fallback-env", source)
+	}
+}
+
+func TestResolveEncryptionKey_FileTrailingNewlineTrimmed(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "enc_key")
+	wantKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	if err := os.WriteFile(keyFile, []byte(wantKey+"\n\n"), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+	os.Setenv("SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE", keyFile)
+	defer os.Unsetenv("SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE")
+
+	sc := SecurityConfig{}
+	key, _, err := sc.ResolveEncryptionKey()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if key != wantKey {
+		t.Errorf("trailing newline not trimmed: got %q, want %q", key, wantKey)
+	}
+}
+
+func TestResolveEncryptionKey_ShortKeyLogsError(t *testing.T) {
+	// Short key (< 32 bytes) should still be returned — fail-soft.
+	// We can't assert the slog.Error without capturing the logger,
+	// but we verify the key is returned and no error is returned.
+	os.Unsetenv("SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE")
+	sc := SecurityConfig{EncryptionKey: "short"}
+	key, source, err := sc.ResolveEncryptionKey()
+	if err != nil {
+		t.Fatalf("unexpected err (short key should be fail-soft): %v", err)
+	}
+	if key != "short" {
+		t.Errorf("key: got %q, want short", key)
+	}
+	if source != "literal-env" {
+		t.Errorf("source: got %q, want literal-env", source)
 	}
 }
 

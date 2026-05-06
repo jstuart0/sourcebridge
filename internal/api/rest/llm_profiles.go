@@ -242,6 +242,11 @@ func (s *Server) handleListLLMProfiles(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"profiles":               profiles,
 		"active_profile_missing": activeMissing,
+		// encryption_key_set: true when the API has a resolved encryption key.
+		// Used by the web UI to show the correct onboarding state (r1 Phase 2d).
+		// Defaults to false when not set; the web UI must default to true on
+		// older API replicas for backwards-compat during rolling deploys.
+		"encryption_key_set": s.encryptionKeySet,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

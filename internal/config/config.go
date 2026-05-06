@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -233,6 +234,79 @@ type SecurityConfig struct {
 	// Config key: security.api_token_legacy_admin_default
 	// Env var:    SOURCEBRIDGE_SECURITY_API_TOKEN_LEGACY_ADMIN_DEFAULT
 	APITokenLegacyAdminDefault bool `mapstructure:"api_token_legacy_admin_default" toml:"api_token_legacy_admin_default" json:"api_token_legacy_admin_default"`
+}
+
+// ResolveEncryptionKey resolves the encryption key following the priority order:
+//
+//  1. SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE (file path) — if set and the
+//     file exists, is readable, and is non-empty after trimming whitespace.
+//  2. s.EncryptionKey (literal value from env / config.toml) — if non-empty.
+//  3. Empty string — key is unset; caller logs accordingly.
+//
+// source is one of: "file", "literal-env", "file-missing-fallback-env",
+// "unset".
+//
+// When both sources are set, the file wins and a WARN is logged (matches Vault
+// / Postgres *_FILE precedence — files are higher-trust because env vars leak
+// via /proc, docker inspect, and shell history).
+//
+// If _FILE is set but the file is missing / unreadable / empty, an ERROR is
+// logged and the method falls through to literal-env.
+//
+// r1 H4 — minimum-entropy guardrail: if the resolved key is non-empty and
+// shorter than 32 bytes, an ERROR is logged but the key is still returned
+// (fail-soft: consistent with the existing WARN-only encryption posture).
+// Document the expected format: 32+ bytes of cryptographic random,
+// hex- or base64-encoded (generate with `openssl rand -hex 32`).
+func (s SecurityConfig) ResolveEncryptionKey() (key string, source string, err error) {
+	filePath := strings.TrimSpace(os.Getenv("SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE"))
+	hasLiteralEnv := s.EncryptionKey != ""
+
+	if filePath != "" {
+		data, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			slog.Error("encryption key: SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE is set but file is unreadable; falling back to literal env",
+				"path", filePath, "err", readErr)
+			if hasLiteralEnv {
+				return s.checkEntropyAndReturn(s.EncryptionKey, "file-missing-fallback-env")
+			}
+			return "", "unset", nil
+		}
+		trimmed := strings.TrimSpace(string(data))
+		if trimmed == "" {
+			slog.Error("encryption key: SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE points to an empty file; falling back to literal env",
+				"path", filePath)
+			if hasLiteralEnv {
+				return s.checkEntropyAndReturn(s.EncryptionKey, "file-missing-fallback-env")
+			}
+			return "", "unset", nil
+		}
+		if hasLiteralEnv {
+			slog.Warn("encryption key resolved from file; SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY env var is set but ignored — file precedence is by design (matches Vault / Postgres convention)",
+				"path", filePath)
+		}
+		return s.checkEntropyAndReturn(trimmed, "file")
+	}
+
+	if hasLiteralEnv {
+		return s.checkEntropyAndReturn(s.EncryptionKey, "literal-env")
+	}
+
+	return "", "unset", nil
+}
+
+// checkEntropyAndReturn emits an ERROR log when the key is shorter than 32
+// bytes (r1 H4 minimum-entropy guardrail) but still returns the key. The
+// caller must not treat the error return value from ResolveEncryptionKey as
+// an unrecoverable failure — this is a loud warning only.
+func (s SecurityConfig) checkEntropyAndReturn(key, source string) (string, string, error) {
+	if len(key) < 32 {
+		slog.Error("encryption key is shorter than 32 bytes; current implementation hashes passphrase via single-pass SHA-256 (NOT a KDF), so short keys are brute-forceable. "+
+			"See docs/admin/llm-config.md#encryption-key for the expected format (32+ random bytes, hex/base64). "+
+			"Filed as follow-up: KDF strengthening (PBKDF2/scrypt/Argon2).",
+			"key_length_bytes", len(key), "source", source)
+	}
+	return key, source, nil
 }
 
 // OIDCConfig holds OpenID Connect settings for SSO integration.

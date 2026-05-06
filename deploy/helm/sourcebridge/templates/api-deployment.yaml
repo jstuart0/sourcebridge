@@ -80,6 +80,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "sourcebridge.fullname" . }}-secrets
                   key: surrealdb-password
+            - name: SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sourcebridge.fullname" . }}-secrets
+                  key: encryption-key
             {{- end }}
             # CA-142: drain grace window. Maps to [shutdown].grace_seconds
             # via Viper's SOURCEBRIDGE_ prefix + dot→underscore rule.

@@ -250,6 +250,123 @@ The cipher is constructed **once** at boot and threaded into both the
 row encrypted by this version uses identical key material. There is
 no per-profile key derivation; the security boundary is the workspace.
 
+### Encryption key bootstrap {#encryption-key}
+
+#### Expected format
+
+The key must be **32 or more bytes of cryptographic random**, hex- or
+base64-encoded. Generate one with:
+
+```bash
+openssl rand -hex 32   # 64-char hex string, 32 bytes of entropy
+```
+
+If the resolved key is shorter than 32 bytes, the API logs an ERROR at
+boot but continues to function (fail-soft posture). Short keys are
+brute-forceable via single-pass SHA-256 — fix them before storing real
+secrets. A KDF upgrade (PBKDF2/scrypt/Argon2id) is filed as a
+follow-up for a future plan.
+
+#### Resolution order
+
+The API resolves the encryption key **once** at boot, before any cipher
+or store construction. Resolution order (highest trust first, matching
+Vault and Postgres `*_FILE` convention):
+
+1. `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE` — if set and the file
+   exists, is readable, and is non-empty after trimming whitespace.
+   The file value wins even if `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY`
+   is also set; a WARN is logged in that case.
+2. `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY` — literal value from env or
+   `config.toml`.
+3. Empty (key unset) — saves of API keys return 422; AI features
+   continue to work if no API key is required (e.g., Ollama).
+
+If `_FILE` is set but the file is missing, unreadable, or empty, an
+ERROR is logged and the resolver falls through to (2).
+
+The startup log line reports the source:
+
+```
+{"level":"INFO","msg":"encryption key source","source":"file"}
+# or "literal-env" / "unset" / "file-missing-fallback-env"
+```
+
+#### Docker Compose (hub image — no `setup.sh`)
+
+The `encryption-key-init` service in `docker-compose.hub.yml` generates
+a unique 32-byte key on first boot and writes it to the `sourcebridge-secrets`
+named volume. The API container mounts the volume read-only at
+`/run/sourcebridge/secrets` and reads the key via
+`SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE`.
+
+The init container is idempotent: subsequent `up` calls reuse the
+existing key file. `down -v` deletes the volume and triggers a new
+key on the next `up` — see **Wipe-and-re-enter** below.
+
+**Back up the `sourcebridge-secrets` volume** before any `down -v`
+or disaster-recovery restore. Losing the volume loses every encrypted
+LLM API key and git token stored in the database.
+
+> **Security note:** The key volume lives on the same host as the
+> SurrealDB data volume. This provides envelope encryption (protecting
+> data in transit and in backups) but not isolation-in-depth. For
+> production deployments with stricter requirements, inject the key
+> via a KMS, Vault, or Kubernetes Secret — see the Helm chart section
+> below. **Never copy the encryption key to a path outside
+> `.gitignore`. Common mistakes: `~/Desktop/sourcebridge-backup.key`
+> committed to a personal repo.**
+
+#### Docker Compose (`setup.sh` path)
+
+`setup.sh` writes `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY` into `.env`
+using `openssl rand -hex 32`. The literal env var is passed to the API
+container via the `docker-compose.yml` `environment:` block. When both
+the literal env var and the init-container file key are present, **the
+file wins** per the resolution order above — operators who use `setup.sh`
+and the hub compose simultaneously should keep the literal env var in
+`.env` and let the file serve as a backup.
+
+#### Helm chart
+
+The chart's `secrets.yaml` auto-generates a 32-character alphanumeric
+key on first install (`randAlphaNum 32`) and stores it as the
+`encryption-key` key in the `<release>-secrets` Secret. The
+`helm.sh/resource-policy: keep` annotation ensures `helm upgrade` does
+NOT regenerate this value — upgrading the chart will not discard your
+encrypted secrets.
+
+To override with a custom key, set `secrets.encryptionKey` in
+`values.yaml` or via `--set`:
+
+```bash
+helm upgrade my-release ./deploy/helm/sourcebridge \
+  --set secrets.encryptionKey="$(openssl rand -hex 32)"
+```
+
+The key is mounted into the API pod via the literal
+`SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY` env var (no `_FILE` indirection
+needed in Kubernetes — the secret is already managed by the Secret
+object).
+
+#### Wipe-and-re-enter (destructive cleanup)
+
+**This is not "rotation"** — it destroys all encrypted secrets.
+Running `docker compose down -v` deletes all named volumes, including
+`sourcebridge-secrets`. When you `up` again, the init container
+generates a **new** key. All previously-stored encrypted secrets
+(LLM API keys, git tokens) are irrecoverably unreadable.
+
+After a wipe:
+1. A new key is generated on `up`.
+2. Go to `/admin/llm` and re-enter your LLM API key.
+3. If you have git tokens or other encrypted secrets, re-enter those
+   too.
+
+A real re-encryption procedure (export → decrypt with old key →
+re-encrypt with new key → swap → verify) is filed as a future plan.
+No tooling exists today.
+
 ### Migrating legacy plaintext keys
 
 Pre-April-2026 deployments saved API keys as plaintext. The new code
@@ -300,7 +417,13 @@ The command is idempotent — already-encrypted rows are re-encrypted
 with a fresh nonce, which is fine. It refuses to run when
 `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY` is unset.
 
-### Encryption-key rotation with profiles
+### Encryption-key rotation with profiles (manual re-seal procedure)
+
+> **Note**: This procedure re-seals each profile's api_key under a new
+> key without losing the ciphertext database. For the simpler (but
+> destructive) path that wipes all secrets, see **Wipe-and-re-enter**
+> above. No automated rotation tooling exists today — that is a future
+> plan.
 
 Rotating `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY` after profiles are
 deployed requires re-saving each profile's `api_key` so the

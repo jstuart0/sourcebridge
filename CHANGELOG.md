@@ -16,6 +16,20 @@ All notable changes to SourceBridge are documented here. The format follows
 
 - **`internal/db/llm_config_migration.go`**: Self-heal guard (r1 H1) — when the legacy row has a real provider but the deterministic profile row is missing, the migration now prefers the legacy row's values over the (now-empty) env-bootstrap defaults. Prevents a partially-corrupt admin's recovery path from being silently zeroed.
 
+### Added
+
+- **Encryption key bootstrap** (`docker-compose.hub.yml`, `docker-compose.yml`): New `encryption-key-init` service generates a unique per-install encryption key on first boot and persists it in the `sourcebridge-secrets` named volume. The API container reads it via `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE` (file wins over literal env per `_FILE` convention — matches Vault / Postgres). **`down -v` deletes the volume and all encrypted secrets; back up `sourcebridge-secrets` before restores.** New volume: `sourcebridge-secrets`.
+
+- **`SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE` env var** (`internal/config/config.go`): New `SecurityConfig.ResolveEncryptionKey()` helper implements r1 H2 resolution order (`_FILE > literal env > empty`) and r1 H4 minimum-entropy guardrail (logs ERROR for keys < 32 bytes, does not crash). Called once at the top of `runServe` before any cipher construction; result is written back into `cfg.Security.EncryptionKey` so all five downstream consumers (gitCipher, llmCipher, lwStore, lwRepoStore, empty-key check) see the resolved value. **Precedence change for existing operators with both `_FILE` and the literal env set: file now wins.** This is intentional and documented in the runbook.
+
+- **`encryption_key_set` flag on `GET /api/v1/admin/llm-profiles`** (`internal/api/rest/llm_profiles.go`): New boolean field in the list response. `true` when the API booted with a resolved encryption key. Web UI uses this to show the correct onboarding state. Existing API consumers should default to `true` on older replicas during rolling deploys.
+
+- **`setup.sh`**: Now generates `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY` in `.env` using `openssl rand -hex 32` (macOS-portable). Preserves existing value on re-run.
+
+- **Helm chart** (`deploy/helm/sourcebridge/templates/secrets.yaml`, `api-deployment.yaml`, `values.yaml`): Auto-generates an `encryption-key` secret on first install (`randAlphaNum 32`). `helm.sh/resource-policy: keep` ensures `helm upgrade` does NOT regenerate the key. Override with `secrets.encryptionKey`.
+
+- **Runbook** (`docs/admin/llm-config.md`): Added `##-Encryption-key-bootstrap` section covering resolution order, expected format, Docker Compose paths, Helm chart, and "Wipe-and-re-enter (destructive cleanup)" (r1 M5 — renamed from "rotation" to avoid implying key-safe re-encryption).
+
 
 
 **System audit refactor campaign** (CA-155, 2026-05-04, `a176b6f..89c85f3`). Full-codebase audit — 70 deduplicated findings (9 Critical, 23 High, 30 Medium, 18 Low), 74 commits across 5 phases, no public surface removed.

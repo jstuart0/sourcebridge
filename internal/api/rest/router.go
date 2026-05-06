@@ -146,6 +146,14 @@ func WithLLMCaller(c *llmcall.Caller) ServerOption {
 	return func(s *Server) { s.llmCaller = c }
 }
 
+// WithEncryptionKeySet records whether the API booted with a resolved
+// encryption key. Surfaced on GET /api/v1/admin/llm-profiles as
+// encryption_key_set so the web UI shows the correct onboarding state
+// (r1 Phase 2d / plan §2d).
+func WithEncryptionKeySet(set bool) ServerOption {
+	return func(s *Server) { s.encryptionKeySet = set }
+}
+
 // WithQueueControlStore enables persisted LLM queue intake controls.
 func WithQueueControlStore(store QueueControlStore) ServerOption {
 	return func(s *Server) { s.queueControlStore = store }
@@ -306,6 +314,12 @@ type Server struct {
 	clusterRunner              *clustering.Runner                // subsystem clustering job dispatcher; nil = feature disabled
 	healthChecker              *HealthChecker                    // shared DB+worker probe; nil = embedded/test mode, handlers fall back to local checks
 	workerVersionLookup        *versionLookup                    // best-effort cache for worker GetVersion (CA-136); nil = workerVersion always "" in /api/v1/version
+
+	// encryptionKeySet is true when the API booted with a resolved encryption
+	// key (from SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE or the literal env
+	// var). Surfaced on GET /api/v1/admin/llm-profiles as encryption_key_set
+	// so the web UI can show the correct onboarding state (r1 Phase 2d).
+	encryptionKeySet bool
 
 	// LLM source-of-truth (single resolver shared with the GraphQL resolver
 	// and llmcall.Caller). The Server owns the resolver so handleGetLLMConfig
@@ -643,9 +657,10 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			LivingWikiPagePublishStore: s.livingWikiPagePublishStore,
 			// LivingWikiAuditLog: enterprise-only; not stored on Server; left nil
 			// here (enterprise routes or tests may set it on the resolver directly).
-			ClusterStore:  clusterStore,
-			WorkerVersion: buildWorkerVersionFunc(s),
-			DrainAdmitter: s.DrainAdmitterFor(),
+			ClusterStore:     clusterStore,
+			WorkerVersion:    buildWorkerVersionFunc(s),
+			DrainAdmitter:    s.DrainAdmitterFor(),
+			EncryptionKeySet: s.encryptionKeySet,
 		}
 		// syncServerDepsFromAppDeps is an idempotent identity sync: the Server
 		// already has these values from the WithXxx options applied above. It
