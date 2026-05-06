@@ -49,4 +49,11 @@ export interface ProfileResponse {
 export interface ListProfilesResponse {
   profiles: ProfileResponse[];
   active_profile_missing: boolean;
+  /**
+   * True when the API has a usable encryption key configured. When false,
+   * saving an API key on a profile returns 422. UI uses this to render
+   * State 1 of the onboarding banner. Optional: older API replicas during
+   * rolling deploys may not include this field.
+   */
+  encryption_key_set?: boolean;
 }

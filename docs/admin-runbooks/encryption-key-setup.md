@@ -154,10 +154,56 @@ Expected: `[{"encrypted": true}]` (when a key has been saved).
   key from Vaultwarden, OR re-save every secret through the admin UI
   under the new key.
 
+## `_FILE` indirection (Docker / Compose deployments)
+
+The compose stacks (`docker-compose.hub.yml` and `docker-compose.yml`)
+do not pass the encryption key as a literal env var. Instead they use
+the `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE` convention, which
+follows the Postgres / Vault `*_FILE` pattern:
+
+- An **init container** (`encryption-key-init`) generates a random key
+  on first boot with `openssl rand -hex 32` and writes it into a named
+  volume (`sourcebridge-secrets`) at `/secrets/encryption_key`.
+- The API container mounts that volume read-only at
+  `/run/sourcebridge/secrets` and reads the key via
+  `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE=/run/sourcebridge/secrets/encryption_key`.
+- Files are higher-trust than literal env vars because env vars leak via
+  `docker inspect` and `/proc/<pid>/environ`.
+
+**Resolution order** (`ResolveEncryptionKey` in `internal/config/config.go`):
+
+1. `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE` — if set, file is
+   readable, and non-empty, the file value wins.
+2. `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY` — literal env / config.toml
+   value, used only when no readable `_FILE` is present.
+3. Empty — key is unset; API logs a startup WARN and rejects any
+   attempt to save an API key with HTTP 422.
+
+When both `_FILE` and the literal env are set, the **file wins** and a
+WARN is logged. This is intentional (matches Vault / Postgres
+convention). `setup.sh` writes the literal env into `.env` and the init
+container generates the volume file; the file takes precedence at
+runtime. To rotate the key, update the volume file (or run
+`docker compose down -v && docker compose up -d` to regenerate from
+scratch — note that `down -v` deletes all encrypted secrets; see
+[`docs/admin/llm-config.md`](../admin/llm-config.md) §"Wipe-and-re-enter").
+Updating `.env` alone has no effect while a valid volume file is
+present.
+
+**Helm / Kubernetes note**: when deploying via Helm or raw manifests,
+the standard approach is a `Secret` with the literal key and the env
+var `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY` (no `_FILE` needed). To
+rotate via Helm, update the secret and restart the pods — see
+[`docs/admin/llm-config.md`](../admin/llm-config.md) for the
+wipe-and-re-enter discussion. If using a secret manager that mounts
+secrets as files, point `SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE` at
+the mount path; the file-wins rule applies.
+
 ## See also
 
 - [`docs/admin/llm-config.md`](../admin/llm-config.md) — encryption
-  envelope details and resolution architecture.
+  envelope details and resolution architecture, including the
+  wipe-and-re-enter procedure for key rotation.
 - [`docs/admin-runbooks/llm-config.md`](llm-config.md) — LLM-config
   operational checklist.
 - [`docs/admin-runbooks/git-config.md`](git-config.md) — git-config

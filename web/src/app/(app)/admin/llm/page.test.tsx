@@ -821,4 +821,30 @@ describe("AdminLLMPage — Phase 3: onboarding banner (r1 H6)", () => {
     expect(screen.queryByTestId("onboarding-banner-state2")).toBeNull();
     expect(screen.queryByTestId("onboarding-banner-state3")).toBeNull();
   });
+
+  it("(vi) N=1 provider=ollama + encryption_key_set=true + empty summary_model → State 3 banner", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [
+          profile({
+            is_active: true,
+            provider: "ollama",
+            api_key_set: false,
+            summary_model: "",
+          }),
+        ],
+        active_profile_missing: false,
+        encryption_key_set: true,
+      },
+    });
+    render(<AdminLLMPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("onboarding-banner-state3")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("onboarding-banner-state1")).toBeNull();
+    expect(screen.queryByTestId("onboarding-banner-state2")).toBeNull();
+    expect(screen.getByTestId("onboarding-banner-state3").textContent).toMatch(
+      /Almost there — set a model name below/,
+    );
+  });
 });

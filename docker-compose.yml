@@ -32,7 +32,7 @@ services:
       - -lc
       - |
         if [ ! -f /secrets/encryption_key ]; then
-          head -c 32 /dev/urandom | base64 -w0 > /secrets/encryption_key
+          head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > /secrets/encryption_key
           echo "encryption-key-init: generated new encryption key"
         else
           echo "encryption-key-init: encryption key already exists, skipping"
@@ -93,13 +93,19 @@ services:
       - SOURCEBRIDGE_SECURITY_GRPC_AUTH_SECRET=${SOURCEBRIDGE_GRPC_SECRET:-dev-shared-secret}
       - SOURCEBRIDGE_SECURITY_JWT_SECRET=${SOURCEBRIDGE_JWT_SECRET:-dev-jwt-secret-change-me}
       # r1 M3: explicit env wiring so docker-compose substitutes from .env.
-      # If SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY is set in .env, it wins over
-      # the init-container file per r1 H2 (*_FILE > literal env > empty).
       # The :- default keeps the line valid when .env is absent.
+      # Resolution order (ResolveEncryptionKey): _FILE > literal env > empty.
+      # When both are set, the FILE wins and the literal env is ignored — this
+      # matches the Vault / Postgres *_FILE convention (files are higher-trust
+      # than env vars, which leak via docker inspect and /proc).
+      # setup.sh writes the literal env into .env AND the init container
+      # generates the volume file; when both exist, the file takes precedence.
+      # To rotate: update the volume file (or run down -v and up to regenerate).
+      # Updating .env alone has no effect while the volume file is present.
       - SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY=${SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY:-}
       # r1 Phase 2: file path for the init-container-generated encryption key.
-      # Ignored when SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY is also set (file wins
-      # per r1 H2, but setup.sh typically sets the literal env so file is backup).
+      # The file is the primary source of truth; literal env is the operator
+      # escape hatch when no volume file is present (e.g. external secret manager).
       - SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE=/run/sourcebridge/secrets/encryption_key
     volumes:
       - sourcebridge-secrets:/run/sourcebridge/secrets:ro
