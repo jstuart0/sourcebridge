@@ -56,7 +56,7 @@ class OllamaEmbeddingProvider:
         if len(texts) <= _BATCH_SIZE:
             return await self._embed_batch(texts)
 
-        # Split into batches
+        # Ollama embedding stays serial — host gate combines this with the LLM gate; see plan Decision 8 + Decision 1.
         all_embeddings: list[list[float]] = []
         for i in range(0, len(texts), _BATCH_SIZE):
             batch = texts[i : i + _BATCH_SIZE]
