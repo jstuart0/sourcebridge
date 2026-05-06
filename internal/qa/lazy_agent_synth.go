@@ -29,6 +29,13 @@ import (
 // SupportsTools calls that find no usable cache entry coalesce on a
 // single in-flight probe (single-flight) so a sudden burst of first-
 // request traffic still fires exactly one underlying RPC.
+// hardCapacityCeiling is the maximum effective value returned by
+// UpstreamCapacity. Defense-in-depth clamp matching D9 / H1.
+// The DB CHECK constraint and WorkerConfig validator are the primary
+// guards; this Go-side clamp prevents a future schema change from
+// causing goroutine exhaustion.
+const hardCapacityCeiling = 256
+
 type LazyAgentSynth struct {
 	caller   agentWorkerCaller
 	resolver ProbeVersionSource
@@ -44,6 +51,12 @@ type LazyAgentSynth struct {
 	nextRetry time.Time               // valid only when state == probeStateFailure
 	inflight  *probeInFlight          // single-flight handle; nil when no probe is running
 	lastErr   error                   // most recent probe error (diagnostic only)
+
+	// Capacity cache (M2): stored independently of syn so that probe
+	// failures after a successful first probe preserve the last-known-good
+	// capacity value (fail-open). Only a successful probe updates these.
+	capacityValue int  // last successfully probed max_concurrent_calls value
+	capacityKnown bool // last successfully probed max_concurrent_calls_known flag
 }
 
 // ProbeVersionSource is the narrow surface LazyAgentSynth needs from
@@ -321,6 +334,113 @@ func (l *LazyAgentSynth) LastProbeError() error {
 	return l.lastErr
 }
 
+// UpstreamCapacity returns the LLM backend's declared parallel inference
+// capacity. It shares the same underlying probe RPC as SupportsTools (M4
+// single-flight), so calling UpstreamCapacity never fires a second gRPC RPC
+// when a SupportsTools probe is already in-flight or completed.
+//
+// Return semantics (D3 encoding / D5 failure handling):
+//   - (N, true, nil)   → clamp orchestrator to N (1 ≤ N ≤ 256)
+//   - (0, true, nil)   → unbounded (frontier API); orchestrator does not clamp
+//   - (0, false, nil)  → unknown; orchestrator does not clamp (fail-open)
+//   - (0, false, err)  → first probe failed; no last-known-good; fail-open
+//   - (N, true, nil)   → returned after a re-probe failure when a prior
+//     success cached N (last-known-good, M2)
+//
+// Capacity probe failure does NOT install the 60s agentic cooldown (M5).
+// This is a separate concern — a flaky worker should not disable agentic
+// synthesis just because the capacity field is temporarily unavailable.
+//
+// No repoID parameter (H2): the runner pre-resolves the profile and passes
+// a profile-bound closure as the UpstreamCapacityProvider.
+func (l *LazyAgentSynth) UpstreamCapacity(ctx context.Context) (int, bool, error) {
+	if l == nil || l.caller == nil || !l.caller.IsAvailable() {
+		return 0, false, nil
+	}
+
+	// Phase 1: read cached capacity under the mutex.
+	l.mu.Lock()
+	state := l.state
+	cachedVal := l.capacityValue
+	cachedKnown := l.capacityKnown
+	inflight := l.inflight
+	l.mu.Unlock()
+
+	// If we already have a successful probe, return the cached capacity.
+	if state == probeStateSuccess {
+		return cachedVal, cachedKnown, nil
+	}
+
+	// If a probe is already in-flight (started by SupportsTools or a
+	// concurrent UpstreamCapacity call), join it (M4 single-flight).
+	if inflight != nil {
+		select {
+		case <-inflight.done:
+			l.mu.Lock()
+			val := l.capacityValue
+			known := l.capacityKnown
+			newState := l.state
+			l.mu.Unlock()
+			if newState == probeStateSuccess {
+				return val, known, nil
+			}
+			// Probe finished but failed; return last-known-good or unknown.
+			return val, known, nil
+		case <-ctx.Done():
+			// Context canceled while waiting. Return last-known-good (may be zero).
+			l.mu.Lock()
+			val := l.capacityValue
+			known := l.capacityKnown
+			l.mu.Unlock()
+			return val, known, ctx.Err()
+		}
+	}
+
+	// Phase 2: no probe in flight and state is not success. Fire a probe.
+	// NOTE: capacity probe failures do NOT install the 60s agentic cooldown
+	// (M5). We use modeBootWarmup here because it leaves state=Unprobed on
+	// failure — this means the next UpstreamCapacity call will retry without
+	// waiting for a cooldown period.
+	l.mu.Lock()
+	// Re-check: another goroutine may have started a probe between our
+	// unlock above and this re-lock.
+	if l.inflight != nil {
+		done := l.inflight.done
+		l.mu.Unlock()
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
+		l.mu.Lock()
+		val := l.capacityValue
+		known := l.capacityKnown
+		l.mu.Unlock()
+		return val, known, nil
+	}
+	if l.state == probeStateSuccess {
+		val := l.capacityValue
+		known := l.capacityKnown
+		l.mu.Unlock()
+		return val, known, nil
+	}
+	// Start the probe.
+	l.inflight = &probeInFlight{done: make(chan struct{})}
+	inflightHandle := l.inflight
+	l.mu.Unlock()
+
+	probeErr := l.doProbe(ctx, modeBootWarmup)
+
+	// Done. Notify waiters and clear inflight.
+	l.mu.Lock()
+	close(inflightHandle.done)
+	l.inflight = nil
+	val := l.capacityValue
+	known := l.capacityKnown
+	l.mu.Unlock()
+
+	return val, known, probeErr
+}
+
 // doProbe runs a single probe RPC and updates the cache. Caller must
 // not hold l.mu (we acquire it briefly to write results). Single-
 // flight is enforced by SupportsTools setting l.inflight before
@@ -390,6 +510,27 @@ func (l *LazyAgentSynth) doProbe(ctx context.Context, mode supportsToolsMode) er
 	}
 
 	l.lastErr = nil
+
+	// Cache capacity fields independently of tool-use (M2 — capacity
+	// cache survives a probe failure; it is not cleared on error).
+	// D9: clamp to hardCapacityCeiling as defense-in-depth.
+	rawCap := int(capsWrap.Resp.GetMaxConcurrentCalls())
+	rawKnown := capsWrap.Resp.GetMaxConcurrentCallsKnown()
+	if rawCap < 0 {
+		// Invalid value per D3 encoding table — treat as unknown.
+		rawKnown = false
+		rawCap = 0
+		l.log.Warn("agent synth: GetProviderCapabilities returned negative max_concurrent_calls; treating as unknown",
+			"raw_value", rawCap)
+	}
+	if rawCap > hardCapacityCeiling {
+		l.log.Warn("agent synth: max_concurrent_calls exceeds hard ceiling; clamped",
+			"reported", rawCap, "ceiling", hardCapacityCeiling)
+		rawCap = hardCapacityCeiling
+	}
+	l.capacityValue = rawCap
+	l.capacityKnown = rawKnown
+
 	if !capsWrap.Resp.GetToolUseSupported() {
 		// Provider exists but doesn't support tools. That's a hard
 		// "no agentic for this provider," NOT a transient failure.
@@ -403,7 +544,9 @@ func (l *LazyAgentSynth) doProbe(ctx context.Context, mode supportsToolsMode) er
 		l.log.Info("agent synth: provider does not support tool use; agentic disabled (cached)",
 			"provider", capsWrap.Resp.GetProvider(),
 			"model", capsWrap.Resp.GetModel(),
-			"probed_version", capsWrap.Version)
+			"probed_version", capsWrap.Version,
+			"max_concurrent_calls", rawCap,
+			"max_concurrent_calls_known", rawKnown)
 		return nil
 	}
 	l.state = probeStateSuccess
@@ -412,7 +555,9 @@ func (l *LazyAgentSynth) doProbe(ctx context.Context, mode supportsToolsMode) er
 	l.log.Info("agent synth: lazy probe succeeded; agentic enabled",
 		"provider", capsWrap.Resp.GetProvider(),
 		"model", capsWrap.Resp.GetModel(),
-		"probed_version", capsWrap.Version)
+		"probed_version", capsWrap.Version,
+		"max_concurrent_calls", rawCap,
+		"max_concurrent_calls_known", rawKnown)
 	return nil
 }
 

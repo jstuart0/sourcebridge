@@ -132,6 +132,23 @@ type clientBundle struct {
 // validated cert reload fires. New RPCs handshake under the new cert; in-
 // flight RPCs against the old conn complete naturally and the old conn
 // closes once drained.
+// workerSecretCredentials implements credentials.PerRPCCredentials to attach
+// the x-sb-worker-secret metadata header on every outgoing RPC call when a
+// shared secret is configured (D10 / Phase 1).
+//
+// RequireTransportSecurity returns false so the secret can be sent over the
+// insecure dev path (OSS default); operators who set the secret in production
+// should also enable mTLS or at minimum run on a trusted internal network.
+type workerSecretCredentials struct {
+	secret string
+}
+
+func (w workerSecretCredentials) GetRequestMetadata(_ context.Context, _ ...string) (map[string]string, error) {
+	return map[string]string{"x-sb-worker-secret": w.secret}, nil
+}
+
+func (workerSecretCredentials) RequireTransportSecurity() bool { return false }
+
 type Client struct {
 	bundle  atomic.Pointer[clientBundle]
 	address string
@@ -144,6 +161,12 @@ type Client struct {
 	serverName       string            // captured at New() for per-bundle TLS configs
 	rotateMu         sync.Mutex        // serializes rotations; readers are lock-free
 	healthCheckOnSwap bool
+
+	// workerAuthSecret is the first token from the operator-configured
+	// SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET value. Sent as
+	// x-sb-worker-secret metadata on every outgoing RPC when non-empty.
+	// Wired via WithWorkerAuthSecret. Empty = no auth (default).
+	workerAuthSecret string
 
 	// Test hooks (no production wiring). Subscribers receive
 	// notifications when a rotation commits or when a candidate is
@@ -172,6 +195,25 @@ type TLSConfig struct {
 	KeyPath    string
 	CAPath     string
 	ServerName string
+}
+
+// WithWorkerAuthSecret wires a shared secret into the gRPC client. When set,
+// every outgoing RPC attaches an x-sb-worker-secret metadata header so the
+// Python worker's ServerInterceptor can validate it.
+//
+// This is the client-side half of D10's shared-secret auth story. When the
+// secret is empty (""), the option is a no-op — matching today's default
+// unauthenticated behaviour. When set, it must match the worker's
+// SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET value (comma-separated for rotation).
+//
+// The first token in a comma-separated list is used for outgoing calls
+// (the server accepts any of the listed tokens — this allows rolling
+// secret rotation by sending the new secret while the server still
+// accepts both old and new).
+func WithWorkerAuthSecret(secret string) Option {
+	return func(c *Client) {
+		c.workerAuthSecret = secret
+	}
 }
 
 // WithKnowledgeTimeoutProvider injects a live timeout provider for
@@ -311,6 +353,16 @@ func New(address string, tlsCfg TLSConfig, opts ...Option) (*Client, error) {
 			Timeout:             20 * time.Second,
 			PermitWithoutStream: false,
 		}),
+	}
+	// D10: attach per-RPC credentials when a shared auth secret is configured.
+	// The first token in a comma-separated list is used for outgoing calls
+	// (the server accepts any token in the list — rotation compatibility).
+	if c.workerAuthSecret != "" {
+		outboundSecret := strings.SplitN(c.workerAuthSecret, ",", 2)[0]
+		outboundSecret = strings.TrimSpace(outboundSecret)
+		if outboundSecret != "" {
+			dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(workerSecretCredentials{secret: outboundSecret}))
+		}
 	}
 	c.dialOpts = dialOpts
 

@@ -145,6 +145,13 @@ type Config struct {
 	// Signature validation happens in the resolver body; the closure applies
 	// applyPageSelection after taxonomy resolution.
 	SelectedPageIDs []string
+
+	// UpstreamCapacityProvider reports the LLM backend's declared parallel
+	// inference capacity. When non-nil, it is passed into the orchestrator's
+	// GenerateRequest so MaxConcurrency can be clamped to the upstream's real
+	// slot count. When nil, MaxConcurrency (coldStartMaxConcurrency=12) is
+	// used as-is. See [lworch.UpstreamCapacityProvider] for return semantics.
+	UpstreamCapacityProvider lworch.UpstreamCapacityProvider
 }
 
 // BuildRunner returns the RunWithContext closure for a living-wiki
@@ -617,9 +624,10 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 		// Wire OnPageReady into the orchestrator request.
 		genReq := lworch.GenerateRequest{
 			Config: lworch.Config{
-				RepoID:         cfg.RepoID,
-				MaxConcurrency: coldStartMaxConcurrency,
-				TimeBudget:     coldStartTimeBudget,
+				RepoID:                   cfg.RepoID,
+				MaxConcurrency:           coldStartMaxConcurrency,
+				TimeBudget:               coldStartTimeBudget,
+				UpstreamCapacityProvider: cfg.UpstreamCapacityProvider, // D4: capacity clamp (nil = no clamp)
 			},
 			Pages:            regenerate,
 			PageFingerprints: currentFps,

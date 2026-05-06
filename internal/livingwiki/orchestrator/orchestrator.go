@@ -361,6 +361,37 @@ type ConstGraphMetrics struct {
 func (c ConstGraphMetrics) PageReferenceCount(_, _ string) int { return c.PageRefs }
 func (c ConstGraphMetrics) GraphRelationCount(_, _ string) int { return c.GraphRelations }
 
+// UpstreamCapacityProvider reports the LLM backend's declared parallel
+// inference capacity. The orchestrator calls UpstreamCapacity once at the
+// start of [Orchestrator.Generate] (M3 — snapshot invariant) and uses the
+// result to clamp [Config.MaxConcurrency] downward when the upstream cannot
+// serve as many parallel calls as configured.
+//
+// Return semantics (D3 encoding):
+//   - (N, true, nil)  → clamp to N (1 ≤ N ≤ 256)
+//   - (0, true, nil)  → unbounded (frontier API); do not clamp
+//   - (0, false, nil) → unknown; do not clamp (fail-open)
+//   - (_, _, err)     → treat as unknown; do not clamp
+//
+// Implementations must be safe for concurrent use. A nil
+// UpstreamCapacityProvider is safe and behaves as if unknown (no clamp).
+type UpstreamCapacityProvider interface {
+	UpstreamCapacity(ctx context.Context) (capacity int, known bool, err error)
+}
+
+// StaticCapacityProvider is an [UpstreamCapacityProvider] that returns a
+// fixed value. Useful in tests and for future REST-override injection.
+type StaticCapacityProvider struct {
+	Value int
+	Known bool
+	Err   error
+}
+
+// UpstreamCapacity implements [UpstreamCapacityProvider].
+func (s StaticCapacityProvider) UpstreamCapacity(_ context.Context) (int, bool, error) {
+	return s.Value, s.Known, s.Err
+}
+
 // Config controls the orchestrator's behaviour.
 type Config struct {
 	// RepoID is the opaque repository identifier.
@@ -370,9 +401,17 @@ type Config struct {
 	// When zero, defaults to 5 minutes.
 	TimeBudget time.Duration
 
-	// MaxConcurrency is the maximum number of page-generation goroutines.
-	// When zero, defaults to 5.
+	// MaxConcurrency is the upper ceiling on concurrent page-generation
+	// goroutines. This value may be clamped downward by
+	// [Config.UpstreamCapacityProvider] when the LLM backend cannot serve as
+	// many parallel calls as configured. Effective concurrency =
+	// min(MaxConcurrency, upstream_capacity). When zero, defaults to 5.
 	MaxConcurrency int
+
+	// UpstreamCapacityProvider reports the LLM backend's declared parallel
+	// inference capacity. When nil, MaxConcurrency is used as-is (no clamp).
+	// Snapshot-invariant: read once at Generate() start; never re-read mid-job.
+	UpstreamCapacityProvider UpstreamCapacityProvider
 
 	// DirectPublish skips the PR flow and writes pages directly to canonical_ast.
 	// Default is false (PR mode). Set to true for teams that do not want a
@@ -684,10 +723,6 @@ func (o *Orchestrator) MedianCompletedPageMs(jobID string) (int64, bool) {
 
 func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (GenerateResult, error) {
 	cfg := mergeConfig(o.cfg, req.Config)
-	// Recompute window/threshold defaults in case mergeConfig produced a
-	// MaxConcurrency that differs from the orchestrator-level value.
-	cfg.SoftFailureWindow = effectiveSoftFailureWindow(cfg)
-	cfg.SoftFailureThreshold = effectiveSoftFailureThreshold(cfg)
 
 	start := time.Now()
 	parentCtx := ctx
@@ -708,12 +743,38 @@ func (o *Orchestrator) Generate(ctx context.Context, req GenerateRequest) (Gener
 			"pages_count", len(req.Pages))
 	}
 
+	// M3: read upstream capacity once at Generate() start; never re-read.
+	// D4: clamp MaxConcurrency downward when the upstream reports a tighter limit.
+	effective := cfg.MaxConcurrency
+	if cfg.UpstreamCapacityProvider != nil {
+		if upCap, known, err := cfg.UpstreamCapacityProvider.UpstreamCapacity(runCtx); err == nil && known {
+			if upCap > 0 && upCap < effective {
+				// Upstream is constrained: clamp down and log once per job.
+				slog.Info("livingwiki/orchestrator: clamping MaxConcurrency to upstream capacity",
+					"configured", cfg.MaxConcurrency,
+					"upstream_capacity", upCap,
+					"effective", upCap,
+					"job_id", req.JobID)
+				effective = upCap
+			}
+			// upCap == 0 with known=true means unbounded (frontier API);
+			// effective stays at cfg.MaxConcurrency.
+		}
+		// On error or unknown: fail-open (no clamp); orchestrator uses configured MaxConcurrency.
+	}
+	// C1: recompute breaker math from the CLAMPED effective concurrency.
+	// Without this, a breaker calibrated for a 12-wide pool trips falsely on
+	// a 1-wide pool's normal soft-failure rate (threshold would be 13 vs 2).
+	cfg.MaxConcurrency = effective
+	cfg.SoftFailureWindow = effectiveSoftFailureWindow(cfg)
+	cfg.SoftFailureThreshold = effectiveSoftFailureThreshold(cfg)
+
 	outcomes := make([]pageOutcome, len(req.Pages))
 	var outcomesMu sync.Mutex
 	sw := newSoftFailureWindow(cfg.SoftFailureWindow, cfg.SoftFailureThreshold)
 
 	eg, egCtx := errgroup.WithContext(runCtx)
-	eg.SetLimit(cfg.MaxConcurrency)
+	eg.SetLimit(effective)
 
 	// pageIDs collects the IDs of all pages we start tracking so the
 	// deferred error-path sweep can remove them if Generate returns an error.
@@ -1577,6 +1638,12 @@ func mergeConfig(base, override Config) Config {
 	}
 	if override.SoftFailureThreshold > 0 {
 		merged.SoftFailureThreshold = override.SoftFailureThreshold
+	}
+	if override.GraphMetrics != nil {
+		merged.GraphMetrics = override.GraphMetrics
+	}
+	if override.UpstreamCapacityProvider != nil {
+		merged.UpstreamCapacityProvider = override.UpstreamCapacityProvider
 	}
 	return merged
 }

@@ -496,6 +496,13 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		s.searchSvc.WithEmbedder(cached)
 	}
 
+	// lazyAgent is the production LazyAgentSynth that implements both the
+	// agentic synthesizer interface and UpstreamCapacityProvider. Declared
+	// here (outside the if cfg != nil block) so AppDeps can capture it as
+	// UpstreamCapacityProvider after the QA block completes (Phase 2 / D4).
+	// Remains nil when no cfg or no llmCaller is available.
+	var lazyAgent *qa.LazyAgentSynth
+
 	// Server-side QA orchestrator. Default off until Phase 5 flips
 	// QAConfig.ServerSideEnabled. The handler also double-checks the
 	// flag so operators can disable cleanly without a restart.
@@ -547,9 +554,10 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		// We always wire the lazy provider — even when llmCaller is
 		// nil — because the orchestrator's shouldUseAgenticPath gate
 		// short-circuits on a nil caller without burning a probe.
+		//
 		if s.llmCaller != nil {
 			versionSrc := &resolverVersionSource{r: s.llmResolver}
-			lazyAgent := qa.NewLazyAgentSynth(s.llmCaller, versionSrc, qa.LazyAgentSynthOptions{
+			lazyAgent = qa.NewLazyAgentSynth(s.llmCaller, versionSrc, qa.LazyAgentSynthOptions{
 				// Per-request probe deadline. The first agentic request
 				// after a cold start blocks on this; 2s is the sweet
 				// spot — long enough that a healthy worker on the
@@ -632,6 +640,14 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		if s.llmProfileStore != nil {
 			profileLookup = s.llmProfileStore
 		}
+		// Capture lazyAgent as the UpstreamCapacityProvider for the coldstart
+		// runner (Phase 2 / D4). LazyAgentSynth implements UpstreamCapacity(ctx)
+		// and shares the single-flight probe with SupportsTools (M4). nil when
+		// no worker caller is configured (tests, deployments without a worker).
+		var capacityProvider lworch.UpstreamCapacityProvider
+		if lazyAgent != nil {
+			capacityProvider = lazyAgent
+		}
 		s.AppDeps = &appdeps.AppDeps{
 			KnowledgeStore:             s.knowledgeStore,
 			Worker:                     s.worker,
@@ -657,10 +673,11 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			LivingWikiPagePublishStore: s.livingWikiPagePublishStore,
 			// LivingWikiAuditLog: enterprise-only; not stored on Server; left nil
 			// here (enterprise routes or tests may set it on the resolver directly).
-			ClusterStore:     clusterStore,
-			WorkerVersion:    buildWorkerVersionFunc(s),
-			DrainAdmitter:    s.DrainAdmitterFor(),
-			EncryptionKeySet: s.encryptionKeySet,
+			ClusterStore:             clusterStore,
+			WorkerVersion:            buildWorkerVersionFunc(s),
+			DrainAdmitter:            s.DrainAdmitterFor(),
+			EncryptionKeySet:         s.encryptionKeySet,
+			UpstreamCapacityProvider: capacityProvider,
 		}
 		// syncServerDepsFromAppDeps is an idempotent identity sync: the Server
 		// already has these values from the WithXxx options applied above. It

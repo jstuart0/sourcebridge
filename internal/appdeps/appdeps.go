@@ -99,4 +99,11 @@ type AppDeps struct {
 	// GET /api/v1/admin/llm-profiles so the web UI can show the correct
 	// onboarding state (r1 Phase 2d).
 	EncryptionKeySet bool
+
+	// UpstreamCapacityProvider is the production adapter that reports the
+	// LLM backend's declared parallel inference capacity. Populated at
+	// wiring time from the global LazyAgentSynth (Phase 2). When nil
+	// (e.g., in tests that don't wire a worker), the coldstart runner
+	// injects no UpstreamCapacityProvider and MaxConcurrency is used as-is.
+	UpstreamCapacityProvider lworch.UpstreamCapacityProvider
 }

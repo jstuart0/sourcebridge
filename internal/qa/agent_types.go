@@ -79,4 +79,9 @@ type ProviderCapabilities struct {
 	Model                  string `json:"model"`
 	ToolUseSupported       bool   `json:"tool_use_supported"`
 	PromptCachingSupported bool   `json:"prompt_caching_supported"`
+	// MaxConcurrentCalls is the upstream backend's declared parallel
+	// inference capacity. 0 with MaxConcurrentCallsKnown=true means
+	// unbounded (frontier APIs). 0 with Known=false means unknown.
+	MaxConcurrentCalls      int  `json:"max_concurrent_calls,omitempty"`
+	MaxConcurrentCallsKnown bool `json:"max_concurrent_calls_known,omitempty"`
 }
