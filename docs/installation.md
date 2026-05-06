@@ -685,6 +685,16 @@ Embeddings are used for semantic search and knowledge retrieval in large reposit
    docker compose up -d worker
    ```
 
+4. If `/auth/info` returns HTTP 500 and you are running `docker-compose.hub.yml`
+   with a `sourcebridge-web:latest` image pulled before 2026-05-05, pull the
+   updated image. The build-time rewrites pointed to `http://localhost:8080`,
+   which is unreachable inside the container; the fix is in commits `1fee78b`,
+   `9ba671b`, `873bc53` on `main`.
+   ```bash
+   docker compose -f docker-compose.hub.yml pull web
+   docker compose -f docker-compose.hub.yml up -d web
+   ```
+
 ### API server returns 502 or connection refused
 
 **Symptom:** `curl http://localhost:8080/healthz` fails.
@@ -781,6 +791,31 @@ generic errors.
 
 To resolve, either stop the conflicting process or change the port mapping in
 `docker-compose.yml`.
+
+### Custom web port requires matching CORS origin
+
+**Symptom:** Page hangs at "loading"; browser DevTools console shows
+`blocked by CORS policy`.
+
+If you override `SOURCEBRIDGE_WEB_PORT` (e.g. to `3300` because port 3000 is
+taken), also set `SOURCEBRIDGE_SERVER_CORS_ORIGINS` on the API container to
+include the new origin. The Go API rejects requests whose `Origin` header is not
+in the allowlist (default: `["http://localhost:3000"]`).
+
+```
+SOURCEBRIDGE_SERVER_CORS_ORIGINS='["http://localhost:3300"]'
+```
+
+### Admin SSE streams drop after a few seconds of idle
+
+**Symptom:** `/admin/monitor` (and other admin SSE streams) disconnect after a
+short idle period.
+
+Node's default `keepAliveTimeout` in standalone mode is 5 seconds. If the Go
+API's SSE heartbeat interval exceeds this, the underlying TCP connection closes
+between heartbeats. Set `NEXT_HTTP_KEEP_ALIVE_TIMEOUT=60000` (milliseconds) on
+the web container, or shorten the upstream heartbeat interval. The middleware
+proxy preserves stream chunks but cannot extend the TCP keepalive independently.
 
 ### Viewing logs
 

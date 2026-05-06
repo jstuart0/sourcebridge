@@ -24,6 +24,27 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-05 web runtime API proxy fix** — 3 commits, `1fee78b..873bc53`.
+Replaces `next.config.ts rewrites()` with a Next.js middleware at
+`web/src/middleware.ts` that proxies `/api/*`, `/auth/*`, `/healthz`,
+`/readyz`, and `/metrics` to the upstream API at request time.
+
+Load-bearing constraints for future-Claude:
+
+- The middleware reads `SOURCEBRIDGE_WEB_DEV_PROXY || 'http://localhost:8080'`
+  at request time. **Do not switch this back to `NEXT_PUBLIC_*`** — webpack's
+  DefinePlugin inlines `NEXT_PUBLIC_*` vars at build time (including in
+  server-side middleware bundles), which is exactly the bug that was fixed.
+- The `next.config.ts` `env: { NEXT_PUBLIC_API_URL: ... }` block is
+  **mandatory and must not be deleted**. Its sole consumer is the `"use client"`
+  page at `web/src/app/(app)/settings/appearance/page.tsx`, which needs
+  DefinePlugin inlining in the client bundle.
+- Future Next.js native handlers under `web/src/app/api/<name>/route.ts` will
+  be silently proxied to the Go API unless their path is added to the exclusion
+  guard in `middleware.ts`. `/api/health` is the currently-excluded path.
+
+Plan: `thoughts/shared/plans/active-2026-05-05-deliver-web-runtime-api-proxy.md`
+
 **2026-05-04 system audit refactor** (CA-155) — 74 commits, `a176b6f..89c85f3`.
 Full-codebase audit covering security hardening, GraphQL deduplication, subsystem
 registration, MCP tool refactor, web UI consolidation, and infrastructure

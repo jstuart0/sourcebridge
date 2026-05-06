@@ -603,6 +603,27 @@ test.
 
 ### Fixed
 
+- **Hub install: web container proxy now resolves the upstream API URL at
+  request time** (`1fee78b`, `9ba671b`, `873bc53`). The published
+  `sourcebridge-web` image previously baked `next.config.ts` rewrites
+  pointing to `http://localhost:8080` at build time. Inside the running
+  container that address is unreachable — the API is at `sourcebridge:8080`
+  on the Docker network — so every fresh `docker-compose.hub.yml` install
+  got HTTP 500 on `/auth/info`, and the login page silently fell back to
+  password-entry mode for an account that was never created. The fix
+  replaces `next.config.ts rewrites()` with a Next.js middleware
+  (`web/src/middleware.ts`) that reads `SOURCEBRIDGE_WEB_DEV_PROXY` per
+  request. The middleware also strips upstream API security headers
+  (prevents CSP/X-Frame-Options collisions with the web UI's own headers)
+  and `X-Forwarded-*` injection vectors (closes a rate-limit bypass via
+  spoofed client IP). SSE streams propagate browser disconnect via
+  `signal: request.signal`.
+
+- **`docker-compose.hub.yml` SurrealDB init no longer fails with
+  `PermissionDenied`** (`b73502c`). The `surrealdb-init` service was
+  missing from the hub compose file; first installs silently skipped DB
+  initialization and the API container crashed on boot.
+
 - **`sourcebridge login` error no longer sends users to a 404** (`201548a`,
   CA-124). The "setup not complete" error previously named `/setup`, which
   returns 404. It now names `/login` and provides a curl fallback.
