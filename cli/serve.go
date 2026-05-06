@@ -510,6 +510,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 			bootCancel()
 			return fmt.Errorf("llm profile migration failed: %w", err)
 		}
+		// D2: seed max_concurrent_calls from SOURCEBRIDGE_LLM_PARALLEL_HINT only
+		// when the column is NONE (NULL) on the default profile — never overwrites
+		// an operator-set value. No-ops when env var is unset.
+		if err := lps.SeedDefaultProfileMaxConcurrentCalls(bootCtx, db.MigratedProfileRecordID); err != nil {
+			bootCancel()
+			return fmt.Errorf("seed default profile max_concurrent_calls: %w", err)
+		}
 		bootCancel()
 
 		// Build the profile-aware resolver adapter (codex-H2 + H3 +
