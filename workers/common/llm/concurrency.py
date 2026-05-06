@@ -267,6 +267,8 @@ class ConcurrencyConfig:
             with contextlib.suppress(ValueError):
                 interval = float(interval_raw)
 
+        _validate_known_provider_tokens(all_providers)
+
         return cls(
             llm_max_concurrent=llm_max,
             embedding_max_concurrent=embed_max,
@@ -276,6 +278,52 @@ class ConcurrencyConfig:
             retry_max_attempts=retry_max,
             metrics_interval_seconds=interval,
         )
+
+
+def _validate_known_provider_tokens(all_providers: list[str]) -> None:
+    """Scan env vars for unknown provider tokens and emit a structlog WARNING.
+
+    Decision 7 / codex r2 L1: an operator typo like
+    ``SOURCEBRIDGE_LLM_PROVIDER_OPENAICOMPAT_MAX_CONCURRENT`` (missing the
+    underscore in OPENAI_COMPATIBLE) would otherwise be silently ignored.
+    This helper detects such typos and warns without raising, so existing
+    deployments with stale env vars don't crash at boot.
+
+    Scans for the three per-provider env-var patterns consumed by ``from_env()``:
+      ``SOURCEBRIDGE_LLM_PROVIDER_<NAME>_MAX_CONCURRENT``
+      ``SOURCEBRIDGE_LLM_PROVIDER_<NAME>_RPM``
+      ``SOURCEBRIDGE_EMBEDDING_PROVIDER_<NAME>_MAX_CONCURRENT``
+    """
+    # Build the set of canonical tokens (uppercase, hyphens → underscores).
+    canonical_tokens: frozenset[str] = frozenset(
+        p.upper().replace("-", "_") for p in all_providers
+    )
+
+    _LLM_SUFFIXES = ("_MAX_CONCURRENT", "_RPM")
+    _EMBED_SUFFIXES = ("_MAX_CONCURRENT",)
+
+    for env_var in os.environ:
+        token: str | None = None
+        if env_var.startswith("SOURCEBRIDGE_LLM_PROVIDER_"):
+            remainder = env_var[len("SOURCEBRIDGE_LLM_PROVIDER_"):]
+            for suffix in _LLM_SUFFIXES:
+                if remainder.endswith(suffix):
+                    token = remainder[: -len(suffix)]
+                    break
+        elif env_var.startswith("SOURCEBRIDGE_EMBEDDING_PROVIDER_"):
+            remainder = env_var[len("SOURCEBRIDGE_EMBEDDING_PROVIDER_"):]
+            for suffix in _EMBED_SUFFIXES:
+                if remainder.endswith(suffix):
+                    token = remainder[: -len(suffix)]
+                    break
+
+        if token is not None and token not in canonical_tokens:
+            log.warning(
+                "concurrency_config_unknown_provider_token",
+                env_var=env_var,
+                unknown_token=token,
+                canonical_tokens=sorted(canonical_tokens),
+            )
 
 
 def _read_max_concurrent(env_var: str, provider: str, target: dict[str, int]) -> None:

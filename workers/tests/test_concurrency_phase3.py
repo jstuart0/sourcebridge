@@ -972,8 +972,42 @@ def test_concurrency_config_from_env_env_override_takes_precedence(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 20. test_concurrency_config_rejects_unknown_provider_token
-#     (Plan codex r2 L1: validator should reject unknown provider tokens)
+# 20. test_concurrency_config_warns_on_unknown_provider_token
+#     (Plan codex r2 L1: validator should warn on unknown provider tokens)
+
+
+def test_concurrency_config_warns_on_unknown_provider_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 7 / codex r2 L1: typo'd provider env vars produce a structlog
+    warning, not a silent no-op.  The valid env var is still parsed correctly."""
+    import structlog.testing
+
+    # Typo: OPENAICOMPAT instead of OPENAI_COMPATIBLE
+    monkeypatch.setenv("SOURCEBRIDGE_LLM_PROVIDER_OPENAICOMPAT_MAX_CONCURRENT", "4")
+    # Valid env var as a control — must still be applied.
+    monkeypatch.setenv("SOURCEBRIDGE_LLM_PROVIDER_OLLAMA_MAX_CONCURRENT", "2")
+
+    with structlog.testing.capture_logs() as captured:
+        cfg = ConcurrencyConfig.from_env()
+
+    # Must not raise; valid env var still parsed.
+    assert cfg is not None
+    assert cfg.llm_max_concurrent.get("ollama") == 2
+
+    # Unknown token must produce a warning event.
+    unknown_warnings = [
+        e for e in captured
+        if e.get("event") == "concurrency_config_unknown_provider_token"
+        and e.get("unknown_token") == "OPENAICOMPAT"
+    ]
+    assert len(unknown_warnings) >= 1, (
+        f"Expected warning about OPENAICOMPAT typo; captured events: {[e.get('event') for e in captured]}"
+    )
+    # The warning should name the bad env var and list canonical tokens.
+    w = unknown_warnings[0]
+    assert w["env_var"] == "SOURCEBRIDGE_LLM_PROVIDER_OPENAICOMPAT_MAX_CONCURRENT"
+    assert "OPENAI_COMPATIBLE" in w["canonical_tokens"]
 
 
 def test_concurrency_config_decision6_real_defaults_loaded() -> None:
