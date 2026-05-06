@@ -1435,6 +1435,7 @@ func (a *llmProfileStoreAdapter) CreateProfile(ctx context.Context, req rest.Pro
 		DraftModel:               req.DraftModel,
 		TimeoutSecs:              req.TimeoutSecs,
 		AdvancedMode:             req.AdvancedMode,
+		MaxConcurrentCalls:       req.MaxConcurrentCalls,
 	})
 	if err != nil {
 		return "", translateProfileStoreErr(err)
@@ -1482,6 +1483,8 @@ func (a *llmProfileStoreAdapter) UpdateProfile(ctx context.Context, id string, r
 		DraftModel:               req.DraftModel,
 		TimeoutSecs:              req.TimeoutSecs,
 		AdvancedMode:             req.AdvancedMode,
+		MaxConcurrentCalls:       req.MaxConcurrentCalls,
+		ClearMaxConcurrentCalls:  req.ClearMaxConcurrentCalls,
 	}
 	if err := a.lps.UpdateProfile(ctx, id, patch); err != nil {
 		return translateProfileStoreErr(err)
@@ -1650,6 +1653,7 @@ func profileToResponse(p db.Profile, activeID string) rest.ProfileResponse {
 		IsActive:                 p.ID == activeID,
 		CreatedAt:                rest.FormatProfileTime(p.CreatedAt),
 		UpdatedAt:                rest.FormatProfileTime(p.UpdatedAt),
+		MaxConcurrentCalls:       p.MaxConcurrentCalls,
 	}
 }
 

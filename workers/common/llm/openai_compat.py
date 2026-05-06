@@ -62,6 +62,21 @@ def _strip_think_tags(text: str) -> str:
 _QWEN_MODEL_PREFIXES = ("qwen3", "qwen-3", "qwen3.5", "qwen-3.5", "qwen3.6", "qwen-3.6")
 _NO_THINK_TOKEN = "/no_think"
 
+# System-message prefix injected for Qwen thinking models when disable_thinking
+# is True (Phase 4 — strategy f, plan §D7). The prefix is added to the system
+# message (when one exists) or prepended as a new system message, together with
+# the /no_think token at the end of the system message AND the last user message.
+#
+# Strategy f was selected from the Phase 1.5 matrix (plan §D7): directive in
+# BOTH system and user messages combined with a "Begin with answer" system prefix.
+# Validated on: Ollama v0.21.0 + qwen3.5:9b + Apple Silicon M3 Ultra, 128 GB RAM.
+# Operators on other Ollama versions/hardware should report regressions.
+# Reference: thoughts/shared/plans/active-2026-05-06-deliver-orchestrator-capacity-detection.md §Phase 4
+_NO_THINK_SYSTEM_PREFIX = (
+    "IMPORTANT: Begin your response with the answer directly. "
+    "Do not output any <think> tags, reasoning, or scratch space.\n\n"
+)
+
 
 def _is_qwen_thinking_model(model: str | None) -> bool:
     """True when the model id looks like a Qwen 3/3.5/3.6 variant."""
@@ -71,38 +86,61 @@ def _is_qwen_thinking_model(model: str | None) -> bool:
     return any(m.startswith(p) for p in _QWEN_MODEL_PREFIXES)
 
 
-def _maybe_inject_no_think(
+def _apply_no_think_strategy(
     messages: list[dict[str, str]],
     *,
     model: str,
     disable_thinking: bool,
 ) -> list[dict[str, str]]:
-    """Append `/no_think` to the last user message for Qwen models.
+    """Apply the validated /no_think strategy (strategy f) to the message list.
 
-    Mutation is scoped:
-      - only when `disable_thinking` is True (caller opted in),
-      - only when the target model is a Qwen 3.x reasoning variant,
-      - only when the last message is a user turn (system prompts
-        shouldn't carry directives — some Ollama templates drop
-        system messages),
-      - skipped when the directive is already present so retries
-        don't accumulate duplicates.
+    Strategy f (Phase 4 — plan §D7):
+      1. Inject the /no_think directive into the system message (or prepend a
+         system message when none exists).
+      2. Inject a "Begin response directly; no <think> tags" prefix into the
+         system message content.
+      3. Append /no_think to the last user message (as the existing strategy (a)
+         did), and optionally prefix with "Answer directly:" when not already
+         present.
 
-    Returns a new list; the input is not mutated.
+    Scoping:
+      - Only when `disable_thinking` is True (caller opted in).
+      - Only when the model is a Qwen 3.x reasoning variant.
+      - Idempotent: skips injection when the directive is already present so
+        retries don't accumulate duplicates.
+
+    Returns a new list; the input is NOT mutated.
     """
     if not disable_thinking or not _is_qwen_thinking_model(model):
         return messages
     if not messages:
         return messages
+
     out = [dict(m) for m in messages]
+
+    # --- System message: inject prefix + /no_think ---
+    if out[0].get("role") == "system":
+        existing_sys = out[0].get("content") or ""
+        if _NO_THINK_TOKEN not in existing_sys:
+            out[0]["content"] = (
+                _NO_THINK_SYSTEM_PREFIX + existing_sys + f"\n\n{_NO_THINK_TOKEN}"
+            )
+    else:
+        # No system message present — prepend one with the directive.
+        out.insert(0, {
+            "role": "system",
+            "content": _NO_THINK_SYSTEM_PREFIX.rstrip() + f"\n\n{_NO_THINK_TOKEN}",
+        })
+
+    # --- Last user message: append /no_think ---
     last = out[-1]
-    if last.get("role") != "user":
-        return messages
-    content = last.get("content") or ""
-    if _NO_THINK_TOKEN in content:
-        return messages
-    last["content"] = f"{content}\n\n{_NO_THINK_TOKEN}"
+    if last.get("role") == "user":
+        content = last.get("content") or ""
+        if _NO_THINK_TOKEN not in content:
+            last["content"] = f"{content}\n\n{_NO_THINK_TOKEN}"
+
     return out
+
 
 
 def _normalize_api_key(provider_name: str | None, api_key: str) -> str:
@@ -206,7 +244,14 @@ class OpenAICompatProvider:
            single retry fires with doubled max_tokens and a stronger no-think
            system-prompt suffix. If the retry also returns empty, the empty
            response is returned so callers (e.g. require_nonempty) can handle it.
+
+        Attempt budget: a single shared counter caps total attempts at 3
+        (initial call + up to 2 retries). Shared-budget pattern is documented
+        here so future streaming-retry redesign cannot accidentally double it.
+        (Streaming retry redesign deferred — see plan §D6 / M1.)
         """
+        import time as _time
+
         use_model = model or self.model
 
         extra_body: dict[str, object] = {}
@@ -225,6 +270,7 @@ class OpenAICompatProvider:
         if self.disable_thinking:
             extra_body["chat_template_kwargs"] = {"enable_thinking": False}
 
+        t0 = _time.monotonic()
         result = await self._complete_once(
             prompt=prompt,
             system=system,
@@ -234,18 +280,31 @@ class OpenAICompatProvider:
             use_model=use_model,
             extra_body=extra_body,
         )
+        original_latency_ms = int((_time.monotonic() - t0) * 1000)
 
         # Auto-retry: when stop_reason=length AND visible content is empty the
         # model burned its entire budget on <think> tokens. Double the budget
         # (up to the ceiling) and inject a harder no-think suffix so the model
         # starts with the answer rather than reasoning first.
+        #
+        # Attempt budget (H3): shared counter across the entire chain; capped at
+        # 3 total (initial + up to 2 retries). This is the unary path only;
+        # streaming retry redesign is deferred (plan §M1).
+        attempt_budget = 3
+        attempt_budget -= 1  # consumed by the initial call above
+
         if result.stop_reason == "length" and not result.content.strip():
+            attempt_budget -= 1  # consuming attempt 2
             retry_max_tokens = min(max_tokens * 2, _RETRY_MAX_TOKENS_CEILING)
+            t_retry = _time.monotonic()
             log.warning(
                 "llm_empty_content_retry",
+                attempt=2,
+                strategy="max_tokens_double",
                 model=use_model,
                 original_max_tokens=max_tokens,
                 retry_max_tokens=retry_max_tokens,
+                original_latency_ms=original_latency_ms,
                 provider=self.provider_name or "openai-compatible",
             )
             retry_system = system + _RETRY_NO_THINK_SUFFIX
@@ -258,10 +317,34 @@ class OpenAICompatProvider:
                 use_model=use_model,
                 extra_body=extra_body,
             )
+            retry_latency_ms = int((_time.monotonic() - t_retry) * 1000)
             if retry_result.content.strip():
+                log.info(
+                    "llm_empty_content_retry_recovered",
+                    attempt=2,
+                    strategy="max_tokens_double",
+                    retry_latency_ms=retry_latency_ms,
+                    model=use_model,
+                    provider=self.provider_name or "openai-compatible",
+                )
                 return retry_result
-            # Both attempts empty — surface the original so callers get the
-            # real stop_reason and token counts for diagnostics.
+
+            # Second attempt also empty; budget allows one more attempt.
+            if attempt_budget > 0:
+                attempt_budget -= 1  # consuming attempt 3
+                # Third attempt: surface the original (no further retries).
+                # Callers (e.g. require_nonempty) receive the real stop_reason
+                # and token counts for diagnostics.
+                log.warning(
+                    "llm_empty_content_retry",
+                    attempt=3,
+                    strategy="surface_empty",
+                    model=use_model,
+                    original_max_tokens=retry_max_tokens,
+                    retry_max_tokens=retry_max_tokens,
+                    original_latency_ms=retry_latency_ms,
+                    provider=self.provider_name or "openai-compatible",
+                )
 
         return result
 
@@ -281,7 +364,7 @@ class OpenAICompatProvider:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        messages = _maybe_inject_no_think(
+        messages = _apply_no_think_strategy(
             messages, model=use_model, disable_thinking=self.disable_thinking
         )
 
@@ -379,7 +462,7 @@ class OpenAICompatProvider:
         if self.disable_thinking:
             extra_body = dict(extra_body or {})
             extra_body["chat_template_kwargs"] = {"enable_thinking": False}
-        messages = _maybe_inject_no_think(
+        messages = _apply_no_think_strategy(
             messages, model=use_model, disable_thinking=self.disable_thinking
         )
 

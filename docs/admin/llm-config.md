@@ -1100,6 +1100,203 @@ calibration ticket.
 
 ---
 
+## Backend parallelism and the `max_concurrent_calls` field
+
+### Why this exists
+
+Living Wiki generation dispatches multiple page-generation requests in
+parallel. The orchestrator's per-job concurrency (`MaxConcurrency`,
+default 5 for coldstart; configurable via **Admin → Comprehension →
+Runtime**) controls how many pages are in-flight simultaneously.
+
+When the upstream LLM backend (typically Ollama) can only serve 1
+request at a time (`OLLAMA_NUM_PARALLEL=1`, the stock default), 11 of
+those 12 goroutines queue behind the single slot — each waiting 50–90 s.
+Two concurrent LW jobs halve throughput further. The result: a 17-page
+cold-start that should complete in 5 minutes takes 30+ minutes.
+
+The `max_concurrent_calls` profile field tells the orchestrator the
+upstream's real parallelism so it can clamp its goroutine count to
+match. When the upstream capacity is less than `MaxConcurrency`, the
+orchestrator logs a single INFO line per job and reduces its pool to fit:
+
+```
+livingwiki/orchestrator: clamping MaxConcurrency to upstream capacity
+  configured=12 upstream_capacity=8 effective=8 job_id=...
+```
+
+### Encoding
+
+| `max_concurrent_calls` value | Meaning |
+|---|---|
+| `null` (default) | Unknown — orchestrator does not clamp; uses configured `MaxConcurrency` as-is |
+| `0` | Explicitly unbounded (frontier APIs, OpenRouter) — orchestrator does not clamp |
+| `1..256` | Clamp value — orchestrator limits in-flight goroutines to this value |
+
+### Hard ceiling
+
+The maximum effective value is **256 concurrent calls per profile**.
+Values above 256 are rejected by the SurrealDB `ASSERT` constraint and
+clamped silently to 256 by the Go-side adapter as defense in depth.
+
+### Setting the value
+
+**v1 path (env var + REST; no Admin UI form yet):**
+
+1. **Environment variable (seed-once bootstrap):** set
+   `SOURCEBRIDGE_LLM_PARALLEL_HINT=8` (or whatever matches your
+   `OLLAMA_NUM_PARALLEL`). On first boot, the API seeds the Default
+   profile's `max_concurrent_calls` from this env var **only when the
+   column is NULL**. After the seed, the DB value is authoritative and
+   the env var is ignored on subsequent restarts. Remove the env var
+   once the first boot is complete.
+
+2. **REST PATCH (any time):**
+   ```bash
+   # Get the profile id first:
+   curl -s https://sourcebridge.example/api/v1/llm/profiles \
+     -H "Authorization: Bearer $TOKEN" | jq '.[0].id'
+
+   # Set max_concurrent_calls:
+   curl -X PATCH https://sourcebridge.example/api/v1/llm/profiles/<id> \
+     -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"max_concurrent_calls": 8}'
+
+   # Reset to null (unknown — no clamping):
+   curl -X PATCH https://sourcebridge.example/api/v1/llm/profiles/<id> \
+     -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"clear_max_concurrent_calls": true}'
+   ```
+
+3. **Admin UI:** a form field is planned for v2 (CA-### follow-up).
+   In v1, use the REST API above.
+
+### Recommended values by provider
+
+| Provider | Recommended `max_concurrent_calls` |
+|---|---|
+| **Ollama** | Match `OLLAMA_NUM_PARALLEL` (see below). Default Ollama: `1`. |
+| **vLLM** | Match `--max-num-seqs` (default 256; often `8`–`32` in practice). |
+| **llama.cpp** (llama-server) | Match `-np` / `--parallel` (default 1). |
+| **LM Studio** | Match "Parallel requests" in the server settings. |
+| **Anthropic API** | `0` (explicitly unbounded; batch rate-limits handled server-side). |
+| **OpenAI API** | `0` (unbounded). |
+| **OpenRouter** | `0` (unbounded). |
+| **Azure OpenAI** | `0` (unbounded). |
+
+### Recommended Ollama settings for typical hardware
+
+These environment variables go in `OLLAMA_*` env in your Ollama service
+file (e.g. `/etc/systemd/system/ollama.service` or
+`/Library/LaunchDaemons/com.ollama.serve.plist`):
+
+| Env var | Recommended value | Effect |
+|---|---|---|
+| `OLLAMA_NUM_PARALLEL` | **8** (Apple Silicon 128 GB RAM) / **2–4** (16–32 GB) / **1** (≤8 GB) | Max in-flight requests. Set `max_concurrent_calls` to the same value. |
+| `OLLAMA_MAX_LOADED_MODELS` | `1` | Prevents model thrashing when `MaxConcurrency` > loaded models. |
+| `OLLAMA_KEEP_ALIVE` | `10m` | Keep the model warm between LW jobs (reduces first-page latency). |
+| `OLLAMA_FLASH_ATTENTION` | `1` | Enables flash attention on supported hardware (speeds up prefill). |
+| `OLLAMA_KV_CACHE_TYPE` | `q8_0` | Reduces KV-cache VRAM at minimal quality cost (useful for large contexts). |
+
+After changing Ollama settings, restart the Ollama service and update
+`max_concurrent_calls` via REST to match the new `OLLAMA_NUM_PARALLEL`
+value.
+
+### `max_concurrent_calls` vs `MaxConcurrency`
+
+`MaxConcurrency` (Admin → Comprehension → Runtime → "Max concurrency") is
+a **ceiling** — the most goroutines the orchestrator will dispatch for a
+single LW job regardless of upstream capacity. `max_concurrent_calls` is
+an **upstream clamp** that further reduces that ceiling when upstream
+capacity is smaller. The effective concurrency is
+`min(MaxConcurrency, max_concurrent_calls)`.
+
+Operators who want to serialize LW generation for debugging can set
+`MaxConcurrency=1` directly; `max_concurrent_calls` is a backend-capacity
+signal, not a deliberate throttle.
+
+### Soft-failure breaker recalibration (C1)
+
+The orchestrator's soft-failure breaker trips when too many page
+generations fail in a window. Prior to this fix, the breaker was
+calibrated against the *configured* `MaxConcurrency` (e.g. 12). With
+`max_concurrent_calls=1` clamping the effective concurrency to 1, the
+breaker would trip immediately on any single failure — "13 failures in a
+window of 30" is unreachable at `effective=1`.
+
+The breaker is now recalibrated from the *clamped* effective concurrency:
+- Window: `max(2 × effective, 30)`
+- Threshold: `max(effective + 1, 15)`
+
+At `effective=1`, window=30 and threshold=15 — conservative but
+reachable. Operators running fully serialized LW on weak hardware should
+not see false breaker trips.
+
+### Multi-replica cache caveat
+
+In multi-replica installs (Helm `replicas > 1`), each API replica caches
+`max_concurrent_calls` independently (one gRPC probe per replica per
+process lifetime). After changing `max_concurrent_calls` via REST PATCH,
+restart all replicas to guarantee immediate visibility:
+
+```bash
+kubectl -n sourcebridge rollout restart deploy/sourcebridge-api
+```
+
+### Worker gRPC auth surface (D10)
+
+If the worker's gRPC bind address is **non-loopback** (`0.0.0.0`,
+`[::]`, or any non-127/non-`::1` address), set the shared secret
+`SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET` to a random string (≥32 chars
+recommended) and set the **same value** in the API config. Without one
+of these, the worker logs an ERROR at startup:
+`worker_grpc_unauthenticated_non_loopback_bind`.
+
+```bash
+# Generate a secret:
+openssl rand -hex 32
+
+# Set in API env (docker-compose, configmap, etc.):
+SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET=<the-secret>
+
+# Set in worker env (same value):
+WORKER_GRPC_AUTH_SECRET=<the-secret>
+```
+
+When the secret is non-empty, the API attaches an `x-sb-worker-secret`
+metadata header to every gRPC call; the worker rejects calls with a
+missing or mismatched header with `UNAUTHENTICATED`. When the secret is
+empty, both sides operate as before (no auth). mTLS remains opt-in for
+stricter deployments.
+
+### `/no_think` directive and Qwen thinking models
+
+Qwen 3 / 3.5 / 3.6 models honor a `/no_think` directive to skip their
+`<think>` reasoning block. SourceBridge injects this directive when the
+profile's `disable_thinking` flag is enabled (automatically set for
+detected Qwen models on Ollama backends).
+
+**Matrix-validated strategy (strategy f, Ollama v0.21.0 + qwen3.5:9b +
+Apple Silicon M3 Ultra, 128 GB RAM):** the directive is injected into
+both the system message and the last user message, with a system-message
+prefix: "Begin your response with the answer directly. Do not output any
+`<think>` tags, reasoning, or scratch space." This combination achieves
+<5% empty-content rate at all `max_tokens` budgets from 256 through
+4096. Operators on other Ollama versions or hardware should report
+regressions.
+
+**Empty-content retry policy:** when `stop_reason=length` AND visible
+content is empty (model burned budget on `<think>` tokens), the
+orchestrator retries once with doubled `max_tokens` (capped at 16384)
+and a reinforced no-think system prompt. Total attempt budget is 3
+(initial + up to 2 retries). Retry latency when it fires: ≤30 s
+(vs ~114 s pre-fix). Telemetry: `llm_empty_content_retry` log with
+`attempt`, `strategy`, `original_latency_ms` fields.
+
+---
+
 ## Living Wiki page-count and ops behavior
 
 For how Living Wiki determines the number of pages to generate, how

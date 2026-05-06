@@ -222,6 +222,76 @@ def test_zero_or_negative_timeout_falls_back_to_default(monkeypatch: pytest.Monk
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
+async def test_phase4_strategy_f_injects_into_system_and_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Phase 4: strategy (f) — /no_think injected into BOTH system message and
+    last user message, with 'Begin response directly' prefix in system.
+    Validates the plan §D7 matrix winner for Qwen thinking models."""
+    monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
+    provider = OpenAICompatProvider(
+        api_key="x",
+        model="qwen3.5:9b",
+        base_url="http://localhost:11434/v1",
+        provider_name="ollama",
+        disable_thinking=True,
+    )
+
+    await provider.complete("hello", system="Be helpful.")
+
+    create = provider.client.chat.completions.create
+    assert create.calls
+    messages = create.calls[0]["messages"]
+
+    sys_msg = next((m for m in messages if m["role"] == "system"), None)
+    user_msg = next((m for m in messages if m["role"] == "user"), None)
+
+    assert sys_msg is not None, "system message must be present"
+    assert "/no_think" in sys_msg["content"], "system message must contain /no_think"
+    assert "Begin your response" in sys_msg["content"], (
+        "system message must contain the 'Begin response' prefix"
+    )
+    assert user_msg is not None, "user message must be present"
+    assert "/no_think" in user_msg["content"], "last user message must contain /no_think"
+
+
+@pytest.mark.asyncio
+async def test_phase4_strategy_f_prepends_system_when_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Phase 4: when no system message is provided, _apply_no_think_strategy
+    prepends a synthetic system message so the directive reaches the model."""
+    monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
+    provider = OpenAICompatProvider(
+        api_key="x",
+        model="qwen3.5:9b",
+        base_url="http://localhost:11434/v1",
+        provider_name="ollama",
+        disable_thinking=True,
+    )
+
+    # No system= arg → no system message in the input list.
+    await provider.complete("hello")
+
+    messages = provider.client.chat.completions.create.calls[0]["messages"]
+    roles = [m["role"] for m in messages]
+    assert roles[0] == "system", "system message must be prepended when none provided"
+    assert "/no_think" in messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_phase4_strategy_f_idempotent_on_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Phase 4: calling _apply_no_think_strategy on messages that already have
+    the directive does NOT add a second copy (retry path)."""
+    from workers.common.llm.openai_compat import _apply_no_think_strategy
+    messages = [
+        {"role": "system", "content": "Be helpful.\n\n/no_think"},
+        {"role": "user", "content": "hello\n\n/no_think"},
+    ]
+    result = _apply_no_think_strategy(messages, model="qwen3.5:9b", disable_thinking=True)
+    sys_content = result[0]["content"]
+    user_content = result[-1]["content"]
+    assert sys_content.count("/no_think") == 1, "system /no_think must not be duplicated"
+    assert user_content.count("/no_think") == 1, "user /no_think must not be duplicated"
+
+
 def test_strip_think_tags_clean_response_unchanged() -> None:
     """Responses without think blocks must pass through unmodified."""
     clean = "This function manages the retry logic for LLM calls."
@@ -405,4 +475,78 @@ async def test_both_attempts_empty_returns_original(monkeypatch: pytest.MonkeyPa
     # Both attempts empty — caller gets back the original empty result.
     assert result.content == ""
     assert result.stop_reason == "length"
+
+
+@pytest.mark.asyncio
+async def test_complete_total_attempts_capped_at_three(monkeypatch: pytest.MonkeyPatch) -> None:
+    """H3: shared attempt_budget=3 caps total calls regardless of how many times
+    stop_reason=length and content is empty. Even if every call returns empty,
+    exactly 2 calls are made (initial + 1 retry; the budget counter is shared
+    so the second retry is 'attempt 3' = surface_empty, no fourth call)."""
+    think_only = "<think>I reason forever</think>"
+
+    # Provide 10 responses to ensure the loop cannot fire indefinitely.
+    create = _CallTrackingCreate([_make_response(think_only, "length")] * 10)
+
+    class _FakeClient:
+        def __init__(self, *a, **kw) -> None:
+            self.api_key = kw.get("api_key", "")
+            self.base_url = kw.get("base_url", "")
+            self.timeout = kw.get("timeout", 900)
+            self.default_headers = kw.get("default_headers", {})
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=create))
+
+    monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeClient)
+
+    provider = OpenAICompatProvider(api_key="x", model="qwen3.6:27b-q4_K_M", provider_name="ollama")
+
+    result = await provider.complete("hi", max_tokens=256)
+
+    # Budget allows: 1 initial call + 1 retry (attempt 2 = max_tokens_double).
+    # attempt 3 = surface_empty fires *without* a third network call (returns
+    # the original response). So total calls == 2.
+    assert len(create.calls) == 2, f"expected 2 calls, got {len(create.calls)}"
+    # Surface the original empty result — caller gets real diagnostics.
+    assert result.content == ""
+    assert result.stop_reason == "length"
+
+
+@pytest.mark.asyncio
+async def test_retry_log_includes_telemetry_fields(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
+    """Phase 3: llm_empty_content_retry log must include attempt, strategy,
+    original_latency_ms fields for observability."""
+    import logging
+    import structlog.testing
+
+    think_only = "<think>reasoning</think>"
+    real_answer = "The answer is 42."
+
+    create = _CallTrackingCreate([
+        _make_response(think_only, "length"),
+        _make_response(real_answer, "stop"),
+    ])
+
+    class _FakeClient:
+        def __init__(self, *a, **kw) -> None:
+            self.api_key = kw.get("api_key", "")
+            self.base_url = kw.get("base_url", "")
+            self.timeout = kw.get("timeout", 900)
+            self.default_headers = kw.get("default_headers", {})
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=create))
+
+    monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeClient)
+
+    with structlog.testing.capture_logs() as captured:
+        provider = OpenAICompatProvider(api_key="x", model="qwen3.6:27b-q4_K_M", provider_name="ollama")
+        result = await provider.complete("hi", max_tokens=512)
+
+    retry_events = [e for e in captured if e.get("event") == "llm_empty_content_retry"]
+    assert retry_events, "expected at least one llm_empty_content_retry log event"
+    evt = retry_events[0]
+    assert "attempt" in evt, "retry log must include attempt field"
+    assert "strategy" in evt, "retry log must include strategy field"
+    assert "original_latency_ms" in evt, "retry log must include original_latency_ms field"
+    assert evt["attempt"] == 2
+    assert evt["strategy"] == "max_tokens_double"
+    assert result.content == real_answer
     assert len(create.calls) == 2

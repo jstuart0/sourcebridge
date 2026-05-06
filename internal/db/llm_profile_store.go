@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -122,6 +124,12 @@ type Profile struct {
 	// workspace.version > active.LastLegacyVersionConsumed to detect
 	// old-pod legacy writes.
 	LastLegacyVersionConsumed uint64
+	// MaxConcurrentCalls is the operator-declared upstream parallelism for
+	// this profile.  nil = unknown (orchestrator does not clamp); 0 =
+	// explicitly unbounded (frontier / OpenRouter); 1..256 = clamp value.
+	// Capped at 256 at the DB level (ASSERT) and at the Go-side adapter
+	// (D9 hard ceiling).
+	MaxConcurrentCalls *int
 }
 
 // ProfileCreate is the input shape for CreateProfile. APIKey is plaintext
@@ -141,6 +149,8 @@ type ProfileCreate struct {
 	DraftModel               string
 	TimeoutSecs              int
 	AdvancedMode             bool
+	// MaxConcurrentCalls: nil = unknown, 0 = unbounded, 1..256 = clamp.
+	MaxConcurrentCalls *int
 }
 
 // ProfileUpdate uses pointer-patch semantics (matches the existing
@@ -167,6 +177,11 @@ type ProfileUpdate struct {
 	DraftModel               *string
 	TimeoutSecs              *int
 	AdvancedMode             *bool
+	// MaxConcurrentCalls: nil = no change; pointer to value = set (0 = unbounded,
+	// 1..256 = clamp, validated at DB + REST layers).  ClearMaxConcurrentCalls
+	// resets the column to NULL (unknown) and takes precedence.
+	MaxConcurrentCalls      *int
+	ClearMaxConcurrentCalls bool
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -229,6 +244,8 @@ func (s *SurrealLLMProfileStore) EnsureSchema(ctx context.Context) error {
 		DEFINE FIELD IF NOT EXISTS created_at ON ca_llm_profile TYPE datetime;
 		DEFINE FIELD IF NOT EXISTS updated_at ON ca_llm_profile TYPE datetime;
 		DEFINE FIELD IF NOT EXISTS last_legacy_version_consumed ON ca_llm_profile TYPE int DEFAULT 0;
+		DEFINE FIELD IF NOT EXISTS max_concurrent_calls ON ca_llm_profile TYPE option<int>
+		  ASSERT $value IS NONE OR ($value >= 0 AND $value <= 256);
 		DEFINE INDEX IF NOT EXISTS ca_llm_profile_name_key_unique ON ca_llm_profile FIELDS name_key UNIQUE;
 	`, map[string]any{})
 	if err != nil {
@@ -325,6 +342,21 @@ func (s *SurrealLLMProfileStore) rowToProfile(row map[string]interface{}) (*Prof
 	}
 	if t := extractTime(row, "updated_at"); !t.IsZero() {
 		p.UpdatedAt = t
+	}
+	if v, ok := row["max_concurrent_calls"]; ok && v != nil {
+		switch t := v.(type) {
+		case float64:
+			iv := int(t)
+			p.MaxConcurrentCalls = &iv
+		case uint64:
+			iv := int(t)
+			p.MaxConcurrentCalls = &iv
+		case int64:
+			iv := int(t)
+			p.MaxConcurrentCalls = &iv
+		case int:
+			p.MaxConcurrentCalls = &t
+		}
 	}
 	return p, nil
 }
@@ -425,7 +457,7 @@ func (s *SurrealLLMProfileStore) ListProfiles(ctx context.Context) ([]Profile, e
 			summary_model, review_model, ask_model, knowledge_model,
 			architecture_diagram_model, report_model, draft_model,
 			timeout_secs, advanced_mode, created_at, updated_at,
-			last_legacy_version_consumed
+			last_legacy_version_consumed, max_concurrent_calls
 		 FROM ca_llm_profile ORDER BY name_key ASC`,
 		map[string]any{})
 	if err != nil {
@@ -471,7 +503,7 @@ func (s *SurrealLLMProfileStore) LoadProfile(ctx context.Context, id string) (*P
 			summary_model, review_model, ask_model, knowledge_model,
 			architecture_diagram_model, report_model, draft_model,
 			timeout_secs, advanced_mode, created_at, updated_at,
-			last_legacy_version_consumed
+			last_legacy_version_consumed, max_concurrent_calls
 		 FROM ca_llm_profile WHERE id = type::thing('ca_llm_profile', $rid) LIMIT 1`,
 		map[string]any{"rid": recordID})
 	if err != nil {
@@ -560,6 +592,28 @@ func (s *SurrealLLMProfileStore) CreateProfile(ctx context.Context, p ProfileCre
 		return "", err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	createVars := map[string]any{
+		"name":                       name,
+		"name_key":                   nameKey,
+		"provider":                   p.Provider,
+		"base_url":                   p.BaseURL,
+		"api_key":                    encryptedKey,
+		"summary_model":              p.SummaryModel,
+		"review_model":               p.ReviewModel,
+		"ask_model":                  p.AskModel,
+		"knowledge_model":            p.KnowledgeModel,
+		"architecture_diagram_model": p.ArchitectureDiagramModel,
+		"report_model":               p.ReportModel,
+		"draft_model":                p.DraftModel,
+		"timeout_secs":               p.TimeoutSecs,
+		"advanced_mode":              p.AdvancedMode,
+		"now":                        now,
+	}
+	maxConcSet := ""
+	if p.MaxConcurrentCalls != nil {
+		createVars["max_concurrent_calls"] = *p.MaxConcurrentCalls
+		maxConcSet = ", max_concurrent_calls = $max_concurrent_calls"
+	}
 	raw, err := surrealdb.Query[[]map[string]interface{}](ctx, db,
 		`CREATE ca_llm_profile SET
 			name                         = $name,
@@ -578,25 +632,9 @@ func (s *SurrealLLMProfileStore) CreateProfile(ctx context.Context, p ProfileCre
 			advanced_mode                = $advanced_mode,
 			created_at                   = type::datetime($now),
 			updated_at                   = type::datetime($now),
-			last_legacy_version_consumed = 0
+			last_legacy_version_consumed = 0`+maxConcSet+`
 		 RETURN id`,
-		map[string]any{
-			"name":                       name,
-			"name_key":                   nameKey,
-			"provider":                   p.Provider,
-			"base_url":                   p.BaseURL,
-			"api_key":                    encryptedKey,
-			"summary_model":              p.SummaryModel,
-			"review_model":               p.ReviewModel,
-			"ask_model":                  p.AskModel,
-			"knowledge_model":            p.KnowledgeModel,
-			"architecture_diagram_model": p.ArchitectureDiagramModel,
-			"report_model":               p.ReportModel,
-			"draft_model":                p.DraftModel,
-			"timeout_secs":               p.TimeoutSecs,
-			"advanced_mode":              p.AdvancedMode,
-			"now":                        now,
-		})
+		createVars)
 	if err != nil {
 		if isUniqueIndexViolation(err) {
 			return "", ErrDuplicateProfileName
@@ -735,6 +773,16 @@ func (s *SurrealLLMProfileStore) UpdateProfile(ctx context.Context, id string, p
 	if patch.AdvancedMode != nil {
 		setClauses = append(setClauses, "advanced_mode = $advanced_mode")
 		vars["advanced_mode"] = *patch.AdvancedMode
+	}
+	// ClearMaxConcurrentCalls resets the column to NULL (unknown).
+	// MaxConcurrentCalls pointer sets it to a concrete value (0=unbounded, 1..256=clamp).
+	// Clear takes precedence.
+	switch {
+	case patch.ClearMaxConcurrentCalls:
+		setClauses = append(setClauses, "max_concurrent_calls = NONE")
+	case patch.MaxConcurrentCalls != nil:
+		setClauses = append(setClauses, "max_concurrent_calls = $max_concurrent_calls")
+		vars["max_concurrent_calls"] = *patch.MaxConcurrentCalls
 	}
 
 	if len(setClauses) == 0 {
@@ -881,4 +929,67 @@ func isUniqueIndexViolationString(msg string) bool {
 		return true
 	}
 	return false
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Env seed-once bootstrap (D2 / H4)
+// ─────────────────────────────────────────────────────────────────────────
+
+// maxConcurrentCallsCeiling is the hard ceiling enforced at the DB level (ASSERT)
+// and Go-side (D9). Duplicated here so the seed-once guard can validate without
+// importing internal/qa.
+const maxConcurrentCallsCeiling = 256
+
+// SeedDefaultProfileMaxConcurrentCalls reads SOURCEBRIDGE_LLM_PARALLEL_HINT and,
+// when it is set AND the named profile's max_concurrent_calls column is currently
+// NULL (unknown), sets it to the env value.  When the column is already set
+// (non-NULL) the env value is ignored — operator-set values are never overwritten.
+//
+// Call order in cli/serve.go: after MigrateToProfiles (profile row exists) and
+// before starting any LW job.  This is the seed-once pattern used by
+// envBootstrapToLegacy for the legacy LLM config fields (D2).
+//
+// profileID must be the full SurrealDB record id of the default profile
+// (e.g. "ca_llm_profile:default-migrated").  If profileID is empty the
+// function is a no-op (no default profile found yet).
+func (s *SurrealLLMProfileStore) SeedDefaultProfileMaxConcurrentCalls(ctx context.Context, profileID string) error {
+	envVal := os.Getenv("SOURCEBRIDGE_LLM_PARALLEL_HINT")
+	if envVal == "" || profileID == "" {
+		return nil
+	}
+	hint, err := strconv.Atoi(envVal)
+	if err != nil || hint < 0 || hint > maxConcurrentCallsCeiling {
+		slog.Warn("SOURCEBRIDGE_LLM_PARALLEL_HINT: invalid value; must be integer in [0, 256]",
+			"value", envVal)
+		return nil
+	}
+
+	_, recordID, ok := splitRecordID(profileID)
+	if !ok {
+		return fmt.Errorf("seed max_concurrent_calls: invalid profile id %q", profileID)
+	}
+	db := s.client.DB()
+	if db == nil {
+		return fmt.Errorf("database not connected")
+	}
+
+	// Seed-once guard: only update when the column IS NULL (NONE in SurrealDB).
+	// WHERE max_concurrent_calls IS NONE ensures we never overwrite an
+	// operator-set value on subsequent restarts (H4).
+	_, err = surrealdb.Query[interface{}](ctx, db,
+		`UPDATE type::thing('ca_llm_profile', $rid)
+		 SET max_concurrent_calls = $val, updated_at = type::datetime($now)
+		 WHERE max_concurrent_calls IS NONE`,
+		map[string]any{
+			"rid": recordID,
+			"val": hint,
+			"now": time.Now().UTC().Format(time.RFC3339Nano),
+		})
+	if err != nil {
+		return fmt.Errorf("seed max_concurrent_calls: %w", err)
+	}
+	slog.Info("SOURCEBRIDGE_LLM_PARALLEL_HINT: seeded default profile max_concurrent_calls",
+		"profile_id", profileID,
+		"value", hint)
+	return nil
 }

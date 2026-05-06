@@ -99,6 +99,9 @@ type ProfileResponse struct {
 	IsActive                 bool   `json:"is_active"`
 	CreatedAt                string `json:"created_at,omitempty"`
 	UpdatedAt                string `json:"updated_at,omitempty"`
+	// MaxConcurrentCalls is the operator-declared upstream parallelism.
+	// null = unknown (orchestrator does not clamp); 0 = unbounded; 1..256 = clamp.
+	MaxConcurrentCalls *int `json:"max_concurrent_calls"`
 }
 
 // ProfileCreateRequest is the wire shape for POST. APIKey is plaintext;
@@ -117,6 +120,8 @@ type ProfileCreateRequest struct {
 	DraftModel               string `json:"draft_model"`
 	TimeoutSecs              int    `json:"timeout_secs"`
 	AdvancedMode             bool   `json:"advanced_mode"`
+	// MaxConcurrentCalls: null/omitted = unknown, 0 = unbounded, 1..256 = clamp.
+	MaxConcurrentCalls *int `json:"max_concurrent_calls,omitempty"`
 }
 
 // ProfileUpdateRequest is the wire shape for PUT. Pointer fields are
@@ -141,6 +146,10 @@ type ProfileUpdateRequest struct {
 	DraftModel               *string `json:"draft_model,omitempty"`
 	TimeoutSecs              *int    `json:"timeout_secs,omitempty"`
 	AdvancedMode             *bool   `json:"advanced_mode,omitempty"`
+	// MaxConcurrentCalls: null/omitted = no change; 0 = unbounded; 1..256 = clamp.
+	// Set ClearMaxConcurrentCalls=true to reset to null (unknown).
+	MaxConcurrentCalls      *int `json:"max_concurrent_calls,omitempty"`
+	ClearMaxConcurrentCalls bool `json:"clear_max_concurrent_calls,omitempty"`
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -291,6 +300,12 @@ func (s *Server) handleCreateLLMProfile(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if req.MaxConcurrentCalls != nil && (*req.MaxConcurrentCalls < 0 || *req.MaxConcurrentCalls > 256) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "max_concurrent_calls must be between 0 and 256",
+		})
+		return
+	}
 	id, err := s.llmProfileStore.CreateProfile(r.Context(), req)
 	if err != nil {
 		mapProfileError(w, err, "create")
@@ -323,6 +338,12 @@ func (s *Server) handleUpdateLLMProfile(w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+	}
+	if req.MaxConcurrentCalls != nil && (*req.MaxConcurrentCalls < 0 || *req.MaxConcurrentCalls > 256) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "max_concurrent_calls must be between 0 and 256",
+		})
+		return
 	}
 	if err := s.llmProfileStore.UpdateProfile(r.Context(), id, req); err != nil {
 		mapProfileError(w, err, "update")

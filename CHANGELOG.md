@@ -300,6 +300,16 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ## [Unreleased]
 
+**Orchestrator capacity detection** (2026-05-06, branch `fix/orchestrator-capacity-detection`). Three compounding LW throughput issues fixed end-to-end: capacity mismatch, empty-content retry tax, and `/no_think` unreliability at small `max_tokens` budgets.
+
+- **Capacity clamping (Go):** the LW orchestrator's per-job concurrency is now clamped to `min(MaxConcurrency, upstream_capacity)`. Upstream capacity is reported by the Python worker via an extended `GetProviderCapabilities` RPC response (`max_concurrent_calls` + `max_concurrent_calls_known` fields). Proto change is wire-compatible (proto3 zero-defaults give fail-open behavior on old workers). Logs once per job: `livingwiki/orchestrator: clamping MaxConcurrency to upstream capacity`.
+- **Breaker recalibration (C1):** soft-failure breaker window and threshold are now computed from the *clamped* effective concurrency, not the unconfigured `MaxConcurrency`. Prevents false trips when `effective=1` (serialized Ollama path).
+- **Per-profile `max_concurrent_calls` field (DB + REST):** new optional `INT` column on `ca_llm_profile` (`NULL` = unknown; `0` = unbounded; `1..256` = clamp). DB-level `ASSERT` + REST-layer validation enforce the `[0, 256]` range. `SOURCEBRIDGE_LLM_PARALLEL_HINT` env var seeds the Default profile column on first boot (seed-once guard: never overwrites a non-NULL value).
+- **gRPC auth interceptor (D10):** `internal/worker/client.go` now attaches `x-sb-worker-secret` metadata when `SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET` is set; Python worker verifies it. Startup ERROR log when worker is bound to a non-loopback address without auth.
+- **Empty-content retry telemetry (Phase 3):** `llm_empty_content_retry` log now includes `attempt`, `strategy`, and `original_latency_ms` fields. Total attempt budget is a shared counter capped at 3.
+- **`/no_think` reliability (Phase 4):** matrix-validated strategy (strategy f) injects the directive into both system and user messages with a "Begin response directly" system prefix, achieving <5% empty-content rate at all budgets ≥256 tokens (validated: Ollama v0.21.0 + qwen3.5:9b + Apple Silicon M3 Ultra).
+- **Docs (`docs/admin/llm-config.md`):** new "Backend parallelism and the `max_concurrent_calls` field" section covering recommended values by provider, Ollama tuning env vars, breaker recalibration, multi-replica caveat, and gRPC auth setup.
+
 **Fresh-install LLM onboarding** (2026-05-05). Fixes three compounding root causes that bricked first-time setup on hub-compose installs. Users can now reach a working LLM configuration in under 60 seconds without editing YAML or hitting opaque 422 errors.
 
 ### Changed
