@@ -50,11 +50,14 @@ services:
       - |
         if [ ! -f /secrets/encryption_key ]; then
           head -c 32 /dev/urandom | base64 -w0 > /secrets/encryption_key
-          chmod 600 /secrets/encryption_key
           echo "encryption-key-init: generated new encryption key"
         else
           echo "encryption-key-init: encryption key already exists, skipping"
         fi
+        # Allow the API user (UID 1000) to read the key. The file is
+        # in a named volume only accessible within the compose network.
+        chown 1000:1000 /secrets/encryption_key
+        chmod 600 /secrets/encryption_key
     volumes:
       - sourcebridge-secrets:/secrets
     restart: "no"
