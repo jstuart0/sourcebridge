@@ -2207,9 +2207,14 @@ export function WikiSettingsPanel({
   const progressRef = useRef<HTMLDivElement>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
 
-  // Fetch global settings (for kill-switch + credential availability)
+  // Fetch global settings (for kill-switch + credential availability).
+  // network-only prevents the Urql document cache from serving a stale
+  // confluenceToken/notionToken: null when the user saved creds on the
+  // /settings/living-wiki page (which bypasses Urql entirely via authFetch)
+  // and then navigated here before the cache entry expired.
   const [{ data: globalData, fetching: globalFetching }] = useQuery({
     query: LIVING_WIKI_GLOBAL_SETTINGS_QUERY,
+    requestPolicy: "network-only",
   });
   const global: GlobalSettings = globalData?.livingWikiSettings ?? {};
 
