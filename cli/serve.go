@@ -258,6 +258,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		opts := []worker.Option{
 			worker.WithKnowledgeTimeoutProvider(knowledgeTimeoutProvider),
 		}
+		// D10: attach the shared worker gRPC auth secret so every outgoing
+		// RPC carries the x-sb-worker-secret metadata header when the operator
+		// has configured SOURCEBRIDGE_SECURITY_GRPC_AUTH_SECRET. Empty = no
+		// auth header (preserves today's behavior for unprotected installs).
+		if cfg.Security.GRPCAuthSecret != "" {
+			opts = append(opts, worker.WithWorkerAuthSecret(cfg.Security.GRPCAuthSecret))
+		}
 		// R3 slice 4: when mTLS is enabled, construct a hot-reload
 		// watcher BEFORE worker.New so we can pass it via Option. The
 		// watcher loads + validates the initial cert (a second
