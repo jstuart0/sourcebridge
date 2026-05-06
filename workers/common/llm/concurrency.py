@@ -20,11 +20,15 @@ Architecture (Decision 1, 2, 5b, v4 plan):
   acquires whichever binding gate is appropriate and updates the matching
   counter.
 
-Phase 1 ships **sentinel-uncapped defaults** (``_UNCAPPED = sys.maxsize``) so
-that wiring the wrapper in Phase 2 is behavior-equivalent to today.
+Phase 3 (Decision 3, atomic): SDK retry disabled on AsyncOpenAI / AsyncAnthropic
+(max_retries=0); tenacity predicate finalized (Decision 4 whitelist); real
+Decision 6 defaults loaded by ``ConcurrencyConfig.from_env()``; local
+hierarchical/renderer fan-out caps raised; both hand-rolled retries deleted.
+The empty-content retry at ``openai_compat.py:_complete_once`` is preserved
+(handles <think>-budget exhaustion, not network errors).
 
-The tenacity retry predicate is a no-op in Phase 1 (``lambda exc: False``),
-activated to its real whitelist in Phase 3.
+Kill switch: SOURCEBRIDGE_LLM_CONCURRENCY_WRAPPER_ENABLED=false reverts to
+pre-refactor behavior without redeploy.
 
 The aggregator task (emitting ``llm_provider_gate_metrics`` log lines) is
 deferred to Phase 6; the start hook is a placeholder comment here.
@@ -46,9 +50,14 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
+import anthropic
+import httpx
+import openai
 import structlog
+from aiolimiter import AsyncLimiter
 from tenacity import (
     AsyncRetrying,
+    RetryCallState,
     retry_if_exception,
     stop_after_attempt,
     wait_random_exponential,
@@ -108,13 +117,13 @@ def _normalize_host_key(provider: str, base_url: str | None) -> tuple[str, str]:
 class ConcurrencyConfig:
     """Runtime concurrency knobs sourced from environment variables.
 
-    All fields have sentinel-uncapped Phase 1 defaults.  Phase 3 introduces
-    the real Decision 6 caps by changing the defaults here and in
-    ``__main__.py``'s ``ConcurrencyConfig.from_env()`` call.
+    Decision 6 real defaults are loaded by ``from_env()`` when no env-var
+    overrides are set.  The ``_UNCAPPED`` sentinel is retained as the registry
+    fallback for unknown providers; it is not the default for any named provider.
     """
 
     # Per-provider max-concurrent overrides.  Key = canonical provider name.
-    # Phase 1 default: empty (sentinel uncapped applies).
+    # from_env() pre-populates these from the Decision 6 table.
     llm_max_concurrent: dict[str, int] = field(default_factory=dict)
     embedding_max_concurrent: dict[str, int] = field(default_factory=dict)
 
@@ -127,9 +136,8 @@ class ConcurrencyConfig:
     # Global kill switch.  When False, factories return raw providers.
     wrapper_enabled: bool = True
 
-    # Tenacity: max attempts per call.  1 = no retry (Phase 1 default).
-    # Phase 3 raises this to 5.
-    retry_max_attempts: int = 1
+    # Tenacity: max attempts per call.  Default 5 (Phase 3 activates real retry).
+    retry_max_attempts: int = 5
 
     # Aggregator task interval (seconds).  Phase 6 activates the task.
     metrics_interval_seconds: float = 30.0
@@ -137,6 +145,23 @@ class ConcurrencyConfig:
     @classmethod
     def from_env(cls) -> ConcurrencyConfig:
         """Read all concurrency knobs from environment variables.
+
+        Decision 6 default caps (applied when no env-var override is set):
+
+          | Provider           | LLM max_concurrent | Embed max_concurrent |
+          |--------------------|--------------------|----------------------|
+          | ollama             | 1 (host total)     | (host-shared)        |
+          | vllm               | 4 (host total)     | (host-shared)        |
+          | llama-cpp          | 4 (host total)     | (host-shared)        |
+          | sglang             | 4 (host total)     | (host-shared)        |
+          | lmstudio           | 2 (host total)     | (host-shared)        |
+          | openai             | 8                  | 8                    |
+          | anthropic          | 4                  | n/a                  |
+          | openrouter         | 8                  | 8                    |
+          | gemini             | 8                  | 8                    |
+          | openai-compatible  | 4 (host total)     | (host-shared)        |
+
+        Env-var overrides take precedence (first-match wins).
 
         Decision 7 env-var names (``SOURCEBRIDGE_LLM_*`` prefix):
 
@@ -154,12 +179,35 @@ class ConcurrencyConfig:
           gemini → GEMINI, openrouter → OPENROUTER, lmstudio → LMSTUDIO,
           openai-compatible → OPENAI_COMPATIBLE.
         """
+        # Decision 6 real defaults (Outcome A — ollama cap=1 is safe per dick's
+        # investigation; cap-raise to 4 is safe for vllm/llama-cpp/sglang).
+        llm_defaults: dict[str, int] = {
+            "ollama": 1,
+            "vllm": 4,
+            "llama-cpp": 4,
+            "sglang": 4,
+            "lmstudio": 2,
+            "openai": 8,
+            "anthropic": 4,
+            "openrouter": 8,
+            "gemini": 8,
+            "openai-compatible": 4,
+        }
+        embed_defaults: dict[str, int] = {
+            # Frontier providers have separate embedding caps.
+            "openai": 8,
+            "openrouter": 8,
+            "gemini": 8,
+            # Host-gated providers share the LLM cap; no separate embed entry needed.
+        }
+
         all_providers = list(_HOST_GATED_PROVIDERS | _KIND_GATED_PROVIDERS) + [
             "openai-compatible"
         ]
 
-        llm_max: dict[str, int] = {}
-        embed_max: dict[str, int] = {}
+        # Start with Decision 6 defaults; env-var overrides overwrite them.
+        llm_max: dict[str, int] = dict(llm_defaults)
+        embed_max: dict[str, int] = dict(embed_defaults)
         rpm_map: dict[str, int | None] = {}
 
         for provider in all_providers:
@@ -194,7 +242,7 @@ class ConcurrencyConfig:
         wrapper_enabled = wrapper_raw in ("true", "1", "yes", "on")
 
         retry_raw = os.environ.get("SOURCEBRIDGE_LLM_RETRY_MAX_ATTEMPTS", "").strip()
-        retry_max = 1  # Phase 1: no-op; Phase 3 will default to 5
+        retry_max = 5  # Phase 3 default: 5 attempts (Decision 3)
         if retry_raw:
             try:
                 retry_max = int(retry_raw)
@@ -207,7 +255,7 @@ class ConcurrencyConfig:
                     value=retry_raw,
                     error=str(exc),
                 )
-                retry_max = 1
+                retry_max = 5
 
         interval_raw = os.environ.get("SOURCEBRIDGE_LLM_METRICS_AGGREGATION_INTERVAL_SECONDS", "").strip()
         interval = 30.0
@@ -567,14 +615,15 @@ class ProviderGateRegistry:
         """The effective LLM cap for this provider+base_url.
 
         Returns ``None`` when the wrapper is disabled (kill switch) or the gate
-        is uncapped (sentinel).  Phase 2 uses this to populate
-        ``GetProviderCapabilities.max_concurrent_calls``.
+        is sentinel-uncapped (unknown provider with no Decision 6 default).
+        Phase 3: Decision 6 defaults are pre-populated by ``from_env()``, so
+        all named providers now return a finite cap.
         """
         if not self._config.wrapper_enabled:
             return None
         cap = self._config.llm_max_concurrent.get(provider)
-        if cap is None:
-            return None  # No per-provider override; sentinel uncapped in Phase 1.
+        if cap is None or cap == _UNCAPPED:
+            return None  # Unknown provider or sentinel-uncapped.
         return cap
 
     def canonical_key_for(self, provider: str, base_url: str | None, kind: str) -> tuple[str, ...]:
@@ -613,26 +662,88 @@ class ProviderGateRegistry:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Tenacity predicate (Phase 1: no-op; Phase 3 wires the real whitelist)
+# Tenacity predicate and retry hooks (Phase 3: Decision 4 whitelist)
 
 
 def _retry_predicate(exc: BaseException) -> bool:
-    """Return True when the exception is retryable.
+    """Return True when the exception is retryable (Decision 4 whitelist).
 
-    Phase 1: always False (retry is disabled — wrapper makes exactly one
-    attempt).  Phase 3 replaces this body with the Decision 4 whitelist
-    (RateLimitError, retryable status codes, transient httpx errors).
+    1. RateLimitError — always retryable (both OpenAI and Anthropic SDKs).
+    2. APIStatusError with status_code in {408, 429, 502, 503, 504}.
+    3. Transient httpx errors: TimeoutException, ConnectError, ReadError.
+
+    Returns False for everything else, including 4xx errors (except 408/429),
+    pydantic.ValidationError, SnapshotTooLargeError, and any other non-transient
+    failure.  The wrapper never retries auth failures (401/403) or bad requests
+    (400/422) — those require operator intervention.
     """
+    # 1. Rate-limit errors are always retryable.
+    if isinstance(exc, (openai.RateLimitError, anthropic.RateLimitError)):
+        return True
+    # 2. Status-code-filtered API errors.
+    if isinstance(exc, (openai.APIStatusError, anthropic.APIStatusError)):
+        return getattr(exc, "status_code", None) in {408, 429, 502, 503, 504}
+    # 3. Transient httpx transport errors.
+    if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError)):
+        return True
     return False
 
 
-def _record_retry(retry_state: Any) -> None:
-    """Called by tenacity before each sleep window (Decision 2)."""
-    log.debug(
-        "llm_gate_retry",
-        attempt=retry_state.attempt_number,
-        exc=str(retry_state.outcome.exception()) if retry_state.outcome else None,
-    )
+def _extract_retry_after(exc: BaseException) -> float | None:
+    """Extract the Retry-After header value (seconds) from an SDK exception.
+
+    Returns None when no header is present or parsing fails.
+    """
+    # OpenAI SDK exposes the response object on APIStatusError.
+    response = getattr(exc, "response", None)
+    if response is not None:
+        headers = getattr(response, "headers", None)
+        if headers is not None:
+            raw = headers.get("retry-after") or headers.get("Retry-After")
+            if raw:
+                with contextlib.suppress(ValueError):
+                    return float(raw)
+    return None
+
+
+def _make_before_sleep(gate_binding: Any) -> Any:
+    """Factory returning a tenacity ``before_sleep`` callback.
+
+    The callback:
+    1. Increments the gate's retry counter and 429 counter (when applicable).
+    2. Logs a structured debug line with attempt info.
+    3. Extracts the ``Retry-After`` header from the exception and extends the
+       tenacity wait duration when the header value exceeds the computed
+       exponential backoff (Decision 2 — use the larger of the two so a tiny
+       Retry-After: 1 doesn't subvert sustained-429 backoff).
+    """
+
+    def _before_sleep(retry_state: RetryCallState) -> None:
+        exc = retry_state.outcome.exception() if retry_state.outcome else None
+        gate_binding._retries += 1
+        if isinstance(exc, (openai.RateLimitError, anthropic.RateLimitError)):
+            gate_binding._recent_429 += 1
+        elif isinstance(exc, (openai.APIStatusError, anthropic.APIStatusError)):
+            if getattr(exc, "status_code", None) == 429:
+                gate_binding._recent_429 += 1
+
+        # Honor Retry-After header: extend the computed sleep when needed.
+        retry_after = _extract_retry_after(exc) if exc is not None else None
+
+        log.debug(
+            "llm_gate_retry",
+            attempt=retry_state.attempt_number,
+            exc_type=type(exc).__name__ if exc else None,
+            retry_after_header=retry_after,
+        )
+
+        if retry_after is not None and retry_state.next_action is not None:
+            computed_sleep = getattr(retry_state.next_action, "sleep", 0.0)
+            # Use the larger of the two; never let Retry-After: 1 undercut backoff.
+            if retry_after > computed_sleep:
+                retry_state.next_action.sleep = retry_after  # type: ignore[assignment]
+
+    return _before_sleep
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -650,7 +761,10 @@ class ConcurrencyGatedProvider:
     long ``Retry-After`` does not monopolize the only slot while other
     callers wait.
 
-    ``stream()`` is pass-through in Phase 1 (no usage extraction).
+    Phase 3: tenacity predicate activated (Decision 4 whitelist), aiolimiter
+    wired for RPM shaping when configured.
+
+    ``stream()`` is pass-through (no usage extraction).
     Provider-specific streaming subclasses (``OpenAICompatGatedProvider``,
     ``AnthropicGatedProvider``) that extract final usage tokens are added in
     Phase 6.  A ``# TODO(phase-6)`` comment marks the extension point.
@@ -665,8 +779,15 @@ class ConcurrencyGatedProvider:
         self._raw = raw
         self._gate = gate
         self._config = config or ConcurrencyConfig()
-        # aiolimiter.AsyncLimiter instance; None = no RPM shaping (Phase 1).
-        self._limiter: Any = None  # TODO(phase-3): wire from config.rpm
+        # Wire aiolimiter for RPM rate-shaping when configured (Decision 7).
+        # None = no RPM shaping (default for all providers; Phase 8 adds specific RPMs).
+        provider_name = getattr(raw, "provider_name", None) or ""
+        rpm = self._config.rpm.get(provider_name)
+        self._limiter: AsyncLimiter | None = (
+            AsyncLimiter(rpm, time_period=60) if rpm is not None and rpm > 0 else None
+        )
+        # Cache the before_sleep callback (captures the gate's binding).
+        self._before_sleep = _make_before_sleep(gate._binding)
 
     async def complete(
         self,
@@ -686,7 +807,7 @@ class ConcurrencyGatedProvider:
             wait=wait_random_exponential(multiplier=1, max=60),
             stop=stop_after_attempt(retry_max),
             reraise=True,
-            before_sleep=_record_retry,
+            before_sleep=self._before_sleep,
         ):
             with attempt:
                 if self._limiter is not None:
@@ -715,7 +836,7 @@ class ConcurrencyGatedProvider:
         temperature: float = 0.0,
         model: str | None = None,
     ) -> AsyncIterator[str]:
-        """Pass-through streaming (no usage extraction in Phase 1).
+        """Pass-through streaming (slot held during the entire stream).
 
         TODO(phase-6): replace with provider-specific subclasses
         (``OpenAICompatGatedProvider``, ``AnthropicGatedProvider``) that
@@ -730,7 +851,7 @@ class ConcurrencyGatedProvider:
             wait=wait_random_exponential(multiplier=1, max=60),
             stop=stop_after_attempt(retry_max),
             reraise=True,
-            before_sleep=_record_retry,
+            before_sleep=self._before_sleep,
         ):
             with attempt:
                 if self._limiter is not None:

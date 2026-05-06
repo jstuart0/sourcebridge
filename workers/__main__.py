@@ -199,14 +199,16 @@ async def serve() -> None:
 
     # --- Construct concurrency gate registry (long-lived, shared across all servicers) ---
     # ConcurrencyConfig.from_env() reads SOURCEBRIDGE_LLM_* env vars (Decision 7).
-    # The registry is threaded by reference into all factory calls and servicer
-    # constructors; plan v4 Phase 2 (wires the gate without activating real caps).
+    # Phase 3: real Decision 6 defaults loaded; tenacity retry active (max_attempts=5);
+    # SDK retry disabled (max_retries=0 on AsyncOpenAI / AsyncAnthropic).
+    # Kill switch: SOURCEBRIDGE_LLM_CONCURRENCY_WRAPPER_ENABLED=false to revert.
     concurrency_config = ConcurrencyConfig.from_env()
     gate_registry = ProviderGateRegistry(concurrency_config)
     log.info(
         "concurrency_gate_registry_initialized",
         wrapper_enabled=concurrency_config.wrapper_enabled,
         retry_max_attempts=concurrency_config.retry_max_attempts,
+        llm_max_concurrent=concurrency_config.llm_max_concurrent,
     )
 
     # --- Initialize providers (long-lived, connection-pooled) ---

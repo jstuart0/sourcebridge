@@ -261,9 +261,13 @@ def test_concurrency_config_from_env_rejects_invalid_rpm(
 def test_concurrency_config_from_env_rejects_zero_max_concurrent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Phase 3: Decision 6 defaults are pre-populated, so "openai" is always in the
+    # dict with value 8. Setting the env var to 0 should be rejected (logged as
+    # invalid) and the Decision 6 default (8) should be preserved, not 0.
     monkeypatch.setenv("SOURCEBRIDGE_LLM_PROVIDER_OPENAI_MAX_CONCURRENT", "0")
     config = ConcurrencyConfig.from_env()
-    assert "openai" not in config.llm_max_concurrent
+    # The invalid value (0) must NOT be stored; the Decision 6 default (8) is kept.
+    assert config.llm_max_concurrent.get("openai") == 8
 
 
 # ──────────────────────────────────────────────────────────────────────────────

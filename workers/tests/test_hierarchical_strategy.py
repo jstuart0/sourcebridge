@@ -348,13 +348,18 @@ async def test_leaf_concurrency_is_bounded() -> None:
     provider = _BoundedProvider()
     strategy = HierarchicalStrategy(
         provider,
-        HierarchicalConfig(repository_name="toy", leaf_concurrency=3),
+        HierarchicalConfig(
+            repository_name="toy",
+            leaf_concurrency=3,
+            file_concurrency=3,    # Phase 3: default raised to 4; pin to 3 for this test
+            package_concurrency=3,  # so the peak bound remains meaningful
+        ),
     )
     corpus = _ToyCorpus()
     await strategy.build_tree(corpus)
 
-    # The concurrency semaphore gates leaf calls only. File/package/root
-    # calls run sequentially, so the peak is bounded by leaf_concurrency.
+    # The leaf, file, and package semaphores each cap to 3 concurrent calls.
+    # Peak in-flight is bounded by the configured concurrency.
     assert peak <= 3
 
 

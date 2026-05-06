@@ -55,6 +55,9 @@ asyncio_mode = "auto"
 pythonpath = [".", "../gen/python"]
 testpaths = [".", "../tests"]
 norecursedirs = ["fixtures", "node_modules", ".git", "__pycache__"]
+markers = [
+    "slow: marks tests that require real wall-clock time (deselect with -m 'not slow')",
+]
 
 [build-system]
 requires = ["hatchling"]

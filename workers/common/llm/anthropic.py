@@ -32,7 +32,10 @@ class AnthropicProvider:
         model: str = "claude-sonnet-4-20250514",
         enable_cache: bool = True,
     ) -> None:
-        self.client = anthropic.AsyncAnthropic(api_key=api_key)
+        self.client = anthropic.AsyncAnthropic(
+            api_key=api_key,
+            max_retries=0,  # Phase 3: SDK retry disabled; tenacity owns retry (Decision 3)
+        )
         self.model = model
         self.enable_cache = enable_cache
 

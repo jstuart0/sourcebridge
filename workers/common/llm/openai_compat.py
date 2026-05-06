@@ -144,6 +144,7 @@ class OpenAICompatProvider:
             base_url=base_url,
             timeout=effective_timeout,
             default_headers=extra_headers or {},
+            max_retries=0,  # Phase 3: SDK retry disabled; tenacity owns retry (Decision 3)
         )
         self.model = model
         self.draft_model = draft_model
