@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import AsyncIterator
 
+import httpx
 import openai
 import structlog
 
@@ -48,99 +50,45 @@ def _strip_think_tags(text: str) -> str:
     return text.strip()
 
 
-# Qwen 3 / 3.5 honor a `/no_think` directive in the user message to
-# skip the reasoning block. llama.cpp also understands this (via the
-# chat template's enable_thinking jinja var), but Ollama ignores
-# `chat_template_kwargs={"enable_thinking": False}` entirely — it
-# just renders the chat template verbatim, leaving thinking on. The
-# directive is the only portable way to disable thinking on Ollama,
-# and it's harmless on llama.cpp because the template still honors
-# the kwarg and the `/no_think` token is treated as a model-level
-# directive, not leaked into the output. Scoping to the Qwen family
-# (by model-id prefix match) avoids poisoning other models' prompts
-# with a string they have no rule to interpret.
-_QWEN_MODEL_PREFIXES = ("qwen3", "qwen-3", "qwen3.5", "qwen-3.5", "qwen3.6", "qwen-3.6")
-_NO_THINK_TOKEN = "/no_think"
-
-# System-message prefix injected for Qwen thinking models when disable_thinking
-# is True (Phase 4 — strategy f, plan §D7). The prefix is added to the system
-# message (when one exists) or prepended as a new system message, together with
-# the /no_think token at the end of the system message AND the last user message.
+# Empirical finding (2026-05-06): ALL of the following suppression strategies
+# are silently ignored by Ollama's OpenAI-compat shim (/v1/chat/completions):
 #
-# Strategy f was selected from the Phase 1.5 matrix (plan §D7): directive in
-# BOTH system and user messages combined with a "Begin with answer" system prefix.
-# Validated on: Ollama v0.21.0 + qwen3.5:9b + Apple Silicon M3 Ultra, 128 GB RAM.
-# Operators on other Ollama versions/hardware should report regressions.
-# Reference: thoughts/shared/plans/active-2026-05-06-deliver-orchestrator-capacity-detection.md §Phase 4
-_NO_THINK_SYSTEM_PREFIX = (
-    "IMPORTANT: Begin your response with the answer directly. "
-    "Do not output any <think> tags, reasoning, or scratch space.\n\n"
-)
+#   - chat_template_kwargs={"enable_thinking": False}   (llama.cpp extension)
+#   - /no_think suffix in user message                  (Qwen model directive)
+#   - /no_think in system message                       (same)
+#   - top-level think: false                            (swallowed by shim)
+#   - extra_body.think: false                           (also swallowed)
+#
+# The ONLY working knob on Ollama ≥0.6.0 is `think: false` at the top level
+# of the NATIVE /api/chat endpoint. That path is taken when provider_name ==
+# "ollama" and disable_thinking is True. All other providers and all other
+# configurations continue through the OpenAI-compat path.
+#
+# For llama.cpp (and compatible servers): chat_template_kwargs={"enable_thinking":
+# False} still works. It is still set in the extra_body for non-Ollama providers
+# so those users are unaffected.
+#
+# References:
+#   https://github.com/ollama/ollama/issues/10456
+#   https://docs.ollama.com/capabilities/thinking
+#   thoughts/shared/investigations/2026-05-06-ollama-think-suppression-empirical.md
 
 
-def _is_qwen_thinking_model(model: str | None) -> bool:
-    """True when the model id looks like a Qwen 3/3.5/3.6 variant."""
-    if not model:
-        return False
-    m = model.lower()
-    return any(m.startswith(p) for p in _QWEN_MODEL_PREFIXES)
+def _ollama_native_base_url(base_url: str) -> str:
+    """Derive the Ollama root URL from an OpenAI-compat base_url.
 
+    Strips a trailing '/v1' (with or without trailing slash) so that
+    '/v1/chat/completions' → '' and we can append '/api/chat'.
 
-def _apply_no_think_strategy(
-    messages: list[dict[str, str]],
-    *,
-    model: str,
-    disable_thinking: bool,
-) -> list[dict[str, str]]:
-    """Apply the validated /no_think strategy (strategy f) to the message list.
-
-    Strategy f (Phase 4 — plan §D7):
-      1. Inject the /no_think directive into the system message (or prepend a
-         system message when none exists).
-      2. Inject a "Begin response directly; no <think> tags" prefix into the
-         system message content.
-      3. Append /no_think to the last user message (as the existing strategy (a)
-         did), and optionally prefix with "Answer directly:" when not already
-         present.
-
-    Scoping:
-      - Only when `disable_thinking` is True (caller opted in).
-      - Only when the model is a Qwen 3.x reasoning variant.
-      - Idempotent: skips injection when the directive is already present so
-        retries don't accumulate duplicates.
-
-    Returns a new list; the input is NOT mutated.
+    Examples:
+        'http://host:11434/v1'  → 'http://host:11434'
+        'http://host:11434/v1/' → 'http://host:11434'
+        'http://host:11434'     → 'http://host:11434'
     """
-    if not disable_thinking or not _is_qwen_thinking_model(model):
-        return messages
-    if not messages:
-        return messages
-
-    out = [dict(m) for m in messages]
-
-    # --- System message: inject prefix + /no_think ---
-    if out[0].get("role") == "system":
-        existing_sys = out[0].get("content") or ""
-        if _NO_THINK_TOKEN not in existing_sys:
-            out[0]["content"] = (
-                _NO_THINK_SYSTEM_PREFIX + existing_sys + f"\n\n{_NO_THINK_TOKEN}"
-            )
-    else:
-        # No system message present — prepend one with the directive.
-        out.insert(0, {
-            "role": "system",
-            "content": _NO_THINK_SYSTEM_PREFIX.rstrip() + f"\n\n{_NO_THINK_TOKEN}",
-        })
-
-    # --- Last user message: append /no_think ---
-    last = out[-1]
-    if last.get("role") == "user":
-        content = last.get("content") or ""
-        if _NO_THINK_TOKEN not in content:
-            last["content"] = f"{content}\n\n{_NO_THINK_TOKEN}"
-
-    return out
-
+    url = base_url.rstrip("/")
+    if url.endswith("/v1"):
+        url = url[:-3]
+    return url
 
 
 def _normalize_api_key(provider_name: str | None, api_key: str) -> str:
@@ -202,6 +150,9 @@ class OpenAICompatProvider:
         self.provider_name = provider_name
         self.disable_thinking = disable_thinking
         self.timeout = effective_timeout
+        # Retained separately so _complete_ollama_native / _stream_ollama_native
+        # can derive the root URL without going through the openai client object.
+        self._base_url = base_url or ""
 
     @property
     def default_model(self) -> str:
@@ -261,18 +212,27 @@ class OpenAICompatProvider:
         extra_body: dict[str, object] = {}
         if self.draft_model:
             extra_body["draft_model"] = self.draft_model
-        # Two-pronged "disable thinking" that works for both llama.cpp
-        # and Ollama:
-        #   1. `chat_template_kwargs={"enable_thinking": False}` — llama.cpp
-        #      extension, toggles the Jinja template variable in the chat
-        #      template. Ignored (and not an error) on Ollama / OpenAI /
-        #      Anthropic.
-        #   2. `/no_think` suffix on the last user message — Qwen 3.x
-        #      model-level directive, honored on Ollama. Scoped to Qwen
-        #      so other models don't see a stray directive string.
-        # Using both makes either backend work with no runtime detection.
-        if self.disable_thinking:
+        # For llama.cpp and compatible servers: chat_template_kwargs toggles
+        # the Jinja template variable that disables the <think> block. This is
+        # NOT honored by Ollama's OpenAI-compat shim (see module-level comment).
+        # Ollama with disable_thinking branches below to _complete_ollama_native.
+        provider = (self.provider_name or "").strip().lower()
+        if self.disable_thinking and provider != "ollama":
             extra_body["chat_template_kwargs"] = {"enable_thinking": False}
+
+        # Ollama-specific path: when disable_thinking is requested, use the
+        # native /api/chat endpoint with top-level think: false. The OpenAI-
+        # compat shim silently ignores all suppression strategies (empirically
+        # confirmed 2026-05-06). Everything else, including Ollama WITH thinking
+        # enabled, uses the standard OpenAI-compat path below.
+        if provider == "ollama" and self.disable_thinking:
+            return await self._complete_ollama_native(
+                prompt=prompt,
+                system=system,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                use_model=use_model,
+            )
 
         t0 = _time.monotonic()
         result = await self._complete_once(
@@ -352,6 +312,154 @@ class OpenAICompatProvider:
 
         return result
 
+    async def _complete_ollama_native(
+        self,
+        *,
+        prompt: str,
+        system: str,
+        max_tokens: int,
+        temperature: float,
+        use_model: str,
+    ) -> LLMResponse:
+        """POST to Ollama's native /api/chat with think: false.
+
+        The OpenAI-compat shim (/v1/chat/completions) silently ignores all
+        thinking-suppression strategies. The native endpoint is the only knob
+        that works. Returns the same LLMResponse shape as _complete_once so
+        callers are transport-agnostic.
+
+        Native response shape differs from OpenAI:
+          message.content            (not choices[0].message.content)
+          done_reason                (not finish_reason)
+          eval_count                 (not usage.completion_tokens)
+          prompt_eval_count          (not usage.prompt_tokens)
+        """
+        import time as _time
+
+        root = _ollama_native_base_url(self._base_url)
+        url = f"{root}/api/chat"
+
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        body: dict[str, object] = {
+            "model": use_model,
+            "messages": messages,
+            "stream": False,
+            "think": False,
+            "options": {
+                "num_predict": max_tokens,
+                "temperature": temperature,
+            },
+        }
+
+        log.info(
+            "llm_request_dispatch",
+            operation="complete",
+            provider="ollama",
+            model=use_model,
+            base_url=url,
+            disable_thinking=True,
+            enable_thinking_override=False,
+            draft_model=None,
+            transport="native",
+        )
+
+        t0 = _time.monotonic()
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(url, json=body)
+            resp.raise_for_status()
+        generation_time_ms = int((_time.monotonic() - t0) * 1000)
+
+        data = resp.json()
+        msg = data.get("message") or {}
+        raw_content = msg.get("content") or ""
+
+        if raw_content and re.search(r"<think(?:ing)?>", raw_content, re.IGNORECASE):
+            log.warning(
+                "llm_response_contained_think_tags",
+                provider="ollama",
+                model=use_model,
+            )
+        content = _strip_think_tags(raw_content) if raw_content else ""
+
+        return LLMResponse(
+            content=content,
+            model=use_model,
+            input_tokens=data.get("prompt_eval_count") or 0,
+            output_tokens=data.get("eval_count") or 0,
+            stop_reason=data.get("done_reason") or "",
+            tokens_per_second=None,
+            generation_time_ms=float(generation_time_ms),
+            acceptance_rate=None,
+            provider_name=self.provider_name,
+        )
+
+    async def _stream_ollama_native(
+        self,
+        *,
+        prompt: str,
+        system: str,
+        max_tokens: int,
+        temperature: float,
+        use_model: str,
+    ) -> AsyncIterator[str]:
+        """Stream from Ollama's native /api/chat with think: false.
+
+        Each newline-delimited JSON chunk has a `message.content` field
+        containing the next delta. The final chunk has `done: true`. Think
+        blocks (if somehow present) are stripped from each delta.
+        """
+        root = _ollama_native_base_url(self._base_url)
+        url = f"{root}/api/chat"
+
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        body: dict[str, object] = {
+            "model": use_model,
+            "messages": messages,
+            "stream": True,
+            "think": False,
+            "options": {
+                "num_predict": max_tokens,
+                "temperature": temperature,
+            },
+        }
+
+        log.info(
+            "llm_request_dispatch",
+            operation="stream",
+            provider="ollama",
+            model=use_model,
+            base_url=url,
+            disable_thinking=True,
+            enable_thinking_override=False,
+            draft_model=None,
+            transport="native",
+        )
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client, client.stream("POST", url, json=body) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = (chunk.get("message") or {}).get("content") or ""
+                    if delta:
+                        yield _strip_think_tags(delta) if re.search(
+                            r"<think(?:ing)?>", delta, re.IGNORECASE
+                        ) else delta
+                    if chunk.get("done"):
+                        break
+
     async def _complete_once(
         self,
         *,
@@ -368,9 +476,6 @@ class OpenAICompatProvider:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        messages = _apply_no_think_strategy(
-            messages, model=use_model, disable_thinking=self.disable_thinking
-        )
 
         log.info(
             "llm_request_dispatch",
@@ -450,8 +555,27 @@ class OpenAICompatProvider:
         temperature: float = 0.0,
         model: str | None = None,
     ) -> AsyncIterator[str]:
-        """Stream a completion."""
+        """Stream a completion.
+
+        Ollama with disable_thinking branches to _stream_ollama_native, which
+        uses the native /api/chat endpoint with think: false. All other
+        configurations use the OpenAI-compat path.
+        """
         use_model = model or self.model
+        provider = (self.provider_name or "").strip().lower()
+
+        # Ollama native path: see module-level comment for why.
+        if provider == "ollama" and self.disable_thinking:
+            async for chunk in self._stream_ollama_native(
+                prompt=prompt,
+                system=system,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                use_model=use_model,
+            ):
+                yield chunk
+            return
+
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -460,15 +584,12 @@ class OpenAICompatProvider:
         extra_body: dict[str, object] | None = None
         if self.draft_model:
             extra_body = {"draft_model": self.draft_model}
-        # Mirror the two-pronged disable-thinking strategy used in
-        # complete(): kwarg for llama.cpp, `/no_think` directive for
-        # Ollama-served Qwen models. See the comment in complete().
+        # For llama.cpp and compatible non-Ollama servers: disable <think> via
+        # the chat template kwarg. Ollama with thinking enabled uses this path
+        # too (thinking is on, so no suppression is needed).
         if self.disable_thinking:
             extra_body = dict(extra_body or {})
             extra_body["chat_template_kwargs"] = {"enable_thinking": False}
-        messages = _apply_no_think_strategy(
-            messages, model=use_model, disable_thinking=self.disable_thinking
-        )
 
         log.info(
             "llm_request_dispatch",

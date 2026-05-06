@@ -4,7 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from workers.common.llm.openai_compat import OpenAICompatProvider, _strip_think_tags
+from workers.common.llm.openai_compat import (
+    OpenAICompatProvider,
+    _ollama_native_base_url,
+    _strip_think_tags,
+)
 
 
 class _FakeCreate:
@@ -29,13 +33,16 @@ class _FakeAsyncOpenAI:
 
 
 @pytest.mark.asyncio
-async def test_complete_attaches_disable_thinking_override(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_complete_llama_cpp_attaches_disable_thinking_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """For non-Ollama providers (e.g. llama.cpp), disable_thinking sets
+    chat_template_kwargs on the OpenAI-compat path. The native-endpoint branch
+    must NOT fire for a non-Ollama provider."""
     monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
     provider = OpenAICompatProvider(
         api_key="x",
         model="qwen3.5:35b-a3b",
-        base_url="http://localhost:11434/v1",
-        provider_name="ollama",
+        base_url="http://localhost:8080/v1",
+        provider_name="llama-cpp",
         disable_thinking=True,
     )
 
@@ -45,17 +52,13 @@ async def test_complete_attaches_disable_thinking_override(monkeypatch: pytest.M
     assert create.calls
     # llama.cpp path: kwarg toggles the Jinja template variable.
     assert create.calls[0]["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
-    # Ollama path: `/no_think` directive appended to the user message.
-    # (Both are sent on every call; each backend honors the one it
-    # understands, the other is a no-op.)
-    user_msg = create.calls[0]["messages"][-1]
-    assert user_msg["role"] == "user"
-    assert user_msg["content"].endswith("/no_think")
     assert provider.client.api_key == "x"
 
 
 @pytest.mark.asyncio
-async def test_stream_attaches_disable_thinking_override(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_stream_llama_cpp_attaches_disable_thinking_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """For non-Ollama providers (e.g. llama.cpp), stream() sets
+    chat_template_kwargs on the OpenAI-compat path."""
     class _FakeStreamCreate(_FakeCreate):
         async def __call__(self, **kwargs):
             self.calls.append(kwargs)
@@ -78,8 +81,8 @@ async def test_stream_attaches_disable_thinking_override(monkeypatch: pytest.Mon
     provider = OpenAICompatProvider(
         api_key="x",
         model="qwen3.5:35b-a3b",
-        base_url="http://localhost:11434/v1",
-        provider_name="ollama",
+        base_url="http://localhost:8080/v1",
+        provider_name="llama-cpp",
         disable_thinking=True,
     )
 
@@ -91,17 +94,13 @@ async def test_stream_attaches_disable_thinking_override(monkeypatch: pytest.Mon
     create = provider.client.chat.completions.create
     assert create.calls
     assert create.calls[0]["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
-    user_msg = create.calls[0]["messages"][-1]
-    assert user_msg["content"].endswith("/no_think")
     assert provider.client.api_key == "x"
 
 
 @pytest.mark.asyncio
-async def test_no_think_scoped_to_qwen_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Non-Qwen models must not receive the `/no_think` directive,
-    even when disable_thinking is True, because the string would leak
-    into those models' context as literal content rather than being
-    interpreted as a directive."""
+async def test_non_ollama_provider_prompt_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-Ollama providers with disable_thinking=True use the OpenAI-compat path.
+    No /no_think directive is injected into the user message content."""
     monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
     provider = OpenAICompatProvider(
         api_key="x",
@@ -111,25 +110,12 @@ async def test_no_think_scoped_to_qwen_only(monkeypatch: pytest.MonkeyPatch) -> 
         disable_thinking=True,
     )
     await provider.complete("hello")
-    user_msg = provider.client.chat.completions.create.calls[0]["messages"][-1]
+    call = provider.client.chat.completions.create.calls[0]
+    user_msg = call["messages"][-1]
+    # OpenAI-compat path: no /no_think injection (that was Ollama-specific).
     assert "/no_think" not in user_msg["content"]
-
-
-@pytest.mark.asyncio
-async def test_no_think_not_duplicated_on_second_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A user whose prompt already contains `/no_think` (deliberate
-    or from a prior pass) shouldn't get a second copy appended."""
-    monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
-    provider = OpenAICompatProvider(
-        api_key="x",
-        model="qwen3:14b",
-        base_url="http://localhost:11434/v1",
-        provider_name="ollama",
-        disable_thinking=True,
-    )
-    await provider.complete("what is 2+2?\n\n/no_think")
-    user_msg = provider.client.chat.completions.create.calls[0]["messages"][-1]
-    assert user_msg["content"].count("/no_think") == 1
+    # chat_template_kwargs is set for llama.cpp-compatible servers.
+    assert call["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
 
 
 @pytest.mark.asyncio
@@ -220,16 +206,58 @@ def test_zero_or_negative_timeout_falls_back_to_default(monkeypatch: pytest.Monk
 
 
 # ---------------------------------------------------------------------------
-# _strip_think_tags unit tests
+# _ollama_native_base_url unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_ollama_native_base_url_strips_v1_suffix() -> None:
+    assert _ollama_native_base_url("http://host:11434/v1") == "http://host:11434"
+    assert _ollama_native_base_url("http://host:11434/v1/") == "http://host:11434"
+    assert _ollama_native_base_url("http://host:11434") == "http://host:11434"
+
+
+# ---------------------------------------------------------------------------
+# Ollama native-endpoint dispatch tests (Phase 4 replacement)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_phase4_strategy_f_injects_into_system_and_user(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Phase 4: strategy (f) — /no_think injected into BOTH system message and
-    last user message, with 'Begin response directly' prefix in system.
-    Validates the plan §D7 matrix winner for Qwen thinking models."""
+async def test_ollama_native_dispatch_when_thinking_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """provider=ollama + disable_thinking=True → native /api/chat endpoint,
+    body includes think: false and options.num_predict (not max_tokens)."""
+    captured: list[dict] = []
+
+    class _FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return {
+                "message": {"content": "visible output"},
+                "done_reason": "stop",
+                "eval_count": 7,
+                "prompt_eval_count": 12,
+            }
+
+    class _FakeHTTPXClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def post(self, url: str, *, json: dict, **_kw) -> _FakeResponse:  # noqa: A002
+            captured.append({"url": url, "body": json})
+            return _FakeResponse()
+
     monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("workers.common.llm.openai_compat.httpx.AsyncClient", _FakeHTTPXClient)
+
     provider = OpenAICompatProvider(
         api_key="x",
         model="qwen3.5:9b",
@@ -238,29 +266,54 @@ async def test_phase4_strategy_f_injects_into_system_and_user(monkeypatch: pytes
         disable_thinking=True,
     )
 
-    await provider.complete("hello", system="Be helpful.")
+    result = await provider.complete("hello", system="Be helpful.", max_tokens=1024)
 
-    create = provider.client.chat.completions.create
-    assert create.calls
-    messages = create.calls[0]["messages"]
-
-    sys_msg = next((m for m in messages if m["role"] == "system"), None)
-    user_msg = next((m for m in messages if m["role"] == "user"), None)
-
-    assert sys_msg is not None, "system message must be present"
-    assert "/no_think" in sys_msg["content"], "system message must contain /no_think"
-    assert "Begin your response" in sys_msg["content"], (
-        "system message must contain the 'Begin response' prefix"
-    )
-    assert user_msg is not None, "user message must be present"
-    assert "/no_think" in user_msg["content"], "last user message must contain /no_think"
+    assert len(captured) == 1
+    req = captured[0]
+    assert req["url"] == "http://localhost:11434/api/chat"
+    body = req["body"]
+    assert body["think"] is False
+    assert body["stream"] is False
+    assert body["options"]["num_predict"] == 1024
+    # OpenAI-compat client must NOT have been called.
+    assert not provider.client.chat.completions.create.calls
+    assert result.content == "visible output"
 
 
 @pytest.mark.asyncio
-async def test_phase4_strategy_f_prepends_system_when_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Phase 4: when no system message is provided, _apply_no_think_strategy
-    prepends a synthetic system message so the directive reaches the model."""
+async def test_ollama_native_response_normalization(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Native response shape (message.content, eval_count, done_reason) maps to
+    the same LLMResponse fields as the OpenAI-compat path."""
+    class _FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return {
+                "message": {"content": "The answer is 42."},
+                "done_reason": "stop",
+                "eval_count": 20,
+                "prompt_eval_count": 30,
+            }
+
+    class _FakeHTTPXClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def post(self, url: str, *, json: dict, **_kw) -> _FakeResponse:  # noqa: A002
+            return _FakeResponse()
+
     monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("workers.common.llm.openai_compat.httpx.AsyncClient", _FakeHTTPXClient)
+
     provider = OpenAICompatProvider(
         api_key="x",
         model="qwen3.5:9b",
@@ -269,29 +322,63 @@ async def test_phase4_strategy_f_prepends_system_when_none(monkeypatch: pytest.M
         disable_thinking=True,
     )
 
-    # No system= arg → no system message in the input list.
+    result = await provider.complete("what is 6x7?")
+
+    assert result.content == "The answer is 42."
+    assert result.output_tokens == 20
+    assert result.input_tokens == 30
+    assert result.stop_reason == "stop"
+    assert result.provider_name == "ollama"
+
+
+@pytest.mark.asyncio
+async def test_ollama_openai_compat_path_when_thinking_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """provider=ollama + disable_thinking=False → OpenAI-compat path, no native call."""
+    monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
+    provider = OpenAICompatProvider(
+        api_key="x",
+        model="qwen3.5:9b",
+        base_url="http://localhost:11434/v1",
+        provider_name="ollama",
+        disable_thinking=False,
+    )
+
     await provider.complete("hello")
 
-    messages = provider.client.chat.completions.create.calls[0]["messages"]
-    roles = [m["role"] for m in messages]
-    assert roles[0] == "system", "system message must be prepended when none provided"
-    assert "/no_think" in messages[0]["content"]
+    call = provider.client.chat.completions.create.calls[0]
+    # No thinking suppression kwargs since disable_thinking=False.
+    assert call["extra_body"] is None
+    # Prompt must be clean — no /no_think injected.
+    assert "/no_think" not in call["messages"][-1]["content"]
 
 
 @pytest.mark.asyncio
-async def test_phase4_strategy_f_idempotent_on_retry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Phase 4: calling _apply_no_think_strategy on messages that already have
-    the directive does NOT add a second copy (retry path)."""
-    from workers.common.llm.openai_compat import _apply_no_think_strategy
-    messages = [
-        {"role": "system", "content": "Be helpful.\n\n/no_think"},
-        {"role": "user", "content": "hello\n\n/no_think"},
-    ]
-    result = _apply_no_think_strategy(messages, model="qwen3.5:9b", disable_thinking=True)
-    sys_content = result[0]["content"]
-    user_content = result[-1]["content"]
-    assert sys_content.count("/no_think") == 1, "system /no_think must not be duplicated"
-    assert user_content.count("/no_think") == 1, "user /no_think must not be duplicated"
+async def test_non_ollama_provider_uses_openai_compat_even_with_disable_thinking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """provider=openai + disable_thinking=True → OpenAI-compat path (not native).
+    The native branch is scoped exclusively to provider_name == 'ollama'."""
+    monkeypatch.setattr("workers.common.llm.openai_compat.openai.AsyncOpenAI", _FakeAsyncOpenAI)
+    provider = OpenAICompatProvider(
+        api_key="real-key",
+        model="gpt-4o",
+        base_url="https://api.openai.com/v1",
+        provider_name="openai",
+        disable_thinking=True,
+    )
+
+    await provider.complete("hello")
+
+    # OpenAI-compat client must have been called, not the native Ollama path.
+    assert provider.client.chat.completions.create.calls
+    call = provider.client.chat.completions.create.calls[0]
+    # chat_template_kwargs is set for llama.cpp-compatible servers (openai path).
+    assert call["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+# ---------------------------------------------------------------------------
+# _strip_think_tags unit tests
+# ---------------------------------------------------------------------------
 
 
 def test_strip_think_tags_clean_response_unchanged() -> None:
@@ -356,7 +443,9 @@ def _make_response(content: str, finish_reason: str = "stop") -> SimpleNamespace
 
 @pytest.mark.asyncio
 async def test_retry_fires_on_empty_content_with_length_stop(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When stop_reason=length and content is empty (all think tokens), retry with doubled max_tokens."""
+    """When stop_reason=length and content is empty (all think tokens), retry with doubled max_tokens.
+    Uses llama-cpp provider (OpenAI-compat path) — Ollama with disable_thinking now takes
+    the native path and the empty-content failure mode is eliminated there."""
     think_only = "<think>I am reasoning forever</think>"
     real_answer = "The function initializes the config loader."
 
@@ -378,8 +467,8 @@ async def test_retry_fires_on_empty_content_with_length_stop(monkeypatch: pytest
     provider = OpenAICompatProvider(
         api_key="x",
         model="qwen3.6:27b-q4_K_M",
-        base_url="http://localhost:11434/v1",
-        provider_name="ollama",
+        base_url="http://localhost:8080/v1",
+        provider_name="llama-cpp",
         disable_thinking=True,
     )
 
@@ -517,7 +606,6 @@ async def test_complete_total_attempts_capped_at_three(monkeypatch: pytest.Monke
 async def test_retry_log_includes_telemetry_fields(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
     """Phase 3: llm_empty_content_retry log must include attempt, strategy,
     original_latency_ms fields for observability."""
-    import logging
     import structlog.testing
 
     think_only = "<think>reasoning</think>"
