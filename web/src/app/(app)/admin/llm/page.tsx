@@ -94,6 +94,10 @@ interface LegacyLLMConfigResponse {
 interface ListProfilesResponse {
   profiles: ProfileResponse[];
   active_profile_missing: boolean;
+  // Phase 3 / r1 H2: exposed by the API when the encryption key is present.
+  // Defaults to true when missing so older API replicas during a rolling
+  // deploy don't accidentally show the State 1 onboarding banner.
+  encryption_key_set?: boolean;
 }
 
 interface ConflictState {
@@ -107,16 +111,37 @@ interface ConflictState {
 
 async function handleApiError(res: Response): Promise<string> {
   const text = await res.text();
+  let serverMsg = text;
   try {
     const json = JSON.parse(text);
-    if (json.error) return json.error;
+    if (json.error) serverMsg = json.error;
   } catch {
     /* not JSON */
+  }
+
+  // r1 H7 — translate operator-vocabulary error strings into user-facing copy.
+  // Ordered by priority; first match wins.
+  if (
+    res.status === 422 ||
+    serverMsg.toLowerCase().includes("encryption key") ||
+    serverMsg.includes("ErrEncryptionKeyRequired")
+  ) {
+    return "Your API key can't be saved yet. This server isn't fully configured — contact your administrator to complete the setup. (Error: encryption key required)";
+  }
+  if (res.status >= 500) {
+    return "Something went wrong on the server. Try again, or check the server logs.";
+  }
+  if (
+    serverMsg.toLowerCase().includes("validation") ||
+    serverMsg.toLowerCase().includes("must be") ||
+    serverMsg.toLowerCase().includes("invalid format")
+  ) {
+    return "The API key format looks wrong. Check that you've copied the full key from your provider's dashboard.";
   }
   if (text.trimStart().startsWith("<")) {
     return `Server error (HTTP ${res.status}). The API may be restarting — try again in a moment.`;
   }
-  return text || `HTTP ${res.status}`;
+  return serverMsg || `HTTP ${res.status}`;
 }
 
 const RUNBOOK_PATH = "/docs/admin-runbooks/llm-config.md";
@@ -124,6 +149,10 @@ const RUNBOOK_PATH = "/docs/admin-runbooks/llm-config.md";
 export default function AdminLLMPage() {
   const [profiles, setProfiles] = useState<ProfileResponse[] | null>(null);
   const [activeProfileMissing, setActiveProfileMissing] = useState(false);
+  // r1 H2: encryption key presence flag from the LIST response.
+  // Initialise to true so existing sessions don't flash State 1 before
+  // the first fetch completes.
+  const [encryptionKeySet, setEncryptionKeySet] = useState(true);
   const [legacyConfig, setLegacyConfig] = useState<LegacyLLMConfigResponse | null>(null);
   const [workerAddr, setWorkerAddr] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -191,6 +220,8 @@ export default function AdminLLMPage() {
       if (list) {
         setProfiles(list.profiles);
         setActiveProfileMissing(list.active_profile_missing);
+        // Default to true when the field is absent (older API replica).
+        setEncryptionKeySet(list.encryption_key_set ?? true);
         // Auto-select an editor target. Prefer the active profile;
         // otherwise the first profile in the list. If the user already
         // picked a profile via [Edit], keep that selection if it's
@@ -472,25 +503,49 @@ export default function AdminLLMPage() {
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {isMultiProfileMode && activeProfile ? (
+              // N≥2: green Active pill showing the active profile name.
+              // r1 L5: text color #16a34a (green-700) gives ≥4.5:1 contrast
+              // on the rgba(34,197,94,0.1) background; replaces the former
+              // #22c55e which failed WCAG AA at ~3.1:1.
               <span
                 data-testid="header-active-pill"
-                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-success,#22c55e)] bg-[rgba(34,197,94,0.1)] px-2.5 py-1 text-xs font-medium text-[var(--color-success,#22c55e)]"
+                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-success,#22c55e)] bg-[rgba(34,197,94,0.1)] px-2.5 py-1 text-xs font-medium text-[#16a34a]"
               >
                 Active: {activeProfile.name}
               </span>
             ) : !isMultiProfileMode && profiles && profiles[0] ? (
-              // Slice 4 inline-rename UX polish: in N=1 the static
-              // pill becomes a click-to-edit affordance. The editor
-              // grid below intentionally hides the name field in
-              // N=1, so this pill is the only rename surface for
-              // single-profile workspaces.
-              <ProfileNamePill
-                profileId={profiles[0].id}
-                currentName={headerActiveProfileName}
-                onRenamed={loadAll}
-                disabled={editorDisabled}
-                testIdPrefix="header-profile-pill"
-              />
+              // N=1: show the ProfileNamePill (click-to-rename) AND an Active
+              // pill whose color encodes functional completeness (r1 H5).
+              <>
+                <ProfileNamePill
+                  profileId={profiles[0].id}
+                  currentName={headerActiveProfileName}
+                  onRenamed={loadAll}
+                  disabled={editorDisabled}
+                  testIdPrefix="header-profile-pill"
+                />
+                {(() => {
+                  const p = profiles[0];
+                  const isComplete =
+                    isLocalProvider(p.provider) || (p.api_key_set && encryptionKeySet);
+                  return isComplete ? (
+                    // r1 L5: same contrast fix as the N≥2 pill above.
+                    <span
+                      data-testid="header-active-pill-single-complete"
+                      className="inline-flex items-center rounded-full border border-[var(--color-success,#22c55e)] bg-[rgba(34,197,94,0.1)] px-2.5 py-1 text-xs font-medium text-[#16a34a]"
+                    >
+                      Active
+                    </span>
+                  ) : (
+                    <span
+                      data-testid="header-active-pill-single-incomplete"
+                      className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-subtle)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]"
+                    >
+                      Active (not configured)
+                    </span>
+                  );
+                })()}
+              </>
             ) : null}
             {!isMultiProfileMode && (
               <Button
@@ -631,6 +686,87 @@ export default function AdminLLMPage() {
         </Panel>
       )}
 
+      {/* r1 H6 — onboarding banner (N=1 only; 4 states; L4 aria roles).
+          State precedence: 1 > 2 > 3 > 4.
+          State 4 = no banner. The banner is informational (role=status)
+          and non-intrusive (aria-live=polite). Gated on profileCount === 1
+          strictly so N>=2 is never affected. Also suppressed while the
+          repair banner is active (repair wins visually). */}
+      {profileCount === 1 && !activeProfileMissing && selectedProfile && (() => {
+        const p = selectedProfile;
+        const isLocal = isLocalProvider(p.provider);
+        const hasProvider = p.provider !== "";
+        // State 1: encryption key absent + non-local or no provider.
+        if (!encryptionKeySet && (!isLocal || !hasProvider)) {
+          return (
+            <Panel
+              className="mb-4 border-[var(--color-warning,#f59e0b)]"
+              data-testid="onboarding-banner-state1"
+              role="status"
+              aria-live="polite"
+            >
+              <p className="text-sm text-[var(--text-primary)]">
+                Your LLM profile isn&apos;t ready to use yet. This server needs an encryption key
+                before it can store cloud API keys. Ask your administrator to set{" "}
+                <code className="rounded bg-[var(--bg-subtle)] px-1 font-mono text-xs">
+                  SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY
+                </code>{" "}
+                and restart the server. If you&apos;re the administrator, see the{" "}
+                <a
+                  href="/docs/admin-runbooks/llm-config.md"
+                  className="underline hover:text-[var(--text-primary)]"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  LLM configuration guide
+                </a>
+                . In the meantime, you can switch to Ollama below — it runs locally and
+                doesn&apos;t need an API key or an encryption key.
+              </p>
+            </Panel>
+          );
+        }
+        // State 2: key set + (no provider, OR cloud with no key).
+        if (encryptionKeySet && (!hasProvider || (!isLocal && !p.api_key_set))) {
+          return (
+            <Panel
+              className="mb-4 border-[var(--color-info,#3b82f6)]"
+              data-testid="onboarding-banner-state2"
+              role="status"
+              aria-live="polite"
+            >
+              <p className="text-sm text-[var(--text-primary)]">
+                Choose a provider to enable AI features. Ollama runs on your machine and
+                requires no API key. Anthropic and OpenAI are cloud providers that require an
+                API key. Pick one below, fill in your credentials, and save.
+              </p>
+            </Panel>
+          );
+        }
+        // State 3: key set + local provider + no model configured.
+        if (encryptionKeySet && isLocal && !p.summary_model) {
+          return (
+            <Panel
+              className="mb-4 border-[var(--color-info,#3b82f6)]"
+              data-testid="onboarding-banner-state3"
+              role="status"
+              aria-live="polite"
+            >
+              <p className="text-sm text-[var(--text-primary)]">
+                Almost there — set a model name below. Ollama is configured but no model is
+                selected. Specify a model (e.g.{" "}
+                <code className="rounded bg-[var(--bg-subtle)] px-1 font-mono text-xs">
+                  llama3.2
+                </code>
+                ) and save.
+              </p>
+            </Panel>
+          );
+        }
+        // State 4: fully configured — no banner.
+        return null;
+      })()}
+
       {/* Editor — always present unless we hit empty-state. In N=1 mode
           this looks exactly like today's /admin/llm grid. In N>=2 mode
           it picks up the "Profile name" + "Make active" affordances. */}
@@ -639,16 +775,26 @@ export default function AdminLLMPage() {
           className="mb-4"
           data-testid={isMultiProfileMode ? "editor-panel-multi" : "editor-panel-single"}
         >
-          {isMultiProfileMode && (
+          {(isMultiProfileMode || profileCount === 1) && (
             <div className="mb-3 text-sm text-[var(--text-secondary)]">
               <span className="font-medium text-[var(--text-primary)]">
-                Editing: {selectedProfile.name}
+                {isMultiProfileMode ? `Editing: ${selectedProfile.name}` : selectedProfile.name}
               </span>
-              {selectedProfile.is_active && (
-                <span className="ml-2 inline-flex items-center rounded-full border border-[var(--color-success,#22c55e)] bg-[rgba(34,197,94,0.1)] px-2 py-0.5 text-xs font-medium text-[var(--color-success,#22c55e)]">
-                  Active
-                </span>
-              )}
+              {selectedProfile.is_active && (() => {
+                const isComplete =
+                  isLocalProvider(selectedProfile.provider) ||
+                  (selectedProfile.api_key_set && encryptionKeySet);
+                return isComplete ? (
+                  // r1 L5: #16a34a for WCAG AA compliance on rgba bg.
+                  <span className="ml-2 inline-flex items-center rounded-full border border-[var(--color-success,#22c55e)] bg-[rgba(34,197,94,0.1)] px-2 py-0.5 text-xs font-medium text-[#16a34a]">
+                    Active
+                  </span>
+                ) : (
+                  <span className="ml-2 inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-subtle)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
+                    Active (not configured)
+                  </span>
+                );
+              })()}
             </div>
           )}
           <ProfileEditor

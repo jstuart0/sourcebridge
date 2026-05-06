@@ -84,7 +84,7 @@ function profile(overrides: Partial<ProfileFixture>): ProfileFixture {
 }
 
 interface FetchPlan {
-  profilesList: { profiles: ProfileFixture[]; active_profile_missing: boolean };
+  profilesList: { profiles: ProfileFixture[]; active_profile_missing: boolean; encryption_key_set?: boolean };
   legacyConfig?: {
     provider: string;
     base_url: string;
@@ -264,10 +264,12 @@ describe("AdminLLMPage — N=1 layout (progressive disclosure)", () => {
     // The profile-name input appears only in multiProfileMode.
     expect(screen.queryByTestId("editor-single-name-input")).toBeNull();
 
-    // Today's grid is present: provider select, base URL input, model
-    // combobox, advanced toggle, timeout, save button.
+    // Today's grid is present: provider select, server/base URL input
+    // (r1 M6: label is "Server URL" for local providers like ollama),
+    // model combobox, advanced toggle, timeout, save button.
     expect(screen.getByText("Provider")).toBeInTheDocument();
-    expect(screen.getByText("Base URL")).toBeInTheDocument();
+    // Ollama is a local provider, so the label is "Server URL" (r1 M6).
+    expect(screen.getByText("Server URL")).toBeInTheDocument();
     expect(screen.getByText(/Timeout \(seconds\)/i)).toBeInTheDocument();
     // Save button (single-mode label).
     expect(screen.getByTestId("editor-single-save")).toBeInTheDocument();
@@ -665,5 +667,158 @@ describe("AdminLLMPage — slice-1-flag #1 (is_active from list)", () => {
     // And the per-row [Active] pill is on Beta only.
     expect(screen.getByTestId("profile-row-ca_llm_profile:b-active-pill")).toBeInTheDocument();
     expect(screen.queryByTestId("profile-row-ca_llm_profile:a-active-pill")).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 3 — N=1 UX clarity (r1 H5, H6, H7)
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("AdminLLMPage — Phase 3: N=1 Active pill (r1 H5)", () => {
+  it("(vi) shows green complete pill for provider=ollama (local, no API key needed)", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [profile({ is_active: true, provider: "ollama", summary_model: "llama3.2" })],
+        active_profile_missing: false,
+        encryption_key_set: true,
+      },
+    });
+    render(<AdminLLMPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("header-active-pill-single-complete")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("header-active-pill-single-incomplete")).toBeNull();
+  });
+
+  it("(vii) shows gray incomplete pill for cloud provider with api_key_set=false", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [
+          profile({
+            is_active: true,
+            provider: "anthropic",
+            api_key_set: false,
+            summary_model: "claude-sonnet-4-20250514",
+          }),
+        ],
+        active_profile_missing: false,
+        encryption_key_set: true,
+      },
+    });
+    render(<AdminLLMPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("header-active-pill-single-incomplete")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("header-active-pill-single-complete")).toBeNull();
+  });
+});
+
+describe("AdminLLMPage — Phase 3: onboarding banner (r1 H6)", () => {
+  it("(i) N=1 empty provider + key set → State 2 banner", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [profile({ is_active: true, provider: "", api_key_set: false })],
+        active_profile_missing: false,
+        encryption_key_set: true,
+      },
+    });
+    render(<AdminLLMPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("onboarding-banner-state2")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("onboarding-banner-state1")).toBeNull();
+    expect(screen.queryByTestId("onboarding-banner-state3")).toBeNull();
+  });
+
+  it("(ii) N=1 provider=anthropic + api_key_set=false + key set → State 2 banner", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [
+          profile({
+            is_active: true,
+            provider: "anthropic",
+            api_key_set: false,
+            summary_model: "claude-sonnet-4-20250514",
+          }),
+        ],
+        active_profile_missing: false,
+        encryption_key_set: true,
+      },
+    });
+    render(<AdminLLMPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("onboarding-banner-state2")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("onboarding-banner-state2").textContent).toMatch(
+      /Choose a provider/,
+    );
+  });
+
+  it("(iii) N=1 provider=ollama with model set → no banner (State 4)", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [
+          profile({
+            is_active: true,
+            provider: "ollama",
+            api_key_set: false,
+            summary_model: "llama3.2",
+          }),
+        ],
+        active_profile_missing: false,
+        encryption_key_set: true,
+      },
+    });
+    render(<AdminLLMPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("editor-panel-single")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("onboarding-banner-state1")).toBeNull();
+    expect(screen.queryByTestId("onboarding-banner-state2")).toBeNull();
+    expect(screen.queryByTestId("onboarding-banner-state3")).toBeNull();
+  });
+
+  it("(iv) N=1 encryption_key_set=false + non-local provider → State 1 banner", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [
+          profile({
+            is_active: true,
+            provider: "anthropic",
+            api_key_set: false,
+          }),
+        ],
+        active_profile_missing: false,
+        encryption_key_set: false,
+      },
+    });
+    render(<AdminLLMPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("onboarding-banner-state1")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("onboarding-banner-state1").textContent).toMatch(
+      /SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY/,
+    );
+    expect(screen.queryByTestId("onboarding-banner-state2")).toBeNull();
+  });
+
+  it("(v) N>=2 → no onboarding banner regardless of key/provider state", async () => {
+    installFetchPlan({
+      profilesList: {
+        profiles: [
+          profile({ id: "ca_llm_profile:a", is_active: true, provider: "anthropic", api_key_set: false }),
+          profile({ id: "ca_llm_profile:b", is_active: false, provider: "ollama" }),
+        ],
+        active_profile_missing: false,
+        encryption_key_set: false,
+      },
+    });
+    render(<AdminLLMPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("editor-panel-multi")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("onboarding-banner-state1")).toBeNull();
+    expect(screen.queryByTestId("onboarding-banner-state2")).toBeNull();
+    expect(screen.queryByTestId("onboarding-banner-state3")).toBeNull();
   });
 });

@@ -442,14 +442,19 @@ export function ProfileEditor({
         </select>
       </div>
 
+      {/* r1 M6 — label and placeholder adapt to provider type:
+          local providers show "Server URL" (required); cloud providers
+          show "Base URL (optional)" with proxy-routing guidance. */}
       <div className={fieldWrapClass}>
-        <label className={labelClass}>Base URL</label>
+        <label className={labelClass}>
+          {def.isLocal ? "Server URL" : "Base URL (optional)"}
+        </label>
         <div className="flex items-center gap-2">
           <Input
             type="text"
             value={baseURL}
             onChange={(e) => setBaseURL(e.target.value)}
-            placeholder={def.defaultBaseURL}
+            placeholder={def.isLocal ? def.defaultBaseURL : ""}
             disabled={disabled}
             className="flex-1 font-mono"
           />
@@ -475,7 +480,9 @@ export function ProfileEditor({
                     ? "OpenRouter uses the OpenAI-compatible API. Models from 300+ providers available."
                     : provider === "gemini"
                       ? "Google Gemini uses an OpenAI-compatible endpoint. Default URL works for most setups."
-                      : "Default URL for this provider. Change it to use a custom proxy or endpoint."}
+                      : !def.isLocal
+                        ? "Leave blank to use the default API endpoint. Set this only if you're routing through a proxy."
+                        : "Default URL for this provider. Change it to use a custom proxy or endpoint."}
         </p>
       </div>
 
