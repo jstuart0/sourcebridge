@@ -690,6 +690,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 			}
 		} else {
 			slog.Info("living-wiki globally disabled; dispatcher not started")
+			// TODO(option-D): consider defaulting enabled=true on fresh installs
+			// so the dispatcher starts automatically without requiring the operator
+			// to visit /settings/living-wiki first. Blocked on: (a) safety review
+			// (dispatcher calls out to LLMs which costs money / consumes local
+			// Ollama), (b) kill-switch semantics, (c) UX for the "auto-started but
+			// not configured" case. Filed as follow-up; do not implement here.
 		}
 	}
 
