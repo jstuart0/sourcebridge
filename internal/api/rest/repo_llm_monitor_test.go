@@ -195,7 +195,7 @@ func TestRepoLLMJobLogsMatchingRepo(t *testing.T) {
 		TargetKey:   "repo-1:logs-match",
 		RepoID:      "repo-abc",
 		Run: func(rt llm.Runtime) error {
-			rt.ReportProgress(0.25, "snapshot", "Snapshot assembled")
+			rt.ReportProgress(0.25, "snapshot", "Snapshot assembled", 0)
 			return nil
 		},
 	})

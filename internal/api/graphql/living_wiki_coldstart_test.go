@@ -172,11 +172,11 @@ func csRunnerFromPages(
 		total := len(pages)
 
 		if total == 0 {
-			rt.ReportProgress(1.0, "ok", "no pages")
+			rt.ReportProgress(1.0, "ok", "no pages", 0)
 			return nil
 		}
 
-		rt.ReportProgress(0.05, "generating", fmt.Sprintf("starting %d pages", total))
+		rt.ReportProgress(0.05, "generating", fmt.Sprintf("starting %d pages", total), 0)
 
 		var generated, excludedCount int32
 		var excludedIDsAcc atomicStringSlice
@@ -195,7 +195,7 @@ func csRunnerFromPages(
 				}
 				done := int(atomic.LoadInt32(&generated)) + int(atomic.LoadInt32(&excludedCount))
 				rt.ReportProgress(0.05+0.90*float64(done)/float64(total),
-					"generating", fmt.Sprintf("%d/%d", done, total))
+					"generating", fmt.Sprintf("%d/%d", done, total), 0)
 			},
 		}
 
@@ -219,7 +219,7 @@ func csRunnerFromPages(
 
 		finalGen := int(atomic.LoadInt32(&generated))
 		finalExcl := int(atomic.LoadInt32(&excludedCount))
-		rt.ReportProgress(1.0, status, fmt.Sprintf("%d gen, %d excl", finalGen, finalExcl))
+		rt.ReportProgress(1.0, status, fmt.Sprintf("%d gen, %d excl", finalGen, finalExcl), 0)
 
 		if jrs != nil {
 			now := time.Now()
@@ -264,7 +264,7 @@ type fakeRuntime struct {
 }
 
 func (f *fakeRuntime) JobID() string { return f.jobID }
-func (f *fakeRuntime) ReportProgress(p float64, phase, _ string) {
+func (f *fakeRuntime) ReportProgress(p float64, phase, _ string, _ float64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.progress = p
@@ -598,7 +598,7 @@ func TestColdStartJobAppearsInSharedActivityFeed(t *testing.T) {
 		RepoID:      "feed-test",
 		Priority:    llm.PriorityInteractive,
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
-			rt.ReportProgress(0.1, "generating", "testing")
+			rt.ReportProgress(0.1, "generating", "testing", 0)
 			select {
 			case <-block:
 			case <-runCtx.Done():
@@ -1318,11 +1318,11 @@ func csRunnerFromPagesWithSinks(
 		total := len(pages)
 
 		if total == 0 {
-			rt.ReportProgress(1.0, "ok", "no pages")
+			rt.ReportProgress(1.0, "ok", "no pages", 0)
 			return nil
 		}
 
-		rt.ReportProgress(0.05, "generating", fmt.Sprintf("starting %d pages", total))
+		rt.ReportProgress(0.05, "generating", fmt.Sprintf("starting %d pages", total), 0)
 
 		var generated, excludedCount int32
 		var excludedIDsAcc atomicStringSlice
@@ -1341,7 +1341,7 @@ func csRunnerFromPagesWithSinks(
 				}
 				done := int(atomic.LoadInt32(&generated)) + int(atomic.LoadInt32(&excludedCount))
 				rt.ReportProgress(0.05+0.90*float64(done)/float64(total),
-					"generating", fmt.Sprintf("%d/%d", done, total))
+					"generating", fmt.Sprintf("%d/%d", done, total), 0)
 			},
 		}
 
@@ -1377,7 +1377,7 @@ func csRunnerFromPagesWithSinks(
 			)
 		}
 
-		rt.ReportProgress(1.0, status, fmt.Sprintf("%d gen, %d excl", finalGen, finalExcl))
+		rt.ReportProgress(1.0, status, fmt.Sprintf("%d gen, %d excl", finalGen, finalExcl), 0)
 
 		if jrs != nil {
 			now := time.Now()

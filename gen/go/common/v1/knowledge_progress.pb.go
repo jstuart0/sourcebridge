@@ -139,8 +139,14 @@ type KnowledgeStreamProgress struct {
 	FileCacheHits    int32 `protobuf:"varint,11,opt,name=file_cache_hits,json=fileCacheHits,proto3" json:"file_cache_hits,omitempty"`
 	PackageCacheHits int32 `protobuf:"varint,12,opt,name=package_cache_hits,json=packageCacheHits,proto3" json:"package_cache_hits,omitempty"`
 	RootCacheHits    int32 `protobuf:"varint,13,opt,name=root_cache_hits,json=rootCacheHits,proto3" json:"root_cache_hits,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Instantaneous throughput from the active LLM gate's 60-second ring
+	// buffer at the moment this progress event was emitted. Zero when the
+	// gate has not recorded any completions yet (cold start, non-streaming
+	// path, or kill-switch disabled). Consumers MUST treat zero as "unknown",
+	// not as "zero tokens per second". Added Phase 6 (worker LLM concurrency).
+	CurrentTokensPerSecond float32 `protobuf:"fixed32,14,opt,name=current_tokens_per_second,json=currentTokensPerSecond,proto3" json:"current_tokens_per_second,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *KnowledgeStreamProgress) Reset() {
@@ -236,6 +242,13 @@ func (x *KnowledgeStreamProgress) GetRootCacheHits() int32 {
 	return 0
 }
 
+func (x *KnowledgeStreamProgress) GetCurrentTokensPerSecond() float32 {
+	if x != nil {
+		return x.CurrentTokensPerSecond
+	}
+	return 0
+}
+
 // KnowledgeStreamPhaseMarker fires once per phase transition so the
 // client can update the phase label deterministically. The detail
 // field is optional context (for example the strategy name on the
@@ -296,7 +309,7 @@ var File_common_v1_knowledge_progress_proto protoreflect.FileDescriptor
 
 const file_common_v1_knowledge_progress_proto_rawDesc = "" +
 	"\n" +
-	"\"common/v1/knowledge_progress.proto\x12\x16sourcebridge.common.v1\"\xfe\x02\n" +
+	"\"common/v1/knowledge_progress.proto\x12\x16sourcebridge.common.v1\"\xb9\x03\n" +
 	"\x17KnowledgeStreamProgress\x12<\n" +
 	"\x05phase\x18\x01 \x01(\x0e2&.sourcebridge.common.v1.KnowledgePhaseR\x05phase\x12'\n" +
 	"\x0fcompleted_units\x18\x02 \x01(\x05R\x0ecompletedUnits\x12\x1f\n" +
@@ -308,7 +321,8 @@ const file_common_v1_knowledge_progress_proto_rawDesc = "" +
 	" \x01(\x05R\rleafCacheHits\x12&\n" +
 	"\x0ffile_cache_hits\x18\v \x01(\x05R\rfileCacheHits\x12,\n" +
 	"\x12package_cache_hits\x18\f \x01(\x05R\x10packageCacheHits\x12&\n" +
-	"\x0froot_cache_hits\x18\r \x01(\x05R\rrootCacheHits\"r\n" +
+	"\x0froot_cache_hits\x18\r \x01(\x05R\rrootCacheHits\x129\n" +
+	"\x19current_tokens_per_second\x18\x0e \x01(\x02R\x16currentTokensPerSecond\"r\n" +
 	"\x1aKnowledgeStreamPhaseMarker\x12<\n" +
 	"\x05phase\x18\x01 \x01(\x0e2&.sourcebridge.common.v1.KnowledgePhaseR\x05phase\x12\x16\n" +
 	"\x06detail\x18\x02 \x01(\tR\x06detail*\x9e\x02\n" +

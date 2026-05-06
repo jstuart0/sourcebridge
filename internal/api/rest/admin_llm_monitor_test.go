@@ -239,7 +239,7 @@ func TestHandleLLMActivityShowsCompletedJob(t *testing.T) {
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:activity",
 		Run: func(rt llm.Runtime) error {
-			rt.ReportProgress(0.5, "midway", "halfway")
+			rt.ReportProgress(0.5, "midway", "halfway", 0)
 			rt.ReportTokens(200, 150)
 			close(done)
 			return nil
@@ -314,7 +314,7 @@ func TestHandleLLMJobLogs(t *testing.T) {
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:logs",
 		Run: func(rt llm.Runtime) error {
-			rt.ReportProgress(0.25, "snapshot", "Snapshot assembled")
+			rt.ReportProgress(0.25, "snapshot", "Snapshot assembled", 0)
 			return nil
 		},
 	})
@@ -454,6 +454,53 @@ func TestParseListFilterBasicFields(t *testing.T) {
 	}
 	if f.Limit != 25 {
 		t.Fatalf("expected limit 25, got %d", f.Limit)
+	}
+}
+
+func TestMonitorJobViewCurrentTokensPerSecondSerializesWhenNonZero(t *testing.T) {
+	view := monitorJobView{
+		ID:                     "job-123",
+		Status:                 string(llm.StatusGenerating),
+		CurrentTokensPerSecond: 12.3,
+		ElapsedMs:              500,
+		UpdatedAt:              time.Now(),
+	}
+	b, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	got, ok := out["current_tokens_per_second"]
+	if !ok {
+		t.Fatal("expected current_tokens_per_second key in JSON output")
+	}
+	// JSON numbers unmarshal to float64 from map[string]any.
+	if v, _ := got.(float64); v < 12.2 || v > 12.4 {
+		t.Fatalf("expected current_tokens_per_second≈12.3, got %v", got)
+	}
+}
+
+func TestMonitorJobViewCurrentTokensPerSecondOmittedWhenZero(t *testing.T) {
+	view := monitorJobView{
+		ID:        "job-456",
+		Status:    string(llm.StatusGenerating),
+		ElapsedMs: 100,
+		UpdatedAt: time.Now(),
+		// CurrentTokensPerSecond intentionally zero (default)
+	}
+	b, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := out["current_tokens_per_second"]; ok {
+		t.Fatal("expected current_tokens_per_second to be omitted when zero")
 	}
 }
 

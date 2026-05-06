@@ -148,14 +148,14 @@ func (s learningPathGenerationService) runGenerationPipeline(
 	focusArea := p.focusArea
 
 	enrichedSnapJSON := snapJSON
-	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
+	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled", 0)
 	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 	if artifactUsesUnderstanding(generationMode) {
 		if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
 			return err
 		} else {
 			if reused {
-				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
+				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
 				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 			}
 			if understanding != nil {
@@ -190,7 +190,7 @@ func (s learningPathGenerationService) runGenerationPipeline(
 		return err
 	}
 
-	rt.ReportProgress(0.96, "llm", "LLM completed, persisting steps")
+	rt.ReportProgress(0.96, "llm", "LLM completed, persisting steps", 0)
 	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
 
 	if resp.Usage != nil {
@@ -248,7 +248,7 @@ func (s learningPathGenerationService) runGenerationPipeline(
 	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
 		slog.Error("failed to mark learning path ready", "artifact_id", artifact.ID, "error", err)
 	}
-	rt.ReportProgress(1.0, "ready", "Learning path ready")
+	rt.ReportProgress(1.0, "ready", "Learning path ready", 0)
 	slog.Info("learning path generation complete", "artifact_id", artifact.ID)
 	return nil
 }

@@ -148,14 +148,14 @@ func (s codeTourGenerationService) runGenerationPipeline(
 	theme := p.theme
 
 	enrichedSnapJSON := snapJSON
-	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
+	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled", 0)
 	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 	if artifactUsesUnderstanding(generationMode) {
 		if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
 			return err
 		} else {
 			if reused {
-				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
+				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
 				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 			}
 			if understanding != nil {
@@ -190,7 +190,7 @@ func (s codeTourGenerationService) runGenerationPipeline(
 		return err
 	}
 
-	rt.ReportProgress(0.96, "llm", "LLM completed, persisting stops")
+	rt.ReportProgress(0.96, "llm", "LLM completed, persisting stops", 0)
 	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
 
 	if resp.Usage != nil {
@@ -243,7 +243,7 @@ func (s codeTourGenerationService) runGenerationPipeline(
 	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
 		slog.Error("failed to mark code tour ready", "artifact_id", artifact.ID, "error", err)
 	}
-	rt.ReportProgress(1.0, "ready", "Code tour ready")
+	rt.ReportProgress(1.0, "ready", "Code tour ready", 0)
 	slog.Info("code tour generation complete", "artifact_id", artifact.ID)
 	return nil
 }

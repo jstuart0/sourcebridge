@@ -165,7 +165,7 @@ func TestMemStoreIgnoresWritesForTerminalJobs(t *testing.T) {
 	store := NewMemStore()
 	_, _ = store.Create(newTestJob("done", "tk", StatusCancelled))
 	before := store.GetByID("done")
-	if err := store.SetProgress("done", 0.75, "render", "ignored"); err != nil {
+	if err := store.SetProgress("done", 0.75, "render", "ignored", 0); err != nil {
 		t.Fatalf("SetProgress failed: %v", err)
 	}
 	if err := store.SetTokens("done", 10, 20); err != nil {

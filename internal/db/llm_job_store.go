@@ -57,12 +57,17 @@ type surrealLLMJob struct {
 	SkippedFileUnits  int             `json:"skipped_file_units"`
 	SkippedPackageUnits int           `json:"skipped_package_units"`
 	SkippedRootUnits  int             `json:"skipped_root_units"`
-	ArtifactID       string           `json:"artifact_id"`
-	RepoID           string           `json:"repo_id"`
-	CreatedAt        surrealTime      `json:"created_at"`
-	StartedAt        surrealTime      `json:"started_at"`
-	UpdatedAt        surrealTime      `json:"updated_at"`
-	CompletedAt      surrealTime      `json:"completed_at"`
+	ArtifactID             string           `json:"artifact_id"`
+	RepoID                 string           `json:"repo_id"`
+	// CurrentTokensPerSecond is stored as a pointer so that zero and
+	// absent are distinct on round-trip: a missing field decodes to nil
+	// (unknown) rather than 0 (zero rate), while an explicit 0 is
+	// preserved but the caller treats it as "unknown" per the Job docs.
+	CurrentTokensPerSecond *float64         `json:"current_tokens_per_second,omitempty"`
+	CreatedAt              surrealTime      `json:"created_at"`
+	StartedAt              surrealTime      `json:"started_at"`
+	UpdatedAt              surrealTime      `json:"updated_at"`
+	CompletedAt            surrealTime      `json:"completed_at"`
 }
 
 type surrealLLMJobLog struct {
@@ -122,6 +127,9 @@ func (r *surrealLLMJob) toJob() *llm.Job {
 		RepoID:           r.RepoID,
 		CreatedAt:        r.CreatedAt.Time,
 		UpdatedAt:        r.UpdatedAt.Time,
+	}
+	if r.CurrentTokensPerSecond != nil {
+		job.CurrentTokensPerSecond = *r.CurrentTokensPerSecond
 	}
 	if !r.StartedAt.Time.IsZero() {
 		t := r.StartedAt.Time
@@ -212,6 +220,7 @@ func (s *SurrealStore) Create(job *llm.Job) (*llm.Job, error) {
 		skipped_root_units = $skipped_root_units,
 		artifact_id = $artifact_id,
 		repo_id = $repo_id,
+		current_tokens_per_second = $current_tokens_per_second,
 		created_at = time::now(),
 		updated_at = time::now()`
 
@@ -252,6 +261,7 @@ func (s *SurrealStore) Create(job *llm.Job) (*llm.Job, error) {
 		"skipped_root_units":  job.SkippedRootUnits,
 		"artifact_id":        job.ArtifactID,
 		"repo_id":            job.RepoID,
+		"current_tokens_per_second": job.CurrentTokensPerSecond,
 	}
 
 	if _, err := surrealdb.Query[interface{}](ctx(), db, sql, vars); err != nil {
@@ -307,6 +317,7 @@ func (s *SurrealStore) Update(job *llm.Job) error {
 		skipped_root_units = $skipped_root_units,
 		artifact_id = $artifact_id,
 		repo_id = $repo_id,
+		current_tokens_per_second = $current_tokens_per_second,
 		updated_at = time::now()`
 	vars := map[string]any{
 		"id":                 job.ID,
@@ -345,6 +356,7 @@ func (s *SurrealStore) Update(job *llm.Job) error {
 		"skipped_root_units":  job.SkippedRootUnits,
 		"artifact_id":        job.ArtifactID,
 		"repo_id":            job.RepoID,
+		"current_tokens_per_second": job.CurrentTokensPerSecond,
 	}
 	_, err := queryOne[interface{}](ctx(), db, sql, vars)
 	return err
@@ -532,7 +544,7 @@ func (s *SurrealStore) SetStatus(id string, status llm.JobStatus) error {
 }
 
 // SetProgress updates the progress fields.
-func (s *SurrealStore) SetProgress(id string, progress float64, phase, message string) error {
+func (s *SurrealStore) SetProgress(id string, progress float64, phase, message string, throughputTPS float64) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -548,6 +560,7 @@ func (s *SurrealStore) SetProgress(id string, progress float64, phase, message s
 			progress = $progress,
 			progress_phase = $phase,
 			progress_message = $message,
+			current_tokens_per_second = $tps,
 			updated_at = time::now()
 		  WHERE status = 'pending' OR status = 'generating'`,
 		map[string]any{
@@ -555,6 +568,7 @@ func (s *SurrealStore) SetProgress(id string, progress float64, phase, message s
 			"progress": progress,
 			"phase":    phase,
 			"message":  message,
+			"tps":      throughputTPS,
 		})
 	return err
 }

@@ -23,17 +23,18 @@ type streamFakeRuntime struct {
 }
 
 type reportedProgress struct {
-	pct     float64
-	phase   string
-	message string
+	pct          float64
+	phase        string
+	message      string
+	throughputTPS float64
 }
 
 func (f *streamFakeRuntime) JobID() string { return "fake-job" }
 
-func (f *streamFakeRuntime) ReportProgress(p float64, phase, message string) {
+func (f *streamFakeRuntime) ReportProgress(p float64, phase, message string, throughputTPS float64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.progress = append(f.progress, reportedProgress{pct: p, phase: phase, message: message})
+	f.progress = append(f.progress, reportedProgress{pct: p, phase: phase, message: message, throughputTPS: throughputTPS})
 }
 
 func (f *streamFakeRuntime) ReportTokens(int, int)   {}
@@ -58,7 +59,7 @@ func TestStreamProgressDriverWritesPhaseAndProgress(t *testing.T) {
 		writes []reportedProgress
 		mu     sync.Mutex
 	)
-	write := func(p float64, phase, message string) error {
+	write := func(p float64, phase, message string, _ float64) error {
 		mu.Lock()
 		defer mu.Unlock()
 		writes = append(writes, reportedProgress{pct: p, phase: phase, message: message})
@@ -120,7 +121,7 @@ func TestStreamProgressDriverDropsOldestUnderBackpressure(t *testing.T) {
 	var lastSeen atomic.Int32
 	var writeMu sync.Mutex
 	var writes []float64
-	write := func(p float64, phase, message string) error {
+	write := func(p float64, phase, message string, _ float64) error {
 		<-gate
 		writeMu.Lock()
 		writes = append(writes, p)
@@ -168,13 +169,62 @@ func TestStreamProgressDriverDropsOldestUnderBackpressure(t *testing.T) {
 	}
 }
 
+// TestStreamProgressDriverPropagatesThroughputTPS verifies that a
+// KnowledgeStreamProgress message carrying a non-zero
+// current_tokens_per_second value flows from the proto field through
+// handleProgress into both rt.ReportProgress and the row writer.
+func TestStreamProgressDriverPropagatesThroughputTPS(t *testing.T) {
+	rt := &streamFakeRuntime{}
+	var (
+		writtenTPS []float64
+		mu         sync.Mutex
+	)
+	write := func(p float64, phase, message string, throughputTPS float64) error {
+		mu.Lock()
+		defer mu.Unlock()
+		writtenTPS = append(writtenTPS, throughputTPS)
+		return nil
+	}
+
+	d := newStreamProgressDriver(rt, write, rpcBucketCollapsed, "artifact_id", "tps-test")
+	defer d.Close()
+
+	handler := d.OnProgress()
+	handler(worker.KnowledgeStreamEvent{Progress: &commonv1.KnowledgeStreamProgress{
+		Phase:                  commonv1.KnowledgePhase_KNOWLEDGE_PHASE_RENDER,
+		CompletedUnits:         1,
+		TotalUnits:             2,
+		UnitKind:               "section",
+		Message:                "rendering",
+		CurrentTokensPerSecond: 12.3,
+	}})
+	d.Close()
+
+	rtSnap := rt.snapshot()
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(rtSnap) == 0 {
+		t.Fatal("expected at least one ReportProgress call")
+	}
+	if got := rtSnap[len(rtSnap)-1].throughputTPS; got < 12.2 || got > 12.4 {
+		t.Fatalf("expected throughputTPS≈12.3 in rt.ReportProgress, got %v", got)
+	}
+	if len(writtenTPS) == 0 {
+		t.Fatal("expected at least one row write")
+	}
+	if got := writtenTPS[len(writtenTPS)-1]; got < 12.2 || got > 12.4 {
+		t.Fatalf("expected throughputTPS≈12.3 in write callback, got %v", got)
+	}
+}
+
 // TestStreamProgressDriverCloseDrains exercises the Close-before-
 // terminal-state-write contract: events queued before Close are all
 // written before Close returns.
 func TestStreamProgressDriverCloseDrains(t *testing.T) {
 	rt := &streamFakeRuntime{}
 	var writes int32
-	write := func(p float64, phase, message string) error {
+	write := func(p float64, phase, message string, _ float64) error {
 		atomic.AddInt32(&writes, 1)
 		// Small artificial delay to verify Close waits.
 		time.Sleep(2 * time.Millisecond)

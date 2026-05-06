@@ -127,16 +127,20 @@ type monitorJobView struct {
 	SkippedFileUnits    int        `json:"skipped_file_units"`
 	SkippedPackageUnits int        `json:"skipped_package_units"`
 	SkippedRootUnits    int        `json:"skipped_root_units"`
-	ArtifactID          string     `json:"artifact_id,omitempty"`
-	RepoID              string     `json:"repo_id,omitempty"`
-	ElapsedMs           int64      `json:"elapsed_ms"`
-	QueuePosition       int        `json:"queue_position,omitempty"`
-	QueueDepth          int        `json:"queue_depth,omitempty"`
-	EstimatedWaitMs     int64      `json:"estimated_wait_ms,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
-	StartedAt           *time.Time `json:"started_at,omitempty"`
-	UpdatedAt           time.Time  `json:"updated_at"`
-	CompletedAt         *time.Time `json:"completed_at,omitempty"`
+	ArtifactID             string     `json:"artifact_id,omitempty"`
+	RepoID                 string     `json:"repo_id,omitempty"`
+	// CurrentTokensPerSecond is the instantaneous LLM throughput sampled
+	// from the gate's 60-second ring buffer at the last progress update.
+	// Zero means unknown; consumers MUST treat zero as "unknown".
+	CurrentTokensPerSecond float64    `json:"current_tokens_per_second,omitempty"`
+	ElapsedMs              int64      `json:"elapsed_ms"`
+	QueuePosition          int        `json:"queue_position,omitempty"`
+	QueueDepth             int        `json:"queue_depth,omitempty"`
+	EstimatedWaitMs        int64      `json:"estimated_wait_ms,omitempty"`
+	CreatedAt              time.Time  `json:"created_at"`
+	StartedAt              *time.Time `json:"started_at,omitempty"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+	CompletedAt            *time.Time `json:"completed_at,omitempty"`
 }
 
 type monitorJobLogView struct {
@@ -239,13 +243,14 @@ func toMonitorJobView(j *llm.Job) monitorJobView {
 		SkippedFileUnits:    j.SkippedFileUnits,
 		SkippedPackageUnits: j.SkippedPackageUnits,
 		SkippedRootUnits:    j.SkippedRootUnits,
-		ArtifactID:          j.ArtifactID,
-		RepoID:              j.RepoID,
-		ElapsedMs:           j.Elapsed().Milliseconds(),
-		CreatedAt:           j.CreatedAt,
-		StartedAt:           j.StartedAt,
-		UpdatedAt:           j.UpdatedAt,
-		CompletedAt:         j.CompletedAt,
+		ArtifactID:             j.ArtifactID,
+		RepoID:                 j.RepoID,
+		CurrentTokensPerSecond: j.CurrentTokensPerSecond,
+		ElapsedMs:              j.Elapsed().Milliseconds(),
+		CreatedAt:              j.CreatedAt,
+		StartedAt:              j.StartedAt,
+		UpdatedAt:              j.UpdatedAt,
+		CompletedAt:            j.CompletedAt,
 	}
 }
 

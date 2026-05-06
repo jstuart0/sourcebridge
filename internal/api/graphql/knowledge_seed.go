@@ -114,7 +114,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 	run := func(runCtx context.Context, rt llm.Runtime) error {
 		snapshotBytes := []byte(snapshotJSON)
 		enrichedSnapshotJSON := snapshotJSON
-		rt.ReportProgress(0.1, "snapshot", "Seed snapshot assembled")
+		rt.ReportProgress(0.1, "snapshot", "Seed snapshot assembled", 0)
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Seed snapshot assembled")
 		// CA-122 Phase 6/7: stream-driven progress for the seed pipeline.
 		streamDriver := r.runStreamProgressDriver(runCtx, rt, artifact.ID, rpcBucketForArtifact(artifact))
@@ -140,7 +140,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			if _, err := updateUnderstandingForCliffNotes(r.KnowledgeStore, artifact, key.Scope, sourceRevision, resp, knowledgepkg.UnderstandingFirstPassReady); err != nil {
 				slog.Warn("failed to update repository understanding from seed cliff notes", "artifact_id", artifact.ID, "error", err)
 			}
-			rt.ReportProgress(0.96, "llm", "Seed LLM completed, persisting")
+			rt.ReportProgress(0.96, "llm", "Seed LLM completed, persisting", 0)
 			sections := make([]knowledgepkg.Section, len(resp.Sections))
 			for i, sec := range resp.Sections {
 				sections[i] = knowledgepkg.Section{
@@ -160,7 +160,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 				return err
 			} else {
 				if reused {
-					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
+					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
 					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 				}
 				if understanding != nil {
@@ -181,7 +181,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			if err != nil {
 				return err
 			}
-			rt.ReportProgress(0.96, "llm", "Seed LLM completed, persisting")
+			rt.ReportProgress(0.96, "llm", "Seed LLM completed, persisting", 0)
 			sections := make([]knowledgepkg.Section, len(resp.Steps))
 			for i, step := range resp.Steps {
 				sections[i] = knowledgepkg.Section{
@@ -199,7 +199,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 				return err
 			} else {
 				if reused {
-					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
+					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
 					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 				}
 				if understanding != nil {
@@ -220,7 +220,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			if err != nil {
 				return err
 			}
-			rt.ReportProgress(0.96, "llm", "Seed LLM completed, persisting")
+			rt.ReportProgress(0.96, "llm", "Seed LLM completed, persisting", 0)
 			sections := make([]knowledgepkg.Section, len(resp.Stops))
 			for i, stop := range resp.Stops {
 				sections[i] = knowledgepkg.Section{
@@ -244,7 +244,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 				return err
 			} else {
 				if reused {
-					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
+					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
 					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 				}
 				if understanding != nil {
@@ -267,7 +267,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			if err != nil {
 				return err
 			}
-			rt.ReportProgress(0.96, "llm", "Seed LLM completed, persisting")
+			rt.ReportProgress(0.96, "llm", "Seed LLM completed, persisting", 0)
 			sections := make([]knowledgepkg.Section, len(resp.Sections))
 			for i, sec := range resp.Sections {
 				sections[i] = knowledgepkg.Section{
@@ -285,7 +285,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 		default:
 			return nil
 		}
-		rt.ReportProgress(1.0, "ready", "Seed artifact ready")
+		rt.ReportProgress(1.0, "ready", "Seed artifact ready", 0)
 		return nil
 	}
 

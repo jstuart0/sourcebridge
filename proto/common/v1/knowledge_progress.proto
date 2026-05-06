@@ -68,6 +68,13 @@ message KnowledgeStreamProgress {
   int32 file_cache_hits = 11;
   int32 package_cache_hits = 12;
   int32 root_cache_hits = 13;
+
+  // Instantaneous throughput from the active LLM gate's 60-second ring
+  // buffer at the moment this progress event was emitted. Zero when the
+  // gate has not recorded any completions yet (cold start, non-streaming
+  // path, or kill-switch disabled). Consumers MUST treat zero as "unknown",
+  // not as "zero tokens per second". Added Phase 6 (worker LLM concurrency).
+  float current_tokens_per_second = 14;
 }
 
 // KnowledgeStreamPhaseMarker fires once per phase transition so the

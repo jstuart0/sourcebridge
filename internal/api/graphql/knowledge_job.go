@@ -43,7 +43,7 @@ func setKnowledgeQueueHeartbeatInterval(interval time.Duration) {
 // owned this type was deleted in CA-122 once every knowledge RPC
 // became server-streaming and could surface real per-phase progress
 // to the orchestrator's UpdatedAt heartbeat.
-type progressWriter func(progress float64, phase, message string) error
+type progressWriter func(progress float64, phase, message string, throughputTPS float64) error
 
 // knowledgeJobTargetKey returns the canonical dedupe key the orchestrator
 // uses for a knowledge artifact generation job. Matching keys collapse to
@@ -150,7 +150,7 @@ func startKnowledgeQueueHeartbeat(ctx context.Context, rt llm.Runtime, artifactI
 			case <-hbCtx.Done():
 				return
 			case <-tick.C:
-				rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot")
+				rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot", 0)
 				if store != nil && artifactID != "" {
 					if err := store.UpdateKnowledgeArtifactProgressWithPhase(artifactID, 0.02, "queued", "Waiting for knowledge generation slot"); err != nil {
 						knowledgeProgressWriteErrorsTotal.Add(1)
@@ -230,7 +230,7 @@ func (r *Resolver) enqueueKnowledgeJob(
 		GenerationMode: string(artifact.GenerationMode),
 		MaxAttempts:    knowledgeJobMaxAttempts(artifact, scope),
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
-			rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot")
+			rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot", 0)
 			if err := r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.02, "queued", "Waiting for knowledge generation slot"); err != nil {
 				knowledgeProgressWriteErrorsTotal.Add(1)
 				slog.Warn("knowledge_progress_write_failed",
@@ -340,7 +340,7 @@ func enqueueRepositoryUnderstandingJob(
 		// rather than redoing all the work.
 		MaxAttempts: 3,
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
-			rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot")
+			rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot", 0)
 			appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "queued", "knowledge_slot_wait_started", "Waiting for knowledge generation slot", map[string]any{
 				"job_type": "build_repository_understanding",
 			})

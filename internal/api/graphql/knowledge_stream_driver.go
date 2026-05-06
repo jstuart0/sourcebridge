@@ -241,8 +241,8 @@ func (d *streamProgressDriver) handlePhase(pm *commonv1.KnowledgeStreamPhaseMark
 	d.currentMu.Unlock()
 
 	msg := phaseLabel(pm.GetPhase())
-	d.rt.ReportProgress(pct, "generating", msg)
-	if err := d.write(pct, "generating", msg); err != nil {
+	d.rt.ReportProgress(pct, "generating", msg, 0)
+	if err := d.write(pct, "generating", msg, 0); err != nil {
 		d.logWriteErr(err, "phase")
 	}
 }
@@ -281,8 +281,9 @@ func (d *streamProgressDriver) handleProgress(p *commonv1.KnowledgeStreamProgres
 	if msg == "" {
 		msg = phaseLabel(d.curPhase)
 	}
-	d.rt.ReportProgress(pct, "generating", msg)
-	if err := d.write(pct, "generating", msg); err != nil {
+	throughputTPS := float64(p.GetCurrentTokensPerSecond())
+	d.rt.ReportProgress(pct, "generating", msg, throughputTPS)
+	if err := d.write(pct, "generating", msg, throughputTPS); err != nil {
 		d.logWriteErr(err, "progress")
 	}
 }
@@ -324,7 +325,7 @@ func (r *Resolver) runStreamProgressDriver(
 	_ = ctx // reserved for future per-driver cancellation; the
 	// streaming RPC's own ctx already governs its lifetime.
 	return newStreamProgressDriver(rt,
-		func(p float64, phase, msg string) error {
+		func(p float64, phase, msg string, _ float64) error {
 			return r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifactID, p, phase, msg)
 		},
 		kind,
@@ -343,7 +344,7 @@ func (r *Resolver) runUnderstandingStreamDriver(
 ) *streamProgressDriver {
 	_ = ctx
 	return newStreamProgressDriver(rt,
-		func(p float64, phase, msg string) error {
+		func(p float64, phase, msg string, _ float64) error {
 			return r.KnowledgeStore.UpdateRepositoryUnderstandingProgress(understandingID, p, phase, msg)
 		},
 		kind,

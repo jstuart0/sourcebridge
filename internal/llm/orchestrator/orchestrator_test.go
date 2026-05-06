@@ -55,7 +55,7 @@ func TestOrchestratorEnqueueRunsJobToCompletion(t *testing.T) {
 		JobType:     "cliff_notes",
 		TargetKey:   "repo-1:cliff_notes:dev:medium",
 		Run: func(rt llm.Runtime) error {
-			rt.ReportProgress(0.5, "mid", "halfway")
+			rt.ReportProgress(0.5, "mid", "halfway", 0)
 			rt.ReportTokens(1000, 500)
 			rt.ReportSnapshotBytes(12345)
 			ran.Store(true)
@@ -451,9 +451,9 @@ func TestOrchestratorPublishesEvents(t *testing.T) {
 		JobType:     "cliff_notes",
 		TargetKey:   "repo-1:events",
 		Run: func(rt llm.Runtime) error {
-			rt.ReportProgress(0.25, "building", "building")
+			rt.ReportProgress(0.25, "building", "building", 0)
 			time.Sleep(15 * time.Millisecond) // cross the debounce window
-			rt.ReportProgress(0.75, "finishing", "nearly done")
+			rt.ReportProgress(0.75, "finishing", "nearly done", 0)
 			return nil
 		},
 	})
@@ -894,7 +894,7 @@ func TestRuntimeHeartbeatIsNoopOnTerminalJob(t *testing.T) {
 		JobType:     "heartbeat_terminal_test",
 		TargetKey:   "heartbeat-terminal-1",
 		Run: func(rt llm.Runtime) error {
-			rt.ReportProgress(1.0, "ok", "done")
+			rt.ReportProgress(1.0, "ok", "done", 0)
 			return nil
 		},
 	})
@@ -945,12 +945,12 @@ func TestRuntimeHeartbeatBypassesProgressDebounce(t *testing.T) {
 		JobType:     "heartbeat_debounce_test",
 		TargetKey:   "heartbeat-debounce-1",
 		Run: func(rt llm.Runtime) error {
-			rt.ReportProgress(0.5, "mid", "first")
+			rt.ReportProgress(0.5, "mid", "first", 0)
 			afterProgress1 := orch.GetJob(rt.JobID()).UpdatedAt
 			time.Sleep(20 * time.Millisecond)
 			// Second ReportProgress is debounced (5s window) so should NOT
 			// advance UpdatedAt.
-			rt.ReportProgress(0.5, "mid", "first")
+			rt.ReportProgress(0.5, "mid", "first", 0)
 			afterProgress2 := orch.GetJob(rt.JobID()).UpdatedAt
 			time.Sleep(20 * time.Millisecond)
 			// Heartbeat MUST advance UpdatedAt despite the debounce window.
@@ -1151,7 +1151,7 @@ func TestReaper_HeartbeatStale_LivingWiki_QueuedPhase_NotReapedEarly(t *testing.
 			t.Fatalf("enqueue: %v", err)
 		}
 		// Job is StatusPending; set progress phase to "queued".
-		if err := orch.store.SetProgress(job.ID, 0, "queued", ""); err != nil {
+		if err := orch.store.SetProgress(job.ID, 0, "queued", "", 0); err != nil {
 			t.Fatalf("set progress: %v", err)
 		}
 		// 6 min stale — above heartbeatStaleThreshold but within queued override.

@@ -136,7 +136,7 @@ func (s architectureDiagramGenerationService) runGenerationPipeline(
 	audience := p.audience
 	depth := p.depth
 
-	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
+	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled", 0)
 	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 
 	var architectureBundle architectureDiagramPromptBundle
@@ -147,7 +147,7 @@ func (s architectureDiagramGenerationService) runGenerationPipeline(
 	} else {
 		understandingForDiagram = understanding
 		if reused {
-			rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
+			rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
 			_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 		}
 	}
@@ -188,7 +188,7 @@ func (s architectureDiagramGenerationService) runGenerationPipeline(
 		rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
 	}
 
-	rt.ReportProgress(0.96, "llm", "LLM completed, persisting diagram")
+	rt.ReportProgress(0.96, "llm", "LLM completed, persisting diagram", 0)
 	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting diagram")
 
 	sections := []knowledgepkg.Section{{
@@ -230,7 +230,7 @@ func (s architectureDiagramGenerationService) runGenerationPipeline(
 	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
 		return err
 	}
-	rt.ReportProgress(1.0, "ready", "AI architecture diagram ready")
+	rt.ReportProgress(1.0, "ready", "AI architecture diagram ready", 0)
 	return nil
 }
 

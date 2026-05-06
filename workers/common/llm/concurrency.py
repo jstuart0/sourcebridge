@@ -65,6 +65,10 @@ from tenacity import (
 
 from workers.common.llm.provider import LLMProvider, LLMResponse
 
+# Lazy imports for provider-specific gated adapters (Decision 10).
+# Imported inside wrap_provider to avoid circular imports at module load time.
+# The actual check uses isinstance() against those classes.
+
 log = structlog.get_logger()
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -543,8 +547,12 @@ class ProviderGateRegistry:
         # (provider, normalized_origin, kind) → _KindCounter (observability only)
         self._kind_counters: dict[tuple[str, str, str], _KindCounter] = {}
         self._closed: bool = False
-        # TODO(phase-6): start the aggregator task here.
-        #   self._aggregator_task = asyncio.create_task(self._run_aggregator())
+        # Phase 6: start the aggregator task. It runs indefinitely until
+        # close() cancels it. Emits llm_provider_gate_metrics info-level
+        # structlog lines every metrics_interval_seconds.
+        self._aggregator_task: asyncio.Task[None] = asyncio.ensure_future(
+            self._run_aggregator()
+        )
 
     def _classify(self, provider: str) -> str:
         """Return "host", "per_kind", or the resolved mode for openai-compatible."""
@@ -650,15 +658,75 @@ class ProviderGateRegistry:
             entries.append(gate.snapshot(provider, origin, kind))
         return entries
 
+    def snapshot_tokens_per_second(
+        self, provider: str, base_url: str | None, kind: str
+    ) -> float:
+        """Return the 60-second ring-buffer tok/s for the given gate.
+
+        Called by progress-emit sites (e.g. hierarchical strategy) once per
+        progress event to populate KnowledgeStreamProgress.current_tokens_per_second.
+        Returns 0.0 when the gate doesn't exist yet or the wrapper is disabled.
+        """
+        if not self._config.wrapper_enabled:
+            return 0.0
+        mode = self._classify(provider)
+        if mode == "host":
+            _, normalized_origin = _normalize_host_key(provider, base_url)
+            host_key = (provider, normalized_origin)
+            gate = self._host_gates.get(host_key)
+            if gate is not None:
+                return gate.snapshot_tokens_per_second()
+            return 0.0
+        else:
+            raw_url = base_url or ""
+            kind_key = (provider, raw_url, kind)
+            gate = self._kind_gates.get(kind_key)
+            if gate is not None:
+                return gate.snapshot_tokens_per_second()
+            return 0.0
+
+    async def _run_aggregator(self) -> None:
+        """Emit llm_provider_gate_metrics info-level structlog lines at a
+        fixed cadence (metrics_interval_seconds from ConcurrencyConfig).
+
+        Runs until cancelled by close(). Does not emit when the registry has
+        no active gates yet (avoids log noise on startup).
+        """
+        interval = self._config.metrics_interval_seconds
+        while True:
+            await asyncio.sleep(interval)
+            # Snapshot the current gate state and emit one log line per gate.
+            entries = self.snapshot()
+            for entry in entries:
+                # Derive retries_since_last_tick from the raw gate counter.
+                # We read it directly because GateSnapshotEntry records the
+                # cumulative total — callers who want a delta should persist
+                # the previous total themselves. For the log line, the
+                # cumulative total is sufficient for operators.
+                log.info(
+                    "llm_provider_gate_metrics",
+                    provider=entry.provider,
+                    base_url_normalized=entry.base_url_normalized,
+                    kind=entry.kind,
+                    in_flight=entry.in_flight,
+                    queue_depth=entry.queue_depth,
+                    max_concurrent=entry.max_concurrent,
+                    retries_since_start=entry.retries_since_start,
+                    recent_429_count=entry.recent_429_count,
+                    tokens_per_second_60s=round(entry.tokens_per_second, 2),
+                )
+
     async def close(self) -> None:
-        """Cancel aggregator tasks and mark the registry closed.
+        """Cancel the aggregator task and mark the registry closed.
 
         Idempotent — safe to call more than once.
         """
         if self._closed:
             return
         self._closed = True
-        # TODO(phase-6): cancel self._aggregator_task here.
+        self._aggregator_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self._aggregator_task
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -869,6 +937,224 @@ class ConcurrencyGatedProvider:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Provider-specific gated adapters (Decision 10, Phase 6)
+#
+# These subclasses override ``stream()`` to extract final token counts from
+# the SDK's streaming response and feed them into the gate's 60-second ring
+# buffer. The base class ``ConcurrencyGatedProvider.stream()`` is a pass-through
+# that does not record token counts; use these subclasses for providers whose
+# SDKs surface streaming usage data.
+
+
+class OpenAICompatGatedProvider(ConcurrencyGatedProvider):
+    """Gated provider for OpenAI-compatible backends.
+
+    Overrides ``stream()`` to pass ``stream_options={"include_usage": True}``
+    so the final chunk carries ``chunk.usage.completion_tokens``. On 400
+    responses indicating ``stream_options`` is unsupported the adapter falls
+    back silently and marks the gate flag ``streaming_usage_unsupported``.
+
+    Decision 10b / codex r2 M2.
+    """
+
+    async def stream(
+        self,
+        prompt: str,
+        *,
+        system: str = "",
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        model: str | None = None,
+    ) -> AsyncIterator[str]:
+        """Gate + retry wrapper around raw OpenAI-compat stream with usage extraction."""
+        retry_max = self._config.retry_max_attempts
+
+        async for attempt in AsyncRetrying(
+            retry=retry_if_exception(_retry_predicate),
+            wait=wait_random_exponential(multiplier=1, max=60),
+            stop=stop_after_attempt(retry_max),
+            reraise=True,
+            before_sleep=self._before_sleep,
+        ):
+            with attempt:
+                if self._limiter is not None:
+                    await self._limiter.acquire()
+                async with self._gate.slot():
+                    output_tokens = 0
+                    try:
+                        async for chunk in self._stream_with_usage(
+                            prompt,
+                            system=system,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            model=model,
+                        ):
+                            if isinstance(chunk, int):
+                                # Sentinel: final usage token count.
+                                output_tokens = chunk
+                            else:
+                                yield chunk
+                    finally:
+                        if output_tokens > 0:
+                            self._gate.record_completion(output_tokens)
+                    return  # Successful stream complete.
+
+    async def _stream_with_usage(
+        self,
+        prompt: str,
+        *,
+        system: str = "",
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        model: str | None = None,
+    ) -> AsyncIterator[str | int]:
+        """Delegate to raw.stream, attempting to include usage data.
+
+        Yields text chunks as str, then a final int sentinel with output_tokens.
+        When stream_options is unsupported (400), falls back to plain streaming.
+        """
+        if self._gate.streaming_usage_unsupported:
+            # Already know this gate doesn't support stream_options; use raw directly.
+            async for chunk in self._raw.stream(
+                prompt, system=system, max_tokens=max_tokens, temperature=temperature, model=model
+            ):
+                yield chunk
+            return
+
+        # Attempt stream with usage via the provider's own stream() first.
+        # The OpenAICompatProvider.stream() doesn't pass stream_options; to extract
+        # usage we need the underlying client. Try to access it directly.
+        raw_client = getattr(self._raw, "client", None)
+        if raw_client is None:
+            # No direct SDK access — fall back to raw.stream() without usage.
+            async for chunk in self._raw.stream(
+                prompt, system=system, max_tokens=max_tokens, temperature=temperature, model=model
+            ):
+                yield chunk
+            return
+
+        use_model = model or getattr(self._raw, "model", None)
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        # Build extra_body from raw provider if applicable.
+        extra_body: dict[str, object] | None = None
+        draft_model = getattr(self._raw, "draft_model", None)
+        if draft_model:
+            extra_body = {"draft_model": draft_model}
+        disable_thinking = getattr(self._raw, "disable_thinking", False)
+        if disable_thinking:
+            extra_body = dict(extra_body or {})
+            extra_body["chat_template_kwargs"] = {"enable_thinking": False}
+
+        try:
+            stream = await raw_client.chat.completions.create(
+                model=use_model,
+                messages=messages,  # type: ignore[arg-type]
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=True,
+                stream_options={"include_usage": True},
+                extra_body=extra_body,
+            )
+            completion_tokens = 0
+            async for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+                # The final chunk (empty choices) carries usage when stream_options is set.
+                if chunk.usage is not None:
+                    completion_tokens = chunk.usage.completion_tokens or 0
+            if completion_tokens > 0:
+                yield completion_tokens  # type: ignore[misc]  # int sentinel
+        except openai.APIStatusError as exc:
+            if exc.status_code == 400 and "stream_options" in str(exc).lower():
+                # Server doesn't support stream_options — mark the gate and fall back.
+                self._gate.streaming_usage_unsupported = True
+                log.warning(
+                    "llm_gate_stream_options_unsupported",
+                    provider=getattr(self._raw, "provider_name", "openai-compatible"),
+                    error=str(exc),
+                )
+                async for chunk in self._raw.stream(
+                    prompt, system=system, max_tokens=max_tokens, temperature=temperature, model=model
+                ):
+                    yield chunk
+            else:
+                raise
+
+
+class AnthropicGatedProvider(ConcurrencyGatedProvider):
+    """Gated provider for Anthropic's API.
+
+    Overrides ``stream()`` to extract ``usage.output_tokens`` from the
+    Anthropic SDK's streaming ``message_delta`` event and feed it into the
+    gate's 60-second ring buffer.
+    """
+
+    async def stream(
+        self,
+        prompt: str,
+        *,
+        system: str = "",
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        model: str | None = None,
+    ) -> AsyncIterator[str]:
+        """Gate + retry wrapper around raw Anthropic stream with usage extraction."""
+        retry_max = self._config.retry_max_attempts
+
+        async for attempt in AsyncRetrying(
+            retry=retry_if_exception(_retry_predicate),
+            wait=wait_random_exponential(multiplier=1, max=60),
+            stop=stop_after_attempt(retry_max),
+            reraise=True,
+            before_sleep=self._before_sleep,
+        ):
+            with attempt:
+                if self._limiter is not None:
+                    await self._limiter.acquire()
+                async with self._gate.slot():
+                    raw_client = getattr(self._raw, "client", None)
+                    if raw_client is None:
+                        # No direct SDK access; fall back to raw.stream().
+                        async for chunk in self._raw.stream(
+                            prompt, system=system, max_tokens=max_tokens, temperature=temperature, model=model
+                        ):
+                            yield chunk
+                        return
+
+                    use_model = model or getattr(self._raw, "model", None)
+                    output_tokens = 0
+                    # Build system prompt via raw provider helper if available.
+                    build_system = getattr(self._raw, "_build_system", None)
+                    system_block = build_system(system) if build_system is not None else system
+
+                    try:
+                        async with raw_client.messages.stream(
+                            model=use_model,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            system=system_block,
+                            messages=[{"role": "user", "content": prompt}],
+                        ) as stream:
+                            async for text in stream.text_stream:
+                                yield text
+                            # After stream completes, get the final message for usage.
+                            try:
+                                final_msg = await stream.get_final_message()
+                                if final_msg.usage:
+                                    output_tokens = final_msg.usage.output_tokens or 0
+                            except Exception:  # noqa: BLE001
+                                pass
+                    finally:
+                        if output_tokens > 0:
+                            self._gate.record_completion(output_tokens)
+                    return  # Successful stream complete.
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Factory helper
 
 
@@ -880,7 +1166,14 @@ async def wrap_provider(
     registry: ProviderGateRegistry,
     config: ConcurrencyConfig | None = None,
 ) -> LLMProvider:
-    """Wrap ``raw`` in a ``ConcurrencyGatedProvider`` if the kill switch is on.
+    """Wrap ``raw`` in a provider-specific gated adapter if the kill switch is on.
+
+    Decision 10 (Phase 6): branch on the raw provider's type to select the
+    correct gated subclass that can extract streaming usage tokens:
+
+      - OpenAICompatProvider  → OpenAICompatGatedProvider (stream_options extraction)
+      - AnthropicProvider     → AnthropicGatedProvider (message_delta extraction)
+      - anything else         → ConcurrencyGatedProvider (no streaming usage)
 
     Returns ``raw`` unchanged when ``config.wrapper_enabled`` is False.
     """
@@ -888,4 +1181,13 @@ async def wrap_provider(
     if not cfg.wrapper_enabled:
         return raw
     gate = await registry.lookup(provider_name, base_url, kind)
+
+    # Lazy imports to avoid circular imports at module load time.
+    from workers.common.llm.anthropic import AnthropicProvider  # noqa: PLC0415
+    from workers.common.llm.openai_compat import OpenAICompatProvider  # noqa: PLC0415
+
+    if isinstance(raw, OpenAICompatProvider):
+        return OpenAICompatGatedProvider(raw, gate, cfg)
+    if isinstance(raw, AnthropicProvider):
+        return AnthropicGatedProvider(raw, gate, cfg)
     return ConcurrencyGatedProvider(raw, gate, cfg)

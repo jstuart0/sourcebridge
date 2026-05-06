@@ -389,7 +389,7 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 	}
 
 	err = enqueueRepositoryUnderstandingJob(ctx, r.Resolver, repo, understanding, scope, snapshotJSON, func(runCtx context.Context, rt llm.Runtime) error {
-		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
+		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled", 0)
 		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "snapshot", "snapshot_assembled", "Snapshot assembled", map[string]any{
 			"snapshot_bytes": len(snapshotJSON),
 			"scope_type":     string(scope.ScopeType),
@@ -423,7 +423,7 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 		if _, err := updateUnderstandingForCliffNotes(r.KnowledgeStore, &knowledgepkg.Artifact{RepositoryID: repo.ID}, scope, snap.SourceRevision, resp, knowledgepkg.UnderstandingFirstPassReady); err != nil {
 			return err
 		}
-		rt.ReportProgress(1.0, "ready", "Repository understanding ready")
+		rt.ReportProgress(1.0, "ready", "Repository understanding ready", 0)
 		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "ready", "repository_understanding_ready", "Repository understanding ready", map[string]any{
 			"cached_nodes": func() int32 {
 				if resp.Diagnostics == nil {

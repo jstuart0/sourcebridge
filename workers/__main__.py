@@ -271,6 +271,7 @@ async def serve() -> None:
         report_llm=report_llm,
         worker_config=config,
         summary_node_cache=summary_node_cache,
+        gate_registry=gate_registry,
     )
     knowledge_pb2_grpc.add_KnowledgeServiceServicer_to_server(knowledge_servicer, server)
     report_pb2_grpc.add_EnterpriseReportServiceServicer_to_server(

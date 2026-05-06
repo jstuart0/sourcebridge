@@ -650,7 +650,14 @@ function ActiveJobCard({
       <JobProgress job={job} variant="card" />
 
       <div className="flex items-center justify-between gap-2 text-xs text-[var(--text-tertiary)]">
-        <span>{formatElapsedMs(job.elapsed_ms)}</span>
+        <span className="flex items-center gap-2">
+          <span>{formatElapsedMs(job.elapsed_ms)}</span>
+          {job.status === "generating" && (job.current_tokens_per_second ?? 0) > 0 ? (
+            <span className="rounded bg-[var(--bg-subtle)] px-1 py-0.5 font-mono text-[10px] text-[var(--text-secondary)]">
+              {job.current_tokens_per_second!.toFixed(1)} tok/s
+            </span>
+          ) : null}
+        </span>
         <span className="flex items-center gap-2">
           {formatGenerationMode(job.generation_mode) ? <span>{formatGenerationMode(job.generation_mode)}</span> : null}
           {formatPriority(job.priority) ? <span>{formatPriority(job.priority)}</span> : null}

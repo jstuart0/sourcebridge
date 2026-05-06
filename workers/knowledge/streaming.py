@@ -112,6 +112,7 @@ def progress_event(
     file_cache_hits: int = 0,
     package_cache_hits: int = 0,
     root_cache_hits: int = 0,
+    current_tokens_per_second: float = 0.0,
 ) -> knowledge_progress_pb2.KnowledgeStreamProgress:
     """Build a KnowledgeStreamProgress message with the given fields."""
     return knowledge_progress_pb2.KnowledgeStreamProgress(
@@ -124,6 +125,7 @@ def progress_event(
         file_cache_hits=file_cache_hits,
         package_cache_hits=package_cache_hits,
         root_cache_hits=root_cache_hits,
+        current_tokens_per_second=current_tokens_per_second,
     )
 
 

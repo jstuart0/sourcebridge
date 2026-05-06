@@ -48,7 +48,10 @@ type JobStore interface {
 
 	// SetProgress writes a progress update. Callers are expected to
 	// debounce upstream; the store writes every call it receives.
-	SetProgress(id string, progress float64, phase, message string) error
+	// throughputTPS carries the instantaneous LLM token/s from the gate's
+	// 60-second ring buffer; 0 means not available (non-streaming paths,
+	// or before the first streaming completion).
+	SetProgress(id string, progress float64, phase, message string, throughputTPS float64) error
 
 	// Heartbeat bumps updated_at to time::now() without changing any other
 	// field. Used by long-running jobs to assert liveness when no progress

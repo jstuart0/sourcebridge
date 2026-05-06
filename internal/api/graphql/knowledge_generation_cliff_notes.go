@@ -250,10 +250,10 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 		}
 	}()
 	genStart := time.Now()
-	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
+	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled", 0)
 	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 	if reusedUnderstanding {
-		rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
+		rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
 		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 	}
 	appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "snapshot", "snapshot_assembled", "Snapshot assembled", map[string]any{
@@ -367,7 +367,7 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 	if reusedSummaries > 0 {
 		llmMessage = fmt.Sprintf("LLM completed, reused %d summaries, persisting sections", reusedSummaries)
 	}
-	rt.ReportProgress(0.96, "llm", llmMessage)
+	rt.ReportProgress(0.96, "llm", llmMessage, 0)
 	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", llmMessage)
 
 	if resp.Usage != nil {
@@ -455,7 +455,7 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 	if reusedSummaries > 0 {
 		readyMessage = fmt.Sprintf("Cliff notes ready · reused %d summaries", reusedSummaries)
 	}
-	rt.ReportProgress(1.0, "ready", readyMessage)
+	rt.ReportProgress(1.0, "ready", readyMessage, 0)
 	slog.Info("cliff_notes_generation_completed",
 		"artifact_id", artifact.ID,
 		"scope_type", string(scope.ScopeType),
