@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 import structlog
@@ -195,85 +196,123 @@ async def refine_with_llm(
     for c in candidates:
         groups.setdefault(c.group_key, []).append(c)
 
-    refined: list[RefinedSpec] = []
-    total_input = 0
-    total_output = 0
-    model_name = ""
+    # Bounded concurrent fan-out over groups. The upstream provider gate is the
+    # binding cap; this local semaphore prevents queuing N-thousand coroutines
+    # for very large repos before the gate has a chance to drain them.
+    LOCAL_GROUP_FANOUT_LIMIT = 8
+    local_sem = asyncio.Semaphore(LOCAL_GROUP_FANOUT_LIMIT)
 
-    for group_key, group_candidates in groups.items():
-        primary = group_candidates[0]
+    # _GroupResult carries the refined spec plus per-call usage stats so the
+    # serial merge below can accumulate them without mutating RefinedSpec.
+    _GroupResult = tuple[RefinedSpec, int, int, str]  # (spec, in_tok, out_tok, model)
 
-        # Build artifacts block
-        artifacts_parts: list[str] = []
-        for c in group_candidates:
-            if c.source == "test":
-                artifacts_parts.append(f"Test: {c.raw_text}")
-                assertions = c.metadata.get("assertions", [])
-                if assertions:
-                    artifacts_parts.append(f"  Assertions: {', '.join(assertions)}")
-            elif c.source == "schema":
-                artifacts_parts.append(f"Schema: {c.raw_text}")
-            else:
-                artifacts_parts.append(f"Comment: {c.raw_text}")
+    async def _refine_one(
+        group_key: str,
+        group_candidates: list[CandidateSpec],
+    ) -> _GroupResult:
+        """Refine one group, bounded by the local semaphore."""
+        async with local_sem:
+            primary = group_candidates[0]
 
-        artifacts_block = "\n".join(artifacts_parts)
-        prompt = SPEC_REFINEMENT_USER.format(
-            source_type=primary.source,
-            source_file=primary.source_file,
-            language=primary.language,
-            artifacts_block=artifacts_block,
-        )
+            # Build artifacts block
+            artifacts_parts: list[str] = []
+            for c in group_candidates:
+                if c.source == "test":
+                    artifacts_parts.append(f"Test: {c.raw_text}")
+                    assertions = c.metadata.get("assertions", [])
+                    if assertions:
+                        artifacts_parts.append(f"  Assertions: {', '.join(assertions)}")
+                elif c.source == "schema":
+                    artifacts_parts.append(f"Schema: {c.raw_text}")
+                else:
+                    artifacts_parts.append(f"Comment: {c.raw_text}")
 
-        try:
-            from workers.common.llm.provider import require_nonempty
-
-            response = require_nonempty(
-                await llm_provider.complete(
-                    prompt,
-                    system=SPEC_REFINEMENT_SYSTEM,
-                    temperature=0.1,
-                    max_tokens=512,
-                ),
-                context="requirements:spec_refinement",
+            artifacts_block = "\n".join(artifacts_parts)
+            prompt = SPEC_REFINEMENT_USER.format(
+                source_type=primary.source,
+                source_file=primary.source_file,
+                language=primary.language,
+                artifacts_block=artifacts_block,
             )
-            total_input += response.input_tokens
-            total_output += response.output_tokens
-            model_name = response.model
 
-            data = parse_json_response(response.content)
-            if data and isinstance(data, dict):
-                text = data.get("requirement_text", primary.raw_text)
-                keywords = data.get("keywords", [])
-                if not isinstance(keywords, list):
-                    keywords = []
-            else:
-                text = primary.raw_text
-                keywords = []
+            text_out = primary.raw_text
+            keywords_out: list[str] = []
+            input_tokens = 0
+            output_tokens = 0
+            model_out = ""
 
-        except Exception as exc:
-            log.warning("llm_refinement_failed", group_key=group_key, error=str(exc))
-            text = primary.raw_text
-            keywords = []
+            try:
+                from workers.common.llm.provider import require_nonempty
 
-        confidence = compute_confidence(group_candidates)
+                response = require_nonempty(
+                    await llm_provider.complete(
+                        prompt,
+                        system=SPEC_REFINEMENT_SYSTEM,
+                        temperature=0.1,
+                        max_tokens=512,
+                    ),
+                    context="requirements:spec_refinement",
+                )
+                input_tokens = response.input_tokens
+                output_tokens = response.output_tokens
+                model_out = response.model
 
-        source_files = list({c.source_file for c in group_candidates if c.source_file != primary.source_file})
+                data = parse_json_response(response.content)
+                if data and isinstance(data, dict):
+                    text_out = data.get("requirement_text", primary.raw_text)
+                    kw = data.get("keywords", [])
+                    keywords_out = kw if isinstance(kw, list) else []
 
-        refined.append(
-            RefinedSpec(
+            except Exception as exc:
+                log.warning("llm_refinement_failed", group_key=group_key, error=str(exc))
+
+            confidence = compute_confidence(group_candidates)
+            source_files = list(
+                {c.source_file for c in group_candidates if c.source_file != primary.source_file}
+            )
+
+            spec = RefinedSpec(
                 source=primary.source,
                 source_file=primary.source_file,
                 source_line=primary.source_line,
                 source_files=source_files,
-                text=text,
+                text=text_out,
                 raw_text=primary.raw_text,
                 group_key=group_key,
                 language=primary.language,
-                keywords=keywords,
+                keywords=keywords_out,
                 confidence=confidence,
                 llm_refined=True,
             )
-        )
+            return (spec, input_tokens, output_tokens, model_out)
+
+    group_items = list(groups.items())
+    raw_results = await asyncio.gather(
+        *[_refine_one(k, v) for k, v in group_items],
+        return_exceptions=True,
+    )
+
+    # Merge results in insertion order — order matches groups.items() iteration
+    # order (dict preserves insertion order in Python 3.7+). deduplicate_specs
+    # is key-based so list order doesn't affect correctness, but we preserve it
+    # for stable, deterministic output.
+    refined: list[RefinedSpec] = []
+    total_input = 0
+    total_output = 0
+    model_name = ""
+    for r in raw_results:
+        if isinstance(r, BaseException):
+            # gather(return_exceptions=True) surfaces framework-level errors
+            # (e.g., CancelledError). Per-LLM failures are caught inside
+            # _refine_one and return a fallback spec, so this path is rare.
+            log.warning("spec_group_task_failed", error=str(r))
+            continue
+        spec, in_tok, out_tok, model_out = r
+        refined.append(spec)
+        total_input += in_tok
+        total_output += out_tok
+        if model_out:
+            model_name = model_out
 
     usage = LLMUsageRecord(
         model=model_name,
