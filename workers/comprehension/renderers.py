@@ -334,16 +334,19 @@ GROUP_FEWSHOT_EXAMPLES: dict[tuple[str, ...], str] = {
 === Quality examples for this slice ===
 Good System Purpose example:
 - "This repository builds and serves SourceBridge knowledge artifacts for a codebase. API and GraphQL surfaces
-  coordinate requests, background workers index repositories and generate understanding, reports, or diagrams,
-  the web app visualizes those results, and the CLI provides operator and developer workflows."
+  coordinate requests via `NewServer` and `NewResolver`, background workers index repositories and generate
+  understanding, reports, or diagrams through `CliffNotesRenderer` and `KnowledgeServicer`, the web app
+  visualizes those results, and the CLI provides operator and developer workflows via `cli_main`."
 
 Bad System Purpose example:
 - "This repository is mainly a REST API with various components."
 
 Good Architecture Overview example:
 - "The architecture combines serve or API entrypoints, GraphQL resolvers, background workers, persistence, and a
-  web product surface. API and GraphQL requests schedule or fetch artifact work, workers build understanding and
-  render outputs, stores persist revisions and jobs, and web or CLI surfaces consume the resulting artifacts."
+  web product surface. API and GraphQL requests schedule or fetch artifact work via `scheduleKnowledgeJob` and
+  `GetCliffNotes`, workers build understanding and render outputs through `renderDeepSections` and
+  `_enforce_deep_confidence_floor`, stores persist revisions and jobs via `StoreRevision` and `GetJobByID`,
+  and web or CLI surfaces consume the resulting artifacts."
 
 Bad Architecture Overview example:
 - "The architecture is a REST router plus some helpers."
@@ -352,15 +355,17 @@ Bad Architecture Overview example:
 === Quality examples for this slice ===
 Good Domain Model example:
 - "The domain centers on repositories, scopes, generated knowledge artifacts, understanding revisions, reports,
-  diagrams, and background jobs. Explain those internal entities directly instead of drifting into transport code,
-  scanners, or generic storage helpers."
+  diagrams, and background jobs. Core entities are represented by `Repository`, `KnowledgeRevision`, and
+  `BackgroundJob` types defined in `internal/db/store.go`. Explain those internal entities directly instead of
+  drifting into transport code, scanners, or generic storage helpers."
 
 Bad Domain Model example:
 - "The domain model is mainly API schemas and comments."
 
 Good Key Abstractions example:
-- "Name the repository-specific abstractions that organize work: understanding trees, artifact renderers,
-  orchestration jobs, knowledge servicers, and persistence stores. Explain what each abstraction is for."
+- "Name the repository-specific abstractions that organize work: understanding trees via `SummaryTree`,
+  artifact renderers via `CliffNotesRenderer`, orchestration jobs via `JobOrchestrator`, knowledge servicers
+  via `KnowledgeServicer`, and persistence stores via `Store`. Explain what each abstraction is for."
 
 Bad Key Abstractions example:
 - "The key abstractions are the database client and a few helpers."
@@ -375,8 +380,9 @@ Bad Code Structure example:
     DEEP_SECTION_GROUPS[2]: """\
 === Quality examples for this slice ===
 Good External Dependencies example:
-- "Call out concrete dependencies like SurrealDB, LLM provider configuration, and gRPC boundaries only when the
-  selected files show them directly."
+- "Call out concrete dependencies like SurrealDB (accessed via `SurrealStore` and `QueryRaw`), LLM provider
+  configuration via `LLMProviderConfig`, and gRPC boundaries via `WorkerServicer` only when the selected files
+  show them directly."
 
 Bad External Dependencies example:
 - "The system probably uses several cloud services and external APIs."
@@ -385,7 +391,8 @@ Bad External Dependencies example:
 - "Servicer files imply there is probably a gRPC service boundary."
 
 Good Security example:
-- "Ground security claims in middleware, auth stores, token handling, and tenant/repo access enforcement."
+- "Ground security claims in middleware (`AuthMiddleware`), auth stores (`TokenStore`), token handling via
+  `ValidateToken`, and tenant/repo access enforcement via `EnforceRepoAccess`."
 
 Bad Security example:
 - "The system appears secure because it has authentication."
@@ -393,14 +400,16 @@ Bad Security example:
     DEEP_SECTION_GROUPS[3]: """\
 === Quality examples for this slice ===
 Good Data Flow example:
-- "Trace a request from serve/API entrypoints through resolvers or handlers into worker or store operations, then
-  explain where asynchronous work or persistence happens."
+- "Trace a request from serve/API entrypoints through resolvers (`GetCliffNotes`) or handlers (`handleKnowledgeRequest`)
+  into worker or store operations (`DispatchJob`, `StoreRevision`), then explain where asynchronous work or
+  persistence happens."
 
 Bad Data Flow example:
 - "Requests go through the system and eventually reach the backend."
 
 Good Testing example:
-- "Mention concrete test directories, fake providers, and benchmark scripts when they are present."
+- "Mention concrete test directories, fake providers (`FakeLLMProvider`, `FakeStore`), and benchmark scripts
+  (`bench_embedding.py`) when they are present."
 
 Bad Testing example:
 - "The repository likely has unit and integration tests."
@@ -471,7 +480,10 @@ Required section titles (produce every one, in this order):
 Confidence rules (mechanical — apply exactly):
 - Set confidence to "high" and inferred to false when you cite AT LEAST THREE \
   real repository file paths from the section evidence plan AND name at least \
-  three specific functions, types, methods, or test identifiers from them.
+  three specific functions, types, methods, or test identifiers from them, \
+  wrapping each identifier in markdown backticks (e.g., `FunctionName`, \
+  `test_my_thing`, `MyType`). Identifiers written without backticks do not \
+  count toward the high-confidence threshold.
 - Set confidence to "medium" when you can cite at least one real repo file path \
   but are extending beyond what the summaries make explicit.
 - Set confidence to "low" only when no file in the section evidence plan is \
@@ -525,6 +537,11 @@ Rewrite ONLY the `{section_title}` section as a stronger, more grounded version.
 - Prefer concrete internal entities, stores, jobs, artifacts, tests, or worker flows when the evidence shows them.
 - Remove broad filler and unsupported abstractions.
 - Cite only real repository file paths from the evidence above.
+- Wrap every function name, type, method, and test identifier in markdown backticks \
+  (e.g., `FunctionName`, `test_my_thing`). Unformatted identifiers do not count \
+  toward the high-confidence threshold.
+- Set confidence to "high" only when you name at least three backtick-wrapped \
+  identifiers AND cite at least three real file paths from the evidence plan.
 
 Return ONLY a JSON array with exactly one object using these keys:
 - "title"
