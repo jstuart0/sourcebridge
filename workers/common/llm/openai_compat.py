@@ -10,6 +10,7 @@ import httpx
 import openai
 import structlog
 
+from workers.common.llm.concurrency import is_local_provider
 from workers.common.llm.provider import LLMResponse
 
 log = structlog.get_logger()
@@ -106,7 +107,7 @@ def _normalize_api_key(provider_name: str | None, api_key: str) -> str:
         return ""
 
     provider = (provider_name or "").strip().lower()
-    if provider in {"ollama", "lmstudio", "llama-cpp", "vllm", "sglang"} and normalized.lower() in {
+    if is_local_provider(provider) and normalized.lower() in {
         "not-needed",
         "none",
         "dummy",

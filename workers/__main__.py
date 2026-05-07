@@ -30,7 +30,7 @@ from requirements.v1 import requirements_pb2, requirements_pb2_grpc  # noqa: E40
 from workers import __version__ as _worker_version  # noqa: E402
 from workers.common.config import WorkerConfig  # noqa: E402
 from workers.common.embedding.config import create_embedding_provider  # noqa: E402
-from workers.common.llm.concurrency import ConcurrencyConfig, ProviderGateRegistry  # noqa: E402
+from workers.common.llm.concurrency import ConcurrencyConfig, ProviderGateRegistry, is_local_provider  # noqa: E402
 from workers.common.llm.concurrency_probe import OpenAICompatProbeBackend, run_startup_probe  # noqa: E402
 from workers.common.llm.factory import create_llm_provider, create_report_provider  # noqa: E402
 from workers.contracts.servicer import ContractsServicer  # noqa: E402
@@ -44,9 +44,6 @@ from workers.version_servicer import VersionServicer  # noqa: E402
 
 _LOOPBACK_PREFIXES = ("127.", "::1", "localhost")
 _UNAUTHENTICATED_BIND_ADDRESSES = ("[::]", "0.0.0.0", "")
-# Providers where a real concurrency limit is meaningful; frontier APIs
-# (anthropic, openai, openrouter) are unbounded so no probe is needed.
-_LOCAL_PROBE_PROVIDERS = frozenset({"ollama", "vllm", "llama-cpp", "sglang", "lmstudio"})
 
 
 def _is_non_loopback(addr: str) -> bool:
@@ -415,7 +412,7 @@ async def serve() -> None:
     # informational: a WARN fires when declared vs observed parallelism disagrees
     # by >=2x. The declared value is never auto-overridden (D1).
     if (
-        config.llm_provider in _LOCAL_PROBE_PROVIDERS
+        is_local_provider(config.llm_provider)
         and not config.test_mode
         and config.llm_max_concurrent_calls > 0
     ):

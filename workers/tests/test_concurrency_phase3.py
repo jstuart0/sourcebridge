@@ -1282,3 +1282,102 @@ def test_renderer_deep_parallelism_raised() -> None:
     assert fields.get("deep_repair_parallelism") == 4, (
         f"Expected deep_repair_parallelism=4, got {fields.get('deep_repair_parallelism')}"
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Phase 2: is_local_provider predicate tests (CA-173)
+
+
+def test_is_local_provider_classification() -> None:
+    """is_local_provider returns True for known local providers, False otherwise."""
+    from workers.common.llm.concurrency import is_local_provider
+
+    # Known local providers → True
+    for provider in ("ollama", "vllm", "llama-cpp", "sglang", "lmstudio"):
+        assert is_local_provider(provider) is True, f"Expected True for {provider!r}"
+
+    # Known cloud providers → False
+    for provider in ("openai", "anthropic", "gemini", "openrouter"):
+        assert is_local_provider(provider) is False, f"Expected False for {provider!r}"
+
+    # openai-compatible is intentionally NOT local (depends on operator's deployment)
+    assert is_local_provider("openai-compatible") is False
+
+    # Edge cases → False
+    assert is_local_provider("") is False
+    assert is_local_provider(None) is False
+    assert is_local_provider("foo") is False
+    assert is_local_provider("unknown-provider") is False
+
+    # Case-insensitive matching → True
+    assert is_local_provider("OLLAMA") is True
+    assert is_local_provider("Ollama") is True
+    assert is_local_provider("VLLM") is True
+    assert is_local_provider("LLama-CPP") is True
+
+
+def test_is_local_provider_replaces_local_probe_providers_drift_guard() -> None:
+    """Regression: no source file in workers/ (except concurrency.py itself) defines
+    a parallel set/frozenset containing the five local provider names.
+
+    Specifically, the literal name ``_LOCAL_PROBE_PROVIDERS`` must not appear in
+    any source file — it was the duplicate constant deleted in Phase 2 (CA-173).
+    This test pins the consolidation so a future agent cannot silently reintroduce it.
+    """
+    import pathlib
+    import re
+
+    workers_root = pathlib.Path(__file__).parent.parent  # workers/
+
+    # 1. Assert _LOCAL_PROBE_PROVIDERS is gone from all non-test source files.
+    #    (This test file itself references the name in comments/strings — excluded.)
+    this_file = pathlib.Path(__file__).resolve()
+    matches: list[str] = []
+    for py_file in workers_root.rglob("*.py"):
+        if py_file.resolve() == this_file:
+            continue  # exclude this test file (contains the name in docstrings)
+        text = py_file.read_text(encoding="utf-8")
+        if "_LOCAL_PROBE_PROVIDERS" in text:
+            matches.append(str(py_file))
+
+    assert matches == [], (
+        f"_LOCAL_PROBE_PROVIDERS was reintroduced in: {matches}. "
+        "This constant was consolidated into is_local_provider() in CA-173 Phase 2. "
+        "Extend is_local_provider() instead."
+    )
+
+    # 2. Assert no other file (outside concurrency.py) defines a frozenset that
+    #    contains all five local-gating provider names together.  This is the
+    #    precise structural duplicate that Phase 2 eliminated.  The pattern
+    #    `frozenset({... "ollama" ... "lmstudio" ...})` only matches when both
+    #    Ollama (always-local) and lmstudio (local-only, never in cloud sets)
+    #    appear inside the same frozenset literal.  Known-legitimate sets that
+    #    contain both (e.g. SUPPORTED_LLM_PROVIDERS in common/config.py) are
+    #    excluded by path.
+    concurrency_py = (workers_root / "common" / "llm" / "concurrency.py").resolve()
+    supported_config_py = (workers_root / "common" / "config.py").resolve()
+    # Match a frozenset literal that spans multiple lines and includes both
+    # "ollama" and "lmstudio" — unique to the host-gate set.
+    parallel_set_re = re.compile(
+        r'frozenset\s*\(\s*\{[^}]*"ollama"[^}]*"lmstudio"[^}]*\}',
+        re.DOTALL,
+    )
+    parallel_matches: list[str] = []
+    for py_file in workers_root.rglob("*.py"):
+        resolved = py_file.resolve()
+        if resolved == concurrency_py:
+            continue  # canonical home — skip
+        if resolved == supported_config_py:
+            continue  # SUPPORTED_LLM_PROVIDERS is a legitimate aggregator, not a duplicate gate set
+        if resolved == this_file:
+            continue  # this test file contains the pattern in docstrings/regex strings
+        if py_file.suffix != ".py":
+            continue
+        text = py_file.read_text(encoding="utf-8")
+        if parallel_set_re.search(text):
+            parallel_matches.append(str(py_file))
+
+    assert parallel_matches == [], (
+        f"Parallel local-provider frozenset found outside concurrency.py: {parallel_matches}. "
+        "Add new local providers to _HOST_GATED_PROVIDERS in concurrency.py instead."
+    )

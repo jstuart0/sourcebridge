@@ -91,6 +91,35 @@ _GATING_ENV_VAR = "SOURCEBRIDGE_LLM_PROVIDER_OPENAI_COMPATIBLE_GATING"
 _DEFAULT_OPENAI_COMPAT_GATING = "host"
 
 
+def is_local_provider(provider_name: str | None) -> bool:
+    """Return True when *provider_name* identifies a local/self-hosted LLM backend.
+
+    The positive set is ``_HOST_GATED_PROVIDERS`` — the same five providers that
+    share a single host-level concurrency gate rather than per-kind gates.
+
+    Two important non-obvious constraints:
+
+    * ``openai-compatible`` is intentionally **not** treated as local even though
+      some operators deploy it against a local backend.  Whether a given
+      ``openai-compatible`` endpoint is local is operator-controlled at runtime
+      (via ``SOURCEBRIDGE_LLM_PROVIDER_OPENAI_COMPATIBLE_GATING``), not
+      determinable from the provider name alone.
+
+    * This predicate is **not** a substitute for the load-bearing
+      ``if provider == "ollama"`` thinking-suppression dispatches at
+      ``workers/common/llm/openai_compat.py:229`` and ``:569``.  Those branches
+      are Ollama-specific because the OpenAI-compat shim silently ignores all
+      suppression strategies (empirically confirmed 2026-05-06; see CLAUDE.md
+      2026-05-06 entry).  Replacing them with ``is_local_provider`` would
+      re-enable thinking on every non-Ollama local provider (vLLM, llama-cpp,
+      etc.) and break qwen3.x thinking suppression — do **not** migrate those
+      call sites.
+    """
+    if not provider_name:
+        return False
+    return provider_name.lower() in _HOST_GATED_PROVIDERS
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # URL normalization helper (Decision 1, v4)
 
