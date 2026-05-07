@@ -1562,6 +1562,77 @@ Plan: `thoughts/shared/plans/active-2026-05-07-diagnose-qwen-confidence-regressi
 
 ---
 
+## Knowledge-job startup reconciliation (CA-175)
+
+When the orchestrator process exits while a knowledge job is in-flight (crash,
+OOM, rolling restart), the job's slot stays `active` in SurrealDB. On default
+`SOURCEBRIDGE_KNOWLEDGE_MAX_CONCURRENCY=1`, this permanently blocks all
+subsequent knowledge-artifact enqueues until the reaper's long timeout expires
+— or until the process is restarted and the reconciliation described below runs.
+
+### How it works
+
+Each orchestrator instance generates a **per-process UUID** at `New()`. Every
+job is stamped with this UUID at `Create()` time via the `process_id` field
+(migration 058: `DEFINE FIELD IF NOT EXISTS process_id ON ca_llm_job TYPE option<string>`).
+
+Before workers start, `reconcileZombieJobs()` runs **synchronously**. It finds
+all `active` jobs whose `updated_at` is older than `reconcileStaleThreshold`
+(90 seconds) and marks them `failed` with error code
+`PROCESS_RESTART_RECONCILIATION`. This is distinct from the reaper's
+`DEADLINE_EXCEEDED` — the error code lets you tell in logs whether the cleanup
+was triggered by a process restart or by a legitimately timed-out job.
+
+After reconciliation, the affected artifact keys are unblocked and the next
+enqueue proceeds normally.
+
+### What you see in logs
+
+On each reconciled job:
+
+```
+orchestrator_zombie_reconciled  job_id=<id>  artifact_key=<key>  zombie_process_id=<uuid>
+```
+
+After a full pass:
+
+```
+orchestrator_zombie_reconciled_pass  count=<n>  current_process_id=<uuid>  sample_zombie_job_ids=[<id>, ...]
+```
+
+If no zombies are found, the pass log fires with `count=0` (still useful as a
+startup signal).
+
+### Tuning and caveats
+
+**`reconcileStaleThreshold` is 90 seconds** — 18× the 5s
+`knowledgeQueueHeartbeatInterval`. Don't tighten below 60s without accounting
+for inter-replica clock skew in HA deployments. Don't loosen beyond 150s
+without impact-checking the user-visible bench-stall window.
+
+**`Config.SkipStartupReconciliation`** is a Go-only opt-out flag (zero-value
+`false` → reconciliation runs). It is not currently bindable to an env var.
+There is no production reason to disable it; the flag exists for the test suite
+(`newTestOrchestrator` defaults it to `true` to protect tests that pre-seed
+jobs and don't expect them to be reconciled away).
+
+**Legacy rows** (`process_id = NONE`) are safe during a rolling upgrade. The
+90s freshness gate means a restarting replica won't reconcile a job that a
+surviving peer is actively heartbeating.
+
+### CA-174 note
+
+The CA-174 fix (same campaign) is operator-invisible. It resolves transient
+`Found NULL for field llm_label` SurrealDB errors that appeared in logs on
+every Living Wiki understanding pass that produced clusters. No knobs were
+added; no behavior changed for users.
+
+Related: [CA-175](https://plane.xmojo.net/agile-solutions-group/projects/d3fa4bd8-1177-4364-88a7-aae69698b75d/issues/CA-175) | [CA-174](https://plane.xmojo.net/agile-solutions-group/projects/d3fa4bd8-1177-4364-88a7-aae69698b75d/issues/CA-174)
+Plan: `thoughts/shared/plans/active-2026-05-07-diagnose-knowledge-slot-stall.md`
+Investigation: `thoughts/shared/investigations/2026-05-07-diagnose-knowledge-slot-stall.md`
+
+---
+
 ## Living Wiki page-count and ops behavior
 
 For how Living Wiki determines the number of pages to generate, how

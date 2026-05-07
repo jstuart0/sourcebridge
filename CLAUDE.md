@@ -71,6 +71,66 @@ Load-bearing constraints for future-Claude:
 Plan: `thoughts/shared/plans/active-2026-05-07-diagnose-qwen-confidence-regression.md`
 Runbook: [`docs/admin/llm-config.md`](docs/admin/llm-config.md#deep-render-parallelism-cliff-notes)
 
+**2026-05-07 knowledge-job slot-stall remediation (CA-174 + CA-175)** — 2 commits, `2dd1149` + `1ed4cfd`.
+Two-phase fix for a compounding issue that caused Living Wiki knowledge-artifact
+generation to permanently stall the orchestrator slot queue across process
+restarts. CA-174 fixes a SurrealDB schema rejection on `option<string>` fields
+that produced ERROR-level log noise on every understanding pass. CA-175 fixes
+the zombie-job problem: when an orchestrator process exits mid-job and restarts,
+the in-flight job held the slot indefinitely because nothing reclaimed it.
+
+Phase 1 (CA-174 — schema): `ReplaceClusters` was using `SET field = $c.field`
+with an explicit JSON null when `LLMLabel` was absent. SurrealDB v2.2.1 rejects
+null on `option<string>` fields (`Found NULL for field llm_label`). Fix: switch
+to `CREATE ... CONTENT $c.content` where `clusterRow` is split into
+`clusterContent` (schema fields, `omitempty` on `LLMLabel`) + a `clusterID`
+wrapper. `SaveClusters` similarly conditionally includes `llm_label` in vars only
+when non-nil. No behavior change for operators; ERROR log noise is eliminated.
+
+Phase 2 (CA-175 — zombie reconciliation): each orchestrator now generates a
+per-process UUID at `New()` (`uuid.New().String()`) and stamps it on every job at
+`Create()` time. On startup, `reconcileZombieJobs()` runs synchronously before
+workers start — it marks any active job whose `updated_at` is older than 90s as
+failed with error code `PROCESS_RESTART_RECONCILIATION`, freeing the slot for the
+next enqueue. Default `SOURCEBRIDGE_KNOWLEDGE_MAX_CONCURRENCY=1` no longer means
+a single supervisor restart blocks all knowledge-artifact generation for 10 minutes.
+
+Load-bearing constraints for future-Claude:
+
+- **`internal/db/store.go` cluster write path**: `ReplaceClusters` uses
+  `CREATE ... CONTENT $c.content` (not `SET field = $c.field`), and `clusterRow`
+  is split into `clusterContent` (schema fields, `omitempty` on `LLMLabel`) +
+  `clusterID` wrapper (cid + content). Don't revert to `SET` — the SET path with
+  an explicit JSON null is what SurrealDB v2.2.1 rejects on `option<string>`
+  fields. `SaveClusters` similarly conditionally includes `llm_label` in vars
+  only when non-nil.
+- **Integration testcontainer pinned to `surrealdb/surrealdb:v2.2.1`** at
+  `internal/db/testutil_integration_test.go:31` (matches production). Don't bump
+  this without first verifying Phase 1 still passes — v2.3.5 had a different
+  tolerance for the SET+null path that masked the bug.
+- **`Job.ProcessID` is the per-process UUID stamp**, generated once per
+  orchestrator at `New()` and stamped on every job at `Create()` time only — NOT
+  at `SetStatus(generating)`. The rolling-restart edge case (P1 creates, P2
+  claims) is intentionally handled by the 90s heartbeat-freshness gate, not by
+  re-stamping. Don't add a `SetStatusWithProcessID` interface method — explicitly
+  rejected in plan review.
+- **`reconcileZombieJobs()` runs synchronously in `Orchestrator.New()` before
+  workers start**. `reconcileStaleThreshold = 90 * time.Second` is 18× the 5s
+  `knowledgeQueueHeartbeatInterval` — don't tighten to <60s without accounting
+  for inter-replica clock skew in HA deployments. Don't loosen to >150s without
+  impact-checking the user-visible bench-stall window.
+- **`Config.SkipStartupReconciliation`** is a positive opt-out flag (zero-value
+  false → reconciliation runs in production). `newTestOrchestrator` defaults it
+  to `true` to protect the existing test suite. Don't flip the default to true in
+  production without re-validating the bench scenario.
+- **Migration 058**: `DEFINE FIELD IF NOT EXISTS process_id ON ca_llm_job TYPE option<string>`.
+  Idempotent. Legacy rows have `process_id = NONE`; the freshness gate protects
+  them during rolling-restart upgrades.
+
+Plan: `thoughts/shared/plans/active-2026-05-07-diagnose-knowledge-slot-stall.md`
+Investigation: `thoughts/shared/investigations/2026-05-07-diagnose-knowledge-slot-stall.md`
+Runbook: [`docs/admin/llm-config.md`](docs/admin/llm-config.md#knowledge-job-startup-reconciliation-ca-175)
+
 **2026-05-06 orchestrator capacity detection** — 8 commits, `e730009..e1fe4b1`.
 Fixes three compounding Living Wiki throughput issues end-to-end: capacity
 mismatch between orchestrator goroutine pool and upstream LLM, empty-content
