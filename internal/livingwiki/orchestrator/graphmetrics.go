@@ -72,66 +72,110 @@ func (m *GraphStoreMetrics) GraphRelationCount(repoID, pageID string) int {
 
 // packageReferenceCount counts distinct caller packages importing any symbol
 // in pkg within the given repository.
+//
+// CA-171: replaces the prior O(symbols × callers) sequential SurrealDB
+// round-trips with two queries — GetSymbols + GetCallEdges — and one
+// GetSymbolsByIDs batch for the resolved callers. Same logical result.
 func (m *GraphStoreMetrics) packageReferenceCount(repoID, pkg string) int {
 	syms, _ := m.store.GetSymbols(repoID, nil, nil, 0, 0)
-	callerPkgs := make(map[string]bool)
+	pkgSymIDs := make(map[string]struct{}, len(syms))
 	for _, sym := range syms {
 		if sym.FilePath == "" {
 			continue
 		}
-		if !symbolInPackage(sym.FilePath, pkg) {
+		if symbolInPackage(sym.FilePath, pkg) {
+			pkgSymIDs[sym.ID] = struct{}{}
+		}
+	}
+	if len(pkgSymIDs) == 0 {
+		return 0
+	}
+	edges := m.store.GetCallEdges(repoID)
+	callerIDSet := make(map[string]struct{})
+	for _, e := range edges {
+		if _, ok := pkgSymIDs[e.CalleeID]; !ok {
 			continue
 		}
-		for _, callerID := range m.store.GetCallers(sym.ID) {
-			caller := m.store.GetSymbol(callerID)
-			if caller == nil {
-				continue
-			}
-			callerPkg := filePackage(caller.FilePath)
-			if callerPkg != pkg {
-				callerPkgs[callerPkg] = true
-			}
+		callerIDSet[e.CallerID] = struct{}{}
+	}
+	if len(callerIDSet) == 0 {
+		return 0
+	}
+	callerIDs := make([]string, 0, len(callerIDSet))
+	for id := range callerIDSet {
+		callerIDs = append(callerIDs, id)
+	}
+	callers := m.store.GetSymbolsByIDs(callerIDs)
+	callerPkgs := make(map[string]bool)
+	for _, caller := range callers {
+		if caller == nil {
+			continue
+		}
+		callerPkg := filePackage(caller.FilePath)
+		if callerPkg != pkg {
+			callerPkgs[callerPkg] = true
 		}
 	}
 	return len(callerPkgs)
 }
 
 // packageRelationCount counts total inbound call-graph edges to symbols in pkg.
+//
+// CA-171: uses GetCallEdges + a package-membership filter instead of one
+// GetCallers query per symbol.
 func (m *GraphStoreMetrics) packageRelationCount(repoID, pkg string) int {
 	syms, _ := m.store.GetSymbols(repoID, nil, nil, 0, 0)
-	total := 0
+	pkgSymIDs := make(map[string]struct{}, len(syms))
 	for _, sym := range syms {
-		if !symbolInPackage(sym.FilePath, pkg) {
-			continue
+		if symbolInPackage(sym.FilePath, pkg) {
+			pkgSymIDs[sym.ID] = struct{}{}
 		}
-		total += len(m.store.GetCallers(sym.ID))
+	}
+	if len(pkgSymIDs) == 0 {
+		return 0
+	}
+	total := 0
+	for _, e := range m.store.GetCallEdges(repoID) {
+		if _, ok := pkgSymIDs[e.CalleeID]; ok {
+			total++
+		}
 	}
 	return total
 }
 
 // repoReferenceCount aggregates reference counts across all packages in the repo.
+//
+// CA-171: collapsed N×K SurrealDB round-trips into GetCallEdges + one
+// GetSymbolsByIDs batch.
 func (m *GraphStoreMetrics) repoReferenceCount(repoID string) int {
-	syms, _ := m.store.GetSymbols(repoID, nil, nil, 0, 0)
+	edges := m.store.GetCallEdges(repoID)
+	if len(edges) == 0 {
+		return 0
+	}
+	callerIDSet := make(map[string]struct{}, len(edges))
+	for _, e := range edges {
+		callerIDSet[e.CallerID] = struct{}{}
+	}
+	callerIDs := make([]string, 0, len(callerIDSet))
+	for id := range callerIDSet {
+		callerIDs = append(callerIDs, id)
+	}
+	callers := m.store.GetSymbolsByIDs(callerIDs)
 	callerPkgs := make(map[string]bool)
-	for _, sym := range syms {
-		for _, callerID := range m.store.GetCallers(sym.ID) {
-			caller := m.store.GetSymbol(callerID)
-			if caller != nil {
-				callerPkgs[filePackage(caller.FilePath)] = true
-			}
+	for _, caller := range callers {
+		if caller == nil {
+			continue
 		}
+		callerPkgs[filePackage(caller.FilePath)] = true
 	}
 	return len(callerPkgs)
 }
 
 // repoRelationCount counts all inbound call edges for the repo.
+//
+// CA-171: replaced GetCallers-per-symbol with a single GetCallEdges query.
 func (m *GraphStoreMetrics) repoRelationCount(repoID string) int {
-	syms, _ := m.store.GetSymbols(repoID, nil, nil, 0, 0)
-	total := 0
-	for _, sym := range syms {
-		total += len(m.store.GetCallers(sym.ID))
-	}
-	return total
+	return len(m.store.GetCallEdges(repoID))
 }
 
 // pageSubject extracts the package path from an architecture page ID.
