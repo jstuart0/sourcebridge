@@ -57,6 +57,8 @@ func (s *MemStore) Create(job *Job) (*Job, error) {
 	if job.Priority == "" {
 		job.Priority = PriorityInteractive
 	}
+	// ProcessID is preserved as-is from the caller (may be empty for
+	// legacy/test jobs that don't carry a process stamp).
 	stored := cloneJob(job)
 	s.jobs[job.ID] = stored
 	return cloneJob(stored), nil

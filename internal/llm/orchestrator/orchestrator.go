@@ -67,6 +67,14 @@ type Config struct {
 	// state (e.g. mark the linked knowledge artifact as failed too).
 	// Nil means no callback.
 	OnStaleJob func(job *llm.Job)
+	// SkipStartupReconciliation disables the zombie-job reconciliation pass
+	// that normally runs synchronously inside New() before workers start.
+	// Set to true in tests that pre-populate the store with active jobs from
+	// a different process_id and do not want the orchestrator to immediately
+	// mark them failed on construction. Production callers leave this false
+	// (the zero value) so reconciliation runs automatically on every startup.
+	// See reconcileZombieJobs for the reconciliation semantics.
+	SkipStartupReconciliation bool
 }
 
 // withDefaults returns a copy of c with zero fields replaced by sane defaults.
@@ -103,6 +111,12 @@ type Orchestrator struct {
 	inflight *inflightRegistry
 	metrics  *metrics
 	breaker  *subsystemBreaker
+
+	// processID is a UUID generated once per Orchestrator.New() call. It is
+	// stamped on every job this process creates (via job.ProcessID) so that
+	// startup reconciliation can distinguish zombie jobs from prior processes.
+	// Exposed via ProcessID() for tests and future observability hooks.
+	processID string
 
 	// Separate lanes keep interactive work ahead of maintenance/prewarm.
 	interactiveQ chan *workItem
@@ -167,6 +181,7 @@ func New(store llm.JobStore, cfg Config) *Orchestrator {
 	o := &Orchestrator{
 		cfg:               cfg,
 		store:             store,
+		processID:         uuid.New().String(),
 		inflight:          newInflightRegistry(),
 		metrics:           newMetrics(cfg.MetricsCapacity),
 		breaker:           newSubsystemBreaker(cfg.ComputeErrorThreshold, cfg.ComputeCooldown),
@@ -183,6 +198,15 @@ func New(store llm.JobStore, cfg Config) *Orchestrator {
 		cancelled:         make(map[string]struct{}),
 		configuredWorkers: cfg.MaxConcurrency,
 	}
+	// CA-175: reconcile zombie jobs from prior processes before workers start
+	// pulling from queues. Runs synchronously so the orchestrator is internally
+	// consistent at construction time — no dedupe hit on a zombie is possible
+	// after New() returns. Gated on SkipStartupReconciliation so tests that
+	// pre-populate the store with active rows from a different process_id can
+	// opt out without calling reconcileZombieJobs on their own.
+	if !cfg.SkipStartupReconciliation {
+		o.reconcileZombieJobs()
+	}
 	o.workerMu.Lock()
 	for i := 0; i < cfg.MaxConcurrency; i++ {
 		o.startWorkerLocked()
@@ -193,6 +217,13 @@ func New(store llm.JobStore, cfg Config) *Orchestrator {
 	// dedupe forever.
 	go o.reaper()
 	return o
+}
+
+// ProcessID returns the UUID that identifies this orchestrator process.
+// Stamped on every job created by this process; used by reconcileZombieJobs
+// to distinguish live jobs from zombie jobs left by prior processes.
+func (o *Orchestrator) ProcessID() string {
+	return o.processID
 }
 
 // Shutdown stops accepting new work and waits for running jobs to drain.
@@ -321,6 +352,31 @@ const (
 	// Do not lower below heartbeatStaleThreshold / 2 (2.5 min) — ticking faster
 	// than the heartbeat period wastes CPU with no correctness benefit.
 	reaperTickInterval = 15 * time.Second
+
+	// reconcileStaleThreshold is the heartbeat-freshness gate used by
+	// reconcileZombieJobs to distinguish a zombie (dead process, no more
+	// heartbeats) from a live peer-replica or a job from this process that
+	// updated_at is still fresh.
+	//
+	// 90 s = 18 × knowledgeQueueHeartbeatInterval (5 s). A healthy process
+	// updates its active jobs' updated_at at least once per 5 s while any
+	// knowledge job is queued; 18 cycles of margin absorbs transient store
+	// write latency and normal jitter.
+	//
+	// HA tradeoff: if two orchestrator replicas run concurrently (not the
+	// current single-binary deploy), Replica B's reconciliation at startup
+	// could incorrectly mark Replica A's jobs as zombies if Replica A's last
+	// heartbeat is older than 90 s (e.g. store latency spike or a replica
+	// that stopped heartbeating for another reason). Revisit and lower this
+	// threshold — or add a distributed lease — before deploying in a
+	// multi-replica configuration with inter-replica clock skew > 60 s.
+	//
+	// Distinct from reaper's staleGeneratingThreshold (10 min): the reaper's
+	// gate asks "has this specific job stalled long enough to be considered
+	// hung?" — reconciliation asks "did the process that owns this job die?"
+	// A fresh job from a dead process could be only seconds old but still be
+	// a zombie; the heartbeat-freshness gate correctly handles both.
+	reconcileStaleThreshold = 90 * time.Second
 )
 
 // subsystemEmitsHeartbeats returns true for subsystems whose dispatcher calls
@@ -511,6 +567,110 @@ func (o *Orchestrator) reapStaleJobs() {
 	}
 }
 
+// reconcileZombieJobs marks active jobs from prior processes as failed.
+// It runs synchronously in New() before workers start, so the orchestrator
+// is internally consistent at construction time: no dedupe hit on a zombie
+// is possible after New() returns.
+//
+// Decision criteria (CA-175, D3):
+//   - Skip jobs whose ProcessID matches the current process (defensive;
+//     in practice o.processID was just generated so no jobs carry it yet).
+//   - Skip jobs whose updated_at is recent (< reconcileStaleThreshold):
+//     they are either from a live peer-replica that is still heartbeating,
+//     or a legacy row whose heartbeat is still fresh (rolling-restart
+//     upgrade where a pre-migration peer is still alive).
+//   - Reconcile all other active jobs: those from dead processes (process_id
+//     != current AND updated_at stale) and legacy rows with empty process_id
+//     (pre-migration 058) that are also stale.
+//
+// Rolling-restart edge case: if P1 creates a job (stamped P1) and then
+// dies, and P2 starts within reconcileStaleThreshold, P2 sees the row
+// with process_id="P1" and updated_at still recent — the freshness gate
+// skips reconciliation. Once P1's last heartbeat ages out past
+// reconcileStaleThreshold, P2 reconciles the row on its next opportunity
+// (currently: only at startup; periodic reconciliation is future work).
+//
+// Ordering mirrors the reaper (reapStaleJobs) exactly:
+// claimFinalization → SetStatus(Failed) → SetError → inflight.release.
+// Releasing inflight before DB writes complete would open a window for a
+// fresh enqueue to start before the zombie is terminal in the DB.
+func (o *Orchestrator) reconcileZombieJobs() {
+	active := o.store.ListActive(llm.ListFilter{})
+	now := time.Now()
+	reconciled := 0
+	reconciledIDs := make([]string, 0)
+
+	for _, job := range active {
+		// Skip jobs owned by the current process — they cannot be zombies.
+		if job.ProcessID == o.processID {
+			continue
+		}
+		// Skip jobs whose heartbeat is still fresh: a live peer-replica or a
+		// rolling-restart peer whose heartbeat hasn't gone stale yet.
+		// An empty ProcessID (legacy, pre-migration 058) is treated the same
+		// as a mismatched ProcessID: reconciled when stale, skipped when fresh.
+		if now.Sub(job.UpdatedAt) < reconcileStaleThreshold {
+			continue
+		}
+
+		// Claim finalization first — same primitive as the reaper — so we
+		// don't race the reaper or a concurrent reconcileZombieJobs call.
+		if !o.claimFinalization(job.ID) {
+			slog.Info("reconcile: skipped already-finalizing zombie",
+				"job_id", job.ID,
+				"event", "orchestrator_zombie_reconcile_skip_finalizing")
+			continue
+		}
+
+		slog.Warn("reconciling zombie job from prior process",
+			"job_id", job.ID,
+			"target_key", job.TargetKey,
+			"prior_process_id", job.ProcessID,
+			"current_process_id", o.processID,
+			"age_seconds", now.Sub(job.UpdatedAt).Round(time.Second).Seconds(),
+			"event", "orchestrator_zombie_reconciled")
+
+		if err := o.store.SetStatus(job.ID, llm.StatusFailed); err != nil {
+			slog.Warn("reconcile: failed to set zombie status; releasing claim",
+				"job_id", job.ID,
+				"error", err,
+				"event", "orchestrator_zombie_reconcile_release_claim",
+				"reason", "store_write_failed")
+			o.releaseFinalization(job.ID)
+			continue
+		}
+
+		errMsg := "Job marked failed by orchestrator startup reconciliation: zombie from process_id=" + job.ProcessID
+		if err := o.store.SetError(job.ID, "PROCESS_RESTART_RECONCILIATION", errMsg); err != nil {
+			slog.Warn("reconcile: failed to set zombie error; releasing claim",
+				"job_id", job.ID,
+				"error", err,
+				"event", "orchestrator_zombie_reconcile_release_claim",
+				"reason", "store_write_failed")
+			o.releaseFinalization(job.ID)
+			continue
+		}
+
+		// Both writes succeeded — now safe to release the inflight key so
+		// a fresh enqueue can start for this target_key.
+		o.inflight.release(job.TargetKey)
+		reconciled++
+		reconciledIDs = append(reconciledIDs, job.ID)
+	}
+
+	// Emit a summary log regardless of count so the operator can confirm
+	// reconciliation ran and observe the result.
+	sampleIDs := reconciledIDs
+	if len(sampleIDs) > 10 {
+		sampleIDs = sampleIDs[:10]
+	}
+	slog.Info("orchestrator startup reconciliation complete",
+		"count", reconciled,
+		"current_process_id", o.processID,
+		"reconciled_ids", sampleIDs,
+		"event", "orchestrator_zombie_reconciled_pass")
+}
+
 // Enqueue claims a job, persists it, and schedules it for execution. If
 // a job with the same TargetKey is already active, Enqueue returns the
 // existing job without creating a duplicate.
@@ -626,6 +786,14 @@ func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 		MaxAttempts:      req.MaxAttempts,
 		TimeoutSec:       req.TimeoutSec,
 		AttachedRequests: 1,
+		// CA-175: stamp the creating process's ID so startup reconciliation
+		// can identify zombie jobs from prior processes. Set at Create time
+		// only — not re-stamped on SetStatus(generating) — because routing
+		// a new field through the JobStore interface would require a new
+		// interface method. The rolling-restart edge case (P1 creates, P2
+		// claims and transitions to generating) is handled by the
+		// heartbeat-freshness gate in reconcileZombieJobs.
+		ProcessID:        o.processID,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}

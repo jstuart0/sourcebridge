@@ -17,6 +17,14 @@ import (
 
 // newTestOrchestrator returns an orchestrator wired up against the
 // in-memory job store with a short debounce window so tests finish fast.
+//
+// SkipStartupReconciliation is set to true by default so that the ~12+
+// existing tests using this helper are not affected by the CA-175 zombie
+// reconciliation pass — their MemStore is always empty at construction
+// time, but future tests that pre-populate the store with active rows from
+// a different process_id would be surprised by an immediate mark-failed.
+// Tests that want to exercise reconciliation use New() directly with the
+// zero-value Config.SkipStartupReconciliation (= false, production default).
 func newTestOrchestrator(t *testing.T, cfg Config) *Orchestrator {
 	t.Helper()
 	if cfg.ProgressDebounce == 0 {
@@ -25,6 +33,7 @@ func newTestOrchestrator(t *testing.T, cfg Config) *Orchestrator {
 	if cfg.Retry.MaxAttempts == 0 {
 		cfg.Retry = RetryPolicy{MaxAttempts: 1} // no retries by default in tests
 	}
+	cfg.SkipStartupReconciliation = true
 	store := llm.NewMemStore()
 	orch := New(store, cfg)
 	t.Cleanup(func() { _ = orch.Shutdown(2 * time.Second) })

@@ -178,6 +178,15 @@ type Job struct {
 	SkippedPackageUnits int  `json:"skipped_package_units"`
 	SkippedRootUnits  int    `json:"skipped_root_units"`
 
+	// ProcessID identifies the orchestrator process that created this job.
+	// Generated once per Orchestrator.New() as a UUID; stamped on Create()
+	// only — not on subsequent status transitions. The startup reconciliation
+	// (Orchestrator.reconcileZombieJobs) uses this field together with a
+	// heartbeat-freshness gate to identify zombie jobs from prior processes.
+	// Empty string means the field was absent on the row (legacy rows
+	// pre-migration 058 or jobs created without a process ID).
+	ProcessID string `json:"process_id,omitempty"`
+
 	// ArtifactID (optional) links the job back to a domain record — a
 	// ca_knowledge_artifact row for knowledge jobs, a requirement id for
 	// requirements jobs, etc. Used by the Monitor page to deep-link into

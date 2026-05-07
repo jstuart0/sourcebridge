@@ -64,6 +64,10 @@ type surrealLLMJob struct {
 	// (unknown) rather than 0 (zero rate), while an explicit 0 is
 	// preserved but the caller treats it as "unknown" per the Job docs.
 	CurrentTokensPerSecond *float64         `json:"current_tokens_per_second,omitempty"`
+	// ProcessID is a pointer + omitempty so that absent rows (legacy, pre-058)
+	// decode to nil and the public Job.ProcessID field receives an empty string.
+	// A row created by a live orchestrator process carries the process UUID here.
+	ProcessID              *string          `json:"process_id,omitempty"`
 	CreatedAt              surrealTime      `json:"created_at"`
 	StartedAt              surrealTime      `json:"started_at"`
 	UpdatedAt              surrealTime      `json:"updated_at"`
@@ -130,6 +134,9 @@ func (r *surrealLLMJob) toJob() *llm.Job {
 	}
 	if r.CurrentTokensPerSecond != nil {
 		job.CurrentTokensPerSecond = *r.CurrentTokensPerSecond
+	}
+	if r.ProcessID != nil {
+		job.ProcessID = *r.ProcessID
 	}
 	if !r.StartedAt.Time.IsZero() {
 		t := r.StartedAt.Time
@@ -224,6 +231,14 @@ func (s *SurrealStore) Create(job *llm.Job) (*llm.Job, error) {
 		created_at = time::now(),
 		updated_at = time::now()`
 
+	// process_id is appended to the SQL and vars only when non-empty.
+	// This matches the conditional-include pattern from Phase 1 (SaveClusters)
+	// and avoids sending explicit null for option<string> fields in SurrealDB.
+	if job.ProcessID != "" {
+		sql += `,
+		process_id = $process_id`
+	}
+
 	vars := map[string]any{
 		"id":                 job.ID,
 		"subsystem":          string(job.Subsystem),
@@ -262,6 +277,9 @@ func (s *SurrealStore) Create(job *llm.Job) (*llm.Job, error) {
 		"artifact_id":        job.ArtifactID,
 		"repo_id":            job.RepoID,
 		"current_tokens_per_second": job.CurrentTokensPerSecond,
+	}
+	if job.ProcessID != "" {
+		vars["process_id"] = job.ProcessID
 	}
 
 	if _, err := surrealdb.Query[interface{}](ctx(), db, sql, vars); err != nil {
@@ -319,6 +337,10 @@ func (s *SurrealStore) Update(job *llm.Job) error {
 		repo_id = $repo_id,
 		current_tokens_per_second = $current_tokens_per_second,
 		updated_at = time::now()`
+	if job.ProcessID != "" {
+		sql += `,
+		process_id = $process_id`
+	}
 	vars := map[string]any{
 		"id":                 job.ID,
 		"subsystem":          string(job.Subsystem),
@@ -357,6 +379,9 @@ func (s *SurrealStore) Update(job *llm.Job) error {
 		"artifact_id":        job.ArtifactID,
 		"repo_id":            job.RepoID,
 		"current_tokens_per_second": job.CurrentTokensPerSecond,
+	}
+	if job.ProcessID != "" {
+		vars["process_id"] = job.ProcessID
 	}
 	_, err := queryOne[interface{}](ctx(), db, sql, vars)
 	return err

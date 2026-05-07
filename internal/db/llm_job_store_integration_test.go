@@ -252,3 +252,116 @@ func TestSurrealStoreLLMProviderRoundTrip(t *testing.T) {
 		t.Fatalf("ListLogs llm_provider round-trip failed: %+v", logs)
 	}
 }
+
+// TestSurrealStoreProcessIDRoundTrip verifies that process_id (added in
+// migration 058, CA-175) survives a full SurrealDB round-trip through Create,
+// GetByID, and ListActive — the three paths reconcileZombieJobs depends on.
+//
+// The explicit ListActive assertion is non-negotiable: reconciliation reads
+// via ListActive, so a SQL bug that drops process_id from the SELECT would
+// silently degrade reconciliation to pure heartbeat-freshness without this
+// test catching it.
+func TestSurrealStoreProcessIDRoundTrip(t *testing.T) {
+	s := startSurrealContainer(t)
+	store := NewSurrealStore(s)
+
+	// (a) Create a job with a non-empty ProcessID and confirm it round-trips.
+	job := newTestJob("tk-processid-1", "repo-pid-1")
+	job.ProcessID = "test-process-uuid-abc123"
+
+	created, err := store.Create(job)
+	if err != nil {
+		t.Fatalf("Create with process_id: %v", err)
+	}
+	if created.ProcessID != "test-process-uuid-abc123" {
+		t.Fatalf("Create round-trip process_id: got %q, want %q", created.ProcessID, "test-process-uuid-abc123")
+	}
+
+	// (b) GetByID must return the job with ProcessID populated.
+	got := store.GetByID(job.ID)
+	if got == nil {
+		t.Fatal("GetByID returned nil")
+	}
+	if got.ProcessID != "test-process-uuid-abc123" {
+		t.Fatalf("GetByID process_id: got %q, want %q", got.ProcessID, "test-process-uuid-abc123")
+	}
+
+	// (c) ListActive must return the job with ProcessID populated.
+	// This is the critical assertion: reconcileZombieJobs reads via ListActive.
+	// If the SELECT in ListActive doesn't include process_id (or the DTO mapping
+	// drops it), reconciliation silently degrades to pure heartbeat-freshness.
+	active := store.ListActive(llm.ListFilter{})
+	var found *llm.Job
+	for _, j := range active {
+		if j.ID == job.ID {
+			found = j
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("ListActive did not return the created job (id=%s)", job.ID)
+	}
+	if found.ProcessID != "test-process-uuid-abc123" {
+		t.Fatalf("ListActive process_id: got %q, want %q; reconciliation would silently degrade",
+			found.ProcessID, "test-process-uuid-abc123")
+	}
+
+	// (d) Update() must preserve ProcessID. If Update() omits process_id from
+	// its SET clause, a read-modify-write caller silently zeros the field in DB;
+	// the next reconciliation pass then treats the row as a pre-migration legacy
+	// job and may fail it spuriously.
+	got.Progress = 42 // arbitrary mutation to confirm the UPDATE fires
+	if err := store.Update(got); err != nil {
+		t.Fatalf("Update after Create: %v", err)
+	}
+	afterUpdate := store.GetByID(got.ID)
+	if afterUpdate == nil {
+		t.Fatal("GetByID after Update returned nil")
+	}
+	if afterUpdate.ProcessID != "test-process-uuid-abc123" {
+		t.Fatalf("Update must preserve ProcessID: got %q, want %q", afterUpdate.ProcessID, "test-process-uuid-abc123")
+	}
+	if afterUpdate.Progress != 42 {
+		t.Fatalf("Update must persist other fields: progress got %v, want 42", afterUpdate.Progress)
+	}
+
+	// (f) Create a job with empty ProcessID — field must be absent (or NONE) in
+	// SurrealDB and round-trip as empty string. Validates the option<string>
+	// field-absence contract from Decision D3: legacy rows with NONE are safe.
+	jobNoID := newTestJob("tk-processid-2", "repo-pid-2")
+	// ProcessID intentionally left empty.
+
+	createdNoID, err := store.Create(jobNoID)
+	if err != nil {
+		t.Fatalf("Create without process_id: %v", err)
+	}
+	if createdNoID.ProcessID != "" {
+		t.Fatalf("Create round-trip empty process_id: got %q, want empty string", createdNoID.ProcessID)
+	}
+
+	gotNoID := store.GetByID(jobNoID.ID)
+	if gotNoID == nil {
+		t.Fatal("GetByID (no process_id) returned nil")
+	}
+	if gotNoID.ProcessID != "" {
+		t.Fatalf("GetByID empty process_id: got %q, want empty string", gotNoID.ProcessID)
+	}
+
+	// (e) ListActive must also return legacy/pre-migration rows (no process_id)
+	// with an empty ProcessID — not a default or sentinel value. This is the
+	// contract that makes startup reconciliation safe against old rows.
+	listedForNoID := store.ListActive(llm.ListFilter{})
+	var foundNoID *llm.Job
+	for _, j := range listedForNoID {
+		if j.ID == jobNoID.ID {
+			foundNoID = j
+			break
+		}
+	}
+	if foundNoID == nil {
+		t.Fatalf("ListActive must return job with empty ProcessID (id=%s)", jobNoID.ID)
+	}
+	if foundNoID.ProcessID != "" {
+		t.Fatalf("ListActive empty ProcessID must round-trip as empty string, got %q", foundNoID.ProcessID)
+	}
+}
