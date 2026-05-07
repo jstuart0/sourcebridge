@@ -356,6 +356,58 @@ func (c *HTTPConfluenceClient) findPageIDByExternalID(ctx context.Context, auth,
 	return pageID, nil
 }
 
+// adoptPageByTitle searches for a page in the configured space whose title
+// matches `title` and stamps it with our sourcebridge_page_id property so
+// future EnsurePage calls find it via the property index. Used to recover
+// from the 400-duplicate-title path: a page already exists with this title
+// but doesn't carry our property (typically an OSS run that preceded
+// property tracking, or a manually-authored page).
+//
+// Conservative: only adopts a page that has NO sourcebridge_page_id set. A
+// page already owned by a different external ID is left alone (the caller
+// will surface the original 400). Returns the adopted page's ID, or empty
+// string + nil error if no adoptable candidate exists.
+func (c *HTTPConfluenceClient) adoptPageByTitle(ctx context.Context, auth, externalID, title string) (string, error) {
+	if title == "" {
+		return "", nil
+	}
+	spaceID, err := c.resolveSpaceID(ctx, auth)
+	if err != nil {
+		return "", err
+	}
+	params := url.Values{}
+	params.Set("title", title)
+	params.Set("space-id", spaceID)
+	path := "/pages?" + params.Encode()
+	var searchResp struct {
+		Results []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"results"`
+	}
+	if err := c.do(ctx, auth, http.MethodGet, path, nil, &searchResp); err != nil {
+		return "", fmt.Errorf("confluence_http: adopt search by title %q: %w", title, err)
+	}
+	for _, r := range searchResp.Results {
+		propVal, propErr := c.getPageProperty(ctx, auth, r.ID, confluencePropertyKey)
+		if propErr != nil {
+			continue
+		}
+		if propVal != "" && propVal != externalID {
+			// Owned by a different external ID — don't steal it.
+			continue
+		}
+		// Either no property (unowned) or already matches — adopt or no-op.
+		if propVal == "" {
+			if err := c.setPageProperty(ctx, auth, r.ID, confluencePropertyKey, externalID); err != nil {
+				return "", fmt.Errorf("confluence_http: adopt set property on %q: %w", r.ID, err)
+			}
+		}
+		return r.ID, nil
+	}
+	return "", nil
+}
+
 // findPageByPropertyScan iterates every page in the space and returns the
 // Confluence page ID whose sourcebridge_page_id property equals externalID.
 // Returns "" when no match is found.
@@ -533,6 +585,22 @@ func (c *HTTPConfluenceClient) EnsurePage(ctx context.Context, snap credentials.
 				return conflictPageID, nil
 			}
 			// Lookup failed too — surface the original 409 so the caller can decide.
+		}
+
+		// Confluence sometimes returns 400 (not 409) when a page already exists
+		// with the same TITLE in the space but lacks our sourcebridge_page_id
+		// property — typical for pages created by an earlier OSS run that
+		// preceded property tracking, or when an admin manually authored a
+		// page with a colliding title. The findPageIDByExternalID fast-path
+		// skipped them because the property didn't match; createPage then
+		// hits the title uniqueness constraint. Adopt: look up by title only,
+		// stamp our external ID property, and return the existing page's ID.
+		if errors.As(createErr, &apiErr) && apiErr.StatusCode == http.StatusBadRequest &&
+			strings.Contains(apiErr.Message, "page with this title already exists") {
+			adoptedID, adoptErr := c.adoptPageByTitle(ctx, auth, externalID, title)
+			if adoptErr == nil && adoptedID != "" {
+				return adoptedID, nil
+			}
 		}
 		return "", fmt.Errorf("confluence_http: EnsurePage create %q: %w", externalID, createErr)
 	}
