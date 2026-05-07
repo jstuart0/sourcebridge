@@ -363,10 +363,19 @@ func (c *HTTPConfluenceClient) findPageIDByExternalID(ctx context.Context, auth,
 // but doesn't carry our property (typically an OSS run that preceded
 // property tracking, or a manually-authored page).
 //
-// Conservative: only adopts a page that has NO sourcebridge_page_id set. A
-// page already owned by a different external ID is left alone (the caller
-// will surface the original 400). Returns the adopted page's ID, or empty
-// string + nil error if no adoptable candidate exists.
+// Adoption rules (single-repo OSS default):
+//   - No sourcebridge_page_id property set → adopt (write our external ID).
+//   - Property already equals our external ID → no-op (return its page ID).
+//   - Property points at a DIFFERENT, stale external ID (e.g. from a prior
+//     run before page-ID schemas were renamed) → take over by overwriting.
+//     The collision-by-title is itself evidence the operator wants this
+//     page owned by SourceBridge; an external ID mismatch from a past run
+//     is the most common reason adoption is needed in the first place.
+//
+// In multi-repo shared-space deployments, prefer per-repo title scoping at
+// the section/root layer so this function never sees a true cross-repo
+// title collision. The repo-scoped section title (Architecture · <repo>)
+// in confluence_writer.go is exactly that mitigation.
 func (c *HTTPConfluenceClient) adoptPageByTitle(ctx context.Context, auth, externalID, title string) (string, error) {
 	if title == "" {
 		return "", nil
@@ -393,15 +402,12 @@ func (c *HTTPConfluenceClient) adoptPageByTitle(ctx context.Context, auth, exter
 		if propErr != nil {
 			continue
 		}
-		if propVal != "" && propVal != externalID {
-			// Owned by a different external ID — don't steal it.
-			continue
+		if propVal == externalID {
+			return r.ID, nil
 		}
-		// Either no property (unowned) or already matches — adopt or no-op.
-		if propVal == "" {
-			if err := c.setPageProperty(ctx, auth, r.ID, confluencePropertyKey, externalID); err != nil {
-				return "", fmt.Errorf("confluence_http: adopt set property on %q: %w", r.ID, err)
-			}
+		// Either no property or stale property — stamp ours and adopt.
+		if err := c.setPageProperty(ctx, auth, r.ID, confluencePropertyKey, externalID); err != nil {
+			return "", fmt.Errorf("confluence_http: adopt set property on %q: %w", r.ID, err)
 		}
 		return r.ID, nil
 	}
