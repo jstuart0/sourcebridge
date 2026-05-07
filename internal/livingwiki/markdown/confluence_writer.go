@@ -881,8 +881,11 @@ func (cw *ConfluenceWriter) ensureHierarchy(ctx context.Context) error {
 			xmlEscape(repoName),
 		)
 
-		// Architecture section is parented to the root.
-		_, err = cw.client.EnsurePage(ctx, archID, "Architecture", rootID, archBody)
+		// Architecture section is parented to the root. Title is repo-scoped
+		// ("Architecture · <repoName>") to avoid collisions in shared spaces
+		// where multiple repos publish their own Living Wiki — Confluence
+		// enforces title uniqueness per space regardless of parent.
+		_, err = cw.client.EnsurePage(ctx, archID, "Architecture · "+repoName, rootID, archBody)
 		if err != nil {
 			cw.hierarchyErr = fmt.Errorf("confluence_writer: ensure architecture section: %w", err)
 		}

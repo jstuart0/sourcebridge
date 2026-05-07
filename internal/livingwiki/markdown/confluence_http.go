@@ -202,6 +202,12 @@ func (c *HTTPConfluenceClient) GetPage(ctx context.Context, snap credentials.Sna
 }
 
 // UpsertPage creates or updates the page identified by externalID.
+//
+// On a 400-duplicate-title response from createPage (a page with the target
+// title already exists in the space but lacks our property — e.g. an OSS-run
+// orphan), the page is adopted: the property is stamped onto the existing
+// page and the body is updated. This mirrors EnsurePage's adopt path so
+// every page-write entry point is title-collision tolerant.
 func (c *HTTPConfluenceClient) UpsertPage(ctx context.Context, snap credentials.Snapshot, externalID string, xhtml []byte, metadata ConfluenceProperties) error {
 	auth := basicAuthHeader(snap.ConfluenceEmail, snap.ConfluenceToken)
 	pageID, err := c.findPageIDByExternalID(ctx, auth, externalID, metadata)
@@ -210,7 +216,20 @@ func (c *HTTPConfluenceClient) UpsertPage(ctx context.Context, snap credentials.
 	}
 
 	if pageID == "" {
-		return c.createPage(ctx, auth, externalID, xhtml, metadata)
+		_, createErr := c.createPage(ctx, auth, externalID, xhtml, metadata)
+		if createErr == nil {
+			return nil
+		}
+		// Title collision against an orphan? Adopt it and update.
+		var apiErr *ConfluenceAPIError
+		if errors.As(createErr, &apiErr) && apiErr.StatusCode == http.StatusBadRequest &&
+			strings.Contains(apiErr.Message, "page with this title already exists") {
+			adoptedID, adoptErr := c.adoptPageByTitle(ctx, auth, externalID, metadata[propConfluenceTitle])
+			if adoptErr == nil && adoptedID != "" {
+				return c.updatePage(ctx, auth, adoptedID, externalID, xhtml, metadata)
+			}
+		}
+		return createErr
 	}
 	return c.updatePage(ctx, auth, pageID, externalID, xhtml, metadata)
 }
@@ -356,6 +375,64 @@ func (c *HTTPConfluenceClient) findPageIDByExternalID(ctx context.Context, auth,
 	return pageID, nil
 }
 
+// adoptPageByTitle searches for a page in the configured space whose title
+// matches `title` and stamps it with our sourcebridge_page_id property so
+// future EnsurePage calls find it via the property index. Used to recover
+// from the 400-duplicate-title path: a page already exists with this title
+// but doesn't carry our property (typically an OSS run that preceded
+// property tracking, or a manually-authored page).
+//
+// Adoption rules (single-repo OSS default):
+//   - No sourcebridge_page_id property set → adopt (write our external ID).
+//   - Property already equals our external ID → no-op (return its page ID).
+//   - Property points at a DIFFERENT, stale external ID (e.g. from a prior
+//     run before page-ID schemas were renamed) → take over by overwriting.
+//     The collision-by-title is itself evidence the operator wants this
+//     page owned by SourceBridge; an external ID mismatch from a past run
+//     is the most common reason adoption is needed in the first place.
+//
+// In multi-repo shared-space deployments, prefer per-repo title scoping at
+// the section/root layer so this function never sees a true cross-repo
+// title collision. The repo-scoped section title (Architecture · <repo>)
+// in confluence_writer.go is exactly that mitigation.
+func (c *HTTPConfluenceClient) adoptPageByTitle(ctx context.Context, auth, externalID, title string) (string, error) {
+	if title == "" {
+		return "", nil
+	}
+	spaceID, err := c.resolveSpaceID(ctx, auth)
+	if err != nil {
+		return "", err
+	}
+	params := url.Values{}
+	params.Set("title", title)
+	params.Set("space-id", spaceID)
+	path := "/pages?" + params.Encode()
+	var searchResp struct {
+		Results []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"results"`
+	}
+	if err := c.do(ctx, auth, http.MethodGet, path, nil, &searchResp); err != nil {
+		return "", fmt.Errorf("confluence_http: adopt search by title %q: %w", title, err)
+	}
+	for _, r := range searchResp.Results {
+		propVal, propErr := c.getPageProperty(ctx, auth, r.ID, confluencePropertyKey)
+		if propErr != nil {
+			continue
+		}
+		if propVal == externalID {
+			return r.ID, nil
+		}
+		// Either no property or stale property — stamp ours and adopt.
+		if err := c.setPageProperty(ctx, auth, r.ID, confluencePropertyKey, externalID); err != nil {
+			return "", fmt.Errorf("confluence_http: adopt set property on %q: %w", r.ID, err)
+		}
+		return r.ID, nil
+	}
+	return "", nil
+}
+
 // findPageByPropertyScan iterates every page in the space and returns the
 // Confluence page ID whose sourcebridge_page_id property equals externalID.
 // Returns "" when no match is found.
@@ -415,10 +492,13 @@ func (c *HTTPConfluenceClient) findPageByPropertyScan(ctx context.Context, auth,
 // When metadata contains propParentExternalID, the value is resolved to a
 // Confluence numeric page ID (via findPageIDByExternalID) and used as the
 // parentId of the new page rather than cfg.ParentPageID.
-func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID string, xhtml []byte, metadata ConfluenceProperties) error {
+//
+// Returns the new page's numeric Confluence ID on success (callers can avoid
+// a post-create lookup that is fragile under Atlassian search-index lag).
+func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID string, xhtml []byte, metadata ConfluenceProperties) (string, error) {
 	spaceID, err := c.resolveSpaceID(ctx, auth)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	type bodyValue struct {
@@ -449,7 +529,7 @@ func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID 
 	if parentExtID := metadata[propParentExternalID]; parentExtID != "" {
 		resolved, resolveErr := c.findPageIDByExternalID(ctx, auth, parentExtID, nil)
 		if resolveErr != nil {
-			return fmt.Errorf("confluence_http: resolve parent %q: %w", parentExtID, resolveErr)
+			return "", fmt.Errorf("confluence_http: resolve parent %q: %w", parentExtID, resolveErr)
 		}
 		if resolved != "" {
 			parentID = resolved
@@ -471,12 +551,12 @@ func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID 
 		ID string `json:"id"`
 	}
 	if err := c.do(ctx, auth, http.MethodPost, "/pages", payload, &resp); err != nil {
-		return fmt.Errorf("confluence_http: create page: %w", err)
+		return "", fmt.Errorf("confluence_http: create page: %w", err)
 	}
 
 	// Write the sourcebridge_page_id property.
 	if err := c.setPageProperty(ctx, auth, resp.ID, confluencePropertyKey, externalID); err != nil {
-		return fmt.Errorf("confluence_http: set page property: %w", err)
+		return "", fmt.Errorf("confluence_http: set page property: %w", err)
 	}
 
 	// Write any additional metadata properties. The pseudo-properties
@@ -488,7 +568,7 @@ func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID 
 		}
 		_ = c.setPageProperty(ctx, auth, resp.ID, k, v) // best-effort
 	}
-	return nil
+	return resp.ID, nil
 }
 
 // EnsurePage implements [ConfluenceClient]. It creates a page with the given
@@ -520,7 +600,7 @@ func (c *HTTPConfluenceClient) EnsurePage(ctx context.Context, snap credentials.
 		metadata[propParentExternalID] = parentExternalID
 	}
 
-	createErr := c.createPage(ctx, auth, externalID, body, metadata)
+	newPageID, createErr := c.createPage(ctx, auth, externalID, body, metadata)
 	if createErr != nil {
 		// CR7: A 409 Conflict response means another writer (same pod via a
 		// different goroutine, or a different pod) created this page concurrently.
@@ -534,14 +614,29 @@ func (c *HTTPConfluenceClient) EnsurePage(ctx context.Context, snap credentials.
 			}
 			// Lookup failed too — surface the original 409 so the caller can decide.
 		}
+
+		// Confluence sometimes returns 400 (not 409) when a page already exists
+		// with the same TITLE in the space but lacks our sourcebridge_page_id
+		// property — typical for pages created by an earlier OSS run that
+		// preceded property tracking, or when an admin manually authored a
+		// page with a colliding title. The findPageIDByExternalID fast-path
+		// skipped them because the property didn't match; createPage then
+		// hits the title uniqueness constraint. Adopt: look up by title only,
+		// stamp our external ID property, and return the existing page's ID.
+		if errors.As(createErr, &apiErr) && apiErr.StatusCode == http.StatusBadRequest &&
+			strings.Contains(apiErr.Message, "page with this title already exists") {
+			adoptedID, adoptErr := c.adoptPageByTitle(ctx, auth, externalID, title)
+			if adoptErr == nil && adoptedID != "" {
+				return adoptedID, nil
+			}
+		}
 		return "", fmt.Errorf("confluence_http: EnsurePage create %q: %w", externalID, createErr)
 	}
 
-	// Resolve the new page's numeric ID.
-	newPageID, err := c.findPageIDByExternalID(ctx, auth, externalID, metadata)
-	if err != nil {
-		return "", fmt.Errorf("confluence_http: EnsurePage post-create lookup %q: %w", externalID, err)
-	}
+	// createPage returned the new page's ID directly (avoids a fragile
+	// post-create title-search lookup that races Atlassian's eventual-consistency
+	// search index — one such lookup timed out at 30 s on a slow run, and the
+	// post-create call provides the ID for free in its response anyway).
 	return newPageID, nil
 }
 
