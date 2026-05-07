@@ -2858,16 +2858,27 @@ func (s *SurrealStore) ReplaceClusters(ctx context.Context, repoID string, clust
 	now := time.Now().UTC()
 
 	// Build flat arrays for the BEGIN/COMMIT batch.
-	type clusterRow struct {
-		ID        string  `json:"cid"`
-		RepoID    string  `json:"repo_id"`
-		Label     string  `json:"label"`
-		LLMLabel  *string `json:"llm_label"`
-		Size      int     `json:"size"`
-		EdgeHash  string  `json:"edge_hash"`
-		Partial   bool    `json:"partial"`
-		CreatedAt string  `json:"created_at"`
-		UpdatedAt string  `json:"updated_at"`
+	//
+	// clusterContent omits the "cid" key that we use in type::thing() to set
+	// the record ID. In a SCHEMAFULL table, CONTENT must not include fields
+	// that are not defined in the schema; the record ID is supplied separately
+	// via the type::thing() expression in the CREATE statement. llm_label uses
+	// omitempty so that nil *string serialises as absent-key rather than JSON
+	// null — SurrealDB v2.2+ rejects explicit null for option<string> fields.
+	type clusterContent struct {
+		RepoID    string    `json:"repo_id"`
+		Label     string    `json:"label"`
+		LLMLabel  *string   `json:"llm_label,omitempty"`
+		Size      int       `json:"size"`
+		EdgeHash  string    `json:"edge_hash"`
+		Partial   bool      `json:"partial"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	// clusterID pairs each content object with the raw ID used in type::thing.
+	type clusterID struct {
+		Cid     string         `json:"cid"`
+		Content clusterContent `json:"content"`
 	}
 	type memberRow struct {
 		ClusterID string `json:"cid"`
@@ -2875,23 +2886,25 @@ func (s *SurrealStore) ReplaceClusters(ctx context.Context, repoID string, clust
 		RepoID    string `json:"repo_id"`
 	}
 
-	clusterRows := make([]clusterRow, 0, len(clusters))
+	clusterRows := make([]clusterID, 0, len(clusters))
 	memberRows := make([]memberRow, 0)
 	for _, c := range clusters {
 		rawID := strings.TrimPrefix(c.ID, "cluster:")
 		if rawID == "" {
 			rawID = uuid.New().String()
 		}
-		clusterRows = append(clusterRows, clusterRow{
-			ID:        rawID,
-			RepoID:    repoID,
-			Label:     c.Label,
-			LLMLabel:  c.LLMLabel,
-			Size:      c.Size,
-			EdgeHash:  c.EdgeHash,
-			Partial:   c.Partial,
-			CreatedAt: now.Format(time.RFC3339Nano),
-			UpdatedAt: now.Format(time.RFC3339Nano),
+		clusterRows = append(clusterRows, clusterID{
+			Cid: rawID,
+			Content: clusterContent{
+				RepoID:    repoID,
+				Label:     c.Label,
+				LLMLabel:  c.LLMLabel,
+				Size:      c.Size,
+				EdgeHash:  c.EdgeHash,
+				Partial:   c.Partial,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
 		})
 		for _, m := range c.Members {
 			memberRows = append(memberRows, memberRow{
@@ -2902,20 +2915,18 @@ func (s *SurrealStore) ReplaceClusters(ctx context.Context, repoID string, clust
 		}
 	}
 
+	// Use CONTENT $c.content instead of SET ... so that absent keys (e.g.
+	// llm_label when LLMLabel is nil and omitempty drops it) are absent from
+	// the created record by construction. A SET llm_label = $c.llm_label
+	// statement assigns NONE to the field when the key is missing, which
+	// SurrealDB v2.2+ rejects for option<string> inside a transactional
+	// FOR-loop.
 	_, err := surrealdb.Query[interface{}](ctx, db,
 		`BEGIN;
 		 DELETE cluster_member WHERE repo_id = $repo_id;
 		 DELETE cluster        WHERE repo_id = $repo_id;
 		 FOR $c IN $clusters {
-		   CREATE type::thing('cluster', $c.cid) SET
-		     repo_id    = $c.repo_id,
-		     label      = $c.label,
-		     llm_label  = $c.llm_label,
-		     size       = $c.size,
-		     edge_hash  = $c.edge_hash,
-		     partial    = $c.partial,
-		     created_at = type::datetime($c.created_at),
-		     updated_at = type::datetime($c.updated_at);
+		   CREATE type::thing('cluster', $c.cid) CONTENT $c.content;
 		 };
 		 FOR $m IN $members {
 		   CREATE cluster_member SET
@@ -2952,27 +2963,35 @@ func (s *SurrealStore) SaveClusters(_ context.Context, repoID string, clusters [
 		if rawID == "" {
 			rawID = clusterUUID
 		}
-		_, err := surrealdb.Query[interface{}](ctx(), db,
-			`CREATE type::thing('cluster', $cid) SET
+		// Build the vars map conditionally: include llm_label only when
+		// non-nil, and dereference the pointer when included. Passing a
+		// nil *string as $llm_label would produce SET llm_label = null,
+		// which SurrealDB v2.2+ rejects for option<string> columns.
+		// When nil, omit the field from both vars and the SET clause so
+		// SurrealDB leaves it absent (permitted for option<string>).
+		vars := map[string]any{
+			"cid":        rawID,
+			"repo_id":    repoID,
+			"label":      c.Label,
+			"size":       c.Size,
+			"edge_hash":  c.EdgeHash,
+			"partial":    c.Partial,
+			"created_at": now,
+			"updated_at": now,
+		}
+		sql := `CREATE type::thing('cluster', $cid) SET
 				repo_id    = $repo_id,
 				label      = $label,
-				llm_label  = $llm_label,
 				size       = $size,
 				edge_hash  = $edge_hash,
 				partial    = $partial,
 				created_at = $created_at,
-				updated_at = $updated_at`,
-			map[string]any{
-				"cid":        rawID,
-				"repo_id":    repoID,
-				"label":      c.Label,
-				"llm_label":  c.LLMLabel,
-				"size":       c.Size,
-				"edge_hash":  c.EdgeHash,
-				"partial":    c.Partial,
-				"created_at": now,
-				"updated_at": now,
-			})
+				updated_at = $updated_at`
+		if c.LLMLabel != nil {
+			vars["llm_label"] = *c.LLMLabel
+			sql += `, llm_label = $llm_label`
+		}
+		_, err := surrealdb.Query[interface{}](ctx(), db, sql, vars)
 		if err != nil {
 			slog.Warn("clustering: failed to save cluster", "repo_id", repoID, "error", err)
 			continue
