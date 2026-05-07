@@ -48,6 +48,10 @@ Per-step requirements:
 GROUNDING RULE: never tell the reader to merely "explore the codebase" or "familiarize yourself".
 Every step must name specific files and what to inspect in them.
 
+IDENTIFIER FORMAT: wrap every function name, type, method, route name, and test
+identifier in markdown backticks (e.g., `FunctionName`, `test_my_thing`).
+Identifiers without backticks do NOT count toward the high-confidence threshold.
+
 FILE-PATH DISCIPLINE (violations lower the step's confidence):
 - Every entry in "file_paths" MUST be a real file path you can see in the
   snapshot or in the "Representative files" / "Entry-point symbols" /

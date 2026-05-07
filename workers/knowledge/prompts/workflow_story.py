@@ -163,9 +163,14 @@ Writing guidance:
 - Each section's "content" must be 4-8 substantial sentences. Name specific files, \
   components, functions, and routes. Minimum 80 words per section.
 
+IDENTIFIER FORMAT: wrap every function name, type, method, route name, and test
+identifier in markdown backticks (e.g., `FunctionName`, `test_my_thing`).
+Identifiers without backticks do NOT count toward the high-confidence threshold.
+
 Confidence rules:
-- If a section references specific files, symbols, or routes from the snapshot, \
-  set confidence to "high" and inferred to false — the snapshot IS direct evidence.
+- Set confidence to "high" and inferred to false when a section names at least two \
+  backtick-wrapped identifiers (e.g., `FunctionName`) AND cites at least three real \
+  file paths from the snapshot — that is direct evidence.
 - Only use "medium" confidence when you are connecting dots between separate pieces \
   of evidence (e.g. inferring a data flow from two separate function signatures).
 - Only use "low" confidence when the snapshot provides no relevant evidence at all.
