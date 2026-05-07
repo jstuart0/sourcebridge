@@ -91,3 +91,166 @@ def test_interceptor_trailing_comma_does_not_match_empty() -> None:
     assert not interceptor.check_auth_metadata({})
     assert not interceptor.check_auth_metadata({"x-sb-worker-secret": ""})
     assert interceptor.check_auth_metadata({"x-sb-worker-secret": "real-secret"})
+
+
+# ---------------------------------------------------------------------------
+# _GrpcAuthInterceptor — _wrap_handler streaming paths
+#
+# Prior coverage gap noted at line 51 ("The _wrap_handler path is exercised by
+# end-to-end tests"): the streaming handler slots were never directly tested,
+# which is why the async-generator TypeError shipped. Tests below close that gap.
+# ---------------------------------------------------------------------------
+
+
+import grpc  # noqa: E402 — used only in the _wrap_handler tests below
+
+
+class _FakeContext:
+    """Minimal stand-in for grpc.ServicerContext."""
+
+    def __init__(self, metadata: dict[str, str]) -> None:
+        self._metadata = metadata
+        self.aborted: tuple | None = None
+
+    def invocation_metadata(self):
+        return list(self._metadata.items())
+
+    async def abort(self, code, details):
+        self.aborted = (code, details)
+
+
+class _FakeHandler:
+    """Minimal stand-in for grpc.RpcMethodHandler (named-tuple-like)."""
+
+    __slots__ = ("unary_unary", "unary_stream", "stream_unary", "stream_stream")
+
+    def __init__(self, **kwargs):
+        for slot in self.__slots__:
+            setattr(self, slot, kwargs.get(slot))
+
+    def _replace(self, **kwargs):
+        new = _FakeHandler(**{s: getattr(self, s) for s in self.__slots__})
+        for k, v in kwargs.items():
+            setattr(new, k, v)
+        return new
+
+
+@pytest.mark.asyncio
+async def test_wrap_handler_unary_stream_passes_auth() -> None:
+    """unary_stream handler yields chunks when auth passes."""
+
+    async def fake_unary_stream(request, context):
+        yield "chunk-a"
+        yield "chunk-b"
+
+    interceptor = _GrpcAuthInterceptor("secret")
+    handler = _FakeHandler(unary_stream=fake_unary_stream)
+    wrapped = interceptor._wrap_handler(handler)
+
+    ctx = _FakeContext({"x-sb-worker-secret": "secret"})
+    results = []
+    async for chunk in wrapped.unary_stream("req", ctx):
+        results.append(chunk)
+
+    assert results == ["chunk-a", "chunk-b"]
+    assert ctx.aborted is None
+
+
+@pytest.mark.asyncio
+async def test_wrap_handler_unary_stream_fails_auth() -> None:
+    """unary_stream handler aborts and yields nothing when auth fails."""
+
+    async def fake_unary_stream(request, context):
+        yield "should-not-appear"  # pragma: no cover
+
+    interceptor = _GrpcAuthInterceptor("secret")
+    handler = _FakeHandler(unary_stream=fake_unary_stream)
+    wrapped = interceptor._wrap_handler(handler)
+
+    ctx = _FakeContext({"x-sb-worker-secret": "wrong"})
+    results = []
+    async for chunk in wrapped.unary_stream("req", ctx):
+        results.append(chunk)  # pragma: no cover
+
+    assert results == []
+    assert ctx.aborted is not None
+    assert ctx.aborted[0] == grpc.StatusCode.UNAUTHENTICATED
+
+
+@pytest.mark.asyncio
+async def test_wrap_handler_stream_stream_passes_auth() -> None:
+    """stream_stream handler yields chunks when auth passes."""
+
+    async def fake_stream_stream(request_iter, context):
+        yield "resp-1"
+        yield "resp-2"
+
+    interceptor = _GrpcAuthInterceptor("secret")
+    handler = _FakeHandler(stream_stream=fake_stream_stream)
+    wrapped = interceptor._wrap_handler(handler)
+
+    ctx = _FakeContext({"x-sb-worker-secret": "secret"})
+    results = []
+    async for chunk in wrapped.stream_stream(iter([]), ctx):
+        results.append(chunk)
+
+    assert results == ["resp-1", "resp-2"]
+    assert ctx.aborted is None
+
+
+@pytest.mark.asyncio
+async def test_wrap_handler_stream_stream_fails_auth() -> None:
+    """stream_stream handler aborts and yields nothing when auth fails."""
+
+    async def fake_stream_stream(request_iter, context):
+        yield "should-not-appear"  # pragma: no cover
+
+    interceptor = _GrpcAuthInterceptor("secret")
+    handler = _FakeHandler(stream_stream=fake_stream_stream)
+    wrapped = interceptor._wrap_handler(handler)
+
+    ctx = _FakeContext({})
+    results = []
+    async for chunk in wrapped.stream_stream(iter([]), ctx):
+        results.append(chunk)  # pragma: no cover
+
+    assert results == []
+    assert ctx.aborted is not None
+    assert ctx.aborted[0] == grpc.StatusCode.UNAUTHENTICATED
+
+
+@pytest.mark.asyncio
+async def test_wrap_handler_stream_unary_passes_auth() -> None:
+    """stream_unary handler (coroutine) returns its value when auth passes."""
+
+    async def fake_stream_unary(request_iter, context):
+        return "single-response"
+
+    interceptor = _GrpcAuthInterceptor("secret")
+    handler = _FakeHandler(stream_unary=fake_stream_unary)
+    wrapped = interceptor._wrap_handler(handler)
+
+    ctx = _FakeContext({"x-sb-worker-secret": "secret"})
+    result = await wrapped.stream_unary(iter([]), ctx)
+
+    assert result == "single-response"
+    assert ctx.aborted is None
+
+
+@pytest.mark.asyncio
+async def test_wrap_handler_stream_unary_fails_auth() -> None:
+    """stream_unary handler aborts when auth fails."""
+
+    async def fake_stream_unary(request_iter, context):
+        return "should-not-appear"  # pragma: no cover
+
+    interceptor = _GrpcAuthInterceptor("secret")
+    handler = _FakeHandler(stream_unary=fake_stream_unary)
+    wrapped = interceptor._wrap_handler(handler)
+
+    ctx = _FakeContext({})
+    result = await wrapped.stream_unary(iter([]), ctx)
+
+    assert result is None
+    assert ctx.aborted is not None
+    assert ctx.aborted[0] == grpc.StatusCode.UNAUTHENTICATED

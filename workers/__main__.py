@@ -136,7 +136,22 @@ class _GrpcAuthInterceptor(grpc.aio.ServerInterceptor):
                 return
             return await original(request, context)
 
-        async def _check_and_call_stream(request_iter, context):
+        async def _check_and_call_server_stream(request_or_iter, context):
+            # unary_stream and stream_stream handlers are async generator functions.
+            # `return await original(...)` raises TypeError because await cannot be
+            # used on an async generator object — they must be iterated with `async for`.
+            if not self._check_auth(context):
+                await context.abort(
+                    grpc.StatusCode.UNAUTHENTICATED,
+                    "Missing or invalid x-sb-worker-secret header.",
+                )
+                return
+            async for chunk in original(request_or_iter, context):
+                yield chunk
+
+        async def _check_and_call_stream_unary(request_iter, context):
+            # stream_unary handlers are coroutines (consume a stream, return one
+            # response), so the `return await` pattern is correct here.
             if not self._check_auth(context):
                 await context.abort(
                     grpc.StatusCode.UNAUTHENTICATED,
@@ -150,13 +165,13 @@ class _GrpcAuthInterceptor(grpc.aio.ServerInterceptor):
             return handler._replace(unary_unary=_check_and_call_unary)
         if handler.unary_stream:
             original = handler.unary_stream
-            return handler._replace(unary_stream=_check_and_call_stream)
+            return handler._replace(unary_stream=_check_and_call_server_stream)
         if handler.stream_unary:
             original = handler.stream_unary
-            return handler._replace(stream_unary=_check_and_call_stream)
+            return handler._replace(stream_unary=_check_and_call_stream_unary)
         if handler.stream_stream:
             original = handler.stream_stream
-            return handler._replace(stream_stream=_check_and_call_stream)
+            return handler._replace(stream_stream=_check_and_call_server_stream)
         return handler
 
     async def intercept_service(self, continuation, handler_call_details):
