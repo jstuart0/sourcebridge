@@ -202,6 +202,12 @@ func (c *HTTPConfluenceClient) GetPage(ctx context.Context, snap credentials.Sna
 }
 
 // UpsertPage creates or updates the page identified by externalID.
+//
+// On a 400-duplicate-title response from createPage (a page with the target
+// title already exists in the space but lacks our property — e.g. an OSS-run
+// orphan), the page is adopted: the property is stamped onto the existing
+// page and the body is updated. This mirrors EnsurePage's adopt path so
+// every page-write entry point is title-collision tolerant.
 func (c *HTTPConfluenceClient) UpsertPage(ctx context.Context, snap credentials.Snapshot, externalID string, xhtml []byte, metadata ConfluenceProperties) error {
 	auth := basicAuthHeader(snap.ConfluenceEmail, snap.ConfluenceToken)
 	pageID, err := c.findPageIDByExternalID(ctx, auth, externalID, metadata)
@@ -210,8 +216,20 @@ func (c *HTTPConfluenceClient) UpsertPage(ctx context.Context, snap credentials.
 	}
 
 	if pageID == "" {
-		_, err := c.createPage(ctx, auth, externalID, xhtml, metadata)
-		return err
+		_, createErr := c.createPage(ctx, auth, externalID, xhtml, metadata)
+		if createErr == nil {
+			return nil
+		}
+		// Title collision against an orphan? Adopt it and update.
+		var apiErr *ConfluenceAPIError
+		if errors.As(createErr, &apiErr) && apiErr.StatusCode == http.StatusBadRequest &&
+			strings.Contains(apiErr.Message, "page with this title already exists") {
+			adoptedID, adoptErr := c.adoptPageByTitle(ctx, auth, externalID, metadata[propConfluenceTitle])
+			if adoptErr == nil && adoptedID != "" {
+				return c.updatePage(ctx, auth, adoptedID, externalID, xhtml, metadata)
+			}
+		}
+		return createErr
 	}
 	return c.updatePage(ctx, auth, pageID, externalID, xhtml, metadata)
 }
