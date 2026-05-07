@@ -927,13 +927,21 @@ class ConcurrencyGatedProvider:
         self._config = config or ConcurrencyConfig()
         # Wire aiolimiter for RPM rate-shaping when configured (Decision 7).
         # None = no RPM shaping (default for all providers; Phase 8 adds specific RPMs).
-        provider_name = getattr(raw, "provider_name", None) or ""
-        rpm = self._config.rpm.get(provider_name)
+        self._provider_name: str = str(getattr(raw, "provider_name", "") or "").strip()
+        rpm = self._config.rpm.get(self._provider_name)
         self._limiter: AsyncLimiter | None = (
             AsyncLimiter(rpm, time_period=60) if rpm is not None and rpm > 0 else None
         )
         # Cache the before_sleep callback (captures the gate's binding).
         self._before_sleep = _make_before_sleep(gate._binding)
+
+    @property
+    def provider_name(self) -> str:
+        """Forward the wrapped provider's ``provider_name`` for callers that
+        classify behavior by provider type (e.g., CliffNotesRenderer's
+        provider-aware deep_parallelism default). Read-only — set at ``__init__``
+        from the raw provider's ``provider_name``."""
+        return self._provider_name
 
     async def complete(
         self,

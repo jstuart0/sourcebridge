@@ -26,6 +26,7 @@ class _RecordingProvider:
     captured_prompt: str = ""
     captured_prompts: list[str] | None = None
     calls: int = 0
+    provider_name: str = ""
 
     async def complete(
         self,

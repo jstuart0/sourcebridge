@@ -40,7 +40,6 @@ Refs: CA-169 / plan v4 Phase 3 Verification list.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import random
 from collections.abc import AsyncIterator
 from unittest.mock import MagicMock, patch
@@ -1271,16 +1270,219 @@ def test_hierarchical_default_caps_raised() -> None:
     assert DEFAULT_PACKAGE_CONCURRENCY == 4, f"Expected 4, got {DEFAULT_PACKAGE_CONCURRENCY}"
 
 
-def test_renderer_deep_parallelism_raised() -> None:
-    """Phase 3 raises deep_parallelism and deep_repair_parallelism defaults to 4."""
+def test_renderer_deep_parallelism_default_cloud_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cloud provider resolves deep_parallelism=4, deep_repair_parallelism=4."""
+    monkeypatch.delenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM", raising=False)
+    monkeypatch.delenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_REPAIR_PARALLELISM", raising=False)
+
+    from dataclasses import dataclass
+
     from workers.comprehension.renderers import CliffNotesRenderer
 
-    fields = {f.name: f.default for f in dataclasses.fields(CliffNotesRenderer)}
-    assert fields.get("deep_parallelism") == 4, (
-        f"Expected deep_parallelism=4, got {fields.get('deep_parallelism')}"
+    @dataclass
+    class _P:
+        provider_name: str = "openai"
+
+    renderer = CliffNotesRenderer(provider=_P())  # type: ignore[arg-type]
+    assert renderer.deep_parallelism == 4, f"Expected 4, got {renderer.deep_parallelism}"
+    assert renderer.deep_repair_parallelism == 4, f"Expected 4, got {renderer.deep_repair_parallelism}"
+
+
+def test_renderer_deep_parallelism_default_local_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Local provider (ollama) resolves deep_parallelism=2, deep_repair_parallelism=2."""
+    monkeypatch.delenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM", raising=False)
+    monkeypatch.delenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_REPAIR_PARALLELISM", raising=False)
+
+    from dataclasses import dataclass
+
+    from workers.comprehension.renderers import CliffNotesRenderer
+
+    @dataclass
+    class _P:
+        provider_name: str = "ollama"
+
+    renderer = CliffNotesRenderer(provider=_P())  # type: ignore[arg-type]
+    assert renderer.deep_parallelism == 2, f"Expected 2, got {renderer.deep_parallelism}"
+    assert renderer.deep_repair_parallelism == 2, f"Expected 2, got {renderer.deep_repair_parallelism}"
+
+
+def test_renderer_deep_parallelism_default_unknown_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unknown/empty provider resolves to cloud default (4) — pins the contract."""
+    monkeypatch.delenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM", raising=False)
+    monkeypatch.delenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_REPAIR_PARALLELISM", raising=False)
+
+    from dataclasses import dataclass
+
+    from workers.comprehension.renderers import CliffNotesRenderer
+
+    @dataclass
+    class _P:
+        provider_name: str = ""
+
+    renderer = CliffNotesRenderer(provider=_P())  # type: ignore[arg-type]
+    assert renderer.deep_parallelism == 4, f"Expected 4 (cloud default), got {renderer.deep_parallelism}"
+
+
+def test_renderer_deep_parallelism_env_var_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Env var wins over local provider default (8 > 2)."""
+    from dataclasses import dataclass
+
+    monkeypatch.setenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM", "8")
+
+    from workers.comprehension.renderers import CliffNotesRenderer
+
+    @dataclass
+    class _P:
+        provider_name: str = "ollama"
+
+    renderer = CliffNotesRenderer(provider=_P())  # type: ignore[arg-type]
+    assert renderer.deep_parallelism == 8, f"Expected 8 (env), got {renderer.deep_parallelism}"
+
+
+def test_renderer_deep_parallelism_constructor_overrides_higher_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Constructor override=3 wins even when env var is 8 (higher)."""
+    from dataclasses import dataclass
+
+    monkeypatch.setenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM", "8")
+
+    from workers.comprehension.renderers import CliffNotesRenderer
+
+    @dataclass
+    class _P:
+        provider_name: str = "ollama"
+
+    renderer = CliffNotesRenderer(provider=_P(), _deep_parallelism_override=3)  # type: ignore[arg-type]
+    assert renderer.deep_parallelism == 3, f"Expected 3 (constructor), got {renderer.deep_parallelism}"
+
+
+def test_renderer_deep_parallelism_constructor_overrides_lower_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Constructor override=8 wins even when env var is 3 (lower) — bidirectional check."""
+    from dataclasses import dataclass
+
+    monkeypatch.setenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM", "3")
+
+    from workers.comprehension.renderers import CliffNotesRenderer
+
+    @dataclass
+    class _P:
+        provider_name: str = "ollama"
+
+    renderer = CliffNotesRenderer(provider=_P(), _deep_parallelism_override=8)  # type: ignore[arg-type]
+    assert renderer.deep_parallelism == 8, f"Expected 8 (constructor), got {renderer.deep_parallelism}"
+
+
+def test_renderer_deep_parallelism_invalid_env_var_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invalid env var emits a warn-log and falls back to provider-aware default (2 for ollama)."""
+    from dataclasses import dataclass
+
+    monkeypatch.setenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM", "banana")
+
+    from workers.comprehension.renderers import CliffNotesRenderer
+
+    @dataclass
+    class _P:
+        provider_name: str = "ollama"
+
+    renderer = CliffNotesRenderer(provider=_P())  # type: ignore[arg-type]
+    assert renderer.deep_parallelism == 2, (
+        f"Expected 2 (ollama default after invalid env), got {renderer.deep_parallelism}"
     )
-    assert fields.get("deep_repair_parallelism") == 4, (
-        f"Expected deep_repair_parallelism=4, got {fields.get('deep_repair_parallelism')}"
+
+
+def test_renderer_deep_repair_parallelism_env_var_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """deep_repair env var (=6) is applied independently; deep_parallelism still uses local default (2)."""
+    from dataclasses import dataclass
+
+    monkeypatch.setenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_REPAIR_PARALLELISM", "6")
+
+    from workers.comprehension.renderers import CliffNotesRenderer
+
+    @dataclass
+    class _P:
+        provider_name: str = "ollama"
+
+    renderer = CliffNotesRenderer(provider=_P())  # type: ignore[arg-type]
+    assert renderer.deep_repair_parallelism == 6, (
+        f"Expected 6 (repair env), got {renderer.deep_repair_parallelism}"
+    )
+    assert renderer.deep_parallelism == 2, (
+        f"Expected 2 (ollama deep default), got {renderer.deep_parallelism}"
+    )
+
+
+def test_renderer_deep_parallelism_resolved_log_emits_cloud(monkeypatch: pytest.MonkeyPatch) -> None:
+    """__post_init__ emits cliff_notes_deep_parallelism_resolved with exact source labels for cloud."""
+    monkeypatch.delenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM", raising=False)
+    monkeypatch.delenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_REPAIR_PARALLELISM", raising=False)
+
+    from dataclasses import dataclass
+
+    import structlog.testing
+
+    from workers.comprehension.renderers import CliffNotesRenderer  # noqa: PLC0415
+
+    @dataclass
+    class _P:
+        provider_name: str = "openai"
+
+    with structlog.testing.capture_logs() as captured:
+        renderer = CliffNotesRenderer(provider=_P())  # type: ignore[arg-type]
+
+    resolved_events = [e for e in captured if e.get("event") == "cliff_notes_deep_parallelism_resolved"]
+    assert len(resolved_events) == 1, (
+        f"Expected exactly 1 cliff_notes_deep_parallelism_resolved event; got {len(resolved_events)}"
+    )
+    ev = resolved_events[0]
+    assert ev["deep_parallelism"] == renderer.deep_parallelism
+    assert ev["deep_repair_parallelism"] == renderer.deep_repair_parallelism
+    # Cloud provider must resolve from "default", NOT "default_local".
+    assert ev["deep_source"] == "default", (
+        f"Expected 'default' for openai provider, got {ev['deep_source']!r}"
+    )
+    assert ev["deep_repair_source"] == "default", (
+        f"Expected 'default' for openai repair, got {ev['deep_repair_source']!r}"
+    )
+
+
+def test_renderer_deep_parallelism_resolved_log_emits_local(monkeypatch: pytest.MonkeyPatch) -> None:
+    """__post_init__ emits cliff_notes_deep_parallelism_resolved with 'default_local' for Ollama."""
+    monkeypatch.delenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM", raising=False)
+    monkeypatch.delenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_REPAIR_PARALLELISM", raising=False)
+
+    from dataclasses import dataclass
+
+    import structlog.testing
+
+    from workers.comprehension.renderers import CliffNotesRenderer  # noqa: PLC0415
+
+    @dataclass
+    class _P:
+        provider_name: str = "ollama"
+
+    with structlog.testing.capture_logs() as captured:
+        renderer = CliffNotesRenderer(provider=_P())  # type: ignore[arg-type]
+
+    resolved_events = [e for e in captured if e.get("event") == "cliff_notes_deep_parallelism_resolved"]
+    assert len(resolved_events) == 1, (
+        f"Expected exactly 1 cliff_notes_deep_parallelism_resolved event; got {len(resolved_events)}"
+    )
+    ev = resolved_events[0]
+    assert ev["deep_parallelism"] == renderer.deep_parallelism
+    assert ev["deep_repair_parallelism"] == renderer.deep_repair_parallelism
+    # Local provider must resolve from "default_local", NOT "default".
+    assert ev["deep_source"] == "default_local", (
+        f"Expected 'default_local' for ollama provider, got {ev['deep_source']!r}"
+    )
+    assert ev["deep_repair_source"] == "default_local", (
+        f"Expected 'default_local' for ollama repair, got {ev['deep_repair_source']!r}"
     )
 
 
@@ -1380,4 +1582,132 @@ def test_is_local_provider_replaces_local_probe_providers_drift_guard() -> None:
     assert parallel_matches == [], (
         f"Parallel local-provider frozenset found outside concurrency.py: {parallel_matches}. "
         "Add new local providers to _HOST_GATED_PROVIDERS in concurrency.py instead."
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 27. test_renderer_deep_parallelism_env_var_zero_falls_back
+#     env="0" is a valid int but fails the >= 1 guard → warn + provider-aware default.
+#     Distinct code path from "banana" (valid-int-but-out-of-range vs. parse failure).
+
+
+def test_renderer_deep_parallelism_env_var_zero_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """env SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM=0 fails the >= 1 guard and falls
+    back to the provider-aware default (2 for ollama). Distinct from 'banana' which
+    triggers ValueError; 0 is a valid int that is out of the allowed range.
+    """
+    from dataclasses import dataclass
+
+    monkeypatch.setenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM", "0")
+    monkeypatch.delenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_REPAIR_PARALLELISM", raising=False)
+
+    from workers.comprehension.renderers import CliffNotesRenderer
+
+    @dataclass
+    class _P:
+        provider_name: str = "ollama"
+
+    renderer = CliffNotesRenderer(provider=_P())  # type: ignore[arg-type]
+    assert renderer.deep_parallelism == 2, (
+        f"Expected 2 (ollama default after env=0), got {renderer.deep_parallelism}"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 28. test_concurrency_gated_provider_forwards_provider_name
+#     Critical fix: ConcurrencyGatedProvider must expose provider_name as a
+#     property so callers like CliffNotesRenderer can classify by provider type.
+
+
+@pytest.mark.asyncio
+async def test_concurrency_gated_provider_forwards_provider_name() -> None:
+    """ConcurrencyGatedProvider.provider_name forwards the raw provider's name."""
+
+    class _StubRaw:
+        provider_name = "ollama"
+
+        @property
+        def default_model(self) -> str:
+            return "llama3"
+
+    config = ConcurrencyConfig(llm_max_concurrent={"ollama": 1}, retry_max_attempts=1)
+    registry = _registry(config)
+    gate = await registry.lookup("ollama", "http://localhost:11434/v1", "llm")
+    wrapper = ConcurrencyGatedProvider(_StubRaw(), gate, config)  # type: ignore[arg-type]
+
+    assert wrapper.provider_name == "ollama", (
+        f"Expected 'ollama', got {wrapper.provider_name!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_concurrency_gated_provider_forwards_empty_provider_name() -> None:
+    """ConcurrencyGatedProvider.provider_name is '' when raw has no provider_name."""
+
+    class _NoName:
+        @property
+        def default_model(self) -> str:
+            return "unknown"
+
+    config = ConcurrencyConfig(llm_max_concurrent={"openai": 4}, retry_max_attempts=1)
+    registry = _registry(config)
+    gate = await registry.lookup("openai", "https://api.openai.com/v1", "llm")
+    wrapper = ConcurrencyGatedProvider(_NoName(), gate, config)  # type: ignore[arg-type]
+
+    assert wrapper.provider_name == ""
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 29. test_concurrency_gated_provider_ollama_resolves_cliff_notes_deep_parallelism_2
+#     THE load-bearing production-path test: pins the full chain
+#     ConcurrencyGatedProvider(ollama_raw) → CliffNotesRenderer(provider=wrapper)
+#     → deep_parallelism == 2.
+#
+#     This was the missing test ian flagged: without it a regression to the
+#     broken getattr("") path would go undetected.
+
+
+@pytest.mark.asyncio
+async def test_concurrency_gated_provider_ollama_resolves_cliff_notes_deep_parallelism_2(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Production path: wrapping an Ollama provider in ConcurrencyGatedProvider and
+    passing the wrapper into CliffNotesRenderer must resolve deep_parallelism=2.
+
+    This tests the full chain:
+      raw.provider_name="ollama"
+      → ConcurrencyGatedProvider stores it as self._provider_name
+      → wrapper.provider_name property returns "ollama"
+      → CliffNotesRenderer.__post_init__ → getattr(provider, "provider_name") → "ollama"
+      → is_local_provider("ollama") → True → local_default=2
+    """
+    monkeypatch.delenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM", raising=False)
+    monkeypatch.delenv("SOURCEBRIDGE_CLIFF_NOTES_DEEP_REPAIR_PARALLELISM", raising=False)
+
+    from workers.common.llm.concurrency import ConcurrencyGatedProvider
+    from workers.comprehension.renderers import CliffNotesRenderer
+
+    class _OllamaRaw:
+        provider_name = "ollama"
+
+        @property
+        def default_model(self) -> str:
+            return "llama3"
+
+    raw = _OllamaRaw()
+    config = ConcurrencyConfig(llm_max_concurrent={"ollama": 1}, retry_max_attempts=1)
+    registry = _registry(config)
+    gate = await registry.lookup("ollama", "http://localhost:11434/v1", "llm")
+    wrapper = ConcurrencyGatedProvider(raw, gate, config)  # type: ignore[arg-type]
+
+    renderer = CliffNotesRenderer(provider=wrapper)  # type: ignore[arg-type]
+
+    assert renderer.deep_parallelism == 2, (
+        f"Expected deep_parallelism=2 for wrapped Ollama provider, got {renderer.deep_parallelism}. "
+        "This is the production code path — ConcurrencyGatedProvider must forward provider_name."
+    )
+    assert renderer.deep_repair_parallelism == 2, (
+        f"Expected deep_repair_parallelism=2 for wrapped Ollama provider, got {renderer.deep_repair_parallelism}."
     )

@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import monotonic
 
 import structlog
 
+from workers.common.llm.concurrency import is_local_provider
 from workers.common.llm.errors import is_provider_compute_error
 from workers.common.llm.provider import (
     LLMProvider,
@@ -56,6 +58,13 @@ from workers.knowledge.types import CliffNotesResult, CliffNotesSection
 from workers.reasoning.types import LLMUsageRecord
 
 log = structlog.get_logger()
+
+# Provider-aware defaults for deep render parallelism (Phase 3 — CA-173).
+# Local providers share a host-level gate; cloud providers tolerate higher concurrency.
+DEFAULT_DEEP_PARALLELISM_LOCAL = 2
+DEFAULT_DEEP_PARALLELISM_CLOUD = 4
+DEFAULT_DEEP_REPAIR_PARALLELISM_LOCAL = 2
+DEFAULT_DEEP_REPAIR_PARALLELISM_CLOUD = 4
 
 SECTION_KEYWORDS: dict[str, tuple[str, ...]] = {
     "System Purpose": ("entry", "serve", "web", "page", "ui", "browser", "api", "worker", "product", "graphql", "knowledge", "artifact"),
@@ -542,8 +551,79 @@ class CliffNotesRenderer:
     max_file_summaries: int = 12
     max_tokens_per_call: int = 16384  # thinking models need headroom for <think> chains before the JSON output
     model_override: str | None = None
-    deep_parallelism: int = 4          # Phase 3: raised from 2 (Outcome A)
-    deep_repair_parallelism: int = 4   # Phase 3: raised from 2 (Outcome A)
+    # NOTE: `deep_parallelism` and `deep_repair_parallelism` are public fields
+    # but are RESOLVED by __post_init__ from a precedence chain:
+    #   _*_override > env var > provider-aware default.
+    # Callers wanting to bypass resolution must use the private
+    # `_deep_parallelism_override` / `_deep_repair_parallelism_override`
+    # fields instead. Passing `deep_parallelism=N` directly to the constructor
+    # is silently overwritten — the default `4` exists only because dataclass
+    # field ordering requires a default when the override fields follow.
+    deep_parallelism: int = 4
+    deep_repair_parallelism: int = 4
+    # Private override fields: pass to bypass env/default resolution entirely.
+    _deep_parallelism_override: int | None = field(default=None, repr=False, compare=False)
+    _deep_repair_parallelism_override: int | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self.deep_parallelism, deep_source = self._resolve_parallelism_field(
+            override=self._deep_parallelism_override,
+            env_name="SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM",
+            warn_event="cliff_notes_deep_parallelism_invalid_env",
+            local_default=DEFAULT_DEEP_PARALLELISM_LOCAL,
+            cloud_default=DEFAULT_DEEP_PARALLELISM_CLOUD,
+        )
+        self.deep_repair_parallelism, repair_source = self._resolve_parallelism_field(
+            override=self._deep_repair_parallelism_override,
+            env_name="SOURCEBRIDGE_CLIFF_NOTES_DEEP_REPAIR_PARALLELISM",
+            warn_event="cliff_notes_deep_repair_parallelism_invalid_env",
+            local_default=DEFAULT_DEEP_REPAIR_PARALLELISM_LOCAL,
+            cloud_default=DEFAULT_DEEP_REPAIR_PARALLELISM_CLOUD,
+        )
+        log.info(
+            "cliff_notes_deep_parallelism_resolved",
+            provider=getattr(self.provider, "provider_name", ""),
+            deep_parallelism=self.deep_parallelism,
+            deep_repair_parallelism=self.deep_repair_parallelism,
+            deep_source=deep_source,
+            deep_repair_source=repair_source,
+        )
+
+    def _resolve_parallelism_field(
+        self,
+        *,
+        override: int | None,
+        env_name: str,
+        warn_event: str,
+        local_default: int,
+        cloud_default: int,
+    ) -> tuple[int, str]:
+        """Resolve a parallelism field using precedence: override > env var > provider default.
+
+        Returns the resolved value and a source label for structured logging.
+        Valid source labels: "constructor" | "env" | "default_local" | "default".
+        """
+        # Treat override <= 0 as "no override" (fall through to env/default).
+        # Operators expressing "use the resolved default" pass None;
+        # 0 and negatives are coerced silently rather than raising — the same
+        # treatment env-var "0" gets at the next branch.
+        if override is not None and override >= 1:
+            return override, "constructor"
+
+        raw = os.environ.get(env_name, "").strip()
+        if raw:
+            try:
+                value = int(raw)
+                if value >= 1:
+                    return value, "env"
+            except ValueError:
+                pass
+            log.warning(warn_event, env_name=env_name, raw_value=raw)
+
+        provider_name = getattr(self.provider, "provider_name", "") or ""
+        if is_local_provider(provider_name):
+            return local_default, "default_local"
+        return cloud_default, "default"
 
     async def render(
         self,
