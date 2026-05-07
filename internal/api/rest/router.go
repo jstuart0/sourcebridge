@@ -7,6 +7,8 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/http/pprof" //nolint:gosec // dev-only profiling, gated behind SOURCEBRIDGE_PPROF_ENABLED
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -734,6 +736,23 @@ func (s *Server) setupRouter() {
 
 	// Rate limiting
 	r.Use(httprate.LimitByIP(100, 1*time.Minute))
+
+	// pprof — gated behind SOURCEBRIDGE_PPROF_ENABLED=true. Mounted before the
+	// global rate limiter so a goroutine dump under load is not throttled.
+	// Dev-only; never enable on a public-facing deployment.
+	if os.Getenv("SOURCEBRIDGE_PPROF_ENABLED") == "true" {
+		r.HandleFunc("/debug/pprof/", pprof.Index)
+		r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		r.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		r.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		r.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+		r.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+		r.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+		r.Handle("/debug/pprof/block", pprof.Handler("block"))
+		r.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
+		r.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+	}
 
 	// Public routes
 	r.Get("/healthz", s.handleHealthz)
