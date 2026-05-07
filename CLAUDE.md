@@ -131,6 +131,42 @@ Plan: `thoughts/shared/plans/active-2026-05-07-diagnose-knowledge-slot-stall.md`
 Investigation: `thoughts/shared/investigations/2026-05-07-diagnose-knowledge-slot-stall.md`
 Runbook: [`docs/admin/llm-config.md`](docs/admin/llm-config.md#knowledge-job-startup-reconciliation-ca-175)
 
+**2026-05-07 deep-render confidence prompt fix (CA-176)** — 1 commit, `f907f16`.
+Closes the residual confidence gap left after CA-173+CA-174+CA-175: the post-CA-173
+bench still returned 7H/0M/9L against the April 14H/0M/2L baseline. Root cause: a
+prompt/upgrade-function mismatch. `_enforce_deep_confidence_floor` in
+`workers/comprehension/renderers.py` counts backtick-wrapped identifiers (matched by
+`_SPECIFIC_IDENTIFIER_RE`) to determine whether a section earns high confidence — but
+`CLIFF_NOTES_RENDER_TEMPLATE` and `CLIFF_NOTES_SECTION_REPAIR_TEMPLATE` only asked the
+model to "name specific functions/types/methods" without specifying backtick markdown
+format. April's qwen3.6 happened to use backticks by convention; today's runs
+didn't for 9 of 16 sections, so those sections were scored low regardless of content
+quality. Fix: explicit backtick-format requirement added to both templates, plus
+backtick-wrapped identifiers injected into all four `GROUP_FEWSHOT_EXAMPLES` Good
+examples to model the format via few-shot. Result: qwen3.6:35b-a3b-q4_K_M on Mac
+Studio Ollama at `deep_parallelism=2` scores 16H/0M/0L, exceeding the April baseline
+by 2 high sections, with CA-169's 735s wall time preserved (vs April's 3500s).
+
+Load-bearing constraints for future-Claude:
+
+- **Don't remove the backtick instruction from the templates.** The backtick-format
+  requirement in `CLIFF_NOTES_RENDER_TEMPLATE` and `CLIFF_NOTES_SECTION_REPAIR_TEMPLATE`
+  is what feeds `_enforce_deep_confidence_floor`. Removing it re-regresses local-tier
+  model output to ~half its potential confidence rate — the upgrade function runs but
+  finds nothing to count.
+- **Don't change `_SPECIFIC_IDENTIFIER_RE`** at `renderers.py:2359` to accept plain-text
+  CamelCase/snake_case without thorough false-positive testing. The backtick-only contract
+  has lower false-positive risk than open identifier matching; widening it raises the
+  chance that prose sentences score as high-confidence sections that aren't.
+- **`GROUP_FEWSHOT_EXAMPLES` should preserve backtick formatting** in all Good examples.
+  Few-shot modeling is more reliable than instruction text alone for stochastic local
+  models — instruction text is guidance, examples are constraint. If a future example
+  update strips the backticks "for readability," the instruction text won't fully
+  compensate.
+
+Plan: `thoughts/shared/plans/active-2026-05-07-diagnose-confidence-partial-recovery.md`
+Investigation: `thoughts/shared/investigations/2026-05-07-diagnose-confidence-partial-recovery.md`
+
 **2026-05-06 orchestrator capacity detection** — 8 commits, `e730009..e1fe4b1`.
 Fixes three compounding Living Wiki throughput issues end-to-end: capacity
 mismatch between orchestrator goroutine pool and upstream LLM, empty-content
