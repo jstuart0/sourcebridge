@@ -72,9 +72,14 @@ func (m *GraphStoreMetrics) GraphRelationCount(repoID, pageID string) int {
 
 // packageReferenceCount counts distinct caller packages importing any symbol
 // in pkg within the given repository.
+//
+// CA-171: replaced inner GetSymbol-per-callerID with one GetSymbolsByIDs batch
+// to eliminate the SurrealDB N+1 that stalled Living Wiki page generation.
+// The outer GetCallers-per-symbol N+1 remains; that requires a new store
+// helper and is tracked separately.
 func (m *GraphStoreMetrics) packageReferenceCount(repoID, pkg string) int {
 	syms, _ := m.store.GetSymbols(repoID, nil, nil, 0, 0)
-	callerPkgs := make(map[string]bool)
+	callerIDSet := make(map[string]struct{})
 	for _, sym := range syms {
 		if sym.FilePath == "" {
 			continue
@@ -83,14 +88,25 @@ func (m *GraphStoreMetrics) packageReferenceCount(repoID, pkg string) int {
 			continue
 		}
 		for _, callerID := range m.store.GetCallers(sym.ID) {
-			caller := m.store.GetSymbol(callerID)
-			if caller == nil {
-				continue
-			}
-			callerPkg := filePackage(caller.FilePath)
-			if callerPkg != pkg {
-				callerPkgs[callerPkg] = true
-			}
+			callerIDSet[callerID] = struct{}{}
+		}
+	}
+	if len(callerIDSet) == 0 {
+		return 0
+	}
+	callerIDs := make([]string, 0, len(callerIDSet))
+	for id := range callerIDSet {
+		callerIDs = append(callerIDs, id)
+	}
+	callers := m.store.GetSymbolsByIDs(callerIDs)
+	callerPkgs := make(map[string]bool)
+	for _, caller := range callers {
+		if caller == nil {
+			continue
+		}
+		callerPkg := filePackage(caller.FilePath)
+		if callerPkg != pkg {
+			callerPkgs[callerPkg] = true
 		}
 	}
 	return len(callerPkgs)
@@ -110,16 +126,31 @@ func (m *GraphStoreMetrics) packageRelationCount(repoID, pkg string) int {
 }
 
 // repoReferenceCount aggregates reference counts across all packages in the repo.
+//
+// CA-171: same N+1 fix as packageReferenceCount — batch-fetch callers once
+// instead of one GetSymbol per callerID.
 func (m *GraphStoreMetrics) repoReferenceCount(repoID string) int {
 	syms, _ := m.store.GetSymbols(repoID, nil, nil, 0, 0)
-	callerPkgs := make(map[string]bool)
+	callerIDSet := make(map[string]struct{})
 	for _, sym := range syms {
 		for _, callerID := range m.store.GetCallers(sym.ID) {
-			caller := m.store.GetSymbol(callerID)
-			if caller != nil {
-				callerPkgs[filePackage(caller.FilePath)] = true
-			}
+			callerIDSet[callerID] = struct{}{}
 		}
+	}
+	if len(callerIDSet) == 0 {
+		return 0
+	}
+	callerIDs := make([]string, 0, len(callerIDSet))
+	for id := range callerIDSet {
+		callerIDs = append(callerIDs, id)
+	}
+	callers := m.store.GetSymbolsByIDs(callerIDs)
+	callerPkgs := make(map[string]bool)
+	for _, caller := range callers {
+		if caller == nil {
+			continue
+		}
+		callerPkgs[filePackage(caller.FilePath)] = true
 	}
 	return len(callerPkgs)
 }
