@@ -1873,25 +1873,40 @@ func (s *SurrealStore) GetSymbol(id string) *graph.StoredSymbol {
 }
 
 // GetSymbolsByIDs returns symbols for a batch of IDs in a single query.
+//
+// CA-171 followup: chunked to 500 IDs per query. The single-query form with
+// `id IN $ids.map(|$v| type::thing(...))` over ~7-10k IDs (sourcebridge-sized
+// repos) overwhelms SurrealDB's per-statement timeout and returns a context-
+// deadline-exceeded warning, defeating the N+1 fix's intent. Chunked at 500
+// the array map-and-IN comparison stays well inside Surreal's budget while
+// the total round-trip cost (~16 sequential queries instead of ~7000) is
+// still vastly cheaper than the original per-id N+1.
 func (s *SurrealStore) GetSymbolsByIDs(ids []string) map[string]*graph.StoredSymbol {
 	db := s.client.DB()
 	if db == nil || len(ids) == 0 {
 		return nil
 	}
 
-	// Use $ids.map(|$v| type::thing('ca_symbol', $v)) to convert string IDs to record IDs.
-	rows, err := queryOne[[]surrealSymbol](ctx(), db,
-		"SELECT * FROM ca_symbol WHERE id IN $ids.map(|$v| type::thing('ca_symbol', $v))",
-		map[string]any{"ids": ids})
-	if err != nil {
-		slog.Warn("failed to batch fetch symbols", "error", err, "count", len(ids))
-		return nil
-	}
-
-	result := make(map[string]*graph.StoredSymbol, len(rows))
-	for i := range rows {
-		sym := rows[i].toStoredSymbol()
-		result[sym.ID] = sym
+	const chunk = 500
+	result := make(map[string]*graph.StoredSymbol, len(ids))
+	for start := 0; start < len(ids); start += chunk {
+		end := start + chunk
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[start:end]
+		rows, err := queryOne[[]surrealSymbol](ctx(), db,
+			"SELECT * FROM ca_symbol WHERE id IN $ids.map(|$v| type::thing('ca_symbol', $v))",
+			map[string]any{"ids": batch})
+		if err != nil {
+			slog.Warn("failed to batch fetch symbols",
+				"error", err, "chunk_size", len(batch), "total_ids", len(ids))
+			continue // partial-result better than nothing on transient errors
+		}
+		for i := range rows {
+			sym := rows[i].toStoredSymbol()
+			result[sym.ID] = sym
+		}
 	}
 	return result
 }
