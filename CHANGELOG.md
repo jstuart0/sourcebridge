@@ -4,6 +4,22 @@ All notable changes to SourceBridge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+> **Note**: This section is maintained manually as a preview of what
+> release-please will roll into the next rc bump. Release-please regenerates
+> the cut release notes from conventional-commit messages on each push to
+> main, so this section will be replaced when the next release PR opens.
+
+### Added
+
+* **worker (CA-169):** Universal LLM concurrency gate with retry, tok/s observability, and admin gate-snapshot endpoint ([3093791](https://github.com/sourcebridge-ai/sourcebridge/commit/30937917ae76fe5f9a25a102499e26bbbb1ab1af)). Every LLM and embedding call passes through a per-`(provider, base_url)` host or per-kind semaphore, jitter-aware tenacity retry loop, optional RPM limiter, and tok/s ring buffer. Eliminates the 5×3=15-attempt storm from stacked hand-rolled retries. `GetProviderCapabilities.max_concurrent_calls` is now sourced from the gate's effective cap for the resolved context, so Go and Python agree on capacity by construction. Adds a live "LLM Gate Activity" section to the admin monitor page. Kill switch: `SOURCEBRIDGE_LLM_CONCURRENCY_WRAPPER_ENABLED=false`.
+
+### Fixed
+
+* **livingwiki (CA-171):** Collapse `GraphStoreMetrics` N+1 caller lookups using `GetCallEdges` + one `GetSymbolsByIDs` batch ([56246ea](https://github.com/sourcebridge-ai/sourcebridge/commit/56246ea040994e56fb05583a131c061bd95250d6)). Page generation previously stalled indefinitely on any non-trivial repo because each metric call issued one SurrealDB websocket round-trip per caller (O(symbols × callers) sequential RPCs). Caught via pprof goroutine dump during deploy validation. Also adds a dev-only `/debug/pprof/*` endpoint behind `SOURCEBRIDGE_PPROF_ENABLED=true`.
+* **confluence:** Adopt existing pages on 400-duplicate-title; repo-scoped Architecture section title; return create-response ID directly ([222eb3a](https://github.com/sourcebridge-ai/sourcebridge/commit/222eb3a0dd5280491e49b5270b3b05e9933e14dc)). Confluence returns 400 (not 409) when a target title already exists in the space without our property — typical for orphan pages from earlier OSS runs. `EnsurePage` and `UpsertPage` now look the page up by title alone, stamp our property, and update its body. The Architecture section page title is now `Architecture · <repoName>` to avoid cross-repo collisions in shared spaces. The post-create title-search lookup that races Atlassian's eventual-consistency search index is gone — `createPage` returns the new page's ID directly from the create response.
+
 ## [0.10.0-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.9.0-rc.3...v0.10.0-rc.3) (2026-05-06)
 
 
