@@ -70,6 +70,9 @@ def make_ollama_override(ollama_base_url: str):
 
     def _override(model: str, api_key: str, repo_mount: str):
         handle = tempfile.NamedTemporaryFile("w", delete=False, suffix=".yml")
+        # Embedding endpoint is /api/embeddings on the base host (no /v1
+        # path), so strip /v1 from ollama_base_url for the embedding URL.
+        embedding_base_url = ollama_base_url.rstrip("/").removesuffix("/v1")
         # Thinking mode is disabled by default in _resolve_disable_thinking()
         # but we set it explicitly so the benchmark config is self-documenting.
         # Reasoning chains from Qwen3.x drastically slow generation and
@@ -84,8 +87,19 @@ services:
       - SOURCEBRIDGE_WORKER_LLM_MODEL={model}
       - SOURCEBRIDGE_WORKER_LLM_API_KEY=ollama
       - SOURCEBRIDGE_WORKER_LLM_DISABLE_THINKING=true
+      # CA-169: lift the per-host Ollama gate to match Mac Studio's
+      # OLLAMA_NUM_PARALLEL=8 so the worker's hierarchical / spec / deep-render
+      # fan-out (4-way each) can actually run concurrently against Ollama.
+      # Without this the gate clamps every fan-out back to 1, defeating the
+      # async parallelism CA-169's Phase 3-5 added.
+      - SOURCEBRIDGE_LLM_PROVIDER_OLLAMA_MAX_CONCURRENT=8
       - SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER=ollama
-      - SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL=http://host.docker.internal:11434
+      # Point embedding at the same Ollama host as completion. The original
+      # default (host.docker.internal:11434) assumed a local-host Ollama on
+      # the dev box, which most of the time isn't running — embeddings then
+      # fail with "All connection attempts failed" before the LLM call even
+      # fires. Mac Studio has nomic-embed-text + qwen3-embedding loaded.
+      - SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL={embedding_base_url}
   sourcebridge:
     volumes:
       - "{repo_mount}:/bench/repo:ro"
