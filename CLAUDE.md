@@ -24,6 +24,53 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-07 qwen3.6 confidence regression remediation (CA-173)** — 4 commits, `952f88e..4f3f079`.
+Restores Living Wiki deep-render confidence from the regressed 4H/0M/12L back toward
+the April baseline (14H/2L) for qwen3.6:35b-a3b-moe and analogous local models. CA-169
+raised `CliffNotesRenderer.deep_parallelism` from 2 to 4; under four simultaneous
+16k-output deep-group calls, qwen3.6 on Ollama runs into KV-cache pressure and emits
+NDJSON instead of a JSON array. `parse_json_sections` had no NDJSON branch, so it fell
+back and stub-filled 12 of 16 sections as `confidence="low"` — quality gates were never
+reached. Two-part fix: NDJSON recovery in `parse_json_sections` (phase 1), and a
+provider-aware default for `deep_parallelism` (`2` for local providers, `4` for cloud —
+preserves CA-169's cloud throughput, restores April baseline for Ollama/vLLM operators).
+
+Load-bearing constraints for future-Claude:
+
+- **`parse_json_sections` NDJSON branch** (`workers/knowledge/parse_utils.py`): the
+  recovery splits on `}\s*(?:\r?\n)+\s*{`, wraps fragments as a JSON array, and accepts
+  the result only if `≥2 fragments AND every fragment is a dict`. Do not remove or relax
+  the `≥2 dict` floor — it's the safeguard against the false-positive trap where a single
+  valid JSON object whose `content` field contains `}\n{` gets split into corrupt halves.
+  Pinned by `test_parse_json_sections_ndjson_does_not_split_embedded_braces`.
+- **`CliffNotesRenderer.deep_parallelism` and `deep_repair_parallelism`** are no longer
+  literal field defaults. `__post_init__` resolves from a precedence chain: private
+  `_deep_parallelism_override` field (constructor) → `SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM`
+  env var → provider-aware default (`2` local / `4` cloud). Public field type stays `int`;
+  private override is `int | None` (Decision 6 — keeps semaphore consumers' `int`
+  annotation green). Cloud default stays `4` (CA-169 throughput preserved); local default
+  is `2` (April baseline). A structured-log line `cliff_notes_deep_parallelism_resolved`
+  fires at renderer construction with fields `deep_source` / `deep_repair_source` — valid
+  source values are `"constructor"`, `"env"`, `"default_local"`, `"default"`.
+- **`is_local_provider(provider_name)` in `workers/common/llm/concurrency.py`** is the
+  canonical predicate for local-vs-cloud classification — reads `_HOST_GATED_PROVIDERS`.
+  Do not fork the source-of-truth set into other files. The two `if provider == "ollama"`
+  thinking-suppression dispatches at `workers/common/llm/openai_compat.py:229,569` are
+  intentionally NOT migrated to `is_local_provider` — they dispatch Ollama-native
+  `/api/chat` thinking-suppression (load-bearing per the 2026-05-06 orchestrator-capacity
+  entry). Migrating them would silently re-enable thinking on qwen models.
+- **`ConcurrencyGatedProvider.provider_name` @property** forwards the wrapped provider's
+  name. This is what makes the local-default-2 fire in production. Without it,
+  `getattr(wrapper, "provider_name", "")` returns `""` and every Ollama operator gets
+  cloud default `4`. Pinned by
+  `test_concurrency_gated_provider_ollama_resolves_cliff_notes_deep_parallelism_2`.
+- **`_LOCAL_PROBE_PROVIDERS` was deleted** from `workers/__main__.py` (phase 2). The
+  call site at `__main__.py:418` now uses `is_local_provider`. Do not re-introduce a
+  parallel set.
+
+Plan: `thoughts/shared/plans/active-2026-05-07-diagnose-qwen-confidence-regression.md`
+Runbook: [`docs/admin/llm-config.md`](docs/admin/llm-config.md#deep-render-parallelism-cliff-notes)
+
 **2026-05-06 orchestrator capacity detection** — 8 commits, `e730009..e1fe4b1`.
 Fixes three compounding Living Wiki throughput issues end-to-end: capacity
 mismatch between orchestrator goroutine pool and upstream LLM, empty-content

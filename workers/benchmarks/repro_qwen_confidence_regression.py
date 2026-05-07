@@ -19,7 +19,7 @@ WHEN TO RUN
 After any change to:
   - workers/knowledge/parse_utils.py  (parse_json_sections)
   - workers/comprehension/renderers.py (_parse_sections, CliffNotesRenderer)
-  - workers/common/llm/utils.py       (is_local_provider)
+  - workers/common/llm/concurrency.py (is_local_provider)
 
 ARTIFACT
 --------

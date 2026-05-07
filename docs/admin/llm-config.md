@@ -1465,6 +1465,101 @@ The underlying data comes from `GET /api/v1/admin/llm/activity`
 (`gate_snapshot` field), populated by the `GetLLMGateSnapshot` gRPC
 method on the worker's `ReasoningService`.
 
+### Deep-render parallelism (cliff notes)
+
+Living Wiki deep renders dispatch several section-group calls in parallel
+inside the Python worker. The `CliffNotesRenderer` controls this via two
+fields: `deep_parallelism` (main render) and `deep_repair_parallelism`
+(repair pass). Both resolve at renderer construction through a precedence
+chain.
+
+**Why this matters (CA-173):** CA-169 raised the default from 2 to 4.
+Under 4 simultaneous 16k-output calls, qwen3.6:35b-a3b-moe on Ollama
+runs into KV-cache pressure and emits NDJSON instead of a JSON array —
+the parse step then stubs every section as low-confidence. The
+provider-aware default below restores the April baseline for local
+providers while preserving CA-169's cloud throughput.
+
+#### Resolution precedence (first match wins)
+
+| Source | Env var | Notes |
+|---|---|---|
+| Constructor override | `_deep_parallelism_override` (Python field) | Only relevant when constructing `CliffNotesRenderer` in tests or custom code |
+| Env var | `SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM` | Positive int; overrides provider-aware default for all providers |
+| Env var (repair) | `SOURCEBRIDGE_CLIFF_NOTES_DEEP_REPAIR_PARALLELISM` | Same, for the repair pass only |
+| Provider-aware default | — | `2` for local providers; `4` for cloud/unknown |
+
+#### Default by provider type
+
+| Provider classification | `deep_parallelism` default | `deep_repair_parallelism` default |
+|---|---|---|
+| Local (`ollama`, `vllm`, `llama-cpp`, `sglang`, `lmstudio`) | **2** | **2** |
+| Cloud (`openai`, `anthropic`, `gemini`, `openrouter`) or unknown | **4** | **4** |
+
+Classification is done by `is_local_provider()` in
+`workers/common/llm/concurrency.py` reading `_HOST_GATED_PROVIDERS`.
+`openai-compatible` is treated as cloud/unknown (operator's deployment
+determines whether it's local).
+
+#### When to raise
+
+- Mac Studio M2 Ultra / M3 Ultra (128 GB+) running a quantized model with
+  adequate KV-cache headroom.
+- vLLM or SGLang deployments on 4×80 GB GPU clusters.
+- Any setup where bench results show consistent `high` confidence at
+  `deep_parallelism=4` and you want further throughput gains.
+
+Set the env var to `4` (or higher) and re-run a benchmark. Watch for
+NDJSON-shaped fallback in logs (`parse_json_sections_ndjson_recovery`)
+— that's the KV-pressure signal; lower the value if it appears.
+
+#### When to lower
+
+- Models with small KV caches or constrained VRAM (≤16 GB).
+- Hybrid CPU/GPU setups where multiple simultaneous large-context calls
+  cause memory thrashing.
+- Observed confidence regression (many `low` sections) after raising
+  `deep_parallelism` — this is the CA-173 failure mode.
+
+Set `SOURCEBRIDGE_CLIFF_NOTES_DEEP_PARALLELISM=1` as a diagnostic. If
+confidence recovers, raise gradually to find the hardware limit.
+
+#### Verification
+
+The worker emits a structured-log line at renderer construction:
+
+```
+cliff_notes_deep_parallelism_resolved
+  provider=ollama
+  deep_parallelism=2
+  deep_repair_parallelism=2
+  deep_source=default_local
+  deep_repair_source=default_local
+```
+
+Valid `deep_source` / `deep_repair_source` values:
+
+| Value | Meaning |
+|---|---|
+| `constructor` | Override field was set directly on the renderer |
+| `env` | Env var was set and parsed successfully |
+| `default_local` | No override; provider classified as local |
+| `default` | No override; provider is cloud, unknown, or `openai-compatible` |
+
+If you set the env var and the log shows `default_local` or `default`,
+the override didn't take effect — check that the env var is exported in
+the worker's process environment (not the API's) and that the value is a
+positive integer.
+
+**Restart note:** `__post_init__` reads env vars at renderer construction.
+Since `servicer.py` constructs a fresh `CliffNotesRenderer` per render
+job, a worker restart is the cleanest way to ensure the new value is
+picked up. In practice, changes take effect on the next render job
+without a restart — but a restart removes ambiguity.
+
+Related: [CA-173](https://plane.xmojo.net/agile-solutions-group/projects/d3fa4bd8-1177-4364-88a7-aae69698b75d/issues/CA-173) |
+Plan: `thoughts/shared/plans/active-2026-05-07-diagnose-qwen-confidence-regression.md`
+
 ---
 
 ## Living Wiki page-count and ops behavior
