@@ -42,9 +42,11 @@ from workers.reasoning.servicer import ReasoningServicer  # noqa: E402
 from workers.requirements.servicer import RequirementsServicer  # noqa: E402
 from workers.version_servicer import VersionServicer  # noqa: E402
 
-
 _LOOPBACK_PREFIXES = ("127.", "::1", "localhost")
 _UNAUTHENTICATED_BIND_ADDRESSES = ("[::]", "0.0.0.0", "")
+# Providers where a real concurrency limit is meaningful; frontier APIs
+# (anthropic, openai, openrouter) are unbounded so no probe is needed.
+_LOCAL_PROBE_PROVIDERS = frozenset({"ollama", "vllm", "llama-cpp", "sglang", "lmstudio"})
 
 
 def _is_non_loopback(addr: str) -> bool:
@@ -226,7 +228,7 @@ async def serve() -> None:
     # D10: Warn if the worker will be exposed on a non-loopback address without
     # authentication. This fires regardless of whether the capacity probe is used.
     listen_addr_early = f"[::]:{config.grpc_port}"
-    bind_host = f"[::]"  # default gRPC bind host before port is chosen
+    bind_host = "[::]"  # default gRPC bind host before port is chosen
     if not config.tls_enabled and not config.grpc_auth_secret and _is_non_loopback(bind_host):
         log.error(
             "worker_grpc_unauthenticated_non_loopback_bind",
@@ -397,9 +399,6 @@ async def serve() -> None:
     # Fires after server is serving to avoid delaying startup. The result is
     # informational: a WARN fires when declared vs observed parallelism disagrees
     # by >=2x. The declared value is never auto-overridden (D1).
-    # Only fires for local/self-hosted providers where a real concurrency limit
-    # is meaningful; frontier APIs (anthropic, openai, openrouter) are unbounded.
-    _LOCAL_PROBE_PROVIDERS = {"ollama", "vllm", "llama-cpp", "sglang", "lmstudio"}
     if (
         config.llm_provider in _LOCAL_PROBE_PROVIDERS
         and not config.test_mode

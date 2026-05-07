@@ -21,6 +21,12 @@ from workers.requirements.spec_models import (
 
 log = structlog.get_logger()
 
+# Maximum concurrent LLM calls over spec-extraction groups in a single
+# refine_with_llm() call. The upstream provider gate is the binding cap;
+# this local semaphore prevents N-thousand pending coroutines from queuing
+# on very large repos before the gate has a chance to drain them.
+_SPEC_GROUP_FANOUT_LIMIT = 8
+
 # Language detection by file extension
 EXTENSION_TO_LANGUAGE: dict[str, str] = {
     ".go": "go",
@@ -196,20 +202,16 @@ async def refine_with_llm(
     for c in candidates:
         groups.setdefault(c.group_key, []).append(c)
 
-    # Bounded concurrent fan-out over groups. The upstream provider gate is the
-    # binding cap; this local semaphore prevents queuing N-thousand coroutines
-    # for very large repos before the gate has a chance to drain them.
-    LOCAL_GROUP_FANOUT_LIMIT = 8
-    local_sem = asyncio.Semaphore(LOCAL_GROUP_FANOUT_LIMIT)
+    # Bounded concurrent fan-out over groups. _SPEC_GROUP_FANOUT_LIMIT is the
+    # local bound; the upstream provider gate is the binding cap.
+    local_sem = asyncio.Semaphore(_SPEC_GROUP_FANOUT_LIMIT)
 
-    # _GroupResult carries the refined spec plus per-call usage stats so the
-    # serial merge below can accumulate them without mutating RefinedSpec.
-    _GroupResult = tuple[RefinedSpec, int, int, str]  # (spec, in_tok, out_tok, model)
-
+    # Each task returns (spec, input_tokens, output_tokens, model) so the
+    # serial merge below can accumulate usage without mutating RefinedSpec.
     async def _refine_one(
         group_key: str,
         group_candidates: list[CandidateSpec],
-    ) -> _GroupResult:
+    ) -> tuple[RefinedSpec, int, int, str]:
         """Refine one group, bounded by the local semaphore."""
         async with local_sem:
             primary = group_candidates[0]

@@ -21,9 +21,8 @@ from collections.abc import AsyncIterator
 import pytest
 
 from workers.common.llm.provider import LLMResponse
-from workers.requirements.spec_extraction import refine_with_llm
+from workers.requirements.spec_extraction import _SPEC_GROUP_FANOUT_LIMIT, refine_with_llm
 from workers.requirements.spec_models import CandidateSpec
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -149,13 +148,13 @@ async def test_spec_extraction_local_bound_caps_pending_coroutines() -> None:
     specs, usage = await refine_with_llm(candidates, provider)
 
     assert len(specs) == 100, f"Expected 100 specs, got {len(specs)}"
-    # LOCAL_GROUP_FANOUT_LIMIT=8: peak must not exceed the cap.
-    assert provider.peak_in_flight <= 8, (
-        f"Peak in-flight {provider.peak_in_flight} exceeded LOCAL_GROUP_FANOUT_LIMIT=8"
+    # _SPEC_GROUP_FANOUT_LIMIT: peak must not exceed the cap.
+    assert provider.peak_in_flight <= _SPEC_GROUP_FANOUT_LIMIT, (
+        f"Peak in-flight {provider.peak_in_flight} exceeded _SPEC_GROUP_FANOUT_LIMIT={_SPEC_GROUP_FANOUT_LIMIT}"
     )
     # Fan-out is actually happening (not fully serial).
     assert provider.peak_in_flight > 1, (
-        f"Peak in-flight was 1; expected > 1 (fan-out should be active for 100 groups)"
+        "Peak in-flight was 1; expected > 1 (fan-out should be active for 100 groups)"
     )
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from pydantic import field_validator, model_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 # Maximum allowed value for llm_max_concurrent_calls (D9 / H1).
@@ -207,10 +207,10 @@ class WorkerConfig(BaseSettings):
         """
         try:
             val = int(v)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as err:
             raise ValueError(
                 f"llm_max_concurrent_calls must be an integer, got {v!r}."
-            )
+            ) from err
         if val < 0 or val > HARD_CONCURRENCY_CEILING:
             raise ValueError(
                 f"llm_max_concurrent_calls must be between 0 and {HARD_CONCURRENCY_CEILING}, got {val}."

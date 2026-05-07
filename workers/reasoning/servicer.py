@@ -9,7 +9,7 @@ from reasoning.v1 import reasoning_pb2, reasoning_pb2_grpc
 
 from workers.common.config import HARD_CONCURRENCY_CEILING, WorkerConfig
 from workers.common.embedding.provider import EmbeddingProvider
-from workers.common.llm.concurrency import ProviderGateRegistry, _UNCAPPED
+from workers.common.llm.concurrency import _UNCAPPED, ProviderGateRegistry
 from workers.common.llm.provider import LLMProvider
 from workers.common.llm.tools import (
     AgentMessage,

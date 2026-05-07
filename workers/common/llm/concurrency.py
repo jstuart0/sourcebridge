@@ -280,6 +280,10 @@ class ConcurrencyConfig:
         )
 
 
+_LLM_SUFFIXES = ("_MAX_CONCURRENT", "_RPM")
+_EMBED_SUFFIXES = ("_MAX_CONCURRENT",)
+
+
 def _validate_known_provider_tokens(all_providers: list[str]) -> None:
     """Scan env vars for unknown provider tokens and emit a structlog WARNING.
 
@@ -298,9 +302,6 @@ def _validate_known_provider_tokens(all_providers: list[str]) -> None:
     canonical_tokens: frozenset[str] = frozenset(
         p.upper().replace("-", "_") for p in all_providers
     )
-
-    _LLM_SUFFIXES = ("_MAX_CONCURRENT", "_RPM")
-    _EMBED_SUFFIXES = ("_MAX_CONCURRENT",)
 
     for env_var in os.environ:
         token: str | None = None

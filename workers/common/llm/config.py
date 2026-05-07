@@ -166,7 +166,7 @@ async def create_llm_provider(
     """
     raw = _build_raw_llm_provider(config)
 
-    if gate_registry is not None and not config.test_mode:
+    if gate_registry is not None:
         from workers.common.llm.concurrency import wrap_provider
 
         base_url_for_gate = _provider_base_url(config)

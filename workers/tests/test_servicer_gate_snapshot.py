@@ -11,8 +11,6 @@ Refs: CA-169 / plan v4 Phase 7 Verification list.
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 import pytest_asyncio  # noqa: F401
 from reasoning.v1 import reasoning_pb2
@@ -20,7 +18,6 @@ from reasoning.v1 import reasoning_pb2
 from workers.common.embedding.fake import FakeEmbeddingProvider
 from workers.common.llm.concurrency import ConcurrencyConfig, ProviderGateRegistry
 from workers.reasoning.servicer import ReasoningServicer
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Fixtures

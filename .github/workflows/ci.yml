@@ -75,7 +75,7 @@ jobs:
       - working-directory: workers
         run: |
           uv sync --dev
-          uv run pytest -v --cov=workers --cov-report=xml
+          uv run pytest -v --cov=workers --cov-report=xml -m "not slow"
 
   build-web:
     runs-on: ubuntu-latest

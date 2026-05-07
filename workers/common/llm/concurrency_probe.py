@@ -24,6 +24,7 @@ OpenAI-compat endpoint. Tests inject a FakeConcurrencyProbeBackend.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from typing import TYPE_CHECKING, Protocol
 
@@ -87,14 +88,12 @@ class OpenAICompatProbeBackend:
 
         start = time.monotonic()
         async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
+            with contextlib.suppress(Exception):
                 await client.post(
                     f"{self._base_url}/chat/completions",
                     json=payload,
                     headers=headers,
                 )
-            except Exception:
-                pass  # timing measurement ignores response errors
         return time.monotonic() - start
 
 
