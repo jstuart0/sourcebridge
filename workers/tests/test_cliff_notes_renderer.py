@@ -1516,3 +1516,80 @@ async def test_render_limits_group_summaries() -> None:
     assert "pkg0" in prompt
     assert "pkg4" in prompt
     assert "pkg10" not in prompt  # capped out
+
+
+def test_parse_sections_recovers_ndjson_output() -> None:
+    """Renderer-level regression: _parse_sections must recover NDJSON-shaped LLM
+    output and produce real structured sections, not parse-fallback stubs.
+
+    This pins the qwen3.6 regression (CA-173): deep_parallelism=4 causes the
+    model to emit NDJSON instead of a JSON array.  Before Phase 1, every group
+    that returned NDJSON was dumped into required_sections[0] with confidence="low"
+    and the remaining titles were stubbed — producing 12/16 LOW sections.  After
+    Phase 1, parse_json_sections recovers the objects so _parse_sections can
+    assign the confidence values the LLM actually emitted.
+
+    H3 assertion (from plan round 2): at least one resulting CliffNotesSection
+    must have confidence in {"medium", "high"} — NOT just "non-stub content",
+    because the pre-fix bug produced non-stub content in required_sections[0]
+    with confidence="low".
+    """
+    stub_text = "*Insufficient data to generate this section.*"
+
+    # Two NDJSON objects covering two deep-repository sections.
+    # confidence="high" and "medium" are intentional — they must survive
+    # through _parse_sections to prove the recovery path is end-to-end.
+    obj1 = (
+        '{"title": "System Purpose", '
+        '"content": "Automates knowledge graph generation via GraphQL and background workers.", '
+        '"summary": "Core purpose.", '
+        '"confidence": "high", '
+        '"inferred": false, '
+        '"evidence": []}'
+    )
+    obj2 = (
+        '{"title": "Architecture Overview", '
+        '"content": "Layered GraphQL API + Python workers + LLM pipeline.", '
+        '"summary": "Architecture.", '
+        '"confidence": "medium", '
+        '"inferred": false, '
+        '"evidence": []}'
+    )
+    ndjson_input = obj1 + "\n" + obj2
+
+    required = list(REQUIRED_SECTIONS_DEEP_REPOSITORY)
+    provider = _RecordingProvider(response_text="")  # not used — we call _parse_sections directly
+    renderer = CliffNotesRenderer(provider=provider)
+
+    sections = renderer._parse_sections(ndjson_input, required)
+
+    # The total section count must equal REQUIRED_SECTIONS_DEEP_REPOSITORY (stubs backfill missing ones).
+    assert len(sections) == len(required)
+
+    by_title = {s.title: s for s in sections}
+
+    # H3: at least one section has confidence in {medium, high}.
+    assert any(s.confidence in {"medium", "high"} for s in sections), (
+        "Expected at least one section with confidence=medium or high; "
+        f"got {[(s.title, s.confidence) for s in sections]}"
+    )
+
+    # The two recovered sections must have the confidence the LLM emitted,
+    # not "low" (which is the pre-fix parse-fallback value).
+    sp = by_title.get("System Purpose")
+    assert sp is not None
+    assert sp.confidence == "high", f"System Purpose: expected high, got {sp.confidence}"
+    assert sp.content != stub_text
+    assert "knowledge graph" in sp.content or "GraphQL" in sp.content
+
+    ao = by_title.get("Architecture Overview")
+    assert ao is not None
+    assert ao.confidence == "medium", f"Architecture Overview: expected medium, got {ao.confidence}"
+    assert ao.content != stub_text
+
+    # Sections not present in the NDJSON input should be backfill stubs with confidence=low.
+    for title in required:
+        if title not in ("System Purpose", "Architecture Overview"):
+            section_stub = by_title.get(title)
+            assert section_stub is not None
+            assert section_stub.content == stub_text, f"{title}: expected stub content, got {section_stub.content!r}"

@@ -13,6 +13,7 @@ artifact at once rather than being copy-pasted per module.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 from collections.abc import Callable, Iterable
@@ -156,12 +157,47 @@ def parse_json_sections(raw: str) -> list[dict[str, object]]:
 
     try:
         parsed = json.loads(text)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as _orig_exc:
+        # Fallback 1: extract a top-level [...] array (handles truncated or
+        # preamble-wrapped JSON arrays).  If the extracted match also fails to
+        # parse, fall through to the NDJSON branch below rather than raising.
+        _array_parsed: object = None
         match = re.search(r"\[.*\]", text, flags=re.DOTALL)
         if match:
-            parsed = json.loads(match.group())
+            with contextlib.suppress(json.JSONDecodeError):
+                _array_parsed = json.loads(match.group())
+
+        if _array_parsed is not None:
+            parsed = _array_parsed
         else:
-            raise
+            # Fallback 2: NDJSON recovery — some local LLMs (e.g. qwen3.6 under
+            # KV-cache pressure) emit multiple JSON objects separated by newlines
+            # instead of a proper JSON array.  Split on the object boundary,
+            # wrap as an array, and parse.  Accept the result only when at
+            # least two fragments are present AND every fragment is a dict;
+            # otherwise the original error is re-raised so _parse_sections can
+            # apply its own fallback without silently corrupting single-object
+            # output that happens to contain "}\n{" inside a string value.
+            fragments = re.split(r"}\s*(?:\r?\n)+\s*{", text)
+            if len(fragments) >= 2:
+                wrapped = "[" + "},{".join(fragments) + "]"
+                try:
+                    ndjson_parsed = json.loads(wrapped)
+                    # The boundary regex only splits on `}\n{` transitions, so
+                    # every fragment is structurally object-shaped after wrapping.
+                    # The all-dict check is therefore structurally unreachable via
+                    # natural input today — it is a defensive guard against future
+                    # regex changes.  Do not remove it.
+                    if isinstance(ndjson_parsed, list) and len(ndjson_parsed) >= 2 and all(
+                        isinstance(item, dict) for item in ndjson_parsed
+                    ):
+                        parsed = ndjson_parsed
+                    else:
+                        raise _orig_exc
+                except json.JSONDecodeError:
+                    raise _orig_exc from None
+            else:
+                raise
 
     if isinstance(parsed, dict):
         for key in ("sections", "data", "items", "results", "steps", "stops"):
