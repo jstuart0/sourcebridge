@@ -210,7 +210,8 @@ func (c *HTTPConfluenceClient) UpsertPage(ctx context.Context, snap credentials.
 	}
 
 	if pageID == "" {
-		return c.createPage(ctx, auth, externalID, xhtml, metadata)
+		_, err := c.createPage(ctx, auth, externalID, xhtml, metadata)
+		return err
 	}
 	return c.updatePage(ctx, auth, pageID, externalID, xhtml, metadata)
 }
@@ -473,10 +474,13 @@ func (c *HTTPConfluenceClient) findPageByPropertyScan(ctx context.Context, auth,
 // When metadata contains propParentExternalID, the value is resolved to a
 // Confluence numeric page ID (via findPageIDByExternalID) and used as the
 // parentId of the new page rather than cfg.ParentPageID.
-func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID string, xhtml []byte, metadata ConfluenceProperties) error {
+//
+// Returns the new page's numeric Confluence ID on success (callers can avoid
+// a post-create lookup that is fragile under Atlassian search-index lag).
+func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID string, xhtml []byte, metadata ConfluenceProperties) (string, error) {
 	spaceID, err := c.resolveSpaceID(ctx, auth)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	type bodyValue struct {
@@ -507,7 +511,7 @@ func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID 
 	if parentExtID := metadata[propParentExternalID]; parentExtID != "" {
 		resolved, resolveErr := c.findPageIDByExternalID(ctx, auth, parentExtID, nil)
 		if resolveErr != nil {
-			return fmt.Errorf("confluence_http: resolve parent %q: %w", parentExtID, resolveErr)
+			return "", fmt.Errorf("confluence_http: resolve parent %q: %w", parentExtID, resolveErr)
 		}
 		if resolved != "" {
 			parentID = resolved
@@ -529,12 +533,12 @@ func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID 
 		ID string `json:"id"`
 	}
 	if err := c.do(ctx, auth, http.MethodPost, "/pages", payload, &resp); err != nil {
-		return fmt.Errorf("confluence_http: create page: %w", err)
+		return "", fmt.Errorf("confluence_http: create page: %w", err)
 	}
 
 	// Write the sourcebridge_page_id property.
 	if err := c.setPageProperty(ctx, auth, resp.ID, confluencePropertyKey, externalID); err != nil {
-		return fmt.Errorf("confluence_http: set page property: %w", err)
+		return "", fmt.Errorf("confluence_http: set page property: %w", err)
 	}
 
 	// Write any additional metadata properties. The pseudo-properties
@@ -546,7 +550,7 @@ func (c *HTTPConfluenceClient) createPage(ctx context.Context, auth, externalID 
 		}
 		_ = c.setPageProperty(ctx, auth, resp.ID, k, v) // best-effort
 	}
-	return nil
+	return resp.ID, nil
 }
 
 // EnsurePage implements [ConfluenceClient]. It creates a page with the given
@@ -578,7 +582,7 @@ func (c *HTTPConfluenceClient) EnsurePage(ctx context.Context, snap credentials.
 		metadata[propParentExternalID] = parentExternalID
 	}
 
-	createErr := c.createPage(ctx, auth, externalID, body, metadata)
+	newPageID, createErr := c.createPage(ctx, auth, externalID, body, metadata)
 	if createErr != nil {
 		// CR7: A 409 Conflict response means another writer (same pod via a
 		// different goroutine, or a different pod) created this page concurrently.
@@ -611,11 +615,10 @@ func (c *HTTPConfluenceClient) EnsurePage(ctx context.Context, snap credentials.
 		return "", fmt.Errorf("confluence_http: EnsurePage create %q: %w", externalID, createErr)
 	}
 
-	// Resolve the new page's numeric ID.
-	newPageID, err := c.findPageIDByExternalID(ctx, auth, externalID, metadata)
-	if err != nil {
-		return "", fmt.Errorf("confluence_http: EnsurePage post-create lookup %q: %w", externalID, err)
-	}
+	// createPage returned the new page's ID directly (avoids a fragile
+	// post-create title-search lookup that races Atlassian's eventual-consistency
+	// search index — one such lookup timed out at 30 s on a slow run, and the
+	// post-create call provides the ID for free in its response anyway).
 	return newPageID, nil
 }
 
