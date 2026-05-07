@@ -56,6 +56,16 @@ service ReasoningService {
   // a per-request round-trip.
   rpc GetProviderCapabilities(GetProviderCapabilitiesRequest) returns (GetProviderCapabilitiesResponse);
 
+  // GetLLMGateSnapshot returns a point-in-time snapshot of all active
+  // per-provider concurrency gates in the worker. Used by the admin
+  // /api/v1/admin/llm/activity endpoint to surface real-time gate
+  // counters (in-flight, queued, tok/s) without a per-request round-trip.
+  //
+  // An explicit request struct (rather than google.protobuf.Empty) is
+  // used for forward compatibility: filter fields (provider, kind) can
+  // be added without redeclaring the RPC.
+  rpc GetLLMGateSnapshot(GetLLMGateSnapshotRequest) returns (GetLLMGateSnapshotResponse);
+
   // ClassifyQuestion runs a cheap LLM classifier (Haiku) that
   // returns the question's likely class plus evidence-kind hints
   // (needs_call_graph, needs_tests, ...) and advisory symbol /
@@ -465,4 +475,52 @@ message GetProviderCapabilitiesResponse {
   // older than this proto change OR when the provider truly cannot
   // report a value. When false, callers MUST NOT clamp on this field.
   bool max_concurrent_calls_known = 6;
+}
+
+// GetLLMGateSnapshotRequest is intentionally empty (not google.protobuf.Empty)
+// for forward compatibility — future filter fields (provider, kind) can be
+// added here without redeclaring the RPC.
+message GetLLMGateSnapshotRequest {}
+
+message GetLLMGateSnapshotResponse {
+  repeated LLMGateEntry gates = 1;
+}
+
+// LLMGateEntry is one row in the gate snapshot — one entry per
+// (provider, base_url_normalized, kind) triple that has been
+// registered in the gate registry since the worker started.
+message LLMGateEntry {
+  // Canonical provider name (e.g. "ollama", "openai").
+  string provider = 1;
+
+  // Normalized origin URL — "scheme://host:port" with path/query stripped.
+  // Host-gated providers collapse to the daemon origin; frontier providers
+  // use the raw base_url per Decision 1 in the concurrency plan.
+  string base_url_normalized = 2;
+
+  // "llm" or "embedding". Host-gated providers (Ollama, vLLM, …) emit one
+  // row per kind sharing a single max_concurrent and tokens_per_second.
+  string kind = 3;
+
+  // Current number of LLM calls executing inside the semaphore right now.
+  int32 in_flight = 4;
+
+  // Number of callers waiting for a semaphore slot (Decision 11 waiter count).
+  int32 queued = 5;
+
+  // Effective semaphore size — the cap enforced by this gate.
+  int32 max_concurrent = 6;
+
+  // Cumulative retry count since the worker started.
+  int64 retries_since_start = 7;
+
+  // Cumulative 429 / RateLimitError count since the worker started.
+  int64 recent_429_count = 8;
+
+  // Output tokens per second averaged over the last 60 seconds (60-second
+  // ring buffer). Zero means no completions have been recorded yet.
+  double tokens_per_second = 9;
+
+  // Configured requests-per-minute limit for this gate; 0 = no RPM limiter.
+  int32 rpm = 10;
 }

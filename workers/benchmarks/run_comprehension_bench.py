@@ -12,8 +12,8 @@ from typing import Any
 
 import yaml
 
+from workers.common.cli_main import build_cli_runtime_provider
 from workers.common.config import WorkerConfig
-from workers.common.llm.config import create_llm_provider
 from workers.common.llm.fake import FakeLLMProvider
 from workers.knowledge.cliff_notes import generate_cliff_notes
 from workers.knowledge.code_tour import generate_code_tour
@@ -123,16 +123,21 @@ def _effective_provider_mode(case: dict[str, Any], override: str | None) -> str:
     return override
 
 
-def _create_provider(provider_mode: str) -> tuple[Any, str, str]:
+async def _create_provider(provider_mode: str) -> tuple[Any, str, str, Any]:
+    """Return (provider, provider_name, model_id, gate_registry).
+
+    ``gate_registry`` is ``None`` for fake mode (no lifecycle to manage).
+    Callers must ``await gate_registry.close()`` when done with a live provider.
+    """
     if provider_mode == "fake":
         provider = FakeLLMProvider()
-        return provider, "fake", provider.default_model
+        return provider, "fake", provider.default_model, None
     if provider_mode == "live":
         config = WorkerConfig()
-        provider = create_llm_provider(config)
+        provider, gate_registry = await build_cli_runtime_provider(config)
         provider_name = getattr(provider, "provider_name", None) or config.llm_provider
         model_id = getattr(provider, "default_model", None) or config.llm_model
-        return provider, provider_name, model_id
+        return provider, provider_name, model_id, gate_registry
     raise ValueError(f"unsupported provider mode: {provider_mode}")
 
 
@@ -178,12 +183,12 @@ CHECKS = {
 
 async def _run_case(case: dict[str, Any], provider_mode_override: str | None = None) -> BenchmarkResult:
     provider_mode = _effective_provider_mode(case, provider_mode_override)
-    provider, provider_name, model_id = _create_provider(provider_mode)
+    provider, provider_name, model_id, gate_registry = await _create_provider(provider_mode)
     snapshot_json = _snapshot_json_for_corpus(case["corpus_id"])
     artifact_type = case["artifact_type"]
 
     started = time.perf_counter()
-    try:
+    try:  # noqa: SIM105 — gate cleanup requires finally even when no exception
         if artifact_type == "cliff_notes":
             result, usage = await generate_cliff_notes(
                 provider=provider,
@@ -268,6 +273,9 @@ async def _run_case(case: dict[str, Any], provider_mode_override: str | None = N
             checks={},
             metrics={},
         )
+    finally:
+        if gate_registry is not None:
+            await gate_registry.close()
 
 
 def _write_report(results_dir: Path, results: list[BenchmarkResult]) -> None:

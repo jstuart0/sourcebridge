@@ -79,9 +79,9 @@ from workers.knowledge.parse_utils import coerce_int
 log = structlog.get_logger()
 
 
-DEFAULT_LEAF_CONCURRENCY = 1
-DEFAULT_FILE_CONCURRENCY = 2
-DEFAULT_PACKAGE_CONCURRENCY = 2
+DEFAULT_LEAF_CONCURRENCY = 4    # Phase 3: raised from 1 (Outcome A — cap raise safe per dick)
+DEFAULT_FILE_CONCURRENCY = 4    # Phase 3: raised from 2
+DEFAULT_PACKAGE_CONCURRENCY = 4  # Phase 3: raised from 2
 DEFAULT_LEAF_MAX_TOKENS = 384
 DEFAULT_FILE_MAX_TOKENS = 640
 DEFAULT_PACKAGE_MAX_TOKENS = 896
@@ -1013,43 +1013,32 @@ class HierarchicalStrategy:
             # body exceeding the budget is a real problem.
             raise
 
-        max_attempts = 3
+        # Phase 3: hand-rolled retry deleted — the ConcurrencyGatedProvider
+        # wrapper owns all retry via tenacity (Decision 3 / Decision 4).
+        # A single attempt is made here; transient errors (429, 503, timeouts)
+        # are retried at the gate layer with jitter-backoff before this caller
+        # sees them.  Non-retryable errors fall through to the fallback below.
         last_exc: Exception | None = None
-        for attempt in range(1, max_attempts + 1):
-            try:
-                response: LLMResponse = require_nonempty(
-                    await complete_with_optional_model(
-                        self._provider,
-                        prompt,
-                        system=HIERARCHICAL_SYSTEM,
-                        temperature=0.0,
-                        max_tokens=max_tokens,
-                        model=self._config.model_override,
-                    ),
-                    context=context,
-                )
-                return (
-                    response.content.strip(),
-                    response.model,
-                    response.input_tokens,
-                    response.output_tokens,
-                )
-            except Exception as exc:
-                last_exc = exc
-                if _is_provider_compute_error(exc):
-                    self._provider_compute_errors += 1
-                    if attempt < max_attempts:
-                        delay = 0.35 * (2 ** (attempt - 1))
-                        log.warning(
-                            "hierarchical_node_retry",
-                            context=context,
-                            attempt=attempt,
-                            delay_s=delay,
-                            error=str(exc),
-                        )
-                        await asyncio.sleep(delay)
-                        continue
-                break
+        try:
+            response: LLMResponse = require_nonempty(
+                await complete_with_optional_model(
+                    self._provider,
+                    prompt,
+                    system=HIERARCHICAL_SYSTEM,
+                    temperature=0.0,
+                    max_tokens=max_tokens,
+                    model=self._config.model_override,
+                ),
+                context=context,
+            )
+            return (
+                response.content.strip(),
+                response.model,
+                response.input_tokens,
+                response.output_tokens,
+            )
+        except Exception as exc:
+            last_exc = exc
 
         self._fallback_count += 1
         if ":root" in context:

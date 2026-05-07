@@ -374,7 +374,7 @@ func runRelabelClusters(ctx context.Context, rt llm.Runtime, cs clustering.Clust
 			return ctx.Err()
 		}
 		progress := float64(i) / total
-		rt.ReportProgress(progress, "relabeling", fmt.Sprintf("Relabeling cluster %d of %d", i+1, int(total)))
+		rt.ReportProgress(progress, "relabeling", fmt.Sprintf("Relabeling cluster %d of %d", i+1, int(total)), 0)
 
 		c, err := cs.GetClusterByID(ctx, clusterID)
 		if err != nil || c == nil {
@@ -409,7 +409,7 @@ func runRelabelClusters(ctx context.Context, rt llm.Runtime, cs clustering.Clust
 			}
 		}
 	}
-	rt.ReportProgress(1.0, "ready", fmt.Sprintf("Relabeled %d clusters", len(clusterIDs)))
+	rt.ReportProgress(1.0, "ready", fmt.Sprintf("Relabeled %d clusters", len(clusterIDs)), 0)
 	return nil
 }
 

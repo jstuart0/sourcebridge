@@ -261,12 +261,15 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         report_llm: LLMProvider | None = None,
         worker_config: WorkerConfig | None = None,
         summary_node_cache: SurrealSummaryNodeCache | None = None,
+        gate_registry=None,
     ) -> None:
         self._llm = llm_provider
         self._embedding = embedding_provider
         self._report_llm = report_llm
         self._config = worker_config
         self._summary_node_cache = summary_node_cache
+        # ProviderGateRegistry for snapshot_tokens_per_second at progress emit sites.
+        self._gate_registry = gate_registry
         # default_model_id is the best-effort identifier of the model
         # the LLM provider is configured with. The selector uses it to
         # look up the model's capability profile when no per-call
@@ -278,13 +281,29 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         # request-local (see GenerateCliffNotes for the holder
         # pattern); no servicer-instance state for in-flight runs.
 
+    def _snapshot_tokens_per_second(self) -> float:
+        """Return the 60-second ring-buffer tok/s for the configured LLM gate.
+
+        Returns 0.0 when gate_registry is absent, config is absent, or the
+        wrapper kill-switch is disabled. Callers treat 0.0 as "unknown".
+        """
+        if self._gate_registry is None or self._config is None:
+            return 0.0
+        provider = getattr(self._config, "llm_provider", "") or ""
+        base_url = getattr(self._config, "llm_base_url", None) or None
+        return self._gate_registry.snapshot_tokens_per_second(provider, base_url, "llm")
+
     def _resolve_request_provider(self, context: grpc.aio.ServicerContext) -> tuple[LLMProvider, str | None]:
         """Backward-compat wrapper. New code should call resolve_provider_for_context directly."""
-        return resolve_provider_for_context(self._llm, self._config, context)
+        provider, model, _ = resolve_provider_for_context(self._llm, self._config, context)
+        return provider, model
 
     def _resolve_report_provider(self, context: grpc.aio.ServicerContext) -> tuple[LLMProvider, str | None]:
         """Backward-compat wrapper with self._report_llm fallback."""
-        return resolve_provider_for_context(self._llm, self._config, context, fallback_llm=self._report_llm)
+        provider, model, _ = resolve_provider_for_context(
+            self._llm, self._config, context, fallback_llm=self._report_llm
+        )
+        return provider, model
 
     def _build_job_state_updater(
         self,
@@ -1309,6 +1328,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     prog.completed_units = 0
                     prog.total_units = 0
                     prog.unit_kind = ""
+                prog.current_tokens_per_second = self._snapshot_tokens_per_second()
                 yield knowledge_pb2.KnowledgeServiceGenerateCliffNotesResponse(progress=prog)
 
             # Work task is done. Await it to surface the result or
@@ -1540,6 +1560,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
                     message="Generating learning path",
                 ):
+                    prog.current_tokens_per_second = self._snapshot_tokens_per_second()
                     yield knowledge_pb2.KnowledgeServiceGenerateLearningPathResponse(progress=prog)
                 result, usage = await work_task
             except asyncio.CancelledError:
@@ -1693,6 +1714,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
                     message="Generating architecture diagram",
                 ):
+                    prog.current_tokens_per_second = self._snapshot_tokens_per_second()
                     yield knowledge_pb2.KnowledgeServiceGenerateArchitectureDiagramResponse(progress=prog)
                 result, usage = await work_task
             except asyncio.CancelledError:
@@ -1868,6 +1890,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
                     message="Generating workflow story",
                 ):
+                    prog.current_tokens_per_second = self._snapshot_tokens_per_second()
                     yield knowledge_pb2.KnowledgeServiceGenerateWorkflowStoryResponse(progress=prog)
                 result, usage = await work_task
             except asyncio.CancelledError:
@@ -2023,6 +2046,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
                     message="Explaining system",
                 ):
+                    prog.current_tokens_per_second = self._snapshot_tokens_per_second()
                     yield knowledge_pb2.KnowledgeServiceExplainSystemResponse(progress=prog)
                 result, usage = await work_task
             except asyncio.CancelledError:
@@ -2151,6 +2175,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                     phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
                     message="Generating code tour",
                 ):
+                    prog.current_tokens_per_second = self._snapshot_tokens_per_second()
                     yield knowledge_pb2.KnowledgeServiceGenerateCodeTourResponse(progress=prog)
                 result, usage = await work_task
             except asyncio.CancelledError:

@@ -42,7 +42,7 @@ func TestEnqueueKnowledgeJobCreatesQueuedKnowledgeJob(t *testing.T) {
 
 	block := make(chan struct{})
 	err = r.enqueueKnowledgeJob(context.Background(), artifact, "seed:cliff_notes", 1234, func(_ context.Context, rt llm.Runtime) error {
-		rt.ReportProgress(0.2, "snapshot", "queued")
+		rt.ReportProgress(0.2, "snapshot", "queued", 0)
 		<-block
 		return nil
 	})
@@ -139,7 +139,7 @@ func TestKnowledgeJobsShareGlobalConcurrencyGate(t *testing.T) {
 
 	first := makeArtifact("repo-1", knowledge.ArtifactCliffNotes)
 	if err := r.enqueueKnowledgeJob(context.Background(), first, "cliff_notes", 100, func(_ context.Context, rt llm.Runtime) error {
-		rt.ReportProgress(0.25, "generating", "first")
+		rt.ReportProgress(0.25, "generating", "first", 0)
 		entered <- "cliff_notes"
 		<-releaseRunning
 		return nil
@@ -149,7 +149,7 @@ func TestKnowledgeJobsShareGlobalConcurrencyGate(t *testing.T) {
 
 	second := makeArtifact("repo-1", knowledge.ArtifactCodeTour)
 	if err := r.enqueueKnowledgeJob(context.Background(), second, "code_tour", 100, func(_ context.Context, rt llm.Runtime) error {
-		rt.ReportProgress(0.25, "generating", "second")
+		rt.ReportProgress(0.25, "generating", "second", 0)
 		entered <- "code_tour"
 		<-releaseRunning
 		return nil
@@ -276,7 +276,7 @@ func TestQueuedKnowledgeJobsHeartbeatWhileWaitingForGate(t *testing.T) {
 	stop := startKnowledgeQueueHeartbeat(ctx, testRuntime{
 		jobID: "job-1",
 		setProgress: func(progress float64, phase, message string) {
-			_ = jobStore.SetProgress("job-1", progress, phase, message)
+			_ = jobStore.SetProgress("job-1", progress, phase, message, 0)
 		},
 	}, artifact.ID, knowledgeStore)
 	defer stop()
@@ -309,7 +309,7 @@ type testRuntime struct {
 
 func (t testRuntime) JobID() string { return t.jobID }
 
-func (t testRuntime) ReportProgress(progress float64, phase, message string) {
+func (t testRuntime) ReportProgress(progress float64, phase, message string, _ float64) {
 	if t.setProgress != nil {
 		t.setProgress(progress, phase, message)
 	}

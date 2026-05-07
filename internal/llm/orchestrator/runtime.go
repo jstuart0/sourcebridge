@@ -29,6 +29,7 @@ type runtime struct {
 	lastProgress      float64
 	lastPhase         string
 	lastMessage       string
+	lastThroughputTPS float64
 	lastWrite         time.Time
 	pendingProgress   bool
 	lastLoggedPhase   string
@@ -52,8 +53,10 @@ func (r *runtime) JobID() string { return r.jobID }
 
 // ReportProgress records a progress update. The update is written to
 // the store immediately if the debounce window has elapsed, or buffered
-// and written on the next tick / flush otherwise.
-func (r *runtime) ReportProgress(progress float64, phase, message string) {
+// and written on the next tick / flush otherwise. throughputTPS carries
+// the instantaneous LLM token/s from the gate's 60-second ring buffer;
+// pass 0 when not available (non-streaming callers, clustering, etc.).
+func (r *runtime) ReportProgress(progress float64, phase, message string, throughputTPS float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if progress < 0 {
@@ -65,6 +68,7 @@ func (r *runtime) ReportProgress(progress float64, phase, message string) {
 	r.lastProgress = progress
 	r.lastPhase = phase
 	r.lastMessage = message
+	r.lastThroughputTPS = throughputTPS
 	r.pendingProgress = true
 
 	now := time.Now()
@@ -132,7 +136,7 @@ func (r *runtime) flush() {
 // writeProgressLocked persists the current buffered progress values. The
 // caller must hold r.mu.
 func (r *runtime) writeProgressLocked(now time.Time) {
-	if err := r.orch.store.SetProgress(r.jobID, r.lastProgress, r.lastPhase, r.lastMessage); err != nil {
+	if err := r.orch.store.SetProgress(r.jobID, r.lastProgress, r.lastPhase, r.lastMessage, r.lastThroughputTPS); err != nil {
 		return
 	}
 	r.lastWrite = now

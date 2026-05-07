@@ -4,7 +4,9 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +18,34 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
 )
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Gate snapshot test helpers
+
+// fakeGateFetcher is a test stub for gateSnapshotFetcher. It records how many
+// times GetLLMGateSnapshot was called and returns a fixed response.
+type fakeGateFetcher struct {
+	entries []monitorGateEntry
+	err     error
+	calls   int
+}
+
+func (f *fakeGateFetcher) GetLLMGateSnapshot(_ context.Context) ([]monitorGateEntry, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.entries, nil
+}
+
+// newMonitorTestServerWithGateFetcher builds a Server with a gate fetcher stub
+// wired in for testing fetchGateSnapshot without a live worker.
+func newMonitorTestServerWithGateFetcher(t *testing.T, fetcher gateSnapshotFetcher) *Server {
+	t.Helper()
+	s := newMonitorTestServer(t)
+	s.gateSnapshotCache.fetcher = fetcher
+	return s
+}
 
 // newMonitorTestServer builds a Server instance wired to an isolated
 // orchestrator + in-memory JobStore, sufficient for testing the
@@ -239,7 +269,7 @@ func TestHandleLLMActivityShowsCompletedJob(t *testing.T) {
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:activity",
 		Run: func(rt llm.Runtime) error {
-			rt.ReportProgress(0.5, "midway", "halfway")
+			rt.ReportProgress(0.5, "midway", "halfway", 0)
 			rt.ReportTokens(200, 150)
 			close(done)
 			return nil
@@ -314,7 +344,7 @@ func TestHandleLLMJobLogs(t *testing.T) {
 		JobType:   "cliff_notes",
 		TargetKey: "repo-1:logs",
 		Run: func(rt llm.Runtime) error {
-			rt.ReportProgress(0.25, "snapshot", "Snapshot assembled")
+			rt.ReportProgress(0.25, "snapshot", "Snapshot assembled", 0)
 			return nil
 		},
 	})
@@ -457,6 +487,53 @@ func TestParseListFilterBasicFields(t *testing.T) {
 	}
 }
 
+func TestMonitorJobViewCurrentTokensPerSecondSerializesWhenNonZero(t *testing.T) {
+	view := monitorJobView{
+		ID:                     "job-123",
+		Status:                 string(llm.StatusGenerating),
+		CurrentTokensPerSecond: 12.3,
+		ElapsedMs:              500,
+		UpdatedAt:              time.Now(),
+	}
+	b, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	got, ok := out["current_tokens_per_second"]
+	if !ok {
+		t.Fatal("expected current_tokens_per_second key in JSON output")
+	}
+	// JSON numbers unmarshal to float64 from map[string]any.
+	if v, _ := got.(float64); v < 12.2 || v > 12.4 {
+		t.Fatalf("expected current_tokens_per_second≈12.3, got %v", got)
+	}
+}
+
+func TestMonitorJobViewCurrentTokensPerSecondOmittedWhenZero(t *testing.T) {
+	view := monitorJobView{
+		ID:        "job-456",
+		Status:    string(llm.StatusGenerating),
+		ElapsedMs: 100,
+		UpdatedAt: time.Now(),
+		// CurrentTokensPerSecond intentionally zero (default)
+	}
+	b, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := out["current_tokens_per_second"]; ok {
+		t.Fatal("expected current_tokens_per_second to be omitted when zero")
+	}
+}
+
 func TestEventMatchesFilter(t *testing.T) {
 	job := &llm.Job{
 		Subsystem: llm.SubsystemKnowledge,
@@ -486,5 +563,130 @@ func TestEventMatchesFilter(t *testing.T) {
 	// repo_id mismatch
 	if eventMatchesFilter(ev, llm.ListFilter{RepoID: "repo-2"}) {
 		t.Fatal("mismatched repo should not pass")
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Phase 7: fetchGateSnapshot + handleLLMActivity gate_snapshot field tests
+
+// TestHandleLLMActivityGateSnapshotPopulated verifies that handleLLMActivity
+// includes gate_snapshot when the worker stub returns a non-empty snapshot.
+func TestHandleLLMActivityGateSnapshotPopulated(t *testing.T) {
+	want := []monitorGateEntry{
+		{
+			Provider:          "ollama",
+			BaseURLNormalized: "http://localhost:11434",
+			Kind:              "llm",
+			InFlight:          1,
+			Queued:            2,
+			MaxConcurrent:     4,
+			RetriesSinceStart: 3,
+			Recent429Count:    1,
+			TokensPerSecond:   12.5,
+		},
+		{
+			Provider:          "ollama",
+			BaseURLNormalized: "http://localhost:11434",
+			Kind:              "embedding",
+			InFlight:          0,
+			Queued:            0,
+			MaxConcurrent:     4,
+			TokensPerSecond:   0,
+		},
+	}
+	fetcher := &fakeGateFetcher{entries: want}
+	s := newMonitorTestServerWithGateFetcher(t, fetcher)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/llm/activity", nil)
+	w := httptest.NewRecorder()
+	s.handleLLMActivity(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp monitorActivityResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(resp.GateSnapshot) != 2 {
+		t.Fatalf("expected 2 gate entries, got %d", len(resp.GateSnapshot))
+	}
+	got := resp.GateSnapshot[0]
+	if got.Provider != "ollama" {
+		t.Errorf("provider: want %q, got %q", "ollama", got.Provider)
+	}
+	if got.Kind != "llm" {
+		t.Errorf("kind: want %q, got %q", "llm", got.Kind)
+	}
+	if got.InFlight != 1 {
+		t.Errorf("in_flight: want 1, got %d", got.InFlight)
+	}
+	if got.MaxConcurrent != 4 {
+		t.Errorf("max_concurrent: want 4, got %d", got.MaxConcurrent)
+	}
+	if got.TokensPerSecond != 12.5 {
+		t.Errorf("tokens_per_second: want 12.5, got %f", got.TokensPerSecond)
+	}
+	if fetcher.calls != 1 {
+		t.Errorf("expected exactly 1 gRPC call, got %d", fetcher.calls)
+	}
+}
+
+// TestHandleLLMActivityGateSnapshotOmittedOnError verifies that gate_snapshot
+// is absent from the response (not an empty array) when the fetcher errors.
+// The rest of the response must remain intact and return 200.
+func TestHandleLLMActivityGateSnapshotOmittedOnError(t *testing.T) {
+	fetcher := &fakeGateFetcher{err: errors.New("worker unreachable")}
+	s := newMonitorTestServerWithGateFetcher(t, fetcher)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/llm/activity", nil)
+	w := httptest.NewRecorder()
+	s.handleLLMActivity(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 even when worker errors, got %d", w.Code)
+	}
+	// Verify gate_snapshot key is absent from the raw JSON (omitempty).
+	body := w.Body.String()
+	if strings.Contains(body, `"gate_snapshot"`) {
+		t.Fatalf("gate_snapshot should be absent when worker errors, but found it in: %s", body)
+	}
+	// Verify the rest of the response is intact.
+	var resp monitorActivityResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if resp.Stats.MaxConcurrency != 2 {
+		t.Errorf("stats should still be present; max_concurrency: want 2, got %d", resp.Stats.MaxConcurrency)
+	}
+}
+
+// TestFetchGateSnapshotCacheDeduplicatesGRPCCalls verifies that two calls
+// within the 1-second TTL window trigger only one underlying gRPC fetch.
+func TestFetchGateSnapshotCacheDeduplicatesGRPCCalls(t *testing.T) {
+	fetcher := &fakeGateFetcher{entries: []monitorGateEntry{
+		{Provider: "openai", Kind: "llm", MaxConcurrent: 8},
+	}}
+	s := newMonitorTestServerWithGateFetcher(t, fetcher)
+
+	ctx := context.Background()
+	first := s.fetchGateSnapshot(ctx)
+	second := s.fetchGateSnapshot(ctx)
+
+	if len(first) != 1 || len(second) != 1 {
+		t.Fatalf("expected 1 entry on both calls, got %d and %d", len(first), len(second))
+	}
+	if fetcher.calls != 1 {
+		t.Errorf("cache should deduplicate: expected 1 gRPC call, got %d", fetcher.calls)
+	}
+}
+
+// TestFetchGateSnapshotNilWorkerReturnsNil verifies that fetchGateSnapshot
+// returns nil (omitempty) when the server has no worker and no test fetcher.
+func TestFetchGateSnapshotNilWorkerReturnsNil(t *testing.T) {
+	s := newMonitorTestServer(t) // worker is nil in the base fixture
+	result := s.fetchGateSnapshot(context.Background())
+	if result != nil {
+		t.Fatalf("expected nil from fetchGateSnapshot when worker is nil, got %v", result)
 	}
 }

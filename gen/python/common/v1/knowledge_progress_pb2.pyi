@@ -25,7 +25,7 @@ KNOWLEDGE_PHASE_RENDER: KnowledgePhase
 KNOWLEDGE_PHASE_FINALIZING: KnowledgePhase
 
 class KnowledgeStreamProgress(_message.Message):
-    __slots__ = ("phase", "completed_units", "total_units", "unit_kind", "message", "leaf_cache_hits", "file_cache_hits", "package_cache_hits", "root_cache_hits")
+    __slots__ = ("phase", "completed_units", "total_units", "unit_kind", "message", "leaf_cache_hits", "file_cache_hits", "package_cache_hits", "root_cache_hits", "current_tokens_per_second")
     PHASE_FIELD_NUMBER: _ClassVar[int]
     COMPLETED_UNITS_FIELD_NUMBER: _ClassVar[int]
     TOTAL_UNITS_FIELD_NUMBER: _ClassVar[int]
@@ -35,6 +35,7 @@ class KnowledgeStreamProgress(_message.Message):
     FILE_CACHE_HITS_FIELD_NUMBER: _ClassVar[int]
     PACKAGE_CACHE_HITS_FIELD_NUMBER: _ClassVar[int]
     ROOT_CACHE_HITS_FIELD_NUMBER: _ClassVar[int]
+    CURRENT_TOKENS_PER_SECOND_FIELD_NUMBER: _ClassVar[int]
     phase: KnowledgePhase
     completed_units: int
     total_units: int
@@ -44,7 +45,8 @@ class KnowledgeStreamProgress(_message.Message):
     file_cache_hits: int
     package_cache_hits: int
     root_cache_hits: int
-    def __init__(self, phase: _Optional[_Union[KnowledgePhase, str]] = ..., completed_units: _Optional[int] = ..., total_units: _Optional[int] = ..., unit_kind: _Optional[str] = ..., message: _Optional[str] = ..., leaf_cache_hits: _Optional[int] = ..., file_cache_hits: _Optional[int] = ..., package_cache_hits: _Optional[int] = ..., root_cache_hits: _Optional[int] = ...) -> None: ...
+    current_tokens_per_second: float
+    def __init__(self, phase: _Optional[_Union[KnowledgePhase, str]] = ..., completed_units: _Optional[int] = ..., total_units: _Optional[int] = ..., unit_kind: _Optional[str] = ..., message: _Optional[str] = ..., leaf_cache_hits: _Optional[int] = ..., file_cache_hits: _Optional[int] = ..., package_cache_hits: _Optional[int] = ..., root_cache_hits: _Optional[int] = ..., current_tokens_per_second: _Optional[float] = ...) -> None: ...
 
 class KnowledgeStreamPhaseMarker(_message.Message):
     __slots__ = ("phase", "detail")

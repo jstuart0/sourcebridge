@@ -1101,6 +1101,23 @@ func (c *Client) GetProviderCapabilities(ctx context.Context) (*reasoningv1.GetP
 	return b.reasoning.GetProviderCapabilities(ctx, &reasoningv1.GetProviderCapabilitiesRequest{})
 }
 
+// GetLLMGateSnapshot returns a point-in-time snapshot of all active
+// per-provider concurrency gates from the worker. Used by the admin
+// monitor endpoint to surface real-time gate counters.
+//
+// Short timeout (5s): this is a read-only, lock-free snapshot; any
+// call that takes longer than 5s indicates a stuck worker.
+func (c *Client) GetLLMGateSnapshot(ctx context.Context) (*reasoningv1.GetLLMGateSnapshotResponse, error) {
+	b := c.acquire()
+	if b == nil {
+		return nil, errClientClosed
+	}
+	defer c.release(b)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return b.reasoning.GetLLMGateSnapshot(ctx, &reasoningv1.GetLLMGateSnapshotRequest{})
+}
+
 // ClassifyQuestion runs the LLM-backed question classifier. Quick
 // timeout (2s) because callers fall back to the keyword classifier
 // when this fails.

@@ -7,7 +7,6 @@ import asyncio
 import pytest
 
 from workers.common.llm.concurrency_probe import (
-    ProbeBackend,
     probe_concurrency,
     run_startup_probe,
 )

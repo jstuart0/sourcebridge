@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\"common/v1/knowledge_progress.proto\x12\x16sourcebridge.common.v1\"\x89\x02\n\x17KnowledgeStreamProgress\x12\x35\n\x05phase\x18\x01 \x01(\x0e\x32&.sourcebridge.common.v1.KnowledgePhase\x12\x17\n\x0f\x63ompleted_units\x18\x02 \x01(\x05\x12\x13\n\x0btotal_units\x18\x03 \x01(\x05\x12\x11\n\tunit_kind\x18\x04 \x01(\t\x12\x0f\n\x07message\x18\x05 \x01(\t\x12\x17\n\x0fleaf_cache_hits\x18\n \x01(\x05\x12\x17\n\x0f\x66ile_cache_hits\x18\x0b \x01(\x05\x12\x1a\n\x12package_cache_hits\x18\x0c \x01(\x05\x12\x17\n\x0froot_cache_hits\x18\r \x01(\x05\"c\n\x1aKnowledgeStreamPhaseMarker\x12\x35\n\x05phase\x18\x01 \x01(\x0e\x32&.sourcebridge.common.v1.KnowledgePhase\x12\x0e\n\x06\x64\x65tail\x18\x02 \x01(\t*\x9e\x02\n\x0eKnowledgePhase\x12\x1f\n\x1bKNOWLEDGE_PHASE_UNSPECIFIED\x10\x00\x12\x1c\n\x18KNOWLEDGE_PHASE_SNAPSHOT\x10\x01\x12\"\n\x1eKNOWLEDGE_PHASE_LEAF_SUMMARIES\x10\x02\x12\"\n\x1eKNOWLEDGE_PHASE_FILE_SUMMARIES\x10\x03\x12%\n!KNOWLEDGE_PHASE_PACKAGE_SUMMARIES\x10\x04\x12\"\n\x1eKNOWLEDGE_PHASE_ROOT_SYNTHESIS\x10\x05\x12\x1a\n\x16KNOWLEDGE_PHASE_RENDER\x10\x06\x12\x1e\n\x1aKNOWLEDGE_PHASE_FINALIZING\x10\x07\x42@Z>github.com/sourcebridge/sourcebridge/gen/go/common/v1;commonv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\"common/v1/knowledge_progress.proto\x12\x16sourcebridge.common.v1\"\xac\x02\n\x17KnowledgeStreamProgress\x12\x35\n\x05phase\x18\x01 \x01(\x0e\x32&.sourcebridge.common.v1.KnowledgePhase\x12\x17\n\x0f\x63ompleted_units\x18\x02 \x01(\x05\x12\x13\n\x0btotal_units\x18\x03 \x01(\x05\x12\x11\n\tunit_kind\x18\x04 \x01(\t\x12\x0f\n\x07message\x18\x05 \x01(\t\x12\x17\n\x0fleaf_cache_hits\x18\n \x01(\x05\x12\x17\n\x0f\x66ile_cache_hits\x18\x0b \x01(\x05\x12\x1a\n\x12package_cache_hits\x18\x0c \x01(\x05\x12\x17\n\x0froot_cache_hits\x18\r \x01(\x05\x12!\n\x19\x63urrent_tokens_per_second\x18\x0e \x01(\x02\"c\n\x1aKnowledgeStreamPhaseMarker\x12\x35\n\x05phase\x18\x01 \x01(\x0e\x32&.sourcebridge.common.v1.KnowledgePhase\x12\x0e\n\x06\x64\x65tail\x18\x02 \x01(\t*\x9e\x02\n\x0eKnowledgePhase\x12\x1f\n\x1bKNOWLEDGE_PHASE_UNSPECIFIED\x10\x00\x12\x1c\n\x18KNOWLEDGE_PHASE_SNAPSHOT\x10\x01\x12\"\n\x1eKNOWLEDGE_PHASE_LEAF_SUMMARIES\x10\x02\x12\"\n\x1eKNOWLEDGE_PHASE_FILE_SUMMARIES\x10\x03\x12%\n!KNOWLEDGE_PHASE_PACKAGE_SUMMARIES\x10\x04\x12\"\n\x1eKNOWLEDGE_PHASE_ROOT_SYNTHESIS\x10\x05\x12\x1a\n\x16KNOWLEDGE_PHASE_RENDER\x10\x06\x12\x1e\n\x1aKNOWLEDGE_PHASE_FINALIZING\x10\x07\x42@Z>github.com/sourcebridge/sourcebridge/gen/go/common/v1;commonv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,10 +32,10 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'common.v1.knowledge_progres
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'Z>github.com/sourcebridge/sourcebridge/gen/go/common/v1;commonv1'
-  _globals['_KNOWLEDGEPHASE']._serialized_start=432
-  _globals['_KNOWLEDGEPHASE']._serialized_end=718
+  _globals['_KNOWLEDGEPHASE']._serialized_start=467
+  _globals['_KNOWLEDGEPHASE']._serialized_end=753
   _globals['_KNOWLEDGESTREAMPROGRESS']._serialized_start=63
-  _globals['_KNOWLEDGESTREAMPROGRESS']._serialized_end=328
-  _globals['_KNOWLEDGESTREAMPHASEMARKER']._serialized_start=330
-  _globals['_KNOWLEDGESTREAMPHASEMARKER']._serialized_end=429
+  _globals['_KNOWLEDGESTREAMPROGRESS']._serialized_end=363
+  _globals['_KNOWLEDGESTREAMPHASEMARKER']._serialized_start=365
+  _globals['_KNOWLEDGESTREAMPHASEMARKER']._serialized_end=464
 # @@protoc_insertion_point(module_scope)

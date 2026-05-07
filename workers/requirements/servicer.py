@@ -37,7 +37,8 @@ class RequirementsServicer(requirements_pb2_grpc.RequirementsServiceServicer):
 
     def _resolve_provider(self, context: grpc.aio.ServicerContext) -> tuple[LLMProvider, str | None]:
         """Backward-compat wrapper. New code should call resolve_provider_for_context directly."""
-        return resolve_provider_for_context(self._llm, self._config, context)
+        provider, model, _ = resolve_provider_for_context(self._llm, self._config, context)
+        return provider, model
 
     async def ParseDocument(  # noqa: N802
         self,

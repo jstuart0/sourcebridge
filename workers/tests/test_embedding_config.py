@@ -13,22 +13,26 @@ Tester report 2026-04-30 (Pazaryna) Issue 3 / CA-125.
 import pytest
 
 from workers.common.config import SUPPORTED_EMBEDDING_PROVIDERS, WorkerConfig
+from workers.common.embedding.concurrency import ConcurrencyGatedEmbeddingProvider
 from workers.common.embedding.config import create_embedding_provider
+from workers.common.llm.concurrency import ConcurrencyConfig, ProviderGateRegistry
 
 
-def test_create_embedding_provider_rejects_unknown_with_actionable_message() -> None:
+@pytest.mark.asyncio
+async def test_create_embedding_provider_rejects_unknown_with_actionable_message() -> None:
     cfg = WorkerConfig(embedding_provider="ollama")
     # Bypass the validator the same way per-request overrides do.
     bypassed = cfg.model_copy(update={"embedding_provider": "totally-fake"})
     with pytest.raises(ValueError) as exc_info:
-        create_embedding_provider(bypassed)
+        await create_embedding_provider(bypassed)
     msg = str(exc_info.value)
     assert "totally-fake" in msg
     for provider in SUPPORTED_EMBEDDING_PROVIDERS:
         assert repr(provider) in msg, f"supported provider {provider} not surfaced in error: {msg}"
 
 
-def test_create_embedding_provider_anthropic_gets_specific_hint() -> None:
+@pytest.mark.asyncio
+async def test_create_embedding_provider_anthropic_gets_specific_hint() -> None:
     """The tester-report footgun: setting embedding_provider=anthropic
     is reasonable on first read of the README. The factory error
     surface must explicitly explain why anthropic isn't here, not just
@@ -36,7 +40,7 @@ def test_create_embedding_provider_anthropic_gets_specific_hint() -> None:
     cfg = WorkerConfig(embedding_provider="ollama")
     bypassed = cfg.model_copy(update={"embedding_provider": "anthropic"})
     with pytest.raises(ValueError) as exc_info:
-        create_embedding_provider(bypassed)
+        await create_embedding_provider(bypassed)
     msg = str(exc_info.value)
     assert "Anthropic" in msg
     assert "embeddings API" in msg
@@ -45,7 +49,8 @@ def test_create_embedding_provider_anthropic_gets_specific_hint() -> None:
     assert "openai" in msg
 
 
-def test_create_embedding_provider_no_longer_raises_notimplementederror() -> None:
+@pytest.mark.asyncio
+async def test_create_embedding_provider_no_longer_raises_notimplementederror() -> None:
     """Pre-fix the factory raised NotImplementedError. New behavior:
     raises ValueError. Pinning the type is a regression guard so a
     well-meaning future refactor doesn't revert to NotImplementedError
@@ -54,23 +59,49 @@ def test_create_embedding_provider_no_longer_raises_notimplementederror() -> Non
     cfg = WorkerConfig(embedding_provider="ollama")
     bypassed = cfg.model_copy(update={"embedding_provider": "fake"})
     with pytest.raises(ValueError):
-        create_embedding_provider(bypassed)
+        await create_embedding_provider(bypassed)
     # And explicitly NOT NotImplementedError.
     try:
-        create_embedding_provider(bypassed)
+        await create_embedding_provider(bypassed)
     except NotImplementedError:
         pytest.fail("create_embedding_provider must not raise NotImplementedError")
     except ValueError:
         pass
 
 
-def test_create_embedding_provider_test_mode_unaffected() -> None:
+@pytest.mark.asyncio
+async def test_create_embedding_provider_test_mode_unaffected() -> None:
     """test_mode short-circuits to FakeEmbeddingProvider before the
     provider check. Pinning so a future refactor that moves the
     check earlier doesn't break the test fixture path that thousands
     of unit tests already use."""
     cfg = WorkerConfig(test_mode=True, embedding_provider="ollama")
-    provider = create_embedding_provider(cfg)
+    provider = await create_embedding_provider(cfg)
     # FakeEmbeddingProvider is the contract; assert it's a non-None
     # provider instance at minimum.
     assert provider is not None
+
+
+# ─── Phase 2 gate-wiring tests ───────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_embedding_provider_is_wrapped_when_gate_registry_supplied() -> None:
+    """create_embedding_provider with a registry returns a gated provider."""
+    registry = ProviderGateRegistry(ConcurrencyConfig())
+    cfg = WorkerConfig(embedding_provider="ollama")
+    provider = await create_embedding_provider(cfg, gate_registry=registry)
+    assert isinstance(provider, ConcurrencyGatedEmbeddingProvider)
+    await registry.close()
+
+
+@pytest.mark.asyncio
+async def test_embedding_provider_not_wrapped_when_kill_switch_off(monkeypatch) -> None:
+    """Kill switch off → raw provider returned unchanged."""
+    monkeypatch.setenv("SOURCEBRIDGE_LLM_CONCURRENCY_WRAPPER_ENABLED", "false")
+    config = ConcurrencyConfig.from_env()
+    registry = ProviderGateRegistry(config)
+    cfg = WorkerConfig(embedding_provider="ollama")
+    provider = await create_embedding_provider(cfg, gate_registry=registry)
+    assert not isinstance(provider, ConcurrencyGatedEmbeddingProvider)
+    await registry.close()

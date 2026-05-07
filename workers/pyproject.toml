@@ -16,6 +16,8 @@ dependencies = [
     "pydantic>=2.7.0",
     "pydantic-settings>=2.2.0",
     "pyyaml>=6.0.2",
+    "tenacity>=8.5.0",
+    "aiolimiter>=1.2.1",
 ]
 
 [dependency-groups]
@@ -53,6 +55,9 @@ asyncio_mode = "auto"
 pythonpath = [".", "../gen/python"]
 testpaths = [".", "../tests"]
 norecursedirs = ["fixtures", "node_modules", ".git", "__pycache__"]
+markers = [
+    "slow: marks tests that require real wall-clock time (deselect with -m 'not slow')",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -189,7 +189,7 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 	}
 	if cfg.LWOrch == nil {
 		return func(_ context.Context, rt llm.Runtime) error {
-			rt.ReportProgress(1.0, "unavailable", "Living-wiki orchestrator not configured")
+			rt.ReportProgress(1.0, "unavailable", "Living-wiki orchestrator not configured", 0)
 			return nil
 		}
 	}
@@ -198,7 +198,7 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 		jobID := rt.JobID()
 		start := time.Now()
 
-		rt.ReportProgress(0.0, "planning", "Resolving page taxonomy")
+		rt.ReportProgress(0.0, "planning", "Resolving page taxonomy", 0)
 
 		// ── Step 1.65 (NEW at r3): Resolve LLM identity ONCE before taxonomy ─────
 		//
@@ -290,7 +290,7 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 				}
 			}
 			if len(pages) == 0 {
-				rt.ReportProgress(1.0, "ok", "No previously-excluded pages found; nothing to retry")
+				rt.ReportProgress(1.0, "ok", "No previously-excluded pages found; nothing to retry", 0)
 				return nil
 			}
 		} else {
@@ -303,7 +303,7 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 		}
 
 		if len(pages) == 0 {
-			rt.ReportProgress(1.0, "ok", "No pages to generate for this repository")
+			rt.ReportProgress(1.0, "ok", "No pages to generate for this repository", 0)
 			return nil
 		}
 
@@ -322,7 +322,7 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 		pages = ApplyPageSelection(pages, cfg.SelectedPageIDs)
 
 		if len(pages) == 0 {
-			rt.ReportProgress(1.0, "ok", "No pages remain after selection filter")
+			rt.ReportProgress(1.0, "ok", "No pages remain after selection filter", 0)
 			return nil
 		}
 
@@ -375,7 +375,7 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 			"cap_value", capValue,
 			"excluded_only_retry", excludedOnlyRetry,
 		)
-		rt.ReportProgress(0.01, "planning", planningMsg)
+		rt.ReportProgress(0.01, "planning", planningMsg, 0)
 
 		// ── Step 1.5: Attach knowledge artifacts to architecture pages ─────────
 		//
@@ -557,7 +557,7 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 
 		if toGenerate == 0 && len(skipNeedsFixup) == 0 {
 			rt.ReportProgress(1.0, "ok", fmt.Sprintf(
-				"All %d pages already up to date — nothing to regenerate", total))
+				"All %d pages already up to date — nothing to regenerate", total), 0)
 			if cfg.JobResultStore != nil {
 				now := time.Now()
 				_ = cfg.JobResultStore.Save(runCtx, cfg.TenantID, &livingwiki.LivingWikiJobResult{
@@ -576,7 +576,7 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 
 		rt.ReportProgress(0.05, "generating", fmt.Sprintf(
 			"Generating %d pages (%s; %d already up to date, %d need fixup)",
-			toGenerate, planningMsg, len(skipFully), len(skipNeedsFixup)))
+			toGenerate, planningMsg, len(skipFully), len(skipNeedsFixup)), 0)
 
 		// ── Step 1.9: Wire async dispatch worker (CR2) ───────────────────────────
 		//
@@ -656,7 +656,7 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 				progress = 0.05 + 0.85*float64(done)/float64(toGenerate)
 			}
 			rt.ReportProgress(progress, "generating",
-				fmt.Sprintf("%d/%d pages complete", done, toGenerate))
+				fmt.Sprintf("%d/%d pages complete", done, toGenerate), 0)
 
 			// Phase 2: trigger an index update every indexUpdateEvery page completions.
 			// OnPageDone now fires from the orchestrator's single-goroutine persistence
@@ -719,7 +719,7 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 						p = 0.05 + 0.85*float64(done)/float64(toGenerate)
 					}
 					rt.ReportProgress(p, "generating",
-						fmt.Sprintf("%d/%d pages complete", done, toGenerate))
+						fmt.Sprintf("%d/%d pages complete", done, toGenerate), 0)
 					// Phase 2: refresh the index page on every 30s heartbeat tick.
 					// Run in a goroutine so a slow sink write does not delay the next
 					// heartbeat. runCtx (not hbCtx) so the write can complete even if
@@ -866,7 +866,7 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 		// errors leave sinks untouched. (codex r1b [Medium])
 		if (err == nil || isPartial) && (len(result.Generated) > 0 || len(skippedPageIDs) > 0) {
 			rt.ReportProgress(0.92, "pushing", fmt.Sprintf(
-				"Pushing %d pages to sinks", len(result.Generated)))
+				"Pushing %d pages to sinks", len(result.Generated)), 0)
 
 			// Resolve the repository name for the Confluence root page title.
 			// Best-effort: fall back to an empty string if the store is nil or
@@ -898,7 +898,7 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 		rt.ReportProgress(1.0, status, fmt.Sprintf(
 			"Generation complete: %d generated, %d excluded",
 			finalGen, finalExcl,
-		))
+		), 0)
 
 		// ── Step 5: Persist LivingWikiJobResult ───────────────────────────────
 		if cfg.JobResultStore != nil {

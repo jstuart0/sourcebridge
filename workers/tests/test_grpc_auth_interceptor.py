@@ -6,7 +6,6 @@ import pytest
 
 from workers.__main__ import _GrpcAuthInterceptor, _is_non_loopback
 
-
 # ---------------------------------------------------------------------------
 # _is_non_loopback helper
 # ---------------------------------------------------------------------------

@@ -1219,7 +1219,7 @@ func (r *Resolver) ensureFreshRepositoryUnderstanding(
 				"reason", "cliff_notes_already_generating",
 				"cliff_notes_id", existingCN.ID)
 			if rt != nil {
-				rt.ReportProgress(0.12, "understanding", "Cliff notes in progress — proceeding without understanding")
+				rt.ReportProgress(0.12, "understanding", "Cliff notes in progress — proceeding without understanding", 0)
 			}
 			return nil, false, nil
 		}
@@ -1229,7 +1229,7 @@ func (r *Resolver) ensureFreshRepositoryUnderstanding(
 		slog.Warn("failed to seed repository understanding", "artifact_id", artifact.ID, "error", err)
 	}
 	if rt != nil {
-		rt.ReportProgress(0.12, "understanding", "Building repository understanding")
+		rt.ReportProgress(0.12, "understanding", "Building repository understanding", 0)
 	}
 	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Building repository understanding")
 	streamDriver := r.runStreamProgressDriver(ctx, rt, artifact.ID, rpcBucketHierarchical)
@@ -1846,7 +1846,7 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 		GenerationMode: string(artifact.GenerationMode),
 		MaxAttempts:    2,
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
-			rt.ReportProgress(0.05, "deepening", "Deepening critical cliff note sections")
+			rt.ReportProgress(0.05, "deepening", "Deepening critical cliff note sections", 0)
 			markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(artifact.ID), selectedTitles, knowledgepkg.RefinementRunning, "")
 			bgCtx := withCliffNotesRenderMetadata(runCtx, true, selectedTitles, string(knowledgepkg.DepthMedium), "product_core")
 			streamDriver := r.runStreamProgressDriver(bgCtx, rt, artifact.ID, rpcBucketForArtifact(artifact))
@@ -1899,7 +1899,7 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 			}
 			outcome, outcomeError := cliffNotesDeepeningOutcome(merged, selectedTitles)
 			markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, merged, selectedTitles, outcome, outcomeError)
-			rt.ReportProgress(1.0, "ready", "Section deepening complete")
+			rt.ReportProgress(1.0, "ready", "Section deepening complete", 0)
 			return nil
 		},
 	}

@@ -542,8 +542,8 @@ class CliffNotesRenderer:
     max_file_summaries: int = 12
     max_tokens_per_call: int = 16384  # thinking models need headroom for <think> chains before the JSON output
     model_override: str | None = None
-    deep_parallelism: int = 2
-    deep_repair_parallelism: int = 2
+    deep_parallelism: int = 4          # Phase 3: raised from 2 (Outcome A)
+    deep_repair_parallelism: int = 4   # Phase 3: raised from 2 (Outcome A)
 
     async def render(
         self,
@@ -714,9 +714,16 @@ class CliffNotesRenderer:
                     depth_instructions=depth_instructions,
                     required_sections=required_sections,
                 )
-                response = await self._render_with_retry(
-                    prompt=prompt,
-                    scope_type=scope_type,
+                response = require_nonempty(
+                    await complete_with_optional_model(
+                        self.provider,
+                        prompt,
+                        system=CLIFF_NOTES_SYSTEM,
+                        temperature=0.0,
+                        max_tokens=self.max_tokens_per_call,
+                        model=self.model_override,
+                    ),
+                    context=f"hierarchical_render:cliff_notes:{scope_type}",
                 )
                 sections = self._parse_sections(
                     response.content,
@@ -836,9 +843,16 @@ class CliffNotesRenderer:
                     context=f"hierarchical_render:cliff_notes:targeted:{title}",
                 )
                 try:
-                    response = await self._render_with_retry(
-                        prompt=prompt,
-                        scope_type=f"{scope_type}:targeted:{title}",
+                    response = require_nonempty(
+                        await complete_with_optional_model(
+                            self.provider,
+                            prompt,
+                            system=CLIFF_NOTES_SYSTEM,
+                            temperature=0.0,
+                            max_tokens=self.max_tokens_per_call,
+                            model=self.model_override,
+                        ),
+                        context=f"hierarchical_render:cliff_notes:{scope_type}:targeted:{title}",
                     )
                     section = self._parse_sections(
                         response.content,
@@ -960,9 +974,16 @@ class CliffNotesRenderer:
                     required_sections=list(section_group),
                 )
                 try:
-                    response = await self._render_with_retry(
-                        prompt=prompt,
-                        scope_type=f"{scope_type}:deep_group",
+                    response = require_nonempty(
+                        await complete_with_optional_model(
+                            self.provider,
+                            prompt,
+                            system=CLIFF_NOTES_SYSTEM,
+                            temperature=0.0,
+                            max_tokens=self.max_tokens_per_call,
+                            model=self.model_override,
+                        ),
+                        context=f"hierarchical_render:cliff_notes:{scope_type}:deep_group",
                     )
                     sections = self._parse_sections(
                         response.content,
@@ -1108,9 +1129,16 @@ class CliffNotesRenderer:
                     context=f"hierarchical_render:cliff_notes:repair:{title}",
                 )
                 try:
-                    response = await self._render_with_retry(
-                        prompt=prompt,
-                        scope_type=f"repository:repair:{title}",
+                    response = require_nonempty(
+                        await complete_with_optional_model(
+                            self.provider,
+                            prompt,
+                            system=CLIFF_NOTES_SYSTEM,
+                            temperature=0.0,
+                            max_tokens=self.max_tokens_per_call,
+                            model=self.model_override,
+                        ),
+                        context=f"hierarchical_render:cliff_notes:repository:repair:{title}",
                     )
                     repaired = self._parse_sections(
                         response.content,
@@ -1216,46 +1244,6 @@ class CliffNotesRenderer:
             context=f"hierarchical_render:cliff_notes:{scope_type}",
         )
         return prompt
-
-    async def _render_with_retry(
-        self,
-        *,
-        prompt: str,
-        scope_type: str,
-    ) -> LLMResponse:
-        context = f"hierarchical_render:cliff_notes:{scope_type}"
-        last_exc: Exception | None = None
-        for attempt in range(1, 4):
-            try:
-                return require_nonempty(
-                    await complete_with_optional_model(
-                        self.provider,
-                        prompt,
-                        system=CLIFF_NOTES_SYSTEM,
-                        temperature=0.0,
-                        max_tokens=self.max_tokens_per_call,
-                        model=self.model_override,
-                    ),
-                    context=context,
-                )
-            except Exception as exc:
-                last_exc = exc
-                if _is_provider_compute_error(exc) and attempt < 3:
-                    delay = 0.4 * (2 ** (attempt - 1))
-                    log.warning(
-                        "cliff_notes_renderer_retry",
-                        scope_type=scope_type,
-                        attempt=attempt,
-                        delay_s=delay,
-                        error=str(exc),
-                    )
-                    import asyncio
-
-                    await asyncio.sleep(delay)
-                    continue
-                break
-        assert last_exc is not None
-        raise last_exc
 
     # ------------------------------------------------------------------
     # Selection helpers

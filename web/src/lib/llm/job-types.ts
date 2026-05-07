@@ -44,6 +44,12 @@ export interface LLMJobView {
   estimated_wait_ms?: number;
   generation_mode?: "classic" | "understanding_first";
   priority?: "interactive" | "maintenance" | "prewarm";
+  /**
+   * Instantaneous LLM throughput sampled from the gate's 60-second ring
+   * buffer at the last progress update. Zero means unknown (non-streaming
+   * path, cold gate, or kill-switch disabled). Treat zero as "unknown".
+   */
+  current_tokens_per_second?: number;
   elapsed_ms: number;
   updated_at: string;
   created_at?: string;

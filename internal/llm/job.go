@@ -146,6 +146,11 @@ type Job struct {
 	Progress        float64   `json:"progress"`
 	ProgressPhase   string    `json:"progress_phase,omitempty"`
 	ProgressMessage string    `json:"progress_message,omitempty"`
+	// CurrentTokensPerSecond is the instantaneous LLM throughput sampled
+	// from the gate's 60-second ring buffer at the most recent progress
+	// update. Zero means unknown (non-streaming path, cold gate, or
+	// kill-switch disabled). Consumers MUST treat zero as "unknown".
+	CurrentTokensPerSecond float64 `json:"current_tokens_per_second,omitempty"`
 
 	ErrorCode    string `json:"error_code,omitempty"`
 	ErrorMessage string `json:"error_message,omitempty"`
@@ -277,9 +282,11 @@ type Runtime interface {
 	// JobID returns the persisted id of the job currently running.
 	JobID() string
 	// ReportProgress updates the job's progress (0.0-1.0), phase label,
-	// and human-readable message. Updates are debounced by the orchestrator
-	// to avoid write amplification.
-	ReportProgress(progress float64, phase, message string)
+	// and human-readable message. throughputTPS carries the instantaneous
+	// LLM token/s from the gate's 60-second ring buffer at the moment the
+	// progress event was emitted; pass 0 when not available. Updates are
+	// debounced by the orchestrator to avoid write amplification.
+	ReportProgress(progress float64, phase, message string, throughputTPS float64)
 	// ReportTokens records the input/output token counts for billing and
 	// metrics. Typically called once at the end of the job.
 	ReportTokens(input, output int)

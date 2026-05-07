@@ -1,11 +1,14 @@
 import pytest
+import pytest_asyncio  # noqa: F401 — registers asyncio mode
 
 from workers.common.config import SUPPORTED_LLM_PROVIDERS, WorkerConfig
 from workers.common.grpc_metadata import RuntimeLLMOverride, resolve_llm_override
+from workers.common.llm.concurrency import ConcurrencyConfig, ConcurrencyGatedProvider, ProviderGateRegistry
 from workers.common.llm.config import (
     _resolve_disable_thinking,
     create_llm_provider,
     create_llm_provider_for_request,
+    create_report_provider,
 )
 
 
@@ -68,7 +71,8 @@ def test_resolve_llm_override_ignores_invalid_timeout():
     assert override.timeout_seconds == 0
 
 
-def test_create_llm_provider_for_request_passes_timeout_to_client():
+@pytest.mark.asyncio
+async def test_create_llm_provider_for_request_passes_timeout_to_client(gate_registry):
     """End-to-end check: a request-scoped timeout reaches the HTTP client."""
     cfg = WorkerConfig(
         llm_provider="openai",
@@ -76,20 +80,23 @@ def test_create_llm_provider_for_request_passes_timeout_to_client():
         llm_model="gpt-4o",
         llm_timeout=900,
     )
-    provider, model = create_llm_provider_for_request(
+    provider, model = await create_llm_provider_for_request(
         cfg,
         provider="openai",
         model="gpt-4o",
         api_key="test",
         timeout_seconds=1800,
+        gate_registry=gate_registry,
     )
     # OpenAICompatProvider stores the effective timeout on the instance
-    # for downstream visibility.
-    assert getattr(provider, "timeout", None) == 1800.0
+    # for downstream visibility.  When wrapped, unwrap to access raw attrs.
+    raw = getattr(provider, "_raw", provider)
+    assert getattr(raw, "timeout", None) == 1800.0
     assert model == "gpt-4o"
 
 
-def test_create_llm_provider_for_request_falls_back_to_bootstrap_timeout():
+@pytest.mark.asyncio
+async def test_create_llm_provider_for_request_falls_back_to_bootstrap_timeout(gate_registry):
     """No per-request override → worker's bootstrap llm_timeout wins."""
     cfg = WorkerConfig(
         llm_provider="openai",
@@ -97,14 +104,16 @@ def test_create_llm_provider_for_request_falls_back_to_bootstrap_timeout():
         llm_model="gpt-4o",
         llm_timeout=900,
     )
-    provider, _ = create_llm_provider_for_request(
+    provider, _ = await create_llm_provider_for_request(
         cfg,
         provider="openai",
         model="gpt-4o",
         api_key="test",
         timeout_seconds=0,
+        gate_registry=gate_registry,
     )
-    assert getattr(provider, "timeout", None) == 900.0
+    raw = getattr(provider, "_raw", provider)
+    assert getattr(raw, "timeout", None) == 900.0
 
 
 def test_runtime_override_is_empty_when_only_default_timeout():
@@ -116,7 +125,8 @@ def test_runtime_override_is_empty_when_only_default_timeout():
 # ─── Factory defense in depth (CA-125) ───────────────────────────────
 
 
-def test_create_llm_provider_rejects_unknown_provider_with_actionable_message():
+@pytest.mark.asyncio
+async def test_create_llm_provider_rejects_unknown_provider_with_actionable_message():
     """create_llm_provider catches unknown providers reaching it via
     paths that bypass the WorkerConfig validator (notably
     config.model_copy(update={'llm_provider': '...'}) used by
@@ -131,10 +141,66 @@ def test_create_llm_provider_rejects_unknown_provider_with_actionable_message():
     # Bypass the validator the same way per-request overrides do.
     bypassed = cfg.model_copy(update={"llm_provider": "totally-fake"})
     with pytest.raises(ValueError) as exc_info:
-        create_llm_provider(bypassed)
+        await create_llm_provider(bypassed)
     msg = str(exc_info.value)
     assert "totally-fake" in msg
     # Every supported provider must be named so the user knows what to
     # switch to.
     for provider in SUPPORTED_LLM_PROVIDERS:
         assert repr(provider) in msg, f"supported provider {provider} not surfaced in error: {msg}"
+
+
+# ─── Phase 2 gate-wiring tests ───────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_provider_is_wrapped_when_kill_switch_enabled(gate_registry):
+    """create_llm_provider with a registry returns a ConcurrencyGatedProvider."""
+    cfg = WorkerConfig(llm_provider="openai", llm_api_key="test", llm_model="gpt-4o")
+    provider = await create_llm_provider(cfg, gate_registry=gate_registry)
+    assert isinstance(provider, ConcurrencyGatedProvider)
+
+
+@pytest.mark.asyncio
+async def test_kill_switch_disables_wrapper(monkeypatch):
+    """When SOURCEBRIDGE_LLM_CONCURRENCY_WRAPPER_ENABLED=false the raw provider is returned."""
+    monkeypatch.setenv("SOURCEBRIDGE_LLM_CONCURRENCY_WRAPPER_ENABLED", "false")
+    config = ConcurrencyConfig.from_env()
+    assert not config.wrapper_enabled
+    registry = ProviderGateRegistry(config)
+    cfg = WorkerConfig(llm_provider="openai", llm_api_key="test", llm_model="gpt-4o")
+    provider = await create_llm_provider(cfg, gate_registry=registry)
+    assert not isinstance(provider, ConcurrencyGatedProvider)
+    await registry.close()
+
+
+@pytest.mark.asyncio
+async def test_create_llm_provider_for_request_forwards_registry(gate_registry):
+    """create_llm_provider_for_request wraps the returned provider when registry is supplied."""
+    cfg = WorkerConfig(llm_provider="openai", llm_api_key="test", llm_model="gpt-4o")
+    provider, model = await create_llm_provider_for_request(
+        cfg,
+        provider="openai",
+        model="gpt-4o",
+        api_key="test",
+        gate_registry=gate_registry,
+    )
+    assert isinstance(provider, ConcurrencyGatedProvider)
+    assert model == "gpt-4o"
+
+
+@pytest.mark.asyncio
+async def test_create_report_provider_uses_same_gate_for_same_endpoint(gate_registry):
+    """Report provider and main provider share a gate when pointing at the same endpoint."""
+    cfg = WorkerConfig(
+        llm_provider="ollama",
+        llm_model="qwen3:7b",
+        llm_report_provider="ollama",
+        llm_report_model="qwen3:14b",
+    )
+    main_prov = await create_llm_provider(cfg, gate_registry=gate_registry)
+    report_prov = await create_report_provider(cfg, gate_registry=gate_registry)
+    assert isinstance(main_prov, ConcurrencyGatedProvider)
+    assert isinstance(report_prov, ConcurrencyGatedProvider)
+    # Both point at the same Ollama host → same underlying _HostGate binding.
+    assert main_prov._gate._binding is report_prov._gate._binding

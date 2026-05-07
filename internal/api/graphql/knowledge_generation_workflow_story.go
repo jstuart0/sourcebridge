@@ -159,14 +159,14 @@ func (s workflowStoryGenerationService) runGenerationPipeline(
 	executionPathJSON := p.executionPathJSON
 
 	enrichedSnapJSON := snapJSON
-	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled")
+	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled", 0)
 	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 	if artifactUsesUnderstanding(generationMode) {
 		if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
 			return err
 		} else {
 			if reused {
-				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding")
+				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
 				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 			}
 			if understanding != nil {
@@ -204,7 +204,7 @@ func (s workflowStoryGenerationService) runGenerationPipeline(
 		return err
 	}
 
-	rt.ReportProgress(0.96, "llm", "LLM completed, persisting sections")
+	rt.ReportProgress(0.96, "llm", "LLM completed, persisting sections", 0)
 	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
 
 	if resp.Usage != nil {
@@ -240,7 +240,7 @@ func (s workflowStoryGenerationService) runGenerationPipeline(
 	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
 		slog.Error("failed to mark workflow story ready", "artifact_id", artifact.ID, "error", err)
 	}
-	rt.ReportProgress(1.0, "ready", "Workflow story ready")
+	rt.ReportProgress(1.0, "ready", "Workflow story ready", 0)
 	slog.Info("workflow story generation complete", "artifact_id", artifact.ID)
 	return nil
 }

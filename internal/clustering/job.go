@@ -100,7 +100,7 @@ func NewOrchestratorDispatcher(o *orchestrator.Orchestrator) Dispatcher {
 
 // run is the job body. It executes the full clustering pipeline for one repo.
 func (r *Runner) run(ctx context.Context, rt llm.Runtime, repoID, commitSHA string) error {
-	rt.ReportProgress(0.05, "loading", "Loading call graph")
+	rt.ReportProgress(0.05, "loading", "Loading call graph", 0)
 
 	// 1. Load call edges.
 	rawEdges := r.store.GetCallEdges(repoID)
@@ -111,11 +111,11 @@ func (r *Runner) run(ctx context.Context, rt llm.Runtime, repoID, commitSHA stri
 	if storedHash != "" && storedHash == currentHash {
 		slog.Info("clustering: call graph unchanged, skipping",
 			"repo_id", repoID, "edge_hash", currentHash[:8])
-		rt.ReportProgress(1.0, "unchanged", "Call graph unchanged — skipping re-cluster")
+		rt.ReportProgress(1.0, "unchanged", "Call graph unchanged — skipping re-cluster", 0)
 		return nil
 	}
 
-	rt.ReportProgress(0.15, "running_lpa", "Running label propagation")
+	rt.ReportProgress(0.15, "running_lpa", "Running label propagation", 0)
 
 	// 3. Collect all node IDs.
 	nodeSet := make(map[string]struct{}, len(rawEdges)*2)
@@ -133,7 +133,7 @@ func (r *Runner) run(ctx context.Context, rt llm.Runtime, repoID, commitSHA stri
 	seed := BuildSeed(repoID, commitSHA)
 	lpaResult := RunLPA(rawEdges, nodeIDs, seed)
 
-	rt.ReportProgress(0.60, "building_clusters", "Building cluster records")
+	rt.ReportProgress(0.60, "building_clusters", "Building cluster records", 0)
 
 	// 5. Group nodes by their final label.
 	groups := make(map[string][]string, len(nodeIDs)/4+1)
@@ -201,7 +201,7 @@ func (r *Runner) run(ctx context.Context, rt llm.Runtime, repoID, commitSHA stri
 		clusters = append(clusters, cls)
 	}
 
-	rt.ReportProgress(0.80, "persisting", "Persisting clusters")
+	rt.ReportProgress(0.80, "persisting", "Persisting clusters", 0)
 
 	// 9. Atomic replace: delete old clusters and insert new ones in a single
 	// transaction so GetClusters never returns empty mid-swap.
@@ -228,7 +228,7 @@ func (r *Runner) run(ctx context.Context, rt llm.Runtime, repoID, commitSHA stri
 		"size_p95", sp95,
 	)
 
-	rt.ReportProgress(1.0, "ready", fmt.Sprintf("Clustered %d symbols into %d subsystems (Q=%.2f)", len(nodeIDs), len(clusters), q))
+	rt.ReportProgress(1.0, "ready", fmt.Sprintf("Clustered %d symbols into %d subsystems (Q=%.2f)", len(nodeIDs), len(clusters), q), 0)
 	return nil
 }
 

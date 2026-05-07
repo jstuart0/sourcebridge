@@ -1,5 +1,25 @@
 "use client";
 
+/**
+ * LLMGateEntry mirrors the monitorGateEntry JSON shape from the Go REST handler.
+ * One entry per (provider, base_url_normalized, kind) gate in the worker registry.
+ *
+ * Consumers must treat zero values as "unknown/uncapped" for max_concurrent
+ * (matches the (known=true, calls=0) unbounded encoding from GetProviderCapabilities).
+ */
+export interface LLMGateEntry {
+  provider: string;
+  base_url_normalized: string;
+  kind: "llm" | "embedding";
+  in_flight: number;
+  queued: number;
+  max_concurrent: number;
+  retries_since_start: number;
+  recent_429_count: number;
+  tokens_per_second: number;
+  rpm?: number;
+}
+
 interface ActivityEnvelope<TJob> {
   active?: TJob[];
   recent?: TJob[];

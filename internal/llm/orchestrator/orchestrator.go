@@ -1198,7 +1198,7 @@ func (o *Orchestrator) runJob(item *workItem) {
 	}
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if cooldown := o.breaker.waitDuration(req.Subsystem); cooldown > 0 {
-			_ = o.store.SetProgress(jobID, 0.02, "backoff", "Waiting for model backend to recover")
+			_ = o.store.SetProgress(jobID, 0.02, "backoff", "Waiting for model backend to recover", 0)
 			if job := o.store.GetByID(jobID); job != nil {
 				o.publish(llm.JobEvent{Kind: llm.EventProgress, Job: job})
 			}

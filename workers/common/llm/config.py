@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 from workers.common.config import (
     SUPPORTED_LLM_PROVIDERS,
@@ -13,6 +14,9 @@ from workers.common.llm.anthropic import AnthropicProvider
 from workers.common.llm.fake import FakeLLMProvider
 from workers.common.llm.openai_compat import OpenAICompatProvider
 from workers.common.llm.provider import LLMProvider
+
+if TYPE_CHECKING:
+    from workers.common.llm.concurrency import ProviderGateRegistry
 
 
 def _env_truthy(value: str) -> bool:
@@ -58,14 +62,45 @@ def _resolve_disable_thinking(*, report: bool = False) -> bool:
     return True
 
 
-def create_llm_provider(config: WorkerConfig) -> LLMProvider:
-    """Create an LLM provider from configuration."""
+def _create_llm_provider_sync(
+    config: WorkerConfig,
+    *,
+    provider: str = "",
+    base_url: str = "",
+    api_key: str = "",
+    model: str = "",
+    draft_model: str = "",
+    timeout_seconds: int = 0,
+) -> tuple[LLMProvider, str]:
+    """Synchronous per-request provider factory — returns the raw (unwrapped) provider.
+
+    Used by ``servicer_utils.resolve_provider_for_context`` which must remain
+    synchronous (called from backward-compat wrappers on gRPC servicers that
+    haven't been made async yet).  No gate wrapping — the caller uses the
+    returned ``ProviderResolutionKey`` to look up the gate directly.
+    """
+    effective = config.model_copy(
+        update={
+            "llm_provider": provider or config.llm_provider,
+            "llm_base_url": base_url or config.llm_base_url,
+            "llm_api_key": api_key or config.llm_api_key,
+            "llm_model": model or config.llm_model,
+            "llm_draft_model": draft_model or config.llm_draft_model,
+            "llm_timeout": timeout_seconds if timeout_seconds > 0 else config.llm_timeout,
+        }
+    )
+    return _build_raw_llm_provider(effective), effective.llm_model
+
+
+def _build_raw_llm_provider(config: WorkerConfig) -> LLMProvider:
+    """Build a raw (unwrapped) LLM provider from config.  No gate, no async."""
     if config.test_mode:
         return FakeLLMProvider()
 
     if config.llm_provider == "anthropic":
         return AnthropicProvider(api_key=config.llm_api_key, model=config.llm_model)
-    elif config.llm_provider == "lmstudio":
+
+    if config.llm_provider == "lmstudio":
         lmstudio_url = config.llm_base_url or "http://localhost:1234/v1"
         return OpenAICompatProvider(
             api_key=config.llm_api_key,
@@ -74,7 +109,8 @@ def create_llm_provider(config: WorkerConfig) -> LLMProvider:
             draft_model=config.llm_draft_model or None,
             provider_name="lmstudio",
         )
-    elif config.llm_provider in ("openai", "ollama", "vllm", "llama-cpp", "sglang", "gemini", "openrouter"):
+
+    if config.llm_provider in ("openai", "ollama", "vllm", "llama-cpp", "sglang", "gemini", "openrouter"):
         if config.llm_base_url:
             base_url: str | None = config.llm_base_url
         elif config.llm_provider == "ollama":
@@ -99,12 +135,7 @@ def create_llm_provider(config: WorkerConfig) -> LLMProvider:
                 "X-Title": "SourceBridge",
             }
 
-        # Disable thinking mode for local models by default. Thinking
-        # models (Qwen 3.5) generate long <think> chains that waste
-        # tokens on summarization tasks. Operators can re-enable via
-        # SOURCEBRIDGE_LLM_ENABLE_THINKING=true.
         disable_thinking = _resolve_disable_thinking()
-
         return OpenAICompatProvider(
             api_key=config.llm_api_key,
             model=config.llm_model,
@@ -114,21 +145,58 @@ def create_llm_provider(config: WorkerConfig) -> LLMProvider:
             disable_thinking=disable_thinking,
             timeout=float(config.llm_timeout) if config.llm_timeout else None,
         )
-    else:
-        # Defense in depth: WorkerConfig._validate_llm_provider catches
-        # this at config-load time, but per-request overrides via
-        # config.model_copy(update=...) skip validators in pydantic v2 by
-        # default. The actionable message below mirrors the validator's
-        # so a metadata-driven override carrying a typo doesn't crash
-        # the worker mid-request with a confusing stack trace.
-        # Tester report 2026-04-30 (Pazaryna) R2 / CA-125.
-        raise ValueError(
-            f"LLM provider {config.llm_provider!r} is not supported. "
-            f"Supported LLM providers: {_format_supported(SUPPORTED_LLM_PROVIDERS)}."
+
+    raise ValueError(
+        f"LLM provider {config.llm_provider!r} is not supported. "
+        f"Supported LLM providers: {_format_supported(SUPPORTED_LLM_PROVIDERS)}."
+    )
+
+
+async def create_llm_provider(
+    config: WorkerConfig,
+    *,
+    gate_registry: ProviderGateRegistry | None = None,
+) -> LLMProvider:
+    """Create an LLM provider from configuration.
+
+    When ``gate_registry`` is supplied (Phase 2+), the returned provider is
+    wrapped in a ``ConcurrencyGatedProvider`` so all calls pass through the
+    host/kind gate.  When None (kill-switch off or tests that construct
+    providers directly), the raw provider is returned unchanged.
+    """
+    raw = _build_raw_llm_provider(config)
+
+    if gate_registry is not None:
+        from workers.common.llm.concurrency import wrap_provider
+
+        base_url_for_gate = _provider_base_url(config)
+        return await wrap_provider(
+            raw,
+            provider_name=config.llm_provider,
+            base_url=base_url_for_gate,
+            kind="llm",
+            registry=gate_registry,
         )
+    return raw
 
 
-def create_llm_provider_for_request(
+def _provider_base_url(config: WorkerConfig) -> str | None:
+    """Resolve the effective base URL for a provider config (used for gate key lookup)."""
+    if config.llm_base_url:
+        return config.llm_base_url
+    _defaults = {
+        "ollama": "http://localhost:11434/v1",
+        "vllm": "http://localhost:8000/v1",
+        "llama-cpp": "http://localhost:8080/v1",
+        "sglang": "http://localhost:30000/v1",
+        "lmstudio": "http://localhost:1234/v1",
+        "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "openrouter": "https://openrouter.ai/api/v1",
+    }
+    return _defaults.get(config.llm_provider)
+
+
+async def create_llm_provider_for_request(
     config: WorkerConfig,
     *,
     provider: str = "",
@@ -137,6 +205,7 @@ def create_llm_provider_for_request(
     model: str = "",
     draft_model: str = "",
     timeout_seconds: int = 0,
+    gate_registry: ProviderGateRegistry | None = None,
 ) -> tuple[LLMProvider, str]:
     """Create a per-request provider from effective runtime settings.
 
@@ -144,6 +213,10 @@ def create_llm_provider_for_request(
     ``timeout_seconds`` > 0 overrides the worker's bootstrap
     ``llm_timeout``; this is how the admin UI's TimeoutSecs reaches the
     HTTP client on a per-call basis.
+
+    When ``gate_registry`` is supplied it is forwarded to
+    ``create_llm_provider`` so the returned provider is wrapped in the
+    concurrency gate (plan v4 Phase 2, bob H4).
     """
     effective = config.model_copy(
         update={
@@ -155,14 +228,22 @@ def create_llm_provider_for_request(
             "llm_timeout": timeout_seconds if timeout_seconds > 0 else config.llm_timeout,
         }
     )
-    return create_llm_provider(effective), effective.llm_model
+    return await create_llm_provider(effective, gate_registry=gate_registry), effective.llm_model
 
 
-def create_report_provider(config: WorkerConfig) -> LLMProvider | None:
+async def create_report_provider(
+    config: WorkerConfig,
+    *,
+    gate_registry: ProviderGateRegistry | None = None,
+) -> LLMProvider | None:
     """Create a separate LLM provider for report generation, if configured.
 
     Returns None if no report-specific provider is configured, meaning
     the caller should fall back to the main provider.
+
+    When ``gate_registry`` is supplied the returned provider is wrapped in
+    the concurrency gate using the report provider's name and base URL
+    (plan v4 Phase 2).
     """
     if not config.llm_report_provider and not config.llm_report_model:
         return None
@@ -173,23 +254,37 @@ def create_report_provider(config: WorkerConfig) -> LLMProvider | None:
     base_url = config.llm_report_base_url or config.llm_base_url
 
     if provider_name == "anthropic":
-        return AnthropicProvider(api_key=api_key, model=model)
+        raw: LLMProvider = AnthropicProvider(api_key=api_key, model=model)
+        effective_base_url: str | None = base_url or None
+    else:
+        # All other providers use OpenAI-compatible interface
+        default_urls = {
+            "ollama": "http://localhost:11434/v1",
+            "vllm": "http://localhost:8000/v1",
+            "lmstudio": "http://localhost:1234/v1",
+        }
+        if not base_url:
+            base_url = default_urls.get(provider_name, "")
 
-    # All other providers use OpenAI-compatible interface
-    default_urls = {
-        "ollama": "http://localhost:11434/v1",
-        "vllm": "http://localhost:8000/v1",
-        "lmstudio": "http://localhost:1234/v1",
-    }
-    if not base_url:
-        base_url = default_urls.get(provider_name, "")
+        disable_thinking = _resolve_disable_thinking(report=True)
 
-    disable_thinking = _resolve_disable_thinking(report=True)
+        raw = OpenAICompatProvider(
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            provider_name=provider_name,
+            disable_thinking=disable_thinking,
+        )
+        effective_base_url = base_url or None
 
-    return OpenAICompatProvider(
-        api_key=api_key,
-        model=model,
-        base_url=base_url,
-        provider_name=provider_name,
-        disable_thinking=disable_thinking,
-    )
+    if gate_registry is not None:
+        from workers.common.llm.concurrency import wrap_provider
+
+        return await wrap_provider(
+            raw,
+            provider_name=provider_name,
+            base_url=effective_base_url,
+            kind="llm",
+            registry=gate_registry,
+        )
+    return raw

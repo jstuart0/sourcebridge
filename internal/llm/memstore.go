@@ -221,7 +221,7 @@ func (s *MemStore) SetStatus(id string, status JobStatus) error {
 }
 
 // SetProgress updates the progress fields without changing status.
-func (s *MemStore) SetProgress(id string, progress float64, phase, message string) error {
+func (s *MemStore) SetProgress(id string, progress float64, phase, message string, throughputTPS float64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.jobs[id]
@@ -240,6 +240,9 @@ func (s *MemStore) SetProgress(id string, progress float64, phase, message strin
 	j.Progress = progress
 	j.ProgressPhase = phase
 	j.ProgressMessage = message
+	if throughputTPS > 0 {
+		j.CurrentTokensPerSecond = throughputTPS
+	}
 	j.UpdatedAt = time.Now()
 	return nil
 }

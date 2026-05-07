@@ -80,6 +80,11 @@ class ReasoningServiceStub(object):
                 request_serializer=reasoning_dot_v1_dot_reasoning__pb2.GetProviderCapabilitiesRequest.SerializeToString,
                 response_deserializer=reasoning_dot_v1_dot_reasoning__pb2.GetProviderCapabilitiesResponse.FromString,
                 _registered_method=True)
+        self.GetLLMGateSnapshot = channel.unary_unary(
+                '/sourcebridge.reasoning.v1.ReasoningService/GetLLMGateSnapshot',
+                request_serializer=reasoning_dot_v1_dot_reasoning__pb2.GetLLMGateSnapshotRequest.SerializeToString,
+                response_deserializer=reasoning_dot_v1_dot_reasoning__pb2.GetLLMGateSnapshotResponse.FromString,
+                _registered_method=True)
         self.ClassifyQuestion = channel.unary_unary(
                 '/sourcebridge.reasoning.v1.ReasoningService/ClassifyQuestion',
                 request_serializer=reasoning_dot_v1_dot_reasoning__pb2.ClassifyQuestionRequest.SerializeToString,
@@ -185,6 +190,20 @@ class ReasoningServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetLLMGateSnapshot(self, request, context):
+        """GetLLMGateSnapshot returns a point-in-time snapshot of all active
+        per-provider concurrency gates in the worker. Used by the admin
+        /api/v1/admin/llm/activity endpoint to surface real-time gate
+        counters (in-flight, queued, tok/s) without a per-request round-trip.
+
+        An explicit request struct (rather than google.protobuf.Empty) is
+        used for forward compatibility: filter fields (provider, kind) can
+        be added without redeclaring the RPC.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ClassifyQuestion(self, request, context):
         """ClassifyQuestion runs a cheap LLM classifier (Haiku) that
         returns the question's likely class plus evidence-kind hints
@@ -270,6 +289,11 @@ def add_ReasoningServiceServicer_to_server(servicer, server):
                     servicer.GetProviderCapabilities,
                     request_deserializer=reasoning_dot_v1_dot_reasoning__pb2.GetProviderCapabilitiesRequest.FromString,
                     response_serializer=reasoning_dot_v1_dot_reasoning__pb2.GetProviderCapabilitiesResponse.SerializeToString,
+            ),
+            'GetLLMGateSnapshot': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetLLMGateSnapshot,
+                    request_deserializer=reasoning_dot_v1_dot_reasoning__pb2.GetLLMGateSnapshotRequest.FromString,
+                    response_serializer=reasoning_dot_v1_dot_reasoning__pb2.GetLLMGateSnapshotResponse.SerializeToString,
             ),
             'ClassifyQuestion': grpc.unary_unary_rpc_method_handler(
                     servicer.ClassifyQuestion,
@@ -531,6 +555,33 @@ class ReasoningService(object):
             '/sourcebridge.reasoning.v1.ReasoningService/GetProviderCapabilities',
             reasoning_dot_v1_dot_reasoning__pb2.GetProviderCapabilitiesRequest.SerializeToString,
             reasoning_dot_v1_dot_reasoning__pb2.GetProviderCapabilitiesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetLLMGateSnapshot(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/sourcebridge.reasoning.v1.ReasoningService/GetLLMGateSnapshot',
+            reasoning_dot_v1_dot_reasoning__pb2.GetLLMGateSnapshotRequest.SerializeToString,
+            reasoning_dot_v1_dot_reasoning__pb2.GetLLMGateSnapshotResponse.FromString,
             options,
             channel_credentials,
             insecure,

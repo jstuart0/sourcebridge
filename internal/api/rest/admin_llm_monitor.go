@@ -4,11 +4,13 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -33,6 +35,46 @@ type monitorActivityResponse struct {
 	// Stats is derived queue state that tests and the Monitor header
 	// rely on (max concurrency, current in-flight, pending queue depth).
 	Stats monitorStats `json:"stats"`
+	// GateSnapshot is a point-in-time view of per-provider LLM concurrency
+	// gates sourced from the worker via GetLLMGateSnapshot. Omitted entirely
+	// when the worker is unreachable, the call errors, or the wrapper is
+	// kill-switched, so old/disabled-wrapper deployments don't surface a
+	// misleading empty array.
+	GateSnapshot []monitorGateEntry `json:"gate_snapshot,omitempty"`
+}
+
+// monitorGateEntry mirrors LLMGateEntry from the proto — one row per
+// (provider, base_url_normalized, kind) gate in the worker registry.
+type monitorGateEntry struct {
+	Provider          string  `json:"provider"`
+	BaseURLNormalized string  `json:"base_url_normalized"`
+	Kind              string  `json:"kind"`
+	InFlight          int     `json:"in_flight"`
+	Queued            int     `json:"queued"`
+	MaxConcurrent     int     `json:"max_concurrent"`
+	RetriesSinceStart int64   `json:"retries_since_start"`
+	Recent429Count    int64   `json:"recent_429_count"`
+	TokensPerSecond   float64 `json:"tokens_per_second"`
+	RPM               int     `json:"rpm,omitempty"`
+}
+
+// gateSnapshotFetcher is a narrow interface over the gRPC call so the cache
+// can be unit-tested without a live worker connection. The production wiring
+// uses *worker.Client directly; tests inject a stub.
+type gateSnapshotFetcher interface {
+	GetLLMGateSnapshot(ctx context.Context) ([]monitorGateEntry, error)
+}
+
+// gateSnapshotCache holds the last successful gate snapshot from the worker
+// and the time it was fetched. The 1-second TTL prevents hammering the worker
+// when the admin monitor is polled every 2 seconds.
+//
+// The optional fetcher field overrides the default s.worker path for testing.
+type gateSnapshotCache struct {
+	mu        sync.Mutex
+	entries   []monitorGateEntry
+	fetchedAt time.Time
+	fetcher   gateSnapshotFetcher // non-nil in tests only; nil = use s.worker
 }
 
 // monitorHealth is the traffic-light summary at the top of the Monitor
@@ -127,16 +169,20 @@ type monitorJobView struct {
 	SkippedFileUnits    int        `json:"skipped_file_units"`
 	SkippedPackageUnits int        `json:"skipped_package_units"`
 	SkippedRootUnits    int        `json:"skipped_root_units"`
-	ArtifactID          string     `json:"artifact_id,omitempty"`
-	RepoID              string     `json:"repo_id,omitempty"`
-	ElapsedMs           int64      `json:"elapsed_ms"`
-	QueuePosition       int        `json:"queue_position,omitempty"`
-	QueueDepth          int        `json:"queue_depth,omitempty"`
-	EstimatedWaitMs     int64      `json:"estimated_wait_ms,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
-	StartedAt           *time.Time `json:"started_at,omitempty"`
-	UpdatedAt           time.Time  `json:"updated_at"`
-	CompletedAt         *time.Time `json:"completed_at,omitempty"`
+	ArtifactID             string     `json:"artifact_id,omitempty"`
+	RepoID                 string     `json:"repo_id,omitempty"`
+	// CurrentTokensPerSecond is the instantaneous LLM throughput sampled
+	// from the gate's 60-second ring buffer at the last progress update.
+	// Zero means unknown; consumers MUST treat zero as "unknown".
+	CurrentTokensPerSecond float64    `json:"current_tokens_per_second,omitempty"`
+	ElapsedMs              int64      `json:"elapsed_ms"`
+	QueuePosition          int        `json:"queue_position,omitempty"`
+	QueueDepth             int        `json:"queue_depth,omitempty"`
+	EstimatedWaitMs        int64      `json:"estimated_wait_ms,omitempty"`
+	CreatedAt              time.Time  `json:"created_at"`
+	StartedAt              *time.Time `json:"started_at,omitempty"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+	CompletedAt            *time.Time `json:"completed_at,omitempty"`
 }
 
 type monitorJobLogView struct {
@@ -239,13 +285,14 @@ func toMonitorJobView(j *llm.Job) monitorJobView {
 		SkippedFileUnits:    j.SkippedFileUnits,
 		SkippedPackageUnits: j.SkippedPackageUnits,
 		SkippedRootUnits:    j.SkippedRootUnits,
-		ArtifactID:          j.ArtifactID,
-		RepoID:              j.RepoID,
-		ElapsedMs:           j.Elapsed().Milliseconds(),
-		CreatedAt:           j.CreatedAt,
-		StartedAt:           j.StartedAt,
-		UpdatedAt:           j.UpdatedAt,
-		CompletedAt:         j.CompletedAt,
+		ArtifactID:             j.ArtifactID,
+		RepoID:                 j.RepoID,
+		CurrentTokensPerSecond: j.CurrentTokensPerSecond,
+		ElapsedMs:              j.Elapsed().Milliseconds(),
+		CreatedAt:              j.CreatedAt,
+		StartedAt:              j.StartedAt,
+		UpdatedAt:              j.UpdatedAt,
+		CompletedAt:            j.CompletedAt,
 	}
 }
 
@@ -377,8 +424,82 @@ func (s *Server) handleLLMActivity(w http.ResponseWriter, r *http.Request) {
 			PendingMaintenance:    countPendingPriority(pending, llm.PriorityMaintenance),
 			PendingPrewarm:        countPendingPriority(pending, llm.PriorityPrewarm),
 		},
+		GateSnapshot: s.fetchGateSnapshot(r.Context()),
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// fetchGateSnapshot returns the worker's gate snapshot, using a 1-second
+// in-process cache to avoid hammering the worker on every 2-second poll.
+//
+// Returns nil (not an empty slice) when:
+//   - s.worker is nil (no worker configured) and no test fetcher is set
+//   - the worker is unreachable or the RPC errors
+//   - the snapshot is empty (kill-switch off or no gates registered yet)
+//
+// nil causes the GateSnapshot field to be omitted (omitempty) so old
+// or kill-switched deployments don't surface a misleading empty array.
+func (s *Server) fetchGateSnapshot(ctx context.Context) []monitorGateEntry {
+	s.gateSnapshotCache.mu.Lock()
+	defer s.gateSnapshotCache.mu.Unlock()
+
+	// Determine the fetch function to use (test hook or production path).
+	var fetch func(context.Context) ([]monitorGateEntry, error)
+	if s.gateSnapshotCache.fetcher != nil {
+		fetch = s.gateSnapshotCache.fetcher.GetLLMGateSnapshot
+	} else if s.worker != nil {
+		fetch = func(ctx context.Context) ([]monitorGateEntry, error) {
+			resp, err := s.worker.GetLLMGateSnapshot(ctx)
+			if err != nil || resp == nil {
+				return nil, err
+			}
+			entries := make([]monitorGateEntry, 0, len(resp.Gates))
+			for _, g := range resp.Gates {
+				entries = append(entries, monitorGateEntry{
+					Provider:          g.Provider,
+					BaseURLNormalized: g.BaseUrlNormalized,
+					Kind:              g.Kind,
+					InFlight:          int(g.InFlight),
+					Queued:            int(g.Queued),
+					MaxConcurrent:     int(g.MaxConcurrent),
+					RetriesSinceStart: g.RetriesSinceStart,
+					Recent429Count:    g.Recent_429Count,
+					TokensPerSecond:   g.TokensPerSecond,
+					RPM:               int(g.Rpm),
+				})
+			}
+			return entries, nil
+		}
+	} else {
+		return nil
+	}
+
+	if time.Since(s.gateSnapshotCache.fetchedAt) < time.Second {
+		// Cache hit: return a copy to avoid races if the caller holds a reference.
+		if len(s.gateSnapshotCache.entries) == 0 {
+			return nil
+		}
+		out := make([]monitorGateEntry, len(s.gateSnapshotCache.entries))
+		copy(out, s.gateSnapshotCache.entries)
+		return out
+	}
+
+	// Cache miss: fetch from the worker (lock held so concurrent callers don't
+	// all fire simultaneously; the 1-second TTL means at most one caller
+	// waits for the gRPC call at a time).
+	entries, err := fetch(ctx)
+	if err != nil || len(entries) == 0 {
+		// Don't update the cache timestamp on error so the next caller retries
+		// immediately rather than waiting the full TTL on a transient failure.
+		return nil
+	}
+
+	s.gateSnapshotCache.entries = entries
+	s.gateSnapshotCache.fetchedAt = time.Now()
+
+	out := make([]monitorGateEntry, len(entries))
+	copy(out, entries)
+	return out
 }
 
 func modeRollups(jobs []monitorJobView) map[string]monitorModeRollup {

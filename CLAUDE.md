@@ -58,6 +58,59 @@ Plan: `thoughts/shared/plans/active-2026-05-06-deliver-orchestrator-capacity-det
 Investigation: `thoughts/shared/investigations/2026-05-06-ollama-think-suppression-empirical.md`
 Runbook: [`docs/admin/llm-config.md`](docs/admin/llm-config.md#backend-parallelism-and-the-max_concurrent_calls-field)
 
+**2026-05-06 worker LLM concurrency refactor** — 7 commits, `3274ade..6eed915`.
+Universal per-`(provider, base_url)` gate registry in the Python worker:
+every LLM and embedding call passes through a host or per-kind semaphore,
+jitter-aware tenacity retry loop, optional RPM limiter, and tok/s ring
+buffer. Eliminates the 5×3=15-attempt storm from stacked hand-rolled
+retries. `GetProviderCapabilities.max_concurrent_calls` is now sourced
+from the gate's effective cap for the resolved context, not bootstrap
+config, so Go and Python agree on capacity by construction. Phase 7
+extends `/api/v1/admin/llm/activity` with a `gate_snapshot` field and
+adds a live "LLM Gate Activity" section to the admin monitor page.
+
+Load-bearing constraints for future-Claude:
+
+- **Don't re-enable SDK retry** (`max_retries=0` on `AsyncOpenAI` and
+  `AsyncAnthropic`). The tenacity wrapper owns retry. Re-enabling SDK
+  retry produces 5×3=15-attempt storms per Decision 3.
+- **Don't add a `[llm.concurrency]` TOML section.** Concurrency is
+  operator-tunable via env vars, not `config.toml`. Decision 7.
+- **The kill switch is the rollback path**: `SOURCEBRIDGE_LLM_CONCURRENCY_WRAPPER_ENABLED=false`
+  reverts to pre-refactor behavior without redeploy. Use it before
+  assuming the gate is the problem.
+- **Registry is constructed-once-passed-by-reference** — constructed in
+  `workers/__main__.py` and `workers/common/cli_main.py` only. No
+  module-level singletons. Every factory call (`create_llm_provider`,
+  `create_embedding_provider`, etc.) receives `gate_registry=` as a
+  required kwarg.
+- **Don't delete the empty-content retry** at
+  `workers/common/llm/openai_compat.py` (around lines 249–313). It
+  handles `<think>`-budget exhaustion (`stop_reason=length` + empty
+  visible content) — it is NOT a network retry and is explicitly distinct
+  from the tenacity wrapper retry.
+- **Gate is authoritative for `GetProviderCapabilities`**: the worker's
+  `GetProviderCapabilities` handler reads the registry's effective cap
+  for the resolved-context `(provider, base_url)` via
+  `workers/reasoning/servicer.py`. Don't bypass back to
+  `WorkerConfig.llm_max_concurrent_calls` except in the legacy fallback
+  path (kill switch off).
+- **Host gate vs. per-kind gate classification is per-provider, not
+  configurable per call.** Local providers (`ollama`, `vllm`,
+  `llama-cpp`, `sglang`, `lmstudio`) share one host gate across LLM and
+  embedding. Cloud providers (`openai`, `anthropic`, `gemini`,
+  `openrouter`) use per-kind gates. `openai-compatible` defaults host;
+  flip with `SOURCEBRIDGE_LLM_PROVIDER_OPENAI_COMPATIBLE_GATING=per_kind`.
+- **Don't fork the cross-language plumbing.** `/api/v1/admin/llm/activity`
+  (REST) and `KnowledgeStreamProgress` (proto) are the sole channels for
+  gate snapshot and per-job tok/s. Don't add a new endpoint or proto
+  field; extend these.
+
+Plan: `thoughts/shared/plans/active-2026-05-06-deliver-worker-llm-concurrency.md`
+Investigation: `thoughts/shared/investigations/2026-05-06-diagnose-llm-throughput-rotten.md`
+Decisions log: `thoughts/shared/plans/active-2026-05-06-deliver-worker-llm-concurrency.decisions.md`
+Runbook: [`docs/admin/llm-config.md`](docs/admin/llm-config.md#operator-concurrency-tuning)
+
 **2026-05-05 web runtime API proxy fix** — 3 commits, `1fee78b..873bc53`.
 Replaces `next.config.ts rewrites()` with a Next.js middleware at
 `web/src/middleware.ts` that proxies `/api/*`, `/auth/*`, `/healthz`,

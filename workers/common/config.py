@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from pydantic import field_validator, model_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 # Maximum allowed value for llm_max_concurrent_calls (D9 / H1).
@@ -161,6 +161,13 @@ class WorkerConfig(BaseSettings):
     # DB profile row's max_concurrent_calls IS NULL (see Phase 5 migration).
     # Never overrides an operator-set DB value. Config-level env var:
     # SOURCEBRIDGE_WORKER_LLM_MAX_CONCURRENT_CALLS (or the shared hint).
+    #
+    # LEGACY SEED (Phase 2+): The ProviderGateRegistry is the runtime owner
+    # of the effective LLM concurrency cap.  This field is used only as the
+    # fallback seed when the gate's per-provider override is absent AND the
+    # kill switch is off.  GetProviderCapabilities sources its cap from the
+    # registry's effective value, not from this field directly.
+    # See plan 2026-05-06-deliver-worker-llm-concurrency Decision 12.
     llm_max_concurrent_calls: int = 0
 
     # gRPC auth
@@ -200,10 +207,10 @@ class WorkerConfig(BaseSettings):
         """
         try:
             val = int(v)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as err:
             raise ValueError(
                 f"llm_max_concurrent_calls must be an integer, got {v!r}."
-            )
+            ) from err
         if val < 0 or val > HARD_CONCURRENCY_CEILING:
             raise ValueError(
                 f"llm_max_concurrent_calls must be between 0 and {HARD_CONCURRENCY_CEILING}, got {val}."

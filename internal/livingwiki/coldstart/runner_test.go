@@ -124,7 +124,7 @@ func (s *stubRuntime) JobID() string {
 	return s.jobID
 }
 
-func (s *stubRuntime) ReportProgress(progress float64, status, message string) {
+func (s *stubRuntime) ReportProgress(progress float64, status, message string, _ float64) {
 	if s.onReportProgress != nil {
 		s.onReportProgress(progress, status, message)
 	}

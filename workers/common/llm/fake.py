@@ -1,8 +1,27 @@
-"""Fake LLM provider for deterministic testing."""
+"""Fake LLM provider for deterministic testing.
+
+**This module is test-only.**  Do not instantiate ``FakeLLMProvider`` in
+production code paths.
+
+The class ships two personalities:
+1. **Fixture-backed** (default) — returns deterministic responses based on
+   prompt keywords.  Suitable for integration tests that don't care about
+   failure paths.
+2. **Fail-mode** — constructor kwargs enable fault injection for concurrency
+   gate tests (Phase 3+):
+   - ``raise_on_attempts`` — raise ``exc`` for the first N calls.
+   - ``delay_seconds`` — sleep this many seconds before returning/raising.
+   - ``responses`` — a queue of ``str | Exception``; each call pops one item;
+     strings are returned as content, exceptions are raised.
+
+See plan Decision 9: thoughts/shared/plans/active-2026-05-06-deliver-worker-llm-concurrency.md
+"""
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections import deque
 from collections.abc import AsyncIterator
 
 from workers.common.llm.provider import LLMResponse
@@ -225,10 +244,58 @@ class FakeLLMProvider:
         ]
     )
 
+    def __init__(
+        self,
+        *,
+        raise_on_attempts: int = 0,
+        exc: BaseException | None = None,
+        delay_seconds: float = 0.0,
+        responses: list[str | BaseException] | None = None,
+    ) -> None:
+        """Create a fake LLM provider.
+
+        Args:
+            raise_on_attempts: Raise ``exc`` for the first N calls (0 = never).
+            exc: Exception to raise when ``raise_on_attempts > 0``.
+                 Defaults to ``RuntimeError("FakeLLMProvider injected failure")``.
+            delay_seconds: Sleep this long (real asyncio sleep) before each
+                response.  Use small values (0.01–0.1 s) in tests that verify
+                concurrency ordering without making the suite slow.
+            responses: Optional queue of ``str | BaseException``.  Each call
+                pops the leftmost item; if it's a string it's returned as the
+                response content; if it's an exception it's raised.  When the
+                queue is exhausted, falls back to the fixture-based dispatch.
+        """
+        self._raise_on_attempts = raise_on_attempts
+        self._exc = exc or RuntimeError("FakeLLMProvider injected failure")
+        self._delay_seconds = delay_seconds
+        self._responses: deque[str | BaseException] = deque(responses or [])
+        self._call_count: int = 0
+
     @property
     def default_model(self) -> str:
         """Return the default model ID."""
         return "fake-test-model"
+
+    async def _maybe_fail_or_delay(self) -> str | None:
+        """Handle fail-mode kwargs.  Returns queued content string or None."""
+        if self._delay_seconds > 0:
+            await asyncio.sleep(self._delay_seconds)
+
+        self._call_count += 1
+
+        # Queued response takes priority.
+        if self._responses:
+            item = self._responses.popleft()
+            if isinstance(item, BaseException):
+                raise item
+            return item
+
+        # raise_on_attempts covers the first N calls.
+        if self._raise_on_attempts > 0 and self._call_count <= self._raise_on_attempts:
+            raise self._exc
+
+        return None
 
     async def complete(
         self,
@@ -237,9 +304,20 @@ class FakeLLMProvider:
         system: str = "",
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        frequency_penalty: float = 0.0,
         model: str | None = None,
     ) -> LLMResponse:
         """Return deterministic fixture response based on prompt content."""
+        queued = await self._maybe_fail_or_delay()
+        if queued is not None:
+            return LLMResponse(
+                content=queued,
+                model="fake-test-model",
+                input_tokens=len(prompt.split()),
+                output_tokens=len(queued.split()),
+                stop_reason="end_turn",
+            )
+
         content = self.SUMMARY_RESPONSE
         if "cliff notes" in prompt.lower() or "required sections" in prompt.lower():
             content = self.CLIFF_NOTES_RESPONSE
@@ -271,7 +349,14 @@ class FakeLLMProvider:
         temperature: float = 0.0,
         model: str | None = None,
     ) -> AsyncIterator[str]:
-        """Stream deterministic response word by word."""
-        response = await self.complete(prompt, system=system, max_tokens=max_tokens, temperature=temperature)
+        """Stream deterministic response word by word.
+
+        Fail-mode kwargs apply: delay fires before the first chunk;
+        raise_on_attempts / queued exceptions raise before any chunks are
+        yielded.
+        """
+        response = await self.complete(
+            prompt, system=system, max_tokens=max_tokens, temperature=temperature
+        )
         for word in response.content.split():
             yield word + " "

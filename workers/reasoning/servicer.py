@@ -9,6 +9,7 @@ from reasoning.v1 import reasoning_pb2, reasoning_pb2_grpc
 
 from workers.common.config import HARD_CONCURRENCY_CEILING, WorkerConfig
 from workers.common.embedding.provider import EmbeddingProvider
+from workers.common.llm.concurrency import _UNCAPPED, ProviderGateRegistry
 from workers.common.llm.provider import LLMProvider
 from workers.common.llm.tools import (
     AgentMessage,
@@ -154,14 +155,19 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
         llm_provider: LLMProvider,
         embedding_provider: EmbeddingProvider,
         worker_config: WorkerConfig | None = None,
+        gate_registry: ProviderGateRegistry | None = None,
     ) -> None:
         self._llm = llm_provider
         self._embedding = embedding_provider
         self._config = worker_config
+        self._gate_registry = gate_registry
 
     def _resolve_provider(self, context: grpc.aio.ServicerContext) -> tuple[LLMProvider, str | None]:
         """Backward-compat wrapper. New code should call resolve_provider_for_context directly."""
-        return resolve_provider_for_context(self._llm, self._config, context)
+        provider, model, _ = resolve_provider_for_context(
+            self._llm, self._config, context, gate_registry=self._gate_registry
+        )
+        return provider, model
 
     async def AnalyzeSymbol(  # noqa: N802
         self,
@@ -701,18 +707,51 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
         provider_key = "anthropic" if "anthropic" in provider_name else ""
         model = getattr(provider, "default_model", "") or getattr(provider, "model", "")
 
-        # Populate the new capacity fields (D3 / Phase 1).
-        # max_concurrent_calls is taken from the worker config (operator-declared).
-        # max_concurrent_calls_known is True when we have an explicit declaration
-        # (>0) or when the provider is a known-unbounded frontier API (see below).
+        # Populate the capacity fields (D3 / Phase 2 rewrite — Decision 12).
+        #
+        # Phase 2 (gate active): ask the registry for the effective cap of the
+        # *resolved-context* (provider, base_url) so the reported cap always
+        # reflects the provider that will actually service requests for this
+        # workspace/repo combination, not the bootstrap config.
+        #
+        # Legacy fallback (kill switch off, or no gate_registry): read
+        # WorkerConfig.llm_max_concurrent_calls directly.  This preserves
+        # pre-Phase-2 behavior for deployments that have not enabled the gate.
+        #
         # Hard-clamp to HARD_CONCURRENCY_CEILING as defense in depth (D9).
         declared = 0
         known = False
 
-        if self._config is not None:
+        _, _, resolution_key = resolve_provider_for_context(
+            self._llm,
+            self._config,
+            context,
+            gate_registry=self._gate_registry,
+        )
+
+        if resolution_key is not None and self._gate_registry is not None:
+            # Gate is active: use the registry's effective LLM cap for the
+            # resolved (provider, base_url).  Decision 6 / v4 M1 fix: all
+            # providers now report finite caps; the old "frontier unbounded"
+            # sentinel is only emitted via the legacy fallback below so that
+            # old workers (without a gate) keep the previous encoding.
+            effective = self._gate_registry.effective_llm_max_concurrent(
+                resolution_key.provider,
+                resolution_key.base_url,
+            )
+            if effective is not None:
+                declared = min(effective, HARD_CONCURRENCY_CEILING)
+                known = True
+            # effective is None when the wrapper is disabled inside the
+            # registry — fall through to the legacy path.
+
+        if not known and self._config is not None:
+            # Legacy fallback: wrapper disabled (kill switch off) or no
+            # per-provider override set in the registry yet.  Keep the
+            # old WorkerConfig-sourced logic exactly so existing deployments
+            # are unaffected.
             declared = min(self._config.llm_max_concurrent_calls, HARD_CONCURRENCY_CEILING)
             if declared > 0:
-                # Operator declared a finite value.
                 known = True
             elif self._config.llm_provider in ("anthropic", "openai", "openrouter", "gemini"):
                 # These are frontier APIs with effectively unbounded parallelism.
@@ -729,3 +768,56 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
             max_concurrent_calls=declared,
             max_concurrent_calls_known=known,
         )
+
+    async def GetLLMGateSnapshot(  # noqa: N802
+        self,
+        request: reasoning_pb2.GetLLMGateSnapshotRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> reasoning_pb2.GetLLMGateSnapshotResponse:
+        """Return a point-in-time snapshot of all active concurrency gates.
+
+        Same gRPC auth as GetProviderCapabilities: callers must present a
+        valid x-sb-worker-secret header when the worker is configured with
+        SOURCEBRIDGE_SECURITY_GRPC_AUTH_SECRET.
+
+        When no gate registry is wired (kill-switch off, test builds without
+        registry) the response is an empty list — the admin monitor omits the
+        gate_snapshot field on empty so old/kill-switched deployments surface
+        nothing rather than a misleading empty array.
+        """
+        # Auth check: reuse _resolve_provider which calls resolve_provider_for_context
+        # and enforces the gRPC auth interceptor's metadata check.  We don't
+        # actually need the returned provider for this read-only query.
+        self._resolve_provider(context)
+
+        if self._gate_registry is None:
+            return reasoning_pb2.GetLLMGateSnapshotResponse()
+
+        entries = self._gate_registry.snapshot()
+        gates = []
+        for entry in entries:
+            # Clamp max_concurrent to HARD_CONCURRENCY_CEILING so the int32
+            # proto field never overflows.  The _UNCAPPED sentinel (sys.maxsize)
+            # means "no real cap configured" — emit 0 to signal unknown/uncapped,
+            # matching the (known=true, calls=0) "unbounded" encoding used in
+            # GetProviderCapabilities.
+            effective_cap = entry.max_concurrent
+            if effective_cap >= _UNCAPPED:
+                effective_cap = 0
+            else:
+                effective_cap = min(effective_cap, HARD_CONCURRENCY_CEILING)
+            gates.append(
+                reasoning_pb2.LLMGateEntry(
+                    provider=entry.provider,
+                    base_url_normalized=entry.base_url_normalized,
+                    kind=entry.kind,
+                    in_flight=entry.in_flight,
+                    queued=entry.queue_depth,
+                    max_concurrent=effective_cap,
+                    retries_since_start=entry.retries_since_start,
+                    recent_429_count=entry.recent_429_count,
+                    tokens_per_second=entry.tokens_per_second,
+                    rpm=entry.rpm,
+                )
+            )
+        return reasoning_pb2.GetLLMGateSnapshotResponse(gates=gates)

@@ -81,7 +81,7 @@ func (r *Resolver) runSyncLLMJob(
 type noopRuntime struct{}
 
 func (noopRuntime) JobID() string                                              { return "" }
-func (noopRuntime) ReportProgress(progress float64, phase, message string)     {}
+func (noopRuntime) ReportProgress(progress float64, phase, message string, throughputTPS float64) {}
 func (noopRuntime) ReportTokens(input, output int)                             {}
 func (noopRuntime) ReportSnapshotBytes(bytes int)                              {}
 func (noopRuntime) Heartbeat() error                                           { return nil }
