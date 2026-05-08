@@ -1594,3 +1594,34 @@ def test_parse_sections_recovers_ndjson_output() -> None:
             section_stub = by_title.get(title)
             assert section_stub is not None
             assert section_stub.content == stub_text, f"{title}: expected stub content, got {section_stub.content!r}"
+
+
+# ---------------------------------------------------------------------------
+# CA-280: backtick-template instruction is load-bearing
+# ---------------------------------------------------------------------------
+
+def test_cliff_notes_render_template_requires_markdown_backticks() -> None:
+    """CA-176/CA-280 contract: the cliff-notes render template MUST instruct
+    the model to wrap identifiers in markdown backticks.
+
+    `_enforce_deep_confidence_floor` (renderers.py:_SPECIFIC_IDENTIFIER_RE)
+    counts backtick-wrapped identifiers to upgrade LOW -> MEDIUM/HIGH on
+    grounded sections. If the template stops asking for backticks, local-tier
+    models silently regress to ~half their potential confidence rate (the
+    upgrade function runs but finds nothing to count). See:
+    `thoughts/shared/plans/active-2026-05-07-diagnose-confidence-partial-recovery.md`.
+    """
+    from workers.comprehension.renderers import (
+        CLIFF_NOTES_RENDER_TEMPLATE,
+        CLIFF_NOTES_SECTION_REPAIR_TEMPLATE,
+    )
+    assert "markdown backticks" in CLIFF_NOTES_RENDER_TEMPLATE, (
+        "CA-176 regression: CLIFF_NOTES_RENDER_TEMPLATE no longer instructs "
+        "the model to wrap identifiers in markdown backticks. This will "
+        "silently regress local-tier confidence to ~half the previous rate."
+    )
+    assert "markdown backticks" in CLIFF_NOTES_SECTION_REPAIR_TEMPLATE, (
+        "CA-176 regression: CLIFF_NOTES_SECTION_REPAIR_TEMPLATE no longer "
+        "instructs the model to wrap identifiers in markdown backticks. "
+        "Repaired sections will fail to clear _enforce_deep_confidence_floor."
+    )

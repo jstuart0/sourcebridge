@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
@@ -61,11 +62,57 @@ func (m *mockKnowledgeStore) StoreKnowledgeArtifact(a *knowledge.Artifact) (*kno
 	m.artifacts[a.ID] = a
 	return a, nil
 }
+// ClaimArtifact and ClaimArtifactWithMode mirror MemStore's claim semantics
+// (CA-279): if a matching artifact exists for the key, return it with
+// claimed=false; otherwise create a new generating-status artifact and
+// return it with claimed=true. The previous always-(nil,false,nil) stub
+// caused mock/prod divergence — handlers that branched on the claim
+// outcome were exercised against an unrealistic shape.
 func (m *mockKnowledgeStore) ClaimArtifact(key knowledge.ArtifactKey, rev knowledge.SourceRevision) (*knowledge.Artifact, bool, error) {
-	return nil, false, nil
+	return m.ClaimArtifactWithMode(key, rev, "")
 }
 func (m *mockKnowledgeStore) ClaimArtifactWithMode(key knowledge.ArtifactKey, rev knowledge.SourceRevision, mode knowledge.GenerationMode) (*knowledge.Artifact, bool, error) {
-	return nil, false, nil
+	key = key.Normalized()
+	normalizedMode := knowledge.NormalizeGenerationMode(mode)
+	for _, existing := range m.artifacts {
+		if existing.RepositoryID != key.RepositoryID || existing.Type != key.Type ||
+			existing.Audience != key.Audience || existing.Depth != key.Depth {
+			continue
+		}
+		var existingScopeKey string
+		if existing.Scope != nil {
+			existingScopeKey = existing.Scope.ScopeKey()
+		} else {
+			existingScopeKey = (knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository}).ScopeKey()
+		}
+		if existingScopeKey != key.ScopeKey() {
+			continue
+		}
+		if mode != "" && knowledge.NormalizeGenerationMode(existing.GenerationMode) != normalizedMode {
+			continue
+		}
+		out := *existing
+		return &out, false, nil
+	}
+	now := time.Now()
+	scope := key.Scope.Normalize()
+	artifact := &knowledge.Artifact{
+		ID:             uuid.New().String(),
+		RepositoryID:   key.RepositoryID,
+		Type:           key.Type,
+		Audience:       key.Audience,
+		Depth:          key.Depth,
+		Scope:          &scope,
+		Status:         knowledge.StatusGenerating,
+		Progress:       0,
+		SourceRevision: rev,
+		GenerationMode: normalizedMode,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	stored := *artifact
+	m.artifacts[stored.ID] = &stored
+	return artifact, true, nil
 }
 func (m *mockKnowledgeStore) GetKnowledgeArtifact(id string) *knowledge.Artifact {
 	return m.artifacts[id]
