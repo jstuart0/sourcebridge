@@ -1595,24 +1595,6 @@ func (s *Store) GetSymbolsByFile(repoID string, filePath string) []*StoredSymbol
 	return result
 }
 
-// UpdateRequirement updates the priority and tags on an existing requirement.
-func (s *Store) UpdateRequirement(id string, priority string, tags []string) *StoredRequirement {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	req := s.requirements[id]
-	if req == nil {
-		return nil
-	}
-	if priority != "" {
-		req.Priority = priority
-	}
-	if tags != nil {
-		req.Tags = tags
-	}
-	req.UpdatedAt = time.Now()
-	return req
-}
-
 // UpdateRequirementFields applies a partial update to the requirement.
 // Nil fields are preserved; externalId uniqueness is enforced per-repo.
 func (s *Store) UpdateRequirementFields(id string, fields RequirementUpdate) *StoredRequirement {

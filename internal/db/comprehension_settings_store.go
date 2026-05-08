@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	surrealdb "github.com/surrealdb/surrealdb.go"
@@ -314,54 +315,28 @@ func (s *SurrealStore) SetModelCapabilities(mc *comprehension.ModelCapabilities)
 
 	lcqJSON := comprehension.MarshalLongContextQuality(mc.LongContextQuality)
 
-	sql := `
-		LET $existing = (SELECT id FROM ca_model_capabilities WHERE model_id = $model_id);
-		IF array::len($existing) > 0 THEN
-			(UPDATE ca_model_capabilities SET
-				provider = $provider,
-				declared_context_tokens = $declared_context,
-				effective_context_tokens = $effective_context,
-				long_context_quality = $lcq,
-				instruction_following = $instruction_following,
-				json_mode = $json_mode,
-				tool_use = $tool_use,
-				extraction_grade = $extraction_grade,
-				creative_grade = $creative_grade,
-				embedding_model = $embedding_model,
-				cost_per_1k_input = $cost_input,
-				cost_per_1k_output = $cost_output,
-				source = $source,
-				notes = $notes,
-				quality_gate_tier = $quality_gate_tier,
-				updated_at = time::now()
-			WHERE model_id = $model_id)
-		ELSE
-			(CREATE ca_model_capabilities SET
-				id = type::thing('ca_model_capabilities', $id),
-				model_id = $model_id,
-				provider = $provider,
-				declared_context_tokens = $declared_context,
-				effective_context_tokens = $effective_context,
-				long_context_quality = $lcq,
-				instruction_following = $instruction_following,
-				json_mode = $json_mode,
-				tool_use = $tool_use,
-				extraction_grade = $extraction_grade,
-				creative_grade = $creative_grade,
-				embedding_model = $embedding_model,
-				cost_per_1k_input = $cost_input,
-				cost_per_1k_output = $cost_output,
-				source = $source,
-				notes = $notes,
-				quality_gate_tier = $quality_gate_tier,
-				updated_at = time::now())
-		END;
-	`
 	id := mc.ID
 	if id == "" {
 		id = uuid.New().String()
 	}
 
+	// Static (non-nullable) fields always appear in the SET fragment.
+	sets := []string{
+		"provider = $provider",
+		"declared_context_tokens = $declared_context",
+		"effective_context_tokens = $effective_context",
+		"long_context_quality = $lcq",
+		"instruction_following = $instruction_following",
+		"json_mode = $json_mode",
+		"tool_use = $tool_use",
+		"extraction_grade = $extraction_grade",
+		"creative_grade = $creative_grade",
+		"embedding_model = $embedding_model",
+		"source = $source",
+		"notes = $notes", // required-with-default (string DEFAULT ''); always static
+		"quality_gate_tier = $quality_gate_tier",
+		"updated_at = time::now()",
+	}
 	vars := map[string]any{
 		"id":                    id,
 		"model_id":              mc.ModelID,
@@ -375,12 +350,47 @@ func (s *SurrealStore) SetModelCapabilities(mc *comprehension.ModelCapabilities)
 		"extraction_grade":      mc.ExtractionGrade,
 		"creative_grade":        mc.CreativeGrade,
 		"embedding_model":       mc.EmbeddingModel,
-		"cost_input":            mc.CostPer1kInput,
-		"cost_output":           mc.CostPer1kOutput,
 		"source":                mc.Source,
 		"notes":                 mc.Notes,
 		"quality_gate_tier":     string(mc.QualityGateTier),
 	}
+
+	// Nullable option<…> fields: only add the SET clause and var when non-nil,
+	// so a nil pointer is never serialised as JSON null on the wire.
+	addFloat64Ptr := func(col string, val *float64) {
+		if val == nil {
+			return
+		}
+		sets = append(sets, col+" = $"+col)
+		vars[col] = *val
+	}
+	addTimePtr := func(col string, val *time.Time) {
+		if val == nil {
+			return
+		}
+		sets = append(sets, col+" = $"+col)
+		vars[col] = models.CustomDateTime{Time: *val}
+	}
+	addFloat64Ptr("cost_per_1k_input", mc.CostPer1kInput)
+	addFloat64Ptr("cost_per_1k_output", mc.CostPer1kOutput)
+	addTimePtr("last_probed_at", mc.LastProbedAt)
+
+	// Build a single SET fragment that appears in BOTH the UPDATE arm and the
+	// CREATE arm of the LET/IF/ELSE statement. Mutating `sets` after this
+	// affects both arms — keep that in mind if extending.
+	setFragment := joinComma(sets)
+
+	sql := fmt.Sprintf(`
+		LET $existing = (SELECT id FROM ca_model_capabilities WHERE model_id = $model_id);
+		IF array::len($existing) > 0 THEN
+			(UPDATE ca_model_capabilities SET %[1]s WHERE model_id = $model_id)
+		ELSE
+			(CREATE ca_model_capabilities SET
+				id = type::thing('ca_model_capabilities', $id),
+				model_id = $model_id,
+				%[1]s)
+		END;
+	`, setFragment)
 
 	_, err := surrealdb.Query[interface{}](ctx(), db, sql, vars)
 	return err

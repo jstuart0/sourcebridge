@@ -63,7 +63,7 @@ services:
     restart: "no"
 
   surrealdb:
-    image: surrealdb/surrealdb:v2.2.1
+    image: surrealdb/surrealdb:v2.6.5
     command: start --user ${SURREAL_USER:-root} --pass ${SURREAL_PASS:-INSECURE-DEFAULT-CHANGE-ME-NOW} --log info file:/data/database.db
     volumes:
       - surrealdb-data:/data

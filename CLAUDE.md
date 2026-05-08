@@ -24,6 +24,71 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-07 SurrealDB v2.6.5 upgrade + option-field NULL remediation (CA-179)** — N commits, `<range>` (TODO: fill after valerie signoff + commit).
+Upgrades the SurrealDB integration testcontainer and production pin from v2.2.1 to v2.6.5
+across 4 implementation phases. The upgrade surfaces that v2.6.5 enforces strict rejection
+of JSON null on `option<…>` schema columns in contexts that earlier versions tolerated.
+Phase 1 remediates `SetModelCapabilities` in `internal/db/comprehension_settings_store.go` —
+three pointer fields (`cost_per_1k_input *float64`, `cost_per_1k_output *float64`,
+`last_probed_at *time.Time`) are now guarded with the conditional-vars closure idiom (matching
+`UpdateRequirementFields` at `internal/db/store.go:1938`); nil pointers are never serialised as
+JSON null. Phase 1 also discovers that `option<datetime>` columns require `models.CustomDateTime{Time: t}`
+binding, not RFC3339 strings. Phase 2 remediates `UpdateRequirementFields` directly (the
+conditional-vars idiom was already there; this phase extended it and deleted the old
+`UpdateRequirement(id, priority, tags)` method that always SET both columns regardless of
+nil). Phase 3 wires the `EnrichRequirement` GraphQL mutation to call `UpdateRequirementFields`
+instead of the now-deleted `UpdateRequirement`. Phase 4 updates the testcontainer pin to
+v2.6.5 and verifies the full integration suite is green.
+
+Load-bearing constraints for future-Claude:
+
+- **`internal/db/comprehension_settings_store.go:SetModelCapabilities`** uses the
+  conditional-vars closure idiom for three `option<…>` fields: `cost_per_1k_input`
+  (`*float64` → `option<float>`), `cost_per_1k_output` (`*float64` → `option<float>`),
+  and `last_probed_at` (`*time.Time` → `option<datetime>`). `last_probed_at` is guarded
+  preemptively — no caller writes it today, but `ModelCapabilities.LastProbedAt` exists on
+  the public Go struct, so a future writer would otherwise trip v2.6.5 NULL rejection. Don't
+  revert to static SET clauses for any of these three fields.
+- **`option<datetime>` fields require `models.CustomDateTime{Time: t}` binding, NOT RFC3339
+  strings.** SurrealDB's CBOR codec accepts CBOR tag 12 (datetime) for `option<datetime>`
+  columns but rejects RFC3339Nano string format. If a future writer adds a new
+  `option<datetime>` SET clause and binds a Go `time.Time` directly (or its
+  `.Format(time.RFC3339Nano)`), the write will fail at runtime against v2.6.5. Always wrap
+  as `models.CustomDateTime{Time: t}` (the `models` package is the SurrealDB Go SDK's models
+  package — import path confirmed in `internal/db/comprehension_settings_store.go`). Other
+  `option<datetime>` writers that work today (e.g., `livingwiki_repo_settings_store.go:439-454`)
+  use `time::now()` literals server-side, which sidesteps the encoding question entirely.
+- **The conditional-vars `setFragment` interpolates into BOTH the UPDATE and CREATE arms** of
+  the LET/IF/ELSE statement in `SetModelCapabilities`. Mutating `sets []string` or
+  `setFragment` after assignment affects both arms. A future maintainer adding a field "only
+  in the UPDATE branch" needs to build a second fragment or accept both arms get the clause
+  (which is correct UPSERT behavior anyway). Don't split the LET/IF/ELSE into separate CREATE
+  and UPDATE statements without strong justification — adds a round-trip and a race window.
+- **Legacy `UpdateRequirement(id, priority, tags)` is DELETED.** Use
+  `UpdateRequirementFields(id, RequirementUpdate{Priority: &p, Tags: &t})` instead. Deleted
+  from four sites: SurrealStore impl (`internal/db/store.go`), in-memory store
+  (`internal/graph/store.go`), interface (`internal/graph/iface.go`), and tenant-filter
+  passthrough (`internal/graph/filtered.go`). Don't reintroduce as a convenience wrapper —
+  that's how the v2.6.5 NULL bug got into the codebase.
+- **`EnrichRequirement` GraphQL mutation no longer bumps `updated_at` when the LLM returns no
+  suggestions.** Before Phase 3, the mutation always issued an UPDATE (touching `updated_at`).
+  After Phase 3, `UpdateRequirementFields` short-circuits at `internal/db/store.go:1985` when
+  `len(sets) == 1` (only `updated_at` would change). This is more correct semantically but is
+  a behavioral shift — downstream consumers keying off `updated_at` to detect "recently
+  touched" should use a different signal.
+- **Audit `option<…>` writers schema-outward, not Go-pointer-inward.** For every `option<…>`
+  schema column in `internal/db/migrations/`, find its Go writer and verify it uses
+  CONTENT-payload, conditional-vars, or guarantees non-nil binding. Going Go-pointer-inward
+  (look for `*T` fields → check schema) misses the case where the Go field is a value type
+  but the schema column is `option<…>` — that pattern silently trips v2.6.5 with no
+  JSON-null safety net.
+
+v3.x migration is deferred (separate future ticket). Known break points: `SEARCH ANALYZER` → `FULLTEXT ANALYZER` in migration 033, ~30 `type::thing(…)` call sites need migration to `type::record`, audit for bare `$param =` assignments needing `LET`.
+
+Plan: `thoughts/shared/plans/active-2026-05-07-deliver-surrealdb-2.6.5-upgrade.md`
+Investigation: this session's research brief (sarah, in-conversation)
+Plane ticket: CA-179
+
 **2026-05-07 qwen3.6 confidence regression remediation (CA-173)** — 4 commits, `952f88e..4f3f079`.
 Restores Living Wiki deep-render confidence from the regressed 4H/0M/12L back toward
 the April baseline (14H/2L) for qwen3.6:35b-a3b-moe and analogous local models. CA-169
@@ -104,10 +169,15 @@ Load-bearing constraints for future-Claude:
   an explicit JSON null is what SurrealDB v2.2.1 rejects on `option<string>`
   fields. `SaveClusters` similarly conditionally includes `llm_label` in vars
   only when non-nil.
-- **Integration testcontainer pinned to `surrealdb/surrealdb:v2.2.1`** at
-  `internal/db/testutil_integration_test.go:31` (matches production). Don't bump
-  this without first verifying Phase 1 still passes — v2.3.5 had a different
-  tolerance for the SET+null path that masked the bug.
+- **Integration testcontainer pinned to `surrealdb/surrealdb:v2.6.5`** at
+  `internal/db/testutil_integration_test.go:31` (matches production — bumped from
+  v2.2.1 in CA-179). Version tolerance for `option<…>` NULL rejection is
+  **non-monotonic** across SurrealDB versions: v2.2.1 was lenient, v2.3.5 had
+  different tolerance that masked the bug during that window, v2.6.5 enforces strict
+  rejection. On any future bump, run the full integration suite against the new
+  version before landing — not just the targeted writer tests. The CA-174 + CA-179
+  fixes (CONTENT-payload + conditional-vars idioms) defend against any version that
+  falls anywhere on the tolerance spectrum.
 - **`Job.ProcessID` is the per-process UUID stamp**, generated once per
   orchestrator at `New()` and stamped on every job at `Create()` time only — NOT
   at `SetStatus(generating)`. The rolling-restart edge case (P1 creates, P2

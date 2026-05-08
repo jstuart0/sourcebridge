@@ -159,7 +159,7 @@ surrealdb:
   enabled: true
   image:
     repository: surrealdb/surrealdb
-    tag: v2.2.1
+    tag: v2.6.5
     pullPolicy: IfNotPresent
   port: 8000
   persistence:

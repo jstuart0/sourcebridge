@@ -1086,7 +1086,10 @@ func (r *mutationResolver) EnrichRequirement(ctx context.Context, requirementID 
 		}
 	}
 
-	updated := r.getStore(ctx).UpdateRequirement(requirementID, newPriority, newTags)
+	updated := r.getStore(ctx).UpdateRequirementFields(requirementID, graphstore.RequirementUpdate{
+		Priority: &newPriority,
+		Tags:     &newTags,
+	})
 	if updated == nil {
 		return nil, fmt.Errorf("failed to update requirement: %s", requirementID)
 	}

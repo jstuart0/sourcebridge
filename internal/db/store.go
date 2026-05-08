@@ -1932,25 +1932,6 @@ func (s *SurrealStore) GetSymbolsByFile(repoID string, filePath string) []*graph
 	return symbols
 }
 
-// UpdateRequirement updates the priority and tags on an existing requirement.
-func (s *SurrealStore) UpdateRequirement(id string, priority string, tags []string) *graph.StoredRequirement {
-	db := s.client.DB()
-	if db == nil {
-		return nil
-	}
-
-	// Refuse to update a trashed requirement. The mutation returns nil
-	// and the caller gets "requirement not found" — correct behaviour
-	// because from the caller's perspective the row is deleted.
-	rows, err := queryOne[[]surrealRequirement](ctx(), db,
-		"UPDATE type::thing('ca_requirement', $id) SET priority = $priority, tags = $tags, updated_at = time::now() WHERE deleted_at IS NONE RETURN AFTER",
-		map[string]any{"id": id, "priority": priority, "tags": tags})
-	if err != nil || len(rows) == 0 {
-		return nil
-	}
-	return rows[0].toStoredRequirement()
-}
-
 // UpdateRequirementFields applies a partial update, preserving any
 // field the caller leaves nil. Enforces externalId uniqueness per-repo
 // via a pre-check against non-trashed rows.

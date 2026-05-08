@@ -28,7 +28,7 @@ func startSurrealContainer(t *testing.T) *SurrealDB {
 	defer cancel()
 
 	req := testcontainers.ContainerRequest{
-		Image:        "surrealdb/surrealdb:v2.2.1",
+		Image:        "surrealdb/surrealdb:v2.6.5",
 		ExposedPorts: []string{"8000/tcp"},
 		Cmd: []string{
 			"start",

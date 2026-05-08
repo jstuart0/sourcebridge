@@ -279,10 +279,6 @@ func (f *TenantFilteredStore) GetRequirementsByIDs(ids []string) map[string]*Sto
 	return f.inner.GetRequirementsByIDs(ids)
 }
 
-func (f *TenantFilteredStore) UpdateRequirement(id string, priority string, tags []string) *StoredRequirement {
-	return f.inner.UpdateRequirement(id, priority, tags)
-}
-
 func (f *TenantFilteredStore) UpdateRequirementFields(id string, fields RequirementUpdate) *StoredRequirement {
 	return f.inner.UpdateRequirementFields(id, fields)
 }

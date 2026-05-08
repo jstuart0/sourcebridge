@@ -47,7 +47,7 @@ services:
 
   # SurrealDB — embedded document/graph database
   surrealdb:
-    image: surrealdb/surrealdb:v2.2.1
+    image: surrealdb/surrealdb:v2.6.5
     command: start --user root --pass root --log info file:/data/database.db
     ports:
       - "${SOURCEBRIDGE_SURREALDB_PORT:-8000}:8000"
