@@ -24,6 +24,83 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-08 audit-remediation wave 2: P5 + P9 + P2 (CA-239..CA-250, CA-304, CA-200)** — 3 commits, `2309b60..b4d7a08`.
+Continues the master remediation plan. Closes 14 of the remaining 32 Critical+High audit
+findings: 12 HIGH UX (P5), 1 CRITICAL data-loss (P9), 1 HIGH security cipher upgrade (P2).
+Master plan: `thoughts/shared/plans/active-2026-05-08-deliver-audit-remediation-master-plan.md`.
+
+P5 (UX terminology + a11y, `2309b60`) — twelve HIGH ruby-audit findings shipped together.
+Status badges → human labels + tooltips; queue jargon → plain English; "Cliff Notes" →
+"Field Guide" everywhere in user-facing surface; three-button toolbar → single contextual
+action; duplicate "Build understanding" button removed; div onClick patterns now expose
+proper button semantics (role, tabIndex, aria-expanded, onKeyDown, focus-visible);
+execution-trace select gets sr-only label; monitor page gets a skeleton during first
+poll; Test Connection JSON dump → success/failure callout; admin/knowledge auto-refreshes
+while generating.
+
+P9 (ReplaceIndexResult data correctness, `a37abb0`) — closed a CRITICAL silent data loss
+where re-indexing dropped every test-linkage edge. Two stacked bugs (DELETE missed
+ca_tests + relation re-insert loop only handled RelationCalls) combined to make
+GetTestsForSymbolPersisted return empty for every symbol after the second indexing pass.
+
+P2 (encryption-at-rest cipher hardening, `b4d7a08`) — replaced sbenc:v1's unsalted
+single-pass SHA-256 KDF with sbenc:v2's Argon2id (memory-hard, GPU-resistant) +
+per-installation salt. v1 envelopes are now rejected on decrypt with an explicit
+migration message; pre-release context (0 prod installs) accepts the aggressive
+re-save-via-Admin-UI migration. Salt derived deterministically from the encryption
+key via HMAC — zero operator burden, but documented as weaker than independent
+random salt with a follow-up tracked.
+
+Load-bearing constraints for future-Claude (wave 2):
+
+- **`secretcipher.NewAESGCMCipher` signature is `(passphrase, salt, allowUnencrypted)
+  → (*AESGCMCipher, error)`.** All 4 stores (git, llm config, llm profile,
+  livingwiki-repo-settings) update the bootstrap path to derive salt via
+  `DeriveInstallationSaltFromKey(key)` when no explicit salt option is provided.
+  Tests use `MustNewAESGCMCipher` (panic-on-error variant). Production wiring at
+  `cli/serve.go:402-415` derives `installSalt` once and shares it across both
+  gitCipher and llmCipher — keep this single-salt-per-installation invariant.
+- **`DeriveInstallationSaltFromKey` is HMAC-SHA256 with domain-separation tag
+  `"sourcebridge-installation-salt-v1"`.** Never change the tag without a follow-up
+  migration: every existing v2-encrypted row depends on this exact derivation.
+  Future independent-random-salt rollout MUST add a v3 envelope, not modify v1
+  derivation.
+- **`Validate()` JWT length gate fires only on operator-configured short secrets.**
+  Auto-generated path produces 64-hex-char (32 raw bytes) which clears trivially.
+  Tests that construct Config{} directly without going through Load() must seed
+  a 64-hex placeholder (existing pattern in config_test.go and tests/integration).
+- **CA-241 "Cliff Notes" → "Field Guide" rename is user-surface only.** The
+  internal artifact-type enum (`CLIFF_NOTES`), the Go struct names, and the gRPC
+  proto field names are unchanged. Don't rename them — they're stable contracts
+  with the worker, MCP, and persisted artifacts.
+- **CA-243 panel-level "Build understanding" button is REMOVED.** The page-header
+  button (`repositories/[id]/page.tsx`) is now the canonical trigger. Adding the
+  panel button back would re-introduce the redundant-mutation double-click bug.
+  The empty-state prompt directs users to the header.
+- **CA-242 button-consolidation rule.** When a knowledge artifact panel renders
+  actions: in-flight → Cancel only; stale or failed → Regenerate (primary); else
+  → Refresh (secondary). One button per state. Don't re-introduce simultaneous
+  Generate + Refresh + Cancel triples.
+- **CA-200 v1 envelope rejection is fail-closed.** ErrV1EnvelopeRejected fires
+  on every read; one-time-per-process ERROR log so log volume doesn't scale
+  with re-read frequency on a stale row. The migration path is operator-driven
+  (re-save via Admin UI) — there is no auto-migration. Don't add one without
+  threat-modeling the race against concurrent v2 encrypts.
+- **CA-304 fix preserves `RelationTests` AND `RelationCalls` in
+  ReplaceIndexResult.** Future relation types (e.g., `RelationImports`,
+  `RelationOverrides`) added to the indexer MUST be added to BOTH the
+  StoreIndexResult AND ReplaceIndexResult relation loops. The shape is
+  symmetric; deviating is what produced CA-304 in the first place.
+- **CA-304 DELETE block ordering is load-bearing.** Drop ca_tests AND ca_calls
+  before ca_symbol; ca_module + ca_file last. The ca_import deletion uses a
+  subquery against ca_file — that subquery must run before the ca_file DELETE.
+  SurrealDB does not enforce referential integrity on these tables, so order
+  matters only for query correctness, but the comment in store.go explains
+  this so a future maintainer doesn't reorder.
+
+Plan: `thoughts/shared/plans/active-2026-05-08-deliver-audit-remediation-master-plan.md`
+Audit synthesis: `thoughts/shared/audits/finished-2026-05-08-audit-full-codebase.md`
+
 **2026-05-08 audit-remediation wave 1: P4 + P3-partial + P1-subset + P7 (CA-256..260, CA-279, CA-280, CA-311, CA-204, CA-206, NEW-H1, CA-227, CA-228, CA-317, CA-229)** — 5 commits, `db1614c..4a9ac10`.
 First wave of the master remediation plan from the 2026-05-08 full codebase audit. Covers
 14 of the 47 Critical+High findings end-to-end, plus one new HIGH finding surfaced during
