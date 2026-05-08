@@ -78,7 +78,8 @@ root. All variables are optional and have sensible defaults.
 | Variable | Description | Default |
 |---|---|---|
 | `SOURCEBRIDGE_GRPC_SECRET` | Shared secret for API-to-worker gRPC auth | `dev-shared-secret` |
-| `SOURCEBRIDGE_JWT_SECRET` | JWT signing key | `dev-jwt-secret-change-me` |
+| `SOURCEBRIDGE_JWT_SECRET` | JWT signing key (≥32 bytes; CA-311 hard rejects shorter at startup) | publicly-known 64-hex placeholder (override with `openssl rand -hex 32`) |
+| `SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE` | (preferred) File path for the JWT signing key — wins over literal env var | (unset) |
 | `SOURCEBRIDGE_LLM_PROVIDER` | LLM backend: `anthropic`, `openai`, `ollama`, `vllm` | `ollama` |
 | `SOURCEBRIDGE_LLM_MODEL` | Model name | `qwen3:32b` |
 | `SOURCEBRIDGE_LLM_BASE_URL` | Base URL for the LLM API | (provider default) |

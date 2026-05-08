@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -481,6 +482,43 @@ func TestResolveJWTSecret_FileMissingFallsBackToEnv(t *testing.T) {
 	}
 	if source != "file-missing-fallback-env" {
 		t.Errorf("source: got %q, want file-missing-fallback-env", source)
+	}
+}
+
+// codex r2 High: explicit _FILE that's unreadable + no literal-env fallback
+// must FAIL CLOSED, not silently auto-generate. Otherwise a typoed path or
+// missing Secret mount creates per-process JWT keys = replica split-brain.
+func TestResolveJWTSecret_FileMissingNoFallback_ReturnsError(t *testing.T) {
+	os.Setenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE", "/tmp/nonexistent-jwt-secret-fail-closed")
+	defer os.Unsetenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE")
+
+	sc := SecurityConfig{JWTSecret: ""}
+	_, _, err := sc.ResolveJWTSecret()
+	if err == nil {
+		t.Fatal("ResolveJWTSecret() should return error when _FILE is set + unreadable + no literal fallback")
+	}
+	if !strings.Contains(err.Error(), "unreadable") {
+		t.Errorf("error should mention unreadable: %v", err)
+	}
+}
+
+// codex r2 High companion: empty file + no literal-env fallback also fails.
+func TestResolveJWTSecret_EmptyFileNoFallback_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "empty_jwt_secret_no_fallback")
+	if err := os.WriteFile(keyFile, []byte("   \n"), 0o600); err != nil {
+		t.Fatalf("write empty key file: %v", err)
+	}
+	os.Setenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE", keyFile)
+	defer os.Unsetenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE")
+
+	sc := SecurityConfig{JWTSecret: ""}
+	_, _, err := sc.ResolveJWTSecret()
+	if err == nil {
+		t.Fatal("ResolveJWTSecret() should return error when _FILE points to empty file + no literal fallback")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("error should mention empty: %v", err)
 	}
 }
 

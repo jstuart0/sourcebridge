@@ -30,25 +30,45 @@ The demo ships with intentionally weak secrets. Before exposing SourceBridge to 
 
 ### JWT Secret
 
-The JWT secret signs all user session tokens. The demo default is `dev-jwt-secret-change-me`.
+The JWT secret signs all user session tokens. **CA-311 (2026-05-08): the
+old `dev-secret-change-in-production` literal fallback was removed. The
+server now refuses to start when the resolved JWT secret is shorter than
+32 bytes**. The default `docker-compose` files ship with a publicly-known
+64-hex placeholder so the quickstart still boots; for any non-throwaway
+deployment, override it.
+
+Three ways to provide the secret, in order of preference:
 
 ```bash
-# Generate a strong secret
-openssl rand -base64 32
-```
+# 1. (preferred) File path — matches Vault / Postgres _FILE convention
+#    Files are higher-trust than env vars (no leak via /proc, docker
+#    inspect, or shell history).
+echo -n "$(openssl rand -hex 32)" > /run/secrets/sourcebridge-jwt
+SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE=/run/secrets/sourcebridge-jwt
 
-Set it via environment variable or config file:
+# 2. Literal env var
+SOURCEBRIDGE_SECURITY_JWT_SECRET=$(openssl rand -hex 32)
 
-```bash
-# Environment variable
-SOURCEBRIDGE_SECURITY_JWT_SECRET=your-generated-secret
-
-# Or in config.toml
+# 3. config.toml (file path)
 [security]
-jwt_secret = "your-generated-secret"
+jwt_secret_file = "/run/secrets/sourcebridge-jwt"
 ```
 
-If you change this after users have logged in, all existing sessions will be invalidated. Users will need to log in again.
+When BOTH are set, the file wins and a WARN is logged.
+
+When **neither** is set, the API auto-generates a 64-hex-char in-memory
+secret per process and emits a one-time INFO log. **Sessions invalidated
+on every restart in this mode** — production multi-replica deployments
+must provide the secret externally (file or env), otherwise replicas have
+different secrets and auth fails non-deterministically.
+
+The Helm chart's existing `randAlphaNum 32` Secret remains the
+recommended path for Kubernetes deployments; it produces a 32-character
+ASCII secret that satisfies the new length gate and is shared by all
+replicas via Kubernetes Secret mounting.
+
+If you change this after users have logged in, all existing sessions
+will be invalidated. Users will need to log in again.
 
 ### gRPC Auth Secret
 

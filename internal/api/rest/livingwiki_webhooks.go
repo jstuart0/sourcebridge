@@ -117,10 +117,18 @@ func RegisterLivingWikiRoutes(r chi.Router, deps LivingWikiWebhookDeps) {
 	// and refuses unauthenticated dispatch when the secret is unconfigured.
 	r.Post("/webhooks/confluence", h.confluenceWebhook)
 
-	// NEW-H1 (2026-05-08): /webhooks/notion-poll requires admin bearer
-	// auth. The endpoint is the trigger for an operator-controlled CronJob,
-	// not a SaaS push, so bearer is the cleaner fit (no shared-secret
-	// sprawl; the trigger ties to a real service-account API token).
+	// NEW-H1 (2026-05-08): /webhooks/notion-poll requires admin auth.
+	// The endpoint is the trigger for an operator-controlled CronJob,
+	// not a SaaS push. The production composition (router.go) wires
+	// authMiddleware (which accepts BOTH Bearer tokens and session cookies
+	// — see internal/auth/middleware.go) + RequireRole(admin). Bearer is
+	// the typical caller (CronJob with service-account API token), but
+	// admin operators testing manually via a logged-in browser session
+	// are also accepted. The route is mounted OUTSIDE the CSRF-protected
+	// API group; cookie-authenticated callers cannot be CSRF'd into this
+	// endpoint because (a) cross-origin POSTs from browsers cannot set
+	// arbitrary headers, and (b) the endpoint is JSON-content-type-only
+	// so simple-form POSTs are rejected at parse.
 	// Refuse to register if no auth middleware was provided — better to
 	// 404 than expose an unauthenticated dispatcher trigger.
 	if deps.NotionPollAuthMiddleware != nil {

@@ -75,10 +75,15 @@ Open [http://localhost:3000](http://localhost:3000) and create your admin accoun
 
 > **Security: set your secrets before exposing SourceBridge to a network.**
 >
-> The default compose file uses sentinel values (`INSECURE-DEFAULT-CHANGE-ME-NOW`)
-> for the database password, gRPC shared secret, and JWT signing key.  These are
+> The default compose files use sentinel values: `INSECURE-DEFAULT-CHANGE-ME-NOW`
+> for the database password and gRPC shared secret, and a publicly-known 64-hex
+> placeholder for the JWT signing key (CA-311: the old short fallback was
+> removed; the server now refuses to start with a JWT secret shorter than 32
+> bytes, but the 64-hex placeholder is syntactically valid). These are
 > intentionally loud and self-identifying — the API server will emit a repeating
-> warning until they are replaced.
+> warning until they are replaced. For production, prefer
+> `SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE` over the literal env var; see
+> `docs/going-to-production.md#jwt-secret` for the resolution chain.
 >
 > Run the init script once before starting the stack:
 >

@@ -49,6 +49,16 @@ type CredentialCheck struct {
 // matches a known insecure default sentinel. An empty slice means all
 // credentials are properly configured (or non-empty but unrecognized as a
 // shipped default).
+//
+// Note (CA-311 / codex r2 Low): length-based weakness for JWT secrets
+// specifically is enforced HARDER by config.Validate() (which rejects
+// secrets shorter than 32 bytes at startup, blocking the server from
+// booting). This helper is for runtime warning of recognizable shipped
+// defaults that pass the length gate but are publicly known. A short
+// non-sentinel secret reaches Validate() before reaching this helper, so
+// length-based warning here would be redundant for the JWT-secret path
+// and mis-targeted for the other credentials this helper inspects (gRPC
+// secret, surreal pass) which have no separate length contract.
 func InsecureCredentials(checks []CredentialCheck) []string {
 	var bad []string
 	for _, c := range checks {

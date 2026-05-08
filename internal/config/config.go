@@ -335,21 +335,30 @@ func (s SecurityConfig) ResolveJWTSecret() (key string, source string, err error
 	if filePath != "" {
 		data, readErr := os.ReadFile(filePath)
 		if readErr != nil {
-			slog.Error("JWT secret: SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE is set but file is unreadable; falling back to literal env",
-				"path", filePath, "err", readErr)
+			// codex r2 High: when _FILE is explicitly set, treat
+			// unreadable as a hard error UNLESS a literal env fallback
+			// is available. Falling through to "unset" + auto-generate
+			// would mask a typoed path / missing Secret mount / bad
+			// file mode and ephemeralize the JWT key per process,
+			// causing replica auth split-brain in multi-replica deploys.
 			if hasLiteralEnv {
+				slog.Warn("JWT secret: SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE is set but file is unreadable; falling back to literal env",
+					"path", filePath, "err", readErr)
 				return s.JWTSecret, "file-missing-fallback-env", nil
 			}
-			return "", "unset", nil
+			return "", "", fmt.Errorf("JWT secret: SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE is set to %q but the file is unreadable: %w (set SOURCEBRIDGE_SECURITY_JWT_SECRET as a literal-env fallback, or fix the file path / mount / permissions)", filePath, readErr)
 		}
 		trimmed := strings.TrimSpace(string(data))
 		if trimmed == "" {
-			slog.Error("JWT secret: SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE points to an empty file; falling back to literal env",
-				"path", filePath)
+			// Same rationale as the unreadable branch — explicit _FILE
+			// configuration must NOT silently degrade to auto-generated
+			// secrets.
 			if hasLiteralEnv {
+				slog.Warn("JWT secret: SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE points to an empty file; falling back to literal env",
+					"path", filePath)
 				return s.JWTSecret, "file-missing-fallback-env", nil
 			}
-			return "", "unset", nil
+			return "", "", fmt.Errorf("JWT secret: SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE is set to %q but the file is empty (set SOURCEBRIDGE_SECURITY_JWT_SECRET as a literal-env fallback, or write a >=32 byte secret to the file with: openssl rand -hex 32 > %s)", filePath, filePath)
 		}
 		if hasLiteralEnv {
 			slog.Warn("JWT secret resolved from file; SOURCEBRIDGE_SECURITY_JWT_SECRET env var is set but ignored — file precedence is by design (matches Vault / Postgres convention)",
