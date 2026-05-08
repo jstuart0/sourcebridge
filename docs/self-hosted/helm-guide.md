@@ -164,7 +164,7 @@ helm install sourcebridge sourcebridge/sourcebridge \
 Access via port-forward:
 
 ```bash
-kubectl -n sourcebridge port-forward svc/sourcebridge-web 3000:3000
+kubectl -n sourcebridge port-forward svc/sourcebridge-web 3300:3000
 kubectl -n sourcebridge port-forward svc/sourcebridge-api 8080:8080
 ```
 

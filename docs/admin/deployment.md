@@ -26,7 +26,7 @@ services:
   web:
     image: ghcr.io/sourcebridge/sourcebridge-web:latest
     ports:
-      - "3000:3000"
+      - "3300:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://api:8080
 

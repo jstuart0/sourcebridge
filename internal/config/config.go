@@ -698,7 +698,7 @@ func Defaults() *Config {
 			HTTPPort:      8080,
 			GRPCPort:      50051,
 			PublicBaseURL: "http://localhost:8080",
-			CORSOrigins:   []string{"http://localhost:3000"},
+			CORSOrigins:   []string{"http://localhost:3300"},
 			MaxBodySize:   10 * 1024 * 1024, // 10MB
 		},
 		Storage: StorageConfig{

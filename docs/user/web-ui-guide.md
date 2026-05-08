@@ -4,7 +4,7 @@ The SourceBridge.ai web dashboard provides a visual interface for exploring your
 
 ## Accessing the Web UI
 
-The web UI is available at http://localhost:3000 when running with Docker Compose, or after starting `npm run dev` in the `web/` directory.
+The web UI is available at http://localhost:3300 when running with Docker Compose, or after starting `npm run dev` in the `web/` directory.
 
 ## Dashboard
 

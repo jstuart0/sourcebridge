@@ -71,7 +71,7 @@ curl -O https://raw.githubusercontent.com/sourcebridge-ai/sourcebridge/main/dock
 docker compose -f docker-compose.hub.yml up -d
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and create your admin account.
+Open [http://localhost:3300](http://localhost:3300) and create your admin account.
 
 > **Security: set your secrets before exposing SourceBridge to a network.**
 >
@@ -210,7 +210,7 @@ cd sourcebridge
 ./demo.sh
 ```
 
-The demo starts SourceBridge, indexes a 44-file sample API, and generates cliff notes, code tours, and architecture diagrams. Open [http://localhost:3000](http://localhost:3000) to explore.
+The demo starts SourceBridge, indexes a 44-file sample API, and generates cliff notes, code tours, and architecture diagrams. Open [http://localhost:3300](http://localhost:3300) to explore.
 
 ### CLI — one line, any platform
 

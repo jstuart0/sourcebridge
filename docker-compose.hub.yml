@@ -163,7 +163,10 @@ services:
   web:
     image: sourcebridge/sourcebridge-web:latest
     ports:
-      - "${SOURCEBRIDGE_WEB_PORT:-3000}:3000"
+      # Host port defaults to 3300 (3000 is commonly taken on dev machines).
+      # Override via SOURCEBRIDGE_WEB_PORT in .env if 3300 collides too.
+      # Container side stays 3000.
+      - "${SOURCEBRIDGE_WEB_PORT:-3300}:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://sourcebridge:8080
       - SOURCEBRIDGE_WEB_DEV_PROXY=http://sourcebridge:8080

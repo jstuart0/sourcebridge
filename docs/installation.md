@@ -55,7 +55,7 @@ EOF
 docker compose up -d
 ```
 
-Open **http://localhost:3000** once the containers are healthy.
+Open **http://localhost:3300** once the containers are healthy.
 
 ### Verifying the install
 
@@ -475,7 +475,7 @@ for file changes if you have `air` installed.
 make dev-web
 ```
 
-The Next.js dev server starts at http://localhost:3000 with hot module replacement.
+The Next.js dev server starts at http://localhost:3300 with hot module replacement.
 
 **Terminal 3 -- Worker:**
 ```bash
@@ -822,7 +822,7 @@ To resolve, either stop the conflicting process or change the port mapping in
 If you override `SOURCEBRIDGE_WEB_PORT` (e.g. to `3300` because port 3000 is
 taken), also set `SOURCEBRIDGE_SERVER_CORS_ORIGINS` on the API container to
 include the new origin. The Go API rejects requests whose `Origin` header is not
-in the allowlist (default: `["http://localhost:3000"]`).
+in the allowlist (default: `["http://localhost:3300"]`).
 
 ```
 SOURCEBRIDGE_SERVER_CORS_ORIGINS='["http://localhost:3300"]'

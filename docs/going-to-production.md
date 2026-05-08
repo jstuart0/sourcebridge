@@ -302,7 +302,7 @@ SOURCEBRIDGE_SERVER_PUBLIC_BASE_URL=https://sourcebridge.yourcompany.com
 
 ### CORS Origins
 
-The demo allows `http://localhost:3000`. In production, set this to your actual web UI origin:
+The demo allows `http://localhost:3300`. In production, set this to your actual web UI origin:
 
 ```bash
 SOURCEBRIDGE_SERVER_CORS_ORIGINS=https://sourcebridge.yourcompany.com

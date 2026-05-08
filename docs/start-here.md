@@ -13,7 +13,7 @@ You just ran SourceBridge. Here's what happened and what to do next.
 
 ### Explore the Demo
 
-Open [http://localhost:3000](http://localhost:3000) and click on **acme-api**:
+Open [http://localhost:3300](http://localhost:3300) and click on **acme-api**:
 
 - **Cliff Notes** — Read the AI-generated summary of the system
 - **Code Tour** — Walk through the codebase with guided stops

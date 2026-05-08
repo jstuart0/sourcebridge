@@ -54,7 +54,7 @@ docker compose exec -T sourcebridge sourcebridge ask "what does processPayment d
 echo "   PASS: Ask executed"
 
 echo "7. Checking web UI..."
-if curl -sf http://localhost:3000 | grep -q "html\|HTML"; then
+if curl -sf http://localhost:3300 | grep -q "html\|HTML"; then
   echo "   PASS: Web UI returns HTML"
 else
   echo "   WARN: Web UI may not be ready"

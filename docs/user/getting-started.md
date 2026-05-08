@@ -127,7 +127,7 @@ sourcebridge ask "What does the processPayment function do?"
 
 ## Web UI
 
-Open http://localhost:3000 to access the web dashboard with:
+Open http://localhost:3300 to access the web dashboard with:
 
 - Repository browser
 - Requirements list with linked code

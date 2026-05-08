@@ -420,7 +420,7 @@ ${BOLD}=======================================${RESET}
   SourceBridge.ai is running.
 ${BOLD}=======================================${RESET}
 
-  Web UI:      ${GREEN}http://localhost:3000${RESET}
+  Web UI:      ${GREEN}http://localhost:3300${RESET}
   API server:  http://localhost:8080
   Health:      http://localhost:8080/healthz
 
@@ -589,7 +589,7 @@ ${BOLD}=======================================${RESET}
     cd workers && uv run python -m workers
 
   Once running:
-    Web UI:      ${GREEN}http://localhost:3000${RESET}
+    Web UI:      ${GREEN}http://localhost:3300${RESET}
     API server:  http://localhost:8080
     Health:      http://localhost:8080/healthz
 
