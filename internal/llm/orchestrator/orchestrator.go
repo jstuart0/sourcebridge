@@ -67,6 +67,13 @@ type Config struct {
 	// state (e.g. mark the linked knowledge artifact as failed too).
 	// Nil means no callback.
 	OnStaleJob func(job *llm.Job)
+	// OnJobFailed is called whenever any failure path marks a job as failed:
+	// finalizeFailed (retry exhaustion), the reaper (stale-generating), or
+	// reconcileZombieJobs (startup zombie). The reaper calls both OnStaleJob
+	// and OnJobFailed; they handle different concerns and must both fire.
+	// The callback always receives a non-nil *llm.Job.
+	// Nil means no callback.
+	OnJobFailed func(job *llm.Job)
 	// SkipStartupReconciliation disables the zombie-job reconciliation pass
 	// that normally runs synchronously inside New() before workers start.
 	// Set to true in tests that pre-populate the store with active jobs from
@@ -559,10 +566,14 @@ func (o *Orchestrator) reapStaleJobs() {
 
 		// Both writes succeeded. Now safe to release the inflight key
 		// (allowing a fresh user-initiated run to take over) and fire
-		// the OnStaleJob callback.
+		// callbacks. OnStaleJob handles artifact/living-wiki side-effects;
+		// OnJobFailed handles understanding-stage propagation. Both must fire.
 		o.inflight.release(job.TargetKey)
 		if o.cfg.OnStaleJob != nil {
 			o.cfg.OnStaleJob(job)
+		}
+		if o.cfg.OnJobFailed != nil {
+			o.cfg.OnJobFailed(job)
 		}
 	}
 }
@@ -654,6 +665,9 @@ func (o *Orchestrator) reconcileZombieJobs() {
 		// Both writes succeeded — now safe to release the inflight key so
 		// a fresh enqueue can start for this target_key.
 		o.inflight.release(job.TargetKey)
+		if o.cfg.OnJobFailed != nil {
+			o.cfg.OnJobFailed(job)
+		}
 		reconciled++
 		reconciledIDs = append(reconciledIDs, job.ID)
 	}
@@ -1563,6 +1577,14 @@ func (o *Orchestrator) finalizeFailed(jobID string, req *llm.EnqueueRequest, err
 	if job != nil {
 		o.metrics.record(req.Subsystem, req.JobType, job.Elapsed(), llm.StatusFailed)
 		o.publish(llm.JobEvent{Kind: llm.EventFailed, Job: job})
+		// OnJobFailed fires inside the nil-guard so the callback can safely
+		// dereference job.ArtifactID and job.JobType. If store.GetByID returns
+		// nil (transient store degradation), the callback intentionally does not
+		// fire — the understanding row will be caught by the next reaper sweep
+		// or startup reconciliation. Do not move this call outside the guard.
+		if o.cfg.OnJobFailed != nil {
+			o.cfg.OnJobFailed(job)
+		}
 	}
 	_ = o.AppendJobLog(jobID, llm.LogLevelError, "failed", "job_failed", msg, map[string]any{
 		"error_code": code,

@@ -460,6 +460,30 @@ func (s *MemStore) MarkRepositoryUnderstandingNeedsRefresh(repoID string) error 
 	return nil
 }
 
+func (s *MemStore) MarkRepositoryUnderstandingFailed(understandingID, errorCode, errorMessage string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	u := s.understandings[understandingID]
+	if u == nil {
+		return nil // nothing to fail; treat as a no-op
+	}
+	// Gate matches the SurrealDB WHERE clause: only running stages may
+	// transition to FAILED. A late callback on an already-terminal row
+	// (e.g. READY from a successful concurrent retry) must not clobber it.
+	if !u.Stage.IsRunning() {
+		return nil
+	}
+	u.Stage = UnderstandingFailed
+	u.Progress = 0
+	u.ProgressPhase = ""
+	u.ProgressMessage = ""
+	u.ErrorCode = errorCode
+	u.ErrorMessage = errorMessage
+	u.UpdatedAt = time.Now()
+	return nil
+}
+
 func (s *MemStore) UpdateRepositoryUnderstandingProgress(id string, progress float64, phase, message string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

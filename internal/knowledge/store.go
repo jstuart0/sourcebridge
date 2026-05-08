@@ -53,6 +53,12 @@ type KnowledgeStore interface {
 	GetRepositoryUnderstanding(repoID string, scope ArtifactScope) *RepositoryUnderstanding
 	GetRepositoryUnderstandings(repoID string) []*RepositoryUnderstanding
 	MarkRepositoryUnderstandingNeedsRefresh(repoID string) error
+	// MarkRepositoryUnderstandingFailed transitions a running understanding row
+	// (stage BUILDING_TREE or DEEPENING) to FAILED, zeroes progress fields, and
+	// records the job error code and message. The gate on running stages is
+	// intentional: a late callback must not clobber a READY row from a successful
+	// concurrent retry. Rows already in a terminal state are silently left alone.
+	MarkRepositoryUnderstandingFailed(understandingID string, errorCode, errorMessage string) error
 	// UpdateRepositoryUnderstandingProgress sets the in-progress percentage,
 	// phase label, and human-readable message on the understanding row so the
 	// UI can surface live motion during the build (analogous to

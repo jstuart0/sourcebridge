@@ -24,6 +24,72 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-08 `build_repository_understanding` failure leaves stage stuck (CA-180)** — N commits, `<range>` (TODO: fill after commit).
+When a `build_repository_understanding` job failed for any reason (LLM unreachable, retry
+exhaustion, reaper kill, or startup zombie reconciliation), the `ca_repository_understanding.stage`
+field was not transitioned to `FAILED`. It stayed stuck at whatever in-progress stage was active
+(`BUILDING_TREE` or `DEEPENING`), so the repo screen kept showing "Generating…" indefinitely while
+the jobs screen correctly showed the job as failed. Two stacked bugs closed together.
+
+Backend (root cause): new `MarkRepositoryUnderstandingFailed(understandingID, errorCode, errorMessage string) error`
+method added to the `KnowledgeStore` interface with implementations in SurrealStore
+(`internal/db/knowledge_store.go`), MemStore (`internal/knowledge/memstore.go`), and the test
+mock (`internal/api/rest/mcp_test.go`). New `OnJobFailed func(*llm.Job)` callback added to
+`orchestrator.Config` and wired from all three failure paths in the orchestrator:
+`finalizeFailed` (retry exhaustion), the reaper stale-job loop (alongside the existing
+`OnStaleJob`), and `reconcileZombieJobs` (startup reconciliation — CA-175 origin; previously had
+no callback at all). Callback is registered in `internal/api/rest/router.go` gated on
+`job.JobType == "build_repository_understanding"`. The SQL update gates on
+`WHERE stage INSIDE ['building_tree', 'deepening']` for idempotency.
+
+Frontend (mask fix): `understandingProgressJobView` at `knowledge-tab.tsx:460-477` previously
+synthesized a hardcoded `status: "generating"` view for any non-pending/non-generating liveJob.
+Now returns `liveJob` whenever non-null; only synthesizes when no live job exists. The `JobProgress`
+component already renders `failed` and `cancelled` correctly — no component change needed.
+
+Known cosmetic gap (pre-existing, not a blocker): `error_code` on the written understanding row
+sometimes lands as `""` instead of the expected code — a timing window where `GetByID` reads the
+job record before `SetError` fully commits. The router-side fallback (`"" → "JOB_FAILED"`) exists
+but did not always fire as expected in manual repro. `errorMessage` carries the diagnostic
+information. The follow-up ticket **CA-TBD-knowledge-artifact-reconciler-coverage** tracks the
+broader gap: the reconciler-callback pattern is unimplemented for living-wiki and knowledge-artifact
+jobs (they have the same stuck-on-failure symptom on process restart via that path).
+
+Load-bearing constraints for future-Claude:
+
+- **`OnJobFailed` must fire from all three failure paths.** The reconciler path (`reconcileZombieJobs`,
+  CA-175 origin) had no failure callback before CA-180. If a future change adds a fourth job-failure
+  path (e.g., manual cancel-as-fail, force-stop), it must also invoke `OnJobFailed` or understanding
+  rows will get stuck again.
+- **`OnJobFailed` fires inside the `if job != nil` guard in `finalizeFailed`** (after
+  `o.publish(EventFailed)`). If `store.GetByID` returns nil (transient store degradation), the
+  callback intentionally does not fire — startup reconciliation catches the orphan on the next
+  process restart. Do not move the call outside the guard; it would nil-deref on `job.ArtifactID`.
+- **The reaper calls both `OnStaleJob` and `OnJobFailed`.** Do not deduplicate. They handle
+  different concerns: `OnStaleJob` drives artifact/living-wiki side-effects already wired at
+  `router.go:464`; `OnJobFailed` drives understanding-stage propagation. Collapsing them would
+  break one or the other path.
+- **Receiver is `s.knowledgeStore`, not `s.store`.** `s.store` is `graphstore.GraphStore`
+  (`router.go:280`); `s.knowledgeStore` is `knowledge.KnowledgeStore` (`router.go:281`). The
+  existing `OnStaleJob` callback at `:465` already establishes this convention. Don't route
+  understanding-store writes through the graphstore.
+- **Idempotency gate (`WHERE stage INSIDE ['building_tree', 'deepening']`) is load-bearing.**
+  Re-firing `MarkRepositoryUnderstandingFailed` on an already-`FAILED` row is a no-op. This is
+  what makes the 3-path callback safe under concurrent failure events. Do not relax or remove it.
+- **`KnowledgeStore` has THREE implementations**: SurrealStore (`internal/db/knowledge_store.go`),
+  MemStore (`internal/knowledge/memstore.go`), and the test mock
+  (`internal/api/rest/mcp_test.go:163`). Adding a method to the interface requires updating all
+  three or the build breaks. Verified with `grep -rn "MarkRepositoryUnderstandingNeedsRefresh"`.
+- **`understandingProgressJobView` must return `liveJob` whenever non-null.** The previous
+  `pending|generating`-only filter is what created the hardcoded-"generating" fallback bug. Do not
+  reintroduce a status-specific filter on the early-return path.
+- **Follow-up scope (out of CA-180):** `ca_knowledge_artifact` and living-wiki jobs have the same
+  reconciler-no-callback gap (on process restart, those job types also lack an `OnJobFailed`-
+  equivalent on the `reconcileZombieJobs` path). Tracked as
+  **CA-TBD-knowledge-artifact-reconciler-coverage**.
+
+Plan: `thoughts/shared/plans/active-2026-05-08-deliver-understanding-stage-stuck-on-failure.md`
+
 **2026-05-07 SurrealDB v2.6.5 upgrade + option-field NULL remediation (CA-179)** — 1 commit, `6951279`.
 Upgrades the SurrealDB integration testcontainer and production pin from v2.2.1 to v2.6.5
 across 4 implementation phases. The upgrade surfaces that v2.6.5 enforces strict rejection

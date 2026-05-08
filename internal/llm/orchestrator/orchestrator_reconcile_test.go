@@ -5,13 +5,18 @@
 // Each test exercises a specific invariant of reconcileZombieJobs — see
 // the plan at thoughts/shared/plans/active-2026-05-07-diagnose-knowledge-slot-stall.md
 // Phase 2 Step 2.5 for the design rationale behind each case.
+//
+// CA-180 tests (OnJobFailed dispatch) are appended at the end of this file.
 
 package orchestrator
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -405,5 +410,167 @@ func TestReconcileZombieJobs_LogsPassEvent(t *testing.T) {
 	got := orch.GetJob(zombieID)
 	if got == nil || got.Status != llm.StatusFailed {
 		t.Fatalf("expected zombie StatusFailed; got %v", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CA-180: OnJobFailed callback dispatch tests
+//
+// Each test verifies that Config.OnJobFailed fires from one of the three
+// orchestrator failure paths. Fresh construction blocks are used (not
+// newReconcileOrchestrator) because that helper does not expose Config for
+// caller mutation — wiring OnJobFailed into cfg BEFORE New() is the key
+// requirement; a nil callback silently does nothing.
+// ---------------------------------------------------------------------------
+
+// TestOnJobFailed_FinalizeFailedPath verifies that OnJobFailed is invoked
+// when a job exhausts its retry budget (the finalizeFailed path). The job's
+// Run function returns an error immediately so it fails on the first attempt.
+func TestOnJobFailed_FinalizeFailedPath(t *testing.T) {
+	var capturedJobs []*llm.Job
+	var mu sync.Mutex
+
+	store := llm.NewMemStore()
+	cfg := Config{
+		MaxConcurrency:            1,
+		ProgressDebounce:          5 * time.Millisecond,
+		Retry:                     RetryPolicy{MaxAttempts: 1}, // fail on first attempt
+		SkipStartupReconciliation: true,
+		OnJobFailed: func(job *llm.Job) {
+			mu.Lock()
+			capturedJobs = append(capturedJobs, job)
+			mu.Unlock()
+		},
+	}
+	orch := New(store, cfg)
+	t.Cleanup(func() { _ = orch.Shutdown(2 * time.Second) })
+
+	job, err := orch.Enqueue(&llm.EnqueueRequest{
+		Subsystem:   llm.SubsystemKnowledge,
+		LLMProvider: "test",
+		JobType:     "build_repository_understanding",
+		ArtifactID:  "understanding-id-finalizer",
+		TargetKey:   "onfailed-finalize-" + uuid.NewString(),
+		Run: func(rt llm.Runtime) error {
+			return fmt.Errorf("simulated llm failure")
+		},
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Wait for the job to fail.
+	waitFor(t, 3*time.Second, func() bool {
+		j := orch.GetJob(job.ID)
+		return j != nil && j.Status == llm.StatusFailed
+	})
+
+	mu.Lock()
+	n := len(capturedJobs)
+	mu.Unlock()
+	if n == 0 {
+		t.Fatal("expected OnJobFailed to fire from finalizeFailed; got 0 calls")
+	}
+	mu.Lock()
+	captured := capturedJobs[0]
+	mu.Unlock()
+	if captured.ID != job.ID {
+		t.Fatalf("OnJobFailed received wrong job: got %s, want %s", captured.ID, job.ID)
+	}
+}
+
+// TestOnJobFailed_ReaperPath verifies that OnJobFailed fires when the reaper
+// marks a generating job as stale.
+func TestOnJobFailed_ReaperPath(t *testing.T) {
+	var callCount atomic.Int64
+
+	store := llm.NewMemStore()
+	cfg := Config{
+		MaxConcurrency:            1,
+		ProgressDebounce:          5 * time.Millisecond,
+		Retry:                     RetryPolicy{MaxAttempts: 1},
+		SkipStartupReconciliation: true,
+		OnJobFailed: func(job *llm.Job) {
+			callCount.Add(1)
+		},
+	}
+	orch := New(store, cfg)
+	t.Cleanup(func() { _ = orch.Shutdown(2 * time.Second) })
+
+	hold := make(chan struct{})
+	t.Cleanup(func() { close(hold) })
+
+	job, err := orch.Enqueue(&llm.EnqueueRequest{
+		Subsystem:   llm.SubsystemKnowledge,
+		LLMProvider: "test",
+		JobType:     "build_repository_understanding",
+		ArtifactID:  "understanding-id-reaper",
+		TargetKey:   "onfailed-reaper-" + uuid.NewString(),
+		RunWithContext: func(ctx context.Context, _ llm.Runtime) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-hold:
+				return nil
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Wait until the worker sets StatusGenerating before backdating.
+	waitFor(t, 2*time.Second, func() bool {
+		j := orch.GetJob(job.ID)
+		return j != nil && j.Status == llm.StatusGenerating
+	})
+
+	// Backdate past staleGeneratingThreshold so the reaper picks it up.
+	backdate(t, orch, job.ID, staleGeneratingThreshold+time.Second)
+	orch.reapStaleJobs()
+
+	waitFor(t, 2*time.Second, func() bool {
+		j := orch.GetJob(job.ID)
+		return j != nil && j.Status == llm.StatusFailed
+	})
+
+	if callCount.Load() == 0 {
+		t.Fatal("expected OnJobFailed to fire from reaper; got 0 calls")
+	}
+}
+
+// TestOnJobFailed_ReconcilerPath verifies that OnJobFailed fires when
+// reconcileZombieJobs marks a startup zombie as failed. The orchestrator is
+// constructed with reconciliation enabled and a pre-seeded stale zombie.
+func TestOnJobFailed_ReconcilerPath(t *testing.T) {
+	var callCount atomic.Int64
+
+	priorPID := "old-proc-onfailed-test"
+	store, zombieID := newReconcileStore(t, priorPID, time.Now().Add(-5*time.Minute))
+
+	// Wire OnJobFailed BEFORE New() — this is the critical requirement.
+	// reconcileZombieJobs runs synchronously inside New() so the callback
+	// must already be set on cfg at that point.
+	cfg := Config{
+		MaxConcurrency:            0,
+		ProgressDebounce:          5 * time.Millisecond,
+		Retry:                     RetryPolicy{MaxAttempts: 1},
+		SkipStartupReconciliation: false, // exercise the reconciler path
+		OnJobFailed: func(job *llm.Job) {
+			callCount.Add(1)
+		},
+	}
+	orch := New(store, cfg)
+	t.Cleanup(func() { _ = orch.Shutdown(2 * time.Second) })
+
+	// Reconciliation runs inside New() — by the time we reach here the
+	// zombie must already be failed and the callback must have fired.
+	zombie := orch.GetJob(zombieID)
+	if zombie == nil || zombie.Status != llm.StatusFailed {
+		t.Fatalf("expected zombie reconciled to StatusFailed; got %v", zombie)
+	}
+
+	if callCount.Load() == 0 {
+		t.Fatal("expected OnJobFailed to fire from reconcileZombieJobs; got 0 calls")
 	}
 }

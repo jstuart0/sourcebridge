@@ -1298,6 +1298,30 @@ func (s *SurrealStore) MarkRepositoryUnderstandingNeedsRefresh(repoID string) er
 	return err
 }
 
+func (s *SurrealStore) MarkRepositoryUnderstandingFailed(understandingID, errorCode, errorMessage string) error {
+	db := s.client.DB()
+	if db == nil {
+		return fmt.Errorf("database not connected")
+	}
+	_, err := queryOne[interface{}](ctx(), db,
+		`UPDATE type::thing('ca_repository_understanding', $id)
+		 SET stage = $stage,
+		     progress = 0,
+		     progress_phase = '',
+		     progress_message = '',
+		     error_code = $error_code,
+		     error_message = $error_message,
+		     updated_at = time::now()
+		 WHERE stage INSIDE ['building_tree', 'deepening']`,
+		map[string]any{
+			"id":            understandingID,
+			"stage":         string(knowledge.UnderstandingFailed),
+			"error_code":    errorCode,
+			"error_message": errorMessage,
+		})
+	return err
+}
+
 func (s *SurrealStore) UpdateRepositoryUnderstandingProgress(id string, progress float64, phase, message string) error {
 	db := s.client.DB()
 	if db == nil {

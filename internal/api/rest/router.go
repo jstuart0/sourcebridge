@@ -469,6 +469,37 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			persistStaleLivingWikiResult(s.livingWikiJobResultStore, job)
 		}
 	}
+	// OnJobFailed fires from all three failure paths (finalizeFailed,
+	// reaper, reconcileZombieJobs) and propagates the failure into the
+	// ca_repository_understanding row so the repo screen shows "Failed"
+	// instead of "generating" indefinitely.
+	// Receiver is s.knowledgeStore (knowledge.KnowledgeStore at router.go:281),
+	// not s.store (graphstore.GraphStore) — same receiver OnStaleJob uses above.
+	orchCfg.OnJobFailed = func(job *llm.Job) {
+		if job == nil || s.knowledgeStore == nil {
+			return
+		}
+		if job.JobType != "build_repository_understanding" {
+			return
+		}
+		if job.ArtifactID == "" {
+			return
+		}
+		code := job.ErrorCode
+		if code == "" {
+			code = "JOB_FAILED"
+		}
+		msg := job.ErrorMessage
+		if msg == "" {
+			msg = "Repository understanding job failed"
+		}
+		if err := s.knowledgeStore.MarkRepositoryUnderstandingFailed(job.ArtifactID, code, msg); err != nil {
+			slog.Warn("mark_repository_understanding_failed_error",
+				"job_id", job.ID,
+				"understanding_id", job.ArtifactID,
+				"error", err)
+		}
+	}
 	s.orchestrator = orchestrator.New(s.jobStore, orchCfg)
 	if s.queueControlStore != nil {
 		if rec, err := s.queueControlStore.LoadQueueControl(); err == nil && rec != nil {

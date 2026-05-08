@@ -579,3 +579,108 @@ func TestUpdateKnowledgeArtifactProgressIgnoresTerminalArtifacts(t *testing.T) {
 		})
 	}
 }
+
+// TestMarkRepositoryUnderstandingFailed covers the three-case idempotency
+// contract for the MemStore implementation (mirrors the SurrealStore integration
+// test in internal/db/repository_understanding_integration_test.go).
+func TestMarkRepositoryUnderstandingFailed(t *testing.T) {
+	t.Parallel()
+	scope := (&ArtifactScope{ScopeType: ScopeRepository}).NormalizePtr()
+	const errCode = "DEADLINE_EXCEEDED"
+	const errMsg = "retry exhaustion"
+
+	for _, startStage := range []RepositoryUnderstandingStage{
+		UnderstandingBuildingTree,
+		UnderstandingDeepening,
+	} {
+		startStage := startStage
+		t.Run("from_"+string(startStage), func(t *testing.T) {
+			t.Parallel()
+			s := NewMemStore()
+			repoID := "repo-fail-" + string(startStage)
+			row, err := s.StoreRepositoryUnderstanding(&RepositoryUnderstanding{
+				RepositoryID:    repoID,
+				Scope:           scope,
+				Stage:           startStage,
+				TreeStatus:      UnderstandingTreePartial,
+				Progress:        0.55,
+				ProgressPhase:   "running",
+				ProgressMessage: "doing stuff",
+			})
+			if err != nil || row == nil {
+				t.Fatalf("seed %s: err=%v row=%v", startStage, err, row)
+			}
+
+			if err := s.MarkRepositoryUnderstandingFailed(row.ID, errCode, errMsg); err != nil {
+				t.Fatalf("MarkRepositoryUnderstandingFailed from %s: %v", startStage, err)
+			}
+
+			got := s.GetRepositoryUnderstanding(repoID, *scope)
+			if got == nil {
+				t.Fatal("GetRepositoryUnderstanding after failure returned nil")
+			}
+			if got.Stage != UnderstandingFailed {
+				t.Fatalf("expected stage=failed, got %s", got.Stage)
+			}
+			if got.Progress != 0 || got.ProgressPhase != "" || got.ProgressMessage != "" {
+				t.Fatalf("expected progress zeroed, got progress=%v phase=%q message=%q",
+					got.Progress, got.ProgressPhase, got.ProgressMessage)
+			}
+			if got.ErrorCode != errCode {
+				t.Fatalf("expected error_code=%q, got %q", errCode, got.ErrorCode)
+			}
+			if got.ErrorMessage != errMsg {
+				t.Fatalf("expected error_message=%q, got %q", errMsg, got.ErrorMessage)
+			}
+
+			// Idempotent re-fire: calling again on FAILED must be a no-op.
+			if err := s.MarkRepositoryUnderstandingFailed(row.ID, "SECOND_CALL", "should be ignored"); err != nil {
+				t.Fatalf("idempotent re-fire: %v", err)
+			}
+			again := s.GetRepositoryUnderstanding(repoID, *scope)
+			if again.ErrorCode != errCode {
+				t.Fatalf("idempotent re-fire overwrote error_code: got %q", again.ErrorCode)
+			}
+		})
+	}
+
+	t.Run("no_op_from_ready", func(t *testing.T) {
+		t.Parallel()
+		s := NewMemStore()
+		repoID := "repo-fail-noop-ready"
+		row, err := s.StoreRepositoryUnderstanding(&RepositoryUnderstanding{
+			RepositoryID: repoID,
+			Scope:        scope,
+			Stage:        UnderstandingReady,
+			TreeStatus:   UnderstandingTreeComplete,
+		})
+		if err != nil || row == nil {
+			t.Fatalf("seed ready: err=%v row=%v", err, row)
+		}
+
+		if err := s.MarkRepositoryUnderstandingFailed(row.ID, errCode, errMsg); err != nil {
+			t.Fatalf("MarkRepositoryUnderstandingFailed on READY: %v", err)
+		}
+
+		got := s.GetRepositoryUnderstanding(repoID, *scope)
+		if got == nil {
+			t.Fatal("post-no-op lookup returned nil")
+		}
+		if got.Stage != UnderstandingReady {
+			t.Fatalf("expected stage=ready unchanged, got %s", got.Stage)
+		}
+		// Error fields must not have been written.
+		if got.ErrorCode != "" {
+			t.Fatalf("expected error_code empty on READY row, got %q", got.ErrorCode)
+		}
+	})
+
+	t.Run("no_op_on_missing_id", func(t *testing.T) {
+		t.Parallel()
+		s := NewMemStore()
+		// A non-existent ID must return nil (no-op), not an error.
+		if err := s.MarkRepositoryUnderstandingFailed("nonexistent", errCode, errMsg); err != nil {
+			t.Fatalf("expected no-op for missing ID, got error: %v", err)
+		}
+	})
+}

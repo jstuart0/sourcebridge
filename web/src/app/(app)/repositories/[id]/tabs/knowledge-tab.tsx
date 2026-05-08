@@ -457,11 +457,15 @@ function renderCliffNotesSectionProvenance(section: KnowledgeSection) {
   );
 }
 
-function understandingProgressJobView(
+// exported for testing (understandingProgressJobView_test.tsx)
+export function understandingProgressJobView(
   liveJob: RepoJobView | null | undefined,
   understanding: RepositoryUnderstanding | null | undefined,
 ): LLMJobView {
-  if (liveJob && (liveJob.status === "pending" || liveJob.status === "generating")) return liveJob;
+  // Return the live job for any status (pending, generating, failed, cancelled,
+  // ready). Only synthesize a "generating" placeholder when there is no live job
+  // at all — avoids permanently showing "generating" when the job has failed.
+  if (liveJob) return liveJob;
   const updated = understanding?.updatedAt ?? new Date().toISOString();
   const elapsed = updated ? Math.max(0, Date.now() - new Date(updated).getTime()) : 0;
   return {

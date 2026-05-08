@@ -141,6 +141,107 @@ func TestSurrealStore_UpdateProgress_RunningStageWritesThrough(t *testing.T) {
 	}
 }
 
+// TestMarkRepositoryUnderstandingFailed_TransitionsRunningStages verifies the
+// three-case idempotency contract for MarkRepositoryUnderstandingFailed:
+//
+//   - A BUILDING_TREE row transitions to FAILED with error fields set and
+//     progress zeroed.
+//   - A DEEPENING row transitions to FAILED identically.
+//   - A READY row is left untouched (the WHERE gate refuses to overwrite a
+//     terminal stage — protects against a late callback racing a successful
+//     retry that already wrote READY).
+//   - Calling the method again on an already-FAILED row is idempotent (no-op).
+func TestMarkRepositoryUnderstandingFailed_TransitionsRunningStages(t *testing.T) {
+	s := startSurrealContainer(t)
+	store := NewSurrealStore(s)
+
+	scope := &knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository}
+	const errCode = "DEADLINE_EXCEEDED"
+	const errMsg = "retry exhaustion"
+
+	for _, startStage := range []knowledge.RepositoryUnderstandingStage{
+		knowledge.UnderstandingBuildingTree,
+		knowledge.UnderstandingDeepening,
+	} {
+		startStage := startStage
+		t.Run("from_"+string(startStage), func(t *testing.T) {
+			repoID := "repo-fail-" + string(startStage)
+			row, err := store.StoreRepositoryUnderstanding(&knowledge.RepositoryUnderstanding{
+				RepositoryID: repoID,
+				Scope:        scope,
+				Stage:        startStage,
+				TreeStatus:   knowledge.UnderstandingTreePartial,
+				Progress:     0.55,
+				ProgressPhase: "running",
+				ProgressMessage: "doing stuff",
+			})
+			if err != nil || row == nil {
+				t.Fatalf("seed %s: err=%v row=%v", startStage, err, row)
+			}
+
+			if err := store.MarkRepositoryUnderstandingFailed(row.ID, errCode, errMsg); err != nil {
+				t.Fatalf("MarkRepositoryUnderstandingFailed from %s: %v", startStage, err)
+			}
+
+			got := store.GetRepositoryUnderstanding(repoID, *scope)
+			if got == nil {
+				t.Fatal("GetRepositoryUnderstanding after failure returned nil")
+			}
+			if got.Stage != knowledge.UnderstandingFailed {
+				t.Fatalf("expected stage=failed, got %s", got.Stage)
+			}
+			if got.Progress != 0 || got.ProgressPhase != "" || got.ProgressMessage != "" {
+				t.Fatalf("expected progress zeroed, got progress=%v phase=%q message=%q",
+					got.Progress, got.ProgressPhase, got.ProgressMessage)
+			}
+			if got.ErrorCode != errCode {
+				t.Fatalf("expected error_code=%q, got %q", errCode, got.ErrorCode)
+			}
+			if got.ErrorMessage != errMsg {
+				t.Fatalf("expected error_message=%q, got %q", errMsg, got.ErrorMessage)
+			}
+
+			// Idempotent re-fire: calling again on FAILED must be a no-op.
+			if err := store.MarkRepositoryUnderstandingFailed(row.ID, "SECOND_CALL", "should be ignored"); err != nil {
+				t.Fatalf("idempotent re-fire: %v", err)
+			}
+			again := store.GetRepositoryUnderstanding(repoID, *scope)
+			if again == nil {
+				t.Fatal("idempotent re-fire lookup returned nil")
+			}
+			if again.ErrorCode != errCode {
+				t.Fatalf("idempotent re-fire overwrote error_code: got %q", again.ErrorCode)
+			}
+		})
+	}
+
+	t.Run("no_op_from_ready", func(t *testing.T) {
+		// Build a READY row and confirm the method leaves it untouched.
+		repoID := "repo-fail-noop-ready"
+		row, err := store.StoreRepositoryUnderstanding(&knowledge.RepositoryUnderstanding{
+			RepositoryID: repoID,
+			Scope:        scope,
+			Stage:        knowledge.UnderstandingReady,
+			TreeStatus:   knowledge.UnderstandingTreeComplete,
+		})
+		if err != nil || row == nil {
+			t.Fatalf("seed ready: err=%v row=%v", err, row)
+		}
+
+		if err := store.MarkRepositoryUnderstandingFailed(row.ID, errCode, errMsg); err != nil {
+			t.Fatalf("MarkRepositoryUnderstandingFailed on READY: %v", err)
+		}
+
+		got := store.GetRepositoryUnderstanding(repoID, *scope)
+		if got == nil {
+			t.Fatal("post-no-op lookup returned nil")
+		}
+		if got.Stage != knowledge.UnderstandingReady {
+			t.Fatalf("expected stage=ready unchanged, got %s", got.Stage)
+		}
+	})
+}
+
 // TestSurrealStore_MarkNeedsRefresh_ZeroesProgressFields verifies the
 // MarkRepositoryUnderstandingNeedsRefresh SQL flips a terminal row to
 // NEEDS_REFRESH AND zeroes its progress fields. The MemStore mirror at
