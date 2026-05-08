@@ -37,7 +37,11 @@ jobs:
         working-directory: workers
         run: |
           uv sync --dev
-          uv run pytest -v
+          # Skip @pytest.mark.slow timing-sensitive tests (e.g.,
+          # test_wrapper_rate_limits_with_real_aiolimiter). Matches the
+          # posture in ci.yml. Slow tests rely on real-clock measurements
+          # that flake on the GitHub-hosted runner under load.
+          uv run pytest -v -m "not slow"
 
       - name: Test Web
         working-directory: web
