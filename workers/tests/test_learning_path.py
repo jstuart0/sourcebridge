@@ -601,11 +601,10 @@ async def test_learning_path_repair_swallows_budget_exception() -> None:
     initial = json.dumps([low_step])
 
     provider = FakeLLMProvider(responses=[initial])
-    with structlog.testing.capture_logs() as captured:
-        with patch(
-            "workers.knowledge.learning_path.check_prompt_budget",
-            side_effect=[None, SnapshotTooLargeError(99999, 8000, "learning_path:repair:order_1")],
-        ):
+    with structlog.testing.capture_logs() as captured, patch(
+        "workers.knowledge.learning_path.check_prompt_budget",
+        side_effect=[None, SnapshotTooLargeError(99999, 8000, "learning_path:repair:order_1")],
+    ):
             result, usage = await generate_learning_path(
                 provider=provider,
                 repository_name="test-repo",
