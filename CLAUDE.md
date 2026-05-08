@@ -167,6 +167,57 @@ Load-bearing constraints for future-Claude:
 Plan: `thoughts/shared/plans/active-2026-05-07-diagnose-confidence-partial-recovery.md`
 Investigation: `thoughts/shared/investigations/2026-05-07-diagnose-confidence-partial-recovery.md`
 
+**2026-05-07 deep-render repair-pass parity for learning_path + workflow_story (CA-178)** — 3 commits, `810dc1a..4546ced`.
+Closes the architectural gap where cliff_notes had a section-level repair pass but
+`generate_learning_path` and `generate_workflow_story` did not. When a step (learning_path)
+or section (workflow_story) fails the `meets_confidence_floor` gate in a deep render, the
+repair helper re-renders that single unit with a repair-targeted prompt and a three-clause
+acceptance check before shipping it as LOW. Single-attempt policy — if the repair output
+also fails the floor, the original LOW unit ships unchanged. Net runtime is approximately
+zero change post-CA-176/177: sections rarely fall through the gate in practice; the benefit
+is robustness on edge cases that do.
+
+Cross-links: CA-176 (backtick prompt fix), CA-177 (alignment), CA-150 (quality gates).
+
+Load-bearing constraints for future-Claude:
+
+- **Repair templates require the backtick-format instruction** — both
+  `LEARNING_PATH_STEP_REPAIR_TEMPLATE` and `WORKFLOW_STORY_SECTION_REPAIR_TEMPLATE`
+  include the explicit "wrap each identifier in markdown backticks" rule (matching
+  CA-176/CA-177). Don't remove it — it's what allows repaired output to clear the same
+  `_enforce_deep_confidence_floor` gate as the main render.
+- **Repair helpers call `parse_json_sections` directly**, NOT `_parse_steps` or
+  `parse_with_fallback`. The fallback wrapper would inject a single-element fallback
+  element on parse failure that could be silently accepted by `_should_accept_repaired_*`.
+  The direct call is wrapped in `try/except (json.JSONDecodeError, ValueError, TypeError):
+  continue`, mirroring cliff_notes' `_parse_sections` pattern.
+- **Single-attempt policy** — each LOW unit gets at most one repair call. No retry loop.
+  If the repair output also fails the floor, the original LOW unit ships unchanged. The
+  acceptance check `_should_accept_repaired_*` gates this with three clauses: reject if
+  evidence/file_paths emptied; reject if repair stays LOW; reject if shorter+fewer-refs.
+- **`response is None` skip in workflow_story** — repair must not fire on the
+  synthetic-fallback path where the main render returned no response. Wiring guard:
+  `if depth == "deep" and response is not None and any(s.confidence == "low" for s in sections):`.
+  Don't relax this.
+- **`exercises`-only-LOW skip in learning_path** — a step that is LOW solely because
+  `not step.exercises` (gate passes; exercises list missing) doesn't benefit from a
+  content-targeted repair. The helper skips it to avoid wasted LLM cost.
+- **Operation label trichotomy** — `learning_path` / `workflow_story` (no repair fired);
+  `learning_path_repaired` / `workflow_story_repaired` (fired AND ≥1 accepted);
+  `learning_path_repair_attempted` / `workflow_story_repair_attempted` (fired but all
+  rejected). Telemetry consumers: use `startswith("learning_path")` /
+  `startswith("workflow_story")` to catch all three variants.
+- **Distinguished log keys** — `*_repair_skipped_budget_exceeded` for `SnapshotTooLargeError`;
+  `*_repair_skipped` for generic exceptions. Don't collapse them.
+- **Repair gate is deep-only** — no repair on medium/short/summary depth. Conditional:
+  `if depth == "deep":`.
+- **Architectural extraction NOT done** — three repair instances (cliff_notes, learning_path,
+  workflow_story) with two different evidence-shape conventions. A shared `RepairableArtifact`
+  mixin/protocol was deferred per librarian's plan-review verdict; abstraction is premature
+  at this count. Don't extract until ≥4 instances.
+
+Plan: `thoughts/shared/plans/active-2026-05-07-deliver-repair-pass-learning-path-workflow-story.md`
+
 **2026-05-06 orchestrator capacity detection** — 8 commits, `e730009..e1fe4b1`.
 Fixes three compounding Living Wiki throughput issues end-to-end: capacity
 mismatch between orchestrator goroutine pool and upstream LLM, empty-content
