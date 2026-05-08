@@ -14,11 +14,29 @@ import (
 	"time"
 )
 
-// InsecureSentinel is the value that docker-compose.hub.yml injects as the
-// default for SURREAL_PASS, SOURCEBRIDGE_GRPC_SECRET, and
-// SOURCEBRIDGE_JWT_SECRET when no .env file is present.  It is intentionally
-// unmistakable so operators notice it immediately.
+// InsecureSentinel is the value that docker-compose.hub.yml historically
+// injected as the default for SURREAL_PASS, SOURCEBRIDGE_GRPC_SECRET, and
+// SOURCEBRIDGE_JWT_SECRET when no .env file was present.  It is intentionally
+// unmistakable so operators notice it immediately.  CA-311 (2026-05-08)
+// added the publicly-known 64-hex JWT placeholder and several historical
+// dev-default literals to the recognized set; see KnownInsecureSentinels.
 const InsecureSentinel = "INSECURE-DEFAULT-CHANGE-ME-NOW"
+
+// KnownInsecureSentinels is the set of credential values that have ever been
+// shipped as docker-compose / OSS quickstart defaults.  Any of them appearing
+// at runtime indicates an operator who didn't override the default — warn
+// loudly until they do.  The 64-hex placeholder is syntactically valid (it
+// passes the ≥32-byte JWT gate added in CA-311) but is publicly known and
+// therefore weaker than a per-deployment random secret.
+var KnownInsecureSentinels = map[string]struct{}{
+	InsecureSentinel:                  {},
+	"dev-secret-change-in-production": {}, // CA-311: pre-r2 JWT fallback
+	"dev-jwt-secret-change-me":        {}, // CA-311: docker-compose.yml dev default (pre-r2)
+	"dev-shared-secret":               {}, // historical gRPC dev default
+	// CA-311: 64-hex publicly-known JWT placeholder shipped in docker-compose
+	// after the r2 length-gate fix. Syntactically valid but weak.
+	"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef": {},
+}
 
 // CredentialCheck pairs a human-readable label with the runtime value to
 // inspect.
@@ -27,12 +45,17 @@ type CredentialCheck struct {
 	Value string
 }
 
-// InsecureCredentials returns the labels of any credentials whose value equals
-// the sentinel.  An empty slice means all credentials are properly configured.
+// InsecureCredentials returns the labels of any credentials whose value
+// matches a known insecure default sentinel. An empty slice means all
+// credentials are properly configured (or non-empty but unrecognized as a
+// shipped default).
 func InsecureCredentials(checks []CredentialCheck) []string {
 	var bad []string
 	for _, c := range checks {
-		if c.Value == InsecureSentinel {
+		if c.Value == "" {
+			continue
+		}
+		if _, hit := KnownInsecureSentinels[c.Value]; hit {
 			bad = append(bad, c.Label)
 		}
 	}

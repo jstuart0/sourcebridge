@@ -101,7 +101,12 @@ services:
       - SOURCEBRIDGE_STORAGE_REPO_CACHE_PATH=/data/repo-cache
       - SOURCEBRIDGE_WORKER_ADDRESS=worker:50051
       - SOURCEBRIDGE_SECURITY_GRPC_AUTH_SECRET=${SOURCEBRIDGE_GRPC_SECRET:-dev-shared-secret}
-      - SOURCEBRIDGE_SECURITY_JWT_SECRET=${SOURCEBRIDGE_JWT_SECRET:-dev-jwt-secret-change-me}
+      # CA-311: 64-hex placeholder is syntactically valid (32 raw bytes; passes
+      # the >=32-byte length gate) but is publicly known. Override with
+      # SOURCEBRIDGE_JWT_SECRET=$(openssl rand -hex 32) in .env for any
+      # non-throwaway use. WarnInsecureDefaults emits a startup banner when
+      # this exact placeholder is detected at runtime.
+      - SOURCEBRIDGE_SECURITY_JWT_SECRET=${SOURCEBRIDGE_JWT_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       # r1 M3: explicit env wiring so docker-compose substitutes from .env.
       # The :- default keeps the line valid when .env is absent.
       # Resolution order (ResolveEncryptionKey): _FILE > literal env > empty.

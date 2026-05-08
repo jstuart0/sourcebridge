@@ -101,7 +101,12 @@ services:
       - SOURCEBRIDGE_STORAGE_REPO_CACHE_PATH=/data/repo-cache
       - SOURCEBRIDGE_WORKER_ADDRESS=worker:50051
       - SOURCEBRIDGE_SECURITY_GRPC_AUTH_SECRET=${SOURCEBRIDGE_GRPC_SECRET:-INSECURE-DEFAULT-CHANGE-ME-NOW}
-      - SOURCEBRIDGE_SECURITY_JWT_SECRET=${SOURCEBRIDGE_JWT_SECRET:-INSECURE-DEFAULT-CHANGE-ME-NOW}
+      # CA-311: 64-hex placeholder is syntactically valid (32 raw bytes; passes
+      # the >=32-byte length gate added in r2) but is publicly known. Override
+      # with SOURCEBRIDGE_JWT_SECRET=$(openssl rand -hex 32) in .env for any
+      # non-throwaway use. WarnInsecureDefaults still flags this placeholder
+      # so operators see a startup banner until they replace it.
+      - SOURCEBRIDGE_SECURITY_JWT_SECRET=${SOURCEBRIDGE_JWT_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       # r1 Phase 2: read encryption key from the init-container-generated file.
       # The *_FILE convention follows Postgres / Vault (higher-trust than literal
       # env vars, which leak via docker inspect and /proc/<pid>/environ).

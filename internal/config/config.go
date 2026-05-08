@@ -4,6 +4,8 @@
 package config
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -216,6 +218,16 @@ type UIConfig struct {
 // SecurityConfig holds security-related settings.
 type SecurityConfig struct {
 	JWTSecret           string     `mapstructure:"jwt_secret"`
+	// JWTSecretFile resolves to the path of a file containing the JWT
+	// signing secret. CA-311: mirrors the EncryptionKey/EncryptionKeyFile
+	// pattern so the file (higher-trust than env vars, which leak via
+	// /proc, docker inspect, and shell history) takes precedence over
+	// SOURCEBRIDGE_SECURITY_JWT_SECRET.  When neither is set, an in-memory
+	// secret is auto-generated at boot — sessions do NOT survive restart in
+	// that mode; production multi-replica deployments must set the file or
+	// the literal env (Helm chart's `jwt-secret` Secret takes the literal
+	// path).
+	JWTSecretFile       string     `mapstructure:"jwt_secret_file"` // env: SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE
 	JWTTTLMinutes       int        `mapstructure:"jwt_ttl_minutes"`
 	EncryptionKey       string     `mapstructure:"encryption_key"`
 	CSRFEnabled         bool       `mapstructure:"csrf_enabled"`
@@ -290,6 +302,64 @@ func (s SecurityConfig) ResolveEncryptionKey() (key string, source string, err e
 
 	if hasLiteralEnv {
 		return s.checkEntropyAndReturn(s.EncryptionKey, "literal-env")
+	}
+
+	return "", "unset", nil
+}
+
+// ResolveJWTSecret resolves the JWT signing secret following the priority
+// order:
+//
+//  1. SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE (file path) — if set and the
+//     file exists, is readable, and is non-empty after trimming whitespace.
+//  2. s.JWTSecret (literal value from env / config.toml) — if non-empty.
+//  3. Empty string + source="unset" — caller is expected to auto-generate
+//     an in-memory secret and warn that sessions will not survive restart.
+//
+// source is one of: "file", "literal-env", "file-missing-fallback-env",
+// "unset".  Mirrors ResolveEncryptionKey's behavior — see that method's
+// docstring for the rationale on file precedence.
+//
+// Unlike ResolveEncryptionKey, the entropy gate (≥32 bytes) is NOT applied
+// here; Validate() enforces it after the caller decides between the
+// resolved value and the auto-generated fallback. That way the gate fires
+// on operator-configured but-too-short secrets without rejecting the
+// auto-generated 64-hex placeholder.
+func (s SecurityConfig) ResolveJWTSecret() (key string, source string, err error) {
+	filePath := strings.TrimSpace(os.Getenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE"))
+	if filePath == "" {
+		filePath = strings.TrimSpace(s.JWTSecretFile)
+	}
+	hasLiteralEnv := s.JWTSecret != ""
+
+	if filePath != "" {
+		data, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			slog.Error("JWT secret: SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE is set but file is unreadable; falling back to literal env",
+				"path", filePath, "err", readErr)
+			if hasLiteralEnv {
+				return s.JWTSecret, "file-missing-fallback-env", nil
+			}
+			return "", "unset", nil
+		}
+		trimmed := strings.TrimSpace(string(data))
+		if trimmed == "" {
+			slog.Error("JWT secret: SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE points to an empty file; falling back to literal env",
+				"path", filePath)
+			if hasLiteralEnv {
+				return s.JWTSecret, "file-missing-fallback-env", nil
+			}
+			return "", "unset", nil
+		}
+		if hasLiteralEnv {
+			slog.Warn("JWT secret resolved from file; SOURCEBRIDGE_SECURITY_JWT_SECRET env var is set but ignored — file precedence is by design (matches Vault / Postgres convention)",
+				"path", filePath)
+		}
+		return trimmed, "file", nil
+	}
+
+	if hasLiteralEnv {
+		return s.JWTSecret, "literal-env", nil
 	}
 
 	return "", "unset", nil
@@ -772,6 +842,7 @@ func Load() (*Config, error) {
 	v.SetDefault("llm.report_model", cfg.LLM.ReportModel)
 	v.SetDefault("llm.timeout_seconds", cfg.LLM.TimeoutSecs)
 	v.SetDefault("security.jwt_secret", "")
+	v.SetDefault("security.jwt_secret_file", "")
 	v.SetDefault("security.grpc_auth_secret", "")
 	v.SetDefault("security.jwt_ttl_minutes", cfg.Security.JWTTTLMinutes)
 	v.SetDefault("security.encryption_key", "")
@@ -841,21 +912,57 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("error parsing config: %w", err)
 	}
 
-	// Generate JWT secret if not set
-	if cfg.Security.JWTSecret == "" {
-		cfg.Security.JWTSecret = os.Getenv("SOURCEBRIDGE_SECURITY_JWT_SECRET")
-		if cfg.Security.JWTSecret == "" {
-			cfg.Security.JWTSecret = "dev-secret-change-in-production"
-		}
+	// CA-311: resolve JWT secret with file priority, falling through to
+	// literal env, then auto-generating an in-memory secret if neither is
+	// set. The previous "dev-secret-change-in-production" literal fallback
+	// is removed — Validate() now refuses to start with a short or weak
+	// secret. See ResolveJWTSecret for the full priority chain.
+	resolvedJWT, jwtSource, err := cfg.Security.ResolveJWTSecret()
+	if err != nil {
+		return nil, fmt.Errorf("resolving JWT secret: %w", err)
 	}
+	if resolvedJWT == "" {
+		generated, genErr := generateRandomJWTSecret()
+		if genErr != nil {
+			return nil, fmt.Errorf("auto-generating JWT secret: %w", genErr)
+		}
+		resolvedJWT = generated
+		jwtSource = "auto-generated"
+		slog.Info("JWT secret: auto-generated (in-memory only — does NOT persist; sessions invalidated on restart). For production / multi-replica, configure SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE or SOURCEBRIDGE_SECURITY_JWT_SECRET.",
+			"length_bytes", len(resolvedJWT))
+	} else {
+		slog.Debug("JWT secret resolved", "source", jwtSource, "length_bytes", len(resolvedJWT))
+	}
+	cfg.Security.JWTSecret = resolvedJWT
 
 	return cfg, nil
+}
+
+// generateRandomJWTSecret returns a 32-byte cryptographic-random secret
+// hex-encoded as a 64-character ASCII string. The hex form is chosen so the
+// returned string passes the ≥32-byte length gate trivially (64 ASCII bytes
+// = 32 raw random bytes after decode) while remaining safe to use as the
+// HMAC key directly (jwt.SigningMethodHS256 takes []byte and the entropy is
+// preserved either way).
+func generateRandomJWTSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := cryptorand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // Validate checks the configuration for errors.
 func (c *Config) Validate() error {
 	if c.Server.HTTPPort <= 0 || c.Server.HTTPPort > 65535 {
 		return fmt.Errorf("invalid HTTP port: %d", c.Server.HTTPPort)
+	}
+	// CA-311: refuse to start with a JWT secret shorter than 32 bytes. The
+	// auto-generated path produces a 64-hex-char string (32 raw bytes), so
+	// this only fires when an operator explicitly configures a too-short
+	// secret via SOURCEBRIDGE_SECURITY_JWT_SECRET / _FILE / config.toml.
+	if len(c.Security.JWTSecret) < 32 {
+		return fmt.Errorf("JWT secret is shorter than 32 bytes (got %d) — set SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE to a path containing a 32+ byte random secret (generate with: openssl rand -hex 32)", len(c.Security.JWTSecret))
 	}
 	if c.Storage.SurrealMode != "embedded" && c.Storage.SurrealMode != "external" {
 		return fmt.Errorf("invalid SurrealDB mode: %s (must be 'embedded' or 'external')", c.Storage.SurrealMode)

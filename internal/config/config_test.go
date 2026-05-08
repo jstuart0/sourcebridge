@@ -141,12 +141,37 @@ func TestValidate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := Defaults()
+			// CA-311: Validate() now enforces a ≥32-byte JWT secret. The
+			// happy-path Validate() tests don't go through Load() (which
+			// auto-resolves/auto-generates the secret), so we seed a
+			// well-formed placeholder here. Tests that specifically
+			// exercise the JWT-secret length gate set their own value.
+			if cfg.Security.JWTSecret == "" {
+				cfg.Security.JWTSecret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+			}
 			tt.modify(cfg)
 			err := cfg.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateRejectsShortJWTSecret(t *testing.T) {
+	cfg := Defaults()
+	cfg.Security.JWTSecret = "short"
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should reject JWT secret shorter than 32 bytes")
+	}
+}
+
+func TestValidateAcceptsExactly32ByteJWTSecret(t *testing.T) {
+	cfg := Defaults()
+	cfg.Security.JWTSecret = "01234567890123456789012345678901" // 32 ASCII bytes
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() rejected 32-byte JWT secret: %v", err)
 	}
 }
 
@@ -372,5 +397,180 @@ func TestSecurityEnvBinding(t *testing.T) {
 				t.Errorf("%s: expected %q from env %s, got %q", name, tc.value, tc.env, got)
 			}
 		})
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// CA-311 — ResolveJWTSecret unit tests (mirror ResolveEncryptionKey)
+// ─────────────────────────────────────────────────────────────────────────
+
+func TestResolveJWTSecret_FileOnly(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "jwt_secret")
+	wantKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	if err := os.WriteFile(keyFile, []byte(wantKey+"\n"), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+	os.Setenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE", keyFile)
+	defer os.Unsetenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE")
+
+	sc := SecurityConfig{JWTSecret: ""}
+	key, source, err := sc.ResolveJWTSecret()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if key != wantKey {
+		t.Errorf("key: got %q, want %q", key, wantKey)
+	}
+	if source != "file" {
+		t.Errorf("source: got %q, want file", source)
+	}
+}
+
+func TestResolveJWTSecret_LiteralEnvOnly(t *testing.T) {
+	os.Unsetenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE")
+	wantKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	sc := SecurityConfig{JWTSecret: wantKey}
+	key, source, err := sc.ResolveJWTSecret()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if key != wantKey {
+		t.Errorf("key: got %q, want %q", key, wantKey)
+	}
+	if source != "literal-env" {
+		t.Errorf("source: got %q, want literal-env", source)
+	}
+}
+
+func TestResolveJWTSecret_FileWinsOverEnv(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "jwt_secret")
+	fileKey := "FILE-JWT-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	if err := os.WriteFile(keyFile, []byte(fileKey), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+	os.Setenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE", keyFile)
+	defer os.Unsetenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE")
+
+	sc := SecurityConfig{JWTSecret: "ENV-JWT-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}
+	key, source, err := sc.ResolveJWTSecret()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if key != fileKey {
+		t.Errorf("file should win: got %q, want %q", key, fileKey)
+	}
+	if source != "file" {
+		t.Errorf("source: got %q, want file", source)
+	}
+}
+
+func TestResolveJWTSecret_FileMissingFallsBackToEnv(t *testing.T) {
+	os.Setenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE", "/tmp/nonexistent-jwt-secret-xyz")
+	defer os.Unsetenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE")
+
+	wantKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	sc := SecurityConfig{JWTSecret: wantKey}
+	key, source, err := sc.ResolveJWTSecret()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if key != wantKey {
+		t.Errorf("key: got %q, want %q", key, wantKey)
+	}
+	if source != "file-missing-fallback-env" {
+		t.Errorf("source: got %q, want file-missing-fallback-env", source)
+	}
+}
+
+func TestResolveJWTSecret_NeitherSet(t *testing.T) {
+	os.Unsetenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE")
+	sc := SecurityConfig{JWTSecret: ""}
+	key, source, err := sc.ResolveJWTSecret()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if key != "" {
+		t.Errorf("key: got %q, want empty", key)
+	}
+	if source != "unset" {
+		t.Errorf("source: got %q, want unset", source)
+	}
+}
+
+func TestResolveJWTSecret_EmptyFileFallsToEnv(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "empty_jwt_secret")
+	if err := os.WriteFile(keyFile, []byte("   \n"), 0o600); err != nil {
+		t.Fatalf("write empty key file: %v", err)
+	}
+	os.Setenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE", keyFile)
+	defer os.Unsetenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE")
+
+	wantKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	sc := SecurityConfig{JWTSecret: wantKey}
+	key, source, err := sc.ResolveJWTSecret()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if key != wantKey {
+		t.Errorf("key: got %q, want %q", key, wantKey)
+	}
+	if source != "file-missing-fallback-env" {
+		t.Errorf("source: got %q, want file-missing-fallback-env (empty file treated as missing)", source)
+	}
+}
+
+func TestLoadAutoGeneratesJWTSecretWhenUnset(t *testing.T) {
+	// Unset all JWT-secret env vars so Load() takes the auto-generate path.
+	os.Unsetenv("SOURCEBRIDGE_SECURITY_JWT_SECRET")
+	os.Unsetenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got := len(cfg.Security.JWTSecret); got != 64 {
+		t.Errorf("auto-generated JWT secret length: got %d, want 64 (32 raw bytes hex-encoded)", got)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("auto-generated secret should pass Validate(): %v", err)
+	}
+
+	// A second Load() should produce a different secret (non-deterministic
+	// confirms it's actually random; not a fixture).
+	cfg2, err := Load()
+	if err != nil {
+		t.Fatalf("Load() #2 error: %v", err)
+	}
+	if cfg.Security.JWTSecret == cfg2.Security.JWTSecret {
+		t.Error("two Load() calls produced identical auto-generated secrets — non-determinism check failed")
+	}
+}
+
+func TestSecurityJWTSecretFileViperBinding(t *testing.T) {
+	// Ensure SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE binds to
+	// SecurityConfig.JWTSecretFile via Viper (not just os.Getenv).
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "jwt_secret")
+	wantKey := "viperjwt-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	if err := os.WriteFile(keyFile, []byte(wantKey+"\n"), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+	// Use the field directly (config.toml path) — env-var path is covered
+	// by the other ResolveJWTSecret tests.
+	os.Unsetenv("SOURCEBRIDGE_SECURITY_JWT_SECRET")
+	os.Unsetenv("SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE")
+	sc := SecurityConfig{JWTSecretFile: keyFile}
+	key, source, err := sc.ResolveJWTSecret()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if key != wantKey {
+		t.Errorf("key: got %q, want %q", key, wantKey)
+	}
+	if source != "file" {
+		t.Errorf("source: got %q, want file", source)
 	}
 }
