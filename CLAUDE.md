@@ -85,7 +85,7 @@ Load-bearing constraints for future-Claude:
 
 v3.x migration is deferred (separate future ticket). Known break points: `SEARCH ANALYZER` → `FULLTEXT ANALYZER` in migration 033, ~30 `type::thing(…)` call sites need migration to `type::record`, audit for bare `$param =` assignments needing `LET`.
 
-Plan: `thoughts/shared/plans/active-2026-05-07-deliver-surrealdb-2.6.5-upgrade.md`
+Plan: `thoughts/shared/plans/finished-2026-05-07-deliver-surrealdb-2.6.5-upgrade.md`
 Investigation: this session's research brief (sarah, in-conversation)
 Plane ticket: CA-179
 
