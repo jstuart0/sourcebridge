@@ -43,6 +43,16 @@ func signBody(t *testing.T, body []byte, secret string) string {
 // stub. Kept the comment so the next contributor doesn't recreate the
 // abstraction by accident.)
 
+// passthroughAuth is a no-op auth middleware for tests that want to
+// exercise the Notion-poll handler without wiring real bearer auth.
+// CA-NEW-H1 (2026-05-08): the route now requires deps.NotionPollAuthMiddleware
+// to register; tests use this passthrough so they can still hit the
+// handler. Production wiring composes s.authMiddleware() and
+// auth.RequireRole(auth.RoleAdmin) — see router.go.
+func passthroughAuth(next http.Handler) http.Handler {
+	return next
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Confluence signature validation tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -159,6 +169,11 @@ func TestConfluenceWebhook_MissingSignatureHeader(t *testing.T) {
 func TestConfluenceWebhook_NonPageUpdatedEvent(t *testing.T) {
 	// Events that are not page_updated should be acknowledged (204) without
 	// being submitted to the dispatcher.
+	//
+	// CA-206: this test now provides a secret + valid signature so the
+	// handler proceeds past the unconfigured-secret 503 branch and
+	// exercises the real payload-handling path.
+	secret := "non-page-updated-secret"
 	r := chi.NewRouter()
 	wm := orchestrator.NewMemoryWatermarkStore()
 	deps := webhook.DispatcherDeps{WatermarkStore: wm, Logger: webhook.NoopLogger{}}
@@ -169,11 +184,14 @@ func TestConfluenceWebhook_NonPageUpdatedEvent(t *testing.T) {
 		defer cancel()
 		_ = d.Stop(ctx)
 	})
-	// No secret — skip signature validation for simplicity.
-	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{Dispatcher: d})
+	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{
+		Dispatcher:              d,
+		ConfluenceWebhookSecret: secret,
+	})
 
 	body := []byte(`{"eventType":"page_created","page":{"id":"99"}}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/confluence", bytes.NewReader(body))
+	req.Header.Set("X-Confluence-Signature", signBody(t, body, secret))
 
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -183,8 +201,10 @@ func TestConfluenceWebhook_NonPageUpdatedEvent(t *testing.T) {
 	}
 }
 
-func TestConfluenceWebhook_NonSourceBridgePage(t *testing.T) {
-	// Pages without sourcebridge_page_id property should be silently ignored (204).
+// CA-206 anchor: webhook with no secret configured returns 503 with
+// scrubbed body. LOAD-BEARING — future cleanup must NOT remove this test;
+// it pins the contract that the route refuses to dispatch unauthenticated.
+func TestConfluenceWebhook_UnconfiguredSecretReturnsScrubbed503(t *testing.T) {
 	r := chi.NewRouter()
 	wm := orchestrator.NewMemoryWatermarkStore()
 	deps := webhook.DispatcherDeps{WatermarkStore: wm, Logger: webhook.NoopLogger{}}
@@ -195,7 +215,87 @@ func TestConfluenceWebhook_NonSourceBridgePage(t *testing.T) {
 		defer cancel()
 		_ = d.Stop(ctx)
 	})
+	// No secret, no resolver — handler must refuse.
 	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{Dispatcher: d})
+
+	body := []byte(`{"eventType":"page_updated","page":{"id":"1"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/confluence", bytes.NewReader(body))
+
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("want 503 ServiceUnavailable for unconfigured secret, got %d", rr.Code)
+	}
+	if got := strings.TrimSpace(rr.Body.String()); got != `{"error":"route_unavailable"}` {
+		t.Errorf("want scrubbed body, got %q", got)
+	}
+}
+
+// CA-206 anchor: handler-time resolver lets admin-UI changes take effect
+// without restart. LOAD-BEARING.
+func TestConfluenceWebhook_HandlerTimeResolverPicksUpNewSecret(t *testing.T) {
+	currentSecret := "" // initially unconfigured
+	r := chi.NewRouter()
+	wm := orchestrator.NewMemoryWatermarkStore()
+	deps := webhook.DispatcherDeps{WatermarkStore: wm, Logger: webhook.NoopLogger{}}
+	d := webhook.NewDispatcher(deps, webhook.DispatcherConfig{WorkerCount: 1, MaxQueueDepth: 10})
+	_ = d.Start(context.Background())
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = d.Stop(ctx)
+	})
+	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{
+		Dispatcher: d,
+		ConfluenceSecretResolver: func() (string, error) {
+			return currentSecret, nil
+		},
+	})
+
+	// Round 1: secret is empty → 503.
+	payload := []byte(`{"eventType":"page_updated","page":{"id":"1"}}`)
+	req1 := httptest.NewRequest(http.MethodPost, "/webhooks/confluence", bytes.NewReader(payload))
+	rr1 := httptest.NewRecorder()
+	r.ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusServiceUnavailable {
+		t.Errorf("round 1: want 503, got %d", rr1.Code)
+	}
+
+	// Operator configures the secret post-boot (no restart).
+	currentSecret = "configured-after-boot"
+
+	// Round 2: same secret, valid signature → handler proceeds (404
+	// non-sourcebridge page is fine; we only assert NOT 503).
+	body2 := []byte(`{"eventType":"page_updated","page":{"id":"1","properties":[]}}`)
+	req2 := httptest.NewRequest(http.MethodPost, "/webhooks/confluence", bytes.NewReader(body2))
+	req2.Header.Set("X-Confluence-Signature", signBody(t, body2, currentSecret))
+	rr2 := httptest.NewRecorder()
+	r.ServeHTTP(rr2, req2)
+	if rr2.Code == http.StatusServiceUnavailable {
+		t.Errorf("round 2: post-boot configured secret should not return 503, got %d", rr2.Code)
+	}
+}
+
+func TestConfluenceWebhook_NonSourceBridgePage(t *testing.T) {
+	// Pages without sourcebridge_page_id property should be silently ignored (204).
+	// CA-206: configure a secret + sign the body so we exercise the real
+	// payload-handling path (not the 503 unconfigured-secret branch).
+	secret := "non-sourcebridge-secret"
+	r := chi.NewRouter()
+	wm := orchestrator.NewMemoryWatermarkStore()
+	deps := webhook.DispatcherDeps{WatermarkStore: wm, Logger: webhook.NoopLogger{}}
+	d := webhook.NewDispatcher(deps, webhook.DispatcherConfig{WorkerCount: 1, MaxQueueDepth: 10})
+	_ = d.Start(context.Background())
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = d.Stop(ctx)
+	})
+	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{
+		Dispatcher:              d,
+		ConfluenceWebhookSecret: secret,
+	})
 
 	payload := map[string]any{
 		"eventType": "page_updated",
@@ -206,6 +306,7 @@ func TestConfluenceWebhook_NonSourceBridgePage(t *testing.T) {
 	}
 	body, _ := json.Marshal(payload)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/confluence", bytes.NewReader(body))
+	req.Header.Set("X-Confluence-Signature", signBody(t, body, secret))
 
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
@@ -216,6 +317,10 @@ func TestConfluenceWebhook_NonSourceBridgePage(t *testing.T) {
 }
 
 func TestConfluenceWebhook_BadJSON(t *testing.T) {
+	// CA-206: configure a secret + sign the malformed body so we exercise
+	// the real JSON-parsing failure path (the 503 branch is now unreachable
+	// in tests that need 400 semantics).
+	secret := "bad-json-secret"
 	r := chi.NewRouter()
 	wm := orchestrator.NewMemoryWatermarkStore()
 	deps := webhook.DispatcherDeps{WatermarkStore: wm, Logger: webhook.NoopLogger{}}
@@ -226,9 +331,14 @@ func TestConfluenceWebhook_BadJSON(t *testing.T) {
 		defer cancel()
 		_ = d.Stop(ctx)
 	})
-	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{Dispatcher: d})
+	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{
+		Dispatcher:              d,
+		ConfluenceWebhookSecret: secret,
+	})
 
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/confluence", strings.NewReader("{bad json"))
+	body := []byte("{bad json")
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/confluence", bytes.NewReader(body))
+	req.Header.Set("X-Confluence-Signature", signBody(t, body, secret))
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -252,7 +362,10 @@ func TestNotionPoll_ValidRequest(t *testing.T) {
 		defer cancel()
 		_ = d.Stop(ctx)
 	})
-	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{Dispatcher: d})
+	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{
+		Dispatcher:               d,
+		NotionPollAuthMiddleware: passthroughAuth,
+	})
 
 	body := map[string]any{
 		"repo_id":      "repo-notion-1",
@@ -293,7 +406,10 @@ func TestNotionPoll_MissingRepoID(t *testing.T) {
 		defer cancel()
 		_ = d.Stop(ctx)
 	})
-	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{Dispatcher: d})
+	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{
+		Dispatcher:               d,
+		NotionPollAuthMiddleware: passthroughAuth,
+	})
 
 	body := map[string]any{"page_id": "some-page"}
 	bodyBytes, _ := json.Marshal(body)
@@ -318,7 +434,10 @@ func TestNotionPoll_BadJSON(t *testing.T) {
 		defer cancel()
 		_ = d.Stop(ctx)
 	})
-	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{Dispatcher: d})
+	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{
+		Dispatcher:               d,
+		NotionPollAuthMiddleware: passthroughAuth,
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/notion-poll", strings.NewReader("notjson"))
 	rr := httptest.NewRecorder()
@@ -348,7 +467,10 @@ func TestNotionPoll_Idempotent(t *testing.T) {
 		defer cancel()
 		_ = d.Stop(ctx)
 	})
-	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{Dispatcher: d})
+	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{
+		Dispatcher:               d,
+		NotionPollAuthMiddleware: passthroughAuth,
+	})
 
 	body := map[string]any{"repo_id": "repo-idem", "page_id": "some-page"}
 	bodyBytes, _ := json.Marshal(body)
@@ -361,6 +483,33 @@ func TestNotionPoll_Idempotent(t *testing.T) {
 		if rr.Code != http.StatusAccepted && rr.Code != http.StatusOK {
 			t.Errorf("call %d: want 200 or 202, got %d", i+1, rr.Code)
 		}
+	}
+}
+
+// NEW-H1 anchor: Notion-poll route REFUSES to register when no auth
+// middleware is provided. LOAD-BEARING — future cleanup must NOT relax
+// this. Without it, an unauthenticated dispatcher trigger goes live.
+func TestNotionPoll_NoAuthMiddleware_Returns404(t *testing.T) {
+	r := chi.NewRouter()
+	wm := orchestrator.NewMemoryWatermarkStore()
+	deps := webhook.DispatcherDeps{WatermarkStore: wm, Logger: webhook.NoopLogger{}}
+	d := webhook.NewDispatcher(deps, webhook.DispatcherConfig{WorkerCount: 1, MaxQueueDepth: 10})
+	_ = d.Start(context.Background())
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = d.Stop(ctx)
+	})
+	// Deliberately omit NotionPollAuthMiddleware.
+	rest.RegisterLivingWikiRoutes(r, rest.LivingWikiWebhookDeps{Dispatcher: d})
+
+	body := []byte(`{"repo_id":"repo-1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/notion-poll", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("want 404 (route not registered) when auth middleware absent, got %d", rr.Code)
 	}
 }
 

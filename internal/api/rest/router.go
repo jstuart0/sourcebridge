@@ -768,21 +768,33 @@ func (s *Server) setupRouter() {
 	// Rate limiting
 	r.Use(httprate.LimitByIP(100, 1*time.Minute))
 
-	// pprof — gated behind SOURCEBRIDGE_PPROF_ENABLED=true. Mounted before the
-	// global rate limiter so a goroutine dump under load is not throttled.
-	// Dev-only; never enable on a public-facing deployment.
+	// pprof — gated behind SOURCEBRIDGE_PPROF_ENABLED=true.
+	//
+	// CA-204: previously mounted at the top level (no auth). Goroutine /
+	// heap dumps can leak in-flight tokens, environment values, and other
+	// secrets — they MUST require admin role. The auth + RequireRole(admin)
+	// chain wraps every pprof endpoint here.
+	//
+	// Mounted before the global rate limiter so a profile dump under load
+	// is not throttled.
 	if os.Getenv("SOURCEBRIDGE_PPROF_ENABLED") == "true" {
-		r.HandleFunc("/debug/pprof/", pprof.Index)
-		r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		r.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		r.HandleFunc("/debug/pprof/trace", pprof.Trace)
-		r.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
-		r.Handle("/debug/pprof/heap", pprof.Handler("heap"))
-		r.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
-		r.Handle("/debug/pprof/block", pprof.Handler("block"))
-		r.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
-		r.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+		slog.Warn("pprof endpoints enabled — gated to admin role (SOURCEBRIDGE_PPROF_ENABLED=true)",
+			"path", "/debug/pprof/*")
+		r.Group(func(r chi.Router) {
+			r.Use(s.authMiddleware())
+			r.Use(auth.RequireRole(auth.RoleAdmin))
+			r.HandleFunc("/debug/pprof/", pprof.Index)
+			r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+			r.HandleFunc("/debug/pprof/profile", pprof.Profile)
+			r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+			r.HandleFunc("/debug/pprof/trace", pprof.Trace)
+			r.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+			r.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+			r.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+			r.Handle("/debug/pprof/block", pprof.Handler("block"))
+			r.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
+			r.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+		})
 	}
 
 	// Public routes
@@ -1263,9 +1275,36 @@ func (s *Server) setupRouter() {
 				confluenceSecret = resolved.ConfluenceWebhookSecret
 			}
 		}
+		// CA-206: handler-time resolver lets admin-UI changes take effect
+		// without restart. The eager ConfluenceWebhookSecret stays as a
+		// boot-time fallback (used if the resolver is unavailable per
+		// request).
+		var confluenceResolver func() (string, error)
+		if s.livingWikiResolver != nil {
+			resolverRef := s.livingWikiResolver
+			confluenceResolver = func() (string, error) {
+				resolved, err := resolverRef.Get()
+				if err != nil {
+					return "", err
+				}
+				if resolved == nil {
+					return "", nil
+				}
+				return resolved.ConfluenceWebhookSecret, nil
+			}
+		}
+		// NEW-H1: Notion-poll requires admin bearer auth (the trigger is
+		// an operator-controlled CronJob, not a SaaS push). The auth chain
+		// is composed once here so the route layer in
+		// RegisterLivingWikiRoutes can wrap.
+		notionAuth := func(next http.Handler) http.Handler {
+			return s.authMiddleware()(auth.RequireRole(auth.RoleAdmin)(next))
+		}
 		deps := LivingWikiWebhookDeps{
 			Dispatcher:              s.livingWikiDispatcher,
 			ConfluenceWebhookSecret: confluenceSecret,
+			ConfluenceSecretResolver: confluenceResolver,
+			NotionPollAuthMiddleware: notionAuth,
 		}
 		RegisterLivingWikiRoutes(r, deps)
 		slog.Info("living-wiki webhook routes registered")

@@ -65,13 +65,36 @@ type LivingWikiWebhookDeps struct {
 	Dispatcher *webhook.Dispatcher
 
 	// ConfluenceWebhookSecret is the HMAC-SHA256 shared secret for validating
-	// X-Confluence-Signature headers. When empty, signature validation is
-	// skipped (development mode only — never do this in production).
+	// X-Confluence-Signature headers, captured at handler construction.
+	// Tests typically set this directly. The production path also wires
+	// ConfluenceSecretResolver below so post-boot admin-UI changes take
+	// effect without restart.
+	//
+	// CA-206 (2026-05-08): the handler now refuses to dispatch when the
+	// effective secret is empty. The previous "skip signature validation
+	// when empty" semantics are removed — every Confluence webhook request
+	// now requires a configured secret + valid signature.
 	ConfluenceWebhookSecret string
+
+	// ConfluenceSecretResolver, if non-nil, is consulted on every request
+	// before falling back to ConfluenceWebhookSecret. CA-206: handler-time
+	// resolution lets operators configure the secret via the admin UI
+	// (which writes through to the resolver's cache) without a server
+	// restart. Returns the resolved secret (possibly ""), or an error if
+	// resolution itself failed (transient — handler treats error as
+	// "use the captured secret").
+	ConfluenceSecretResolver func() (string, error)
 
 	// NotionWebhookSecret is reserved for future Notion webhook validation.
 	// Unused until Notion supports arbitrary block-level webhooks.
 	NotionWebhookSecret string
+
+	// NotionPollAuthMiddleware wraps /webhooks/notion-poll with bearer auth
+	// so unauthenticated callers can't trigger reconciliation. Required
+	// when Dispatcher is non-nil; the route refuses to register without it.
+	// Typically set to s.authMiddleware() composed with
+	// auth.RequireRole(auth.RoleAdmin) — see router.go.
+	NotionPollAuthMiddleware func(http.Handler) http.Handler
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -88,8 +111,26 @@ type LivingWikiWebhookDeps struct {
 //	POST /webhooks/notion-poll     — External poller trigger for Notion reconciliation
 func RegisterLivingWikiRoutes(r chi.Router, deps LivingWikiWebhookDeps) {
 	h := newLivingWikiWebhookHandler(deps)
+	// CA-206: /webhooks/confluence is unauthenticated at the route layer
+	// because Confluence Cloud cannot inject Authorization headers. The
+	// handler validates HMAC-SHA256 against the resolved secret per request
+	// and refuses unauthenticated dispatch when the secret is unconfigured.
 	r.Post("/webhooks/confluence", h.confluenceWebhook)
-	r.Post("/webhooks/notion-poll", h.notionPollWebhook)
+
+	// NEW-H1 (2026-05-08): /webhooks/notion-poll requires admin bearer
+	// auth. The endpoint is the trigger for an operator-controlled CronJob,
+	// not a SaaS push, so bearer is the cleaner fit (no shared-secret
+	// sprawl; the trigger ties to a real service-account API token).
+	// Refuse to register if no auth middleware was provided — better to
+	// 404 than expose an unauthenticated dispatcher trigger.
+	if deps.NotionPollAuthMiddleware != nil {
+		r.Group(func(r chi.Router) {
+			r.Use(deps.NotionPollAuthMiddleware)
+			r.Post("/webhooks/notion-poll", h.notionPollWebhook)
+		})
+	} else {
+		slog.Warn("livingwiki: /webhooks/notion-poll NOT registered (no auth middleware provided) — operator must configure auth to enable Notion-poll webhook")
+	}
 }
 
 // RegisterLivingWikiDisabledRoutes registers 503 stub handlers for the
@@ -181,6 +222,34 @@ type confluenceWebhookPayload struct {
 }
 
 func (h *livingWikiWebhookHandler) confluenceWebhook(w http.ResponseWriter, r *http.Request) {
+	// CA-206: handler-time secret resolution.  An admin who configures the
+	// secret via the admin UI gets the new value picked up on the next
+	// request without needing a server restart.  The resolver is expected
+	// to cache; per-request lookups are cheap.
+	secret := h.deps.ConfluenceWebhookSecret
+	if h.deps.ConfluenceSecretResolver != nil {
+		if resolved, resolveErr := h.deps.ConfluenceSecretResolver(); resolveErr == nil {
+			secret = resolved
+		} else {
+			slog.Warn("livingwiki: confluence webhook: resolver returned err — falling back to captured secret",
+				"err", resolveErr)
+		}
+	}
+
+	// CA-206: refuse to dispatch if the secret is unconfigured.  Previously
+	// an empty secret silently skipped signature validation — now the
+	// route returns 503 with a scrubbed body (operator-actionable details
+	// only in the server log).
+	if secret == "" {
+		slog.Warn("livingwiki: confluence webhook: secret unconfigured — dispatch refused",
+			"remedy", "configure ConfluenceWebhookSecret in admin/livingwiki settings",
+			"remote_addr", r.RemoteAddr)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = fmt.Fprint(w, `{"error":"route_unavailable"}`)
+		return
+	}
+
 	// Read body first (needed for both signature and parsing).
 	body, err := io.ReadAll(io.LimitReader(r.Body, 2*1024*1024)) // 2 MB safety cap
 	if err != nil {
@@ -189,16 +258,15 @@ func (h *livingWikiWebhookHandler) confluenceWebhook(w http.ResponseWriter, r *h
 		return
 	}
 
-	// Signature validation.
-	if h.deps.ConfluenceWebhookSecret != "" {
-		sig := r.Header.Get("X-Confluence-Signature")
-		if !validateConfluenceSignature(body, sig, h.deps.ConfluenceWebhookSecret) {
-			slog.Warn("livingwiki: confluence webhook: signature validation failed",
-				"remote_addr", r.RemoteAddr,
-			)
-			http.Error(w, "invalid signature", http.StatusUnauthorized)
-			return
-		}
+	// Signature validation.  Now unconditional — the missing-secret branch
+	// above already returned 503.
+	sig := r.Header.Get("X-Confluence-Signature")
+	if !validateConfluenceSignature(body, sig, secret) {
+		slog.Warn("livingwiki: confluence webhook: signature validation failed",
+			"remote_addr", r.RemoteAddr,
+		)
+		http.Error(w, "invalid signature", http.StatusUnauthorized)
+		return
 	}
 
 	// Parse envelope.

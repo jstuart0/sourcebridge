@@ -632,7 +632,7 @@ export default function LivingWikiSettingsPage() {
             <div>
               <FieldLabel
                 label="Confluence webhook secret"
-                help="HMAC-SHA256 shared secret for validating the X-Confluence-Signature header on incoming Confluence webhooks. Configure the same value in the Confluence webhook settings UI. When empty, signature validation is skipped — only acceptable in development."
+                help="HMAC-SHA256 shared secret for validating the X-Confluence-Signature header on incoming Confluence webhooks. Configure the same value in the Confluence webhook settings UI. Required: when empty, the webhook endpoint refuses incoming requests with 503 (CA-206 — was previously skipped in development; that path was removed)."
               />
               <SecretInput
                 value={confluenceWebhookSecret}
