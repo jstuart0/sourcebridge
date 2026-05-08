@@ -24,7 +24,7 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
-**2026-05-07 SurrealDB v2.6.5 upgrade + option-field NULL remediation (CA-179)** — N commits, `<range>` (TODO: fill after valerie signoff + commit).
+**2026-05-07 SurrealDB v2.6.5 upgrade + option-field NULL remediation (CA-179)** — 1 commit, `6951279`.
 Upgrades the SurrealDB integration testcontainer and production pin from v2.2.1 to v2.6.5
 across 4 implementation phases. The upgrade surfaces that v2.6.5 enforces strict rejection
 of JSON null on `option<…>` schema columns in contexts that earlier versions tolerated.
