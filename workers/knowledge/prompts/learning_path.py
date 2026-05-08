@@ -20,6 +20,64 @@ Rules:
 - Adapt difficulty and pacing to the target audience.
 """
 
+LEARNING_PATH_STEP_REPAIR_TEMPLATE = """\
+You are repairing one step in a DEEP learning path for a repository.
+
+Repository: {repository_name}
+Audience: {audience}
+Step order: {step_order}
+Step title: {step_title}
+
+=== Current step objective ===
+{step_objective}
+
+=== Current step content ===
+{current_content}
+
+=== Current exercises ===
+{current_exercises}
+
+=== Current file paths ===
+{current_file_paths}
+
+=== Repository snapshot ===
+{snapshot_excerpt}
+
+=== Task ===
+Rewrite ONLY the step above as a stronger, more grounded version.
+- Keep the step narrowly focused on its objective.
+- Prefer concrete internal entities, functions, types, tests, or patterns visible in the snapshot.
+- Remove broad filler and unsupported abstractions.
+- Cite only real repository file paths visible in the snapshot above.
+- Wrap every function name, type, method, and test identifier in markdown backticks \
+  (e.g., `FunctionName`, `test_my_thing`). Unformatted identifiers do not count \
+  toward the high-confidence threshold.
+- Set confidence to "high" only when you name at least three backtick-wrapped \
+  identifiers AND cite at least three real file paths from the snapshot.
+
+FILE-PATH DISCIPLINE (violations lower the step's confidence):
+- Every entry in "file_paths" MUST be a real file path visible in the snapshot above. \
+  Do not invent paths.
+- Every entry MUST include a file extension (".go", ".py", ".ts", ".tsx", ".sql", \
+  ".proto", ".md", etc.). If you only know a directory, drop it — do NOT list \
+  directories in "file_paths"; describe the directory in prose instead.
+- If you find yourself wanting to cite a file whose exact path you are not sure of, \
+  describe it in prose rather than as a path.
+
+Return ONLY a JSON array with exactly one object using these keys:
+- "order"
+- "title"
+- "objective"
+- "content"
+- "file_paths"
+- "symbol_ids"
+- "estimated_time"
+- "prerequisite_steps"
+- "difficulty"
+- "exercises"
+- "checkpoint"
+"""
+
 _AUDIENCE_INSTRUCTIONS = {
     "beginner": (
         "The reader is new to programming or this codebase. "
