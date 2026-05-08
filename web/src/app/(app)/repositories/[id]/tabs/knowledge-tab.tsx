@@ -211,7 +211,10 @@ type RepoJobView = LLMJobView;
 interface RepoJobActivityResponse {
   active: RepoJobView[];
   recent: RepoJobView[];
-  stats: {
+  // Optional: older API replicas may omit this entirely; double-optional
+  // chains at consumer sites (CA-258 — repoJobs?.stats?.queue_depth ?? 0)
+  // are the runtime guard.
+  stats?: {
     in_flight: number;
     queue_depth: number;
     max_concurrency: number;
@@ -482,11 +485,30 @@ export function understandingProgressJobView(
 }
 
 function artifactAsJobView(artifact: KnowledgeArtifact): LLMJobView {
-  const status: LLMJobView["status"] =
-    artifact.status === "PENDING" ? "pending"
-    : artifact.status === "GENERATING" ? "generating"
-    : artifact.status === "FAILED" ? "failed"
-    : "ready";
+  // CA-259: exhaustive match on the four documented statuses; any unknown
+  // status falls through to "ready" with a one-time warn (helps catch
+  // backend/frontend drift in dev without crashing in prod).
+  let status: LLMJobView["status"];
+  switch (artifact.status) {
+    case "PENDING":
+      status = "pending";
+      break;
+    case "GENERATING":
+      status = "generating";
+      break;
+    case "FAILED":
+      status = "failed";
+      break;
+    case "READY":
+      status = "ready";
+      break;
+    default:
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("artifactAsJobView: unknown artifact.status — defaulting to 'ready'", artifact.status);
+      }
+      status = "ready";
+      break;
+  }
   const updated = artifact.updatedAt;
   const elapsed = updated ? Math.max(0, Date.now() - new Date(updated).getTime()) : 0;
   return {
@@ -1177,7 +1199,7 @@ export function KnowledgeTab({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-tertiary)]">
               <span className={artifactStatusClass}>
-                Queue {repoJobs?.stats.queue_depth ?? 0} / {repoJobs?.stats.max_concurrency ?? 0} slots
+                Queue {repoJobs?.stats?.queue_depth ?? 0} / {repoJobs?.stats?.max_concurrency ?? 0} slots
               </span>
               <span className={artifactStatusClass}>
                 Batch {batchSummary.completed}/{batchSummary.total || 0} complete

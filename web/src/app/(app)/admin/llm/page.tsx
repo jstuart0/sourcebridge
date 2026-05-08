@@ -219,7 +219,10 @@ export default function AdminLLMPage() {
       ]);
       if (list) {
         setProfiles(list.profiles);
-        setActiveProfileMissing(list.active_profile_missing);
+        // CA-260: older API replicas may omit `active_profile_missing`
+        // entirely. Default to false so the repair banner stays hidden
+        // rather than silently flickering on.
+        setActiveProfileMissing(list.active_profile_missing ?? false);
         // Default to true when the field is absent (older API replica).
         setEncryptionKeySet(list.encryption_key_set ?? true);
         // Auto-select an editor target. Prefer the active profile;
@@ -233,7 +236,7 @@ export default function AdminLLMPage() {
           return list.profiles[0]?.id ?? null;
         });
         // Pre-fill the repair picker with the first profile if needed.
-        if (list.active_profile_missing && list.profiles.length > 0) {
+        if ((list.active_profile_missing ?? false) && list.profiles.length > 0) {
           setRepairTargetId((prev) => prev || list.profiles[0].id);
         }
       }

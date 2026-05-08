@@ -378,8 +378,13 @@ export default function MonitorPage() {
   }, [modeRollups]);
 
   const saturation = useMemo(() => {
+    // CA-257: double-guard partial stats — older API replicas may return
+    // stats without max_concurrency or in_flight. Treat undefined as 0,
+    // matching the displayed "—" placeholder elsewhere.
     if (!stats) return null;
-    const pct = stats.max_concurrency > 0 ? (stats.in_flight / stats.max_concurrency) * 100 : 0;
+    const maxConcurrency = stats.max_concurrency ?? 0;
+    const inFlight = stats.in_flight ?? 0;
+    const pct = maxConcurrency > 0 ? (inFlight / maxConcurrency) * 100 : 0;
     return Math.round(pct);
   }, [stats]);
 
