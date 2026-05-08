@@ -557,10 +557,16 @@ func (s *SurrealStore) ReplaceIndexResult(repoID string, result *indexer.IndexRe
 			"repo_id", repoID, "error", err)
 	}
 
-	// Remove old data (including call graph)
+	// CA-304: remove old data including BOTH ca_calls AND ca_tests. The
+	// previous DELETE missed ca_tests entirely, so re-indexing left
+	// orphan test-linkage rows whose source_id / target_id pointed at
+	// deleted symbols. Combined with the matching CREATE-side bug below
+	// (ReplaceIndexResult re-inserted only RelationCalls), every
+	// re-index permanently lost the repo's test-linkage edges.
 	_, _ = surrealdb.Query[interface{}](ctx(), db,
 		`DELETE ca_import WHERE file_id IN (SELECT VALUE id FROM ca_file WHERE repo_id = $id);
 		 DELETE ca_calls WHERE repo_id = $id;
+		 DELETE ca_tests WHERE repo_id = $id;
 		 DELETE ca_symbol WHERE repo_id = $id;
 		 DELETE ca_module WHERE repo_id = $id;
 		 DELETE ca_file WHERE repo_id = $id`,
@@ -648,26 +654,44 @@ func (s *SurrealStore) ReplaceIndexResult(repoID string, result *indexer.IndexRe
 		}
 	}
 
-	// Re-insert call graph relations
+	// CA-304: re-insert BOTH call-graph AND test-linkage relations.
+	// Mirrors the StoreIndexResult relation loop above. The previous
+	// implementation only re-inserted RelationCalls and silently
+	// dropped RelationTests on every re-index, leaving the repo with
+	// no test-linkage edges (GetTestsForSymbolPersisted returned nothing
+	// for every symbol after re-indexing).
 	for _, rel := range result.Relations {
-		if rel.Type != indexer.RelationCalls {
+		sourceID := idMap[rel.SourceID]
+		targetID := idMap[rel.TargetID]
+		if sourceID == "" || targetID == "" {
 			continue
 		}
-		callerID := idMap[rel.SourceID]
-		calleeID := idMap[rel.TargetID]
-		if callerID == "" || calleeID == "" {
-			continue
+		switch rel.Type {
+		case indexer.RelationCalls:
+			_, _ = surrealdb.Query[interface{}](ctx(), db,
+				`CREATE ca_calls SET
+					caller_id = $caller_id,
+					callee_id = $callee_id,
+					repo_id = $repo_id`,
+				map[string]any{
+					"caller_id": sourceID,
+					"callee_id": targetID,
+					"repo_id":   repoID,
+				})
+		case indexer.RelationTests:
+			// ca_tests: source_id = test symbol, target_id = symbol
+			// being tested. Same shape as StoreIndexResult.
+			_, _ = surrealdb.Query[interface{}](ctx(), db,
+				`CREATE ca_tests SET
+					source_id = $source_id,
+					target_id = $target_id,
+					repo_id = $repo_id`,
+				map[string]any{
+					"source_id": sourceID,
+					"target_id": targetID,
+					"repo_id":   repoID,
+				})
 		}
-		_, _ = surrealdb.Query[interface{}](ctx(), db,
-			`CREATE ca_calls SET
-				caller_id = $caller_id,
-				callee_id = $callee_id,
-				repo_id = $repo_id`,
-			map[string]any{
-				"caller_id": callerID,
-				"callee_id": calleeID,
-				"repo_id":   repoID,
-			})
 	}
 
 	// Re-insert modules
