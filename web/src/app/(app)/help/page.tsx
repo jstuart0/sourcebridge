@@ -36,7 +36,7 @@ export default function HelpPage() {
       <div className="space-y-8">
         <HelpSection title="Getting Started">
           <p>
-            SourceBridge.ai is a codebase field guide and context layer. It indexes repositories to
+            SourceBridge.ai is a codebase cliff notes and context layer. It indexes repositories to
             discover files and symbols, then helps you explain the system, review risky areas, and
             optionally connect specs or requirements to implementation.
           </p>
@@ -53,7 +53,7 @@ export default function HelpPage() {
               structure.
             </li>
             <li>
-              <strong>Open the repository Field Guide</strong> to get oriented quickly.
+              <strong>Open the repository Cliff Notes</strong> to get oriented quickly.
             </li>
             <li>
               <strong>Import specs or requirements later</strong> if you want intent-to-code links and coverage.
@@ -67,7 +67,7 @@ export default function HelpPage() {
             providing a git URL or a local filesystem path.
           </p>
           <p className="mt-3">
-            Once indexed, you can browse files, inspect symbols, open the Field Guide, review changes,
+            Once indexed, you can browse files, inspect symbols, open the Cliff Notes, review changes,
             and run explain/discuss workflows from the repository workspace.
           </p>
           <p className="mt-3">

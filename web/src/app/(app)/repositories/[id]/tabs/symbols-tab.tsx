@@ -630,15 +630,15 @@ export function SymbolsTab({
                     <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Cached analysis</p>
                     <p className="mt-2 text-sm text-[var(--text-secondary)]">
                       {selectedSymbolNode
-                        ? "Generate or reuse a cached field guide for this symbol. Impact analysis is included once the symbol guide is up to date."
-                        : "Generate or reuse a cached field guide for this file."}
+                        ? "Generate or reuse a cached cliff notes for this symbol. Impact analysis is included once the symbol guide is up to date."
+                        : "Generate or reuse a cached cliff notes for this file."}
                     </p>
                   </div>
                   {!currentScopedCliffNotes ? (
                     <div className="rounded-[var(--radius-sm)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] p-5">
                       <p className="text-sm font-medium text-[var(--text-primary)]">No scoped Cliff Notes yet.</p>
                       <p className="mt-2 text-sm text-[var(--text-secondary)]">
-                        Generate an indexed field guide for this {selectedSymbolNode ? "symbol" : "file"} to get purpose, local context, and safe-change guidance in one place.
+                        Generate an indexed cliff notes for this {selectedSymbolNode ? "symbol" : "file"} to get purpose, local context, and safe-change guidance in one place.
                       </p>
                       <div className="mt-4">
                         <Button onClick={handleGenerateScopedCliffNotes} disabled={knowledgeLoading}>

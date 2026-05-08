@@ -60,8 +60,8 @@ export function SymbolList({
               {cachedScopePaths?.has(`${sym.filePath}#${sym.name}`) ? (
                 <span
                   className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--accent-primary)]"
-                  aria-label="Cached field guide available"
-                  title="Cached field guide available"
+                  aria-label="Cached cliff notes available"
+                  title="Cached cliff notes available"
                 />
               ) : null}
               <span className="ml-auto shrink-0 text-xs text-[var(--text-tertiary)]">:{sym.startLine}</span>

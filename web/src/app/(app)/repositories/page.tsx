@@ -179,7 +179,7 @@ export default function RepositoriesPage() {
         repositoryId: addedId || undefined,
         metadata: { source: "repositories_page" },
       });
-      setAddSuccess(`Repository "${newName.trim()}" added. Cloning and indexing are in progress. You’ll be taken straight to its field guide when indexing completes.`);
+      setAddSuccess(`Repository "${newName.trim()}" added. Cloning and indexing are in progress. You’ll be taken straight to its cliff notes when indexing completes.`);
       setNewName("");
       setNewPath("");
       reexecute({ requestPolicy: "network-only" });
@@ -327,7 +327,7 @@ export default function RepositoriesPage() {
               <h3 className="text-base font-semibold text-[var(--text-primary)]">Bulk Import</h3>
               <p className="text-sm text-[var(--text-secondary)]">
                 Paste one git URL or path per line. Each repo will be cloned, indexed, and automatically
-                generate field guides, learning paths, and code tours.
+                generate cliff notes, learning paths, and code tours.
               </p>
             </div>
             <textarea
@@ -370,7 +370,7 @@ export default function RepositoriesPage() {
       {repos.length === 0 && !result.fetching ? (
         <EmptyState
           title="No repositories indexed yet"
-          description="Start by adding a repository. Once indexing completes, SourceBridge.ai builds a field guide for the system: files, symbols, structure, and guided understanding."
+          description="Start by adding a repository. Once indexing completes, SourceBridge.ai builds a cliff notes for the system: files, symbols, structure, and guided understanding."
           actions={<Button onClick={() => setShowAddForm(true)}>Add Repository</Button>}
         />
       ) : (

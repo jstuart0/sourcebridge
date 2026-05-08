@@ -30,8 +30,10 @@ findings: 12 HIGH UX (P5), 1 CRITICAL data-loss (P9), 1 HIGH security cipher upg
 Master plan: `thoughts/shared/plans/active-2026-05-08-deliver-audit-remediation-master-plan.md`.
 
 P5 (UX terminology + a11y, `2309b60`) — twelve HIGH ruby-audit findings shipped together.
-Status badges → human labels + tooltips; queue jargon → plain English; "Cliff Notes" →
-"Field Guide" everywhere in user-facing surface; three-button toolbar → single contextual
+Status badges → human labels + tooltips; queue jargon → plain English; user-facing
+surface standardized on "Cliff Notes" everywhere (the audit recommended choosing one
+noun consistently — "Cliff Notes" was retained as the user-facing brand;
+three-button toolbar → single contextual
 action; duplicate "Build understanding" button removed; div onClick patterns now expose
 proper button semantics (role, tabIndex, aria-expanded, onKeyDown, focus-visible);
 execution-trace select gets sr-only label; monitor page gets a skeleton during first
@@ -69,7 +71,7 @@ Load-bearing constraints for future-Claude (wave 2):
   Auto-generated path produces 64-hex-char (32 raw bytes) which clears trivially.
   Tests that construct Config{} directly without going through Load() must seed
   a 64-hex placeholder (existing pattern in config_test.go and tests/integration).
-- **CA-241 "Cliff Notes" → "Field Guide" rename is user-surface only.** The
+- **CA-241 user-facing surface standardized on "Cliff Notes".** The
   internal artifact-type enum (`CLIFF_NOTES`), the Go struct names, and the gRPC
   proto field names are unchanged. Don't rename them — they're stable contracts
   with the worker, MCP, and persisted artifacts.

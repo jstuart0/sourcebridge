@@ -98,7 +98,7 @@ export function SettingsTab({
           <div>
             <h4 className="text-sm font-semibold text-[var(--text-primary)]">Knowledge Engine Default</h4>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              Sets the repository-level default generation engine. Request-time selections in the field guide still override this.
+              Sets the repository-level default generation engine. Request-time selections in the cliff notes still override this.
             </p>
           </div>
           <span className={artifactStatusClass}>{repoGenerationModeDefault === "CLASSIC" ? "Classic" : "Understanding First"}</span>

@@ -107,7 +107,7 @@ export default function DashboardPage() {
       <PageHeader
         eyebrow="Overview"
         title="Understand your codebases faster"
-        description="See what SourceBridge.ai has already mapped: repositories, structure, understanding signals, and recent field-guide activity."
+        description="See what SourceBridge.ai has already mapped: repositories, structure, understanding signals, and recent cliff-notes activity."
       />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 md:grid-cols-3">
@@ -120,7 +120,7 @@ export default function DashboardPage() {
         <EmptyState
           eyebrow="First Workspace"
           title="Bring your first codebase into focus"
-          description="Add a repository to build a field guide for the system: files, symbols, structure, guided explanations, and change understanding."
+          description="Add a repository to build a cliff notes for the system: files, symbols, structure, guided explanations, and change understanding."
           actions={
             <>
               <Link href="/onboarding">
@@ -174,7 +174,7 @@ export default function DashboardPage() {
                 Workspaces
               </p>
               <h2 className="text-xl font-semibold tracking-[-0.03em] text-[var(--text-primary)]">
-                Repository Field Guides
+                Repository Cliff Notes
               </h2>
             </div>
             <div className="divide-y divide-[var(--border-subtle)]">

@@ -632,7 +632,7 @@ function ActiveJobsSection({
       <div className="flex flex-col items-center gap-3 rounded-[var(--radius-md)] border border-dashed border-[var(--border-default)] py-10 text-center">
         <p className="text-sm font-medium text-[var(--text-primary)]">No jobs right now.</p>
         <p className="max-w-md text-xs text-[var(--text-secondary)]">
-          Generate a field guide for a repository and you&apos;ll see it here — with a live
+          Generate a cliff notes for a repository and you&apos;ll see it here — with a live
           progress bar, elapsed time, and a cancel button.
         </p>
         <Link href="/repositories">

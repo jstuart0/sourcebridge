@@ -128,14 +128,14 @@ export default function LoginPage() {
             Understand any codebase, fast.
           </h1>
           <p className="max-w-lg text-base leading-8 text-[var(--text-secondary)]">
-            Build a field guide for unfamiliar codebases, explain what matters, review risky changes,
+            Build a cliff notes for unfamiliar codebases, explain what matters, review risky changes,
             and connect specs to implementation when you have them.
           </p>
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">
           {[
-            { label: "Field Guide", value: "Repo → file → symbol understanding" },
+            { label: "Cliff Notes", value: "Repo → file → symbol understanding" },
             { label: "Change Impact", value: "See what recent commits affect" },
             { label: "Specs", value: "Optional links from intent to code" },
           ].map((item) => (

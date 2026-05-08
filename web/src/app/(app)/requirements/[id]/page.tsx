@@ -72,7 +72,7 @@ interface KnowledgeArtifact {
   sections: KnowledgeSection[];
 }
 
-type RequirementTab = "links" | "field-guide" | "chat";
+type RequirementTab = "links" | "cliff-notes" | "chat";
 
 function confidenceLevel(conf: string): ConfidenceLevel {
   switch (conf) {
@@ -190,7 +190,7 @@ export default function RequirementDetailPage() {
   const allLinks = useMemo(() => [...initialLinks, ...extraLinks], [initialLinks, extraLinks]);
   const symbols = symbolsResult.data?.symbols?.nodes || [];
 
-  // --- Field Guide state ---
+  // --- Cliff Notes state ---
   const [knowledgeResult, reexecuteKnowledge] = useQuery({
     query: REQUIREMENT_KNOWLEDGE_QUERY,
     variables: { repositoryId: repoId, requirementId: reqId },
@@ -467,7 +467,7 @@ export default function RequirementDetailPage() {
 
           {/* Tab switcher */}
           <div className="flex items-center gap-6 border-b border-[var(--border-default)]">
-            {(["links", "field-guide", "chat"] as RequirementTab[]).map((tab) => (
+            {(["links", "cliff-notes", "chat"] as RequirementTab[]).map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -479,7 +479,7 @@ export default function RequirementDetailPage() {
                     : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
                 )}
               >
-                {tab === "links" ? `Links (${allLinks.length}${loadingMore ? "+" : ""})` : tab === "field-guide" ? "Field Guide" : "Chat"}
+                {tab === "links" ? `Links (${allLinks.length}${loadingMore ? "+" : ""})` : tab === "cliff-notes" ? "Cliff Notes" : "Chat"}
               </button>
             ))}
             <span className="ml-auto inline-flex rounded-full bg-[var(--bg-hover)] px-2.5 py-1 text-xs font-medium text-[var(--text-tertiary)]">
@@ -601,15 +601,15 @@ export default function RequirementDetailPage() {
             </Panel>
           ) : null}
 
-          {/* Field Guide tab */}
-          {activeTab === "field-guide" ? (
+          {/* Cliff Notes tab */}
+          {activeTab === "cliff-notes" ? (
             <Panel variant="elevated" className="space-y-5">
               {!hasLinks ? (
                 <div className="rounded-[var(--radius-sm)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] p-5">
                   <p className="text-sm font-medium text-[var(--text-primary)]">No linked code yet</p>
                   <p className="mt-2 text-sm text-[var(--text-secondary)]">
                     Link code to this requirement first (via Auto-Link or manual linking),
-                    then generate a Field Guide to see how it&apos;s implemented.
+                    then generate a Cliff Notes to see how it&apos;s implemented.
                   </p>
                 </div>
               ) : isFailed ? (
@@ -637,7 +637,7 @@ export default function RequirementDetailPage() {
               ) : isGenerating ? (
                 <div className="space-y-3">
                   <p className="text-sm text-[var(--text-secondary)]">
-                    Generating Field Guide{artifact?.progress ? ` (${Math.round(artifact.progress * 100)}%)` : ""}…
+                    Generating Cliff Notes{artifact?.progress ? ` (${Math.round(artifact.progress * 100)}%)` : ""}…
                   </p>
                   <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--bg-hover)]">
                     <div
@@ -650,7 +650,7 @@ export default function RequirementDetailPage() {
                 <div className="space-y-5">
                   <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div className="flex items-center gap-3">
-                      <h2 className="text-lg font-semibold text-[var(--text-primary)]">Field Guide</h2>
+                      <h2 className="text-lg font-semibold text-[var(--text-primary)]">Cliff Notes</h2>
                       {artifact.stale ? (
                         <span className="rounded-full bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-600">
                           Stale
@@ -706,10 +706,10 @@ export default function RequirementDetailPage() {
               ) : (
                 <div className="space-y-3">
                   <p className="text-sm text-[var(--text-secondary)]">
-                    Generate a Field Guide to see a cross-cutting summary of how this requirement is implemented.
+                    Generate a Cliff Notes to see a cross-cutting summary of how this requirement is implemented.
                   </p>
                   <Button onClick={handleGenerateFieldGuide} disabled={generating}>
-                    {generating ? "Starting…" : "Generate Field Guide"}
+                    {generating ? "Starting…" : "Generate Cliff Notes"}
                   </Button>
                 </div>
               )}
@@ -723,12 +723,12 @@ export default function RequirementDetailPage() {
                 <div className="rounded-[var(--radius-sm)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] p-5">
                   <p className="text-sm font-medium text-[var(--text-primary)]">No linked code yet</p>
                   <p className="mt-2 text-sm text-[var(--text-secondary)]">
-                    Link code to this requirement first, then generate a Field Guide to enable follow-up questions.
+                    Link code to this requirement first, then generate a Cliff Notes to enable follow-up questions.
                   </p>
                 </div>
               ) : !isReady ? (
                 <p className="text-sm text-[var(--text-secondary)]">
-                  Generate a Field Guide first to enable follow-up questions.
+                  Generate a Cliff Notes first to enable follow-up questions.
                 </p>
               ) : (
                 <>

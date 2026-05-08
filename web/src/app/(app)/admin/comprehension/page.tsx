@@ -457,7 +457,7 @@ export default function ComprehensionSettingsPage() {
       <PageHeader
         eyebrow="Settings"
         title="Comprehension Engine"
-        description="Configure how SourceBridge generates field guides, learning paths, and other AI artifacts."
+        description="Configure how SourceBridge generates cliff notes, learning paths, and other AI artifacts."
         actions={
           <div className="flex items-center gap-2">
             <Link

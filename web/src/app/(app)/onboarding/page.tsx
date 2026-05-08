@@ -49,7 +49,7 @@ export default function OnboardingPage() {
       <PageHeader
         eyebrow="Onboarding"
         title="Set up your first repository"
-        description="Get value quickly: add a repo, index it, and open its field guide."
+        description="Get value quickly: add a repo, index it, and open its cliff notes."
       />
 
       <div className="mx-auto w-full max-w-3xl space-y-8">
@@ -79,7 +79,7 @@ export default function OnboardingPage() {
 
             <ul className="list-disc space-y-2 pl-5 text-sm leading-7 text-[var(--text-secondary)]">
               <li>Index repositories to discover files, symbols, and structure.</li>
-              <li>Open a repository field guide to see what matters first.</li>
+              <li>Open a repository cliff notes to see what matters first.</li>
               <li>Use AI to explain, discuss, and review implementation.</li>
               <li>Add specs or requirements later if you want intent-to-code links.</li>
             </ul>
@@ -159,7 +159,7 @@ export default function OnboardingPage() {
               </h2>
               <p className="text-sm leading-7 text-[var(--text-secondary)]">
                 {addedRepo
-                  ? `"${addedRepo.name}" is being indexed. We’ll take you straight into its field guide as soon as it is ready.`
+                  ? `"${addedRepo.name}" is being indexed. We’ll take you straight into its cliff notes as soon as it is ready.`
                   : "You can add repositories and optional specs or requirements at any time."}
               </p>
             </div>

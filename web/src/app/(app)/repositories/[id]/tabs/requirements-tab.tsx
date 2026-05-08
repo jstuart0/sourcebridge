@@ -163,7 +163,7 @@ export function RequirementsTab({
           <div className="space-y-2 text-sm text-[var(--text-secondary)]">
             <p>No specs or requirements imported yet.</p>
             <p>
-              This is optional. SourceBridge.ai can still explain the codebase, generate field guides, and review files without it.
+              This is optional. SourceBridge.ai can still explain the codebase, generate cliff notes, and review files without it.
               Importing specs later unlocks intent-to-code links, coverage visibility, and richer change impact analysis.
             </p>
           </div>

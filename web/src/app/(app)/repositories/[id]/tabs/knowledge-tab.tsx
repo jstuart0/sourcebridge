@@ -865,7 +865,7 @@ export function KnowledgeTab({
   }
 
   function scopeSubtitle() {
-    if (knowledgeScopeType === "REPOSITORY") return "Repository field guide";
+    if (knowledgeScopeType === "REPOSITORY") return "Repository cliff notes";
     if (knowledgeScopeType === "MODULE") return knowledgeScopePath;
     if (knowledgeScopeType === "FILE") return knowledgeScopePath;
     if (knowledgeScopeType === "SYMBOL") return knowledgeScopePath;
@@ -1094,7 +1094,7 @@ export function KnowledgeTab({
             </div>
             <h3 className="text-base font-semibold text-[var(--text-primary)]">Get to know this repository</h3>
             <p className="mt-2 max-w-sm text-sm text-[var(--text-secondary)]">
-              Generate a Field Guide to get oriented fast — purpose, architecture, key patterns, and entry points.
+              Generate Cliff Notes to get oriented fast — purpose, architecture, key patterns, and entry points.
             </p>
             <div className="mt-6">
               {/* CA-244: when the button is disabled because the LLM
@@ -1106,21 +1106,21 @@ export function KnowledgeTab({
                   wrapping element. */}
               <span
                 title={!features.cliffNotes
-                  ? "Field-guide generation is not enabled on this server. Configure an LLM provider in Admin → LLM."
+                  ? "Cliff-notes generation is not enabled on this server. Configure an LLM provider in Admin → LLM."
                   : undefined}
               >
                 <Button
                   onClick={handleGenerateCliffNotes}
                   disabled={knowledgeLoading || isCliffNotesGenerating || !features.cliffNotes}
-                  aria-describedby={!features.cliffNotes ? "field-guide-disabled-reason" : undefined}
+                  aria-describedby={!features.cliffNotes ? "cliff-notes-disabled-reason" : undefined}
                 >
-                  {knowledgeLoading || isCliffNotesGenerating ? "Generating..." : "Generate Field Guide"}
+                  {knowledgeLoading || isCliffNotesGenerating ? "Generating..." : "Generate Cliff Notes"}
                 </Button>
               </span>
             </div>
             {!features.cliffNotes ? (
-              <p id="field-guide-disabled-reason" className="mt-3 text-xs text-[var(--text-tertiary)]">
-                Field-guide generation is not enabled on this server. Configure an LLM provider in Admin → LLM to enable.
+              <p id="cliff-notes-disabled-reason" className="mt-3 text-xs text-[var(--text-tertiary)]">
+                Cliff-notes generation is not enabled on this server. Configure an LLM provider in Admin → LLM to enable.
               </p>
             ) : null}
           </div>
@@ -1257,7 +1257,7 @@ export function KnowledgeTab({
                   <p className="text-sm font-semibold text-[var(--text-primary)]">Repository Understanding</p>
                   <p className="mt-1 text-sm text-[var(--text-secondary)]">
                     {currentUnderstanding
-                      ? "Shared repository understanding powers field-guide reuse and refresh decisions."
+                      ? "Shared repository understanding powers cliff-notes reuse and refresh decisions."
                       : "No shared repository understanding has been persisted yet."}
                   </p>
                 </div>
@@ -1388,7 +1388,7 @@ export function KnowledgeTab({
               ) : null}
             </div>
 
-            {/* Category 1: Field Guide / Cliff Notes */}
+            {/* Category 1: Cliff Notes */}
             <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] overflow-hidden transition-all">
               <button
                 type="button"
@@ -1399,11 +1399,12 @@ export function KnowledgeTab({
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
                 </span>
                 <div className="min-w-0 flex-1">
-                  {/* CA-241: surface name is "Field Guide" — "Cliff Notes" is
-                      an internal implementation term and should not appear in
-                      the product surface. The marketing/external name is
-                      "Field Guide" everywhere. */}
-                  <p className="text-sm font-semibold text-[var(--text-primary)]">Field Guide</p>
+                  {/* CA-241: surface name standardized on "Cliff Notes"
+                      throughout the product. The internal type enum
+                      (CLIFF_NOTES) and Go/proto identifiers stay
+                      unchanged — those are stable contracts with the
+                      worker, MCP, and persisted artifacts. */}
+                  <p className="text-sm font-semibold text-[var(--text-primary)]">Cliff Notes</p>
                   <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
                     {currentCliffNotes
                       ? `${currentCliffNotes.sections.length} section${currentCliffNotes.sections.length !== 1 ? "s" : ""}${currentCliffNotes.generatedAt ? ` · Generated ${formatGeneratedAt(currentCliffNotes.generatedAt)}` : ""}`
@@ -1416,18 +1417,18 @@ export function KnowledgeTab({
                 <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
                   {!currentCliffNotes && !knowledgeResult.fetching && (
                     <div className="rounded-[var(--radius-sm)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] p-5">
-                      <p className="text-sm font-medium text-[var(--text-primary)]">No field guide for this view yet.</p>
+                      <p className="text-sm font-medium text-[var(--text-primary)]">No cliff notes for this view yet.</p>
                       <p className="mt-2 text-sm text-[var(--text-secondary)]">
                         Generate a grounded guide for {scopeTitle()} to get oriented fast. Requirements are optional and can be layered in later.
                       </p>
                       <div className="mt-4">
                         <Button onClick={handleGenerateCliffNotes} disabled={knowledgeLoading || isCliffNotesGenerating || !features.cliffNotes}>
-                          {knowledgeLoading || isCliffNotesGenerating ? "Generating..." : "Generate field guide"}
+                          {knowledgeLoading || isCliffNotesGenerating ? "Generating..." : "Generate cliff notes"}
                         </Button>
                       </div>
                       {!features.cliffNotes ? (
                         <p className="mt-3 text-xs text-[var(--text-tertiary)]">
-                          Field-guide generation is not enabled on this server. This view stays visible so you always know where guided understanding will appear.
+                          Cliff-notes generation is not enabled on this server. This view stays visible so you always know where guided understanding will appear.
                         </p>
                       ) : null}
                     </div>
@@ -1448,7 +1449,7 @@ export function KnowledgeTab({
                           <p className="mt-2 text-xs text-[var(--text-tertiary)]">
                             {formatGeneratedAt(currentCliffNotes.generatedAt)
                               ? `Generated ${formatGeneratedAt(currentCliffNotes.generatedAt)}`
-                              : "Generated after the latest successful field-guide run."}
+                              : "Generated after the latest successful cliff-notes run."}
                             {currentCliffNotes.sourceRevision?.commitSha
                               ? ` · revision ${currentCliffNotes.sourceRevision.commitSha.slice(0, 7)}`
                               : ""}
@@ -1471,7 +1472,7 @@ export function KnowledgeTab({
                             <p className="mt-1 text-xs text-[var(--text-tertiary)]">{artifactDeepeningSummary(currentCliffNotes)}</p>
                           ) : null}
                         </div>
-                        {/* CA-242: collapse the "Generate this lens" + "Refresh field guide"
+                        {/* CA-242: collapse the "Generate this lens" + "Refresh cliff notes"
                             pair down to a single primary action. They had identical visual
                             weight and the distinction (regenerate vs refresh) was opaque.
                             New rendering rule:
@@ -1491,7 +1492,7 @@ export function KnowledgeTab({
                             </Button>
                           ) : (
                             <Button variant="secondary" size="sm" onClick={() => handleRefreshArtifact(currentCliffNotes.id)} disabled={knowledgeLoading || isCliffNotesGenerating}>
-                              {artifactRetryLabel(currentCliffNotes, currentCliffNotesJob, "field guide")}
+                              {artifactRetryLabel(currentCliffNotes, currentCliffNotesJob, "cliff notes")}
                             </Button>
                           )}
                         </div>
@@ -1734,7 +1735,7 @@ export function KnowledgeTab({
                         {executionPath.message || "This path is not well enough understood yet."}
                       </p>
                       <p className="mt-2 text-sm text-[var(--text-secondary)]">
-                        Use the Field Guide for this scope first, then try again from a more concrete route or symbol.
+                        Use the Cliff Notes for this scope first, then try again from a more concrete route or symbol.
                       </p>
                     </div>
                   ) : executionPath ? (

@@ -283,7 +283,7 @@ export default function RepositoryDetailPage() {
     { key: "impact", label: "Change Impact", visible: true },
     { key: "architecture", label: "Architecture", visible: true },
     { key: "related", label: "Related", visible: true },
-    { key: "knowledge", label: "Field Guide", visible: true },
+    { key: "knowledge", label: "Cliff Notes", visible: true },
     { key: "subsystems", label: "Subsystems", visible: features.subsystemClustering },
     { key: "settings", label: "Settings", visible: true },
   ];
@@ -401,7 +401,7 @@ export default function RepositoryDetailPage() {
           <a href={repo.remoteUrl} target="_blank" rel="noopener noreferrer" className="underline decoration-[var(--border-default)] underline-offset-4 transition-colors hover:text-[var(--text-primary)] hover:decoration-[var(--text-primary)]">
             {repo.path || repo.remoteUrl}
           </a>
-        ) : (repo?.path || "Explore the codebase through files, symbols, field guides, reviews, and change impact.")}
+        ) : (repo?.path || "Explore the codebase through files, symbols, cliff notes, reviews, and change impact.")}
         actions={repo ? (
           <div className="flex flex-wrap items-center gap-2">
             <Button
