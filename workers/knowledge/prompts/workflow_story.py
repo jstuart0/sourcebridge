@@ -31,6 +31,52 @@ REQUIRED_WORKFLOW_STORY_SECTIONS_DEEP = [
     "Where to Inspect or Modify",
 ]
 
+WORKFLOW_STORY_SECTION_REPAIR_TEMPLATE = """\
+You are repairing one section in a DEEP workflow story for a repository.
+
+Repository: {repository_name}
+Audience: {audience}
+Scope type: {scope_type}
+Scope path: {scope_path}
+Section: {section_title}
+
+=== Current section summary ===
+{current_summary}
+
+=== Current section content ===
+{current_content}
+
+=== Current evidence ===
+{current_evidence}
+
+=== Repository snapshot ===
+{snapshot_excerpt}
+
+=== Execution path ===
+{execution_path_excerpt}
+
+=== Task ===
+Rewrite ONLY the `{section_title}` section as a stronger, more grounded version.
+- Keep the section narrowly focused on the section title's intent.
+- Prefer concrete internal entities, functions, types, routes, tests, or patterns visible in the snapshot.
+- Remove broad filler and unsupported abstractions.
+- Cite only real repository file paths visible in the snapshot above.
+- Wrap every function name, type, method, and test identifier in markdown backticks \
+  (e.g., `FunctionName`, `test_my_thing`). Unformatted identifiers do not count \
+  toward the high-confidence threshold.
+- Set confidence to "high" only when you name at least two backtick-wrapped \
+  identifiers AND cite at least three real file paths from the snapshot.
+- Only use "low" confidence when the snapshot provides no relevant evidence at all.
+
+Return ONLY a JSON array with exactly one object using these keys:
+- "title"
+- "content"
+- "summary"
+- "confidence"
+- "inferred"
+- "evidence"
+"""
+
 WORKFLOW_STORY_SYSTEM = """\
 You are a senior product-minded software engineer creating a grounded workflow story.
 

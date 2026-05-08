@@ -31,6 +31,7 @@ from workers.knowledge.parse_utils import (
 from workers.knowledge.prompts.workflow_story import (
     REQUIRED_WORKFLOW_STORY_SECTIONS,
     REQUIRED_WORKFLOW_STORY_SECTIONS_DEEP,
+    WORKFLOW_STORY_SECTION_REPAIR_TEMPLATE,
     WORKFLOW_STORY_SYSTEM,
     build_workflow_story_prompt,
 )
@@ -416,6 +417,197 @@ def _merge_with_fallbacks(
     return merged
 
 
+def _should_accept_repaired_workflow_section(
+    current: CliffNotesSection,
+    repaired: CliffNotesSection,
+) -> bool:
+    """Decide whether to swap in a repaired section.
+
+    Mirrors cliff_notes' ``_should_accept_repaired_section`` with
+    ``extract_section_evidence_refs`` for the ref count.  The simplified
+    confidence check is valid because the original is always LOW at repair time.
+    """
+    current_refs = len(extract_section_evidence_refs(current.evidence))
+    repaired_refs = len(extract_section_evidence_refs(repaired.evidence))
+    if current_refs > 0 and repaired_refs == 0:
+        return False
+    # original is always LOW here; reject if repair stays LOW (collapsed
+    # cliff_notes' `if repaired_low and not current_low` since current_low is True)
+    if (repaired.confidence or "").lower() == "low":
+        return False
+    if repaired_refs < current_refs and len(repaired.content) <= len(current.content):
+        return False
+    return True
+
+
+async def _repair_low_confidence_sections(
+    provider: LLMProvider,
+    repository_name: str,
+    audience: str,
+    scope_type: str,
+    scope_path: str,
+    snapshot_json: str,
+    execution_path_json: str,
+    sections: list[CliffNotesSection],
+    model_override: str | None,
+) -> tuple[list[CliffNotesSection], int, int, bool, bool]:
+    """Attempt one repair LLM call per LOW-confidence section (sequential, single-attempt).
+
+    Returns ``(updated_sections, repair_in_toks, repair_out_toks, any_accepted, any_fired)``.
+    ``any_fired`` is True when at least one repair attempt was started (including
+    attempts that were aborted by budget or LLM exceptions).
+    Mirrors the architecture of cliff_notes' ``_repair_deep_sections`` but as a
+    module-level free function (no parallelism needed for this artifact — D8).
+    ``depth`` is intentionally absent from the signature — this helper is only
+    ever called inside ``if depth == "deep":`` (M3).
+    """
+    by_title = {section.title: section for section in sections}
+    repair_in_toks = 0
+    repair_out_toks = 0
+    any_accepted = False
+    any_fired = False
+
+    for section in sections:
+        if section.confidence != "low":
+            continue
+
+        # Mark as fired: a repair attempt is being made for this section.
+        any_fired = True
+
+        evidence_lines = []
+        for ev in section.evidence or []:
+            line = f"- {ev.source_type}: {ev.file_path}"
+            if ev.rationale:
+                line += f" ({ev.rationale})"
+            evidence_lines.append(line)
+        current_evidence_str = "\n".join(evidence_lines) if evidence_lines else "(none)"
+
+        prompt = WORKFLOW_STORY_SECTION_REPAIR_TEMPLATE.format(
+            repository_name=repository_name or "repository",
+            audience=audience,
+            scope_type=scope_type or "repository",
+            scope_path=scope_path or "",
+            section_title=section.title,
+            current_summary=section.summary or "",
+            current_content=section.content or "",
+            current_evidence=current_evidence_str,
+            snapshot_excerpt=snapshot_json,
+            execution_path_excerpt=execution_path_json,
+        )
+
+        try:
+            check_prompt_budget(
+                prompt,
+                system=WORKFLOW_STORY_SYSTEM,
+                context=f"workflow_story:repair:{section.title}",
+            )
+        except SnapshotTooLargeError as exc:
+            log.warning(
+                "workflow_story_repair_skipped_budget_exceeded",
+                section_title=section.title,
+                error=str(exc),
+            )
+            continue
+
+        try:
+            response_repair = await complete_with_optional_model(
+                provider,
+                prompt,
+                system=WORKFLOW_STORY_SYSTEM,
+                max_tokens=4096,
+                temperature=0.0,
+                model=model_override,
+            )
+            require_nonempty(response_repair, context=f"workflow_story:repair:{section.title}")
+        except Exception as exc:
+            log.warning(
+                "workflow_story_repair_skipped",
+                section_title=section.title,
+                error=str(exc),
+            )
+            continue
+
+        try:
+            raw_results = parse_json_sections(response_repair.content)
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            log.warning(
+                "workflow_story_repair_skipped",
+                section_title=section.title,
+                error=str(exc),
+            )
+            repair_in_toks += response_repair.input_tokens
+            repair_out_toks += response_repair.output_tokens
+            continue
+
+        if not raw_results or not isinstance(raw_results[0], dict):
+            log.warning(
+                "workflow_story_repair_skipped",
+                section_title=section.title,
+                error="empty_or_non_dict",
+            )
+            repair_in_toks += response_repair.input_tokens
+            repair_out_toks += response_repair.output_tokens
+            continue
+
+        # Construct candidate CliffNotesSection explicitly (M5 — coerce_section returns dict).
+        normalized = coerce_section(
+            raw_results[0],
+            fallback_title=section.title,
+            title_summary_max_chars=TITLE_SUMMARY_MAX_CHARS,
+        )
+        candidate = CliffNotesSection(
+            title=str(normalized.get("title", section.title)),
+            content=str(normalized.get("content", "")),
+            confidence=str(normalized.get("confidence", "low")),
+            summary=str(normalized.get("summary", "")),
+            inferred=bool(normalized.get("inferred", False)),
+            evidence=parse_evidence(normalized.get("evidence")),
+        )
+
+        # Identity check: reject if the repair LLM changed the section title (D4).
+        if candidate.title != section.title:
+            log.warning(
+                "workflow_story_repair_skipped",
+                section_title=section.title,
+                error=f"title_mismatch: got {candidate.title!r}",
+            )
+            repair_in_toks += response_repair.input_tokens
+            repair_out_toks += response_repair.output_tokens
+            continue
+
+        # Re-run the evidence gate + floor upgrade to set candidate.confidence.
+        minimums = {"Main Steps": 3, "Behind the Scenes": 3, "Error Recovery": 2, "Observability": 1, "Where to Inspect or Modify": 3}
+        cand_gate = evaluate_evidence_gate(
+            text=f"{candidate.summary}\n{candidate.content}",
+            evidence=extract_section_evidence_refs(candidate.evidence),
+            minimum=minimums.get(candidate.title, 2),
+        )
+        if cand_gate.below_threshold or cand_gate.forbidden_phrases:
+            candidate.confidence = "low"
+            candidate.refinement_status = "needs_evidence"
+        else:
+            cited = {e.file_path for e in (candidate.evidence or []) if e.file_path}
+            if meets_confidence_floor(
+                current_confidence=candidate.confidence,
+                unique_file_paths=cited,
+                content=f"{candidate.summary}\n{candidate.content}",
+                min_files=MIN_FILES_CLIFF_NOTES,
+                min_identifiers=MIN_IDENTIFIERS_DEFAULT,
+            ):
+                candidate.confidence = "high"
+                candidate.refinement_status = ""
+
+        repair_in_toks += response_repair.input_tokens
+        repair_out_toks += response_repair.output_tokens
+
+        if _should_accept_repaired_workflow_section(section, candidate):
+            by_title[section.title] = candidate
+            any_accepted = True
+
+    updated_sections = [by_title[s.title] for s in sections]
+    return updated_sections, repair_in_toks, repair_out_toks, any_accepted, any_fired
+
+
 async def generate_workflow_story(
     provider: LLMProvider,
     repository_name: str,
@@ -561,6 +753,35 @@ async def generate_workflow_story(
                     section.confidence = "high"
                     section.refinement_status = ""
 
+    # Repair pass: initialize counters and flags unconditionally so the usage
+    # block below can reference them on every code path (M1 — no NameError).
+    repair_in_toks = 0
+    repair_out_toks = 0
+    any_accepted = False
+    repair_fired = False
+
+    # Only attempt repair when the initial LLM call succeeded (response is not
+    # None) and we're in deep mode and at least one section is still LOW.
+    # Repair has no useful signal against template-built fallback sections (D2).
+    if (
+        depth == "deep"
+        and response is not None
+        and any(s.confidence == "low" for s in sections)
+    ):
+        sections, repair_in_toks, repair_out_toks, any_accepted, repair_fired = (
+            await _repair_low_confidence_sections(
+                provider=provider,
+                repository_name=repository_name,
+                audience=audience,
+                scope_type=scope_type or "repository",
+                scope_path=scope_path,
+                snapshot_json=snapshot_json,
+                execution_path_json=execution_path_json,
+                sections=sections,
+                model_override=model_override,
+            )
+        )
+
     # --- Baseline quality instrumentation ---
     evidence_by_type: dict[str, int] = {}
     total_evidence = 0
@@ -592,12 +813,20 @@ async def generate_workflow_story(
         execution_path_steps=len(execution_path.get("steps") or []) if isinstance(execution_path, dict) else 0,
     )
 
+    # Operation label trichotomy (D10/M2).
+    if repair_fired and any_accepted:
+        operation = "workflow_story_repaired"
+    elif repair_fired:
+        operation = "workflow_story_repair_attempted"
+    else:
+        operation = "workflow_story"
+
     usage = LLMUsageRecord(
         provider=(response.provider_name or "") if response else "",
         model=response.model if response else "fallback",
-        input_tokens=response.input_tokens if response else 0,
-        output_tokens=response.output_tokens if response else 0,
-        operation="workflow_story",
+        input_tokens=(response.input_tokens if response else 0) + repair_in_toks,
+        output_tokens=(response.output_tokens if response else 0) + repair_out_toks,
+        operation=operation,
         entity_name=repository_name,
     )
 
