@@ -936,8 +936,8 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("auto-generating JWT secret: %w", genErr)
 		}
 		resolvedJWT = generated
-		jwtSource = "auto-generated"
 		slog.Info("JWT secret: auto-generated (in-memory only — does NOT persist; sessions invalidated on restart). For production / multi-replica, configure SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE or SOURCEBRIDGE_SECURITY_JWT_SECRET.",
+			"source", "auto-generated",
 			"length_bytes", len(resolvedJWT))
 	} else {
 		slog.Debug("JWT secret resolved", "source", jwtSource, "length_bytes", len(resolvedJWT))
