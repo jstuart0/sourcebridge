@@ -144,7 +144,11 @@ services:
       - SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL=${SOURCEBRIDGE_EMBEDDING_BASE_URL:-${SOURCEBRIDGE_LLM_BASE_URL:-http://host.docker.internal:11434}}
       # SEC-11: enable gRPC reflection in dev so grpcurl / grpc-ui work locally.
       # Production deployments leave this unset → reflection is off.
-      - SOURCEBRIDGE_WORKER_DEBUG=true
+      # CA-317: hub deploy default false (production-shaped); operator can
+      # opt in to verbose logging via SOURCEBRIDGE_WORKER_DEBUG=true in .env.
+      # Was hardcoded true — that left every Docker-Hub install logging at
+      # debug verbosity by default with no way to opt out.
+      - SOURCEBRIDGE_WORKER_DEBUG=${SOURCEBRIDGE_WORKER_DEBUG:-false}
     depends_on:
       surrealdb:
         condition: service_healthy

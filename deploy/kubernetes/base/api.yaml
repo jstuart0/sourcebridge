@@ -28,10 +28,15 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  # CHANGE-ME: replace with a StorageClass that supports ReadWriteMany.
-  # See the top-of-file comment for supported backends and the overlay
-  # patch pattern.
-  storageClassName: CHANGE-ME-set-rwx-class
+  # CA-228: empty storageClassName falls back to the cluster default
+  # StorageClass. RWX is still required at apply time — operators on
+  # clusters whose default class doesn't support RWX must override via
+  # overlay (see the top-of-file comment for the patch pattern). This
+  # default-class behavior is preferred to "CHANGE-ME-set-rwx-class"
+  # because the latter produces a permanently-pending PVC with no
+  # cluster-default fallback, which is harder to diagnose than a
+  # provisioner-rejection error from a real default class.
+  storageClassName: ""
   resources:
     requests:
       storage: 10Gi

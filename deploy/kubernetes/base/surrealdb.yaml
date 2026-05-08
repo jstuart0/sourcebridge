@@ -116,10 +116,16 @@ spec:
         name: surrealdb-data
       spec:
         accessModes: ["ReadWriteOnce"]
-        # CHANGE-ME: replace with a StorageClass that has reclaimPolicy: Retain
-        # so that PVC deletion does not destroy the database volume.
-        # See the top-of-file comment for the overlay patch pattern.
-        storageClassName: CHANGE-ME-set-with-Retain-policy
+        # CA-228: empty storageClassName falls back to the cluster default.
+        # PRODUCTION operators MUST override with a class that has
+        # reclaimPolicy: Retain so PVC deletion does not destroy the
+        # database volume. See the top-of-file comment for the overlay
+        # patch pattern. The default-class fallback is intended for kind /
+        # microk8s / development clusters; for production deployments, the
+        # overlay must explicitly set storageClassName to a Retain-policy
+        # class and the operator is responsible for verifying reclaimPolicy
+        # before applying.
+        storageClassName: ""
         resources:
           requests:
             storage: 10Gi

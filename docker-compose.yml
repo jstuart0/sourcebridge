@@ -48,7 +48,13 @@ services:
   # SurrealDB — embedded document/graph database
   surrealdb:
     image: surrealdb/surrealdb:v2.6.5
-    command: start --user root --pass root --log info file:/data/database.db
+    # CA-229: SurrealDB credentials default to root/root (development) but
+    # are now env-overridable. Production-shaped operator who wants to
+    # harden the dev compose can set SURREAL_USER and SURREAL_PASS in
+    # .env. The published port is also opt-in via SOURCEBRIDGE_SURREALDB_PORT
+    # (default 8000); set to "127.0.0.1:8000" to bind loopback-only when
+    # exposing dev services to a wider network is undesirable.
+    command: start --user ${SURREAL_USER:-root} --pass ${SURREAL_PASS:-root} --log info file:/data/database.db
     ports:
       - "${SOURCEBRIDGE_SURREALDB_PORT:-8000}:8000"
     volumes:
@@ -87,8 +93,8 @@ services:
       - SOURCEBRIDGE_STORAGE_SURREAL_URL=ws://surrealdb:8000/rpc
       - SOURCEBRIDGE_STORAGE_SURREAL_NAMESPACE=sourcebridge
       - SOURCEBRIDGE_STORAGE_SURREAL_DATABASE=sourcebridge
-      - SOURCEBRIDGE_STORAGE_SURREAL_USER=root
-      - SOURCEBRIDGE_STORAGE_SURREAL_PASS=root
+      - SOURCEBRIDGE_STORAGE_SURREAL_USER=${SURREAL_USER:-root}
+      - SOURCEBRIDGE_STORAGE_SURREAL_PASS=${SURREAL_PASS:-root}
       - SOURCEBRIDGE_STORAGE_REDIS_MODE=memory
       # Repo cache: /data is owned by the 'sourcebr' user (UID 1000) inside the
       # API container. Without this, the default './repo-cache' resolves to
@@ -154,12 +160,15 @@ services:
       - SOURCEBRIDGE_WORKER_SURREAL_URL=ws://surrealdb:8000/rpc
       - SOURCEBRIDGE_WORKER_SURREAL_NAMESPACE=sourcebridge
       - SOURCEBRIDGE_WORKER_SURREAL_DATABASE=sourcebridge
-      - SOURCEBRIDGE_WORKER_SURREAL_USER=root
-      - SOURCEBRIDGE_WORKER_SURREAL_PASS=root
+      - SOURCEBRIDGE_WORKER_SURREAL_USER=${SURREAL_USER:-root}
+      - SOURCEBRIDGE_WORKER_SURREAL_PASS=${SURREAL_PASS:-root}
       - SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET=${SOURCEBRIDGE_GRPC_SECRET:-dev-shared-secret}
       # SEC-11: enable gRPC reflection in dev so grpcurl / grpc-ui work locally.
       # Production deployments leave this unset → reflection is off.
-      - SOURCEBRIDGE_WORKER_DEBUG=true
+      # CA-317: dev-default true (verbose worker logging is useful in dev
+      # compose), but operator-overridable. Set SOURCEBRIDGE_WORKER_DEBUG=false
+      # in .env when running this compose against a non-dev workload.
+      - SOURCEBRIDGE_WORKER_DEBUG=${SOURCEBRIDGE_WORKER_DEBUG:-true}
 
       # ─── LLM Provider Configuration ──────────────────────────────────
       #
