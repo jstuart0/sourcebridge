@@ -4,8 +4,13 @@
 package secretcipher
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 )
@@ -210,3 +215,58 @@ func TestAESGCMCipher_AllowsUnencrypted(t *testing.T) {
 
 // Compile-time verify the implementation satisfies the interface.
 var _ Cipher = (*AESGCMCipher)(nil)
+
+// CA-200 transparent migration: legacy sbenc:v1 envelopes written by the
+// previous cipher (SHA-256 KDF, no salt) must remain decryptable under
+// the new cipher with the same passphrase. This test exists because the
+// original CA-200 fail-closed posture broke the homelab deploy on
+// 2026-05-08 — the master plan's "0 prod installs" assumption was wrong
+// for installations with existing v1-encrypted data.
+func TestDecryptV1EnvelopeIsTransparent(t *testing.T) {
+	const passphrase = "homelab-passphrase-32-chars-long-x"
+
+	v1Sum := sha256.Sum256([]byte(passphrase))
+	block, err := aes.NewCipher(v1Sum[:])
+	if err != nil {
+		t.Fatalf("v1 setup: aes new cipher: %v", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatalf("v1 setup: gcm: %v", err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		t.Fatalf("v1 setup: nonce: %v", err)
+	}
+	plaintext := "sk-test-secret-llm-api-key-12345"
+	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	v1Stored := EnvelopeV1Prefix + base64.StdEncoding.EncodeToString(ciphertext)
+
+	c := MustNewAESGCMCipher(passphrase, DeriveInstallationSaltFromKey(passphrase), false)
+
+	got, err := c.Decrypt(v1Stored)
+	if err != nil {
+		t.Fatalf("v1 decrypt should succeed transparently, got err: %v", err)
+	}
+	if got != plaintext {
+		t.Errorf("v1 decrypt: got %q, want %q", got, plaintext)
+	}
+
+	v2Stored, err := c.Encrypt(plaintext)
+	if err != nil {
+		t.Fatalf("re-encrypt: %v", err)
+	}
+	if !c.IsEnvelopeEncrypted(v2Stored) {
+		t.Errorf("re-encrypted form should be a v2 envelope; got %q", v2Stored)
+	}
+	if !strings.HasPrefix(v2Stored, EnvelopeV2Prefix) {
+		t.Errorf("expected v2 prefix, got %q", v2Stored[:min(20, len(v2Stored))])
+	}
+	roundTripped, err := c.Decrypt(v2Stored)
+	if err != nil {
+		t.Fatalf("v2 round-trip decrypt: %v", err)
+	}
+	if roundTripped != plaintext {
+		t.Errorf("v2 round-trip: got %q, want %q", roundTripped, plaintext)
+	}
+}

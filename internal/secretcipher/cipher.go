@@ -101,11 +101,21 @@ var ErrEncryptionKeyRequired = errors.New("secretcipher: encryption key is requi
 // is the whole point of the envelope.
 var ErrDecryptFailed = errors.New("secretcipher: stored value could not be decrypted; refusing to return a partial value")
 
-// ErrV1EnvelopeRejected is returned when Decrypt encounters an
-// sbenc:v1: envelope. CA-200 deprecated v1 because it used unsalted
-// SHA-256 as a KDF, leaving stored values brute-forceable. Operators
-// must re-save every affected secret via the Admin UI to migrate to v2.
-var ErrV1EnvelopeRejected = errors.New("secretcipher: legacy sbenc:v1 envelope detected (CA-200); re-save this secret via the Admin UI to migrate to the v2 envelope (Argon2id KDF + per-installation salt)")
+// ErrV1EnvelopeRejected was previously returned when Decrypt encountered
+// an sbenc:v1: envelope. CA-200 originally rejected v1 reads to force
+// operator-driven re-save, but the homelab deploy on 2026-05-08
+// surfaced installations with v1-encrypted data that the master plan's
+// "0 prod installs" assumption did not anticipate. The cipher now
+// transparently decrypts v1 envelopes via the v1 KDF (SHA-256 of
+// passphrase) and the next Encrypt of the same logical record migrates
+// it to v2. This var is retained so any downstream code that wrote
+// `errors.Is(err, ErrV1EnvelopeRejected)` still compiles; it is no
+// longer returned by Decrypt.
+//
+// Deprecated: v1 envelopes are now handled transparently. This sentinel
+// is unreferenced internally and exists only for backward-compat with
+// hypothetical external callers.
+var ErrV1EnvelopeRejected = errors.New("secretcipher: legacy sbenc:v1 envelope detected (CA-200) — Deprecated: v1 reads are now transparent")
 
 // ErrSaltRequired is returned by NewAESGCMCipher when the caller passes
 // a non-empty passphrase but no salt. CA-200: salt is mandatory for v2.
@@ -136,14 +146,17 @@ type Cipher interface {
 //
 // Empty plaintext encrypts to empty (no envelope). Empty stored decrypts
 // to empty. Unprefixed stored reads as legacy plaintext (one-time WARN).
-// v1-prefixed stored returns ErrV1EnvelopeRejected with a migration
-// message. v2-prefixed but undecryptable stored returns ErrDecryptFailed.
+// v1-prefixed stored is transparently decrypted via the v1 KDF (SHA-256
+// of passphrase) — the cipher emits a one-time WARN and the next Encrypt
+// of the same logical record re-saves it under v2. v2-prefixed but
+// undecryptable stored returns ErrDecryptFailed.
 //
 // Concurrency: the derived key and configuration fields are immutable
 // post-construction; the cipher is safe for concurrent Encrypt/Decrypt
 // calls.
 type AESGCMCipher struct {
 	key              []byte // 32 bytes (Argon2id-derived); empty when no key
+	v1Key            []byte // 32 bytes (SHA-256 of passphrase) — v1 read-fallback only
 	allowUnencrypted bool   // OSS escape hatch
 	// loadedLegacyOnce rate-limits the "this row is unencrypted; please
 	// migrate" WARN to one log line per process lifetime.
@@ -151,9 +164,9 @@ type AESGCMCipher struct {
 	// savedUnencryptedOnce rate-limits the "AllowUnencrypted is on and we
 	// just saved plaintext" WARN to one log line per process lifetime.
 	savedUnencryptedOnce sync.Once
-	// loadedV1Once rate-limits the "v1 envelope rejected; re-save"
-	// ERROR to one log line per process lifetime so log volume doesn't
-	// scale with read frequency on a stale row.
+	// loadedV1Once rate-limits the "v1 envelope detected; transparent
+	// decrypt" WARN to one log line per process lifetime so log volume
+	// doesn't scale with read frequency on a stale row.
 	loadedV1Once sync.Once
 }
 
@@ -187,6 +200,13 @@ func NewAESGCMCipher(passphrase string, salt []byte, allowUnencrypted bool) (*AE
 		argon2Threads,
 		argon2KeyLen,
 	)
+	// v1 read-fallback: derive the legacy SHA-256 key alongside the
+	// Argon2id key so v1 ciphertexts written by the previous cipher
+	// remain decryptable without operator intervention. New writes
+	// always use the v2 envelope (Argon2id + salt). The next save of
+	// any v1-encrypted row re-encrypts it under v2 transparently.
+	v1Sum := sha256.Sum256([]byte(passphrase))
+	c.v1Key = v1Sum[:]
 	return c, nil
 }
 
@@ -299,14 +319,41 @@ func (c *AESGCMCipher) Decrypt(stored string) (string, error) {
 	if stored == "" {
 		return "", nil
 	}
-	// CA-200: legacy v1 envelopes are explicitly rejected. Operators
-	// must re-save every affected secret via the Admin UI to migrate.
+	// CA-200: legacy v1 envelopes are decrypted via the v1 KDF
+	// (sha256.Sum256(passphrase)) so existing data remains readable on
+	// upgrade. The cipher emits a one-time WARN; the next Encrypt of the
+	// same logical record will write a fresh v2 envelope, migrating the
+	// row transparently. Operators don't need to re-enter secrets.
 	if strings.HasPrefix(stored, EnvelopeV1Prefix) {
+		if len(c.v1Key) == 0 {
+			return "", fmt.Errorf("%w: stored value is a legacy sbenc:v1 envelope but the cipher has no v1 fallback key (passphrase was empty at construction)", ErrDecryptFailed)
+		}
 		c.loadedV1Once.Do(func() {
-			slog.Error("secretcipher: encountered legacy sbenc:v1 envelope; CA-200 deprecated v1 (unsalted SHA-256 KDF). Re-save the secret via the Admin UI to migrate to v2. The previous-saved value cannot be decrypted with the v2 cipher.",
-				"prefix", EnvelopeV1Prefix)
+			slog.Warn("secretcipher: legacy sbenc:v1 envelope detected; decrypted via v1 fallback (SHA-256 KDF). Next save of this row will re-encrypt under sbenc:v2 (Argon2id + per-installation salt). No operator action required — the migration is transparent.")
 		})
-		return "", ErrV1EnvelopeRejected
+		encoded := strings.TrimPrefix(stored, EnvelopeV1Prefix)
+		data, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return "", fmt.Errorf("%w: v1 base64 decode: %v", ErrDecryptFailed, err)
+		}
+		block, err := aes.NewCipher(c.v1Key)
+		if err != nil {
+			return "", fmt.Errorf("%w: v1 aes new cipher: %v", ErrDecryptFailed, err)
+		}
+		gcm, err := cipher.NewGCM(block)
+		if err != nil {
+			return "", fmt.Errorf("%w: v1 gcm: %v", ErrDecryptFailed, err)
+		}
+		nonceSize := gcm.NonceSize()
+		if len(data) < nonceSize {
+			return "", fmt.Errorf("%w: v1 ciphertext too short", ErrDecryptFailed)
+		}
+		nonce, ciphertext := data[:nonceSize], data[nonceSize:]
+		plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+		if err != nil {
+			return "", fmt.Errorf("%w: v1 gcm open: %v", ErrDecryptFailed, err)
+		}
+		return string(plaintext), nil
 	}
 	if !strings.HasPrefix(stored, EnvelopeV2Prefix) {
 		// Legacy plaintext path. Warn once per process; never auto-
