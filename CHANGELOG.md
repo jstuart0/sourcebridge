@@ -4,6 +4,73 @@ All notable changes to SourceBridge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.10.0-rc.3...v0.11.0-rc.3) (2026-05-08)
+
+
+### Added
+
+* **db:** bump SurrealDB v2.2.1 → v2.6.5 + option&lt;…&gt; NULL remediation (CA-179) ([6951279](https://github.com/sourcebridge-ai/sourcebridge/commit/6951279817771b8c88d51a690309d455860a65b8))
+* **learning_path:** section-level repair pass for deep render (CA-178 phase 1/2) ([810dc1a](https://github.com/sourcebridge-ai/sourcebridge/commit/810dc1adde1eb2e3f6b5a39d8a7b609a4ae37bc0))
+* **orchestrator:** Phase 2 — capacity clamp, breaker recalibration, gRPC auth, capacity provider wiring ([6ea3fa7](https://github.com/sourcebridge-ai/sourcebridge/commit/6ea3fa77dd799b026eee5c783acd28528b681e60))
+* **orchestrator:** Phases 3+4+5+6 — retry telemetry, no_think strategy-f, max_concurrent_calls DB+REST, docs ([ccf8d9d](https://github.com/sourcebridge-ai/sourcebridge/commit/ccf8d9d2bb0e10a94f56deb7cc636492750ccac2))
+* **security:** Argon2id KDF + per-installation salt for at-rest cipher (CA-200) ([b4d7a08](https://github.com/sourcebridge-ai/sourcebridge/commit/b4d7a089f1e6ee8196713f69a5b9a5132846afcf))
+* **security:** JWT secret file-priority resolver + entropy gate (CA-311) ([b55b623](https://github.com/sourcebridge-ai/sourcebridge/commit/b55b623163a923c2ee95101699aaf1d560588f4d))
+* **security:** pprof admin gate, Confluence handler-time secret, Notion-poll bearer auth (CA-204, CA-206, NEW-H1) ([9b17a60](https://github.com/sourcebridge-ai/sourcebridge/commit/9b17a605455c36642bdfad624ff2f1854f124aa7))
+* **web:** UX terminology + a11y wave 1 (CA-239..CA-250) ([2309b60](https://github.com/sourcebridge-ai/sourcebridge/commit/2309b60e69fb160ad7d53349f71f63d931ec4b40))
+* **worker:** Phase 1 — concurrency probe, capacity RPC fields, gRPC auth interceptor ([e730009](https://github.com/sourcebridge-ai/sourcebridge/commit/e7300094ab2dd8e21eed04a7146623f96fe60d2f))
+* **workflow_story:** section-level repair pass for deep render (CA-178 phase 2/2) ([ac1d173](https://github.com/sourcebridge-ai/sourcebridge/commit/ac1d17399294d55c41ce8802ad737388a6185ed5))
+
+
+### Fixed
+
+* **bench:** point embedding at Mac Studio Ollama + raise gate cap ([#48](https://github.com/sourcebridge-ai/sourcebridge/issues/48)) ([78aade2](https://github.com/sourcebridge-ai/sourcebridge/commit/78aade25a52a5d2cccf770e1bdaa312cd5c0d6e5))
+* **ci,ca-149:** release-please dispatch fallback + vscode prerelease default ([#39](https://github.com/sourcebridge-ai/sourcebridge/issues/39)) ([111bd3a](https://github.com/sourcebridge-ai/sourcebridge/commit/111bd3ab80e5a4c3da59bfaea60ce92c78181dc3))
+* **compose,web:** unblock Living Wiki for fresh hub installs (cache path + onboarding banner) ([#41](https://github.com/sourcebridge-ai/sourcebridge/issues/41)) ([2f2b65a](https://github.com/sourcebridge-ai/sourcebridge/commit/2f2b65a212771a17d1d13efca52bcb9d99e2ec80))
+* **comprehension:** provider-aware deep_parallelism resolution (CA-173 phase 3/4) ([c403b1e](https://github.com/sourcebridge-ai/sourcebridge/commit/c403b1e55b19e35944ac63405e589bc0bdfd1137))
+* **comprehension:** require backtick-wrapped identifiers in deep-render prompts (CA-176) ([f907f16](https://github.com/sourcebridge-ai/sourcebridge/commit/f907f16727efd6a1d71b33700f6cb541311d062c))
+* **config:** drop ineffectual jwtSource assignment in auto-generate path (CI lint) ([e02bb38](https://github.com/sourcebridge-ai/sourcebridge/commit/e02bb38cf80910ee74dbb46d1a4a64f825153d38))
+* **db:** chunk GetSymbolsByIDs at 500 to fit SurrealDB query timeout (CA-171 followup) ([#46](https://github.com/sourcebridge-ai/sourcebridge/issues/46)) ([490be43](https://github.com/sourcebridge-ai/sourcebridge/commit/490be43d0540442d3eb824ecc52a4b8934c991e3))
+* **db:** cluster ReplaceClusters/SaveClusters write nil LLMLabel as field-absence (CA-174 phase 1/2) ([2dd1149](https://github.com/sourcebridge-ai/sourcebridge/commit/2dd1149f6314692f9c967d3e22f6192c7563a863))
+* **db:** preserve test-linkage edges across ReplaceIndexResult (CA-304) ([a37abb0](https://github.com/sourcebridge-ai/sourcebridge/commit/a37abb06dfddb70d4139e99c52bcdcdf38862d06))
+* **infra:** close 4 critical infra gaps (CA-227, CA-228, CA-317, CA-229) ([4a9ac10](https://github.com/sourcebridge-ai/sourcebridge/commit/4a9ac10fe906aa7124b947acbe3e4f643d229991))
+* **knowledge:** mark understanding stage FAILED on job failure (CA-180) ([60bb4c2](https://github.com/sourcebridge-ai/sourcebridge/commit/60bb4c27650d935f149c359e2c2295712c71a911))
+* **learning_path:** combine nested-with in budget-skip test (CA-178 reconcile) ([4546ced](https://github.com/sourcebridge-ai/sourcebridge/commit/4546ced3513dff80596b7e0d9e34ff79c34c255a))
+* **orchestrator:** Phase 5 fixup — wire SeedDefaultProfileMaxConcurrentCalls into serve boot ([d99e668](https://github.com/sourcebridge-ai/sourcebridge/commit/d99e6682ba91c5cd1244c55f7d28c2cf5a7cf574))
+* **orchestrator:** startup reconciliation kills zombie knowledge jobs (CA-175 phase 2/2) ([1ed4cfd](https://github.com/sourcebridge-ai/sourcebridge/commit/1ed4cfd4daf3e133cf9cec9a5f8a142fbf924b49))
+* **orchestrator:** wire UpstreamCapacityProvider into coldstart resolver (ian mid-build) ([e1fe4b1](https://github.com/sourcebridge-ai/sourcebridge/commit/e1fe4b186768336c0b4d2f20f346e11833ac283a))
+* **parse:** NDJSON recovery in parse_json_sections (CA-173 phase 1/4) ([952f88e](https://github.com/sourcebridge-ai/sourcebridge/commit/952f88ed75e5a909349dcf970ba3b68008b07d4f))
+* **prompts:** require backtick-wrapped identifiers in learning_path + workflow_story deep prompts (CA-177) ([8ec96e8](https://github.com/sourcebridge-ai/sourcebridge/commit/8ec96e82ba2d29893fc3ddb3fb9c4179517a28e5))
+* **security:** address codex r2 findings on P1 diff (1H + 2M + 2L) ([a398aba](https://github.com/sourcebridge-ai/sourcebridge/commit/a398abaa0444b9043c253399d41ecfcaae7a488f))
+* **security:** transparent v1→v2 envelope migration on read (CA-200 amend) ([7028590](https://github.com/sourcebridge-ai/sourcebridge/commit/7028590a2f8d0b8a03b17d349a1b7a6e8565e92f))
+* **web:** Confluence creds stale cache + add configured badges to settings disclosures ([#42](https://github.com/sourcebridge-ai/sourcebridge/issues/42)) ([5acb2e2](https://github.com/sourcebridge-ai/sourcebridge/commit/5acb2e22fd6efe46c496279d9222c5fc5d2538c2))
+* **web:** harden UI state-derivation against partial response shapes (CA-256..260) ([db1614c](https://github.com/sourcebridge-ai/sourcebridge/commit/db1614c56950e5e7acbf59dbaa7332ea5bb2ed21))
+* **worker:** gRPC auth interceptor wraps streaming handlers correctly ([#47](https://github.com/sourcebridge-ai/sourcebridge/issues/47)) ([2f04621](https://github.com/sourcebridge-ai/sourcebridge/commit/2f046211937aa27761b81e1beab080629c733b40))
+* **worker:** Phase 2 fixup — wire WithWorkerAuthSecret into serve boot (D10) ([fe8c290](https://github.com/sourcebridge-ai/sourcebridge/commit/fe8c2901f289da8cd0c152f4efc17d7f436e3352))
+* **worker:** sentinel api_key for openai&gt;=2.34 empty-key rejection ([7a3057e](https://github.com/sourcebridge-ai/sourcebridge/commit/7a3057e1cd6aad5af2e96d8d3dfab15249a59ba0))
+
+
+### Changed
+
+* **web:** standardize user-facing surface on "Cliff Notes" (CA-241 amend) ([a28d6ee](https://github.com/sourcebridge-ai/sourcebridge/commit/a28d6eea2bce58a0a8747acdd5f2329eeb821a2e))
+* **worker:** replace strategy F prompt-injection with Ollama-native /api/chat dispatch ([c98f596](https://github.com/sourcebridge-ai/sourcebridge/commit/c98f596be2bd4079d920b43053c6da914bca76ca))
+* **workers:** is_local_provider predicate + consolidate duplicates (CA-173 phase 2/4) ([66617d6](https://github.com/sourcebridge-ai/sourcebridge/commit/66617d63391adc0157d0c211a892e4d2ccf451fa))
+
+
+### Documentation
+
+* **audit-remediation:** CHANGELOG + CLAUDE.md for wave 1 (P4 + P3 + P1 + P7) ([4903358](https://github.com/sourcebridge-ai/sourcebridge/commit/49033582301749cfcd933b7d33789ca65360b404))
+* **audit-remediation:** CHANGELOG + CLAUDE.md for wave 2 (P5 + P9 + P2) ([f045f76](https://github.com/sourcebridge-ai/sourcebridge/commit/f045f7633f659923b27a36d19761d67094758e41))
+* **ca-173:** CHANGELOG + CLAUDE.md + llm-config for qwen3.6 confidence regression remediation ([55ca7ec](https://github.com/sourcebridge-ai/sourcebridge/commit/55ca7ec6e1f3f208cb2c5a24bc762ccbb0fbe390))
+* **ca-174-175:** CHANGELOG + CLAUDE.md + llm-config for knowledge-job slot-stall remediation ([915feb1](https://github.com/sourcebridge-ai/sourcebridge/commit/915feb1d29abdff534cc291e27a4c29e6c7bfb05))
+* **ca-176:** CHANGELOG + CLAUDE.md for deep-render confidence prompt fix ([6b931e5](https://github.com/sourcebridge-ai/sourcebridge/commit/6b931e5dca0ea7172f1da1a988f14f4589c1f053))
+* **ca-178:** CHANGELOG + CLAUDE.md for repair-pass parity in learning_path + workflow_story ([b3ee929](https://github.com/sourcebridge-ai/sourcebridge/commit/b3ee929bf6d125ee513c0084086054231fdbda2a))
+* **ca-179:** fill commit-range placeholder in CLAUDE.md ([83ab674](https://github.com/sourcebridge-ai/sourcebridge/commit/83ab674daa56f8c37242cd33540c39e772d49313))
+* **ca-179:** update plan path to finished- prefix after archival ([cce1c63](https://github.com/sourcebridge-ai/sourcebridge/commit/cce1c635aed8a632e5701eeb21e91d1ada47d04e))
+* **ca-180:** fill commit-range placeholder + finalize plan paths ([f9d9203](https://github.com/sourcebridge-ai/sourcebridge/commit/f9d92033b80daff868ae79426d830b5f79d2dc16))
+* **changelog:** preview today's CA-169 + CA-171 + confluence-adopt merges ([d777cc5](https://github.com/sourcebridge-ai/sourcebridge/commit/d777cc5491562350d797a06e9d8cc015fcdf7176))
+* cross-link capacity-detection campaign + ian wiring fix ([bee9199](https://github.com/sourcebridge-ai/sourcebridge/commit/bee919904f207ebb34f9716eaec418e5be38db69))
+* tidy CHANGELOG Unreleased section ([1a4f8e0](https://github.com/sourcebridge-ai/sourcebridge/commit/1a4f8e0a4c86321920ee8a9828c43f904c1aadd3))
+
 ## [Unreleased]
 
 > **Note**: This section is maintained manually as a preview of what
