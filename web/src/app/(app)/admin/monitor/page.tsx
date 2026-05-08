@@ -388,12 +388,32 @@ export default function MonitorPage() {
     return Math.round(pct);
   }, [stats]);
 
+  // CA-248: render a skeleton during the first poll cycle so the page is
+  // never blank. `data === null` is the pre-first-fetch state; once we have
+  // any response (including an error), we render the real layout.
+  const isInitialLoad = data === null && error === null;
+
   return (
     <PageFrame>
       <PageHeader
         title="Generation Monitor"
         description="Live view of every AI job SourceBridge is running — what's working, what's queued, what failed."
       />
+
+      {isInitialLoad && (
+        <div className="space-y-4" aria-label="Loading monitor data" role="status" aria-busy="true">
+          <div className="flex flex-wrap gap-4">
+            {[0, 1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="h-24 w-44 animate-pulse rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
+              />
+            ))}
+          </div>
+          <div className="h-32 w-full animate-pulse rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)]" />
+          <p className="sr-only">Loading generation monitor — first poll in progress.</p>
+        </div>
+      )}
 
       {/* Zone 1 — Health banner */}
       <HealthBanner health={data?.health} error={error} />
@@ -612,7 +632,7 @@ function ActiveJobsSection({
       <div className="flex flex-col items-center gap-3 rounded-[var(--radius-md)] border border-dashed border-[var(--border-default)] py-10 text-center">
         <p className="text-sm font-medium text-[var(--text-primary)]">No jobs right now.</p>
         <p className="max-w-md text-xs text-[var(--text-secondary)]">
-          Generate cliff notes for a repository and you&apos;ll see it here — with a live
+          Generate a field guide for a repository and you&apos;ll see it here — with a live
           progress bar, elapsed time, and a cancel button.
         </p>
         <Link href="/repositories">

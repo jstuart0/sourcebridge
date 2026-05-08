@@ -40,17 +40,48 @@ interface KnowledgeAdminStatus {
 export default function AdminKnowledgePage() {
   const [data, setData] = useState<KnowledgeAdminStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  // CA-250: track last-refreshed timestamp + auto-refresh while any
+  // artifact is generating/pending. Mirrors the polling pattern used
+  // in the knowledge-tab (knowledge-tab.tsx ~line 773-784).
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
 
   const refetch = useCallback(async () => {
     setLoading(true);
     const res = await authFetch("/api/v1/admin/knowledge");
-    if (res.ok) setData(await res.json());
+    if (res.ok) {
+      setData(await res.json());
+      setLastRefreshedAt(Date.now());
+    }
     setLoading(false);
   }, []);
 
   useEffect(() => {
     refetch();
   }, [refetch]);
+
+  // CA-250: auto-refresh every 5s while any artifact is in a non-terminal
+  // state. Stops polling when everything is ready/failed/stale to avoid
+  // wasted requests.
+  const hasInflightWork =
+    (data?.stats?.generating ?? 0) > 0 || (data?.stats?.pending ?? 0) > 0;
+  useEffect(() => {
+    if (!hasInflightWork) return undefined;
+    const id = window.setInterval(() => {
+      void refetch();
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [hasInflightWork, refetch]);
+
+  // Tick re-render every 1s while inflight so the "last refreshed Xs
+  // ago" label updates even if the data didn't change.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!hasInflightWork || lastRefreshedAt === null) return undefined;
+    const id = window.setInterval(() => setTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [hasInflightWork, lastRefreshedAt]);
+
+  const lastRefreshedAgo = lastRefreshedAt === null ? null : Math.max(0, Math.floor((Date.now() - lastRefreshedAt) / 1000));
 
   return (
     <PageFrame>
@@ -61,13 +92,21 @@ export default function AdminKnowledgePage() {
       />
 
       <div>
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex items-center justify-between gap-3">
           <h3 className="text-base font-semibold text-[var(--text-primary)]">
             {loading ? "Loading…" : "Overview"}
           </h3>
-          <Button size="sm" variant="secondary" onClick={refetch}>
-            Refresh
-          </Button>
+          <div className="flex items-center gap-3">
+            {lastRefreshedAgo !== null && (
+              <span className="text-xs text-[var(--text-tertiary)]" title={hasInflightWork ? "Auto-refreshing every 5s while generation is in progress" : "Auto-refresh paused (no work in flight)"}>
+                Last refreshed {lastRefreshedAgo}s ago
+                {hasInflightWork ? " · auto" : ""}
+              </span>
+            )}
+            <Button size="sm" variant="secondary" onClick={refetch}>
+              Refresh
+            </Button>
+          </div>
         </div>
 
         {data && !data.configured && (

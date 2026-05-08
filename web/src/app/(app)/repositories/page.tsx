@@ -47,6 +47,32 @@ function statusTone(status: string) {
   }
 }
 
+// CA-239: human-readable label and explanatory tooltip for the status
+// badge. Operators without internal knowledge cannot tell whether
+// "INDEXING" is stuck or normal — the previous all-caps enum was
+// internal vocabulary leaking through to the user surface.
+function statusLabel(status: string): string {
+  switch (status) {
+    case "READY": return "Ready";
+    case "INDEXING": return "Indexing…";
+    case "ERROR": return "Error";
+    default: return status; // unknown future status — fall through verbatim
+  }
+}
+
+function statusTooltip(status: string): string {
+  switch (status) {
+    case "READY":
+      return "Repository is fully indexed and queryable.";
+    case "INDEXING":
+      return "Building the symbol graph and links. Typically completes in 1–5 minutes for medium repos; large monorepos can take longer.";
+    case "ERROR":
+      return "Indexing failed. Open the repository to see the error and retry.";
+    default:
+      return `Status: ${status}`;
+  }
+}
+
 export default function RepositoriesPage() {
   const router = useRouter();
   const [result, reexecute] = useQuery({ query: REPOSITORIES });
@@ -301,7 +327,7 @@ export default function RepositoriesPage() {
               <h3 className="text-base font-semibold text-[var(--text-primary)]">Bulk Import</h3>
               <p className="text-sm text-[var(--text-secondary)]">
                 Paste one git URL or path per line. Each repo will be cloned, indexed, and automatically
-                generate cliff notes, learning paths, and code tours.
+                generate field guides, learning paths, and code tours.
               </p>
             </div>
             <textarea
@@ -368,9 +394,11 @@ export default function RepositoriesPage() {
 
                 <div className="flex items-center gap-3">
                   <span
-                    className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${statusTone(repo.status)}`}
+                    className={`rounded-full border px-3 py-1 text-[11px] font-semibold tracking-[0.08em] ${statusTone(repo.status)}`}
+                    title={statusTooltip(repo.status)}
+                    aria-label={`Repository status: ${statusLabel(repo.status)}. ${statusTooltip(repo.status)}`}
                   >
-                    {repo.status}
+                    {statusLabel(repo.status)}
                   </span>
                   <Button
                     variant="ghost"

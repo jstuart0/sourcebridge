@@ -605,7 +605,11 @@ export function KnowledgeTab({
   understandingJob,
   understandingDedupeNote,
   setUnderstandingDedupeNote: _setUnderstandingDedupeNote,
-  handleBuildRepositoryUnderstanding,
+  // CA-243: the Build understanding action is now owned exclusively by
+  // the page-header button (repositories/[id]/page.tsx). The prop is
+  // still passed in by the parent for consistency with the parent's
+  // shape; this prop is intentionally unused here.
+  handleBuildRepositoryUnderstanding: _handleBuildRepositoryUnderstanding,
   repoJobs,
   repoJobsError,
   repoActiveJobs,
@@ -1093,13 +1097,30 @@ export function KnowledgeTab({
               Generate a Field Guide to get oriented fast — purpose, architecture, key patterns, and entry points.
             </p>
             <div className="mt-6">
-              <Button onClick={handleGenerateCliffNotes} disabled={knowledgeLoading || isCliffNotesGenerating || !features.cliffNotes}>
-                {knowledgeLoading || isCliffNotesGenerating ? "Generating..." : "Generate Field Guide"}
-              </Button>
+              {/* CA-244: when the button is disabled because the LLM
+                  feature is unconfigured, expose the reason at the button
+                  itself (title for hover tooltip + aria-describedby for
+                  screen readers) instead of relying on the small footnote
+                  below. The disabled-attribute hides the button from many
+                  pointer behaviors, so the tooltip needs to be on a
+                  wrapping element. */}
+              <span
+                title={!features.cliffNotes
+                  ? "Field-guide generation is not enabled on this server. Configure an LLM provider in Admin → LLM."
+                  : undefined}
+              >
+                <Button
+                  onClick={handleGenerateCliffNotes}
+                  disabled={knowledgeLoading || isCliffNotesGenerating || !features.cliffNotes}
+                  aria-describedby={!features.cliffNotes ? "field-guide-disabled-reason" : undefined}
+                >
+                  {knowledgeLoading || isCliffNotesGenerating ? "Generating..." : "Generate Field Guide"}
+                </Button>
+              </span>
             </div>
             {!features.cliffNotes ? (
-              <p className="mt-3 text-xs text-[var(--text-tertiary)]">
-                Field-guide generation is not enabled on this server. Contact your administrator to configure an LLM provider.
+              <p id="field-guide-disabled-reason" className="mt-3 text-xs text-[var(--text-tertiary)]">
+                Field-guide generation is not enabled on this server. Configure an LLM provider in Admin → LLM to enable.
               </p>
             ) : null}
           </div>
@@ -1197,14 +1218,27 @@ export function KnowledgeTab({
 
         <div className="border-t border-[var(--border-subtle)] px-6 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-tertiary)]">
-              <span className={artifactStatusClass}>
-                Queue {repoJobs?.stats?.queue_depth ?? 0} / {repoJobs?.stats?.max_concurrency ?? 0} slots
-              </span>
-              <span className={artifactStatusClass}>
-                Batch {batchSummary.completed}/{batchSummary.total || 0} complete
-              </span>
-              {batchSummary.running > 0 ? <span className={artifactStatusClass}>{batchSummary.running} running</span> : null}
+            {/* CA-240: replace internal jargon ("Queue 0 / 1 slots",
+                "Batch 0/4 complete") with plain language. The strip
+                still surfaces the same information; the labels just
+                read like English. The numeric badges stay so
+                operators who want concrete counts can still get them. */}
+            <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-tertiary)]" aria-label="Generation queue status">
+              {(() => {
+                const inFlight = repoJobs?.stats?.in_flight ?? 0;
+                const queued = repoJobs?.stats?.queue_depth ?? 0;
+                const cap = repoJobs?.stats?.max_concurrency ?? 0;
+                const summary = inFlight === 0 && queued === 0
+                  ? "Idle"
+                  : `${inFlight} running${queued > 0 ? ` · ${queued} queued` : ""}${cap > 0 ? ` (cap ${cap})` : ""}`;
+                return <span className={artifactStatusClass} title={`In flight: ${inFlight}; queued: ${queued}; concurrency cap: ${cap}`}>{summary}</span>;
+              })()}
+              {batchSummary.total > 0 ? (
+                <span className={artifactStatusClass} title={`Batch progress: ${batchSummary.completed} of ${batchSummary.total} artifacts complete`}>
+                  {batchSummary.completed}/{batchSummary.total} ready
+                </span>
+              ) : null}
+              {batchSummary.running > 0 ? <span className={artifactStatusClass}>{batchSummary.running} generating</span> : null}
               {batchSummary.failed > 0 ? <span className={artifactStatusClass}>{batchSummary.failed} failed</span> : null}
               {repoJobsError ? <span className="text-[var(--color-error,#ef4444)]">{repoJobsError}</span> : null}
             </div>
@@ -1223,7 +1257,7 @@ export function KnowledgeTab({
                   <p className="text-sm font-semibold text-[var(--text-primary)]">Repository Understanding</p>
                   <p className="mt-1 text-sm text-[var(--text-secondary)]">
                     {currentUnderstanding
-                      ? "Shared repository understanding powers cliff notes reuse and refresh decisions."
+                      ? "Shared repository understanding powers field-guide reuse and refresh decisions."
                       : "No shared repository understanding has been persisted yet."}
                   </p>
                 </div>
@@ -1234,20 +1268,22 @@ export function KnowledgeTab({
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-2">
-                <Button variant="secondary" size="sm" onClick={handleBuildRepositoryUnderstanding} disabled={knowledgeLoading || understandingBuilding}>
-                  {knowledgeLoading
-                    ? "Starting..."
-                    : understandingBuilding
-                      ? "Building understanding..."
-                      : currentUnderstanding
-                        ? "Refresh understanding"
-                        : "Build understanding"}
-                </Button>
+                {/* CA-243: the page-header has the canonical
+                    Build/Refresh/Rebuild understanding button (see
+                    repositories/[id]/page.tsx ~line 405). The panel-level
+                    button was a duplicate that produced redundant clicks
+                    when users pressed both. The panel now shows the
+                    show/hide details affordance only; the build action
+                    lives exclusively in the header. */}
                 {currentUnderstanding ? (
                   <Button variant="ghost" size="sm" onClick={() => setUnderstandingCollapsed((c) => !c)}>
                     {understandingCollapsed ? "Show details" : "Hide details"}
                   </Button>
-                ) : null}
+                ) : (
+                  <p className="text-xs text-[var(--text-tertiary)]">
+                    Use the <span className="font-semibold text-[var(--text-secondary)]">Build understanding</span> button at the top of the page to generate.
+                  </p>
+                )}
                 {currentUnderstanding?.updatedAt && !understandingBuilding ? (
                   <span className="text-xs text-[var(--text-tertiary)]">
                     Updated {formatGeneratedAt(currentUnderstanding.updatedAt)}
@@ -1363,7 +1399,11 @@ export function KnowledgeTab({
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-[var(--text-primary)]">Cliff Notes</p>
+                  {/* CA-241: surface name is "Field Guide" — "Cliff Notes" is
+                      an internal implementation term and should not appear in
+                      the product surface. The marketing/external name is
+                      "Field Guide" everywhere. */}
+                  <p className="text-sm font-semibold text-[var(--text-primary)]">Field Guide</p>
                   <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
                     {currentCliffNotes
                       ? `${currentCliffNotes.sections.length} section${currentCliffNotes.sections.length !== 1 ? "s" : ""}${currentCliffNotes.generatedAt ? ` · Generated ${formatGeneratedAt(currentCliffNotes.generatedAt)}` : ""}`
@@ -1431,18 +1471,29 @@ export function KnowledgeTab({
                             <p className="mt-1 text-xs text-[var(--text-tertiary)]">{artifactDeepeningSummary(currentCliffNotes)}</p>
                           ) : null}
                         </div>
+                        {/* CA-242: collapse the "Generate this lens" + "Refresh field guide"
+                            pair down to a single primary action. They had identical visual
+                            weight and the distinction (regenerate vs refresh) was opaque.
+                            New rendering rule:
+                              - in flight  → "Cancel" (only)
+                              - stale/failed → "Regenerate" (primary)
+                              - up-to-date → "Refresh" (secondary)
+                            The kebab/menu fallback for the rare second action is deferred
+                            to a follow-up if operator feedback says they want both. */}
                         <div className="flex gap-2">
-                          <Button variant="secondary" size="sm" onClick={handleGenerateCliffNotes} disabled={knowledgeLoading || isCliffNotesGenerating}>
-                            {currentCliffNotes?.status === "PENDING" ? "Queued..." : isCliffNotesGenerating ? "Generating..." : "Generate this lens"}
-                          </Button>
-                          <Button variant="secondary" size="sm" onClick={() => handleRefreshArtifact(currentCliffNotes.id)} disabled={knowledgeLoading || isCliffNotesGenerating}>
-                            {artifactRetryLabel(currentCliffNotes, currentCliffNotesJob, "field guide")}
-                          </Button>
                           {currentCliffNotesJob && (currentCliffNotesJob.status === "pending" || currentCliffNotesJob.status === "generating") ? (
                             <Button variant="secondary" size="sm" onClick={() => void handleCancelRepoJob(currentCliffNotesJob.id)} disabled={knowledgeLoading || cancellingJobIds[currentCliffNotesJob.id]}>
                               {cancellingJobIds[currentCliffNotesJob.id] ? "Cancelling..." : "Cancel"}
                             </Button>
-                          ) : null}
+                          ) : currentCliffNotes.stale || currentCliffNotes.status === "FAILED" ? (
+                            <Button onClick={handleGenerateCliffNotes} disabled={knowledgeLoading || isCliffNotesGenerating}>
+                              {currentCliffNotes?.status === "PENDING" ? "Queued..." : isCliffNotesGenerating ? "Generating..." : "Regenerate"}
+                            </Button>
+                          ) : (
+                            <Button variant="secondary" size="sm" onClick={() => handleRefreshArtifact(currentCliffNotes.id)} disabled={knowledgeLoading || isCliffNotesGenerating}>
+                              {artifactRetryLabel(currentCliffNotes, currentCliffNotesJob, "field guide")}
+                            </Button>
+                          )}
                         </div>
                       </div>
                       {isCliffNotesGenerating ? renderKnowledgeProgress(currentCliffNotes, "Queued for generation", currentCliffNotesJob) : null}
@@ -1486,9 +1537,22 @@ export function KnowledgeTab({
                         .sort((a, b) => a.orderIndex - b.orderIndex)
                         .map((section) => (
                           <div key={section.id} className="border-t border-[var(--border-subtle)] py-4 first:border-t-0 first:pt-0">
+                            {/* CA-245: section row is interactive — expose
+                                button semantics so keyboard / screen-reader
+                                users can expand sections (Enter/Space). */}
                             <div
+                              role="button"
+                              tabIndex={0}
+                              aria-expanded={expandedSection === section.id}
+                              aria-controls={`section-${section.id}-body`}
                               onClick={() => setExpandedSection(expandedSection === section.id ? null : section.id)}
-                              className="flex cursor-pointer items-start justify-between gap-4"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  setExpandedSection(expandedSection === section.id ? null : section.id);
+                                }
+                              }}
+                              className="flex cursor-pointer items-start justify-between gap-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)] rounded-sm"
                             >
                               <div>
                                 <h3 className="text-base font-semibold text-[var(--text-primary)]">{section.title}</h3>
@@ -1505,7 +1569,7 @@ export function KnowledgeTab({
                               </div>
                             </div>
                             {expandedSection === section.id && (
-                              <div className="mt-3">
+                              <div id={`section-${section.id}-body`} className="mt-3">
                                 <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--text-secondary)]">{section.content}</p>
                                 {renderCliffNotesSectionProvenance(section)}
                                 {section.evidence.length > 0 && (
@@ -1623,10 +1687,20 @@ export function KnowledgeTab({
                   </div>
                   {knowledgeScopeType === "REPOSITORY" ? (
                     <div className="mb-4 flex flex-col gap-3 md:flex-row">
+                      {/* CA-247: explicit label associated via htmlFor so screen
+                          readers announce "Entry point combobox" instead of an
+                          unlabeled combobox. Visually-hidden via sr-only because
+                          the surrounding "How This Works" heading already
+                          provides visible context. */}
+                      <label htmlFor="execution-entry-point" className="sr-only">
+                        Entry point
+                      </label>
                       <select
+                        id="execution-entry-point"
                         value={selectedExecutionEntry}
                         onChange={(e) => setSelectedExecutionEntry(e.target.value)}
                         className={`${inputClass} md:flex-1`}
+                        aria-label="Entry point for execution trace"
                       >
                         {executionEntries.length === 0 ? <option value="">No backend entry points found yet</option> : null}
                         {executionEntries.map((entry) => (
@@ -1888,9 +1962,23 @@ export function KnowledgeTab({
                         <div className="mt-3 space-y-3">
                           {currentLearningPath.sections.slice().sort((a, b) => a.orderIndex - b.orderIndex).map((step, idx) => (
                             <div key={step.id} className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
+                              {/* CA-246: same a11y pattern as cliff-notes
+                                  section rows above. Code tour stops use
+                                  <button> directly; this row stays a div for
+                                  layout reasons but exposes button semantics. */}
                               <div
+                                role="button"
+                                tabIndex={0}
+                                aria-expanded={expandedSection === step.id}
+                                aria-controls={`step-${step.id}-body`}
                                 onClick={() => setExpandedSection(expandedSection === step.id ? null : step.id)}
-                                className="flex cursor-pointer gap-4"
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    setExpandedSection(expandedSection === step.id ? null : step.id);
+                                  }
+                                }}
+                                className="flex cursor-pointer gap-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-primary)] rounded-sm"
                               >
                                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--accent-primary)] text-xs font-semibold text-[var(--accent-contrast)]">{idx + 1}</div>
                                 <div className="min-w-0 flex-1">
@@ -1899,7 +1987,7 @@ export function KnowledgeTab({
                                 </div>
                               </div>
                               {expandedSection === step.id && step.content && (
-                                <div className="mt-3 pl-11">
+                                <div id={`step-${step.id}-body`} className="mt-3 pl-11">
                                   <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--text-secondary)]">{step.content}</p>
                                 </div>
                               )}

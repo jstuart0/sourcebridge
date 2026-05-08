@@ -222,7 +222,15 @@ export function ProfileEditor({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
+  // CA-249: testResult was previously a JSON-stringified blob shown in a
+  // <pre> block. Now structured: a parsed result with success/failure +
+  // a human-readable summary, plus the raw payload for the rare case
+  // where an operator wants to see exactly what came back.
+  const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    summary: string;
+    raw: string;
+  } | null>(null);
 
   // Models list (provider-driven). The fetch is keyed on the EDITOR's
   // provider/baseURL, not the workspace-active profile (ruby-M1). The
@@ -380,9 +388,30 @@ export function ProfileEditor({
 
   async function testConnection() {
     setTestResult(null);
-    const res = await authFetch("/api/v1/admin/test-llm", { method: "POST" });
-    const data = await res.json();
-    setTestResult(JSON.stringify(data, null, 2));
+    let raw = "";
+    try {
+      const res = await authFetch("/api/v1/admin/test-llm", { method: "POST" });
+      const data = await res.json();
+      raw = JSON.stringify(data, null, 2);
+      // CA-249: interpret the response shape into a human-readable summary.
+      // The handler returns { status, model?, latency_ms?, error? } —
+      // normalize both success and error shapes.
+      if (res.ok && data && (data.status === "ok" || data.ok === true)) {
+        const parts: string[] = ["Connection successful"];
+        if (data.model) parts.push(`model ${data.model}`);
+        if (typeof data.latency_ms === "number") parts.push(`${data.latency_ms} ms`);
+        setTestResult({ ok: true, summary: parts.join(" · "), raw });
+      } else {
+        const errMsg = (data && (data.error || data.message)) || `HTTP ${res.status}`;
+        setTestResult({ ok: false, summary: `Connection failed: ${errMsg}`, raw });
+      }
+    } catch (e) {
+      setTestResult({
+        ok: false,
+        summary: `Connection failed: ${(e as Error).message}`,
+        raw: raw || `(no response body)`,
+      });
+    }
   }
 
   const fieldWrapClass = "grid gap-1.5";
@@ -731,7 +760,17 @@ export function ProfileEditor({
       </div>
 
       {message && <p className={messageClass(success)}>{message}</p>}
-      {testResult && <pre className={codeBlockClass}>{testResult}</pre>}
+      {testResult && (
+        <div className="space-y-2">
+          <p className={messageClass(testResult.ok)} role="status">
+            {testResult.summary}
+          </p>
+          <details className="text-xs text-[var(--text-tertiary)]">
+            <summary className="cursor-pointer select-none">Show raw response</summary>
+            <pre className={`${codeBlockClass} mt-2`}>{testResult.raw}</pre>
+          </details>
+        </div>
+      )}
     </div>
   );
 }
