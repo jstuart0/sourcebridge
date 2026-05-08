@@ -19,7 +19,7 @@ import (
 //   - the WithGitConfigCipher injection wins over the bootstrap options
 
 func TestGitConfigStore_CipherInjection(t *testing.T) {
-	custom := secretcipher.NewAESGCMCipher("custom-key-A", false)
+	custom := secretcipher.MustNewAESGCMCipher("custom-key-A", secretcipher.DeriveInstallationSaltFromKey("custom-key-A"), false)
 	s := NewSurrealGitConfigStore(nil,
 		WithGitConfigEncryptionKey("ignored-key-B"),
 		WithGitConfigCipher(custom),
@@ -59,7 +59,7 @@ func TestErrGitTokenDecryptFailed_WrapsCipherSentinel(t *testing.T) {
 }
 
 func TestGitConfigStore_NoKeyNoEscapeHatch_RefusesNonEmptyEncrypt(t *testing.T) {
-	cipher := secretcipher.NewAESGCMCipher("", false)
+	cipher := secretcipher.MustNewAESGCMCipher("", secretcipher.DeriveInstallationSaltFromKey(""), false)
 	s := NewSurrealGitConfigStore(nil, WithGitConfigCipher(cipher))
 	// Direct cipher path (the store's SaveGitConfig calls cipher.Encrypt
 	// internally; here we exercise the same shape at the store-level
@@ -71,7 +71,7 @@ func TestGitConfigStore_NoKeyNoEscapeHatch_RefusesNonEmptyEncrypt(t *testing.T) 
 }
 
 func TestGitConfigStore_AllowUnencryptedEscapeHatch(t *testing.T) {
-	cipher := secretcipher.NewAESGCMCipher("", true)
+	cipher := secretcipher.MustNewAESGCMCipher("", secretcipher.DeriveInstallationSaltFromKey(""), true)
 	s := NewSurrealGitConfigStore(nil, WithGitConfigCipher(cipher))
 	stored, err := s.cipher.Encrypt("dev-token")
 	if err != nil {

@@ -13,7 +13,7 @@ import (
 const testPassphrase = "test-passphrase-do-not-use-in-prod"
 
 func TestAESGCMCipher_RoundTrip(t *testing.T) {
-	c := NewAESGCMCipher(testPassphrase, false)
+	c := MustNewAESGCMCipher(testPassphrase, DeriveInstallationSaltFromKey(testPassphrase), false)
 
 	plaintext := "sk-anthropic-1234567890"
 	stored, err := c.Encrypt(plaintext)
@@ -37,7 +37,7 @@ func TestAESGCMCipher_RoundTrip(t *testing.T) {
 }
 
 func TestAESGCMCipher_EmptyPlaintext(t *testing.T) {
-	c := NewAESGCMCipher(testPassphrase, false)
+	c := MustNewAESGCMCipher(testPassphrase, DeriveInstallationSaltFromKey(testPassphrase), false)
 
 	stored, err := c.Encrypt("")
 	if err != nil {
@@ -57,7 +57,7 @@ func TestAESGCMCipher_EmptyPlaintext(t *testing.T) {
 }
 
 func TestAESGCMCipher_LegacyPlaintext(t *testing.T) {
-	c := NewAESGCMCipher(testPassphrase, false)
+	c := MustNewAESGCMCipher(testPassphrase, DeriveInstallationSaltFromKey(testPassphrase), false)
 
 	// Stored without the envelope prefix should be returned as-is.
 	out, err := c.Decrypt("legacy-plaintext-token")
@@ -73,7 +73,7 @@ func TestAESGCMCipher_LegacyPlaintext(t *testing.T) {
 }
 
 func TestAESGCMCipher_NoKeyNoEscapeHatch_RefusesEncrypt(t *testing.T) {
-	c := NewAESGCMCipher("", false)
+	c := MustNewAESGCMCipher("", DeriveInstallationSaltFromKey(""), false)
 
 	// Empty plaintext is fine.
 	if _, err := c.Encrypt(""); err != nil {
@@ -88,7 +88,7 @@ func TestAESGCMCipher_NoKeyNoEscapeHatch_RefusesEncrypt(t *testing.T) {
 }
 
 func TestAESGCMCipher_NoKeyWithEscapeHatch_StoresPlaintext(t *testing.T) {
-	c := NewAESGCMCipher("", true)
+	c := MustNewAESGCMCipher("", DeriveInstallationSaltFromKey(""), true)
 
 	stored, err := c.Encrypt("dev-secret")
 	if err != nil {
@@ -103,7 +103,7 @@ func TestAESGCMCipher_NoKeyWithEscapeHatch_StoresPlaintext(t *testing.T) {
 }
 
 func TestAESGCMCipher_DecryptCorruptedReturnsErrDecryptFailed(t *testing.T) {
-	c := NewAESGCMCipher(testPassphrase, false)
+	c := MustNewAESGCMCipher(testPassphrase, DeriveInstallationSaltFromKey(testPassphrase), false)
 
 	// Garbage after the prefix.
 	corrupt := EnvelopePrefix + base64.StdEncoding.EncodeToString([]byte("not-a-real-ciphertext"))
@@ -114,7 +114,7 @@ func TestAESGCMCipher_DecryptCorruptedReturnsErrDecryptFailed(t *testing.T) {
 }
 
 func TestAESGCMCipher_DecryptNotBase64ReturnsErrDecryptFailed(t *testing.T) {
-	c := NewAESGCMCipher(testPassphrase, false)
+	c := MustNewAESGCMCipher(testPassphrase, DeriveInstallationSaltFromKey(testPassphrase), false)
 
 	// Prefix + non-base64 garbage.
 	corrupt := EnvelopePrefix + "!!!not-base64!!!"
@@ -125,7 +125,7 @@ func TestAESGCMCipher_DecryptNotBase64ReturnsErrDecryptFailed(t *testing.T) {
 }
 
 func TestAESGCMCipher_DecryptShortCiphertextReturnsErrDecryptFailed(t *testing.T) {
-	c := NewAESGCMCipher(testPassphrase, false)
+	c := MustNewAESGCMCipher(testPassphrase, DeriveInstallationSaltFromKey(testPassphrase), false)
 
 	// Prefix + base64 of bytes shorter than the GCM nonce.
 	tooShort := EnvelopePrefix + base64.StdEncoding.EncodeToString([]byte{1, 2, 3})
@@ -136,13 +136,13 @@ func TestAESGCMCipher_DecryptShortCiphertextReturnsErrDecryptFailed(t *testing.T
 }
 
 func TestAESGCMCipher_DecryptEnvelopedWithoutKeyFails(t *testing.T) {
-	c := NewAESGCMCipher(testPassphrase, false)
+	c := MustNewAESGCMCipher(testPassphrase, DeriveInstallationSaltFromKey(testPassphrase), false)
 	stored, err := c.Encrypt("secret")
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
 
-	cNoKey := NewAESGCMCipher("", false)
+	cNoKey := MustNewAESGCMCipher("", DeriveInstallationSaltFromKey(""), false)
 	_, err = cNoKey.Decrypt(stored)
 	if !errors.Is(err, ErrDecryptFailed) {
 		t.Fatalf("expected ErrDecryptFailed when no key configured for prefixed value, got: %v", err)
@@ -151,8 +151,8 @@ func TestAESGCMCipher_DecryptEnvelopedWithoutKeyFails(t *testing.T) {
 
 func TestAESGCMCipher_DerivedKeyDeterminism(t *testing.T) {
 	// Two ciphers built from the same passphrase decrypt each other's output.
-	a := NewAESGCMCipher(testPassphrase, false)
-	b := NewAESGCMCipher(testPassphrase, false)
+	a := MustNewAESGCMCipher(testPassphrase, DeriveInstallationSaltFromKey(testPassphrase), false)
+	b := MustNewAESGCMCipher(testPassphrase, DeriveInstallationSaltFromKey(testPassphrase), false)
 
 	stored, err := a.Encrypt("shared-plaintext")
 	if err != nil {
@@ -168,8 +168,8 @@ func TestAESGCMCipher_DerivedKeyDeterminism(t *testing.T) {
 }
 
 func TestAESGCMCipher_DifferentKeyCannotDecrypt(t *testing.T) {
-	a := NewAESGCMCipher("alpha-passphrase", false)
-	b := NewAESGCMCipher("beta-passphrase", false)
+	a := MustNewAESGCMCipher("alpha-passphrase", DeriveInstallationSaltFromKey("alpha-passphrase"), false)
+	b := MustNewAESGCMCipher("beta-passphrase", DeriveInstallationSaltFromKey("beta-passphrase"), false)
 
 	stored, _ := a.Encrypt("secret")
 	_, err := b.Decrypt(stored)
@@ -182,7 +182,7 @@ func TestAESGCMCipher_NonceUniqueness(t *testing.T) {
 	// Same plaintext encrypted twice should produce different stored
 	// values (random nonce per encrypt). Guards against accidental
 	// removal of the random-nonce step.
-	c := NewAESGCMCipher(testPassphrase, false)
+	c := MustNewAESGCMCipher(testPassphrase, DeriveInstallationSaltFromKey(testPassphrase), false)
 	a, _ := c.Encrypt("same-plaintext")
 	b, _ := c.Encrypt("same-plaintext")
 	if a == b {
@@ -191,19 +191,19 @@ func TestAESGCMCipher_NonceUniqueness(t *testing.T) {
 }
 
 func TestAESGCMCipher_HasKey(t *testing.T) {
-	if NewAESGCMCipher("k", false).HasKey() != true {
+	if MustNewAESGCMCipher("k", DeriveInstallationSaltFromKey("k"), false).HasKey() != true {
 		t.Fatalf("HasKey should be true when passphrase is set")
 	}
-	if NewAESGCMCipher("", false).HasKey() != false {
+	if MustNewAESGCMCipher("", DeriveInstallationSaltFromKey(""), false).HasKey() != false {
 		t.Fatalf("HasKey should be false when passphrase is empty")
 	}
 }
 
 func TestAESGCMCipher_AllowsUnencrypted(t *testing.T) {
-	if !NewAESGCMCipher("k", true).AllowsUnencrypted() {
+	if !MustNewAESGCMCipher("k", DeriveInstallationSaltFromKey("k"), true).AllowsUnencrypted() {
 		t.Fatalf("AllowsUnencrypted should be true when constructed with allowUnencrypted=true")
 	}
-	if NewAESGCMCipher("k", false).AllowsUnencrypted() {
+	if MustNewAESGCMCipher("k", DeriveInstallationSaltFromKey("k"), false).AllowsUnencrypted() {
 		t.Fatalf("AllowsUnencrypted should be false when constructed with allowUnencrypted=false")
 	}
 }

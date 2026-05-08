@@ -35,7 +35,8 @@ type SurrealLLMConfigStore struct {
 	// still accepts WithLLMConfigEncryptionKey + WithLLMConfigAllowUnencrypted
 	// and constructs the cipher from those values. Tests / live callers don't
 	// need to know the cipher exists.
-	encryptionKeyForBootstrap string
+	encryptionKeyForBootstrap    string
+	encryptionSaltForBootstrap   []byte // CA-200: per-installation salt for v2 envelope
 	allowUnencryptedForBootstrap bool
 }
 
@@ -86,7 +87,18 @@ func NewSurrealLLMConfigStore(client *SurrealDB, opts ...LLMConfigStoreOption) *
 		}
 	}
 	if s.cipher == nil {
-		s.cipher = secretcipher.NewAESGCMCipher(s.encryptionKeyForBootstrap, s.allowUnencryptedForBootstrap)
+		// CA-200: derive salt from key if not explicitly provided.
+		salt := s.encryptionSaltForBootstrap
+		if len(salt) == 0 && s.encryptionKeyForBootstrap != "" {
+			salt = secretcipher.DeriveInstallationSaltFromKey(s.encryptionKeyForBootstrap)
+		}
+		c, err := secretcipher.NewAESGCMCipher(s.encryptionKeyForBootstrap, salt, s.allowUnencryptedForBootstrap)
+		if err != nil {
+			slog.Error("llm config store: cipher construction failed; saves will be refused until salt is configured",
+				"err", err)
+			c, _ = secretcipher.NewAESGCMCipher("", nil, s.allowUnencryptedForBootstrap)
+		}
+		s.cipher = c
 	}
 	return s
 }

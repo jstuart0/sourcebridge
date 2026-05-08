@@ -390,6 +390,11 @@ func TestCLIConfigValidate(t *testing.T) {
 	// This test verifies the binary can be built and config commands work.
 	// Actual CLI execution is tested in smoke tests.
 	cfg := config.Defaults()
+	// CA-311: Validate() now enforces a >=32-byte JWT secret. Defaults()
+	// doesn't set one (Load() does, with auto-generation if neither
+	// _FILE nor literal env are set). Seed a placeholder for the
+	// validate-shape test.
+	cfg.Security.JWTSecret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("default config should be valid: %v", err)
 	}

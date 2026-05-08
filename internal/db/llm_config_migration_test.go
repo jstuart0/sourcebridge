@@ -23,7 +23,7 @@ import (
 //   5. plaintext + no key + no escape hatch → HARD STOP
 
 func TestChooseAPIKey_EmptyFreshInstall(t *testing.T) {
-	cipher := secretcipher.NewAESGCMCipher("k", false)
+	cipher := secretcipher.MustNewAESGCMCipher("k", secretcipher.DeriveInstallationSaltFromKey("k"), false)
 	got, source, err := chooseAPIKeyForMigratedProfile("", cipher, false, true /*freshInstall*/)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -37,7 +37,7 @@ func TestChooseAPIKey_EmptyFreshInstall(t *testing.T) {
 }
 
 func TestChooseAPIKey_EmptyLegacy(t *testing.T) {
-	cipher := secretcipher.NewAESGCMCipher("k", false)
+	cipher := secretcipher.MustNewAESGCMCipher("k", secretcipher.DeriveInstallationSaltFromKey("k"), false)
 	got, source, err := chooseAPIKeyForMigratedProfile("", cipher, false, false /*freshInstall*/)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -51,7 +51,7 @@ func TestChooseAPIKey_EmptyLegacy(t *testing.T) {
 }
 
 func TestChooseAPIKey_AlreadyEncryptedCopiesBytes(t *testing.T) {
-	cipher := secretcipher.NewAESGCMCipher("k", false)
+	cipher := secretcipher.MustNewAESGCMCipher("k", secretcipher.DeriveInstallationSaltFromKey("k"), false)
 	sealed, err := cipher.Encrypt("real-secret")
 	if err != nil {
 		t.Fatalf("seed: %v", err)
@@ -69,7 +69,7 @@ func TestChooseAPIKey_AlreadyEncryptedCopiesBytes(t *testing.T) {
 }
 
 func TestChooseAPIKey_PlaintextWithKeyResealed(t *testing.T) {
-	cipher := secretcipher.NewAESGCMCipher("test-key", false)
+	cipher := secretcipher.MustNewAESGCMCipher("test-key", secretcipher.DeriveInstallationSaltFromKey("test-key"), false)
 	got, source, err := chooseAPIKeyForMigratedProfile("plaintext", cipher, false, false)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -91,7 +91,7 @@ func TestChooseAPIKey_PlaintextWithKeyResealed(t *testing.T) {
 }
 
 func TestChooseAPIKey_PlaintextWithEscapeHatchPreserved(t *testing.T) {
-	cipher := secretcipher.NewAESGCMCipher("", true /*allowUnenc*/)
+	cipher := secretcipher.MustNewAESGCMCipher("", secretcipher.DeriveInstallationSaltFromKey(""), true /*allowUnenc*/)
 	got, source, err := chooseAPIKeyForMigratedProfile("plain-bytes", cipher, true /*allowUnenc*/, false)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -105,7 +105,7 @@ func TestChooseAPIKey_PlaintextWithEscapeHatchPreserved(t *testing.T) {
 }
 
 func TestChooseAPIKey_PlaintextNoKeyNoEscapeHatchHardStop(t *testing.T) {
-	cipher := secretcipher.NewAESGCMCipher("", false)
+	cipher := secretcipher.MustNewAESGCMCipher("", secretcipher.DeriveInstallationSaltFromKey(""), false)
 	_, _, err := chooseAPIKeyForMigratedProfile("plain", cipher, false /*allowUnenc=false*/, false)
 	if err == nil {
 		t.Fatal("expected hard-stop error, got nil")

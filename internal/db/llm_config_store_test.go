@@ -191,11 +191,20 @@ func TestIsEncrypted(t *testing.T) {
 	if IsEncrypted("plain") {
 		t.Error("plain string should not be encrypted")
 	}
-	if !IsEncrypted("sbenc:v1:abc") {
-		t.Error("prefixed string should be flagged encrypted")
+	// CA-200: v2 is the current envelope; IsEncrypted reports true.
+	if !IsEncrypted("sbenc:v2:abc") {
+		t.Error("v2-prefixed string should be flagged encrypted")
+	}
+	// CA-200: v1 envelopes are legacy and rejected on decrypt.
+	// IsEncrypted treats them as not-current-envelope (returns false)
+	// so callers don't accidentally try to decrypt a v1 row with the
+	// v2 cipher and silently drop it. The deprecated-envelope check
+	// happens explicitly in Decrypt's v1 branch.
+	if IsEncrypted("sbenc:v1:abc") {
+		t.Error("v1 envelope is deprecated and not the current envelope")
 	}
 	if IsEncrypted("sbenc:v0:abc") {
-		t.Error("v0 prefix is not the v1 envelope")
+		t.Error("v0 prefix is not the v2 envelope")
 	}
 }
 

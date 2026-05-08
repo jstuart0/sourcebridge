@@ -147,7 +147,7 @@ func TestProfileStoreSharedCipher(t *testing.T) {
 	// librarian-M1: cli/serve.go builds ONE cipher and passes it to
 	// both the LLM config store and the profile store. Verify the
 	// option chaining wires the same cipher instance.
-	cipher := secretcipher.NewAESGCMCipher("shared", false)
+	cipher := secretcipher.MustNewAESGCMCipher("shared", secretcipher.DeriveInstallationSaltFromKey("shared"), false)
 	lcs := NewSurrealLLMConfigStore(nil, WithLLMConfigCipher(cipher))
 	lps := NewSurrealLLMProfileStore(nil, WithLLMProfileCipher(cipher))
 

@@ -39,6 +39,7 @@ type SurrealGitConfigStore struct {
 	// and constructs the cipher from those values. Live callers (cli/serve.go)
 	// inject a pre-built cipher via WithGitConfigCipher; tests use either form.
 	encryptionKeyForBootstrap    string
+	encryptionSaltForBootstrap   []byte // CA-200: per-installation salt for v2 envelope
 	allowUnencryptedForBootstrap bool
 
 	// sshValidator validates an admin-supplied SSH key path on every
@@ -60,6 +61,19 @@ type GitConfigStoreOption func(*SurrealGitConfigStore)
 func WithGitConfigEncryptionKey(key string) GitConfigStoreOption {
 	return func(s *SurrealGitConfigStore) {
 		s.encryptionKeyForBootstrap = key
+	}
+}
+
+// WithGitConfigEncryptionSalt supplies the per-installation salt used by
+// the Argon2id KDF in the v2 envelope (CA-200). Required when an
+// encryption key is configured; an empty salt with a non-empty key
+// produces a cipher that fails-closed on Encrypt with ErrSaltRequired.
+// Production wiring loads this from
+// SOURCEBRIDGE_SECURITY_ENCRYPTION_SALT_FILE (preferred) or auto-
+// generates and persists it on first boot.
+func WithGitConfigEncryptionSalt(salt []byte) GitConfigStoreOption {
+	return func(s *SurrealGitConfigStore) {
+		s.encryptionSaltForBootstrap = salt
 	}
 }
 
@@ -106,7 +120,22 @@ func NewSurrealGitConfigStore(client *SurrealDB, opts ...GitConfigStoreOption) *
 		}
 	}
 	if s.cipher == nil {
-		s.cipher = secretcipher.NewAESGCMCipher(s.encryptionKeyForBootstrap, s.allowUnencryptedForBootstrap)
+		// CA-200: when the bootstrap path is used without an explicit
+		// salt, derive one deterministically from the encryption key
+		// (mirrors cli/serve.go production wiring). The
+		// security-tradeoff documentation lives in
+		// secretcipher.DeriveInstallationSaltFromKey.
+		salt := s.encryptionSaltForBootstrap
+		if len(salt) == 0 && s.encryptionKeyForBootstrap != "" {
+			salt = secretcipher.DeriveInstallationSaltFromKey(s.encryptionKeyForBootstrap)
+		}
+		c, err := secretcipher.NewAESGCMCipher(s.encryptionKeyForBootstrap, salt, s.allowUnencryptedForBootstrap)
+		if err != nil {
+			slog.Error("git config store: cipher construction failed; saves will be refused until salt is configured",
+				"err", err)
+			c, _ = secretcipher.NewAESGCMCipher("", nil, s.allowUnencryptedForBootstrap)
+		}
+		s.cipher = c
 	}
 	return s
 }

@@ -145,8 +145,13 @@ func runMigrateGitSecrets(cmd *cobra.Command, args []string) error {
 	defer surrealDB.Close()
 
 	// Build the cipher under the configured key (or refuse if neither
-	// the key nor the OSS escape hatch is on).
-	cipher := secretcipher.NewAESGCMCipher(cfg.Security.EncryptionKey, false)
+	// the key nor the OSS escape hatch is on). CA-200: per-installation
+	// salt derived from the key via HMAC.
+	salt := secretcipher.DeriveInstallationSaltFromKey(cfg.Security.EncryptionKey)
+	cipher, cipherErr := secretcipher.NewAESGCMCipher(cfg.Security.EncryptionKey, salt, false)
+	if cipherErr != nil {
+		return fmt.Errorf("migrate-git-secrets: cipher construction: %w", cipherErr)
+	}
 	if !cipher.HasKey() {
 		return fmt.Errorf("migrate-git-secrets: SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY must be set; refusing to migrate to a no-op encryption")
 	}

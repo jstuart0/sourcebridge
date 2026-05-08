@@ -399,10 +399,22 @@ func runServe(cmd *cobra.Command, args []string) error {
 		// SOURCEBRIDGE_ALLOW_UNENCRYPTED_GIT_TOKEN keeps the LLM naming
 		// convention. cfg.Git is captured by VALUE into the resolver and
 		// MUST NOT be mutated post-boot.
-		gitCipher := secretcipher.NewAESGCMCipher(
+		// CA-200: salt derived from the encryption key via HMAC. See
+		// secretcipher.DeriveInstallationSaltFromKey for the security
+		// tradeoff and the follow-up ticket for migrating to an
+		// independent random per-installation salt.
+		installSalt := secretcipher.DeriveInstallationSaltFromKey(cfg.Security.EncryptionKey)
+		gitCipher, gitCipherErr := secretcipher.NewAESGCMCipher(
 			cfg.Security.EncryptionKey,
+			installSalt,
 			strings.EqualFold(os.Getenv("SOURCEBRIDGE_ALLOW_UNENCRYPTED_GIT_TOKEN"), "true"),
 		)
+		if gitCipherErr != nil {
+			slog.Error("git config: cipher construction failed; saves will be refused",
+				"err", gitCipherErr)
+			gitCipher, _ = secretcipher.NewAESGCMCipher("", nil,
+				strings.EqualFold(os.Getenv("SOURCEBRIDGE_ALLOW_UNENCRYPTED_GIT_TOKEN"), "true"))
+		}
 		if !gitCipher.HasKey() {
 			if gitCipher.AllowsUnencrypted() {
 				slog.Warn("git config: SOURCEBRIDGE_ALLOW_UNENCRYPTED_GIT_TOKEN=true — admin saves of default_token may land in plaintext on disk (OSS dev only)")
@@ -448,7 +460,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		// both rows are encrypted under identical key material with
 		// identical legacy-warn rate-limiting state.
 		allowUnencLLM := strings.EqualFold(os.Getenv("SOURCEBRIDGE_ALLOW_UNENCRYPTED_LLM_KEY"), "true")
-		llmCipher := secretcipher.NewAESGCMCipher(cfg.Security.EncryptionKey, allowUnencLLM)
+		// CA-200: same per-installation salt as the git cipher above.
+		llmCipher, llmCipherErr := secretcipher.NewAESGCMCipher(cfg.Security.EncryptionKey, installSalt, allowUnencLLM)
+		if llmCipherErr != nil {
+			slog.Error("llm config: cipher construction failed; saves will be refused",
+				"err", llmCipherErr)
+			llmCipher, _ = secretcipher.NewAESGCMCipher("", nil, allowUnencLLM)
+		}
 		encryptionKeySet = llmCipher.HasKey() // r1 Phase 2d: surfaced on /admin/llm-profiles
 		if !llmCipher.HasKey() {
 			if llmCipher.AllowsUnencrypted() {

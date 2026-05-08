@@ -342,8 +342,8 @@ func TestIntegration_MigrationHardStopOnPlaintextNoKey(t *testing.T) {
 	// escape hatch on the LCS to plant the plaintext, then construct
 	// a separate cipher (no key, no escape hatch) for the migration.
 	surreal := startSurrealContainer(t)
-	noKeyCipher := secretcipher.NewAESGCMCipher("", false)
-	allowUnencCipher := secretcipher.NewAESGCMCipher("", true)
+	noKeyCipher := secretcipher.MustNewAESGCMCipher("", secretcipher.DeriveInstallationSaltFromKey(""), false)
+	allowUnencCipher := secretcipher.MustNewAESGCMCipher("", secretcipher.DeriveInstallationSaltFromKey(""), true)
 	lcs := NewSurrealLLMConfigStore(surreal, WithLLMConfigCipher(allowUnencCipher))
 	lps := NewSurrealLLMProfileStore(surreal, WithLLMProfileCipher(noKeyCipher))
 
