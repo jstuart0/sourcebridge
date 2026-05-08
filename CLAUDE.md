@@ -24,6 +24,91 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-08 audit-remediation wave 1: P4 + P3-partial + P1-subset + P7 (CA-256..260, CA-279, CA-280, CA-311, CA-204, CA-206, NEW-H1, CA-227, CA-228, CA-317, CA-229)** — 5 commits, `db1614c..4a9ac10`.
+First wave of the master remediation plan from the 2026-05-08 full codebase audit. Covers
+14 of the 47 Critical+High findings end-to-end, plus one new HIGH finding surfaced during
+plan review (NEW-H1: Notion-poll webhook unauth). Master plan: `thoughts/shared/plans/active-2026-05-08-deliver-audit-remediation-master-plan.md`.
+
+P4 (UI state-derivation crash hardening, `db1614c`) — five mechanical optional-chain
+fixes that close active CA-180-pattern crashes from partial response shapes. Knowledge tab,
+admin monitor, admin LLM. Type-only changes; no API surface.
+
+P3 partial (test gaps, `119964e`) — CA-279 fixes `mockKnowledgeStore.ClaimArtifact` to
+mirror MemStore claim semantics (was returning `(nil, false, nil)` always — caused
+mock/prod divergence). CA-280 adds a snapshot test asserting `"markdown backticks"` is
+present in `CLIFF_NOTES_RENDER_TEMPLATE` and `CLIFF_NOTES_SECTION_REPAIR_TEMPLATE` so
+future cleanups can't silently regress local-tier confidence (the
+`_enforce_deep_confidence_floor` upgrade function depends on backtick-wrapped identifiers).
+CA-281, CA-282, CA-283 deferred — handler-coverage tests need test-server harness work.
+
+P1 subset (auth/JWT/pprof/webhook hardening, `b55b623` + `9b17a60`) — campaign re-scoped
+mid-flight after codex r1 review identified two Criticals on the original CSRF plan: web
+frontend uses Bearer + cookie via `authFetch`/URQL, so tightening CSRF to require token
+on Bearer+cookie requests breaks every browser write unless the frontend gets X-CSRF-Token
+injection. CA-198 + CA-201 split to a dedicated CSRF-frontend campaign (TBD slug
+`2026-05-08-deliver-csrf-admin-frontend-injection`). The four independent fixes shipped
+this wave:
+
+- **CA-311** — JWT secret default literal removed; `Validate()` enforces ≥32-byte length
+  gate. `ResolveJWTSecret()` mirrors `ResolveEncryptionKey` (file > literal env > unset
+  with auto-generated in-memory fallback). New env var
+  `SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE`. Helm chart's `randAlphaNum 32` Secret stays
+  unchanged and passes the new gate. Docker Compose dev defaults updated to a 64-hex
+  publicly-known placeholder so `docker compose up` still boots; `WarnInsecureDefaults`
+  flags it. **Breaking** — communicated in CHANGELOG.
+- **CA-204** — pprof endpoints now require admin role when `SOURCEBRIDGE_PPROF_ENABLED=true`.
+- **CA-206** — Confluence webhook refuses to dispatch when secret unconfigured (returns
+  503 with scrubbed body `{"error":"route_unavailable"}`); secret resolved per-request
+  via `ConfluenceSecretResolver` so admin-UI changes take effect without restart.
+- **NEW-H1** — Notion-poll webhook requires admin bearer auth (was completely
+  unauthenticated). Route refuses to register when `NotionPollAuthMiddleware` is nil.
+
+P7 (infra gaps, `4a9ac10`) — CA-227 fail-fast LLM URL placeholders (RFC 2606 .invalid
+TLD); CA-228 `storageClassName: ""` in base manifests so cluster default class is used
+out of box; CA-317 `WORKER_DEBUG=true` un-hardcoded in compose hub; CA-229 dev compose
+SurrealDB creds env-overridable.
+
+Load-bearing constraints for future-Claude:
+
+- **`Validate()` JWT length gate is post-resolution, not pre-resolution.** It runs after
+  `Load()` decides between resolved-secret and auto-generated fallback. The auto-generated
+  path produces 64 ASCII chars (32 raw bytes hex-encoded) which clears the gate trivially.
+  This means a future regression that disables the auto-generate fallback would surface
+  as a `Validate()` rejection — not a silent default — which is the desired posture.
+- **`ResolveJWTSecret()` and `ResolveEncryptionKey()` share an idiom.** Both: file env
+  var first (`_FILE`), literal env var second, source string trichotomy, fallback to
+  literal-env on file-missing/empty-file. Future `*_FILE` patterns should mirror this
+  exactly — diverging fragments the operator mental model.
+- **`KnownInsecureSentinels` is generalized from `InsecureSentinel`.** Adding new shipped
+  defaults (e.g., a future template literal) requires adding them to the map, not just
+  adding a new const. `InsecureCredentials()` skips empty values so callers don't need
+  to nil-guard.
+- **`ConfluenceSecretResolver` is new on `LivingWikiWebhookDeps` but the eager
+  `ConfluenceWebhookSecret` field stays.** Tests typically use the eager field; production
+  wires the resolver. Don't remove the eager field — that breaks every existing test.
+- **`NotionPollAuthMiddleware` REQUIRED for the route to register.** A future code path
+  that constructs `LivingWikiWebhookDeps` without setting this field will silently 404
+  the Notion-poll endpoint. The startup `slog.Warn` in `RegisterLivingWikiRoutes` is the
+  signal; don't suppress it.
+- **`mockKnowledgeStore.ClaimArtifact` now has real claim semantics.** Tests that
+  previously relied on `(nil, false, nil)` will see different behavior — search for
+  test sites that branch on `claimed` and verify they still pass with the realistic
+  shape.
+- **`storageClassName: ""` in base manifests requires a cluster with a default
+  StorageClass.** Operators on clusters without a default class must override via
+  overlay (the top-of-file comment in `api.yaml` and `surrealdb.yaml` documents the
+  patch pattern). For SurrealDB, production operators MUST override with a class that
+  has `reclaimPolicy: Retain` — the empty default is for kind / microk8s only.
+- **CA-198 + CA-201 explicitly NOT shipped this wave.** A future CSRF-on-admin campaign
+  must include a frontend slice that injects `X-CSRF-Token` in `authFetch` and the URQL
+  fetch wrapper before the backend gate goes live, OR every browser write breaks with
+  403. Plan path: `thoughts/shared/plans/active-2026-05-08-deliver-csrf-admin-frontend-injection.md` (TBD).
+
+Plan: `thoughts/shared/plans/active-2026-05-08-deliver-auth-csrf-jwt-pprof-hardening.md`
+Master plan: `thoughts/shared/plans/active-2026-05-08-deliver-audit-remediation-master-plan.md`
+Audit synthesis: `thoughts/shared/audits/finished-2026-05-08-audit-full-codebase.md`
+Codex r1 (plan): `thoughts/shared/plans/active-2026-05-08-deliver-auth-csrf-jwt-pprof-hardening.codex-r1-plan.md`
+
 **2026-05-08 `build_repository_understanding` failure leaves stage stuck (CA-180)** — 1 commit, `60bb4c2`.
 When a `build_repository_understanding` job failed for any reason (LLM unreachable, retry
 exhaustion, reaper kill, or startup zombie reconciliation), the `ca_repository_understanding.stage`
