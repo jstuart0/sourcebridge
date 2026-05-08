@@ -24,7 +24,7 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
-**2026-05-08 `build_repository_understanding` failure leaves stage stuck (CA-180)** — N commits, `<range>` (TODO: fill after commit).
+**2026-05-08 `build_repository_understanding` failure leaves stage stuck (CA-180)** — 1 commit, `60bb4c2`.
 When a `build_repository_understanding` job failed for any reason (LLM unreachable, retry
 exhaustion, reaper kill, or startup zombie reconciliation), the `ca_repository_understanding.stage`
 field was not transitioned to `FAILED`. It stayed stuck at whatever in-progress stage was active
@@ -88,7 +88,7 @@ Load-bearing constraints for future-Claude:
   equivalent on the `reconcileZombieJobs` path). Tracked as
   **CA-TBD-knowledge-artifact-reconciler-coverage**.
 
-Plan: `thoughts/shared/plans/active-2026-05-08-deliver-understanding-stage-stuck-on-failure.md`
+Plan: `thoughts/shared/plans/finished-2026-05-08-deliver-understanding-stage-stuck-on-failure.md`
 
 **2026-05-07 SurrealDB v2.6.5 upgrade + option-field NULL remediation (CA-179)** — 1 commit, `6951279`.
 Upgrades the SurrealDB integration testcontainer and production pin from v2.2.1 to v2.6.5
