@@ -48,16 +48,24 @@ spec:
             - name: redis
               containerPort: {{ .Values.redis.port }}
               protocol: TCP
+          # CA-226: Use redis-cli ping for both probes. tcpSocket passes even
+          # when Redis is in LOADING state and not yet accepting commands.
+          # Defense-in-depth: exec ping on both liveness and readiness so a
+          # hung event loop (TCP open, commands blocked) triggers a restart.
           livenessProbe:
-            tcpSocket:
-              port: redis
+            exec:
+              command: ["redis-cli", "ping"]
             initialDelaySeconds: 15
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
-            tcpSocket:
-              port: redis
+            exec:
+              command: ["redis-cli", "ping"]
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.redis.resources | nindent 12 }}
           {{- if .Values.redis.persistence.enabled }}
