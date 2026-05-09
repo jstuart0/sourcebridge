@@ -2110,6 +2110,14 @@ func (s *Store) UnlinkRepos(linkID string) error {
 func (s *Store) GetRepoLinks(repoID string) ([]*RepoLink, error) {
 	return nil, nil
 }
+
+// GetRepoLink returns nil in the in-memory store because federation is not
+// supported here (Decision 10). The TenantFilteredStore uses this method
+// as a helper for UnlinkRepos/VerifyLink access gating; callers receiving
+// nil treat the link as not-found.
+func (s *Store) GetRepoLink(_ string) *RepoLink {
+	return nil
+}
 func (s *Store) StoreCrossRepoRef(ref *CrossRepoRef) error {
 	return fmt.Errorf("federation not supported in in-memory store")
 }

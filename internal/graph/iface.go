@@ -189,6 +189,10 @@ type GraphStore interface {
 	LinkRepos(sourceRepoID, targetRepoID string) (*RepoLink, error)
 	UnlinkRepos(linkID string) error
 	GetRepoLinks(repoID string) ([]*RepoLink, error)
+	// GetRepoLink looks up a single repo link by ID. Used by TenantFilteredStore
+	// to validate access before UnlinkRepos and VerifyLink mutations. In the
+	// in-memory store, federation is stubbed — returns nil (Decision 10).
+	GetRepoLink(linkID string) *RepoLink
 
 	StoreCrossRepoRef(ref *CrossRepoRef) error
 	StoreCrossRepoRefs(refs []*CrossRepoRef) int

@@ -160,6 +160,22 @@ func (s *SurrealStore) GetRepoLinks(repoID string) ([]*graph.RepoLink, error) {
 	return links, nil
 }
 
+// GetRepoLink fetches a single repo link by ID.
+// Used by TenantFilteredStore to validate access before UnlinkRepos/VerifyLink.
+func (s *SurrealStore) GetRepoLink(linkID string) *graph.RepoLink {
+	db := s.client.DB()
+	if db == nil {
+		return nil
+	}
+	rows, err := queryOne[[]surrealRepoLink](ctx(), db,
+		`SELECT * FROM type::thing('ca_repo_link', $id)`,
+		map[string]any{"id": linkID})
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	return rows[0].toRepoLink()
+}
+
 // --- Cross-Repo References ---
 
 func (s *SurrealStore) StoreCrossRepoRef(ref *graph.CrossRepoRef) error {

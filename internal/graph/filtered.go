@@ -264,6 +264,9 @@ func (f *TenantFilteredStore) GetTestsForSymbolPersisted(symbolID string) []stri
 }
 
 func (f *TenantFilteredStore) GetCallEdges(repoID string) []CallEdge {
+	if !f.hasAccess(repoID) {
+		return nil
+	}
 	return f.inner.GetCallEdges(repoID)
 }
 
@@ -297,10 +300,6 @@ func (f *TenantFilteredStore) GetLinksForSymbol(symID string, includeRejected bo
 
 func (f *TenantFilteredStore) GetLinksForFile(fileID string, startLine, endLine int, minConfidence float64) []*StoredLink {
 	return f.inner.GetLinksForFile(fileID, startLine, endLine, minConfidence)
-}
-
-func (f *TenantFilteredStore) VerifyLink(linkID string, verified bool, verifiedBy string) *StoredLink {
-	return f.inner.VerifyLink(linkID, verified, verifiedBy)
 }
 
 func (f *TenantFilteredStore) StoreEmbedding(record *EmbeddingRecord) {
@@ -418,53 +417,140 @@ func (f *TenantFilteredStore) LinkRepos(sourceRepoID, targetRepoID string) (*Rep
 	}
 	return f.inner.LinkRepos(sourceRepoID, targetRepoID)
 }
+
+// UnlinkRepos gates on the repo IDs of the link before delegating.
+// The same opaque "not found" error is returned for "doesn't exist" and
+// "belongs to another tenant" to prevent cross-tenant enumeration.
 func (f *TenantFilteredStore) UnlinkRepos(linkID string) error {
+	link := f.inner.GetRepoLink(linkID)
+	if link == nil {
+		return fmt.Errorf("repo link not found")
+	}
+	if !f.hasAccess(link.SourceRepoID) || !f.hasAccess(link.TargetRepoID) {
+		return fmt.Errorf("repo link not found")
+	}
 	return f.inner.UnlinkRepos(linkID)
 }
+
 func (f *TenantFilteredStore) GetRepoLinks(repoID string) ([]*RepoLink, error) {
 	if !f.hasAccess(repoID) {
 		return nil, nil
 	}
 	return f.inner.GetRepoLinks(repoID)
 }
+
+// GetRepoLink is a pass-through used internally by UnlinkRepos and VerifyLink
+// as a helper to load a link for access validation. The hasAccess check is NOT
+// applied here — the caller is responsible for gating. Applying a second check
+// at this level would imply incorrect semantics (double-check that could block
+// internal helpers on the allowed path).
+func (f *TenantFilteredStore) GetRepoLink(linkID string) *RepoLink {
+	return f.inner.GetRepoLink(linkID)
+}
+
+// StoreCrossRepoRef gates on both source and target repo IDs.
 func (f *TenantFilteredStore) StoreCrossRepoRef(ref *CrossRepoRef) error {
+	if !f.hasAccess(ref.SourceRepoID) || !f.hasAccess(ref.TargetRepoID) {
+		return fmt.Errorf("access denied")
+	}
 	return f.inner.StoreCrossRepoRef(ref)
 }
+
+// StoreCrossRepoRefs filters the slice to refs where both source and target
+// repos are accessible to the tenant. Cross-tenant refs are dropped silently;
+// the returned count reflects only persisted refs (the accessible subset).
 func (f *TenantFilteredStore) StoreCrossRepoRefs(refs []*CrossRepoRef) int {
-	return f.inner.StoreCrossRepoRefs(refs)
+	allowed := refs[:0:len(refs)] // re-use backing array without allocation
+	for _, ref := range refs {
+		if f.hasAccess(ref.SourceRepoID) && f.hasAccess(ref.TargetRepoID) {
+			allowed = append(allowed, ref)
+		}
+	}
+	if len(allowed) == 0 {
+		return 0
+	}
+	return f.inner.StoreCrossRepoRefs(allowed)
 }
+
 func (f *TenantFilteredStore) GetCrossRepoRefs(repoID string, refType *string, limit int) ([]*CrossRepoRef, error) {
 	if !f.hasAccess(repoID) {
 		return nil, nil
 	}
 	return f.inner.GetCrossRepoRefs(repoID, refType, limit)
 }
+
+// GetSymbolCrossRepoRefs gates on the symbol's home repo AND filters result
+// rows to those where both source and target repos are accessible.
+// Decision 5: gate at symbol lookup prevents cross-tenant symbol enumeration;
+// result-row filtering prevents leaking refs to inaccessible target repos.
 func (f *TenantFilteredStore) GetSymbolCrossRepoRefs(symbolID string) ([]*CrossRepoRef, error) {
-	return f.inner.GetSymbolCrossRepoRefs(symbolID)
+	sym := f.inner.GetSymbol(symbolID)
+	if sym == nil || !f.hasAccess(sym.RepoID) {
+		return nil, nil
+	}
+	refs, err := f.inner.GetSymbolCrossRepoRefs(symbolID)
+	if err != nil || len(refs) == 0 {
+		return refs, err
+	}
+	filtered := refs[:0:len(refs)]
+	for _, ref := range refs {
+		if f.hasAccess(ref.SourceRepoID) && f.hasAccess(ref.TargetRepoID) {
+			filtered = append(filtered, ref)
+		}
+	}
+	return filtered, nil
 }
+
 func (f *TenantFilteredStore) DeleteCrossRepoRefsForRepo(repoID string) error {
 	if !f.hasAccess(repoID) {
 		return fmt.Errorf("access denied")
 	}
 	return f.inner.DeleteCrossRepoRefsForRepo(repoID)
 }
+
+// DeleteCrossRepoRefsBetweenRepos gates on both repo IDs.
 func (f *TenantFilteredStore) DeleteCrossRepoRefsBetweenRepos(repoA, repoB string) error {
+	if !f.hasAccess(repoA) || !f.hasAccess(repoB) {
+		return fmt.Errorf("access denied")
+	}
 	return f.inner.DeleteCrossRepoRefsBetweenRepos(repoA, repoB)
 }
+
+// StoreAPIContract gates on the contract's repo ID.
+// Closes the asymmetry where DeleteAPIContractsForRepo was gated but
+// StoreAPIContract was not (xander r1 critical finding).
 func (f *TenantFilteredStore) StoreAPIContract(contract *APIContract) error {
+	if !f.hasAccess(contract.RepoID) {
+		return fmt.Errorf("access denied")
+	}
 	return f.inner.StoreAPIContract(contract)
 }
+
 func (f *TenantFilteredStore) GetAPIContracts(repoID string) ([]*APIContract, error) {
 	if !f.hasAccess(repoID) {
 		return nil, nil
 	}
 	return f.inner.GetAPIContracts(repoID)
 }
+
 func (f *TenantFilteredStore) DeleteAPIContractsForRepo(repoID string) error {
 	if !f.hasAccess(repoID) {
 		return fmt.Errorf("access denied")
 	}
 	return f.inner.DeleteAPIContractsForRepo(repoID)
+}
+
+// VerifyLink gates on the link's repo ID before delegating.
+// Uses GetLink (already on the interface) since StoredLink.RepoID is available.
+// Returns nil for "not found" and "belongs to another tenant" to prevent
+// cross-tenant link enumeration. A nil return at the call site (schema.resolvers.go)
+// triggers the Phase 4 publish-site nil-check that suppresses EventLinkVerified.
+func (f *TenantFilteredStore) VerifyLink(linkID string, verified bool, verifiedBy string) *StoredLink {
+	link := f.inner.GetLink(linkID)
+	if link == nil || !f.hasAccess(link.RepoID) {
+		return nil
+	}
+	return f.inner.VerifyLink(linkID, verified, verifiedBy)
 }
 
 // Verify at compile time that *TenantFilteredStore satisfies GraphStore.
