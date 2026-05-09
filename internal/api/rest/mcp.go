@@ -334,6 +334,10 @@ type mcpHandler struct {
 	clusterStore   clustering.ClusterStore // subsystem clustering; nil when the store doesn't support it
 	edition        capabilities.Edition    // drives tools/list filtering + initialize response
 	allowedRepos   map[string]bool         // nil = all repos allowed
+	// allowPrivateGitHosts mirrors Config.Indexing.AllowPrivateGitHosts and
+	// is consulted by the register-only fallback path in callIndexRepository
+	// when indexingSvc is nil. Wired in router.go alongside indexingSvc.
+	allowPrivateGitHosts bool
 	sessionTTL     time.Duration
 	keepalive      time.Duration
 	maxSessions    int

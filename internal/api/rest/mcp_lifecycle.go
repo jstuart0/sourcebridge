@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"path/filepath"
 	"time"
 
 	"github.com/sourcebridge/sourcebridge/internal/indexing"
+	"github.com/sourcebridge/sourcebridge/internal/indexing/pathutil"
 )
 
 // Phase 3.2 — indexing lifecycle tools.
@@ -139,6 +141,14 @@ func (h *mcpHandler) callIndexRepository(session *mcpSession, args json.RawMessa
 	name := params.Name
 	if name == "" {
 		name = filepath.Base(params.PathOrURL)
+	}
+	// CA-312 L1: validate remote URLs before persisting them, even on the
+	// register-only path. An unvalidated URL would bypass the denylist and
+	// land in the DB, allowing a future pull or clone to reach a private IP.
+	if isRemoteURL(params.PathOrURL) {
+		if err := pathutil.ValidateGitURLForClone(params.PathOrURL, h.allowPrivateGitHosts, net.LookupIP); err != nil {
+			return nil, errInvalidArguments(fmt.Sprintf("repository URL not allowed: %v", err))
+		}
 	}
 	if existing := h.store.GetRepositoryByPath(params.PathOrURL); existing != nil {
 		return indexRepositoryResult{

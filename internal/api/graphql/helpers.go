@@ -172,8 +172,16 @@ func gitAskpassHelper() (string, error) {
 }
 
 // gitPullCmd builds an exec.Cmd for git pull with optional authentication.
+//
+// CA-312: -c http.followRedirects=false is included so that a redirect from
+// an initially-public URL to a private IP cannot be used to bypass the
+// pre-pull ValidateGitURLForClone denylist check.
 func gitPullCmd(ctx context.Context, repoDir, token, sshKeyPath string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", "pull", "--ff-only")
+	cmd := exec.CommandContext(ctx, "git",
+		"pull",
+		"--ff-only",
+		"-c", "http.followRedirects=false",
+	)
 	cmd.Dir = repoDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

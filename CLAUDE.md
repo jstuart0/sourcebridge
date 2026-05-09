@@ -24,6 +24,75 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-09 audit-remediation wave 3: P8 security hardening — SSRF denylist, gRPC reflection gate, SSE tenant filter, TenantFilteredStore gating (CA-202, CA-312, CA-203, CA-205)** — 4 commits, `56380d2..9c3b1ab`, reconcile commit TBD.
+
+Phase CA-202 (`56380d2`) — gRPC reflection gate tightened to dual-key: both
+`SOURCEBRIDGE_WORKER_DEBUG=true` AND `SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED=true`
+must be set. Setting only `WORKER_DEBUG=true` no longer enables reflection.
+
+Phase CA-312 (`dd437e7`) — SSRF protection for git clone/pull: `ValidateGitURLForClone`
+in `internal/indexing/pathutil/pathutil.go` blocks URLs resolving to private/loopback/
+link-local/CGNAT/ULA/unspecified (0.0.0.0/::)/multicast addresses. Scheme allowlist:
+https://, ssh://, and SCP-form only; http:// is always rejected. `gitCloneCmd` and
+`gitPullCmd` both pass `-c http.followRedirects=false`. `Config.Indexing.AllowPrivateGitHosts`
+is a dangerous opt-in for self-hosted internal networks (default false).
+
+Phase CA-203 (`7245203`) — `TenantFilteredStore` methods now gate on tenant access; 8
+methods return nil/empty on cross-tenant denial (opaque nil) instead of bypassing the
+allowed-repo set. `GetRepoLink(linkID)` was added to the `GraphStore` interface.
+
+Phase CA-205 (`9c3b1ab`) — per-tenant SSE filter: `handleSSE` drops events whose
+`repo_id`/`repository_id` is not in the tenant's allowed set. Events with no repo
+identifier are dropped defensively on non-default tenants. `events.Bus.Subscribe`
+returns `*Subscription`; callers must call `Unsubscribe()` on cleanup (X-L2 leak fix).
+Subscription leak in the SSE handler was fixed with `defer s.eventBus.Unsubscribe(sub)`.
+
+Reconcile pass (this commit) — 5 punch-list items from xander, ian, codex r2:
+
+- **codex r2 H1**: `isPrivateOrInternalIP` now also rejects `IsUnspecified()` (0.0.0.0,
+  ::), `IsMulticast()`, and `IsInterfaceLocalMulticast()`. Tests T15-T16 added.
+- **xander H1**: `gitPullCmd` now passes `-c http.followRedirects=false` (was on clone
+  path only; pull path was unguarded against redirect-chain bypass).
+- **ian H1**: `TestSSERepoIDFromEvent_FallbackToRepositoryID` + 7 `TestHandleSSE_*` tests
+  added in `internal/api/rest/sse_test.go`. Multi-tenant tests use direct handler
+  invocation with injected context (TenantMiddleware is enterprise-only).
+- **codex r2 L1**: MCP fallback path in `callIndexRepository` now calls
+  `pathutil.ValidateGitURLForClone` before `CreateRepository` on remote URLs.
+  `allowPrivateGitHosts` field added to `mcpHandler`, wired in router.go.
+- **codex r2 M2**: `CLAUDE.md`, `docs/going-to-production.md`, and
+  `docs/admin/configuration.md` updated; stale `test_worker_debug_config.py`
+  docstring corrected.
+
+Load-bearing constraints for future-Claude:
+
+- **`WORKER_DEBUG=true` alone does NOT enable gRPC reflection.** Both
+  `SOURCEBRIDGE_WORKER_DEBUG=true` AND `SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED=true`
+  must be set. `test_worker_debug_config.py` now documents this explicitly.
+- **`SOURCEBRIDGE_INDEXING_ALLOW_PRIVATE_GIT_HOSTS`** is a dangerous opt-in (default
+  false); only enable on single-operator self-hosted instances. The config default is
+  pinned by `TestIndexingDefaultsAllowPrivateGitHostsFalse`.
+- **`GraphStore` interface grew `GetRepoLink(linkID)`** — all three implementers
+  (SurrealStore, MemStore, TenantFilteredStore) provide it. Adding a method to
+  `GraphStore` requires updating all three or the build breaks.
+- **`events.Bus.Subscribe` returns `*Subscription`** (was void before CA-205).
+  Callers must call `s.eventBus.Unsubscribe(sub)` on cleanup. The SSE handler uses
+  `defer s.eventBus.Unsubscribe(sub)`. Any future subscriber that doesn't unsubscribe
+  will leak a reference to the closed-over channel after the handler returns.
+- **8 `TenantFilteredStore` methods now gated by `hasAccess`** — opaque-nil return on
+  cross-tenant denial. Future additions to `GraphStore` that return data must follow
+  the same gating pattern in `TenantFilteredStore`.
+- **`csrfProtectionWithName` (CSRF) and `ValidateGitURLForClone` (CA-312) both have
+  safe-by-default operator opt-in flags** following the `Config.Security.*Enabled` /
+  `Config.Indexing.*Enabled` convention.
+- **`WithEventBus(bus)` server option** added to allow test injection of a pre-built
+  `*events.Bus`. Do not use in production (the default is created in `NewServer`).
+- **MCP `callIndexRepository` fallback path validates URLs** before calling
+  `CreateRepository`. The `allowPrivateGitHosts` field on `mcpHandler` mirrors
+  `Config.Indexing.AllowPrivateGitHosts` and is wired in `router.go` alongside
+  `indexingSvc`.
+
+Plan: `thoughts/shared/plans/active-2026-05-08-deliver-p8-security-highs.md`
+
 **2026-05-09 audit-remediation wave 3: P1 deferred — CSRF admin route group + Bearer-bypass tightening with frontend X-CSRF-Token injection (CA-198 + CA-201)** — 4 commits, `19dcd6b..(reconcile)`.
 
 Closes the two security findings deferred from wave-1 P1: CA-198 (CRITICAL — no CSRF

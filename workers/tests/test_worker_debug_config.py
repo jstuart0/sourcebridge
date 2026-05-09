@@ -2,9 +2,13 @@
 
 Proves that:
   1. The default value of WorkerConfig.debug is False (reflection off in prod).
-  2. SOURCEBRIDGE_WORKER_DEBUG=true sets debug=True (reflection on in dev).
+  2. SOURCEBRIDGE_WORKER_DEBUG=true sets debug=True.
   3. SOURCEBRIDGE_WORKER_DEBUG=false keeps debug=False.
   4. The field is not accidentally tied to test_mode.
+
+Note: SOURCEBRIDGE_WORKER_DEBUG=true ALONE does NOT enable gRPC reflection.
+Both SOURCEBRIDGE_WORKER_DEBUG=true AND SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED=true
+must be set. See workers/__main__.py and test_main_grpc_reflection.py.
 """
 
 
@@ -25,7 +29,12 @@ def test_debug_default_is_false(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_debug_env_true(monkeypatch: pytest.MonkeyPatch) -> None:
-    """SOURCEBRIDGE_WORKER_DEBUG=true enables debug mode."""
+    """SOURCEBRIDGE_WORKER_DEBUG=true sets debug=True.
+
+    NOTE: this does NOT enable gRPC reflection on its own — that requires
+    SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED=true as well.
+    See test_main_grpc_reflection.py for the dual-key gate tests.
+    """
     monkeypatch.setenv("SOURCEBRIDGE_WORKER_DEBUG", "true")
     config = WorkerConfig()
     assert config.debug is True

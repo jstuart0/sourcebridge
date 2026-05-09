@@ -424,3 +424,47 @@ func TestValidateGitURL_AllowPrivateDoesNotUnlockHTTP(t *testing.T) {
 		t.Errorf("http:// with allowPrivate=true: want ErrSchemeNotAllowed, got %v", err)
 	}
 }
+
+// T15 — codex r2 H1: 0.0.0.0 and :: (unspecified addresses) must be denied.
+// On common OS stacks these map to the local host and bypass loopback detection.
+func TestValidateGitURL_UnspecifiedAddresses_Denied(t *testing.T) {
+	cases := []struct {
+		name string
+		ip   string
+	}{
+		{"IPv4 unspecified (0.0.0.0)", "0.0.0.0"},
+		{"IPv6 unspecified (::)", "::"},
+	}
+	for _, tc := range cases {
+		ipCopy := tc.ip
+		stubUnspecified := func(_ string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP(ipCopy)}, nil
+		}
+		err := ValidateGitURLForClone("https://evil.example.com/repo.git", false, stubUnspecified)
+		if !errors.Is(err, ErrPrivateIPNotAllowed) {
+			t.Errorf("%s: want ErrPrivateIPNotAllowed, got %v", tc.name, err)
+		}
+	}
+}
+
+// T16 — multicast addresses must be denied (git over multicast is not legitimate).
+func TestValidateGitURL_MulticastAddresses_Denied(t *testing.T) {
+	cases := []struct {
+		name string
+		ip   string
+	}{
+		{"IPv4 multicast (224.0.0.1)", "224.0.0.1"},
+		{"IPv6 multicast (ff02::1)", "ff02::1"},
+		{"IPv6 interface-local multicast (ff01::1)", "ff01::1"},
+	}
+	for _, tc := range cases {
+		ipCopy := tc.ip
+		stubMulticast := func(_ string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP(ipCopy)}, nil
+		}
+		err := ValidateGitURLForClone("https://evil.example.com/repo.git", false, stubMulticast)
+		if !errors.Is(err, ErrPrivateIPNotAllowed) {
+			t.Errorf("%s: want ErrPrivateIPNotAllowed, got %v", tc.name, err)
+		}
+	}
+}

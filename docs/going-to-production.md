@@ -130,6 +130,37 @@ SOURCEBRIDGE_SECURITY_GITHUB_WEBHOOK_SECRET=your-github-secret
 SOURCEBRIDGE_SECURITY_GITLAB_WEBHOOK_SECRET=your-gitlab-secret
 ```
 
+### Git URL SSRF Protection (CA-312)
+
+By default, SourceBridge rejects git clone/pull URLs that resolve to private,
+loopback, link-local, CGNAT, unspecified (0.0.0.0/::), or multicast addresses.
+This blocks SSRF attacks on multi-tenant or internet-exposed deployments.
+
+**Self-hosted Forgejo/Gitea operators** running on an internal network will see
+`ErrPrivateIPNotAllowed` when they register an internal repository URL. Opt in
+by setting:
+
+```bash
+SOURCEBRIDGE_INDEXING_ALLOW_PRIVATE_GIT_HOSTS=true
+```
+
+**Do not enable this on multi-tenant or publicly reachable instances.** It is
+safe only for single-operator self-hosted environments where the operator fully
+controls DNS and network routing.
+
+### gRPC Reflection (Development Only)
+
+The worker exposes gRPC reflection for grpcurl-based debugging. It is disabled
+by default and requires **both** flags to be set:
+
+```bash
+SOURCEBRIDGE_WORKER_DEBUG=true
+SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED=true
+```
+
+Setting only `SOURCEBRIDGE_WORKER_DEBUG=true` does NOT enable reflection (CA-202).
+Leave both flags unset (the default) in production.
+
 ---
 
 ## 2. Storage

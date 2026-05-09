@@ -13,6 +13,8 @@ SourceBridge.ai reads configuration from environment variables and config files.
 | `SOURCEBRIDGE_JWT_SECRET` | JWT signing secret | (required for auth) |
 | `SOURCEBRIDGE_LOG_LEVEL` | Log level (debug, info, warn, error) | `info` |
 | `SOURCEBRIDGE_TEST_MODE` | Enable test mode (no auth required) | `false` |
+| `SOURCEBRIDGE_INDEXING_ALLOW_PRIVATE_GIT_HOSTS` | Allow git clone/pull to private IPs (SSRF risk — for self-hosted Forgejo/Gitea operators only; never enable on multi-tenant deployments) | `false` |
+| `SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED` | Enable gRPC reflection on the worker for grpcurl debugging. Requires `SOURCEBRIDGE_WORKER_DEBUG=true` as well. Never enable in production. | `false` |
 
 ### Config File
 

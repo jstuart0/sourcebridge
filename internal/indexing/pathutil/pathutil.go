@@ -138,11 +138,22 @@ var ulaBlock = func() *net.IPNet {
 }()
 
 // isPrivateOrInternalIP returns true if the given IP is in any denylist range:
-// RFC1918, loopback, link-local unicast, CGNAT, or ULA.
+// RFC1918, loopback, link-local unicast, CGNAT, ULA, unspecified (0.0.0.0/::),
+// multicast, or interface-local multicast.
 func isPrivateOrInternalIP(ip net.IP) bool {
 	// stdlib covers: 10/8, 172.16/12, 192.168/16, 127/8, ::1, 169.254/16,
 	// fe80::/10, fc00::/7.
 	if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+		return true
+	}
+	// Unspecified: 0.0.0.0 or :: — on many stacks these resolve to the local
+	// host and bypass loopback detection.
+	if ip.IsUnspecified() {
+		return true
+	}
+	// Multicast: git over multicast is never legitimate; block 224.0.0.0/4 and
+	// ff00::/8 to prevent exotic routing tricks.
+	if ip.IsMulticast() || ip.IsInterfaceLocalMulticast() {
 		return true
 	}
 	// CGNAT: 100.64.0.0/10 — not covered by stdlib IsPrivate.

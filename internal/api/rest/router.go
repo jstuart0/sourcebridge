@@ -81,6 +81,13 @@ func WithTokenStore(store auth.APITokenStore) ServerOption {
 	return func(s *Server) { s.tokenStore = store }
 }
 
+// WithEventBus overrides the default in-process event bus. Primarily useful
+// for testing handleSSE without standing up the full server — callers inject
+// a pre-built *events.Bus and publish events directly from the test body.
+func WithEventBus(bus *events.Bus) ServerOption {
+	return func(s *Server) { s.eventBus = bus }
+}
+
 // WithDesktopAuthStore overrides desktop auth session persistence.
 func WithDesktopAuthStore(store DesktopAuthSessionStore) ServerOption {
 	return func(s *Server) { s.desktopAuth = store }
@@ -1228,6 +1235,7 @@ func (s *Server) setupRouter() {
 			mcpIndexSvc.WithClusteringHook(hook)
 		}
 		s.mcp.indexingSvc = mcpIndexSvc
+		s.mcp.allowPrivateGitHosts = s.cfg != nil && s.cfg.Indexing.AllowPrivateGitHosts
 		// Wire enterprise extensions if provided via server options
 		if s.mcpPermChecker != nil {
 			s.mcp.permChecker = s.mcpPermChecker
