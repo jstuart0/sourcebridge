@@ -372,3 +372,63 @@ func TestAdminRole_AdminServerDrain_NotForbiddenByRoleGate(t *testing.T) {
 		t.Fatalf("admin must not receive 403 from role gate on server-drain, got %d", rec.Code)
 	}
 }
+
+// ─── CA-282: RBAC gate for test-worker and test-llm (cases 17–20) ─────────
+
+// Case 17: POST /api/v1/admin/test-worker by non-admin → 403.
+func TestAdminRole_UserTestWorker_Returns403(t *testing.T) {
+	s, jwtMgr, _ := adminRoleTestServer(t)
+	bearer := bearerToken(t, jwtMgr, "uid-user-17", auth.RoleUser)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/test-worker", nil)
+	req.Header.Set("Authorization", bearer)
+	rec := doRequest(s, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Case 18: POST /api/v1/admin/test-llm by non-admin → 403.
+func TestAdminRole_UserTestLLM_Returns403(t *testing.T) {
+	s, jwtMgr, _ := adminRoleTestServer(t)
+	bearer := bearerToken(t, jwtMgr, "uid-user-18", auth.RoleUser)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/test-llm", nil)
+	req.Header.Set("Authorization", bearer)
+	rec := doRequest(s, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Case 19 (mirrors 17): admin calls POST /api/v1/admin/test-worker → passes
+// the role gate (may return 200 with status field, not 403).
+func TestAdminRole_AdminTestWorker_NotForbiddenByRoleGate(t *testing.T) {
+	s, jwtMgr, _ := adminRoleTestServer(t)
+	bearer := bearerToken(t, jwtMgr, "uid-admin-19", auth.RoleAdmin)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/test-worker", nil)
+	req.Header.Set("Authorization", bearer)
+	rec := doRequest(s, req)
+
+	if rec.Code == http.StatusForbidden {
+		t.Fatalf("admin must not receive 403 from role gate on test-worker, got %d", rec.Code)
+	}
+}
+
+// Case 20 (mirrors 18): admin calls POST /api/v1/admin/test-llm → passes
+// the role gate.
+func TestAdminRole_AdminTestLLM_NotForbiddenByRoleGate(t *testing.T) {
+	s, jwtMgr, _ := adminRoleTestServer(t)
+	bearer := bearerToken(t, jwtMgr, "uid-admin-20", auth.RoleAdmin)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/test-llm", nil)
+	req.Header.Set("Authorization", bearer)
+	rec := doRequest(s, req)
+
+	if rec.Code == http.StatusForbidden {
+		t.Fatalf("admin must not receive 403 from role gate on test-llm, got %d", rec.Code)
+	}
+}
