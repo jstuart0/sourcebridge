@@ -175,6 +175,52 @@ func (r *surrealLLMJobLog) toJobLog() *llm.JobLogEntry {
 // LLM job operations
 // ---------------------------------------------------------------------------
 
+// jobParams returns the shared parameter map used by both Create and Update.
+// Fields that must not be sent as explicit JSON null (process_id is an
+// option<string> column) are conditionally appended by the caller so this
+// function only ever populates them when non-empty.
+func jobParams(job *llm.Job) map[string]any {
+	return map[string]any{
+		"id":                          job.ID,
+		"subsystem":                   string(job.Subsystem),
+		"job_type":                    job.JobType,
+		"target_key":                  job.TargetKey,
+		"strategy":                    job.Strategy,
+		"model":                       job.Model,
+		"llm_provider":                job.LLMProvider,
+		"priority":                    string(job.Priority),
+		"generation_mode":             job.GenerationMode,
+		"status":                      string(job.Status),
+		"progress":                    job.Progress,
+		"progress_phase":              job.ProgressPhase,
+		"progress_message":            job.ProgressMessage,
+		"error_code":                  job.ErrorCode,
+		"error_message":               job.ErrorMessage,
+		"retry_count":                 job.RetryCount,
+		"max_attempts":                job.MaxAttempts,
+		"timeout_sec":                 job.TimeoutSec,
+		"attached_requests":           job.AttachedRequests,
+		"input_tokens":                job.InputTokens,
+		"output_tokens":               job.OutputTokens,
+		"snapshot_bytes":              job.SnapshotBytes,
+		"reused_summaries":            job.ReusedSummaries,
+		"leaf_cache_hits":             job.LeafCacheHits,
+		"file_cache_hits":             job.FileCacheHits,
+		"package_cache_hits":          job.PackageCacheHits,
+		"root_cache_hits":             job.RootCacheHits,
+		"cached_nodes_loaded":         job.CachedNodesLoaded,
+		"total_nodes":                 job.TotalNodes,
+		"resume_stage":                job.ResumeStage,
+		"skipped_leaf_units":          job.SkippedLeafUnits,
+		"skipped_file_units":          job.SkippedFileUnits,
+		"skipped_package_units":       job.SkippedPackageUnits,
+		"skipped_root_units":          job.SkippedRootUnits,
+		"artifact_id":                 job.ArtifactID,
+		"repo_id":                     job.RepoID,
+		"current_tokens_per_second":   job.CurrentTokensPerSecond,
+	}
+}
+
 // Create inserts a new job record. The job must have a non-empty ID; the
 // orchestrator generates one before calling Create.
 func (s *SurrealStore) Create(job *llm.Job) (*llm.Job, error) {
@@ -239,45 +285,9 @@ func (s *SurrealStore) Create(job *llm.Job) (*llm.Job, error) {
 		process_id = $process_id`
 	}
 
-	vars := map[string]any{
-		"id":                 job.ID,
-		"subsystem":          string(job.Subsystem),
-		"job_type":           job.JobType,
-		"target_key":         job.TargetKey,
-		"strategy":           job.Strategy,
-		"model":              job.Model,
-		"llm_provider":       job.LLMProvider,
-		"priority":           string(job.Priority),
-		"generation_mode":    job.GenerationMode,
-		"status":             string(status),
-		"progress":           job.Progress,
-		"progress_phase":     job.ProgressPhase,
-		"progress_message":   job.ProgressMessage,
-		"error_code":         job.ErrorCode,
-		"error_message":      job.ErrorMessage,
-		"retry_count":        job.RetryCount,
-		"max_attempts":       job.MaxAttempts,
-		"timeout_sec":        job.TimeoutSec,
-		"attached_requests":  job.AttachedRequests,
-		"input_tokens":       job.InputTokens,
-		"output_tokens":      job.OutputTokens,
-		"snapshot_bytes":     job.SnapshotBytes,
-		"reused_summaries":   job.ReusedSummaries,
-		"leaf_cache_hits":    job.LeafCacheHits,
-		"file_cache_hits":    job.FileCacheHits,
-		"package_cache_hits": job.PackageCacheHits,
-		"root_cache_hits":    job.RootCacheHits,
-		"cached_nodes_loaded": job.CachedNodesLoaded,
-		"total_nodes":         job.TotalNodes,
-		"resume_stage":        job.ResumeStage,
-		"skipped_leaf_units":  job.SkippedLeafUnits,
-		"skipped_file_units":  job.SkippedFileUnits,
-		"skipped_package_units": job.SkippedPackageUnits,
-		"skipped_root_units":  job.SkippedRootUnits,
-		"artifact_id":        job.ArtifactID,
-		"repo_id":            job.RepoID,
-		"current_tokens_per_second": job.CurrentTokensPerSecond,
-	}
+	// Create uses a resolved status (defaults to pending when unset).
+	vars := jobParams(job)
+	vars["status"] = string(status)
 	if job.ProcessID != "" {
 		vars["process_id"] = job.ProcessID
 	}
@@ -341,45 +351,7 @@ func (s *SurrealStore) Update(job *llm.Job) error {
 		sql += `,
 		process_id = $process_id`
 	}
-	vars := map[string]any{
-		"id":                 job.ID,
-		"subsystem":          string(job.Subsystem),
-		"job_type":           job.JobType,
-		"target_key":         job.TargetKey,
-		"strategy":           job.Strategy,
-		"model":              job.Model,
-		"llm_provider":       job.LLMProvider,
-		"priority":           string(job.Priority),
-		"generation_mode":    job.GenerationMode,
-		"status":             string(job.Status),
-		"progress":           job.Progress,
-		"progress_phase":     job.ProgressPhase,
-		"progress_message":   job.ProgressMessage,
-		"error_code":         job.ErrorCode,
-		"error_message":      job.ErrorMessage,
-		"retry_count":        job.RetryCount,
-		"max_attempts":       job.MaxAttempts,
-		"timeout_sec":        job.TimeoutSec,
-		"attached_requests":  job.AttachedRequests,
-		"input_tokens":       job.InputTokens,
-		"output_tokens":      job.OutputTokens,
-		"snapshot_bytes":     job.SnapshotBytes,
-		"reused_summaries":   job.ReusedSummaries,
-		"leaf_cache_hits":    job.LeafCacheHits,
-		"file_cache_hits":    job.FileCacheHits,
-		"package_cache_hits": job.PackageCacheHits,
-		"root_cache_hits":    job.RootCacheHits,
-		"cached_nodes_loaded": job.CachedNodesLoaded,
-		"total_nodes":         job.TotalNodes,
-		"resume_stage":        job.ResumeStage,
-		"skipped_leaf_units":  job.SkippedLeafUnits,
-		"skipped_file_units":  job.SkippedFileUnits,
-		"skipped_package_units": job.SkippedPackageUnits,
-		"skipped_root_units":  job.SkippedRootUnits,
-		"artifact_id":        job.ArtifactID,
-		"repo_id":            job.RepoID,
-		"current_tokens_per_second": job.CurrentTokensPerSecond,
-	}
+	vars := jobParams(job)
 	if job.ProcessID != "" {
 		vars["process_id"] = job.ProcessID
 	}
