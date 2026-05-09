@@ -1465,6 +1465,66 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         # Final terminal message — must be last.
         yield knowledge_pb2.KnowledgeServiceGenerateCliffNotesResponse(final=response)
 
+    async def _run_simple_streaming_generation(
+        self,
+        context: grpc.aio.ServicerContext,
+        job_logger: SurrealJobLogger | None,
+        work_task: asyncio.Task,
+        event_name: str,
+        result_holder: list,
+    ) -> AsyncIterator[Any]:
+        """Shared scaffold for learning_path, workflow_story, and code_tour handlers.
+
+        Runs ``work_task`` under ``run_with_heartbeat``, yields
+        ``KnowledgeStreamProgress`` protos, and stores the task's return
+        value in ``result_holder[0]`` on success.
+
+        Callers must:
+        - Yield the RENDER phase marker BEFORE calling this generator.
+        - Yield the FINALIZING phase marker and final response AFTER
+          iteration completes.
+        - Handle outer job_logger.close() in their own try/finally.
+
+        On ``CancelledError`` the task is cancelled and the exception is
+        re-raised so the gRPC framework tears down the stream.  On any
+        other exception the generator logs the error, calls
+        ``context.abort`` (INTERNAL), and returns without raising so the
+        handler can exit cleanly after the ``async for`` loop.
+
+        ``event_name`` is used in structured log keys and job-logger
+        events (e.g. ``"learning_path"``).
+        """
+        try:
+            async for prog in run_with_heartbeat(
+                work_task,
+                phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
+                message=f"Generating {event_name.replace('_', ' ')}",
+            ):
+                prog.current_tokens_per_second = self._snapshot_tokens_per_second()
+                yield prog
+            result_holder[0] = await work_task
+        except asyncio.CancelledError:
+            log.warning(f"{event_name}_stream_cancelled")
+            if not work_task.done():
+                work_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
+                    await asyncio.wait_for(work_task, timeout=5.0)
+            raise
+        except Exception as exc:
+            if job_logger is not None:
+                with contextlib.suppress(Exception):
+                    await job_logger.error(
+                        phase="failed",
+                        event=f"generate_{event_name}_failed",
+                        message=f"{event_name.replace('_', ' ').title()} generation failed in worker",
+                        payload={"error": str(exc)},
+                    )
+            log.error(f"generate_{event_name}_failed", error=str(exc))
+            await context.abort(
+                grpc.StatusCode.INTERNAL,
+                f"{event_name.replace('_', ' ').title()} generation failed: {exc}",
+            )
+
     async def GenerateLearningPath(  # noqa: N802
         self,
         request: knowledge_pb2.GenerateLearningPathRequest,
@@ -1507,8 +1567,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         job_logger = self._resolve_job_logger(context)
         # codex r2b M4: outer try/finally so job_logger.close() runs
         # even on cancellation between work_task success and the
-        # FINALIZING / final-response yields. Inner branches set
-        # job_logger_closed=True to prevent double-close.
+        # FINALIZING / final-response yields.
         job_logger_closed = [False]
         try:
             if job_logger is not None:
@@ -1526,9 +1585,7 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
 
             # codex r2 C1: spawn the LLM call as a task and pump phase-only
             # heartbeats so the orchestrator's UpdatedAt stays fresh
-            # through long single-LLM-call generations. Never shields the
-            # work task — cancellation propagates upward and the
-            # try/finally tears down the task.
+            # through long single-LLM-call generations.
             work_task = asyncio.create_task(
                 generate_learning_path(
                     provider=provider,
@@ -1541,45 +1598,14 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 ),
                 name=f"learning-path-{request.repository_id}",
             )
-            try:
-                async for prog in run_with_heartbeat(
-                    work_task,
-                    phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
-                    message="Generating learning path",
-                ):
-                    prog.current_tokens_per_second = self._snapshot_tokens_per_second()
-                    yield knowledge_pb2.KnowledgeServiceGenerateLearningPathResponse(progress=prog)
-                result, usage = await work_task
-            except asyncio.CancelledError:
-                log.warning("learning_path_stream_cancelled", repository_id=request.repository_id)
-                if not work_task.done():
-                    work_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
-                        await asyncio.wait_for(work_task, timeout=5.0)
-                if job_logger is not None:
-                    with contextlib.suppress(Exception):
-                        await job_logger.warn(
-                            phase="cancelled",
-                            event="generate_learning_path_cancelled",
-                            message="Stream cancelled by client",
-                            payload={"repository_id": request.repository_id},
-                        )
-                raise
-            except Exception as exc:
-                if job_logger is not None:
-                    with contextlib.suppress(Exception):
-                        await job_logger.error(
-                            phase="failed",
-                            event="generate_learning_path_failed",
-                            message="Learning path generation failed in worker",
-                            payload={"error": str(exc)},
-                        )
-                log.error("generate_learning_path_failed", error=str(exc))
-                await context.abort(
-                    grpc.StatusCode.INTERNAL,
-                    f"Learning path generation failed: {exc}",
-                )
-                return
+            result_holder: list = []
+            async for prog in self._run_simple_streaming_generation(
+                context, job_logger, work_task, "learning_path", result_holder
+            ):
+                yield knowledge_pb2.KnowledgeServiceGenerateLearningPathResponse(progress=prog)
+            if not result_holder:
+                return  # context.abort was called inside the helper
+            result, usage = result_holder[0]
 
             # Phase: FINALIZING
             yield knowledge_pb2.KnowledgeServiceGenerateLearningPathResponse(
@@ -1871,39 +1897,14 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 ),
                 name=f"workflow-story-{request.repository_id}",
             )
-            try:
-                async for prog in run_with_heartbeat(
-                    work_task,
-                    phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
-                    message="Generating workflow story",
-                ):
-                    prog.current_tokens_per_second = self._snapshot_tokens_per_second()
-                    yield knowledge_pb2.KnowledgeServiceGenerateWorkflowStoryResponse(progress=prog)
-                result, usage = await work_task
-            except asyncio.CancelledError:
-                log.warning("workflow_story_stream_cancelled", repository_id=request.repository_id)
-                if not work_task.done():
-                    work_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
-                        await asyncio.wait_for(work_task, timeout=5.0)
-                raise
-            except Exception as exc:
-                import traceback
-
-                if job_logger is not None:
-                    with contextlib.suppress(Exception):
-                        await job_logger.error(
-                            phase="failed",
-                            event="generate_workflow_story_failed",
-                            message="Workflow story generation failed in worker",
-                            payload={"error": str(exc)},
-                        )
-                log.error("generate_workflow_story_failed", error=str(exc), traceback=traceback.format_exc())
-                await context.abort(
-                    grpc.StatusCode.INTERNAL,
-                    f"Workflow story generation failed: {exc}",
-                )
-                return
+            result_holder: list = []
+            async for prog in self._run_simple_streaming_generation(
+                context, job_logger, work_task, "workflow_story", result_holder
+            ):
+                yield knowledge_pb2.KnowledgeServiceGenerateWorkflowStoryResponse(progress=prog)
+            if not result_holder:
+                return  # context.abort was called inside the helper
+            result, usage = result_holder[0]
 
             # Phase: FINALIZING
             yield knowledge_pb2.KnowledgeServiceGenerateWorkflowStoryResponse(
@@ -2156,37 +2157,14 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
                 ),
                 name=f"code-tour-{request.repository_id}",
             )
-            try:
-                async for prog in run_with_heartbeat(
-                    work_task,
-                    phase=knowledge_progress_pb2.KNOWLEDGE_PHASE_RENDER,
-                    message="Generating code tour",
-                ):
-                    prog.current_tokens_per_second = self._snapshot_tokens_per_second()
-                    yield knowledge_pb2.KnowledgeServiceGenerateCodeTourResponse(progress=prog)
-                result, usage = await work_task
-            except asyncio.CancelledError:
-                log.warning("code_tour_stream_cancelled", repository_id=request.repository_id)
-                if not work_task.done():
-                    work_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
-                        await asyncio.wait_for(work_task, timeout=5.0)
-                raise
-            except Exception as exc:
-                if job_logger is not None:
-                    with contextlib.suppress(Exception):
-                        await job_logger.error(
-                            phase="failed",
-                            event="generate_code_tour_failed",
-                            message="Code tour generation failed in worker",
-                            payload={"error": str(exc)},
-                        )
-                log.error("generate_code_tour_failed", error=str(exc))
-                await context.abort(
-                    grpc.StatusCode.INTERNAL,
-                    f"Code tour generation failed: {exc}",
-                )
-                return
+            result_holder: list = []
+            async for prog in self._run_simple_streaming_generation(
+                context, job_logger, work_task, "code_tour", result_holder
+            ):
+                yield knowledge_pb2.KnowledgeServiceGenerateCodeTourResponse(progress=prog)
+            if not result_holder:
+                return  # context.abort was called inside the helper
+            result, usage = result_holder[0]
 
             # Phase: FINALIZING
             yield knowledge_pb2.KnowledgeServiceGenerateCodeTourResponse(
