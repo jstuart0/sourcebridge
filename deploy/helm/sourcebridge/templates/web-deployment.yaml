@@ -16,7 +16,7 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
-      serviceAccountName: {{ include "sourcebridge.serviceAccountName" . }}
+      serviceAccountName: {{ include "sourcebridge.web.serviceAccountName" . }}
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -50,17 +50,24 @@ spec:
               value: "http://{{ include "sourcebridge.fullname" . }}-api:{{ .Values.api.service.port }}"
             - name: SOURCEBRIDGE_WEB_DEV_PROXY
               value: "http://{{ include "sourcebridge.fullname" . }}-api:{{ .Values.api.service.port }}"
+          # otto Medium #13: /api/health is lighter than / (no full SSR render)
+          # and correctly tests the API proxy path — the page may render from
+          # cache even when the upstream API is unreachable. Matches k8s base.
           livenessProbe:
             httpGet:
-              path: /
+              path: /api/health
               port: http
             initialDelaySeconds: 10
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /
+              path: /api/health
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}

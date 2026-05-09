@@ -23,7 +23,7 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
     spec:
-      serviceAccountName: {{ include "sourcebridge.serviceAccountName" . }}
+      serviceAccountName: {{ include "sourcebridge.worker.serviceAccountName" . }}
       # CA-142: matches kustomize base worker.yaml:59 (65 min = grace + slack).
       terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds | default 3900 }}
       {{- with .Values.podSecurityContext }}

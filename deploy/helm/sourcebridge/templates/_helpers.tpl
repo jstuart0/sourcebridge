@@ -149,12 +149,51 @@ Redis connection URL
 {{- end }}
 
 {{/*
-ServiceAccount name
+ServiceAccount name (shared / legacy fallback — do not use for new deployments).
+Per-component names are preferred: sourcebridge.api.serviceAccountName etc.
 */}}
 {{- define "sourcebridge.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
 {{- default (include "sourcebridge.fullname" .) .Values.serviceAccount.name }}
 {{- else }}
 {{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}
+
+{{/*
+CA-230: Per-component ServiceAccount names.
+When serviceAccount.create is false operators supply their own SA;
+the per-component override keys (serviceAccount.apiName etc.) allow
+overriding individual SAs while still having create:true for the rest.
+*/}}
+{{- define "sourcebridge.api.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (printf "%s-api" (include "sourcebridge.fullname" .)) .Values.serviceAccount.apiName }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.apiName }}
+{{- end }}
+{{- end }}
+
+{{- define "sourcebridge.worker.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (printf "%s-worker" (include "sourcebridge.fullname" .)) .Values.serviceAccount.workerName }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.workerName }}
+{{- end }}
+{{- end }}
+
+{{- define "sourcebridge.web.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (printf "%s-web" (include "sourcebridge.fullname" .)) .Values.serviceAccount.webName }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.webName }}
+{{- end }}
+{{- end }}
+
+{{- define "sourcebridge.surrealdb.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (printf "%s-surrealdb" (include "sourcebridge.fullname" .)) .Values.serviceAccount.surrealdbName }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.surrealdbName }}
 {{- end }}
 {{- end }}
