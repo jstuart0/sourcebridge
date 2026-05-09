@@ -6,6 +6,7 @@ package graphql
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -154,6 +155,92 @@ func TestPermanentlyDelete_Unauthenticated_Rejected(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "unauthenticated") {
 		t.Errorf("want unauthenticated error, got %v", err)
+	}
+}
+
+// T45a: restoreFromTrash publishes EventTrashChanged with repo_id.
+func TestRestoreFromTrash_EventPayloadContainsRepoID(t *testing.T) {
+	r := newTestResolver(t)
+	store := r.TrashStore.(*trash.MemStore)
+	const wantRepoID = "repo-restore-test"
+	store.Register(trash.RegisterOptions{
+		Type: trash.TypeRequirement, ID: "req-restore-1", RepositoryID: wantRepoID,
+		NaturalKey: "AUTH-002", Label: "restore test",
+	})
+	_, err := store.MoveToTrash(context.Background(), trash.TypeRequirement, "req-restore-1",
+		trash.MoveOptions{UserID: "jay"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Subscribe before the call so we capture the event synchronously via Shutdown flush.
+	var mu sync.Mutex
+	var captured []events.Event
+	r.EventBus.Subscribe(events.EventTrashChanged, func(e events.Event) {
+		mu.Lock()
+		defer mu.Unlock()
+		captured = append(captured, e)
+	})
+
+	_, err = r.restoreFromTrash(
+		ctxWithClaims("jay", "user"),
+		TrashableTypeRequirement, "req-restore-1", nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("restoreFromTrash: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	r.EventBus.Shutdown(ctx) //nolint:errcheck // flush in-flight handlers
+
+	mu.Lock()
+	defer mu.Unlock()
+	var found *events.Event
+	for i := range captured {
+		if v, _ := captured[i].Data["action"].(string); v == "restored" {
+			found = &captured[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("T45: EventTrashChanged(action=restored) not published")
+	}
+	gotRepoID, _ := found.Data["repo_id"].(string)
+	if gotRepoID != wantRepoID {
+		t.Errorf("T45: repo_id: want %q, got %q", wantRepoID, gotRepoID)
+	}
+}
+
+// T45b: restoreFromTrash returns not-in-trash error BEFORE any state mutation
+// when the entry does not exist.
+func TestRestoreFromTrash_NonExistent_ReturnsErrorBeforeMutation(t *testing.T) {
+	r := newTestResolver(t)
+	store := r.TrashStore.(*trash.MemStore)
+	store.Register(trash.RegisterOptions{
+		Type: trash.TypeRequirement, ID: "req-live", RepositoryID: "repo",
+		NaturalKey: "AUTH-003", Label: "live item",
+	})
+	// NOT moved to trash.
+
+	_, err := r.restoreFromTrash(
+		ctxWithClaims("jay", "user"),
+		TrashableTypeRequirement, "req-live", nil, nil,
+	)
+	if err == nil {
+		t.Fatal("expected not-in-trash error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not in trash") {
+		t.Errorf("want not-in-trash error, got %v", err)
+	}
+
+	// Confirm the item is still live (no state mutation occurred).
+	entry, getErr := store.Get(context.Background(), trash.TypeRequirement, "req-live")
+	if getErr != nil {
+		t.Fatalf("Get after expected-early-exit: %v", getErr)
+	}
+	if entry != nil {
+		t.Errorf("T45: item was mutated (moved to trash) despite not-in-trash early exit")
 	}
 }
 

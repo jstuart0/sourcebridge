@@ -482,3 +482,84 @@ func TestFilteredIntegrationVerifyLinkLegitimate(t *testing.T) {
 		t.Fatalf("expected Verified=true, got false")
 	}
 }
+
+// --- T29: GetSymbolCrossRepoRefs partial-target access ---
+
+// TestFilteredIntegrationGetSymbolCrossRepoRefsPartialTarget (T29): when a
+// symbol's home repo is in the tenant's allowed set but only SOME cross-repo
+// ref target repos are, GetSymbolCrossRepoRefs returns ONLY the subset whose
+// target repos are accessible. This pins the result-row filter (Decision 5).
+func TestFilteredIntegrationGetSymbolCrossRepoRefsPartialTarget(t *testing.T) {
+	store := startSurrealStore(t)
+	repoA := seedRepo(t, store, "T29-repo-A")
+	repoB := seedRepo(t, store, "T29-repo-B")
+	repoC := seedRepo(t, store, "T29-repo-C")
+
+	// Seed a symbol in repoA.
+	symResult := &indexer.IndexResult{
+		RepoName: "T29-repo-A",
+		RepoPath: "/tmp/T29-repo-A",
+		Files: []indexer.FileResult{
+			{
+				Path:     "a.go",
+				Language: "go",
+				Symbols: []indexer.Symbol{
+					{
+						ID:            "sym-T29-A",
+						Name:          "FuncA",
+						QualifiedName: "pkg.FuncA",
+						Kind:          indexer.SymbolFunction,
+						Language:      "go",
+						FilePath:      "a.go",
+						StartLine:     1,
+						EndLine:       5,
+					},
+				},
+			},
+		},
+	}
+	_, err := store.ReplaceIndexResult(repoA, symResult)
+	if err != nil {
+		t.Fatalf("ReplaceIndexResult: %v", err)
+	}
+
+	syms := store.GetSymbolsByFile(repoA, "a.go")
+	if len(syms) == 0 {
+		t.Fatal("no symbols found after ReplaceIndexResult")
+	}
+	symID := syms[0].ID
+
+	// Store two cross-repo refs: A→B (allowed) and A→C (not in tenant's set).
+	if err := store.StoreCrossRepoRef(&graph.CrossRepoRef{
+		SourceSymbolID: symID,
+		SourceRepoID:   repoA,
+		TargetRepoID:   repoB,
+		RefType:        "import",
+		Confidence:     0.9,
+	}); err != nil {
+		t.Fatalf("StoreCrossRepoRef A→B: %v", err)
+	}
+	if err := store.StoreCrossRepoRef(&graph.CrossRepoRef{
+		SourceSymbolID: symID,
+		SourceRepoID:   repoA,
+		TargetRepoID:   repoC,
+		RefType:        "import",
+		Confidence:     0.8,
+	}); err != nil {
+		t.Fatalf("StoreCrossRepoRef A→C: %v", err)
+	}
+
+	// Tenant may access A and B but NOT C.
+	f := filteredFor(store, repoA, repoB)
+	refs, err := f.GetSymbolCrossRepoRefs(symID)
+	if err != nil {
+		t.Fatalf("GetSymbolCrossRepoRefs: %v", err)
+	}
+
+	if len(refs) != 1 {
+		t.Fatalf("T29: want exactly 1 ref (A→B), got %d", len(refs))
+	}
+	if refs[0].TargetRepoID != repoB {
+		t.Errorf("T29: want TargetRepoID=%q, got %q", repoB, refs[0].TargetRepoID)
+	}
+}

@@ -86,6 +86,9 @@ root. All variables are optional and have sensible defaults.
 | `SOURCEBRIDGE_LLM_API_KEY` | API key for cloud LLM providers | -- |
 | `SOURCEBRIDGE_EMBEDDING_PROVIDER` | Embedding backend: `voyage`, `openai`, `ollama` | -- |
 | `VOYAGE_API_KEY` | API key for Voyage AI embeddings | -- |
+| `SOURCEBRIDGE_INDEXING_ALLOW_PRIVATE_GIT_HOSTS` | **DANGEROUS opt-in**: allows git clone to private/internal IPs (RFC1918, loopback, link-local, CGNAT, ULA). Only enable on single-operator self-hosted instances where all indexed repos are on your private network. See CA-312. | `false` |
+| `SOURCEBRIDGE_WORKER_DEBUG` | Enable verbose worker logging. Note: to also enable gRPC reflection for grpcurl debugging, ALSO set `SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED=true`. | `false` |
+| `SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED` | Enable gRPC reflection on the worker for grpcurl debugging. **Requires `SOURCEBRIDGE_WORKER_DEBUG=true` as well — both must be true.** See CA-202. | `false` |
 
 ### Customizing the LLM provider
 
