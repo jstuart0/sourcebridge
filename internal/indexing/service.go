@@ -97,6 +97,17 @@ func (s *Service) Import(ctx context.Context, spec ImportSpec) (*graphstore.Repo
 
 	isRemote := IsGitURL(spec.PathOrURL)
 
+	// CA-312: validate remote URLs before creating the repository record.
+	// This gives the caller an actionable error at the handler boundary
+	// (before the background goroutine starts) rather than a silent failure
+	// that only surfaces in the repository's error field.
+	if isRemote {
+		allowPrivate := s.cfg != nil && s.cfg.Indexing.AllowPrivateGitHosts
+		if err := pathutil.ValidateGitURLForClone(spec.PathOrURL, allowPrivate, nil); err != nil {
+			return nil, fmt.Errorf("repository URL not allowed: %w", err)
+		}
+	}
+
 	// Dedup. Mirrors the GraphQL AddRepository dedupe path so both
 	// surfaces converge on the same record.
 	if isRemote {
@@ -194,7 +205,13 @@ func (s *Service) runImport(repoID, repoName, repoPath string, isRemote bool, to
 			s.store.SetRepositoryError(repoID, fmt.Errorf("creating clone dir: %w", err))
 			return
 		}
-		if err := GitCloneCmd(ctx, repoPath, cloneDir, pullToken, sshKeyPath).Run(); err != nil {
+		allowPrivate := s.cfg != nil && s.cfg.Indexing.AllowPrivateGitHosts
+		cmd, err := GitCloneCmd(ctx, repoPath, cloneDir, pullToken, sshKeyPath, allowPrivate)
+		if err != nil {
+			s.store.SetRepositoryError(repoID, err)
+			return
+		}
+		if err := cmd.Run(); err != nil {
 			s.store.SetRepositoryError(repoID, fmt.Errorf("cloning repository: %w", err))
 			return
 		}
@@ -276,18 +293,30 @@ func NormalizeGitURL(url string) string {
 // GitCloneCmd builds the exec.Cmd for a git clone invocation,
 // preferring PAT-embedded URLs for HTTPS and GIT_SSH_COMMAND for ssh
 // keys. Shape mirrors the GraphQL resolver's helper.
-func GitCloneCmd(ctx context.Context, repoURL, targetDir, token, sshKeyPath string) *exec.Cmd {
-	args := []string{"clone", "--depth=1"}
+//
+// CA-312: validates the URL before building the command. Returns
+// (nil, err) when the URL fails the scheme allowlist or IP denylist.
+// The allowPrivate parameter mirrors config.Indexing.AllowPrivateGitHosts.
+func GitCloneCmd(ctx context.Context, repoURL, targetDir, token, sshKeyPath string, allowPrivate bool) (*exec.Cmd, error) {
+	if err := pathutil.ValidateGitURLForClone(repoURL, allowPrivate, nil); err != nil {
+		return nil, fmt.Errorf("repository URL not allowed: %w", err)
+	}
+
+	// CA-312: harden the clone command against redirect-chain bypasses and
+	// submodule SSRF. These args apply to all clone operations regardless
+	// of the allowPrivate flag.
+	args := []string{
+		"clone",
+		"--depth=1",
+		"-c", "http.followRedirects=false",    // refuse HTTP 30x redirects (TOCTOU bypass)
+		"--no-recurse-submodules",             // refuse to clone submodules
+		"-c", "submodule.recurse=false",       // defense-in-depth: no submodule init later
+	}
 	cloneURL := repoURL
 
-	if token != "" && (strings.HasPrefix(repoURL, "https://") || strings.HasPrefix(repoURL, "http://")) {
+	if token != "" && strings.HasPrefix(repoURL, "https://") {
 		// https://host/... → https://<token>@host/...
-		for _, prefix := range []string{"https://", "http://"} {
-			if strings.HasPrefix(cloneURL, prefix) {
-				cloneURL = prefix + token + "@" + strings.TrimPrefix(cloneURL, prefix)
-				break
-			}
-		}
+		cloneURL = "https://" + token + "@" + strings.TrimPrefix(cloneURL, "https://")
 	}
 
 	args = append(args, cloneURL, targetDir)
@@ -300,7 +329,7 @@ func GitCloneCmd(ctx context.Context, repoURL, targetDir, token, sshKeyPath stri
 		// pre-populate ~/.ssh/known_hosts on the API pod.
 		cmd.Env = append(os.Environ(), "GIT_SSH_COMMAND="+gitres.BuildGitSSHCommand(sshKeyPath, "no"))
 	}
-	return cmd
+	return cmd, nil
 }
 
 // sanitizeRepoName produces a filesystem-safe name used for the

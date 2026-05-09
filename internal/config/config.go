@@ -103,6 +103,20 @@ type IndexingConfig struct {
 	IgnoreGlobs    []string `mapstructure:"ignore_globs"`
 	MaxConcurrency int      `mapstructure:"max_concurrency"`
 	SCIPEnabled    bool     `mapstructure:"scip_enabled"`
+
+	// AllowPrivateGitHosts disables the SSRF IP-range denylist for git clone
+	// operations. Default false (safe for all deployments).
+	//
+	// Set SOURCEBRIDGE_INDEXING_ALLOW_PRIVATE_GIT_HOSTS=true ONLY on
+	// single-operator self-hosted instances where every authenticated user is
+	// trusted not to clone from internal control planes (cloud metadata
+	// services, internal k8s APIs, internal DBs, etc.).
+	//
+	// WARNING: NOT safe for multi-tenant public deploys. An attacker with
+	// repository-add permissions can trigger SSRF to any host reachable from
+	// the API pod — including AWS EC2 metadata (169.254.169.254), internal
+	// Kubernetes services, and RFC1918 databases. See docs/going-to-production.md.
+	AllowPrivateGitHosts bool `mapstructure:"allow_private_git_hosts"`
 }
 
 // LLMConfig holds AI/LLM provider settings.
@@ -724,10 +738,11 @@ func Defaults() *Config {
 			RepoCachePath:    "./repo-cache",
 		},
 		Indexing: IndexingConfig{
-			MaxFileSize:    1024 * 1024, // 1MB
-			IgnoreGlobs:    []string{"node_modules/**", "dist/**", ".git/**", "vendor/**", "__pycache__/**"},
-			MaxConcurrency: 8,
-			SCIPEnabled:    true,
+			MaxFileSize:          1024 * 1024, // 1MB
+			IgnoreGlobs:          []string{"node_modules/**", "dist/**", ".git/**", "vendor/**", "__pycache__/**"},
+			MaxConcurrency:       8,
+			SCIPEnabled:          true,
+			AllowPrivateGitHosts: false, // CA-312: SSRF denylist enabled by default
 		},
 		LLM: LLMConfig{
 			// Provider and model fields are intentionally empty so fresh
@@ -913,6 +928,7 @@ func Load() (*Config, error) {
 	v.SetDefault("living_wiki.notion_webhook_secret", "")
 	v.SetDefault("living_wiki.scheduler_interval", cfg.LivingWiki.SchedulerInterval)
 	v.SetDefault("living_wiki.max_concurrent_jobs_per_tenant", cfg.LivingWiki.MaxConcurrentJobsPerTenant)
+	v.SetDefault("indexing.allow_private_git_hosts", false)
 	v.SetDefault("change_watch.enabled", cfg.ChangeWatch.Enabled)
 	v.SetDefault("change_watch.debounce_ms", cfg.ChangeWatch.DebounceMs)
 	v.SetDefault("change_watch.rate_limit_per_min", cfg.ChangeWatch.RateLimitPerMin)

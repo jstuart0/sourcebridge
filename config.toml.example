@@ -3,6 +3,21 @@
 # Environment variables override file values. The env prefix is SOURCEBRIDGE_
 # with nested keys joined by underscores, e.g. SOURCEBRIDGE_LLM_BASE_URL.
 
+# ─── Indexing (CA-312 SSRF hardening) ─────────────────────────────
+# [indexing]
+# allow_private_git_hosts = false
+#
+# WARNING: NOT safe for multi-tenant public deploys. An attacker with
+# repository-add permissions can trigger SSRF to any host reachable from the
+# API pod — including AWS EC2 metadata (169.254.169.254), internal Kubernetes
+# services, and RFC1918 databases.
+#
+# Set SOURCEBRIDGE_INDEXING_ALLOW_PRIVATE_GIT_HOSTS=true ONLY on
+# single-operator self-hosted instances where every authenticated user is
+# trusted not to clone from internal control planes. This flag disables the
+# IP-range denylist for git clone; the scheme allowlist (https://, ssh://)
+# remains active regardless. See docs/going-to-production.md.
+
 # ─── Telemetry ─────────────────────────────────────────────────────
 # Anonymous usage data helps us improve SourceBridge. No PII is collected.
 # Disable via SOURCEBRIDGE_TELEMETRY=off or DO_NOT_TRACK=1.

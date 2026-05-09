@@ -47,7 +47,13 @@ func (r *mutationResolver) importRepository(repoID, repoName, repoPath string, i
 			store.SetRepositoryError(repoID, fmt.Errorf("creating clone dir: %w", err))
 			return
 		}
-		if err := gitCloneCmd(ctx, repoPath, cloneDir, pullToken, sshKeyPath).Run(); err != nil {
+		allowPrivate := r.Config != nil && r.Config.Indexing.AllowPrivateGitHosts
+		cmd, err := gitCloneCmd(ctx, repoPath, cloneDir, pullToken, sshKeyPath, allowPrivate)
+		if err != nil {
+			store.SetRepositoryError(repoID, err)
+			return
+		}
+		if err := cmd.Run(); err != nil {
 			store.SetRepositoryError(repoID, fmt.Errorf("cloning repository: %w", err))
 			return
 		}

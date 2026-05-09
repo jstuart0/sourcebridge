@@ -28,6 +28,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/git"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
+	"github.com/sourcebridge/sourcebridge/internal/indexing/pathutil"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/coldstart"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/governance"
@@ -55,6 +56,14 @@ func (r *mutationResolver) AddRepository(ctx context.Context, input AddRepositor
 
 	repoPath := input.Path
 	isRemote := isGitURL(repoPath)
+
+	// CA-312: validate remote URLs at the handler boundary before touching the store.
+	if isRemote {
+		allowPrivate := r.Config != nil && r.Config.Indexing.AllowPrivateGitHosts
+		if err := pathutil.ValidateGitURLForClone(repoPath, allowPrivate, nil); err != nil {
+			return nil, fmt.Errorf("repository URL not allowed: %w", err)
+		}
+	}
 
 	// Dedup check: return existing repo if already tracked
 	if isRemote {
@@ -154,17 +163,29 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 			pullToken = defaultToken
 		}
 
+		// CA-312: validate remote URL BEFORE the clone-vs-pull branch split.
+		// git pull re-contacts the URL stored in .git/config, which was written
+		// by the original clone (possibly pre-CA-312). Validating here covers
+		// BOTH the re-clone path (line below) AND the pull path (else branch).
+		remoteURL := repo.RemoteURL
+		if remoteURL == "" {
+			remoteURL = repo.Path
+		}
+		allowPrivate := r.Config != nil && r.Config.Indexing.AllowPrivateGitHosts
+		if err := pathutil.ValidateGitURLForClone(remoteURL, allowPrivate, nil); err != nil {
+			return nil, fmt.Errorf("repository URL not allowed: %w", err)
+		}
+
 		// If clone directory doesn't exist, re-clone the repo
 		if _, statErr := os.Stat(cloneDir); os.IsNotExist(statErr) {
-			remoteURL := repo.RemoteURL
-			if remoteURL == "" {
-				remoteURL = repo.Path
-			}
 			slog.Info("re-cloning remote repo (clone missing)", "url", remoteURL, "target", cloneDir)
 			if err := os.MkdirAll(filepath.Dir(cloneDir), 0o755); err != nil {
 				return nil, fmt.Errorf("creating clone directory: %w", err)
 			}
-			cmd := gitCloneCmd(ctx, remoteURL, cloneDir, pullToken, sshKeyPath)
+			cmd, err := gitCloneCmd(ctx, remoteURL, cloneDir, pullToken, sshKeyPath, allowPrivate)
+			if err != nil {
+				return nil, err
+			}
 			if err := cmd.Run(); err != nil {
 				return nil, fmt.Errorf("re-cloning repository: %w", err)
 			}

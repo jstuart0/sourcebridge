@@ -4,6 +4,8 @@
 package pathutil
 
 import (
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -262,5 +264,163 @@ func TestSafeJoinRepoPath_WrittenFile(t *testing.T) {
 	}
 	if err := os.WriteFile(joined, []byte("ok"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CA-312: ValidateGitURLForClone — T5-T14
+// ---------------------------------------------------------------------------
+
+// stubLookupPublic returns a single public IP for any host.
+func stubLookupPublic(_ string) ([]net.IP, error) {
+	return []net.IP{net.ParseIP("1.2.3.4")}, nil
+}
+
+// stubLookupFail simulates a DNS lookup failure.
+func stubLookupFail(_ string) ([]net.IP, error) {
+	return nil, errors.New("dns: no such host")
+}
+
+// T5 — blocked schemes (http://, file://, git://, ftp://)
+func TestValidateGitURL_BlockedSchemes(t *testing.T) {
+	blocked := []string{
+		"http://github.com/org/repo.git",
+		"file:///etc/passwd",
+		"git://github.com/org/repo.git",
+		"ftp://github.com/repo",
+		"javascript:alert(1)",
+		"data:text/plain,hello",
+	}
+	for _, u := range blocked {
+		err := ValidateGitURLForClone(u, false, stubLookupPublic)
+		if !errors.Is(err, ErrSchemeNotAllowed) {
+			t.Errorf("URL %q: want ErrSchemeNotAllowed, got %v", u, err)
+		}
+	}
+}
+
+// T6 — public HTTPS allowed (stubbed lookup returns public IP)
+func TestValidateGitURL_PublicHTTPS_Allowed(t *testing.T) {
+	err := ValidateGitURLForClone("https://github.com/org/repo.git", false, stubLookupPublic)
+	if err != nil {
+		t.Errorf("public HTTPS should be allowed, got: %v", err)
+	}
+}
+
+// T7 — private HTTPS denied (table-driven over all denylist ranges)
+func TestValidateGitURL_PrivateIPs_Denied(t *testing.T) {
+	privateIPs := []string{
+		"10.0.0.1",
+		"192.168.1.1",
+		"172.16.0.1",
+		"127.0.0.1",
+		"::1",
+		"169.254.169.254",
+		"100.64.0.1",
+		"fc00::1",
+		"fe80::1",
+	}
+	for _, ip := range privateIPs {
+		ipCopy := ip
+		stubPrivate := func(_ string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP(ipCopy)}, nil
+		}
+		err := ValidateGitURLForClone("https://internal.example.com/repo.git", false, stubPrivate)
+		if !errors.Is(err, ErrPrivateIPNotAllowed) {
+			t.Errorf("IP %s: want ErrPrivateIPNotAllowed, got %v", ip, err)
+		}
+	}
+}
+
+// T8 — private IPs allowed with opt-in flag
+func TestValidateGitURL_PrivateIPs_AllowedWithOptIn(t *testing.T) {
+	privateIPs := []string{
+		"10.0.0.1",
+		"192.168.1.1",
+		"172.16.0.1",
+		"127.0.0.1",
+	}
+	for _, ip := range privateIPs {
+		ipCopy := ip
+		stubPrivate := func(_ string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP(ipCopy)}, nil
+		}
+		// allowPrivate=true should skip IP validation
+		err := ValidateGitURLForClone("https://gitea.internal/org/repo.git", true, stubPrivate)
+		if err != nil {
+			t.Errorf("IP %s with allowPrivate=true should be allowed, got: %v", ip, err)
+		}
+	}
+}
+
+// T9 — SCP-form git@ with private IP denied
+func TestValidateGitURL_SCPForm_PrivateIP_Denied(t *testing.T) {
+	cases := []struct {
+		url string
+		ip  string
+	}{
+		{"git@10.0.0.1:org/repo.git", "10.0.0.1"},
+		{"git@169.254.169.254:admin/secrets.git", "169.254.169.254"},
+	}
+	for _, tc := range cases {
+		ipCopy := tc.ip
+		stubPrivate := func(_ string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP(ipCopy)}, nil
+		}
+		err := ValidateGitURLForClone(tc.url, false, stubPrivate)
+		if !errors.Is(err, ErrPrivateIPNotAllowed) {
+			t.Errorf("SCP form %q: want ErrPrivateIPNotAllowed, got %v", tc.url, err)
+		}
+	}
+}
+
+// T10 — SCP-form git@ with public IP allowed
+func TestValidateGitURL_SCPForm_Public_Allowed(t *testing.T) {
+	err := ValidateGitURLForClone("git@github.com:org/repo.git", false, stubLookupPublic)
+	if err != nil {
+		t.Errorf("SCP form with public IP should be allowed, got: %v", err)
+	}
+}
+
+// T11 — ssh:// form with private and public IPs
+func TestValidateGitURL_SSHForm(t *testing.T) {
+	stubPrivate := func(_ string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("10.0.0.1")}, nil
+	}
+	if err := ValidateGitURLForClone("ssh://git@10.0.0.1/repo.git", false, stubPrivate); !errors.Is(err, ErrPrivateIPNotAllowed) {
+		t.Errorf("ssh:// to private IP: want ErrPrivateIPNotAllowed, got %v", err)
+	}
+	if err := ValidateGitURLForClone("ssh://git@github.com/repo.git", false, stubLookupPublic); err != nil {
+		t.Errorf("ssh:// to public host should be allowed, got: %v", err)
+	}
+}
+
+// T12 — DNS lookup failure → ErrHostnameUnresolvable (fail-closed)
+func TestValidateGitURL_DNSFailure_FailClosed(t *testing.T) {
+	err := ValidateGitURLForClone("https://no-such-host.example.invalid/repo.git", false, stubLookupFail)
+	if !errors.Is(err, ErrHostnameUnresolvable) {
+		t.Errorf("DNS failure: want ErrHostnameUnresolvable, got %v", err)
+	}
+}
+
+// T13 — multi-IP rebind defense: one public + one private → rejected
+func TestValidateGitURL_MultiIP_AnyPrivateFails(t *testing.T) {
+	stubMixed := func(_ string) ([]net.IP, error) {
+		return []net.IP{
+			net.ParseIP("1.2.3.4"),   // public
+			net.ParseIP("10.0.0.1"), // RFC1918 — should trigger rejection
+		}, nil
+	}
+	err := ValidateGitURLForClone("https://dns-rebind.example.com/repo.git", false, stubMixed)
+	if !errors.Is(err, ErrPrivateIPNotAllowed) {
+		t.Errorf("mixed IPs (one private): want ErrPrivateIPNotAllowed, got %v", err)
+	}
+}
+
+// T14 — allowPrivate=true + http:// scheme → still rejected (gates independent)
+func TestValidateGitURL_AllowPrivateDoesNotUnlockHTTP(t *testing.T) {
+	err := ValidateGitURLForClone("http://gitea.internal/org/repo.git", true, stubLookupPublic)
+	if !errors.Is(err, ErrSchemeNotAllowed) {
+		t.Errorf("http:// with allowPrivate=true: want ErrSchemeNotAllowed, got %v", err)
 	}
 }

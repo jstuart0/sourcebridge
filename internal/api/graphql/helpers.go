@@ -90,23 +90,39 @@ func injectTokenIntoURL(rawURL, token string) string {
 // gitCloneCmd builds an exec.Cmd for git clone with optional authentication.
 // For HTTPS repos, it injects the token into the URL.
 // For SSH repos, it sets GIT_SSH_COMMAND to use a specific key if provided.
-func gitCloneCmd(ctx context.Context, repoURL, targetDir, token, sshKeyPath string) *exec.Cmd {
+//
+// CA-312: validates the URL before building the command. Returns
+// (nil, err) when the URL fails the scheme allowlist or IP denylist.
+// The allowPrivate parameter mirrors config.Indexing.AllowPrivateGitHosts.
+func gitCloneCmd(ctx context.Context, repoURL, targetDir, token, sshKeyPath string, allowPrivate bool) (*exec.Cmd, error) {
+	if err := pathutil.ValidateGitURLForClone(repoURL, allowPrivate, nil); err != nil {
+		return nil, fmt.Errorf("repository URL not allowed: %w", err)
+	}
+
 	cloneURL := repoURL
-	if token != "" && (strings.HasPrefix(repoURL, "https://") || strings.HasPrefix(repoURL, "http://")) {
+	if token != "" && strings.HasPrefix(repoURL, "https://") {
 		cloneURL = injectTokenIntoURL(repoURL, token)
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth=1", cloneURL, targetDir)
+	// CA-312: harden clone against redirect-chain bypasses and submodule SSRF.
+	cmd := exec.CommandContext(ctx, "git",
+		"clone",
+		"--depth=1",
+		"-c", "http.followRedirects=false",
+		"--no-recurse-submodules",
+		"-c", "submodule.recurse=false",
+		cloneURL, targetDir,
+	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	if sshKeyPath != "" && strings.HasPrefix(repoURL, "git@") {
+	if sshKeyPath != "" && (strings.HasPrefix(repoURL, "git@") || strings.HasPrefix(repoURL, "ssh://")) {
 		// Codex r2 high fix: shell-safe quoting via gitres.BuildGitSSHCommand.
 		// Belt-and-suspenders against any path that bypassed the
 		// SSHKeyPathValidator (env-bootstrap or pre-R3 plaintext rows).
 		cmd.Env = append(os.Environ(), "GIT_SSH_COMMAND="+gitres.BuildGitSSHCommand(sshKeyPath, "accept-new"))
 	}
-	return cmd
+	return cmd, nil
 }
 
 // gitAskpassHelper returns the absolute path to the git-credential-helper

@@ -7,6 +7,20 @@ import (
 	"testing"
 )
 
+// TestIndexingDefaultsAllowPrivateGitHostsFalse pins the default value of
+// AllowPrivateGitHosts to false. This is a security regression canary:
+// a commit that changes the default to true would allow operators' API pods
+// to reach RFC1918 hosts without explicit opt-in, enabling SSRF.
+func TestIndexingDefaultsAllowPrivateGitHostsFalse(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Indexing.AllowPrivateGitHosts {
+		t.Error("Indexing.AllowPrivateGitHosts must default to false; found true — " +
+			"this is a security regression that enables SSRF on git clone. " +
+			"Only set SOURCEBRIDGE_INDEXING_ALLOW_PRIVATE_GIT_HOSTS=true on " +
+			"single-operator self-hosted instances. See CA-312.")
+	}
+}
+
 func TestSecurityDefaultsCSRFEnabled(t *testing.T) {
 	cfg := Defaults()
 	if !cfg.Security.CSRFEnabled {
