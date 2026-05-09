@@ -10,9 +10,11 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- if .Values.ingress.className }}
-  ingressClassName: {{ .Values.ingress.className }}
-  {{- end }}
+  # CA-318 / otto Medium #21: ingressClassName defaults to "traefik".
+  # On clusters with multiple controllers (e.g. traefik + nginx), an empty
+  # className picks the cluster default which may not be what you expect.
+  # Override via ingress.className in your values file.
+  ingressClassName: {{ .Values.ingress.className | default "traefik" }}
   {{- if or .Values.ingress.tls .Values.global.tls.enabled }}
   tls:
     {{- if .Values.ingress.tls }}
@@ -51,27 +53,11 @@ spec:
                 name: {{ include "sourcebridge.fullname" . }}-api
                 port:
                   number: {{ .Values.api.service.port }}
-          - path: /healthz
-            pathType: Exact
-            backend:
-              service:
-                name: {{ include "sourcebridge.fullname" . }}-api
-                port:
-                  number: {{ .Values.api.service.port }}
-          - path: /readyz
-            pathType: Exact
-            backend:
-              service:
-                name: {{ include "sourcebridge.fullname" . }}-api
-                port:
-                  number: {{ .Values.api.service.port }}
-          - path: /metrics
-            pathType: Exact
-            backend:
-              service:
-                name: {{ include "sourcebridge.fullname" . }}-api
-                port:
-                  number: {{ .Values.api.service.port }}
+          # CA-318: /healthz, /readyz, and /metrics are intentionally NOT
+          # exposed via the Ingress. These are internal observability endpoints.
+          # Prometheus should scrape /metrics via the in-cluster API Service
+          # using a ServiceMonitor (see deploy/kubernetes/base/api-servicemonitor.yaml),
+          # not through the public Ingress.
           # Catch-all — web frontend
           - path: /
             pathType: Prefix
