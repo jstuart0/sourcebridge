@@ -92,6 +92,18 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+          # otto Medium #18: startupProbe gives SurrealDB up to 125s
+          # (5 + 3*40) to complete RocksDB compaction on startup before
+          # liveness kicks in. Without this, the liveness kill-loop can
+          # delay startup further under data load.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            failureThreshold: 40
+            timeoutSeconds: 3
           livenessProbe:
             httpGet:
               path: /health

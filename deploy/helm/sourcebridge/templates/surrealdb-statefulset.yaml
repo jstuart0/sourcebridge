@@ -16,6 +16,13 @@ spec:
       labels:
         {{- include "sourcebridge.surrealdb.selectorLabels" . | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "sourcebridge.surrealdb.serviceAccountName" . }}
+      # CA-316: SurrealDB runs as UID 65532 (non-root). fsGroup ensures the
+      # PVC mount is group-writable after the chown initContainer runs.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
       {{- with .Values.surrealdb.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -28,10 +35,37 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # CA-316: Pre-own the PVC mount for UID 65532 before SurrealDB starts.
+      # Fresh Docker/k8s PVCs default to root ownership; SurrealDB fails
+      # with PermissionDenied on RocksDB dir creation without this chown.
+      # Mirrors deploy/kubernetes/base/surrealdb.yaml:50-63.
+      initContainers:
+        - name: surrealdb-data-chown
+          image: alpine:3.20
+          command: ["chown", "-R", "65532:65532", "/data"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Must run as root (uid 0) to chown; pod-level runAsNonRoot:true
+            # is overridden here for the initContainer only.
+            runAsNonRoot: false
+            runAsUser: 0
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "DAC_OVERRIDE"]
+          {{- if .Values.surrealdb.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- end }}
       containers:
         - name: surrealdb
           image: "{{ .Values.surrealdb.image.repository }}:{{ .Values.surrealdb.image.tag }}"
           imagePullPolicy: {{ .Values.surrealdb.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: false
           args:
             - start
             {{- if .Values.surrealdb.persistence.enabled }}
@@ -56,16 +90,36 @@ spec:
             - name: http
               containerPort: {{ .Values.surrealdb.port }}
               protocol: TCP
+          # CA-225: Use HTTP /health instead of tcpSocket. SurrealDB exposes
+          # a real application-level health endpoint; a TCP probe passes even
+          # when RocksDB initialisation is still in progress.
+          # CA-225 + otto Medium #18: startupProbe gives SurrealDB up to 125s
+          # (5 + 3*40) to complete RocksDB compaction on startup before liveness
+          # kicks in. Without this, the liveness kill-loop delays startup further.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            failureThreshold: 40
+            timeoutSeconds: 3
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: http
             initialDelaySeconds: 15
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.surrealdb.resources | nindent 12 }}
           {{- if .Values.surrealdb.persistence.enabled }}
