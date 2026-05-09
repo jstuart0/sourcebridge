@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -17,6 +18,9 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/clustering"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
+	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
 
 // fakeClusterStore embeds *graph.Store (satisfying GraphStore) and adds
@@ -229,5 +233,157 @@ func TestHandleListClusters_PackagesAndWarnings(t *testing.T) {
 	}
 	if !hasCrossPackage {
 		t.Errorf("expected cross-package-callers warning for TokenStore.Rotate; got %v", c.Warnings)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handleRelabelClusters tests (CA-283)
+// ---------------------------------------------------------------------------
+
+// newRelabelTestServer builds a minimal Server for relabel handler tests.
+// It returns the server and the repoID inserted into the store.
+// When withOrch is true, a real in-memory orchestrator is wired.
+func newRelabelTestServer(t *testing.T, withOrch bool) (srv *Server, repoID string) {
+	t.Helper()
+
+	store := newFakeClusterStore()
+	repo, err := store.Store.CreateRepository("test-repo", "/test")
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	repoID = repo.ID
+
+	// Seed one cluster so the handler has something to relabel.
+	now := time.Now()
+	_ = store.SaveClusters(context.Background(), repoID, []clustering.Cluster{
+		{ID: "cluster:test", RepoID: repoID, Label: "test", Size: 1, CreatedAt: now, UpdatedAt: now},
+	})
+
+	cfg := &config.Config{Edition: "oss"}
+	// Wire a frozen resolver that returns a non-empty provider so the
+	// orchestrator's LLMProvider guard (ErrLLMProviderRequired) doesn't
+	// fire on relabel_clusters enqueues.
+	resolver := resolution.NewFrozenResolver(resolution.Snapshot{Provider: "test-provider"})
+	srv = &Server{cfg: cfg, store: store, llmResolver: resolver}
+
+	if withOrch {
+		orch := orchestrator.New(llm.NewMemStore(), orchestrator.Config{
+			MaxConcurrency:            1,
+			SkipStartupReconciliation: true,
+		})
+		srv.orchestrator = orch
+	}
+	return srv, repoID
+}
+
+// relabelChiRouter wraps the handler in a chi.Router so chi.URLParam("repo_id") works.
+func relabelChiRouter(srv *Server) *chi.Mux {
+	r := chi.NewRouter()
+	r.Post("/api/v1/repositories/{repo_id}/clusters/relabel", srv.handleRelabelClusters)
+	return r
+}
+
+// TestHandleRelabelClusters_HappyPath verifies that a valid request returns 202
+// with a job_id field.
+func TestHandleRelabelClusters_HappyPath_Returns202WithJobID(t *testing.T) {
+	srv, repoID := newRelabelTestServer(t, true /* withOrch */)
+	r := relabelChiRouter(srv)
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/repositories/"+repoID+"/clusters/relabel", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("code = %d, want 202; body: %s", rec.Code, rec.Body.String())
+	}
+	var resp relabelResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.JobID == "" {
+		t.Errorf("expected non-empty job_id in response")
+	}
+}
+
+// TestHandleRelabelClusters_OrchestratorUnavailable verifies that a nil orchestrator
+// returns 503 with a diagnostic message.
+func TestHandleRelabelClusters_OrchestratorUnavailable_Returns503(t *testing.T) {
+	srv, repoID := newRelabelTestServer(t, false /* withOrch */)
+	r := relabelChiRouter(srv)
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/repositories/"+repoID+"/clusters/relabel", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("code = %d, want 503 (orchestrator nil)", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "orchestrator") {
+		t.Errorf("body %q should mention orchestrator", rec.Body.String())
+	}
+}
+
+// TestHandleRelabelClusters_RepoNotFound verifies that a non-existent repoID
+// returns 404.
+func TestHandleRelabelClusters_RepoNotFound_Returns404(t *testing.T) {
+	srv, _ := newRelabelTestServer(t, true /* withOrch */)
+	r := relabelChiRouter(srv)
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/repositories/does-not-exist/clusters/relabel", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("code = %d, want 404", rec.Code)
+	}
+}
+
+// TestHandleRelabelClusters_InvalidJSON_Returns400 verifies that a malformed
+// JSON body returns 400.
+func TestHandleRelabelClusters_InvalidJSON_Returns400(t *testing.T) {
+	srv, repoID := newRelabelTestServer(t, true /* withOrch */)
+	r := relabelChiRouter(srv)
+
+	// A non-empty body that is not valid JSON.
+	body := bytes.NewReader([]byte("not-valid-json"))
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/repositories/"+repoID+"/clusters/relabel", body)
+	req.ContentLength = int64(body.Len())
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("code = %d, want 400", rec.Code)
+	}
+}
+
+// TestHandleRelabelClusters_WithExplicitClusterIDs verifies that passing
+// cluster_ids in the body scopes the relabel to those clusters.
+func TestHandleRelabelClusters_WithExplicitClusterIDs_Returns202(t *testing.T) {
+	srv, repoID := newRelabelTestServer(t, true /* withOrch */)
+	r := relabelChiRouter(srv)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"cluster_ids": []string{"cluster:test"},
+	})
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/repositories/"+repoID+"/clusters/relabel",
+		bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("code = %d, want 202; body: %s", rec.Code, rec.Body.String())
+	}
+	var resp relabelResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.JobID == "" {
+		t.Errorf("expected non-empty job_id")
 	}
 }
