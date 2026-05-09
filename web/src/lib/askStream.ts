@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 SourceBridge Contributors
 
+import { getStoredToken } from "@/lib/auth-token-store";
+import { CSRF_HEADER, getCSRFToken } from "@/lib/csrf-token-store";
+
 /**
  * Client for POST /api/v1/discuss/stream.
  *
@@ -13,6 +16,10 @@
  * fires the callbacks as they arrive. Designed for a React page that
  * wants to update state as each token lands; the caller owns the
  * AbortController so they can cancel on unmount or a fresh submit.
+ *
+ * X-CSRF-Token and Authorization: Bearer are injected on every request so
+ * this POST is covered when Phase 2's CSRF gate goes live on the first
+ * authenticated route group (which already includes /api/v1/discuss/stream).
  */
 
 export interface AskStreamInput {
@@ -47,12 +54,28 @@ export async function askStream(
   input: AskStreamInput,
   handlers: AskStreamHandlers,
 ): Promise<void> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  };
+
+  // Inject Bearer token so cookie-only sessions are not the only auth path.
+  const bearerToken = getStoredToken();
+  if (bearerToken) {
+    headers["Authorization"] = `Bearer ${bearerToken}`;
+  }
+
+  // Inject CSRF token — /api/v1/discuss/stream is in the first CSRF-protected
+  // route group. When Phase 2 tightens the Bearer bypass, this header is what
+  // prevents a 403 for browser-shaped requests.
+  const csrfToken = getCSRFToken();
+  if (csrfToken) {
+    headers[CSRF_HEADER] = csrfToken;
+  }
+
   const res = await fetch("/api/v1/discuss/stream", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-    },
+    headers,
     credentials: "same-origin",
     body: JSON.stringify({
       repository_id: input.repositoryId,

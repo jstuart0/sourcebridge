@@ -12,6 +12,7 @@ import {
   User as UserIcon,
 } from "lucide-react";
 import { clearStoredToken } from "@/lib/auth-token-store";
+import { authFetch } from "@/lib/auth-fetch";
 import { isAdminRole, useCurrentUser } from "@/lib/current-user";
 import { cn } from "@/lib/utils";
 
@@ -86,9 +87,12 @@ export function TopBar({ onMobileNavOpen }: { onMobileNavOpen?: () => void }) {
 
   const handleLogout = useCallback(async () => {
     try {
-      await fetch("/auth/logout", { method: "POST" });
+      // Use authFetch so that Bearer + X-CSRF-Token are injected. When Phase 2's
+      // CSRFFullCoverageEnabled flag is turned on, /auth/logout will require the
+      // CSRF token. authFetch handles the transparent refresh-and-retry path.
+      await authFetch("/auth/logout", { method: "POST" });
     } catch {
-      // ignore
+      // ignore — proceed with local logout regardless of server response
     }
     clearStoredToken();
     router.push("/login");
