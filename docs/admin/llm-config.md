@@ -1729,15 +1729,31 @@ export SOURCEBRIDGE_SECURITY_CSRF_FULL_COVERAGE_ENABLED=true
 # kill -HUP <pid>                      # if your wrapper honours SIGHUP
 ```
 
+### Wait for the rollout to complete
+
+After flipping via Path A or Path B, the Deployment rollout is asynchronous.
+Wait for it to finish before declaring the flip live:
+
+```bash
+kubectl -n sourcebridge rollout status deployment/sourcebridge-api --timeout=5m
+# or, if you flipped via helm:
+helm upgrade sourcebridge sourcebridge-ai/sourcebridge --set api.env.SOURCEBRIDGE_SECURITY_CSRF_FULL_COVERAGE_ENABLED=true --wait
+```
+
+Until `rollout status` reports success on the new replica set, both old
+and new pods may be serving traffic — and only the new pods will honour
+the flag. Skip this wait and you'll see intermittent CSRF rejections that
+look like a real bug but are just stale-replica residue.
+
 ### Rollback
 
 Set the flag back to `false` via the same path used to enable it, then
 restart the API process or roll out the Deployment. All three flip paths
 require a restart:
 
-- **Path A** (Helm): `helm upgrade` triggers a Deployment rollout automatically.
-- **Path B** (`kubectl set env`): Kubernetes rolls out the Deployment automatically when env changes.
-- **Path C** (config.toml / env): you must restart the API process manually.
+- **Path A** (Helm): `helm upgrade` triggers a Deployment rollout automatically. Wait via `--wait` or `kubectl rollout status`.
+- **Path B** (`kubectl set env`): Kubernetes rolls out the Deployment automatically when env changes. Wait via `kubectl rollout status`.
+- **Path C** (config.toml / env): you must fully restart the API process. A simple in-process config reload is NOT sufficient — `csrfProtectionWithName` is wired at router construction and only re-reads the flag on full process start. `kill -HUP <pid>` is correct only if your wrapper interprets HUP as full restart (e.g., `systemd` with `Restart=always` after a SIGHUP-triggered exit). If the wrapper merely reloads config without exec'ing a new process, the flag flip will silently not take effect.
 
 ### Flip verification {#flip-verification}
 
@@ -1788,7 +1804,8 @@ level=WARN msg="csrf rejection" path=/api/v1/admin/config method=POST
 ```
 
 `reason` is one of:
-- `csrf_token_missing` — request had no `X-CSRF-Token` header.
+- `csrf_token_missing` — the CSRF cookie was absent on the request. The `X-CSRF-Token` header may also have been absent; with no cookie there is no value to compare against.
+- `csrf_token_mismatch` — the CSRF cookie was present but the `X-CSRF-Token` header was absent or didn't match. This is the more common rejection during normal operation (stale tab, cookie expiry, or genuine forgery attempt).
 - `csrf_token_mismatch` — header value did not match the CSRF cookie.
 
 `bearer_with_session_cookie` is `true` when the new tightened bypass fired

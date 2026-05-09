@@ -24,6 +24,138 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-09 audit-remediation wave 3: P1 deferred — CSRF admin route group + Bearer-bypass tightening with frontend X-CSRF-Token injection (CA-198 + CA-201)** — 4 commits, `19dcd6b..(reconcile)`.
+
+Closes the two security findings deferred from wave-1 P1: CA-198 (CRITICAL — no CSRF
+middleware on admin route group) and CA-201 (HIGH — Bearer-bypass too permissive,
+skipped CSRF whenever an Authorization header was present, even when a session cookie
+also accompanied the request). Wave-1 codex r1 had surfaced two Criticals on the
+original combined plan: the frontend hadn't been designed to inject `X-CSRF-Token`
+on every browser write (so backend-only fix would 403 every browser mutation) and a
+cookie-name confusion bug (the original snippet checked the CSRF cookie name, not the
+session cookie name, in the bypass logic). This campaign solves both.
+
+Phase 1 (frontend, ruby, `19dcd6b`) — new `web/src/lib/csrf-token-store.ts` module with
+synchronous cookie read + on-demand `GET /api/v1/csrf-token` refresh (single-flight via
+in-module `Promise<string|undefined> | null` cleared in `finally`; bare `fetch` never
+`authFetch` to prevent retry recursion; SSR-safe; 5s AbortController timeout). Header
+injection wired into `authFetch`, URQL `fetch:` wrapper, `askStream`, `telemetry`
+(`sendBeacon` → `fetch keepalive`), and `TopBar.tsx` logout. ReadableStream guard skips
+retry on stream bodies. Single retry per request, no recursion. Comprehensive grep
+audit embedded as a comment block at the top of `csrf-token-store.ts` classifies every
+browser fetch path.
+
+Phase 2 (backend, jackson, `d684d27`) — `csrfProtectionWithName(csrfCookieName,
+sessionCookieName string, fullCoverage bool)` is the new three-parameter signature.
+The third parameter is the runtime gate: with `fullCoverage=false` the middleware is
+**bit-exact backwards-compat with today's code** (Bearer alone bypasses); with
+`fullCoverage=true` the bypass requires no session cookie present AND the second
+authenticated route group + auth-helper routes (`/auth/logout`,
+`/auth/change-password`) get gated. The flag `Config.Security.CSRFFullCoverageEnabled`
+defaults `false` so a single PR can ship both phases harmlessly; the operator flips
+the flag to enable the new behaviors. All three behaviors flip atomically. New tests
+delete `TestCSRFMiddlewareSkipsBearerAuth` (one-arg signature is gone) and add
+behavior tests for cookie-name distinct-by-name (using real
+`s.jwtMgr.SessionCookieName()` / `CSRFCookieName()` accessors), bearer+session
+mismatched-token, flag-off-preserves-today-behavior, flag-off-second-group-no-op-with-
+Phase1-header.
+
+Reconcile pass (`bfc5622` — backend + frontend) — three diff reviewers (ian, codex r2,
+xander) all flagged the same Critical: backend `csrfReject` was emitting
+`{"error":"CSRF token missing"}` (title case + space) but the frontend's `isCsrfError`
+detection looked for `csrf_token_missing` (lowercase + underscore), so the
+refresh-and-retry path was dead code in production. Backend now emits machine-readable
+lowercase-underscore codes, sets `Content-Type: application/json`, exposes the new
+flag in `/api/v1/admin/config`, and emits a `security_csrf_full_coverage_state`
+startup log line in `cli/serve.go`. Frontend tests now use real `Response` constructors
+with the canonical body shape, the URQL test seam is `_csrfAwareFetch` exported for
+direct coverage, conditional `if (fetchMock.mock.calls.length > 0)` assertions are
+unconditional `expect(fetchMock).toHaveBeenCalled()`. New tests cover the
+xander-CSRF-M1 Authorization-header-on-retry contract and the xander-CSRF-M2
+missing-cookie + 403 + refresh + retry end-to-end shape.
+
+Documentation polish (this entry's commit) — `docs/admin/llm-config.md` flip runbook
+gets explicit `kubectl rollout status` / `helm upgrade --wait` instructions; the
+`kill -HUP` example is tightened to call out that HUP is only correct if the wrapper
+interprets it as a full restart (the flag is startup-wired). The `csrf_token_missing`
+vs `csrf_token_mismatch` reason descriptions are corrected to reflect that the
+former fires on missing cookie, the latter on missing-or-mismatched header.
+
+Load-bearing constraints for future-Claude:
+
+- **`csrfProtectionWithName` is THREE-parameter and never two.** The signature
+  `(csrfCookieName, sessionCookieName string, fullCoverage bool)` is the entire
+  defense against the cookie-name confusion bug that bit the wave-1 P1 plan.
+  Collapsing to two parameters would re-introduce that risk; never do it. The
+  third parameter is the wiring-time decision of which behavior the middleware
+  has, NOT a closure read of `s.cfg` — that's intentional so unit tests can pin
+  behavior with a single call without a `*Server` fixture.
+- **`Config.Security.CSRFFullCoverageEnabled` defaults `false`.** Pinned by
+  `TestSecurityDefaultsCSRFFullCoverageEnabled` at `internal/config/config_test.go`.
+  Changing the default to `true` would activate the Bearer-bypass tightening + admin
+  route gate on deploy without operator opt-in, breaking every browser write at
+  process restart for installations that haven't yet rolled out the Phase-1
+  frontend bundle. Don't flip the default — operators flip per the runbook.
+- **The flag is wired at router construction time, NOT read per-request.** Flipping
+  the env var or config requires a full API process restart / Kubernetes Deployment
+  rollout. The runbook in `docs/admin/llm-config.md` describes the rollout-wait
+  ritual; future code that reads the flag dynamically per request would invalidate
+  the runbook. Keep the wiring at construction time, or fully replace the runbook.
+- **`/auth/login` and `/auth/setup` are intentionally CSRF-exempt** — no session
+  exists at call time, and the routes are outside the protected groups. Don't
+  add CSRF to login; it would break the bootstrap flow. `/auth/logout` is
+  CSRF-gated (when the flag is on) but stays public — no auth middleware — so a
+  user with an expired session can still clear their browser state.
+- **`/auth/change-password` IS gated when the flag is on** — it sits inside an
+  existing rate-limited + auth group, with `r.Use(csrfProtectionWithName(...))`
+  added conditionally. This protects against a CSRF-driven password change.
+- **CSRF cookie name probe in `web/src/lib/csrf-token-store.ts:CSRF_COOKIE_NAMES`
+  must stay in sync with backend `JWTManager.CSRFCookieName()` derivation at
+  `internal/auth/jwt.go:48-60`.** The backend derives `sourcebridge_csrf` for
+  the OSS edition and `sourcebridge_<edition>_csrf` for non-OSS. The frontend
+  array currently probes `["sourcebridge_csrf", "sourcebridge_enterprise_csrf"]`.
+  If a third edition lands, this list MUST extend OR the fast cookie-read path
+  silently falls back to GET-on-403 for that edition. There's a comment in the
+  module documenting this sync contract — preserve it.
+- **Backend response body for CSRF rejection is `{"error":"csrf_token_missing"}`
+  / `{"error":"csrf_token_mismatch"}` — lowercase + underscore.** Title-case +
+  space breaks the frontend retry detection. Pinned by
+  `TestCSRFMiddlewareRejectsMissingHeader` and `TestCSRFMiddlewareRejectsMismatch`
+  body assertions in `csrf_test.go`. Don't change the strings without updating
+  the frontend `isCsrfError()` checks in lockstep.
+- **`csrfReject` sets `Content-Type: application/json`** — using `http.Error()`
+  would set `text/plain` and violate the JSON contract; the frontend
+  `response.json()` parse may work in browsers anyway, but strict HTTP clients
+  / proxies could fail. Don't revert.
+- **The drop counter is `atomic.Int64` and NEVER registered as a Prometheus
+  metric.** It's an internal log-rate gate only (10/sec via in-package
+  `time.Ticker`). Exposing it via `/metrics` (which is publicly scrapable per
+  `router.go:803`) creates a covert oracle for the CSRF gate state — xander
+  CSRF-5. If a future maintainer wants CSRF rejection metrics, aggregate by
+  `reason` only (no per-IP / per-path / per-session-id labels).
+- **`refreshCSRFToken()` MUST use bare `fetch`, never `authFetch`.** Calling
+  `authFetch` from inside the refresh would create infinite recursion when the
+  refresh itself returns 403. The bare-`fetch` rule is enforced by code review,
+  not type system; preserve it.
+- **`{"error":"csrf_token_missing"}` and `{"error":"csrf_token_mismatch"}` log
+  reasons are NOT one-to-one with HTTP request shapes.** Codex r2b L1 noted the
+  asymmetry: a request with NO cookie emits `csrf_token_missing`; a request
+  with a cookie but no/wrong header emits `csrf_token_mismatch`. Both are
+  recoverable via the frontend's transparent retry. The runbook documents this;
+  if you're debugging a specific 403, check the `bearer_with_session_cookie`
+  field in the structured log to know whether the request was browser-shaped.
+- **Phase 1 + Phase 2 ship in one PR; the flag flip is a separate operator
+  action.** The earlier "≥24h between PRs" plan was social, not technical;
+  the flag-default-false approach replaces it with a hard gate. Future plans
+  involving this kind of "deploy frontend before backend gate" coordination
+  should use the same flag-default-false pattern; the social-gap pattern is
+  unenforceable in the Argo Image Updater pipeline.
+
+Plan: `thoughts/shared/plans/active-2026-05-08-deliver-csrf-admin-frontend-injection.md`
+Codex r1: `.codex-r1-plan.md` (verdict iterate); r1b: `.codex-r1b-plan.md` (verdict iterate, mechanical signature alignment); r2: `.codex-r2-diff.md` (verdict iterate, error-string mismatch + restart docs); r2b: `.codex-r2b-diff.md` (verdict iterate, two non-blocking polish items)
+Reviews: bob (`.bob.md`), xander (inline), tessa (inline), librarian (inline NEW verdict)
+Validation: valerie FIXES REQUIRED initially (2 punch-list items: TestSecurityDefaultsCSRFFullCoverageEnabled + this CLAUDE.md entry); both addressed in this commit
+
 **2026-05-08 audit-remediation wave 2: P5 + P9 + P2 (CA-239..CA-250, CA-304, CA-200)** — 3 commits, `2309b60..b4d7a08`.
 Continues the master remediation plan. Closes 14 of the remaining 32 Critical+High audit
 findings: 12 HIGH UX (P5), 1 CRITICAL data-loss (P9), 1 HIGH security cipher upgrade (P2).

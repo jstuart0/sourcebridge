@@ -14,6 +14,13 @@ func TestSecurityDefaultsCSRFEnabled(t *testing.T) {
 	}
 }
 
+func TestSecurityDefaultsCSRFFullCoverageEnabled(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Security.CSRFFullCoverageEnabled {
+		t.Error("Security.CSRFFullCoverageEnabled must default to false; found true — would activate the broader CSRF gate (admin route group + Bearer-bypass tightening + auth-helper-route gating) on deploy without operator opt-in. Phase-1 frontend coverage must be confirmed live before this flag is flipped on per the rollout runbook in docs/admin/llm-config.md.")
+	}
+}
+
 func TestDefaults(t *testing.T) {
 	cfg := Defaults()
 	if cfg.Server.HTTPPort != 8080 {
