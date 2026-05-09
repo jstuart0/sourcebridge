@@ -11,6 +11,7 @@ import (
 
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 	"github.com/sourcebridge/sourcebridge/internal/events"
+	apimiddleware "github.com/sourcebridge/sourcebridge/internal/api/middleware"
 )
 
 type setupRequest struct {
@@ -185,18 +186,61 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve tenantID for this connection. GetTenantID returns "default" for
+	// OSS single-tenant (tenantID == "" is normalized to "default" by the helper).
+	tenantID := apimiddleware.GetTenantID(r.Context())
+	isOSS := tenantID == "" || tenantID == "default"
+
+	// Multi-tenant: ensure the repo-access checker is available.
+	// Fail-closed (R7): if repoChecker is nil and the tenant is non-default,
+	// we cannot safely filter events — return 503.
+	if !isOSS && s.repoChecker == nil {
+		http.Error(w, `{"error":"tenant filtering unconfigured"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	// Build the allowed-repo set once for this connection so the handler
+	// closure doesn't re-query on every event.
+	var allowedRepos map[string]bool
+	if !isOSS {
+		repoIDs, err := s.repoChecker.GetTenantRepos(tenantID)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		allowedRepos = make(map[string]bool, len(repoIDs))
+		for _, id := range repoIDs {
+			allowedRepos[id] = true
+		}
+	}
+
 	// Send initial connected event
-	w.Write([]byte("event: connected\ndata: {\"status\":\"connected\"}\n\n"))
+	w.Write([]byte("event: connected\ndata: {\"status\":\"connected\"}\n\n")) //nolint:errcheck
 	flusher.Flush()
 
-	// Subscribe to all events via wildcard
+	// Subscribe to all events via wildcard. The returned handle is used by
+	// defer Unsubscribe to prevent subscription leaks (X-L2 fix).
 	ch := make(chan events.Event, 100)
-	s.eventBus.Subscribe("*", func(e events.Event) {
+	sub := s.eventBus.Subscribe("*", func(e events.Event) {
+		// Tenant filter: OSS single-tenant gets all events; multi-tenant only
+		// gets events whose repo_id (or repository_id) is in allowedRepos.
+		// Events with no repo identifier are dropped defensively on multi-tenant
+		// to avoid cross-tenant leaks. (Decision 7 / CA-205)
+		if !isOSS {
+			repoID := sseRepoIDFromEvent(e)
+			if repoID == "" || !allowedRepos[repoID] {
+				return
+			}
+		}
 		select {
 		case ch <- e:
 		default: // drop if buffer full
 		}
 	})
+	// Unsubscribe runs before the channel is effectively abandoned, ensuring
+	// no goroutine holds a reference to the closed-over ch after the handler
+	// returns. (X-L2 fix)
+	defer s.eventBus.Unsubscribe(sub)
 
 	heartbeat := time.NewTicker(30 * time.Second)
 	defer heartbeat.Stop()
@@ -214,4 +258,18 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// sseRepoIDFromEvent extracts the repo identifier from an event's Data map.
+// It tries "repo_id" first (the canonical key from Phase 4 backfill) and falls
+// back to "repository_id" for events that predate the backfill (e.g.
+// EventTrashBulkChanged, EventTrashCountChanged).
+func sseRepoIDFromEvent(e events.Event) string {
+	if v, ok := e.Data["repo_id"].(string); ok && v != "" {
+		return v
+	}
+	if v, ok := e.Data["repository_id"].(string); ok && v != "" {
+		return v
+	}
+	return ""
 }

@@ -236,6 +236,19 @@ func (r *Resolver) restoreFromTrash(
 		opts.NewKey = *rename
 	}
 
+	// Pre-load the trash entry to capture its RepositoryID before the restore
+	// call. RestoreResult has no repository field (Decision 9 / CA-205).
+	// This read happens before RestoreFromTrash so that a non-existent entry
+	// fails early with a clear message (T45 pin).
+	trashEntry, entryErr := r.TrashStore.Get(ctx, mapped, id)
+	if entryErr != nil {
+		return nil, entryErr
+	}
+	if trashEntry == nil {
+		return nil, fmt.Errorf("%s %s is not in trash", mapped, id)
+	}
+	restoreRepoID := trashEntry.RepositoryID
+
 	result, err := r.TrashStore.RestoreFromTrash(ctx, mapped, id, opts)
 	if err != nil {
 		var conflict *trash.ConflictError
@@ -249,12 +262,12 @@ func (r *Resolver) restoreFromTrash(
 		trash.ConflictsTotal.Add(1) // RENAME implies a conflict was resolved
 	}
 	r.publishEvent(events.EventTrashChanged, map[string]interface{}{
-		"action": "restored",
-		"type":   string(mapped),
-		"id":     id,
+		"action":  "restored",
+		"type":    string(mapped),
+		"id":      id,
+		"repo_id": restoreRepoID,
 	})
-	// Count event is best-effort — we don't know repo without a lookup;
-	// callers refresh the count view on any trash_changed.
+	// Count event is best-effort — repo_id now backfilled above.
 	return &RestoreResult{
 		RestoredID: result.RestoredID,
 		BatchSize:  result.BatchSize,
@@ -305,10 +318,13 @@ func (r *Resolver) permanentlyDelete(ctx context.Context, t TrashableType, id st
 		return false, err
 	}
 	trash.PermanentDeletesTotal.Add(1)
+	// Backfill repo_id using the entry already pre-loaded above for the
+	// ownership check (CA-205 / Decision 9).
 	r.publishEvent(events.EventTrashChanged, map[string]interface{}{
-		"action": "purged",
-		"type":   string(mapped),
-		"id":     id,
+		"action":  "purged",
+		"type":    string(mapped),
+		"id":      id,
+		"repo_id": entry.RepositoryID,
 	})
 	return true, nil
 }

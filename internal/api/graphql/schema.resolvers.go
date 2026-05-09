@@ -563,15 +563,27 @@ func (r *mutationResolver) VerifyLink(ctx context.Context, linkID string, verifi
 	}
 	link := r.getStore(ctx).VerifyLink(linkID, verified, "graphql-user")
 	if link == nil {
+		// Phase 3 (CA-203) VerifyLink returns nil for cross-tenant links.
+		// Do NOT publish EventLinkVerified/Rejected here — that would be a
+		// cross-tenant SSE leak. The nil return is the dual-layer defense
+		// (storage gate → publish-site nil check). T44 pins this invariant.
 		return nil, fmt.Errorf("link not found: %s", linkID)
 	}
 	if r.ReqBooster != nil && link.RepoID != "" {
 		r.ReqBooster.Invalidate(link.RepoID)
 	}
+	// Backfill repo_id on the event payload so the Phase 4 SSE tenant filter
+	// can route the event to the correct subscriber (CA-205).
 	if verified {
-		r.Resolver.publishEvent(events.EventLinkVerified, map[string]interface{}{"link_id": linkID})
+		r.Resolver.publishEvent(events.EventLinkVerified, map[string]interface{}{
+			"link_id": linkID,
+			"repo_id": link.RepoID,
+		})
 	} else {
-		r.Resolver.publishEvent(events.EventLinkRejected, map[string]interface{}{"link_id": linkID})
+		r.Resolver.publishEvent(events.EventLinkRejected, map[string]interface{}{
+			"link_id": linkID,
+			"repo_id": link.RepoID,
+		})
 	}
 	return mapLinkWithRelations(link, r.getStore(ctx)), nil
 }

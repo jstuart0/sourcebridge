@@ -14,10 +14,27 @@ import (
 // Handler is a function that handles events.
 type Handler func(Event)
 
+// Subscription is an opaque handle returned by Subscribe. Pass it to
+// Unsubscribe to deregister the handler. The zero value is invalid.
+type Subscription struct {
+	eventType string
+}
+
 // Bus is an in-process event bus.
+//
+// Lock semantics (Decision 8 / CA-205):
+//   - Subscribe and Unsubscribe take mu.Lock().
+//   - Publish takes mu.RLock(), snapshots handlers into a local slice,
+//     releases the lock, then dispatches goroutines from the snapshot.
+//     The lock is never held across goroutine dispatch; handlers are
+//     never called while the lock is held, avoiding deadlock.
+//   - Callers MUST NOT call Unsubscribe from within a handler — the
+//     handler runs outside the lock and Unsubscribe takes mu.Lock(),
+//     which would be fine structurally, but the behavior is undefined
+//     as to whether the current event is the last one dispatched.
 type Bus struct {
 	mu       sync.RWMutex
-	handlers map[string][]Handler
+	handlers map[string]map[*Subscription]Handler
 	wg       sync.WaitGroup
 	closed   atomic.Bool
 }
@@ -25,15 +42,34 @@ type Bus struct {
 // NewBus creates a new event bus.
 func NewBus() *Bus {
 	return &Bus{
-		handlers: make(map[string][]Handler),
+		handlers: make(map[string]map[*Subscription]Handler),
 	}
 }
 
-// Subscribe registers a handler for an event type.
-func (b *Bus) Subscribe(eventType string, handler Handler) {
+// Subscribe registers a handler for an event type and returns a
+// *Subscription handle. Pass the handle to Unsubscribe to deregister.
+// Handlers subscribed with "*" receive all events.
+func (b *Bus) Subscribe(eventType string, handler Handler) *Subscription {
+	sub := &Subscription{eventType: eventType}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.handlers[eventType] = append(b.handlers[eventType], handler)
+	if b.handlers[eventType] == nil {
+		b.handlers[eventType] = make(map[*Subscription]Handler)
+	}
+	b.handlers[eventType][sub] = handler
+	return sub
+}
+
+// Unsubscribe removes the handler associated with sub. It is idempotent:
+// calling Unsubscribe twice on the same handle is a no-op. Calling
+// Unsubscribe on a nil handle is also a no-op.
+func (b *Bus) Unsubscribe(sub *Subscription) {
+	if sub == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.handlers[sub.eventType], sub)
 }
 
 // Publish emits an event to all registered handlers.
@@ -43,10 +79,24 @@ func (b *Bus) Publish(event Event) {
 		return
 	}
 	b.mu.RLock()
+	// Snapshot handlers under RLock to avoid holding the lock while
+	// dispatching goroutines (which could call Unsubscribe → deadlock).
+	// Deduplicate by pointer in case both topic and "*" match.
+	seen := make(map[*Subscription]bool)
 	handlers := make([]Handler, 0, len(b.handlers[event.Type])+len(b.handlers["*"]))
-	handlers = append(handlers, b.handlers[event.Type]...)
+	for sub, h := range b.handlers[event.Type] {
+		if !seen[sub] {
+			seen[sub] = true
+			handlers = append(handlers, h)
+		}
+	}
 	if event.Type != "*" {
-		handlers = append(handlers, b.handlers["*"]...)
+		for sub, h := range b.handlers["*"] {
+			if !seen[sub] {
+				seen[sub] = true
+				handlers = append(handlers, h)
+			}
+		}
 	}
 	b.mu.RUnlock()
 
