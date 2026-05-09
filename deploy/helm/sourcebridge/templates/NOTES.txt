@@ -5,6 +5,18 @@
   Namespace: {{ .Release.Namespace }}
   Version:   {{ .Chart.AppVersion }}
 
+{{- if or (eq .Values.api.image.tag "latest") (eq .Values.web.image.tag "latest") (eq .Values.worker.image.tag "latest") }}
+
+  WARNING: One or more image tags are set to "latest".
+  This disables reproducible deployments — pod restarts may pull a different
+  image version, and "helm rollback" becomes meaningless.
+  Pin to a specific version tag (e.g. "0.2.0") in your values file:
+
+    api.image.tag: "0.2.0"
+    web.image.tag: "0.2.0"
+    worker.image.tag: "0.2.0"
+{{- end }}
+
 == Components ==
 
   API Server:    {{ include "sourcebridge.fullname" . }}-api
@@ -75,5 +87,15 @@
 
   # Run connection test
   helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+== Prometheus Metrics ==
+
+  /metrics is NOT exposed via the Ingress (CA-318). Prometheus should scrape
+  the API's metrics endpoint via the in-cluster Service using a ServiceMonitor:
+
+    kubectl apply -f deploy/kubernetes/base/api-servicemonitor.yaml
+
+  Adjust the ServiceMonitor's selector labels to match your Prometheus Operator
+  instance before applying.
 
 For documentation: https://github.com/sourcebridge/sourcebridge
