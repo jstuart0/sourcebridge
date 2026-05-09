@@ -163,12 +163,13 @@ services:
       - SOURCEBRIDGE_WORKER_SURREAL_USER=${SURREAL_USER:-root}
       - SOURCEBRIDGE_WORKER_SURREAL_PASS=${SURREAL_PASS:-root}
       - SOURCEBRIDGE_WORKER_GRPC_AUTH_SECRET=${SOURCEBRIDGE_GRPC_SECRET:-dev-shared-secret}
-      # SEC-11: enable gRPC reflection in dev so grpcurl / grpc-ui work locally.
-      # Production deployments leave this unset → reflection is off.
-      # CA-317: dev-default true (verbose worker logging is useful in dev
-      # compose), but operator-overridable. Set SOURCEBRIDGE_WORKER_DEBUG=false
-      # in .env when running this compose against a non-dev workload.
+      # SEC-11 / CA-202: gRPC reflection AND verbose logging.
+      # Both env vars default to true in dev so grpcurl / grpc-ui work locally.
+      # Reflection requires BOTH flags set (AND-gate); setting only DEBUG
+      # enables verbose logs but not reflection — set to false in .env when
+      # running against a non-dev workload.
       - SOURCEBRIDGE_WORKER_DEBUG=${SOURCEBRIDGE_WORKER_DEBUG:-true}
+      - SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED=${SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED:-true}
 
       # ─── LLM Provider Configuration ──────────────────────────────────
       #

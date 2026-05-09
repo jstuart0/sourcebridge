@@ -142,13 +142,19 @@ services:
       - SOURCEBRIDGE_WORKER_LLM_API_KEY=${SOURCEBRIDGE_LLM_API_KEY:-not-needed}
       - SOURCEBRIDGE_WORKER_EMBEDDING_PROVIDER=${SOURCEBRIDGE_EMBEDDING_PROVIDER:-ollama}
       - SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL=${SOURCEBRIDGE_EMBEDDING_BASE_URL:-${SOURCEBRIDGE_LLM_BASE_URL:-http://host.docker.internal:11434}}
-      # SEC-11: enable gRPC reflection in dev so grpcurl / grpc-ui work locally.
-      # Production deployments leave this unset → reflection is off.
-      # CA-317: hub deploy default false (production-shaped); operator can
-      # opt in to verbose logging via SOURCEBRIDGE_WORKER_DEBUG=true in .env.
-      # Was hardcoded true — that left every Docker-Hub install logging at
-      # debug verbosity by default with no way to opt out.
+      # SEC-11 / CA-202: debug logging and gRPC reflection.
+      # SECURITY: reflection is OFF in hub/production by default.
+      # Reflection exposes the full gRPC service schema to unauthenticated callers.
+      # The AND-gate requires BOTH SOURCEBRIDGE_WORKER_DEBUG=true AND
+      # SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED=true to be set — neither is
+      # set here, so reflection is provably off in hub deploys.
+      # CA-317: hub default false (production-shaped); operator can opt in to
+      # verbose logging via SOURCEBRIDGE_WORKER_DEBUG=true in .env without
+      # inadvertently enabling reflection.
       - SOURCEBRIDGE_WORKER_DEBUG=${SOURCEBRIDGE_WORKER_DEBUG:-false}
+      # SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED intentionally omitted —
+      # defaults to false in the worker; reflection stays off even if an
+      # operator sets DEBUG=true for verbose logs.
     depends_on:
       surrealdb:
         condition: service_healthy

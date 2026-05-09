@@ -77,6 +77,12 @@ spec:
             - containerPort: 50051
               name: grpc
               protocol: TCP
+          # SEC-11 / CA-202: gRPC reflection requires BOTH
+          #   SOURCEBRIDGE_WORKER_DEBUG=true AND
+          #   SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED=true.
+          # Neither variable is set in this base manifest or the Helm chart;
+          # production reflection is provably off. Setting DEBUG=true in an
+          # operator overlay enables verbose logs only — not reflection.
           envFrom:
             - configMapRef:
                 name: sourcebridge-config

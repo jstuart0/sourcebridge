@@ -146,13 +146,38 @@ class WorkerConfig(BaseSettings):
     # Test mode
     test_mode: bool = False
 
-    # Debug mode: gates gRPC server reflection (SEC-11).
+    # Debug mode: gates verbose logging and (in combination with
+    # worker_grpc_reflection_enabled) gRPC server reflection (SEC-11).
     # When False (the default), grpc-reflection is not registered — the
     # service schema is not advertised to unauthenticated callers, which
     # prevents enumeration of internal RPC methods in production.
-    # Set SOURCEBRIDGE_WORKER_DEBUG=true in dev compose to keep grpcurl
-    # working locally.
+    # Set SOURCEBRIDGE_WORKER_DEBUG=true in dev compose to keep verbose
+    # logging working locally.
+    #
+    # NOTE: setting debug=true ALONE does NOT enable reflection.
+    # Reflection requires BOTH debug=true AND grpc_reflection_enabled=true.
+    # Precedence: reflection_enabled = debug AND grpc_reflection_enabled.
     debug: bool = False
+
+    # Explicit opt-in for gRPC server reflection (SEC-11 / CA-202).
+    # Reflection advertises the full service schema to any caller, enabling
+    # unauthenticated method enumeration. This flag is a second, independent
+    # gate so that operators who set SOURCEBRIDGE_WORKER_DEBUG=true for verbose
+    # logs do NOT accidentally expose the proto schema.
+    #
+    # To enable reflection (e.g. for grpcurl in a local dev environment):
+    #   SOURCEBRIDGE_WORKER_DEBUG=true
+    #   SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED=true
+    #
+    # Either flag alone is insufficient — the AND-gate is enforced at startup.
+    # In production neither flag should be set; the Helm chart and k8s base
+    # manifests do not inject either variable (verified: grep returns zero
+    # matches in deploy/helm/ and deploy/kubernetes/).
+    #
+    # Field is named grpc_reflection_enabled (not worker_grpc_reflection_enabled)
+    # so that the env_prefix "SOURCEBRIDGE_WORKER_" produces the correct
+    # env var name: SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED.
+    grpc_reflection_enabled: bool = False
 
     # Operator-declared upstream LLM parallelism.
     # 0 = unknown/unbounded (default; Go orchestrator does not clamp).

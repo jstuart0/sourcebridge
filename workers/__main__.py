@@ -316,12 +316,17 @@ async def serve() -> None:
     await health_servicer.set("sourcebridge.contracts.v1.ContractsService", health_pb2.HealthCheckResponse.SERVING)
     await health_servicer.set("sourcebridge.common.v1.VersionService", health_pb2.HealthCheckResponse.SERVING)
 
-    # --- Server reflection (SEC-11) ---
+    # --- Server reflection (SEC-11 / CA-202) ---
     # gRPC reflection advertises the full service schema to any caller,
     # enabling unauthenticated method enumeration. It is useful for local
-    # development (grpcurl, grpc-ui) but should be off in production.
-    # Gate it behind WorkerConfig.debug (SOURCEBRIDGE_WORKER_DEBUG env var).
-    if config.debug:
+    # development (grpcurl, grpc-ui) but must be off in production.
+    #
+    # DUAL-KEY GATE: both SOURCEBRIDGE_WORKER_DEBUG=true AND
+    # SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED=true must be set.
+    # Setting only WORKER_DEBUG=true enables verbose logging but does NOT
+    # enable reflection — this prevents operators from accidentally exposing
+    # the proto schema when they flip the debug flag for log verbosity.
+    if config.debug and config.grpc_reflection_enabled:
         service_names = (
             reasoning_pb2.DESCRIPTOR.services_by_name["ReasoningService"].full_name,
             linking_pb2.DESCRIPTOR.services_by_name["LinkingService"].full_name,
@@ -334,7 +339,16 @@ async def serve() -> None:
             reflection.SERVICE_NAME,
         )
         reflection.enable_server_reflection(service_names, server)
-        log.info("grpc_reflection_enabled", reason="SOURCEBRIDGE_WORKER_DEBUG=true")
+        log.info(
+            "grpc_reflection_enabled",
+            reason="SOURCEBRIDGE_WORKER_DEBUG=true AND SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED=true",
+        )
+    else:
+        log.info(
+            "grpc_reflection_disabled",
+            debug=config.debug,
+            reflection_enabled=config.grpc_reflection_enabled,
+        )
 
     # --- Start listening ---
     # mTLS (slice 4 of plan 2026-04-29-workspace-llm-source-of-truth-r2.md).
