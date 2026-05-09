@@ -1648,6 +1648,13 @@ Both behaviors are gated on a single operator flag that defaults to `false`
 **Config key**: `security.csrf_full_coverage_enabled`
 **Default**: `false`
 
+> **Restart required.** `CSRFFullCoverageEnabled` is wired at router construction
+> time, not read per-request. Flipping the flag — by any path below — requires an
+> API process restart or a Kubernetes Deployment rollout before the change takes
+> effect. The startup log line `security_csrf_full_coverage_state` (see
+> [Verification](#flip-verification) below) is the authoritative confirmation that
+> the running process reflects the intended value.
+
 When `false` (default):
 - Bearer alone bypasses CSRF (pre-CA-201 behavior, unchanged).
 - The admin route group (`/api/v1/admin/*`, `/api/v1/tokens/*`, etc.) has no CSRF middleware.
@@ -1717,12 +1724,44 @@ Or set the env var and restart the API process:
 
 ```bash
 export SOURCEBRIDGE_SECURITY_CSRF_FULL_COVERAGE_ENABLED=true
+# Restart is mandatory — the flag is startup-wired:
+# systemctl restart sourcebridge-api   # systemd
+# kill -HUP <pid>                      # if your wrapper honours SIGHUP
 ```
 
 ### Rollback
 
-Set the flag back to `false` via the same path used to enable it. No
-redeploy is required for paths B and C; path A requires `helm upgrade`.
+Set the flag back to `false` via the same path used to enable it, then
+restart the API process or roll out the Deployment. All three flip paths
+require a restart:
+
+- **Path A** (Helm): `helm upgrade` triggers a Deployment rollout automatically.
+- **Path B** (`kubectl set env`): Kubernetes rolls out the Deployment automatically when env changes.
+- **Path C** (config.toml / env): you must restart the API process manually.
+
+### Flip verification {#flip-verification}
+
+After any flip + restart, grep the API startup logs to confirm the flag value:
+
+```bash
+kubectl -n sourcebridge logs deployment/sourcebridge-api | grep security_csrf_full_coverage_state
+```
+
+Expected output:
+
+```
+level=INFO msg="security_csrf_full_coverage_state" enabled=true event=security_csrf_full_coverage_state
+```
+
+If the line is absent, the process did not restart — the old binary is still running with the old wiring.
+
+You can also verify via the admin API (no kubectl required):
+
+```bash
+curl -s -H "Authorization: Bearer <admin-token>" https://your-instance/api/v1/admin/config \
+  | jq '.security.csrf_full_coverage_enabled'
+# → true
+```
 
 ### Watch window and expected log volume
 

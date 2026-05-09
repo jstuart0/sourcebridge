@@ -69,6 +69,13 @@ func TestCSRFMiddlewareRejectsMismatch(t *testing.T) {
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("expected 403 Forbidden for mismatched CSRF token, got %d", rr.Code)
 	}
+	wantBody := `{"error":"csrf_token_mismatch"}`
+	if got := rr.Body.String(); got != wantBody {
+		t.Errorf("expected body %q, got %q", wantBody, got)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
 }
 
 // TestCSRFMiddlewareAcceptsMatch verifies the middleware passes a request
@@ -107,6 +114,13 @@ func TestCSRFMiddlewareRejectsMissingHeader(t *testing.T) {
 
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("expected 403 Forbidden for missing CSRF header, got %d", rr.Code)
+	}
+	wantBody := `{"error":"csrf_token_mismatch"}`
+	if got := rr.Body.String(); got != wantBody {
+		t.Errorf("expected body %q, got %q", wantBody, got)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
 	}
 }
 
@@ -298,7 +312,9 @@ func TestCSRFFlagOffSecondGroupNotGated(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/config", nil)
 	req.Header.Set("Authorization", "Bearer api-token")
 	req.AddCookie(&http.Cookie{Name: jwtMgr.SessionCookieName(), Value: "sess"})
-	// no X-CSRF-Token header
+	// Phase 1 frontend sends this header on all requests; pin the contract that
+	// it is harmless on ungated routes (flag off = no middleware on this group).
+	req.Header.Set("X-CSRF-Token", "phase1-extra-header-must-be-harmless")
 
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)

@@ -32,9 +32,16 @@
 // EventSource (sse.ts) — GET-only by protocol spec; no CSRF needed.
 //   GET /api/v1/events?token=… uses query-param auth, outside the CSRF scope.
 
-// Cookie names — probe both OSS and enterprise variants. The backend's
-// JWTManager.CSRFCookieName() is the single source of truth for the server-set
-// name; this list must match. If a third edition lands, extend the probe order.
+// Cookie names — probe both OSS and enterprise variants.
+//
+// SYNC CONTRACT: this array MUST stay in sync with the backend's
+// JWTManager.CSRFCookieName() derivation at internal/auth/jwt.go:48-60.
+// The backend sets the name to "sourcebridge_csrf" for the OSS edition and
+// "sourcebridge_<edition>_csrf" for any other edition string. If a third
+// edition (e.g. "cloud") is ever introduced, add "sourcebridge_cloud_csrf"
+// here — otherwise the fast cookie-read path misses it and every URQL/authFetch
+// request falls back to the GET /api/v1/csrf-token refresh on the first 403,
+// which is a latency hit rather than a correctness failure, but still wrong.
 const CSRF_COOKIE_NAMES = ["sourcebridge_csrf", "sourcebridge_enterprise_csrf"] as const;
 
 /** The header name the backend reads for CSRF verification. */

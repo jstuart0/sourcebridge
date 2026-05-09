@@ -13,8 +13,11 @@ import { CSRF_HEADER, getCSRFToken, refreshCSRFToken } from "@/lib/csrf-token-st
  * If refreshCSRFToken() itself throws (network failure during refresh), the
  * original 403 response is returned rather than propagating a secondary error
  * through fetchExchange.
+ *
+ * Exported as `_csrfAwareFetch` for test-only direct coverage. Do not import
+ * this in production code; use createClient() which wires it internally.
  */
-async function csrfAwareFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+export async function _csrfAwareFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const method = (init?.method ?? "GET").toUpperCase();
   const isUnsafe = ["POST", "PUT", "PATCH", "DELETE"].includes(method);
 
@@ -94,7 +97,7 @@ export function createClient(token?: string) {
       }),
       fetchExchange,
     ],
-    fetch: csrfAwareFetch,
+    fetch: _csrfAwareFetch,
     fetchOptions: () => ({
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

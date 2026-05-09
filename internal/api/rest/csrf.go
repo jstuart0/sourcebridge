@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -62,11 +63,16 @@ func csrfReject(w http.ResponseWriter, r *http.Request, reason string, bearerWit
 	default:
 		csrfDropCounter.Add(1)
 	}
-	body := `{"error":"CSRF token missing"}`
+	// Machine-readable lowercase-underscore codes align with isCsrfError()
+	// checks on the frontend (auth-fetch.ts + graphql/client.ts) so the
+	// refresh-and-retry path fires correctly.
+	body := `{"error":"csrf_token_missing"}`
 	if reason == "csrf_token_mismatch" {
-		body = `{"error":"CSRF token mismatch"}`
+		body = `{"error":"csrf_token_mismatch"}`
 	}
-	http.Error(w, body, http.StatusForbidden)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = fmt.Fprint(w, body)
 }
 
 // csrfProtectionWithName returns CSRF middleware parameterised by cookie names
@@ -99,9 +105,12 @@ func csrfProtectionWithName(csrfCookieName, sessionCookieName string, fullCovera
 			// browser-shaped.
 			//
 			// fullCoverage=false (default): any Bearer header bypasses CSRF, matching
-			// pre-CA-201 behaviour exactly. This is the kill-switch path; flipping
-			// CSRFFullCoverageEnabled back to false at runtime restores today's bypass
-			// posture without a redeploy.
+			// pre-CA-201 behaviour exactly. This is the kill-switch path.
+			//
+			// IMPORTANT: CSRFFullCoverageEnabled is wired at router construction time,
+			// not read per-request. Flipping the flag requires an API process restart
+			// or a Kubernetes Deployment rollout — the change does NOT take effect
+			// in a running process.
 			//
 			// fullCoverage=true: bypass requires Bearer AND absence of the session
 			// cookie. Browsers attach the session cookie automatically on same-origin

@@ -1,5 +1,16 @@
+// TEST CONTRACT: the tests in this file use the canonical backend response shape.
+//
+// The backend emits exactly these bodies on CSRF rejection (internal/api/rest/csrf.go):
+//   {"error":"csrf_token_missing"}   — header absent
+//   {"error":"csrf_token_mismatch"}  — header present but wrong
+//
+// If jackson changes csrfReject() bodies, these fixtures AND the matching
+// backend test (internal/api/rest/csrf_test.go::TestCSRFRejectionResponseShape)
+// must be updated together. The snake_case strings here must match the backend
+// exactly — the retry detector in client.ts checks for these exact values.
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createClient } from "./client";
+import { _csrfAwareFetch, createClient } from "./client";
 
 // ─── Module mock setup ────────────────────────────────────────────────────────
 
@@ -17,22 +28,37 @@ vi.mock("@/lib/auth-utils", () => ({
   forceLogout: vi.fn(),
 }));
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Canonical backend response fixtures ─────────────────────────────────────
+//
+// These use the real Response constructor (not hand-rolled objects) so the
+// shape is as close to production as possible. The body strings are the exact
+// JSON the backend writes in csrfReject() after jackson's change.
 
-function makeResponse(status: number, body: unknown = {}): Response {
-  return {
-    ok: status >= 200 && status < 300,
+function makeRealResponse(status: number, body: unknown = {}): Response {
+  return new Response(JSON.stringify(body), {
     status,
-    headers: new Headers({ "Content-Type": "application/json" }),
-    clone: () => makeResponse(status, body),
-    json: async () => body,
-    text: async () => JSON.stringify(body),
-  } as unknown as Response;
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
-const csrfMissingResponse = () => makeResponse(403, { error: "csrf_token_missing" });
-const csrfMismatchResponse = () => makeResponse(403, { error: "csrf_token_mismatch" });
-const normalForbiddenResponse = () => makeResponse(403, { error: "forbidden" });
+// Canonical backend shapes — these are the strings jackson's fix will emit.
+const backendCsrfMissing = () =>
+  new Response('{"error":"csrf_token_missing"}', {
+    status: 403,
+    headers: { "Content-Type": "application/json" },
+  });
+
+const backendCsrfMismatch = () =>
+  new Response('{"error":"csrf_token_mismatch"}', {
+    status: 403,
+    headers: { "Content-Type": "application/json" },
+  });
+
+const nonCsrf403 = () =>
+  new Response('{"error":"forbidden"}', {
+    status: 403,
+    headers: { "Content-Type": "application/json" },
+  });
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -44,272 +70,226 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ─── Helper: extract the csrfAwareFetch from the client ───────────────────────
+// ─── Direct _csrfAwareFetch tests ─────────────────────────────────────────────
 //
-// The CSRF-aware fetch function is passed as the `fetch` option to the URQL
-// Client constructor. We test it by intercepting the calls that createClient()
-// makes through the internal fetch wrapper, using a global fetch mock.
+// These tests call _csrfAwareFetch directly (the same function wired into the
+// URQL Client as the `fetch` option). Testing it directly avoids duplicating
+// the retry logic in tests and ensures any future implementation change is
+// caught immediately.
 
-describe("URQL client CSRF injection", () => {
-  it("sends X-CSRF-Token header on POST (mutation) when cookie is present", async () => {
-    mockGetCSRFToken.mockReturnValue("csrf-abc");
+describe("_csrfAwareFetch — canonical backend response shape", () => {
+  it("triggers refresh+retry on real backend csrf_token_missing body", async () => {
+    mockGetCSRFToken.mockReturnValue("old-token");
+    mockRefreshCSRFToken.mockResolvedValue("new-token");
 
-    const fetchMock = vi.fn().mockResolvedValue(makeResponse(200, { data: {} }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(backendCsrfMissing())
+      .mockResolvedValueOnce(makeRealResponse(200, { data: {} }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = createClient("test-token");
+    const result = await _csrfAwareFetch("/api/v1/graphql", {
+      method: "POST",
+      body: "{}",
+    });
 
-    // Execute a mutation — URQL's fetchExchange sends a POST.
-    // We catch the network error since we're not running a real server.
-    client.mutation("mutation Test { __typename }", {}).toPromise().catch(() => {});
-
-    // Wait a tick for the fetch to be called
-    await new Promise((r) => setTimeout(r, 0));
-
-    if (fetchMock.mock.calls.length > 0) {
-      const [, init] = fetchMock.mock.calls[0];
-      const headers = new Headers(init?.headers);
-      expect(headers.get("X-CSRF-Token")).toBe("csrf-abc");
-    }
-  });
-
-  it("stale-token: second mutation reads post-refresh token, not stale baked-in value", async () => {
-    // Simulate token rotation between two requests.
-    mockGetCSRFToken
-      .mockReturnValueOnce("token-A")
-      .mockReturnValueOnce("token-B");
-
-    const fetchMock = vi.fn().mockResolvedValue(makeResponse(200, { data: {} }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = createClient("test-token");
-
-    // Trigger two mutations
-    client.mutation("mutation One { __typename }", {}).toPromise().catch(() => {});
-    await new Promise((r) => setTimeout(r, 0));
-
-    client.mutation("mutation Two { __typename }", {}).toPromise().catch(() => {});
-    await new Promise((r) => setTimeout(r, 0));
-
-    if (fetchMock.mock.calls.length >= 2) {
-      const headers1 = new Headers(fetchMock.mock.calls[0][1]?.headers);
-      const headers2 = new Headers(fetchMock.mock.calls[1][1]?.headers);
-      expect(headers1.get("X-CSRF-Token")).toBe("token-A");
-      expect(headers2.get("X-CSRF-Token")).toBe("token-B");
-    }
-  });
-});
-
-// ─── Direct csrfAwareFetch tests ──────────────────────────────────────────────
-//
-// We test the internal fetch wrapper directly by reconstructing its logic
-// via the module boundary. The cleanest approach is to re-import and call
-// the function that the URQL client was built with.
-
-describe("csrfAwareFetch behavior (via URQL client fetch option)", () => {
-  // We need to access the wrapped fetch directly. Extract it by replacing
-  // globalThis.fetch with a spy and observing what URQL's fetchExchange calls.
-
-  async function invokeCsrfFetch(
-    fetchMock: ReturnType<typeof vi.fn>,
-    init: RequestInit
-  ) {
-    vi.stubGlobal("fetch", fetchMock);
-    createClient("tok"); // side effect: registers csrfAwareFetch as the fetch option
-
-    // Manually invoke the csrfAwareFetch by calling the registered fetch
-    // through a mutation that forces URQL to POST.
-    // Since we're not running a GraphQL server, catch any errors.
-    try {
-      await createClient("tok")
-        .mutation("mutation T { __typename }", {})
-        .toPromise();
-    } catch {
-      // expected network error in test
-    }
-  }
-
-  it("retries once with refreshed token on csrf_token_missing", async () => {
-    mockGetCSRFToken.mockReturnValue("stale");
-    mockRefreshCSRFToken.mockResolvedValue("fresh");
-
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(csrfMissingResponse())
-      .mockResolvedValueOnce(makeResponse(200, { data: {} }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    // Import the wrapped fetch directly through the module to avoid URQL's
-    // exchange machinery conflating test assertions.
-    // We test the behavior via the module-level function by using vi.importActual
-    // and grabbing the internal csrfAwareFetch.
-    //
-    // Since csrfAwareFetch is not exported, we simulate its behavior by verifying
-    // that the second fetch call carries the new token. We do this by calling
-    // fetch directly with the same init shape that URQL would use.
-    const { getCSRFToken, refreshCSRFToken, CSRF_HEADER } = await import("@/lib/csrf-token-store");
-
-    async function simulateCsrfFetch(init: RequestInit) {
-      const method = (init.method ?? "GET").toUpperCase();
-      const isUnsafe = ["POST", "PUT", "PATCH", "DELETE"].includes(method);
-      let headers = new Headers(init.headers);
-
-      if (isUnsafe) {
-        const t = getCSRFToken();
-        if (t && !headers.has(CSRF_HEADER)) headers.set(CSRF_HEADER, t);
-      }
-
-      const res = await fetch("/api/v1/graphql", { ...init, headers });
-
-      if (res.status === 403 && isUnsafe) {
-        let isCsrf = false;
-        try {
-          const d = (await res.clone().json()) as { error?: string };
-          isCsrf = d?.error === "csrf_token_missing" || d?.error === "csrf_token_mismatch";
-        } catch { /* */ }
-
-        if (isCsrf) {
-          let newToken: string | undefined;
-          try { newToken = await refreshCSRFToken(); } catch { return res; }
-          if (!newToken) return res;
-          const retryHeaders = new Headers(init.headers);
-          retryHeaders.set(CSRF_HEADER, newToken);
-          return fetch("/api/v1/graphql", { ...init, headers: retryHeaders });
-        }
-      }
-      return res;
-    }
-
-    const result = await simulateCsrfFetch({ method: "POST", body: '{}' });
-    expect(result.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe(200);
+
+    // Retry must carry the refreshed token.
+    const retryHeaders = new Headers(fetchMock.mock.calls[1][1]?.headers);
+    expect(retryHeaders.get("X-CSRF-Token")).toBe("new-token");
+  });
+
+  it("triggers refresh+retry on real backend csrf_token_mismatch body", async () => {
+    mockGetCSRFToken.mockReturnValue("stale-token");
+    mockRefreshCSRFToken.mockResolvedValue("fresh-token");
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(backendCsrfMismatch())
+      .mockResolvedValueOnce(makeRealResponse(200, { data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await _csrfAwareFetch("/api/v1/graphql", {
+      method: "POST",
+      body: "{}",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe(200);
 
     const retryHeaders = new Headers(fetchMock.mock.calls[1][1]?.headers);
-    expect(retryHeaders.get("X-CSRF-Token")).toBe("fresh");
+    expect(retryHeaders.get("X-CSRF-Token")).toBe("fresh-token");
+  });
+
+  it("does NOT retry on non-CSRF 403 (role denial)", async () => {
+    mockGetCSRFToken.mockReturnValue("token");
+    mockRefreshCSRFToken.mockResolvedValue("new-token");
+
+    const fetchMock = vi.fn().mockResolvedValue(nonCsrf403());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await _csrfAwareFetch("/api/v1/graphql", {
+      method: "POST",
+      body: "{}",
+    });
+
+    expect(result.status).toBe(403);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockRefreshCSRFToken).not.toHaveBeenCalled();
   });
 
   it("returns original 403 when refresh throws (does not propagate secondary error)", async () => {
     mockGetCSRFToken.mockReturnValue("token");
     mockRefreshCSRFToken.mockRejectedValue(new Error("refresh network failure"));
 
-    const fetchMock = vi.fn().mockResolvedValue(csrfMissingResponse());
+    const fetchMock = vi.fn().mockResolvedValue(backendCsrfMissing());
     vi.stubGlobal("fetch", fetchMock);
 
-    const { getCSRFToken, refreshCSRFToken, CSRF_HEADER } = await import("@/lib/csrf-token-store");
+    // Must not throw — returns the original 403.
+    const result = await _csrfAwareFetch("/api/v1/graphql", {
+      method: "POST",
+      body: "{}",
+    });
 
-    async function simulateCsrfFetch(init: RequestInit) {
-      const method = "POST";
-      const headers = new Headers(init.headers);
-      const t = getCSRFToken();
-      if (t) headers.set(CSRF_HEADER, t);
-
-      const res = await fetch("/api/v1/graphql", { ...init, headers });
-      if (res.status === 403) {
-        let isCsrf = false;
-        try {
-          const d = (await res.clone().json()) as { error?: string };
-          isCsrf = d?.error === "csrf_token_missing" || d?.error === "csrf_token_mismatch";
-        } catch { /* */ }
-
-        if (isCsrf) {
-          let newToken: string | undefined;
-          try { newToken = await refreshCSRFToken(); } catch { return res; } // returns 403, no propagation
-          if (!newToken) return res;
-          const retryHeaders = new Headers(init.headers);
-          retryHeaders.set(CSRF_HEADER, newToken);
-          return fetch("/api/v1/graphql", { ...init, headers: retryHeaders });
-        }
-      }
-      return res;
-    }
-
-    // Should not throw — returns the original 403
-    const result = await simulateCsrfFetch({ method: "POST", body: '{}' });
     expect(result.status).toBe(403);
-    // fetch was called exactly once (no retry attempted after throw)
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("flows non-CSRF 403 responses through unchanged without retry", async () => {
+  it("returns original 403 when refresh resolves undefined", async () => {
     mockGetCSRFToken.mockReturnValue("token");
-    mockRefreshCSRFToken.mockResolvedValue("new-token");
+    mockRefreshCSRFToken.mockResolvedValue(undefined);
 
-    const fetchMock = vi.fn().mockResolvedValue(normalForbiddenResponse());
+    const fetchMock = vi.fn().mockResolvedValue(backendCsrfMissing());
     vi.stubGlobal("fetch", fetchMock);
 
-    const { getCSRFToken, refreshCSRFToken, CSRF_HEADER } = await import("@/lib/csrf-token-store");
+    const result = await _csrfAwareFetch("/api/v1/graphql", {
+      method: "POST",
+      body: "{}",
+    });
 
-    async function simulateCsrfFetch(init: RequestInit) {
-      const headers = new Headers(init.headers);
-      const t = getCSRFToken();
-      if (t) headers.set(CSRF_HEADER, t);
-
-      const res = await fetch("/api/v1/graphql", { ...init, headers });
-      if (res.status === 403) {
-        let isCsrf = false;
-        try {
-          const d = (await res.clone().json()) as { error?: string };
-          isCsrf = d?.error === "csrf_token_missing" || d?.error === "csrf_token_mismatch";
-        } catch { /* */ }
-
-        if (isCsrf) {
-          let newToken: string | undefined;
-          try { newToken = await refreshCSRFToken(); } catch { return res; }
-          if (!newToken) return res;
-          const retryHeaders = new Headers(init.headers);
-          retryHeaders.set(CSRF_HEADER, newToken);
-          return fetch("/api/v1/graphql", { ...init, headers: retryHeaders });
-        }
-      }
-      return res;
-    }
-
-    const result = await simulateCsrfFetch({ method: "POST", body: '{}' });
     expect(result.status).toBe(403);
-    expect(fetchMock).toHaveBeenCalledTimes(1); // no retry
-    // refreshCSRFToken should not have been invoked — use the module-level mock spy
-    expect(mockRefreshCSRFToken).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("retries once on csrf_token_mismatch and returns the retry response", async () => {
-    mockGetCSRFToken.mockReturnValue("old");
-    mockRefreshCSRFToken.mockResolvedValue("renewed");
+  it("injects X-CSRF-Token on POST when cookie is present", async () => {
+    mockGetCSRFToken.mockReturnValue("csrf-abc");
 
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(csrfMismatchResponse())
-      .mockResolvedValueOnce(makeResponse(200, { data: {} }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(makeRealResponse(200, { data: {} }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const { getCSRFToken, refreshCSRFToken, CSRF_HEADER } = await import("@/lib/csrf-token-store");
+    await _csrfAwareFetch("/api/v1/graphql", { method: "POST", body: "{}" });
 
-    async function simulateCsrfFetch(init: RequestInit) {
-      const headers = new Headers(init.headers);
-      const t = getCSRFToken();
-      if (t) headers.set(CSRF_HEADER, t);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = new Headers(init?.headers);
+    expect(headers.get("X-CSRF-Token")).toBe("csrf-abc");
+  });
 
-      const res = await fetch("/api/v1/graphql", { ...init, headers });
-      if (res.status === 403) {
-        let isCsrf = false;
-        try {
-          const d = (await res.clone().json()) as { error?: string };
-          isCsrf = d?.error === "csrf_token_missing" || d?.error === "csrf_token_mismatch";
-        } catch { /* */ }
+  it("does NOT inject X-CSRF-Token on GET", async () => {
+    mockGetCSRFToken.mockReturnValue("csrf-abc");
 
-        if (isCsrf) {
-          let newToken: string | undefined;
-          try { newToken = await refreshCSRFToken(); } catch { return res; }
-          if (!newToken) return res;
-          const retryHeaders = new Headers(init.headers);
-          retryHeaders.set(CSRF_HEADER, newToken);
-          return fetch("/api/v1/graphql", { ...init, headers: retryHeaders });
-        }
-      }
-      return res;
-    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(makeRealResponse(200, { data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
 
-    const result = await simulateCsrfFetch({ method: "POST", body: '{}' });
-    expect(result.status).toBe(200);
+    await _csrfAwareFetch("/api/v1/graphql", { method: "GET" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = new Headers(init?.headers);
+    expect(headers.get("X-CSRF-Token")).toBeNull();
+  });
+});
+
+// ─── URQL integration — stale-token rotation ──────────────────────────────────
+//
+// These tests exercise _csrfAwareFetch via the URQL Client's fetch option to
+// verify the per-request (not per-client-creation) token read behavior.
+// Assertions are unconditional: if fetch is not called, the test MUST fail.
+
+describe("URQL client stale-token rotation (via _csrfAwareFetch)", () => {
+  it("sends X-CSRF-Token header on POST when cookie is present", async () => {
+    mockGetCSRFToken.mockReturnValue("csrf-abc");
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(makeRealResponse(200, { data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createClient("test-token");
+    client.mutation("mutation Test { __typename }", {}).toPromise().catch(() => {});
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Unconditional: if fetch was not called, the CSRF injection is untestable.
+    expect(fetchMock).toHaveBeenCalled();
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = new Headers(init?.headers);
+    expect(headers.get("X-CSRF-Token")).toBe("csrf-abc");
+  });
+
+  it("stale-token: second mutation reads post-rotation token, not stale baked-in value", async () => {
+    mockGetCSRFToken
+      .mockReturnValueOnce("token-A")
+      .mockReturnValueOnce("token-B");
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(makeRealResponse(200, { data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createClient("test-token");
+
+    client.mutation("mutation One { __typename }", {}).toPromise().catch(() => {});
+    await new Promise((r) => setTimeout(r, 0));
+
+    client.mutation("mutation Two { __typename }", {}).toPromise().catch(() => {});
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Unconditional: both mutations must have resulted in a fetch call.
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    const headers1 = new Headers(fetchMock.mock.calls[0][1]?.headers);
+    const headers2 = new Headers(fetchMock.mock.calls[1][1]?.headers);
+    expect(headers1.get("X-CSRF-Token")).toBe("token-A");
+    expect(headers2.get("X-CSRF-Token")).toBe("token-B");
+  });
+});
+
+// ─── xander CSRF-M1: retry preserves Authorization header ────────────────────
+//
+// Regression guard: when csrfAwareFetch retries after a CSRF 403, the retry
+// must carry the Authorization header from the original init. Losing it would
+// cause the retry to 401 rather than succeed.
+
+describe("_csrfAwareFetch — Authorization header preserved on CSRF retry", () => {
+  it("retry request includes Authorization header from original init", async () => {
+    mockGetCSRFToken.mockReturnValue("csrf-token");
+    mockRefreshCSRFToken.mockResolvedValue("new-csrf-token");
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(backendCsrfMissing())
+      .mockResolvedValueOnce(makeRealResponse(200, { data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await _csrfAwareFetch("/api/v1/graphql", {
+      method: "POST",
+      body: "{}",
+      headers: {
+        Authorization: "Bearer test-jwt-token",
+        "Content-Type": "application/json",
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // The retry (second call) must carry Authorization.
     const retryHeaders = new Headers(fetchMock.mock.calls[1][1]?.headers);
-    expect(retryHeaders.get("X-CSRF-Token")).toBe("renewed");
+    expect(retryHeaders.get("Authorization")).toBe("Bearer test-jwt-token");
+    expect(retryHeaders.get("X-CSRF-Token")).toBe("new-csrf-token");
   });
 });

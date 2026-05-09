@@ -77,6 +77,8 @@ surreal_mode = "embedded"
 [security]
 mode = "oss"
 
+# csrf_full_coverage_enabled = false  # Set true after Phase 1 frontend bundle is confirmed live (requires API restart).
+
 # ─── Knowledge artifact invalidation ───────────────────────────────
 # When a repository is reindexed, knowledge artifacts (cliff notes, diagrams,
 # learning paths, etc.) need to be re-examined for freshness. Two env vars
