@@ -24,7 +24,7 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
-**2026-05-09 audit-remediation wave 3: P8 security hardening — SSRF denylist, gRPC reflection gate, SSE tenant filter, TenantFilteredStore gating (CA-202, CA-312, CA-203, CA-205)** — 4 commits, `56380d2..9c3b1ab`, reconcile commit TBD.
+**2026-05-09 audit-remediation wave 3: P8 security hardening — SSRF denylist, gRPC reflection gate, SSE tenant filter, TenantFilteredStore gating (CA-202, CA-312, CA-203, CA-205)** — 5 commits, `56380d2..2552036`.
 
 Phase CA-202 (`56380d2`) — gRPC reflection gate tightened to dual-key: both
 `SOURCEBRIDGE_WORKER_DEBUG=true` AND `SOURCEBRIDGE_WORKER_GRPC_REFLECTION_ENABLED=true`
