@@ -8,11 +8,13 @@ import (
 	"strings"
 	"time"
 
+	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
+	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
 type workflowStoryGenerationService struct {
@@ -24,14 +26,8 @@ type workflowStoryGenerationService struct {
 // beyond the receiver. Defined here so both Generate and (eventually)
 // RefreshFromExisting can build it with appropriate values.
 type workflowStoryRunParams struct {
-	repo              *graphstore.Repository
-	artifact          *knowledgepkg.Artifact
-	snap              *knowledgepkg.KnowledgeSnapshot
-	snapJSON          []byte
+	baseRunParams
 	scope             knowledgepkg.ArtifactScope
-	generationMode    knowledgepkg.GenerationMode
-	audience          string
-	depth             string
 	anchorLabel       string
 	executionPathJSON string
 }
@@ -114,14 +110,16 @@ func (s workflowStoryGenerationService) Generate(ctx context.Context) (*Knowledg
 	}
 
 	params := workflowStoryRunParams{
-		repo:              repo,
-		artifact:          artifact,
-		snap:              snap,
-		snapJSON:          snapJSON,
+		baseRunParams: baseRunParams{
+			repo:           repo,
+			artifact:       artifact,
+			snap:           snap,
+			snapJSON:       snapJSON,
+			generationMode: generationMode,
+			audience:       audience,
+			depth:          depth,
+		},
 		scope:             scope,
-		generationMode:    generationMode,
-		audience:          audience,
-		depth:             depth,
 		anchorLabel:       anchorLabel,
 		executionPathJSON: executionPathJSON,
 	}
@@ -146,103 +144,54 @@ func (s workflowStoryGenerationService) runGenerationPipeline(
 	store graphstore.GraphStore,
 	p workflowStoryRunParams,
 ) error {
-	r := s.resolver
-	artifact := p.artifact
-	repo := p.repo
-	snap := p.snap
-	snapJSON := p.snapJSON
 	scope := p.scope
-	generationMode := p.generationMode
-	audience := p.audience
-	depth := p.depth
 	anchorLabel := p.anchorLabel
 	executionPathJSON := p.executionPathJSON
-
-	enrichedSnapJSON := snapJSON
-	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled", 0)
-	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
-	if artifactUsesUnderstanding(generationMode) {
-		if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
-			return err
-		} else {
-			if reused {
-				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
-				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
+	return runKnowledgePipeline(runCtx, rt, store, s.resolver, p.baseRunParams, knowledgePipelineConfig{
+		artifactLabel:          "workflow story",
+		rpcBucket:              rpcBucketCollapsed,
+		progressPersistMessage: "LLM completed, persisting sections",
+		readyMessage:           "Workflow story ready",
+		rpcFn: func(ctx context.Context, enrichedSnapJSON []byte, rt llm.Runtime, r *Resolver, base baseRunParams, onProgress func(worker.KnowledgeStreamEvent)) (any, *commonv1.LLMUsage, error) {
+			resp, err := r.LLMCaller.GenerateWorkflowStoryWithJob(ctx, base.repo.ID, resolution.OpKnowledge,
+				llmJobMetadataWithProgress(rt, base.artifact.ID, "workflow_story", onProgress),
+				&knowledgev1.GenerateWorkflowStoryRequest{
+					RepositoryId:      base.repo.ID,
+					RepositoryName:    base.repo.Name,
+					Audience:          base.audience,
+					AudienceEnum:      protoAudience(knowledgepkg.Audience(base.audience)),
+					Depth:             base.depth,
+					DepthEnum:         protoDepth(knowledgepkg.Depth(base.depth)),
+					ScopeType:         string(scope.ScopeType),
+					ScopePath:         scope.ScopePath,
+					AnchorLabel:       anchorLabel,
+					ExecutionPathJson: executionPathJSON,
+					SnapshotJson:      string(enrichedSnapJSON),
+				})
+			if err != nil {
+				return nil, nil, err
 			}
-			if understanding != nil {
-				if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
-					enrichedSnapJSON = enriched
+			return resp, resp.Usage, nil
+		},
+		mapSections: func(raw any) ([]knowledgepkg.Section, [][]knowledgepkg.Evidence) {
+			resp := raw.(*knowledgev1.GenerateWorkflowStoryResponse)
+			sections := make([]knowledgepkg.Section, len(resp.Sections))
+			evidences := make([][]knowledgepkg.Evidence, len(resp.Sections))
+			for i, sec := range resp.Sections {
+				sections[i] = knowledgepkg.Section{
+					Title:      sec.Title,
+					Content:    sec.Content,
+					Summary:    sec.Summary,
+					Confidence: mapProtoConfidence(sec.Confidence),
+					Inferred:   sec.Inferred,
+				}
+				if len(sec.Evidence) > 0 {
+					evidences[i] = mapProtoEvidence(sec.Evidence)
 				}
 			}
-		}
-	}
-	if knowledgepkg.Depth(depth) == knowledgepkg.DepthDeep {
-		if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), enrichedSnapJSON); ok {
-			enrichedSnapJSON = enriched
-		}
-	}
-
-	streamDriver := r.runStreamProgressDriver(runCtx, rt, artifact.ID, rpcBucketCollapsed)
-	resp, err := r.LLMCaller.GenerateWorkflowStoryWithJob(runCtx, repo.ID, resolution.OpKnowledge,
-		llmJobMetadataWithProgress(rt, artifact.ID, "workflow_story", streamDriver.OnProgress()),
-		&knowledgev1.GenerateWorkflowStoryRequest{
-			RepositoryId:      repo.ID,
-			RepositoryName:    repo.Name,
-			Audience:          audience,
-			AudienceEnum:      protoAudience(knowledgepkg.Audience(audience)),
-			Depth:             depth,
-			DepthEnum:         protoDepth(knowledgepkg.Depth(depth)),
-			ScopeType:         string(scope.ScopeType),
-			ScopePath:         scope.ScopePath,
-			AnchorLabel:       anchorLabel,
-			ExecutionPathJson: executionPathJSON,
-			SnapshotJson:      string(enrichedSnapJSON),
-		})
-	streamDriver.Close()
-	if err != nil {
-		slog.Error("workflow story generation failed", "artifact_id", artifact.ID, "error", err)
-		return err
-	}
-
-	rt.ReportProgress(0.96, "llm", "LLM completed, persisting sections", 0)
-	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
-
-	if resp.Usage != nil {
-		storeLLMUsage(store, repo.ID, resp.Usage, "")
-		rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
-	}
-
-	sections := make([]knowledgepkg.Section, len(resp.Sections))
-	for i, sec := range resp.Sections {
-		sections[i] = knowledgepkg.Section{
-			Title:      sec.Title,
-			Content:    sec.Content,
-			Summary:    sec.Summary,
-			Confidence: mapProtoConfidence(sec.Confidence),
-			Inferred:   sec.Inferred,
-		}
-	}
-	if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
-		slog.Error("failed to store workflow story sections", "artifact_id", artifact.ID, "error", err)
-		return err
-	}
-
-	storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
-	for i, sec := range resp.Sections {
-		if i >= len(storedSections) {
-			break
-		}
-		if len(sec.Evidence) > 0 {
-			_ = r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[i].ID, mapProtoEvidence(sec.Evidence))
-		}
-	}
-
-	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
-		slog.Error("failed to mark workflow story ready", "artifact_id", artifact.ID, "error", err)
-	}
-	rt.ReportProgress(1.0, "ready", "Workflow story ready", 0)
-	slog.Info("workflow story generation complete", "artifact_id", artifact.ID)
-	return nil
+			return sections, evidences
+		},
+	})
 }
 
 // RefreshFromExisting re-runs the generation pipeline against an existing
@@ -297,14 +246,16 @@ func (s workflowStoryGenerationService) RefreshFromExisting(ctx context.Context,
 		rt.ReportSnapshotBytes(len(snapJSON))
 
 		params := workflowStoryRunParams{
-			repo:              repo,
-			artifact:          existing,
-			snap:              snap,
-			snapJSON:          snapJSON,
+			baseRunParams: baseRunParams{
+				repo:           repo,
+				artifact:       existing,
+				snap:           snap,
+				snapJSON:       snapJSON,
+				generationMode: generationMode,
+				audience:       audience,
+				depth:          depth,
+			},
 			scope:             scope,
-			generationMode:    generationMode,
-			audience:          audience,
-			depth:             depth,
 			anchorLabel:       "",
 			executionPathJSON: "",
 		}

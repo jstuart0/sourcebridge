@@ -8,11 +8,13 @@ import (
 	"strings"
 	"time"
 
+	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
+	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
 type learningPathGenerationService struct {
@@ -24,14 +26,8 @@ type learningPathGenerationService struct {
 // beyond the receiver. Defined here so both Generate and (eventually)
 // RefreshFromExisting can build it with appropriate values.
 type learningPathRunParams struct {
-	repo           *graphstore.Repository
-	artifact       *knowledgepkg.Artifact
-	snap           *knowledgepkg.KnowledgeSnapshot
-	snapJSON       []byte
-	generationMode knowledgepkg.GenerationMode
-	audience       string
-	depth          string
-	focusArea      string
+	baseRunParams
+	focusArea string
 }
 
 func (s learningPathGenerationService) Generate(ctx context.Context) (*KnowledgeArtifact, error) {
@@ -107,14 +103,16 @@ func (s learningPathGenerationService) Generate(ctx context.Context) (*Knowledge
 	syncArtifactExecutionMetadata(r.KnowledgeStore, artifact)
 
 	params := learningPathRunParams{
-		repo:           repo,
-		artifact:       artifact,
-		snap:           snap,
-		snapJSON:       snapJSON,
-		generationMode: generationMode,
-		audience:       audience,
-		depth:          depth,
-		focusArea:      focusArea,
+		baseRunParams: baseRunParams{
+			repo:           repo,
+			artifact:       artifact,
+			snap:           snap,
+			snapJSON:       snapJSON,
+			generationMode: generationMode,
+			audience:       audience,
+			depth:          depth,
+		},
+		focusArea: focusArea,
 	}
 	capturedStore := r.getStore(ctx)
 	err = r.enqueueKnowledgeJob(ctx, artifact, "learning_path", len(snapJSON), func(runCtx context.Context, rt llm.Runtime) error {
@@ -137,120 +135,69 @@ func (s learningPathGenerationService) runGenerationPipeline(
 	store graphstore.GraphStore,
 	p learningPathRunParams,
 ) error {
-	r := s.resolver
-	artifact := p.artifact
-	repo := p.repo
-	snap := p.snap
-	snapJSON := p.snapJSON
-	generationMode := p.generationMode
-	audience := p.audience
-	depth := p.depth
 	focusArea := p.focusArea
-
-	enrichedSnapJSON := snapJSON
-	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled", 0)
-	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
-	if artifactUsesUnderstanding(generationMode) {
-		if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
-			return err
-		} else {
-			if reused {
-				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
-				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
+	return runKnowledgePipeline(runCtx, rt, store, s.resolver, p.baseRunParams, knowledgePipelineConfig{
+		artifactLabel:          "learning path",
+		rpcBucket:              rpcBucketCollapsed,
+		progressPersistMessage: "LLM completed, persisting steps",
+		readyMessage:           "Learning path ready",
+		rpcFn: func(ctx context.Context, enrichedSnapJSON []byte, rt llm.Runtime, r *Resolver, base baseRunParams, onProgress func(worker.KnowledgeStreamEvent)) (any, *commonv1.LLMUsage, error) {
+			resp, err := r.LLMCaller.GenerateLearningPathWithJob(ctx, base.repo.ID, resolution.OpKnowledge,
+				llmJobMetadataWithProgress(rt, base.artifact.ID, "learning_path", onProgress),
+				&knowledgev1.GenerateLearningPathRequest{
+					RepositoryId:   base.repo.ID,
+					RepositoryName: base.repo.Name,
+					Audience:       base.audience,
+					AudienceEnum:   protoAudience(knowledgepkg.Audience(base.audience)),
+					Depth:          base.depth,
+					DepthEnum:      protoDepth(knowledgepkg.Depth(base.depth)),
+					SnapshotJson:   string(enrichedSnapJSON),
+					FocusArea:      focusArea,
+				})
+			if err != nil {
+				return nil, nil, err
 			}
-			if understanding != nil {
-				if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
-					enrichedSnapJSON = enriched
+			return resp, resp.Usage, nil
+		},
+		mapSections: func(raw any) ([]knowledgepkg.Section, [][]knowledgepkg.Evidence) {
+			resp := raw.(*knowledgev1.GenerateLearningPathResponse)
+			sections := make([]knowledgepkg.Section, len(resp.Steps))
+			evidences := make([][]knowledgepkg.Evidence, len(resp.Steps))
+			for i, step := range resp.Steps {
+				metaRaw, _ := json.Marshal(map[string]any{
+					"prerequisite_steps": step.PrerequisiteSteps,
+					"difficulty":         step.Difficulty,
+					"exercises":          step.Exercises,
+					"checkpoint":         step.Checkpoint,
+				})
+				sections[i] = knowledgepkg.Section{
+					Title:            step.Title,
+					Content:          step.Content,
+					Summary:          step.Objective,
+					Metadata:         string(metaRaw),
+					Confidence:       mapProtoConfidence(step.Confidence),
+					RefinementStatus: step.RefinementStatus,
 				}
+				var ev []knowledgepkg.Evidence
+				for _, fp := range step.FilePaths {
+					ev = append(ev, knowledgepkg.Evidence{
+						SourceType: knowledgepkg.EvidenceFile,
+						FilePath:   fp,
+						Rationale:  "Referenced in learning step",
+					})
+				}
+				for _, sid := range step.SymbolIds {
+					ev = append(ev, knowledgepkg.Evidence{
+						SourceType: knowledgepkg.EvidenceSymbol,
+						SourceID:   sid,
+						Rationale:  "Referenced in learning step",
+					})
+				}
+				evidences[i] = ev
 			}
-		}
-	}
-	if knowledgepkg.Depth(depth) == knowledgepkg.DepthDeep {
-		if enriched, ok := enrichSnapshotWithCliffNotesAnalysis(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), enrichedSnapJSON); ok {
-			enrichedSnapJSON = enriched
-		}
-	}
-
-	streamDriver := r.runStreamProgressDriver(runCtx, rt, artifact.ID, rpcBucketCollapsed)
-	resp, err := r.LLMCaller.GenerateLearningPathWithJob(runCtx, repo.ID, resolution.OpKnowledge,
-		llmJobMetadataWithProgress(rt, artifact.ID, "learning_path", streamDriver.OnProgress()),
-		&knowledgev1.GenerateLearningPathRequest{
-			RepositoryId:   repo.ID,
-			RepositoryName: repo.Name,
-			Audience:       audience,
-			AudienceEnum:   protoAudience(knowledgepkg.Audience(audience)),
-			Depth:          depth,
-			DepthEnum:      protoDepth(knowledgepkg.Depth(depth)),
-			SnapshotJson:   string(enrichedSnapJSON),
-			FocusArea:      focusArea,
-		})
-	streamDriver.Close()
-	if err != nil {
-		slog.Error("learning path generation failed", "artifact_id", artifact.ID, "error", err)
-		return err
-	}
-
-	rt.ReportProgress(0.96, "llm", "LLM completed, persisting steps", 0)
-	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
-
-	if resp.Usage != nil {
-		storeLLMUsage(store, repo.ID, resp.Usage, "")
-		rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
-	}
-
-	sections := make([]knowledgepkg.Section, len(resp.Steps))
-	for i, step := range resp.Steps {
-		metaRaw, _ := json.Marshal(map[string]any{
-			"prerequisite_steps": step.PrerequisiteSteps,
-			"difficulty":         step.Difficulty,
-			"exercises":          step.Exercises,
-			"checkpoint":         step.Checkpoint,
-		})
-		sections[i] = knowledgepkg.Section{
-			Title:            step.Title,
-			Content:          step.Content,
-			Summary:          step.Objective,
-			Metadata:         string(metaRaw),
-			Confidence:       mapProtoConfidence(step.Confidence),
-			RefinementStatus: step.RefinementStatus,
-		}
-	}
-	if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
-		slog.Error("failed to store learning path sections", "artifact_id", artifact.ID, "error", err)
-		return err
-	}
-
-	storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
-	for i, step := range resp.Steps {
-		if i >= len(storedSections) {
-			break
-		}
-		var evidence []knowledgepkg.Evidence
-		for _, fp := range step.FilePaths {
-			evidence = append(evidence, knowledgepkg.Evidence{
-				SourceType: knowledgepkg.EvidenceFile,
-				FilePath:   fp,
-				Rationale:  "Referenced in learning step",
-			})
-		}
-		for _, sid := range step.SymbolIds {
-			evidence = append(evidence, knowledgepkg.Evidence{
-				SourceType: knowledgepkg.EvidenceSymbol,
-				SourceID:   sid,
-				Rationale:  "Referenced in learning step",
-			})
-		}
-		if len(evidence) > 0 {
-			_ = r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[i].ID, evidence)
-		}
-	}
-
-	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
-		slog.Error("failed to mark learning path ready", "artifact_id", artifact.ID, "error", err)
-	}
-	rt.ReportProgress(1.0, "ready", "Learning path ready", 0)
-	slog.Info("learning path generation complete", "artifact_id", artifact.ID)
-	return nil
+			return sections, evidences
+		},
+	})
 }
 
 // RefreshFromExisting re-runs the generation pipeline against an existing
@@ -293,14 +240,16 @@ func (s learningPathGenerationService) RefreshFromExisting(ctx context.Context, 
 		rt.ReportSnapshotBytes(len(snapJSON))
 
 		params := learningPathRunParams{
-			repo:           repo,
-			artifact:       existing,
-			snap:           snap,
-			snapJSON:       snapJSON,
-			generationMode: generationMode,
-			audience:       audience,
-			depth:          depth,
-			focusArea:      "",
+			baseRunParams: baseRunParams{
+				repo:           repo,
+				artifact:       existing,
+				snap:           snap,
+				snapJSON:       snapJSON,
+				generationMode: generationMode,
+				audience:       audience,
+				depth:          depth,
+			},
+			focusArea: "",
 		}
 		return s.runGenerationPipeline(runCtx, rt, capturedStore, params)
 	})
