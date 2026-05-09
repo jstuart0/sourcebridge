@@ -144,7 +144,7 @@ func (c *gqlClient) do(ctx context.Context, req gqlRequest) (map[string]any, err
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.baseURL+"/api/graphql", bytes.NewReader(body))
+		c.baseURL+"/api/v1/graphql", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("new request: %w", err)
 	}

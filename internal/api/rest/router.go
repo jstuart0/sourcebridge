@@ -843,16 +843,40 @@ func (s *Server) setupRouter() {
 
 	// Auth info endpoint (tells frontend which auth methods are available)
 	r.Get("/auth/info", s.handleAuthInfo)
-	r.Post("/auth/logout", s.handleLogout)
+
+	// CA-NEW-LOGOUT: /auth/logout stays public (no auth middleware) so that
+	// users can log out even after a session expires in another tab. When
+	// CSRFFullCoverageEnabled=true, the double-submit cookie check still verifies
+	// the request originated from the user's own browser, which closes the
+	// autosubmit attack vector (xander CSRF-1).
+	if s.cfg.Security.CSRFFullCoverageEnabled {
+		r.Group(func(r chi.Router) {
+			r.Use(csrfProtectionWithName(
+				s.jwtMgr.CSRFCookieName(),
+				s.jwtMgr.SessionCookieName(),
+				true,
+			))
+			r.Post("/auth/logout", s.handleLogout)
+		})
+	} else {
+		r.Post("/auth/logout", s.handleLogout)
+	}
 
 	// OIDC routes
 	r.Get("/auth/oidc/login", s.handleOIDCLogin)
 	r.Get("/auth/oidc/callback", s.handleOIDCCallback)
 
-	// Change password requires authentication
+	// Change password requires authentication (CA-NEW-CHGPW: CSRF-gated when flag on).
 	r.Group(func(r chi.Router) {
 		r.Use(httprate.LimitByIP(10, 1*time.Minute))
 		r.Use(auth.Middleware(s.jwtMgr))
+		if s.cfg.Security.CSRFFullCoverageEnabled {
+			r.Use(csrfProtectionWithName(
+				s.jwtMgr.CSRFCookieName(),
+				s.jwtMgr.SessionCookieName(),
+				true,
+			))
+		}
 		r.Post("/auth/change-password", s.handleChangePassword)
 	})
 
@@ -941,7 +965,14 @@ func (s *Server) setupRouter() {
 		// (after this group is defined), so we read it lazily at request time.
 		r.Use(s.lazyRepoAccessMiddleware)
 		if s.cfg.Security.CSRFEnabled {
-			r.Use(csrfProtectionWithName(s.jwtMgr.CSRFCookieName()))
+			// fullCoverage=false when the flag is off → Bearer-only bypass (today's
+			// behaviour preserved exactly). fullCoverage=true tightens to Bearer+no-session
+			// (CA-201) once CSRFFullCoverageEnabled is flipped by the operator post-Phase-1.
+			r.Use(csrfProtectionWithName(
+				s.jwtMgr.CSRFCookieName(),
+				s.jwtMgr.SessionCookieName(),
+				s.cfg.Security.CSRFFullCoverageEnabled,
+			))
 		}
 
 		// CSRF token endpoint
@@ -987,11 +1018,21 @@ func (s *Server) setupRouter() {
 	// Authenticated routes — outer group populates claims and applies tenant
 	// repo filtering; inner subgroups split on required role.
 	//
-	// Middleware order: tokens → repo-access → role.
+	// Middleware order: tokens → repo-access → [csrf] → role.
 	// Tokens populates claims; repo-access tightens repo IDs; role checks claims.
+	// CSRF middleware is added only when CSRFFullCoverageEnabled=true (CA-198).
 	r.Group(func(r chi.Router) {
 		r.Use(s.authMiddleware())
 		r.Use(s.lazyRepoAccessMiddleware)
+		// CA-198: gate the second authenticated group on the full-coverage flag.
+		// literal true because this branch only executes when the flag is on.
+		if s.cfg.Security.CSRFFullCoverageEnabled {
+			r.Use(csrfProtectionWithName(
+				s.jwtMgr.CSRFCookieName(),
+				s.jwtMgr.SessionCookieName(),
+				true,
+			))
+		}
 
 		// Subgroup A: user-scoped token self-service (auth required, no role gate).
 		// Non-admin users manage ONLY their own tokens here. Handler-side

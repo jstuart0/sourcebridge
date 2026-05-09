@@ -1633,6 +1633,133 @@ Investigation: `thoughts/shared/investigations/2026-05-07-diagnose-knowledge-slo
 
 ---
 
+## CSRF full-coverage flip (CA-198 / CA-201)
+
+SourceBridge ships a two-phase CSRF hardening campaign. Phase 1 injects
+`X-CSRF-Token` into every browser request from the web frontend. Phase 2
+adds the CSRF middleware to the admin route group and tightens the
+Bearer-bypass to reject browser-shaped requests (Bearer + session cookie)
+unless the token is also present.
+
+Both behaviors are gated on a single operator flag that defaults to `false`
+(safe rollback posture):
+
+**Env var**: `SOURCEBRIDGE_SECURITY_CSRF_FULL_COVERAGE_ENABLED`
+**Config key**: `security.csrf_full_coverage_enabled`
+**Default**: `false`
+
+When `false` (default):
+- Bearer alone bypasses CSRF (pre-CA-201 behavior, unchanged).
+- The admin route group (`/api/v1/admin/*`, `/api/v1/tokens/*`, etc.) has no CSRF middleware.
+- `/auth/logout` and `/auth/change-password` are not CSRF-gated.
+
+When `true`:
+- Bearer + session cookie is treated as browser-shaped; the request must carry `X-CSRF-Token`.
+- Bearer alone (no session cookie) still bypasses — CLI, MCP, VS Code extension, smoke jobs are unaffected.
+- Admin route group gains CSRF middleware.
+- `/auth/logout` and `/auth/change-password` gain CSRF protection.
+
+### Pre-flip checklist
+
+Before setting the flag to `true`:
+
+1. Confirm the web frontend bundle (Phase 1) is deployed and healthy.
+   In DevTools Network tab: a PUT to `/api/v1/admin/config` or similar
+   admin endpoint should show an `X-CSRF-Token` header with a hex value.
+2. Confirm the CSRF rejection log baseline is near-zero (no existing
+   rejections from stale/misconfigured clients).
+3. Identify any internal automation (CI jobs, smoke scripts, kubectl
+   exec'd curl commands) that might send both a Bearer token and a
+   session cookie in the same request — those callers need to drop the
+   session cookie or add `X-CSRF-Token`.
+
+### Flip path A — Helm-managed install (canonical)
+
+Add or update in your chart values:
+
+```yaml
+api:
+  env:
+    SOURCEBRIDGE_SECURITY_CSRF_FULL_COVERAGE_ENABLED: "true"
+```
+
+Then apply:
+
+```bash
+helm upgrade sourcebridge sourcebridge/sourcebridge --values your-values.yaml
+```
+
+The chart already passes arbitrary `api.env` keys through to the
+Deployment env block; no chart version change is needed.
+
+### Flip path B — Ad-hoc / triage (non-canonical)
+
+```bash
+kubectl -n sourcebridge set env deployment/sourcebridge-api \
+  SOURCEBRIDGE_SECURITY_CSRF_FULL_COVERAGE_ENABLED=true
+```
+
+Note: `kubectl set env` writes the live Deployment directly but is
+overwritten on the next `helm upgrade` if the chart values are not also
+updated. Use only for validation or emergency rollback, then update the
+chart values.
+
+### Flip path C — Non-Helm installs (config.toml or env)
+
+In `config.toml`:
+
+```toml
+[security]
+csrf_full_coverage_enabled = true
+```
+
+Or set the env var and restart the API process:
+
+```bash
+export SOURCEBRIDGE_SECURITY_CSRF_FULL_COVERAGE_ENABLED=true
+```
+
+### Rollback
+
+Set the flag back to `false` via the same path used to enable it. No
+redeploy is required for paths B and C; path A requires `helm upgrade`.
+
+### Watch window and expected log volume
+
+After flipping the flag, watch the API logs for 30 minutes minimum.
+
+```bash
+kubectl -n sourcebridge logs -f deployment/sourcebridge-api | grep "csrf rejection"
+```
+
+**Expected tail behavior**: a small number of 403s from browser tabs that
+loaded against the old bundle (before Phase 1 was deployed or before the
+user refreshed). These are ephemeral — they decay as users refresh. A
+tab refresh is the recovery action. Do not page on this tail.
+
+**Pager threshold**: more than 5 CSRF rejections per minute, sustained for
+more than 5 minutes after the flip, indicates something beyond stale tabs —
+investigate and consider rollback.
+
+Log format:
+
+```
+level=WARN msg="csrf rejection" path=/api/v1/admin/config method=POST
+  reason=csrf_token_missing bearer_with_session_cookie=true
+```
+
+`reason` is one of:
+- `csrf_token_missing` — request had no `X-CSRF-Token` header.
+- `csrf_token_mismatch` — header value did not match the CSRF cookie.
+
+`bearer_with_session_cookie` is `true` when the new tightened bypass fired
+(Bearer present + session cookie present → treated as browser-shaped).
+
+The drop counter (for rate-limited log lines) is internal only and does not
+appear in `/metrics`.
+
+---
+
 ## Living Wiki page-count and ops behavior
 
 For how Living Wiki determines the number of pages to generate, how

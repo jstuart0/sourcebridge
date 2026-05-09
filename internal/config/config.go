@@ -230,8 +230,19 @@ type SecurityConfig struct {
 	JWTSecretFile       string     `mapstructure:"jwt_secret_file"` // env: SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE
 	JWTTTLMinutes       int        `mapstructure:"jwt_ttl_minutes"`
 	EncryptionKey       string     `mapstructure:"encryption_key"`
-	CSRFEnabled         bool       `mapstructure:"csrf_enabled"`
-	GRPCAuthSecret      string     `mapstructure:"grpc_auth_secret"`
+	CSRFEnabled bool `mapstructure:"csrf_enabled"`
+	// CSRFFullCoverageEnabled gates the CA-198 + CA-201 tightening:
+	//   - Bearer-bypass requires no session cookie (CA-201).
+	//   - CSRF middleware is added to the second authenticated route group (/api/v1/admin/*, /api/v1/tokens/*, etc.) (CA-198).
+	//   - /auth/logout and /auth/change-password gain CSRF protection.
+	//
+	// Defaults false so that Phase 2 ships safely with no behavior change.
+	// Flip to true only after confirming the Phase 1 frontend bundle (X-CSRF-Token injection) is live.
+	//
+	// Config key: security.csrf_full_coverage_enabled
+	// Env var:    SOURCEBRIDGE_SECURITY_CSRF_FULL_COVERAGE_ENABLED
+	CSRFFullCoverageEnabled bool `mapstructure:"csrf_full_coverage_enabled"`
+	GRPCAuthSecret          string     `mapstructure:"grpc_auth_secret"`
 	Mode                string     `mapstructure:"mode"` // oss, commercial
 	OIDC                OIDCConfig `mapstructure:"oidc"`
 	GitHubWebhookSecret string     `mapstructure:"github_webhook_secret"`
@@ -856,6 +867,7 @@ func Load() (*Config, error) {
 	v.SetDefault("security.jwt_ttl_minutes", cfg.Security.JWTTTLMinutes)
 	v.SetDefault("security.encryption_key", "")
 	v.SetDefault("security.csrf_enabled", cfg.Security.CSRFEnabled)
+	v.SetDefault("security.csrf_full_coverage_enabled", false)
 	v.SetDefault("security.mode", cfg.Security.Mode)
 	v.SetDefault("security.api_token_legacy_admin_default", false)
 	v.SetDefault("security.github_webhook_secret", "")
