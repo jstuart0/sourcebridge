@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import inspect
 import json
 import os
 from collections.abc import AsyncIterator, Callable
@@ -64,18 +63,6 @@ from workers.knowledge.workflow_story import generate_workflow_story
 from workers.reasoning.types import LLMUsageRecord
 
 log = structlog.get_logger()
-
-
-def _supports_kwarg(fn: object, name: str) -> bool:
-    # Retained for back-compat with extensions / tests; production no longer
-    # uses it (all callers pass depth= unconditionally now that SurrealSummaryNodeCache
-    # always accepts the param). After two deploys with no extension reports a
-    # future cleanup ticket (CA-XXX) can remove this.
-    try:
-        sig = inspect.signature(fn)
-    except (TypeError, ValueError):
-        return False
-    return name in sig.parameters
 
 
 # SOURCEBRIDGE_CLIFF_NOTES_STRATEGY is a comma-separated preference chain
