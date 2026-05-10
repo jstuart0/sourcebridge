@@ -613,6 +613,16 @@ The subprocess `cli_ask.py` path remains the only route that reads
 uncommitted working-tree changes, so it stays available for local
 development via `sourcebridge ask --legacy`.
 
+**Default mode change (CA-319):** As of this release, omitting `mode` on
+`POST /api/v1/ask` and GraphQL `ask` defaults to `deep` retrieval (file
+and snippet context attached before synthesis). Explicit `mode: "fast"`
+remains available for callers that want the pure-LLM, no-retrieval path.
+The `sourcebridge ask --server` CLI inherits the server-side default when
+`--mode` is unset; scripts that need a specific mode should pass `--mode`
+explicitly. Operators tuning concurrency: deep-mode calls engage the
+synthesis lane — `SOURCEBRIDGE_QA_SYNTHESIS_LANE` is the throttle to
+revisit if deep-default load saturates the existing lane size.
+
 #### [security] -- Authentication mode
 
 ```toml
