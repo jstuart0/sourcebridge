@@ -899,13 +899,16 @@ hold a `*AppDeps` pointer constructed once in `NewServer`.
 
 To add a new subsystem dependency:
 1. Add a field to `AppDeps` in `internal/appdeps/appdeps.go`.
-2. Add the matching field on `graphql.Resolver` (exported) and/or `rest.Server`
-   (unexported), as appropriate.
-3. Add one line to the relevant sync helper (`syncResolverDepsFromAppDeps` or
-   `syncServerDepsFromAppDeps`).
+2. For `rest.Server`: also add the matching lowercase field and one line to
+   `syncServerDepsFromAppDeps` in `internal/api/rest/router_deps.go`.
+3. For `graphql.Resolver`: no resolver-side step is required. The resolver
+   reads the new field directly via `r.Deps.<Field>`. There is no
+   `syncResolverDepsFromAppDeps` function — it was removed in P11.
 
-`ClusteringHook` is intentionally absent from `AppDeps` — it is a closure
-constructed at wiring time and does not belong in the long-lived registry.
+The three resolver-only fields (`Store`, `Plan`, `ClusteringHook`) live directly
+on `graphql.Resolver` because they are not shared with `rest.Server`. See
+`internal/appdeps/appdeps.go:13-16` for the rationale. Do not add mirror fields
+to `graphql.Resolver` for anything that already lives on `AppDeps`.
 
 ## Legacy CodeAware naming
 

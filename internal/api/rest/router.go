@@ -272,11 +272,11 @@ func WithHealthChecker(hc *HealthChecker) ServerOption {
 // Server is the HTTP API server.
 type Server struct {
 	// AppDeps is the shared dependency registry constructed once in NewServer.
-	// It is populated after options are applied via a call to
-	// syncServerDepsFromAppDeps and passed to the GraphQL resolver via
-	// syncResolverDepsFromAppDeps. The existing lowercase fields below are
-	// preserved unchanged — they are the primary store; AppDeps mirrors them
-	// for consumers that need the canonical registry.
+	// It is populated after options are applied via syncServerDepsFromAppDeps.
+	// The GraphQL resolver receives AppDeps via direct field assignment
+	// (resolver.Deps = s.AppDeps) at construction — no sync function exists
+	// on the resolver side. The existing lowercase fields below are the primary
+	// store; AppDeps holds the same values for consumers that need the registry.
 	AppDeps *appdeps.AppDeps
 
 	cfg                        *config.Config
@@ -669,9 +669,10 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 
 	// Build AppDeps — the shared dependency registry (Phase 2 Slice 5,
 	// STRUCT-1). Constructed once here after all fields are settled.
-	// The GraphQL resolver receives AppDeps via resolver.Deps and the sync
-	// call in setupRouter. syncServerDepsFromAppDeps writes AppDeps back into
-	// the Server's lowercase fields (idempotent — values already match).
+	// The GraphQL resolver receives AppDeps via direct field assignment at
+	// construction; there is no resolver-side sync function. AppDeps is also
+	// written back into the Server's lowercase fields via syncServerDepsFromAppDeps
+	// (idempotent — values already match).
 	{
 		var clusterStore clustering.ClusterStore
 		if cs, ok := s.store.(clustering.ClusterStore); ok {

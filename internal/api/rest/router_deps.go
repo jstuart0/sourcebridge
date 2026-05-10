@@ -49,9 +49,9 @@ func syncServerDepsFromAppDeps(s *Server, deps *appdeps.AppDeps) {
 	// in NewServer. AppDeps.ClusterStore is populated from that assertion and
 	// wired into the GraphQL resolver; there is no write-back needed here.
 
-	// LivingWikiAuditLog: not stored on Server (it is an enterprise-only dep
-	// threaded directly into the Resolver). AppDeps carries it so the resolver
-	// sync can populate r.LivingWikiAuditLog without a separate wiring path.
+	// LivingWikiAuditLog: not stored on Server (it is an enterprise-only dep).
+	// AppDeps carries it; the GraphQL resolver reads it via r.Deps.LivingWikiAuditLog.
+	// There is no resolver sync function — the resolver holds *AppDeps directly.
 
 	// LLMProfileLookup: wired via s.llmProfileStore (a broader interface); the
 	// narrowed lookup adapter is built at setupRouter time. AppDeps.LLMProfileLookup

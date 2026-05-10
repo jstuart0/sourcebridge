@@ -52,7 +52,7 @@ func isForbiddenError(err error) bool {
 // TestCheckRepoAccessGraphQLForbiddenWhenAbsent verifies the helper returns a
 // forbidden-flavoured error when the repository is not in the store.
 func TestCheckRepoAccessGraphQLForbiddenWhenAbsent(t *testing.T) {
-	r := &Resolver{Store: graph.NewStore()}
+	r := &Resolver{Store: graph.NewStore(), Deps: &appdeps.AppDeps{}}
 	err := r.checkRepoAccessGraphQL(context.Background(), "does-not-exist")
 	if err == nil {
 		t.Fatal("expected forbidden error, got nil")
@@ -70,7 +70,7 @@ func TestCheckRepoAccessGraphQLNilWhenPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
-	r := &Resolver{Store: s}
+	r := &Resolver{Store: s, Deps: &appdeps.AppDeps{}}
 	if err := r.checkRepoAccessGraphQL(context.Background(), repo.ID); err != nil {
 		t.Errorf("expected nil for accessible repo, got: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestCheckRepoAccessGraphQLNilWhenPresent(t *testing.T) {
 // (should not happen in production, but defensive) returns a forbidden error
 // rather than panicking.
 func TestCheckRepoAccessGraphQLForbiddenOnNilStore(t *testing.T) {
-	r := &Resolver{Store: nil}
+	r := &Resolver{Store: nil, Deps: &appdeps.AppDeps{}}
 	err := r.checkRepoAccessGraphQL(context.Background(), "any-repo")
 	if err == nil {
 		t.Fatal("expected forbidden error with nil store, got nil")

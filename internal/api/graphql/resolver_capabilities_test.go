@@ -4,10 +4,12 @@
 package graphql
 
 import (
+	"context"
 	"testing"
 
 	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/capabilities"
+	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/entitlements"
 )
 
@@ -114,5 +116,53 @@ func TestFeatureToCapability_ExactMatchMappings(t *testing.T) {
 		if got != "" {
 			t.Errorf("featureToCapability(%q) = %q; want empty (unmapped: %s)", tc.feature, got, tc.reason)
 		}
+	}
+}
+
+// TestResolveGitCredentials_NilGitResolverFallsBackToConfigGit verifies the
+// env-bootstrap fallback path in resolveGitCredentialsForOp: when
+// r.Deps.GitResolver is nil (test or embedded mode) and r.Deps.Config is
+// populated, the resolver returns Config.Git credentials without error.
+//
+// Regression guard for P11 L2: this path replaced the deleted GitConfigLoader
+// branch. Without this test, a future refactor could break the fallback
+// silently — every git operation would return empty credentials rather than
+// the configured token.
+func TestResolveGitCredentials_NilGitResolverFallsBackToConfigGit(t *testing.T) {
+	cfg := &config.Config{
+		Git: config.GitConfig{
+			DefaultToken: "test-pat-token",
+			SSHKeyPath:   "/home/user/.ssh/id_ed25519",
+		},
+	}
+	r := &Resolver{Deps: &appdeps.AppDeps{Config: cfg}}
+	// GitResolver is nil — triggers the env-bootstrap fallback.
+	token, sshKeyPath, err := r.resolveGitCredentialsForOp(context.Background(), "test-op")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if token != cfg.Git.DefaultToken {
+		t.Errorf("token: got %q, want %q", token, cfg.Git.DefaultToken)
+	}
+	if sshKeyPath != cfg.Git.SSHKeyPath {
+		t.Errorf("sshKeyPath: got %q, want %q", sshKeyPath, cfg.Git.SSHKeyPath)
+	}
+}
+
+// TestResolveGitCredentials_NilGitResolverNilConfigReturnsEmpty verifies that
+// when both GitResolver and Config are nil, the fallback returns empty strings
+// without error (the "no credentials configured" case — callers handle blank
+// token by falling back to unauthenticated clone).
+func TestResolveGitCredentials_NilGitResolverNilConfigReturnsEmpty(t *testing.T) {
+	r := &Resolver{Deps: &appdeps.AppDeps{}}
+	token, sshKeyPath, err := r.resolveGitCredentialsForOp(context.Background(), "test-op")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if token != "" {
+		t.Errorf("token: got %q, want empty", token)
+	}
+	if sshKeyPath != "" {
+		t.Errorf("sshKeyPath: got %q, want empty", sshKeyPath)
 	}
 }

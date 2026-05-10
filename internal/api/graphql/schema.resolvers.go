@@ -3124,8 +3124,8 @@ func (r *queryResolver) ServiceHealth(ctx context.Context) (*PlatformHealth, err
 // Edition source-of-truth precedence (matches CA-136 REST handler):
 //   - r.Deps.Config.Edition (runtime config) when set; this is what the
 //     operator deployed as.
-//   - "unknown" otherwise. r.Deps.Config can be nil in tests that
-//     construct Resolver{} without wiring; nil-safe by design.
+//   - "unknown" otherwise. r.Deps.Config can be nil in degraded-mode tests
+//     that construct Resolver{Deps: &appdeps.AppDeps{}}; nil-safe by design.
 //
 // workerVersion uses the same cached lookup as REST so a high-cadence
 // GraphQL client sees identical, cached results — no extra worker
