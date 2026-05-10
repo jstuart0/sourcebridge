@@ -479,33 +479,67 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 	}
 	// OnJobFailed fires from all three failure paths (finalizeFailed,
 	// reaper, reconcileZombieJobs) and propagates the failure into the
-	// ca_repository_understanding row so the repo screen shows "Failed"
+	// appropriate artifact/understanding row so the UI shows "Failed"
 	// instead of "generating" indefinitely.
+	//
+	// Dispatch by job.JobType:
+	//   build_repository_understanding → MarkRepositoryUnderstandingFailed (ca_repository_understanding)
+	//   cliff_notes / architecture_diagram / learning_path / code_tour / workflow_story → SetArtifactFailed (ca_knowledge_artifact)
+	//   living_wiki_cold_start / living_wiki_retry_excluded → persistStaleLivingWikiResult
+	//
+	// SetArtifactFailed and MarkRepositoryUnderstandingFailed both carry an
+	// idempotency gate (WHERE status INSIDE ['pending','generating']) so re-firing
+	// on an already-terminal row is a safe no-op.
+	//
 	// Receiver is s.knowledgeStore (knowledge.KnowledgeStore at router.go:281),
 	// not s.store (graphstore.GraphStore) — same receiver OnStaleJob uses above.
 	orchCfg.OnJobFailed = func(job *llm.Job) {
-		if job == nil || s.knowledgeStore == nil {
+		if job == nil {
 			return
 		}
-		if job.JobType != "build_repository_understanding" {
-			return
-		}
-		if job.ArtifactID == "" {
-			return
-		}
-		code := job.ErrorCode
-		if code == "" {
-			code = "JOB_FAILED"
-		}
-		msg := job.ErrorMessage
-		if msg == "" {
-			msg = "Repository understanding job failed"
-		}
-		if err := s.knowledgeStore.MarkRepositoryUnderstandingFailed(context.Background(), job.ArtifactID, code, msg); err != nil {
-			slog.Warn("mark_repository_understanding_failed_error",
-				"job_id", job.ID,
-				"understanding_id", job.ArtifactID,
-				"error", err)
+		switch job.JobType {
+		case "build_repository_understanding":
+			if s.knowledgeStore == nil || job.ArtifactID == "" {
+				return
+			}
+			code := job.ErrorCode
+			if code == "" {
+				code = "JOB_FAILED"
+			}
+			msg := job.ErrorMessage
+			if msg == "" {
+				msg = "Repository understanding job failed"
+			}
+			if err := s.knowledgeStore.MarkRepositoryUnderstandingFailed(context.Background(), job.ArtifactID, code, msg); err != nil {
+				slog.Warn("mark_repository_understanding_failed_error",
+					"job_id", job.ID,
+					"understanding_id", job.ArtifactID,
+					"error", err)
+			}
+		case "cliff_notes", "architecture_diagram", "learning_path", "code_tour", "workflow_story":
+			if s.knowledgeStore == nil || job.ArtifactID == "" {
+				return
+			}
+			code := job.ErrorCode
+			if code == "" {
+				code = "JOB_FAILED"
+			}
+			msg := job.ErrorMessage
+			if msg == "" {
+				msg = "Knowledge artifact generation failed"
+			}
+			if err := s.knowledgeStore.SetArtifactFailed(context.Background(), job.ArtifactID, code, msg); err != nil {
+				slog.Warn("set_artifact_failed_error",
+					"job_id", job.ID,
+					"job_type", job.JobType,
+					"artifact_id", job.ArtifactID,
+					"error", err)
+			}
+		case "living_wiki_cold_start", "living_wiki_retry_excluded":
+			if s.livingWikiJobResultStore == nil {
+				return
+			}
+			persistStaleLivingWikiResult(s.livingWikiJobResultStore, job)
 		}
 	}
 	s.orchestrator = orchestrator.New(s.jobStore, orchCfg)

@@ -522,6 +522,12 @@ func (s *SurrealStore) SetArtifactFailed(ctx context.Context, id string, code st
 		return fmt.Errorf("database not connected")
 	}
 
+	// Idempotency gate: only transition from a non-terminal status so a late
+	// OnJobFailed callback cannot clobber an artifact that has already reached
+	// ready (from a successful concurrent retry) or is already failed. Mirrors
+	// the WHERE clause used by MarkRepositoryUnderstandingFailed. The stale flag
+	// is independent of status; an artifact being regenerated (status=generating)
+	// is correctly gated by the status check alone.
 	_, err := queryOne[interface{}](ctx, db,
 		`UPDATE type::thing('ca_knowledge_artifact', $id)
 		 SET status = $status,
@@ -531,7 +537,7 @@ func (s *SurrealStore) SetArtifactFailed(ctx context.Context, id string, code st
 		     error_code = $error_code,
 		     error_message = $error_message,
 		     updated_at = time::now()
-		 WHERE deleted_at IS NONE`,
+		 WHERE deleted_at IS NONE AND status INSIDE ['pending', 'generating']`,
 		map[string]any{
 			"id":            id,
 			"status":        string(knowledge.StatusFailed),

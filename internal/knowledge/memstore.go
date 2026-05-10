@@ -264,6 +264,13 @@ func (s *MemStore) SetArtifactFailed(_ context.Context, id string, code string, 
 	if a == nil {
 		return fmt.Errorf("artifact %s not found", id)
 	}
+	// Idempotency gate: only transition from a non-terminal status so a late
+	// OnJobFailed callback cannot clobber an artifact that has already reached
+	// ready (from a successful concurrent retry) or is already failed. Mirrors
+	// the WHERE clause added to the SurrealDB implementation.
+	if a.Status != StatusPending && a.Status != StatusGenerating {
+		return nil
+	}
 	a.Status = StatusFailed
 	a.ErrorCode = code
 	a.ErrorMessage = message
