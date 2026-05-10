@@ -684,3 +684,121 @@ func TestMarkRepositoryUnderstandingFailed(t *testing.T) {
 		}
 	})
 }
+
+// TestMarkRepositoryUnderstandingNeedsRefresh_FromFailed verifies that
+// MarkRepositoryUnderstandingNeedsRefresh accepts FAILED rows, transitions to
+// NEEDS_REFRESH, clears error_code/error_message, is idempotent on already-
+// needs_refresh rows, and is a no-op on running (BUILDING_TREE) rows.
+//
+// Gate symmetry note (load-bearing): MarkRepositoryUnderstandingFailed gates on
+// running stages {building_tree, deepening}; MarkRepositoryUnderstandingNeedsRefresh
+// gates on terminal stages {first_pass_ready, ready, failed}. The two gate sets are
+// non-overlapping, so there is no needs_refresh → failed regression possible.
+func TestMarkRepositoryUnderstandingNeedsRefresh_FromFailed(t *testing.T) {
+	t.Parallel()
+	scope := (&ArtifactScope{ScopeType: ScopeRepository}).NormalizePtr()
+	const errCode = "TEST_ERR"
+	const errMsg = "test"
+
+	t.Run("transitions_failed_to_needs_refresh", func(t *testing.T) {
+		t.Parallel()
+		s := NewMemStore()
+		repoID := "repo-nr-from-failed"
+
+		// Seed at FAILED with error fields populated.
+		row, err := s.StoreRepositoryUnderstanding(t.Context(), &RepositoryUnderstanding{
+			RepositoryID: repoID,
+			Scope:        scope,
+			Stage:        UnderstandingFailed,
+			TreeStatus:   UnderstandingTreePartial,
+			ErrorCode:    errCode,
+			ErrorMessage: errMsg,
+		})
+		if err != nil || row == nil {
+			t.Fatalf("seed failed row: err=%v row=%v", err, row)
+		}
+
+		if err := s.MarkRepositoryUnderstandingNeedsRefresh(t.Context(), repoID); err != nil {
+			t.Fatalf("MarkRepositoryUnderstandingNeedsRefresh from failed: %v", err)
+		}
+
+		got := s.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
+		if got == nil {
+			t.Fatal("GetRepositoryUnderstanding post-refresh returned nil")
+		}
+		if got.Stage != UnderstandingNeedsRefresh {
+			t.Fatalf("expected stage=needs_refresh, got %s", got.Stage)
+		}
+		if got.ErrorCode != "" {
+			t.Fatalf("expected error_code cleared, got %q", got.ErrorCode)
+		}
+		if got.ErrorMessage != "" {
+			t.Fatalf("expected error_message cleared, got %q", got.ErrorMessage)
+		}
+		if got.Progress != 0 || got.ProgressPhase != "" || got.ProgressMessage != "" {
+			t.Fatalf("expected progress zeroed, got progress=%v phase=%q message=%q",
+				got.Progress, got.ProgressPhase, got.ProgressMessage)
+		}
+	})
+
+	t.Run("idempotent_on_needs_refresh", func(t *testing.T) {
+		t.Parallel()
+		s := NewMemStore()
+		repoID := "repo-nr-idempotent"
+
+		// Seed directly at NEEDS_REFRESH.
+		if _, err := s.StoreRepositoryUnderstanding(t.Context(), &RepositoryUnderstanding{
+			RepositoryID: repoID,
+			Scope:        scope,
+			Stage:        UnderstandingNeedsRefresh,
+			TreeStatus:   UnderstandingTreePartial,
+		}); err != nil {
+			t.Fatalf("seed needs_refresh: %v", err)
+		}
+
+		// First call.
+		if err := s.MarkRepositoryUnderstandingNeedsRefresh(t.Context(), repoID); err != nil {
+			t.Fatalf("first call: %v", err)
+		}
+		// Second call (idempotent).
+		if err := s.MarkRepositoryUnderstandingNeedsRefresh(t.Context(), repoID); err != nil {
+			t.Fatalf("idempotent second call: %v", err)
+		}
+
+		got := s.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
+		if got == nil {
+			t.Fatal("post-idempotent lookup returned nil")
+		}
+		if got.Stage != UnderstandingNeedsRefresh {
+			t.Fatalf("expected stage=needs_refresh unchanged, got %s", got.Stage)
+		}
+	})
+
+	t.Run("no_op_on_building_tree", func(t *testing.T) {
+		t.Parallel()
+		s := NewMemStore()
+		repoID := "repo-nr-noop-running"
+
+		// Seed at BUILDING_TREE (running stage — must not be touched).
+		if _, err := s.StoreRepositoryUnderstanding(t.Context(), &RepositoryUnderstanding{
+			RepositoryID: repoID,
+			Scope:        scope,
+			Stage:        UnderstandingBuildingTree,
+			TreeStatus:   UnderstandingTreePartial,
+		}); err != nil {
+			t.Fatalf("seed building_tree: %v", err)
+		}
+
+		if err := s.MarkRepositoryUnderstandingNeedsRefresh(t.Context(), repoID); err != nil {
+			t.Fatalf("MarkNeedsRefresh on building_tree: %v", err)
+		}
+
+		got := s.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
+		if got == nil {
+			t.Fatal("post-noop lookup returned nil")
+		}
+		if got.Stage != UnderstandingBuildingTree {
+			t.Fatalf("expected building_tree unchanged, got %s", got.Stage)
+		}
+	})
+}

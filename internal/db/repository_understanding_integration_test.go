@@ -308,3 +308,109 @@ func TestSurrealStore_MarkNeedsRefresh_ZeroesProgressFields(t *testing.T) {
 			flipped.Progress, flipped.ProgressPhase, flipped.ProgressMessage)
 	}
 }
+
+// TestMarkRepositoryUnderstandingNeedsRefresh_FromFailed verifies that
+// MarkRepositoryUnderstandingNeedsRefresh transitions a FAILED row to
+// NEEDS_REFRESH, clears error_code and error_message, and is idempotent on
+// already-needs_refresh rows and a no-op on running (BUILDING_TREE) rows.
+//
+// Gate symmetry note (load-bearing): MarkRepositoryUnderstandingFailed gates on
+// stage INSIDE ['building_tree', 'deepening']; MarkRepositoryUnderstandingNeedsRefresh
+// gates on stage INSIDE ['first_pass_ready', 'ready', 'failed']. The two gate sets
+// are non-overlapping, so there is no needs_refresh → failed regression possible.
+func TestMarkRepositoryUnderstandingNeedsRefresh_FromFailed(t *testing.T) {
+	s := startSurrealContainer(t)
+	store := NewSurrealStore(s)
+
+	scope := &knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository}
+	const errCode = "TEST_ERR"
+	const errMsg = "test"
+
+	// Seed: BUILDING_TREE first so we can progress to FAILED via MarkFailed.
+	repoID := "repo-needs-refresh-from-failed"
+	if _, err := store.StoreRepositoryUnderstanding(t.Context(), &knowledge.RepositoryUnderstanding{
+		RepositoryID: repoID,
+		Scope:        scope,
+		Stage:        knowledge.UnderstandingBuildingTree,
+		TreeStatus:   knowledge.UnderstandingTreePartial,
+	}); err != nil {
+		t.Fatalf("seed building_tree: %v", err)
+	}
+	row := store.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
+	if row == nil {
+		t.Fatal("seed lookup returned nil")
+	}
+
+	// Transition to FAILED.
+	if err := store.MarkRepositoryUnderstandingFailed(t.Context(), row.ID, errCode, errMsg); err != nil {
+		t.Fatalf("MarkRepositoryUnderstandingFailed: %v", err)
+	}
+	failed := store.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
+	if failed == nil {
+		t.Fatal("post-failed lookup returned nil")
+	}
+	if failed.Stage != knowledge.UnderstandingFailed {
+		t.Fatalf("expected stage=failed, got %s", failed.Stage)
+	}
+	if failed.ErrorCode != errCode || failed.ErrorMessage != errMsg {
+		t.Fatalf("expected error_code=%q error_message=%q, got code=%q msg=%q",
+			errCode, errMsg, failed.ErrorCode, failed.ErrorMessage)
+	}
+
+	// Path under test: MarkNeedsRefresh should accept FAILED and clear error fields.
+	if err := store.MarkRepositoryUnderstandingNeedsRefresh(t.Context(), repoID); err != nil {
+		t.Fatalf("MarkRepositoryUnderstandingNeedsRefresh from failed: %v", err)
+	}
+	refreshed := store.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
+	if refreshed == nil {
+		t.Fatal("post-refresh lookup returned nil")
+	}
+	if refreshed.Stage != knowledge.UnderstandingNeedsRefresh {
+		t.Fatalf("expected stage=needs_refresh, got %s", refreshed.Stage)
+	}
+	if refreshed.ErrorCode != "" {
+		t.Fatalf("expected error_code cleared, got %q", refreshed.ErrorCode)
+	}
+	if refreshed.ErrorMessage != "" {
+		t.Fatalf("expected error_message cleared, got %q", refreshed.ErrorMessage)
+	}
+	if refreshed.Progress != 0 || refreshed.ProgressPhase != "" || refreshed.ProgressMessage != "" {
+		t.Fatalf("expected progress zeroed, got progress=%v phase=%q message=%q",
+			refreshed.Progress, refreshed.ProgressPhase, refreshed.ProgressMessage)
+	}
+
+	// Idempotency: a second call on a needs_refresh row must be a no-op (the WHERE
+	// clause excludes needs_refresh, so the row stays at needs_refresh unchanged).
+	if err := store.MarkRepositoryUnderstandingNeedsRefresh(t.Context(), repoID); err != nil {
+		t.Fatalf("idempotent second call: %v", err)
+	}
+	again := store.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
+	if again == nil {
+		t.Fatal("post-idempotent lookup returned nil")
+	}
+	if again.Stage != knowledge.UnderstandingNeedsRefresh {
+		t.Fatalf("idempotent call must not change stage, got %s", again.Stage)
+	}
+
+	// Cross-stage no-op: a BUILDING_TREE row must not be touched (running stages
+	// are not eligible — they are already processing).
+	repoID2 := "repo-needs-refresh-noop-running"
+	if _, err := store.StoreRepositoryUnderstanding(t.Context(), &knowledge.RepositoryUnderstanding{
+		RepositoryID: repoID2,
+		Scope:        scope,
+		Stage:        knowledge.UnderstandingBuildingTree,
+		TreeStatus:   knowledge.UnderstandingTreePartial,
+	}); err != nil {
+		t.Fatalf("seed building_tree (noop): %v", err)
+	}
+	if err := store.MarkRepositoryUnderstandingNeedsRefresh(t.Context(), repoID2); err != nil {
+		t.Fatalf("MarkNeedsRefresh on building_tree: %v", err)
+	}
+	noop := store.GetRepositoryUnderstanding(t.Context(), repoID2, *scope)
+	if noop == nil {
+		t.Fatal("noop lookup returned nil")
+	}
+	if noop.Stage != knowledge.UnderstandingBuildingTree {
+		t.Fatalf("expected building_tree unchanged, got %s", noop.Stage)
+	}
+}

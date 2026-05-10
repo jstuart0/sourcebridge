@@ -457,11 +457,13 @@ func (s *MemStore) MarkRepositoryUnderstandingNeedsRefresh(_ context.Context, re
 		if u.RepositoryID != repoID {
 			continue
 		}
-		if u.Stage == UnderstandingReady || u.Stage == UnderstandingFirstPassReady {
+		if u.Stage == UnderstandingReady || u.Stage == UnderstandingFirstPassReady || u.Stage == UnderstandingFailed {
 			u.Stage = UnderstandingNeedsRefresh
 			u.Progress = 0
 			u.ProgressPhase = ""
 			u.ProgressMessage = ""
+			u.ErrorCode = ""
+			u.ErrorMessage = ""
 			u.UpdatedAt = now
 		}
 	}

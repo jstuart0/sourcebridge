@@ -1296,8 +1296,10 @@ func (s *SurrealStore) MarkRepositoryUnderstandingNeedsRefresh(ctx context.Conte
 		     progress = 0,
 		     progress_phase = '',
 		     progress_message = '',
+		     error_code = '',
+		     error_message = '',
 		     updated_at = time::now()
-		 WHERE repo_id = $repo_id AND stage INSIDE ['first_pass_ready', 'ready']`,
+		 WHERE repo_id = $repo_id AND stage INSIDE ['first_pass_ready', 'ready', 'failed']`,
 		map[string]any{
 			"repo_id": repoID,
 			"stage":   string(knowledge.UnderstandingNeedsRefresh),
