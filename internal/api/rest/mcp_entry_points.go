@@ -52,7 +52,7 @@ type entryPointsResult struct {
 	Truncated    bool                    `json:"truncated,omitempty"`
 }
 
-func (h *mcpHandler) callGetEntryPoints(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetEntryPoints(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID string `json:"repository_id"`
 		Kind         string `json:"kind"`
@@ -81,7 +81,7 @@ func (h *mcpHandler) callGetEntryPoints(session *mcpSession, args json.RawMessag
 	// Pull every symbol once. The classifier is a linear pass; we
 	// don't need pagination here — the Phase 2 pagination work
 	// adds cursors for all list tools as a uniform treatment.
-	storedSymbols, _ := h.store.GetSymbols(context.Background(), params.RepositoryID, nil, nil, 0, 0)
+	storedSymbols, _ := h.store.GetSymbols(ctx, params.RepositoryID, nil, nil, 0, 0)
 	symbols := make([]entrypoints.Symbol, 0, len(storedSymbols))
 	for _, s := range storedSymbols {
 		symbols = append(symbols, entrypoints.Symbol{
@@ -104,7 +104,7 @@ func (h *mcpHandler) callGetEntryPoints(session *mcpSession, args json.RawMessag
 	// via a minimal file list and leave GrailsRole empty when the
 	// store doesn't carry it — the framework-aware classifier falls
 	// back to per-symbol signals cleanly.
-	storedFiles := h.store.GetFiles(context.Background(), params.RepositoryID)
+	storedFiles := h.store.GetFiles(ctx, params.RepositoryID)
 	files := make([]entrypoints.File, 0, len(storedFiles))
 	for _, f := range storedFiles {
 		files = append(files, entrypoints.File{

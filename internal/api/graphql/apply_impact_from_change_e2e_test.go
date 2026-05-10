@@ -24,16 +24,16 @@ import (
 // the extracted helper preserves the verbatim post-state for both
 // feature-flag branches; this test verifies the integration path:
 //
-//   1. The ReindexRepository GraphQL mutation, when run against a real
-//      on-disk git repository, drives the indexer end-to-end and
-//      reaches r.applyImpactFromChange with a meaningful ImpactReport.
-//   2. The same observable post-state the helper-level test asserts
-//      (selective stale flagging on the matching artifact, persistence
-//      of the impact report, surgical StaleArtifacts list) holds when
-//      reached via the mutation.
-//   3. The mutation completes without error on the happy path
-//      (incremental reindex, hash-skipping, ReplaceIndexResult, impact
-//      computation, applyImpactFromChange).
+//  1. The ReindexRepository GraphQL mutation, when run against a real
+//     on-disk git repository, drives the indexer end-to-end and
+//     reaches r.applyImpactFromChange with a meaningful ImpactReport.
+//  2. The same observable post-state the helper-level test asserts
+//     (selective stale flagging on the matching artifact, persistence
+//     of the impact report, surgical StaleArtifacts list) holds when
+//     reached via the mutation.
+//  3. The mutation completes without error on the happy path
+//     (incremental reindex, hash-skipping, ReplaceIndexResult, impact
+//     computation, applyImpactFromChange).
 //
 // What this test pins that the helper-level test cannot:
 //

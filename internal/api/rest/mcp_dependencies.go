@@ -92,7 +92,7 @@ type findImportersResult struct {
 // Handler
 // ---------------------------------------------------------------------------
 
-func (h *mcpHandler) callFindImporters(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callFindImporters(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID string `json:"repository_id"`
 		FilePath     string `json:"file_path"`
@@ -119,7 +119,7 @@ func (h *mcpHandler) callFindImporters(session *mcpSession, args json.RawMessage
 	repoID := params.RepositoryID
 
 	// Verify the repository exists.
-	if h.store.GetRepository(context.Background(), repoID) == nil {
+	if h.store.GetRepository(ctx, repoID) == nil {
 		return nil, errRepositoryNotIndexed(repoID)
 	}
 
@@ -128,7 +128,7 @@ func (h *mcpHandler) callFindImporters(session *mcpSession, args json.RawMessage
 	dir := path.Dir(params.FilePath)
 
 	// Find the matching package dependency record.
-	deps := h.store.GetPackageDependencies(context.Background(), repoID)
+	deps := h.store.GetPackageDependencies(ctx, repoID)
 
 	// Discriminate reasons before matching:
 	//   - No deps at all → "package_dependencies_not_computed"
@@ -237,7 +237,7 @@ func (h *mcpHandler) dependenciesToolsList() []mcpTool {
 		defByName[d.Name] = d
 	}
 	return []mcpTool{
-		{Definition: defByName["find_importers"], Handler: noCtxHandler((*mcpHandler).callFindImporters)},
+		{Definition: defByName["find_importers"], Handler: withCtxHandler((*mcpHandler).callFindImporters)},
 	}
 }
 

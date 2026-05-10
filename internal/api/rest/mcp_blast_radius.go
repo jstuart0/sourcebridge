@@ -171,7 +171,7 @@ type blastRadiusResult struct {
 // Handler
 // ---------------------------------------------------------------------------
 
-func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetBlastRadius(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID string `json:"repository_id"`
 		SymbolID     string `json:"symbol_id"`
@@ -224,14 +224,14 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 	repoID := params.RepositoryID
 
 	// Verify repo exists.
-	if h.store.GetRepository(context.Background(), repoID) == nil {
+	if h.store.GetRepository(ctx, repoID) == nil {
 		return nil, errRepositoryNotIndexed(repoID)
 	}
 
 	// -----------------------------------------------------------------------
 	// Resolve root symbol.
 	// -----------------------------------------------------------------------
-	root, err := h.resolveSymbol(symbolRefParams{
+	root, err := h.resolveSymbol(ctx, symbolRefParams{
 		RepositoryID: repoID,
 		SymbolID:     params.SymbolID,
 		FilePath:     params.FilePath,
@@ -255,7 +255,7 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 	// cap and ensures in-repo descendants reachable only through cross-repo
 	// intermediaries are NOT visited.
 	// -----------------------------------------------------------------------
-	allSyms, _ := h.store.GetSymbols(context.Background(), repoID, nil, nil, 0, 0)
+	allSyms, _ := h.store.GetSymbols(ctx, repoID, nil, nil, 0, 0)
 	repoSymbolSet := make(map[string]bool, len(allSyms))
 	for _, sym := range allSyms {
 		repoSymbolSet[sym.ID] = true
@@ -294,7 +294,7 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 	for hop := 1; hop <= depth; hop++ {
 		next := []string{}
 		for _, id := range frontier {
-			callers := h.store.GetCallers(context.Background(), id)
+			callers := h.store.GetCallers(ctx, id)
 			for _, nid := range callers {
 				// Cross-repo isolation at expansion time (per bob C2).
 				if !repoSymbolSet[nid] {
@@ -329,7 +329,7 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 		if hop == 0 {
 			continue // exclude root from impact_by_depth (per bob M4)
 		}
-		sym := h.store.GetSymbol(context.Background(), id)
+		sym := h.store.GetSymbol(ctx, id)
 		if sym == nil {
 			continue
 		}
@@ -407,10 +407,10 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 	for i := range layers {
 		layer := &layers[i]
 		if includeTests {
-			layer.TestMatches = h.aggregateTestsForLayer(layer.Callers, testSymsByID)
+			layer.TestMatches = h.aggregateTestsForLayer(ctx, layer.Callers, testSymsByID)
 		}
 		if includeRequirements {
-			layer.Requirements = h.aggregateRequirementsForLayer(layer.Callers, repoID)
+			layer.Requirements = h.aggregateRequirementsForLayer(ctx, layer.Callers, repoID)
 		}
 	}
 
@@ -510,14 +510,14 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 //
 // Name-heuristic (nameReferences) is deliberately excluded (includeNameHeuristic
 // = false hardcoded; see bob r2 advisory).
-func (h *mcpHandler) aggregateTestsForLayer(callers []callGraphSymbolBR, testSymsByID map[string]brTestSymInfo) []blastRadiusTestMatch {
+func (h *mcpHandler) aggregateTestsForLayer(ctx context.Context, callers []callGraphSymbolBR, testSymsByID map[string]brTestSymInfo) []blastRadiusTestMatch {
 	type testKey struct{ filePath, testName string }
 	seen := map[testKey]string{} // key → best confidence
 
 	for _, caller := range callers {
 		// Source 1: persisted edges.
-		for _, tsID := range h.store.GetTestsForSymbolPersisted(context.Background(), caller.SymbolID) {
-			ts := h.store.GetSymbol(context.Background(), tsID)
+		for _, tsID := range h.store.GetTestsForSymbolPersisted(ctx, caller.SymbolID) {
+			ts := h.store.GetSymbol(ctx, tsID)
 			if ts == nil {
 				continue
 			}
@@ -554,16 +554,16 @@ func (h *mcpHandler) aggregateTestsForLayer(callers []callGraphSymbolBR, testSym
 
 // aggregateRequirementsForLayer collects linked requirements for all callers
 // in a depth layer. Returns a deduped (max-confidence), sorted slice.
-func (h *mcpHandler) aggregateRequirementsForLayer(callers []callGraphSymbolBR, repoID string) []requirementSummary {
+func (h *mcpHandler) aggregateRequirementsForLayer(ctx context.Context, callers []callGraphSymbolBR, repoID string) []requirementSummary {
 	reqConfByID := map[string]float64{}
 	reqByID := map[string]requirementSummary{}
 
 	for _, caller := range callers {
-		for _, link := range h.store.GetLinksForSymbol(context.Background(), caller.SymbolID, false) {
+		for _, link := range h.store.GetLinksForSymbol(ctx, caller.SymbolID, false) {
 			if link.RequirementID == "" {
 				continue
 			}
-			req := h.store.GetRequirement(context.Background(), link.RequirementID)
+			req := h.store.GetRequirement(ctx, link.RequirementID)
 			if req == nil || req.RepoID != repoID {
 				continue
 			}
@@ -606,7 +606,7 @@ func (h *mcpHandler) blastRadiusToolsList() []mcpTool {
 		defByName[d.Name] = d
 	}
 	return []mcpTool{
-		{Definition: defByName["get_blast_radius"], Handler: noCtxHandler((*mcpHandler).callGetBlastRadius)},
+		{Definition: defByName["get_blast_radius"], Handler: withCtxHandler((*mcpHandler).callGetBlastRadius)},
 	}
 }
 

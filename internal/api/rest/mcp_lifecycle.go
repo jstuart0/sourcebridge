@@ -97,7 +97,7 @@ type indexRepositoryResult struct {
 	Message       string `json:"message,omitempty"`
 }
 
-func (h *mcpHandler) callIndexRepository(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callIndexRepository(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		PathOrURL string  `json:"path_or_url"`
 		Name      string  `json:"name"`
@@ -150,7 +150,7 @@ func (h *mcpHandler) callIndexRepository(session *mcpSession, args json.RawMessa
 			return nil, errInvalidArguments(fmt.Sprintf("repository URL not allowed: %v", err))
 		}
 	}
-	if existing := h.store.GetRepositoryByPath(context.Background(), params.PathOrURL); existing != nil {
+	if existing := h.store.GetRepositoryByPath(ctx, params.PathOrURL); existing != nil {
 		return indexRepositoryResult{
 			RepositoryID:  existing.ID,
 			Name:          existing.Name,
@@ -159,7 +159,7 @@ func (h *mcpHandler) callIndexRepository(session *mcpSession, args json.RawMessa
 			Message:       "Repository already registered with this path.",
 		}, nil
 	}
-	repo, err := h.store.CreateRepository(context.Background(), name, params.PathOrURL)
+	repo, err := h.store.CreateRepository(ctx, name, params.PathOrURL)
 	if err != nil {
 		return nil, fmt.Errorf("creating repository: %w", err)
 	}
@@ -194,7 +194,7 @@ type indexStatusResult struct {
 	ClassCount      int    `json:"class_count"`
 }
 
-func (h *mcpHandler) callGetIndexStatus(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetIndexStatus(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID string `json:"repository_id"`
 	}
@@ -205,7 +205,7 @@ func (h *mcpHandler) callGetIndexStatus(session *mcpSession, args json.RawMessag
 		return nil, err
 	}
 
-	repo := h.store.GetRepository(context.Background(), params.RepositoryID)
+	repo := h.store.GetRepository(ctx, params.RepositoryID)
 	if repo == nil {
 		return nil, errRepositoryNotIndexed(params.RepositoryID)
 	}
@@ -239,7 +239,7 @@ type refreshRepositoryResult struct {
 	Message      string `json:"message,omitempty"`
 }
 
-func (h *mcpHandler) callRefreshRepository(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callRefreshRepository(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID string `json:"repository_id"`
 		Strategy     string `json:"strategy"`
@@ -251,7 +251,7 @@ func (h *mcpHandler) callRefreshRepository(session *mcpSession, args json.RawMes
 		return nil, err
 	}
 
-	repo := h.store.GetRepository(context.Background(), params.RepositoryID)
+	repo := h.store.GetRepository(ctx, params.RepositoryID)
 	if repo == nil {
 		return nil, errRepositoryNotIndexed(params.RepositoryID)
 	}

@@ -90,7 +90,7 @@ type testsForSymbolResult struct {
 // Handler
 // ---------------------------------------------------------------------------
 
-func (h *mcpHandler) callGetTestsForSymbol(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetTestsForSymbol(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		symbolRefParams
 		IncludeAdjacent *bool `json:"include_adjacent"`
@@ -103,7 +103,7 @@ func (h *mcpHandler) callGetTestsForSymbol(session *mcpSession, args json.RawMes
 		return nil, err
 	}
 
-	target, err := h.resolveSymbol(params.symbolRefParams)
+	target, err := h.resolveSymbol(ctx, params.symbolRefParams)
 	if err != nil {
 		return nil, err
 	}
@@ -149,8 +149,8 @@ func (h *mcpHandler) callGetTestsForSymbol(session *mcpSession, args json.RawMes
 	// every direct call from a test symbol to a non-test symbol.
 	// GraphStore.GetTestsForSymbolPersisted returns the test IDs
 	// keyed on the target symbol.
-	if testIDs := h.store.GetTestsForSymbolPersisted(context.Background(), target.ID); len(testIDs) > 0 {
-		byID := h.store.GetSymbolsByIDs(context.Background(), testIDs)
+	if testIDs := h.store.GetTestsForSymbolPersisted(ctx, target.ID); len(testIDs) > 0 {
+		byID := h.store.GetSymbolsByIDs(ctx, testIDs)
 		for _, sym := range byID {
 			if sym != nil {
 				addSource(sym, "persisted_edge")
@@ -159,9 +159,9 @@ func (h *mcpHandler) callGetTestsForSymbol(session *mcpSession, args json.RawMes
 	}
 	// Fallback: IsTest-marked callers (kept as a belt-and-suspenders
 	// signal for languages/patterns where the persisted edge misses).
-	callerIDs := h.store.GetCallers(context.Background(), target.ID)
+	callerIDs := h.store.GetCallers(ctx, target.ID)
 	if len(callerIDs) > 0 {
-		byID := h.store.GetSymbolsByIDs(context.Background(), callerIDs)
+		byID := h.store.GetSymbolsByIDs(ctx, callerIDs)
 		for _, sym := range byID {
 			if sym != nil && sym.IsTest {
 				addSource(sym, "persisted_edge")
@@ -176,7 +176,7 @@ func (h *mcpHandler) callGetTestsForSymbol(session *mcpSession, args json.RawMes
 	if includeAdjacent {
 		candidates := qa.AdjacentTestCandidates(target.FilePath)
 		for _, cand := range candidates {
-			for _, sym := range h.store.GetSymbolsByFile(context.Background(), target.RepoID, cand) {
+			for _, sym := range h.store.GetSymbolsByFile(ctx, target.RepoID, cand) {
 				if sym.IsTest {
 					addSource(sym, "adjacent_heuristic")
 				}
@@ -193,7 +193,7 @@ func (h *mcpHandler) callGetTestsForSymbol(session *mcpSession, args json.RawMes
 	// symbol whose file contains another symbol named identically
 	// to the target is considered a text_reference match.
 	if includeTextRefs && target.Name != "" {
-		allSyms, _ := h.store.GetSymbols(context.Background(), target.RepoID, nil, nil, 0, 0)
+		allSyms, _ := h.store.GetSymbols(ctx, target.RepoID, nil, nil, 0, 0)
 		for _, sym := range allSyms {
 			if !sym.IsTest {
 				continue

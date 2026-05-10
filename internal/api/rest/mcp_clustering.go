@@ -77,7 +77,7 @@ type subsystemsResult struct {
 	GeneratedAt string                    `json:"generated_at"`
 }
 
-func (h *mcpHandler) callGetSubsystems(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetSubsystems(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepoID string `json:"repo_id"`
 		Limit  int    `json:"limit"`
@@ -109,7 +109,7 @@ func (h *mcpHandler) callGetSubsystems(session *mcpSession, args json.RawMessage
 		}, nil
 	}
 
-	clusters, err := h.clusterStore.GetClusters(context.Background(), params.RepoID)
+	clusters, err := h.clusterStore.GetClusters(ctx, params.RepoID)
 	if err != nil || len(clusters) == 0 {
 		return subsystemsResult{
 			RepoID:      params.RepoID,
@@ -120,7 +120,7 @@ func (h *mcpHandler) callGetSubsystems(session *mcpSession, args json.RawMessage
 	}
 
 	// Build cross-cluster call index.
-	edges := h.store.GetCallEdges(context.Background(), params.RepoID)
+	edges := h.store.GetCallEdges(ctx, params.RepoID)
 	clusterBySymbol := buildClusterBySymbol(clusters)
 	crossCalls := buildCrossClusterCalls(edges, clusterBySymbol, clusters)
 
@@ -161,7 +161,7 @@ type subsystemByIDResult struct {
 	Cluster clustering.Cluster `json:"cluster"`
 }
 
-func (h *mcpHandler) callGetSubsystemByID(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetSubsystemByID(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		ClusterID string `json:"cluster_id"`
 	}
@@ -179,7 +179,7 @@ func (h *mcpHandler) callGetSubsystemByID(session *mcpSession, args json.RawMess
 		return nil, fmt.Errorf("clustering not available on this deployment")
 	}
 
-	c, err := h.clusterStore.GetClusterByID(context.Background(), params.ClusterID)
+	c, err := h.clusterStore.GetClusterByID(ctx, params.ClusterID)
 	if err != nil || c == nil {
 		return nil, fmt.Errorf("cluster %q not found", params.ClusterID)
 	}
@@ -204,7 +204,7 @@ type subsystemForSymbolResult struct {
 	Message     string                    `json:"message,omitempty"`
 }
 
-func (h *mcpHandler) callGetSubsystem(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetSubsystem(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepoID   string `json:"repo_id"`
 		SymbolID string `json:"symbol_id"`
@@ -230,7 +230,7 @@ func (h *mcpHandler) callGetSubsystem(session *mcpSession, args json.RawMessage)
 		}, nil
 	}
 
-	c, err := h.clusterStore.GetClusterForSymbol(context.Background(), params.RepoID, params.SymbolID)
+	c, err := h.clusterStore.GetClusterForSymbol(ctx, params.RepoID, params.SymbolID)
 	if err != nil || c == nil {
 		return subsystemForSymbolResult{
 			RepoID:   params.RepoID,
@@ -240,11 +240,11 @@ func (h *mcpHandler) callGetSubsystem(session *mcpSession, args json.RawMessage)
 	}
 
 	// Build summary from the cluster's member list.
-	edges := h.store.GetCallEdges(context.Background(), params.RepoID)
+	edges := h.store.GetCallEdges(ctx, params.RepoID)
 	inDegree := buildInDegree(edges)
 
 	// Gather all clusters for cross-cluster call computation.
-	allClusters, _ := h.clusterStore.GetClusters(context.Background(), params.RepoID)
+	allClusters, _ := h.clusterStore.GetClusters(ctx, params.RepoID)
 	clusterBySymbol := buildClusterBySymbol(allClusters)
 	crossCalls := buildCrossClusterCalls(edges, clusterBySymbol, allClusters)
 
@@ -263,7 +263,7 @@ func (h *mcpHandler) callGetSubsystem(session *mcpSession, args json.RawMessage)
 		peers = peers[:maxPeers]
 	}
 	// Resolve symbol names for readability.
-	symMap := h.store.GetSymbolsByIDs(context.Background(), peers)
+	symMap := h.store.GetSymbolsByIDs(ctx, peers)
 	peerNames := make([]string, 0, len(peers))
 	for _, id := range peers {
 		if sym, ok := symMap[id]; ok && sym != nil {

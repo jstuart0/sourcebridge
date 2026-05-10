@@ -55,7 +55,7 @@ type crossRepoImpactResult struct {
 	Message      string                `json:"message,omitempty"`
 }
 
-func (h *mcpHandler) callGetCrossRepoImpact(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetCrossRepoImpact(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	// Capability gate — refuses cleanly on OSS even if something
 	// manages to invoke the tool without going through tools/list.
 	if !capabilities.IsAvailable("cross_repo_impact", h.edition) {
@@ -90,7 +90,7 @@ func (h *mcpHandler) callGetCrossRepoImpact(session *mcpSession, args json.RawMe
 
 	var out []crossRepoRefResult
 	if params.SymbolID != "" {
-		refs, err := h.store.GetSymbolCrossRepoRefs(context.Background(), params.SymbolID)
+		refs, err := h.store.GetSymbolCrossRepoRefs(ctx, params.SymbolID)
 		if err != nil {
 			return nil, err
 		}
@@ -107,7 +107,7 @@ func (h *mcpHandler) callGetCrossRepoImpact(session *mcpSession, args json.RawMe
 			})
 		}
 	} else {
-		refs, err := h.store.GetCrossRepoRefs(context.Background(), params.RepositoryID, refType, limit)
+		refs, err := h.store.GetCrossRepoRefs(ctx, params.RepositoryID, refType, limit)
 		if err != nil {
 			return nil, err
 		}

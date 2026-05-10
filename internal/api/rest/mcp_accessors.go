@@ -155,11 +155,11 @@ type symbolRefParams struct {
 // to symbol_id when provided and the contract fields are ambiguous or
 // empty. Returns nil with a non-nil error when no matching symbol is
 // found.
-func (h *mcpHandler) resolveSymbol(p symbolRefParams) (*graph.StoredSymbol, error) {
+func (h *mcpHandler) resolveSymbol(ctx context.Context, p symbolRefParams) (*graph.StoredSymbol, error) {
 	// symbol_id optimization path — validated against repository_id to
 	// prevent cross-repo leakage.
 	if p.SymbolID != "" {
-		sym := h.store.GetSymbol(context.Background(), p.SymbolID)
+		sym := h.store.GetSymbol(ctx, p.SymbolID)
 		if sym != nil && sym.RepoID == p.RepositoryID {
 			return sym, nil
 		}
@@ -171,7 +171,7 @@ func (h *mcpHandler) resolveSymbol(p symbolRefParams) (*graph.StoredSymbol, erro
 		return nil, fmt.Errorf("must provide either symbol_id or {file_path, symbol_name}")
 	}
 
-	fileSymbols := h.store.GetSymbolsByFile(context.Background(), p.RepositoryID, p.FilePath)
+	fileSymbols := h.store.GetSymbolsByFile(ctx, p.RepositoryID, p.FilePath)
 	var candidates []*graph.StoredSymbol
 	for _, s := range fileSymbols {
 		if s.Name == p.SymbolName {
@@ -236,15 +236,15 @@ type callGraphResult struct {
 // callGetCallers / callGetCallees share most of the walk logic — direction
 // is the only thing that changes.
 
-func (h *mcpHandler) callGetCallers(session *mcpSession, args json.RawMessage) (interface{}, error) {
-	return h.walkCallGraph(session, args, "callers")
+func (h *mcpHandler) callGetCallers(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
+	return h.walkCallGraph(ctx, session, args, "callers")
 }
 
-func (h *mcpHandler) callGetCallees(session *mcpSession, args json.RawMessage) (interface{}, error) {
-	return h.walkCallGraph(session, args, "callees")
+func (h *mcpHandler) callGetCallees(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
+	return h.walkCallGraph(ctx, session, args, "callees")
 }
 
-func (h *mcpHandler) walkCallGraph(session *mcpSession, args json.RawMessage, direction string) (interface{}, error) {
+func (h *mcpHandler) walkCallGraph(ctx context.Context, session *mcpSession, args json.RawMessage, direction string) (interface{}, error) {
 	var params struct {
 		symbolRefParams
 		paginationArgs
@@ -266,7 +266,7 @@ func (h *mcpHandler) walkCallGraph(session *mcpSession, args json.RawMessage, di
 		hops = 3
 	}
 
-	root, err := h.resolveSymbol(params.symbolRefParams)
+	root, err := h.resolveSymbol(ctx, params.symbolRefParams)
 	if err != nil {
 		return nil, err
 	}
@@ -283,9 +283,9 @@ func (h *mcpHandler) walkCallGraph(session *mcpSession, args json.RawMessage, di
 			var neighbors []string
 			switch direction {
 			case "callers":
-				neighbors = h.store.GetCallers(context.Background(), id)
+				neighbors = h.store.GetCallers(ctx, id)
 			case "callees":
-				neighbors = h.store.GetCallees(context.Background(), id)
+				neighbors = h.store.GetCallees(ctx, id)
 			}
 			for _, nid := range neighbors {
 				if _, seen := visited[nid]; seen {
@@ -319,7 +319,7 @@ func (h *mcpHandler) walkCallGraph(session *mcpSession, args json.RawMessage, di
 	for id := range visited {
 		ids = append(ids, id)
 	}
-	byID := h.store.GetSymbolsByIDs(context.Background(), ids)
+	byID := h.store.GetSymbolsByIDs(ctx, ids)
 
 	symbols := make([]callGraphSymbol, 0, len(visited))
 	for id, hopFromRoot := range visited {
@@ -424,7 +424,7 @@ type fileImportsResult struct {
 	Imports  []fileImport `json:"imports"`
 }
 
-func (h *mcpHandler) callGetFileImports(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetFileImports(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID string `json:"repository_id"`
 		FilePath     string `json:"file_path"`
@@ -452,13 +452,13 @@ func (h *mcpHandler) callGetFileImports(session *mcpSession, args json.RawMessag
 		}
 	}
 
-	all := h.store.GetImports(context.Background(), params.RepositoryID)
+	all := h.store.GetImports(ctx, params.RepositoryID)
 
 	// Build a file-path → []import index keyed by the file *declaring*
 	// the import. GetImports returns StoredImport with only FileID —
 	// we need to join to file path. The cheapest path today is a
 	// single pass over repo files.
-	files := h.store.GetFiles(context.Background(), params.RepositoryID)
+	files := h.store.GetFiles(ctx, params.RepositoryID)
 	fileIDToPath := make(map[string]string, len(files))
 	pathToFileID := make(map[string]string, len(files))
 	for _, f := range files {
@@ -571,7 +571,7 @@ type architectureDiagramResult struct {
 	Message    string                 `json:"message,omitempty"`
 }
 
-func (h *mcpHandler) callGetArchitectureDiagram(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetArchitectureDiagram(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID string `json:"repository_id"`
 		ScopeType    string `json:"scope_type"`
@@ -608,7 +608,7 @@ func (h *mcpHandler) callGetArchitectureDiagram(session *mcpSession, args json.R
 		},
 	}
 
-	artifact := h.knowledgeStore.GetArtifactByKey(context.Background(), key)
+	artifact := h.knowledgeStore.GetArtifactByKey(ctx, key)
 	if artifact == nil {
 		return architectureDiagramResult{
 			Found:     false,
@@ -676,7 +676,7 @@ type recentChangesResult struct {
 	Truncated    bool           `json:"truncated,omitempty"`
 }
 
-func (h *mcpHandler) callGetRecentChanges(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetRecentChanges(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID string `json:"repository_id"`
 		Path         string `json:"path"`
@@ -705,7 +705,7 @@ func (h *mcpHandler) callGetRecentChanges(session *mcpSession, args json.RawMess
 		limit = 200
 	}
 
-	repo := h.store.GetRepository(context.Background(), params.RepositoryID)
+	repo := h.store.GetRepository(ctx, params.RepositoryID)
 	if repo == nil {
 		return nil, fmt.Errorf("repository not found")
 	}
@@ -722,7 +722,7 @@ func (h *mcpHandler) callGetRecentChanges(session *mcpSession, args json.RawMess
 
 	// Symbol-level mode: resolve the symbol and run git log -L.
 	if params.SymbolName != "" || params.SymbolID != "" {
-		sym, err := h.resolveSymbol(symbolRefParams{
+		sym, err := h.resolveSymbol(ctx, symbolRefParams{
 			RepositoryID: params.RepositoryID,
 			FilePath:     params.FilePath,
 			SymbolName:   params.SymbolName,
@@ -732,7 +732,7 @@ func (h *mcpHandler) callGetRecentChanges(session *mcpSession, args json.RawMess
 		if err != nil {
 			return nil, err
 		}
-		commits, err := runGitLogSymbol(context.Background(), gitRoot, sym.FilePath, sym.StartLine, sym.EndLine, limit)
+		commits, err := runGitLogSymbol(ctx, gitRoot, sym.FilePath, sym.StartLine, sym.EndLine, limit)
 		if err != nil {
 			return nil, fmt.Errorf("git log -L failed: %v", err)
 		}
@@ -744,7 +744,7 @@ func (h *mcpHandler) callGetRecentChanges(session *mcpSession, args json.RawMess
 	}
 
 	// File / directory mode.
-	commits, err := runGitLog(context.Background(), gitRoot, params.Path, limit)
+	commits, err := runGitLog(ctx, gitRoot, params.Path, limit)
 	if err != nil {
 		return nil, fmt.Errorf("git log failed: %v", err)
 	}

@@ -24,20 +24,20 @@ type cliffNotesGenerationService struct {
 // beyond the receiver. Defined here so both Generate and (eventually)
 // RefreshFromExisting can build it with appropriate values.
 type cliffNotesRunParams struct {
-	repo                *graphstore.Repository
-	artifact            *knowledgepkg.Artifact
-	snap                *knowledgepkg.KnowledgeSnapshot
-	snapJSON            []byte
+	repo                  *graphstore.Repository
+	artifact              *knowledgepkg.Artifact
+	snap                  *knowledgepkg.KnowledgeSnapshot
+	snapJSON              []byte
 	enrichedCliffSnapJSON []byte
-	scope               knowledgepkg.ArtifactScope
-	generationMode      knowledgepkg.GenerationMode
-	audience            string
-	depth               string
-	clientType          string
-	snapshotSizeBytes   int
-	understanding       *knowledgepkg.RepositoryUnderstanding
-	reusedUnderstanding bool
-	renderPlan          cliffNotesRenderPlan
+	scope                 knowledgepkg.ArtifactScope
+	generationMode        knowledgepkg.GenerationMode
+	audience              string
+	depth                 string
+	clientType            string
+	snapshotSizeBytes     int
+	understanding         *knowledgepkg.RepositoryUnderstanding
+	reusedUnderstanding   bool
+	renderPlan            cliffNotesRenderPlan
 }
 
 func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeArtifact, error) {

@@ -252,7 +252,7 @@ func recordChangeToolDef() mcpToolDefinition {
 // before any router work. An agent that targets a repo it can't access
 // gets the standard "Repository not found or not accessible" error
 // (no fingerprinting of which repos exist).
-func (h *mcpHandler) callRecordChange(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callRecordChange(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	if h.changeDispatcher == nil {
 		// Defense in depth: the tool is hidden from tools/list when the
 		// dispatcher is nil, but a hand-crafted tools/call can still

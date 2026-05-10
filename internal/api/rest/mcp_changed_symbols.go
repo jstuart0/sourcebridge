@@ -101,7 +101,7 @@ type changedSymbolsResult struct {
 // Handler
 // ---------------------------------------------------------------------------
 
-func (h *mcpHandler) callGetChangedSymbols(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetChangedSymbols(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID string   `json:"repository_id"`
 		CommitRange  string   `json:"commit_range"`
@@ -129,7 +129,7 @@ func (h *mcpHandler) callGetChangedSymbols(session *mcpSession, args json.RawMes
 	// intentionally discarded — we build both projections from the flat
 	// symbol ID list (second return) so every entry is fully hydrated from
 	// the store.
-	_, touchedSymbolIDs, err := h.resolveDiffTouchedSymbols(repoID, params.CommitRange, params.Files)
+	_, touchedSymbolIDs, err := h.resolveDiffTouchedSymbols(ctx, repoID, params.CommitRange, params.Files)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (h *mcpHandler) callGetChangedSymbols(session *mcpSession, args json.RawMes
 	//
 	// GetSymbolsByIDs returns a map[id]*StoredSymbol. IDs not found in the
 	// store are absent from the map; we skip them silently.
-	symMap := h.store.GetSymbolsByIDs(context.Background(), touchedSymbolIDs)
+	symMap := h.store.GetSymbolsByIDs(ctx, touchedSymbolIDs)
 
 	// Step 3: dedupe + cross-repo guard.
 	//
@@ -245,7 +245,7 @@ func (h *mcpHandler) changedSymbolsToolsList() []mcpTool {
 		defByName[d.Name] = d
 	}
 	return []mcpTool{
-		{Definition: defByName["get_changed_symbols"], Handler: noCtxHandler((*mcpHandler).callGetChangedSymbols)},
+		{Definition: defByName["get_changed_symbols"], Handler: withCtxHandler((*mcpHandler).callGetChangedSymbols)},
 	}
 }
 

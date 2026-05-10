@@ -103,7 +103,7 @@ func (h *mcpHandler) fieldGuideToolDefs() []mcpToolDefinition {
 // callGetFieldGuide implements the get_field_guide MCP tool. It maps the
 // format enum to a knowledge.ArtifactType and reads from the knowledge store
 // using the same GetArtifactByKey path as callGetCliffNotes.
-func (h *mcpHandler) callGetFieldGuide(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetFieldGuide(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID string `json:"repository_id"`
 		Format       string `json:"format"`
@@ -169,7 +169,7 @@ func (h *mcpHandler) callGetFieldGuide(session *mcpSession, args json.RawMessage
 		formatLabel = "cliff_notes"
 	}
 
-	artifact := h.knowledgeStore.GetArtifactByKey(context.Background(), key)
+	artifact := h.knowledgeStore.GetArtifactByKey(ctx, key)
 	if artifact == nil {
 		return map[string]interface{}{
 			"artifact": nil,
@@ -282,7 +282,7 @@ func (h *mcpHandler) fieldGuideToolsList() []mcpTool {
 		defByName[d.Name] = d
 	}
 	return []mcpTool{
-		{Definition: defByName["get_field_guide"], Handler: noCtxHandler((*mcpHandler).callGetFieldGuide)},
+		{Definition: defByName["get_field_guide"], Handler: withCtxHandler((*mcpHandler).callGetFieldGuide)},
 	}
 }
 
