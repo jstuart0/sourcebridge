@@ -301,7 +301,7 @@ func (h *mcpHandler) callRecordChange(ctx context.Context, session *mcpSession, 
 	// error string regardless of which constraint failed (allowed-list,
 	// permChecker, or unknown repo) so a caller can't fingerprint
 	// other tenants' repos.
-	if err := h.checkRepoAccess(session, req.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, req.RepositoryID); err != nil {
 		return nil, err
 	}
 

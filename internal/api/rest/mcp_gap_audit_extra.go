@@ -140,7 +140,7 @@ func (h *mcpHandler) callFindDeadCode(ctx context.Context, session *mcpSession, 
 		return nil, errInvalidArguments(err.Error())
 	}
 
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 
@@ -292,7 +292,7 @@ func (h *mcpHandler) callGetUntestedSymbols(ctx context.Context, session *mcpSes
 		return nil, errInvalidArguments(err.Error())
 	}
 
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 

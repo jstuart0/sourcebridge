@@ -84,7 +84,7 @@ func (h *mcpHandler) callGetSymbolSource(ctx context.Context, session *mcpSessio
 // bundled caller/callee assembly), and any error.
 func (h *mcpHandler) buildSymbolSource(ctx context.Context, session *mcpSession, params symbolRefParams, contextLines int) (getSymbolSourceResult, *graphstore.StoredSymbol, error) {
 	// Step 4 — defense-in-depth repo access guard.
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return getSymbolSourceResult{}, nil, err
 	}
 
@@ -238,7 +238,7 @@ func (h *mcpHandler) callGetSymbolContext(ctx context.Context, session *mcpSessi
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, errInvalidArguments(err.Error())
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 

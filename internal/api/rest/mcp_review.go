@@ -150,7 +150,7 @@ func (h *mcpHandler) callGetReviewForDiff(ctx context.Context, session *mcpSessi
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, errInvalidArguments(err.Error())
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 

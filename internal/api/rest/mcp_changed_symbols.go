@@ -112,7 +112,7 @@ func (h *mcpHandler) callGetChangedSymbols(ctx context.Context, session *mcpSess
 		return nil, errInvalidArguments(err.Error())
 	}
 
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 

@@ -997,9 +997,9 @@ func (h *mcpHandler) dispatchCtx(ctx context.Context, session *mcpSession, msg j
 	case "tools/call":
 		return h.handleToolsCallCtx(ctx, session, msg)
 	case "resources/list":
-		return h.handleResourcesList(session, msg)
+		return h.handleResourcesList(ctx, session, msg)
 	case "resources/read":
-		return h.handleResourcesRead(session, msg)
+		return h.handleResourcesRead(ctx, session, msg)
 	case "prompts/list":
 		return h.handlePromptsList(session, msg)
 	case "prompts/get":
@@ -1334,7 +1334,7 @@ func (h *mcpHandler) callSearchSymbols(ctx context.Context, session *mcpSession,
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 
@@ -1518,7 +1518,7 @@ func (h *mcpHandler) callAskQuestion(ctx context.Context, session *mcpSession, a
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 	if !h.qaEnabled || h.qaOrchestrator == nil {
@@ -1613,7 +1613,7 @@ func (h *mcpHandler) callExplainCodeCtx(ctx context.Context, session *mcpSession
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 
@@ -1720,7 +1720,7 @@ func (h *mcpHandler) callGetRequirements(ctx context.Context, session *mcpSessio
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 
@@ -1800,7 +1800,7 @@ func (h *mcpHandler) callGetImpactReport(ctx context.Context, session *mcpSessio
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 
@@ -1841,7 +1841,7 @@ func (h *mcpHandler) callGetCliffNotes(ctx context.Context, session *mcpSession,
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 
@@ -1931,8 +1931,8 @@ func (h *mcpHandler) callGetCliffNotes(ctx context.Context, session *mcpSession,
 // resources/list
 // ---------------------------------------------------------------------------
 
-func (h *mcpHandler) handleResourcesList(session *mcpSession, msg jsonRPCRequest) jsonRPCResponse {
-	repos := h.store.ListRepositories(context.Background())
+func (h *mcpHandler) handleResourcesList(ctx context.Context, session *mcpSession, msg jsonRPCRequest) jsonRPCResponse {
+	repos := h.store.ListRepositories(ctx)
 	resources := make([]mcpResourceDefinition, 0)
 
 	for _, repo := range repos {
@@ -1960,7 +1960,7 @@ func (h *mcpHandler) handleResourcesList(session *mcpSession, msg jsonRPCRequest
 // resources/read
 // ---------------------------------------------------------------------------
 
-func (h *mcpHandler) handleResourcesRead(session *mcpSession, msg jsonRPCRequest) jsonRPCResponse {
+func (h *mcpHandler) handleResourcesRead(ctx context.Context, session *mcpSession, msg jsonRPCRequest) jsonRPCResponse {
 	var params struct {
 		URI string `json:"uri"`
 	}
@@ -1982,7 +1982,7 @@ func (h *mcpHandler) handleResourcesRead(session *mcpSession, msg jsonRPCRequest
 	repoID := parts[0]
 	resourceType := parts[1]
 
-	if err := h.checkRepoAccess(session, repoID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, repoID); err != nil {
 		return errorResponse(msg.ID, -32602, err.Error())
 	}
 
@@ -1991,9 +1991,9 @@ func (h *mcpHandler) handleResourcesRead(session *mcpSession, msg jsonRPCRequest
 
 	switch resourceType {
 	case "files":
-		content, readErr = h.readFilesResource(repoID)
+		content, readErr = h.readFilesResource(ctx, repoID)
 	case "symbols":
-		content, readErr = h.readSymbolsResource(repoID)
+		content, readErr = h.readSymbolsResource(ctx, repoID)
 	default:
 		return errorResponse(msg.ID, -32602, fmt.Sprintf("Unknown resource type: %s", resourceType))
 	}
@@ -2021,8 +2021,8 @@ func (h *mcpHandler) handleResourcesRead(session *mcpSession, msg jsonRPCRequest
 	})
 }
 
-func (h *mcpHandler) readFilesResource(repoID string) (interface{}, error) {
-	files := h.store.GetFiles(context.Background(), repoID)
+func (h *mcpHandler) readFilesResource(ctx context.Context, repoID string) (interface{}, error) {
+	files := h.store.GetFiles(ctx, repoID)
 	if files == nil {
 		return nil, fmt.Errorf("repository not found or not indexed")
 	}
@@ -2042,8 +2042,8 @@ func (h *mcpHandler) readFilesResource(repoID string) (interface{}, error) {
 	return result, nil
 }
 
-func (h *mcpHandler) readSymbolsResource(repoID string) (interface{}, error) {
-	symbols, _ := h.store.GetSymbols(context.Background(), repoID, nil, nil, 1000, 0)
+func (h *mcpHandler) readSymbolsResource(ctx context.Context, repoID string) (interface{}, error) {
+	symbols, _ := h.store.GetSymbols(ctx, repoID, nil, nil, 1000, 0)
 	if symbols == nil {
 		return nil, fmt.Errorf("repository not found or not indexed")
 	}
@@ -2073,11 +2073,11 @@ func (h *mcpHandler) readSymbolsResource(repoID string) (interface{}, error) {
 // Repo access helpers
 // ---------------------------------------------------------------------------
 
-func (h *mcpHandler) checkRepoAccess(session *mcpSession, repoID string) error {
+func (h *mcpHandler) checkRepoAccess(ctx context.Context, session *mcpSession, repoID string) error {
 	if repoID == "" {
 		return fmt.Errorf("repository_id is required")
 	}
-	repo := h.store.GetRepository(context.Background(), repoID)
+	repo := h.store.GetRepository(ctx, repoID)
 	if repo == nil {
 		return fmt.Errorf("Repository not found or not accessible")
 	}

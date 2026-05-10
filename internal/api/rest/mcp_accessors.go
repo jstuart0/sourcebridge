@@ -254,7 +254,7 @@ func (h *mcpHandler) walkCallGraph(ctx context.Context, session *mcpSession, arg
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 
@@ -434,7 +434,7 @@ func (h *mcpHandler) callGetFileImports(ctx context.Context, session *mcpSession
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 	if params.FilePath == "" {
@@ -581,7 +581,7 @@ func (h *mcpHandler) callGetArchitectureDiagram(ctx context.Context, session *mc
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 	if h.knowledgeStore == nil {
@@ -693,7 +693,7 @@ func (h *mcpHandler) callGetRecentChanges(ctx context.Context, session *mcpSessi
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, errInvalidArguments(err.Error())
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 

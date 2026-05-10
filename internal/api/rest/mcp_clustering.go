@@ -85,7 +85,7 @@ func (h *mcpHandler) callGetSubsystems(ctx context.Context, session *mcpSession,
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, errInvalidArguments(err.Error())
 	}
-	if err := h.checkRepoAccess(session, params.RepoID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepoID); err != nil {
 		return nil, err
 	}
 	if err := clustering.ValidateID(params.RepoID); err != nil {
@@ -185,7 +185,7 @@ func (h *mcpHandler) callGetSubsystemByID(ctx context.Context, session *mcpSessi
 	}
 
 	// Auth: ensure the caller can access the repo this cluster belongs to.
-	if err := h.checkRepoAccess(session, c.RepoID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, c.RepoID); err != nil {
 		return nil, err
 	}
 
@@ -212,7 +212,7 @@ func (h *mcpHandler) callGetSubsystem(ctx context.Context, session *mcpSession, 
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, errInvalidArguments(err.Error())
 	}
-	if err := h.checkRepoAccess(session, params.RepoID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepoID); err != nil {
 		return nil, err
 	}
 	if err := clustering.ValidateID(params.RepoID); err != nil {

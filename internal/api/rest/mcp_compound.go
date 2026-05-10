@@ -192,7 +192,7 @@ func (h *mcpHandler) callReviewDiffAgainstRequirements(ctx context.Context, sess
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, errInvalidArguments(err.Error())
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 
@@ -352,7 +352,7 @@ func (h *mcpHandler) callImpactSummary(ctx context.Context, session *mcpSession,
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, errInvalidArguments(err.Error())
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 	if len(params.Files) == 0 && len(params.Symbols) == 0 {
@@ -487,7 +487,7 @@ func (h *mcpHandler) callOnboardNewContributor(ctx context.Context, session *mcp
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, errInvalidArguments(err.Error())
 	}
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 

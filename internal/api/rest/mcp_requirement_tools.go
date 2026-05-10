@@ -204,7 +204,7 @@ func (h *mcpHandler) callGetRequirementsForSymbol(ctx context.Context, session *
 		return nil, errInvalidArguments(err.Error())
 	}
 
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 
@@ -304,7 +304,7 @@ func (h *mcpHandler) callGetSymbolsForRequirement(ctx context.Context, session *
 		return nil, errInvalidArguments(err.Error())
 	}
 
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 
@@ -413,7 +413,7 @@ func (h *mcpHandler) callGetChangedRequirements(ctx context.Context, session *mc
 		return nil, errInvalidArguments(err.Error())
 	}
 
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 
@@ -667,7 +667,7 @@ func (h *mcpHandler) callGetOrphanSymbols(ctx context.Context, session *mcpSessi
 		return nil, errInvalidArguments(err.Error())
 	}
 
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 
@@ -724,7 +724,7 @@ func (h *mcpHandler) callGetUncoveredRequirements(ctx context.Context, session *
 		return nil, errInvalidArguments(err.Error())
 	}
 
-	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
+	if err := h.checkRepoAccess(ctx, session, params.RepositoryID); err != nil {
 		return nil, err
 	}
 
