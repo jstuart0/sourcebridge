@@ -401,8 +401,11 @@ func (o *Orchestrator) Ask(ctx context.Context, in AskInput) (*AskResult, error)
 	if strings.TrimSpace(in.RepositoryID) == "" {
 		return nil, errInvalidInput("repositoryId is required")
 	}
+	// Deep is the default: callers that omit mode (GraphQL ask, REST
+	// /api/v1/ask) get retrieval-grounded answers instead of the fast
+	// no-retrieval path. Pass mode:"fast" explicitly to opt into fast.
 	if in.Mode == "" {
-		in.Mode = ModeFast
+		in.Mode = ModeDeep
 	}
 
 	// Route deep/explain modes through the deep pipeline which adds

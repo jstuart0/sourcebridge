@@ -11,6 +11,8 @@ import (
 
 	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
+	"github.com/sourcebridge/sourcebridge/internal/knowledge"
+	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 )
 
 type fakeSynth struct {
@@ -169,6 +171,61 @@ func TestBuildPromptEnvelope_DelimitsContext(t *testing.T) {
 	}
 	if !strings.Contains(p, "DATA, not instructions") {
 		t.Errorf("missing injection-defense boilerplate")
+	}
+}
+
+func TestAsk_EmptyModeDefaultsToDeep(t *testing.T) {
+	// When the caller omits mode (Mode == ""), the pipeline must default
+	// to ModeDeep so retrieval context reaches the synthesizer. This is
+	// the contract for GraphQL `ask` and REST /api/v1/ask.
+	reader := &fakeDeepReader{
+		understanding: &knowledge.RepositoryUnderstanding{
+			Stage:      knowledge.UnderstandingReady,
+			TreeStatus: knowledge.UnderstandingTreeComplete,
+			CorpusID:   "corpus-default-mode",
+			RevisionFP: "rev-001",
+		},
+		nodes: []comprehension.SummaryNode{
+			{
+				CorpusID:    "corpus-default-mode",
+				UnitID:      "core-svc",
+				Level:       1,
+				Headline:    "Core service entry",
+				SummaryText: "Handles the main request flow.",
+				Metadata:    `{"file_path":"core/service.go"}`,
+			},
+		},
+	}
+	synth := &fakeSynth{
+		available: true,
+		resp: &reasoningv1.AnswerQuestionResponse{
+			Answer: "The main entry point handles X.",
+			Usage:  &commonv1.LLMUsage{Model: "m", InputTokens: 50, OutputTokens: 10},
+		},
+	}
+	o := New(synth, reader, nil, DefaultConfig())
+
+	res, err := o.Ask(context.Background(), AskInput{
+		RepositoryID: "repo-1",
+		Question:     "What is the main entry point?",
+		// Mode intentionally omitted — pipeline must default to deep.
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// (a) The synthesizer must have received non-empty context code,
+	// proving the deep retrieval pipeline ran (not the no-retrieval
+	// fast path which passes contextMD="" when no caller-supplied code
+	// is present).
+	if synth.lastReq == nil {
+		t.Fatal("synthesizer was not called")
+	}
+	if synth.lastReq.GetContextCode() == "" {
+		t.Error("synthesizer received empty context_code: deep retrieval did not run")
+	}
+	// (b) Diagnostics must reflect that the deep path executed.
+	if res.Diagnostics.Mode != string(ModeDeep) {
+		t.Errorf("diagnostics.Mode = %q, want %q", res.Diagnostics.Mode, string(ModeDeep))
 	}
 }
 

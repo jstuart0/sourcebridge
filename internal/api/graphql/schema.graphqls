@@ -839,7 +839,7 @@ type DiscussionResult {
 input AskInput {
   repositoryId: ID!
   question: String!
-  mode: String            # fast | deep | explain (default fast)
+  mode: String            # fast | deep | explain (default deep)
   conversationId: String
   priorMessages: [String!]
   filePath: String
