@@ -475,3 +475,61 @@ def test_parse_sections_handles_fenced_json_with_trailing_whitespace() -> None:
     result = parse_json_sections(raw)
     assert len(result) == 1
     assert result[0]["title"] == "Purpose"
+
+
+@pytest.mark.asyncio
+async def test_cliff_notes_summary_classic_high_confidence_canary() -> None:
+    """Regression canary: SUMMARY depth + CLASSIC mode (single-LLM-call path) must
+    produce at least one HIGH-confidence section.
+
+    This test guards the parallel knowledge path (Cliff Notes generation) against
+    regressions introduced by QA pipeline changes (CA-319 phases 1-3). It runs the
+    non-renderer, non-deep-evidence-gate path — depth="summary" with the standard
+    FakeLLMProvider fixture — and asserts three properties:
+
+    1. At least one section has confidence == "high"  (the HIGH-floor canary).
+    2. Every section carries a valid confidence label  (no missing/corrupt labels).
+    3. At least one section has non-empty evidence with a non-empty file_path
+       (guards against the stub-filled-LOW regression from CA-173/CA-176/CA-177).
+
+    FakeLLMProvider.CLIFF_NOTES_RESPONSE contains 4 HIGH-confidence sections and 2
+    MEDIUM sections, all with proper evidence on the HIGH sections.  The SUMMARY path
+    skips the deep evidence gate (that gate only fires for REQUIRED_SECTIONS_DEEP_
+    REPOSITORY), so the fixture output passes through unchanged.  The canary is
+    therefore deterministic and must not be marked skip.
+
+    If a future change makes FakeLLMProvider stop returning CLIFF_NOTES_RESPONSE for
+    summary prompts, this test will fail loudly — diagnose the FakeLLMProvider dispatch
+    logic rather than weakening the assertion.
+    """
+    provider = FakeLLMProvider()
+    result, usage = await generate_cliff_notes(
+        provider=provider,
+        repository_name="test-repo",
+        audience="developer",
+        depth="summary",
+        snapshot_json=SAMPLE_SNAPSHOT,
+    )
+
+    # 1. HIGH-confidence floor: at least one section must be high.
+    high_sections = [s for s in result.sections if s.confidence == "high"]
+    assert len(high_sections) >= 1, (
+        f"Expected ≥1 HIGH-confidence section from SUMMARY+CLASSIC render; "
+        f"got {[(s.title, s.confidence) for s in result.sections]}"
+    )
+
+    # 2. All sections carry a valid confidence label.
+    for sec in result.sections:
+        assert sec.confidence in ("high", "medium", "low"), (
+            f"Section {sec.title!r} has invalid confidence: {sec.confidence!r}"
+        )
+
+    # 3. At least one HIGH section has a non-empty evidence list with a file_path
+    #    (anti-stub assertion: guards against stub-filled LOW regression).
+    high_with_evidence = [
+        s for s in high_sections if any(ev.file_path for ev in s.evidence)
+    ]
+    assert len(high_with_evidence) >= 1, (
+        f"Expected ≥1 HIGH section with file_path evidence; "
+        f"HIGH sections: {[(s.title, [ev.file_path for ev in s.evidence]) for s in high_sections]}"
+    )
