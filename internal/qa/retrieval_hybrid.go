@@ -3,9 +3,9 @@
 
 package qa
 
-import "context"
-
 import (
+	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,9 +17,9 @@ import (
 // line number, and tags each hit with its fired signals as the
 // provenance reason.
 //
-// When the clone isn't available (no locator, no on-disk files),
-// returns an empty slice — the caller falls through to the grep
-// retriever in that case.
+// When the clone root is unavailable (no locator, locator miss, or clone gone
+// after a container restart), returns nil so the caller's grep-fallback path
+// fires instead of receiving empty-snippet entries that suppress the fallback.
 func filesFromSearchHits(ctx context.Context, hits []SearchHit, locator RepoLocator, repoID string) []FileEvidence {
 	if len(hits) == 0 {
 		return nil
@@ -29,6 +29,18 @@ func filesFromSearchHits(ctx context.Context, hits []SearchHit, locator RepoLoca
 		if r, ok := locator.LocateRepoClone(ctx, repoID); ok {
 			root = r
 		}
+	}
+	if root == "" {
+		// No clone available — returning nil lets deep_pipeline.go's
+		// `if len(files) == 0` gate invoke the grep retriever, which
+		// can read from the repo's local path (valid for locally-added
+		// repos) or surface a meaningful "no content" rather than an
+		// LLM prompt full of empty code fences.
+		slog.WarnContext(ctx, "qa: clone root unavailable; deferring to grep fallback",
+			"repo_id", repoID,
+			"hits", len(hits),
+		)
+		return nil
 	}
 
 	byPath := make(map[string]FileEvidence, len(hits))
@@ -56,20 +68,27 @@ func filesFromSearchHits(ctx context.Context, hits []SearchHit, locator RepoLoca
 				Score:   100 - i,
 				Reasons: append([]string{}, h.Signals...),
 			}
-			if root != "" {
-				snippet, sStart, sEnd, _ := hybridReadSnippet(root, h.FilePath, h.StartLine)
-				if snippet != "" {
-					ev.Snippet = snippet
-					// Prefer the file-read window bounds over the
-					// symbol's own bounds — the window gives more
-					// context around the match for the LLM.
-					if sStart > 0 {
-						ev.StartLine = sStart
-					}
-					if sEnd > 0 {
-						ev.EndLine = sEnd
-					}
-				}
+			snippet, sStart, sEnd, serr := hybridReadSnippet(root, h.FilePath, h.StartLine)
+			if serr != nil || snippet == "" {
+				// File missing or unreadable — skip this entry so the
+				// caller's len(files)==0 fallback can still fire if
+				// every file in the hit list is gone. Log once per file
+				// so operators can detect a partially-missing clone.
+				slog.WarnContext(ctx, "qa: hybrid snippet empty, skipping hit",
+					"repo_id", repoID,
+					"file", h.FilePath,
+					"err", serr,
+				)
+				continue
+			}
+			ev.Snippet = snippet
+			// Prefer the file-read window bounds over the symbol's own
+			// bounds — the window gives more context around the match.
+			if sStart > 0 {
+				ev.StartLine = sStart
+			}
+			if sEnd > 0 {
+				ev.EndLine = sEnd
 			}
 			ev.Reason = strings.Join(ev.Reasons, ";")
 			byPath[h.FilePath] = ev
@@ -87,6 +106,10 @@ func filesFromSearchHits(ctx context.Context, hits []SearchHit, locator RepoLoca
 		byPath[h.FilePath] = ev
 	}
 
+	if len(byPath) == 0 {
+		// All hits had unreadable files — fall through to grep retriever.
+		return nil
+	}
 	out := make([]FileEvidence, 0, len(byPath))
 	for _, ev := range byPath {
 		out = append(out, ev)

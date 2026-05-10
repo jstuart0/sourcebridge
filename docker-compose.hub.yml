@@ -62,6 +62,20 @@ services:
       - sourcebridge-secrets:/secrets
     restart: "no"
 
+  # Ensure /data/repo-cache is owned by the API user (UID 1000) before the
+  # sourcebridge container starts. Docker creates named-volume directories as
+  # root, which causes "permission denied" on the first mkdir inside the
+  # container. This mirrors the surrealdb-init pattern above.
+  repo-cache-init:
+    image: alpine:3.20
+    command:
+      - /bin/sh
+      - -lc
+      - mkdir -p /data/repos && chown -R 1000:1000 /data
+    volumes:
+      - repo-cache-data:/data
+    restart: "no"
+
   surrealdb:
     image: surrealdb/surrealdb:v2.6.5
     command: start --user ${SURREAL_USER:-root} --pass ${SURREAL_PASS:-INSECURE-DEFAULT-CHANGE-ME-NOW} --log info file:/data/database.db
@@ -94,10 +108,8 @@ services:
       # API container. Without this, the default './repo-cache' resolves to
       # /repo-cache (root-owned) and every addRepository call fails with
       # "permission denied" before the git clone even starts.
-      # Note: /data/repo-cache lives inside the container filesystem and is NOT
-      # persisted across container restarts by default. The cache is fully
-      # rebuildable from git, so this is acceptable. If you want crash-safe
-      # caching, add a named volume mount for /data/repo-cache.
+      # Persisted via named volume `repo-cache-data` so QA can read file content
+      # after a container restart. Fully rebuildable from git — `down -v` is safe.
       - SOURCEBRIDGE_STORAGE_REPO_CACHE_PATH=/data/repo-cache
       - SOURCEBRIDGE_WORKER_ADDRESS=worker:50051
       - SOURCEBRIDGE_SECURITY_GRPC_AUTH_SECRET=${SOURCEBRIDGE_GRPC_SECRET:-INSECURE-DEFAULT-CHANGE-ME-NOW}
@@ -113,10 +125,13 @@ services:
       - SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE=/run/sourcebridge/secrets/encryption_key
     volumes:
       - sourcebridge-secrets:/run/sourcebridge/secrets:ro
+      - repo-cache-data:/data/repo-cache
     depends_on:
       surrealdb:
         condition: service_healthy
       encryption-key-init:
+        condition: service_completed_successfully
+      repo-cache-init:
         condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
@@ -194,3 +209,10 @@ volumes:
   # every encrypted LLM API key and git token stored in the database.
   # See docs/admin/llm-config.md §"Wipe-and-re-enter (destructive cleanup)".
   sourcebridge-secrets:
+  # Cloned repo cache. Persisted via named volume so QA search hits can read
+  # file content after a container restart. The cache is fully rebuildable from
+  # git (re-index any repo to repopulate), so `docker compose down -v` is safe
+  # — the next `up` + re-index restores it. Without this volume the search
+  # index (SurrealDB, also persisted) returns valid hits but filesFromSearchHits
+  # cannot read snippets, causing the QA pipeline to return "no evidence".
+  repo-cache-data:
