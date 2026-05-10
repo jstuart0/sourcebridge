@@ -128,7 +128,7 @@ func TestGraphQLRepositories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.StoreIndexResult(result)
+	_, err = store.StoreIndexResult(context.Background(), result)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestGraphQLSymbolSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(t.Context(), result)
 
 	ts, token := setupPhase2Server(t, store)
 
@@ -218,27 +218,27 @@ func TestRemoveRepository(t *testing.T) {
 
 	idx := indexer.NewIndexer(nil)
 	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(t.Context(), result)
 
 	// Verify it exists
-	repos := store.ListRepositories()
+	repos := store.ListRepositories(t.Context())
 	if len(repos) != 1 {
 		t.Fatalf("expected 1 repo, got %d", len(repos))
 	}
 
 	// Remove it
-	removed := store.RemoveRepository(repo.ID)
+	removed := store.RemoveRepository(t.Context(), repo.ID)
 	if !removed {
 		t.Fatal("expected removal to succeed")
 	}
 
 	// Verify it's gone
-	repos = store.ListRepositories()
+	repos = store.ListRepositories(t.Context())
 	if len(repos) != 0 {
 		t.Fatalf("expected 0 repos after removal, got %d", len(repos))
 	}
 
-	stats := store.Stats()
+	stats := store.Stats(t.Context())
 	if stats["symbols"] != 0 {
 		t.Errorf("expected 0 symbols after removal, got %d", stats["symbols"])
 	}
@@ -328,9 +328,9 @@ func TestGraphStoreStats(t *testing.T) {
 
 	idx := indexer.NewIndexer(nil)
 	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
-	store.StoreIndexResult(result)
+	store.StoreIndexResult(t.Context(), result)
 
-	stats := store.Stats()
+	stats := store.Stats(t.Context())
 	t.Logf("Graph stats: %+v", stats)
 
 	if stats["files"] < 5 {
@@ -355,9 +355,9 @@ func TestContentSearch(t *testing.T) {
 
 	idx := indexer.NewIndexer(nil)
 	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(t.Context(), result)
 
-	results := store.SearchContent(repo.ID, "ProcessPayment", 10)
+	results := store.SearchContent(t.Context(), repo.ID, "ProcessPayment", 10)
 	if len(results) == 0 {
 		t.Fatal("expected search results for 'ProcessPayment'")
 	}

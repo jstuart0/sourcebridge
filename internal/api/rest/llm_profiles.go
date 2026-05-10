@@ -411,7 +411,7 @@ func (s *Server) handleActiveLLMJobCount(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusOK, map[string]int{"count": 0})
 		return
 	}
-	jobs := s.jobStore.ListActive(llmListActiveFilterAllSubsystems())
+	jobs := s.jobStore.ListActive(r.Context(), llmListActiveFilterAllSubsystems())
 	count := 0
 	for _, j := range jobs {
 		if j == nil {

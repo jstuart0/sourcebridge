@@ -134,7 +134,7 @@ func TestPassiveOnly_Phase1DoneDef7(t *testing.T) {
 			}
 
 			store := graphstore.NewStore()
-			repo, err := store.CreateRepository("passive-only-"+sc.name, repoPath)
+			repo, err := store.CreateRepository(t.Context(), "passive-only-"+sc.name, repoPath)
 			if err != nil {
 				t.Fatalf("CreateRepository: %v", err)
 			}
@@ -153,7 +153,7 @@ func TestPassiveOnly_Phase1DoneDef7(t *testing.T) {
 					{Path: "pkg0/file3.go", Language: "go", LineCount: 10, ContentHash: "h3"},
 				},
 			}
-			if _, err := store.ReplaceIndexResult(repo.ID, prev); err != nil {
+			if _, err := store.ReplaceIndexResult(t.Context(), repo.ID, prev); err != nil {
 				t.Fatalf("ReplaceIndexResult: %v", err)
 			}
 

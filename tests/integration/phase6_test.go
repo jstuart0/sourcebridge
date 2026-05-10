@@ -203,7 +203,7 @@ func TestGraphQLSymbolsByFilePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(context.Background(), result)
 
 	ts, token := setupPhase6Server(t, store)
 
@@ -237,7 +237,7 @@ func TestGraphQLSymbolsByFilePathEmpty(t *testing.T) {
 
 	idx := indexer.NewIndexer(nil)
 	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(context.Background(), result)
 
 	ts, token := setupPhase6Server(t, store)
 
@@ -259,7 +259,7 @@ func TestGraphQLSymbolsByNameQuery(t *testing.T) {
 
 	idx := indexer.NewIndexer(nil)
 	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(context.Background(), result)
 
 	ts, token := setupPhase6Server(t, store)
 
@@ -283,10 +283,10 @@ func TestGraphQLAIMutationWithoutWorker(t *testing.T) {
 
 	idx := indexer.NewIndexer(nil)
 	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(context.Background(), result)
 
 	// Get a symbol ID
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 1, 0)
+	syms, _ := store.GetSymbols(context.Background(), repo.ID, nil, nil, 1, 0)
 	if len(syms) == 0 {
 		t.Fatal("expected at least one symbol")
 	}

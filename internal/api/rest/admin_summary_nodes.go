@@ -20,7 +20,7 @@ func (s *Server) handleGetSummaryNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	corpusID := chi.URLParam(r, "corpusId")
-	nodes, err := s.summaryNodeStore.GetSummaryNodes(corpusID)
+	nodes, err := s.summaryNodeStore.GetSummaryNodes(r.Context(), corpusID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -43,7 +43,7 @@ func (s *Server) handleStoreSummaryNodes(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 		return
 	}
-	if err := s.summaryNodeStore.StoreSummaryNodes(nodes); err != nil {
+	if err := s.summaryNodeStore.StoreSummaryNodes(r.Context(), nodes); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -58,7 +58,7 @@ func (s *Server) handleInvalidateSummaryNodes(w http.ResponseWriter, r *http.Req
 		return
 	}
 	corpusID := chi.URLParam(r, "corpusId")
-	if err := s.summaryNodeStore.InvalidateSummaryNodes(corpusID); err != nil {
+	if err := s.summaryNodeStore.InvalidateSummaryNodes(r.Context(), corpusID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

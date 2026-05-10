@@ -41,11 +41,11 @@ func newReconcileStore(t *testing.T, processID string, updatedAt time.Time) (*ll
 		Status:    llm.StatusGenerating,
 		ProcessID: processID,
 	}
-	if _, err := store.Create(job); err != nil {
+	if _, err := store.Create(t.Context(), job); err != nil {
 		t.Fatalf("newReconcileStore Create: %v", err)
 	}
 	// Force UpdatedAt to the desired value after Create (Create may stamp now).
-	if err := store.ForceUpdatedAt(jobID, updatedAt); err != nil {
+	if err := store.ForceUpdatedAt(t.Context(), jobID, updatedAt); err != nil {
 		t.Fatalf("newReconcileStore ForceUpdatedAt: %v", err)
 	}
 	return store, jobID
@@ -241,10 +241,10 @@ func TestReconcileZombieJobs_ConcurrentIdempotency(t *testing.T) {
 			Status:    llm.StatusGenerating,
 			ProcessID: z.processID,
 		}
-		if _, err := store.Create(job); err != nil {
+		if _, err := store.Create(t.Context(), job); err != nil {
 			t.Fatalf("Create zombie %s: %v", z.id, err)
 		}
-		if err := store.ForceUpdatedAt(z.id, staleTime); err != nil {
+		if err := store.ForceUpdatedAt(t.Context(), z.id, staleTime); err != nil {
 			t.Fatalf("ForceUpdatedAt zombie %s: %v", z.id, err)
 		}
 	}
@@ -304,10 +304,10 @@ func TestEnqueueAfterReconcile_FreshJobNotDeduped(t *testing.T) {
 		Status:    llm.StatusGenerating,
 		ProcessID: priorPID,
 	}
-	if _, err := store.Create(zombieJob); err != nil {
+	if _, err := store.Create(t.Context(), zombieJob); err != nil {
 		t.Fatalf("Create zombie: %v", err)
 	}
-	if err := store.ForceUpdatedAt(zombieJob.ID, time.Now().Add(-5*time.Minute)); err != nil {
+	if err := store.ForceUpdatedAt(t.Context(), zombieJob.ID, time.Now().Add(-5*time.Minute)); err != nil {
 		t.Fatalf("ForceUpdatedAt: %v", err)
 	}
 

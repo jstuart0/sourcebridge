@@ -47,14 +47,14 @@ func TestRecomputePackageDependencies_BasicAggregation(t *testing.T) {
 		},
 	}
 
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
-	store.RecomputePackageDependencies(repo.ID)
+	store.RecomputePackageDependencies(t.Context(), repo.ID)
 
-	deps := store.GetPackageDependencies(repo.ID)
+	deps := store.GetPackageDependencies(t.Context(), repo.ID)
 	if len(deps) == 0 {
 		t.Fatal("expected non-empty package dependencies after recompute")
 	}
@@ -110,15 +110,15 @@ func TestRecomputePackageDependencies_Idempotent(t *testing.T) {
 		},
 	}
 
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
-	store.RecomputePackageDependencies(repo.ID)
-	store.RecomputePackageDependencies(repo.ID) // second call
+	store.RecomputePackageDependencies(t.Context(), repo.ID)
+	store.RecomputePackageDependencies(t.Context(), repo.ID) // second call
 
-	deps := store.GetPackageDependencies(repo.ID)
+	deps := store.GetPackageDependencies(t.Context(), repo.ID)
 
 	// Count entries for pkg/a — must be exactly 1.
 	var aCount int
@@ -164,12 +164,12 @@ func TestGetPackageDependencies_EmptyBeforeRecompute(t *testing.T) {
 		},
 	}
 
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
-	deps := store.GetPackageDependencies(repo.ID)
+	deps := store.GetPackageDependencies(t.Context(), repo.ID)
 	if len(deps) != 0 {
 		t.Errorf("expected empty deps before RecomputePackageDependencies, got %d entries", len(deps))
 	}

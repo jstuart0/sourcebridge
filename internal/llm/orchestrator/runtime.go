@@ -105,7 +105,7 @@ func (r *runtime) ReportSnapshotBytes(bytes int) {
 // to keep ticking. Callers that already log on error should not double-log.
 func (r *runtime) Heartbeat() error {
 	jobID := r.jobID
-	if err := r.orch.store.Heartbeat(jobID); err != nil {
+	if err := r.orch.store.Heartbeat(r.orch.ctx, jobID); err != nil {
 		slog.Warn("llm_runtime_heartbeat_failed",
 			"job_id", jobID, "error", err.Error())
 		return err
@@ -124,11 +124,11 @@ func (r *runtime) flush() {
 		r.writeProgressLocked(time.Now())
 	}
 	if r.pendingTokensSet {
-		_ = r.orch.store.SetTokens(r.jobID, r.pendingTokensInput, r.pendingTokensOutput)
+		_ = r.orch.store.SetTokens(r.orch.ctx, r.jobID, r.pendingTokensInput, r.pendingTokensOutput)
 		r.pendingTokensSet = false
 	}
 	if r.pendingBytesSet {
-		_ = r.orch.store.SetSnapshotBytes(r.jobID, r.pendingBytes)
+		_ = r.orch.store.SetSnapshotBytes(r.orch.ctx, r.jobID, r.pendingBytes)
 		r.pendingBytesSet = false
 	}
 }
@@ -136,7 +136,7 @@ func (r *runtime) flush() {
 // writeProgressLocked persists the current buffered progress values. The
 // caller must hold r.mu.
 func (r *runtime) writeProgressLocked(now time.Time) {
-	if err := r.orch.store.SetProgress(r.jobID, r.lastProgress, r.lastPhase, r.lastMessage, r.lastThroughputTPS); err != nil {
+	if err := r.orch.store.SetProgress(r.orch.ctx, r.jobID, r.lastProgress, r.lastPhase, r.lastMessage, r.lastThroughputTPS); err != nil {
 		return
 	}
 	r.lastWrite = now
@@ -149,7 +149,7 @@ func (r *runtime) writeProgressLocked(now time.Time) {
 		r.lastLoggedMessage = r.lastMessage
 	}
 
-	if job := r.orch.store.GetByID(r.jobID); job != nil {
+	if job := r.orch.store.GetByID(r.orch.ctx, r.jobID); job != nil {
 		r.orch.publish(llm.JobEvent{Kind: llm.EventProgress, Job: job})
 	}
 }

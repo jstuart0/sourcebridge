@@ -36,13 +36,13 @@ func TestIntegration_UpdateRequirementFields_NilPriorityNilTags(t *testing.T) {
 		Priority:    "high",
 		Tags:        []string{"ui", "accessibility"},
 	}
-	store.StoreRequirement(repoID, seed)
+	store.StoreRequirement(t.Context(), repoID, seed)
 	if seed.ID == "" {
 		t.Fatal("StoreRequirement did not populate seed.ID")
 	}
 
 	// No-op patch: both Priority and Tags are nil — nothing substantive changes.
-	updated := store.UpdateRequirementFields(seed.ID, graph.RequirementUpdate{
+	updated := store.UpdateRequirementFields(t.Context(), seed.ID, graph.RequirementUpdate{
 		Priority: nil,
 		Tags:     nil,
 	})
@@ -69,7 +69,7 @@ func TestIntegration_UpdateRequirementFields_NilPriorityNilTags(t *testing.T) {
 
 	// Read back from the database to verify the no-op was not persisted as a
 	// spurious write (i.e. the row was not modified).
-	readback := store.GetRequirement(seed.ID)
+	readback := store.GetRequirement(t.Context(), seed.ID)
 	if readback == nil {
 		t.Fatal("GetRequirement returned nil after no-op UpdateRequirementFields")
 	}

@@ -1377,7 +1377,7 @@ func (p *telemetryCountProvider) TelemetryCounts() (repos, users int, features [
 	if p.store == nil {
 		return 0, 0, nil, nil
 	}
-	allRepos := p.store.ListRepositories()
+	allRepos := p.store.ListRepositories(context.Background())
 	repos = len(allRepos)
 
 	var totalFiles, totalSymbols int

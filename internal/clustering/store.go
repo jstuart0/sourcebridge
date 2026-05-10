@@ -32,10 +32,10 @@ type ClusterStore interface {
 	// Call graph access — reuses existing GraphStore signatures.
 
 	// GetCallEdges returns all caller→callee edges for the given repository.
-	GetCallEdges(repoID string) []graph.CallEdge
+	GetCallEdges(ctx context.Context, repoID string) []graph.CallEdge
 
 	// GetSymbolsByIDs returns a map of symbol ID → symbol for the given IDs.
-	GetSymbolsByIDs(ids []string) map[string]*graph.StoredSymbol
+	GetSymbolsByIDs(ctx context.Context, ids []string) map[string]*graph.StoredSymbol
 
 	// Edge-hash delta check — stored on the ca_repository record.
 

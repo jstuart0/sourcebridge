@@ -113,7 +113,7 @@ func (b *Backfiller) Run(ctx context.Context, repoID string, progress *BackfillP
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	syms, _ := b.Store.GetSymbols(repoID, nil, nil, 0, 0)
+	syms, _ := b.Store.GetSymbols(ctx, repoID, nil, nil, 0, 0)
 	slog.Info("search: embedding backfill start", "repo", repoID, "total", len(syms), "model", b.Embedder.Model())
 
 	var done atomic.Int64
@@ -169,7 +169,7 @@ func (b *Backfiller) Run(ctx context.Context, repoID string, progress *BackfillP
 		if wantHash == "" {
 			wantHash = hashString(text)
 		}
-		if err := upserter.UpsertSymbolEmbedding(repoID, s.ID, vec, b.Embedder.Model(), b.Dim, wantHash); err != nil {
+		if err := upserter.UpsertSymbolEmbedding(ctx, repoID, s.ID, vec, b.Embedder.Model(), b.Dim, wantHash); err != nil {
 			if progress != nil {
 				progress.mu.Lock()
 				progress.Errored++

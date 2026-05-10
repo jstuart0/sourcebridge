@@ -141,7 +141,7 @@ func (s *Service) Search(ctx context.Context, req *Request) (*Response, error) {
 		}
 		if sym == nil {
 			// Last resort — pull from the store.
-			sym = s.Store.GetSymbol(c.EntityID)
+			sym = s.Store.GetSymbol(ctx, c.EntityID)
 		}
 		if sym == nil {
 			return nil
@@ -163,7 +163,7 @@ func (s *Service) Search(ctx context.Context, req *Request) (*Response, error) {
 	// --- Boost ---
 	tBoostStart := time.Now()
 	for _, b := range s.Boosters {
-		b.Apply(fused, req, routed)
+		b.Apply(ctx, fused, req, routed)
 	}
 	// Re-sort after boosters adjust scores. The sort key matches fuse
 	// order so pagination stability is preserved.

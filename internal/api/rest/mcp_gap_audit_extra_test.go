@@ -124,7 +124,7 @@ func seedGapAuditExtraFixture(t *testing.T, h *mcpTestHarness) gapAuditExtraFixt
 		},
 	}
 
-	repoA, err := h.store.StoreIndexResult(resultA)
+	repoA, err := h.store.StoreIndexResult(t.Context(), resultA)
 	if err != nil {
 		t.Fatalf("StoreIndexResult repoA: %v", err)
 	}
@@ -133,7 +133,7 @@ func seedGapAuditExtraFixture(t *testing.T, h *mcpTestHarness) gapAuditExtraFixt
 	// Map fixture IDs to store-assigned IDs by name (store may reassign them).
 	// Symbols with explicit IDs keep them if the store honours the hint.
 	// Look them up by name to be safe.
-	symsA, _ := h.store.GetSymbols(fix.RepoID, nil, nil, 0, 0)
+	symsA, _ := h.store.GetSymbols(t.Context(), fix.RepoID, nil, nil, 0, 0)
 	symIDByName := map[string]string{}
 	for _, s := range symsA {
 		symIDByName[s.Name] = s.ID
@@ -164,12 +164,12 @@ func seedGapAuditExtraFixture(t *testing.T, h *mcpTestHarness) gapAuditExtraFixt
 			},
 		},
 	}
-	repoB, err := h.store.StoreIndexResult(resultB)
+	repoB, err := h.store.StoreIndexResult(t.Context(), resultB)
 	if err != nil {
 		t.Fatalf("StoreIndexResult repoB: %v", err)
 	}
 	fix.RepoBID = repoB.ID
-	symsB, _ := h.store.GetSymbols(fix.RepoBID, nil, nil, 0, 0)
+	symsB, _ := h.store.GetSymbols(t.Context(), fix.RepoBID, nil, nil, 0, 0)
 	if len(symsB) > 0 {
 		fix.RepoBSymID = symsB[0].ID
 	}
@@ -708,7 +708,7 @@ func TestMCP_GetUntestedSymbols_PreResolvesTestSetOnce(t *testing.T) {
 			},
 		},
 	}
-	repo, err := realStore.StoreIndexResult(indexResult)
+	repo, err := realStore.StoreIndexResult(t.Context(), indexResult)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}

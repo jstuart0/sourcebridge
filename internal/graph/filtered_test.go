@@ -19,6 +19,7 @@
 package graph
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 )
@@ -39,44 +40,44 @@ type callRecorder struct {
 	verifyLinkCalls                 atomic.Int32
 }
 
-func (r *callRecorder) UnlinkRepos(linkID string) error {
+func (r *callRecorder) UnlinkRepos(ctx context.Context, linkID string) error {
 	r.unlinkReposCalls.Add(1)
-	return r.GraphStore.UnlinkRepos(linkID)
+	return r.GraphStore.UnlinkRepos(ctx, linkID)
 }
 
-func (r *callRecorder) StoreCrossRepoRef(ref *CrossRepoRef) error {
+func (r *callRecorder) StoreCrossRepoRef(ctx context.Context, ref *CrossRepoRef) error {
 	r.storeCrossRepoRefCalls.Add(1)
-	return r.GraphStore.StoreCrossRepoRef(ref)
+	return r.GraphStore.StoreCrossRepoRef(ctx, ref)
 }
 
-func (r *callRecorder) StoreCrossRepoRefs(refs []*CrossRepoRef) int {
+func (r *callRecorder) StoreCrossRepoRefs(ctx context.Context, refs []*CrossRepoRef) int {
 	r.storeCrossRepoRefsCalls.Add(1)
-	return r.GraphStore.StoreCrossRepoRefs(refs)
+	return r.GraphStore.StoreCrossRepoRefs(ctx, refs)
 }
 
-func (r *callRecorder) GetSymbolCrossRepoRefs(symbolID string) ([]*CrossRepoRef, error) {
+func (r *callRecorder) GetSymbolCrossRepoRefs(ctx context.Context, symbolID string) ([]*CrossRepoRef, error) {
 	r.getSymbolCrossRepoRefsCalls.Add(1)
-	return r.GraphStore.GetSymbolCrossRepoRefs(symbolID)
+	return r.GraphStore.GetSymbolCrossRepoRefs(ctx, symbolID)
 }
 
-func (r *callRecorder) DeleteCrossRepoRefsBetweenRepos(repoA, repoB string) error {
+func (r *callRecorder) DeleteCrossRepoRefsBetweenRepos(ctx context.Context, repoA, repoB string) error {
 	r.deleteCrossRepoRefsBetweenCalls.Add(1)
-	return r.GraphStore.DeleteCrossRepoRefsBetweenRepos(repoA, repoB)
+	return r.GraphStore.DeleteCrossRepoRefsBetweenRepos(ctx, repoA, repoB)
 }
 
-func (r *callRecorder) GetCallEdges(repoID string) []CallEdge {
+func (r *callRecorder) GetCallEdges(ctx context.Context, repoID string) []CallEdge {
 	r.getCallEdgesCalls.Add(1)
-	return r.GraphStore.GetCallEdges(repoID)
+	return r.GraphStore.GetCallEdges(ctx, repoID)
 }
 
-func (r *callRecorder) StoreAPIContract(contract *APIContract) error {
+func (r *callRecorder) StoreAPIContract(ctx context.Context, contract *APIContract) error {
 	r.storeAPIContractCalls.Add(1)
-	return r.GraphStore.StoreAPIContract(contract)
+	return r.GraphStore.StoreAPIContract(ctx, contract)
 }
 
-func (r *callRecorder) VerifyLink(linkID string, verified bool, verifiedBy string) *StoredLink {
+func (r *callRecorder) VerifyLink(ctx context.Context, linkID string, verified bool, verifiedBy string) *StoredLink {
 	r.verifyLinkCalls.Add(1)
-	return r.GraphStore.VerifyLink(linkID, verified, verifiedBy)
+	return r.GraphStore.VerifyLink(ctx, linkID, verified, verifiedBy)
 }
 
 // --- Helpers ---
@@ -102,7 +103,7 @@ func filteredWithRecorder(allowedRepoIDs ...string) (*TenantFilteredStore, *call
 func TestFilteredUnlinkReposCrossTenant(t *testing.T) {
 	f, rec := filteredWithRecorder("repo-A")
 
-	err := f.UnlinkRepos("link-belonging-to-B")
+	err := f.UnlinkRepos(context.Background(), "link-belonging-to-B")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -119,7 +120,7 @@ func TestFilteredUnlinkReposCrossTenant(t *testing.T) {
 func TestFilteredUnlinkReposPartialScope(t *testing.T) {
 	f, rec := filteredWithRecorder("repo-A")
 	// repo-B is NOT allowed for this tenant.
-	err := f.UnlinkRepos("link-source-A-target-B")
+	err := f.UnlinkRepos(context.Background(), "link-source-A-target-B")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -139,7 +140,7 @@ func TestFilteredStoreCrossRepoRefPartialScope(t *testing.T) {
 		SourceRepoID: "repo-A",
 		TargetRepoID: "repo-B", // not allowed
 	}
-	err := f.StoreCrossRepoRef(ref)
+	err := f.StoreCrossRepoRef(context.Background(), ref)
 	if err == nil {
 		t.Fatal("expected access-denied error, got nil")
 	}
@@ -159,7 +160,7 @@ func TestFilteredStoreCrossRepoRefsAllDenied(t *testing.T) {
 		{SourceRepoID: "repo-B", TargetRepoID: "repo-A"},   // source not allowed
 		{SourceRepoID: "repo-C", TargetRepoID: "repo-D"},   // both not allowed
 	}
-	n := f.StoreCrossRepoRefs(refs)
+	n := f.StoreCrossRepoRefs(context.Background(), refs)
 	if n != 0 {
 		t.Fatalf("StoreCrossRepoRefs returned %d; want 0 (all denied)", n)
 	}
@@ -177,7 +178,7 @@ func TestFilteredGetSymbolCrossRepoRefsNotAccessible(t *testing.T) {
 	f, rec := filteredWithRecorder("repo-A")
 	// Symbol does not exist in the inner store (GetSymbol → nil), which also
 	// triggers the "nil || !hasAccess" path.
-	refs, err := f.GetSymbolCrossRepoRefs("sym-in-repo-B")
+	refs, err := f.GetSymbolCrossRepoRefs(context.Background(), "sym-in-repo-B")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -196,7 +197,7 @@ func TestFilteredGetSymbolCrossRepoRefsNotAccessible(t *testing.T) {
 // call the inner store.
 func TestFilteredDeleteCrossRepoRefsBetweenReposOneOut(t *testing.T) {
 	f, rec := filteredWithRecorder("repo-A")
-	err := f.DeleteCrossRepoRefsBetweenRepos("repo-A", "repo-B")
+	err := f.DeleteCrossRepoRefsBetweenRepos(context.Background(), "repo-A", "repo-B")
 	if err == nil {
 		t.Fatal("expected access-denied error, got nil")
 	}
@@ -211,7 +212,7 @@ func TestFilteredDeleteCrossRepoRefsBetweenReposOneOut(t *testing.T) {
 // in the allowed set returns nil and does NOT call the inner store.
 func TestFilteredGetCallEdgesCrossTenant(t *testing.T) {
 	f, rec := filteredWithRecorder("repo-A")
-	edges := f.GetCallEdges("repo-B")
+	edges := f.GetCallEdges(context.Background(), "repo-B")
 	if edges != nil {
 		t.Fatalf("expected nil edges, got %v", edges)
 	}
@@ -229,7 +230,7 @@ func TestFilteredGetCallEdgesCrossTenant(t *testing.T) {
 func TestFilteredStoreAPIContractCrossTenant(t *testing.T) {
 	f, rec := filteredWithRecorder("repo-A")
 	contract := &APIContract{RepoID: "repo-B"}
-	err := f.StoreAPIContract(contract)
+	err := f.StoreAPIContract(context.Background(), contract)
 	if err == nil {
 		t.Fatal("expected access-denied error, got nil")
 	}
@@ -250,7 +251,7 @@ func TestFilteredStoreAPIContractCrossTenant(t *testing.T) {
 // is never called.
 func TestFilteredVerifyLinkCrossTenant(t *testing.T) {
 	f, rec := filteredWithRecorder("repo-A")
-	result := f.VerifyLink("link-belonging-to-B", true, "user-A")
+	result := f.VerifyLink(context.Background(), "link-belonging-to-B", true, "user-A")
 	if result != nil {
 		t.Fatalf("expected nil, got link %+v", result)
 	}
@@ -273,7 +274,7 @@ func TestFilteredAdminDoesNotBypassTenantGate(t *testing.T) {
 	f, rec := filteredWithRecorder("repo-A") // admin of tenant A
 
 	// Try to unlink a link belonging to tenant B (in-memory → nil → not found).
-	err := f.UnlinkRepos("link-belonging-to-B")
+	err := f.UnlinkRepos(context.Background(), "link-belonging-to-B")
 	if err == nil {
 		t.Fatal("admin tenant A should not be able to unlink tenant B's link")
 	}
@@ -282,7 +283,7 @@ func TestFilteredAdminDoesNotBypassTenantGate(t *testing.T) {
 	}
 
 	// GetCallEdges for a different tenant's repo.
-	edges := f.GetCallEdges("repo-B")
+	edges := f.GetCallEdges(context.Background(), "repo-B")
 	if edges != nil {
 		t.Fatalf("admin tenant A should not see tenant B's call edges")
 	}
@@ -304,12 +305,12 @@ func TestFilteredOSSPassThroughGetCallEdges(t *testing.T) {
 	f := NewTenantFilteredStore(inner, []string{"repo-A", "repo-B"})
 
 	// No edges seeded, but the inner store should be reached (no nil-return gate).
-	edgesA := f.GetCallEdges("repo-A")
+	edgesA := f.GetCallEdges(context.Background(), "repo-A")
 	// The in-memory store returns an empty slice (not nil) — just verifying the
 	// call wasn't blocked.
 	_ = edgesA
 
-	edgesB := f.GetCallEdges("repo-B")
+	edgesB := f.GetCallEdges(context.Background(), "repo-B")
 	_ = edgesB
 	// No assertion on content — the OSS test is that the gate did NOT block.
 }
@@ -321,7 +322,7 @@ func TestFilteredOSSPassThroughDeleteCrossRepoRefs(t *testing.T) {
 	f := NewTenantFilteredStore(inner, []string{"repo-A", "repo-B"})
 
 	// No data seeded; inner.DeleteCrossRepoRefsBetweenRepos returns nil for both.
-	err := f.DeleteCrossRepoRefsBetweenRepos("repo-A", "repo-B")
+	err := f.DeleteCrossRepoRefsBetweenRepos(context.Background(), "repo-A", "repo-B")
 	// The inner in-memory store stubs this as "federation not supported" — that
 	// is expected. What we verify is that the gate did NOT fire "access denied"
 	// (error text would differ).
@@ -340,7 +341,7 @@ func TestFilteredOSSPassThroughStoreAPIContract(t *testing.T) {
 	f := NewTenantFilteredStore(inner, []string{"repo-A"})
 
 	contract := &APIContract{RepoID: "repo-A", ContractType: "openapi"}
-	err := f.StoreAPIContract(contract)
+	err := f.StoreAPIContract(context.Background(), contract)
 	// The in-memory store's StoreAPIContract should not return access denied.
 	if err != nil && err.Error() == "access denied" {
 		t.Fatalf("OSS pass-through unexpectedly returned access denied: %v", err)

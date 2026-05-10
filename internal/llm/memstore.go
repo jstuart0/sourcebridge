@@ -4,6 +4,7 @@
 package llm
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
@@ -32,7 +33,7 @@ func NewMemStore() *MemStore {
 // Create inserts a copy of the supplied job. The caller's pointer is not
 // retained — callers that want to mutate a persisted job should call
 // GetByID to fetch a fresh copy.
-func (s *MemStore) Create(job *Job) (*Job, error) {
+func (s *MemStore) Create(_ context.Context, job *Job) (*Job, error) {
 	if job == nil {
 		return nil, fmt.Errorf("job is nil")
 	}
@@ -65,7 +66,7 @@ func (s *MemStore) Create(job *Job) (*Job, error) {
 }
 
 // Update replaces the stored record with a copy of the supplied job.
-func (s *MemStore) Update(job *Job) error {
+func (s *MemStore) Update(_ context.Context, job *Job) error {
 	if job == nil || job.ID == "" {
 		return fmt.Errorf("job id is required")
 	}
@@ -80,7 +81,7 @@ func (s *MemStore) Update(job *Job) error {
 }
 
 // GetByID returns a copy of the stored job, or nil.
-func (s *MemStore) GetByID(id string) *Job {
+func (s *MemStore) GetByID(_ context.Context, id string) *Job {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	j, ok := s.jobs[id]
@@ -94,7 +95,7 @@ func (s *MemStore) GetByID(id string) *Job {
 // the supplied target key. The orchestrator uses this as its DB-level
 // dedupe path — complementing the in-process registry so that a restart
 // does not lose dedupe state.
-func (s *MemStore) GetActiveByTargetKey(targetKey string) *Job {
+func (s *MemStore) GetActiveByTargetKey(_ context.Context, targetKey string) *Job {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var best *Job
@@ -117,7 +118,7 @@ func (s *MemStore) GetActiveByTargetKey(targetKey string) *Job {
 
 // ListActive returns every active (pending or generating) job matching
 // the filter, newest-first.
-func (s *MemStore) ListActive(filter ListFilter) []*Job {
+func (s *MemStore) ListActive(_ context.Context, filter ListFilter) []*Job {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	statuses := filter.Statuses
@@ -128,7 +129,7 @@ func (s *MemStore) ListActive(filter ListFilter) []*Job {
 }
 
 // ListRecent returns terminal jobs whose updated_at is >= since.
-func (s *MemStore) ListRecent(filter ListFilter, since time.Time) []*Job {
+func (s *MemStore) ListRecent(_ context.Context, filter ListFilter, since time.Time) []*Job {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	statuses := filter.Statuses
@@ -179,7 +180,7 @@ func (s *MemStore) listLocked(filter ListFilter, statuses []JobStatus, since tim
 
 // SetStatus transitions a job to a new status. It stamps StartedAt when
 // moving to generating and CompletedAt when moving to a terminal state.
-func (s *MemStore) SetStatus(id string, status JobStatus) error {
+func (s *MemStore) SetStatus(_ context.Context, id string, status JobStatus) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.jobs[id]
@@ -223,7 +224,7 @@ func (s *MemStore) SetStatus(id string, status JobStatus) error {
 }
 
 // SetProgress updates the progress fields without changing status.
-func (s *MemStore) SetProgress(id string, progress float64, phase, message string, throughputTPS float64) error {
+func (s *MemStore) SetProgress(_ context.Context, id string, progress float64, phase, message string, throughputTPS float64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.jobs[id]
@@ -251,7 +252,7 @@ func (s *MemStore) SetProgress(id string, progress float64, phase, message strin
 
 // Heartbeat bumps updated_at without touching any other field. No-op for
 // terminal or unknown jobs (returns nil).
-func (s *MemStore) Heartbeat(id string) error {
+func (s *MemStore) Heartbeat(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.jobs[id]
@@ -272,7 +273,7 @@ func (s *MemStore) Heartbeat(id string) error {
 // already in a terminal state other than Failed, the guard rejects
 // the call as a no-op so we don't overwrite a successful Ready or
 // user-cancelled Cancelled.
-func (s *MemStore) SetError(id string, code, message string) error {
+func (s *MemStore) SetError(_ context.Context, id string, code, message string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.jobs[id]
@@ -294,7 +295,7 @@ func (s *MemStore) SetError(id string, code, message string) error {
 }
 
 // SetTokens records the final token usage.
-func (s *MemStore) SetTokens(id string, input, output int) error {
+func (s *MemStore) SetTokens(_ context.Context, id string, input, output int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.jobs[id]
@@ -311,7 +312,7 @@ func (s *MemStore) SetTokens(id string, input, output int) error {
 }
 
 // SetSnapshotBytes records the serialized input size.
-func (s *MemStore) SetSnapshotBytes(id string, bytes int) error {
+func (s *MemStore) SetSnapshotBytes(_ context.Context, id string, bytes int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.jobs[id]
@@ -327,7 +328,7 @@ func (s *MemStore) SetSnapshotBytes(id string, bytes int) error {
 }
 
 // SetReuseStats records structured summary reuse/cache-hit counts.
-func (s *MemStore) SetReuseStats(id string, reused, leafHits, fileHits, packageHits, rootHits int) error {
+func (s *MemStore) SetReuseStats(_ context.Context, id string, reused, leafHits, fileHits, packageHits, rootHits int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.jobs[id]
@@ -344,7 +345,7 @@ func (s *MemStore) SetReuseStats(id string, reused, leafHits, fileHits, packageH
 }
 
 // IncrementAttachedRequests bumps the deduped request count.
-func (s *MemStore) IncrementAttachedRequests(id string) error {
+func (s *MemStore) IncrementAttachedRequests(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.jobs[id]
@@ -360,7 +361,7 @@ func (s *MemStore) IncrementAttachedRequests(id string) error {
 }
 
 // IncrementRetry bumps the retry counter.
-func (s *MemStore) IncrementRetry(id string) error {
+func (s *MemStore) IncrementRetry(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.jobs[id]
@@ -376,7 +377,7 @@ func (s *MemStore) IncrementRetry(id string) error {
 }
 
 // AppendLog persists a structured log entry for a job.
-func (s *MemStore) AppendLog(entry *JobLogEntry) (*JobLogEntry, error) {
+func (s *MemStore) AppendLog(_ context.Context, entry *JobLogEntry) (*JobLogEntry, error) {
 	if entry == nil || entry.JobID == "" {
 		return nil, fmt.Errorf("job log job_id is required")
 	}
@@ -394,7 +395,7 @@ func (s *MemStore) AppendLog(entry *JobLogEntry) (*JobLogEntry, error) {
 }
 
 // ListLogs returns logs for a job ordered by sequence ascending.
-func (s *MemStore) ListLogs(jobID string, filter JobLogFilter) []*JobLogEntry {
+func (s *MemStore) ListLogs(_ context.Context, jobID string, filter JobLogFilter) []*JobLogEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows := s.logs[jobID]
@@ -424,7 +425,7 @@ func (s *MemStore) ListLogs(jobID string, filter JobLogFilter) []*JobLogEntry {
 // provided for testing scenarios (e.g. reaper threshold assertions) that need
 // to simulate a stale job without waiting for real time to pass. It must not
 // be used in production paths.
-func (s *MemStore) ForceUpdatedAt(id string, t time.Time) error {
+func (s *MemStore) ForceUpdatedAt(_ context.Context, id string, t time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.jobs[id]

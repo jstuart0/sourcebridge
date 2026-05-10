@@ -54,11 +54,11 @@ func newQARepoLocator(store graphstore.GraphStore, repoCacheBase string) *qaRepo
 // LocateRepoClone resolves a repo ID to its on-disk root. Mirrors
 // resolveRepoSourcePath's decision order: persisted clone_path →
 // computed cache path → local Path fallback.
-func (l *qaRepoLocator) LocateRepoClone(repoID string) (string, bool) {
+func (l *qaRepoLocator) LocateRepoClone(ctx context.Context, repoID string) (string, bool) {
 	if l == nil || l.store == nil {
 		return "", false
 	}
-	repo := l.store.GetRepository(repoID)
+	repo := l.store.GetRepository(ctx, repoID)
 	if repo == nil {
 		return "", false
 	}
@@ -98,11 +98,11 @@ type qaGraphLookup struct {
 	store graphstore.GraphStore
 }
 
-func (g *qaGraphLookup) Lookup(id string) (string, string, string, int, int, bool) {
+func (g *qaGraphLookup) Lookup(ctx context.Context, id string) (string, string, string, int, int, bool) {
 	if g == nil || g.store == nil {
 		return "", "", "", 0, 0, false
 	}
-	sym := g.store.GetSymbol(id)
+	sym := g.store.GetSymbol(ctx, id)
 	if sym == nil {
 		return "", "", "", 0, 0, false
 	}
@@ -119,8 +119,12 @@ type qaGraphAdapter struct {
 	store graphstore.GraphStore
 }
 
-func (a *qaGraphAdapter) GetCallers(id string) []string { return a.store.GetCallers(id) }
-func (a *qaGraphAdapter) GetCallees(id string) []string { return a.store.GetCallees(id) }
+func (a *qaGraphAdapter) GetCallers(ctx context.Context, id string) []string {
+	return a.store.GetCallers(ctx, id)
+}
+func (a *qaGraphAdapter) GetCallees(ctx context.Context, id string) []string {
+	return a.store.GetCallees(ctx, id)
+}
 
 // qaArtifactLookup adapts the knowledge store to qa.ArtifactLookup.
 // Returns the same context block the legacy discussCode resolver
@@ -129,11 +133,11 @@ type qaArtifactLookup struct {
 	store knowledge.KnowledgeStore
 }
 
-func (a *qaArtifactLookup) ArtifactContext(id string) string {
+func (a *qaArtifactLookup) ArtifactContext(ctx context.Context, id string) string {
 	if a == nil || a.store == nil || id == "" {
 		return ""
 	}
-	art := a.store.GetKnowledgeArtifact(id)
+	art := a.store.GetKnowledgeArtifact(ctx, id)
 	if art == nil {
 		return ""
 	}
@@ -180,11 +184,11 @@ type qaRequirementLookup struct {
 	store graphstore.GraphStore
 }
 
-func (r *qaRequirementLookup) RequirementContext(id string) string {
+func (r *qaRequirementLookup) RequirementContext(ctx context.Context, id string) string {
 	if r == nil || r.store == nil || id == "" {
 		return ""
 	}
-	req := r.store.GetRequirement(id)
+	req := r.store.GetRequirement(ctx, id)
 	if req == nil {
 		return ""
 	}
@@ -194,19 +198,19 @@ func (r *qaRequirementLookup) RequirementContext(id string) string {
 	)
 }
 
-func (r *qaRequirementLookup) RequirementLabelsForSymbols(symbolIDs []string) []string {
+func (r *qaRequirementLookup) RequirementLabelsForSymbols(ctx context.Context, symbolIDs []string) []string {
 	if r == nil || r.store == nil || len(symbolIDs) == 0 {
 		return nil
 	}
 	seen := map[string]struct{}{}
 	out := []string{}
 	for _, sid := range symbolIDs {
-		for _, link := range r.store.GetLinksForSymbol(sid, false) {
+		for _, link := range r.store.GetLinksForSymbol(ctx, sid, false) {
 			if _, dup := seen[link.RequirementID]; dup {
 				continue
 			}
 			seen[link.RequirementID] = struct{}{}
-			req := r.store.GetRequirement(link.RequirementID)
+			req := r.store.GetRequirement(ctx, link.RequirementID)
 			if req == nil {
 				continue
 			}
@@ -229,11 +233,11 @@ type qaSymbolLookup struct {
 	store graphstore.GraphStore
 }
 
-func (s *qaSymbolLookup) SymbolContext(id string) string {
+func (s *qaSymbolLookup) SymbolContext(ctx context.Context, id string) string {
 	if s == nil || s.store == nil || id == "" {
 		return ""
 	}
-	sym := s.store.GetSymbol(id)
+	sym := s.store.GetSymbol(ctx, id)
 	if sym == nil {
 		return ""
 	}
@@ -247,22 +251,22 @@ func (s *qaSymbolLookup) SymbolContext(id string) string {
 	return joinLines(parts)
 }
 
-func (s *qaSymbolLookup) SymbolFilePath(id string) string {
+func (s *qaSymbolLookup) SymbolFilePath(ctx context.Context, id string) string {
 	if s == nil || s.store == nil || id == "" {
 		return ""
 	}
-	sym := s.store.GetSymbol(id)
+	sym := s.store.GetSymbol(ctx, id)
 	if sym == nil {
 		return ""
 	}
 	return sym.FilePath
 }
 
-func (s *qaSymbolLookup) SymbolDetails(id string) (qa.SymbolDetail, bool) {
+func (s *qaSymbolLookup) SymbolDetails(ctx context.Context, id string) (qa.SymbolDetail, bool) {
 	if s == nil || s.store == nil || id == "" {
 		return qa.SymbolDetail{}, false
 	}
-	sym := s.store.GetSymbol(id)
+	sym := s.store.GetSymbol(ctx, id)
 	if sym == nil {
 		return qa.SymbolDetail{}, false
 	}
@@ -288,11 +292,11 @@ func (s *qaSymbolLookup) SymbolDetails(id string) (qa.SymbolDetail, bool) {
 	return detail, true
 }
 
-func (s *qaSymbolLookup) SymbolsInFile(repoID, filePath string) []qa.SymbolContextRef {
+func (s *qaSymbolLookup) SymbolsInFile(ctx context.Context, repoID, filePath string) []qa.SymbolContextRef {
 	if s == nil || s.store == nil || repoID == "" || filePath == "" {
 		return nil
 	}
-	syms := s.store.GetSymbolsByFile(repoID, filePath)
+	syms := s.store.GetSymbolsByFile(ctx, repoID, filePath)
 	out := make([]qa.SymbolContextRef, 0, len(syms))
 	for _, sym := range syms {
 		out = append(out, qa.SymbolContextRef{
@@ -314,11 +318,11 @@ type qaFileReader struct {
 	locator *qaRepoLocator
 }
 
-func (r *qaFileReader) ReadRepoFile(repoID, filePath string) (string, error) {
+func (r *qaFileReader) ReadRepoFile(ctx context.Context, repoID, filePath string) (string, error) {
 	if r == nil || r.locator == nil {
 		return "", errNoLocator
 	}
-	root, ok := r.locator.LocateRepoClone(repoID)
+	root, ok := r.locator.LocateRepoClone(ctx, repoID)
 	if !ok || root == "" {
 		return "", errRepoUnavailable
 	}

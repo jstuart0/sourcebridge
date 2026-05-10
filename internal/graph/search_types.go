@@ -3,6 +3,8 @@
 
 package graph
 
+import "context"
+
 // RankedSymbol pairs a stored symbol with an opaque relevance score
 // produced by a ranked-search backend (BM25, vector similarity, etc.).
 //
@@ -39,6 +41,7 @@ type SymbolSearchFilters struct {
 // substring matching via the existing GetSymbols path.
 type FTSSymbolSearch interface {
 	SearchSymbolsFTS(
+		ctx context.Context,
 		repoID, query string,
 		filters SymbolSearchFilters,
 		limit int,
@@ -51,6 +54,7 @@ type FTSSymbolSearch interface {
 // not available" and the router skips the vector arm entirely.
 type VectorSymbolSearch interface {
 	SearchSymbolsVector(
+		ctx context.Context,
 		repoID string,
 		queryVec []float32,
 		filters SymbolSearchFilters,
@@ -65,6 +69,7 @@ type VectorSymbolSearch interface {
 // queryable by the HNSW index.
 type SymbolEmbeddingUpsert interface {
 	UpsertSymbolEmbedding(
+		ctx context.Context,
 		repoID, symbolID string,
 		vector []float32,
 		model string,

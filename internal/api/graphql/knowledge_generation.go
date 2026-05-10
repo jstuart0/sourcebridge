@@ -22,7 +22,7 @@ func (r *Resolver) requireKnowledgeGenerationSupport() error {
 }
 
 func (r *Resolver) loadKnowledgeRepository(ctx context.Context, repositoryID string) (*graphstore.Repository, error) {
-	repo := r.getStore(ctx).GetRepository(repositoryID)
+	repo := r.getStore(ctx).GetRepository(ctx, repositoryID)
 	if repo == nil {
 		return nil, fmt.Errorf("repository %s not found", repositoryID)
 	}

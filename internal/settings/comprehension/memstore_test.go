@@ -22,7 +22,7 @@ func TestMemStore_SetModelCapabilities_InvalidTier(t *testing.T) {
 		Provider:        "test",
 		QualityGateTier: modeltier.QualityGateTier("INVALID"),
 	}
-	err := store.SetModelCapabilities(mc)
+	err := store.SetModelCapabilities(t.Context(), mc)
 	if err == nil {
 		t.Fatal("expected ErrInvalidQualityGateTier, got nil")
 	}
@@ -47,7 +47,7 @@ func TestMemStore_SetModelCapabilities_ValidTiers(t *testing.T) {
 				Provider:        "test",
 				QualityGateTier: tier,
 			}
-			if err := store.SetModelCapabilities(mc); err != nil {
+			if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 				t.Errorf("tier=%q: unexpected error: %v", tier, err)
 			}
 		})

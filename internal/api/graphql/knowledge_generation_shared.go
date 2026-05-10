@@ -112,14 +112,14 @@ func runKnowledgePipeline(
 
 	enrichedSnapJSON := snapJSON
 	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled", 0)
-	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
+	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 	if artifactUsesUnderstanding(generationMode) {
 		if understanding, reused, err := r.ensureFreshRepositoryUnderstanding(runCtx, rt, repo, artifact, snap.SourceRevision, snapJSON); err != nil {
 			return err
 		} else {
 			if reused {
 				rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
-				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
+				_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 			}
 			if understanding != nil {
 				if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
@@ -145,7 +145,7 @@ func runKnowledgePipeline(
 	}
 
 	rt.ReportProgress(0.96, "llm", cfg.progressPersistMessage, 0)
-	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting")
+	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.8, "llm", "LLM completed, persisting")
 
 	if usage != nil {
 		storeLLMUsage(store, repo.ID, usage, "")
@@ -153,22 +153,22 @@ func runKnowledgePipeline(
 	}
 
 	sections, evidences := cfg.mapSections(resp)
-	if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
+	if err := r.KnowledgeStore.StoreKnowledgeSections(runCtx, artifact.ID, sections); err != nil {
 		slog.Error("failed to store "+cfg.artifactLabel+" sections", "artifact_id", artifact.ID, "error", err)
 		return err
 	}
 
 	if len(evidences) > 0 {
-		storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
+		storedSections := r.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID)
 		for i, ev := range evidences {
 			if i >= len(storedSections) || len(ev) == 0 {
 				continue
 			}
-			_ = r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[i].ID, ev)
+			_ = r.KnowledgeStore.StoreKnowledgeEvidence(runCtx, storedSections[i].ID, ev)
 		}
 	}
 
-	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
+	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(runCtx, artifact.ID, knowledgepkg.StatusReady); err != nil {
 		slog.Error("failed to mark "+cfg.artifactLabel+" ready", "artifact_id", artifact.ID, "error", err)
 	}
 	rt.ReportProgress(1.0, "ready", cfg.readyMessage, 0)

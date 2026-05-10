@@ -1654,7 +1654,7 @@ func mergeConfig(base, override Config) Config {
 type PackageDepsProvider interface {
 	// GetPackageDependencies returns all package-level dependency records for
 	// the given repository. Returns an empty slice when none are available.
-	GetPackageDependencies(repoID string) []*graph.StoredPackageDependencies
+	GetPackageDependencies(ctx context.Context, repoID string) []*graph.StoredPackageDependencies
 }
 
 // TaxonomyResolver derives the [PlannedPage] list for a repository from its
@@ -1722,7 +1722,7 @@ type PackageGraphInfo struct {
 //
 // now is used for Provenance timestamps; pass time.Now() in production.
 func (r *TaxonomyResolver) Resolve(ctx context.Context, pkgGraph []PackageGraphInfo, clusters []clustering.ClusterSummary, now time.Time) ([]PlannedPage, error) {
-	syms, err := r.symbolGraph.ExportedSymbols(r.repoID)
+	syms, err := r.symbolGraph.ExportedSymbols(ctx, r.repoID)
 	if err != nil {
 		return nil, fmt.Errorf("taxonomy: fetching symbols: %w", err)
 	}
@@ -1743,7 +1743,7 @@ func (r *TaxonomyResolver) Resolve(ctx context.Context, pkgGraph []PackageGraphI
 	// using the cluster label as the page scope. Uses archPageID for backward
 	// compatibility; new callers use ResolveOverview / ResolveDetailed.
 	if len(clusters) > 0 {
-		pages = append(pages, r.resolveClusterArchPages(baseInput, clusters, archPageID)...)
+		pages = append(pages, r.resolveClusterArchPages(ctx, baseInput, clusters, archPageID)...)
 	} else {
 		// 1b. Architecture pages — package-path fallback.
 		//
@@ -1856,7 +1856,7 @@ const maxOverviewFallbackPages = 25
 // Overview mode requires cluster data to produce meaningful subsystem pages.
 // The caller (UI/runner) should surface "re-index required for Overview mode" in this case.
 func (r *TaxonomyResolver) ResolveOverview(ctx context.Context, pkgGraph []PackageGraphInfo, clusters []clustering.ClusterSummary, now time.Time) ([]PlannedPage, error) {
-	syms, err := r.symbolGraph.ExportedSymbols(r.repoID)
+	syms, err := r.symbolGraph.ExportedSymbols(ctx, r.repoID)
 	if err != nil {
 		return nil, fmt.Errorf("taxonomy: fetching symbols: %w", err)
 	}
@@ -1873,7 +1873,7 @@ func (r *TaxonomyResolver) ResolveOverview(ctx context.Context, pkgGraph []Packa
 	var pages []PlannedPage
 
 	if len(clusters) > 0 {
-		pages = append(pages, r.resolveClusterArchPages(baseInput, clusters, OverviewPageID)...)
+		pages = append(pages, r.resolveClusterArchPages(ctx, baseInput, clusters, OverviewPageID)...)
 	}
 	// When clusters is empty: no architecture pages for Overview (LD-13 / plan decisions).
 
@@ -1889,7 +1889,7 @@ func (r *TaxonomyResolver) ResolveOverview(ctx context.Context, pkgGraph []Packa
 // When clusters are absent, the fallback emits one page per unique top-level directory
 // derived from the symbol graph, capped at maxOverviewFallbackPages.
 func (r *TaxonomyResolver) ResolveDetailed(ctx context.Context, pkgGraph []PackageGraphInfo, clusters []clustering.ClusterSummary, now time.Time) ([]PlannedPage, error) {
-	syms, err := r.symbolGraph.ExportedSymbols(r.repoID)
+	syms, err := r.symbolGraph.ExportedSymbols(ctx, r.repoID)
 	if err != nil {
 		return nil, fmt.Errorf("taxonomy: fetching symbols: %w", err)
 	}
@@ -1906,7 +1906,7 @@ func (r *TaxonomyResolver) ResolveDetailed(ctx context.Context, pkgGraph []Packa
 
 	if len(clusters) > 0 {
 		// Cluster-based Detailed pages — same pages as Overview but under ".detail." prefix.
-		pages = append(pages, r.resolveClusterArchPages(baseInput, clusters, DetailPageID)...)
+		pages = append(pages, r.resolveClusterArchPages(ctx, baseInput, clusters, DetailPageID)...)
 	} else {
 		// Package-path fallback: one page per top-level directory, capped at maxOverviewFallbackPages.
 		pages = append(pages, r.resolveTopLevelDirPages(baseInput, syms, pkgGraph)...)
@@ -1933,6 +1933,7 @@ func (r *TaxonomyResolver) ResolveForMode(ctx context.Context, mode string, pkgG
 // using the given pageIDFn to compute each page's ID. This is shared between
 // Overview and Detailed modes so the cluster analysis logic is not duplicated.
 func (r *TaxonomyResolver) resolveClusterArchPages(
+	ctx context.Context,
 	baseInput templates.GenerateInput,
 	clusters []clustering.ClusterSummary,
 	pageIDFn func(repoID, label string) string,
@@ -1940,7 +1941,7 @@ func (r *TaxonomyResolver) resolveClusterArchPages(
 	// Build package-level dependency lookup once.
 	var pkgDepByPkg map[string]*graph.StoredPackageDependencies
 	if r.pkgDeps != nil {
-		all := r.pkgDeps.GetPackageDependencies(r.repoID)
+		all := r.pkgDeps.GetPackageDependencies(ctx, r.repoID)
 		pkgDepByPkg = make(map[string]*graph.StoredPackageDependencies, len(all))
 		for _, d := range all {
 			pkgDepByPkg[d.Package] = d

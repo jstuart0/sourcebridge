@@ -38,7 +38,7 @@ func (r *Resolver) checkRepoAccessGraphQL(ctx context.Context, repositoryID stri
 	if store == nil {
 		return fmt.Errorf("forbidden: repository not accessible")
 	}
-	repo := store.GetRepository(repositoryID)
+	repo := store.GetRepository(ctx, repositoryID)
 	if repo == nil {
 		return fmt.Errorf("forbidden: repository not found or not accessible")
 	}
@@ -563,22 +563,22 @@ func mapLink(l *graphstore.StoredLink) *RequirementLink {
 }
 
 // mapLinkWithRelations maps a StoredLink and populates both Symbol and Requirement.
-func mapLinkWithRelations(l *graphstore.StoredLink, store graphstore.GraphStore) *RequirementLink {
+func mapLinkWithRelations(ctx context.Context, l *graphstore.StoredLink, store graphstore.GraphStore) *RequirementLink {
 	rl := mapLink(l)
 	if store == nil {
 		return rl
 	}
-	if req := store.GetRequirement(l.RequirementID); req != nil {
+	if req := store.GetRequirement(ctx, l.RequirementID); req != nil {
 		rl.Requirement = mapRequirement(req)
 	}
-	if sym := store.GetSymbol(l.SymbolID); sym != nil {
+	if sym := store.GetSymbol(ctx, l.SymbolID); sym != nil {
 		rl.Symbol = mapSymbol(sym)
 	}
 	return rl
 }
 
 // mapLinksWithRelationsBatch maps a slice of StoredLinks with batch-fetched symbols and requirements.
-func mapLinksWithRelationsBatch(links []*graphstore.StoredLink, store graphstore.GraphStore) []*RequirementLink {
+func mapLinksWithRelationsBatch(ctx context.Context, links []*graphstore.StoredLink, store graphstore.GraphStore) []*RequirementLink {
 	if len(links) == 0 {
 		return []*RequirementLink{}
 	}
@@ -599,8 +599,8 @@ func mapLinksWithRelationsBatch(links []*graphstore.StoredLink, store graphstore
 		}
 	}
 
-	symMap := store.GetSymbolsByIDs(symIDs)
-	reqMap := store.GetRequirementsByIDs(reqIDs)
+	symMap := store.GetSymbolsByIDs(ctx, symIDs)
+	reqMap := store.GetRequirementsByIDs(ctx, reqIDs)
 
 	result := make([]*RequirementLink, 0, len(links))
 	for _, l := range links {
@@ -617,11 +617,11 @@ func mapLinksWithRelationsBatch(links []*graphstore.StoredLink, store graphstore
 }
 
 // populateRepositoryDetails fills in the files and modules for a repository.
-func populateRepositoryDetails(repo *Repository, store graphstore.GraphStore) {
+func populateRepositoryDetails(ctx context.Context, repo *Repository, store graphstore.GraphStore) {
 	if store == nil {
 		return
 	}
-	mods := store.GetModules(repo.ID)
+	mods := store.GetModules(ctx, repo.ID)
 	repo.Modules = make([]*Module, 0, len(mods))
 	for _, m := range mods {
 		repo.Modules = append(repo.Modules, &Module{
@@ -651,35 +651,35 @@ func mapFile(f *graphstore.File) *File {
 }
 
 // populateSymbolRelations fills in callers, callees, and requirements for a symbol.
-func populateSymbolRelations(sym *CodeSymbol, store graphstore.GraphStore) {
+func populateSymbolRelations(ctx context.Context, sym *CodeSymbol, store graphstore.GraphStore) {
 	if store == nil {
 		return
 	}
 	// Callers
-	callerIDs := store.GetCallers(sym.ID)
+	callerIDs := store.GetCallers(ctx, sym.ID)
 	sym.Callers = make([]*CodeSymbol, 0, len(callerIDs))
 	for _, cid := range callerIDs {
-		caller := store.GetSymbol(cid)
+		caller := store.GetSymbol(ctx, cid)
 		if caller != nil {
 			sym.Callers = append(sym.Callers, mapSymbol(caller))
 		}
 	}
 	// Callees
-	calleeIDs := store.GetCallees(sym.ID)
+	calleeIDs := store.GetCallees(ctx, sym.ID)
 	sym.Callees = make([]*CodeSymbol, 0, len(calleeIDs))
 	for _, cid := range calleeIDs {
-		callee := store.GetSymbol(cid)
+		callee := store.GetSymbol(ctx, cid)
 		if callee != nil {
 			sym.Callees = append(sym.Callees, mapSymbol(callee))
 		}
 	}
 	// Requirement links
-	links := store.GetLinksForSymbol(sym.ID, false)
+	links := store.GetLinksForSymbol(ctx, sym.ID, false)
 	sym.Requirements = make([]*RequirementLink, 0, len(links))
 	for _, l := range links {
 		rl := mapLink(l)
 		// Populate the requirement reference
-		req := store.GetRequirement(l.RequirementID)
+		req := store.GetRequirement(ctx, l.RequirementID)
 		if req != nil {
 			mapped := mapRequirement(req)
 			rl.Requirement = mapped
@@ -691,11 +691,11 @@ func populateSymbolRelations(sym *CodeSymbol, store graphstore.GraphStore) {
 // populateRequirementLinks fills in the links for a requirement.
 // Links are already sorted by confidence DESC from the store; we cap at 50
 // for the UI detail view to avoid slow responses with thousands of links.
-func populateRequirementLinks(req *Requirement, store graphstore.GraphStore) {
+func populateRequirementLinks(ctx context.Context, req *Requirement, store graphstore.GraphStore) {
 	if store == nil {
 		return
 	}
-	links := store.GetLinksForRequirement(req.ID, false)
+	links := store.GetLinksForRequirement(ctx, req.ID, false)
 	if len(links) > 50 {
 		links = links[:50]
 	}
@@ -705,7 +705,7 @@ func populateRequirementLinks(req *Requirement, store graphstore.GraphStore) {
 	for _, l := range links {
 		symIDs = append(symIDs, l.SymbolID)
 	}
-	symMap := store.GetSymbolsByIDs(symIDs)
+	symMap := store.GetSymbolsByIDs(ctx, symIDs)
 
 	req.Links = make([]*RequirementLink, 0, len(links))
 	for _, l := range links {
@@ -950,18 +950,18 @@ func mapModelCapability(mc *comprehension.ModelCapabilities) *ModelCapabilityPro
 	return p
 }
 
-func mapKnowledgeArtifactWithStore(store knowledgepkg.KnowledgeStore, a *knowledgepkg.Artifact) *KnowledgeArtifact {
+func mapKnowledgeArtifactWithStore(ctx context.Context, store knowledgepkg.KnowledgeStore, a *knowledgepkg.Artifact) *KnowledgeArtifact {
 	out := mapKnowledgeArtifact(a)
 	if store == nil || a == nil || out == nil {
 		return out
 	}
-	for _, dep := range store.GetArtifactDependencies(a.ID) {
+	for _, dep := range store.GetArtifactDependencies(ctx, a.ID) {
 		out.Dependencies = append(out.Dependencies, mapArtifactDependency(&dep))
 	}
 	if out.Dependencies == nil {
 		out.Dependencies = []*ArtifactDependency{}
 	}
-	for _, unit := range store.GetRefinementUnits(a.ID) {
+	for _, unit := range store.GetRefinementUnits(ctx, a.ID) {
 		out.RefinementUnits = append(out.RefinementUnits, mapRefinementUnit(&unit))
 	}
 	if out.RefinementUnits == nil {
@@ -971,7 +971,7 @@ func mapKnowledgeArtifactWithStore(store knowledgepkg.KnowledgeStore, a *knowled
 	if a.Scope != nil {
 		scope = a.Scope.Normalize()
 	}
-	if u := store.GetRepositoryUnderstanding(a.RepositoryID, understandingScopeForArtifact(scope)); u != nil {
+	if u := store.GetRepositoryUnderstanding(ctx, a.RepositoryID, understandingScopeForArtifact(scope)); u != nil {
 		out.RefreshAvailable = a.Stale || knowledgepkg.ArtifactRefreshAvailable(a, u)
 		if out.UnderstandingID == nil && u.ID != "" {
 			out.UnderstandingID = ptrString(u.ID)
@@ -1421,8 +1421,8 @@ type knowledgeFreshnessAdapter struct {
 	store knowledgepkg.KnowledgeStore
 }
 
-func (a *knowledgeFreshnessAdapter) GetFreshnessRatio(repoID string) (fresh int, total int) {
-	artifacts := a.store.GetKnowledgeArtifacts(repoID)
+func (a *knowledgeFreshnessAdapter) GetFreshnessRatio(ctx context.Context, repoID string) (fresh int, total int) {
+	artifacts := a.store.GetKnowledgeArtifacts(ctx, repoID)
 	total = len(artifacts)
 	for _, art := range artifacts {
 		if !art.Stale && art.Status == knowledgepkg.StatusReady {

@@ -91,7 +91,7 @@ func (o *Orchestrator) runAgentic(
 	var summaries []SummaryEvidence
 	if o.reader != nil {
 		t1 := time.Now()
-		status := GetRepositoryStatus(o.reader, in.RepositoryID, "")
+		status := GetRepositoryStatus(ctx, o.reader, in.RepositoryID, "")
 		result.Diagnostics.StageTimings["qa.understanding_ready"] = FromDuration(time.Since(t1))
 		if status != nil {
 			result.Diagnostics.UnderstandingStage = status.UnderstandingStage
@@ -105,7 +105,7 @@ func (o *Orchestrator) runAgentic(
 				return nil, fmt.Errorf("understanding not ready; falling back")
 			}
 			t2 := time.Now()
-			ev, err := GetSummaryEvidence(o.reader, status.CorpusID, in.Question, string(kind))
+			ev, err := GetSummaryEvidence(ctx, o.reader, status.CorpusID, in.Question, string(kind))
 			result.Diagnostics.StageTimings["qa.summary_evidence"] = FromDuration(time.Since(t2))
 			if err == nil {
 				summaries = trimSummaries(ev, 6) // seed with top 6 per plan

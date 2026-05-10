@@ -69,26 +69,26 @@ func newResolverWithRepoAndLink(t *testing.T, rb *recordingBus) (*Resolver, stri
 			},
 		},
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
 	// Seed a requirement.
-	store.StoreRequirement(repo.ID, &graphstore.StoredRequirement{
+	store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ID:         "req-link-test",
 		ExternalID: "LT-001",
 		Title:      "Link test req",
 	})
 
 	// Find the stored symbol.
-	syms := store.GetSymbolsByFile(repo.ID, "main.go")
+	syms := store.GetSymbolsByFile(t.Context(), repo.ID, "main.go")
 	if len(syms) == 0 {
 		t.Fatal("no symbols found after StoreIndexResult")
 	}
 
 	// Seed a link.
-	link := store.StoreLink(repo.ID, &graphstore.StoredLink{
+	link := store.StoreLink(t.Context(), repo.ID, &graphstore.StoredLink{
 		RepoID:        repo.ID,
 		RequirementID: "req-link-test",
 		SymbolID:      syms[0].ID,

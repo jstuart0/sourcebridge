@@ -69,7 +69,7 @@ func TestPhase1_EndToEnd_ChangeWatchToFreshness(t *testing.T) {
 	}
 
 	store := graphstore.NewStore()
-	repo, err := store.CreateRepository("phase1-sweep", repoPath)
+	repo, err := store.CreateRepository(t.Context(), "phase1-sweep", repoPath)
 	if err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestPhase1_EndToEnd_ChangeWatchToFreshness(t *testing.T) {
 			{Path: "pkg0/file2.go", Language: "go", LineCount: 10, ContentHash: "h2"},
 		},
 	}
-	if _, err := store.ReplaceIndexResult(repo.ID, prev); err != nil {
+	if _, err := store.ReplaceIndexResult(t.Context(), repo.ID, prev); err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 

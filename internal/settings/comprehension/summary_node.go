@@ -3,7 +3,10 @@
 
 package comprehension
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // SummaryNode represents a cached node in a hierarchical summary tree.
 // Persisted in ca_summary_node and used for incremental reindexing.
@@ -29,14 +32,14 @@ type SummaryNode struct {
 // SummaryNodeStore is the persistence interface for summary nodes.
 type SummaryNodeStore interface {
 	// GetSummaryNodes returns all cached nodes for a corpus.
-	GetSummaryNodes(corpusID string) ([]SummaryNode, error)
+	GetSummaryNodes(ctx context.Context, corpusID string) ([]SummaryNode, error)
 
 	// GetSummaryNode returns a single node by corpus + unit ID.
-	GetSummaryNode(corpusID, unitID string) (*SummaryNode, error)
+	GetSummaryNode(ctx context.Context, corpusID, unitID string) (*SummaryNode, error)
 
 	// StoreSummaryNodes bulk-upserts nodes for a corpus.
-	StoreSummaryNodes(nodes []SummaryNode) error
+	StoreSummaryNodes(ctx context.Context, nodes []SummaryNode) error
 
 	// InvalidateSummaryNodes deletes all cached nodes for a corpus.
-	InvalidateSummaryNodes(corpusID string) error
+	InvalidateSummaryNodes(ctx context.Context, corpusID string) error
 }

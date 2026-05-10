@@ -27,7 +27,7 @@ func (r *queryResolver) executionEntryPoints(ctx context.Context, repositoryID s
 	if store == nil {
 		return []*ExecutionEntryPoint{}, nil
 	}
-	repo := store.GetRepository(repositoryID)
+	repo := store.GetRepository(ctx, repositoryID)
 	if repo == nil {
 		return []*ExecutionEntryPoint{}, nil
 	}
@@ -35,7 +35,7 @@ func (r *queryResolver) executionEntryPoints(ctx context.Context, repositoryID s
 	if err != nil {
 		return []*ExecutionEntryPoint{}, nil
 	}
-	routes, err := extractRouteEntryPoints(store, repositoryID, repoRoot)
+	routes, err := extractRouteEntryPoints(ctx, store, repositoryID, repoRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func (r *queryResolver) executionPath(ctx context.Context, input ExecutionPathIn
 	if store == nil {
 		return &ExecutionPathResult{EntryKind: input.EntryKind, EntryLabel: input.EntryValue, TrustQualified: false, Steps: []*ExecutionPathStep{}}, nil
 	}
-	repo := store.GetRepository(input.RepositoryID)
+	repo := store.GetRepository(ctx, input.RepositoryID)
 	if repo == nil {
 		return nil, fmt.Errorf("repository %s not found", input.RepositoryID)
 	}
@@ -90,7 +90,7 @@ func (r *queryResolver) executionPath(ctx context.Context, input ExecutionPathIn
 		if err != nil {
 			return trustedExecutionFallback(input.EntryKind, input.EntryValue, "This path is not well enough understood yet."), nil
 		}
-		routes, err := extractRouteEntryPoints(store, input.RepositoryID, repoRoot)
+		routes, err := extractRouteEntryPoints(ctx, store, input.RepositoryID, repoRoot)
 		if err != nil {
 			return nil, err
 		}
@@ -121,19 +121,19 @@ func (r *queryResolver) executionPath(ctx context.Context, input ExecutionPathIn
 			LineEnd:     &lineEnd,
 		})
 		if selected.Symbol != nil {
-			steps = append(steps, executionStepsFromSymbolPath(store, input.RepositoryID, repoRoot, selected.Symbol.ID, maxDepth)...)
+			steps = append(steps, executionStepsFromSymbolPath(ctx, store, input.RepositoryID, repoRoot, selected.Symbol.ID, maxDepth)...)
 		}
 	case ExecutionEntryKindSymbol:
-		symbol := resolveSymbolEntry(store, input.RepositoryID, input.EntryValue)
+		symbol := resolveSymbolEntry(ctx, store, input.RepositoryID, input.EntryValue)
 		if symbol == nil {
 			return trustedExecutionFallback(input.EntryKind, input.EntryValue, "This path is not well enough understood yet."), nil
 		}
 		entryLabel = symbol.Name
 		repoRoot, err := resolveRepoSourcePath(repo)
 		if err == nil {
-			steps = executionStepsFromSymbolPath(store, input.RepositoryID, repoRoot, symbol.ID, maxDepth)
+			steps = executionStepsFromSymbolPath(ctx, store, input.RepositoryID, repoRoot, symbol.ID, maxDepth)
 		} else {
-			steps = executionStepsFromSymbolPath(store, input.RepositoryID, "", symbol.ID, maxDepth)
+			steps = executionStepsFromSymbolPath(ctx, store, input.RepositoryID, "", symbol.ID, maxDepth)
 		}
 	case ExecutionEntryKindFile:
 		filePath := input.EntryValue
@@ -150,20 +150,20 @@ func (r *queryResolver) executionPath(ctx context.Context, input ExecutionPathIn
 			FilePath:    &filePath,
 			LineStart:   &lineStart,
 		})
-		symbol := resolveFileAnchorSymbol(store, input.RepositoryID, input.EntryValue)
+		symbol := resolveFileAnchorSymbol(ctx, store, input.RepositoryID, input.EntryValue)
 		if symbol != nil {
 			repoRoot, err := resolveRepoSourcePath(repo)
 			if err == nil {
-				steps = append(steps, executionStepsFromSymbolPath(store, input.RepositoryID, repoRoot, symbol.ID, maxDepth)...)
+				steps = append(steps, executionStepsFromSymbolPath(ctx, store, input.RepositoryID, repoRoot, symbol.ID, maxDepth)...)
 			} else {
-				steps = append(steps, executionStepsFromSymbolPath(store, input.RepositoryID, "", symbol.ID, maxDepth)...)
+				steps = append(steps, executionStepsFromSymbolPath(ctx, store, input.RepositoryID, "", symbol.ID, maxDepth)...)
 			}
 		}
 	default:
 		entryLabel = input.EntryValue
 	}
 
-	steps = append(steps, inferredWorkerHandoffSteps(store, input.RepositoryID, steps)...)
+	steps = append(steps, inferredWorkerHandoffSteps(ctx, store, input.RepositoryID, steps)...)
 	result := buildExecutionPathResult(input.EntryKind, entryLabel, steps)
 	if !result.TrustQualified {
 		return trustedExecutionFallback(input.EntryKind, entryLabel, "This path is not well enough understood yet."), nil
@@ -171,11 +171,11 @@ func (r *queryResolver) executionPath(ctx context.Context, input ExecutionPathIn
 	return result, nil
 }
 
-func executionStepsFromSymbolPath(store graphstore.GraphStore, repoID, repoRoot, symbolID string, maxDepth int) []*ExecutionPathStep {
-	nodes := graphstore.TraceLikelyExecutionPath(store, repoID, symbolID, maxDepth)
-	symbol := store.GetSymbol(symbolID)
+func executionStepsFromSymbolPath(ctx context.Context, store graphstore.GraphStore, repoID, repoRoot, symbolID string, maxDepth int) []*ExecutionPathStep {
+	nodes := graphstore.TraceLikelyExecutionPath(ctx, store, repoID, symbolID, maxDepth)
+	symbol := store.GetSymbol(ctx, symbolID)
 	if symbol != nil {
-		nodes = mergeExecutionNodes(nodes, inferSourceHelperNodes(store, repoID, repoRoot, symbol, maxDepth))
+		nodes = mergeExecutionNodes(nodes, inferSourceHelperNodes(ctx, store, repoID, repoRoot, symbol, maxDepth))
 	}
 	steps := make([]*ExecutionPathStep, 0, len(nodes))
 	for i, node := range nodes {
@@ -238,7 +238,7 @@ func mergeExecutionNodes(base []graphstore.ExecutionNode, extras []graphstore.Ex
 	return merged
 }
 
-func inferSourceHelperNodes(store graphstore.GraphStore, repoID, repoRoot string, symbol *graphstore.StoredSymbol, maxDepth int) []graphstore.ExecutionNode {
+func inferSourceHelperNodes(ctx context.Context, store graphstore.GraphStore, repoID, repoRoot string, symbol *graphstore.StoredSymbol, maxDepth int) []graphstore.ExecutionNode {
 	if symbol == nil || repoRoot == "" || maxDepth <= 0 {
 		return nil
 	}
@@ -258,7 +258,7 @@ func inferSourceHelperNodes(store graphstore.GraphStore, repoID, repoRoot string
 	body := strings.Join(lines[start:end], "\n")
 
 	// Build lookup from same-file symbols
-	sameFile := store.GetSymbolsByFile(repoID, symbol.FilePath)
+	sameFile := store.GetSymbolsByFile(ctx, repoID, symbol.FilePath)
 	byName := make(map[string]*graphstore.StoredSymbol, len(sameFile))
 	for _, candidate := range sameFile {
 		if candidate == nil || candidate.ID == symbol.ID || candidate.IsTest {
@@ -270,7 +270,7 @@ func inferSourceHelperNodes(store graphstore.GraphStore, repoID, repoRoot string
 	}
 
 	// Build cross-file lookup for names not found in same file
-	allSymbols, _ := store.GetSymbols(repoID, nil, nil, 0, 0)
+	allSymbols, _ := store.GetSymbols(ctx, repoID, nil, nil, 0, 0)
 	allByName := make(map[string]*graphstore.StoredSymbol, len(allSymbols))
 	for _, sym := range allSymbols {
 		if sym == nil || sym.ID == symbol.ID || sym.IsTest {
@@ -355,13 +355,13 @@ func trustedExecutionFallback(kind ExecutionEntryKind, entryLabel string, messag
 	}
 }
 
-func resolveSymbolEntry(store graphstore.GraphStore, repoID, entryValue string) *graphstore.StoredSymbol {
-	if sym := store.GetSymbol(entryValue); sym != nil {
+func resolveSymbolEntry(ctx context.Context, store graphstore.GraphStore, repoID, entryValue string) *graphstore.StoredSymbol {
+	if sym := store.GetSymbol(ctx, entryValue); sym != nil {
 		return sym
 	}
 	if strings.Contains(entryValue, "#") {
 		filePath, symbolName, _ := strings.Cut(entryValue, "#")
-		for _, sym := range store.GetSymbolsByFile(repoID, filePath) {
+		for _, sym := range store.GetSymbolsByFile(ctx, repoID, filePath) {
 			if sym.Name == symbolName || sym.QualifiedName == symbolName {
 				return sym
 			}
@@ -370,8 +370,8 @@ func resolveSymbolEntry(store graphstore.GraphStore, repoID, entryValue string) 
 	return nil
 }
 
-func resolveFileAnchorSymbol(store graphstore.GraphStore, repoID, filePath string) *graphstore.StoredSymbol {
-	symbols := store.GetSymbolsByFile(repoID, filePath)
+func resolveFileAnchorSymbol(ctx context.Context, store graphstore.GraphStore, repoID, filePath string) *graphstore.StoredSymbol {
+	symbols := store.GetSymbolsByFile(ctx, repoID, filePath)
 	sort.Slice(symbols, func(i, j int) bool {
 		if symbols[i].StartLine == symbols[j].StartLine {
 			return symbols[i].Name < symbols[j].Name
@@ -389,8 +389,8 @@ func resolveFileAnchorSymbol(store graphstore.GraphStore, repoID, filePath strin
 	return symbols[0]
 }
 
-func extractRouteEntryPoints(store graphstore.GraphStore, repoID, repoRoot string) ([]routeEntry, error) {
-	allSymbols, _ := store.GetSymbols(repoID, nil, nil, 0, 0)
+func extractRouteEntryPoints(ctx context.Context, store graphstore.GraphStore, repoID, repoRoot string) ([]routeEntry, error) {
+	allSymbols, _ := store.GetSymbols(ctx, repoID, nil, nil, 0, 0)
 	symbolsByName := make(map[string]*graphstore.StoredSymbol, len(allSymbols))
 	for _, sym := range allSymbols {
 		if _, exists := symbolsByName[sym.Name]; !exists {
@@ -400,7 +400,7 @@ func extractRouteEntryPoints(store graphstore.GraphStore, repoID, repoRoot strin
 
 	seen := map[string]bool{}
 	var routes []routeEntry
-	for _, file := range store.GetFiles(repoID) {
+	for _, file := range store.GetFiles(ctx, repoID) {
 		if file.Language != "go" {
 			continue
 		}
@@ -438,7 +438,7 @@ func extractRouteEntryPoints(store graphstore.GraphStore, repoID, repoRoot strin
 	return routes, nil
 }
 
-func inferredWorkerHandoffSteps(store graphstore.GraphStore, repoID string, steps []*ExecutionPathStep) []*ExecutionPathStep {
+func inferredWorkerHandoffSteps(ctx context.Context, store graphstore.GraphStore, repoID string, steps []*ExecutionPathStep) []*ExecutionPathStep {
 	if len(steps) == 0 {
 		return nil
 	}
@@ -447,7 +447,7 @@ func inferredWorkerHandoffSteps(store graphstore.GraphStore, repoID string, step
 		return nil
 	}
 
-	targetFile, explanation := inferredWorkerTarget(store, repoID, *last.SymbolName)
+	targetFile, explanation := inferredWorkerTarget(ctx, store, repoID, *last.SymbolName)
 	if targetFile == "" {
 		return []*ExecutionPathStep{{
 			OrderIndex:  len(steps),
@@ -483,7 +483,7 @@ func inferredWorkerHandoffSteps(store graphstore.GraphStore, repoID string, step
 	}
 }
 
-func inferredWorkerTarget(store graphstore.GraphStore, repoID, symbolName string) (string, string) {
+func inferredWorkerTarget(ctx context.Context, store graphstore.GraphStore, repoID, symbolName string) (string, string) {
 	targets := map[string]string{
 		"GenerateCliffNotes":   "workers/knowledge/servicer.py",
 		"GenerateLearningPath": "workers/knowledge/servicer.py",
@@ -498,7 +498,7 @@ func inferredWorkerTarget(store graphstore.GraphStore, repoID, symbolName string
 	if filePath == "" {
 		return "", ""
 	}
-	for _, file := range store.GetFiles(repoID) {
+	for _, file := range store.GetFiles(ctx, repoID) {
 		if file.Path == filePath {
 			return filePath, "This is the likely Python worker entry point for the handoff."
 		}

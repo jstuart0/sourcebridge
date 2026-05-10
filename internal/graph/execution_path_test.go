@@ -42,12 +42,12 @@ func TestTraceLikelyExecutionPathBuildsCallerAndCalleeChain(t *testing.T) {
 			{SourceID: "service", TargetID: "repo", Type: indexer.RelationCalls},
 		},
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
-	symbols, _ := store.GetSymbols(repo.ID, nil, nil, 0, 0)
+	symbols, _ := store.GetSymbols(t.Context(), repo.ID, nil, nil, 0, 0)
 	var serviceID string
 	for _, sym := range symbols {
 		if sym.Name == "processLogin" {
@@ -59,7 +59,7 @@ func TestTraceLikelyExecutionPathBuildsCallerAndCalleeChain(t *testing.T) {
 		t.Fatal("expected stored service symbol")
 	}
 
-	nodes := TraceLikelyExecutionPath(store, repo.ID, serviceID, 4)
+	nodes := TraceLikelyExecutionPath(t.Context(), store, repo.ID, serviceID, 4)
 	if len(nodes) < 3 {
 		t.Fatalf("expected caller + current + callee chain, got %#v", nodes)
 	}

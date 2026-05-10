@@ -4,6 +4,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"time"
@@ -95,7 +96,7 @@ func (r *surrealAPIContract) toAPIContract() *graph.APIContract {
 
 // --- Repo Links ---
 
-func (s *SurrealStore) LinkRepos(sourceRepoID, targetRepoID string) (*graph.RepoLink, error) {
+func (s *SurrealStore) LinkRepos(_ context.Context, sourceRepoID, targetRepoID string) (*graph.RepoLink, error) {
 	if sourceRepoID == targetRepoID {
 		return nil, fmt.Errorf("cannot link a repository to itself")
 	}
@@ -131,7 +132,7 @@ func (s *SurrealStore) LinkRepos(sourceRepoID, targetRepoID string) (*graph.Repo
 	}, nil
 }
 
-func (s *SurrealStore) UnlinkRepos(linkID string) error {
+func (s *SurrealStore) UnlinkRepos(_ context.Context, linkID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -142,7 +143,7 @@ func (s *SurrealStore) UnlinkRepos(linkID string) error {
 	return err
 }
 
-func (s *SurrealStore) GetRepoLinks(repoID string) ([]*graph.RepoLink, error) {
+func (s *SurrealStore) GetRepoLinks(_ context.Context, repoID string) ([]*graph.RepoLink, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, nil
@@ -162,7 +163,7 @@ func (s *SurrealStore) GetRepoLinks(repoID string) ([]*graph.RepoLink, error) {
 
 // GetRepoLink fetches a single repo link by ID.
 // Used by TenantFilteredStore to validate access before UnlinkRepos/VerifyLink.
-func (s *SurrealStore) GetRepoLink(linkID string) *graph.RepoLink {
+func (s *SurrealStore) GetRepoLink(_ context.Context, linkID string) *graph.RepoLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -178,7 +179,7 @@ func (s *SurrealStore) GetRepoLink(linkID string) *graph.RepoLink {
 
 // --- Cross-Repo References ---
 
-func (s *SurrealStore) StoreCrossRepoRef(ref *graph.CrossRepoRef) error {
+func (s *SurrealStore) StoreCrossRepoRef(_ context.Context, ref *graph.CrossRepoRef) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -217,10 +218,10 @@ func (s *SurrealStore) StoreCrossRepoRef(ref *graph.CrossRepoRef) error {
 	return nil
 }
 
-func (s *SurrealStore) StoreCrossRepoRefs(refs []*graph.CrossRepoRef) int {
+func (s *SurrealStore) StoreCrossRepoRefs(_ context.Context, refs []*graph.CrossRepoRef) int {
 	stored := 0
 	for _, ref := range refs {
-		if err := s.StoreCrossRepoRef(ref); err != nil {
+		if err := s.StoreCrossRepoRef(ctx(), ref); err != nil {
 			slog.Warn("failed to store cross-repo ref", "error", err)
 			continue
 		}
@@ -229,7 +230,7 @@ func (s *SurrealStore) StoreCrossRepoRefs(refs []*graph.CrossRepoRef) int {
 	return stored
 }
 
-func (s *SurrealStore) GetCrossRepoRefs(repoID string, refType *string, limit int) ([]*graph.CrossRepoRef, error) {
+func (s *SurrealStore) GetCrossRepoRefs(_ context.Context, repoID string, refType *string, limit int) ([]*graph.CrossRepoRef, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, nil
@@ -257,7 +258,7 @@ func (s *SurrealStore) GetCrossRepoRefs(repoID string, refType *string, limit in
 	return refs, nil
 }
 
-func (s *SurrealStore) GetSymbolCrossRepoRefs(symbolID string) ([]*graph.CrossRepoRef, error) {
+func (s *SurrealStore) GetSymbolCrossRepoRefs(_ context.Context, symbolID string) ([]*graph.CrossRepoRef, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, nil
@@ -275,7 +276,7 @@ func (s *SurrealStore) GetSymbolCrossRepoRefs(symbolID string) ([]*graph.CrossRe
 	return refs, nil
 }
 
-func (s *SurrealStore) DeleteCrossRepoRefsForRepo(repoID string) error {
+func (s *SurrealStore) DeleteCrossRepoRefsForRepo(_ context.Context, repoID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -286,7 +287,7 @@ func (s *SurrealStore) DeleteCrossRepoRefsForRepo(repoID string) error {
 	return err
 }
 
-func (s *SurrealStore) DeleteCrossRepoRefsBetweenRepos(repoA, repoB string) error {
+func (s *SurrealStore) DeleteCrossRepoRefsBetweenRepos(_ context.Context, repoA, repoB string) error {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -301,7 +302,7 @@ func (s *SurrealStore) DeleteCrossRepoRefsBetweenRepos(repoA, repoB string) erro
 
 // --- API Contracts ---
 
-func (s *SurrealStore) StoreAPIContract(contract *graph.APIContract) error {
+func (s *SurrealStore) StoreAPIContract(_ context.Context, contract *graph.APIContract) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -333,7 +334,7 @@ func (s *SurrealStore) StoreAPIContract(contract *graph.APIContract) error {
 	return nil
 }
 
-func (s *SurrealStore) GetAPIContracts(repoID string) ([]*graph.APIContract, error) {
+func (s *SurrealStore) GetAPIContracts(_ context.Context, repoID string) ([]*graph.APIContract, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, nil
@@ -351,7 +352,7 @@ func (s *SurrealStore) GetAPIContracts(repoID string) ([]*graph.APIContract, err
 	return contracts, nil
 }
 
-func (s *SurrealStore) DeleteAPIContractsForRepo(repoID string) error {
+func (s *SurrealStore) DeleteAPIContractsForRepo(_ context.Context, repoID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return nil

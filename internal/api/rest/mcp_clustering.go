@@ -120,7 +120,7 @@ func (h *mcpHandler) callGetSubsystems(session *mcpSession, args json.RawMessage
 	}
 
 	// Build cross-cluster call index.
-	edges := h.store.GetCallEdges(params.RepoID)
+	edges := h.store.GetCallEdges(context.Background(), params.RepoID)
 	clusterBySymbol := buildClusterBySymbol(clusters)
 	crossCalls := buildCrossClusterCalls(edges, clusterBySymbol, clusters)
 
@@ -240,7 +240,7 @@ func (h *mcpHandler) callGetSubsystem(session *mcpSession, args json.RawMessage)
 	}
 
 	// Build summary from the cluster's member list.
-	edges := h.store.GetCallEdges(params.RepoID)
+	edges := h.store.GetCallEdges(context.Background(), params.RepoID)
 	inDegree := buildInDegree(edges)
 
 	// Gather all clusters for cross-cluster call computation.
@@ -263,7 +263,7 @@ func (h *mcpHandler) callGetSubsystem(session *mcpSession, args json.RawMessage)
 		peers = peers[:maxPeers]
 	}
 	// Resolve symbol names for readability.
-	symMap := h.store.GetSymbolsByIDs(peers)
+	symMap := h.store.GetSymbolsByIDs(context.Background(), peers)
 	peerNames := make([]string, 0, len(peers))
 	for _, id := range peers {
 		if sym, ok := symMap[id]; ok && sym != nil {

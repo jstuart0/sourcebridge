@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"sort"
@@ -223,7 +224,7 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 	repoID := params.RepositoryID
 
 	// Verify repo exists.
-	if h.store.GetRepository(repoID) == nil {
+	if h.store.GetRepository(context.Background(), repoID) == nil {
 		return nil, errRepositoryNotIndexed(repoID)
 	}
 
@@ -254,7 +255,7 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 	// cap and ensures in-repo descendants reachable only through cross-repo
 	// intermediaries are NOT visited.
 	// -----------------------------------------------------------------------
-	allSyms, _ := h.store.GetSymbols(repoID, nil, nil, 0, 0)
+	allSyms, _ := h.store.GetSymbols(context.Background(), repoID, nil, nil, 0, 0)
 	repoSymbolSet := make(map[string]bool, len(allSyms))
 	for _, sym := range allSyms {
 		repoSymbolSet[sym.ID] = true
@@ -293,7 +294,7 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 	for hop := 1; hop <= depth; hop++ {
 		next := []string{}
 		for _, id := range frontier {
-			callers := h.store.GetCallers(id)
+			callers := h.store.GetCallers(context.Background(), id)
 			for _, nid := range callers {
 				// Cross-repo isolation at expansion time (per bob C2).
 				if !repoSymbolSet[nid] {
@@ -328,7 +329,7 @@ func (h *mcpHandler) callGetBlastRadius(session *mcpSession, args json.RawMessag
 		if hop == 0 {
 			continue // exclude root from impact_by_depth (per bob M4)
 		}
-		sym := h.store.GetSymbol(id)
+		sym := h.store.GetSymbol(context.Background(), id)
 		if sym == nil {
 			continue
 		}
@@ -515,8 +516,8 @@ func (h *mcpHandler) aggregateTestsForLayer(callers []callGraphSymbolBR, testSym
 
 	for _, caller := range callers {
 		// Source 1: persisted edges.
-		for _, tsID := range h.store.GetTestsForSymbolPersisted(caller.SymbolID) {
-			ts := h.store.GetSymbol(tsID)
+		for _, tsID := range h.store.GetTestsForSymbolPersisted(context.Background(), caller.SymbolID) {
+			ts := h.store.GetSymbol(context.Background(), tsID)
 			if ts == nil {
 				continue
 			}
@@ -558,11 +559,11 @@ func (h *mcpHandler) aggregateRequirementsForLayer(callers []callGraphSymbolBR, 
 	reqByID := map[string]requirementSummary{}
 
 	for _, caller := range callers {
-		for _, link := range h.store.GetLinksForSymbol(caller.SymbolID, false) {
+		for _, link := range h.store.GetLinksForSymbol(context.Background(), caller.SymbolID, false) {
 			if link.RequirementID == "" {
 				continue
 			}
-			req := h.store.GetRequirement(link.RequirementID)
+			req := h.store.GetRequirement(context.Background(), link.RequirementID)
 			if req == nil || req.RepoID != repoID {
 				continue
 			}

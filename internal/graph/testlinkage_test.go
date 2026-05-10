@@ -43,7 +43,7 @@ func TestStore_PersistsRelationTests(t *testing.T) {
 		},
 	}
 
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -53,12 +53,12 @@ func TestStore_PersistsRelationTests(t *testing.T) {
 	// tmp-* IDs directly).
 	var prodID string
 	var testIDs []string
-	for _, s := range store.GetSymbolsByFile(repo.ID, "auth.go") {
+	for _, s := range store.GetSymbolsByFile(t.Context(), repo.ID, "auth.go") {
 		if s.Name == "Verify" {
 			prodID = s.ID
 		}
 	}
-	for _, s := range store.GetSymbolsByFile(repo.ID, "auth_test.go") {
+	for _, s := range store.GetSymbolsByFile(t.Context(), repo.ID, "auth_test.go") {
 		if s.IsTest {
 			testIDs = append(testIDs, s.ID)
 		}
@@ -67,7 +67,7 @@ func TestStore_PersistsRelationTests(t *testing.T) {
 		t.Fatalf("fixture setup: prodID=%q testIDs=%v", prodID, testIDs)
 	}
 
-	got := store.GetTestsForSymbolPersisted(prodID)
+	got := store.GetTestsForSymbolPersisted(t.Context(), prodID)
 	if len(got) != 2 {
 		t.Errorf("expected 2 test edges for Verify, got %d: %v", len(got), got)
 	}
@@ -84,7 +84,7 @@ func TestStore_PersistsRelationTests(t *testing.T) {
 // edges return an empty slice (not a crash, not nil).
 func TestStore_NoRelationTestsForUntested(t *testing.T) {
 	store := NewStore()
-	got := store.GetTestsForSymbolPersisted("nonexistent-id")
+	got := store.GetTestsForSymbolPersisted(t.Context(), "nonexistent-id")
 	if len(got) != 0 {
 		t.Errorf("expected empty slice, got %v", got)
 	}

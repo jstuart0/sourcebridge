@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -30,7 +31,7 @@ func (m *mockFileReader) add(repoID, filePath, content string) {
 	m.files[repoID+"\x00"+filePath] = content
 }
 
-func (m *mockFileReader) ReadRepoFile(repoID, filePath string) (string, error) {
+func (m *mockFileReader) ReadRepoFile(_ context.Context, repoID, filePath string) (string, error) {
 	k := repoID + "\x00" + filePath
 	content, ok := m.files[k]
 	if !ok {
@@ -153,18 +154,18 @@ func seedSymbolSourceData(t *testing.T, h *mcpTestHarness) (handleID, parseID st
 			},
 		},
 	}
-	repo, err := h.store.ReplaceIndexResult(h.repoID, result)
+	repo, err := h.store.ReplaceIndexResult(t.Context(), h.repoID, result)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 	h.repoID = repo.ID
 
-	for _, s := range h.store.GetSymbolsByFile(h.repoID, "main.go") {
+	for _, s := range h.store.GetSymbolsByFile(t.Context(), h.repoID, "main.go") {
 		if s.Name == "HandleRequest" {
 			handleID = s.ID
 		}
 	}
-	for _, s := range h.store.GetSymbolsByFile(h.repoID, "utils.go") {
+	for _, s := range h.store.GetSymbolsByFile(t.Context(), h.repoID, "utils.go") {
 		if s.Name == "ParseJSON" {
 			parseID = s.ID
 		}
@@ -348,7 +349,7 @@ func TestMCP_GetSymbolSource_CrossRepoLeakageBlocked(t *testing.T) {
 		RepoPath: "/tmp/repo-b",
 		Files:    []indexer.FileResult{},
 	}
-	repoB, err := h.store.StoreIndexResult(resultB)
+	repoB, err := h.store.StoreIndexResult(t.Context(), resultB)
 	if err != nil {
 		t.Fatalf("StoreIndexResult repo-b: %v", err)
 	}
@@ -489,7 +490,7 @@ func TestMCP_GetSymbolSource_LargeSymbolSourceNote(t *testing.T) {
 			},
 		},
 	}
-	repo, err := h.store.ReplaceIndexResult(h.repoID, bigResult)
+	repo, err := h.store.ReplaceIndexResult(t.Context(), h.repoID, bigResult)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
@@ -638,7 +639,7 @@ func TestMCP_GetSymbolSource_FileShrankSinceIndex(t *testing.T) {
 			},
 		},
 	}
-	repo, err := h.store.ReplaceIndexResult(h.repoID, result)
+	repo, err := h.store.ReplaceIndexResult(t.Context(), h.repoID, result)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}

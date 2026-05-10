@@ -3,6 +3,8 @@
 
 package comprehension
 
+import "context"
+
 // Store is the persistence interface for comprehension settings and
 // model capabilities. Implementations include SurrealDB (production)
 // and in-memory (tests).
@@ -10,31 +12,31 @@ type Store interface {
 	// --- Strategy settings ---
 
 	// GetSettings returns the settings for a specific scope, or nil if none exist.
-	GetSettings(scope Scope) (*Settings, error)
+	GetSettings(ctx context.Context, scope Scope) (*Settings, error)
 
 	// SetSettings creates or replaces settings for a scope. Zero-value
 	// fields mean "inherit from parent" — the caller is responsible for
 	// only setting fields that should be overridden.
-	SetSettings(s *Settings) error
+	SetSettings(ctx context.Context, s *Settings) error
 
 	// DeleteSettings removes the settings for a scope, reverting it
 	// to pure inheritance.
-	DeleteSettings(scope Scope) error
+	DeleteSettings(ctx context.Context, scope Scope) error
 
 	// ListSettings returns all saved settings records.
-	ListSettings() ([]Settings, error)
+	ListSettings(ctx context.Context) ([]Settings, error)
 
 	// --- Model capabilities ---
 
 	// GetModelCapabilities returns the capability profile for a model.
-	GetModelCapabilities(modelID string) (*ModelCapabilities, error)
+	GetModelCapabilities(ctx context.Context, modelID string) (*ModelCapabilities, error)
 
 	// SetModelCapabilities creates or updates a model capability profile.
-	SetModelCapabilities(m *ModelCapabilities) error
+	SetModelCapabilities(ctx context.Context, m *ModelCapabilities) error
 
 	// DeleteModelCapabilities removes a model from the registry.
-	DeleteModelCapabilities(modelID string) error
+	DeleteModelCapabilities(ctx context.Context, modelID string) error
 
 	// ListModelCapabilities returns all model capability profiles.
-	ListModelCapabilities() ([]ModelCapabilities, error)
+	ListModelCapabilities(ctx context.Context) ([]ModelCapabilities, error)
 }

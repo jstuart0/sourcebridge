@@ -4,6 +4,7 @@
 package comprehension
 
 import (
+	"context"
 	"testing"
 
 	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
@@ -11,7 +12,7 @@ import (
 
 func TestResolve_DefaultsWhenEmpty(t *testing.T) {
 	store := NewMemStore()
-	eff, err := Resolve(store, WorkspaceScope)
+	eff, err := Resolve(context.Background(), store, WorkspaceScope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,14 +26,14 @@ func TestResolve_DefaultsWhenEmpty(t *testing.T) {
 
 func TestResolve_WorkspaceOverridesDefaults(t *testing.T) {
 	store := NewMemStore()
-	_ = store.SetSettings(&Settings{
+	_ = store.SetSettings(context.Background(), &Settings{
 		ScopeType:               ScopeWorkspace,
 		ScopeKey:                "default",
 		StrategyPreferenceChain: []string{"single_shot"},
 		MaxConcurrency:          5,
 	})
 
-	eff, err := Resolve(store, WorkspaceScope)
+	eff, err := Resolve(context.Background(), store, WorkspaceScope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,20 +51,20 @@ func TestResolve_WorkspaceOverridesDefaults(t *testing.T) {
 
 func TestResolve_ArtifactTypeOverridesWorkspace(t *testing.T) {
 	store := NewMemStore()
-	_ = store.SetSettings(&Settings{
+	_ = store.SetSettings(context.Background(), &Settings{
 		ScopeType:               ScopeWorkspace,
 		ScopeKey:                "default",
 		ModelID:                 "llama3:latest",
 		StrategyPreferenceChain: []string{"hierarchical"},
 		MaxConcurrency:          5,
 	})
-	_ = store.SetSettings(&Settings{
+	_ = store.SetSettings(context.Background(), &Settings{
 		ScopeType: ScopeArtifactType,
 		ScopeKey:  "cliff_notes",
 		ModelID:   "claude-sonnet-4-6",
 	})
 
-	eff, err := Resolve(store, Scope{Type: ScopeArtifactType, Key: "cliff_notes"})
+	eff, err := Resolve(context.Background(), store, Scope{Type: ScopeArtifactType, Key: "cliff_notes"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,23 +91,23 @@ func TestResolve_ArtifactTypeOverridesWorkspace(t *testing.T) {
 
 func TestResolve_UserOverridesAll(t *testing.T) {
 	store := NewMemStore()
-	_ = store.SetSettings(&Settings{
+	_ = store.SetSettings(context.Background(), &Settings{
 		ScopeType:      ScopeWorkspace,
 		ScopeKey:       "default",
 		MaxConcurrency: 5,
 	})
-	_ = store.SetSettings(&Settings{
+	_ = store.SetSettings(context.Background(), &Settings{
 		ScopeType:      ScopeArtifactType,
 		ScopeKey:       "cliff_notes",
 		MaxConcurrency: 10,
 	})
-	_ = store.SetSettings(&Settings{
+	_ = store.SetSettings(context.Background(), &Settings{
 		ScopeType:      ScopeUser,
 		ScopeKey:       "user-123",
 		MaxConcurrency: 1,
 	})
 
-	eff, err := Resolve(store, Scope{Type: ScopeUser, Key: "user-123"})
+	eff, err := Resolve(context.Background(), store, Scope{Type: ScopeUser, Key: "user-123"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,13 +119,13 @@ func TestResolve_UserOverridesAll(t *testing.T) {
 func TestResolve_BoolFieldInheritance(t *testing.T) {
 	store := NewMemStore()
 	enabled := true
-	_ = store.SetSettings(&Settings{
+	_ = store.SetSettings(context.Background(), &Settings{
 		ScopeType:    ScopeWorkspace,
 		ScopeKey:     "default",
 		CacheEnabled: &enabled,
 	})
 
-	eff, err := Resolve(store, Scope{Type: ScopeArtifactType, Key: "cliff_notes"})
+	eff, err := Resolve(context.Background(), store, Scope{Type: ScopeArtifactType, Key: "cliff_notes"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,13 +135,13 @@ func TestResolve_BoolFieldInheritance(t *testing.T) {
 
 	// Artifact-level override disables cache
 	disabled := false
-	_ = store.SetSettings(&Settings{
+	_ = store.SetSettings(context.Background(), &Settings{
 		ScopeType:    ScopeArtifactType,
 		ScopeKey:     "cliff_notes",
 		CacheEnabled: &disabled,
 	})
 
-	eff, err = Resolve(store, Scope{Type: ScopeArtifactType, Key: "cliff_notes"})
+	eff, err = Resolve(context.Background(), store, Scope{Type: ScopeArtifactType, Key: "cliff_notes"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +154,7 @@ func TestMemStore_ModelCapabilitiesCRUD(t *testing.T) {
 	store := NewMemStore()
 
 	// Get non-existent
-	mc, err := store.GetModelCapabilities("none")
+	mc, err := store.GetModelCapabilities(context.Background(), "none")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +163,7 @@ func TestMemStore_ModelCapabilitiesCRUD(t *testing.T) {
 	}
 
 	// Create
-	_ = store.SetModelCapabilities(&ModelCapabilities{
+	_ = store.SetModelCapabilities(context.Background(), &ModelCapabilities{
 		ModelID:                "claude-sonnet-4-6",
 		Provider:               "anthropic",
 		DeclaredContextTokens:  200000,
@@ -171,7 +172,7 @@ func TestMemStore_ModelCapabilitiesCRUD(t *testing.T) {
 		Source:                 "builtin",
 	})
 
-	mc, err = store.GetModelCapabilities("claude-sonnet-4-6")
+	mc, err = store.GetModelCapabilities(context.Background(), "claude-sonnet-4-6")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,14 +181,14 @@ func TestMemStore_ModelCapabilitiesCRUD(t *testing.T) {
 	}
 
 	// List
-	all, _ := store.ListModelCapabilities()
+	all, _ := store.ListModelCapabilities(context.Background())
 	if len(all) != 1 {
 		t.Errorf("expected 1 model, got %d", len(all))
 	}
 
 	// Delete
-	_ = store.DeleteModelCapabilities("claude-sonnet-4-6")
-	mc, _ = store.GetModelCapabilities("claude-sonnet-4-6")
+	_ = store.DeleteModelCapabilities(context.Background(), "claude-sonnet-4-6")
+	mc, _ = store.GetModelCapabilities(context.Background(), "claude-sonnet-4-6")
 	if mc != nil {
 		t.Error("expected nil after delete")
 	}
@@ -208,10 +209,10 @@ func TestMemStore_ModelCapabilities_QualityGateTier_RoundTrip(t *testing.T) {
 			QualityGateTier: tier,
 			Source:          "builtin",
 		}
-		if err := store.SetModelCapabilities(mc); err != nil {
+		if err := store.SetModelCapabilities(context.Background(), mc); err != nil {
 			t.Fatalf("SetModelCapabilities(%s): %v", tier, err)
 		}
-		got, err := store.GetModelCapabilities(mc.ModelID)
+		got, err := store.GetModelCapabilities(context.Background(), mc.ModelID)
 		if err != nil {
 			t.Fatalf("GetModelCapabilities(%s): %v", mc.ModelID, err)
 		}
@@ -228,7 +229,7 @@ func TestMemStore_SettingsCRUD(t *testing.T) {
 	store := NewMemStore()
 
 	// Get non-existent
-	s, err := store.GetSettings(WorkspaceScope)
+	s, err := store.GetSettings(context.Background(), WorkspaceScope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,26 +238,26 @@ func TestMemStore_SettingsCRUD(t *testing.T) {
 	}
 
 	// Set
-	_ = store.SetSettings(&Settings{
+	_ = store.SetSettings(context.Background(), &Settings{
 		ScopeType:      ScopeWorkspace,
 		ScopeKey:       "default",
 		MaxConcurrency: 5,
 	})
 
-	s, _ = store.GetSettings(WorkspaceScope)
+	s, _ = store.GetSettings(context.Background(), WorkspaceScope)
 	if s == nil || s.MaxConcurrency != 5 {
 		t.Error("expected MaxConcurrency=5")
 	}
 
 	// List
-	all, _ := store.ListSettings()
+	all, _ := store.ListSettings(context.Background())
 	if len(all) != 1 {
 		t.Errorf("expected 1 settings, got %d", len(all))
 	}
 
 	// Delete
-	_ = store.DeleteSettings(WorkspaceScope)
-	s, _ = store.GetSettings(WorkspaceScope)
+	_ = store.DeleteSettings(context.Background(), WorkspaceScope)
+	s, _ = store.GetSettings(context.Background(), WorkspaceScope)
 	if s != nil {
 		t.Error("expected nil after delete")
 	}

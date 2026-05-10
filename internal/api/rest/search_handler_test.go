@@ -17,7 +17,7 @@ import (
 
 func TestHandleSearch_BasicShape(t *testing.T) {
 	store := graphstore.NewStore()
-	repo, _ := store.CreateRepository("test-repo", "/tmp/test")
+	repo, _ := store.CreateRepository(t.Context(), "test-repo", "/tmp/test")
 	store.InjectSymbolForTest(repo.ID, &graphstore.StoredSymbol{
 		ID: uuid.New().String(), Name: "parseUser", QualifiedName: "auth.parseUser",
 		Kind: "function", Language: "go", FilePath: "auth/user.go", StartLine: 10,

@@ -4,6 +4,7 @@
 package db
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -38,7 +39,7 @@ func diagramDocumentRecordID(repoID string, sourceKind architecture.SourceKind) 
 	return fmt.Sprintf("%s_%s", repoID, sourceKind)
 }
 
-func (s *SurrealStore) StoreDiagramDocument(doc *architecture.DiagramDocument) error {
+func (s *SurrealStore) StoreDiagramDocument(_ context.Context, doc *architecture.DiagramDocument) error {
 	db := s.client.DB()
 	payload, err := json.Marshal(doc)
 	if err != nil {
@@ -64,7 +65,7 @@ func (s *SurrealStore) StoreDiagramDocument(doc *architecture.DiagramDocument) e
 	return err
 }
 
-func (s *SurrealStore) GetDiagramDocument(repoID string, sourceKinds ...architecture.SourceKind) *architecture.DiagramDocument {
+func (s *SurrealStore) GetDiagramDocument(_ context.Context, repoID string, sourceKinds ...architecture.SourceKind) *architecture.DiagramDocument {
 	db := s.client.DB()
 	for _, sourceKind := range sourceKinds {
 		row, err := queryOne[[]surrealDiagramDocument](ctx(), db,
@@ -83,7 +84,7 @@ func (s *SurrealStore) GetDiagramDocument(repoID string, sourceKinds ...architec
 	return nil
 }
 
-func (s *SurrealStore) DeleteDiagramDocument(repoID string, sourceKind architecture.SourceKind) error {
+func (s *SurrealStore) DeleteDiagramDocument(_ context.Context, repoID string, sourceKind architecture.SourceKind) error {
 	db := s.client.DB()
 	_, err := surrealdb.Query[interface{}](ctx(), db,
 		"DELETE type::thing('ca_diagram_document', $id)",

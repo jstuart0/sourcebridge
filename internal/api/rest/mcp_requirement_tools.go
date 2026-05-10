@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -228,7 +229,7 @@ func (h *mcpHandler) callGetRequirementsForSymbol(session *mcpSession, args json
 	}
 
 	// Fetch non-rejected links for this symbol and collect requirement IDs.
-	links := h.store.GetLinksForSymbol(sym.ID, false /* includeRejected */)
+	links := h.store.GetLinksForSymbol(context.Background(), sym.ID, false /* includeRejected */)
 
 	// Build a confidence map keyed by requirement ID so we can annotate
 	// each requirement with the link's confidence score.
@@ -257,7 +258,7 @@ func (h *mcpHandler) callGetRequirementsForSymbol(session *mcpSession, args json
 	}
 
 	// Batch-hydrate requirements.
-	reqMap := h.store.GetRequirementsByIDs(reqIDs)
+	reqMap := h.store.GetRequirementsByIDs(context.Background(), reqIDs)
 
 	requirements := make([]requirementSummary, 0, len(reqIDs))
 	for _, id := range reqIDs {
@@ -335,7 +336,7 @@ func (h *mcpHandler) callGetSymbolsForRequirement(session *mcpSession, args json
 	}
 
 	// Fetch non-rejected links for this requirement and collect symbol IDs.
-	links := h.store.GetLinksForRequirement(req.ID, false /* includeRejected */)
+	links := h.store.GetLinksForRequirement(context.Background(), req.ID, false /* includeRejected */)
 
 	// Build a confidence map keyed by symbol ID.
 	confidenceBySymID := make(map[string]float64, len(links))
@@ -352,7 +353,7 @@ func (h *mcpHandler) callGetSymbolsForRequirement(session *mcpSession, args json
 	// Cross-repo isolation: batch-hydrate all candidates and filter to
 	// symbols that belong to the requested repository. total_count reflects
 	// only the in-repo symbols so callers can paginate correctly.
-	allSymMap := h.store.GetSymbolsByIDs(allSymIDs)
+	allSymMap := h.store.GetSymbolsByIDs(context.Background(), allSymIDs)
 	inRepoSymIDs := make([]string, 0, len(allSymIDs))
 	for _, id := range allSymIDs {
 		if sym, ok := allSymMap[id]; ok && sym.RepoID == params.RepositoryID {
@@ -442,7 +443,7 @@ func (h *mcpHandler) callGetChangedRequirements(session *mcpSession, args json.R
 	var unlinkedSymIDs []string
 
 	for _, symID := range touchedSymbolIDs {
-		links := h.store.GetLinksForSymbol(symID, false /* includeRejected */)
+		links := h.store.GetLinksForSymbol(context.Background(), symID, false /* includeRejected */)
 		if len(links) == 0 {
 			unlinkedSymIDs = append(unlinkedSymIDs, symID)
 			continue
@@ -475,7 +476,7 @@ func (h *mcpHandler) callGetChangedRequirements(session *mcpSession, args json.R
 	}
 
 	// Step 3: hydrate requirements (deduped via reqOrder).
-	reqMap := h.store.GetRequirementsByIDs(reqOrder)
+	reqMap := h.store.GetRequirementsByIDs(context.Background(), reqOrder)
 
 	changedReqs := make([]requirementSummary, 0, len(reqOrder))
 	for _, reqID := range reqOrder {
@@ -499,7 +500,7 @@ func (h *mcpHandler) callGetChangedRequirements(session *mcpSession, args json.R
 	// Step 4: hydrate unlinked symbols.
 	unlinkedSummaries := make([]symbolSummary, 0, len(unlinkedSymIDs))
 	if len(unlinkedSymIDs) > 0 {
-		symMap := h.store.GetSymbolsByIDs(unlinkedSymIDs)
+		symMap := h.store.GetSymbolsByIDs(context.Background(), unlinkedSymIDs)
 		for _, symID := range unlinkedSymIDs {
 			sym, ok := symMap[symID]
 			if !ok {
@@ -550,7 +551,7 @@ func (h *mcpHandler) callGetChangedRequirements(session *mcpSession, args json.R
 //   - An external ID string (e.g. "PROJ-101") via GetRequirementByExternalID
 func (h *mcpHandler) resolveRequirement(repoID, requirementID string) *graphstore.StoredRequirement {
 	// Try UUID lookup first.
-	if req := h.store.GetRequirement(requirementID); req != nil {
+	if req := h.store.GetRequirement(context.Background(), requirementID); req != nil {
 		// Cross-repo isolation: the UUID must belong to this repository.
 		if req.RepoID == repoID {
 			return req
@@ -560,7 +561,7 @@ func (h *mcpHandler) resolveRequirement(repoID, requirementID string) *graphstor
 		return nil
 	}
 	// Fall back to external ID lookup (scoped to the repository).
-	return h.store.GetRequirementByExternalID(repoID, requirementID)
+	return h.store.GetRequirementByExternalID(context.Background(), repoID, requirementID)
 }
 
 // ---------------------------------------------------------------------------
@@ -678,12 +679,12 @@ func (h *mcpHandler) callGetOrphanSymbols(session *mcpSession, args json.RawMess
 	// Full repo scan — limit=0, offset=0 fetches all symbols. The second
 	// return value (total before pagination) is discarded because we need the
 	// post-filter count, not the raw symbol count.
-	allSyms, _ := h.store.GetSymbols(params.RepositoryID, nil, nil, 0, 0)
+	allSyms, _ := h.store.GetSymbols(context.Background(), params.RepositoryID, nil, nil, 0, 0)
 
 	// Filter to symbols with no non-rejected links.
 	orphans := make([]*graphstore.StoredSymbol, 0)
 	for _, sym := range allSyms {
-		links := h.store.GetLinksForSymbol(sym.ID, false /* includeRejected */)
+		links := h.store.GetLinksForSymbol(context.Background(), sym.ID, false /* includeRejected */)
 		if len(links) == 0 {
 			orphans = append(orphans, sym)
 		}
@@ -735,13 +736,13 @@ func (h *mcpHandler) callGetUncoveredRequirements(session *mcpSession, args json
 	// Fetch up to maxUncoveredReqScan requirements. The second return value
 	// is the total number of requirements in the repo (before our limit),
 	// which lets us detect truncation without a separate COUNT query.
-	reqs, totalInStore := h.store.GetRequirements(params.RepositoryID, maxUncoveredReqScan, 0)
+	reqs, totalInStore := h.store.GetRequirements(context.Background(), params.RepositoryID, maxUncoveredReqScan, 0)
 	scanTruncated := totalInStore > maxUncoveredReqScan
 
 	// Filter to requirements with no non-rejected links.
 	uncovered := make([]*graphstore.StoredRequirement, 0)
 	for _, req := range reqs {
-		links := h.store.GetLinksForRequirement(req.ID, false /* includeRejected */)
+		links := h.store.GetLinksForRequirement(context.Background(), req.ID, false /* includeRejected */)
 		if len(links) == 0 {
 			uncovered = append(uncovered, req)
 		}

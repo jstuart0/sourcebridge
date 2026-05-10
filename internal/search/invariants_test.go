@@ -36,7 +36,7 @@ func TestService_RepoScopeInvariants(t *testing.T) {
 func TestService_QueryLengthCapped(t *testing.T) {
 	repo := uuid.New().String()
 	store := graph.NewStore()
-	r, _ := store.CreateRepository("r", "/")
+	r, _ := store.CreateRepository(context.Background(), "r", "/")
 	store.InjectSymbolForTest(r.ID, &graph.StoredSymbol{
 		ID: uuid.New().String(), Name: "X", QualifiedName: "X", Kind: "function",
 		Language: "go", FilePath: "x.go", StartLine: 1,

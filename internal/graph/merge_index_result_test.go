@@ -51,7 +51,7 @@ func fixtureTwoFileRepo() *indexer.IndexResult {
 // findSymbolByName looks up a symbol in the store by repo / file / name.
 func findSymbolByName(t *testing.T, store *Store, repoID, filePath, name string) *StoredSymbol {
 	t.Helper()
-	for _, s := range store.GetSymbolsByFile(repoID, filePath) {
+	for _, s := range store.GetSymbolsByFile(t.Context(), repoID, filePath) {
 		if s.Name == name {
 			return s
 		}
@@ -64,11 +64,11 @@ func findSymbolByName(t *testing.T, store *Store, repoID, filePath, name string)
 // and the assertions match the fixture.
 func TestMergeIndexResult_NewRepoFromInitialReplace(t *testing.T) {
 	store := NewStore()
-	repo, err := store.CreateRepository("merge-fixture", "/tmp/merge-fixture")
+	repo, err := store.CreateRepository(t.Context(), "merge-fixture", "/tmp/merge-fixture")
 	if err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
-	if _, err := store.ReplaceIndexResult(repo.ID, fixtureTwoFileRepo()); err != nil {
+	if _, err := store.ReplaceIndexResult(t.Context(), repo.ID, fixtureTwoFileRepo()); err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 	if findSymbolByName(t, store, repo.ID, "auth.go", "Verify") == nil {
@@ -79,7 +79,7 @@ func TestMergeIndexResult_NewRepoFromInitialReplace(t *testing.T) {
 	if verify == nil || helper == nil {
 		t.Fatalf("missing fixture symbols: verify=%v helper=%v", verify, helper)
 	}
-	if got := store.GetCallees(verify.ID); len(got) != 1 || got[0] != helper.ID {
+	if got := store.GetCallees(t.Context(), verify.ID); len(got) != 1 || got[0] != helper.ID {
 		t.Errorf("Verify callees = %v, want [%s]", got, helper.ID)
 	}
 }
@@ -94,8 +94,8 @@ func TestMergeIndexResult_NewRepoFromInitialReplace(t *testing.T) {
 // retained a reference to the prior IDs.
 func TestMergeIndexResult_PreservesUnaffectedFile(t *testing.T) {
 	store := NewStore()
-	repo, _ := store.CreateRepository("merge-fixture", "/tmp/merge-fixture")
-	if _, err := store.ReplaceIndexResult(repo.ID, fixtureTwoFileRepo()); err != nil {
+	repo, _ := store.CreateRepository(t.Context(), "merge-fixture", "/tmp/merge-fixture")
+	if _, err := store.ReplaceIndexResult(t.Context(), repo.ID, fixtureTwoFileRepo()); err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 	// Capture the test file's symbol ID — this must survive the merge.
@@ -119,7 +119,7 @@ func TestMergeIndexResult_PreservesUnaffectedFile(t *testing.T) {
 		{SourceID: "tmp-test-verify", TargetID: "tmp-verify", Type: indexer.RelationTests},
 	}
 
-	if _, err := store.MergeIndexResult(repo.ID, []string{"auth.go"}, merged); err != nil {
+	if _, err := store.MergeIndexResult(t.Context(), repo.ID, []string{"auth.go"}, merged); err != nil {
 		t.Fatalf("MergeIndexResult: %v", err)
 	}
 
@@ -147,8 +147,8 @@ func TestMergeIndexResult_PreservesUnaffectedFile(t *testing.T) {
 // symbol's existing store ID after the merge — not silently dropped.
 func TestMergeIndexResult_TestLinkageReconnectsCarryForward(t *testing.T) {
 	store := NewStore()
-	repo, _ := store.CreateRepository("merge-fixture", "/tmp/merge-fixture")
-	if _, err := store.ReplaceIndexResult(repo.ID, fixtureTwoFileRepo()); err != nil {
+	repo, _ := store.CreateRepository(t.Context(), "merge-fixture", "/tmp/merge-fixture")
+	if _, err := store.ReplaceIndexResult(t.Context(), repo.ID, fixtureTwoFileRepo()); err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 	testVerifyBefore := findSymbolByName(t, store, repo.ID, "auth_test.go", "TestVerify")
@@ -161,14 +161,14 @@ func TestMergeIndexResult_TestLinkageReconnectsCarryForward(t *testing.T) {
 	// Relations must be re-resolved against the new auth.go symbols
 	// AND against the carry-forward TestVerify symbol.
 	merged := fixtureTwoFileRepo()
-	if _, err := store.MergeIndexResult(repo.ID, []string{"auth.go"}, merged); err != nil {
+	if _, err := store.MergeIndexResult(t.Context(), repo.ID, []string{"auth.go"}, merged); err != nil {
 		t.Fatalf("MergeIndexResult: %v", err)
 	}
 	verifyAfter := findSymbolByName(t, store, repo.ID, "auth.go", "Verify")
 	if verifyAfter == nil {
 		t.Fatalf("Verify missing after merge")
 	}
-	tests := store.GetTestsForSymbolPersisted(verifyAfter.ID)
+	tests := store.GetTestsForSymbolPersisted(t.Context(), verifyAfter.ID)
 	if len(tests) != 1 {
 		t.Fatalf("test linkage edges for Verify after merge = %v, want exactly 1 (carry-forward TestVerify)", tests)
 	}
@@ -182,8 +182,8 @@ func TestMergeIndexResult_TestLinkageReconnectsCarryForward(t *testing.T) {
 // the file row, its symbols, and any dependent edges are dropped.
 func TestMergeIndexResult_DeletionDropsFile(t *testing.T) {
 	store := NewStore()
-	repo, _ := store.CreateRepository("merge-fixture", "/tmp/merge-fixture")
-	if _, err := store.ReplaceIndexResult(repo.ID, fixtureTwoFileRepo()); err != nil {
+	repo, _ := store.CreateRepository(t.Context(), "merge-fixture", "/tmp/merge-fixture")
+	if _, err := store.ReplaceIndexResult(t.Context(), repo.ID, fixtureTwoFileRepo()); err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 
@@ -198,12 +198,12 @@ func TestMergeIndexResult_DeletionDropsFile(t *testing.T) {
 		// the merge does not re-introduce the dropped test edge.
 		Relations: nil,
 	}
-	if _, err := store.MergeIndexResult(repo.ID, []string{"auth_test.go"}, merged); err != nil {
+	if _, err := store.MergeIndexResult(t.Context(), repo.ID, []string{"auth_test.go"}, merged); err != nil {
 		t.Fatalf("MergeIndexResult: %v", err)
 	}
 
 	// auth_test.go should be gone.
-	if got := store.GetSymbolsByFile(repo.ID, "auth_test.go"); len(got) != 0 {
+	if got := store.GetSymbolsByFile(t.Context(), repo.ID, "auth_test.go"); len(got) != 0 {
 		t.Errorf("auth_test.go symbols after deletion = %v, want empty", got)
 	}
 	// auth.go should be intact.
@@ -217,8 +217,8 @@ func TestMergeIndexResult_DeletionDropsFile(t *testing.T) {
 // inserted as net-new.
 func TestMergeIndexResult_AdditionInsertsNewFile(t *testing.T) {
 	store := NewStore()
-	repo, _ := store.CreateRepository("merge-fixture", "/tmp/merge-fixture")
-	if _, err := store.ReplaceIndexResult(repo.ID, fixtureTwoFileRepo()); err != nil {
+	repo, _ := store.CreateRepository(t.Context(), "merge-fixture", "/tmp/merge-fixture")
+	if _, err := store.ReplaceIndexResult(t.Context(), repo.ID, fixtureTwoFileRepo()); err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 
@@ -233,7 +233,7 @@ func TestMergeIndexResult_AdditionInsertsNewFile(t *testing.T) {
 			{ID: "tmp-newsym", Name: "NewSym", QualifiedName: "auth.NewSym", Kind: indexer.SymbolFunction, Language: "go", FilePath: "new.go", StartLine: 1, EndLine: 5},
 		},
 	})
-	if _, err := store.MergeIndexResult(repo.ID, []string{"new.go"}, merged); err != nil {
+	if _, err := store.MergeIndexResult(t.Context(), repo.ID, []string{"new.go"}, merged); err != nil {
 		t.Fatalf("MergeIndexResult: %v", err)
 	}
 	if findSymbolByName(t, store, repo.ID, "new.go", "NewSym") == nil {
@@ -249,12 +249,12 @@ func TestMergeIndexResult_AdditionInsertsNewFile(t *testing.T) {
 // FileCount on the Repository row are recomputed from the merged set.
 func TestMergeIndexResult_RecomputesAggregates(t *testing.T) {
 	store := NewStore()
-	repo, _ := store.CreateRepository("merge-fixture", "/tmp/merge-fixture")
-	if _, err := store.ReplaceIndexResult(repo.ID, fixtureTwoFileRepo()); err != nil {
+	repo, _ := store.CreateRepository(t.Context(), "merge-fixture", "/tmp/merge-fixture")
+	if _, err := store.ReplaceIndexResult(t.Context(), repo.ID, fixtureTwoFileRepo()); err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 	// Fixture: 3 functions across 2 files.
-	if r := store.GetRepository(repo.ID); r.FileCount != 2 || r.FunctionCount != 3 {
+	if r := store.GetRepository(t.Context(), repo.ID); r.FileCount != 2 || r.FunctionCount != 3 {
 		t.Fatalf("baseline aggregates: file=%d func=%d, want 2/3", r.FileCount, r.FunctionCount)
 	}
 
@@ -264,10 +264,10 @@ func TestMergeIndexResult_RecomputesAggregates(t *testing.T) {
 		RepoPath: "/tmp/merge-fixture",
 		Files:    []indexer.FileResult{fixtureTwoFileRepo().Files[0]},
 	}
-	if _, err := store.MergeIndexResult(repo.ID, []string{"auth_test.go"}, merged); err != nil {
+	if _, err := store.MergeIndexResult(t.Context(), repo.ID, []string{"auth_test.go"}, merged); err != nil {
 		t.Fatalf("MergeIndexResult: %v", err)
 	}
-	r := store.GetRepository(repo.ID)
+	r := store.GetRepository(t.Context(), repo.ID)
 	if r.FileCount != 1 {
 		t.Errorf("FileCount after deletion = %d, want 1", r.FileCount)
 	}
@@ -280,7 +280,7 @@ func TestMergeIndexResult_RecomputesAggregates(t *testing.T) {
 // surfaces as a clear error rather than panicking.
 func TestMergeIndexResult_NilRepository(t *testing.T) {
 	store := NewStore()
-	_, err := store.MergeIndexResult("nonexistent-repo", []string{"a.go"}, fixtureTwoFileRepo())
+	_, err := store.MergeIndexResult(t.Context(), "nonexistent-repo", []string{"a.go"}, fixtureTwoFileRepo())
 	if err == nil {
 		t.Fatalf("MergeIndexResult on nonexistent repo: err = nil, want non-nil")
 	}
@@ -289,8 +289,8 @@ func TestMergeIndexResult_NilRepository(t *testing.T) {
 // TestMergeIndexResult_NilResult asserts the input-validation boundary.
 func TestMergeIndexResult_NilResult(t *testing.T) {
 	store := NewStore()
-	repo, _ := store.CreateRepository("merge-fixture", "/tmp/merge-fixture")
-	_, err := store.MergeIndexResult(repo.ID, []string{"a.go"}, nil)
+	repo, _ := store.CreateRepository(t.Context(), "merge-fixture", "/tmp/merge-fixture")
+	_, err := store.MergeIndexResult(t.Context(), repo.ID, []string{"a.go"}, nil)
 	if err == nil {
 		t.Fatalf("MergeIndexResult with nil result: err = nil, want non-nil")
 	}
@@ -302,16 +302,16 @@ func TestMergeIndexResult_NilResult(t *testing.T) {
 // branch onto the merged IndexResult before calling MergeIndexResult.
 func TestMergeIndexResult_RecordsBranch(t *testing.T) {
 	store := NewStore()
-	repo, _ := store.CreateRepository("merge-fixture", "/tmp/merge-fixture")
-	if _, err := store.ReplaceIndexResult(repo.ID, fixtureTwoFileRepo()); err != nil {
+	repo, _ := store.CreateRepository(t.Context(), "merge-fixture", "/tmp/merge-fixture")
+	if _, err := store.ReplaceIndexResult(t.Context(), repo.ID, fixtureTwoFileRepo()); err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 	merged := fixtureTwoFileRepo()
 	merged.Branch = "feature/x"
-	if _, err := store.MergeIndexResult(repo.ID, []string{"auth.go"}, merged); err != nil {
+	if _, err := store.MergeIndexResult(t.Context(), repo.ID, []string{"auth.go"}, merged); err != nil {
 		t.Fatalf("MergeIndexResult: %v", err)
 	}
-	if got := store.GetRepository(repo.ID).Branch; got != "feature/x" {
+	if got := store.GetRepository(t.Context(), repo.ID).Branch; got != "feature/x" {
 		t.Errorf("repo.Branch after merge = %q, want feature/x", got)
 	}
 }

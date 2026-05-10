@@ -69,7 +69,7 @@ func buildCallGraphStore(t *testing.T) (gs *graph.Store, repoID string) {
 		},
 	}
 
-	repo, err := gs.StoreIndexResult(result)
+	repo, err := gs.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}

@@ -109,18 +109,18 @@ func TestRunImport_GitCredsIntegrityFailClosed(t *testing.T) {
 	}
 
 	svc := NewService(cfg, store, creds, nil)
-	repo, err := store.CreateRepository("test-repo", "https://example.invalid/git/test-repo.git")
+	repo, err := store.CreateRepository(t.Context(), "test-repo", "https://example.invalid/git/test-repo.git")
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	store.UpdateRepositoryMeta(repo.ID, graphstore.RepositoryMeta{RemoteURL: "https://example.invalid/git/test-repo"})
+	store.UpdateRepositoryMeta(t.Context(), repo.ID, graphstore.RepositoryMeta{RemoteURL: "https://example.invalid/git/test-repo"})
 
 	// Call runImport synchronously (it would normally be invoked via
 	// the Import goroutine; calling it directly avoids the goroutine
 	// scheduling timing in the test).
 	svc.runImport(repo.ID, "test-repo", "https://example.invalid/git/test-repo.git", true, nil)
 
-	got := store.GetRepository(repo.ID)
+	got := store.GetRepository(t.Context(), repo.ID)
 	if got == nil {
 		t.Fatalf("repository %s missing after runImport", repo.ID)
 	}
@@ -163,16 +163,16 @@ func TestRunImport_RequestTokenBypassesIntegrityError(t *testing.T) {
 	}
 
 	svc := NewService(cfg, store, creds, nil)
-	repo, err := store.CreateRepository("test-repo", "https://example.invalid/git/test-repo.git")
+	repo, err := store.CreateRepository(t.Context(), "test-repo", "https://example.invalid/git/test-repo.git")
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	store.UpdateRepositoryMeta(repo.ID, graphstore.RepositoryMeta{RemoteURL: "https://example.invalid/git/test-repo"})
+	store.UpdateRepositoryMeta(t.Context(), repo.ID, graphstore.RepositoryMeta{RemoteURL: "https://example.invalid/git/test-repo"})
 
 	requestToken := "request-scoped-pat"
 	svc.runImport(repo.ID, "test-repo", "https://example.invalid/git/test-repo.git", true, &requestToken)
 
-	got := store.GetRepository(repo.ID)
+	got := store.GetRepository(t.Context(), repo.ID)
 	if got == nil {
 		t.Fatalf("repository %s missing after runImport", repo.ID)
 	}

@@ -42,11 +42,11 @@ func TestIntegration_ModelCapabilities_QualityGateTier_RoundTrip(t *testing.T) {
 			Source:          "builtin",
 			QualityGateTier: tier,
 		}
-		if err := store.SetModelCapabilities(mc); err != nil {
+		if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 			t.Fatalf("SetModelCapabilities (tier=%q): %v", tier, err)
 		}
 
-		got, err := store.GetModelCapabilities(modelID)
+		got, err := store.GetModelCapabilities(t.Context(), modelID)
 		if err != nil {
 			t.Fatalf("GetModelCapabilities (tier=%q): %v", tier, err)
 		}
@@ -76,17 +76,17 @@ func TestIntegration_ModelCapabilities_QualityGateTier_UpdatePreservesOtherField
 		Notes:                "original note",
 		QualityGateTier:      modeltier.TierMid,
 	}
-	if err := store.SetModelCapabilities(mc); err != nil {
+	if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 		t.Fatalf("initial SetModelCapabilities: %v", err)
 	}
 
 	// Update with different tier only.
 	mc.QualityGateTier = modeltier.TierFrontier
-	if err := store.SetModelCapabilities(mc); err != nil {
+	if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 		t.Fatalf("update SetModelCapabilities: %v", err)
 	}
 
-	got, err := store.GetModelCapabilities("tier-update-test")
+	got, err := store.GetModelCapabilities(t.Context(), "tier-update-test")
 	if err != nil || got == nil {
 		t.Fatalf("GetModelCapabilities after update: %v / %v", err, got)
 	}
@@ -116,11 +116,11 @@ func TestIntegration_ModelCapabilities_NonNilCosts_RoundTrip(t *testing.T) {
 		CostPer1kInput:  ptr(0.002),
 		CostPer1kOutput: ptr(0.006),
 	}
-	if err := store.SetModelCapabilities(mc); err != nil {
+	if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 		t.Fatalf("SetModelCapabilities: %v", err)
 	}
 
-	got, err := store.GetModelCapabilities("cost-roundtrip-test")
+	got, err := store.GetModelCapabilities(t.Context(), "cost-roundtrip-test")
 	if err != nil || got == nil {
 		t.Fatalf("GetModelCapabilities: %v / %v", err, got)
 	}
@@ -153,11 +153,11 @@ func TestIntegration_ModelCapabilities_NilCosts_RoundTripPreservesNil(t *testing
 		CostPer1kInput:  nil,
 		CostPer1kOutput: nil,
 	}
-	if err := store.SetModelCapabilities(mc); err != nil {
+	if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 		t.Fatalf("SetModelCapabilities: %v", err)
 	}
 
-	got, err := store.GetModelCapabilities("nil-cost-test")
+	got, err := store.GetModelCapabilities(t.Context(), "nil-cost-test")
 	if err != nil || got == nil {
 		t.Fatalf("GetModelCapabilities: %v / %v", err, got)
 	}
@@ -186,11 +186,11 @@ func TestIntegration_ModelCapabilities_LastProbedAt_NonNilRoundTrip(t *testing.T
 		QualityGateTier: modeltier.TierLocal,
 		LastProbedAt:    &probed,
 	}
-	if err := store.SetModelCapabilities(mc); err != nil {
+	if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 		t.Fatalf("SetModelCapabilities: %v", err)
 	}
 
-	got, err := store.GetModelCapabilities("last-probed-at-test")
+	got, err := store.GetModelCapabilities(t.Context(), "last-probed-at-test")
 	if err != nil || got == nil {
 		t.Fatalf("GetModelCapabilities: %v / %v", err, got)
 	}
@@ -229,20 +229,20 @@ func TestIntegration_ModelCapabilities_OptionFieldsTableDriven(t *testing.T) {
 		const id = "option-table-cost-input"
 		// nil → CREATE → read: field must be absent (nil).
 		mc := baseMC(id)
-		if err := store.SetModelCapabilities(mc); err != nil {
+		if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 			t.Fatalf("write nil: %v", err)
 		}
-		got, _ := store.GetModelCapabilities(id)
+		got, _ := store.GetModelCapabilities(t.Context(), id)
 		if got == nil || got.CostPer1kInput != nil {
 			t.Fatalf("nil write: expected nil, got %v", got)
 		}
 
 		// non-nil → UPDATE → read: field must match.
 		mc.CostPer1kInput = ptr(0.001)
-		if err := store.SetModelCapabilities(mc); err != nil {
+		if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 			t.Fatalf("write non-nil: %v", err)
 		}
-		got, _ = store.GetModelCapabilities(id)
+		got, _ = store.GetModelCapabilities(t.Context(), id)
 		if got == nil || got.CostPer1kInput == nil || math.Abs(*got.CostPer1kInput-0.001) > 1e-9 {
 			t.Fatalf("non-nil write: want 0.001, got %v", got)
 		}
@@ -251,15 +251,15 @@ func TestIntegration_ModelCapabilities_OptionFieldsTableDriven(t *testing.T) {
 		// Omitting a field from the UPDATE SET clause leaves the prior value
 		// intact (the writer is a partial update, not a clear). To test the
 		// "nil on a fresh row" path we delete and re-create.
-		if err := store.DeleteModelCapabilities(id); err != nil {
+		if err := store.DeleteModelCapabilities(t.Context(), id); err != nil {
 			t.Fatalf("delete: %v", err)
 		}
 		mc.ID = ""            // force a fresh CREATE
 		mc.CostPer1kInput = nil
-		if err := store.SetModelCapabilities(mc); err != nil {
+		if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 			t.Fatalf("write nil on fresh row: %v", err)
 		}
-		got, _ = store.GetModelCapabilities(id)
+		got, _ = store.GetModelCapabilities(t.Context(), id)
 		if got == nil || got.CostPer1kInput != nil {
 			t.Fatalf("nil on fresh row: expected nil, got %v", got)
 		}
@@ -269,34 +269,34 @@ func TestIntegration_ModelCapabilities_OptionFieldsTableDriven(t *testing.T) {
 		const id = "option-table-cost-output"
 		// nil → CREATE → read: field must be absent (nil).
 		mc := baseMC(id)
-		if err := store.SetModelCapabilities(mc); err != nil {
+		if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 			t.Fatalf("write nil: %v", err)
 		}
-		got, _ := store.GetModelCapabilities(id)
+		got, _ := store.GetModelCapabilities(t.Context(), id)
 		if got == nil || got.CostPer1kOutput != nil {
 			t.Fatalf("nil write: expected nil, got %v", got)
 		}
 
 		// non-nil → UPDATE → read: field must match.
 		mc.CostPer1kOutput = ptr(0.003)
-		if err := store.SetModelCapabilities(mc); err != nil {
+		if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 			t.Fatalf("write non-nil: %v", err)
 		}
-		got, _ = store.GetModelCapabilities(id)
+		got, _ = store.GetModelCapabilities(t.Context(), id)
 		if got == nil || got.CostPer1kOutput == nil || math.Abs(*got.CostPer1kOutput-0.003) > 1e-9 {
 			t.Fatalf("non-nil write: want 0.003, got %v", got)
 		}
 
 		// nil → DELETE+CREATE → read: field must be absent again.
-		if err := store.DeleteModelCapabilities(id); err != nil {
+		if err := store.DeleteModelCapabilities(t.Context(), id); err != nil {
 			t.Fatalf("delete: %v", err)
 		}
 		mc.ID = ""
 		mc.CostPer1kOutput = nil
-		if err := store.SetModelCapabilities(mc); err != nil {
+		if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 			t.Fatalf("write nil on fresh row: %v", err)
 		}
-		got, _ = store.GetModelCapabilities(id)
+		got, _ = store.GetModelCapabilities(t.Context(), id)
 		if got == nil || got.CostPer1kOutput != nil {
 			t.Fatalf("nil on fresh row: expected nil, got %v", got)
 		}
@@ -306,20 +306,20 @@ func TestIntegration_ModelCapabilities_OptionFieldsTableDriven(t *testing.T) {
 		const id = "option-table-last-probed-at"
 		// nil → CREATE → read: field must be absent (nil).
 		mc := baseMC(id)
-		if err := store.SetModelCapabilities(mc); err != nil {
+		if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 			t.Fatalf("write nil: %v", err)
 		}
-		got, _ := store.GetModelCapabilities(id)
+		got, _ := store.GetModelCapabilities(t.Context(), id)
 		if got == nil || got.LastProbedAt != nil {
 			t.Fatalf("nil write: expected nil, got %v", got)
 		}
 
 		// non-nil → UPDATE → read: field must round-trip within 1ms.
 		mc.LastProbedAt = &now
-		if err := store.SetModelCapabilities(mc); err != nil {
+		if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 			t.Fatalf("write non-nil: %v", err)
 		}
-		got, _ = store.GetModelCapabilities(id)
+		got, _ = store.GetModelCapabilities(t.Context(), id)
 		if got == nil || got.LastProbedAt == nil {
 			t.Fatalf("non-nil write: got nil LastProbedAt")
 		}
@@ -332,15 +332,15 @@ func TestIntegration_ModelCapabilities_OptionFieldsTableDriven(t *testing.T) {
 		}
 
 		// nil → DELETE+CREATE → read: field must be absent again.
-		if err := store.DeleteModelCapabilities(id); err != nil {
+		if err := store.DeleteModelCapabilities(t.Context(), id); err != nil {
 			t.Fatalf("delete: %v", err)
 		}
 		mc.ID = ""
 		mc.LastProbedAt = nil
-		if err := store.SetModelCapabilities(mc); err != nil {
+		if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 			t.Fatalf("write nil on fresh row: %v", err)
 		}
-		got, _ = store.GetModelCapabilities(id)
+		got, _ = store.GetModelCapabilities(t.Context(), id)
 		if got == nil || got.LastProbedAt != nil {
 			t.Fatalf("nil on fresh row: expected nil, got %v", got)
 		}

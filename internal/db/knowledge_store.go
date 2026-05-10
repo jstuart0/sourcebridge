@@ -4,6 +4,7 @@
 package db
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -265,7 +266,7 @@ func (r *surrealKnowledgeEvidence) toEvidence() knowledge.Evidence {
 // Knowledge artifact operations
 // ---------------------------------------------------------------------------
 
-func (s *SurrealStore) StoreKnowledgeArtifact(artifact *knowledge.Artifact) (*knowledge.Artifact, error) {
+func (s *SurrealStore) StoreKnowledgeArtifact(_ context.Context, artifact *knowledge.Artifact) (*knowledge.Artifact, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -341,14 +342,14 @@ func (s *SurrealStore) StoreKnowledgeArtifact(artifact *knowledge.Artifact) (*kn
 		return nil, fmt.Errorf("store knowledge artifact: %w", err)
 	}
 
-	return s.GetKnowledgeArtifact(id), nil
+	return s.GetKnowledgeArtifact(ctx(), id), nil
 }
 
-func (s *SurrealStore) ClaimArtifact(key knowledge.ArtifactKey, sourceRevision knowledge.SourceRevision) (*knowledge.Artifact, bool, error) {
-	return s.ClaimArtifactWithMode(key, sourceRevision, "")
+func (s *SurrealStore) ClaimArtifact(_ context.Context, key knowledge.ArtifactKey, sourceRevision knowledge.SourceRevision) (*knowledge.Artifact, bool, error) {
+	return s.ClaimArtifactWithMode(ctx(), key, sourceRevision, "")
 }
 
-func (s *SurrealStore) ClaimArtifactWithMode(key knowledge.ArtifactKey, sourceRevision knowledge.SourceRevision, mode knowledge.GenerationMode) (*knowledge.Artifact, bool, error) {
+func (s *SurrealStore) ClaimArtifactWithMode(_ context.Context, key knowledge.ArtifactKey, sourceRevision knowledge.SourceRevision, mode knowledge.GenerationMode) (*knowledge.Artifact, bool, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, false, fmt.Errorf("database not connected")
@@ -406,16 +407,16 @@ func (s *SurrealStore) ClaimArtifactWithMode(key knowledge.ArtifactKey, sourceRe
 			"generation_mode":   string(normalizedMode),
 		})
 	if err != nil {
-		existing := s.GetArtifactByKeyAndMode(key, normalizedMode)
+		existing := s.GetArtifactByKeyAndMode(ctx(), key, normalizedMode)
 		if existing != nil {
 			return existing, false, nil
 		}
 		return nil, false, fmt.Errorf("claim knowledge artifact: %w", err)
 	}
-	return s.GetKnowledgeArtifact(id), true, nil
+	return s.GetKnowledgeArtifact(ctx(), id), true, nil
 }
 
-func (s *SurrealStore) GetKnowledgeArtifact(id string) *knowledge.Artifact {
+func (s *SurrealStore) GetKnowledgeArtifact(_ context.Context, id string) *knowledge.Artifact {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -429,15 +430,15 @@ func (s *SurrealStore) GetKnowledgeArtifact(id string) *knowledge.Artifact {
 	}
 
 	a := row[0].toArtifact()
-	a.Sections = s.loadSections(a.ID)
+	a.Sections = s.loadSections(ctx(), a.ID)
 	return a
 }
 
-func (s *SurrealStore) GetArtifactByKey(key knowledge.ArtifactKey) *knowledge.Artifact {
-	return s.GetArtifactByKeyAndMode(key, "")
+func (s *SurrealStore) GetArtifactByKey(_ context.Context, key knowledge.ArtifactKey) *knowledge.Artifact {
+	return s.GetArtifactByKeyAndMode(ctx(), key, "")
 }
 
-func (s *SurrealStore) GetArtifactByKeyAndMode(key knowledge.ArtifactKey, mode knowledge.GenerationMode) *knowledge.Artifact {
+func (s *SurrealStore) GetArtifactByKeyAndMode(_ context.Context, key knowledge.ArtifactKey, mode knowledge.GenerationMode) *knowledge.Artifact {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -471,11 +472,11 @@ func (s *SurrealStore) GetArtifactByKeyAndMode(key knowledge.ArtifactKey, mode k
 		return nil
 	}
 	a := rows[0].toArtifact()
-	a.Sections = s.loadSections(a.ID)
+	a.Sections = s.loadSections(ctx(), a.ID)
 	return a
 }
 
-func (s *SurrealStore) GetKnowledgeArtifacts(repoID string) []*knowledge.Artifact {
+func (s *SurrealStore) GetKnowledgeArtifacts(_ context.Context, repoID string) []*knowledge.Artifact {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -491,13 +492,13 @@ func (s *SurrealStore) GetKnowledgeArtifacts(repoID string) []*knowledge.Artifac
 	results := make([]*knowledge.Artifact, 0, len(rows))
 	for _, r := range rows {
 		a := r.toArtifact()
-		a.Sections = s.loadSections(a.ID)
+		a.Sections = s.loadSections(ctx(), a.ID)
 		results = append(results, a)
 	}
 	return results
 }
 
-func (s *SurrealStore) UpdateKnowledgeArtifactStatus(id string, status knowledge.ArtifactStatus) error {
+func (s *SurrealStore) UpdateKnowledgeArtifactStatus(_ context.Context, id string, status knowledge.ArtifactStatus) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -515,7 +516,7 @@ func (s *SurrealStore) UpdateKnowledgeArtifactStatus(id string, status knowledge
 	return err
 }
 
-func (s *SurrealStore) SetArtifactFailed(id string, code string, message string) error {
+func (s *SurrealStore) SetArtifactFailed(_ context.Context, id string, code string, message string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -540,11 +541,11 @@ func (s *SurrealStore) SetArtifactFailed(id string, code string, message string)
 	return err
 }
 
-func (s *SurrealStore) UpdateKnowledgeArtifactProgress(id string, progress float64) error {
-	return s.UpdateKnowledgeArtifactProgressWithPhase(id, progress, "", "")
+func (s *SurrealStore) UpdateKnowledgeArtifactProgress(_ context.Context, id string, progress float64) error {
+	return s.UpdateKnowledgeArtifactProgressWithPhase(ctx(), id, progress, "", "")
 }
 
-func (s *SurrealStore) UpdateKnowledgeArtifactProgressWithPhase(id string, progress float64, phase, message string) error {
+func (s *SurrealStore) UpdateKnowledgeArtifactProgressWithPhase(_ context.Context, id string, progress float64, phase, message string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -573,7 +574,7 @@ func (s *SurrealStore) UpdateKnowledgeArtifactProgressWithPhase(id string, progr
 	return err
 }
 
-func (s *SurrealStore) MarkKnowledgeArtifactStale(id string, stale bool) error {
+func (s *SurrealStore) MarkKnowledgeArtifactStale(_ context.Context, id string, stale bool) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -600,7 +601,7 @@ func (s *SurrealStore) MarkKnowledgeArtifactStale(id string, stale bool) error {
 	return err
 }
 
-func (s *SurrealStore) MarkKnowledgeArtifactStaleWithReason(id string, reasonJSON string, reportID string) error {
+func (s *SurrealStore) MarkKnowledgeArtifactStaleWithReason(_ context.Context, id string, reasonJSON string, reportID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -624,7 +625,7 @@ func (s *SurrealStore) MarkKnowledgeArtifactStaleWithReason(id string, reasonJSO
 // GetArtifactsForSources returns artifacts whose evidence references any of
 // the given (source_type, source_id) pairs. Implemented as a two-step lookup:
 // resolve section_ids from evidence, then artifacts from sections.
-func (s *SurrealStore) GetArtifactsForSources(repoID string, sources []knowledge.SourceRef) []*knowledge.Artifact {
+func (s *SurrealStore) GetArtifactsForSources(_ context.Context, repoID string, sources []knowledge.SourceRef) []*knowledge.Artifact {
 	db := s.client.DB()
 	if db == nil || len(sources) == 0 {
 		return nil
@@ -667,12 +668,12 @@ func (s *SurrealStore) GetArtifactsForSources(repoID string, sources []knowledge
 		return nil
 	}
 
-	return s.artifactsFromSectionIDs(repoID, sectionIDSet)
+	return s.artifactsFromSectionIDs(ctx(), repoID, sectionIDSet)
 }
 
 // GetArtifactsForFiles returns artifacts whose evidence references any of
 // the given file paths.
-func (s *SurrealStore) GetArtifactsForFiles(repoID string, filePaths []string) []*knowledge.Artifact {
+func (s *SurrealStore) GetArtifactsForFiles(_ context.Context, repoID string, filePaths []string) []*knowledge.Artifact {
 	db := s.client.DB()
 	if db == nil || len(filePaths) == 0 {
 		return nil
@@ -709,12 +710,12 @@ func (s *SurrealStore) GetArtifactsForFiles(repoID string, filePaths []string) [
 		return nil
 	}
 
-	return s.artifactsFromSectionIDs(repoID, sectionIDSet)
+	return s.artifactsFromSectionIDs(ctx(), repoID, sectionIDSet)
 }
 
 // artifactsFromSectionIDs resolves a set of section IDs to their parent
 // artifacts, scoped to the given repo and deduped.
-func (s *SurrealStore) artifactsFromSectionIDs(repoID string, sectionIDSet map[string]struct{}) []*knowledge.Artifact {
+func (s *SurrealStore) artifactsFromSectionIDs(_ context.Context, repoID string, sectionIDSet map[string]struct{}) []*knowledge.Artifact {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -762,20 +763,20 @@ func (s *SurrealStore) artifactsFromSectionIDs(repoID string, sectionIDSet map[s
 	out := make([]*knowledge.Artifact, 0, len(rows))
 	for _, r := range rows {
 		a := r.toArtifact()
-		a.Sections = s.loadSections(a.ID)
+		a.Sections = s.loadSections(ctx(), a.ID)
 		out = append(out, a)
 	}
 	return out
 }
 
-func (s *SurrealStore) DeleteKnowledgeArtifact(id string) error {
+func (s *SurrealStore) DeleteKnowledgeArtifact(_ context.Context, id string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
 
 	// Delete evidence for all sections of this artifact.
-	sections := s.GetKnowledgeSections(id)
+	sections := s.GetKnowledgeSections(ctx(), id)
 	for _, sec := range sections {
 		_, _ = queryOne[interface{}](ctx(), db,
 			"DELETE ca_knowledge_evidence WHERE section_id = $section_id",
@@ -794,15 +795,15 @@ func (s *SurrealStore) DeleteKnowledgeArtifact(id string) error {
 	return err
 }
 
-func (s *SurrealStore) SupersedeArtifact(id string, sections []knowledge.Section) error {
+func (s *SurrealStore) SupersedeArtifact(_ context.Context, id string, sections []knowledge.Section) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	if s.GetKnowledgeArtifact(id) == nil {
+	if s.GetKnowledgeArtifact(ctx(), id) == nil {
 		return fmt.Errorf("artifact %s not found", id)
 	}
-	for _, sec := range s.GetKnowledgeSections(id) {
+	for _, sec := range s.GetKnowledgeSections(ctx(), id) {
 		_, _ = queryOne[interface{}](ctx(), db,
 			"DELETE ca_knowledge_evidence WHERE section_id = $section_id",
 			map[string]any{"section_id": sec.ID})
@@ -810,30 +811,30 @@ func (s *SurrealStore) SupersedeArtifact(id string, sections []knowledge.Section
 	_, _ = queryOne[interface{}](ctx(), db,
 		"DELETE ca_knowledge_section WHERE artifact_id = $artifact_id",
 		map[string]any{"artifact_id": id})
-	if err := s.StoreKnowledgeSections(id, sections); err != nil {
+	if err := s.StoreKnowledgeSections(ctx(), id, sections); err != nil {
 		return err
 	}
-	for _, sec := range s.GetKnowledgeSections(id) {
+	for _, sec := range s.GetKnowledgeSections(ctx(), id) {
 		for _, incoming := range sections {
 			if incoming.Title != sec.Title || incoming.Content != sec.Content {
 				continue
 			}
 			if len(incoming.Evidence) > 0 {
-				if err := s.StoreKnowledgeEvidence(sec.ID, incoming.Evidence); err != nil {
+				if err := s.StoreKnowledgeEvidence(ctx(), sec.ID, incoming.Evidence); err != nil {
 					return err
 				}
 			}
 			break
 		}
 	}
-	return s.UpdateKnowledgeArtifactStatus(id, knowledge.StatusReady)
+	return s.UpdateKnowledgeArtifactStatus(ctx(), id, knowledge.StatusReady)
 }
 
 // ---------------------------------------------------------------------------
 // Knowledge section operations
 // ---------------------------------------------------------------------------
 
-func (s *SurrealStore) StoreKnowledgeSections(artifactID string, sections []knowledge.Section) error {
+func (s *SurrealStore) StoreKnowledgeSections(_ context.Context, artifactID string, sections []knowledge.Section) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -907,7 +908,7 @@ func (s *SurrealStore) StoreKnowledgeSections(artifactID string, sections []know
 	return nil
 }
 
-func (s *SurrealStore) GetKnowledgeSections(artifactID string) []knowledge.Section {
+func (s *SurrealStore) GetKnowledgeSections(_ context.Context, artifactID string) []knowledge.Section {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -923,18 +924,18 @@ func (s *SurrealStore) GetKnowledgeSections(artifactID string) []knowledge.Secti
 	sections := make([]knowledge.Section, 0, len(rows))
 	for _, r := range rows {
 		sec := r.toSection()
-		sec.Evidence = s.GetKnowledgeEvidence(sec.ID)
+		sec.Evidence = s.GetKnowledgeEvidence(ctx(), sec.ID)
 		sections = append(sections, sec)
 	}
 	return sections
 }
 
-func (s *SurrealStore) StoreRefinementUnits(artifactID string, units []knowledge.RefinementUnit) error {
+func (s *SurrealStore) StoreRefinementUnits(_ context.Context, artifactID string, units []knowledge.RefinementUnit) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	if s.GetKnowledgeArtifact(artifactID) == nil {
+	if s.GetKnowledgeArtifact(ctx(), artifactID) == nil {
 		return fmt.Errorf("artifact %s not found", artifactID)
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -983,7 +984,7 @@ func (s *SurrealStore) StoreRefinementUnits(artifactID string, units []knowledge
 	return nil
 }
 
-func (s *SurrealStore) GetRefinementUnits(artifactID string) []knowledge.RefinementUnit {
+func (s *SurrealStore) GetRefinementUnits(_ context.Context, artifactID string) []knowledge.RefinementUnit {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1001,7 +1002,7 @@ func (s *SurrealStore) GetRefinementUnits(artifactID string) []knowledge.Refinem
 	return units
 }
 
-func (s *SurrealStore) StoreArtifactDependencies(artifactID string, dependencies []knowledge.ArtifactDependency) error {
+func (s *SurrealStore) StoreArtifactDependencies(_ context.Context, artifactID string, dependencies []knowledge.ArtifactDependency) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -1040,7 +1041,7 @@ func (s *SurrealStore) StoreArtifactDependencies(artifactID string, dependencies
 	return nil
 }
 
-func (s *SurrealStore) GetArtifactDependencies(artifactID string) []knowledge.ArtifactDependency {
+func (s *SurrealStore) GetArtifactDependencies(_ context.Context, artifactID string) []knowledge.ArtifactDependency {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1062,7 +1063,7 @@ func (s *SurrealStore) GetArtifactDependencies(artifactID string) []knowledge.Ar
 // Knowledge evidence operations
 // ---------------------------------------------------------------------------
 
-func (s *SurrealStore) StoreKnowledgeEvidence(sectionID string, evidence []knowledge.Evidence) error {
+func (s *SurrealStore) StoreKnowledgeEvidence(_ context.Context, sectionID string, evidence []knowledge.Evidence) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -1114,7 +1115,7 @@ func (s *SurrealStore) StoreKnowledgeEvidence(sectionID string, evidence []knowl
 	return nil
 }
 
-func (s *SurrealStore) GetKnowledgeEvidence(sectionID string) []knowledge.Evidence {
+func (s *SurrealStore) GetKnowledgeEvidence(_ context.Context, sectionID string) []knowledge.Evidence {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1134,7 +1135,7 @@ func (s *SurrealStore) GetKnowledgeEvidence(sectionID string) []knowledge.Eviden
 	return evidence
 }
 
-func (s *SurrealStore) StoreRepositoryUnderstanding(u *knowledge.RepositoryUnderstanding) (*knowledge.RepositoryUnderstanding, error) {
+func (s *SurrealStore) StoreRepositoryUnderstanding(_ context.Context, u *knowledge.RepositoryUnderstanding) (*knowledge.RepositoryUnderstanding, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -1235,10 +1236,10 @@ func (s *SurrealStore) StoreRepositoryUnderstanding(u *knowledge.RepositoryUnder
 	if _, err := surrealdb.Query[interface{}](ctx(), db, sql, vars); err != nil {
 		return nil, fmt.Errorf("store repository understanding: %w", err)
 	}
-	return s.GetRepositoryUnderstanding(u.RepositoryID, scope), nil
+	return s.GetRepositoryUnderstanding(ctx(), u.RepositoryID, scope), nil
 }
 
-func (s *SurrealStore) GetRepositoryUnderstanding(repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding {
+func (s *SurrealStore) GetRepositoryUnderstanding(_ context.Context, repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1258,7 +1259,7 @@ func (s *SurrealStore) GetRepositoryUnderstanding(repoID string, scope knowledge
 	return rows[0].toRepositoryUnderstanding()
 }
 
-func (s *SurrealStore) GetRepositoryUnderstandings(repoID string) []*knowledge.RepositoryUnderstanding {
+func (s *SurrealStore) GetRepositoryUnderstandings(_ context.Context, repoID string) []*knowledge.RepositoryUnderstanding {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1278,7 +1279,7 @@ func (s *SurrealStore) GetRepositoryUnderstandings(repoID string) []*knowledge.R
 	return out
 }
 
-func (s *SurrealStore) MarkRepositoryUnderstandingNeedsRefresh(repoID string) error {
+func (s *SurrealStore) MarkRepositoryUnderstandingNeedsRefresh(_ context.Context, repoID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -1298,7 +1299,7 @@ func (s *SurrealStore) MarkRepositoryUnderstandingNeedsRefresh(repoID string) er
 	return err
 }
 
-func (s *SurrealStore) MarkRepositoryUnderstandingFailed(understandingID, errorCode, errorMessage string) error {
+func (s *SurrealStore) MarkRepositoryUnderstandingFailed(_ context.Context, understandingID, errorCode, errorMessage string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -1322,7 +1323,7 @@ func (s *SurrealStore) MarkRepositoryUnderstandingFailed(understandingID, errorC
 	return err
 }
 
-func (s *SurrealStore) UpdateRepositoryUnderstandingProgress(id string, progress float64, phase, message string) error {
+func (s *SurrealStore) UpdateRepositoryUnderstandingProgress(_ context.Context, id string, progress float64, phase, message string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -1346,7 +1347,7 @@ func (s *SurrealStore) UpdateRepositoryUnderstandingProgress(id string, progress
 	return err
 }
 
-func (s *SurrealStore) AttachArtifactUnderstanding(artifactID, understandingID, revisionFP string) error {
+func (s *SurrealStore) AttachArtifactUnderstanding(_ context.Context, artifactID, understandingID, revisionFP string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -1366,8 +1367,8 @@ func (s *SurrealStore) AttachArtifactUnderstanding(artifactID, understandingID, 
 }
 
 // loadSections returns ordered sections with nested evidence for an artifact.
-func (s *SurrealStore) loadSections(artifactID string) []knowledge.Section {
-	sections := s.GetKnowledgeSections(artifactID)
+func (s *SurrealStore) loadSections(_ context.Context, artifactID string) []knowledge.Section {
+	sections := s.GetKnowledgeSections(ctx(), artifactID)
 	sort.Slice(sections, func(i, j int) bool { return sections[i].OrderIndex < sections[j].OrderIndex })
 	return sections
 }

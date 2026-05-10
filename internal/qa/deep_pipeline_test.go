@@ -22,10 +22,10 @@ type fakeDeepReader struct {
 	nodesErr      error
 }
 
-func (f *fakeDeepReader) GetRepositoryUnderstanding(repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding {
+func (f *fakeDeepReader) GetRepositoryUnderstanding(_ context.Context, repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding {
 	return f.understanding
 }
-func (f *fakeDeepReader) GetSummaryNodes(corpusID string) ([]comprehension.SummaryNode, error) {
+func (f *fakeDeepReader) GetSummaryNodes(_ context.Context, corpusID string) ([]comprehension.SummaryNode, error) {
 	return f.nodes, f.nodesErr
 }
 

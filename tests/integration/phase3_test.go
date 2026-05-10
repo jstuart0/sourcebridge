@@ -134,7 +134,7 @@ func TestRequirementStorage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(context.Background(), result)
 
 	// Parse and store requirements
 	content := readFixtureFile(t, "requirements.md")
@@ -152,13 +152,13 @@ func TestRequirementStorage(t *testing.T) {
 		})
 	}
 
-	imported := store.StoreRequirements(repo.ID, storedReqs)
+	imported := store.StoreRequirements(context.Background(), repo.ID, storedReqs)
 	if imported != 14 {
 		t.Fatalf("expected 14 imported, got %d", imported)
 	}
 
 	// Retrieve requirements
-	reqs, total := store.GetRequirements(repo.ID, 100, 0)
+	reqs, total := store.GetRequirements(context.Background(), repo.ID, 100, 0)
 	if total != 14 {
 		t.Fatalf("expected total 14, got %d", total)
 	}
@@ -172,7 +172,7 @@ func TestRequirementStorage(t *testing.T) {
 	}
 
 	// Test GetRequirementByExternalID
-	found := store.GetRequirementByExternalID(repo.ID, "REQ-010")
+	found := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-010")
 	if found == nil {
 		t.Fatal("expected to find REQ-010")
 	}
@@ -181,7 +181,7 @@ func TestRequirementStorage(t *testing.T) {
 	}
 
 	// Test pagination
-	reqs, total = store.GetRequirements(repo.ID, 5, 0)
+	reqs, total = store.GetRequirements(context.Background(), repo.ID, 5, 0)
 	if total != 14 {
 		t.Errorf("expected total 14, got %d", total)
 	}
@@ -190,7 +190,7 @@ func TestRequirementStorage(t *testing.T) {
 	}
 
 	// Test stats
-	stats := store.Stats()
+	stats := store.Stats(context.Background())
 	if stats["requirements"] != 14 {
 		t.Errorf("expected 14 requirements in stats, got %d", stats["requirements"])
 	}
@@ -201,28 +201,28 @@ func TestRequirementRemovalWithRepo(t *testing.T) {
 
 	idx := indexer.NewIndexer(nil)
 	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(context.Background(), result)
 
 	// Store requirements
-	store.StoreRequirements(repo.ID, []*graph.StoredRequirement{
+	store.StoreRequirements(context.Background(), repo.ID, []*graph.StoredRequirement{
 		{ExternalID: "REQ-001", Title: "Test", Description: "Desc"},
 	})
 
 	// Verify requirement exists
-	reqs, _ := store.GetRequirements(repo.ID, 100, 0)
+	reqs, _ := store.GetRequirements(context.Background(), repo.ID, 100, 0)
 	if len(reqs) != 1 {
 		t.Fatalf("expected 1 requirement, got %d", len(reqs))
 	}
 
 	// Remove repo should also remove requirements
-	store.RemoveRepository(repo.ID)
+	store.RemoveRepository(context.Background(), repo.ID)
 
-	_, total := store.GetRequirements(repo.ID, 100, 0)
+	_, total := store.GetRequirements(context.Background(), repo.ID, 100, 0)
 	if total != 0 {
 		t.Errorf("expected 0 requirements after repo removal, got %d", total)
 	}
 
-	stats := store.Stats()
+	stats := store.Stats(context.Background())
 	if stats["requirements"] != 0 {
 		t.Errorf("expected 0 requirements in stats after removal, got %d", stats["requirements"])
 	}
@@ -236,7 +236,7 @@ func TestGraphQLImportRequirements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(context.Background(), result)
 
 	ts, token := setupPhase3Server(t, store)
 
@@ -271,10 +271,10 @@ func TestGraphQLQueryRequirements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(context.Background(), result)
 
 	// Store requirements directly
-	store.StoreRequirements(repo.ID, []*graph.StoredRequirement{
+	store.StoreRequirements(context.Background(), repo.ID, []*graph.StoredRequirement{
 		{ExternalID: "REQ-001", Title: "System Startup", Description: "Desc 1", Source: "test.md", Priority: "High"},
 		{ExternalID: "REQ-002", Title: "Data Processing", Description: "Desc 2", Source: "test.md", Priority: "Critical"},
 		{ExternalID: "REQ-003", Title: "User Auth", Description: "Desc 3", Source: "test.md", Priority: "Medium"},
@@ -315,13 +315,13 @@ func TestGraphQLQuerySingleRequirement(t *testing.T) {
 
 	idx := indexer.NewIndexer(nil)
 	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(context.Background(), result)
 
-	store.StoreRequirements(repo.ID, []*graph.StoredRequirement{
+	store.StoreRequirements(context.Background(), repo.ID, []*graph.StoredRequirement{
 		{ExternalID: "REQ-100", Title: "Test Req", Description: "A test", Source: "test.md", Priority: "Low"},
 	})
 
-	reqs, _ := store.GetRequirements(repo.ID, 1, 0)
+	reqs, _ := store.GetRequirements(context.Background(), repo.ID, 1, 0)
 	reqID := reqs[0].ID
 
 	ts, token := setupPhase3Server(t, store)
@@ -345,10 +345,10 @@ func TestGraphQLImportDuplicateSkip(t *testing.T) {
 
 	idx := indexer.NewIndexer(nil)
 	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(context.Background(), result)
 
 	// Pre-store a requirement
-	store.StoreRequirements(repo.ID, []*graph.StoredRequirement{
+	store.StoreRequirements(context.Background(), repo.ID, []*graph.StoredRequirement{
 		{ExternalID: "REQ-001", Title: "Existing", Description: "Already here", Source: "old.md"},
 	})
 
@@ -385,7 +385,7 @@ func TestGraphQLRequirementsPagination(t *testing.T) {
 
 	idx := indexer.NewIndexer(nil)
 	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(context.Background(), result)
 
 	// Store 10 requirements
 	var reqs []*graph.StoredRequirement
@@ -396,7 +396,7 @@ func TestGraphQLRequirementsPagination(t *testing.T) {
 			Description: "Description",
 		})
 	}
-	store.StoreRequirements(repo.ID, reqs)
+	store.StoreRequirements(context.Background(), repo.ID, reqs)
 
 	ts, token := setupPhase3Server(t, store)
 
@@ -422,7 +422,7 @@ func TestGraphQLCSVImport(t *testing.T) {
 
 	idx := indexer.NewIndexer(nil)
 	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(context.Background(), result)
 
 	ts, token := setupPhase3Server(t, store)
 

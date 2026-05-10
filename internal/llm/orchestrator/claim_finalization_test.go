@@ -85,7 +85,7 @@ func TestMemStoreSetStatus_TerminalToTerminalIsNoOp(t *testing.T) {
 	store := llm.NewMemStore()
 
 	const id = "test-job-1"
-	if _, err := store.Create(&llm.Job{
+	if _, err := store.Create(t.Context(), &llm.Job{
 		ID:        id,
 		Subsystem: llm.SubsystemKnowledge,
 		JobType:   "cliff_notes",
@@ -95,18 +95,18 @@ func TestMemStoreSetStatus_TerminalToTerminalIsNoOp(t *testing.T) {
 	}
 
 	// Transition pending -> generating -> ready.
-	if err := store.SetStatus(id, llm.StatusGenerating); err != nil {
+	if err := store.SetStatus(t.Context(), id, llm.StatusGenerating); err != nil {
 		t.Fatalf("set generating: %v", err)
 	}
-	if err := store.SetStatus(id, llm.StatusReady); err != nil {
+	if err := store.SetStatus(t.Context(), id, llm.StatusReady); err != nil {
 		t.Fatalf("set ready: %v", err)
 	}
 
 	// Now attempt to overwrite ready -> failed. Must be no-op.
-	if err := store.SetStatus(id, llm.StatusFailed); err != nil {
+	if err := store.SetStatus(t.Context(), id, llm.StatusFailed); err != nil {
 		t.Errorf("expected no-op (nil error), got %v", err)
 	}
-	got := store.GetByID(id)
+	got := store.GetByID(t.Context(), id)
 	if got == nil {
 		t.Fatal("job vanished")
 	}
@@ -120,7 +120,7 @@ func TestMemStoreSetStatus_TerminalToSelfIsAllowed(t *testing.T) {
 	// the underlying state — fields are re-stamped, but the status
 	// stays). The guard explicitly allows status == j.Status.
 	store := llm.NewMemStore()
-	job, err := store.Create(&llm.Job{
+	job, err := store.Create(t.Context(), &llm.Job{
 		ID:        randID(t),
 		Subsystem: llm.SubsystemKnowledge,
 		JobType:   "cliff_notes",
@@ -130,12 +130,12 @@ func TestMemStoreSetStatus_TerminalToSelfIsAllowed(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	id := job.ID
-	_ = store.SetStatus(id, llm.StatusGenerating)
-	_ = store.SetStatus(id, llm.StatusFailed)
-	if err := store.SetStatus(id, llm.StatusFailed); err != nil {
+	_ = store.SetStatus(t.Context(), id, llm.StatusGenerating)
+	_ = store.SetStatus(t.Context(), id, llm.StatusFailed)
+	if err := store.SetStatus(t.Context(), id, llm.StatusFailed); err != nil {
 		t.Errorf("self-write should not error, got %v", err)
 	}
-	got := store.GetByID(id)
+	got := store.GetByID(t.Context(), id)
 	if got.Status != llm.StatusFailed {
 		t.Errorf("status got %v, want failed", got.Status)
 	}
@@ -143,7 +143,7 @@ func TestMemStoreSetStatus_TerminalToSelfIsAllowed(t *testing.T) {
 
 func TestMemStoreSetError_TerminalToFailedIsAllowed(t *testing.T) {
 	store := llm.NewMemStore()
-	job, err := store.Create(&llm.Job{
+	job, err := store.Create(t.Context(), &llm.Job{
 		ID:        randID(t),
 		Subsystem: llm.SubsystemKnowledge,
 		JobType:   "cliff_notes",
@@ -153,13 +153,13 @@ func TestMemStoreSetError_TerminalToFailedIsAllowed(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	id := job.ID
-	_ = store.SetStatus(id, llm.StatusGenerating)
+	_ = store.SetStatus(t.Context(), id, llm.StatusGenerating)
 	// SetError implicitly sets Failed; calling on a non-terminal
 	// generating job should succeed and write the error.
-	if err := store.SetError(id, "DEADLINE_EXCEEDED", "reaped"); err != nil {
+	if err := store.SetError(t.Context(), id, "DEADLINE_EXCEEDED", "reaped"); err != nil {
 		t.Fatalf("set error: %v", err)
 	}
-	got := store.GetByID(id)
+	got := store.GetByID(t.Context(), id)
 	if got.Status != llm.StatusFailed {
 		t.Errorf("status got %v, want failed", got.Status)
 	}
@@ -171,7 +171,7 @@ func TestMemStoreSetError_TerminalToFailedIsAllowed(t *testing.T) {
 func TestMemStoreSetError_OnAlreadyReadyIsNoOp(t *testing.T) {
 	// The reaper must never overwrite a successful Ready into Failed.
 	store := llm.NewMemStore()
-	job, err := store.Create(&llm.Job{
+	job, err := store.Create(t.Context(), &llm.Job{
 		ID:        randID(t),
 		Subsystem: llm.SubsystemKnowledge,
 		JobType:   "cliff_notes",
@@ -181,15 +181,15 @@ func TestMemStoreSetError_OnAlreadyReadyIsNoOp(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	id := job.ID
-	_ = store.SetStatus(id, llm.StatusGenerating)
-	_ = store.SetStatus(id, llm.StatusReady)
+	_ = store.SetStatus(t.Context(), id, llm.StatusGenerating)
+	_ = store.SetStatus(t.Context(), id, llm.StatusReady)
 	// Now the reaper fires and tries to write a failure on an
 	// already-ready job. The terminal-status guard must reject it
 	// silently (no error, no state change).
-	if err := store.SetError(id, "DEADLINE_EXCEEDED", "stale-reap-after-success"); err != nil {
+	if err := store.SetError(t.Context(), id, "DEADLINE_EXCEEDED", "stale-reap-after-success"); err != nil {
 		t.Errorf("expected silent no-op, got %v", err)
 	}
-	got := store.GetByID(id)
+	got := store.GetByID(t.Context(), id)
 	if got.Status != llm.StatusReady {
 		t.Errorf("status got %v, want ready (terminal-status guard should have blocked)", got.Status)
 	}
@@ -200,7 +200,7 @@ func TestMemStoreSetError_OnAlreadyReadyIsNoOp(t *testing.T) {
 
 func TestMemStoreSetError_OnCancelledIsNoOp(t *testing.T) {
 	store := llm.NewMemStore()
-	job, err := store.Create(&llm.Job{
+	job, err := store.Create(t.Context(), &llm.Job{
 		ID:        randID(t),
 		Subsystem: llm.SubsystemKnowledge,
 		JobType:   "cliff_notes",
@@ -210,12 +210,12 @@ func TestMemStoreSetError_OnCancelledIsNoOp(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	id := job.ID
-	_ = store.SetStatus(id, llm.StatusGenerating)
-	_ = store.SetStatus(id, llm.StatusCancelled)
-	if err := store.SetError(id, "DEADLINE_EXCEEDED", "should-not-write"); err != nil {
+	_ = store.SetStatus(t.Context(), id, llm.StatusGenerating)
+	_ = store.SetStatus(t.Context(), id, llm.StatusCancelled)
+	if err := store.SetError(t.Context(), id, "DEADLINE_EXCEEDED", "should-not-write"); err != nil {
 		t.Errorf("expected silent no-op, got %v", err)
 	}
-	got := store.GetByID(id)
+	got := store.GetByID(t.Context(), id)
 	if got.Status != llm.StatusCancelled {
 		t.Errorf("status got %v, want cancelled", got.Status)
 	}

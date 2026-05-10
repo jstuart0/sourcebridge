@@ -18,7 +18,7 @@ import (
 func seedStore(t *testing.T) (string, *graph.Store) {
 	t.Helper()
 	s := graph.NewStore()
-	repo, err := s.CreateRepository("test-repo", "/tmp/test")
+	repo, err := s.CreateRepository(t.Context(), "test-repo", "/tmp/test")
 	if err != nil {
 		t.Fatal(err)
 	}

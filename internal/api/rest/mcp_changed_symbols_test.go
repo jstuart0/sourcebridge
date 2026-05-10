@@ -80,13 +80,13 @@ func seedChangedSymbolsFixture(t *testing.T, h *mcpTestHarness) changedSymbolsFi
 			},
 		},
 	}
-	repoA, err := h.store.StoreIndexResult(resultA)
+	repoA, err := h.store.StoreIndexResult(t.Context(), resultA)
 	if err != nil {
 		t.Fatalf("StoreIndexResult repoA: %v", err)
 	}
 	fix.RepoID = repoA.ID
 
-	symsA, _ := h.store.GetSymbols(fix.RepoID, nil, nil, 0, 0)
+	symsA, _ := h.store.GetSymbols(t.Context(), fix.RepoID, nil, nil, 0, 0)
 	for _, s := range symsA {
 		switch s.Name {
 		case "FuncA":
@@ -113,7 +113,7 @@ func seedChangedSymbolsFixture(t *testing.T, h *mcpTestHarness) changedSymbolsFi
 			},
 		},
 	}
-	repoB, err := h.store.StoreIndexResult(resultB)
+	repoB, err := h.store.StoreIndexResult(t.Context(), resultB)
 	if err != nil {
 		t.Fatalf("StoreIndexResult repoB: %v", err)
 	}
@@ -273,13 +273,13 @@ func TestMCP_GetChangedSymbols_HappyPath_CommitRange(t *testing.T) {
 			},
 		},
 	}
-	repo, err := h.store.StoreIndexResult(result)
+	repo, err := h.store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
 	// Point the stored repo's clone path to our real git checkout.
-	h.store.UpdateRepositoryMeta(repo.ID, graphstore.RepositoryMeta{
+	h.store.UpdateRepositoryMeta(t.Context(), repo.ID, graphstore.RepositoryMeta{
 		ClonePath: repoDir,
 	})
 
@@ -425,7 +425,7 @@ func TestMCP_GetChangedSymbols_MaxSymbolsCap(t *testing.T) {
 		RepoPath: "/tmp/cs-cap-repo",
 		Files:    files,
 	}
-	repo, err := h.store.StoreIndexResult(bigResult)
+	repo, err := h.store.StoreIndexResult(t.Context(), bigResult)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -504,7 +504,7 @@ func TestMCP_GetChangedSymbols_CrossRepoIsolation(t *testing.T) {
 	ids := flatSymbolIDsFromChangedSymbols(t, result)
 
 	// Get all symbols from repo B to check for leakage.
-	repoBSyms, _ := h.store.GetSymbols(fix.RepoBID, nil, nil, 0, 0)
+	repoBSyms, _ := h.store.GetSymbols(t.Context(), fix.RepoBID, nil, nil, 0, 0)
 	for _, bs := range repoBSyms {
 		if containsID(ids, bs.ID) {
 			t.Errorf("repo B symbol %s (%s) leaked into repo A results", bs.ID, bs.Name)

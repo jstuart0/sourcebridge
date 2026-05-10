@@ -111,7 +111,7 @@ func TestIntegration_UpsertSymbolEmbedding_RoundTrip(t *testing.T) {
 	const model = "nomic-embed-text"
 	const textHash = "sha256:abcdef1234567890"
 
-	if err := store.UpsertSymbolEmbedding(repoID, symID, vec, model, dim, textHash); err != nil {
+	if err := store.UpsertSymbolEmbedding(t.Context(), repoID, symID, vec, model, dim, textHash); err != nil {
 		t.Fatalf("UpsertSymbolEmbedding: %v", err)
 	}
 
@@ -163,7 +163,7 @@ func TestIntegration_UpsertSymbolEmbedding_DimensionGate(t *testing.T) {
 
 	// vec has 3 elements, dim claims 768 → must error.
 	shortVec := []float32{0.1, 0.2, 0.3}
-	err := store.UpsertSymbolEmbedding(repoID, symID, shortVec, "nomic-embed-text", 768, "hash")
+	err := store.UpsertSymbolEmbedding(t.Context(), repoID, symID, shortVec, "nomic-embed-text", 768, "hash")
 	if err == nil {
 		t.Fatal("expected error for dimension mismatch, got nil")
 	}

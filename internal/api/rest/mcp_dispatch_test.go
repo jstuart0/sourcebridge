@@ -85,7 +85,7 @@ func TestSafeDispatchCtx_CancelledContextPropagates(t *testing.T) {
 			},
 		},
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}

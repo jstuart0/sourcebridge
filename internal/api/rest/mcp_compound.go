@@ -133,7 +133,7 @@ func (h *mcpHandler) resolveDiffTouchedSymbols(repoID, commitRange string, files
 	if len(files) > 0 {
 		touchedFiles = files
 	} else {
-		repo := h.store.GetRepository(repoID)
+		repo := h.store.GetRepository(context.Background(), repoID)
 		if repo == nil {
 			return nil, nil, errRepositoryNotIndexed(repoID)
 		}
@@ -168,7 +168,7 @@ func (h *mcpHandler) resolveDiffTouchedSymbols(repoID, commitRange string, files
 	var reviewFiles []diffReviewFile
 	var symbolIDs []string
 	for _, fp := range touchedFiles {
-		fileSymbols := h.store.GetSymbolsByFile(repoID, fp)
+		fileSymbols := h.store.GetSymbolsByFile(context.Background(), repoID, fp)
 		names := make([]string, 0, len(fileSymbols))
 		for _, s := range fileSymbols {
 			names = append(names, s.Name)
@@ -213,7 +213,7 @@ func (h *mcpHandler) callReviewDiffAgainstRequirements(session *mcpSession, args
 	linkedReqIDs := map[string]bool{}
 	symToReqs := map[string][]string{}
 	for _, symID := range touchedSymbolIDs {
-		for _, link := range h.store.GetLinksForSymbol(symID, false) {
+		for _, link := range h.store.GetLinksForSymbol(context.Background(), symID, false) {
 			if link.RequirementID != "" && !linkedReqIDs[link.RequirementID] {
 				linkedReqIDs[link.RequirementID] = true
 			}
@@ -225,7 +225,7 @@ func (h *mcpHandler) callReviewDiffAgainstRequirements(session *mcpSession, args
 		for id := range linkedReqIDs {
 			ids = append(ids, id)
 		}
-		reqs := h.store.GetRequirementsByIDs(ids)
+		reqs := h.store.GetRequirementsByIDs(context.Background(), ids)
 		for _, req := range reqs {
 			if req == nil {
 				continue
@@ -247,7 +247,7 @@ func (h *mcpHandler) callReviewDiffAgainstRequirements(session *mcpSession, args
 	// char, for languages where that's the convention) and have no
 	// linked requirement.
 	for _, symID := range touchedSymbolIDs {
-		sym := h.store.GetSymbol(symID)
+		sym := h.store.GetSymbol(context.Background(), symID)
 		if sym == nil {
 			continue
 		}
@@ -368,7 +368,7 @@ func (h *mcpHandler) callImpactSummary(session *mcpSession, args json.RawMessage
 	// Collect the target symbols.
 	var targets []string
 	for _, fp := range params.Files {
-		for _, s := range h.store.GetSymbolsByFile(params.RepositoryID, fp) {
+		for _, s := range h.store.GetSymbolsByFile(context.Background(), params.RepositoryID, fp) {
 			targets = append(targets, s.ID)
 		}
 	}
@@ -392,14 +392,14 @@ func (h *mcpHandler) callImpactSummary(session *mcpSession, args json.RawMessage
 			continue
 		}
 		seen[id] = true
-		sym := h.store.GetSymbol(id)
+		sym := h.store.GetSymbol(context.Background(), id)
 		if sym == nil {
 			continue
 		}
 
 		// Callers (1 hop for simplicity; the tool exposes the cap).
-		callerIDs := h.store.GetCallers(id)
-		byID := h.store.GetSymbolsByIDs(callerIDs)
+		callerIDs := h.store.GetCallers(context.Background(), id)
+		byID := h.store.GetSymbolsByIDs(context.Background(), callerIDs)
 		var callers []map[string]interface{}
 		for _, c := range byID {
 			if c == nil {
@@ -416,7 +416,7 @@ func (h *mcpHandler) callImpactSummary(session *mcpSession, args json.RawMessage
 		// the same approach as get_tests_for_symbol's text-reference
 		// source).
 		testMatches := 0
-		allSyms, _ := h.store.GetSymbols(params.RepositoryID, nil, nil, 0, 0)
+		allSyms, _ := h.store.GetSymbols(context.Background(), params.RepositoryID, nil, nil, 0, 0)
 		for _, cand := range allSyms {
 			if cand.IsTest && nameReferences(cand.Name, sym.Name) {
 				testMatches++
@@ -425,11 +425,11 @@ func (h *mcpHandler) callImpactSummary(session *mcpSession, args json.RawMessage
 
 		// Linked requirements.
 		var reqs []map[string]interface{}
-		for _, link := range h.store.GetLinksForSymbol(id, false) {
+		for _, link := range h.store.GetLinksForSymbol(context.Background(), id, false) {
 			if link.RequirementID == "" {
 				continue
 			}
-			if req := h.store.GetRequirement(link.RequirementID); req != nil {
+			if req := h.store.GetRequirement(context.Background(), link.RequirementID); req != nil {
 				reqs = append(reqs, map[string]interface{}{
 					"id":          req.ID,
 					"external_id": req.ExternalID,
@@ -517,7 +517,7 @@ func (h *mcpHandler) callOnboardNewContributor(session *mcpSession, args json.Ra
 	var entriesPayload entryPointsResult
 	_ = json.Unmarshal(entryBytes, &entriesPayload)
 
-	repo := h.store.GetRepository(params.RepositoryID)
+	repo := h.store.GetRepository(context.Background(), params.RepositoryID)
 	gitRoot := ""
 	if repo != nil {
 		gitRoot = repo.ClonePath

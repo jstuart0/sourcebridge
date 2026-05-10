@@ -39,7 +39,7 @@ func (s *Server) handleAdminStatus(w http.ResponseWriter, r *http.Request) {
 		"configured": s.knowledgeStore != nil,
 	}
 	if s.knowledgeStore != nil {
-		knowledgeStats["artifacts"] = s.collectKnowledgeStats(s.getStore(r))
+		knowledgeStats["artifacts"] = s.collectKnowledgeStats(r.Context(), s.getStore(r))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

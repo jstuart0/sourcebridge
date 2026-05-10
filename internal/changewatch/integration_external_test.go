@@ -67,7 +67,7 @@ func TestIntegration_ExternalEditFlowsToFreshness(t *testing.T) {
 	}
 
 	store := graphstore.NewStore()
-	repo, err := store.CreateRepository("integration-repo", repoPath)
+	repo, err := store.CreateRepository(t.Context(), "integration-repo", repoPath)
 	if err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestIntegration_ExternalEditFlowsToFreshness(t *testing.T) {
 			{Path: "pkg0/file2.go", Language: "go", LineCount: 10, ContentHash: "h2"},
 		},
 	}
-	if _, err := store.ReplaceIndexResult(repo.ID, prev); err != nil {
+	if _, err := store.ReplaceIndexResult(t.Context(), repo.ID, prev); err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 
@@ -200,7 +200,7 @@ func TestIntegration_RecordChange_FlowsToFreshness(t *testing.T) {
 	}
 
 	store := graphstore.NewStore()
-	repo, err := store.CreateRepository("rc-repo", repoPath)
+	repo, err := store.CreateRepository(t.Context(), "rc-repo", repoPath)
 	if err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestIntegration_RecordChange_FlowsToFreshness(t *testing.T) {
 			{Path: "pkg0/file1.go", Language: "go", LineCount: 10, ContentHash: "h1"},
 		},
 	}
-	if _, err := store.ReplaceIndexResult(repo.ID, prev); err != nil {
+	if _, err := store.ReplaceIndexResult(t.Context(), repo.ID, prev); err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 

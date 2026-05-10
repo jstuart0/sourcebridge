@@ -141,7 +141,7 @@ func (r *mutationResolver) enqueueStaleArtifactRefresh(
 	// Load + filter candidates.
 	candidates := make([]*knowledgepkg.Artifact, 0, len(artifactIDs))
 	for _, id := range artifactIDs {
-		a := r.KnowledgeStore.GetKnowledgeArtifact(id)
+		a := r.KnowledgeStore.GetKnowledgeArtifact(context.Background(), id)
 		if a == nil {
 			continue
 		}
@@ -287,7 +287,7 @@ func splitForUnderstandingGate(
 		key := scopeKey{st: string(scope.ScopeType), sp: scope.ScopePath}
 		u, cached := cache[key]
 		if !cached {
-			u = store.GetRepositoryUnderstanding(repoID, scope)
+			u = store.GetRepositoryUnderstanding(context.Background(), repoID, scope)
 			cache[key] = u
 		}
 		if understandingIsReadyForArtifact(u, a) {

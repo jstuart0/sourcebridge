@@ -39,17 +39,17 @@ func TestSurrealStoreHeartbeatAdvancesUpdatedAt(t *testing.T) {
 	s := startSurrealContainer(t)
 	store := NewSurrealStore(s)
 
-	job, err := store.Create(newTestJob("tk-heartbeat-1", "repo-hb-1"))
+	job, err := store.Create(t.Context(), newTestJob("tk-heartbeat-1", "repo-hb-1"))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	// Advance to "generating" so the Heartbeat WHERE clause matches.
-	if err := store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
+	if err := store.SetStatus(t.Context(), job.ID, llm.StatusGenerating); err != nil {
 		t.Fatalf("SetStatus generating: %v", err)
 	}
 
-	before := store.GetByID(job.ID)
+	before := store.GetByID(t.Context(), job.ID)
 	if before == nil {
 		t.Fatal("GetByID before heartbeat returned nil")
 	}
@@ -57,11 +57,11 @@ func TestSurrealStoreHeartbeatAdvancesUpdatedAt(t *testing.T) {
 	// Sleep to ensure time::now() produces a strictly later timestamp.
 	time.Sleep(110 * time.Millisecond)
 
-	if err := store.Heartbeat(job.ID); err != nil {
+	if err := store.Heartbeat(t.Context(), job.ID); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
 
-	after := store.GetByID(job.ID)
+	after := store.GetByID(t.Context(), job.ID)
 	if after == nil {
 		t.Fatal("GetByID after heartbeat returned nil")
 	}
@@ -79,27 +79,27 @@ func TestSurrealStoreHeartbeatIsNoopOnTerminalJob(t *testing.T) {
 	s := startSurrealContainer(t)
 	store := NewSurrealStore(s)
 
-	job, err := store.Create(newTestJob("tk-heartbeat-2", "repo-hb-2"))
+	job, err := store.Create(t.Context(), newTestJob("tk-heartbeat-2", "repo-hb-2"))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := store.SetError(job.ID, "test_error", "deliberately failed"); err != nil {
+	if err := store.SetError(t.Context(), job.ID, "test_error", "deliberately failed"); err != nil {
 		t.Fatalf("SetError: %v", err)
 	}
 
-	before := store.GetByID(job.ID)
+	before := store.GetByID(t.Context(), job.ID)
 	if before == nil {
 		t.Fatal("GetByID before heartbeat returned nil")
 	}
 
 	time.Sleep(110 * time.Millisecond)
 
-	if err := store.Heartbeat(job.ID); err != nil {
+	if err := store.Heartbeat(t.Context(), job.ID); err != nil {
 		t.Fatalf("Heartbeat (terminal): unexpected error: %v", err)
 	}
 
-	after := store.GetByID(job.ID)
+	after := store.GetByID(t.Context(), job.ID)
 	if after == nil {
 		t.Fatal("GetByID after heartbeat returned nil")
 	}
@@ -207,7 +207,7 @@ func TestSurrealStoreLLMProviderRoundTrip(t *testing.T) {
 
 	job := newTestJob("tk-llmprovider-1", "repo-llmprov-1")
 	job.LLMProvider = "anthropic"
-	created, err := store.Create(job)
+	created, err := store.Create(t.Context(), job)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -215,23 +215,23 @@ func TestSurrealStoreLLMProviderRoundTrip(t *testing.T) {
 		t.Fatalf("Create round-trip llm_provider: got %q, want anthropic", created.LLMProvider)
 	}
 
-	got := store.GetByID(job.ID)
+	got := store.GetByID(t.Context(), job.ID)
 	if got == nil || got.LLMProvider != "anthropic" {
 		t.Fatalf("GetByID llm_provider: got %+v", got)
 	}
 
 	// Update path — change the provider and confirm it persists.
 	got.LLMProvider = "openai"
-	if err := store.Update(got); err != nil {
+	if err := store.Update(t.Context(), got); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	got2 := store.GetByID(job.ID)
+	got2 := store.GetByID(t.Context(), job.ID)
 	if got2 == nil || got2.LLMProvider != "openai" {
 		t.Fatalf("Update round-trip llm_provider: got %+v", got2)
 	}
 
 	// Append a log line and verify llm_provider is written and read back.
-	entry, err := store.AppendLog(&llm.JobLogEntry{
+	entry, err := store.AppendLog(t.Context(), &llm.JobLogEntry{
 		JobID:       job.ID,
 		Subsystem:   llm.SubsystemKnowledge,
 		JobType:     "test_job",
@@ -247,7 +247,7 @@ func TestSurrealStoreLLMProviderRoundTrip(t *testing.T) {
 	if entry == nil || entry.LLMProvider != "openai" {
 		t.Fatalf("AppendLog llm_provider: got %+v", entry)
 	}
-	logs := store.ListLogs(job.ID, llm.JobLogFilter{})
+	logs := store.ListLogs(t.Context(), job.ID, llm.JobLogFilter{})
 	if len(logs) != 1 || logs[0].LLMProvider != "openai" {
 		t.Fatalf("ListLogs llm_provider round-trip failed: %+v", logs)
 	}
@@ -269,7 +269,7 @@ func TestSurrealStoreProcessIDRoundTrip(t *testing.T) {
 	job := newTestJob("tk-processid-1", "repo-pid-1")
 	job.ProcessID = "test-process-uuid-abc123"
 
-	created, err := store.Create(job)
+	created, err := store.Create(t.Context(), job)
 	if err != nil {
 		t.Fatalf("Create with process_id: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestSurrealStoreProcessIDRoundTrip(t *testing.T) {
 	}
 
 	// (b) GetByID must return the job with ProcessID populated.
-	got := store.GetByID(job.ID)
+	got := store.GetByID(t.Context(), job.ID)
 	if got == nil {
 		t.Fatal("GetByID returned nil")
 	}
@@ -290,7 +290,7 @@ func TestSurrealStoreProcessIDRoundTrip(t *testing.T) {
 	// This is the critical assertion: reconcileZombieJobs reads via ListActive.
 	// If the SELECT in ListActive doesn't include process_id (or the DTO mapping
 	// drops it), reconciliation silently degrades to pure heartbeat-freshness.
-	active := store.ListActive(llm.ListFilter{})
+	active := store.ListActive(t.Context(), llm.ListFilter{})
 	var found *llm.Job
 	for _, j := range active {
 		if j.ID == job.ID {
@@ -311,10 +311,10 @@ func TestSurrealStoreProcessIDRoundTrip(t *testing.T) {
 	// the next reconciliation pass then treats the row as a pre-migration legacy
 	// job and may fail it spuriously.
 	got.Progress = 42 // arbitrary mutation to confirm the UPDATE fires
-	if err := store.Update(got); err != nil {
+	if err := store.Update(t.Context(), got); err != nil {
 		t.Fatalf("Update after Create: %v", err)
 	}
-	afterUpdate := store.GetByID(got.ID)
+	afterUpdate := store.GetByID(t.Context(), got.ID)
 	if afterUpdate == nil {
 		t.Fatal("GetByID after Update returned nil")
 	}
@@ -331,7 +331,7 @@ func TestSurrealStoreProcessIDRoundTrip(t *testing.T) {
 	jobNoID := newTestJob("tk-processid-2", "repo-pid-2")
 	// ProcessID intentionally left empty.
 
-	createdNoID, err := store.Create(jobNoID)
+	createdNoID, err := store.Create(t.Context(), jobNoID)
 	if err != nil {
 		t.Fatalf("Create without process_id: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestSurrealStoreProcessIDRoundTrip(t *testing.T) {
 		t.Fatalf("Create round-trip empty process_id: got %q, want empty string", createdNoID.ProcessID)
 	}
 
-	gotNoID := store.GetByID(jobNoID.ID)
+	gotNoID := store.GetByID(t.Context(), jobNoID.ID)
 	if gotNoID == nil {
 		t.Fatal("GetByID (no process_id) returned nil")
 	}
@@ -350,7 +350,7 @@ func TestSurrealStoreProcessIDRoundTrip(t *testing.T) {
 	// (e) ListActive must also return legacy/pre-migration rows (no process_id)
 	// with an empty ProcessID — not a default or sentinel value. This is the
 	// contract that makes startup reconciliation safe against old rows.
-	listedForNoID := store.ListActive(llm.ListFilter{})
+	listedForNoID := store.ListActive(t.Context(), llm.ListFilter{})
 	var foundNoID *llm.Job
 	for _, j := range listedForNoID {
 		if j.ID == jobNoID.ID {

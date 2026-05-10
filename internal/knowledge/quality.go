@@ -4,6 +4,7 @@
 package knowledge
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -41,7 +42,7 @@ type scopeAccumulator struct {
 }
 
 // CollectQualityMetrics summarizes knowledge quality for a repository.
-func CollectQualityMetrics(kstore KnowledgeStore, gstore graphstore.GraphStore, repoID string) QualityMetrics {
+func CollectQualityMetrics(ctx context.Context, kstore KnowledgeStore, gstore graphstore.GraphStore, repoID string) QualityMetrics {
 	metrics := QualityMetrics{
 		RepositoryID:      repoID,
 		EvidenceSourceMix: make(map[string]int),
@@ -63,7 +64,7 @@ func CollectQualityMetrics(kstore KnowledgeStore, gstore graphstore.GraphStore, 
 	readyModuleScopes := map[string]bool{}
 	repositoryReady := false
 
-	for _, artifact := range kstore.GetKnowledgeArtifacts(repoID) {
+	for _, artifact := range kstore.GetKnowledgeArtifacts(ctx, repoID) {
 		scopeType := string(ScopeRepository)
 		scopeKey := "repository:"
 		if artifact.Scope != nil {
@@ -101,7 +102,7 @@ func CollectQualityMetrics(kstore KnowledgeStore, gstore graphstore.GraphStore, 
 
 		sections := artifact.Sections
 		if len(sections) == 0 {
-			sections = kstore.GetKnowledgeSections(artifact.ID)
+			sections = kstore.GetKnowledgeSections(ctx, artifact.ID)
 		}
 		artifactWords := 0
 		for _, section := range sections {
@@ -112,7 +113,7 @@ func CollectQualityMetrics(kstore KnowledgeStore, gstore graphstore.GraphStore, 
 
 			evidence := section.Evidence
 			if len(evidence) == 0 {
-				evidence = kstore.GetKnowledgeEvidence(section.ID)
+				evidence = kstore.GetKnowledgeEvidence(ctx, section.ID)
 			}
 			acc.evidenceCount += len(evidence)
 			for _, ev := range evidence {
@@ -122,9 +123,9 @@ func CollectQualityMetrics(kstore KnowledgeStore, gstore graphstore.GraphStore, 
 		acc.artifactWordTotal += artifactWords
 	}
 
-	totalFiles := len(gstore.GetFiles(repoID))
-	totalSymbols, _ := gstore.GetSymbols(repoID, nil, nil, 0, 0)
-	totalModules := len(gstore.GetModules(repoID))
+	totalFiles := len(gstore.GetFiles(ctx, repoID))
+	totalSymbols, _ := gstore.GetSymbols(ctx, repoID, nil, nil, 0, 0)
+	totalModules := len(gstore.GetModules(ctx, repoID))
 
 	for scopeType, acc := range accs {
 		if acc == nil {

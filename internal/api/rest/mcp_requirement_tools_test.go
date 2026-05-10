@@ -100,7 +100,7 @@ func seedRequirementLinkingFixture(t *testing.T, h *mcpTestHarness) RequirementL
 			},
 		},
 	}
-	repoA, err := h.store.ReplaceIndexResult(h.repoID, resultA)
+	repoA, err := h.store.ReplaceIndexResult(t.Context(), h.repoID, resultA)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult repo A: %v", err)
 	}
@@ -114,19 +114,19 @@ func seedRequirementLinkingFixture(t *testing.T, h *mcpTestHarness) RequirementL
 	sym5ID := lookupSymID(t, h, repoA.ID, "internal.go", "internalHelper")
 
 	// Store requirements.
-	h.store.StoreRequirement(repoA.ID, &graphstore.StoredRequirement{
+	h.store.StoreRequirement(t.Context(), repoA.ID, &graphstore.StoredRequirement{
 		ID:         "req-1",
 		ExternalID: "TEST-1",
 		Title:      "Create resource endpoint",
 		Priority:   "high",
 	})
-	h.store.StoreRequirement(repoA.ID, &graphstore.StoredRequirement{
+	h.store.StoreRequirement(t.Context(), repoA.ID, &graphstore.StoredRequirement{
 		ID:         "req-2",
 		ExternalID: "TEST-2",
 		Title:      "Parse resource IDs",
 		Priority:   "medium",
 	})
-	h.store.StoreRequirement(repoA.ID, &graphstore.StoredRequirement{
+	h.store.StoreRequirement(t.Context(), repoA.ID, &graphstore.StoredRequirement{
 		ID:         "req-3",
 		ExternalID: "TEST-3",
 		Title:      "Uncovered requirement",
@@ -134,28 +134,28 @@ func seedRequirementLinkingFixture(t *testing.T, h *mcpTestHarness) RequirementL
 	})
 
 	// Resolve stored requirement IDs (store may re-key).
-	req1 := h.store.GetRequirementByExternalID(repoA.ID, "TEST-1")
-	req2 := h.store.GetRequirementByExternalID(repoA.ID, "TEST-2")
-	req3 := h.store.GetRequirementByExternalID(repoA.ID, "TEST-3")
+	req1 := h.store.GetRequirementByExternalID(t.Context(), repoA.ID, "TEST-1")
+	req2 := h.store.GetRequirementByExternalID(t.Context(), repoA.ID, "TEST-2")
+	req3 := h.store.GetRequirementByExternalID(t.Context(), repoA.ID, "TEST-3")
 	if req1 == nil || req2 == nil || req3 == nil {
 		t.Fatal("failed to retrieve seeded requirements")
 	}
 
 	// Links: Req1 → Sym1 (confidence 0.9), Req1 → Sym2 (confidence 0.7),
 	//        Req2 → Sym3 (confidence 0.85).
-	h.store.StoreLink(repoA.ID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), repoA.ID, &graphstore.StoredLink{
 		RequirementID: req1.ID,
 		SymbolID:      sym1ID,
 		Confidence:    0.9,
 		Source:        "semantic",
 	})
-	h.store.StoreLink(repoA.ID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), repoA.ID, &graphstore.StoredLink{
 		RequirementID: req1.ID,
 		SymbolID:      sym2ID,
 		Confidence:    0.7,
 		Source:        "semantic",
 	})
-	h.store.StoreLink(repoA.ID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), repoA.ID, &graphstore.StoredLink{
 		RequirementID: req2.ID,
 		SymbolID:      sym3ID,
 		Confidence:    0.85,
@@ -179,7 +179,7 @@ func seedRequirementLinkingFixture(t *testing.T, h *mcpTestHarness) RequirementL
 			},
 		},
 	}
-	repoB, err := h.store.StoreIndexResult(resultB)
+	repoB, err := h.store.StoreIndexResult(t.Context(), resultB)
 	if err != nil {
 		t.Fatalf("StoreIndexResult repo B: %v", err)
 	}
@@ -187,7 +187,7 @@ func seedRequirementLinkingFixture(t *testing.T, h *mcpTestHarness) RequirementL
 
 	// Cross-repo link: Req1 (from repo A) → Sym6 (from repo B). This is
 	// the edge that the handler must not surface when queried via repo A.
-	h.store.StoreLink(repoB.ID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), repoB.ID, &graphstore.StoredLink{
 		RequirementID: req1.ID,
 		SymbolID:      sym6ID,
 		Confidence:    0.6,
@@ -212,7 +212,7 @@ func seedRequirementLinkingFixture(t *testing.T, h *mcpTestHarness) RequirementL
 // lookupSymID resolves a symbol ID by file path + name within a repository.
 func lookupSymID(t *testing.T, h *mcpTestHarness, repoID, filePath, name string) string {
 	t.Helper()
-	for _, s := range h.store.GetSymbolsByFile(repoID, filePath) {
+	for _, s := range h.store.GetSymbolsByFile(t.Context(), repoID, filePath) {
 		if s.Name == name {
 			return s.ID
 		}
@@ -293,7 +293,7 @@ func TestMCP_GetRequirementsForSymbol_MultipleLinks(t *testing.T) {
 
 	// Re-seed: link Sym1 to both Req1 AND Req2.
 	fix := seedRequirementLinkingFixture(t, h)
-	h.store.StoreLink(fix.RepoAID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), fix.RepoAID, &graphstore.StoredLink{
 		RequirementID: fix.Req2ID,
 		SymbolID:      fix.Sym1ID,
 		Confidence:    0.5,
@@ -394,19 +394,19 @@ func TestMCP_GetRequirementsForSymbol_CrossRepoReqLeakageBlocked(t *testing.T) {
 	// The fixture already has a cross-repo link: Sym6 (repo B) → Req1 (repo A).
 	// For P1 #3 we need the INVERSE: a repo-A symbol linked to a repo-B requirement.
 	// Seed a "foreign" requirement directly into repo B, then link Sym1 (repo A) to it.
-	h.store.StoreRequirement(fix.RepoBID, &graphstore.StoredRequirement{
+	h.store.StoreRequirement(t.Context(), fix.RepoBID, &graphstore.StoredRequirement{
 		ID:         "foreign-req-1",
 		ExternalID: "FOREIGN-1",
 		Title:      "Foreign repo B requirement — must not leak",
 		Priority:   "high",
 	})
-	foreignReq := h.store.GetRequirementByExternalID(fix.RepoBID, "FOREIGN-1")
+	foreignReq := h.store.GetRequirementByExternalID(t.Context(), fix.RepoBID, "FOREIGN-1")
 	if foreignReq == nil {
 		t.Fatal("failed to retrieve foreign requirement from repo B")
 	}
 
 	// Store a link from repo-A's Sym1 to the foreign (repo-B) requirement.
-	h.store.StoreLink(fix.RepoAID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), fix.RepoAID, &graphstore.StoredLink{
 		RequirementID: foreignReq.ID,
 		SymbolID:      fix.Sym1ID,
 		Confidence:    0.9,
@@ -690,13 +690,13 @@ func TestMCP_GetRequirementsForSymbol_Pagination(t *testing.T) {
 	sess := h.createSession()
 
 	// Link Sym3 to all 3 requirements so we have 3 total links.
-	h.store.StoreLink(fix.RepoAID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), fix.RepoAID, &graphstore.StoredLink{
 		RequirementID: fix.Req1ID,
 		SymbolID:      fix.Sym3ID,
 		Confidence:    0.8,
 		Source:        "semantic",
 	})
-	h.store.StoreLink(fix.RepoAID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), fix.RepoAID, &graphstore.StoredLink{
 		RequirementID: fix.Req3ID,
 		SymbolID:      fix.Sym3ID,
 		Confidence:    0.6,
@@ -749,7 +749,7 @@ func TestMCP_GetSymbolsForRequirement_Pagination(t *testing.T) {
 
 	// Req1 has Sym1 and Sym2 from the fixture (2 links).
 	// Add Sym3 to bring the total to 3.
-	h.store.StoreLink(fix.RepoAID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), fix.RepoAID, &graphstore.StoredLink{
 		RequirementID: fix.Req1ID,
 		SymbolID:      fix.Sym3ID,
 		Confidence:    0.55,
@@ -839,13 +839,13 @@ func TestMCP_GetOrphanSymbols_NoOrphans(t *testing.T) {
 	sess := h.createSession()
 
 	// Link the two remaining orphan symbols (Sym4 and Sym5) so none are orphans.
-	h.store.StoreLink(fix.RepoAID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), fix.RepoAID, &graphstore.StoredLink{
 		RequirementID: fix.Req1ID,
 		SymbolID:      fix.Sym4ID,
 		Confidence:    0.5,
 		Source:        "manual",
 	})
-	h.store.StoreLink(fix.RepoAID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), fix.RepoAID, &graphstore.StoredLink{
 		RequirementID: fix.Req2ID,
 		SymbolID:      fix.Sym5ID,
 		Confidence:    0.5,
@@ -895,7 +895,7 @@ func TestMCP_GetOrphanSymbols_AllOrphans(t *testing.T) {
 			},
 		},
 	}
-	repo, err := h.store.StoreIndexResult(result2)
+	repo, err := h.store.StoreIndexResult(t.Context(), result2)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -946,7 +946,7 @@ func TestMCP_GetOrphanSymbols_Pagination(t *testing.T) {
 			{Path: "orphans.go", Language: "go", Symbols: syms},
 		},
 	}
-	repo, err := h.store.StoreIndexResult(result)
+	repo, err := h.store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -1015,7 +1015,7 @@ func TestMCP_GetOrphanSymbols_LimitClamp(t *testing.T) {
 			{Path: "clamp.go", Language: "go", Symbols: syms},
 		},
 	}
-	repo, err := h.store.StoreIndexResult(result)
+	repo, err := h.store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -1091,7 +1091,7 @@ func TestMCP_GetUncoveredRequirements_NoUncovered(t *testing.T) {
 	sess := h.createSession()
 
 	// Link Req3 (the previously uncovered requirement) to Sym4.
-	h.store.StoreLink(fix.RepoAID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), fix.RepoAID, &graphstore.StoredLink{
 		RequirementID: fix.Req3ID,
 		SymbolID:      fix.Sym4ID,
 		Confidence:    0.5,
@@ -1138,8 +1138,8 @@ type truncatingGraphStore struct {
 	graphstore.GraphStore
 }
 
-func (s truncatingGraphStore) GetRequirements(repoID string, limit, offset int) ([]*graphstore.StoredRequirement, int) {
-	reqs, total := s.GraphStore.GetRequirements(repoID, limit, offset)
+func (s truncatingGraphStore) GetRequirements(ctx context.Context, repoID string, limit, offset int) ([]*graphstore.StoredRequirement, int) {
+	reqs, total := s.GraphStore.GetRequirements(ctx, repoID, limit, offset)
 	// Simulate a store that has one more requirement than the scan cap when
 	// the caller asks for exactly maxUncoveredReqScan rows at offset 0.
 	if limit == maxUncoveredReqScan && offset == 0 {
@@ -1153,14 +1153,14 @@ func TestMCP_GetUncoveredRequirements_ScanTruncated(t *testing.T) {
 
 	// Seed a repo with a handful of requirements (no links — they will all be
 	// "uncovered" in the filtered result, but that's irrelevant to this test).
-	repo, err := realStore.StoreIndexResult(&indexer.IndexResult{
+	repo, err := realStore.StoreIndexResult(t.Context(), &indexer.IndexResult{
 		RepoName: "truncated-req-repo",
 		RepoPath: "/tmp/truncated-req-repo",
 	})
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
-	realStore.StoreRequirement(repo.ID, &graphstore.StoredRequirement{
+	realStore.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ID:    "tr-req-1",
 		Title: "Truncation test requirement",
 	})
@@ -1258,7 +1258,7 @@ func seedChangedReqsFixture(t *testing.T, h *mcpTestHarness) changedReqsFixture 
 			},
 		},
 	}
-	repo, err := h.store.ReplaceIndexResult(h.repoID, result)
+	repo, err := h.store.ReplaceIndexResult(t.Context(), h.repoID, result)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
@@ -1269,36 +1269,36 @@ func seedChangedReqsFixture(t *testing.T, h *mcpTestHarness) changedReqsFixture 
 	parseIDSymID := lookupSymID(t, h, repo.ID, "utils.go", "ParseID")
 	formatOutputID := lookupSymID(t, h, repo.ID, "utils.go", "FormatOutput")
 
-	h.store.StoreRequirement(repo.ID, &graphstore.StoredRequirement{
+	h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ID: "cr-req-1", ExternalID: "CR-1", Title: "Create endpoint", Priority: "high",
 	})
-	h.store.StoreRequirement(repo.ID, &graphstore.StoredRequirement{
+	h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ID: "cr-req-2", ExternalID: "CR-2", Title: "Delete and parse", Priority: "medium",
 	})
-	h.store.StoreRequirement(repo.ID, &graphstore.StoredRequirement{
+	h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ID: "cr-req-3", ExternalID: "CR-3", Title: "Uncovered req", Priority: "low",
 	})
 
-	req1 := h.store.GetRequirementByExternalID(repo.ID, "CR-1")
-	req2 := h.store.GetRequirementByExternalID(repo.ID, "CR-2")
-	req3 := h.store.GetRequirementByExternalID(repo.ID, "CR-3")
+	req1 := h.store.GetRequirementByExternalID(t.Context(), repo.ID, "CR-1")
+	req2 := h.store.GetRequirementByExternalID(t.Context(), repo.ID, "CR-2")
+	req3 := h.store.GetRequirementByExternalID(t.Context(), repo.ID, "CR-3")
 	if req1 == nil || req2 == nil || req3 == nil {
 		t.Fatal("failed to retrieve seeded requirements")
 	}
 
 	// HandleCreate → Req1
-	h.store.StoreLink(repo.ID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), repo.ID, &graphstore.StoredLink{
 		RequirementID: req1.ID, SymbolID: handleCreateID, Confidence: 0.9, Source: "semantic",
 	})
 	// HandleDelete → Req1 AND Req2
-	h.store.StoreLink(repo.ID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), repo.ID, &graphstore.StoredLink{
 		RequirementID: req1.ID, SymbolID: handleDeleteID, Confidence: 0.7, Source: "semantic",
 	})
-	h.store.StoreLink(repo.ID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), repo.ID, &graphstore.StoredLink{
 		RequirementID: req2.ID, SymbolID: handleDeleteID, Confidence: 0.8, Source: "comment",
 	})
 	// ParseID → Req2
-	h.store.StoreLink(repo.ID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), repo.ID, &graphstore.StoredLink{
 		RequirementID: req2.ID, SymbolID: parseIDSymID, Confidence: 0.85, Source: "comment",
 	})
 	// FormatOutput — no links (unlinked touched symbol case)
@@ -1419,7 +1419,7 @@ func TestMCP_GetChangedRequirements_HappyPath_CommitRange(t *testing.T) {
 	fix := seedChangedReqsFixture(t, h)
 
 	// Point the stored repo's clone path to our real git checkout.
-	h.store.UpdateRepositoryMeta(fix.RepoID, graphstore.RepositoryMeta{
+	h.store.UpdateRepositoryMeta(t.Context(), fix.RepoID, graphstore.RepositoryMeta{
 		ClonePath: repoDir,
 	})
 
@@ -1512,7 +1512,7 @@ func TestMCP_GetChangedRequirements_AllUnlinked(t *testing.T) {
 			},
 		},
 	}
-	repo, err := h.store.StoreIndexResult(unlinkedOnlyResult)
+	repo, err := h.store.StoreIndexResult(t.Context(), unlinkedOnlyResult)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}

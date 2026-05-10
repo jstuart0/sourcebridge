@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"net/http"
 	"sort"
 	"time"
@@ -48,16 +49,16 @@ type repoKnowledge struct {
 	Quality   knowledge.QualityMetrics   `json:"quality"`
 }
 
-func (s *Server) collectKnowledgeStats(store graphstore.GraphStore) knowledgeStats {
+func (s *Server) collectKnowledgeStats(ctx context.Context, store graphstore.GraphStore) knowledgeStats {
 	stats := knowledgeStats{
 		ByType:      make(map[string]int),
 		ByErrorCode: make(map[string]int),
 	}
 
 	// Iterate all repositories to collect knowledge artifacts.
-	repos := store.ListRepositories()
+	repos := store.ListRepositories(ctx)
 	for _, repo := range repos {
-		artifacts := s.knowledgeStore.GetKnowledgeArtifacts(repo.ID)
+		artifacts := s.knowledgeStore.GetKnowledgeArtifacts(ctx, repo.ID)
 		for _, a := range artifacts {
 			stats.Total++
 			stats.ByType[string(a.Type)]++
@@ -100,20 +101,20 @@ func (s *Server) handleAdminKnowledgeStatus(w http.ResponseWriter, r *http.Reque
 	}
 
 	store := s.getStore(r)
-	stats := s.collectKnowledgeStats(store)
+	stats := s.collectKnowledgeStats(r.Context(), store)
 
 	var repoDetails []repoKnowledge
 
-	repos := store.ListRepositories()
+	repos := store.ListRepositories(r.Context())
 	for _, repo := range repos {
-		artifacts := s.knowledgeStore.GetKnowledgeArtifacts(repo.ID)
+		artifacts := s.knowledgeStore.GetKnowledgeArtifacts(r.Context(), repo.ID)
 		if len(artifacts) == 0 {
 			continue
 		}
 		rk := repoKnowledge{
 			RepoID:   repo.ID,
 			RepoName: repo.Name,
-			Quality:  knowledge.CollectQualityMetrics(s.knowledgeStore, store, repo.ID),
+			Quality:  knowledge.CollectQualityMetrics(r.Context(), s.knowledgeStore, store, repo.ID),
 		}
 		for _, a := range artifacts {
 			entry := knowledgeArtifactSummary{

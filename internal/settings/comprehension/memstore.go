@@ -4,6 +4,7 @@
 package comprehension
 
 import (
+	"context"
 	"fmt"
 	"sync"
 )
@@ -29,7 +30,7 @@ func settingsKey(scope Scope) string {
 	return fmt.Sprintf("%s:%s", scope.Type, scope.Key)
 }
 
-func (m *MemStore) GetSettings(scope Scope) (*Settings, error) {
+func (m *MemStore) GetSettings(_ context.Context, scope Scope) (*Settings, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	s, ok := m.settings[settingsKey(scope)]
@@ -40,7 +41,7 @@ func (m *MemStore) GetSettings(scope Scope) (*Settings, error) {
 	return &cp, nil
 }
 
-func (m *MemStore) SetSettings(s *Settings) error {
+func (m *MemStore) SetSettings(_ context.Context, s *Settings) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := settingsKey(Scope{Type: s.ScopeType, Key: s.ScopeKey})
@@ -48,14 +49,14 @@ func (m *MemStore) SetSettings(s *Settings) error {
 	return nil
 }
 
-func (m *MemStore) DeleteSettings(scope Scope) error {
+func (m *MemStore) DeleteSettings(_ context.Context, scope Scope) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.settings, settingsKey(scope))
 	return nil
 }
 
-func (m *MemStore) ListSettings() ([]Settings, error) {
+func (m *MemStore) ListSettings(_ context.Context) ([]Settings, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	result := make([]Settings, 0, len(m.settings))
@@ -65,7 +66,7 @@ func (m *MemStore) ListSettings() ([]Settings, error) {
 	return result, nil
 }
 
-func (m *MemStore) GetModelCapabilities(modelID string) (*ModelCapabilities, error) {
+func (m *MemStore) GetModelCapabilities(_ context.Context, modelID string) (*ModelCapabilities, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	mc, ok := m.capabilities[modelID]
@@ -76,7 +77,7 @@ func (m *MemStore) GetModelCapabilities(modelID string) (*ModelCapabilities, err
 	return &cp, nil
 }
 
-func (m *MemStore) SetModelCapabilities(mc *ModelCapabilities) error {
+func (m *MemStore) SetModelCapabilities(_ context.Context, mc *ModelCapabilities) error {
 	if !mc.QualityGateTier.IsValid() {
 		return ErrInvalidQualityGateTier
 	}
@@ -86,14 +87,14 @@ func (m *MemStore) SetModelCapabilities(mc *ModelCapabilities) error {
 	return nil
 }
 
-func (m *MemStore) DeleteModelCapabilities(modelID string) error {
+func (m *MemStore) DeleteModelCapabilities(_ context.Context, modelID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.capabilities, modelID)
 	return nil
 }
 
-func (m *MemStore) ListModelCapabilities() ([]ModelCapabilities, error) {
+func (m *MemStore) ListModelCapabilities(_ context.Context) ([]ModelCapabilities, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	result := make([]ModelCapabilities, 0, len(m.capabilities))
@@ -105,7 +106,7 @@ func (m *MemStore) ListModelCapabilities() ([]ModelCapabilities, error) {
 
 // --- SummaryNodeStore ---
 
-func (m *MemStore) GetSummaryNodes(corpusID string) ([]SummaryNode, error) {
+func (m *MemStore) GetSummaryNodes(_ context.Context, corpusID string) ([]SummaryNode, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	nodes := m.summaryNodes[corpusID]
@@ -114,7 +115,7 @@ func (m *MemStore) GetSummaryNodes(corpusID string) ([]SummaryNode, error) {
 	return cp, nil
 }
 
-func (m *MemStore) GetSummaryNode(corpusID, unitID string) (*SummaryNode, error) {
+func (m *MemStore) GetSummaryNode(_ context.Context, corpusID, unitID string) (*SummaryNode, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, n := range m.summaryNodes[corpusID] {
@@ -126,7 +127,7 @@ func (m *MemStore) GetSummaryNode(corpusID, unitID string) (*SummaryNode, error)
 	return nil, nil
 }
 
-func (m *MemStore) StoreSummaryNodes(nodes []SummaryNode) error {
+func (m *MemStore) StoreSummaryNodes(_ context.Context, nodes []SummaryNode) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, n := range nodes {
@@ -146,7 +147,7 @@ func (m *MemStore) StoreSummaryNodes(nodes []SummaryNode) error {
 	return nil
 }
 
-func (m *MemStore) InvalidateSummaryNodes(corpusID string) error {
+func (m *MemStore) InvalidateSummaryNodes(_ context.Context, corpusID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.summaryNodes, corpusID)

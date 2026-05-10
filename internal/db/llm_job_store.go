@@ -4,6 +4,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -223,7 +224,7 @@ func jobParams(job *llm.Job) map[string]any {
 
 // Create inserts a new job record. The job must have a non-empty ID; the
 // orchestrator generates one before calling Create.
-func (s *SurrealStore) Create(job *llm.Job) (*llm.Job, error) {
+func (s *SurrealStore) Create(_ context.Context, job *llm.Job) (*llm.Job, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -295,13 +296,13 @@ func (s *SurrealStore) Create(job *llm.Job) (*llm.Job, error) {
 	if _, err := surrealdb.Query[interface{}](ctx(), db, sql, vars); err != nil {
 		return nil, fmt.Errorf("create llm job: %w", err)
 	}
-	return s.GetByID(job.ID), nil
+	return s.GetByID(ctx(), job.ID), nil
 }
 
 // Update replaces the stored record. Callers should fetch, mutate, and
 // write back the full job — the SetFoo helpers below are preferred for
 // targeted updates to avoid write amplification.
-func (s *SurrealStore) Update(job *llm.Job) error {
+func (s *SurrealStore) Update(_ context.Context, job *llm.Job) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -360,7 +361,7 @@ func (s *SurrealStore) Update(job *llm.Job) error {
 }
 
 // GetByID returns the job with the given id, or nil.
-func (s *SurrealStore) GetByID(id string) *llm.Job {
+func (s *SurrealStore) GetByID(_ context.Context, id string) *llm.Job {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -375,7 +376,7 @@ func (s *SurrealStore) GetByID(id string) *llm.Job {
 }
 
 // GetActiveByTargetKey returns the newest active job for a target key, or nil.
-func (s *SurrealStore) GetActiveByTargetKey(targetKey string) *llm.Job {
+func (s *SurrealStore) GetActiveByTargetKey(_ context.Context, targetKey string) *llm.Job {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -394,24 +395,24 @@ func (s *SurrealStore) GetActiveByTargetKey(targetKey string) *llm.Job {
 }
 
 // ListActive returns all active jobs matching the filter.
-func (s *SurrealStore) ListActive(filter llm.ListFilter) []*llm.Job {
+func (s *SurrealStore) ListActive(_ context.Context, filter llm.ListFilter) []*llm.Job {
 	statuses := filter.Statuses
 	if len(statuses) == 0 {
 		statuses = []llm.JobStatus{llm.StatusPending, llm.StatusGenerating}
 	}
-	return s.listJobs(filter, statuses, time.Time{})
+	return s.listJobs(ctx(), filter, statuses, time.Time{})
 }
 
 // ListRecent returns terminal jobs updated on or after since.
-func (s *SurrealStore) ListRecent(filter llm.ListFilter, since time.Time) []*llm.Job {
+func (s *SurrealStore) ListRecent(_ context.Context, filter llm.ListFilter, since time.Time) []*llm.Job {
 	statuses := filter.Statuses
 	if len(statuses) == 0 {
 		statuses = []llm.JobStatus{llm.StatusReady, llm.StatusFailed, llm.StatusCancelled}
 	}
-	return s.listJobs(filter, statuses, since)
+	return s.listJobs(ctx(), filter, statuses, since)
 }
 
-func (s *SurrealStore) listJobs(filter llm.ListFilter, statuses []llm.JobStatus, since time.Time) []*llm.Job {
+func (s *SurrealStore) listJobs(_ context.Context, filter llm.ListFilter, statuses []llm.JobStatus, since time.Time) []*llm.Job {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -470,7 +471,7 @@ func (s *SurrealStore) listJobs(filter llm.ListFilter, statuses []llm.JobStatus,
 
 // SetStatus transitions the job state. Timestamps are stamped server-side
 // so the database is authoritative for wall-clock measurement.
-func (s *SurrealStore) SetStatus(id string, status llm.JobStatus) error {
+func (s *SurrealStore) SetStatus(_ context.Context, id string, status llm.JobStatus) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -541,7 +542,7 @@ func (s *SurrealStore) SetStatus(id string, status llm.JobStatus) error {
 }
 
 // SetProgress updates the progress fields.
-func (s *SurrealStore) SetProgress(id string, progress float64, phase, message string, throughputTPS float64) error {
+func (s *SurrealStore) SetProgress(_ context.Context, id string, progress float64, phase, message string, throughputTPS float64) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -573,7 +574,7 @@ func (s *SurrealStore) SetProgress(id string, progress float64, phase, message s
 // Heartbeat bumps updated_at without changing any other field. The WHERE
 // clause restricts to active jobs so a heartbeat to a terminal job is a
 // safe no-op (zero rows updated, no error).
-func (s *SurrealStore) Heartbeat(id string) error {
+func (s *SurrealStore) Heartbeat(_ context.Context, id string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -594,7 +595,7 @@ func (s *SurrealStore) Heartbeat(id string) error {
 // the write only when the job is not already terminal in a different
 // status. (status='failed' OR not terminal). This prevents the reaper
 // from overwriting a successful ready or user-cancelled.
-func (s *SurrealStore) SetError(id string, code, message string) error {
+func (s *SurrealStore) SetError(_ context.Context, id string, code, message string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -620,7 +621,7 @@ func (s *SurrealStore) SetError(id string, code, message string) error {
 }
 
 // SetTokens records input/output token usage.
-func (s *SurrealStore) SetTokens(id string, input, output int) error {
+func (s *SurrealStore) SetTokens(_ context.Context, id string, input, output int) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -636,7 +637,7 @@ func (s *SurrealStore) SetTokens(id string, input, output int) error {
 }
 
 // SetSnapshotBytes records the serialized input size.
-func (s *SurrealStore) SetSnapshotBytes(id string, bytes int) error {
+func (s *SurrealStore) SetSnapshotBytes(_ context.Context, id string, bytes int) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -651,7 +652,7 @@ func (s *SurrealStore) SetSnapshotBytes(id string, bytes int) error {
 }
 
 // SetReuseStats records structured summary reuse/cache-hit counts.
-func (s *SurrealStore) SetReuseStats(id string, reused, leafHits, fileHits, packageHits, rootHits int) error {
+func (s *SurrealStore) SetReuseStats(_ context.Context, id string, reused, leafHits, fileHits, packageHits, rootHits int) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -677,7 +678,7 @@ func (s *SurrealStore) SetReuseStats(id string, reused, leafHits, fileHits, pack
 }
 
 // IncrementRetry bumps the retry counter.
-func (s *SurrealStore) IncrementRetry(id string) error {
+func (s *SurrealStore) IncrementRetry(_ context.Context, id string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -692,12 +693,12 @@ func (s *SurrealStore) IncrementRetry(id string) error {
 }
 
 // IncrementAttachedRequests bumps the deduped request count.
-func (s *SurrealStore) IncrementAttachedRequests(id string) error {
+func (s *SurrealStore) IncrementAttachedRequests(_ context.Context, id string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	job := s.GetByID(id)
+	job := s.GetByID(ctx(), id)
 	if job == nil {
 		return fmt.Errorf("job %s not found", id)
 	}
@@ -718,7 +719,7 @@ func (s *SurrealStore) IncrementAttachedRequests(id string) error {
 }
 
 // AppendLog persists a structured job log record.
-func (s *SurrealStore) AppendLog(entry *llm.JobLogEntry) (*llm.JobLogEntry, error) {
+func (s *SurrealStore) AppendLog(_ context.Context, entry *llm.JobLogEntry) (*llm.JobLogEntry, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -773,7 +774,7 @@ func (s *SurrealStore) AppendLog(entry *llm.JobLogEntry) (*llm.JobLogEntry, erro
 }
 
 // ListLogs returns persisted logs for a job ordered by sequence ascending.
-func (s *SurrealStore) ListLogs(jobID string, filter llm.JobLogFilter) []*llm.JobLogEntry {
+func (s *SurrealStore) ListLogs(_ context.Context, jobID string, filter llm.JobLogFilter) []*llm.JobLogEntry {
 	db := s.client.DB()
 	if db == nil || strings.TrimSpace(jobID) == "" {
 		return nil

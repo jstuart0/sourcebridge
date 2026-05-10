@@ -4,6 +4,7 @@
 package graph
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strconv"
@@ -283,7 +284,7 @@ func NewStore() *Store {
 }
 
 // CreateRepository creates a placeholder repository with PENDING status.
-func (s *Store) CreateRepository(name, path string) (*Repository, error) {
+func (s *Store) CreateRepository(_ context.Context, name, path string) (*Repository, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -300,7 +301,7 @@ func (s *Store) CreateRepository(name, path string) (*Repository, error) {
 }
 
 // StoreIndexResult persists a full indexing result to the graph.
-func (s *Store) StoreIndexResult(result *indexer.IndexResult) (*Repository, error) {
+func (s *Store) StoreIndexResult(_ context.Context, result *indexer.IndexResult) (*Repository, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -419,7 +420,7 @@ func (s *Store) StoreIndexResult(result *indexer.IndexResult) (*Repository, erro
 
 // ReplaceIndexResult atomically replaces all files, symbols, modules, and relations
 // for an existing repository with new index results.
-func (s *Store) ReplaceIndexResult(repoID string, result *indexer.IndexResult) (*Repository, error) {
+func (s *Store) ReplaceIndexResult(_ context.Context, repoID string, result *indexer.IndexResult) (*Repository, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -609,7 +610,7 @@ func (s *Store) ReplaceIndexResult(repoID string, result *indexer.IndexResult) (
 // Locking: a single big-write lock for the duration of the merge. The
 // store's other methods take s.mu.RLock for reads, so this serializes
 // against concurrent mutations as expected.
-func (s *Store) MergeIndexResult(repoID string, affectedPaths []string, result *indexer.IndexResult) (*Repository, error) {
+func (s *Store) MergeIndexResult(_ context.Context, repoID string, affectedPaths []string, result *indexer.IndexResult) (*Repository, error) {
 	if result == nil {
 		return nil, fmt.Errorf("nil IndexResult")
 	}
@@ -895,7 +896,7 @@ func sliceContains(slice []string, target string) bool {
 }
 
 // UpdateRepositoryMeta updates mutable metadata fields on a repository.
-func (s *Store) UpdateRepositoryMeta(id string, meta RepositoryMeta) {
+func (s *Store) UpdateRepositoryMeta(_ context.Context, id string, meta RepositoryMeta) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	repo := s.repos[id]
@@ -923,7 +924,7 @@ func (s *Store) UpdateRepositoryMeta(id string, meta RepositoryMeta) {
 }
 
 // ListRepositories returns all repositories.
-func (s *Store) ListRepositories() []*Repository {
+func (s *Store) ListRepositories(_ context.Context) []*Repository {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -935,14 +936,14 @@ func (s *Store) ListRepositories() []*Repository {
 }
 
 // GetRepository returns a repository by ID.
-func (s *Store) GetRepository(id string) *Repository {
+func (s *Store) GetRepository(_ context.Context, id string) *Repository {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.repos[id]
 }
 
 // GetRepositoryByPath returns a repository by its path.
-func (s *Store) GetRepositoryByPath(path string) *Repository {
+func (s *Store) GetRepositoryByPath(_ context.Context, path string) *Repository {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, r := range s.repos {
@@ -954,7 +955,7 @@ func (s *Store) GetRepositoryByPath(path string) *Repository {
 }
 
 // RemoveRepository removes a repository and all its data.
-func (s *Store) RemoveRepository(id string) bool {
+func (s *Store) RemoveRepository(_ context.Context, id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1014,7 +1015,7 @@ func (s *Store) RemoveRepository(id string) bool {
 }
 
 // GetFiles returns all files for a repository.
-func (s *Store) GetFiles(repoID string) []*File {
+func (s *Store) GetFiles(_ context.Context, repoID string) []*File {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1028,7 +1029,7 @@ func (s *Store) GetFiles(repoID string) []*File {
 }
 
 // GetFilesPaginated returns files for a repository with optional path prefix filtering and pagination.
-func (s *Store) GetFilesPaginated(repoID string, pathPrefix *string, limit, offset int) ([]*File, int) {
+func (s *Store) GetFilesPaginated(_ context.Context, repoID string, pathPrefix *string, limit, offset int) ([]*File, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1058,7 +1059,7 @@ func (s *Store) GetFilesPaginated(repoID string, pathPrefix *string, limit, offs
 }
 
 // GetSymbols returns symbols for a repository with optional filtering.
-func (s *Store) GetSymbols(repoID string, query *string, kind *string, limit, offset int) ([]*StoredSymbol, int) {
+func (s *Store) GetSymbols(_ context.Context, repoID string, query *string, kind *string, limit, offset int) ([]*StoredSymbol, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1102,7 +1103,7 @@ func (s *Store) GetSymbols(repoID string, query *string, kind *string, limit, of
 }
 
 // GetFileSymbols returns symbols for a specific file.
-func (s *Store) GetFileSymbols(fileID string) []*StoredSymbol {
+func (s *Store) GetFileSymbols(_ context.Context, fileID string) []*StoredSymbol {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1116,7 +1117,7 @@ func (s *Store) GetFileSymbols(fileID string) []*StoredSymbol {
 }
 
 // GetModules returns all modules for a repository.
-func (s *Store) GetModules(repoID string) []*StoredModule {
+func (s *Store) GetModules(_ context.Context, repoID string) []*StoredModule {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1130,7 +1131,7 @@ func (s *Store) GetModules(repoID string) []*StoredModule {
 }
 
 // SearchContent searches file content for a query string.
-func (s *Store) SearchContent(repoID, query string, limit int) []SearchResult {
+func (s *Store) SearchContent(_ context.Context, repoID, query string, limit int) []SearchResult {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1181,14 +1182,14 @@ func (s *Store) SearchContent(repoID, query string, limit int) []SearchResult {
 }
 
 // GetCallers returns the IDs of symbols that call the given symbol.
-func (s *Store) GetCallers(symbolID string) []string {
+func (s *Store) GetCallers(_ context.Context, symbolID string) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.reverseCallGraph[symbolID]
 }
 
 // GetCallees returns the IDs of symbols called by the given symbol.
-func (s *Store) GetCallees(symbolID string) []string {
+func (s *Store) GetCallees(_ context.Context, symbolID string) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.callGraph[symbolID]
@@ -1197,14 +1198,14 @@ func (s *Store) GetCallees(symbolID string) []string {
 // GetTestsForSymbolPersisted returns the IDs of test symbols that
 // exercise the given target symbol, sourced from RelationTests edges
 // written during indexing.
-func (s *Store) GetTestsForSymbolPersisted(symbolID string) []string {
+func (s *Store) GetTestsForSymbolPersisted(_ context.Context, symbolID string) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.testedByGraph[symbolID]
 }
 
 // GetCallEdges returns all call edges for a repository in a single batch.
-func (s *Store) GetCallEdges(repoID string) []CallEdge {
+func (s *Store) GetCallEdges(_ context.Context, repoID string) []CallEdge {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1229,7 +1230,7 @@ func (s *Store) GetCallEdges(repoID string) []CallEdge {
 }
 
 // GetImports returns all imports for a repository.
-func (s *Store) GetImports(repoID string) []*StoredImport {
+func (s *Store) GetImports(_ context.Context, repoID string) []*StoredImport {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1260,7 +1261,7 @@ type SearchResult struct {
 }
 
 // Stats returns aggregate statistics.
-func (s *Store) Stats() map[string]int {
+func (s *Store) Stats(_ context.Context) map[string]int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1292,7 +1293,7 @@ func removeFromSlice(s []string, val string) []string {
 }
 
 // StoreLink adds a requirement-code link.
-func (s *Store) StoreLink(repoID string, link *StoredLink) *StoredLink {
+func (s *Store) StoreLink(_ context.Context, repoID string, link *StoredLink) *StoredLink {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1309,7 +1310,7 @@ func (s *Store) StoreLink(repoID string, link *StoredLink) *StoredLink {
 }
 
 // StoreLinks adds multiple links at once.
-func (s *Store) StoreLinks(repoID string, links []*StoredLink) int {
+func (s *Store) StoreLinks(_ context.Context, repoID string, links []*StoredLink) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1327,7 +1328,7 @@ func (s *Store) StoreLinks(repoID string, links []*StoredLink) int {
 }
 
 // GetLink returns a link by ID.
-func (s *Store) GetLink(id string) *StoredLink {
+func (s *Store) GetLink(_ context.Context, id string) *StoredLink {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.links[id]
@@ -1335,7 +1336,7 @@ func (s *Store) GetLink(id string) *StoredLink {
 
 // GetLinksForRequirement returns links for a requirement ID.
 // If includeRejected is false, rejected links are excluded.
-func (s *Store) GetLinksForRequirement(reqID string, includeRejected bool) []*StoredLink {
+func (s *Store) GetLinksForRequirement(_ context.Context, reqID string, includeRejected bool) []*StoredLink {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1354,7 +1355,7 @@ func (s *Store) GetLinksForRequirement(reqID string, includeRejected bool) []*St
 }
 
 // GetLinksForSymbol returns links for a symbol ID.
-func (s *Store) GetLinksForSymbol(symID string, includeRejected bool) []*StoredLink {
+func (s *Store) GetLinksForSymbol(_ context.Context, symID string, includeRejected bool) []*StoredLink {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1373,7 +1374,7 @@ func (s *Store) GetLinksForSymbol(symID string, includeRejected bool) []*StoredL
 }
 
 // GetLinksForFile returns links for symbols in a file, optionally filtered by line range.
-func (s *Store) GetLinksForFile(fileID string, startLine, endLine int, minConfidence float64) []*StoredLink {
+func (s *Store) GetLinksForFile(_ context.Context, fileID string, startLine, endLine int, minConfidence float64) []*StoredLink {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1407,7 +1408,7 @@ func (s *Store) GetLinksForFile(fileID string, startLine, endLine int, minConfid
 }
 
 // VerifyLink marks a link as verified or rejected.
-func (s *Store) VerifyLink(linkID string, verified bool, verifiedBy string) *StoredLink {
+func (s *Store) VerifyLink(_ context.Context, linkID string, verified bool, verifiedBy string) *StoredLink {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1430,7 +1431,7 @@ func (s *Store) VerifyLink(linkID string, verified bool, verifiedBy string) *Sto
 }
 
 // StoreRequirement adds a requirement to the store.
-func (s *Store) StoreRequirement(repoID string, req *StoredRequirement) {
+func (s *Store) StoreRequirement(_ context.Context, repoID string, req *StoredRequirement) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1445,7 +1446,7 @@ func (s *Store) StoreRequirement(repoID string, req *StoredRequirement) {
 }
 
 // StoreRequirements adds multiple requirements and returns the count stored.
-func (s *Store) StoreRequirements(repoID string, reqs []*StoredRequirement) int {
+func (s *Store) StoreRequirements(_ context.Context, repoID string, reqs []*StoredRequirement) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1465,7 +1466,7 @@ func (s *Store) StoreRequirements(repoID string, reqs []*StoredRequirement) int 
 }
 
 // GetRequirements returns requirements for a repository with pagination.
-func (s *Store) GetRequirements(repoID string, limit, offset int) ([]*StoredRequirement, int) {
+func (s *Store) GetRequirements(_ context.Context, repoID string, limit, offset int) ([]*StoredRequirement, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1491,14 +1492,14 @@ func (s *Store) GetRequirements(repoID string, limit, offset int) ([]*StoredRequ
 }
 
 // GetRequirement returns a requirement by ID.
-func (s *Store) GetRequirement(id string) *StoredRequirement {
+func (s *Store) GetRequirement(_ context.Context, id string) *StoredRequirement {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.requirements[id]
 }
 
 // GetRequirementsByIDs returns requirements by a list of IDs in a single lookup.
-func (s *Store) GetRequirementsByIDs(ids []string) map[string]*StoredRequirement {
+func (s *Store) GetRequirementsByIDs(_ context.Context, ids []string) map[string]*StoredRequirement {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make(map[string]*StoredRequirement, len(ids))
@@ -1511,7 +1512,7 @@ func (s *Store) GetRequirementsByIDs(ids []string) map[string]*StoredRequirement
 }
 
 // GetRequirementByExternalID returns a requirement by external ID within a repo.
-func (s *Store) GetRequirementByExternalID(repoID, externalID string) *StoredRequirement {
+func (s *Store) GetRequirementByExternalID(_ context.Context, repoID, externalID string) *StoredRequirement {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1524,7 +1525,7 @@ func (s *Store) GetRequirementByExternalID(repoID, externalID string) *StoredReq
 }
 
 // GetLinksForRepo returns all non-rejected links for a repository.
-func (s *Store) GetLinksForRepo(repoID string) []*StoredLink {
+func (s *Store) GetLinksForRepo(_ context.Context, repoID string) []*StoredLink {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1540,7 +1541,7 @@ func (s *Store) GetLinksForRepo(repoID string) []*StoredLink {
 }
 
 // SetRepositoryError marks a repository as having an error.
-func (s *Store) SetRepositoryError(id string, err error) {
+func (s *Store) SetRepositoryError(_ context.Context, id string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if repo := s.repos[id]; repo != nil {
@@ -1550,7 +1551,7 @@ func (s *Store) SetRepositoryError(id string, err error) {
 }
 
 // CacheUnderstandingScore stores the precomputed overall score on the repository.
-func (s *Store) CacheUnderstandingScore(id string, overall float64) {
+func (s *Store) CacheUnderstandingScore(_ context.Context, id string, overall float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if repo := s.repos[id]; repo != nil {
@@ -1561,14 +1562,14 @@ func (s *Store) CacheUnderstandingScore(id string, overall float64) {
 }
 
 // GetSymbol returns a single symbol by ID.
-func (s *Store) GetSymbol(id string) *StoredSymbol {
+func (s *Store) GetSymbol(_ context.Context, id string) *StoredSymbol {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.symbols[id]
 }
 
 // GetSymbolsByIDs returns symbols by a list of IDs in a single lookup.
-func (s *Store) GetSymbolsByIDs(ids []string) map[string]*StoredSymbol {
+func (s *Store) GetSymbolsByIDs(_ context.Context, ids []string) map[string]*StoredSymbol {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make(map[string]*StoredSymbol, len(ids))
@@ -1581,7 +1582,7 @@ func (s *Store) GetSymbolsByIDs(ids []string) map[string]*StoredSymbol {
 }
 
 // GetSymbolsByFile returns all symbols in a repository for a given file path.
-func (s *Store) GetSymbolsByFile(repoID string, filePath string) []*StoredSymbol {
+func (s *Store) GetSymbolsByFile(_ context.Context, repoID string, filePath string) []*StoredSymbol {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var result []*StoredSymbol
@@ -1597,7 +1598,7 @@ func (s *Store) GetSymbolsByFile(repoID string, filePath string) []*StoredSymbol
 
 // UpdateRequirementFields applies a partial update to the requirement.
 // Nil fields are preserved; externalId uniqueness is enforced per-repo.
-func (s *Store) UpdateRequirementFields(id string, fields RequirementUpdate) *StoredRequirement {
+func (s *Store) UpdateRequirementFields(_ context.Context, id string, fields RequirementUpdate) *StoredRequirement {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	req := s.requirements[id]
@@ -1645,7 +1646,7 @@ func (s *Store) UpdateRequirementFields(id string, fields RequirementUpdate) *St
 // ---------------------------------------------------------------------------
 
 // StoreLLMUsage records an LLM API call.
-func (s *Store) StoreLLMUsage(record *LLMUsageRecord) {
+func (s *Store) StoreLLMUsage(_ context.Context, record *LLMUsageRecord) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record.ID = uuid.New().String()
@@ -1654,7 +1655,7 @@ func (s *Store) StoreLLMUsage(record *LLMUsageRecord) {
 }
 
 // GetLLMUsage returns all LLM usage records, optionally filtered by repoID.
-func (s *Store) GetLLMUsage(repoID string, limit int) []LLMUsageRecord {
+func (s *Store) GetLLMUsage(_ context.Context, repoID string, limit int) []LLMUsageRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var results []LLMUsageRecord
@@ -1676,7 +1677,7 @@ func (s *Store) GetLLMUsage(repoID string, limit int) []LLMUsageRecord {
 // ---------------------------------------------------------------------------
 
 // StoreEmbedding caches an embedding vector.
-func (s *Store) StoreEmbedding(record *EmbeddingRecord) {
+func (s *Store) StoreEmbedding(_ context.Context, record *EmbeddingRecord) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record.ID = uuid.New().String()
@@ -1685,7 +1686,7 @@ func (s *Store) StoreEmbedding(record *EmbeddingRecord) {
 }
 
 // GetEmbedding retrieves a cached embedding by target ID.
-func (s *Store) GetEmbedding(targetID string) *EmbeddingRecord {
+func (s *Store) GetEmbedding(_ context.Context, targetID string) *EmbeddingRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.embeddings[targetID]
@@ -1696,7 +1697,7 @@ func (s *Store) GetEmbedding(targetID string) *EmbeddingRecord {
 // ---------------------------------------------------------------------------
 
 // StoreReviewResult persists an AI code review result.
-func (s *Store) StoreReviewResult(record *ReviewResultRecord) {
+func (s *Store) StoreReviewResult(_ context.Context, record *ReviewResultRecord) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record.ID = uuid.New().String()
@@ -1705,7 +1706,7 @@ func (s *Store) StoreReviewResult(record *ReviewResultRecord) {
 }
 
 // GetReviewResults returns review results for a target (symbol or file).
-func (s *Store) GetReviewResults(targetID string) []*ReviewResultRecord {
+func (s *Store) GetReviewResults(_ context.Context, targetID string) []*ReviewResultRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var results []*ReviewResultRecord
@@ -1718,7 +1719,7 @@ func (s *Store) GetReviewResults(targetID string) []*ReviewResultRecord {
 }
 
 // GetReviewResultsForRepo returns all review results for a given repository.
-func (s *Store) GetReviewResultsForRepo(repoID string) []*ReviewResultRecord {
+func (s *Store) GetReviewResultsForRepo(_ context.Context, repoID string) []*ReviewResultRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var results []*ReviewResultRecord
@@ -1732,7 +1733,7 @@ func (s *Store) GetReviewResultsForRepo(repoID string) []*ReviewResultRecord {
 
 // GetPublicSymbolDocCoverage returns the count of public symbols with doc comments
 // and the total count of public symbols for a repository.
-func (s *Store) GetPublicSymbolDocCoverage(repoID string) (withDocs int, total int) {
+func (s *Store) GetPublicSymbolDocCoverage(_ context.Context, repoID string) (withDocs int, total int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, symID := range s.repoSymbols[repoID] {
@@ -1749,7 +1750,7 @@ func (s *Store) GetPublicSymbolDocCoverage(repoID string) (withDocs int, total i
 }
 
 // GetTestSymbolRatio returns the count of test symbols and total symbols for a repository.
-func (s *Store) GetTestSymbolRatio(repoID string) (tests int, total int) {
+func (s *Store) GetTestSymbolRatio(_ context.Context, repoID string) (tests int, total int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, symID := range s.repoSymbols[repoID] {
@@ -1766,7 +1767,7 @@ func (s *Store) GetTestSymbolRatio(repoID string) (tests int, total int) {
 }
 
 // GetAICodeFileRatio returns the count of AI-generated files (AIScore > 0.5) and total files.
-func (s *Store) GetAICodeFileRatio(repoID string) (aiFiles int, totalFiles int) {
+func (s *Store) GetAICodeFileRatio(_ context.Context, repoID string) (aiFiles int, totalFiles int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, fid := range s.repoFiles[repoID] {
@@ -1783,14 +1784,14 @@ func (s *Store) GetAICodeFileRatio(repoID string) (aiFiles int, totalFiles int) 
 }
 
 // StoreImpactReport stores an impact report for a repository.
-func (s *Store) StoreImpactReport(repoID string, report *ImpactReport) {
+func (s *Store) StoreImpactReport(_ context.Context, repoID string, report *ImpactReport) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.impactReports[repoID] = append(s.impactReports[repoID], report)
 }
 
 // GetLatestImpactReport returns the most recent impact report for a repository.
-func (s *Store) GetLatestImpactReport(repoID string) *ImpactReport {
+func (s *Store) GetLatestImpactReport(_ context.Context, repoID string) *ImpactReport {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	reports := s.impactReports[repoID]
@@ -1801,7 +1802,7 @@ func (s *Store) GetLatestImpactReport(repoID string) *ImpactReport {
 }
 
 // GetImpactReports returns impact reports for a repository, most recent first.
-func (s *Store) GetImpactReports(repoID string, limit int) ([]*ImpactReport, int) {
+func (s *Store) GetImpactReports(_ context.Context, repoID string, limit int) ([]*ImpactReport, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	reports := s.impactReports[repoID]
@@ -1826,7 +1827,7 @@ func (s *Store) GetImpactReports(repoID string, limit int) ([]*ImpactReport, int
 // ---------------------------------------------------------------------------
 
 // StoreDiscoveredRequirement adds a single discovered requirement.
-func (s *Store) StoreDiscoveredRequirement(repoID string, req *DiscoveredRequirement) {
+func (s *Store) StoreDiscoveredRequirement(_ context.Context, repoID string, req *DiscoveredRequirement) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1844,7 +1845,7 @@ func (s *Store) StoreDiscoveredRequirement(repoID string, req *DiscoveredRequire
 }
 
 // StoreDiscoveredRequirements adds multiple discovered requirements and returns the count stored.
-func (s *Store) StoreDiscoveredRequirements(repoID string, reqs []*DiscoveredRequirement) int {
+func (s *Store) StoreDiscoveredRequirements(_ context.Context, repoID string, reqs []*DiscoveredRequirement) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1868,7 +1869,7 @@ func (s *Store) StoreDiscoveredRequirements(repoID string, reqs []*DiscoveredReq
 }
 
 // GetDiscoveredRequirements returns discovered requirements with optional filters and pagination.
-func (s *Store) GetDiscoveredRequirements(repoID string, status *string, confidence *string, limit, offset int) ([]*DiscoveredRequirement, int) {
+func (s *Store) GetDiscoveredRequirements(_ context.Context, repoID string, status *string, confidence *string, limit, offset int) ([]*DiscoveredRequirement, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1923,14 +1924,14 @@ func confidenceRank(c string) int {
 }
 
 // GetDiscoveredRequirement returns a single discovered requirement by ID.
-func (s *Store) GetDiscoveredRequirement(id string) *DiscoveredRequirement {
+func (s *Store) GetDiscoveredRequirement(_ context.Context, id string) *DiscoveredRequirement {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.discoveredRequirements[id]
 }
 
 // PromoteDiscoveredRequirement marks a discovered requirement as promoted.
-func (s *Store) PromoteDiscoveredRequirement(id string, requirementID string) *DiscoveredRequirement {
+func (s *Store) PromoteDiscoveredRequirement(_ context.Context, id string, requirementID string) *DiscoveredRequirement {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1945,7 +1946,7 @@ func (s *Store) PromoteDiscoveredRequirement(id string, requirementID string) *D
 }
 
 // DismissDiscoveredRequirement marks a discovered requirement as dismissed.
-func (s *Store) DismissDiscoveredRequirement(id string, dismissedBy string, reason string) *DiscoveredRequirement {
+func (s *Store) DismissDiscoveredRequirement(_ context.Context, id string, dismissedBy string, reason string) *DiscoveredRequirement {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1962,7 +1963,7 @@ func (s *Store) DismissDiscoveredRequirement(id string, dismissedBy string, reas
 
 // DeleteDiscoveredRequirementsByRepo removes all discovered requirements for a repo.
 // Only deletes requirements with status "discovered"; promoted/dismissed are preserved.
-func (s *Store) DeleteDiscoveredRequirementsByRepo(repoID string) int {
+func (s *Store) DeleteDiscoveredRequirementsByRepo(_ context.Context, repoID string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1994,7 +1995,7 @@ func (s *Store) DeleteDiscoveredRequirementsByRepo(repoID string) int {
 //     toPkg = Path.
 //  3. Aggregate into imports/imported_by sets per package.
 //  4. Store one StoredPackageDependencies per package.
-func (s *Store) RecomputePackageDependencies(repoID string) {
+func (s *Store) RecomputePackageDependencies(_ context.Context, repoID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -2085,7 +2086,7 @@ func (s *Store) RecomputePackageDependencies(repoID string) {
 // GetPackageDependencies returns all package-level dependency records for the
 // given repository. Returns an empty slice when no data has been computed yet
 // (e.g. for repos indexed before this feature was added).
-func (s *Store) GetPackageDependencies(repoID string) []*StoredPackageDependencies {
+func (s *Store) GetPackageDependencies(_ context.Context, repoID string) []*StoredPackageDependencies {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -2101,13 +2102,13 @@ func (s *Store) GetPackageDependencies(repoID string) []*StoredPackageDependenci
 
 // --- Cross-Repo Federation (in-memory stubs) ---
 
-func (s *Store) LinkRepos(sourceRepoID, targetRepoID string) (*RepoLink, error) {
+func (s *Store) LinkRepos(_ context.Context, sourceRepoID, targetRepoID string) (*RepoLink, error) {
 	return nil, fmt.Errorf("federation not supported in in-memory store")
 }
-func (s *Store) UnlinkRepos(linkID string) error {
+func (s *Store) UnlinkRepos(_ context.Context, linkID string) error {
 	return fmt.Errorf("federation not supported in in-memory store")
 }
-func (s *Store) GetRepoLinks(repoID string) ([]*RepoLink, error) {
+func (s *Store) GetRepoLinks(_ context.Context, repoID string) ([]*RepoLink, error) {
 	return nil, nil
 }
 
@@ -2115,33 +2116,33 @@ func (s *Store) GetRepoLinks(repoID string) ([]*RepoLink, error) {
 // supported here (Decision 10). The TenantFilteredStore uses this method
 // as a helper for UnlinkRepos/VerifyLink access gating; callers receiving
 // nil treat the link as not-found.
-func (s *Store) GetRepoLink(_ string) *RepoLink {
+func (s *Store) GetRepoLink(_ context.Context, _ string) *RepoLink {
 	return nil
 }
-func (s *Store) StoreCrossRepoRef(ref *CrossRepoRef) error {
+func (s *Store) StoreCrossRepoRef(_ context.Context, ref *CrossRepoRef) error {
 	return fmt.Errorf("federation not supported in in-memory store")
 }
-func (s *Store) StoreCrossRepoRefs(refs []*CrossRepoRef) int {
+func (s *Store) StoreCrossRepoRefs(_ context.Context, refs []*CrossRepoRef) int {
 	return 0
 }
-func (s *Store) GetCrossRepoRefs(repoID string, refType *string, limit int) ([]*CrossRepoRef, error) {
+func (s *Store) GetCrossRepoRefs(_ context.Context, repoID string, refType *string, limit int) ([]*CrossRepoRef, error) {
 	return nil, nil
 }
-func (s *Store) GetSymbolCrossRepoRefs(symbolID string) ([]*CrossRepoRef, error) {
+func (s *Store) GetSymbolCrossRepoRefs(_ context.Context, symbolID string) ([]*CrossRepoRef, error) {
 	return nil, nil
 }
-func (s *Store) DeleteCrossRepoRefsForRepo(repoID string) error {
+func (s *Store) DeleteCrossRepoRefsForRepo(_ context.Context, repoID string) error {
 	return nil
 }
-func (s *Store) DeleteCrossRepoRefsBetweenRepos(repoA, repoB string) error {
+func (s *Store) DeleteCrossRepoRefsBetweenRepos(_ context.Context, repoA, repoB string) error {
 	return nil
 }
-func (s *Store) StoreAPIContract(contract *APIContract) error {
+func (s *Store) StoreAPIContract(_ context.Context, contract *APIContract) error {
 	return fmt.Errorf("federation not supported in in-memory store")
 }
-func (s *Store) GetAPIContracts(repoID string) ([]*APIContract, error) {
+func (s *Store) GetAPIContracts(_ context.Context, repoID string) ([]*APIContract, error) {
 	return nil, nil
 }
-func (s *Store) DeleteAPIContractsForRepo(repoID string) error {
+func (s *Store) DeleteAPIContractsForRepo(_ context.Context, repoID string) error {
 	return nil
 }

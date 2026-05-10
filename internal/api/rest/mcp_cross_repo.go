@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 
@@ -89,7 +90,7 @@ func (h *mcpHandler) callGetCrossRepoImpact(session *mcpSession, args json.RawMe
 
 	var out []crossRepoRefResult
 	if params.SymbolID != "" {
-		refs, err := h.store.GetSymbolCrossRepoRefs(params.SymbolID)
+		refs, err := h.store.GetSymbolCrossRepoRefs(context.Background(), params.SymbolID)
 		if err != nil {
 			return nil, err
 		}
@@ -106,7 +107,7 @@ func (h *mcpHandler) callGetCrossRepoImpact(session *mcpSession, args json.RawMe
 			})
 		}
 	} else {
-		refs, err := h.store.GetCrossRepoRefs(params.RepositoryID, refType, limit)
+		refs, err := h.store.GetCrossRepoRefs(context.Background(), params.RepositoryID, refType, limit)
 		if err != nil {
 			return nil, err
 		}

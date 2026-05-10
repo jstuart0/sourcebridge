@@ -159,7 +159,7 @@ func (h *mcpHandler) resolveSymbol(p symbolRefParams) (*graph.StoredSymbol, erro
 	// symbol_id optimization path — validated against repository_id to
 	// prevent cross-repo leakage.
 	if p.SymbolID != "" {
-		sym := h.store.GetSymbol(p.SymbolID)
+		sym := h.store.GetSymbol(context.Background(), p.SymbolID)
 		if sym != nil && sym.RepoID == p.RepositoryID {
 			return sym, nil
 		}
@@ -171,7 +171,7 @@ func (h *mcpHandler) resolveSymbol(p symbolRefParams) (*graph.StoredSymbol, erro
 		return nil, fmt.Errorf("must provide either symbol_id or {file_path, symbol_name}")
 	}
 
-	fileSymbols := h.store.GetSymbolsByFile(p.RepositoryID, p.FilePath)
+	fileSymbols := h.store.GetSymbolsByFile(context.Background(), p.RepositoryID, p.FilePath)
 	var candidates []*graph.StoredSymbol
 	for _, s := range fileSymbols {
 		if s.Name == p.SymbolName {
@@ -283,9 +283,9 @@ func (h *mcpHandler) walkCallGraph(session *mcpSession, args json.RawMessage, di
 			var neighbors []string
 			switch direction {
 			case "callers":
-				neighbors = h.store.GetCallers(id)
+				neighbors = h.store.GetCallers(context.Background(), id)
 			case "callees":
-				neighbors = h.store.GetCallees(id)
+				neighbors = h.store.GetCallees(context.Background(), id)
 			}
 			for _, nid := range neighbors {
 				if _, seen := visited[nid]; seen {
@@ -319,7 +319,7 @@ func (h *mcpHandler) walkCallGraph(session *mcpSession, args json.RawMessage, di
 	for id := range visited {
 		ids = append(ids, id)
 	}
-	byID := h.store.GetSymbolsByIDs(ids)
+	byID := h.store.GetSymbolsByIDs(context.Background(), ids)
 
 	symbols := make([]callGraphSymbol, 0, len(visited))
 	for id, hopFromRoot := range visited {
@@ -452,13 +452,13 @@ func (h *mcpHandler) callGetFileImports(session *mcpSession, args json.RawMessag
 		}
 	}
 
-	all := h.store.GetImports(params.RepositoryID)
+	all := h.store.GetImports(context.Background(), params.RepositoryID)
 
 	// Build a file-path → []import index keyed by the file *declaring*
 	// the import. GetImports returns StoredImport with only FileID —
 	// we need to join to file path. The cheapest path today is a
 	// single pass over repo files.
-	files := h.store.GetFiles(params.RepositoryID)
+	files := h.store.GetFiles(context.Background(), params.RepositoryID)
 	fileIDToPath := make(map[string]string, len(files))
 	pathToFileID := make(map[string]string, len(files))
 	for _, f := range files {
@@ -608,7 +608,7 @@ func (h *mcpHandler) callGetArchitectureDiagram(session *mcpSession, args json.R
 		},
 	}
 
-	artifact := h.knowledgeStore.GetArtifactByKey(key)
+	artifact := h.knowledgeStore.GetArtifactByKey(context.Background(), key)
 	if artifact == nil {
 		return architectureDiagramResult{
 			Found:     false,
@@ -705,7 +705,7 @@ func (h *mcpHandler) callGetRecentChanges(session *mcpSession, args json.RawMess
 		limit = 200
 	}
 
-	repo := h.store.GetRepository(params.RepositoryID)
+	repo := h.store.GetRepository(context.Background(), params.RepositoryID)
 	if repo == nil {
 		return nil, fmt.Errorf("repository not found")
 	}

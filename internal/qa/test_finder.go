@@ -348,13 +348,13 @@ func (f *TestFinder) FindForSymbol(ctx context.Context, symbolID string, limit i
 	if f == nil || f.o == nil || f.o.symbols == nil {
 		return nil, nil
 	}
-	sourcePath := f.o.symbols.SymbolFilePath(symbolID)
+	sourcePath := f.o.symbols.SymbolFilePath(ctx, symbolID)
 	if sourcePath == "" {
 		return nil, nil
 	}
 	// Find the symbol's display name for content matching.
 	var name string
-	for _, ref := range f.o.symbols.SymbolsInFile(f.repoID, sourcePath) {
+	for _, ref := range f.o.symbols.SymbolsInFile(ctx, f.repoID, sourcePath) {
 		if ref.ID == symbolID {
 			name = ref.Name
 			break
@@ -363,7 +363,7 @@ func (f *TestFinder) FindForSymbol(ctx context.Context, symbolID string, limit i
 	if name == "" {
 		return nil, nil
 	}
-	frames := f.collectAdjacentFrames(sourcePath, name)
+	frames := f.collectAdjacentFrames(ctx, sourcePath, name)
 	frames = f.augmentFromSearch(ctx, name, frames)
 
 	hits := rankAndSlice(frames, name, sourcePath, limit)
@@ -381,7 +381,7 @@ func (f *TestFinder) FindForFile(ctx context.Context, filePath string, limit int
 	// content-match needles in candidate test bodies.
 	var needles []string
 	if f.o.symbols != nil {
-		for _, ref := range f.o.symbols.SymbolsInFile(f.repoID, filePath) {
+		for _, ref := range f.o.symbols.SymbolsInFile(ctx, f.repoID, filePath) {
 			if ref.Name != "" {
 				needles = append(needles, ref.Name)
 			}
@@ -398,7 +398,7 @@ func (f *TestFinder) FindForFile(ctx context.Context, filePath string, limit int
 		return nil, nil
 	}
 
-	frames := f.collectAdjacentFrames(filePath, needles[0])
+	frames := f.collectAdjacentFrames(ctx, filePath, needles[0])
 	// Re-score each frame by how many of the file's symbols it
 	// actually mentions, so tests covering several symbols from the
 	// file rank above single-mention hits.
@@ -419,7 +419,7 @@ func (f *TestFinder) FindForFile(ctx context.Context, filePath string, limit int
 // for a source path and returns the contained test functions. Files
 // that aren't readable (don't exist, binary, traversal rejected)
 // are silently skipped — the adjacent heuristic is best-effort.
-func (f *TestFinder) collectAdjacentFrames(sourcePath, subject string) []testFrame {
+func (f *TestFinder) collectAdjacentFrames(ctx context.Context, sourcePath, subject string) []testFrame {
 	out := []testFrame{}
 	for _, cand := range adjacentTestCandidates(sourcePath) {
 		if cand == sourcePath { // defensive
@@ -428,7 +428,7 @@ func (f *TestFinder) collectAdjacentFrames(sourcePath, subject string) []testFra
 		if f.o.files == nil {
 			break
 		}
-		body, err := f.o.files.ReadRepoFile(f.repoID, cand)
+		body, err := f.o.files.ReadRepoFile(ctx, f.repoID, cand)
 		if err != nil {
 			continue
 		}
@@ -467,7 +467,7 @@ func (f *TestFinder) augmentFromSearch(ctx context.Context, subject string, exis
 		if _, dup := existingPaths[h.FilePath]; dup {
 			continue
 		}
-		body, readErr := f.o.files.ReadRepoFile(f.repoID, h.FilePath)
+		body, readErr := f.o.files.ReadRepoFile(ctx, f.repoID, h.FilePath)
 		if readErr != nil {
 			continue
 		}

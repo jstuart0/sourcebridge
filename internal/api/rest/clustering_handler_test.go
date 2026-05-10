@@ -247,7 +247,7 @@ func newRelabelTestServer(t *testing.T, withOrch bool) (srv *Server, repoID stri
 	t.Helper()
 
 	store := newFakeClusterStore()
-	repo, err := store.Store.CreateRepository("test-repo", "/test")
+	repo, err := store.Store.CreateRepository(t.Context(), "test-repo", "/test")
 	if err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}

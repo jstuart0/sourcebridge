@@ -298,7 +298,7 @@ func ctx() context.Context { return context.Background() }
 // ---------------------------------------------------------------------------
 
 // CreateRepository creates a placeholder repository with PENDING status.
-func (s *SurrealStore) CreateRepository(name, path string) (*graph.Repository, error) {
+func (s *SurrealStore) CreateRepository(_ context.Context, name, path string) (*graph.Repository, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -337,7 +337,7 @@ func (s *SurrealStore) CreateRepository(name, path string) (*graph.Repository, e
 }
 
 // StoreIndexResult persists a full indexing result.
-func (s *SurrealStore) StoreIndexResult(result *indexer.IndexResult) (*graph.Repository, error) {
+func (s *SurrealStore) StoreIndexResult(_ context.Context, result *indexer.IndexResult) (*graph.Repository, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -538,7 +538,7 @@ func (s *SurrealStore) StoreIndexResult(result *indexer.IndexResult) (*graph.Rep
 
 // ReplaceIndexResult atomically replaces all files, symbols, modules, and relations
 // for an existing repository with new index results.
-func (s *SurrealStore) ReplaceIndexResult(repoID string, result *indexer.IndexResult) (*graph.Repository, error) {
+func (s *SurrealStore) ReplaceIndexResult(_ context.Context, repoID string, result *indexer.IndexResult) (*graph.Repository, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -732,7 +732,7 @@ func (s *SurrealStore) ReplaceIndexResult(repoID string, result *indexer.IndexRe
 		return nil, fmt.Errorf("updating repository: %w", err)
 	}
 
-	return s.GetRepository(repoID), nil
+	return s.GetRepository(ctx(), repoID), nil
 }
 
 // MergeIndexResult is the per-file delta entry point used by the
@@ -749,7 +749,7 @@ func (s *SurrealStore) ReplaceIndexResult(repoID string, result *indexer.IndexRe
 // the flag on while running the SurrealDB backend before Phase 2, the
 // router surfaces this error through the freshness envelope rather
 // than silently corrupting state.
-func (s *SurrealStore) MergeIndexResult(repoID string, affectedPaths []string, result *indexer.IndexResult) (*graph.Repository, error) {
+func (s *SurrealStore) MergeIndexResult(_ context.Context, repoID string, affectedPaths []string, result *indexer.IndexResult) (*graph.Repository, error) {
 	_ = repoID
 	_ = affectedPaths
 	_ = result
@@ -757,7 +757,7 @@ func (s *SurrealStore) MergeIndexResult(repoID string, affectedPaths []string, r
 }
 
 // UpdateRepositoryMeta updates mutable metadata fields on a repository.
-func (s *SurrealStore) UpdateRepositoryMeta(id string, meta graph.RepositoryMeta) {
+func (s *SurrealStore) UpdateRepositoryMeta(_ context.Context, id string, meta graph.RepositoryMeta) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -796,7 +796,7 @@ func (s *SurrealStore) UpdateRepositoryMeta(id string, meta graph.RepositoryMeta
 }
 
 // ListRepositories returns all repositories.
-func (s *SurrealStore) ListRepositories() []*graph.Repository {
+func (s *SurrealStore) ListRepositories(_ context.Context, ) []*graph.Repository {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -817,7 +817,7 @@ func (s *SurrealStore) ListRepositories() []*graph.Repository {
 }
 
 // GetRepository returns a repository by ID.
-func (s *SurrealStore) GetRepository(id string) *graph.Repository {
+func (s *SurrealStore) GetRepository(_ context.Context, id string) *graph.Repository {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -833,7 +833,7 @@ func (s *SurrealStore) GetRepository(id string) *graph.Repository {
 }
 
 // GetRepositoryByPath returns a repository by its path.
-func (s *SurrealStore) GetRepositoryByPath(path string) *graph.Repository {
+func (s *SurrealStore) GetRepositoryByPath(_ context.Context, path string) *graph.Repository {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -849,7 +849,7 @@ func (s *SurrealStore) GetRepositoryByPath(path string) *graph.Repository {
 }
 
 // RemoveRepository removes a repository and all its data.
-func (s *SurrealStore) RemoveRepository(id string) bool {
+func (s *SurrealStore) RemoveRepository(_ context.Context, id string) bool {
 	db := s.client.DB()
 	if db == nil {
 		return false
@@ -880,7 +880,7 @@ func (s *SurrealStore) RemoveRepository(id string) bool {
 }
 
 // GetFiles returns all files for a repository.
-func (s *SurrealStore) GetFiles(repoID string) []*graph.File {
+func (s *SurrealStore) GetFiles(_ context.Context, repoID string) []*graph.File {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -901,7 +901,7 @@ func (s *SurrealStore) GetFiles(repoID string) []*graph.File {
 }
 
 // GetFilesPaginated returns files for a repository with optional path prefix filtering and pagination.
-func (s *SurrealStore) GetFilesPaginated(repoID string, pathPrefix *string, limit, offset int) ([]*graph.File, int) {
+func (s *SurrealStore) GetFilesPaginated(_ context.Context, repoID string, pathPrefix *string, limit, offset int) ([]*graph.File, int) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, 0
@@ -953,7 +953,7 @@ func (s *SurrealStore) GetFilesPaginated(repoID string, pathPrefix *string, limi
 }
 
 // GetSymbols returns symbols for a repository with optional filtering.
-func (s *SurrealStore) GetSymbols(repoID string, query *string, kind *string, limit, offset int) ([]*graph.StoredSymbol, int) {
+func (s *SurrealStore) GetSymbols(_ context.Context, repoID string, query *string, kind *string, limit, offset int) ([]*graph.StoredSymbol, int) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, 0
@@ -1011,7 +1011,7 @@ func (s *SurrealStore) GetSymbols(repoID string, query *string, kind *string, li
 }
 
 // GetFileSymbols returns symbols for a specific file.
-func (s *SurrealStore) GetFileSymbols(fileID string) []*graph.StoredSymbol {
+func (s *SurrealStore) GetFileSymbols(_ context.Context, fileID string) []*graph.StoredSymbol {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1032,7 +1032,7 @@ func (s *SurrealStore) GetFileSymbols(fileID string) []*graph.StoredSymbol {
 }
 
 // GetModules returns all modules for a repository.
-func (s *SurrealStore) GetModules(repoID string) []*graph.StoredModule {
+func (s *SurrealStore) GetModules(_ context.Context, repoID string) []*graph.StoredModule {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1053,7 +1053,7 @@ func (s *SurrealStore) GetModules(repoID string) []*graph.StoredModule {
 }
 
 // GetCallers returns the IDs of symbols that call the given symbol.
-func (s *SurrealStore) GetCallers(symbolID string) []string {
+func (s *SurrealStore) GetCallers(_ context.Context, symbolID string) []string {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1069,7 +1069,7 @@ func (s *SurrealStore) GetCallers(symbolID string) []string {
 }
 
 // GetCallees returns the IDs of symbols called by the given symbol.
-func (s *SurrealStore) GetCallees(symbolID string) []string {
+func (s *SurrealStore) GetCallees(_ context.Context, symbolID string) []string {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1087,7 +1087,7 @@ func (s *SurrealStore) GetCallees(symbolID string) []string {
 // GetTestsForSymbolPersisted returns the IDs of test symbols that
 // exercise the given target symbol, from the ca_tests edge table.
 // Parallels GetCallees — edge shape is source_id=test, target_id=tested.
-func (s *SurrealStore) GetTestsForSymbolPersisted(symbolID string) []string {
+func (s *SurrealStore) GetTestsForSymbolPersisted(_ context.Context, symbolID string) []string {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1102,7 +1102,7 @@ func (s *SurrealStore) GetTestsForSymbolPersisted(symbolID string) []string {
 }
 
 // GetCallEdges returns all call edges for a repository in a single batch.
-func (s *SurrealStore) GetCallEdges(repoID string) []graph.CallEdge {
+func (s *SurrealStore) GetCallEdges(_ context.Context, repoID string) []graph.CallEdge {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1128,7 +1128,7 @@ func (s *SurrealStore) GetCallEdges(repoID string) []graph.CallEdge {
 }
 
 // GetImports returns all imports for a repository.
-func (s *SurrealStore) GetImports(repoID string) []*graph.StoredImport {
+func (s *SurrealStore) GetImports(_ context.Context, repoID string) []*graph.StoredImport {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1160,7 +1160,7 @@ func (s *SurrealStore) GetImports(repoID string) []*graph.StoredImport {
 // RecomputePackageDependencies rebuilds the package-level dependency records
 // for the given repo by aggregating raw import rows from SurrealDB, then
 // upserting one package_dep record per package. It is idempotent.
-func (s *SurrealStore) RecomputePackageDependencies(repoID string) {
+func (s *SurrealStore) RecomputePackageDependencies(_ context.Context, repoID string) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -1256,7 +1256,7 @@ func sortedKeys(m map[string]struct{}) []string {
 
 // GetPackageDependencies returns all pre-computed package dependency records
 // for the given repository from the package_dep table.
-func (s *SurrealStore) GetPackageDependencies(repoID string) []*graph.StoredPackageDependencies {
+func (s *SurrealStore) GetPackageDependencies(_ context.Context, repoID string) []*graph.StoredPackageDependencies {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1290,7 +1290,7 @@ func (s *SurrealStore) GetPackageDependencies(repoID string) []*graph.StoredPack
 }
 
 // SearchContent searches for symbols and files matching a query string.
-func (s *SurrealStore) SearchContent(repoID, query string, limit int) []graph.SearchResult {
+func (s *SurrealStore) SearchContent(_ context.Context, repoID, query string, limit int) []graph.SearchResult {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1354,7 +1354,7 @@ func (s *SurrealStore) SearchContent(repoID, query string, limit int) []graph.Se
 }
 
 // Stats returns aggregate statistics.
-func (s *SurrealStore) Stats() map[string]int {
+func (s *SurrealStore) Stats(_ context.Context, ) map[string]int {
 	db := s.client.DB()
 	if db == nil {
 		return map[string]int{}
@@ -1394,7 +1394,7 @@ func (s *SurrealStore) Stats() map[string]int {
 }
 
 // SetRepositoryError marks a repository as having an error.
-func (s *SurrealStore) SetRepositoryError(id string, repoErr error) {
+func (s *SurrealStore) SetRepositoryError(_ context.Context, id string, repoErr error) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -1409,7 +1409,7 @@ func (s *SurrealStore) SetRepositoryError(id string, repoErr error) {
 }
 
 // CacheUnderstandingScore stores the precomputed overall score on the repository.
-func (s *SurrealStore) CacheUnderstandingScore(id string, overall float64) {
+func (s *SurrealStore) CacheUnderstandingScore(_ context.Context, id string, overall float64) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -1429,7 +1429,7 @@ func (s *SurrealStore) CacheUnderstandingScore(id string, overall float64) {
 // ---------------------------------------------------------------------------
 
 // StoreRequirement adds a requirement to the store.
-func (s *SurrealStore) StoreRequirement(repoID string, req *graph.StoredRequirement) {
+func (s *SurrealStore) StoreRequirement(_ context.Context, repoID string, req *graph.StoredRequirement) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -1484,10 +1484,10 @@ func (s *SurrealStore) StoreRequirement(repoID string, req *graph.StoredRequirem
 }
 
 // StoreRequirements adds multiple requirements and returns the count stored.
-func (s *SurrealStore) StoreRequirements(repoID string, reqs []*graph.StoredRequirement) int {
+func (s *SurrealStore) StoreRequirements(_ context.Context, repoID string, reqs []*graph.StoredRequirement) int {
 	count := 0
 	for _, req := range reqs {
-		s.StoreRequirement(repoID, req)
+		s.StoreRequirement(ctx(), repoID, req)
 		if req.ID != "" {
 			count++
 		}
@@ -1496,7 +1496,7 @@ func (s *SurrealStore) StoreRequirements(repoID string, reqs []*graph.StoredRequ
 }
 
 // GetRequirements returns requirements for a repository with pagination.
-func (s *SurrealStore) GetRequirements(repoID string, limit, offset int) ([]*graph.StoredRequirement, int) {
+func (s *SurrealStore) GetRequirements(_ context.Context, repoID string, limit, offset int) ([]*graph.StoredRequirement, int) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, 0
@@ -1540,7 +1540,7 @@ func (s *SurrealStore) GetRequirements(repoID string, limit, offset int) ([]*gra
 }
 
 // GetRequirement returns a requirement by ID.
-func (s *SurrealStore) GetRequirement(id string) *graph.StoredRequirement {
+func (s *SurrealStore) GetRequirement(_ context.Context, id string) *graph.StoredRequirement {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1556,7 +1556,7 @@ func (s *SurrealStore) GetRequirement(id string) *graph.StoredRequirement {
 }
 
 // GetRequirementsByIDs returns requirements for a batch of IDs in a single query.
-func (s *SurrealStore) GetRequirementsByIDs(ids []string) map[string]*graph.StoredRequirement {
+func (s *SurrealStore) GetRequirementsByIDs(_ context.Context, ids []string) map[string]*graph.StoredRequirement {
 	db := s.client.DB()
 	if db == nil || len(ids) == 0 {
 		return nil
@@ -1579,7 +1579,7 @@ func (s *SurrealStore) GetRequirementsByIDs(ids []string) map[string]*graph.Stor
 }
 
 // GetRequirementByExternalID returns a requirement by external ID within a repo.
-func (s *SurrealStore) GetRequirementByExternalID(repoID, externalID string) *graph.StoredRequirement {
+func (s *SurrealStore) GetRequirementByExternalID(_ context.Context, repoID, externalID string) *graph.StoredRequirement {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1606,7 +1606,7 @@ func linkID(repoID, requirementID, symbolID string) string {
 }
 
 // StoreLink adds or updates a requirement-code link.
-func (s *SurrealStore) StoreLink(repoID string, link *graph.StoredLink) *graph.StoredLink {
+func (s *SurrealStore) StoreLink(_ context.Context, repoID string, link *graph.StoredLink) *graph.StoredLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1652,7 +1652,7 @@ func (s *SurrealStore) StoreLink(repoID string, link *graph.StoredLink) *graph.S
 }
 
 // StoreLinks bulk-inserts links in batches using a single SurrealQL query per batch.
-func (s *SurrealStore) StoreLinks(repoID string, links []*graph.StoredLink) int {
+func (s *SurrealStore) StoreLinks(_ context.Context, repoID string, links []*graph.StoredLink) int {
 	db := s.client.DB()
 	if db == nil {
 		return 0
@@ -1719,7 +1719,7 @@ func (s *SurrealStore) StoreLinks(repoID string, links []*graph.StoredLink) int 
 }
 
 // GetLink returns a link by ID.
-func (s *SurrealStore) GetLink(id string) *graph.StoredLink {
+func (s *SurrealStore) GetLink(_ context.Context, id string) *graph.StoredLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1735,7 +1735,7 @@ func (s *SurrealStore) GetLink(id string) *graph.StoredLink {
 }
 
 // GetLinksForRequirement returns links for a requirement ID.
-func (s *SurrealStore) GetLinksForRequirement(reqID string, includeRejected bool) []*graph.StoredLink {
+func (s *SurrealStore) GetLinksForRequirement(_ context.Context, reqID string, includeRejected bool) []*graph.StoredLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1761,7 +1761,7 @@ func (s *SurrealStore) GetLinksForRequirement(reqID string, includeRejected bool
 }
 
 // GetLinksForSymbol returns links for a symbol ID.
-func (s *SurrealStore) GetLinksForSymbol(symID string, includeRejected bool) []*graph.StoredLink {
+func (s *SurrealStore) GetLinksForSymbol(_ context.Context, symID string, includeRejected bool) []*graph.StoredLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1786,7 +1786,7 @@ func (s *SurrealStore) GetLinksForSymbol(symID string, includeRejected bool) []*
 }
 
 // GetLinksForFile returns links for symbols in a file, optionally filtered by line range.
-func (s *SurrealStore) GetLinksForFile(fileID string, startLine, endLine int, minConfidence float64) []*graph.StoredLink {
+func (s *SurrealStore) GetLinksForFile(_ context.Context, fileID string, startLine, endLine int, minConfidence float64) []*graph.StoredLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1835,7 +1835,7 @@ func (s *SurrealStore) GetLinksForFile(fileID string, startLine, endLine int, mi
 }
 
 // VerifyLink marks a link as verified or rejected.
-func (s *SurrealStore) VerifyLink(linkID string, verified bool, verifiedBy string) *graph.StoredLink {
+func (s *SurrealStore) VerifyLink(_ context.Context, linkID string, verified bool, verifiedBy string) *graph.StoredLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1856,11 +1856,11 @@ func (s *SurrealStore) VerifyLink(linkID string, verified bool, verifiedBy strin
 		return nil
 	}
 
-	return s.GetLink(linkID)
+	return s.GetLink(ctx(), linkID)
 }
 
 // GetLinksForRepo returns all non-rejected links for a repository.
-func (s *SurrealStore) GetLinksForRepo(repoID string) []*graph.StoredLink {
+func (s *SurrealStore) GetLinksForRepo(_ context.Context, repoID string) []*graph.StoredLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1881,7 +1881,7 @@ func (s *SurrealStore) GetLinksForRepo(repoID string) []*graph.StoredLink {
 }
 
 // GetSymbol returns a single symbol by ID.
-func (s *SurrealStore) GetSymbol(id string) *graph.StoredSymbol {
+func (s *SurrealStore) GetSymbol(_ context.Context, id string) *graph.StoredSymbol {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1905,7 +1905,7 @@ func (s *SurrealStore) GetSymbol(id string) *graph.StoredSymbol {
 // the array map-and-IN comparison stays well inside Surreal's budget while
 // the total round-trip cost (~16 sequential queries instead of ~7000) is
 // still vastly cheaper than the original per-id N+1.
-func (s *SurrealStore) GetSymbolsByIDs(ids []string) map[string]*graph.StoredSymbol {
+func (s *SurrealStore) GetSymbolsByIDs(_ context.Context, ids []string) map[string]*graph.StoredSymbol {
 	db := s.client.DB()
 	if db == nil || len(ids) == 0 {
 		return nil
@@ -1936,7 +1936,7 @@ func (s *SurrealStore) GetSymbolsByIDs(ids []string) map[string]*graph.StoredSym
 }
 
 // GetSymbolsByFile returns all symbols in a repository for a given file path.
-func (s *SurrealStore) GetSymbolsByFile(repoID string, filePath string) []*graph.StoredSymbol {
+func (s *SurrealStore) GetSymbolsByFile(_ context.Context, repoID string, filePath string) []*graph.StoredSymbol {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1959,7 +1959,7 @@ func (s *SurrealStore) GetSymbolsByFile(repoID string, filePath string) []*graph
 // UpdateRequirementFields applies a partial update, preserving any
 // field the caller leaves nil. Enforces externalId uniqueness per-repo
 // via a pre-check against non-trashed rows.
-func (s *SurrealStore) UpdateRequirementFields(id string, fields graph.RequirementUpdate) *graph.StoredRequirement {
+func (s *SurrealStore) UpdateRequirementFields(_ context.Context, id string, fields graph.RequirementUpdate) *graph.StoredRequirement {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1967,7 +1967,7 @@ func (s *SurrealStore) UpdateRequirementFields(id string, fields graph.Requireme
 	// Load current row to preserve non-modified fields and to scope the
 	// uniqueness check to the same repo. GetRequirement already filters
 	// trashed rows.
-	current := s.GetRequirement(id)
+	current := s.GetRequirement(ctx(), id)
 	if current == nil {
 		return nil
 	}
@@ -2036,7 +2036,7 @@ func joinComma(parts []string) string {
 // ---------------------------------------------------------------------------
 
 // StoreLLMUsage records an LLM API call.
-func (s *SurrealStore) StoreLLMUsage(record *graph.LLMUsageRecord) {
+func (s *SurrealStore) StoreLLMUsage(_ context.Context, record *graph.LLMUsageRecord) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -2068,7 +2068,7 @@ func (s *SurrealStore) StoreLLMUsage(record *graph.LLMUsageRecord) {
 }
 
 // GetLLMUsage returns LLM usage records, optionally filtered by repoID.
-func (s *SurrealStore) GetLLMUsage(repoID string, limit int) []graph.LLMUsageRecord {
+func (s *SurrealStore) GetLLMUsage(_ context.Context, repoID string, limit int) []graph.LLMUsageRecord {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -2125,7 +2125,7 @@ func (s *SurrealStore) GetLLMUsage(repoID string, limit int) []graph.LLMUsageRec
 // ---------------------------------------------------------------------------
 
 // StoreEmbedding caches an embedding vector.
-func (s *SurrealStore) StoreEmbedding(record *graph.EmbeddingRecord) {
+func (s *SurrealStore) StoreEmbedding(_ context.Context, record *graph.EmbeddingRecord) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -2163,7 +2163,7 @@ func (s *SurrealStore) StoreEmbedding(record *graph.EmbeddingRecord) {
 }
 
 // GetEmbedding retrieves a cached embedding by target ID.
-func (s *SurrealStore) GetEmbedding(targetID string) *graph.EmbeddingRecord {
+func (s *SurrealStore) GetEmbedding(_ context.Context, targetID string) *graph.EmbeddingRecord {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -2209,7 +2209,7 @@ func (s *SurrealStore) GetEmbedding(targetID string) *graph.EmbeddingRecord {
 // ---------------------------------------------------------------------------
 
 // StoreReviewResult persists an AI code review result.
-func (s *SurrealStore) StoreReviewResult(record *graph.ReviewResultRecord) {
+func (s *SurrealStore) StoreReviewResult(_ context.Context, record *graph.ReviewResultRecord) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -2239,7 +2239,7 @@ func (s *SurrealStore) StoreReviewResult(record *graph.ReviewResultRecord) {
 }
 
 // GetReviewResultsForRepo returns all review results for a given repository.
-func (s *SurrealStore) GetReviewResultsForRepo(repoID string) []*graph.ReviewResultRecord {
+func (s *SurrealStore) GetReviewResultsForRepo(_ context.Context, repoID string) []*graph.ReviewResultRecord {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -2280,7 +2280,7 @@ func (s *SurrealStore) GetReviewResultsForRepo(repoID string) []*graph.ReviewRes
 
 // GetPublicSymbolDocCoverage returns the count of public symbols with doc comments
 // and the total count of public symbols for a repository.
-func (s *SurrealStore) GetPublicSymbolDocCoverage(repoID string) (withDocs int, total int) {
+func (s *SurrealStore) GetPublicSymbolDocCoverage(_ context.Context, repoID string) (withDocs int, total int) {
 	db := s.client.DB()
 	if db == nil {
 		return 0, 0
@@ -2308,7 +2308,7 @@ func (s *SurrealStore) GetPublicSymbolDocCoverage(repoID string) (withDocs int, 
 }
 
 // GetTestSymbolRatio returns the count of test symbols and total symbols for a repository.
-func (s *SurrealStore) GetTestSymbolRatio(repoID string) (tests int, total int) {
+func (s *SurrealStore) GetTestSymbolRatio(_ context.Context, repoID string) (tests int, total int) {
 	db := s.client.DB()
 	if db == nil {
 		return 0, 0
@@ -2338,7 +2338,7 @@ func (s *SurrealStore) GetTestSymbolRatio(repoID string) (tests int, total int) 
 }
 
 // GetAICodeFileRatio returns the count of AI-generated files (ai_score > 0.5) and total files.
-func (s *SurrealStore) GetAICodeFileRatio(repoID string) (aiFiles int, totalFiles int) {
+func (s *SurrealStore) GetAICodeFileRatio(_ context.Context, repoID string) (aiFiles int, totalFiles int) {
 	db := s.client.DB()
 	if db == nil {
 		return 0, 0
@@ -2368,7 +2368,7 @@ func (s *SurrealStore) GetAICodeFileRatio(repoID string) (aiFiles int, totalFile
 }
 
 // GetReviewResults returns review results for a target (symbol or file).
-func (s *SurrealStore) GetReviewResults(targetID string) []*graph.ReviewResultRecord {
+func (s *SurrealStore) GetReviewResults(_ context.Context, targetID string) []*graph.ReviewResultRecord {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -2409,7 +2409,7 @@ func (s *SurrealStore) GetReviewResults(targetID string) []*graph.ReviewResultRe
 }
 
 // StoreImpactReport stores an impact report for a repository.
-func (s *SurrealStore) StoreImpactReport(repoID string, report *graph.ImpactReport) {
+func (s *SurrealStore) StoreImpactReport(_ context.Context, repoID string, report *graph.ImpactReport) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -2506,7 +2506,7 @@ func (r *impactReportRow) toImpactReport() *graph.ImpactReport {
 }
 
 // GetLatestImpactReport returns the most recent impact report for a repository.
-func (s *SurrealStore) GetLatestImpactReport(repoID string) *graph.ImpactReport {
+func (s *SurrealStore) GetLatestImpactReport(_ context.Context, repoID string) *graph.ImpactReport {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -2521,7 +2521,7 @@ func (s *SurrealStore) GetLatestImpactReport(repoID string) *graph.ImpactReport 
 }
 
 // GetImpactReports returns impact reports for a repository, most recent first.
-func (s *SurrealStore) GetImpactReports(repoID string, limit int) ([]*graph.ImpactReport, int) {
+func (s *SurrealStore) GetImpactReports(_ context.Context, repoID string, limit int) ([]*graph.ImpactReport, int) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, 0
@@ -2546,7 +2546,7 @@ func (s *SurrealStore) GetImpactReports(repoID string, limit int) ([]*graph.Impa
 // Discovered Requirement operations (spec extraction)
 // ---------------------------------------------------------------------------
 
-func (s *SurrealStore) StoreDiscoveredRequirement(repoID string, req *graph.DiscoveredRequirement) {
+func (s *SurrealStore) StoreDiscoveredRequirement(_ context.Context, repoID string, req *graph.DiscoveredRequirement) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -2597,10 +2597,10 @@ func (s *SurrealStore) StoreDiscoveredRequirement(repoID string, req *graph.Disc
 	req.ID = "ca_discovered_requirement:" + reqID
 }
 
-func (s *SurrealStore) StoreDiscoveredRequirements(repoID string, reqs []*graph.DiscoveredRequirement) int {
+func (s *SurrealStore) StoreDiscoveredRequirements(_ context.Context, repoID string, reqs []*graph.DiscoveredRequirement) int {
 	count := 0
 	for _, req := range reqs {
-		s.StoreDiscoveredRequirement(repoID, req)
+		s.StoreDiscoveredRequirement(ctx(), repoID, req)
 		if req.ID != "" {
 			count++
 		}
@@ -2608,7 +2608,7 @@ func (s *SurrealStore) StoreDiscoveredRequirements(repoID string, reqs []*graph.
 	return count
 }
 
-func (s *SurrealStore) GetDiscoveredRequirements(repoID string, status *string, confidence *string, limit, offset int) ([]*graph.DiscoveredRequirement, int) {
+func (s *SurrealStore) GetDiscoveredRequirements(_ context.Context, repoID string, status *string, confidence *string, limit, offset int) ([]*graph.DiscoveredRequirement, int) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, 0
@@ -2691,7 +2691,7 @@ func (s *SurrealStore) GetDiscoveredRequirements(repoID string, status *string, 
 	return result, total
 }
 
-func (s *SurrealStore) GetDiscoveredRequirement(id string) *graph.DiscoveredRequirement {
+func (s *SurrealStore) GetDiscoveredRequirement(_ context.Context, id string) *graph.DiscoveredRequirement {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -2732,7 +2732,7 @@ func (s *SurrealStore) GetDiscoveredRequirement(id string) *graph.DiscoveredRequ
 	}
 }
 
-func (s *SurrealStore) PromoteDiscoveredRequirement(id string, requirementID string) *graph.DiscoveredRequirement {
+func (s *SurrealStore) PromoteDiscoveredRequirement(_ context.Context, id string, requirementID string) *graph.DiscoveredRequirement {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -2744,10 +2744,10 @@ func (s *SurrealStore) PromoteDiscoveredRequirement(id string, requirementID str
 		slog.Error("promote_discovered_requirement", "error", err)
 		return nil
 	}
-	return s.GetDiscoveredRequirement(id)
+	return s.GetDiscoveredRequirement(ctx(), id)
 }
 
-func (s *SurrealStore) DismissDiscoveredRequirement(id string, dismissedBy string, reason string) *graph.DiscoveredRequirement {
+func (s *SurrealStore) DismissDiscoveredRequirement(_ context.Context, id string, dismissedBy string, reason string) *graph.DiscoveredRequirement {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -2759,10 +2759,10 @@ func (s *SurrealStore) DismissDiscoveredRequirement(id string, dismissedBy strin
 		slog.Error("dismiss_discovered_requirement", "error", err)
 		return nil
 	}
-	return s.GetDiscoveredRequirement(id)
+	return s.GetDiscoveredRequirement(ctx(), id)
 }
 
-func (s *SurrealStore) DeleteDiscoveredRequirementsByRepo(repoID string) int {
+func (s *SurrealStore) DeleteDiscoveredRequirementsByRepo(_ context.Context, repoID string) int {
 	db := s.client.DB()
 	if db == nil {
 		return 0
@@ -2855,7 +2855,7 @@ func (c *surrealCluster) toCluster() clustering.Cluster {
 // atomically. We exploit this by composing the full delete + insert as one
 // batch query, passing cluster and member rows as JSON arrays via $clusters and
 // $members parameters iterated with FOR loops.
-func (s *SurrealStore) ReplaceClusters(ctx context.Context, repoID string, clusters []clustering.Cluster) error {
+func (s *SurrealStore) ReplaceClusters(_ context.Context, repoID string, clusters []clustering.Cluster) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -2926,7 +2926,7 @@ func (s *SurrealStore) ReplaceClusters(ctx context.Context, repoID string, clust
 	// statement assigns NONE to the field when the key is missing, which
 	// SurrealDB v2.2+ rejects for option<string> inside a transactional
 	// FOR-loop.
-	_, err := surrealdb.Query[interface{}](ctx, db,
+	_, err := surrealdb.Query[interface{}](ctx(), db,
 		`BEGIN;
 		 DELETE cluster_member WHERE repo_id = $repo_id;
 		 DELETE cluster        WHERE repo_id = $repo_id;

@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 )
@@ -251,7 +252,7 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 	}
 	testSymsByID := map[string]testSymInfo{}
 
-	allSyms, _ := h.store.GetSymbols(repoID, nil, nil, 0, 0)
+	allSyms, _ := h.store.GetSymbols(context.Background(), repoID, nil, nil, 0, 0)
 	for _, sym := range allSyms {
 		if sym.IsTest {
 			testSymsByID[sym.ID] = testSymInfo{FilePath: sym.FilePath, Name: sym.Name}
@@ -274,7 +275,7 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 	var symbolResults []changeImpactSymbol
 
 	for _, targetID := range targetIDs {
-		sym := h.store.GetSymbol(targetID)
+		sym := h.store.GetSymbol(context.Background(), targetID)
 		if sym == nil {
 			continue
 		}
@@ -284,8 +285,8 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 		}
 
 		// Callers (1 hop).
-		callerIDs := h.store.GetCallers(targetID)
-		callerMap := h.store.GetSymbolsByIDs(callerIDs)
+		callerIDs := h.store.GetCallers(context.Background(), targetID)
+		callerMap := h.store.GetSymbolsByIDs(context.Background(), callerIDs)
 		var callers []map[string]interface{}
 		for _, c := range callerMap {
 			if c == nil || c.RepoID != repoID {
@@ -338,8 +339,8 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 		}
 
 		// Source 1 — persisted edges (highest confidence).
-		if directIDs := h.store.GetTestsForSymbolPersisted(targetID); len(directIDs) > 0 {
-			directMap := h.store.GetSymbolsByIDs(directIDs)
+		if directIDs := h.store.GetTestsForSymbolPersisted(context.Background(), targetID); len(directIDs) > 0 {
+			directMap := h.store.GetSymbolsByIDs(context.Background(), directIDs)
 			for _, ts := range directMap {
 				if ts != nil && ts.RepoID == repoID {
 					addTestMatch(ts.FilePath, ts.Name, "direct")
@@ -378,7 +379,7 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 		// Aggregation: take the max confidence across all links for this symbol.
 		var symReqs []requirementSummary
 		symConfidence := 0.0
-		for _, link := range h.store.GetLinksForSymbol(targetID, false) {
+		for _, link := range h.store.GetLinksForSymbol(context.Background(), targetID, false) {
 			if link.RequirementID == "" {
 				continue
 			}
@@ -386,7 +387,7 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 			if link.Confidence > symConfidence {
 				symConfidence = link.Confidence
 			}
-			req := h.store.GetRequirement(link.RequirementID)
+			req := h.store.GetRequirement(context.Background(), link.RequirementID)
 			if req == nil {
 				continue
 			}

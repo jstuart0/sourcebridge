@@ -37,7 +37,7 @@ type Synthesizer interface {
 // has no readable clone — the orchestrator then degrades to
 // summary-only retrieval.
 type RepoLocator interface {
-	LocateRepoClone(repoID string) (cloneRoot string, ok bool)
+	LocateRepoClone(ctx context.Context, repoID string) (cloneRoot string, ok bool)
 }
 
 // GraphExpander returns caller/callee neighbors for a symbol. The
@@ -45,8 +45,8 @@ type RepoLocator interface {
 // "how does X call Y?" questions have grounded answers. Nil is OK
 // — deep mode simply skips graph expansion.
 type GraphExpander interface {
-	GetCallers(symbolID string) []GraphNeighbor
-	GetCallees(symbolID string) []GraphNeighbor
+	GetCallers(ctx context.Context, symbolID string) []GraphNeighbor
+	GetCallees(ctx context.Context, symbolID string) []GraphNeighbor
 }
 
 // GraphNeighbor is the minimum shape the orchestrator needs for graph
@@ -65,16 +65,16 @@ type GraphNeighbor struct {
 // context block. Used by discussCode routing to preserve the existing
 // ArtifactID parameter's behavior.
 type ArtifactLookup interface {
-	ArtifactContext(artifactID string) string
+	ArtifactContext(ctx context.Context, artifactID string) string
 }
 
 // RequirementLookup resolves a requirement ID to a context block.
 type RequirementLookup interface {
-	RequirementContext(requirementID string) string
+	RequirementContext(ctx context.Context, requirementID string) string
 	// RequirementLabelsForSymbols returns the ExternalID (or Title)
 	// for every requirement linked to any of the supplied symbol IDs.
 	// Deduped, stable order.
-	RequirementLabelsForSymbols(symbolIDs []string) []string
+	RequirementLabelsForSymbols(ctx context.Context, symbolIDs []string) []string
 }
 
 // SymbolDetail bundles the structured fields a single
@@ -107,9 +107,9 @@ type SymbolDetail struct {
 //   - SymbolDetails: structured fields for a symbol in a single store
 //     round-trip; ok=true means safe to attempt source slicing.
 type SymbolLookup interface {
-	SymbolContext(symbolID string) string
-	SymbolFilePath(symbolID string) string
-	SymbolsInFile(repoID, filePath string) []SymbolContextRef
+	SymbolContext(ctx context.Context, symbolID string) string
+	SymbolFilePath(ctx context.Context, symbolID string) string
+	SymbolsInFile(ctx context.Context, repoID, filePath string) []SymbolContextRef
 	// SymbolDetails returns the symbol's identity, file path, 1-based
 	// inclusive line range, and signature in a single store round-trip.
 	// ok=true means "safe to attempt source slicing" — the implementer
@@ -117,7 +117,7 @@ type SymbolLookup interface {
 	// EndLine >= StartLine. Callers must guard on ok before slicing
 	// source; do NOT use ok=false to infer "symbol unknown" (use
 	// SymbolFilePath or graph queries for existence).
-	SymbolDetails(symbolID string) (SymbolDetail, bool)
+	SymbolDetails(ctx context.Context, symbolID string) (SymbolDetail, bool)
 }
 
 // SymbolContextRef is the minimal identifier shape used for
@@ -138,7 +138,7 @@ type SymbolContextRef struct {
 // path-traversal safety guarantees as resolveRepoSourcePath +
 // safeJoinPath on the existing discussCode path.
 type FileReader interface {
-	ReadRepoFile(repoID, filePath string) (string, error)
+	ReadRepoFile(ctx context.Context, repoID, filePath string) (string, error)
 }
 
 // Searcher is the hybrid retrieval backbone the deep pipeline

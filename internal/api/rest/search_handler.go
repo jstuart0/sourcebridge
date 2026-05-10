@@ -68,7 +68,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// GetRepository on that store returns nil when the caller can't
 	// see the repo, which is our authoritative access check.
 	store := s.getStore(r)
-	if store.GetRepository(req.Repo) == nil {
+	if store.GetRepository(r.Context(), req.Repo) == nil {
 		http.Error(w, "repository not found or access denied", http.StatusNotFound)
 		return
 	}

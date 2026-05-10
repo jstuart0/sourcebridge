@@ -1,6 +1,7 @@
 package graphql
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -41,12 +42,12 @@ func classifyError(err error) string {
 	}
 }
 
-func persistArtifactFailure(store knowledgepkg.KnowledgeStore, artifactID string, err error) {
+func persistArtifactFailure(ctx context.Context, store knowledgepkg.KnowledgeStore, artifactID string, err error) {
 	if store == nil || artifactID == "" || err == nil {
 		return
 	}
 	code := classifyError(err)
-	_ = store.SetArtifactFailed(artifactID, code, err.Error())
+	_ = store.SetArtifactFailed(ctx, artifactID, code, err.Error())
 }
 
 const staleGenerationThreshold = 60 * time.Second

@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 )
@@ -137,7 +138,7 @@ func (h *mcpHandler) callGetChangedSymbols(session *mcpSession, args json.RawMes
 	//
 	// GetSymbolsByIDs returns a map[id]*StoredSymbol. IDs not found in the
 	// store are absent from the map; we skip them silently.
-	symMap := h.store.GetSymbolsByIDs(touchedSymbolIDs)
+	symMap := h.store.GetSymbolsByIDs(context.Background(), touchedSymbolIDs)
 
 	// Step 3: dedupe + cross-repo guard.
 	//

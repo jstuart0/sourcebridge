@@ -77,7 +77,7 @@ func runIndex(cmd *cobra.Command, args []string) error {
 
 	// Store results in graph
 	store := graph.NewStore()
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(cmd.Context(), result)
 	if err != nil {
 		return fmt.Errorf("storing results: %w", err)
 	}

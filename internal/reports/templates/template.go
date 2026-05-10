@@ -184,7 +184,7 @@ type TemplateConfig struct {
 type SymbolGraph interface {
 	// ExportedSymbols returns all exported symbols for the given repo.
 	// Symbols are returned in an unspecified order; callers sort as needed.
-	ExportedSymbols(repoID string) ([]Symbol, error)
+	ExportedSymbols(ctx context.Context, repoID string) ([]Symbol, error)
 }
 
 // Symbol is one exported identifier from the symbol graph.

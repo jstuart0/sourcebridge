@@ -88,14 +88,14 @@ func seedImportersFixture(t *testing.T, h *mcpTestHarness) importersFixture {
 			},
 		},
 	}
-	repoA, err := h.store.StoreIndexResult(resultA)
+	repoA, err := h.store.StoreIndexResult(t.Context(), resultA)
 	if err != nil {
 		t.Fatalf("StoreIndexResult repoA: %v", err)
 	}
 	fix.RepoID = repoA.ID
 
 	// Compute package-level dependency graph for repo A.
-	h.store.RecomputePackageDependencies(fix.RepoID)
+	h.store.RecomputePackageDependencies(t.Context(), fix.RepoID)
 
 	// ---- Repo B (cross-repo isolation) ----
 	// Identical package path "internal/auth" — must not leak into repo A queries.
@@ -120,12 +120,12 @@ func seedImportersFixture(t *testing.T, h *mcpTestHarness) importersFixture {
 			},
 		},
 	}
-	repoB, err := h.store.StoreIndexResult(resultB)
+	repoB, err := h.store.StoreIndexResult(t.Context(), resultB)
 	if err != nil {
 		t.Fatalf("StoreIndexResult repoB: %v", err)
 	}
 	fix.RepoBID = repoB.ID
-	h.store.RecomputePackageDependencies(fix.RepoBID)
+	h.store.RecomputePackageDependencies(t.Context(), fix.RepoBID)
 
 	return fix
 }
@@ -482,11 +482,11 @@ func TestMCP_FindImporters_Pagination(t *testing.T) {
 		RepoPath: "/tmp/pagination-importers-repo",
 		Files:    files,
 	}
-	repo, err := h.store.StoreIndexResult(result)
+	repo, err := h.store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
-	h.store.RecomputePackageDependencies(repo.ID)
+	h.store.RecomputePackageDependencies(t.Context(), repo.ID)
 
 	// Page 1 — no cursor, limit 50.
 	resp1 := h.sendRPC(sess, 7, "tools/call", map[string]interface{}{
@@ -575,11 +575,11 @@ func TestMCP_FindImporters_UnindexedRepo(t *testing.T) {
 			},
 		},
 	}
-	repo, err := h.store.StoreIndexResult(result)
+	repo, err := h.store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
-	// Deliberately NOT calling h.store.RecomputePackageDependencies(repo.ID).
+	// Deliberately NOT calling h.store.RecomputePackageDependencies(t.Context(), repo.ID).
 
 	resp := h.sendRPC(sess, 9, "tools/call", map[string]interface{}{
 		"name": "find_importers",
@@ -651,11 +651,11 @@ func TestMCP_FindImporters_ModulePathMatch(t *testing.T) {
 			},
 		},
 	}
-	repo, err := h.store.StoreIndexResult(result)
+	repo, err := h.store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
-	h.store.RecomputePackageDependencies(repo.ID)
+	h.store.RecomputePackageDependencies(t.Context(), repo.ID)
 
 	resp := h.sendRPC(sess, 10, "tools/call", map[string]interface{}{
 		"name": "find_importers",

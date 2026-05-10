@@ -4,6 +4,7 @@
 package knowledge
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"sort"
@@ -14,14 +15,14 @@ import (
 // MarkAllStale marks all knowledge artifacts for a repository as stale.
 // This should be called after any change that could invalidate generated
 // knowledge (reindex, requirements import, link changes).
-func MarkAllStale(store KnowledgeStore, repoID string) {
+func MarkAllStale(ctx context.Context, store KnowledgeStore, repoID string) {
 	if store == nil {
 		return
 	}
-	artifacts := store.GetKnowledgeArtifacts(repoID)
+	artifacts := store.GetKnowledgeArtifacts(ctx, repoID)
 	for _, a := range artifacts {
 		if a.Status == StatusReady && !a.Stale {
-			if err := store.MarkKnowledgeArtifactStale(a.ID, true); err != nil {
+			if err := store.MarkKnowledgeArtifactStale(ctx, a.ID, true); err != nil {
 				slog.Warn("failed to mark knowledge artifact stale",
 					"artifact_id", a.ID,
 					"error", err,
@@ -29,7 +30,7 @@ func MarkAllStale(store KnowledgeStore, repoID string) {
 			}
 		}
 	}
-	if err := store.MarkRepositoryUnderstandingNeedsRefresh(repoID); err != nil {
+	if err := store.MarkRepositoryUnderstandingNeedsRefresh(ctx, repoID); err != nil {
 		slog.Warn("failed to mark repository understanding refresh-needed",
 			"repo_id", repoID,
 			"error", err,
@@ -57,6 +58,7 @@ func MarkAllStale(store KnowledgeStore, repoID string) {
 // graph.StaleArtifactReason — the repo-level caller can copy these into
 // ImpactReport.StaleArtifactReasons.
 func MarkStaleForImpact(
+	ctx context.Context,
 	store KnowledgeStore,
 	repoID string,
 	symbolsChanged []string,
@@ -73,7 +75,7 @@ func MarkStaleForImpact(
 
 	// Always signal the repository understanding to refresh. This is cheap,
 	// idempotent, and preserves the previous MarkAllStale contract.
-	if err := store.MarkRepositoryUnderstandingNeedsRefresh(repoID); err != nil {
+	if err := store.MarkRepositoryUnderstandingNeedsRefresh(ctx, repoID); err != nil {
 		slog.Warn("failed to mark repository understanding refresh-needed",
 			"repo_id", repoID,
 			"error", err,
@@ -96,7 +98,7 @@ func MarkStaleForImpact(
 			"max_changes", maxChanges,
 			"reason", "change_set_exceeds_max",
 		)
-		return blanketStaleAll(store, repoID, reportID, "change_set_exceeds_max")
+		return blanketStaleAll(ctx, store, repoID, reportID, "change_set_exceeds_max")
 	}
 
 	// Resolve artifacts whose evidence references the changed symbols/files.
@@ -107,7 +109,7 @@ func MarkStaleForImpact(
 
 	directly := make(map[string]*graph.StaleArtifactReason)
 	if len(sources) > 0 {
-		for _, a := range store.GetArtifactsForSources(repoID, sources) {
+		for _, a := range store.GetArtifactsForSources(ctx, repoID, sources) {
 			if a == nil {
 				continue
 			}
@@ -120,7 +122,7 @@ func MarkStaleForImpact(
 		}
 	}
 	if len(filesChanged) > 0 {
-		for _, a := range store.GetArtifactsForFiles(repoID, filesChanged) {
+		for _, a := range store.GetArtifactsForFiles(ctx, repoID, filesChanged) {
 			if a == nil {
 				continue
 			}
@@ -141,7 +143,7 @@ func MarkStaleForImpact(
 	// Decide a stale reason for every ready-and-fresh artifact in the repo.
 	// The universe of candidates is GetKnowledgeArtifacts; we skip pending,
 	// generating, and already-stale artifacts (same contract as MarkAllStale).
-	candidates := store.GetKnowledgeArtifacts(repoID)
+	candidates := store.GetKnowledgeArtifacts(ctx, repoID)
 	reasons := make([]graph.StaleArtifactReason, 0, len(candidates))
 
 	for _, a := range candidates {
@@ -158,7 +160,7 @@ func MarkStaleForImpact(
 		}
 
 		reasonJSON := mustMarshalReason(reason)
-		if err := store.MarkKnowledgeArtifactStaleWithReason(a.ID, reasonJSON, reportID); err != nil {
+		if err := store.MarkKnowledgeArtifactStaleWithReason(ctx, a.ID, reasonJSON, reportID); err != nil {
 			slog.Warn("failed to mark knowledge artifact stale",
 				"artifact_id", a.ID,
 				"error", err,
@@ -325,8 +327,8 @@ func matchingFilePaths(a *Artifact, changedFiles []string) []string {
 // blanketStaleAll performs a blanket stale sweep for use when selective
 // invalidation is bypassed (e.g. change-set too large). Each affected artifact
 // is recorded with Blanket=true so the GraphQL reason field still has data.
-func blanketStaleAll(store KnowledgeStore, repoID, reportID, why string) []graph.StaleArtifactReason {
-	candidates := store.GetKnowledgeArtifacts(repoID)
+func blanketStaleAll(ctx context.Context, store KnowledgeStore, repoID, reportID, why string) []graph.StaleArtifactReason {
+	candidates := store.GetKnowledgeArtifacts(ctx, repoID)
 	reasons := make([]graph.StaleArtifactReason, 0, len(candidates))
 	for _, a := range candidates {
 		if a == nil || a.Status != StatusReady || a.Stale {
@@ -338,7 +340,7 @@ func blanketStaleAll(store KnowledgeStore, repoID, reportID, why string) []graph
 			ReportID:   reportID,
 		}
 		reasonJSON := mustMarshalReason(&reason)
-		if err := store.MarkKnowledgeArtifactStaleWithReason(a.ID, reasonJSON, reportID); err != nil {
+		if err := store.MarkKnowledgeArtifactStaleWithReason(ctx, a.ID, reasonJSON, reportID); err != nil {
 			slog.Warn("failed to mark knowledge artifact stale",
 				"artifact_id", a.ID,
 				"error", err,

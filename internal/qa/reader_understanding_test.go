@@ -4,6 +4,7 @@
 package qa
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -17,16 +18,16 @@ type fakeReader struct {
 	summaryErr    error
 }
 
-func (f *fakeReader) GetRepositoryUnderstanding(repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding {
+func (f *fakeReader) GetRepositoryUnderstanding(_ context.Context, repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding {
 	return f.understanding
 }
-func (f *fakeReader) GetSummaryNodes(corpusID string) ([]comprehension.SummaryNode, error) {
+func (f *fakeReader) GetSummaryNodes(_ context.Context, corpusID string) ([]comprehension.SummaryNode, error) {
 	return f.summaryNodes, f.summaryErr
 }
 
 func TestGetRepositoryStatus_NoRow(t *testing.T) {
 	r := &fakeReader{}
-	st := GetRepositoryStatus(r, "repo-1", "MyRepo")
+	st := GetRepositoryStatus(t.Context(), r, "repo-1", "MyRepo")
 	if st == nil {
 		t.Fatal("expected non-nil status")
 	}
@@ -50,7 +51,7 @@ func TestGetRepositoryStatus_Ready(t *testing.T) {
 			ModelUsed:    "claude-sonnet-4-6",
 		},
 	}
-	st := GetRepositoryStatus(r, "repo-1", "MyRepo")
+	st := GetRepositoryStatus(t.Context(), r, "repo-1", "MyRepo")
 	if !st.Ready {
 		t.Fatal("expected Ready=true")
 	}
@@ -66,7 +67,7 @@ func TestGetRepositoryStatus_NotReadyWhenPartial(t *testing.T) {
 			TreeStatus: knowledge.UnderstandingTreePartial,
 		},
 	}
-	st := GetRepositoryStatus(r, "r", "n")
+	st := GetRepositoryStatus(t.Context(), r, "r", "n")
 	if st.Ready {
 		t.Error("partial tree should not be ready")
 	}
@@ -116,7 +117,7 @@ func TestGetSummaryEvidence_SortingAndScoring(t *testing.T) {
 			},
 		},
 	}
-	ev, err := GetSummaryEvidence(r, "c", "How does the auth service handle sessions?", "execution_flow")
+	ev, err := GetSummaryEvidence(t.Context(), r, "c", "How does the auth service handle sessions?", "execution_flow")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +134,7 @@ func TestGetSummaryEvidence_SortingAndScoring(t *testing.T) {
 
 func TestGetSummaryEvidence_EmptyCorpus(t *testing.T) {
 	r := &fakeReader{}
-	ev, err := GetSummaryEvidence(r, "", "anything", "behavior")
+	ev, err := GetSummaryEvidence(t.Context(), r, "", "anything", "behavior")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +151,7 @@ func TestGetSummaryEvidence_ArchitectureBoost(t *testing.T) {
 				Metadata: `{}`},
 		},
 	}
-	ev, err := GetSummaryEvidence(r, "c", "What is the architecture?", "architecture")
+	ev, err := GetSummaryEvidence(t.Context(), r, "c", "What is the architecture?", "architecture")
 	if err != nil {
 		t.Fatal(err)
 	}

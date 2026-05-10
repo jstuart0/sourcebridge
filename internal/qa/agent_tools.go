@@ -277,7 +277,7 @@ func (d *AgentToolDispatcher) dispatchReadFile(ctx context.Context, call ToolCal
 		return errResult(call.CallID, ErrServiceUnavailable, "file reader not configured")
 	}
 	// Safe path join is enforced inside FileReader.ReadRepoFile.
-	content, err := d.o.files.ReadRepoFile(d.repoID, args.Path)
+	content, err := d.o.files.ReadRepoFile(ctx, d.repoID, args.Path)
 	if err != nil {
 		// Map known errors to enum values so the LLM can recover.
 		if errors.Is(err, ctx.Err()) {
@@ -373,15 +373,15 @@ var toolSchemaGetCallees = ToolSchema{
   }`,
 }
 
-func (d *AgentToolDispatcher) dispatchGetCallers(_ context.Context, call ToolCall) ToolResult {
-	return d.dispatchGraph(call, true)
+func (d *AgentToolDispatcher) dispatchGetCallers(ctx context.Context, call ToolCall) ToolResult {
+	return d.dispatchGraph(ctx, call, true)
 }
 
-func (d *AgentToolDispatcher) dispatchGetCallees(_ context.Context, call ToolCall) ToolResult {
-	return d.dispatchGraph(call, false)
+func (d *AgentToolDispatcher) dispatchGetCallees(ctx context.Context, call ToolCall) ToolResult {
+	return d.dispatchGraph(ctx, call, false)
 }
 
-func (d *AgentToolDispatcher) dispatchGraph(call ToolCall, callers bool) ToolResult {
+func (d *AgentToolDispatcher) dispatchGraph(ctx context.Context, call ToolCall, callers bool) ToolResult {
 	var args graphArgs
 	if err := json.Unmarshal(call.Args, &args); err != nil {
 		return errResult(call.CallID, ErrInvalidArgs, "args must be an object with a `symbol_id` string")
@@ -394,9 +394,9 @@ func (d *AgentToolDispatcher) dispatchGraph(call ToolCall, callers bool) ToolRes
 	}
 	var nbrs []GraphNeighbor
 	if callers {
-		nbrs = d.o.graph.GetCallers(args.SymbolID)
+		nbrs = d.o.graph.GetCallers(ctx, args.SymbolID)
 	} else {
-		nbrs = d.o.graph.GetCallees(args.SymbolID)
+		nbrs = d.o.graph.GetCallees(ctx, args.SymbolID)
 	}
 	if nbrs == nil {
 		nbrs = []GraphNeighbor{}
@@ -451,7 +451,7 @@ var toolSchemaGetSummary = ToolSchema{
   }`,
 }
 
-func (d *AgentToolDispatcher) dispatchGetSummary(_ context.Context, call ToolCall) ToolResult {
+func (d *AgentToolDispatcher) dispatchGetSummary(ctx context.Context, call ToolCall) ToolResult {
 	var args getSummaryArgs
 	if err := json.Unmarshal(call.Args, &args); err != nil {
 		return errResult(call.CallID, ErrInvalidArgs, "args must be an object with a `unit_id` string")
@@ -465,11 +465,11 @@ func (d *AgentToolDispatcher) dispatchGetSummary(_ context.Context, call ToolCal
 	// Fetch the repo's corpus, then scan for the unit. This path is
 	// a lookup-by-id miss; we accept the O(n) scan because corpora
 	// are bounded and this tool is called at most a few times per loop.
-	status := GetRepositoryStatus(d.o.reader, d.repoID, "")
+	status := GetRepositoryStatus(ctx, d.o.reader, d.repoID, "")
 	if status == nil || status.CorpusID == "" {
 		return errResult(call.CallID, ErrCorpusUnavailable, "no understanding corpus for this repository")
 	}
-	ev, err := GetSummaryEvidence(d.o.reader, status.CorpusID, args.UnitID, "")
+	ev, err := GetSummaryEvidence(ctx, d.o.reader, status.CorpusID, args.UnitID, "")
 	if err != nil {
 		return errResult(call.CallID, ErrCorpusUnavailable, err.Error())
 	}
@@ -522,7 +522,7 @@ var toolSchemaGetRequirements = ToolSchema{
   }`,
 }
 
-func (d *AgentToolDispatcher) dispatchGetRequirements(_ context.Context, call ToolCall) ToolResult {
+func (d *AgentToolDispatcher) dispatchGetRequirements(ctx context.Context, call ToolCall) ToolResult {
 	var args getRequirementsArgs
 	if err := json.Unmarshal(call.Args, &args); err != nil {
 		return errResult(call.CallID, ErrInvalidArgs, "args must be an object")
@@ -548,7 +548,7 @@ func (d *AgentToolDispatcher) dispatchGetRequirements(_ context.Context, call To
 	// store adapter lands (proposed in a follow-up), swap in.
 	results := make([]requirementRow, 0, limit)
 	if args.ExternalID != "" {
-		if block := d.o.requirements.RequirementContext(args.ExternalID); block != "" {
+		if block := d.o.requirements.RequirementContext(ctx, args.ExternalID); block != "" {
 			results = append(results, requirementRow{
 				ExternalID:  args.ExternalID,
 				Handle:      args.ExternalID,

@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -168,7 +169,7 @@ func (h *mcpHandler) callGetFieldGuide(session *mcpSession, args json.RawMessage
 		formatLabel = "cliff_notes"
 	}
 
-	artifact := h.knowledgeStore.GetArtifactByKey(key)
+	artifact := h.knowledgeStore.GetArtifactByKey(context.Background(), key)
 	if artifact == nil {
 		return map[string]interface{}{
 			"artifact": nil,

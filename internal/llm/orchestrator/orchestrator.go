@@ -454,7 +454,7 @@ func isTerminalJob(job *llm.Job) bool {
 }
 
 func (o *Orchestrator) reapStaleJobs() {
-	active := o.store.ListActive(llm.ListFilter{})
+	active := o.store.ListActive(o.ctx, llm.ListFilter{})
 	now := time.Now()
 	for _, job := range active {
 		// CA-142: during a graceful drain the process is intentionally
@@ -533,7 +533,7 @@ func (o *Orchestrator) reapStaleJobs() {
 		// in the database.
 		o.cancelActiveRun(job.ID)
 
-		setStatusErr := o.store.SetStatus(job.ID, llm.StatusFailed)
+		setStatusErr := o.store.SetStatus(o.ctx, job.ID, llm.StatusFailed)
 		if setStatusErr != nil {
 			slog.Warn("failed to mark stale job failed; releasing claim and keeping inflight key held",
 				"job_id", job.ID,
@@ -550,6 +550,7 @@ func (o *Orchestrator) reapStaleJobs() {
 		}
 
 		setErrorErr := o.store.SetError(
+			o.ctx, 
 			job.ID,
 			"DEADLINE_EXCEEDED",
 			"Job reaped: stuck in "+string(job.Status)+" for "+age.Round(time.Second).String(),
@@ -606,7 +607,7 @@ func (o *Orchestrator) reapStaleJobs() {
 // Releasing inflight before DB writes complete would open a window for a
 // fresh enqueue to start before the zombie is terminal in the DB.
 func (o *Orchestrator) reconcileZombieJobs() {
-	active := o.store.ListActive(llm.ListFilter{})
+	active := o.store.ListActive(o.ctx, llm.ListFilter{})
 	now := time.Now()
 	reconciled := 0
 	reconciledIDs := make([]string, 0)
@@ -641,7 +642,7 @@ func (o *Orchestrator) reconcileZombieJobs() {
 			"age_seconds", now.Sub(job.UpdatedAt).Round(time.Second).Seconds(),
 			"event", "orchestrator_zombie_reconciled")
 
-		if err := o.store.SetStatus(job.ID, llm.StatusFailed); err != nil {
+		if err := o.store.SetStatus(o.ctx, job.ID, llm.StatusFailed); err != nil {
 			slog.Warn("reconcile: failed to set zombie status; releasing claim",
 				"job_id", job.ID,
 				"error", err,
@@ -652,7 +653,7 @@ func (o *Orchestrator) reconcileZombieJobs() {
 		}
 
 		errMsg := "Job marked failed by orchestrator startup reconciliation: zombie from process_id=" + job.ProcessID
-		if err := o.store.SetError(job.ID, "PROCESS_RESTART_RECONCILIATION", errMsg); err != nil {
+		if err := o.store.SetError(o.ctx, job.ID, "PROCESS_RESTART_RECONCILIATION", errMsg); err != nil {
 			slog.Warn("reconcile: failed to set zombie error; releasing claim",
 				"job_id", job.ID,
 				"error", err,
@@ -719,9 +720,9 @@ func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 
 	// DB-level dedupe first — this also covers the "process restarted
 	// with active jobs still in-flight per the DB" case.
-	if existing := o.store.GetActiveByTargetKey(req.TargetKey); existing != nil {
-		_ = o.store.IncrementAttachedRequests(existing.ID)
-		existing = o.store.GetByID(existing.ID)
+	if existing := o.store.GetActiveByTargetKey(o.ctx, req.TargetKey); existing != nil {
+		_ = o.store.IncrementAttachedRequests(o.ctx, existing.ID)
+		existing = o.store.GetByID(o.ctx, existing.ID)
 		// Synchronize the in-process registry so the fast path agrees.
 		o.inflight.claim(req.TargetKey, existing.ID)
 		slog.Info("llm_job_dedupe_hit_store",
@@ -747,10 +748,10 @@ func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 		if ok {
 			break
 		}
-		existing := o.store.GetByID(winner)
+		existing := o.store.GetByID(o.ctx, winner)
 		if existing != nil && !isTerminalJob(existing) {
-			_ = o.store.IncrementAttachedRequests(winner)
-			existing = o.store.GetByID(winner)
+			_ = o.store.IncrementAttachedRequests(o.ctx, winner)
+			existing = o.store.GetByID(o.ctx, winner)
 			slog.Info("llm_job_dedupe_hit_inflight",
 				"job_id", winner,
 				"target_key", req.TargetKey)
@@ -814,7 +815,7 @@ func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 	if job.MaxAttempts <= 0 {
 		job.MaxAttempts = o.cfg.Retry.MaxAttempts
 	}
-	if _, err := o.store.Create(job); err != nil {
+	if _, err := o.store.Create(o.ctx, job); err != nil {
 		o.inflight.release(req.TargetKey)
 		return nil, fmt.Errorf("persist job: %w", err)
 	}
@@ -834,7 +835,7 @@ func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 		return job, nil
 	case <-o.ctx.Done():
 		o.inflight.release(req.TargetKey)
-		_ = o.store.SetError(id, "ORCHESTRATOR_SHUTDOWN", "orchestrator is shutting down")
+		_ = o.store.SetError(o.ctx, id, "ORCHESTRATOR_SHUTDOWN", "orchestrator is shutting down")
 		return nil, fmt.Errorf("orchestrator shutting down")
 	}
 }
@@ -892,12 +893,12 @@ func (o *Orchestrator) DrainPending() (int, error) {
 
 // GetJob returns the current state of a job by id, or nil.
 func (o *Orchestrator) GetJob(id string) *llm.Job {
-	return o.store.GetByID(id)
+	return o.store.GetByID(o.ctx, id)
 }
 
 // SetReuseStats records structured summary reuse/cache-hit counts on a job.
 func (o *Orchestrator) SetReuseStats(id string, reused, leafHits, fileHits, packageHits, rootHits int) error {
-	return o.store.SetReuseStats(id, reused, leafHits, fileHits, packageHits, rootHits)
+	return o.store.SetReuseStats(o.ctx, id, reused, leafHits, fileHits, packageHits, rootHits)
 }
 
 // AppendJobLog persists and publishes a structured job-scoped log entry.
@@ -905,7 +906,7 @@ func (o *Orchestrator) AppendJobLog(jobID string, level llm.JobLogLevel, phase, 
 	if strings.TrimSpace(jobID) == "" {
 		return fmt.Errorf("job id is required")
 	}
-	job := o.store.GetByID(jobID)
+	job := o.store.GetByID(o.ctx, jobID)
 	if job == nil {
 		return fmt.Errorf("job %s not found", jobID)
 	}
@@ -923,7 +924,7 @@ func (o *Orchestrator) AppendJobLog(jobID string, level llm.JobLogLevel, phase, 
 			payloadJSON = string(encoded)
 		}
 	}
-	entry, err := o.store.AppendLog(&llm.JobLogEntry{
+	entry, err := o.store.AppendLog(o.ctx, &llm.JobLogEntry{
 		JobID:      job.ID,
 		RepoID:     job.RepoID,
 		ArtifactID: job.ArtifactID,
@@ -948,7 +949,7 @@ func (o *Orchestrator) AppendJobLog(jobID string, level llm.JobLogLevel, phase, 
 
 // ListJobLogs returns persisted log lines for a job.
 func (o *Orchestrator) ListJobLogs(jobID string, filter llm.JobLogFilter) []*llm.JobLogEntry {
-	return o.store.ListLogs(jobID, filter)
+	return o.store.ListLogs(o.ctx, jobID, filter)
 }
 
 // Cancel requests cancellation of an active job. Pending jobs are cancelled
@@ -964,7 +965,7 @@ func (o *Orchestrator) ListJobLogs(jobID string, filter llm.JobLogFilter) []*llm
 // itself and writes Cancelled directly. The reaper backs off if it
 // fires concurrently.
 func (o *Orchestrator) Cancel(jobID string) error {
-	job := o.store.GetByID(jobID)
+	job := o.store.GetByID(o.ctx, jobID)
 	if job == nil {
 		return fmt.Errorf("job not found")
 	}
@@ -1052,12 +1053,12 @@ func (o *Orchestrator) EnqueueSync(ctx context.Context, req *llm.EnqueueRequest)
 	for {
 		select {
 		case <-ctx.Done():
-			return o.store.GetByID(waitID), ctx.Err()
+			return o.store.GetByID(ctx, waitID), ctx.Err()
 		case <-o.ctx.Done():
-			return o.store.GetByID(waitID), fmt.Errorf("orchestrator shutting down")
+			return o.store.GetByID(ctx, waitID), fmt.Errorf("orchestrator shutting down")
 		case ev, ok := <-events:
 			if !ok {
-				return o.store.GetByID(waitID), nil
+				return o.store.GetByID(ctx, waitID), nil
 			}
 			if ev.Job == nil || ev.Job.ID != waitID {
 				continue
@@ -1071,12 +1072,12 @@ func (o *Orchestrator) EnqueueSync(ctx context.Context, req *llm.EnqueueRequest)
 
 // ListActive returns every currently-active job matching the filter.
 func (o *Orchestrator) ListActive(filter llm.ListFilter) []*llm.Job {
-	return o.store.ListActive(filter)
+	return o.store.ListActive(o.ctx, filter)
 }
 
 // ListRecent returns terminal jobs updated since the supplied time.
 func (o *Orchestrator) ListRecent(filter llm.ListFilter, since time.Time) []*llm.Job {
-	return o.store.ListRecent(filter, since)
+	return o.store.ListRecent(o.ctx, filter, since)
 }
 
 // Metrics returns a point-in-time metrics snapshot for the Monitor page.
@@ -1146,7 +1147,7 @@ func (o *Orchestrator) ReconfigureMaxConcurrency(max int) (oldConfigured int, ne
 // PendingSnapshot returns pending jobs ordered by queue order, oldest first.
 func (o *Orchestrator) PendingSnapshot(filter llm.ListFilter) []*llm.Job {
 	filter.Statuses = []llm.JobStatus{llm.StatusPending}
-	pending := o.store.ListActive(filter)
+	pending := o.store.ListActive(o.ctx, filter)
 	sort.Slice(pending, func(i, j int) bool {
 		if pending[i].Priority != pending[j].Priority {
 			return jobPriorityRank(pending[i].Priority) < jobPriorityRank(pending[j].Priority)
@@ -1343,7 +1344,7 @@ func (o *Orchestrator) runJob(item *workItem) {
 	defer o.clearRunState(jobID)
 
 	if o.isCancelled(jobID) {
-		if job := o.store.GetByID(jobID); job != nil && !job.Status.IsTerminal() {
+		if job := o.store.GetByID(o.ctx, jobID); job != nil && !job.Status.IsTerminal() {
 			// CA-122 Phase 5b: claim before terminal write so reaper
 			// (if it fires concurrently with this just-spun-up
 			// runJob) backs off cleanly.
@@ -1355,10 +1356,10 @@ func (o *Orchestrator) runJob(item *workItem) {
 	}
 
 	// Transition pending -> generating.
-	if err := o.store.SetStatus(jobID, llm.StatusGenerating); err != nil {
+	if err := o.store.SetStatus(o.ctx, jobID, llm.StatusGenerating); err != nil {
 		slog.Warn("llm_job_set_generating_failed", "job_id", jobID, "error", err)
 	}
-	job := o.store.GetByID(jobID)
+	job := o.store.GetByID(o.ctx, jobID)
 	if job != nil {
 		o.publish(llm.JobEvent{Kind: llm.EventStarted, Job: job})
 	}
@@ -1380,8 +1381,8 @@ func (o *Orchestrator) runJob(item *workItem) {
 	}
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if cooldown := o.breaker.waitDuration(req.Subsystem); cooldown > 0 {
-			_ = o.store.SetProgress(jobID, 0.02, "backoff", "Waiting for model backend to recover", 0)
-			if job := o.store.GetByID(jobID); job != nil {
+			_ = o.store.SetProgress(o.ctx, jobID, 0.02, "backoff", "Waiting for model backend to recover", 0)
+			if job := o.store.GetByID(o.ctx, jobID); job != nil {
 				o.publish(llm.JobEvent{Kind: llm.EventProgress, Job: job})
 			}
 			_ = o.AppendJobLog(jobID, llm.LogLevelWarn, "backoff", "breaker_backoff", "Waiting for model backend to recover", map[string]any{
@@ -1411,7 +1412,7 @@ func (o *Orchestrator) runJob(item *workItem) {
 				}
 				return
 			}
-			if err := o.store.IncrementRetry(jobID); err != nil {
+			if err := o.store.IncrementRetry(o.ctx, jobID); err != nil {
 				slog.Warn("llm_job_increment_retry_failed", "job_id", jobID, "error", err)
 			}
 		}
@@ -1549,11 +1550,11 @@ func lastErrString(err error) string {
 // finalizeReady transitions the job to ready, records metrics, and emits
 // an event.
 func (o *Orchestrator) finalizeReady(jobID string, req *llm.EnqueueRequest) {
-	if err := o.store.SetStatus(jobID, llm.StatusReady); err != nil {
+	if err := o.store.SetStatus(o.ctx, jobID, llm.StatusReady); err != nil {
 		slog.Warn("llm_job_set_ready_failed", "job_id", jobID, "error", err)
 	}
 	o.breaker.recordSuccess(req.Subsystem)
-	job := o.store.GetByID(jobID)
+	job := o.store.GetByID(o.ctx, jobID)
 	if job != nil {
 		o.metrics.record(req.Subsystem, req.JobType, job.Elapsed(), llm.StatusReady)
 		o.publish(llm.JobEvent{Kind: llm.EventCompleted, Job: job})
@@ -1570,10 +1571,10 @@ func (o *Orchestrator) finalizeFailed(jobID string, req *llm.EnqueueRequest, err
 	if err != nil {
 		msg = err.Error()
 	}
-	if setErr := o.store.SetError(jobID, code, msg); setErr != nil {
+	if setErr := o.store.SetError(o.ctx, jobID, code, msg); setErr != nil {
 		slog.Warn("llm_job_set_error_failed", "job_id", jobID, "error", setErr)
 	}
-	job := o.store.GetByID(jobID)
+	job := o.store.GetByID(o.ctx, jobID)
 	if job != nil {
 		o.metrics.record(req.Subsystem, req.JobType, job.Elapsed(), llm.StatusFailed)
 		o.publish(llm.JobEvent{Kind: llm.EventFailed, Job: job})
@@ -1593,10 +1594,10 @@ func (o *Orchestrator) finalizeFailed(jobID string, req *llm.EnqueueRequest, err
 
 // finalizeCancelled marks the job cancelled (does not count as failure).
 func (o *Orchestrator) finalizeCancelled(jobID string) {
-	if err := o.store.SetStatus(jobID, llm.StatusCancelled); err != nil {
+	if err := o.store.SetStatus(o.ctx, jobID, llm.StatusCancelled); err != nil {
 		slog.Warn("llm_job_set_cancelled_failed", "job_id", jobID, "error", err)
 	}
-	job := o.store.GetByID(jobID)
+	job := o.store.GetByID(o.ctx, jobID)
 	if job != nil {
 		o.metrics.record(job.Subsystem, job.JobType, job.Elapsed(), llm.StatusCancelled)
 		o.publish(llm.JobEvent{Kind: llm.EventCancelled, Job: job})

@@ -91,7 +91,7 @@ func TestHandleAsk_HappyPath(t *testing.T) {
 	orch := qa.New(synth, nil, nil, qa.DefaultConfig())
 
 	store := graphstore.NewStore()
-	repo, err := store.CreateRepository("test-repo", "/tmp/test")
+	repo, err := store.CreateRepository(t.Context(), "test-repo", "/tmp/test")
 	if err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestAskHandlerAllowsAccessibleRepo(t *testing.T) {
 	orch := qa.New(synth, nil, nil, qa.DefaultConfig())
 
 	store := graphstore.NewStore()
-	repo, err := store.CreateRepository("my-repo", "/src/my-repo")
+	repo, err := store.CreateRepository(t.Context(), "my-repo", "/src/my-repo")
 	if err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}

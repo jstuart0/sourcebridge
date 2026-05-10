@@ -32,7 +32,7 @@ type ExactAdapter struct {
 
 func (*ExactAdapter) Name() string { return "exact" }
 
-func (a *ExactAdapter) Search(_ context.Context, in RouterOutput, req *Request) AdapterResult {
+func (a *ExactAdapter) Search(ctx context.Context, in RouterOutput, req *Request) AdapterResult {
 	res := AdapterResult{AdapterID: "exact"}
 	if a == nil || a.Store == nil || in.Cleaned == "" {
 		res.Unavailable = true
@@ -42,7 +42,7 @@ func (a *ExactAdapter) Search(_ context.Context, in RouterOutput, req *Request) 
 	// filtering below trims it to just the exact hits.
 	qPtr := in.Cleaned
 	kindPtr := kindFilter(in.Filters, req.Filters)
-	syms, _ := a.Store.GetSymbols(req.Repo, &qPtr, kindPtr, 200, 0)
+	syms, _ := a.Store.GetSymbols(ctx, req.Repo, &qPtr, kindPtr, 200, 0)
 
 	lowerQ := strings.ToLower(in.Cleaned)
 	for i, s := range syms {
@@ -89,7 +89,7 @@ type FTSAdapter struct {
 
 func (*FTSAdapter) Name() string { return "fts" }
 
-func (a *FTSAdapter) Search(_ context.Context, in RouterOutput, req *Request) AdapterResult {
+func (a *FTSAdapter) Search(ctx context.Context, in RouterOutput, req *Request) AdapterResult {
 	res := AdapterResult{AdapterID: "fts"}
 	if a == nil || a.Store == nil || in.Cleaned == "" {
 		res.Unavailable = true
@@ -104,7 +104,7 @@ func (a *FTSAdapter) Search(_ context.Context, in RouterOutput, req *Request) Ad
 
 	// Use FTS capability when available.
 	if fts, ok := a.Store.(graph.FTSSymbolSearch); ok {
-		ranked := fts.SearchSymbolsFTS(req.Repo, in.Cleaned, filters, effLimit(req.Limit))
+		ranked := fts.SearchSymbolsFTS(ctx, req.Repo, in.Cleaned, filters, effLimit(req.Limit))
 		// Nil from the capability means "backend failed" — mark as
 		// unavailable so the fuser ignores this adapter (consistent
 		// with plan §Graceful degradation).
@@ -141,7 +141,7 @@ fallback:
 	// score by token-overlap + light boosts for name-prefix / suffix
 	// hits. This preserves natural-language recall in OSS mode and
 	// during the pre-migration window.
-	syms, _ := a.Store.GetSymbols(req.Repo, nil, filters.Kind, 5000, 0)
+	syms, _ := a.Store.GetSymbols(ctx, req.Repo, nil, filters.Kind, 5000, 0)
 	tokens := tokenizeQuery(in.Cleaned)
 	res.Candidates = make([]*Candidate, 0, len(syms))
 	for _, s := range syms {
@@ -206,7 +206,7 @@ func (a *VectorAdapter) Search(ctx context.Context, in RouterOutput, req *Reques
 		Language: langFilter(in.Filters, req.Filters),
 		FilePath: pathFilter(in.Filters, req.Filters),
 	}
-	matches := vs.SearchSymbolsVector(req.Repo, qvec, filters, effLimit(req.Limit))
+	matches := vs.SearchSymbolsVector(ctx, req.Repo, qvec, filters, effLimit(req.Limit))
 	if matches == nil {
 		// Backend query failed — treat as unavailable.
 		res.Unavailable = true
@@ -242,7 +242,7 @@ type GraphAdapter struct {
 
 func (*GraphAdapter) Name() string { return "graph" }
 
-func (a *GraphAdapter) Search(_ context.Context, in RouterOutput, req *Request) AdapterResult {
+func (a *GraphAdapter) Search(ctx context.Context, in RouterOutput, req *Request) AdapterResult {
 	res := AdapterResult{AdapterID: "graph"}
 	if a == nil || a.Store == nil || len(in.Structural) == 0 || in.Seed == "" {
 		res.Unavailable = true
@@ -250,7 +250,7 @@ func (a *GraphAdapter) Search(_ context.Context, in RouterOutput, req *Request) 
 	}
 
 	// Resolve the seed by name or qualified_name.
-	seedSym := resolveSeed(a.Store, req.Repo, in.Seed)
+	seedSym := resolveSeed(ctx, a.Store, req.Repo, in.Seed)
 	if seedSym == nil {
 		return res
 	}
@@ -259,9 +259,9 @@ func (a *GraphAdapter) Search(_ context.Context, in RouterOutput, req *Request) 
 	for _, op := range in.Structural {
 		switch op {
 		case OpCalls:
-			ids = append(ids, a.Store.GetCallees(seedSym.ID)...)
+			ids = append(ids, a.Store.GetCallees(ctx, seedSym.ID)...)
 		case OpCallers:
-			ids = append(ids, a.Store.GetCallers(seedSym.ID)...)
+			ids = append(ids, a.Store.GetCallers(ctx, seedSym.ID)...)
 		case OpImpl:
 			// V1: implementation discovery is a separate investment
 			// (needs interface-symbol edges). Return empty for now.
@@ -270,7 +270,7 @@ func (a *GraphAdapter) Search(_ context.Context, in RouterOutput, req *Request) 
 
 	// Dedupe while preserving first-seen order.
 	seen := make(map[string]bool, len(ids))
-	symMap := a.Store.GetSymbolsByIDs(ids)
+	symMap := a.Store.GetSymbolsByIDs(ctx, ids)
 	rank := 0
 	for _, id := range ids {
 		if seen[id] {
@@ -434,9 +434,9 @@ func sortCandidatesByScore(cs []*Candidate) {
 
 // resolveSeed looks up a symbol by exact name first, then qualified
 // name. Returns nil if no match.
-func resolveSeed(store graph.GraphStore, repoID, seed string) *graph.StoredSymbol {
+func resolveSeed(ctx context.Context, store graph.GraphStore, repoID, seed string) *graph.StoredSymbol {
 	q := seed
-	syms, _ := store.GetSymbols(repoID, &q, nil, 50, 0)
+	syms, _ := store.GetSymbols(ctx, repoID, &q, nil, 50, 0)
 	lq := strings.ToLower(seed)
 	for _, s := range syms {
 		if strings.EqualFold(s.Name, seed) {

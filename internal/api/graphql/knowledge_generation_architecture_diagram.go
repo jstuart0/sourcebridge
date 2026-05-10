@@ -55,7 +55,7 @@ func (s architectureDiagramGenerationService) Generate(ctx context.Context) (*Kn
 	}.Normalized()
 	generationMode := knowledgepkg.GenerationModeUnderstandingFirst
 
-	if existing := r.KnowledgeStore.GetArtifactByKeyAndMode(key, generationMode); existing != nil {
+	if existing := r.KnowledgeStore.GetArtifactByKeyAndMode(ctx, key, generationMode); existing != nil {
 		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
 			return mapKnowledgeArtifact(existing), nil
 		}
@@ -64,7 +64,7 @@ func (s architectureDiagramGenerationService) Generate(ctx context.Context) (*Kn
 		}
 		if existing.Status == knowledgepkg.StatusFailed || existing.Stale ||
 			existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
-			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
+			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(ctx, existing.ID)
 		}
 	}
 
@@ -74,7 +74,7 @@ func (s architectureDiagramGenerationService) Generate(ctx context.Context) (*Kn
 		slog.Warn("architecture diagram: repo source unavailable, docs will be omitted from snapshot",
 			"repo_id", repo.ID, "error", repoRootErr)
 	}
-	snap, err := assembler.Assemble(repo.ID, repoRoot)
+	snap, err := assembler.Assemble(ctx, repo.ID, repoRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to assemble knowledge snapshot: %w", err)
 	}
@@ -87,7 +87,7 @@ func (s architectureDiagramGenerationService) Generate(ctx context.Context) (*Kn
 		return nil, fmt.Errorf("failed to build architecture scaffold: %w", err)
 	}
 
-	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(key, snap.SourceRevision, generationMode)
+	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(ctx, key, snap.SourceRevision, generationMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim knowledge artifact: %w", err)
 	}
@@ -137,7 +137,7 @@ func (s architectureDiagramGenerationService) runGenerationPipeline(
 	depth := p.depth
 
 	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled", 0)
-	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Snapshot assembled")
+	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 
 	var architectureBundle architectureDiagramPromptBundle
 	var architecturePromptJSON []byte
@@ -148,7 +148,7 @@ func (s architectureDiagramGenerationService) runGenerationPipeline(
 		understandingForDiagram = understanding
 		if reused {
 			rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
-			_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
+			_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 		}
 	}
 	if promptJSON, err := buildArchitectureDiagramPromptBundle(r.KnowledgeStore, repo.ID, knowledgepkg.Audience(audience), snap, understandingForDiagram, scaffoldJSON); err != nil {
@@ -189,7 +189,7 @@ func (s architectureDiagramGenerationService) runGenerationPipeline(
 	}
 
 	rt.ReportProgress(0.96, "llm", "LLM completed, persisting diagram", 0)
-	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.8, "llm", "LLM completed, persisting diagram")
+	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.8, "llm", "LLM completed, persisting diagram")
 
 	sections := []knowledgepkg.Section{{
 		Title:            "AI Architecture Diagram",
@@ -213,21 +213,21 @@ func (s architectureDiagramGenerationService) runGenerationPipeline(
 			RefinementStatus: "deep",
 		})
 	}
-	if err := r.KnowledgeStore.StoreKnowledgeSections(artifact.ID, sections); err != nil {
+	if err := r.KnowledgeStore.StoreKnowledgeSections(runCtx, artifact.ID, sections); err != nil {
 		return err
 	}
-	storedSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
+	storedSections := r.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID)
 	if len(storedSections) > 0 && len(resp.Evidence) > 0 {
-		if err := r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[0].ID, mapProtoEvidence(resp.Evidence)); err != nil {
+		if err := r.KnowledgeStore.StoreKnowledgeEvidence(runCtx, storedSections[0].ID, mapProtoEvidence(resp.Evidence)); err != nil {
 			return err
 		}
 	}
 	if len(storedSections) > 1 && len(resp.DetailEvidence) > 0 {
-		if err := r.KnowledgeStore.StoreKnowledgeEvidence(storedSections[1].ID, mapProtoEvidence(resp.DetailEvidence)); err != nil {
+		if err := r.KnowledgeStore.StoreKnowledgeEvidence(runCtx, storedSections[1].ID, mapProtoEvidence(resp.DetailEvidence)); err != nil {
 			return err
 		}
 	}
-	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(artifact.ID, knowledgepkg.StatusReady); err != nil {
+	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(runCtx, artifact.ID, knowledgepkg.StatusReady); err != nil {
 		return err
 	}
 	rt.ReportProgress(1.0, "ready", "AI architecture diagram ready", 0)
@@ -243,7 +243,7 @@ func (s architectureDiagramGenerationService) runGenerationPipeline(
 func (s architectureDiagramGenerationService) RefreshFromExisting(ctx context.Context, existing *knowledgepkg.Artifact) (*KnowledgeArtifact, error) {
 	r := s.resolver
 
-	repo := r.getStore(ctx).GetRepository(existing.RepositoryID)
+	repo := r.getStore(ctx).GetRepository(ctx, existing.RepositoryID)
 	if repo == nil {
 		return nil, fmt.Errorf("repository %s not found", existing.RepositoryID)
 	}
@@ -260,7 +260,7 @@ func (s architectureDiagramGenerationService) RefreshFromExisting(ctx context.Co
 
 	capturedStore := r.getStore(ctx)
 	err := r.enqueueKnowledgeJob(ctx, existing, "refresh:architecture_diagram", 0, func(runCtx context.Context, rt llm.Runtime) error {
-		snap, err := assembler.Assemble(repo.ID, repoRoot)
+		snap, err := assembler.Assemble(ctx, repo.ID, repoRoot)
 		if err != nil {
 			slog.Error("architecture diagram refresh assemble failed", "artifact_id", existing.ID, "error", err)
 			return err
@@ -292,7 +292,7 @@ func (s architectureDiagramGenerationService) RefreshFromExisting(ctx context.Co
 		return nil, fmt.Errorf("enqueue architecture diagram refresh job: %w", err)
 	}
 
-	updated := r.KnowledgeStore.GetKnowledgeArtifact(existing.ID)
+	updated := r.KnowledgeStore.GetKnowledgeArtifact(ctx, existing.ID)
 	if updated == nil {
 		return nil, fmt.Errorf("artifact %s not found after refresh", existing.ID)
 	}

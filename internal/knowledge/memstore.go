@@ -4,6 +4,7 @@
 package knowledge
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
@@ -38,7 +39,7 @@ func NewMemStore() *MemStore {
 // Verify at compile time that *MemStore satisfies KnowledgeStore.
 var _ KnowledgeStore = (*MemStore)(nil)
 
-func (s *MemStore) StoreKnowledgeArtifact(artifact *Artifact) (*Artifact, error) {
+func (s *MemStore) StoreKnowledgeArtifact(_ context.Context, artifact *Artifact) (*Artifact, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -58,7 +59,7 @@ func (s *MemStore) StoreKnowledgeArtifact(artifact *Artifact) (*Artifact, error)
 	return &stored, nil
 }
 
-func (s *MemStore) StoreRepositoryUnderstanding(u *RepositoryUnderstanding) (*RepositoryUnderstanding, error) {
+func (s *MemStore) StoreRepositoryUnderstanding(_ context.Context, u *RepositoryUnderstanding) (*RepositoryUnderstanding, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -91,11 +92,11 @@ func (s *MemStore) StoreRepositoryUnderstanding(u *RepositoryUnderstanding) (*Re
 	return &stored, nil
 }
 
-func (s *MemStore) ClaimArtifact(key ArtifactKey, sourceRevision SourceRevision) (*Artifact, bool, error) {
-	return s.ClaimArtifactWithMode(key, sourceRevision, "")
+func (s *MemStore) ClaimArtifact(ctx context.Context, key ArtifactKey, sourceRevision SourceRevision) (*Artifact, bool, error) {
+	return s.ClaimArtifactWithMode(ctx, key, sourceRevision, "")
 }
 
-func (s *MemStore) ClaimArtifactWithMode(key ArtifactKey, sourceRevision SourceRevision, mode GenerationMode) (*Artifact, bool, error) {
+func (s *MemStore) ClaimArtifactWithMode(_ context.Context, key ArtifactKey, sourceRevision SourceRevision, mode GenerationMode) (*Artifact, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -143,7 +144,7 @@ func (s *MemStore) ClaimArtifactWithMode(key ArtifactKey, sourceRevision SourceR
 	return artifact, true, nil
 }
 
-func (s *MemStore) GetKnowledgeArtifact(id string) *Artifact {
+func (s *MemStore) GetKnowledgeArtifact(_ context.Context, id string) *Artifact {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -156,11 +157,11 @@ func (s *MemStore) GetKnowledgeArtifact(id string) *Artifact {
 	return &out
 }
 
-func (s *MemStore) GetArtifactByKey(key ArtifactKey) *Artifact {
-	return s.GetArtifactByKeyAndMode(key, "")
+func (s *MemStore) GetArtifactByKey(ctx context.Context, key ArtifactKey) *Artifact {
+	return s.GetArtifactByKeyAndMode(ctx, key, "")
 }
 
-func (s *MemStore) GetArtifactByKeyAndMode(key ArtifactKey, mode GenerationMode) *Artifact {
+func (s *MemStore) GetArtifactByKeyAndMode(_ context.Context, key ArtifactKey, mode GenerationMode) *Artifact {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -189,7 +190,7 @@ func (s *MemStore) GetArtifactByKeyAndMode(key ArtifactKey, mode GenerationMode)
 	return &out
 }
 
-func (s *MemStore) GetKnowledgeArtifacts(repoID string) []*Artifact {
+func (s *MemStore) GetKnowledgeArtifacts(_ context.Context, repoID string) []*Artifact {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -204,7 +205,7 @@ func (s *MemStore) GetKnowledgeArtifacts(repoID string) []*Artifact {
 	return results
 }
 
-func (s *MemStore) GetRepositoryUnderstanding(repoID string, scope ArtifactScope) *RepositoryUnderstanding {
+func (s *MemStore) GetRepositoryUnderstanding(_ context.Context, repoID string, scope ArtifactScope) *RepositoryUnderstanding {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -216,7 +217,7 @@ func (s *MemStore) GetRepositoryUnderstanding(repoID string, scope ArtifactScope
 	return &out
 }
 
-func (s *MemStore) GetRepositoryUnderstandings(repoID string) []*RepositoryUnderstanding {
+func (s *MemStore) GetRepositoryUnderstandings(_ context.Context, repoID string) []*RepositoryUnderstanding {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -234,7 +235,7 @@ func (s *MemStore) GetRepositoryUnderstandings(repoID string) []*RepositoryUnder
 	return results
 }
 
-func (s *MemStore) UpdateKnowledgeArtifactStatus(id string, status ArtifactStatus) error {
+func (s *MemStore) UpdateKnowledgeArtifactStatus(_ context.Context, id string, status ArtifactStatus) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -255,7 +256,7 @@ func (s *MemStore) UpdateKnowledgeArtifactStatus(id string, status ArtifactStatu
 	return nil
 }
 
-func (s *MemStore) SetArtifactFailed(id string, code string, message string) error {
+func (s *MemStore) SetArtifactFailed(_ context.Context, id string, code string, message string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -270,11 +271,11 @@ func (s *MemStore) SetArtifactFailed(id string, code string, message string) err
 	return nil
 }
 
-func (s *MemStore) UpdateKnowledgeArtifactProgress(id string, progress float64) error {
-	return s.UpdateKnowledgeArtifactProgressWithPhase(id, progress, "", "")
+func (s *MemStore) UpdateKnowledgeArtifactProgress(ctx context.Context, id string, progress float64) error {
+	return s.UpdateKnowledgeArtifactProgressWithPhase(ctx, id, progress, "", "")
 }
 
-func (s *MemStore) UpdateKnowledgeArtifactProgressWithPhase(id string, progress float64, phase, message string) error {
+func (s *MemStore) UpdateKnowledgeArtifactProgressWithPhase(_ context.Context, id string, progress float64, phase, message string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -299,7 +300,7 @@ func (s *MemStore) UpdateKnowledgeArtifactProgressWithPhase(id string, progress 
 	return nil
 }
 
-func (s *MemStore) MarkKnowledgeArtifactStale(id string, stale bool) error {
+func (s *MemStore) MarkKnowledgeArtifactStale(_ context.Context, id string, stale bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -318,7 +319,7 @@ func (s *MemStore) MarkKnowledgeArtifactStale(id string, stale bool) error {
 	return nil
 }
 
-func (s *MemStore) MarkKnowledgeArtifactStaleWithReason(id string, reasonJSON string, reportID string) error {
+func (s *MemStore) MarkKnowledgeArtifactStaleWithReason(_ context.Context, id string, reasonJSON string, reportID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -333,7 +334,7 @@ func (s *MemStore) MarkKnowledgeArtifactStaleWithReason(id string, reasonJSON st
 	return nil
 }
 
-func (s *MemStore) GetArtifactsForSources(repoID string, sources []SourceRef) []*Artifact {
+func (s *MemStore) GetArtifactsForSources(_ context.Context, repoID string, sources []SourceRef) []*Artifact {
 	if len(sources) == 0 {
 		return nil
 	}
@@ -371,7 +372,7 @@ func (s *MemStore) GetArtifactsForSources(repoID string, sources []SourceRef) []
 	return out
 }
 
-func (s *MemStore) GetArtifactsForFiles(repoID string, filePaths []string) []*Artifact {
+func (s *MemStore) GetArtifactsForFiles(_ context.Context, repoID string, filePaths []string) []*Artifact {
 	if len(filePaths) == 0 {
 		return nil
 	}
@@ -440,7 +441,7 @@ func (s *MemStore) artifactMatchesFileLocked(artifactID string, wanted map[strin
 	return false
 }
 
-func (s *MemStore) MarkRepositoryUnderstandingNeedsRefresh(repoID string) error {
+func (s *MemStore) MarkRepositoryUnderstandingNeedsRefresh(_ context.Context, repoID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -460,7 +461,7 @@ func (s *MemStore) MarkRepositoryUnderstandingNeedsRefresh(repoID string) error 
 	return nil
 }
 
-func (s *MemStore) MarkRepositoryUnderstandingFailed(understandingID, errorCode, errorMessage string) error {
+func (s *MemStore) MarkRepositoryUnderstandingFailed(_ context.Context, understandingID, errorCode, errorMessage string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -484,7 +485,7 @@ func (s *MemStore) MarkRepositoryUnderstandingFailed(understandingID, errorCode,
 	return nil
 }
 
-func (s *MemStore) UpdateRepositoryUnderstandingProgress(id string, progress float64, phase, message string) error {
+func (s *MemStore) UpdateRepositoryUnderstandingProgress(_ context.Context, id string, progress float64, phase, message string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -509,7 +510,7 @@ func (s *MemStore) UpdateRepositoryUnderstandingProgress(id string, progress flo
 	return nil
 }
 
-func (s *MemStore) AttachArtifactUnderstanding(artifactID, understandingID, revisionFP string) error {
+func (s *MemStore) AttachArtifactUnderstanding(_ context.Context, artifactID, understandingID, revisionFP string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -523,7 +524,7 @@ func (s *MemStore) AttachArtifactUnderstanding(artifactID, understandingID, revi
 	return nil
 }
 
-func (s *MemStore) DeleteKnowledgeArtifact(id string) error {
+func (s *MemStore) DeleteKnowledgeArtifact(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -540,7 +541,7 @@ func (s *MemStore) DeleteKnowledgeArtifact(id string) error {
 	return nil
 }
 
-func (s *MemStore) SupersedeArtifact(id string, sections []Section) error {
+func (s *MemStore) SupersedeArtifact(_ context.Context, id string, sections []Section) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -587,7 +588,7 @@ func (s *MemStore) SupersedeArtifact(id string, sections []Section) error {
 	return nil
 }
 
-func (s *MemStore) StoreKnowledgeSections(artifactID string, sections []Section) error {
+func (s *MemStore) StoreKnowledgeSections(_ context.Context, artifactID string, sections []Section) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -613,13 +614,13 @@ func (s *MemStore) StoreKnowledgeSections(artifactID string, sections []Section)
 	return nil
 }
 
-func (s *MemStore) GetKnowledgeSections(artifactID string) []Section {
+func (s *MemStore) GetKnowledgeSections(_ context.Context, artifactID string) []Section {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.loadSectionsLocked(artifactID)
 }
 
-func (s *MemStore) StoreRefinementUnits(artifactID string, units []RefinementUnit) error {
+func (s *MemStore) StoreRefinementUnits(_ context.Context, artifactID string, units []RefinementUnit) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -659,7 +660,7 @@ func (s *MemStore) StoreRefinementUnits(artifactID string, units []RefinementUni
 	return nil
 }
 
-func (s *MemStore) GetRefinementUnits(artifactID string) []RefinementUnit {
+func (s *MemStore) GetRefinementUnits(_ context.Context, artifactID string) []RefinementUnit {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	units := s.refinements[artifactID]
@@ -668,7 +669,7 @@ func (s *MemStore) GetRefinementUnits(artifactID string) []RefinementUnit {
 	return out
 }
 
-func (s *MemStore) StoreKnowledgeEvidence(sectionID string, evidence []Evidence) error {
+func (s *MemStore) StoreKnowledgeEvidence(_ context.Context, sectionID string, evidence []Evidence) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -682,13 +683,13 @@ func (s *MemStore) StoreKnowledgeEvidence(sectionID string, evidence []Evidence)
 	return nil
 }
 
-func (s *MemStore) GetKnowledgeEvidence(sectionID string) []Evidence {
+func (s *MemStore) GetKnowledgeEvidence(_ context.Context, sectionID string) []Evidence {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.evidence[sectionID]
 }
 
-func (s *MemStore) StoreArtifactDependencies(artifactID string, dependencies []ArtifactDependency) error {
+func (s *MemStore) StoreArtifactDependencies(_ context.Context, artifactID string, dependencies []ArtifactDependency) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -711,7 +712,7 @@ func (s *MemStore) StoreArtifactDependencies(artifactID string, dependencies []A
 	return nil
 }
 
-func (s *MemStore) GetArtifactDependencies(artifactID string) []ArtifactDependency {
+func (s *MemStore) GetArtifactDependencies(_ context.Context, artifactID string) []ArtifactDependency {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

@@ -250,7 +250,7 @@ func (h *mcpHandler) callGetReviewForDiff(ctx context.Context, session *mcpSessi
 		var fileContent string
 		if h.fileReader != nil {
 			var readErr error
-			fileContent, readErr = h.fileReader.ReadRepoFile(params.RepositoryID, tf.FilePath)
+			fileContent, readErr = h.fileReader.ReadRepoFile(ctx, params.RepositoryID, tf.FilePath)
 			if readErr != nil {
 				// Best-effort: skip files we cannot read rather than aborting the
 				// whole review. The worker would produce no useful findings on an
@@ -346,7 +346,7 @@ func (h *mcpHandler) buildDiffReviewStructural(repoID, commitRange string, files
 	linkedReqIDs := map[string]bool{}
 	symToReqs := map[string][]string{}
 	for _, symID := range touchedSymbolIDs {
-		for _, link := range h.store.GetLinksForSymbol(symID, false) {
+		for _, link := range h.store.GetLinksForSymbol(context.Background(), symID, false) {
 			if link.RequirementID != "" && !linkedReqIDs[link.RequirementID] {
 				linkedReqIDs[link.RequirementID] = true
 			}
@@ -358,7 +358,7 @@ func (h *mcpHandler) buildDiffReviewStructural(repoID, commitRange string, files
 		for id := range linkedReqIDs {
 			ids = append(ids, id)
 		}
-		reqs := h.store.GetRequirementsByIDs(ids)
+		reqs := h.store.GetRequirementsByIDs(context.Background(), ids)
 		for _, req := range reqs {
 			if req == nil {
 				continue
@@ -374,7 +374,7 @@ func (h *mcpHandler) buildDiffReviewStructural(repoID, commitRange string, files
 
 	// Unlinked public surface.
 	for _, symID := range touchedSymbolIDs {
-		sym := h.store.GetSymbol(symID)
+		sym := h.store.GetSymbol(context.Background(), symID)
 		if sym == nil || len(sym.Name) == 0 {
 			continue
 		}

@@ -4,6 +4,8 @@
 package graph
 
 import (
+	"context"
+
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 )
 
@@ -39,7 +41,7 @@ func BuildSimulatedChanges(resolved []*reasoningv1.SimulatedSymbolMatch) ([]Impa
 // ExpandViaCallGraph adds direct callers of resolved symbols to the change set.
 // This simulates the "ripple effect" where modifying a function signature
 // forces changes in its callers. maxDepth caps the traversal depth (recommended: 2).
-func ExpandViaCallGraph(store GraphStore, resolved []*reasoningv1.SimulatedSymbolMatch, maxDepth int) []ImpactSymbolChange {
+func ExpandViaCallGraph(ctx context.Context, store GraphStore, resolved []*reasoningv1.SimulatedSymbolMatch, maxDepth int) []ImpactSymbolChange {
 	if maxDepth > 4 {
 		maxDepth = 4
 	}
@@ -67,13 +69,13 @@ func ExpandViaCallGraph(store GraphStore, resolved []*reasoningv1.SimulatedSymbo
 	for depth := 0; depth < maxDepth && len(frontier) > 0; depth++ {
 		var next []string
 		for _, symID := range frontier {
-			callers := store.GetCallers(symID)
+			callers := store.GetCallers(ctx, symID)
 			for _, callerID := range callers {
 				if seen[callerID] {
 					continue
 				}
 				seen[callerID] = true
-				sym := store.GetSymbol(callerID)
+				sym := store.GetSymbol(ctx, callerID)
 				if sym != nil {
 					expanded = append(expanded, ImpactSymbolChange{
 						SymbolID:   sym.ID,

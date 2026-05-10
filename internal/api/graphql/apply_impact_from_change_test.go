@@ -78,11 +78,11 @@ func TestApplyImpactFromChange_SelectivePath_PreservesBehavior(t *testing.T) {
 	r.applyImpactFromChange(ctx, repoID, report, true /* selectiveInvalidation */)
 
 	// Selective path: hit is stale, miss is not.
-	hitState := r.KnowledgeStore.GetKnowledgeArtifact(hit.ID)
+	hitState := r.KnowledgeStore.GetKnowledgeArtifact(t.Context(), hit.ID)
 	if hitState == nil || !hitState.Stale {
 		t.Fatalf("hit artifact should be staled, got %+v", hitState)
 	}
-	missState := r.KnowledgeStore.GetKnowledgeArtifact(miss.ID)
+	missState := r.KnowledgeStore.GetKnowledgeArtifact(t.Context(), miss.ID)
 	if missState != nil && missState.Stale {
 		t.Fatalf("miss artifact should NOT be staled (selective path), got %+v", missState)
 	}
@@ -100,7 +100,7 @@ func TestApplyImpactFromChange_SelectivePath_PreservesBehavior(t *testing.T) {
 
 	// Report persisted with the surgical StaleArtifacts list (not
 	// the pre-stale snapshot).
-	persisted := r.Store.GetLatestImpactReport(repoID)
+	persisted := r.Store.GetLatestImpactReport(t.Context(), repoID)
 	if persisted == nil {
 		t.Fatalf("impact report not persisted")
 	}
@@ -138,13 +138,13 @@ func TestApplyImpactFromChange_BlanketPath_PreservesBehavior(t *testing.T) {
 	// Already-stale, ready artifact — appears in pre-stale snapshot
 	// because Stale=true.
 	alreadyStale := seedReadyArtifact(t, store, repoID, knowledgepkg.ArtifactCliffNotes)
-	if err := store.MarkKnowledgeArtifactStale(alreadyStale.ID, true); err != nil {
+	if err := store.MarkKnowledgeArtifactStale(t.Context(), alreadyStale.ID, true); err != nil {
 		t.Fatalf("mark stale: %v", err)
 	}
 
 	// Not-ready artifact (StatusPending) — appears in pre-stale
 	// snapshot because Status != Ready.
-	pending, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	pending, err := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		RepositoryID: repoID,
 		Type:         knowledgepkg.ArtifactLearningPath,
 		Audience:     knowledgepkg.AudienceDeveloper,
@@ -167,13 +167,13 @@ func TestApplyImpactFromChange_BlanketPath_PreservesBehavior(t *testing.T) {
 	r.applyImpactFromChange(ctx, repoID, report, false /* selectiveInvalidation: off → blanket path */)
 
 	// MarkAllStale side effect: every artifact in the repo is now stale.
-	if !store.GetKnowledgeArtifact(alreadyStale.ID).Stale {
+	if !store.GetKnowledgeArtifact(t.Context(), alreadyStale.ID).Stale {
 		t.Fatalf("alreadyStale should remain stale")
 	}
 	// pending is non-ready; MarkAllStale only flips Stale on artifacts
 	// in the StatusReady state, so we don't assert pending.Stale here
 	// (its Stale flag was never relevant to its lifecycle).
-	if !store.GetKnowledgeArtifact(freshReady.ID).Stale {
+	if !store.GetKnowledgeArtifact(t.Context(), freshReady.ID).Stale {
 		t.Fatalf("freshReady should be staled by MarkAllStale")
 	}
 
@@ -255,7 +255,7 @@ func TestApplyImpactFromChange_PersistsBeforeGoroutineLaunch(t *testing.T) {
 	}
 	r.applyImpactFromChange(ctx, repoID, report, true /* selectiveInvalidation */)
 
-	persisted := r.Store.GetLatestImpactReport(repoID)
+	persisted := r.Store.GetLatestImpactReport(t.Context(), repoID)
 	if persisted == nil {
 		t.Fatalf("report not persisted before helper returned (the goroutine ordering contract — original code persisted SYNC, then launched goroutine)")
 	}
@@ -290,7 +290,7 @@ func seedArtifactWithSymbolEvidence(
 	symbolID string,
 ) *knowledgepkg.Artifact {
 	t.Helper()
-	a, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	a, err := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		RepositoryID: repoID,
 		Type:         typ,
 		Audience:     knowledgepkg.AudienceDeveloper,
@@ -300,24 +300,24 @@ func seedArtifactWithSymbolEvidence(
 	if err != nil {
 		t.Fatalf("StoreKnowledgeArtifact: %v", err)
 	}
-	if err := store.UpdateKnowledgeArtifactStatus(a.ID, knowledgepkg.StatusReady); err != nil {
+	if err := store.UpdateKnowledgeArtifactStatus(t.Context(), a.ID, knowledgepkg.StatusReady); err != nil {
 		t.Fatalf("UpdateKnowledgeArtifactStatus: %v", err)
 	}
-	if err := store.StoreKnowledgeSections(a.ID, []knowledgepkg.Section{
+	if err := store.StoreKnowledgeSections(t.Context(), a.ID, []knowledgepkg.Section{
 		{Title: "S", Evidence: nil},
 	}); err != nil {
 		t.Fatalf("StoreKnowledgeSections: %v", err)
 	}
-	stored := store.GetKnowledgeSections(a.ID)
+	stored := store.GetKnowledgeSections(t.Context(), a.ID)
 	if len(stored) != 1 {
 		t.Fatalf("expected 1 stored section, got %d", len(stored))
 	}
-	if err := store.StoreKnowledgeEvidence(stored[0].ID, []knowledgepkg.Evidence{
+	if err := store.StoreKnowledgeEvidence(t.Context(), stored[0].ID, []knowledgepkg.Evidence{
 		{SourceType: knowledgepkg.EvidenceSymbol, SourceID: symbolID},
 	}); err != nil {
 		t.Fatalf("StoreKnowledgeEvidence: %v", err)
 	}
-	return store.GetKnowledgeArtifact(a.ID)
+	return store.GetKnowledgeArtifact(t.Context(), a.ID)
 }
 
 // seedReadyArtifact creates a ready artifact with no evidence — used
@@ -330,7 +330,7 @@ func seedReadyArtifact(
 	typ knowledgepkg.ArtifactType,
 ) *knowledgepkg.Artifact {
 	t.Helper()
-	a, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	a, err := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		RepositoryID: repoID,
 		Type:         typ,
 		Audience:     knowledgepkg.AudienceDeveloper,
@@ -340,8 +340,8 @@ func seedReadyArtifact(
 	if err != nil {
 		t.Fatalf("StoreKnowledgeArtifact: %v", err)
 	}
-	if err := store.UpdateKnowledgeArtifactStatus(a.ID, knowledgepkg.StatusReady); err != nil {
+	if err := store.UpdateKnowledgeArtifactStatus(t.Context(), a.ID, knowledgepkg.StatusReady); err != nil {
 		t.Fatalf("UpdateKnowledgeArtifactStatus: %v", err)
 	}
-	return store.GetKnowledgeArtifact(a.ID)
+	return store.GetKnowledgeArtifact(t.Context(), a.ID)
 }

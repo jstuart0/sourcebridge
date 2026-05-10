@@ -84,9 +84,9 @@ type graphStoreSymbolGraph struct {
 	inner templates.SymbolGraph
 }
 
-func (g *graphStoreSymbolGraph) ExportedSymbols(repoID string) ([]templates.Symbol, error) {
+func (g *graphStoreSymbolGraph) ExportedSymbols(ctx context.Context, repoID string) ([]templates.Symbol, error) {
 	g.once.Do(func() { g.inner = coldstart.NewGraphStoreSymbolGraph(g.store) })
-	return g.inner.ExportedSymbols(repoID)
+	return g.inner.ExportedSymbols(ctx, repoID)
 }
 
 // coldStartLLMCaller shim — schema.resolvers.go constructs this with field

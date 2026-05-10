@@ -20,7 +20,7 @@ func (s *Server) checkRepoAccess(r *http.Request, repoID string) error {
 		return errRepoNotFound
 	}
 	store := s.getStore(r)
-	if store == nil || store.GetRepository(repoID) == nil {
+	if store == nil || store.GetRepository(r.Context(), repoID) == nil {
 		return errRepoNotFound
 	}
 	return nil

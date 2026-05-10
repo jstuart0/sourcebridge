@@ -26,7 +26,7 @@ func (s *Server) handleListComprehensionSettings(w http.ResponseWriter, r *http.
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "comprehension settings not configured"})
 		return
 	}
-	settings, err := s.comprehensionStore.ListSettings()
+	settings, err := s.comprehensionStore.ListSettings(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -51,7 +51,7 @@ func (s *Server) handleGetEffectiveComprehensionSettings(w http.ResponseWriter, 
 		Type: comprehension.ScopeType(scopeType),
 		Key:  scopeKey,
 	}
-	eff, err := comprehension.Resolve(s.comprehensionStore, scope)
+	eff, err := comprehension.Resolve(r.Context(), s.comprehensionStore, scope)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -78,14 +78,14 @@ func (s *Server) handleUpdateComprehensionSettings(w http.ResponseWriter, r *htt
 	userID, _ := currentActorIdentity(r)
 	settings.UpdatedBy = userID
 
-	if err := s.comprehensionStore.SetSettings(&settings); err != nil {
+	if err := s.comprehensionStore.SetSettings(r.Context(), &settings); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
 	// Return the effective settings for the saved scope
 	scope := comprehension.Scope{Type: settings.ScopeType, Key: settings.ScopeKey}
-	eff, err := comprehension.Resolve(s.comprehensionStore, scope)
+	eff, err := comprehension.Resolve(r.Context(), s.comprehensionStore, scope)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -123,7 +123,7 @@ func (s *Server) handleResetComprehensionSettings(w http.ResponseWriter, r *http
 		Type: comprehension.ScopeType(scopeType),
 		Key:  scopeKey,
 	}
-	if err := s.comprehensionStore.DeleteSettings(scope); err != nil {
+	if err := s.comprehensionStore.DeleteSettings(r.Context(), scope); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -140,7 +140,7 @@ func (s *Server) handleListModelCapabilities(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "comprehension settings not configured"})
 		return
 	}
-	models, err := s.comprehensionStore.ListModelCapabilities()
+	models, err := s.comprehensionStore.ListModelCapabilities(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -159,7 +159,7 @@ func (s *Server) handleGetModelCapabilities(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "modelId exceeds 512 character limit"})
 		return
 	}
-	mc, err := s.comprehensionStore.GetModelCapabilities(modelID)
+	mc, err := s.comprehensionStore.GetModelCapabilities(r.Context(), modelID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -207,7 +207,7 @@ func (s *Server) handleUpdateModelCapabilities(w http.ResponseWriter, r *http.Re
 	}
 	mc.QualityGateTier = tier
 
-	if err := s.comprehensionStore.SetModelCapabilities(&mc); err != nil {
+	if err := s.comprehensionStore.SetModelCapabilities(r.Context(), &mc); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -225,7 +225,7 @@ func (s *Server) handleDeleteModelCapabilities(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "modelId exceeds 512 character limit"})
 		return
 	}
-	if err := s.comprehensionStore.DeleteModelCapabilities(modelID); err != nil {
+	if err := s.comprehensionStore.DeleteModelCapabilities(r.Context(), modelID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

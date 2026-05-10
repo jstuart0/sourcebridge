@@ -429,7 +429,7 @@ type mcpHandler struct {
 // clone. Production binding is *qaFileReader; tests can substitute a mock
 // without standing up a real clone on disk.
 type fileReader interface {
-	ReadRepoFile(repoID, filePath string) (string, error)
+	ReadRepoFile(ctx context.Context, repoID, filePath string) (string, error)
 }
 
 // capabilityCheckFunc is the function type for checking whether a named
@@ -556,7 +556,7 @@ func newMCPHandlerWithEdition(store graphstore.GraphStore, ks knowledge.Knowledg
 		}
 		// Warn about repo IDs that don't exist in the store
 		for repoID := range h.allowedRepos {
-			if store.GetRepository(repoID) == nil {
+			if store.GetRepository(context.Background(), repoID) == nil {
 				slog.Warn("mcp configured repo not found in store", "repo_id", repoID)
 			}
 		}
@@ -1366,7 +1366,7 @@ func (h *mcpHandler) callSearchSymbols(ctx context.Context, session *mcpSession,
 
 	if params.FilePath != "" {
 		// Filter by file
-		fileSymbols := h.store.GetSymbolsByFile(params.RepositoryID, params.FilePath)
+		fileSymbols := h.store.GetSymbolsByFile(ctx, params.RepositoryID, params.FilePath)
 		// Apply query and kind filtering manually
 		for _, s := range fileSymbols {
 			if queryPtr != nil && !strings.Contains(strings.ToLower(s.Name), strings.ToLower(*queryPtr)) {
@@ -1388,7 +1388,7 @@ func (h *mcpHandler) callSearchSymbols(ctx context.Context, session *mcpSession,
 			symbols = symbols[:params.Limit]
 		}
 	} else {
-		symbols, total = h.store.GetSymbols(params.RepositoryID, queryPtr, kindPtr, params.Limit, params.Offset)
+		symbols, total = h.store.GetSymbols(ctx, params.RepositoryID, queryPtr, kindPtr, params.Limit, params.Offset)
 	}
 
 	return packSymbolResults(symbols, total), nil
@@ -1447,7 +1447,7 @@ func (h *mcpHandler) searchSymbolsHybrid(ctx context.Context, session *mcpSessio
 			syms = append(syms, r.Symbol)
 			continue
 		}
-		if s := h.store.GetSymbol(r.EntityID); s != nil {
+		if s := h.store.GetSymbol(ctx, r.EntityID); s != nil {
 			syms = append(syms, s)
 		}
 	}
@@ -1629,12 +1629,12 @@ func (h *mcpHandler) callExplainCodeCtx(ctx context.Context, session *mcpSession
 	code := params.Code
 	if code == "" && params.FilePath != "" {
 		// Read source from the repository's indexed files
-		repo := h.store.GetRepository(params.RepositoryID)
+		repo := h.store.GetRepository(ctx, params.RepositoryID)
 		if repo == nil {
 			return nil, fmt.Errorf("Repository not found or not accessible")
 		}
 		// Get symbols from the file to provide context
-		fileSymbols := h.store.GetSymbolsByFile(params.RepositoryID, params.FilePath)
+		fileSymbols := h.store.GetSymbolsByFile(ctx, params.RepositoryID, params.FilePath)
 		if len(fileSymbols) > 0 {
 			// Build context from symbol signatures and doc comments
 			var sb strings.Builder
@@ -1731,7 +1731,7 @@ func (h *mcpHandler) callGetRequirements(session *mcpSession, args json.RawMessa
 		params.Limit = 500
 	}
 
-	reqs, total := h.store.GetRequirements(params.RepositoryID, params.Limit, params.Offset)
+	reqs, total := h.store.GetRequirements(context.Background(), params.RepositoryID, params.Limit, params.Offset)
 
 	type linkInfo struct {
 		SymbolID   string  `json:"symbol_id"`
@@ -1760,13 +1760,13 @@ func (h *mcpHandler) callGetRequirements(session *mcpSession, args json.RawMessa
 			Tags:        req.Tags,
 		}
 		if params.IncludeLinks {
-			links := h.store.GetLinksForRequirement(req.ID, false)
+			links := h.store.GetLinksForRequirement(context.Background(), req.ID, false)
 			// Batch lookup symbol names
 			symIDs := make([]string, 0, len(links))
 			for _, l := range links {
 				symIDs = append(symIDs, l.SymbolID)
 			}
-			symMap := h.store.GetSymbolsByIDs(symIDs)
+			symMap := h.store.GetSymbolsByIDs(context.Background(), symIDs)
 
 			for _, l := range links {
 				li := linkInfo{
@@ -1804,7 +1804,7 @@ func (h *mcpHandler) callGetImpactReport(session *mcpSession, args json.RawMessa
 		return nil, err
 	}
 
-	report := h.store.GetLatestImpactReport(params.RepositoryID)
+	report := h.store.GetLatestImpactReport(context.Background(), params.RepositoryID)
 	if report == nil {
 		return map[string]interface{}{"report": nil}, nil
 	}
@@ -1874,7 +1874,7 @@ func (h *mcpHandler) callGetCliffNotes(session *mcpSession, args json.RawMessage
 		},
 	}
 
-	artifact := h.knowledgeStore.GetArtifactByKey(key)
+	artifact := h.knowledgeStore.GetArtifactByKey(context.Background(), key)
 	if artifact == nil {
 		return map[string]interface{}{
 			"artifact": nil,
@@ -1932,7 +1932,7 @@ func (h *mcpHandler) callGetCliffNotes(session *mcpSession, args json.RawMessage
 // ---------------------------------------------------------------------------
 
 func (h *mcpHandler) handleResourcesList(session *mcpSession, msg jsonRPCRequest) jsonRPCResponse {
-	repos := h.store.ListRepositories()
+	repos := h.store.ListRepositories(context.Background())
 	resources := make([]mcpResourceDefinition, 0)
 
 	for _, repo := range repos {
@@ -2022,7 +2022,7 @@ func (h *mcpHandler) handleResourcesRead(session *mcpSession, msg jsonRPCRequest
 }
 
 func (h *mcpHandler) readFilesResource(repoID string) (interface{}, error) {
-	files := h.store.GetFiles(repoID)
+	files := h.store.GetFiles(context.Background(), repoID)
 	if files == nil {
 		return nil, fmt.Errorf("repository not found or not indexed")
 	}
@@ -2043,7 +2043,7 @@ func (h *mcpHandler) readFilesResource(repoID string) (interface{}, error) {
 }
 
 func (h *mcpHandler) readSymbolsResource(repoID string) (interface{}, error) {
-	symbols, _ := h.store.GetSymbols(repoID, nil, nil, 1000, 0)
+	symbols, _ := h.store.GetSymbols(context.Background(), repoID, nil, nil, 1000, 0)
 	if symbols == nil {
 		return nil, fmt.Errorf("repository not found or not indexed")
 	}
@@ -2077,7 +2077,7 @@ func (h *mcpHandler) checkRepoAccess(session *mcpSession, repoID string) error {
 	if repoID == "" {
 		return fmt.Errorf("repository_id is required")
 	}
-	repo := h.store.GetRepository(repoID)
+	repo := h.store.GetRepository(context.Background(), repoID)
 	if repo == nil {
 		return fmt.Errorf("Repository not found or not accessible")
 	}

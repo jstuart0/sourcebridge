@@ -4,6 +4,8 @@
 package rest
 
 import (
+	"context"
+
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 )
@@ -16,16 +18,16 @@ type qaUnderstandingReader struct {
 	summaries comprehension.SummaryNodeStore
 }
 
-func (a qaUnderstandingReader) GetRepositoryUnderstanding(repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding {
+func (a qaUnderstandingReader) GetRepositoryUnderstanding(ctx context.Context, repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding {
 	if a.knowledge == nil {
 		return nil
 	}
-	return a.knowledge.GetRepositoryUnderstanding(repoID, scope)
+	return a.knowledge.GetRepositoryUnderstanding(ctx, repoID, scope)
 }
 
-func (a qaUnderstandingReader) GetSummaryNodes(corpusID string) ([]comprehension.SummaryNode, error) {
+func (a qaUnderstandingReader) GetSummaryNodes(ctx context.Context, corpusID string) ([]comprehension.SummaryNode, error) {
 	if a.summaries == nil {
 		return nil, nil
 	}
-	return a.summaries.GetSummaryNodes(corpusID)
+	return a.summaries.GetSummaryNodes(ctx, corpusID)
 }

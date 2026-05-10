@@ -37,8 +37,8 @@ type fakeClusterStore struct {
 // Compile-time assertion: fakeClusterStore must satisfy clustering.ClusterStore.
 var _ clustering.ClusterStore = (*fakeClusterStore)(nil)
 
-func (f *fakeClusterStore) GetCallEdges(_ string) []graph.CallEdge { return nil }
-func (f *fakeClusterStore) GetSymbolsByIDs(_ []string) map[string]*graph.StoredSymbol {
+func (f *fakeClusterStore) GetCallEdges(_ context.Context, _ string) []graph.CallEdge { return nil }
+func (f *fakeClusterStore) GetSymbolsByIDs(_ context.Context, _ []string) map[string]*graph.StoredSymbol {
 	return nil
 }
 func (f *fakeClusterStore) GetRepoEdgeHash(_ context.Context, _ string) (string, error) {

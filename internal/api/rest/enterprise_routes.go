@@ -216,7 +216,7 @@ type graphStoreHostServices struct {
 }
 
 func (h *graphStoreHostServices) FindRepoByName(repoFullName string) (string, bool) {
-	for _, repo := range h.store.ListRepositories() {
+	for _, repo := range h.store.ListRepositories(context.Background()) {
 		// Match against Name (e.g., "owner/repo") or RemoteURL
 		if repo.Name == repoFullName {
 			return repo.ID, true
@@ -229,7 +229,7 @@ func (h *graphStoreHostServices) FindRepoByName(repoFullName string) (string, bo
 }
 
 func (h *graphStoreHostServices) FindSymbolsByFile(repoID, filePath string) []routes.SymbolInfo {
-	symbols := h.store.GetSymbolsByFile(repoID, filePath)
+	symbols := h.store.GetSymbolsByFile(context.Background(), repoID, filePath)
 	out := make([]routes.SymbolInfo, len(symbols))
 	for i, s := range symbols {
 		out[i] = routes.SymbolInfo{ID: s.ID, Name: s.Name, Kind: string(s.Kind)}
@@ -238,10 +238,10 @@ func (h *graphStoreHostServices) FindSymbolsByFile(repoID, filePath string) []ro
 }
 
 func (h *graphStoreHostServices) FindRequirementsBySymbol(symbolID string) []routes.RequirementInfo {
-	links := h.store.GetLinksForSymbol(symbolID, false)
+	links := h.store.GetLinksForSymbol(context.Background(), symbolID, false)
 	var reqs []routes.RequirementInfo
 	for _, link := range links {
-		req := h.store.GetRequirement(link.RequirementID)
+		req := h.store.GetRequirement(context.Background(), link.RequirementID)
 		if req != nil {
 			reqs = append(reqs, routes.RequirementInfo{
 				ID:         req.ID,
@@ -255,13 +255,13 @@ func (h *graphStoreHostServices) FindRequirementsBySymbol(symbolID string) []rou
 }
 
 func (h *graphStoreHostServices) GetRepoCoverage(repoID string) float64 {
-	reqs, total := h.store.GetRequirements(repoID, 0, 0)
+	reqs, total := h.store.GetRequirements(context.Background(), repoID, 0, 0)
 	if total == 0 {
 		return 1.0 // no requirements = fully covered
 	}
 	linked := 0
 	for _, req := range reqs {
-		links := h.store.GetLinksForRequirement(req.ID, false)
+		links := h.store.GetLinksForRequirement(context.Background(), req.ID, false)
 		if len(links) > 0 {
 			linked++
 		}
@@ -276,7 +276,7 @@ func (h *graphStoreHostServices) RepoDisplayInfo(repoID string) (string, string,
 	if h == nil || h.store == nil {
 		return "", "", false
 	}
-	repo := h.store.GetRepository(repoID)
+	repo := h.store.GetRepository(context.Background(), repoID)
 	if repo == nil {
 		return "", "", false
 	}
@@ -284,14 +284,14 @@ func (h *graphStoreHostServices) RepoDisplayInfo(repoID string) (string, string,
 }
 
 func (h *graphStoreHostServices) TriggerReindex(repoID string) error {
-	repo := h.store.GetRepository(repoID)
+	repo := h.store.GetRepository(context.Background(), repoID)
 	if repo == nil {
 		return fmt.Errorf("repository %s not found", repoID)
 	}
 	// Clear any previous error so the repository shows as actionable.
 	// The actual reindex is triggered asynchronously — in production this
 	// would enqueue a background job or send an event to the worker.
-	h.store.SetRepositoryError(repoID, nil)
+	h.store.SetRepositoryError(context.Background(), repoID, nil)
 	return nil
 }
 
@@ -300,7 +300,7 @@ func (h *graphStoreHostServices) GetUnderstandingScore(repoID string) *routes.Un
 	if h.knowledgeStore != nil {
 		kfp = &knowledgeFreshnessAdapter{store: h.knowledgeStore}
 	}
-	score := graphstore.ComputeUnderstandingScore(h.store, kfp, repoID)
+	score := graphstore.ComputeUnderstandingScore(context.Background(), h.store, kfp, repoID)
 	if score == nil {
 		return nil
 	}
@@ -326,7 +326,7 @@ func (h *graphStoreHostServices) GetTenantRepoScores(tenantID string) []routes.R
 
 	var results []routes.RepoScoreInfo
 	for _, repoID := range repoIDs {
-		repo := h.store.GetRepository(repoID)
+		repo := h.store.GetRepository(context.Background(), repoID)
 		if repo == nil {
 			continue
 		}
@@ -344,7 +344,7 @@ func (h *graphStoreHostServices) GetTenantRepoScores(tenantID string) []routes.R
 }
 
 func (h *graphStoreHostServices) GetAIScoreViolations(repoID string, threshold float64) []routes.AIViolation {
-	files := h.store.GetFiles(repoID)
+	files := h.store.GetFiles(context.Background(), repoID)
 	var violations []routes.AIViolation
 	for _, f := range files {
 		if f.AIScore >= threshold {
@@ -363,7 +363,7 @@ func (h *graphStoreHostServices) GetAIScoreViolations(repoID string, threshold f
 }
 
 func (h *graphStoreHostServices) GetLatestImpactReport(repoID string) *routes.ImpactReportInfo {
-	report := h.store.GetLatestImpactReport(repoID)
+	report := h.store.GetLatestImpactReport(context.Background(), repoID)
 	if report == nil {
 		return nil
 	}
@@ -390,7 +390,7 @@ func collectRepoDataForReport(store graphstore.GraphStore, knowledgeStore knowle
 	data := make(map[string]interface{})
 
 	for _, repoID := range repoIDs {
-		repo := store.GetRepository(repoID)
+		repo := store.GetRepository(context.Background(), repoID)
 		if repo == nil {
 			continue
 		}
@@ -409,7 +409,7 @@ func collectRepoDataForReport(store graphstore.GraphStore, knowledgeStore knowle
 		}
 
 		// --- Language distribution from actual files ---
-		files := store.GetFiles(repoID)
+		files := store.GetFiles(context.Background(), repoID)
 		langCounts := map[string]int{}
 		topDirs := map[string]bool{}
 		var sampleFiles []string
@@ -452,7 +452,7 @@ func collectRepoDataForReport(store graphstore.GraphStore, knowledgeStore knowle
 		if knowledgeStore != nil {
 			kfp = &knowledgeFreshnessAdapter{store: knowledgeStore}
 		}
-		score := graphstore.ComputeUnderstandingScore(store, kfp, repoID)
+		score := graphstore.ComputeUnderstandingScore(context.Background(), store, kfp, repoID)
 		if score != nil {
 			rd["understanding_score"] = map[string]interface{}{
 				"overall":               score.Overall,
@@ -466,7 +466,7 @@ func collectRepoDataForReport(store graphstore.GraphStore, knowledgeStore knowle
 		}
 
 		// --- Test detection from actual symbols ---
-		testSymbols, totalSymbols := store.GetTestSymbolRatio(repoID)
+		testSymbols, totalSymbols := store.GetTestSymbolRatio(context.Background(), repoID)
 		var testFrameworks []string
 		for _, f := range files {
 			ext := filepath.Ext(f.Path)
@@ -562,11 +562,11 @@ func collectRepoDataForReport(store graphstore.GraphStore, knowledgeStore knowle
 
 		// --- Cliff notes (actual knowledge artifacts) ---
 		if knowledgeStore != nil {
-			artifacts := knowledgeStore.GetKnowledgeArtifacts(repoID)
+			artifacts := knowledgeStore.GetKnowledgeArtifacts(context.Background(), repoID)
 			var cliffNotes []map[string]string
 			for _, art := range artifacts {
 				if art.Type == knowledge.ArtifactCliffNotes && art.Status == knowledge.StatusReady {
-					sections := knowledgeStore.GetKnowledgeSections(art.ID)
+					sections := knowledgeStore.GetKnowledgeSections(context.Background(), art.ID)
 					for _, sec := range sections {
 						cliffNotes = append(cliffNotes, map[string]string{
 							"title":   sec.Title,
@@ -582,7 +582,7 @@ func collectRepoDataForReport(store graphstore.GraphStore, knowledgeStore knowle
 		}
 
 		// --- Requirements ---
-		reqs, reqTotal := store.GetRequirements(repoID, 50, 0)
+		reqs, reqTotal := store.GetRequirements(context.Background(), repoID, 50, 0)
 		if reqTotal > 0 {
 			var reqSummaries []map[string]string
 			linkedCount := 0
@@ -592,7 +592,7 @@ func collectRepoDataForReport(store graphstore.GraphStore, knowledgeStore knowle
 					"title":       req.Title,
 					"source":      req.Source,
 				})
-				links := store.GetLinksForRequirement(req.ID, false)
+				links := store.GetLinksForRequirement(context.Background(), req.ID, false)
 				if len(links) > 0 {
 					linkedCount++
 				}
@@ -606,7 +606,7 @@ func collectRepoDataForReport(store graphstore.GraphStore, knowledgeStore knowle
 		}
 
 		// --- Symbols summary (top classes/functions) ---
-		symbols, symTotal := store.GetSymbols(repoID, nil, nil, 100, 0)
+		symbols, symTotal := store.GetSymbols(context.Background(), repoID, nil, nil, 100, 0)
 		kindCounts := map[string]int{}
 		var publicSymbols []map[string]string
 		for _, sym := range symbols {
@@ -627,8 +627,8 @@ func collectRepoDataForReport(store graphstore.GraphStore, knowledgeStore knowle
 		}
 
 		// --- Doc and AI coverage ---
-		withDocs, totalPub := store.GetPublicSymbolDocCoverage(repoID)
-		aiFiles, totalFiles := store.GetAICodeFileRatio(repoID)
+		withDocs, totalPub := store.GetPublicSymbolDocCoverage(context.Background(), repoID)
+		aiFiles, totalFiles := store.GetAICodeFileRatio(context.Background(), repoID)
 		rd["doc_coverage"] = map[string]interface{}{
 			"documented": withDocs,
 			"total":      totalPub,
@@ -670,8 +670,8 @@ type knowledgeFreshnessAdapter struct {
 	store knowledge.KnowledgeStore
 }
 
-func (a *knowledgeFreshnessAdapter) GetFreshnessRatio(repoID string) (fresh int, total int) {
-	artifacts := a.store.GetKnowledgeArtifacts(repoID)
+func (a *knowledgeFreshnessAdapter) GetFreshnessRatio(ctx context.Context, repoID string) (fresh int, total int) {
+	artifacts := a.store.GetKnowledgeArtifacts(ctx, repoID)
 	total = len(artifacts)
 	for _, art := range artifacts {
 		if !art.Stale && art.Status == knowledge.StatusReady {

@@ -4,6 +4,7 @@
 package db
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -61,7 +62,7 @@ func (r *surrealSummaryNode) toSummaryNode() comprehension.SummaryNode {
 	return n
 }
 
-func (s *SurrealStore) GetSummaryNodes(corpusID string) ([]comprehension.SummaryNode, error) {
+func (s *SurrealStore) GetSummaryNodes(_ context.Context, corpusID string) ([]comprehension.SummaryNode, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -79,7 +80,7 @@ func (s *SurrealStore) GetSummaryNodes(corpusID string) ([]comprehension.Summary
 	return out, nil
 }
 
-func (s *SurrealStore) GetSummaryNode(corpusID, unitID string) (*comprehension.SummaryNode, error) {
+func (s *SurrealStore) GetSummaryNode(_ context.Context, corpusID, unitID string) (*comprehension.SummaryNode, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -97,7 +98,7 @@ func (s *SurrealStore) GetSummaryNode(corpusID, unitID string) (*comprehension.S
 	return &n, nil
 }
 
-func (s *SurrealStore) StoreSummaryNodes(nodes []comprehension.SummaryNode) error {
+func (s *SurrealStore) StoreSummaryNodes(_ context.Context, nodes []comprehension.SummaryNode) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -170,7 +171,7 @@ func (s *SurrealStore) StoreSummaryNodes(nodes []comprehension.SummaryNode) erro
 	return nil
 }
 
-func (s *SurrealStore) InvalidateSummaryNodes(corpusID string) error {
+func (s *SurrealStore) InvalidateSummaryNodes(_ context.Context, corpusID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")

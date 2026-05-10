@@ -77,6 +77,7 @@ func (r *mutationResolver) applyImpactFromChange(
 			}
 		}
 		reasons := knowledgepkg.MarkStaleForImpact(
+			ctx,
 			r.KnowledgeStore,
 			repoID,
 			symbolIDs,
@@ -92,13 +93,13 @@ func (r *mutationResolver) applyImpactFromChange(
 		// Legacy blanket path. Preserve the previous behavior of listing
 		// pre-stale artifacts on the report so the UI keeps its old signal.
 		if r.KnowledgeStore != nil {
-			for _, a := range r.KnowledgeStore.GetKnowledgeArtifacts(repoID) {
+			for _, a := range r.KnowledgeStore.GetKnowledgeArtifacts(ctx, repoID) {
 				if a.Stale || a.Status != knowledgepkg.StatusReady {
 					impactReport.StaleArtifacts = append(impactReport.StaleArtifacts, a.ID)
 				}
 			}
 		}
-		knowledgepkg.MarkAllStale(r.KnowledgeStore, repoID)
+		knowledgepkg.MarkAllStale(ctx, r.KnowledgeStore, repoID)
 	}
 	if impactReport.StaleArtifacts == nil {
 		impactReport.StaleArtifacts = []string{}
@@ -109,7 +110,7 @@ func (r *mutationResolver) applyImpactFromChange(
 
 	// Persist the report after invalidation so StaleArtifacts reflects the
 	// surgically-chosen set (not the pre-stale snapshot).
-	r.getStore(ctx).StoreImpactReport(repoID, impactReport)
+	r.getStore(ctx).StoreImpactReport(ctx, repoID, impactReport)
 
 	// Phase 2: delta-driven auto-regeneration. No-op when the mode is off.
 	// Shadow mode logs what it would do; live mode actually enqueues. Runs

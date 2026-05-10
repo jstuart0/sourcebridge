@@ -78,7 +78,7 @@ func (t *Template) Generate(ctx context.Context, input templates.GenerateInput) 
 		now = time.Now().UTC()
 	}
 
-	syms, err := input.SymbolGraph.ExportedSymbols(input.RepoID)
+	syms, err := input.SymbolGraph.ExportedSymbols(ctx, input.RepoID)
 	if err != nil {
 		return ast.Page{}, fmt.Errorf("apiref: fetching symbols: %w", err)
 	}

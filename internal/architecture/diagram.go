@@ -4,6 +4,7 @@
 package architecture
 
 import (
+	"context"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,10 +14,10 @@ import (
 
 // DiagramStore is the subset of graph.GraphStore needed for diagram generation.
 type DiagramStore interface {
-	GetSymbols(repoID string, query *string, kind *string, limit, offset int) ([]*graph.StoredSymbol, int)
-	GetCallEdges(repoID string) []graph.CallEdge
-	GetFiles(repoID string) []*graph.File
-	GetLinksForRepo(repoID string) []*graph.StoredLink
+	GetSymbols(ctx context.Context, repoID string, query *string, kind *string, limit, offset int) ([]*graph.StoredSymbol, int)
+	GetCallEdges(ctx context.Context, repoID string) []graph.CallEdge
+	GetFiles(ctx context.Context, repoID string) []*graph.File
+	GetLinksForRepo(ctx context.Context, repoID string) []*graph.StoredLink
 }
 
 type DiagramOpts struct {
@@ -51,11 +52,11 @@ type DiagramResult struct {
 }
 
 // BuildDiagram generates an architecture diagram from the symbol graph.
-func BuildDiagram(store DiagramStore, opts DiagramOpts) (*DiagramResult, error) {
+func BuildDiagram(ctx context.Context, store DiagramStore, opts DiagramOpts) (*DiagramResult, error) {
 	if opts.Level == "FILE" && opts.ModuleFilter != nil {
-		return buildFileLevelDiagram(store, opts)
+		return buildFileLevelDiagram(ctx, store, opts)
 	}
-	return buildModuleLevelDiagram(store, opts)
+	return buildModuleLevelDiagram(ctx, store, opts)
 }
 
 // ModuleFromPath extracts a directory prefix at the given depth from a file path.
@@ -75,11 +76,11 @@ func ModuleFromPath(filePath string, depth int) string {
 	return result
 }
 
-func buildModuleLevelDiagram(store DiagramStore, opts DiagramOpts) (*DiagramResult, error) {
-	symbols, _ := store.GetSymbols(opts.RepoID, nil, nil, 0, 0)
-	edges := store.GetCallEdges(opts.RepoID)
-	files := store.GetFiles(opts.RepoID)
-	links := store.GetLinksForRepo(opts.RepoID)
+func buildModuleLevelDiagram(ctx context.Context, store DiagramStore, opts DiagramOpts) (*DiagramResult, error) {
+	symbols, _ := store.GetSymbols(ctx, opts.RepoID, nil, nil, 0, 0)
+	edges := store.GetCallEdges(ctx, opts.RepoID)
+	files := store.GetFiles(ctx, opts.RepoID)
+	links := store.GetLinksForRepo(ctx, opts.RepoID)
 
 	// Build symbol ID -> file_path lookup
 	symPathMap := make(map[string]string, len(symbols))
@@ -270,10 +271,10 @@ func buildModuleLevelDiagram(store DiagramStore, opts DiagramOpts) (*DiagramResu
 	}, nil
 }
 
-func buildFileLevelDiagram(store DiagramStore, opts DiagramOpts) (*DiagramResult, error) {
+func buildFileLevelDiagram(ctx context.Context, store DiagramStore, opts DiagramOpts) (*DiagramResult, error) {
 	prefix := *opts.ModuleFilter
-	symbols, _ := store.GetSymbols(opts.RepoID, nil, nil, 0, 0)
-	edges := store.GetCallEdges(opts.RepoID)
+	symbols, _ := store.GetSymbols(ctx, opts.RepoID, nil, nil, 0, 0)
+	edges := store.GetCallEdges(ctx, opts.RepoID)
 
 	// Build symbol ID -> file_path lookup and filter by module
 	symPathMap := make(map[string]string, len(symbols))

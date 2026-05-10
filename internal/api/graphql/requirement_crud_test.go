@@ -24,7 +24,7 @@ func newResolverWithRepo(t *testing.T) (*Resolver, string) {
 		RepoPath: "/tmp/test",
 		Files:    []indexer.FileResult{{Path: "main.go", Language: "go", LineCount: 10}},
 	}
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(t.Context(), result)
 	return &Resolver{
 		Store:    store,
 		EventBus: events.NewBus(),

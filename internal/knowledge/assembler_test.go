@@ -42,13 +42,13 @@ func TestAssemblerBasic(t *testing.T) {
 		Modules: []indexer.Module{{Name: "main", Path: ".", FileCount: 2}},
 	}
 
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
 	assembler := NewAssembler(store)
-	snap, err := assembler.Assemble(repo.ID, "")
+	snap, err := assembler.Assemble(t.Context(), repo.ID, "")
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -110,10 +110,10 @@ func TestAssemblerDocsDiscovery(t *testing.T) {
 			}},
 		},
 	}
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(t.Context(), result)
 
 	assembler := NewAssembler(store)
-	snap, err := assembler.Assemble(repo.ID, dir)
+	snap, err := assembler.Assemble(t.Context(), repo.ID, dir)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestAssemblerDocsDiscovery(t *testing.T) {
 func TestAssemblerNotFound(t *testing.T) {
 	store := graph.NewStore()
 	assembler := NewAssembler(store)
-	_, err := assembler.Assemble("nonexistent", "")
+	_, err := assembler.Assemble(t.Context(), "nonexistent", "")
 	if err == nil {
 		t.Fatal("expected error for nonexistent repo")
 	}
@@ -162,17 +162,17 @@ func TestAssemblerEachInsightHasEvidence(t *testing.T) {
 			}},
 		},
 	}
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(t.Context(), result)
 
 	// Add a requirement and link.
-	store.StoreRequirement(repo.ID, &graph.StoredRequirement{
+	store.StoreRequirement(t.Context(), repo.ID, &graph.StoredRequirement{
 		ID:         "req-1",
 		ExternalID: "REQ-001",
 		Title:      "Must handle API calls",
 	})
 
 	assembler := NewAssembler(store)
-	snap, _ := assembler.Assemble(repo.ID, "")
+	snap, _ := assembler.Assemble(t.Context(), repo.ID, "")
 
 	// Entry points must have IDs.
 	for _, ep := range snap.EntryPoints {
@@ -220,13 +220,13 @@ func TestAssemblerScopedSymbolIncludesFocusedContext(t *testing.T) {
 		},
 	}
 
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
 	assembler := NewAssembler(store)
-	snap, err := assembler.AssembleScoped(repo.ID, "", ArtifactScope{
+	snap, err := assembler.AssembleScoped(t.Context(), repo.ID, "", ArtifactScope{
 		ScopeType: ScopeSymbol,
 		ScopePath: "internal/api/rest/auth.go#handleLogin",
 	})

@@ -416,7 +416,7 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 		alreadyPublished := listAlreadyPublishedAcrossSinks(
 			runCtx, cfg.RepoID, cfg.Broker, cfg.RepoSettingsStore,
 		)
-		repoSourceRev := repoSourceRevFor(cfg.GraphStore, cfg.RepoID)
+		repoSourceRev := repoSourceRevFor(runCtx, cfg.GraphStore, cfg.RepoID)
 
 		// Compute current fingerprints for every planned page (pure, O(N)).
 		currentFps := make(map[string]string, len(pages))
@@ -873,7 +873,7 @@ func BuildRunner(cfg Config) func(ctx context.Context, rt llm.Runtime) error {
 			// the repo is not found; the sink writer will substitute repoID.
 			var repoName string
 			if cfg.GraphStore != nil {
-				if repo := cfg.GraphStore.GetRepository(cfg.RepoID); repo != nil {
+				if repo := cfg.GraphStore.GetRepository(runCtx, cfg.RepoID); repo != nil {
 					repoName = repo.Name
 				}
 			}
@@ -1336,7 +1336,7 @@ func resolveTaxonomyForMode(ctx context.Context, mode, repoID string, gs graphst
 						for j, m := range full.Members {
 							symIDs[j] = m.SymbolID
 						}
-						symMap := gs.GetSymbolsByIDs(symIDs)
+						symMap := gs.GetSymbolsByIDs(ctx, symIDs)
 						seen := make(map[string]struct{})
 						for _, sym := range symMap {
 							if sym.FilePath == "" {
@@ -1418,7 +1418,7 @@ func NewGraphStoreSymbolGraph(store graphstore.GraphStore) templates.SymbolGraph
 	return &graphStoreSymbolGraph{store: store}
 }
 
-func (g *graphStoreSymbolGraph) ExportedSymbols(repoID string) ([]templates.Symbol, error) {
+func (g *graphStoreSymbolGraph) ExportedSymbols(ctx context.Context, repoID string) ([]templates.Symbol, error) {
 	g.cacheMu.Lock()
 	if g.cache != nil {
 		if cached, ok := g.cache[repoID]; ok {
@@ -1428,11 +1428,11 @@ func (g *graphStoreSymbolGraph) ExportedSymbols(repoID string) ([]templates.Symb
 	}
 	g.cacheMu.Unlock()
 
-	stored, _ := g.store.GetSymbols(repoID, nil, nil, 10000, 0)
+	stored, _ := g.store.GetSymbols(ctx, repoID, nil, nil, 10000, 0)
 
 	// Determine the repo root for source-body reading.
 	repoRoot := ""
-	if repo := g.store.GetRepository(repoID); repo != nil {
+	if repo := g.store.GetRepository(ctx, repoID); repo != nil {
 		repoRoot = repo.ClonePath
 		if repoRoot == "" {
 			repoRoot = repo.Path
@@ -1595,6 +1595,7 @@ func attachKnowledgeArtifacts(
 	// Determine the freshness bar: the revisionFp from the current repo-level
 	// understanding. Pull it once; all clusters use the same bar.
 	currentUnderstanding := ks.GetRepositoryUnderstanding(
+		ctx,
 		repoID,
 		knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository},
 	)
@@ -1610,7 +1611,7 @@ func attachKnowledgeArtifacts(
 	}
 
 	// Fetch all artifacts for the repo in one call, then filter and sort.
-	allArtifacts := ks.GetKnowledgeArtifacts(repoID)
+	allArtifacts := ks.GetKnowledgeArtifacts(ctx, repoID)
 
 	// Build a lookup: scopePath → sorted fresh artifacts.
 	// scopePath for module-scoped artifacts is the module path (directory).
@@ -1863,7 +1864,7 @@ func newRegistryTierFunc(store comprehension.Store) modeltier.TierFunc {
 		model = strings.ToLower(strings.TrimSpace(model))
 		provider = strings.ToLower(strings.TrimSpace(provider))
 		if store != nil {
-			cap, err := store.GetModelCapabilities(model)
+			cap, err := store.GetModelCapabilities(ctx, model)
 			if err != nil {
 				res := modeltier.ClassifyByPattern(provider, model)
 				res.Err = err
@@ -1889,11 +1890,11 @@ func NewRegistryTierFunc(store comprehension.Store) modeltier.TierFunc {
 // when present; falls back to LastIndexedAt nanoseconds as a monotonic proxy.
 // Returns "" when the graphStore is nil or the repository is unknown (the
 // fingerprint will still be computed, but rev-dependent changes won't invalidate it).
-func repoSourceRevFor(gs graphstore.GraphStore, repoID string) string {
+func repoSourceRevFor(ctx context.Context, gs graphstore.GraphStore, repoID string) string {
 	if gs == nil {
 		return ""
 	}
-	repo := gs.GetRepository(repoID)
+	repo := gs.GetRepository(ctx, repoID)
 	if repo == nil {
 		return ""
 	}

@@ -25,12 +25,12 @@ func (r *Resolver) searchLegacy(ctx context.Context, query string, repositoryID 
 	var results []*SearchResult
 	queryLower := strings.ToLower(query)
 
-	repos := r.getStore(ctx).ListRepositories()
+	repos := r.getStore(ctx).ListRepositories(ctx, )
 	for _, repo := range repos {
 		if repositoryID != nil && *repositoryID != "" && repo.ID != *repositoryID {
 			continue
 		}
-		symbols, _ := r.getStore(ctx).GetSymbols(repo.ID, nil, nil, 0, 0)
+		symbols, _ := r.getStore(ctx).GetSymbols(ctx, repo.ID, nil, nil, 0, 0)
 		for _, sym := range symbols {
 			if len(results) >= maxResults {
 				break
@@ -192,7 +192,7 @@ func legacyRequirementResults(store graphstore.GraphStore, repo *graphstore.Repo
 		return nil
 	}
 	q := strings.ToLower(query)
-	reqs, _ := store.GetRequirements(repo.ID, 0, 0)
+	reqs, _ := store.GetRequirements(context.Background(), repo.ID, 0, 0)
 	out := make([]*SearchResult, 0)
 	for _, r := range reqs {
 		if len(out) >= limit {
@@ -222,7 +222,7 @@ func legacyFileResults(store graphstore.GraphStore, repo *graphstore.Repository,
 		return nil
 	}
 	q := strings.ToLower(query)
-	files := store.GetFiles(repo.ID)
+	files := store.GetFiles(context.Background(), repo.ID)
 	out := make([]*SearchResult, 0)
 	for _, f := range files {
 		if len(out) >= limit {

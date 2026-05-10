@@ -77,7 +77,8 @@ func (m *GraphStoreMetrics) GraphRelationCount(repoID, pageID string) int {
 // round-trips with two queries — GetSymbols + GetCallEdges — and one
 // GetSymbolsByIDs batch for the resolved callers. Same logical result.
 func (m *GraphStoreMetrics) packageReferenceCount(repoID, pkg string) int {
-	syms, _ := m.store.GetSymbols(repoID, nil, nil, 0, 0)
+	ctx := context.Background()
+	syms, _ := m.store.GetSymbols(ctx, repoID, nil, nil, 0, 0)
 	pkgSymIDs := make(map[string]struct{}, len(syms))
 	for _, sym := range syms {
 		if sym.FilePath == "" {
@@ -90,7 +91,7 @@ func (m *GraphStoreMetrics) packageReferenceCount(repoID, pkg string) int {
 	if len(pkgSymIDs) == 0 {
 		return 0
 	}
-	edges := m.store.GetCallEdges(repoID)
+	edges := m.store.GetCallEdges(ctx, repoID)
 	callerIDSet := make(map[string]struct{})
 	for _, e := range edges {
 		if _, ok := pkgSymIDs[e.CalleeID]; !ok {
@@ -105,7 +106,7 @@ func (m *GraphStoreMetrics) packageReferenceCount(repoID, pkg string) int {
 	for id := range callerIDSet {
 		callerIDs = append(callerIDs, id)
 	}
-	callers := m.store.GetSymbolsByIDs(callerIDs)
+	callers := m.store.GetSymbolsByIDs(ctx, callerIDs)
 	callerPkgs := make(map[string]bool)
 	for _, caller := range callers {
 		if caller == nil {
@@ -124,7 +125,8 @@ func (m *GraphStoreMetrics) packageReferenceCount(repoID, pkg string) int {
 // CA-171: uses GetCallEdges + a package-membership filter instead of one
 // GetCallers query per symbol.
 func (m *GraphStoreMetrics) packageRelationCount(repoID, pkg string) int {
-	syms, _ := m.store.GetSymbols(repoID, nil, nil, 0, 0)
+	ctx := context.Background()
+	syms, _ := m.store.GetSymbols(ctx, repoID, nil, nil, 0, 0)
 	pkgSymIDs := make(map[string]struct{}, len(syms))
 	for _, sym := range syms {
 		if symbolInPackage(sym.FilePath, pkg) {
@@ -135,7 +137,7 @@ func (m *GraphStoreMetrics) packageRelationCount(repoID, pkg string) int {
 		return 0
 	}
 	total := 0
-	for _, e := range m.store.GetCallEdges(repoID) {
+	for _, e := range m.store.GetCallEdges(ctx, repoID) {
 		if _, ok := pkgSymIDs[e.CalleeID]; ok {
 			total++
 		}
@@ -148,7 +150,8 @@ func (m *GraphStoreMetrics) packageRelationCount(repoID, pkg string) int {
 // CA-171: collapsed N×K SurrealDB round-trips into GetCallEdges + one
 // GetSymbolsByIDs batch.
 func (m *GraphStoreMetrics) repoReferenceCount(repoID string) int {
-	edges := m.store.GetCallEdges(repoID)
+	ctx := context.Background()
+	edges := m.store.GetCallEdges(ctx, repoID)
 	if len(edges) == 0 {
 		return 0
 	}
@@ -160,7 +163,7 @@ func (m *GraphStoreMetrics) repoReferenceCount(repoID string) int {
 	for id := range callerIDSet {
 		callerIDs = append(callerIDs, id)
 	}
-	callers := m.store.GetSymbolsByIDs(callerIDs)
+	callers := m.store.GetSymbolsByIDs(ctx, callerIDs)
 	callerPkgs := make(map[string]bool)
 	for _, caller := range callers {
 		if caller == nil {
@@ -175,7 +178,7 @@ func (m *GraphStoreMetrics) repoReferenceCount(repoID string) int {
 //
 // CA-171: replaced GetCallers-per-symbol with a single GetCallEdges query.
 func (m *GraphStoreMetrics) repoRelationCount(repoID string) int {
-	return len(m.store.GetCallEdges(repoID))
+	return len(m.store.GetCallEdges(context.Background(), repoID))
 }
 
 // pageSubject extracts the package path from an architecture page ID.
@@ -222,16 +225,3 @@ func filePackage(filePath string) string {
 	return filePath[:idx]
 }
 
-// GraphStoreMetricsWithContext wraps [GraphStoreMetrics] to satisfy
-// a hypothetical context-aware interface. Currently the GraphStore
-// does not accept contexts; this is a forward-compatibility wrapper
-// that can be removed when the store is updated.
-//
-// The unused ctx parameter is accepted to document intent.
-func (m *GraphStoreMetrics) PageReferenceCountCtx(_ context.Context, repoID, pageID string) int {
-	return m.PageReferenceCount(repoID, pageID)
-}
-
-func (m *GraphStoreMetrics) GraphRelationCountCtx(_ context.Context, repoID, pageID string) int {
-	return m.GraphRelationCount(repoID, pageID)
-}

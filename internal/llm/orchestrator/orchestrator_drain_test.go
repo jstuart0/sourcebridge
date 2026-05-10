@@ -4,6 +4,7 @@
 package orchestrator
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -65,7 +66,7 @@ func TestMarkDrainingReaperGuard(t *testing.T) {
 	orch.reapStaleJobs()
 
 	// Find the job and verify it is still generating.
-	active := orch.store.ListActive(llm.ListFilter{})
+	active := orch.store.ListActive(context.Background(), llm.ListFilter{})
 	var job *llm.Job
 	for _, j := range active {
 		if j.TargetKey == "lw:test:reaper-guard-repo" {
@@ -122,14 +123,14 @@ func TestMarkDrainingDoesNotBlockPendingReap(t *testing.T) {
 		CreatedAt: old,
 		UpdatedAt: old,
 	}
-	if _, err := store.Create(staleJob); err != nil {
+	if _, err := store.Create(context.Background(), staleJob); err != nil {
 		t.Fatalf("store.Create: %v", err)
 	}
 	orch.inflight.claim(staleJob.TargetKey, staleJob.ID)
 
 	orch.reapStaleJobs()
 
-	got := store.GetByID(staleJob.ID)
+	got := store.GetByID(context.Background(), staleJob.ID)
 	if got == nil {
 		t.Fatal("job disappeared from store")
 	}

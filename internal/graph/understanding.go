@@ -4,6 +4,7 @@
 package graph
 
 import (
+	"context"
 	"strings"
 	"time"
 	"unicode"
@@ -27,22 +28,22 @@ type UnderstandingScore struct {
 type KnowledgeFreshnessProvider interface {
 	// GetFreshnessRatio returns (fresh, total) counts of knowledge artifacts for a repo.
 	// "Fresh" means status=ready and stale=false.
-	GetFreshnessRatio(repoID string) (fresh int, total int)
+	GetFreshnessRatio(ctx context.Context, repoID string) (fresh int, total int)
 }
 
 // ComputeUnderstandingScore computes the understanding score for a repository.
 // Weights: traceability 25%, documentation 25%, review 20%, test 15%, knowledge 15%.
-func ComputeUnderstandingScore(store GraphStore, kfp KnowledgeFreshnessProvider, repoID string) *UnderstandingScore {
+func ComputeUnderstandingScore(ctx context.Context, store GraphStore, kfp KnowledgeFreshnessProvider, repoID string) *UnderstandingScore {
 	score := &UnderstandingScore{
 		ComputedAt: time.Now(),
 	}
 
 	// 1. Traceability coverage: % of requirements with at least one non-rejected link
-	_, reqTotal := store.GetRequirements(repoID, 0, 0)
+	_, reqTotal := store.GetRequirements(ctx, repoID, 0, 0)
 	if reqTotal > 0 {
 		// Fetch all non-rejected links for the repo in one query instead of
 		// calling GetLinksForRequirement per requirement (N+1).
-		allLinks := store.GetLinksForRepo(repoID)
+		allLinks := store.GetLinksForRepo(ctx, repoID)
 		linkedReqs := make(map[string]bool, len(allLinks))
 		for _, link := range allLinks {
 			linkedReqs[link.RequirementID] = true
@@ -51,15 +52,15 @@ func ComputeUnderstandingScore(store GraphStore, kfp KnowledgeFreshnessProvider,
 	}
 
 	// 2. Documentation coverage: % of public symbols with doc comments
-	withDocs, totalPublic := store.GetPublicSymbolDocCoverage(repoID)
+	withDocs, totalPublic := store.GetPublicSymbolDocCoverage(ctx, repoID)
 	if totalPublic > 0 {
 		score.DocumentationCoverage = float64(withDocs) / float64(totalPublic) * 100
 	}
 
 	// 3. Review coverage: % of files with at least one review
-	reviewResults := store.GetReviewResultsForRepo(repoID)
+	reviewResults := store.GetReviewResultsForRepo(ctx, repoID)
 	if len(reviewResults) > 0 {
-		files := store.GetFiles(repoID)
+		files := store.GetFiles(ctx, repoID)
 		if len(files) > 0 {
 			// Build file ID set for O(1) lookup
 			fileIDSet := make(map[string]bool, len(files))
@@ -80,7 +81,7 @@ func ComputeUnderstandingScore(store GraphStore, kfp KnowledgeFreshnessProvider,
 				if fileIDSet[rr.TargetID] {
 					reviewedFileSet[rr.TargetID] = true
 				} else {
-					sym := store.GetSymbol(rr.TargetID)
+					sym := store.GetSymbol(ctx, rr.TargetID)
 					if sym != nil {
 						reviewedFileSet[sym.FileID] = true
 					}
@@ -93,7 +94,7 @@ func ComputeUnderstandingScore(store GraphStore, kfp KnowledgeFreshnessProvider,
 	// 4. Test coverage: ratio of test symbols to non-test symbols.
 	// When there are no non-test symbols (nonTest == 0), the score is 0 —
 	// "no testable code found" is not "everything is tested."
-	tests, totalSyms := store.GetTestSymbolRatio(repoID)
+	tests, totalSyms := store.GetTestSymbolRatio(ctx, repoID)
 	if totalSyms > 0 {
 		nonTest := totalSyms - tests
 		if nonTest > 0 {
@@ -109,14 +110,14 @@ func ComputeUnderstandingScore(store GraphStore, kfp KnowledgeFreshnessProvider,
 
 	// 5. Knowledge freshness: % of knowledge artifacts not stale
 	if kfp != nil {
-		fresh, total := kfp.GetFreshnessRatio(repoID)
+		fresh, total := kfp.GetFreshnessRatio(ctx, repoID)
 		if total > 0 {
 			score.KnowledgeFreshness = float64(fresh) / float64(total) * 100
 		}
 	}
 
 	// 6. AI code ratio (informational, Phase 2A will populate)
-	aiFiles, totalFiles := store.GetAICodeFileRatio(repoID)
+	aiFiles, totalFiles := store.GetAICodeFileRatio(ctx, repoID)
 	if totalFiles > 0 {
 		score.AICodeRatio = float64(aiFiles) / float64(totalFiles) * 100
 	}

@@ -4,6 +4,7 @@
 package qa
 
 import (
+	"context"
 	"encoding/json"
 	"regexp"
 	"sort"
@@ -38,8 +39,8 @@ type RepositoryStatus struct {
 // the QA orchestrator needs. It exists as an interface so tests can
 // inject lightweight fakes without standing up a SurrealDB.
 type UnderstandingReader interface {
-	GetRepositoryUnderstanding(repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding
-	GetSummaryNodes(corpusID string) ([]comprehension.SummaryNode, error)
+	GetRepositoryUnderstanding(ctx context.Context, repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding
+	GetSummaryNodes(ctx context.Context, corpusID string) ([]comprehension.SummaryNode, error)
 }
 
 // SummaryEvidence is a scored summary-node row the deep pipeline
@@ -68,8 +69,8 @@ type SummaryEvidence struct {
 // scope (ScopeRepository) row, we use that directly; on miss we surface
 // Ready=false with whatever stage we see so the caller can emit the
 // "understanding not ready" CTA instead of a hard error.
-func GetRepositoryStatus(reader UnderstandingReader, repoID, repoName string) *RepositoryStatus {
-	u := reader.GetRepositoryUnderstanding(repoID, knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository})
+func GetRepositoryStatus(ctx context.Context, reader UnderstandingReader, repoID, repoName string) *RepositoryStatus {
+	u := reader.GetRepositoryUnderstanding(ctx, repoID, knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository})
 	if u == nil {
 		return &RepositoryStatus{
 			RepositoryID:   repoID,
@@ -107,11 +108,11 @@ func GetRepositoryStatus(reader UnderstandingReader, repoID, repoName string) *R
 // Rows with non-useful summary text are discarded (Python `continue`).
 // Rows with final score <= 0 are discarded.
 // Output sorted by (-score, -level, unit_id).
-func GetSummaryEvidence(reader UnderstandingReader, corpusID, question, questionKind string) ([]SummaryEvidence, error) {
+func GetSummaryEvidence(ctx context.Context, reader UnderstandingReader, corpusID, question, questionKind string) ([]SummaryEvidence, error) {
 	if corpusID == "" {
 		return nil, nil
 	}
-	rows, err := reader.GetSummaryNodes(corpusID)
+	rows, err := reader.GetSummaryNodes(ctx, corpusID)
 	if err != nil {
 		return nil, err
 	}

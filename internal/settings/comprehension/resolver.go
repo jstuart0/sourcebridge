@@ -3,13 +3,15 @@
 
 package comprehension
 
+import "context"
+
 // scopeBroadToSpecific is the inheritance chain from broadest to most specific.
 var scopeBroadToSpecific = []ScopeType{ScopeWorkspace, ScopeCorpusType, ScopeArtifactType, ScopeUser}
 
 // Resolve computes the effective settings for a target scope by walking
 // the inheritance chain from the target scope up to workspace defaults.
 // Each field is sourced from the most specific scope that sets it.
-func Resolve(store Store, target Scope) (*EffectiveSettings, error) {
+func Resolve(ctx context.Context, store Store, target Scope) (*EffectiveSettings, error) {
 	defaults := DefaultSettings()
 	eff := &EffectiveSettings{
 		Settings:      defaults,
@@ -20,7 +22,7 @@ func Resolve(store Store, target Scope) (*EffectiveSettings, error) {
 	// later values override earlier ones.
 	chain := buildChain(target)
 	for _, scope := range chain {
-		s, err := store.GetSettings(scope)
+		s, err := store.GetSettings(ctx, scope)
 		if err != nil {
 			return nil, err
 		}

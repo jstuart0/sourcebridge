@@ -465,12 +465,12 @@ func (r *Router) Submit(ctx context.Context, ev *ChangeEvent) (SubmitOutcome, er
 	// 10. Snapshot OLD symbols + compute changed files set BEFORE the
 	// merge. Without this snapshot DiffSymbols can't compute SymbolsAdded
 	// / Modified / Removed correctly.
-	oldSymbols, _ := r.store.GetSymbols(ev.RepositoryID, nil, nil, 0, 0)
+	oldSymbols, _ := r.store.GetSymbols(ctx, ev.RepositoryID, nil, nil, 0, 0)
 
 	// 11. Apply the merge to the store. This drops dependent records on
 	// affected files and re-inserts them with fresh UUIDs while
 	// preserving carry-forward symbol IDs.
-	if _, err := r.store.MergeIndexResult(ev.RepositoryID, affected, newResult); err != nil {
+	if _, err := r.store.MergeIndexResult(ctx, ev.RepositoryID, affected, newResult); err != nil {
 		// MergeIndexResult on the SurrealDB backend in 1.C returns
 		// ErrMergeNotSupported. Surface it through the freshness
 		// envelope as suspect rather than failing loudly.
@@ -486,10 +486,10 @@ func (r *Router) Submit(ctx context.Context, ev *ChangeEvent) (SubmitOutcome, er
 
 	// 12. Compute the impact report and run the existing knowledge-store
 	// invalidation policy via the resolver-side helper.
-	newSymbols, _ := r.store.GetSymbols(ev.RepositoryID, nil, nil, 0, 0)
+	newSymbols, _ := r.store.GetSymbols(ctx, ev.RepositoryID, nil, nil, 0, 0)
 	fileDiffs, changedFilesSet := buildFileDiffs(ev)
 	symbolChanges := graphstore.DiffSymbols(oldSymbols, newSymbols, changedFilesSet)
-	report := graphstore.ComputeImpact(r.store, ev.RepositoryID, fileDiffs, symbolChanges)
+	report := graphstore.ComputeImpact(ctx, r.store, ev.RepositoryID, fileDiffs, symbolChanges)
 
 	if r.impactApplier != nil {
 		// Use a background-friendly context for impact application; the

@@ -76,7 +76,7 @@ func runTrace(cmd *cobra.Command, args []string) error {
 	}
 
 	store := graph.NewStore()
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(cmd.Context(), result)
 	if err != nil {
 		return fmt.Errorf("storing index result: %w", err)
 	}
@@ -111,15 +111,15 @@ func runTrace(cmd *cobra.Command, args []string) error {
 				Tags:               req.Tags,
 			})
 		}
-		store.StoreRequirements(repo.ID, storedReqs)
+		store.StoreRequirements(cmd.Context(), repo.ID, storedReqs)
 	}
 
 	// Find the requirement by external ID
-	req := store.GetRequirementByExternalID(repo.ID, reqID)
+	req := store.GetRequirementByExternalID(cmd.Context(), repo.ID, reqID)
 	if req == nil {
 		fmt.Fprintf(os.Stderr, "Requirement %q not found.\n", reqID)
 		fmt.Fprintf(os.Stderr, "Available requirements:\n")
-		reqs, _ := store.GetRequirements(repo.ID, 100, 0)
+		reqs, _ := store.GetRequirements(cmd.Context(), repo.ID, 100, 0)
 		for _, r := range reqs {
 			fmt.Fprintf(os.Stderr, "  %s: %s\n", r.ExternalID, r.Title)
 		}
@@ -127,11 +127,11 @@ func runTrace(cmd *cobra.Command, args []string) error {
 	}
 
 	// Find links by scanning symbols for comment references
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 10000, 0)
+	syms, _ := store.GetSymbols(cmd.Context(), repo.ID, nil, nil, 10000, 0)
 	for _, sym := range syms {
 		// Check doc comments for requirement references
 		if containsReqRef(sym.DocComment, reqID) || containsReqRef(sym.Signature, reqID) {
-			store.StoreLink(repo.ID, &graph.StoredLink{
+			store.StoreLink(cmd.Context(), repo.ID, &graph.StoredLink{
 				RequirementID: req.ID,
 				SymbolID:      sym.ID,
 				Confidence:    0.95,
@@ -143,7 +143,7 @@ func runTrace(cmd *cobra.Command, args []string) error {
 	}
 
 	// Retrieve links
-	links := store.GetLinksForRequirement(req.ID, false)
+	links := store.GetLinksForRequirement(cmd.Context(), req.ID, false)
 
 	// Filter by confidence
 	var filtered []*graph.StoredLink

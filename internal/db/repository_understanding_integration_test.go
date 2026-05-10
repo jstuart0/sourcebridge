@@ -38,7 +38,7 @@ func TestSurrealStore_RepositoryUnderstanding_NonRunningStageZeroesProgress(t *t
 	scope := &knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository}
 
 	// Sanity: a write with a running stage preserves the progress fields.
-	running, err := store.StoreRepositoryUnderstanding(&knowledge.RepositoryUnderstanding{
+	running, err := store.StoreRepositoryUnderstanding(t.Context(), &knowledge.RepositoryUnderstanding{
 		RepositoryID:    "repo-progress-running",
 		Scope:           scope,
 		Stage:           knowledge.UnderstandingBuildingTree,
@@ -68,7 +68,7 @@ func TestSurrealStore_RepositoryUnderstanding_NonRunningStageZeroesProgress(t *t
 		stage := stage
 		t.Run(string(stage), func(t *testing.T) {
 			repoID := "repo-progress-" + string(stage)
-			out, err := store.StoreRepositoryUnderstanding(&knowledge.RepositoryUnderstanding{
+			out, err := store.StoreRepositoryUnderstanding(t.Context(), &knowledge.RepositoryUnderstanding{
 				RepositoryID:    repoID,
 				Scope:           scope,
 				Stage:           stage,
@@ -92,10 +92,10 @@ func TestSurrealStore_RepositoryUnderstanding_NonRunningStageZeroesProgress(t *t
 			// A late heartbeat must NOT re-stamp progress on a terminal row —
 			// the SQL WHERE clause in UpdateRepositoryUnderstandingProgress
 			// is the line under test.
-			if err := store.UpdateRepositoryUnderstandingProgress(out.ID, 0.5, "queued", "rebuilding"); err != nil {
+			if err := store.UpdateRepositoryUnderstandingProgress(t.Context(), out.ID, 0.5, "queued", "rebuilding"); err != nil {
 				t.Fatalf("UpdateRepositoryUnderstandingProgress on terminal row: %v", err)
 			}
-			again := store.GetRepositoryUnderstanding(repoID, *scope)
+			again := store.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
 			if again == nil {
 				t.Fatal("GetRepositoryUnderstanding after late heartbeat returned nil")
 			}
@@ -118,7 +118,7 @@ func TestSurrealStore_UpdateProgress_RunningStageWritesThrough(t *testing.T) {
 
 	scope := &knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository}
 
-	row, err := store.StoreRepositoryUnderstanding(&knowledge.RepositoryUnderstanding{
+	row, err := store.StoreRepositoryUnderstanding(t.Context(), &knowledge.RepositoryUnderstanding{
 		RepositoryID: "repo-progress-running-update",
 		Scope:        scope,
 		Stage:        knowledge.UnderstandingBuildingTree,
@@ -128,10 +128,10 @@ func TestSurrealStore_UpdateProgress_RunningStageWritesThrough(t *testing.T) {
 		t.Fatalf("seed running row: err=%v row=%v", err, row)
 	}
 
-	if err := store.UpdateRepositoryUnderstandingProgress(row.ID, 0.42, "files", "analysing 14 files"); err != nil {
+	if err := store.UpdateRepositoryUnderstandingProgress(t.Context(), row.ID, 0.42, "files", "analysing 14 files"); err != nil {
 		t.Fatalf("UpdateRepositoryUnderstandingProgress: %v", err)
 	}
-	got := store.GetRepositoryUnderstanding("repo-progress-running-update", *scope)
+	got := store.GetRepositoryUnderstanding(t.Context(), "repo-progress-running-update", *scope)
 	if got == nil {
 		t.Fatal("GetRepositoryUnderstanding returned nil")
 	}
@@ -166,7 +166,7 @@ func TestMarkRepositoryUnderstandingFailed_TransitionsRunningStages(t *testing.T
 		startStage := startStage
 		t.Run("from_"+string(startStage), func(t *testing.T) {
 			repoID := "repo-fail-" + string(startStage)
-			row, err := store.StoreRepositoryUnderstanding(&knowledge.RepositoryUnderstanding{
+			row, err := store.StoreRepositoryUnderstanding(t.Context(), &knowledge.RepositoryUnderstanding{
 				RepositoryID: repoID,
 				Scope:        scope,
 				Stage:        startStage,
@@ -179,11 +179,11 @@ func TestMarkRepositoryUnderstandingFailed_TransitionsRunningStages(t *testing.T
 				t.Fatalf("seed %s: err=%v row=%v", startStage, err, row)
 			}
 
-			if err := store.MarkRepositoryUnderstandingFailed(row.ID, errCode, errMsg); err != nil {
+			if err := store.MarkRepositoryUnderstandingFailed(t.Context(), row.ID, errCode, errMsg); err != nil {
 				t.Fatalf("MarkRepositoryUnderstandingFailed from %s: %v", startStage, err)
 			}
 
-			got := store.GetRepositoryUnderstanding(repoID, *scope)
+			got := store.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
 			if got == nil {
 				t.Fatal("GetRepositoryUnderstanding after failure returned nil")
 			}
@@ -202,10 +202,10 @@ func TestMarkRepositoryUnderstandingFailed_TransitionsRunningStages(t *testing.T
 			}
 
 			// Idempotent re-fire: calling again on FAILED must be a no-op.
-			if err := store.MarkRepositoryUnderstandingFailed(row.ID, "SECOND_CALL", "should be ignored"); err != nil {
+			if err := store.MarkRepositoryUnderstandingFailed(t.Context(), row.ID, "SECOND_CALL", "should be ignored"); err != nil {
 				t.Fatalf("idempotent re-fire: %v", err)
 			}
-			again := store.GetRepositoryUnderstanding(repoID, *scope)
+			again := store.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
 			if again == nil {
 				t.Fatal("idempotent re-fire lookup returned nil")
 			}
@@ -218,7 +218,7 @@ func TestMarkRepositoryUnderstandingFailed_TransitionsRunningStages(t *testing.T
 	t.Run("no_op_from_ready", func(t *testing.T) {
 		// Build a READY row and confirm the method leaves it untouched.
 		repoID := "repo-fail-noop-ready"
-		row, err := store.StoreRepositoryUnderstanding(&knowledge.RepositoryUnderstanding{
+		row, err := store.StoreRepositoryUnderstanding(t.Context(), &knowledge.RepositoryUnderstanding{
 			RepositoryID: repoID,
 			Scope:        scope,
 			Stage:        knowledge.UnderstandingReady,
@@ -228,11 +228,11 @@ func TestMarkRepositoryUnderstandingFailed_TransitionsRunningStages(t *testing.T
 			t.Fatalf("seed ready: err=%v row=%v", err, row)
 		}
 
-		if err := store.MarkRepositoryUnderstandingFailed(row.ID, errCode, errMsg); err != nil {
+		if err := store.MarkRepositoryUnderstandingFailed(t.Context(), row.ID, errCode, errMsg); err != nil {
 			t.Fatalf("MarkRepositoryUnderstandingFailed on READY: %v", err)
 		}
 
-		got := store.GetRepositoryUnderstanding(repoID, *scope)
+		got := store.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
 		if got == nil {
 			t.Fatal("post-no-op lookup returned nil")
 		}
@@ -258,7 +258,7 @@ func TestSurrealStore_MarkNeedsRefresh_ZeroesProgressFields(t *testing.T) {
 	// prove MarkRepositoryUnderstandingNeedsRefresh actually does its own
 	// zeroing we cheat the row up to non-zero progress via a direct
 	// UPDATE to building_tree, write progress, then flip back to ready.
-	if _, err := store.StoreRepositoryUnderstanding(&knowledge.RepositoryUnderstanding{
+	if _, err := store.StoreRepositoryUnderstanding(t.Context(), &knowledge.RepositoryUnderstanding{
 		RepositoryID: repoID,
 		Scope:        scope,
 		Stage:        knowledge.UnderstandingBuildingTree,
@@ -266,14 +266,14 @@ func TestSurrealStore_MarkNeedsRefresh_ZeroesProgressFields(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed building_tree: %v", err)
 	}
-	row := store.GetRepositoryUnderstanding(repoID, *scope)
+	row := store.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
 	if row == nil {
 		t.Fatal("seed lookup returned nil")
 	}
-	if err := store.UpdateRepositoryUnderstandingProgress(row.ID, 0.91, "root", "synthesising"); err != nil {
+	if err := store.UpdateRepositoryUnderstandingProgress(t.Context(), row.ID, 0.91, "root", "synthesising"); err != nil {
 		t.Fatalf("seed heartbeat: %v", err)
 	}
-	if _, err := store.StoreRepositoryUnderstanding(&knowledge.RepositoryUnderstanding{
+	if _, err := store.StoreRepositoryUnderstanding(t.Context(), &knowledge.RepositoryUnderstanding{
 		ID:           row.ID,
 		RepositoryID: repoID,
 		Scope:        scope,
@@ -283,7 +283,7 @@ func TestSurrealStore_MarkNeedsRefresh_ZeroesProgressFields(t *testing.T) {
 		t.Fatalf("transition to ready: %v", err)
 	}
 	// Sanity: the ready transition should already have zeroed progress.
-	ready := store.GetRepositoryUnderstanding(repoID, *scope)
+	ready := store.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
 	if ready == nil {
 		t.Fatal("ready lookup returned nil")
 	}
@@ -293,10 +293,10 @@ func TestSurrealStore_MarkNeedsRefresh_ZeroesProgressFields(t *testing.T) {
 	}
 
 	// Now flip to NEEDS_REFRESH. This is the path under test.
-	if err := store.MarkRepositoryUnderstandingNeedsRefresh(repoID); err != nil {
+	if err := store.MarkRepositoryUnderstandingNeedsRefresh(t.Context(), repoID); err != nil {
 		t.Fatalf("MarkRepositoryUnderstandingNeedsRefresh: %v", err)
 	}
-	flipped := store.GetRepositoryUnderstanding(repoID, *scope)
+	flipped := store.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
 	if flipped == nil {
 		t.Fatal("post-flip lookup returned nil")
 	}

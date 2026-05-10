@@ -21,11 +21,11 @@ func TestMemStore_LLMProviderRoundTrip(t *testing.T) {
 		LLMProvider: "anthropic",
 		Status:      StatusPending,
 	}
-	if _, err := s.Create(job); err != nil {
+	if _, err := s.Create(t.Context(), job); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	got := s.GetByID("job-rt-1")
+	got := s.GetByID(t.Context(), "job-rt-1")
 	if got == nil {
 		t.Fatalf("GetByID returned nil")
 	}
@@ -33,7 +33,7 @@ func TestMemStore_LLMProviderRoundTrip(t *testing.T) {
 		t.Errorf("Job.LLMProvider round-trip: got %q, want anthropic", got.LLMProvider)
 	}
 
-	entry, err := s.AppendLog(&JobLogEntry{
+	entry, err := s.AppendLog(t.Context(), &JobLogEntry{
 		JobID:       "job-rt-1",
 		LLMProvider: "anthropic",
 		Level:       LogLevelInfo,
@@ -48,7 +48,7 @@ func TestMemStore_LLMProviderRoundTrip(t *testing.T) {
 		t.Errorf("JobLogEntry.LLMProvider on append: got %q, want anthropic", entry.LLMProvider)
 	}
 
-	logs := s.ListLogs("job-rt-1", JobLogFilter{})
+	logs := s.ListLogs(t.Context(), "job-rt-1", JobLogFilter{})
 	if len(logs) != 1 || logs[0].LLMProvider != "anthropic" {
 		t.Errorf("JobLogEntry.LLMProvider round-trip via ListLogs failed: %+v", logs)
 	}

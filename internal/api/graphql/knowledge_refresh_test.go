@@ -77,7 +77,7 @@ func seedStaleArtifact(
 	mode knowledgepkg.GenerationMode,
 ) *knowledgepkg.Artifact {
 	t.Helper()
-	a, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	a, err := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		RepositoryID:   repoID,
 		Type:           typ,
 		Audience:       knowledgepkg.AudienceDeveloper,
@@ -88,13 +88,13 @@ func seedStaleArtifact(
 	if err != nil {
 		t.Fatalf("seed %s: %v", typ, err)
 	}
-	if err := store.UpdateKnowledgeArtifactStatus(a.ID, knowledgepkg.StatusReady); err != nil {
+	if err := store.UpdateKnowledgeArtifactStatus(t.Context(), a.ID, knowledgepkg.StatusReady); err != nil {
 		t.Fatalf("ready: %v", err)
 	}
-	if err := store.MarkKnowledgeArtifactStale(a.ID, true); err != nil {
+	if err := store.MarkKnowledgeArtifactStale(t.Context(), a.ID, true); err != nil {
 		t.Fatalf("stale: %v", err)
 	}
-	return store.GetKnowledgeArtifact(a.ID)
+	return store.GetKnowledgeArtifact(t.Context(), a.ID)
 }
 
 // resolverWithStore returns a mutationResolver wired up enough to exercise
@@ -153,7 +153,7 @@ func TestEnqueueStaleArtifactRefresh_ShadowMode_LogsButDoesNotEnqueue(t *testing
 		t.Fatalf("expected mode=shadow in logs, got: %s", lc.text())
 	}
 	// Artifact must remain stale under shadow — we never actually refreshed.
-	after := store.GetKnowledgeArtifact(a.ID)
+	after := store.GetKnowledgeArtifact(t.Context(), a.ID)
 	if !after.Stale {
 		t.Fatalf("shadow mode should not unset stale; got stale=%v", after.Stale)
 	}
@@ -244,14 +244,14 @@ func TestEnqueueStaleArtifactRefresh_SkipsNonStaleAndNonReady(t *testing.T) {
 	// Create three artifacts: one stale+ready, one non-stale+ready,
 	// one stale+generating. Only the first should be considered.
 	good := seedStaleArtifact(t, store, "repo-s", knowledgepkg.ArtifactCliffNotes, knowledgepkg.DepthMedium, knowledgepkg.GenerationModeClassic)
-	noStale, _ := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	noStale, _ := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		RepositoryID: "repo-s", Type: knowledgepkg.ArtifactLearningPath,
 		Audience: knowledgepkg.AudienceDeveloper, Depth: knowledgepkg.DepthMedium,
 		GenerationMode: knowledgepkg.GenerationModeClassic, Status: knowledgepkg.StatusPending,
 	})
-	_ = store.UpdateKnowledgeArtifactStatus(noStale.ID, knowledgepkg.StatusReady)
+	_ = store.UpdateKnowledgeArtifactStatus(t.Context(), noStale.ID, knowledgepkg.StatusReady)
 	inflight := seedStaleArtifact(t, store, "repo-s", knowledgepkg.ArtifactCodeTour, knowledgepkg.DepthMedium, knowledgepkg.GenerationModeClassic)
-	_ = store.UpdateKnowledgeArtifactStatus(inflight.ID, knowledgepkg.StatusGenerating)
+	_ = store.UpdateKnowledgeArtifactStatus(t.Context(), inflight.ID, knowledgepkg.StatusGenerating)
 	r := resolverWithStore(store)
 	r.enqueueStaleArtifactRefresh("repo-s", []string{good.ID, noStale.ID, inflight.ID}, "report-s")
 
@@ -298,14 +298,14 @@ func TestEnqueueStaleArtifactRefresh_DefersUnderstandingFirstUntilFreshUnderstan
 	}
 
 	// Now seed a fresh understanding and rerun — ufArt should not be deferred.
-	_, _ = store.StoreRepositoryUnderstanding(&knowledgepkg.RepositoryUnderstanding{
+	_, _ = store.StoreRepositoryUnderstanding(t.Context(), &knowledgepkg.RepositoryUnderstanding{
 		RepositoryID: "repo-u",
 		Scope:        (&knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository}).NormalizePtr(),
 		Stage:        knowledgepkg.UnderstandingReady,
 		RevisionFP:   "rev-1",
 	})
 	// Re-stale the artifacts (first pass unset them via the decision flow).
-	_ = store.MarkKnowledgeArtifactStale(ufArt.ID, true)
+	_ = store.MarkKnowledgeArtifactStale(t.Context(), ufArt.ID, true)
 
 	lc2 := captureSlog(t)
 	resetRegenRateLimiter()
@@ -331,11 +331,11 @@ func TestEnqueueStaleArtifactRefresh_RateLimit(t *testing.T) {
 
 	// 3 attempts fit under the cap.
 	for i := 0; i < 3; i++ {
-		_ = store.MarkKnowledgeArtifactStale(a.ID, true)
+		_ = store.MarkKnowledgeArtifactStale(t.Context(), a.ID, true)
 		r.enqueueStaleArtifactRefresh("repo-r", []string{a.ID}, "report-r")
 	}
 	// 4th should hit the rate limit.
-	_ = store.MarkKnowledgeArtifactStale(a.ID, true)
+	_ = store.MarkKnowledgeArtifactStale(t.Context(), a.ID, true)
 	r.enqueueStaleArtifactRefresh("repo-r", []string{a.ID}, "report-r-4")
 
 	if !strings.Contains(lc.text(), "delta_regen_rate_limited") {
@@ -430,7 +430,7 @@ func TestEnqueueStaleArtifactRefresh_ShadowVsLiveDecisionParity(t *testing.T) {
 func seedUnsupportedArtifact(t *testing.T, store *knowledgepkg.MemStore, repoID string) *knowledgepkg.Artifact {
 	t.Helper()
 	// Use a type string that is not one of the five supported generation types.
-	a, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	a, err := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		RepositoryID:   repoID,
 		Type:           knowledgepkg.ArtifactType("slide_outline"),
 		Audience:       knowledgepkg.AudienceDeveloper,
@@ -441,16 +441,16 @@ func seedUnsupportedArtifact(t *testing.T, store *knowledgepkg.MemStore, repoID 
 	if err != nil {
 		t.Fatalf("StoreKnowledgeArtifact: %v", err)
 	}
-	if err := store.UpdateKnowledgeArtifactStatus(a.ID, knowledgepkg.StatusReady); err != nil {
+	if err := store.UpdateKnowledgeArtifactStatus(t.Context(), a.ID, knowledgepkg.StatusReady); err != nil {
 		t.Fatalf("UpdateKnowledgeArtifactStatus: %v", err)
 	}
-	return store.GetKnowledgeArtifact(a.ID)
+	return store.GetKnowledgeArtifact(t.Context(), a.ID)
 }
 
 func TestRefreshKnowledgeArtifact_UnsupportedType_DoesNotLeaveGenerating(t *testing.T) {
 	// Arrange: a repository in the graph store + an artifact of an unsupported type.
 	graphStore := graphstore.NewStore()
-	repo, err := graphStore.CreateRepository("test-repo", "/tmp/test-repo")
+	repo, err := graphStore.CreateRepository(t.Context(), "test-repo", "/tmp/test-repo")
 	if err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
@@ -476,7 +476,7 @@ func TestRefreshKnowledgeArtifact_UnsupportedType_DoesNotLeaveGenerating(t *test
 
 	// Assert: artifact must NOT be stuck in "generating" — the type guard fires
 	// before status mutation, so status remains "ready".
-	after := knowledgeStore.GetKnowledgeArtifact(artifact.ID)
+	after := knowledgeStore.GetKnowledgeArtifact(t.Context(), artifact.ID)
 	if after == nil {
 		t.Fatal("artifact disappeared from store")
 	}

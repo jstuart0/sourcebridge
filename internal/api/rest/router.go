@@ -470,7 +470,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 	//     surfaces the timeout instead of returning lastJobResult: null.
 	orchCfg.OnStaleJob = func(job *llm.Job) {
 		if s.knowledgeStore != nil && job.ArtifactID != "" {
-			_ = s.knowledgeStore.SetArtifactFailed(job.ArtifactID, "DEADLINE_EXCEEDED", "Generation timed out — please retry")
+			_ = s.knowledgeStore.SetArtifactFailed(context.Background(), job.ArtifactID, "DEADLINE_EXCEEDED", "Generation timed out — please retry")
 		}
 		if s.livingWikiJobResultStore != nil && job.Subsystem == llm.SubsystemLivingWiki {
 			persistStaleLivingWikiResult(s.livingWikiJobResultStore, job)
@@ -500,7 +500,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		if msg == "" {
 			msg = "Repository understanding job failed"
 		}
-		if err := s.knowledgeStore.MarkRepositoryUnderstandingFailed(job.ArtifactID, code, msg); err != nil {
+		if err := s.knowledgeStore.MarkRepositoryUnderstandingFailed(context.Background(), job.ArtifactID, code, msg); err != nil {
 			slog.Warn("mark_repository_understanding_failed_error",
 				"job_id", job.ID,
 				"understanding_id", job.ArtifactID,

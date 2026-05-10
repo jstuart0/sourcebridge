@@ -3,6 +3,8 @@
 
 package qa
 
+import "context"
+
 import (
 	"os"
 	"path/filepath"
@@ -18,13 +20,13 @@ import (
 // When the clone isn't available (no locator, no on-disk files),
 // returns an empty slice — the caller falls through to the grep
 // retriever in that case.
-func filesFromSearchHits(hits []SearchHit, locator RepoLocator, repoID string) []FileEvidence {
+func filesFromSearchHits(ctx context.Context, hits []SearchHit, locator RepoLocator, repoID string) []FileEvidence {
 	if len(hits) == 0 {
 		return nil
 	}
 	var root string
 	if locator != nil {
-		if r, ok := locator.LocateRepoClone(repoID); ok {
+		if r, ok := locator.LocateRepoClone(ctx, repoID); ok {
 			root = r
 		}
 	}

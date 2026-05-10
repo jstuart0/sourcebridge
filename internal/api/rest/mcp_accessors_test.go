@@ -69,19 +69,19 @@ func seedCallGraphTestData(t *testing.T, h *mcpTestHarness) (handleID, parseID s
 			{SourceID: "tmp-handle", TargetID: "tmp-config", Type: indexer.RelationCalls},
 		},
 	}
-	repo, err := h.store.ReplaceIndexResult(h.repoID, result)
+	repo, err := h.store.ReplaceIndexResult(t.Context(), h.repoID, result)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 	h.repoID = repo.ID
 
 	// Look up generated symbol IDs.
-	for _, s := range h.store.GetSymbolsByFile(h.repoID, "main.go") {
+	for _, s := range h.store.GetSymbolsByFile(t.Context(), h.repoID, "main.go") {
 		if s.Name == "HandleRequest" {
 			handleID = s.ID
 		}
 	}
-	for _, s := range h.store.GetSymbolsByFile(h.repoID, "utils.go") {
+	for _, s := range h.store.GetSymbolsByFile(t.Context(), h.repoID, "utils.go") {
 		if s.Name == "ParseJSON" {
 			parseID = s.ID
 		}
@@ -342,7 +342,7 @@ func TestMCP_ResolveSymbol_AmbiguousByName(t *testing.T) {
 			},
 		},
 	}
-	repo, err := h.store.ReplaceIndexResult(h.repoID, result)
+	repo, err := h.store.ReplaceIndexResult(t.Context(), h.repoID, result)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}

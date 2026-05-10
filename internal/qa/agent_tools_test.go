@@ -224,7 +224,7 @@ func TestReadFileRejectsEmptyPath(t *testing.T) {
 // can predict.
 type fakeFileReaderTool struct{ body string }
 
-func (f *fakeFileReaderTool) ReadRepoFile(_ string, _ string) (string, error) {
+func (f *fakeFileReaderTool) ReadRepoFile(_ context.Context, _ string, _ string) (string, error) {
 	return f.body, nil
 }
 
@@ -280,8 +280,8 @@ type fakeGraphTools struct {
 	callees []GraphNeighbor
 }
 
-func (f *fakeGraphTools) GetCallers(_ string) []GraphNeighbor { return f.callers }
-func (f *fakeGraphTools) GetCallees(_ string) []GraphNeighbor { return f.callees }
+func (f *fakeGraphTools) GetCallers(_ context.Context, _ string) []GraphNeighbor { return f.callers }
+func (f *fakeGraphTools) GetCallees(_ context.Context, _ string) []GraphNeighbor { return f.callees }
 
 // TestGetCallersEmitsHandles validates the symbol handle format.
 func TestGetCallersEmitsHandles(t *testing.T) {

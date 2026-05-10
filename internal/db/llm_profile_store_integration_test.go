@@ -39,7 +39,10 @@ type helperStores struct {
 func newHelperStores(t *testing.T, encryptionKey string, allowUnenc bool) *helperStores {
 	t.Helper()
 	surreal := startSurrealContainer(t)
-	cipher := secretcipher.NewAESGCMCipher(encryptionKey, allowUnenc)
+	cipher, err := secretcipher.NewAESGCMCipher(encryptionKey, secretcipher.DeriveInstallationSaltFromKey(encryptionKey), allowUnenc)
+	if err != nil {
+		t.Fatalf("NewAESGCMCipher: %v", err)
+	}
 	lcs := NewSurrealLLMConfigStore(surreal, WithLLMConfigCipher(cipher))
 	lps := NewSurrealLLMProfileStore(surreal, WithLLMProfileCipher(cipher))
 

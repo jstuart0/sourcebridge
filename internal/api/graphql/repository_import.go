@@ -37,27 +37,27 @@ func (r *mutationResolver) importRepository(repoID, repoName, repoPath string, i
 		if credsErr != nil && pullToken == "" {
 			// No request-scoped fallback and the workspace creds are
 			// unusable (corrupt envelope, missing key). Fail closed.
-			store.SetRepositoryError(repoID, fmt.Errorf("git credentials integrity failure: %w", credsErr))
+			store.SetRepositoryError(ctx, repoID, fmt.Errorf("git credentials integrity failure: %w", credsErr))
 			return
 		}
 		if pullToken == "" {
 			pullToken = defaultToken
 		}
 		if err := os.MkdirAll(filepath.Dir(cloneDir), 0o755); err != nil {
-			store.SetRepositoryError(repoID, fmt.Errorf("creating clone dir: %w", err))
+			store.SetRepositoryError(ctx, repoID, fmt.Errorf("creating clone dir: %w", err))
 			return
 		}
 		allowPrivate := r.Config != nil && r.Config.Indexing.AllowPrivateGitHosts
 		cmd, err := gitCloneCmd(ctx, repoPath, cloneDir, pullToken, sshKeyPath, allowPrivate)
 		if err != nil {
-			store.SetRepositoryError(repoID, err)
+			store.SetRepositoryError(ctx, repoID, err)
 			return
 		}
 		if err := cmd.Run(); err != nil {
-			store.SetRepositoryError(repoID, fmt.Errorf("cloning repository: %w", err))
+			store.SetRepositoryError(ctx, repoID, fmt.Errorf("cloning repository: %w", err))
 			return
 		}
-		store.UpdateRepositoryMeta(repoID, graphstore.RepositoryMeta{ClonePath: cloneDir})
+		store.UpdateRepositoryMeta(ctx, repoID, graphstore.RepositoryMeta{ClonePath: cloneDir})
 		localPath = cloneDir
 	}
 
@@ -67,20 +67,20 @@ func (r *mutationResolver) importRepository(repoID, repoName, repoPath string, i
 	// (plan v5), every IndexRepository caller must pass a typed reason.
 	result, err := idx.IndexRepository(ctx, localPath, indexer.ReasonInitialOnboard)
 	if err != nil {
-		store.SetRepositoryError(repoID, fmt.Errorf("indexing repository: %w", err))
+		store.SetRepositoryError(ctx, repoID, fmt.Errorf("indexing repository: %w", err))
 		return
 	}
 	result.RepoName = repoName
 	if isRemote {
 		result.RepoPath = repoPath
 	}
-	if _, err := store.ReplaceIndexResult(repoID, result); err != nil {
-		store.SetRepositoryError(repoID, fmt.Errorf("storing index result: %w", err))
+	if _, err := store.ReplaceIndexResult(ctx, repoID, result); err != nil {
+		store.SetRepositoryError(ctx, repoID, fmt.Errorf("storing index result: %w", err))
 		return
 	}
 	commitSHA := ""
 	if gitMeta, err := git.GetGitMetadata(localPath); err == nil && gitMeta != nil {
-		store.UpdateRepositoryMeta(repoID, graphstore.RepositoryMeta{
+		store.UpdateRepositoryMeta(ctx, repoID, graphstore.RepositoryMeta{
 			ClonePath: localPath,
 			CommitSHA: gitMeta.CommitSHA,
 			Branch:    gitMeta.Branch,

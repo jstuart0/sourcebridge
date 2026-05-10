@@ -4,6 +4,7 @@
 package knowledge
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -29,8 +30,8 @@ func NewAssembler(store graph.GraphStore) *Assembler {
 // Assemble builds a complete KnowledgeSnapshot for the given repository.
 // repoSourcePath is the filesystem path to the repository's working tree,
 // used for docs discovery.
-func (a *Assembler) Assemble(repoID string, repoSourcePath string) (*KnowledgeSnapshot, error) {
-	repo := a.store.GetRepository(repoID)
+func (a *Assembler) Assemble(ctx context.Context, repoID string, repoSourcePath string) (*KnowledgeSnapshot, error) {
+	repo := a.store.GetRepository(ctx, repoID)
 	if repo == nil {
 		return nil, fmt.Errorf("repository %s not found", repoID)
 	}
@@ -42,28 +43,28 @@ func (a *Assembler) Assemble(repoID string, repoSourcePath string) (*KnowledgeSn
 	}
 
 	// Load symbols once and share across sub-assemblers.
-	allSymbols, _ := a.store.GetSymbols(repoID, nil, nil, 0, 0)
+	allSymbols, _ := a.store.GetSymbols(ctx, repoID, nil, nil, 0, 0)
 
-	a.assembleStructureFromSymbols(snap, repoID, allSymbols)
+	a.assembleStructureFromSymbols(ctx, snap, repoID, allSymbols)
 	a.assembleSymbolsFromSlice(snap, allSymbols)
-	a.assembleCallGraphBatch(snap, repoID, allSymbols)
-	a.assembleRequirements(snap, repoID)
+	a.assembleCallGraphBatch(ctx, snap, repoID, allSymbols)
+	a.assembleRequirements(ctx, snap, repoID)
 	a.assembleDocs(snap, repoSourcePath)
 
 	return snap, nil
 }
 
 // AssembleScoped builds a narrower snapshot for a module/file/symbol/requirement scope.
-func (a *Assembler) AssembleScoped(repoID string, repoSourcePath string, scope ArtifactScope) (*KnowledgeSnapshot, error) {
+func (a *Assembler) AssembleScoped(ctx context.Context, repoID string, repoSourcePath string, scope ArtifactScope) (*KnowledgeSnapshot, error) {
 	scope = scope.Normalize()
 	if scope.ScopeType == ScopeRepository {
-		return a.Assemble(repoID, repoSourcePath)
+		return a.Assemble(ctx, repoID, repoSourcePath)
 	}
 	if scope.ScopeType == ScopeRequirement {
-		return a.AssembleRequirement(repoID, repoSourcePath, scope)
+		return a.AssembleRequirement(ctx, repoID, repoSourcePath, scope)
 	}
 
-	full, err := a.Assemble(repoID, repoSourcePath)
+	full, err := a.Assemble(ctx, repoID, repoSourcePath)
 	if err != nil {
 		return nil, err
 	}
@@ -81,12 +82,12 @@ func (a *Assembler) AssembleScoped(repoID string, repoSourcePath string, scope A
 	filtered.Links = nil
 
 	fileByPath := make(map[string]*graph.File)
-	for _, file := range a.store.GetFiles(repoID) {
+	for _, file := range a.store.GetFiles(ctx, repoID) {
 		fileByPath[file.Path] = file
 	}
 
-	allowedFiles := a.allowedFilesForScope(repoID, scope)
-	allowedSymbols := a.allowedSymbolsForScope(repoID, scope, allowedFiles)
+	allowedFiles := a.allowedFilesForScope(ctx, repoID, scope)
+	allowedSymbols := a.allowedSymbolsForScope(ctx, repoID, scope, allowedFiles)
 
 	filtered.FileCount = len(allowedFiles)
 	filtered.SymbolCount = len(allowedSymbols)
@@ -158,15 +159,15 @@ func (a *Assembler) AssembleScoped(repoID string, repoSourcePath string, scope A
 		filtered.CoverageRatio = float64(len(filtered.Requirements)) / float64(len(full.Requirements))
 	}
 
-	filtered.ScopeContext = a.buildScopeContext(repoID, scope, allowedSymbols, fileByPath)
+	filtered.ScopeContext = a.buildScopeContext(ctx, repoID, scope, allowedSymbols, fileByPath)
 
 	return &filtered, nil
 }
 
 // AssembleRequirement builds a requirement-scoped snapshot. The flow is
 // inverted relative to other scopes: requirement → linked symbols → files.
-func (a *Assembler) AssembleRequirement(repoID string, repoSourcePath string, scope ArtifactScope) (*KnowledgeSnapshot, error) {
-	full, err := a.Assemble(repoID, repoSourcePath)
+func (a *Assembler) AssembleRequirement(ctx context.Context, repoID string, repoSourcePath string, scope ArtifactScope) (*KnowledgeSnapshot, error) {
+	full, err := a.Assemble(ctx, repoID, repoSourcePath)
 	if err != nil {
 		return nil, err
 	}
@@ -174,13 +175,13 @@ func (a *Assembler) AssembleRequirement(repoID string, repoSourcePath string, sc
 	requirementID := scope.ScopePath
 
 	// Fetch the requirement for context.
-	req := a.store.GetRequirement(requirementID)
+	req := a.store.GetRequirement(ctx, requirementID)
 	if req == nil {
 		return nil, fmt.Errorf("requirement %s not found", requirementID)
 	}
 
 	// Get all non-rejected links for this requirement.
-	links := a.store.GetLinksForRequirement(requirementID, false)
+	links := a.store.GetLinksForRequirement(ctx, requirementID, false)
 
 	// Budget cap: limit to 200 highest-confidence linked symbols.
 	const maxLinkedSymbols = 200
@@ -202,7 +203,7 @@ func (a *Assembler) AssembleRequirement(repoID string, repoSourcePath string, sc
 	for id := range linkedSymbolIDs {
 		ids = append(ids, id)
 	}
-	symMap := a.store.GetSymbolsByIDs(ids)
+	symMap := a.store.GetSymbolsByIDs(ctx, ids)
 
 	// Build allowed files from linked symbols.
 	allowedFiles := make(map[string]bool)
@@ -278,7 +279,7 @@ func (a *Assembler) AssembleRequirement(repoID string, repoSourcePath string, sc
 
 	// Build linked file refs for scope context.
 	fileByPath := make(map[string]*graph.File)
-	for _, file := range a.store.GetFiles(repoID) {
+	for _, file := range a.store.GetFiles(ctx, repoID) {
 		fileByPath[file.Path] = file
 	}
 	var linkedFileRefs []FileRef
@@ -311,8 +312,8 @@ func (a *Assembler) AssembleRequirement(repoID string, repoSourcePath string, sc
 	return &filtered, nil
 }
 
-func (a *Assembler) allowedFilesForScope(repoID string, scope ArtifactScope) map[string]bool {
-	files := a.store.GetFiles(repoID)
+func (a *Assembler) allowedFilesForScope(ctx context.Context, repoID string, scope ArtifactScope) map[string]bool {
+	files := a.store.GetFiles(ctx, repoID)
 	allowed := make(map[string]bool)
 	for _, f := range files {
 		switch scope.ScopeType {
@@ -333,13 +334,13 @@ func (a *Assembler) allowedFilesForScope(repoID string, scope ArtifactScope) map
 	return allowed
 }
 
-func (a *Assembler) allowedSymbolsForScope(repoID string, scope ArtifactScope, allowedFiles map[string]bool) []*graph.StoredSymbol {
+func (a *Assembler) allowedSymbolsForScope(ctx context.Context, repoID string, scope ArtifactScope, allowedFiles map[string]bool) []*graph.StoredSymbol {
 	if scope.ScopeType == ScopeSymbol {
-		target := a.findScopeSymbol(repoID, scope)
+		target := a.findScopeSymbol(ctx, repoID, scope)
 		if target == nil {
 			return nil
 		}
-		syms := a.store.GetSymbolsByFile(repoID, scope.FilePath)
+		syms := a.store.GetSymbolsByFile(ctx, repoID, scope.FilePath)
 		var results []*graph.StoredSymbol
 		for _, sym := range syms {
 			if !sym.IsTest {
@@ -347,20 +348,20 @@ func (a *Assembler) allowedSymbolsForScope(repoID string, scope ArtifactScope, a
 			}
 		}
 		results = append(results, target)
-		for _, callerID := range a.store.GetCallers(target.ID) {
-			if caller := a.store.GetSymbol(callerID); caller != nil {
+		for _, callerID := range a.store.GetCallers(ctx, target.ID) {
+			if caller := a.store.GetSymbol(ctx, callerID); caller != nil {
 				results = append(results, caller)
 			}
 		}
-		for _, calleeID := range a.store.GetCallees(target.ID) {
-			if callee := a.store.GetSymbol(calleeID); callee != nil {
+		for _, calleeID := range a.store.GetCallees(ctx, target.ID) {
+			if callee := a.store.GetSymbol(ctx, calleeID); callee != nil {
 				results = append(results, callee)
 			}
 		}
 		return dedupeStoredSymbols(results)
 	}
 
-	all, _ := a.store.GetSymbols(repoID, nil, nil, 0, 0)
+	all, _ := a.store.GetSymbols(ctx, repoID, nil, nil, 0, 0)
 	var results []*graph.StoredSymbol
 	for _, sym := range all {
 		if allowedFiles[sym.FilePath] {
@@ -370,41 +371,41 @@ func (a *Assembler) allowedSymbolsForScope(repoID string, scope ArtifactScope, a
 	return results
 }
 
-func (a *Assembler) buildScopeContext(repoID string, scope ArtifactScope, allowedSymbols []*graph.StoredSymbol, files map[string]*graph.File) *ScopeContext {
+func (a *Assembler) buildScopeContext(ctx context.Context, repoID string, scope ArtifactScope, allowedSymbols []*graph.StoredSymbol, files map[string]*graph.File) *ScopeContext {
 	scope = scope.Normalize()
-	ctx := &ScopeContext{
+	sc := &ScopeContext{
 		ScopeType: string(scope.ScopeType),
 		ScopePath: scope.ScopePath,
 	}
 
 	switch scope.ScopeType {
 	case ScopeModule:
-		ctx.FocusSummary = fmt.Sprintf("Module guide for %s with the files and symbols that shape this area.", scope.ScopePath)
+		sc.FocusSummary = fmt.Sprintf("Module guide for %s with the files and symbols that shape this area.", scope.ScopePath)
 	case ScopeFile:
-		ctx.FocusSummary = fmt.Sprintf("File guide for %s with the main symbols, responsibilities, and editing surface.", scope.ScopePath)
-		ctx.TargetFile = fileRefFromStored(files[scope.FilePath])
-		ctx.KeySymbols = limitSymbolRefs(symbolRefsFromStored(allowedSymbols), 8)
+		sc.FocusSummary = fmt.Sprintf("File guide for %s with the main symbols, responsibilities, and editing surface.", scope.ScopePath)
+		sc.TargetFile = fileRefFromStored(files[scope.FilePath])
+		sc.KeySymbols = limitSymbolRefs(symbolRefsFromStored(allowedSymbols), 8)
 	case ScopeSymbol:
-		ctx.FocusSummary = fmt.Sprintf("Symbol guide for %s with nearby file context, callers, callees, and change-impact hints.", scope.ScopePath)
-		ctx.TargetFile = fileRefFromStored(files[scope.FilePath])
-		target := a.findScopeSymbol(repoID, scope)
+		sc.FocusSummary = fmt.Sprintf("Symbol guide for %s with nearby file context, callers, callees, and change-impact hints.", scope.ScopePath)
+		sc.TargetFile = fileRefFromStored(files[scope.FilePath])
+		target := a.findScopeSymbol(ctx, repoID, scope)
 		if target != nil {
 			ref := symbolRefFromStored(target)
-			ctx.TargetSymbol = &ref
-			ctx.Callers = limitSymbolRefs(a.symbolRefsByIDs(a.store.GetCallers(target.ID)), 6)
-			ctx.Callees = limitSymbolRefs(a.symbolRefsByIDs(a.store.GetCallees(target.ID)), 6)
-			ctx.SiblingSymbols = limitSymbolRefs(a.siblingSymbolRefs(repoID, target), 6)
-			ctx.KeySymbols = limitSymbolRefs(append([]SymbolRef{ref}, ctx.SiblingSymbols...), 8)
+			sc.TargetSymbol = &ref
+			sc.Callers = limitSymbolRefs(a.symbolRefsByIDs(ctx, a.store.GetCallers(ctx, target.ID)), 6)
+			sc.Callees = limitSymbolRefs(a.symbolRefsByIDs(ctx, a.store.GetCallees(ctx, target.ID)), 6)
+			sc.SiblingSymbols = limitSymbolRefs(a.siblingSymbolRefs(ctx, repoID, target), 6)
+			sc.KeySymbols = limitSymbolRefs(append([]SymbolRef{ref}, sc.SiblingSymbols...), 8)
 		} else {
-			ctx.KeySymbols = limitSymbolRefs(symbolRefsFromStored(allowedSymbols), 8)
+			sc.KeySymbols = limitSymbolRefs(symbolRefsFromStored(allowedSymbols), 8)
 		}
 	}
 
-	return ctx
+	return sc
 }
 
-func (a *Assembler) findScopeSymbol(repoID string, scope ArtifactScope) *graph.StoredSymbol {
-	for _, sym := range a.store.GetSymbolsByFile(repoID, scope.FilePath) {
+func (a *Assembler) findScopeSymbol(ctx context.Context, repoID string, scope ArtifactScope) *graph.StoredSymbol {
+	for _, sym := range a.store.GetSymbolsByFile(ctx, repoID, scope.FilePath) {
 		if sym.Name == scope.SymbolName || sym.QualifiedName == scope.SymbolName {
 			return sym
 		}
@@ -412,18 +413,18 @@ func (a *Assembler) findScopeSymbol(repoID string, scope ArtifactScope) *graph.S
 	return nil
 }
 
-func (a *Assembler) symbolRefsByIDs(ids []string) []SymbolRef {
+func (a *Assembler) symbolRefsByIDs(ctx context.Context, ids []string) []SymbolRef {
 	refs := make([]SymbolRef, 0, len(ids))
 	for _, id := range ids {
-		if sym := a.store.GetSymbol(id); sym != nil {
+		if sym := a.store.GetSymbol(ctx, id); sym != nil {
 			refs = append(refs, symbolRefFromStored(sym))
 		}
 	}
 	return dedupeSymbolRefs(refs)
 }
 
-func (a *Assembler) siblingSymbolRefs(repoID string, target *graph.StoredSymbol) []SymbolRef {
-	siblings := a.store.GetSymbolsByFile(repoID, target.FilePath)
+func (a *Assembler) siblingSymbolRefs(ctx context.Context, repoID string, target *graph.StoredSymbol) []SymbolRef {
+	siblings := a.store.GetSymbolsByFile(ctx, repoID, target.FilePath)
 	refs := make([]SymbolRef, 0, len(siblings))
 	for _, sym := range siblings {
 		if sym.ID == target.ID || sym.IsTest {
@@ -520,8 +521,8 @@ func buildSourceRevision(repo *graph.Repository) SourceRevision {
 	return rev
 }
 
-func (a *Assembler) assembleStructureFromSymbols(snap *KnowledgeSnapshot, repoID string, allSymbols []*graph.StoredSymbol) {
-	files := a.store.GetFiles(repoID)
+func (a *Assembler) assembleStructureFromSymbols(ctx context.Context, snap *KnowledgeSnapshot, repoID string, allSymbols []*graph.StoredSymbol) {
+	files := a.store.GetFiles(ctx, repoID)
 	snap.FileCount = len(files)
 
 	langFiles := map[string]int{}
@@ -533,7 +534,7 @@ func (a *Assembler) assembleStructureFromSymbols(snap *KnowledgeSnapshot, repoID
 		langFiles[lang]++
 	}
 
-	modules := a.store.GetModules(repoID)
+	modules := a.store.GetModules(ctx, repoID)
 	for _, m := range modules {
 		snap.Modules = append(snap.Modules, ModuleSummary{
 			ID:        m.ID,
@@ -618,8 +619,8 @@ func (a *Assembler) assembleSymbolsFromSlice(snap *KnowledgeSnapshot, allSymbols
 // assembleCallGraphBatch uses a single batch query instead of per-symbol
 // queries. With 16K+ symbols the old approach issued ~33K SurrealDB queries;
 // the batch approach issues one.
-func (a *Assembler) assembleCallGraphBatch(snap *KnowledgeSnapshot, repoID string, allSymbols []*graph.StoredSymbol) {
-	edges := a.store.GetCallEdges(repoID)
+func (a *Assembler) assembleCallGraphBatch(ctx context.Context, snap *KnowledgeSnapshot, repoID string, allSymbols []*graph.StoredSymbol) {
+	edges := a.store.GetCallEdges(ctx, repoID)
 
 	// Compute fan-in / fan-out from edges.
 	fanOut := map[string]int{}
@@ -694,9 +695,9 @@ func (a *Assembler) assembleCallGraphBatch(snap *KnowledgeSnapshot, repoID strin
 	}
 }
 
-func (a *Assembler) assembleRequirements(snap *KnowledgeSnapshot, repoID string) {
-	reqs, _ := a.store.GetRequirements(repoID, 0, 0)
-	links := a.store.GetLinksForRepo(repoID)
+func (a *Assembler) assembleRequirements(ctx context.Context, snap *KnowledgeSnapshot, repoID string) {
+	reqs, _ := a.store.GetRequirements(ctx, repoID, 0, 0)
+	links := a.store.GetLinksForRepo(ctx, repoID)
 
 	reqLinkCounts := map[string]int{}
 	linkedReqs := map[string]bool{}

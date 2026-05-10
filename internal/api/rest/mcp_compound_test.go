@@ -84,7 +84,7 @@ func seedCompoundFixture(t *testing.T, h *mcpTestHarness) (repoID string, symIDs
 			},
 		},
 	}
-	repo, err := h.store.StoreIndexResult(result)
+	repo, err := h.store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("seedCompoundFixture StoreIndexResult: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestCallReviewDiffAgainstRequirements_CommitRangeHappyPath(t *testing.T) {
 
 	// Point the stored repo's clone path at the real git checkout so
 	// runGitLog finds a valid .git directory.
-	h.store.UpdateRepositoryMeta(repoID, graphstore.RepositoryMeta{
+	h.store.UpdateRepositoryMeta(t.Context(), repoID, graphstore.RepositoryMeta{
 		ClonePath: repoDir,
 	})
 
@@ -274,7 +274,7 @@ func TestCallReviewDiffAgainstRequirements_GitLogErrorPath(t *testing.T) {
 	sess := h.createSession()
 
 	// Store a repo with an empty path so there is no git root on disk.
-	repo, err := h.store.StoreIndexResult(&indexer.IndexResult{
+	repo, err := h.store.StoreIndexResult(t.Context(), &indexer.IndexResult{
 		RepoName: "no-git-root-repo",
 		RepoPath: "", // empty — no path on disk
 	})
@@ -313,7 +313,7 @@ func TestCallReviewDiffAgainstRequirements_FileWithNoSymbols(t *testing.T) {
 	sess := h.createSession()
 
 	// Store a repo with a file that has no symbols.
-	repo, err := h.store.StoreIndexResult(&indexer.IndexResult{
+	repo, err := h.store.StoreIndexResult(t.Context(), &indexer.IndexResult{
 		RepoName: "no-symbols-repo",
 		RepoPath: "/tmp/no-symbols-repo",
 		Files: []indexer.FileResult{
@@ -367,17 +367,17 @@ func TestCallReviewDiffAgainstRequirements_LinkedRequirementIncluded(t *testing.
 	sess := h.createSession()
 
 	// Store a requirement and link it to PublicFunc.
-	h.store.StoreRequirement(repoID, &graphstore.StoredRequirement{
+	h.store.StoreRequirement(t.Context(), repoID, &graphstore.StoredRequirement{
 		ID:         "cpd-req-1",
 		ExternalID: "CPD-1",
 		Title:      "Compound req title",
 		Priority:   "high",
 	})
-	req := h.store.GetRequirementByExternalID(repoID, "CPD-1")
+	req := h.store.GetRequirementByExternalID(t.Context(), repoID, "CPD-1")
 	if req == nil {
 		t.Fatal("failed to retrieve seeded requirement CPD-1")
 	}
-	h.store.StoreLink(repoID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), repoID, &graphstore.StoredLink{
 		RequirementID: req.ID,
 		SymbolID:      symIDs["PublicFunc"],
 		Confidence:    0.9,
@@ -428,17 +428,17 @@ func TestCallReviewDiffAgainstRequirements_UnlinkedPublicSurfaceIncluded(t *test
 
 	// Link Helper (util.go, public) to a requirement so it does NOT appear
 	// in unlinked_public_surface.
-	h.store.StoreRequirement(repoID, &graphstore.StoredRequirement{
+	h.store.StoreRequirement(t.Context(), repoID, &graphstore.StoredRequirement{
 		ID:         "cpd-req-2",
 		ExternalID: "CPD-2",
 		Title:      "Helper requirement",
 		Priority:   "medium",
 	})
-	req := h.store.GetRequirementByExternalID(repoID, "CPD-2")
+	req := h.store.GetRequirementByExternalID(t.Context(), repoID, "CPD-2")
 	if req == nil {
 		t.Fatal("failed to retrieve seeded requirement CPD-2")
 	}
-	h.store.StoreLink(repoID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), repoID, &graphstore.StoredLink{
 		RequirementID: req.ID,
 		SymbolID:      symIDs["Helper"],
 		Confidence:    0.8,

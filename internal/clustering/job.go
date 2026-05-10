@@ -103,7 +103,7 @@ func (r *Runner) run(ctx context.Context, rt llm.Runtime, repoID, commitSHA stri
 	rt.ReportProgress(0.05, "loading", "Loading call graph", 0)
 
 	// 1. Load call edges.
-	rawEdges := r.store.GetCallEdges(repoID)
+	rawEdges := r.store.GetCallEdges(ctx, repoID)
 
 	// 2. Compute hash of sorted edges and check against stored hash.
 	currentHash := edgeSetHash(rawEdges)
@@ -143,7 +143,7 @@ func (r *Runner) run(ctx context.Context, rt llm.Runtime, repoID, commitSHA stri
 	}
 
 	// 6. Load symbol metadata for label derivation and in-degree ranking.
-	syms := r.store.GetSymbolsByIDs(nodeIDs)
+	syms := r.store.GetSymbolsByIDs(ctx, nodeIDs)
 	if syms == nil {
 		syms = make(map[string]*graph.StoredSymbol)
 	}

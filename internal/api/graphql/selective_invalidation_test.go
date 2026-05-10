@@ -36,7 +36,7 @@ func TestReindexSelectiveInvalidation_SurgicalPath(t *testing.T) {
 	}
 	ids := make(map[string]string, len(artifacts))
 	for label, typ := range artifacts {
-		a, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+		a, err := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 			RepositoryID: repoID,
 			Type:         typ,
 			Audience:     knowledgepkg.AudienceDeveloper,
@@ -46,7 +46,7 @@ func TestReindexSelectiveInvalidation_SurgicalPath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed %s: %v", label, err)
 		}
-		if err := store.UpdateKnowledgeArtifactStatus(a.ID, knowledgepkg.StatusReady); err != nil {
+		if err := store.UpdateKnowledgeArtifactStatus(t.Context(), a.ID, knowledgepkg.StatusReady); err != nil {
 			t.Fatalf("ready %s: %v", label, err)
 		}
 		ids[label] = a.ID
@@ -59,15 +59,15 @@ func TestReindexSelectiveInvalidation_SurgicalPath(t *testing.T) {
 			evCopy[i] = sections[i].Evidence
 			sections[i].Evidence = nil
 		}
-		if err := store.StoreKnowledgeSections(ids[label], sections); err != nil {
+		if err := store.StoreKnowledgeSections(t.Context(), ids[label], sections); err != nil {
 			t.Fatalf("sections %s: %v", label, err)
 		}
-		stored := store.GetKnowledgeSections(ids[label])
+		stored := store.GetKnowledgeSections(t.Context(), ids[label])
 		for i, sec := range stored {
 			if len(evCopy[i]) == 0 {
 				continue
 			}
-			if err := store.StoreKnowledgeEvidence(sec.ID, evCopy[i]); err != nil {
+			if err := store.StoreKnowledgeEvidence(t.Context(), sec.ID, evCopy[i]); err != nil {
 				t.Fatalf("evidence %s: %v", label, err)
 			}
 		}
@@ -93,6 +93,7 @@ func TestReindexSelectiveInvalidation_SurgicalPath(t *testing.T) {
 	// Invoke with the modified symbol + touched file, matching what the
 	// resolver feeds into MarkStaleForImpact.
 	reasons := knowledgepkg.MarkStaleForImpact(
+		t.Context(),
 		store,
 		repoID,
 		[]string{"sym-A"},
@@ -138,7 +139,7 @@ func TestReindexSelectiveInvalidation_SurgicalPath(t *testing.T) {
 	}
 
 	// Persisted per-artifact reason JSON round-trips.
-	hit := store.GetKnowledgeArtifact(ids["hit"])
+	hit := store.GetKnowledgeArtifact(t.Context(), ids["hit"])
 	if hit == nil || hit.StaleReasonJSON == "" || hit.StaleReportID != "imp-report-xyz" {
 		t.Fatalf("expected persisted reason on hit artifact: %+v", hit)
 	}
@@ -163,29 +164,29 @@ func TestReindexSelectiveInvalidation_FlagOff_Blanket(t *testing.T) {
 	const repoID = "repo-sel-off"
 
 	// Two artifacts; one would stay fresh under selective, both stale under blanket.
-	a1, _ := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	a1, _ := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		RepositoryID: repoID, Type: knowledgepkg.ArtifactCliffNotes,
 		Audience: knowledgepkg.AudienceDeveloper, Depth: knowledgepkg.DepthMedium,
 		Status: knowledgepkg.StatusPending,
 	})
-	a2, _ := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	a2, _ := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		RepositoryID: repoID, Type: knowledgepkg.ArtifactLearningPath,
 		Audience: knowledgepkg.AudienceDeveloper, Depth: knowledgepkg.DepthMedium,
 		Status: knowledgepkg.StatusPending,
 	})
-	_ = store.UpdateKnowledgeArtifactStatus(a1.ID, knowledgepkg.StatusReady)
-	_ = store.UpdateKnowledgeArtifactStatus(a2.ID, knowledgepkg.StatusReady)
-	_ = store.StoreKnowledgeSections(a1.ID, []knowledgepkg.Section{
+	_ = store.UpdateKnowledgeArtifactStatus(t.Context(), a1.ID, knowledgepkg.StatusReady)
+	_ = store.UpdateKnowledgeArtifactStatus(t.Context(), a2.ID, knowledgepkg.StatusReady)
+	_ = store.StoreKnowledgeSections(t.Context(), a1.ID, []knowledgepkg.Section{
 		{Title: "S", Evidence: nil},
 	})
-	_ = store.StoreKnowledgeSections(a2.ID, []knowledgepkg.Section{
+	_ = store.StoreKnowledgeSections(t.Context(), a2.ID, []knowledgepkg.Section{
 		{Title: "S", Evidence: []knowledgepkg.Evidence{{SourceType: knowledgepkg.EvidenceSymbol, SourceID: "sym-Unrelated"}}},
 	})
 
 	// Simulate the resolver's blanket branch.
-	knowledgepkg.MarkAllStale(store, repoID)
+	knowledgepkg.MarkAllStale(t.Context(), store, repoID)
 
-	if !store.GetKnowledgeArtifact(a1.ID).Stale || !store.GetKnowledgeArtifact(a2.ID).Stale {
+	if !store.GetKnowledgeArtifact(t.Context(), a1.ID).Stale || !store.GetKnowledgeArtifact(t.Context(), a2.ID).Stale {
 		t.Fatalf("expected both artifacts staled under blanket path")
 	}
 }

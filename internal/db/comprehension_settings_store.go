@@ -4,6 +4,7 @@
 package db
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -145,7 +146,7 @@ func (r *surrealModelCapabilities) toModelCapabilities() *comprehension.ModelCap
 // Strategy settings CRUD
 // ---------------------------------------------------------------------------
 
-func (s *SurrealStore) GetSettings(scope comprehension.Scope) (*comprehension.Settings, error) {
+func (s *SurrealStore) GetSettings(_ context.Context, scope comprehension.Scope) (*comprehension.Settings, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -165,7 +166,7 @@ func (s *SurrealStore) GetSettings(scope comprehension.Scope) (*comprehension.Se
 	return result[0].toSettings(), nil
 }
 
-func (s *SurrealStore) SetSettings(settings *comprehension.Settings) error {
+func (s *SurrealStore) SetSettings(_ context.Context, settings *comprehension.Settings) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -252,7 +253,7 @@ func (s *SurrealStore) SetSettings(settings *comprehension.Settings) error {
 	return err
 }
 
-func (s *SurrealStore) DeleteSettings(scope comprehension.Scope) error {
+func (s *SurrealStore) DeleteSettings(_ context.Context, scope comprehension.Scope) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -266,7 +267,7 @@ func (s *SurrealStore) DeleteSettings(scope comprehension.Scope) error {
 	return err
 }
 
-func (s *SurrealStore) ListSettings() ([]comprehension.Settings, error) {
+func (s *SurrealStore) ListSettings(_ context.Context, ) ([]comprehension.Settings, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -287,7 +288,7 @@ func (s *SurrealStore) ListSettings() ([]comprehension.Settings, error) {
 // Model capabilities CRUD
 // ---------------------------------------------------------------------------
 
-func (s *SurrealStore) GetModelCapabilities(modelID string) (*comprehension.ModelCapabilities, error) {
+func (s *SurrealStore) GetModelCapabilities(_ context.Context, modelID string) (*comprehension.ModelCapabilities, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -304,7 +305,7 @@ func (s *SurrealStore) GetModelCapabilities(modelID string) (*comprehension.Mode
 	return result[0].toModelCapabilities(), nil
 }
 
-func (s *SurrealStore) SetModelCapabilities(mc *comprehension.ModelCapabilities) error {
+func (s *SurrealStore) SetModelCapabilities(_ context.Context, mc *comprehension.ModelCapabilities) error {
 	if !mc.QualityGateTier.IsValid() {
 		return comprehension.ErrInvalidQualityGateTier
 	}
@@ -396,7 +397,7 @@ func (s *SurrealStore) SetModelCapabilities(mc *comprehension.ModelCapabilities)
 	return err
 }
 
-func (s *SurrealStore) DeleteModelCapabilities(modelID string) error {
+func (s *SurrealStore) DeleteModelCapabilities(_ context.Context, modelID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -407,7 +408,7 @@ func (s *SurrealStore) DeleteModelCapabilities(modelID string) error {
 	return err
 }
 
-func (s *SurrealStore) ListModelCapabilities() ([]comprehension.ModelCapabilities, error) {
+func (s *SurrealStore) ListModelCapabilities(_ context.Context, ) ([]comprehension.ModelCapabilities, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")

@@ -123,7 +123,7 @@ func TestAdminComprehension_GetModelCapabilities_RouteParam(t *testing.T) {
 	s := newComprehensionTestServer(t, featureflags.Flags{})
 
 	// Pre-seed the store.
-	_ = s.comprehensionStore.SetModelCapabilities(&comprehension.ModelCapabilities{
+	_ = s.comprehensionStore.SetModelCapabilities(t.Context(), &comprehension.ModelCapabilities{
 		ModelID:  "claude-sonnet-4-6",
 		Provider: "anthropic",
 		Source:   "builtin",
@@ -249,7 +249,7 @@ func TestAdminComprehension_TierNormalization(t *testing.T) {
 				t.Fatalf("tier=%q: expected 200, got %d: %s", tc.input, w.Code, w.Body.String())
 			}
 			// Verify the store holds the normalized value.
-			mc, err := s.comprehensionStore.GetModelCapabilities("test-model")
+			mc, err := s.comprehensionStore.GetModelCapabilities(t.Context(), "test-model")
 			if err != nil {
 				t.Fatalf("store.GetModelCapabilities: %v", err)
 			}
@@ -283,7 +283,7 @@ func TestAdminComprehension_ModelIDNormalization(t *testing.T) {
 	}
 
 	// Should be stored under normalized key.
-	mc, err := s.comprehensionStore.GetModelCapabilities("qwen3:32b")
+	mc, err := s.comprehensionStore.GetModelCapabilities(t.Context(), "qwen3:32b")
 	if err != nil {
 		t.Fatalf("store.GetModelCapabilities: %v", err)
 	}

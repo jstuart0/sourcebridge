@@ -40,12 +40,12 @@ func (s *Server) setupRouter() {
 			},
 		},
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
-	routes, err := extractRouteEntryPoints(store, repo.ID, root)
+	routes, err := extractRouteEntryPoints(t.Context(), store, repo.ID, root)
 	if err != nil {
 		t.Fatalf("extractRouteEntryPoints: %v", err)
 	}
@@ -113,12 +113,12 @@ func writeJSON() {}
 			},
 		},
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
-	symbols, _ := store.GetSymbols(repo.ID, nil, nil, 0, 0)
+	symbols, _ := store.GetSymbols(t.Context(), repo.ID, nil, nil, 0, 0)
 	var loginID string
 	for _, sym := range symbols {
 		if sym.Name == "handleLogin" {
@@ -130,7 +130,7 @@ func writeJSON() {}
 		t.Fatal("expected stored handleLogin symbol")
 	}
 
-	steps := executionStepsFromSymbolPath(store, repo.ID, root, loginID, 4)
+	steps := executionStepsFromSymbolPath(t.Context(), store, repo.ID, root, loginID, 4)
 	if len(steps) < 3 {
 		t.Fatalf("expected focused step plus inferred same-file helpers, got %#v", steps)
 	}
@@ -195,12 +195,12 @@ func loadUser() {}
 			},
 		},
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
-	symbols, _ := store.GetSymbols(repo.ID, nil, nil, 0, 0)
+	symbols, _ := store.GetSymbols(t.Context(), repo.ID, nil, nil, 0, 0)
 	var loginID string
 	for _, sym := range symbols {
 		if sym.Name == "handleLogin" {
@@ -212,7 +212,7 @@ func loadUser() {}
 		t.Fatal("expected stored handleLogin symbol")
 	}
 
-	steps := executionStepsFromSymbolPath(store, repo.ID, root, loginID, 4)
+	steps := executionStepsFromSymbolPath(t.Context(), store, repo.ID, root, loginID, 4)
 	if len(steps) < 2 {
 		t.Fatalf("expected focused step plus cross-file helper, got %d steps", len(steps))
 	}

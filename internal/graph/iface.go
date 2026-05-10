@@ -4,6 +4,7 @@
 package graph
 
 import (
+	"context"
 	"errors"
 
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
@@ -46,9 +47,9 @@ type CallEdge struct {
 // swapped via configuration.
 type GraphStore interface {
 	// Repository operations
-	CreateRepository(name, path string) (*Repository, error)
-	StoreIndexResult(result *indexer.IndexResult) (*Repository, error)
-	ReplaceIndexResult(repoID string, result *indexer.IndexResult) (*Repository, error)
+	CreateRepository(ctx context.Context, name, path string) (*Repository, error)
+	StoreIndexResult(ctx context.Context, result *indexer.IndexResult) (*Repository, error)
+	ReplaceIndexResult(ctx context.Context, repoID string, result *indexer.IndexResult) (*Repository, error)
 	// MergeIndexResult applies a per-file delta to the existing graph
 	// state for repoID. Only rows whose file path is in affectedPaths
 	// are touched; every other file (and its symbols, imports, edges)
@@ -80,130 +81,130 @@ type GraphStore interface {
 	// support per-file merge semantics (e.g. the SurrealDB backend in
 	// Phase 1.C, which lacks the per-file primitives that land alongside
 	// the freshness-state migration in Phase 2).
-	MergeIndexResult(repoID string, affectedPaths []string, result *indexer.IndexResult) (*Repository, error)
-	ListRepositories() []*Repository
-	GetRepository(id string) *Repository
-	GetRepositoryByPath(path string) *Repository
-	RemoveRepository(id string) bool
-	SetRepositoryError(id string, err error)
-	UpdateRepositoryMeta(id string, meta RepositoryMeta)
-	CacheUnderstandingScore(id string, overall float64)
+	MergeIndexResult(ctx context.Context, repoID string, affectedPaths []string, result *indexer.IndexResult) (*Repository, error)
+	ListRepositories(ctx context.Context) []*Repository
+	GetRepository(ctx context.Context, id string) *Repository
+	GetRepositoryByPath(ctx context.Context, path string) *Repository
+	RemoveRepository(ctx context.Context, id string) bool
+	SetRepositoryError(ctx context.Context, id string, err error)
+	UpdateRepositoryMeta(ctx context.Context, id string, meta RepositoryMeta)
+	CacheUnderstandingScore(ctx context.Context, id string, overall float64)
 
 	// File operations
-	GetFiles(repoID string) []*File
-	GetFilesPaginated(repoID string, pathPrefix *string, limit, offset int) ([]*File, int)
-	GetFileSymbols(fileID string) []*StoredSymbol
+	GetFiles(ctx context.Context, repoID string) []*File
+	GetFilesPaginated(ctx context.Context, repoID string, pathPrefix *string, limit, offset int) ([]*File, int)
+	GetFileSymbols(ctx context.Context, fileID string) []*StoredSymbol
 
 	// Symbol operations
-	GetSymbols(repoID string, query *string, kind *string, limit, offset int) ([]*StoredSymbol, int)
-	GetSymbol(id string) *StoredSymbol
-	GetSymbolsByIDs(ids []string) map[string]*StoredSymbol
-	GetSymbolsByFile(repoID string, filePath string) []*StoredSymbol
+	GetSymbols(ctx context.Context, repoID string, query *string, kind *string, limit, offset int) ([]*StoredSymbol, int)
+	GetSymbol(ctx context.Context, id string) *StoredSymbol
+	GetSymbolsByIDs(ctx context.Context, ids []string) map[string]*StoredSymbol
+	GetSymbolsByFile(ctx context.Context, repoID string, filePath string) []*StoredSymbol
 
 	// Module operations
-	GetModules(repoID string) []*StoredModule
+	GetModules(ctx context.Context, repoID string) []*StoredModule
 
 	// Call graph
-	GetCallers(symbolID string) []string
-	GetCallees(symbolID string) []string
-	GetCallEdges(repoID string) []CallEdge
-	GetImports(repoID string) []*StoredImport
+	GetCallers(ctx context.Context, symbolID string) []string
+	GetCallees(ctx context.Context, symbolID string) []string
+	GetCallEdges(ctx context.Context, repoID string) []CallEdge
+	GetImports(ctx context.Context, repoID string) []*StoredImport
 
 	// Package dependency aggregation.
 	// RecomputePackageDependencies rebuilds the package-level caller/callee
 	// edge map from raw imports. Call once at the end of each index run.
-	RecomputePackageDependencies(repoID string)
+	RecomputePackageDependencies(ctx context.Context, repoID string)
 	// GetPackageDependencies returns the pre-computed package dependency
 	// records for a repository. Returns an empty slice for repos that have
 	// not been indexed since this feature was added.
-	GetPackageDependencies(repoID string) []*StoredPackageDependencies
+	GetPackageDependencies(ctx context.Context, repoID string) []*StoredPackageDependencies
 
 	// Test linkage — "given a non-test symbol ID, return the IDs of
 	// test symbols that exercise it." Populated from
 	// IndexResult.Relations with Type=RelationTests. See the
 	// in-memory Store.testedByGraph for the backing structure.
-	GetTestsForSymbolPersisted(symbolID string) []string
+	GetTestsForSymbolPersisted(ctx context.Context, symbolID string) []string
 
 	// Search
-	SearchContent(repoID, query string, limit int) []SearchResult
+	SearchContent(ctx context.Context, repoID, query string, limit int) []SearchResult
 
 	// Stats
-	Stats() map[string]int
+	Stats(ctx context.Context) map[string]int
 
 	// Requirement operations
-	StoreRequirement(repoID string, req *StoredRequirement)
-	StoreRequirements(repoID string, reqs []*StoredRequirement) int
-	GetRequirements(repoID string, limit, offset int) ([]*StoredRequirement, int)
-	GetRequirement(id string) *StoredRequirement
-	GetRequirementsByIDs(ids []string) map[string]*StoredRequirement
-	GetRequirementByExternalID(repoID, externalID string) *StoredRequirement
+	StoreRequirement(ctx context.Context, repoID string, req *StoredRequirement)
+	StoreRequirements(ctx context.Context, repoID string, reqs []*StoredRequirement) int
+	GetRequirements(ctx context.Context, repoID string, limit, offset int) ([]*StoredRequirement, int)
+	GetRequirement(ctx context.Context, id string) *StoredRequirement
+	GetRequirementsByIDs(ctx context.Context, ids []string) map[string]*StoredRequirement
+	GetRequirementByExternalID(ctx context.Context, repoID, externalID string) *StoredRequirement
 	// UpdateRequirementFields updates a requirement in place. Non-empty
 	// string fields in `fields` replace the stored value; unset fields
 	// are preserved. Returns the updated row or nil when the target is
 	// missing/trashed.
-	UpdateRequirementFields(id string, fields RequirementUpdate) *StoredRequirement
+	UpdateRequirementFields(ctx context.Context, id string, fields RequirementUpdate) *StoredRequirement
 
 	// Link operations
-	StoreLink(repoID string, link *StoredLink) *StoredLink
-	StoreLinks(repoID string, links []*StoredLink) int
-	GetLink(id string) *StoredLink
-	GetLinksForRequirement(reqID string, includeRejected bool) []*StoredLink
-	GetLinksForSymbol(symID string, includeRejected bool) []*StoredLink
-	GetLinksForFile(fileID string, startLine, endLine int, minConfidence float64) []*StoredLink
-	VerifyLink(linkID string, verified bool, verifiedBy string) *StoredLink
-	GetLinksForRepo(repoID string) []*StoredLink
+	StoreLink(ctx context.Context, repoID string, link *StoredLink) *StoredLink
+	StoreLinks(ctx context.Context, repoID string, links []*StoredLink) int
+	GetLink(ctx context.Context, id string) *StoredLink
+	GetLinksForRequirement(ctx context.Context, reqID string, includeRejected bool) []*StoredLink
+	GetLinksForSymbol(ctx context.Context, symID string, includeRejected bool) []*StoredLink
+	GetLinksForFile(ctx context.Context, fileID string, startLine, endLine int, minConfidence float64) []*StoredLink
+	VerifyLink(ctx context.Context, linkID string, verified bool, verifiedBy string) *StoredLink
+	GetLinksForRepo(ctx context.Context, repoID string) []*StoredLink
 
 	// LLM usage tracking
-	StoreLLMUsage(record *LLMUsageRecord)
-	GetLLMUsage(repoID string, limit int) []LLMUsageRecord
+	StoreLLMUsage(ctx context.Context, record *LLMUsageRecord)
+	GetLLMUsage(ctx context.Context, repoID string, limit int) []LLMUsageRecord
 
 	// Embedding cache
-	StoreEmbedding(record *EmbeddingRecord)
-	GetEmbedding(targetID string) *EmbeddingRecord
+	StoreEmbedding(ctx context.Context, record *EmbeddingRecord)
+	GetEmbedding(ctx context.Context, targetID string) *EmbeddingRecord
 
 	// Review results
-	StoreReviewResult(record *ReviewResultRecord)
-	GetReviewResults(targetID string) []*ReviewResultRecord
-	GetReviewResultsForRepo(repoID string) []*ReviewResultRecord
+	StoreReviewResult(ctx context.Context, record *ReviewResultRecord)
+	GetReviewResults(ctx context.Context, targetID string) []*ReviewResultRecord
+	GetReviewResultsForRepo(ctx context.Context, repoID string) []*ReviewResultRecord
 
 	// Understanding score helpers
-	GetPublicSymbolDocCoverage(repoID string) (withDocs int, total int)
-	GetTestSymbolRatio(repoID string) (tests int, total int)
-	GetAICodeFileRatio(repoID string) (aiFiles int, totalFiles int)
+	GetPublicSymbolDocCoverage(ctx context.Context, repoID string) (withDocs int, total int)
+	GetTestSymbolRatio(ctx context.Context, repoID string) (tests int, total int)
+	GetAICodeFileRatio(ctx context.Context, repoID string) (aiFiles int, totalFiles int)
 
 	// Impact reports
-	StoreImpactReport(repoID string, report *ImpactReport)
-	GetLatestImpactReport(repoID string) *ImpactReport
-	GetImpactReports(repoID string, limit int) ([]*ImpactReport, int)
+	StoreImpactReport(ctx context.Context, repoID string, report *ImpactReport)
+	GetLatestImpactReport(ctx context.Context, repoID string) *ImpactReport
+	GetImpactReports(ctx context.Context, repoID string, limit int) ([]*ImpactReport, int)
 
 	// Discovered requirement operations (spec extraction)
-	StoreDiscoveredRequirement(repoID string, req *DiscoveredRequirement)
-	StoreDiscoveredRequirements(repoID string, reqs []*DiscoveredRequirement) int
-	GetDiscoveredRequirements(repoID string, status *string, confidence *string, limit, offset int) ([]*DiscoveredRequirement, int)
-	GetDiscoveredRequirement(id string) *DiscoveredRequirement
-	PromoteDiscoveredRequirement(id string, requirementID string) *DiscoveredRequirement
-	DismissDiscoveredRequirement(id string, dismissedBy string, reason string) *DiscoveredRequirement
-	DeleteDiscoveredRequirementsByRepo(repoID string) int
+	StoreDiscoveredRequirement(ctx context.Context, repoID string, req *DiscoveredRequirement)
+	StoreDiscoveredRequirements(ctx context.Context, repoID string, reqs []*DiscoveredRequirement) int
+	GetDiscoveredRequirements(ctx context.Context, repoID string, status *string, confidence *string, limit, offset int) ([]*DiscoveredRequirement, int)
+	GetDiscoveredRequirement(ctx context.Context, id string) *DiscoveredRequirement
+	PromoteDiscoveredRequirement(ctx context.Context, id string, requirementID string) *DiscoveredRequirement
+	DismissDiscoveredRequirement(ctx context.Context, id string, dismissedBy string, reason string) *DiscoveredRequirement
+	DeleteDiscoveredRequirementsByRepo(ctx context.Context, repoID string) int
 
 	// Cross-repo federation (OSS)
-	LinkRepos(sourceRepoID, targetRepoID string) (*RepoLink, error)
-	UnlinkRepos(linkID string) error
-	GetRepoLinks(repoID string) ([]*RepoLink, error)
+	LinkRepos(ctx context.Context, sourceRepoID, targetRepoID string) (*RepoLink, error)
+	UnlinkRepos(ctx context.Context, linkID string) error
+	GetRepoLinks(ctx context.Context, repoID string) ([]*RepoLink, error)
 	// GetRepoLink looks up a single repo link by ID. Used by TenantFilteredStore
 	// to validate access before UnlinkRepos and VerifyLink mutations. In the
 	// in-memory store, federation is stubbed — returns nil (Decision 10).
-	GetRepoLink(linkID string) *RepoLink
+	GetRepoLink(ctx context.Context, linkID string) *RepoLink
 
-	StoreCrossRepoRef(ref *CrossRepoRef) error
-	StoreCrossRepoRefs(refs []*CrossRepoRef) int
-	GetCrossRepoRefs(repoID string, refType *string, limit int) ([]*CrossRepoRef, error)
-	GetSymbolCrossRepoRefs(symbolID string) ([]*CrossRepoRef, error)
-	DeleteCrossRepoRefsForRepo(repoID string) error
-	DeleteCrossRepoRefsBetweenRepos(repoA, repoB string) error
+	StoreCrossRepoRef(ctx context.Context, ref *CrossRepoRef) error
+	StoreCrossRepoRefs(ctx context.Context, refs []*CrossRepoRef) int
+	GetCrossRepoRefs(ctx context.Context, repoID string, refType *string, limit int) ([]*CrossRepoRef, error)
+	GetSymbolCrossRepoRefs(ctx context.Context, symbolID string) ([]*CrossRepoRef, error)
+	DeleteCrossRepoRefsForRepo(ctx context.Context, repoID string) error
+	DeleteCrossRepoRefsBetweenRepos(ctx context.Context, repoA, repoB string) error
 
-	StoreAPIContract(contract *APIContract) error
-	GetAPIContracts(repoID string) ([]*APIContract, error)
-	DeleteAPIContractsForRepo(repoID string) error
+	StoreAPIContract(ctx context.Context, contract *APIContract) error
+	GetAPIContracts(ctx context.Context, repoID string) ([]*APIContract, error)
+	DeleteAPIContractsForRepo(ctx context.Context, repoID string) error
 }
 
 // Verify at compile time that *Store satisfies GraphStore.

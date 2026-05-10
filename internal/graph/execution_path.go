@@ -3,7 +3,10 @@
 
 package graph
 
-import "sort"
+import (
+	"context"
+	"sort"
+)
 
 type ExecutionNode struct {
 	SymbolID   string
@@ -16,18 +19,18 @@ type ExecutionNode struct {
 }
 
 // TraceLikelyExecutionPath builds a conservative caller/current/callee chain for a symbol.
-func TraceLikelyExecutionPath(store GraphStore, repoID, symbolID string, maxDepth int) []ExecutionNode {
+func TraceLikelyExecutionPath(ctx context.Context, store GraphStore, repoID, symbolID string, maxDepth int) []ExecutionNode {
 	if maxDepth <= 0 {
 		maxDepth = 6
 	}
 
-	allSymbols, _ := store.GetSymbols(repoID, nil, nil, 0, 0)
+	allSymbols, _ := store.GetSymbols(ctx, repoID, nil, nil, 0, 0)
 	byID := make(map[string]*StoredSymbol, len(allSymbols))
 	fanOut := make(map[string]int)
 	for _, sym := range allSymbols {
 		byID[sym.ID] = sym
 	}
-	for _, edge := range store.GetCallEdges(repoID) {
+	for _, edge := range store.GetCallEdges(ctx, repoID) {
 		fanOut[edge.CallerID]++
 	}
 
@@ -37,7 +40,7 @@ func TraceLikelyExecutionPath(store GraphStore, repoID, symbolID string, maxDept
 	}
 
 	steps := make([]ExecutionNode, 0, maxDepth+2)
-	callerChain := traceCallerChain(store, byID, fanOut, current.ID, 4)
+	callerChain := traceCallerChain(ctx, store, byID, fanOut, current.ID, 4)
 	for i := len(callerChain) - 1; i >= 0; i-- {
 		steps = append(steps, callerChain[i])
 	}
@@ -46,7 +49,7 @@ func TraceLikelyExecutionPath(store GraphStore, repoID, symbolID string, maxDept
 	visited := map[string]bool{current.ID: true}
 	currentID := current.ID
 	for depth := 0; depth < maxDepth; depth++ {
-		nextID := selectPrimaryNeighbor(store.GetCallees(currentID), byID, fanOut, currentID, visited)
+		nextID := selectPrimaryNeighbor(store.GetCallees(ctx, currentID), byID, fanOut, currentID, visited)
 		if nextID == "" {
 			break
 		}
@@ -62,12 +65,12 @@ func TraceLikelyExecutionPath(store GraphStore, repoID, symbolID string, maxDept
 	return steps
 }
 
-func traceCallerChain(store GraphStore, byID map[string]*StoredSymbol, fanOut map[string]int, symbolID string, maxDepth int) []ExecutionNode {
+func traceCallerChain(ctx context.Context, store GraphStore, byID map[string]*StoredSymbol, fanOut map[string]int, symbolID string, maxDepth int) []ExecutionNode {
 	visited := map[string]bool{symbolID: true}
 	var chain []ExecutionNode
 	currentID := symbolID
 	for depth := 0; depth < maxDepth; depth++ {
-		prevID := selectPrimaryNeighbor(store.GetCallers(currentID), byID, fanOut, currentID, visited)
+		prevID := selectPrimaryNeighbor(store.GetCallers(ctx, currentID), byID, fanOut, currentID, visited)
 		if prevID == "" {
 			break
 		}

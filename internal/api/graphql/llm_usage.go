@@ -4,6 +4,7 @@
 package graphql
 
 import (
+	"context"
 	"strings"
 
 	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
@@ -58,7 +59,7 @@ func storeLLMUsage(store graphstore.GraphStore, repoID string, usage *commonv1.L
 	if op == "" {
 		op = usage.Operation
 	}
-	store.StoreLLMUsage(&graphstore.LLMUsageRecord{
+	store.StoreLLMUsage(context.Background(), &graphstore.LLMUsageRecord{
 		RepoID:       repoID,
 		Operation:    op,
 		Provider:     providerFromUsage(usage),

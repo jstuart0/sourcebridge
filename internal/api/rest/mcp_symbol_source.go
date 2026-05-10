@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -65,7 +66,7 @@ func (h *mcpHandler) callGetSymbolSource(session *mcpSession, args json.RawMessa
 		contextLines = mcpSymbolContextLinesCap
 	}
 
-	result, _, err := h.buildSymbolSource(session, params.symbolRefParams, contextLines)
+	result, _, err := h.buildSymbolSource(context.Background(), session, params.symbolRefParams, contextLines)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +82,7 @@ func (h *mcpHandler) callGetSymbolSource(session *mcpSession, args json.RawMessa
 //
 // Returns the result struct, the resolved StoredSymbol (for Phase 3's
 // bundled caller/callee assembly), and any error.
-func (h *mcpHandler) buildSymbolSource(session *mcpSession, params symbolRefParams, contextLines int) (getSymbolSourceResult, *graphstore.StoredSymbol, error) {
+func (h *mcpHandler) buildSymbolSource(ctx context.Context, session *mcpSession, params symbolRefParams, contextLines int) (getSymbolSourceResult, *graphstore.StoredSymbol, error) {
 	// Step 4 — defense-in-depth repo access guard.
 	if err := h.checkRepoAccess(session, params.RepositoryID); err != nil {
 		return getSymbolSourceResult{}, nil, err
@@ -100,7 +101,7 @@ func (h *mcpHandler) buildSymbolSource(session *mcpSession, params symbolRefPara
 	}
 
 	// Step 7 — read the file; map any read error to stale.
-	content, err := h.fileReader.ReadRepoFile(params.RepositoryID, sym.FilePath)
+	content, err := h.fileReader.ReadRepoFile(ctx, params.RepositoryID, sym.FilePath)
 	if err != nil {
 		return getSymbolSourceResult{}, nil, errRepositoryStale(sym.FilePath)
 	}
@@ -258,7 +259,7 @@ func (h *mcpHandler) callGetSymbolContext(session *mcpSession, args json.RawMess
 
 	// Resolve symbol + read source. context_lines=0 keeps the bundle compact;
 	// callers/callees already provide the surrounding context.
-	symbolResult, sym, err := h.buildSymbolSource(session, params.symbolRefParams, 0)
+	symbolResult, sym, err := h.buildSymbolSource(context.Background(), session, params.symbolRefParams, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -297,13 +298,13 @@ func (h *mcpHandler) callGetSymbolContext(session *mcpSession, args json.RawMess
 	// --- Callers ---
 	callers := make([]callGraphSymbol, 0)
 	if callGraphAvailable {
-		callerIDs := h.store.GetCallers(sym.ID)
+		callerIDs := h.store.GetCallers(context.Background(), sym.ID)
 		if len(callerIDs) > mcpContextCallersTruncLimit {
 			callerIDs = callerIDs[:mcpContextCallersTruncLimit]
 			truncated = true
 		}
 		if len(callerIDs) > 0 {
-			symMap := h.store.GetSymbolsByIDs(callerIDs)
+			symMap := h.store.GetSymbolsByIDs(context.Background(), callerIDs)
 			for _, id := range callerIDs {
 				s := symMap[id]
 				if s == nil {
@@ -328,13 +329,13 @@ func (h *mcpHandler) callGetSymbolContext(session *mcpSession, args json.RawMess
 	// --- Callees ---
 	callees := make([]callGraphSymbol, 0)
 	if callGraphAvailable {
-		calleeIDs := h.store.GetCallees(sym.ID)
+		calleeIDs := h.store.GetCallees(context.Background(), sym.ID)
 		if len(calleeIDs) > mcpContextCalleesTruncLimit {
 			calleeIDs = calleeIDs[:mcpContextCalleesTruncLimit]
 			truncated = true
 		}
 		if len(calleeIDs) > 0 {
-			symMap := h.store.GetSymbolsByIDs(calleeIDs)
+			symMap := h.store.GetSymbolsByIDs(context.Background(), calleeIDs)
 			for _, id := range calleeIDs {
 				s := symMap[id]
 				if s == nil {
@@ -358,11 +359,11 @@ func (h *mcpHandler) callGetSymbolContext(session *mcpSession, args json.RawMess
 	// --- Imports ---
 	imports := make([]fileImport, 0)
 	if fileImportsAvailable {
-		allImports := h.store.GetImports(params.RepositoryID)
+		allImports := h.store.GetImports(context.Background(), params.RepositoryID)
 
 		// Build a file-ID → file-path map (same pattern as callGetFileImports).
 		// O(repo-files) per call; acceptable for depth=1 — see plan Phase 3.3.
-		files := h.store.GetFiles(params.RepositoryID)
+		files := h.store.GetFiles(context.Background(), params.RepositoryID)
 		fileIDToPath := make(map[string]string, len(files))
 		pathToFileID := make(map[string]string, len(files))
 		for _, f := range files {

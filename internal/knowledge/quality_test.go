@@ -36,13 +36,13 @@ func TestCollectQualityMetrics(t *testing.T) {
 		},
 		Modules: []indexer.Module{{ID: "mod-1", Name: "root", Path: ".", FileCount: 2}},
 	}
-	repo, err := gstore.StoreIndexResult(result)
+	repo, err := gstore.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
 	kstore := NewMemStore()
-	repoArtifact, _, err := kstore.ClaimArtifact(ArtifactKey{
+	repoArtifact, _, err := kstore.ClaimArtifact(t.Context(), ArtifactKey{
 		RepositoryID: repo.ID,
 		Type:         ArtifactCliffNotes,
 		Audience:     AudienceDeveloper,
@@ -53,7 +53,7 @@ func TestCollectQualityMetrics(t *testing.T) {
 		t.Fatalf("ClaimArtifact repo: %v", err)
 	}
 	repoArtifact.CreatedAt = time.Now().Add(-2 * time.Minute)
-	_ = kstore.SupersedeArtifact(repoArtifact.ID, []Section{{
+	_ = kstore.SupersedeArtifact(t.Context(), repoArtifact.ID, []Section{{
 		Title:   "System Purpose",
 		Content: "This repository handles login and request entry.",
 		Summary: "Login and request entry.",
@@ -65,7 +65,7 @@ func TestCollectQualityMetrics(t *testing.T) {
 		}},
 	}})
 
-	fileArtifact, _, err := kstore.ClaimArtifact(ArtifactKey{
+	fileArtifact, _, err := kstore.ClaimArtifact(t.Context(), ArtifactKey{
 		RepositoryID: repo.ID,
 		Type:         ArtifactCliffNotes,
 		Audience:     AudienceDeveloper,
@@ -76,7 +76,7 @@ func TestCollectQualityMetrics(t *testing.T) {
 		t.Fatalf("ClaimArtifact file: %v", err)
 	}
 	fileArtifact.CreatedAt = time.Now().Add(-time.Minute)
-	_ = kstore.SupersedeArtifact(fileArtifact.ID, []Section{{
+	_ = kstore.SupersedeArtifact(t.Context(), fileArtifact.ID, []Section{{
 		Title:   "File Purpose",
 		Content: "This file owns login-specific request handling.",
 		Summary: "Login request handling.",
@@ -89,7 +89,7 @@ func TestCollectQualityMetrics(t *testing.T) {
 		}},
 	}})
 
-	failedArtifact, _, err := kstore.ClaimArtifact(ArtifactKey{
+	failedArtifact, _, err := kstore.ClaimArtifact(t.Context(), ArtifactKey{
 		RepositoryID: repo.ID,
 		Type:         ArtifactCliffNotes,
 		Audience:     AudienceDeveloper,
@@ -99,11 +99,11 @@ func TestCollectQualityMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClaimArtifact symbol: %v", err)
 	}
-	if err := kstore.UpdateKnowledgeArtifactStatus(failedArtifact.ID, StatusFailed); err != nil {
+	if err := kstore.UpdateKnowledgeArtifactStatus(t.Context(), failedArtifact.ID, StatusFailed); err != nil {
 		t.Fatalf("UpdateKnowledgeArtifactStatus: %v", err)
 	}
 
-	metrics := CollectQualityMetrics(kstore, gstore, repo.ID)
+	metrics := CollectQualityMetrics(t.Context(), kstore, gstore, repo.ID)
 
 	if metrics.ByScope[string(ScopeRepository)].Coverage != 1 {
 		t.Fatalf("expected repository coverage to be 1, got %v", metrics.ByScope[string(ScopeRepository)].Coverage)

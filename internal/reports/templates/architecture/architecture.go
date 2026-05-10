@@ -162,7 +162,7 @@ func (t *Template) GeneratePackagePage(ctx context.Context, input templates.Gene
 		now = time.Now().UTC()
 	}
 
-	syms, err := input.SymbolGraph.ExportedSymbols(input.RepoID)
+	syms, err := input.SymbolGraph.ExportedSymbols(ctx, input.RepoID)
 	if err != nil {
 		return ast.Page{}, fmt.Errorf("architecture: fetching symbols: %w", err)
 	}
@@ -320,7 +320,7 @@ func (t *Template) Generate(ctx context.Context, input templates.GenerateInput) 
 	if input.SymbolGraph == nil || input.LLM == nil {
 		return ast.Page{}, fmt.Errorf("architecture: SymbolGraph and LLM are required")
 	}
-	syms, err := input.SymbolGraph.ExportedSymbols(input.RepoID)
+	syms, err := input.SymbolGraph.ExportedSymbols(ctx, input.RepoID)
 	if err != nil {
 		return ast.Page{}, fmt.Errorf("architecture: fetching symbols: %w", err)
 	}

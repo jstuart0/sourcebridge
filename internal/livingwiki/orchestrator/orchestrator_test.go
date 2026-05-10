@@ -47,7 +47,7 @@ func (c *constLLM) Complete(_ context.Context, _, _ string) (string, error) {
 // twoPackageGraph returns symbols for two packages.
 type twoPackageGraph struct{}
 
-func (twoPackageGraph) ExportedSymbols(_ string) ([]templates.Symbol, error) {
+func (twoPackageGraph) ExportedSymbols(_ context.Context, _ string) ([]templates.Symbol, error) {
 	return []templates.Symbol{
 		{
 			Package:    "internal/auth",
@@ -936,7 +936,7 @@ func threeClusterSummaries() []clustering.ClusterSummary {
 // multiPackageGraph returns symbols spread across 30 packages under 5 top-level dirs.
 type multiPackageGraph struct{}
 
-func (multiPackageGraph) ExportedSymbols(_ string) ([]templates.Symbol, error) {
+func (multiPackageGraph) ExportedSymbols(_ context.Context, _ string) ([]templates.Symbol, error) {
 	var syms []templates.Symbol
 	topDirs := []string{"cmd", "internal", "pkg", "tools", "vendor"}
 	// 6 packages per top-level dir → 30 packages total.
@@ -1166,7 +1166,7 @@ func TestResolveDetailedFallbackCappedAt25(t *testing.T) {
 // manyTopDirsGraph returns one symbol per unique top-level dir (30 dirs total).
 type manyTopDirsGraph struct{}
 
-func (manyTopDirsGraph) ExportedSymbols(_ string) ([]templates.Symbol, error) {
+func (manyTopDirsGraph) ExportedSymbols(_ context.Context, _ string) ([]templates.Symbol, error) {
 	var syms []templates.Symbol
 	for i := 0; i < 30; i++ {
 		syms = append(syms, templates.Symbol{

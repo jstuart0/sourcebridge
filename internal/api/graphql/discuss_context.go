@@ -33,12 +33,12 @@ func assembleDiscussionContext(
 		contextParts = append(contextParts, "Recent follow-up context:\n"+strings.Join(input.ConversationHistory, "\n\n"))
 	}
 	if input.ArtifactID != nil && *input.ArtifactID != "" && r.KnowledgeStore != nil {
-		if artifact := r.KnowledgeStore.GetKnowledgeArtifact(*input.ArtifactID); artifact != nil {
+		if artifact := r.KnowledgeStore.GetKnowledgeArtifact(ctx, *input.ArtifactID); artifact != nil {
 			contextParts = append(contextParts, discussionContextFromArtifact(artifact))
 		}
 	}
 	if input.RequirementID != nil && *input.RequirementID != "" {
-		if req := r.getStore(ctx).GetRequirement(*input.RequirementID); req != nil {
+		if req := r.getStore(ctx).GetRequirement(ctx, *input.RequirementID); req != nil {
 			contextParts = append(contextParts, fmt.Sprintf(
 				"Requirement context:\nID: %s\nTitle: %s\nDescription: %s",
 				req.ExternalID, req.Title, req.Description,
@@ -50,7 +50,7 @@ func assembleDiscussionContext(
 	if input.Code != nil && *input.Code != "" {
 		contextParts = append(contextParts, *input.Code)
 	} else if input.SymbolID != nil && *input.SymbolID != "" {
-		if sym := r.getStore(ctx).GetSymbol(*input.SymbolID); sym != nil {
+		if sym := r.getStore(ctx).GetSymbol(ctx, *input.SymbolID); sym != nil {
 			contextParts = append(contextParts, discussionContextFromStoredSymbol(sym))
 			// Derive file path from the symbol when the caller did not supply one.
 			if input.FilePath == nil || *input.FilePath == "" {
@@ -59,7 +59,7 @@ func assembleDiscussionContext(
 			}
 			// Also read the actual source file so the LLM has full code context, not just metadata.
 			if input.FilePath != nil && *input.FilePath != "" {
-				repo := r.getStore(ctx).GetRepository(input.RepositoryID)
+				repo := r.getStore(ctx).GetRepository(ctx, input.RepositoryID)
 				repoRoot, readErr := resolveRepoSourcePath(repo)
 				if readErr == nil {
 					content, readErr := readSourceFile(repoRoot, *input.FilePath)
@@ -71,7 +71,7 @@ func assembleDiscussionContext(
 		}
 	}
 	if len(contextParts) == 0 && input.FilePath != nil && *input.FilePath != "" {
-		repo := r.getStore(ctx).GetRepository(input.RepositoryID)
+		repo := r.getStore(ctx).GetRepository(ctx, input.RepositoryID)
 		repoRoot, readErr := resolveRepoSourcePath(repo)
 		if readErr != nil {
 			return "", nil, 0, "", fmt.Errorf("source unavailable: %w", readErr)
@@ -98,14 +98,14 @@ func assembleDiscussionContext(
 
 	// Collect context symbols: the named symbol + all file-level symbols.
 	if input.SymbolID != nil && *input.SymbolID != "" {
-		if sym := r.getStore(ctx).GetSymbol(*input.SymbolID); sym != nil {
+		if sym := r.getStore(ctx).GetSymbol(ctx, *input.SymbolID); sym != nil {
 			contextSymbols = append(contextSymbols, protoCodeSymbolFromStored(sym))
 		}
 	}
 	// Capture the (possibly derived) file path before returning.
 	if input.FilePath != nil {
 		effectiveFilePath = *input.FilePath
-		syms := r.getStore(ctx).GetSymbolsByFile(input.RepositoryID, *input.FilePath)
+		syms := r.getStore(ctx).GetSymbolsByFile(ctx, input.RepositoryID, *input.FilePath)
 		for _, s := range syms {
 			contextSymbols = append(contextSymbols, &commonv1.CodeSymbol{
 				Id:   s.ID,

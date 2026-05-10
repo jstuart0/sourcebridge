@@ -4,6 +4,7 @@
 package search
 
 import (
+	"context"
 	"sync"
 
 	"github.com/sourcebridge/sourcebridge/internal/graph"
@@ -14,7 +15,7 @@ import (
 // still runs GraphBooster, but it contributes zero.
 type Booster interface {
 	Name() string
-	Apply(results []*Result, req *Request, routed RouterOutput)
+	Apply(ctx context.Context, results []*Result, req *Request, routed RouterOutput)
 }
 
 // -----------------------------------------------------------------------------
@@ -35,7 +36,7 @@ type GraphBooster struct {
 
 func (*GraphBooster) Name() string { return "graph" }
 
-func (b *GraphBooster) Apply(results []*Result, req *Request, routed RouterOutput) {
+func (b *GraphBooster) Apply(ctx context.Context, results []*Result, req *Request, routed RouterOutput) {
 	if b == nil || b.Store == nil || len(results) == 0 {
 		return
 	}
@@ -48,7 +49,7 @@ func (b *GraphBooster) Apply(results []*Result, req *Request, routed RouterOutpu
 	// signal set.
 	seedID := ""
 	if routed.Seed != "" {
-		if sym := resolveSeed(b.Store, req.Repo, routed.Seed); sym != nil {
+		if sym := resolveSeed(ctx, b.Store, req.Repo, routed.Seed); sym != nil {
 			seedID = sym.ID
 		}
 	}
@@ -64,10 +65,10 @@ func (b *GraphBooster) Apply(results []*Result, req *Request, routed RouterOutpu
 		return
 	}
 	neighbors := make(map[string]bool)
-	for _, id := range b.Store.GetCallers(seedID) {
+	for _, id := range b.Store.GetCallers(ctx, seedID) {
 		neighbors[id] = true
 	}
-	for _, id := range b.Store.GetCallees(seedID) {
+	for _, id := range b.Store.GetCallees(ctx, seedID) {
 		neighbors[id] = true
 	}
 	if len(neighbors) == 0 {
@@ -117,7 +118,7 @@ func (b *RequirementBooster) Invalidate(repoID string) {
 	delete(b.warm, repoID)
 }
 
-func (b *RequirementBooster) Apply(results []*Result, req *Request, _ RouterOutput) {
+func (b *RequirementBooster) Apply(ctx context.Context, results []*Result, req *Request, _ RouterOutput) {
 	if b == nil || b.Store == nil || len(results) == 0 {
 		return
 	}
@@ -126,7 +127,7 @@ func (b *RequirementBooster) Apply(results []*Result, req *Request, _ RouterOutp
 		weight = 0.15
 	}
 
-	linkMap := b.linksFor(req.Repo)
+	linkMap := b.linksFor(ctx, req.Repo)
 	if len(linkMap) == 0 {
 		return // no-op on zero-link repos
 	}
@@ -145,7 +146,7 @@ func (b *RequirementBooster) Apply(results []*Result, req *Request, _ RouterOutp
 
 // linksFor returns (repo_id → symbol_id → max confidence). Cached so
 // the hot path is a single map read.
-func (b *RequirementBooster) linksFor(repoID string) map[string]float64 {
+func (b *RequirementBooster) linksFor(ctx context.Context, repoID string) map[string]float64 {
 	b.mu.RLock()
 	if b.cache != nil {
 		if m, ok := b.cache[repoID]; ok {
@@ -164,7 +165,7 @@ func (b *RequirementBooster) linksFor(repoID string) map[string]float64 {
 	if m, ok := b.cache[repoID]; ok {
 		return m
 	}
-	links := b.Store.GetLinksForRepo(repoID)
+	links := b.Store.GetLinksForRepo(ctx, repoID)
 	m := make(map[string]float64, len(links))
 	for _, l := range links {
 		if l == nil || l.Rejected {

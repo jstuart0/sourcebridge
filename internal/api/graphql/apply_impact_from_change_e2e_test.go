@@ -86,7 +86,7 @@ func TestReindexRepository_AppliesImpactFromChange_EndToEnd(t *testing.T) {
 
 	// Register the repository with the local path (non-remote so the
 	// mutation skips the clone/pull branch entirely).
-	repo, err := store.CreateRepository("phase1b-fixture", repoPath)
+	repo, err := store.CreateRepository(t.Context(), "phase1b-fixture", repoPath)
 	if err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestReindexRepository_AppliesImpactFromChange_EndToEnd(t *testing.T) {
 	}
 	initial.RepoName = repo.Name
 	initial.RepoPath = repo.Path
-	if _, err := store.ReplaceIndexResult(repo.ID, initial); err != nil {
+	if _, err := store.ReplaceIndexResult(t.Context(), repo.ID, initial); err != nil {
 		t.Fatalf("seed ReplaceIndexResult: %v", err)
 	}
 	// Seed the repo's commit SHA so the mutation's DiffRefs path
@@ -114,7 +114,7 @@ func TestReindexRepository_AppliesImpactFromChange_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed rev-parse: %v", err)
 	}
-	store.UpdateRepositoryMeta(repo.ID, graphstore.RepositoryMeta{
+	store.UpdateRepositoryMeta(t.Context(), repo.ID, graphstore.RepositoryMeta{
 		CommitSHA: strings.TrimSpace(string(headBytes)),
 		Branch:    "main",
 	})
@@ -170,7 +170,7 @@ func TestReindexRepository_AppliesImpactFromChange_EndToEnd(t *testing.T) {
 
 	// The persisted ImpactReport must exist and contain the expected
 	// surgical StaleArtifacts (selective path: hit only, not miss).
-	persisted := store.GetLatestImpactReport(repo.ID)
+	persisted := store.GetLatestImpactReport(t.Context(), repo.ID)
 	if persisted == nil {
 		t.Fatalf("no ImpactReport persisted; the helper extraction may be bypassed")
 	}
@@ -197,11 +197,11 @@ func TestReindexRepository_AppliesImpactFromChange_EndToEnd(t *testing.T) {
 	}
 
 	// And the live KnowledgeStore must reflect the same flag state.
-	hitState := knowledgeStore.GetKnowledgeArtifact(hit.ID)
+	hitState := knowledgeStore.GetKnowledgeArtifact(t.Context(), hit.ID)
 	if hitState == nil || !hitState.Stale {
 		t.Fatalf("hit artifact should be staled in knowledge store, got %+v", hitState)
 	}
-	missState := knowledgeStore.GetKnowledgeArtifact(miss.ID)
+	missState := knowledgeStore.GetKnowledgeArtifact(t.Context(), miss.ID)
 	if missState != nil && missState.Stale {
 		t.Fatalf("miss artifact should NOT be staled (selective path), got %+v", missState)
 	}
@@ -223,7 +223,7 @@ func seedArtifactWithFileEvidence(
 	filePath string,
 ) *knowledgepkg.Artifact {
 	t.Helper()
-	a, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	a, err := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		RepositoryID: repoID,
 		Type:         typ,
 		Audience:     knowledgepkg.AudienceDeveloper,
@@ -233,24 +233,24 @@ func seedArtifactWithFileEvidence(
 	if err != nil {
 		t.Fatalf("StoreKnowledgeArtifact: %v", err)
 	}
-	if err := store.UpdateKnowledgeArtifactStatus(a.ID, knowledgepkg.StatusReady); err != nil {
+	if err := store.UpdateKnowledgeArtifactStatus(t.Context(), a.ID, knowledgepkg.StatusReady); err != nil {
 		t.Fatalf("UpdateKnowledgeArtifactStatus: %v", err)
 	}
-	if err := store.StoreKnowledgeSections(a.ID, []knowledgepkg.Section{
+	if err := store.StoreKnowledgeSections(t.Context(), a.ID, []knowledgepkg.Section{
 		{Title: "S", Evidence: nil},
 	}); err != nil {
 		t.Fatalf("StoreKnowledgeSections: %v", err)
 	}
-	stored := store.GetKnowledgeSections(a.ID)
+	stored := store.GetKnowledgeSections(t.Context(), a.ID)
 	if len(stored) != 1 {
 		t.Fatalf("expected 1 stored section, got %d", len(stored))
 	}
-	if err := store.StoreKnowledgeEvidence(stored[0].ID, []knowledgepkg.Evidence{
+	if err := store.StoreKnowledgeEvidence(t.Context(), stored[0].ID, []knowledgepkg.Evidence{
 		{SourceType: knowledgepkg.EvidenceFile, FilePath: filePath},
 	}); err != nil {
 		t.Fatalf("StoreKnowledgeEvidence: %v", err)
 	}
-	return store.GetKnowledgeArtifact(a.ID)
+	return store.GetKnowledgeArtifact(t.Context(), a.ID)
 }
 
 // mustReadFile is the same helper used by the indexer-package

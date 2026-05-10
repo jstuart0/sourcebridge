@@ -171,7 +171,7 @@ func TestOrchestratorInflightReleasesAfterTerminalJob(t *testing.T) {
 	// inflight registry to set this up deterministically without
 	// needing to race a real failure.
 	deadID := "dead-job-from-prior-race"
-	if _, err := orch.store.Create(&llm.Job{
+	if _, err := orch.store.Create(t.Context(), &llm.Job{
 		ID:          deadID,
 		Subsystem:   llm.SubsystemReasoning,
 		LLMProvider: "test",
@@ -181,7 +181,7 @@ func TestOrchestratorInflightReleasesAfterTerminalJob(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed dead job: %v", err)
 	}
-	if err := orch.store.SetError(deadID, "WORKER_UNAVAILABLE", "prior startup race"); err != nil {
+	if err := orch.store.SetError(t.Context(), deadID, "WORKER_UNAVAILABLE", "prior startup race"); err != nil {
 		t.Fatalf("set error on dead job: %v", err)
 	}
 	if claimedID, ok := orch.inflight.claim(targetKey, deadID); !ok || claimedID != deadID {
@@ -919,7 +919,7 @@ func TestRuntimeHeartbeatIsNoopOnTerminalJob(t *testing.T) {
 	// Direct store heartbeat on the terminal job — should not error and
 	// should not advance UpdatedAt (the WHERE clause / status check
 	// excludes terminal jobs).
-	if err := orch.store.Heartbeat(job.ID); err != nil {
+	if err := orch.store.Heartbeat(t.Context(), job.ID); err != nil {
 		t.Errorf("Heartbeat on terminal job returned error: %v", err)
 	}
 	after := orch.GetJob(job.ID).UpdatedAt
@@ -1008,7 +1008,7 @@ func TestRuntimeHeartbeatBypassesProgressDebounce(t *testing.T) {
 func backdate(t *testing.T, orch *Orchestrator, jobID string, age time.Duration) {
 	t.Helper()
 	ms := orch.store.(*llm.MemStore)
-	if err := ms.ForceUpdatedAt(jobID, time.Now().Add(-age)); err != nil {
+	if err := ms.ForceUpdatedAt(t.Context(), jobID, time.Now().Add(-age)); err != nil {
 		t.Fatalf("backdate: %v", err)
 	}
 }
@@ -1033,7 +1033,7 @@ func TestReaper_HeartbeatStale_LivingWiki_Reaped(t *testing.T) {
 	}
 
 	// Force the job into StatusGenerating so the heartbeat-stale branch applies.
-	if err := orch.store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
+	if err := orch.store.SetStatus(t.Context(), job.ID, llm.StatusGenerating); err != nil {
 		t.Fatalf("set generating: %v", err)
 	}
 	// Back-date UpdatedAt past the heartbeat threshold (5 min + 1 s margin).
@@ -1066,7 +1066,7 @@ func TestReaper_HeartbeatStale_LivingWiki_HealthyHeartbeat_NotReaped(t *testing.
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	if err := orch.store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
+	if err := orch.store.SetStatus(t.Context(), job.ID, llm.StatusGenerating); err != nil {
 		t.Fatalf("set generating: %v", err)
 	}
 	// 1 min stale — well below 5 min heartbeatStaleThreshold.
@@ -1104,7 +1104,7 @@ func TestReaper_LivingWiki_FallbackWallClock_IfRemovedFromAllowList(t *testing.T
 		if err != nil {
 			t.Fatalf("enqueue: %v", err)
 		}
-		if err := orch.store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
+		if err := orch.store.SetStatus(t.Context(), job.ID, llm.StatusGenerating); err != nil {
 			t.Fatalf("set generating: %v", err)
 		}
 		backdate(t, orch, job.ID, 7*time.Minute)
@@ -1128,7 +1128,7 @@ func TestReaper_LivingWiki_FallbackWallClock_IfRemovedFromAllowList(t *testing.T
 		if err != nil {
 			t.Fatalf("enqueue: %v", err)
 		}
-		if err := orch.store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
+		if err := orch.store.SetStatus(t.Context(), job.ID, llm.StatusGenerating); err != nil {
 			t.Fatalf("set generating: %v", err)
 		}
 		backdate(t, orch, job.ID, staleGeneratingThresholdLivingWiki+time.Second)
@@ -1160,7 +1160,7 @@ func TestReaper_HeartbeatStale_LivingWiki_QueuedPhase_NotReapedEarly(t *testing.
 			t.Fatalf("enqueue: %v", err)
 		}
 		// Job is StatusPending; set progress phase to "queued".
-		if err := orch.store.SetProgress(job.ID, 0, "queued", "", 0); err != nil {
+		if err := orch.store.SetProgress(t.Context(), job.ID, 0, "queued", "", 0); err != nil {
 			t.Fatalf("set progress: %v", err)
 		}
 		// 6 min stale — above heartbeatStaleThreshold but within queued override.
@@ -1186,7 +1186,7 @@ func TestReaper_HeartbeatStale_LivingWiki_QueuedPhase_NotReapedEarly(t *testing.
 		if err != nil {
 			t.Fatalf("enqueue: %v", err)
 		}
-		if err := orch.store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
+		if err := orch.store.SetStatus(t.Context(), job.ID, llm.StatusGenerating); err != nil {
 			t.Fatalf("set generating: %v", err)
 		}
 		backdate(t, orch, job.ID, 6*time.Minute)
@@ -1214,7 +1214,7 @@ func TestReaper_NonHeartbeatSubsystem_Knowledge_UsesWallClockThreshold(t *testin
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	if err := orch.store.SetStatus(job.ID, llm.StatusGenerating); err != nil {
+	if err := orch.store.SetStatus(t.Context(), job.ID, llm.StatusGenerating); err != nil {
 		t.Fatalf("set generating: %v", err)
 	}
 	// 6 min: above heartbeatStaleThreshold (5 min) but below staleGeneratingThreshold (10 min).

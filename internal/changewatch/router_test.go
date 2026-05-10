@@ -99,7 +99,7 @@ func (s *stubImpact) ApplyImpact(_ context.Context, _ string, _ *graphstore.Impa
 func newRouterHarness(t *testing.T, cfg Config) (*Router, *stubIndexer, *stubBranches, *stubImpact, *graphstore.Store) {
 	t.Helper()
 	store := graphstore.NewStore()
-	repo, err := store.CreateRepository("test-repo", "/tmp/test-repo")
+	repo, err := store.CreateRepository(t.Context(), "test-repo", "/tmp/test-repo")
 	if err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
@@ -112,7 +112,7 @@ func newRouterHarness(t *testing.T, cfg Config) (*Router, *stubIndexer, *stubBra
 			{Path: "b.go", Language: "go", LineCount: 10, ContentHash: "h2"},
 		},
 	}
-	if _, err := store.ReplaceIndexResult(repo.ID, prev); err != nil {
+	if _, err := store.ReplaceIndexResult(t.Context(), repo.ID, prev); err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 
@@ -133,7 +133,7 @@ func newRouterHarness(t *testing.T, cfg Config) (*Router, *stubIndexer, *stubBra
 
 // repoIDFromHarness returns the single repo's ID from the store.
 func repoIDFromHarness(store *graphstore.Store) string {
-	for _, r := range store.ListRepositories() {
+	for _, r := range store.ListRepositories(context.Background()) {
 		return r.ID
 	}
 	return ""
@@ -223,8 +223,8 @@ func TestRouter_RejectsInvalidPaths(t *testing.T) {
 func TestRouter_MultiTenantContainment(t *testing.T) {
 	cfg := Config{Enabled: true, RateLimitPerMin: 30, RepoBreakerPerMin: 60}
 	store := graphstore.NewStore()
-	repoA, _ := store.CreateRepository("tenant-a-repo", "/tmp/tenant-a")
-	repoB, _ := store.CreateRepository("tenant-b-repo", "/tmp/tenant-b")
+	repoA, _ := store.CreateRepository(t.Context(), "tenant-a-repo", "/tmp/tenant-a")
+	repoB, _ := store.CreateRepository(t.Context(), "tenant-b-repo", "/tmp/tenant-b")
 	prev := func(name, path string) *indexer.IndexResult {
 		return &indexer.IndexResult{
 			RepoName: name, RepoPath: path, Branch: "main",
@@ -233,8 +233,8 @@ func TestRouter_MultiTenantContainment(t *testing.T) {
 	}
 	prevA := prev("tenant-a-repo", "/tmp/tenant-a")
 	prevB := prev("tenant-b-repo", "/tmp/tenant-b")
-	store.ReplaceIndexResult(repoA.ID, prevA)
-	store.ReplaceIndexResult(repoB.ID, prevB)
+	store.ReplaceIndexResult(t.Context(), repoA.ID, prevA)
+	store.ReplaceIndexResult(t.Context(), repoB.ID, prevB)
 
 	idx := &stubIndexer{}
 	branches := &stubBranches{branch: "main"}

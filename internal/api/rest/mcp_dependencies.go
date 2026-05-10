@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"path"
 	"sort"
@@ -118,7 +119,7 @@ func (h *mcpHandler) callFindImporters(session *mcpSession, args json.RawMessage
 	repoID := params.RepositoryID
 
 	// Verify the repository exists.
-	if h.store.GetRepository(repoID) == nil {
+	if h.store.GetRepository(context.Background(), repoID) == nil {
 		return nil, errRepositoryNotIndexed(repoID)
 	}
 
@@ -127,7 +128,7 @@ func (h *mcpHandler) callFindImporters(session *mcpSession, args json.RawMessage
 	dir := path.Dir(params.FilePath)
 
 	// Find the matching package dependency record.
-	deps := h.store.GetPackageDependencies(repoID)
+	deps := h.store.GetPackageDependencies(context.Background(), repoID)
 
 	// Discriminate reasons before matching:
 	//   - No deps at all → "package_dependencies_not_computed"

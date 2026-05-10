@@ -3,18 +3,20 @@
 
 package qa
 
+import "context"
+
 // graphAdapterStore is the narrow slice of graph.GraphStore the
 // orchestrator calls through. Defined locally so internal/qa doesn't
 // import internal/graph directly — the REST server layer wires the
 // adapter up at startup.
 type graphAdapterStore interface {
-	GetCallers(symbolID string) []string
-	GetCallees(symbolID string) []string
+	GetCallers(ctx context.Context, symbolID string) []string
+	GetCallees(ctx context.Context, symbolID string) []string
 }
 
 // graphSymbolLookup resolves a symbol ID to its display metadata.
 type graphSymbolLookup interface {
-	Lookup(id string) (qualifiedName, filePath, language string, startLine, endLine int, ok bool)
+	Lookup(ctx context.Context, id string) (qualifiedName, filePath, language string, startLine, endLine int, ok bool)
 }
 
 // NewGraphExpander adapts a GraphStore-shaped collaborator + symbol
@@ -31,27 +33,27 @@ type graphExpander struct {
 	lookup graphSymbolLookup
 }
 
-func (g *graphExpander) GetCallers(symbolID string) []GraphNeighbor {
+func (g *graphExpander) GetCallers(ctx context.Context, symbolID string) []GraphNeighbor {
 	if g == nil || g.store == nil {
 		return nil
 	}
-	return g.resolve(g.store.GetCallers(symbolID))
+	return g.resolve(ctx, g.store.GetCallers(ctx, symbolID))
 }
 
-func (g *graphExpander) GetCallees(symbolID string) []GraphNeighbor {
+func (g *graphExpander) GetCallees(ctx context.Context, symbolID string) []GraphNeighbor {
 	if g == nil || g.store == nil {
 		return nil
 	}
-	return g.resolve(g.store.GetCallees(symbolID))
+	return g.resolve(ctx, g.store.GetCallees(ctx, symbolID))
 }
 
-func (g *graphExpander) resolve(ids []string) []GraphNeighbor {
+func (g *graphExpander) resolve(ctx context.Context, ids []string) []GraphNeighbor {
 	if len(ids) == 0 || g.lookup == nil {
 		return nil
 	}
 	out := make([]GraphNeighbor, 0, len(ids))
 	for _, id := range ids {
-		qn, fp, lang, start, end, ok := g.lookup.Lookup(id)
+		qn, fp, lang, start, end, ok := g.lookup.Lookup(ctx, id)
 		if !ok {
 			continue
 		}

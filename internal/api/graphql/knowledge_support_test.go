@@ -1,6 +1,7 @@
 package graphql
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -15,38 +16,38 @@ type stubComprehensionStore struct {
 	workspace *comprehension.Settings
 }
 
-func (s stubComprehensionStore) GetSettings(scope comprehension.Scope) (*comprehension.Settings, error) {
+func (s stubComprehensionStore) GetSettings(_ context.Context, scope comprehension.Scope) (*comprehension.Settings, error) {
 	if scope == comprehension.WorkspaceScope && s.workspace != nil {
 		return s.workspace, nil
 	}
 	return nil, nil
 }
 
-func (s stubComprehensionStore) SetSettings(settings *comprehension.Settings) error {
+func (s stubComprehensionStore) SetSettings(_ context.Context, settings *comprehension.Settings) error {
 	return nil
 }
 
-func (s stubComprehensionStore) DeleteSettings(scope comprehension.Scope) error {
+func (s stubComprehensionStore) DeleteSettings(_ context.Context, scope comprehension.Scope) error {
 	return nil
 }
 
-func (s stubComprehensionStore) ListSettings() ([]comprehension.Settings, error) {
+func (s stubComprehensionStore) ListSettings(_ context.Context) ([]comprehension.Settings, error) {
 	return nil, nil
 }
 
-func (s stubComprehensionStore) GetModelCapabilities(modelID string) (*comprehension.ModelCapabilities, error) {
+func (s stubComprehensionStore) GetModelCapabilities(_ context.Context, modelID string) (*comprehension.ModelCapabilities, error) {
 	return nil, nil
 }
 
-func (s stubComprehensionStore) SetModelCapabilities(m *comprehension.ModelCapabilities) error {
+func (s stubComprehensionStore) SetModelCapabilities(_ context.Context, m *comprehension.ModelCapabilities) error {
 	return nil
 }
 
-func (s stubComprehensionStore) DeleteModelCapabilities(modelID string) error {
+func (s stubComprehensionStore) DeleteModelCapabilities(_ context.Context, modelID string) error {
 	return nil
 }
 
-func (s stubComprehensionStore) ListModelCapabilities() ([]comprehension.ModelCapabilities, error) {
+func (s stubComprehensionStore) ListModelCapabilities(_ context.Context) ([]comprehension.ModelCapabilities, error) {
 	return nil, nil
 }
 
@@ -70,7 +71,7 @@ func TestTopLevelModuleScopesFallsBackToFilesWhenModulesMissing(t *testing.T) {
 			{Path: "web/app/page.tsx", Language: "typescript", LineCount: 80},
 		},
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -158,7 +159,7 @@ func TestCliffNotesSectionMetadataJSON(t *testing.T) {
 
 func TestCliffNotesDeepeningTargetsSkipsQueuedRunningAndCompletedUnits(t *testing.T) {
 	store := knowledgepkg.NewMemStore()
-	artifact, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	artifact, err := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		RepositoryID: "repo-1",
 		Type:         knowledgepkg.ArtifactCliffNotes,
 		Audience:     knowledgepkg.AudienceDeveloper,
@@ -175,10 +176,10 @@ func TestCliffNotesDeepeningTargetsSkipsQueuedRunningAndCompletedUnits(t *testin
 		{Title: "External Dependencies", SectionKey: "external_dependencies", RefinementStatus: "light"},
 		{Title: "Key Abstractions", SectionKey: "key_abstractions", RefinementStatus: "light"},
 	}
-	if err := store.StoreKnowledgeSections(artifact.ID, sections); err != nil {
+	if err := store.StoreKnowledgeSections(t.Context(), artifact.ID, sections); err != nil {
 		t.Fatalf("StoreKnowledgeSections: %v", err)
 	}
-	if err := store.StoreRefinementUnits(artifact.ID, []knowledgepkg.RefinementUnit{
+	if err := store.StoreRefinementUnits(t.Context(), artifact.ID, []knowledgepkg.RefinementUnit{
 		{SectionKey: "architecture_overview", SectionTitle: "Architecture Overview", RefinementType: cliffNotesDeepRefinementType, Status: knowledgepkg.RefinementQueued},
 		{SectionKey: "external_dependencies", SectionTitle: "External Dependencies", RefinementType: cliffNotesDeepRefinementType, Status: knowledgepkg.RefinementRunning},
 		{SectionKey: "domain_model", SectionTitle: "Domain Model", RefinementType: cliffNotesDeepRefinementType, Status: knowledgepkg.RefinementCompleted},
@@ -194,7 +195,7 @@ func TestCliffNotesDeepeningTargetsSkipsQueuedRunningAndCompletedUnits(t *testin
 
 func TestCliffNotesDeepeningTargetsIncludeLowConfidenceOrInferredSections(t *testing.T) {
 	store := knowledgepkg.NewMemStore()
-	artifact, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	artifact, err := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		RepositoryID: "repo-1",
 		Type:         knowledgepkg.ArtifactCliffNotes,
 		Audience:     knowledgepkg.AudienceDeveloper,
@@ -214,7 +215,7 @@ func TestCliffNotesDeepeningTargetsIncludeLowConfidenceOrInferredSections(t *tes
 		{Title: "Configuration & Feature Flags", SectionKey: "configuration_feature_flags", RefinementStatus: "light", Confidence: knowledgepkg.ConfidenceHigh, Inferred: true},
 		{Title: "Concurrency & Background Work", SectionKey: "concurrency_background_work", RefinementStatus: "unsupported_claims", Confidence: knowledgepkg.ConfidenceHigh},
 	}
-	if err := store.StoreKnowledgeSections(artifact.ID, sections); err != nil {
+	if err := store.StoreKnowledgeSections(t.Context(), artifact.ID, sections); err != nil {
 		t.Fatalf("StoreKnowledgeSections: %v", err)
 	}
 
@@ -235,7 +236,7 @@ func TestCliffNotesDeepeningTargetsIncludeLowConfidenceOrInferredSections(t *tes
 
 func TestMarkCliffNotesDeepRefinementStatusTracksAttempts(t *testing.T) {
 	store := knowledgepkg.NewMemStore()
-	artifact, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	artifact, err := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		ID:                      "artifact-1",
 		RepositoryID:            "repo-1",
 		Type:                    knowledgepkg.ArtifactCliffNotes,
@@ -251,7 +252,7 @@ func TestMarkCliffNotesDeepRefinementStatusTracksAttempts(t *testing.T) {
 	sections := []knowledgepkg.Section{
 		{Title: "Core System Flows", SectionKey: "core_system_flows", RefinementStatus: "light"},
 	}
-	if err := store.StoreKnowledgeSections(artifact.ID, sections); err != nil {
+	if err := store.StoreKnowledgeSections(t.Context(), artifact.ID, sections); err != nil {
 		t.Fatalf("StoreKnowledgeSections: %v", err)
 	}
 
@@ -259,7 +260,7 @@ func TestMarkCliffNotesDeepRefinementStatusTracksAttempts(t *testing.T) {
 	markCliffNotesDeepRefinementStatus(store, artifact, sections, []string{"Core System Flows"}, knowledgepkg.RefinementRunning, "")
 	markCliffNotesDeepRefinementStatus(store, artifact, sections, []string{"Core System Flows"}, knowledgepkg.RefinementFailed, "boom")
 
-	units := store.GetRefinementUnits(artifact.ID)
+	units := store.GetRefinementUnits(t.Context(), artifact.ID)
 	if len(units) != 1 {
 		t.Fatalf("expected 1 refinement unit, got %d", len(units))
 	}
@@ -277,7 +278,7 @@ func TestMarkCliffNotesDeepRefinementStatusTracksAttempts(t *testing.T) {
 
 func TestSyncCliffNotesRefinementUnitsStoresAllSections(t *testing.T) {
 	store := knowledgepkg.NewMemStore()
-	artifact, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	artifact, err := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		ID:                      "artifact-sync-1",
 		RepositoryID:            "repo-1",
 		Type:                    knowledgepkg.ArtifactCliffNotes,
@@ -301,7 +302,7 @@ func TestSyncCliffNotesRefinementUnitsStoresAllSections(t *testing.T) {
 		RevisionFP: "rev-1",
 	})
 
-	units := store.GetRefinementUnits(artifact.ID)
+	units := store.GetRefinementUnits(t.Context(), artifact.ID)
 	if len(units) != 3 {
 		t.Fatalf("expected 3 refinement units, got %#v", units)
 	}
@@ -410,7 +411,7 @@ func TestSelectAcceptedDeepenedSectionsKeepsOnlyImprovements(t *testing.T) {
 
 func TestCliffNotesDeepeningTargetsRequeuesFailedWeakSections(t *testing.T) {
 	store := knowledgepkg.NewMemStore()
-	artifact, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	artifact, err := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		RepositoryID: "repo-1",
 		Type:         knowledgepkg.ArtifactCliffNotes,
 		Audience:     knowledgepkg.AudienceDeveloper,
@@ -425,10 +426,10 @@ func TestCliffNotesDeepeningTargetsRequeuesFailedWeakSections(t *testing.T) {
 		{Title: "Domain Model", SectionKey: "domain_model", RefinementStatus: "needs_evidence", Confidence: knowledgepkg.ConfidenceLow},
 		{Title: "Architecture Overview", SectionKey: "architecture_overview", RefinementStatus: "deep", Confidence: knowledgepkg.ConfidenceHigh},
 	}
-	if err := store.StoreKnowledgeSections(artifact.ID, sections); err != nil {
+	if err := store.StoreKnowledgeSections(t.Context(), artifact.ID, sections); err != nil {
 		t.Fatalf("StoreKnowledgeSections: %v", err)
 	}
-	if err := store.StoreRefinementUnits(artifact.ID, []knowledgepkg.RefinementUnit{
+	if err := store.StoreRefinementUnits(t.Context(), artifact.ID, []knowledgepkg.RefinementUnit{
 		{
 			SectionKey:     "domain_model",
 			SectionTitle:   "Domain Model",
@@ -448,7 +449,7 @@ func TestCliffNotesDeepeningTargetsRequeuesFailedWeakSections(t *testing.T) {
 
 func TestCliffNotesRenderPlanForArtifactUsesUnderstandingBackedDeepRender(t *testing.T) {
 	store := knowledgepkg.NewMemStore()
-	artifact, err := store.StoreKnowledgeArtifact(&knowledgepkg.Artifact{
+	artifact, err := store.StoreKnowledgeArtifact(t.Context(), &knowledgepkg.Artifact{
 		RepositoryID:            "repo-1",
 		Type:                    knowledgepkg.ArtifactCliffNotes,
 		Audience:                knowledgepkg.AudienceDeveloper,
@@ -460,7 +461,7 @@ func TestCliffNotesRenderPlanForArtifactUsesUnderstandingBackedDeepRender(t *tes
 	if err != nil {
 		t.Fatalf("StoreKnowledgeArtifact: %v", err)
 	}
-	understanding, err := store.StoreRepositoryUnderstanding(&knowledgepkg.RepositoryUnderstanding{
+	understanding, err := store.StoreRepositoryUnderstanding(t.Context(), &knowledgepkg.RepositoryUnderstanding{
 		RepositoryID: "repo-1",
 		Scope:        (&knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository}).NormalizePtr(),
 		RevisionFP:   "rev-1",

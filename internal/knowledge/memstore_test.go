@@ -19,7 +19,7 @@ func TestKnowledgeArtifactCRUD(t *testing.T) {
 			Branch:    "main",
 		},
 	}
-	stored, err := s.StoreKnowledgeArtifact(artifact)
+	stored, err := s.StoreKnowledgeArtifact(t.Context(), artifact)
 	if err != nil {
 		t.Fatalf("StoreKnowledgeArtifact: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestKnowledgeArtifactCRUD(t *testing.T) {
 		t.Fatalf("expected status pending, got %s", stored.Status)
 	}
 
-	fetched := s.GetKnowledgeArtifact(stored.ID)
+	fetched := s.GetKnowledgeArtifact(t.Context(), stored.ID)
 	if fetched == nil {
 		t.Fatal("expected to find artifact")
 	}
@@ -41,16 +41,16 @@ func TestKnowledgeArtifactCRUD(t *testing.T) {
 		t.Fatalf("expected commit abc123, got %s", fetched.SourceRevision.CommitSHA)
 	}
 
-	artifacts := s.GetKnowledgeArtifacts("repo-1")
+	artifacts := s.GetKnowledgeArtifacts(t.Context(), "repo-1")
 	if len(artifacts) != 1 {
 		t.Fatalf("expected 1 artifact, got %d", len(artifacts))
 	}
 
-	err = s.UpdateKnowledgeArtifactStatus(stored.ID, StatusReady)
+	err = s.UpdateKnowledgeArtifactStatus(t.Context(), stored.ID, StatusReady)
 	if err != nil {
 		t.Fatalf("UpdateKnowledgeArtifactStatus: %v", err)
 	}
-	fetched = s.GetKnowledgeArtifact(stored.ID)
+	fetched = s.GetKnowledgeArtifact(t.Context(), stored.ID)
 	if fetched.Status != StatusReady {
 		t.Fatalf("expected status ready, got %s", fetched.Status)
 	}
@@ -58,20 +58,20 @@ func TestKnowledgeArtifactCRUD(t *testing.T) {
 		t.Fatal("expected generated_at to be set when status is ready")
 	}
 
-	err = s.MarkKnowledgeArtifactStale(stored.ID, true)
+	err = s.MarkKnowledgeArtifactStale(t.Context(), stored.ID, true)
 	if err != nil {
 		t.Fatalf("MarkKnowledgeArtifactStale: %v", err)
 	}
-	fetched = s.GetKnowledgeArtifact(stored.ID)
+	fetched = s.GetKnowledgeArtifact(t.Context(), stored.ID)
 	if !fetched.Stale {
 		t.Fatal("expected artifact to be stale")
 	}
 
-	err = s.DeleteKnowledgeArtifact(stored.ID)
+	err = s.DeleteKnowledgeArtifact(t.Context(), stored.ID)
 	if err != nil {
 		t.Fatalf("DeleteKnowledgeArtifact: %v", err)
 	}
-	if s.GetKnowledgeArtifact(stored.ID) != nil {
+	if s.GetKnowledgeArtifact(t.Context(), stored.ID) != nil {
 		t.Fatal("expected artifact to be deleted")
 	}
 }
@@ -79,7 +79,7 @@ func TestKnowledgeArtifactCRUD(t *testing.T) {
 func TestKnowledgeSectionsAndEvidence(t *testing.T) {
 	s := NewMemStore()
 
-	stored, _ := s.StoreKnowledgeArtifact(&Artifact{
+	stored, _ := s.StoreKnowledgeArtifact(t.Context(), &Artifact{
 		RepositoryID: "repo-1",
 		Type:         ArtifactCliffNotes,
 		Audience:     AudienceBeginner,
@@ -91,12 +91,12 @@ func TestKnowledgeSectionsAndEvidence(t *testing.T) {
 		{Title: "System Purpose", Content: "This system does X.", Summary: "Does X.", Confidence: ConfidenceHigh},
 		{Title: "Architecture", Content: "Layered architecture.", Summary: "Layers.", Confidence: ConfidenceMedium, Inferred: true},
 	}
-	err := s.StoreKnowledgeSections(stored.ID, sections)
+	err := s.StoreKnowledgeSections(t.Context(), stored.ID, sections)
 	if err != nil {
 		t.Fatalf("StoreKnowledgeSections: %v", err)
 	}
 
-	fetchedSections := s.GetKnowledgeSections(stored.ID)
+	fetchedSections := s.GetKnowledgeSections(t.Context(), stored.ID)
 	if len(fetchedSections) != 2 {
 		t.Fatalf("expected 2 sections, got %d", len(fetchedSections))
 	}
@@ -108,12 +108,12 @@ func TestKnowledgeSectionsAndEvidence(t *testing.T) {
 		{SourceType: EvidenceFile, SourceID: "file-1", FilePath: "main.go", LineStart: 1, LineEnd: 10, Rationale: "Entry point"},
 		{SourceType: EvidenceSymbol, SourceID: "sym-1", FilePath: "main.go", LineStart: 5, LineEnd: 8, Metadata: map[string]string{"kind": "function"}},
 	}
-	err = s.StoreKnowledgeEvidence(fetchedSections[0].ID, evidence)
+	err = s.StoreKnowledgeEvidence(t.Context(), fetchedSections[0].ID, evidence)
 	if err != nil {
 		t.Fatalf("StoreKnowledgeEvidence: %v", err)
 	}
 
-	fetchedEvidence := s.GetKnowledgeEvidence(fetchedSections[0].ID)
+	fetchedEvidence := s.GetKnowledgeEvidence(t.Context(), fetchedSections[0].ID)
 	if len(fetchedEvidence) != 2 {
 		t.Fatalf("expected 2 evidence, got %d", len(fetchedEvidence))
 	}
@@ -121,7 +121,7 @@ func TestKnowledgeSectionsAndEvidence(t *testing.T) {
 		t.Fatalf("expected metadata kind=function, got %v", fetchedEvidence[1].Metadata)
 	}
 
-	full := s.GetKnowledgeArtifact(stored.ID)
+	full := s.GetKnowledgeArtifact(t.Context(), stored.ID)
 	if len(full.Sections) != 2 {
 		t.Fatalf("expected 2 nested sections, got %d", len(full.Sections))
 	}
@@ -133,16 +133,16 @@ func TestKnowledgeSectionsAndEvidence(t *testing.T) {
 func TestKnowledgeArtifactNotFound(t *testing.T) {
 	s := NewMemStore()
 
-	if s.GetKnowledgeArtifact("nonexistent") != nil {
+	if s.GetKnowledgeArtifact(t.Context(), "nonexistent") != nil {
 		t.Fatal("expected nil for nonexistent artifact")
 	}
-	if err := s.UpdateKnowledgeArtifactStatus("nonexistent", StatusReady); err == nil {
+	if err := s.UpdateKnowledgeArtifactStatus(t.Context(), "nonexistent", StatusReady); err == nil {
 		t.Fatal("expected error for nonexistent artifact")
 	}
-	if err := s.MarkKnowledgeArtifactStale("nonexistent", true); err == nil {
+	if err := s.MarkKnowledgeArtifactStale(t.Context(), "nonexistent", true); err == nil {
 		t.Fatal("expected error for nonexistent artifact")
 	}
-	if err := s.DeleteKnowledgeArtifact("nonexistent"); err == nil {
+	if err := s.DeleteKnowledgeArtifact(t.Context(), "nonexistent"); err == nil {
 		t.Fatal("expected error for nonexistent artifact")
 	}
 }
@@ -157,7 +157,7 @@ func TestKnowledgeArtifactNotFound(t *testing.T) {
 func TestStoreKnowledgeSections_CleansUpOldEvidence(t *testing.T) {
 	s := NewMemStore()
 
-	artifact, err := s.StoreKnowledgeArtifact(&Artifact{
+	artifact, err := s.StoreKnowledgeArtifact(t.Context(), &Artifact{
 		RepositoryID: "repo-1",
 		Type:         ArtifactCliffNotes,
 		Audience:     AudienceDeveloper,
@@ -173,21 +173,21 @@ func TestStoreKnowledgeSections_CleansUpOldEvidence(t *testing.T) {
 		{Title: "System Purpose", Content: "First generation.", Confidence: ConfidenceHigh},
 		{Title: "Architecture", Content: "Initial arch.", Confidence: ConfidenceMedium},
 	}
-	if err := s.StoreKnowledgeSections(artifact.ID, firstSections); err != nil {
+	if err := s.StoreKnowledgeSections(t.Context(), artifact.ID, firstSections); err != nil {
 		t.Fatalf("StoreKnowledgeSections (first): %v", err)
 	}
-	stored := s.GetKnowledgeSections(artifact.ID)
+	stored := s.GetKnowledgeSections(t.Context(), artifact.ID)
 	if len(stored) != 2 {
 		t.Fatalf("expected 2 sections, got %d", len(stored))
 	}
 	firstSectionID := stored[0].ID
-	if err := s.StoreKnowledgeEvidence(firstSectionID, []Evidence{
+	if err := s.StoreKnowledgeEvidence(t.Context(), firstSectionID, []Evidence{
 		{SourceType: EvidenceFile, SourceID: "f1", FilePath: "main.go"},
 		{SourceType: EvidenceFile, SourceID: "f2", FilePath: "util.go"},
 	}); err != nil {
 		t.Fatalf("StoreKnowledgeEvidence: %v", err)
 	}
-	if n := len(s.GetKnowledgeEvidence(firstSectionID)); n != 2 {
+	if n := len(s.GetKnowledgeEvidence(t.Context(), firstSectionID)); n != 2 {
 		t.Fatalf("expected 2 evidence rows after first generation, got %d", n)
 	}
 
@@ -195,16 +195,16 @@ func TestStoreKnowledgeSections_CleansUpOldEvidence(t *testing.T) {
 	newSections := []Section{
 		{Title: "System Purpose", Content: "Refreshed content.", Confidence: ConfidenceHigh},
 	}
-	if err := s.StoreKnowledgeSections(artifact.ID, newSections); err != nil {
+	if err := s.StoreKnowledgeSections(t.Context(), artifact.ID, newSections); err != nil {
 		t.Fatalf("StoreKnowledgeSections (refresh): %v", err)
 	}
 
 	// Old evidence rows for the replaced section must be gone.
-	if n := len(s.GetKnowledgeEvidence(firstSectionID)); n != 0 {
+	if n := len(s.GetKnowledgeEvidence(t.Context(), firstSectionID)); n != 0 {
 		t.Fatalf("expected old evidence to be cleaned up on section replacement, got %d rows", n)
 	}
 	// New sections are present.
-	afterSections := s.GetKnowledgeSections(artifact.ID)
+	afterSections := s.GetKnowledgeSections(t.Context(), artifact.ID)
 	if len(afterSections) != 1 {
 		t.Fatalf("expected 1 section after refresh, got %d", len(afterSections))
 	}
@@ -216,7 +216,7 @@ func TestStoreKnowledgeSections_CleansUpOldEvidence(t *testing.T) {
 func TestDeleteArtifactCleansUpSectionsAndEvidence(t *testing.T) {
 	s := NewMemStore()
 
-	artifact, _ := s.StoreKnowledgeArtifact(&Artifact{
+	artifact, _ := s.StoreKnowledgeArtifact(t.Context(), &Artifact{
 		RepositoryID: "repo-1",
 		Type:         ArtifactLearningPath,
 		Audience:     AudienceDeveloper,
@@ -224,18 +224,18 @@ func TestDeleteArtifactCleansUpSectionsAndEvidence(t *testing.T) {
 		Status:       StatusReady,
 	})
 
-	_ = s.StoreKnowledgeSections(artifact.ID, []Section{{Title: "Step 1", Content: "Do this.", Confidence: ConfidenceHigh}})
-	fetchedSections := s.GetKnowledgeSections(artifact.ID)
-	_ = s.StoreKnowledgeEvidence(fetchedSections[0].ID, []Evidence{
+	_ = s.StoreKnowledgeSections(t.Context(), artifact.ID, []Section{{Title: "Step 1", Content: "Do this.", Confidence: ConfidenceHigh}})
+	fetchedSections := s.GetKnowledgeSections(t.Context(), artifact.ID)
+	_ = s.StoreKnowledgeEvidence(t.Context(), fetchedSections[0].ID, []Evidence{
 		{SourceType: EvidenceFile, SourceID: "f1", FilePath: "a.go"},
 	})
 
-	_ = s.DeleteKnowledgeArtifact(artifact.ID)
+	_ = s.DeleteKnowledgeArtifact(t.Context(), artifact.ID)
 
-	if len(s.GetKnowledgeSections(artifact.ID)) != 0 {
+	if len(s.GetKnowledgeSections(t.Context(), artifact.ID)) != 0 {
 		t.Fatal("expected sections to be cleaned up")
 	}
-	if len(s.GetKnowledgeEvidence(fetchedSections[0].ID)) != 0 {
+	if len(s.GetKnowledgeEvidence(t.Context(), fetchedSections[0].ID)) != 0 {
 		t.Fatal("expected evidence to be cleaned up")
 	}
 }
@@ -243,7 +243,7 @@ func TestDeleteArtifactCleansUpSectionsAndEvidence(t *testing.T) {
 func TestSupersedeArtifactRegeneratesEvidenceIDs(t *testing.T) {
 	s := NewMemStore()
 
-	artifact, _ := s.StoreKnowledgeArtifact(&Artifact{
+	artifact, _ := s.StoreKnowledgeArtifact(t.Context(), &Artifact{
 		RepositoryID: "repo-1",
 		Type:         ArtifactCliffNotes,
 		Audience:     AudienceDeveloper,
@@ -263,15 +263,15 @@ func TestSupersedeArtifactRegeneratesEvidenceIDs(t *testing.T) {
 			LineEnd:    4,
 		}},
 	}}
-	if err := s.SupersedeArtifact(artifact.ID, sections); err != nil {
+	if err := s.SupersedeArtifact(t.Context(), artifact.ID, sections); err != nil {
 		t.Fatalf("SupersedeArtifact initial: %v", err)
 	}
 
-	firstSections := s.GetKnowledgeSections(artifact.ID)
+	firstSections := s.GetKnowledgeSections(t.Context(), artifact.ID)
 	if len(firstSections) != 1 {
 		t.Fatalf("expected 1 section, got %d", len(firstSections))
 	}
-	firstEvidence := s.GetKnowledgeEvidence(firstSections[0].ID)
+	firstEvidence := s.GetKnowledgeEvidence(t.Context(), firstSections[0].ID)
 	if len(firstEvidence) != 1 {
 		t.Fatalf("expected 1 evidence row, got %d", len(firstEvidence))
 	}
@@ -279,15 +279,15 @@ func TestSupersedeArtifactRegeneratesEvidenceIDs(t *testing.T) {
 		t.Fatal("expected persisted evidence id to be regenerated")
 	}
 
-	if err := s.SupersedeArtifact(artifact.ID, sections); err != nil {
+	if err := s.SupersedeArtifact(t.Context(), artifact.ID, sections); err != nil {
 		t.Fatalf("SupersedeArtifact repeat: %v", err)
 	}
 
-	secondSections := s.GetKnowledgeSections(artifact.ID)
+	secondSections := s.GetKnowledgeSections(t.Context(), artifact.ID)
 	if len(secondSections) != 1 {
 		t.Fatalf("expected 1 section after repeat, got %d", len(secondSections))
 	}
-	secondEvidence := s.GetKnowledgeEvidence(secondSections[0].ID)
+	secondEvidence := s.GetKnowledgeEvidence(t.Context(), secondSections[0].ID)
 	if len(secondEvidence) != 1 {
 		t.Fatalf("expected 1 evidence row after repeat, got %d", len(secondEvidence))
 	}
@@ -299,7 +299,7 @@ func TestSupersedeArtifactRegeneratesEvidenceIDs(t *testing.T) {
 func TestSetArtifactFailedPersistsErrorMetadata(t *testing.T) {
 	s := NewMemStore()
 
-	stored, err := s.StoreKnowledgeArtifact(&Artifact{
+	stored, err := s.StoreKnowledgeArtifact(t.Context(), &Artifact{
 		RepositoryID: "repo-1",
 		Type:         ArtifactWorkflowStory,
 		Audience:     AudienceDeveloper,
@@ -310,11 +310,11 @@ func TestSetArtifactFailedPersistsErrorMetadata(t *testing.T) {
 		t.Fatalf("StoreKnowledgeArtifact: %v", err)
 	}
 
-	if err := s.SetArtifactFailed(stored.ID, "LLM_EMPTY", "provider returned no content"); err != nil {
+	if err := s.SetArtifactFailed(t.Context(), stored.ID, "LLM_EMPTY", "provider returned no content"); err != nil {
 		t.Fatalf("SetArtifactFailed: %v", err)
 	}
 
-	fetched := s.GetKnowledgeArtifact(stored.ID)
+	fetched := s.GetKnowledgeArtifact(t.Context(), stored.ID)
 	if fetched.Status != StatusFailed {
 		t.Fatalf("expected status failed, got %s", fetched.Status)
 	}
@@ -329,7 +329,7 @@ func TestSetArtifactFailedPersistsErrorMetadata(t *testing.T) {
 func TestUpdateKnowledgeArtifactStatusClearsErrorMetadataOnRecovery(t *testing.T) {
 	s := NewMemStore()
 
-	stored, err := s.StoreKnowledgeArtifact(&Artifact{
+	stored, err := s.StoreKnowledgeArtifact(t.Context(), &Artifact{
 		RepositoryID: "repo-1",
 		Type:         ArtifactCodeTour,
 		Audience:     AudienceDeveloper,
@@ -340,14 +340,14 @@ func TestUpdateKnowledgeArtifactStatusClearsErrorMetadataOnRecovery(t *testing.T
 		t.Fatalf("StoreKnowledgeArtifact: %v", err)
 	}
 
-	if err := s.SetArtifactFailed(stored.ID, "WORKER_UNAVAILABLE", "dial tcp timeout"); err != nil {
+	if err := s.SetArtifactFailed(t.Context(), stored.ID, "WORKER_UNAVAILABLE", "dial tcp timeout"); err != nil {
 		t.Fatalf("SetArtifactFailed: %v", err)
 	}
-	if err := s.UpdateKnowledgeArtifactStatus(stored.ID, StatusReady); err != nil {
+	if err := s.UpdateKnowledgeArtifactStatus(t.Context(), stored.ID, StatusReady); err != nil {
 		t.Fatalf("UpdateKnowledgeArtifactStatus: %v", err)
 	}
 
-	fetched := s.GetKnowledgeArtifact(stored.ID)
+	fetched := s.GetKnowledgeArtifact(t.Context(), stored.ID)
 	if fetched.Status != StatusReady {
 		t.Fatalf("expected status ready, got %s", fetched.Status)
 	}
@@ -375,7 +375,7 @@ func TestArtifactsCanCoexistAcrossGenerationModes(t *testing.T) {
 		Scope:        ArtifactScope{ScopeType: ScopeRepository},
 	}
 
-	classic, created, err := s.ClaimArtifactWithMode(key, SourceRevision{CommitSHA: "a"}, GenerationModeClassic)
+	classic, created, err := s.ClaimArtifactWithMode(t.Context(), key, SourceRevision{CommitSHA: "a"}, GenerationModeClassic)
 	if err != nil {
 		t.Fatalf("ClaimArtifactWithMode classic: %v", err)
 	}
@@ -383,7 +383,7 @@ func TestArtifactsCanCoexistAcrossGenerationModes(t *testing.T) {
 		t.Fatal("expected classic artifact to be created")
 	}
 
-	understanding, created, err := s.ClaimArtifactWithMode(key, SourceRevision{CommitSHA: "a"}, GenerationModeUnderstandingFirst)
+	understanding, created, err := s.ClaimArtifactWithMode(t.Context(), key, SourceRevision{CommitSHA: "a"}, GenerationModeUnderstandingFirst)
 	if err != nil {
 		t.Fatalf("ClaimArtifactWithMode understanding_first: %v", err)
 	}
@@ -394,10 +394,10 @@ func TestArtifactsCanCoexistAcrossGenerationModes(t *testing.T) {
 		t.Fatal("expected distinct artifacts per generation mode")
 	}
 
-	if got := s.GetArtifactByKeyAndMode(key, GenerationModeClassic); got == nil || got.ID != classic.ID {
+	if got := s.GetArtifactByKeyAndMode(t.Context(), key, GenerationModeClassic); got == nil || got.ID != classic.ID {
 		t.Fatalf("expected classic lookup to return %q, got %#v", classic.ID, got)
 	}
-	if got := s.GetArtifactByKeyAndMode(key, GenerationModeUnderstandingFirst); got == nil || got.ID != understanding.ID {
+	if got := s.GetArtifactByKeyAndMode(t.Context(), key, GenerationModeUnderstandingFirst); got == nil || got.ID != understanding.ID {
 		t.Fatalf("expected understanding lookup to return %q, got %#v", understanding.ID, got)
 	}
 }
@@ -405,7 +405,7 @@ func TestArtifactsCanCoexistAcrossGenerationModes(t *testing.T) {
 func TestRepositoryUnderstandingLifecycle(t *testing.T) {
 	s := NewMemStore()
 
-	u, err := s.StoreRepositoryUnderstanding(&RepositoryUnderstanding{
+	u, err := s.StoreRepositoryUnderstanding(t.Context(), &RepositoryUnderstanding{
 		RepositoryID: "repo-1",
 		Scope:        (&ArtifactScope{ScopeType: ScopeRepository}).NormalizePtr(),
 		RevisionFP:   "rev-1",
@@ -423,7 +423,7 @@ func TestRepositoryUnderstandingLifecycle(t *testing.T) {
 		t.Fatal("expected repository understanding ID")
 	}
 
-	updated, err := s.StoreRepositoryUnderstanding(&RepositoryUnderstanding{
+	updated, err := s.StoreRepositoryUnderstanding(t.Context(), &RepositoryUnderstanding{
 		RepositoryID: "repo-1",
 		Scope:        (&ArtifactScope{ScopeType: ScopeRepository}).NormalizePtr(),
 		RevisionFP:   "rev-2",
@@ -445,7 +445,7 @@ func TestRepositoryUnderstandingLifecycle(t *testing.T) {
 		t.Fatalf("expected complete tree status, got %q", updated.TreeStatus)
 	}
 
-	artifact, err := s.StoreKnowledgeArtifact(&Artifact{
+	artifact, err := s.StoreKnowledgeArtifact(t.Context(), &Artifact{
 		RepositoryID: "repo-1",
 		Type:         ArtifactCliffNotes,
 		Audience:     AudienceDeveloper,
@@ -455,11 +455,11 @@ func TestRepositoryUnderstandingLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StoreKnowledgeArtifact: %v", err)
 	}
-	if err := s.AttachArtifactUnderstanding(artifact.ID, updated.ID, updated.RevisionFP); err != nil {
+	if err := s.AttachArtifactUnderstanding(t.Context(), artifact.ID, updated.ID, updated.RevisionFP); err != nil {
 		t.Fatalf("AttachArtifactUnderstanding: %v", err)
 	}
 
-	linked := s.GetKnowledgeArtifact(artifact.ID)
+	linked := s.GetKnowledgeArtifact(t.Context(), artifact.ID)
 	if linked.UnderstandingID != updated.ID {
 		t.Fatalf("expected linked understanding %q, got %q", updated.ID, linked.UnderstandingID)
 	}
@@ -481,7 +481,7 @@ func TestStoreRepositoryUnderstandingZerosProgressOnTerminalStage(t *testing.T) 
 	s := NewMemStore()
 	scope := (&ArtifactScope{ScopeType: ScopeRepository}).NormalizePtr()
 
-	running, err := s.StoreRepositoryUnderstanding(&RepositoryUnderstanding{
+	running, err := s.StoreRepositoryUnderstanding(t.Context(), &RepositoryUnderstanding{
 		RepositoryID:    "repo-progress",
 		Scope:           scope,
 		Stage:           UnderstandingBuildingTree,
@@ -506,7 +506,7 @@ func TestStoreRepositoryUnderstandingZerosProgressOnTerminalStage(t *testing.T) 
 	for _, stage := range terminalStages {
 		stage := stage
 		t.Run(string(stage), func(t *testing.T) {
-			out, err := s.StoreRepositoryUnderstanding(&RepositoryUnderstanding{
+			out, err := s.StoreRepositoryUnderstanding(t.Context(), &RepositoryUnderstanding{
 				RepositoryID:    "repo-progress",
 				Scope:           scope,
 				Stage:           stage,
@@ -524,10 +524,10 @@ func TestStoreRepositoryUnderstandingZerosProgressOnTerminalStage(t *testing.T) 
 					stage, out.Progress, out.ProgressPhase, out.ProgressMessage)
 			}
 			// Late heartbeat must not re-stamp progress on a terminal row.
-			if err := s.UpdateRepositoryUnderstandingProgress(out.ID, 0.5, "queued", "rebuilding"); err != nil {
+			if err := s.UpdateRepositoryUnderstandingProgress(t.Context(), out.ID, 0.5, "queued", "rebuilding"); err != nil {
 				t.Fatalf("UpdateRepositoryUnderstandingProgress: %v", err)
 			}
-			again := s.GetRepositoryUnderstanding("repo-progress", *scope)
+			again := s.GetRepositoryUnderstanding(t.Context(), "repo-progress", *scope)
 			if again.Progress != 0 || again.ProgressPhase != "" || again.ProgressMessage != "" {
 				t.Fatalf("late heartbeat re-stamped progress on stage %s: %+v", stage, again)
 			}
@@ -543,7 +543,7 @@ func TestUpdateKnowledgeArtifactProgressIgnoresTerminalArtifacts(t *testing.T) {
 	for _, status := range []ArtifactStatus{StatusReady, StatusFailed} {
 		t.Run(string(status), func(t *testing.T) {
 			s := NewMemStore()
-			stored, err := s.StoreKnowledgeArtifact(&Artifact{
+			stored, err := s.StoreKnowledgeArtifact(t.Context(), &Artifact{
 				RepositoryID: "repo-1",
 				Type:         ArtifactCliffNotes,
 				Audience:     AudienceDeveloper,
@@ -556,23 +556,23 @@ func TestUpdateKnowledgeArtifactProgressIgnoresTerminalArtifacts(t *testing.T) {
 			}
 			// Mid-flight progress write should land while still
 			// generating.
-			if err := s.UpdateKnowledgeArtifactProgressWithPhase(stored.ID, 0.6, "render", "rendering"); err != nil {
+			if err := s.UpdateKnowledgeArtifactProgressWithPhase(t.Context(), stored.ID, 0.6, "render", "rendering"); err != nil {
 				t.Fatalf("mid-flight progress: %v", err)
 			}
-			midFlight := s.GetKnowledgeArtifact(stored.ID)
+			midFlight := s.GetKnowledgeArtifact(t.Context(), stored.ID)
 			if midFlight.Progress != 0.6 || midFlight.ProgressPhase != "render" || midFlight.ProgressMessage != "rendering" {
 				t.Fatalf("expected mid-flight progress to land: %+v", midFlight)
 			}
 			// Now flip to terminal and try a late write.
-			if err := s.UpdateKnowledgeArtifactStatus(stored.ID, status); err != nil {
+			if err := s.UpdateKnowledgeArtifactStatus(t.Context(), stored.ID, status); err != nil {
 				t.Fatalf("UpdateKnowledgeArtifactStatus: %v", err)
 			}
-			terminal := s.GetKnowledgeArtifact(stored.ID)
+			terminal := s.GetKnowledgeArtifact(t.Context(), stored.ID)
 			beforeLate := *terminal
-			if err := s.UpdateKnowledgeArtifactProgressWithPhase(stored.ID, 0.42, "queued", "Late stream-driver flush"); err != nil {
+			if err := s.UpdateKnowledgeArtifactProgressWithPhase(t.Context(), stored.ID, 0.42, "queued", "Late stream-driver flush"); err != nil {
 				t.Fatalf("late progress should be a silent no-op, got: %v", err)
 			}
-			after := s.GetKnowledgeArtifact(stored.ID)
+			after := s.GetKnowledgeArtifact(t.Context(), stored.ID)
 			if after.Progress != beforeLate.Progress || after.ProgressPhase != beforeLate.ProgressPhase || after.ProgressMessage != beforeLate.ProgressMessage {
 				t.Fatalf("late progress re-stamped terminal artifact (status %s):\nbefore: %+v\nafter:  %+v", status, beforeLate, *after)
 			}
@@ -598,7 +598,7 @@ func TestMarkRepositoryUnderstandingFailed(t *testing.T) {
 			t.Parallel()
 			s := NewMemStore()
 			repoID := "repo-fail-" + string(startStage)
-			row, err := s.StoreRepositoryUnderstanding(&RepositoryUnderstanding{
+			row, err := s.StoreRepositoryUnderstanding(t.Context(), &RepositoryUnderstanding{
 				RepositoryID:    repoID,
 				Scope:           scope,
 				Stage:           startStage,
@@ -611,11 +611,11 @@ func TestMarkRepositoryUnderstandingFailed(t *testing.T) {
 				t.Fatalf("seed %s: err=%v row=%v", startStage, err, row)
 			}
 
-			if err := s.MarkRepositoryUnderstandingFailed(row.ID, errCode, errMsg); err != nil {
+			if err := s.MarkRepositoryUnderstandingFailed(t.Context(), row.ID, errCode, errMsg); err != nil {
 				t.Fatalf("MarkRepositoryUnderstandingFailed from %s: %v", startStage, err)
 			}
 
-			got := s.GetRepositoryUnderstanding(repoID, *scope)
+			got := s.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
 			if got == nil {
 				t.Fatal("GetRepositoryUnderstanding after failure returned nil")
 			}
@@ -634,10 +634,10 @@ func TestMarkRepositoryUnderstandingFailed(t *testing.T) {
 			}
 
 			// Idempotent re-fire: calling again on FAILED must be a no-op.
-			if err := s.MarkRepositoryUnderstandingFailed(row.ID, "SECOND_CALL", "should be ignored"); err != nil {
+			if err := s.MarkRepositoryUnderstandingFailed(t.Context(), row.ID, "SECOND_CALL", "should be ignored"); err != nil {
 				t.Fatalf("idempotent re-fire: %v", err)
 			}
-			again := s.GetRepositoryUnderstanding(repoID, *scope)
+			again := s.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
 			if again.ErrorCode != errCode {
 				t.Fatalf("idempotent re-fire overwrote error_code: got %q", again.ErrorCode)
 			}
@@ -648,7 +648,7 @@ func TestMarkRepositoryUnderstandingFailed(t *testing.T) {
 		t.Parallel()
 		s := NewMemStore()
 		repoID := "repo-fail-noop-ready"
-		row, err := s.StoreRepositoryUnderstanding(&RepositoryUnderstanding{
+		row, err := s.StoreRepositoryUnderstanding(t.Context(), &RepositoryUnderstanding{
 			RepositoryID: repoID,
 			Scope:        scope,
 			Stage:        UnderstandingReady,
@@ -658,11 +658,11 @@ func TestMarkRepositoryUnderstandingFailed(t *testing.T) {
 			t.Fatalf("seed ready: err=%v row=%v", err, row)
 		}
 
-		if err := s.MarkRepositoryUnderstandingFailed(row.ID, errCode, errMsg); err != nil {
+		if err := s.MarkRepositoryUnderstandingFailed(t.Context(), row.ID, errCode, errMsg); err != nil {
 			t.Fatalf("MarkRepositoryUnderstandingFailed on READY: %v", err)
 		}
 
-		got := s.GetRepositoryUnderstanding(repoID, *scope)
+		got := s.GetRepositoryUnderstanding(t.Context(), repoID, *scope)
 		if got == nil {
 			t.Fatal("post-no-op lookup returned nil")
 		}
@@ -679,7 +679,7 @@ func TestMarkRepositoryUnderstandingFailed(t *testing.T) {
 		t.Parallel()
 		s := NewMemStore()
 		// A non-existent ID must return nil (no-op), not an error.
-		if err := s.MarkRepositoryUnderstandingFailed("nonexistent", errCode, errMsg); err != nil {
+		if err := s.MarkRepositoryUnderstandingFailed(t.Context(), "nonexistent", errCode, errMsg); err != nil {
 			t.Fatalf("expected no-op for missing ID, got error: %v", err)
 		}
 	})

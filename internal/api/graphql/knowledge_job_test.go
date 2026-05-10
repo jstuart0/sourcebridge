@@ -26,7 +26,7 @@ func TestEnqueueKnowledgeJobCreatesQueuedKnowledgeJob(t *testing.T) {
 		Depth:        knowledge.DepthMedium,
 		Scope:        knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository},
 	}
-	artifact, created, err := knowledgeStore.ClaimArtifact(key, knowledge.SourceRevision{})
+	artifact, created, err := knowledgeStore.ClaimArtifact(t.Context(), key, knowledge.SourceRevision{})
 	if err != nil {
 		t.Fatalf("ClaimArtifact: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestEnqueueKnowledgeJobCreatesQueuedKnowledgeJob(t *testing.T) {
 
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		job = jobStore.GetByID(job.ID)
+		job = jobStore.GetByID(t.Context(), job.ID)
 		if job != nil && job.Status == llm.StatusReady && job.SnapshotBytes == 1234 {
 			break
 		}
@@ -118,7 +118,7 @@ func TestKnowledgeJobsShareGlobalConcurrencyGate(t *testing.T) {
 			Depth:        knowledge.DepthMedium,
 			Scope:        knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository},
 		}
-		artifact, created, err := knowledgeStore.ClaimArtifact(key, knowledge.SourceRevision{})
+		artifact, created, err := knowledgeStore.ClaimArtifact(t.Context(), key, knowledge.SourceRevision{})
 		if err != nil {
 			t.Fatalf("ClaimArtifact(%s): %v", artifactType, err)
 		}
@@ -193,7 +193,7 @@ func TestRepositoryCliffNotesJobsDoNotAutoRetry(t *testing.T) {
 		Depth:        knowledge.DepthMedium,
 		Scope:        knowledge.ArtifactScope{ScopeType: knowledge.ScopeRepository},
 	}
-	artifact, created, err := knowledgeStore.ClaimArtifact(key, knowledge.SourceRevision{})
+	artifact, created, err := knowledgeStore.ClaimArtifact(t.Context(), key, knowledge.SourceRevision{})
 	if err != nil {
 		t.Fatalf("ClaimArtifact: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestQueuedKnowledgeJobsHeartbeatWhileWaitingForGate(t *testing.T) {
 
 	knowledgeStore := knowledge.NewMemStore()
 	jobStore := llm.NewMemStore()
-	artifact, created, err := knowledgeStore.ClaimArtifact(knowledge.ArtifactKey{
+	artifact, created, err := knowledgeStore.ClaimArtifact(t.Context(), knowledge.ArtifactKey{
 		RepositoryID: "repo-1",
 		Type:         knowledge.ArtifactCliffNotes,
 		Audience:     knowledge.AudienceDeveloper,
@@ -257,7 +257,7 @@ func TestQueuedKnowledgeJobsHeartbeatWhileWaitingForGate(t *testing.T) {
 		t.Fatal("expected fresh artifact claim")
 	}
 
-	job, err := jobStore.Create(&llm.Job{
+	job, err := jobStore.Create(t.Context(), &llm.Job{
 		ID:         "job-1",
 		Subsystem:  llm.SubsystemKnowledge,
 		JobType:    "cliff_notes",
@@ -276,14 +276,14 @@ func TestQueuedKnowledgeJobsHeartbeatWhileWaitingForGate(t *testing.T) {
 	stop := startKnowledgeQueueHeartbeat(ctx, testRuntime{
 		jobID: "job-1",
 		setProgress: func(progress float64, phase, message string) {
-			_ = jobStore.SetProgress("job-1", progress, phase, message, 0)
+			_ = jobStore.SetProgress(t.Context(), "job-1", progress, phase, message, 0)
 		},
 	}, artifact.ID, knowledgeStore)
 	defer stop()
 
 	time.Sleep(100 * time.Millisecond)
 
-	job = jobStore.GetByID("job-1")
+	job = jobStore.GetByID(t.Context(), "job-1")
 	if job == nil {
 		t.Fatal("expected heartbeat job to still exist")
 	}
@@ -293,7 +293,7 @@ func TestQueuedKnowledgeJobsHeartbeatWhileWaitingForGate(t *testing.T) {
 	if job.ProgressPhase != "queued" {
 		t.Fatalf("expected queued progress phase while waiting, got %q", job.ProgressPhase)
 	}
-	artifact = knowledgeStore.GetKnowledgeArtifact(artifact.ID)
+	artifact = knowledgeStore.GetKnowledgeArtifact(t.Context(), artifact.ID)
 	if artifact == nil {
 		t.Fatal("expected artifact to still exist")
 	}

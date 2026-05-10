@@ -65,7 +65,7 @@ func TestCheckRepoAccessGraphQLForbiddenWhenAbsent(t *testing.T) {
 // when the repository is present in the (tenant-filtered) store.
 func TestCheckRepoAccessGraphQLNilWhenPresent(t *testing.T) {
 	s := graph.NewStore()
-	repo, err := s.CreateRepository("test-repo", "/tmp/test-repo")
+	repo, err := s.CreateRepository(t.Context(), "test-repo", "/tmp/test-repo")
 	if err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestAskMutationForbiddenBeforeQA(t *testing.T) {
 // "forbidden" access-denial error.
 func TestAskMutationPassesWhenRepoPresent(t *testing.T) {
 	s := graph.NewStore()
-	repo, err := s.CreateRepository("test-repo", "/tmp/test-repo")
+	repo, err := s.CreateRepository(t.Context(), "test-repo", "/tmp/test-repo")
 	if err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestDiscussForbiddenBeforeQA(t *testing.T) {
 // gets past the access check when the repository is accessible.
 func TestDiscussPassesWhenRepoPresent(t *testing.T) {
 	s := graph.NewStore()
-	repo, err := s.CreateRepository("test-repo", "/tmp/test-repo")
+	repo, err := s.CreateRepository(t.Context(), "test-repo", "/tmp/test-repo")
 	if err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}

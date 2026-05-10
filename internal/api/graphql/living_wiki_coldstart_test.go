@@ -115,7 +115,7 @@ func (e *csErrorTemplate) Generate(_ context.Context, _ templates.GenerateInput)
 // csStaticSymbolGraph supplies one package to the taxonomy resolver.
 type csStaticSymbolGraph struct{}
 
-func (csStaticSymbolGraph) ExportedSymbols(_ string) ([]templates.Symbol, error) {
+func (csStaticSymbolGraph) ExportedSymbols(_ context.Context, _ string) ([]templates.Symbol, error) {
 	return []templates.Symbol{
 		{
 			Package:    "internal/auth",
@@ -668,8 +668,8 @@ type stubClusterStore struct {
 	clusters []clustering.Cluster
 }
 
-func (s *stubClusterStore) GetCallEdges(_ string) []graphstore.CallEdge { return nil }
-func (s *stubClusterStore) GetSymbolsByIDs(_ []string) map[string]*graphstore.StoredSymbol {
+func (s *stubClusterStore) GetCallEdges(_ context.Context, _ string) []graphstore.CallEdge { return nil }
+func (s *stubClusterStore) GetSymbolsByIDs(_ context.Context, _ []string) map[string]*graphstore.StoredSymbol {
 	return nil
 }
 func (s *stubClusterStore) GetRepoEdgeHash(_ context.Context, _ string) (string, error) {
@@ -763,7 +763,7 @@ func TestAttachKnowledgeArtifacts_FreshArtifactsAttached(t *testing.T) {
 	ks := knowledge.NewMemStore()
 
 	// Store a repo-level understanding with a known revisionFp.
-	_, err := ks.StoreRepositoryUnderstanding(&knowledge.RepositoryUnderstanding{
+	_, err := ks.StoreRepositoryUnderstanding(t.Context(), &knowledge.RepositoryUnderstanding{
 		RepositoryID: repoID,
 		RevisionFP:   revFP,
 		Stage:        knowledge.UnderstandingReady,
@@ -774,7 +774,7 @@ func TestAttachKnowledgeArtifacts_FreshArtifactsAttached(t *testing.T) {
 	}
 
 	// Store a ready module-scoped artifact matching revFP.
-	art, err := ks.StoreKnowledgeArtifact(&knowledge.Artifact{
+	art, err := ks.StoreKnowledgeArtifact(t.Context(), &knowledge.Artifact{
 		RepositoryID:            repoID,
 		Type:                    knowledge.ArtifactCliffNotes,
 		Audience:                knowledge.AudienceDeveloper,
@@ -792,7 +792,7 @@ func TestAttachKnowledgeArtifacts_FreshArtifactsAttached(t *testing.T) {
 		t.Fatalf("StoreKnowledgeArtifact: %v", err)
 	}
 	// Store a section for this artifact.
-	if err := ks.StoreKnowledgeSections(art.ID, []knowledge.Section{
+	if err := ks.StoreKnowledgeSections(t.Context(), art.ID, []knowledge.Section{
 		{
 			Title:      "Overview",
 			Content:    "The auth package provides JWT validation middleware.",
@@ -852,7 +852,7 @@ func TestAttachKnowledgeArtifacts_StaleArtifactFiltered(t *testing.T) {
 	ks := knowledge.NewMemStore()
 
 	// Current understanding has a different revisionFp than the artifact.
-	_, err := ks.StoreRepositoryUnderstanding(&knowledge.RepositoryUnderstanding{
+	_, err := ks.StoreRepositoryUnderstanding(t.Context(), &knowledge.RepositoryUnderstanding{
 		RepositoryID: repoID,
 		RevisionFP:   currentRevFP,
 		Stage:        knowledge.UnderstandingReady,
@@ -863,7 +863,7 @@ func TestAttachKnowledgeArtifacts_StaleArtifactFiltered(t *testing.T) {
 	}
 
 	// Store an artifact with the old (stale) revisionFp.
-	_, err = ks.StoreKnowledgeArtifact(&knowledge.Artifact{
+	_, err = ks.StoreKnowledgeArtifact(t.Context(), &knowledge.Artifact{
 		RepositoryID:            repoID,
 		Type:                    knowledge.ArtifactCliffNotes,
 		Audience:                knowledge.AudienceDeveloper,
@@ -1928,7 +1928,7 @@ func TestNewRegistryTierFunc_NormalizesModelCaseAndWhitespace(t *testing.T) {
 
 	store := comprehension.NewMemStore()
 	// Register under canonical lowercase key.
-	if err := store.SetModelCapabilities(&comprehension.ModelCapabilities{
+	if err := store.SetModelCapabilities(t.Context(), &comprehension.ModelCapabilities{
 		ModelID:         "qwen3:32b",
 		Provider:        "ollama",
 		QualityGateTier: modeltier.TierLocal,

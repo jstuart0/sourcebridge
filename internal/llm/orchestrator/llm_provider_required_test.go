@@ -62,7 +62,7 @@ func TestEnqueue_LLMBackedEmptyProvider_ReturnsErrLLMProviderRequired(t *testing
 	}
 
 	// No job persisted under this target key.
-	if existing := orch.store.GetActiveByTargetKey("repo-1:cliff_notes:empty-provider"); existing != nil {
+	if existing := orch.store.GetActiveByTargetKey(context.Background(), "repo-1:cliff_notes:empty-provider"); existing != nil {
 		t.Errorf("expected no active job for rejected target_key; found %+v", existing)
 	}
 
@@ -130,7 +130,7 @@ func TestEnqueue_LLMBackedEmptyProvider_DoesNotDisturbExistingInflightClaim(t *t
 	}
 
 	// And the existing job's store row is also undisturbed.
-	stored := orch.store.GetByID(first.ID)
+	stored := orch.store.GetByID(context.Background(), first.ID)
 	if stored == nil {
 		t.Fatal("expected first job's store row to still exist")
 	}

@@ -92,7 +92,7 @@ func newReviewHarnessWithFiles(t *testing.T, files []string) (*mcpTestHarness, s
 		RepoPath: "/tmp/review-test-repo-" + t.Name(),
 		Files:    fileResults,
 	}
-	repo, err := h.store.StoreIndexResult(result)
+	repo, err := h.store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -597,7 +597,7 @@ func TestMCP_GetReviewForDiff_CommitRange_Correctness(t *testing.T) {
 
 	// Seed a repo whose clone path points to our git checkout, with both files indexed.
 	h, repoID := newReviewHarnessWithFiles(t, []string{"first.go", "second.go"})
-	h.store.UpdateRepositoryMeta(repoID, graphstore.RepositoryMeta{
+	h.store.UpdateRepositoryMeta(t.Context(), repoID, graphstore.RepositoryMeta{
 		ClonePath: repoDir,
 	})
 	sess := h.createSession()

@@ -21,15 +21,15 @@ import (
 
 type fakeArtifactLookup struct{ block string }
 
-func (f *fakeArtifactLookup) ArtifactContext(id string) string { return f.block }
+func (f *fakeArtifactLookup) ArtifactContext(_ context.Context, id string) string { return f.block }
 
 type fakeRequirementLookup struct {
 	byID    map[string]string
 	bySymID map[string][]string
 }
 
-func (f *fakeRequirementLookup) RequirementContext(id string) string { return f.byID[id] }
-func (f *fakeRequirementLookup) RequirementLabelsForSymbols(ids []string) []string {
+func (f *fakeRequirementLookup) RequirementContext(_ context.Context, id string) string { return f.byID[id] }
+func (f *fakeRequirementLookup) RequirementLabelsForSymbols(_ context.Context, ids []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, id := range ids {
@@ -51,12 +51,16 @@ type fakeSymbolLookup struct {
 	details     map[string]SymbolDetail
 }
 
-func (f *fakeSymbolLookup) SymbolContext(id string) string  { return f.byID[id] }
-func (f *fakeSymbolLookup) SymbolFilePath(id string) string { return f.filePathsBy[id] }
-func (f *fakeSymbolLookup) SymbolsInFile(repoID, filePath string) []SymbolContextRef {
+func (f *fakeSymbolLookup) SymbolContext(ctx context.Context, id string) string {
+	return f.byID[id]
+}
+func (f *fakeSymbolLookup) SymbolFilePath(ctx context.Context, id string) string {
+	return f.filePathsBy[id]
+}
+func (f *fakeSymbolLookup) SymbolsInFile(ctx context.Context, repoID, filePath string) []SymbolContextRef {
 	return f.inFile[filePath]
 }
-func (f *fakeSymbolLookup) SymbolDetails(id string) (SymbolDetail, bool) {
+func (f *fakeSymbolLookup) SymbolDetails(ctx context.Context, id string) (SymbolDetail, bool) {
 	if f.details == nil {
 		return SymbolDetail{}, false
 	}
@@ -74,7 +78,7 @@ func (f *fakeSymbolLookup) SymbolDetails(id string) (SymbolDetail, bool) {
 
 type fakeFileReader struct{ files map[string]string }
 
-func (f *fakeFileReader) ReadRepoFile(repoID, filePath string) (string, error) {
+func (f *fakeFileReader) ReadRepoFile(ctx context.Context, repoID, filePath string) (string, error) {
 	if s, ok := f.files[filePath]; ok {
 		return s, nil
 	}

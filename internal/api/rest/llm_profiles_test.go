@@ -882,7 +882,7 @@ func TestHandler_ActiveLLMJobCount_FiltersByLLMProvider(t *testing.T) {
 		{ID: "j4", Status: llmgo_StatusReady, LLMProvider: "openai", Subsystem: llmgo_SubsystemKnowledge, JobType: "x"},
 		{ID: "j5", Status: llmgo_StatusFailed, LLMProvider: "ollama", Subsystem: llmgo_SubsystemKnowledge, JobType: "x"},
 	} {
-		_, _ = store.Create(j)
+		_, _ = store.Create(t.Context(), j)
 	}
 	s := newServerWithProfileStore(t, fake)
 	s.jobStore = store

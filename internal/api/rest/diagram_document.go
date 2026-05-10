@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,13 +14,19 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sourcebridge/sourcebridge/internal/architecture"
+	"github.com/sourcebridge/sourcebridge/internal/db"
 )
 
 type diagramDocumentPersistence interface {
-	StoreDiagramDocument(doc *architecture.DiagramDocument) error
-	GetDiagramDocument(repoID string, sourceKinds ...architecture.SourceKind) *architecture.DiagramDocument
-	DeleteDiagramDocument(repoID string, sourceKind architecture.SourceKind) error
+	StoreDiagramDocument(ctx context.Context, doc *architecture.DiagramDocument) error
+	GetDiagramDocument(ctx context.Context, repoID string, sourceKinds ...architecture.SourceKind) *architecture.DiagramDocument
+	DeleteDiagramDocument(ctx context.Context, repoID string, sourceKind architecture.SourceKind) error
 }
+
+// Verify at compile time that *db.SurrealStore satisfies diagramDocumentPersistence.
+// This assertion lives in package rest (not db) because diagramDocumentPersistence is
+// unexported in rest; package db cannot name it.
+var _ diagramDocumentPersistence = (*db.SurrealStore)(nil)
 
 // diagramDocumentStore is an in-memory fallback for diagram documents.
 type diagramDocumentStore struct {
@@ -35,7 +42,7 @@ func diagramKey(repoID string, sourceKind architecture.SourceKind) string {
 	return repoID + ":" + string(sourceKind)
 }
 
-func (s *diagramDocumentStore) StoreDiagramDocument(doc *architecture.DiagramDocument) error {
+func (s *diagramDocumentStore) StoreDiagramDocument(_ context.Context, doc *architecture.DiagramDocument) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cloned := *doc
@@ -43,7 +50,7 @@ func (s *diagramDocumentStore) StoreDiagramDocument(doc *architecture.DiagramDoc
 	return nil
 }
 
-func (s *diagramDocumentStore) GetDiagramDocument(repoID string, sourceKinds ...architecture.SourceKind) *architecture.DiagramDocument {
+func (s *diagramDocumentStore) GetDiagramDocument(_ context.Context, repoID string, sourceKinds ...architecture.SourceKind) *architecture.DiagramDocument {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, sourceKind := range sourceKinds {
@@ -55,7 +62,7 @@ func (s *diagramDocumentStore) GetDiagramDocument(repoID string, sourceKinds ...
 	return nil
 }
 
-func (s *diagramDocumentStore) DeleteDiagramDocument(repoID string, sourceKind architecture.SourceKind) error {
+func (s *diagramDocumentStore) DeleteDiagramDocument(_ context.Context, repoID string, sourceKind architecture.SourceKind) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.docs, diagramKey(repoID, sourceKind))
@@ -80,7 +87,7 @@ func (s *Server) handleGetStructuredDiagram(w http.ResponseWriter, r *http.Reque
 	store := s.diagramStoreForRequest(r)
 
 	// Check for a user-edited version first
-	if doc := store.GetDiagramDocument(repoID, architecture.SourceUserEdited); doc != nil {
+	if doc := store.GetDiagramDocument(r.Context(), repoID, architecture.SourceUserEdited); doc != nil {
 		respondJSON(w, http.StatusOK, doc)
 		return
 	}
@@ -115,7 +122,7 @@ func (s *Server) handleGetDiagramDocument(w http.ResponseWriter, r *http.Request
 	}
 
 	store := s.diagramStoreForRequest(r)
-	if doc := store.GetDiagramDocument(repoID,
+	if doc := store.GetDiagramDocument(r.Context(), repoID,
 		architecture.SourceUserEdited,
 		architecture.SourceImportedMermaid,
 		architecture.SourceAIGenerated,
@@ -177,7 +184,7 @@ func (s *Server) handleImportMermaid(w http.ResponseWriter, r *http.Request) {
 	normResult := architecture.Normalize(doc, mode)
 	generatedMermaid := doc.GenerateMermaid()
 
-	if err := s.diagramStoreForRequest(r).StoreDiagramDocument(doc); err != nil {
+	if err := s.diagramStoreForRequest(r).StoreDiagramDocument(r.Context(), doc); err != nil {
 		http.Error(w, `{"error":"failed to store diagram"}`, http.StatusInternalServerError)
 		return
 	}
@@ -193,7 +200,7 @@ func (s *Server) handleImportMermaid(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleExportDiagramMermaid(w http.ResponseWriter, r *http.Request) {
 	repoID := chi.URLParam(r, "repoId")
 	depth, maxNodes := parseDiagramQueryParams(r)
-	doc := s.diagramStoreForRequest(r).GetDiagramDocument(repoID,
+	doc := s.diagramStoreForRequest(r).GetDiagramDocument(r.Context(), repoID,
 		architecture.SourceUserEdited,
 		architecture.SourceImportedMermaid,
 		architecture.SourceAIGenerated,
@@ -218,7 +225,7 @@ func (s *Server) handleExportDiagramMermaid(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleExportDiagramJSON(w http.ResponseWriter, r *http.Request) {
 	repoID := chi.URLParam(r, "repoId")
 	depth, maxNodes := parseDiagramQueryParams(r)
-	doc := s.diagramStoreForRequest(r).GetDiagramDocument(repoID,
+	doc := s.diagramStoreForRequest(r).GetDiagramDocument(r.Context(), repoID,
 		architecture.SourceUserEdited,
 		architecture.SourceImportedMermaid,
 		architecture.SourceAIGenerated,
@@ -250,7 +257,7 @@ func (s *Server) handlePutDiagramDocument(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"repoId is required"}`, http.StatusBadRequest)
 		return
 	}
-	if s.getStore(r).GetRepository(repoID) == nil {
+	if s.getStore(r).GetRepository(r.Context(), repoID) == nil {
 		http.Error(w, `{"error":"repository not found"}`, http.StatusNotFound)
 		return
 	}
@@ -262,7 +269,7 @@ func (s *Server) handlePutDiagramDocument(w http.ResponseWriter, r *http.Request
 	}
 
 	now := time.Now().UTC()
-	existing := s.diagramStoreForRequest(r).GetDiagramDocument(repoID, architecture.SourceUserEdited)
+	existing := s.diagramStoreForRequest(r).GetDiagramDocument(r.Context(), repoID, architecture.SourceUserEdited)
 	if existing != nil && !existing.CreatedAt.IsZero() {
 		doc.CreatedAt = existing.CreatedAt
 	} else if doc.CreatedAt.IsZero() {
@@ -275,7 +282,7 @@ func (s *Server) handlePutDiagramDocument(w http.ResponseWriter, r *http.Request
 		doc.ID = "user-" + repoID
 	}
 
-	if err := s.diagramStoreForRequest(r).StoreDiagramDocument(&doc); err != nil {
+	if err := s.diagramStoreForRequest(r).StoreDiagramDocument(r.Context(), &doc); err != nil {
 		http.Error(w, `{"error":"failed to store diagram"}`, http.StatusInternalServerError)
 		return
 	}
@@ -291,7 +298,7 @@ func (s *Server) handleDeleteDiagramDocument(w http.ResponseWriter, r *http.Requ
 		http.Error(w, `{"error":"repoId is required"}`, http.StatusBadRequest)
 		return
 	}
-	if err := s.diagramStoreForRequest(r).DeleteDiagramDocument(repoID, architecture.SourceUserEdited); err != nil {
+	if err := s.diagramStoreForRequest(r).DeleteDiagramDocument(r.Context(), repoID, architecture.SourceUserEdited); err != nil {
 		http.Error(w, `{"error":"failed to delete diagram"}`, http.StatusInternalServerError)
 		return
 	}
@@ -316,7 +323,7 @@ func parseDiagramQueryParams(r *http.Request) (depth int, maxNodes int) {
 
 func (s *Server) buildDeterministicDiagramDoc(r *http.Request, repoID string, depth int, maxNodes int) (*architecture.DiagramDocument, error) {
 	store := s.getStore(r)
-	result, err := architecture.BuildDiagram(store, architecture.DiagramOpts{
+	result, err := architecture.BuildDiagram(r.Context(), store, architecture.DiagramOpts{
 		RepoID:      repoID,
 		Level:       "MODULE",
 		ModuleDepth: depth,

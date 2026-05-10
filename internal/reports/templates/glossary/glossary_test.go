@@ -22,7 +22,7 @@ type stubSymbolGraph struct {
 	symbols []templates.Symbol
 }
 
-func (s *stubSymbolGraph) ExportedSymbols(_ string) ([]templates.Symbol, error) {
+func (s *stubSymbolGraph) ExportedSymbols(_ context.Context, _ string) ([]templates.Symbol, error) {
 	return s.symbols, nil
 }
 

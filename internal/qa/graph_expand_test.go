@@ -3,19 +3,22 @@
 
 package qa
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 type fakeStore struct {
 	callers map[string][]string
 	callees map[string][]string
 }
 
-func (f *fakeStore) GetCallers(id string) []string { return f.callers[id] }
-func (f *fakeStore) GetCallees(id string) []string { return f.callees[id] }
+func (f *fakeStore) GetCallers(_ context.Context, id string) []string { return f.callers[id] }
+func (f *fakeStore) GetCallees(_ context.Context, id string) []string { return f.callees[id] }
 
 type fakeLookup map[string]GraphNeighbor
 
-func (f fakeLookup) Lookup(id string) (string, string, string, int, int, bool) {
+func (f fakeLookup) Lookup(_ context.Context, id string) (string, string, string, int, int, bool) {
 	n, ok := f[id]
 	if !ok {
 		return "", "", "", 0, 0, false
@@ -32,7 +35,7 @@ func TestGraphExpander_Callers(t *testing.T) {
 		"caller-b": {QualifiedName: "pkg.B", FilePath: "b.go", StartLine: 30, EndLine: 40, Language: "go"},
 	}
 	g := NewGraphExpander(store, lookup)
-	got := g.GetCallers("focal")
+	got := g.GetCallers(context.Background(), "focal")
 	if len(got) != 2 {
 		t.Fatalf("expected 2 resolved neighbors (unknown skipped), got %d", len(got))
 	}
@@ -49,7 +52,7 @@ func TestGraphExpander_Callees(t *testing.T) {
 		"callee": {QualifiedName: "pkg.C", FilePath: "c.go"},
 	}
 	g := NewGraphExpander(store, lookup)
-	got := g.GetCallees("focal")
+	got := g.GetCallees(context.Background(), "focal")
 	if len(got) != 1 || got[0].QualifiedName != "pkg.C" {
 		t.Errorf("unexpected callees: %+v", got)
 	}
@@ -57,10 +60,10 @@ func TestGraphExpander_Callees(t *testing.T) {
 
 func TestGraphExpander_NilInputs(t *testing.T) {
 	var g GraphExpander = NewGraphExpander(nil, nil)
-	if got := g.GetCallers("x"); got != nil {
+	if got := g.GetCallers(context.Background(), "x"); got != nil {
 		t.Errorf("nil store should return nil, got %v", got)
 	}
-	if got := g.GetCallees("x"); got != nil {
+	if got := g.GetCallees(context.Background(), "x"); got != nil {
 		t.Errorf("nil store should return nil, got %v", got)
 	}
 }
@@ -77,7 +80,7 @@ func TestCollectGraphNeighbors_Caps(t *testing.T) {
 		callees: map[string][]string{"f": ids},
 	}
 	g := NewGraphExpander(store, lookup)
-	out := collectGraphNeighbors(g, "f", 5)
+	out := collectGraphNeighbors(context.Background(), g, "f", 5)
 	if len(out) != 10 {
 		t.Errorf("expected 5 callers + 5 callees = 10, got %d", len(out))
 	}
@@ -85,7 +88,7 @@ func TestCollectGraphNeighbors_Caps(t *testing.T) {
 
 func TestCollectGraphNeighbors_NoFocal(t *testing.T) {
 	g := NewGraphExpander(&fakeStore{}, fakeLookup{})
-	if n := collectGraphNeighbors(g, "", 5); n != nil {
+	if n := collectGraphNeighbors(context.Background(), g, "", 5); n != nil {
 		t.Errorf("expected nil when focal missing, got %v", n)
 	}
 }

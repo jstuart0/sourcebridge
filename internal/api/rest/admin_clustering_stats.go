@@ -35,7 +35,7 @@ func (s *Server) handleClusteringStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	store := s.getStore(r)
-	repos := store.ListRepositories()
+	repos := store.ListRepositories(r.Context())
 
 	stats := make([]clusteringRepoStats, 0, len(repos))
 	for _, repo := range repos {

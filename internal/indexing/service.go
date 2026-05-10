@@ -112,7 +112,7 @@ func (s *Service) Import(ctx context.Context, spec ImportSpec) (*graphstore.Repo
 	// surfaces converge on the same record.
 	if isRemote {
 		normalized := NormalizeGitURL(spec.PathOrURL)
-		for _, existing := range s.store.ListRepositories() {
+		for _, existing := range s.store.ListRepositories(ctx) {
 			if existing.RemoteURL == normalized {
 				return existing, nil
 			}
@@ -120,13 +120,13 @@ func (s *Service) Import(ctx context.Context, spec ImportSpec) (*graphstore.Repo
 	} else {
 		abs, err := filepath.Abs(spec.PathOrURL)
 		if err == nil {
-			if existing := s.store.GetRepositoryByPath(abs); existing != nil {
+			if existing := s.store.GetRepositoryByPath(ctx, abs); existing != nil {
 				return existing, nil
 			}
 		}
 	}
 
-	repo, err := s.store.CreateRepository(name, spec.PathOrURL)
+	repo, err := s.store.CreateRepository(ctx, name, spec.PathOrURL)
 	if err != nil {
 		return nil, fmt.Errorf("creating repository: %w", err)
 	}
@@ -138,7 +138,7 @@ func (s *Service) Import(ctx context.Context, spec ImportSpec) (*graphstore.Repo
 			meta.AuthToken = *spec.Token
 		}
 	}
-	s.store.UpdateRepositoryMeta(repo.ID, meta)
+	s.store.UpdateRepositoryMeta(ctx, repo.ID, meta)
 
 	// Background clone + index.
 	go s.runImport(repo.ID, name, spec.PathOrURL, isRemote, spec.Token)
@@ -150,7 +150,7 @@ func (s *Service) Import(ctx context.Context, spec ImportSpec) (*graphstore.Repo
 // repository's stored ClonePath / Path to decide what to index; for
 // remote repos it re-clones into the cache dir if missing.
 func (s *Service) Reindex(ctx context.Context, repoID string) error {
-	repo := s.store.GetRepository(repoID)
+	repo := s.store.GetRepository(ctx, repoID)
 	if repo == nil {
 		return fmt.Errorf("repository not found: %s", repoID)
 	}
@@ -192,7 +192,7 @@ func (s *Service) runImport(repoID, repoName, repoPath string, isRemote bool, to
 				// key). Fail closed — same contract the GraphQL clone
 				// path enforces. Do NOT silently downgrade to an
 				// empty token (the legacy bug).
-				s.store.SetRepositoryError(repoID, fmt.Errorf("git credentials integrity failure: %w", credsErr))
+				s.store.SetRepositoryError(ctx, repoID, fmt.Errorf("git credentials integrity failure: %w", credsErr))
 				return
 			}
 			if pullToken == "" {
@@ -202,20 +202,20 @@ func (s *Service) runImport(repoID, repoName, repoPath string, isRemote bool, to
 		}
 
 		if err := os.MkdirAll(filepath.Dir(cloneDir), 0o755); err != nil {
-			s.store.SetRepositoryError(repoID, fmt.Errorf("creating clone dir: %w", err))
+			s.store.SetRepositoryError(ctx, repoID, fmt.Errorf("creating clone dir: %w", err))
 			return
 		}
 		allowPrivate := s.cfg != nil && s.cfg.Indexing.AllowPrivateGitHosts
 		cmd, err := GitCloneCmd(ctx, repoPath, cloneDir, pullToken, sshKeyPath, allowPrivate)
 		if err != nil {
-			s.store.SetRepositoryError(repoID, err)
+			s.store.SetRepositoryError(ctx, repoID, err)
 			return
 		}
 		if err := cmd.Run(); err != nil {
-			s.store.SetRepositoryError(repoID, fmt.Errorf("cloning repository: %w", err))
+			s.store.SetRepositoryError(ctx, repoID, fmt.Errorf("cloning repository: %w", err))
 			return
 		}
-		s.store.UpdateRepositoryMeta(repoID, graphstore.RepositoryMeta{ClonePath: cloneDir})
+		s.store.UpdateRepositoryMeta(ctx, repoID, graphstore.RepositoryMeta{ClonePath: cloneDir})
 		localPath = cloneDir
 	}
 
@@ -227,24 +227,24 @@ func (s *Service) runImport(repoID, repoName, repoPath string, isRemote bool, to
 	// caller must pass a typed reason.
 	result, err := idx.IndexRepository(ctx, localPath, indexer.ReasonInitialOnboard)
 	if err != nil {
-		s.store.SetRepositoryError(repoID, fmt.Errorf("indexing repository: %w", err))
+		s.store.SetRepositoryError(ctx, repoID, fmt.Errorf("indexing repository: %w", err))
 		return
 	}
 	result.RepoName = repoName
 	if isRemote {
 		result.RepoPath = repoPath
 	}
-	if _, err := s.store.ReplaceIndexResult(repoID, result); err != nil {
-		s.store.SetRepositoryError(repoID, fmt.Errorf("storing index result: %w", err))
+	if _, err := s.store.ReplaceIndexResult(ctx, repoID, result); err != nil {
+		s.store.SetRepositoryError(ctx, repoID, fmt.Errorf("storing index result: %w", err))
 		return
 	}
 
 	// Rebuild package-level dependency edges now that all imports are stored.
 	// This is idempotent; existing package_dep records for the repo are replaced.
-	s.store.RecomputePackageDependencies(repoID)
+	s.store.RecomputePackageDependencies(ctx, repoID)
 	commitSHA := ""
 	if gitMeta, err := git.GetGitMetadata(localPath); err == nil && gitMeta != nil {
-		s.store.UpdateRepositoryMeta(repoID, graphstore.RepositoryMeta{
+		s.store.UpdateRepositoryMeta(ctx, repoID, graphstore.RepositoryMeta{
 			ClonePath: localPath,
 			CommitSHA: gitMeta.CommitSHA,
 			Branch:    gitMeta.Branch,

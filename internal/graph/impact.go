@@ -4,6 +4,7 @@
 package graph
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -83,7 +84,7 @@ type ImpactReport struct {
 }
 
 // ComputeImpact analyzes which links and requirements are affected by symbol changes.
-func ComputeImpact(store GraphStore, repoID string, fileDiffs []ImpactFileDiff, symbolChanges []ImpactSymbolChange) *ImpactReport {
+func ComputeImpact(ctx context.Context, store GraphStore, repoID string, fileDiffs []ImpactFileDiff, symbolChanges []ImpactSymbolChange) *ImpactReport {
 	report := &ImpactReport{
 		ID:              fmt.Sprintf("impact-%s-%d", repoID, time.Now().UnixMilli()),
 		RepositoryID:    repoID,
@@ -111,7 +112,7 @@ func ComputeImpact(store GraphStore, repoID string, fileDiffs []ImpactFileDiff, 
 			impact = "symbol_removed"
 		}
 
-		links := store.GetLinksForSymbol(sc.SymbolID, false)
+		links := store.GetLinksForSymbol(ctx, sc.SymbolID, false)
 		for _, link := range links {
 			if _, seen := affectedLinkSet[link.ID]; seen {
 				continue
@@ -126,9 +127,9 @@ func ComputeImpact(store GraphStore, repoID string, fileDiffs []ImpactFileDiff, 
 
 			// Track affected requirement
 			if _, ok := affectedReqMap[link.RequirementID]; !ok {
-				req := store.GetRequirement(link.RequirementID)
+				req := store.GetRequirement(ctx, link.RequirementID)
 				if req != nil {
-					totalLinks := len(store.GetLinksForRequirement(req.ID, false))
+					totalLinks := len(store.GetLinksForRequirement(ctx, req.ID, false))
 					affectedReqMap[link.RequirementID] = &AffectedRequirement{
 						RequirementID: req.ID,
 						ExternalID:    req.ExternalID,

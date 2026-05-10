@@ -52,7 +52,7 @@ func (s workflowStoryGenerationService) Generate(ctx context.Context) (*Knowledg
 	scope := key.Scope.Normalize()
 	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
 
-	existing := r.KnowledgeStore.GetArtifactByKeyAndMode(key, generationMode)
+	existing := r.KnowledgeStore.GetArtifactByKeyAndMode(ctx, key, generationMode)
 	if existing != nil {
 		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
 			return mapKnowledgeArtifact(existing), nil
@@ -65,7 +65,7 @@ func (s workflowStoryGenerationService) Generate(ctx context.Context) (*Knowledg
 		}
 		if existing.Status == knowledgepkg.StatusFailed || existing.Stale ||
 			existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
-			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
+			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(ctx, existing.ID)
 		}
 	}
 
@@ -77,9 +77,9 @@ func (s workflowStoryGenerationService) Generate(ctx context.Context) (*Knowledg
 	}
 	var snap *knowledgepkg.KnowledgeSnapshot
 	if scope.ScopeType == knowledgepkg.ScopeRepository {
-		snap, err = assembler.Assemble(repo.ID, repoRoot)
+		snap, err = assembler.Assemble(ctx, repo.ID, repoRoot)
 	} else {
-		snap, err = assembler.AssembleScoped(repo.ID, repoRoot, scope)
+		snap, err = assembler.AssembleScoped(ctx, repo.ID, repoRoot, scope)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to assemble knowledge snapshot: %w", err)
@@ -90,7 +90,7 @@ func (s workflowStoryGenerationService) Generate(ctx context.Context) (*Knowledg
 		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
 	}
 
-	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(key, snap.SourceRevision, generationMode)
+	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(ctx, key, snap.SourceRevision, generationMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim knowledge artifact: %w", err)
 	}
@@ -203,7 +203,7 @@ func (s workflowStoryGenerationService) runGenerationPipeline(
 func (s workflowStoryGenerationService) RefreshFromExisting(ctx context.Context, existing *knowledgepkg.Artifact) (*KnowledgeArtifact, error) {
 	r := s.resolver
 
-	repo := r.getStore(ctx).GetRepository(existing.RepositoryID)
+	repo := r.getStore(ctx).GetRepository(ctx, existing.RepositoryID)
 	if repo == nil {
 		return nil, fmt.Errorf("repository %s not found", existing.RepositoryID)
 	}
@@ -230,9 +230,9 @@ func (s workflowStoryGenerationService) RefreshFromExisting(ctx context.Context,
 			err  error
 		)
 		if scope.ScopeType == knowledgepkg.ScopeRepository {
-			snap, err = assembler.Assemble(repo.ID, repoRoot)
+			snap, err = assembler.Assemble(ctx, repo.ID, repoRoot)
 		} else {
-			snap, err = assembler.AssembleScoped(repo.ID, repoRoot, scope)
+			snap, err = assembler.AssembleScoped(ctx, repo.ID, repoRoot, scope)
 		}
 		if err != nil {
 			slog.Error("workflow story refresh assemble failed", "artifact_id", existing.ID, "error", err)
@@ -265,7 +265,7 @@ func (s workflowStoryGenerationService) RefreshFromExisting(ctx context.Context,
 		return nil, fmt.Errorf("enqueue workflow story refresh job: %w", err)
 	}
 
-	updated := r.KnowledgeStore.GetKnowledgeArtifact(existing.ID)
+	updated := r.KnowledgeStore.GetKnowledgeArtifact(ctx, existing.ID)
 	if updated == nil {
 		return nil, fmt.Errorf("artifact %s not found after refresh", existing.ID)
 	}

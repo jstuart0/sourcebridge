@@ -99,7 +99,7 @@ func (s *Server) handleListClusters(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build cross-cluster call index using the existing helpers from the MCP handler.
-	edges := store.GetCallEdges(repoID)
+	edges := store.GetCallEdges(r.Context(), repoID)
 	inDegree := buildInDegree(edges)
 
 	// Fetch full cluster data (with members) for package and warning derivation.
@@ -134,7 +134,7 @@ func (s *Server) handleListClusters(w http.ResponseWriter, r *http.Request) {
 	for id := range memberIDSet {
 		allSymbolIDs = append(allSymbolIDs, id)
 	}
-	symMap := store.GetSymbolsByIDs(allSymbolIDs)
+	symMap := store.GetSymbolsByIDs(r.Context(), allSymbolIDs)
 
 	// Resolve cluster label for each symbol (needed by DeriveWarnings).
 	symClusterLabel := make(map[string]string, len(allSymbolIDs))
@@ -285,7 +285,7 @@ func (s *Server) handleRelabelClusters(w http.ResponseWriter, r *http.Request) {
 
 	// Verify the repo exists in the store.
 	store := s.getStore(r)
-	repo := store.GetRepository(repoID)
+	repo := store.GetRepository(r.Context(), repoID)
 	if repo == nil {
 		http.Error(w, "repository not found", http.StatusNotFound)
 		return

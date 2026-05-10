@@ -53,13 +53,13 @@ func TestReplaceIndexResultPreservesTestLinkageEdges(t *testing.T) {
 		},
 	}
 
-	repo, err := store.StoreIndexResult(initial)
+	repo, err := store.StoreIndexResult(t.Context(), initial)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
 	// Sanity check: GetTestsForSymbolPersisted finds the linkage.
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 100, 0)
+	syms, _ := store.GetSymbols(t.Context(), repo.ID, nil, nil, 100, 0)
 	var greetID string
 	for _, sym := range syms {
 		if sym.Name == "Greet" {
@@ -70,7 +70,7 @@ func TestReplaceIndexResultPreservesTestLinkageEdges(t *testing.T) {
 	if greetID == "" {
 		t.Fatal("Greet symbol not found after StoreIndexResult")
 	}
-	tests := store.GetTestsForSymbolPersisted(greetID)
+	tests := store.GetTestsForSymbolPersisted(t.Context(), greetID)
 	if len(tests) != 1 {
 		t.Fatalf("post-StoreIndexResult: want 1 test edge for Greet, got %d", len(tests))
 	}
@@ -86,13 +86,13 @@ func TestReplaceIndexResultPreservesTestLinkageEdges(t *testing.T) {
 		Files:      initial.Files,
 		Relations:  initial.Relations,
 	}
-	_, err = store.ReplaceIndexResult(repo.ID, reindex)
+	_, err = store.ReplaceIndexResult(t.Context(), repo.ID, reindex)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 
 	// Symbols are recreated with new IDs; look up the new Greet.
-	symsAfter, _ := store.GetSymbols(repo.ID, nil, nil, 100, 0)
+	symsAfter, _ := store.GetSymbols(t.Context(), repo.ID, nil, nil, 100, 0)
 	var greetIDAfter string
 	for _, sym := range symsAfter {
 		if sym.Name == "Greet" {
@@ -107,7 +107,7 @@ func TestReplaceIndexResultPreservesTestLinkageEdges(t *testing.T) {
 		t.Fatal("expected fresh symbol ID after ReplaceIndexResult; got the original (was the DELETE skipped?)")
 	}
 
-	testsAfter := store.GetTestsForSymbolPersisted(greetIDAfter)
+	testsAfter := store.GetTestsForSymbolPersisted(t.Context(), greetIDAfter)
 	if len(testsAfter) != 1 {
 		t.Fatalf("CA-304 regression: want 1 test edge for Greet after re-index, got %d (test-linkage edges silently dropped)", len(testsAfter))
 	}

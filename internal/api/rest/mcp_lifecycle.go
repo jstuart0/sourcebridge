@@ -150,7 +150,7 @@ func (h *mcpHandler) callIndexRepository(session *mcpSession, args json.RawMessa
 			return nil, errInvalidArguments(fmt.Sprintf("repository URL not allowed: %v", err))
 		}
 	}
-	if existing := h.store.GetRepositoryByPath(params.PathOrURL); existing != nil {
+	if existing := h.store.GetRepositoryByPath(context.Background(), params.PathOrURL); existing != nil {
 		return indexRepositoryResult{
 			RepositoryID:  existing.ID,
 			Name:          existing.Name,
@@ -159,7 +159,7 @@ func (h *mcpHandler) callIndexRepository(session *mcpSession, args json.RawMessa
 			Message:       "Repository already registered with this path.",
 		}, nil
 	}
-	repo, err := h.store.CreateRepository(name, params.PathOrURL)
+	repo, err := h.store.CreateRepository(context.Background(), name, params.PathOrURL)
 	if err != nil {
 		return nil, fmt.Errorf("creating repository: %w", err)
 	}
@@ -205,7 +205,7 @@ func (h *mcpHandler) callGetIndexStatus(session *mcpSession, args json.RawMessag
 		return nil, err
 	}
 
-	repo := h.store.GetRepository(params.RepositoryID)
+	repo := h.store.GetRepository(context.Background(), params.RepositoryID)
 	if repo == nil {
 		return nil, errRepositoryNotIndexed(params.RepositoryID)
 	}
@@ -251,7 +251,7 @@ func (h *mcpHandler) callRefreshRepository(session *mcpSession, args json.RawMes
 		return nil, err
 	}
 
-	repo := h.store.GetRepository(params.RepositoryID)
+	repo := h.store.GetRepository(context.Background(), params.RepositoryID)
 	if repo == nil {
 		return nil, errRepositoryNotIndexed(params.RepositoryID)
 	}

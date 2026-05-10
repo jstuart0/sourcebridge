@@ -58,7 +58,7 @@ func newMockKnowledgeStore() *mockKnowledgeStore {
 	return &mockKnowledgeStore{artifacts: make(map[string]*knowledge.Artifact)}
 }
 
-func (m *mockKnowledgeStore) StoreKnowledgeArtifact(a *knowledge.Artifact) (*knowledge.Artifact, error) {
+func (m *mockKnowledgeStore) StoreKnowledgeArtifact(_ context.Context, a *knowledge.Artifact) (*knowledge.Artifact, error) {
 	m.artifacts[a.ID] = a
 	return a, nil
 }
@@ -68,10 +68,10 @@ func (m *mockKnowledgeStore) StoreKnowledgeArtifact(a *knowledge.Artifact) (*kno
 // return it with claimed=true. The previous always-(nil,false,nil) stub
 // caused mock/prod divergence — handlers that branched on the claim
 // outcome were exercised against an unrealistic shape.
-func (m *mockKnowledgeStore) ClaimArtifact(key knowledge.ArtifactKey, rev knowledge.SourceRevision) (*knowledge.Artifact, bool, error) {
-	return m.ClaimArtifactWithMode(key, rev, "")
+func (m *mockKnowledgeStore) ClaimArtifact(ctx context.Context, key knowledge.ArtifactKey, rev knowledge.SourceRevision) (*knowledge.Artifact, bool, error) {
+	return m.ClaimArtifactWithMode(ctx, key, rev, "")
 }
-func (m *mockKnowledgeStore) ClaimArtifactWithMode(key knowledge.ArtifactKey, rev knowledge.SourceRevision, mode knowledge.GenerationMode) (*knowledge.Artifact, bool, error) {
+func (m *mockKnowledgeStore) ClaimArtifactWithMode(_ context.Context, key knowledge.ArtifactKey, rev knowledge.SourceRevision, mode knowledge.GenerationMode) (*knowledge.Artifact, bool, error) {
 	key = key.Normalized()
 	normalizedMode := knowledge.NormalizeGenerationMode(mode)
 	for _, existing := range m.artifacts {
@@ -114,13 +114,13 @@ func (m *mockKnowledgeStore) ClaimArtifactWithMode(key knowledge.ArtifactKey, re
 	m.artifacts[stored.ID] = &stored
 	return artifact, true, nil
 }
-func (m *mockKnowledgeStore) GetKnowledgeArtifact(id string) *knowledge.Artifact {
+func (m *mockKnowledgeStore) GetKnowledgeArtifact(_ context.Context, id string) *knowledge.Artifact {
 	return m.artifacts[id]
 }
-func (m *mockKnowledgeStore) GetArtifactByKey(key knowledge.ArtifactKey) *knowledge.Artifact {
-	return m.GetArtifactByKeyAndMode(key, "")
+func (m *mockKnowledgeStore) GetArtifactByKey(ctx context.Context, key knowledge.ArtifactKey) *knowledge.Artifact {
+	return m.GetArtifactByKeyAndMode(ctx, key, "")
 }
-func (m *mockKnowledgeStore) GetArtifactByKeyAndMode(key knowledge.ArtifactKey, mode knowledge.GenerationMode) *knowledge.Artifact {
+func (m *mockKnowledgeStore) GetArtifactByKeyAndMode(_ context.Context, key knowledge.ArtifactKey, mode knowledge.GenerationMode) *knowledge.Artifact {
 	key = key.Normalized()
 	for _, a := range m.artifacts {
 		aKey := knowledge.ArtifactKey{
@@ -141,16 +141,16 @@ func (m *mockKnowledgeStore) GetArtifactByKeyAndMode(key knowledge.ArtifactKey, 
 	}
 	return nil
 }
-func (m *mockKnowledgeStore) GetKnowledgeArtifacts(repoID string) []*knowledge.Artifact {
+func (m *mockKnowledgeStore) GetKnowledgeArtifacts(_ context.Context, repoID string) []*knowledge.Artifact {
 	return nil
 }
-func (m *mockKnowledgeStore) UpdateKnowledgeArtifactStatus(id string, status knowledge.ArtifactStatus) error {
+func (m *mockKnowledgeStore) UpdateKnowledgeArtifactStatus(_ context.Context, id string, status knowledge.ArtifactStatus) error {
 	if a, ok := m.artifacts[id]; ok {
 		a.Status = status
 	}
 	return nil
 }
-func (m *mockKnowledgeStore) SetArtifactFailed(id string, code string, message string) error {
+func (m *mockKnowledgeStore) SetArtifactFailed(_ context.Context, id string, code string, message string) error {
 	if a, ok := m.artifacts[id]; ok {
 		a.Status = knowledge.StatusFailed
 		a.ErrorCode = code
@@ -158,71 +158,71 @@ func (m *mockKnowledgeStore) SetArtifactFailed(id string, code string, message s
 	}
 	return nil
 }
-func (m *mockKnowledgeStore) UpdateKnowledgeArtifactProgress(id string, progress float64) error {
+func (m *mockKnowledgeStore) UpdateKnowledgeArtifactProgress(_ context.Context, id string, progress float64) error {
 	return nil
 }
-func (m *mockKnowledgeStore) UpdateKnowledgeArtifactProgressWithPhase(id string, progress float64, phase, message string) error {
+func (m *mockKnowledgeStore) UpdateKnowledgeArtifactProgressWithPhase(_ context.Context, id string, progress float64, phase, message string) error {
 	return nil
 }
-func (m *mockKnowledgeStore) MarkKnowledgeArtifactStale(id string, stale bool) error {
+func (m *mockKnowledgeStore) MarkKnowledgeArtifactStale(_ context.Context, id string, stale bool) error {
 	return nil
 }
-func (m *mockKnowledgeStore) MarkKnowledgeArtifactStaleWithReason(id string, reasonJSON string, reportID string) error {
+func (m *mockKnowledgeStore) MarkKnowledgeArtifactStaleWithReason(_ context.Context, id string, reasonJSON string, reportID string) error {
 	return nil
 }
-func (m *mockKnowledgeStore) GetArtifactsForSources(repoID string, sources []knowledge.SourceRef) []*knowledge.Artifact {
+func (m *mockKnowledgeStore) GetArtifactsForSources(_ context.Context, repoID string, sources []knowledge.SourceRef) []*knowledge.Artifact {
 	return nil
 }
-func (m *mockKnowledgeStore) GetArtifactsForFiles(repoID string, filePaths []string) []*knowledge.Artifact {
+func (m *mockKnowledgeStore) GetArtifactsForFiles(_ context.Context, repoID string, filePaths []string) []*knowledge.Artifact {
 	return nil
 }
-func (m *mockKnowledgeStore) DeleteKnowledgeArtifact(id string) error { return nil }
-func (m *mockKnowledgeStore) SupersedeArtifact(id string, sections []knowledge.Section) error {
+func (m *mockKnowledgeStore) DeleteKnowledgeArtifact(_ context.Context, id string) error { return nil }
+func (m *mockKnowledgeStore) SupersedeArtifact(_ context.Context, id string, sections []knowledge.Section) error {
 	return nil
 }
-func (m *mockKnowledgeStore) StoreKnowledgeSections(artifactID string, sections []knowledge.Section) error {
+func (m *mockKnowledgeStore) StoreKnowledgeSections(_ context.Context, artifactID string, sections []knowledge.Section) error {
 	return nil
 }
-func (m *mockKnowledgeStore) GetKnowledgeSections(artifactID string) []knowledge.Section {
+func (m *mockKnowledgeStore) GetKnowledgeSections(_ context.Context, artifactID string) []knowledge.Section {
 	return nil
 }
-func (m *mockKnowledgeStore) StoreRefinementUnits(artifactID string, units []knowledge.RefinementUnit) error {
+func (m *mockKnowledgeStore) StoreRefinementUnits(_ context.Context, artifactID string, units []knowledge.RefinementUnit) error {
 	return nil
 }
-func (m *mockKnowledgeStore) GetRefinementUnits(artifactID string) []knowledge.RefinementUnit {
+func (m *mockKnowledgeStore) GetRefinementUnits(_ context.Context, artifactID string) []knowledge.RefinementUnit {
 	return nil
 }
-func (m *mockKnowledgeStore) StoreKnowledgeEvidence(sectionID string, evidence []knowledge.Evidence) error {
+func (m *mockKnowledgeStore) StoreKnowledgeEvidence(_ context.Context, sectionID string, evidence []knowledge.Evidence) error {
 	return nil
 }
-func (m *mockKnowledgeStore) GetKnowledgeEvidence(sectionID string) []knowledge.Evidence {
+func (m *mockKnowledgeStore) GetKnowledgeEvidence(_ context.Context, sectionID string) []knowledge.Evidence {
 	return nil
 }
-func (m *mockKnowledgeStore) StoreRepositoryUnderstanding(u *knowledge.RepositoryUnderstanding) (*knowledge.RepositoryUnderstanding, error) {
+func (m *mockKnowledgeStore) StoreRepositoryUnderstanding(_ context.Context, u *knowledge.RepositoryUnderstanding) (*knowledge.RepositoryUnderstanding, error) {
 	return u, nil
 }
-func (m *mockKnowledgeStore) GetRepositoryUnderstanding(repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding {
+func (m *mockKnowledgeStore) GetRepositoryUnderstanding(_ context.Context, repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding {
 	return nil
 }
-func (m *mockKnowledgeStore) GetRepositoryUnderstandings(repoID string) []*knowledge.RepositoryUnderstanding {
+func (m *mockKnowledgeStore) GetRepositoryUnderstandings(_ context.Context, repoID string) []*knowledge.RepositoryUnderstanding {
 	return nil
 }
-func (m *mockKnowledgeStore) MarkRepositoryUnderstandingNeedsRefresh(repoID string) error {
+func (m *mockKnowledgeStore) MarkRepositoryUnderstandingNeedsRefresh(_ context.Context, repoID string) error {
 	return nil
 }
-func (m *mockKnowledgeStore) MarkRepositoryUnderstandingFailed(understandingID, errorCode, errorMessage string) error {
+func (m *mockKnowledgeStore) MarkRepositoryUnderstandingFailed(_ context.Context, understandingID, errorCode, errorMessage string) error {
 	return nil
 }
-func (m *mockKnowledgeStore) UpdateRepositoryUnderstandingProgress(id string, progress float64, phase, message string) error {
+func (m *mockKnowledgeStore) UpdateRepositoryUnderstandingProgress(_ context.Context, id string, progress float64, phase, message string) error {
 	return nil
 }
-func (m *mockKnowledgeStore) AttachArtifactUnderstanding(artifactID, understandingID, revisionFP string) error {
+func (m *mockKnowledgeStore) AttachArtifactUnderstanding(_ context.Context, artifactID, understandingID, revisionFP string) error {
 	return nil
 }
-func (m *mockKnowledgeStore) StoreArtifactDependencies(artifactID string, dependencies []knowledge.ArtifactDependency) error {
+func (m *mockKnowledgeStore) StoreArtifactDependencies(_ context.Context, artifactID string, dependencies []knowledge.ArtifactDependency) error {
 	return nil
 }
-func (m *mockKnowledgeStore) GetArtifactDependencies(artifactID string) []knowledge.ArtifactDependency {
+func (m *mockKnowledgeStore) GetArtifactDependencies(_ context.Context, artifactID string) []knowledge.ArtifactDependency {
 	return nil
 }
 
@@ -268,31 +268,31 @@ func newTestHarness(t *testing.T) *mcpTestHarness {
 			},
 		},
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
 	// All IDs are auto-generated UUIDs, so look them up.
-	symbols, _ := store.GetSymbols(repo.ID, nil, nil, 10, 0)
+	symbols, _ := store.GetSymbols(t.Context(), repo.ID, nil, nil, 10, 0)
 	if len(symbols) == 0 {
 		t.Fatal("no symbols after indexing")
 	}
 	firstSymbolID := symbols[0].ID
 
-	store.StoreRequirement(repo.ID, &graphstore.StoredRequirement{
+	store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ExternalID:  "PROJ-101",
 		Title:       "Handle HTTP requests",
 		Description: "The system must handle HTTP requests with proper error handling.",
 		Priority:    "high",
 		Tags:        []string{"api", "http"},
 	})
-	reqs, _ := store.GetRequirements(repo.ID, 1, 0)
+	reqs, _ := store.GetRequirements(t.Context(), repo.ID, 1, 0)
 	if len(reqs) == 0 {
 		t.Fatal("failed to store test requirement")
 	}
 
-	store.StoreLink(repo.ID, &graphstore.StoredLink{
+	store.StoreLink(t.Context(), repo.ID, &graphstore.StoredLink{
 		RequirementID: reqs[0].ID,
 		SymbolID:      firstSymbolID,
 		Confidence:    0.85,
@@ -952,7 +952,7 @@ func TestMCP_GetRequirements_Pagination(t *testing.T) {
 
 	// Add more requirements
 	for i := 2; i <= 15; i++ {
-		h.store.StoreRequirement(h.repoID, &graphstore.StoredRequirement{
+		h.store.StoreRequirement(t.Context(), h.repoID, &graphstore.StoredRequirement{
 			ID:     fmt.Sprintf("req-%d", i),
 			RepoID: h.repoID,
 			Title:  fmt.Sprintf("Requirement %d", i),
@@ -997,7 +997,7 @@ func TestMCP_GetImpactReport_Exists(t *testing.T) {
 	sess := h.createSession()
 
 	// Store an impact report
-	h.store.StoreImpactReport(h.repoID, &graphstore.ImpactReport{
+	h.store.StoreImpactReport(t.Context(), h.repoID, &graphstore.ImpactReport{
 		ID:           "impact-1",
 		RepositoryID: h.repoID,
 		OldCommitSHA: "abc123",
@@ -1284,7 +1284,7 @@ func TestMCP_RepoAccessDenied(t *testing.T) {
 		RepoPath: "/tmp/allowed",
 		Files:    []indexer.FileResult{{Path: "a.go", Language: "go", LineCount: 10}},
 	}
-	repo, _ := store.StoreIndexResult(result)
+	repo, _ := store.StoreIndexResult(t.Context(), result)
 
 	// Create handler that only allows a different repo
 	h := newMCPHandler(store, ks, worker, "other-repo-id", 1*time.Hour, 30*time.Second, 100, nil)

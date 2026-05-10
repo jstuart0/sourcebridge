@@ -152,7 +152,7 @@ func startKnowledgeQueueHeartbeat(ctx context.Context, rt llm.Runtime, artifactI
 			case <-tick.C:
 				rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot", 0)
 				if store != nil && artifactID != "" {
-					if err := store.UpdateKnowledgeArtifactProgressWithPhase(artifactID, 0.02, "queued", "Waiting for knowledge generation slot"); err != nil {
+					if err := store.UpdateKnowledgeArtifactProgressWithPhase(ctx, artifactID, 0.02, "queued", "Waiting for knowledge generation slot"); err != nil {
 						knowledgeProgressWriteErrorsTotal.Add(1)
 						slog.Warn("knowledge_progress_write_failed",
 							"event", "knowledge_progress_write_failed",
@@ -231,7 +231,7 @@ func (r *Resolver) enqueueKnowledgeJob(
 		MaxAttempts:    knowledgeJobMaxAttempts(artifact, scope),
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
 			rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot", 0)
-			if err := r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.02, "queued", "Waiting for knowledge generation slot"); err != nil {
+			if err := r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(ctx, artifact.ID, 0.02, "queued", "Waiting for knowledge generation slot"); err != nil {
 				knowledgeProgressWriteErrorsTotal.Add(1)
 				slog.Warn("knowledge_progress_write_failed",
 					"event", "knowledge_progress_write_failed",
@@ -268,7 +268,7 @@ func (r *Resolver) enqueueKnowledgeJob(
 				// knowledgeArtifact GraphQL type shows the error. The
 				// orchestrator will independently persist the error on
 				// the llm.Job record via its finalizeFailed path.
-				persistArtifactFailure(r.KnowledgeStore, artifact.ID, err)
+				persistArtifactFailure(ctx, r.KnowledgeStore, artifact.ID, err)
 				return err
 			}
 			return nil
@@ -278,7 +278,7 @@ func (r *Resolver) enqueueKnowledgeJob(
 	if _, err := r.Orchestrator.Enqueue(req); err != nil {
 		// Synchronous enqueue failure — keep the artifact's failure
 		// state in sync with the user-visible error.
-		persistArtifactFailure(r.KnowledgeStore, artifact.ID, err)
+		persistArtifactFailure(ctx, r.KnowledgeStore, artifact.ID, err)
 		slog.Error("knowledge_job_enqueue_failed",
 			"artifact_id", artifact.ID,
 			"job_type", jobType,

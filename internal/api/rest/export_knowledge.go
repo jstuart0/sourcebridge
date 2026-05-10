@@ -29,16 +29,16 @@ func (s *Server) handleExportKnowledgeArtifact(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	artifact := s.knowledgeStore.GetKnowledgeArtifact(artifactID)
+	artifact := s.knowledgeStore.GetKnowledgeArtifact(r.Context(), artifactID)
 	if artifact == nil {
 		http.Error(w, `{"error":"artifact not found"}`, http.StatusNotFound)
 		return
 	}
 
 	// Hydrate sections and evidence.
-	sections := s.knowledgeStore.GetKnowledgeSections(artifactID)
+	sections := s.knowledgeStore.GetKnowledgeSections(r.Context(), artifactID)
 	for i := range sections {
-		sections[i].Evidence = s.knowledgeStore.GetKnowledgeEvidence(sections[i].ID)
+		sections[i].Evidence = s.knowledgeStore.GetKnowledgeEvidence(r.Context(), sections[i].ID)
 	}
 	artifact.Sections = sections
 

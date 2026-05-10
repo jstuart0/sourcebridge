@@ -86,7 +86,7 @@ func seedChangeImpactFixture(t *testing.T, h *mcpTestHarness) changeImpactFixtur
 		},
 	}
 
-	repo, err := h.store.StoreIndexResult(result)
+	repo, err := h.store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("seedChangeImpactFixture StoreIndexResult: %v", err)
 	}
@@ -124,7 +124,7 @@ func seedChangeImpactFixture(t *testing.T, h *mcpTestHarness) changeImpactFixtur
 			{SourceID: handlerID, TargetID: helperID, Type: indexer.RelationCalls},
 		},
 	}
-	repo, err = h.store.ReplaceIndexResult(repo.ID, result2)
+	repo, err = h.store.ReplaceIndexResult(t.Context(), repo.ID, result2)
 	if err != nil {
 		t.Fatalf("seedChangeImpactFixture ReplaceIndexResult: %v", err)
 	}
@@ -134,13 +134,13 @@ func seedChangeImpactFixture(t *testing.T, h *mcpTestHarness) changeImpactFixtur
 	testSymID := lookupSymID(t, h, repo.ID, "service_test.go", "TestHandleCreate")
 
 	// Requirements.
-	h.store.StoreRequirement(repo.ID, &graphstore.StoredRequirement{
+	h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ExternalID: "CI-1", Title: "Create handler requirement",
 	})
-	h.store.StoreRequirement(repo.ID, &graphstore.StoredRequirement{
+	h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ExternalID: "CI-2", Title: "Helper requirement",
 	})
-	reqs, _ := h.store.GetRequirements(repo.ID, 10, 0)
+	reqs, _ := h.store.GetRequirements(t.Context(), repo.ID, 10, 0)
 	req1ID, req2ID := "", ""
 	for _, r := range reqs {
 		switch r.ExternalID {
@@ -155,13 +155,13 @@ func seedChangeImpactFixture(t *testing.T, h *mcpTestHarness) changeImpactFixtur
 	}
 
 	// Links: HandleCreate → Req1 (conf 0.9), HelperFunc → Req1 (conf 0.7), HelperFunc → Req2 (conf 0.8).
-	h.store.StoreLink(repo.ID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), repo.ID, &graphstore.StoredLink{
 		RequirementID: req1ID, SymbolID: handlerID, Confidence: 0.9,
 	})
-	h.store.StoreLink(repo.ID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), repo.ID, &graphstore.StoredLink{
 		RequirementID: req1ID, SymbolID: helperID, Confidence: 0.7,
 	})
-	h.store.StoreLink(repo.ID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), repo.ID, &graphstore.StoredLink{
 		RequirementID: req2ID, SymbolID: helperID, Confidence: 0.8,
 	})
 
@@ -439,7 +439,7 @@ func TestMCP_PredictChangeImpact_AffectedTests_DirectVsIndirect(t *testing.T) {
 			{SourceID: fix.TestSymID, TargetID: fix.HandlerID, Type: indexer.RelationTests},
 		},
 	}
-	newRepo, err := h.store.ReplaceIndexResult(fix.RepoID, result)
+	newRepo, err := h.store.ReplaceIndexResult(t.Context(), fix.RepoID, result)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
@@ -497,9 +497,9 @@ type countingGraphStore struct {
 	getSymbolsCalls int64
 }
 
-func (s *countingGraphStore) GetSymbols(repoID string, query *string, kind *string, limit, offset int) ([]*graphstore.StoredSymbol, int) {
+func (s *countingGraphStore) GetSymbols(ctx context.Context, repoID string, query *string, kind *string, limit, offset int) ([]*graphstore.StoredSymbol, int) {
 	atomic.AddInt64(&s.getSymbolsCalls, 1)
-	return s.GraphStore.GetSymbols(repoID, query, kind, limit, offset)
+	return s.GraphStore.GetSymbols(ctx, repoID, query, kind, limit, offset)
 }
 
 func TestMCP_PredictChangeImpact_TestSetResolvedOnce(t *testing.T) {
@@ -533,7 +533,7 @@ func TestMCP_PredictChangeImpact_TestSetResolvedOnce(t *testing.T) {
 			},
 		},
 	}
-	repo, err := realStore.StoreIndexResult(indexResult)
+	repo, err := realStore.StoreIndexResult(t.Context(), indexResult)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -639,7 +639,7 @@ func TestMCP_PredictChangeImpact_CrossRepoLeakageBlocked(t *testing.T) {
 	// Attempt to call with a symbol_id that belongs to the default harness
 	// repo (h.repoID) while claiming repository_id = fix.RepoID. The symbol
 	// should not appear in the results because it belongs to a different repo.
-	defaultSyms, _ := h.store.GetSymbols(h.repoID, nil, nil, 0, 0)
+	defaultSyms, _ := h.store.GetSymbols(t.Context(), h.repoID, nil, nil, 0, 0)
 	if len(defaultSyms) == 0 {
 		t.Skip("no symbols in default harness repo")
 	}

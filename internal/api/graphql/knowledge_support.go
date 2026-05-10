@@ -110,7 +110,8 @@ func buildArchitectureDiagramScaffold(store graphstore.GraphStore, repoID string
 	if store == nil || strings.TrimSpace(repoID) == "" {
 		return nil, nil
 	}
-	result, err := architecture.BuildDiagram(store, architecture.DiagramOpts{
+	bgCtx := context.Background()
+	result, err := architecture.BuildDiagram(bgCtx, store, architecture.DiagramOpts{
 		RepoID:      repoID,
 		Level:       "MODULE",
 		ModuleDepth: 2,
@@ -120,7 +121,7 @@ func buildArchitectureDiagramScaffold(store graphstore.GraphStore, repoID string
 		return nil, err
 	}
 	fileBuckets := map[string][]string{}
-	for _, file := range store.GetFiles(repoID) {
+	for _, file := range store.GetFiles(bgCtx, repoID) {
 		module := architecture.ModuleFromPath(file.Path, 2)
 		fileBuckets[module] = append(fileBuckets[module], file.Path)
 	}
@@ -646,11 +647,11 @@ func architectureDiagramCliffNotesHighlights(
 		}.Normalized(),
 	}
 	for _, key := range lookupOrder {
-		artifact := store.GetArtifactByKey(key)
+		artifact := store.GetArtifactByKey(context.Background(), key)
 		if artifact == nil || artifact.Status != knowledgepkg.StatusReady {
 			continue
 		}
-		sections := store.GetKnowledgeSections(artifact.ID)
+		sections := store.GetKnowledgeSections(context.Background(), artifact.ID)
 		if len(sections) == 0 {
 			continue
 		}
@@ -697,13 +698,14 @@ func cliffNotesDeepeningTargets(store knowledgepkg.KnowledgeStore, artifact *kno
 	if len(targets) == 0 {
 		return nil
 	}
-	current := store.GetKnowledgeSections(artifact.ID)
+	bgCtx := context.Background()
+	current := store.GetKnowledgeSections(bgCtx, artifact.ID)
 	byTitle := make(map[string]knowledgepkg.Section, len(current))
 	for _, sec := range current {
 		byTitle[sec.Title] = sec
 	}
 	refinementBySectionKey := make(map[string]knowledgepkg.RefinementUnit)
-	for _, unit := range store.GetRefinementUnits(artifact.ID) {
+	for _, unit := range store.GetRefinementUnits(bgCtx, artifact.ID) {
 		if unit.RefinementType != cliffNotesDeepRefinementType {
 			continue
 		}
@@ -780,12 +782,12 @@ func syncCliffNotesRefinementUnits(
 			Metadata:           cliffNotesSectionMetadataJSON(knowledgepkg.ArtifactCliffNotes, understanding, "light", sec.Title, len(sec.Evidence) > 0),
 		})
 	}
-	_ = store.StoreRefinementUnits(artifact.ID, units)
+	_ = store.StoreRefinementUnits(context.Background(), artifact.ID, units)
 	slog.Info("cliff_notes_light_units_synced",
 		"artifact_id", artifact.ID,
 		"section_count", len(sections),
 		"light_unit_count", len(units),
-		"total_refinement_units", len(store.GetRefinementUnits(artifact.ID)),
+		"total_refinement_units", len(store.GetRefinementUnits(context.Background(), artifact.ID)),
 	)
 }
 
@@ -805,7 +807,7 @@ func markCliffNotesDeepRefinementStatus(
 		byTitle[sec.Title] = sec
 	}
 	existingAttempts := make(map[string]int)
-	for _, unit := range store.GetRefinementUnits(artifact.ID) {
+	for _, unit := range store.GetRefinementUnits(context.Background(), artifact.ID) {
 		if unit.RefinementType != cliffNotesDeepRefinementType {
 			continue
 		}
@@ -838,7 +840,7 @@ func markCliffNotesDeepRefinementStatus(
 			LastError:          strings.TrimSpace(lastError),
 		})
 	}
-	_ = store.StoreRefinementUnits(artifact.ID, units)
+	_ = store.StoreRefinementUnits(context.Background(), artifact.ID, units)
 }
 
 func cliffNotesDeepeningOutcome(sections []knowledgepkg.Section, selectedTitles []string) (knowledgepkg.RefinementStatus, string) {
@@ -957,7 +959,8 @@ func updateUnderstandingForCliffNotes(
 			understanding.TreeStatus = knowledgepkg.UnderstandingTreePartial
 		}
 	}
-	existing := store.GetRepositoryUnderstanding(artifact.RepositoryID, understandingScopeForArtifact(scope))
+	bgCtx := context.Background()
+	existing := store.GetRepositoryUnderstanding(bgCtx, artifact.RepositoryID, understandingScopeForArtifact(scope))
 	if metadata := cliffNotesUnderstandingMetadata(existing, resp); metadata != "" {
 		understanding.Metadata = metadata
 	}
@@ -967,15 +970,15 @@ func updateUnderstandingForCliffNotes(
 	if understanding.ModelUsed == "" && resp.Usage != nil {
 		understanding.ModelUsed = resp.Usage.Model
 	}
-	stored, err := store.StoreRepositoryUnderstanding(understanding)
+	stored, err := store.StoreRepositoryUnderstanding(bgCtx, understanding)
 	if err != nil {
 		return nil, err
 	}
 	if stored != nil && artifact.ID != "" {
-		_ = store.AttachArtifactUnderstanding(artifact.ID, stored.ID, stored.RevisionFP)
+		_ = store.AttachArtifactUnderstanding(bgCtx, artifact.ID, stored.ID, stored.RevisionFP)
 		artifact.UnderstandingID = stored.ID
 		artifact.UnderstandingRevisionFP = stored.RevisionFP
-		_ = store.StoreArtifactDependencies(artifact.ID, []knowledgepkg.ArtifactDependency{{
+		_ = store.StoreArtifactDependencies(bgCtx, artifact.ID, []knowledgepkg.ArtifactDependency{{
 			ArtifactID:       artifact.ID,
 			DependencyType:   knowledgepkg.DependencyRepositoryUnderstanding,
 			TargetID:         stored.ID,
@@ -1076,15 +1079,16 @@ func seedRepositoryUnderstanding(
 		Stage:        stage,
 		TreeStatus:   knowledgepkg.UnderstandingTreeMissing,
 	}
-	stored, err := store.StoreRepositoryUnderstanding(u)
+	bgCtx := context.Background()
+	stored, err := store.StoreRepositoryUnderstanding(bgCtx, u)
 	if err != nil {
 		return nil, err
 	}
 	if stored != nil {
-		_ = store.AttachArtifactUnderstanding(artifact.ID, stored.ID, stored.RevisionFP)
+		_ = store.AttachArtifactUnderstanding(bgCtx, artifact.ID, stored.ID, stored.RevisionFP)
 		artifact.UnderstandingID = stored.ID
 		artifact.UnderstandingRevisionFP = stored.RevisionFP
-		_ = store.StoreArtifactDependencies(artifact.ID, []knowledgepkg.ArtifactDependency{{
+		_ = store.StoreArtifactDependencies(bgCtx, artifact.ID, []knowledgepkg.ArtifactDependency{{
 			ArtifactID:       artifact.ID,
 			DependencyType:   knowledgepkg.DependencyRepositoryUnderstanding,
 			TargetID:         stored.ID,
@@ -1115,12 +1119,13 @@ func markRepositoryUnderstandingFailed(
 	if err != nil {
 		u.ErrorMessage = err.Error()
 	}
-	stored, storeErr := store.StoreRepositoryUnderstanding(u)
+	bgCtx := context.Background()
+	stored, storeErr := store.StoreRepositoryUnderstanding(bgCtx, u)
 	if storeErr == nil && stored != nil {
-		_ = store.AttachArtifactUnderstanding(artifact.ID, stored.ID, stored.RevisionFP)
+		_ = store.AttachArtifactUnderstanding(bgCtx, artifact.ID, stored.ID, stored.RevisionFP)
 		artifact.UnderstandingID = stored.ID
 		artifact.UnderstandingRevisionFP = stored.RevisionFP
-		_ = store.StoreArtifactDependencies(artifact.ID, []knowledgepkg.ArtifactDependency{{
+		_ = store.StoreArtifactDependencies(bgCtx, artifact.ID, []knowledgepkg.ArtifactDependency{{
 			ArtifactID:       artifact.ID,
 			DependencyType:   knowledgepkg.DependencyRepositoryUnderstanding,
 			TargetID:         stored.ID,
@@ -1139,7 +1144,8 @@ func attachFreshUnderstanding(
 	if store == nil || artifact == nil {
 		return nil, false
 	}
-	u := store.GetRepositoryUnderstanding(artifact.RepositoryID, understandingScopeForArtifact(scope))
+	bgCtx := context.Background()
+	u := store.GetRepositoryUnderstanding(bgCtx, artifact.RepositoryID, understandingScopeForArtifact(scope))
 	if u == nil {
 		return nil, false
 	}
@@ -1147,10 +1153,10 @@ func attachFreshUnderstanding(
 	if revisionFP == "" || u.RevisionFP == "" || revisionFP != u.RevisionFP {
 		return u, false
 	}
-	_ = store.AttachArtifactUnderstanding(artifact.ID, u.ID, u.RevisionFP)
+	_ = store.AttachArtifactUnderstanding(bgCtx, artifact.ID, u.ID, u.RevisionFP)
 	artifact.UnderstandingID = u.ID
 	artifact.UnderstandingRevisionFP = u.RevisionFP
-	_ = store.StoreArtifactDependencies(artifact.ID, []knowledgepkg.ArtifactDependency{{
+	_ = store.StoreArtifactDependencies(bgCtx, artifact.ID, []knowledgepkg.ArtifactDependency{{
 		ArtifactID:       artifact.ID,
 		DependencyType:   knowledgepkg.DependencyRepositoryUnderstanding,
 		TargetID:         u.ID,
@@ -1209,7 +1215,7 @@ func (r *Resolver) ensureFreshRepositoryUnderstanding(
 	// If cliff notes are already generating for this repo, skip the understanding
 	// build rather than blocking the worker with a concurrent generation request.
 	// The understanding will be available once the in-flight cliff notes complete.
-	for _, existingCN := range r.KnowledgeStore.GetKnowledgeArtifacts(repo.ID) {
+	for _, existingCN := range r.KnowledgeStore.GetKnowledgeArtifacts(ctx, repo.ID) {
 		if existingCN.Type != knowledgepkg.ArtifactCliffNotes || existingCN.Scope.ScopeType != knowledgepkg.ScopeRepository {
 			continue
 		}
@@ -1231,7 +1237,7 @@ func (r *Resolver) ensureFreshRepositoryUnderstanding(
 	if rt != nil {
 		rt.ReportProgress(0.12, "understanding", "Building repository understanding", 0)
 	}
-	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Building repository understanding")
+	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(ctx, artifact.ID, 0.12, "understanding", "Building repository understanding")
 	streamDriver := r.runStreamProgressDriver(ctx, rt, artifact.ID, rpcBucketHierarchical)
 	resp, err := r.LLMCaller.GenerateCliffNotesWithJob(
 		ctx,
@@ -1296,7 +1302,7 @@ func knowledgeGenerationModeValue(mode *KnowledgeGenerationMode) knowledgepkg.Ge
 
 func configuredKnowledgeGenerationModeDefault(store comprehension.Store) knowledgepkg.GenerationMode {
 	if store != nil {
-		if eff, err := comprehension.Resolve(store, comprehension.WorkspaceScope); err == nil && eff != nil {
+		if eff, err := comprehension.Resolve(context.Background(), store, comprehension.WorkspaceScope); err == nil && eff != nil {
 			switch strings.TrimSpace(strings.ToLower(eff.KnowledgeGenerationModeDefault)) {
 			case "classic":
 				return knowledgepkg.GenerationModeClassic
@@ -1474,8 +1480,9 @@ func enrichSnapshotWithCliffNotesAnalysis(
 		}.Normalized(),
 	}
 	var cliffNotes *knowledgepkg.Artifact
+	bgCtx := context.Background()
 	for _, key := range lookupOrder {
-		if candidate := store.GetArtifactByKey(key); candidate != nil && candidate.Status == knowledgepkg.StatusReady {
+		if candidate := store.GetArtifactByKey(bgCtx, key); candidate != nil && candidate.Status == knowledgepkg.StatusReady {
 			cliffNotes = candidate
 			break
 		}
@@ -1483,7 +1490,7 @@ func enrichSnapshotWithCliffNotesAnalysis(
 	if cliffNotes == nil {
 		return snapshotJSON, false
 	}
-	sections := store.GetKnowledgeSections(cliffNotes.ID)
+	sections := store.GetKnowledgeSections(bgCtx, cliffNotes.ID)
 	if len(sections) == 0 {
 		return snapshotJSON, false
 	}
@@ -1522,7 +1529,7 @@ func syncArtifactExecutionMetadata(store knowledgepkg.KnowledgeStore, artifact *
 	if artifact.GenerationMode == "" {
 		artifact.GenerationMode = knowledgepkg.GenerationModeUnderstandingFirst
 	}
-	_, _ = store.StoreKnowledgeArtifact(artifact)
+	_, _ = store.StoreKnowledgeArtifact(context.Background(), artifact)
 }
 
 func cliffNotesRenderPlanForArtifact(
@@ -1551,7 +1558,7 @@ func cliffNotesRenderPlanForArtifact(
 		scopeType = artifact.Scope.Normalize().ScopeType
 	}
 	required := knowledgepkg.RequiredCliffNotesSections(scopeType, artifact.Depth)
-	existingSections := store.GetKnowledgeSections(artifact.ID)
+	existingSections := store.GetKnowledgeSections(context.Background(), artifact.ID)
 	missing := knowledgepkg.MissingSectionTitles(existingSections, required)
 	if artifact.RendererVersion != knowledgepkg.RendererVersionForArtifact(artifact.Type) {
 		return cliffNotesRenderPlan{
@@ -1657,7 +1664,8 @@ func buildScopeChildren(store graphstore.GraphStore, repoID string, scope knowle
 }
 
 func topLevelModuleScopes(store graphstore.GraphStore, repoID string) []knowledgepkg.ArtifactScope {
-	modules := store.GetModules(repoID)
+	bgCtx := context.Background()
+	modules := store.GetModules(bgCtx, repoID)
 	seen := map[string]bool{}
 	var results []knowledgepkg.ArtifactScope
 	for _, mod := range modules {
@@ -1677,7 +1685,7 @@ func topLevelModuleScopes(store graphstore.GraphStore, repoID string) []knowledg
 	}
 
 	topLevelFiles := map[string]bool{}
-	for _, file := range store.GetFiles(repoID) {
+	for _, file := range store.GetFiles(bgCtx, repoID) {
 		dir := path.Dir(file.Path)
 		if dir == "." || dir == "" {
 			topLevelFiles[file.Path] = true
@@ -1707,7 +1715,8 @@ func moduleChildScopes(store graphstore.GraphStore, repoID, modulePath string) [
 	modulePath = strings.Trim(modulePath, "/")
 	childModules := map[string]bool{}
 	var results []knowledgepkg.ArtifactScope
-	for _, mod := range store.GetModules(repoID) {
+	bgCtx := context.Background()
+	for _, mod := range store.GetModules(bgCtx, repoID) {
 		trimmed := strings.Trim(mod.Path, "/")
 		if trimmed == modulePath || !strings.HasPrefix(trimmed, modulePath+"/") {
 			continue
@@ -1727,7 +1736,7 @@ func moduleChildScopes(store graphstore.GraphStore, repoID, modulePath string) [
 			}
 		}
 	}
-	for _, file := range store.GetFiles(repoID) {
+	for _, file := range store.GetFiles(bgCtx, repoID) {
 		dir := path.Dir(file.Path)
 		if dir == "." {
 			dir = ""
@@ -1745,7 +1754,7 @@ func moduleChildScopes(store graphstore.GraphStore, repoID, modulePath string) [
 }
 
 func fileChildScopes(store graphstore.GraphStore, repoID, filePath string) []knowledgepkg.ArtifactScope {
-	symbols := store.GetSymbolsByFile(repoID, filePath)
+	symbols := store.GetSymbolsByFile(context.Background(), repoID, filePath)
 	results := make([]knowledgepkg.ArtifactScope, 0, len(symbols))
 	for _, sym := range symbols {
 		results = append(results, knowledgepkg.ArtifactScope{
@@ -1809,7 +1818,7 @@ func (r *Resolver) enqueueCliffNotesDeepening(
 	slog.Info("cliff_notes_deepening_enqueued",
 		"artifact_id", artifact.ID,
 		"selected_titles", selectedTitles,
-		"total_refinement_units", len(r.KnowledgeStore.GetRefinementUnits(artifact.ID)),
+		"total_refinement_units", len(r.KnowledgeStore.GetRefinementUnits(context.Background(), artifact.ID)),
 	)
 	return nil
 }
@@ -1822,14 +1831,14 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 	snapshotJSON []byte,
 	selectedTitle string,
 ) error {
-	currentSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
+	currentSections := r.KnowledgeStore.GetKnowledgeSections(context.Background(), artifact.ID)
 	selectedTitles := []string{selectedTitle}
 	markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, currentSections, selectedTitles, knowledgepkg.RefinementQueued, "")
 	slog.Info("cliff_notes_deep_unit_marked_queued",
 		"artifact_id", artifact.ID,
 		"selected_title", selectedTitle,
 		"section_count", len(currentSections),
-		"total_refinement_units", len(r.KnowledgeStore.GetRefinementUnits(artifact.ID)),
+		"total_refinement_units", len(r.KnowledgeStore.GetRefinementUnits(context.Background(), artifact.ID)),
 	)
 	req := &llm.EnqueueRequest{
 		Subsystem:      llm.SubsystemKnowledge,
@@ -1847,7 +1856,7 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 		MaxAttempts:    2,
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
 			rt.ReportProgress(0.05, "deepening", "Deepening critical cliff note sections", 0)
-			markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(artifact.ID), selectedTitles, knowledgepkg.RefinementRunning, "")
+			markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID), selectedTitles, knowledgepkg.RefinementRunning, "")
 			bgCtx := withCliffNotesRenderMetadata(runCtx, true, selectedTitles, string(knowledgepkg.DepthMedium), "product_core")
 			streamDriver := r.runStreamProgressDriver(bgCtx, rt, artifact.ID, rpcBucketForArtifact(artifact))
 			resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge,
@@ -1865,7 +1874,7 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 				})
 			streamDriver.Close()
 			if err != nil {
-				markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(artifact.ID), selectedTitles, knowledgepkg.RefinementFailed, err.Error())
+				markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID), selectedTitles, knowledgepkg.RefinementFailed, err.Error())
 				return err
 			}
 			incoming := make([]knowledgepkg.Section, 0, len(resp.Sections))
@@ -1886,15 +1895,15 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 					RefinementStatus: refinementStatus,
 				})
 			}
-			existingSections := r.KnowledgeStore.GetKnowledgeSections(artifact.ID)
+			existingSections := r.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID)
 			acceptedIncoming := selectAcceptedDeepenedSections(existingSections, incoming, selectedTitles)
 			selected := make(map[string]struct{}, len(selectedTitles))
 			for _, title := range selectedTitles {
 				selected[title] = struct{}{}
 			}
 			merged := knowledgepkg.MergeSectionsByTitle(existingSections, acceptedIncoming, selected)
-			if err := r.KnowledgeStore.SupersedeArtifact(artifact.ID, merged); err != nil {
-				markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(artifact.ID), selectedTitles, knowledgepkg.RefinementFailed, err.Error())
+			if err := r.KnowledgeStore.SupersedeArtifact(runCtx, artifact.ID, merged); err != nil {
+				markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID), selectedTitles, knowledgepkg.RefinementFailed, err.Error())
 				return err
 			}
 			outcome, outcomeError := cliffNotesDeepeningOutcome(merged, selectedTitles)

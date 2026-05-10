@@ -4,6 +4,7 @@
 package architecture
 
 import (
+	"context"
 	"testing"
 
 	"github.com/sourcebridge/sourcebridge/internal/graph"
@@ -39,7 +40,7 @@ type mockStore struct {
 	links   []*graph.StoredLink
 }
 
-func (m *mockStore) GetSymbols(repoID string, query *string, kind *string, limit, offset int) ([]*graph.StoredSymbol, int) {
+func (m *mockStore) GetSymbols(_ context.Context, repoID string, query *string, kind *string, limit, offset int) ([]*graph.StoredSymbol, int) {
 	var result []*graph.StoredSymbol
 	for _, s := range m.symbols {
 		if s.RepoID == repoID {
@@ -48,10 +49,10 @@ func (m *mockStore) GetSymbols(repoID string, query *string, kind *string, limit
 	}
 	return result, len(result)
 }
-func (m *mockStore) GetCallEdges(repoID string) []graph.CallEdge {
+func (m *mockStore) GetCallEdges(_ context.Context, repoID string) []graph.CallEdge {
 	return append([]graph.CallEdge(nil), m.edges...)
 }
-func (m *mockStore) GetFiles(repoID string) []*graph.File {
+func (m *mockStore) GetFiles(_ context.Context, repoID string) []*graph.File {
 	var result []*graph.File
 	for _, f := range m.files {
 		if f.RepoID == repoID {
@@ -60,7 +61,7 @@ func (m *mockStore) GetFiles(repoID string) []*graph.File {
 	}
 	return result
 }
-func (m *mockStore) GetLinksForRepo(repoID string) []*graph.StoredLink {
+func (m *mockStore) GetLinksForRepo(_ context.Context, repoID string) []*graph.StoredLink {
 	var result []*graph.StoredLink
 	for _, l := range m.links {
 		if l.RepoID == repoID {
@@ -72,7 +73,7 @@ func (m *mockStore) GetLinksForRepo(repoID string) []*graph.StoredLink {
 
 func TestBuildModuleLevelDiagram_Empty(t *testing.T) {
 	store := &mockStore{}
-	result, err := BuildDiagram(store, DiagramOpts{
+	result, err := BuildDiagram(t.Context(), store, DiagramOpts{
 		RepoID:      "repo1",
 		Level:       "MODULE",
 		ModuleDepth: 1,
@@ -104,7 +105,7 @@ func TestBuildModuleLevelDiagram_SingleModule(t *testing.T) {
 		},
 	}
 
-	result, err := BuildDiagram(store, DiagramOpts{
+	result, err := BuildDiagram(t.Context(), store, DiagramOpts{
 		RepoID:      "r1",
 		Level:       "MODULE",
 		ModuleDepth: 1,
@@ -141,7 +142,7 @@ func TestBuildModuleLevelDiagram_MultiModule(t *testing.T) {
 		},
 	}
 
-	result, err := BuildDiagram(store, DiagramOpts{
+	result, err := BuildDiagram(t.Context(), store, DiagramOpts{
 		RepoID:      "r1",
 		Level:       "MODULE",
 		ModuleDepth: 2,
@@ -185,7 +186,7 @@ func TestBuildModuleLevelDiagram_SelfEdgesExcluded(t *testing.T) {
 		},
 	}
 
-	result, err := BuildDiagram(store, DiagramOpts{
+	result, err := BuildDiagram(t.Context(), store, DiagramOpts{
 		RepoID:      "r1",
 		Level:       "MODULE",
 		ModuleDepth: 1,
@@ -212,7 +213,7 @@ func TestBuildModuleLevelDiagram_Truncation(t *testing.T) {
 	}
 
 	store := &mockStore{symbols: symbols, files: files}
-	result, err := BuildDiagram(store, DiagramOpts{
+	result, err := BuildDiagram(t.Context(), store, DiagramOpts{
 		RepoID:      "r1",
 		Level:       "MODULE",
 		ModuleDepth: 1,
@@ -251,7 +252,7 @@ func TestBuildFileLevelDiagram(t *testing.T) {
 	}
 
 	filter := "internal/db"
-	result, err := BuildDiagram(store, DiagramOpts{
+	result, err := BuildDiagram(t.Context(), store, DiagramOpts{
 		RepoID:       "r1",
 		Level:        "FILE",
 		ModuleFilter: &filter,
@@ -288,7 +289,7 @@ func TestModuleNodeMetadata(t *testing.T) {
 		},
 	}
 
-	result, err := BuildDiagram(store, DiagramOpts{
+	result, err := BuildDiagram(t.Context(), store, DiagramOpts{
 		RepoID:      "r1",
 		Level:       "MODULE",
 		ModuleDepth: 1,

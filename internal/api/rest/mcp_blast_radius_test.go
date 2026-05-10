@@ -125,7 +125,7 @@ func seedBlastRadiusFixture(t *testing.T, h *mcpTestHarness) blastRadiusFixture 
 		},
 	}
 
-	repo, err := h.store.StoreIndexResult(result)
+	repo, err := h.store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("seedBlastRadiusFixture StoreIndexResult: %v", err)
 	}
@@ -137,10 +137,10 @@ func seedBlastRadiusFixture(t *testing.T, h *mcpTestHarness) blastRadiusFixture 
 	testLoginID := lookupSymID(t, h, repo.ID, "auth/service_test.go", "TestLogin")
 
 	// Store a requirement linked to Login.
-	h.store.StoreRequirement(repo.ID, &graphstore.StoredRequirement{
+	h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ExternalID: "BR-1", Title: "Login must be secured",
 	})
-	reqs, _ := h.store.GetRequirements(repo.ID, 10, 0)
+	reqs, _ := h.store.GetRequirements(t.Context(), repo.ID, 10, 0)
 	req1ID := ""
 	for _, r := range reqs {
 		if r.ExternalID == "BR-1" {
@@ -150,7 +150,7 @@ func seedBlastRadiusFixture(t *testing.T, h *mcpTestHarness) blastRadiusFixture 
 	if req1ID == "" {
 		t.Fatal("seedBlastRadiusFixture: requirement BR-1 not found")
 	}
-	h.store.StoreLink(repo.ID, &graphstore.StoredLink{
+	h.store.StoreLink(t.Context(), repo.ID, &graphstore.StoredLink{
 		RequirementID: req1ID, SymbolID: loginID, Confidence: 0.9,
 	})
 
@@ -458,7 +458,7 @@ func TestMCP_GetBlastRadius_TruncatedAt500(t *testing.T) {
 		Files:     files,
 		Relations: rels,
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -528,7 +528,7 @@ func TestMCP_GetBlastRadius_TruncatedCapDoesNotSkipShallowNodes(t *testing.T) {
 		Files:     files,
 		Relations: rels,
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -599,7 +599,7 @@ func TestMCP_GetBlastRadius_DuplicatePathDeduplication(t *testing.T) {
 			{SourceID: "dd-a", TargetID: "dd-c", Type: indexer.RelationCalls},
 		},
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -665,7 +665,7 @@ func TestMCP_GetBlastRadius_CycleAtDepth1(t *testing.T) {
 			{SourceID: "cy-a", TargetID: "cy-b", Type: indexer.RelationCalls},
 		},
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -768,7 +768,7 @@ func TestMCP_GetBlastRadius_RiskScoreFormula(t *testing.T) {
 			{SourceID: "fm-c", TargetID: "fm-b", Type: indexer.RelationCalls},
 		},
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -861,12 +861,12 @@ func TestMCP_GetBlastRadius_PreResolvesTestSetOnce(t *testing.T) {
 			{SourceID: "cbr-caller1", TargetID: "cbr-root", Type: indexer.RelationCalls},
 		},
 	}
-	repo, err := realStore.StoreIndexResult(indexResult)
+	repo, err := realStore.StoreIndexResult(t.Context(), indexResult)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 	rootID := ""
-	for _, s := range realStore.GetSymbolsByFile(repo.ID, "svc.go") {
+	for _, s := range realStore.GetSymbolsByFile(t.Context(), repo.ID, "svc.go") {
 		if s.Name == "BRRoot" {
 			rootID = s.ID
 		}
@@ -999,7 +999,7 @@ func TestMCP_GetBlastRadius_CrossRepoBFSPollution(t *testing.T) {
 			{SourceID: "crp-root2", TargetID: "crp-b", Type: indexer.RelationCalls}, // depth-2 via B
 		},
 	}
-	repoA, err := store.StoreIndexResult(resultA)
+	repoA, err := store.StoreIndexResult(t.Context(), resultA)
 	if err != nil {
 		t.Fatalf("StoreIndexResult repoA: %v", err)
 	}
@@ -1015,7 +1015,7 @@ func TestMCP_GetBlastRadius_CrossRepoBFSPollution(t *testing.T) {
 			}},
 		},
 	}
-	repoB, err := store.StoreIndexResult(resultB)
+	repoB, err := store.StoreIndexResult(t.Context(), resultB)
 	if err != nil {
 		t.Fatalf("StoreIndexResult repoB: %v", err)
 	}
@@ -1130,7 +1130,7 @@ func TestMCP_GetBlastRadius_ZeroCallers(t *testing.T) {
 			}},
 		},
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -1472,13 +1472,13 @@ func BenchmarkMCP_GetBlastRadius_Depth5(b *testing.B) {
 		Files:     files,
 		Relations: rels,
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(b.Context(), result)
 	if err != nil {
 		b.Fatalf("StoreIndexResult: %v", err)
 	}
 
 	rootID := ""
-	for _, s := range store.GetSymbolsByFile(repo.ID, "bench/root.go") {
+	for _, s := range store.GetSymbolsByFile(b.Context(), repo.ID, "bench/root.go") {
 		if s.Name == "BenchRoot" {
 			rootID = s.ID
 		}

@@ -44,7 +44,7 @@ func (r *Resolver) createRequirementImpl(ctx context.Context, input CreateRequir
 	if title == "" {
 		return nil, errors.New("title is required")
 	}
-	repo := store.GetRepository(input.RepositoryID)
+	repo := store.GetRepository(ctx, input.RepositoryID)
 	if repo == nil {
 		return nil, fmt.Errorf("repository %q not found", input.RepositoryID)
 	}
@@ -58,7 +58,7 @@ func (r *Resolver) createRequirementImpl(ctx context.Context, input CreateRequir
 	// filters soft-deleted entries. This precheck is a friendly UX layer;
 	// migration 032's UNIQUE index on (repo_id, external_id) is the
 	// authoritative race-proof backstop.
-	if existing := store.GetRequirementByExternalID(input.RepositoryID, externalID); existing != nil {
+	if existing := store.GetRequirementByExternalID(ctx, input.RepositoryID, externalID); existing != nil {
 		slog.Warn("requirement_create_duplicate_external_id",
 			"repo_id", input.RepositoryID,
 			"external_id", externalID,
@@ -80,13 +80,13 @@ func (r *Resolver) createRequirementImpl(ctx context.Context, input CreateRequir
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
-	store.StoreRequirement(input.RepositoryID, rec)
+	store.StoreRequirement(ctx, input.RepositoryID, rec)
 
 	// Post-hoc verification: StoreRequirement currently swallows DB errors
 	// and logs them (signature doesn't return an error). A rejected unique
 	// constraint would therefore look like a silent no-op. Re-resolve by
 	// external ID to confirm the row actually persisted.
-	persisted := store.GetRequirementByExternalID(input.RepositoryID, externalID)
+	persisted := store.GetRequirementByExternalID(ctx, input.RepositoryID, externalID)
 	if persisted == nil {
 		slog.Warn("requirement_create_persist_failed",
 			"repo_id", input.RepositoryID,
@@ -132,14 +132,14 @@ func (r *Resolver) updateRequirementFieldsImpl(ctx context.Context, input Update
 		patch.AcceptanceCriteria = &ac
 	}
 
-	updated := store.UpdateRequirementFields(input.ID, patch)
+	updated := store.UpdateRequirementFields(ctx, input.ID, patch)
 	if updated == nil {
 		// Three reasons this returns nil:
 		//   1. requirement not found (or trashed)
 		//   2. externalId app-layer precheck collision
 		//   3. DB-level unique-constraint rejection (migration 032 race backstop)
 		// Disambiguate so the UI can render a specific error.
-		current := store.GetRequirement(input.ID)
+		current := store.GetRequirement(ctx, input.ID)
 		if current == nil {
 			return nil, fmt.Errorf("requirement %q not found", input.ID)
 		}

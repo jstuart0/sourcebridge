@@ -37,7 +37,7 @@ func (r *complianceGitHubResolver) ResolveGitHubRepo(ctx context.Context, repoID
 	if r == nil || r.store == nil || repoID == "" {
 		return "", "", "", false
 	}
-	repo := r.store.GetRepository(repoID)
+	repo := r.store.GetRepository(ctx, repoID)
 	if repo == nil || repo.RemoteURL == "" {
 		return "", "", "", false
 	}

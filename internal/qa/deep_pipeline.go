@@ -65,7 +65,7 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 
 	if o.reader != nil {
 		t1 := time.Now()
-		status = GetRepositoryStatus(o.reader, in.RepositoryID, "")
+		status = GetRepositoryStatus(ctx, o.reader, in.RepositoryID, "")
 		result.Diagnostics.StageTimings["qa.understanding_ready"] = FromDuration(time.Since(t1))
 		result.Diagnostics.UnderstandingStage = status.UnderstandingStage
 		result.Diagnostics.TreeStatus = status.TreeStatus
@@ -88,7 +88,7 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 		}
 		sumCh := make(chan sumRes, 1)
 		go func() {
-			items, err := GetSummaryEvidence(o.reader, status.CorpusID, in.Question, string(kind))
+			items, err := GetSummaryEvidence(ctx, o.reader, status.CorpusID, in.Question, string(kind))
 			sumCh <- sumRes{items: items, err: err}
 		}()
 		// Requirement lines are a file-system read; keep on the same
@@ -121,11 +121,11 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 	if o.searcher != nil {
 		hits, serr := o.searcher.SearchForQA(ctx, in.RepositoryID, in.Question, 12)
 		if serr == nil {
-			files = filesFromSearchHits(hits, o.locator, in.RepositoryID)
+			files = filesFromSearchHits(ctx, hits, o.locator, in.RepositoryID)
 		}
 	}
 	if len(files) == 0 && o.locator != nil {
-		if cloneRoot, ok := o.locator.LocateRepoClone(in.RepositoryID); ok && cloneRoot != "" {
+		if cloneRoot, ok := o.locator.LocateRepoClone(ctx, in.RepositoryID); ok && cloneRoot != "" {
 			fr := DefaultFileRetriever(cloneRoot)
 			files = fr.BestFiles(in.Question, kind)
 		}
@@ -139,7 +139,7 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 	var graphNeighbors []GraphNeighbor
 	if o.graph != nil {
 		t2c := time.Now()
-		graphNeighbors = collectGraphNeighbors(o.graph, in.SymbolID, 12)
+		graphNeighbors = collectGraphNeighbors(ctx, o.graph, in.SymbolID, 12)
 		result.Diagnostics.StageTimings["qa.graph_expand"] = FromDuration(time.Since(t2c))
 		result.Diagnostics.GraphExpansionUsed = len(graphNeighbors) > 0
 	}
@@ -153,12 +153,12 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 	var contextSymbols []SymbolContextRef
 
 	if in.ArtifactID != "" && o.artifacts != nil {
-		if block := o.artifacts.ArtifactContext(in.ArtifactID); block != "" {
+		if block := o.artifacts.ArtifactContext(ctx, in.ArtifactID); block != "" {
 			pinnedBlocks = append(pinnedBlocks, block)
 		}
 	}
 	if in.RequirementID != "" && o.requirements != nil {
-		if block := o.requirements.RequirementContext(in.RequirementID); block != "" {
+		if block := o.requirements.RequirementContext(ctx, in.RequirementID); block != "" {
 			pinnedBlocks = append(pinnedBlocks, block)
 		}
 	}
@@ -173,13 +173,13 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 		//    cheap and the alternative (folding both into one method)
 		//    would couple metadata-block formatting to structured-field
 		//    access.
-		if block := o.symbols.SymbolContext(in.SymbolID); block != "" {
+		if block := o.symbols.SymbolContext(ctx, in.SymbolID); block != "" {
 			pinnedBlocks = append(pinnedBlocks, block)
 		}
 		// 2. Source slice — pinned by line range when available.
-		detail, ok := o.symbols.SymbolDetails(in.SymbolID)
+		detail, ok := o.symbols.SymbolDetails(ctx, in.SymbolID)
 		if ok && o.files != nil {
-			if raw, err := o.files.ReadRepoFile(in.RepositoryID, detail.FilePath); err == nil && raw != "" {
+			if raw, err := o.files.ReadRepoFile(ctx, in.RepositoryID, detail.FilePath); err == nil && raw != "" {
 				if slice := sliceLines(raw, detail.StartLine, detail.EndLine); slice != "" {
 					pinnedBlocks = append(pinnedBlocks,
 						fmt.Sprintf("## %s:%d-%d\n```\n%s\n```", detail.FilePath, detail.StartLine, detail.EndLine, slice))
@@ -194,7 +194,7 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 		//    use the legacy SymbolFilePath so we never return less
 		//    context than today on stores without populated line ranges.
 		if !pinnedSource && in.FilePath == "" {
-			if legacyFP := o.symbols.SymbolFilePath(in.SymbolID); legacyFP != "" {
+			if legacyFP := o.symbols.SymbolFilePath(ctx, in.SymbolID); legacyFP != "" {
 				in.FilePath = legacyFP
 			}
 		}
@@ -229,13 +229,13 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 	// caller passed both SymbolID and FilePath; the slice is the
 	// high-signal block.
 	if in.FilePath != "" && in.Code == "" && o.files != nil && !pinnedSource {
-		if content, err := o.files.ReadRepoFile(in.RepositoryID, in.FilePath); err == nil && content != "" {
+		if content, err := o.files.ReadRepoFile(ctx, in.RepositoryID, in.FilePath); err == nil && content != "" {
 			pinnedBlocks = append(pinnedBlocks, content)
 		}
 		if o.symbols != nil {
 			contextSymbols = appendSymbolsInFileDedup(
 				contextSymbols,
-				o.symbols.SymbolsInFile(in.RepositoryID, in.FilePath),
+				o.symbols.SymbolsInFile(ctx, in.RepositoryID, in.FilePath),
 				in.SymbolID,
 			)
 		}
@@ -245,7 +245,7 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 		// we already pinned so it doesn't appear twice.
 		contextSymbols = appendSymbolsInFileDedup(
 			contextSymbols,
-			o.symbols.SymbolsInFile(in.RepositoryID, in.FilePath),
+			o.symbols.SymbolsInFile(ctx, in.RepositoryID, in.FilePath),
 			in.SymbolID,
 		)
 	}
@@ -377,7 +377,7 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 				ids = append(ids, s.ID)
 			}
 		}
-		result.RelatedRequirements = append(result.RelatedRequirements, o.requirements.RequirementLabelsForSymbols(ids)...)
+		result.RelatedRequirements = append(result.RelatedRequirements, o.requirements.RequirementLabelsForSymbols(ctx, ids)...)
 	}
 
 	result.Diagnostics.StageTimings["qa.response_parse"] = FromDuration(time.Since(t5))

@@ -17,7 +17,8 @@ func (r *mutationResolver) seedRepositoryFieldGuide(repoID string) {
 	if r.Worker == nil || r.KnowledgeStore == nil || r.Store == nil {
 		return
 	}
-	repo := r.Store.GetRepository(repoID)
+	bgCtx := context.Background()
+	repo := r.Store.GetRepository(bgCtx, repoID)
 	if repo == nil {
 		return
 	}
@@ -28,7 +29,7 @@ func (r *mutationResolver) seedRepositoryFieldGuide(repoID string) {
 	}
 
 	assembler := knowledgepkg.NewAssembler(r.Store)
-	repoSnapshot, err := assembler.Assemble(repo.ID, repoRoot)
+	repoSnapshot, err := assembler.Assemble(bgCtx, repo.ID, repoRoot)
 	if err != nil {
 		slog.Warn("knowledge seed: assemble repo snapshot failed", "repo_id", repo.ID, "error", err)
 		return
@@ -73,7 +74,7 @@ func (r *mutationResolver) seedRepositoryFieldGuide(repoID string) {
 
 	for _, filePath := range repositoryFieldGuideSeedFiles(repoSnapshot) {
 		fileScope := knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeFile, ScopePath: filePath}.Normalize()
-		fileSnapshot, err := assembler.AssembleScoped(repo.ID, repoRoot, fileScope)
+		fileSnapshot, err := assembler.AssembleScoped(bgCtx, repo.ID, repoRoot, fileScope)
 		if err != nil {
 			slog.Warn("knowledge seed: assemble file snapshot failed", "repo_id", repo.ID, "file", filePath, "error", err)
 			continue
@@ -95,7 +96,8 @@ func (r *mutationResolver) seedRepositoryFieldGuide(repoID string) {
 
 func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, key knowledgepkg.ArtifactKey, sourceRevision knowledgepkg.SourceRevision, snapshotJSON string) {
 	key = key.Normalized()
-	existing := r.KnowledgeStore.GetArtifactByKeyAndMode(key, knowledgepkg.GenerationModeUnderstandingFirst)
+	bgCtx := context.Background()
+	existing := r.KnowledgeStore.GetArtifactByKeyAndMode(bgCtx, key, knowledgepkg.GenerationModeUnderstandingFirst)
 	if existing != nil {
 		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
 			return
@@ -103,10 +105,10 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 		if existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
 			return
 		}
-		_ = r.KnowledgeStore.DeleteKnowledgeArtifact(existing.ID)
+		_ = r.KnowledgeStore.DeleteKnowledgeArtifact(bgCtx, existing.ID)
 	}
 
-	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(key, sourceRevision, knowledgepkg.GenerationModeUnderstandingFirst)
+	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(bgCtx, key, sourceRevision, knowledgepkg.GenerationModeUnderstandingFirst)
 	if err != nil || !created {
 		return
 	}
@@ -115,7 +117,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 		snapshotBytes := []byte(snapshotJSON)
 		enrichedSnapshotJSON := snapshotJSON
 		rt.ReportProgress(0.1, "snapshot", "Seed snapshot assembled", 0)
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.1, "snapshot", "Seed snapshot assembled")
+		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.1, "snapshot", "Seed snapshot assembled")
 		// CA-122 Phase 6/7: stream-driven progress for the seed pipeline.
 		streamDriver := r.runStreamProgressDriver(runCtx, rt, artifact.ID, rpcBucketForArtifact(artifact))
 		defer streamDriver.Close()
@@ -152,7 +154,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 					Evidence:   mapProtoEvidence(sec.Evidence),
 				}
 			}
-			if err := r.KnowledgeStore.SupersedeArtifact(artifact.ID, sections); err != nil {
+			if err := r.KnowledgeStore.SupersedeArtifact(runCtx, artifact.ID, sections); err != nil {
 				return err
 			}
 		case knowledgepkg.ArtifactLearningPath:
@@ -161,7 +163,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			} else {
 				if reused {
 					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
-					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
+					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 				}
 				if understanding != nil {
 					if enriched, ok := enrichSnapshotWithUnderstanding(snapshotBytes, understanding); ok {
@@ -191,7 +193,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 					Confidence: knowledgepkg.ConfidenceMedium,
 				}
 			}
-			if err := r.KnowledgeStore.SupersedeArtifact(artifact.ID, sections); err != nil {
+			if err := r.KnowledgeStore.SupersedeArtifact(runCtx, artifact.ID, sections); err != nil {
 				return err
 			}
 		case knowledgepkg.ArtifactCodeTour:
@@ -200,7 +202,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			} else {
 				if reused {
 					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
-					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
+					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 				}
 				if understanding != nil {
 					if enriched, ok := enrichSnapshotWithUnderstanding(snapshotBytes, understanding); ok {
@@ -236,7 +238,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 					}},
 				}
 			}
-			if err := r.KnowledgeStore.SupersedeArtifact(artifact.ID, sections); err != nil {
+			if err := r.KnowledgeStore.SupersedeArtifact(runCtx, artifact.ID, sections); err != nil {
 				return err
 			}
 		case knowledgepkg.ArtifactWorkflowStory:
@@ -245,7 +247,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 			} else {
 				if reused {
 					rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
-					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifact.ID, 0.12, "understanding", "Using cached repository understanding")
+					_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 				}
 				if understanding != nil {
 					if enriched, ok := enrichSnapshotWithUnderstanding(snapshotBytes, understanding); ok {
@@ -279,7 +281,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 					Evidence:   mapProtoEvidence(sec.Evidence),
 				}
 			}
-			if err := r.KnowledgeStore.SupersedeArtifact(artifact.ID, sections); err != nil {
+			if err := r.KnowledgeStore.SupersedeArtifact(runCtx, artifact.ID, sections); err != nil {
 				return err
 			}
 		default:
@@ -292,7 +294,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 	jobType := "seed:" + string(key.Type)
 	if r.Orchestrator == nil {
 		if err := run(context.Background(), noopRuntime{}); err != nil {
-			persistArtifactFailure(r.KnowledgeStore, artifact.ID, err)
+			persistArtifactFailure(bgCtx, r.KnowledgeStore, artifact.ID, err)
 		}
 		return
 	}
@@ -300,7 +302,7 @@ func (r *mutationResolver) ensureKnowledgeArtifact(repo *graphstore.Repository, 
 	// resolver lookup is fast enough that lacking deadline propagation
 	// is acceptable for this fire-and-forget seeding flow.
 	if err := r.enqueueKnowledgeJob(context.Background(), artifact, jobType, len(snapshotJSON), run); err != nil {
-		persistArtifactFailure(r.KnowledgeStore, artifact.ID, err)
+		persistArtifactFailure(bgCtx, r.KnowledgeStore, artifact.ID, err)
 	}
 }
 

@@ -141,7 +141,7 @@ func TestHandlePutAndDeleteDiagramDocumentPersistsUserEditedDocument(t *testing.
 func newDiagramTestServerAndRepo(t *testing.T) (*graphstore.Store, *graphstore.Repository) {
 	t.Helper()
 	store := graphstore.NewStore()
-	repo, err := store.StoreIndexResult(&indexer.IndexResult{
+	repo, err := store.StoreIndexResult(t.Context(), &indexer.IndexResult{
 		RepoName: "diagram-rest-repo",
 		RepoPath: "/tmp/diagram-rest-repo",
 		Files: []indexer.FileResult{

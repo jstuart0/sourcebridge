@@ -22,7 +22,7 @@ func setupPhase4Store(t *testing.T) (*graph.Store, *graph.Repository) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(context.Background(), result)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func setupPhase4Store(t *testing.T) (*graph.Store, *graph.Repository) {
 			AcceptanceCriteria: req.AcceptanceCriteria,
 		})
 	}
-	store.StoreRequirements(repo.ID, storedReqs)
+	store.StoreRequirements(context.Background(), repo.ID, storedReqs)
 
 	return store, repo
 }
@@ -49,20 +49,20 @@ func setupPhase4Store(t *testing.T) (*graph.Store, *graph.Repository) {
 func TestLinkStorage(t *testing.T) {
 	store, repo := setupPhase4Store(t)
 
-	req := store.GetRequirementByExternalID(repo.ID, "REQ-001")
+	req := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-001")
 	if req == nil {
 		t.Fatal("REQ-001 not found")
 	}
 
 	// Get a symbol
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 1, 0)
+	syms, _ := store.GetSymbols(context.Background(), repo.ID, nil, nil, 1, 0)
 	if len(syms) == 0 {
 		t.Fatal("no symbols found")
 	}
 	sym := syms[0]
 
 	// Store a link
-	link := store.StoreLink(repo.ID, &graph.StoredLink{
+	link := store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req.ID,
 		SymbolID:      sym.ID,
 		Confidence:    0.95,
@@ -79,7 +79,7 @@ func TestLinkStorage(t *testing.T) {
 	}
 
 	// Retrieve
-	got := store.GetLink(link.ID)
+	got := store.GetLink(context.Background(), link.ID)
 	if got == nil {
 		t.Fatal("link not found")
 	}
@@ -88,7 +88,7 @@ func TestLinkStorage(t *testing.T) {
 	}
 
 	// Stats should include link
-	stats := store.Stats()
+	stats := store.Stats(context.Background())
 	if stats["links"] != 1 {
 		t.Errorf("expected 1 link in stats, got %d", stats["links"])
 	}
@@ -97,21 +97,21 @@ func TestLinkStorage(t *testing.T) {
 func TestLinksForRequirement(t *testing.T) {
 	store, repo := setupPhase4Store(t)
 
-	req := store.GetRequirementByExternalID(repo.ID, "REQ-001")
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 3, 0)
+	req := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-001")
+	syms, _ := store.GetSymbols(context.Background(), repo.ID, nil, nil, 3, 0)
 	if len(syms) < 2 {
 		t.Fatal("need at least 2 symbols")
 	}
 
 	// Store two links to same requirement
-	store.StoreLink(repo.ID, &graph.StoredLink{
+	store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req.ID,
 		SymbolID:      syms[0].ID,
 		Confidence:    0.9,
 		Source:        "comment",
 		LinkType:      "implements",
 	})
-	store.StoreLink(repo.ID, &graph.StoredLink{
+	store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req.ID,
 		SymbolID:      syms[1].ID,
 		Confidence:    0.7,
@@ -119,7 +119,7 @@ func TestLinksForRequirement(t *testing.T) {
 		LinkType:      "implements",
 	})
 
-	links := store.GetLinksForRequirement(req.ID, false)
+	links := store.GetLinksForRequirement(context.Background(), req.ID, false)
 	if len(links) != 2 {
 		t.Fatalf("expected 2 links, got %d", len(links))
 	}
@@ -128,20 +128,20 @@ func TestLinksForRequirement(t *testing.T) {
 func TestLinksForSymbol(t *testing.T) {
 	store, repo := setupPhase4Store(t)
 
-	req1 := store.GetRequirementByExternalID(repo.ID, "REQ-001")
-	req2 := store.GetRequirementByExternalID(repo.ID, "REQ-003")
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 1, 0)
+	req1 := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-001")
+	req2 := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-003")
+	syms, _ := store.GetSymbols(context.Background(), repo.ID, nil, nil, 1, 0)
 	sym := syms[0]
 
 	// Two requirements linked to same symbol
-	store.StoreLink(repo.ID, &graph.StoredLink{
+	store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req1.ID,
 		SymbolID:      sym.ID,
 		Confidence:    0.9,
 		Source:        "comment",
 		LinkType:      "implements",
 	})
-	store.StoreLink(repo.ID, &graph.StoredLink{
+	store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req2.ID,
 		SymbolID:      sym.ID,
 		Confidence:    0.8,
@@ -149,7 +149,7 @@ func TestLinksForSymbol(t *testing.T) {
 		LinkType:      "implements",
 	})
 
-	links := store.GetLinksForSymbol(sym.ID, false)
+	links := store.GetLinksForSymbol(context.Background(), sym.ID, false)
 	if len(links) != 2 {
 		t.Fatalf("expected 2 links, got %d", len(links))
 	}
@@ -158,10 +158,10 @@ func TestLinksForSymbol(t *testing.T) {
 func TestVerifyLink(t *testing.T) {
 	store, repo := setupPhase4Store(t)
 
-	req := store.GetRequirementByExternalID(repo.ID, "REQ-001")
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 1, 0)
+	req := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-001")
+	syms, _ := store.GetSymbols(context.Background(), repo.ID, nil, nil, 1, 0)
 
-	link := store.StoreLink(repo.ID, &graph.StoredLink{
+	link := store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req.ID,
 		SymbolID:      syms[0].ID,
 		Confidence:    0.7,
@@ -170,7 +170,7 @@ func TestVerifyLink(t *testing.T) {
 	})
 
 	// Verify
-	verified := store.VerifyLink(link.ID, true, "test-user")
+	verified := store.VerifyLink(context.Background(), link.ID, true, "test-user")
 	if verified == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -185,7 +185,7 @@ func TestVerifyLink(t *testing.T) {
 	}
 
 	// Reject
-	rejected := store.VerifyLink(link.ID, false, "test-user")
+	rejected := store.VerifyLink(context.Background(), link.ID, false, "test-user")
 	if !rejected.Rejected {
 		t.Error("expected rejected=true")
 	}
@@ -197,10 +197,10 @@ func TestVerifyLink(t *testing.T) {
 func TestRejectExcludesFromQuery(t *testing.T) {
 	store, repo := setupPhase4Store(t)
 
-	req := store.GetRequirementByExternalID(repo.ID, "REQ-001")
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 1, 0)
+	req := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-001")
+	syms, _ := store.GetSymbols(context.Background(), repo.ID, nil, nil, 1, 0)
 
-	link := store.StoreLink(repo.ID, &graph.StoredLink{
+	link := store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req.ID,
 		SymbolID:      syms[0].ID,
 		Confidence:    0.7,
@@ -209,22 +209,22 @@ func TestRejectExcludesFromQuery(t *testing.T) {
 	})
 
 	// Before rejection
-	links := store.GetLinksForRequirement(req.ID, false)
+	links := store.GetLinksForRequirement(context.Background(), req.ID, false)
 	if len(links) != 1 {
 		t.Fatalf("expected 1 link, got %d", len(links))
 	}
 
 	// Reject
-	store.VerifyLink(link.ID, false, "test-user")
+	store.VerifyLink(context.Background(), link.ID, false, "test-user")
 
 	// After rejection — should be excluded
-	links = store.GetLinksForRequirement(req.ID, false)
+	links = store.GetLinksForRequirement(context.Background(), req.ID, false)
 	if len(links) != 0 {
 		t.Fatalf("expected 0 links after rejection, got %d", len(links))
 	}
 
 	// But include rejected should return it
-	links = store.GetLinksForRequirement(req.ID, true)
+	links = store.GetLinksForRequirement(context.Background(), req.ID, true)
 	if len(links) != 1 {
 		t.Fatalf("expected 1 link with includeRejected, got %d", len(links))
 	}
@@ -233,18 +233,18 @@ func TestRejectExcludesFromQuery(t *testing.T) {
 func TestLinksForRepo(t *testing.T) {
 	store, repo := setupPhase4Store(t)
 
-	req1 := store.GetRequirementByExternalID(repo.ID, "REQ-001")
-	req2 := store.GetRequirementByExternalID(repo.ID, "REQ-003")
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 2, 0)
+	req1 := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-001")
+	req2 := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-003")
+	syms, _ := store.GetSymbols(context.Background(), repo.ID, nil, nil, 2, 0)
 
-	store.StoreLink(repo.ID, &graph.StoredLink{
+	store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req1.ID,
 		SymbolID:      syms[0].ID,
 		Confidence:    0.9,
 		Source:        "comment",
 		LinkType:      "implements",
 	})
-	store.StoreLink(repo.ID, &graph.StoredLink{
+	store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req2.ID,
 		SymbolID:      syms[1].ID,
 		Confidence:    0.8,
@@ -252,7 +252,7 @@ func TestLinksForRepo(t *testing.T) {
 		LinkType:      "implements",
 	})
 
-	links := store.GetLinksForRepo(repo.ID)
+	links := store.GetLinksForRepo(context.Background(), repo.ID)
 	if len(links) != 2 {
 		t.Fatalf("expected 2 links, got %d", len(links))
 	}
@@ -261,10 +261,10 @@ func TestLinksForRepo(t *testing.T) {
 func TestLinkRemovalWithRepo(t *testing.T) {
 	store, repo := setupPhase4Store(t)
 
-	req := store.GetRequirementByExternalID(repo.ID, "REQ-001")
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 1, 0)
+	req := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-001")
+	syms, _ := store.GetSymbols(context.Background(), repo.ID, nil, nil, 1, 0)
 
-	store.StoreLink(repo.ID, &graph.StoredLink{
+	store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req.ID,
 		SymbolID:      syms[0].ID,
 		Confidence:    0.9,
@@ -272,14 +272,14 @@ func TestLinkRemovalWithRepo(t *testing.T) {
 		LinkType:      "implements",
 	})
 
-	stats := store.Stats()
+	stats := store.Stats(context.Background())
 	if stats["links"] != 1 {
 		t.Fatalf("expected 1 link, got %d", stats["links"])
 	}
 
-	store.RemoveRepository(repo.ID)
+	store.RemoveRepository(context.Background(), repo.ID)
 
-	stats = store.Stats()
+	stats = store.Stats(context.Background())
 	if stats["links"] != 0 {
 		t.Errorf("expected 0 links after repo removal, got %d", stats["links"])
 	}
@@ -288,10 +288,10 @@ func TestLinkRemovalWithRepo(t *testing.T) {
 func TestGraphQLVerifyLink(t *testing.T) {
 	store, repo := setupPhase4Store(t)
 
-	req := store.GetRequirementByExternalID(repo.ID, "REQ-001")
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 1, 0)
+	req := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-001")
+	syms, _ := store.GetSymbols(context.Background(), repo.ID, nil, nil, 1, 0)
 
-	link := store.StoreLink(repo.ID, &graph.StoredLink{
+	link := store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req.ID,
 		SymbolID:      syms[0].ID,
 		Confidence:    0.7,
@@ -327,8 +327,8 @@ func TestGraphQLVerifyLink(t *testing.T) {
 func TestGraphQLCreateManualLink(t *testing.T) {
 	store, repo := setupPhase4Store(t)
 
-	req := store.GetRequirementByExternalID(repo.ID, "REQ-001")
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 1, 0)
+	req := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-001")
+	syms, _ := store.GetSymbols(context.Background(), repo.ID, nil, nil, 1, 0)
 
 	ts, token := setupPhase3Server(t, store)
 
@@ -365,17 +365,17 @@ func TestGraphQLCreateManualLink(t *testing.T) {
 func TestGraphQLRequirementToCode(t *testing.T) {
 	store, repo := setupPhase4Store(t)
 
-	req := store.GetRequirementByExternalID(repo.ID, "REQ-001")
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 2, 0)
+	req := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-001")
+	syms, _ := store.GetSymbols(context.Background(), repo.ID, nil, nil, 2, 0)
 
-	store.StoreLink(repo.ID, &graph.StoredLink{
+	store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req.ID,
 		SymbolID:      syms[0].ID,
 		Confidence:    0.9,
 		Source:        "comment",
 		LinkType:      "implements",
 	})
-	store.StoreLink(repo.ID, &graph.StoredLink{
+	store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req.ID,
 		SymbolID:      syms[1].ID,
 		Confidence:    0.8,
@@ -406,19 +406,19 @@ func TestGraphQLRequirementToCode(t *testing.T) {
 func TestGraphQLCodeToRequirements(t *testing.T) {
 	store, repo := setupPhase4Store(t)
 
-	req1 := store.GetRequirementByExternalID(repo.ID, "REQ-001")
-	req2 := store.GetRequirementByExternalID(repo.ID, "REQ-003")
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 1, 0)
+	req1 := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-001")
+	req2 := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-003")
+	syms, _ := store.GetSymbols(context.Background(), repo.ID, nil, nil, 1, 0)
 	sym := syms[0]
 
-	store.StoreLink(repo.ID, &graph.StoredLink{
+	store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req1.ID,
 		SymbolID:      sym.ID,
 		Confidence:    0.9,
 		Source:        "comment",
 		LinkType:      "implements",
 	})
-	store.StoreLink(repo.ID, &graph.StoredLink{
+	store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req2.ID,
 		SymbolID:      sym.ID,
 		Confidence:    0.8,
@@ -449,18 +449,18 @@ func TestGraphQLCodeToRequirements(t *testing.T) {
 func TestGraphQLTraceabilityMatrix(t *testing.T) {
 	store, repo := setupPhase4Store(t)
 
-	req1 := store.GetRequirementByExternalID(repo.ID, "REQ-001")
-	req2 := store.GetRequirementByExternalID(repo.ID, "REQ-003")
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 2, 0)
+	req1 := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-001")
+	req2 := store.GetRequirementByExternalID(context.Background(), repo.ID, "REQ-003")
+	syms, _ := store.GetSymbols(context.Background(), repo.ID, nil, nil, 2, 0)
 
-	store.StoreLink(repo.ID, &graph.StoredLink{
+	store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req1.ID,
 		SymbolID:      syms[0].ID,
 		Confidence:    0.9,
 		Source:        "comment",
 		LinkType:      "implements",
 	})
-	store.StoreLink(repo.ID, &graph.StoredLink{
+	store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 		RequirementID: req2.ID,
 		SymbolID:      syms[1].ID,
 		Confidence:    0.8,
@@ -511,12 +511,12 @@ func TestGraphQLTraceabilityPerformance(t *testing.T) {
 	store, repo := setupPhase4Store(t)
 
 	// Create 100 links
-	reqs, _ := store.GetRequirements(repo.ID, 14, 0)
-	syms, _ := store.GetSymbols(repo.ID, nil, nil, 100, 0)
+	reqs, _ := store.GetRequirements(context.Background(), repo.ID, 14, 0)
+	syms, _ := store.GetSymbols(context.Background(), repo.ID, nil, nil, 100, 0)
 
 	for i := 0; i < 100 && i < len(syms); i++ {
 		reqIdx := i % len(reqs)
-		store.StoreLink(repo.ID, &graph.StoredLink{
+		store.StoreLink(context.Background(), repo.ID, &graph.StoredLink{
 			RequirementID: reqs[reqIdx].ID,
 			SymbolID:      syms[i].ID,
 			Confidence:    0.8,

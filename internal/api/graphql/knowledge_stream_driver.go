@@ -326,7 +326,7 @@ func (r *Resolver) runStreamProgressDriver(
 	// streaming RPC's own ctx already governs its lifetime.
 	return newStreamProgressDriver(rt,
 		func(p float64, phase, msg string, _ float64) error {
-			return r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(artifactID, p, phase, msg)
+			return r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(ctx, artifactID, p, phase, msg)
 		},
 		kind,
 		"artifact_id", artifactID,
@@ -342,10 +342,9 @@ func (r *Resolver) runUnderstandingStreamDriver(
 	understandingID string,
 	kind rpcBucketKind,
 ) *streamProgressDriver {
-	_ = ctx
 	return newStreamProgressDriver(rt,
 		func(p float64, phase, msg string, _ float64) error {
-			return r.KnowledgeStore.UpdateRepositoryUnderstandingProgress(understandingID, p, phase, msg)
+			return r.KnowledgeStore.UpdateRepositoryUnderstandingProgress(ctx, understandingID, p, phase, msg)
 		},
 		kind,
 		"understanding_id", understandingID,

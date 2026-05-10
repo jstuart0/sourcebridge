@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"testing"
@@ -18,7 +19,7 @@ func TestCollectKnowledgeStatsCountsErrorCodes(t *testing.T) {
 	repo := mustStoreAdminKnowledgeTestRepo(t, store)
 	ks := knowledge.NewMemStore()
 
-	ready, err := ks.StoreKnowledgeArtifact(&knowledge.Artifact{
+	ready, err := ks.StoreKnowledgeArtifact(t.Context(), &knowledge.Artifact{
 		RepositoryID: repo.ID,
 		Type:         knowledge.ArtifactCliffNotes,
 		Audience:     knowledge.AudienceDeveloper,
@@ -29,14 +30,14 @@ func TestCollectKnowledgeStatsCountsErrorCodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StoreKnowledgeArtifact ready: %v", err)
 	}
-	if err := ks.SetArtifactFailed(ready.ID, "INTERNAL", "should be cleared on recovery"); err != nil {
+	if err := ks.SetArtifactFailed(t.Context(), ready.ID, "INTERNAL", "should be cleared on recovery"); err != nil {
 		t.Fatalf("SetArtifactFailed ready: %v", err)
 	}
-	if err := ks.UpdateKnowledgeArtifactStatus(ready.ID, knowledge.StatusReady); err != nil {
+	if err := ks.UpdateKnowledgeArtifactStatus(t.Context(), ready.ID, knowledge.StatusReady); err != nil {
 		t.Fatalf("UpdateKnowledgeArtifactStatus ready: %v", err)
 	}
 
-	failed, err := ks.StoreKnowledgeArtifact(&knowledge.Artifact{
+	failed, err := ks.StoreKnowledgeArtifact(t.Context(), &knowledge.Artifact{
 		RepositoryID: repo.ID,
 		Type:         knowledge.ArtifactWorkflowStory,
 		Audience:     knowledge.AudienceDeveloper,
@@ -47,11 +48,11 @@ func TestCollectKnowledgeStatsCountsErrorCodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StoreKnowledgeArtifact failed: %v", err)
 	}
-	if err := ks.SetArtifactFailed(failed.ID, "LLM_EMPTY", "provider returned no content"); err != nil {
+	if err := ks.SetArtifactFailed(t.Context(), failed.ID, "LLM_EMPTY", "provider returned no content"); err != nil {
 		t.Fatalf("SetArtifactFailed failed: %v", err)
 	}
 
-	unknown, err := ks.StoreKnowledgeArtifact(&knowledge.Artifact{
+	unknown, err := ks.StoreKnowledgeArtifact(t.Context(), &knowledge.Artifact{
 		RepositoryID: repo.ID,
 		Type:         knowledge.ArtifactCodeTour,
 		Audience:     knowledge.AudienceDeveloper,
@@ -62,12 +63,12 @@ func TestCollectKnowledgeStatsCountsErrorCodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StoreKnowledgeArtifact unknown: %v", err)
 	}
-	if err := ks.UpdateKnowledgeArtifactStatus(unknown.ID, knowledge.StatusFailed); err != nil {
+	if err := ks.UpdateKnowledgeArtifactStatus(t.Context(), unknown.ID, knowledge.StatusFailed); err != nil {
 		t.Fatalf("UpdateKnowledgeArtifactStatus unknown: %v", err)
 	}
 
 	server := &Server{store: store, knowledgeStore: ks}
-	stats := server.collectKnowledgeStats(store)
+	stats := server.collectKnowledgeStats(context.Background(), store)
 
 	if stats.Total != 3 {
 		t.Fatalf("expected total=3, got %d", stats.Total)
@@ -94,7 +95,7 @@ func TestHandleAdminKnowledgeStatusIncludesFailureDetails(t *testing.T) {
 	repo := mustStoreAdminKnowledgeTestRepo(t, store)
 	ks := knowledge.NewMemStore()
 
-	generating, err := ks.StoreKnowledgeArtifact(&knowledge.Artifact{
+	generating, err := ks.StoreKnowledgeArtifact(t.Context(), &knowledge.Artifact{
 		RepositoryID: repo.ID,
 		Type:         knowledge.ArtifactLearningPath,
 		Audience:     knowledge.AudienceDeveloper,
@@ -106,11 +107,11 @@ func TestHandleAdminKnowledgeStatusIncludesFailureDetails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StoreKnowledgeArtifact generating: %v", err)
 	}
-	if err := ks.UpdateKnowledgeArtifactProgress(generating.ID, 0.4); err != nil {
+	if err := ks.UpdateKnowledgeArtifactProgress(t.Context(), generating.ID, 0.4); err != nil {
 		t.Fatalf("UpdateKnowledgeArtifactProgress: %v", err)
 	}
 
-	failed, err := ks.StoreKnowledgeArtifact(&knowledge.Artifact{
+	failed, err := ks.StoreKnowledgeArtifact(t.Context(), &knowledge.Artifact{
 		RepositoryID: repo.ID,
 		Type:         knowledge.ArtifactWorkflowStory,
 		Audience:     knowledge.AudienceDeveloper,
@@ -121,7 +122,7 @@ func TestHandleAdminKnowledgeStatusIncludesFailureDetails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StoreKnowledgeArtifact failed: %v", err)
 	}
-	if err := ks.SetArtifactFailed(failed.ID, "WORKER_UNAVAILABLE", "connection refused"); err != nil {
+	if err := ks.SetArtifactFailed(t.Context(), failed.ID, "WORKER_UNAVAILABLE", "connection refused"); err != nil {
 		t.Fatalf("SetArtifactFailed: %v", err)
 	}
 
@@ -174,7 +175,7 @@ func TestHandleAdminKnowledgeStatusIncludesFailureDetails(t *testing.T) {
 func mustStoreAdminKnowledgeTestRepo(t *testing.T, store *graphstore.Store) *graphstore.Repository {
 	t.Helper()
 
-	repo, err := store.StoreIndexResult(&indexer.IndexResult{
+	repo, err := store.StoreIndexResult(t.Context(), &indexer.IndexResult{
 		RepoName: "knowledge-admin-repo",
 		RepoPath: "/tmp/knowledge-admin-repo",
 		Files: []indexer.FileResult{

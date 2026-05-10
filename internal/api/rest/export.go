@@ -23,15 +23,15 @@ func (s *Server) handleExportTraceability(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	repo := s.getStore(r).GetRepository(repoID)
+	repo := s.getStore(r).GetRepository(r.Context(), repoID)
 	if repo == nil {
 		http.Error(w, `{"error":"repository not found"}`, http.StatusNotFound)
 		return
 	}
 
-	links := s.getStore(r).GetLinksForRepo(repoID)
-	reqs, _ := s.getStore(r).GetRequirements(repoID, 0, 0)
-	symbols, _ := s.getStore(r).GetSymbols(repoID, nil, nil, 0, 0)
+	links := s.getStore(r).GetLinksForRepo(r.Context(), repoID)
+	reqs, _ := s.getStore(r).GetRequirements(r.Context(), repoID, 0, 0)
+	symbols, _ := s.getStore(r).GetSymbols(r.Context(), repoID, nil, nil, 0, 0)
 
 	reqMap := make(map[string]string)
 	for _, req := range reqs {
@@ -94,13 +94,13 @@ func (s *Server) handleExportRequirements(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	repo := s.getStore(r).GetRepository(repoID)
+	repo := s.getStore(r).GetRepository(r.Context(), repoID)
 	if repo == nil {
 		http.Error(w, `{"error":"repository not found"}`, http.StatusNotFound)
 		return
 	}
 
-	reqs, _ := s.getStore(r).GetRequirements(repoID, 0, 0)
+	reqs, _ := s.getStore(r).GetRequirements(r.Context(), repoID, 0, 0)
 
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=requirements-%s.csv", repo.Name))
@@ -126,13 +126,13 @@ func (s *Server) handleExportSymbols(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	repo := s.getStore(r).GetRepository(repoID)
+	repo := s.getStore(r).GetRepository(r.Context(), repoID)
 	if repo == nil {
 		http.Error(w, `{"error":"repository not found"}`, http.StatusNotFound)
 		return
 	}
 
-	symbols, _ := s.getStore(r).GetSymbols(repoID, nil, nil, 0, 0)
+	symbols, _ := s.getStore(r).GetSymbols(r.Context(), repoID, nil, nil, 0, 0)
 
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=symbols-%s.csv", repo.Name))

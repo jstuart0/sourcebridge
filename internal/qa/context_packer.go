@@ -3,6 +3,8 @@
 
 package qa
 
+import "context"
+
 import (
 	"fmt"
 	"strings"
@@ -92,17 +94,17 @@ func buildDeepContextMarkdown(
 // collectGraphNeighbors pulls callers + callees for the supplied focal
 // symbol, bounded by `cap` per direction. Returns nil when no focal
 // symbol was provided (deep mode without a symbol pin).
-func collectGraphNeighbors(g GraphExpander, focalSymbolID string, cap int) []GraphNeighbor {
+func collectGraphNeighbors(ctx context.Context, g GraphExpander, focalSymbolID string, cap int) []GraphNeighbor {
 	if g == nil || focalSymbolID == "" {
 		return nil
 	}
 	out := make([]GraphNeighbor, 0, cap*2)
-	callers := g.GetCallers(focalSymbolID)
+	callers := g.GetCallers(ctx, focalSymbolID)
 	if len(callers) > cap {
 		callers = callers[:cap]
 	}
 	out = append(out, callers...)
-	callees := g.GetCallees(focalSymbolID)
+	callees := g.GetCallees(ctx, focalSymbolID)
 	if len(callees) > cap {
 		callees = callees[:cap]
 	}

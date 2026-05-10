@@ -94,18 +94,18 @@ func seedSymbolContextData(t *testing.T, h *mcpTestHarness) (handleID, parseID s
 			{SourceID: "ctx-handle", TargetID: "ctx-config", Type: indexer.RelationCalls},
 		},
 	}
-	repo, err := h.store.ReplaceIndexResult(h.repoID, result)
+	repo, err := h.store.ReplaceIndexResult(t.Context(), h.repoID, result)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 	h.repoID = repo.ID
 
-	for _, s := range h.store.GetSymbolsByFile(h.repoID, "main.go") {
+	for _, s := range h.store.GetSymbolsByFile(t.Context(), h.repoID, "main.go") {
 		if s.Name == "HandleRequest" {
 			handleID = s.ID
 		}
 	}
-	for _, s := range h.store.GetSymbolsByFile(h.repoID, "utils.go") {
+	for _, s := range h.store.GetSymbolsByFile(t.Context(), h.repoID, "utils.go") {
 		if s.Name == "ParseJSON" {
 			parseID = s.ID
 		}
@@ -407,7 +407,7 @@ func TestMCP_GetSymbolContext_TruncationCallers(t *testing.T) {
 		Files:     []indexer.FileResult{{Path: "trunc.go", Language: "go", LineCount: 200, Symbols: symbols}},
 		Relations: relations,
 	}
-	repo, err := h.store.ReplaceIndexResult(h.repoID, result)
+	repo, err := h.store.ReplaceIndexResult(t.Context(), h.repoID, result)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestMCP_GetSymbolContext_TruncationCallers(t *testing.T) {
 
 	// Find the generated target symbol ID.
 	var targetID string
-	for _, s := range h.store.GetSymbolsByFile(h.repoID, "trunc.go") {
+	for _, s := range h.store.GetSymbolsByFile(t.Context(), h.repoID, "trunc.go") {
 		if s.Name == "TargetFunc" {
 			targetID = s.ID
 			break
@@ -503,14 +503,14 @@ func TestMCP_GetSymbolContext_TruncationCallees(t *testing.T) {
 		Files:     []indexer.FileResult{{Path: "callees.go", Language: "go", LineCount: 200, Symbols: symbols}},
 		Relations: relations,
 	}
-	repo, err := h.store.ReplaceIndexResult(h.repoID, result)
+	repo, err := h.store.ReplaceIndexResult(t.Context(), h.repoID, result)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 	h.repoID = repo.ID
 
 	var callerSymID string
-	for _, s := range h.store.GetSymbolsByFile(h.repoID, "callees.go") {
+	for _, s := range h.store.GetSymbolsByFile(t.Context(), h.repoID, "callees.go") {
 		if s.Name == "CallerFunc" {
 			callerSymID = s.ID
 			break
@@ -591,14 +591,14 @@ func TestMCP_GetSymbolContext_TruncationImports(t *testing.T) {
 			},
 		},
 	}
-	repo, err := h.store.ReplaceIndexResult(h.repoID, result)
+	repo, err := h.store.ReplaceIndexResult(t.Context(), h.repoID, result)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 	h.repoID = repo.ID
 
 	var symID string
-	for _, s := range h.store.GetSymbolsByFile(h.repoID, "imports.go") {
+	for _, s := range h.store.GetSymbolsByFile(t.Context(), h.repoID, "imports.go") {
 		if s.Name == "ImportHeavy" {
 			symID = s.ID
 			break
@@ -682,14 +682,14 @@ func TestMCP_GetSymbolContext_MissingCallerSymbol_Skipped(t *testing.T) {
 			{SourceID: "ghost-caller", TargetID: "dangle-target", Type: indexer.RelationCalls},
 		},
 	}
-	repo, err := h.store.ReplaceIndexResult(h.repoID, result)
+	repo, err := h.store.ReplaceIndexResult(t.Context(), h.repoID, result)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 	h.repoID = repo.ID
 
 	var targetSymID string
-	for _, s := range h.store.GetSymbolsByFile(h.repoID, "target.go") {
+	for _, s := range h.store.GetSymbolsByFile(t.Context(), h.repoID, "target.go") {
 		if s.Name == "TargetFn" {
 			targetSymID = s.ID
 			break
@@ -908,7 +908,7 @@ func TestMCP_GetSymbolContext_CrossRepoLeakageBlocked(t *testing.T) {
 	sess := h.createSession()
 
 	// Create a second empty repo.
-	repoB, err := h.store.StoreIndexResult(&indexer.IndexResult{
+	repoB, err := h.store.StoreIndexResult(t.Context(), &indexer.IndexResult{
 		RepoName: "repo-b-ctx",
 		RepoPath: "/tmp/repo-b-ctx",
 		Files:    []indexer.FileResult{},
@@ -967,7 +967,7 @@ func newBenchHarness(b *testing.B) *benchHarness {
 		RepoPath: "/tmp/bench-repo",
 		Files:    []indexer.FileResult{},
 	}
-	repo, err := store.StoreIndexResult(init)
+	repo, err := store.StoreIndexResult(b.Context(), init)
 	if err != nil {
 		b.Fatalf("StoreIndexResult: %v", err)
 	}
@@ -1056,14 +1056,14 @@ func BenchmarkMCP_GetSymbolContext(b *testing.B) {
 		},
 		Relations: relations,
 	}
-	repo, err := bh.store.ReplaceIndexResult(bh.repoID, indexResult)
+	repo, err := bh.store.ReplaceIndexResult(b.Context(), bh.repoID, indexResult)
 	if err != nil {
 		b.Fatalf("ReplaceIndexResult: %v", err)
 	}
 	bh.repoID = repo.ID
 
 	var rootID string
-	for _, s := range bh.store.GetSymbolsByFile(bh.repoID, "bench.go") {
+	for _, s := range bh.store.GetSymbolsByFile(b.Context(), bh.repoID, "bench.go") {
 		if s.Name == "BenchRoot" {
 			rootID = s.ID
 			break

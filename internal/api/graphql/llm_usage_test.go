@@ -211,7 +211,7 @@ func TestStoreLLMUsage_ProviderResolution(t *testing.T) {
 			store := graphstore.NewStore()
 			storeLLMUsage(store, repoID, tc.usage, tc.operation)
 
-			records := store.GetLLMUsage(repoID, 10)
+			records := store.GetLLMUsage(t.Context(), repoID, 10)
 			if tc.usage == nil {
 				if len(records) != 0 {
 					t.Errorf("nil usage: expected 0 records, got %d", len(records))

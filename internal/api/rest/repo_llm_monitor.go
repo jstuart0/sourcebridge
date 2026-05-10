@@ -252,7 +252,7 @@ func (s *Server) handleRepoLLMJobCancel(w http.ResponseWriter, r *http.Request) 
 
 	job := s.orchestrator.GetJob(jobID)
 	if s.knowledgeStore != nil && job != nil && job.ArtifactID != "" {
-		_ = s.knowledgeStore.SetArtifactFailed(job.ArtifactID, "CANCELLED", "Generation was cancelled before completion.")
+		_ = s.knowledgeStore.SetArtifactFailed(r.Context(), job.ArtifactID, "CANCELLED", "Generation was cancelled before completion.")
 		job.Progress = 0
 		job.ProgressPhase = ""
 		job.ProgressMessage = ""
