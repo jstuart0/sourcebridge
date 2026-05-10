@@ -89,9 +89,10 @@ func TestGetRepositoryStatus_ReadyAndPartialWhenReadyStagePartialTree(t *testing
 // will fail loudly — classify the new stage as Ready/Not-ready/Partial and add
 // it to the table before proceeding.
 func TestGetRepositoryStatus_ReadinessMatrix(t *testing.T) {
-	// Enum-growth tripwire: update this slice whenever a new
-	// RepositoryUnderstandingStage is added to internal/knowledge/models.go.
-	// The test will fail until the new stage is classified in the table below.
+	// Enum-growth tripwire: knownStages must match knowledge.AllRepositoryUnderstandingStages
+	// exactly. When a new RepositoryUnderstandingStage constant is added to
+	// internal/knowledge/models.go, add it to AllRepositoryUnderstandingStages AND
+	// classify it in the table below — the DeepEqual assertion will catch the omission.
 	knownStages := []knowledge.RepositoryUnderstandingStage{
 		knowledge.UnderstandingBuildingTree,
 		knowledge.UnderstandingFirstPassReady,
@@ -100,8 +101,8 @@ func TestGetRepositoryStatus_ReadinessMatrix(t *testing.T) {
 		knowledge.UnderstandingReady,
 		knowledge.UnderstandingFailed,
 	}
-	if len(knownStages) != 6 {
-		t.Fatalf("enum-growth tripwire: expected 6 known stages, got %d — update knownStages and the table below", len(knownStages))
+	if !reflect.DeepEqual(knownStages, knowledge.AllRepositoryUnderstandingStages) {
+		t.Fatalf("enum-growth tripwire: knownStages doesn't match AllRepositoryUnderstandingStages — update both and the table below\ngot:  %v\nwant: %v", knownStages, knowledge.AllRepositoryUnderstandingStages)
 	}
 
 	type cell struct {

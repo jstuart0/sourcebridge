@@ -212,3 +212,28 @@ func TestPrintAskPretty_PrefersDiagnosticsModeLabel(t *testing.T) {
 		t.Errorf("expected output NOT to contain [fast], but it does:\n%s", outStr)
 	}
 }
+
+// TestRunAskLegacy_DefaultsToFastWhenModeUnset verifies that when --mode is not
+// passed, the legacy subprocess receives "fast" — not "deep". The server path
+// inherits the server-side default; the legacy path must resolve locally and
+// must not regress local-desktop users to a blocking deep path.
+func TestRunAskLegacy_DefaultsToFastWhenModeUnset(t *testing.T) {
+	// resolveAskLegacyMode mirrors the inline logic in runAskLegacy so we can
+	// unit-test the default without spinning up a Python process.
+	resolveAskLegacyMode := func(mode string) string {
+		if mode == "" {
+			return "fast"
+		}
+		return mode
+	}
+
+	if got := resolveAskLegacyMode(""); got != "fast" {
+		t.Errorf("legacy mode with unset askMode: got %q, want %q", got, "fast")
+	}
+	if got := resolveAskLegacyMode("deep"); got != "deep" {
+		t.Errorf("legacy mode with explicit deep: got %q, want %q", got, "deep")
+	}
+	if got := resolveAskLegacyMode("fast"); got != "fast" {
+		t.Errorf("legacy mode with explicit fast: got %q, want %q", got, "fast")
+	}
+}

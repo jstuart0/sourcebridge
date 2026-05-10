@@ -89,6 +89,10 @@ func (o *Orchestrator) runAgentic(
 
 	// Seed context: summaries + classifier hints.
 	var summaries []SummaryEvidence
+	// corpusPartial mirrors the single-shot path's understanding_partial soft
+	// signal (deep_pipeline.go:85-86). Hoisted outside the reader block so the
+	// FallbackUsed assignment at the return site can read it.
+	var corpusPartial bool
 	if o.reader != nil {
 		t1 := time.Now()
 		status := GetRepositoryStatus(ctx, o.reader, in.RepositoryID, "")
@@ -97,6 +101,7 @@ func (o *Orchestrator) runAgentic(
 			result.Diagnostics.UnderstandingStage = status.UnderstandingStage
 			result.Diagnostics.TreeStatus = status.TreeStatus
 			result.Diagnostics.UnderstandingRevision = status.UnderstandingRevision
+			corpusPartial = status.Partial
 
 			if !status.Ready {
 				// Don't start the loop — single-shot deep already
@@ -187,6 +192,13 @@ func (o *Orchestrator) runAgentic(
 			Prompt:          fmt.Sprintf("agentic loop, %d turns, %d tool calls", loopResult.TurnsCount, loopResult.ToolCallsCount),
 			ContextMarkdown: loopResult.RawAnswer,
 		}
+	}
+
+	// Mirror the single-shot path's soft signal (deep_pipeline.go:85-86):
+	// partial-corpus runs carry understanding_partial so callers can present
+	// a quality caveat without blocking the answer.
+	if corpusPartial {
+		result.Diagnostics.FallbackUsed = "understanding_partial"
 	}
 
 	result.Diagnostics.StageTimings["qa.ask"] = FromDuration(time.Since(started))

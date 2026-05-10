@@ -298,6 +298,28 @@ const (
 	UnderstandingFailed         RepositoryUnderstandingStage = "failed"
 )
 
+// AllRepositoryUnderstandingStages is the canonical ordered list of all
+// RepositoryUnderstandingStage constants. Tests that classify stages (e.g.
+// TestGetRepositoryStatus_ReadinessMatrix) assert their coverage slice matches
+// this list so that adding a new constant without updating the test causes an
+// immediate compile-time-visible failure.
+var AllRepositoryUnderstandingStages = []RepositoryUnderstandingStage{
+	UnderstandingBuildingTree,
+	UnderstandingFirstPassReady,
+	UnderstandingNeedsRefresh,
+	UnderstandingDeepening,
+	UnderstandingReady,
+	UnderstandingFailed,
+}
+
+// AllRepositoryUnderstandingTreeStatuses is the canonical ordered list of all
+// RepositoryUnderstandingTreeStatus constants, mirroring the pattern above.
+var AllRepositoryUnderstandingTreeStatuses = []RepositoryUnderstandingTreeStatus{
+	UnderstandingTreeMissing,
+	UnderstandingTreePartial,
+	UnderstandingTreeComplete,
+}
+
 // IsRunning reports whether work is actively in progress for this stage.
 // Only running stages may carry meaningful progress / progress_phase /
 // progress_message values; any write that lands a non-running stage must

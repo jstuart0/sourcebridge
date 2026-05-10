@@ -223,9 +223,14 @@ func runAskLegacy(ctx context.Context, cfg *config.Config, question string) erro
 		return fmt.Errorf("resolving repo path: %w", err)
 	}
 
+	// Legacy subprocess default is "fast" — local-desktop users without an
+	// indexed corpus get a working answer via pure LLM completion rather than
+	// blocking on a deep retrieval path that has nothing to retrieve.
+	// The server path uses cmd.Flags().Changed("mode") to distinguish unset
+	// from explicitly-passed flags; the legacy path simply resolves here.
 	legacyMode := askMode
 	if legacyMode == "" {
-		legacyMode = "deep"
+		legacyMode = "fast"
 	}
 	pyCmd := exec.CommandContext(ctx, "uv", "run", "python", "cli_ask.py", question, legacyMode)
 	pyCmd.Dir = findWorkersDir()
