@@ -64,13 +64,13 @@ type Resolved struct {
 // Resolver merges UI-stored settings with env-var fallbacks.
 // It caches results for ~30 seconds to avoid hammering the DB on every event.
 type Resolver struct {
-	store  Store
-	env    EnvConfig
-	ttl    time.Duration
+	store Store
+	env   EnvConfig
+	ttl   time.Duration
 
-	mu         sync.Mutex
-	cached     *Resolved
-	cachedAt   time.Time
+	mu       sync.Mutex
+	cached   *Resolved
+	cachedAt time.Time
 }
 
 // NewResolver creates a Resolver. ttl is the cache duration; pass 0 to use

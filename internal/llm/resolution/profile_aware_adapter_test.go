@@ -71,12 +71,12 @@ func (f *fakeProfileStore) LoadAllProfileIDs(_ context.Context) ([]string, error
 }
 
 type fakeReconciler struct {
-	calls     atomic.Int64
-	result    ReconcileResult
-	err       error
-	lastObsV  uint64
-	lastObsW  uint64
-	lastID    string
+	calls    atomic.Int64
+	result   ReconcileResult
+	err      error
+	lastObsV uint64
+	lastObsW uint64
+	lastID   string
 }
 
 func (f *fakeReconciler) ReconcileLegacyToActive(_ context.Context, observedVersion, observedWatermark uint64, activeID string) (ReconcileResult, error) {

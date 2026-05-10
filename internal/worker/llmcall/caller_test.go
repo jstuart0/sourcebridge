@@ -171,7 +171,10 @@ func TestCaller_AttachesMetadataAcrossAllProtectedRPCs(t *testing.T) {
 		fn   func() error
 	}
 	cases := []call{
-		{"AnswerQuestion", func() error { _, e := c.AnswerQuestion(ctx, "", resolution.OpDiscussion, &reasoningv1.AnswerQuestionRequest{}); return e }},
+		{"AnswerQuestion", func() error {
+			_, e := c.AnswerQuestion(ctx, "", resolution.OpDiscussion, &reasoningv1.AnswerQuestionRequest{})
+			return e
+		}},
 		{"AnswerQuestionWithTools", func() error {
 			_, e := c.AnswerQuestionWithTools(ctx, "", resolution.OpQAAgentTurn, &reasoningv1.AnswerQuestionWithToolsRequest{})
 			return e
@@ -196,7 +199,10 @@ func TestCaller_AttachesMetadataAcrossAllProtectedRPCs(t *testing.T) {
 			_, e := c.AnalyzeSymbol(ctx, "", resolution.OpAnalysis, &reasoningv1.AnalyzeSymbolRequest{})
 			return e
 		}},
-		{"ReviewFile", func() error { _, e := c.ReviewFile(ctx, "", resolution.OpReview, &reasoningv1.ReviewFileRequest{}); return e }},
+		{"ReviewFile", func() error {
+			_, e := c.ReviewFile(ctx, "", resolution.OpReview, &reasoningv1.ReviewFileRequest{})
+			return e
+		}},
 		{"GenerateCliffNotes", func() error {
 			_, e := c.GenerateCliffNotes(ctx, "", resolution.OpKnowledge, &knowledgev1.GenerateCliffNotesRequest{})
 			return e

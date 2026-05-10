@@ -84,8 +84,9 @@ const SecretSentinel = "********"
 // list lives here so the next refactor that wants a data-driven
 // MaskSecrets has the source of truth ready.
 //
-//nolint:unused // Reference list; see MaskSecrets and the secret-handling
 // audit notes.
+//
+//nolint:unused // Reference list; see MaskSecrets and the secret-handling
 var secretFields = []string{
 	"github_token",
 	"gitlab_token",
@@ -185,12 +186,12 @@ type PagePublishStatusRow struct {
 	PageID             string
 	SinkKind           string
 	IntegrationName    string
-	Status             string    // "pending", "generating", "ready", "failed", "failed_fixup"
+	Status             string // "pending", "generating", "ready", "failed", "failed_fixup"
 	ErrorMsg           string
-	ContentFingerprint string    // empty string (not nil) when no fingerprint yet (LD-7, C2)
+	ContentFingerprint string // empty string (not nil) when no fingerprint yet (LD-7, C2)
 	HasStubs           bool
 	StubTargetPageIDs  []string
-	FixupStatus        string    // one of the FixupStatus* constants
+	FixupStatus        string // one of the FixupStatus* constants
 	UpdatedAt          time.Time
 }
 

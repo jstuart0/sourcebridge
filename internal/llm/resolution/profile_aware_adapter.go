@@ -323,6 +323,6 @@ func legacyOverlayFromSnap(snap *ConfigSnapshot) *WorkspaceRecord {
 // Compile-time interface checks: the adapter must implement both
 // LLMConfigStore and ProfileLookupStore.
 var (
-	_ LLMConfigStore    = (*ProfileAwareLLMResolverAdapter)(nil)
+	_ LLMConfigStore     = (*ProfileAwareLLMResolverAdapter)(nil)
 	_ ProfileLookupStore = (*ProfileAwareLLMResolverAdapter)(nil)
 )

@@ -294,8 +294,8 @@ func (s *LivingWikiSettingsStore) DecryptForTest(encoded string) (string, error)
 
 // LivingWikiSettingsUpdatedAt is a lightweight helper that just reads the
 // updated_at timestamp from the stored row. Used by health checks.
-func LivingWikiSettingsUpdatedAt(store livingwiki.Store) (time.Time, error) {
-	s, err := store.Get(context.Background())
+func LivingWikiSettingsUpdatedAt(ctx context.Context, store livingwiki.Store) (time.Time, error) {
+	s, err := store.Get(ctx)
 	if err != nil {
 		return time.Time{}, err
 	}
