@@ -20,7 +20,7 @@ import (
 
 type fakeSymbolGraph struct{}
 
-func (f *fakeSymbolGraph) ExportedSymbols(_ string) ([]templates.Symbol, error) {
+func (f *fakeSymbolGraph) ExportedSymbols(_ context.Context, _ string) ([]templates.Symbol, error) {
 	return []templates.Symbol{
 		{
 			Package: "internal/auth", Name: "Init",
