@@ -135,7 +135,7 @@ var _ lwcredentials.Broker = (*fakeBroker)(nil)
 // TaxonomyResolver will derive 3 architecture + 1 API ref + 1 sysoverview + 1 glossary = 6 pages.
 type fakeSymbolGraph struct{}
 
-func (fakeSymbolGraph) ExportedSymbols(_ string) ([]templates.Symbol, error) {
+func (fakeSymbolGraph) ExportedSymbols(_ context.Context, _ string) ([]templates.Symbol, error) {
 	packages := []string{"internal/auth", "internal/billing", "internal/payments"}
 	var syms []templates.Symbol
 	for _, pkg := range packages {

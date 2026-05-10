@@ -22,7 +22,7 @@ import (
 // cascade.
 func TestSummaryNodeStore_RoundTrip(t *testing.T) {
 	surreal := startSurrealContainer(t)
-	store := surreal
+	store := NewSurrealStore(surreal)
 
 	const corpusID = "summary-node-roundtrip-corpus"
 

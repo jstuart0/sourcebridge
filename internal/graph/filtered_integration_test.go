@@ -121,7 +121,7 @@ func seedRepo(t *testing.T, store graph.GraphStore, name string) string {
 			{Path: "main.go", Language: "go", LineCount: 5},
 		},
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult(%s): %v", name, err)
 	}
@@ -145,19 +145,19 @@ func TestFilteredIntegrationUnlinkReposLegitimate(t *testing.T) {
 	repoB := seedRepo(t, store, "T19-repo-B")
 
 	// Create a link using the unfiltered store.
-	link, err := store.LinkRepos(repoA, repoB)
+	link, err := store.LinkRepos(t.Context(), repoA, repoB)
 	if err != nil {
 		t.Fatalf("LinkRepos: %v", err)
 	}
 
 	// The tenant owns both repos.
 	f := filteredFor(store, repoA, repoB)
-	if err := f.UnlinkRepos(link.ID); err != nil {
+	if err := f.UnlinkRepos(t.Context(), link.ID); err != nil {
 		t.Fatalf("UnlinkRepos via filtered store: %v", err)
 	}
 
 	// Verify the link is gone.
-	links, err := store.GetRepoLinks(repoA)
+	links, err := store.GetRepoLinks(t.Context(), repoA)
 	if err != nil {
 		t.Fatalf("GetRepoLinks: %v", err)
 	}
@@ -185,12 +185,12 @@ func TestFilteredIntegrationStoreCrossRepoRefLegitimate(t *testing.T) {
 		RefType:      "import",
 		Confidence:   0.9,
 	}
-	if err := f.StoreCrossRepoRef(ref); err != nil {
+	if err := f.StoreCrossRepoRef(t.Context(), ref); err != nil {
 		t.Fatalf("StoreCrossRepoRef: %v", err)
 	}
 
 	// Verify the row is present via unfiltered store.
-	refs, err := store.GetCrossRepoRefs(repoA, nil, 10)
+	refs, err := store.GetCrossRepoRefs(t.Context(), repoA, nil, 10)
 	if err != nil {
 		t.Fatalf("GetCrossRepoRefs: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestFilteredIntegrationStoreCrossRepoRefsAllAllowed(t *testing.T) {
 		{SourceRepoID: repoA, TargetRepoID: repoB, RefType: "call", Confidence: 0.7},
 		{SourceRepoID: repoB, TargetRepoID: repoA, RefType: "import", Confidence: 0.6},
 	}
-	n := f.StoreCrossRepoRefs(refs)
+	n := f.StoreCrossRepoRefs(t.Context(), refs)
 	if n != 3 {
 		t.Fatalf("StoreCrossRepoRefs returned %d; want 3", n)
 	}
@@ -240,13 +240,13 @@ func TestFilteredIntegrationStoreCrossRepoRefsMixed(t *testing.T) {
 		{SourceRepoID: repoA, TargetRepoID: "repo-C-not-allowed", RefType: "import", Confidence: 0.5},
 		{SourceRepoID: "repo-C-not-allowed", TargetRepoID: repoB, RefType: "call", Confidence: 0.4},
 	}
-	n := f.StoreCrossRepoRefs(refs)
+	n := f.StoreCrossRepoRefs(t.Context(), refs)
 	if n != 3 {
 		t.Fatalf("StoreCrossRepoRefs returned %d; want 3 (2 cross-tenant filtered out)", n)
 	}
 
 	// The cross-tenant refs must not be in the store.
-	allRefs, err := store.GetCrossRepoRefs(repoA, nil, 20)
+	allRefs, err := store.GetCrossRepoRefs(t.Context(), repoA, nil, 20)
 	if err != nil {
 		t.Fatalf("GetCrossRepoRefs: %v", err)
 	}
@@ -282,13 +282,13 @@ func TestFilteredIntegrationGetSymbolCrossRepoRefsLegitimate(t *testing.T) {
 		},
 	}
 	// Re-store repoA with a symbol via ReplaceIndexResult (which takes an existing repo ID).
-	_, err := store.ReplaceIndexResult(repoA, symResult)
+	_, err := store.ReplaceIndexResult(t.Context(), repoA, symResult)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 
 	// Find the actual symbol ID as stored (the store assigns IDs from indexer ID).
-	syms := store.GetSymbolsByFile(repoA, "a.go")
+	syms := store.GetSymbolsByFile(t.Context(), repoA, "a.go")
 	if len(syms) == 0 {
 		t.Fatal("no symbols found after ReplaceIndexResult")
 	}
@@ -302,12 +302,12 @@ func TestFilteredIntegrationGetSymbolCrossRepoRefsLegitimate(t *testing.T) {
 		RefType:        "import",
 		Confidence:     0.9,
 	}
-	if err := store.StoreCrossRepoRef(ref); err != nil {
+	if err := store.StoreCrossRepoRef(t.Context(), ref); err != nil {
 		t.Fatalf("StoreCrossRepoRef: %v", err)
 	}
 
 	f := filteredFor(store, repoA, repoB)
-	refs, err := f.GetSymbolCrossRepoRefs(symID)
+	refs, err := f.GetSymbolCrossRepoRefs(t.Context(), symID)
 	if err != nil {
 		t.Fatalf("GetSymbolCrossRepoRefs: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestFilteredIntegrationDeleteCrossRepoRefsBetweenReposBothInScope(t *testin
 	repoB := seedRepo(t, store, "T30-repo-B")
 
 	// Seed a ref between them.
-	if err := store.StoreCrossRepoRef(&graph.CrossRepoRef{
+	if err := store.StoreCrossRepoRef(t.Context(), &graph.CrossRepoRef{
 		SourceRepoID: repoA,
 		TargetRepoID: repoB,
 		RefType:      "import",
@@ -336,11 +336,11 @@ func TestFilteredIntegrationDeleteCrossRepoRefsBetweenReposBothInScope(t *testin
 	}
 
 	f := filteredFor(store, repoA, repoB)
-	if err := f.DeleteCrossRepoRefsBetweenRepos(repoA, repoB); err != nil {
+	if err := f.DeleteCrossRepoRefsBetweenRepos(t.Context(), repoA, repoB); err != nil {
 		t.Fatalf("DeleteCrossRepoRefsBetweenRepos: %v", err)
 	}
 
-	refs, err := store.GetCrossRepoRefs(repoA, nil, 10)
+	refs, err := store.GetCrossRepoRefs(t.Context(), repoA, nil, 10)
 	if err != nil {
 		t.Fatalf("GetCrossRepoRefs: %v", err)
 	}
@@ -376,13 +376,13 @@ func TestFilteredIntegrationGetCallEdgesLegitimate(t *testing.T) {
 			{SourceID: "sym-caller", TargetID: "sym-callee", Type: indexer.RelationCalls},
 		},
 	}
-	repo, err := store.StoreIndexResult(result)
+	repo, err := store.StoreIndexResult(t.Context(), result)
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
 
 	f := filteredFor(store, repo.ID)
-	edges := f.GetCallEdges(repo.ID)
+	edges := f.GetCallEdges(t.Context(), repo.ID)
 	if len(edges) == 0 {
 		t.Fatal("expected at least one call edge for allowed repo")
 	}
@@ -405,11 +405,11 @@ func TestFilteredIntegrationStoreAPIContractLegitimate(t *testing.T) {
 		Version:      "1.0.0",
 		ContentHash:  "abc123",
 	}
-	if err := f.StoreAPIContract(contract); err != nil {
+	if err := f.StoreAPIContract(t.Context(), contract); err != nil {
 		t.Fatalf("StoreAPIContract: %v", err)
 	}
 
-	contracts, err := store.GetAPIContracts(repoA)
+	contracts, err := store.GetAPIContracts(t.Context(), repoA)
 	if err != nil {
 		t.Fatalf("GetAPIContracts: %v", err)
 	}
@@ -430,11 +430,10 @@ func TestFilteredIntegrationVerifyLinkLegitimate(t *testing.T) {
 	repoA := seedRepo(t, store, "T34-repo-A")
 
 	// Seed a requirement and a link for it.
-	store.StoreRequirement(repoA, &graph.StoredRequirement{
+	store.StoreRequirement(t.Context(), repoA, &graph.StoredRequirement{
 		ID:         "req-T34",
 		ExternalID: "T34-EXT-001",
 		Title:      "T34 req",
-		Status:     "active",
 	})
 
 	// Seed a symbol.
@@ -451,17 +450,17 @@ func TestFilteredIntegrationVerifyLinkLegitimate(t *testing.T) {
 			},
 		},
 	}
-	_, err := store.ReplaceIndexResult(repoA, symResult)
+	_, err := store.ReplaceIndexResult(t.Context(), repoA, symResult)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 
-	syms := store.GetSymbolsByFile(repoA, "a.go")
+	syms := store.GetSymbolsByFile(t.Context(), repoA, "a.go")
 	if len(syms) == 0 {
 		t.Fatal("no symbols found after ReplaceIndexResult")
 	}
 
-	link := store.StoreLink(repoA, &graph.StoredLink{
+	link := store.StoreLink(t.Context(), repoA, &graph.StoredLink{
 		RepoID:        repoA,
 		RequirementID: "req-T34",
 		SymbolID:      syms[0].ID,
@@ -474,7 +473,7 @@ func TestFilteredIntegrationVerifyLinkLegitimate(t *testing.T) {
 
 	// Verify via the filtered store — link's repo is allowed.
 	f := filteredFor(store, repoA)
-	updated := f.VerifyLink(link.ID, true, "user-A")
+	updated := f.VerifyLink(t.Context(), link.ID, true, "user-A")
 	if updated == nil {
 		t.Fatal("VerifyLink returned nil; expected updated link")
 	}
@@ -518,19 +517,19 @@ func TestFilteredIntegrationGetSymbolCrossRepoRefsPartialTarget(t *testing.T) {
 			},
 		},
 	}
-	_, err := store.ReplaceIndexResult(repoA, symResult)
+	_, err := store.ReplaceIndexResult(t.Context(), repoA, symResult)
 	if err != nil {
 		t.Fatalf("ReplaceIndexResult: %v", err)
 	}
 
-	syms := store.GetSymbolsByFile(repoA, "a.go")
+	syms := store.GetSymbolsByFile(t.Context(), repoA, "a.go")
 	if len(syms) == 0 {
 		t.Fatal("no symbols found after ReplaceIndexResult")
 	}
 	symID := syms[0].ID
 
 	// Store two cross-repo refs: A→B (allowed) and A→C (not in tenant's set).
-	if err := store.StoreCrossRepoRef(&graph.CrossRepoRef{
+	if err := store.StoreCrossRepoRef(t.Context(), &graph.CrossRepoRef{
 		SourceSymbolID: symID,
 		SourceRepoID:   repoA,
 		TargetRepoID:   repoB,
@@ -539,7 +538,7 @@ func TestFilteredIntegrationGetSymbolCrossRepoRefsPartialTarget(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("StoreCrossRepoRef A→B: %v", err)
 	}
-	if err := store.StoreCrossRepoRef(&graph.CrossRepoRef{
+	if err := store.StoreCrossRepoRef(t.Context(), &graph.CrossRepoRef{
 		SourceSymbolID: symID,
 		SourceRepoID:   repoA,
 		TargetRepoID:   repoC,
@@ -551,7 +550,7 @@ func TestFilteredIntegrationGetSymbolCrossRepoRefsPartialTarget(t *testing.T) {
 
 	// Tenant may access A and B but NOT C.
 	f := filteredFor(store, repoA, repoB)
-	refs, err := f.GetSymbolCrossRepoRefs(symID)
+	refs, err := f.GetSymbolCrossRepoRefs(t.Context(), symID)
 	if err != nil {
 		t.Fatalf("GetSymbolCrossRepoRefs: %v", err)
 	}
