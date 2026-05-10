@@ -24,6 +24,18 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-10 Resolver/AppDeps dedup + GitConfigLoader removal (CA-184 + CA-305)** — 3 commits, `5ef9a47` + `9a8a646` + this docs commit.
+Closes CA-184 (HIGH — `graphql.Resolver` duplicated 26 mirror fields of `AppDeps` with a sync function) and CA-305 (HIGH — `GitConfigLoader` was a transitional adapter shadowed by production CLI wiring). Phase 1 collapsed all 26 mirror fields onto a single `Deps *appdeps.AppDeps` reference; ~480 production access sites and ~20 test files rewritten; `resolver_deps.go` and `SyncResolverDepsFromAppDeps` deleted. Phase 2 removed the `GitConfigLoader` type, the `gitConfigLoaderAdapter`, and the `GitConfig` field from `Resolver`. The `Resolver` struct now has exactly 4 fields: `Deps`, `Store`, `Plan`, `ClusteringHook`.
+
+Load-bearing constraints for future-Claude:
+
+- **`Resolver.Deps` is mandatory.** Tests constructing `Resolver{}` MUST include at least `Deps: &appdeps.AppDeps{...}` populated with whatever fields the test exercises. Existing degraded-mode checks like `if r.Worker == nil` rewrite to `if r.Deps.Worker == nil`. Don't introduce new tests that construct a bare `Resolver{}` expecting nil-degraded behavior.
+- **`Resolver` has exactly 4 fields**: `Deps`, `Store`, `Plan`, `ClusteringHook`. Adding a new field to `Resolver` should follow the question: "could this go on `AppDeps`?" If yes, add it there and access via `r.Deps.X`. The 4 resolver-only fields stayed because of per-tenant / boot-time / closure-at-wiring-time semantics documented in `internal/appdeps/appdeps.go:13-16`.
+- **`SyncResolverDepsFromAppDeps` is GONE** (was the helper that synced `AppDeps` → `Resolver` mirror fields). The structural canary `TestResolverStructureCanary` in `internal/appdeps/appdeps_test.go` pins the 4-field shape; adding a new field to `Resolver` requires updating that test deliberately.
+- **`GitConfigLoader` is GONE.** Production wiring uses `rest.WithGitResolver(gitResolver)` at `cli/serve.go:816`. Don't reintroduce a fallback adapter; in-process degraded-mode should use the `cfg.Git` config read directly.
+
+Plan: `thoughts/shared/plans/active-2026-05-10-deliver-resolver-appdeps-dedup.md`
+
 **2026-05-09 store ctx threading + decomposition (CA-183 + CA-182)** — 12 commits, `71f6542` + `150c094` + `8a3ccd0` + `eefa122` + `fa084b4` + `2eaad0d` + `1244396` + `037bf2d` + `0105f3d` + `7081107` + `c67be11` + `73bd8f3`.
 Closes CA-183 (CRITICAL — `context.Background()` discarded in every store method, breaking request cancellation and tracing) and CA-182 (HIGH — `internal/db/store.go` monolith at ~4,500 LOC). Five phases shipped under a green-CI discipline (every intermediate commit passes `go build`, `go vet`, `go test -short -race`, and the full integration suite).
 
