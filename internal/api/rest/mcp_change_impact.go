@@ -127,21 +127,21 @@ type unresolvedSymbol struct {
 
 // changeImpactResult is the full predict_change_impact response.
 type changeImpactResult struct {
-	RepositoryID         string                   `json:"repository_id"`
-	Scope                changeImpactScope        `json:"scope"`
-	Symbols              []changeImpactSymbol     `json:"symbols"`
-	AffectedRequirements []requirementSummary     `json:"affected_requirements"`
-	AffectedTests        []changeImpactTestMatch  `json:"affected_tests"`
-	UnresolvedSymbols    []unresolvedSymbol       `json:"unresolved_symbols"`
-	Depth                int                      `json:"depth"`
-	Meta                 map[string]interface{}   `json:"_meta,omitempty"`
+	RepositoryID         string                  `json:"repository_id"`
+	Scope                changeImpactScope       `json:"scope"`
+	Symbols              []changeImpactSymbol    `json:"symbols"`
+	AffectedRequirements []requirementSummary    `json:"affected_requirements"`
+	AffectedTests        []changeImpactTestMatch `json:"affected_tests"`
+	UnresolvedSymbols    []unresolvedSymbol      `json:"unresolved_symbols"`
+	Depth                int                     `json:"depth"`
+	Meta                 map[string]interface{}  `json:"_meta,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
 
-func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callPredictChangeImpact(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID string   `json:"repository_id"`
 		CommitRange  string   `json:"commit_range"`
@@ -192,7 +192,7 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 
 	// Diff-anchored: files or commit_range.
 	if len(params.Files) > 0 || params.CommitRange != "" {
-		_, diffSymIDs, err := h.resolveDiffTouchedSymbols(repoID, params.CommitRange, params.Files)
+		_, diffSymIDs, err := h.resolveDiffTouchedSymbols(ctx, repoID, params.CommitRange, params.Files)
 		if err != nil {
 			return nil, err
 		}
@@ -215,7 +215,7 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 			inputDesc = s.FilePath + ":" + s.SymbolName
 		}
 
-		sym, err := h.resolveSymbol(symbolRefParams{
+		sym, err := h.resolveSymbol(ctx, symbolRefParams{
 			RepositoryID: repoID,
 			SymbolID:     s.SymbolID,
 			FilePath:     s.FilePath,
@@ -252,7 +252,7 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 	}
 	testSymsByID := map[string]testSymInfo{}
 
-	allSyms, _ := h.store.GetSymbols(context.Background(), repoID, nil, nil, 0, 0)
+	allSyms, _ := h.store.GetSymbols(ctx, repoID, nil, nil, 0, 0)
 	for _, sym := range allSyms {
 		if sym.IsTest {
 			testSymsByID[sym.ID] = testSymInfo{FilePath: sym.FilePath, Name: sym.Name}
@@ -275,7 +275,7 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 	var symbolResults []changeImpactSymbol
 
 	for _, targetID := range targetIDs {
-		sym := h.store.GetSymbol(context.Background(), targetID)
+		sym := h.store.GetSymbol(ctx, targetID)
 		if sym == nil {
 			continue
 		}
@@ -285,8 +285,8 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 		}
 
 		// Callers (1 hop).
-		callerIDs := h.store.GetCallers(context.Background(), targetID)
-		callerMap := h.store.GetSymbolsByIDs(context.Background(), callerIDs)
+		callerIDs := h.store.GetCallers(ctx, targetID)
+		callerMap := h.store.GetSymbolsByIDs(ctx, callerIDs)
 		var callers []map[string]interface{}
 		for _, c := range callerMap {
 			if c == nil || c.RepoID != repoID {
@@ -339,8 +339,8 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 		}
 
 		// Source 1 — persisted edges (highest confidence).
-		if directIDs := h.store.GetTestsForSymbolPersisted(context.Background(), targetID); len(directIDs) > 0 {
-			directMap := h.store.GetSymbolsByIDs(context.Background(), directIDs)
+		if directIDs := h.store.GetTestsForSymbolPersisted(ctx, targetID); len(directIDs) > 0 {
+			directMap := h.store.GetSymbolsByIDs(ctx, directIDs)
 			for _, ts := range directMap {
 				if ts != nil && ts.RepoID == repoID {
 					addTestMatch(ts.FilePath, ts.Name, "direct")
@@ -379,7 +379,7 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 		// Aggregation: take the max confidence across all links for this symbol.
 		var symReqs []requirementSummary
 		symConfidence := 0.0
-		for _, link := range h.store.GetLinksForSymbol(context.Background(), targetID, false) {
+		for _, link := range h.store.GetLinksForSymbol(ctx, targetID, false) {
 			if link.RequirementID == "" {
 				continue
 			}
@@ -387,7 +387,7 @@ func (h *mcpHandler) callPredictChangeImpact(session *mcpSession, args json.RawM
 			if link.Confidence > symConfidence {
 				symConfidence = link.Confidence
 			}
-			req := h.store.GetRequirement(context.Background(), link.RequirementID)
+			req := h.store.GetRequirement(ctx, link.RequirementID)
 			if req == nil {
 				continue
 			}
@@ -528,7 +528,7 @@ func (h *mcpHandler) changeImpactToolsList() []mcpTool {
 		defByName[d.Name] = d
 	}
 	return []mcpTool{
-		{Definition: defByName["predict_change_impact"], Handler: noCtxHandler((*mcpHandler).callPredictChangeImpact)},
+		{Definition: defByName["predict_change_impact"], Handler: withCtxHandler((*mcpHandler).callPredictChangeImpact)},
 	}
 }
 

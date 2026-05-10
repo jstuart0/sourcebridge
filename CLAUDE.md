@@ -24,8 +24,8 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
-**2026-05-09 store ctx threading + decomposition (CA-183 + CA-182)** — 5 commits, `71f6542` + `150c094` + `8a3ccd0` + `eefa122` + `fa084b4` + `<this commit>`.
-Closes CA-183 (CRITICAL — `context.Background()` discarded in every store method, breaking request cancellation and tracing) and CA-182 (HIGH — `internal/db/store.go` monolith at ~4,500 LOC). Four phases shipped together under a green-CI discipline (every intermediate commit passes `go build`, `go vet`, `go test -short -race`, and the full integration suite).
+**2026-05-09 store ctx threading + decomposition (CA-183 + CA-182)** — 7 commits, `71f6542` + `150c094` + `8a3ccd0` + `eefa122` + `fa084b4` + `b7e6193` + `<this commit>`.
+Closes CA-183 (CRITICAL — `context.Background()` discarded in every store method, breaking request cancellation and tracing) and CA-182 (HIGH — `internal/db/store.go` monolith at ~4,500 LOC). Five phases shipped under a green-CI discipline (every intermediate commit passes `go build`, `go vet`, `go test -short -race`, and the full integration suite).
 
 Phase 1 (`71f6542` + `150c094`) — signature threading. Every method on `*SurrealStore` (and the 6 store interfaces it satisfies: `GraphStore`, `KnowledgeStore`, `JobStore`, `comprehension.SettingsStore`, `livingwiki.RepoSettingsStore`, `SummaryNodeStore`) gains `ctx context.Context` as its first parameter. The unexported `diagramDocumentPersistence` interface (`internal/api/rest/diagram_document.go`) and the 9 local subset interfaces (`architecture.DiagramStore`, orchestrator `PackageDepsProvider`, QA package interfaces — `RepoLocator`, `GraphExpander`, `ArtifactLookup`, `RequirementLookup`, `SymbolLookup`, `FileReader`, `UnderstandingReader`, `templates.SymbolGraph`, `search.Booster`, `graph.KnowledgeFreshnessProvider`) are all updated in lockstep. Phase 1 covers ~165 caller files / ~2,450 LOC; all `internal/db/` method bodies still call the package-local `ctx()` helper so the package builds.
 
@@ -33,7 +33,9 @@ Phase 2 (`8a3ccd0` + `eefa122`) — `ctx()` helper deletion. The `func ctx() con
 
 Phase 3 (`fa084b4`) — file decomposition. `internal/db/store.go` is deleted and its contents split into 6 per-domain files: `repository_store.go`, `requirement_store.go`, `cluster_store.go`, `analytics_store.go`, `index_result.go`, `helpers.go` (all `package db`). Pure file moves — no logic changes.
 
-Phase 4 (`<this commit>`) — CLAUDE.md updates (this entry).
+Phase 4 (`b7e6193`) — CLAUDE.md update for phases 1–4.
+
+Phase 5 (`<this commit>`) — MCP handler ctx threading (codex r2 BLOCK). All 29 MCP tool dispatch handlers previously registered via `noCtxHandler` (which silently dropped the live request context) converted to `withCtxHandler`. Handler method signatures updated to accept `ctx context.Context`; every store/knowledge/cluster call inside those handlers now receives the threaded ctx. Three deliberate `context.Background()` detachments preserved: `indexingSvc.Import`, `indexingSvc.Reindex` (background ops that must outlive the request), `changeDispatcher.Submit` (router background work survives agent disconnect). Two `DeleteClusters` ctx-drops in `internal/db/index_result.go` and `internal/db/repository_store.go` fixed. `buildDiffReviewStructural` in `mcp_review.go` upgraded to accept and thread ctx. `internal/db/index_result.go` file-level comment corrected: `MergeIndexResult` is fail-closed, not a multi-step writer. Regression test `TestFormerlyNoCtxHandlerTools_CtxThreadedToStore` in `mcp_dispatch_test.go` verifies that a formerly-`noCtxHandler` tool (`get_index_status`) now propagates the request ctx sentinel value to `store.GetRepository`.
 
 Load-bearing constraints for future-Claude:
 
@@ -45,6 +47,9 @@ Load-bearing constraints for future-Claude:
 - **TenantFilteredStore `hasAccess` gating preserved** on the same 8 federation methods as wave-3 P8 (CA-203). The ctx threading didn't introduce new methods; the gating set is unchanged.
 - **Embedded-interface override audit findings**: `callRecorder` (`internal/graph/filtered_test.go:42-79`, 8 overrides), `countingGraphStore` (`internal/api/rest/mcp_change_impact_test.go:495-502`), `truncatingGraphStore` (`internal/api/rest/mcp_requirement_tools_test.go:1137-1148`) all updated to take ctx as first parameter. Future test override patterns must follow.
 - **Phase 1 scope was ~165 caller files / ~2,450 LOC**: every package holding a `graphstore.GraphStore` value or implementing one of the 6+ store interfaces or any of the 9 local subset interfaces listed above.
+- **`noCtxHandler` adapter is STILL DEFINED** (as a backward-compat shim used by `safeDispatch` in tests) but MUST NOT be used for new tool registrations. All 29 former `noCtxHandler` registrations in `coreTools()` and all per-phase `register*Tools()` functions now use `withCtxHandler`. Adding a new tool with `noCtxHandler` is a silent ctx-drop; the compiler won't catch it. `TestFormerlyNoCtxHandlerTools_CtxThreadedToStore` catches regressions at the dispatch layer.
+- **Three deliberate `context.Background()` detachments in MCP handlers must not be changed to the threaded ctx**: `indexingSvc.Import` and `indexingSvc.Reindex` (background indexing jobs that must survive request cancellation), and `changeDispatcher.Submit` (router background work that must complete even if the agent disconnects). These are commented in the source.
+- **`buildDiffReviewStructural` takes `ctx context.Context` as first param** (added in Phase 5). Any future caller must thread the request ctx. The function calls `resolveDiffTouchedSymbols`, `GetLinksForSymbol`, `GetRequirementsByIDs`, and `GetSymbol` — all ctx-aware.
 
 Plan: `thoughts/shared/plans/active-2026-05-09-deliver-store-ctx-decomp.md`
 

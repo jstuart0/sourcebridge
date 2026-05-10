@@ -44,14 +44,14 @@ import (
 
 // reviewFinding is one AI-generated finding for a file+template pair.
 type reviewFinding struct {
-	FilePath    string `json:"file_path"`
-	Template    string `json:"template"`
-	Category    string `json:"category,omitempty"`
-	Severity    string `json:"severity"`
-	Message     string `json:"message"`
-	StartLine   int32  `json:"start_line,omitempty"`
-	EndLine     int32  `json:"end_line,omitempty"`
-	Suggestion  string `json:"suggestion,omitempty"`
+	FilePath   string `json:"file_path"`
+	Template   string `json:"template"`
+	Category   string `json:"category,omitempty"`
+	Severity   string `json:"severity"`
+	Message    string `json:"message"`
+	StartLine  int32  `json:"start_line,omitempty"`
+	EndLine    int32  `json:"end_line,omitempty"`
+	Suggestion string `json:"suggestion,omitempty"`
 }
 
 // reviewForDiffResult embeds diffReviewResult (per bob H5 — preserves the
@@ -128,11 +128,11 @@ func (h *mcpHandler) reviewToolDefs() []mcpToolDefinition {
 // ---------------------------------------------------------------------------
 
 const (
-	reviewDefaultMaxFiles    = 5
-	reviewCapMaxFiles        = 20
+	reviewDefaultMaxFiles     = 5
+	reviewCapMaxFiles         = 20
 	reviewDefaultMaxTemplates = 3
-	reviewCapMaxTemplates    = 5
-	reviewAIDeadline         = 90 * time.Second
+	reviewCapMaxTemplates     = 5
+	reviewAIDeadline          = 90 * time.Second
 )
 
 var reviewDefaultTemplates = []string{"security", "solid", "maintainability"}
@@ -193,7 +193,7 @@ func (h *mcpHandler) callGetReviewForDiff(ctx context.Context, session *mcpSessi
 
 	// Build structural payload (reuses resolveDiffTouchedSymbols + the same
 	// aggregation logic as callReviewDiffAgainstRequirements).
-	structural, err := h.buildDiffReviewStructural(params.RepositoryID, params.CommitRange, params.Files)
+	structural, err := h.buildDiffReviewStructural(ctx, params.RepositoryID, params.CommitRange, params.Files)
 	if err != nil {
 		return nil, err
 	}
@@ -330,8 +330,8 @@ func filePathToProtoLanguage(filePath string) commonv1.Language {
 // buildDiffReviewStructural constructs the diffReviewResult for a given repo
 // and diff anchor. It is the structural half of callReviewDiffAgainstRequirements,
 // extracted so get_review_for_diff can reuse it without calling the legacy tool.
-func (h *mcpHandler) buildDiffReviewStructural(repoID, commitRange string, files []string) (*diffReviewResult, error) {
-	touchedFileEntries, touchedSymbolIDs, err := h.resolveDiffTouchedSymbols(repoID, commitRange, files)
+func (h *mcpHandler) buildDiffReviewStructural(ctx context.Context, repoID, commitRange string, files []string) (*diffReviewResult, error) {
+	touchedFileEntries, touchedSymbolIDs, err := h.resolveDiffTouchedSymbols(ctx, repoID, commitRange, files)
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +346,7 @@ func (h *mcpHandler) buildDiffReviewStructural(repoID, commitRange string, files
 	linkedReqIDs := map[string]bool{}
 	symToReqs := map[string][]string{}
 	for _, symID := range touchedSymbolIDs {
-		for _, link := range h.store.GetLinksForSymbol(context.Background(), symID, false) {
+		for _, link := range h.store.GetLinksForSymbol(ctx, symID, false) {
 			if link.RequirementID != "" && !linkedReqIDs[link.RequirementID] {
 				linkedReqIDs[link.RequirementID] = true
 			}
@@ -358,7 +358,7 @@ func (h *mcpHandler) buildDiffReviewStructural(repoID, commitRange string, files
 		for id := range linkedReqIDs {
 			ids = append(ids, id)
 		}
-		reqs := h.store.GetRequirementsByIDs(context.Background(), ids)
+		reqs := h.store.GetRequirementsByIDs(ctx, ids)
 		for _, req := range reqs {
 			if req == nil {
 				continue
@@ -374,7 +374,7 @@ func (h *mcpHandler) buildDiffReviewStructural(repoID, commitRange string, files
 
 	// Unlinked public surface.
 	for _, symID := range touchedSymbolIDs {
-		sym := h.store.GetSymbol(context.Background(), symID)
+		sym := h.store.GetSymbol(ctx, symID)
 		if sym == nil || len(sym.Name) == 0 {
 			continue
 		}
@@ -400,7 +400,7 @@ func (h *mcpHandler) buildDiffReviewStructural(repoID, commitRange string, files
 // the total touched surface, which is a proxy for "how much changed code lacks
 // requirements traceability."
 //
-//   score = unlinked_public / max(total_symbols, 1)
+//	score = unlinked_public / max(total_symbols, 1)
 //
 // Clamped to [0, 1]. Returns 0.0 when the structural payload is nil.
 func structuralRiskScore(r *diffReviewResult) float64 {

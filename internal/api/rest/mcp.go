@@ -338,9 +338,9 @@ type mcpHandler struct {
 	// is consulted by the register-only fallback path in callIndexRepository
 	// when indexingSvc is nil. Wired in router.go alongside indexingSvc.
 	allowPrivateGitHosts bool
-	sessionTTL     time.Duration
-	keepalive      time.Duration
-	maxSessions    int
+	sessionTTL           time.Duration
+	keepalive            time.Duration
+	maxSessions          int
 
 	// sessionStore persists session state (claims, initialized flag, client
 	// info, timestamps). With Redis-backed storage, any replica can serve any
@@ -603,35 +603,35 @@ func (h *mcpHandler) coreTools() []mcpTool {
 		// MCP-3: search_symbols promoted to ctx-bearing registration so request
 		// cancellation propagates through searchSymbolsHybrid into search.Service.
 		{Definition: defByName["search_symbols"], Handler: withCtxHandler((*mcpHandler).callSearchSymbols)},
-		{Definition: defByName["get_requirements"], Handler: noCtxHandler((*mcpHandler).callGetRequirements)},
-		{Definition: defByName["get_impact_report"], Handler: noCtxHandler((*mcpHandler).callGetImpactReport)},
-		{Definition: defByName["get_cliff_notes"], Handler: noCtxHandler((*mcpHandler).callGetCliffNotes)},
-		{Definition: defByName["get_callers"], Handler: noCtxHandler((*mcpHandler).callGetCallers)},
-		{Definition: defByName["get_callees"], Handler: noCtxHandler((*mcpHandler).callGetCallees)},
-		{Definition: defByName["get_file_imports"], Handler: noCtxHandler((*mcpHandler).callGetFileImports)},
-		{Definition: defByName["get_architecture_diagram"], Handler: noCtxHandler((*mcpHandler).callGetArchitectureDiagram)},
-		{Definition: defByName["get_recent_changes"], Handler: noCtxHandler((*mcpHandler).callGetRecentChanges)},
-		{Definition: defByName["get_tests_for_symbol"], Handler: noCtxHandler((*mcpHandler).callGetTestsForSymbol)},
-		{Definition: defByName["get_entry_points"], Handler: noCtxHandler((*mcpHandler).callGetEntryPoints)},
-		{Definition: defByName["get_symbol_source"], Handler: noCtxHandler((*mcpHandler).callGetSymbolSource)},
-		{Definition: defByName["get_symbol_context"], Handler: noCtxHandler((*mcpHandler).callGetSymbolContext)},
-		{Definition: defByName["index_repository"], Handler: noCtxHandler((*mcpHandler).callIndexRepository)},
-		{Definition: defByName["get_index_status"], Handler: noCtxHandler((*mcpHandler).callGetIndexStatus)},
-		{Definition: defByName["refresh_repository"], Handler: noCtxHandler((*mcpHandler).callRefreshRepository)},
-		{Definition: defByName["review_diff_against_requirements"], Handler: noCtxHandler((*mcpHandler).callReviewDiffAgainstRequirements)},
-		{Definition: defByName["impact_summary"], Handler: noCtxHandler((*mcpHandler).callImpactSummary)},
-		{Definition: defByName["onboard_new_contributor"], Handler: noCtxHandler((*mcpHandler).callOnboardNewContributor)},
-		{Definition: defByName["get_cross_repo_impact"], Handler: noCtxHandler((*mcpHandler).callGetCrossRepoImpact)},
-		{Definition: defByName["get_subsystems"], Handler: noCtxHandler((*mcpHandler).callGetSubsystems)},
-		{Definition: defByName["get_subsystem_by_id"], Handler: noCtxHandler((*mcpHandler).callGetSubsystemByID)},
-		{Definition: defByName["get_subsystem"], Handler: noCtxHandler((*mcpHandler).callGetSubsystem)},
+		{Definition: defByName["get_requirements"], Handler: withCtxHandler((*mcpHandler).callGetRequirements)},
+		{Definition: defByName["get_impact_report"], Handler: withCtxHandler((*mcpHandler).callGetImpactReport)},
+		{Definition: defByName["get_cliff_notes"], Handler: withCtxHandler((*mcpHandler).callGetCliffNotes)},
+		{Definition: defByName["get_callers"], Handler: withCtxHandler((*mcpHandler).callGetCallers)},
+		{Definition: defByName["get_callees"], Handler: withCtxHandler((*mcpHandler).callGetCallees)},
+		{Definition: defByName["get_file_imports"], Handler: withCtxHandler((*mcpHandler).callGetFileImports)},
+		{Definition: defByName["get_architecture_diagram"], Handler: withCtxHandler((*mcpHandler).callGetArchitectureDiagram)},
+		{Definition: defByName["get_recent_changes"], Handler: withCtxHandler((*mcpHandler).callGetRecentChanges)},
+		{Definition: defByName["get_tests_for_symbol"], Handler: withCtxHandler((*mcpHandler).callGetTestsForSymbol)},
+		{Definition: defByName["get_entry_points"], Handler: withCtxHandler((*mcpHandler).callGetEntryPoints)},
+		{Definition: defByName["get_symbol_source"], Handler: withCtxHandler((*mcpHandler).callGetSymbolSource)},
+		{Definition: defByName["get_symbol_context"], Handler: withCtxHandler((*mcpHandler).callGetSymbolContext)},
+		{Definition: defByName["index_repository"], Handler: withCtxHandler((*mcpHandler).callIndexRepository)},
+		{Definition: defByName["get_index_status"], Handler: withCtxHandler((*mcpHandler).callGetIndexStatus)},
+		{Definition: defByName["refresh_repository"], Handler: withCtxHandler((*mcpHandler).callRefreshRepository)},
+		{Definition: defByName["review_diff_against_requirements"], Handler: withCtxHandler((*mcpHandler).callReviewDiffAgainstRequirements)},
+		{Definition: defByName["impact_summary"], Handler: withCtxHandler((*mcpHandler).callImpactSummary)},
+		{Definition: defByName["onboard_new_contributor"], Handler: withCtxHandler((*mcpHandler).callOnboardNewContributor)},
+		{Definition: defByName["get_cross_repo_impact"], Handler: withCtxHandler((*mcpHandler).callGetCrossRepoImpact)},
+		{Definition: defByName["get_subsystems"], Handler: withCtxHandler((*mcpHandler).callGetSubsystems)},
+		{Definition: defByName["get_subsystem_by_id"], Handler: withCtxHandler((*mcpHandler).callGetSubsystemByID)},
+		{Definition: defByName["get_subsystem"], Handler: withCtxHandler((*mcpHandler).callGetSubsystem)},
 		// record_change is always registered in the dispatch map for defense-in-depth.
 		// The handler itself checks h.changeDispatcher and returns MCPErrCapabilityDisabled
 		// when nil. The tool is hidden from tools/list (baseTools) via
 		// recordChangeToolDefIfAvailable returning nil, so agents don't discover it
 		// when the dispatcher is unwired — but a hand-crafted tools/call is handled
 		// gracefully rather than returning "Unknown tool".
-		{Definition: recordChangeToolDef(), Handler: noCtxHandler((*mcpHandler).callRecordChange)},
+		{Definition: recordChangeToolDef(), Handler: withCtxHandler((*mcpHandler).callRecordChange)},
 		// Ctx-bearing tools: registered via withCtxHandler (MCP-2) so method
 		// expressions are used instead of anonymous closures. noCtxHandler unchanged.
 		{Definition: defByName["explain_code"], Handler: withCtxHandler((*mcpHandler).callExplainCodeCtx)},
@@ -1710,7 +1710,7 @@ func (h *mcpHandler) callExplainCodeCtx(ctx context.Context, session *mcpSession
 // Tool: get_requirements
 // ---------------------------------------------------------------------------
 
-func (h *mcpHandler) callGetRequirements(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetRequirements(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID string `json:"repository_id"`
 		IncludeLinks bool   `json:"include_links"`
@@ -1731,7 +1731,7 @@ func (h *mcpHandler) callGetRequirements(session *mcpSession, args json.RawMessa
 		params.Limit = 500
 	}
 
-	reqs, total := h.store.GetRequirements(context.Background(), params.RepositoryID, params.Limit, params.Offset)
+	reqs, total := h.store.GetRequirements(ctx, params.RepositoryID, params.Limit, params.Offset)
 
 	type linkInfo struct {
 		SymbolID   string  `json:"symbol_id"`
@@ -1760,13 +1760,13 @@ func (h *mcpHandler) callGetRequirements(session *mcpSession, args json.RawMessa
 			Tags:        req.Tags,
 		}
 		if params.IncludeLinks {
-			links := h.store.GetLinksForRequirement(context.Background(), req.ID, false)
+			links := h.store.GetLinksForRequirement(ctx, req.ID, false)
 			// Batch lookup symbol names
 			symIDs := make([]string, 0, len(links))
 			for _, l := range links {
 				symIDs = append(symIDs, l.SymbolID)
 			}
-			symMap := h.store.GetSymbolsByIDs(context.Background(), symIDs)
+			symMap := h.store.GetSymbolsByIDs(ctx, symIDs)
 
 			for _, l := range links {
 				li := linkInfo{
@@ -1793,7 +1793,7 @@ func (h *mcpHandler) callGetRequirements(session *mcpSession, args json.RawMessa
 // Tool: get_impact_report
 // ---------------------------------------------------------------------------
 
-func (h *mcpHandler) callGetImpactReport(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetImpactReport(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID string `json:"repository_id"`
 	}
@@ -1804,7 +1804,7 @@ func (h *mcpHandler) callGetImpactReport(session *mcpSession, args json.RawMessa
 		return nil, err
 	}
 
-	report := h.store.GetLatestImpactReport(context.Background(), params.RepositoryID)
+	report := h.store.GetLatestImpactReport(ctx, params.RepositoryID)
 	if report == nil {
 		return map[string]interface{}{"report": nil}, nil
 	}
@@ -1830,7 +1830,7 @@ func (h *mcpHandler) callGetImpactReport(session *mcpSession, args json.RawMessa
 // Tool: get_cliff_notes
 // ---------------------------------------------------------------------------
 
-func (h *mcpHandler) callGetCliffNotes(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetCliffNotes(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID string `json:"repository_id"`
 		ScopeType    string `json:"scope_type"`
@@ -1874,7 +1874,7 @@ func (h *mcpHandler) callGetCliffNotes(session *mcpSession, args json.RawMessage
 		},
 	}
 
-	artifact := h.knowledgeStore.GetArtifactByKey(context.Background(), key)
+	artifact := h.knowledgeStore.GetArtifactByKey(ctx, key)
 	if artifact == nil {
 		return map[string]interface{}{
 			"artifact": nil,

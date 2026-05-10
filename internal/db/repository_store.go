@@ -160,7 +160,7 @@ func (s *SurrealStore) RemoveRepository(ctx context.Context, id string) bool {
 
 	// Remove cluster data first (stale invalidation). Logged on failure; a
 	// failed delete here means orphaned cluster records, not a missing repo.
-	if err := s.DeleteClusters(context.Background(), id); err != nil {
+	if err := s.DeleteClusters(ctx, id); err != nil {
 		slog.Warn("RemoveRepository: failed to delete clusters; orphaned records may remain",
 			"repo_id", id, "error", err)
 	}

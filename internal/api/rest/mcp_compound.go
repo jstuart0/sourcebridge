@@ -45,15 +45,15 @@ import (
 func (h *mcpHandler) compoundToolDefs() []mcpToolDefinition {
 	return []mcpToolDefinition{
 		{
-			Name: "review_diff_against_requirements",
+			Name:        "review_diff_against_requirements",
 			Description: "Compound workflow: given a diff or commit range, identify touched files/symbols, look up any requirements linked to those symbols, flag public symbols that have no linked requirements, and return a structured report. Optional include_synthesis: true runs an ask_question pass to narrate the risk summary. (legacy — use get_review_for_diff for AI findings)",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"repository_id":       map[string]interface{}{"type": "string", "description": "Repository ID"},
-					"commit_range":        map[string]interface{}{"type": "string", "description": "Commit range (e.g. \"HEAD~3..HEAD\"). Defaults to the most recent commit."},
-					"files":               map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "Explicit files to consider. Overrides commit_range when both are set."},
-					"include_synthesis":   map[string]interface{}{"type": "boolean", "description": "Run an ask_question narrative synthesis pass (default false — structured report only)"},
+					"repository_id":     map[string]interface{}{"type": "string", "description": "Repository ID"},
+					"commit_range":      map[string]interface{}{"type": "string", "description": "Commit range (e.g. \"HEAD~3..HEAD\"). Defaults to the most recent commit."},
+					"files":             map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "Explicit files to consider. Overrides commit_range when both are set."},
+					"include_synthesis": map[string]interface{}{"type": "boolean", "description": "Run an ask_question narrative synthesis pass (default false — structured report only)"},
 				},
 				"required": []string{"repository_id"},
 			},
@@ -89,8 +89,8 @@ func (h *mcpHandler) compoundToolDefs() []mcpToolDefinition {
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"repository_id": map[string]interface{}{"type": "string", "description": "Repository ID"},
-					"top_n":         map[string]interface{}{"type": "integer", "description": "How many entry points to include (default 10, cap 30)"},
+					"repository_id":       map[string]interface{}{"type": "string", "description": "Repository ID"},
+					"top_n":               map[string]interface{}{"type": "integer", "description": "How many entry points to include (default 10, cap 30)"},
 					"include_cliff_notes": map[string]interface{}{"type": "boolean", "description": "Fetch cliff notes for each entry's file (default true)"},
 				},
 				"required": []string{"repository_id"},
@@ -109,12 +109,12 @@ type diffReviewFile struct {
 }
 
 type diffReviewResult struct {
-	RepositoryID         string                   `json:"repository_id"`
-	CommitRange          string                   `json:"commit_range,omitempty"`
-	TouchedFiles         []diffReviewFile         `json:"touched_files"`
-	LinkedRequirements   []map[string]interface{} `json:"linked_requirements"`
+	RepositoryID          string                   `json:"repository_id"`
+	CommitRange           string                   `json:"commit_range,omitempty"`
+	TouchedFiles          []diffReviewFile         `json:"touched_files"`
+	LinkedRequirements    []map[string]interface{} `json:"linked_requirements"`
 	UnlinkedPublicSurface []map[string]interface{} `json:"unlinked_public_surface"`
-	Summary              string                   `json:"summary,omitempty"`
+	Summary               string                   `json:"summary,omitempty"`
 }
 
 // resolveDiffTouchedSymbols resolves the set of files and symbols affected by
@@ -128,12 +128,12 @@ type diffReviewResult struct {
 //
 // Returns the file-level summary (ready for TouchedFiles in diffReviewResult)
 // and the flat list of symbol IDs across all touched files.
-func (h *mcpHandler) resolveDiffTouchedSymbols(repoID, commitRange string, files []string) ([]diffReviewFile, []string, error) {
+func (h *mcpHandler) resolveDiffTouchedSymbols(ctx context.Context, repoID, commitRange string, files []string) ([]diffReviewFile, []string, error) {
 	var touchedFiles []string
 	if len(files) > 0 {
 		touchedFiles = files
 	} else {
-		repo := h.store.GetRepository(context.Background(), repoID)
+		repo := h.store.GetRepository(ctx, repoID)
 		if repo == nil {
 			return nil, nil, errRepositoryNotIndexed(repoID)
 		}
@@ -149,7 +149,7 @@ func (h *mcpHandler) resolveDiffTouchedSymbols(repoID, commitRange string, files
 		if commitRange != "" {
 			limit = 10
 		}
-		commits, err := runGitLog(context.Background(), gitRoot, "", limit, commitRange)
+		commits, err := runGitLog(ctx, gitRoot, "", limit, commitRange)
 		if err != nil {
 			return nil, nil, fmt.Errorf("git log for commit range: %v", err)
 		}
@@ -168,7 +168,7 @@ func (h *mcpHandler) resolveDiffTouchedSymbols(repoID, commitRange string, files
 	var reviewFiles []diffReviewFile
 	var symbolIDs []string
 	for _, fp := range touchedFiles {
-		fileSymbols := h.store.GetSymbolsByFile(context.Background(), repoID, fp)
+		fileSymbols := h.store.GetSymbolsByFile(ctx, repoID, fp)
 		names := make([]string, 0, len(fileSymbols))
 		for _, s := range fileSymbols {
 			names = append(names, s.Name)
@@ -182,7 +182,7 @@ func (h *mcpHandler) resolveDiffTouchedSymbols(repoID, commitRange string, files
 	return reviewFiles, symbolIDs, nil
 }
 
-func (h *mcpHandler) callReviewDiffAgainstRequirements(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callReviewDiffAgainstRequirements(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID     string   `json:"repository_id"`
 		CommitRange      string   `json:"commit_range"`
@@ -197,7 +197,7 @@ func (h *mcpHandler) callReviewDiffAgainstRequirements(session *mcpSession, args
 	}
 
 	touchedFileEntries, touchedSymbolIDs, err := h.resolveDiffTouchedSymbols(
-		params.RepositoryID, params.CommitRange, params.Files,
+		ctx, params.RepositoryID, params.CommitRange, params.Files,
 	)
 	if err != nil {
 		return nil, err
@@ -213,7 +213,7 @@ func (h *mcpHandler) callReviewDiffAgainstRequirements(session *mcpSession, args
 	linkedReqIDs := map[string]bool{}
 	symToReqs := map[string][]string{}
 	for _, symID := range touchedSymbolIDs {
-		for _, link := range h.store.GetLinksForSymbol(context.Background(), symID, false) {
+		for _, link := range h.store.GetLinksForSymbol(ctx, symID, false) {
 			if link.RequirementID != "" && !linkedReqIDs[link.RequirementID] {
 				linkedReqIDs[link.RequirementID] = true
 			}
@@ -225,7 +225,7 @@ func (h *mcpHandler) callReviewDiffAgainstRequirements(session *mcpSession, args
 		for id := range linkedReqIDs {
 			ids = append(ids, id)
 		}
-		reqs := h.store.GetRequirementsByIDs(context.Background(), ids)
+		reqs := h.store.GetRequirementsByIDs(ctx, ids)
 		for _, req := range reqs {
 			if req == nil {
 				continue
@@ -247,7 +247,7 @@ func (h *mcpHandler) callReviewDiffAgainstRequirements(session *mcpSession, args
 	// char, for languages where that's the convention) and have no
 	// linked requirement.
 	for _, symID := range touchedSymbolIDs {
-		sym := h.store.GetSymbol(context.Background(), symID)
+		sym := h.store.GetSymbol(ctx, symID)
 		if sym == nil {
 			continue
 		}
@@ -338,11 +338,11 @@ type impactSummaryResult struct {
 	Symbols      []impactSymbol `json:"symbols"`
 }
 
-func (h *mcpHandler) callImpactSummary(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callImpactSummary(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
-		RepositoryID  string   `json:"repository_id"`
-		Files         []string `json:"files"`
-		Symbols       []struct {
+		RepositoryID string   `json:"repository_id"`
+		Files        []string `json:"files"`
+		Symbols      []struct {
 			FilePath   string `json:"file_path"`
 			SymbolName string `json:"symbol_name"`
 			LineStart  int    `json:"line_start"`
@@ -368,12 +368,12 @@ func (h *mcpHandler) callImpactSummary(session *mcpSession, args json.RawMessage
 	// Collect the target symbols.
 	var targets []string
 	for _, fp := range params.Files {
-		for _, s := range h.store.GetSymbolsByFile(context.Background(), params.RepositoryID, fp) {
+		for _, s := range h.store.GetSymbolsByFile(ctx, params.RepositoryID, fp) {
 			targets = append(targets, s.ID)
 		}
 	}
 	for _, s := range params.Symbols {
-		sym, err := h.resolveSymbol(symbolRefParams{
+		sym, err := h.resolveSymbol(ctx, symbolRefParams{
 			RepositoryID: params.RepositoryID,
 			FilePath:     s.FilePath,
 			SymbolName:   s.SymbolName,
@@ -392,14 +392,14 @@ func (h *mcpHandler) callImpactSummary(session *mcpSession, args json.RawMessage
 			continue
 		}
 		seen[id] = true
-		sym := h.store.GetSymbol(context.Background(), id)
+		sym := h.store.GetSymbol(ctx, id)
 		if sym == nil {
 			continue
 		}
 
 		// Callers (1 hop for simplicity; the tool exposes the cap).
-		callerIDs := h.store.GetCallers(context.Background(), id)
-		byID := h.store.GetSymbolsByIDs(context.Background(), callerIDs)
+		callerIDs := h.store.GetCallers(ctx, id)
+		byID := h.store.GetSymbolsByIDs(ctx, callerIDs)
 		var callers []map[string]interface{}
 		for _, c := range byID {
 			if c == nil {
@@ -416,7 +416,7 @@ func (h *mcpHandler) callImpactSummary(session *mcpSession, args json.RawMessage
 		// the same approach as get_tests_for_symbol's text-reference
 		// source).
 		testMatches := 0
-		allSyms, _ := h.store.GetSymbols(context.Background(), params.RepositoryID, nil, nil, 0, 0)
+		allSyms, _ := h.store.GetSymbols(ctx, params.RepositoryID, nil, nil, 0, 0)
 		for _, cand := range allSyms {
 			if cand.IsTest && nameReferences(cand.Name, sym.Name) {
 				testMatches++
@@ -425,11 +425,11 @@ func (h *mcpHandler) callImpactSummary(session *mcpSession, args json.RawMessage
 
 		// Linked requirements.
 		var reqs []map[string]interface{}
-		for _, link := range h.store.GetLinksForSymbol(context.Background(), id, false) {
+		for _, link := range h.store.GetLinksForSymbol(ctx, id, false) {
 			if link.RequirementID == "" {
 				continue
 			}
-			if req := h.store.GetRequirement(context.Background(), link.RequirementID); req != nil {
+			if req := h.store.GetRequirement(ctx, link.RequirementID); req != nil {
 				reqs = append(reqs, map[string]interface{}{
 					"id":          req.ID,
 					"external_id": req.ExternalID,
@@ -463,14 +463,14 @@ func (h *mcpHandler) callImpactSummary(session *mcpSession, args json.RawMessage
 // ---------------------------------------------------------------------------
 
 type onboardingEntry struct {
-	Kind       string                 `json:"kind"`
-	SymbolName string                 `json:"symbol_name"`
-	FilePath   string                 `json:"file_path"`
-	Language   string                 `json:"language"`
-	StartLine  int                    `json:"start_line"`
-	Detector   string                 `json:"detector"`
-	CliffNotes map[string]interface{} `json:"cliff_notes,omitempty"`
-	RecentAuthors []string            `json:"recent_authors,omitempty"`
+	Kind          string                 `json:"kind"`
+	SymbolName    string                 `json:"symbol_name"`
+	FilePath      string                 `json:"file_path"`
+	Language      string                 `json:"language"`
+	StartLine     int                    `json:"start_line"`
+	Detector      string                 `json:"detector"`
+	CliffNotes    map[string]interface{} `json:"cliff_notes,omitempty"`
+	RecentAuthors []string               `json:"recent_authors,omitempty"`
 }
 
 type onboardingResult struct {
@@ -478,7 +478,7 @@ type onboardingResult struct {
 	Entries      []onboardingEntry `json:"entries"`
 }
 
-func (h *mcpHandler) callOnboardNewContributor(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callOnboardNewContributor(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID      string `json:"repository_id"`
 		TopN              int    `json:"top_n"`
@@ -509,7 +509,7 @@ func (h *mcpHandler) callOnboardNewContributor(session *mcpSession, args json.Ra
 		"precision":     "framework_aware",
 		"limit":         200,
 	})
-	rawEntries, err := h.callGetEntryPoints(session, entryArgs)
+	rawEntries, err := h.callGetEntryPoints(ctx, session, entryArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -517,7 +517,7 @@ func (h *mcpHandler) callOnboardNewContributor(session *mcpSession, args json.Ra
 	var entriesPayload entryPointsResult
 	_ = json.Unmarshal(entryBytes, &entriesPayload)
 
-	repo := h.store.GetRepository(context.Background(), params.RepositoryID)
+	repo := h.store.GetRepository(ctx, params.RepositoryID)
 	gitRoot := ""
 	if repo != nil {
 		gitRoot = repo.ClonePath
@@ -545,7 +545,7 @@ func (h *mcpHandler) callOnboardNewContributor(session *mcpSession, args json.Ra
 			},
 		}
 		if gitRoot != "" {
-			commits, err := runGitLog(context.Background(), gitRoot, ep.FilePath, 20)
+			commits, err := runGitLog(ctx, gitRoot, ep.FilePath, 20)
 			if err == nil {
 				s.activity = len(commits)
 				seen := map[string]bool{}
@@ -582,7 +582,7 @@ func (h *mcpHandler) callOnboardNewContributor(session *mcpSession, args json.Ra
 				"scope_type":    "file",
 				"scope_path":    c.ep.FilePath,
 			})
-			if raw, err := h.callGetCliffNotes(session, cliffArgs); err == nil {
+			if raw, err := h.callGetCliffNotes(ctx, session, cliffArgs); err == nil {
 				if payload, ok := raw.(map[string]interface{}); ok {
 					cliffByFile[c.ep.FilePath] = payload
 				}
@@ -601,4 +601,3 @@ func (h *mcpHandler) callOnboardNewContributor(session *mcpSession, args json.Ra
 	}
 	return result, nil
 }
-

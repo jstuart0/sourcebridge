@@ -128,7 +128,7 @@ type deadSymbolResult struct {
 	Reason     string  `json:"reason"`
 }
 
-func (h *mcpHandler) callFindDeadCode(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callFindDeadCode(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID           string   `json:"repository_id"`
 		ExcludeEntryPoints     *bool    `json:"exclude_entry_points"`
@@ -167,7 +167,7 @@ func (h *mcpHandler) callFindDeadCode(session *mcpSession, args json.RawMessage)
 	// Full scan capped at maxDeadCodeScan. GetSymbols returns
 	// (symbols_loaded, total_in_store); we use total_in_store to detect
 	// truncation without a separate COUNT query.
-	syms, totalInStore := h.store.GetSymbols(context.Background(), params.RepositoryID, nil, nil, maxDeadCodeScan, 0)
+	syms, totalInStore := h.store.GetSymbols(ctx, params.RepositoryID, nil, nil, maxDeadCodeScan, 0)
 	scanTruncated := totalInStore > maxDeadCodeScan
 
 	// Pre-resolve test-symbol set for the exclude_test_only_callers path
@@ -205,7 +205,7 @@ func (h *mcpHandler) callFindDeadCode(session *mcpSession, args json.RawMessage)
 			continue
 		}
 
-		callers := h.store.GetCallers(context.Background(), sym.ID)
+		callers := h.store.GetCallers(ctx, sym.ID)
 
 		if len(callers) == 0 {
 			// Definitively no callers.
@@ -281,7 +281,7 @@ type untestedSymbolResult struct {
 	TestCount  int    `json:"test_count"`
 }
 
-func (h *mcpHandler) callGetUntestedSymbols(session *mcpSession, args json.RawMessage) (interface{}, error) {
+func (h *mcpHandler) callGetUntestedSymbols(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
 	var params struct {
 		RepositoryID         string   `json:"repository_id"`
 		Kinds                []string `json:"kinds"`
@@ -316,7 +316,7 @@ func (h *mcpHandler) callGetUntestedSymbols(session *mcpSession, args json.RawMe
 	// Build (a) the master scan list, and (b) testSymsByID for O(1) lookup
 	// in the per-symbol caller-filter below.
 	// -----------------------------------------------------------------------
-	allSyms, totalInStore := h.store.GetSymbols(context.Background(), params.RepositoryID, nil, nil, maxUntestedScan, 0)
+	allSyms, totalInStore := h.store.GetSymbols(ctx, params.RepositoryID, nil, nil, maxUntestedScan, 0)
 	scanTruncated := totalInStore > maxUntestedScan
 
 	// testSymsByID is keyed by symbol ID. Used for:
@@ -353,13 +353,13 @@ func (h *mcpHandler) callGetUntestedSymbols(session *mcpSession, args json.RawMe
 		}
 
 		// Primary: persisted RelationTests edges.
-		if persisted := h.store.GetTestsForSymbolPersisted(context.Background(), sym.ID); len(persisted) > 0 {
+		if persisted := h.store.GetTestsForSymbolPersisted(ctx, sym.ID); len(persisted) > 0 {
 			continue // tested
 		}
 
 		// Secondary: IsTest callers via call graph.
 		hasTestCaller := false
-		for _, callerID := range h.store.GetCallers(context.Background(), sym.ID) {
+		for _, callerID := range h.store.GetCallers(ctx, sym.ID) {
 			if _, ok := testSymsByID[callerID]; ok {
 				hasTestCaller = true
 				break
@@ -437,8 +437,8 @@ func (h *mcpHandler) gapAuditExtraTools() []mcpTool {
 		defByName[d.Name] = d
 	}
 	return []mcpTool{
-		{Definition: defByName["find_dead_code"], Handler: noCtxHandler((*mcpHandler).callFindDeadCode)},
-		{Definition: defByName["get_untested_symbols"], Handler: noCtxHandler((*mcpHandler).callGetUntestedSymbols)},
+		{Definition: defByName["find_dead_code"], Handler: withCtxHandler((*mcpHandler).callFindDeadCode)},
+		{Definition: defByName["get_untested_symbols"], Handler: withCtxHandler((*mcpHandler).callGetUntestedSymbols)},
 	}
 }
 

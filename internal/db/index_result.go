@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 SourceBridge Contributors
 
-// Package db — index_result.go contains the three multi-step write methods
-// that persist, replace, or merge an indexer.IndexResult into SurrealDB, plus
+// Package db — index_result.go contains the three active multi-step write
+// methods that persist or replace an indexer.IndexResult into SurrealDB, plus
 // RecomputePackageDependencies which rebuilds the package-dep table.
+// MergeIndexResult is fail-closed (returns ErrMergeNotSupported) — it is a
+// deliberate stub pending per-file merge primitives; it is not a multi-step
+// writer and does not issue any SurrealDB queries.
 //
-// WARNING: these four methods issue many sequential SurrealDB queries without
-// wrapping them in a single atomic transaction. Context cancellation mid-flight
-// will leave the repository in a partially-written state. This is a known
-// behavioural exception accepted in the CA-183 ctx-threading campaign; the
-// transactional fix is tracked as CA-TBD-store-multi-step-write-atomicity.
-// Do NOT add ctx.Err() short-circuits inside these methods without first
-// landing the transaction wrapper, or callers will observe partial writes.
+// WARNING: StoreIndexResult, ReplaceIndexResult, and RecomputePackageDependencies
+// issue many sequential SurrealDB queries without wrapping them in a single
+// atomic transaction. Context cancellation mid-flight will leave the repository
+// in a partially-written state. This is a known behavioural exception accepted
+// in the CA-183 ctx-threading campaign; the transactional fix is tracked as
+// CA-TBD-store-multi-step-write-atomicity. Do NOT add ctx.Err() short-circuits
+// inside these methods without first landing the transaction wrapper, or
+// callers will observe partial writes.
 
 package db
 
@@ -245,7 +249,7 @@ func (s *SurrealStore) ReplaceIndexResult(ctx context.Context, repoID string, re
 	// Invalidate stale clusters before replacing the graph data.
 	// Non-fatal: the re-cluster job will overwrite these records; a failed
 	// delete leaves stale (not missing) clusters, which is the safer outcome.
-	if err := s.DeleteClusters(context.Background(), repoID); err != nil {
+	if err := s.DeleteClusters(ctx, repoID); err != nil {
 		slog.Warn("ReplaceIndexResult: failed to delete stale clusters; continuing",
 			"repo_id", repoID, "error", err)
 	}

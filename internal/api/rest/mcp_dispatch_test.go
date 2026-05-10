@@ -175,6 +175,95 @@ func TestSafeDispatchCtx_CancelledContextPropagates(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Regression: formerly-noCtxHandler tools now thread ctx to store calls (P10 Phase 5)
+// ---------------------------------------------------------------------------
+
+// ctxTrackingStore wraps graphstore.Store and records the context received
+// by GetRepository so the test can assert it carries the request context.
+type ctxTrackingStore struct {
+	*graphstore.Store
+	lastGetRepositoryCtx context.Context //nolint:containedctx // test-only
+}
+
+func (s *ctxTrackingStore) GetRepository(ctx context.Context, id string) *graphstore.Repository {
+	s.lastGetRepositoryCtx = ctx
+	return s.Store.GetRepository(ctx, id)
+}
+
+// TestFormerlyNoCtxHandlerTools_CtxThreadedToStore verifies that tools which
+// were previously registered via noCtxHandler (and therefore silently dropped
+// the live request context) now propagate that context through to store calls.
+//
+// Representative tool: get_index_status — calls store.GetRepository(ctx, ...).
+// Before the Phase 5 fix, the handler received context.Background() no matter
+// what context the HTTP request carried. After the fix, the handler receives
+// r.Context(). We inject a context carrying a distinguishing value and assert
+// it reaches the store's GetRepository call.
+func TestFormerlyNoCtxHandlerTools_CtxThreadedToStore(t *testing.T) {
+	inner := graphstore.NewStore()
+	tracking := &ctxTrackingStore{Store: inner}
+	ks := newMockKnowledgeStore()
+
+	h := newMCPHandler(tracking, ks, nil, "", 1*time.Hour, 30*time.Second, 100, nil)
+
+	// Seed a repository so GetRepository has something to look up.
+	result := &indexer.IndexResult{
+		RepoName: "ctx-index-status-repo",
+		RepoPath: "/tmp/ctx-index-status-repo",
+	}
+	repo, err := inner.StoreIndexResult(t.Context(), result)
+	if err != nil {
+		t.Fatalf("StoreIndexResult: %v", err)
+	}
+
+	// Build a session.
+	sess := &mcpSession{
+		id:          "ctx-tracking-sess",
+		claims:      &auth.Claims{UserID: "u1", OrgID: "org1"},
+		initialized: true,
+		createdAt:   time.Now(),
+		lastUsed:    time.Now(),
+	}
+
+	// Dispatch get_index_status with a context carrying a sentinel value.
+	type sentinelKey struct{}
+	const sentinelVal = "ctx-tracking-sentinel"
+	reqCtx := context.WithValue(t.Context(), sentinelKey{}, sentinelVal)
+
+	argsBytes, _ := json.Marshal(map[string]interface{}{
+		"repository_id": repo.ID,
+	})
+	idRaw, _ := json.Marshal(99)
+	msg := jsonRPCRequest{
+		JSONRPC: "2.0",
+		ID:      idRaw,
+		Method:  "tools/call",
+		Params: func() json.RawMessage {
+			b, _ := json.Marshal(map[string]interface{}{
+				"name":      "get_index_status",
+				"arguments": json.RawMessage(argsBytes),
+			})
+			return b
+		}(),
+	}
+
+	resp := h.safeDispatchCtx(reqCtx, sess, msg)
+	if resp.Error != nil {
+		t.Fatalf("unexpected dispatch error: %+v", resp.Error)
+	}
+
+	// The store's GetRepository must have been called with the sentinel context,
+	// not with context.Background().
+	if tracking.lastGetRepositoryCtx == nil {
+		t.Fatal("GetRepository was never called — test setup problem")
+	}
+	if got := tracking.lastGetRepositoryCtx.Value(sentinelKey{}); got != sentinelVal {
+		t.Errorf("store.GetRepository received wrong context: sentinel value = %v (want %q); "+
+			"this means the handler was not upgraded from noCtxHandler to withCtxHandler", got, sentinelVal)
+	}
+}
+
 // TestSafeDispatch_IsBackcompatShim verifies that safeDispatch (the test/backcompat
 // shim) still works for existing callers (e.g. sendRPC in the test harness).
 // It must produce the same response shape as safeDispatchCtx(context.Background(), ...).
