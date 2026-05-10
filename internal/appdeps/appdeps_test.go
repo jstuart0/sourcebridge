@@ -10,11 +10,10 @@ import (
 
 // TestResolverStructureCanary pins the exact field set on graphql.Resolver.
 //
-// After CA-184 Phase 1, Resolver has exactly five fields:
-//   - Deps         — *appdeps.AppDeps pointer (all subsystem dependencies)
-//   - Store        — per-tenant filtered store (not in AppDeps; per-request lifecycle)
-//   - Plan         — boot-time entitlement plan (not in AppDeps; computed at boot)
-//   - GitConfig    — legacy loader kept until Phase 2 (CA-305) removes it
+// After CA-305 Phase 2, Resolver has exactly four fields:
+//   - Deps           — *appdeps.AppDeps pointer (all subsystem dependencies)
+//   - Store          — per-tenant filtered store (not in AppDeps; per-request lifecycle)
+//   - Plan           — boot-time entitlement plan (not in AppDeps; computed at boot)
 //   - ClusteringHook — wiring-time closure (excluded from AppDeps by design)
 //
 // If this test fails after you add a new field to Resolver, either:
@@ -31,7 +30,6 @@ func TestResolverStructureCanary(t *testing.T) {
 		"Deps":           true,
 		"Store":          true,
 		"Plan":           true,
-		"GitConfig":      true, // removed in Phase 2 (CA-305)
 		"ClusteringHook": true,
 	}
 

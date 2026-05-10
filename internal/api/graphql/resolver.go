@@ -19,15 +19,6 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
 
-// GitConfigLoader is the legacy adapter the graphql package used before
-// R3 slice 2 introduced gitres.Resolver. It is kept ONLY to preserve
-// the option name on rest.Server for backward-compatible test wiring
-// (the live runtime path uses Resolver.GitResolver). When both are set,
-// the resolver wins.
-type GitConfigLoader interface {
-	LoadGitConfig() (token, sshKeyPath string, err error)
-}
-
 // DrainAdmitter is the interface the GraphQL resolver uses to (a) check
 // whether the server is draining and (b) atomically admit on-demand Living
 // Wiki requests to the drain counter. CA-142.
@@ -107,10 +98,6 @@ type Resolver struct {
 	// Zero value normalized to PlanOSS at the resolveCapabilities call site.
 	Plan entitlements.Plan
 
-	// GitConfig is the legacy git-credential loader kept for Phase 1; Phase 2
-	// (CA-305) removes it. The live runtime path uses r.Deps.GitResolver.
-	GitConfig GitConfigLoader
-
 	// ClusteringHook is called after each successful index run with (repoID,
 	// commitSHA) to enqueue an async clustering job. Nil = clustering disabled.
 	// Not in AppDeps: this is a closure constructed at wiring time; see
@@ -141,17 +128,15 @@ func (r *Resolver) getStore(ctx context.Context) graph.GraphStore {
 // Context is threaded so a cancelled GraphQL request bypasses the DB
 // version probe rather than completing on context.Background.
 //
-// Backward-compat: when r.Deps.GitResolver is nil (e.g. older test wiring)
-// we fall back to the legacy GitConfigLoader path. The legacy path cannot
-// surface IntegrityError — it only ever returns env-shadowed values —
-// so production deployments MUST wire the resolver.
+// When r.Deps.GitResolver is nil (e.g. test wiring that supplies only
+// Deps.Config), the env-bootstrap values in cfg.Git are returned directly.
 //
 // resolveGitCredentialsForOp(ctx, "<op>") so the structured log line
-// carries op context. This zero-arg form is kept for older tests that
-// haven't been updated and is asserted as allowlisted in
+// carries op context. This zero-arg form is kept for callers that do not
+// need an op label, asserted as allowlisted in
 // internal/git/resolution/lint_test.go (resolveGitCredentials).
 //
-//nolint:unused // Backward-compat shim: every active caller now uses
+//nolint:unused // Some callers use the named-op variant; both are allowlisted.
 func (r *Resolver) resolveGitCredentials(ctx context.Context) (token, sshKeyPath string, err error) {
 	return r.resolveGitCredentialsForOp(ctx, "graphql")
 }
@@ -176,26 +161,11 @@ func (r *Resolver) resolveGitCredentialsForOp(ctx context.Context, op string) (t
 		return snap.Token, snap.SSHKeyPath, nil
 	}
 
-	// Legacy fallback (test wiring).
-	if r.GitConfig != nil {
-		if t, s, lerr := r.GitConfig.LoadGitConfig(); lerr == nil {
-			if t != "" {
-				token = t
-			}
-			if s != "" {
-				sshKeyPath = s
-			}
-		} else {
-			slog.Warn("failed to load git config from database, using in-memory", "error", lerr)
-		}
+	// Env-bootstrap fallback when no resolver is wired (test or embedded mode).
+	if r.Deps.Config != nil {
+		return r.Deps.Config.Git.DefaultToken, r.Deps.Config.Git.SSHKeyPath, nil
 	}
-	if token == "" && r.Deps.Config != nil {
-		token = r.Deps.Config.Git.DefaultToken
-	}
-	if sshKeyPath == "" && r.Deps.Config != nil {
-		sshKeyPath = r.Deps.Config.Git.SSHKeyPath
-	}
-	return token, sshKeyPath, nil
+	return "", "", nil
 }
 
 // syncJobOp picks the resolution.Op constant for sync jobs enqueued via

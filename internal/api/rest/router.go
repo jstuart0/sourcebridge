@@ -890,12 +890,10 @@ func (s *Server) setupRouter() {
 	// GraphQL server — all subsystem dependencies are read via r.Deps.<Field>.
 	// ClusteringHook is a closure constructed at wiring time and stays on
 	// Resolver directly (not in AppDeps; see appdeps package doc for rationale).
-	// GitConfig is the legacy loader kept until Phase 2 (CA-305) removes it.
 	gqlResolver := &graphql.Resolver{
 		Deps:           s.AppDeps,
 		Store:          s.store,
 		Plan:           graphql.BootCurrentPlan(),
-		GitConfig:      gitConfigLoaderFromStore(s.gitConfigStore),
 		ClusteringHook: s.clusteringHookFunc(),
 	}
 

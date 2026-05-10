@@ -54,11 +54,10 @@ func TestNoDirectCfgGitReads(t *testing.T) {
 		"internal/api/rest/git_config.go": {"handleGetGitConfig": true},
 		// Admin snapshot fallback when no resolver is wired.
 		"internal/api/rest/admin.go": {"adminGitView": true},
-		// GraphQL resolver's legacy fallback (when GitResolver is nil
-		// in tests). Production wiring sets GitResolver so this path
-		// is dead in live deployments. resolveGitCredentialsForOp is
-		// the codex r2 medium variant that takes an op label for the
-		// LogResolved structured log line; both wrap the same fallback.
+		// GraphQL resolver env-bootstrap fallback (when GitResolver is nil,
+		// reads cfg.Git directly). resolveGitCredentialsForOp is the
+		// codex r2 named-op variant; resolveGitCredentials is the
+		// zero-arg convenience wrapper. Both are allowlisted here.
 		"internal/api/graphql/resolver.go": {
 			"resolveGitCredentials":      true,
 			"resolveGitCredentialsForOp": true,

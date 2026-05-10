@@ -26,30 +26,6 @@ type GitConfigStore interface {
 	SaveGitConfig(ctx context.Context, token, sshKeyPath string) error
 }
 
-// gitConfigLoaderAdapter narrows a ctx-aware GitConfigStore to the
-// legacy GitConfigLoader shape the GraphQL package uses for backward-
-// compatible test wiring. Production wiring sets Resolver.GitResolver,
-// which takes precedence over the legacy loader.
-type gitConfigLoaderAdapter struct{ s GitConfigStore }
-
-func (a *gitConfigLoaderAdapter) LoadGitConfig() (string, string, error) {
-	if a == nil || a.s == nil {
-		return "", "", nil
-	}
-	t, p, _, err := a.s.LoadGitConfig(context.Background())
-	return t, p, err
-}
-
-// gitConfigLoaderFromStore wraps a ctx-aware store as a legacy loader.
-// Returns nil when the input is nil so the GraphQL Resolver's GitConfig
-// stays nil-safe.
-func gitConfigLoaderFromStore(s GitConfigStore) *gitConfigLoaderAdapter {
-	if s == nil {
-		return nil
-	}
-	return &gitConfigLoaderAdapter{s: s}
-}
-
 type gitConfigResponse struct {
 	DefaultTokenSet  bool   `json:"default_token_set"`
 	DefaultTokenHint string `json:"default_token_hint,omitempty"`
