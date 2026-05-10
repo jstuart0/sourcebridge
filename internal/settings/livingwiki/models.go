@@ -129,10 +129,10 @@ func MaskSecrets(s Settings) Settings {
 type Store interface {
 	// Get returns the current settings, or a zero-value Settings if none have
 	// been saved yet. Secrets are returned decrypted.
-	Get() (*Settings, error)
+	Get(ctx context.Context) (*Settings, error)
 
 	// Set persists s. Secret fields are encrypted before writing.
-	Set(s *Settings) error
+	Set(ctx context.Context, s *Settings) error
 }
 
 // RepoSettingsStore is the persistence interface for per-repo living-wiki

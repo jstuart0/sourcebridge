@@ -110,14 +110,14 @@ func (r *surrealLivingWikiSettings) toSettings(decrypt func(string) (string, err
 // Public interface
 // ─────────────────────────────────────────────────────────────────────────────
 
-func (s *LivingWikiSettingsStore) Get() (*livingwiki.Settings, error) {
+func (s *LivingWikiSettingsStore) Get(ctx context.Context) (*livingwiki.Settings, error) {
 	db := s.client.DB()
 	if db == nil {
 		return &livingwiki.Settings{}, nil
 	}
 
 	sql := `SELECT * FROM lw_settings WHERE id = type::thing('lw_settings', 'default') LIMIT 1`
-	result, err := queryOne[[]surrealLivingWikiSettings](context.Background(), db, sql, nil)
+	result, err := queryOne[[]surrealLivingWikiSettings](ctx, db, sql, nil)
 	if err != nil || len(result) == 0 {
 		return &livingwiki.Settings{}, nil
 	}
@@ -125,7 +125,7 @@ func (s *LivingWikiSettingsStore) Get() (*livingwiki.Settings, error) {
 	return result[0].toSettings(s.decrypt)
 }
 
-func (s *LivingWikiSettingsStore) Set(settings *livingwiki.Settings) error {
+func (s *LivingWikiSettingsStore) Set(ctx context.Context, settings *livingwiki.Settings) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -185,7 +185,7 @@ func (s *LivingWikiSettingsStore) Set(settings *livingwiki.Settings) error {
 			updated_at                   = time::now()
 	`
 
-	_, err = surrealdb.Query[interface{}](context.Background(), db, sql, map[string]any{
+	_, err = surrealdb.Query[interface{}](ctx, db, sql, map[string]any{
 		"enabled_set":               enabledSet,
 		"enabled":                   enabled,
 		"worker_count":              settings.WorkerCount,
@@ -295,7 +295,7 @@ func (s *LivingWikiSettingsStore) DecryptForTest(encoded string) (string, error)
 // LivingWikiSettingsUpdatedAt is a lightweight helper that just reads the
 // updated_at timestamp from the stored row. Used by health checks.
 func LivingWikiSettingsUpdatedAt(store livingwiki.Store) (time.Time, error) {
-	s, err := store.Get()
+	s, err := store.Get(context.Background())
 	if err != nil {
 		return time.Time{}, err
 	}

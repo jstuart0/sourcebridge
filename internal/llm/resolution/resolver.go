@@ -67,8 +67,8 @@ type Snapshot struct {
 // db.SurrealLLMConfigStore; we keep the resolver's view minimal so tests
 // can fake it without dragging in SurrealDB.
 type LLMConfigStore interface {
-	LoadLLMConfig() (*WorkspaceRecord, error)
-	LoadLLMConfigVersion() (uint64, error)
+	LoadLLMConfig(ctx context.Context) (*WorkspaceRecord, error)
+	LoadLLMConfigVersion(ctx context.Context) (uint64, error)
 }
 
 // ProfileLookupStore is the narrow interface the per-repo override
@@ -386,7 +386,7 @@ func (r *DefaultResolver) applyWorkspace(ctx context.Context, snap *Snapshot) {
 	// Cheap version check first. If the version cell is unreachable or
 	// returns an empty/zero result we treat the workspace layer as
 	// unavailable for THIS Resolve, but we still serve cached values.
-	currentVer, verErr := r.store.LoadLLMConfigVersion()
+	currentVer, verErr := r.store.LoadLLMConfigVersion(ctx)
 
 	r.mu.Lock()
 	cachedRec := r.cache
@@ -420,7 +420,7 @@ func (r *DefaultResolver) applyWorkspace(ctx context.Context, snap *Snapshot) {
 	}
 
 	// Cache miss: full fetch.
-	rec, loadErr := r.store.LoadLLMConfig()
+	rec, loadErr := r.store.LoadLLMConfig(ctx)
 	if loadErr != nil {
 		// DB hiccup mid-fetch — same outage handling as above.
 		if cachedRec != nil {

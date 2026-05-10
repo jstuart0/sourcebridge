@@ -509,7 +509,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 	}
 	s.orchestrator = orchestrator.New(s.jobStore, orchCfg)
 	if s.queueControlStore != nil {
-		if rec, err := s.queueControlStore.LoadQueueControl(); err == nil && rec != nil {
+		if rec, err := s.queueControlStore.LoadQueueControl(context.Background()); err == nil && rec != nil {
 			s.orchestrator.SetIntakePaused(rec.IntakePaused)
 		}
 	}

@@ -42,7 +42,7 @@ func previewResolver(
 
 	globalStore := livingwiki.NewMemStore()
 	enabled := globalEnabled
-	if err := globalStore.Set(&livingwiki.Settings{Enabled: &enabled}); err != nil {
+	if err := globalStore.Set(context.Background(), &livingwiki.Settings{Enabled: &enabled}); err != nil {
 		t.Fatalf("seed global settings: %v", err)
 	}
 
@@ -85,7 +85,7 @@ func resolverWithClusters(
 
 	globalStore := livingwiki.NewMemStore()
 	enabled := true
-	if err := globalStore.Set(&livingwiki.Settings{Enabled: &enabled}); err != nil {
+	if err := globalStore.Set(context.Background(), &livingwiki.Settings{Enabled: &enabled}); err != nil {
 		t.Fatalf("seed global settings: %v", err)
 	}
 

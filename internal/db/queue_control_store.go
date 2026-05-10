@@ -24,12 +24,11 @@ type QueueControlRecord struct {
 	IntakePaused bool `json:"intake_paused"`
 }
 
-func (s *SurrealQueueControlStore) LoadQueueControl() (*QueueControlRecord, error) {
+func (s *SurrealQueueControlStore) LoadQueueControl(ctx context.Context) (*QueueControlRecord, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, nil
 	}
-	ctx := context.Background()
 	raw, err := surrealdb.Query[[]map[string]interface{}](ctx, db,
 		"SELECT * FROM type::thing('ca_config', $id)",
 		map[string]any{"id": "llm_queue_control"})
@@ -60,12 +59,11 @@ func (s *SurrealQueueControlStore) LoadQueueControl() (*QueueControlRecord, erro
 	return &rec, nil
 }
 
-func (s *SurrealQueueControlStore) SaveQueueControl(rec *QueueControlRecord) error {
+func (s *SurrealQueueControlStore) SaveQueueControl(ctx context.Context, rec *QueueControlRecord) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	ctx := context.Background()
 	_, err := surrealdb.Query[interface{}](ctx, db, `
 		DEFINE TABLE IF NOT EXISTS ca_config SCHEMAFULL;
 		DEFINE FIELD IF NOT EXISTS key ON ca_config TYPE string;

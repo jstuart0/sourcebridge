@@ -160,13 +160,11 @@ const envelopePrefix = secretcipher.EnvelopePrefix
 // Decrypt failures (corruption, wrong key, key rotated without
 // re-saving) return ErrAPIKeyDecryptFailed — caller MUST surface this
 // rather than silently falling back to env or builtin defaults.
-func (s *SurrealLLMConfigStore) LoadLLMConfig() (*LLMConfigRecord, error) {
+func (s *SurrealLLMConfigStore) LoadLLMConfig(ctx context.Context) (*LLMConfigRecord, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, nil
 	}
-
-	ctx := context.Background()
 
 	raw, err := surrealdb.Query[[]map[string]interface{}](ctx, db,
 		"SELECT provider, base_url, api_key, summary_model, review_model, ask_model, knowledge_model, architecture_diagram_model, report_model, draft_model, timeout_secs, advanced_mode, version FROM ca_llm_config WHERE id = type::thing('ca_llm_config', 'default') LIMIT 1",
@@ -256,12 +254,11 @@ func (s *SurrealLLMConfigStore) LoadLLMConfig() (*LLMConfigRecord, error) {
 // Returns 0 when the row doesn't exist yet (no workspace settings saved).
 // Errors propagate so the resolver can fall back to its cached snapshot
 // and stamp Stale=true.
-func (s *SurrealLLMConfigStore) LoadLLMConfigVersion() (uint64, error) {
+func (s *SurrealLLMConfigStore) LoadLLMConfigVersion(ctx context.Context) (uint64, error) {
 	db := s.client.DB()
 	if db == nil {
 		return 0, fmt.Errorf("database not connected")
 	}
-	ctx := context.Background()
 	raw, err := surrealdb.Query[[]map[string]interface{}](ctx, db,
 		"SELECT version FROM ca_llm_config WHERE id = type::thing('ca_llm_config', 'default') LIMIT 1",
 		map[string]any{})
@@ -302,7 +299,7 @@ func (s *SurrealLLMConfigStore) LoadLLMConfigVersion() (uint64, error) {
 	return 0, nil
 }
 
-func (s *SurrealLLMConfigStore) SaveLLMConfig(rec *LLMConfigRecord) error {
+func (s *SurrealLLMConfigStore) SaveLLMConfig(ctx context.Context, rec *LLMConfigRecord) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -314,8 +311,6 @@ func (s *SurrealLLMConfigStore) SaveLLMConfig(rec *LLMConfigRecord) error {
 	if err != nil {
 		return err
 	}
-
-	ctx := context.Background()
 
 	// Ensure table exists (idempotent)
 	_, err = surrealdb.Query[interface{}](ctx, db, `

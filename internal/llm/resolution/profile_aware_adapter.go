@@ -23,7 +23,7 @@ import (
 // migration), return a zero-value snapshot with no error.
 type ProfileAwareConfigStore interface {
 	LoadConfigSnapshot(ctx context.Context) (*ConfigSnapshot, error)
-	LoadLLMConfigVersion() (uint64, error)
+	LoadLLMConfigVersion(ctx context.Context) (uint64, error)
 }
 
 // ProfileAwareProfileStore is the adapter-facing interface implemented
@@ -166,9 +166,7 @@ func (a *ProfileAwareLLMResolverAdapter) ActiveProfileMissing() bool {
 // reconciliation when an old-pod legacy write is detected (codex-H2 / r1c).
 //
 // Implements resolution.LLMConfigStore.
-func (a *ProfileAwareLLMResolverAdapter) LoadLLMConfig() (*WorkspaceRecord, error) {
-	ctx := context.Background()
-
+func (a *ProfileAwareLLMResolverAdapter) LoadLLMConfig(ctx context.Context) (*WorkspaceRecord, error) {
 	snap, err := a.configStore.LoadConfigSnapshot(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("profile-aware adapter: load snapshot: %w", err)
@@ -233,8 +231,8 @@ func (a *ProfileAwareLLMResolverAdapter) LoadLLMConfig() (*WorkspaceRecord, erro
 // LoadLLMConfigVersion forwards to the underlying config store. The
 // version cell remains on ca_llm_config:default; the resolver's
 // version-keyed cache uses this for the cheap probe.
-func (a *ProfileAwareLLMResolverAdapter) LoadLLMConfigVersion() (uint64, error) {
-	return a.configStore.LoadLLMConfigVersion()
+func (a *ProfileAwareLLMResolverAdapter) LoadLLMConfigVersion(ctx context.Context) (uint64, error) {
+	return a.configStore.LoadLLMConfigVersion(ctx)
 }
 
 // LoadProfileForResolution implements ProfileLookupStore. Used by the

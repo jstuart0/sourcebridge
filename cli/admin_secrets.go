@@ -66,7 +66,7 @@ func runMigrateLLMSecrets(cmd *cobra.Command, args []string) error {
 		db.WithLLMConfigEncryptionKey(cfg.Security.EncryptionKey),
 	)
 
-	rec, err := store.LoadLLMConfig()
+	rec, err := store.LoadLLMConfig(context.Background())
 	if err != nil {
 		return fmt.Errorf("load existing record: %w", err)
 	}
@@ -91,7 +91,7 @@ func runMigrateLLMSecrets(cmd *cobra.Command, args []string) error {
 	}
 
 	// Save will encrypt under the configured key.
-	if err := store.SaveLLMConfig(rec); err != nil {
+	if err := store.SaveLLMConfig(context.Background(), rec); err != nil {
 		return fmt.Errorf("re-save record: %w", err)
 	}
 

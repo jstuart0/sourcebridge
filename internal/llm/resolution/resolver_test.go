@@ -24,7 +24,7 @@ type fakeStore struct {
 	versionErr error
 }
 
-func (f *fakeStore) LoadLLMConfig() (*WorkspaceRecord, error) {
+func (f *fakeStore) LoadLLMConfig(_ context.Context) (*WorkspaceRecord, error) {
 	f.loadCalls.Add(1)
 	if f.loadErr != nil {
 		return nil, f.loadErr
@@ -37,7 +37,7 @@ func (f *fakeStore) LoadLLMConfig() (*WorkspaceRecord, error) {
 	return &cp, nil
 }
 
-func (f *fakeStore) LoadLLMConfigVersion() (uint64, error) {
+func (f *fakeStore) LoadLLMConfigVersion(_ context.Context) (uint64, error) {
 	f.verCalls.Add(1)
 	if f.versionErr != nil {
 		return 0, f.versionErr

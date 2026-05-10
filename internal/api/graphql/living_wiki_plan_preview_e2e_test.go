@@ -96,7 +96,7 @@ func TestEnableLivingWikiForRepo_StaleSignaturePathReturnsFreshPlanInGraphQLResp
 	})
 	globalStore := livingwiki.NewMemStore()
 	enabled := true
-	_ = globalStore.Set(&livingwiki.Settings{Enabled: &enabled})
+	_ = globalStore.Set(context.Background(), &livingwiki.Settings{Enabled: &enabled})
 
 	jobStore := llm.NewMemStore()
 	llmOrch := orchestrator.New(jobStore, orchestrator.Config{MaxConcurrency: 1})

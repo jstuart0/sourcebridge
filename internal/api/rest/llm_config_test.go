@@ -23,7 +23,7 @@ type fakeLLMConfigStore struct {
 	saveErr error
 }
 
-func (f *fakeLLMConfigStore) LoadLLMConfig() (*LLMConfigRecord, error) {
+func (f *fakeLLMConfigStore) LoadLLMConfig(_ context.Context) (*LLMConfigRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.rec == nil {
@@ -33,7 +33,7 @@ func (f *fakeLLMConfigStore) LoadLLMConfig() (*LLMConfigRecord, error) {
 	return &cp, nil
 }
 
-func (f *fakeLLMConfigStore) SaveLLMConfig(rec *LLMConfigRecord) error {
+func (f *fakeLLMConfigStore) SaveLLMConfig(_ context.Context, rec *LLMConfigRecord) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.saveErr != nil {
@@ -136,7 +136,7 @@ func TestHandleUpdateLLMConfig_PartialMergeAgainstDB(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	saved, _ := store.LoadLLMConfig()
+	saved, _ := store.LoadLLMConfig(context.Background())
 	if saved.Provider != "ollama" {
 		t.Errorf("provider: got %q, want ollama", saved.Provider)
 	}
@@ -206,7 +206,7 @@ type fakeResolverStore struct {
 	version uint64
 }
 
-func (f *fakeResolverStore) LoadLLMConfig() (*resolution.WorkspaceRecord, error) {
+func (f *fakeResolverStore) LoadLLMConfig(_ context.Context) (*resolution.WorkspaceRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.rec == nil {
@@ -217,7 +217,7 @@ func (f *fakeResolverStore) LoadLLMConfig() (*resolution.WorkspaceRecord, error)
 	return &cp, nil
 }
 
-func (f *fakeResolverStore) LoadLLMConfigVersion() (uint64, error) {
+func (f *fakeResolverStore) LoadLLMConfigVersion(_ context.Context) (uint64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.version, nil

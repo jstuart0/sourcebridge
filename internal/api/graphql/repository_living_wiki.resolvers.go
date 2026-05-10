@@ -164,7 +164,7 @@ func (r *Resolver) isLivingWikiGloballyEnabled() bool {
 	if r.Deps.LivingWikiStore == nil {
 		return false
 	}
-	s, err := r.Deps.LivingWikiStore.Get()
+	s, err := r.Deps.LivingWikiStore.Get(context.Background())
 	if err != nil || s == nil || s.Enabled == nil {
 		return false
 	}

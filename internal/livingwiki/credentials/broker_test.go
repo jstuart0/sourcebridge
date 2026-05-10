@@ -180,7 +180,7 @@ func TestSnapshot_ValueSemantics(t *testing.T) {
 func newTestResolver(gh, gl, cfEmail, cfToken, nt string) *livingwiki.Resolver {
 	store := livingwiki.NewMemStore()
 	enabled := true
-	_ = store.Set(&livingwiki.Settings{
+	_ = store.Set(context.Background(), &livingwiki.Settings{
 		Enabled:         &enabled,
 		GitHubToken:     gh,
 		GitLabToken:     gl,
@@ -218,7 +218,7 @@ func TestResolverBroker_ReturnsResolvedCredentials(t *testing.T) {
 func TestResolverBroker_CacheRespected(t *testing.T) {
 	store := livingwiki.NewMemStore()
 	enabled := true
-	_ = store.Set(&livingwiki.Settings{
+	_ = store.Set(context.Background(), &livingwiki.Settings{
 		Enabled:     &enabled,
 		GitHubToken: "cached-token",
 	})
@@ -244,7 +244,7 @@ func TestResolverBroker_CacheRespected(t *testing.T) {
 func TestResolverBroker_RespectsInvalidation(t *testing.T) {
 	store := livingwiki.NewMemStore()
 	enabled := true
-	_ = store.Set(&livingwiki.Settings{
+	_ = store.Set(context.Background(), &livingwiki.Settings{
 		Enabled:         &enabled,
 		ConfluenceEmail: "old@example.com",
 		ConfluenceToken: "old-token",
@@ -263,7 +263,7 @@ func TestResolverBroker_RespectsInvalidation(t *testing.T) {
 	}
 
 	// Simulate a credential rotation: update store and invalidate cache.
-	_ = store.Set(&livingwiki.Settings{
+	_ = store.Set(context.Background(), &livingwiki.Settings{
 		Enabled:         &enabled,
 		ConfluenceEmail: "new@example.com",
 		ConfluenceToken: "new-token",

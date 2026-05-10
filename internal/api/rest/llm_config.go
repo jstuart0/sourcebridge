@@ -17,8 +17,8 @@ import (
 
 // LLMConfigStore persists LLM configuration so it survives server restarts.
 type LLMConfigStore interface {
-	LoadLLMConfig() (*LLMConfigRecord, error)
-	SaveLLMConfig(rec *LLMConfigRecord) error
+	LoadLLMConfig(ctx context.Context) (*LLMConfigRecord, error)
+	SaveLLMConfig(ctx context.Context, rec *LLMConfigRecord) error
 }
 
 // LLMConfigRecord mirrors db.LLMConfigRecord to avoid circular imports.
@@ -103,7 +103,7 @@ type effectiveLLM struct {
 	AdvancedMode             bool
 }
 
-func (s *Server) effectiveLLMConfig() effectiveLLM {
+func (s *Server) effectiveLLMConfig(ctx context.Context) effectiveLLM {
 	// Start from env-bootstrap (cfg.LLM); workspace store overrides
 	// non-empty fields when available.
 	eff := effectiveLLM{
@@ -127,7 +127,7 @@ func (s *Server) effectiveLLMConfig() effectiveLLM {
 	// into one Model; that's intentional for the gRPC code path but
 	// wrong for the admin UI which wants to render every per-op slot.
 	if s.llmConfigStore != nil {
-		if rec, err := s.llmConfigStore.LoadLLMConfig(); err == nil && rec != nil {
+		if rec, err := s.llmConfigStore.LoadLLMConfig(ctx); err == nil && rec != nil {
 			if rec.Provider != "" {
 				eff.Provider = rec.Provider
 			}
@@ -168,7 +168,7 @@ func (s *Server) effectiveLLMConfig() effectiveLLM {
 }
 
 func (s *Server) handleGetLLMConfig(w http.ResponseWriter, r *http.Request) {
-	eff := s.effectiveLLMConfig()
+	eff := s.effectiveLLMConfig(r.Context())
 	resp := llmConfigResponse{
 		Provider:                 eff.Provider,
 		BaseURL:                  eff.BaseURL,
@@ -232,7 +232,7 @@ func (s *Server) handleUpdateLLMConfig(w http.ResponseWriter, r *http.Request) {
 	// request only touches the fields it explicitly provides.
 	rec := &LLMConfigRecord{}
 	if s.llmConfigStore != nil {
-		if existing, err := s.llmConfigStore.LoadLLMConfig(); err == nil && existing != nil {
+		if existing, err := s.llmConfigStore.LoadLLMConfig(r.Context()); err == nil && existing != nil {
 			rec = existing
 		}
 	}
@@ -300,7 +300,7 @@ func (s *Server) handleUpdateLLMConfig(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if err := s.llmConfigStore.SaveLLMConfig(rec); err != nil {
+	if err := s.llmConfigStore.SaveLLMConfig(r.Context(), rec); err != nil {
 		// Slice 3 introduces a typed encryption-key-missing error
 		// (ErrEncryptionKeyRequired). Detect it via errors.Is so the
 		// admin UI can show a 422 with a clear message.

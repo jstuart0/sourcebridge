@@ -4,6 +4,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -13,8 +14,8 @@ import (
 // Only durable operator intent belongs here; one-shot actions like drain are
 // handled directly by the orchestrator.
 type QueueControlStore interface {
-	LoadQueueControl() (*QueueControlRecord, error)
-	SaveQueueControl(rec *QueueControlRecord) error
+	LoadQueueControl(ctx context.Context) (*QueueControlRecord, error)
+	SaveQueueControl(ctx context.Context, rec *QueueControlRecord) error
 }
 
 type QueueControlRecord struct {
@@ -33,7 +34,7 @@ func (s *Server) persistQueueControl() {
 	if s.queueControlStore == nil || s.orchestrator == nil {
 		return
 	}
-	if err := s.queueControlStore.SaveQueueControl(&QueueControlRecord{
+	if err := s.queueControlStore.SaveQueueControl(context.Background(), &QueueControlRecord{
 		IntakePaused: s.orchestrator.IntakePaused(),
 	}); err != nil {
 		slog.Warn("failed to persist queue control", "error", err)

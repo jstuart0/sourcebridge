@@ -1190,8 +1190,8 @@ type queueControlAdapter struct {
 	store *db.SurrealQueueControlStore
 }
 
-func (a *llmConfigAdapter) LoadLLMConfig() (*rest.LLMConfigRecord, error) {
-	rec, err := a.store.LoadLLMConfig()
+func (a *llmConfigAdapter) LoadLLMConfig(ctx context.Context) (*rest.LLMConfigRecord, error) {
+	rec, err := a.store.LoadLLMConfig(ctx)
 	if err != nil || rec == nil {
 		return nil, err
 	}
@@ -1211,7 +1211,7 @@ func (a *llmConfigAdapter) LoadLLMConfig() (*rest.LLMConfigRecord, error) {
 	}, nil
 }
 
-func (a *llmConfigAdapter) SaveLLMConfig(rec *rest.LLMConfigRecord) error {
+func (a *llmConfigAdapter) SaveLLMConfig(ctx context.Context, rec *rest.LLMConfigRecord) error {
 	// Slice 1 made the legacy PUT /admin/llm-config translate to a
 	// PATCH against the ACTIVE profile (D7), going through
 	// writeActiveProfileWithLegacyMirror so the legacy mirror row stays
@@ -1227,7 +1227,6 @@ func (a *llmConfigAdapter) SaveLLMConfig(rec *rest.LLMConfigRecord) error {
 	// that did not abort boot; surface ErrNoActiveProfile (mapped to
 	// 503 by handleUpdateLLMConfig) rather than silently writing the
 	// legacy fields and creating a stale mirror.
-	ctx := context.Background()
 	activeID, _, err := a.store.LoadActiveProfileIDAndVersion(ctx)
 	if err != nil {
 		return fmt.Errorf("load active profile id: %w", err)
@@ -1352,8 +1351,8 @@ func (a *lwRepoOverrideAdapter) LoadLLMOverride(ctx context.Context, repoID stri
 	}, nil
 }
 
-func (a *queueControlAdapter) LoadQueueControl() (*rest.QueueControlRecord, error) {
-	rec, err := a.store.LoadQueueControl()
+func (a *queueControlAdapter) LoadQueueControl(ctx context.Context) (*rest.QueueControlRecord, error) {
+	rec, err := a.store.LoadQueueControl(ctx)
 	if err != nil || rec == nil {
 		return nil, err
 	}
@@ -1362,8 +1361,8 @@ func (a *queueControlAdapter) LoadQueueControl() (*rest.QueueControlRecord, erro
 	}, nil
 }
 
-func (a *queueControlAdapter) SaveQueueControl(rec *rest.QueueControlRecord) error {
-	return a.store.SaveQueueControl(&db.QueueControlRecord{
+func (a *queueControlAdapter) SaveQueueControl(ctx context.Context, rec *rest.QueueControlRecord) error {
+	return a.store.SaveQueueControl(ctx, &db.QueueControlRecord{
 		IntakePaused: rec.IntakePaused,
 	})
 }
@@ -1768,8 +1767,8 @@ func (s *profileAwareConfigStoreShim) LoadConfigSnapshot(ctx context.Context) (*
 	}, nil
 }
 
-func (s *profileAwareConfigStoreShim) LoadLLMConfigVersion() (uint64, error) {
-	return s.store.LoadLLMConfigVersion()
+func (s *profileAwareConfigStoreShim) LoadLLMConfigVersion(ctx context.Context) (uint64, error) {
+	return s.store.LoadLLMConfigVersion(ctx)
 }
 
 // profileAwareProfileStoreShim bridges *db.SurrealLLMProfileStore →

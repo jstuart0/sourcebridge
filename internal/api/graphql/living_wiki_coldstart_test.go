@@ -2255,7 +2255,7 @@ func enableResolverWithClusters(t *testing.T, repoID string, n int) (*mutationRe
 
 	globalStore := livingwiki.NewMemStore()
 	enabled := true
-	_ = globalStore.Set(&livingwiki.Settings{Enabled: &enabled})
+	_ = globalStore.Set(context.Background(), &livingwiki.Settings{Enabled: &enabled})
 
 	r := &Resolver{
 		Deps: &appdeps.AppDeps{
@@ -2360,7 +2360,7 @@ func TestEnableLivingWikiForRepo_StaleSignatureRejected(t *testing.T) {
 	})
 	globalStore := livingwiki.NewMemStore()
 	enabled := true
-	_ = globalStore.Set(&livingwiki.Settings{Enabled: &enabled})
+	_ = globalStore.Set(context.Background(), &livingwiki.Settings{Enabled: &enabled})
 
 	jobStore := llm.NewMemStore()
 	llmOrch := orchestrator.New(jobStore, orchestrator.Config{MaxConcurrency: 1})
@@ -2415,7 +2415,7 @@ func TestEnableLivingWikiForRepo_StaleSignatureDoesNotPersistSettings(t *testing
 	})
 	globalStore := livingwiki.NewMemStore()
 	enabled := true
-	_ = globalStore.Set(&livingwiki.Settings{Enabled: &enabled})
+	_ = globalStore.Set(context.Background(), &livingwiki.Settings{Enabled: &enabled})
 
 	jobStore := llm.NewMemStore()
 	llmOrch := orchestrator.New(jobStore, orchestrator.Config{MaxConcurrency: 1})
@@ -2475,7 +2475,7 @@ func TestEnableLivingWikiForRepo_UnknownSelectedPageIDsRejected(t *testing.T) {
 	})
 	globalStore := livingwiki.NewMemStore()
 	enabled := true
-	_ = globalStore.Set(&livingwiki.Settings{Enabled: &enabled})
+	_ = globalStore.Set(context.Background(), &livingwiki.Settings{Enabled: &enabled})
 
 	jobStore := llm.NewMemStore()
 	llmOrch := orchestrator.New(jobStore, orchestrator.Config{MaxConcurrency: 1})
@@ -2905,7 +2905,7 @@ func TestEnableLivingWikiForRepo_WithSelectedPageIds_ClosureGeneratesOnlySelecte
 	})
 	globalStore := livingwiki.NewMemStore()
 	enabled := true
-	_ = globalStore.Set(&livingwiki.Settings{Enabled: &enabled})
+	_ = globalStore.Set(context.Background(), &livingwiki.Settings{Enabled: &enabled})
 
 	qr := &queryResolver{Resolver: &Resolver{
 		Deps: &appdeps.AppDeps{

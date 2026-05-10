@@ -33,7 +33,7 @@ func (f *fakeConfigStore) LoadConfigSnapshot(_ context.Context) (*ConfigSnapshot
 	return &cp, nil
 }
 
-func (f *fakeConfigStore) LoadLLMConfigVersion() (uint64, error) {
+func (f *fakeConfigStore) LoadLLMConfigVersion(_ context.Context) (uint64, error) {
 	f.versionCalls.Add(1)
 	if f.versionErr != nil {
 		return 0, f.versionErr
@@ -95,7 +95,7 @@ func TestAdapter_NoActiveProfileFreshInstall(t *testing.T) {
 	ps := &fakeProfileStore{}
 	a := NewProfileAwareLLMResolverAdapter(cs, ps, nil, nil)
 
-	rec, err := a.LoadLLMConfig()
+	rec, err := a.LoadLLMConfig(context.Background())
 	if err != nil {
 		t.Fatalf("LoadLLMConfig: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestAdapter_DualReadFallbackPreMigration(t *testing.T) {
 	ps := &fakeProfileStore{}
 	a := NewProfileAwareLLMResolverAdapter(cs, ps, nil, nil)
 
-	rec, err := a.LoadLLMConfig()
+	rec, err := a.LoadLLMConfig(context.Background())
 	if err != nil {
 		t.Fatalf("LoadLLMConfig: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestAdapter_DualReadFallbackDisabled(t *testing.T) {
 	a := NewProfileAwareLLMResolverAdapter(cs, ps, nil, nil)
 	a.SetDualReadFallback(false)
 
-	rec, err := a.LoadLLMConfig()
+	rec, err := a.LoadLLMConfig(context.Background())
 	if err != nil {
 		t.Fatalf("LoadLLMConfig: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestAdapter_ActiveProfileMissingSentinel(t *testing.T) {
 	}
 	a := NewProfileAwareLLMResolverAdapter(cs, ps, nil, nil)
 
-	rec, err := a.LoadLLMConfig()
+	rec, err := a.LoadLLMConfig(context.Background())
 	if err != nil {
 		t.Fatalf("LoadLLMConfig: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestAdapter_ActivePresentNoReconcile(t *testing.T) {
 	rec := &fakeReconciler{}
 	a := NewProfileAwareLLMResolverAdapter(cs, ps, rec, nil)
 
-	got, err := a.LoadLLMConfig()
+	got, err := a.LoadLLMConfig(context.Background())
 	if err != nil {
 		t.Fatalf("LoadLLMConfig: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestAdapter_LegacyWriteTriggersReconcile(t *testing.T) {
 	}
 	a := NewProfileAwareLLMResolverAdapter(cs, ps, rec, nil)
 
-	got, err := a.LoadLLMConfig()
+	got, err := a.LoadLLMConfig(context.Background())
 	if err != nil {
 		t.Fatalf("LoadLLMConfig: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestAdapter_ReconcileVersionConflictIsSwallowed(t *testing.T) {
 	rec := &fakeReconciler{err: ErrVersionConflict}
 	a := NewProfileAwareLLMResolverAdapter(cs, ps, rec, nil)
 
-	got, err := a.LoadLLMConfig()
+	got, err := a.LoadLLMConfig(context.Background())
 	if err != nil {
 		t.Fatalf("LoadLLMConfig should swallow ErrVersionConflict, got %v", err)
 	}
@@ -359,7 +359,7 @@ func TestAdapter_ProfileVersionInheritsFromWorkspace(t *testing.T) {
 	}
 	a := NewProfileAwareLLMResolverAdapter(cs, ps, nil, nil)
 
-	got, err := a.LoadLLMConfig()
+	got, err := a.LoadLLMConfig(context.Background())
 	if err != nil {
 		t.Fatalf("LoadLLMConfig: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestAdapter_ActiveMissingResetsOnSuccessfulResolve(t *testing.T) {
 	a := NewProfileAwareLLMResolverAdapter(cs, ps, nil, nil)
 
 	// First resolve: profile missing → latched true.
-	if _, err := a.LoadLLMConfig(); err != nil {
+	if _, err := a.LoadLLMConfig(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if !a.ActiveProfileMissing() {
@@ -393,7 +393,7 @@ func TestAdapter_ActiveMissingResetsOnSuccessfulResolve(t *testing.T) {
 		Provider:                  "x",
 		LastLegacyVersionConsumed: 2,
 	}
-	if _, err := a.LoadLLMConfig(); err != nil {
+	if _, err := a.LoadLLMConfig(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if a.ActiveProfileMissing() {

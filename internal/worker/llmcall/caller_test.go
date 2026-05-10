@@ -107,7 +107,7 @@ func (f *fakeWorker) GenerateReport(ctx context.Context, _ *enterprisev1.Generat
 // fakeStore yields a fixed workspace record at version 1.
 type fakeStore struct{ rec *resolution.WorkspaceRecord }
 
-func (f *fakeStore) LoadLLMConfig() (*resolution.WorkspaceRecord, error) {
+func (f *fakeStore) LoadLLMConfig(_ context.Context) (*resolution.WorkspaceRecord, error) {
 	if f.rec == nil {
 		return nil, nil
 	}
@@ -115,7 +115,7 @@ func (f *fakeStore) LoadLLMConfig() (*resolution.WorkspaceRecord, error) {
 	cp.Version = 1
 	return &cp, nil
 }
-func (f *fakeStore) LoadLLMConfigVersion() (uint64, error) { return 1, nil }
+func (f *fakeStore) LoadLLMConfigVersion(_ context.Context) (uint64, error) { return 1, nil }
 
 func TestCaller_AttachesMetadataAndDelegates(t *testing.T) {
 	store := &fakeStore{

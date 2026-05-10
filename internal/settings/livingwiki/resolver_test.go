@@ -4,6 +4,7 @@
 package livingwiki
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -64,7 +65,7 @@ func TestResolver_UIOverridesEnv(t *testing.T) {
 	r := NewResolver(store, env, 0)
 
 	enabled := true
-	_ = store.Set(&Settings{
+	_ = store.Set(context.Background(), &Settings{
 		Enabled:     &enabled,
 		WorkerCount: 2,
 		GitHubToken: "ui-token",
@@ -98,7 +99,7 @@ func TestResolver_Cache(t *testing.T) {
 
 	// Change backing store without invalidating cache
 	wc := true
-	_ = store.Set(&Settings{Enabled: &wc, WorkerCount: 99})
+	_ = store.Set(context.Background(), &Settings{Enabled: &wc, WorkerCount: 99})
 
 	// Cache should return old value
 	res, _ := r.Get()
@@ -141,10 +142,11 @@ func TestMaskSecrets(t *testing.T) {
 }
 
 func TestMemStore_RoundTrip(t *testing.T) {
+	ctx := context.Background()
 	store := NewMemStore()
 
 	// Empty get
-	s, err := store.Get()
+	s, err := store.Get(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,11 +161,11 @@ func TestMemStore_RoundTrip(t *testing.T) {
 		WorkerCount: 6,
 		GitHubToken: "token123",
 	}
-	if err := store.Set(in); err != nil {
+	if err := store.Set(ctx, in); err != nil {
 		t.Fatal(err)
 	}
 
-	out, err := store.Get()
+	out, err := store.Get(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

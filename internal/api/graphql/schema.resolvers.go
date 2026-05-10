@@ -1928,7 +1928,7 @@ func (r *mutationResolver) UpdateLivingWikiSettings(ctx context.Context, input U
 	}
 
 	// Load current stored settings so we can apply a partial patch.
-	current, err := r.Deps.LivingWikiStore.Get()
+	current, err := r.Deps.LivingWikiStore.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1971,7 +1971,7 @@ func (r *mutationResolver) UpdateLivingWikiSettings(ctx context.Context, input U
 		current.UpdatedBy = userID
 	}
 
-	if err := r.Deps.LivingWikiStore.Set(current); err != nil {
+	if err := r.Deps.LivingWikiStore.Set(ctx, current); err != nil {
 		return nil, err
 	}
 
@@ -4123,7 +4123,7 @@ func (r *queryResolver) LivingWikiSettings(ctx context.Context) (*LivingWikiSett
 	if r.Deps.LivingWikiStore == nil {
 		return &LivingWikiSettings{}, nil
 	}
-	s, err := r.Deps.LivingWikiStore.Get()
+	s, err := r.Deps.LivingWikiStore.Get(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -275,8 +275,8 @@ func newServerWithProfileStore(t *testing.T, fake *fakeProfileStoreAdapter) *Ser
 // surfaces alongside.
 type nullConfigStore struct{}
 
-func (nullConfigStore) LoadLLMConfig() (*LLMConfigRecord, error) { return nil, nil }
-func (nullConfigStore) SaveLLMConfig(_ *LLMConfigRecord) error   { return nil }
+func (nullConfigStore) LoadLLMConfig(_ context.Context) (*LLMConfigRecord, error) { return nil, nil }
+func (nullConfigStore) SaveLLMConfig(_ context.Context, _ *LLMConfigRecord) error { return nil }
 
 // ─────────────────────────────────────────────────────────────────────────
 // List

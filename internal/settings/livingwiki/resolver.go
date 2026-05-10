@@ -16,6 +16,7 @@
 package livingwiki
 
 import (
+	"context"
 	"os"
 	"strconv"
 	"sync"
@@ -100,7 +101,7 @@ func (r *Resolver) Get() (*Resolved, error) {
 		return &cp, nil
 	}
 
-	ui, err := r.store.Get()
+	ui, err := r.store.Get(context.Background())
 	if err != nil {
 		return nil, err
 	}

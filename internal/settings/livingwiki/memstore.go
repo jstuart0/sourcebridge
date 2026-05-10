@@ -3,7 +3,10 @@
 
 package livingwiki
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // MemStore is an in-memory [Store] implementation for tests and local dev.
 // Secrets are stored in plaintext (no encryption; it is only for tests).
@@ -17,7 +20,7 @@ func NewMemStore() *MemStore {
 	return &MemStore{}
 }
 
-func (m *MemStore) Get() (*Settings, error) {
+func (m *MemStore) Get(_ context.Context) (*Settings, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.data == nil {
@@ -27,7 +30,7 @@ func (m *MemStore) Get() (*Settings, error) {
 	return &cp, nil
 }
 
-func (m *MemStore) Set(s *Settings) error {
+func (m *MemStore) Set(_ context.Context, s *Settings) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cp := *s
