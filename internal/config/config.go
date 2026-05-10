@@ -35,6 +35,7 @@ type Config struct {
 	ChangeWatch   ChangeWatchConfig   `mapstructure:"change_watch"`
 	ConnectorAPI  ConnectorAPIConfig  `mapstructure:"connector_api"`
 	Shutdown      ShutdownConfig      `mapstructure:"shutdown"`
+	Search        SearchConfig        `mapstructure:"search"`
 }
 
 // ComprehensionConfig holds tunables for the LLM job orchestrator and
@@ -231,7 +232,7 @@ type UIConfig struct {
 
 // SecurityConfig holds security-related settings.
 type SecurityConfig struct {
-	JWTSecret           string     `mapstructure:"jwt_secret"`
+	JWTSecret string `mapstructure:"jwt_secret"`
 	// JWTSecretFile resolves to the path of a file containing the JWT
 	// signing secret. CA-311: mirrors the EncryptionKey/EncryptionKeyFile
 	// pattern so the file (higher-trust than env vars, which leak via
@@ -241,10 +242,10 @@ type SecurityConfig struct {
 	// that mode; production multi-replica deployments must set the file or
 	// the literal env (Helm chart's `jwt-secret` Secret takes the literal
 	// path).
-	JWTSecretFile       string     `mapstructure:"jwt_secret_file"` // env: SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE
-	JWTTTLMinutes       int        `mapstructure:"jwt_ttl_minutes"`
-	EncryptionKey       string     `mapstructure:"encryption_key"`
-	CSRFEnabled bool `mapstructure:"csrf_enabled"`
+	JWTSecretFile string `mapstructure:"jwt_secret_file"` // env: SOURCEBRIDGE_SECURITY_JWT_SECRET_FILE
+	JWTTTLMinutes int    `mapstructure:"jwt_ttl_minutes"`
+	EncryptionKey string `mapstructure:"encryption_key"`
+	CSRFEnabled   bool   `mapstructure:"csrf_enabled"`
 	// CSRFFullCoverageEnabled gates the CA-198 + CA-201 tightening:
 	//   - Bearer-bypass requires no session cookie (CA-201).
 	//   - CSRF middleware is added to the second authenticated route group (/api/v1/admin/*, /api/v1/tokens/*, etc.) (CA-198).
@@ -255,12 +256,12 @@ type SecurityConfig struct {
 	//
 	// Config key: security.csrf_full_coverage_enabled
 	// Env var:    SOURCEBRIDGE_SECURITY_CSRF_FULL_COVERAGE_ENABLED
-	CSRFFullCoverageEnabled bool `mapstructure:"csrf_full_coverage_enabled"`
+	CSRFFullCoverageEnabled bool       `mapstructure:"csrf_full_coverage_enabled"`
 	GRPCAuthSecret          string     `mapstructure:"grpc_auth_secret"`
-	Mode                string     `mapstructure:"mode"` // oss, commercial
-	OIDC                OIDCConfig `mapstructure:"oidc"`
-	GitHubWebhookSecret string     `mapstructure:"github_webhook_secret"`
-	GitLabWebhookSecret string     `mapstructure:"gitlab_webhook_secret"`
+	Mode                    string     `mapstructure:"mode"` // oss, commercial
+	OIDC                    OIDCConfig `mapstructure:"oidc"`
+	GitHubWebhookSecret     string     `mapstructure:"github_webhook_secret"`
+	GitLabWebhookSecret     string     `mapstructure:"gitlab_webhook_secret"`
 	// APITokenLegacyAdminDefault controls the role assigned to API tokens whose
 	// role field is empty (i.e. tokens that somehow pre-date migration 056 and
 	// were not updated by the backfill).  Default false (least privilege: empty
@@ -715,6 +716,19 @@ type ShutdownConfig struct {
 	GraceSeconds int `mapstructure:"grace_seconds"`
 }
 
+// SearchConfig holds tunables for the hybrid retrieval backbone.
+type SearchConfig struct {
+	// VectorTimeoutMs caps the per-query vector-adapter phase (embedding +
+	// DB ANN hop) in milliseconds. Default 5000 (5 s) — chosen to
+	// accommodate Ollama running on a remote homelab GPU box where a cold
+	// embedding call takes ≥208 ms from inside Docker.  Operators running
+	// an in-process or co-located embedder can tighten this via
+	// SOURCEBRIDGE_SEARCH_VECTOR_TIMEOUT_MS for snappier p99 latency
+	// (e.g. 500 ms for a local sidecar, 1000 ms for a same-LAN GPU node).
+	// 0 falls through to the code-level default (5000 ms).
+	VectorTimeoutMs int `mapstructure:"vector_timeout_ms"`
+}
+
 // Defaults returns a Config with all default values.
 func Defaults() *Config {
 	return &Config{
@@ -796,7 +810,17 @@ func Defaults() *Config {
 			MaxBatchSize:     500,
 		},
 		QA: QAConfig{
-			ServerSideEnabled:         false, // default-off through Phase 4
+			// Server-side QA: default ON. The original "default-off through
+			// Phase 4" comment dates from when the server-side ask endpoint
+			// was net-new and operators were validating it against the CLI
+			// subprocess fast-path. Phase 4 has shipped and the server-side
+			// path is the supported QA surface for hosted/multi-tenant
+			// installs and dev compose. The CLI subprocess path remains
+			// available via LocalFastModeSubprocess for local-desktop users
+			// who want working-tree visibility on uncommitted changes.
+			// Operators who must disable server-side QA (e.g. pre-Phase-4
+			// rollbacks) can still set SOURCEBRIDGE_QA_SERVER_SIDE_ENABLED=false.
+			ServerSideEnabled:         true,
 			LocalFastModeSubprocess:   true,
 			QuestionMaxBytes:          4096,
 			SessionTokensPerHour:      100_000,
@@ -832,6 +856,12 @@ func Defaults() *Config {
 			// terminationGracePeriodSeconds on the API Deployment is set to 3900s
 			// (grace_seconds + preStop-sleep + 60s slack). CA-142.
 			GraceSeconds: 3600,
+		},
+		Search: SearchConfig{
+			// 5000 ms accommodates remote Ollama (≥208 ms observed from inside
+			// Docker) with ample headroom. Operators on co-located embedders can
+			// tighten via SOURCEBRIDGE_SEARCH_VECTOR_TIMEOUT_MS.
+			VectorTimeoutMs: 5000,
 		},
 	}
 }
@@ -937,6 +967,7 @@ func Load() (*Config, error) {
 	v.SetDefault("connector_api.enabled", cfg.ConnectorAPI.Enabled)
 	v.SetDefault("linking.invalidate_grace_hours", cfg.Linking.InvalidateGraceHours)
 	v.SetDefault("shutdown.grace_seconds", cfg.Shutdown.GraceSeconds)
+	v.SetDefault("search.vector_timeout_ms", cfg.Search.VectorTimeoutMs)
 
 	// Try reading config file (not required)
 	if err := v.ReadInConfig(); err != nil {

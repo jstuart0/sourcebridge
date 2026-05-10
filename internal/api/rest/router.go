@@ -566,6 +566,9 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 	s.searchSvc = search.NewService(s.store)
 	s.searchMetrics = search.NewMetrics(0)
 	s.searchSvc.Metrics = s.searchMetrics
+	if cfg != nil && cfg.Search.VectorTimeoutMs > 0 {
+		s.searchSvc.VectorTimeout = time.Duration(cfg.Search.VectorTimeoutMs) * time.Millisecond
+	}
 	if s.worker != nil {
 		emb := search.NewWorkerEmbedder(s.worker, "")
 		cached := search.NewCachedEmbedder(emb, 2048, 5*time.Minute, 5, 30*time.Second)

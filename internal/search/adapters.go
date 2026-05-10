@@ -6,6 +6,7 @@ package search
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 )
@@ -196,7 +197,9 @@ func (a *VectorAdapter) Search(ctx context.Context, in RouterOutput, req *Reques
 		res.Unavailable = true
 		return res
 	}
+	tEmbed := time.Now()
 	qvec, ok := a.Embedder.Embed(ctx, in.Cleaned)
+	res.EmbedMs = float64(time.Since(tEmbed).Nanoseconds()) / 1e6
 	if !ok || len(qvec) == 0 {
 		res.Unavailable = true
 		return res

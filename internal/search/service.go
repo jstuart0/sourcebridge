@@ -266,6 +266,7 @@ func (s *Service) collectTimings(routeMs, fuseMs, boostMs float64, start time.Ti
 			t.FTSMs = r.DurationMs
 		case "vector":
 			t.VectorMs = r.DurationMs
+			t.EmbedMs = r.EmbedMs
 		case "graph":
 			t.GraphMs = r.DurationMs
 		}

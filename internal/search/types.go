@@ -145,7 +145,7 @@ type StageTimings struct {
 // failed during this request. UI renders these only in dev/admin mode
 // (plan §Phase 5 — Degraded-state UX rules).
 type DegradeFlags struct {
-	LexicalUnavailable bool `json:"lexical_unavailable"`
+	LexicalUnavailable  bool `json:"lexical_unavailable"`
 	SemanticUnavailable bool `json:"semantic_unavailable"`
 	EmbedderUnavailable bool `json:"embedder_unavailable"`
 	GraphUnavailable    bool `json:"graph_unavailable"`
@@ -155,12 +155,12 @@ type DegradeFlags struct {
 // Debug is the optional debug envelope returned when
 // Request.IncludeDebug is true.
 type Debug struct {
-	Class    QueryClass      `json:"class"`
-	Ops      []StructuralOp  `json:"structural_ops,omitempty"`
-	Timings  StageTimings    `json:"timings"`
-	Degrade  DegradeFlags    `json:"degrade"`
-	Adapters []string        `json:"adapters_invoked"`
-	Extra    map[string]any  `json:"extra,omitempty"`
+	Class    QueryClass     `json:"class"`
+	Ops      []StructuralOp `json:"structural_ops,omitempty"`
+	Timings  StageTimings   `json:"timings"`
+	Degrade  DegradeFlags   `json:"degrade"`
+	Adapters []string       `json:"adapters_invoked"`
+	Extra    map[string]any `json:"extra,omitempty"`
 }
 
 // Result is one ranked entity. EntityType is currently "symbol" for
@@ -204,9 +204,13 @@ type Candidate struct {
 
 // AdapterResult is a list of candidates from one adapter.
 type AdapterResult struct {
-	AdapterID    string
-	Candidates   []*Candidate
-	DurationMs   float64
-	Unavailable  bool // true when the backend could not run at all
-	Err          error
+	AdapterID   string
+	Candidates  []*Candidate
+	DurationMs  float64
+	Unavailable bool // true when the backend could not run at all
+	Err         error
+	// EmbedMs is populated by VectorAdapter only: wall time spent on the
+	// query embedding call (gRPC GenerateEmbedding round-trip). Zero for
+	// all other adapters. Used by collectTimings to populate StageTimings.EmbedMs.
+	EmbedMs float64
 }

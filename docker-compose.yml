@@ -107,6 +107,15 @@ services:
       - SOURCEBRIDGE_STORAGE_REPO_CACHE_PATH=/data/repo-cache
       - SOURCEBRIDGE_WORKER_ADDRESS=worker:50051
       - SOURCEBRIDGE_SECURITY_GRPC_AUTH_SECRET=${SOURCEBRIDGE_GRPC_SECRET:-dev-shared-secret}
+      # QA server-side mode: default ON. Enables GraphQL `ask`, REST
+      # POST /api/v1/ask, and MCP ask_question with server-side token-budget
+      # enforcement. The CLI subprocess fast-path remains for local-desktop
+      # working-tree visibility (controlled separately via LocalFastModeSubprocess).
+      # Operators can override to `false` for legacy/rollback scenarios.
+      - SOURCEBRIDGE_QA_SERVER_SIDE_ENABLED=${SOURCEBRIDGE_QA_SERVER_SIDE_ENABLED:-true}
+      # Vector search timeout: default 5000 ms — accommodates remote Ollama
+      # (≥208 ms observed from Docker bridge). Tighten for co-located embedders.
+      - SOURCEBRIDGE_SEARCH_VECTOR_TIMEOUT_MS=${SOURCEBRIDGE_SEARCH_VECTOR_TIMEOUT_MS:-5000}
       # CA-311: 64-hex placeholder is syntactically valid (32 raw bytes; passes
       # the >=32-byte length gate) but is publicly known. Override with
       # SOURCEBRIDGE_JWT_SECRET=$(openssl rand -hex 32) in .env for any
