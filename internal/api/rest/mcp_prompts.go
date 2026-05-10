@@ -43,8 +43,8 @@ type mcpPromptDefinition struct {
 // matches what MCP clients feed into their LLM invocation: role +
 // content[].{type,text}.
 type mcpPromptMessage struct {
-	Role    string       `json:"role"` // "user" or "assistant"
-	Content mcpContent   `json:"content"`
+	Role    string     `json:"role"` // "user" or "assistant"
+	Content mcpContent `json:"content"`
 }
 
 type mcpPromptGetResult struct {

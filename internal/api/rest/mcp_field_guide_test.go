@@ -79,11 +79,11 @@ func TestMCP_GetFieldGuide_HappyPath_CliffNotes(t *testing.T) {
 	}
 
 	var result struct {
-		RepositoryID  string              `json:"repository_id"`
-		Format        string              `json:"format"`
-		Content       string              `json:"content"`
-		Sections      []fieldGuideSection `json:"sections"`
-		ArtifactMeta  map[string]interface{} `json:"_artifact_meta"`
+		RepositoryID string                 `json:"repository_id"`
+		Format       string                 `json:"format"`
+		Content      string                 `json:"content"`
+		Sections     []fieldGuideSection    `json:"sections"`
+		ArtifactMeta map[string]interface{} `json:"_artifact_meta"`
 	}
 	if err := json.Unmarshal([]byte(text), &result); err != nil {
 		t.Fatalf("failed to parse result: %v", err)

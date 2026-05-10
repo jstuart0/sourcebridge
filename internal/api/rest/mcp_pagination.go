@@ -88,10 +88,10 @@ func paginateSlice[T any](items []T, offset, limit, defaultLimit, cap int) ([]T,
 // paginationArgs is the standard pagination input block every list
 // tool accepts. Embeddable in tool-specific arg structs:
 //
-//   type myParams struct {
-//       RepositoryID string `json:"repository_id"`
-//       paginationArgs
-//   }
+//	type myParams struct {
+//	    RepositoryID string `json:"repository_id"`
+//	    paginationArgs
+//	}
 type paginationArgs struct {
 	Cursor string `json:"cursor,omitempty"`
 	Limit  int    `json:"limit,omitempty"`

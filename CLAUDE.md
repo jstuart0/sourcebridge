@@ -36,7 +36,7 @@ Load-bearing constraints for future-Claude:
 
 Plan: `thoughts/shared/plans/active-2026-05-10-deliver-resolver-appdeps-dedup.md`
 
-**2026-05-09 store ctx threading + decomposition (CA-183 + CA-182)** — 12 commits, `71f6542` + `150c094` + `8a3ccd0` + `eefa122` + `fa084b4` + `2eaad0d` + `1244396` + `037bf2d` + `0105f3d` + `7081107` + `c67be11` + `73bd8f3`.
+**2026-05-09 store ctx threading + decomposition (CA-183 + CA-182)** — 13 commits, `71f6542..bde3ae2`.
 Closes CA-183 (CRITICAL — `context.Background()` discarded in every store method, breaking request cancellation and tracing) and CA-182 (HIGH — `internal/db/store.go` monolith at ~4,500 LOC). Five phases shipped under a green-CI discipline (every intermediate commit passes `go build`, `go vet`, `go test -short -race`, and the full integration suite).
 
 Phase 1 (`71f6542` + `150c094`) — signature threading. Every method on `*SurrealStore` (and the 6 store interfaces it satisfies: `GraphStore`, `KnowledgeStore`, `JobStore`, `comprehension.SettingsStore`, `livingwiki.RepoSettingsStore`, `SummaryNodeStore`) gains `ctx context.Context` as its first parameter. The unexported `diagramDocumentPersistence` interface (`internal/api/rest/diagram_document.go`) and the 9 local subset interfaces (`architecture.DiagramStore`, orchestrator `PackageDepsProvider`, QA package interfaces — `RepoLocator`, `GraphExpander`, `ArtifactLookup`, `RequirementLookup`, `SymbolLookup`, `FileReader`, `UnderstandingReader`, `templates.SymbolGraph`, `search.Booster`, `graph.KnowledgeFreshnessProvider`) are all updated in lockstep. Phase 1 covers ~165 caller files / ~2,450 LOC; all `internal/db/` method bodies still call the package-local `ctx()` helper so the package builds.

@@ -200,7 +200,13 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=localhost:50051"]
+      # CA-202 (wave 3) added a gRPC auth interceptor that requires the
+       # x-sb-worker-secret header on every call. The healthcheck probe must
+       # pass it too or the probe fails Unauthenticated and the container is
+       # marked unhealthy even when the worker is functionally serving.
+      test:
+        - CMD-SHELL
+        - /usr/local/bin/grpc_health_probe -addr=localhost:50051 -rpc-header=x-sb-worker-secret:${SOURCEBRIDGE_GRPC_SECRET:-dev-shared-secret}
       interval: 5s
       timeout: 5s
       retries: 10
