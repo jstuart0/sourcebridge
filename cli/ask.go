@@ -48,7 +48,7 @@ var (
 func init() {
 	askImplCmd.Flags().StringVar(&askRepoPath, "repo", ".", "Repository path (used by --legacy)")
 	askImplCmd.Flags().BoolVar(&askJSON, "json", false, "Output results as JSON")
-	askImplCmd.Flags().StringVar(&askMode, "mode", "fast", "Answer mode: fast or deep")
+	askImplCmd.Flags().StringVar(&askMode, "mode", "", "Answer mode: fast or deep (default: deep, server-side). When --mode is unset, the server chooses. When --mode is passed, it is honored.")
 	askImplCmd.Flags().StringVar(&askServerURL, "server", "", "SourceBridge server URL (overrides config)")
 	askImplCmd.Flags().BoolVar(&askLegacy, "legacy", false, "Force the Python subprocess path (skips server capability probe)")
 	askImplCmd.Flags().StringVar(&askRepositoryID, "repository-id", "", "Repository ID on the server (required for --server path)")
@@ -57,7 +57,9 @@ func init() {
 func runAsk(cmd *cobra.Command, args []string) error {
 	question := args[0]
 
-	if askMode != "fast" && askMode != "deep" {
+	// Validate mode only when explicitly passed — an unset flag is valid and
+	// means "let the server decide".
+	if cmd.Flags().Changed("mode") && askMode != "fast" && askMode != "deep" {
 		return fmt.Errorf("invalid ask mode %q (expected fast or deep)", askMode)
 	}
 
@@ -78,7 +80,7 @@ func runAsk(cmd *cobra.Command, args []string) error {
 			serverURL = cfg.Server.PublicBaseURL
 		}
 		if serverURL != "" && askRepositoryID != "" && probeQACapability(cmd.Context(), serverURL) {
-			return runAskServer(cmd.Context(), serverURL, question)
+			return runAskServer(cmd, serverURL, question)
 		}
 	}
 
@@ -107,12 +109,17 @@ func probeQACapability(ctx context.Context, serverURL string) bool {
 }
 
 // runAskServer calls POST /api/v1/ask with the structured ask input
-// and prints the response.
-func runAskServer(ctx context.Context, serverURL, question string) error {
+// and prints the response. When the user did not explicitly pass --mode,
+// the mode key is omitted from the payload so the server-side pipeline
+// default fires.
+func runAskServer(cmd *cobra.Command, serverURL, question string) error {
+	ctx := cmd.Context()
 	payload := map[string]any{
 		"repositoryId": askRepositoryID,
 		"question":     question,
-		"mode":         askMode,
+	}
+	if cmd.Flags().Changed("mode") {
+		payload["mode"] = askMode
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -165,8 +172,8 @@ func runAskServer(ctx context.Context, serverURL, question string) error {
 // paths apart until they look at --json.
 func printAskPretty(raw json.RawMessage) error {
 	var r struct {
-		Answer              string `json:"answer"`
-		References          []struct {
+		Answer     string `json:"answer"`
+		References []struct {
 			Title string `json:"title"`
 			Kind  string `json:"kind"`
 		} `json:"references"`
@@ -216,7 +223,11 @@ func runAskLegacy(ctx context.Context, cfg *config.Config, question string) erro
 		return fmt.Errorf("resolving repo path: %w", err)
 	}
 
-	pyCmd := exec.CommandContext(ctx, "uv", "run", "python", "cli_ask.py", question, askMode)
+	legacyMode := askMode
+	if legacyMode == "" {
+		legacyMode = "deep"
+	}
+	pyCmd := exec.CommandContext(ctx, "uv", "run", "python", "cli_ask.py", question, legacyMode)
 	pyCmd.Dir = findWorkersDir()
 	pyCmd.Env = append(os.Environ(), buildWorkerLLMEnv(cfg, cfg.LLM.AskModel, "SOURCEBRIDGE_LLM_ASK_MODEL")...)
 	pyCmd.Env = append(pyCmd.Env, "SOURCEBRIDGE_REPO_PATH="+absRepo)
@@ -264,4 +275,3 @@ func runAskLegacy(ctx context.Context, cfg *config.Config, question string) erro
 
 	return nil
 }
-
