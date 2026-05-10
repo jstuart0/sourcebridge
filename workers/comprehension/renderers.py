@@ -325,8 +325,8 @@ SECTION_DISFAVORED_PATH_SNIPPETS: dict[str, tuple[str, ...]] = {
         "internal/api/graphql/schema.resolvers.go",
         "internal/api/rest/router.go",
     ),
-    "Domain Model": ("internal/db/surreal.go", "internal/db/store.go", "internal/graph/store.go"),
-    "Key Abstractions": ("internal/db/store.go", "internal/graph/store.go"),
+    "Domain Model": ("internal/db/surreal.go", "internal/db/repository_store.go", "internal/db/index_result.go", "internal/graph/store.go"),
+    "Key Abstractions": ("internal/db/repository_store.go", "internal/graph/store.go"),
 }
 
 GROUP_FEWSHOT_EXAMPLES: dict[tuple[str, ...], str] = {
@@ -356,7 +356,7 @@ Bad Architecture Overview example:
 Good Domain Model example:
 - "The domain centers on repositories, scopes, generated knowledge artifacts, understanding revisions, reports,
   diagrams, and background jobs. Core entities are represented by `Repository`, `KnowledgeRevision`, and
-  `BackgroundJob` types defined in `internal/db/store.go`. Explain those internal entities directly instead of
+  `BackgroundJob` types defined in `internal/llm/job.go`. Explain those internal entities directly instead of
   drifting into transport code, scanners, or generic storage helpers."
 
 Bad Domain Model example:

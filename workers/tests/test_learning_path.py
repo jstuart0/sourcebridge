@@ -124,7 +124,7 @@ def test_collect_snapshot_file_paths_extracts_from_every_symbol_list():
             "public_api": [{"file_path": "internal/api/router.go"}],
             "test_symbols": [{"file_path": "internal/api/router_test.go"}],
             "complex_symbols": [{"file_path": "internal/llm/orchestrator.go"}],
-            "high_fan_in_symbols": [{"file_path": "internal/db/store.go"}],
+            "high_fan_in_symbols": [{"file_path": "internal/db/repository_store.go"}],
             "high_fan_out_symbols": [{"file_path": "internal/graph/index.go"}],
             "modules": [
                 {

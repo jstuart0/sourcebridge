@@ -334,7 +334,7 @@ def collect_snapshot_path_signals(snapshot_json: str) -> tuple[set[str], set[str
     The ``KnowledgeSnapshot`` only materialises file paths for symbols
     it tracks — not every file in the repo. Using ``known_full_paths``
     alone as the ground truth drops real-but-untracked files (e.g.
-    ``internal/db/migrations.go`` when only ``internal/db/store.go`` has
+    ``internal/db/migrations.go`` when only ``internal/db/repository_store.go`` has
     a tracked symbol), which torpedoes the HIGH-confidence floor on the
     learning path. Using ``known_directories`` lets a filter say "this
     looks like it belongs to a real directory in the repo, keep it"
