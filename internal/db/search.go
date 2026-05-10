@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/surrealdb/surrealdb.go/pkg/models"
+
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 )
 
@@ -131,9 +133,49 @@ func (s *SurrealStore) SearchSymbolsFTS(ctx context.Context,
 // ---------------------------------------------------------------------------
 
 // vectorSymbolRow is the projection used by SearchSymbolsVector.
+//
+// Flat (NOT anonymous-embedded) layout: fxamacker/cbor — used by the
+// SurrealDB Go SDK — does not promote fields from anonymously-embedded
+// structs the way encoding/json does. An anonymous `surrealSymbol`
+// embed left every promoted field empty after unmarshal, producing
+// "shape-empty" hits with valid similarity scores but no entity_id /
+// title / file_path. Flattening fixes the unmarshal.
 type vectorSymbolRow struct {
-	surrealSymbol
-	Similarity float64 `json:"__similarity"`
+	ID             *models.RecordID `json:"id,omitempty"`
+	RepoID         string           `json:"repo_id"`
+	FileID         string           `json:"file_id"`
+	Name           string           `json:"name"`
+	QualifiedName  string           `json:"qualified_name"`
+	Kind           string           `json:"kind"`
+	Language       string           `json:"language"`
+	FilePath       string           `json:"file_path"`
+	StartLine      int              `json:"start_line"`
+	EndLine        int              `json:"end_line"`
+	Signature      string           `json:"signature"`
+	DocComment     string           `json:"doc_comment"`
+	IsTest         bool             `json:"is_test"`
+	EmbeddingModel string           `json:"embedding_model,omitempty"`
+	EmbeddingDim   int              `json:"embedding_dim,omitempty"`
+	EmbeddingHash  string           `json:"embedding_hash,omitempty"`
+	Similarity     float64          `json:"__similarity"`
+}
+
+func (r *vectorSymbolRow) toStoredSymbol() *graph.StoredSymbol {
+	return &graph.StoredSymbol{
+		ID:            recordIDString(r.ID),
+		RepoID:        r.RepoID,
+		FileID:        r.FileID,
+		Name:          r.Name,
+		QualifiedName: r.QualifiedName,
+		Kind:          r.Kind,
+		Language:      r.Language,
+		FilePath:      r.FilePath,
+		StartLine:     r.StartLine,
+		EndLine:       r.EndLine,
+		Signature:     r.Signature,
+		DocComment:    r.DocComment,
+		IsTest:        r.IsTest,
+	}
 }
 
 // SearchSymbolsVector runs an HNSW KNN query against ca_symbol.embedding
@@ -185,8 +227,16 @@ func (s *SurrealStore) SearchSymbolsVector(ctx context.Context,
 		vars["fp"] = *filters.FilePath
 	}
 
+	// Explicit field list (NOT `SELECT *`): the embedding column is a 768-dim
+	// vector; including it in the response payload bloats CBOR decode by
+	// ~6 KB per row and was empirically observed to leave the surrealSymbol
+	// fields (id, name, file_path, etc.) empty after unmarshal — the
+	// resulting candidates were "shape-empty" with only the similarity
+	// score populated, breaking search hydration and QA evidence.
 	sql := fmt.Sprintf(
-		`SELECT *,
+		`SELECT id, repo_id, file_id, name, qualified_name, kind, language,
+		        file_path, start_line, end_line, signature, doc_comment, is_test,
+		        embedding_model, embedding_dim, embedding_hash,
 		        vector::similarity::cosine(embedding, $qv) AS __similarity
 		 FROM ca_symbol
 		 WHERE %s
