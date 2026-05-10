@@ -74,10 +74,10 @@ func (s *Server) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			"ask_model":     s.cfg.LLM.AskModel,
 		},
 		"security": map[string]interface{}{
-			"csrf_enabled":              s.cfg.Security.CSRFEnabled,
+			"csrf_enabled":               s.cfg.Security.CSRFEnabled,
 			"csrf_full_coverage_enabled": s.cfg.Security.CSRFFullCoverageEnabled,
-			"mode":                      s.cfg.Security.Mode,
-			"oidc_configured":           s.cfg.Security.OIDC.IssuerURL != "",
+			"mode":                       s.cfg.Security.Mode,
+			"oidc_configured":            s.cfg.Security.OIDC.IssuerURL != "",
 		},
 		"worker": map[string]interface{}{
 			"address": s.cfg.Worker.Address,

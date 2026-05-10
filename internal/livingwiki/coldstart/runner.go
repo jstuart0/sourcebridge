@@ -132,13 +132,13 @@ type Config struct {
 	RepoSettingsStore  livingwiki.RepoSettingsStore
 	ClusterStore       clustering.ClusterStore
 	KnowledgeStore     knowledge.KnowledgeStore
-	MetricsCollector   *lwmetrics.Collector // when nil, falls back to lwmetrics.Default
-	LLMResolver        resolution.Resolver  // for FrozenResolver + fingerprint model identity (CR5, LD-7)
+	MetricsCollector   *lwmetrics.Collector              // when nil, falls back to lwmetrics.Default
+	LLMResolver        resolution.Resolver               // for FrozenResolver + fingerprint model identity (CR5, LD-7)
 	PublishStatusStore livingwiki.PagePublishStatusStore // for per-page dispatch state (Phase 1)
 	Mode               string                            // Phase 4a: "lw_overview" or "lw_detailed"; empty defaults to lw_detailed
 	ComprehensionStore comprehension.Store               // for quality-gate tier registry lookup (CA-150 Phase 4)
-	MaxPagesPerJob    int   // CA-146: repo setting cap; 0 = no cap (new repos get 500 via migration)
-	PageCountOverride *int  // CA-146: per-run override; nil = use MaxPagesPerJob
+	MaxPagesPerJob     int                               // CA-146: repo setting cap; 0 = no cap (new repos get 500 via migration)
+	PageCountOverride  *int                              // CA-146: per-run override; nil = use MaxPagesPerJob
 	// CA-146 Phase 2 (codex r1 H1): nullable-list selection contract.
 	// nil = no filter (passthrough). [] = explicit empty (only repo-wide pages).
 	// [ids...] = explicit selection (repo-wide + named IDs retained).

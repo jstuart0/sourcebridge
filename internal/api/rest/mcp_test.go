@@ -62,6 +62,7 @@ func (m *mockKnowledgeStore) StoreKnowledgeArtifact(_ context.Context, a *knowle
 	m.artifacts[a.ID] = a
 	return a, nil
 }
+
 // ClaimArtifact and ClaimArtifactWithMode mirror MemStore's claim semantics
 // (CA-279): if a matching artifact exists for the key, return it with
 // claimed=false; otherwise create a new generating-status artifact and

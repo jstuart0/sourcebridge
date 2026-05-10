@@ -214,18 +214,18 @@ func (r *Resolver) enqueueKnowledgeJob(
 	}
 
 	req := &llm.EnqueueRequest{
-		Subsystem:      llm.SubsystemKnowledge,
-		JobType:        jobType,
-		TargetKey:      knowledgeJobTargetKey(key),
-		Strategy:       "knowledge_artifact_queue",
-		ArtifactID:     artifact.ID,
-		RepoID:         artifact.RepositoryID,
+		Subsystem:  llm.SubsystemKnowledge,
+		JobType:    jobType,
+		TargetKey:  knowledgeJobTargetKey(key),
+		Strategy:   "knowledge_artifact_queue",
+		ArtifactID: artifact.ID,
+		RepoID:     artifact.RepositoryID,
 		// R3 slice 3: stamp llm_provider so the Monitor page and per-
 		// provider metrics attribute work correctly. Empty when the
 		// resolver isn't wired (test/embedded mode); the AST lint in
 		// internal/llm/orchestrator/ enforces presence at compile time
 		// for production code paths.
-		LLMProvider: r.resolveLLMProviderForOp(ctx, artifact.RepositoryID, resolution.OpKnowledge),
+		LLMProvider:    r.resolveLLMProviderForOp(ctx, artifact.RepositoryID, resolution.OpKnowledge),
 		Priority:       llm.PriorityInteractive,
 		GenerationMode: string(artifact.GenerationMode),
 		MaxAttempts:    knowledgeJobMaxAttempts(artifact, scope),

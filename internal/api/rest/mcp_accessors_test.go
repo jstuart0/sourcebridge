@@ -17,15 +17,15 @@ import (
 //
 // Produces this topology:
 //
-//   main.go:
-//     HandleRequest  → ParseJSON, Config
-//     Config
-//   utils.go:
-//     ParseJSON      → (leaf)
+//	main.go:
+//	  HandleRequest  → ParseJSON, Config
+//	  Config
+//	utils.go:
+//	  ParseJSON      → (leaf)
 //
-//   imports:
-//     main.go  → "./utils"  → resolves to utils.go (suffix match)
-//     utils.go → "encoding/json" (external — no match in repo)
+//	imports:
+//	  main.go  → "./utils"  → resolves to utils.go (suffix match)
+//	  utils.go → "encoding/json" (external — no match in repo)
 func seedCallGraphTestData(t *testing.T, h *mcpTestHarness) (handleID, parseID string) {
 	t.Helper()
 

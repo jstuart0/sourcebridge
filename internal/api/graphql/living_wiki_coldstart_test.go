@@ -639,12 +639,12 @@ func TestColdStartJobAppearsInSharedActivityFeed(t *testing.T) {
 
 func TestBuildColdStartRunnerNilOrchestratorReturnsNotice(t *testing.T) {
 	runner := buildColdStartRunner(coldStartConfig{
-		LWOrch:           nil, // nil orchestrator
-		RepoID:           "test-repo",
-		TenantID:         "default",
-		SinkKind:         "unknown",
-		Mode:             GenerationModeLWDetailed,
-		MaxPagesPerJob:   500,
+		LWOrch:            nil, // nil orchestrator
+		RepoID:            "test-repo",
+		TenantID:          "default",
+		SinkKind:          "unknown",
+		Mode:              GenerationModeLWDetailed,
+		MaxPagesPerJob:    500,
 		PageCountOverride: nil,
 	})
 
@@ -668,7 +668,9 @@ type stubClusterStore struct {
 	clusters []clustering.Cluster
 }
 
-func (s *stubClusterStore) GetCallEdges(_ context.Context, _ string) []graphstore.CallEdge { return nil }
+func (s *stubClusterStore) GetCallEdges(_ context.Context, _ string) []graphstore.CallEdge {
+	return nil
+}
 func (s *stubClusterStore) GetSymbolsByIDs(_ context.Context, _ []string) map[string]*graphstore.StoredSymbol {
 	return nil
 }
@@ -2069,7 +2071,7 @@ func TestColdStart_PageCountOverride_WinsOverRepoSetting(t *testing.T) {
 		ClusterStore:      cs,
 		MetricsCollector:  mc,
 		Mode:              GenerationModeLWDetailed,
-		MaxPagesPerJob:    10,       // loose, would not cap on its own
+		MaxPagesPerJob:    10,        // loose, would not cap on its own
 		PageCountOverride: &override, // per-run override wins
 	})
 
@@ -2124,17 +2126,17 @@ func TestColdStart_ExcludedOnlyRetry_SkipsCap(t *testing.T) {
 		"excluded-cap-repo.detail.module.2",
 	}
 	runner := buildColdStartRunner(coldStartConfig{
-		LWOrch:          lwOrch,
-		RepoID:          "excluded-cap-repo",
-		TenantID:        "default",
-		GraphStore:      newStubGraphStore(),
-		ExcludedPageIDs: excludedIDs, // non-empty → retryExcludedOnly path
-		SinkKind:        "git_repo",
-		JobResultStore:  jrs,
-		ClusterStore:    cs,
+		LWOrch:           lwOrch,
+		RepoID:           "excluded-cap-repo",
+		TenantID:         "default",
+		GraphStore:       newStubGraphStore(),
+		ExcludedPageIDs:  excludedIDs, // non-empty → retryExcludedOnly path
+		SinkKind:         "git_repo",
+		JobResultStore:   jrs,
+		ClusterStore:     cs,
 		MetricsCollector: mc,
-		Mode:            GenerationModeLWDetailed,
-		MaxPagesPerJob:  1, // very tight — should be bypassed on excluded-only path
+		Mode:             GenerationModeLWDetailed,
+		MaxPagesPerJob:   1, // very tight — should be bypassed on excluded-only path
 	})
 
 	rt := &fakeRuntime{jobID: "excluded-cap-job"}
@@ -2933,17 +2935,17 @@ func TestEnableLivingWikiForRepo_WithSelectedPageIds_ClosureGeneratesOnlySelecte
 	mc := lwmetrics.NewCollector()
 
 	runner := buildColdStartRunner(coldStartConfig{
-		LWOrch:          lwOrch,
-		RepoID:          repoID,
-		TenantID:        defaultTenantID,
-		GraphStore:      newStubGraphStore(),
-		SinkKind:        "git_repo",
-		JobResultStore:  jrs,
-		ClusterStore:    cs,
+		LWOrch:           lwOrch,
+		RepoID:           repoID,
+		TenantID:         defaultTenantID,
+		GraphStore:       newStubGraphStore(),
+		SinkKind:         "git_repo",
+		JobResultStore:   jrs,
+		ClusterStore:     cs,
 		MetricsCollector: mc,
-		Mode:            GenerationModeLWDetailed,
-		MaxPagesPerJob:  500,
-		SelectedPageIDs: []string{selectedClusterID}, // only cluster:0
+		Mode:             GenerationModeLWDetailed,
+		MaxPagesPerJob:   500,
+		SelectedPageIDs:  []string{selectedClusterID}, // only cluster:0
 	})
 
 	rt := &fakeRuntime{jobID: "ian-h1-job"}

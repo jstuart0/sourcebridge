@@ -67,9 +67,9 @@ type Template interface {
 // when changing prompts; the CI reviewer must include the bump in the PR
 // so the change is observable in history.
 var templateVersions = map[string]string{
-	"architecture":   "architecture@v1",
-	"api_reference":  "api_reference@v1",
-	"glossary":       "glossary@v1",
+	"architecture":    "architecture@v1",
+	"api_reference":   "api_reference@v1",
+	"glossary":        "glossary@v1",
 	"system_overview": "system_overview@v1",
 }
 

@@ -45,11 +45,11 @@ func (h *mcpHandler) getEntryPointsToolDef() mcpToolDefinition {
 }
 
 type entryPointsResult struct {
-	RepositoryID string                  `json:"repository_id"`
-	Precision    string                  `json:"precision"`
+	RepositoryID string                   `json:"repository_id"`
+	Precision    string                   `json:"precision"`
 	EntryPoints  []entrypoints.EntryPoint `json:"entry_points"`
-	Total        int                     `json:"total"`
-	Truncated    bool                    `json:"truncated,omitempty"`
+	Total        int                      `json:"total"`
+	Truncated    bool                     `json:"truncated,omitempty"`
 }
 
 func (h *mcpHandler) callGetEntryPoints(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {

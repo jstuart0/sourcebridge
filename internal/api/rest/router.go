@@ -1350,8 +1350,8 @@ func (s *Server) setupRouter() {
 			return s.authMiddleware()(auth.RequireRole(auth.RoleAdmin)(next))
 		}
 		deps := LivingWikiWebhookDeps{
-			Dispatcher:              s.livingWikiDispatcher,
-			ConfluenceWebhookSecret: confluenceSecret,
+			Dispatcher:               s.livingWikiDispatcher,
+			ConfluenceWebhookSecret:  confluenceSecret,
 			ConfluenceSecretResolver: confluenceResolver,
 			NotionPollAuthMiddleware: notionAuth,
 		}

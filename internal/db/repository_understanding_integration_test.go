@@ -167,12 +167,12 @@ func TestMarkRepositoryUnderstandingFailed_TransitionsRunningStages(t *testing.T
 		t.Run("from_"+string(startStage), func(t *testing.T) {
 			repoID := "repo-fail-" + string(startStage)
 			row, err := store.StoreRepositoryUnderstanding(t.Context(), &knowledge.RepositoryUnderstanding{
-				RepositoryID: repoID,
-				Scope:        scope,
-				Stage:        startStage,
-				TreeStatus:   knowledge.UnderstandingTreePartial,
-				Progress:     0.55,
-				ProgressPhase: "running",
+				RepositoryID:    repoID,
+				Scope:           scope,
+				Stage:           startStage,
+				TreeStatus:      knowledge.UnderstandingTreePartial,
+				Progress:        0.55,
+				ProgressPhase:   "running",
 				ProgressMessage: "doing stuff",
 			})
 			if err != nil || row == nil {

@@ -207,11 +207,11 @@ func (h *mcpHandler) resolveSymbol(ctx context.Context, p symbolRefParams) (*gra
 // ---------------------------------------------------------------------------
 
 type callGraphEdge struct {
-	FromID     string `json:"from_id"`
-	FromName   string `json:"from_name,omitempty"`
-	ToID       string `json:"to_id"`
-	ToName     string `json:"to_name,omitempty"`
-	HopsFromRoot int  `json:"hops_from_root"`
+	FromID       string `json:"from_id"`
+	FromName     string `json:"from_name,omitempty"`
+	ToID         string `json:"to_id"`
+	ToName       string `json:"to_name,omitempty"`
+	HopsFromRoot int    `json:"hops_from_root"`
 }
 
 type callGraphSymbol struct {
@@ -293,8 +293,8 @@ func (h *mcpHandler) walkCallGraph(ctx context.Context, session *mcpSession, arg
 					// already visited — a cycle should show up in
 					// edges so the caller can reason about it.
 					edges = append(edges, callGraphEdge{
-						FromID: edgeFrom(id, nid, direction),
-						ToID:   edgeTo(id, nid, direction),
+						FromID:       edgeFrom(id, nid, direction),
+						ToID:         edgeTo(id, nid, direction),
 						HopsFromRoot: hop,
 					})
 					continue
@@ -302,8 +302,8 @@ func (h *mcpHandler) walkCallGraph(ctx context.Context, session *mcpSession, arg
 				visited[nid] = hop
 				next = append(next, nid)
 				edges = append(edges, callGraphEdge{
-					FromID: edgeFrom(id, nid, direction),
-					ToID:   edgeTo(id, nid, direction),
+					FromID:       edgeFrom(id, nid, direction),
+					ToID:         edgeTo(id, nid, direction),
 					HopsFromRoot: hop,
 				})
 			}
@@ -413,10 +413,10 @@ func edgeTo(cur, neighbor, direction string) string {
 // ---------------------------------------------------------------------------
 
 type fileImport struct {
-	Path     string `json:"path"`
-	Line     int    `json:"line"`
-	Depth    int    `json:"depth"`
-	ViaFile  string `json:"via_file,omitempty"`
+	Path    string `json:"path"`
+	Line    int    `json:"line"`
+	Depth   int    `json:"depth"`
+	ViaFile string `json:"via_file,omitempty"`
 }
 
 type fileImportsResult struct {
@@ -661,11 +661,11 @@ func (h *mcpHandler) callGetArchitectureDiagram(ctx context.Context, session *mc
 // ---------------------------------------------------------------------------
 
 type recentChange struct {
-	SHA         string   `json:"sha"`
-	Author      string   `json:"author"`
-	AuthorEmail string   `json:"author_email"`
-	Date        string   `json:"date"`
-	Subject     string   `json:"subject"`
+	SHA          string   `json:"sha"`
+	Author       string   `json:"author"`
+	AuthorEmail  string   `json:"author_email"`
+	Date         string   `json:"date"`
+	Subject      string   `json:"subject"`
 	FilesTouched []string `json:"files_touched,omitempty"`
 }
 

@@ -67,14 +67,14 @@ func TestIntegration_ModelCapabilities_QualityGateTier_UpdatePreservesOtherField
 	store := &SurrealStore{client: surreal}
 
 	mc := &comprehension.ModelCapabilities{
-		ModelID:              "tier-update-test",
-		Provider:             "anthropic",
+		ModelID:                "tier-update-test",
+		Provider:               "anthropic",
 		DeclaredContextTokens:  200000,
 		EffectiveContextTokens: 160000,
 		InstructionFollowing:   "high",
-		Source:               "builtin",
-		Notes:                "original note",
-		QualityGateTier:      modeltier.TierMid,
+		Source:                 "builtin",
+		Notes:                  "original note",
+		QualityGateTier:        modeltier.TierMid,
 	}
 	if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 		t.Fatalf("initial SetModelCapabilities: %v", err)
@@ -254,7 +254,7 @@ func TestIntegration_ModelCapabilities_OptionFieldsTableDriven(t *testing.T) {
 		if err := store.DeleteModelCapabilities(t.Context(), id); err != nil {
 			t.Fatalf("delete: %v", err)
 		}
-		mc.ID = ""            // force a fresh CREATE
+		mc.ID = "" // force a fresh CREATE
 		mc.CostPer1kInput = nil
 		if err := store.SetModelCapabilities(t.Context(), mc); err != nil {
 			t.Fatalf("write nil on fresh row: %v", err)

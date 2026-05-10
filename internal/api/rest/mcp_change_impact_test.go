@@ -39,11 +39,11 @@ import (
 
 // changeImpactFixture holds IDs seeded into the store for the impact tests.
 type changeImpactFixture struct {
-	RepoID   string
+	RepoID string
 	// Symbols
-	HandlerID  string // "HandleCreate" in service.go — linked to Req1
-	HelperID   string // "HelperFunc" in service.go — linked to Req1 and Req2
-	TestSymID  string // "TestHandleCreate" in service_test.go — IsTest, nameReferences HandleCreate
+	HandlerID string // "HandleCreate" in service.go — linked to Req1
+	HelperID  string // "HelperFunc" in service.go — linked to Req1 and Req2
+	TestSymID string // "TestHandleCreate" in service_test.go — IsTest, nameReferences HandleCreate
 	// Requirements
 	Req1ID string
 	Req2ID string

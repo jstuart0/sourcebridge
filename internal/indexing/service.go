@@ -74,9 +74,9 @@ func (s *Service) WithClusteringHook(hook ClusteringHook) {
 
 // ImportSpec describes a single import request.
 type ImportSpec struct {
-	Name     string  // display name; if empty, derive from the URL/path
-	PathOrURL string // local path or remote git URL
-	Token    *string // optional PAT for private HTTPS repos (falls back to creds)
+	Name      string  // display name; if empty, derive from the URL/path
+	PathOrURL string  // local path or remote git URL
+	Token     *string // optional PAT for private HTTPS repos (falls back to creds)
 }
 
 // Import creates a Repository record (idempotent on path/URL match)
@@ -308,9 +308,9 @@ func GitCloneCmd(ctx context.Context, repoURL, targetDir, token, sshKeyPath stri
 	args := []string{
 		"clone",
 		"--depth=1",
-		"-c", "http.followRedirects=false",    // refuse HTTP 30x redirects (TOCTOU bypass)
-		"--no-recurse-submodules",             // refuse to clone submodules
-		"-c", "submodule.recurse=false",       // defense-in-depth: no submodule init later
+		"-c", "http.followRedirects=false", // refuse HTTP 30x redirects (TOCTOU bypass)
+		"--no-recurse-submodules",       // refuse to clone submodules
+		"-c", "submodule.recurse=false", // defense-in-depth: no submodule init later
 	}
 	cloneURL := repoURL
 

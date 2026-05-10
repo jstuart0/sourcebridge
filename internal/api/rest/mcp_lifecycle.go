@@ -48,7 +48,7 @@ import (
 func (h *mcpHandler) lifecycleToolDefs() []mcpToolDefinition {
 	return []mcpToolDefinition{
 		{
-			Name: "index_repository",
+			Name:        "index_repository",
 			Description: "Register a repository for indexing. For local paths the repository is fully registered and will be indexed on the next scheduled scan. For remote git URLs the full clone + index orchestration currently lives in the GraphQL AddRepository mutation — call that from any MCP client that can issue GraphQL requests, or use this tool to pre-register the record.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
@@ -181,17 +181,17 @@ func (h *mcpHandler) callIndexRepository(ctx context.Context, session *mcpSessio
 // ---------------------------------------------------------------------------
 
 type indexStatusResult struct {
-	RepositoryID    string `json:"repository_id"`
-	Name            string `json:"name"`
-	Path            string `json:"path"`
-	Status          string `json:"status"`
-	FileCount       int    `json:"file_count"`
-	CommitSHA       string `json:"commit_sha,omitempty"`
-	Branch          string `json:"branch,omitempty"`
-	LastIndexedAt   string `json:"last_indexed_at,omitempty"`
-	IndexError      string `json:"index_error,omitempty"`
-	FunctionCount   int    `json:"function_count"`
-	ClassCount      int    `json:"class_count"`
+	RepositoryID  string `json:"repository_id"`
+	Name          string `json:"name"`
+	Path          string `json:"path"`
+	Status        string `json:"status"`
+	FileCount     int    `json:"file_count"`
+	CommitSHA     string `json:"commit_sha,omitempty"`
+	Branch        string `json:"branch,omitempty"`
+	LastIndexedAt string `json:"last_indexed_at,omitempty"`
+	IndexError    string `json:"index_error,omitempty"`
+	FunctionCount int    `json:"function_count"`
+	ClassCount    int    `json:"class_count"`
 }
 
 func (h *mcpHandler) callGetIndexStatus(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {

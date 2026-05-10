@@ -71,10 +71,10 @@ func (h *mcpHandler) clusteringToolDefs() []mcpToolDefinition {
 // ---------------------------------------------------------------------------
 
 type subsystemsResult struct {
-	RepoID      string                    `json:"repo_id"`
-	Status      string                    `json:"status"`
+	RepoID      string                      `json:"repo_id"`
+	Status      string                      `json:"status"`
 	Clusters    []clustering.ClusterSummary `json:"clusters"`
-	GeneratedAt string                    `json:"generated_at"`
+	GeneratedAt string                      `json:"generated_at"`
 }
 
 func (h *mcpHandler) callGetSubsystems(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {
@@ -197,11 +197,11 @@ func (h *mcpHandler) callGetSubsystemByID(ctx context.Context, session *mcpSessi
 // ---------------------------------------------------------------------------
 
 type subsystemForSymbolResult struct {
-	RepoID      string                    `json:"repo_id"`
-	SymbolID    string                    `json:"symbol_id"`
+	RepoID      string                     `json:"repo_id"`
+	SymbolID    string                     `json:"symbol_id"`
 	Cluster     *clustering.ClusterSummary `json:"cluster"`
-	PeerSymbols []string                  `json:"peer_symbols"`
-	Message     string                    `json:"message,omitempty"`
+	PeerSymbols []string                   `json:"peer_symbols"`
+	Message     string                     `json:"message,omitempty"`
 }
 
 func (h *mcpHandler) callGetSubsystem(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {

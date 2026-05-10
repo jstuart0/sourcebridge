@@ -99,8 +99,8 @@ func TestReconcileZombieJobs_StalePriorProcess_MarkedFailed(t *testing.T) {
 // durations) to match the pattern in reaper_ca141_test.go:46-88.
 func TestReconcileZombieJobs_FreshPeer_NotReconciled(t *testing.T) {
 	cases := []struct {
-		name          string
-		age           time.Duration
+		name           string
+		age            time.Duration
 		wantReconciled bool
 	}{
 		{

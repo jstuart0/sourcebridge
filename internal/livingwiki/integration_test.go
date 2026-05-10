@@ -99,7 +99,7 @@ func (m *memConfluence) PageCount() int {
 // errConfluence simulates a Confluence 401 auth failure on the first call,
 // then succeeds on subsequent calls.
 type errConfluence struct {
-	mu       sync.Mutex
+	mu        sync.Mutex
 	callCount int
 }
 
@@ -118,10 +118,10 @@ type fakeBroker struct {
 	confluenceErr error
 }
 
-func (f *fakeBroker) GitHub(_ context.Context) (string, error)          { return "gh-fake-token", nil }
-func (f *fakeBroker) GitLab(_ context.Context) (string, error)          { return "gl-fake-token", nil }
-func (f *fakeBroker) Notion(_ context.Context) (string, error)          { return "nt-fake-token", nil }
-func (f *fakeBroker) ConfluenceSite(_ context.Context) (string, error)  { return "testsite", nil }
+func (f *fakeBroker) GitHub(_ context.Context) (string, error)         { return "gh-fake-token", nil }
+func (f *fakeBroker) GitLab(_ context.Context) (string, error)         { return "gl-fake-token", nil }
+func (f *fakeBroker) Notion(_ context.Context) (string, error)         { return "nt-fake-token", nil }
+func (f *fakeBroker) ConfluenceSite(_ context.Context) (string, error) { return "testsite", nil }
 func (f *fakeBroker) Confluence(_ context.Context) (string, string, error) {
 	if f.confluenceErr != nil {
 		return "", "", f.confluenceErr
@@ -189,10 +189,10 @@ func (a *alwaysExcludedTemplate) Generate(_ context.Context, input templates.Gen
 		},
 		Blocks: []ast.Block{
 			{
-				ID:   ast.GenerateBlockID(pageID, "", ast.BlockKindParagraph, 0),
-				Kind: ast.BlockKindParagraph,
+				ID:      ast.GenerateBlockID(pageID, "", ast.BlockKindParagraph, 0),
+				Kind:    ast.BlockKindParagraph,
 				Content: ast.BlockContent{Paragraph: &ast.ParagraphContent{Markdown: md}},
-				Owner: ast.OwnerGenerated,
+				Owner:   ast.OwnerGenerated,
 			},
 		},
 		Provenance: ast.Provenance{GeneratedAt: input.Now},

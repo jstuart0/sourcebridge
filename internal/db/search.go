@@ -16,8 +16,8 @@ import (
 // aren't yet migrated the runtime query simply returns no rows, which
 // the search service treats as "backend available but empty".
 var (
-	_ graph.FTSSymbolSearch      = (*SurrealStore)(nil)
-	_ graph.VectorSymbolSearch   = (*SurrealStore)(nil)
+	_ graph.FTSSymbolSearch       = (*SurrealStore)(nil)
+	_ graph.VectorSymbolSearch    = (*SurrealStore)(nil)
 	_ graph.SymbolEmbeddingUpsert = (*SurrealStore)(nil)
 )
 
@@ -60,7 +60,7 @@ func sanitizeFTSQuery(q string) string {
 // If the FTS index is missing or the query fails the result is nil —
 // callers must treat nil as "backend unavailable" and degrade to the
 // lexical substring path.
-func (s *SurrealStore) SearchSymbolsFTS(ctx context.Context, 
+func (s *SurrealStore) SearchSymbolsFTS(ctx context.Context,
 	repoID, query string,
 	filters graph.SymbolSearchFilters,
 	limit int,
@@ -140,7 +140,7 @@ type vectorSymbolRow struct {
 // and returns matches ordered by cosine similarity. The `queryVec`
 // dimension must match the index dimension defined in migration 034;
 // mismatched dimensions return nil so the service can degrade.
-func (s *SurrealStore) SearchSymbolsVector(ctx context.Context, 
+func (s *SurrealStore) SearchSymbolsVector(ctx context.Context,
 	repoID string,
 	queryVec []float32,
 	filters graph.SymbolSearchFilters,
@@ -215,7 +215,7 @@ func (s *SurrealStore) SearchSymbolsVector(ctx context.Context,
 // HNSW index defined in migration 034 is maintained by SurrealDB on
 // write. Mismatched dimensions return an error — callers must refuse
 // to mix models (see plan §Data Consistency Rules).
-func (s *SurrealStore) UpsertSymbolEmbedding(ctx context.Context, 
+func (s *SurrealStore) UpsertSymbolEmbedding(ctx context.Context,
 	repoID, symbolID string,
 	vector []float32,
 	model string,

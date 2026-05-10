@@ -18,11 +18,11 @@ import (
 // stubIndexer is the test-side Indexer. It records every IndexFiles
 // call and returns a configurable IndexResult or error.
 type stubIndexer struct {
-	mu       sync.Mutex
-	calls    []stubIndexCall
-	result   *indexer.IndexResult
-	err      error
-	delay    time.Duration
+	mu     sync.Mutex
+	calls  []stubIndexCall
+	result *indexer.IndexResult
+	err    error
+	delay  time.Duration
 }
 
 type stubIndexCall struct {

@@ -156,9 +156,9 @@ func TestFilteredStoreCrossRepoRefPartialScope(t *testing.T) {
 func TestFilteredStoreCrossRepoRefsAllDenied(t *testing.T) {
 	f, rec := filteredWithRecorder("repo-A")
 	refs := []*CrossRepoRef{
-		{SourceRepoID: "repo-A", TargetRepoID: "repo-B"},   // target not allowed
-		{SourceRepoID: "repo-B", TargetRepoID: "repo-A"},   // source not allowed
-		{SourceRepoID: "repo-C", TargetRepoID: "repo-D"},   // both not allowed
+		{SourceRepoID: "repo-A", TargetRepoID: "repo-B"}, // target not allowed
+		{SourceRepoID: "repo-B", TargetRepoID: "repo-A"}, // source not allowed
+		{SourceRepoID: "repo-C", TargetRepoID: "repo-D"}, // both not allowed
 	}
 	n := f.StoreCrossRepoRefs(context.Background(), refs)
 	if n != 0 {

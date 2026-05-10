@@ -550,7 +550,7 @@ func (o *Orchestrator) reapStaleJobs() {
 		}
 
 		setErrorErr := o.store.SetError(
-			o.ctx, 
+			o.ctx,
 			job.ID,
 			"DEADLINE_EXCEEDED",
 			"Job reaped: stuck in "+string(job.Status)+" for "+age.Round(time.Second).String(),
@@ -808,9 +808,9 @@ func (o *Orchestrator) Enqueue(req *llm.EnqueueRequest) (*llm.Job, error) {
 		// interface method. The rolling-restart edge case (P1 creates, P2
 		// claims and transitions to generating) is handled by the
 		// heartbeat-freshness gate in reconcileZombieJobs.
-		ProcessID:        o.processID,
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
+		ProcessID: o.processID,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 	if job.MaxAttempts <= 0 {
 		job.MaxAttempts = o.cfg.Retry.MaxAttempts

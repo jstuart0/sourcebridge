@@ -267,7 +267,7 @@ func (s *SurrealStore) DeleteSettings(ctx context.Context, scope comprehension.S
 	return err
 }
 
-func (s *SurrealStore) ListSettings(ctx context.Context, ) ([]comprehension.Settings, error) {
+func (s *SurrealStore) ListSettings(ctx context.Context) ([]comprehension.Settings, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -408,7 +408,7 @@ func (s *SurrealStore) DeleteModelCapabilities(ctx context.Context, modelID stri
 	return err
 }
 
-func (s *SurrealStore) ListModelCapabilities(ctx context.Context, ) ([]comprehension.ModelCapabilities, error) {
+func (s *SurrealStore) ListModelCapabilities(ctx context.Context) ([]comprehension.ModelCapabilities, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")

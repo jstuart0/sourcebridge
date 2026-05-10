@@ -34,15 +34,15 @@ type searchResponse struct {
 }
 
 type searchResult struct {
-	EntityType string          `json:"entity_type"`
-	EntityID   string          `json:"entity_id"`
-	Title      string          `json:"title"`
-	Subtitle   string          `json:"subtitle,omitempty"`
-	FilePath   string          `json:"file_path,omitempty"`
-	Line       int             `json:"line,omitempty"`
-	RepoID     string          `json:"repo_id"`
-	Score      float64         `json:"score"`
-	Signals    search.Signals  `json:"signals"`
+	EntityType string         `json:"entity_type"`
+	EntityID   string         `json:"entity_id"`
+	Title      string         `json:"title"`
+	Subtitle   string         `json:"subtitle,omitempty"`
+	FilePath   string         `json:"file_path,omitempty"`
+	Line       int            `json:"line,omitempty"`
+	RepoID     string         `json:"repo_id"`
+	Score      float64        `json:"score"`
+	Signals    search.Signals `json:"signals"`
 }
 
 // handleSearch implements POST /api/v1/search. Authorization is handled

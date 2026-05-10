@@ -437,8 +437,8 @@ func (h *mcpHandler) callGetChangedRequirements(ctx context.Context, session *mc
 	// reqSymbols maps requirement ID → ordered list of symbol IDs that link to it.
 	// The ordering follows the order symbols appear in touchedSymbolIDs so the
 	// output is deterministic across calls with the same input.
-	reqSymbols := map[string][]string{}    // req ID → []sym ID (preserves insertion order)
-	reqOrder := []string{}                  // stable ordering of first-seen req IDs
+	reqSymbols := map[string][]string{} // req ID → []sym ID (preserves insertion order)
+	reqOrder := []string{}              // stable ordering of first-seen req IDs
 	reqSeen := map[string]bool{}
 	var unlinkedSymIDs []string
 
@@ -528,15 +528,15 @@ func (h *mcpHandler) callGetChangedRequirements(ctx context.Context, session *mc
 	}
 
 	return map[string]interface{}{
-		"repository_id":             repoID,
-		"commit_range":              params.CommitRange,
-		"files":                     params.Files,
-		"changed_requirements":      changedReqs,
-		"unlinked_touched_symbols":  unlinkedSummaries,
+		"repository_id":            repoID,
+		"commit_range":             params.CommitRange,
+		"files":                    params.Files,
+		"changed_requirements":     changedReqs,
+		"unlinked_touched_symbols": unlinkedSummaries,
 		"_meta": map[string]interface{}{
-			"touched_symbol_count":     len(touchedSymbolIDs),
+			"touched_symbol_count":      len(touchedSymbolIDs),
 			"changed_requirement_count": len(changedReqs),
-			"unlinked_symbol_count":    len(unlinkedSummaries),
+			"unlinked_symbol_count":     len(unlinkedSummaries),
 		},
 	}, nil
 }

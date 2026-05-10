@@ -1841,12 +1841,12 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 		"total_refinement_units", len(r.KnowledgeStore.GetRefinementUnits(context.Background(), artifact.ID)),
 	)
 	req := &llm.EnqueueRequest{
-		Subsystem:      llm.SubsystemKnowledge,
-		JobType:        "cliff_notes_deepen",
-		TargetKey:      fmt.Sprintf("refine:%s:%s", artifact.ID, selectedTitle),
-		Strategy:       "knowledge_artifact_refinement",
-		ArtifactID:     artifact.ID,
-		RepoID:         repo.ID,
+		Subsystem:  llm.SubsystemKnowledge,
+		JobType:    "cliff_notes_deepen",
+		TargetKey:  fmt.Sprintf("refine:%s:%s", artifact.ID, selectedTitle),
+		Strategy:   "knowledge_artifact_refinement",
+		ArtifactID: artifact.ID,
+		RepoID:     repo.ID,
 		// R3 slice 3: stamp llm_provider. Background ctx is fine —
 		// the resolver lookup is fast and this enqueue path doesn't
 		// have a request ctx in scope (called from a deeper helper).

@@ -25,7 +25,7 @@ func (r *Resolver) searchLegacy(ctx context.Context, query string, repositoryID 
 	var results []*SearchResult
 	queryLower := strings.ToLower(query)
 
-	repos := r.getStore(ctx).ListRepositories(ctx, )
+	repos := r.getStore(ctx).ListRepositories(ctx)
 	for _, repo := range repos {
 		if repositoryID != nil && *repositoryID != "" && repo.ID != *repositoryID {
 			continue
@@ -242,4 +242,3 @@ func legacyFileResults(store graphstore.GraphStore, repo *graphstore.Repository,
 	}
 	return out
 }
-

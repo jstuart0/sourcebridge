@@ -41,18 +41,18 @@ func (h *mcpHandler) crossRepoToolDef() mcpToolDefinition {
 }
 
 type crossRepoRefResult struct {
-	SourceSymbolID string `json:"source_symbol_id,omitempty"`
-	TargetRepoID   string `json:"target_repo_id"`
-	TargetSymbol   string `json:"target_symbol,omitempty"`
-	RefType        string `json:"ref_type,omitempty"`
+	SourceSymbolID string  `json:"source_symbol_id,omitempty"`
+	TargetRepoID   string  `json:"target_repo_id"`
+	TargetSymbol   string  `json:"target_symbol,omitempty"`
+	RefType        string  `json:"ref_type,omitempty"`
 	Confidence     float64 `json:"confidence,omitempty"`
 }
 
 type crossRepoImpactResult struct {
-	RepositoryID string                `json:"repository_id"`
-	Refs         []crossRepoRefResult  `json:"refs"`
-	Total        int                   `json:"total"`
-	Message      string                `json:"message,omitempty"`
+	RepositoryID string               `json:"repository_id"`
+	Refs         []crossRepoRefResult `json:"refs"`
+	Total        int                  `json:"total"`
+	Message      string               `json:"message,omitempty"`
 }
 
 func (h *mcpHandler) callGetCrossRepoImpact(ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error) {

@@ -28,7 +28,9 @@ type fakeRequirementLookup struct {
 	bySymID map[string][]string
 }
 
-func (f *fakeRequirementLookup) RequirementContext(_ context.Context, id string) string { return f.byID[id] }
+func (f *fakeRequirementLookup) RequirementContext(_ context.Context, id string) string {
+	return f.byID[id]
+}
 func (f *fakeRequirementLookup) RequirementLabelsForSymbols(_ context.Context, ids []string) []string {
 	seen := map[string]bool{}
 	out := []string{}

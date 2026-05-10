@@ -432,10 +432,10 @@ func (s *assertNoCitationTemplate) Generate(_ context.Context, input templates.G
 		},
 		Blocks: []ast.Block{
 			{
-				ID:   ast.GenerateBlockID(pageID, "", ast.BlockKindParagraph, 0),
-				Kind: ast.BlockKindParagraph,
+				ID:      ast.GenerateBlockID(pageID, "", ast.BlockKindParagraph, 0),
+				Kind:    ast.BlockKindParagraph,
 				Content: ast.BlockContent{Paragraph: &ast.ParagraphContent{Markdown: md}},
-				Owner: ast.OwnerGenerated,
+				Owner:   ast.OwnerGenerated,
 			},
 		},
 		Provenance: ast.Provenance{GeneratedAt: input.Now},
@@ -615,7 +615,7 @@ func TestRejection(t *testing.T) {
 
 	// Set a canonical baseline.
 	canonicalBaseline := ast.Page{
-		ID: "test.page",
+		ID:       "test.page",
 		Manifest: manifest.DependencyManifest{PageID: "test.page"},
 		Blocks: []ast.Block{
 			{

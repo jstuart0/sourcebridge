@@ -97,11 +97,11 @@ type StoredImport struct {
 // Imports is the set of raw import paths this package references (as-seen in source).
 // ImportedBy is the set of raw import paths that reference this package.
 type StoredPackageDependencies struct {
-	RepoID    string    `json:"repo_id"`
-	Package   string    `json:"package"`
-	Imports   []string  `json:"imports"`
-	ImportedBy []string `json:"imported_by"`
-	UpdatedAt time.Time `json:"updated_at"`
+	RepoID     string    `json:"repo_id"`
+	Package    string    `json:"package"`
+	Imports    []string  `json:"imports"`
+	ImportedBy []string  `json:"imported_by"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // StoredLink is a requirement-code link stored in the graph.
@@ -222,16 +222,16 @@ type ReviewFinding struct {
 // In-memory implementation for OSS/CLI mode.
 // SurrealDB backend can be plugged in for Docker/K8s mode.
 type Store struct {
-	mu                     sync.RWMutex
-	repos                  map[string]*Repository
-	files                  map[string]*File              // fileID -> File
-	symbols                map[string]*StoredSymbol      // symbolID -> Symbol
-	modules                map[string]*StoredModule      // moduleID -> Module
-	requirements           map[string]*StoredRequirement // reqID -> Requirement
-	links                  map[string]*StoredLink        // linkID -> Link
-	imports                []StoredImport
-	callGraph              map[string][]string // callerID -> []calleeID
-	reverseCallGraph       map[string][]string // calleeID -> []callerID
+	mu               sync.RWMutex
+	repos            map[string]*Repository
+	files            map[string]*File              // fileID -> File
+	symbols          map[string]*StoredSymbol      // symbolID -> Symbol
+	modules          map[string]*StoredModule      // moduleID -> Module
+	requirements     map[string]*StoredRequirement // reqID -> Requirement
+	links            map[string]*StoredLink        // linkID -> Link
+	imports          []StoredImport
+	callGraph        map[string][]string // callerID -> []calleeID
+	reverseCallGraph map[string][]string // calleeID -> []callerID
 	// testedByGraph maps target-symbol-id → []test-symbol-id, i.e.
 	// "symbols that tests cover." Populated from
 	// IndexResult.Relations with Type=RelationTests. Enables the
@@ -246,11 +246,11 @@ type Store struct {
 	symLinks               map[string][]string // symbolID -> []linkID
 	fileSymbols            map[string][]string // fileID -> []symbolID
 	llmUsage               []LLMUsageRecord
-	embeddings             map[string]*EmbeddingRecord       // targetID -> EmbeddingRecord
-	reviewResults          map[string]*ReviewResultRecord    // reviewID -> ReviewResultRecord
-	impactReports          map[string][]*ImpactReport        // repoID -> []*ImpactReport
-	discoveredRequirements map[string]*DiscoveredRequirement // discReqID -> DiscoveredRequirement
-	repoDiscoveredReqs     map[string][]string               // repoID -> []discReqID
+	embeddings             map[string]*EmbeddingRecord           // targetID -> EmbeddingRecord
+	reviewResults          map[string]*ReviewResultRecord        // reviewID -> ReviewResultRecord
+	impactReports          map[string][]*ImpactReport            // repoID -> []*ImpactReport
+	discoveredRequirements map[string]*DiscoveredRequirement     // discReqID -> DiscoveredRequirement
+	repoDiscoveredReqs     map[string][]string                   // repoID -> []discReqID
 	packageDeps            map[string]*StoredPackageDependencies // "repoID:pkg" -> deps
 }
 

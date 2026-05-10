@@ -22,7 +22,7 @@ func TestMarkAllStale(t *testing.T) {
 		Depth:        DepthMedium,
 		Status:       StatusPending,
 	})
-	_ = s.UpdateKnowledgeArtifactStatus(context.Background(),a1.ID, StatusReady)
+	_ = s.UpdateKnowledgeArtifactStatus(context.Background(), a1.ID, StatusReady)
 
 	a2, _ := s.StoreKnowledgeArtifact(context.Background(), &Artifact{
 		RepositoryID: "repo-1",
@@ -31,7 +31,7 @@ func TestMarkAllStale(t *testing.T) {
 		Depth:        DepthSummary,
 		Status:       StatusPending,
 	})
-	_ = s.UpdateKnowledgeArtifactStatus(context.Background(),a2.ID, StatusReady)
+	_ = s.UpdateKnowledgeArtifactStatus(context.Background(), a2.ID, StatusReady)
 
 	pendingArtifact, _ := s.StoreKnowledgeArtifact(context.Background(), &Artifact{
 		RepositoryID: "repo-1",
@@ -49,25 +49,25 @@ func TestMarkAllStale(t *testing.T) {
 		Depth:        DepthMedium,
 		Status:       StatusPending,
 	})
-	_ = s.UpdateKnowledgeArtifactStatus(context.Background(),otherRepo.ID, StatusReady)
+	_ = s.UpdateKnowledgeArtifactStatus(context.Background(), otherRepo.ID, StatusReady)
 
 	MarkAllStale(context.Background(), s, "repo-1")
 
 	// Both ready artifacts should now be stale.
-	if a := s.GetKnowledgeArtifact(context.Background(),a1.ID); !a.Stale {
+	if a := s.GetKnowledgeArtifact(context.Background(), a1.ID); !a.Stale {
 		t.Fatalf("expected a1 to be stale")
 	}
-	if a := s.GetKnowledgeArtifact(context.Background(),a2.ID); !a.Stale {
+	if a := s.GetKnowledgeArtifact(context.Background(), a2.ID); !a.Stale {
 		t.Fatalf("expected a2 to be stale")
 	}
 
 	// Pending artifact should NOT be marked stale.
-	if a := s.GetKnowledgeArtifact(context.Background(),pendingArtifact.ID); a.Stale {
+	if a := s.GetKnowledgeArtifact(context.Background(), pendingArtifact.ID); a.Stale {
 		t.Fatalf("expected pending artifact to remain non-stale")
 	}
 
 	// Other repo should NOT be affected.
-	if a := s.GetKnowledgeArtifact(context.Background(),otherRepo.ID); a.Stale {
+	if a := s.GetKnowledgeArtifact(context.Background(), otherRepo.ID); a.Stale {
 		t.Fatalf("expected other-repo artifact to remain non-stale")
 	}
 }
@@ -87,12 +87,12 @@ func TestMarkAllStaleIdempotent(t *testing.T) {
 		Depth:        DepthMedium,
 		Status:       StatusPending,
 	})
-	_ = s.UpdateKnowledgeArtifactStatus(context.Background(),a.ID, StatusReady)
+	_ = s.UpdateKnowledgeArtifactStatus(context.Background(), a.ID, StatusReady)
 
 	MarkAllStale(context.Background(), s, "repo-1")
 	MarkAllStale(context.Background(), s, "repo-1") // second call — already stale, should be no-op
 
-	if fetched := s.GetKnowledgeArtifact(context.Background(),a.ID); !fetched.Stale {
+	if fetched := s.GetKnowledgeArtifact(context.Background(), a.ID); !fetched.Stale {
 		t.Fatalf("expected artifact to still be stale after double mark")
 	}
 }
@@ -107,17 +107,17 @@ func TestRefreshClearsStale(t *testing.T) {
 		Depth:        DepthMedium,
 		Status:       StatusPending,
 	})
-	_ = s.UpdateKnowledgeArtifactStatus(context.Background(),a.ID, StatusReady)
-	_ = s.MarkKnowledgeArtifactStale(context.Background(),a.ID, true)
+	_ = s.UpdateKnowledgeArtifactStatus(context.Background(), a.ID, StatusReady)
+	_ = s.MarkKnowledgeArtifactStale(context.Background(), a.ID, true)
 
-	if fetched := s.GetKnowledgeArtifact(context.Background(),a.ID); !fetched.Stale {
+	if fetched := s.GetKnowledgeArtifact(context.Background(), a.ID); !fetched.Stale {
 		t.Fatalf("expected artifact to be stale")
 	}
 
 	// Clearing stale flag simulates what happens after a successful refresh.
-	_ = s.MarkKnowledgeArtifactStale(context.Background(),a.ID, false)
+	_ = s.MarkKnowledgeArtifactStale(context.Background(), a.ID, false)
 
-	if fetched := s.GetKnowledgeArtifact(context.Background(),a.ID); fetched.Stale {
+	if fetched := s.GetKnowledgeArtifact(context.Background(), a.ID); fetched.Stale {
 		t.Fatalf("expected artifact to no longer be stale after refresh")
 	}
 }
@@ -169,7 +169,7 @@ func seedReadyArtifact(t *testing.T, s *MemStore, repoID string, typ ArtifactTyp
 	if err != nil {
 		t.Fatalf("StoreKnowledgeArtifact: %v", err)
 	}
-	if err := s.UpdateKnowledgeArtifactStatus(context.Background(),a.ID, StatusReady); err != nil {
+	if err := s.UpdateKnowledgeArtifactStatus(context.Background(), a.ID, StatusReady); err != nil {
 		t.Fatalf("UpdateKnowledgeArtifactStatus: %v", err)
 	}
 	if len(sections) > 0 {
@@ -205,7 +205,7 @@ func TestMarkStaleForImpact_NoChanges_NoOp(t *testing.T) {
 	if len(reasons) != 0 {
 		t.Fatalf("expected no reasons, got %v", reasons)
 	}
-	if got := s.GetKnowledgeArtifact(context.Background(),aid); got.Stale {
+	if got := s.GetKnowledgeArtifact(context.Background(), aid); got.Stale {
 		t.Fatalf("expected artifact to stay fresh")
 	}
 }
@@ -233,15 +233,15 @@ func TestMarkStaleForImpact_SymbolHit(t *testing.T) {
 		t.Fatalf("expected report id to round-trip")
 	}
 
-	if !s.GetKnowledgeArtifact(context.Background(),hit).Stale {
+	if !s.GetKnowledgeArtifact(context.Background(), hit).Stale {
 		t.Fatalf("expected hit artifact to be stale")
 	}
-	if s.GetKnowledgeArtifact(context.Background(),miss).Stale {
+	if s.GetKnowledgeArtifact(context.Background(), miss).Stale {
 		t.Fatalf("expected miss artifact to stay fresh")
 	}
 
 	// Persisted reason should parse back to the same shape.
-	got := s.GetKnowledgeArtifact(context.Background(),hit)
+	got := s.GetKnowledgeArtifact(context.Background(), hit)
 	if got.StaleReasonJSON == "" {
 		t.Fatalf("expected stale_reason_json to be populated")
 	}
@@ -301,7 +301,7 @@ func TestMarkStaleForImpact_NoEvidence_FallsBackToBlanket(t *testing.T) {
 	if !reasons[0].Blanket {
 		t.Fatalf("expected Blanket=true")
 	}
-	if !s.GetKnowledgeArtifact(context.Background(),aid).Stale {
+	if !s.GetKnowledgeArtifact(context.Background(), aid).Stale {
 		t.Fatalf("expected artifact to be stale")
 	}
 }
@@ -350,7 +350,7 @@ func TestMarkStaleForImpact_ChangeSetExceedsMax_FallsBackToBlanket(t *testing.T)
 			t.Fatalf("expected Blanket=true after fallback, got %+v", r)
 		}
 	}
-	if !s.GetKnowledgeArtifact(context.Background(),hit).Stale || !s.GetKnowledgeArtifact(context.Background(),unrelated).Stale {
+	if !s.GetKnowledgeArtifact(context.Background(), hit).Stale || !s.GetKnowledgeArtifact(context.Background(), unrelated).Stale {
 		t.Fatalf("expected both artifacts staled")
 	}
 }
@@ -375,7 +375,7 @@ func TestMarkStaleForImpact_IgnoresPendingAndAlreadyStale(t *testing.T) {
 	stale := seedReadyArtifact(t, s, "repo-1", ArtifactLearningPath, []Section{
 		{Title: "Sec", Evidence: []Evidence{{SourceType: EvidenceSymbol, SourceID: "sym-X"}}},
 	})
-	if err := s.MarkKnowledgeArtifactStale(context.Background(),stale, true); err != nil {
+	if err := s.MarkKnowledgeArtifactStale(context.Background(), stale, true); err != nil {
 		t.Fatalf("pre-stale: %v", err)
 	}
 
@@ -387,7 +387,7 @@ func TestMarkStaleForImpact_IgnoresPendingAndAlreadyStale(t *testing.T) {
 	if len(reasons) != 1 || reasons[0].ArtifactID != fresh {
 		t.Fatalf("expected only the fresh-ready artifact to be staled, got %+v", reasons)
 	}
-	if got := s.GetKnowledgeArtifact(context.Background(),pending.ID); got.Stale {
+	if got := s.GetKnowledgeArtifact(context.Background(), pending.ID); got.Stale {
 		t.Fatalf("expected pending artifact to remain non-stale")
 	}
 }

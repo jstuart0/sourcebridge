@@ -408,11 +408,11 @@ func TestMCP_GetReviewForDiff_MaxFilesCap(t *testing.T) {
 	resp := h.sendRPC(sess, 1, "tools/call", map[string]interface{}{
 		"name": "get_review_for_diff",
 		"arguments": map[string]interface{}{
-			"repository_id":    repoID,
-			"files":            files, // all 10 files
+			"repository_id":     repoID,
+			"files":             files, // all 10 files
 			"include_ai_review": true,
-			"max_files":        5,
-			"templates":        []string{"security"},
+			"max_files":         5,
+			"templates":         []string{"security"},
 		},
 	})
 
@@ -719,10 +719,10 @@ func TestMCP_GetReviewForDiff_DeadlineRespected(t *testing.T) {
 	defer cancel()
 
 	args, _ := json.Marshal(map[string]interface{}{
-		"repository_id":    repoID,
-		"files":            []string{"api.go"},
+		"repository_id":     repoID,
+		"files":             []string{"api.go"},
 		"include_ai_review": true,
-		"templates":        []string{"security"},
+		"templates":         []string{"security"},
 	})
 
 	start := time.Now()

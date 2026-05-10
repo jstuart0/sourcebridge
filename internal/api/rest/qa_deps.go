@@ -390,6 +390,7 @@ func joinLines(ps []string) string {
 	}
 	return string(b)
 }
+
 // qaSearcher adapts the hybrid retrieval service to qa.Searcher. The
 // bridge is narrow on purpose — internal/qa doesn't know about
 // search.Request/Response shapes.

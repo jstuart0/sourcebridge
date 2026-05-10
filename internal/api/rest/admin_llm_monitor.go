@@ -135,42 +135,42 @@ type monitorModeRollup struct {
 // of human-readable fields so the frontend doesn't have to duplicate
 // any of the formatting logic.
 type monitorJobView struct {
-	ID                  string     `json:"id"`
-	Subsystem           string     `json:"subsystem"`
-	JobType             string     `json:"job_type"`
-	TargetKey           string     `json:"target_key"`
-	Strategy            string     `json:"strategy,omitempty"`
-	Model               string     `json:"model,omitempty"`
-	Priority            string     `json:"priority,omitempty"`
-	GenerationMode      string     `json:"generation_mode,omitempty"`
-	Status              string     `json:"status"`
-	Progress            float64    `json:"progress"`
-	ProgressPhase       string     `json:"progress_phase,omitempty"`
-	ProgressMessage     string     `json:"progress_message,omitempty"`
-	ErrorCode           string     `json:"error_code,omitempty"`
-	ErrorMessage        string     `json:"error_message,omitempty"`
-	ErrorTitle          string     `json:"error_title,omitempty"` // human-readable title derived from error_code
-	ErrorHint           string     `json:"error_hint,omitempty"`  // one-sentence remediation
-	RetryCount          int        `json:"retry_count"`
-	MaxAttempts         int        `json:"max_attempts"`
-	AttachedRequests    int        `json:"attached_requests"`
-	InputTokens         int        `json:"input_tokens"`
-	OutputTokens        int        `json:"output_tokens"`
-	SnapshotBytes       int        `json:"snapshot_bytes"`
-	ReusedSummaries     int        `json:"reused_summaries"`
-	LeafCacheHits       int        `json:"leaf_cache_hits"`
-	FileCacheHits       int        `json:"file_cache_hits"`
-	PackageCacheHits    int        `json:"package_cache_hits"`
-	RootCacheHits       int        `json:"root_cache_hits"`
-	CachedNodesLoaded   int        `json:"cached_nodes_loaded"`
-	TotalNodes          int        `json:"total_nodes"`
-	ResumeStage         string     `json:"resume_stage,omitempty"`
-	SkippedLeafUnits    int        `json:"skipped_leaf_units"`
-	SkippedFileUnits    int        `json:"skipped_file_units"`
-	SkippedPackageUnits int        `json:"skipped_package_units"`
-	SkippedRootUnits    int        `json:"skipped_root_units"`
-	ArtifactID             string     `json:"artifact_id,omitempty"`
-	RepoID                 string     `json:"repo_id,omitempty"`
+	ID                  string  `json:"id"`
+	Subsystem           string  `json:"subsystem"`
+	JobType             string  `json:"job_type"`
+	TargetKey           string  `json:"target_key"`
+	Strategy            string  `json:"strategy,omitempty"`
+	Model               string  `json:"model,omitempty"`
+	Priority            string  `json:"priority,omitempty"`
+	GenerationMode      string  `json:"generation_mode,omitempty"`
+	Status              string  `json:"status"`
+	Progress            float64 `json:"progress"`
+	ProgressPhase       string  `json:"progress_phase,omitempty"`
+	ProgressMessage     string  `json:"progress_message,omitempty"`
+	ErrorCode           string  `json:"error_code,omitempty"`
+	ErrorMessage        string  `json:"error_message,omitempty"`
+	ErrorTitle          string  `json:"error_title,omitempty"` // human-readable title derived from error_code
+	ErrorHint           string  `json:"error_hint,omitempty"`  // one-sentence remediation
+	RetryCount          int     `json:"retry_count"`
+	MaxAttempts         int     `json:"max_attempts"`
+	AttachedRequests    int     `json:"attached_requests"`
+	InputTokens         int     `json:"input_tokens"`
+	OutputTokens        int     `json:"output_tokens"`
+	SnapshotBytes       int     `json:"snapshot_bytes"`
+	ReusedSummaries     int     `json:"reused_summaries"`
+	LeafCacheHits       int     `json:"leaf_cache_hits"`
+	FileCacheHits       int     `json:"file_cache_hits"`
+	PackageCacheHits    int     `json:"package_cache_hits"`
+	RootCacheHits       int     `json:"root_cache_hits"`
+	CachedNodesLoaded   int     `json:"cached_nodes_loaded"`
+	TotalNodes          int     `json:"total_nodes"`
+	ResumeStage         string  `json:"resume_stage,omitempty"`
+	SkippedLeafUnits    int     `json:"skipped_leaf_units"`
+	SkippedFileUnits    int     `json:"skipped_file_units"`
+	SkippedPackageUnits int     `json:"skipped_package_units"`
+	SkippedRootUnits    int     `json:"skipped_root_units"`
+	ArtifactID          string  `json:"artifact_id,omitempty"`
+	RepoID              string  `json:"repo_id,omitempty"`
 	// CurrentTokensPerSecond is the instantaneous LLM throughput sampled
 	// from the gate's 60-second ring buffer at the last progress update.
 	// Zero means unknown; consumers MUST treat zero as "unknown".
@@ -251,40 +251,40 @@ func toMonitorJobView(j *llm.Job) monitorJobView {
 	}
 	title, hint := errorTitleForCode(j.ErrorCode)
 	return monitorJobView{
-		ID:                  j.ID,
-		Subsystem:           string(j.Subsystem),
-		JobType:             j.JobType,
-		TargetKey:           j.TargetKey,
-		Strategy:            j.Strategy,
-		Model:               j.Model,
-		Priority:            string(j.Priority),
-		GenerationMode:      j.GenerationMode,
-		Status:              string(j.Status),
-		Progress:            j.Progress,
-		ProgressPhase:       j.ProgressPhase,
-		ProgressMessage:     j.ProgressMessage,
-		ErrorCode:           j.ErrorCode,
-		ErrorMessage:        j.ErrorMessage,
-		ErrorTitle:          title,
-		ErrorHint:           hint,
-		RetryCount:          j.RetryCount,
-		MaxAttempts:         j.MaxAttempts,
-		AttachedRequests:    j.AttachedRequests,
-		InputTokens:         j.InputTokens,
-		OutputTokens:        j.OutputTokens,
-		SnapshotBytes:       j.SnapshotBytes,
-		ReusedSummaries:     j.ReusedSummaries,
-		LeafCacheHits:       j.LeafCacheHits,
-		FileCacheHits:       j.FileCacheHits,
-		PackageCacheHits:    j.PackageCacheHits,
-		RootCacheHits:       j.RootCacheHits,
-		CachedNodesLoaded:   j.CachedNodesLoaded,
-		TotalNodes:          j.TotalNodes,
-		ResumeStage:         j.ResumeStage,
-		SkippedLeafUnits:    j.SkippedLeafUnits,
-		SkippedFileUnits:    j.SkippedFileUnits,
-		SkippedPackageUnits: j.SkippedPackageUnits,
-		SkippedRootUnits:    j.SkippedRootUnits,
+		ID:                     j.ID,
+		Subsystem:              string(j.Subsystem),
+		JobType:                j.JobType,
+		TargetKey:              j.TargetKey,
+		Strategy:               j.Strategy,
+		Model:                  j.Model,
+		Priority:               string(j.Priority),
+		GenerationMode:         j.GenerationMode,
+		Status:                 string(j.Status),
+		Progress:               j.Progress,
+		ProgressPhase:          j.ProgressPhase,
+		ProgressMessage:        j.ProgressMessage,
+		ErrorCode:              j.ErrorCode,
+		ErrorMessage:           j.ErrorMessage,
+		ErrorTitle:             title,
+		ErrorHint:              hint,
+		RetryCount:             j.RetryCount,
+		MaxAttempts:            j.MaxAttempts,
+		AttachedRequests:       j.AttachedRequests,
+		InputTokens:            j.InputTokens,
+		OutputTokens:           j.OutputTokens,
+		SnapshotBytes:          j.SnapshotBytes,
+		ReusedSummaries:        j.ReusedSummaries,
+		LeafCacheHits:          j.LeafCacheHits,
+		FileCacheHits:          j.FileCacheHits,
+		PackageCacheHits:       j.PackageCacheHits,
+		RootCacheHits:          j.RootCacheHits,
+		CachedNodesLoaded:      j.CachedNodesLoaded,
+		TotalNodes:             j.TotalNodes,
+		ResumeStage:            j.ResumeStage,
+		SkippedLeafUnits:       j.SkippedLeafUnits,
+		SkippedFileUnits:       j.SkippedFileUnits,
+		SkippedPackageUnits:    j.SkippedPackageUnits,
+		SkippedRootUnits:       j.SkippedRootUnits,
 		ArtifactID:             j.ArtifactID,
 		RepoID:                 j.RepoID,
 		CurrentTokensPerSecond: j.CurrentTokensPerSecond,

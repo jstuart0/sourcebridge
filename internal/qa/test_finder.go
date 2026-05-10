@@ -97,6 +97,7 @@ func isTestFile(filePath string) bool {
 //	  - web/src/auth/session.test.ts
 //	  - web/src/auth/session.spec.ts
 //	  - web/src/auth/__tests__/session.test.ts
+//
 // AdjacentTestCandidates is the exported alias used by the MCP
 // accessor tools (get_tests_for_symbol). Keeping both names avoids
 // a sweeping rename of the 10-ish internal call sites; the exported

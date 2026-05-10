@@ -68,7 +68,7 @@ func (r *mutationResolver) AddRepository(ctx context.Context, input AddRepositor
 	// Dedup check: return existing repo if already tracked
 	if isRemote {
 		normalizedURL := normalizeGitURL(repoPath)
-		for _, existing := range store.ListRepositories(ctx, ) {
+		for _, existing := range store.ListRepositories(ctx) {
 			if existing.RemoteURL == normalizedURL {
 				return mapRepository(existing), nil
 			}
@@ -2401,13 +2401,13 @@ func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID 
 	}
 	if retryExcludedOnly != nil && *retryExcludedOnly && selectedPageIds != nil {
 		return nil, &gqlerror.Error{
-			Message: "selectedPageIds cannot be combined with retryExcludedOnly=true",
+			Message:    "selectedPageIds cannot be combined with retryExcludedOnly=true",
 			Extensions: map[string]any{"code": "LIVING_WIKI_INPUT_CONFLICT"},
 		}
 	}
 	if selectedPageIds != nil && (planSignature == nil || *planSignature == "") {
 		return nil, &gqlerror.Error{
-			Message: "planSignature is required when selectedPageIds is supplied (including the empty-list case)",
+			Message:    "planSignature is required when selectedPageIds is supplied (including the empty-list case)",
 			Extensions: map[string]any{"code": "LIVING_WIKI_PLAN_SIGNATURE_REQUIRED"},
 		}
 	}
@@ -3167,7 +3167,7 @@ func (r *queryResolver) Repositories(ctx context.Context) ([]*Repository, error)
 	}
 
 	store := r.getStore(ctx)
-	graphRepos := store.ListRepositories(ctx, )
+	graphRepos := store.ListRepositories(ctx)
 	var repos []*Repository
 	for _, gr := range graphRepos {
 		repo := mapRepository(gr)
@@ -3329,7 +3329,7 @@ func (r *queryResolver) Search(ctx context.Context, query string, repositoryID *
 			scopedRepos = []*graphstore.Repository{repo}
 		}
 	} else {
-		scopedRepos = store.ListRepositories(ctx, )
+		scopedRepos = store.ListRepositories(ctx)
 	}
 	if len(scopedRepos) == 0 {
 		return []*SearchResult{}, nil

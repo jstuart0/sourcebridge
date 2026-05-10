@@ -31,20 +31,20 @@ const (
 // documentation appears in the tool's description so the model can
 // recover.
 const (
-	ErrQueryEmpty             = "query_empty"
-	ErrLimitOutOfRange        = "limit_out_of_range"
-	ErrServiceUnavailable     = "service_unavailable"
-	ErrFileNotFound           = "file_not_found"
-	ErrPathTraversalRejected  = "path_traversal_rejected"
-	ErrFileTooLarge           = "file_too_large"
-	ErrBinaryFile             = "binary_file"
-	ErrSymbolNotFound         = "symbol_not_found"
-	ErrGraphUnavailable       = "graph_unavailable"
-	ErrUnitNotFound           = "unit_not_found"
-	ErrCorpusUnavailable      = "corpus_unavailable"
-	ErrInvalidArgs            = "invalid_args"
+	ErrQueryEmpty              = "query_empty"
+	ErrLimitOutOfRange         = "limit_out_of_range"
+	ErrServiceUnavailable      = "service_unavailable"
+	ErrFileNotFound            = "file_not_found"
+	ErrPathTraversalRejected   = "path_traversal_rejected"
+	ErrFileTooLarge            = "file_too_large"
+	ErrBinaryFile              = "binary_file"
+	ErrSymbolNotFound          = "symbol_not_found"
+	ErrGraphUnavailable        = "graph_unavailable"
+	ErrUnitNotFound            = "unit_not_found"
+	ErrCorpusUnavailable       = "corpus_unavailable"
+	ErrInvalidArgs             = "invalid_args"
 	ErrEvidenceBudgetExhausted = "evidence_budget_exhausted"
-	ErrRepoUnavailable        = "repo_unavailable"
+	ErrRepoUnavailable         = "repo_unavailable"
 )
 
 // ToolSchema defines one tool the orchestrator advertises to the LLM.

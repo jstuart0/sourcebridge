@@ -24,55 +24,55 @@ var _ llm.JobStore = (*SurrealStore)(nil)
 // both native CBOR datetimes and legacy string values, and uses
 // option-shaped string fields so absent rows decode cleanly.
 type surrealLLMJob struct {
-	ID               *models.RecordID `json:"id,omitempty"`
-	Subsystem        string           `json:"subsystem"`
-	JobType          string           `json:"job_type"`
-	TargetKey        string           `json:"target_key"`
-	Strategy         string           `json:"strategy"`
-	Model            string           `json:"model"`
-	LLMProvider      string           `json:"llm_provider"`
-	Priority         string           `json:"priority"`
-	GenerationMode   string           `json:"generation_mode"`
-	Status           string           `json:"status"`
-	Progress         float64          `json:"progress"`
-	ProgressPhase    string           `json:"progress_phase"`
-	ProgressMessage  string           `json:"progress_message"`
-	ErrorCode        string           `json:"error_code"`
-	ErrorMessage     string           `json:"error_message"`
-	RetryCount       int              `json:"retry_count"`
-	MaxAttempts      int              `json:"max_attempts"`
-	TimeoutSec       int              `json:"timeout_sec"`
-	AttachedRequests int              `json:"attached_requests"`
-	InputTokens      int              `json:"input_tokens"`
-	OutputTokens     int              `json:"output_tokens"`
-	SnapshotBytes    int              `json:"snapshot_bytes"`
-	ReusedSummaries  int              `json:"reused_summaries"`
-	LeafCacheHits    int              `json:"leaf_cache_hits"`
-	FileCacheHits    int              `json:"file_cache_hits"`
-	PackageCacheHits int              `json:"package_cache_hits"`
-	RootCacheHits    int              `json:"root_cache_hits"`
-	CachedNodesLoaded int             `json:"cached_nodes_loaded"`
-	TotalNodes        int             `json:"total_nodes"`
-	ResumeStage       string          `json:"resume_stage"`
-	SkippedLeafUnits  int             `json:"skipped_leaf_units"`
-	SkippedFileUnits  int             `json:"skipped_file_units"`
-	SkippedPackageUnits int           `json:"skipped_package_units"`
-	SkippedRootUnits  int             `json:"skipped_root_units"`
-	ArtifactID             string           `json:"artifact_id"`
-	RepoID                 string           `json:"repo_id"`
+	ID                  *models.RecordID `json:"id,omitempty"`
+	Subsystem           string           `json:"subsystem"`
+	JobType             string           `json:"job_type"`
+	TargetKey           string           `json:"target_key"`
+	Strategy            string           `json:"strategy"`
+	Model               string           `json:"model"`
+	LLMProvider         string           `json:"llm_provider"`
+	Priority            string           `json:"priority"`
+	GenerationMode      string           `json:"generation_mode"`
+	Status              string           `json:"status"`
+	Progress            float64          `json:"progress"`
+	ProgressPhase       string           `json:"progress_phase"`
+	ProgressMessage     string           `json:"progress_message"`
+	ErrorCode           string           `json:"error_code"`
+	ErrorMessage        string           `json:"error_message"`
+	RetryCount          int              `json:"retry_count"`
+	MaxAttempts         int              `json:"max_attempts"`
+	TimeoutSec          int              `json:"timeout_sec"`
+	AttachedRequests    int              `json:"attached_requests"`
+	InputTokens         int              `json:"input_tokens"`
+	OutputTokens        int              `json:"output_tokens"`
+	SnapshotBytes       int              `json:"snapshot_bytes"`
+	ReusedSummaries     int              `json:"reused_summaries"`
+	LeafCacheHits       int              `json:"leaf_cache_hits"`
+	FileCacheHits       int              `json:"file_cache_hits"`
+	PackageCacheHits    int              `json:"package_cache_hits"`
+	RootCacheHits       int              `json:"root_cache_hits"`
+	CachedNodesLoaded   int              `json:"cached_nodes_loaded"`
+	TotalNodes          int              `json:"total_nodes"`
+	ResumeStage         string           `json:"resume_stage"`
+	SkippedLeafUnits    int              `json:"skipped_leaf_units"`
+	SkippedFileUnits    int              `json:"skipped_file_units"`
+	SkippedPackageUnits int              `json:"skipped_package_units"`
+	SkippedRootUnits    int              `json:"skipped_root_units"`
+	ArtifactID          string           `json:"artifact_id"`
+	RepoID              string           `json:"repo_id"`
 	// CurrentTokensPerSecond is stored as a pointer so that zero and
 	// absent are distinct on round-trip: a missing field decodes to nil
 	// (unknown) rather than 0 (zero rate), while an explicit 0 is
 	// preserved but the caller treats it as "unknown" per the Job docs.
-	CurrentTokensPerSecond *float64         `json:"current_tokens_per_second,omitempty"`
+	CurrentTokensPerSecond *float64 `json:"current_tokens_per_second,omitempty"`
 	// ProcessID is a pointer + omitempty so that absent rows (legacy, pre-058)
 	// decode to nil and the public Job.ProcessID field receives an empty string.
 	// A row created by a live orchestrator process carries the process UUID here.
-	ProcessID              *string          `json:"process_id,omitempty"`
-	CreatedAt              surrealTime      `json:"created_at"`
-	StartedAt              surrealTime      `json:"started_at"`
-	UpdatedAt              surrealTime      `json:"updated_at"`
-	CompletedAt            surrealTime      `json:"completed_at"`
+	ProcessID   *string     `json:"process_id,omitempty"`
+	CreatedAt   surrealTime `json:"created_at"`
+	StartedAt   surrealTime `json:"started_at"`
+	UpdatedAt   surrealTime `json:"updated_at"`
+	CompletedAt surrealTime `json:"completed_at"`
 }
 
 type surrealLLMJobLog struct {
@@ -94,44 +94,44 @@ type surrealLLMJobLog struct {
 
 func (r *surrealLLMJob) toJob() *llm.Job {
 	job := &llm.Job{
-		ID:               recordIDString(r.ID),
-		Subsystem:        llm.Subsystem(r.Subsystem),
-		JobType:          r.JobType,
-		TargetKey:        r.TargetKey,
-		Strategy:         r.Strategy,
-		Model:            r.Model,
-		LLMProvider:      r.LLMProvider,
-		Priority:         llm.JobPriority(r.Priority),
-		GenerationMode:   r.GenerationMode,
-		Status:           llm.JobStatus(r.Status),
-		Progress:         r.Progress,
-		ProgressPhase:    r.ProgressPhase,
-		ProgressMessage:  r.ProgressMessage,
-		ErrorCode:        r.ErrorCode,
-		ErrorMessage:     r.ErrorMessage,
-		RetryCount:       r.RetryCount,
-		MaxAttempts:      r.MaxAttempts,
-		TimeoutSec:       r.TimeoutSec,
-		AttachedRequests: r.AttachedRequests,
-		InputTokens:      r.InputTokens,
-		OutputTokens:     r.OutputTokens,
-		SnapshotBytes:    r.SnapshotBytes,
-		ReusedSummaries:  r.ReusedSummaries,
-		LeafCacheHits:    r.LeafCacheHits,
-		FileCacheHits:    r.FileCacheHits,
-		PackageCacheHits: r.PackageCacheHits,
-		RootCacheHits:    r.RootCacheHits,
-		CachedNodesLoaded: r.CachedNodesLoaded,
-		TotalNodes:        r.TotalNodes,
-		ResumeStage:       r.ResumeStage,
-		SkippedLeafUnits:  r.SkippedLeafUnits,
-		SkippedFileUnits:  r.SkippedFileUnits,
+		ID:                  recordIDString(r.ID),
+		Subsystem:           llm.Subsystem(r.Subsystem),
+		JobType:             r.JobType,
+		TargetKey:           r.TargetKey,
+		Strategy:            r.Strategy,
+		Model:               r.Model,
+		LLMProvider:         r.LLMProvider,
+		Priority:            llm.JobPriority(r.Priority),
+		GenerationMode:      r.GenerationMode,
+		Status:              llm.JobStatus(r.Status),
+		Progress:            r.Progress,
+		ProgressPhase:       r.ProgressPhase,
+		ProgressMessage:     r.ProgressMessage,
+		ErrorCode:           r.ErrorCode,
+		ErrorMessage:        r.ErrorMessage,
+		RetryCount:          r.RetryCount,
+		MaxAttempts:         r.MaxAttempts,
+		TimeoutSec:          r.TimeoutSec,
+		AttachedRequests:    r.AttachedRequests,
+		InputTokens:         r.InputTokens,
+		OutputTokens:        r.OutputTokens,
+		SnapshotBytes:       r.SnapshotBytes,
+		ReusedSummaries:     r.ReusedSummaries,
+		LeafCacheHits:       r.LeafCacheHits,
+		FileCacheHits:       r.FileCacheHits,
+		PackageCacheHits:    r.PackageCacheHits,
+		RootCacheHits:       r.RootCacheHits,
+		CachedNodesLoaded:   r.CachedNodesLoaded,
+		TotalNodes:          r.TotalNodes,
+		ResumeStage:         r.ResumeStage,
+		SkippedLeafUnits:    r.SkippedLeafUnits,
+		SkippedFileUnits:    r.SkippedFileUnits,
 		SkippedPackageUnits: r.SkippedPackageUnits,
-		SkippedRootUnits:  r.SkippedRootUnits,
-		ArtifactID:       r.ArtifactID,
-		RepoID:           r.RepoID,
-		CreatedAt:        r.CreatedAt.Time,
-		UpdatedAt:        r.UpdatedAt.Time,
+		SkippedRootUnits:    r.SkippedRootUnits,
+		ArtifactID:          r.ArtifactID,
+		RepoID:              r.RepoID,
+		CreatedAt:           r.CreatedAt.Time,
+		UpdatedAt:           r.UpdatedAt.Time,
 	}
 	if r.CurrentTokensPerSecond != nil {
 		job.CurrentTokensPerSecond = *r.CurrentTokensPerSecond
@@ -182,43 +182,43 @@ func (r *surrealLLMJobLog) toJobLog() *llm.JobLogEntry {
 // function only ever populates them when non-empty.
 func jobParams(job *llm.Job) map[string]any {
 	return map[string]any{
-		"id":                          job.ID,
-		"subsystem":                   string(job.Subsystem),
-		"job_type":                    job.JobType,
-		"target_key":                  job.TargetKey,
-		"strategy":                    job.Strategy,
-		"model":                       job.Model,
-		"llm_provider":                job.LLMProvider,
-		"priority":                    string(job.Priority),
-		"generation_mode":             job.GenerationMode,
-		"status":                      string(job.Status),
-		"progress":                    job.Progress,
-		"progress_phase":              job.ProgressPhase,
-		"progress_message":            job.ProgressMessage,
-		"error_code":                  job.ErrorCode,
-		"error_message":               job.ErrorMessage,
-		"retry_count":                 job.RetryCount,
-		"max_attempts":                job.MaxAttempts,
-		"timeout_sec":                 job.TimeoutSec,
-		"attached_requests":           job.AttachedRequests,
-		"input_tokens":                job.InputTokens,
-		"output_tokens":               job.OutputTokens,
-		"snapshot_bytes":              job.SnapshotBytes,
-		"reused_summaries":            job.ReusedSummaries,
-		"leaf_cache_hits":             job.LeafCacheHits,
-		"file_cache_hits":             job.FileCacheHits,
-		"package_cache_hits":          job.PackageCacheHits,
-		"root_cache_hits":             job.RootCacheHits,
-		"cached_nodes_loaded":         job.CachedNodesLoaded,
-		"total_nodes":                 job.TotalNodes,
-		"resume_stage":                job.ResumeStage,
-		"skipped_leaf_units":          job.SkippedLeafUnits,
-		"skipped_file_units":          job.SkippedFileUnits,
-		"skipped_package_units":       job.SkippedPackageUnits,
-		"skipped_root_units":          job.SkippedRootUnits,
-		"artifact_id":                 job.ArtifactID,
-		"repo_id":                     job.RepoID,
-		"current_tokens_per_second":   job.CurrentTokensPerSecond,
+		"id":                        job.ID,
+		"subsystem":                 string(job.Subsystem),
+		"job_type":                  job.JobType,
+		"target_key":                job.TargetKey,
+		"strategy":                  job.Strategy,
+		"model":                     job.Model,
+		"llm_provider":              job.LLMProvider,
+		"priority":                  string(job.Priority),
+		"generation_mode":           job.GenerationMode,
+		"status":                    string(job.Status),
+		"progress":                  job.Progress,
+		"progress_phase":            job.ProgressPhase,
+		"progress_message":          job.ProgressMessage,
+		"error_code":                job.ErrorCode,
+		"error_message":             job.ErrorMessage,
+		"retry_count":               job.RetryCount,
+		"max_attempts":              job.MaxAttempts,
+		"timeout_sec":               job.TimeoutSec,
+		"attached_requests":         job.AttachedRequests,
+		"input_tokens":              job.InputTokens,
+		"output_tokens":             job.OutputTokens,
+		"snapshot_bytes":            job.SnapshotBytes,
+		"reused_summaries":          job.ReusedSummaries,
+		"leaf_cache_hits":           job.LeafCacheHits,
+		"file_cache_hits":           job.FileCacheHits,
+		"package_cache_hits":        job.PackageCacheHits,
+		"root_cache_hits":           job.RootCacheHits,
+		"cached_nodes_loaded":       job.CachedNodesLoaded,
+		"total_nodes":               job.TotalNodes,
+		"resume_stage":              job.ResumeStage,
+		"skipped_leaf_units":        job.SkippedLeafUnits,
+		"skipped_file_units":        job.SkippedFileUnits,
+		"skipped_package_units":     job.SkippedPackageUnits,
+		"skipped_root_units":        job.SkippedRootUnits,
+		"artifact_id":               job.ArtifactID,
+		"repo_id":                   job.RepoID,
+		"current_tokens_per_second": job.CurrentTokensPerSecond,
 	}
 }
 

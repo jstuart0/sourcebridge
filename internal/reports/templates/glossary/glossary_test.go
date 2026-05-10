@@ -127,13 +127,13 @@ func TestGlossary_SymbolsWithinPackageAreSortedAlphabetically(t *testing.T) {
 func TestGlossary_CitationPresentInParagraph(t *testing.T) {
 	syms := []templates.Symbol{
 		{
-			Package:   "internal/auth",
-			Name:      "Middleware",
-			Signature: "func Middleware(next http.Handler) http.Handler",
+			Package:    "internal/auth",
+			Name:       "Middleware",
+			Signature:  "func Middleware(next http.Handler) http.Handler",
 			DocComment: "Middleware wraps next and enforces authentication.",
-			FilePath:  "internal/auth/middleware.go",
-			StartLine: 42,
-			EndLine:   55,
+			FilePath:   "internal/auth/middleware.go",
+			StartLine:  42,
+			EndLine:    55,
 		},
 	}
 	g := glossary.New()

@@ -224,4 +224,3 @@ func filePackage(filePath string) string {
 	}
 	return filePath[:idx]
 }
-

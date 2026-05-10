@@ -117,11 +117,11 @@ func (r *Resolver) updateRequirementFieldsImpl(ctx context.Context, input Update
 	}
 	// Strip whitespace-only strings to nil so the store doesn't write them.
 	patch := graphstore.RequirementUpdate{
-		ExternalID:         trimmed(input.ExternalID),
-		Title:              trimmed(input.Title),
-		Description:        input.Description, // allow empty string to clear
-		Priority:           input.Priority,
-		Source:             trimmed(input.Source),
+		ExternalID:  trimmed(input.ExternalID),
+		Title:       trimmed(input.Title),
+		Description: input.Description, // allow empty string to clear
+		Priority:    input.Priority,
+		Source:      trimmed(input.Source),
 	}
 	if input.Tags != nil {
 		tags := input.Tags

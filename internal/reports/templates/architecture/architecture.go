@@ -82,7 +82,7 @@ type KnowledgeArtifactSummary struct {
 	Depth       string // "summary", "medium", or "deep"
 	ScopePath   string // module / package path the artifact covers
 	Sections    []KnowledgeSection
-	RevisionFp  string    // matches the understanding revisionFp
+	RevisionFp  string // matches the understanding revisionFp
 	GeneratedAt time.Time
 }
 
@@ -447,7 +447,10 @@ func buildUserPrompt(pkg PackageInfo, syms []templates.Symbol) string {
 		// de-duplicated "verified source references" block. The model is
 		// instructed to cite from these refs first using the (file:start-end)
 		// convention.
-		type evKey struct{ fp string; lo, hi int }
+		type evKey struct {
+			fp     string
+			lo, hi int
+		}
 		seen := make(map[evKey]struct{})
 		var evLines []string
 		for _, art := range pkg.KnowledgeArtifacts {

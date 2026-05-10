@@ -50,13 +50,13 @@ func (h *mcpHandler) getTestsForSymbolToolDef() mcpToolDefinition {
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"repository_id":      map[string]interface{}{"type": "string", "description": "Repository ID"},
-				"file_path":          map[string]interface{}{"type": "string", "description": "Repo-relative file path containing the target symbol"},
-				"symbol_name":        map[string]interface{}{"type": "string", "description": "Name of the target symbol"},
-				"line_start":         map[string]interface{}{"type": "integer", "description": "Disambiguator when the same name appears more than once in the file"},
-				"symbol_id":          map[string]interface{}{"type": "string", "description": "Optional optimization hint"},
-				"include_adjacent":   map[string]interface{}{"type": "boolean", "description": "Include adjacent-heuristic matches (default true)"},
-				"include_text_refs":  map[string]interface{}{"type": "boolean", "description": "Include text-reference matches (default true)"},
+				"repository_id":     map[string]interface{}{"type": "string", "description": "Repository ID"},
+				"file_path":         map[string]interface{}{"type": "string", "description": "Repo-relative file path containing the target symbol"},
+				"symbol_name":       map[string]interface{}{"type": "string", "description": "Name of the target symbol"},
+				"line_start":        map[string]interface{}{"type": "integer", "description": "Disambiguator when the same name appears more than once in the file"},
+				"symbol_id":         map[string]interface{}{"type": "string", "description": "Optional optimization hint"},
+				"include_adjacent":  map[string]interface{}{"type": "boolean", "description": "Include adjacent-heuristic matches (default true)"},
+				"include_text_refs": map[string]interface{}{"type": "boolean", "description": "Include text-reference matches (default true)"},
 			},
 			"required": []string{"repository_id", "file_path", "symbol_name"},
 		},
@@ -287,4 +287,3 @@ func camelToSnake(s string) string {
 	out := camelSplit.ReplaceAllString(s, "${1}_${2}")
 	return strings.ToLower(out)
 }
-

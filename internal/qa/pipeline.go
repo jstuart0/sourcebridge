@@ -159,8 +159,8 @@ type Searcher interface {
 // search result. Narrower than search.Result so internal/qa doesn't
 // leak internal/search types into its public interface.
 type SearchHit struct {
-	EntityType string   // "symbol" | "requirement" | "file"
-	EntityID   string   // stable ID for the hit
+	EntityType string // "symbol" | "requirement" | "file"
+	EntityID   string // stable ID for the hit
 	Title      string
 	Subtitle   string
 	FilePath   string
@@ -326,12 +326,12 @@ func (o *Orchestrator) WithFileReader(f FileReader) *Orchestrator {
 // package boundaries stay clean (internal/qa does not import
 // internal/config).
 type Config struct {
-	QuestionMaxBytes           int
-	AskModel                   string
-	MaxAnswerTokens            int
-	PromptCachingEnabled       bool
-	SmartClassifierEnabled     bool
-	QueryDecompositionEnabled  bool
+	QuestionMaxBytes          int
+	AskModel                  string
+	MaxAnswerTokens           int
+	PromptCachingEnabled      bool
+	SmartClassifierEnabled    bool
+	QueryDecompositionEnabled bool
 }
 
 // DefaultConfig returns a Config with reasonable defaults for unit
