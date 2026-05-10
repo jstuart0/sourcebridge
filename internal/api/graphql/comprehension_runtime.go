@@ -7,10 +7,10 @@ import (
 )
 
 func (r *Resolver) applyEffectiveComprehensionSettings(eff *comprehension.EffectiveSettings) {
-	if eff == nil || r.Orchestrator == nil || !r.Flags.RuntimeReconfigure {
+	if eff == nil || r.Deps.Orchestrator == nil || !r.Deps.Flags.RuntimeReconfigure {
 		return
 	}
-	oldConfigured, newConfigured := r.Orchestrator.ReconfigureMaxConcurrency(eff.MaxConcurrency)
+	oldConfigured, newConfigured := r.Deps.Orchestrator.ReconfigureMaxConcurrency(eff.MaxConcurrency)
 	slog.Info("orchestrator_reconfigure",
 		"event", "orchestrator_reconfigure",
 		"source", "graphql_update_comprehension_settings",

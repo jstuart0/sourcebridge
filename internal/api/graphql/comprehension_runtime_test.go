@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/featureflags"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
@@ -21,9 +22,11 @@ func newComprehensionMutationResolver(t *testing.T, flags featureflags.Flags) *m
 	t.Cleanup(func() { _ = orch.Shutdown(time.Second) })
 	return &mutationResolver{
 		&Resolver{
-			Orchestrator:       orch,
-			ComprehensionStore: comprehension.NewMemStore(),
-			Flags:              flags,
+			Deps: &appdeps.AppDeps{
+				Orchestrator:       orch,
+				ComprehensionStore: comprehension.NewMemStore(),
+				Flags:              flags,
+			},
 		},
 	}
 }
@@ -41,7 +44,7 @@ func TestUpdateComprehensionSettingsReconfiguresOrchestratorWhenEnabled(t *testi
 	if err != nil {
 		t.Fatalf("update comprehension settings failed: %v", err)
 	}
-	if got := resolver.Orchestrator.MaxConcurrency(); got != 5 {
+	if got := resolver.Deps.Orchestrator.MaxConcurrency(); got != 5 {
 		t.Fatalf("expected orchestrator max concurrency 5, got %d", got)
 	}
 }
@@ -59,7 +62,7 @@ func TestUpdateComprehensionSettingsLeavesOrchestratorUnchangedWhenDisabled(t *t
 	if err != nil {
 		t.Fatalf("update comprehension settings failed: %v", err)
 	}
-	if got := resolver.Orchestrator.MaxConcurrency(); got != 2 {
+	if got := resolver.Deps.Orchestrator.MaxConcurrency(); got != 2 {
 		t.Fatalf("expected orchestrator max concurrency to remain 2, got %d", got)
 	}
 }

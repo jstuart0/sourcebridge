@@ -1,7 +1,7 @@
 // Package appdeps holds the shared dependency registry for the SourceBridge
 // application layer. Both rest.Server and graphql.Resolver carry an *AppDeps
 // pointer; rest.Server's NewServer constructs the AppDeps once and the
-// resolver-construction code reads from it via syncResolverDepsFromAppDeps.
+// graphql.Resolver reads dependencies via r.Deps.<Field>.
 //
 // Why a separate package: appdeps is imported by both internal/api/graphql
 // and internal/api/rest. Putting AppDeps in either of those packages would
@@ -12,8 +12,13 @@
 //
 // ClusteringHook is intentionally absent from AppDeps: it is a closure
 // constructed at wiring time from the server's clusterRunner and does not
-// belong in the long-lived dependency registry. The resolver constructor
-// assigns it explicitly after the sync call.
+// belong in the long-lived dependency registry. The resolver assigns it
+// directly on the Resolver struct.
+//
+// Adding a new subsystem: add a field to AppDeps here. The graphql.Resolver
+// side reads via r.Deps.<Field> automatically — no resolver-side wiring
+// step required. For rest.Server, also add the matching lowercase field and
+// one line to syncServerDepsFromAppDeps.
 package appdeps
 
 import (
@@ -26,10 +31,10 @@ import (
 	gitres "github.com/sourcebridge/sourcebridge/internal/git/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/health"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
+	"github.com/sourcebridge/sourcebridge/internal/livingwiki/governance"
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
-	"github.com/sourcebridge/sourcebridge/internal/livingwiki/governance"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
 	"github.com/sourcebridge/sourcebridge/internal/search"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
@@ -62,10 +67,10 @@ type DrainAdmitter interface {
 // value constructed once in NewServer. Adding a new subsystem requires:
 //
 //  1. A new field here.
-//  2. The matching field on graphql.Resolver (exported) and/or rest.Server
-//     (lowercase private), as appropriate.
-//  3. One new line in the relevant sync helper
-//     (syncResolverDepsFromAppDeps / syncServerDepsFromAppDeps).
+//  2. For rest.Server: the matching lowercase private field and one line in
+//     syncServerDepsFromAppDeps.
+//  3. For graphql.Resolver: no additional wiring — the resolver reads
+//     r.Deps.<Field> directly.
 type AppDeps struct {
 	KnowledgeStore             knowledge.KnowledgeStore
 	Worker                     *worker.Client

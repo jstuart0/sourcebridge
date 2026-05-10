@@ -19,11 +19,11 @@ import (
 // sink.
 type emptyCredsBroker struct{}
 
-func (emptyCredsBroker) GitHub(_ context.Context) (string, error)              { return "", nil }
-func (emptyCredsBroker) GitLab(_ context.Context) (string, error)              { return "", nil }
-func (emptyCredsBroker) ConfluenceSite(_ context.Context) (string, error)      { return "", nil }
-func (emptyCredsBroker) Confluence(_ context.Context) (string, string, error)  { return "", "", nil }
-func (emptyCredsBroker) Notion(_ context.Context) (string, error)              { return "", nil }
+func (emptyCredsBroker) GitHub(_ context.Context) (string, error)             { return "", nil }
+func (emptyCredsBroker) GitLab(_ context.Context) (string, error)             { return "", nil }
+func (emptyCredsBroker) ConfluenceSite(_ context.Context) (string, error)     { return "", nil }
+func (emptyCredsBroker) Confluence(_ context.Context) (string, string, error) { return "", "", nil }
+func (emptyCredsBroker) Notion(_ context.Context) (string, error)             { return "", nil }
 
 // TestDispatchGeneratedPagesSinkAuthFailureClassifiesAsAuth verifies that when
 // BuildSinkWriters returns *ErrMissingCredentials, dispatchGeneratedPages sets
@@ -66,7 +66,7 @@ func TestDispatchGeneratedPagesSinkAuthFailureClassifiesAsAuth(t *testing.T) {
 		context.Background(),
 		"repo-auth-test", "default",
 		pages,
-		nil,              // no skipped page IDs
+		nil, // no skipped page IDs
 		emptyCredsBroker{},
 		repoStore,
 		"test-repo",

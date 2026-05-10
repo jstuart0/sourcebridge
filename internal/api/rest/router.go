@@ -887,79 +887,17 @@ func (s *Server) setupRouter() {
 		r.Post("/auth/change-password", s.handleChangePassword)
 	})
 
-	// Extract cluster store for Living Wiki taxonomy resolution when the
-	// underlying store satisfies the interface (SurrealStore does).
-	var gqlClusterStore clustering.ClusterStore
-	if cs, ok := s.store.(clustering.ClusterStore); ok {
-		gqlClusterStore = cs
-	}
-
-	// Slice 3 of the LLM provider profiles plan: thread the profile
-	// lookup adapter into the GraphQL resolver so the per-repo
-	// override mutation can validate referenced profiles + populate
-	// profileName at field-resolve time. The rest profile-store
-	// adapter satisfies graphql.LLMProfileLookup (LookupProfileName).
-	// Nil-safe: pre-profile / embedded mode degrades gracefully.
-	var gqlProfileLookup graphql.LLMProfileLookup
-	if s.llmProfileStore != nil {
-		gqlProfileLookup = s.llmProfileStore
-	}
-
-	// GraphQL server — resolver is extracted as a variable so we can attach
-	// Deps and call syncResolverDepsFromAppDeps after construction (STRUCT-1,
-	// Phase 2 Slice 5). The manual field assignments below are kept as
-	// defensive duplication; the sync call is idempotent.
+	// GraphQL server — all subsystem dependencies are read via r.Deps.<Field>.
+	// ClusteringHook is a closure constructed at wiring time and stays on
+	// Resolver directly (not in AppDeps; see appdeps package doc for rationale).
+	// GitConfig is the legacy loader kept until Phase 2 (CA-305) removes it.
 	gqlResolver := &graphql.Resolver{
-		Store:                      s.store,
-		KnowledgeStore:             s.knowledgeStore,
-		Worker:                     s.worker,
-		LLMCaller:                  s.llmCaller,
-		LLMResolver:                s.llmResolver,
-		Orchestrator:               s.orchestrator,
-		Config:                     s.cfg,
-		EventBus:                   s.eventBus,
-		Flags:                      s.flags,
-		Plan:                       graphql.BootCurrentPlan(),
-		GitConfig:                  gitConfigLoaderFromStore(s.gitConfigStore),
-		GitResolver:                s.gitResolver,
-		ComprehensionStore:         s.comprehensionStore,
-		HealthChecker:              s.healthChecker,
-		TrashStore:                 s.trashStore,
-		SearchSvc:                  s.searchSvc,
-		ReqBooster:                 s.reqBooster,
-		QA:                         s.qaResolverOrchestrator(),
-		LLMProfileLookup:           gqlProfileLookup,
-		LivingWikiStore:            s.livingWikiStore,
-		LivingWikiResolver:         s.livingWikiResolver,
-		LivingWikiRepoStore:        s.livingWikiRepoStore,
-		LivingWikiJobResultStore:   s.livingWikiJobResultStore,
-		LivingWikiPagePublishStore: s.livingWikiPagePublishStore,
-		LivingWikiLiveOrchestrator: s.livingWikiLiveOrchestrator,
-		ClusteringHook:             s.clusteringHookFunc(),
-		ClusterStore:               gqlClusterStore,
-		// CA-138: share the REST server's cached worker-version
-		// lookup with the GraphQL resolver so /api/v1/version and
-		// the GraphQL `version { workerVersion }` field return
-		// identical cached results without flooding the worker.
-		// Closure preserves the package-private versionLookup.
-		WorkerVersion: func(ctx context.Context) string {
-			if s.workerVersionLookup == nil {
-				return ""
-			}
-			return s.workerVersionLookup.get(ctx)
-		},
-		// CA-142: drain admitter so the GraphQL resolver can gate
-		// Living Wiki mutations and count on-demand requests without
-		// a direct dependency on *rest.Server. The concrete type
-		// (*serverDrainAdmitter) satisfies graphql.DrainAdmitter.
-		DrainAdmitter: s.DrainAdmitterFor(),
+		Deps:           s.AppDeps,
+		Store:          s.store,
+		Plan:           graphql.BootCurrentPlan(),
+		GitConfig:      gitConfigLoaderFromStore(s.gitConfigStore),
+		ClusteringHook: s.clusteringHookFunc(),
 	}
-	// Wire AppDeps into the resolver and sync all shared deps (idempotent).
-	// ClusteringHook is set above in the composite literal — it stays outside
-	// AppDeps by design (constructed as a closure at wiring time; see appdeps
-	// package doc for rationale).
-	gqlResolver.Deps = s.AppDeps
-	graphql.SyncResolverDepsFromAppDeps(gqlResolver, s.AppDeps)
 
 	gqlSrv := handler.NewDefaultServer(graphql.NewExecutableSchema(graphql.Config{
 		Resolvers: gqlResolver,

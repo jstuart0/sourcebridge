@@ -7,6 +7,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 )
 
@@ -16,7 +17,9 @@ func newModelCapabilityMutationResolver(t *testing.T) *mutationResolver {
 	t.Helper()
 	return &mutationResolver{
 		&Resolver{
-			ComprehensionStore: comprehension.NewMemStore(),
+			Deps: &appdeps.AppDeps{
+				ComprehensionStore: comprehension.NewMemStore(),
+			},
 		},
 	}
 }
@@ -85,4 +88,3 @@ func TestUpdateModelCapabilities_QualityGateTier_PremiumRejected(t *testing.T) {
 		t.Errorf("expected no stored profile after rejection, but got one (modelId=%q)", got.ModelID)
 	}
 }
-

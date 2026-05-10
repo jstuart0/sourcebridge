@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/featureflags"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
@@ -74,14 +75,16 @@ func TestReindexRepository_AppliesImpactFromChange_EndToEnd(t *testing.T) {
 	store := graphstore.NewStore()
 	knowledgeStore := knowledgepkg.NewMemStore()
 	r := &mutationResolver{&Resolver{
-		Store:          store,
-		KnowledgeStore: knowledgeStore,
-		// Flags must be set explicitly because applyImpactFromChange now
-		// reads r.Flags.SelectiveInvalidationEnabled directly (boot-resolved
-		// value) rather than re-reading the env var at call time. The Setenv
-		// above is preserved so deltaRegenMode / deltaRegenModeWithFlags (which
-		// still read SOURCEBRIDGE_DELTA_REGEN_MODE from env) behave correctly.
-		Flags: featureflags.Flags{SelectiveInvalidationEnabled: true},
+		Deps: &appdeps.AppDeps{
+			KnowledgeStore: knowledgeStore,
+			// Flags must be set explicitly because applyImpactFromChange now
+			// reads r.Deps.Flags.SelectiveInvalidationEnabled directly (boot-resolved
+			// value) rather than re-reading the env var at call time. The Setenv
+			// above is preserved so deltaRegenMode / deltaRegenModeWithFlags (which
+			// still read SOURCEBRIDGE_DELTA_REGEN_MODE from env) behave correctly.
+			Flags: featureflags.Flags{SelectiveInvalidationEnabled: true},
+		},
+		Store: store,
 	}}
 
 	// Register the repository with the local path (non-remote so the

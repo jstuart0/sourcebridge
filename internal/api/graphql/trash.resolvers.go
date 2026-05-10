@@ -32,8 +32,8 @@ import (
 // Every trash resolver calls it first; if false, we return a stable
 // error the UI handles gracefully (fallback to hard-delete flow).
 func (r *Resolver) trashEnabled() bool {
-	return r.TrashStore != nil &&
-		r.Config != nil && r.Config.Trash.Enabled
+	return r.Deps.TrashStore != nil &&
+		r.Deps.Config != nil && r.Deps.Config.Trash.Enabled
 }
 
 // currentUserID pulls claims.UserID from the request context. Returns
@@ -90,14 +90,14 @@ func (r *Resolver) toGraphQLEntry(e trash.Entry) *TrashEntry {
 	expiresAt := e.DeletedAt.Add(r.retentionWindow())
 	repoID := e.RepositoryID
 	entry := &TrashEntry{
-		ID:              e.ID,
-		Type:            unmapTrashableType(e.Type),
-		RepositoryID:    &repoID,
-		Label:           e.Label,
-		DeletedAt:       e.DeletedAt.Format(time.RFC3339),
-		ExpiresAt:       expiresAt.Format(time.RFC3339),
-		CanRestore:      e.CanRestore,
-		TrashBatchID:    e.TrashBatchID,
+		ID:           e.ID,
+		Type:         unmapTrashableType(e.Type),
+		RepositoryID: &repoID,
+		Label:        e.Label,
+		DeletedAt:    e.DeletedAt.Format(time.RFC3339),
+		ExpiresAt:    expiresAt.Format(time.RFC3339),
+		CanRestore:   e.CanRestore,
+		TrashBatchID: e.TrashBatchID,
 	}
 	if e.OriginalKey != "" {
 		key := e.OriginalKey
@@ -118,8 +118,8 @@ func (r *Resolver) toGraphQLEntry(e trash.Entry) *TrashEntry {
 // Defaults to 30 days if the field is zero.
 func (r *Resolver) retentionWindow() time.Duration {
 	days := 30
-	if r.Config != nil && r.Config.Trash.RetentionDays > 0 {
-		days = r.Config.Trash.RetentionDays
+	if r.Deps.Config != nil && r.Deps.Config.Trash.RetentionDays > 0 {
+		days = r.Deps.Config.Trash.RetentionDays
 	}
 	return time.Duration(days) * 24 * time.Hour
 }
@@ -127,10 +127,10 @@ func (r *Resolver) retentionWindow() time.Duration {
 // --- Query: trashRetentionDays ----------------------------------------
 
 func (r *Resolver) trashRetentionDays() int {
-	if r.Config == nil || r.Config.Trash.RetentionDays <= 0 {
+	if r.Deps.Config == nil || r.Deps.Config.Trash.RetentionDays <= 0 {
 		return 30
 	}
-	return r.Config.Trash.RetentionDays
+	return r.Deps.Config.Trash.RetentionDays
 }
 
 // --- Query: trashedItems ----------------------------------------------
@@ -167,7 +167,7 @@ func (r *Resolver) trashedItems(
 		filter.Search = *search
 	}
 
-	entries, total, err := r.TrashStore.List(ctx, filter)
+	entries, total, err := r.Deps.TrashStore.List(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +196,7 @@ func (r *Resolver) moveToTrash(ctx context.Context, t TrashableType, id string, 
 	if reason != nil {
 		opts.Reason = *reason
 	}
-	entry, err := r.TrashStore.MoveToTrash(ctx, mapped, id, opts)
+	entry, err := r.Deps.TrashStore.MoveToTrash(ctx, mapped, id, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +240,7 @@ func (r *Resolver) restoreFromTrash(
 	// call. RestoreResult has no repository field (Decision 9 / CA-205).
 	// This read happens before RestoreFromTrash so that a non-existent entry
 	// fails early with a clear message (T45 pin).
-	trashEntry, entryErr := r.TrashStore.Get(ctx, mapped, id)
+	trashEntry, entryErr := r.Deps.TrashStore.Get(ctx, mapped, id)
 	if entryErr != nil {
 		return nil, entryErr
 	}
@@ -249,7 +249,7 @@ func (r *Resolver) restoreFromTrash(
 	}
 	restoreRepoID := trashEntry.RepositoryID
 
-	result, err := r.TrashStore.RestoreFromTrash(ctx, mapped, id, opts)
+	result, err := r.Deps.TrashStore.RestoreFromTrash(ctx, mapped, id, opts)
 	if err != nil {
 		var conflict *trash.ConflictError
 		if errors.As(err, &conflict) {
@@ -300,7 +300,7 @@ func (r *Resolver) permanentlyDelete(ctx context.Context, t TrashableType, id st
 	// Ownership gate. A user may permanentlyDelete their own trash
 	// entries (deletedBy == caller). Admins may purge anyone's.
 	// Neither path reaches this code without authentication above.
-	entry, err := r.TrashStore.Get(ctx, mapped, id)
+	entry, err := r.Deps.TrashStore.Get(ctx, mapped, id)
 	if err != nil {
 		return false, err
 	}
@@ -314,7 +314,7 @@ func (r *Resolver) permanentlyDelete(ctx context.Context, t TrashableType, id st
 		return false, fmt.Errorf("permanentlyDelete: only the user who moved an item to trash or an admin may purge it (trashed by %q, caller %q)", entry.DeletedBy, caller)
 	}
 
-	if err := r.TrashStore.PermanentlyDelete(ctx, mapped, id); err != nil {
+	if err := r.Deps.TrashStore.PermanentlyDelete(ctx, mapped, id); err != nil {
 		return false, err
 	}
 	trash.PermanentDeletesTotal.Add(1)
@@ -346,7 +346,7 @@ func (r *Resolver) emptyTrash(ctx context.Context, repositoryID string, olderTha
 	// naive first implementation; a future refinement pushes the
 	// filter into the store directly for fewer round-trips.
 	filter := trash.ListFilter{RepositoryID: repositoryID, Limit: 10_000}
-	entries, _, err := r.TrashStore.List(ctx, filter)
+	entries, _, err := r.Deps.TrashStore.List(ctx, filter)
 	if err != nil {
 		return 0, err
 	}
@@ -359,7 +359,7 @@ func (r *Resolver) emptyTrash(ctx context.Context, repositoryID string, olderTha
 				continue
 			}
 		}
-		if err := r.TrashStore.PermanentlyDelete(ctx, e.Type, e.ID); err != nil {
+		if err := r.Deps.TrashStore.PermanentlyDelete(ctx, e.Type, e.ID); err != nil {
 			// Best-effort: log and continue.
 			continue
 		}

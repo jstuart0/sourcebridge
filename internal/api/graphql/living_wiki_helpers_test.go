@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 )
 
@@ -254,13 +255,15 @@ func TestEnqueueWikiJob_NilOrchestrator_ReturnsDispatchFailureNotice(t *testing.
 	t.Parallel()
 	// With a nil Orchestrator, buildColdStartRunner returns a stub closure that
 	// immediately marks the job complete. However, the enqueue call itself goes
-	// to r.Orchestrator.Enqueue which is nil — so enqueueWikiJob returns a
+	// to r.Deps.Orchestrator.Enqueue which is nil — so enqueueWikiJob returns a
 	// "Settings saved but job dispatch failed" notice, not a hard error.
 	// Verify that nil Orchestrator doesn't panic and yields a notice result.
 	r := &Resolver{
-		Store:               newStubGraphStore(),
-		LivingWikiRepoStore: livingwiki.NewRepoSettingsMemStore(),
-		// Orchestrator: nil — dispatch-failure notice path
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: livingwiki.NewRepoSettingsMemStore(),
+			// Orchestrator: nil — dispatch-failure notice path
+		},
+		Store: newStubGraphStore(),
 	}
 	settings := livingwiki.RepositoryLivingWikiSettings{
 		TenantID:                  "default",

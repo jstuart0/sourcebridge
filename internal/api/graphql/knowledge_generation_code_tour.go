@@ -54,7 +54,7 @@ func (s codeTourGenerationService) Generate(ctx context.Context) (*KnowledgeArti
 	if input.Theme != nil {
 		theme = *input.Theme
 	}
-	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
+	generationMode := resolvedKnowledgeGenerationMode(r.Deps.ComprehensionStore, repo, input.GenerationMode)
 
 	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
 	repoRoot, repoRootErr := resolveRepoSourcePath(repo)
@@ -77,7 +77,7 @@ func (s codeTourGenerationService) Generate(ctx context.Context) (*KnowledgeArti
 		Depth:        knowledgepkg.Depth(depth),
 		Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
 	}.Normalized()
-	if existing := r.KnowledgeStore.GetArtifactByKeyAndMode(ctx, key, generationMode); existing != nil {
+	if existing := r.Deps.KnowledgeStore.GetArtifactByKeyAndMode(ctx, key, generationMode); existing != nil {
 		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
 			return mapKnowledgeArtifact(existing), nil
 		}
@@ -89,10 +89,10 @@ func (s codeTourGenerationService) Generate(ctx context.Context) (*KnowledgeArti
 		}
 		if existing.Status == knowledgepkg.StatusFailed || existing.Stale ||
 			existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
-			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(ctx, existing.ID)
+			_ = r.Deps.KnowledgeStore.DeleteKnowledgeArtifact(ctx, existing.ID)
 		}
 	}
-	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(ctx, key, snap.SourceRevision, generationMode)
+	artifact, created, err := r.Deps.KnowledgeStore.ClaimArtifactWithMode(ctx, key, snap.SourceRevision, generationMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim knowledge artifact: %w", err)
 	}
@@ -100,7 +100,7 @@ func (s codeTourGenerationService) Generate(ctx context.Context) (*KnowledgeArti
 		return mapKnowledgeArtifact(artifact), nil
 	}
 	artifact.GenerationMode = generationMode
-	syncArtifactExecutionMetadata(r.KnowledgeStore, artifact)
+	syncArtifactExecutionMetadata(r.Deps.KnowledgeStore, artifact)
 
 	params := codeTourRunParams{
 		baseRunParams: baseRunParams{
@@ -142,7 +142,7 @@ func (s codeTourGenerationService) runGenerationPipeline(
 		progressPersistMessage: "LLM completed, persisting stops",
 		readyMessage:           "Code tour ready",
 		rpcFn: func(ctx context.Context, enrichedSnapJSON []byte, rt llm.Runtime, r *Resolver, base baseRunParams, onProgress func(worker.KnowledgeStreamEvent)) (any, *commonv1.LLMUsage, error) {
-			resp, err := r.LLMCaller.GenerateCodeTourWithJob(ctx, base.repo.ID, resolution.OpKnowledge,
+			resp, err := r.Deps.LLMCaller.GenerateCodeTourWithJob(ctx, base.repo.ID, resolution.OpKnowledge,
 				llmJobMetadataWithProgress(rt, base.artifact.ID, "code_tour", onProgress),
 				&knowledgev1.GenerateCodeTourRequest{
 					RepositoryId:   base.repo.ID,
@@ -254,7 +254,7 @@ func (s codeTourGenerationService) RefreshFromExisting(ctx context.Context, exis
 		return nil, fmt.Errorf("enqueue code tour refresh job: %w", err)
 	}
 
-	updated := r.KnowledgeStore.GetKnowledgeArtifact(ctx, existing.ID)
+	updated := r.Deps.KnowledgeStore.GetKnowledgeArtifact(ctx, existing.ID)
 	if updated == nil {
 		return nil, fmt.Errorf("artifact %s not found after refresh", existing.ID)
 	}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 )
 
@@ -28,7 +29,7 @@ func modeFlagsResolver(repoID string, overview, detailed bool) (*mutationResolve
 		LivingWikiDetailedEnabled: detailed,
 		Sinks:                     []livingwiki.RepoWikiSink{{Kind: livingwiki.RepoWikiSinkGitRepo}},
 	})
-	return &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: store}}, store
+	return &mutationResolver{Resolver: &Resolver{Deps: &appdeps.AppDeps{LivingWikiRepoStore: store}}}, store
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -257,7 +258,7 @@ func modeFlagsResolverWithSinks(repoID string, overview, detailed bool) (*mutati
 		LivingWikiDetailedEnabled: detailed,
 		Sinks:                     []livingwiki.RepoWikiSink{{Kind: livingwiki.RepoWikiSinkGitRepo}},
 	})
-	return &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: store}}, store
+	return &mutationResolver{Resolver: &Resolver{Deps: &appdeps.AppDeps{LivingWikiRepoStore: store}}}, store
 }
 
 // TestEnableLivingWikiForRepo_OverviewOverride_DoesNotPersistFlags is the
@@ -371,7 +372,7 @@ func TestEnableLivingWikiForRepo_ReEnable_ClearsDisabledAt(t *testing.T) {
 		DisabledAt: &pastTime,
 		Sinks:      []livingwiki.RepoWikiSink{{Kind: livingwiki.RepoWikiSinkGitRepo}},
 	})
-	r := &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: store}}
+	r := &mutationResolver{Resolver: &Resolver{Deps: &appdeps.AppDeps{LivingWikiRepoStore: store}}}
 
 	input := EnableLivingWikiForRepoInput{
 		RepositoryID: "repo-redisable",
@@ -403,7 +404,7 @@ func TestEnableLivingWikiForRepo_ReEnable_ClearsDisabledAt(t *testing.T) {
 // Medium finding.)
 func TestEnableLivingWikiForRepo_NewRepo_BuildsDefaults(t *testing.T) {
 	store := livingwiki.NewRepoSettingsMemStore()
-	r := &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: store}}
+	r := &mutationResolver{Resolver: &Resolver{Deps: &appdeps.AppDeps{LivingWikiRepoStore: store}}}
 
 	input := EnableLivingWikiForRepoInput{
 		RepositoryID: "repo-new",

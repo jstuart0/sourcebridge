@@ -7,6 +7,7 @@ package graphql
 
 import (
 	"context"
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"strings"
 	"testing"
 
@@ -18,10 +19,8 @@ import (
 // tests. It wires a real in-memory graph store so symbol / requirement lookups
 // return zero-value misses (nil) without panicking.
 func newDiscussResolver() *Resolver {
-	return &Resolver{
-		Store: graphstore.NewStore(),
-		// KnowledgeStore: nil — GetKnowledgeArtifact path is skipped when nil.
-	}
+	// KnowledgeStore: nil — GetKnowledgeArtifact path is skipped when nil.
+	return &Resolver{Deps: &appdeps.AppDeps{}, Store: graphstore.NewStore()}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -147,7 +146,7 @@ func TestAssembleDiscussionContext_ArtifactID_NilKnowledgeStore(t *testing.T) {
 	// When KnowledgeStore is nil, the artifact branch is skipped silently.
 	// The input has no other context, so the function returns the "provide code" error.
 	r := newDiscussResolver()
-	r.KnowledgeStore = nil
+	r.Deps.KnowledgeStore = nil
 	artifactID := "art-abc"
 	input := DiscussCodeInput{
 		RepositoryID: "repo-6",

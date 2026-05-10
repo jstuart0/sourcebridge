@@ -97,12 +97,12 @@ func TestArchitectureDiagramMetadataIncludesExecutionViewAndStrategy(t *testing.
 		},
 	}
 	resp := &knowledgev1.GenerateArchitectureDiagramResponse{
-		MermaidSource:     "flowchart LR\napi-->worker",
-		RawMermaidSource:  "flowchart LR\napi-->worker",
-		ValidationStatus:  "repaired",
-		RepairSummary:     "fell back to deterministic system view: invalid Mermaid",
-		DiagramSummary:    "SourceBridge routes user requests through the interfaces and API, hands knowledge generation to the orchestration layer, executes jobs in background workers, grounds analysis in the code graph and repository understanding, persists artifacts and job state, and calls the configured LLM provider when synthesis is needed.",
-		InferredEdges:     []string{"api -> worker"},
+		MermaidSource:    "flowchart LR\napi-->worker",
+		RawMermaidSource: "flowchart LR\napi-->worker",
+		ValidationStatus: "repaired",
+		RepairSummary:    "fell back to deterministic system view: invalid Mermaid",
+		DiagramSummary:   "SourceBridge routes user requests through the interfaces and API, hands knowledge generation to the orchestration layer, executes jobs in background workers, grounds analysis in the code graph and repository understanding, persists artifacts and job state, and calls the configured LLM provider when synthesis is needed.",
+		InferredEdges:    []string{"api -> worker"},
 	}
 
 	raw := architectureDiagramMetadataJSON(resp, &bundle)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sourcebridge/sourcebridge/internal/api/graphql"
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/version"
 )
@@ -41,9 +42,11 @@ func TestGraphQLVersionParityWithREST(t *testing.T) {
 	// Construct the GraphQL resolver with the same Config and lookup
 	// that REST uses. WorkerVersion closure mirrors router.go's wiring.
 	r := &graphql.Resolver{
-		Config: cfg,
-		WorkerVersion: func(ctx context.Context) string {
-			return lookup.get(ctx)
+		Deps: &appdeps.AppDeps{
+			Config: cfg,
+			WorkerVersion: func(ctx context.Context) string {
+				return lookup.get(ctx)
+			},
 		},
 	}
 
@@ -93,12 +96,14 @@ func TestGraphQLVersionParityWithREST_NilWorker(t *testing.T) {
 	cfg := &config.Config{Edition: "enterprise"}
 
 	r := &graphql.Resolver{
-		Config: cfg,
-		WorkerVersion: func(ctx context.Context) string {
-			// Mirror the rest.NewServer wiring that nil-guards the
-			// lookup; in this test no lookup is wired, so the
-			// closure short-circuits.
-			return ""
+		Deps: &appdeps.AppDeps{
+			Config: cfg,
+			WorkerVersion: func(ctx context.Context) string {
+				// Mirror the rest.NewServer wiring that nil-guards the
+				// lookup; in this test no lookup is wired, so the
+				// closure short-circuits.
+				return ""
+			},
 		},
 	}
 
@@ -140,8 +145,9 @@ func TestGraphQLVersionParityWithREST_NilWorker(t *testing.T) {
 // handler when cfg.Edition is empty.
 func TestGraphQLVersionParityWithREST_NilConfig(t *testing.T) {
 	r := &graphql.Resolver{
-		// Config: nil — tests sometimes construct Resolver this way.
-		WorkerVersion: func(ctx context.Context) string { return "" },
+		Deps: &appdeps.AppDeps{
+			WorkerVersion: func(ctx context.Context) string { return "" },
+		},
 	}
 
 	gqlInfo, err := r.Query().Version(context.Background())

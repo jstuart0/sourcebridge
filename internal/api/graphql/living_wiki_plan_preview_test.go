@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/clustering"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 	"github.com/vektah/gqlparser/v2/gqlerror"
@@ -46,9 +47,11 @@ func previewResolver(
 	}
 
 	r := &Resolver{
-		LivingWikiRepoStore: repoStore,
-		LivingWikiStore:     globalStore,
-		ClusterStore:        &stubClusterStore{clusters: nil},
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: repoStore,
+			LivingWikiStore:     globalStore,
+			ClusterStore:        &stubClusterStore{clusters: nil},
+		},
 	}
 	return &queryResolver{r}
 }
@@ -56,10 +59,10 @@ func previewResolver(
 // defaultRepoSettingsForPreview returns baseline enabled settings with mode=Detailed.
 func defaultRepoSettingsForPreview() *livingwiki.RepositoryLivingWikiSettings {
 	return &livingwiki.RepositoryLivingWikiSettings{
-		TenantID:                 "default",
-		RepoID:                   testRepoID,
-		Enabled:                  true,
-		MaxPagesPerJob:           500,
+		TenantID:                  "default",
+		RepoID:                    testRepoID,
+		Enabled:                   true,
+		MaxPagesPerJob:            500,
 		LivingWikiDetailedEnabled: true,
 	}
 }
@@ -87,10 +90,12 @@ func resolverWithClusters(
 	}
 
 	r := &Resolver{
-		LivingWikiRepoStore: repoStore,
-		LivingWikiStore:     globalStore,
-		ClusterStore:        clusterStore,
-		Store:               newStubGraphStore(),
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: repoStore,
+			LivingWikiStore:     globalStore,
+			ClusterStore:        clusterStore,
+		},
+		Store: newStubGraphStore(),
 	}
 	return &queryResolver{r}
 }
@@ -129,10 +134,10 @@ func TestPreviewLivingWikiPlan_DetailedWithClusters(t *testing.T) {
 		},
 	}
 	settings := &livingwiki.RepositoryLivingWikiSettings{
-		TenantID:                 defaultTenantID,
-		RepoID:                   repoID,
-		Enabled:                  true,
-		MaxPagesPerJob:           500,
+		TenantID:                  defaultTenantID,
+		RepoID:                    repoID,
+		Enabled:                   true,
+		MaxPagesPerJob:            500,
 		LivingWikiDetailedEnabled: true,
 	}
 	r := resolverWithClusters(t, cs, settings)
@@ -200,10 +205,10 @@ func TestPreviewLivingWikiPlan_DetailedNoClusters_ClassifiesAsTopLevelDir(t *tes
 	// Empty cluster store → top-level-dir fallback path.
 	cs := &stubClusterStore{clusters: nil}
 	settings := &livingwiki.RepositoryLivingWikiSettings{
-		TenantID:                 defaultTenantID,
-		RepoID:                   testRepoID,
-		Enabled:                  true,
-		MaxPagesPerJob:           500,
+		TenantID:                  defaultTenantID,
+		RepoID:                    testRepoID,
+		Enabled:                   true,
+		MaxPagesPerJob:            500,
 		LivingWikiDetailedEnabled: true,
 	}
 	r := resolverWithClusters(t, cs, settings)
@@ -252,10 +257,10 @@ func TestPreviewLivingWikiPlan_OverviewMode(t *testing.T) {
 		},
 	}
 	settings := &livingwiki.RepositoryLivingWikiSettings{
-		TenantID:                 defaultTenantID,
-		RepoID:                   repoID,
-		Enabled:                  true,
-		MaxPagesPerJob:           500,
+		TenantID:                  defaultTenantID,
+		RepoID:                    repoID,
+		Enabled:                   true,
+		MaxPagesPerJob:            500,
 		LivingWikiOverviewEnabled: true,
 	}
 	r := resolverWithClusters(t, cs, settings)
@@ -365,7 +370,7 @@ func TestPreviewLivingWikiPlan_AllEnabled_ReturnsTypedError(t *testing.T) {
 func TestPreviewLivingWikiPlan_KillSwitchOrDisabled_ReturnsTypedError(t *testing.T) {
 	t.Run("KillSwitch", func(t *testing.T) {
 		r := previewResolver(t, defaultRepoSettingsForPreview(), true)
-		r.Flags.LivingWikiKillSwitch = true // inject via field — no env var needed
+		r.Deps.Flags.LivingWikiKillSwitch = true // inject via field — no env var needed
 		plan, err := r.PreviewLivingWikiPlan(context.Background(), testRepoID, nil, nil)
 		if err != nil {
 			t.Fatalf("expected nil error on kill-switch path, got: %v", err)
@@ -415,10 +420,10 @@ func TestPreviewLivingWikiPlan_CapReducesPageCount(t *testing.T) {
 		},
 	}
 	settings := &livingwiki.RepositoryLivingWikiSettings{
-		TenantID:                 defaultTenantID,
-		RepoID:                   repoID,
-		Enabled:                  true,
-		MaxPagesPerJob:           500, // loose repo cap — override should win
+		TenantID:                  defaultTenantID,
+		RepoID:                    repoID,
+		Enabled:                   true,
+		MaxPagesPerJob:            500, // loose repo cap — override should win
 		LivingWikiDetailedEnabled: true,
 	}
 	r := resolverWithClusters(t, cs, settings)
@@ -470,10 +475,10 @@ func TestPreviewLivingWikiPlan_FitsWithinCap(t *testing.T) {
 		},
 	}
 	settings := &livingwiki.RepositoryLivingWikiSettings{
-		TenantID:                 defaultTenantID,
-		RepoID:                   repoID,
-		Enabled:                  true,
-		MaxPagesPerJob:           500,
+		TenantID:                  defaultTenantID,
+		RepoID:                    repoID,
+		Enabled:                   true,
+		MaxPagesPerJob:            500,
 		LivingWikiDetailedEnabled: true,
 	}
 	r := resolverWithClusters(t, cs, settings)
@@ -508,10 +513,10 @@ func TestPreviewLivingWikiPlan_SignatureStableAcrossCalls(t *testing.T) {
 		},
 	}
 	settings := &livingwiki.RepositoryLivingWikiSettings{
-		TenantID:                 defaultTenantID,
-		RepoID:                   repoID,
-		Enabled:                  true,
-		MaxPagesPerJob:           500,
+		TenantID:                  defaultTenantID,
+		RepoID:                    repoID,
+		Enabled:                   true,
+		MaxPagesPerJob:            500,
 		LivingWikiDetailedEnabled: true,
 	}
 	r := resolverWithClusters(t, cs, settings)
@@ -545,10 +550,10 @@ func TestPreviewLivingWikiPlan_SignatureChangesOnInputChange(t *testing.T) {
 		},
 	}
 	settings := &livingwiki.RepositoryLivingWikiSettings{
-		TenantID:                 defaultTenantID,
-		RepoID:                   repoID,
-		Enabled:                  true,
-		MaxPagesPerJob:           500,
+		TenantID:                  defaultTenantID,
+		RepoID:                    repoID,
+		Enabled:                   true,
+		MaxPagesPerJob:            500,
 		LivingWikiDetailedEnabled: true,
 	}
 	r := resolverWithClusters(t, cs, settings)
@@ -622,10 +627,10 @@ func TestPreviewLivingWikiPlan_RepoWidePagesAlwaysPresent(t *testing.T) {
 		},
 	}
 	settings := &livingwiki.RepositoryLivingWikiSettings{
-		TenantID:                 defaultTenantID,
-		RepoID:                   repoID,
-		Enabled:                  true,
-		MaxPagesPerJob:           2, // tight repo-level cap
+		TenantID:                  defaultTenantID,
+		RepoID:                    repoID,
+		Enabled:                   true,
+		MaxPagesPerJob:            2, // tight repo-level cap
 		LivingWikiDetailedEnabled: true,
 	}
 	r := resolverWithClusters(t, cs, settings)

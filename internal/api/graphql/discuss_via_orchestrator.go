@@ -11,7 +11,7 @@ import (
 
 // dispatchDiscussThroughOrchestrator routes a DiscussCodeInput through
 // the QA orchestrator and flattens the resulting AskResult to the
-// legacy DiscussionResult wire shape. Used when r.QA is non-nil
+// legacy DiscussionResult wire shape. Used when r.Deps.QA is non-nil
 // (which happens when QAConfig.ServerSideEnabled is true — see
 // qaResolverOrchestrator in internal/api/rest/router.go).
 //
@@ -57,7 +57,7 @@ func (r *mutationResolver) dispatchDiscussThroughOrchestrator(ctx context.Contex
 		askInput.RequirementID = *input.RequirementID
 	}
 
-	res, err := r.QA.Ask(ctx, askInput)
+	res, err := r.Deps.QA.Ask(ctx, askInput)
 	if err != nil {
 		return nil, err
 	}

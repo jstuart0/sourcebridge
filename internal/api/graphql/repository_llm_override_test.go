@@ -12,6 +12,7 @@ import (
 
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 )
 
@@ -41,7 +42,7 @@ func (s *encryptionFailingStore) SetRepoSettings(ctx context.Context, settings l
 // returned masked view matches.
 func TestSetRepositoryLLMOverride_FullCreate(t *testing.T) {
 	mem := livingwiki.NewRepoSettingsMemStore()
-	r := &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: mem}}
+	r := &mutationResolver{Resolver: &Resolver{Deps: &appdeps.AppDeps{LivingWikiRepoStore: mem}}}
 
 	out, err := r.SetRepositoryLLMOverride(context.Background(), "repo-A", RepositoryLLMOverrideInput{
 		Provider:                 llmStrPtr("ollama"),
@@ -123,7 +124,7 @@ func TestSetRepositoryLLMOverride_PartialPatch_PreservesOtherFields(t *testing.T
 		t.Fatalf("seed: %v", err)
 	}
 
-	r := &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: mem}}
+	r := &mutationResolver{Resolver: &Resolver{Deps: &appdeps.AppDeps{LivingWikiRepoStore: mem}}}
 	_, err := r.SetRepositoryLLMOverride(context.Background(), "repo-A", RepositoryLLMOverrideInput{
 		Provider: llmStrPtr("anthropic"), // only this field
 	})
@@ -170,7 +171,7 @@ func TestSetRepositoryLLMOverride_EmptyStringClearsField(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	r := &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: mem}}
+	r := &mutationResolver{Resolver: &Resolver{Deps: &appdeps.AppDeps{LivingWikiRepoStore: mem}}}
 	_, err := r.SetRepositoryLLMOverride(context.Background(), "repo-A", RepositoryLLMOverrideInput{
 		SummaryModel: llmStrPtr(""), // explicit clear
 	})
@@ -208,7 +209,7 @@ func TestSetRepositoryLLMOverride_ClearAPIKeyFlag(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	r := &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: mem}}
+	r := &mutationResolver{Resolver: &Resolver{Deps: &appdeps.AppDeps{LivingWikiRepoStore: mem}}}
 	out, err := r.SetRepositoryLLMOverride(context.Background(), "repo-A", RepositoryLLMOverrideInput{
 		ClearAPIKey: llmBoolPtr(true),
 	})
@@ -250,7 +251,7 @@ func TestSetRepositoryLLMOverride_OmittedAPIKeyLeavesAlone(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	r := &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: mem}}
+	r := &mutationResolver{Resolver: &Resolver{Deps: &appdeps.AppDeps{LivingWikiRepoStore: mem}}}
 	_, err := r.SetRepositoryLLMOverride(context.Background(), "repo-A", RepositoryLLMOverrideInput{
 		Provider: llmStrPtr("anthropic"),
 		// APIKey omitted → leave alone.
@@ -271,7 +272,7 @@ func TestSetRepositoryLLMOverride_OmittedAPIKeyLeavesAlone(t *testing.T) {
 // "ENCRYPTION_KEY_REQUIRED" so the UI can render a precise message.
 func TestSetRepositoryLLMOverride_EncryptionKeyRequiredErrorMapping(t *testing.T) {
 	store := &encryptionFailingStore{RepoSettingsMemStore: livingwiki.NewRepoSettingsMemStore()}
-	r := &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: store}}
+	r := &mutationResolver{Resolver: &Resolver{Deps: &appdeps.AppDeps{LivingWikiRepoStore: store}}}
 
 	_, err := r.SetRepositoryLLMOverride(context.Background(), "repo-A", RepositoryLLMOverrideInput{
 		APIKey: llmStrPtr("plaintext-key-1234567890"),
@@ -312,7 +313,7 @@ func TestClearRepositoryLLMOverride_DropsRow(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	r := &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: mem}}
+	r := &mutationResolver{Resolver: &Resolver{Deps: &appdeps.AppDeps{LivingWikiRepoStore: mem}}}
 	out, err := r.ClearRepositoryLLMOverride(context.Background(), "repo-A")
 	if err != nil {
 		t.Fatalf("ClearRepositoryLLMOverride: %v", err)
@@ -351,7 +352,7 @@ func TestSetRepositoryLLMOverride_ResultingEmptyOverrideDropsRow(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	r := &mutationResolver{Resolver: &Resolver{LivingWikiRepoStore: mem}}
+	r := &mutationResolver{Resolver: &Resolver{Deps: &appdeps.AppDeps{LivingWikiRepoStore: mem}}}
 	_, err := r.SetRepositoryLLMOverride(context.Background(), "repo-A", RepositoryLLMOverrideInput{
 		Provider:    llmStrPtr(""),
 		ClearAPIKey: llmBoolPtr(true),
@@ -402,8 +403,10 @@ func TestSetRepositoryLLMOverride_ProfileMode_HappyPath(t *testing.T) {
 		"ca_llm_profile:default-migrated": "Default",
 	}}
 	r := &mutationResolver{Resolver: &Resolver{
-		LivingWikiRepoStore: mem,
-		LLMProfileLookup:    pl,
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: mem,
+			LLMProfileLookup:    pl,
+		},
 	}}
 
 	out, err := r.SetRepositoryLLMOverride(context.Background(), "repo-A", RepositoryLLMOverrideInput{
@@ -458,8 +461,10 @@ func TestSetRepositoryLLMOverride_ProfileMode_DeletedProfileBlocksSave(t *testin
 
 	pl := &fakeProfileLookup{present: map[string]string{}} // empty
 	r := &mutationResolver{Resolver: &Resolver{
-		LivingWikiRepoStore: mem,
-		LLMProfileLookup:    pl,
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: mem,
+			LLMProfileLookup:    pl,
+		},
 	}}
 
 	_, err := r.SetRepositoryLLMOverride(context.Background(), "repo-A", RepositoryLLMOverrideInput{
@@ -501,16 +506,18 @@ func TestSetRepositoryLLMOverride_ProfileMode_AtomicallyClearsInline(t *testing.
 		"ca_llm_profile:foo": "Foo",
 	}}
 	r := &mutationResolver{Resolver: &Resolver{
-		LivingWikiRepoStore: mem,
-		LLMProfileLookup:    pl,
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: mem,
+			LLMProfileLookup:    pl,
+		},
 	}}
 
 	_, err := r.SetRepositoryLLMOverride(context.Background(), "repo-A", RepositoryLLMOverrideInput{
 		ProfileID:    llmStrPtr("ca_llm_profile:foo"),
-		Provider:     llmStrPtr("ollama"),         // ignored
-		APIKey:       llmStrPtr("inline-key"),     // ignored
-		SummaryModel: llmStrPtr("inline-model"),   // ignored
-		AdvancedMode: llmBoolPtr(true),            // ignored
+		Provider:     llmStrPtr("ollama"),       // ignored
+		APIKey:       llmStrPtr("inline-key"),   // ignored
+		SummaryModel: llmStrPtr("inline-model"), // ignored
+		AdvancedMode: llmBoolPtr(true),          // ignored
 	})
 	if err != nil {
 		t.Fatalf("SetRepositoryLLMOverride: %v", err)
@@ -554,8 +561,10 @@ func TestSetRepositoryLLMOverride_ClearProfileFlag(t *testing.T) {
 	}
 
 	r := &mutationResolver{Resolver: &Resolver{
-		LivingWikiRepoStore: mem,
-		LLMProfileLookup:    &fakeProfileLookup{},
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: mem,
+			LLMProfileLookup:    &fakeProfileLookup{},
+		},
 	}}
 
 	out, err := r.SetRepositoryLLMOverride(context.Background(), "repo-A", RepositoryLLMOverrideInput{
@@ -606,8 +615,10 @@ func TestSetRepositoryLLMOverride_ProfileIdNilPreservesSaved(t *testing.T) {
 	}
 
 	r := &mutationResolver{Resolver: &Resolver{
-		LivingWikiRepoStore: mem,
-		LLMProfileLookup:    &fakeProfileLookup{},
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: mem,
+			LLMProfileLookup:    &fakeProfileLookup{},
+		},
 	}}
 
 	// Send a patch with profileId omitted entirely (nil pointer).
@@ -643,8 +654,10 @@ func TestSetRepositoryLLMOverride_ProfileIdEmptyStringIsNoop(t *testing.T) {
 	}
 
 	r := &mutationResolver{Resolver: &Resolver{
-		LivingWikiRepoStore: mem,
-		LLMProfileLookup:    &fakeProfileLookup{},
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: mem,
+			LLMProfileLookup:    &fakeProfileLookup{},
+		},
 	}}
 
 	_, err := r.SetRepositoryLLMOverride(context.Background(), "repo-A", RepositoryLLMOverrideInput{
@@ -682,8 +695,10 @@ func TestLlmOverride_FieldResolver_PopulatesProfileName(t *testing.T) {
 		"ca_llm_profile:default-migrated": "Default",
 	}}
 	r := &repositoryLivingWikiSettingsResolver{Resolver: &Resolver{
-		LivingWikiRepoStore: mem,
-		LLMProfileLookup:    pl,
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: mem,
+			LLMProfileLookup:    pl,
+		},
 	}}
 
 	out, err := r.LlmOverride(context.Background(), &RepositoryLivingWikiSettings{RepoID: "repo-A"})
@@ -722,8 +737,10 @@ func TestLlmOverride_FieldResolver_DeletedProfileReturnsCodeAndData(t *testing.T
 
 	pl := &fakeProfileLookup{present: map[string]string{}} // missing
 	r := &repositoryLivingWikiSettingsResolver{Resolver: &Resolver{
-		LivingWikiRepoStore: mem,
-		LLMProfileLookup:    pl,
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: mem,
+			LLMProfileLookup:    pl,
+		},
 	}}
 
 	out, err := r.LlmOverride(context.Background(), &RepositoryLivingWikiSettings{RepoID: "repo-A"})
@@ -770,8 +787,10 @@ func TestLlmOverride_FieldResolver_InlineModeNoLookup(t *testing.T) {
 
 	pl := &fakeProfileLookup{}
 	r := &repositoryLivingWikiSettingsResolver{Resolver: &Resolver{
-		LivingWikiRepoStore: mem,
-		LLMProfileLookup:    pl,
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: mem,
+			LLMProfileLookup:    pl,
+		},
 	}}
 
 	out, err := r.LlmOverride(context.Background(), &RepositoryLivingWikiSettings{RepoID: "repo-A"})
@@ -798,8 +817,10 @@ func TestLlmOverride_FieldResolver_InlineModeNoLookup(t *testing.T) {
 func TestSetRepositoryLLMOverride_ProfileMode_NilLookupDegradesGracefully(t *testing.T) {
 	mem := livingwiki.NewRepoSettingsMemStore()
 	r := &mutationResolver{Resolver: &Resolver{
-		LivingWikiRepoStore: mem,
-		LLMProfileLookup:    nil, // not wired
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: mem,
+			LLMProfileLookup:    nil, // not wired
+		},
 	}}
 
 	out, err := r.SetRepositoryLLMOverride(context.Background(), "repo-A", RepositoryLLMOverrideInput{

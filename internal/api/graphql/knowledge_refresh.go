@@ -117,7 +117,7 @@ func (r *mutationResolver) enqueueStaleArtifactRefresh(
 	if mode == DeltaRegenModeOff {
 		return
 	}
-	if r.KnowledgeStore == nil {
+	if r.Deps.KnowledgeStore == nil {
 		slog.Warn("delta_regen_skipped: knowledge store unavailable", "repo_id", repoID, "mode", string(mode))
 		return
 	}
@@ -141,7 +141,7 @@ func (r *mutationResolver) enqueueStaleArtifactRefresh(
 	// Load + filter candidates.
 	candidates := make([]*knowledgepkg.Artifact, 0, len(artifactIDs))
 	for _, id := range artifactIDs {
-		a := r.KnowledgeStore.GetKnowledgeArtifact(context.Background(), id)
+		a := r.Deps.KnowledgeStore.GetKnowledgeArtifact(context.Background(), id)
 		if a == nil {
 			continue
 		}
@@ -166,7 +166,7 @@ func (r *mutationResolver) enqueueStaleArtifactRefresh(
 	// mismatch), defer understanding_first artifacts for this reindex so we
 	// don't regenerate them on top of stale context. classic-mode artifacts
 	// are unaffected.
-	deferred, ready := splitForUnderstandingGate(r.KnowledgeStore, repoID, candidates)
+	deferred, ready := splitForUnderstandingGate(r.Deps.KnowledgeStore, repoID, candidates)
 	if len(deferred) > 0 {
 		ids := make([]string, 0, len(deferred))
 		for _, a := range deferred {

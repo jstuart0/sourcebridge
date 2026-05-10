@@ -259,4 +259,3 @@ func remoteAddrFromContext(ctx context.Context) string {
 func WithRemoteAddr(ctx context.Context, addr string) context.Context {
 	return context.WithValue(ctx, remoteAddrContextKey{}, addr)
 }
-

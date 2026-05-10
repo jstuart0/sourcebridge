@@ -1197,13 +1197,13 @@ func (r *Resolver) ensureFreshRepositoryUnderstanding(
 	sourceRevision knowledgepkg.SourceRevision,
 	snapshotJSON []byte,
 ) (*knowledgepkg.RepositoryUnderstanding, bool, error) {
-	if r == nil || r.KnowledgeStore == nil || r.Worker == nil || repo == nil || artifact == nil {
+	if r == nil || r.Deps.KnowledgeStore == nil || r.Deps.Worker == nil || repo == nil || artifact == nil {
 		return nil, false, nil
 	}
 	repoScope := knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository}
 	// Accept any existing understanding (even if slightly stale) to avoid
 	// blocking the worker with a concurrent cliff notes generation request.
-	if understanding, fresh := attachFreshUnderstanding(r.KnowledgeStore, artifact, repoScope, sourceRevision); understanding != nil {
+	if understanding, fresh := attachFreshUnderstanding(r.Deps.KnowledgeStore, artifact, repoScope, sourceRevision); understanding != nil {
 		if !fresh {
 			slog.Info("using_stale_understanding",
 				"artifact_id", artifact.ID,
@@ -1215,7 +1215,7 @@ func (r *Resolver) ensureFreshRepositoryUnderstanding(
 	// If cliff notes are already generating for this repo, skip the understanding
 	// build rather than blocking the worker with a concurrent generation request.
 	// The understanding will be available once the in-flight cliff notes complete.
-	for _, existingCN := range r.KnowledgeStore.GetKnowledgeArtifacts(ctx, repo.ID) {
+	for _, existingCN := range r.Deps.KnowledgeStore.GetKnowledgeArtifacts(ctx, repo.ID) {
 		if existingCN.Type != knowledgepkg.ArtifactCliffNotes || existingCN.Scope.ScopeType != knowledgepkg.ScopeRepository {
 			continue
 		}
@@ -1231,15 +1231,15 @@ func (r *Resolver) ensureFreshRepositoryUnderstanding(
 		}
 		break
 	}
-	if _, err := seedRepositoryUnderstanding(r.KnowledgeStore, artifact, repoScope, sourceRevision, knowledgepkg.UnderstandingBuildingTree); err != nil {
+	if _, err := seedRepositoryUnderstanding(r.Deps.KnowledgeStore, artifact, repoScope, sourceRevision, knowledgepkg.UnderstandingBuildingTree); err != nil {
 		slog.Warn("failed to seed repository understanding", "artifact_id", artifact.ID, "error", err)
 	}
 	if rt != nil {
 		rt.ReportProgress(0.12, "understanding", "Building repository understanding", 0)
 	}
-	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(ctx, artifact.ID, 0.12, "understanding", "Building repository understanding")
+	_ = r.Deps.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(ctx, artifact.ID, 0.12, "understanding", "Building repository understanding")
 	streamDriver := r.runStreamProgressDriver(ctx, rt, artifact.ID, rpcBucketHierarchical)
-	resp, err := r.LLMCaller.GenerateCliffNotesWithJob(
+	resp, err := r.Deps.LLMCaller.GenerateCliffNotesWithJob(
 		ctx,
 		repo.ID,
 		resolution.OpKnowledge,
@@ -1257,11 +1257,11 @@ func (r *Resolver) ensureFreshRepositoryUnderstanding(
 	)
 	streamDriver.Close()
 	if err != nil {
-		markRepositoryUnderstandingFailed(r.KnowledgeStore, artifact, repoScope, sourceRevision, err)
+		markRepositoryUnderstandingFailed(r.Deps.KnowledgeStore, artifact, repoScope, sourceRevision, err)
 		return nil, false, err
 	}
 	understanding, err := updateUnderstandingForCliffNotes(
-		r.KnowledgeStore,
+		r.Deps.KnowledgeStore,
 		artifact,
 		repoScope,
 		sourceRevision,
@@ -1797,7 +1797,7 @@ func (r *Resolver) enqueueCliffNotesDeepening(
 	snapshotJSON []byte,
 	selectedTitles []string,
 ) error {
-	if r == nil || r.Orchestrator == nil || r.Worker == nil || r.KnowledgeStore == nil {
+	if r == nil || r.Deps.Orchestrator == nil || r.Deps.Worker == nil || r.Deps.KnowledgeStore == nil {
 		return nil
 	}
 	if repo == nil || artifact == nil || len(selectedTitles) == 0 {
@@ -1818,7 +1818,7 @@ func (r *Resolver) enqueueCliffNotesDeepening(
 	slog.Info("cliff_notes_deepening_enqueued",
 		"artifact_id", artifact.ID,
 		"selected_titles", selectedTitles,
-		"total_refinement_units", len(r.KnowledgeStore.GetRefinementUnits(context.Background(), artifact.ID)),
+		"total_refinement_units", len(r.Deps.KnowledgeStore.GetRefinementUnits(context.Background(), artifact.ID)),
 	)
 	return nil
 }
@@ -1831,14 +1831,14 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 	snapshotJSON []byte,
 	selectedTitle string,
 ) error {
-	currentSections := r.KnowledgeStore.GetKnowledgeSections(context.Background(), artifact.ID)
+	currentSections := r.Deps.KnowledgeStore.GetKnowledgeSections(context.Background(), artifact.ID)
 	selectedTitles := []string{selectedTitle}
-	markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, currentSections, selectedTitles, knowledgepkg.RefinementQueued, "")
+	markCliffNotesDeepRefinementStatus(r.Deps.KnowledgeStore, artifact, currentSections, selectedTitles, knowledgepkg.RefinementQueued, "")
 	slog.Info("cliff_notes_deep_unit_marked_queued",
 		"artifact_id", artifact.ID,
 		"selected_title", selectedTitle,
 		"section_count", len(currentSections),
-		"total_refinement_units", len(r.KnowledgeStore.GetRefinementUnits(context.Background(), artifact.ID)),
+		"total_refinement_units", len(r.Deps.KnowledgeStore.GetRefinementUnits(context.Background(), artifact.ID)),
 	)
 	req := &llm.EnqueueRequest{
 		Subsystem:  llm.SubsystemKnowledge,
@@ -1856,10 +1856,10 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 		MaxAttempts:    2,
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
 			rt.ReportProgress(0.05, "deepening", "Deepening critical cliff note sections", 0)
-			markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID), selectedTitles, knowledgepkg.RefinementRunning, "")
+			markCliffNotesDeepRefinementStatus(r.Deps.KnowledgeStore, artifact, r.Deps.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID), selectedTitles, knowledgepkg.RefinementRunning, "")
 			bgCtx := withCliffNotesRenderMetadata(runCtx, true, selectedTitles, string(knowledgepkg.DepthMedium), "product_core")
 			streamDriver := r.runStreamProgressDriver(bgCtx, rt, artifact.ID, rpcBucketForArtifact(artifact))
-			resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge,
+			resp, err := r.Deps.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge,
 				llmJobMetadataWithProgress(rt, artifact.ID, "cliff_notes_deepen", streamDriver.OnProgress()),
 				&knowledgev1.GenerateCliffNotesRequest{
 					RepositoryId:   repo.ID,
@@ -1874,7 +1874,7 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 				})
 			streamDriver.Close()
 			if err != nil {
-				markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID), selectedTitles, knowledgepkg.RefinementFailed, err.Error())
+				markCliffNotesDeepRefinementStatus(r.Deps.KnowledgeStore, artifact, r.Deps.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID), selectedTitles, knowledgepkg.RefinementFailed, err.Error())
 				return err
 			}
 			incoming := make([]knowledgepkg.Section, 0, len(resp.Sections))
@@ -1895,24 +1895,24 @@ func (r *Resolver) enqueueSingleCliffNotesDeepening(
 					RefinementStatus: refinementStatus,
 				})
 			}
-			existingSections := r.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID)
+			existingSections := r.Deps.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID)
 			acceptedIncoming := selectAcceptedDeepenedSections(existingSections, incoming, selectedTitles)
 			selected := make(map[string]struct{}, len(selectedTitles))
 			for _, title := range selectedTitles {
 				selected[title] = struct{}{}
 			}
 			merged := knowledgepkg.MergeSectionsByTitle(existingSections, acceptedIncoming, selected)
-			if err := r.KnowledgeStore.SupersedeArtifact(runCtx, artifact.ID, merged); err != nil {
-				markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, r.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID), selectedTitles, knowledgepkg.RefinementFailed, err.Error())
+			if err := r.Deps.KnowledgeStore.SupersedeArtifact(runCtx, artifact.ID, merged); err != nil {
+				markCliffNotesDeepRefinementStatus(r.Deps.KnowledgeStore, artifact, r.Deps.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID), selectedTitles, knowledgepkg.RefinementFailed, err.Error())
 				return err
 			}
 			outcome, outcomeError := cliffNotesDeepeningOutcome(merged, selectedTitles)
-			markCliffNotesDeepRefinementStatus(r.KnowledgeStore, artifact, merged, selectedTitles, outcome, outcomeError)
+			markCliffNotesDeepRefinementStatus(r.Deps.KnowledgeStore, artifact, merged, selectedTitles, outcome, outcomeError)
 			rt.ReportProgress(1.0, "ready", "Section deepening complete", 0)
 			return nil
 		},
 	}
-	_, err := r.Orchestrator.Enqueue(req)
+	_, err := r.Deps.Orchestrator.Enqueue(req)
 	return err
 }
 

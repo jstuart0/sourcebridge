@@ -49,7 +49,7 @@ func (r *queryResolver) PreviewLivingWikiPlan(
 	//
 	// Check before any heavy work. Returns a notice-bearing plan (not an error)
 	// so the UI can render the degraded banner rather than a generic error toast.
-	killSwitch := r.Flags.LivingWikiKillSwitch
+	killSwitch := r.Deps.Flags.LivingWikiKillSwitch
 	globalEnabled := r.isLivingWikiGloballyEnabled()
 
 	if killSwitch || !globalEnabled {
@@ -117,8 +117,8 @@ func (r *queryResolver) PreviewLivingWikiPlan(
 	default:
 		// nil → derive from effective settings. Load existing repo settings; if
 		// none exist yet, fall back to lw_detailed (the established default).
-		if r.LivingWikiRepoStore != nil {
-			existing, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+		if r.Deps.LivingWikiRepoStore != nil {
+			existing, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
 			if err != nil {
 				return nil, fmt.Errorf("load repo settings: %w", err)
 			}
@@ -138,16 +138,16 @@ func (r *queryResolver) PreviewLivingWikiPlan(
 	// build time. On resolver error we continue with a nil frozenCaller —
 	// resolveTaxonomyForMode degrades gracefully without one.
 	var frozenCaller *llmcall.Caller
-	if r.LLMResolver != nil && r.LLMCaller != nil {
-		snap, resolveErr := r.LLMResolver.Resolve(ctx, repositoryID, resolution.OpLivingWikiColdStart)
+	if r.Deps.LLMResolver != nil && r.Deps.LLMCaller != nil {
+		snap, resolveErr := r.Deps.LLMResolver.Resolve(ctx, repositoryID, resolution.OpLivingWikiColdStart)
 		if resolveErr == nil {
-			frozenCaller = llmcall.New(r.LLMCaller.Inner(), resolution.NewFrozenResolver(snap), nil)
+			frozenCaller = llmcall.New(r.Deps.LLMCaller.Inner(), resolution.NewFrozenResolver(snap), nil)
 		}
 	}
 
 	// ── 6. Resolve taxonomy ───────────────────────────────────────────────────
 	graphStore := r.getStore(ctx)
-	pages, err := resolveTaxonomyForMode(ctx, modeStr, repositoryID, graphStore, frozenCaller, r.ClusterStore)
+	pages, err := resolveTaxonomyForMode(ctx, modeStr, repositoryID, graphStore, frozenCaller, r.Deps.ClusterStore)
 	if err != nil {
 		return nil, fmt.Errorf("living-wiki: taxonomy resolution failed: %w", err)
 	}
@@ -157,8 +157,8 @@ func (r *queryResolver) PreviewLivingWikiPlan(
 	// Load repo settings to obtain MaxPagesPerJob for the cap formula.
 	// If no settings row exists, maxPagesPerJob = 0 (no cap).
 	var maxPagesPerJob int
-	if r.LivingWikiRepoStore != nil {
-		if existing, sErr := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID); sErr == nil && existing != nil {
+	if r.Deps.LivingWikiRepoStore != nil {
+		if existing, sErr := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID); sErr == nil && existing != nil {
 			maxPagesPerJob = existing.MaxPagesPerJob
 		}
 	}

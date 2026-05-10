@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/events"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
@@ -26,8 +27,10 @@ func newResolverWithRepo(t *testing.T) (*Resolver, string) {
 	}
 	repo, _ := store.StoreIndexResult(t.Context(), result)
 	return &Resolver{
-		Store:    store,
-		EventBus: events.NewBus(),
+		Deps: &appdeps.AppDeps{
+			EventBus: events.NewBus(),
+		},
+		Store: store,
 	}, repo.ID
 }
 

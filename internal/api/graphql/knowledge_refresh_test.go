@@ -6,6 +6,7 @@ package graphql
 import (
 	"bytes"
 	"context"
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"log/slog"
 	"strings"
 	"sync"
@@ -102,7 +103,7 @@ func seedStaleArtifact(
 // only verify driver decisions, not downstream regen flow (live mode's
 // RefreshKnowledgeArtifact call path is covered by its own resolver tests).
 func resolverWithStore(store knowledgepkg.KnowledgeStore) *mutationResolver {
-	return &mutationResolver{&Resolver{KnowledgeStore: store}}
+	return &mutationResolver{&Resolver{Deps: &appdeps.AppDeps{KnowledgeStore: store}}}
 }
 
 // resetRegenRateLimiter wipes the global rate-limit windows between tests so
@@ -460,9 +461,11 @@ func TestRefreshKnowledgeArtifact_UnsupportedType_DoesNotLeaveGenerating(t *test
 	// Wire up a resolver with a non-nil Worker (zero-value Client — enough to pass
 	// the nil-check; the unsupported-type guard returns before any Worker method is called).
 	r := &mutationResolver{&Resolver{
-		KnowledgeStore: knowledgeStore,
-		Store:          graphStore,
-		Worker:         &worker.Client{},
+		Deps: &appdeps.AppDeps{
+			KnowledgeStore: knowledgeStore,
+			Worker:         &worker.Client{},
+		},
+		Store: graphStore,
 	}}
 
 	// Act: refresh should return an error (unsupported type).

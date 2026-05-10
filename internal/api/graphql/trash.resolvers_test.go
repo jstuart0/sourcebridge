@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/events"
@@ -19,14 +20,16 @@ import (
 func newTestResolver(t *testing.T) *Resolver {
 	t.Helper()
 	return &Resolver{
-		Config: &config.Config{
-			Trash: config.TrashConfig{
-				Enabled:       true,
-				RetentionDays: 30,
+		Deps: &appdeps.AppDeps{
+			Config: &config.Config{
+				Trash: config.TrashConfig{
+					Enabled:       true,
+					RetentionDays: 30,
+				},
 			},
+			EventBus:   events.NewBus(),
+			TrashStore: trash.NewMemStore(),
 		},
-		EventBus:   events.NewBus(),
-		TrashStore: trash.NewMemStore(),
 	}
 }
 
@@ -40,7 +43,7 @@ func ctxWithClaims(userID, role string) context.Context {
 // A user can permanentlyDelete their own trash entry.
 func TestPermanentlyDelete_Owner_AllowsSelfDelete(t *testing.T) {
 	r := newTestResolver(t)
-	store := r.TrashStore.(*trash.MemStore)
+	store := r.Deps.TrashStore.(*trash.MemStore)
 	store.Register(trash.RegisterOptions{
 		Type: trash.TypeRequirement, ID: "req-1", RepositoryID: "repo",
 		NaturalKey: "AUTH-001", Label: "x",
@@ -66,7 +69,7 @@ func TestPermanentlyDelete_Owner_AllowsSelfDelete(t *testing.T) {
 // A non-admin, non-owner is rejected.
 func TestPermanentlyDelete_NonOwner_NonAdmin_Rejected(t *testing.T) {
 	r := newTestResolver(t)
-	store := r.TrashStore.(*trash.MemStore)
+	store := r.Deps.TrashStore.(*trash.MemStore)
 	store.Register(trash.RegisterOptions{
 		Type: trash.TypeRequirement, ID: "req-1", RepositoryID: "repo",
 		NaturalKey: "AUTH-001", Label: "x",
@@ -95,7 +98,7 @@ func TestPermanentlyDelete_NonOwner_NonAdmin_Rejected(t *testing.T) {
 // An admin can purge someone else's trash entry.
 func TestPermanentlyDelete_Admin_AllowsCrossUser(t *testing.T) {
 	r := newTestResolver(t)
-	store := r.TrashStore.(*trash.MemStore)
+	store := r.Deps.TrashStore.(*trash.MemStore)
 	store.Register(trash.RegisterOptions{
 		Type: trash.TypeRequirement, ID: "req-1", RepositoryID: "repo",
 		NaturalKey: "AUTH-001", Label: "x",
@@ -121,7 +124,7 @@ func TestPermanentlyDelete_Admin_AllowsCrossUser(t *testing.T) {
 // PermanentlyDelete refuses to touch a row that is not in trash.
 func TestPermanentlyDelete_LiveRow_Rejected(t *testing.T) {
 	r := newTestResolver(t)
-	store := r.TrashStore.(*trash.MemStore)
+	store := r.Deps.TrashStore.(*trash.MemStore)
 	store.Register(trash.RegisterOptions{
 		Type: trash.TypeRequirement, ID: "req-1", RepositoryID: "repo",
 		NaturalKey: "AUTH-001", Label: "x",
@@ -141,7 +144,7 @@ func TestPermanentlyDelete_LiveRow_Rejected(t *testing.T) {
 // path silently deleting data).
 func TestPermanentlyDelete_Unauthenticated_Rejected(t *testing.T) {
 	r := newTestResolver(t)
-	store := r.TrashStore.(*trash.MemStore)
+	store := r.Deps.TrashStore.(*trash.MemStore)
 	store.Register(trash.RegisterOptions{
 		Type: trash.TypeRequirement, ID: "req-1", RepositoryID: "repo",
 		NaturalKey: "AUTH-001", Label: "x",
@@ -161,7 +164,7 @@ func TestPermanentlyDelete_Unauthenticated_Rejected(t *testing.T) {
 // T45a: restoreFromTrash publishes EventTrashChanged with repo_id.
 func TestRestoreFromTrash_EventPayloadContainsRepoID(t *testing.T) {
 	r := newTestResolver(t)
-	store := r.TrashStore.(*trash.MemStore)
+	store := r.Deps.TrashStore.(*trash.MemStore)
 	const wantRepoID = "repo-restore-test"
 	store.Register(trash.RegisterOptions{
 		Type: trash.TypeRequirement, ID: "req-restore-1", RepositoryID: wantRepoID,
@@ -176,7 +179,7 @@ func TestRestoreFromTrash_EventPayloadContainsRepoID(t *testing.T) {
 	// Subscribe before the call so we capture the event synchronously via Shutdown flush.
 	var mu sync.Mutex
 	var captured []events.Event
-	r.EventBus.Subscribe(events.EventTrashChanged, func(e events.Event) {
+	r.Deps.EventBus.Subscribe(events.EventTrashChanged, func(e events.Event) {
 		mu.Lock()
 		defer mu.Unlock()
 		captured = append(captured, e)
@@ -192,7 +195,7 @@ func TestRestoreFromTrash_EventPayloadContainsRepoID(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	r.EventBus.Shutdown(ctx) //nolint:errcheck // flush in-flight handlers
+	r.Deps.EventBus.Shutdown(ctx) //nolint:errcheck // flush in-flight handlers
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -216,7 +219,7 @@ func TestRestoreFromTrash_EventPayloadContainsRepoID(t *testing.T) {
 // when the entry does not exist.
 func TestRestoreFromTrash_NonExistent_ReturnsErrorBeforeMutation(t *testing.T) {
 	r := newTestResolver(t)
-	store := r.TrashStore.(*trash.MemStore)
+	store := r.Deps.TrashStore.(*trash.MemStore)
 	store.Register(trash.RegisterOptions{
 		Type: trash.TypeRequirement, ID: "req-live", RepositoryID: "repo",
 		NaturalKey: "AUTH-003", Label: "live item",
@@ -250,7 +253,7 @@ func TestRestoreFromTrash_NonExistent_ReturnsErrorBeforeMutation(t *testing.T) {
 // milliseconds before the Get.)
 func TestPermanentlyDelete_TOCTOU_Consistency(t *testing.T) {
 	r := newTestResolver(t)
-	store := r.TrashStore.(*trash.MemStore)
+	store := r.Deps.TrashStore.(*trash.MemStore)
 	store.Register(trash.RegisterOptions{
 		Type: trash.TypeRequirement, ID: "req-1", RepositoryID: "repo",
 		NaturalKey: "AUTH-001", Label: "x",

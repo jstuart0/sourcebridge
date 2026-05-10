@@ -46,7 +46,7 @@ func (r *Resolver) runSyncLLMJob(
 	repoID string,
 	run func(rt llm.Runtime) error,
 ) error {
-	if r.Orchestrator == nil {
+	if r.Deps.Orchestrator == nil {
 		return run(noopRuntime{})
 	}
 	// R3 slice 3: stamp llm_provider so per-provider metrics track sync
@@ -55,7 +55,7 @@ func (r *Resolver) runSyncLLMJob(
 	// as an async one — the resolver cares about the work, not the
 	// transport).
 	op := syncJobOp(subsystem, jobType)
-	job, err := r.Orchestrator.EnqueueSync(ctx, &llm.EnqueueRequest{
+	job, err := r.Deps.Orchestrator.EnqueueSync(ctx, &llm.EnqueueRequest{
 		Subsystem:   subsystem,
 		JobType:     jobType,
 		TargetKey:   targetKey,
@@ -80,8 +80,8 @@ func (r *Resolver) runSyncLLMJob(
 // callers can still run without conditional checks.
 type noopRuntime struct{}
 
-func (noopRuntime) JobID() string                                              { return "" }
+func (noopRuntime) JobID() string                                                                 { return "" }
 func (noopRuntime) ReportProgress(progress float64, phase, message string, throughputTPS float64) {}
-func (noopRuntime) ReportTokens(input, output int)                             {}
-func (noopRuntime) ReportSnapshotBytes(bytes int)                              {}
-func (noopRuntime) Heartbeat() error                                           { return nil }
+func (noopRuntime) ReportTokens(input, output int)                                                {}
+func (noopRuntime) ReportSnapshotBytes(bytes int)                                                 {}
+func (noopRuntime) Heartbeat() error                                                              { return nil }

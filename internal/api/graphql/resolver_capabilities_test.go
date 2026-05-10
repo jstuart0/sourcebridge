@@ -6,6 +6,7 @@ package graphql
 import (
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/capabilities"
 	"github.com/sourcebridge/sourcebridge/internal/entitlements"
 )
@@ -20,7 +21,7 @@ import (
 // behavior (currentPlan() returning PlanOSS when no env var was set) produced
 // Billing: false. This test pins the backward-compatible behavior.
 func TestResolveCapabilities_ZeroValuePlan_BillingFalse(t *testing.T) {
-	r := &Resolver{} // zero value — Plan is ""
+	r := &Resolver{Deps: &appdeps.AppDeps{}} // zero value — Plan is ""
 	caps := r.resolveCapabilities()
 	if caps.features == nil {
 		t.Fatal("resolveCapabilities returned nil features")
@@ -35,7 +36,7 @@ func TestResolveCapabilities_ZeroValuePlan_BillingFalse(t *testing.T) {
 // TestResolveCapabilities_PlanOSS_BillingFalse verifies that an explicitly-set
 // PlanOSS resolver also reports Billing: false.
 func TestResolveCapabilities_PlanOSS_BillingFalse(t *testing.T) {
-	r := &Resolver{Plan: entitlements.PlanOSS}
+	r := &Resolver{Deps: &appdeps.AppDeps{}, Plan: entitlements.PlanOSS}
 	caps := r.resolveCapabilities()
 	if caps.features.Billing {
 		t.Fatalf("PlanOSS resolver should produce Billing: false, got true")
@@ -45,7 +46,7 @@ func TestResolveCapabilities_PlanOSS_BillingFalse(t *testing.T) {
 // TestResolveCapabilities_PlanEnterprise_BillingTrue verifies that an
 // enterprise-plan resolver reports Billing: true (positive case).
 func TestResolveCapabilities_PlanEnterprise_BillingTrue(t *testing.T) {
-	r := &Resolver{Plan: entitlements.PlanEnterprise}
+	r := &Resolver{Deps: &appdeps.AppDeps{}, Plan: entitlements.PlanEnterprise}
 	caps := r.resolveCapabilities()
 	if !caps.features.Billing {
 		t.Fatalf("PlanEnterprise resolver should produce Billing: true, got false")

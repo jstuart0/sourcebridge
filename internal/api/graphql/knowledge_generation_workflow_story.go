@@ -50,9 +50,9 @@ func (s workflowStoryGenerationService) Generate(ctx context.Context) (*Knowledg
 	audience := string(key.Audience)
 	depth := string(key.Depth)
 	scope := key.Scope.Normalize()
-	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
+	generationMode := resolvedKnowledgeGenerationMode(r.Deps.ComprehensionStore, repo, input.GenerationMode)
 
-	existing := r.KnowledgeStore.GetArtifactByKeyAndMode(ctx, key, generationMode)
+	existing := r.Deps.KnowledgeStore.GetArtifactByKeyAndMode(ctx, key, generationMode)
 	if existing != nil {
 		if existing.Status == knowledgepkg.StatusReady && !existing.Stale {
 			return mapKnowledgeArtifact(existing), nil
@@ -65,7 +65,7 @@ func (s workflowStoryGenerationService) Generate(ctx context.Context) (*Knowledg
 		}
 		if existing.Status == knowledgepkg.StatusFailed || existing.Stale ||
 			existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
-			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(ctx, existing.ID)
+			_ = r.Deps.KnowledgeStore.DeleteKnowledgeArtifact(ctx, existing.ID)
 		}
 	}
 
@@ -90,7 +90,7 @@ func (s workflowStoryGenerationService) Generate(ctx context.Context) (*Knowledg
 		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
 	}
 
-	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(ctx, key, snap.SourceRevision, generationMode)
+	artifact, created, err := r.Deps.KnowledgeStore.ClaimArtifactWithMode(ctx, key, snap.SourceRevision, generationMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim knowledge artifact: %w", err)
 	}
@@ -98,7 +98,7 @@ func (s workflowStoryGenerationService) Generate(ctx context.Context) (*Knowledg
 		return mapKnowledgeArtifact(artifact), nil
 	}
 	artifact.GenerationMode = generationMode
-	syncArtifactExecutionMetadata(r.KnowledgeStore, artifact)
+	syncArtifactExecutionMetadata(r.Deps.KnowledgeStore, artifact)
 
 	anchorLabel := ""
 	if input.AnchorLabel != nil {
@@ -153,7 +153,7 @@ func (s workflowStoryGenerationService) runGenerationPipeline(
 		progressPersistMessage: "LLM completed, persisting sections",
 		readyMessage:           "Workflow story ready",
 		rpcFn: func(ctx context.Context, enrichedSnapJSON []byte, rt llm.Runtime, r *Resolver, base baseRunParams, onProgress func(worker.KnowledgeStreamEvent)) (any, *commonv1.LLMUsage, error) {
-			resp, err := r.LLMCaller.GenerateWorkflowStoryWithJob(ctx, base.repo.ID, resolution.OpKnowledge,
+			resp, err := r.Deps.LLMCaller.GenerateWorkflowStoryWithJob(ctx, base.repo.ID, resolution.OpKnowledge,
 				llmJobMetadataWithProgress(rt, base.artifact.ID, "workflow_story", onProgress),
 				&knowledgev1.GenerateWorkflowStoryRequest{
 					RepositoryId:      base.repo.ID,
@@ -265,7 +265,7 @@ func (s workflowStoryGenerationService) RefreshFromExisting(ctx context.Context,
 		return nil, fmt.Errorf("enqueue workflow story refresh job: %w", err)
 	}
 
-	updated := r.KnowledgeStore.GetKnowledgeArtifact(ctx, existing.ID)
+	updated := r.Deps.KnowledgeStore.GetKnowledgeArtifact(ctx, existing.ID)
 	if updated == nil {
 		return nil, fmt.Errorf("artifact %s not found after refresh", existing.ID)
 	}

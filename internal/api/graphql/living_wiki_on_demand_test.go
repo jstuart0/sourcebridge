@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
@@ -56,8 +57,10 @@ func onDemandResolver(repoID string, detailedEnabled bool) *mutationResolver {
 		LivingWikiDetailedEnabled: detailedEnabled,
 	})
 	return &mutationResolver{Resolver: &Resolver{
-		LivingWikiRepoStore:        repoStore,
-		LivingWikiLiveOrchestrator: onDemandOrch(),
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore:        repoStore,
+			LivingWikiLiveOrchestrator: onDemandOrch(),
+		},
 	}}
 }
 
@@ -245,10 +248,12 @@ func TestGenerateLivingWikiPageOnDemand_ResolvesTierAndFreezes(t *testing.T) {
 	comprStore := comprehension.NewMemStore()
 
 	r := &mutationResolver{Resolver: &Resolver{
-		LivingWikiRepoStore:        repoStore,
-		LivingWikiLiveOrchestrator: onDemandOrch(),
-		LLMResolver:                resolver,
-		ComprehensionStore:         comprStore,
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore:        repoStore,
+			LivingWikiLiveOrchestrator: onDemandOrch(),
+			LLMResolver:                resolver,
+			ComprehensionStore:         comprStore,
+		},
 	}}
 
 	folder := "internal/api"

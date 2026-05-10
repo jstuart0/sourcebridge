@@ -29,6 +29,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
 )
@@ -111,8 +112,10 @@ func TestAskMutationForbiddenBeforeQA(t *testing.T) {
 	// A zero-value *qa.Orchestrator: Ask would panic (nil receiver fields)
 	// if it were ever reached.
 	r := &mutationResolver{&Resolver{
+		Deps: &appdeps.AppDeps{
+			QA: &qa.Orchestrator{},
+		},
 		Store: emptyStore,
-		QA:    &qa.Orchestrator{},
 	}}
 
 	_, err := r.Ask(context.Background(), AskInput{
@@ -139,8 +142,10 @@ func TestAskMutationPassesWhenRepoPresent(t *testing.T) {
 		t.Fatalf("CreateRepository: %v", err)
 	}
 	r := &mutationResolver{&Resolver{
+		Deps: &appdeps.AppDeps{
+			QA: &qa.Orchestrator{},
+		},
 		Store: s,
-		QA:    &qa.Orchestrator{},
 	}}
 
 	_, err = r.Ask(context.Background(), AskInput{
@@ -163,8 +168,10 @@ func TestAskMutationPassesWhenRepoPresent(t *testing.T) {
 func TestDiscussForbiddenBeforeQA(t *testing.T) {
 	emptyStore := graph.NewStore()
 	r := &mutationResolver{&Resolver{
+		Deps: &appdeps.AppDeps{
+			QA: &qa.Orchestrator{},
+		},
 		Store: emptyStore,
-		QA:    &qa.Orchestrator{},
 	}}
 
 	_, err := r.dispatchDiscussThroughOrchestrator(context.Background(), DiscussCodeInput{
@@ -189,8 +196,10 @@ func TestDiscussPassesWhenRepoPresent(t *testing.T) {
 		t.Fatalf("CreateRepository: %v", err)
 	}
 	r := &mutationResolver{&Resolver{
+		Deps: &appdeps.AppDeps{
+			QA: &qa.Orchestrator{},
+		},
 		Store: s,
-		QA:    &qa.Orchestrator{},
 	}}
 
 	_, err = r.dispatchDiscussThroughOrchestrator(context.Background(), DiscussCodeInput{

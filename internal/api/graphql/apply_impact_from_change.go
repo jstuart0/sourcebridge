@@ -24,14 +24,14 @@ import (
 // same invalidation policy.
 //
 // selectiveInvalidation must be the boot-resolved value from
-// r.Flags.SelectiveInvalidationEnabled. It is passed explicitly so
+// r.Deps.Flags.SelectiveInvalidationEnabled. It is passed explicitly so
 // changing the environment after process start cannot alter the
 // behavior of an in-flight request path.
 //
 // Side effects (must remain identical to the inline original):
 //   - mutates impactReport.StaleArtifacts and StaleArtifactReasons.
 //   - calls knowledgepkg.MarkStaleForImpact OR MarkAllStale on
-//     r.KnowledgeStore depending on the feature flag.
+//     r.Deps.KnowledgeStore depending on the feature flag.
 //   - persists the report via r.getStore(ctx).StoreImpactReport.
 //   - launches r.enqueueStaleArtifactRefresh as a goroutine when
 //     deltaRegenMode != Off and StaleArtifacts is non-empty. The
@@ -51,7 +51,7 @@ func (r *mutationResolver) applyImpactFromChange(
 	// otherwise fall back to the legacy blanket behavior. In both cases the
 	// resulting StaleArtifacts / StaleArtifactReasons list is then recorded
 	// on the impact report for downstream consumers.
-	if r.KnowledgeStore != nil && selectiveInvalidation {
+	if r.Deps.KnowledgeStore != nil && selectiveInvalidation {
 		symbolIDs := make([]string, 0, len(impactReport.SymbolsModified)+len(impactReport.SymbolsRemoved))
 		for _, sc := range impactReport.SymbolsModified {
 			if sc.SymbolID != "" {
@@ -78,7 +78,7 @@ func (r *mutationResolver) applyImpactFromChange(
 		}
 		reasons := knowledgepkg.MarkStaleForImpact(
 			ctx,
-			r.KnowledgeStore,
+			r.Deps.KnowledgeStore,
 			repoID,
 			symbolIDs,
 			filePaths,
@@ -92,14 +92,14 @@ func (r *mutationResolver) applyImpactFromChange(
 	} else {
 		// Legacy blanket path. Preserve the previous behavior of listing
 		// pre-stale artifacts on the report so the UI keeps its old signal.
-		if r.KnowledgeStore != nil {
-			for _, a := range r.KnowledgeStore.GetKnowledgeArtifacts(ctx, repoID) {
+		if r.Deps.KnowledgeStore != nil {
+			for _, a := range r.Deps.KnowledgeStore.GetKnowledgeArtifacts(ctx, repoID) {
 				if a.Stale || a.Status != knowledgepkg.StatusReady {
 					impactReport.StaleArtifacts = append(impactReport.StaleArtifacts, a.ID)
 				}
 			}
 		}
-		knowledgepkg.MarkAllStale(ctx, r.KnowledgeStore, repoID)
+		knowledgepkg.MarkAllStale(ctx, r.Deps.KnowledgeStore, repoID)
 	}
 	if impactReport.StaleArtifacts == nil {
 		impactReport.StaleArtifacts = []string{}

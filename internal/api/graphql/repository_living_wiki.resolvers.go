@@ -45,7 +45,7 @@ import (
 // Note: defined here (rather than schema.resolvers.go) so gqlgen regen does
 // not move it to the warning block on each schema change.
 func (r *Resolver) checkServerDraining() error {
-	if r.DrainAdmitter != nil && r.DrainAdmitter.IsDraining() {
+	if r.Deps.DrainAdmitter != nil && r.Deps.DrainAdmitter.IsDraining() {
 		return &gqlerror.Error{
 			Message: "The server is draining for a graceful restart. " +
 				"Living Wiki operations are temporarily unavailable. " +
@@ -161,10 +161,10 @@ func mapRepoLivingWikiSettings(s *livingwiki.RepositoryLivingWikiSettings) *Repo
 
 // isLivingWikiGloballyEnabled checks whether the global living-wiki switch is on.
 func (r *Resolver) isLivingWikiGloballyEnabled() bool {
-	if r.LivingWikiStore == nil {
+	if r.Deps.LivingWikiStore == nil {
 		return false
 	}
-	s, err := r.LivingWikiStore.Get()
+	s, err := r.Deps.LivingWikiStore.Get()
 	if err != nil || s == nil || s.Enabled == nil {
 		return false
 	}
@@ -372,8 +372,8 @@ func enqueueWikiJob(
 	// When retryExcludedOnly=true, look up the excluded page IDs from the
 	// most recent job result so the cold-start runner can scope its page set.
 	var excludedPageIDs []string
-	if retryExcluded && r.LivingWikiJobResultStore != nil {
-		if last, err := r.LivingWikiJobResultStore.LastResultForRepo(ctx, defaultTenantID, input.RepositoryID); err == nil && last != nil {
+	if retryExcluded && r.Deps.LivingWikiJobResultStore != nil {
+		if last, err := r.Deps.LivingWikiJobResultStore.LastResultForRepo(ctx, defaultTenantID, input.RepositoryID); err == nil && last != nil {
 			excludedPageIDs = last.ExcludedPageIDs
 		}
 	}
@@ -423,32 +423,32 @@ func enqueueWikiJob(
 		MaxAttempts: 1,
 		// GQL-5: delegate via the coldstart package boundary.
 		RunWithContext: coldstart.BuildRunner(coldstart.Config{
-			LWOrch:             r.LivingWikiLiveOrchestrator,
-			RepoID:             input.RepositoryID,
-			TenantID:           defaultTenantID,
-			GraphStore:         r.getStore(ctx),
-			WorkerClient:       r.Worker,
-			LLMCaller:          r.LLMCaller,
-			ExcludedPageIDs:    excludedPageIDs,
-			SinkKind:           sinkKind,
-			JobResultStore:     r.LivingWikiJobResultStore,
-			Broker:             r.livingWikiBroker(),
-			RepoSettingsStore:  r.LivingWikiRepoStore,
-			ClusterStore:       r.ClusterStore,
-			KnowledgeStore:     r.KnowledgeStore,
-			MetricsCollector:   nil,                              // fall back to lwmetrics.Default
-			LLMResolver:        r.LLMResolver,                    // for FrozenResolver + fingerprint model identity (CR5, LD-7)
-			PublishStatusStore: r.LivingWikiPagePublishStore,     // for per-page dispatch state (Phase 1)
-			Mode:               jobMode,                          // Phase 4a: mode-aware taxonomy
-			ComprehensionStore: r.ComprehensionStore,             // for quality-gate tier registry lookup (CA-150 Phase 4)
-			MaxPagesPerJob:     effectiveSettings.MaxPagesPerJob, // CA-146: repo-level cap (now wired)
-			PageCountOverride:  input.PageCountOverride,          // CA-146: per-run override (nil = use repo setting)
-			SelectedPageIDs:    input.SelectedPageIds,            // CA-146 Phase 2: nil-passthrough; closure handles (codex r1 H1)
-			UpstreamCapacityProvider: upstreamCapProvider, // ian mid-build wiring fix; see helper above
+			LWOrch:                   r.Deps.LivingWikiLiveOrchestrator,
+			RepoID:                   input.RepositoryID,
+			TenantID:                 defaultTenantID,
+			GraphStore:               r.getStore(ctx),
+			WorkerClient:             r.Deps.Worker,
+			LLMCaller:                r.Deps.LLMCaller,
+			ExcludedPageIDs:          excludedPageIDs,
+			SinkKind:                 sinkKind,
+			JobResultStore:           r.Deps.LivingWikiJobResultStore,
+			Broker:                   r.livingWikiBroker(),
+			RepoSettingsStore:        r.Deps.LivingWikiRepoStore,
+			ClusterStore:             r.Deps.ClusterStore,
+			KnowledgeStore:           r.Deps.KnowledgeStore,
+			MetricsCollector:         nil,                               // fall back to lwmetrics.Default
+			LLMResolver:              r.Deps.LLMResolver,                // for FrozenResolver + fingerprint model identity (CR5, LD-7)
+			PublishStatusStore:       r.Deps.LivingWikiPagePublishStore, // for per-page dispatch state (Phase 1)
+			Mode:                     jobMode,                           // Phase 4a: mode-aware taxonomy
+			ComprehensionStore:       r.Deps.ComprehensionStore,         // for quality-gate tier registry lookup (CA-150 Phase 4)
+			MaxPagesPerJob:           effectiveSettings.MaxPagesPerJob,  // CA-146: repo-level cap (now wired)
+			PageCountOverride:        input.PageCountOverride,           // CA-146: per-run override (nil = use repo setting)
+			SelectedPageIDs:          input.SelectedPageIds,             // CA-146 Phase 2: nil-passthrough; closure handles (codex r1 H1)
+			UpstreamCapacityProvider: upstreamCapProvider,               // ian mid-build wiring fix; see helper above
 		}),
 	}
 
-	job, err := r.Orchestrator.Enqueue(req)
+	job, err := r.Deps.Orchestrator.Enqueue(req)
 	if err != nil {
 		notice := fmt.Sprintf("Settings saved but job dispatch failed: %s", err.Error())
 		return &EnableLivingWikiResult{Settings: gql, Notice: &notice}, nil

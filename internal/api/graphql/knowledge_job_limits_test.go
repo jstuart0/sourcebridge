@@ -7,8 +7,8 @@ import (
 
 func TestKnowledgeJobBaseTypeStripsPrefixes(t *testing.T) {
 	tests := map[string]string{
-		"cliff_notes":           "cliff_notes",
-		"seed:cliff_notes":      "cliff_notes",
+		"cliff_notes":            "cliff_notes",
+		"seed:cliff_notes":       "cliff_notes",
 		"refresh:workflow_story": "workflow_story",
 	}
 	for input, want := range tests {

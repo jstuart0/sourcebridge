@@ -30,6 +30,7 @@ import (
 
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/clustering"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
@@ -2257,10 +2258,12 @@ func enableResolverWithClusters(t *testing.T, repoID string, n int) (*mutationRe
 	_ = globalStore.Set(&livingwiki.Settings{Enabled: &enabled})
 
 	r := &Resolver{
-		LivingWikiRepoStore: repoStore,
-		LivingWikiStore:     globalStore,
-		ClusterStore:        csClusterStore(n),
-		Store:               newStubGraphStore(),
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: repoStore,
+			LivingWikiStore:     globalStore,
+			ClusterStore:        csClusterStore(n),
+		},
+		Store: newStubGraphStore(),
 	}
 	return &mutationResolver{Resolver: r}, repoStore
 }
@@ -2319,7 +2322,7 @@ func TestEnableLivingWikiForRepo_NoJobGatesSkipSignatureValidation(t *testing.T)
 	t.Parallel()
 
 	r, _ := enableResolverWithClusters(t, "ks-gate-repo", 2)
-	r.Flags.LivingWikiKillSwitch = true // inject via field — no env var needed
+	r.Deps.Flags.LivingWikiKillSwitch = true // inject via field — no env var needed
 
 	bogusSignature := "not-the-real-hash"
 	inp := enableInput("ks-gate-repo")
@@ -2364,11 +2367,13 @@ func TestEnableLivingWikiForRepo_StaleSignatureRejected(t *testing.T) {
 	defer func() { _ = llmOrch.Shutdown(2 * time.Second) }()
 
 	r := &mutationResolver{Resolver: &Resolver{
-		LivingWikiRepoStore: repoStore,
-		LivingWikiStore:     globalStore,
-		ClusterStore:        csClusterStore(2),
-		Store:               newStubGraphStore(),
-		Orchestrator:        llmOrch,
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: repoStore,
+			LivingWikiStore:     globalStore,
+			ClusterStore:        csClusterStore(2),
+			Orchestrator:        llmOrch,
+		},
+		Store: newStubGraphStore(),
 	}}
 
 	bogusSignature := "not-the-real-hash"
@@ -2417,11 +2422,13 @@ func TestEnableLivingWikiForRepo_StaleSignatureDoesNotPersistSettings(t *testing
 	defer func() { _ = llmOrch.Shutdown(2 * time.Second) }()
 
 	r := &mutationResolver{Resolver: &Resolver{
-		LivingWikiRepoStore: repoStore,
-		LivingWikiStore:     globalStore,
-		ClusterStore:        csClusterStore(2),
-		Store:               newStubGraphStore(),
-		Orchestrator:        llmOrch,
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: repoStore,
+			LivingWikiStore:     globalStore,
+			ClusterStore:        csClusterStore(2),
+			Orchestrator:        llmOrch,
+		},
+		Store: newStubGraphStore(),
 	}}
 
 	bogusSignature := "stale"
@@ -2476,11 +2483,13 @@ func TestEnableLivingWikiForRepo_UnknownSelectedPageIDsRejected(t *testing.T) {
 
 	cs := csClusterStore(2)
 	r := &mutationResolver{Resolver: &Resolver{
-		LivingWikiRepoStore: repoStore,
-		LivingWikiStore:     globalStore,
-		ClusterStore:        cs,
-		Store:               newStubGraphStore(),
-		Orchestrator:        llmOrch,
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: repoStore,
+			LivingWikiStore:     globalStore,
+			ClusterStore:        cs,
+			Orchestrator:        llmOrch,
+		},
+		Store: newStubGraphStore(),
 	}}
 
 	// First compute the real current signature for this fixture.
@@ -2899,10 +2908,12 @@ func TestEnableLivingWikiForRepo_WithSelectedPageIds_ClosureGeneratesOnlySelecte
 	_ = globalStore.Set(&livingwiki.Settings{Enabled: &enabled})
 
 	qr := &queryResolver{Resolver: &Resolver{
-		LivingWikiRepoStore: repoStore,
-		LivingWikiStore:     globalStore,
-		ClusterStore:        cs,
-		Store:               newStubGraphStore(),
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: repoStore,
+			LivingWikiStore:     globalStore,
+			ClusterStore:        cs,
+		},
+		Store: newStubGraphStore(),
 	}}
 	mode := LivingWikiBuildModeDetailed
 	plan, planErr := qr.PreviewLivingWikiPlan(context.Background(), repoID, &mode, nil)
@@ -3002,15 +3013,17 @@ func TestEnableLivingWikiForRepo_WithSelectedPageIds_ClosureGeneratesOnlySelecte
 	defer func() { _ = llmOrch.Shutdown(2 * time.Second) }()
 
 	mr := &mutationResolver{Resolver: &Resolver{
-		LivingWikiRepoStore:        repoStore,
-		LivingWikiStore:            globalStore,
-		ClusterStore:               cs,
-		Store:                      newStubGraphStore(),
-		Orchestrator:               llmOrch,
-		LivingWikiLiveOrchestrator: lwOrch,
-		// Wire a stub LLM resolver so resolveLLMProviderForOp returns a non-empty
-		// provider string — the orchestrator hard-blocks enqueues with empty provider.
-		LLMResolver: newStubLLMResolver(),
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore:        repoStore,
+			LivingWikiStore:            globalStore,
+			ClusterStore:               cs,
+			Orchestrator:               llmOrch,
+			LivingWikiLiveOrchestrator: lwOrch,
+			// Wire a stub LLM resolver so resolveLLMProviderForOp returns a non-empty
+			// provider string — the orchestrator hard-blocks enqueues with empty provider.
+			LLMResolver: newStubLLMResolver(),
+		},
+		Store: newStubGraphStore(),
 	}}
 
 	sig := capturedSig

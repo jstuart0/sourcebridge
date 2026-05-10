@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/events"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
@@ -100,8 +101,10 @@ func newResolverWithRepoAndLink(t *testing.T, rb *recordingBus) (*Resolver, stri
 	}
 
 	r := &Resolver{
-		Store:    store,
-		EventBus: rb.bus,
+		Deps: &appdeps.AppDeps{
+			EventBus: rb.bus,
+		},
+		Store: store,
 	}
 	return r, link.ID, repo.ID
 }
@@ -114,8 +117,10 @@ func TestVerifyLink_CrossTenant_NoEventPublished(t *testing.T) {
 	rb := newRecordingBus()
 	store := graphstore.NewStore()
 	r := &Resolver{
-		Store:    store,
-		EventBus: rb.bus,
+		Deps: &appdeps.AppDeps{
+			EventBus: rb.bus,
+		},
+		Store: store,
 	}
 
 	// Drive VerifyLink with a non-existent link ID — the in-memory store

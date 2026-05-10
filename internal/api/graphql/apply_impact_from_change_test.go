@@ -5,6 +5,7 @@ package graphql
 
 import (
 	"context"
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"sort"
 	"testing"
 
@@ -61,9 +62,9 @@ func TestApplyImpactFromChange_SelectivePath_PreservesBehavior(t *testing.T) {
 	// Seed two artifacts: "hit" (evidence references a symbol the
 	// impact report names) and "miss" (evidence references an
 	// unrelated symbol).
-	hit := seedArtifactWithSymbolEvidence(t, r.KnowledgeStore.(*knowledgepkg.MemStore), repoID,
+	hit := seedArtifactWithSymbolEvidence(t, r.Deps.KnowledgeStore.(*knowledgepkg.MemStore), repoID,
 		knowledgepkg.ArtifactCliffNotes, "sym-modified")
-	miss := seedArtifactWithSymbolEvidence(t, r.KnowledgeStore.(*knowledgepkg.MemStore), repoID,
+	miss := seedArtifactWithSymbolEvidence(t, r.Deps.KnowledgeStore.(*knowledgepkg.MemStore), repoID,
 		knowledgepkg.ArtifactLearningPath, "sym-unrelated")
 
 	// Build the impact report with the modified symbol.
@@ -78,11 +79,11 @@ func TestApplyImpactFromChange_SelectivePath_PreservesBehavior(t *testing.T) {
 	r.applyImpactFromChange(ctx, repoID, report, true /* selectiveInvalidation */)
 
 	// Selective path: hit is stale, miss is not.
-	hitState := r.KnowledgeStore.GetKnowledgeArtifact(t.Context(), hit.ID)
+	hitState := r.Deps.KnowledgeStore.GetKnowledgeArtifact(t.Context(), hit.ID)
 	if hitState == nil || !hitState.Stale {
 		t.Fatalf("hit artifact should be staled, got %+v", hitState)
 	}
-	missState := r.KnowledgeStore.GetKnowledgeArtifact(t.Context(), miss.ID)
+	missState := r.Deps.KnowledgeStore.GetKnowledgeArtifact(t.Context(), miss.ID)
 	if missState != nil && missState.Stale {
 		t.Fatalf("miss artifact should NOT be staled (selective path), got %+v", missState)
 	}
@@ -133,7 +134,7 @@ func TestApplyImpactFromChange_BlanketPath_PreservesBehavior(t *testing.T) {
 	r := newTestMutationResolver()
 	const repoID = "repo-apply-2"
 
-	store := r.KnowledgeStore.(*knowledgepkg.MemStore)
+	store := r.Deps.KnowledgeStore.(*knowledgepkg.MemStore)
 
 	// Already-stale, ready artifact — appears in pre-stale snapshot
 	// because Stale=true.
@@ -203,15 +204,17 @@ func TestApplyImpactFromChange_BlanketPath_PreservesBehavior(t *testing.T) {
 
 // TestApplyImpactFromChange_NilGuards exercises the safe paths when
 // dependent components are unwired (e.g. minimal test resolvers).
-// The original block had nil-guards on r.KnowledgeStore; the helper
+// The original block had nil-guards on r.Deps.KnowledgeStore; the helper
 // must preserve them.
 func TestApplyImpactFromChange_NilGuards(t *testing.T) {
 	t.Setenv("SOURCEBRIDGE_DELTA_REGEN_MODE", "off")
 
 	ctx := context.Background()
 	r := &mutationResolver{&Resolver{
-		Store:          graphstore.NewStore(),
-		KnowledgeStore: nil, // deliberately nil
+		Deps: &appdeps.AppDeps{
+			KnowledgeStore: nil, // deliberately nil
+		},
+		Store: graphstore.NewStore(),
 	}}
 	report := &graphstore.ImpactReport{
 		ID:           "imp-nil",
@@ -243,7 +246,7 @@ func TestApplyImpactFromChange_PersistsBeforeGoroutineLaunch(t *testing.T) {
 	ctx := context.Background()
 	r := newTestMutationResolver()
 	const repoID = "repo-order"
-	hit := seedArtifactWithSymbolEvidence(t, r.KnowledgeStore.(*knowledgepkg.MemStore), repoID,
+	hit := seedArtifactWithSymbolEvidence(t, r.Deps.KnowledgeStore.(*knowledgepkg.MemStore), repoID,
 		knowledgepkg.ArtifactCliffNotes, "sym-x")
 
 	report := &graphstore.ImpactReport{
@@ -274,8 +277,10 @@ func TestApplyImpactFromChange_PersistsBeforeGoroutineLaunch(t *testing.T) {
 // drive them.
 func newTestMutationResolver() *mutationResolver {
 	return &mutationResolver{&Resolver{
-		Store:          graphstore.NewStore(),
-		KnowledgeStore: knowledgepkg.NewMemStore(),
+		Deps: &appdeps.AppDeps{
+			KnowledgeStore: knowledgepkg.NewMemStore(),
+		},
+		Store: graphstore.NewStore(),
 	}}
 }
 

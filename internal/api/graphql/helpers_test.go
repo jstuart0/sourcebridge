@@ -26,9 +26,9 @@ func TestIsGitURL(t *testing.T) {
 		// Local paths — must be false regardless of .git suffix (codex M fix).
 		{"/home/user/project", false},
 		{"./relative/path", false},
-		{"/home/user/repos/myrepo.git", false},  // absolute local bare repo
-		{"./myrepo.git", false},                  // explicit relative local bare repo
-		{"../myrepo.git", false},                 // parent-relative local bare repo
+		{"/home/user/repos/myrepo.git", false}, // absolute local bare repo
+		{"./myrepo.git", false},                // explicit relative local bare repo
+		{"../myrepo.git", false},               // parent-relative local bare repo
 		// Bare name without hostname prefix: ambiguous, treated as local because
 		// there is no hostname-shaped prefix before the first slash.
 		// Pre-Slice-7 graphql accepted this (myrepo.git → true), but the

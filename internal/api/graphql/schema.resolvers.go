@@ -59,7 +59,7 @@ func (r *mutationResolver) AddRepository(ctx context.Context, input AddRepositor
 
 	// CA-312: validate remote URLs at the handler boundary before touching the store.
 	if isRemote {
-		allowPrivate := r.Config != nil && r.Config.Indexing.AllowPrivateGitHosts
+		allowPrivate := r.Deps.Config != nil && r.Deps.Config.Indexing.AllowPrivateGitHosts
 		if err := pathutil.ValidateGitURLForClone(repoPath, allowPrivate, nil); err != nil {
 			return nil, fmt.Errorf("repository URL not allowed: %w", err)
 		}
@@ -145,8 +145,8 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 		cloneDir := repo.ClonePath
 		if cloneDir == "" {
 			cacheDir := "./repo-cache"
-			if r.Config != nil && r.Config.Storage.RepoCachePath != "" {
-				cacheDir = r.Config.Storage.RepoCachePath
+			if r.Deps.Config != nil && r.Deps.Config.Storage.RepoCachePath != "" {
+				cacheDir = r.Deps.Config.Storage.RepoCachePath
 			}
 			cloneDir = filepath.Join(cacheDir, "repos", sanitizeRepoName(repo.Name))
 		}
@@ -171,7 +171,7 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 		if remoteURL == "" {
 			remoteURL = repo.Path
 		}
-		allowPrivate := r.Config != nil && r.Config.Indexing.AllowPrivateGitHosts
+		allowPrivate := r.Deps.Config != nil && r.Deps.Config.Indexing.AllowPrivateGitHosts
 		if err := pathutil.ValidateGitURLForClone(remoteURL, allowPrivate, nil); err != nil {
 			return nil, fmt.Errorf("repository URL not allowed: %w", err)
 		}
@@ -314,7 +314,7 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 	// will call the same helper after its own delta-only refresh, so
 	// the reindex mutation and change-event paths follow identical
 	// invalidation rules.
-	r.applyImpactFromChange(ctx, id, impactReport, r.Flags.SelectiveInvalidationEnabled)
+	r.applyImpactFromChange(ctx, id, impactReport, r.Deps.Flags.SelectiveInvalidationEnabled)
 
 	slog.Info("impact analysis complete",
 		"id", impactReport.ID,
@@ -325,11 +325,11 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 		"affectedLinks", len(impactReport.AffectedLinks),
 		"affectedRequirements", len(impactReport.AffectedRequirements),
 		"staleArtifacts", len(impactReport.StaleArtifacts),
-		"selective", r.Flags.SelectiveInvalidationEnabled,
+		"selective", r.Deps.Flags.SelectiveInvalidationEnabled,
 	)
 
 	// Refresh cached understanding score
-	uScore := graphstore.ComputeUnderstandingScore(ctx, r.getStore(ctx), newKnowledgeFreshnessProvider(r.KnowledgeStore), id)
+	uScore := graphstore.ComputeUnderstandingScore(ctx, r.getStore(ctx), newKnowledgeFreshnessProvider(r.Deps.KnowledgeStore), id)
 	r.getStore(ctx).CacheUnderstandingScore(ctx, id, uScore.Overall)
 
 	slog.Info("repository reindexed",
@@ -339,7 +339,7 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 		"commitSHA", updatedRepo.CommitSHA,
 	)
 
-	if r.Flags.KnowledgePrewarmOnIndexEnabled {
+	if r.Deps.Flags.KnowledgePrewarmOnIndexEnabled {
 		go r.seedRepositoryFieldGuide(id)
 	}
 
@@ -348,10 +348,10 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 
 // BuildRepositoryUnderstanding is the resolver for the buildRepositoryUnderstanding field.
 func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, input BuildRepositoryUnderstandingInput) (*RepositoryUnderstanding, error) {
-	if r.Worker == nil {
+	if r.Deps.Worker == nil {
 		return nil, fmt.Errorf("AI features are unavailable — worker not connected")
 	}
-	if r.KnowledgeStore == nil {
+	if r.Deps.KnowledgeStore == nil {
 		return nil, fmt.Errorf("knowledge store not configured")
 	}
 
@@ -384,7 +384,7 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
 	}
 
-	existing := r.KnowledgeStore.GetRepositoryUnderstanding(ctx, repo.ID, scope)
+	existing := r.Deps.KnowledgeStore.GetRepositoryUnderstanding(ctx, repo.ID, scope)
 	revisionFP := knowledgepkg.RevisionFingerprint(snap.SourceRevision)
 	// Same-revision short-circuit: if the user hasn't asked for a forced
 	// rebuild and the existing understanding matches the current source
@@ -404,14 +404,14 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 		Stage:        knowledgepkg.UnderstandingBuildingTree,
 		TreeStatus:   knowledgepkg.UnderstandingTreeMissing,
 	}
-	understanding, err = r.KnowledgeStore.StoreRepositoryUnderstanding(ctx, understanding)
+	understanding, err = r.Deps.KnowledgeStore.StoreRepositoryUnderstanding(ctx, understanding)
 	if err != nil {
 		return nil, fmt.Errorf("failed to seed repository understanding: %w", err)
 	}
 
 	err = enqueueRepositoryUnderstandingJob(ctx, r.Resolver, repo, understanding, scope, snapshotJSON, func(runCtx context.Context, rt llm.Runtime) error {
 		rt.ReportProgress(0.1, "snapshot", "Snapshot assembled", 0)
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "snapshot", "snapshot_assembled", "Snapshot assembled", map[string]any{
+		appendJobLog(r.Deps.Orchestrator, rt, llm.LogLevelInfo, "snapshot", "snapshot_assembled", "Snapshot assembled", map[string]any{
 			"snapshot_bytes": len(snapshotJSON),
 			"scope_type":     string(scope.ScopeType),
 			"scope_path":     scope.ScopePath,
@@ -423,7 +423,7 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 		// hierarchical bucket map fits a repository-scope cliff-notes
 		// build.
 		streamDriver := r.runUnderstandingStreamDriver(runCtx, rt, understanding.ID, rpcBucketHierarchical)
-		resp, err := r.LLMCaller.GenerateCliffNotesWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, understanding.ID, "build_repository_understanding", streamDriver.OnProgress()), &knowledgev1.GenerateCliffNotesRequest{
+		resp, err := r.Deps.LLMCaller.GenerateCliffNotesWithJob(runCtx, repo.ID, resolution.OpKnowledge, llmJobMetadataWithProgress(rt, understanding.ID, "build_repository_understanding", streamDriver.OnProgress()), &knowledgev1.GenerateCliffNotesRequest{
 			RepositoryId:   repo.ID,
 			RepositoryName: repo.Name,
 			Audience:       string(knowledgepkg.AudienceDeveloper),
@@ -438,14 +438,14 @@ func (r *mutationResolver) BuildRepositoryUnderstanding(ctx context.Context, inp
 		// r1b M5 driver-drain rule).
 		streamDriver.Close()
 		if err != nil {
-			markRepositoryUnderstandingFailed(r.KnowledgeStore, &knowledgepkg.Artifact{RepositoryID: repo.ID}, scope, snap.SourceRevision, err)
+			markRepositoryUnderstandingFailed(r.Deps.KnowledgeStore, &knowledgepkg.Artifact{RepositoryID: repo.ID}, scope, snap.SourceRevision, err)
 			return err
 		}
-		if _, err := updateUnderstandingForCliffNotes(r.KnowledgeStore, &knowledgepkg.Artifact{RepositoryID: repo.ID}, scope, snap.SourceRevision, resp, knowledgepkg.UnderstandingFirstPassReady); err != nil {
+		if _, err := updateUnderstandingForCliffNotes(r.Deps.KnowledgeStore, &knowledgepkg.Artifact{RepositoryID: repo.ID}, scope, snap.SourceRevision, resp, knowledgepkg.UnderstandingFirstPassReady); err != nil {
 			return err
 		}
 		rt.ReportProgress(1.0, "ready", "Repository understanding ready", 0)
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "ready", "repository_understanding_ready", "Repository understanding ready", map[string]any{
+		appendJobLog(r.Deps.Orchestrator, rt, llm.LogLevelInfo, "ready", "repository_understanding_ready", "Repository understanding ready", map[string]any{
 			"cached_nodes": func() int32 {
 				if resp.Diagnostics == nil {
 					return 0
@@ -533,7 +533,7 @@ func (r *mutationResolver) ImportRequirements(ctx context.Context, input ImportR
 	imported := r.getStore(ctx).StoreRequirements(ctx, input.RepositoryID, storedReqs)
 
 	// Mark knowledge artifacts stale after requirements import
-	knowledgepkg.MarkAllStale(ctx, r.KnowledgeStore, input.RepositoryID)
+	knowledgepkg.MarkAllStale(ctx, r.Deps.KnowledgeStore, input.RepositoryID)
 
 	r.Resolver.publishEvent(events.EventRequirementImported, map[string]interface{}{
 		"repo_id": input.RepositoryID, "imported": imported, "skipped": skipped,
@@ -569,8 +569,8 @@ func (r *mutationResolver) VerifyLink(ctx context.Context, linkID string, verifi
 		// (storage gate → publish-site nil check). T44 pins this invariant.
 		return nil, fmt.Errorf("link not found: %s", linkID)
 	}
-	if r.ReqBooster != nil && link.RepoID != "" {
-		r.ReqBooster.Invalidate(link.RepoID)
+	if r.Deps.ReqBooster != nil && link.RepoID != "" {
+		r.Deps.ReqBooster.Invalidate(link.RepoID)
 	}
 	// Backfill repo_id on the event payload so the Phase 4 SSE tenant filter
 	// can route the event to the correct subscriber (CA-205).
@@ -610,15 +610,15 @@ func (r *mutationResolver) CreateManualLink(ctx context.Context, input CreateMan
 	if link == nil {
 		return nil, fmt.Errorf("failed to create link")
 	}
-	if r.ReqBooster != nil {
-		r.ReqBooster.Invalidate(input.RepositoryID)
+	if r.Deps.ReqBooster != nil {
+		r.Deps.ReqBooster.Invalidate(input.RepositoryID)
 	}
 	return mapLinkWithRelations(ctx, link, r.getStore(ctx)), nil
 }
 
 // AnalyzeSymbol is the resolver for the analyzeSymbol field.
 func (r *mutationResolver) AnalyzeSymbol(ctx context.Context, repositoryID string, symbolID string) (*AnalysisResult, error) {
-	if r.Worker == nil {
+	if r.Deps.Worker == nil {
 		return nil, fmt.Errorf("AI features are unavailable: worker not connected")
 	}
 	if r.getStore(ctx) == nil {
@@ -649,7 +649,7 @@ func (r *mutationResolver) AnalyzeSymbol(ctx context.Context, repositoryID strin
 		repositoryID,
 		func(rt llm.Runtime) error {
 			var callErr error
-			resp, callErr = r.LLMCaller.AnalyzeSymbol(ctx, repositoryID, resolution.OpAnalysis, &reasoningv1.AnalyzeSymbolRequest{
+			resp, callErr = r.Deps.LLMCaller.AnalyzeSymbol(ctx, repositoryID, resolution.OpAnalysis, &reasoningv1.AnalyzeSymbolRequest{
 				RepositoryId: repositoryID,
 				Symbol: &commonv1.CodeSymbol{
 					Id:            sym.ID,
@@ -698,7 +698,7 @@ func (r *mutationResolver) AnalyzeSymbol(ctx context.Context, repositoryID strin
 
 // DiscussCode is the resolver for the discussCode field.
 func (r *mutationResolver) DiscussCode(ctx context.Context, input DiscussCodeInput) (*DiscussionResult, error) {
-	if r.Worker == nil {
+	if r.Deps.Worker == nil {
 		return nil, fmt.Errorf("AI features are unavailable: worker not connected")
 	}
 
@@ -714,7 +714,7 @@ func (r *mutationResolver) DiscussCode(ctx context.Context, input DiscussCodeInp
 	// DiscussionResult's legacy []string references wire shape,
 	// preserving Ledger F10/F11. Flag-gated so the legacy path remains
 	// the fallback until parity ships.
-	if r.QA != nil {
+	if r.Deps.QA != nil {
 		return r.dispatchDiscussThroughOrchestrator(ctx, input)
 	}
 
@@ -729,7 +729,7 @@ func (r *mutationResolver) DiscussCode(ctx context.Context, input DiscussCodeInp
 	err = r.runSyncLLMJob(ctx, llm.SubsystemReasoning, "discuss_code", targetKey, input.RepositoryID,
 		func(rt llm.Runtime) error {
 			var callErr error
-			resp, callErr = r.LLMCaller.AnswerQuestion(ctx, input.RepositoryID, resolution.OpDiscussion, &reasoningv1.AnswerQuestionRequest{
+			resp, callErr = r.Deps.LLMCaller.AnswerQuestion(ctx, input.RepositoryID, resolution.OpDiscussion, &reasoningv1.AnswerQuestionRequest{
 				Question:       input.Question,
 				RepositoryId:   input.RepositoryID,
 				ContextSymbols: contextSymbols,
@@ -799,7 +799,7 @@ func (r *mutationResolver) DiscussCode(ctx context.Context, input DiscussCodeInp
 
 // ReviewCode is the resolver for the reviewCode field.
 func (r *mutationResolver) ReviewCode(ctx context.Context, input ReviewCodeInput) (*ReviewResult, error) {
-	if r.Worker == nil {
+	if r.Deps.Worker == nil {
 		return nil, fmt.Errorf("AI features are unavailable: worker not connected")
 	}
 
@@ -831,7 +831,7 @@ func (r *mutationResolver) ReviewCode(ctx context.Context, input ReviewCodeInput
 		input.RepositoryID,
 		func(rt llm.Runtime) error {
 			var callErr error
-			resp, callErr = r.LLMCaller.ReviewFile(ctx, input.RepositoryID, resolution.OpReview, &reasoningv1.ReviewFileRequest{
+			resp, callErr = r.Deps.LLMCaller.ReviewFile(ctx, input.RepositoryID, resolution.OpReview, &reasoningv1.ReviewFileRequest{
 				RepositoryId: input.RepositoryID,
 				FilePath:     input.FilePath,
 				Language:     lang,
@@ -902,7 +902,7 @@ func (r *mutationResolver) ReviewCode(ctx context.Context, input ReviewCodeInput
 // error. The mutation is additive — discussCode remains the legacy
 // path and continues to work through Phase 6.
 func (r *mutationResolver) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
-	if r.QA == nil {
+	if r.Deps.QA == nil {
 		return &AskResult{
 			Answer: "Server-side QA is disabled on this deployment. Ask the operator to set SOURCEBRIDGE_QA_SERVER_SIDE_ENABLED=true.",
 			Diagnostics: &AskDiagnostics{
@@ -919,7 +919,7 @@ func (r *mutationResolver) Ask(ctx context.Context, input AskInput) (*AskResult,
 		return nil, err
 	}
 	qaIn := askInputToQA(input)
-	res, err := r.QA.Ask(ctx, qaIn)
+	res, err := r.Deps.QA.Ask(ctx, qaIn)
 	if err != nil {
 		return nil, err
 	}
@@ -928,7 +928,7 @@ func (r *mutationResolver) Ask(ctx context.Context, input AskInput) (*AskResult,
 
 // AutoLinkRequirements is the resolver for the autoLinkRequirements field.
 func (r *mutationResolver) AutoLinkRequirements(ctx context.Context, repositoryID string, minConfidence *float64) (*AutoLinkResult, error) {
-	if r.Worker == nil {
+	if r.Deps.Worker == nil {
 		return nil, fmt.Errorf("AI features are unavailable: worker not connected")
 	}
 
@@ -1015,7 +1015,7 @@ func (r *mutationResolver) AutoLinkRequirements(ctx context.Context, repositoryI
 		fmt.Sprintf("linking:batch:%s", repositoryID), repositoryID,
 		func(rt llm.Runtime) error {
 			var callErr error
-			resp, callErr = r.Worker.BatchLink(context.Background(), &linkingv1.BatchLinkRequest{
+			resp, callErr = r.Deps.Worker.BatchLink(context.Background(), &linkingv1.BatchLinkRequest{
 				Requirements:     protoReqs,
 				RepositoryId:     repositoryID,
 				MinConfidence:    minConf,
@@ -1044,8 +1044,8 @@ func (r *mutationResolver) AutoLinkRequirements(ctx context.Context, repositoryI
 	stored := store.StoreLinks(ctx, repositoryID, storedLinks)
 	slog.Info("auto-link: storage complete", "stored", stored)
 
-	if r.ReqBooster != nil && stored > 0 {
-		r.ReqBooster.Invalidate(repositoryID)
+	if r.Deps.ReqBooster != nil && stored > 0 {
+		r.Deps.ReqBooster.Invalidate(repositoryID)
 	}
 
 	r.Resolver.publishEvent(events.EventRequirementLinked, map[string]interface{}{
@@ -1062,7 +1062,7 @@ func (r *mutationResolver) AutoLinkRequirements(ctx context.Context, repositoryI
 
 // EnrichRequirement is the resolver for the enrichRequirement field.
 func (r *mutationResolver) EnrichRequirement(ctx context.Context, requirementID string) (*Requirement, error) {
-	if r.Worker == nil {
+	if r.Deps.Worker == nil {
 		return nil, fmt.Errorf("AI features are unavailable: worker not connected")
 	}
 
@@ -1076,7 +1076,7 @@ func (r *mutationResolver) EnrichRequirement(ctx context.Context, requirementID 
 		fmt.Sprintf("requirements:enrich:%s", req.ID), "",
 		func(rt llm.Runtime) error {
 			var callErr error
-			resp, callErr = r.LLMCaller.EnrichRequirement(ctx, "", resolution.OpRequirementsEnrich, &requirementsv1.EnrichRequirementRequest{
+			resp, callErr = r.Deps.LLMCaller.EnrichRequirement(ctx, "", resolution.OpRequirementsEnrich, &requirementsv1.EnrichRequirementRequest{
 				Requirement: &commonv1.Requirement{
 					Id:          req.ID,
 					ExternalId:  req.ExternalID,
@@ -1131,7 +1131,7 @@ func (r *mutationResolver) EnrichRequirement(ctx context.Context, requirementID 
 
 // SimulateChange is the resolver for the simulateChange field.
 func (r *mutationResolver) SimulateChange(ctx context.Context, input SimulateChangeInput) (*SimulatedImpactReport, error) {
-	if r.Worker == nil {
+	if r.Deps.Worker == nil {
 		return nil, fmt.Errorf("AI features are unavailable: worker not connected")
 	}
 
@@ -1185,7 +1185,7 @@ func (r *mutationResolver) SimulateChange(ctx context.Context, input SimulateCha
 
 	slog.Info("simulate-change: resolving symbols", "repo", repo.Name, "symbols", len(protoSymbols), "descLen", len(desc))
 
-	resp, err := r.Worker.SimulateChange(ctx, &reasoningv1.SimulateChangeRequest{
+	resp, err := r.Deps.Worker.SimulateChange(ctx, &reasoningv1.SimulateChangeRequest{
 		RepositoryId: input.RepositoryID,
 		Description:  desc,
 		AnchorFile:   anchorFile,
@@ -1241,7 +1241,7 @@ func (r *mutationResolver) SimulateChange(ctx context.Context, input SimulateCha
 
 // TriggerSpecExtraction is the resolver for the triggerSpecExtraction field.
 func (r *mutationResolver) TriggerSpecExtraction(ctx context.Context, input TriggerSpecExtractionInput) (*SpecExtractionResult, error) {
-	if r.Worker == nil {
+	if r.Deps.Worker == nil {
 		return nil, fmt.Errorf("AI features are unavailable: worker not connected")
 	}
 
@@ -1289,7 +1289,7 @@ func (r *mutationResolver) TriggerSpecExtraction(ctx context.Context, input Trig
 			// so it always ran on the worker's bootstrap (configmap)
 			// provider regardless of workspace settings — confirmed bypass.
 			// Routed through llmcall.Caller now so workspace settings win.
-			resp, callErr = r.LLMCaller.ExtractSpecs(ctx, input.RepositoryID, resolution.OpRequirementsExtract, &requirementsv1.ExtractSpecsRequest{
+			resp, callErr = r.Deps.LLMCaller.ExtractSpecs(ctx, input.RepositoryID, resolution.OpRequirementsExtract, &requirementsv1.ExtractSpecsRequest{
 				RepositoryId:      input.RepositoryID,
 				RepositoryName:    repo.Name,
 				Files:             protoFiles,
@@ -1461,7 +1461,7 @@ func (r *mutationResolver) UnlinkReposResult(ctx context.Context, linkID string)
 // DetectContracts is the resolver for the detectContracts field.
 func (r *mutationResolver) DetectContracts(ctx context.Context, repoID string) (bool, error) {
 	recordDeprecatedFieldReadCtx(ctx, "Mutation.detectContracts")
-	if r.Worker == nil {
+	if r.Deps.Worker == nil {
 		return false, fmt.Errorf("AI features are unavailable — worker not connected")
 	}
 	store := r.getStore(ctx)
@@ -1507,7 +1507,7 @@ func (r *mutationResolver) DetectContracts(ctx context.Context, repoID string) (
 		return true, nil
 	}
 
-	resp, err := r.Worker.DetectContracts(ctx, &contractsv1.DetectContractsRequest{
+	resp, err := r.Deps.Worker.DetectContracts(ctx, &contractsv1.DetectContractsRequest{
 		RepositoryId: repoID,
 		Files:        protoFiles,
 	})
@@ -1578,7 +1578,7 @@ func (r *mutationResolver) GenerateWorkflowStory(ctx context.Context, input Gene
 
 // ExplainSystem is the resolver for the explainSystem field.
 func (r *mutationResolver) ExplainSystem(ctx context.Context, input ExplainSystemInput) (*ExplainSystemResult, error) {
-	if r.Worker == nil {
+	if r.Deps.Worker == nil {
 		return nil, fmt.Errorf("AI features are unavailable — worker not connected")
 	}
 
@@ -1599,7 +1599,7 @@ func (r *mutationResolver) ExplainSystem(ctx context.Context, input ExplainSyste
 	if input.Question != nil {
 		question = *input.Question
 	}
-	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
+	generationMode := resolvedKnowledgeGenerationMode(r.Deps.ComprehensionStore, repo, input.GenerationMode)
 
 	assembler := knowledgepkg.NewAssembler(r.getStore(ctx))
 	scope, err := artifactScopeFromInput(input.ScopeType, input.ScopePath)
@@ -1626,7 +1626,7 @@ func (r *mutationResolver) ExplainSystem(ctx context.Context, input ExplainSyste
 	}
 	enrichedSnapJSON := snapJSON
 	if artifactUsesUnderstanding(generationMode) {
-		if understanding := r.KnowledgeStore.GetRepositoryUnderstanding(ctx, repo.ID, knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository}); understanding != nil {
+		if understanding := r.Deps.KnowledgeStore.GetRepositoryUnderstanding(ctx, repo.ID, knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository}); understanding != nil {
 			if understanding.RevisionFP == knowledgepkg.RevisionFingerprint(snap.SourceRevision) {
 				if enriched, ok := enrichSnapshotWithUnderstanding(snapJSON, understanding); ok {
 					enrichedSnapJSON = enriched
@@ -1647,7 +1647,7 @@ func (r *mutationResolver) ExplainSystem(ctx context.Context, input ExplainSyste
 		func(rt llm.Runtime) error {
 			rt.ReportSnapshotBytes(len(snapJSON))
 			var callErr error
-			resp, callErr = r.LLMCaller.ExplainSystem(bgCtx, repo.ID, resolution.OpKnowledge, &knowledgev1.ExplainSystemRequest{
+			resp, callErr = r.Deps.LLMCaller.ExplainSystem(bgCtx, repo.ID, resolution.OpKnowledge, &knowledgev1.ExplainSystemRequest{
 				RepositoryId:   repo.ID,
 				RepositoryName: repo.Name,
 				Audience:       audience,
@@ -1689,14 +1689,14 @@ func (r *mutationResolver) ExplainSystem(ctx context.Context, input ExplainSyste
 
 // RefreshKnowledgeArtifact is the resolver for the refreshKnowledgeArtifact field.
 func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id string) (*KnowledgeArtifact, error) {
-	if r.KnowledgeStore == nil {
+	if r.Deps.KnowledgeStore == nil {
 		return nil, fmt.Errorf("knowledge store not configured")
 	}
-	if r.Worker == nil {
+	if r.Deps.Worker == nil {
 		return nil, fmt.Errorf("AI features are not available")
 	}
 
-	existing := r.KnowledgeStore.GetKnowledgeArtifact(ctx, id)
+	existing := r.Deps.KnowledgeStore.GetKnowledgeArtifact(ctx, id)
 	if existing == nil {
 		return nil, fmt.Errorf("knowledge artifact %s not found", id)
 	}
@@ -1729,11 +1729,11 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 		return nil, fmt.Errorf("unsupported artifact type: %s", existing.Type)
 	}
 
-	if err := r.KnowledgeStore.UpdateKnowledgeArtifactProgress(ctx, id, 0); err != nil {
+	if err := r.Deps.KnowledgeStore.UpdateKnowledgeArtifactProgress(ctx, id, 0); err != nil {
 		return nil, err
 	}
-	syncArtifactExecutionMetadata(r.KnowledgeStore, existing)
-	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(ctx, id, knowledgepkg.StatusGenerating); err != nil {
+	syncArtifactExecutionMetadata(r.Deps.KnowledgeStore, existing)
+	if err := r.Deps.KnowledgeStore.UpdateKnowledgeArtifactStatus(ctx, id, knowledgepkg.StatusGenerating); err != nil {
 		return nil, err
 	}
 
@@ -1761,7 +1761,7 @@ func (r *mutationResolver) RefreshKnowledgeArtifact(ctx context.Context, id stri
 
 // UpdateComprehensionSettings is the resolver for the updateComprehensionSettings field.
 func (r *mutationResolver) UpdateComprehensionSettings(ctx context.Context, input UpdateComprehensionSettingsInput) (*EffectiveComprehensionSettings, error) {
-	if r.ComprehensionStore == nil {
+	if r.Deps.ComprehensionStore == nil {
 		return nil, fmt.Errorf("comprehension settings not configured")
 	}
 	scopeKey := ""
@@ -1799,12 +1799,12 @@ func (r *mutationResolver) UpdateComprehensionSettings(ctx context.Context, inpu
 		settings.GraphRAGEntityTypes = input.GraphragEntityTypes
 	}
 
-	if err := r.ComprehensionStore.SetSettings(ctx, settings); err != nil {
+	if err := r.Deps.ComprehensionStore.SetSettings(ctx, settings); err != nil {
 		return nil, err
 	}
 
 	scope := comprehension.Scope{Type: settings.ScopeType, Key: settings.ScopeKey}
-	eff, err := comprehension.Resolve(ctx, r.ComprehensionStore, scope)
+	eff, err := comprehension.Resolve(ctx, r.Deps.ComprehensionStore, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -1814,7 +1814,7 @@ func (r *mutationResolver) UpdateComprehensionSettings(ctx context.Context, inpu
 
 // ResetComprehensionSettings is the resolver for the resetComprehensionSettings field.
 func (r *mutationResolver) ResetComprehensionSettings(ctx context.Context, scopeType string, scopeKey *string) (bool, error) {
-	if r.ComprehensionStore == nil {
+	if r.Deps.ComprehensionStore == nil {
 		return false, fmt.Errorf("comprehension settings not configured")
 	}
 	sk := ""
@@ -1822,7 +1822,7 @@ func (r *mutationResolver) ResetComprehensionSettings(ctx context.Context, scope
 		sk = *scopeKey
 	}
 	scope := comprehension.Scope{Type: comprehension.ScopeType(scopeType), Key: sk}
-	if err := r.ComprehensionStore.DeleteSettings(ctx, scope); err != nil {
+	if err := r.Deps.ComprehensionStore.DeleteSettings(ctx, scope); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1830,7 +1830,7 @@ func (r *mutationResolver) ResetComprehensionSettings(ctx context.Context, scope
 
 // UpdateModelCapabilities is the resolver for the updateModelCapabilities field.
 func (r *mutationResolver) UpdateModelCapabilities(ctx context.Context, input UpdateModelCapabilitiesInput) (*ModelCapabilityProfile, error) {
-	if r.ComprehensionStore == nil {
+	if r.Deps.ComprehensionStore == nil {
 		return nil, fmt.Errorf("comprehension settings not configured")
 	}
 
@@ -1840,7 +1840,7 @@ func (r *mutationResolver) UpdateModelCapabilities(ctx context.Context, input Up
 	input.ModelID = strings.ToLower(strings.TrimSpace(input.ModelID))
 
 	// Get existing or create new
-	mc, err := r.ComprehensionStore.GetModelCapabilities(ctx, input.ModelID)
+	mc, err := r.Deps.ComprehensionStore.GetModelCapabilities(ctx, input.ModelID)
 	if err != nil {
 		return nil, err
 	}
@@ -1898,7 +1898,7 @@ func (r *mutationResolver) UpdateModelCapabilities(ctx context.Context, input Up
 		mc.QualityGateTier = tier
 	}
 
-	if err := r.ComprehensionStore.SetModelCapabilities(ctx, mc); err != nil {
+	if err := r.Deps.ComprehensionStore.SetModelCapabilities(ctx, mc); err != nil {
 		return nil, err
 	}
 	return mapModelCapability(mc), nil
@@ -1907,10 +1907,10 @@ func (r *mutationResolver) UpdateModelCapabilities(ctx context.Context, input Up
 // DeleteModelCapabilities is the resolver for the deleteModelCapabilities field.
 func (r *mutationResolver) DeleteModelCapabilities(ctx context.Context, modelID string) (bool, error) {
 	recordDeprecatedFieldReadCtx(ctx, "Mutation.deleteModelCapabilities")
-	if r.ComprehensionStore == nil {
+	if r.Deps.ComprehensionStore == nil {
 		return false, fmt.Errorf("comprehension settings not configured")
 	}
-	if err := r.ComprehensionStore.DeleteModelCapabilities(ctx, modelID); err != nil {
+	if err := r.Deps.ComprehensionStore.DeleteModelCapabilities(ctx, modelID); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1923,12 +1923,12 @@ func (r *mutationResolver) DeleteModelCapabilitiesResult(ctx context.Context, mo
 
 // UpdateLivingWikiSettings is the resolver for the updateLivingWikiSettings field.
 func (r *mutationResolver) UpdateLivingWikiSettings(ctx context.Context, input UpdateLivingWikiSettingsInput) (*LivingWikiSettings, error) {
-	if r.LivingWikiStore == nil {
+	if r.Deps.LivingWikiStore == nil {
 		return nil, fmt.Errorf("living-wiki settings not configured")
 	}
 
 	// Load current stored settings so we can apply a partial patch.
-	current, err := r.LivingWikiStore.Get()
+	current, err := r.Deps.LivingWikiStore.Get()
 	if err != nil {
 		return nil, err
 	}
@@ -1971,17 +1971,17 @@ func (r *mutationResolver) UpdateLivingWikiSettings(ctx context.Context, input U
 		current.UpdatedBy = userID
 	}
 
-	if err := r.LivingWikiStore.Set(current); err != nil {
+	if err := r.Deps.LivingWikiStore.Set(current); err != nil {
 		return nil, err
 	}
 
 	// Invalidate the resolver cache so next webhook sees new values immediately.
-	if r.LivingWikiResolver != nil {
-		r.LivingWikiResolver.Invalidate()
+	if r.Deps.LivingWikiResolver != nil {
+		r.Deps.LivingWikiResolver.Invalidate()
 	}
 
 	// Append an audit entry when a credential field was rotated.
-	if credentialRotated && r.LivingWikiAuditLog != nil {
+	if credentialRotated && r.Deps.LivingWikiAuditLog != nil {
 		entry := governance.AuditEntry{
 			BlockID:              "lw_settings:default",
 			SourceSink:           "ui",
@@ -1990,15 +1990,15 @@ func (r *mutationResolver) UpdateLivingWikiSettings(ctx context.Context, input U
 			RemoteAddr:           remoteAddrFromContext(ctx),
 			Timestamp:            time.Now(),
 		}
-		_ = r.LivingWikiAuditLog.Append(ctx, entry)
+		_ = r.Deps.LivingWikiAuditLog.Append(ctx, entry)
 	}
 
-	return mapLivingWikiSettings(livingwiki.MaskSecrets(*current), r.Flags.LivingWikiKillSwitch), nil
+	return mapLivingWikiSettings(livingwiki.MaskSecrets(*current), r.Deps.Flags.LivingWikiKillSwitch), nil
 }
 
 // TestLivingWikiConnection is the resolver for the testLivingWikiConnection field.
 func (r *mutationResolver) TestLivingWikiConnection(ctx context.Context, provider string) (*LivingWikiConnectionTestResult, error) {
-	if r.LivingWikiResolver == nil {
+	if r.Deps.LivingWikiResolver == nil {
 		return &LivingWikiConnectionTestResult{
 			Provider: provider,
 			Ok:       false,
@@ -2006,7 +2006,7 @@ func (r *mutationResolver) TestLivingWikiConnection(ctx context.Context, provide
 		}, nil
 	}
 
-	res, err := r.LivingWikiResolver.Get()
+	res, err := r.Deps.LivingWikiResolver.Get()
 	if err != nil {
 		return nil, err
 	}
@@ -2032,12 +2032,12 @@ func (r *mutationResolver) TestLivingWikiConnection(ctx context.Context, provide
 // UpdateRepositoryLivingWikiSettings resolves Mutation.updateRepositoryLivingWikiSettings.
 // Applies a partial patch to the existing per-repo settings record.
 func (r *mutationResolver) UpdateRepositoryLivingWikiSettings(ctx context.Context, input UpdateRepositoryLivingWikiSettingsInput) (*RepositoryLivingWikiSettings, error) {
-	if r.LivingWikiRepoStore == nil {
+	if r.Deps.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
 
 	// Load current settings (nil = not yet configured → start from defaults).
-	current, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, input.RepositoryID)
+	current, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, input.RepositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -2078,7 +2078,7 @@ func (r *mutationResolver) UpdateRepositoryLivingWikiSettings(ctx context.Contex
 	current.UpdatedAt = time.Now()
 	current.UpdatedBy = userIDFromContext(ctx)
 
-	if err := r.LivingWikiRepoStore.SetRepoSettings(ctx, *current); err != nil {
+	if err := r.Deps.LivingWikiRepoStore.SetRepoSettings(ctx, *current); err != nil {
 		return nil, err
 	}
 	return mapRepoLivingWikiSettings(current), nil
@@ -2094,7 +2094,7 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 	if err := r.checkServerDraining(); err != nil {
 		return nil, err
 	}
-	if r.LivingWikiRepoStore == nil {
+	if r.Deps.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
 
@@ -2129,7 +2129,7 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 	// Without this seed, codex r2 noted, a first UI enable would land
 	// with both mode flags off — the UI would show "No build modes
 	// enabled" right after the user clicked Enable.
-	existing, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, input.RepositoryID)
+	existing, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, input.RepositoryID)
 	if err != nil {
 		return nil, fmt.Errorf("load existing repo settings: %w", err)
 	}
@@ -2179,9 +2179,9 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 	// ── Step 3: Resolve frozenCaller (for signature-validation taxonomy;
 	//            same snap used in closure for resolver+closure symmetry)
 	var frozenCaller *llmcall.Caller
-	if r.LLMResolver != nil && r.LLMCaller != nil {
-		if snap, resolveErr := r.LLMResolver.Resolve(ctx, input.RepositoryID, resolution.OpLivingWikiColdStart); resolveErr == nil {
-			frozenCaller = llmcall.New(r.LLMCaller.Inner(), resolution.NewFrozenResolver(snap), nil)
+	if r.Deps.LLMResolver != nil && r.Deps.LLMCaller != nil {
+		if snap, resolveErr := r.Deps.LLMResolver.Resolve(ctx, input.RepositoryID, resolution.OpLivingWikiColdStart); resolveErr == nil {
+			frozenCaller = llmcall.New(r.Deps.LLMCaller.Inner(), resolution.NewFrozenResolver(snap), nil)
 		}
 	}
 
@@ -2191,19 +2191,19 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 	// Each path persists settings and returns a notice. Runs BEFORE signature
 	// validation to avoid paying taxonomy cost when the system is paused.
 	globalEnabled := r.isLivingWikiGloballyEnabled()
-	killSwitch := r.Flags.LivingWikiKillSwitch
+	killSwitch := r.Deps.Flags.LivingWikiKillSwitch
 	gql := mapRepoLivingWikiSettings(&settings)
 
 	if !globalEnabled {
-		return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+		return persistSettingsAndNotice(ctx, r.Deps.LivingWikiRepoStore, settings, gql,
 			"Living Wiki is not enabled globally. Enable it in the global settings panel, then jobs will start automatically.")
 	}
 	if killSwitch {
-		return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+		return persistSettingsAndNotice(ctx, r.Deps.LivingWikiRepoStore, settings, gql,
 			"Living wiki is paused via SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH. Settings are saved but no jobs will run until the kill-switch is unset.")
 	}
-	if r.Orchestrator == nil {
-		return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+	if r.Deps.Orchestrator == nil {
+		return persistSettingsAndNotice(ctx, r.Deps.LivingWikiRepoStore, settings, gql,
 			"Living Wiki orchestrator is not available. Jobs will run when the server is fully configured.")
 	}
 
@@ -2216,7 +2216,7 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 	if input.SelectedPageIds != nil {
 		freshPages, taxErr := resolveTaxonomyForMode(
 			ctx, jobMode, input.RepositoryID,
-			r.getStore(ctx), frozenCaller, r.ClusterStore,
+			r.getStore(ctx), frozenCaller, r.Deps.ClusterStore,
 		)
 		if taxErr != nil {
 			return nil, fmt.Errorf("taxonomy resolution: %w", taxErr)
@@ -2277,7 +2277,7 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 	// Persisted AFTER signature validation so a stale Build click cannot
 	// mutate stored settings before the error is returned
 	// (TestEnableLivingWikiForRepo_StaleSignatureDoesNotPersistSettings).
-	if err := persistLivingWikiSettings(ctx, r.LivingWikiRepoStore, settings); err != nil {
+	if err := persistLivingWikiSettings(ctx, r.Deps.LivingWikiRepoStore, settings); err != nil {
 		return nil, err
 	}
 
@@ -2288,11 +2288,11 @@ func (r *mutationResolver) EnableLivingWikiForRepo(ctx context.Context, input En
 // DisableLivingWikiForRepo resolves Mutation.disableLivingWikiForRepo.
 // Soft-disables: sets enabled=false, records DisabledAt, preserves all sinks.
 func (r *mutationResolver) DisableLivingWikiForRepo(ctx context.Context, repositoryID string) (*RepositoryLivingWikiSettings, error) {
-	if r.LivingWikiRepoStore == nil {
+	if r.Deps.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
 
-	current, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	current, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -2308,7 +2308,7 @@ func (r *mutationResolver) DisableLivingWikiForRepo(ctx context.Context, reposit
 	current.UpdatedAt = time.Now()
 	current.UpdatedBy = userIDFromContext(ctx)
 
-	if err := r.LivingWikiRepoStore.SetRepoSettings(ctx, *current); err != nil {
+	if err := r.Deps.LivingWikiRepoStore.SetRepoSettings(ctx, *current); err != nil {
 		return nil, err
 	}
 	return mapRepoLivingWikiSettings(current), nil
@@ -2331,11 +2331,11 @@ func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID 
 	if err := r.checkServerDraining(); err != nil {
 		return nil, err
 	}
-	if r.LivingWikiRepoStore == nil {
+	if r.Deps.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
 
-	current, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	current, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
 	if err != nil {
 		return nil, fmt.Errorf("load repo settings: %w", err)
 	}
@@ -2415,22 +2415,22 @@ func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID 
 	// No-job gates (same as EnableLivingWikiForRepo step 4).
 	gql := mapRepoLivingWikiSettings(&settings)
 	globalEnabled := r.isLivingWikiGloballyEnabled()
-	killSwitch := r.Flags.LivingWikiKillSwitch
+	killSwitch := r.Deps.Flags.LivingWikiKillSwitch
 	if !globalEnabled {
-		return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+		return persistSettingsAndNotice(ctx, r.Deps.LivingWikiRepoStore, settings, gql,
 			"Living Wiki is not enabled globally. Enable it in the global settings panel, then jobs will start automatically.")
 	}
 	if killSwitch {
-		return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+		return persistSettingsAndNotice(ctx, r.Deps.LivingWikiRepoStore, settings, gql,
 			"Living wiki is paused via SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH. Settings are saved but no jobs will run until the kill-switch is unset.")
 	}
-	if r.Orchestrator == nil {
-		return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+	if r.Deps.Orchestrator == nil {
+		return persistSettingsAndNotice(ctx, r.Deps.LivingWikiRepoStore, settings, gql,
 			"Living Wiki orchestrator is not available. Jobs will run when the server is fully configured.")
 	}
 
 	// Persist the settings update (DisabledAt cleared, UpdatedAt stamped).
-	if err := persistLivingWikiSettings(ctx, r.LivingWikiRepoStore, settings); err != nil {
+	if err := persistLivingWikiSettings(ctx, r.Deps.LivingWikiRepoStore, settings); err != nil {
 		return nil, err
 	}
 
@@ -2439,11 +2439,11 @@ func (r *mutationResolver) RetryLivingWikiJob(ctx context.Context, repositoryID 
 
 // SetLivingWikiModeFlags resolves Mutation.setLivingWikiModeFlags.
 func (r *mutationResolver) SetLivingWikiModeFlags(ctx context.Context, repositoryID string, overviewEnabled bool, detailedEnabled bool) (*RepositoryLivingWikiSettings, error) {
-	if r.LivingWikiRepoStore == nil {
+	if r.Deps.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
 
-	current, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	current, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
 	if err != nil {
 		return nil, fmt.Errorf("load repo settings: %w", err)
 	}
@@ -2456,7 +2456,7 @@ func (r *mutationResolver) SetLivingWikiModeFlags(ctx context.Context, repositor
 	current.UpdatedAt = time.Now()
 	current.UpdatedBy = userIDFromContext(ctx)
 
-	if err := r.LivingWikiRepoStore.SetRepoSettings(ctx, *current); err != nil {
+	if err := r.Deps.LivingWikiRepoStore.SetRepoSettings(ctx, *current); err != nil {
 		return nil, fmt.Errorf("persist mode flags: %w", err)
 	}
 
@@ -2475,11 +2475,11 @@ func (r *mutationResolver) TriggerLivingWikiColdStartAllEnabled(ctx context.Cont
 	if err := r.checkServerDraining(); err != nil {
 		return nil, err
 	}
-	if r.LivingWikiRepoStore == nil {
+	if r.Deps.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
 
-	current, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	current, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
 	if err != nil {
 		return nil, fmt.Errorf("load repo settings: %w", err)
 	}
@@ -2497,17 +2497,17 @@ func (r *mutationResolver) TriggerLivingWikiColdStartAllEnabled(ctx context.Cont
 		gql := mapRepoLivingWikiSettings(&settings)
 
 		globalEnabled := r.isLivingWikiGloballyEnabled()
-		killSwitch := r.Flags.LivingWikiKillSwitch
+		killSwitch := r.Deps.Flags.LivingWikiKillSwitch
 		if !globalEnabled {
-			return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+			return persistSettingsAndNotice(ctx, r.Deps.LivingWikiRepoStore, settings, gql,
 				"Living Wiki is not enabled globally. Enable it in the global settings panel, then jobs will start automatically.")
 		}
 		if killSwitch {
-			return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+			return persistSettingsAndNotice(ctx, r.Deps.LivingWikiRepoStore, settings, gql,
 				"Living wiki is paused via SOURCEBRIDGE_LIVING_WIKI_KILL_SWITCH. Settings are saved but no jobs will run until the kill-switch is unset.")
 		}
-		if r.Orchestrator == nil {
-			return persistSettingsAndNotice(ctx, r.LivingWikiRepoStore, settings, gql,
+		if r.Deps.Orchestrator == nil {
+			return persistSettingsAndNotice(ctx, r.Deps.LivingWikiRepoStore, settings, gql,
 				"Living Wiki orchestrator is not available. Jobs will run when the server is fully configured.")
 		}
 
@@ -2560,8 +2560,8 @@ func (r *mutationResolver) GenerateLivingWikiPageOnDemand(ctx context.Context, r
 	// and increments the counter under the same mutex that BeginDrain uses,
 	// closing the TOCTOU window that existed when IsDraining and AdmitOnDemand
 	// were separate calls.
-	if r.DrainAdmitter != nil {
-		admission, admitted := r.DrainAdmitter.TryAdmitOnDemand()
+	if r.Deps.DrainAdmitter != nil {
+		admission, admitted := r.Deps.DrainAdmitter.TryAdmitOnDemand()
 		if !admitted {
 			return nil, &gqlerror.Error{
 				Message: "The server is draining for a graceful restart. " +
@@ -2576,10 +2576,10 @@ func (r *mutationResolver) GenerateLivingWikiPageOnDemand(ctx context.Context, r
 	}
 
 	// ── 1. Gate: Detailed mode must be enabled ────────────────────────────────
-	if r.LivingWikiRepoStore == nil {
+	if r.Deps.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
-	settings, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	settings, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
 	if err != nil {
 		return nil, fmt.Errorf("load repo settings: %w", err)
 	}
@@ -2628,10 +2628,10 @@ func (r *mutationResolver) GenerateLivingWikiPageOnDemand(ctx context.Context, r
 	pageID := lworch.DetailPageID(repositoryID, scope)
 
 	// ── 4. Require the orchestrator ───────────────────────────────────────────
-	if r.LivingWikiLiveOrchestrator == nil {
+	if r.Deps.LivingWikiLiveOrchestrator == nil {
 		return nil, fmt.Errorf("living-wiki orchestrator not configured")
 	}
-	lwOrch := r.LivingWikiLiveOrchestrator
+	lwOrch := r.Deps.LivingWikiLiveOrchestrator
 
 	// ── 5. Resolve+freeze LLM identity and derive quality-gate tier ─────────
 	//
@@ -2641,18 +2641,18 @@ func (r *mutationResolver) GenerateLivingWikiPageOnDemand(ctx context.Context, r
 		onDemandSnap       resolution.Snapshot
 		onDemandResolveErr error
 	)
-	if r.LLMResolver != nil {
-		onDemandSnap, onDemandResolveErr = r.LLMResolver.Resolve(ctx, repositoryID, resolution.OpLivingWikiColdStart)
+	if r.Deps.LLMResolver != nil {
+		onDemandSnap, onDemandResolveErr = r.Deps.LLMResolver.Resolve(ctx, repositoryID, resolution.OpLivingWikiColdStart)
 	} else {
 		onDemandResolveErr = errors.New("llmResolver is nil")
 	}
 
-	frozenCaller := r.LLMCaller
-	if onDemandResolveErr == nil && r.LLMCaller != nil {
-		frozenCaller = llmcall.New(r.LLMCaller.Inner(), resolution.NewFrozenResolver(onDemandSnap), nil)
+	frozenCaller := r.Deps.LLMCaller
+	if onDemandResolveErr == nil && r.Deps.LLMCaller != nil {
+		frozenCaller = llmcall.New(r.Deps.LLMCaller.Inner(), resolution.NewFrozenResolver(onDemandSnap), nil)
 	}
 
-	onDemandTierFn := newRegistryTierFunc(r.ComprehensionStore)
+	onDemandTierFn := newRegistryTierFunc(r.Deps.ComprehensionStore)
 	onDemandTierResolution := modeltier.Resolution{
 		Tier:   modeltier.TierLocal,
 		Source: "fallback",
@@ -2752,7 +2752,7 @@ func (r *mutationResolver) GenerateLivingWikiPageOnDemand(ctx context.Context, r
 		sinkResults := dispatchGeneratedPages(
 			ctx, repositoryID, defaultTenantID,
 			result.Generated, nil, /* no skippedPageIDs for on-demand */
-			r.livingWikiBroker(), r.LivingWikiRepoStore,
+			r.livingWikiBroker(), r.Deps.LivingWikiRepoStore,
 			repoName,
 			&status, &failCat, &errMsg,
 			GenerationModeLWDetailed,
@@ -2811,7 +2811,7 @@ func (r *mutationResolver) GenerateLivingWikiPageOnDemand(ctx context.Context, r
 // safer invariant because a stale UI cache cannot accidentally write a
 // half-and-half row.
 func (r *mutationResolver) SetRepositoryLLMOverride(ctx context.Context, repositoryID string, input RepositoryLLMOverrideInput) (*RepositoryLLMOverride, error) {
-	if r.LivingWikiRepoStore == nil {
+	if r.Deps.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
 
@@ -2820,8 +2820,8 @@ func (r *mutationResolver) SetRepositoryLLMOverride(ctx context.Context, reposit
 	// error and never touch the override row, preserving the user's
 	// previous state for the resolution-panel flow.
 	if input.ProfileID != nil && *input.ProfileID != "" {
-		if r.LLMProfileLookup != nil {
-			name, exists, lerr := r.LLMProfileLookup.LookupProfileName(ctx, *input.ProfileID)
+		if r.Deps.LLMProfileLookup != nil {
+			name, exists, lerr := r.Deps.LLMProfileLookup.LookupProfileName(ctx, *input.ProfileID)
 			if lerr != nil {
 				return nil, fmt.Errorf("validate profileId: %w", lerr)
 			}
@@ -2847,7 +2847,7 @@ func (r *mutationResolver) SetRepositoryLLMOverride(ctx context.Context, reposit
 		// resolve time (Warn log + workspace fallback).
 	}
 
-	current, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	current, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
 	if err != nil {
 		return nil, fmt.Errorf("load repo settings: %w", err)
 	}
@@ -2963,7 +2963,7 @@ func (r *mutationResolver) SetRepositoryLLMOverride(ctx context.Context, reposit
 	current.UpdatedAt = time.Now()
 	current.UpdatedBy = userIDFromContext(ctx)
 
-	if err := r.LivingWikiRepoStore.SetRepoSettings(ctx, *current); err != nil {
+	if err := r.Deps.LivingWikiRepoStore.SetRepoSettings(ctx, *current); err != nil {
 		// Map the encryption-key-required sentinel into a GraphQL error
 		// with an extension code so the UI can render a precise message.
 		if errors.Is(err, livingwiki.ErrEncryptionKeyRequired) {
@@ -2980,7 +2980,7 @@ func (r *mutationResolver) SetRepositoryLLMOverride(ctx context.Context, reposit
 
 	// Re-load to get the saved value (so the cipher round-trip + masking
 	// reflects what's actually persisted, not what the request claimed).
-	saved, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	saved, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
 	if err != nil {
 		return nil, fmt.Errorf("reload repo settings after save: %w", err)
 	}
@@ -2992,8 +2992,8 @@ func (r *mutationResolver) SetRepositoryLLMOverride(ctx context.Context, reposit
 	// Slice 3: populate profileName on the response so the UI doesn't
 	// need a follow-up GET. Direct lookup matches ian-M3 (no cache in
 	// v1; profile-name fetches are cheap by design).
-	if out.ProfileID != nil && *out.ProfileID != "" && r.LLMProfileLookup != nil {
-		name, exists, lerr := r.LLMProfileLookup.LookupProfileName(ctx, *out.ProfileID)
+	if out.ProfileID != nil && *out.ProfileID != "" && r.Deps.LLMProfileLookup != nil {
+		name, exists, lerr := r.Deps.LLMProfileLookup.LookupProfileName(ctx, *out.ProfileID)
 		if lerr == nil && exists {
 			n := name
 			out.ProfileName = &n
@@ -3010,11 +3010,11 @@ func (r *mutationResolver) SetRepositoryLLMOverride(ctx context.Context, reposit
 // ClearRepositoryLLMOverride removes the per-repository LLM override
 // entirely. Returns the updated RepositoryLivingWikiSettings record.
 func (r *mutationResolver) ClearRepositoryLLMOverride(ctx context.Context, repositoryID string) (*RepositoryLivingWikiSettings, error) {
-	if r.LivingWikiRepoStore == nil {
+	if r.Deps.LivingWikiRepoStore == nil {
 		return nil, fmt.Errorf("living-wiki repo store not configured")
 	}
 
-	current, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	current, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
 	if err != nil {
 		return nil, fmt.Errorf("load repo settings: %w", err)
 	}
@@ -3027,7 +3027,7 @@ func (r *mutationResolver) ClearRepositoryLLMOverride(ctx context.Context, repos
 	current.UpdatedAt = time.Now()
 	current.UpdatedBy = userIDFromContext(ctx)
 
-	if err := r.LivingWikiRepoStore.SetRepoSettings(ctx, *current); err != nil {
+	if err := r.Deps.LivingWikiRepoStore.SetRepoSettings(ctx, *current); err != nil {
 		return nil, fmt.Errorf("persist repo settings: %w", err)
 	}
 	return mapRepoLivingWikiSettings(current), nil
@@ -3068,8 +3068,8 @@ func (r *queryResolver) Health(ctx context.Context) (*HealthStatus, error) {
 
 	// Check worker
 	workerStatus := "unavailable"
-	if r.Worker != nil {
-		healthy, err := r.Worker.CheckHealth(ctx)
+	if r.Deps.Worker != nil {
+		healthy, err := r.Deps.Worker.CheckHealth(ctx)
 		if err == nil && healthy {
 			workerStatus = "healthy"
 		} else if err != nil {
@@ -3093,7 +3093,7 @@ func (r *queryResolver) Health(ctx context.Context) (*HealthStatus, error) {
 // It MUST NOT touch the database — it is the mechanism by which we detect DB
 // outages, so introducing a DB dependency here would break that detection.
 func (r *queryResolver) ServiceHealth(ctx context.Context) (*PlatformHealth, error) {
-	if r.HealthChecker == nil {
+	if r.Deps.HealthChecker == nil {
 		// No checker wired (embedded mode or tests) — report everything healthy
 		// so the banner stays hidden in environments where live checks aren't
 		// meaningful.
@@ -3106,7 +3106,7 @@ func (r *queryResolver) ServiceHealth(ctx context.Context) (*PlatformHealth, err
 		}, nil
 	}
 
-	s := r.HealthChecker.Get(ctx)
+	s := r.Deps.HealthChecker.Get(ctx)
 	return &PlatformHealth{
 		Overall:   s.Overall,
 		Surreal:   s.Surreal,
@@ -3122,9 +3122,9 @@ func (r *queryResolver) ServiceHealth(ctx context.Context) (*PlatformHealth, err
 // parity test in internal/api/rest/graphql_version_parity_test.go.
 //
 // Edition source-of-truth precedence (matches CA-136 REST handler):
-//   - r.Config.Edition (runtime config) when set; this is what the
+//   - r.Deps.Config.Edition (runtime config) when set; this is what the
 //     operator deployed as.
-//   - "unknown" otherwise. r.Config can be nil in tests that
+//   - "unknown" otherwise. r.Deps.Config can be nil in tests that
 //     construct Resolver{} without wiring; nil-safe by design.
 //
 // workerVersion uses the same cached lookup as REST so a high-cadence
@@ -3132,12 +3132,12 @@ func (r *queryResolver) ServiceHealth(ctx context.Context) (*PlatformHealth, err
 // gRPC traffic.
 func (r *queryResolver) Version(ctx context.Context) (*VersionInfo, error) {
 	edition := "unknown"
-	if r.Config != nil && r.Config.Edition != "" {
-		edition = r.Config.Edition
+	if r.Deps.Config != nil && r.Deps.Config.Edition != "" {
+		edition = r.Deps.Config.Edition
 	}
 	workerVer := ""
-	if r.WorkerVersion != nil {
-		workerVer = r.WorkerVersion(ctx)
+	if r.Deps.WorkerVersion != nil {
+		workerVer = r.Deps.WorkerVersion(ctx)
 	}
 	return &VersionInfo{
 		Version:       version.Version,
@@ -3309,7 +3309,7 @@ func (r *queryResolver) Search(ctx context.Context, query string, repositoryID *
 	if r.getStore(ctx) == nil {
 		return []*SearchResult{}, nil
 	}
-	if r.SearchSvc == nil {
+	if r.Deps.SearchSvc == nil {
 		return r.searchLegacy(ctx, query, repositoryID, limit)
 	}
 
@@ -3356,7 +3356,7 @@ func (r *queryResolver) Search(ctx context.Context, query string, repositoryID *
 
 			cctx, cancel := context.WithTimeout(ctx, perRepoSearchTimeout)
 			defer cancel()
-			resp, err := r.SearchSvc.Search(cctx, &search.Request{
+			resp, err := r.Deps.SearchSvc.Search(cctx, &search.Request{
 				Repo:  repo.ID,
 				Query: query,
 				Limit: maxResults,
@@ -3568,8 +3568,8 @@ func (r *queryResolver) SourceFile(ctx context.Context, repositoryID string, fil
 	}
 
 	maxBytes := int64(1024 * 1024)
-	if r.Config != nil && r.Config.Indexing.MaxFileSize > 0 {
-		maxBytes = r.Config.Indexing.MaxFileSize
+	if r.Deps.Config != nil && r.Deps.Config.Indexing.MaxFileSize > 0 {
+		maxBytes = r.Deps.Config.Indexing.MaxFileSize
 	}
 
 	content, err := readSourceFileLimited(repoRoot, filePath, maxBytes)
@@ -3643,14 +3643,14 @@ func (r *queryResolver) SourceFile(ctx context.Context, repositoryID string, fil
 
 // KnowledgeArtifacts is the resolver for the knowledgeArtifacts field.
 func (r *queryResolver) KnowledgeArtifacts(ctx context.Context, repositoryID string, scopeType *KnowledgeScopeType, scopePath *string) ([]*KnowledgeArtifact, error) {
-	if r.KnowledgeStore == nil {
+	if r.Deps.KnowledgeStore == nil {
 		return []*KnowledgeArtifact{}, nil
 	}
-	artifacts := r.KnowledgeStore.GetKnowledgeArtifacts(ctx, repositoryID)
+	artifacts := r.Deps.KnowledgeStore.GetKnowledgeArtifacts(ctx, repositoryID)
 	if scopeType == nil && scopePath == nil {
 		result := make([]*KnowledgeArtifact, len(artifacts))
 		for i, a := range artifacts {
-			result[i] = mapKnowledgeArtifactWithStore(ctx, r.KnowledgeStore, a)
+			result[i] = mapKnowledgeArtifactWithStore(ctx, r.Deps.KnowledgeStore, a)
 		}
 		return result, nil
 	}
@@ -3665,7 +3665,7 @@ func (r *queryResolver) KnowledgeArtifacts(ctx context.Context, repositoryID str
 			artifactScope = a.Scope.Normalize()
 		}
 		if artifactScope.ScopeKey() == scope.ScopeKey() {
-			result = append(result, mapKnowledgeArtifactWithStore(ctx, r.KnowledgeStore, a))
+			result = append(result, mapKnowledgeArtifactWithStore(ctx, r.Deps.KnowledgeStore, a))
 		}
 	}
 	if result == nil {
@@ -3676,26 +3676,26 @@ func (r *queryResolver) KnowledgeArtifacts(ctx context.Context, repositoryID str
 
 // KnowledgeArtifact is the resolver for the knowledgeArtifact field.
 func (r *queryResolver) KnowledgeArtifact(ctx context.Context, id string) (*KnowledgeArtifact, error) {
-	if r.KnowledgeStore == nil {
+	if r.Deps.KnowledgeStore == nil {
 		return nil, nil
 	}
-	a := r.KnowledgeStore.GetKnowledgeArtifact(ctx, id)
+	a := r.Deps.KnowledgeStore.GetKnowledgeArtifact(ctx, id)
 	if a == nil {
 		return nil, nil
 	}
-	return mapKnowledgeArtifactWithStore(ctx, r.KnowledgeStore, a), nil
+	return mapKnowledgeArtifactWithStore(ctx, r.Deps.KnowledgeStore, a), nil
 }
 
 // RepositoryUnderstanding is the resolver for the repositoryUnderstanding field.
 func (r *queryResolver) RepositoryUnderstanding(ctx context.Context, repositoryID string, scopeType *KnowledgeScopeType, scopePath *string) (*RepositoryUnderstanding, error) {
-	if r.KnowledgeStore == nil {
+	if r.Deps.KnowledgeStore == nil {
 		return nil, nil
 	}
 	scope, err := artifactScopeFromInput(scopeType, scopePath)
 	if err != nil {
 		return nil, err
 	}
-	return mapRepositoryUnderstanding(r.KnowledgeStore.GetRepositoryUnderstanding(ctx, repositoryID, scope)), nil
+	return mapRepositoryUnderstanding(r.Deps.KnowledgeStore.GetRepositoryUnderstanding(ctx, repositoryID, scope)), nil
 }
 
 // KnowledgeScopeChildren is the resolver for the knowledgeScopeChildren field.
@@ -3704,7 +3704,7 @@ func (r *queryResolver) KnowledgeScopeChildren(ctx context.Context, repositoryID
 	if store == nil {
 		return []*ScopeChild{}, nil
 	}
-	if r.KnowledgeStore == nil {
+	if r.Deps.KnowledgeStore == nil {
 		return []*ScopeChild{}, nil
 	}
 	scope := knowledgepkg.ArtifactScope{
@@ -3723,7 +3723,7 @@ func (r *queryResolver) KnowledgeScopeChildren(ctx context.Context, repositoryID
 			Depth:        childDepth,
 			Scope:        child,
 		}.Normalized()
-		existing := r.KnowledgeStore.GetArtifactByKey(ctx, key)
+		existing := r.Deps.KnowledgeStore.GetArtifactByKey(ctx, key)
 		hasArtifact := existing != nil && existing.Status == knowledgepkg.StatusReady && !existing.Stale
 		var summary *string
 		if hasArtifact && len(existing.Sections) > 0 {
@@ -3789,7 +3789,7 @@ func (r *queryResolver) UnderstandingScore(ctx context.Context, repositoryID str
 	if store == nil {
 		return nil, fmt.Errorf("store not initialized")
 	}
-	score := graphstore.ComputeUnderstandingScore(ctx, store, newKnowledgeFreshnessProvider(r.KnowledgeStore), repositoryID)
+	score := graphstore.ComputeUnderstandingScore(ctx, store, newKnowledgeFreshnessProvider(r.Deps.KnowledgeStore), repositoryID)
 	return mapUnderstandingScore(score), nil
 }
 
@@ -4041,7 +4041,7 @@ func (r *queryResolver) PlatformStats(ctx context.Context) (*PlatformStats, erro
 
 // ComprehensionSettings is the resolver for the comprehensionSettings field.
 func (r *queryResolver) ComprehensionSettings(ctx context.Context, scopeType *string, scopeKey *string) (*EffectiveComprehensionSettings, error) {
-	if r.ComprehensionStore == nil {
+	if r.Deps.ComprehensionStore == nil {
 		return nil, fmt.Errorf("comprehension settings not configured")
 	}
 	st := "workspace"
@@ -4053,7 +4053,7 @@ func (r *queryResolver) ComprehensionSettings(ctx context.Context, scopeType *st
 		sk = *scopeKey
 	}
 	scope := comprehension.Scope{Type: comprehension.ScopeType(st), Key: sk}
-	eff, err := comprehension.Resolve(ctx, r.ComprehensionStore, scope)
+	eff, err := comprehension.Resolve(ctx, r.Deps.ComprehensionStore, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -4063,10 +4063,10 @@ func (r *queryResolver) ComprehensionSettings(ctx context.Context, scopeType *st
 // ComprehensionSettingsList is the resolver for the comprehensionSettingsList field.
 func (r *queryResolver) ComprehensionSettingsList(ctx context.Context) ([]*ComprehensionSettings, error) {
 	recordDeprecatedFieldReadCtx(ctx, "Query.comprehensionSettingsList")
-	if r.ComprehensionStore == nil {
+	if r.Deps.ComprehensionStore == nil {
 		return nil, fmt.Errorf("comprehension settings not configured")
 	}
-	list, err := r.ComprehensionStore.ListSettings(ctx)
+	list, err := r.Deps.ComprehensionStore.ListSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -4079,10 +4079,10 @@ func (r *queryResolver) ComprehensionSettingsList(ctx context.Context) ([]*Compr
 
 // ModelCapabilities is the resolver for the modelCapabilities field.
 func (r *queryResolver) ModelCapabilities(ctx context.Context) ([]*ModelCapabilityProfile, error) {
-	if r.ComprehensionStore == nil {
+	if r.Deps.ComprehensionStore == nil {
 		return nil, fmt.Errorf("comprehension settings not configured")
 	}
-	list, err := r.ComprehensionStore.ListModelCapabilities(ctx)
+	list, err := r.Deps.ComprehensionStore.ListModelCapabilities(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -4095,10 +4095,10 @@ func (r *queryResolver) ModelCapabilities(ctx context.Context) ([]*ModelCapabili
 
 // ModelCapability is the resolver for the modelCapability field.
 func (r *queryResolver) ModelCapability(ctx context.Context, modelID string) (*ModelCapabilityProfile, error) {
-	if r.ComprehensionStore == nil {
+	if r.Deps.ComprehensionStore == nil {
 		return nil, fmt.Errorf("comprehension settings not configured")
 	}
-	mc, err := r.ComprehensionStore.GetModelCapabilities(ctx, modelID)
+	mc, err := r.Deps.ComprehensionStore.GetModelCapabilities(ctx, modelID)
 	if err != nil {
 		return nil, err
 	}
@@ -4120,22 +4120,22 @@ func (r *queryResolver) TrashRetentionDays(ctx context.Context) (int, error) {
 
 // LivingWikiSettings is the resolver for the livingWikiSettings field.
 func (r *queryResolver) LivingWikiSettings(ctx context.Context) (*LivingWikiSettings, error) {
-	if r.LivingWikiStore == nil {
+	if r.Deps.LivingWikiStore == nil {
 		return &LivingWikiSettings{}, nil
 	}
-	s, err := r.LivingWikiStore.Get()
+	s, err := r.Deps.LivingWikiStore.Get()
 	if err != nil {
 		return nil, err
 	}
-	return mapLivingWikiSettings(livingwiki.MaskSecrets(*s), r.Flags.LivingWikiKillSwitch), nil
+	return mapLivingWikiSettings(livingwiki.MaskSecrets(*s), r.Deps.Flags.LivingWikiKillSwitch), nil
 }
 
 // RepositoryLivingWikiSettings resolves Query.repositoryLivingWikiSettings.
 func (r *queryResolver) RepositoryLivingWikiSettings(ctx context.Context, repositoryID string) (*RepositoryLivingWikiSettings, error) {
-	if r.LivingWikiRepoStore == nil {
+	if r.Deps.LivingWikiRepoStore == nil {
 		return nil, nil
 	}
-	s, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
+	s, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, repositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -4144,10 +4144,10 @@ func (r *queryResolver) RepositoryLivingWikiSettings(ctx context.Context, reposi
 
 // RepositoriesUsingSink resolves Query.repositoriesUsingSink.
 func (r *queryResolver) RepositoriesUsingSink(ctx context.Context, integrationName string) ([]*Repository, error) {
-	if r.LivingWikiRepoStore == nil {
+	if r.Deps.LivingWikiRepoStore == nil {
 		return []*Repository{}, nil
 	}
-	rows, err := r.LivingWikiRepoStore.RepositoriesUsingSink(ctx, defaultTenantID, integrationName)
+	rows, err := r.Deps.LivingWikiRepoStore.RepositoriesUsingSink(ctx, defaultTenantID, integrationName)
 	if err != nil {
 		return nil, err
 	}
@@ -4205,21 +4205,21 @@ func (r *repositoryResolver) UnderstandingScore(ctx context.Context, obj *Reposi
 	// Always compute the full score so sub-score breakdowns are populated.
 	// The cache only stores the overall value, so using it would zero out
 	// the breakdown fields (traceability, documentation, review, test, knowledge).
-	score := graphstore.ComputeUnderstandingScore(ctx, store, newKnowledgeFreshnessProvider(r.KnowledgeStore), obj.ID)
+	score := graphstore.ComputeUnderstandingScore(ctx, store, newKnowledgeFreshnessProvider(r.Deps.KnowledgeStore), obj.ID)
 	store.CacheUnderstandingScore(ctx, obj.ID, score.Overall)
 	return mapUnderstandingScore(score), nil
 }
 
 // RepositoryUnderstanding is the resolver for the repositoryUnderstanding field.
 func (r *repositoryResolver) RepositoryUnderstanding(ctx context.Context, obj *Repository, scopeType *KnowledgeScopeType, scopePath *string) (*RepositoryUnderstanding, error) {
-	if r.KnowledgeStore == nil || obj == nil {
+	if r.Deps.KnowledgeStore == nil || obj == nil {
 		return nil, nil
 	}
 	scope, err := artifactScopeFromInput(scopeType, scopePath)
 	if err != nil {
 		return nil, err
 	}
-	return mapRepositoryUnderstanding(r.KnowledgeStore.GetRepositoryUnderstanding(ctx, obj.ID, scope)), nil
+	return mapRepositoryUnderstanding(r.Deps.KnowledgeStore.GetRepositoryUnderstanding(ctx, obj.ID, scope)), nil
 }
 
 // UpstreamStatus is the resolver for the upstreamStatus field.
@@ -4246,10 +4246,10 @@ func (r *repositoryResolver) UpstreamStatus(ctx context.Context, obj *Repository
 
 // LivingWikiSettings resolves Repository.livingWikiSettings.
 func (r *repositoryResolver) LivingWikiSettings(ctx context.Context, obj *Repository) (*RepositoryLivingWikiSettings, error) {
-	if r.LivingWikiRepoStore == nil {
+	if r.Deps.LivingWikiRepoStore == nil {
 		return nil, nil
 	}
-	s, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, obj.ID)
+	s, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, obj.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -4259,10 +4259,10 @@ func (r *repositoryResolver) LivingWikiSettings(ctx context.Context, obj *Reposi
 // LastJobResult resolves RepositoryLivingWikiSettings.lastJobResult.
 // Returns the most recent job result for the repo, or nil when none exists.
 func (r *repositoryLivingWikiSettingsResolver) LastJobResult(ctx context.Context, obj *RepositoryLivingWikiSettings) (*LivingWikiJobResult, error) {
-	if r.LivingWikiJobResultStore == nil || obj == nil || obj.RepoID == "" {
+	if r.Deps.LivingWikiJobResultStore == nil || obj == nil || obj.RepoID == "" {
 		return nil, nil
 	}
-	result, err := r.LivingWikiJobResultStore.LastResultForRepo(ctx, defaultTenantID, obj.RepoID)
+	result, err := r.Deps.LivingWikiJobResultStore.LastResultForRepo(ctx, defaultTenantID, obj.RepoID)
 	if err != nil || result == nil {
 		return nil, err
 	}
@@ -4288,13 +4288,13 @@ func (r *repositoryLivingWikiSettingsResolver) LastJobResult(ctx context.Context
 // response). The UI listens for this extension code and renders the
 // resolution panel; it does NOT navigate away or hide the override.
 func (r *repositoryLivingWikiSettingsResolver) LlmOverride(ctx context.Context, obj *RepositoryLivingWikiSettings) (*RepositoryLLMOverride, error) {
-	if r.LivingWikiRepoStore == nil {
+	if r.Deps.LivingWikiRepoStore == nil {
 		return nil, nil
 	}
 	if obj == nil || obj.RepoID == "" {
 		return nil, nil
 	}
-	settings, err := r.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, obj.RepoID)
+	settings, err := r.Deps.LivingWikiRepoStore.GetRepoSettings(ctx, defaultTenantID, obj.RepoID)
 	if err != nil {
 		return nil, fmt.Errorf("load repo settings for llmOverride: %w", err)
 	}
@@ -4311,8 +4311,8 @@ func (r *repositoryLivingWikiSettingsResolver) LlmOverride(ctx context.Context, 
 	//   - lookup fails entirely → log + leave profileName nil; do NOT
 	//     surface PROFILE_NO_LONGER_EXISTS without proof. A DB outage
 	//     should not be misrendered as "your profile is deleted".
-	if out.ProfileID != nil && *out.ProfileID != "" && r.LLMProfileLookup != nil {
-		name, exists, lerr := r.LLMProfileLookup.LookupProfileName(ctx, *out.ProfileID)
+	if out.ProfileID != nil && *out.ProfileID != "" && r.Deps.LLMProfileLookup != nil {
+		name, exists, lerr := r.Deps.LLMProfileLookup.LookupProfileName(ctx, *out.ProfileID)
 		if lerr != nil {
 			// Generic lookup failure — surface but do NOT misclassify.
 			return out, fmt.Errorf("lookup profileName: %w", lerr)

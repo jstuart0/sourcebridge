@@ -19,8 +19,9 @@ import (
 	"time"
 
 	"github.com/99designs/gqlgen/graphql/handler"
-	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 )
 
@@ -104,11 +105,13 @@ func TestEnableLivingWikiForRepo_StaleSignaturePathReturnsFreshPlanInGraphQLResp
 	cs := csClusterStore(2) // 2 cluster pages + 3 repo-wide = 5 total
 
 	r := &Resolver{
-		LivingWikiRepoStore: repoStore,
-		LivingWikiStore:     globalStore,
-		ClusterStore:        cs,
-		Store:               newStubGraphStore(),
-		Orchestrator:        llmOrch,
+		Deps: &appdeps.AppDeps{
+			LivingWikiRepoStore: repoStore,
+			LivingWikiStore:     globalStore,
+			ClusterStore:        cs,
+			Orchestrator:        llmOrch,
+		},
+		Store: newStubGraphStore(),
 	}
 	srv := newTestGQLServer(t, r)
 	defer srv.Close()

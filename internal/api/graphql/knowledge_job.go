@@ -190,7 +190,7 @@ func (r *Resolver) enqueueKnowledgeJob(
 	snapshotBytes int,
 	run func(ctx context.Context, rt llm.Runtime) error,
 ) error {
-	if r.Orchestrator == nil {
+	if r.Deps.Orchestrator == nil {
 		return fmt.Errorf("llm orchestrator is not configured")
 	}
 	if artifact == nil {
@@ -231,7 +231,7 @@ func (r *Resolver) enqueueKnowledgeJob(
 		MaxAttempts:    knowledgeJobMaxAttempts(artifact, scope),
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
 			rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot", 0)
-			if err := r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(ctx, artifact.ID, 0.02, "queued", "Waiting for knowledge generation slot"); err != nil {
+			if err := r.Deps.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(ctx, artifact.ID, 0.02, "queued", "Waiting for knowledge generation slot"); err != nil {
 				knowledgeProgressWriteErrorsTotal.Add(1)
 				slog.Warn("knowledge_progress_write_failed",
 					"event", "knowledge_progress_write_failed",
@@ -239,24 +239,24 @@ func (r *Resolver) enqueueKnowledgeJob(
 					"phase", "queued",
 					"error", err)
 			}
-			appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "queued", "knowledge_slot_wait_started", "Waiting for knowledge generation slot", map[string]any{
+			appendJobLog(r.Deps.Orchestrator, rt, llm.LogLevelInfo, "queued", "knowledge_slot_wait_started", "Waiting for knowledge generation slot", map[string]any{
 				"job_type": jobType,
 			})
-			stopHeartbeat := startKnowledgeQueueHeartbeat(runCtx, rt, artifact.ID, r.KnowledgeStore)
+			stopHeartbeat := startKnowledgeQueueHeartbeat(runCtx, rt, artifact.ID, r.Deps.KnowledgeStore)
 			defer stopHeartbeat()
 			releaseGlobal, err := acquireKnowledgeGlobalSlot(runCtx)
 			if err != nil {
 				return err
 			}
 			defer releaseGlobal()
-			appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "queued", "knowledge_global_slot_acquired", "Acquired global knowledge slot", nil)
+			appendJobLog(r.Deps.Orchestrator, rt, llm.LogLevelInfo, "queued", "knowledge_global_slot_acquired", "Acquired global knowledge slot", nil)
 			release, err := acquireKnowledgeJobSlot(runCtx, jobType)
 			if err != nil {
 				return err
 			}
 			defer release()
 			stopHeartbeat()
-			appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "queued", "knowledge_job_slot_acquired", "Acquired job-specific knowledge slot", map[string]any{
+			appendJobLog(r.Deps.Orchestrator, rt, llm.LogLevelInfo, "queued", "knowledge_job_slot_acquired", "Acquired job-specific knowledge slot", map[string]any{
 				"job_type": jobType,
 			})
 			if snapshotBytes > 0 {
@@ -268,17 +268,17 @@ func (r *Resolver) enqueueKnowledgeJob(
 				// knowledgeArtifact GraphQL type shows the error. The
 				// orchestrator will independently persist the error on
 				// the llm.Job record via its finalizeFailed path.
-				persistArtifactFailure(ctx, r.KnowledgeStore, artifact.ID, err)
+				persistArtifactFailure(ctx, r.Deps.KnowledgeStore, artifact.ID, err)
 				return err
 			}
 			return nil
 		},
 	}
 
-	if _, err := r.Orchestrator.Enqueue(req); err != nil {
+	if _, err := r.Deps.Orchestrator.Enqueue(req); err != nil {
 		// Synchronous enqueue failure — keep the artifact's failure
 		// state in sync with the user-visible error.
-		persistArtifactFailure(ctx, r.KnowledgeStore, artifact.ID, err)
+		persistArtifactFailure(ctx, r.Deps.KnowledgeStore, artifact.ID, err)
 		slog.Error("knowledge_job_enqueue_failed",
 			"artifact_id", artifact.ID,
 			"job_type", jobType,
@@ -312,7 +312,7 @@ func enqueueRepositoryUnderstandingJob(
 	snapshotJSON []byte,
 	run func(ctx context.Context, rt llm.Runtime) error,
 ) error {
-	if r == nil || r.Orchestrator == nil {
+	if r == nil || r.Deps.Orchestrator == nil {
 		return fmt.Errorf("llm orchestrator is not configured")
 	}
 	if repo == nil {
@@ -341,7 +341,7 @@ func enqueueRepositoryUnderstandingJob(
 		MaxAttempts: 3,
 		RunWithContext: func(runCtx context.Context, rt llm.Runtime) error {
 			rt.ReportProgress(0.02, "queued", "Waiting for knowledge generation slot", 0)
-			appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "queued", "knowledge_slot_wait_started", "Waiting for knowledge generation slot", map[string]any{
+			appendJobLog(r.Deps.Orchestrator, rt, llm.LogLevelInfo, "queued", "knowledge_slot_wait_started", "Waiting for knowledge generation slot", map[string]any{
 				"job_type": "build_repository_understanding",
 			})
 			stopHeartbeat := startKnowledgeQueueHeartbeat(runCtx, rt, "", nil)
@@ -361,6 +361,6 @@ func enqueueRepositoryUnderstandingJob(
 			return run(runCtx, rt)
 		},
 	}
-	_, err := r.Orchestrator.Enqueue(req)
+	_, err := r.Deps.Orchestrator.Enqueue(req)
 	return err
 }

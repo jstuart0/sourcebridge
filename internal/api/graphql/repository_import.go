@@ -21,8 +21,8 @@ func (r *mutationResolver) importRepository(repoID, repoName, repoPath string, i
 	localPath := repoPath
 	if isRemote {
 		cacheDir := "./repo-cache"
-		if r.Config != nil && r.Config.Storage.RepoCachePath != "" {
-			cacheDir = r.Config.Storage.RepoCachePath
+		if r.Deps.Config != nil && r.Deps.Config.Storage.RepoCachePath != "" {
+			cacheDir = r.Deps.Config.Storage.RepoCachePath
 		}
 		cloneDir := filepath.Join(cacheDir, "repos", sanitizeRepoName(repoName))
 		pullToken := ""
@@ -47,7 +47,7 @@ func (r *mutationResolver) importRepository(repoID, repoName, repoPath string, i
 			store.SetRepositoryError(ctx, repoID, fmt.Errorf("creating clone dir: %w", err))
 			return
 		}
-		allowPrivate := r.Config != nil && r.Config.Indexing.AllowPrivateGitHosts
+		allowPrivate := r.Deps.Config != nil && r.Deps.Config.Indexing.AllowPrivateGitHosts
 		cmd, err := gitCloneCmd(ctx, repoPath, cloneDir, pullToken, sshKeyPath, allowPrivate)
 		if err != nil {
 			store.SetRepositoryError(ctx, repoID, err)
@@ -87,7 +87,7 @@ func (r *mutationResolver) importRepository(repoID, repoName, repoPath string, i
 		})
 		commitSHA = gitMeta.CommitSHA
 	}
-	if r.Flags.KnowledgePrewarmOnIndexEnabled {
+	if r.Deps.Flags.KnowledgePrewarmOnIndexEnabled {
 		go r.seedRepositoryFieldGuide(repoID)
 	}
 	// Enqueue async clustering job. Must not block the indexing pipeline.

@@ -23,9 +23,9 @@ type streamFakeRuntime struct {
 }
 
 type reportedProgress struct {
-	pct          float64
-	phase        string
-	message      string
+	pct           float64
+	phase         string
+	message       string
 	throughputTPS float64
 }
 

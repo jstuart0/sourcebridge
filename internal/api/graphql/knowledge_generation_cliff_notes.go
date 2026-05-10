@@ -56,7 +56,7 @@ func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeAr
 	if err != nil {
 		return nil, err
 	}
-	generationMode := resolvedKnowledgeGenerationMode(r.ComprehensionStore, repo, input.GenerationMode)
+	generationMode := resolvedKnowledgeGenerationMode(r.Deps.ComprehensionStore, repo, input.GenerationMode)
 	audience := string(key.Audience)
 	depth := string(key.Depth)
 	scope := key.Scope.Normalize()
@@ -71,21 +71,21 @@ func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeAr
 		}
 	}
 
-	existing := r.KnowledgeStore.GetArtifactByKeyAndMode(ctx, key, generationMode)
+	existing := r.Deps.KnowledgeStore.GetArtifactByKeyAndMode(ctx, key, generationMode)
 	if existing != nil {
 		if shouldRefreshScopedCliffNotes(existing) {
-			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(ctx, existing.ID)
+			_ = r.Deps.KnowledgeStore.DeleteKnowledgeArtifact(ctx, existing.ID)
 			existing = nil
 		}
 	}
 	if existing != nil {
 		existing.GenerationMode = generationMode
-		syncArtifactExecutionMetadata(r.KnowledgeStore, existing)
+		syncArtifactExecutionMetadata(r.Deps.KnowledgeStore, existing)
 		scopeUnderstanding := (*knowledgepkg.RepositoryUnderstanding)(nil)
 		if artifactUsesUnderstanding(generationMode) {
-			scopeUnderstanding, _ = attachFreshUnderstanding(r.KnowledgeStore, existing, scope, knowledgepkg.SourceRevision{})
+			scopeUnderstanding, _ = attachFreshUnderstanding(r.Deps.KnowledgeStore, existing, scope, knowledgepkg.SourceRevision{})
 		}
-		renderPlan := cliffNotesRenderPlanForArtifact(r.KnowledgeStore, existing, knowledgepkg.SourceRevision{}, scopeUnderstanding)
+		renderPlan := cliffNotesRenderPlanForArtifact(r.Deps.KnowledgeStore, existing, knowledgepkg.SourceRevision{}, scopeUnderstanding)
 		if existing.Status == knowledgepkg.StatusReady && !existing.Stale && !renderPlan.RenderOnly {
 			return mapKnowledgeArtifact(existing), nil
 		}
@@ -97,7 +97,7 @@ func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeAr
 		}
 		if existing.Status == knowledgepkg.StatusFailed || existing.Stale ||
 			existing.Status == knowledgepkg.StatusGenerating || existing.Status == knowledgepkg.StatusPending {
-			_ = r.KnowledgeStore.DeleteKnowledgeArtifact(ctx, existing.ID)
+			_ = r.Deps.KnowledgeStore.DeleteKnowledgeArtifact(ctx, existing.ID)
 		}
 	}
 
@@ -122,7 +122,7 @@ func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeAr
 		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
 	}
 
-	artifact, created, err := r.KnowledgeStore.ClaimArtifactWithMode(ctx, key, snap.SourceRevision, generationMode)
+	artifact, created, err := r.Deps.KnowledgeStore.ClaimArtifactWithMode(ctx, key, snap.SourceRevision, generationMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim knowledge artifact: %w", err)
 	}
@@ -130,18 +130,18 @@ func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeAr
 		return mapKnowledgeArtifact(artifact), nil
 	}
 	artifact.GenerationMode = generationMode
-	syncArtifactExecutionMetadata(r.KnowledgeStore, artifact)
+	syncArtifactExecutionMetadata(r.Deps.KnowledgeStore, artifact)
 	understanding := (*knowledgepkg.RepositoryUnderstanding)(nil)
 	reusedUnderstanding := false
 	renderPlan := cliffNotesRenderPlan{}
 	if artifactUsesUnderstanding(generationMode) {
-		understanding, reusedUnderstanding = attachFreshUnderstanding(r.KnowledgeStore, artifact, scope, snap.SourceRevision)
+		understanding, reusedUnderstanding = attachFreshUnderstanding(r.Deps.KnowledgeStore, artifact, scope, snap.SourceRevision)
 		if understanding == nil {
-			if _, err := seedRepositoryUnderstanding(r.KnowledgeStore, artifact, scope, snap.SourceRevision, knowledgepkg.UnderstandingBuildingTree); err != nil {
+			if _, err := seedRepositoryUnderstanding(r.Deps.KnowledgeStore, artifact, scope, snap.SourceRevision, knowledgepkg.UnderstandingBuildingTree); err != nil {
 				slog.Warn("failed to seed repository understanding", "artifact_id", artifact.ID, "error", err)
 			}
 		} else {
-			renderPlan = cliffNotesRenderPlanForArtifact(r.KnowledgeStore, artifact, snap.SourceRevision, understanding)
+			renderPlan = cliffNotesRenderPlanForArtifact(r.Deps.KnowledgeStore, artifact, snap.SourceRevision, understanding)
 		}
 	}
 
@@ -159,7 +159,7 @@ func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeAr
 	)
 
 	enrichedCliffSnapJSON := snapJSON
-	if depth == "deep" && scope.ScopeType != knowledgepkg.ScopeRepository && r.KnowledgeStore != nil {
+	if depth == "deep" && scope.ScopeType != knowledgepkg.ScopeRepository && r.Deps.KnowledgeStore != nil {
 		repoCliffKey := knowledgepkg.ArtifactKey{
 			RepositoryID: repo.ID,
 			Type:         knowledgepkg.ArtifactCliffNotes,
@@ -167,8 +167,8 @@ func (s cliffNotesGenerationService) Generate(ctx context.Context) (*KnowledgeAr
 			Depth:        knowledgepkg.DepthMedium,
 			Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
 		}.Normalized()
-		if repoCliff := r.KnowledgeStore.GetArtifactByKey(ctx, repoCliffKey); repoCliff != nil && repoCliff.Status == knowledgepkg.StatusReady {
-			sections := r.KnowledgeStore.GetKnowledgeSections(ctx, repoCliff.ID)
+		if repoCliff := r.Deps.KnowledgeStore.GetArtifactByKey(ctx, repoCliffKey); repoCliff != nil && repoCliff.Status == knowledgepkg.StatusReady {
+			sections := r.Deps.KnowledgeStore.GetKnowledgeSections(ctx, repoCliff.ID)
 			if len(sections) > 0 {
 				var analysis []map[string]string
 				for _, sec := range sections {
@@ -246,17 +246,17 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 
 	defer func() {
 		if runErr != nil {
-			markRepositoryUnderstandingFailed(r.KnowledgeStore, artifact, scope, snap.SourceRevision, runErr)
+			markRepositoryUnderstandingFailed(r.Deps.KnowledgeStore, artifact, scope, snap.SourceRevision, runErr)
 		}
 	}()
 	genStart := time.Now()
 	rt.ReportProgress(0.1, "snapshot", "Snapshot assembled", 0)
-	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.1, "snapshot", "Snapshot assembled")
+	_ = r.Deps.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.1, "snapshot", "Snapshot assembled")
 	if reusedUnderstanding {
 		rt.ReportProgress(0.12, "understanding", "Using cached repository understanding", 0)
-		_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.12, "understanding", "Using cached repository understanding")
+		_ = r.Deps.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.12, "understanding", "Using cached repository understanding")
 	}
-	appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "snapshot", "snapshot_assembled", "Snapshot assembled", map[string]any{
+	appendJobLog(r.Deps.Orchestrator, rt, llm.LogLevelInfo, "snapshot", "snapshot_assembled", "Snapshot assembled", map[string]any{
 		"snapshot_bytes": len(enrichedCliffSnapJSON),
 		"scope_type":     string(scope.ScopeType),
 		"scope_path":     scope.ScopePath,
@@ -277,7 +277,7 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 			renderPlan.RelevanceProfile,
 		)
 	}
-	appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "llm", "worker_dispatch", "Dispatching cliff notes request to worker", map[string]any{
+	appendJobLog(r.Deps.Orchestrator, rt, llm.LogLevelInfo, "llm", "worker_dispatch", "Dispatching cliff notes request to worker", map[string]any{
 		"repository_id":   repo.ID,
 		"repository_name": repo.Name,
 		"scope_type":      string(scope.ScopeType),
@@ -288,7 +288,7 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 		"selected_titles": renderPlan.SelectedSectionTitles,
 	})
 	streamDriver := r.runStreamProgressDriver(bgCtx, rt, artifact.ID, rpcBucketForArtifact(artifact))
-	resp, err := r.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge,
+	resp, err := r.Deps.LLMCaller.GenerateCliffNotesWithJob(bgCtx, repo.ID, resolution.OpKnowledge,
 		llmJobMetadataWithProgress(rt, artifact.ID, "cliff_notes", streamDriver.OnProgress()),
 		&knowledgev1.GenerateCliffNotesRequest{
 			RepositoryId:   repo.ID,
@@ -306,7 +306,7 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 	// below run only after Close returns.
 	streamDriver.Close()
 	if err != nil {
-		appendJobLog(r.Orchestrator, rt, llm.LogLevelError, "llm", "worker_failed", "Worker cliff notes request failed", map[string]any{
+		appendJobLog(r.Deps.Orchestrator, rt, llm.LogLevelError, "llm", "worker_failed", "Worker cliff notes request failed", map[string]any{
 			"duration_ms": time.Since(genStart).Milliseconds(),
 		})
 		slog.Error("cliff_notes_generation_failed",
@@ -319,7 +319,7 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 		)
 		return err
 	}
-	understanding, err = updateUnderstandingForCliffNotes(r.KnowledgeStore, artifact, scope, snap.SourceRevision, resp, knowledgepkg.UnderstandingReady)
+	understanding, err = updateUnderstandingForCliffNotes(r.Deps.KnowledgeStore, artifact, scope, snap.SourceRevision, resp, knowledgepkg.UnderstandingReady)
 	if err != nil {
 		slog.Warn("failed to update repository understanding", "artifact_id", artifact.ID, "error", err)
 	}
@@ -335,14 +335,14 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 		packageCacheHits = int(resp.Diagnostics.PackageCacheHits)
 		rootCacheHits = int(resp.Diagnostics.RootCacheHits)
 		reusedSummaries = leafCacheHits + fileCacheHits + packageCacheHits + rootCacheHits
-		if err := r.Orchestrator.SetReuseStats(rt.JobID(), reusedSummaries, leafCacheHits, fileCacheHits, packageCacheHits, rootCacheHits); err != nil {
+		if err := r.Deps.Orchestrator.SetReuseStats(rt.JobID(), reusedSummaries, leafCacheHits, fileCacheHits, packageCacheHits, rootCacheHits); err != nil {
 			slog.Warn("failed to persist cliff notes reuse stats",
 				"job_id", rt.JobID(),
 				"artifact_id", artifact.ID,
 				"error", err)
 		}
 	}
-	appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "llm", "worker_response_received", "Worker returned cliff notes response", map[string]any{
+	appendJobLog(r.Deps.Orchestrator, rt, llm.LogLevelInfo, "llm", "worker_response_received", "Worker returned cliff notes response", map[string]any{
 		"duration_ms":        time.Since(genStart).Milliseconds(),
 		"section_count":      len(resp.Sections),
 		"reused_summaries":   reusedSummaries,
@@ -368,13 +368,13 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 		llmMessage = fmt.Sprintf("LLM completed, reused %d summaries, persisting sections", reusedSummaries)
 	}
 	rt.ReportProgress(0.96, "llm", llmMessage, 0)
-	_ = r.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.8, "llm", llmMessage)
+	_ = r.Deps.KnowledgeStore.UpdateKnowledgeArtifactProgressWithPhase(runCtx, artifact.ID, 0.8, "llm", llmMessage)
 
 	if resp.Usage != nil {
 		storeLLMUsage(store, repo.ID, resp.Usage, "")
 		rt.ReportTokens(int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens))
 	}
-	appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "persist", "persist_sections_started", "Persisting generated cliff note sections", map[string]any{
+	appendJobLog(r.Deps.Orchestrator, rt, llm.LogLevelInfo, "persist", "persist_sections_started", "Persisting generated cliff note sections", map[string]any{
 		"section_count": len(resp.Sections),
 	})
 
@@ -400,18 +400,18 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 		for _, title := range renderPlan.SelectedSectionTitles {
 			selected[title] = struct{}{}
 		}
-		sections = knowledgepkg.MergeSectionsByTitle(r.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID), sections, selected)
+		sections = knowledgepkg.MergeSectionsByTitle(r.Deps.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID), sections, selected)
 	}
-	if err := r.KnowledgeStore.StoreKnowledgeSections(runCtx, artifact.ID, sections); err != nil {
+	if err := r.Deps.KnowledgeStore.StoreKnowledgeSections(runCtx, artifact.ID, sections); err != nil {
 		slog.Error("failed to store cliff notes sections", "artifact_id", artifact.ID, "error", err)
 		return err
 	}
-	syncCliffNotesRefinementUnits(r.KnowledgeStore, artifact, sections, understanding)
-	appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "persist", "persist_sections_completed", "Stored cliff note sections", map[string]any{
+	syncCliffNotesRefinementUnits(r.Deps.KnowledgeStore, artifact, sections, understanding)
+	appendJobLog(r.Deps.Orchestrator, rt, llm.LogLevelInfo, "persist", "persist_sections_completed", "Stored cliff note sections", map[string]any{
 		"section_count": len(sections),
 	})
 
-	storedSections := r.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID)
+	storedSections := r.Deps.KnowledgeStore.GetKnowledgeSections(runCtx, artifact.ID)
 	for i, sec := range resp.Sections {
 		if i >= len(storedSections) {
 			break
@@ -428,15 +428,15 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 					Rationale:  ev.Rationale,
 				}
 			}
-			_ = r.KnowledgeStore.StoreKnowledgeEvidence(runCtx, storedSections[i].ID, evidence)
+			_ = r.Deps.KnowledgeStore.StoreKnowledgeEvidence(runCtx, storedSections[i].ID, evidence)
 		}
 	}
 
-	if err := r.KnowledgeStore.UpdateKnowledgeArtifactStatus(runCtx, artifact.ID, knowledgepkg.StatusReady); err != nil {
+	if err := r.Deps.KnowledgeStore.UpdateKnowledgeArtifactStatus(runCtx, artifact.ID, knowledgepkg.StatusReady); err != nil {
 		slog.Error("failed to mark cliff notes ready", "artifact_id", artifact.ID, "error", err)
 	}
 	if artifactUsesUnderstanding(generationMode) && depth != string(knowledgepkg.DepthSummary) {
-		targets := cliffNotesDeepeningTargets(r.KnowledgeStore, artifact)
+		targets := cliffNotesDeepeningTargets(r.Deps.KnowledgeStore, artifact)
 		slog.Info("cliff_notes_deepening_targets_evaluated",
 			"artifact_id", artifact.ID,
 			"target_count", len(targets),
@@ -448,7 +448,7 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 			}
 		}
 	}
-	appendJobLog(r.Orchestrator, rt, llm.LogLevelInfo, "ready", "artifact_ready", "Cliff notes artifact marked ready", map[string]any{
+	appendJobLog(r.Deps.Orchestrator, rt, llm.LogLevelInfo, "ready", "artifact_ready", "Cliff notes artifact marked ready", map[string]any{
 		"section_count": len(sections),
 	})
 	readyMessage := "Cliff notes ready"
@@ -524,18 +524,18 @@ func (s cliffNotesGenerationService) RefreshFromExisting(ctx context.Context, ex
 		reusedUnderstanding := false
 		renderPlan := cliffNotesRenderPlan{}
 		if artifactUsesUnderstanding(generationMode) {
-			understanding, reusedUnderstanding = attachFreshUnderstanding(r.KnowledgeStore, existing, scope, snap.SourceRevision)
+			understanding, reusedUnderstanding = attachFreshUnderstanding(r.Deps.KnowledgeStore, existing, scope, snap.SourceRevision)
 			if understanding == nil {
-				if _, err := seedRepositoryUnderstanding(r.KnowledgeStore, existing, scope, snap.SourceRevision, knowledgepkg.UnderstandingBuildingTree); err != nil {
+				if _, err := seedRepositoryUnderstanding(r.Deps.KnowledgeStore, existing, scope, snap.SourceRevision, knowledgepkg.UnderstandingBuildingTree); err != nil {
 					slog.Warn("cliff notes refresh: failed to seed repository understanding", "artifact_id", existing.ID, "error", err)
 				}
 			} else {
-				renderPlan = cliffNotesRenderPlanForArtifact(r.KnowledgeStore, existing, snap.SourceRevision, understanding)
+				renderPlan = cliffNotesRenderPlanForArtifact(r.Deps.KnowledgeStore, existing, snap.SourceRevision, understanding)
 			}
 		}
 
 		enrichedCliffSnapJSON := snapJSON
-		if depth == "deep" && scope.ScopeType != knowledgepkg.ScopeRepository && r.KnowledgeStore != nil {
+		if depth == "deep" && scope.ScopeType != knowledgepkg.ScopeRepository && r.Deps.KnowledgeStore != nil {
 			repoCliffKey := knowledgepkg.ArtifactKey{
 				RepositoryID: repo.ID,
 				Type:         knowledgepkg.ArtifactCliffNotes,
@@ -543,8 +543,8 @@ func (s cliffNotesGenerationService) RefreshFromExisting(ctx context.Context, ex
 				Depth:        knowledgepkg.DepthMedium,
 				Scope:        knowledgepkg.ArtifactScope{ScopeType: knowledgepkg.ScopeRepository},
 			}.Normalized()
-			if repoCliff := r.KnowledgeStore.GetArtifactByKey(ctx, repoCliffKey); repoCliff != nil && repoCliff.Status == knowledgepkg.StatusReady {
-				sections := r.KnowledgeStore.GetKnowledgeSections(ctx, repoCliff.ID)
+			if repoCliff := r.Deps.KnowledgeStore.GetArtifactByKey(ctx, repoCliffKey); repoCliff != nil && repoCliff.Status == knowledgepkg.StatusReady {
+				sections := r.Deps.KnowledgeStore.GetKnowledgeSections(ctx, repoCliff.ID)
 				if len(sections) > 0 {
 					var analysis []map[string]string
 					for _, sec := range sections {
@@ -587,7 +587,7 @@ func (s cliffNotesGenerationService) RefreshFromExisting(ctx context.Context, ex
 		return nil, fmt.Errorf("enqueue cliff notes refresh job: %w", err)
 	}
 
-	updated := r.KnowledgeStore.GetKnowledgeArtifact(ctx, existing.ID)
+	updated := r.Deps.KnowledgeStore.GetKnowledgeArtifact(ctx, existing.ID)
 	if updated == nil {
 		return nil, fmt.Errorf("artifact %s not found after refresh", existing.ID)
 	}

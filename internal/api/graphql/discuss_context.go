@@ -32,8 +32,8 @@ func assembleDiscussionContext(
 	if len(input.ConversationHistory) > 0 {
 		contextParts = append(contextParts, "Recent follow-up context:\n"+strings.Join(input.ConversationHistory, "\n\n"))
 	}
-	if input.ArtifactID != nil && *input.ArtifactID != "" && r.KnowledgeStore != nil {
-		if artifact := r.KnowledgeStore.GetKnowledgeArtifact(ctx, *input.ArtifactID); artifact != nil {
+	if input.ArtifactID != nil && *input.ArtifactID != "" && r.Deps.KnowledgeStore != nil {
+		if artifact := r.Deps.KnowledgeStore.GetKnowledgeArtifact(ctx, *input.ArtifactID); artifact != nil {
 			contextParts = append(contextParts, discussionContextFromArtifact(artifact))
 		}
 	}
