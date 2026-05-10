@@ -24,6 +24,30 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-09 store ctx threading + decomposition (CA-183 + CA-182)** — 5 commits, `71f6542` + `150c094` + `8a3ccd0` + `eefa122` + `fa084b4` + `<this commit>`.
+Closes CA-183 (CRITICAL — `context.Background()` discarded in every store method, breaking request cancellation and tracing) and CA-182 (HIGH — `internal/db/store.go` monolith at ~4,500 LOC). Four phases shipped together under a green-CI discipline (every intermediate commit passes `go build`, `go vet`, `go test -short -race`, and the full integration suite).
+
+Phase 1 (`71f6542` + `150c094`) — signature threading. Every method on `*SurrealStore` (and the 6 store interfaces it satisfies: `GraphStore`, `KnowledgeStore`, `JobStore`, `comprehension.SettingsStore`, `livingwiki.RepoSettingsStore`, `SummaryNodeStore`) gains `ctx context.Context` as its first parameter. The unexported `diagramDocumentPersistence` interface (`internal/api/rest/diagram_document.go`) and the 9 local subset interfaces (`architecture.DiagramStore`, orchestrator `PackageDepsProvider`, QA package interfaces — `RepoLocator`, `GraphExpander`, `ArtifactLookup`, `RequirementLookup`, `SymbolLookup`, `FileReader`, `UnderstandingReader`, `templates.SymbolGraph`, `search.Booster`, `graph.KnowledgeFreshnessProvider`) are all updated in lockstep. Phase 1 covers ~165 caller files / ~2,450 LOC; all `internal/db/` method bodies still call the package-local `ctx()` helper so the package builds.
+
+Phase 2 (`8a3ccd0` + `eefa122`) — `ctx()` helper deletion. The `func ctx() context.Context { return context.Background() }` helper is deleted; all ~185 call sites in `internal/db/` are replaced with the threaded parameter.
+
+Phase 3 (`fa084b4`) — file decomposition. `internal/db/store.go` is deleted and its contents split into 6 per-domain files: `repository_store.go`, `requirement_store.go`, `cluster_store.go`, `analytics_store.go`, `index_result.go`, `helpers.go` (all `package db`). Pure file moves — no logic changes.
+
+Phase 4 (`<this commit>`) — CLAUDE.md updates (this entry).
+
+Load-bearing constraints for future-Claude:
+
+- **`func ctx() context.Context { return context.Background() }` is GONE.** Don't add it back. Every method on `*SurrealStore` (and the 6+ store interfaces) takes `ctx context.Context` as first parameter; threading that through is the contract. Bridging with `context.Background()` at a call site is an explicit rollback of CA-183.
+- **`internal/db/store.go` is DELETED.** Methods live in `repository_store.go`, `requirement_store.go`, `cluster_store.go`, `analytics_store.go`, `index_result.go`, `helpers.go` — all `package db`. Don't recreate `store.go`.
+- **Multi-step writers expose partial-write windows on cancellation**: `StoreIndexResult`, `ReplaceIndexResult`, `MergeIndexResult`, `RecomputePackageDependencies` issue 100+ sequential `surrealdb.Query` calls without a transaction wrapper (`internal/db/tx.go` `RunInTx` is documented no-op). Request cancellation now propagates to SurrealDB. Callers MUST NOT rely on these being all-or-nothing. Follow-up: `CA-TBD-store-multi-step-write-atomicity`.
+- **`var _ diagramDocumentPersistence = (*db.SurrealStore)(nil)`** at `internal/api/rest/diagram_document.go:29` is the compile-time gate that `*SurrealStore` (now spread across 6 files) still satisfies the unexported `diagramDocumentPersistence` interface. The 3 satisfying methods live in `internal/db/diagram_document_store.go`. Don't move them without updating this assertion.
+- **`impactReportRow` lives with the impact-report methods** in `analytics_store.go`, NOT in `helpers.go`. Decomposition rule: cross-domain row types (`surrealRepo`, `surrealFile`, `surrealSymbol`, `surrealModule`, `surrealRequirement`, `surrealLink`) live in `helpers.go`; single-domain row types live with their domain.
+- **TenantFilteredStore `hasAccess` gating preserved** on the same 8 federation methods as wave-3 P8 (CA-203). The ctx threading didn't introduce new methods; the gating set is unchanged.
+- **Embedded-interface override audit findings**: `callRecorder` (`internal/graph/filtered_test.go:42-79`, 8 overrides), `countingGraphStore` (`internal/api/rest/mcp_change_impact_test.go:495-502`), `truncatingGraphStore` (`internal/api/rest/mcp_requirement_tools_test.go:1137-1148`) all updated to take ctx as first parameter. Future test override patterns must follow.
+- **Phase 1 scope was ~165 caller files / ~2,450 LOC**: every package holding a `graphstore.GraphStore` value or implementing one of the 6+ store interfaces or any of the 9 local subset interfaces listed above.
+
+Plan: `thoughts/shared/plans/active-2026-05-09-deliver-store-ctx-decomp.md`
+
 **2026-05-09 audit-remediation wave 3: P8 security hardening — SSRF denylist, gRPC reflection gate, SSE tenant filter, TenantFilteredStore gating (CA-202, CA-312, CA-203, CA-205)** — 5 commits, `56380d2..2552036`.
 
 Phase CA-202 (`56380d2`) — gRPC reflection gate tightened to dual-key: both
@@ -248,11 +272,15 @@ GetTestsForSymbolPersisted return empty for every symbol after the second indexi
 
 P2 (encryption-at-rest cipher hardening, `b4d7a08`) — replaced sbenc:v1's unsalted
 single-pass SHA-256 KDF with sbenc:v2's Argon2id (memory-hard, GPU-resistant) +
-per-installation salt. v1 envelopes are now rejected on decrypt with an explicit
-migration message; pre-release context (0 prod installs) accepts the aggressive
-re-save-via-Admin-UI migration. Salt derived deterministically from the encryption
-key via HMAC — zero operator burden, but documented as weaker than independent
-random salt with a follow-up tracked.
+per-installation salt. v1 envelopes are transparently decrypted on read via the
+legacy v1 KDF (SHA-256 of passphrase), with a one-time-per-process WARN log for
+operator visibility; new writes always use v2. Post-wave-2 operational change:
+homelab deploy on 2026-05-08 surfaced installations with v1-encrypted data, so
+the original fail-closed rejection was rolled back to transparent read-fallback.
+Migration to v2 happens lazily as v1 rows get re-saved through normal application
+flow. Salt derived deterministically from the encryption key via HMAC — zero
+operator burden, but documented as weaker than independent random salt with a
+follow-up tracked.
 
 Load-bearing constraints for future-Claude (wave 2):
 
@@ -284,11 +312,15 @@ Load-bearing constraints for future-Claude (wave 2):
   actions: in-flight → Cancel only; stale or failed → Regenerate (primary); else
   → Refresh (secondary). One button per state. Don't re-introduce simultaneous
   Generate + Refresh + Cancel triples.
-- **CA-200 v1 envelope rejection is fail-closed.** ErrV1EnvelopeRejected fires
-  on every read; one-time-per-process ERROR log so log volume doesn't scale
-  with re-read frequency on a stale row. The migration path is operator-driven
-  (re-save via Admin UI) — there is no auto-migration. Don't add one without
-  threat-modeling the race against concurrent v2 encrypts.
+- **CA-200 v1 envelope read behavior is transparent, not fail-closed.** Post-wave-2
+  operational change (2026-05-08 homelab deploy surfaced installations with v1-encrypted
+  data): `Decrypt` transparently handles sbenc:v1 envelopes via the legacy SHA-256 KDF,
+  emitting a one-time-per-process WARN log (rate-gated via `loadedV1Once`) for operator
+  visibility without breaking reads. `ErrV1EnvelopeRejected` is retained for compile
+  compatibility but is no longer returned; it is marked Deprecated. New writes always
+  use v2. Migration to v2 happens lazily as v1 rows get re-saved through normal
+  application flow. Don't add forced-migration logic without threat-modeling the race
+  against concurrent v2 encrypts.
 - **CA-304 fix preserves `RelationTests` AND `RelationCalls` in
   ReplaceIndexResult.** Future relation types (e.g., `RelationImports`,
   `RelationOverrides`) added to the indexer MUST be added to BOTH the
@@ -462,7 +494,7 @@ of JSON null on `option<…>` schema columns in contexts that earlier versions t
 Phase 1 remediates `SetModelCapabilities` in `internal/db/comprehension_settings_store.go` —
 three pointer fields (`cost_per_1k_input *float64`, `cost_per_1k_output *float64`,
 `last_probed_at *time.Time`) are now guarded with the conditional-vars closure idiom (matching
-`UpdateRequirementFields` at `internal/db/store.go:1938`); nil pointers are never serialised as
+`UpdateRequirementFields` at `internal/db/requirement_store.go:546`); nil pointers are never serialised as
 JSON null. Phase 1 also discovers that `option<datetime>` columns require `models.CustomDateTime{Time: t}`
 binding, not RFC3339 strings. Phase 2 remediates `UpdateRequirementFields` directly (the
 conditional-vars idiom was already there; this phase extended it and deleted the old
@@ -497,13 +529,13 @@ Load-bearing constraints for future-Claude:
   and UPDATE statements without strong justification — adds a round-trip and a race window.
 - **Legacy `UpdateRequirement(id, priority, tags)` is DELETED.** Use
   `UpdateRequirementFields(id, RequirementUpdate{Priority: &p, Tags: &t})` instead. Deleted
-  from four sites: SurrealStore impl (`internal/db/store.go`), in-memory store
+  from four sites: SurrealStore impl (`internal/db/requirement_store.go`), in-memory store
   (`internal/graph/store.go`), interface (`internal/graph/iface.go`), and tenant-filter
   passthrough (`internal/graph/filtered.go`). Don't reintroduce as a convenience wrapper —
   that's how the v2.6.5 NULL bug got into the codebase.
 - **`EnrichRequirement` GraphQL mutation no longer bumps `updated_at` when the LLM returns no
   suggestions.** Before Phase 3, the mutation always issued an UPDATE (touching `updated_at`).
-  After Phase 3, `UpdateRequirementFields` short-circuits at `internal/db/store.go:1985` when
+  After Phase 3, `UpdateRequirementFields` short-circuits at `internal/db/requirement_store.go:593` when
   `len(sets) == 1` (only `updated_at` would change). This is more correct semantically but is
   a behavioral shift — downstream consumers keying off `updated_at` to detect "recently
   touched" should use a different signal.
@@ -593,7 +625,7 @@ a single supervisor restart blocks all knowledge-artifact generation for 10 minu
 
 Load-bearing constraints for future-Claude:
 
-- **`internal/db/store.go` cluster write path**: `ReplaceClusters` uses
+- **`internal/db/cluster_store.go` cluster write path**: `ReplaceClusters` uses
   `CREATE ... CONTENT $c.content` (not `SET field = $c.field`), and `clusterRow`
   is split into `clusterContent` (schema fields, `omitempty` on `LLMLabel`) +
   `clusterID` wrapper (cid + content). Don't revert to `SET` — the SET path with
