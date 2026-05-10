@@ -342,6 +342,11 @@ func (r *mutationResolver) ReindexRepository(ctx context.Context, id string) (*R
 	if r.Deps.Flags.KnowledgePrewarmOnIndexEnabled {
 		go r.seedRepositoryFieldGuide(id)
 	}
+	// Re-embed symbols so semantic search reflects the updated index.
+	// KickBackground is fire-and-forget; the mutation response is unblocked.
+	if r.Deps.Backfiller != nil {
+		r.Deps.Backfiller.KickBackground(id)
+	}
 
 	return mapRepository(updatedRepo), nil
 }

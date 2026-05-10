@@ -94,4 +94,11 @@ func (r *mutationResolver) importRepository(repoID, repoName, repoPath string, i
 	if r.ClusteringHook != nil {
 		r.ClusteringHook(repoID, commitSHA)
 	}
+	// Kick the embedding backfill so newly-indexed symbols get vectors for
+	// semantic search. KickBackground spawns its own goroutine and returns
+	// immediately; this function is already running in a background goroutine
+	// but we keep the non-blocking contract explicit.
+	if r.Deps.Backfiller != nil {
+		r.Deps.Backfiller.KickBackground(repoID)
+	}
 }

@@ -49,13 +49,20 @@ type PrewarmHook func(repoID string)
 // Optional — nil = skip.
 type ClusteringHook func(repoID, commitSHA string)
 
+// IndexCompleteHook runs after a successful index with the repository ID.
+// It is called synchronously inside runImport before the function returns, so
+// implementations must not block — spawn a goroutine if needed.
+// Optional — nil = skip.
+type IndexCompleteHook func(repoID string)
+
 // Service is the shared indexing entry point.
 type Service struct {
-	cfg        *config.Config
-	store      graphstore.GraphStore
-	creds      GitCredentialsFunc
-	prewarm    PrewarmHook
-	clustering ClusteringHook
+	cfg             *config.Config
+	store           graphstore.GraphStore
+	creds           GitCredentialsFunc
+	prewarm         PrewarmHook
+	clustering      ClusteringHook
+	onIndexComplete IndexCompleteHook
 }
 
 // NewService builds a Service. cfg + store are required; creds may
@@ -70,6 +77,13 @@ func NewService(cfg *config.Config, store graphstore.GraphStore, creds GitCreden
 // commit SHA so the clustering job can be enqueued asynchronously.
 func (s *Service) WithClusteringHook(hook ClusteringHook) {
 	s.clustering = hook
+}
+
+// WithIndexCompleteHook wires a post-index hook that fires after a successful
+// index with just the repo ID. Implementations must not block — the hook
+// runs inside the background goroutine started by Import/Reindex.
+func (s *Service) WithIndexCompleteHook(hook IndexCompleteHook) {
+	s.onIndexComplete = hook
 }
 
 // ImportSpec describes a single import request.
@@ -257,6 +271,11 @@ func (s *Service) runImport(repoID, repoName, repoPath string, isRemote bool, to
 	// Enqueue async clustering job. This must not block the indexing pipeline.
 	if s.clustering != nil {
 		s.clustering(repoID, commitSHA)
+	}
+	// Notify any post-index subscriber (e.g. embedding backfill). The hook
+	// must not block — implementations are expected to spawn a goroutine.
+	if s.onIndexComplete != nil {
+		s.onIndexComplete(repoID)
 	}
 	slog.Info("repository indexed via shared service", "repo_id", repoID, "name", repoName)
 }

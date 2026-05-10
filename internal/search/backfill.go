@@ -214,6 +214,34 @@ func symbolEmbeddingUpToDate(_ *graph.StoredSymbol, _ string, _ string) bool {
 	return false
 }
 
+// KickBackground spawns a background goroutine that runs Run for the given
+// repoID with a 30-minute budget. It returns immediately and is safe to call
+// from any goroutine. Progress is logged at INFO on start and finish; errors
+// are logged at WARN. It is a no-op when b is nil or not configured.
+func (b *Backfiller) KickBackground(repoID string) {
+	if b == nil || b.Store == nil || b.Embedder == nil {
+		return
+	}
+	slog.Info("search: embedding backfill queued", "repo_id", repoID)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		progress := &BackfillProgress{}
+		if err := b.Run(ctx, repoID, progress, nil); err != nil {
+			slog.Warn("search: embedding backfill failed", "repo_id", repoID, "error", err)
+			return
+		}
+		snap := progress.Snapshot()
+		slog.Info("search: embedding backfill complete",
+			"repo_id", repoID,
+			"embedded", snap.Embedded,
+			"skipped", snap.Skipped,
+			"errored", snap.Errored,
+			"duration_ms", time.Since(snap.StartedAt).Milliseconds(),
+		)
+	}()
+}
+
 func hashString(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])

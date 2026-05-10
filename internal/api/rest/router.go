@@ -312,6 +312,7 @@ type Server struct {
 	searchSvc                  *search.Service                   // hybrid retrieval backbone; always set in NewServer
 	reqBooster                 *search.RequirementBooster        // repo-scoped requirement link cache; feeds searchSvc boosters
 	searchMetrics              *search.Metrics                   // in-process ring buffer of per-stage latency / success
+	backfiller                 *search.Backfiller                // post-index embedding backfill; nil when worker is unavailable
 	livingWikiStore            livingwiki.Store                  // living-wiki UI settings store; nil = feature unavailable
 	livingWikiResolver         *livingwiki.Resolver              // merged living-wiki config (UI + env); nil = only env applies
 	livingWikiRepoStore        livingwiki.RepoSettingsStore      // per-repo living-wiki opt-in; nil = feature unavailable
@@ -535,6 +536,15 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		emb := search.NewWorkerEmbedder(s.worker, "")
 		cached := search.NewCachedEmbedder(emb, 2048, 5*time.Minute, 5, 30*time.Second)
 		s.searchSvc.WithEmbedder(cached)
+		// Backfiller uses a separate WorkerEmbedder so backfill calls don't
+		// pollute the query-embedding LRU cache (backfill texts are one-shot
+		// and unlikely to be reused as search queries).
+		backfillEmb := search.NewWorkerEmbedder(s.worker, "")
+		s.backfiller = search.NewBackfiller(s.store, backfillEmb, 0, search.BackfillConfig{
+			RPS:       2,
+			Batch:     8,
+			MaxPerRun: 2000,
+		})
 	}
 
 	// lazyAgent is the production LazyAgentSynth that implements both the
@@ -705,6 +715,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			TrashStore:                 s.trashStore,
 			SearchSvc:                  s.searchSvc,
 			ReqBooster:                 s.reqBooster,
+			Backfiller:                 s.backfiller,
 			QA:                         s.qaResolverOrchestrator(),
 			LLMProfileLookup:           profileLookup,
 			LivingWikiStore:            s.livingWikiStore,
@@ -736,6 +747,13 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 // tests and the graceful-shutdown path can call Shutdown on it.
 func (s *Server) Orchestrator() *orchestrator.Orchestrator {
 	return s.orchestrator
+}
+
+// kickBackfill fires the embedding backfill for a repo via the shared
+// Backfiller. Delegates to Backfiller.KickBackground which spawns its own
+// goroutine and returns immediately. Safe to use as an IndexCompleteHook.
+func (s *Server) kickBackfill(repoID string) {
+	s.backfiller.KickBackground(repoID)
 }
 
 // clusteringHookFunc returns a post-index hook that enqueues a clustering job,
@@ -1171,6 +1189,7 @@ func (s *Server) setupRouter() {
 		if hook := s.clusteringHookFunc(); hook != nil {
 			mcpIndexSvc.WithClusteringHook(hook)
 		}
+		mcpIndexSvc.WithIndexCompleteHook(s.kickBackfill)
 		s.mcp.indexingSvc = mcpIndexSvc
 		s.mcp.allowPrivateGitHosts = s.cfg != nil && s.cfg.Indexing.AllowPrivateGitHosts
 		// Wire enterprise extensions if provided via server options

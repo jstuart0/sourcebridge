@@ -86,6 +86,7 @@ type AppDeps struct {
 	TrashStore                 trash.Store
 	SearchSvc                  *search.Service
 	ReqBooster                 *search.RequirementBooster
+	Backfiller                 *search.Backfiller
 	QA                         *qa.Orchestrator
 	LLMProfileLookup           LLMProfileLookup
 	LivingWikiStore            livingwiki.Store
