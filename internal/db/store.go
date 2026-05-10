@@ -3086,7 +3086,7 @@ func (s *SurrealStore) GetClusterForSymbol(ctx context.Context, repoID, symbolID
 		return nil, nil
 	}
 	cid := recordIDString(rows[0].ClusterID)
-	return s.GetClusterByID(context.Background(), cid)
+	return s.GetClusterByID(ctx, cid)
 }
 
 // DeleteClusters removes all cluster and cluster_member records for a
