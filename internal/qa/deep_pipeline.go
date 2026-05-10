@@ -79,6 +79,13 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 			return result, nil
 		}
 
+		// Soft signal: corpus is usable but not fully deepened.
+		// Callers can present the response with a quality caveat.
+		// The pipeline still proceeds; this is not a gate.
+		if status.Partial {
+			result.Diagnostics.FallbackUsed = "understanding_partial"
+		}
+
 		// Stage 3: parallel retrieval. Summary evidence + requirement
 		// lines read from independent stores, so we fan out.
 		t2 := time.Now()
@@ -88,6 +95,10 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 		}
 		sumCh := make(chan sumRes, 1)
 		go func() {
+			// nil summaries from GetSummaryEvidence is the expected outcome
+			// when the corpus is partial (GetSummaryEvidence returns (nil, nil)
+			// for an empty corpusID or when no summary nodes exist yet). This is
+			// not an error — file retrieval below can still produce evidence.
 			items, err := GetSummaryEvidence(ctx, o.reader, status.CorpusID, in.Question, string(kind))
 			sumCh <- sumRes{items: items, err: err}
 		}()

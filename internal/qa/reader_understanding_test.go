@@ -60,7 +60,13 @@ func TestGetRepositoryStatus_Ready(t *testing.T) {
 	}
 }
 
-func TestGetRepositoryStatus_NotReadyWhenPartial(t *testing.T) {
+// TestGetRepositoryStatus_ReadyAndPartialWhenReadyStagePartialTree verifies
+// that stage=ready with treeStatus=partial is Ready=true, Partial=true.
+// This is the post-CA-319 behavior: the predicate was relaxed deliberately
+// to enable QA on partial corpora. The old test name was
+// TestGetRepositoryStatus_NotReadyWhenPartial; it was renamed and flipped
+// when the predicate changed.
+func TestGetRepositoryStatus_ReadyAndPartialWhenReadyStagePartialTree(t *testing.T) {
 	r := &fakeReader{
 		understanding: &knowledge.RepositoryUnderstanding{
 			Stage:      knowledge.UnderstandingReady,
@@ -68,8 +74,101 @@ func TestGetRepositoryStatus_NotReadyWhenPartial(t *testing.T) {
 		},
 	}
 	st := GetRepositoryStatus(t.Context(), r, "r", "n")
-	if st.Ready {
-		t.Error("partial tree should not be ready")
+	if !st.Ready {
+		t.Error("stage=ready + treeStatus=partial should be Ready=true (CA-319 predicate relaxation)")
+	}
+	if !st.Partial {
+		t.Error("stage=ready + treeStatus=partial should be Partial=true")
+	}
+}
+
+// TestGetRepositoryStatus_ReadinessMatrix pins the full 6×3 stage/treeStatus
+// grid against the CA-319 readiness predicate. If a new
+// RepositoryUnderstandingStage constant is added to internal/knowledge/models.go
+// without updating this test, the enum-growth tripwire at the top of the test
+// will fail loudly — classify the new stage as Ready/Not-ready/Partial and add
+// it to the table before proceeding.
+func TestGetRepositoryStatus_ReadinessMatrix(t *testing.T) {
+	// Enum-growth tripwire: update this slice whenever a new
+	// RepositoryUnderstandingStage is added to internal/knowledge/models.go.
+	// The test will fail until the new stage is classified in the table below.
+	knownStages := []knowledge.RepositoryUnderstandingStage{
+		knowledge.UnderstandingBuildingTree,
+		knowledge.UnderstandingFirstPassReady,
+		knowledge.UnderstandingNeedsRefresh,
+		knowledge.UnderstandingDeepening,
+		knowledge.UnderstandingReady,
+		knowledge.UnderstandingFailed,
+	}
+	if len(knownStages) != 6 {
+		t.Fatalf("enum-growth tripwire: expected 6 known stages, got %d — update knownStages and the table below", len(knownStages))
+	}
+
+	type cell struct {
+		stage       knowledge.RepositoryUnderstandingStage
+		treeStatus  knowledge.RepositoryUnderstandingTreeStatus
+		wantReady   bool
+		wantPartial bool
+		note        string
+	}
+
+	cases := []cell{
+		// building_tree: no summary nodes exist yet — always blocked.
+		{knowledge.UnderstandingBuildingTree, knowledge.UnderstandingTreeMissing, false, false, "building_tree+missing: no corpus"},
+		{knowledge.UnderstandingBuildingTree, knowledge.UnderstandingTreePartial, false, false, "building_tree+partial: structurally reachable but excluded"},
+		// (building_tree, complete) is structurally unreachable: tree-complete
+		// write and stage advancement happen together in the build path. The
+		// predicate excludes it defensively.
+		{knowledge.UnderstandingBuildingTree, knowledge.UnderstandingTreeComplete, false, false, "building_tree+complete: structurally unreachable, excluded defensively"},
+
+		// first_pass_ready: summary nodes exist; deepening not yet started.
+		// Primary new Ready+Partial cells.
+		{knowledge.UnderstandingFirstPassReady, knowledge.UnderstandingTreeMissing, false, false, "first_pass_ready+missing: tree must be partial or complete"},
+		{knowledge.UnderstandingFirstPassReady, knowledge.UnderstandingTreePartial, true, true, "first_pass_ready+partial: usable, partial corpus"},
+		{knowledge.UnderstandingFirstPassReady, knowledge.UnderstandingTreeComplete, true, true, "first_pass_ready+complete: usable, not yet deepened"},
+
+		// needs_refresh: stale but awaiting reindex — excluded (not progressing).
+		{knowledge.UnderstandingNeedsRefresh, knowledge.UnderstandingTreeMissing, false, false, "needs_refresh+missing: stale"},
+		{knowledge.UnderstandingNeedsRefresh, knowledge.UnderstandingTreePartial, false, false, "needs_refresh+partial: stale"},
+		{knowledge.UnderstandingNeedsRefresh, knowledge.UnderstandingTreeComplete, false, false, "needs_refresh+complete: stale"},
+
+		// deepening: active deepening pass in progress. Primary new Ready+Partial cells.
+		{knowledge.UnderstandingDeepening, knowledge.UnderstandingTreeMissing, false, false, "deepening+missing: tree must be partial or complete"},
+		{knowledge.UnderstandingDeepening, knowledge.UnderstandingTreePartial, true, true, "deepening+partial: usable, partial corpus"},
+		{knowledge.UnderstandingDeepening, knowledge.UnderstandingTreeComplete, true, true, "deepening+complete: usable, deepening in progress"},
+
+		// ready: fully deepened.
+		{knowledge.UnderstandingReady, knowledge.UnderstandingTreeMissing, false, false, "ready+missing: tree must be partial or complete"},
+		{knowledge.UnderstandingReady, knowledge.UnderstandingTreePartial, true, true, "ready+partial: usable but tree incomplete"},
+		{knowledge.UnderstandingReady, knowledge.UnderstandingTreeComplete, true, false, "ready+complete: fully ready, not partial"},
+
+		// failed: reachable but intentionally excluded. Recovery path is Phase 2
+		// NeedsRefresh transition; the CTA path handles the immediate request.
+		// (failed, complete) is reachable in theory (deepening completed but the
+		// subsequent stage transition failed), but is intentionally excluded: the
+		// failed error_code/message signals something is wrong.
+		{knowledge.UnderstandingFailed, knowledge.UnderstandingTreeMissing, false, false, "failed+missing: excluded, use CTA path"},
+		{knowledge.UnderstandingFailed, knowledge.UnderstandingTreePartial, false, false, "failed+partial: excluded, use CTA path"},
+		{knowledge.UnderstandingFailed, knowledge.UnderstandingTreeComplete, false, false, "failed+complete: reachable but intentionally excluded; recovery via Phase 2 NeedsRefresh"},
+	}
+
+	for _, c := range cases {
+		t.Run(string(c.stage)+"+"+string(c.treeStatus), func(t *testing.T) {
+			r := &fakeReader{
+				understanding: &knowledge.RepositoryUnderstanding{
+					Stage:      c.stage,
+					TreeStatus: c.treeStatus,
+					CorpusID:   "corpus-x",
+				},
+			}
+			st := GetRepositoryStatus(t.Context(), r, "repo", "Repo")
+			if st.Ready != c.wantReady {
+				t.Errorf("Ready: got %v, want %v — %s", st.Ready, c.wantReady, c.note)
+			}
+			if st.Partial != c.wantPartial {
+				t.Errorf("Partial: got %v, want %v — %s", st.Partial, c.wantPartial, c.note)
+			}
+		})
 	}
 }
 

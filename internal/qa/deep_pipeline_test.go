@@ -198,6 +198,98 @@ func TestDeep_DegradesWhenNoReader(t *testing.T) {
 	}
 }
 
+// TestDeepAsk_PartialCorpus verifies that a partial-and-progressing corpus
+// (stage=first_pass_ready, treeStatus=partial) lets the deep pipeline run
+// and emits the "understanding_partial" soft diagnostic. The pipeline must
+// not block on partial corpora — it produces a real answer and the caller
+// can present the result with a quality caveat.
+func TestDeepAsk_PartialCorpus(t *testing.T) {
+	reader := &fakeDeepReader{
+		understanding: &knowledge.RepositoryUnderstanding{
+			Stage:      knowledge.UnderstandingFirstPassReady,
+			TreeStatus: knowledge.UnderstandingTreePartial,
+			CorpusID:   "corpus-partial",
+		},
+		// Provide one summary node so context assembly has something to pack.
+		nodes: []comprehension.SummaryNode{
+			{
+				CorpusID: "corpus-partial", UnitID: "pkg-auth", Level: 1,
+				Headline: "Auth package", SummaryText: "Handles session tokens and login flows.",
+				Metadata: `{"file_path":"auth/session.go"}`,
+			},
+		},
+	}
+	synth := &fakeSynth{
+		available: true,
+		resp: &reasoningv1.AnswerQuestionResponse{
+			Answer: "The auth package orchestrates sessions.",
+			Usage:  &commonv1.LLMUsage{Model: "m", InputTokens: 50, OutputTokens: 20},
+		},
+	}
+	o := New(synth, reader, nil, DefaultConfig())
+
+	res, err := o.Ask(context.Background(), AskInput{
+		RepositoryID: "repo-partial",
+		Question:     "how does auth work?",
+		Mode:         ModeDeep,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The partial diagnostic must be set — not "understanding_not_ready".
+	if res.Diagnostics.FallbackUsed != "understanding_partial" {
+		t.Errorf("expected fallbackUsed=understanding_partial, got %q", res.Diagnostics.FallbackUsed)
+	}
+	// The pipeline must still produce an answer (it proceeds past the soft signal).
+	if res.Answer == "" {
+		t.Error("expected non-empty answer even with partial corpus")
+	}
+	// Context must have been packed (deep retrieval ran).
+	if !strings.Contains(synth.lastReq.GetContextCode(), "Auth package") {
+		t.Errorf("expected summary headline in context, got: %q", synth.lastReq.GetContextCode())
+	}
+	// Stage timing key must be present (confirms deep path ran).
+	if _, ok := res.Diagnostics.StageTimings["qa.summary_evidence"]; !ok {
+		t.Error("expected qa.summary_evidence timing key (confirms deep retrieval ran)")
+	}
+}
+
+// TestDeepAsk_FailedStillBlocks verifies that stage=failed still routes
+// through the existing CTA path and emits "understanding_not_ready".
+// Phase 3 relaxes the predicate for partial-and-progressing corpora but
+// intentionally excludes failed corpora — a failed corpus may be empty or
+// actively churning. The recovery path for failed rows is Phase 2's
+// NeedsRefresh transition, not the Phase 3 predicate.
+func TestDeepAsk_FailedStillBlocks(t *testing.T) {
+	reader := &fakeDeepReader{
+		understanding: &knowledge.RepositoryUnderstanding{
+			Stage:      knowledge.UnderstandingFailed,
+			TreeStatus: knowledge.UnderstandingTreePartial,
+			CorpusID:   "corpus-failed",
+		},
+	}
+	o := New(&fakeSynth{available: true}, reader, nil, DefaultConfig())
+
+	res, err := o.Ask(context.Background(), AskInput{
+		RepositoryID: "repo-failed",
+		Question:     "anything",
+		Mode:         ModeDeep,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Diagnostics.FallbackUsed != "understanding_not_ready" {
+		t.Errorf("expected understanding_not_ready for failed corpus, got %q", res.Diagnostics.FallbackUsed)
+	}
+	if len(res.References) == 0 {
+		t.Fatal("expected CTA reference for failed corpus")
+	}
+	ref := res.References[0]
+	if ref.UnderstandingSection == nil || ref.UnderstandingSection.Kind != "action_cta" {
+		t.Errorf("expected action_cta reference, got %+v", ref)
+	}
+}
+
 func TestBuildContextMarkdown_IncludesSummaries(t *testing.T) {
 	sums := []SummaryEvidence{
 		{UnitID: "u1", Headline: "First", SummaryText: "Some summary text."},

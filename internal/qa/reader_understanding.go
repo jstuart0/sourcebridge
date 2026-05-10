@@ -30,9 +30,19 @@ type RepositoryStatus struct {
 	TreeStatus            string
 	UnderstandingRevision string
 	ModelUsed             string
-	// Ready mirrors Python _understanding_ready: stage == "ready"
-	// AND tree_status == "complete".
+	// Ready is true when the corpus is usable for deep QA:
+	// stage IN {first_pass_ready, deepening, ready} AND
+	// treeStatus IN {partial, complete}.
+	// stage=failed and stage=building_tree are excluded — a failed
+	// corpus may be empty or actively churning; building_tree has no
+	// summary nodes yet. See CA-319 for the predicate-relaxation rationale.
 	Ready bool
+	// Partial is true when the corpus is in an incomplete or pre-deepening
+	// state: treeStatus == partial OR stage is one of {first_pass_ready,
+	// deepening} even with a complete tree. Callers should present
+	// Partial=true responses with a caveat; the answer may be lower
+	// quality than a fully-deepened (stage=ready, tree=complete) run.
+	Partial bool
 }
 
 // UnderstandingReader wraps the subset of the knowledge/summary stores
@@ -78,6 +88,13 @@ func GetRepositoryStatus(ctx context.Context, reader UnderstandingReader, repoID
 			Ready:          false,
 		}
 	}
+	ready := (u.Stage == knowledge.UnderstandingFirstPassReady ||
+		u.Stage == knowledge.UnderstandingDeepening ||
+		u.Stage == knowledge.UnderstandingReady) &&
+		(u.TreeStatus == knowledge.UnderstandingTreePartial ||
+			u.TreeStatus == knowledge.UnderstandingTreeComplete)
+	partial := ready && (u.TreeStatus == knowledge.UnderstandingTreePartial ||
+		u.Stage != knowledge.UnderstandingReady)
 	return &RepositoryStatus{
 		RepositoryID:          repoID,
 		RepositoryName:        repoName,
@@ -86,7 +103,8 @@ func GetRepositoryStatus(ctx context.Context, reader UnderstandingReader, repoID
 		TreeStatus:            string(u.TreeStatus),
 		UnderstandingRevision: u.RevisionFP,
 		ModelUsed:             u.ModelUsed,
-		Ready:                 u.Stage == knowledge.UnderstandingReady && u.TreeStatus == knowledge.UnderstandingTreeComplete,
+		Ready:                 ready,
+		Partial:               partial,
 	}
 }
 
