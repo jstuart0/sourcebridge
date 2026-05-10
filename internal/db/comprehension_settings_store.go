@@ -146,7 +146,7 @@ func (r *surrealModelCapabilities) toModelCapabilities() *comprehension.ModelCap
 // Strategy settings CRUD
 // ---------------------------------------------------------------------------
 
-func (s *SurrealStore) GetSettings(_ context.Context, scope comprehension.Scope) (*comprehension.Settings, error) {
+func (s *SurrealStore) GetSettings(ctx context.Context, scope comprehension.Scope) (*comprehension.Settings, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -156,7 +156,7 @@ func (s *SurrealStore) GetSettings(_ context.Context, scope comprehension.Scope)
 		"scope_type": string(scope.Type),
 		"scope_key":  scope.Key,
 	}
-	result, err := queryOne[[]surrealStrategySettings](ctx(), db, sql, vars)
+	result, err := queryOne[[]surrealStrategySettings](ctx, db, sql, vars)
 	if err != nil {
 		return nil, nil // not found
 	}
@@ -166,7 +166,7 @@ func (s *SurrealStore) GetSettings(_ context.Context, scope comprehension.Scope)
 	return result[0].toSettings(), nil
 }
 
-func (s *SurrealStore) SetSettings(_ context.Context, settings *comprehension.Settings) error {
+func (s *SurrealStore) SetSettings(ctx context.Context, settings *comprehension.Settings) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -249,11 +249,11 @@ func (s *SurrealStore) SetSettings(_ context.Context, settings *comprehension.Se
 		"updated_by":              settings.UpdatedBy,
 	}
 
-	_, err := surrealdb.Query[interface{}](ctx(), db, sql, vars)
+	_, err := surrealdb.Query[interface{}](ctx, db, sql, vars)
 	return err
 }
 
-func (s *SurrealStore) DeleteSettings(_ context.Context, scope comprehension.Scope) error {
+func (s *SurrealStore) DeleteSettings(ctx context.Context, scope comprehension.Scope) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -263,17 +263,17 @@ func (s *SurrealStore) DeleteSettings(_ context.Context, scope comprehension.Sco
 		"scope_type": string(scope.Type),
 		"scope_key":  scope.Key,
 	}
-	_, err := surrealdb.Query[interface{}](ctx(), db, sql, vars)
+	_, err := surrealdb.Query[interface{}](ctx, db, sql, vars)
 	return err
 }
 
-func (s *SurrealStore) ListSettings(_ context.Context, ) ([]comprehension.Settings, error) {
+func (s *SurrealStore) ListSettings(ctx context.Context, ) ([]comprehension.Settings, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
 	}
 	sql := `SELECT * FROM ca_strategy_settings ORDER BY scope_type, scope_key`
-	result, err := queryOne[[]surrealStrategySettings](ctx(), db, sql, nil)
+	result, err := queryOne[[]surrealStrategySettings](ctx, db, sql, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -288,14 +288,14 @@ func (s *SurrealStore) ListSettings(_ context.Context, ) ([]comprehension.Settin
 // Model capabilities CRUD
 // ---------------------------------------------------------------------------
 
-func (s *SurrealStore) GetModelCapabilities(_ context.Context, modelID string) (*comprehension.ModelCapabilities, error) {
+func (s *SurrealStore) GetModelCapabilities(ctx context.Context, modelID string) (*comprehension.ModelCapabilities, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
 	}
 	sql := `SELECT * FROM ca_model_capabilities WHERE model_id = $model_id LIMIT 1`
 	vars := map[string]any{"model_id": modelID}
-	result, err := queryOne[[]surrealModelCapabilities](ctx(), db, sql, vars)
+	result, err := queryOne[[]surrealModelCapabilities](ctx, db, sql, vars)
 	if err != nil {
 		return nil, nil
 	}
@@ -305,7 +305,7 @@ func (s *SurrealStore) GetModelCapabilities(_ context.Context, modelID string) (
 	return result[0].toModelCapabilities(), nil
 }
 
-func (s *SurrealStore) SetModelCapabilities(_ context.Context, mc *comprehension.ModelCapabilities) error {
+func (s *SurrealStore) SetModelCapabilities(ctx context.Context, mc *comprehension.ModelCapabilities) error {
 	if !mc.QualityGateTier.IsValid() {
 		return comprehension.ErrInvalidQualityGateTier
 	}
@@ -393,28 +393,28 @@ func (s *SurrealStore) SetModelCapabilities(_ context.Context, mc *comprehension
 		END;
 	`, setFragment)
 
-	_, err := surrealdb.Query[interface{}](ctx(), db, sql, vars)
+	_, err := surrealdb.Query[interface{}](ctx, db, sql, vars)
 	return err
 }
 
-func (s *SurrealStore) DeleteModelCapabilities(_ context.Context, modelID string) error {
+func (s *SurrealStore) DeleteModelCapabilities(ctx context.Context, modelID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
 	sql := `DELETE FROM ca_model_capabilities WHERE model_id = $model_id`
 	vars := map[string]any{"model_id": modelID}
-	_, err := surrealdb.Query[interface{}](ctx(), db, sql, vars)
+	_, err := surrealdb.Query[interface{}](ctx, db, sql, vars)
 	return err
 }
 
-func (s *SurrealStore) ListModelCapabilities(_ context.Context, ) ([]comprehension.ModelCapabilities, error) {
+func (s *SurrealStore) ListModelCapabilities(ctx context.Context, ) ([]comprehension.ModelCapabilities, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
 	}
 	sql := `SELECT * FROM ca_model_capabilities ORDER BY model_id`
-	result, err := queryOne[[]surrealModelCapabilities](ctx(), db, sql, nil)
+	result, err := queryOne[[]surrealModelCapabilities](ctx, db, sql, nil)
 	if err != nil {
 		return nil, err
 	}

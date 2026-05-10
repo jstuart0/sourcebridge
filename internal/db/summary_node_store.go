@@ -62,14 +62,14 @@ func (r *surrealSummaryNode) toSummaryNode() comprehension.SummaryNode {
 	return n
 }
 
-func (s *SurrealStore) GetSummaryNodes(_ context.Context, corpusID string) ([]comprehension.SummaryNode, error) {
+func (s *SurrealStore) GetSummaryNodes(ctx context.Context, corpusID string) ([]comprehension.SummaryNode, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
 	}
 	sql := `SELECT * FROM ca_summary_node WHERE corpus_id = $corpus_id ORDER BY level, unit_id`
 	vars := map[string]any{"corpus_id": corpusID}
-	result, err := queryOne[[]surrealSummaryNode](ctx(), db, sql, vars)
+	result, err := queryOne[[]surrealSummaryNode](ctx, db, sql, vars)
 	if err != nil {
 		return nil, err
 	}
@@ -80,14 +80,14 @@ func (s *SurrealStore) GetSummaryNodes(_ context.Context, corpusID string) ([]co
 	return out, nil
 }
 
-func (s *SurrealStore) GetSummaryNode(_ context.Context, corpusID, unitID string) (*comprehension.SummaryNode, error) {
+func (s *SurrealStore) GetSummaryNode(ctx context.Context, corpusID, unitID string) (*comprehension.SummaryNode, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
 	}
 	sql := `SELECT * FROM ca_summary_node WHERE corpus_id = $corpus_id AND unit_id = $unit_id LIMIT 1`
 	vars := map[string]any{"corpus_id": corpusID, "unit_id": unitID}
-	result, err := queryOne[[]surrealSummaryNode](ctx(), db, sql, vars)
+	result, err := queryOne[[]surrealSummaryNode](ctx, db, sql, vars)
 	if err != nil {
 		return nil, nil
 	}
@@ -98,7 +98,7 @@ func (s *SurrealStore) GetSummaryNode(_ context.Context, corpusID, unitID string
 	return &n, nil
 }
 
-func (s *SurrealStore) StoreSummaryNodes(_ context.Context, nodes []comprehension.SummaryNode) error {
+func (s *SurrealStore) StoreSummaryNodes(ctx context.Context, nodes []comprehension.SummaryNode) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -164,20 +164,20 @@ func (s *SurrealStore) StoreSummaryNodes(_ context.Context, nodes []comprehensio
 			"revision_fp":    n.RevisionFP,
 			"metadata":       n.Metadata,
 		}
-		if _, err := surrealdb.Query[interface{}](ctx(), db, sql, vars); err != nil {
+		if _, err := surrealdb.Query[interface{}](ctx, db, sql, vars); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *SurrealStore) InvalidateSummaryNodes(_ context.Context, corpusID string) error {
+func (s *SurrealStore) InvalidateSummaryNodes(ctx context.Context, corpusID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
 	sql := `DELETE FROM ca_summary_node WHERE corpus_id = $corpus_id`
 	vars := map[string]any{"corpus_id": corpusID}
-	_, err := surrealdb.Query[interface{}](ctx(), db, sql, vars)
+	_, err := surrealdb.Query[interface{}](ctx, db, sql, vars)
 	return err
 }

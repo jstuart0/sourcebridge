@@ -39,14 +39,14 @@ func diagramDocumentRecordID(repoID string, sourceKind architecture.SourceKind) 
 	return fmt.Sprintf("%s_%s", repoID, sourceKind)
 }
 
-func (s *SurrealStore) StoreDiagramDocument(_ context.Context, doc *architecture.DiagramDocument) error {
+func (s *SurrealStore) StoreDiagramDocument(ctx context.Context, doc *architecture.DiagramDocument) error {
 	db := s.client.DB()
 	payload, err := json.Marshal(doc)
 	if err != nil {
 		return err
 	}
 
-	_, err = surrealdb.Query[interface{}](ctx(), db, `
+	_, err = surrealdb.Query[interface{}](ctx, db, `
 		UPSERT type::thing('ca_diagram_document', $id) SET
 			id = type::thing('ca_diagram_document', $id),
 			repo_id = $repo_id,
@@ -65,10 +65,10 @@ func (s *SurrealStore) StoreDiagramDocument(_ context.Context, doc *architecture
 	return err
 }
 
-func (s *SurrealStore) GetDiagramDocument(_ context.Context, repoID string, sourceKinds ...architecture.SourceKind) *architecture.DiagramDocument {
+func (s *SurrealStore) GetDiagramDocument(ctx context.Context, repoID string, sourceKinds ...architecture.SourceKind) *architecture.DiagramDocument {
 	db := s.client.DB()
 	for _, sourceKind := range sourceKinds {
-		row, err := queryOne[[]surrealDiagramDocument](ctx(), db,
+		row, err := queryOne[[]surrealDiagramDocument](ctx, db,
 			"SELECT * FROM type::thing('ca_diagram_document', $id)",
 			map[string]any{"id": diagramDocumentRecordID(repoID, sourceKind)},
 		)
@@ -84,9 +84,9 @@ func (s *SurrealStore) GetDiagramDocument(_ context.Context, repoID string, sour
 	return nil
 }
 
-func (s *SurrealStore) DeleteDiagramDocument(_ context.Context, repoID string, sourceKind architecture.SourceKind) error {
+func (s *SurrealStore) DeleteDiagramDocument(ctx context.Context, repoID string, sourceKind architecture.SourceKind) error {
 	db := s.client.DB()
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		"DELETE type::thing('ca_diagram_document', $id)",
 		map[string]any{"id": diagramDocumentRecordID(repoID, sourceKind)},
 	)

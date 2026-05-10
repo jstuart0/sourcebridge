@@ -291,14 +291,12 @@ func recordIDString(rid *models.RecordID) string {
 	return fmt.Sprintf("%v", rid.ID)
 }
 
-func ctx() context.Context { return context.Background() }
-
 // ---------------------------------------------------------------------------
 // Repository operations
 // ---------------------------------------------------------------------------
 
 // CreateRepository creates a placeholder repository with PENDING status.
-func (s *SurrealStore) CreateRepository(_ context.Context, name, path string) (*graph.Repository, error) {
+func (s *SurrealStore) CreateRepository(ctx context.Context, name, path string) (*graph.Repository, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -306,7 +304,7 @@ func (s *SurrealStore) CreateRepository(_ context.Context, name, path string) (*
 
 	repoID := uuid.New().String()
 
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`CREATE ca_repository SET
 			id = type::thing('ca_repository', $rid),
 			name = $name,
@@ -337,7 +335,7 @@ func (s *SurrealStore) CreateRepository(_ context.Context, name, path string) (*
 }
 
 // StoreIndexResult persists a full indexing result.
-func (s *SurrealStore) StoreIndexResult(_ context.Context, result *indexer.IndexResult) (*graph.Repository, error) {
+func (s *SurrealStore) StoreIndexResult(ctx context.Context, result *indexer.IndexResult) (*graph.Repository, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -355,7 +353,7 @@ func (s *SurrealStore) StoreIndexResult(_ context.Context, result *indexer.Index
 	for _, fr := range result.Files {
 		fileID := uuid.New().String()
 
-		_, err := surrealdb.Query[interface{}](ctx(), db,
+		_, err := surrealdb.Query[interface{}](ctx, db,
 			`CREATE ca_file SET
 				id = type::thing('ca_file', $fid),
 				repo_id = $repo_id,
@@ -384,7 +382,7 @@ func (s *SurrealStore) StoreIndexResult(_ context.Context, result *indexer.Index
 			symID := uuid.New().String()
 			idMap[sym.ID] = symID
 
-			_, err := surrealdb.Query[interface{}](ctx(), db,
+			_, err := surrealdb.Query[interface{}](ctx, db,
 				`CREATE ca_symbol SET
 					id = type::thing('ca_symbol', $sid),
 					repo_id = $repo_id,
@@ -428,7 +426,7 @@ func (s *SurrealStore) StoreIndexResult(_ context.Context, result *indexer.Index
 		}
 
 		for _, imp := range fr.Imports {
-			_, _ = surrealdb.Query[interface{}](ctx(), db,
+			_, _ = surrealdb.Query[interface{}](ctx, db,
 				`CREATE ca_import SET
 					file_id = $file_id,
 					path = $path,
@@ -450,7 +448,7 @@ func (s *SurrealStore) StoreIndexResult(_ context.Context, result *indexer.Index
 		}
 		switch rel.Type {
 		case indexer.RelationCalls:
-			_, _ = surrealdb.Query[interface{}](ctx(), db,
+			_, _ = surrealdb.Query[interface{}](ctx, db,
 				`CREATE ca_calls SET
 					caller_id = $caller_id,
 					callee_id = $callee_id,
@@ -464,7 +462,7 @@ func (s *SurrealStore) StoreIndexResult(_ context.Context, result *indexer.Index
 			// ca_tests: source_id = test symbol, target_id = symbol
 			// being tested. Queried via target_id in
 			// GetTestsForSymbolPersisted.
-			_, _ = surrealdb.Query[interface{}](ctx(), db,
+			_, _ = surrealdb.Query[interface{}](ctx, db,
 				`CREATE ca_tests SET
 					source_id = $source_id,
 					target_id = $target_id,
@@ -480,7 +478,7 @@ func (s *SurrealStore) StoreIndexResult(_ context.Context, result *indexer.Index
 	// Store modules
 	for _, mod := range result.Modules {
 		modID := uuid.New().String()
-		_, _ = surrealdb.Query[interface{}](ctx(), db,
+		_, _ = surrealdb.Query[interface{}](ctx, db,
 			`CREATE ca_module SET
 				id = type::thing('ca_module', $mid),
 				repo_id = $repo_id,
@@ -499,7 +497,7 @@ func (s *SurrealStore) StoreIndexResult(_ context.Context, result *indexer.Index
 	// Store repository record
 	// Use time::now() so SurrealDB generates a native datetime value
 	// (passing a Go-formatted string is rejected by SCHEMAFULL datetime fields).
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`CREATE ca_repository SET
 			id = type::thing('ca_repository', $rid),
 			name = $name,
@@ -538,14 +536,14 @@ func (s *SurrealStore) StoreIndexResult(_ context.Context, result *indexer.Index
 
 // ReplaceIndexResult atomically replaces all files, symbols, modules, and relations
 // for an existing repository with new index results.
-func (s *SurrealStore) ReplaceIndexResult(_ context.Context, repoID string, result *indexer.IndexResult) (*graph.Repository, error) {
+func (s *SurrealStore) ReplaceIndexResult(ctx context.Context, repoID string, result *indexer.IndexResult) (*graph.Repository, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
 	}
 
 	// Mark as indexing so the UI shows progress even if the process is interrupted
-	_, _ = surrealdb.Query[interface{}](ctx(), db,
+	_, _ = surrealdb.Query[interface{}](ctx, db,
 		`UPDATE type::thing('ca_repository', $id) SET status = 'indexing'`,
 		map[string]any{"id": repoID})
 
@@ -563,7 +561,7 @@ func (s *SurrealStore) ReplaceIndexResult(_ context.Context, repoID string, resu
 	// deleted symbols. Combined with the matching CREATE-side bug below
 	// (ReplaceIndexResult re-inserted only RelationCalls), every
 	// re-index permanently lost the repo's test-linkage edges.
-	_, _ = surrealdb.Query[interface{}](ctx(), db,
+	_, _ = surrealdb.Query[interface{}](ctx, db,
 		`DELETE ca_import WHERE file_id IN (SELECT VALUE id FROM ca_file WHERE repo_id = $id);
 		 DELETE ca_calls WHERE repo_id = $id;
 		 DELETE ca_tests WHERE repo_id = $id;
@@ -580,7 +578,7 @@ func (s *SurrealStore) ReplaceIndexResult(_ context.Context, repoID string, resu
 	for _, fr := range result.Files {
 		fileID := uuid.New().String()
 
-		_, err := surrealdb.Query[interface{}](ctx(), db,
+		_, err := surrealdb.Query[interface{}](ctx, db,
 			`CREATE ca_file SET
 				id = type::thing('ca_file', $fid),
 				repo_id = $repo_id,
@@ -608,7 +606,7 @@ func (s *SurrealStore) ReplaceIndexResult(_ context.Context, repoID string, resu
 		for _, sym := range fr.Symbols {
 			symID := uuid.New().String()
 			idMap[sym.ID] = symID
-			_, _ = surrealdb.Query[interface{}](ctx(), db,
+			_, _ = surrealdb.Query[interface{}](ctx, db,
 				`CREATE ca_symbol SET
 					id = type::thing('ca_symbol', $sid),
 					repo_id = $repo_id,
@@ -648,7 +646,7 @@ func (s *SurrealStore) ReplaceIndexResult(_ context.Context, repoID string, resu
 		}
 
 		for _, imp := range fr.Imports {
-			_, _ = surrealdb.Query[interface{}](ctx(), db,
+			_, _ = surrealdb.Query[interface{}](ctx, db,
 				`CREATE ca_import SET file_id = $file_id, path = $path, line = $line`,
 				map[string]any{"file_id": fileID, "path": imp.Path, "line": imp.Line})
 		}
@@ -668,7 +666,7 @@ func (s *SurrealStore) ReplaceIndexResult(_ context.Context, repoID string, resu
 		}
 		switch rel.Type {
 		case indexer.RelationCalls:
-			_, _ = surrealdb.Query[interface{}](ctx(), db,
+			_, _ = surrealdb.Query[interface{}](ctx, db,
 				`CREATE ca_calls SET
 					caller_id = $caller_id,
 					callee_id = $callee_id,
@@ -681,7 +679,7 @@ func (s *SurrealStore) ReplaceIndexResult(_ context.Context, repoID string, resu
 		case indexer.RelationTests:
 			// ca_tests: source_id = test symbol, target_id = symbol
 			// being tested. Same shape as StoreIndexResult.
-			_, _ = surrealdb.Query[interface{}](ctx(), db,
+			_, _ = surrealdb.Query[interface{}](ctx, db,
 				`CREATE ca_tests SET
 					source_id = $source_id,
 					target_id = $target_id,
@@ -697,7 +695,7 @@ func (s *SurrealStore) ReplaceIndexResult(_ context.Context, repoID string, resu
 	// Re-insert modules
 	for _, mod := range result.Modules {
 		modID := uuid.New().String()
-		_, _ = surrealdb.Query[interface{}](ctx(), db,
+		_, _ = surrealdb.Query[interface{}](ctx, db,
 			`CREATE ca_module SET
 				id = type::thing('ca_module', $mid),
 				repo_id = $repo_id,
@@ -714,7 +712,7 @@ func (s *SurrealStore) ReplaceIndexResult(_ context.Context, repoID string, resu
 	}
 
 	// Update repository record
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`UPDATE type::thing('ca_repository', $id) SET
 			status = 'ready',
 			file_count = $file_count,
@@ -732,7 +730,7 @@ func (s *SurrealStore) ReplaceIndexResult(_ context.Context, repoID string, resu
 		return nil, fmt.Errorf("updating repository: %w", err)
 	}
 
-	return s.GetRepository(ctx(), repoID), nil
+	return s.GetRepository(ctx, repoID), nil
 }
 
 // MergeIndexResult is the per-file delta entry point used by the
@@ -749,7 +747,7 @@ func (s *SurrealStore) ReplaceIndexResult(_ context.Context, repoID string, resu
 // the flag on while running the SurrealDB backend before Phase 2, the
 // router surfaces this error through the freshness envelope rather
 // than silently corrupting state.
-func (s *SurrealStore) MergeIndexResult(_ context.Context, repoID string, affectedPaths []string, result *indexer.IndexResult) (*graph.Repository, error) {
+func (s *SurrealStore) MergeIndexResult(ctx context.Context, repoID string, affectedPaths []string, result *indexer.IndexResult) (*graph.Repository, error) {
 	_ = repoID
 	_ = affectedPaths
 	_ = result
@@ -757,7 +755,7 @@ func (s *SurrealStore) MergeIndexResult(_ context.Context, repoID string, affect
 }
 
 // UpdateRepositoryMeta updates mutable metadata fields on a repository.
-func (s *SurrealStore) UpdateRepositoryMeta(_ context.Context, id string, meta graph.RepositoryMeta) {
+func (s *SurrealStore) UpdateRepositoryMeta(ctx context.Context, id string, meta graph.RepositoryMeta) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -792,17 +790,17 @@ func (s *SurrealStore) UpdateRepositoryMeta(_ context.Context, id string, meta g
 	}
 
 	sql := fmt.Sprintf("UPDATE type::thing('ca_repository', $id) SET %s", strings.Join(sets, ", "))
-	_, _ = surrealdb.Query[interface{}](ctx(), db, sql, vars)
+	_, _ = surrealdb.Query[interface{}](ctx, db, sql, vars)
 }
 
 // ListRepositories returns all repositories.
-func (s *SurrealStore) ListRepositories(_ context.Context, ) []*graph.Repository {
+func (s *SurrealStore) ListRepositories(ctx context.Context, ) []*graph.Repository {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealRepo](ctx(), db,
+	rows, err := queryOne[[]surrealRepo](ctx, db,
 		"SELECT * FROM ca_repository", nil)
 	if err != nil {
 		slog.Warn("list repositories failed", "error", err)
@@ -817,13 +815,13 @@ func (s *SurrealStore) ListRepositories(_ context.Context, ) []*graph.Repository
 }
 
 // GetRepository returns a repository by ID.
-func (s *SurrealStore) GetRepository(_ context.Context, id string) *graph.Repository {
+func (s *SurrealStore) GetRepository(ctx context.Context, id string) *graph.Repository {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealRepo](ctx(), db,
+	rows, err := queryOne[[]surrealRepo](ctx, db,
 		"SELECT * FROM type::thing('ca_repository', $id)",
 		map[string]any{"id": id})
 	if err != nil || len(rows) == 0 {
@@ -833,13 +831,13 @@ func (s *SurrealStore) GetRepository(_ context.Context, id string) *graph.Reposi
 }
 
 // GetRepositoryByPath returns a repository by its path.
-func (s *SurrealStore) GetRepositoryByPath(_ context.Context, path string) *graph.Repository {
+func (s *SurrealStore) GetRepositoryByPath(ctx context.Context, path string) *graph.Repository {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealRepo](ctx(), db,
+	rows, err := queryOne[[]surrealRepo](ctx, db,
 		"SELECT * FROM ca_repository WHERE path = $path LIMIT 1",
 		map[string]any{"path": path})
 	if err != nil || len(rows) == 0 {
@@ -849,7 +847,7 @@ func (s *SurrealStore) GetRepositoryByPath(_ context.Context, path string) *grap
 }
 
 // RemoveRepository removes a repository and all its data.
-func (s *SurrealStore) RemoveRepository(_ context.Context, id string) bool {
+func (s *SurrealStore) RemoveRepository(ctx context.Context, id string) bool {
 	db := s.client.DB()
 	if db == nil {
 		return false
@@ -862,7 +860,7 @@ func (s *SurrealStore) RemoveRepository(_ context.Context, id string) bool {
 			"repo_id", id, "error", err)
 	}
 
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`DELETE ca_link WHERE repo_id = $id;
 		 DELETE ca_requirement WHERE repo_id = $id;
 		 DELETE ca_import WHERE file_id IN (SELECT VALUE id FROM ca_file WHERE repo_id = $id);
@@ -880,13 +878,13 @@ func (s *SurrealStore) RemoveRepository(_ context.Context, id string) bool {
 }
 
 // GetFiles returns all files for a repository.
-func (s *SurrealStore) GetFiles(_ context.Context, repoID string) []*graph.File {
+func (s *SurrealStore) GetFiles(ctx context.Context, repoID string) []*graph.File {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealFile](ctx(), db,
+	rows, err := queryOne[[]surrealFile](ctx, db,
 		"SELECT * FROM ca_file WHERE repo_id = $repo_id",
 		map[string]any{"repo_id": repoID})
 	if err != nil {
@@ -901,7 +899,7 @@ func (s *SurrealStore) GetFiles(_ context.Context, repoID string) []*graph.File 
 }
 
 // GetFilesPaginated returns files for a repository with optional path prefix filtering and pagination.
-func (s *SurrealStore) GetFilesPaginated(_ context.Context, repoID string, pathPrefix *string, limit, offset int) ([]*graph.File, int) {
+func (s *SurrealStore) GetFilesPaginated(ctx context.Context, repoID string, pathPrefix *string, limit, offset int) ([]*graph.File, int) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, 0
@@ -916,7 +914,7 @@ func (s *SurrealStore) GetFilesPaginated(_ context.Context, repoID string, pathP
 	}
 
 	// Get total count
-	countRows, err := queryOne[[]map[string]interface{}](ctx(), db,
+	countRows, err := queryOne[[]map[string]interface{}](ctx, db,
 		fmt.Sprintf("SELECT count() AS total FROM ca_file WHERE %s GROUP ALL", where), vars)
 	total := 0
 	if err == nil && len(countRows) > 0 {
@@ -940,7 +938,7 @@ func (s *SurrealStore) GetFilesPaginated(_ context.Context, repoID string, pathP
 		sql += fmt.Sprintf(" START %d", offset)
 	}
 
-	rows, err := queryOne[[]surrealFile](ctx(), db, sql, vars)
+	rows, err := queryOne[[]surrealFile](ctx, db, sql, vars)
 	if err != nil {
 		return nil, total
 	}
@@ -953,7 +951,7 @@ func (s *SurrealStore) GetFilesPaginated(_ context.Context, repoID string, pathP
 }
 
 // GetSymbols returns symbols for a repository with optional filtering.
-func (s *SurrealStore) GetSymbols(_ context.Context, repoID string, query *string, kind *string, limit, offset int) ([]*graph.StoredSymbol, int) {
+func (s *SurrealStore) GetSymbols(ctx context.Context, repoID string, query *string, kind *string, limit, offset int) ([]*graph.StoredSymbol, int) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, 0
@@ -973,7 +971,7 @@ func (s *SurrealStore) GetSymbols(_ context.Context, repoID string, query *strin
 	}
 
 	// Get total count
-	countRows, err := queryOne[[]map[string]interface{}](ctx(), db,
+	countRows, err := queryOne[[]map[string]interface{}](ctx, db,
 		fmt.Sprintf("SELECT count() AS total FROM ca_symbol WHERE %s GROUP ALL", where), vars)
 	total := 0
 	if err == nil && len(countRows) > 0 {
@@ -998,7 +996,7 @@ func (s *SurrealStore) GetSymbols(_ context.Context, repoID string, query *strin
 		sql += fmt.Sprintf(" START %d", offset)
 	}
 
-	rows, err := queryOne[[]surrealSymbol](ctx(), db, sql, vars)
+	rows, err := queryOne[[]surrealSymbol](ctx, db, sql, vars)
 	if err != nil {
 		return nil, total
 	}
@@ -1011,13 +1009,13 @@ func (s *SurrealStore) GetSymbols(_ context.Context, repoID string, query *strin
 }
 
 // GetFileSymbols returns symbols for a specific file.
-func (s *SurrealStore) GetFileSymbols(_ context.Context, fileID string) []*graph.StoredSymbol {
+func (s *SurrealStore) GetFileSymbols(ctx context.Context, fileID string) []*graph.StoredSymbol {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealSymbol](ctx(), db,
+	rows, err := queryOne[[]surrealSymbol](ctx, db,
 		"SELECT * FROM ca_symbol WHERE file_id = $file_id",
 		map[string]any{"file_id": fileID})
 	if err != nil {
@@ -1032,13 +1030,13 @@ func (s *SurrealStore) GetFileSymbols(_ context.Context, fileID string) []*graph
 }
 
 // GetModules returns all modules for a repository.
-func (s *SurrealStore) GetModules(_ context.Context, repoID string) []*graph.StoredModule {
+func (s *SurrealStore) GetModules(ctx context.Context, repoID string) []*graph.StoredModule {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealModule](ctx(), db,
+	rows, err := queryOne[[]surrealModule](ctx, db,
 		"SELECT * FROM ca_module WHERE repo_id = $repo_id",
 		map[string]any{"repo_id": repoID})
 	if err != nil {
@@ -1053,13 +1051,13 @@ func (s *SurrealStore) GetModules(_ context.Context, repoID string) []*graph.Sto
 }
 
 // GetCallers returns the IDs of symbols that call the given symbol.
-func (s *SurrealStore) GetCallers(_ context.Context, symbolID string) []string {
+func (s *SurrealStore) GetCallers(ctx context.Context, symbolID string) []string {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]string](ctx(), db,
+	rows, err := queryOne[[]string](ctx, db,
 		"SELECT VALUE caller_id FROM ca_calls WHERE callee_id = $id",
 		map[string]any{"id": symbolID})
 	if err != nil {
@@ -1069,13 +1067,13 @@ func (s *SurrealStore) GetCallers(_ context.Context, symbolID string) []string {
 }
 
 // GetCallees returns the IDs of symbols called by the given symbol.
-func (s *SurrealStore) GetCallees(_ context.Context, symbolID string) []string {
+func (s *SurrealStore) GetCallees(ctx context.Context, symbolID string) []string {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]string](ctx(), db,
+	rows, err := queryOne[[]string](ctx, db,
 		"SELECT VALUE callee_id FROM ca_calls WHERE caller_id = $id",
 		map[string]any{"id": symbolID})
 	if err != nil {
@@ -1087,12 +1085,12 @@ func (s *SurrealStore) GetCallees(_ context.Context, symbolID string) []string {
 // GetTestsForSymbolPersisted returns the IDs of test symbols that
 // exercise the given target symbol, from the ca_tests edge table.
 // Parallels GetCallees — edge shape is source_id=test, target_id=tested.
-func (s *SurrealStore) GetTestsForSymbolPersisted(_ context.Context, symbolID string) []string {
+func (s *SurrealStore) GetTestsForSymbolPersisted(ctx context.Context, symbolID string) []string {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
-	rows, err := queryOne[[]string](ctx(), db,
+	rows, err := queryOne[[]string](ctx, db,
 		"SELECT VALUE source_id FROM ca_tests WHERE target_id = $id",
 		map[string]any{"id": symbolID})
 	if err != nil {
@@ -1102,7 +1100,7 @@ func (s *SurrealStore) GetTestsForSymbolPersisted(_ context.Context, symbolID st
 }
 
 // GetCallEdges returns all call edges for a repository in a single batch.
-func (s *SurrealStore) GetCallEdges(_ context.Context, repoID string) []graph.CallEdge {
+func (s *SurrealStore) GetCallEdges(ctx context.Context, repoID string) []graph.CallEdge {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1113,7 +1111,7 @@ func (s *SurrealStore) GetCallEdges(_ context.Context, repoID string) []graph.Ca
 		CalleeID string `json:"callee_id"`
 	}
 
-	rows, err := queryOne[[]edgeRow](ctx(), db,
+	rows, err := queryOne[[]edgeRow](ctx, db,
 		"SELECT caller_id, callee_id FROM ca_calls WHERE repo_id = $repo_id",
 		map[string]any{"repo_id": repoID})
 	if err != nil {
@@ -1128,7 +1126,7 @@ func (s *SurrealStore) GetCallEdges(_ context.Context, repoID string) []graph.Ca
 }
 
 // GetImports returns all imports for a repository.
-func (s *SurrealStore) GetImports(_ context.Context, repoID string) []*graph.StoredImport {
+func (s *SurrealStore) GetImports(ctx context.Context, repoID string) []*graph.StoredImport {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1139,7 +1137,7 @@ func (s *SurrealStore) GetImports(_ context.Context, repoID string) []*graph.Sto
 		Path   string `json:"path"`
 		Line   int    `json:"line"`
 	}
-	rows, err := queryOne[[]importRow](ctx(), db,
+	rows, err := queryOne[[]importRow](ctx, db,
 		`SELECT * FROM ca_import WHERE file_id IN (SELECT VALUE id FROM ca_file WHERE repo_id = $repo_id)`,
 		map[string]any{"repo_id": repoID})
 	if err != nil {
@@ -1160,7 +1158,7 @@ func (s *SurrealStore) GetImports(_ context.Context, repoID string) []*graph.Sto
 // RecomputePackageDependencies rebuilds the package-level dependency records
 // for the given repo by aggregating raw import rows from SurrealDB, then
 // upserting one package_dep record per package. It is idempotent.
-func (s *SurrealStore) RecomputePackageDependencies(_ context.Context, repoID string) {
+func (s *SurrealStore) RecomputePackageDependencies(ctx context.Context, repoID string) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -1171,7 +1169,7 @@ func (s *SurrealStore) RecomputePackageDependencies(_ context.Context, repoID st
 		FilePath   string `json:"file_path"`
 		ImportPath string `json:"import_path"`
 	}
-	rows, err := queryOne[[]importPair](ctx(), db,
+	rows, err := queryOne[[]importPair](ctx, db,
 		`SELECT f.path AS file_path, i.path AS import_path
 		 FROM ca_import AS i
 		 JOIN ca_file AS f ON f.id = i.file_id
@@ -1224,7 +1222,7 @@ func (s *SurrealStore) RecomputePackageDependencies(_ context.Context, repoID st
 		importList := sortedKeys(imports[pkg])
 		importedByList := sortedKeys(importedBy[pkg])
 		// Upsert the record keyed by (repo_id, package).
-		_, _ = surrealdb.Query[interface{}](ctx(), db,
+		_, _ = surrealdb.Query[interface{}](ctx, db,
 			`UPSERT package_dep:[type::string($repo_id), type::string($pkg)] SET
 			   repo_id = $repo_id,
 			   package = $pkg,
@@ -1256,7 +1254,7 @@ func sortedKeys(m map[string]struct{}) []string {
 
 // GetPackageDependencies returns all pre-computed package dependency records
 // for the given repository from the package_dep table.
-func (s *SurrealStore) GetPackageDependencies(_ context.Context, repoID string) []*graph.StoredPackageDependencies {
+func (s *SurrealStore) GetPackageDependencies(ctx context.Context, repoID string) []*graph.StoredPackageDependencies {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1269,7 +1267,7 @@ func (s *SurrealStore) GetPackageDependencies(_ context.Context, repoID string) 
 		ImportedBy []string  `json:"imported_by"`
 		UpdatedAt  surrealTime `json:"updated_at"`
 	}
-	rows, err := queryOne[[]depRow](ctx(), db,
+	rows, err := queryOne[[]depRow](ctx, db,
 		`SELECT * FROM package_dep WHERE repo_id = $repo_id`,
 		map[string]any{"repo_id": repoID})
 	if err != nil {
@@ -1290,7 +1288,7 @@ func (s *SurrealStore) GetPackageDependencies(_ context.Context, repoID string) 
 }
 
 // SearchContent searches for symbols and files matching a query string.
-func (s *SurrealStore) SearchContent(_ context.Context, repoID, query string, limit int) []graph.SearchResult {
+func (s *SurrealStore) SearchContent(ctx context.Context, repoID, query string, limit int) []graph.SearchResult {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1309,7 +1307,7 @@ func (s *SurrealStore) SearchContent(_ context.Context, repoID, query string, li
 	if symLimit <= 0 {
 		symLimit = 50
 	}
-	symRows, err := queryOne[[]surrealSymbol](ctx(), db,
+	symRows, err := queryOne[[]surrealSymbol](ctx, db,
 		fmt.Sprintf(`SELECT * FROM ca_symbol
 			WHERE repo_id = $repo_id
 			  AND (string::lowercase(name) CONTAINS $q OR string::lowercase(qualified_name) CONTAINS $q)
@@ -1330,7 +1328,7 @@ func (s *SurrealStore) SearchContent(_ context.Context, repoID, query string, li
 	}
 
 	// Search file paths
-	fileRows, err := queryOne[[]surrealFile](ctx(), db,
+	fileRows, err := queryOne[[]surrealFile](ctx, db,
 		fmt.Sprintf(`SELECT * FROM ca_file
 			WHERE repo_id = $repo_id
 			  AND string::lowercase(path) CONTAINS $q
@@ -1354,7 +1352,7 @@ func (s *SurrealStore) SearchContent(_ context.Context, repoID, query string, li
 }
 
 // Stats returns aggregate statistics.
-func (s *SurrealStore) Stats(_ context.Context, ) map[string]int {
+func (s *SurrealStore) Stats(ctx context.Context, ) map[string]int {
 	db := s.client.DB()
 	if db == nil {
 		return map[string]int{}
@@ -1372,7 +1370,7 @@ func (s *SurrealStore) Stats(_ context.Context, ) map[string]int {
 	}
 
 	for key, table := range tables {
-		rows, err := queryOne[[]map[string]interface{}](ctx(), db,
+		rows, err := queryOne[[]map[string]interface{}](ctx, db,
 			fmt.Sprintf("SELECT count() AS total FROM %s GROUP ALL", table), nil)
 		if err == nil && len(rows) > 0 {
 			if v, ok := rows[0]["total"]; ok {
@@ -1394,13 +1392,13 @@ func (s *SurrealStore) Stats(_ context.Context, ) map[string]int {
 }
 
 // SetRepositoryError marks a repository as having an error.
-func (s *SurrealStore) SetRepositoryError(_ context.Context, id string, repoErr error) {
+func (s *SurrealStore) SetRepositoryError(ctx context.Context, id string, repoErr error) {
 	db := s.client.DB()
 	if db == nil {
 		return
 	}
 
-	_, _ = surrealdb.Query[interface{}](ctx(), db,
+	_, _ = surrealdb.Query[interface{}](ctx, db,
 		`UPDATE type::thing('ca_repository', $id) SET status = 'error', index_error = $err`,
 		map[string]any{
 			"id":  id,
@@ -1409,12 +1407,12 @@ func (s *SurrealStore) SetRepositoryError(_ context.Context, id string, repoErr 
 }
 
 // CacheUnderstandingScore stores the precomputed overall score on the repository.
-func (s *SurrealStore) CacheUnderstandingScore(_ context.Context, id string, overall float64) {
+func (s *SurrealStore) CacheUnderstandingScore(ctx context.Context, id string, overall float64) {
 	db := s.client.DB()
 	if db == nil {
 		return
 	}
-	_, _ = surrealdb.Query[interface{}](ctx(), db,
+	_, _ = surrealdb.Query[interface{}](ctx, db,
 		`UPDATE type::thing('ca_repository', $id) SET
 			understanding_score = $score,
 			understanding_score_at = time::now()`,
@@ -1429,7 +1427,7 @@ func (s *SurrealStore) CacheUnderstandingScore(_ context.Context, id string, ove
 // ---------------------------------------------------------------------------
 
 // StoreRequirement adds a requirement to the store.
-func (s *SurrealStore) StoreRequirement(_ context.Context, repoID string, req *graph.StoredRequirement) {
+func (s *SurrealStore) StoreRequirement(ctx context.Context, repoID string, req *graph.StoredRequirement) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -1448,7 +1446,7 @@ func (s *SurrealStore) StoreRequirement(_ context.Context, repoID string, req *g
 		ac = []string{}
 	}
 
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`CREATE ca_requirement SET
 			id = type::thing('ca_requirement', $rid),
 			repo_id = $repo_id,
@@ -1484,10 +1482,10 @@ func (s *SurrealStore) StoreRequirement(_ context.Context, repoID string, req *g
 }
 
 // StoreRequirements adds multiple requirements and returns the count stored.
-func (s *SurrealStore) StoreRequirements(_ context.Context, repoID string, reqs []*graph.StoredRequirement) int {
+func (s *SurrealStore) StoreRequirements(ctx context.Context, repoID string, reqs []*graph.StoredRequirement) int {
 	count := 0
 	for _, req := range reqs {
-		s.StoreRequirement(ctx(), repoID, req)
+		s.StoreRequirement(ctx, repoID, req)
 		if req.ID != "" {
 			count++
 		}
@@ -1496,7 +1494,7 @@ func (s *SurrealStore) StoreRequirements(_ context.Context, repoID string, reqs 
 }
 
 // GetRequirements returns requirements for a repository with pagination.
-func (s *SurrealStore) GetRequirements(_ context.Context, repoID string, limit, offset int) ([]*graph.StoredRequirement, int) {
+func (s *SurrealStore) GetRequirements(ctx context.Context, repoID string, limit, offset int) ([]*graph.StoredRequirement, int) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, 0
@@ -1511,7 +1509,7 @@ func (s *SurrealStore) GetRequirements(_ context.Context, repoID string, limit, 
 	// when combined with an equality filter — returns the full repo total.
 	// `array::len((SELECT id FROM ...))` applies the filter correctly and
 	// is fast enough on requirement-sized datasets.
-	totalCnt, err := queryOne[int](ctx(), db,
+	totalCnt, err := queryOne[int](ctx, db,
 		"RETURN array::len((SELECT id FROM ca_requirement WHERE repo_id = $repo_id AND deleted_at IS NONE));", vars)
 	total := 0
 	if err == nil {
@@ -1527,7 +1525,7 @@ func (s *SurrealStore) GetRequirements(_ context.Context, repoID string, limit, 
 		sql += fmt.Sprintf(" START %d", offset)
 	}
 
-	rows, err := queryOne[[]surrealRequirement](ctx(), db, sql, vars)
+	rows, err := queryOne[[]surrealRequirement](ctx, db, sql, vars)
 	if err != nil {
 		return nil, total
 	}
@@ -1540,13 +1538,13 @@ func (s *SurrealStore) GetRequirements(_ context.Context, repoID string, limit, 
 }
 
 // GetRequirement returns a requirement by ID.
-func (s *SurrealStore) GetRequirement(_ context.Context, id string) *graph.StoredRequirement {
+func (s *SurrealStore) GetRequirement(ctx context.Context, id string) *graph.StoredRequirement {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealRequirement](ctx(), db,
+	rows, err := queryOne[[]surrealRequirement](ctx, db,
 		"SELECT * FROM type::thing('ca_requirement', $id) WHERE deleted_at IS NONE",
 		map[string]any{"id": id})
 	if err != nil || len(rows) == 0 {
@@ -1556,13 +1554,13 @@ func (s *SurrealStore) GetRequirement(_ context.Context, id string) *graph.Store
 }
 
 // GetRequirementsByIDs returns requirements for a batch of IDs in a single query.
-func (s *SurrealStore) GetRequirementsByIDs(_ context.Context, ids []string) map[string]*graph.StoredRequirement {
+func (s *SurrealStore) GetRequirementsByIDs(ctx context.Context, ids []string) map[string]*graph.StoredRequirement {
 	db := s.client.DB()
 	if db == nil || len(ids) == 0 {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealRequirement](ctx(), db,
+	rows, err := queryOne[[]surrealRequirement](ctx, db,
 		"SELECT * FROM ca_requirement WHERE id IN $ids.map(|$v| type::thing('ca_requirement', $v)) AND deleted_at IS NONE",
 		map[string]any{"ids": ids})
 	if err != nil {
@@ -1579,13 +1577,13 @@ func (s *SurrealStore) GetRequirementsByIDs(_ context.Context, ids []string) map
 }
 
 // GetRequirementByExternalID returns a requirement by external ID within a repo.
-func (s *SurrealStore) GetRequirementByExternalID(_ context.Context, repoID, externalID string) *graph.StoredRequirement {
+func (s *SurrealStore) GetRequirementByExternalID(ctx context.Context, repoID, externalID string) *graph.StoredRequirement {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealRequirement](ctx(), db,
+	rows, err := queryOne[[]surrealRequirement](ctx, db,
 		"SELECT * FROM ca_requirement WHERE repo_id = $repo_id AND external_id = $eid AND deleted_at IS NONE LIMIT 1",
 		map[string]any{"repo_id": repoID, "eid": externalID})
 	if err != nil || len(rows) == 0 {
@@ -1606,7 +1604,7 @@ func linkID(repoID, requirementID, symbolID string) string {
 }
 
 // StoreLink adds or updates a requirement-code link.
-func (s *SurrealStore) StoreLink(_ context.Context, repoID string, link *graph.StoredLink) *graph.StoredLink {
+func (s *SurrealStore) StoreLink(ctx context.Context, repoID string, link *graph.StoredLink) *graph.StoredLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1614,7 +1612,7 @@ func (s *SurrealStore) StoreLink(_ context.Context, repoID string, link *graph.S
 
 	lid := linkID(repoID, link.RequirementID, link.SymbolID)
 
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`UPSERT type::thing('ca_link', $lid) SET
 			repo_id = $repo_id,
 			requirement_id = $req_id,
@@ -1652,7 +1650,7 @@ func (s *SurrealStore) StoreLink(_ context.Context, repoID string, link *graph.S
 }
 
 // StoreLinks bulk-inserts links in batches using a single SurrealQL query per batch.
-func (s *SurrealStore) StoreLinks(_ context.Context, repoID string, links []*graph.StoredLink) int {
+func (s *SurrealStore) StoreLinks(ctx context.Context, repoID string, links []*graph.StoredLink) int {
 	db := s.client.DB()
 	if db == nil {
 		return 0
@@ -1687,7 +1685,7 @@ func (s *SurrealStore) StoreLinks(_ context.Context, repoID string, links []*gra
 			})
 		}
 
-		_, err := surrealdb.Query[interface{}](ctx(), db,
+		_, err := surrealdb.Query[interface{}](ctx, db,
 			`FOR $item IN $links {
 				UPSERT type::thing('ca_link', $item.lid) SET
 					repo_id = $item.repo_id,
@@ -1719,13 +1717,13 @@ func (s *SurrealStore) StoreLinks(_ context.Context, repoID string, links []*gra
 }
 
 // GetLink returns a link by ID.
-func (s *SurrealStore) GetLink(_ context.Context, id string) *graph.StoredLink {
+func (s *SurrealStore) GetLink(ctx context.Context, id string) *graph.StoredLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealLink](ctx(), db,
+	rows, err := queryOne[[]surrealLink](ctx, db,
 		"SELECT * FROM type::thing('ca_link', $id) WHERE deleted_at IS NONE",
 		map[string]any{"id": id})
 	if err != nil || len(rows) == 0 {
@@ -1735,7 +1733,7 @@ func (s *SurrealStore) GetLink(_ context.Context, id string) *graph.StoredLink {
 }
 
 // GetLinksForRequirement returns links for a requirement ID.
-func (s *SurrealStore) GetLinksForRequirement(_ context.Context, reqID string, includeRejected bool) []*graph.StoredLink {
+func (s *SurrealStore) GetLinksForRequirement(ctx context.Context, reqID string, includeRejected bool) []*graph.StoredLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1747,7 +1745,7 @@ func (s *SurrealStore) GetLinksForRequirement(_ context.Context, reqID string, i
 	}
 	sql += " ORDER BY confidence DESC"
 
-	rows, err := queryOne[[]surrealLink](ctx(), db, sql,
+	rows, err := queryOne[[]surrealLink](ctx, db, sql,
 		map[string]any{"req_id": reqID})
 	if err != nil {
 		return nil
@@ -1761,7 +1759,7 @@ func (s *SurrealStore) GetLinksForRequirement(_ context.Context, reqID string, i
 }
 
 // GetLinksForSymbol returns links for a symbol ID.
-func (s *SurrealStore) GetLinksForSymbol(_ context.Context, symID string, includeRejected bool) []*graph.StoredLink {
+func (s *SurrealStore) GetLinksForSymbol(ctx context.Context, symID string, includeRejected bool) []*graph.StoredLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1772,7 +1770,7 @@ func (s *SurrealStore) GetLinksForSymbol(_ context.Context, symID string, includ
 		sql += " AND rejected = false"
 	}
 
-	rows, err := queryOne[[]surrealLink](ctx(), db, sql,
+	rows, err := queryOne[[]surrealLink](ctx, db, sql,
 		map[string]any{"sym_id": symID})
 	if err != nil {
 		return nil
@@ -1786,7 +1784,7 @@ func (s *SurrealStore) GetLinksForSymbol(_ context.Context, symID string, includ
 }
 
 // GetLinksForFile returns links for symbols in a file, optionally filtered by line range.
-func (s *SurrealStore) GetLinksForFile(_ context.Context, fileID string, startLine, endLine int, minConfidence float64) []*graph.StoredLink {
+func (s *SurrealStore) GetLinksForFile(ctx context.Context, fileID string, startLine, endLine int, minConfidence float64) []*graph.StoredLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1804,7 +1802,7 @@ func (s *SurrealStore) GetLinksForFile(_ context.Context, fileID string, startLi
 		vars["end_line"] = endLine
 	}
 
-	symRows, err := queryOne[[]surrealSymbol](ctx(), db,
+	symRows, err := queryOne[[]surrealSymbol](ctx, db,
 		fmt.Sprintf("SELECT * FROM ca_symbol WHERE %s", symWhere), vars)
 	if err != nil || len(symRows) == 0 {
 		return nil
@@ -1817,7 +1815,7 @@ func (s *SurrealStore) GetLinksForFile(_ context.Context, fileID string, startLi
 	}
 
 	// Get links for those symbols
-	linkRows, err := queryOne[[]surrealLink](ctx(), db,
+	linkRows, err := queryOne[[]surrealLink](ctx, db,
 		"SELECT * FROM ca_link WHERE symbol_id IN $sym_ids AND rejected = false AND deleted_at IS NONE AND confidence >= $min_conf",
 		map[string]any{
 			"sym_ids":  symIDs,
@@ -1835,7 +1833,7 @@ func (s *SurrealStore) GetLinksForFile(_ context.Context, fileID string, startLi
 }
 
 // VerifyLink marks a link as verified or rejected.
-func (s *SurrealStore) VerifyLink(_ context.Context, linkID string, verified bool, verifiedBy string) *graph.StoredLink {
+func (s *SurrealStore) VerifyLink(ctx context.Context, linkID string, verified bool, verifiedBy string) *graph.StoredLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1849,24 +1847,24 @@ func (s *SurrealStore) VerifyLink(_ context.Context, linkID string, verified boo
 		sql = `UPDATE type::thing('ca_link', $id) SET rejected = true, verified = false, verified_by = $by WHERE deleted_at IS NONE`
 	}
 
-	_, err := surrealdb.Query[interface{}](ctx(), db, sql,
+	_, err := surrealdb.Query[interface{}](ctx, db, sql,
 		map[string]any{"id": linkID, "by": verifiedBy})
 	if err != nil {
 		slog.Warn("verify link failed", "error", err)
 		return nil
 	}
 
-	return s.GetLink(ctx(), linkID)
+	return s.GetLink(ctx, linkID)
 }
 
 // GetLinksForRepo returns all non-rejected links for a repository.
-func (s *SurrealStore) GetLinksForRepo(_ context.Context, repoID string) []*graph.StoredLink {
+func (s *SurrealStore) GetLinksForRepo(ctx context.Context, repoID string) []*graph.StoredLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealLink](ctx(), db,
+	rows, err := queryOne[[]surrealLink](ctx, db,
 		"SELECT * FROM ca_link WHERE repo_id = $repo_id AND rejected = false AND deleted_at IS NONE",
 		map[string]any{"repo_id": repoID})
 	if err != nil {
@@ -1881,13 +1879,13 @@ func (s *SurrealStore) GetLinksForRepo(_ context.Context, repoID string) []*grap
 }
 
 // GetSymbol returns a single symbol by ID.
-func (s *SurrealStore) GetSymbol(_ context.Context, id string) *graph.StoredSymbol {
+func (s *SurrealStore) GetSymbol(ctx context.Context, id string) *graph.StoredSymbol {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealSymbol](ctx(), db,
+	rows, err := queryOne[[]surrealSymbol](ctx, db,
 		"SELECT * FROM ca_symbol WHERE id = type::thing('ca_symbol', $id) LIMIT 1",
 		map[string]any{"id": id})
 	if err != nil || len(rows) == 0 {
@@ -1905,7 +1903,7 @@ func (s *SurrealStore) GetSymbol(_ context.Context, id string) *graph.StoredSymb
 // the array map-and-IN comparison stays well inside Surreal's budget while
 // the total round-trip cost (~16 sequential queries instead of ~7000) is
 // still vastly cheaper than the original per-id N+1.
-func (s *SurrealStore) GetSymbolsByIDs(_ context.Context, ids []string) map[string]*graph.StoredSymbol {
+func (s *SurrealStore) GetSymbolsByIDs(ctx context.Context, ids []string) map[string]*graph.StoredSymbol {
 	db := s.client.DB()
 	if db == nil || len(ids) == 0 {
 		return nil
@@ -1919,7 +1917,7 @@ func (s *SurrealStore) GetSymbolsByIDs(_ context.Context, ids []string) map[stri
 			end = len(ids)
 		}
 		batch := ids[start:end]
-		rows, err := queryOne[[]surrealSymbol](ctx(), db,
+		rows, err := queryOne[[]surrealSymbol](ctx, db,
 			"SELECT * FROM ca_symbol WHERE id IN $ids.map(|$v| type::thing('ca_symbol', $v))",
 			map[string]any{"ids": batch})
 		if err != nil {
@@ -1936,13 +1934,13 @@ func (s *SurrealStore) GetSymbolsByIDs(_ context.Context, ids []string) map[stri
 }
 
 // GetSymbolsByFile returns all symbols in a repository for a given file path.
-func (s *SurrealStore) GetSymbolsByFile(_ context.Context, repoID string, filePath string) []*graph.StoredSymbol {
+func (s *SurrealStore) GetSymbolsByFile(ctx context.Context, repoID string, filePath string) []*graph.StoredSymbol {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealSymbol](ctx(), db,
+	rows, err := queryOne[[]surrealSymbol](ctx, db,
 		"SELECT * FROM ca_symbol WHERE repo_id = $repo_id AND file_path = $file_path ORDER BY start_line",
 		map[string]any{"repo_id": repoID, "file_path": filePath})
 	if err != nil {
@@ -1959,7 +1957,7 @@ func (s *SurrealStore) GetSymbolsByFile(_ context.Context, repoID string, filePa
 // UpdateRequirementFields applies a partial update, preserving any
 // field the caller leaves nil. Enforces externalId uniqueness per-repo
 // via a pre-check against non-trashed rows.
-func (s *SurrealStore) UpdateRequirementFields(_ context.Context, id string, fields graph.RequirementUpdate) *graph.StoredRequirement {
+func (s *SurrealStore) UpdateRequirementFields(ctx context.Context, id string, fields graph.RequirementUpdate) *graph.StoredRequirement {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -1967,13 +1965,13 @@ func (s *SurrealStore) UpdateRequirementFields(_ context.Context, id string, fie
 	// Load current row to preserve non-modified fields and to scope the
 	// uniqueness check to the same repo. GetRequirement already filters
 	// trashed rows.
-	current := s.GetRequirement(ctx(), id)
+	current := s.GetRequirement(ctx, id)
 	if current == nil {
 		return nil
 	}
 	if fields.ExternalID != nil && *fields.ExternalID != "" && *fields.ExternalID != current.ExternalID {
 		// Soft-delete aware uniqueness — see plan §1.4 on read-path filters.
-		existing, err := queryOne[int](ctx(), db,
+		existing, err := queryOne[int](ctx, db,
 			"RETURN array::len((SELECT id FROM ca_requirement WHERE repo_id = $repo AND external_id = $eid AND deleted_at IS NONE));",
 			map[string]any{"repo": current.RepoID, "eid": *fields.ExternalID})
 		if err == nil && existing > 0 {
@@ -2012,7 +2010,7 @@ func (s *SurrealStore) UpdateRequirementFields(_ context.Context, id string, fie
 	}
 
 	stmt := "UPDATE type::thing('ca_requirement', $id) SET " + joinComma(sets) + " WHERE deleted_at IS NONE RETURN AFTER"
-	rows, err := queryOne[[]surrealRequirement](ctx(), db, stmt, vars)
+	rows, err := queryOne[[]surrealRequirement](ctx, db, stmt, vars)
 	if err != nil || len(rows) == 0 {
 		return nil
 	}
@@ -2036,7 +2034,7 @@ func joinComma(parts []string) string {
 // ---------------------------------------------------------------------------
 
 // StoreLLMUsage records an LLM API call.
-func (s *SurrealStore) StoreLLMUsage(_ context.Context, record *graph.LLMUsageRecord) {
+func (s *SurrealStore) StoreLLMUsage(ctx context.Context, record *graph.LLMUsageRecord) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -2044,7 +2042,7 @@ func (s *SurrealStore) StoreLLMUsage(_ context.Context, record *graph.LLMUsageRe
 
 	record.ID = uuid.New().String()
 
-	_, _ = surrealdb.Query[interface{}](ctx(), db,
+	_, _ = surrealdb.Query[interface{}](ctx, db,
 		`CREATE ca_llm_usage SET
 			id = type::thing('ca_llm_usage', $uid),
 			repo_id = $repo_id,
@@ -2068,7 +2066,7 @@ func (s *SurrealStore) StoreLLMUsage(_ context.Context, record *graph.LLMUsageRe
 }
 
 // GetLLMUsage returns LLM usage records, optionally filtered by repoID.
-func (s *SurrealStore) GetLLMUsage(_ context.Context, repoID string, limit int) []graph.LLMUsageRecord {
+func (s *SurrealStore) GetLLMUsage(ctx context.Context, repoID string, limit int) []graph.LLMUsageRecord {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -2097,7 +2095,7 @@ func (s *SurrealStore) GetLLMUsage(_ context.Context, repoID string, limit int) 
 		CreatedAt    surrealTime      `json:"created_at"`
 	}
 
-	rows, err := queryOne[[]usageRow](ctx(), db, sql, vars)
+	rows, err := queryOne[[]usageRow](ctx, db, sql, vars)
 	if err != nil {
 		return nil
 	}
@@ -2125,7 +2123,7 @@ func (s *SurrealStore) GetLLMUsage(_ context.Context, repoID string, limit int) 
 // ---------------------------------------------------------------------------
 
 // StoreEmbedding caches an embedding vector.
-func (s *SurrealStore) StoreEmbedding(_ context.Context, record *graph.EmbeddingRecord) {
+func (s *SurrealStore) StoreEmbedding(ctx context.Context, record *graph.EmbeddingRecord) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -2140,7 +2138,7 @@ func (s *SurrealStore) StoreEmbedding(_ context.Context, record *graph.Embedding
 	}
 
 	// Upsert by target_id — only keep the latest embedding per target
-	_, _ = surrealdb.Query[interface{}](ctx(), db,
+	_, _ = surrealdb.Query[interface{}](ctx, db,
 		`DELETE ca_embedding WHERE target_id = $target_id;
 		 CREATE ca_embedding SET
 			id = type::thing('ca_embedding', $eid),
@@ -2163,7 +2161,7 @@ func (s *SurrealStore) StoreEmbedding(_ context.Context, record *graph.Embedding
 }
 
 // GetEmbedding retrieves a cached embedding by target ID.
-func (s *SurrealStore) GetEmbedding(_ context.Context, targetID string) *graph.EmbeddingRecord {
+func (s *SurrealStore) GetEmbedding(ctx context.Context, targetID string) *graph.EmbeddingRecord {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -2180,7 +2178,7 @@ func (s *SurrealStore) GetEmbedding(_ context.Context, targetID string) *graph.E
 		CreatedAt  surrealTime      `json:"created_at"`
 	}
 
-	rows, err := queryOne[[]embRow](ctx(), db,
+	rows, err := queryOne[[]embRow](ctx, db,
 		"SELECT * FROM ca_embedding WHERE target_id = $target_id LIMIT 1",
 		map[string]any{"target_id": targetID})
 	if err != nil || len(rows) == 0 {
@@ -2209,7 +2207,7 @@ func (s *SurrealStore) GetEmbedding(_ context.Context, targetID string) *graph.E
 // ---------------------------------------------------------------------------
 
 // StoreReviewResult persists an AI code review result.
-func (s *SurrealStore) StoreReviewResult(_ context.Context, record *graph.ReviewResultRecord) {
+func (s *SurrealStore) StoreReviewResult(ctx context.Context, record *graph.ReviewResultRecord) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -2217,7 +2215,7 @@ func (s *SurrealStore) StoreReviewResult(_ context.Context, record *graph.Review
 
 	record.ID = uuid.New().String()
 
-	_, _ = surrealdb.Query[interface{}](ctx(), db,
+	_, _ = surrealdb.Query[interface{}](ctx, db,
 		`CREATE ca_review_result SET
 			id = type::thing('ca_review_result', $rid),
 			repo_id = $repo_id,
@@ -2239,7 +2237,7 @@ func (s *SurrealStore) StoreReviewResult(_ context.Context, record *graph.Review
 }
 
 // GetReviewResultsForRepo returns all review results for a given repository.
-func (s *SurrealStore) GetReviewResultsForRepo(_ context.Context, repoID string) []*graph.ReviewResultRecord {
+func (s *SurrealStore) GetReviewResultsForRepo(ctx context.Context, repoID string) []*graph.ReviewResultRecord {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -2255,7 +2253,7 @@ func (s *SurrealStore) GetReviewResultsForRepo(_ context.Context, repoID string)
 		CreatedAt surrealTime      `json:"created_at"`
 	}
 
-	rows, err := queryOne[[]reviewRow](ctx(), db,
+	rows, err := queryOne[[]reviewRow](ctx, db,
 		"SELECT * FROM ca_review_result WHERE repo_id = $repo_id ORDER BY created_at DESC",
 		map[string]any{"repo_id": repoID})
 	if err != nil {
@@ -2280,14 +2278,14 @@ func (s *SurrealStore) GetReviewResultsForRepo(_ context.Context, repoID string)
 
 // GetPublicSymbolDocCoverage returns the count of public symbols with doc comments
 // and the total count of public symbols for a repository.
-func (s *SurrealStore) GetPublicSymbolDocCoverage(_ context.Context, repoID string) (withDocs int, total int) {
+func (s *SurrealStore) GetPublicSymbolDocCoverage(ctx context.Context, repoID string) (withDocs int, total int) {
 	db := s.client.DB()
 	if db == nil {
 		return 0, 0
 	}
 
 	// Fetch all symbols for the repo and apply visibility rules in Go
-	rows, err := queryOne[[]surrealSymbol](ctx(), db,
+	rows, err := queryOne[[]surrealSymbol](ctx, db,
 		"SELECT * FROM ca_symbol WHERE repo_id = $repo_id",
 		map[string]any{"repo_id": repoID})
 	if err != nil {
@@ -2308,7 +2306,7 @@ func (s *SurrealStore) GetPublicSymbolDocCoverage(_ context.Context, repoID stri
 }
 
 // GetTestSymbolRatio returns the count of test symbols and total symbols for a repository.
-func (s *SurrealStore) GetTestSymbolRatio(_ context.Context, repoID string) (tests int, total int) {
+func (s *SurrealStore) GetTestSymbolRatio(ctx context.Context, repoID string) (tests int, total int) {
 	db := s.client.DB()
 	if db == nil {
 		return 0, 0
@@ -2319,7 +2317,7 @@ func (s *SurrealStore) GetTestSymbolRatio(_ context.Context, repoID string) (tes
 	}
 
 	// Total symbols
-	totalRows, err := queryOne[[]countRow](ctx(), db,
+	totalRows, err := queryOne[[]countRow](ctx, db,
 		"SELECT count() AS total FROM ca_symbol WHERE repo_id = $repo_id GROUP ALL",
 		map[string]any{"repo_id": repoID})
 	if err == nil && len(totalRows) > 0 {
@@ -2327,7 +2325,7 @@ func (s *SurrealStore) GetTestSymbolRatio(_ context.Context, repoID string) (tes
 	}
 
 	// Test symbols
-	testRows, err := queryOne[[]countRow](ctx(), db,
+	testRows, err := queryOne[[]countRow](ctx, db,
 		"SELECT count() AS total FROM ca_symbol WHERE repo_id = $repo_id AND is_test = true GROUP ALL",
 		map[string]any{"repo_id": repoID})
 	if err == nil && len(testRows) > 0 {
@@ -2338,7 +2336,7 @@ func (s *SurrealStore) GetTestSymbolRatio(_ context.Context, repoID string) (tes
 }
 
 // GetAICodeFileRatio returns the count of AI-generated files (ai_score > 0.5) and total files.
-func (s *SurrealStore) GetAICodeFileRatio(_ context.Context, repoID string) (aiFiles int, totalFiles int) {
+func (s *SurrealStore) GetAICodeFileRatio(ctx context.Context, repoID string) (aiFiles int, totalFiles int) {
 	db := s.client.DB()
 	if db == nil {
 		return 0, 0
@@ -2349,7 +2347,7 @@ func (s *SurrealStore) GetAICodeFileRatio(_ context.Context, repoID string) (aiF
 	}
 
 	// Total files
-	rows, err := queryOne[[]countRow](ctx(), db,
+	rows, err := queryOne[[]countRow](ctx, db,
 		"SELECT count() AS total FROM ca_file WHERE repo_id = $repo_id GROUP ALL",
 		map[string]any{"repo_id": repoID})
 	if err == nil && len(rows) > 0 {
@@ -2357,7 +2355,7 @@ func (s *SurrealStore) GetAICodeFileRatio(_ context.Context, repoID string) (aiF
 	}
 
 	// AI files
-	aiRows, err := queryOne[[]countRow](ctx(), db,
+	aiRows, err := queryOne[[]countRow](ctx, db,
 		"SELECT count() AS total FROM ca_file WHERE repo_id = $repo_id AND ai_score > 0.5 GROUP ALL",
 		map[string]any{"repo_id": repoID})
 	if err == nil && len(aiRows) > 0 {
@@ -2368,7 +2366,7 @@ func (s *SurrealStore) GetAICodeFileRatio(_ context.Context, repoID string) (aiF
 }
 
 // GetReviewResults returns review results for a target (symbol or file).
-func (s *SurrealStore) GetReviewResults(_ context.Context, targetID string) []*graph.ReviewResultRecord {
+func (s *SurrealStore) GetReviewResults(ctx context.Context, targetID string) []*graph.ReviewResultRecord {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -2385,7 +2383,7 @@ func (s *SurrealStore) GetReviewResults(_ context.Context, targetID string) []*g
 		CreatedAt surrealTime      `json:"created_at"`
 	}
 
-	rows, err := queryOne[[]reviewRow](ctx(), db,
+	rows, err := queryOne[[]reviewRow](ctx, db,
 		"SELECT * FROM ca_review_result WHERE target_id = $target_id ORDER BY created_at DESC",
 		map[string]any{"target_id": targetID})
 	if err != nil {
@@ -2409,7 +2407,7 @@ func (s *SurrealStore) GetReviewResults(_ context.Context, targetID string) []*g
 }
 
 // StoreImpactReport stores an impact report for a repository.
-func (s *SurrealStore) StoreImpactReport(_ context.Context, repoID string, report *graph.ImpactReport) {
+func (s *SurrealStore) StoreImpactReport(ctx context.Context, repoID string, report *graph.ImpactReport) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -2423,7 +2421,7 @@ func (s *SurrealStore) StoreImpactReport(_ context.Context, repoID string, repor
 			reasonsJSON = string(b)
 		}
 	}
-	if _, err := surrealdb.Query[interface{}](ctx(), db,
+	if _, err := surrealdb.Query[interface{}](ctx, db,
 		`CREATE ca_impact_report SET
 			report_id = $report_id, repo_id = $repo_id,
 			old_commit_sha = $old_sha, new_commit_sha = $new_sha,
@@ -2506,12 +2504,12 @@ func (r *impactReportRow) toImpactReport() *graph.ImpactReport {
 }
 
 // GetLatestImpactReport returns the most recent impact report for a repository.
-func (s *SurrealStore) GetLatestImpactReport(_ context.Context, repoID string) *graph.ImpactReport {
+func (s *SurrealStore) GetLatestImpactReport(ctx context.Context, repoID string) *graph.ImpactReport {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
-	impRows, err := queryOne[[]impactReportRow](ctx(), db,
+	impRows, err := queryOne[[]impactReportRow](ctx, db,
 		"SELECT * FROM ca_impact_report WHERE repo_id = $repo_id ORDER BY computed_at DESC LIMIT 1",
 		map[string]any{"repo_id": repoID})
 	if err != nil || len(impRows) == 0 {
@@ -2521,7 +2519,7 @@ func (s *SurrealStore) GetLatestImpactReport(_ context.Context, repoID string) *
 }
 
 // GetImpactReports returns impact reports for a repository, most recent first.
-func (s *SurrealStore) GetImpactReports(_ context.Context, repoID string, limit int) ([]*graph.ImpactReport, int) {
+func (s *SurrealStore) GetImpactReports(ctx context.Context, repoID string, limit int) ([]*graph.ImpactReport, int) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, 0
@@ -2529,7 +2527,7 @@ func (s *SurrealStore) GetImpactReports(_ context.Context, repoID string, limit 
 	if limit <= 0 {
 		limit = 10
 	}
-	impRows, err := queryOne[[]impactReportRow](ctx(), db,
+	impRows, err := queryOne[[]impactReportRow](ctx, db,
 		"SELECT * FROM ca_impact_report WHERE repo_id = $repo_id ORDER BY computed_at DESC LIMIT $lim",
 		map[string]any{"repo_id": repoID, "lim": limit})
 	if err != nil {
@@ -2546,7 +2544,7 @@ func (s *SurrealStore) GetImpactReports(_ context.Context, repoID string, limit 
 // Discovered Requirement operations (spec extraction)
 // ---------------------------------------------------------------------------
 
-func (s *SurrealStore) StoreDiscoveredRequirement(_ context.Context, repoID string, req *graph.DiscoveredRequirement) {
+func (s *SurrealStore) StoreDiscoveredRequirement(ctx context.Context, repoID string, req *graph.DiscoveredRequirement) {
 	db := s.client.DB()
 	if db == nil {
 		return
@@ -2564,7 +2562,7 @@ func (s *SurrealStore) StoreDiscoveredRequirement(_ context.Context, repoID stri
 		keywords = []string{}
 	}
 
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`CREATE ca_discovered_requirement SET
 			id = type::thing('ca_discovered_requirement', $rid),
 			repo_id = $repo_id,
@@ -2597,10 +2595,10 @@ func (s *SurrealStore) StoreDiscoveredRequirement(_ context.Context, repoID stri
 	req.ID = "ca_discovered_requirement:" + reqID
 }
 
-func (s *SurrealStore) StoreDiscoveredRequirements(_ context.Context, repoID string, reqs []*graph.DiscoveredRequirement) int {
+func (s *SurrealStore) StoreDiscoveredRequirements(ctx context.Context, repoID string, reqs []*graph.DiscoveredRequirement) int {
 	count := 0
 	for _, req := range reqs {
-		s.StoreDiscoveredRequirement(ctx(), repoID, req)
+		s.StoreDiscoveredRequirement(ctx, repoID, req)
 		if req.ID != "" {
 			count++
 		}
@@ -2608,7 +2606,7 @@ func (s *SurrealStore) StoreDiscoveredRequirements(_ context.Context, repoID str
 	return count
 }
 
-func (s *SurrealStore) GetDiscoveredRequirements(_ context.Context, repoID string, status *string, confidence *string, limit, offset int) ([]*graph.DiscoveredRequirement, int) {
+func (s *SurrealStore) GetDiscoveredRequirements(ctx context.Context, repoID string, status *string, confidence *string, limit, offset int) ([]*graph.DiscoveredRequirement, int) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, 0
@@ -2647,7 +2645,7 @@ func (s *SurrealStore) GetDiscoveredRequirements(_ context.Context, repoID strin
 	}
 
 	// Count
-	countRows, err := queryOne[[]map[string]interface{}](ctx(), db,
+	countRows, err := queryOne[[]map[string]interface{}](ctx, db,
 		"SELECT count() AS total FROM ca_discovered_requirement "+where+" GROUP ALL", vars)
 	total := 0
 	if err == nil && len(countRows) > 0 {
@@ -2671,7 +2669,7 @@ func (s *SurrealStore) GetDiscoveredRequirements(_ context.Context, repoID strin
 		q += fmt.Sprintf(" START %d", offset)
 	}
 
-	rows, err := queryOne[[]discRow](ctx(), db, q, vars)
+	rows, err := queryOne[[]discRow](ctx, db, q, vars)
 	if err != nil {
 		return nil, total
 	}
@@ -2691,7 +2689,7 @@ func (s *SurrealStore) GetDiscoveredRequirements(_ context.Context, repoID strin
 	return result, total
 }
 
-func (s *SurrealStore) GetDiscoveredRequirement(_ context.Context, id string) *graph.DiscoveredRequirement {
+func (s *SurrealStore) GetDiscoveredRequirement(ctx context.Context, id string) *graph.DiscoveredRequirement {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -2716,7 +2714,7 @@ func (s *SurrealStore) GetDiscoveredRequirement(_ context.Context, id string) *g
 		DismissedReason string      `json:"dismissed_reason"`
 		CreatedAt       surrealTime `json:"created_at"`
 	}
-	rows, err := queryOne[[]discRow](ctx(), db, "SELECT * FROM $id", map[string]any{"id": id})
+	rows, err := queryOne[[]discRow](ctx, db, "SELECT * FROM $id", map[string]any{"id": id})
 	if err != nil || len(rows) == 0 {
 		return nil
 	}
@@ -2732,42 +2730,42 @@ func (s *SurrealStore) GetDiscoveredRequirement(_ context.Context, id string) *g
 	}
 }
 
-func (s *SurrealStore) PromoteDiscoveredRequirement(_ context.Context, id string, requirementID string) *graph.DiscoveredRequirement {
+func (s *SurrealStore) PromoteDiscoveredRequirement(ctx context.Context, id string, requirementID string) *graph.DiscoveredRequirement {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`UPDATE $id SET status = 'promoted', promoted_to = $req_id, promoted_at = time::now()`,
 		map[string]any{"id": id, "req_id": requirementID})
 	if err != nil {
 		slog.Error("promote_discovered_requirement", "error", err)
 		return nil
 	}
-	return s.GetDiscoveredRequirement(ctx(), id)
+	return s.GetDiscoveredRequirement(ctx, id)
 }
 
-func (s *SurrealStore) DismissDiscoveredRequirement(_ context.Context, id string, dismissedBy string, reason string) *graph.DiscoveredRequirement {
+func (s *SurrealStore) DismissDiscoveredRequirement(ctx context.Context, id string, dismissedBy string, reason string) *graph.DiscoveredRequirement {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`UPDATE $id SET status = 'dismissed', dismissed_by = $by, dismissed_reason = $reason, dismissed_at = time::now()`,
 		map[string]any{"id": id, "by": dismissedBy, "reason": reason})
 	if err != nil {
 		slog.Error("dismiss_discovered_requirement", "error", err)
 		return nil
 	}
-	return s.GetDiscoveredRequirement(ctx(), id)
+	return s.GetDiscoveredRequirement(ctx, id)
 }
 
-func (s *SurrealStore) DeleteDiscoveredRequirementsByRepo(_ context.Context, repoID string) int {
+func (s *SurrealStore) DeleteDiscoveredRequirementsByRepo(ctx context.Context, repoID string) int {
 	db := s.client.DB()
 	if db == nil {
 		return 0
 	}
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`DELETE FROM ca_discovered_requirement WHERE repo_id = $repo_id AND status = 'discovered'`,
 		map[string]any{"repo_id": repoID})
 	if err != nil {
@@ -2783,7 +2781,7 @@ func (s *SurrealStore) DeleteDiscoveredRequirementsByRepo(_ context.Context, rep
 
 // GetRepoEdgeHash returns the cluster_graph_edge_hash stored on the
 // ca_repository record, or an empty string when the field is absent.
-func (s *SurrealStore) GetRepoEdgeHash(_ context.Context, repoID string) (string, error) {
+func (s *SurrealStore) GetRepoEdgeHash(ctx context.Context, repoID string) (string, error) {
 	db := s.client.DB()
 	if db == nil {
 		return "", nil
@@ -2791,7 +2789,7 @@ func (s *SurrealStore) GetRepoEdgeHash(_ context.Context, repoID string) (string
 	type hashRow struct {
 		Hash string `json:"cluster_graph_edge_hash"`
 	}
-	rows, err := queryOne[[]hashRow](ctx(), db,
+	rows, err := queryOne[[]hashRow](ctx, db,
 		`SELECT cluster_graph_edge_hash FROM type::thing('ca_repository', $id)`,
 		map[string]any{"id": repoID})
 	if err != nil || len(rows) == 0 {
@@ -2802,12 +2800,12 @@ func (s *SurrealStore) GetRepoEdgeHash(_ context.Context, repoID string) (string
 
 // SetRepoEdgeHash writes the cluster_graph_edge_hash onto the ca_repository
 // record so future clustering runs can skip unchanged graphs.
-func (s *SurrealStore) SetRepoEdgeHash(_ context.Context, repoID, hash string) error {
+func (s *SurrealStore) SetRepoEdgeHash(ctx context.Context, repoID, hash string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`UPDATE type::thing('ca_repository', $id) SET cluster_graph_edge_hash = $hash`,
 		map[string]any{"id": repoID, "hash": hash})
 	return err
@@ -2855,7 +2853,7 @@ func (c *surrealCluster) toCluster() clustering.Cluster {
 // atomically. We exploit this by composing the full delete + insert as one
 // batch query, passing cluster and member rows as JSON arrays via $clusters and
 // $members parameters iterated with FOR loops.
-func (s *SurrealStore) ReplaceClusters(_ context.Context, repoID string, clusters []clustering.Cluster) error {
+func (s *SurrealStore) ReplaceClusters(ctx context.Context, repoID string, clusters []clustering.Cluster) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -2926,7 +2924,7 @@ func (s *SurrealStore) ReplaceClusters(_ context.Context, repoID string, cluster
 	// statement assigns NONE to the field when the key is missing, which
 	// SurrealDB v2.2+ rejects for option<string> inside a transactional
 	// FOR-loop.
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`BEGIN;
 		 DELETE cluster_member WHERE repo_id = $repo_id;
 		 DELETE cluster        WHERE repo_id = $repo_id;
@@ -2954,7 +2952,7 @@ func (s *SurrealStore) ReplaceClusters(_ context.Context, repoID string, cluster
 // SaveClusters persists a full set of clusters and their members for a
 // repository. The caller is responsible for calling DeleteClusters first when
 // replacing an existing set. Prefer ReplaceClusters for full replacements.
-func (s *SurrealStore) SaveClusters(_ context.Context, repoID string, clusters []clustering.Cluster) error {
+func (s *SurrealStore) SaveClusters(ctx context.Context, repoID string, clusters []clustering.Cluster) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -2996,14 +2994,14 @@ func (s *SurrealStore) SaveClusters(_ context.Context, repoID string, clusters [
 			vars["llm_label"] = *c.LLMLabel
 			sql += `, llm_label = $llm_label`
 		}
-		_, err := surrealdb.Query[interface{}](ctx(), db, sql, vars)
+		_, err := surrealdb.Query[interface{}](ctx, db, sql, vars)
 		if err != nil {
 			slog.Warn("clustering: failed to save cluster", "repo_id", repoID, "error", err)
 			continue
 		}
 		// Persist members.
 		for _, m := range c.Members {
-			_, _ = surrealdb.Query[interface{}](ctx(), db,
+			_, _ = surrealdb.Query[interface{}](ctx, db,
 				`CREATE cluster_member SET
 					cluster_id = type::thing('cluster', $cid),
 					symbol_id  = $symbol_id,
@@ -3019,12 +3017,12 @@ func (s *SurrealStore) SaveClusters(_ context.Context, repoID string, clusters [
 }
 
 // GetClusters returns all clusters for a repository without member lists.
-func (s *SurrealStore) GetClusters(_ context.Context, repoID string) ([]clustering.Cluster, error) {
+func (s *SurrealStore) GetClusters(ctx context.Context, repoID string) ([]clustering.Cluster, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, nil
 	}
-	rows, err := queryOne[[]surrealCluster](ctx(), db,
+	rows, err := queryOne[[]surrealCluster](ctx, db,
 		`SELECT * FROM cluster WHERE repo_id = $repo_id ORDER BY size DESC`,
 		map[string]any{"repo_id": repoID})
 	if err != nil {
@@ -3038,7 +3036,7 @@ func (s *SurrealStore) GetClusters(_ context.Context, repoID string) ([]clusteri
 }
 
 // GetClusterByID returns a single cluster including its full member list.
-func (s *SurrealStore) GetClusterByID(_ context.Context, clusterID string) (*clustering.Cluster, error) {
+func (s *SurrealStore) GetClusterByID(ctx context.Context, clusterID string) (*clustering.Cluster, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, nil
@@ -3046,7 +3044,7 @@ func (s *SurrealStore) GetClusterByID(_ context.Context, clusterID string) (*clu
 	// Strip leading "cluster:" prefix if present.
 	rawID := strings.TrimPrefix(clusterID, "cluster:")
 
-	rows, err := queryOne[[]surrealCluster](ctx(), db,
+	rows, err := queryOne[[]surrealCluster](ctx, db,
 		`SELECT * FROM type::thing('cluster', $id)`,
 		map[string]any{"id": rawID})
 	if err != nil || len(rows) == 0 {
@@ -3059,7 +3057,7 @@ func (s *SurrealStore) GetClusterByID(_ context.Context, clusterID string) (*clu
 		SymbolID string `json:"symbol_id"`
 		RepoID   string `json:"repo_id"`
 	}
-	members, _ := queryOne[[]memberRow](ctx(), db,
+	members, _ := queryOne[[]memberRow](ctx, db,
 		`SELECT symbol_id, repo_id FROM cluster_member WHERE cluster_id = type::thing('cluster', $id)`,
 		map[string]any{"id": rawID})
 	for _, m := range members {
@@ -3073,7 +3071,7 @@ func (s *SurrealStore) GetClusterByID(_ context.Context, clusterID string) (*clu
 }
 
 // GetClusterForSymbol returns the cluster containing the given symbol.
-func (s *SurrealStore) GetClusterForSymbol(_ context.Context, repoID, symbolID string) (*clustering.Cluster, error) {
+func (s *SurrealStore) GetClusterForSymbol(ctx context.Context, repoID, symbolID string) (*clustering.Cluster, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, nil
@@ -3081,7 +3079,7 @@ func (s *SurrealStore) GetClusterForSymbol(_ context.Context, repoID, symbolID s
 	type memberRow struct {
 		ClusterID *models.RecordID `json:"cluster_id"`
 	}
-	rows, err := queryOne[[]memberRow](ctx(), db,
+	rows, err := queryOne[[]memberRow](ctx, db,
 		`SELECT cluster_id FROM cluster_member WHERE symbol_id = $sid AND repo_id = $repo_id LIMIT 1`,
 		map[string]any{"sid": symbolID, "repo_id": repoID})
 	if err != nil || len(rows) == 0 || rows[0].ClusterID == nil {
@@ -3093,12 +3091,12 @@ func (s *SurrealStore) GetClusterForSymbol(_ context.Context, repoID, symbolID s
 
 // DeleteClusters removes all cluster and cluster_member records for a
 // repository. Called on repo deletion and at the start of each re-cluster run.
-func (s *SurrealStore) DeleteClusters(_ context.Context, repoID string) error {
+func (s *SurrealStore) DeleteClusters(ctx context.Context, repoID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`DELETE cluster_member WHERE repo_id = $repo_id;
 		 DELETE cluster WHERE repo_id = $repo_id`,
 		map[string]any{"repo_id": repoID})
@@ -3112,14 +3110,14 @@ func (s *SurrealStore) DeleteClusters(_ context.Context, repoID string) error {
 // Returns clustering.ErrClusterNotFound when the cluster no longer exists (e.g.
 // deleted by a concurrent ReplaceClusters during re-index). The caller should
 // log a warning and continue; the cluster keeps its heuristic label.
-func (s *SurrealStore) SetClusterLLMLabel(_ context.Context, clusterID string, label string) error {
+func (s *SurrealStore) SetClusterLLMLabel(ctx context.Context, clusterID string, label string) error {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 	// Strip the "cluster:" prefix to construct the SurrealDB record ID.
 	rawID := strings.TrimPrefix(clusterID, "cluster:")
-	updated, err := queryOne[[]map[string]any](ctx(), db,
+	updated, err := queryOne[[]map[string]any](ctx, db,
 		`UPDATE type::thing('cluster', $cid) SET
 			llm_label  = $llm_label,
 			updated_at = time::now()`,

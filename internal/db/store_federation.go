@@ -96,7 +96,7 @@ func (r *surrealAPIContract) toAPIContract() *graph.APIContract {
 
 // --- Repo Links ---
 
-func (s *SurrealStore) LinkRepos(_ context.Context, sourceRepoID, targetRepoID string) (*graph.RepoLink, error) {
+func (s *SurrealStore) LinkRepos(ctx context.Context, sourceRepoID, targetRepoID string) (*graph.RepoLink, error) {
 	if sourceRepoID == targetRepoID {
 		return nil, fmt.Errorf("cannot link a repository to itself")
 	}
@@ -111,7 +111,7 @@ func (s *SurrealStore) LinkRepos(_ context.Context, sourceRepoID, targetRepoID s
 	}
 
 	linkID := uuid.New().String()
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`CREATE ca_repo_link SET
 			id = type::thing('ca_repo_link', $lid),
 			source_repo_id = $src,
@@ -132,23 +132,23 @@ func (s *SurrealStore) LinkRepos(_ context.Context, sourceRepoID, targetRepoID s
 	}, nil
 }
 
-func (s *SurrealStore) UnlinkRepos(_ context.Context, linkID string) error {
+func (s *SurrealStore) UnlinkRepos(ctx context.Context, linkID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`DELETE type::thing('ca_repo_link', $id)`,
 		map[string]any{"id": linkID})
 	return err
 }
 
-func (s *SurrealStore) GetRepoLinks(_ context.Context, repoID string) ([]*graph.RepoLink, error) {
+func (s *SurrealStore) GetRepoLinks(ctx context.Context, repoID string) ([]*graph.RepoLink, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, nil
 	}
-	rows, err := queryOne[[]surrealRepoLink](ctx(), db,
+	rows, err := queryOne[[]surrealRepoLink](ctx, db,
 		`SELECT * FROM ca_repo_link WHERE source_repo_id = $id OR target_repo_id = $id`,
 		map[string]any{"id": repoID})
 	if err != nil {
@@ -163,12 +163,12 @@ func (s *SurrealStore) GetRepoLinks(_ context.Context, repoID string) ([]*graph.
 
 // GetRepoLink fetches a single repo link by ID.
 // Used by TenantFilteredStore to validate access before UnlinkRepos/VerifyLink.
-func (s *SurrealStore) GetRepoLink(_ context.Context, linkID string) *graph.RepoLink {
+func (s *SurrealStore) GetRepoLink(ctx context.Context, linkID string) *graph.RepoLink {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
-	rows, err := queryOne[[]surrealRepoLink](ctx(), db,
+	rows, err := queryOne[[]surrealRepoLink](ctx, db,
 		`SELECT * FROM type::thing('ca_repo_link', $id)`,
 		map[string]any{"id": linkID})
 	if err != nil || len(rows) == 0 {
@@ -179,13 +179,13 @@ func (s *SurrealStore) GetRepoLink(_ context.Context, linkID string) *graph.Repo
 
 // --- Cross-Repo References ---
 
-func (s *SurrealStore) StoreCrossRepoRef(_ context.Context, ref *graph.CrossRepoRef) error {
+func (s *SurrealStore) StoreCrossRepoRef(ctx context.Context, ref *graph.CrossRepoRef) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
 	refID := uuid.New().String()
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`CREATE ca_cross_repo_ref SET
 			id = type::thing('ca_cross_repo_ref', $rid),
 			source_symbol_id = $src_sym,
@@ -218,10 +218,10 @@ func (s *SurrealStore) StoreCrossRepoRef(_ context.Context, ref *graph.CrossRepo
 	return nil
 }
 
-func (s *SurrealStore) StoreCrossRepoRefs(_ context.Context, refs []*graph.CrossRepoRef) int {
+func (s *SurrealStore) StoreCrossRepoRefs(ctx context.Context, refs []*graph.CrossRepoRef) int {
 	stored := 0
 	for _, ref := range refs {
-		if err := s.StoreCrossRepoRef(ctx(), ref); err != nil {
+		if err := s.StoreCrossRepoRef(ctx, ref); err != nil {
 			slog.Warn("failed to store cross-repo ref", "error", err)
 			continue
 		}
@@ -230,7 +230,7 @@ func (s *SurrealStore) StoreCrossRepoRefs(_ context.Context, refs []*graph.Cross
 	return stored
 }
 
-func (s *SurrealStore) GetCrossRepoRefs(_ context.Context, repoID string, refType *string, limit int) ([]*graph.CrossRepoRef, error) {
+func (s *SurrealStore) GetCrossRepoRefs(ctx context.Context, repoID string, refType *string, limit int) ([]*graph.CrossRepoRef, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, nil
@@ -247,7 +247,7 @@ func (s *SurrealStore) GetCrossRepoRefs(_ context.Context, repoID string, refTyp
 		sql += fmt.Sprintf(` LIMIT %d`, limit)
 	}
 
-	rows, err := queryOne[[]surrealCrossRepoRef](ctx(), db, sql, vars)
+	rows, err := queryOne[[]surrealCrossRepoRef](ctx, db, sql, vars)
 	if err != nil {
 		return nil, err
 	}
@@ -258,12 +258,12 @@ func (s *SurrealStore) GetCrossRepoRefs(_ context.Context, repoID string, refTyp
 	return refs, nil
 }
 
-func (s *SurrealStore) GetSymbolCrossRepoRefs(_ context.Context, symbolID string) ([]*graph.CrossRepoRef, error) {
+func (s *SurrealStore) GetSymbolCrossRepoRefs(ctx context.Context, symbolID string) ([]*graph.CrossRepoRef, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, nil
 	}
-	rows, err := queryOne[[]surrealCrossRepoRef](ctx(), db,
+	rows, err := queryOne[[]surrealCrossRepoRef](ctx, db,
 		`SELECT * FROM ca_cross_repo_ref WHERE source_symbol_id = $id OR target_symbol_id = $id`,
 		map[string]any{"id": symbolID})
 	if err != nil {
@@ -276,23 +276,23 @@ func (s *SurrealStore) GetSymbolCrossRepoRefs(_ context.Context, symbolID string
 	return refs, nil
 }
 
-func (s *SurrealStore) DeleteCrossRepoRefsForRepo(_ context.Context, repoID string) error {
+func (s *SurrealStore) DeleteCrossRepoRefsForRepo(ctx context.Context, repoID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`DELETE FROM ca_cross_repo_ref WHERE source_repo_id = $id OR target_repo_id = $id`,
 		map[string]any{"id": repoID})
 	return err
 }
 
-func (s *SurrealStore) DeleteCrossRepoRefsBetweenRepos(_ context.Context, repoA, repoB string) error {
+func (s *SurrealStore) DeleteCrossRepoRefsBetweenRepos(ctx context.Context, repoA, repoB string) error {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`DELETE FROM ca_cross_repo_ref WHERE
 			(source_repo_id = $a AND target_repo_id = $b) OR
 			(source_repo_id = $b AND target_repo_id = $a)`,
@@ -302,13 +302,13 @@ func (s *SurrealStore) DeleteCrossRepoRefsBetweenRepos(_ context.Context, repoA,
 
 // --- API Contracts ---
 
-func (s *SurrealStore) StoreAPIContract(_ context.Context, contract *graph.APIContract) error {
+func (s *SurrealStore) StoreAPIContract(ctx context.Context, contract *graph.APIContract) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
 	contractID := uuid.New().String()
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`CREATE ca_api_contract SET
 			id = type::thing('ca_api_contract', $cid),
 			repo_id = $repo_id,
@@ -334,12 +334,12 @@ func (s *SurrealStore) StoreAPIContract(_ context.Context, contract *graph.APICo
 	return nil
 }
 
-func (s *SurrealStore) GetAPIContracts(_ context.Context, repoID string) ([]*graph.APIContract, error) {
+func (s *SurrealStore) GetAPIContracts(ctx context.Context, repoID string) ([]*graph.APIContract, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, nil
 	}
-	rows, err := queryOne[[]surrealAPIContract](ctx(), db,
+	rows, err := queryOne[[]surrealAPIContract](ctx, db,
 		`SELECT * FROM ca_api_contract WHERE repo_id = $repo_id ORDER BY file_path ASC`,
 		map[string]any{"repo_id": repoID})
 	if err != nil {
@@ -352,12 +352,12 @@ func (s *SurrealStore) GetAPIContracts(_ context.Context, repoID string) ([]*gra
 	return contracts, nil
 }
 
-func (s *SurrealStore) DeleteAPIContractsForRepo(_ context.Context, repoID string) error {
+func (s *SurrealStore) DeleteAPIContractsForRepo(ctx context.Context, repoID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`DELETE FROM ca_api_contract WHERE repo_id = $repo_id`,
 		map[string]any{"repo_id": repoID})
 	return err

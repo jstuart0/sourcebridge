@@ -6,6 +6,7 @@
 package db
 
 import (
+	"context"
 	"testing"
 
 	"github.com/google/uuid"
@@ -21,7 +22,7 @@ func seedSymbolRow(t *testing.T, surreal *SurrealDB, repoID string) string {
 		t.Fatal("surrealdb not connected")
 	}
 	symID := uuid.New().String()
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](context.Background(), db,
 		`CREATE ca_symbol SET
 			id           = type::thing('ca_symbol', $sid),
 			repo_id      = $repo_id,
@@ -64,7 +65,7 @@ func readEmbeddingFields(t *testing.T, surreal *SurrealDB, symID string) surreal
 	if db == nil {
 		t.Fatal("surrealdb not connected")
 	}
-	rows, err := queryOne[[]surrealSymbol](ctx(), db,
+	rows, err := queryOne[[]surrealSymbol](context.Background(), db,
 		`SELECT embedding, embedding_model, embedding_dim, embedding_hash
 		 FROM ca_symbol
 		 WHERE id = type::thing('ca_symbol', $id)

@@ -266,7 +266,7 @@ func (r *surrealKnowledgeEvidence) toEvidence() knowledge.Evidence {
 // Knowledge artifact operations
 // ---------------------------------------------------------------------------
 
-func (s *SurrealStore) StoreKnowledgeArtifact(_ context.Context, artifact *knowledge.Artifact) (*knowledge.Artifact, error) {
+func (s *SurrealStore) StoreKnowledgeArtifact(ctx context.Context, artifact *knowledge.Artifact) (*knowledge.Artifact, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -337,19 +337,19 @@ func (s *SurrealStore) StoreKnowledgeArtifact(_ context.Context, artifact *knowl
 	}
 
 	// CREATE returns an array — use untyped query then SELECT back.
-	_, err := surrealdb.Query[interface{}](ctx(), db, metadataSQL, vars)
+	_, err := surrealdb.Query[interface{}](ctx, db, metadataSQL, vars)
 	if err != nil {
 		return nil, fmt.Errorf("store knowledge artifact: %w", err)
 	}
 
-	return s.GetKnowledgeArtifact(ctx(), id), nil
+	return s.GetKnowledgeArtifact(ctx, id), nil
 }
 
-func (s *SurrealStore) ClaimArtifact(_ context.Context, key knowledge.ArtifactKey, sourceRevision knowledge.SourceRevision) (*knowledge.Artifact, bool, error) {
-	return s.ClaimArtifactWithMode(ctx(), key, sourceRevision, "")
+func (s *SurrealStore) ClaimArtifact(ctx context.Context, key knowledge.ArtifactKey, sourceRevision knowledge.SourceRevision) (*knowledge.Artifact, bool, error) {
+	return s.ClaimArtifactWithMode(ctx, key, sourceRevision, "")
 }
 
-func (s *SurrealStore) ClaimArtifactWithMode(_ context.Context, key knowledge.ArtifactKey, sourceRevision knowledge.SourceRevision, mode knowledge.GenerationMode) (*knowledge.Artifact, bool, error) {
+func (s *SurrealStore) ClaimArtifactWithMode(ctx context.Context, key knowledge.ArtifactKey, sourceRevision knowledge.SourceRevision, mode knowledge.GenerationMode) (*knowledge.Artifact, bool, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, false, fmt.Errorf("database not connected")
@@ -363,7 +363,7 @@ func (s *SurrealStore) ClaimArtifactWithMode(_ context.Context, key knowledge.Ar
 
 	id := uuid.New().String()
 	scope := key.Scope.Normalize()
-	_, err := surrealdb.Query[interface{}](ctx(), db,
+	_, err := surrealdb.Query[interface{}](ctx, db,
 		`CREATE ca_knowledge_artifact SET
 			id = type::thing('ca_knowledge_artifact', $id),
 			repo_id = $repo_id,
@@ -407,22 +407,22 @@ func (s *SurrealStore) ClaimArtifactWithMode(_ context.Context, key knowledge.Ar
 			"generation_mode":   string(normalizedMode),
 		})
 	if err != nil {
-		existing := s.GetArtifactByKeyAndMode(ctx(), key, normalizedMode)
+		existing := s.GetArtifactByKeyAndMode(ctx, key, normalizedMode)
 		if existing != nil {
 			return existing, false, nil
 		}
 		return nil, false, fmt.Errorf("claim knowledge artifact: %w", err)
 	}
-	return s.GetKnowledgeArtifact(ctx(), id), true, nil
+	return s.GetKnowledgeArtifact(ctx, id), true, nil
 }
 
-func (s *SurrealStore) GetKnowledgeArtifact(_ context.Context, id string) *knowledge.Artifact {
+func (s *SurrealStore) GetKnowledgeArtifact(ctx context.Context, id string) *knowledge.Artifact {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	row, err := queryOne[[]surrealKnowledgeArtifact](ctx(), db,
+	row, err := queryOne[[]surrealKnowledgeArtifact](ctx, db,
 		"SELECT * FROM type::thing('ca_knowledge_artifact', $id) WHERE deleted_at IS NONE",
 		map[string]any{"id": id})
 	if err != nil || len(row) == 0 {
@@ -430,15 +430,15 @@ func (s *SurrealStore) GetKnowledgeArtifact(_ context.Context, id string) *knowl
 	}
 
 	a := row[0].toArtifact()
-	a.Sections = s.loadSections(ctx(), a.ID)
+	a.Sections = s.loadSections(ctx, a.ID)
 	return a
 }
 
-func (s *SurrealStore) GetArtifactByKey(_ context.Context, key knowledge.ArtifactKey) *knowledge.Artifact {
-	return s.GetArtifactByKeyAndMode(ctx(), key, "")
+func (s *SurrealStore) GetArtifactByKey(ctx context.Context, key knowledge.ArtifactKey) *knowledge.Artifact {
+	return s.GetArtifactByKeyAndMode(ctx, key, "")
 }
 
-func (s *SurrealStore) GetArtifactByKeyAndMode(_ context.Context, key knowledge.ArtifactKey, mode knowledge.GenerationMode) *knowledge.Artifact {
+func (s *SurrealStore) GetArtifactByKeyAndMode(ctx context.Context, key knowledge.ArtifactKey, mode knowledge.GenerationMode) *knowledge.Artifact {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -467,22 +467,22 @@ func (s *SurrealStore) GetArtifactByKeyAndMode(_ context.Context, key knowledge.
 	query += `
 		 ORDER BY created_at DESC
 		 LIMIT 1`
-	rows, err := queryOne[[]surrealKnowledgeArtifact](ctx(), db, query, vars)
+	rows, err := queryOne[[]surrealKnowledgeArtifact](ctx, db, query, vars)
 	if err != nil || len(rows) == 0 {
 		return nil
 	}
 	a := rows[0].toArtifact()
-	a.Sections = s.loadSections(ctx(), a.ID)
+	a.Sections = s.loadSections(ctx, a.ID)
 	return a
 }
 
-func (s *SurrealStore) GetKnowledgeArtifacts(_ context.Context, repoID string) []*knowledge.Artifact {
+func (s *SurrealStore) GetKnowledgeArtifacts(ctx context.Context, repoID string) []*knowledge.Artifact {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealKnowledgeArtifact](ctx(), db,
+	rows, err := queryOne[[]surrealKnowledgeArtifact](ctx, db,
 		"SELECT * FROM ca_knowledge_artifact WHERE repo_id = $repo_id AND deleted_at IS NONE ORDER BY created_at DESC",
 		map[string]any{"repo_id": repoID})
 	if err != nil {
@@ -492,13 +492,13 @@ func (s *SurrealStore) GetKnowledgeArtifacts(_ context.Context, repoID string) [
 	results := make([]*knowledge.Artifact, 0, len(rows))
 	for _, r := range rows {
 		a := r.toArtifact()
-		a.Sections = s.loadSections(ctx(), a.ID)
+		a.Sections = s.loadSections(ctx, a.ID)
 		results = append(results, a)
 	}
 	return results
 }
 
-func (s *SurrealStore) UpdateKnowledgeArtifactStatus(_ context.Context, id string, status knowledge.ArtifactStatus) error {
+func (s *SurrealStore) UpdateKnowledgeArtifactStatus(ctx context.Context, id string, status knowledge.ArtifactStatus) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -512,17 +512,17 @@ func (s *SurrealStore) UpdateKnowledgeArtifactStatus(_ context.Context, id strin
 		sql = `UPDATE type::thing('ca_knowledge_artifact', $id) SET status = $status, progress = 1.0, error_code = '', error_message = '', generated_at = time::now(), updated_at = time::now() WHERE deleted_at IS NONE`
 	}
 
-	_, err := queryOne[interface{}](ctx(), db, sql, vars)
+	_, err := queryOne[interface{}](ctx, db, sql, vars)
 	return err
 }
 
-func (s *SurrealStore) SetArtifactFailed(_ context.Context, id string, code string, message string) error {
+func (s *SurrealStore) SetArtifactFailed(ctx context.Context, id string, code string, message string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
 
-	_, err := queryOne[interface{}](ctx(), db,
+	_, err := queryOne[interface{}](ctx, db,
 		`UPDATE type::thing('ca_knowledge_artifact', $id)
 		 SET status = $status,
 		     progress = 0,
@@ -541,11 +541,11 @@ func (s *SurrealStore) SetArtifactFailed(_ context.Context, id string, code stri
 	return err
 }
 
-func (s *SurrealStore) UpdateKnowledgeArtifactProgress(_ context.Context, id string, progress float64) error {
-	return s.UpdateKnowledgeArtifactProgressWithPhase(ctx(), id, progress, "", "")
+func (s *SurrealStore) UpdateKnowledgeArtifactProgress(ctx context.Context, id string, progress float64) error {
+	return s.UpdateKnowledgeArtifactProgressWithPhase(ctx, id, progress, "", "")
 }
 
-func (s *SurrealStore) UpdateKnowledgeArtifactProgressWithPhase(_ context.Context, id string, progress float64, phase, message string) error {
+func (s *SurrealStore) UpdateKnowledgeArtifactProgressWithPhase(ctx context.Context, id string, progress float64, phase, message string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -570,18 +570,18 @@ func (s *SurrealStore) UpdateKnowledgeArtifactProgressWithPhase(_ context.Contex
 	// resurrect a terminal row's progress, phase, or message.
 	// deleted_at IS NONE keeps the existing trashed-artifact guard.
 	sql += ` WHERE deleted_at IS NONE AND status NOT IN ['ready', 'failed']`
-	_, err := queryOne[interface{}](ctx(), db, sql, vars)
+	_, err := queryOne[interface{}](ctx, db, sql, vars)
 	return err
 }
 
-func (s *SurrealStore) MarkKnowledgeArtifactStale(_ context.Context, id string, stale bool) error {
+func (s *SurrealStore) MarkKnowledgeArtifactStale(ctx context.Context, id string, stale bool) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
 
 	if stale {
-		_, err := queryOne[interface{}](ctx(), db,
+		_, err := queryOne[interface{}](ctx, db,
 			`UPDATE type::thing('ca_knowledge_artifact', $id)
 			 SET stale = $stale, updated_at = time::now()
 			 WHERE deleted_at IS NONE`,
@@ -590,7 +590,7 @@ func (s *SurrealStore) MarkKnowledgeArtifactStale(_ context.Context, id string, 
 	}
 	// Clearing stale drops the reason as well so the UI doesn't show a stale
 	// explanation for a fresh artifact.
-	_, err := queryOne[interface{}](ctx(), db,
+	_, err := queryOne[interface{}](ctx, db,
 		`UPDATE type::thing('ca_knowledge_artifact', $id)
 		 SET stale = false,
 		     stale_reason_json = '',
@@ -601,13 +601,13 @@ func (s *SurrealStore) MarkKnowledgeArtifactStale(_ context.Context, id string, 
 	return err
 }
 
-func (s *SurrealStore) MarkKnowledgeArtifactStaleWithReason(_ context.Context, id string, reasonJSON string, reportID string) error {
+func (s *SurrealStore) MarkKnowledgeArtifactStaleWithReason(ctx context.Context, id string, reasonJSON string, reportID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
 
-	_, err := queryOne[interface{}](ctx(), db,
+	_, err := queryOne[interface{}](ctx, db,
 		`UPDATE type::thing('ca_knowledge_artifact', $id)
 		 SET stale = true,
 		     stale_reason_json = $reason_json,
@@ -625,7 +625,7 @@ func (s *SurrealStore) MarkKnowledgeArtifactStaleWithReason(_ context.Context, i
 // GetArtifactsForSources returns artifacts whose evidence references any of
 // the given (source_type, source_id) pairs. Implemented as a two-step lookup:
 // resolve section_ids from evidence, then artifacts from sections.
-func (s *SurrealStore) GetArtifactsForSources(_ context.Context, repoID string, sources []knowledge.SourceRef) []*knowledge.Artifact {
+func (s *SurrealStore) GetArtifactsForSources(ctx context.Context, repoID string, sources []knowledge.SourceRef) []*knowledge.Artifact {
 	db := s.client.DB()
 	if db == nil || len(sources) == 0 {
 		return nil
@@ -650,7 +650,7 @@ func (s *SurrealStore) GetArtifactsForSources(_ context.Context, repoID string, 
 		SectionID string `json:"section_id"`
 	}
 	for sourceType, ids := range bySourceType {
-		rows, err := queryOne[[]evRow](ctx(), db,
+		rows, err := queryOne[[]evRow](ctx, db,
 			`SELECT section_id FROM ca_knowledge_evidence
 			 WHERE source_type = $st AND source_id IN $ids`,
 			map[string]any{"st": sourceType, "ids": ids})
@@ -668,12 +668,12 @@ func (s *SurrealStore) GetArtifactsForSources(_ context.Context, repoID string, 
 		return nil
 	}
 
-	return s.artifactsFromSectionIDs(ctx(), repoID, sectionIDSet)
+	return s.artifactsFromSectionIDs(ctx, repoID, sectionIDSet)
 }
 
 // GetArtifactsForFiles returns artifacts whose evidence references any of
 // the given file paths.
-func (s *SurrealStore) GetArtifactsForFiles(_ context.Context, repoID string, filePaths []string) []*knowledge.Artifact {
+func (s *SurrealStore) GetArtifactsForFiles(ctx context.Context, repoID string, filePaths []string) []*knowledge.Artifact {
 	db := s.client.DB()
 	if db == nil || len(filePaths) == 0 {
 		return nil
@@ -692,7 +692,7 @@ func (s *SurrealStore) GetArtifactsForFiles(_ context.Context, repoID string, fi
 	type evRow struct {
 		SectionID string `json:"section_id"`
 	}
-	rows, err := queryOne[[]evRow](ctx(), db,
+	rows, err := queryOne[[]evRow](ctx, db,
 		`SELECT section_id FROM ca_knowledge_evidence
 		 WHERE file_path IN $paths AND file_path != ''`,
 		map[string]any{"paths": nonEmpty})
@@ -710,12 +710,12 @@ func (s *SurrealStore) GetArtifactsForFiles(_ context.Context, repoID string, fi
 		return nil
 	}
 
-	return s.artifactsFromSectionIDs(ctx(), repoID, sectionIDSet)
+	return s.artifactsFromSectionIDs(ctx, repoID, sectionIDSet)
 }
 
 // artifactsFromSectionIDs resolves a set of section IDs to their parent
 // artifacts, scoped to the given repo and deduped.
-func (s *SurrealStore) artifactsFromSectionIDs(_ context.Context, repoID string, sectionIDSet map[string]struct{}) []*knowledge.Artifact {
+func (s *SurrealStore) artifactsFromSectionIDs(ctx context.Context, repoID string, sectionIDSet map[string]struct{}) []*knowledge.Artifact {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -729,7 +729,7 @@ func (s *SurrealStore) artifactsFromSectionIDs(_ context.Context, repoID string,
 	type secRow struct {
 		ArtifactID string `json:"artifact_id"`
 	}
-	secRows, err := queryOne[[]secRow](ctx(), db,
+	secRows, err := queryOne[[]secRow](ctx, db,
 		`SELECT artifact_id FROM ca_knowledge_section
 		 WHERE id IN $ids.map(|$v| type::thing('ca_knowledge_section', $v))`,
 		map[string]any{"ids": sectionIDs})
@@ -751,7 +751,7 @@ func (s *SurrealStore) artifactsFromSectionIDs(_ context.Context, repoID string,
 	for id := range artifactIDSet {
 		artifactIDs = append(artifactIDs, id)
 	}
-	rows, err := queryOne[[]surrealKnowledgeArtifact](ctx(), db,
+	rows, err := queryOne[[]surrealKnowledgeArtifact](ctx, db,
 		`SELECT * FROM ca_knowledge_artifact
 		 WHERE repo_id = $repo_id
 		   AND deleted_at IS NONE
@@ -763,78 +763,78 @@ func (s *SurrealStore) artifactsFromSectionIDs(_ context.Context, repoID string,
 	out := make([]*knowledge.Artifact, 0, len(rows))
 	for _, r := range rows {
 		a := r.toArtifact()
-		a.Sections = s.loadSections(ctx(), a.ID)
+		a.Sections = s.loadSections(ctx, a.ID)
 		out = append(out, a)
 	}
 	return out
 }
 
-func (s *SurrealStore) DeleteKnowledgeArtifact(_ context.Context, id string) error {
+func (s *SurrealStore) DeleteKnowledgeArtifact(ctx context.Context, id string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
 
 	// Delete evidence for all sections of this artifact.
-	sections := s.GetKnowledgeSections(ctx(), id)
+	sections := s.GetKnowledgeSections(ctx, id)
 	for _, sec := range sections {
-		_, _ = queryOne[interface{}](ctx(), db,
+		_, _ = queryOne[interface{}](ctx, db,
 			"DELETE ca_knowledge_evidence WHERE section_id = $section_id",
 			map[string]any{"section_id": sec.ID})
 	}
 
 	// Delete sections.
-	_, _ = queryOne[interface{}](ctx(), db,
+	_, _ = queryOne[interface{}](ctx, db,
 		"DELETE ca_knowledge_section WHERE artifact_id = $artifact_id",
 		map[string]any{"artifact_id": id})
 
 	// Delete artifact.
-	_, err := queryOne[interface{}](ctx(), db,
+	_, err := queryOne[interface{}](ctx, db,
 		"DELETE type::thing('ca_knowledge_artifact', $id)",
 		map[string]any{"id": id})
 	return err
 }
 
-func (s *SurrealStore) SupersedeArtifact(_ context.Context, id string, sections []knowledge.Section) error {
+func (s *SurrealStore) SupersedeArtifact(ctx context.Context, id string, sections []knowledge.Section) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	if s.GetKnowledgeArtifact(ctx(), id) == nil {
+	if s.GetKnowledgeArtifact(ctx, id) == nil {
 		return fmt.Errorf("artifact %s not found", id)
 	}
-	for _, sec := range s.GetKnowledgeSections(ctx(), id) {
-		_, _ = queryOne[interface{}](ctx(), db,
+	for _, sec := range s.GetKnowledgeSections(ctx, id) {
+		_, _ = queryOne[interface{}](ctx, db,
 			"DELETE ca_knowledge_evidence WHERE section_id = $section_id",
 			map[string]any{"section_id": sec.ID})
 	}
-	_, _ = queryOne[interface{}](ctx(), db,
+	_, _ = queryOne[interface{}](ctx, db,
 		"DELETE ca_knowledge_section WHERE artifact_id = $artifact_id",
 		map[string]any{"artifact_id": id})
-	if err := s.StoreKnowledgeSections(ctx(), id, sections); err != nil {
+	if err := s.StoreKnowledgeSections(ctx, id, sections); err != nil {
 		return err
 	}
-	for _, sec := range s.GetKnowledgeSections(ctx(), id) {
+	for _, sec := range s.GetKnowledgeSections(ctx, id) {
 		for _, incoming := range sections {
 			if incoming.Title != sec.Title || incoming.Content != sec.Content {
 				continue
 			}
 			if len(incoming.Evidence) > 0 {
-				if err := s.StoreKnowledgeEvidence(ctx(), sec.ID, incoming.Evidence); err != nil {
+				if err := s.StoreKnowledgeEvidence(ctx, sec.ID, incoming.Evidence); err != nil {
 					return err
 				}
 			}
 			break
 		}
 	}
-	return s.UpdateKnowledgeArtifactStatus(ctx(), id, knowledge.StatusReady)
+	return s.UpdateKnowledgeArtifactStatus(ctx, id, knowledge.StatusReady)
 }
 
 // ---------------------------------------------------------------------------
 // Knowledge section operations
 // ---------------------------------------------------------------------------
 
-func (s *SurrealStore) StoreKnowledgeSections(_ context.Context, artifactID string, sections []knowledge.Section) error {
+func (s *SurrealStore) StoreKnowledgeSections(ctx context.Context, artifactID string, sections []knowledge.Section) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -847,19 +847,19 @@ func (s *SurrealStore) StoreKnowledgeSections(_ context.Context, artifactID stri
 	type sectionIDRow struct {
 		ID string `json:"id"`
 	}
-	if existing, err := queryOne[[]sectionIDRow](ctx(), db,
+	if existing, err := queryOne[[]sectionIDRow](ctx, db,
 		"SELECT id FROM ca_knowledge_section WHERE artifact_id = $artifact_id",
 		map[string]any{"artifact_id": artifactID}); err == nil {
 		for _, row := range existing {
 			secID := row.ID
-			_, _ = queryOne[interface{}](ctx(), db,
+			_, _ = queryOne[interface{}](ctx, db,
 				"DELETE ca_knowledge_evidence WHERE section_id = $section_id",
 				map[string]any{"section_id": secID})
 		}
 	}
 
 	// Remove old sections.
-	_, _ = queryOne[interface{}](ctx(), db,
+	_, _ = queryOne[interface{}](ctx, db,
 		"DELETE ca_knowledge_section WHERE artifact_id = $artifact_id",
 		map[string]any{"artifact_id": artifactID})
 
@@ -875,7 +875,7 @@ func (s *SurrealStore) StoreKnowledgeSections(_ context.Context, artifactID stri
 			sec.RefinementStatus = "light"
 		}
 
-		_, err := surrealdb.Query[interface{}](ctx(), db,
+		_, err := surrealdb.Query[interface{}](ctx, db,
 			`CREATE ca_knowledge_section SET
 				id = type::thing('ca_knowledge_section', $id),
 				artifact_id = $artifact_id,
@@ -908,13 +908,13 @@ func (s *SurrealStore) StoreKnowledgeSections(_ context.Context, artifactID stri
 	return nil
 }
 
-func (s *SurrealStore) GetKnowledgeSections(_ context.Context, artifactID string) []knowledge.Section {
+func (s *SurrealStore) GetKnowledgeSections(ctx context.Context, artifactID string) []knowledge.Section {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealKnowledgeSection](ctx(), db,
+	rows, err := queryOne[[]surrealKnowledgeSection](ctx, db,
 		"SELECT * FROM ca_knowledge_section WHERE artifact_id = $artifact_id AND deleted_at IS NONE ORDER BY order_index ASC",
 		map[string]any{"artifact_id": artifactID})
 	if err != nil {
@@ -924,18 +924,18 @@ func (s *SurrealStore) GetKnowledgeSections(_ context.Context, artifactID string
 	sections := make([]knowledge.Section, 0, len(rows))
 	for _, r := range rows {
 		sec := r.toSection()
-		sec.Evidence = s.GetKnowledgeEvidence(ctx(), sec.ID)
+		sec.Evidence = s.GetKnowledgeEvidence(ctx, sec.ID)
 		sections = append(sections, sec)
 	}
 	return sections
 }
 
-func (s *SurrealStore) StoreRefinementUnits(_ context.Context, artifactID string, units []knowledge.RefinementUnit) error {
+func (s *SurrealStore) StoreRefinementUnits(ctx context.Context, artifactID string, units []knowledge.RefinementUnit) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	if s.GetKnowledgeArtifact(ctx(), artifactID) == nil {
+	if s.GetKnowledgeArtifact(ctx, artifactID) == nil {
 		return fmt.Errorf("artifact %s not found", artifactID)
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -944,7 +944,7 @@ func (s *SurrealStore) StoreRefinementUnits(_ context.Context, artifactID string
 		if unitID == "" {
 			unitID = uuid.New().String()
 		}
-		if _, err := surrealdb.Query[interface{}](ctx(), db,
+		if _, err := surrealdb.Query[interface{}](ctx, db,
 			`UPSERT ca_knowledge_refinement SET
 				id = type::thing('ca_knowledge_refinement', $id),
 				artifact_id = $artifact_id,
@@ -984,12 +984,12 @@ func (s *SurrealStore) StoreRefinementUnits(_ context.Context, artifactID string
 	return nil
 }
 
-func (s *SurrealStore) GetRefinementUnits(_ context.Context, artifactID string) []knowledge.RefinementUnit {
+func (s *SurrealStore) GetRefinementUnits(ctx context.Context, artifactID string) []knowledge.RefinementUnit {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
-	rows, err := queryOne[[]surrealRefinementUnit](ctx(), db,
+	rows, err := queryOne[[]surrealRefinementUnit](ctx, db,
 		"SELECT * FROM ca_knowledge_refinement WHERE artifact_id = $artifact_id AND deleted_at IS NONE ORDER BY section_title ASC, refinement_type ASC",
 		map[string]any{"artifact_id": artifactID})
 	if err != nil {
@@ -1002,13 +1002,13 @@ func (s *SurrealStore) GetRefinementUnits(_ context.Context, artifactID string) 
 	return units
 }
 
-func (s *SurrealStore) StoreArtifactDependencies(_ context.Context, artifactID string, dependencies []knowledge.ArtifactDependency) error {
+func (s *SurrealStore) StoreArtifactDependencies(ctx context.Context, artifactID string, dependencies []knowledge.ArtifactDependency) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
 
-	_, _ = queryOne[interface{}](ctx(), db,
+	_, _ = queryOne[interface{}](ctx, db,
 		"DELETE ca_knowledge_dependency WHERE artifact_id = $artifact_id",
 		map[string]any{"artifact_id": artifactID})
 
@@ -1017,7 +1017,7 @@ func (s *SurrealStore) StoreArtifactDependencies(_ context.Context, artifactID s
 		if depID == "" {
 			depID = uuid.New().String()
 		}
-		_, err := surrealdb.Query[interface{}](ctx(), db,
+		_, err := surrealdb.Query[interface{}](ctx, db,
 			`CREATE ca_knowledge_dependency SET
 				id = type::thing('ca_knowledge_dependency', $id),
 				artifact_id = $artifact_id,
@@ -1041,12 +1041,12 @@ func (s *SurrealStore) StoreArtifactDependencies(_ context.Context, artifactID s
 	return nil
 }
 
-func (s *SurrealStore) GetArtifactDependencies(_ context.Context, artifactID string) []knowledge.ArtifactDependency {
+func (s *SurrealStore) GetArtifactDependencies(ctx context.Context, artifactID string) []knowledge.ArtifactDependency {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
-	rows, err := queryOne[[]surrealArtifactDependency](ctx(), db,
+	rows, err := queryOne[[]surrealArtifactDependency](ctx, db,
 		"SELECT * FROM ca_knowledge_dependency WHERE artifact_id = $artifact_id AND deleted_at IS NONE ORDER BY created_at ASC",
 		map[string]any{"artifact_id": artifactID})
 	if err != nil {
@@ -1063,14 +1063,14 @@ func (s *SurrealStore) GetArtifactDependencies(_ context.Context, artifactID str
 // Knowledge evidence operations
 // ---------------------------------------------------------------------------
 
-func (s *SurrealStore) StoreKnowledgeEvidence(_ context.Context, sectionID string, evidence []knowledge.Evidence) error {
+func (s *SurrealStore) StoreKnowledgeEvidence(ctx context.Context, sectionID string, evidence []knowledge.Evidence) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
 
 	// Remove old evidence first.
-	_, _ = queryOne[interface{}](ctx(), db,
+	_, _ = queryOne[interface{}](ctx, db,
 		"DELETE ca_knowledge_evidence WHERE section_id = $section_id",
 		map[string]any{"section_id": sectionID})
 
@@ -1086,7 +1086,7 @@ func (s *SurrealStore) StoreKnowledgeEvidence(_ context.Context, sectionID strin
 			metadataJSON = string(b)
 		}
 
-		_, err := surrealdb.Query[interface{}](ctx(), db,
+		_, err := surrealdb.Query[interface{}](ctx, db,
 			`CREATE ca_knowledge_evidence SET
 				id = type::thing('ca_knowledge_evidence', $id),
 				section_id = $section_id,
@@ -1115,13 +1115,13 @@ func (s *SurrealStore) StoreKnowledgeEvidence(_ context.Context, sectionID strin
 	return nil
 }
 
-func (s *SurrealStore) GetKnowledgeEvidence(_ context.Context, sectionID string) []knowledge.Evidence {
+func (s *SurrealStore) GetKnowledgeEvidence(ctx context.Context, sectionID string) []knowledge.Evidence {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 
-	rows, err := queryOne[[]surrealKnowledgeEvidence](ctx(), db,
+	rows, err := queryOne[[]surrealKnowledgeEvidence](ctx, db,
 		"SELECT * FROM ca_knowledge_evidence WHERE section_id = $section_id AND deleted_at IS NONE",
 		map[string]any{"section_id": sectionID})
 	if err != nil {
@@ -1135,7 +1135,7 @@ func (s *SurrealStore) GetKnowledgeEvidence(_ context.Context, sectionID string)
 	return evidence
 }
 
-func (s *SurrealStore) StoreRepositoryUnderstanding(_ context.Context, u *knowledge.RepositoryUnderstanding) (*knowledge.RepositoryUnderstanding, error) {
+func (s *SurrealStore) StoreRepositoryUnderstanding(ctx context.Context, u *knowledge.RepositoryUnderstanding) (*knowledge.RepositoryUnderstanding, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -1233,19 +1233,19 @@ func (s *SurrealStore) StoreRepositoryUnderstanding(_ context.Context, u *knowle
 		"progress_phase":   progressPhase,
 		"progress_message": progressMessage,
 	}
-	if _, err := surrealdb.Query[interface{}](ctx(), db, sql, vars); err != nil {
+	if _, err := surrealdb.Query[interface{}](ctx, db, sql, vars); err != nil {
 		return nil, fmt.Errorf("store repository understanding: %w", err)
 	}
-	return s.GetRepositoryUnderstanding(ctx(), u.RepositoryID, scope), nil
+	return s.GetRepositoryUnderstanding(ctx, u.RepositoryID, scope), nil
 }
 
-func (s *SurrealStore) GetRepositoryUnderstanding(_ context.Context, repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding {
+func (s *SurrealStore) GetRepositoryUnderstanding(ctx context.Context, repoID string, scope knowledge.ArtifactScope) *knowledge.RepositoryUnderstanding {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
 	scope = scope.Normalize()
-	rows, err := queryOne[[]surrealRepositoryUnderstanding](ctx(), db,
+	rows, err := queryOne[[]surrealRepositoryUnderstanding](ctx, db,
 		`SELECT * FROM ca_repository_understanding
 		 WHERE repo_id = $repo_id AND scope_key = $scope_key
 		 LIMIT 1`,
@@ -1259,12 +1259,12 @@ func (s *SurrealStore) GetRepositoryUnderstanding(_ context.Context, repoID stri
 	return rows[0].toRepositoryUnderstanding()
 }
 
-func (s *SurrealStore) GetRepositoryUnderstandings(_ context.Context, repoID string) []*knowledge.RepositoryUnderstanding {
+func (s *SurrealStore) GetRepositoryUnderstandings(ctx context.Context, repoID string) []*knowledge.RepositoryUnderstanding {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
-	rows, err := queryOne[[]surrealRepositoryUnderstanding](ctx(), db,
+	rows, err := queryOne[[]surrealRepositoryUnderstanding](ctx, db,
 		`SELECT * FROM ca_repository_understanding
 		 WHERE repo_id = $repo_id
 		 ORDER BY updated_at DESC`,
@@ -1279,12 +1279,12 @@ func (s *SurrealStore) GetRepositoryUnderstandings(_ context.Context, repoID str
 	return out
 }
 
-func (s *SurrealStore) MarkRepositoryUnderstandingNeedsRefresh(_ context.Context, repoID string) error {
+func (s *SurrealStore) MarkRepositoryUnderstandingNeedsRefresh(ctx context.Context, repoID string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	_, err := queryOne[interface{}](ctx(), db,
+	_, err := queryOne[interface{}](ctx, db,
 		`UPDATE ca_repository_understanding
 		 SET stage = $stage,
 		     progress = 0,
@@ -1299,12 +1299,12 @@ func (s *SurrealStore) MarkRepositoryUnderstandingNeedsRefresh(_ context.Context
 	return err
 }
 
-func (s *SurrealStore) MarkRepositoryUnderstandingFailed(_ context.Context, understandingID, errorCode, errorMessage string) error {
+func (s *SurrealStore) MarkRepositoryUnderstandingFailed(ctx context.Context, understandingID, errorCode, errorMessage string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	_, err := queryOne[interface{}](ctx(), db,
+	_, err := queryOne[interface{}](ctx, db,
 		`UPDATE type::thing('ca_repository_understanding', $id)
 		 SET stage = $stage,
 		     progress = 0,
@@ -1323,7 +1323,7 @@ func (s *SurrealStore) MarkRepositoryUnderstandingFailed(_ context.Context, unde
 	return err
 }
 
-func (s *SurrealStore) UpdateRepositoryUnderstandingProgress(_ context.Context, id string, progress float64, phase, message string) error {
+func (s *SurrealStore) UpdateRepositoryUnderstandingProgress(ctx context.Context, id string, progress float64, phase, message string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -1343,16 +1343,16 @@ func (s *SurrealStore) UpdateRepositoryUnderstandingProgress(_ context.Context, 
 		vars["message"] = message
 	}
 	sql += ` WHERE stage INSIDE ['building_tree', 'deepening']`
-	_, err := queryOne[interface{}](ctx(), db, sql, vars)
+	_, err := queryOne[interface{}](ctx, db, sql, vars)
 	return err
 }
 
-func (s *SurrealStore) AttachArtifactUnderstanding(_ context.Context, artifactID, understandingID, revisionFP string) error {
+func (s *SurrealStore) AttachArtifactUnderstanding(ctx context.Context, artifactID, understandingID, revisionFP string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	_, err := queryOne[interface{}](ctx(), db,
+	_, err := queryOne[interface{}](ctx, db,
 		`UPDATE type::thing('ca_knowledge_artifact', $id)
 		 SET understanding_id = $understanding_id,
 		     understanding_revision_fp = $understanding_revision_fp,
@@ -1367,8 +1367,8 @@ func (s *SurrealStore) AttachArtifactUnderstanding(_ context.Context, artifactID
 }
 
 // loadSections returns ordered sections with nested evidence for an artifact.
-func (s *SurrealStore) loadSections(_ context.Context, artifactID string) []knowledge.Section {
-	sections := s.GetKnowledgeSections(ctx(), artifactID)
+func (s *SurrealStore) loadSections(ctx context.Context, artifactID string) []knowledge.Section {
+	sections := s.GetKnowledgeSections(ctx, artifactID)
 	sort.Slice(sections, func(i, j int) bool { return sections[i].OrderIndex < sections[j].OrderIndex })
 	return sections
 }

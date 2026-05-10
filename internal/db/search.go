@@ -60,7 +60,7 @@ func sanitizeFTSQuery(q string) string {
 // If the FTS index is missing or the query fails the result is nil —
 // callers must treat nil as "backend unavailable" and degrade to the
 // lexical substring path.
-func (s *SurrealStore) SearchSymbolsFTS(_ context.Context, 
+func (s *SurrealStore) SearchSymbolsFTS(ctx context.Context, 
 	repoID, query string,
 	filters graph.SymbolSearchFilters,
 	limit int,
@@ -107,7 +107,7 @@ func (s *SurrealStore) SearchSymbolsFTS(_ context.Context,
 		 LIMIT %d`,
 		where, limit)
 
-	rows, err := queryOne[[]ftsSymbolRow](ctx(), db, sql, vars)
+	rows, err := queryOne[[]ftsSymbolRow](ctx, db, sql, vars)
 	if err != nil {
 		return nil
 	}
@@ -140,7 +140,7 @@ type vectorSymbolRow struct {
 // and returns matches ordered by cosine similarity. The `queryVec`
 // dimension must match the index dimension defined in migration 034;
 // mismatched dimensions return nil so the service can degrade.
-func (s *SurrealStore) SearchSymbolsVector(_ context.Context, 
+func (s *SurrealStore) SearchSymbolsVector(ctx context.Context, 
 	repoID string,
 	queryVec []float32,
 	filters graph.SymbolSearchFilters,
@@ -194,7 +194,7 @@ func (s *SurrealStore) SearchSymbolsVector(_ context.Context,
 		 LIMIT %d`,
 		where, limit)
 
-	rows, err := queryOne[[]vectorSymbolRow](ctx(), db, sql, vars)
+	rows, err := queryOne[[]vectorSymbolRow](ctx, db, sql, vars)
 	if err != nil {
 		return nil
 	}
@@ -215,7 +215,7 @@ func (s *SurrealStore) SearchSymbolsVector(_ context.Context,
 // HNSW index defined in migration 034 is maintained by SurrealDB on
 // write. Mismatched dimensions return an error — callers must refuse
 // to mix models (see plan §Data Consistency Rules).
-func (s *SurrealStore) UpsertSymbolEmbedding(_ context.Context, 
+func (s *SurrealStore) UpsertSymbolEmbedding(ctx context.Context, 
 	repoID, symbolID string,
 	vector []float32,
 	model string,
@@ -254,7 +254,7 @@ func (s *SurrealStore) UpsertSymbolEmbedding(_ context.Context,
 	            embedding_dim = $dim,
 	            embedding_hash = $hash
 	        WHERE repo_id = $repo_id AND id = type::thing('ca_symbol', $id)`
-	if _, err := queryOne[[]map[string]interface{}](ctx(), db, sql, vars); err != nil {
+	if _, err := queryOne[[]map[string]interface{}](ctx, db, sql, vars); err != nil {
 		return fmt.Errorf("upsert symbol embedding: %w", err)
 	}
 	return nil

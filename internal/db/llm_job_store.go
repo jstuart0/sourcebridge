@@ -224,7 +224,7 @@ func jobParams(job *llm.Job) map[string]any {
 
 // Create inserts a new job record. The job must have a non-empty ID; the
 // orchestrator generates one before calling Create.
-func (s *SurrealStore) Create(_ context.Context, job *llm.Job) (*llm.Job, error) {
+func (s *SurrealStore) Create(ctx context.Context, job *llm.Job) (*llm.Job, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -293,16 +293,16 @@ func (s *SurrealStore) Create(_ context.Context, job *llm.Job) (*llm.Job, error)
 		vars["process_id"] = job.ProcessID
 	}
 
-	if _, err := surrealdb.Query[interface{}](ctx(), db, sql, vars); err != nil {
+	if _, err := surrealdb.Query[interface{}](ctx, db, sql, vars); err != nil {
 		return nil, fmt.Errorf("create llm job: %w", err)
 	}
-	return s.GetByID(ctx(), job.ID), nil
+	return s.GetByID(ctx, job.ID), nil
 }
 
 // Update replaces the stored record. Callers should fetch, mutate, and
 // write back the full job — the SetFoo helpers below are preferred for
 // targeted updates to avoid write amplification.
-func (s *SurrealStore) Update(_ context.Context, job *llm.Job) error {
+func (s *SurrealStore) Update(ctx context.Context, job *llm.Job) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -356,17 +356,17 @@ func (s *SurrealStore) Update(_ context.Context, job *llm.Job) error {
 	if job.ProcessID != "" {
 		vars["process_id"] = job.ProcessID
 	}
-	_, err := queryOne[interface{}](ctx(), db, sql, vars)
+	_, err := queryOne[interface{}](ctx, db, sql, vars)
 	return err
 }
 
 // GetByID returns the job with the given id, or nil.
-func (s *SurrealStore) GetByID(_ context.Context, id string) *llm.Job {
+func (s *SurrealStore) GetByID(ctx context.Context, id string) *llm.Job {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
-	rows, err := queryOne[[]surrealLLMJob](ctx(), db,
+	rows, err := queryOne[[]surrealLLMJob](ctx, db,
 		"SELECT * FROM type::thing('ca_llm_job', $id)",
 		map[string]any{"id": id})
 	if err != nil || len(rows) == 0 {
@@ -376,12 +376,12 @@ func (s *SurrealStore) GetByID(_ context.Context, id string) *llm.Job {
 }
 
 // GetActiveByTargetKey returns the newest active job for a target key, or nil.
-func (s *SurrealStore) GetActiveByTargetKey(_ context.Context, targetKey string) *llm.Job {
+func (s *SurrealStore) GetActiveByTargetKey(ctx context.Context, targetKey string) *llm.Job {
 	db := s.client.DB()
 	if db == nil {
 		return nil
 	}
-	rows, err := queryOne[[]surrealLLMJob](ctx(), db,
+	rows, err := queryOne[[]surrealLLMJob](ctx, db,
 		`SELECT * FROM ca_llm_job
 		 WHERE target_key = $target_key
 		   AND status IN ['pending', 'generating']
@@ -395,24 +395,24 @@ func (s *SurrealStore) GetActiveByTargetKey(_ context.Context, targetKey string)
 }
 
 // ListActive returns all active jobs matching the filter.
-func (s *SurrealStore) ListActive(_ context.Context, filter llm.ListFilter) []*llm.Job {
+func (s *SurrealStore) ListActive(ctx context.Context, filter llm.ListFilter) []*llm.Job {
 	statuses := filter.Statuses
 	if len(statuses) == 0 {
 		statuses = []llm.JobStatus{llm.StatusPending, llm.StatusGenerating}
 	}
-	return s.listJobs(ctx(), filter, statuses, time.Time{})
+	return s.listJobs(ctx, filter, statuses, time.Time{})
 }
 
 // ListRecent returns terminal jobs updated on or after since.
-func (s *SurrealStore) ListRecent(_ context.Context, filter llm.ListFilter, since time.Time) []*llm.Job {
+func (s *SurrealStore) ListRecent(ctx context.Context, filter llm.ListFilter, since time.Time) []*llm.Job {
 	statuses := filter.Statuses
 	if len(statuses) == 0 {
 		statuses = []llm.JobStatus{llm.StatusReady, llm.StatusFailed, llm.StatusCancelled}
 	}
-	return s.listJobs(ctx(), filter, statuses, since)
+	return s.listJobs(ctx, filter, statuses, since)
 }
 
-func (s *SurrealStore) listJobs(_ context.Context, filter llm.ListFilter, statuses []llm.JobStatus, since time.Time) []*llm.Job {
+func (s *SurrealStore) listJobs(ctx context.Context, filter llm.ListFilter, statuses []llm.JobStatus, since time.Time) []*llm.Job {
 	db := s.client.DB()
 	if db == nil {
 		return nil
@@ -458,7 +458,7 @@ func (s *SurrealStore) listJobs(_ context.Context, filter llm.ListFilter, status
 		sql += fmt.Sprintf(" LIMIT %d", filter.Limit)
 	}
 
-	rows, err := queryOne[[]surrealLLMJob](ctx(), db, sql, vars)
+	rows, err := queryOne[[]surrealLLMJob](ctx, db, sql, vars)
 	if err != nil {
 		return nil
 	}
@@ -471,7 +471,7 @@ func (s *SurrealStore) listJobs(_ context.Context, filter llm.ListFilter, status
 
 // SetStatus transitions the job state. Timestamps are stamped server-side
 // so the database is authoritative for wall-clock measurement.
-func (s *SurrealStore) SetStatus(_ context.Context, id string, status llm.JobStatus) error {
+func (s *SurrealStore) SetStatus(ctx context.Context, id string, status llm.JobStatus) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -501,7 +501,7 @@ func (s *SurrealStore) SetStatus(_ context.Context, id string, status llm.JobSta
 	// started_at/completed_at atomically with the status write.
 	switch status {
 	case llm.StatusGenerating:
-		_, err := queryOne[interface{}](ctx(), db,
+		_, err := queryOne[interface{}](ctx, db,
 			`UPDATE type::thing('ca_llm_job', $id) SET
 				status = $status,
 				started_at = time::now(),
@@ -510,7 +510,7 @@ func (s *SurrealStore) SetStatus(_ context.Context, id string, status llm.JobSta
 			map[string]any{"id": id, "status": string(status)})
 		return err
 	case llm.StatusReady:
-		_, err := queryOne[interface{}](ctx(), db,
+		_, err := queryOne[interface{}](ctx, db,
 			`UPDATE type::thing('ca_llm_job', $id) SET
 				status = $status,
 				progress = 1.0,
@@ -522,7 +522,7 @@ func (s *SurrealStore) SetStatus(_ context.Context, id string, status llm.JobSta
 			map[string]any{"id": id, "status": string(status)})
 		return err
 	case llm.StatusFailed, llm.StatusCancelled:
-		_, err := queryOne[interface{}](ctx(), db,
+		_, err := queryOne[interface{}](ctx, db,
 			`UPDATE type::thing('ca_llm_job', $id) SET
 				status = $status,
 				completed_at = time::now(),
@@ -531,7 +531,7 @@ func (s *SurrealStore) SetStatus(_ context.Context, id string, status llm.JobSta
 			map[string]any{"id": id, "status": string(status)})
 		return err
 	default:
-		_, err := queryOne[interface{}](ctx(), db,
+		_, err := queryOne[interface{}](ctx, db,
 			`UPDATE type::thing('ca_llm_job', $id) SET
 				status = $status,
 				updated_at = time::now()
@@ -542,7 +542,7 @@ func (s *SurrealStore) SetStatus(_ context.Context, id string, status llm.JobSta
 }
 
 // SetProgress updates the progress fields.
-func (s *SurrealStore) SetProgress(_ context.Context, id string, progress float64, phase, message string, throughputTPS float64) error {
+func (s *SurrealStore) SetProgress(ctx context.Context, id string, progress float64, phase, message string, throughputTPS float64) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
@@ -553,7 +553,7 @@ func (s *SurrealStore) SetProgress(_ context.Context, id string, progress float6
 	if progress > 1 {
 		progress = 1
 	}
-	_, err := queryOne[interface{}](ctx(), db,
+	_, err := queryOne[interface{}](ctx, db,
 		`UPDATE type::thing('ca_llm_job', $id) SET
 			progress = $progress,
 			progress_phase = $phase,
@@ -574,12 +574,12 @@ func (s *SurrealStore) SetProgress(_ context.Context, id string, progress float6
 // Heartbeat bumps updated_at without changing any other field. The WHERE
 // clause restricts to active jobs so a heartbeat to a terminal job is a
 // safe no-op (zero rows updated, no error).
-func (s *SurrealStore) Heartbeat(_ context.Context, id string) error {
+func (s *SurrealStore) Heartbeat(ctx context.Context, id string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	_, err := queryOne[interface{}](ctx(), db,
+	_, err := queryOne[interface{}](ctx, db,
 		`UPDATE type::thing('ca_llm_job', $id) SET
 			updated_at = time::now()
 		  WHERE status = 'pending' OR status = 'generating' OR status = 'queued'`,
@@ -595,12 +595,12 @@ func (s *SurrealStore) Heartbeat(_ context.Context, id string) error {
 // the write only when the job is not already terminal in a different
 // status. (status='failed' OR not terminal). This prevents the reaper
 // from overwriting a successful ready or user-cancelled.
-func (s *SurrealStore) SetError(_ context.Context, id string, code, message string) error {
+func (s *SurrealStore) SetError(ctx context.Context, id string, code, message string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	_, err := queryOne[interface{}](ctx(), db,
+	_, err := queryOne[interface{}](ctx, db,
 		`UPDATE type::thing('ca_llm_job', $id) SET
 			status = $status,
 			error_code = $code,
@@ -621,12 +621,12 @@ func (s *SurrealStore) SetError(_ context.Context, id string, code, message stri
 }
 
 // SetTokens records input/output token usage.
-func (s *SurrealStore) SetTokens(_ context.Context, id string, input, output int) error {
+func (s *SurrealStore) SetTokens(ctx context.Context, id string, input, output int) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	_, err := queryOne[interface{}](ctx(), db,
+	_, err := queryOne[interface{}](ctx, db,
 		`UPDATE type::thing('ca_llm_job', $id) SET
 			input_tokens = $input,
 			output_tokens = $output,
@@ -637,12 +637,12 @@ func (s *SurrealStore) SetTokens(_ context.Context, id string, input, output int
 }
 
 // SetSnapshotBytes records the serialized input size.
-func (s *SurrealStore) SetSnapshotBytes(_ context.Context, id string, bytes int) error {
+func (s *SurrealStore) SetSnapshotBytes(ctx context.Context, id string, bytes int) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	_, err := queryOne[interface{}](ctx(), db,
+	_, err := queryOne[interface{}](ctx, db,
 		`UPDATE type::thing('ca_llm_job', $id) SET
 			snapshot_bytes = $bytes,
 			updated_at = time::now()
@@ -652,12 +652,12 @@ func (s *SurrealStore) SetSnapshotBytes(_ context.Context, id string, bytes int)
 }
 
 // SetReuseStats records structured summary reuse/cache-hit counts.
-func (s *SurrealStore) SetReuseStats(_ context.Context, id string, reused, leafHits, fileHits, packageHits, rootHits int) error {
+func (s *SurrealStore) SetReuseStats(ctx context.Context, id string, reused, leafHits, fileHits, packageHits, rootHits int) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	_, err := queryOne[interface{}](ctx(), db,
+	_, err := queryOne[interface{}](ctx, db,
 		`UPDATE type::thing('ca_llm_job', $id) SET
 			reused_summaries = $reused,
 			leaf_cache_hits = $leaf_hits,
@@ -678,12 +678,12 @@ func (s *SurrealStore) SetReuseStats(_ context.Context, id string, reused, leafH
 }
 
 // IncrementRetry bumps the retry counter.
-func (s *SurrealStore) IncrementRetry(_ context.Context, id string) error {
+func (s *SurrealStore) IncrementRetry(ctx context.Context, id string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	_, err := queryOne[interface{}](ctx(), db,
+	_, err := queryOne[interface{}](ctx, db,
 		`UPDATE type::thing('ca_llm_job', $id) SET
 			retry_count = retry_count + 1,
 			updated_at = time::now()
@@ -693,12 +693,12 @@ func (s *SurrealStore) IncrementRetry(_ context.Context, id string) error {
 }
 
 // IncrementAttachedRequests bumps the deduped request count.
-func (s *SurrealStore) IncrementAttachedRequests(_ context.Context, id string) error {
+func (s *SurrealStore) IncrementAttachedRequests(ctx context.Context, id string) error {
 	db := s.client.DB()
 	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
-	job := s.GetByID(ctx(), id)
+	job := s.GetByID(ctx, id)
 	if job == nil {
 		return fmt.Errorf("job %s not found", id)
 	}
@@ -707,7 +707,7 @@ func (s *SurrealStore) IncrementAttachedRequests(_ context.Context, id string) e
 		next = 1
 	}
 	next++
-	_, err := queryOne[interface{}](ctx(), db, `
+	_, err := queryOne[interface{}](ctx, db, `
 		UPDATE type::thing('ca_llm_job', $id)
 		SET attached_requests = $attached_requests,
 		    updated_at = time::now()
@@ -719,7 +719,7 @@ func (s *SurrealStore) IncrementAttachedRequests(_ context.Context, id string) e
 }
 
 // AppendLog persists a structured job log record.
-func (s *SurrealStore) AppendLog(_ context.Context, entry *llm.JobLogEntry) (*llm.JobLogEntry, error) {
+func (s *SurrealStore) AppendLog(ctx context.Context, entry *llm.JobLogEntry) (*llm.JobLogEntry, error) {
 	db := s.client.DB()
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -761,10 +761,10 @@ func (s *SurrealStore) AppendLog(_ context.Context, entry *llm.JobLogEntry) (*ll
 		"payload_json": entry.PayloadJSON,
 		"sequence":     entry.Sequence,
 	}
-	if _, err := surrealdb.Query[interface{}](ctx(), db, sql, vars); err != nil {
+	if _, err := surrealdb.Query[interface{}](ctx, db, sql, vars); err != nil {
 		return nil, fmt.Errorf("create llm job log: %w", err)
 	}
-	rows, err := queryOne[[]surrealLLMJobLog](ctx(), db,
+	rows, err := queryOne[[]surrealLLMJobLog](ctx, db,
 		`SELECT * FROM type::thing('ca_llm_job_log', $id)`,
 		map[string]any{"id": id})
 	if err != nil || len(rows) == 0 {
@@ -774,7 +774,7 @@ func (s *SurrealStore) AppendLog(_ context.Context, entry *llm.JobLogEntry) (*ll
 }
 
 // ListLogs returns persisted logs for a job ordered by sequence ascending.
-func (s *SurrealStore) ListLogs(_ context.Context, jobID string, filter llm.JobLogFilter) []*llm.JobLogEntry {
+func (s *SurrealStore) ListLogs(ctx context.Context, jobID string, filter llm.JobLogFilter) []*llm.JobLogEntry {
 	db := s.client.DB()
 	if db == nil || strings.TrimSpace(jobID) == "" {
 		return nil
@@ -792,7 +792,7 @@ func (s *SurrealStore) ListLogs(_ context.Context, jobID string, filter llm.JobL
 		vars["after_sequence"] = filter.AfterSequence
 	}
 	sql += ` ORDER BY sequence ASC LIMIT $limit`
-	rows, err := queryOne[[]surrealLLMJobLog](ctx(), db, sql, vars)
+	rows, err := queryOne[[]surrealLLMJobLog](ctx, db, sql, vars)
 	if err != nil || len(rows) == 0 {
 		return nil
 	}
