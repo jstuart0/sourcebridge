@@ -633,3 +633,79 @@ func TestSecurityJWTSecretFileViperBinding(t *testing.T) {
 		t.Errorf("source: got %q, want file", source)
 	}
 }
+
+// TestServerDefaultsRejectWildcardCORSWithCredentials pins the default to false.
+// Changing this default to true would cause Validate() to fail on any deployment
+// that has a wildcard CORS origin — including the default "http://localhost:3300".
+func TestServerDefaultsRejectWildcardCORSWithCredentials(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Server.RejectWildcardCORSWithCredentials {
+		t.Error("Server.RejectWildcardCORSWithCredentials must default to false; " +
+			"changing to true would break any install with a wildcard cors_origin on upgrade. " +
+			"Operators opt in via SOURCEBRIDGE_SERVER_REJECT_WILDCARD_CORS_WITH_CREDENTIALS=true. " +
+			"See CA-313.")
+	}
+}
+
+// TestCORSWildcardGuard_FlagOff verifies that wildcard origins pass Validate() when the
+// strict rejection flag is off (default). The WARN log fires but validation succeeds.
+func TestCORSWildcardGuard_FlagOff(t *testing.T) {
+	wildcards := []string{
+		"*",
+		"*.example.com",
+		"https://*.bar.com",
+		" *.foo.com", // whitespace-padded
+	}
+	for _, origin := range wildcards {
+		cfg := validCORSTestConfig()
+		cfg.Server.CORSOrigins = []string{origin}
+		cfg.Server.RejectWildcardCORSWithCredentials = false
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("origin %q: expected no error with flag=false, got %v", origin, err)
+		}
+	}
+}
+
+// TestCORSWildcardGuard_FlagOn verifies that wildcard origins fail Validate() when the
+// strict rejection flag is on, and that non-wildcard origins still pass.
+func TestCORSWildcardGuard_FlagOn(t *testing.T) {
+	wildcards := []string{
+		"*",
+		"*.example.com",
+		"https://*.bar.com",
+		" *.foo.com", // whitespace-padded
+	}
+	for _, origin := range wildcards {
+		cfg := validCORSTestConfig()
+		cfg.Server.CORSOrigins = []string{origin}
+		cfg.Server.RejectWildcardCORSWithCredentials = true
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("origin %q: expected error with flag=true, got nil", origin)
+			continue
+		}
+		if !strings.Contains(err.Error(), "wildcard pattern") {
+			t.Errorf("origin %q: expected 'wildcard pattern' in error, got: %v", origin, err)
+		}
+	}
+
+	// Non-wildcard origins must still pass when flag is on.
+	safe := []string{"https://app.example.com", "http://localhost:3300", "https://sub.example.com"}
+	for _, origin := range safe {
+		cfg := validCORSTestConfig()
+		cfg.Server.CORSOrigins = []string{origin}
+		cfg.Server.RejectWildcardCORSWithCredentials = true
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("safe origin %q: unexpected error with flag=true: %v", origin, err)
+		}
+	}
+}
+
+// validCORSTestConfig returns a minimal valid Config for CORS guard tests.
+// It avoids the Defaults() JWT auto-generate path by supplying a placeholder secret.
+func validCORSTestConfig() *Config {
+	cfg := Defaults()
+	// Defaults() does not populate JWTSecret; Validate() requires ≥32 bytes.
+	cfg.Security.JWTSecret = strings.Repeat("a", 64)
+	return cfg
+}

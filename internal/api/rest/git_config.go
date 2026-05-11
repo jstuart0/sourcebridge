@@ -61,7 +61,7 @@ func (s *Server) handleGetGitConfig(w http.ResponseWriter, r *http.Request) {
 
 	snap, err := s.gitResolver.Resolve(r.Context())
 	if err != nil {
-		http.Error(w, `{"error":"resolve git config failed"}`, http.StatusServiceUnavailable)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "resolve git config failed"})
 		return
 	}
 	resp := gitConfigResponse{
@@ -96,7 +96,7 @@ func (s *Server) handleGetGitConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateGitConfig(w http.ResponseWriter, r *http.Request) {
 	var req updateGitConfigRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
 
@@ -107,7 +107,7 @@ func (s *Server) handleUpdateGitConfig(w http.ResponseWriter, r *http.Request) {
 		// than silently keep an in-memory mutation that disappears at
 		// restart (the legacy behavior, which led to admins thinking a
 		// save took when it hadn't).
-		http.Error(w, `{"error":"git config persistence unavailable"}`, http.StatusServiceUnavailable)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "git config persistence unavailable"})
 		return
 	}
 
@@ -127,7 +127,7 @@ func (s *Server) handleUpdateGitConfig(w http.ResponseWriter, r *http.Request) {
 			curS = ""
 		} else {
 			slog.Warn("git config: load before save failed; refusing to save partial update", "error", loadErr)
-			http.Error(w, `{"error":"git config: cannot load current record; refusing to save partial update"}`, http.StatusServiceUnavailable)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "git config: cannot load current record; refusing to save partial update"})
 			return
 		}
 	}
@@ -147,7 +147,7 @@ func (s *Server) handleUpdateGitConfig(w http.ResponseWriter, r *http.Request) {
 		allowRoot = s.cfg.Git.SSHKeyPathRoot
 	}
 	if err := gitres.NewSSHKeyPathValidator(allowRoot).Validate(newS); err != nil {
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -158,11 +158,11 @@ func (s *Server) handleUpdateGitConfig(w http.ResponseWriter, r *http.Request) {
 		// other failures.
 		if errors.Is(err, secretcipher.ErrEncryptionKeyRequired) || errors.Is(err, db.ErrGitTokenEncryptionKeyRequired) {
 			slog.Warn("git config: save refused — encryption key missing; admin must set SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY")
-			http.Error(w, `{"error":"git token cannot be saved without an encryption key (set SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY or enable SOURCEBRIDGE_ALLOW_UNENCRYPTED_GIT_TOKEN for OSS development)"}`, http.StatusUnprocessableEntity)
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "git token cannot be saved without an encryption key (set SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY or enable SOURCEBRIDGE_ALLOW_UNENCRYPTED_GIT_TOKEN for OSS development)"})
 			return
 		}
 		slog.Warn("failed to persist git config", "error", err)
-		http.Error(w, `{"error":"failed to persist git config"}`, http.StatusInternalServerError)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to persist git config"})
 		return
 	}
 

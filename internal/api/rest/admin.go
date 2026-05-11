@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 
@@ -202,17 +203,36 @@ type createTokenRequest struct {
 }
 
 func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
-	// NOTE(security/M7): the `name` field has no server-side length or
-	// character validation beyond the empty-string check. The web UI's tokens
-	// page applies a client-side allowlist regex (^[A-Za-z0-9 _-]{1,64}$) for
-	// social-engineering mitigation, but a direct API call bypasses it entirely.
-	// This is acceptable for M7's threat model (the reflected name is only
-	// displayed to the victim's own session), but should be hardened if the
-	// token name ever surfaces in shared or multi-user UX (e.g. admin views).
 	var req createTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
+	}
+	// CA-212: server-side token name validation. The web UI enforces a client-side
+	// allowlist (^[A-Za-z0-9 _-]{1,64}$) but direct API calls bypass it. Validate
+	// here so reflected names cannot carry control characters or non-printable Unicode
+	// regardless of how the request was constructed.
+	trimmedName := strings.TrimSpace(req.Name)
+	if trimmedName == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+	if len([]rune(trimmedName)) > 128 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name must be 128 characters or fewer"})
+		return
+	}
+	for _, ch := range trimmedName {
+		if ch < 0x20 || ch == 0x7F {
+			// ASCII control characters (0x00–0x1F, DEL 0x7F).
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name contains invalid characters"})
+			return
+		}
+		// Unicode non-printable: categories Cc (control), Cs (surrogate), Co (private use), Cn (unassigned).
+		// unicode.IsPrint covers 'self-identifying' printable runes; anything that fails is rejected.
+		if !isPrintableRune(ch) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name contains invalid characters"})
+			return
+		}
 	}
 
 	// Default to least-privilege when the caller does not specify a role.
@@ -411,4 +431,12 @@ func filterTokens(tokens []*auth.APIToken, r *http.Request) []*auth.APIToken {
 		filtered = append(filtered, token)
 	}
 	return filtered
+}
+
+// isPrintableRune returns true when ch is a printable Unicode code point.
+// Rejects ASCII control characters (< 0x20 and DEL 0x7F) and Unicode
+// non-printable categories (Cc, Cs, Co, Cn).
+// Used by handleCreateToken for CA-212 token name validation.
+func isPrintableRune(ch rune) bool {
+	return unicode.IsPrint(ch)
 }

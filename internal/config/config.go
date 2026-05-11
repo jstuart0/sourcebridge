@@ -82,6 +82,17 @@ type ServerConfig struct {
 	TrustedProxies []string `mapstructure:"trusted_proxies"`
 	CORSOrigins    []string `mapstructure:"cors_origins"`
 	MaxBodySize    int64    `mapstructure:"max_body_size"`
+
+	// RejectWildcardCORSWithCredentials is an operator opt-in guard (CA-313).
+	// Credentials are hardcoded true in the CORS middleware; a wildcard origin
+	// combined with AllowCredentials=true violates the CORS spec and may allow
+	// cross-origin credential theft. When false (default), wildcard origins in
+	// cors_origins emit a startup WARN log. When true, Validate() returns an
+	// error and the server refuses to start.
+	//
+	// Config key: server.reject_wildcard_cors_with_credentials
+	// Env var:    SOURCEBRIDGE_SERVER_REJECT_WILDCARD_CORS_WITH_CREDENTIALS
+	RejectWildcardCORSWithCredentials bool `mapstructure:"reject_wildcard_cors_with_credentials"`
 }
 
 // StorageConfig holds database and cache settings.
@@ -1096,6 +1107,24 @@ func (c *Config) Validate() error {
 	}
 	if c.Linking.InvalidateGraceHours < 0 {
 		return fmt.Errorf("invalid linking.invalidate_grace_hours: %d (must be >= 0; 0 disables the grace window)", c.Linking.InvalidateGraceHours)
+	}
+	// CA-313: CORS wildcard guard. Credentials are hardcoded true in the CORS middleware;
+	// a wildcard origin with AllowCredentials=true violates the CORS spec and can allow
+	// cross-origin credential theft. When RejectWildcardCORSWithCredentials=true (opt-in),
+	// refuse to start. When false (default), emit a WARN log so operators notice at startup.
+	for i, origin := range c.Server.CORSOrigins {
+		trimmed := strings.TrimSpace(origin)
+		if strings.Contains(trimmed, "*") {
+			if c.Server.RejectWildcardCORSWithCredentials {
+				return fmt.Errorf(
+					"server.cors_origins[%d] = %q is a wildcard pattern, which is unsafe with hardcoded AllowCredentials=true; "+
+						"either narrow the origin or set server.reject_wildcard_cors_with_credentials=false",
+					i, origin,
+				)
+			}
+			slog.Warn("CORS: wildcard origin detected; credentials are hardcoded true — this violates the CORS spec and may allow cross-origin credential theft; consider narrowing the origin or setting server.reject_wildcard_cors_with_credentials=true",
+				"origin", origin, "index", i)
+		}
 	}
 	return nil
 }

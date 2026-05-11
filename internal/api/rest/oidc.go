@@ -4,7 +4,10 @@
 package rest
 
 import (
+	"log/slog"
 	"net/http"
+
+	"github.com/google/uuid"
 
 	"github.com/sourcebridge/sourcebridge/internal/auth"
 )
@@ -31,8 +34,13 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if errMsg := r.URL.Query().Get("error"); errMsg != "" {
+		// CA-208: scrub IdP-supplied error from the browser response to avoid leaking
+		// internal error strings or encoded IdP details. Log the full message server-side
+		// with a correlation ID so operators can trace the failure without exposing it.
 		desc := r.URL.Query().Get("error_description")
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errMsg, "description": desc})
+		corrID := uuid.New().String()
+		slog.Warn("OIDC callback: IdP returned error", "correlation_id", corrID, "error", errMsg, "description", desc)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "authentication_failed", "correlation_id": corrID})
 		return
 	}
 
@@ -46,7 +54,11 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 	token, err := s.oidc.Exchange(r.Context(), state, code)
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		// CA-208: scrub the exchange error — may contain IdP internals (token endpoint URLs,
+		// partial credentials, server-side error messages). Log full detail server-side.
+		corrID := uuid.New().String()
+		slog.Warn("OIDC callback: token exchange failed", "correlation_id", corrID, "error", err.Error())
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication_failed", "correlation_id": corrID})
 		return
 	}
 
