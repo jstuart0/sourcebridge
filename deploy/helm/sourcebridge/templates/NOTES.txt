@@ -1,6 +1,22 @@
 
   SourceBridge has been deployed!
 
+WARNING: Back up your encryption Secret before every helm upgrade.
+
+  The `{{ include "sourcebridge.fullname" . }}-secrets` Secret contains the
+  encryption key for all stored LLM API keys and git PATs. If this Secret is
+  manually deleted between upgrades, `helm upgrade` generates a new random key
+  and ALL stored credentials become permanently unreadable.
+
+  Before every upgrade:
+    kubectl get secret {{ include "sourcebridge.fullname" . }}-secrets \
+      -n {{ .Release.Namespace }} \
+      -o yaml > sourcebridge-secrets-backup-$(date +%Y%m%d).yaml
+
+  The `helm.sh/resource-policy: keep` annotation prevents Helm from deleting
+  the Secret on uninstall, but does NOT prevent operators from deleting it
+  manually.
+
   Release:   {{ .Release.Name }}
   Namespace: {{ .Release.Namespace }}
   Version:   {{ .Chart.AppVersion }}
@@ -88,6 +104,12 @@
   # Run connection test
   helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
 
+== Worker Memory ==
+
+  Changing `worker.resources.limits.memory` in your values file triggers a
+  Deployment rollout on `helm upgrade`. Size the limit to at least 2× the
+  HuggingFace model cache footprint for your configured models.
+
 == Prometheus Metrics ==
 
   /metrics is NOT exposed via the Ingress (CA-318). Prometheus should scrape
@@ -97,5 +119,16 @@
 
   Adjust the ServiceMonitor's selector labels to match your Prometheus Operator
   instance before applying.
+
+{{- if and (not .Values.serviceAccount.create) (eq .Values.serviceAccount.name "") }}
+
+WARNING: ServiceAccount configuration
+
+  You have `serviceAccount.create: false` and an empty `serviceAccount.name`.
+  The Helm chart will fall back to the default ServiceAccount in the namespace,
+  which may have `automountServiceAccountToken: true` (granting cluster API
+  access to your pods). Either set `serviceAccount.create: true` or specify
+  an explicit `serviceAccount.name`.
+{{- end }}
 
 For documentation: https://github.com/sourcebridge/sourcebridge

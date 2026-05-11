@@ -1,0 +1,29 @@
+# Sets readOnlyRootFilesystem: true for the worker container and adds two
+# emptyDir volumes:
+#   /tmp              — uv-cache and HuggingFace cache redirect here via
+#                       Dockerfile.worker UV_CACHE_DIR/HF_HOME env vars.
+#   /var/cache/sourcebridge — workers/ runtime cache dir per Dockerfile.worker.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sourcebridge-worker
+  namespace: sourcebridge
+spec:
+  template:
+    spec:
+      containers:
+        - name: sourcebridge-worker
+          securityContext:
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /var/cache/sourcebridge
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 2Gi
+        - name: cache
+          emptyDir:
+            sizeLimit: 4Gi   # generous for HF model cache + UV wheels

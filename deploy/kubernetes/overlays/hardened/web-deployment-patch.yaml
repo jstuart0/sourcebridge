@@ -1,0 +1,29 @@
+# Sets readOnlyRootFilesystem: true for the web container and adds two
+# emptyDir volumes:
+#   /tmp              — Node.js / Next.js temporary files.
+#   /app/.next/cache  — Next.js standalone server cache dir
+#                       (Dockerfile.web copies .next into /app/.next;
+#                        the runtime needs this path writable for ISR/RSC cache).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sourcebridge-web
+  namespace: sourcebridge
+spec:
+  template:
+    spec:
+      containers:
+        - name: sourcebridge-web
+          securityContext:
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: nextcache
+              mountPath: /app/.next/cache
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: nextcache
+          emptyDir: {}

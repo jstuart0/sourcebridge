@@ -245,6 +245,57 @@ helm install sourcebridge deploy/helm/sourcebridge/ \
 
 See [Helm Guide](docs/self-hosted/helm-guide.md) for full configuration options, including air-gapped and local inference setups.
 
+### Kustomize (raw manifests)
+
+Use an overlay to pin image tags, set your hostname, and configure `NEXT_PUBLIC_API_URL`:
+
+```yaml
+# my-overlay/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - github.com/sourcebridge-ai/sourcebridge//deploy/kubernetes/base?ref=v0.12.0
+
+# Pin image tags (replace pin-via-overlay-do-not-use placeholder)
+images:
+  - name: ghcr.io/sourcebridge-ai/sourcebridge-api
+    newTag: v0.12.0
+  - name: ghcr.io/sourcebridge-ai/sourcebridge-worker
+    newTag: v0.12.0
+  - name: ghcr.io/sourcebridge-ai/sourcebridge-web
+    newTag: v0.12.0
+
+patches:
+  # Set the Ingress hostname and NEXT_PUBLIC_API_URL together.
+  # NEXT_PUBLIC_API_URL is baked into the web image at build time — this
+  # env override is for documentation/tooling; use the Ingress hostname
+  # as the authoritative public URL.
+  - target:
+      kind: Ingress
+      name: sourcebridge-ingress
+    patch: |
+      - op: replace
+        path: /spec/rules/0/host
+        value: sourcebridge.yourdomain.com
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: sourcebridge.yourdomain.com
+  - target:
+      kind: Deployment
+      name: sourcebridge-web
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/env/0/value
+        value: "https://sourcebridge.yourdomain.com"
+```
+
+```bash
+kubectl apply -k my-overlay/
+```
+
+See [`deploy/kubernetes/base/README.md`](deploy/kubernetes/base/README.md) for the full operator guide (storage classes, secrets, mTLS).
+
 ## VS Code Extension
 
 Use SourceBridge without leaving your editor. The extension is in [`plugins/vscode/`](plugins/vscode/) and talks to any SourceBridge server — local, Docker, Helm, or a shared team deployment.

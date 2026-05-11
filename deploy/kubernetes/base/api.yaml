@@ -125,6 +125,8 @@ spec:
               mountPath: /etc/sourcebridge/tls-ca
               readOnly: true
           resources:
+            # Starting baselines — tune based on observed p99 usage in your
+            # cluster. Override via an overlay patch or Helm values.
             requests:
               memory: "256Mi"
               cpu: "250m"

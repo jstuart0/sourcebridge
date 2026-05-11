@@ -13,12 +13,20 @@ Export all data from SurrealDB:
 # Port-forward SurrealDB
 kubectl -n sourcebridge port-forward svc/surrealdb 8000:8000 &
 
+# Retrieve SurrealDB password (kustomize / base install)
+PASS=$(kubectl -n sourcebridge get secret sourcebridge-secrets \
+  -o jsonpath='{.data.SOURCEBRIDGE_STORAGE_SURREAL_PASS}' | base64 -d)
+
+# Helm deploys: the secret key name differs
+# PASS=$(kubectl get secret sourcebridge-secrets -n sourcebridge \
+#   -o jsonpath='{.data.surrealdb-password}' | base64 -d)
+
 # Export (requires surreal CLI or curl)
 curl -X POST http://localhost:8000/export \
   -H "Accept: application/octet-stream" \
   -H "NS: sourcebridge" \
   -H "DB: main" \
-  -u root:$(kubectl -n sourcebridge get secret sourcebridge-secrets -o jsonpath='{.data.SOURCEBRIDGE_STORAGE_SURREAL_PASS}' | base64 -d) \
+  -u root:${PASS} \
   -o surrealdb-backup-$(date +%Y%m%d-%H%M%S).surql
 
 # Stop port-forward
@@ -33,12 +41,20 @@ Import a backup into SurrealDB:
 # Port-forward SurrealDB
 kubectl -n sourcebridge port-forward svc/surrealdb 8000:8000 &
 
+# Retrieve SurrealDB password (kustomize / base install)
+PASS=$(kubectl -n sourcebridge get secret sourcebridge-secrets \
+  -o jsonpath='{.data.SOURCEBRIDGE_STORAGE_SURREAL_PASS}' | base64 -d)
+
+# Helm deploys: the secret key name differs
+# PASS=$(kubectl get secret sourcebridge-secrets -n sourcebridge \
+#   -o jsonpath='{.data.surrealdb-password}' | base64 -d)
+
 # Import
 curl -X POST http://localhost:8000/import \
   -H "Content-Type: application/octet-stream" \
   -H "NS: sourcebridge" \
   -H "DB: main" \
-  -u root:$(kubectl -n sourcebridge get secret sourcebridge-secrets -o jsonpath='{.data.SOURCEBRIDGE_STORAGE_SURREAL_PASS}' | base64 -d) \
+  -u root:${PASS} \
   --data-binary @surrealdb-backup-TIMESTAMP.surql
 
 # Stop port-forward

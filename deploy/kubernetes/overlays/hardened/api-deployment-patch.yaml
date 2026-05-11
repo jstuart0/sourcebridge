@@ -1,0 +1,22 @@
+# Sets readOnlyRootFilesystem: true for the API container and adds a /tmp
+# emptyDir volume. The API's only writable path at runtime is /tmp;
+# the repo-cache PVC is already mounted at /data/repo-cache (base manifest).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sourcebridge-api
+  namespace: sourcebridge
+spec:
+  template:
+    spec:
+      containers:
+        - name: sourcebridge-api
+          securityContext:
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi

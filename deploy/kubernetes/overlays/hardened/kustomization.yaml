@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Opt-in readOnlyRootFilesystem hardening overlay.
+# Sets readOnlyRootFilesystem: true on api, worker, and web containers,
+# and adds the emptyDir volumes needed to satisfy writable-path requirements.
+# The base manifest is NOT modified.
+#
+# Apply:  kubectl apply -k deploy/kubernetes/overlays/hardened/
+# Remove: revert to base (kubectl apply -k deploy/kubernetes/base/)
+#
+# See README.md in this directory before applying to production.
+
+namespace: sourcebridge
+
+resources:
+  - ../../base
+
+patches:
+  - path: api-deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: sourcebridge-api
+  - path: worker-deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: sourcebridge-worker
+  - path: web-deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: sourcebridge-web

@@ -1,0 +1,310 @@
+# SourceBridge NetworkPolicy hardening allow-set.
+#
+# Each policy opens exactly the traffic a component requires.
+# Selectors use the app.kubernetes.io/name labels from the base manifests:
+#   sourcebridge-api, sourcebridge-worker, sourcebridge-web,
+#   surrealdb (note: not "sourcebridge-surrealdb"), redis
+#
+# Ingress-controller selector targets Traefik (thor cluster uses Traefik).
+# For nginx-ingress clusters, replace the podSelector label with:
+#   app.kubernetes.io/name: ingress-nginx
+# and adjust the namespaceSelector to match your ingress namespace.
+#
+# DNS egress targets kube-dns in kube-system. If you run CoreDNS under
+# a different label, update allow-dns-egress accordingly.
+
+---
+# All pods need DNS to resolve service names.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+
+---
+# API ingress: accept connections from the ingress controller (port 8080)
+# and from web pods (Next.js middleware proxy).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-ingress
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sourcebridge-api
+  policyTypes:
+    - Ingress
+  ingress:
+    # From Traefik ingress controller (thor uses Traefik)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 8080
+    # From web pods (Next.js middleware proxy via SOURCEBRIDGE_WEB_DEV_PROXY)
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sourcebridge-web
+      ports:
+        - protocol: TCP
+          port: 8080
+
+---
+# API egress: SurrealDB, Redis, worker gRPC, external HTTPS/HTTP/SSH.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-egress
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sourcebridge-api
+  policyTypes:
+    - Egress
+  egress:
+    # SurrealDB
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: surrealdb
+      ports:
+        - protocol: TCP
+          port: 8000
+    # Redis (optional caching layer)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Worker gRPC
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sourcebridge-worker
+      ports:
+        - protocol: TCP
+          port: 50051
+    # External HTTPS: git providers, LLM cloud providers, PostHog telemetry ingest
+    - ports:
+        - protocol: TCP
+          port: 443
+    # External HTTP: Ollama and other HTTP-only LLM endpoints
+    - ports:
+        - protocol: TCP
+          port: 80
+    # External SSH: git over SSH (clone/pull via ssh://)
+    - ports:
+        - protocol: TCP
+          port: 22
+
+---
+# Worker ingress: only from API on the gRPC port.
+# Mirrors the existing worker-allow-api-only policy in base.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-worker-ingress
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sourcebridge-worker
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sourcebridge-api
+      ports:
+        - protocol: TCP
+          port: 50051
+
+---
+# Worker egress: SurrealDB, external HTTPS (LLM/embedding cloud providers),
+# external HTTP (Ollama over HTTP).
+# Workers do not currently connect to Redis directly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-worker-egress
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sourcebridge-worker
+  policyTypes:
+    - Egress
+  egress:
+    # SurrealDB
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: surrealdb
+      ports:
+        - protocol: TCP
+          port: 8000
+    # External HTTPS: LLM and embedding cloud providers (Anthropic, OpenAI, etc.)
+    - ports:
+        - protocol: TCP
+          port: 443
+    # External HTTP: Ollama over HTTP (operator-configured)
+    # NOTE: if your Ollama instance is cluster-internal, narrow this rule to
+    # a podSelector or namespaceSelector targeting your Ollama deployment.
+    - ports:
+        - protocol: TCP
+          port: 80
+
+---
+# Web ingress: from ingress controller on port 3000.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-web-ingress
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sourcebridge-web
+  policyTypes:
+    - Ingress
+  ingress:
+    # From Traefik ingress controller (thor uses Traefik)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 3000
+
+---
+# Web egress: API proxy (Next.js middleware), external HTTPS (PostHog SSR).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-web-egress
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sourcebridge-web
+  policyTypes:
+    - Egress
+  egress:
+    # API proxy (SOURCEBRIDGE_WEB_DEV_PROXY → api service on :8080)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sourcebridge-api
+      ports:
+        - protocol: TCP
+          port: 8080
+    # External HTTPS: PostHog client-side init (if SSR path hits PostHog ingest)
+    - ports:
+        - protocol: TCP
+          port: 443
+
+---
+# SurrealDB ingress: only from API and worker pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-surrealdb-ingress
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: surrealdb
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sourcebridge-api
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sourcebridge-worker
+      ports:
+        - protocol: TCP
+          port: 8000
+
+---
+# Redis ingress: only from API pods (workers don't use Redis directly).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis-ingress
+  namespace: sourcebridge
+  labels:
+    app.kubernetes.io/part-of: sourcebridge
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sourcebridge-api
+      ports:
+        - protocol: TCP
+          port: 6379

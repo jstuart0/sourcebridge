@@ -6,6 +6,10 @@
 #
 # Secrets (jwtSecret, grpcAuthSecret, surrealdbPassword) are auto-generated
 # on first install if left empty. To pin them, set explicit values.
+#
+# IMPORTANT — back up the encryption Secret before every helm upgrade:
+#   kubectl get secret <release>-secrets -n <namespace> \
+#     -o yaml > sourcebridge-secrets-backup-$(date +%Y%m%d).yaml
 
 # -- Override the chart name
 nameOverride: ""
@@ -146,12 +150,16 @@ worker:
   replicas: 1
   port: 50051
   resources:
+    # These are starting baselines. Tune based on observed p99 usage in your
+    # cluster — especially memory.limits, which scales with the number of
+    # concurrent LLM calls (SOURCEBRIDGE_KNOWLEDGE_MAX_CONCURRENCY) and the
+    # model context window. On tight clusters, 2Gi limits is often sufficient.
     requests:
       cpu: 500m
       memory: 1Gi
     limits:
       cpu: "2"
-      memory: 2Gi
+      memory: 4Gi
   # -- Extra environment variables passed to the worker container.
   # The top-level `llm` and `embedding` sections are the recommended way
   # to configure LLM/embedding providers. Use this map only for overrides

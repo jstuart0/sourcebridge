@@ -101,6 +101,9 @@ spec:
               mountPath: /etc/sourcebridge/tls-ca
               readOnly: true
           resources:
+            # Starting baselines — tune based on observed p99 usage in your
+            # cluster. Memory limits scale with LLM concurrency and context
+            # window size. Override via an overlay patch or Helm values.
             requests:
               memory: "512Mi"
               cpu: "250m"
