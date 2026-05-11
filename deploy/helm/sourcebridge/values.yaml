@@ -249,6 +249,14 @@ ingress:
   #       - sourcebridge.example.com
   #     secretName: sourcebridge-tls
 
+# ─── Network Policy ──────────────────────────────────────────────────
+networkPolicy:
+  # -- Enable NetworkPolicy hardening. Rolls out a default-deny-all policy plus
+  # a curated allow-set for API, worker, web, SurrealDB, and Redis.
+  # See NOTES.txt for guidance and caveats before enabling.
+  # Default: false (backward-compatible; safe to enable on new installs).
+  enabled: false
+
 # ─── Secrets ─────────────────────────────────────────────────────────
 secrets:
   # -- Set to true to have the chart create a Secret resource.

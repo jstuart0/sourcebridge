@@ -131,4 +131,38 @@ WARNING: ServiceAccount configuration
   an explicit `serviceAccount.name`.
 {{- end }}
 
+== NetworkPolicy Hardening ==
+
+{{- if .Values.networkPolicy.enabled }}
+
+  NetworkPolicy hardening is ENABLED. A default-deny-all policy plus a
+  curated allow-set is active for this namespace.
+
+  WARNING: The bundled allow-set covers standard SourceBridge traffic only
+  (API ↔ SurrealDB, API ↔ worker gRPC, API ↔ Redis, web → API proxy,
+  Traefik → API/web, all pods → kube-dns, API → external HTTPS/HTTP/SSH,
+  worker → external HTTPS/HTTP). If you have additional traffic patterns
+  (e.g. a cluster-internal Ollama, a Prometheus scraper, external database
+  connections) you must add supplementary NetworkPolicy resources alongside
+  this chart or the traffic will be silently dropped.
+
+  To disable:
+    helm upgrade {{ .Release.Name }} sourcebridge/ \
+      --set networkPolicy.enabled=false \
+      -n {{ .Release.Namespace }}
+
+{{- else }}
+
+  NetworkPolicy hardening is disabled (default). To enable the default-deny
+  + allow-set policies, run:
+
+    helm upgrade {{ .Release.Name }} sourcebridge/ \
+      --set networkPolicy.enabled=true \
+      -n {{ .Release.Namespace }}
+
+  Read the caveats above (enable with enabled=true) before toggling on
+  existing clusters — the allow-set may need operator-specific additions.
+
+{{- end }}
+
 For documentation: https://github.com/sourcebridge/sourcebridge

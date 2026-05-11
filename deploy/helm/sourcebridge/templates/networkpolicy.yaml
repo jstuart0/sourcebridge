@@ -1,0 +1,337 @@
+{{- if .Values.networkPolicy.enabled }}
+# NetworkPolicy hardening — see NOTES.txt for operator guidance.
+# All policies are gated on .Values.networkPolicy.enabled (default: false).
+# Apply together: enabling the default-deny without the allow-set breaks all traffic.
+
+---
+# Default-deny: both Ingress and Egress denied for all pods in the namespace.
+# The allow-set policies below carve out the specific flows each component needs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-default-deny-all
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sourcebridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# All pods need DNS to resolve service names.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-allow-dns-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sourcebridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+
+---
+# API ingress: from Traefik ingress controller and from web pods (Next.js middleware proxy).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-allow-api-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sourcebridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+  ingress:
+    # From Traefik ingress controller (thor cluster uses Traefik).
+    # For nginx-ingress clusters replace the podSelector label with
+    # app.kubernetes.io/name: ingress-nginx and adjust namespaceSelector.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 8080
+    # From web pods (Next.js middleware proxy via SOURCEBRIDGE_WEB_DEV_PROXY)
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+              app.kubernetes.io/component: web
+      ports:
+        - protocol: TCP
+          port: 8080
+
+---
+# API egress: SurrealDB, Redis, worker gRPC, external HTTPS/HTTP/SSH.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-allow-api-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sourcebridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Egress
+  egress:
+    # SurrealDB
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+              app.kubernetes.io/component: surrealdb
+      ports:
+        - protocol: TCP
+          port: 8000
+    # Redis (optional caching layer)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+              app.kubernetes.io/component: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Worker gRPC
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+              app.kubernetes.io/component: worker
+      ports:
+        - protocol: TCP
+          port: 50051
+    # External HTTPS: git providers, LLM cloud providers, PostHog telemetry ingest
+    - ports:
+        - protocol: TCP
+          port: 443
+    # External HTTP: Ollama and other HTTP-only LLM endpoints
+    - ports:
+        - protocol: TCP
+          port: 80
+    # External SSH: git over SSH (clone/pull via ssh://)
+    - ports:
+        - protocol: TCP
+          port: 22
+
+---
+# Worker ingress: only from API on the gRPC port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-allow-worker-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sourcebridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+      app.kubernetes.io/component: worker
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 50051
+
+---
+# Worker egress: SurrealDB, external HTTPS (LLM/embedding cloud providers),
+# external HTTP (Ollama over HTTP).
+# Workers do not connect to Redis directly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-allow-worker-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sourcebridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+      app.kubernetes.io/component: worker
+  policyTypes:
+    - Egress
+  egress:
+    # SurrealDB
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+              app.kubernetes.io/component: surrealdb
+      ports:
+        - protocol: TCP
+          port: 8000
+    # External HTTPS: LLM and embedding cloud providers (Anthropic, OpenAI, etc.)
+    - ports:
+        - protocol: TCP
+          port: 443
+    # External HTTP: Ollama over HTTP (operator-configured).
+    # If your Ollama instance is cluster-internal, narrow this to a podSelector
+    # or namespaceSelector targeting your Ollama deployment.
+    - ports:
+        - protocol: TCP
+          port: 80
+
+---
+# Web ingress: from Traefik ingress controller on port 3000.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-allow-web-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sourcebridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+      app.kubernetes.io/component: web
+  policyTypes:
+    - Ingress
+  ingress:
+    # From Traefik ingress controller (thor cluster uses Traefik).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 3000
+
+---
+# Web egress: API proxy (Next.js middleware), external HTTPS (PostHog SSR).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-allow-web-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sourcebridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+      app.kubernetes.io/component: web
+  policyTypes:
+    - Egress
+  egress:
+    # API proxy (SOURCEBRIDGE_WEB_DEV_PROXY → api service on :8080)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 8080
+    # External HTTPS: PostHog client-side init (SSR path)
+    - ports:
+        - protocol: TCP
+          port: 443
+
+---
+# SurrealDB ingress: only from API and worker pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-allow-surrealdb-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sourcebridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+      app.kubernetes.io/component: surrealdb
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+              app.kubernetes.io/component: api
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+              app.kubernetes.io/component: worker
+      ports:
+        - protocol: TCP
+          port: 8000
+
+---
+# Redis ingress: only from API pods (workers don't use Redis directly).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sourcebridge.fullname" . }}-allow-redis-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sourcebridge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+      app.kubernetes.io/component: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 6379
+
+{{- end }}
