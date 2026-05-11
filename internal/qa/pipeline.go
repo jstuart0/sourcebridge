@@ -224,6 +224,20 @@ type Orchestrator struct {
 	decompSynthesizer decomposedSynthesizer
 }
 
+// resolveAskModel returns the live ask model identifier, preferring
+// the AskModelResolver callback over the static config field. Returns
+// "" when neither yields a value. Used by Fix B (CA-324) on paths
+// where the synthesizer omits usage on the wire (Ollama with no token
+// counts) or where synthesis fails before returning a usage block.
+func (o *Orchestrator) resolveAskModel(ctx context.Context) string {
+	if o.config.AskModelResolver != nil {
+		if m := o.config.AskModelResolver(ctx); m != "" {
+			return m
+		}
+	}
+	return o.config.AskModel
+}
+
 // WithAgentSynthesizer installs the tool-use synthesizer. When nil,
 // the orchestrator stays on single-shot. Toggled on per §Phase 4
 // canary rollout by flipping AgenticRetrievalEnabled or setting
@@ -326,8 +340,19 @@ func (o *Orchestrator) WithFileReader(f FileReader) *Orchestrator {
 // package boundaries stay clean (internal/qa does not import
 // internal/config).
 type Config struct {
-	QuestionMaxBytes          int
-	AskModel                  string
+	QuestionMaxBytes int
+	// AskModel is the static fallback model identifier. When AskModelResolver
+	// is non-nil and returns a non-empty value, that takes precedence.
+	// Without either, model fields in diagnostics/usage stay empty when the
+	// worker omits usage on the wire (Fix B / CA-324).
+	AskModel string
+	// AskModelResolver, if set, returns the currently-configured ask model
+	// at request time. Used to surface the live model in diagnostics even
+	// when the worker omits usage (typical of Ollama with no token counts)
+	// or when synthesis fails (Fix B / CA-324). The orchestrator does not
+	// import internal/db or internal/config — callers thread a closure that
+	// reads the active LLM config record.
+	AskModelResolver          func(ctx context.Context) string
 	MaxAnswerTokens           int
 	PromptCachingEnabled      bool
 	SmartClassifierEnabled    bool

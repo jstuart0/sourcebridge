@@ -596,9 +596,26 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 	// flag so operators can disable cleanly without a restart.
 	if cfg != nil {
 		askModel := cfg.LLM.AskModel
+		// Fix B / CA-324: live resolver returns the active LLM config's
+		// ask_model so model diagnostics reflect the operator's current
+		// profile, not the (typically empty) config-file value. Reads the
+		// llmConfigStore at request time — admin profile changes take effect
+		// without a restart. Falls back to the static cfg.LLM.AskModel when
+		// the store is absent or read fails.
+		var askModelResolver func(ctx context.Context) string
+		if s.llmConfigStore != nil {
+			askModelResolver = func(ctx context.Context) string {
+				rec, err := s.llmConfigStore.LoadLLMConfig(ctx)
+				if err != nil || rec == nil {
+					return ""
+				}
+				return rec.AskModel
+			}
+		}
 		qaOrchCfg := qa.Config{
 			QuestionMaxBytes:          cfg.QA.QuestionMaxBytes,
 			AskModel:                  askModel,
+			AskModelResolver:          askModelResolver,
 			PromptCachingEnabled:      cfg.QA.PromptCachingEnabled,
 			SmartClassifierEnabled:    cfg.QA.SmartClassifierEnabled,
 			QueryDecompositionEnabled: cfg.QA.QueryDecompositionEnabled,

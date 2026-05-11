@@ -367,6 +367,14 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 		// gathered — the caller can read the evidence block directly.
 		result.Diagnostics.FallbackUsed = "synthesis_failed"
 		result.Answer = fmt.Sprintf("Synthesis failed: %v. The gathered evidence is available in the references list.", err)
+		// Fix B (CA-324): populate model on the synthesis-failed path so
+		// callers see WHICH model was attempted. Resolver takes precedence
+		// over static config so the live profile model surfaces (runtime
+		// admin changes propagate without restart).
+		if m := o.resolveAskModel(ctx); m != "" {
+			result.Usage = AskUsage{Model: m}
+			result.Diagnostics.ModelUsed = m
+		}
 		result.Diagnostics.StageTimings["qa.ask"] = FromDuration(time.Since(started))
 		return result, nil
 	}
@@ -384,13 +392,14 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 	} else {
 		// Fix B: worker omitted usage (proto3 zero-value message dropped by
 		// encoder — common with Ollama when token counts are absent). Populate
-		// model from the configured ask model so callers never see a nil model.
+		// model from the live resolver / configured ask model so callers never
+		// see a nil model.
 		slog.WarnContext(ctx, "qa: synthesizer returned nil usage; token counts unavailable",
 			"repository_id", in.RepositoryID,
 		)
-		if o.config.AskModel != "" {
-			result.Usage = AskUsage{Model: o.config.AskModel}
-			result.Diagnostics.ModelUsed = o.config.AskModel
+		if m := o.resolveAskModel(ctx); m != "" {
+			result.Usage = AskUsage{Model: m}
+			result.Diagnostics.ModelUsed = m
 		}
 	}
 	for _, sym := range resp.GetReferencedSymbols() {
