@@ -4,6 +4,55 @@ All notable changes to SourceBridge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- HSTS header (`Strict-Transport-Security: max-age=31536000; includeSubDomains`) added unconditionally to all API responses (CA-209)
+- OIDC error responses sanitized: both the IdP-supplied error path and the exchange-failure path now return `{"error":"authentication_failed","correlation_id":"<uuid>"}` — the `description` field is intentionally removed (attacker-controllable); full error is logged server-side (CA-208)
+- Token name server-side validation: rejects names longer than 128 characters or containing non-printable/control Unicode runes (CA-212)
+- Git config handler JSON error responses sanitized — all 7 error sites in `internal/api/rest/git_config.go` now return structured `{"error": string}` JSON instead of plain-text `http.Error` output (CA-213)
+- CORS wildcard-with-credentials opt-in strict guard: `Config.Server.RejectWildcardCORSWithCredentials` (default `false`); when `false`, a startup `WARN` is emitted; when `true`, boot fails validation; wildcard match includes `TrimSpace` to catch whitespace-padded entries (CA-313)
+- LLM `base_url` SSRF validator on both Go API side (`Config.LLM.AllowPrivateBaseURL`, default `true`) and Python worker side (`WorkerConfig.LLMAllowPrivateBaseURL`, default `true`); defaults preserve existing local-LLM (Ollama) workflows; worker validator wired at all provider construction sites (CA-214)
+- Password minimum length configurable via `Config.Auth.PasswordMinLength` (default `8`); server enforces the configured minimum with a clear error message; see Known gaps below for client-side propagation status (CA-215)
+- MCP HEAD probe gated via `Config.MCP.PublicProbeEnabled` (default `true`); when `false`, route returns `404 Not Found` (not `401`) so the web client correctly hides MCP capability (CA-314)
+- Next.js Content-Security-Policy headers added (`frame-ancestors 'none'`, `object-src 'none'`, `connect-src` includes PostHog host, `wss:`, `ws:`); CSP is computed at `next build` from `NEXT_PUBLIC_POSTHOG_HOST` (default `https://us.i.posthog.com`) — runtime container env has no effect; operators who need a different PostHog host must set the env at build time (CA-210)
+- PostHog analytics: `email` and `tenant_id` no longer sent on `identify`; DNT (`navigator.doNotTrack === "1"`) honored on both `identify` and `capture` (CA-211)
+
+### Added
+
+- `useAsyncOp` hook at `web/src/lib/useAsyncOp.ts` — tracks pending keys with finally-cleanup on both success and error; no dedup (callers guard via `isPending(key)`)
+- Network policy hardening kustomize overlay at `deploy/kubernetes/overlays/network-policy-hardened/` — opt-in; base `deploy/kubernetes/base/networkpolicy.yaml` is unchanged (CA-231)
+- Container hardening kustomize overlay at `deploy/kubernetes/overlays/hardened/` — sets `readOnlyRootFilesystem: true` on api, worker, web; requires writable emptyDir volumes at correct paths (CA-293)
+- Helm `networkPolicy.enabled` value (default `false`); when `true`, renders default-deny + full enumerated allow-set (CA-231)
+- Slow-tests CI workflow at `.github/workflows/slow-tests.yml` — nightly cron, non-blocking (CA-290)
+
+### Changed
+
+- `StoreRequirement` / `StoreRequirements` now return `error`; repo-wide caller migration (~44 sites) complete (CA-308)
+- `graphql.DrainAdmitter` and `graphql.LLMProfileLookup` interface declarations moved to `appdeps` package; `internal/api/rest/drain.go` and `llm_profiles.go` updated to reference `appdeps.*` (CA-309)
+- `_UNCAPPED` Python sentinel exported as `UNCAPPED_SENTINEL` in `workers/common/llm/concurrency.py`; `_UNCAPPED` kept as deprecated alias for one release (CA-189)
+- `joinComma` helper deleted from `internal/db/helpers.go`; replaced with `strings.Join` at all call sites (CA-191)
+- `coerceInt` / `coerceUint64` extracted to `internal/db/helpers.go`; inline CBOR-decode switches in 8+ files replaced with helper calls (CA-187)
+- `surrealLLMConfig` DTO introduced in `internal/db/llm_config_store.go`; used by all three `ca_llm_config` readers (`LoadLLMConfig`, `LoadConfigSnapshot`, `LoadLegacyFieldsRaw`); `APIKey` field holds raw encrypted bytes — decryption happens after CBOR decode in the calling function (CA-307)
+- Helm worker memory recommendation raised to `4Gi` limit default in `values.yaml`
+
+### Fixed
+
+- Knowledge tab Cliff Notes accordion: defaults closed when Cliff Notes exist; explicit empty-state CTA rendered when no Cliff Notes artifact exists yet (U-M13)
+- Engine selector tooltip, sidebar `aria-label` always set, `TopBar` `onBlur` close-on-tab-out, form labels on repos page input/textarea, dialog guard on repos page copy action, `<select>` CSS class, repository detail skeleton structural fidelity, login page loading state uses `<Brand>` + `<Spinner>` (CA-251..CA-268)
+- `useAsyncOp` hook migrated into `repositories/[id]/page.tsx` replacing ad-hoc `Set`-based loading state
+- `TestIntegration_ConcurrentReconcileOneWins` flake: assertion relaxed from `wins == 1` to `wins >= 1 && noDuplicates` — the contract is no duplicate winners, not first-race-wins-deterministically (CA-284)
+- `llm_job_store` integration test and `llm_provider_required` test `time.Sleep` patterns replaced with deterministic signaling (CA-285, CA-286)
+- Backtick contract tests added for `CLIFF_NOTES_RENDER_TEMPLATE` and `CLIFF_NOTES_SECTION_REPAIR_TEMPLATE` — pins the CA-176 load-bearing requirement (CA-287)
+- `mcp_test.go` mock `KnowledgeStore` replaced with real `knowledge.MemStore` — closes mock/prod divergence gap (CA-289)
+
+### Known gaps (deferred from CA-320 implementation)
+
+- **H1 (CA-215 partial)**: `password_min_length` propagation is incomplete — server enforces the configured minimum and returns a clear rejection; `desktop_auth.go`, `cli/setup_admin.go`, and web `login/page.tsx`/`security/page.tsx` form validators still use the hardcoded client-side default of 8. Threading these consumers is a follow-up campaign.
+- **H3 (CA-293 partial)**: Helm `securityContext.readOnlyRootFilesystem=true` does not auto-provision the required writable emptyDir volumes; pods will crash on first write. Use the kustomize overlay `deploy/kubernetes/overlays/hardened/` for this hardening today. Full Helm chart volume wiring is a follow-up.
+- **M2 (CA-208 partial)**: OIDC error response shape change lacks dedicated handler-level pin tests. Implementation correctness verified; dedicated regression tests are a follow-up.
+
 ## [0.12.0-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.11.0-rc.3...v0.12.0-rc.3) (2026-05-11)
 
 
