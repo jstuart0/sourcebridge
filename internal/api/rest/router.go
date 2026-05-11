@@ -283,7 +283,7 @@ type Server struct {
 	router                     chi.Router
 	localAuth                  *auth.LocalAuth
 	jwtMgr                     *auth.JWTManager
-	oidc                       *auth.OIDCProvider
+	oidc                       oidcProvider // *auth.OIDCProvider in production; interface allows test stubs (CA-323)
 	store                      graphstore.GraphStore
 	knowledgeStore             knowledge.KnowledgeStore
 	jobStore                   llm.JobStore               // persistent store for llm.Job records; defaults to MemStore
@@ -822,6 +822,17 @@ func (s *Server) clusteringHookFunc() func(repoID, commitSHA string) {
 // SetOIDCProvider configures the OIDC provider for SSO login.
 func (s *Server) SetOIDCProvider(o *auth.OIDCProvider) {
 	s.oidc = o
+}
+
+// oidcProvider is the interface satisfied by *auth.OIDCProvider in
+// production. The interface lives in this package (not internal/auth)
+// because it expresses the rest-package's consumption contract, not
+// the auth package's public surface. Test stubs implement this
+// interface to exercise the OIDC handler paths (CA-323) without
+// wiring a full IdP.
+type oidcProvider interface {
+	AuthorizationURL(ctx context.Context) (url string, state string, err error)
+	Exchange(ctx context.Context, state, code string) (string, error)
 }
 
 func (s *Server) setupRouter() {
