@@ -8,6 +8,7 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ### Security
 
+- GraphQL resolver errors now run through a content-scrubbing presenter that replaces low-level storage messages (SurrealDB SDK strings, `thing(ca_X:y)` record IDs, `rpc error: code = …`, RocksDB/CBOR layer hints, any `ca_<table>` reference) with `{"message":"internal error", extensions:{correlation_id, code:"INTERNAL"}}`. Full error logged server-side at WARN with the same correlation ID. `*gqlerror.Error` and non-leak errors pass through untouched. Closes a Medium schema-leak that pre-existed CA-320 — authenticated GraphQL callers could trigger SurrealDB constraint violations and read table/field/version details from `errors[]` (xander Phase 2 mid-build retro).
 - HSTS header (`Strict-Transport-Security: max-age=31536000; includeSubDomains`) added unconditionally to all API responses (CA-209)
 - OIDC error responses sanitized: both the IdP-supplied error path and the exchange-failure path now return `{"error":"authentication_failed","correlation_id":"<uuid>"}` — the `description` field is intentionally removed (attacker-controllable); full error is logged server-side (CA-208)
 - Token name server-side validation: rejects names longer than 128 characters or containing non-printable/control Unicode runes (CA-212)
@@ -46,6 +47,15 @@ All notable changes to SourceBridge are documented here. The format follows
 - `llm_job_store` integration test and `llm_provider_required` test `time.Sleep` patterns replaced with deterministic signaling (CA-285, CA-286)
 - Backtick contract tests added for `CLIFF_NOTES_RENDER_TEMPLATE` and `CLIFF_NOTES_SECTION_REPAIR_TEMPLATE` — pins the CA-176 load-bearing requirement (CA-287)
 - `mcp_test.go` mock `KnowledgeStore` replaced with real `knowledge.MemStore` — closes mock/prod divergence gap (CA-289)
+
+### CA-324 / CA-325 / CA-326 (post-CA-320 reliability follow-ups, 2026-05-11)
+
+- **CA-324 — discussCode no longer silently returns empty answers** (`fix(qa): 5ba768c..5d5f685`). Three interlocking issues fixed:
+  - `deep_pipeline.go` was passing the full XML injection-guard envelope as the worker's `request.question`, causing the model to receive the real user question buried inside `<question>` tags and the context duplicated. Now `req.Question` carries the bare user question; the injection-guard reconstructs worker-side in `build_discussion_prompt`.
+  - Proto3 zero-value `LLMUsage` omission meant `resp.GetUsage()` returned nil whenever Ollama omitted token counts, leaving `model`/`tokens` null. New `Config.QA.AskModelResolver` reads the live LLM-config record at request time to populate the model field even when usage is unavailable.
+  - The discussCode adapter (`internal/api/graphql/discuss_via_orchestrator.go`) now surfaces an explicit failure message when `res.Answer == ""` — either the fallback reason from diagnostics or a generic "synthesis completed but returned empty" message. Eliminates the silent-empty-answer UX failure mode.
+- **CA-325 — QA synthesis timeout configurable** (`fix(qa): 4736b83 + 1faae37`). New `Config.QA.SynthesisTimeoutSecs int` (env `SOURCEBRIDGE_QA_SYNTHESIS_TIMEOUT_SECS`, default `0` = preserve built-in 120s). Operators on slow remote LLM providers (Ollama serving 9B+ models over the network) raise this to 600+ to prevent `DeadlineExceeded` on the synth call. Read at request time, so admin profile changes take effect on the next call without restart. Mirrors the existing `WithKnowledgeTimeoutProvider` pattern; all 4 discussion-class RPCs (`AnswerQuestion`, `AnswerQuestionWithTools`, `SynthesizeDecomposedAnswer`, `AnswerQuestionStream`) gated through the live resolver. `docker-compose.yml` exposes the env passthrough.
+- **CA-326 — QA synth fails fast on `DeadlineExceeded`** (`fix(qa): f40ccbd`). `qaJobRunner.RunSyncQAJob` now pins `MaxAttempts: 1` on QA synth jobs (the orchestrator's default policy retries `DeadlineExceeded`, doubling user wait when the provider is hung). Knowledge-generation jobs keep `MaxAttempts: 2` because cold-start model swaps may legitimately complete on attempt 2. `deep_pipeline.go` now logs an explicit WARN with `elapsed_ms`, `model`, and an operator hint pointing at `Ollama /api/ps` + `/api/version` whenever the synth call hits `DeadlineExceeded` after burning the full configured ceiling.
 
 ### Known gaps (deferred from CA-320 implementation)
 
