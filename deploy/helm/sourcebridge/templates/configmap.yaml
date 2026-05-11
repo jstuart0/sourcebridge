@@ -41,6 +41,12 @@ data:
   SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL: {{ .Values.embedding.baseUrl | quote }}
   {{- end }}
 
+  # CA-214: LLM base URL SSRF guard.
+  SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL: {{ .Values.llm.allowPrivateBaseURL | default "true" | quote }}
+  SOURCEBRIDGE_WORKER_LLM_ALLOW_PRIVATE_BASE_URL: {{ .Values.llm.allowPrivateBaseURL | default "true" | quote }}
+  # CA-215: Minimum admin password length.
+  SOURCEBRIDGE_AUTH_PASSWORD_MIN_LENGTH: {{ .Values.auth.passwordMinLength | default 8 | quote }}
+
   # ─── Extra worker env overrides ────────────────────────────────────
   {{- range $key, $value := .Values.worker.env }}
   {{ $key }}: {{ $value | quote }}

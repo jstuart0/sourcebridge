@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/sourcebridge/sourcebridge/internal/capabilities"
+	"github.com/sourcebridge/sourcebridge/internal/indexing/pathutil"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/maskutil"
 )
@@ -289,6 +291,17 @@ func (s *Server) handleUpdateLLMConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AdvancedMode != nil {
 		rec.AdvancedMode = *req.AdvancedMode
+	}
+
+	// CA-214: validate the base URL against the SSRF denylist before
+	// persisting. allowPrivate defaults true so existing Ollama-on-localhost
+	// deployments are unaffected. Operators on multi-tenant public installs
+	// flip SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL=false to enable strict mode.
+	if err := pathutil.ValidateLLMBaseURL(rec.BaseURL, s.cfg.LLM.AllowPrivateBaseURL, nil); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("invalid LLM base URL: %s", err),
+		})
+		return
 	}
 
 	// Persist to database. Failure is fatal: pre-slice-1 we silently

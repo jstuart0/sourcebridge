@@ -204,3 +204,62 @@ async def test_create_report_provider_uses_same_gate_for_same_endpoint(gate_regi
     assert isinstance(report_prov, ConcurrencyGatedProvider)
     # Both point at the same Ollama host → same underlying _HostGate binding.
     assert main_prov._gate._binding is report_prov._gate._binding
+
+
+# ─── CA-214: LLM base-URL SSRF guard ─────────────────────────────────────────
+
+from workers.common.llm.config import validate_llm_base_url  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "url,allow_private,should_raise",
+    [
+        # Empty URL is always accepted.
+        ("", True, False),
+        ("", False, False),
+        # Localhost — accepted when allow_private=True, rejected when False.
+        ("http://localhost:11434/v1", True, False),
+        ("http://localhost:11434/v1", False, True),
+        # 127.0.0.1 loopback
+        ("http://127.0.0.1:8080", True, False),
+        ("http://127.0.0.1:8080", False, True),
+        # RFC1918 — 10.x
+        ("http://10.0.0.5:8080", True, False),
+        ("http://10.0.0.5:8080", False, True),
+        # RFC1918 — 172.16.x
+        ("http://172.16.0.5:8080", True, False),
+        ("http://172.16.0.5:8080", False, True),
+        # RFC1918 — 192.168.x
+        ("http://192.168.0.5:8080", True, False),
+        ("http://192.168.0.5:8080", False, True),
+        # Link-local / IMDS
+        ("http://169.254.169.254/latest/meta-data/", True, False),
+        ("http://169.254.169.254/latest/meta-data/", False, True),
+        # CGNAT 100.64.x
+        ("http://100.64.0.5:8080", True, False),
+        ("http://100.64.0.5:8080", False, True),
+        # IPv6 loopback
+        ("http://[::1]:8080", True, False),
+        ("http://[::1]:8080", False, True),
+        # IPv6 multicast
+        ("http://[ff00::1]:8080", True, False),
+        ("http://[ff00::1]:8080", False, True),
+        # Unspecified 0.0.0.0
+        ("http://0.0.0.0:8080", True, False),
+        ("http://0.0.0.0:8080", False, True),
+        # Public HTTPS — always accepted (bare IP, no DNS lookup needed)
+        ("https://104.18.0.1/v1", True, False),
+        ("https://104.18.0.1/v1", False, False),
+        # Bad scheme — always rejected
+        ("ftp://example.com", True, True),
+        ("ftp://example.com", False, True),
+    ],
+)
+def test_validate_llm_base_url_matrix(url: str, allow_private: bool, should_raise: bool) -> None:
+    """CA-214: accept/reject matrix mirrors pathutil.ValidateLLMBaseURL in Go."""
+    if should_raise:
+        with pytest.raises(ValueError):
+            validate_llm_base_url(url, allow_private)
+    else:
+        # Must not raise.
+        validate_llm_base_url(url, allow_private)

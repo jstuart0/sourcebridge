@@ -130,10 +130,13 @@ var cgnatBlock = func() *net.IPNet {
 	return cidr
 }()
 
-// isPrivateOrInternalIP returns true if the given IP is in any denylist range:
+// IsPrivateOrInternalIP returns true if the given IP is in any denylist range:
 // RFC1918, loopback, link-local unicast, CGNAT, ULA, unspecified (0.0.0.0/::),
 // multicast, or interface-local multicast.
-func isPrivateOrInternalIP(ip net.IP) bool {
+//
+// Exported so callers outside this package (e.g. LLM base-URL validation) can
+// reuse the same denylist without duplicating the logic.
+func IsPrivateOrInternalIP(ip net.IP) bool {
 	// stdlib covers: 10/8, 172.16/12, 192.168/16, 127/8, ::1, 169.254/16,
 	// fe80::/10, fc00::/7.
 	if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
@@ -144,7 +147,7 @@ func isPrivateOrInternalIP(ip net.IP) bool {
 	if ip.IsUnspecified() {
 		return true
 	}
-	// Multicast: git over multicast is never legitimate; block 224.0.0.0/4 and
+	// Multicast: never legitimate for HTTP/LLM; block 224.0.0.0/4 and
 	// ff00::/8 to prevent exotic routing tricks.
 	if ip.IsMulticast() || ip.IsInterfaceLocalMulticast() {
 		return true
@@ -155,6 +158,10 @@ func isPrivateOrInternalIP(ip net.IP) bool {
 	}
 	return false
 }
+
+// isPrivateOrInternalIP is the unexported alias kept for internal callers in
+// this package that pre-date the export.
+func isPrivateOrInternalIP(ip net.IP) bool { return IsPrivateOrInternalIP(ip) }
 
 // extractHostname returns the hostname from a git URL string.
 //
@@ -227,6 +234,93 @@ func ValidateGitURLForClone(rawURL string, allowPrivate bool, lookupIP LookupIPF
 		}
 	}
 
+	return nil
+}
+
+// --- LLM base-URL SSRF guard (CA-214) ---
+
+// Sentinel errors returned by ValidateLLMBaseURL.
+var (
+	// ErrLLMSchemeNotAllowed is returned when the LLM base URL uses a
+	// disallowed scheme. Only http:// and https:// are permitted; Ollama and
+	// other local providers serve over plain HTTP on localhost.
+	ErrLLMSchemeNotAllowed = errors.New("LLM base URL scheme not allowed; use http:// or https://")
+
+	// ErrLLMPrivateIPNotAllowed is returned when the resolved hostname maps to
+	// a private/internal IP and allowPrivate is false. Set
+	// SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL=true to permit self-hosted LLM
+	// providers on internal networks (not safe for multi-tenant public deploys).
+	ErrLLMPrivateIPNotAllowed = errors.New("LLM base URL hostname resolves to a private IP; set SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL=true for self-hosted internal providers")
+
+	// ErrLLMHostnameUnresolvable is returned when DNS lookup fails for the
+	// LLM hostname. Fail-closed: an unresolvable hostname may be a typo or a
+	// DNS-rebind attack in progress.
+	ErrLLMHostnameUnresolvable = errors.New("LLM base URL hostname is unresolvable; check DNS or use an IP address directly")
+)
+
+// ValidateLLMBaseURL validates an LLM base URL at save time.
+//
+// Defense scope: this is a SAVE-TIME-ONLY guard. The validator resolves the
+// hostname and rejects if any resolved IP is private/internal (when
+// allowPrivate is false). A DNS rebind attacker can pass a public IP at
+// save time and switch the record to 169.254.169.254 before the next
+// request, bypassing the check entirely. Full defense requires a custom
+// http.Client dialer that re-runs IsPrivateOrInternalIP on every resolved
+// address at request time. That is intentionally out of scope here;
+// runtime hardening is tracked as a separate ticket. The save-time check
+// remains valuable as a first layer.
+//
+// Two independent gates:
+//  1. Scheme allowlist: http:// and https:// are allowed; ftp://, file://,
+//     etc. are rejected with ErrLLMSchemeNotAllowed.
+//  2. IP denylist: when allowPrivate is false, the hostname is resolved via
+//     lookupIP and any private/internal IP causes ErrLLMPrivateIPNotAllowed.
+//     Empty URL is accepted (means "use provider default").
+//
+// Pass nil for lookupIP to use net.LookupIP.
+func ValidateLLMBaseURL(rawURL string, allowPrivate bool, lookupIP LookupIPFunc) error {
+	if rawURL == "" {
+		// Empty means "use provider default" — nothing to validate.
+		return nil
+	}
+	if lookupIP == nil {
+		lookupIP = net.LookupIP
+	}
+
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrLLMSchemeNotAllowed, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return ErrLLMSchemeNotAllowed
+	}
+
+	if allowPrivate {
+		return nil
+	}
+
+	host := u.Hostname()
+	if host == "" {
+		return ErrLLMSchemeNotAllowed
+	}
+
+	// If the host is already a bare IP (e.g. 127.0.0.1), skip DNS lookup.
+	if ip := net.ParseIP(host); ip != nil {
+		if IsPrivateOrInternalIP(ip) {
+			return fmt.Errorf("%w: %s", ErrLLMPrivateIPNotAllowed, host)
+		}
+		return nil
+	}
+
+	ips, err := lookupIP(host)
+	if err != nil || len(ips) == 0 {
+		return fmt.Errorf("%w: %s", ErrLLMHostnameUnresolvable, host)
+	}
+	for _, ip := range ips {
+		if IsPrivateOrInternalIP(ip) {
+			return fmt.Errorf("%w: %s resolves to %s", ErrLLMPrivateIPNotAllowed, host, ip)
+		}
+	}
 	return nil
 }
 

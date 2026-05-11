@@ -244,14 +244,19 @@ func readPasswordWithConfirmation(pwdReader passwordReader) (string, error) {
 // validateAdminPassword applies the server-side rule client-side so
 // "too short" is caught before the network round-trip. The server's
 // own validation remains the source of truth — this is a UX shortcut.
-func validateAdminPassword(password string) error {
+// minLength <= 0 falls back to minAdminPasswordLength (8).
+func validateAdminPassword(password string, minLength ...int) error {
 	if password == "" {
 		return fmt.Errorf("password cannot be empty")
 	}
-	if len(password) < minAdminPasswordLength {
+	min := minAdminPasswordLength
+	if len(minLength) > 0 && minLength[0] > min {
+		min = minLength[0]
+	}
+	if len(password) < min {
 		return fmt.Errorf(
 			"password must be at least %d characters (got %d).",
-			minAdminPasswordLength, len(password),
+			min, len(password),
 		)
 	}
 	return nil

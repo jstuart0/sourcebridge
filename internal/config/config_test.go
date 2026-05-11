@@ -35,6 +35,21 @@ func TestSecurityDefaultsCSRFFullCoverageEnabled(t *testing.T) {
 	}
 }
 
+// TestLLMDefaultsAllowPrivateBaseURLTrue pins the default value of
+// AllowPrivateBaseURL to true. This is intentional: local LLM providers
+// (Ollama on localhost, vLLM on internal cluster IPs) require private-IP
+// access. Multi-tenant SaaS operators who must block SSRF via crafted base
+// URLs should flip this to false per docs/going-to-production.md (CA-214).
+func TestLLMDefaultsAllowPrivateBaseURLTrue(t *testing.T) {
+	cfg := Defaults()
+	if !cfg.LLM.AllowPrivateBaseURL {
+		t.Error("LLM.AllowPrivateBaseURL must default to true; found false — " +
+			"local providers (Ollama, vLLM, llama-cpp, etc.) require localhost/private-IP access. " +
+			"Set SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL=false only on multi-tenant public deployments. " +
+			"See CA-214.")
+	}
+}
+
 func TestMCPDefaultsPublicProbeTrue(t *testing.T) {
 	cfg := Defaults()
 	if !cfg.MCP.PublicProbe {

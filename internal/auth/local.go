@@ -20,17 +20,40 @@ type LocalUser struct {
 	PasswordHash string `json:"password_hash"`
 }
 
+// LocalAuthOptions configures optional behavior for LocalAuth.
+type LocalAuthOptions struct {
+	// PasswordMinLength is the minimum accepted password length for Setup and
+	// ChangePassword. Zero is treated as the default of 8.
+	PasswordMinLength int
+}
+
+// passwordMinLength returns the effective minimum, applying the default of 8
+// when the configured value is zero.
+func (o LocalAuthOptions) passwordMinLength() int {
+	if o.PasswordMinLength <= 0 {
+		return 8
+	}
+	return o.PasswordMinLength
+}
+
 // LocalAuth handles single-user authentication for OSS mode.
 type LocalAuth struct {
 	jwtManager *JWTManager
 	persister  AuthPersister
+	opts       LocalAuthOptions
 	user       *LocalUser
 	setupDone  bool
 }
 
-// NewLocalAuth creates a new local auth handler.
+// NewLocalAuth creates a new local auth handler with default options.
 // If persister is nil, a MemoryPersister is used (no persistence across restarts).
 func NewLocalAuth(jwtManager *JWTManager, persister ...AuthPersister) *LocalAuth {
+	return NewLocalAuthWithOptions(jwtManager, LocalAuthOptions{PasswordMinLength: 8}, persister...)
+}
+
+// NewLocalAuthWithOptions creates a new local auth handler with explicit options.
+// If persister is nil, a MemoryPersister is used (no persistence across restarts).
+func NewLocalAuthWithOptions(jwtManager *JWTManager, opts LocalAuthOptions, persister ...AuthPersister) *LocalAuth {
 	var p AuthPersister = MemoryPersister{}
 	if len(persister) > 0 && persister[0] != nil {
 		p = persister[0]
@@ -39,6 +62,7 @@ func NewLocalAuth(jwtManager *JWTManager, persister ...AuthPersister) *LocalAuth
 	la := &LocalAuth{
 		jwtManager: jwtManager,
 		persister:  p,
+		opts:       opts,
 	}
 
 	// Attempt to load persisted user
@@ -53,6 +77,11 @@ func NewLocalAuth(jwtManager *JWTManager, persister ...AuthPersister) *LocalAuth
 	return la
 }
 
+// PasswordMinLength returns the configured minimum password length.
+func (a *LocalAuth) PasswordMinLength() int {
+	return a.opts.passwordMinLength()
+}
+
 // IsSetupDone returns whether initial setup has been completed.
 func (a *LocalAuth) IsSetupDone() bool {
 	return a.setupDone
@@ -64,8 +93,8 @@ func (a *LocalAuth) Setup(password string) (*LocalUser, error) {
 		return nil, fmt.Errorf("setup already completed")
 	}
 
-	if len(password) < 8 {
-		return nil, fmt.Errorf("password must be at least 8 characters")
+	if len(password) < a.opts.passwordMinLength() {
+		return nil, fmt.Errorf("password must be at least %d characters", a.opts.passwordMinLength())
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -117,8 +146,8 @@ func (a *LocalAuth) ChangePassword(oldPassword, newPassword string) error {
 		return fmt.Errorf("invalid current password")
 	}
 
-	if len(newPassword) < 8 {
-		return fmt.Errorf("new password must be at least 8 characters")
+	if len(newPassword) < a.opts.passwordMinLength() {
+		return fmt.Errorf("new password must be at least %d characters", a.opts.passwordMinLength())
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)

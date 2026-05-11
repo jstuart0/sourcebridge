@@ -14,6 +14,18 @@ import (
 	"github.com/spf13/viper"
 )
 
+// AuthConfig holds authentication settings.
+type AuthConfig struct {
+	// PasswordMinLength is the minimum accepted password length for local-auth
+	// setup and change-password flows. Default 8 (preserves current behavior).
+	// Operators who want a stronger floor set this via
+	// SOURCEBRIDGE_AUTH_PASSWORD_MIN_LENGTH.
+	//
+	// Config key: auth.password_min_length
+	// Env var:    SOURCEBRIDGE_AUTH_PASSWORD_MIN_LENGTH
+	PasswordMinLength int `mapstructure:"password_min_length"`
+}
+
 // Config holds the complete application configuration.
 type Config struct {
 	Env           string              `mapstructure:"env"`     // development, production
@@ -22,6 +34,7 @@ type Config struct {
 	Storage       StorageConfig       `mapstructure:"storage"`
 	Indexing      IndexingConfig      `mapstructure:"indexing"`
 	LLM           LLMConfig           `mapstructure:"llm"`
+	Auth          AuthConfig          `mapstructure:"auth"`
 	Linking       LinkingConfig       `mapstructure:"linking"`
 	UI            UIConfig            `mapstructure:"ui"`
 	Security      SecurityConfig      `mapstructure:"security"`
@@ -145,6 +158,16 @@ type LLMConfig struct {
 	DraftModel               string `mapstructure:"draft_model"`                // LM Studio only: sent as draft_model per request
 	TimeoutSecs              int    `mapstructure:"timeout_seconds"`
 	AdvancedMode             bool   `mapstructure:"advanced_mode"` // when true, per-operation models are active
+
+	// AllowPrivateBaseURL disables the SSRF IP-range denylist for the LLM
+	// base_url field. Default true (preserve current behavior — operators
+	// running Ollama on localhost rely on http://127.0.0.1:11434). Flip to
+	// false on multi-tenant public deploys where you don't want users pointing
+	// the LLM at internal metadata services.
+	//
+	// Config key: llm.allow_private_base_url
+	// Env var:    SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL
+	AllowPrivateBaseURL bool `mapstructure:"allow_private_base_url"`
 }
 
 // OperationGroup identifies the coarse LLM operation family used for per-operation
@@ -801,6 +824,13 @@ func Defaults() *Config {
 			// models we've measured. The prior 30s default was ignored
 			// downstream anyway; operators can tune via the admin UI.
 			TimeoutSecs: 900,
+			// CA-214: default true so existing deployments running Ollama on
+			// localhost or other private IPs continue working without config
+			// changes. Multi-tenant public operators flip to false.
+			AllowPrivateBaseURL: true,
+		},
+		Auth: AuthConfig{
+			PasswordMinLength: 8, // CA-215: default 8 preserves current behavior
 		},
 		Linking: LinkingConfig{
 			MinConfidenceUI:        0.5,
@@ -985,6 +1015,8 @@ func Load() (*Config, error) {
 	v.SetDefault("living_wiki.scheduler_interval", cfg.LivingWiki.SchedulerInterval)
 	v.SetDefault("living_wiki.max_concurrent_jobs_per_tenant", cfg.LivingWiki.MaxConcurrentJobsPerTenant)
 	v.SetDefault("indexing.allow_private_git_hosts", false)
+	v.SetDefault("llm.allow_private_base_url", true)
+	v.SetDefault("auth.password_min_length", cfg.Auth.PasswordMinLength)
 	v.SetDefault("change_watch.enabled", cfg.ChangeWatch.Enabled)
 	v.SetDefault("change_watch.debounce_ms", cfg.ChangeWatch.DebounceMs)
 	v.SetDefault("change_watch.rate_limit_per_min", cfg.ChangeWatch.RateLimitPerMin)

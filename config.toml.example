@@ -18,6 +18,13 @@
 # IP-range denylist for git clone; the scheme allowlist (https://, ssh://)
 # remains active regardless. See docs/going-to-production.md.
 
+# ─── Auth (CA-215 password policy) ─────────────────────────────────
+# [auth]
+# password_min_length = 8
+# Minimum character length for the admin password (Setup and Change-Password).
+# Default 8 preserves the pre-CA-215 behavior. Increase to enforce a stronger
+# floor. Env var: SOURCEBRIDGE_AUTH_PASSWORD_MIN_LENGTH.
+
 # ─── Telemetry ─────────────────────────────────────────────────────
 # Anonymous usage data helps us improve SourceBridge. No PII is collected.
 # Disable via SOURCEBRIDGE_TELEMETRY=off or DO_NOT_TRACK=1.
@@ -31,6 +38,15 @@
 # summary_model = "claude-sonnet-4-20250514"
 # review_model  = "claude-sonnet-4-20250514"
 # ask_model     = "claude-sonnet-4-20250514"
+
+# ─── LLM base-URL SSRF guard (CA-214) ──────────────────────────────
+# allow_private_base_url controls whether LLM base URLs pointing at private /
+# internal IPs are accepted when saved via the admin UI. Default true
+# (preserves current behavior — Ollama on localhost is allowed). Set to false
+# on multi-tenant public deployments. Env var:
+# SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL.
+# [llm]
+# allow_private_base_url = true
 
 # ─── Local mode (Ollama) — free, runs on your machine ──────────────
 [llm]

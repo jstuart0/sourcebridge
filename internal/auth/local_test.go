@@ -151,3 +151,64 @@ func TestLocalAuthLoginIssuesAdminRole(t *testing.T) {
 		t.Errorf("expected role %q, got %q — bootstrap admin JWT must carry admin role", RoleAdmin, claims.Role)
 	}
 }
+
+// CA-215: password min-length configurable via LocalAuthOptions.
+
+func TestLocalAuthOptions_DefaultMinLength(t *testing.T) {
+	mgr := NewJWTManager("test-secret", 60, "")
+	la := NewLocalAuth(mgr)
+	if la.PasswordMinLength() != 8 {
+		t.Errorf("default PasswordMinLength: want 8, got %d", la.PasswordMinLength())
+	}
+}
+
+func TestLocalAuthOptions_CustomMinLength(t *testing.T) {
+	mgr := NewJWTManager("test-secret", 60, "")
+	la := NewLocalAuthWithOptions(mgr, LocalAuthOptions{PasswordMinLength: 12})
+	if la.PasswordMinLength() != 12 {
+		t.Errorf("custom PasswordMinLength: want 12, got %d", la.PasswordMinLength())
+	}
+}
+
+func TestLocalAuthOptions_ZeroFallsBackToDefault(t *testing.T) {
+	mgr := NewJWTManager("test-secret", 60, "")
+	la := NewLocalAuthWithOptions(mgr, LocalAuthOptions{PasswordMinLength: 0})
+	if la.PasswordMinLength() != 8 {
+		t.Errorf("zero PasswordMinLength: want 8 (default), got %d", la.PasswordMinLength())
+	}
+}
+
+func TestLocalAuthSetup_RejectsShortPasswordWithCustomMin(t *testing.T) {
+	mgr := NewJWTManager("test-secret", 60, "")
+	la := NewLocalAuthWithOptions(mgr, LocalAuthOptions{PasswordMinLength: 12})
+
+	// 11 chars — below min of 12
+	_, err := la.Setup("password123")
+	if err == nil {
+		t.Error("expected error for password shorter than custom min")
+	}
+}
+
+func TestLocalAuthSetup_AcceptsPasswordAtCustomMin(t *testing.T) {
+	mgr := NewJWTManager("test-secret", 60, "")
+	la := NewLocalAuthWithOptions(mgr, LocalAuthOptions{PasswordMinLength: 12})
+
+	// exactly 12 chars
+	_, err := la.Setup("passwordTwelv")
+	if err != nil {
+		t.Errorf("unexpected error for password at custom min: %v", err)
+	}
+}
+
+func TestLocalAuthChangePassword_RejectsShortPasswordWithCustomMin(t *testing.T) {
+	mgr := NewJWTManager("test-secret", 60, "")
+	la := NewLocalAuthWithOptions(mgr, LocalAuthOptions{PasswordMinLength: 12})
+	if _, err := la.Setup("passwordTwelv"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	// new password only 8 chars — below min of 12
+	err := la.ChangePassword("passwordTwelv", "short123")
+	if err == nil {
+		t.Error("expected error for new password shorter than custom min")
+	}
+}

@@ -152,6 +152,31 @@ var ErrAPIKeyDecryptFailed = fmt.Errorf("llm api key decrypt failed; refusing to
 // (test files use envelopePrefix directly).
 const envelopePrefix = secretcipher.EnvelopePrefix
 
+// surrealLLMConfig is the CBOR DTO for ca_llm_config rows. APIKey holds the
+// raw stored form (encrypted or legacy plaintext); callers that need the
+// decrypted value must call s.decryptAPIKey after decode.
+//
+// D-M7 (CA-307): replaces ad-hoc map[string]interface{} decodes across
+// LoadLLMConfig, LoadConfigSnapshot, and LoadLegacyFieldsRaw with a typed
+// struct so the compiler catches field drift.
+type surrealLLMConfig struct {
+	Provider                 string `json:"provider"`
+	BaseURL                  string `json:"base_url"`
+	APIKey                   string `json:"api_key"` // raw stored form (may be encrypted)
+	SummaryModel             string `json:"summary_model"`
+	ReviewModel              string `json:"review_model"`
+	AskModel                 string `json:"ask_model"`
+	KnowledgeModel           string `json:"knowledge_model"`
+	ArchitectureDiagramModel string `json:"architecture_diagram_model"`
+	ReportModel              string `json:"report_model"`
+	DraftModel               string `json:"draft_model"`
+	TimeoutSecs              int    `json:"timeout_secs"`
+	AdvancedMode             bool   `json:"advanced_mode"`
+	Version                  uint64 `json:"version"`
+	ActiveProfileID          string `json:"active_profile_id"`
+	UpdatedAt                surrealTime `json:"updated_at"`
+}
+
 // LoadLLMConfig reads the workspace LLM config record. The api_key field
 // is decrypted before return: prefixed values go through GCM-Open;
 // unprefixed values are treated as legacy plaintext (with a one-time
@@ -166,44 +191,35 @@ func (s *SurrealLLMConfigStore) LoadLLMConfig(ctx context.Context) (*LLMConfigRe
 		return nil, nil
 	}
 
-	raw, err := surrealdb.Query[[]map[string]interface{}](ctx, db,
+	rows, err := queryOne[[]surrealLLMConfig](ctx, db,
 		"SELECT provider, base_url, api_key, summary_model, review_model, ask_model, knowledge_model, architecture_diagram_model, report_model, draft_model, timeout_secs, advanced_mode, version FROM ca_llm_config WHERE id = type::thing('ca_llm_config', 'default') LIMIT 1",
 		map[string]any{})
 	if err != nil {
 		slog.Warn("surreal llm config load query failed", "error", err)
 		return nil, nil
 	}
-
-	if raw == nil || len(*raw) == 0 {
+	if len(rows) == 0 {
 		return nil, nil
 	}
+	row := rows[0]
 
-	qr := (*raw)[0]
-	if qr.Error != nil {
-		slog.Warn("llm config load: query error", "error", fmt.Sprintf("%v", qr.Error))
-		return nil, nil
-	}
-
-	if len(qr.Result) == 0 {
-		return nil, nil
-	}
-
-	row := qr.Result[0]
 	rec := &LLMConfigRecord{
-		Provider:                 strVal(row, "provider"),
-		BaseURL:                  strVal(row, "base_url"),
-		SummaryModel:             strVal(row, "summary_model"),
-		ReviewModel:              strVal(row, "review_model"),
-		AskModel:                 strVal(row, "ask_model"),
-		KnowledgeModel:           strVal(row, "knowledge_model"),
-		ArchitectureDiagramModel: strVal(row, "architecture_diagram_model"),
-		ReportModel:              strVal(row, "report_model"),
-		DraftModel:               strVal(row, "draft_model"),
+		Provider:                 row.Provider,
+		BaseURL:                  row.BaseURL,
+		SummaryModel:             row.SummaryModel,
+		ReviewModel:              row.ReviewModel,
+		AskModel:                 row.AskModel,
+		KnowledgeModel:           row.KnowledgeModel,
+		ArchitectureDiagramModel: row.ArchitectureDiagramModel,
+		ReportModel:              row.ReportModel,
+		DraftModel:               row.DraftModel,
+		TimeoutSecs:              row.TimeoutSecs,
+		AdvancedMode:             row.AdvancedMode,
+		Version:                  row.Version,
 	}
 
 	// API key path: fail-closed on decrypt failure.
-	storedKey := strVal(row, "api_key")
-	plaintext, err := s.decryptAPIKey(storedKey)
+	plaintext, err := s.decryptAPIKey(row.APIKey)
 	if err != nil {
 		slog.Error("llm config load: api_key decrypt failed",
 			"error", err,
@@ -212,17 +228,6 @@ func (s *SurrealLLMConfigStore) LoadLLMConfig(ctx context.Context) (*LLMConfigRe
 	}
 	rec.APIKey = plaintext
 
-	if v, ok := row["timeout_secs"]; ok {
-		rec.TimeoutSecs = coerceInt(v)
-	}
-	if v, ok := row["advanced_mode"]; ok {
-		if b, ok := v.(bool); ok {
-			rec.AdvancedMode = b
-		}
-	}
-	if v, ok := row["version"]; ok {
-		rec.Version = coerceUint64(v)
-	}
 	return rec, nil
 }
 

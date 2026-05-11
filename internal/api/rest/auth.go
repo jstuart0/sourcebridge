@@ -168,9 +168,10 @@ func (s *Server) handleCurrentToken(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAuthInfo(w http.ResponseWriter, r *http.Request) {
 	info := map[string]interface{}{
-		"local_auth":   true,
-		"setup_done":   s.localAuth.IsSetupDone(),
-		"oidc_enabled": s.oidc != nil,
+		"local_auth":          true,
+		"setup_done":          s.localAuth.IsSetupDone(),
+		"oidc_enabled":        s.oidc != nil,
+		"password_min_length": s.localAuth.PasswordMinLength(),
 	}
 	writeJSON(w, http.StatusOK, info)
 }

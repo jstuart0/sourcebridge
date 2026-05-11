@@ -468,3 +468,102 @@ func TestValidateGitURL_MulticastAddresses_Denied(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ValidateLLMBaseURL tests (CA-214)
+// ---------------------------------------------------------------------------
+
+// TestValidateLLMBaseURL_Matrix covers the 12-case accept/reject matrix
+// for both allowPrivate=true and allowPrivate=false modes.
+func TestValidateLLMBaseURL_Matrix(t *testing.T) {
+	// stubLookup builds a LookupIPFunc that returns the given IP string.
+	stubLookup := func(ipStr string) LookupIPFunc {
+		return func(_ string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP(ipStr)}, nil
+		}
+	}
+
+	type tc struct {
+		name          string
+		url           string
+		allowPrivate  bool
+		lookupResult  string // empty = use real DNS; otherwise stub this IP
+		wantErr       error  // nil = no error expected
+	}
+
+	cases := []tc{
+		// Localhost — accepted when allowPrivate=true, rejected when false.
+		{"localhost allowPrivate=true", "http://localhost:11434/v1", true, "127.0.0.1", nil},
+		{"localhost allowPrivate=false", "http://localhost:11434/v1", false, "127.0.0.1", ErrLLMPrivateIPNotAllowed},
+		// 127.0.0.1 loopback
+		{"127.0.0.1 allowPrivate=true", "http://127.0.0.1:8080", true, "127.0.0.1", nil},
+		{"127.0.0.1 allowPrivate=false", "http://127.0.0.1:8080", false, "", ErrLLMPrivateIPNotAllowed},
+		// RFC1918 — 10.x
+		{"10.x allowPrivate=true", "http://10.0.0.5:8080", true, "10.0.0.5", nil},
+		{"10.x allowPrivate=false", "http://10.0.0.5:8080", false, "", ErrLLMPrivateIPNotAllowed},
+		// RFC1918 — 172.16.x
+		{"172.16.x allowPrivate=true", "http://172.16.0.5:8080", true, "172.16.0.5", nil},
+		{"172.16.x allowPrivate=false", "http://172.16.0.5:8080", false, "", ErrLLMPrivateIPNotAllowed},
+		// RFC1918 — 192.168.x
+		{"192.168.x allowPrivate=true", "http://192.168.0.5:8080", true, "192.168.0.5", nil},
+		{"192.168.x allowPrivate=false", "http://192.168.0.5:8080", false, "", ErrLLMPrivateIPNotAllowed},
+		// Link-local / IMDS — 169.254.x
+		{"169.254.x (IMDS) allowPrivate=true", "http://169.254.169.254/latest/meta-data/", true, "169.254.169.254", nil},
+		{"169.254.x (IMDS) allowPrivate=false", "http://169.254.169.254/latest/meta-data/", false, "", ErrLLMPrivateIPNotAllowed},
+		// CGNAT — 100.64.x
+		{"100.64.x (CGNAT) allowPrivate=true", "http://100.64.0.5:8080", true, "100.64.0.5", nil},
+		{"100.64.x (CGNAT) allowPrivate=false", "http://100.64.0.5:8080", false, "", ErrLLMPrivateIPNotAllowed},
+		// IPv6 loopback — ::1
+		{"[::1] allowPrivate=true", "http://[::1]:8080", true, "", nil},
+		{"[::1] allowPrivate=false", "http://[::1]:8080", false, "", ErrLLMPrivateIPNotAllowed},
+		// IPv6 multicast
+		{"[ff00::1] allowPrivate=true", "http://[ff00::1]:8080", true, "", nil},
+		{"[ff00::1] allowPrivate=false", "http://[ff00::1]:8080", false, "", ErrLLMPrivateIPNotAllowed},
+		// Unspecified — 0.0.0.0
+		{"0.0.0.0 allowPrivate=true", "http://0.0.0.0:8080", true, "", nil},
+		{"0.0.0.0 allowPrivate=false", "http://0.0.0.0:8080", false, "", ErrLLMPrivateIPNotAllowed},
+		// Public URL — always accepted
+		{"openai always accepted", "https://api.openai.com/v1", true, "104.18.0.1", nil},
+		{"openai always accepted strict", "https://api.openai.com/v1", false, "104.18.0.1", nil},
+		// Bad scheme — always rejected
+		{"ftp scheme always rejected", "ftp://example.com", true, "", ErrLLMSchemeNotAllowed},
+		{"ftp scheme strict rejected", "ftp://example.com", false, "", ErrLLMSchemeNotAllowed},
+		// Empty URL — always accepted (means "use provider default")
+		{"empty url allowPrivate=true", "", true, "", nil},
+		{"empty url allowPrivate=false", "", false, "", nil},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var lookup LookupIPFunc
+			if c.lookupResult != "" {
+				ip := c.lookupResult
+				lookup = stubLookup(ip)
+			} else if !c.allowPrivate {
+				// For tests where allowPrivate=false and the URL has a bare IP,
+				// no DNS lookup happens — ValidateLLMBaseURL does ip.IsPrivate
+				// directly. Pass nil to use real DNS only for hostname cases.
+				lookup = nil
+			}
+			// For bare IPs in the URL, ValidateLLMBaseURL parses them directly
+			// without a DNS lookup — the stub is only needed for hostname tests.
+			err := ValidateLLMBaseURL(c.url, c.allowPrivate, lookup)
+			if c.wantErr == nil {
+				if err != nil {
+					t.Errorf("want no error, got: %v", err)
+				}
+			} else {
+				if !errors.Is(err, c.wantErr) {
+					t.Errorf("want %v, got: %v", c.wantErr, err)
+				}
+			}
+		})
+	}
+}
+
+// TestValidateLLMBaseURL_EmptyAccepted verifies empty URL is a no-op.
+func TestValidateLLMBaseURL_EmptyAccepted(t *testing.T) {
+	if err := ValidateLLMBaseURL("", false, nil); err != nil {
+		t.Fatalf("empty URL should be accepted, got: %v", err)
+	}
+}

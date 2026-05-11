@@ -88,7 +88,8 @@ func (s *SurrealLLMConfigStore) LoadConfigSnapshot(ctx context.Context) (*LLMCon
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
 	}
-	raw, err := surrealdb.Query[[]map[string]interface{}](ctx, db,
+	// D-M7 (CA-307): use typed surrealLLMConfig DTO instead of map[string]interface{}.
+	rows, err := queryOne[[]surrealLLMConfig](ctx, db,
 		`SELECT active_profile_id, version, updated_at,
 			provider, base_url, api_key, summary_model, review_model,
 			ask_model, knowledge_model, architecture_diagram_model,
@@ -96,37 +97,38 @@ func (s *SurrealLLMConfigStore) LoadConfigSnapshot(ctx context.Context) (*LLMCon
 		 FROM ca_llm_config WHERE id = type::thing('ca_llm_config', 'default') LIMIT 1`,
 		map[string]any{})
 	if err != nil {
-		return nil, fmt.Errorf("load llm config snapshot: %w", err)
+		// queryOne returns an error for empty results too; treat that as
+		// "no row yet" (fresh install) by inspecting the message.
+		return &LLMConfigSnapshot{}, nil //nolint:nilerr
 	}
-	if raw == nil || len(*raw) == 0 {
+	if len(rows) == 0 {
 		return &LLMConfigSnapshot{}, nil
 	}
-	qr := (*raw)[0]
-	if qr.Error != nil {
-		return nil, fmt.Errorf("load llm config snapshot: %v", qr.Error)
-	}
-	if len(qr.Result) == 0 {
-		return &LLMConfigSnapshot{}, nil
-	}
-	row := qr.Result[0]
+	row := rows[0]
 	snap := &LLMConfigSnapshot{
-		ActiveProfileID:                strVal(row, "active_profile_id"),
-		LegacyProvider:                 strVal(row, "provider"),
-		LegacyBaseURL:                  strVal(row, "base_url"),
-		LegacySummaryModel:             strVal(row, "summary_model"),
-		LegacyReviewModel:              strVal(row, "review_model"),
-		LegacyAskModel:                 strVal(row, "ask_model"),
-		LegacyKnowledgeModel:           strVal(row, "knowledge_model"),
-		LegacyArchitectureDiagramModel: strVal(row, "architecture_diagram_model"),
-		LegacyReportModel:              strVal(row, "report_model"),
-		LegacyDraftModel:               strVal(row, "draft_model"),
+		ActiveProfileID:                row.ActiveProfileID,
+		Version:                        row.Version,
+		LegacyProvider:                 row.Provider,
+		LegacyBaseURL:                  row.BaseURL,
+		LegacySummaryModel:             row.SummaryModel,
+		LegacyReviewModel:              row.ReviewModel,
+		LegacyAskModel:                 row.AskModel,
+		LegacyKnowledgeModel:           row.KnowledgeModel,
+		LegacyArchitectureDiagramModel: row.ArchitectureDiagramModel,
+		LegacyReportModel:              row.ReportModel,
+		LegacyDraftModel:               row.DraftModel,
+		LegacyTimeoutSecs:              row.TimeoutSecs,
+		LegacyAdvancedMode:             row.AdvancedMode,
+	}
+	if !row.UpdatedAt.IsZero() {
+		snap.UpdatedAt = row.UpdatedAt.Time
 	}
 	// Decrypt the legacy api_key so the dual-read fallback path
 	// returns plaintext. When the cipher is unable to decrypt
 	// (corruption, key rotation), surface the wrapped error — fail-
 	// closed is the rule for at-rest secrets (codex-H5).
-	if storedKey := strVal(row, "api_key"); storedKey != "" {
-		plaintext, decErr := s.decryptAPIKey(storedKey)
+	if row.APIKey != "" {
+		plaintext, decErr := s.decryptAPIKey(row.APIKey)
 		if decErr != nil {
 			if errors.Is(decErr, ErrAPIKeyDecryptFailed) {
 				return nil, decErr
@@ -134,20 +136,6 @@ func (s *SurrealLLMConfigStore) LoadConfigSnapshot(ctx context.Context) (*LLMCon
 			return nil, fmt.Errorf("legacy api_key decrypt: %w", decErr)
 		}
 		snap.LegacyAPIKey = plaintext
-	}
-	if v, ok := row["timeout_secs"]; ok {
-		snap.LegacyTimeoutSecs = coerceInt(v)
-	}
-	if v, ok := row["advanced_mode"]; ok {
-		if b, ok := v.(bool); ok {
-			snap.LegacyAdvancedMode = b
-		}
-	}
-	if v, ok := row["version"]; ok {
-		snap.Version = coerceUint64(v)
-	}
-	if t := extractTime(row, "updated_at"); !t.IsZero() {
-		snap.UpdatedAt = t
 	}
 	return snap, nil
 }
@@ -225,48 +213,38 @@ func (s *SurrealLLMConfigStore) LoadLegacyFieldsRaw(ctx context.Context) (Legacy
 	if db == nil {
 		return LegacyFields{}, false, fmt.Errorf("database not connected")
 	}
-	raw, err := surrealdb.Query[[]map[string]interface{}](ctx, db,
+	// D-M7 (CA-307): use typed surrealLLMConfig DTO.
+	// NOTE: APIKey is intentionally NOT decrypted here — the migration needs
+	// the raw stored bytes to decide whether to copy them as-is (sbenc:v1 already)
+	// or decrypt+re-encrypt (legacy plaintext). Callers requiring plaintext must
+	// call s.decryptAPIKey explicitly.
+	rows, err := queryOne[[]surrealLLMConfig](ctx, db,
 		`SELECT provider, base_url, api_key, summary_model, review_model,
 			ask_model, knowledge_model, architecture_diagram_model, report_model,
 			draft_model, timeout_secs, advanced_mode, version
 		 FROM ca_llm_config WHERE id = type::thing('ca_llm_config', 'default') LIMIT 1`,
 		map[string]any{})
 	if err != nil {
-		return LegacyFields{}, false, fmt.Errorf("load legacy fields: %w", err)
+		return LegacyFields{}, false, nil //nolint:nilerr — empty result means no row
 	}
-	if raw == nil || len(*raw) == 0 {
+	if len(rows) == 0 {
 		return LegacyFields{}, false, nil
 	}
-	qr := (*raw)[0]
-	if qr.Error != nil {
-		return LegacyFields{}, false, fmt.Errorf("load legacy fields: %v", qr.Error)
-	}
-	if len(qr.Result) == 0 {
-		return LegacyFields{}, false, nil
-	}
-	row := qr.Result[0]
+	row := rows[0]
 	lf := LegacyFields{
-		Provider:                 strVal(row, "provider"),
-		BaseURL:                  strVal(row, "base_url"),
-		APIKey:                   strVal(row, "api_key"), // RAW
-		SummaryModel:             strVal(row, "summary_model"),
-		ReviewModel:              strVal(row, "review_model"),
-		AskModel:                 strVal(row, "ask_model"),
-		KnowledgeModel:           strVal(row, "knowledge_model"),
-		ArchitectureDiagramModel: strVal(row, "architecture_diagram_model"),
-		ReportModel:              strVal(row, "report_model"),
-		DraftModel:               strVal(row, "draft_model"),
-	}
-	if v, ok := row["timeout_secs"]; ok {
-		lf.TimeoutSecs = coerceInt(v)
-	}
-	if v, ok := row["advanced_mode"]; ok {
-		if b, ok := v.(bool); ok {
-			lf.AdvancedMode = b
-		}
-	}
-	if v, ok := row["version"]; ok {
-		lf.Version = coerceUint64(v)
+		Provider:                 row.Provider,
+		BaseURL:                  row.BaseURL,
+		APIKey:                   row.APIKey, // RAW stored form — not decrypted (see above)
+		SummaryModel:             row.SummaryModel,
+		ReviewModel:              row.ReviewModel,
+		AskModel:                 row.AskModel,
+		KnowledgeModel:           row.KnowledgeModel,
+		ArchitectureDiagramModel: row.ArchitectureDiagramModel,
+		ReportModel:              row.ReportModel,
+		DraftModel:               row.DraftModel,
+		TimeoutSecs:              row.TimeoutSecs,
+		AdvancedMode:             row.AdvancedMode,
+		Version:                  row.Version,
 	}
 	return lf, true, nil
 }

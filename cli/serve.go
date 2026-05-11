@@ -586,7 +586,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// live (in-memory mode has no persistent tokens from a previous version).
 	enumerateAdminTokens(context.Background(), tokenStore)
 
-	localAuth := auth.NewLocalAuth(jwtMgr, authPersister)
+	localAuth := auth.NewLocalAuthWithOptions(jwtMgr, auth.LocalAuthOptions{
+		PasswordMinLength: cfg.Auth.PasswordMinLength,
+	}, authPersister)
 
 	// Build the runtime LLM-config resolver. cfg.LLM is the env-bootstrap
 	// layer; the workspace store is layer 2. Per-repo override (slice 5)

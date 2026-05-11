@@ -130,6 +130,25 @@ The API responds with `Strict-Transport-Security: max-age=31536000; includeSubDo
 - Bare HTTP deployments (development, local docker compose): HSTS still reaches the browser. Browsers ignore HSTS on plain-HTTP origins, so this is harmless. But if the same hostname is later served over HTTPS, HSTS will be in effect.
 - No `preload` directive is set. Operators wanting preload must submit their domain manually at https://hstspreload.org/ AFTER confirming all subdomains serve over HTTPS.
 
+### LLM Base URL SSRF Hardening
+
+By default, `Config.LLM.AllowPrivateBaseURL=true` to support local LLM
+providers (Ollama on localhost, vLLM on internal cluster IPs). On
+multi-tenant SaaS deployments where any admin user could exfiltrate
+internal-network data via a crafted base URL, set:
+
+```toml
+[llm]
+allow_private_base_url = false
+```
+
+Or via env var: `SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL=false`. The
+worker enforces the same flag via `SOURCEBRIDGE_WORKER_LLM_ALLOW_PRIVATE_BASE_URL=false`.
+
+Note: the validator runs at save time only. Full request-time SSRF defense
+(custom dialer with per-IP re-validation on each LLM call) is a separate
+hardening item.
+
 ### Webhook Secrets (Optional)
 
 If you receive webhooks from GitHub or GitLab:

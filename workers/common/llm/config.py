@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
+import socket
+from urllib.parse import urlparse
 from typing import TYPE_CHECKING
 
 from workers.common.config import (
@@ -21,6 +24,102 @@ if TYPE_CHECKING:
 
 def _env_truthy(value: str) -> bool:
     return value.strip().lower() in ("true", "1", "yes", "on")
+
+
+# CA-214: LLM base-URL SSRF guard — mirrors Go's pathutil.ValidateLLMBaseURL.
+
+# CGNAT: 100.64.0.0/10 (RFC 6598) — not classified as private by stdlib.
+_CGNAT_NETWORK = ipaddress.IPv4Network("100.64.0.0/10")
+
+
+def _is_private_or_internal_ip(addr: str) -> bool:
+    """Return True if ``addr`` is in any SSRF-denylist range.
+
+    Covers: RFC1918 private, loopback, link-local, CGNAT (100.64/10),
+    ULA (fc00::/7), unspecified (0.0.0.0/::), multicast.
+    """
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return False
+    if (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_unspecified
+        or ip.is_multicast
+        or ip.is_reserved
+    ):
+        return True
+    # CGNAT: ipaddress.is_private does not cover 100.64.0.0/10 in older Pythons.
+    if isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT_NETWORK:
+        return True
+    return False
+
+
+def validate_llm_base_url(url: str, allow_private: bool) -> None:
+    """Validate an LLM base URL for SSRF risk.
+
+    Defense scope: this is a SAVE-TIME-ONLY guard. The validator resolves the
+    hostname and rejects if any resolved IP is private/internal (when
+    allow_private is False). A DNS rebind attacker can pass a public IP at
+    save time and switch the record to 169.254.169.254 before the next
+    request, bypassing the check entirely. Full defense requires a custom
+    HTTP client that re-validates the resolved IP on every LLM call at
+    request time. That is intentionally out of scope here; runtime hardening
+    is tracked as a separate ticket. The save-time check remains valuable as
+    a first layer.
+
+    Mirrors ``pathutil.ValidateLLMBaseURL`` in Go:
+    - Empty URL is accepted (means "use provider default").
+    - Scheme must be ``http`` or ``https``.
+    - When ``allow_private=False``, the host must not resolve to any
+      private/internal IP address.
+
+    Raises ``ValueError`` with a descriptive message on rejection.
+    """
+    if not url:
+        return
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(
+            f"LLM base URL scheme not allowed ({parsed.scheme!r}); use http:// or https://"
+        )
+    host = parsed.hostname or ""
+    if not host:
+        raise ValueError("LLM base URL is missing a host")
+    if allow_private:
+        return
+    # If host is a bare IP, check directly.
+    try:
+        addr = ipaddress.ip_address(host)
+        if _is_private_or_internal_ip(str(addr)):
+            raise ValueError(
+                f"LLM base URL hostname resolves to a private IP ({host}); "
+                "set SOURCEBRIDGE_WORKER_LLM_ALLOW_PRIVATE_BASE_URL=true for "
+                "self-hosted internal providers"
+            )
+        return
+    except ValueError as exc:
+        # Re-raise our own error messages; swallow ipaddress.ip_address parse errors.
+        if "LLM base URL" in str(exc):
+            raise
+    # DNS resolution.
+    try:
+        results = socket.getaddrinfo(host, None)
+    except OSError as exc:
+        raise ValueError(
+            f"LLM base URL hostname is unresolvable ({host}): {exc}"
+        ) from exc
+    for _family, _type, _proto, _canonname, sockaddr in results:
+        addr_str = sockaddr[0]
+        if _is_private_or_internal_ip(addr_str):
+            raise ValueError(
+                f"LLM base URL hostname resolves to a private IP "
+                f"({host} → {addr_str}); set "
+                "SOURCEBRIDGE_WORKER_LLM_ALLOW_PRIVATE_BASE_URL=true for "
+                "self-hosted internal providers"
+            )
 
 
 def _resolve_disable_thinking(*, report: bool = False) -> bool:

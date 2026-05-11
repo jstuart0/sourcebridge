@@ -59,6 +59,14 @@ data:
   SOURCEBRIDGE_WORKER_EMBEDDING_BASE_URL: "http://no-embedding-configured-set-via-overlay.invalid:0"
   SOURCEBRIDGE_WORKER_EMBEDDING_MODEL: "nomic-embed-text"
   SOURCEBRIDGE_WORKER_EMBEDDING_DIMENSION: "768"
+  # CA-214: LLM base URL SSRF guard. Default "true" preserves current behavior
+  # (Ollama on localhost is allowed). Set to "false" on multi-tenant public
+  # deployments to block LLM endpoint URLs that resolve to private/internal IPs.
+  SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL: "true"
+  SOURCEBRIDGE_WORKER_LLM_ALLOW_PRIVATE_BASE_URL: "true"
+  # CA-215: Minimum admin password length. Default 8 preserves current behavior.
+  # Increase (e.g. "12") to enforce a stronger minimum.
+  SOURCEBRIDGE_AUTH_PASSWORD_MIN_LENGTH: "8"
   # Knowledge generation pressure controls
   SOURCEBRIDGE_KNOWLEDGE_MAX_CONCURRENCY: "1"
   SOURCEBRIDGE_HIERARCHICAL_CONCURRENCY: "3"

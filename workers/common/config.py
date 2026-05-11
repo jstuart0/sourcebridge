@@ -195,6 +195,11 @@ class WorkerConfig(BaseSettings):
     # See plan 2026-05-06-deliver-worker-llm-concurrency Decision 12.
     llm_max_concurrent_calls: int = 0
 
+    # CA-214: LLM base URL SSRF guard. Default True so existing deployments
+    # running Ollama on localhost continue working without config changes.
+    # Multi-tenant public operators set SOURCEBRIDGE_WORKER_LLM_ALLOW_PRIVATE_BASE_URL=false.
+    llm_allow_private_base_url: bool = True
+
     # gRPC auth
     grpc_auth_secret: str = ""
 

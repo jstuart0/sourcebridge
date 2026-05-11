@@ -32,6 +32,16 @@ llm:
   model: claude-sonnet-4-20250514
   # Base URL override (leave empty for cloud providers; set for Ollama/LM Studio)
   baseUrl: ""
+  # CA-214: LLM base URL SSRF guard. Default true preserves current behavior
+  # (Ollama on localhost is allowed). Set to false on multi-tenant public
+  # deployments where users can supply LLM base URLs via the admin UI.
+  allowPrivateBaseURL: true
+
+# -- Auth configuration (CA-215)
+auth:
+  # Minimum admin password length. Default 8 preserves current behavior.
+  # Increase to enforce a stronger floor (e.g. 12 or 16).
+  passwordMinLength: 8
 
 # -- Top-level embedding configuration
 embedding:

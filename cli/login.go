@@ -138,11 +138,12 @@ func defaultPasswordReader(prompt string) (string, error) {
 	return strings.TrimSpace(string(raw)), nil
 }
 
-// desktopInfoResponse mirrors GET /auth/desktop/info.
+// desktopInfoResponse mirrors GET /auth/desktop/info and GET /auth/info.
 type desktopInfoResponse struct {
-	LocalAuth   bool `json:"local_auth"`
-	SetupDone   bool `json:"setup_done"`
-	OIDCEnabled bool `json:"oidc_enabled"`
+	LocalAuth         bool `json:"local_auth"`
+	SetupDone         bool `json:"setup_done"`
+	OIDCEnabled       bool `json:"oidc_enabled"`
+	PasswordMinLength int  `json:"password_min_length"` // CA-215: 0 means server default (8)
 }
 
 // desktopOIDCStartResp mirrors POST /auth/desktop/oidc/start.
@@ -317,13 +318,17 @@ func validateMethod(method string, info *desktopInfoResponse, serverURL string) 
 			)
 		}
 		if !info.SetupDone {
+			minLen := info.PasswordMinLength
+			if minLen <= 0 {
+				minLen = 8 // fall back to hardcoded default if server is old
+			}
 			return fmt.Errorf(
 				"this server hasn't been initialized yet.\n"+
 					"Open %s/login in a browser and set the admin password, then re-run `sourcebridge login`.\n"+
 					"For headless / CI environments, set up via the API:\n"+
 					"  curl -X POST %s/auth/setup -H 'Content-Type: application/json' -d '{\"password\":\"YOUR_ADMIN_PASSWORD\"}'\n"+
-					"(password must be at least 8 characters).",
-				serverURL, serverURL,
+					"(password must be at least %d characters).",
+				serverURL, serverURL, minLen,
 			)
 		}
 	}
