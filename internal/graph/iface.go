@@ -132,8 +132,8 @@ type GraphStore interface {
 	Stats(ctx context.Context) map[string]int
 
 	// Requirement operations
-	StoreRequirement(ctx context.Context, repoID string, req *StoredRequirement)
-	StoreRequirements(ctx context.Context, repoID string, reqs []*StoredRequirement) int
+	StoreRequirement(ctx context.Context, repoID string, req *StoredRequirement) error
+	StoreRequirements(ctx context.Context, repoID string, reqs []*StoredRequirement) (int, error)
 	GetRequirements(ctx context.Context, repoID string, limit, offset int) ([]*StoredRequirement, int)
 	GetRequirement(ctx context.Context, id string) *StoredRequirement
 	GetRequirementsByIDs(ctx context.Context, ids []string) map[string]*StoredRequirement

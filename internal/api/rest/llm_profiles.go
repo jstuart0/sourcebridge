@@ -56,7 +56,7 @@ func llmListActiveFilterAllSubsystems() llm.ListFilter {
 // resolution at field-resolve time). The same adapter implementation
 // serves both REST and GraphQL — the rest.Server already holds the
 // adapter; the router exposes it to the GraphQL resolver via a small
-// wrapper that satisfies graphql.LLMProfileLookup.
+// wrapper that satisfies appdeps.LLMProfileLookup.
 type LLMProfileStoreAdapter interface {
 	ListProfiles(ctx context.Context) ([]ProfileResponse, error)
 	GetProfile(ctx context.Context, id string) (*ProfileResponse, error)

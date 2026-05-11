@@ -1431,7 +1431,7 @@ func (s *Store) VerifyLink(_ context.Context, linkID string, verified bool, veri
 }
 
 // StoreRequirement adds a requirement to the store.
-func (s *Store) StoreRequirement(_ context.Context, repoID string, req *StoredRequirement) {
+func (s *Store) StoreRequirement(_ context.Context, repoID string, req *StoredRequirement) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1443,26 +1443,19 @@ func (s *Store) StoreRequirement(_ context.Context, repoID string, req *StoredRe
 
 	s.requirements[req.ID] = req
 	s.repoRequirements[repoID] = append(s.repoRequirements[repoID], req.ID)
+	return nil
 }
 
 // StoreRequirements adds multiple requirements and returns the count stored.
-func (s *Store) StoreRequirements(_ context.Context, repoID string, reqs []*StoredRequirement) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	now := time.Now()
+func (s *Store) StoreRequirements(ctx context.Context, repoID string, reqs []*StoredRequirement) (int, error) {
 	count := 0
 	for _, req := range reqs {
-		req.ID = uuid.New().String()
-		req.RepoID = repoID
-		req.CreatedAt = now
-		req.UpdatedAt = now
-
-		s.requirements[req.ID] = req
-		s.repoRequirements[repoID] = append(s.repoRequirements[repoID], req.ID)
+		if err := s.StoreRequirement(ctx, repoID, req); err != nil {
+			return count, err
+		}
 		count++
 	}
-	return count
+	return count, nil
 }
 
 // GetRequirements returns requirements for a repository with pagination.

@@ -430,11 +430,13 @@ func TestFilteredIntegrationVerifyLinkLegitimate(t *testing.T) {
 	repoA := seedRepo(t, store, "T34-repo-A")
 
 	// Seed a requirement and a link for it.
-	store.StoreRequirement(t.Context(), repoA, &graph.StoredRequirement{
+	if err := store.StoreRequirement(t.Context(), repoA, &graph.StoredRequirement{
 		ID:         "req-T34",
 		ExternalID: "T34-EXT-001",
 		Title:      "T34 req",
-	})
+	}); err != nil {
+		t.Fatalf("StoreRequirement: %v", err)
+	}
 
 	// Seed a symbol.
 	symResult := &indexer.IndexResult{

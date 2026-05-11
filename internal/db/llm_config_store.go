@@ -213,14 +213,7 @@ func (s *SurrealLLMConfigStore) LoadLLMConfig(ctx context.Context) (*LLMConfigRe
 	rec.APIKey = plaintext
 
 	if v, ok := row["timeout_secs"]; ok {
-		switch t := v.(type) {
-		case float64:
-			rec.TimeoutSecs = int(t)
-		case uint64:
-			rec.TimeoutSecs = int(t)
-		case int:
-			rec.TimeoutSecs = t
-		}
+		rec.TimeoutSecs = coerceInt(v)
 	}
 	if v, ok := row["advanced_mode"]; ok {
 		if b, ok := v.(bool); ok {
@@ -228,20 +221,7 @@ func (s *SurrealLLMConfigStore) LoadLLMConfig(ctx context.Context) (*LLMConfigRe
 		}
 	}
 	if v, ok := row["version"]; ok {
-		switch t := v.(type) {
-		case float64:
-			rec.Version = uint64(t)
-		case uint64:
-			rec.Version = t
-		case int64:
-			if t >= 0 {
-				rec.Version = uint64(t)
-			}
-		case int:
-			if t >= 0 {
-				rec.Version = uint64(t)
-			}
-		}
+		rec.Version = coerceUint64(v)
 	}
 	return rec, nil
 }
@@ -280,23 +260,7 @@ func (s *SurrealLLMConfigStore) LoadLLMConfigVersion(ctx context.Context) (uint6
 	if !ok {
 		return 0, nil
 	}
-	switch t := v.(type) {
-	case float64:
-		return uint64(t), nil
-	case uint64:
-		return t, nil
-	case int64:
-		if t < 0 {
-			return 0, nil
-		}
-		return uint64(t), nil
-	case int:
-		if t < 0 {
-			return 0, nil
-		}
-		return uint64(t), nil
-	}
-	return 0, nil
+	return coerceUint64(v), nil
 }
 
 func (s *SurrealLLMConfigStore) SaveLLMConfig(ctx context.Context, rec *LLMConfigRecord) error {

@@ -76,11 +76,13 @@ func newResolverWithRepoAndLink(t *testing.T, rb *recordingBus) (*Resolver, stri
 	}
 
 	// Seed a requirement.
-	store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
+	if err := store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ID:         "req-link-test",
 		ExternalID: "LT-001",
 		Title:      "Link test req",
-	})
+	}); err != nil {
+		t.Fatalf("StoreRequirement: %v", err)
+	}
 
 	// Find the stored symbol.
 	syms := store.GetSymbolsByFile(t.Context(), repo.ID, "main.go")

@@ -1648,7 +1648,7 @@ func (a *llmProfileStoreAdapter) ActiveProfileID(ctx context.Context) (string, e
 	return id, err
 }
 
-// LookupProfileName implements graphql.LLMProfileLookup. Slice 3 of the
+// LookupProfileName implements appdeps.LLMProfileLookup. Slice 3 of the
 // LLM provider profiles plan: the GraphQL per-repo override path needs
 // to (a) validate that a referenced profile exists at mutation time
 // (returning PROFILE_NO_LONGER_EXISTS otherwise) and (b) populate

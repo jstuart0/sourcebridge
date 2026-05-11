@@ -91,7 +91,10 @@ func runImport(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	imported := store.StoreRequirements(cmd.Context(), repoID, storedReqs)
+	imported, err := store.StoreRequirements(cmd.Context(), repoID, storedReqs)
+	if err != nil {
+		return fmt.Errorf("storing requirements: %w", err)
+	}
 
 	if importJSON {
 		enc := json.NewEncoder(os.Stdout)

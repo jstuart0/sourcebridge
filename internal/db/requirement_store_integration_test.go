@@ -36,7 +36,9 @@ func TestIntegration_UpdateRequirementFields_NilPriorityNilTags(t *testing.T) {
 		Priority:    "high",
 		Tags:        []string{"ui", "accessibility"},
 	}
-	store.StoreRequirement(t.Context(), repoID, seed)
+	if err := store.StoreRequirement(t.Context(), repoID, seed); err != nil {
+		t.Fatalf("StoreRequirement: %v", err)
+	}
 	if seed.ID == "" {
 		t.Fatal("StoreRequirement did not populate seed.ID")
 	}

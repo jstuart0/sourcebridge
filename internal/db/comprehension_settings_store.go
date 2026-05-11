@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -379,7 +380,7 @@ func (s *SurrealStore) SetModelCapabilities(ctx context.Context, mc *comprehensi
 	// Build a single SET fragment that appears in BOTH the UPDATE arm and the
 	// CREATE arm of the LET/IF/ELSE statement. Mutating `sets` after this
 	// affects both arms — keep that in mind if extending.
-	setFragment := joinComma(sets)
+	setFragment := strings.Join(sets, ", ")
 
 	sql := fmt.Sprintf(`
 		LET $existing = (SELECT id FROM ca_model_capabilities WHERE model_id = $model_id);

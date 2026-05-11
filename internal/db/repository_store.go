@@ -224,14 +224,7 @@ func (s *SurrealStore) GetFilesPaginated(ctx context.Context, repoID string, pat
 	total := 0
 	if err == nil && len(countRows) > 0 {
 		if v, ok := countRows[0]["total"]; ok {
-			switch vt := v.(type) {
-			case float64:
-				total = int(vt)
-			case int:
-				total = vt
-			case uint64:
-				total = int(vt)
-			}
+			total = coerceInt(v)
 		}
 	}
 
@@ -281,14 +274,7 @@ func (s *SurrealStore) GetSymbols(ctx context.Context, repoID string, query *str
 	total := 0
 	if err == nil && len(countRows) > 0 {
 		if v, ok := countRows[0]["total"]; ok {
-			switch vt := v.(type) {
-			case float64:
-				total = int(vt)
-			case int:
-				total = vt
-			case uint64:
-				total = int(vt)
-			}
+			total = coerceInt(v)
 		}
 	}
 
@@ -582,14 +568,7 @@ func (s *SurrealStore) Stats(ctx context.Context) map[string]int {
 			fmt.Sprintf("SELECT count() AS total FROM %s GROUP ALL", table), nil)
 		if err == nil && len(rows) > 0 {
 			if v, ok := rows[0]["total"]; ok {
-				switch vt := v.(type) {
-				case float64:
-					stats[key] = int(vt)
-				case int:
-					stats[key] = vt
-				case uint64:
-					stats[key] = int(vt)
-				}
+				stats[key] = coerceInt(v)
 			}
 		} else {
 			stats[key] = 0

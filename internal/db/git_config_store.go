@@ -361,27 +361,8 @@ func (s *SurrealGitConfigStore) MigrateGitSecrets(ctx context.Context) error {
 // land here in practice).
 func uintVal(m map[string]interface{}, key string) uint64 {
 	v, ok := m[key]
-	if !ok || v == nil {
+	if !ok {
 		return 0
 	}
-	switch n := v.(type) {
-	case int64:
-		if n < 0 {
-			return 0
-		}
-		return uint64(n)
-	case uint64:
-		return n
-	case int:
-		if n < 0 {
-			return 0
-		}
-		return uint64(n)
-	case float64:
-		if n < 0 {
-			return 0
-		}
-		return uint64(n)
-	}
-	return 0
+	return coerceUint64(v)
 }

@@ -535,7 +535,10 @@ func (r *mutationResolver) ImportRequirements(ctx context.Context, input ImportR
 		})
 	}
 
-	imported := r.getStore(ctx).StoreRequirements(ctx, input.RepositoryID, storedReqs)
+	imported, err := r.getStore(ctx).StoreRequirements(ctx, input.RepositoryID, storedReqs)
+	if err != nil {
+		return nil, fmt.Errorf("storing requirements: %w", err)
+	}
 
 	// Mark knowledge artifacts stale after requirements import
 	knowledgepkg.MarkAllStale(ctx, r.Deps.KnowledgeStore, input.RepositoryID)
@@ -1388,7 +1391,9 @@ func (r *mutationResolver) PromoteDiscoveredRequirement(ctx context.Context, id 
 		Priority:    "medium",
 		Tags:        disc.Keywords,
 	}
-	store.StoreRequirement(ctx, disc.RepoID, req)
+	if err := store.StoreRequirement(ctx, disc.RepoID, req); err != nil {
+		return nil, fmt.Errorf("storing promoted requirement: %w", err)
+	}
 
 	// Mark the discovered requirement as promoted
 	updated := store.PromoteDiscoveredRequirement(ctx, id, req.ID)

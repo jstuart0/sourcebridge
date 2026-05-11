@@ -111,7 +111,9 @@ func runTrace(cmd *cobra.Command, args []string) error {
 				Tags:               req.Tags,
 			})
 		}
-		store.StoreRequirements(cmd.Context(), repo.ID, storedReqs)
+		if _, err := store.StoreRequirements(cmd.Context(), repo.ID, storedReqs); err != nil {
+			return fmt.Errorf("storing requirements: %w", err)
+		}
 	}
 
 	// Find the requirement by external ID

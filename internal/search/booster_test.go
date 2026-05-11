@@ -41,7 +41,9 @@ func TestRequirementBooster_LiftsLinkedSymbols(t *testing.T) {
 	target := syms[0]
 	// Create a requirement + link.
 	req := &graph.StoredRequirement{ID: uuid.New().String(), RepoID: repoID, ExternalID: "REQ-T1", Title: "Test"}
-	s.StoreRequirement(t.Context(), repoID, req)
+	if err := s.StoreRequirement(t.Context(), repoID, req); err != nil {
+		t.Fatalf("StoreRequirement: %v", err)
+	}
 	linkIn := &graph.StoredLink{
 		RequirementID: req.ID,
 		SymbolID:      target.ID,
@@ -87,7 +89,9 @@ func TestRequirementBooster_InvalidateRehydrates(t *testing.T) {
 
 	// Add a link after warming. The cache is now stale.
 	req := &graph.StoredRequirement{ID: uuid.New().String(), RepoID: repoID, ExternalID: "REQ-T2", Title: "T2"}
-	s.StoreRequirement(t.Context(), repoID, req)
+	if err := s.StoreRequirement(t.Context(), repoID, req); err != nil {
+		t.Fatalf("StoreRequirement: %v", err)
+	}
 	s.StoreLink(t.Context(), repoID, &graph.StoredLink{RequirementID: req.ID, SymbolID: syms[0].ID, Confidence: 1.0})
 
 	// Without invalidate the booster uses stale data and does not lift.

@@ -19,53 +19,6 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
 
-// DrainAdmitter is the interface the GraphQL resolver uses to (a) check
-// whether the server is draining and (b) atomically admit on-demand Living
-// Wiki requests to the drain counter. CA-142.
-//
-// The concrete implementation is *rest.serverDrainAdmitter,
-// wired via graphql.Resolver.DrainAdmitter at server construction. Nil
-// means drain protection is not active (embedded mode, tests).
-type DrainAdmitter interface {
-	// IsDraining returns true when the server has received SIGTERM or a
-	// /internal/begin-drain call and is waiting for jobs to finish. Used
-	// by cold-start mutations that do not count toward the on-demand total.
-	IsDraining() bool
-
-	// TryAdmitOnDemand atomically checks whether the server is draining
-	// and, if not, increments the in-flight counter. Returns (token, true)
-	// when admitted, or (nil, false) when the server is draining.
-	//
-	// The check and increment happen under the same mutex that BeginDrain
-	// uses to flip the draining flag, so there is no window between
-	// passing the gate and incrementing the counter. The caller MUST call
-	// token.Release() exactly once (typically via defer) when admitted.
-	TryAdmitOnDemand() (token interface{ Release() }, admitted bool)
-}
-
-// LLMProfileLookup is the narrow read-side interface the GraphQL layer
-// uses to (a) validate that a per-repo override's profileId references
-// an existing profile at save time, and (b) resolve profileName for the
-// RepositoryLLMOverride.profileName field at read time.
-//
-// Slice 3 of the LLM provider profiles plan introduces this. The cli
-// wiring layer (cli/serve.go) implements it on top of the slice-1
-// SurrealLLMProfileStore via a small adapter; tests use an in-memory
-// fake. The interface is intentionally narrow: GraphQL never needs to
-// see profile credentials, so we don't expose api_key, base_url, etc.
-// here — only the existence/name pair.
-//
-// LookupProfileName returns:
-//   - ("Default", true, nil) when the profile exists.
-//   - ("", false, nil) when the profile is missing (deleted). This
-//     drives the PROFILE_NO_LONGER_EXISTS error code on the field +
-//     mutation.
-//   - ("", false, err) on store failures (DB outage etc.) — caller
-//     surfaces a generic error.
-type LLMProfileLookup interface {
-	LookupProfileName(ctx context.Context, profileID string) (name string, exists bool, err error)
-}
-
 // This file will not be regenerated automatically.
 //
 // It serves as dependency injection for your app, add any dependencies you require here.

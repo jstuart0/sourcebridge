@@ -165,11 +165,13 @@ func TestAssemblerEachInsightHasEvidence(t *testing.T) {
 	repo, _ := store.StoreIndexResult(t.Context(), result)
 
 	// Add a requirement and link.
-	store.StoreRequirement(t.Context(), repo.ID, &graph.StoredRequirement{
+	if err := store.StoreRequirement(t.Context(), repo.ID, &graph.StoredRequirement{
 		ID:         "req-1",
 		ExternalID: "REQ-001",
 		Title:      "Must handle API calls",
-	})
+	}); err != nil {
+		t.Fatalf("StoreRequirement: %v", err)
+	}
 
 	assembler := NewAssembler(store)
 	snap, _ := assembler.Assemble(t.Context(), repo.ID, "")

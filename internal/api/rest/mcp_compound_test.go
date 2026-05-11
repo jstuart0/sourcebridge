@@ -367,12 +367,14 @@ func TestCallReviewDiffAgainstRequirements_LinkedRequirementIncluded(t *testing.
 	sess := h.createSession()
 
 	// Store a requirement and link it to PublicFunc.
-	h.store.StoreRequirement(t.Context(), repoID, &graphstore.StoredRequirement{
+	if err := h.store.StoreRequirement(t.Context(), repoID, &graphstore.StoredRequirement{
 		ID:         "cpd-req-1",
 		ExternalID: "CPD-1",
 		Title:      "Compound req title",
 		Priority:   "high",
-	})
+	}); err != nil {
+		t.Fatalf("StoreRequirement: %v", err)
+	}
 	req := h.store.GetRequirementByExternalID(t.Context(), repoID, "CPD-1")
 	if req == nil {
 		t.Fatal("failed to retrieve seeded requirement CPD-1")
@@ -428,12 +430,14 @@ func TestCallReviewDiffAgainstRequirements_UnlinkedPublicSurfaceIncluded(t *test
 
 	// Link Helper (util.go, public) to a requirement so it does NOT appear
 	// in unlinked_public_surface.
-	h.store.StoreRequirement(t.Context(), repoID, &graphstore.StoredRequirement{
+	if err := h.store.StoreRequirement(t.Context(), repoID, &graphstore.StoredRequirement{
 		ID:         "cpd-req-2",
 		ExternalID: "CPD-2",
 		Title:      "Helper requirement",
 		Priority:   "medium",
-	})
+	}); err != nil {
+		t.Fatalf("StoreRequirement: %v", err)
+	}
 	req := h.store.GetRequirementByExternalID(t.Context(), repoID, "CPD-2")
 	if req == nil {
 		t.Fatal("failed to retrieve seeded requirement CPD-2")

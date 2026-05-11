@@ -2,6 +2,7 @@ package graphql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
@@ -11,12 +12,21 @@ import (
 
 const knowledgeWorkerUnavailableMessage = "AI features are unavailable — worker not connected"
 
+// ErrWorkerUnavailable is returned by requireKnowledgeGenerationSupport when
+// no AI worker is connected. Callers can use errors.Is to distinguish this
+// from other errors.
+var ErrWorkerUnavailable = errors.New("worker unavailable")
+
+// ErrKnowledgeStoreUnavailable is returned by requireKnowledgeGenerationSupport
+// when the knowledge store has not been configured.
+var ErrKnowledgeStoreUnavailable = errors.New("knowledge store not configured")
+
 func (r *Resolver) requireKnowledgeGenerationSupport() error {
 	if r.Deps.Worker == nil {
-		return fmt.Errorf("%s", knowledgeWorkerUnavailableMessage)
+		return fmt.Errorf("%s: %w", knowledgeWorkerUnavailableMessage, ErrWorkerUnavailable)
 	}
 	if r.Deps.KnowledgeStore == nil {
-		return fmt.Errorf("knowledge store not configured")
+		return fmt.Errorf("knowledge store not configured: %w", ErrKnowledgeStoreUnavailable)
 	}
 	return nil
 }

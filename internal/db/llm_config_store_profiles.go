@@ -136,16 +136,7 @@ func (s *SurrealLLMConfigStore) LoadConfigSnapshot(ctx context.Context) (*LLMCon
 		snap.LegacyAPIKey = plaintext
 	}
 	if v, ok := row["timeout_secs"]; ok {
-		switch t := v.(type) {
-		case float64:
-			snap.LegacyTimeoutSecs = int(t)
-		case int64:
-			snap.LegacyTimeoutSecs = int(t)
-		case int:
-			snap.LegacyTimeoutSecs = t
-		case uint64:
-			snap.LegacyTimeoutSecs = int(t)
-		}
+		snap.LegacyTimeoutSecs = coerceInt(v)
 	}
 	if v, ok := row["advanced_mode"]; ok {
 		if b, ok := v.(bool); ok {
@@ -153,20 +144,7 @@ func (s *SurrealLLMConfigStore) LoadConfigSnapshot(ctx context.Context) (*LLMCon
 		}
 	}
 	if v, ok := row["version"]; ok {
-		switch t := v.(type) {
-		case float64:
-			snap.Version = uint64(t)
-		case uint64:
-			snap.Version = t
-		case int64:
-			if t >= 0 {
-				snap.Version = uint64(t)
-			}
-		case int:
-			if t >= 0 {
-				snap.Version = uint64(t)
-			}
-		}
+		snap.Version = coerceUint64(v)
 	}
 	if t := extractTime(row, "updated_at"); !t.IsZero() {
 		snap.UpdatedAt = t
@@ -202,20 +180,7 @@ func (s *SurrealLLMConfigStore) LoadActiveProfileIDAndVersion(ctx context.Contex
 	id := strVal(row, "active_profile_id")
 	var version uint64
 	if v, ok := row["version"]; ok {
-		switch t := v.(type) {
-		case float64:
-			version = uint64(t)
-		case uint64:
-			version = t
-		case int64:
-			if t >= 0 {
-				version = uint64(t)
-			}
-		case int:
-			if t >= 0 {
-				version = uint64(t)
-			}
-		}
+		version = coerceUint64(v)
 	}
 	return id, version, nil
 }
@@ -293,16 +258,7 @@ func (s *SurrealLLMConfigStore) LoadLegacyFieldsRaw(ctx context.Context) (Legacy
 		DraftModel:               strVal(row, "draft_model"),
 	}
 	if v, ok := row["timeout_secs"]; ok {
-		switch t := v.(type) {
-		case float64:
-			lf.TimeoutSecs = int(t)
-		case int64:
-			lf.TimeoutSecs = int(t)
-		case int:
-			lf.TimeoutSecs = t
-		case uint64:
-			lf.TimeoutSecs = int(t)
-		}
+		lf.TimeoutSecs = coerceInt(v)
 	}
 	if v, ok := row["advanced_mode"]; ok {
 		if b, ok := v.(bool); ok {
@@ -310,20 +266,7 @@ func (s *SurrealLLMConfigStore) LoadLegacyFieldsRaw(ctx context.Context) (Legacy
 		}
 	}
 	if v, ok := row["version"]; ok {
-		switch t := v.(type) {
-		case float64:
-			lf.Version = uint64(t)
-		case uint64:
-			lf.Version = t
-		case int64:
-			if t >= 0 {
-				lf.Version = uint64(t)
-			}
-		case int:
-			if t >= 0 {
-				lf.Version = uint64(t)
-			}
-		}
+		lf.Version = coerceUint64(v)
 	}
 	return lf, true, nil
 }

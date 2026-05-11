@@ -152,7 +152,10 @@ func TestRequirementStorage(t *testing.T) {
 		})
 	}
 
-	imported := store.StoreRequirements(context.Background(), repo.ID, storedReqs)
+	imported, err := store.StoreRequirements(context.Background(), repo.ID, storedReqs)
+	if err != nil {
+		t.Fatalf("StoreRequirements: %v", err)
+	}
 	if imported != 14 {
 		t.Fatalf("expected 14 imported, got %d", imported)
 	}
@@ -204,9 +207,11 @@ func TestRequirementRemovalWithRepo(t *testing.T) {
 	repo, _ := store.StoreIndexResult(context.Background(), result)
 
 	// Store requirements
-	store.StoreRequirements(context.Background(), repo.ID, []*graph.StoredRequirement{
+	if _, err := store.StoreRequirements(context.Background(), repo.ID, []*graph.StoredRequirement{
 		{ExternalID: "REQ-001", Title: "Test", Description: "Desc"},
-	})
+	}); err != nil {
+		t.Fatalf("StoreRequirements: %v", err)
+	}
 
 	// Verify requirement exists
 	reqs, _ := store.GetRequirements(context.Background(), repo.ID, 100, 0)
@@ -274,11 +279,13 @@ func TestGraphQLQueryRequirements(t *testing.T) {
 	repo, _ := store.StoreIndexResult(context.Background(), result)
 
 	// Store requirements directly
-	store.StoreRequirements(context.Background(), repo.ID, []*graph.StoredRequirement{
+	if _, err := store.StoreRequirements(context.Background(), repo.ID, []*graph.StoredRequirement{
 		{ExternalID: "REQ-001", Title: "System Startup", Description: "Desc 1", Source: "test.md", Priority: "High"},
 		{ExternalID: "REQ-002", Title: "Data Processing", Description: "Desc 2", Source: "test.md", Priority: "Critical"},
 		{ExternalID: "REQ-003", Title: "User Auth", Description: "Desc 3", Source: "test.md", Priority: "Medium"},
-	})
+	}); err != nil {
+		t.Fatalf("StoreRequirements: %v", err)
+	}
 
 	ts, token := setupPhase3Server(t, store)
 
@@ -317,9 +324,11 @@ func TestGraphQLQuerySingleRequirement(t *testing.T) {
 	result, _ := idx.IndexRepository(context.Background(), fixtureRepoPath(), indexer.ReasonOperatorRebuild)
 	repo, _ := store.StoreIndexResult(context.Background(), result)
 
-	store.StoreRequirements(context.Background(), repo.ID, []*graph.StoredRequirement{
+	if _, err := store.StoreRequirements(context.Background(), repo.ID, []*graph.StoredRequirement{
 		{ExternalID: "REQ-100", Title: "Test Req", Description: "A test", Source: "test.md", Priority: "Low"},
-	})
+	}); err != nil {
+		t.Fatalf("StoreRequirements: %v", err)
+	}
 
 	reqs, _ := store.GetRequirements(context.Background(), repo.ID, 1, 0)
 	reqID := reqs[0].ID
@@ -348,9 +357,11 @@ func TestGraphQLImportDuplicateSkip(t *testing.T) {
 	repo, _ := store.StoreIndexResult(context.Background(), result)
 
 	// Pre-store a requirement
-	store.StoreRequirements(context.Background(), repo.ID, []*graph.StoredRequirement{
+	if _, err := store.StoreRequirements(context.Background(), repo.ID, []*graph.StoredRequirement{
 		{ExternalID: "REQ-001", Title: "Existing", Description: "Already here", Source: "old.md"},
-	})
+	}); err != nil {
+		t.Fatalf("StoreRequirements: %v", err)
+	}
 
 	ts, token := setupPhase3Server(t, store)
 
@@ -396,7 +407,9 @@ func TestGraphQLRequirementsPagination(t *testing.T) {
 			Description: "Description",
 		})
 	}
-	store.StoreRequirements(context.Background(), repo.ID, reqs)
+	if _, err := store.StoreRequirements(context.Background(), repo.ID, reqs); err != nil {
+		t.Fatalf("StoreRequirements: %v", err)
+	}
 
 	ts, token := setupPhase3Server(t, store)
 

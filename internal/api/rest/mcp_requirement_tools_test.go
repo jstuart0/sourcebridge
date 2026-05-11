@@ -114,24 +114,15 @@ func seedRequirementLinkingFixture(t *testing.T, h *mcpTestHarness) RequirementL
 	sym5ID := lookupSymID(t, h, repoA.ID, "internal.go", "internalHelper")
 
 	// Store requirements.
-	h.store.StoreRequirement(t.Context(), repoA.ID, &graphstore.StoredRequirement{
-		ID:         "req-1",
-		ExternalID: "TEST-1",
-		Title:      "Create resource endpoint",
-		Priority:   "high",
-	})
-	h.store.StoreRequirement(t.Context(), repoA.ID, &graphstore.StoredRequirement{
-		ID:         "req-2",
-		ExternalID: "TEST-2",
-		Title:      "Parse resource IDs",
-		Priority:   "medium",
-	})
-	h.store.StoreRequirement(t.Context(), repoA.ID, &graphstore.StoredRequirement{
-		ID:         "req-3",
-		ExternalID: "TEST-3",
-		Title:      "Uncovered requirement",
-		Priority:   "low",
-	})
+	for _, req := range []*graphstore.StoredRequirement{
+		{ID: "req-1", ExternalID: "TEST-1", Title: "Create resource endpoint", Priority: "high"},
+		{ID: "req-2", ExternalID: "TEST-2", Title: "Parse resource IDs", Priority: "medium"},
+		{ID: "req-3", ExternalID: "TEST-3", Title: "Uncovered requirement", Priority: "low"},
+	} {
+		if err := h.store.StoreRequirement(t.Context(), repoA.ID, req); err != nil {
+			t.Fatalf("StoreRequirement %s: %v", req.ExternalID, err)
+		}
+	}
 
 	// Resolve stored requirement IDs (store may re-key).
 	req1 := h.store.GetRequirementByExternalID(t.Context(), repoA.ID, "TEST-1")
@@ -394,12 +385,14 @@ func TestMCP_GetRequirementsForSymbol_CrossRepoReqLeakageBlocked(t *testing.T) {
 	// The fixture already has a cross-repo link: Sym6 (repo B) → Req1 (repo A).
 	// For P1 #3 we need the INVERSE: a repo-A symbol linked to a repo-B requirement.
 	// Seed a "foreign" requirement directly into repo B, then link Sym1 (repo A) to it.
-	h.store.StoreRequirement(t.Context(), fix.RepoBID, &graphstore.StoredRequirement{
+	if err := h.store.StoreRequirement(t.Context(), fix.RepoBID, &graphstore.StoredRequirement{
 		ID:         "foreign-req-1",
 		ExternalID: "FOREIGN-1",
 		Title:      "Foreign repo B requirement — must not leak",
 		Priority:   "high",
-	})
+	}); err != nil {
+		t.Fatalf("StoreRequirement FOREIGN-1: %v", err)
+	}
 	foreignReq := h.store.GetRequirementByExternalID(t.Context(), fix.RepoBID, "FOREIGN-1")
 	if foreignReq == nil {
 		t.Fatal("failed to retrieve foreign requirement from repo B")
@@ -1160,10 +1153,12 @@ func TestMCP_GetUncoveredRequirements_ScanTruncated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StoreIndexResult: %v", err)
 	}
-	realStore.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
+	if err := realStore.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ID:    "tr-req-1",
 		Title: "Truncation test requirement",
-	})
+	}); err != nil {
+		t.Fatalf("StoreRequirement: %v", err)
+	}
 
 	// Wire the handler with the wrapping store.
 	wrappedStore := truncatingGraphStore{realStore}
@@ -1269,15 +1264,15 @@ func seedChangedReqsFixture(t *testing.T, h *mcpTestHarness) changedReqsFixture 
 	parseIDSymID := lookupSymID(t, h, repo.ID, "utils.go", "ParseID")
 	formatOutputID := lookupSymID(t, h, repo.ID, "utils.go", "FormatOutput")
 
-	h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
-		ID: "cr-req-1", ExternalID: "CR-1", Title: "Create endpoint", Priority: "high",
-	})
-	h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
-		ID: "cr-req-2", ExternalID: "CR-2", Title: "Delete and parse", Priority: "medium",
-	})
-	h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
-		ID: "cr-req-3", ExternalID: "CR-3", Title: "Uncovered req", Priority: "low",
-	})
+	for _, req := range []*graphstore.StoredRequirement{
+		{ID: "cr-req-1", ExternalID: "CR-1", Title: "Create endpoint", Priority: "high"},
+		{ID: "cr-req-2", ExternalID: "CR-2", Title: "Delete and parse", Priority: "medium"},
+		{ID: "cr-req-3", ExternalID: "CR-3", Title: "Uncovered req", Priority: "low"},
+	} {
+		if err := h.store.StoreRequirement(t.Context(), repo.ID, req); err != nil {
+			t.Fatalf("StoreRequirement %s: %v", req.ExternalID, err)
+		}
+	}
 
 	req1 := h.store.GetRequirementByExternalID(t.Context(), repo.ID, "CR-1")
 	req2 := h.store.GetRequirementByExternalID(t.Context(), repo.ID, "CR-2")

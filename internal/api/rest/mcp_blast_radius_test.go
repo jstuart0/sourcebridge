@@ -137,9 +137,11 @@ func seedBlastRadiusFixture(t *testing.T, h *mcpTestHarness) blastRadiusFixture 
 	testLoginID := lookupSymID(t, h, repo.ID, "auth/service_test.go", "TestLogin")
 
 	// Store a requirement linked to Login.
-	h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
+	if err := h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ExternalID: "BR-1", Title: "Login must be secured",
-	})
+	}); err != nil {
+		t.Fatalf("StoreRequirement: %v", err)
+	}
 	reqs, _ := h.store.GetRequirements(t.Context(), repo.ID, 10, 0)
 	req1ID := ""
 	for _, r := range reqs {

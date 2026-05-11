@@ -41,7 +41,9 @@ func setupPhase4Store(t *testing.T) (*graph.Store, *graph.Repository) {
 			AcceptanceCriteria: req.AcceptanceCriteria,
 		})
 	}
-	store.StoreRequirements(context.Background(), repo.ID, storedReqs)
+	if _, err := store.StoreRequirements(context.Background(), repo.ID, storedReqs); err != nil {
+		t.Fatalf("StoreRequirements: %v", err)
+	}
 
 	return store, repo
 }

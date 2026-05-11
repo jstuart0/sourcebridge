@@ -179,15 +179,16 @@ func (f *TenantFilteredStore) SearchContent(ctx context.Context, repoID, query s
 	return f.inner.SearchContent(ctx, repoID, query, limit)
 }
 
-func (f *TenantFilteredStore) StoreRequirement(ctx context.Context, repoID string, req *StoredRequirement) {
-	if f.hasAccess(repoID) {
-		f.inner.StoreRequirement(ctx, repoID, req)
+func (f *TenantFilteredStore) StoreRequirement(ctx context.Context, repoID string, req *StoredRequirement) error {
+	if !f.hasAccess(repoID) {
+		return nil
 	}
+	return f.inner.StoreRequirement(ctx, repoID, req)
 }
 
-func (f *TenantFilteredStore) StoreRequirements(ctx context.Context, repoID string, reqs []*StoredRequirement) int {
+func (f *TenantFilteredStore) StoreRequirements(ctx context.Context, repoID string, reqs []*StoredRequirement) (int, error) {
 	if !f.hasAccess(repoID) {
-		return 0
+		return 0, nil
 	}
 	return f.inner.StoreRequirements(ctx, repoID, reqs)
 }

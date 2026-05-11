@@ -292,14 +292,7 @@ func (s *SurrealDB) Migrate(ctx context.Context, migrationsDir string) error {
 			rows := qr.Result
 			if len(rows) > 0 {
 				if v, ok := rows[0]["version"]; ok {
-					switch vt := v.(type) {
-					case float64:
-						appliedVersion = int(vt)
-					case int:
-						appliedVersion = vt
-					case uint64:
-						appliedVersion = int(vt)
-					}
+					appliedVersion = coerceInt(v)
 				}
 			}
 		}

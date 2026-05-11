@@ -134,12 +134,16 @@ func seedChangeImpactFixture(t *testing.T, h *mcpTestHarness) changeImpactFixtur
 	testSymID := lookupSymID(t, h, repo.ID, "service_test.go", "TestHandleCreate")
 
 	// Requirements.
-	h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
+	if err := h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ExternalID: "CI-1", Title: "Create handler requirement",
-	})
-	h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
+	}); err != nil {
+		t.Fatalf("StoreRequirement CI-1: %v", err)
+	}
+	if err := h.store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ExternalID: "CI-2", Title: "Helper requirement",
-	})
+	}); err != nil {
+		t.Fatalf("StoreRequirement CI-2: %v", err)
+	}
 	reqs, _ := h.store.GetRequirements(t.Context(), repo.ID, 10, 0)
 	req1ID, req2ID := "", ""
 	for _, r := range reqs {

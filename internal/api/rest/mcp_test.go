@@ -281,13 +281,15 @@ func newTestHarness(t *testing.T) *mcpTestHarness {
 	}
 	firstSymbolID := symbols[0].ID
 
-	store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
+	if err := store.StoreRequirement(t.Context(), repo.ID, &graphstore.StoredRequirement{
 		ExternalID:  "PROJ-101",
 		Title:       "Handle HTTP requests",
 		Description: "The system must handle HTTP requests with proper error handling.",
 		Priority:    "high",
 		Tags:        []string{"api", "http"},
-	})
+	}); err != nil {
+		t.Fatalf("StoreRequirement: %v", err)
+	}
 	reqs, _ := store.GetRequirements(t.Context(), repo.ID, 1, 0)
 	if len(reqs) == 0 {
 		t.Fatal("failed to store test requirement")
@@ -953,11 +955,13 @@ func TestMCP_GetRequirements_Pagination(t *testing.T) {
 
 	// Add more requirements
 	for i := 2; i <= 15; i++ {
-		h.store.StoreRequirement(t.Context(), h.repoID, &graphstore.StoredRequirement{
+		if err := h.store.StoreRequirement(t.Context(), h.repoID, &graphstore.StoredRequirement{
 			ID:     fmt.Sprintf("req-%d", i),
 			RepoID: h.repoID,
 			Title:  fmt.Sprintf("Requirement %d", i),
-		})
+		}); err != nil {
+			t.Fatalf("StoreRequirement %d: %v", i, err)
+		}
 	}
 
 	resp := h.sendRPC(sess, 3, "tools/call", map[string]interface{}{

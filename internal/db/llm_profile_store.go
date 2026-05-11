@@ -317,16 +317,7 @@ func (s *SurrealLLMProfileStore) rowToProfile(row map[string]interface{}) (*Prof
 	p.APIKey = plaintext
 
 	if v, ok := row["timeout_secs"]; ok {
-		switch t := v.(type) {
-		case float64:
-			p.TimeoutSecs = int(t)
-		case uint64:
-			p.TimeoutSecs = int(t)
-		case int64:
-			p.TimeoutSecs = int(t)
-		case int:
-			p.TimeoutSecs = t
-		}
+		p.TimeoutSecs = coerceInt(v)
 	}
 	if v, ok := row["advanced_mode"]; ok {
 		if b, ok := v.(bool); ok {
@@ -334,20 +325,7 @@ func (s *SurrealLLMProfileStore) rowToProfile(row map[string]interface{}) (*Prof
 		}
 	}
 	if v, ok := row["last_legacy_version_consumed"]; ok {
-		switch t := v.(type) {
-		case float64:
-			p.LastLegacyVersionConsumed = uint64(t)
-		case uint64:
-			p.LastLegacyVersionConsumed = t
-		case int64:
-			if t >= 0 {
-				p.LastLegacyVersionConsumed = uint64(t)
-			}
-		case int:
-			if t >= 0 {
-				p.LastLegacyVersionConsumed = uint64(t)
-			}
-		}
+		p.LastLegacyVersionConsumed = coerceUint64(v)
 	}
 	if t := extractTime(row, "created_at"); !t.IsZero() {
 		p.CreatedAt = t
@@ -356,19 +334,8 @@ func (s *SurrealLLMProfileStore) rowToProfile(row map[string]interface{}) (*Prof
 		p.UpdatedAt = t
 	}
 	if v, ok := row["max_concurrent_calls"]; ok && v != nil {
-		switch t := v.(type) {
-		case float64:
-			iv := int(t)
-			p.MaxConcurrentCalls = &iv
-		case uint64:
-			iv := int(t)
-			p.MaxConcurrentCalls = &iv
-		case int64:
-			iv := int(t)
-			p.MaxConcurrentCalls = &iv
-		case int:
-			p.MaxConcurrentCalls = &t
-		}
+		iv := coerceInt(v)
+		p.MaxConcurrentCalls = &iv
 	}
 	return p, nil
 }

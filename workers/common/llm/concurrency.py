@@ -74,7 +74,8 @@ log = structlog.get_logger()
 # ──────────────────────────────────────────────────────────────────────────────
 # Sentinel: uncapped defaults for Phase 1 / kill-switch-off behavior.
 # Phase 3 replaces these with the real caps from Decision 6.
-_UNCAPPED: int = sys.maxsize
+UNCAPPED_SENTINEL: int = sys.maxsize
+_UNCAPPED = UNCAPPED_SENTINEL  # deprecated, will be removed
 
 # Providers that share one host-level semaphore across LLM + embedding kinds.
 _HOST_GATED_PROVIDERS: frozenset[str] = frozenset(

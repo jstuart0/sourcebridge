@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,10 +21,10 @@ import (
 // ---------------------------------------------------------------------------
 
 // StoreRequirement adds a requirement to the store.
-func (s *SurrealStore) StoreRequirement(ctx context.Context, repoID string, req *graph.StoredRequirement) {
+func (s *SurrealStore) StoreRequirement(ctx context.Context, repoID string, req *graph.StoredRequirement) error {
 	db := s.client.DB()
 	if db == nil {
-		return
+		return fmt.Errorf("database not connected")
 	}
 
 	reqID := uuid.New().String()
@@ -65,25 +66,26 @@ func (s *SurrealStore) StoreRequirement(ctx context.Context, repoID string, req 
 		})
 	if err != nil {
 		slog.Warn("failed to store requirement", "title", req.Title, "error", err)
-		return
+		return err
 	}
 
 	req.ID = reqID
 	req.RepoID = repoID
 	req.CreatedAt = time.Now().UTC()
 	req.UpdatedAt = req.CreatedAt
+	return nil
 }
 
 // StoreRequirements adds multiple requirements and returns the count stored.
-func (s *SurrealStore) StoreRequirements(ctx context.Context, repoID string, reqs []*graph.StoredRequirement) int {
+func (s *SurrealStore) StoreRequirements(ctx context.Context, repoID string, reqs []*graph.StoredRequirement) (int, error) {
 	count := 0
 	for _, req := range reqs {
-		s.StoreRequirement(ctx, repoID, req)
-		if req.ID != "" {
-			count++
+		if err := s.StoreRequirement(ctx, repoID, req); err != nil {
+			return count, err
 		}
+		count++
 	}
-	return count
+	return count, nil
 }
 
 // GetRequirements returns requirements for a repository with pagination.
@@ -595,7 +597,7 @@ func (s *SurrealStore) UpdateRequirementFields(ctx context.Context, id string, f
 		return current
 	}
 
-	stmt := "UPDATE type::thing('ca_requirement', $id) SET " + joinComma(sets) + " WHERE deleted_at IS NONE RETURN AFTER"
+	stmt := "UPDATE type::thing('ca_requirement', $id) SET " + strings.Join(sets, ", ") + " WHERE deleted_at IS NONE RETURN AFTER"
 	rows, err := queryOne[[]surrealRequirement](ctx, db, stmt, vars)
 	if err != nil || len(rows) == 0 {
 		return nil
@@ -713,14 +715,7 @@ func (s *SurrealStore) GetDiscoveredRequirements(ctx context.Context, repoID str
 	total := 0
 	if err == nil && len(countRows) > 0 {
 		if v, ok := countRows[0]["total"]; ok {
-			switch vt := v.(type) {
-			case float64:
-				total = int(vt)
-			case int:
-				total = vt
-			case uint64:
-				total = int(vt)
-			}
+			total = coerceInt(v)
 		}
 	}
 

@@ -80,12 +80,17 @@ func (r *Resolver) createRequirementImpl(ctx context.Context, input CreateRequir
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
-	store.StoreRequirement(ctx, input.RepositoryID, rec)
+	if err := store.StoreRequirement(ctx, input.RepositoryID, rec); err != nil {
+		slog.Warn("requirement_create_persist_failed",
+			"repo_id", input.RepositoryID,
+			"external_id", externalID,
+			"error", err,
+		)
+		return nil, fmt.Errorf("failed to persist requirement with externalId %q: %w", externalID, err)
+	}
 
-	// Post-hoc verification: StoreRequirement currently swallows DB errors
-	// and logs them (signature doesn't return an error). A rejected unique
-	// constraint would therefore look like a silent no-op. Re-resolve by
-	// external ID to confirm the row actually persisted.
+	// Verify the row actually persisted (guards against unique-constraint
+	// races not surfaced as errors by the store).
 	persisted := store.GetRequirementByExternalID(ctx, input.RepositoryID, externalID)
 	if persisted == nil {
 		slog.Warn("requirement_create_persist_failed",

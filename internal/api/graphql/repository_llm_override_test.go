@@ -373,13 +373,16 @@ func TestSetRepositoryLLMOverride_ResultingEmptyOverrideDropsRow(t *testing.T) {
 // enrichment via LLMProfileLookup.
 // ─────────────────────────────────────────────────────────────────────────
 
-// fakeProfileLookup is a graphql.LLMProfileLookup test double. The
+// fakeProfileLookup is an appdeps.LLMProfileLookup test double. The
 // `present` set drives the (name, exists, err) result tuple per id.
 type fakeProfileLookup struct {
 	present map[string]string // id → name
 	err     error             // when non-nil, every call returns this err
 	calls   int
 }
+
+// Compile-time assertion: fakeProfileLookup must satisfy appdeps.LLMProfileLookup.
+var _ appdeps.LLMProfileLookup = (*fakeProfileLookup)(nil)
 
 func (f *fakeProfileLookup) LookupProfileName(_ context.Context, profileID string) (string, bool, error) {
 	f.calls++

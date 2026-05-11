@@ -113,16 +113,53 @@ func linkID(repoID, requirementID, symbolID string) string {
 	return hex.EncodeToString(h[:16]) // 128-bit, collision-safe for this use
 }
 
-// joinComma is a tiny local join to avoid importing strings just here.
-func joinComma(parts []string) string {
-	out := ""
-	for i, p := range parts {
-		if i > 0 {
-			out += ", "
-		}
-		out += p
+// coerceInt extracts an integer from a loosely-typed SurrealDB result value.
+// SurrealDB's CBOR driver may return numeric fields as float64, int, int64,
+// or uint64 depending on the schema type and the value magnitude. Returns 0
+// for nil or unrecognised types.
+func coerceInt(v any) int {
+	if v == nil {
+		return 0
 	}
-	return out
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case uint64:
+		return int(n)
+	}
+	return 0
+}
+
+// coerceUint64 extracts a uint64 from a loosely-typed SurrealDB result value.
+// Negative values are clamped to 0. Returns 0 for nil or unrecognised types.
+func coerceUint64(v any) uint64 {
+	if v == nil {
+		return 0
+	}
+	switch n := v.(type) {
+	case float64:
+		if n < 0 {
+			return 0
+		}
+		return uint64(n)
+	case uint64:
+		return n
+	case int:
+		if n < 0 {
+			return 0
+		}
+		return uint64(n)
+	case int64:
+		if n < 0 {
+			return 0
+		}
+		return uint64(n)
+	}
+	return 0
 }
 
 // ---------------------------------------------------------------------------

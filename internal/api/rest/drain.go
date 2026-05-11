@@ -31,25 +31,25 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 )
 
-// serverDrainAdmitter wraps *Server to implement graphql.DrainAdmitter.
-// The graphql package defines the interface; we implement it here in the
+// serverDrainAdmitter wraps *Server to implement appdeps.DrainAdmitter.
+// The appdeps package defines the interface; we implement it here in the
 // rest package to avoid an import cycle (graphql imports rest for types
 // would be circular — we pass the interface value at wiring time instead).
 //
-// *serverDrainAdmitter satisfies graphql.DrainAdmitter:
+// *serverDrainAdmitter satisfies appdeps.DrainAdmitter:
 //
 //	TryAdmitOnDemand() (interface{ Release() }, bool)
 type serverDrainAdmitter struct {
 	s *Server
 }
 
-// IsDraining implements graphql.DrainAdmitter. Used by cold-start mutations
+// IsDraining implements appdeps.DrainAdmitter. Used by cold-start mutations
 // that check drain state but do not count toward the on-demand tracker total.
 func (a *serverDrainAdmitter) IsDraining() bool {
 	return a.s.IsDraining()
 }
 
-// TryAdmitOnDemand implements graphql.DrainAdmitter. Delegates to the
+// TryAdmitOnDemand implements appdeps.DrainAdmitter. Delegates to the
 // OnDemandTracker's atomic TryAdmit so the draining check and counter
 // increment happen under the same mutex as BeginDrain's MarkDraining call.
 // Returns (nil, false) when the server is draining; (admission, true) otherwise.
@@ -68,8 +68,8 @@ type noopRelease struct{}
 func (noopRelease) Release() {}
 
 // DrainAdmitterFor returns a *serverDrainAdmitter. Callers assign it
-// to the graphql.DrainAdmitter field; the assignment compiles because
-// *serverDrainAdmitter implements graphql.DrainAdmitter structurally.
+// to the appdeps.DrainAdmitter field; the assignment compiles because
+// *serverDrainAdmitter implements appdeps.DrainAdmitter structurally.
 func (s *Server) DrainAdmitterFor() *serverDrainAdmitter {
 	return &serverDrainAdmitter{s: s}
 }

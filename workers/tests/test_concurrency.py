@@ -22,10 +22,12 @@ import asyncio
 import pytest
 
 from workers.common.llm.concurrency import (
+    UNCAPPED_SENTINEL,
     ConcurrencyConfig,
     ConcurrencyGatedProvider,
     ProviderGate,
     ProviderGateRegistry,
+    _UNCAPPED,
     _normalize_host_key,
 )
 
@@ -347,3 +349,17 @@ async def test_concurrency_gated_provider_stream_passthrough_phase1() -> None:
     async for chunk in wrapped.stream("Summarize this function"):
         chunks.append(chunk)
     assert len(chunks) > 0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# D-M3: UNCAPPED_SENTINEL public alias contract
+
+
+def test_uncapped_sentinel_is_integer() -> None:
+    assert isinstance(UNCAPPED_SENTINEL, int)
+
+
+def test_uncapped_sentinel_deprecated_alias_equal() -> None:
+    # _UNCAPPED is the deprecated alias; both must refer to the same value.
+    assert isinstance(_UNCAPPED, int)
+    assert _UNCAPPED == UNCAPPED_SENTINEL

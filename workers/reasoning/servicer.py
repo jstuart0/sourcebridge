@@ -9,7 +9,7 @@ from reasoning.v1 import reasoning_pb2, reasoning_pb2_grpc
 
 from workers.common.config import HARD_CONCURRENCY_CEILING, WorkerConfig
 from workers.common.embedding.provider import EmbeddingProvider
-from workers.common.llm.concurrency import _UNCAPPED, ProviderGateRegistry
+from workers.common.llm.concurrency import UNCAPPED_SENTINEL, ProviderGateRegistry
 from workers.common.llm.provider import LLMProvider
 from workers.common.llm.tools import (
     AgentMessage,
@@ -797,12 +797,12 @@ class ReasoningServicer(reasoning_pb2_grpc.ReasoningServiceServicer):
         gates = []
         for entry in entries:
             # Clamp max_concurrent to HARD_CONCURRENCY_CEILING so the int32
-            # proto field never overflows.  The _UNCAPPED sentinel (sys.maxsize)
+            # proto field never overflows.  The UNCAPPED_SENTINEL (sys.maxsize)
             # means "no real cap configured" — emit 0 to signal unknown/uncapped,
             # matching the (known=true, calls=0) "unbounded" encoding used in
             # GetProviderCapabilities.
             effective_cap = entry.max_concurrent
-            if effective_cap >= _UNCAPPED:
+            if effective_cap >= UNCAPPED_SENTINEL:
                 effective_cap = 0
             else:
                 effective_cap = min(effective_cap, HARD_CONCURRENCY_CEILING)
