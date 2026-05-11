@@ -587,6 +587,15 @@ type QAConfig struct {
 	// Default off until the Phase-5 benchmark confirms quality and
 	// cost tradeoffs.
 	QueryDecompositionEnabled bool `mapstructure:"query_decomposition_enabled"`
+	// SynthesisTimeoutSecs caps the per-RPC deadline applied to
+	// discussion-class worker calls: AnswerQuestion (deep ask
+	// synthesis), AnswerQuestionWithTools (agentic), and
+	// SynthesizeDecomposedAnswer. The built-in default is 120s but
+	// remote local-LLM providers (Ollama serving a 9B+ model over the
+	// network) routinely take longer; operators raise this to 600+ to
+	// avoid DeadlineExceeded on the synth call. 0 keeps the 120s
+	// default. SOURCEBRIDGE_QA_SYNTHESIS_TIMEOUT_SECS. (CA-325)
+	SynthesisTimeoutSecs int `mapstructure:"synthesis_timeout_secs"`
 }
 
 // TrashConfig controls the soft-delete recycle bin feature.
@@ -887,6 +896,7 @@ func Defaults() *Config {
 			PromptCachingEnabled:      true,  // Anthropic-safe default
 			SmartClassifierEnabled:    false, // default-off through quality-push Phase 5
 			QueryDecompositionEnabled: false, // default-off through quality-push Phase 5
+			SynthesisTimeoutSecs:      0,     // 0 = use worker.TimeoutDiscussion built-in (120s); operators on slow remote LLMs raise to 600+ (CA-325)
 		},
 		LivingWiki: LivingWikiConfig{
 			Enabled:                    false, // opt-in; teams enable when ready to ship the wiki
@@ -1007,6 +1017,7 @@ func Load() (*Config, error) {
 	v.SetDefault("qa.prompt_caching_enabled", cfg.QA.PromptCachingEnabled)
 	v.SetDefault("qa.smart_classifier_enabled", cfg.QA.SmartClassifierEnabled)
 	v.SetDefault("qa.query_decomposition_enabled", cfg.QA.QueryDecompositionEnabled)
+	v.SetDefault("qa.synthesis_timeout_secs", cfg.QA.SynthesisTimeoutSecs)
 	v.SetDefault("living_wiki.enabled", cfg.LivingWiki.Enabled)
 	v.SetDefault("living_wiki.worker_count", cfg.LivingWiki.WorkerCount)
 	v.SetDefault("living_wiki.event_timeout", cfg.LivingWiki.EventTimeout)

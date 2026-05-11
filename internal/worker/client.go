@@ -155,6 +155,13 @@ type Client struct {
 
 	knowledgeTimeoutProvider func() time.Duration
 
+	// discussionTimeoutProvider returns the live ceiling for discussion-class
+	// RPCs (AnswerQuestion, AnswerQuestionWithTools, SynthesizeDecomposedAnswer,
+	// AnswerQuestionStream). When nil or returns <=0, the built-in default
+	// TimeoutDiscussion (120s) applies. Wired via WithDiscussionTimeoutProvider;
+	// production reads from Config.QA.SynthesisTimeoutSecs (CA-325).
+	discussionTimeoutProvider func() time.Duration
+
 	// Hot-reload coordination state.
 	tlsWatcher       *tlsreload.Watcher
 	dialOpts         []grpc.DialOption // captured at New() so rotation can re-dial
@@ -223,6 +230,19 @@ func WithWorkerAuthSecret(secret string) Option {
 func WithKnowledgeTimeoutProvider(fn func() time.Duration) Option {
 	return func(c *Client) {
 		c.knowledgeTimeoutProvider = fn
+	}
+}
+
+// WithDiscussionTimeoutProvider injects a live timeout provider for
+// discussion-class RPCs (AnswerQuestion, AnswerQuestionWithTools,
+// SynthesizeDecomposedAnswer, AnswerQuestionStream). Used by deep QA
+// synthesis. The 120s built-in default is too short for slow remote LLM
+// providers (e.g. Ollama serving a 9B+ model over the network); operators
+// raise this via Config.QA.SynthesisTimeoutSecs. Falls back to
+// TimeoutDiscussion when the provider is nil or returns <=0. (CA-325)
+func WithDiscussionTimeoutProvider(fn func() time.Duration) Option {
+	return func(c *Client) {
+		c.discussionTimeoutProvider = fn
 	}
 }
 
@@ -868,6 +888,20 @@ func (c *Client) repositoryKnowledgeTimeout() time.Duration {
 	return TimeoutKnowledgeRepository
 }
 
+// discussionTimeout returns the live discussion-class ceiling from the
+// provider, falling back to TimeoutDiscussion (120s) when the provider is
+// nil or returns <=0. Used by AnswerQuestion, AnswerQuestionWithTools,
+// SynthesizeDecomposedAnswer, AnswerQuestionStream. (CA-325)
+func (c *Client) discussionTimeout() time.Duration {
+	if c == nil || c.discussionTimeoutProvider == nil {
+		return TimeoutDiscussion
+	}
+	if d := c.discussionTimeoutProvider(); d > 0 {
+		return d
+	}
+	return TimeoutDiscussion
+}
+
 // IsAvailable checks whether the worker gRPC connection is in READY state.
 func (c *Client) IsAvailable() bool {
 	if c == nil {
@@ -1068,7 +1102,7 @@ func (c *Client) AnswerQuestion(ctx context.Context, req *reasoningv1.AnswerQues
 		return nil, errClientClosed
 	}
 	defer c.release(b)
-	ctx, cancel := context.WithTimeout(ctx, TimeoutDiscussion)
+	ctx, cancel := context.WithTimeout(ctx, c.discussionTimeout())
 	defer cancel()
 	return b.reasoning.AnswerQuestion(ctx, req)
 }
@@ -1082,7 +1116,7 @@ func (c *Client) AnswerQuestionWithTools(ctx context.Context, req *reasoningv1.A
 		return nil, errClientClosed
 	}
 	defer c.release(b)
-	ctx, cancel := context.WithTimeout(ctx, TimeoutDiscussion)
+	ctx, cancel := context.WithTimeout(ctx, c.discussionTimeout())
 	defer cancel()
 	return b.reasoning.AnswerQuestionWithTools(ctx, req)
 }
@@ -1154,7 +1188,7 @@ func (c *Client) SynthesizeDecomposedAnswer(ctx context.Context, req *reasoningv
 		return nil, errClientClosed
 	}
 	defer c.release(b)
-	ctx, cancel := context.WithTimeout(ctx, TimeoutDiscussion)
+	ctx, cancel := context.WithTimeout(ctx, c.discussionTimeout())
 	defer cancel()
 	return b.reasoning.SynthesizeDecomposedAnswer(ctx, req)
 }
@@ -1183,7 +1217,7 @@ func (c *Client) AnswerQuestionStream(
 	if b == nil {
 		return nil, func() {}, errClientClosed
 	}
-	streamCtx, cancel := context.WithTimeout(ctx, TimeoutDiscussion)
+	streamCtx, cancel := context.WithTimeout(ctx, c.discussionTimeout())
 	stream, err := b.reasoning.AnswerQuestionStream(streamCtx, req)
 	if err != nil {
 		cancel()

@@ -124,6 +124,50 @@ func TestRepositoryKnowledgeTimeoutFallsBackToDefault(t *testing.T) {
 	}
 }
 
+// CA-325: discussionTimeout provider tests mirror the knowledge-timeout
+// pattern. Operators on slow remote LLM providers raise this via
+// Config.QA.SynthesisTimeoutSecs.
+
+func TestDiscussionTimeoutUsesProvider(t *testing.T) {
+	c, err := New("localhost:59999", TLSConfig{}, WithDiscussionTimeoutProvider(func() time.Duration {
+		return 10 * time.Minute
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	if got := c.discussionTimeout(); got != 10*time.Minute {
+		t.Fatalf("discussionTimeout() = %s, want %s", got, 10*time.Minute)
+	}
+}
+
+func TestDiscussionTimeoutFallsBackOnZero(t *testing.T) {
+	c, err := New("localhost:59999", TLSConfig{}, WithDiscussionTimeoutProvider(func() time.Duration {
+		return 0
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	if got := c.discussionTimeout(); got != TimeoutDiscussion {
+		t.Fatalf("discussionTimeout() with provider returning 0 = %s, want %s", got, TimeoutDiscussion)
+	}
+}
+
+func TestDiscussionTimeoutFallsBackOnNilProvider(t *testing.T) {
+	c, err := New("localhost:59999", TLSConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	if got := c.discussionTimeout(); got != TimeoutDiscussion {
+		t.Fatalf("discussionTimeout() with nil provider = %s, want %s", got, TimeoutDiscussion)
+	}
+}
+
 func TestMinDuration(t *testing.T) {
 	if got := minDuration(2*time.Minute, 5*time.Minute); got != 2*time.Minute {
 		t.Fatalf("minDuration() = %s, want %s", got, 2*time.Minute)

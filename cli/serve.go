@@ -264,8 +264,22 @@ func runServe(cmd *cobra.Command, args []string) error {
 	var workerClient *worker.Client
 	var workerTLSReloadWatcher *tlsreload.Watcher
 	if cfg.Worker.Address != "" {
+		// CA-325: live resolver for discussion-class RPC timeout (AnswerQuestion,
+		// AnswerQuestionWithTools, SynthesizeDecomposedAnswer, AnswerQuestionStream).
+		// Falls back to worker.TimeoutDiscussion (120s) when the operator
+		// hasn't set Config.QA.SynthesisTimeoutSecs. Reading the cfg through a
+		// closure mirrors knowledgeTimeoutProvider — admin config changes
+		// take effect on the next call without restart.
+		discussionTimeoutProvider := func() time.Duration {
+			secs := cfg.QA.SynthesisTimeoutSecs
+			if secs <= 0 {
+				return 0 // worker.Client falls back to TimeoutDiscussion
+			}
+			return time.Duration(secs) * time.Second
+		}
 		opts := []worker.Option{
 			worker.WithKnowledgeTimeoutProvider(knowledgeTimeoutProvider),
+			worker.WithDiscussionTimeoutProvider(discussionTimeoutProvider),
 		}
 		// D10: attach the shared worker gRPC auth secret so every outgoing
 		// RPC carries the x-sb-worker-secret metadata header when the operator

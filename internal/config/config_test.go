@@ -50,6 +50,23 @@ func TestLLMDefaultsAllowPrivateBaseURLTrue(t *testing.T) {
 	}
 }
 
+// TestQADefaultsSynthesisTimeoutSecsZero pins the default of
+// Config.QA.SynthesisTimeoutSecs to 0 (sentinel meaning "use the built-in
+// worker.TimeoutDiscussion = 120s"). Operators on slow remote LLM
+// providers (Ollama serving 9B+ models over the network) raise this to
+// 600 or higher to prevent DeadlineExceeded on deep-ask / discussCode
+// synthesis. The 0 default is intentional: it preserves the prior
+// hardcoded 120s behavior on existing installs. See CA-325.
+func TestQADefaultsSynthesisTimeoutSecsZero(t *testing.T) {
+	cfg := Defaults()
+	if cfg.QA.SynthesisTimeoutSecs != 0 {
+		t.Errorf("QA.SynthesisTimeoutSecs must default to 0 (sentinel for worker.TimeoutDiscussion 120s); found %d — "+
+			"changing the default rewrites every existing install's discussion-RPC ceiling on upgrade. "+
+			"Operators raise this via SOURCEBRIDGE_QA_SYNTHESIS_TIMEOUT_SECS. See CA-325.",
+			cfg.QA.SynthesisTimeoutSecs)
+	}
+}
+
 func TestMCPDefaultsPublicProbeTrue(t *testing.T) {
 	cfg := Defaults()
 	if !cfg.MCP.PublicProbe {

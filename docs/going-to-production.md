@@ -130,6 +130,29 @@ The API responds with `Strict-Transport-Security: max-age=31536000; includeSubDo
 - Bare HTTP deployments (development, local docker compose): HSTS still reaches the browser. Browsers ignore HSTS on plain-HTTP origins, so this is harmless. But if the same hostname is later served over HTTPS, HSTS will be in effect.
 - No `preload` directive is set. Operators wanting preload must submit their domain manually at https://hstspreload.org/ AFTER confirming all subdomains serve over HTTPS.
 
+### QA Synthesis Timeout (CA-325)
+
+Deep-QA discussion RPCs (`AnswerQuestion`, `AnswerQuestionWithTools`,
+`SynthesizeDecomposedAnswer`, `AnswerQuestionStream`) default to a 120-second
+gRPC deadline. This is fine for cloud providers (Anthropic, OpenAI, Gemini)
+but routinely too short for remote local-LLM providers (Ollama or vLLM
+serving a 9B+ model over the network), surfacing as:
+
+```
+Synthesis failed: rpc error: code = DeadlineExceeded desc = context deadline exceeded
+```
+
+Raise the ceiling per install:
+
+```toml
+[qa]
+synthesis_timeout_secs = 600
+```
+
+Or via env var: `SOURCEBRIDGE_QA_SYNTHESIS_TIMEOUT_SECS=600`. The value is
+read at request time, so admin changes take effect on the next call without
+a restart. `0` (default) keeps the built-in 120s ceiling.
+
 ### LLM Base URL SSRF Hardening
 
 By default, `Config.LLM.AllowPrivateBaseURL=true` to support local LLM
