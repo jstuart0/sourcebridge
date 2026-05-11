@@ -1625,3 +1625,33 @@ def test_cliff_notes_render_template_requires_markdown_backticks() -> None:
         "instructs the model to wrap identifiers in markdown backticks. "
         "Repaired sections will fail to clear _enforce_deep_confidence_floor."
     )
+
+
+def test_cliff_notes_render_template_contains_backtick_instruction() -> None:
+    """CA-284 / T-M4: explicit named contract for the render template alone.
+
+    `_enforce_deep_confidence_floor` counts backtick-wrapped identifiers via
+    `_SPECIFIC_IDENTIFIER_RE`. If this instruction is removed, local-tier models
+    silently regress to ~half their potential confidence rate.
+    """
+    from workers.comprehension.renderers import CLIFF_NOTES_RENDER_TEMPLATE
+
+    assert "markdown backticks" in CLIFF_NOTES_RENDER_TEMPLATE, (
+        "CA-176 load-bearing: render template must instruct the model to wrap "
+        "identifiers in backticks; _enforce_deep_confidence_floor counts backtick-"
+        "wrapped identifiers via _SPECIFIC_IDENTIFIER_RE."
+    )
+
+
+def test_cliff_notes_section_repair_template_contains_backtick_instruction() -> None:
+    """CA-284 / T-M4: explicit named contract for the repair template alone.
+
+    Same constraint as the render template — repaired sections must also produce
+    backtick-wrapped identifiers to clear the confidence floor upgrade gate.
+    """
+    from workers.comprehension.renderers import CLIFF_NOTES_SECTION_REPAIR_TEMPLATE
+
+    assert "markdown backticks" in CLIFF_NOTES_SECTION_REPAIR_TEMPLATE, (
+        "CA-176 load-bearing: repair template must instruct the model to wrap "
+        "identifiers in backticks; same constraint as the render template."
+    )

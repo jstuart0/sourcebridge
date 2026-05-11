@@ -52,14 +52,22 @@ func (m *mockWorkerCaller) AnswerQuestion(ctx context.Context, req *reasoningv1.
 
 type mockKnowledgeStore struct {
 	artifacts map[string]*knowledge.Artifact
+	// memStore holds a real MemStore instance used to delegate methods whose
+	// normalization logic must stay in sync with production (CA-289 / T-M6).
+	memStore *knowledge.MemStore
 }
 
 func newMockKnowledgeStore() *mockKnowledgeStore {
-	return &mockKnowledgeStore{artifacts: make(map[string]*knowledge.Artifact)}
+	return &mockKnowledgeStore{
+		artifacts: make(map[string]*knowledge.Artifact),
+		memStore:  knowledge.NewMemStore(),
+	}
 }
 
-func (m *mockKnowledgeStore) StoreKnowledgeArtifact(_ context.Context, a *knowledge.Artifact) (*knowledge.Artifact, error) {
+func (m *mockKnowledgeStore) StoreKnowledgeArtifact(ctx context.Context, a *knowledge.Artifact) (*knowledge.Artifact, error) {
 	m.artifacts[a.ID] = a
+	// Mirror into memStore so GetArtifactByKeyAndMode delegation works (CA-289).
+	_, _ = m.memStore.StoreKnowledgeArtifact(ctx, a)
 	return a, nil
 }
 
@@ -113,6 +121,9 @@ func (m *mockKnowledgeStore) ClaimArtifactWithMode(_ context.Context, key knowle
 	}
 	stored := *artifact
 	m.artifacts[stored.ID] = &stored
+	// Mirror into memStore so GetArtifactByKeyAndMode delegation works (CA-289).
+	ctx := context.Background()
+	_, _ = m.memStore.StoreKnowledgeArtifact(ctx, &stored)
 	return artifact, true, nil
 }
 func (m *mockKnowledgeStore) GetKnowledgeArtifact(_ context.Context, id string) *knowledge.Artifact {
@@ -121,26 +132,26 @@ func (m *mockKnowledgeStore) GetKnowledgeArtifact(_ context.Context, id string) 
 func (m *mockKnowledgeStore) GetArtifactByKey(ctx context.Context, key knowledge.ArtifactKey) *knowledge.Artifact {
 	return m.GetArtifactByKeyAndMode(ctx, key, "")
 }
-func (m *mockKnowledgeStore) GetArtifactByKeyAndMode(_ context.Context, key knowledge.ArtifactKey, mode knowledge.GenerationMode) *knowledge.Artifact {
-	key = key.Normalized()
+// GetArtifactByKeyAndMode delegates to the embedded MemStore (CA-289 / T-M6).
+// Previously this method reimplemented the normalization logic from MemStore,
+// creating a mock/prod divergence risk. Delegation ensures the mock and
+// production implementations stay in sync without duplication.
+//
+// Before delegating, any artifacts in m.artifacts that are absent from
+// m.memStore are synced over. This covers tests that seed the mock by writing
+// to m.artifacts directly rather than going through StoreKnowledgeArtifact.
+func (m *mockKnowledgeStore) GetArtifactByKeyAndMode(ctx context.Context, key knowledge.ArtifactKey, mode knowledge.GenerationMode) *knowledge.Artifact {
+	// Sync m.artifacts → m.memStore so direct-map writes are visible.
+	// Also sync sections: MemStore.GetArtifactByKeyAndMode loads sections from
+	// the sections map (not from the artifact struct), so we must populate it.
 	for _, a := range m.artifacts {
-		aKey := knowledge.ArtifactKey{
-			RepositoryID: a.RepositoryID,
-			Type:         a.Type,
-			Audience:     a.Audience,
-			Depth:        a.Depth,
-			Scope:        *a.Scope,
-		}.Normalized()
-		if aKey.RepositoryID == key.RepositoryID &&
-			aKey.Type == key.Type &&
-			aKey.Audience == key.Audience &&
-			aKey.Depth == key.Depth &&
-			aKey.ScopeKey() == key.ScopeKey() &&
-			(mode == "" || knowledge.NormalizeGenerationMode(a.GenerationMode) == knowledge.NormalizeGenerationMode(mode)) {
-			return a
+		if _, err := m.memStore.StoreKnowledgeArtifact(ctx, a); err == nil {
+			if len(a.Sections) > 0 {
+				_ = m.memStore.StoreKnowledgeSections(ctx, a.ID, a.Sections)
+			}
 		}
 	}
-	return nil
+	return m.memStore.GetArtifactByKeyAndMode(ctx, key, mode)
 }
 func (m *mockKnowledgeStore) GetKnowledgeArtifacts(_ context.Context, repoID string) []*knowledge.Artifact {
 	return nil

@@ -34,14 +34,14 @@ func TestEnqueue_LLMBackedEmptyProvider_ReturnsErrLLMProviderRequired(t *testing
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
 
-	var ran atomic.Bool
+	fired := make(chan struct{}, 1)
 	_, err := orch.Enqueue(&llm.EnqueueRequest{
 		Subsystem:   llm.SubsystemKnowledge,
 		JobType:     "cliff_notes",
 		TargetKey:   "repo-1:cliff_notes:empty-provider",
 		LLMProvider: "", // empty: this is the failure case
 		Run: func(rt llm.Runtime) error {
-			ran.Store(true)
+			fired <- struct{}{}
 			return nil
 		},
 	})
@@ -55,10 +55,15 @@ func TestEnqueue_LLMBackedEmptyProvider_ReturnsErrLLMProviderRequired(t *testing
 		t.Errorf("expected error string to point operator at /admin/llm; got %q", err.Error())
 	}
 
-	// The Run closure must NOT have executed.
-	time.Sleep(50 * time.Millisecond)
-	if ran.Load() {
+	// CA-286: use a channel + select instead of time.Sleep for the negative
+	// assertion. time.Sleep(50ms) is a false-pass on fast runners and flaky on
+	// slow ones; the channel approach gives an immediate failure if the closure
+	// fires and a reliable 200ms timeout if it (correctly) never fires.
+	select {
+	case <-fired:
 		t.Error("expected Run closure NOT to execute on rejected enqueue")
+	case <-time.After(200 * time.Millisecond):
+		// expected — closure did not fire
 	}
 
 	// No job persisted under this target key.

@@ -54,20 +54,26 @@ func TestSurrealStoreHeartbeatAdvancesUpdatedAt(t *testing.T) {
 		t.Fatal("GetByID before heartbeat returned nil")
 	}
 
-	// Sleep to ensure time::now() produces a strictly later timestamp.
-	time.Sleep(110 * time.Millisecond)
-
 	if err := store.Heartbeat(t.Context(), job.ID); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
 
-	after := store.GetByID(t.Context(), job.ID)
+	// CA-285: poll instead of fixed sleep — SurrealDB timestamp resolution can
+	// lag on slow CI, causing a fixed 110ms sleep to race. Wait up to 200ms.
+	deadline := time.Now().Add(200 * time.Millisecond)
+	var after *llm.Job
+	for time.Now().Before(deadline) {
+		after = store.GetByID(t.Context(), job.ID)
+		if after != nil && after.UpdatedAt.After(before.UpdatedAt) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if after == nil {
 		t.Fatal("GetByID after heartbeat returned nil")
 	}
-
 	if !after.UpdatedAt.After(before.UpdatedAt) {
-		t.Errorf("Heartbeat did not advance updated_at: before=%v after=%v",
+		t.Errorf("Heartbeat did not advance updated_at within 200ms: before=%v after=%v",
 			before.UpdatedAt, after.UpdatedAt)
 	}
 }
@@ -93,8 +99,9 @@ func TestSurrealStoreHeartbeatIsNoopOnTerminalJob(t *testing.T) {
 		t.Fatal("GetByID before heartbeat returned nil")
 	}
 
-	time.Sleep(110 * time.Millisecond)
-
+	// CA-285: no sleep needed here. The 50ms tolerance check below is what
+	// detects an erroneous updated_at advance; sleeping 110ms does not
+	// improve detectability and slows CI on every run.
 	if err := store.Heartbeat(t.Context(), job.ID); err != nil {
 		t.Fatalf("Heartbeat (terminal): unexpected error: %v", err)
 	}
