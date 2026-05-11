@@ -125,6 +125,11 @@ services:
       # working-tree visibility (controlled separately via LocalFastModeSubprocess).
       # Operators can override to `false` for legacy/rollback scenarios.
       - SOURCEBRIDGE_QA_SERVER_SIDE_ENABLED=${SOURCEBRIDGE_QA_SERVER_SIDE_ENABLED:-true}
+      # CA-325: deep-QA discussion RPC ceiling. Built-in default 120s is too
+      # short for remote local-LLM providers (Ollama serving 9B+ models over
+      # the network). Operators set this to 600+ to avoid DeadlineExceeded on
+      # AnswerQuestion / discussCode. 0 keeps the 120s default.
+      - SOURCEBRIDGE_QA_SYNTHESIS_TIMEOUT_SECS=${SOURCEBRIDGE_QA_SYNTHESIS_TIMEOUT_SECS:-0}
       # Vector search timeout: default 5000 ms — accommodates remote Ollama
       # (≥208 ms observed from Docker bridge). Tighten for co-located embedders.
       - SOURCEBRIDGE_SEARCH_VECTOR_TIMEOUT_MS=${SOURCEBRIDGE_SEARCH_VECTOR_TIMEOUT_MS:-5000}
