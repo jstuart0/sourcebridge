@@ -130,13 +130,6 @@ var cgnatBlock = func() *net.IPNet {
 	return cidr
 }()
 
-// ulaBlock is fc00::/7 (RFC 4193 — IPv6 Unique Local Addresses).
-// stdlib net.IP.IsPrivate() covers this, but we check explicitly for clarity.
-var ulaBlock = func() *net.IPNet {
-	_, cidr, _ := net.ParseCIDR("fc00::/7")
-	return cidr
-}()
-
 // isPrivateOrInternalIP returns true if the given IP is in any denylist range:
 // RFC1918, loopback, link-local unicast, CGNAT, ULA, unspecified (0.0.0.0/::),
 // multicast, or interface-local multicast.

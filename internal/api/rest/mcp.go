@@ -441,28 +441,15 @@ type capabilityCheckFunc func(name string, edition capabilities.Edition) bool
 // ---------------------------------------------------------------------------
 
 // mcpToolHandlerFunc is the uniform handler signature for all MCP tools in
-// the dispatch map. ctx is the live request context (used by tools that
-// need it for timeout/cancellation; ignored by the others via noCtxHandler).
+// the dispatch map. ctx is the live request context (used for timeout and
+// cancellation propagation through the store calls each handler makes).
 type mcpToolHandlerFunc func(h *mcpHandler, ctx context.Context, session *mcpSession, args json.RawMessage) (interface{}, error)
 
-// noCtxHandler adapts a (session, args) handler — the shape used by the
-// majority of tools — into the dispatcher's (ctx, session, args) signature.
-// The ctx-bearing tools (explain_code, ask_question, get_review_for_diff, and
-// search_symbols after MCP-3) use withCtxHandler instead.
-func noCtxHandler(fn func(*mcpHandler, *mcpSession, json.RawMessage) (interface{}, error)) mcpToolHandlerFunc {
-	return func(h *mcpHandler, _ context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
-		return fn(h, s, a)
-	}
-}
-
-// withCtxHandler wraps a method-expression that already takes context.Context
-// into the mcpToolHandlerFunc shape. Mirrors noCtxHandler for the ctx-bearing
-// tools (explain_code, ask_question, get_review_for_diff, search_symbols) that
-// previously used anonymous closures — the closures and this adapter have
-// identical semantics; the method-expression form is preferred because it is
-// harder to accidentally capture the wrong variable.
-//
-// 2 ctx-bearing tools registered via withCtxHandler (mirrors noCtxHandler).
+// withCtxHandler wraps a method-expression that takes context.Context into
+// the mcpToolHandlerFunc shape. Adding a new tool to coreTools() / register*
+// must go through this adapter so the request ctx propagates to every store
+// call inside the handler. The earlier no-ctx adapter (CA-180 / P10 Phase 5)
+// was deleted after the last handler was converted; do not reintroduce it.
 func withCtxHandler(fn func(*mcpHandler, context.Context, *mcpSession, json.RawMessage) (interface{}, error)) mcpToolHandlerFunc {
 	return func(h *mcpHandler, ctx context.Context, s *mcpSession, a json.RawMessage) (interface{}, error) {
 		return fn(h, ctx, s, a)
