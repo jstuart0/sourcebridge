@@ -145,6 +145,27 @@ interface ActivityResponse {
   // Omitted entirely when the worker is unreachable or the wrapper is
   // kill-switched (never an empty array — see Go handler omitempty).
   gate_snapshot?: LLMGateEntry[];
+  // Present when the configured LLM provider exposes a runtime probe
+  // (currently Ollama only). Carries the model-loaded state so operators
+  // can spot the CA-326 trap proactively (different model pinned in
+  // VRAM forces a multi-minute swap on every request). Omitted on
+  // non-Ollama providers or when the probe didn't fire.
+  provider_state?: ProviderState;
+}
+
+interface ProviderState {
+  provider: string;
+  base_url?: string;
+  configured_ask_model?: string;
+  loaded_models?: LoadedModel[];
+  swap_warning?: string;
+  probe_error?: string;
+}
+
+interface LoadedModel {
+  name: string;
+  size_vram_mb: number;
+  expires_at?: string;
 }
 
 const POLL_INTERVAL_MS = 2000;
@@ -418,6 +439,9 @@ export default function MonitorPage() {
       {/* Zone 1 — Health banner */}
       <HealthBanner health={data?.health} error={error} />
 
+      {/* Provider state banner — fires when configured model isn't loaded on Ollama (CA-326 trap diagnostic) */}
+      <ProviderStateBanner state={data?.provider_state} />
+
       {/* Stats strip */}
       <div className="flex flex-wrap gap-4">
         <StatCard
@@ -613,6 +637,66 @@ function HealthBanner({ health, error }: { health?: HealthPayload; error: string
           {health.status}
         </p>
         <p className="text-sm text-[var(--text-primary)]">{health.summary}</p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ProviderStateBanner — surfaces the CA-326 trap diagnostic.
+ *
+ * When the configured ask_model isn't currently loaded on the upstream LLM
+ * provider (Ollama only today), every request triggers a multi-minute model
+ * swap. This banner renders the API's actionable warning verbatim along with
+ * the loaded-model list so the operator can pick the right resolution path
+ * without leaving the page.
+ *
+ * Renders nothing when:
+ *   - provider state isn't probed (non-Ollama install, cloud provider, etc.)
+ *   - the probe errored (the API surfaces probe_error but the banner stays
+ *     quiet — error display would be noise for transient network blips)
+ *   - the configured model IS loaded (no swap will fire)
+ */
+function ProviderStateBanner({ state }: { state?: ProviderState }) {
+  if (!state || !state.swap_warning) return null;
+
+  return (
+    <div
+      role="alert"
+      className="flex items-start gap-3 rounded-[var(--radius-md)] border border-amber-500 bg-amber-500/10 px-4 py-3"
+    >
+      <span aria-hidden className="text-2xl text-amber-600">⚠</span>
+      <div className="flex-1 space-y-2">
+        <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">
+          Model swap warning
+        </p>
+        <p className="text-sm text-[var(--text-primary)]">{state.swap_warning}</p>
+        {state.loaded_models && state.loaded_models.length > 0 && (
+          <div className="rounded-[var(--radius-sm)] bg-[var(--bg-subtle)] px-3 py-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+              Loaded on {state.provider}{state.base_url ? ` (${state.base_url})` : ""}
+            </p>
+            <ul className="mt-1 space-y-0.5 text-xs text-[var(--text-primary)] font-mono">
+              {state.loaded_models.map((m) => (
+                <li key={m.name}>
+                  <span>{m.name}</span>
+                  <span className="text-[var(--text-tertiary)]">
+                    {" — "}{m.size_vram_mb.toLocaleString()} MB VRAM
+                    {m.expires_at ? `, expires ${m.expires_at.slice(0, 19)}` : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {state.configured_ask_model && (
+              <p className="mt-2 text-xs text-[var(--text-secondary)]">
+                Configured ask_model:{" "}
+                <span className="font-mono text-amber-700 dark:text-amber-300">
+                  {state.configured_ask_model}
+                </span>
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
