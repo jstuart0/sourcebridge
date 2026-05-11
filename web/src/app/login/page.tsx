@@ -16,6 +16,9 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  // CA-321: server-configured password minimum length. Defaults to 8 so the
+  // UI works against old servers that don't expose the field.
+  const [passwordMinLength, setPasswordMinLength] = useState(8);
 
   useEffect(() => {
     const token = getStoredToken();
@@ -39,6 +42,11 @@ export default function LoginPage() {
         const data = await res.json();
         if (!cancelled) {
           setNeedsSetup(data?.setup_done === false);
+          // CA-321: pick up the operator-configured min length when present.
+          // Falls through to the default 8 when the server is old.
+          if (typeof data?.password_min_length === "number" && data.password_min_length > 0) {
+            setPasswordMinLength(data.password_min_length);
+          }
         }
       } catch {
         if (!cancelled) {
@@ -66,8 +74,8 @@ export default function LoginPage() {
       return;
     }
 
-    if (needsSetup && password.length < 8) {
-      setError("Password must be at least 8 characters");
+    if (needsSetup && password.length < passwordMinLength) {
+      setError(`Password must be at least ${passwordMinLength} characters`);
       return;
     }
 

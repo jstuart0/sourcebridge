@@ -153,7 +153,14 @@ func runSetupAdminWith(cmd *cobra.Command, pwdReader passwordReader) error {
 		fmt.Fprintf(os.Stderr, "Using admin password from %s.\n", src)
 	}
 
-	if err := validateAdminPassword(password); err != nil {
+	// CA-321: probe the server's configured password_min_length so the
+	// CLI error message reflects the operator's policy (default 8 when
+	// the server is old or unreachable). The probe is best-effort and
+	// short-fused — a 2-second timeout — so an unreachable server still
+	// lets the user set up with the local 8-char floor and surface the
+	// real server error on submit.
+	minLen := fetchSetupMinPasswordLength(cmd.Context(), serverURL)
+	if err := validateAdminPassword(password, minLen); err != nil {
 		return err
 	}
 
@@ -203,6 +210,24 @@ func runSetupAdminWith(cmd *cobra.Command, pwdReader passwordReader) error {
 		fmt.Fprintf(os.Stdout, "  sourcebridge ask \"What does this repo do?\"\n")
 	}
 	return nil
+}
+
+// fetchSetupMinPasswordLength probes the server's /auth/desktop/info for
+// the configured password_min_length. Best-effort and short-fused: a
+// 2-second context cap, and any error path returns 0 so the caller's
+// validateAdminPassword falls back to the local 8-char minimum. An
+// unreachable server, an old server (no field in response), or a probe
+// failure must NOT block setup — the server's own validation remains the
+// source of truth, and submission will surface the real policy error if
+// the local floor undershoots. (CA-321)
+func fetchSetupMinPasswordLength(parent context.Context, serverURL string) int {
+	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
+	defer cancel()
+	info, err := fetchDesktopInfo(ctx, serverURL)
+	if err != nil || info == nil {
+		return 0
+	}
+	return info.PasswordMinLength
 }
 
 // resolveSetupAdminServerURL applies the same resolution chain as login:

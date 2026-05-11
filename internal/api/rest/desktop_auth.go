@@ -161,10 +161,22 @@ type desktopAuthPollResponse struct {
 }
 
 func (s *Server) handleDesktopAuthInfo(w http.ResponseWriter, r *http.Request) {
+	// CA-321: expose password_min_length so CLI clients (cli/login.go,
+	// cli/setup_admin.go) can render the operator-configured minimum
+	// instead of the hardcoded 8 default. Falls back to 8 when LocalAuth
+	// isn't yet wired (test paths). Matches the field shape exposed by
+	// the browser-facing /auth/info endpoint.
+	minLen := 8
+	if s.localAuth != nil {
+		if v := s.localAuth.PasswordMinLength(); v > 0 {
+			minLen = v
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"local_auth":   true,
-		"setup_done":   s.localAuth.IsSetupDone(),
-		"oidc_enabled": s.oidc != nil,
+		"local_auth":          true,
+		"setup_done":          s.localAuth.IsSetupDone(),
+		"oidc_enabled":        s.oidc != nil,
+		"password_min_length": minLen,
 	})
 }
 

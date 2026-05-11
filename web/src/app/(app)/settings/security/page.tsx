@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,14 +27,36 @@ export default function SettingsSecurityPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  // CA-321: server-configured minimum password length. Defaults to 8 so
+  // the form works against old servers that don't expose the field.
+  const [passwordMinLength, setPasswordMinLength] = useState(8);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/auth/info", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && typeof data?.password_min_length === "number" && data.password_min_length > 0) {
+          setPasswordMinLength(data.password_min_length);
+        }
+      } catch {
+        /* keep default 8 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setMessage(null);
     setSuccess(false);
 
-    if (newPw.length < 8) {
-      setMessage("New password must be at least 8 characters.");
+    if (newPw.length < passwordMinLength) {
+      setMessage(`New password must be at least ${passwordMinLength} characters.`);
       setSuccess(false);
       return;
     }
@@ -102,10 +124,10 @@ export default function SettingsSecurityPage() {
               value={newPw}
               onChange={(e) => setNewPw(e.target.value)}
               required
-              minLength={8}
+              minLength={passwordMinLength}
               autoComplete="new-password"
             />
-            <p className="text-xs text-[var(--text-tertiary)]">Minimum 8 characters.</p>
+            <p className="text-xs text-[var(--text-tertiary)]">Minimum {passwordMinLength} characters.</p>
           </div>
           <div className="grid gap-1.5">
             <label className={labelClass}>Confirm new password</label>
@@ -114,7 +136,7 @@ export default function SettingsSecurityPage() {
               value={confirmPw}
               onChange={(e) => setConfirmPw(e.target.value)}
               required
-              minLength={8}
+              minLength={passwordMinLength}
               autoComplete="new-password"
             />
           </div>
