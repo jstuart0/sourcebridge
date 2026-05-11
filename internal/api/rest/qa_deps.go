@@ -464,12 +464,22 @@ func (j *qaJobRunner) RunSyncQAJob(ctx context.Context, jobType, targetKey, repo
 			provider = snap.Provider
 		}
 	}
+	// CA-326: pin QA synthesis jobs to a single attempt. The orchestrator's
+	// default policy treats DeadlineExceeded as retryable (one retry, so
+	// MaxAttempts=2), which on a hung LLM provider doubles the user's wait
+	// without higher success probability. A QA synth that burned the full
+	// Config.QA.SynthesisTimeoutSecs ceiling once will almost certainly
+	// burn it again — the right response is to fail fast and surface the
+	// upstream-provider issue. Knowledge-generation jobs keep MaxAttempts=2
+	// because long-running jobs hitting timeout once might still complete
+	// on a subsequent attempt (e.g. cold-start model swap finishing).
 	job, err := j.orch.EnqueueSync(ctx, &llm.EnqueueRequest{
 		Subsystem:   llm.SubsystemQA,
 		JobType:     jobType,
 		TargetKey:   targetKey,
 		RepoID:      repoID,
 		LLMProvider: provider,
+		MaxAttempts: 1,
 		Run: func(rt llm.Runtime) error {
 			return run(rt)
 		},

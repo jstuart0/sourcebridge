@@ -5,6 +5,7 @@ package qa
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -367,6 +368,26 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 		// gathered — the caller can read the evidence block directly.
 		result.Diagnostics.FallbackUsed = "synthesis_failed"
 		result.Answer = fmt.Sprintf("Synthesis failed: %v. The gathered evidence is available in the references list.", err)
+		// CA-326: when the synth call hits DeadlineExceeded after burning
+		// the full Config.QA.SynthesisTimeoutSecs ceiling, the upstream LLM
+		// provider is the likely root cause (model swap thrashing, VRAM
+		// contention, hung worker). Log at WARN with the elapsed time so
+		// operators can spot the pattern in logs and check provider health
+		// (Ollama `/api/ps` + `/api/version`, vLLM metrics, cloud-provider
+		// status pages). The user-visible Answer carries the same signal
+		// without the noisy stack trace.
+		elapsedLLM := time.Since(t4)
+		isDeadline := errors.Is(err, context.DeadlineExceeded) ||
+			strings.Contains(err.Error(), "DeadlineExceeded") ||
+			strings.Contains(err.Error(), "context deadline exceeded")
+		if isDeadline {
+			slog.WarnContext(ctx, "qa: synthesizer deadline exceeded — upstream LLM provider likely overloaded or hung",
+				"repository_id", in.RepositoryID,
+				"elapsed_ms", elapsedLLM.Milliseconds(),
+				"model", o.resolveAskModel(ctx),
+				"hint", "check provider health: Ollama /api/ps + /api/version, vLLM metrics, model swap state",
+			)
+		}
 		// Fix B (CA-324): populate model on the synthesis-failed path so
 		// callers see WHICH model was attempted. Resolver takes precedence
 		// over static config so the live profile model surfaces (runtime
