@@ -172,4 +172,42 @@ WARNING: ServiceAccount configuration
 
 {{- end }}
 
+== readOnlyRootFilesystem Hardening ==
+
+{{- if .Values.securityContext.readOnlyRootFilesystem }}
+
+  readOnlyRootFilesystem hardening is ENABLED. The chart auto-renders
+  matching emptyDir volume mounts for each container's required writable
+  cache paths:
+
+    - api:    /tmp (size limit {{ .Values.api.tmpSizeLimit | default "1Gi" }})
+    - worker: /tmp ({{ .Values.worker.tmpSizeLimit | default "2Gi" }})
+              + /var/cache/sourcebridge ({{ .Values.worker.cacheSizeLimit | default "4Gi" }})
+    - web:    /tmp ({{ .Values.web.tmpSizeLimit | default "1Gi" }})
+              + /app/.next/cache ({{ .Values.web.nextCacheSizeLimit | default "1Gi" }})
+
+  If your deployment writes to paths beyond these, supply
+  api.extraVolumes/extraVolumeMounts (and worker/web equivalents) — they
+  are appended when this flag is on.
+
+  To disable:
+    helm upgrade {{ .Release.Name }} sourcebridge/ \
+      --set securityContext.readOnlyRootFilesystem=false \
+      -n {{ .Release.Namespace }}
+
+{{- else }}
+
+  readOnlyRootFilesystem hardening is disabled (default). To enable, run:
+
+    helm upgrade {{ .Release.Name }} sourcebridge/ \
+      --set securityContext.readOnlyRootFilesystem=true \
+      -n {{ .Release.Namespace }}
+
+  The chart auto-provisions emptyDir volumes for the cache paths each
+  container needs (/tmp on all three, /var/cache/sourcebridge on the
+  worker, /app/.next/cache on the web). Verify the rendered output
+  before applying to a long-lived cluster (CA-322).
+
+{{- end }}
+
 For documentation: https://github.com/sourcebridge/sourcebridge

@@ -75,6 +75,17 @@ securityContext:
   runAsNonRoot: true
   runAsUser: 1000
   allowPrivilegeEscalation: false
+  # CA-322: when flipped to true, the deployment templates auto-render
+  # writable emptyDir volume mounts for the cache paths each container
+  # needs:
+  #   - api:    /tmp (api.tmpSizeLimit, default 1Gi)
+  #   - worker: /tmp + /var/cache/sourcebridge (worker.tmpSizeLimit
+  #             default 2Gi, worker.cacheSizeLimit default 4Gi)
+  #   - web:    /tmp + /app/.next/cache (web.tmpSizeLimit default 1Gi,
+  #             web.nextCacheSizeLimit default 1Gi)
+  # Operators with additional write paths can supply api/worker/web
+  # extraVolumes + extraVolumeMounts — they are appended when this flag
+  # is true and rendered alone when this flag is false.
   readOnlyRootFilesystem: false
 
 # ─── API Server ──────────────────────────────────────────────────────

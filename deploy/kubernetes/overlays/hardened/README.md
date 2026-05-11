@@ -47,13 +47,32 @@ Apply and rollback each independently as needed.
 
 ## Helm operators
 
-The Helm chart does not currently render `readOnlyRootFilesystem=true` with
-the required writable `emptyDir` mounts — flipping
-`securityContext.readOnlyRootFilesystem=true` via `--set` or `values.yaml`
-will crash pods on first write to a temporary path because the chart has no
-`extraVolumes`/`extraVolumeMounts` support for these paths.
+As of CA-322, the Helm chart renders the matching writable `emptyDir`
+mounts automatically when you flip the security flag. To enable
+hardening on a Helm install:
 
-**Use this kustomize overlay for `readOnlyRootFilesystem` hardening.** If you
-deploy via Helm, apply the patches manually post-`helm template` (add
-`readOnlyRootFilesystem: true` and the `emptyDir` volumes shown above) or
-wait for Helm chart support to land as a follow-up ticket.
+```bash
+helm upgrade sourcebridge deploy/helm/sourcebridge \
+  --set securityContext.readOnlyRootFilesystem=true
+```
+
+The chart provisions:
+
+- `api`: `/tmp` (size limit `api.tmpSizeLimit`, default `1Gi`)
+- `worker`: `/tmp` (size limit `worker.tmpSizeLimit`, default `2Gi`) +
+  `/var/cache/sourcebridge` (size limit `worker.cacheSizeLimit`, default `4Gi`)
+- `web`: `/tmp` (size limit `web.tmpSizeLimit`, default `1Gi`) +
+  `/app/.next/cache` (size limit `web.nextCacheSizeLimit`, default `1Gi`)
+
+These match the kustomize overlay's mounts byte-for-byte. Operators with
+additional write paths can extend via `api.extraVolumes` +
+`api.extraVolumeMounts` (and the worker/web equivalents); they are
+appended when the flag is on and rendered alone when the flag is off.
+
+Verify the rendered output before upgrading:
+
+```bash
+helm template sourcebridge deploy/helm/sourcebridge \
+  --set securityContext.readOnlyRootFilesystem=true \
+  | grep -A2 "readOnlyRootFilesystem\|mountPath\|emptyDir"
+```
