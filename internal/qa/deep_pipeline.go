@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"log/slog"
+
 	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
@@ -333,7 +335,13 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 
 	t4 := time.Now()
 	req := &reasoningv1.AnswerQuestionRequest{
-		Question:       promptEnvelope,
+		// Fix A: send question + prior history without the context block.
+		// The context travels via ContextCode so the worker's
+		// build_discussion_prompt reconstructs the injection-guarded prompt
+		// without the double-wrapping that occurred when promptEnvelope was
+		// sent here — the model was seeing "Question: [full XML envelope]"
+		// with the real question buried inside <question> XML tags.
+		Question:       buildQuestionPayload(in),
 		RepositoryId:   in.RepositoryID,
 		ContextCode:    contextMD,
 		ContextSymbols: buildProtoContextSymbols(contextSymbols),
@@ -373,6 +381,17 @@ func (o *Orchestrator) deepAsk(ctx context.Context, in AskInput) (*AskResult, er
 			OutputTokens: int(u.GetOutputTokens()),
 		}
 		result.Diagnostics.ModelUsed = u.GetModel()
+	} else {
+		// Fix B: worker omitted usage (proto3 zero-value message dropped by
+		// encoder — common with Ollama when token counts are absent). Populate
+		// model from the configured ask model so callers never see a nil model.
+		slog.WarnContext(ctx, "qa: synthesizer returned nil usage; token counts unavailable",
+			"repository_id", in.RepositoryID,
+		)
+		if o.config.AskModel != "" {
+			result.Usage = AskUsage{Model: o.config.AskModel}
+			result.Diagnostics.ModelUsed = o.config.AskModel
+		}
 	}
 	for _, sym := range resp.GetReferencedSymbols() {
 		result.References = append(result.References, symbolRefFromProto(sym))

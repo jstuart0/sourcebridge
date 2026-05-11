@@ -153,8 +153,16 @@ func TestOrchestrator_SerializesConversationHistory(t *testing.T) {
 	if !strings.Contains(synth.lastReq.GetQuestion(), "previous turn 1") {
 		t.Errorf("prior messages not threaded into prompt: %q", synth.lastReq.GetQuestion())
 	}
-	if !strings.Contains(synth.lastReq.GetQuestion(), "<question>") {
-		t.Errorf("expected prompt envelope wrapping, got %q", synth.lastReq.GetQuestion())
+	// Fix A (CA-324): req.Question must NOT contain <question> XML tags —
+	// those caused the worker's build_discussion_prompt to render
+	// "Question: [full envelope]" with the real question buried inside.
+	// The injection-guard is now reconstructed worker-side.
+	if strings.Contains(synth.lastReq.GetQuestion(), "<question>") {
+		t.Errorf("req.Question must not contain XML <question> tags; got %q", synth.lastReq.GetQuestion())
+	}
+	// The bare user question must appear in the question payload.
+	if !strings.Contains(synth.lastReq.GetQuestion(), "latest turn") {
+		t.Errorf("bare question not in req.Question: %q", synth.lastReq.GetQuestion())
 	}
 }
 

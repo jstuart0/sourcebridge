@@ -420,12 +420,15 @@ func (o *Orchestrator) Ask(ctx context.Context, in AskInput) (*AskResult, error)
 	result.Diagnostics.QuestionType = string(kind)
 	result.Diagnostics.StageTimings["qa.classify"] = FromDuration(time.Since(t0))
 
-	// Stage 2: build the prompt envelope. Deep mode extends this with
+	// Stage 2: build context markdown. Deep mode extends this with
 	// retrieval-derived context; fast mode relies on caller-supplied
 	// code/file hints plus conversation history.
+	// Fix A: the prompt envelope (injection-guard wrapper) is no longer sent
+	// as req.Question — the worker reconstructs it around context_code +
+	// question. We still build contextMD here so it can be forwarded as
+	// req.ContextCode for the worker's injection-guard.
 	t1 := time.Now()
 	contextMD := buildContextMarkdown(in, nil, nil)
-	promptEnvelope := buildPromptEnvelope(in, contextMD)
 	result.Diagnostics.StageTimings["qa.prompt_build"] = FromDuration(time.Since(t1))
 
 	// Stage 3: synthesize. Lane-gate the RPC so search and QA don't
@@ -446,7 +449,11 @@ func (o *Orchestrator) Ask(ctx context.Context, in AskInput) (*AskResult, error)
 
 	t2 := time.Now()
 	req := &reasoningv1.AnswerQuestionRequest{
-		Question:     promptEnvelope,
+		// Fix A (fast path): send question + prior history without the context
+		// block. The context travels separately via ContextCode so the worker's
+		// build_discussion_prompt can reconstruct the injection-guarded prompt
+		// without double-wrapping. See deep_pipeline.go for the same change.
+		Question:     buildQuestionPayload(in),
 		RepositoryId: in.RepositoryID,
 		ContextCode:  contextMD,
 		FilePath:     in.FilePath,
@@ -574,10 +581,34 @@ func buildContextMarkdown(in AskInput, summaries []SummaryEvidence, requirementL
 	return sb.String()
 }
 
+// buildQuestionPayload returns the question field to send in
+// AnswerQuestionRequest.Question. It includes prior conversation turns (oldest
+// first) followed by the bare user question. The context block is NOT included
+// here — it goes into req.ContextCode so the worker can assemble the full
+// injection-guarded prompt via build_discussion_prompt without double-wrapping.
+func buildQuestionPayload(in AskInput) string {
+	if len(in.PriorMessages) == 0 {
+		return in.Question
+	}
+	var sb strings.Builder
+	sb.WriteString("Prior turns in this conversation (oldest first):\n")
+	for i, m := range in.PriorMessages {
+		fmt.Fprintf(&sb, "[%d] %s\n", i+1, m)
+	}
+	sb.WriteString("\n")
+	sb.WriteString(in.Question)
+	return sb.String()
+}
+
 // buildPromptEnvelope wraps the user question with the prompt-injection
 // defense boilerplate described in the plan's §Prompt-Injection Defense.
 // Content inside <context>/<question> is framed as data; the synthesis
 // template must treat everything inside as non-executable.
+//
+// NOTE: this envelope is no longer sent as req.Question to the worker —
+// the worker reconstructs the injection guard in build_discussion_prompt.
+// This function is retained for the IncludeDebug path (AskDebug.Prompt)
+// so developers can inspect the full assembled prompt.
 func buildPromptEnvelope(in AskInput, contextMD string) string {
 	var sb strings.Builder
 	if len(in.PriorMessages) > 0 {
