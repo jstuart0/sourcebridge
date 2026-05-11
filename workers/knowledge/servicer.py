@@ -1476,10 +1476,13 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
         """Shared scaffold for learning_path, workflow_story, and code_tour handlers.
 
         Runs ``work_task`` under ``run_with_heartbeat``, yields
-        ``KnowledgeStreamProgress`` protos, and stores the task's return
-        value in ``result_holder[0]`` on success.
+        ``KnowledgeStreamProgress`` protos, and appends the task's
+        return value to ``result_holder`` on success (read it as
+        ``result_holder[0]`` — the first appended value).
 
         Callers must:
+        - Pass ``result_holder = []`` (the helper ``append()``s; do NOT
+          pre-size or pre-fill).
         - Yield the RENDER phase marker BEFORE calling this generator.
         - Yield the FINALIZING phase marker and final response AFTER
           iteration completes.
@@ -1502,7 +1505,13 @@ class KnowledgeServicer(knowledge_pb2_grpc.KnowledgeServiceServicer):
             ):
                 prog.current_tokens_per_second = self._snapshot_tokens_per_second()
                 yield prog
-            result_holder[0] = await work_task
+            # CA-181 extracted-helper bug: callers initialise
+            # ``result_holder`` as an empty list ``[]``, so
+            # ``result_holder[0] = ...`` raises ``IndexError: list
+            # assignment index out of range``. Use ``append()`` to land
+            # the value at index 0; downstream readers use
+            # ``result_holder[0]`` which still works (first appended value).
+            result_holder.append(await work_task)
         except asyncio.CancelledError:
             log.warning(f"{event_name}_stream_cancelled")
             if not work_task.done():
