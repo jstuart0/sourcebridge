@@ -4,6 +4,75 @@ All notable changes to SourceBridge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.11.0-rc.3...v0.12.0-rc.3) (2026-05-11)
+
+
+### Added
+
+* **db:** RunInTxBatch helper + atomic transaction wrapping for index writers (CA-TBD-store-multi-step-write-atomicity) ([692e5da](https://github.com/sourcebridge-ai/sourcebridge/commit/692e5daea5b4c9a08db5f99a03fbc7ed87e1a996))
+* **db:** thread context.Context through all store interfaces (CA-183 Phase 1) ([0e34381](https://github.com/sourcebridge-ai/sourcebridge/commit/0e34381805e2716cd0149a99414f7564914df010))
+* **search:** wire embeddings backfill into indexing completion (CA-TBD-embeddings-autobackfill) ([691fdfc](https://github.com/sourcebridge-ai/sourcebridge/commit/691fdfced7314d17ab0b1c997671d04c1534822e))
+* **security:** atomic CSRF gate flag — admin route group + Bearer-bypass tighten (CA-198 + CA-201 phase 2) ([127243b](https://github.com/sourcebridge-ai/sourcebridge/commit/127243b0686b2cf968dad5ca5fae799b6d8e92f8))
+* **security:** block SSRF in git clone — scheme allowlist + IP denylist + redirect/submodule hardening (CA-312) ([16221c0](https://github.com/sourcebridge-ai/sourcebridge/commit/16221c01a3a09c6172d2579ceff1b91815365e9f))
+* **security:** tighten gRPC reflection gate to dual-key (CA-202) ([41b00b5](https://github.com/sourcebridge-ai/sourcebridge/commit/41b00b585481e2ddd1c9263422ce5f7129a88d88))
+* **web:** inject X-CSRF-Token on every browser mutating request (CA-198 phase 1) ([b43f1f1](https://github.com/sourcebridge-ai/sourcebridge/commit/b43f1f15c8108cb136448f241b59058550815ed4))
+
+
+### Fixed
+
+* **claude-md,samples:** close valerie validation punch list (CA-183 phase 5 reconcile) ([6b152aa](https://github.com/sourcebridge-ai/sourcebridge/commit/6b152aa0fae76d4761554444ff5e9e1b439023b4))
+* **cli:** phase 1.5 — sourcebridge ask inherits server-side mode default (CA-319) ([949cd91](https://github.com/sourcebridge-ai/sourcebridge/commit/949cd91665a03dffcbb4240219e623e6b3a39eaa))
+* **db:** add ctx to integration test compile sites missed in CA-183 phase 1 ([9b44512](https://github.com/sourcebridge-ai/sourcebridge/commit/9b44512502d7ab28bb6eb69ce2d1780d991f0964))
+* **db:** forward ctx in GetClusterForSymbol second DB hop (CA-183 phase 2 mid-build) ([27e910c](https://github.com/sourcebridge-ai/sourcebridge/commit/27e910c048b60508ac320b644e2fba3f3daccd7d))
+* **graphql,docs:** close codex r2 punch list for P11 (CA-184 + CA-305 reconcile) ([62de64a](https://github.com/sourcebridge-ai/sourcebridge/commit/62de64af85c73a7fb277d1e505cb9eb17f5fa5e5))
+* **helm,infra:** remove /healthz, /readyz, /metrics from public Ingress (CA-318) ([60d708c](https://github.com/sourcebridge-ai/sourcebridge/commit/60d708c980b6c9e88b4f74b908f675e43462ac72))
+* **helm:** canonical registry org, pinned tag, appVersion sync (CA-223, CA-224) ([ca49b87](https://github.com/sourcebridge-ai/sourcebridge/commit/ca49b87d9ad62520367b4844dd827aa39dbb37e3))
+* **helm:** per-component ServiceAccounts with automountServiceAccountToken: false (CA-230) ([ac1bafa](https://github.com/sourcebridge-ai/sourcebridge/commit/ac1bafad964486e871f95c794b1f9056eda5de73))
+* **helm:** Redis probes use redis-cli ping (CA-226) ([4074532](https://github.com/sourcebridge-ai/sourcebridge/commit/407453257567bb5719a13996de33bceec0c086c9))
+* **helm:** SurrealDB chown initContainer, securityContext, httpGet probes (CA-316, CA-225) ([2885972](https://github.com/sourcebridge-ai/sourcebridge/commit/2885972de3a63a36ff99cfabdf7ff699dbe10876))
+* **knowledge:** extend OnJobFailed reconciler-callback to all artifact types (CA-TBD-knowledge-artifact-reconciler-coverage) ([8c2c3d0](https://github.com/sourcebridge-ai/sourcebridge/commit/8c2c3d07fb6208e9d08bf0427daeb634e9f6bd32))
+* **knowledge:** phase 2 — allow needs-refresh transition from failed (CA-319) ([c36e8ff](https://github.com/sourcebridge-ai/sourcebridge/commit/c36e8ff9cf419f15cd834a5f4c6d0506694c8dc3))
+* **lint:** remove dead ulaBlock and noCtxHandler — fix golangci-lint unused gate ([37476b4](https://github.com/sourcebridge-ai/sourcebridge/commit/37476b4a7f9f8c71b2ac528507557d00d88eb060))
+* **mcp:** commit Phase 5 ctx-threading remainder + gofmt cleanup (CA-183 phase 5 follow-up) ([3749b75](https://github.com/sourcebridge-ai/sourcebridge/commit/3749b758a253fc6ae6e4c265f8b084aac690b5f1))
+* **mcp:** convert all noCtxHandler registrations to withCtxHandler (CA-183 Phase 5) ([c52beb4](https://github.com/sourcebridge-ai/sourcebridge/commit/c52beb4ea3fc114aa239cad09de36fba8f58e423))
+* **mcp:** thread ctx through MCP resource helpers and access check (CA-183 phase 5 polish) ([bcd84a5](https://github.com/sourcebridge-ai/sourcebridge/commit/bcd84a5e0f4eb2e3224fbb32c4b4e876d78c96a9))
+* **qa:** address validation findings — CLI legacy default, docs, enum tripwire, agentic mirror (CA-319) ([4b2b90b](https://github.com/sourcebridge-ai/sourcebridge/commit/4b2b90b36194aba85560069336eac4bb87c67806))
+* **qa:** persist clone cache + defensive grep-fallback path (CA-TBD-qa-no-evidence-with-hits) ([ab8252e](https://github.com/sourcebridge-ai/sourcebridge/commit/ab8252e39e7badfd81c78cd5e54760b7e5c9fe46))
+* **qa:** phase 1 — default ask mutation to deep mode (CA-319) ([e2b4fce](https://github.com/sourcebridge-ai/sourcebridge/commit/e2b4fcee8f3816e5b3a8565464fe3e638777aa49))
+* **qa:** phase 3 — accept partial-and-progressing corpus in readiness predicate (CA-319) ([7096892](https://github.com/sourcebridge-ai/sourcebridge/commit/70968925238e8ce5c87835a68af65e4b913c3154))
+* **search:** flatten vectorSymbolRow + explicit field list (CA-TBD-search-vector-symbol-hydration) ([2a9d54d](https://github.com/sourcebridge-ai/sourcebridge/commit/2a9d54d7dc27b9c752ded2f498f7a27b948f557e))
+* **search:** raise VectorTimeout default, make configurable, populate EmbedMs (CA-TBD-vector-retrieval-timeout) ([730bdcc](https://github.com/sourcebridge-ai/sourcebridge/commit/730bdcc3eb91d9f73b1b897d70c3ea4f277d2898))
+* **security:** close P8 reconcile findings — 0.0.0.0/:: denylist + gitPullCmd redirects + SSE handler tests + MCP fallback validation + docs (CA-202..CA-205 reconcile) ([8b21f70](https://github.com/sourcebridge-ai/sourcebridge/commit/8b21f70eb19763e97c1ff15d5bb5b3a5d8f1e3d4))
+* **security:** close P8 valerie punch list — T29/T44/T45/T46 tests + docs/installation.md + CHANGELOG (CA-202..CA-205) ([6ae7105](https://github.com/sourcebridge-ai/sourcebridge/commit/6ae7105efa3783329546debc0438d30486f3268e))
+* **security:** gate TenantFilteredStore federation methods on tenant access (CA-203) ([9fa08a9](https://github.com/sourcebridge-ai/sourcebridge/commit/9fa08a911e439413967329c8ec991ead8d13c935))
+* **security:** per-tenant SSE filter, repo_id backfill, and subscription cleanup (CA-205, X-L2) ([bf2b53b](https://github.com/sourcebridge-ai/sourcebridge/commit/bf2b53b4e41792b237fb433ac845603134e1a0dd))
+* **workers:** ruff I001 — sort imports in test_main_grpc_reflection.py ([87856f1](https://github.com/sourcebridge-ai/sourcebridge/commit/87856f1dfe0ea40d8222b5c19137a825b98e43b2))
+
+
+### Changed
+
+* **db:** decompose store.go into per-domain files (CA-182 phase 3) ([04d75bf](https://github.com/sourcebridge-ai/sourcebridge/commit/04d75bf340a35909f0022c3be8e851c26314406e))
+* **db:** delete ctx() helper, thread ctx parameter into method bodies (CA-183 phase 2) ([88221e0](https://github.com/sourcebridge-ai/sourcebridge/commit/88221e08dd3f880f440afe8d3dce1fda83996eb7))
+* **db:** extract jobParams to deduplicate llm_job_store Create/Update (CA-185) ([0e140d1](https://github.com/sourcebridge-ai/sourcebridge/commit/0e140d1a3012554e64a0d4c42df954fc8e5e8139))
+* **db:** thread ctx through llm_config_store, livingwiki_settings_store, queue_control_store ([6ba8e78](https://github.com/sourcebridge-ai/sourcebridge/commit/6ba8e788705f1efca65c106f370029170b6da6d1))
+* **graphql,rest:** delete GitConfigLoader legacy adapter (CA-305) ([763d93c](https://github.com/sourcebridge-ai/sourcebridge/commit/763d93c3c5a45233e745c75cc4d27c25cef2faeb))
+* **graphql:** collapse Resolver mirror fields into r.Deps.X (CA-184 Phase 1) ([64fec4d](https://github.com/sourcebridge-ai/sourcebridge/commit/64fec4dc618986588afc81ea49c365610c5d0f31))
+* **graphql:** extract runKnowledgeGeneration shared scaffold (CA-186) ([991be45](https://github.com/sourcebridge-ai/sourcebridge/commit/991be451b24c67b7692c19e518a0bbadc40637f4))
+* **workers:** extract _run_simple_streaming_generation envelope (CA-181) ([0edc0fe](https://github.com/sourcebridge-ai/sourcebridge/commit/0edc0fee55dcc268dd08e2c31e39161a11aa739f))
+
+
+### Documentation
+
+* **audit-remediation:** CLAUDE.md + flip runbook polish for CA-198 + CA-201 ([ab59c37](https://github.com/sourcebridge-ai/sourcebridge/commit/ab59c37743d8eeebfda4f6cc3154d1dad938359d))
+* **changelog:** fix duplicate Unreleased — fold stale block into v0.11.0-rc.3 extended notes ([07ff003](https://github.com/sourcebridge-ai/sourcebridge/commit/07ff00305a61a1dae1710ba4b20905c9107bc9fa))
+* **claude-md:** add CA-183/CA-182 P10 entry; fix stale store.go refs and CA-200 cipher claim (CA-183 phase 4) ([14fc555](https://github.com/sourcebridge-ai/sourcebridge/commit/14fc5559bf9a81969d36ca0b9b55404780588539))
+* **claude-md:** add CA-184/CA-305 P11 entry (CA-184 phase 3) ([dc1ec94](https://github.com/sourcebridge-ai/sourcebridge/commit/dc1ec948808139517f85a653894a1c90db286813))
+* **claude-md:** update P8 wave-3 entry with reconcile SHA 2552036 ([78845df](https://github.com/sourcebridge-ai/sourcebridge/commit/78845dfda7f2852f647d059abd5c2aae9b316df0))
+* **claude:** add CA-TBD-knowledge-artifact-reconciler-coverage load-bearing constraints ([e53072a](https://github.com/sourcebridge-ai/sourcebridge/commit/e53072aa0cb48b9e4f12f046a86f2297f3c4ca1a))
+* **claude:** update P10 Phase 5 SHA in CLAUDE.md ([ea3dfcb](https://github.com/sourcebridge-ai/sourcebridge/commit/ea3dfcbd4afcb9703765001598d0e7960497d23f))
+* **p10:** final documentation pass for CA-183/CA-182 campaign ([1b30b99](https://github.com/sourcebridge-ai/sourcebridge/commit/1b30b99b9146c5eb073fe7993870e1745242627b))
+* **qa:** phase 6 — CLAUDE.md + CHANGELOG + installation.md for bulletproof QA (CA-319) ([9cee513](https://github.com/sourcebridge-ai/sourcebridge/commit/9cee513e362c3ab5d50ce331f88325b61da4d3d0))
+
 ## [0.11.0-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.10.0-rc.3...v0.11.0-rc.3) (2026-05-08)
 
 
