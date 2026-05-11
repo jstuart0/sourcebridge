@@ -35,6 +35,17 @@ func TestSecurityDefaultsCSRFFullCoverageEnabled(t *testing.T) {
 	}
 }
 
+func TestMCPDefaultsPublicProbeTrue(t *testing.T) {
+	cfg := Defaults()
+	if !cfg.MCP.PublicProbe {
+		t.Error("MCP.PublicProbe must default to true; found false — " +
+			"this would hide the HEAD /api/v1/mcp/http probe from unauthenticated " +
+			"callers by default, breaking the web UI MCP onboarding banner. " +
+			"Set SOURCEBRIDGE_MCP_PUBLIC_PROBE=false explicitly to opt in to hiding the probe. " +
+			"See CA-314.")
+	}
+}
+
 func TestDefaults(t *testing.T) {
 	cfg := Defaults()
 	if cfg.Server.HTTPPort != 8080 {

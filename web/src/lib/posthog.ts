@@ -28,22 +28,37 @@ export function initPostHog() {
 /**
  * Identify the current user to PostHog. Call after login.
  * Extracts user info from the JWT token payload.
+ *
+ * Privacy: only opaque identifiers are sent — no email, name, or other PII.
+ * The userId is the JWT subject (an opaque UUID). DNT is honoured both here
+ * and via posthog.init's respect_dnt option.
  */
 export function identifyUser(token: string) {
   if (!POSTHOG_KEY || typeof window === "undefined") return;
 
+  // Honour Do Not Track before any identify() or capture() call.
+  if (
+    navigator.doNotTrack === "1" ||
+    (window as Window & { doNotTrack?: string }).doNotTrack === "1"
+  ) {
+    return;
+  }
+
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return;
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    const payload = JSON.parse(
+      atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")),
+    );
 
+    // userId is payload.sub / payload.user_id — opaque JWT subject UUID.
+    // Never use email or name here: those are PII.
     const userId = payload.sub || payload.user_id;
     if (!userId) return;
 
     posthog.identify(userId, {
-      email: payload.email,
-      name: payload.name,
-      tenant_id: payload.tenant_id,
+      // tenant_id is an opaque UUID — not PII.
+      ...(payload.tenant_id ? { tenant_id: payload.tenant_id } : {}),
     });
   } catch {
     // Silently ignore malformed tokens

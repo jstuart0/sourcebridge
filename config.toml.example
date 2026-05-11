@@ -188,6 +188,19 @@ mode = "oss"
 #   5-min window) so retries of the same request stay on the same
 #   path. Ignored when ENABLED=true (agentic is always on).
 
+# ─── MCP (Model Context Protocol) ────────────────────────────────
+# [mcp]
+# enabled = false
+#
+# public_probe = true
+#   When true (default), the HEAD /api/v1/mcp/http probe returns 204 to
+#   unauthenticated callers, allowing the web UI to show the MCP onboarding
+#   banner before login. Set false to hide the MCP surface from unauthenticated
+#   observers (404 is returned; the frontend treats 404 as "MCP not enabled").
+#   Authenticated callers always receive 204 when MCP is enabled, regardless
+#   of this setting.
+#   Env var: SOURCEBRIDGE_MCP_PUBLIC_PROBE
+
 # ─── Graceful drain / shutdown ────────────────────────────────────
 # CA-142: controls how long the API process waits for in-flight
 # Living Wiki cold-start and other LLM orchestrator jobs to complete

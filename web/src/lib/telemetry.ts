@@ -12,6 +12,14 @@ export interface TelemetryEvent {
 export function trackEvent(payload: TelemetryEvent) {
   if (typeof window === "undefined") return;
 
+  // Honour Do Not Track before any capture() call — mirrors identifyUser.
+  if (
+    navigator.doNotTrack === "1" ||
+    (window as Window & { doNotTrack?: string }).doNotTrack === "1"
+  ) {
+    return;
+  }
+
   // Send to PostHog (if initialized)
   posthog.capture(payload.event, {
     repository_id: payload.repositoryId,

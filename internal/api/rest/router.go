@@ -1282,23 +1282,48 @@ func (s *Server) setupRouter() {
 		// every browser DevTools console. Answer 204 instead so the probe
 		// is invisible.
 		//
-		// SECURITY: this probe is intentionally unauthenticated. It returns
-		// 204 only when MCP is enabled, which lets an unauthenticated
-		// observer fingerprint a SourceBridge install with MCP turned on.
-		// We accept this trade-off because the probe is the mechanism the
-		// web UI uses to render pre-auth UX (the "MCP isn't enabled on this
-		// server" banner). Auth-gating the probe would push that detection
-		// behind login and degrade the first-touch experience for users on
-		// misconfigured servers. The disclosure is bounded — version, tenant
-		// data, and auth-method enumeration are not exposed by this endpoint
-		// (auth methods are advertised at /auth/desktop/info, which is
-		// unauthenticated for the same reason). See the security model
-		// section in docs/user/security-model.md for the full pre-auth
-		// surface. See also xander finding H4 in the adversarial security
-		// audit (2026-04-28-cloud-install-security-review-xander.md).
-		r.Method("HEAD", "/api/v1/mcp/http", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusNoContent)
-		}))
+		// SECURITY: when Config.MCP.PublicProbe is true (default), this probe
+		// is intentionally unauthenticated. It returns 204 only when MCP is
+		// enabled, which lets an unauthenticated observer fingerprint a
+		// SourceBridge install with MCP turned on. We accept this trade-off
+		// because the probe is the mechanism the web UI uses to render pre-auth
+		// UX (the "MCP isn't enabled on this server" banner). Auth-gating the
+		// probe would push that detection behind login and degrade the
+		// first-touch experience for users on misconfigured servers.
+		//
+		// When PublicProbe is false, unauthenticated requests receive 404 — the
+		// canonical "not here" signal. The frontend treats any status other
+		// than 404 as "MCP enabled" (plan Decision 6 / codex r1b H4), so 404
+		// cleanly hides the surface. Auth'd requests still receive 204 when
+		// PublicProbe is false (the route still exists for authenticated clients).
+		//
+		// See docs/user/security-model.md for the full pre-auth surface discussion.
+		// See xander finding H4 in the adversarial audit (2026-04-28).
+		if s.cfg.MCP.PublicProbe {
+			r.Method("HEAD", "/api/v1/mcp/http", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			}))
+		} else {
+			// PublicProbe=false: soft-auth the probe. A valid Bearer token → 204
+			// (MCP is enabled for this authenticated caller). No token / invalid
+			// token → 404 (canonical "not here" signal per plan Decision 6 /
+			// codex r1b H4 — frontend treats 404 as "MCP not enabled").
+			//
+			// We cannot use authMiddleware() here because it is fail-closed (401
+			// on missing/invalid token), which would reveal that the route exists.
+			// Instead we do a soft JWT check: if the Authorization header carries
+			// a valid token, respond 204; otherwise respond 404.
+			jwtMgr := s.jwtMgr
+			r.Method("HEAD", "/api/v1/mcp/http", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if bearer := r.Header.Get("Authorization"); jwtMgr != nil && len(bearer) > 7 && bearer[:7] == "Bearer " {
+					if _, err := jwtMgr.ValidateToken(bearer[7:]); err == nil {
+						w.WriteHeader(http.StatusNoContent)
+						return
+					}
+				}
+				http.NotFound(w, r)
+			}))
+		}
 		slog.Info("mcp server enabled", "max_sessions", s.cfg.MCP.MaxSessions, "session_ttl", sessionTTL, "keepalive", keepalive)
 	}
 

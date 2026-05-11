@@ -476,6 +476,19 @@ type MCPConfig struct {
 	SessionTTL  int    `mapstructure:"session_ttl"`  // seconds before idle session is reaped
 	Keepalive   int    `mapstructure:"keepalive"`    // seconds between SSE keepalive pings
 	MaxSessions int    `mapstructure:"max_sessions"` // max concurrent MCP sessions (0 = unlimited)
+
+	// PublicProbe controls whether the unauthenticated HEAD /api/v1/mcp/http
+	// probe returns 204 (true, default) or 404 (false). The web UI reads this
+	// probe before login to decide whether to show the MCP onboarding banner.
+	// Set false to hide the MCP surface from unauthenticated observers (e.g.
+	// on installations where fingerprinting is a concern). When false, the
+	// probe returns 404 to unauthenticated requests — the frontend treats any
+	// status other than 404 as "MCP enabled" so 404 is the clean "not here"
+	// signal (plan Decision 6 / codex r1b H4).
+	//
+	// Config key: mcp.public_probe
+	// Env var:    SOURCEBRIDGE_MCP_PUBLIC_PROBE
+	PublicProbe bool `mapstructure:"public_probe"`
 }
 
 // QAConfig controls the server-side deep-QA orchestrator.
@@ -813,6 +826,7 @@ func Defaults() *Config {
 			SessionTTL:  3600, // 1 hour
 			Keepalive:   30,   // 30 seconds
 			MaxSessions: 100,
+			PublicProbe: true,
 		},
 		Trash: TrashConfig{
 			Enabled:          true,
@@ -946,6 +960,7 @@ func Load() (*Config, error) {
 	v.SetDefault("mcp.session_ttl", cfg.MCP.SessionTTL)
 	v.SetDefault("mcp.keepalive", cfg.MCP.Keepalive)
 	v.SetDefault("mcp.max_sessions", cfg.MCP.MaxSessions)
+	v.SetDefault("mcp.public_probe", cfg.MCP.PublicProbe)
 	v.SetDefault("trash.enabled", cfg.Trash.Enabled)
 	v.SetDefault("trash.retention_days", cfg.Trash.RetentionDays)
 	v.SetDefault("trash.sweep_interval_sec", cfg.Trash.SweepIntervalSec)

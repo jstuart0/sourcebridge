@@ -85,6 +85,36 @@ Telemetry data is sent to `https://telemetry.sourcebridge.ai/v1/ping` via
 HTTPS. The endpoint is operated by SourceBridge. Data is used in aggregate
 only and is not sold or shared with third parties.
 
+## Third-party analytics (PostHog)
+
+The web frontend optionally sends browser-side analytics to PostHog.
+This is **separate** from the server-side telemetry above and is only
+active when `NEXT_PUBLIC_POSTHOG_KEY` is set at build time.
+
+**Host**: `NEXT_PUBLIC_POSTHOG_HOST` (default: `https://us.i.posthog.com`)
+
+**What is sent**:
+
+| Event | Fields |
+|-------|--------|
+| Page views (auto) | URL path (no query params with PII) |
+| Capture events | Event name, timestamp |
+| User identity | Opaque user ID (JWT subject UUID), opaque tenant ID (UUID) |
+
+**What is NOT sent**: email address, name, or any other PII. The
+`identify()` call was audited (CA-211) to strip `email` and `name` from
+the properties payload. Only the JWT subject (an opaque UUID assigned at
+account creation) and tenant ID (also an opaque UUID) are forwarded.
+
+**Opt out**:
+
+- Set the **Do Not Track** browser setting (`navigator.doNotTrack = "1"`).
+  The analytics client checks DNT before every `identify()` call, and
+  PostHog's `respect_dnt: true` option suppresses autocapture as well.
+- Leave `NEXT_PUBLIC_POSTHOG_KEY` unset (or empty) at build time. When
+  the key is absent, the PostHog client never initialises and no data
+  is sent.
+
 ## Source code
 
 The client-side telemetry sender remains in the OSS repository at
