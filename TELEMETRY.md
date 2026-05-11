@@ -99,12 +99,11 @@ active when `NEXT_PUBLIC_POSTHOG_KEY` is set at build time.
 |-------|--------|
 | Page views (auto) | URL path (no query params with PII) |
 | Capture events | Event name, timestamp |
-| User identity | Opaque user ID (JWT subject UUID), opaque tenant ID (UUID) |
+| User identity | Opaque user ID (JWT subject UUID) |
 
-**What is NOT sent**: email address, name, or any other PII. The
-`identify()` call was audited (CA-211) to strip `email` and `name` from
-the properties payload. Only the JWT subject (an opaque UUID assigned at
-account creation) and tenant ID (also an opaque UUID) are forwarded.
+**What is NOT sent**: email address, name, tenant ID, or any other PII. The
+`identify()` call was audited (CA-211 + CA-320) to send only the JWT subject
+(an opaque UUID assigned at account creation).
 
 **Opt out**:
 

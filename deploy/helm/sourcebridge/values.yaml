@@ -169,7 +169,11 @@ worker:
       memory: 1Gi
     limits:
       cpu: "2"
-      memory: 4Gi
+      # Default is 2Gi — sufficient for most deployments at the default
+      # SOURCEBRIDGE_KNOWLEDGE_MAX_CONCURRENCY=1.  For production workloads
+      # with higher concurrency or large model context windows, override via:
+      #   --set worker.resources.limits.memory=4Gi
+      memory: 2Gi
   # -- Extra environment variables passed to the worker container.
   # The top-level `llm` and `embedding` sections are the recommended way
   # to configure LLM/embedding providers. Use this map only for overrides

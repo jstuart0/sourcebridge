@@ -5,10 +5,13 @@
 #   sourcebridge-api, sourcebridge-worker, sourcebridge-web,
 #   surrealdb (note: not "sourcebridge-surrealdb"), redis
 #
-# Ingress-controller selector targets Traefik (thor cluster uses Traefik).
-# For nginx-ingress clusters, replace the podSelector label with:
-#   app.kubernetes.io/name: ingress-nginx
-# and adjust the namespaceSelector to match your ingress namespace.
+# Ingress-controller selector targets Traefik
+# (`kubernetes.io/metadata.name: traefik`). Adjust the namespaceSelector
+# label for your ingress controller (nginx-ingress, contour, etc.):
+#   nginx-ingress:  kubernetes.io/metadata.name: ingress-nginx
+#                   app.kubernetes.io/name: ingress-nginx
+#   contour:        kubernetes.io/metadata.name: projectcontour
+#                   app.kubernetes.io/name: contour
 #
 # DNS egress targets kube-dns in kube-system. If you run CoreDNS under
 # a different label, update allow-dns-egress accordingly.
@@ -59,7 +62,7 @@ spec:
   policyTypes:
     - Ingress
   ingress:
-    # From Traefik ingress controller (thor uses Traefik)
+    # From Traefik ingress controller (adjust namespaceSelector for your ingress controller)
     - from:
         - namespaceSelector:
             matchLabels:
@@ -214,7 +217,7 @@ spec:
   policyTypes:
     - Ingress
   ingress:
-    # From Traefik ingress controller (thor uses Traefik)
+    # From Traefik ingress controller (adjust namespaceSelector for your ingress controller)
     - from:
         - namespaceSelector:
             matchLabels:

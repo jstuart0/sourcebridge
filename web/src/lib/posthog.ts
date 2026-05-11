@@ -56,10 +56,8 @@ export function identifyUser(token: string) {
     const userId = payload.sub || payload.user_id;
     if (!userId) return;
 
-    posthog.identify(userId, {
-      // tenant_id is an opaque UUID — not PII.
-      ...(payload.tenant_id ? { tenant_id: payload.tenant_id } : {}),
-    });
+    // Phase 6: identify with opaque user ID only — no tenant_id per plan.
+    posthog.identify(userId);
   } catch {
     // Silently ignore malformed tokens
   }

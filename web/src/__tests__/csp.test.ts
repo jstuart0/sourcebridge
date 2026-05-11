@@ -16,6 +16,7 @@ describe("Content-Security-Policy header contract", () => {
     expect(csp).toContain(`object-src 'none'`);
     expect(csp).toContain("us.i.posthog.com");
     expect(csp).toContain("wss:");
+    expect(csp).toContain("ws:");
   });
 
   it("sets X-Content-Type-Options and Referrer-Policy", async () => {

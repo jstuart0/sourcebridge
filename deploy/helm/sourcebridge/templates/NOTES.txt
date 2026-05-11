@@ -106,9 +106,16 @@ WARNING: Back up your encryption Secret before every helm upgrade.
 
 == Worker Memory ==
 
-  Changing `worker.resources.limits.memory` in your values file triggers a
-  Deployment rollout on `helm upgrade`. Size the limit to at least 2× the
-  HuggingFace model cache footprint for your configured models.
+  The default worker memory limit is 2Gi. For production workloads with
+  higher concurrency (SOURCEBRIDGE_KNOWLEDGE_MAX_CONCURRENCY > 1) or large
+  model context windows, increase the limit explicitly:
+
+    helm upgrade {{ .Release.Name }} sourcebridge/ \
+      --set worker.resources.limits.memory=4Gi \
+      -n {{ .Release.Namespace }}
+
+  Changing this value triggers a Deployment rollout. Size the limit to at
+  least 2× the HuggingFace model cache footprint for your configured models.
 
 == Prometheus Metrics ==
 

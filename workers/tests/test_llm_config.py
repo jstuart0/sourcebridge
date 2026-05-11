@@ -9,6 +9,7 @@ from workers.common.llm.config import (
     create_llm_provider,
     create_llm_provider_for_request,
     create_report_provider,
+    validate_llm_base_url,
 )
 
 
@@ -206,9 +207,72 @@ async def test_create_report_provider_uses_same_gate_for_same_endpoint(gate_regi
     assert main_prov._gate._binding is report_prov._gate._binding
 
 
-# ─── CA-214: LLM base-URL SSRF guard ─────────────────────────────────────────
+# ─── CA-214: LLM base-URL SSRF guard — provider construction (H2) ────────────
 
-from workers.common.llm.config import validate_llm_base_url  # noqa: E402
+
+@pytest.mark.asyncio
+async def test_create_llm_provider_rejects_private_base_url_strict_mode():
+    """CA-214/H2: private URL is rejected at provider construction (bootstrap path)
+    when allow_private_base_url is False."""
+    cfg = WorkerConfig(
+        llm_provider="openai",
+        llm_api_key="test",
+        llm_model="gpt-4o",
+        llm_base_url="http://192.168.1.100:8080/v1",
+        llm_allow_private_base_url=False,
+    )
+    with pytest.raises(ValueError, match="private"):
+        await create_llm_provider(cfg)
+
+
+@pytest.mark.asyncio
+async def test_create_llm_provider_allows_private_base_url_when_opted_in():
+    """CA-214/H2: private URL is accepted when allow_private_base_url is True."""
+    cfg = WorkerConfig(
+        llm_provider="ollama",
+        llm_api_key="",
+        llm_model="qwen3:7b",
+        llm_base_url="http://192.168.1.100:11434/v1",
+        llm_allow_private_base_url=True,
+    )
+    # Must not raise.
+    provider = await create_llm_provider(cfg)
+    assert provider is not None
+
+
+@pytest.mark.asyncio
+async def test_create_llm_provider_for_request_rejects_private_url_override():
+    """CA-214/H2: per-request URL override is validated at construction time."""
+    cfg = WorkerConfig(
+        llm_provider="openai",
+        llm_api_key="test",
+        llm_model="gpt-4o",
+        llm_allow_private_base_url=False,
+    )
+    with pytest.raises(ValueError, match="private"):
+        await create_llm_provider_for_request(
+            cfg,
+            base_url="http://10.0.0.5:8080/v1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_report_provider_rejects_private_base_url():
+    """CA-214/H2: report provider URL is validated at construction time."""
+    cfg = WorkerConfig(
+        llm_provider="openai",
+        llm_api_key="test",
+        llm_model="gpt-4o",
+        llm_report_provider="openai",
+        llm_report_model="gpt-4o-mini",
+        llm_report_base_url="http://172.16.0.10:8080/v1",
+        llm_allow_private_base_url=False,
+    )
+    with pytest.raises(ValueError, match="private"):
+        await create_report_provider(cfg)
+
+
+# ─── CA-214: LLM base-URL SSRF guard — unit tests ────────────────────────────
 
 
 @pytest.mark.parametrize(

@@ -178,10 +178,13 @@ def _create_llm_provider_sync(
     haven't been made async yet).  No gate wrapping — the caller uses the
     returned ``ProviderResolutionKey`` to look up the gate directly.
     """
+    effective_base_url = base_url or config.llm_base_url
+    # CA-214: validate at provider construction, not just at save time.
+    validate_llm_base_url(effective_base_url, allow_private=config.llm_allow_private_base_url)
     effective = config.model_copy(
         update={
             "llm_provider": provider or config.llm_provider,
-            "llm_base_url": base_url or config.llm_base_url,
+            "llm_base_url": effective_base_url,
             "llm_api_key": api_key or config.llm_api_key,
             "llm_model": model or config.llm_model,
             "llm_draft_model": draft_model or config.llm_draft_model,
@@ -192,7 +195,12 @@ def _create_llm_provider_sync(
 
 
 def _build_raw_llm_provider(config: WorkerConfig) -> LLMProvider:
-    """Build a raw (unwrapped) LLM provider from config.  No gate, no async."""
+    """Build a raw (unwrapped) LLM provider from config.  No gate, no async.
+
+    CA-214: callers are responsible for calling ``validate_llm_base_url``
+    before reaching here.  This function does NOT re-validate — the check
+    belongs at the construction boundary, not inside the factory switch.
+    """
     if config.test_mode:
         return FakeLLMProvider()
 
@@ -263,6 +271,8 @@ async def create_llm_provider(
     host/kind gate.  When None (kill-switch off or tests that construct
     providers directly), the raw provider is returned unchanged.
     """
+    # CA-214: validate bootstrap base URL before constructing any provider.
+    validate_llm_base_url(config.llm_base_url, allow_private=config.llm_allow_private_base_url)
     raw = _build_raw_llm_provider(config)
 
     if gate_registry is not None:
@@ -317,10 +327,15 @@ async def create_llm_provider_for_request(
     ``create_llm_provider`` so the returned provider is wrapped in the
     concurrency gate (plan v4 Phase 2, bob H4).
     """
+    effective_base_url = base_url or config.llm_base_url
+    # CA-214: validate per-request base URL override before constructing.
+    # create_llm_provider also validates config.llm_base_url, but the
+    # per-request override may differ from config — validate the effective URL.
+    validate_llm_base_url(effective_base_url, allow_private=config.llm_allow_private_base_url)
     effective = config.model_copy(
         update={
             "llm_provider": provider or config.llm_provider,
-            "llm_base_url": base_url or config.llm_base_url,
+            "llm_base_url": effective_base_url,
             "llm_api_key": api_key or config.llm_api_key,
             "llm_model": model or config.llm_model,
             "llm_draft_model": draft_model or config.llm_draft_model,
@@ -351,6 +366,9 @@ async def create_report_provider(
     model = config.llm_report_model or config.llm_model
     api_key = config.llm_report_api_key or config.llm_api_key
     base_url = config.llm_report_base_url or config.llm_base_url
+
+    # CA-214: validate report provider base URL before constructing.
+    validate_llm_base_url(base_url, allow_private=config.llm_allow_private_base_url)
 
     if provider_name == "anthropic":
         raw: LLMProvider = AnthropicProvider(api_key=api_key, model=model)

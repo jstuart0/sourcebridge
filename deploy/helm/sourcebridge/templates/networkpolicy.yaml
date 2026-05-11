@@ -66,9 +66,8 @@ spec:
   policyTypes:
     - Ingress
   ingress:
-    # From Traefik ingress controller (thor cluster uses Traefik).
-    # For nginx-ingress clusters replace the podSelector label with
-    # app.kubernetes.io/name: ingress-nginx and adjust namespaceSelector.
+    # From Traefik ingress controller. Adjust the namespaceSelector label
+    # for your ingress controller (nginx-ingress, contour, etc.).
     - from:
         - namespaceSelector:
             matchLabels:
@@ -232,7 +231,7 @@ spec:
   policyTypes:
     - Ingress
   ingress:
-    # From Traefik ingress controller (thor cluster uses Traefik).
+    # From Traefik ingress controller (adjust namespaceSelector for your ingress controller).
     - from:
         - namespaceSelector:
             matchLabels:

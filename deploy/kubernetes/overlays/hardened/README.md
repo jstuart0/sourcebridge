@@ -45,11 +45,15 @@ kubectl apply -k deploy/kubernetes/overlays/hardened/
 
 Apply and rollback each independently as needed.
 
-## Helm equivalent
+## Helm operators
 
-The Helm chart's `securityContext.readOnlyRootFilesystem` defaults `false`.
-Operators can flip to `true` via `--set securityContext.readOnlyRootFilesystem=true`
-but MUST also supply matching `emptyDir` mounts via `extraVolumes` and
-`extraVolumeMounts` values, or the pods will crash on first write to a
-temporary path. The Kubernetes overlays above are the recommended path for
-kustomize-managed clusters.
+The Helm chart does not currently render `readOnlyRootFilesystem=true` with
+the required writable `emptyDir` mounts — flipping
+`securityContext.readOnlyRootFilesystem=true` via `--set` or `values.yaml`
+will crash pods on first write to a temporary path because the chart has no
+`extraVolumes`/`extraVolumeMounts` support for these paths.
+
+**Use this kustomize overlay for `readOnlyRootFilesystem` hardening.** If you
+deploy via Helm, apply the patches manually post-`helm template` (add
+`readOnlyRootFilesystem: true` and the `emptyDir` volumes shown above) or
+wait for Helm chart support to land as a follow-up ticket.
