@@ -253,7 +253,7 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 
 	userID, tenantID := currentActorIdentity(r)
 	tokenStr, record, err := s.tokenStore.CreateToken(r.Context(), auth.CreateTokenInput{
-		Name:       req.Name,
+		Name:       trimmedName,
 		UserID:     userID,
 		TenantID:   tenantID,
 		Kind:       auth.TokenKindAdminAPI,

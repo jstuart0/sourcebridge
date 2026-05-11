@@ -86,6 +86,11 @@ ask_model     = "qwen3:32b"
 http_port = 8080
 grpc_port = 50051
 
+# Reject wildcard CORS origins at startup (default: false).
+# When true, server fails to start if cors_origins contains any entry with `*`.
+# AllowCredentials is hardcoded true; combined with a wildcard origin this is a security risk.
+# reject_wildcard_cors_with_credentials = false
+
 [storage]
 surreal_mode = "embedded"
 

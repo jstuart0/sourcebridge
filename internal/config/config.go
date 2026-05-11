@@ -1117,8 +1117,8 @@ func (c *Config) Validate() error {
 		if strings.Contains(trimmed, "*") {
 			if c.Server.RejectWildcardCORSWithCredentials {
 				return fmt.Errorf(
-					"server.cors_origins[%d] = %q is a wildcard pattern, which is unsafe with hardcoded AllowCredentials=true; "+
-						"either narrow the origin or set server.reject_wildcard_cors_with_credentials=false",
+					"server.cors_origins[%d] = %q is a wildcard pattern; "+
+						"narrow it to a specific origin (wildcards are unsafe with AllowCredentials=true)",
 					i, origin,
 				)
 			}

@@ -1633,7 +1633,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		// that runs in the web container (separate process), not under this CSP header.
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self' https:")
 		// CA-209: HSTS — max-age=1 year, includeSubDomains. No preload (one-way HSTS-preload submission is an
-		// operator opt-in via external tooling — see docs/going-to-production.md).
+		// operator opt-in via external tooling — see docs/going-to-production.md § HSTS).
 		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		next.ServeHTTP(w, r)
 	})

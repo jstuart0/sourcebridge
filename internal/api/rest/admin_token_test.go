@@ -149,6 +149,37 @@ func TestHandleCreateToken_AdminRoleByNilClaims(t *testing.T) {
 	}
 }
 
+// TestHandleCreateToken_NameWhitespaceStripped verifies that leading/trailing
+// whitespace is stripped from the name before storage (CA-320 B1).
+// The response name must equal the trimmed value, not the raw input.
+func TestHandleCreateToken_NameWhitespaceStripped(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"  my token  ", "my token"},
+		{"\t my token \t", "my token"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.input, func(t *testing.T) {
+			s := newTokenTestServer(t)
+			rec := postCreateToken(t, s, nil, map[string]string{"name": tc.input})
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+			}
+			var resp map[string]interface{}
+			if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			got, _ := resp["name"].(string)
+			if got != tc.want {
+				t.Errorf("name: got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestHandleCreateToken_MissingName verifies that a request with no name
 // receives 400.
 func TestHandleCreateToken_MissingName(t *testing.T) {

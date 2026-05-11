@@ -121,6 +121,15 @@ SourceBridge does not terminate TLS itself. Place a reverse proxy in front of it
 
 This is important because SourceBridge sets `Secure: true` on its CSRF cookie. If you access the API over plain HTTP without a TLS-terminating proxy, cookie-based authentication will silently fail — the browser won't send the cookie on non-HTTPS requests.
 
+### HSTS
+
+The API responds with `Strict-Transport-Security: max-age=31536000; includeSubDomains` on every response. Browsers that load the API over plain HTTP will still see the header — and on a subsequent HTTPS visit will pin the domain for one year, refusing future plain-HTTP visits.
+
+**Operator impact:**
+- Deployments behind a TLS-terminating reverse proxy (the supported deployment posture): no action needed; HSTS reaches the browser only after TLS termination.
+- Bare HTTP deployments (development, local docker compose): HSTS still reaches the browser. Browsers ignore HSTS on plain-HTTP origins, so this is harmless. But if the same hostname is later served over HTTPS, HSTS will be in effect.
+- No `preload` directive is set. Operators wanting preload must submit their domain manually at https://hstspreload.org/ AFTER confirming all subdomains serve over HTTPS.
+
 ### Webhook Secrets (Optional)
 
 If you receive webhooks from GitHub or GitLab:
