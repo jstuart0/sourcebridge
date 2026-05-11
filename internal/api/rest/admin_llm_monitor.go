@@ -41,6 +41,51 @@ type monitorActivityResponse struct {
 	// kill-switched, so old/disabled-wrapper deployments don't surface a
 	// misleading empty array.
 	GateSnapshot []monitorGateEntry `json:"gate_snapshot,omitempty"`
+	// ProviderState exposes provider-side runtime info so operators can spot
+	// model-mismatch conditions before they bite. For Ollama: which models
+	// are currently resident in VRAM (the /api/ps surface) vs which model
+	// is the configured ask_model. A mismatch means every request triggers
+	// a full model swap — a classic cause of DeadlineExceeded on synth
+	// (see CA-326 WARN log). Omitted when no provider state is detectable
+	// (non-Ollama provider, network unreachable, etc.) so the UI stays
+	// quiet on cloud-LLM installs.
+	ProviderState *monitorProviderState `json:"provider_state,omitempty"`
+}
+
+// monitorProviderState is the operator-visible representation of which
+// model the provider has loaded vs what SourceBridge has configured.
+// Surfacing this prevents the CA-326 trap (a different model pinned at
+// infinite keep_alive forces a multi-minute swap on every request).
+type monitorProviderState struct {
+	// Provider identifier (e.g. "ollama"). Empty when unknown.
+	Provider string `json:"provider"`
+	// BaseURL the API thinks the worker is talking to (with the /v1 suffix
+	// stripped if present so the probe URL is buildable).
+	BaseURL string `json:"base_url,omitempty"`
+	// ConfiguredAskModel is the active LLM profile's ask_model. Empty when
+	// no profile is set.
+	ConfiguredAskModel string `json:"configured_ask_model,omitempty"`
+	// LoadedModels is the list of currently-resident models on the provider
+	// (Ollama /api/ps). nil when probe failed; empty slice when probe
+	// succeeded but nothing is loaded.
+	LoadedModels []monitorLoadedModel `json:"loaded_models,omitempty"`
+	// SwapWarning is populated when ConfiguredAskModel is non-empty AND
+	// LoadedModels is non-nil AND the configured model is NOT in the loaded
+	// set. Carries a human-readable hint operators can copy/paste.
+	SwapWarning string `json:"swap_warning,omitempty"`
+	// ProbeErrorMessage carries the underlying error when the probe failed.
+	// Lets the UI explain why ProviderState is partial. Internal storage
+	// details scrubbed (the probe error is from net/http, not SurrealDB,
+	// so the leak risk is low — but normalize anyway).
+	ProbeErrorMessage string `json:"probe_error,omitempty"`
+}
+
+// monitorLoadedModel mirrors one entry from Ollama's /api/ps response,
+// trimmed to the fields the UI needs.
+type monitorLoadedModel struct {
+	Name       string    `json:"name"`
+	SizeVRAMMB int64     `json:"size_vram_mb"`
+	ExpiresAt  time.Time `json:"expires_at,omitempty"`
 }
 
 // monitorGateEntry mirrors LLMGateEntry from the proto — one row per
@@ -424,7 +469,8 @@ func (s *Server) handleLLMActivity(w http.ResponseWriter, r *http.Request) {
 			PendingMaintenance:    countPendingPriority(pending, llm.PriorityMaintenance),
 			PendingPrewarm:        countPendingPriority(pending, llm.PriorityPrewarm),
 		},
-		GateSnapshot: s.fetchGateSnapshot(r.Context()),
+		GateSnapshot:  s.fetchGateSnapshot(r.Context()),
+		ProviderState: s.fetchProviderState(r.Context()),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
