@@ -973,6 +973,14 @@ func (s *Server) setupRouter() {
 	gqlSrv := handler.NewDefaultServer(graphql.NewExecutableSchema(graphql.Config{
 		Resolvers: gqlResolver,
 	}))
+	// Schema-leak guard: scrub low-level storage errors before they reach
+	// the browser. Sentinel errors and *gqlerror.Error values pass through
+	// untouched; opaque SurrealDB / gRPC / RocksDB error strings get
+	// replaced with `{"error":"internal error", extensions: {correlation_id, code: "INTERNAL"}}`
+	// while the full error is logged server-side. See
+	// internal/api/rest/gqlgen_error_presenter.go for the full rationale
+	// (xander Phase 2 mid-build finding, CA-320).
+	gqlSrv.SetErrorPresenter(scrubGraphQLError)
 
 	// Protected API routes (accepts both JWT and API tokens)
 	r.Group(func(r chi.Router) {

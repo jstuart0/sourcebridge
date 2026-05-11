@@ -26,7 +26,10 @@ func (r *Resolver) requireKnowledgeGenerationSupport() error {
 		return fmt.Errorf("%s: %w", knowledgeWorkerUnavailableMessage, ErrWorkerUnavailable)
 	}
 	if r.Deps.KnowledgeStore == nil {
-		return fmt.Errorf("knowledge store not configured: %w", ErrKnowledgeStoreUnavailable)
+		// Return the sentinel directly to avoid the duplicated-message render
+		// ("knowledge store not configured: knowledge store not configured")
+		// surfaced by xander on the CA-320 Phase 2 mid-build review.
+		return ErrKnowledgeStoreUnavailable
 	}
 	return nil
 }
