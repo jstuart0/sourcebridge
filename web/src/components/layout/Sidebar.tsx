@@ -100,6 +100,7 @@ export function Sidebar({
             <Link
               key={item.href}
               href={item.href}
+              aria-label={item.label}
               className={cn(
                 "flex items-center gap-3 rounded-[var(--control-radius)] border px-3 py-2.5 text-sm transition-colors",
                 "min-h-[44px]", // touch target
@@ -108,8 +109,8 @@ export function Sidebar({
                   : "border-transparent bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               )}
             >
-              <Icon className="h-4 w-4 shrink-0" />
-              {!collapsed ? <span>{item.label}</span> : null}
+              <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+              {!collapsed ? <span aria-hidden="true">{item.label}</span> : null}
             </Link>
           );
         })}

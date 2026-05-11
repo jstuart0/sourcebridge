@@ -114,7 +114,14 @@ export default function LoginPage() {
   if (checkingAuth) {
     return (
       <main className="flex min-h-screen items-center justify-center px-6">
-        <p className="text-sm text-[var(--text-secondary)]">Checking server status…</p>
+        <div className="flex flex-col items-center gap-4">
+          <Brand size="xl" />
+          <div
+            className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--accent-primary)]"
+            role="status"
+            aria-label="Checking server status"
+          />
+        </div>
       </main>
     );
   }

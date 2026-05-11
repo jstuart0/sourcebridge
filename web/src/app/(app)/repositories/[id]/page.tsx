@@ -42,6 +42,7 @@ import { normalizeActivityResponse } from "@/lib/llm/activity";
 import { authFetch } from "@/lib/auth-fetch";
 import { trackEvent } from "@/lib/telemetry";
 import { notifyJobEvent } from "@/lib/notifications";
+import { useAsyncOp } from "@/lib/useAsyncOp";
 
 type Tab = "files" | "symbols" | "requirements" | "specs" | "analysis" | "impact" | "architecture" | "related" | "knowledge" | "subsystems" | "settings";
 
@@ -130,20 +131,13 @@ export default function RepositoryDetailPage() {
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [symbolKindFilter, setSymbolKindFilter] = useState<string | null>(null);
 
-  // Per-op AI loading (granular: each op gates only its own button)
-  const [aiLoadingOps, setAiLoadingOps] = useState<Set<string>>(new Set());
-  const runAiOp = useCallback(async (key: string, fn: () => Promise<void>) => {
-    setAiLoadingOps((prev) => new Set(prev).add(key));
-    try { await fn(); }
-    finally {
-      setAiLoadingOps((prev) => {
-        const n = new Set(prev);
-        n.delete(key);
-        return n;
-      });
-    }
-  }, []);
-  const isAiLoading = useCallback((key: string) => aiLoadingOps.has(key), [aiLoadingOps]);
+  // Single async-op tracker for all granular per-button loading states.
+  // Both the "AI" ops (requirements, analysis) and "repo" ops (understanding
+  // build, generation) share one instance — distinct keys keep them independent.
+  // Adapters below expose the legacy startLoading/finishLoading/isLoading/runAiOp
+  // API expected by child tab components (their prop interfaces are unchanged in
+  // this phase; a future cleanup can migrate them to accept AsyncOpState directly).
+  const asyncOp = useAsyncOp();
 
   const [repoJobs, setRepoJobs] = useState<RepoJobActivityResponse | null>(null);
   const [repoJobsError, setRepoJobsError] = useState<string | null>(null);
@@ -222,14 +216,37 @@ export default function RepositoryDetailPage() {
 
   const features = useFeatures();
   const symbolScopedAnalysisEnabled = features.symbolScopedAnalysis;
-  const [loadingOps, setLoadingOps] = useState<Set<string>>(new Set());
-  const isLoading = (op: string) => loadingOps.has(op);
-  const startLoading = (op: string) =>
-    setLoadingOps((prev) => new Set(prev).add(op));
-  const finishLoading = (op: string) =>
-    setLoadingOps((prev) => { const n = new Set(prev); n.delete(op); return n; });
-  // Derived: true when any knowledge operation is in flight.
-  const knowledgeLoading = loadingOps.size > 0;
+  // Legacy adapter API expected by child tab components. Backed by asyncOp so
+  // all tracking flows through one state machine. Tab prop interfaces are
+  // unchanged in this phase (future cleanup can migrate them to AsyncOpState).
+  // finishResolvers must be declared before startLoading (which closes over it).
+  const finishResolvers = useRef<Map<string, () => void>>(new Map());
+  const startLoading = useCallback((op: string) => {
+    // Guard: if op is already pending, the resolver map entry is live.
+    // A second startLoading would overwrite it, orphaning the first promise
+    // and keeping the key in pending forever. Silent no-op matches the
+    // idempotent contract used throughout the codebase.
+    if (asyncOp.isPending(op)) return;
+    asyncOp.run(op, () => new Promise<void>((resolve) => {
+      // Promise is resolved by finishLoading() below via the resolver ref map.
+      finishResolvers.current.set(op, resolve);
+    })).catch(() => {});
+  }, [asyncOp]);
+  const finishLoading = useCallback((op: string) => {
+    const resolve = finishResolvers.current.get(op);
+    if (resolve) {
+      finishResolvers.current.delete(op);
+      resolve();
+    }
+  }, []);
+  const isLoading = useCallback((op: string) => asyncOp.isPending(op), [asyncOp]);
+  // True when any knowledge operation is in flight.
+  const knowledgeLoading = asyncOp.pending.size > 0;
+  // AI-op adapter: runAiOp/isAiLoading back asyncOp with "ai:" key namespace.
+  const runAiOp = useCallback(async (key: string, fn: () => Promise<void>) => {
+    await asyncOp.run(key, fn);
+  }, [asyncOp]);
+  const isAiLoading = useCallback((key: string) => asyncOp.isPending(key), [asyncOp]);
 
   const currentUnderstanding: RepositoryUnderstanding | null = repoResult.data?.repository?.repositoryUnderstanding || null;
   // Source of truth for "is the understanding actively building?" lives in
@@ -290,10 +307,9 @@ export default function RepositoryDetailPage() {
   const tabs = allTabs.filter((t) => t.visible);
 
   async function handleBuildRepositoryUnderstanding() {
-    startLoading("understanding-build");
     setUnderstandingDedupeNote(false);
     const wasBuilding = understandingBuilding;
-    try {
+    await asyncOp.run("understanding-build", async () => {
       // force: true so a click on "Refresh understanding" actually re-runs
       // the build even when the source revision is unchanged. Without this,
       // the resolver short-circuits and the user gets the cached result
@@ -321,9 +337,7 @@ export default function RepositoryDetailPage() {
       }
       reexecuteRepo({ requestPolicy: "network-only" });
       void fetchRepoJobs();
-    } finally {
-      finishLoading("understanding-build");
-    }
+    });
   }
 
   function updateSearchParams(mutator: (params: URLSearchParams) => void) {
@@ -559,7 +573,7 @@ export default function RepositoryDetailPage() {
           repoId={repoId}
           active={tab === "knowledge"}
           repo={repo}
-          loadingOps={loadingOps}
+          loadingOps={asyncOp.pending}
           startLoading={startLoading}
           finishLoading={finishLoading}
           isLoading={isLoading}

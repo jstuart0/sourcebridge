@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, type UseQueryExecute } from "urql";
 import {
@@ -235,7 +235,7 @@ export interface KnowledgeTabProps {
     generationModeDefault?: string | null;
   } | null | undefined;
   // Loading ops from parent (Slice 4 pattern)
-  loadingOps: Set<string>;
+  loadingOps: ReadonlySet<string>;
   startLoading: (op: string) => void;
   finishLoading: (op: string) => void;
   isLoading: (op: string) => boolean;
@@ -788,6 +788,21 @@ export function KnowledgeTab({
   // Effects
   useEffect(() => { setAlertsEnabled(jobAlertsEnabled()); }, []);
 
+  // CA-263: Once data loads and Cliff Notes exist, close all accordion categories
+  // so users see the content directly rather than the generate CTA. Runs once on
+  // first successful data load (guarded by !knowledgeResult.fetching). Does not
+  // fire again on subsequent polls so users can freely expand/collapse without
+  // the state resetting under them.
+  const openCategoryInitialisedRef = useRef(false);
+  useEffect(() => {
+    if (openCategoryInitialisedRef.current) return;
+    if (knowledgeResult.fetching) return;
+    if (currentCliffNotes != null) {
+      setOpenCategory(null);
+    }
+    openCategoryInitialisedRef.current = true;
+  }, [knowledgeResult.fetching, currentCliffNotes]);
+
   useEffect(() => {
     setUnderstandingCollapsed(shouldAutoCollapseUnderstanding);
   }, [currentUnderstanding?.id, shouldAutoCollapseUnderstanding]);
@@ -1071,6 +1086,10 @@ export function KnowledgeTab({
 
   // CSS class constants (local to this tab)
   const inputClass = "h-11 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)]";
+  // CA-265: select elements need appearance-auto (or equivalent) to preserve the
+  // native dropdown arrow. inputClass drops the arrow on some browsers because it
+  // overrides appearance. selectClass restores it.
+  const selectClass = `${inputClass} appearance-auto`;
   const artifactStatusClass = "rounded-full border border-[var(--border-default)] bg-[var(--bg-hover)] px-2.5 py-1 text-xs text-[var(--text-secondary)]";
   const confidenceClass = (confidence: string) =>
     cn(
@@ -1191,6 +1210,17 @@ export function KnowledgeTab({
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Engine</span>
+                {/* CA-253: tooltip explaining the engine trade-off — <button> so
+                    keyboard and screen-reader users can focus and discover it */}
+                <button
+                  type="button"
+                  title="Understanding First runs deeper indexing + LLM reasoning before answering. Classic uses faster lookups and may be less precise."
+                  aria-label="What's the difference between Understanding First and Classic?"
+                  className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-[var(--border-default)] text-[9px] font-semibold text-[var(--text-tertiary)] select-none"
+                  onClick={(e) => e.preventDefault()}
+                >
+                  ?
+                </button>
                 <div className="flex flex-wrap gap-1.5">
                   {[
                     { key: "UNDERSTANDING_FIRST", label: "Understanding First" },
@@ -1700,7 +1730,7 @@ export function KnowledgeTab({
                         id="execution-entry-point"
                         value={selectedExecutionEntry}
                         onChange={(e) => setSelectedExecutionEntry(e.target.value)}
-                        className={`${inputClass} md:flex-1`}
+                        className={`${selectClass} md:flex-1`}
                         aria-label="Entry point for execution trace"
                       >
                         {executionEntries.length === 0 ? <option value="">No backend entry points found yet</option> : null}

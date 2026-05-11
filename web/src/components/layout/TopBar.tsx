@@ -130,7 +130,18 @@ export function TopBar({ onMobileNavOpen }: { onMobileNavOpen?: () => void }) {
         </Link>
       ) : null}
 
-      <div className="relative" ref={menuRef}>
+      <div
+        className="relative"
+        ref={menuRef}
+        onBlur={(e) => {
+          // Close the menu when focus leaves the container entirely (click outside
+          // or Shift-Tab past the first item), while keeping it open during
+          // internal navigation between menu items.
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setMenuOpen(false);
+          }
+        }}
+      >
         <button
           ref={triggerRef}
           type="button"

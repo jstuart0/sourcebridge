@@ -16,9 +16,11 @@ import { useEventStream, ServerEvent } from "@/lib/sse";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Input } from "@/components/ui/input";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
+import { Textarea } from "@/components/ui/textarea";
 import { LazyScoreBadge } from "@/components/understanding-score";
 import { trackEvent } from "@/lib/telemetry";
 
@@ -283,23 +285,25 @@ export default function RepositoriesPage() {
 
           <div className="grid gap-5">
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-[var(--text-primary)]">Name</label>
-              <input
+              <label htmlFor="repo-name" className="block text-sm font-medium text-[var(--text-primary)]">Name</label>
+              <Input
+                id="repo-name"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="my-project"
-                className="h-11 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)]"
+                autoComplete="off"
               />
             </div>
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-[var(--text-primary)]">
+              <label htmlFor="repo-path" className="block text-sm font-medium text-[var(--text-primary)]">
                 Path or Git URL
               </label>
-              <input
+              <Input
+                id="repo-path"
                 value={newPath}
                 onChange={(e) => setNewPath(e.target.value)}
                 placeholder="https://github.com/org/repo.git or /path/to/local/repo"
-                className="h-11 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)]"
+                autoComplete="url"
               />
             </div>
 
@@ -330,12 +334,16 @@ export default function RepositoriesPage() {
                 generate cliff notes, learning paths, and code tours.
               </p>
             </div>
-            <textarea
+            <label htmlFor="bulk-import" className="block text-sm font-medium text-[var(--text-primary)] sr-only">
+              Repository URLs or paths (one per line)
+            </label>
+            <Textarea
+              id="bulk-import"
               value={bulkText}
               onChange={(e) => setBulkText(e.target.value)}
               placeholder={"https://github.com/org/repo1.git\nhttps://github.com/org/repo2.git\n/path/to/local/repo3"}
               rows={5}
-              className="mt-3 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 font-mono text-sm text-[var(--text-primary)]"
+              className="mt-3 font-mono"
             />
             <div className="mt-3 flex items-center gap-3">
               <Button
@@ -501,16 +509,18 @@ export default function RepositoriesPage() {
         </div>
       )}
 
-      <ConfirmDialog
-        open={removeConfirm !== null}
-        title="Remove repository"
-        body={`Remove repository "${removeConfirm?.name}"? This cannot be undone.`}
-        confirmLabel="Remove"
-        cancelLabel="Cancel"
-        destructive
-        onConfirm={() => removeConfirm !== null && handleRemoveRepoConfirmed(removeConfirm.id)}
-        onCancel={() => setRemoveConfirm(null)}
-      />
+      {removeConfirm != null && (
+        <ConfirmDialog
+          open
+          title="Remove repository"
+          body={`This will permanently delete the repository "${removeConfirm.name}" and all indexed data, knowledge artifacts, requirements, and cliff notes. This cannot be undone.`}
+          confirmLabel="Remove"
+          cancelLabel="Cancel"
+          destructive
+          onConfirm={() => handleRemoveRepoConfirmed(removeConfirm.id)}
+          onCancel={() => setRemoveConfirm(null)}
+        />
+      )}
     </PageFrame>
   );
 }
