@@ -12,6 +12,7 @@ resources:
   - api.yaml
   - api-pdb.yaml
   - worker.yaml
+  - worker-pdb.yaml
   - web.yaml
   - api-servicemonitor.yaml
   - ingress.yaml

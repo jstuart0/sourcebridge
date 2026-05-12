@@ -79,7 +79,10 @@ spec:
         spec:
           containers:
             - name: backup
-              image: curlimages/curl:latest
+              # CA-235 (O-27): pinned tag for reproducibility — :latest
+              # would silently change the backup tooling between runs.
+              # Bump intentionally when a new curl behavior is needed.
+              image: curlimages/curl:8.7.1
               command:
                 - /bin/sh
                 - -c

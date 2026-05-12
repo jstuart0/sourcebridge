@@ -15,9 +15,17 @@ spec:
     - Ingress
   ingress:
     - from:
+        # CA-303 (O-25): match the api podSelector AND the sourcebridge
+        # namespace. Without namespaceSelector, an attacker could deploy
+        # a pod labelled app.kubernetes.io/name=sourcebridge-api in any
+        # namespace and reach the worker — namespace-level isolation
+        # bypass on the NetworkPolicy ingress rule.
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: sourcebridge-api
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sourcebridge
       ports:
         - protocol: TCP
           port: 50051

@@ -6,6 +6,15 @@ metadata:
     {{- include "sourcebridge.web.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.web.replicas }}
+  # CA-236 (O-28): zero-downtime rolling update even at replicas:1.
+  # Default k8s strategy (maxSurge:25%, maxUnavailable:25%) rounds to
+  # 0 surge and 1 unavailable at replicas:1, producing a momentary
+  # outage on every upgrade. Surge-first matches the API/worker pattern.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       {{- include "sourcebridge.web.selectorLabels" . | nindent 6 }}

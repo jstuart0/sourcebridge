@@ -8,9 +8,11 @@ metadata:
   labels:
     app.kubernetes.io/name: sourcebridge-api
     app.kubernetes.io/part-of: sourcebridge
-    # Add the label your Prometheus instance selects on, e.g.:
-    #   release: kube-prometheus
-    # Check: kubectl get prometheus -A -o jsonpath='{..serviceMonitorSelector}'
+    # Default selector label matching the kube-prometheus-stack convention.
+    # If your Prometheus instance selects on a different label/value, override
+    # via overlay. To find your selector:
+    #   kubectl get prometheus -A -o jsonpath='{..serviceMonitorSelector}'
+    release: kube-prometheus
 spec:
   selector:
     matchLabels:
