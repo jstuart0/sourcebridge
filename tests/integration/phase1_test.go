@@ -16,6 +16,19 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/config"
 )
 
+// setupTestServer constructs a REST server with NO database store and NO
+// worker client. Use this for HTTP-layer tests: CORS, CSRF, rate-limiting,
+// auth headers, security headers, health/metrics endpoints, and any flow
+// where handlers short-circuit cleanly on nil dependencies.
+//
+// **Do NOT add tests that exercise DB-backed flows here.** Token persistence,
+// session revocation, repository CRUD, and any handler that would touch
+// SurrealDB must use a setup that wires a real or in-memory store
+// (see phase2_test.go for the canonical pattern with `store` populated).
+// A test that "passes" here might be silently short-circuiting on nil-store
+// guards rather than verifying the real DB-coupled path. Closing the
+// underlying coverage gap (CA-288) is tracked as a deferred testcontainer
+// harness expansion.
 func setupTestServer(t *testing.T) (*httptest.Server, *config.Config) {
 	t.Helper()
 	cfg := config.Defaults()
