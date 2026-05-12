@@ -122,8 +122,12 @@ export default function RepositoryDetailPage() {
   const searchParams = useSearchParams();
   const repoId = params.id as string;
   const urlTab = searchParams.get("tab");
-  const tab: Tab = (urlTab && ["files", "symbols", "requirements", "specs", "analysis", "impact", "architecture", "related", "knowledge", "subsystems", "settings"].includes(urlTab))
-    ? (urlTab as Tab)
+  // Aliases for the Cliff Notes panel. The canonical key is "knowledge";
+  // "field-guide" was the pre-CA-241 label and "cliff-notes" matches the
+  // current label. Bookmarked / shared URLs using either alias stay valid.
+  const resolvedTab = urlTab === "field-guide" || urlTab === "cliff-notes" ? "knowledge" : urlTab;
+  const tab: Tab = (resolvedTab && ["files", "symbols", "requirements", "specs", "analysis", "impact", "architecture", "related", "knowledge", "subsystems", "settings"].includes(resolvedTab))
+    ? (resolvedTab as Tab)
     : "knowledge";
 
   // Cross-tab shared state
