@@ -8,7 +8,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
@@ -94,16 +95,13 @@ func recordIDString(rid *models.RecordID) string {
 }
 
 // sortedKeys returns the keys of a string set in sorted order.
+// Returns nil (not an empty slice) for an empty map to match the
+// callers' nil-comparison patterns in internal/db/index_result.go.
 func sortedKeys(m map[string]struct{}) []string {
 	if len(m) == 0 {
 		return nil
 	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(m))
 }
 
 // linkID builds a deterministic ID from (repoID, requirementID, symbolID)

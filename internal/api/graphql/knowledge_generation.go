@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
@@ -49,6 +50,10 @@ func protoAudience(audience knowledgepkg.Audience) knowledgev1.Audience {
 	case knowledgepkg.AudienceDeveloper:
 		return knowledgev1.Audience_AUDIENCE_DEVELOPER
 	default:
+		// A new Audience enum value added on the domain side without
+		// updating this switch silently degrades to UNSPECIFIED; log so
+		// the regression is observable in operator-facing structured logs.
+		slog.Warn("protoAudience received unknown Audience value", "value", string(audience))
 		return knowledgev1.Audience_AUDIENCE_UNSPECIFIED
 	}
 }
@@ -62,6 +67,10 @@ func protoDepth(depth knowledgepkg.Depth) knowledgev1.Depth {
 	case knowledgepkg.DepthDeep:
 		return knowledgev1.Depth_DEPTH_DEEP
 	default:
+		// Same rationale as protoAudience: a new Depth enum value silently
+		// degrading to UNSPECIFIED is a class of bug that observability
+		// surfaces immediately.
+		slog.Warn("protoDepth received unknown Depth value", "value", string(depth))
 		return knowledgev1.Depth_DEPTH_UNSPECIFIED
 	}
 }

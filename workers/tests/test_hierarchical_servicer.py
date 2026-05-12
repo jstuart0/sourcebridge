@@ -18,8 +18,14 @@ from workers.knowledge.prompts.cliff_notes import REQUIRED_SECTIONS
 from workers.knowledge.servicer import (
     CLIFF_NOTES_STRATEGY_ENV,
     KnowledgeServicer,
-    _selected_cliff_notes_strategy,
+    _cliff_notes_preference_chain,
 )
+
+
+def _first_strategy() -> str:
+    """Compat helper: return the first entry in the cliff-notes preference chain."""
+    chain = _cliff_notes_preference_chain()
+    return chain[0] if chain else "single_shot"
 
 
 @dataclass
@@ -184,14 +190,14 @@ def test_selected_strategy_default_chain_starts_with_hierarchical(
 
     monkeypatch.delenv(CLIFF_NOTES_STRATEGY_ENV, raising=False)
     assert _cliff_notes_preference_chain() == DEFAULT_CLIFF_NOTES_CHAIN
-    assert _selected_cliff_notes_strategy() == "hierarchical"
+    assert _first_strategy() == "hierarchical"
 
 
 def test_selected_strategy_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(CLIFF_NOTES_STRATEGY_ENV, "hierarchical")
-    assert _selected_cliff_notes_strategy() == "hierarchical"
+    assert _first_strategy() == "hierarchical"
     monkeypatch.setenv(CLIFF_NOTES_STRATEGY_ENV, "  HIERARCHICAL  ")
-    assert _selected_cliff_notes_strategy() == "hierarchical"
+    assert _first_strategy() == "hierarchical"
 
 
 def test_preference_chain_parses_comma_separated(monkeypatch: pytest.MonkeyPatch) -> None:

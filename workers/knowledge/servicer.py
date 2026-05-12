@@ -101,18 +101,6 @@ def _cliff_notes_preference_chain() -> list[str]:
     return names or list(DEFAULT_CLIFF_NOTES_CHAIN)
 
 
-# Back-compat alias used by tests that predate the chain format.
-def _selected_cliff_notes_strategy() -> str:
-    """Return the first entry in the preference chain — legacy shim.
-
-    Tests that relied on the old env-var semantics call this to get a
-    single strategy name. New code should call
-    ``_cliff_notes_preference_chain`` and drive the selector.
-    """
-    chain = _cliff_notes_preference_chain()
-    return chain[0] if chain else "single_shot"
-
-
 def _provider_name(provider: LLMProvider) -> str:
     """Return the canonical provider name string for a given LLMProvider instance.
 

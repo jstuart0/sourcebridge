@@ -55,20 +55,29 @@ export const SERVICE_HEALTH_QUERY = gql`
   }
 `;
 
+// Shared base shape for repo-list queries. New list fields land here once
+// instead of in both REPOSITORIES_QUERY and REPOSITORIES_LIGHT_QUERY.
+const REPOSITORY_LIST_FIELDS = `
+  fragment RepositoryListFields on Repository {
+    id
+    name
+    path
+    status
+    hasAuth
+    fileCount
+    functionCount
+    classCount
+    requirementCount
+    lastIndexedAt
+    createdAt
+  }
+`;
+
 export const REPOSITORIES_QUERY = gql`
+  ${REPOSITORY_LIST_FIELDS}
   query Repositories {
     repositories {
-      id
-      name
-      path
-      status
-      hasAuth
-      fileCount
-      functionCount
-      classCount
-      requirementCount
-      lastIndexedAt
-      createdAt
+      ...RepositoryListFields
       understandingScore {
         overall
       }
@@ -78,19 +87,10 @@ export const REPOSITORIES_QUERY = gql`
 
 /** Lightweight repo list — no understandingScore computation. Use on pages that only need repo metadata. */
 export const REPOSITORIES_LIGHT_QUERY = gql`
+  ${REPOSITORY_LIST_FIELDS}
   query RepositoriesLight {
     repositories {
-      id
-      name
-      path
-      status
-      hasAuth
-      fileCount
-      functionCount
-      classCount
-      requirementCount
-      lastIndexedAt
-      createdAt
+      ...RepositoryListFields
     }
   }
 `;
