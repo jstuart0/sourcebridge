@@ -64,6 +64,18 @@ describe("understandingProgressJobView", () => {
     expect(result.id).toBe(liveJob.id);
   });
 
+  // CA-292 (T-L2): a live job with status "ready" is the documented contract
+  // for understandingProgressJobView — it should be returned verbatim, not
+  // synthesised as "generating". `ready` is terminal so it doesn't normally
+  // appear as a liveJob, but the contract must be pinned so a future
+  // simplification can't silently regress it.
+  it("returns a ready live job verbatim — does not synthesise generating", () => {
+    const liveJob = makeJob("ready");
+    const result = understandingProgressJobView(liveJob, stubUnderstanding);
+    expect(result.status).toBe("ready");
+    expect(result.id).toBe(liveJob.id);
+  });
+
   it("synthesises a generating placeholder when liveJob is null", () => {
     const result = understandingProgressJobView(null, stubUnderstanding);
     expect(result.status).toBe("generating");

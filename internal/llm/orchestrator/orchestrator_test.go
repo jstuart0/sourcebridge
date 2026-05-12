@@ -461,7 +461,12 @@ func TestOrchestratorPublishesEvents(t *testing.T) {
 		TargetKey:   "repo-1:events",
 		Run: func(rt llm.Runtime) error {
 			rt.ReportProgress(0.25, "building", "building", 0)
-			time.Sleep(15 * time.Millisecond) // cross the debounce window
+			// CA-291 (T-L1): 50 ms is 10× the 5 ms debounce window — robust
+			// against goroutine-scheduling lag on a loaded CI runner. waitFor
+			// can't replace this inside the Run callback because Run is
+			// blocking the worker goroutine and can't observe the event bus
+			// from the same goroutine that emits events.
+			time.Sleep(50 * time.Millisecond)
 			rt.ReportProgress(0.75, "finishing", "nearly done", 0)
 			return nil
 		},
