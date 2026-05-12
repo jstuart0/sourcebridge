@@ -2,6 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+// CA-277 (U-L9): convert SCREAMING_SNAKE artifact-type enums into a
+// human-readable title-case label for UI rendering. The internal
+// proto / enum strings are unchanged.
+function toTitleCase(value: string): string {
+  return value
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
 import { Button } from "@/components/ui/button";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
@@ -133,7 +144,7 @@ export default function AdminKnowledgePage() {
                 key={type}
                 className="flex justify-between py-1 text-sm text-[var(--text-primary)]"
               >
-                <span>{type.replace(/_/g, " ")}</span>
+                <span>{toTitleCase(type)}</span>
                 <span className="font-medium">{count}</span>
               </div>
             ))}
@@ -156,7 +167,7 @@ export default function AdminKnowledgePage() {
                     className="flex items-center justify-between border-b border-[var(--border-default)] px-2 py-1.5 text-xs last:border-b-0"
                   >
                     <span>
-                      {a.type.replace(/_/g, " ")} ({a.audience}/{a.depth})
+                      {toTitleCase(a.type)} ({a.audience}/{a.depth})
                     </span>
                     <div className="flex items-center gap-2">
                       {a.stale && (

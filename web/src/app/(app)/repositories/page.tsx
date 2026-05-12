@@ -272,6 +272,16 @@ export default function RepositoriesPage() {
         </div>
       )}
 
+      {/* CA-278 (U-L10): addSuccess banner lives OUTSIDE the form panel so
+          it remains visible after setShowAddForm(false) collapses the form.
+          The original inline render inside the panel disappeared the
+          instant the panel was hidden — operators never saw the message. */}
+      {addSuccess ? (
+        <div className="max-w-3xl rounded-[var(--control-radius)] border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-500" role="status">
+          {addSuccess}
+        </div>
+      ) : null}
+
       {showAddForm ? (
         <Panel variant="elevated" className="max-w-3xl space-y-5">
           <div className="space-y-1">
@@ -310,12 +320,6 @@ export default function RepositoriesPage() {
             {addError ? (
               <div className="rounded-[var(--control-radius)] border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2 text-sm text-[var(--danger-text)]">
                 {addError}
-              </div>
-            ) : null}
-
-            {addSuccess ? (
-              <div className="rounded-[var(--control-radius)] border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-500">
-                {addSuccess}
               </div>
             ) : null}
 
@@ -375,7 +379,20 @@ export default function RepositoriesPage() {
         </Panel>
       ) : null}
 
-      {repos.length === 0 && !result.fetching ? (
+      {repos.length === 0 && result.fetching ? (
+        // CA-274 (U-L6): show skeleton cards on initial load so the page
+        // below the header isn't blank during the first query. Three rows
+        // approximates the typical repo-count for a first install.
+        <div className="grid gap-5" aria-label="Loading repositories" aria-busy="true">
+          {[0, 1, 2].map((i) => (
+            <Panel key={i} className="space-y-3">
+              <div className="h-6 w-2/5 animate-pulse rounded bg-[var(--bg-hover)]" />
+              <div className="h-4 w-1/3 animate-pulse rounded bg-[var(--bg-hover)]" />
+              <div className="h-4 w-1/2 animate-pulse rounded bg-[var(--bg-hover)]" />
+            </Panel>
+          ))}
+        </div>
+      ) : repos.length === 0 && !result.fetching ? (
         <EmptyState
           title="No repositories indexed yet"
           description="Start by adding a repository. Once indexing completes, SourceBridge.ai builds a cliff notes for the system: files, symbols, structure, and guided understanding."

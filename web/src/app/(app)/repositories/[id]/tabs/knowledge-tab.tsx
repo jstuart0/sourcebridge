@@ -1147,7 +1147,10 @@ export function KnowledgeTab({
       )}
       <Panel variant="accent" className="overflow-hidden">
         <div className="border-b border-[var(--border-subtle)] px-6 py-5">
-          <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+          {/* CA-272 (U-L2): uppercase/wide-tracking removed from breadcrumb
+              path display. Module paths like `internal/api/graphql/handlers`
+              were hard to scan in all-caps with 0.18em letter-spacing. */}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-tertiary)]">
             {breadcrumbItems().map((item, idx) => (
               <button
                 key={`${item.scopeType}-${item.scopePath || "root"}`}

@@ -114,6 +114,17 @@ export function TopBar({ onMobileNavOpen }: { onMobileNavOpen?: () => void }) {
       </button>
 
       <div className="ml-auto flex items-center gap-1">
+      {/* CA-276 (U-L8): keyboard-shortcut hint for the command palette.
+          Hidden on mobile (kbd labels are desktop-only UX). */}
+      <span
+        className="mr-2 hidden items-center gap-1 text-[11px] text-[var(--text-tertiary)] md:inline-flex"
+        title="Press ⌘K (or Ctrl+K) to open the command palette"
+        aria-label="Press Command K or Control K to open the command palette"
+      >
+        <kbd className="rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-secondary)]">
+          ⌘K
+        </kbd>
+      </span>
       {showAdmin ? (
         <Link
           href="/admin"

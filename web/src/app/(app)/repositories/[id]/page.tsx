@@ -500,12 +500,12 @@ export default function RepositoryDetailPage() {
         )}
 
       {/* Files Tab — always mounted; hidden attribute hides it from view */}
-      <div role="tabpanel" id="tabpanel-files" aria-labelledby="tab-files" hidden={tab !== "files"}>
+      <div role="tabpanel" id="tabpanel-files" aria-labelledby="tab-files" hidden={tab !== "files"} aria-hidden={tab !== "files"}>
         <FilesTab repoId={repoId} files={files} />
       </div>
 
       {/* Symbols Tab — always mounted; active gates polling effects */}
-      <div role="tabpanel" id="tabpanel-symbols" aria-labelledby="tab-symbols" hidden={tab !== "symbols"}>
+      <div role="tabpanel" id="tabpanel-symbols" aria-labelledby="tab-symbols" hidden={tab !== "symbols"} aria-hidden={tab !== "symbols"}>
         <SymbolsTab
           repoId={repoId}
           active={tab === "symbols"}
@@ -527,7 +527,7 @@ export default function RepositoryDetailPage() {
       </div>
 
       {/* Requirements Tab — always mounted; active gates query and paginate effect */}
-      <div role="tabpanel" id="tabpanel-requirements" aria-labelledby="tab-requirements" hidden={tab !== "requirements"}>
+      <div role="tabpanel" id="tabpanel-requirements" aria-labelledby="tab-requirements" hidden={tab !== "requirements"} aria-hidden={tab !== "requirements"}>
         <RequirementsTab
           repoId={repoId}
           active={tab === "requirements"}
@@ -538,12 +538,12 @@ export default function RepositoryDetailPage() {
       </div>
 
       {/* Discovered Specs Tab — always mounted; active gates query */}
-      <div role="tabpanel" id="tabpanel-specs" aria-labelledby="tab-specs" hidden={tab !== "specs"}>
+      <div role="tabpanel" id="tabpanel-specs" aria-labelledby="tab-specs" hidden={tab !== "specs"} aria-hidden={tab !== "specs"}>
         <SpecsTab repoId={repoId} active={tab === "specs"} />
       </div>
 
       {/* Analysis Tab — always mounted; state (results, streams) persists across switches */}
-      <div role="tabpanel" id="tabpanel-analysis" aria-labelledby="tab-analysis" hidden={tab !== "analysis"}>
+      <div role="tabpanel" id="tabpanel-analysis" aria-labelledby="tab-analysis" hidden={tab !== "analysis"} aria-hidden={tab !== "analysis"}>
         <AnalysisTab
           repoId={repoId}
           symbols={symbols}
@@ -557,22 +557,22 @@ export default function RepositoryDetailPage() {
       </div>
 
       {/* Impact Tab — always mounted; active gates query */}
-      <div role="tabpanel" id="tabpanel-impact" aria-labelledby="tab-impact" hidden={tab !== "impact"}>
+      <div role="tabpanel" id="tabpanel-impact" aria-labelledby="tab-impact" hidden={tab !== "impact"} aria-hidden={tab !== "impact"}>
         <ImpactTab repoId={repoId} active={tab === "impact"} />
       </div>
 
       {/* Architecture Tab — always mounted */}
-      <div role="tabpanel" id="tabpanel-architecture" aria-labelledby="tab-architecture" hidden={tab !== "architecture"}>
+      <div role="tabpanel" id="tabpanel-architecture" aria-labelledby="tab-architecture" hidden={tab !== "architecture"} aria-hidden={tab !== "architecture"}>
         <ArchitectureTab repoId={repoId} setActiveTab={setActiveTab} />
       </div>
 
       {/* Related Tab — always mounted */}
-      <div role="tabpanel" id="tabpanel-related" aria-labelledby="tab-related" hidden={tab !== "related"}>
+      <div role="tabpanel" id="tabpanel-related" aria-labelledby="tab-related" hidden={tab !== "related"} aria-hidden={tab !== "related"}>
         <RelatedTab repoId={repoId} />
       </div>
 
       {/* Knowledge Tab — always mounted; active gates all three queries */}
-      <div role="tabpanel" id="tabpanel-knowledge" aria-labelledby="tab-knowledge" hidden={tab !== "knowledge"}>
+      <div role="tabpanel" id="tabpanel-knowledge" aria-labelledby="tab-knowledge" hidden={tab !== "knowledge"} aria-hidden={tab !== "knowledge"}>
         <KnowledgeTab
           repoId={repoId}
           active={tab === "knowledge"}
@@ -600,12 +600,12 @@ export default function RepositoryDetailPage() {
       </div>
 
       {/* Subsystems Tab — feature-flag guarded; always mounted when feature is on */}
-      <div role="tabpanel" id="tabpanel-subsystems" aria-labelledby="tab-subsystems" hidden={tab !== "subsystems"}>
+      <div role="tabpanel" id="tabpanel-subsystems" aria-labelledby="tab-subsystems" hidden={tab !== "subsystems"} aria-hidden={tab !== "subsystems"}>
         {features.subsystemClustering && repoId && <SubsystemsTab repoId={repoId} />}
       </div>
 
       {/* Settings Tab — always mounted; state persists across switches */}
-      <div role="tabpanel" id="tabpanel-settings" aria-labelledby="tab-settings" hidden={tab !== "settings"}>
+      <div role="tabpanel" id="tabpanel-settings" aria-labelledby="tab-settings" hidden={tab !== "settings"} aria-hidden={tab !== "settings"}>
         <SettingsTab
           repoId={repoId}
           repo={repo}

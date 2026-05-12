@@ -567,7 +567,7 @@ export function ProfileEditor({
       )}
 
       <div className={fieldWrapClass}>
-        <label className={labelClass}>Model {advancedMode && "(Analysis / Default)"}</label>
+        <label className={labelClass}>Model{advancedMode ? " (Analysis / Default)" : ""}</label>
         {models.length > 20 ? (
           <Input
             type="text"
