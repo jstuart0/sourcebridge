@@ -36,6 +36,13 @@ var KnownInsecureSentinels = map[string]struct{}{
 	// CA-311: 64-hex publicly-known JWT placeholder shipped in docker-compose
 	// after the r2 length-gate fix. Syntactically valid but weak.
 	"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef": {},
+	// CA-219 (X-L4): SurrealDB ships "root" as its default root user
+	// password. Embedded mode never uses it; external mode does, and an
+	// operator who left it at the default is exposing their DB. The
+	// caller in cli/serve.go gates the SURREAL_PASS check on external
+	// mode so embedded-mode operators don't see a noisy warning about
+	// a meaningless credential.
+	"root": {},
 }
 
 // CredentialCheck pairs a human-readable label with the runtime value to

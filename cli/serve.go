@@ -132,11 +132,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// exits.  Does not block startup — purely advisory.
 	insecureCtx, insecureCancel := context.WithCancel(context.Background())
 	defer insecureCancel()
-	security.WarnInsecureDefaults(insecureCtx, []security.CredentialCheck{
-		{Label: "SURREAL_PASS", Value: cfg.Storage.SurrealPass},
+	insecureChecks := []security.CredentialCheck{
 		{Label: "JWT_SECRET", Value: cfg.Security.JWTSecret},
 		{Label: "GRPC_AUTH_SECRET", Value: cfg.Security.GRPCAuthSecret},
-	}, 60*time.Second)
+	}
+	// CA-219 (X-L4): SURREAL_PASS is only meaningful in external mode.
+	// Embedded mode uses an in-process database with no remote auth
+	// surface; checking the password there produces a noisy false-positive.
+	if cfg.Storage.SurrealMode != "embedded" {
+		insecureChecks = append(insecureChecks, security.CredentialCheck{
+			Label: "SURREAL_PASS",
+			Value: cfg.Storage.SurrealPass,
+		})
+	}
+	security.WarnInsecureDefaults(insecureCtx, insecureChecks, 60*time.Second)
 
 	// r1 C1 — resolve the encryption key ONCE here, before any cipher
 	// or store construction, and write the result back into

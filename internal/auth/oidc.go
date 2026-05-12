@@ -23,6 +23,15 @@ type OIDCStateStore interface {
 	ConsumeState(ctx context.Context, state string) (bool, error)
 }
 
+// memoryOIDCStateMaxEntries bounds the in-memory state map so that
+// initiated-but-never-completed OIDC flows can't grow memory unboundedly.
+// An attacker hammering /auth/oidc/start without ever completing the
+// callback would otherwise burn process memory. When the map reaches
+// the cap on insert, the earliest-expiring entries are evicted first.
+// 10K accommodates >2 hours of legitimate concurrent starts at typical
+// session-init rates.
+const memoryOIDCStateMaxEntries = 10000
+
 type MemoryOIDCStateStore struct {
 	mu     sync.Mutex
 	states map[string]time.Time
@@ -35,8 +44,46 @@ func NewMemoryOIDCStateStore() *MemoryOIDCStateStore {
 func (s *MemoryOIDCStateStore) SaveState(_ context.Context, state string, expiresAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(s.states) >= memoryOIDCStateMaxEntries {
+		s.evictExpiredAndLocked()
+		// If we're still at the cap after pruning expired entries, drop
+		// the earliest-expiring live entry. This bounds memory under
+		// adversarial /auth/oidc/start spam at the cost of a small
+		// probability that a legitimate in-flight flow loses its state
+		// (the user just retries — no security impact).
+		if len(s.states) >= memoryOIDCStateMaxEntries {
+			s.evictEarliestLocked()
+		}
+	}
 	s.states[state] = expiresAt
 	return nil
+}
+
+// evictExpiredAndLocked drops every already-expired entry. Caller MUST hold the mutex.
+func (s *MemoryOIDCStateStore) evictExpiredAndLocked() {
+	now := time.Now()
+	for k, exp := range s.states {
+		if !now.Before(exp) {
+			delete(s.states, k)
+		}
+	}
+}
+
+// evictEarliestLocked drops the entry with the earliest expiry. Caller MUST hold the mutex.
+func (s *MemoryOIDCStateStore) evictEarliestLocked() {
+	var earliestKey string
+	var earliestExp time.Time
+	first := true
+	for k, exp := range s.states {
+		if first || exp.Before(earliestExp) {
+			earliestKey = k
+			earliestExp = exp
+			first = false
+		}
+	}
+	if earliestKey != "" {
+		delete(s.states, earliestKey)
+	}
 }
 
 func (s *MemoryOIDCStateStore) ConsumeState(_ context.Context, state string) (bool, error) {

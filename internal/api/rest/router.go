@@ -1415,9 +1415,18 @@ func (s *Server) setupRouter() {
 		RegisterLivingWikiDisabledRoutes(r)
 	}
 
-	// GraphQL playground (development only, no auth required)
+	// GraphQL playground (development only). xander X-L8 (CA-222): even in
+	// dev mode the playground is auth-gated so a developer who runs
+	// `make dev` on a multi-tenant box doesn't expose the unauthenticated
+	// schema-introspection surface to anything else on the LAN. The
+	// playground itself runs in-browser; gating doesn't break local
+	// workflows because a dev who hits /api/v1/playground will have a
+	// session cookie from their local /login.
 	if s.cfg.IsDevelopment() {
-		r.Get("/api/v1/playground", playground.Handler("SourceBridge", "/api/v1/graphql"))
+		r.Group(func(r chi.Router) {
+			r.Use(s.authMiddleware())
+			r.Get("/api/v1/playground", playground.Handler("SourceBridge", "/api/v1/graphql"))
+		})
 	}
 
 	s.router = r
