@@ -7,12 +7,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	surrealdb "github.com/surrealdb/surrealdb.go"
 
+	"github.com/sourcebridge/sourcebridge/internal/db/sqlbuild"
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 )
 
@@ -567,37 +567,26 @@ func (s *SurrealStore) UpdateRequirementFields(ctx context.Context, id string, f
 		}
 	}
 
-	// Build a SET clause from the non-nil fields.
-	sets := []string{"updated_at = time::now()"}
-	vars := map[string]any{"id": id}
-	addString := func(col string, val *string) {
-		if val == nil {
-			return
-		}
-		sets = append(sets, col+" = $"+col)
-		vars[col] = *val
-	}
-	addStrings := func(col string, val *[]string) {
-		if val == nil {
-			return
-		}
-		sets = append(sets, col+" = $"+col)
-		vars[col] = *val
-	}
-	addString("external_id", fields.ExternalID)
-	addString("title", fields.Title)
-	addString("description", fields.Description)
-	addString("priority", fields.Priority)
-	addString("source", fields.Source)
-	addStrings("tags", fields.Tags)
-	addStrings("acceptance_criteria", fields.AcceptanceCriteria)
+	// Build a SET clause from the non-nil fields. updated_at is always
+	// stamped; Len()==1 after the Add* calls means no substantive change.
+	b := sqlbuild.New()
+	b.AddRaw("updated_at = time::now()")
+	b.AddStringPtr("external_id", fields.ExternalID)
+	b.AddStringPtr("title", fields.Title)
+	b.AddStringPtr("description", fields.Description)
+	b.AddStringPtr("priority", fields.Priority)
+	b.AddStringPtr("source", fields.Source)
+	b.AddStringsPtr("tags", fields.Tags)
+	b.AddStringsPtr("acceptance_criteria", fields.AcceptanceCriteria)
 
-	if len(sets) == 1 {
+	if b.Len() == 1 {
 		// Nothing substantive changed — return the current row.
 		return current
 	}
 
-	stmt := "UPDATE type::thing('ca_requirement', $id) SET " + strings.Join(sets, ", ") + " WHERE deleted_at IS NONE RETURN AFTER"
+	vars := b.Vars()
+	vars["id"] = id
+	stmt := "UPDATE type::thing('ca_requirement', $id) SET " + b.Clause() + " WHERE deleted_at IS NONE RETURN AFTER"
 	rows, err := queryOne[[]surrealRequirement](ctx, db, stmt, vars)
 	if err != nil || len(rows) == 0 {
 		return nil

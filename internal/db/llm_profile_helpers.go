@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/surrealdb/surrealdb.go"
+
+	"github.com/sourcebridge/sourcebridge/internal/db/sqlbuild"
 )
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -204,37 +206,29 @@ func runBatch(ctx context.Context, surrealDB *SurrealDB, sql string, vars map[st
 // Returns the SET fragment string (no leading comma, no trailing comma)
 // and the params map keyed by `$profile_<col>` so the SQL can bind them.
 func buildProfileFieldClauses(p ProfilePatch, prefix string) (string, map[string]any) {
-	clauses := []string{}
-	vars := map[string]any{}
-	add := func(col string, ok bool, val any) {
-		if !ok {
-			return
-		}
-		key := prefix + col
-		clauses = append(clauses, fmt.Sprintf("%s = $%s", col, key))
-		vars[key] = val
-	}
-	add("provider", p.FieldsPresent.Provider, p.Provider)
-	add("base_url", p.FieldsPresent.BaseURL, p.BaseURL)
-	add("summary_model", p.FieldsPresent.SummaryModel, p.SummaryModel)
-	add("review_model", p.FieldsPresent.ReviewModel, p.ReviewModel)
-	add("ask_model", p.FieldsPresent.AskModel, p.AskModel)
-	add("knowledge_model", p.FieldsPresent.KnowledgeModel, p.KnowledgeModel)
-	add("architecture_diagram_model", p.FieldsPresent.ArchitectureDiagramModel, p.ArchitectureDiagramModel)
-	add("report_model", p.FieldsPresent.ReportModel, p.ReportModel)
-	add("draft_model", p.FieldsPresent.DraftModel, p.DraftModel)
-	add("timeout_secs", p.FieldsPresent.TimeoutSecs, p.TimeoutSecs)
-	add("advanced_mode", p.FieldsPresent.AdvancedMode, p.AdvancedMode)
+	b := sqlbuild.Prefixed(prefix)
+	b.AddPresent("provider", p.FieldsPresent.Provider, p.Provider)
+	b.AddPresent("base_url", p.FieldsPresent.BaseURL, p.BaseURL)
+	b.AddPresent("summary_model", p.FieldsPresent.SummaryModel, p.SummaryModel)
+	b.AddPresent("review_model", p.FieldsPresent.ReviewModel, p.ReviewModel)
+	b.AddPresent("ask_model", p.FieldsPresent.AskModel, p.AskModel)
+	b.AddPresent("knowledge_model", p.FieldsPresent.KnowledgeModel, p.KnowledgeModel)
+	b.AddPresent("architecture_diagram_model", p.FieldsPresent.ArchitectureDiagramModel, p.ArchitectureDiagramModel)
+	b.AddPresent("report_model", p.FieldsPresent.ReportModel, p.ReportModel)
+	b.AddPresent("draft_model", p.FieldsPresent.DraftModel, p.DraftModel)
+	b.AddPresent("timeout_secs", p.FieldsPresent.TimeoutSecs, p.TimeoutSecs)
+	b.AddPresent("advanced_mode", p.FieldsPresent.AdvancedMode, p.AdvancedMode)
 
 	switch p.APIKeyMode {
 	case apiKeyClear:
-		clauses = append(clauses, "api_key = ''")
+		b.AddRaw("api_key = ''")
 	case apiKeySet:
-		clauses = append(clauses, fmt.Sprintf("api_key = $%sapi_key", prefix))
-		vars[prefix+"api_key"] = p.APIKey
+		// api_key uses the prefixed bind key for the same reason every other
+		// field does — the active and legacy arms share a single batch.
+		b.AddPresent("api_key", true, p.APIKey)
 	}
 
-	return strings.Join(clauses, ", "), vars
+	return b.Clause(), b.Vars()
 }
 
 // ─────────────────────────────────────────────────────────────────────────

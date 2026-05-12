@@ -9,12 +9,12 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	surrealdb "github.com/surrealdb/surrealdb.go"
 	"github.com/surrealdb/surrealdb.go/pkg/models"
 
+	"github.com/sourcebridge/sourcebridge/internal/db/sqlbuild"
 	"github.com/sourcebridge/sourcebridge/internal/llm/modeltier"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
 )
@@ -357,25 +357,18 @@ func (s *SurrealStore) SetModelCapabilities(ctx context.Context, mc *comprehensi
 		"quality_gate_tier":     string(mc.QualityGateTier),
 	}
 
-	// Nullable option<…> fields: only add the SET clause and var when non-nil,
-	// so a nil pointer is never serialised as JSON null on the wire.
-	addFloat64Ptr := func(col string, val *float64) {
-		if val == nil {
-			return
-		}
-		sets = append(sets, col+" = $"+col)
-		vars[col] = *val
+	// Nullable option<…> fields: skip nil pointers so a JSON null is never
+	// serialised on the wire (CA-179 invariant). datetime is wrapped in
+	// models.CustomDateTime per the same constraint. The Builder's vars
+	// are merged into the existing vars map below.
+	nb := sqlbuild.New()
+	nb.AddFloat64Ptr("cost_per_1k_input", mc.CostPer1kInput)
+	nb.AddFloat64Ptr("cost_per_1k_output", mc.CostPer1kOutput)
+	nb.AddTimePtr("last_probed_at", mc.LastProbedAt)
+	sets = append(sets, nb.Clauses()...)
+	for k, v := range nb.Vars() {
+		vars[k] = v
 	}
-	addTimePtr := func(col string, val *time.Time) {
-		if val == nil {
-			return
-		}
-		sets = append(sets, col+" = $"+col)
-		vars[col] = models.CustomDateTime{Time: *val}
-	}
-	addFloat64Ptr("cost_per_1k_input", mc.CostPer1kInput)
-	addFloat64Ptr("cost_per_1k_output", mc.CostPer1kOutput)
-	addTimePtr("last_probed_at", mc.LastProbedAt)
 
 	// Build a single SET fragment that appears in BOTH the UPDATE arm and the
 	// CREATE arm of the LET/IF/ELSE statement. Mutating `sets` after this

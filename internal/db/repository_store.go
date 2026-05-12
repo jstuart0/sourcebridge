@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	surrealdb "github.com/surrealdb/surrealdb.go"
 
+	"github.com/sourcebridge/sourcebridge/internal/db/sqlbuild"
 	"github.com/sourcebridge/sourcebridge/internal/graph"
 )
 
@@ -66,35 +67,18 @@ func (s *SurrealStore) UpdateRepositoryMeta(ctx context.Context, id string, meta
 		return
 	}
 
-	sets := []string{}
-	vars := map[string]any{"id": id}
-
-	if meta.ClonePath != "" {
-		sets = append(sets, "clone_path = $clone_path")
-		vars["clone_path"] = meta.ClonePath
-	}
-	if meta.RemoteURL != "" {
-		sets = append(sets, "remote_url = $remote_url")
-		vars["remote_url"] = meta.RemoteURL
-	}
-	if meta.CommitSHA != "" {
-		sets = append(sets, "commit_sha = $commit_sha")
-		vars["commit_sha"] = meta.CommitSHA
-	}
-	if meta.Branch != "" {
-		sets = append(sets, "branch = $branch")
-		vars["branch"] = meta.Branch
-	}
-	if meta.GenerationModeDefault != "" {
-		sets = append(sets, "generation_mode_default = $generation_mode_default")
-		vars["generation_mode_default"] = meta.GenerationModeDefault
-	}
-
-	if len(sets) == 0 {
+	b := sqlbuild.New()
+	b.AddNonEmptyString("clone_path", meta.ClonePath)
+	b.AddNonEmptyString("remote_url", meta.RemoteURL)
+	b.AddNonEmptyString("commit_sha", meta.CommitSHA)
+	b.AddNonEmptyString("branch", meta.Branch)
+	b.AddNonEmptyString("generation_mode_default", meta.GenerationModeDefault)
+	if b.Len() == 0 {
 		return
 	}
-
-	sql := fmt.Sprintf("UPDATE type::thing('ca_repository', $id) SET %s", strings.Join(sets, ", "))
+	vars := b.Vars()
+	vars["id"] = id
+	sql := fmt.Sprintf("UPDATE type::thing('ca_repository', $id) SET %s", b.Clause())
 	_, _ = surrealdb.Query[interface{}](ctx, db, sql, vars)
 }
 
