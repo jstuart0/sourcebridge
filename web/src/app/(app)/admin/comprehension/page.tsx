@@ -248,6 +248,25 @@ export default function ComprehensionSettingsPage() {
   const [undoSnapshot, setUndoSnapshot] = useState<EffectiveSettings | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialLoad = useRef(false);
+  // Sticky-toggle visibility: shown only when the page-header sentinel
+  // scrolls out of view. Keeps the Simple/Advanced toggle reachable on
+  // long-scroll views (CA-264) without duplicating it when the header
+  // toggle is already visible.
+  const headerSentinelRef = useRef<HTMLDivElement>(null);
+  const [showStickyToggle, setShowStickyToggle] = useState(false);
+
+  useEffect(() => {
+    const sentinel = headerSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setShowStickyToggle(!entry.isIntersecting);
+      },
+      { threshold: 0 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []);
 
   // Editable fields (simple mode)
   const [selectedModel, setSelectedModel] = useState("");
@@ -454,27 +473,51 @@ export default function ComprehensionSettingsPage() {
 
   return (
     <PageFrame>
-      <PageHeader
-        eyebrow="Settings"
-        title="Comprehension Engine"
-        description="Configure how SourceBridge generates cliff notes, learning paths, and other AI artifacts."
-        actions={
-          <div className="flex items-center gap-2">
-            <Link
-              href="/admin/monitor"
-              className="inline-flex items-center gap-1.5 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
-            >
-              Monitor →
-            </Link>
+      <div ref={headerSentinelRef}>
+        <PageHeader
+          eyebrow="Settings"
+          title="Comprehension Engine"
+          description="Configure how SourceBridge generates cliff notes, learning paths, and other AI artifacts."
+          actions={
+            <div className="flex items-center gap-2">
+              <Link
+                href="/admin/monitor"
+                className="inline-flex items-center gap-1.5 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+              >
+                Monitor →
+              </Link>
+              <button
+                onClick={() => setMode(mode === "simple" ? "advanced" : "simple")}
+                className="inline-flex items-center gap-1.5 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+                aria-label={`Switch to ${mode === "simple" ? "Advanced" : "Simple"} mode`}
+              >
+                {mode === "simple" ? "Advanced" : "Simple"}
+              </button>
+            </div>
+          }
+        />
+      </div>
+
+      {/* Sticky mode-toggle bar: appears only when the page header has
+          scrolled out of view (CA-264). z-20 sits below the TopBar's
+          z-30 so the global header still wins on overlap. top-12/md:top-14
+          matches the TopBar height. */}
+      {showStickyToggle && (
+        <div className="sticky top-12 z-20 -mx-3 -my-2 border-b border-[var(--border-subtle)] bg-[var(--bg-base)]/95 px-3 py-2 backdrop-blur sm:-mx-4 sm:px-4 md:top-14 md:-mx-8 md:px-8">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs font-medium text-[var(--text-secondary)]">
+              Comprehension Engine · {mode === "simple" ? "Simple" : "Advanced"} mode
+            </span>
             <button
               onClick={() => setMode(mode === "simple" ? "advanced" : "simple")}
-              className="inline-flex items-center gap-1.5 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+              className="inline-flex items-center gap-1.5 rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+              aria-label={`Switch to ${mode === "simple" ? "Advanced" : "Simple"} mode`}
             >
               {mode === "simple" ? "Advanced" : "Simple"}
             </button>
           </div>
-        }
-      />
+        </div>
+      )}
 
       <div className="space-y-6">
         {/* LLM-config callout: this page tunes orchestration & strategy
