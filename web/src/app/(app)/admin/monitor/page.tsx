@@ -501,7 +501,7 @@ export default function MonitorPage() {
           </header>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {modeEntries.map(([mode, rollup]) => (
-              <div key={mode} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
+              <div key={mode} className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <h3 className="text-sm font-semibold text-[var(--text-primary)]">{formatGenerationMode(mode as JobView["generation_mode"]) || mode}</h3>
                   <span className="text-xs text-[var(--text-tertiary)]">{rollup.total} jobs</span>
