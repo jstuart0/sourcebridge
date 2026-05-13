@@ -996,6 +996,11 @@ func (s *Server) setupRouter() {
 	// Protected API routes (accepts both JWT and API tokens)
 	r.Group(func(r chi.Router) {
 		r.Use(s.authMiddleware())
+		// CA-221: per-user rate limit (default 500/min). Fires after auth
+		// so claims.UserID is the key; falls back to IP for any path
+		// where claims are absent. The existing global httprate.LimitByIP
+		// layer (100/min) still applies first.
+		r.Use(perUserRateLimit(s.cfg.Server.PerUserRateLimitPerMin, time.Minute))
 		// Tenant repo filtering — repoChecker is set by registerEnterpriseRoutes
 		// (after this group is defined), so we read it lazily at request time.
 		r.Use(s.lazyRepoAccessMiddleware)
@@ -1058,6 +1063,9 @@ func (s *Server) setupRouter() {
 	// CSRF middleware is added only when CSRFFullCoverageEnabled=true (CA-198).
 	r.Group(func(r chi.Router) {
 		r.Use(s.authMiddleware())
+		// CA-221: per-user rate limit (default 500/min) — defense-in-depth
+		// against single-token rotation across IPs.
+		r.Use(perUserRateLimit(s.cfg.Server.PerUserRateLimitPerMin, time.Minute))
 		r.Use(s.lazyRepoAccessMiddleware)
 		// CA-198: gate the second authenticated group on the full-coverage flag.
 		// literal true because this branch only executes when the flag is on.
@@ -1211,6 +1219,8 @@ func (s *Server) setupRouter() {
 	if s.cfg != nil && s.cfg.ConnectorAPI.Enabled {
 		r.Group(func(r chi.Router) {
 			r.Use(s.authMiddleware())
+			// CA-221: per-user rate limit.
+			r.Use(perUserRateLimit(s.cfg.Server.PerUserRateLimitPerMin, time.Minute))
 			r.Post("/v1/connectors/{id}/events", s.handleConnectorEvent)
 		})
 	}
@@ -1302,12 +1312,16 @@ func (s *Server) setupRouter() {
 		// Session ownership re-verified against authenticated identity per Slice 7 / SEC-1.
 		r.Group(func(r chi.Router) {
 			r.Use(s.authMiddleware())
+			// CA-221: per-user rate limit.
+			r.Use(perUserRateLimit(s.cfg.Server.PerUserRateLimitPerMin, time.Minute))
 			r.Get("/api/v1/mcp/sse", s.mcp.handleSSE)
 			r.Post("/api/v1/mcp/message", s.mcp.handleMessage)
 		})
 		// Streamable HTTP transport: auth on every request (for Codex, etc.)
 		r.Group(func(r chi.Router) {
 			r.Use(s.authMiddleware())
+			// CA-221: per-user rate limit.
+			r.Use(perUserRateLimit(s.cfg.Server.PerUserRateLimitPerMin, time.Minute))
 			r.Post("/api/v1/mcp/http", s.mcp.handleStreamableHTTP)
 			r.Delete("/api/v1/mcp/http", s.mcp.handleStreamableHTTPDelete)
 		})

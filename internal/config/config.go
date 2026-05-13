@@ -106,6 +106,19 @@ type ServerConfig struct {
 	// Config key: server.reject_wildcard_cors_with_credentials
 	// Env var:    SOURCEBRIDGE_SERVER_REJECT_WILDCARD_CORS_WITH_CREDENTIALS
 	RejectWildcardCORSWithCredentials bool `mapstructure:"reject_wildcard_cors_with_credentials"`
+
+	// PerUserRateLimitPerMin caps requests per authenticated user per minute
+	// on the authenticated route groups (everything under /api/v1/*). The
+	// existing global httprate.LimitByIP cap (100/min) still applies first;
+	// this layer adds defense-in-depth so a user with one JWT from many IPs
+	// (Tor exit relays, mobile-carrier-NAT, CDN-proxied bot) cannot burst
+	// above the per-user budget. CA-221 (X-L6). Default 500/min — generous
+	// for legitimate use (~8 req/sec) and still bounds runaway clients.
+	// Set to 0 to disable the per-user layer entirely.
+	//
+	// Config key: server.per_user_rate_limit_per_min
+	// Env var:    SOURCEBRIDGE_SERVER_PER_USER_RATE_LIMIT_PER_MIN
+	PerUserRateLimitPerMin int `mapstructure:"per_user_rate_limit_per_min"`
 }
 
 // StorageConfig holds database and cache settings.
@@ -790,11 +803,12 @@ func Defaults() *Config {
 	return &Config{
 		Env: "production",
 		Server: ServerConfig{
-			HTTPPort:      8080,
-			GRPCPort:      50051,
-			PublicBaseURL: "http://localhost:8080",
-			CORSOrigins:   []string{"http://localhost:3300"},
-			MaxBodySize:   10 * 1024 * 1024, // 10MB
+			HTTPPort:               8080,
+			GRPCPort:               50051,
+			PublicBaseURL:          "http://localhost:8080",
+			CORSOrigins:            []string{"http://localhost:3300"},
+			MaxBodySize:            10 * 1024 * 1024, // 10MB
+			PerUserRateLimitPerMin: 500,              // CA-221: per-user limit on authenticated endpoints
 		},
 		Storage: StorageConfig{
 			SurrealMode:      "embedded",
@@ -954,6 +968,7 @@ func Load() (*Config, error) {
 	v.SetDefault("server.grpc_port", cfg.Server.GRPCPort)
 	v.SetDefault("server.public_base_url", cfg.Server.PublicBaseURL)
 	v.SetDefault("server.max_body_size", cfg.Server.MaxBodySize)
+	v.SetDefault("server.per_user_rate_limit_per_min", cfg.Server.PerUserRateLimitPerMin)
 	v.SetDefault("storage.surreal_mode", cfg.Storage.SurrealMode)
 	v.SetDefault("storage.surreal_url", cfg.Storage.SurrealURL)
 	v.SetDefault("storage.surreal_namespace", cfg.Storage.SurrealNamespace)
