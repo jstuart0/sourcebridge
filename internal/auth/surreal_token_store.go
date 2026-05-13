@@ -22,6 +22,12 @@ type SurrealAPITokenStore struct {
 	dbp            tokenDBProvider
 	mu             sync.Mutex
 	lastUsedWrites map[string]time.Time
+	// CA-220: HMAC key for the new token-hash format. Empty = legacy
+	// bare-SHA-256 only (backward-compat for installs with no encryption
+	// key configured). When non-empty, new writes use HMAC and validation
+	// transparently accepts both formats with opportunistic legacy →
+	// HMAC migration.
+	tokenHashKey []byte
 }
 
 type surrealAPIToken struct {
@@ -55,15 +61,36 @@ func NewSurrealAPITokenStore(dbp tokenDBProvider) *SurrealAPITokenStore {
 	}
 }
 
+// NewSurrealAPITokenStoreWithKey is the production constructor: configures
+// the HMAC key for the new token-hash format (CA-220). Pass nil/empty to
+// preserve legacy SHA-256-only behavior — useful for OSS installs that
+// don't have an encryption key set yet.
+func NewSurrealAPITokenStoreWithKey(dbp tokenDBProvider, key []byte) *SurrealAPITokenStore {
+	return &SurrealAPITokenStore{
+		dbp:            dbp,
+		lastUsedWrites: make(map[string]time.Time),
+		tokenHashKey:   append([]byte(nil), key...),
+	}
+}
+
+// activeHash returns the current write-format hash. HMAC when a key is
+// configured; legacy SHA-256 otherwise.
+func (s *SurrealAPITokenStore) activeHash(rawToken string) string {
+	return hmacHashToken(rawToken, s.tokenHashKey)
+}
+
 func (s *SurrealAPITokenStore) CreateToken(ctx context.Context, input CreateTokenInput) (string, *APIToken, error) {
 	db := s.dbp.DB()
 	if db == nil {
 		return "", nil, fmt.Errorf("database not connected")
 	}
-	tokenStr, prefix, hashStr, err := generateTokenSecret()
+	tokenStr, prefix, _, err := generateTokenSecret()
 	if err != nil {
 		return "", nil, err
 	}
+	// CA-220: new writes always go through the active hash function
+	// (HMAC when key is set, legacy SHA-256 otherwise).
+	hashStr := s.activeHash(tokenStr)
 	id, err := generateID()
 	if err != nil {
 		return "", nil, err
@@ -152,24 +179,83 @@ func (s *SurrealAPITokenStore) ValidateToken(ctx context.Context, rawToken strin
 	if db == nil {
 		return nil, fmt.Errorf("database not connected")
 	}
-	hashStr := hashToken(rawToken)
-	raw, err := surrealdb.Query[[]surrealAPIToken](ctx, db, `
-		SELECT * FROM ca_api_token
-		WHERE token_hash = $token_hash AND revoked_at = NONE
-		LIMIT 1
-	`, map[string]any{"token_hash": hashStr})
+	// CA-220: try the active-format hash first. On miss (and only when
+	// HMAC is in use), retry with the legacy SHA-256 format and
+	// opportunistically migrate the row to HMAC on a hit.
+	activeHash := s.activeHash(rawToken)
+	token, found, err := s.lookupTokenByHash(ctx, db, activeHash)
 	if err != nil {
-		return nil, fmt.Errorf("validating token: %w", err)
+		return nil, err
 	}
-	if raw == nil || len(*raw) == 0 || (*raw)[0].Error != nil || len((*raw)[0].Result) == 0 {
+	if !found && len(s.tokenHashKey) > 0 {
+		legacyHash := legacyHashToken(rawToken)
+		token, found, err = s.lookupTokenByHash(ctx, db, legacyHash)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			// Async row migration: bump token_hash from legacy → HMAC.
+			// Errors are logged but never fail validation. The row still
+			// validates correctly via legacy on subsequent calls until
+			// migration succeeds.
+			go s.migrateTokenHash(token.ID, legacyHash, activeHash)
+		}
+	}
+	if !found {
 		return nil, nil
 	}
-	token := tokenFromSurreal((*raw)[0].Result[0])
 	if token.ExpiresAt != nil && time.Now().After(*token.ExpiresAt) {
 		return nil, nil
 	}
 	s.maybeTouchLastUsed(token.ID)
 	return token, nil
+}
+
+// lookupTokenByHash queries ca_api_token for a non-revoked row whose
+// token_hash matches the supplied hash. Returns (token, true, nil) on
+// hit, (nil, false, nil) on miss, (nil, false, err) on transport error.
+func (s *SurrealAPITokenStore) lookupTokenByHash(ctx context.Context, db *surrealdb.DB, hash string) (*APIToken, bool, error) {
+	raw, err := surrealdb.Query[[]surrealAPIToken](ctx, db, `
+		SELECT * FROM ca_api_token
+		WHERE token_hash = $token_hash AND revoked_at = NONE
+		LIMIT 1
+	`, map[string]any{"token_hash": hash})
+	if err != nil {
+		return nil, false, fmt.Errorf("validating token: %w", err)
+	}
+	if raw == nil || len(*raw) == 0 || (*raw)[0].Error != nil || len((*raw)[0].Result) == 0 {
+		return nil, false, nil
+	}
+	return tokenFromSurreal((*raw)[0].Result[0]), true, nil
+}
+
+// migrateTokenHash rewrites a token row's token_hash from legacy
+// SHA-256 to HMAC-SHA256. Runs in a background goroutine so the
+// validation hot-path stays single-round-trip on the next call.
+// Failures are logged and silently dropped — the row remains
+// validatable via the legacy fallback until migration succeeds.
+func (s *SurrealAPITokenStore) migrateTokenHash(id, legacyHash, newHash string) {
+	db := s.dbp.DB()
+	if db == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := surrealdb.Query[interface{}](ctx, db, `
+		UPDATE type::thing('ca_api_token', $id)
+		SET token_hash = $new_hash
+		WHERE token_hash = $legacy_hash
+	`, map[string]any{
+		"id":          id,
+		"new_hash":    newHash,
+		"legacy_hash": legacyHash,
+	})
+	if err != nil {
+		slog.Warn("ca_api_token hash migration failed; row remains on legacy SHA-256 until next validation",
+			"id", id, "err", err)
+		return
+	}
+	slog.Info("ca_api_token hash migrated legacy SHA-256 → HMAC-SHA256", "id", id)
 }
 
 func (s *SurrealAPITokenStore) ListTokens(ctx context.Context) ([]*APIToken, error) {

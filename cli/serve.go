@@ -412,7 +412,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	var desktopAuthStore rest.DesktopAuthSessionStore
 	if cfg.Storage.SurrealMode == "external" {
 		authPersister = auth.NewSurrealPersister(surrealDB)
-		tokenStore = auth.NewSurrealAPITokenStore(surrealDB)
+		// CA-220: HMAC-keyed token-hash format when an encryption key is
+		// configured. Empty key preserves legacy SHA-256-only behavior
+		// (read-back compat for installs that haven't set the key yet).
+		// The WarnInsecureDefaults plumbing above already alerts operators
+		// when the encryption key is missing; no second warn needed here.
+		tokenStore = auth.NewSurrealAPITokenStoreWithKey(surrealDB, []byte(cfg.Security.EncryptionKey))
 		oidcStateStore = auth.NewSurrealOIDCStateStore(surrealDB)
 		desktopAuthStore = rest.NewSurrealDesktopAuthStore(surrealDB)
 		slog.Info("auth persistence enabled via SurrealDB")

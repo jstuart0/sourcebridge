@@ -82,13 +82,23 @@ type APITokenStore interface {
 }
 
 // MemoryAPITokenStore keeps API tokens in memory for embedded/dev mode.
+//
+// tokenHashKey is the HMAC key used for new-format token hashes (CA-220).
+// When empty, the store falls back to the legacy bare-SHA-256 format on
+// both writes and reads. When non-empty, new writes use HMAC-SHA256 and
+// reads transparently accept both formats (with opportunistic legacy →
+// HMAC migration on legacy-format hits).
 type MemoryAPITokenStore struct {
-	mu     sync.RWMutex
-	tokens map[string]*APIToken
-	byHash map[string]string
-	nextID int
+	mu           sync.RWMutex
+	tokens       map[string]*APIToken
+	byHash       map[string]string
+	nextID       int
+	tokenHashKey []byte
 }
 
+// NewAPITokenStore returns a memory token store with HMAC token hashing
+// disabled (legacy SHA-256). Test-only convenience; production callers
+// use NewMemoryAPITokenStoreWithKey.
 func NewAPITokenStore() APITokenStore {
 	return &MemoryAPITokenStore{
 		tokens: make(map[string]*APIToken),
@@ -96,11 +106,26 @@ func NewAPITokenStore() APITokenStore {
 	}
 }
 
+// NewMemoryAPITokenStoreWithKey returns a memory token store whose
+// new-format hashes are HMAC-SHA256 keyed with key. Pass nil/empty to
+// preserve the legacy SHA-256-only behavior.
+func NewMemoryAPITokenStoreWithKey(key []byte) *MemoryAPITokenStore {
+	return &MemoryAPITokenStore{
+		tokens:       make(map[string]*APIToken),
+		byHash:       make(map[string]string),
+		tokenHashKey: append([]byte(nil), key...),
+	}
+}
+
 func (s *MemoryAPITokenStore) CreateToken(_ context.Context, input CreateTokenInput) (string, *APIToken, error) {
-	tokenStr, prefix, hashStr, err := generateTokenSecret()
+	tokenStr, prefix, _, err := generateTokenSecret()
 	if err != nil {
 		return "", nil, err
 	}
+	// CA-220: new writes always go through the active hash function
+	// (HMAC when key is set, legacy SHA-256 otherwise). generateTokenSecret
+	// pre-computed a legacy hash for backward-compat callers; ignore it.
+	hashStr := s.activeHash(tokenStr)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -134,12 +159,25 @@ func (s *MemoryAPITokenStore) CreateToken(_ context.Context, input CreateTokenIn
 }
 
 func (s *MemoryAPITokenStore) ValidateToken(_ context.Context, rawToken string) (*APIToken, error) {
-	hashStr := hashToken(rawToken)
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	id, ok := s.byHash[hashStr]
+	// CA-220: try the active-format hash first, then the legacy format
+	// as fallback. On a legacy hit, opportunistically rewrite the byHash
+	// index + stored TokenHash to the active format so subsequent
+	// lookups go through one DB query, not two.
+	primary := s.activeHash(rawToken)
+	id, ok := s.byHash[primary]
+	migratedFromLegacy := false
+	if !ok && len(s.tokenHashKey) > 0 {
+		legacy := legacyHashToken(rawToken)
+		id, ok = s.byHash[legacy]
+		if ok {
+			migratedFromLegacy = true
+			delete(s.byHash, legacy)
+			s.byHash[primary] = id
+		}
+	}
 	if !ok {
 		return nil, nil
 	}
@@ -152,7 +190,16 @@ func (s *MemoryAPITokenStore) ValidateToken(_ context.Context, rawToken string) 
 	}
 	now := time.Now()
 	token.LastUsedAt = &now
+	if migratedFromLegacy {
+		token.TokenHash = primary
+	}
 	return cloneToken(token), nil
+}
+
+// activeHash returns the current write-format hash. HMAC when a key is
+// configured; legacy SHA-256 otherwise.
+func (s *MemoryAPITokenStore) activeHash(rawToken string) string {
+	return hmacHashToken(rawToken, s.tokenHashKey)
 }
 
 func (s *MemoryAPITokenStore) ListTokens(_ context.Context) ([]*APIToken, error) {
