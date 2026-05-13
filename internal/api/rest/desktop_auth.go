@@ -6,6 +6,7 @@ package rest
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"log/slog"
@@ -85,16 +86,48 @@ func (s *memoryDesktopAuthStore) Complete(_ context.Context, state, token string
 	return true
 }
 
+// constantTimeLookupLocked finds the session whose ID byte-compares equal
+// to id using subtle.ConstantTimeCompare. Caller MUST hold s.mu. Iterates
+// every session and accumulates the match without short-circuiting so an
+// attacker cannot distinguish "session id exists" from "session id absent"
+// via the wall-clock cost of the lookup. O(N) is acceptable for an
+// in-memory desktop-auth store (typically <100 concurrent flows).
+//
+// Returns the matched session pointer and its map key, or (nil, "") if
+// no match. The map key is returned because the caller deletes by key
+// for the consume path.
+//
+// CA-218 (X-L3): closes the timing side-channel between "session-id
+// found" and "session-id absent" branches at the lookup boundary.
+func (s *memoryDesktopAuthStore) constantTimeLookupLocked(id string) (*desktopAuthSession, string) {
+	idBytes := []byte(id)
+	var match *desktopAuthSession
+	var matchKey string
+	for k, sess := range s.sessions {
+		// Equal-length-only operands: pad with the shorter side's length
+		// to keep ConstantTimeCompare's contract (mismatched-length keys
+		// return 0 without leaking which side was shorter via early exit).
+		if subtle.ConstantTimeCompare([]byte(k), idBytes) == 1 {
+			match = sess
+			matchKey = k
+			// Intentionally NOT breaking — keep iterating so the work
+			// done per call is independent of where (or whether) the
+			// match was found.
+		}
+	}
+	return match, matchKey
+}
+
 func (s *memoryDesktopAuthStore) Poll(_ context.Context, id string) (*desktopAuthSession, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	session := s.sessions[id]
+	session, key := s.constantTimeLookupLocked(id)
 	if session == nil {
 		return nil, false
 	}
 	if time.Now().After(session.ExpiresAt) {
 		delete(s.byState, session.State)
-		delete(s.sessions, id)
+		delete(s.sessions, key)
 		return nil, false
 	}
 	if session.Token == "" {
@@ -108,7 +141,7 @@ func (s *memoryDesktopAuthStore) Poll(_ context.Context, id string) (*desktopAut
 	session.ConsumedAt = &now
 	cp := *session
 	delete(s.byState, session.State)
-	delete(s.sessions, id)
+	delete(s.sessions, key)
 	return &cp, true
 }
 

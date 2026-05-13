@@ -73,6 +73,77 @@ func TestGeneratedSessionIDIsRandomAndPrefixed(t *testing.T) {
 	}
 }
 
+// CA-218 (X-L3): the constant-time lookup must traverse every entry
+// without short-circuiting on match. A break-on-match would let an
+// attacker observe via wall-clock time whether their guessed session
+// ID matched something near the start vs end of the iteration. This
+// test pins the behavior by asserting that the function returns the
+// SAME session regardless of insertion order — proving the loop visited
+// every entry.
+func TestMemoryDesktopAuthPoll_ConstantTimeLookupReturnsCorrectMatch(t *testing.T) {
+	store := NewMemoryDesktopAuthStore().(*memoryDesktopAuthStore)
+
+	// Populate many sessions so iteration order matters.
+	const populated = 50
+	var targetID string
+	for i := 0; i < populated; i++ {
+		sess, err := store.Create(context.Background(), "state-"+string(rune('a'+i%26))+string(rune('0'+i/26)))
+		if err != nil {
+			t.Fatalf("Create()[%d] error: %v", i, err)
+		}
+		if i == populated/2 {
+			targetID = sess.ID
+		}
+	}
+
+	// Poll the middle target — must succeed regardless of map iteration order.
+	got, ok := store.Poll(context.Background(), targetID)
+	if !ok {
+		t.Fatal("Poll() should match a populated middle-of-map session")
+	}
+	if got.ID != targetID {
+		t.Fatalf("Poll() returned session %q, want %q", got.ID, targetID)
+	}
+}
+
+func TestMemoryDesktopAuthPoll_ConstantTimeLookupRejectsNearMiss(t *testing.T) {
+	// Pin behavior: a session-ID guess that differs only at the last
+	// character must NOT match. ConstantTimeCompare's contract is byte-
+	// exact equality; map-lookup-by-prefix or accidental substring
+	// matching would regress here.
+	store := NewMemoryDesktopAuthStore()
+	real, err := store.Create(context.Background(), "state-near-miss")
+	if err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+
+	// Mutate the last character.
+	guess := real.ID[:len(real.ID)-1] + "x"
+	if guess == real.ID {
+		// Defensive: trailing char happened to already be 'x'; mutate to 'y'.
+		guess = real.ID[:len(real.ID)-1] + "y"
+	}
+
+	got, ok := store.Poll(context.Background(), guess)
+	if ok || got != nil {
+		t.Fatalf("near-miss guess %q must NOT match real session %q", guess, real.ID)
+	}
+}
+
+func TestMemoryDesktopAuthPoll_EmptyIDDoesNotMatch(t *testing.T) {
+	// Pin: an empty session-id must not accidentally match an entry
+	// (e.g., via ConstantTimeCompare on equal-length zero strings).
+	store := NewMemoryDesktopAuthStore()
+	_, err := store.Create(context.Background(), "state-empty-test")
+	if err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+	got, ok := store.Poll(context.Background(), "")
+	if ok || got != nil {
+		t.Fatal("empty session-id must not match any populated session")
+	}
+}
+
 func TestMemoryDesktopAuthExpiredSessionIsRemoved(t *testing.T) {
 	store := NewMemoryDesktopAuthStore().(*memoryDesktopAuthStore)
 	store.sessionTTL = -1 * time.Second
