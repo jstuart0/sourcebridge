@@ -28,6 +28,14 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # CA-348: redis:7-alpine runs as UID/GID 999/999 (official image canonical).
+      # fsGroup chowns the /data PVC mount to GID 999 on first start so Redis can
+      # write AOF/RDB files; subsequent restarts are instant (mount already chowned).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
       containers:
         - name: redis
           image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
@@ -68,6 +76,14 @@ spec:
             failureThreshold: 3
           resources:
             {{- toYaml .Values.redis.resources | nindent 12 }}
+          # CA-348: container-level hardening — drop all Linux capabilities;
+          # readOnlyRootFilesystem left false because Redis writes RDB temp files
+          # to the root FS before atomic-rename into /data.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
           {{- if .Values.redis.persistence.enabled }}
           volumeMounts:
             - name: data

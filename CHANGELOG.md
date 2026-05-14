@@ -41,6 +41,7 @@ All notable changes to SourceBridge are documented here. The format follows
 - **NetworkPolicy ingress now gates on (caller-pod-label AND namespace-label)** in the kustomize hardened overlay and the Helm chart. `allow-worker-ingress`, `allow-surrealdb-ingress`, and `allow-redis-ingress` previously matched caller pods by label only, allowing any pod in any namespace with matching labels to reach those services. Each `from:` list item now includes `namespaceSelector: matchLabels: kubernetes.io/metadata.name: sourcebridge` (kustomize) / `{{ .Release.Namespace }}` (Helm) as a second key under the **same** list item — AND semantics, not OR. Closes CA-346, CA-347, CA-355 (O-M6). **Migration note**: `kubernetes.io/metadata.name` is auto-injected by kube-apiserver on K8s ≥ 1.22. Operators on older clusters or who deployed into a namespace other than `sourcebridge` must label the namespace manually: `kubectl label ns <name> kubernetes.io/metadata.name=<name> --overwrite`.
 - Next.js Content-Security-Policy headers added (`frame-ancestors 'none'`, `object-src 'none'`, `connect-src` includes PostHog host, `wss:`, `ws:`); CSP is computed at `next build` from `NEXT_PUBLIC_POSTHOG_HOST` (default `https://us.i.posthog.com`) — runtime container env has no effect; operators who need a different PostHog host must set the env at build time (CA-210)
 - PostHog analytics: `email` and `tenant_id` no longer sent on `identify`; DNT (`navigator.doNotTrack === "1"`) honored on both `identify` and `capture` (CA-211)
+- **CA-348: Helm Redis StatefulSet hardened with pod-level + container-level `securityContext`**. Pod-level: `runAsNonRoot: true`, `runAsUser: 999`, `runAsGroup: 999`, `fsGroup: 999` (`redis:7-alpine` official-image UID/GID; `fsGroup` chowns the `/data` PVC mount so Redis can write AOF/RDB files). Container-level: `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: false` (Redis writes RDB temp files to root FS before atomic-rename), `capabilities.drop: ["ALL"]`. **Migration note**: the first Redis pod restart after upgrade triggers a one-time `chown` on the `/data` PVC mount; subsequent restarts are instant.
 
 ### Added
 
@@ -59,6 +60,7 @@ All notable changes to SourceBridge are documented here. The format follows
 - `coerceInt` / `coerceUint64` extracted to `internal/db/helpers.go`; inline CBOR-decode switches in 8+ files replaced with helper calls (CA-187)
 - `surrealLLMConfig` DTO introduced in `internal/db/llm_config_store.go`; used by all three `ca_llm_config` readers (`LoadLLMConfig`, `LoadConfigSnapshot`, `LoadLegacyFieldsRaw`); `APIKey` field holds raw encrypted bytes — decryption happens after CBOR decode in the calling function (CA-307)
 - Helm worker memory recommendation raised to `4Gi` limit default in `values.yaml`
+- **CA-349: Worker memory limit canonicalized at `2Gi`** across both deployment methods. Kustomize base `deploy/kubernetes/base/worker.yaml` limit was `1Gi`; raised to `2Gi` to match Helm `values.yaml`. Memory **requests** are unchanged at `512Mi` (scheduler uses requests for placement; the `2Gi` limit only matters if the worker exceeds it at runtime).
 
 ### Fixed
 
