@@ -24,6 +24,17 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-14 audit-remediation Phase 2: SSRF guard on /llm-profiles handlers (CA-335)** — 1 commit.
+`handleCreateLLMProfile` and `handleUpdateLLMProfile` in `internal/api/rest/llm_profiles.go` now call `pathutil.ValidateLLMBaseURL(req.BaseURL, s.cfg.LLM.AllowPrivateBaseURL, nil)` before persisting. Save-time defense against SSRF: scheme allowlist (`http://` / `https://` only) is always active; the IP-range denylist (RFC1918, loopback, cloud-metadata 169.254.0.0/16, etc.) is active only when `SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL=false`. On rejection, response is `{"error":"invalid_base_url"}` — raw URL is never reflected; full error is logged server-side via `slog.Warn`.
+
+Load-bearing constraints for future-Claude:
+
+- **`ValidateLLMBaseURL(req.BaseURL, s.cfg.LLM.AllowPrivateBaseURL, nil)` is wired at both `/llm-profiles` create and update handlers.** The worker's `_create_llm_provider_sync` (`workers/common/llm/config.py:183`) also calls `validate_llm_base_url` with `allow_private=config.llm_allow_private_base_url`. Both layers are bypassed when the respective `AllowPrivateBaseURL` flag is `true` (the current default — see Decision 1 of the 2026-05-13 campaign: default flip to `false` deferred to 1.0).
+- **CA-335's `ValidateLLMBaseURL` is save-time-only.** The docstring at `pathutil.go:261-272` explains the DNS-rebind bypass risk; runtime hardening (custom dialer re-checking every resolved address at request time) is tracked as a follow-up.
+- **Any new profile-write handler MUST also wire `ValidateLLMBaseURL`** before the store call. The validator is the implicit contract for this endpoint family.
+- **Response body is always `{"error":"invalid_base_url"}`** on SSRF rejection — never `err.Error()`. This is enforced by the test cases in `internal/api/rest/llm_profiles_ssrf_test.go` (TES-M2 / XAN-L2: assertNoURLReflected).
+- **`handleUpdateLLMProfile` gates on `req.BaseURL != nil`** before calling the validator — the `ProfileUpdateRequest.BaseURL` field is `*string` and nil means "don't change".
+
 **2026-05-11 post-CA-320 QA reliability trio (CA-324 + CA-325 + CA-326)** — 5 commits, `5ba768c..f40ccbd` plus `b51c5f1` for the pre-existing schema-leak fix surfaced during the trio's E2E.
 
 Three interlocking discussCode / ask-deep bugs traced back to a single E2E reproduction on google-uuid + Ollama qwen3.5:9b. The discussCode mutation was silently returning `{"answer":""}` with null model/tokens despite running 4+ minutes. Root causes were independent but compounded:

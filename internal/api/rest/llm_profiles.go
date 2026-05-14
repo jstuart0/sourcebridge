@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/sourcebridge/sourcebridge/internal/indexing/pathutil"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/maskutil"
 )
@@ -306,6 +307,11 @@ func (s *Server) handleCreateLLMProfile(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
+	if err := pathutil.ValidateLLMBaseURL(req.BaseURL, s.cfg.LLM.AllowPrivateBaseURL, nil); err != nil {
+		slog.Warn("llm profile create rejected: invalid base_url", "error", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_base_url"})
+		return
+	}
 	id, err := s.llmProfileStore.CreateProfile(r.Context(), req)
 	if err != nil {
 		mapProfileError(w, err, "create")
@@ -344,6 +350,13 @@ func (s *Server) handleUpdateLLMProfile(w http.ResponseWriter, r *http.Request) 
 			"error": "max_concurrent_calls must be between 0 and 256",
 		})
 		return
+	}
+	if req.BaseURL != nil {
+		if err := pathutil.ValidateLLMBaseURL(*req.BaseURL, s.cfg.LLM.AllowPrivateBaseURL, nil); err != nil {
+			slog.Warn("llm profile update rejected: invalid base_url", "error", err)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_base_url"})
+			return
+		}
 	}
 	if err := s.llmProfileStore.UpdateProfile(r.Context(), id, req); err != nil {
 		mapProfileError(w, err, "update")
