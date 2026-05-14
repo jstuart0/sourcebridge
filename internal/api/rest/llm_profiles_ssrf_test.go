@@ -42,6 +42,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/indexing/pathutil"
 )
@@ -64,6 +65,7 @@ func newSSRFServer(t *testing.T, cfg *config.Config) *Server {
 		cfg:             cfg,
 		llmProfileStore: fake,
 		llmConfigStore:  &nullConfigStore{},
+		Deps:            &appdeps.AppDeps{},
 	}
 	r := chi.NewRouter()
 	r.Post("/api/v1/admin/llm-profiles", s.handleCreateLLMProfile)

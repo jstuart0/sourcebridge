@@ -114,12 +114,12 @@ type gateSnapshotFetcher interface {
 // and the time it was fetched. The 1-second TTL prevents hammering the worker
 // when the admin monitor is polled every 2 seconds.
 //
-// The optional fetcher field overrides the default s.worker path for testing.
+// The optional fetcher field overrides the default s.Deps.Worker path for testing.
 type gateSnapshotCache struct {
 	mu        sync.Mutex
 	entries   []monitorGateEntry
 	fetchedAt time.Time
-	fetcher   gateSnapshotFetcher // non-nil in tests only; nil = use s.worker
+	fetcher   gateSnapshotFetcher // non-nil in tests only; nil = use s.Deps.Worker
 }
 
 // monitorHealth is the traffic-light summary at the top of the Monitor
@@ -394,7 +394,7 @@ func parseListFilter(r *http.Request) llm.ListFilter {
 //	limit      — cap on recent history (default 50)
 //	since      — only include recent jobs updated on/after this ISO8601 time
 func (s *Server) handleLLMActivity(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "llm orchestrator not configured",
 		})
@@ -418,15 +418,15 @@ func (s *Server) handleLLMActivity(w http.ResponseWriter, r *http.Request) {
 	// Active = pending + generating. Recent = terminal within since.
 	activeFilter := filter
 	activeFilter.Limit = 0 // no cap on active; there are never many
-	active := s.orchestrator.ListActive(activeFilter)
-	recent := s.orchestrator.ListRecent(filter, since)
+	active := s.Deps.Orchestrator.ListActive(activeFilter)
+	recent := s.Deps.Orchestrator.ListRecent(filter, since)
 
 	activeViews := make([]monitorJobView, 0, len(active))
 	for _, j := range active {
 		activeViews = append(activeViews, toMonitorJobView(j))
 	}
-	pending := s.orchestrator.PendingSnapshot(activeFilter)
-	enrichQueueMetadata(activeViews, pending, s.orchestrator.Metrics(), s.orchestrator.MaxConcurrency())
+	pending := s.Deps.Orchestrator.PendingSnapshot(activeFilter)
+	enrichQueueMetadata(activeViews, pending, s.Deps.Orchestrator.Metrics(), s.Deps.Orchestrator.MaxConcurrency())
 	recentViews := make([]monitorJobView, 0, len(recent))
 	for _, j := range recent {
 		recentViews = append(recentViews, toMonitorJobView(j))
@@ -434,7 +434,7 @@ func (s *Server) handleLLMActivity(w http.ResponseWriter, r *http.Request) {
 
 	// Worker reachability is orthogonal to the orchestrator — a
 	// healthy orchestrator with an unreachable worker is "degraded".
-	workerConnected := s.worker != nil && s.worker.IsAvailable()
+	workerConnected := s.Deps.Worker != nil && s.Deps.Worker.IsAvailable()
 
 	health := computeMonitorHealth(workerConnected, len(activeViews), recentViews)
 
@@ -442,10 +442,10 @@ func (s *Server) handleLLMActivity(w http.ResponseWriter, r *http.Request) {
 		Health:  health,
 		Active:  activeViews,
 		Recent:  recentViews,
-		Metrics: s.orchestrator.Metrics(),
+		Metrics: s.Deps.Orchestrator.Metrics(),
 		Modes:   modeRollups(recentViews),
 		Control: monitorQueueControl{
-			IntakePaused: s.orchestrator.IntakePaused(),
+			IntakePaused: s.Deps.Orchestrator.IntakePaused(),
 		},
 		ErrorCounters: monitorErrorCounters{
 			KnowledgeProgressWriteErrors: graphql.KnowledgeProgressWriteErrorsTotal(),
@@ -454,12 +454,12 @@ func (s *Server) handleLLMActivity(w http.ResponseWriter, r *http.Request) {
 		},
 		Stats: monitorStats{
 			InFlight:              len(active), // DB-backed count — consistent across pods
-			QueueDepth:            s.orchestrator.QueueDepth(),
+			QueueDepth:            s.Deps.Orchestrator.QueueDepth(),
 			GateWaiting:           gateWaitingCount(activeViews),
-			TotalWaiting:          s.orchestrator.QueueDepth() + gateWaitingCount(activeViews),
-			MaxConcurrency:        s.orchestrator.MaxConcurrency(),
-			ActivePoolSize:        s.orchestrator.ActiveWorkerCount(),
-			ConfiguredPoolSize:    s.orchestrator.MaxConcurrency(),
+			TotalWaiting:          s.Deps.Orchestrator.QueueDepth() + gateWaitingCount(activeViews),
+			MaxConcurrency:        s.Deps.Orchestrator.MaxConcurrency(),
+			ActivePoolSize:        s.Deps.Orchestrator.ActiveWorkerCount(),
+			ConfiguredPoolSize:    s.Deps.Orchestrator.MaxConcurrency(),
 			RecentReusedSummaries: totalReusedSummaries(recentViews),
 			ActiveClassic:         countGenerationMode(activeViews, "classic"),
 			ActiveUnderstanding:   countGenerationMode(activeViews, "understanding_first"),
@@ -479,7 +479,7 @@ func (s *Server) handleLLMActivity(w http.ResponseWriter, r *http.Request) {
 // in-process cache to avoid hammering the worker on every 2-second poll.
 //
 // Returns nil (not an empty slice) when:
-//   - s.worker is nil (no worker configured) and no test fetcher is set
+//   - s.Deps.Worker is nil (no worker configured) and no test fetcher is set
 //   - the worker is unreachable or the RPC errors
 //   - the snapshot is empty (kill-switch off or no gates registered yet)
 //
@@ -493,9 +493,9 @@ func (s *Server) fetchGateSnapshot(ctx context.Context) []monitorGateEntry {
 	var fetch func(context.Context) ([]monitorGateEntry, error)
 	if s.gateSnapshotCache.fetcher != nil {
 		fetch = s.gateSnapshotCache.fetcher.GetLLMGateSnapshot
-	} else if s.worker != nil {
+	} else if s.Deps.Worker != nil {
 		fetch = func(ctx context.Context) ([]monitorGateEntry, error) {
-			resp, err := s.worker.GetLLMGateSnapshot(ctx)
+			resp, err := s.Deps.Worker.GetLLMGateSnapshot(ctx)
 			if err != nil || resp == nil {
 				return nil, err
 			}
@@ -786,7 +786,7 @@ func computeMonitorHealth(workerConnected bool, activeCount int, recent []monito
 
 // handleLLMJobDetail returns the full job record for a single id.
 func (s *Server) handleLLMJobDetail(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "llm orchestrator not configured",
 		})
@@ -797,7 +797,7 @@ func (s *Server) handleLLMJobDetail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
 		return
 	}
-	job := s.orchestrator.GetJob(id)
+	job := s.Deps.Orchestrator.GetJob(id)
 	if job == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
 		return
@@ -806,7 +806,7 @@ func (s *Server) handleLLMJobDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLLMJobCancel(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "llm orchestrator not configured",
 		})
@@ -817,13 +817,13 @@ func (s *Server) handleLLMJobCancel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
 		return
 	}
-	if err := s.orchestrator.Cancel(id); err != nil {
+	if err := s.Deps.Orchestrator.Cancel(id); err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		return
 	}
-	job := s.orchestrator.GetJob(id)
-	if s.knowledgeStore != nil && job != nil && job.ArtifactID != "" {
-		_ = s.knowledgeStore.SetArtifactFailed(r.Context(), job.ArtifactID, "CANCELLED", "Generation was cancelled before completion.")
+	job := s.Deps.Orchestrator.GetJob(id)
+	if s.Deps.KnowledgeStore != nil && job != nil && job.ArtifactID != "" {
+		_ = s.Deps.KnowledgeStore.SetArtifactFailed(r.Context(), job.ArtifactID, "CANCELLED", "Generation was cancelled before completion.")
 		job.Progress = 0
 		job.ProgressPhase = ""
 		job.ProgressMessage = ""
@@ -845,7 +845,7 @@ func (s *Server) handleLLMJobCancel(w http.ResponseWriter, r *http.Request) {
 // callers don't silently assume a retry happened. A future phase can
 // wire this to per-subsystem retry factories.
 func (s *Server) handleLLMJobRetry(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "llm orchestrator not configured",
 		})
@@ -856,7 +856,7 @@ func (s *Server) handleLLMJobRetry(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
 		return
 	}
-	job := s.orchestrator.GetJob(id)
+	job := s.Deps.Orchestrator.GetJob(id)
 	if job == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
 		return
@@ -880,7 +880,7 @@ func (s *Server) handleLLMJobRetry(w http.ResponseWriter, r *http.Request) {
 
 // handleLLMJobLogs returns persisted structured log entries for one job.
 func (s *Server) handleLLMJobLogs(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "llm orchestrator not configured",
 		})
@@ -903,7 +903,7 @@ func (s *Server) handleLLMJobLogs(w http.ResponseWriter, r *http.Request) {
 			afterSequence = n
 		}
 	}
-	rows := s.orchestrator.ListJobLogs(id, llm.JobLogFilter{
+	rows := s.Deps.Orchestrator.ListJobLogs(id, llm.JobLogFilter{
 		Limit:         limit,
 		AfterSequence: afterSequence,
 	})
@@ -916,7 +916,7 @@ func (s *Server) handleLLMJobLogs(w http.ResponseWriter, r *http.Request) {
 
 // handleLLMJobLogStream streams structured log entries for one job via SSE.
 func (s *Server) handleLLMJobLogStream(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "llm orchestrator not configured",
 		})
@@ -941,7 +941,7 @@ func (s *Server) handleLLMJobLogStream(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(": connected\n\n"))
 	flusher.Flush()
 
-	events, unsubscribe := s.orchestrator.SubscribeLogs()
+	events, unsubscribe := s.Deps.Orchestrator.SubscribeLogs()
 	defer unsubscribe()
 	ticker := time.NewTicker(25 * time.Second)
 	defer ticker.Stop()
@@ -987,7 +987,7 @@ func (s *Server) handleLLMJobLogStream(w http.ResponseWriter, r *http.Request) {
 // The connection stays open until the client disconnects or the
 // request context is cancelled.
 func (s *Server) handleLLMStream(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "llm orchestrator not configured",
 		})
@@ -1011,7 +1011,7 @@ func (s *Server) handleLLMStream(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(": connected\n\n"))
 	flusher.Flush()
 
-	events, unsubscribe := s.orchestrator.Subscribe()
+	events, unsubscribe := s.Deps.Orchestrator.Subscribe()
 	defer unsubscribe()
 
 	// Optional filter by subsystem / repo so the repo-scoped popover

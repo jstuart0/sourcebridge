@@ -24,6 +24,17 @@ for the full operator runbook and threshold table reference.
 
 ## Recent refactors
 
+**2026-05-14 rest.Server mirror-field collapse (CA-328)** — 1 commit.
+Applies the CA-184 pattern (which collapsed `graphql.Resolver`'s 26 mirror fields onto `Resolver.Deps`) to `rest.Server`. Removed 21 private mirror fields that duplicated AppDeps entries; the single `Deps *appdeps.AppDeps` field is now the canonical accessor for all subsystem dependencies. `syncServerDepsFromAppDeps` (the idempotent identity-copy function) is deleted. `NewServer` initialises `s.Deps = &appdeps.AppDeps{Worker: ..., EventBus: ..., Flags: ...}` at the top of construction so `WithXxx` options can write to `s.Deps.<Field>` safely before the options loop. The AppDeps construction block is simplified: instead of a full struct re-literal that copied all fields back onto itself, it only fills in the fields that are derived at construction time (ClusterStore, LLMProfileLookup, UpstreamCapacityProvider, Config, WorkerVersion, DrainAdmitter, EncryptionKeySet, QA). All handler files and test files updated. `TestServerStructureCanary` in `internal/api/rest/structure_test.go` pins the final field count.
+
+Load-bearing constraints for future-Claude:
+
+- **`rest.Server.Deps` is mandatory.** Tests constructing `Server{}` directly MUST include at least `Deps: &appdeps.AppDeps{}`. Any handler that accesses `s.Deps.<Field>` will panic if `s.Deps == nil`. Use `Deps: &appdeps.AppDeps{FieldNeededByTest: value}`.
+- **`syncServerDepsFromAppDeps` is GONE.** There is no sync function. The `WithXxx` options write directly to `s.Deps.<Field>`; the AppDeps construction block near the bottom of `NewServer` fills in the few remaining derived fields. Don't reintroduce a sync function.
+- **`s.cfg` is intentionally NOT in AppDeps.** It is used throughout `NewServer` before the derived AppDeps fields can be computed, and threading it through `s.Deps.Config` introduces a circular dependency on initialization order. `s.cfg` is the boot-time process config and is kept as a Server-only field.
+- **`TestServerStructureCanary` in `internal/api/rest/structure_test.go` pins the Server field set.** Adding a new REST-only field requires updating the allowlist in that test. Adding a new subsystem dependency MUST go to `appdeps.AppDeps` and NOT to `Server` directly.
+- **Field `Deps` replaces old field `AppDeps`.** Any grep for `\.AppDeps` in the rest package is a bug — the field is now `Deps`.
+
 **2026-05-14 audit-remediation Phase 2: SSRF guard on /llm-profiles handlers (CA-335)** — 1 commit.
 `handleCreateLLMProfile` and `handleUpdateLLMProfile` in `internal/api/rest/llm_profiles.go` now call `pathutil.ValidateLLMBaseURL(req.BaseURL, s.cfg.LLM.AllowPrivateBaseURL, nil)` before persisting. Save-time defense against SSRF: scheme allowlist (`http://` / `https://` only) is always active; the IP-range denylist (RFC1918, loopback, cloud-metadata 169.254.0.0/16, etc.) is active only when `SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL=false`. On rejection, response is `{"error":"invalid_base_url"}` — raw URL is never reflected; full error is logged server-side via `slog.Warn`.
 

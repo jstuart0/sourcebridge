@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/health"
 )
 
@@ -34,7 +35,7 @@ func (f *fakeWorkerChecker) CheckHealth(_ context.Context) (bool, error) {
 // a live config, gqlgen, etc.).
 func newReadyzServer(db health.DBPinger, wc health.WorkerChecker) *Server {
 	hc := health.New(db, wc)
-	return &Server{healthChecker: hc}
+	return &Server{Deps: &appdeps.AppDeps{HealthChecker: hc}}
 }
 
 // --- tests ---
@@ -105,7 +106,7 @@ func TestHandleReadyz_WorkerUnreachable_Returns200Degraded(t *testing.T) {
 func TestHandleReadyz_NilHealthChecker_EmbeddedMode(t *testing.T) {
 	// When no health checker is wired (embedded/in-memory mode), the handler
 	// must still return 200 and "ready" without panicking.
-	s := &Server{}
+	s := &Server{Deps: &appdeps.AppDeps{}}
 	rec, body := callReadyz(t, s)
 
 	if rec.Code != http.StatusOK {

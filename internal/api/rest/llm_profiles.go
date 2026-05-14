@@ -320,8 +320,8 @@ func (s *Server) handleCreateLLMProfile(w http.ResponseWriter, r *http.Request) 
 	// Nudge local resolver cache so the next Resolve sees the new
 	// profile (it shouldn't be active yet, but the workspace version
 	// bump means a re-fetch is cheap).
-	if s.llmResolver != nil {
-		s.llmResolver.InvalidateLocal()
+	if s.Deps.LLMResolver != nil {
+		s.Deps.LLMResolver.InvalidateLocal()
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
@@ -362,8 +362,8 @@ func (s *Server) handleUpdateLLMProfile(w http.ResponseWriter, r *http.Request) 
 		mapProfileError(w, err, "update")
 		return
 	}
-	if s.llmResolver != nil {
-		s.llmResolver.InvalidateLocal()
+	if s.Deps.LLMResolver != nil {
+		s.Deps.LLMResolver.InvalidateLocal()
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
@@ -380,8 +380,8 @@ func (s *Server) handleDeleteLLMProfile(w http.ResponseWriter, r *http.Request) 
 		mapProfileError(w, err, "delete")
 		return
 	}
-	if s.llmResolver != nil {
-		s.llmResolver.InvalidateLocal()
+	if s.Deps.LLMResolver != nil {
+		s.Deps.LLMResolver.InvalidateLocal()
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -399,8 +399,8 @@ func (s *Server) handleActivateLLMProfile(w http.ResponseWriter, r *http.Request
 		mapProfileError(w, err, "activate")
 		return
 	}
-	if s.llmResolver != nil {
-		s.llmResolver.InvalidateLocal()
+	if s.Deps.LLMResolver != nil {
+		s.Deps.LLMResolver.InvalidateLocal()
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

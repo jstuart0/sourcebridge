@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
 )
@@ -32,8 +33,8 @@ func newDrainTestServer(t *testing.T) *Server {
 	t.Cleanup(func() { _ = orch.Shutdown(2 * time.Second) })
 
 	s := &Server{
-		orchestrator: orch,
-		OnDemand:     NewOnDemandTracker(),
+		Deps:     &appdeps.AppDeps{Orchestrator: orch},
+		OnDemand: NewOnDemandTracker(),
 	}
 	return s
 }
@@ -86,7 +87,7 @@ func TestAwaitDrainWaitsForInFlightJob(t *testing.T) {
 	t.Parallel()
 
 	s := newDrainTestServer(t)
-	orch := s.orchestrator
+	orch := s.Deps.Orchestrator
 
 	jobStarted := make(chan struct{})
 	allowFinish := make(chan struct{})
@@ -146,7 +147,7 @@ func TestCancelAndWaitAfterAwaitDrain(t *testing.T) {
 	t.Parallel()
 
 	s := newDrainTestServer(t)
-	orch := s.orchestrator
+	orch := s.Deps.Orchestrator
 
 	s.BeginDrain("test")
 
@@ -177,7 +178,7 @@ func TestBeginDrainSetsMarkDraining(t *testing.T) {
 		t.Fatal("expected first BeginDrain to return true")
 	}
 
-	if !s.orchestrator.IntakePaused() {
+	if !s.Deps.Orchestrator.IntakePaused() {
 		t.Fatal("expected IntakePaused to be true after BeginDrain")
 	}
 }
@@ -228,7 +229,7 @@ func TestDebugSlowJobCancellationPropagates(t *testing.T) {
 
 	// Enqueue a job that mirrors handleDebugSlowJob's closure: exits via
 	// ctx.Done() and returns ctx.Err() (the post-fix behaviour).
-	_, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
+	_, err := s.Deps.Orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem: "debug",
 		JobType:   "slow_job",
 		TargetKey: "debug:slow_job:cancel-test",
@@ -260,12 +261,12 @@ func TestDebugSlowJobCancellationPropagates(t *testing.T) {
 	// the goroutine would still exit — but we verify the path exits promptly
 	// and the orchestrator worker count reaches zero.
 	const cancelTimeout = 2 * time.Second
-	if err := s.orchestrator.CancelAndWait(cancelTimeout); err != nil {
+	if err := s.Deps.Orchestrator.CancelAndWait(cancelTimeout); err != nil {
 		t.Fatalf("CancelAndWait did not complete within %s: %v — "+
 			"cancellation error likely not propagated from RunWithContext", cancelTimeout, err)
 	}
 
-	if n := s.orchestrator.ActiveWorkerCount(); n != 0 {
+	if n := s.Deps.Orchestrator.ActiveWorkerCount(); n != 0 {
 		t.Fatalf("expected 0 active workers after CancelAndWait, got %d", n)
 	}
 }

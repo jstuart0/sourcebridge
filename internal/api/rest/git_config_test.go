@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/db"
 	gitres "github.com/sourcebridge/sourcebridge/internal/git/resolution"
@@ -73,7 +74,7 @@ func newGitConfigTestServer(_ *testing.T, env config.GitConfig, store *fakeGitCo
 	return &Server{
 		cfg:            cfg,
 		gitConfigStore: store,
-		gitResolver:    resolver,
+		Deps:           &appdeps.AppDeps{GitResolver: resolver},
 	}
 }
 
@@ -295,7 +296,7 @@ func TestHandleUpdateGitConfig_422OnEncryptionKeyMissing(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Git = env
 	resolver := gitres.New(store, env, nil)
-	s := &Server{cfg: cfg, gitConfigStore: store, gitResolver: resolver}
+	s := &Server{cfg: cfg, gitConfigStore: store, Deps: &appdeps.AppDeps{GitResolver: resolver}}
 
 	newToken := "secret"
 	body, _ := json.Marshal(map[string]interface{}{

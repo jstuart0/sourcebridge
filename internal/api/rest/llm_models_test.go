@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
@@ -31,8 +32,8 @@ func TestHandleListLLMModels_DefaultsFromResolverSnapshot(t *testing.T) {
 	}, nil)
 
 	s := &Server{
-		cfg:         &config.Config{LLM: config.LLMConfig{Provider: "anthropic"}},
-		llmResolver: resolver,
+		cfg:  &config.Config{LLM: config.LLMConfig{Provider: "anthropic"}},
+		Deps: &appdeps.AppDeps{LLMResolver: resolver},
 	}
 
 	req := httptest.NewRequest("GET", "/api/v1/admin/llm-models", nil)

@@ -62,7 +62,7 @@ func (s *Server) handleDiscussStream(w http.ResponseWriter, r *http.Request) {
 
 	// Worker availability: fail fast with JSON rather than opening an
 	// SSE stream we can't populate.
-	if s.llmCaller == nil || !s.llmCaller.IsAvailable() || s.worker == nil || !s.worker.IsAvailable() {
+	if s.Deps.LLMCaller == nil || !s.Deps.LLMCaller.IsAvailable() || s.Deps.Worker == nil || !s.Deps.Worker.IsAvailable() {
 		writeDiscussJSONErr(w, http.StatusServiceUnavailable, "AI worker not reachable")
 		return
 	}
@@ -89,7 +89,7 @@ func (s *Server) handleDiscussStream(w http.ResponseWriter, r *http.Request) {
 		question = fmt.Sprintf("%s\n\n```\n%s\n```", req.Question, req.Code)
 	}
 
-	stream, cancel, err := s.llmCaller.AnswerQuestionStream(
+	stream, cancel, err := s.Deps.LLMCaller.AnswerQuestionStream(
 		r.Context(),
 		req.RepositoryID,
 		resolution.OpDiscussStream,

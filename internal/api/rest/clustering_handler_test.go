@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/clustering"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
@@ -264,14 +265,18 @@ func newRelabelTestServer(t *testing.T, withOrch bool) (srv *Server, repoID stri
 	// orchestrator's LLMProvider guard (ErrLLMProviderRequired) doesn't
 	// fire on relabel_clusters enqueues.
 	resolver := resolution.NewFrozenResolver(resolution.Snapshot{Provider: "test-provider"})
-	srv = &Server{cfg: cfg, store: store, llmResolver: resolver}
+	srv = &Server{
+		cfg:   cfg,
+		store: store,
+		Deps:  &appdeps.AppDeps{LLMResolver: resolver},
+	}
 
 	if withOrch {
 		orch := orchestrator.New(llm.NewMemStore(), orchestrator.Config{
 			MaxConcurrency:            1,
 			SkipStartupReconciliation: true,
 		})
-		srv.orchestrator = orch
+		srv.Deps.Orchestrator = orch
 	}
 	return srv, repoID
 }

@@ -31,28 +31,28 @@ type queueControlResponse struct {
 }
 
 func (s *Server) persistQueueControl() {
-	if s.queueControlStore == nil || s.orchestrator == nil {
+	if s.queueControlStore == nil || s.Deps.Orchestrator == nil {
 		return
 	}
 	if err := s.queueControlStore.SaveQueueControl(context.Background(), &QueueControlRecord{
-		IntakePaused: s.orchestrator.IntakePaused(),
+		IntakePaused: s.Deps.Orchestrator.IntakePaused(),
 	}); err != nil {
 		slog.Warn("failed to persist queue control", "error", err)
 	}
 }
 
 func (s *Server) handleGetQueueControl(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "llm orchestrator not configured"})
 		return
 	}
 	writeJSON(w, http.StatusOK, queueControlResponse{
-		IntakePaused: s.orchestrator.IntakePaused(),
+		IntakePaused: s.Deps.Orchestrator.IntakePaused(),
 	})
 }
 
 func (s *Server) handleUpdateQueueControl(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "llm orchestrator not configured"})
 		return
 	}
@@ -65,20 +65,20 @@ func (s *Server) handleUpdateQueueControl(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"intake_paused is required"}`, http.StatusBadRequest)
 		return
 	}
-	s.orchestrator.SetIntakePaused(*req.IntakePaused)
+	s.Deps.Orchestrator.SetIntakePaused(*req.IntakePaused)
 	s.persistQueueControl()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":        "saved",
-		"intake_paused": s.orchestrator.IntakePaused(),
+		"intake_paused": s.Deps.Orchestrator.IntakePaused(),
 	})
 }
 
 func (s *Server) handleDrainQueue(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "llm orchestrator not configured"})
 		return
 	}
-	cancelled, err := s.orchestrator.DrainPending()
+	cancelled, err := s.Deps.Orchestrator.DrainPending()
 	if err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		return
@@ -86,7 +86,7 @@ func (s *Server) handleDrainQueue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":              "drained",
 		"cancelled_pending":   cancelled,
-		"intake_paused":       s.orchestrator.IntakePaused(),
-		"remaining_queue_len": s.orchestrator.QueueDepth(),
+		"intake_paused":       s.Deps.Orchestrator.IntakePaused(),
+		"remaining_queue_len": s.Deps.Orchestrator.QueueDepth(),
 	})
 }

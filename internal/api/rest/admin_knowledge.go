@@ -58,7 +58,7 @@ func (s *Server) collectKnowledgeStats(ctx context.Context, store graphstore.Gra
 	// Iterate all repositories to collect knowledge artifacts.
 	repos := store.ListRepositories(ctx)
 	for _, repo := range repos {
-		artifacts := s.knowledgeStore.GetKnowledgeArtifacts(ctx, repo.ID)
+		artifacts := s.Deps.KnowledgeStore.GetKnowledgeArtifacts(ctx, repo.ID)
 		for _, a := range artifacts {
 			stats.Total++
 			stats.ByType[string(a.Type)]++
@@ -92,7 +92,7 @@ func (s *Server) handleAdminKnowledgeStatus(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Sunset", "Wed, 20 May 2026 00:00:00 GMT")
 	w.Header().Set("Link", `</graphql>; rel="successor-version"`)
 
-	if s.knowledgeStore == nil {
+	if s.Deps.KnowledgeStore == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"configured": false,
 			"message":    "knowledge store not configured",
@@ -107,14 +107,14 @@ func (s *Server) handleAdminKnowledgeStatus(w http.ResponseWriter, r *http.Reque
 
 	repos := store.ListRepositories(r.Context())
 	for _, repo := range repos {
-		artifacts := s.knowledgeStore.GetKnowledgeArtifacts(r.Context(), repo.ID)
+		artifacts := s.Deps.KnowledgeStore.GetKnowledgeArtifacts(r.Context(), repo.ID)
 		if len(artifacts) == 0 {
 			continue
 		}
 		rk := repoKnowledge{
 			RepoID:   repo.ID,
 			RepoName: repo.Name,
-			Quality:  knowledge.CollectQualityMetrics(r.Context(), s.knowledgeStore, store, repo.ID),
+			Quality:  knowledge.CollectQualityMetrics(r.Context(), s.Deps.KnowledgeStore, store, repo.ID),
 		}
 		for _, a := range artifacts {
 			entry := knowledgeArtifactSummary{

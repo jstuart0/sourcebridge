@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
 )
@@ -58,8 +59,8 @@ func newMonitorTestServer(t *testing.T) *Server {
 	})
 	t.Cleanup(func() { _ = orch.Shutdown(time.Second) })
 	return &Server{
-		jobStore:     store,
-		orchestrator: orch,
+		jobStore: store,
+		Deps:     &appdeps.AppDeps{Orchestrator: orch},
 	}
 }
 
@@ -263,7 +264,7 @@ func TestHandleLLMActivityShowsCompletedJob(t *testing.T) {
 	s := newMonitorTestServer(t)
 
 	done := make(chan struct{})
-	_, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
+	_, err := s.Deps.Orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
 		LLMProvider: "test",
 		JobType:   "cliff_notes",
@@ -301,7 +302,7 @@ func TestHandleLLMActivityShowsCompletedJob(t *testing.T) {
 func TestHandleLLMJobDetailRoundTrip(t *testing.T) {
 	s := newMonitorTestServer(t)
 
-	job, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
+	job, err := s.Deps.Orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
 		LLMProvider: "test",
 		JobType:   "cliff_notes",
@@ -338,7 +339,7 @@ func TestHandleLLMJobDetailRoundTrip(t *testing.T) {
 
 func TestHandleLLMJobLogs(t *testing.T) {
 	s := newMonitorTestServer(t)
-	job, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
+	job, err := s.Deps.Orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
 		LLMProvider: "test",
 		JobType:   "cliff_notes",
@@ -387,7 +388,7 @@ func TestHandleLLMJobRetryNonRetryableState(t *testing.T) {
 	s := newMonitorTestServer(t)
 
 	// Enqueue a job and let it complete successfully.
-	job, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
+	job, err := s.Deps.Orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
 		LLMProvider: "test",
 		JobType:   "cliff_notes",
@@ -421,7 +422,7 @@ func TestHandleUpdateQueueControl(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	if !s.orchestrator.IntakePaused() {
+	if !s.Deps.Orchestrator.IntakePaused() {
 		t.Fatal("expected intake to be paused")
 	}
 }
@@ -430,7 +431,7 @@ func TestHandleDrainQueue(t *testing.T) {
 	s := newMonitorTestServer(t)
 	block := make(chan struct{})
 	started := make(chan struct{})
-	_, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
+	_, err := s.Deps.Orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
 		LLMProvider: "test",
 		JobType:   "cliff_notes",
@@ -445,7 +446,7 @@ func TestHandleDrainQueue(t *testing.T) {
 		t.Fatalf("enqueue running job: %v", err)
 	}
 	<-started
-	_, err = s.orchestrator.Enqueue(&llm.EnqueueRequest{
+	_, err = s.Deps.Orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem: llm.SubsystemKnowledge,
 		LLMProvider: "test",
 		JobType:   "learning_path",

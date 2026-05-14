@@ -73,7 +73,7 @@ func (r askRequest) toAskInput() qa.AskInput {
 // to live on POST /api/v1/discuss/stream through the migration; a
 // dedicated ask streaming adapter is a follow-up (see plan §Not Goals).
 func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
-	if !s.cfg.QA.ServerSideEnabled || s.qaOrchestrator == nil {
+	if !s.cfg.QA.ServerSideEnabled || s.Deps.QA == nil {
 		writeAskJSONErr(w, http.StatusServiceUnavailable, "server-side QA is disabled on this deployment")
 		return
 	}
@@ -89,7 +89,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		writeAskJSONErr(w, http.StatusForbidden, "forbidden: no access to repository")
 		return
 	}
-	res, err := s.qaOrchestrator.Ask(r.Context(), in)
+	res, err := s.Deps.QA.Ask(r.Context(), in)
 	if err != nil {
 		if qa.IsInvalidInput(err) {
 			writeAskJSONErr(w, http.StatusBadRequest, err.Error())

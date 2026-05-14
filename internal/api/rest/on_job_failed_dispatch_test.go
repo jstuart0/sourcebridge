@@ -11,6 +11,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
@@ -25,8 +26,10 @@ import (
 // and the tests below will confirm correct routing at the store-call level.
 func buildOnJobFailedCallback(ks knowledge.KnowledgeStore, lw livingwiki.JobResultStore) func(*llm.Job) {
 	s := &Server{
-		knowledgeStore:           ks,
-		livingWikiJobResultStore: lw,
+		Deps: &appdeps.AppDeps{
+			KnowledgeStore:           ks,
+			LivingWikiJobResultStore: lw,
+		},
 	}
 	return func(job *llm.Job) {
 		if job == nil {
@@ -34,7 +37,7 @@ func buildOnJobFailedCallback(ks knowledge.KnowledgeStore, lw livingwiki.JobResu
 		}
 		switch job.JobType {
 		case "build_repository_understanding":
-			if s.knowledgeStore == nil || job.ArtifactID == "" {
+			if s.Deps.KnowledgeStore == nil || job.ArtifactID == "" {
 				return
 			}
 			code := job.ErrorCode
@@ -45,9 +48,9 @@ func buildOnJobFailedCallback(ks knowledge.KnowledgeStore, lw livingwiki.JobResu
 			if msg == "" {
 				msg = "Repository understanding job failed"
 			}
-			_ = s.knowledgeStore.MarkRepositoryUnderstandingFailed(context.Background(), job.ArtifactID, code, msg)
+			_ = s.Deps.KnowledgeStore.MarkRepositoryUnderstandingFailed(context.Background(), job.ArtifactID, code, msg)
 		case "cliff_notes", "architecture_diagram", "learning_path", "code_tour", "workflow_story":
-			if s.knowledgeStore == nil || job.ArtifactID == "" {
+			if s.Deps.KnowledgeStore == nil || job.ArtifactID == "" {
 				return
 			}
 			code := job.ErrorCode
@@ -58,12 +61,12 @@ func buildOnJobFailedCallback(ks knowledge.KnowledgeStore, lw livingwiki.JobResu
 			if msg == "" {
 				msg = "Knowledge artifact generation failed"
 			}
-			_ = s.knowledgeStore.SetArtifactFailed(context.Background(), job.ArtifactID, code, msg)
+			_ = s.Deps.KnowledgeStore.SetArtifactFailed(context.Background(), job.ArtifactID, code, msg)
 		case "living_wiki_cold_start", "living_wiki_retry_excluded":
-			if s.livingWikiJobResultStore == nil {
+			if s.Deps.LivingWikiJobResultStore == nil {
 				return
 			}
-			persistStaleLivingWikiResult(s.livingWikiJobResultStore, job)
+			persistStaleLivingWikiResult(s.Deps.LivingWikiJobResultStore, job)
 		}
 	}
 }

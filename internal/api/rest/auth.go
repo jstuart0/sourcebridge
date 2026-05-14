@@ -222,7 +222,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	// Subscribe to all events via wildcard. The returned handle is used by
 	// defer Unsubscribe to prevent subscription leaks (X-L2 fix).
 	ch := make(chan events.Event, 100)
-	sub := s.eventBus.Subscribe("*", func(e events.Event) {
+	sub := s.Deps.EventBus.Subscribe("*", func(e events.Event) {
 		// Tenant filter: OSS single-tenant gets all events; multi-tenant only
 		// gets events whose repo_id (or repository_id) is in allowedRepos.
 		// Events with no repo identifier are dropped defensively on multi-tenant
@@ -241,7 +241,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	// Unsubscribe runs before the channel is effectively abandoned, ensuring
 	// no goroutine holds a reference to the closed-over ch after the handler
 	// returns. (X-L2 fix)
-	defer s.eventBus.Unsubscribe(sub)
+	defer s.Deps.EventBus.Unsubscribe(sub)
 
 	heartbeat := time.NewTicker(30 * time.Second)
 	defer heartbeat.Stop()

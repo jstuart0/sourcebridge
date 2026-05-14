@@ -44,19 +44,19 @@ func (s *Server) listRepoLLMActivity(repoID string, limit int, since time.Time) 
 		RepoID: repoID,
 		Limit:  0, // no cap on active
 	}
-	rawActive := s.orchestrator.ListActive(filter)
+	rawActive := s.Deps.Orchestrator.ListActive(filter)
 	active = make([]monitorJobView, 0, len(rawActive))
 	for _, j := range rawActive {
 		active = append(active, toMonitorJobView(j))
 	}
-	pending = s.orchestrator.PendingSnapshot(filter)
-	enrichQueueMetadata(active, pending, s.orchestrator.Metrics(), s.orchestrator.MaxConcurrency())
+	pending = s.Deps.Orchestrator.PendingSnapshot(filter)
+	enrichQueueMetadata(active, pending, s.Deps.Orchestrator.Metrics(), s.Deps.Orchestrator.MaxConcurrency())
 
 	recentFilter := llm.ListFilter{
 		RepoID: repoID,
 		Limit:  limit,
 	}
-	rawRecent := s.orchestrator.ListRecent(recentFilter, since)
+	rawRecent := s.Deps.Orchestrator.ListRecent(recentFilter, since)
 	recent = make([]monitorJobView, 0, len(rawRecent))
 	for _, j := range rawRecent {
 		recent = append(recent, toMonitorJobView(j))
@@ -68,7 +68,7 @@ func (s *Server) listRepoLLMActivity(repoID string, limit int, since time.Time) 
 // Returns (job, true) on success. Writes a 404 response and returns (_, false)
 // when the job is not found or belongs to a different repo.
 func (s *Server) getRepoLLMJob(w http.ResponseWriter, repoID, jobID string) (*llm.Job, bool) {
-	job := s.orchestrator.GetJob(jobID)
+	job := s.Deps.Orchestrator.GetJob(jobID)
 	if job == nil || job.RepoID != repoID {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
 		return nil, false
@@ -81,7 +81,7 @@ func (s *Server) getRepoLLMJob(w http.ResponseWriter, repoID, jobID string) (*ll
 // handleRepoLLMActivity handles GET /api/v1/repositories/{id}/llm-activity.
 // Returns active and recent jobs scoped to the given repository.
 func (s *Server) handleRepoLLMActivity(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "llm orchestrator not configured",
 		})
@@ -112,7 +112,7 @@ func (s *Server) handleRepoLLMActivity(w http.ResponseWriter, r *http.Request) {
 
 	active, recent, pending := s.listRepoLLMActivity(repoID, limit, since)
 
-	workerConnected := s.worker != nil && s.worker.IsAvailable()
+	workerConnected := s.Deps.Worker != nil && s.Deps.Worker.IsAvailable()
 	health := computeMonitorHealth(workerConnected, len(active), recent)
 
 	// Match the shape of monitorActivityResponse from handleLLMActivity
@@ -124,10 +124,10 @@ func (s *Server) handleRepoLLMActivity(w http.ResponseWriter, r *http.Request) {
 		Health:  health,
 		Active:  active,
 		Recent:  recent,
-		Metrics: s.orchestrator.Metrics(),
+		Metrics: s.Deps.Orchestrator.Metrics(),
 		Modes:   modeRollups(recent),
 		Control: monitorQueueControl{
-			IntakePaused: s.orchestrator.IntakePaused(),
+			IntakePaused: s.Deps.Orchestrator.IntakePaused(),
 		},
 		ErrorCounters: monitorErrorCounters{
 			KnowledgeProgressWriteErrors: graphql.KnowledgeProgressWriteErrorsTotal(),
@@ -136,12 +136,12 @@ func (s *Server) handleRepoLLMActivity(w http.ResponseWriter, r *http.Request) {
 		},
 		Stats: monitorStats{
 			InFlight:              len(active),
-			QueueDepth:            s.orchestrator.QueueDepth(),
+			QueueDepth:            s.Deps.Orchestrator.QueueDepth(),
 			GateWaiting:           gateWaitingCount(active),
-			TotalWaiting:          s.orchestrator.QueueDepth() + gateWaitingCount(active),
-			MaxConcurrency:        s.orchestrator.MaxConcurrency(),
-			ActivePoolSize:        s.orchestrator.ActiveWorkerCount(),
-			ConfiguredPoolSize:    s.orchestrator.MaxConcurrency(),
+			TotalWaiting:          s.Deps.Orchestrator.QueueDepth() + gateWaitingCount(active),
+			MaxConcurrency:        s.Deps.Orchestrator.MaxConcurrency(),
+			ActivePoolSize:        s.Deps.Orchestrator.ActiveWorkerCount(),
+			ConfiguredPoolSize:    s.Deps.Orchestrator.MaxConcurrency(),
 			RecentReusedSummaries: totalReusedSummaries(recent),
 			ActiveClassic:         countGenerationMode(active, "classic"),
 			ActiveUnderstanding:   countGenerationMode(active, "understanding_first"),
@@ -158,7 +158,7 @@ func (s *Server) handleRepoLLMActivity(w http.ResponseWriter, r *http.Request) {
 // handleRepoLLMJobDetail handles GET /api/v1/repositories/{id}/llm-jobs/{job_id}.
 // Returns the full job record for a single job belonging to this repository.
 func (s *Server) handleRepoLLMJobDetail(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "llm orchestrator not configured",
 		})
@@ -182,7 +182,7 @@ func (s *Server) handleRepoLLMJobDetail(w http.ResponseWriter, r *http.Request) 
 // handleRepoLLMJobLogs handles GET /api/v1/repositories/{id}/llm-jobs/{job_id}/logs.
 // Returns persisted structured log entries for one job belonging to this repository.
 func (s *Server) handleRepoLLMJobLogs(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "llm orchestrator not configured",
 		})
@@ -213,7 +213,7 @@ func (s *Server) handleRepoLLMJobLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rows := s.orchestrator.ListJobLogs(jobID, llm.JobLogFilter{
+	rows := s.Deps.Orchestrator.ListJobLogs(jobID, llm.JobLogFilter{
 		Limit:         limit,
 		AfterSequence: afterSequence,
 	})
@@ -227,7 +227,7 @@ func (s *Server) handleRepoLLMJobLogs(w http.ResponseWriter, r *http.Request) {
 // handleRepoLLMJobCancel handles POST /api/v1/repositories/{id}/llm-jobs/{job_id}/cancel.
 // Cancels a job that belongs to this repository.
 func (s *Server) handleRepoLLMJobCancel(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "llm orchestrator not configured",
 		})
@@ -245,14 +245,14 @@ func (s *Server) handleRepoLLMJobCancel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := s.orchestrator.Cancel(jobID); err != nil {
+	if err := s.Deps.Orchestrator.Cancel(jobID); err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		return
 	}
 
-	job := s.orchestrator.GetJob(jobID)
-	if s.knowledgeStore != nil && job != nil && job.ArtifactID != "" {
-		_ = s.knowledgeStore.SetArtifactFailed(r.Context(), job.ArtifactID, "CANCELLED", "Generation was cancelled before completion.")
+	job := s.Deps.Orchestrator.GetJob(jobID)
+	if s.Deps.KnowledgeStore != nil && job != nil && job.ArtifactID != "" {
+		_ = s.Deps.KnowledgeStore.SetArtifactFailed(r.Context(), job.ArtifactID, "CANCELLED", "Generation was cancelled before completion.")
 		job.Progress = 0
 		job.ProgressPhase = ""
 		job.ProgressMessage = ""

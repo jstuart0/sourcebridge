@@ -114,7 +114,7 @@ func (s *Server) handleBeginDrainInternal(w http.ResponseWriter, r *http.Request
 //
 // Query param: seconds (int, 1-3600, default 30).
 func (s *Server) handleDebugSlowJob(w http.ResponseWriter, r *http.Request) {
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "orchestrator not configured"})
 		return
 	}
@@ -149,7 +149,7 @@ func (s *Server) handleDebugSlowJob(w http.ResponseWriter, r *http.Request) {
 			return nil
 		},
 	}
-	job, err := s.orchestrator.Enqueue(req)
+	job, err := s.Deps.Orchestrator.Enqueue(req)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

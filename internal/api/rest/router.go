@@ -85,7 +85,7 @@ func WithTokenStore(store auth.APITokenStore) ServerOption {
 // for testing handleSSE without standing up the full server — callers inject
 // a pre-built *events.Bus and publish events directly from the test body.
 func WithEventBus(bus *events.Bus) ServerOption {
-	return func(s *Server) { s.eventBus = bus }
+	return func(s *Server) { s.Deps.EventBus = bus }
 }
 
 // WithDesktopAuthStore overrides desktop auth session persistence.
@@ -95,7 +95,7 @@ func WithDesktopAuthStore(store DesktopAuthSessionStore) ServerOption {
 
 // WithKnowledgeStore sets the knowledge persistence store.
 func WithKnowledgeStore(ks knowledge.KnowledgeStore) ServerOption {
-	return func(s *Server) { s.knowledgeStore = ks }
+	return func(s *Server) { s.Deps.KnowledgeStore = ks }
 }
 
 // WithJobStore sets the persistent llm.JobStore used by the orchestrator.
@@ -129,7 +129,7 @@ func WithGitConfigStore(store GitConfigStore) ServerOption {
 // a successful save (instead of mutating s.cfg.Git, which is env-only
 // after R3).
 func WithGitResolver(r gitres.Resolver) ServerOption {
-	return func(s *Server) { s.gitResolver = r }
+	return func(s *Server) { s.Deps.GitResolver = r }
 }
 
 // WithLLMConfigStore enables persistent storage of LLM configuration.
@@ -143,7 +143,7 @@ func WithLLMConfigStore(store LLMConfigStore) ServerOption {
 // current resolved snapshot from this resolver instead of s.cfg.LLM
 // (which is env-bootstrap only after slice 1).
 func WithLLMResolver(r resolution.Resolver) ServerOption {
-	return func(s *Server) { s.llmResolver = r }
+	return func(s *Server) { s.Deps.LLMResolver = r }
 }
 
 // WithLLMCaller wires the LLM-aware adapter around *worker.Client. Every
@@ -152,7 +152,7 @@ func WithLLMResolver(r resolution.Resolver) ServerOption {
 // in metadata. Pass nil when the worker is unavailable; downstream
 // callers gate AI features on Caller.IsAvailable().
 func WithLLMCaller(c *llmcall.Caller) ServerOption {
-	return func(s *Server) { s.llmCaller = c }
+	return func(s *Server) { s.Deps.LLMCaller = c }
 }
 
 // WithEncryptionKeySet records whether the API booted with a resolved
@@ -186,7 +186,7 @@ func WithMCPToolExtender(te MCPToolExtender) ServerOption {
 // WithComprehensionStore injects the comprehension settings and model
 // capabilities store into the server.
 func WithComprehensionStore(cs comprehension.Store) ServerOption {
-	return func(s *Server) { s.comprehensionStore = cs }
+	return func(s *Server) { s.Deps.ComprehensionStore = cs }
 }
 
 // WithSummaryNodeStore injects the summary node persistence store.
@@ -205,27 +205,27 @@ func WithCache(c db.Cache) ServerOption {
 // to run without the feature (embedded mode, or when trash is disabled
 // in config).
 func WithTrashStore(ts trash.Store) ServerOption {
-	return func(s *Server) { s.trashStore = ts }
+	return func(s *Server) { s.Deps.TrashStore = ts }
 }
 
 // WithLivingWikiStore wires the living-wiki settings persistence store. When
 // nil (embedded mode or external SurrealDB unavailable), the GraphQL resolvers
 // return empty settings and the UI shows only env-var-sourced values.
 func WithLivingWikiStore(store livingwiki.Store) ServerOption {
-	return func(s *Server) { s.livingWikiStore = store }
+	return func(s *Server) { s.Deps.LivingWikiStore = store }
 }
 
 // WithLivingWikiResolver wires the living-wiki settings resolver (UI + env
 // fallback). When nil, the GraphQL TestLivingWikiConnection mutation is
 // unavailable. Pass the resolver created alongside WithLivingWikiStore.
 func WithLivingWikiResolver(r *livingwiki.Resolver) ServerOption {
-	return func(s *Server) { s.livingWikiResolver = r }
+	return func(s *Server) { s.Deps.LivingWikiResolver = r }
 }
 
 // WithLivingWikiRepoStore wires the per-repo living-wiki opt-in store. When
 // nil, the repository living-wiki mutations and query return unavailable errors.
 func WithLivingWikiRepoStore(rs livingwiki.RepoSettingsStore) ServerOption {
-	return func(s *Server) { s.livingWikiRepoStore = rs }
+	return func(s *Server) { s.Deps.LivingWikiRepoStore = rs }
 }
 
 // WithLivingWikiDispatcher wires the living-wiki event dispatcher into the
@@ -241,7 +241,7 @@ func WithLivingWikiDispatcher(d *webhook.Dispatcher) ServerOption {
 // WithLivingWikiJobResultStore wires the per-run living-wiki job result store.
 // When nil, the lastJobResult GraphQL field resolves to null.
 func WithLivingWikiJobResultStore(rs livingwiki.JobResultStore) ServerOption {
-	return func(s *Server) { s.livingWikiJobResultStore = rs }
+	return func(s *Server) { s.Deps.LivingWikiJobResultStore = rs }
 }
 
 // WithLivingWikiPagePublishStore wires the per-page-per-sink dispatch state
@@ -251,7 +251,7 @@ func WithLivingWikiJobResultStore(rs livingwiki.JobResultStore) ServerOption {
 // (SetReady / SetNonReady split). When nil, smart-resume falls back to
 // sink-presence-only behavior — pages skip without fingerprint validation.
 func WithLivingWikiPagePublishStore(s2 livingwiki.PagePublishStatusStore) ServerOption {
-	return func(s *Server) { s.livingWikiPagePublishStore = s2 }
+	return func(s *Server) { s.Deps.LivingWikiPagePublishStore = s2 }
 }
 
 // WithLivingWikiLiveOrchestrator wires the living-wiki page-generation
@@ -259,100 +259,77 @@ func WithLivingWikiPagePublishStore(s2 livingwiki.PagePublishStatusStore) Server
 // (R5) can call Generate directly. When nil, cold-start jobs return a
 // "orchestrator unavailable" notice without failing hard.
 func WithLivingWikiLiveOrchestrator(o *lworch.Orchestrator) ServerOption {
-	return func(s *Server) { s.livingWikiLiveOrchestrator = o }
+	return func(s *Server) { s.Deps.LivingWikiLiveOrchestrator = o }
 }
 
 // WithHealthChecker injects a shared HealthChecker used by both /readyz and
 // the serviceHealth GraphQL query. Pass nil to skip the checker (embedded
 // mode, tests), in which case both handlers fall back to lightweight checks.
 func WithHealthChecker(hc *HealthChecker) ServerOption {
-	return func(s *Server) { s.healthChecker = hc }
+	return func(s *Server) { s.Deps.HealthChecker = hc }
 }
 
 // Server is the HTTP API server.
+//
+// Field set is pinned by TestServerStructureCanary in
+// internal/api/rest/structure_test.go (CA-328). Adding a new subsystem
+// dependency: add it to appdeps.AppDeps and access via s.Deps.<Field>.
+// REST-only fields (request-scoped, lifecycle, middleware, construction
+// helpers) stay here.
 type Server struct {
-	// AppDeps is the shared dependency registry constructed once in NewServer.
-	// It is populated after options are applied via syncServerDepsFromAppDeps.
-	// The GraphQL resolver receives AppDeps via direct field assignment
-	// (resolver.Deps = s.AppDeps) at construction — no sync function exists
-	// on the resolver side. The existing lowercase fields below are the primary
-	// store; AppDeps holds the same values for consumers that need the registry.
-	AppDeps *appdeps.AppDeps
+	// Deps is the shared dependency registry. All subsystem dependencies
+	// (stores, clients, orchestrators, etc.) are read via s.Deps.<Field>.
+	// See internal/appdeps for the canonical registry and the full field list.
+	// Initialised to &appdeps.AppDeps{} at the top of NewServer so WithXxx
+	// options can write directly to s.Deps.<Field> before options are applied.
+	Deps *appdeps.AppDeps
 
-	cfg                        *config.Config
-	router                     chi.Router
-	localAuth                  *auth.LocalAuth
-	jwtMgr                     *auth.JWTManager
-	oidc                       oidcProvider // *auth.OIDCProvider in production; interface allows test stubs (CA-323)
-	store                      graphstore.GraphStore
-	knowledgeStore             knowledge.KnowledgeStore
-	jobStore                   llm.JobStore               // persistent store for llm.Job records; defaults to MemStore
-	orchestrator               *orchestrator.Orchestrator // shared LLM job orchestrator (created in NewServer)
-	worker                     *worker.Client
-	eventBus                   *events.Bus
-	flags                      featureflags.Flags
-	tokenStore                 auth.APITokenStore
-	desktopAuth                DesktopAuthSessionStore
-	gitConfigStore             GitConfigStore                    // persists git tokens/SSH config across restarts
-	llmConfigStore             LLMConfigStore                    // persists LLM provider/model config across restarts
-	llmProfileStore            LLMProfileStoreAdapter            // LLM provider profiles slice 1: profile CRUD + active pointer
-	queueControlStore          QueueControlStore                 // persists queue intake controls across restarts
-	enterpriseDB               EnterpriseDB                      // enterprise database handle; nil when enterprise build is not active
-	repoChecker                middleware.RepoAccessChecker      // set by enterprise build to enable tenant repo filtering
-	mcp                        *mcpHandler                       // MCP protocol handler (nil when disabled)
-	mcpPermChecker             MCPPermissionChecker              // deferred to mcp handler at setup
-	mcpAuditLogger             MCPAuditLogger                    // deferred to mcp handler at setup
-	mcpToolExtender            MCPToolExtender                   // deferred to mcp handler at setup
-	comprehensionStore         comprehension.Store               // comprehension settings + model capabilities
-	summaryNodeStore           comprehension.SummaryNodeStore    // cached summary tree nodes
-	cache                      db.Cache                          // shared KV cache (memory or Redis); nil = MCP session store falls back to in-memory
-	trashStore                 trash.Store                       // soft-delete recycle bin; nil = feature disabled
-	qaOrchestrator             *qa.Orchestrator                  // server-side deep-QA orchestrator; nil = server-side QA disabled
-	workerLanes                *worker.Lanes                     // shared lane registry used by search + qa
-	searchSvc                  *search.Service                   // hybrid retrieval backbone; always set in NewServer
-	reqBooster                 *search.RequirementBooster        // repo-scoped requirement link cache; feeds searchSvc boosters
-	searchMetrics              *search.Metrics                   // in-process ring buffer of per-stage latency / success
-	backfiller                 *search.Backfiller                // post-index embedding backfill; nil when worker is unavailable
-	livingWikiStore            livingwiki.Store                  // living-wiki UI settings store; nil = feature unavailable
-	livingWikiResolver         *livingwiki.Resolver              // merged living-wiki config (UI + env); nil = only env applies
-	livingWikiRepoStore        livingwiki.RepoSettingsStore      // per-repo living-wiki opt-in; nil = feature unavailable
-	livingWikiDispatcher       *webhook.Dispatcher               // nil = feature not started or kill-switch active
-	livingWikiJobResultStore   livingwiki.JobResultStore         // nil = job result history unavailable
-	livingWikiPagePublishStore livingwiki.PagePublishStatusStore // per-page dispatch state (Phase 1 of incremental-publish redesign); nil = smart-resume falls back to sink-presence-only
-	livingWikiLiveOrchestrator *lworch.Orchestrator              // living-wiki page-generation orchestrator; nil = feature unavailable
-	knowledgeSettingsStore     KnowledgeSettingsStore            // CA-122: operator-tunable knowledge-RPC safety-net timeout; nil = embedded mode (boot env-default only)
-	clusterRunner              *clustering.Runner                // subsystem clustering job dispatcher; nil = feature disabled
-	healthChecker              *HealthChecker                    // shared DB+worker probe; nil = embedded/test mode, handlers fall back to local checks
-	workerVersionLookup        *versionLookup                    // best-effort cache for worker GetVersion (CA-136); nil = workerVersion always "" in /api/v1/version
-	gateSnapshotCache          gateSnapshotCache                 // 1-second TTL cache for worker gate snapshot (Phase 7)
+	// cfg is the boot-time process configuration. Kept on Server (not in
+	// AppDeps) because it is the primary lifecycle field passed as the first
+	// NewServer parameter and is used throughout setupRouter at wiring time.
+	// Read-only after construction; never mutated post-boot.
+	cfg *config.Config
+
+	// REST-only infrastructure and construction fields.
+	router    chi.Router
+	localAuth *auth.LocalAuth
+	jwtMgr    *auth.JWTManager
+	oidc      oidcProvider // *auth.OIDCProvider in production; interface allows test stubs (CA-323)
+	store     graphstore.GraphStore
+
+	// jobStore holds the persistent llm.Job records; defaults to MemStore.
+	// Kept REST-only because it is the raw store used to build Deps.Orchestrator.
+	jobStore llm.JobStore
+
+	// REST-only option/wiring fields.
+	tokenStore         auth.APITokenStore
+	desktopAuth        DesktopAuthSessionStore
+	gitConfigStore     GitConfigStore         // persists git tokens/SSH config across restarts
+	llmConfigStore     LLMConfigStore         // persists LLM provider/model config across restarts
+	llmProfileStore    LLMProfileStoreAdapter // LLM provider profiles slice 1: profile CRUD + active pointer
+	queueControlStore  QueueControlStore      // persists queue intake controls across restarts
+	enterpriseDB       EnterpriseDB           // enterprise database handle; nil when enterprise build is not active
+	repoChecker        middleware.RepoAccessChecker // set by enterprise build to enable tenant repo filtering
+	mcp                *mcpHandler                  // MCP protocol handler (nil when disabled)
+	mcpPermChecker     MCPPermissionChecker         // deferred to mcp handler at setup
+	mcpAuditLogger     MCPAuditLogger               // deferred to mcp handler at setup
+	mcpToolExtender    MCPToolExtender              // deferred to mcp handler at setup
+	summaryNodeStore   comprehension.SummaryNodeStore // cached summary tree nodes; REST-only (feeds qa reader)
+	cache              db.Cache                     // shared KV cache (memory or Redis); nil = MCP session store falls back to in-memory
+	workerLanes        *worker.Lanes                // shared lane registry used by search + qa
+	searchMetrics      *search.Metrics              // in-process ring buffer of per-stage latency / success
+	livingWikiDispatcher       *webhook.Dispatcher  // nil = feature not started or kill-switch active
+	knowledgeSettingsStore     KnowledgeSettingsStore // CA-122: operator-tunable knowledge-RPC safety-net timeout
+	clusterRunner              *clustering.Runner     // subsystem clustering job dispatcher; nil = feature disabled
+	workerVersionLookup        *versionLookup         // best-effort cache for worker GetVersion (CA-136)
+	gateSnapshotCache          gateSnapshotCache      // 1-second TTL cache for worker gate snapshot (Phase 7)
 
 	// encryptionKeySet is true when the API booted with a resolved encryption
-	// key (from SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY_FILE or the literal env
-	// var). Surfaced on GET /api/v1/admin/llm-profiles as encryption_key_set
-	// so the web UI can show the correct onboarding state (r1 Phase 2d).
+	// key. Surfaced on GET /api/v1/admin/llm-profiles via AppDeps.EncryptionKeySet.
 	encryptionKeySet bool
 
-	// LLM source-of-truth (single resolver shared with the GraphQL resolver
-	// and llmcall.Caller). The Server owns the resolver so handleGetLLMConfig
-	// and handleListLLMModels can read the resolved snapshot rather than
-	// s.cfg.LLM (which is env-only after slice 1).
-	llmResolver resolution.Resolver // nil only in test/embedded mode without a workspace store
-	llmCaller   *llmcall.Caller     // nil when worker is unavailable
-
-	// Git source-of-truth (R3 slice 2). Single resolver shared with the
-	// GraphQL resolver. handleGetGitConfig + handleUpdateGitConfig read
-	// and InvalidateLocal on this resolver instead of mutating s.cfg.Git
-	// (which is env-bootstrap only after R3 — captured by VALUE inside
-	// the resolver and never mutated post-boot).
-	gitResolver gitres.Resolver // nil only in test/embedded mode without a workspace store
-
-	// changeDispatcher is the boundary the change-watch HTTP ingress
-	// (POST /v1/connectors/{id}/events) and the record_change MCP tool
-	// dispatch through. Wired at server-assembly time when
-	// change_watch.enabled is true; nil otherwise (the HTTP route
-	// returns 503; the MCP tool returns a structured "disabled"
-	// response). The interface decouples the rest package from the
-	// concrete *changewatch.Router so tests substitute a stub.
+	// changeDispatcher routes the change-watch HTTP ingress and record_change
+	// MCP tool. Wired at server-assembly time; nil = those features are disabled.
 	changeDispatcher ChangeEventDispatcher
 
 	// qaLocator is the QA repo locator created in NewServer and consumed by
@@ -391,7 +368,7 @@ func (s *Server) qaResolverOrchestrator() *qa.Orchestrator {
 	if s.cfg == nil || !s.cfg.QA.ServerSideEnabled {
 		return nil
 	}
-	return s.qaOrchestrator
+	return s.Deps.QA
 }
 
 // getStore returns a tenant-filtered store when RepoAccessMiddleware has
@@ -437,12 +414,16 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		localAuth:   localAuth,
 		jwtMgr:      jwtMgr,
 		store:       store,
-		worker:      workerClient,
-		eventBus:    events.NewBus(),
-		flags:       featureflags.LoadFromEnv(),
 		tokenStore:  auth.NewAPITokenStore(),
 		desktopAuth: NewMemoryDesktopAuthStore(),
 		OnDemand:    NewOnDemandTracker(),
+		// Deps is initialised here so WithXxx options can write to s.Deps.<Field>
+		// safely before the options loop runs.
+		Deps: &appdeps.AppDeps{
+			Worker:   workerClient,
+			EventBus: events.NewBus(),
+			Flags:    featureflags.LoadFromEnv(),
+		},
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -470,11 +451,11 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 	//     LivingWikiJobResult written so the per-repo settings panel
 	//     surfaces the timeout instead of returning lastJobResult: null.
 	orchCfg.OnStaleJob = func(job *llm.Job) {
-		if s.knowledgeStore != nil && job.ArtifactID != "" {
-			_ = s.knowledgeStore.SetArtifactFailed(context.Background(), job.ArtifactID, "DEADLINE_EXCEEDED", "Generation timed out — please retry")
+		if s.Deps.KnowledgeStore != nil && job.ArtifactID != "" {
+			_ = s.Deps.KnowledgeStore.SetArtifactFailed(context.Background(), job.ArtifactID, "DEADLINE_EXCEEDED", "Generation timed out — please retry")
 		}
-		if s.livingWikiJobResultStore != nil && job.Subsystem == llm.SubsystemLivingWiki {
-			persistStaleLivingWikiResult(s.livingWikiJobResultStore, job)
+		if s.Deps.LivingWikiJobResultStore != nil && job.Subsystem == llm.SubsystemLivingWiki {
+			persistStaleLivingWikiResult(s.Deps.LivingWikiJobResultStore, job)
 		}
 	}
 	// OnJobFailed fires from all three failure paths (finalizeFailed,
@@ -491,7 +472,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 	// idempotency gate (WHERE status INSIDE ['pending','generating']) so re-firing
 	// on an already-terminal row is a safe no-op.
 	//
-	// Receiver is s.knowledgeStore (knowledge.KnowledgeStore at router.go:281),
+	// Receiver is s.Deps.KnowledgeStore (knowledge.KnowledgeStore at router.go:281),
 	// not s.store (graphstore.GraphStore) — same receiver OnStaleJob uses above.
 	orchCfg.OnJobFailed = func(job *llm.Job) {
 		if job == nil {
@@ -499,7 +480,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		}
 		switch job.JobType {
 		case "build_repository_understanding":
-			if s.knowledgeStore == nil || job.ArtifactID == "" {
+			if s.Deps.KnowledgeStore == nil || job.ArtifactID == "" {
 				return
 			}
 			code := job.ErrorCode
@@ -510,14 +491,14 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			if msg == "" {
 				msg = "Repository understanding job failed"
 			}
-			if err := s.knowledgeStore.MarkRepositoryUnderstandingFailed(context.Background(), job.ArtifactID, code, msg); err != nil {
+			if err := s.Deps.KnowledgeStore.MarkRepositoryUnderstandingFailed(context.Background(), job.ArtifactID, code, msg); err != nil {
 				slog.Warn("mark_repository_understanding_failed_error",
 					"job_id", job.ID,
 					"understanding_id", job.ArtifactID,
 					"error", err)
 			}
 		case "cliff_notes", "architecture_diagram", "learning_path", "code_tour", "workflow_story":
-			if s.knowledgeStore == nil || job.ArtifactID == "" {
+			if s.Deps.KnowledgeStore == nil || job.ArtifactID == "" {
 				return
 			}
 			code := job.ErrorCode
@@ -528,7 +509,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			if msg == "" {
 				msg = "Knowledge artifact generation failed"
 			}
-			if err := s.knowledgeStore.SetArtifactFailed(context.Background(), job.ArtifactID, code, msg); err != nil {
+			if err := s.Deps.KnowledgeStore.SetArtifactFailed(context.Background(), job.ArtifactID, code, msg); err != nil {
 				slog.Warn("set_artifact_failed_error",
 					"job_id", job.ID,
 					"job_type", job.JobType,
@@ -536,16 +517,16 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 					"error", err)
 			}
 		case "living_wiki_cold_start", "living_wiki_retry_excluded":
-			if s.livingWikiJobResultStore == nil {
+			if s.Deps.LivingWikiJobResultStore == nil {
 				return
 			}
-			persistStaleLivingWikiResult(s.livingWikiJobResultStore, job)
+			persistStaleLivingWikiResult(s.Deps.LivingWikiJobResultStore, job)
 		}
 	}
-	s.orchestrator = orchestrator.New(s.jobStore, orchCfg)
+	s.Deps.Orchestrator = orchestrator.New(s.jobStore, orchCfg)
 	if s.queueControlStore != nil {
 		if rec, err := s.queueControlStore.LoadQueueControl(context.Background()); err == nil && rec != nil {
-			s.orchestrator.SetIntakePaused(rec.IntakePaused)
+			s.Deps.Orchestrator.SetIntakePaused(rec.IntakePaused)
 		}
 	}
 	slog.Info("server drain handler armed",
@@ -563,21 +544,21 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 	// agentic search_evidence tool. Must be constructed BEFORE the QA
 	// orchestrator so WithSearcher wires correctly; the worker
 	// embedder is attached below once the worker client is in scope.
-	s.searchSvc = search.NewService(s.store)
+	s.Deps.SearchSvc = search.NewService(s.store)
 	s.searchMetrics = search.NewMetrics(0)
-	s.searchSvc.Metrics = s.searchMetrics
+	s.Deps.SearchSvc.Metrics = s.searchMetrics
 	if cfg != nil && cfg.Search.VectorTimeoutMs > 0 {
-		s.searchSvc.VectorTimeout = time.Duration(cfg.Search.VectorTimeoutMs) * time.Millisecond
+		s.Deps.SearchSvc.VectorTimeout = time.Duration(cfg.Search.VectorTimeoutMs) * time.Millisecond
 	}
-	if s.worker != nil {
-		emb := search.NewWorkerEmbedder(s.worker, "")
+	if s.Deps.Worker != nil {
+		emb := search.NewWorkerEmbedder(s.Deps.Worker, "")
 		cached := search.NewCachedEmbedder(emb, 2048, 5*time.Minute, 5, 30*time.Second)
-		s.searchSvc.WithEmbedder(cached)
+		s.Deps.SearchSvc.WithEmbedder(cached)
 		// Backfiller uses a separate WorkerEmbedder so backfill calls don't
 		// pollute the query-embedding LRU cache (backfill texts are one-shot
 		// and unlikely to be reused as search queries).
-		backfillEmb := search.NewWorkerEmbedder(s.worker, "")
-		s.backfiller = search.NewBackfiller(s.store, backfillEmb, 0, search.BackfillConfig{
+		backfillEmb := search.NewWorkerEmbedder(s.Deps.Worker, "")
+		s.Deps.Backfiller = search.NewBackfiller(s.store, backfillEmb, 0, search.BackfillConfig{
 			RPS:       2,
 			Batch:     8,
 			MaxPerRun: 2000,
@@ -621,10 +602,10 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			QueryDecompositionEnabled: cfg.QA.QueryDecompositionEnabled,
 		}
 		var reader qa.UnderstandingReader
-		if s.knowledgeStore != nil && s.summaryNodeStore != nil {
-			reader = qaUnderstandingReader{knowledge: s.knowledgeStore, summaries: s.summaryNodeStore}
+		if s.Deps.KnowledgeStore != nil && s.summaryNodeStore != nil {
+			reader = qaUnderstandingReader{knowledge: s.Deps.KnowledgeStore, summaries: s.summaryNodeStore}
 		}
-		o := qa.New(s.llmCaller, reader, s.workerLanes, qaOrchCfg)
+		o := qa.New(s.Deps.LLMCaller, reader, s.workerLanes, qaOrchCfg)
 		if s.store != nil {
 			s.qaLocator = newQARepoLocator(s.store, cfg.Storage.RepoCachePath)
 			o = o.WithRepoLocator(s.qaLocator)
@@ -633,14 +614,14 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			o = o.WithSymbolLookup(&qaSymbolLookup{store: s.store})
 			o = o.WithFileReader(&qaFileReader{locator: s.qaLocator})
 		}
-		if s.knowledgeStore != nil {
-			o = o.WithArtifactLookup(&qaArtifactLookup{store: s.knowledgeStore})
+		if s.Deps.KnowledgeStore != nil {
+			o = o.WithArtifactLookup(&qaArtifactLookup{store: s.Deps.KnowledgeStore})
 		}
-		if s.orchestrator != nil {
-			o = o.WithJobRunner(&qaJobRunner{orch: s.orchestrator, llmResolver: s.llmResolver})
+		if s.Deps.Orchestrator != nil {
+			o = o.WithJobRunner(&qaJobRunner{orch: s.Deps.Orchestrator, llmResolver: s.Deps.LLMResolver})
 		}
-		if s.searchSvc != nil {
-			o = o.WithSearcher(&qaSearcher{svc: s.searchSvc})
+		if s.Deps.SearchSvc != nil {
+			o = o.WithSearcher(&qaSearcher{svc: s.Deps.SearchSvc})
 		}
 		// Agentic path — wired through a LazyAgentSynth (CA-126,
 		// tester report Issue 2 / Wave 3) so the worker's capability
@@ -660,9 +641,9 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		// nil — because the orchestrator's shouldUseAgenticPath gate
 		// short-circuits on a nil caller without burning a probe.
 		//
-		if s.llmCaller != nil {
-			versionSrc := &resolverVersionSource{r: s.llmResolver}
-			lazyAgent = qa.NewLazyAgentSynth(s.llmCaller, versionSrc, qa.LazyAgentSynthOptions{
+		if s.Deps.LLMCaller != nil {
+			versionSrc := &resolverVersionSource{r: s.Deps.LLMResolver}
+			lazyAgent = qa.NewLazyAgentSynth(s.Deps.LLMCaller, versionSrc, qa.LazyAgentSynthOptions{
 				// Per-request probe deadline. The first agentic request
 				// after a cold start blocks on this; 2s is the sweet
 				// spot — long enough that a healthy worker on the
@@ -677,8 +658,8 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			o = o.WithAgentSynthesizer(lazyAgent).
 				WithAgenticEnabled(cfg.QA.AgenticRetrievalEnabled).
 				WithAgenticCanaryPct(cfg.QA.AgenticRetrievalCanaryPct)
-			o = o.WithQuestionProfiler(qa.NewWorkerQuestionProfiler(s.llmCaller))
-			o = o.WithDecomposer(qa.NewWorkerDecomposer(s.llmCaller), s.llmCaller)
+			o = o.WithQuestionProfiler(qa.NewWorkerQuestionProfiler(s.Deps.LLMCaller))
+			o = o.WithDecomposer(qa.NewWorkerDecomposer(s.Deps.LLMCaller), s.Deps.LLMCaller)
 			slog.Info("agent synth: lazy provider wired",
 				"agentic_enabled", cfg.QA.AgenticRetrievalEnabled,
 				"canary_pct", cfg.QA.AgenticRetrievalCanaryPct,
@@ -698,7 +679,7 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 			}
 			go bootProbeAndWarn(lazyAgent, workerAddr)
 		}
-		s.qaOrchestrator = o
+		s.Deps.QA = o
 		// Publish the server-side QA state to the telemetry counters
 		// so the public dashboard can track adoption without collecting
 		// any request content. Counts: process-local ring buffer of
@@ -707,90 +688,56 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 		qa.SetServerSideEnabled(cfg.QA.ServerSideEnabled)
 	}
 
-	slog.Info("backend feature flags", "enabled", s.flags.EnabledNames())
+	slog.Info("backend feature flags", "enabled", s.Deps.Flags.EnabledNames())
 
 	// Requirement booster is attached late — it depends on the store
 	// being constructed above and doesn't change the QA wiring path.
-	s.reqBooster = &search.RequirementBooster{Store: s.store}
-	s.searchSvc.WithRequirementBooster(s.reqBooster)
+	s.Deps.ReqBooster = &search.RequirementBooster{Store: s.store}
+	s.Deps.SearchSvc.WithRequirementBooster(s.Deps.ReqBooster)
 
 	// Subsystem clustering runner. The store is cast to ClusterStore only
 	// when it satisfies the interface (SurrealStore does; the in-memory
 	// graph.Store does not yet — it will satisfy it after Sprint 1 tests
 	// wire a lightweight adapter, or it can be left nil for tests).
 	if cs, ok := s.store.(clustering.ClusterStore); ok {
-		s.clusterRunner = clustering.NewRunner(cs, clustering.NewOrchestratorDispatcher(s.orchestrator))
+		s.clusterRunner = clustering.NewRunner(cs, clustering.NewOrchestratorDispatcher(s.Deps.Orchestrator))
 	}
 
 	// Worker version lookup (CA-136). When a worker client is available,
 	// wire the gRPC probe so /api/v1/version reports the worker's version.
 	// Cached for 30s; per-call timeout governed by the public handler.
 	var workerProbe func(ctx context.Context) (string, error)
-	if s.worker != nil {
-		workerProbe = s.worker.GetWorkerVersion
+	if s.Deps.Worker != nil {
+		workerProbe = s.Deps.Worker.GetWorkerVersion
 	}
 	s.workerVersionLookup = newVersionLookup(30*time.Second, workerProbe)
 
-	// Build AppDeps — the shared dependency registry (Phase 2 Slice 5,
-	// STRUCT-1). Constructed once here after all fields are settled.
-	// The GraphQL resolver receives AppDeps via direct field assignment at
-	// construction; there is no resolver-side sync function. AppDeps is also
-	// written back into the Server's lowercase fields via syncServerDepsFromAppDeps
-	// (idempotent — values already match).
+	// Finish wiring s.Deps with fields that are derived at construction time
+	// (cannot be set by WithXxx options because they depend on earlier setup
+	// in NewServer). All subsystem fields already set by WithXxx options are
+	// left untouched — they are already on s.Deps from the options loop above.
 	{
-		var clusterStore clustering.ClusterStore
 		if cs, ok := s.store.(clustering.ClusterStore); ok {
-			clusterStore = cs
+			s.Deps.ClusterStore = cs
 		}
-		var profileLookup appdeps.LLMProfileLookup
 		if s.llmProfileStore != nil {
-			profileLookup = s.llmProfileStore
+			s.Deps.LLMProfileLookup = s.llmProfileStore
 		}
 		// Capture lazyAgent as the UpstreamCapacityProvider for the coldstart
 		// runner (Phase 2 / D4). LazyAgentSynth implements UpstreamCapacity(ctx)
 		// and shares the single-flight probe with SupportsTools (M4). nil when
 		// no worker caller is configured (tests, deployments without a worker).
-		var capacityProvider lworch.UpstreamCapacityProvider
 		if lazyAgent != nil {
-			capacityProvider = lazyAgent
+			s.Deps.UpstreamCapacityProvider = lazyAgent
 		}
-		s.AppDeps = &appdeps.AppDeps{
-			KnowledgeStore:             s.knowledgeStore,
-			Worker:                     s.worker,
-			LLMCaller:                  s.llmCaller,
-			LLMResolver:                s.llmResolver,
-			Orchestrator:               s.orchestrator,
-			Config:                     s.cfg,
-			EventBus:                   s.eventBus,
-			Flags:                      s.flags,
-			GitResolver:                s.gitResolver,
-			ComprehensionStore:         s.comprehensionStore,
-			HealthChecker:              s.healthChecker,
-			TrashStore:                 s.trashStore,
-			SearchSvc:                  s.searchSvc,
-			ReqBooster:                 s.reqBooster,
-			Backfiller:                 s.backfiller,
-			QA:                         s.qaResolverOrchestrator(),
-			LLMProfileLookup:           profileLookup,
-			LivingWikiStore:            s.livingWikiStore,
-			LivingWikiResolver:         s.livingWikiResolver,
-			LivingWikiRepoStore:        s.livingWikiRepoStore,
-			LivingWikiJobResultStore:   s.livingWikiJobResultStore,
-			LivingWikiLiveOrchestrator: s.livingWikiLiveOrchestrator,
-			LivingWikiPagePublishStore: s.livingWikiPagePublishStore,
-			// LivingWikiAuditLog: enterprise-only; not stored on Server; left nil
-			// here (enterprise routes or tests may set it on the resolver directly).
-			ClusterStore:             clusterStore,
-			WorkerVersion:            buildWorkerVersionFunc(s),
-			DrainAdmitter:            s.DrainAdmitterFor(),
-			EncryptionKeySet:         s.encryptionKeySet,
-			UpstreamCapacityProvider: capacityProvider,
-		}
-		// syncServerDepsFromAppDeps is an idempotent identity sync: the Server
-		// already has these values from the WithXxx options applied above. It
-		// exists as cheap insurance so any future code reading s.AppDeps and the
-		// lowercase fields sees consistent state.
-		syncServerDepsFromAppDeps(s, s.AppDeps)
+		s.Deps.Config = s.cfg
+		s.Deps.WorkerVersion = buildWorkerVersionFunc(s)
+		s.Deps.DrainAdmitter = s.DrainAdmitterFor()
+		s.Deps.EncryptionKeySet = s.encryptionKeySet
+		// QA is gated: expose the orchestrator only when server-side QA is enabled.
+		// LivingWikiAuditLog: enterprise-only; not stored on Server; left nil
+		// here (enterprise routes or tests may set it on the resolver directly).
+		s.Deps.QA = s.qaResolverOrchestrator()
 	}
 
 	s.setupRouter()
@@ -800,14 +747,14 @@ func NewServer(cfg *config.Config, localAuth *auth.LocalAuth, jwtMgr *auth.JWTMa
 // Orchestrator returns the server's LLM job orchestrator. Exposed so
 // tests and the graceful-shutdown path can call Shutdown on it.
 func (s *Server) Orchestrator() *orchestrator.Orchestrator {
-	return s.orchestrator
+	return s.Deps.Orchestrator
 }
 
 // kickBackfill fires the embedding backfill for a repo via the shared
 // Backfiller. Delegates to Backfiller.KickBackground which spawns its own
 // goroutine and returns immediately. Safe to use as an IndexCompleteHook.
 func (s *Server) kickBackfill(repoID string) {
-	s.backfiller.KickBackground(repoID)
+	s.Deps.Backfiller.KickBackground(repoID)
 }
 
 // clusteringHookFunc returns a post-index hook that enqueues a clustering job,
@@ -975,7 +922,7 @@ func (s *Server) setupRouter() {
 	// ClusteringHook is a closure constructed at wiring time and stays on
 	// Resolver directly (not in AppDeps; see appdeps package doc for rationale).
 	gqlResolver := &graphql.Resolver{
-		Deps:           s.AppDeps,
+		Deps:           s.Deps,
 		Store:          s.store,
 		Plan:           graphql.BootCurrentPlan(),
 		ClusteringHook: s.clusteringHookFunc(),
@@ -1128,7 +1075,7 @@ func (s *Server) setupRouter() {
 			r.Post("/api/v1/admin/llm/server-drain", s.handleAdminServerDrain)
 			// CA-142: debug slow-job endpoint for drain validation (Phase 4).
 			// Only registered when SOURCEBRIDGE_DEBUG_ENDPOINTS=true.
-			if s.flags.DebugEndpointsEnabled {
+			if s.Deps.Flags.DebugEndpointsEnabled {
 				r.Post("/api/v1/admin/debug/slow-job", s.handleDebugSlowJob)
 			}
 			r.Get("/api/v1/admin/llm/jobs/{id}", s.handleLLMJobDetail)
@@ -1233,18 +1180,18 @@ func (s *Server) setupRouter() {
 		// resolver. When llmCaller is nil (worker unavailable), pass nil
 		// and the MCP tools degrade gracefully via IsAvailable() checks.
 		var mcpWorker mcpWorkerCaller
-		if s.llmCaller != nil {
+		if s.Deps.LLMCaller != nil {
 			mcpWorker = &mcpLLMCallerAdapter{
-				caller:   s.llmCaller,
+				caller:   s.Deps.LLMCaller,
 				unaryOp:  resolution.OpMCPExplain,
 				streamOp: resolution.OpMCPDiscussStream,
 				reviewOp: resolution.OpMCPReview,
 			}
 		}
-		s.mcp = newMCPHandlerWithEdition(s.store, s.knowledgeStore, mcpWorker, s.cfg.MCP.Repos, sessionTTL, keepalive, s.cfg.MCP.MaxSessions, s.cache, capabilities.NormalizeEdition(s.cfg.Edition))
-		s.mcp.qaOrchestrator = s.qaOrchestrator
+		s.mcp = newMCPHandlerWithEdition(s.store, s.Deps.KnowledgeStore, mcpWorker, s.cfg.MCP.Repos, sessionTTL, keepalive, s.cfg.MCP.MaxSessions, s.cache, capabilities.NormalizeEdition(s.cfg.Edition))
+		s.mcp.qaOrchestrator = s.Deps.QA
 		s.mcp.qaEnabled = s.cfg.QA.ServerSideEnabled
-		s.mcp.searchSvc = s.searchSvc
+		s.mcp.searchSvc = s.Deps.SearchSvc
 		// Shared indexing service — enables end-to-end index_repository
 		// + refresh_repository MCP flows (Follow-on #3).
 		//
@@ -1254,8 +1201,8 @@ func (s *Server) setupRouter() {
 		// non-GraphQL surfaces must obey the same source-of-truth
 		// contract as the GraphQL clone/import paths.
 		var mcpCreds indexing.GitCredentialsFunc
-		if s.gitResolver != nil {
-			resolver := s.gitResolver
+		if s.Deps.GitResolver != nil {
+			resolver := s.Deps.GitResolver
 			mcpCreds = func(ctx context.Context) (string, string, error) {
 				snap, err := resolver.Resolve(ctx)
 				if err != nil {
@@ -1387,8 +1334,8 @@ func (s *Server) setupRouter() {
 	//     sender knows living-wiki is disabled, not that the path is wrong.
 	if s.livingWikiDispatcher != nil {
 		var confluenceSecret string
-		if s.livingWikiResolver != nil {
-			if resolved, err := s.livingWikiResolver.Get(); err == nil && resolved != nil {
+		if s.Deps.LivingWikiResolver != nil {
+			if resolved, err := s.Deps.LivingWikiResolver.Get(); err == nil && resolved != nil {
 				confluenceSecret = resolved.ConfluenceWebhookSecret
 			}
 		}
@@ -1397,8 +1344,8 @@ func (s *Server) setupRouter() {
 		// boot-time fallback (used if the resolver is unavailable per
 		// request).
 		var confluenceResolver func() (string, error)
-		if s.livingWikiResolver != nil {
-			resolverRef := s.livingWikiResolver
+		if s.Deps.LivingWikiResolver != nil {
+			resolverRef := s.Deps.LivingWikiResolver
 			confluenceResolver = func() (string, error) {
 				resolved, err := resolverRef.Get()
 				if err != nil {
@@ -1484,9 +1431,9 @@ func (s *Server) BeginDrain(source string) (first bool) {
 		"source", source,
 		"event", "begindrain",
 	)
-	if s.orchestrator != nil {
-		s.orchestrator.SetIntakePaused(true)
-		s.orchestrator.MarkDraining(true)
+	if s.Deps.Orchestrator != nil {
+		s.Deps.Orchestrator.SetIntakePaused(true)
+		s.Deps.Orchestrator.MarkDraining(true)
 	}
 	// Mark the on-demand tracker as draining under the same lock that
 	// TryAdmit uses, so no new on-demand admission can slip through
@@ -1512,8 +1459,8 @@ func (s *Server) AwaitDrain(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
-	if s.orchestrator != nil {
-		inFlight := s.orchestrator.InFlightCount()
+	if s.Deps.Orchestrator != nil {
+		inFlight := s.Deps.Orchestrator.InFlightCount()
 		onDemand := int64(0)
 		if s.OnDemand != nil {
 			onDemand = s.OnDemand.Count()
@@ -1523,7 +1470,7 @@ func (s *Server) AwaitDrain(ctx context.Context) error {
 			"on_demand", onDemand,
 			"event", "drain_await_begin")
 
-		eventCh, unsub := s.orchestrator.Subscribe()
+		eventCh, unsub := s.Deps.Orchestrator.Subscribe()
 		defer unsub()
 
 		// progressTicker fires every 30s for operator visibility.
@@ -1539,13 +1486,13 @@ func (s *Server) AwaitDrain(ctx context.Context) error {
 		defer recheckTicker.Stop()
 		start := time.Now()
 
-		for s.orchestrator.InFlightCount() > 0 {
+		for s.Deps.Orchestrator.InFlightCount() > 0 {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-progressTicker.C:
 				slog.Info("drain progress",
-					"in_flight", s.orchestrator.InFlightCount(),
+					"in_flight", s.Deps.Orchestrator.InFlightCount(),
 					"on_demand", func() int64 {
 						if s.OnDemand != nil {
 							return s.OnDemand.Count()
@@ -1579,8 +1526,8 @@ func (s *Server) FinishShutdown(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
-	if s.eventBus != nil {
-		if err := s.eventBus.Shutdown(ctx); err != nil {
+	if s.Deps.EventBus != nil {
+		if err := s.Deps.EventBus.Shutdown(ctx); err != nil {
 			slog.Warn("event bus shutdown error", "err", err)
 		}
 	}
@@ -1599,19 +1546,19 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
-	if s.eventBus != nil {
-		if err := s.eventBus.Shutdown(ctx); err != nil {
+	if s.Deps.EventBus != nil {
+		if err := s.Deps.EventBus.Shutdown(ctx); err != nil {
 			return err
 		}
 	}
-	if s.orchestrator != nil {
+	if s.Deps.Orchestrator != nil {
 		graceful := 5 * time.Second
 		if deadline, ok := ctx.Deadline(); ok {
 			if remaining := time.Until(deadline); remaining > 0 {
 				graceful = remaining
 			}
 		}
-		if err := s.orchestrator.Shutdown(graceful); err != nil {
+		if err := s.Deps.Orchestrator.Shutdown(graceful); err != nil {
 			return err
 		}
 	}

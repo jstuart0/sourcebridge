@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/featureflags"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/orchestrator"
@@ -26,9 +27,11 @@ func newComprehensionTestServer(t *testing.T, flags featureflags.Flags) *Server 
 	orch := orchestrator.New(jobStore, orchestrator.Config{MaxConcurrency: 2})
 	t.Cleanup(func() { _ = orch.Shutdown(time.Second) })
 	return &Server{
-		comprehensionStore: comprehension.NewMemStore(),
-		orchestrator:       orch,
-		flags:              flags,
+		Deps: &appdeps.AppDeps{
+			ComprehensionStore: comprehension.NewMemStore(),
+			Orchestrator:       orch,
+			Flags:              flags,
+		},
 	}
 }
 
@@ -42,7 +45,7 @@ func TestHandleUpdateComprehensionSettingsReconfiguresOrchestratorWhenEnabled(t 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	if got := s.orchestrator.MaxConcurrency(); got != 5 {
+	if got := s.Deps.Orchestrator.MaxConcurrency(); got != 5 {
 		t.Fatalf("expected orchestrator max concurrency 5, got %d", got)
 	}
 }
@@ -123,7 +126,7 @@ func TestAdminComprehension_GetModelCapabilities_RouteParam(t *testing.T) {
 	s := newComprehensionTestServer(t, featureflags.Flags{})
 
 	// Pre-seed the store.
-	_ = s.comprehensionStore.SetModelCapabilities(t.Context(), &comprehension.ModelCapabilities{
+	_ = s.Deps.ComprehensionStore.SetModelCapabilities(t.Context(), &comprehension.ModelCapabilities{
 		ModelID:  "claude-sonnet-4-6",
 		Provider: "anthropic",
 		Source:   "builtin",
@@ -249,7 +252,7 @@ func TestAdminComprehension_TierNormalization(t *testing.T) {
 				t.Fatalf("tier=%q: expected 200, got %d: %s", tc.input, w.Code, w.Body.String())
 			}
 			// Verify the store holds the normalized value.
-			mc, err := s.comprehensionStore.GetModelCapabilities(t.Context(), "test-model")
+			mc, err := s.Deps.ComprehensionStore.GetModelCapabilities(t.Context(), "test-model")
 			if err != nil {
 				t.Fatalf("store.GetModelCapabilities: %v", err)
 			}
@@ -283,7 +286,7 @@ func TestAdminComprehension_ModelIDNormalization(t *testing.T) {
 	}
 
 	// Should be stored under normalized key.
-	mc, err := s.comprehensionStore.GetModelCapabilities(t.Context(), "qwen3:32b")
+	mc, err := s.Deps.ComprehensionStore.GetModelCapabilities(t.Context(), "qwen3:32b")
 	if err != nil {
 		t.Fatalf("store.GetModelCapabilities: %v", err)
 	}
@@ -305,7 +308,7 @@ func TestHandleUpdateComprehensionSettingsLeavesOrchestratorUnchangedWhenDisable
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	if got := s.orchestrator.MaxConcurrency(); got != 2 {
+	if got := s.Deps.Orchestrator.MaxConcurrency(); got != 2 {
 		t.Fatalf("expected orchestrator max concurrency to remain 2, got %d", got)
 	}
 }

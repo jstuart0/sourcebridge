@@ -53,6 +53,7 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ### Changed
 
+- **CA-328: `rest.Server` mirror-field collapse** — 21 private mirror fields removed from `internal/api/rest/router.go`; all subsystem dependencies now accessed via `s.Deps.<Field>` (matching the CA-184 `graphql.Resolver` pattern). `syncServerDepsFromAppDeps` deleted. `TestServerStructureCanary` pins the final field set in `internal/api/rest/structure_test.go`. No behavior change; purely internal.
 - `StoreRequirement` / `StoreRequirements` now return `error`; repo-wide caller migration (~44 sites) complete (CA-308)
 - `graphql.DrainAdmitter` and `graphql.LLMProfileLookup` interface declarations moved to `appdeps` package; `internal/api/rest/drain.go` and `llm_profiles.go` updated to reference `appdeps.*` (CA-309)
 - `_UNCAPPED` Python sentinel exported as `UNCAPPED_SENTINEL` in `workers/common/llm/concurrency.py`; `_UNCAPPED` kept as deprecated alias for one release (CA-189)

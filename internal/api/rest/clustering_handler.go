@@ -324,7 +324,7 @@ func (s *Server) handleRelabelClusters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.orchestrator == nil {
+	if s.Deps.Orchestrator == nil {
 		http.Error(w, "job orchestrator unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -334,8 +334,8 @@ func (s *Server) handleRelabelClusters(w http.ResponseWriter, r *http.Request) {
 	// clustering subsystem (graph clustering itself is CPU-bound and
 	// leaves llm_provider empty). Stamp the resolved provider.
 	provider := ""
-	if s.llmResolver != nil {
-		if snap, err := s.llmResolver.Resolve(r.Context(), repoID, resolution.OpClusteringRelabel); err == nil {
+	if s.Deps.LLMResolver != nil {
+		if snap, err := s.Deps.LLMResolver.Resolve(r.Context(), repoID, resolution.OpClusteringRelabel); err == nil {
 			provider = snap.Provider
 		}
 	}
@@ -347,11 +347,11 @@ func (s *Server) handleRelabelClusters(w http.ResponseWriter, r *http.Request) {
 		RepoID:      repoID,
 		LLMProvider: provider,
 		RunWithContext: func(ctx context.Context, rt llm.Runtime) error {
-			return runRelabelClusters(ctx, rt, cs, s.llmCaller, repoID, clusterIDs)
+			return runRelabelClusters(ctx, rt, cs, s.Deps.LLMCaller, repoID, clusterIDs)
 		},
 	}
 
-	job, err := s.orchestrator.Enqueue(enqReq)
+	job, err := s.Deps.Orchestrator.Enqueue(enqReq)
 	if err != nil {
 		http.Error(w, "failed to enqueue relabel job: "+err.Error(), http.StatusInternalServerError)
 		return

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	lworch "github.com/sourcebridge/sourcebridge/internal/livingwiki/orchestrator"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/ast"
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/manifest"
@@ -44,7 +45,7 @@ func newInFlightTestOrchestrator() *lworch.Orchestrator {
 
 // TestHandleLivingWikiInFlight_FeatureUnavailable asserts the 503 path.
 func TestHandleLivingWikiInFlight_FeatureUnavailable(t *testing.T) {
-	s := &Server{} // livingWikiLiveOrchestrator == nil
+	s := &Server{Deps: &appdeps.AppDeps{}} // LivingWikiLiveOrchestrator == nil
 	req, rec := buildInFlightRequest(t, "job-123")
 	inFlightTestHandler(s).ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
@@ -56,7 +57,7 @@ func TestHandleLivingWikiInFlight_FeatureUnavailable(t *testing.T) {
 // for a job that is not currently tracked.
 func TestHandleLivingWikiInFlight_UnknownJob_EmptyList(t *testing.T) {
 	orch := newInFlightTestOrchestrator()
-	s := &Server{livingWikiLiveOrchestrator: orch}
+	s := &Server{Deps: &appdeps.AppDeps{LivingWikiLiveOrchestrator: orch}}
 	req, rec := buildInFlightRequest(t, "job-unknown")
 	inFlightTestHandler(s).ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -202,7 +203,7 @@ func TestHandleLivingWikiInFlight_PerJobIsolation(t *testing.T) {
 	}
 
 	// REST endpoint for job-A (via orchA) must return ONLY job-A's pages.
-	sA := &Server{livingWikiLiveOrchestrator: orchA}
+	sA := &Server{Deps: &appdeps.AppDeps{LivingWikiLiveOrchestrator: orchA}}
 	reqA, recA := buildInFlightRequest(t, jobA)
 	inFlightTestHandler(sA).ServeHTTP(recA, reqA)
 	if recA.Code != http.StatusOK {
@@ -222,7 +223,7 @@ func TestHandleLivingWikiInFlight_PerJobIsolation(t *testing.T) {
 	}
 
 	// REST endpoint for job-B (via orchB) must return ONLY job-B's pages.
-	sB := &Server{livingWikiLiveOrchestrator: orchB}
+	sB := &Server{Deps: &appdeps.AppDeps{LivingWikiLiveOrchestrator: orchB}}
 	reqB, recB := buildInFlightRequest(t, jobB)
 	inFlightTestHandler(sB).ServeHTTP(recB, reqB)
 	if recB.Code != http.StatusOK {
@@ -275,7 +276,7 @@ func TestHandleLivingWikiInFlight_PopulatedList(t *testing.T) {
 	pr := lworch.NewMemoryWikiPR("pr-rest-inflight")
 
 	orch := lworch.New(lworch.Config{RepoID: "rest-test", MaxConcurrency: 5}, reg, store)
-	s := &Server{livingWikiLiveOrchestrator: orch}
+	s := &Server{Deps: &appdeps.AppDeps{LivingWikiLiveOrchestrator: orch}}
 
 	const jobID = "job-rest-populated"
 	const numPages = 2

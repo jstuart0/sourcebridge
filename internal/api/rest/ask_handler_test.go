@@ -14,6 +14,7 @@ import (
 
 	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/qa"
@@ -39,7 +40,7 @@ func newAskTestServer(t *testing.T, enabled bool, orch *qa.Orchestrator, store *
 	cfg := &config.Config{}
 	cfg.QA.ServerSideEnabled = enabled
 	cfg.QA.QuestionMaxBytes = 4096
-	return &Server{cfg: cfg, qaOrchestrator: orch, store: store}
+	return &Server{cfg: cfg, store: store, Deps: &appdeps.AppDeps{QA: orch}}
 }
 
 func TestHandleAsk_FlagOffReturns503(t *testing.T) {

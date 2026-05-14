@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 )
 
@@ -31,7 +32,7 @@ func TestRepoLLMActivitySignedInUserWithAccess(t *testing.T) {
 	s := newRepoMonitorTestServer(t)
 
 	done := make(chan struct{})
-	_, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
+	_, err := s.Deps.Orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
 		JobType:     "cliff_notes",
@@ -80,7 +81,7 @@ func TestRepoLLMActivitySignedInUserWithAccess(t *testing.T) {
 // TestRepoLLMActivityNoOrchestratorReturns503 tests the graceful degradation
 // when the orchestrator is not configured.
 func TestRepoLLMActivityNoOrchestratorReturns503(t *testing.T) {
-	s := &Server{}
+	s := &Server{Deps: &appdeps.AppDeps{}}
 
 	r := chi.NewRouter()
 	r.Get("/api/v1/repositories/{id}/llm-activity", s.handleRepoLLMActivity)
@@ -99,7 +100,7 @@ func TestRepoLLMActivityNoOrchestratorReturns503(t *testing.T) {
 func TestRepoLLMJobDetailMatchingRepo(t *testing.T) {
 	s := newRepoMonitorTestServer(t)
 
-	job, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
+	job, err := s.Deps.Orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
 		JobType:     "cliff_notes",
@@ -139,7 +140,7 @@ func TestRepoLLMJobDetailMatchingRepo(t *testing.T) {
 func TestRepoLLMJobDetailMismatchedRepo(t *testing.T) {
 	s := newRepoMonitorTestServer(t)
 
-	job, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
+	job, err := s.Deps.Orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
 		JobType:     "cliff_notes",
@@ -188,7 +189,7 @@ func TestRepoLLMJobDetailNotFound(t *testing.T) {
 func TestRepoLLMJobLogsMatchingRepo(t *testing.T) {
 	s := newRepoMonitorTestServer(t)
 
-	job, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
+	job, err := s.Deps.Orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
 		JobType:     "cliff_notes",
@@ -230,7 +231,7 @@ func TestRepoLLMJobLogsMatchingRepo(t *testing.T) {
 func TestRepoLLMJobLogsMismatchedRepo(t *testing.T) {
 	s := newRepoMonitorTestServer(t)
 
-	job, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
+	job, err := s.Deps.Orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
 		JobType:     "cliff_notes",
@@ -264,7 +265,7 @@ func TestRepoLLMJobCancelMatchingRepo(t *testing.T) {
 
 	block := make(chan struct{})
 	started := make(chan struct{})
-	job, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
+	job, err := s.Deps.Orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
 		JobType:     "cliff_notes",
@@ -305,7 +306,7 @@ func TestRepoLLMJobCancelMismatchedRepo(t *testing.T) {
 
 	block := make(chan struct{})
 	started := make(chan struct{})
-	job, err := s.orchestrator.Enqueue(&llm.EnqueueRequest{
+	job, err := s.Deps.Orchestrator.Enqueue(&llm.EnqueueRequest{
 		Subsystem:   llm.SubsystemKnowledge,
 		LLMProvider: "test",
 		JobType:     "cliff_notes",

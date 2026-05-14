@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/indexer"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
@@ -67,7 +68,7 @@ func TestCollectKnowledgeStatsCountsErrorCodes(t *testing.T) {
 		t.Fatalf("UpdateKnowledgeArtifactStatus unknown: %v", err)
 	}
 
-	server := &Server{store: store, knowledgeStore: ks}
+	server := &Server{store: store, Deps: &appdeps.AppDeps{KnowledgeStore: ks}}
 	stats := server.collectKnowledgeStats(context.Background(), store)
 
 	if stats.Total != 3 {
@@ -126,7 +127,7 @@ func TestHandleAdminKnowledgeStatusIncludesFailureDetails(t *testing.T) {
 		t.Fatalf("SetArtifactFailed: %v", err)
 	}
 
-	server := &Server{store: store, knowledgeStore: ks}
+	server := &Server{store: store, Deps: &appdeps.AppDeps{KnowledgeStore: ks}}
 	req := httptest.NewRequest("GET", "/api/v1/admin/knowledge", nil)
 	rec := httptest.NewRecorder()
 

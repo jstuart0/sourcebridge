@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 )
@@ -252,6 +253,7 @@ func newServerWithProfileStore(t *testing.T, fake *fakeProfileStoreAdapter) *Ser
 		cfg:             cfg,
 		llmProfileStore: fake,
 		llmConfigStore:  &nullConfigStore{}, // legacy GET handler reads through this
+		Deps:            &appdeps.AppDeps{},
 	}
 	r := chi.NewRouter()
 	r.Get("/api/v1/admin/llm-profiles", s.handleListLLMProfiles)
@@ -488,7 +490,7 @@ func TestHandler_ListProfiles_RecordIDBracketAsymmetry(t *testing.T) {
 
 func TestHandler_ListProfiles_503WithoutStore(t *testing.T) {
 	// nil profile-store = 503 SERVICE_UNAVAILABLE.
-	s := &Server{}
+	s := &Server{Deps: &appdeps.AppDeps{}}
 	r := chi.NewRouter()
 	r.Get("/api/v1/admin/llm-profiles", s.handleListLLMProfiles)
 	s.router = r

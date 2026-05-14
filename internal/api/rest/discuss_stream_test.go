@@ -38,6 +38,7 @@ import (
 	knowledgev1 "github.com/sourcebridge/sourcebridge/gen/go/knowledge/v1"
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 	requirementsv1 "github.com/sourcebridge/sourcebridge/gen/go/requirements/v1"
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
@@ -173,9 +174,8 @@ func discussStreamServer(t *testing.T, wc *worker.Client, fake *fakeStreamWorker
 	caller := llmcall.New(fake, resolver, nil)
 	cfg := &config.Config{}
 	return &Server{
-		cfg:       cfg,
-		worker:    wc,
-		llmCaller: caller,
+		cfg:  cfg,
+		Deps: &appdeps.AppDeps{Worker: wc, LLMCaller: caller},
 	}
 }
 
@@ -191,7 +191,7 @@ func discussStreamJSON(t *testing.T, repoID, question string) *bytes.Reader {
 // ---------------------------------------------------------------------------
 
 func TestHandleDiscussStream_InvalidJSON_Returns400(t *testing.T) {
-	s := &Server{cfg: &config.Config{}}
+	s := &Server{cfg: &config.Config{}, Deps: &appdeps.AppDeps{}}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/discuss/stream",
 		strings.NewReader("not-json"))
 	rec := httptest.NewRecorder()
@@ -207,7 +207,7 @@ func TestHandleDiscussStream_InvalidJSON_Returns400(t *testing.T) {
 }
 
 func TestHandleDiscussStream_MissingRepositoryID_Returns400(t *testing.T) {
-	s := &Server{cfg: &config.Config{}}
+	s := &Server{cfg: &config.Config{}, Deps: &appdeps.AppDeps{}}
 	body, _ := json.Marshal(map[string]string{"question": "what does foo do?"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/discuss/stream",
 		bytes.NewReader(body))
@@ -224,7 +224,7 @@ func TestHandleDiscussStream_MissingRepositoryID_Returns400(t *testing.T) {
 }
 
 func TestHandleDiscussStream_EmptyQuestion_Returns400(t *testing.T) {
-	s := &Server{cfg: &config.Config{}}
+	s := &Server{cfg: &config.Config{}, Deps: &appdeps.AppDeps{}}
 	body, _ := json.Marshal(map[string]string{"repository_id": "repo-1", "question": "   "})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/discuss/stream",
 		bytes.NewReader(body))
@@ -240,7 +240,7 @@ func TestHandleDiscussStream_EmptyQuestion_Returns400(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestHandleDiscussStream_NilLLMCaller_Returns503(t *testing.T) {
-	s := &Server{cfg: &config.Config{}, llmCaller: nil}
+	s := &Server{cfg: &config.Config{}, Deps: &appdeps.AppDeps{LLMCaller: nil}}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/discuss/stream",
 		discussStreamJSON(t, "repo-1", "what is this?"))
 	rec := httptest.NewRecorder()
@@ -260,7 +260,7 @@ func TestHandleDiscussStream_NilWorker_Returns503(t *testing.T) {
 	fake := &fakeStreamWorker{}
 	resolver := resolution.NewFrozenResolver(resolution.Snapshot{})
 	caller := llmcall.New(fake, resolver, nil)
-	s := &Server{cfg: &config.Config{}, llmCaller: caller, worker: nil}
+	s := &Server{cfg: &config.Config{}, Deps: &appdeps.AppDeps{LLMCaller: caller, Worker: nil}}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/discuss/stream",
 		discussStreamJSON(t, "repo-1", "what is this?"))

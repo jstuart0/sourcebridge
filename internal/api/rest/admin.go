@@ -21,8 +21,8 @@ var serverStartTime = time.Now()
 
 func (s *Server) handleAdminStatus(w http.ResponseWriter, r *http.Request) {
 	workerStatus := "unavailable"
-	if s.worker != nil {
-		healthy, err := s.worker.CheckHealth(context.Background())
+	if s.Deps.Worker != nil {
+		healthy, err := s.Deps.Worker.CheckHealth(context.Background())
 		if err == nil && healthy {
 			workerStatus = "healthy"
 		} else if err == nil {
@@ -37,9 +37,9 @@ func (s *Server) handleAdminStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Knowledge stats.
 	knowledgeStats := map[string]interface{}{
-		"configured": s.knowledgeStore != nil,
+		"configured": s.Deps.KnowledgeStore != nil,
 	}
-	if s.knowledgeStore != nil {
+	if s.Deps.KnowledgeStore != nil {
 		knowledgeStats["artifacts"] = s.collectKnowledgeStats(r.Context(), s.getStore(r))
 	}
 
@@ -93,8 +93,8 @@ func (s *Server) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 // the env-bootstrap layer of cfg.Git, which is what live deployments
 // override via the workspace settings).
 func adminGitView(s *Server, r *http.Request) map[string]interface{} {
-	if s.gitResolver != nil {
-		snap, err := s.gitResolver.Resolve(r.Context())
+	if s.Deps.GitResolver != nil {
+		snap, err := s.Deps.GitResolver.Resolve(r.Context())
 		if err == nil {
 			view := map[string]interface{}{
 				"default_token_set": snap.Token != "",
@@ -133,7 +133,7 @@ func (s *Server) handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleAdminTestWorker(w http.ResponseWriter, r *http.Request) {
-	if s.worker == nil {
+	if s.Deps.Worker == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"status": "unavailable",
 			"error":  "worker not configured",
@@ -141,7 +141,7 @@ func (s *Server) handleAdminTestWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	healthy, err := s.worker.CheckHealth(context.Background())
+	healthy, err := s.Deps.Worker.CheckHealth(context.Background())
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"status": "error",
@@ -160,7 +160,7 @@ func (s *Server) handleAdminTestWorker(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminTestLLM(w http.ResponseWriter, r *http.Request) {
-	if s.worker == nil {
+	if s.Deps.Worker == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"status": "unavailable",
 			"error":  "worker not configured — LLM tests require the worker service",
@@ -169,7 +169,7 @@ func (s *Server) handleAdminTestLLM(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A lightweight health check is the best we can do without sending a real prompt.
-	healthy, err := s.worker.CheckHealth(context.Background())
+	healthy, err := s.Deps.Worker.CheckHealth(context.Background())
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"status": "error",

@@ -39,7 +39,7 @@ type livingWikiInFlightResponse struct {
 // should NOT treat an empty list as a 404 — it simply means no pages are
 // currently in-flight for this job.
 func (s *Server) handleLivingWikiInFlight(w http.ResponseWriter, r *http.Request) {
-	if s.livingWikiLiveOrchestrator == nil {
+	if s.Deps.LivingWikiLiveOrchestrator == nil {
 		http.Error(w, "living wiki orchestrator unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -47,8 +47,8 @@ func (s *Server) handleLivingWikiInFlight(w http.ResponseWriter, r *http.Request
 	jobID := chi.URLParam(r, "id")
 	asOf := time.Now()
 
-	pages := s.livingWikiLiveOrchestrator.InFlightPages(jobID)
-	medianMs, medianKnown := s.livingWikiLiveOrchestrator.MedianCompletedPageMs(jobID)
+	pages := s.Deps.LivingWikiLiveOrchestrator.InFlightPages(jobID)
+	medianMs, medianKnown := s.Deps.LivingWikiLiveOrchestrator.MedianCompletedPageMs(jobID)
 
 	views := make([]inFlightPageView, len(pages))
 	for i, p := range pages {

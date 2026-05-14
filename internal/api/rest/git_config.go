@@ -45,7 +45,7 @@ type updateGitConfigRequest struct {
 // IntegrityError (corrupt envelope / missing key) so the admin UI can
 // show a banner.
 func (s *Server) handleGetGitConfig(w http.ResponseWriter, r *http.Request) {
-	if s.gitResolver == nil {
+	if s.Deps.GitResolver == nil {
 		// Embedded/test mode without a workspace resolver: report
 		// env-bootstrap only.
 		resp := gitConfigResponse{
@@ -59,7 +59,7 @@ func (s *Server) handleGetGitConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snap, err := s.gitResolver.Resolve(r.Context())
+	snap, err := s.Deps.GitResolver.Resolve(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "resolve git config failed"})
 		return
@@ -168,8 +168,8 @@ func (s *Server) handleUpdateGitConfig(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Nudge the resolver cache so this replica sees the change
 	//    immediately (peers pick it up via the version-cell read).
-	if s.gitResolver != nil {
-		s.gitResolver.InvalidateLocal()
+	if s.Deps.GitResolver != nil {
+		s.Deps.GitResolver.InvalidateLocal()
 	}
 
 	// 6. Return masked view (load fresh; never echo the raw token).

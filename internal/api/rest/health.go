@@ -83,8 +83,8 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	// Database: use the shared HealthChecker when available (external mode),
 	// otherwise assume healthy (embedded/in-memory needs no live ping).
 	dbStatus := componentStatus{Status: "healthy", Detail: "embedded/in-memory"}
-	if s.healthChecker != nil {
-		hs := s.healthChecker.Get(r.Context())
+	if s.Deps.HealthChecker != nil {
+		hs := s.Deps.HealthChecker.Get(r.Context())
 		if hs.Surreal {
 			dbStatus = componentStatus{Status: "healthy"}
 		} else {
@@ -101,8 +101,8 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		// Worker: direct check when no shared checker (should not occur in
 		// production, but keeps the handler functional in tests without a DB).
 		workerStatus := componentStatus{Status: "unavailable", Detail: "not configured"}
-		if s.worker != nil {
-			healthy, err := s.worker.CheckHealth(r.Context())
+		if s.Deps.Worker != nil {
+			healthy, err := s.Deps.Worker.CheckHealth(r.Context())
 			if err != nil {
 				workerStatus = componentStatus{Status: "unavailable", Detail: err.Error()}
 			} else if healthy {
@@ -202,12 +202,12 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) { //nolin
 	indexTotal := metrics.indexingTotal.Load()
 	activePoolSize := 0
 	configuredPoolSize := 0
-	if s != nil && s.orchestrator != nil {
-		activePoolSize = s.orchestrator.ActiveWorkerCount()
-		configuredPoolSize = s.orchestrator.MaxConcurrency()
+	if s != nil && s.Deps.Orchestrator != nil {
+		activePoolSize = s.Deps.Orchestrator.ActiveWorkerCount()
+		configuredPoolSize = s.Deps.Orchestrator.MaxConcurrency()
 	}
 	runtimeReconfigureEnabled := 0
-	if s != nil && s.flags.RuntimeReconfigure {
+	if s != nil && s.Deps.Flags.RuntimeReconfigure {
 		runtimeReconfigureEnabled = 1
 	}
 	knowledgeProgressWriteErrors := graphql.KnowledgeProgressWriteErrorsTotal()

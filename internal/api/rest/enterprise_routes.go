@@ -58,7 +58,7 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 	// Wire host services (GraphStore) into webhook handlers
 	ectx.SetHostServices(&graphStoreHostServices{
 		store:          s.store,
-		knowledgeStore: s.knowledgeStore,
+		knowledgeStore: s.Deps.KnowledgeStore,
 		repoChecker:    ectx.RepoChecker,
 	})
 
@@ -124,10 +124,10 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 	// is the one remaining gap; resolving it requires extending the
 	// SetReportGenerator callback signature in the enterprise package
 	// to accept a context, which is a follow-up tracked in CHANGELOG.
-	if s.llmCaller != nil && s.llmCaller.IsAvailable() {
+	if s.Deps.LLMCaller != nil && s.Deps.LLMCaller.IsAvailable() {
 		ectx.API.SetReportGenerator(func(reportID, reportType, audience, repoDataJSON, sectionDefsJSON, outputDir string, repoIDs, selectedSections []string, includeDiagrams, includeRecommendations, includeLOE bool, loeMode, reportName, analysisDepth, styleSystemPrompt, styleSectionRules string) (string, int, int, int, string, error) {
 			// Collect actual repo data from the graph and knowledge stores
-			realRepoData := collectRepoDataForReport(s.store, s.knowledgeStore, repoIDs)
+			realRepoData := collectRepoDataForReport(s.store, s.Deps.KnowledgeStore, repoIDs)
 			repoJSON, _ := json.Marshal(realRepoData)
 			slog.Info("report: collected repo data", "repos", len(repoIDs), "jsonBytes", len(repoJSON))
 
@@ -140,7 +140,7 @@ func (s *Server) registerEnterpriseRoutes(r chi.Router) {
 				repoIDHint = repoIDs[0]
 			}
 			// context.Background() — see M5 documentation block above.
-			resp, err := s.llmCaller.GenerateReport(context.Background(), repoIDHint, resolution.OpReportGenerate, &enterprisev1.GenerateReportRequest{
+			resp, err := s.Deps.LLMCaller.GenerateReport(context.Background(), repoIDHint, resolution.OpReportGenerate, &enterprisev1.GenerateReportRequest{
 				ReportId:               reportID,
 				ReportName:             reportName,
 				ReportType:             reportType,

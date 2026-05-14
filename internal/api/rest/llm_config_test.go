@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
 )
@@ -50,6 +51,7 @@ func newLLMConfigTestServer(_ *testing.T, env config.LLMConfig, store *fakeLLMCo
 	return &Server{
 		cfg:            cfg,
 		llmConfigStore: store,
+		Deps:           &appdeps.AppDeps{},
 	}
 }
 
@@ -188,7 +190,7 @@ func TestHandleUpdateLLMConfig_EncryptionKeyMissingReturns422(t *testing.T) {
 }
 
 func TestHandleUpdateLLMConfig_NoStoreReturns503(t *testing.T) {
-	s := &Server{cfg: &config.Config{}}
+	s := &Server{cfg: &config.Config{}, Deps: &appdeps.AppDeps{}}
 	body := `{"provider":"openai"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/llm-config", bytes.NewBufferString(body))
 	w := httptest.NewRecorder()
@@ -245,7 +247,7 @@ func TestHandleUpdateLLMConfig_InvalidatesResolverCache(t *testing.T) {
 		rec: &LLMConfigRecord{Provider: "openai", APIKey: "v1"},
 	}
 	s := newLLMConfigTestServer(t, config.LLMConfig{}, store)
-	s.llmResolver = resolver
+	s.Deps.LLMResolver = resolver
 
 	body := `{"api_key":"v2"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/llm-config", bytes.NewBufferString(body))

@@ -50,7 +50,7 @@ type searchResult struct {
 // + tenant repo filtering). The handler itself adds a single explicit
 // access check so a client can never ask for a repo they cannot see.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	if s.searchSvc == nil {
+	if s.Deps.SearchSvc == nil {
 		http.Error(w, "search service unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -74,7 +74,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	// Apply the tenant-filtered store scope to the call as well, so
 	// any store-hop inside the service sees only authorized symbols.
-	resp, err := s.searchSvc.Search(withTenantStore(r.Context(), store), &search.Request{
+	resp, err := s.Deps.SearchSvc.Search(withTenantStore(r.Context(), store), &search.Request{
 		Repo:         req.Repo,
 		Query:        req.Query,
 		Limit:        req.Limit,

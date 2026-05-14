@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	"github.com/sourcebridge/sourcebridge/internal/search"
 )
@@ -25,8 +26,8 @@ func TestHandleSearch_BasicShape(t *testing.T) {
 
 	svc := search.NewService(store)
 	srv := &Server{
-		store:     store,
-		searchSvc: svc,
+		store: store,
+		Deps:  &appdeps.AppDeps{SearchSvc: svc},
 	}
 
 	body, _ := json.Marshal(map[string]any{
@@ -57,7 +58,7 @@ func TestHandleSearch_BasicShape(t *testing.T) {
 }
 
 func TestHandleSearch_MissingFields(t *testing.T) {
-	srv := &Server{searchSvc: search.NewService(graphstore.NewStore())}
+	srv := &Server{Deps: &appdeps.AppDeps{SearchSvc: search.NewService(graphstore.NewStore())}}
 	body := []byte(`{"query": "x"}`)
 	req := httptest.NewRequest("POST", "/api/v1/search", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -69,8 +70,8 @@ func TestHandleSearch_MissingFields(t *testing.T) {
 
 func TestHandleSearch_UnknownRepoReturnsNotFound(t *testing.T) {
 	srv := &Server{
-		store:     graphstore.NewStore(),
-		searchSvc: search.NewService(graphstore.NewStore()),
+		store: graphstore.NewStore(),
+		Deps:  &appdeps.AppDeps{SearchSvc: search.NewService(graphstore.NewStore())},
 	}
 	body, _ := json.Marshal(map[string]any{
 		"repo": "nope", "query": "x",
@@ -84,7 +85,7 @@ func TestHandleSearch_UnknownRepoReturnsNotFound(t *testing.T) {
 }
 
 func TestHandleSearch_NoServiceReturns503(t *testing.T) {
-	srv := &Server{}
+	srv := &Server{Deps: &appdeps.AppDeps{}}
 	body, _ := json.Marshal(map[string]any{"repo": "x", "query": "y"})
 	req := httptest.NewRequest("POST", "/api/v1/search", bytes.NewReader(body))
 	w := httptest.NewRecorder()

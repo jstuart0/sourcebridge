@@ -4,7 +4,7 @@
 // Handler-level coverage for handleAdminTestWorker and handleAdminTestLLM
 // (CA-282).
 //
-// Both handlers delegate all their logic to s.worker (nil-check + CheckHealth).
+// Both handlers delegate all their logic to s.Deps.Worker (nil-check + CheckHealth).
 // This file covers:
 //   - Worker not configured (nil) → 200 with status "unavailable"
 //   - Worker configured but CheckHealth returns error → 200 with status "error"
@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/sourcebridge/sourcebridge/internal/appdeps"
 	"github.com/sourcebridge/sourcebridge/internal/config"
 )
 
@@ -35,10 +36,10 @@ import (
 // *fakeWorkerHealthState into s and override the CheckHealth delegation via
 // the workerHealthOverride field below.
 //
-// Approach: since the handlers call s.worker.CheckHealth, and s.worker is
+// Approach: since the handlers call s.Deps.Worker.CheckHealth, and s.Deps.Worker is
 // *worker.Client (concrete), we cannot substitute an interface for the tests.
 // Instead, we test the handlers by calling them directly on a Server where
-// s.worker is nil (no worker configured) and rely on the handler's explicit
+// s.Deps.Worker is nil (no worker configured) and rely on the handler's explicit
 // nil-check + CheckHealth call to exercise all paths.
 //
 // For the CheckHealth-returns-error and CheckHealth-succeeds paths, we wire a
@@ -47,7 +48,7 @@ import (
 //     CheckHealth always returns an error → exercises the error path.
 
 func TestHandleAdminTestWorker_NilWorker_ReturnsUnavailable(t *testing.T) {
-	s := &Server{cfg: defaultTestConfig(), worker: nil}
+	s := &Server{cfg: defaultTestConfig(), Deps: &appdeps.AppDeps{Worker: nil}}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/test-worker", nil)
 	rec := httptest.NewRecorder()
 	s.handleAdminTestWorker(rec, req)
@@ -67,7 +68,7 @@ func TestHandleAdminTestWorker_NilWorker_ReturnsUnavailable(t *testing.T) {
 }
 
 func TestHandleAdminTestLLM_NilWorker_ReturnsUnavailable(t *testing.T) {
-	s := &Server{cfg: defaultTestConfig(), worker: nil}
+	s := &Server{cfg: defaultTestConfig(), Deps: &appdeps.AppDeps{Worker: nil}}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/test-llm", nil)
 	rec := httptest.NewRecorder()
 	s.handleAdminTestLLM(rec, req)
@@ -92,7 +93,7 @@ func TestHandleAdminTestWorker_CheckHealthError_ReturnsErrorStatus(t *testing.T)
 	if wc == nil {
 		return
 	}
-	s := &Server{cfg: defaultTestConfig(), worker: wc}
+	s := &Server{cfg: defaultTestConfig(), Deps: &appdeps.AppDeps{Worker: wc}}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/test-worker", nil)
 	rec := httptest.NewRecorder()
 	s.handleAdminTestWorker(rec, req)
@@ -120,7 +121,7 @@ func TestHandleAdminTestLLM_CheckHealthError_ReturnsErrorStatus(t *testing.T) {
 	if wc == nil {
 		return
 	}
-	s := &Server{cfg: defaultTestConfig(), worker: wc}
+	s := &Server{cfg: defaultTestConfig(), Deps: &appdeps.AppDeps{Worker: wc}}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/test-llm", nil)
 	rec := httptest.NewRecorder()
 	s.handleAdminTestLLM(rec, req)
@@ -151,13 +152,13 @@ func TestHandleAdminTestLLM_ResponseAlwaysHTTP200(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s := &Server{cfg: defaultTestConfig()}
+			s := &Server{cfg: defaultTestConfig(), Deps: &appdeps.AppDeps{}}
 			if !tc.workerNil {
 				wc := startMinimalGRPCServer(t)
 				if wc == nil {
 					t.Skip("worker not available")
 				}
-				s.worker = wc
+				s.Deps.Worker = wc
 			}
 
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/test-llm", nil)

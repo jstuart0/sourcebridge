@@ -24,21 +24,21 @@ func (s *Server) handleExportKnowledgeArtifact(w http.ResponseWriter, r *http.Re
 		format = "json"
 	}
 
-	if s.knowledgeStore == nil {
+	if s.Deps.KnowledgeStore == nil {
 		http.Error(w, `{"error":"knowledge store not configured"}`, http.StatusServiceUnavailable)
 		return
 	}
 
-	artifact := s.knowledgeStore.GetKnowledgeArtifact(r.Context(), artifactID)
+	artifact := s.Deps.KnowledgeStore.GetKnowledgeArtifact(r.Context(), artifactID)
 	if artifact == nil {
 		http.Error(w, `{"error":"artifact not found"}`, http.StatusNotFound)
 		return
 	}
 
 	// Hydrate sections and evidence.
-	sections := s.knowledgeStore.GetKnowledgeSections(r.Context(), artifactID)
+	sections := s.Deps.KnowledgeStore.GetKnowledgeSections(r.Context(), artifactID)
 	for i := range sections {
-		sections[i].Evidence = s.knowledgeStore.GetKnowledgeEvidence(r.Context(), sections[i].ID)
+		sections[i].Evidence = s.Deps.KnowledgeStore.GetKnowledgeEvidence(r.Context(), sections[i].ID)
 	}
 	artifact.Sections = sections
 

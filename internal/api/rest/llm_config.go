@@ -334,8 +334,8 @@ func (s *Server) handleUpdateLLMConfig(w http.ResponseWriter, r *http.Request) {
 	// Nudge the local resolver cache so the very next Resolve on this
 	// replica fetches the new values. Cross-replica freshness still
 	// relies on the version stamp the Save bumps in the DB.
-	if s.llmResolver != nil {
-		s.llmResolver.InvalidateLocal()
+	if s.Deps.LLMResolver != nil {
+		s.Deps.LLMResolver.InvalidateLocal()
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -358,7 +358,7 @@ var ErrLLMEncryptionKeyRequired = errors.New("llm api key cannot be saved withou
 // (e.g. handleListLLMModels). Returns the zero Snapshot when the
 // resolver is unavailable.
 func (s *Server) ResolveLLMSnapshot(ctx context.Context, op string) resolution.Snapshot {
-	if s.llmResolver == nil {
+	if s.Deps.LLMResolver == nil {
 		return resolution.Snapshot{
 			Provider:    s.cfg.LLM.Provider,
 			BaseURL:     s.cfg.LLM.BaseURL,
@@ -367,7 +367,7 @@ func (s *Server) ResolveLLMSnapshot(ctx context.Context, op string) resolution.S
 			TimeoutSecs: s.cfg.LLM.TimeoutSecs,
 		}
 	}
-	snap, err := s.llmResolver.Resolve(ctx, "", op)
+	snap, err := s.Deps.LLMResolver.Resolve(ctx, "", op)
 	if err != nil {
 		slog.Warn("llm resolver: resolve failed in admin handler", "op", op, "error", err)
 		return resolution.Snapshot{
