@@ -123,35 +123,7 @@ func (a *qaArtifactLookup) ArtifactContext(ctx context.Context, id string) strin
 	if art == nil {
 		return ""
 	}
-	return discussionContextFromArtifactQA(art)
-}
-
-func discussionContextFromArtifactQA(artifact *knowledge.Artifact) string {
-	if artifact == nil || len(artifact.Sections) == 0 {
-		return ""
-	}
-	scopePath := "repository"
-	if artifact.Scope != nil {
-		scopePath = artifact.Scope.ScopePath
-	}
-	parts := []string{
-		fmt.Sprintf("Indexed %s context for %s.", lower(string(artifact.Type)), scopePath),
-	}
-	for idx, section := range artifact.Sections {
-		if idx >= 6 {
-			break
-		}
-		body := section.Summary
-		if body == "" {
-			body = section.Content
-		}
-		body = trim(body)
-		if len(body) > 500 {
-			body = body[:500] + "..."
-		}
-		parts = append(parts, fmt.Sprintf("- %s: %s", section.Title, body))
-	}
-	return joinLines(parts)
+	return knowledge.DiscussionContextFromArtifact(art)
 }
 
 // qaRequirementLookup adapts the graph store for requirement

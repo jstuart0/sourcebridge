@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
+	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 )
 
 // assembleDiscussionContext builds the context code and context symbols for a
@@ -34,7 +35,7 @@ func assembleDiscussionContext(
 	}
 	if input.ArtifactID != nil && *input.ArtifactID != "" && r.Deps.KnowledgeStore != nil {
 		if artifact := r.Deps.KnowledgeStore.GetKnowledgeArtifact(ctx, *input.ArtifactID); artifact != nil {
-			contextParts = append(contextParts, discussionContextFromArtifact(artifact))
+			contextParts = append(contextParts, knowledgepkg.DiscussionContextFromArtifact(artifact))
 		}
 	}
 	if input.RequirementID != nil && *input.RequirementID != "" {
