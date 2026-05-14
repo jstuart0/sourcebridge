@@ -290,6 +290,89 @@ func TestDeepAsk_FailedStillBlocks(t *testing.T) {
 	}
 }
 
+// TestDeepPipeline_AskModelResolver_NilUsagePath pins Fix B (CA-324) for the
+// nil-usage branch (deep_pipeline.go:413-424). When the worker returns a
+// successful response but omits the Usage message — the common Ollama case
+// where token counts are absent — the pipeline must populate result.Usage.Model
+// and result.Diagnostics.ModelUsed from the AskModelResolver callback rather
+// than leaving them blank.
+func TestDeepPipeline_AskModelResolver_NilUsagePath(t *testing.T) {
+	reader := &fakeDeepReader{
+		understanding: &knowledge.RepositoryUnderstanding{
+			Stage:      knowledge.UnderstandingReady,
+			TreeStatus: knowledge.UnderstandingTreeComplete,
+			CorpusID:   "c",
+		},
+		nodes: []comprehension.SummaryNode{
+			{CorpusID: "c", UnitID: "u", Level: 1, Headline: "X", SummaryText: "stuff", Metadata: `{}`},
+		},
+	}
+	// Successful response with Usage == nil (proto3 zero-value omitted by encoder).
+	synth := &fakeSynth{
+		available: true,
+		resp: &reasoningv1.AnswerQuestionResponse{
+			Answer: "an answer",
+			Usage:  nil, // nil simulates Ollama omitting token counts
+		},
+	}
+	cfg := DefaultConfig()
+	cfg.AskModelResolver = func(_ context.Context) string { return "test-model-from-resolver" }
+	o := New(synth, reader, nil, cfg)
+
+	res, err := o.Ask(context.Background(), AskInput{
+		RepositoryID: "r", Question: "q", Mode: ModeDeep,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Usage.Model != "test-model-from-resolver" {
+		t.Errorf("Usage.Model: got %q, want %q", res.Usage.Model, "test-model-from-resolver")
+	}
+	if res.Diagnostics.ModelUsed != "test-model-from-resolver" {
+		t.Errorf("Diagnostics.ModelUsed: got %q, want %q", res.Diagnostics.ModelUsed, "test-model-from-resolver")
+	}
+}
+
+// TestDeepPipeline_AskModelResolver_SynthesisFailedPath pins Fix B (CA-324) for
+// the synthesis-failed early-return branch (deep_pipeline.go:391-400). When the
+// worker returns an error, the pipeline exits early after setting
+// FallbackUsed="synthesis_failed". The AskModelResolver callback must still be
+// invoked to populate Usage.Model and Diagnostics.ModelUsed so callers can
+// surface which model was attempted.
+func TestDeepPipeline_AskModelResolver_SynthesisFailedPath(t *testing.T) {
+	reader := &fakeDeepReader{
+		understanding: &knowledge.RepositoryUnderstanding{
+			Stage:      knowledge.UnderstandingReady,
+			TreeStatus: knowledge.UnderstandingTreeComplete,
+			CorpusID:   "c",
+		},
+		nodes: []comprehension.SummaryNode{
+			{CorpusID: "c", UnitID: "u", Level: 1, Headline: "X", SummaryText: "stuff", Metadata: `{}`},
+		},
+	}
+	// Worker returns an error — synthesis failure.
+	synth := &fakeSynth{available: true, err: errors.New("upstream LLM failed")}
+	cfg := DefaultConfig()
+	cfg.AskModelResolver = func(_ context.Context) string { return "test-model-from-resolver" }
+	o := New(synth, reader, nil, cfg)
+
+	res, err := o.Ask(context.Background(), AskInput{
+		RepositoryID: "r", Question: "q", Mode: ModeDeep,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Diagnostics.FallbackUsed != "synthesis_failed" {
+		t.Errorf("expected synthesis_failed, got %q", res.Diagnostics.FallbackUsed)
+	}
+	if res.Usage.Model != "test-model-from-resolver" {
+		t.Errorf("Usage.Model: got %q, want %q", res.Usage.Model, "test-model-from-resolver")
+	}
+	if res.Diagnostics.ModelUsed != "test-model-from-resolver" {
+		t.Errorf("Diagnostics.ModelUsed: got %q, want %q", res.Diagnostics.ModelUsed, "test-model-from-resolver")
+	}
+}
+
 func TestBuildContextMarkdown_IncludesSummaries(t *testing.T) {
 	sums := []SummaryEvidence{
 		{UnitID: "u1", Headline: "First", SummaryText: "Some summary text."},

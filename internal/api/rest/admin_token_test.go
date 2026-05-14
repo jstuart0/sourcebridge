@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/sourcebridge/sourcebridge/internal/auth"
@@ -189,5 +190,72 @@ func TestHandleCreateToken_MissingName(t *testing.T) {
 	rec := postCreateToken(t, s, adminClaims, map[string]string{})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleCreateToken_TokenNameBoundaries is a table-driven test for the
+// token-name validation rules in admin.go:215-236 (CA-391 / TES-H2).
+//
+// Load-bearing: case (d) uses the 3-byte rune '界' (U+754C, UTF-8: 0xE7 0x95 0x8C)
+// so that 129 runes = 387 bytes. A byte-length check `len(s) > 128` would reject
+// 129-byte ASCII strings but would also, critically, accept a 129-rune string of
+// 1-byte runes only. Using a 3-byte rune makes the byte-vs-rune contrast
+// unambiguous: 129×3=387 bytes >> 128, so any byte-count check would have caught
+// it anyway; the real test is that 128×3=384 bytes is ACCEPTED — that only passes
+// under a rune-count check, not a byte-count check.
+func TestHandleCreateToken_TokenNameBoundaries(t *testing.T) {
+	cases := []struct {
+		name       string
+		input      string
+		wantStatus int
+	}{
+		// (a) empty string — rejected after TrimSpace leaves nothing.
+		{"empty", "", http.StatusBadRequest},
+
+		// (b) single ASCII char — accepted.
+		{"single_ascii", "a", http.StatusCreated},
+
+		// (c) exactly 128 ASCII chars — boundary accepted.
+		{"ascii_128_boundary_accepted", strings.Repeat("a", 128), http.StatusCreated},
+
+		// (d) 129 multi-byte runes rejected — rune count > 128.
+		// '界' is U+754C, encoded as 3 bytes in UTF-8. 129 runes = 387 bytes.
+		// A naive byte-count check (len(s) > 128) would catch 387 > 128, but
+		// case (d2) below is the authoritative byte-vs-rune discriminator.
+		{"multibyte_rune_129_rejected", strings.Repeat("界", 129), http.StatusBadRequest},
+
+		// (d2) exactly 128 multi-byte runes — rune count == 128, accepted.
+		// 128 runes × 3 bytes = 384 bytes. A byte-count check would REJECT
+		// (384 > 128). This case passes only if the validator uses rune count.
+		{"multibyte_rune_128_boundary_accepted", strings.Repeat("界", 128), http.StatusCreated},
+
+		// (e) printable Unicode mid-range — accepted.
+		{"printable_unicode_cafe", "café", http.StatusCreated},
+		{"printable_unicode_cjk", "测试", http.StatusCreated},
+
+		// (f) control characters — rejected.
+		{"control_null", "name\x00here", http.StatusBadRequest},
+		{"control_newline", "name\nhere", http.StatusBadRequest},
+		{"control_unit_sep", "name\x1fhere", http.StatusBadRequest},
+
+		// (g) trailing whitespace: admin.go:215 applies strings.TrimSpace before
+		// validation. A name that is non-empty after trimming is ACCEPTED and the
+		// stored name equals the trimmed value (pinned by
+		// TestHandleCreateToken_NameWhitespaceStripped). A name that is all
+		// whitespace becomes "" after trim and is REJECTED (status 400).
+		{"trailing_whitespace_trims_and_accepts", "  name  ", http.StatusCreated},
+		{"all_whitespace_rejected_after_trim", "   ", http.StatusBadRequest},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTokenTestServer(t)
+			rec := postCreateToken(t, s, nil, map[string]string{"name": tc.input})
+			if rec.Code != tc.wantStatus {
+				t.Errorf("input %q: got status %d, want %d — body: %s",
+					tc.input, rec.Code, tc.wantStatus, rec.Body.String())
+			}
+		})
 	}
 }
