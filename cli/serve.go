@@ -43,6 +43,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/settings/livingwiki"
 	"github.com/sourcebridge/sourcebridge/internal/telemetry"
 	"github.com/sourcebridge/sourcebridge/internal/trash"
+	"github.com/sourcebridge/sourcebridge/internal/usage"
 	"github.com/sourcebridge/sourcebridge/internal/version"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 	"github.com/sourcebridge/sourcebridge/internal/worker/llmcall"
@@ -1433,6 +1434,12 @@ func (p *telemetryCountProvider) TelemetryCounts() (repos, users int, features [
 	// cumulative; safe to read even when the feature is disabled
 	// (atomics default to zero).
 	for k, v := range trash.Counters() {
+		counts[k] = v
+	}
+
+	// Merge in rolling 30-day usage counters (queries + artifacts generated).
+	// Process-local; resets to zero on agent restart.
+	for k, v := range usage.Counters() {
 		counts[k] = v
 	}
 

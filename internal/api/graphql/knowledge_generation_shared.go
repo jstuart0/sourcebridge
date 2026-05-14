@@ -11,6 +11,7 @@ import (
 	graphstore "github.com/sourcebridge/sourcebridge/internal/graph"
 	knowledgepkg "github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
+	"github.com/sourcebridge/sourcebridge/internal/usage"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
@@ -168,10 +169,27 @@ func runKnowledgePipeline(
 		}
 	}
 
-	if err := r.Deps.KnowledgeStore.UpdateKnowledgeArtifactStatus(runCtx, artifact.ID, knowledgepkg.StatusReady); err != nil {
+	if err := r.markArtifactReady(runCtx, artifact.ID); err != nil {
 		slog.Error("failed to mark "+cfg.artifactLabel+" ready", "artifact_id", artifact.ID, "error", err)
 	}
 	rt.ReportProgress(1.0, "ready", cfg.readyMessage, 0)
 	slog.Info(cfg.artifactLabel+" generation complete", "artifact_id", artifact.ID)
+	return nil
+}
+
+// markArtifactReady transitions an artifact from GENERATING to READY and,
+// on success, increments the rolling 30-day artifacts-generated counter for
+// telemetry. It is the single instrumentation point for user-requested
+// artifact generation.
+//
+// The SupersedeArtifact paths (knowledge_seed.go and cliff-note deepening in
+// knowledge_support.go) are intentionally NOT routed through this wrapper —
+// they represent seed/refresh operations, not new user-requested generation.
+// See Decision 2 in the CA-400 plan for the full rationale.
+func (r *Resolver) markArtifactReady(ctx context.Context, artifactID string) error {
+	if err := r.Deps.KnowledgeStore.UpdateKnowledgeArtifactStatus(ctx, artifactID, knowledgepkg.StatusReady); err != nil {
+		return err
+	}
+	usage.ArtifactsCounter.Inc()
 	return nil
 }

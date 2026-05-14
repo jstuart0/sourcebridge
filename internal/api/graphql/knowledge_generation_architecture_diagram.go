@@ -227,7 +227,7 @@ func (s architectureDiagramGenerationService) runGenerationPipeline(
 			return err
 		}
 	}
-	if err := r.Deps.KnowledgeStore.UpdateKnowledgeArtifactStatus(runCtx, artifact.ID, knowledgepkg.StatusReady); err != nil {
+	if err := r.markArtifactReady(runCtx, artifact.ID); err != nil {
 		return err
 	}
 	rt.ReportProgress(1.0, "ready", "AI architecture diagram ready", 0)

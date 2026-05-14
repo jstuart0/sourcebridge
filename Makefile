@@ -4,7 +4,8 @@
 	dev dev-web dev-go dev-worker clean migrate help integration-test test-integration smoke-test phase-gate ci \
 	test-livingwiki-integration test-livingwiki-smoke test-scripts \
 	benchmark-comprehension-fake benchmark-comprehension-local benchmark-comprehension-report \
-	benchmark-report-quality-live
+	benchmark-report-quality-live \
+	check-telemetry-disclosure
 
 GO_BIN = bin/sourcebridge
 GO_MIGRATE_BIN = bin/migrate
@@ -86,6 +87,13 @@ lint-worker:
 
 lint-vscode:
 	cd plugins/vscode && npx eslint src --ext ts
+
+# Telemetry disclosure gate: verify that every key shipped in the Counts
+# blob is documented in TELEMETRY.md. Add a grep line for each new key.
+check-telemetry-disclosure:
+	@grep -q '`queries_30d`' TELEMETRY.md || (echo "TELEMETRY.md missing queries_30d disclosure"; exit 1)
+	@grep -q '`artifacts_generated_30d`' TELEMETRY.md || (echo "TELEMETRY.md missing artifacts_generated_30d disclosure"; exit 1)
+	@echo "telemetry disclosure: ok"
 
 # Package the VS Code extension as a VSIX. The output file lands in
 # plugins/vscode/ and is gitignored. Use `install-vscode` to drop it

@@ -15,6 +15,7 @@ import (
 	commonv1 "github.com/sourcebridge/sourcebridge/gen/go/common/v1"
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
+	"github.com/sourcebridge/sourcebridge/internal/usage"
 	"github.com/sourcebridge/sourcebridge/internal/worker"
 )
 
@@ -405,6 +406,7 @@ func (o *Orchestrator) Ask(ctx context.Context, in AskInput) (*AskResult, error)
 	// error path). Counter is process-local and read by the dashboard
 	// ping at most once per 24h.
 	CountAsk()
+	usage.QueriesCounter.Inc()
 
 	started := time.Now()
 	result := &AskResult{

@@ -6,6 +6,7 @@ package qa
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -13,7 +14,14 @@ import (
 	reasoningv1 "github.com/sourcebridge/sourcebridge/gen/go/reasoning/v1"
 	"github.com/sourcebridge/sourcebridge/internal/knowledge"
 	"github.com/sourcebridge/sourcebridge/internal/settings/comprehension"
+	"github.com/sourcebridge/sourcebridge/internal/usage"
 )
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	usage.ResetCountersForTest()
+	os.Exit(code)
+}
 
 type fakeSynth struct {
 	available bool

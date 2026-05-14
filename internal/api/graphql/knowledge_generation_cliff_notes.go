@@ -432,7 +432,7 @@ func (s cliffNotesGenerationService) runGenerationPipeline(
 		}
 	}
 
-	if err := r.Deps.KnowledgeStore.UpdateKnowledgeArtifactStatus(runCtx, artifact.ID, knowledgepkg.StatusReady); err != nil {
+	if err := r.markArtifactReady(runCtx, artifact.ID); err != nil {
 		slog.Error("failed to mark cliff notes ready", "artifact_id", artifact.ID, "error", err)
 	}
 	if artifactUsesUnderstanding(generationMode) && depth != string(knowledgepkg.DepthSummary) {

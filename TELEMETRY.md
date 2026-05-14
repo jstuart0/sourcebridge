@@ -21,6 +21,8 @@ information is ever collected.
 | `trash_purges_total` | `120` | Cumulative count of rows purged by the retention worker |
 | `trash_size_gauge` | `17` | Most recent sampled count of items currently in the trash |
 | `qa_asks_total_14d` | `342` | Rolling 14-day count of server-side QA (`/api/v1/ask`, `ask` mutation, MCP `ask_question`) invocations on this install. Zero when server-side QA is disabled. |
+| `queries_30d` | `342` | Rolling 30-day count of QA invocations (every `Orchestrator.Ask`) on this install. **Process-local; resets to zero when the agent process restarts; reported as the in-process sum at the moment of the ping.** Zero on fresh processes; grows over the next 30 days. |
+| `artifacts_generated_30d` | `17` | Rolling 30-day count of knowledge artifacts (cliff notes, architecture diagram, learning path, code tour, workflow story) that transitioned from GENERATING to READY via user-requested generation. **Excludes** field-guide seed artifacts and cliff-note section deepening (initialization/refresh, not new generation). **Process-local; resets to zero on agent process restart.** |
 | `qa_server_side` feature flag | `["qa_server_side"]` | Present in the `features` array when `SOURCEBRIDGE_QA_SERVER_SIDE_ENABLED=true`. Lets the public dashboard track orchestrator adoption. |
 | `clustering_enabled` | `true` | True when the `subsystem_clustering` capability is active on this installation. |
 | `cluster_count` | `12` | Number of clusters for the largest indexed repository. Zero when clustering has not run or no repos are indexed. |

@@ -51,6 +51,47 @@ The first query is the "how many operators flipped the flag"
 adoption metric. The second is the activity metric — together they
 tell the story of a rollout.
 
+## 5. CA-400: 30-day rolling counters for queries and artifacts
+
+CA-400 (Phase 2) added two new keys to the `counts` blob:
+
+- `queries_30d` — rolling 30-day count of QA invocations
+  (`Orchestrator.Ask`). Process-local; resets on agent restart.
+- `artifacts_generated_30d` — rolling 30-day count of knowledge
+  artifacts (cliff notes, architecture diagram, learning path, code
+  tour, workflow story) that completed user-requested generation.
+  Excludes seed/deepening paths. Process-local; resets on agent restart.
+
+**Important**: `pings` is a latest-per-install snapshot table. The
+`counts` values on each row reflect the process-local state at the
+moment of that ping. Use a freshness gate (`last_seen > -48 hours`)
+when summing across installs — a 30-day window on `last_seen` would
+incorrectly aggregate 0–59 days of activity per the CA-400 Decision 6
+rationale.
+
+```sql
+-- Total queries (30d ring) across currently-active installs
+-- "Active" = pinged within the last 48 hours (2× the 24h default cadence)
+SELECT COALESCE(
+    SUM(CAST(json_extract(counts, '$.queries_30d') AS INTEGER)), 0
+) AS total_queries_30d
+FROM pings
+WHERE is_test = 0
+  AND last_seen > datetime('now', '-48 hours');
+
+-- Total artifacts generated (30d ring) across currently-active installs
+SELECT COALESCE(
+    SUM(CAST(json_extract(counts, '$.artifacts_generated_30d') AS INTEGER)), 0
+) AS total_artifacts_generated_30d
+FROM pings
+WHERE is_test = 0
+  AND last_seen > datetime('now', '-48 hours');
+```
+
+Installs that have not yet sent the new keys will produce NULL from
+`json_extract`; `COALESCE(..., 0)` handles this gracefully so the
+aggregate is never NULL.
+
 ## 5. `README.md` — document the new keys
 
 Append to whatever section enumerates counts:
