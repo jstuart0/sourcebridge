@@ -105,6 +105,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 		)
 	}
 
+	// Announce LLM allow-private-base-url state (CA-336). Fires when the default
+	// is in effect so operators on cloud VMs are prompted to flip the flag.
+	config.WarnAllowPrivateBaseURL(*cfg, slog.Default())
+
 	// Announce API-token legacy-admin-default state (SEC-2 / migration 056).
 	// When true, API tokens whose role field is empty fall back to "admin"
 	// instead of "user" — this recreates the pre-fix behaviour and should only

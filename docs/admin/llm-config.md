@@ -1822,3 +1822,88 @@ For how Living Wiki determines the number of pages to generate, how
 `MaxPagesPerJob` works, the per-run `pageCountOverride`, and the
 targeted-retry cap exemption, see
 [`docs/admin/living-wiki-ops.md`](living-wiki-ops.md).
+
+---
+
+## SSRF posture and `allow_private_base_url` (CA-336)
+
+The LLM `base_url` validator at
+`internal/indexing/pathutil/pathutil.go:ValidateLLMBaseURL` runs when an
+admin saves or updates an LLM provider profile (`POST /api/v1/admin/llm-profiles`
+or `PUT /api/v1/admin/llm-profiles/:id`). Its defenses are layered into two
+tiers based on the `allow_private_base_url` flag.
+
+**Config key**: `llm.allow_private_base_url`
+**Env var**: `SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL`
+**Default**: `true`
+
+### Always-active defenses (regardless of flag)
+
+- **Scheme allowlist**: only `http://` and `https://` are accepted. `file://`,
+  `ftp://`, `gopher://`, `dict://`, and any other scheme are rejected at save
+  time with `{"error":"invalid_base_url"}`.
+- **Redirect disable**: git operations pass `-c http.followRedirects=false` on
+  every clone/pull (CA-312), blocking redirect-chain bypass.
+
+### Conditional defense — active only when `allow_private_base_url = false`
+
+- **IP-range denylist**: rejects RFC1918 private networks (10.0.0.0/8,
+  172.16.0.0/12, 192.168.0.0/16), loopback (127.0.0.0/8, ::1), link-local
+  including the AWS/Azure/GCP IMDS endpoint (169.254.0.0/16 →
+  `http://169.254.169.254/`), CGNAT (100.64.0.0/10), ULA (fc00::/7),
+  unspecified addresses (0.0.0.0, ::), and multicast. Resolution happens at
+  DNS-lookup time on the host running the API.
+
+### Default posture and rationale
+
+`allow_private_base_url = true` is the default to preserve local-LLM
+workflows. Most SourceBridge operators point at Ollama, vLLM, llama.cpp, or
+lmstudio on a private network address (`http://localhost:11434`,
+`http://192.168.x.x:11434`). Flipping the default to `false` would break
+those installs silently on upgrade. **The planned flip to `false` is deferred
+to 1.0**, at which point operators using local LLMs will set the flag
+explicitly.
+
+### When to flip to `false`
+
+Set `SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL=false` if:
+
+- You only consume cloud APIs (OpenAI, Anthropic, OpenRouter, Gemini) and do
+  not run a local LLM.
+- You are deployed on a cloud VM where the IMDS endpoint
+  (`http://169.254.169.254/`) is a privilege-escalation target.
+- You want belt-and-suspenders SSRF defense layered on top of the CSRF gate
+  (CA-198/201/334) to guard against insider-admin-shaped abuse.
+
+> **Restart required.** `AllowPrivateBaseURL` is wired at server construction
+> time, not read per-request. Flipping the flag requires an API process restart
+> or a Kubernetes Deployment rollout.
+
+### Startup WARN
+
+When `allow_private_base_url = true` (the default), the API process emits a
+`slog.Warn` line at startup:
+
+```
+level=WARN msg="LLM private-IP base URLs are allowed"
+  allow_private_base_url=true
+  remediation="set SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL=false if you do not use a local LLM (Ollama/vLLM)"
+```
+
+This line is informational, not a vulnerability indicator. It is the operator
+prompt to confirm the posture matches the deployment shape. When
+`SOURCEBRIDGE_LLM_ALLOW_PRIVATE_BASE_URL=false` the line is absent.
+
+### Known residuals
+
+- **DNS rebinding**: even with `allow_private_base_url = false`, an attacker
+  controlling a domain with a short TTL can pass save-time validation (domain
+  resolves to a public IP) and flip the DNS to `169.254.169.254` before the
+  next worker request. Full runtime hardening requires a custom `http.Client`
+  dialer that re-runs `IsPrivateOrInternalIP` on every resolved address at
+  request time (tracked as a follow-up; not scoped to CA-336).
+- **Worker-side defense-in-depth**: the Python worker's
+  `_create_llm_provider_sync` (`workers/common/llm/config.py`) also calls
+  `validate_llm_base_url` with `allow_private=config.llm_allow_private_base_url`.
+  Under default config (`allow_private_base_url = true`), both the Go-side and
+  Python-side validators accept private-IP base URLs.
