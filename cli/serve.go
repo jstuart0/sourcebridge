@@ -92,14 +92,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 			"advice", "regression; only for API-only deployments")
 	}
 
-	// Announce CSRF full-coverage flag (CA-198 + CA-201). Operators grep this
-	// after a flip + rollout to confirm the new flag value is live.
+	// Announce CSRF full-coverage flag (CA-198 + CA-201 + CA-334). Operators grep
+	// this after a flip + rollout to confirm the new flag value is live.
 	// NOTE: this flag is startup-wired; the log line is the confirmation that
 	// the running process reflects the intended value.
-	slog.Info("security_csrf_full_coverage_state",
-		"enabled", cfg.Security.CSRFFullCoverageEnabled,
-		"event", "security_csrf_full_coverage_state",
-	)
+	if !cfg.Security.CSRFFullCoverageEnabled {
+		config.WarnCSRFDisabled(*cfg, slog.Default())
+	} else {
+		slog.Info("security_csrf_full_coverage_state",
+			"enabled", cfg.Security.CSRFFullCoverageEnabled,
+			"event", "security_csrf_full_coverage_state",
+		)
+	}
 
 	// Announce API-token legacy-admin-default state (SEC-2 / migration 056).
 	// When true, API tokens whose role field is empty fall back to "admin"

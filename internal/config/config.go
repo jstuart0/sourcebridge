@@ -298,8 +298,10 @@ type SecurityConfig struct {
 	//   - CSRF middleware is added to the second authenticated route group (/api/v1/admin/*, /api/v1/tokens/*, etc.) (CA-198).
 	//   - /auth/logout and /auth/change-password gain CSRF protection.
 	//
-	// Defaults false so that Phase 2 ships safely with no behavior change.
-	// Flip to true only after confirming the Phase 1 frontend bundle (X-CSRF-Token injection) is live.
+	// Defaults true as of CA-334 (the audit-remediation campaign). Frontend X-CSRF-Token
+	// injection shipped in CA-198/201. Operators with custom non-browser API clients that
+	// send Bearer + session cookie must set SOURCEBRIDGE_SECURITY_CSRF_FULL_COVERAGE_ENABLED=false
+	// and migrate; a startup ERROR-level log fires when the gate is disabled.
 	//
 	// Config key: security.csrf_full_coverage_enabled
 	// Env var:    SOURCEBRIDGE_SECURITY_CSRF_FULL_COVERAGE_ENABLED
@@ -867,9 +869,10 @@ func Defaults() *Config {
 			OverlayDefault: true,
 		},
 		Security: SecurityConfig{
-			JWTTTLMinutes: 1440, // 24 hours
-			CSRFEnabled:   true,
-			Mode:          "oss",
+			JWTTTLMinutes:          1440, // 24 hours
+			CSRFEnabled:            true,
+			CSRFFullCoverageEnabled: true, // CA-334: default on; frontend injection shipped in CA-198/201
+			Mode:                   "oss",
 		},
 		Worker: WorkerConfig{
 			Address: "localhost:50051",
@@ -992,7 +995,7 @@ func Load() (*Config, error) {
 	v.SetDefault("security.jwt_ttl_minutes", cfg.Security.JWTTTLMinutes)
 	v.SetDefault("security.encryption_key", "")
 	v.SetDefault("security.csrf_enabled", cfg.Security.CSRFEnabled)
-	v.SetDefault("security.csrf_full_coverage_enabled", false)
+	v.SetDefault("security.csrf_full_coverage_enabled", true)
 	v.SetDefault("security.mode", cfg.Security.Mode)
 	v.SetDefault("security.api_token_legacy_admin_default", false)
 	v.SetDefault("security.github_webhook_secret", "")
