@@ -8,7 +8,11 @@
 // shape drift is caught at the type layer, not at the transport layer.
 package qa
 
-import "time"
+import (
+	"time"
+
+	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
+)
 
 // Mode enumerates the orchestration pipeline variant.
 type Mode string
@@ -210,6 +214,23 @@ type DebugCandidate struct {
 	ID     string  `json:"id,omitempty"`
 	Score  float64 `json:"score,omitempty"`
 	Reason string  `json:"reason,omitempty"`
+}
+
+// JobTypeToOp maps a QA job_type string to the canonical resolution.Op
+// for per-op LLM provider resolution + metrics attribution. Single
+// source of truth across REST/MCP and GraphQL transports.
+func JobTypeToOp(jobType string) string {
+	switch jobType {
+	case "qa.classify":
+		return resolution.OpQAClassify
+	case "qa.decompose":
+		return resolution.OpQADecompose
+	case "qa.deep_synth":
+		return resolution.OpQADeepSynth
+	case "qa.agent_turn":
+		return resolution.OpQAAgentTurn
+	}
+	return resolution.OpQASynth
 }
 
 // FlattenReferencesToStrings produces the legacy

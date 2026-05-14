@@ -20,24 +20,6 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/search"
 )
 
-// qaJobOpFromType picks the resolution.Op for a QA job_type. The QA
-// pipeline has multiple sub-ops (classify / decompose / synth / agent)
-// that can use different provider configs in advanced mode; mirroring
-// the per-op resolution lets metrics attribute work correctly.
-func qaJobOpFromType(jobType string) string {
-	switch jobType {
-	case "qa.classify":
-		return resolution.OpQAClassify
-	case "qa.decompose":
-		return resolution.OpQADecompose
-	case "qa.deep_synth":
-		return resolution.OpQADeepSynth
-	case "qa.agent_turn":
-		return resolution.OpQAAgentTurn
-	}
-	return resolution.OpQASynth
-}
-
 // qaRepoLocator adapts the graph store's Repository records to
 // qa.RepoLocator. Uses the same clone-path-resolution logic as the
 // GraphQL resolvers (resolveRepoSourcePath in api/graphql/helpers.go)
@@ -144,10 +126,6 @@ func (a *qaArtifactLookup) ArtifactContext(ctx context.Context, id string) strin
 	return discussionContextFromArtifactQA(art)
 }
 
-// discussionContextFromArtifactQA duplicates the helper in
-// internal/api/graphql/helpers.go so we don't import the graphql
-// package from rest (which would be a layering inversion). If the
-// legacy helper changes, keep this in sync.
 func discussionContextFromArtifactQA(artifact *knowledge.Artifact) string {
 	if artifact == nil || len(artifact.Sections) == 0 {
 		return ""
@@ -459,7 +437,7 @@ func (j *qaJobRunner) RunSyncQAJob(ctx context.Context, jobType, targetKey, repo
 	}
 	provider := ""
 	if j.llmResolver != nil {
-		op := qaJobOpFromType(jobType)
+		op := qa.JobTypeToOp(jobType)
 		if snap, err := j.llmResolver.Resolve(ctx, repoID, op); err == nil {
 			provider = snap.Provider
 		}

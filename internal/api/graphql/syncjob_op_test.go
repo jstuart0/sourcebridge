@@ -104,7 +104,7 @@ func TestSyncJobOpCoversAllLLMSubsystems(t *testing.T) {
 		{"qa.classify", resolution.OpQAClassify},
 		{"qa.decompose", resolution.OpQADecompose},
 		{"qa.synth", resolution.OpQASynth},
-		{"qa.deep_synth", resolution.OpQASynth},
+		{"qa.deep_synth", resolution.OpQADeepSynth},
 		{"qa.agent_turn", resolution.OpQAAgentTurn},
 	}
 	for _, tc := range qaBranches {

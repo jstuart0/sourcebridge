@@ -17,6 +17,7 @@ import (
 	"github.com/sourcebridge/sourcebridge/internal/livingwiki/credentials"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
 	"github.com/sourcebridge/sourcebridge/internal/llm/resolution"
+	"github.com/sourcebridge/sourcebridge/internal/qa"
 )
 
 // This file will not be regenerated automatically.
@@ -139,18 +140,7 @@ func syncJobOp(subsystem llm.Subsystem, jobType string) string {
 	case llm.SubsystemContracts:
 		return resolution.OpAnalysis
 	case llm.SubsystemQA:
-		switch jobType {
-		case "qa.classify":
-			return resolution.OpQAClassify
-		case "qa.decompose":
-			return resolution.OpQADecompose
-		case "qa.deep_synth", "qa.synth":
-			return resolution.OpQASynth
-		case "qa.agent_turn":
-			return resolution.OpQAAgentTurn
-		default:
-			return resolution.OpQASynth
-		}
+		return qa.JobTypeToOp(jobType)
 	case llm.SubsystemReasoning:
 		return resolution.OpDiscussion
 	case llm.SubsystemKnowledge:
