@@ -456,8 +456,9 @@ export function ProfileEditor({
       )}
 
       <div className={fieldWrapClass}>
-        <label className={labelClass}>Provider</label>
+        <label htmlFor="llm-profile-provider" className={labelClass}>Provider</label>
         <select
+          id="llm-profile-provider"
           value={provider}
           onChange={(e) => handleProviderChange(e.target.value)}
           disabled={disabled}

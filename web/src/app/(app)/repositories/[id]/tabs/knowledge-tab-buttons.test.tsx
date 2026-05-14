@@ -382,3 +382,56 @@ describe("CA-370 — MEDIUM confidence badge contrast", () => {
     expect(badge.className).not.toContain("text-inverse-on-amber");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// CA-367 — accordion ARIA reciprocal link (3-attribute checklist per header)
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("CA-367 — accordion ARIA: aria-expanded + aria-controls ↔ panel id + role=region + aria-labelledby", () => {
+  function renderTab() {
+    setupKnowledgeQuery([]);
+    render(<KnowledgeTab {...baseProps()} />);
+  }
+
+  const accordions: Array<{
+    headerId: string;
+    panelId: string;
+  }> = [
+    { headerId: "accordion-header-guide", panelId: "accordion-panel-guide" },
+    { headerId: "accordion-header-execution", panelId: "accordion-panel-execution" },
+    { headerId: "accordion-header-workflow", panelId: "accordion-panel-workflow" },
+  ];
+
+  for (const { headerId, panelId } of accordions) {
+    it(`${headerId}: collapsed state — aria-expanded=false, panel absent`, () => {
+      renderTab();
+      // guide opens by default; reset to closed state for execution/workflow
+      const button = screen.getAllByRole("button").find((b) => b.id === headerId);
+      if (!button) return; // accordion may not render if feature-flagged
+      if (button.getAttribute("aria-expanded") === "true") {
+        fireEvent.click(button);
+      }
+      const btn = screen.getAllByRole("button").find((b) => b.id === headerId)!;
+      expect(btn.getAttribute("aria-expanded")).toBe("false");
+      expect(btn.getAttribute("aria-controls")).toBe(panelId);
+      expect(document.getElementById(panelId)).toBeNull();
+    });
+
+    it(`${headerId}: expanded state — aria-expanded=true, panel has id + role=region + aria-labelledby`, () => {
+      renderTab();
+      const button = screen.getAllByRole("button").find((b) => b.id === headerId);
+      if (!button) return;
+      if (button.getAttribute("aria-expanded") !== "true") {
+        fireEvent.click(button);
+      }
+      const btn = screen.getAllByRole("button").find((b) => b.id === headerId)!;
+      expect(btn.getAttribute("aria-expanded")).toBe("true");
+      expect(btn.getAttribute("aria-controls")).toBe(panelId);
+
+      const panel = document.getElementById(panelId);
+      expect(panel).not.toBeNull();
+      expect(panel!.getAttribute("role")).toBe("region");
+      expect(panel!.getAttribute("aria-labelledby")).toBe(headerId);
+    });
+  }
+});

@@ -1428,6 +1428,9 @@ export function KnowledgeTab({
             <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] overflow-hidden transition-all">
               <button
                 type="button"
+                id="accordion-header-guide"
+                aria-expanded={openCategory === "guide"}
+                aria-controls="accordion-panel-guide"
                 onClick={() => setOpenCategory(openCategory === "guide" ? null : "guide")}
                 className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-[var(--bg-hover)]"
               >
@@ -1450,7 +1453,7 @@ export function KnowledgeTab({
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("shrink-0 text-[var(--text-tertiary)] transition-transform duration-200", openCategory === "guide" && "rotate-180")}><path d="m6 9 6 6 6-6"/></svg>
               </button>
               {openCategory === "guide" && (
-                <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
+                <div id="accordion-panel-guide" role="region" aria-labelledby="accordion-header-guide" className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
                   {!currentCliffNotes && !knowledgeResult.fetching && (
                     <div className="rounded-[var(--radius-sm)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] p-5">
                       <p className="text-sm font-medium text-[var(--text-primary)]">No cliff notes for this view yet.</p>
@@ -1650,6 +1653,9 @@ export function KnowledgeTab({
               <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] overflow-hidden transition-all">
                 <button
                   type="button"
+                  id="accordion-header-ask"
+                  aria-expanded={openCategory === "ask"}
+                  aria-controls="accordion-panel-ask"
                   onClick={() => setOpenCategory(openCategory === "ask" ? null : "ask")}
                   className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-[var(--bg-hover)]"
                 >
@@ -1665,7 +1671,7 @@ export function KnowledgeTab({
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("shrink-0 text-[var(--text-tertiary)] transition-transform duration-200", openCategory === "ask" && "rotate-180")}><path d="m6 9 6 6 6-6"/></svg>
                 </button>
                 {openCategory === "ask" && (
-                  <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
+                  <div id="accordion-panel-ask" role="region" aria-labelledby="accordion-header-ask" className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
                     <p className="mb-3 text-sm text-[var(--text-secondary)]">
                       Ask focused questions about {scopeTitle()} without leaving this view.
                     </p>
@@ -1696,6 +1702,9 @@ export function KnowledgeTab({
             <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] overflow-hidden transition-all">
               <button
                 type="button"
+                id="accordion-header-execution"
+                aria-expanded={openCategory === "execution"}
+                aria-controls="accordion-panel-execution"
                 onClick={() => setOpenCategory(openCategory === "execution" ? null : "execution")}
                 className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-[var(--bg-hover)]"
               >
@@ -1713,7 +1722,7 @@ export function KnowledgeTab({
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("shrink-0 text-[var(--text-tertiary)] transition-transform duration-200", openCategory === "execution" && "rotate-180")}><path d="m6 9 6 6 6-6"/></svg>
               </button>
               {openCategory === "execution" && (
-                <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
+                <div id="accordion-panel-execution" role="region" aria-labelledby="accordion-header-execution" className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
                   <div className="mb-4 flex items-start justify-between gap-3">
                     <p className="text-sm text-[var(--text-secondary)]">
                       Follow the likely backend flow step by step. Observed steps come from indexed relationships; inferred steps are marked clearly.
@@ -1825,6 +1834,9 @@ export function KnowledgeTab({
             <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] overflow-hidden transition-all">
               <button
                 type="button"
+                id="accordion-header-workflow"
+                aria-expanded={openCategory === "workflow"}
+                aria-controls="accordion-panel-workflow"
                 onClick={() => setOpenCategory(openCategory === "workflow" ? null : "workflow")}
                 className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-[var(--bg-hover)]"
               >
@@ -1844,7 +1856,7 @@ export function KnowledgeTab({
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("shrink-0 text-[var(--text-tertiary)] transition-transform duration-200", openCategory === "workflow" && "rotate-180")}><path d="m6 9 6 6 6-6"/></svg>
               </button>
               {openCategory === "workflow" && (
-                <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
+                <div id="accordion-panel-workflow" role="region" aria-labelledby="accordion-header-workflow" className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
                   <div className="mb-4 flex items-start justify-between gap-3">
                     <p className="text-sm text-[var(--text-secondary)]">
                       See how someone is likely to experience this workflow, what usually happens next, and where to inspect the implementation.
@@ -1952,6 +1964,9 @@ export function KnowledgeTab({
               <div className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] overflow-hidden transition-all">
                 <button
                   type="button"
+                  id="accordion-header-explore"
+                  aria-expanded={openCategory === "explore"}
+                  aria-controls="accordion-panel-explore"
                   onClick={() => setOpenCategory(openCategory === "explore" ? null : "explore")}
                   className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-[var(--bg-hover)]"
                 >
@@ -1970,7 +1985,7 @@ export function KnowledgeTab({
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("shrink-0 text-[var(--text-tertiary)] transition-transform duration-200", openCategory === "explore" && "rotate-180")}><path d="m6 9 6 6 6-6"/></svg>
                 </button>
                 {openCategory === "explore" && (
-                  <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
+                  <div id="accordion-panel-explore" role="region" aria-labelledby="accordion-header-explore" className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
                       {/* CA-242 / CA-365 (RUBY-H1): apply button rule INDEPENDENTLY per artifact.
                         Never collapse across artifacts — hiding Code Tour's action while
                         Learning Path is in-flight is wrong UX. Max 2 buttons at once. */}

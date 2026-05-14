@@ -6,6 +6,7 @@ import { useMutation } from "urql";
 import { ADD_REPOSITORY_MUTATION } from "@/lib/graphql/queries";
 import { useEventStream, ServerEvent } from "@/lib/sse";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
@@ -107,11 +108,11 @@ export default function OnboardingPage() {
 
             <div className="grid gap-5">
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-[var(--text-primary)]">
+                <label htmlFor="onboarding-repo-name" className="block text-sm font-medium text-[var(--text-primary)]">
                   Repository Name
                 </label>
-                <input
-                  className="h-11 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)]"
+                <Input
+                  id="onboarding-repo-name"
                   value={repoName}
                   onChange={(e) => setRepoName(e.target.value)}
                   placeholder="e.g. my-project"
@@ -119,11 +120,11 @@ export default function OnboardingPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-[var(--text-primary)]">
+                <label htmlFor="onboarding-repo-path" className="block text-sm font-medium text-[var(--text-primary)]">
                   Git URL or Local Path
                 </label>
-                <input
-                  className="h-11 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)]"
+                <Input
+                  id="onboarding-repo-path"
                   value={repoPath}
                   onChange={(e) => setRepoPath(e.target.value)}
                   placeholder="https://github.com/org/repo.git or /path/to/repo"

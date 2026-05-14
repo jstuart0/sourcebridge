@@ -15,6 +15,7 @@ import { clearStoredToken } from "@/lib/auth-token-store";
 import { authFetch } from "@/lib/auth-fetch";
 import { isAdminRole, useCurrentUser } from "@/lib/current-user";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 function initialsOf(email: string): string {
   if (!email) return "?";
@@ -125,6 +126,7 @@ export function TopBar({ onMobileNavOpen }: { onMobileNavOpen?: () => void }) {
           ⌘K
         </kbd>
       </span>
+      <ThemeToggle />
       {showAdmin ? (
         <Link
           href="/admin"
