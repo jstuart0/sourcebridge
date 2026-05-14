@@ -42,6 +42,9 @@
   --confidence-high: #4ade80;
   --confidence-medium: #fbbf24;
   --confidence-low: #f87171;
+  /* CA-370: dark text on amber-background badges; #431407 = tailwind amber-950.
+     Contrast: #fbbf24 (confidence-medium dark) + #431407 = 11.51:1 (AAA). */
+  --text-inverse-on-amber: #431407;
 
   --bg-base: oklch(0.16 0.01 255);
   --bg-base-alt: oklch(0.19 0.012 250);
@@ -77,6 +80,9 @@
   --confidence-high: #22c55e;
   --confidence-medium: #f59e0b;
   --confidence-low: #ef4444;
+  /* CA-370: dark text on amber-background badges; #431407 = tailwind amber-950.
+     Contrast: #f59e0b (confidence-medium light) + #431407 = 8.9:1 (AAA). */
+  --text-inverse-on-amber: #431407;
 
   --bg-base: oklch(0.965 0.008 90);
   --bg-base-alt: oklch(0.945 0.01 90);

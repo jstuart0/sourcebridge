@@ -379,7 +379,21 @@ export default function RepositoriesPage() {
         </Panel>
       ) : null}
 
-      {repos.length === 0 && result.fetching ? (
+      {/* CA-363: distinguish a network / server error from an empty result.
+          result.error non-null means the query failed entirely (500, auth
+          failure, network down) — not "no repos". Empty repos array with
+          no error is the genuine "nothing indexed yet" state. */}
+      {result.error ? (
+        <div role="alert" className="rounded-md border border-[var(--danger-border)] bg-[var(--bg-elevated)] p-6 text-[var(--danger-text)]">
+          <h2 className="text-lg font-semibold">Couldn&#39;t load repositories</h2>
+          <p className="mt-2 text-sm text-[var(--text-secondary)]">
+            The server returned an error. Check Admin → Status for system health.
+          </p>
+          <Button className="mt-4" onClick={() => reexecute({ requestPolicy: "network-only" })}>
+            Retry
+          </Button>
+        </div>
+      ) : repos.length === 0 && result.fetching ? (
         // CA-274 (U-L6): show skeleton cards on initial load so the page
         // below the header isn't blank during the first query. Three rows
         // approximates the typical repo-count for a first install.

@@ -381,6 +381,25 @@ export default function RepositoryDetailPage() {
     );
   }
 
+  // CA-363: explicit network/server error branch BEFORE the 404 branch.
+  // repoResult.error means the query failed (500, auth failure, network down);
+  // !repo with no error means a genuine 404 (removed / bad link).
+  if (repoResult.error && !repo) {
+    return (
+      <PageFrame>
+        <div role="alert" className="rounded-md border border-[var(--danger-border)] bg-[var(--bg-elevated)] p-6 text-[var(--danger-text)]">
+          <h2 className="text-lg font-semibold">Couldn&#39;t load repository</h2>
+          <p className="mt-2 text-sm text-[var(--text-secondary)]">
+            The server returned an error. Check Admin → Status for system health.
+          </p>
+          <Button className="mt-4" onClick={() => reexecuteRepo({ requestPolicy: "network-only" })}>
+            Retry
+          </Button>
+        </div>
+      </PageFrame>
+    );
+  }
+
   if (!repo) {
     return (
       <PageFrame>

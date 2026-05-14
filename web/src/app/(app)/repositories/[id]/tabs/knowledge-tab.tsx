@@ -1091,12 +1091,15 @@ export function KnowledgeTab({
   // overrides appearance. selectClass restores it.
   const selectClass = `${inputClass} appearance-auto`;
   const artifactStatusClass = "rounded-full border border-[var(--border-default)] bg-[var(--bg-hover)] px-2.5 py-1 text-xs text-[var(--text-secondary)]";
+  // CA-370: MEDIUM badge uses dark text (--text-inverse-on-amber) for AAA contrast.
+  // amber-background + white text = 3.19:1 (fails AA). amber-background + #431407 =
+  // 11.51:1 dark / 8.9:1 light, both AAA.
   const confidenceClass = (confidence: string) =>
     cn(
-      "rounded-full px-1.5 py-0.5 text-xs text-white",
-      confidence === "HIGH" ? "bg-[var(--confidence-high)]"
-        : confidence === "MEDIUM" ? "bg-[var(--confidence-medium)]"
-        : "bg-[var(--confidence-low)]",
+      "rounded-full px-1.5 py-0.5 text-xs",
+      confidence === "HIGH" ? "bg-[var(--confidence-high)] text-white"
+        : confidence === "MEDIUM" ? "bg-[var(--confidence-medium)] text-[var(--text-inverse-on-amber)]"
+        : "bg-[var(--confidence-low)] text-white",
     );
 
   // ---------------------------------------------------------------------------
@@ -1846,22 +1849,29 @@ export function KnowledgeTab({
                     <p className="text-sm text-[var(--text-secondary)]">
                       See how someone is likely to experience this workflow, what usually happens next, and where to inspect the implementation.
                     </p>
+                    {/* CA-242 / CA-364: one button at a time.
+                        in-flight → Cancel only
+                        stale / failed → Regenerate (primary)
+                        fresh / no artifact → Refresh secondary or Generate primary */}
                     <div className="flex shrink-0 gap-2">
-                      {!currentWorkflowStory ? (
-                        <Button variant="secondary" size="sm" onClick={handleGenerateWorkflowStory} disabled={knowledgeLoading || isWorkflowStoryGenerating}>
-                          {isWorkflowStoryGenerating ? "Generating..." : "Generate story"}
+                      {isWorkflowStoryGenerating ? (
+                        <Button variant="secondary" size="sm" onClick={() => currentWorkflowStoryJob && void handleCancelRepoJob(currentWorkflowStoryJob.id)} disabled={knowledgeLoading || !currentWorkflowStoryJob || cancellingJobIds[currentWorkflowStoryJob?.id ?? ""]}>
+                          {currentWorkflowStoryJob && cancellingJobIds[currentWorkflowStoryJob.id] ? "Cancelling..." : "Cancel"}
                         </Button>
-                      ) : null}
-                      {currentWorkflowStory ? (
+                      ) : currentWorkflowStory && (currentWorkflowStory.stale || currentWorkflowStory.status === "FAILED") ? (
+                        <Button size="sm" onClick={() => handleRefreshArtifact(currentWorkflowStory.id)} disabled={knowledgeLoading}>
+                          Regenerate
+                        </Button>
+                      ) : currentWorkflowStory ? (
                         <Button variant="secondary" size="sm" onClick={() => handleRefreshArtifact(currentWorkflowStory.id)} disabled={knowledgeLoading}>
                           {artifactRetryLabel(currentWorkflowStory, currentWorkflowStoryJob, "story")}
                         </Button>
-                      ) : null}
-                      {currentWorkflowStoryJob && (currentWorkflowStoryJob.status === "pending" || currentWorkflowStoryJob.status === "generating") ? (
-                        <Button variant="secondary" size="sm" onClick={() => void handleCancelRepoJob(currentWorkflowStoryJob.id)} disabled={knowledgeLoading || cancellingJobIds[currentWorkflowStoryJob.id]}>
-                          {cancellingJobIds[currentWorkflowStoryJob.id] ? "Cancelling..." : "Cancel"}
+                      ) : (
+                        /* U-M4: empty-state generate is the only available action — no secondary variant */
+                        <Button size="sm" onClick={handleGenerateWorkflowStory} disabled={knowledgeLoading}>
+                          Generate story
                         </Button>
-                      ) : null}
+                      )}
                     </div>
                   </div>
                   {repoJobStatusLabel(currentWorkflowStoryJob) ? (
@@ -1961,27 +1971,54 @@ export function KnowledgeTab({
                 </button>
                 {openCategory === "explore" && (
                   <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
-                    <div className="mb-4 flex flex-wrap gap-2">
+                      {/* CA-242 / CA-365 (RUBY-H1): apply button rule INDEPENDENTLY per artifact.
+                        Never collapse across artifacts — hiding Code Tour's action while
+                        Learning Path is in-flight is wrong UX. Max 2 buttons at once. */}
+                    <div className="mb-4 flex flex-wrap gap-4">
                       {features.learningPaths && (
-                        <Button variant="secondary" size="sm" onClick={currentLearningPath ? () => handleRefreshArtifact(currentLearningPath.id) : handleGenerateLearningPath} disabled={knowledgeLoading || isLearningPathGenerating}>
-                          {currentLearningPath?.status === "PENDING" ? "Queued..." : isLearningPathGenerating ? "Generating..." : currentLearningPath ? artifactRetryLabel(currentLearningPath, currentLearningPathJob, "learning path") : "Generate learning path"}
-                        </Button>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs text-[var(--text-tertiary)]">Learning Path</span>
+                          {isLearningPathGenerating ? (
+                            <Button variant="secondary" size="sm" onClick={() => currentLearningPathJob && void handleCancelRepoJob(currentLearningPathJob.id)} disabled={knowledgeLoading || !currentLearningPathJob || cancellingJobIds[currentLearningPathJob?.id ?? ""]}>
+                              {currentLearningPathJob && cancellingJobIds[currentLearningPathJob.id] ? "Cancelling..." : "Cancel"}
+                            </Button>
+                          ) : currentLearningPath && (currentLearningPath.stale || currentLearningPath.status === "FAILED") ? (
+                            <Button size="sm" onClick={() => handleRefreshArtifact(currentLearningPath.id)} disabled={knowledgeLoading}>
+                              Regenerate
+                            </Button>
+                          ) : currentLearningPath ? (
+                            <Button variant="secondary" size="sm" onClick={() => handleRefreshArtifact(currentLearningPath.id)} disabled={knowledgeLoading}>
+                              {artifactRetryLabel(currentLearningPath, currentLearningPathJob, "learning path")}
+                            </Button>
+                          ) : (
+                            <Button size="sm" onClick={handleGenerateLearningPath} disabled={knowledgeLoading}>
+                              Generate
+                            </Button>
+                          )}
+                        </div>
                       )}
                       {features.codeTours && (
-                        <Button variant="secondary" size="sm" onClick={currentCodeTour ? () => handleRefreshArtifact(currentCodeTour.id) : handleGenerateCodeTour} disabled={knowledgeLoading || isCodeTourGenerating}>
-                          {currentCodeTour?.status === "PENDING" ? "Queued..." : isCodeTourGenerating ? "Generating..." : currentCodeTour ? artifactRetryLabel(currentCodeTour, currentCodeTourJob, "code tour") : "Generate code tour"}
-                        </Button>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs text-[var(--text-tertiary)]">Code Tour</span>
+                          {isCodeTourGenerating ? (
+                            <Button variant="secondary" size="sm" onClick={() => currentCodeTourJob && void handleCancelRepoJob(currentCodeTourJob.id)} disabled={knowledgeLoading || !currentCodeTourJob || cancellingJobIds[currentCodeTourJob?.id ?? ""]}>
+                              {currentCodeTourJob && cancellingJobIds[currentCodeTourJob.id] ? "Cancelling..." : "Cancel"}
+                            </Button>
+                          ) : currentCodeTour && (currentCodeTour.stale || currentCodeTour.status === "FAILED") ? (
+                            <Button size="sm" onClick={() => handleRefreshArtifact(currentCodeTour.id)} disabled={knowledgeLoading}>
+                              Regenerate
+                            </Button>
+                          ) : currentCodeTour ? (
+                            <Button variant="secondary" size="sm" onClick={() => handleRefreshArtifact(currentCodeTour.id)} disabled={knowledgeLoading}>
+                              {artifactRetryLabel(currentCodeTour, currentCodeTourJob, "code tour")}
+                            </Button>
+                          ) : (
+                            <Button size="sm" onClick={handleGenerateCodeTour} disabled={knowledgeLoading}>
+                              Generate
+                            </Button>
+                          )}
+                        </div>
                       )}
-                      {currentLearningPathJob && (currentLearningPathJob.status === "pending" || currentLearningPathJob.status === "generating") ? (
-                        <Button variant="secondary" size="sm" onClick={() => void handleCancelRepoJob(currentLearningPathJob.id)} disabled={knowledgeLoading || cancellingJobIds[currentLearningPathJob.id]}>
-                          {cancellingJobIds[currentLearningPathJob.id] ? "Cancelling..." : "Cancel learning path"}
-                        </Button>
-                      ) : null}
-                      {currentCodeTourJob && (currentCodeTourJob.status === "pending" || currentCodeTourJob.status === "generating") ? (
-                        <Button variant="secondary" size="sm" onClick={() => void handleCancelRepoJob(currentCodeTourJob.id)} disabled={knowledgeLoading || cancellingJobIds[currentCodeTourJob.id]}>
-                          {cancellingJobIds[currentCodeTourJob.id] ? "Cancelling..." : "Cancel code tour"}
-                        </Button>
-                      ) : null}
                     </div>
                     {currentLearningPath && (
                       <div className="mb-5">
