@@ -155,9 +155,15 @@ spec:
     - Ingress
   ingress:
     - from:
+        # CA-346: namespaceSelector AND podSelector (single list item) so only the
+        # sourcebridge namespace can reach the worker, not any namespace whose pods
+        # happen to carry the api label.
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: sourcebridge-api
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sourcebridge
       ports:
         - protocol: TCP
           port: 50051
@@ -277,12 +283,21 @@ spec:
     - Ingress
   ingress:
     - from:
+        # CA-347 / CA-355 (O-M6): each list item is podSelector AND namespaceSelector
+        # (AND combinator). Two items remain (one per caller workload), but each is now
+        # scoped to the sourcebridge namespace so cross-namespace label spoofing is blocked.
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: sourcebridge-api
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sourcebridge
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: sourcebridge-worker
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sourcebridge
       ports:
         - protocol: TCP
           port: 8000
@@ -305,9 +320,13 @@ spec:
     - Ingress
   ingress:
     - from:
+        # CA-355 (O-M6): namespaceSelector AND podSelector (single list item).
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: sourcebridge-api
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sourcebridge
       ports:
         - protocol: TCP
           port: 6379

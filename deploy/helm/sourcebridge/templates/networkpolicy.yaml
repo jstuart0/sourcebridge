@@ -165,10 +165,15 @@ spec:
     - Ingress
   ingress:
     - from:
+        # CA-346: namespaceSelector AND podSelector (single list item) so only pods
+        # in the release namespace can reach the worker.
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
               app.kubernetes.io/component: api
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
       ports:
         - protocol: TCP
           port: 50051
@@ -294,14 +299,22 @@ spec:
     - Ingress
   ingress:
     - from:
+        # CA-347 / CA-355 (O-M6): each list item is podSelector AND namespaceSelector
+        # (AND combinator) scoped to the release namespace.
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
               app.kubernetes.io/component: api
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
               app.kubernetes.io/component: worker
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
       ports:
         - protocol: TCP
           port: 8000
@@ -325,10 +338,15 @@ spec:
     - Ingress
   ingress:
     - from:
+        # CA-355 (O-M6): namespaceSelector AND podSelector (single list item) scoped
+        # to the release namespace.
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "sourcebridge.name" . }}
               app.kubernetes.io/component: api
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
       ports:
         - protocol: TCP
           port: 6379
