@@ -51,7 +51,7 @@ The first query is the "how many operators flipped the flag"
 adoption metric. The second is the activity metric — together they
 tell the story of a rollout.
 
-## 5. CA-400: 30-day rolling counters for queries and artifacts
+## 5. CA-400 — 30-day rolling counters for queries and artifacts
 
 CA-400 (Phase 2) added two new keys to the `counts` blob:
 
@@ -92,7 +92,7 @@ Installs that have not yet sent the new keys will produce NULL from
 `json_extract`; `COALESCE(..., 0)` handles this gracefully so the
 aggregate is never NULL.
 
-## 5. `README.md` — document the new keys
+## 6. `README.md` — document the new keys
 
 Append to whatever section enumerates counts:
 
@@ -107,7 +107,7 @@ Features:
   `SOURCEBRIDGE_QA_SERVER_SIDE_ENABLED` on that install.
 ```
 
-## How to apply
+## 7. How to apply
 
 ```bash
 cd /Users/jaystuart/dev/sourcebridge-telemetry
