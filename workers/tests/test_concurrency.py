@@ -22,12 +22,12 @@ import asyncio
 import pytest
 
 from workers.common.llm.concurrency import (
+    _UNCAPPED,
     UNCAPPED_SENTINEL,
     ConcurrencyConfig,
     ConcurrencyGatedProvider,
     ProviderGate,
     ProviderGateRegistry,
-    _UNCAPPED,
     _normalize_host_key,
 )
 

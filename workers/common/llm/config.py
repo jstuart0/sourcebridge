@@ -5,8 +5,8 @@ from __future__ import annotations
 import ipaddress
 import os
 import socket
-from urllib.parse import urlparse
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from workers.common.config import (
     SUPPORTED_LLM_PROVIDERS,

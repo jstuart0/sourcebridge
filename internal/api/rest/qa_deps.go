@@ -293,39 +293,6 @@ func safeJoinRepoPath(repoRoot, relPath string) (string, error) {
 	return pathutil.SafeJoinRepoPath(repoRoot, relPath)
 }
 
-// local helpers to avoid pulling strings just for these calls; a
-// separate strings-based impl would be identical.
-func lower(s string) string {
-	out := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		out[i] = c
-	}
-	return string(out)
-}
-func trim(s string) string {
-	start, end := 0, len(s)
-	for start < end {
-		c := s[start]
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-			start++
-			continue
-		}
-		break
-	}
-	for end > start {
-		c := s[end-1]
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-			end--
-			continue
-		}
-		break
-	}
-	return s[start:end]
-}
 func joinLines(ps []string) string {
 	var total int
 	for _, p := range ps {

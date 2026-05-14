@@ -89,7 +89,8 @@ const EMPTY_RESULT: UseQueryState = {
 } as UseQueryState;
 
 function setupKnowledgeQuery(artifacts: KnowledgeArtifact[]) {
-  vi.mocked(useQuery).mockImplementation(({ variables }: { variables?: Record<string, unknown> }) => {
+  vi.mocked(useQuery).mockImplementation((args: any) => {
+    const { variables } = args;
     const vars = variables ?? {};
     // Call 1 (KNOWLEDGE_ARTIFACTS_QUERY): has repositoryId + scopeType, NO audience/depth/entryKind
     if ("repositoryId" in vars && "scopeType" in vars && !("audience" in vars) && !("entryKind" in vars)) {
@@ -125,9 +126,7 @@ beforeEach(() => {
 
 function makeArtifact(overrides: { id: string; type: string } & Partial<KnowledgeArtifact>): KnowledgeArtifact {
   return {
-    id: overrides.id,
     repositoryId: "repo-xyz",
-    type: overrides.type,
     audience: "DEVELOPER",
     depth: "MEDIUM",
     scope: { scopeType: "REPOSITORY", scopePath: "", modulePath: null, filePath: null, symbolName: null },
