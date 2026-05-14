@@ -6,6 +6,25 @@ All notable changes to SourceBridge are documented here. The format follows
 
 ## [Unreleased]
 
+### BREAKING
+
+- **CA-345: Kustomize DATABASE rename — `"main"` → `"sourcebridge"`**. Both
+  `SOURCEBRIDGE_STORAGE_SURREAL_DATABASE` and `SOURCEBRIDGE_WORKER_SURREAL_DATABASE` in
+  `deploy/kubernetes/base/configmap.yaml` are now set to `"sourcebridge"`. The Helm chart
+  was already using `"sourcebridge"` and is unchanged. Fresh kustomize installs are
+  unaffected — they pick up the new value on first apply. **Existing kustomize operators
+  with data in the `main` database MUST follow the migration runbook at
+  [`docs/admin-runbooks/kustomize-database-rename.md`](../docs/admin-runbooks/kustomize-database-rename.md)
+  before applying this change**, or override the configmap key in their own overlay to
+  retain `"main"` (see Section 8 of the runbook for the rollback pattern). The migration
+  runbook covers detection (Section 1 — operators with no data skip the runbook), scale-to-zero
+  (Section 2), `surreal export` from `main` (Section 3), non-empty verification (Section 4),
+  `surreal import` into `sourcebridge` (Section 5), configmap apply + scale-back (Section 6),
+  verification (Section 7), and rollback (Section 8). **Note**: SurrealDB does not expose a
+  `db rename` statement; the runbook uses the official `surreal export` + `surreal import` CLI
+  commands. A boot-time DATABASE-mismatch warning is deferred to a follow-up ticket; the
+  CHANGELOG entry and Section 1 detection step are the primary mitigation.
+
 ### Security
 
 - **CSRF full coverage now defaults to enabled** (`security.csrf_full_coverage_enabled=true`). This activates the CA-198 + CA-201 tightening: Bearer-bypass requires no session cookie, CSRF middleware is added to the admin route group, and `/auth/logout` + `/auth/change-password` gain CSRF protection. The web frontend already injects `X-CSRF-Token` on every write via `web/src/lib/csrf-token-store.ts` (shipped in CA-198/201). **Operator action required for custom non-browser API clients**: if you have API clients that send `Authorization: Bearer <token>` _and_ a session cookie without an `X-CSRF-Token` header, they will receive 403 on state-changing requests. Migrate those clients to include the token, or set `SOURCEBRIDGE_SECURITY_CSRF_FULL_COVERAGE_ENABLED=false` as a temporary escape hatch. A startup `ERROR`-level log fires whenever the gate is explicitly disabled (CA-334).
