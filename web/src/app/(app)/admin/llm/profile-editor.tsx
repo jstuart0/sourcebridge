@@ -420,7 +420,9 @@ export function ProfileEditor({
   const inputClass =
     "h-11 w-full rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 text-sm text-[var(--text-primary)] disabled:opacity-60";
   const monoInputClass = `${inputClass} font-mono`;
-  const selectClass = inputClass;
+  // CA-382: appearance-auto restores the native select arrow; Tailwind's preflight
+  // resets it via appearance:none which removes the visual affordance entirely.
+  const selectClass = `${inputClass} appearance-auto`;
   const stackClass = "grid gap-4 max-w-[32rem]";
   const codeBlockClass =
     "rounded-[var(--radius-md)] bg-black/20 p-3 font-mono text-sm whitespace-pre-wrap text-[var(--text-primary)]";

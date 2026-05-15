@@ -35,7 +35,12 @@ export default function SettingsAppearancePage() {
             The web application reads its endpoint from build-time environment variables.
           </p>
         </div>
+        {/* CA-384: explicit label so screen readers announce the input purpose */}
+        <label htmlFor="api-endpoint-display" className="sr-only">
+          API endpoint URL
+        </label>
         <input
+          id="api-endpoint-display"
           type="text"
           value={process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"}
           readOnly

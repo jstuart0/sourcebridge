@@ -1366,22 +1366,23 @@ export function KnowledgeTab({
               {currentUnderstanding && !understandingCollapsed ? (
                 <>
                   <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    {/* CA-387: sentence-case stat card labels (was uppercase tracking-wide) */}
                     <div className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
-                      <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Nodes</p>
+                      <p className="text-[11px] text-[var(--text-tertiary)]">Nodes</p>
                       <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">
                         {currentUnderstanding.cachedNodes}/{currentUnderstanding.totalNodes || currentUnderstanding.cachedNodes}
                       </p>
                     </div>
                     <div className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
-                      <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Strategy</p>
+                      <p className="text-[11px] text-[var(--text-tertiary)]">Strategy</p>
                       <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">{currentUnderstanding.strategy || "hierarchical"}</p>
                     </div>
                     <div className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
-                      <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Model</p>
+                      <p className="text-[11px] text-[var(--text-tertiary)]">Model</p>
                       <p className="mt-1 truncate text-sm font-medium text-[var(--text-primary)]">{currentUnderstanding.modelUsed || "Unknown"}</p>
                     </div>
                     <div className="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] p-3">
-                      <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Revision</p>
+                      <p className="text-[11px] text-[var(--text-tertiary)]">Revision</p>
                       <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">
                         {currentUnderstanding.revisionFp ? currentUnderstanding.revisionFp.slice(0, 12) : "Unknown"}
                       </p>
@@ -1390,7 +1391,7 @@ export function KnowledgeTab({
                   {understandingFeaturedSections.length ? (
                     <div className="mt-4 space-y-3">
                       <div className="flex items-center justify-between gap-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Understanding Highlights</p>
+                        <p className="text-xs font-semibold text-[var(--text-tertiary)]">Understanding highlights</p>
                         <span className="text-xs text-[var(--text-tertiary)]">{understandingSections.length} sections</span>
                       </div>
                       <div className="grid gap-3 lg:grid-cols-2">
@@ -1490,30 +1491,24 @@ export function KnowledgeTab({
                             {currentCliffNotes.refreshAvailable ? <span className={artifactStatusClass}>Refresh available</span> : null}
                             {currentCliffNotes.status === "FAILED" ? <span className={artifactStatusClass}>Refresh failed</span> : null}
                           </div>
+                          {/* CA-277: consolidate 5 stacked metadata lines to 2 rows. */}
                           <p className="mt-2 text-xs text-[var(--text-tertiary)]">
-                            {formatGeneratedAt(currentCliffNotes.generatedAt)
-                              ? `Generated ${formatGeneratedAt(currentCliffNotes.generatedAt)}`
-                              : "Generated after the latest successful cliff-notes run."}
-                            {currentCliffNotes.sourceRevision?.commitSha
-                              ? ` · revision ${currentCliffNotes.sourceRevision.commitSha.slice(0, 7)}`
-                              : ""}
+                            {[
+                              formatGeneratedAt(currentCliffNotes.generatedAt)
+                                ? `Generated ${formatGeneratedAt(currentCliffNotes.generatedAt)}`
+                                : "Generated after the latest successful cliff-notes run.",
+                              currentCliffNotes.sourceRevision?.commitSha
+                                ? `revision ${currentCliffNotes.sourceRevision.commitSha.slice(0, 7)}`
+                                : null,
+                              currentCliffNotes.understandingRevisionFp
+                                ? `understanding ${currentCliffNotes.understandingRevisionFp.slice(0, 12)}`
+                                : null,
+                            ].filter(Boolean).join(" · ")}
                           </p>
-                          {repoJobStatusLabel(currentCliffNotesJob) ? (
-                            <p className="mt-2 text-xs text-[var(--text-tertiary)]">{repoJobStatusLabel(currentCliffNotesJob)}</p>
-                          ) : null}
-                          {repoJobReuseLabel(currentCliffNotesJob) ? (
-                            <p className="mt-1 text-xs text-[var(--text-tertiary)]">{repoJobReuseLabel(currentCliffNotesJob)}</p>
-                          ) : null}
-                          {currentCliffNotes.understandingRevisionFp ? (
+                          {[repoJobStatusLabel(currentCliffNotesJob), repoJobReuseLabel(currentCliffNotesJob), artifactRefinementSummary(currentCliffNotes), artifactDeepeningSummary(currentCliffNotes)].filter(Boolean).length > 0 ? (
                             <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                              Understanding revision {currentCliffNotes.understandingRevisionFp.slice(0, 12)}
+                              {[repoJobStatusLabel(currentCliffNotesJob), repoJobReuseLabel(currentCliffNotesJob), artifactRefinementSummary(currentCliffNotes), artifactDeepeningSummary(currentCliffNotes)].filter(Boolean).join(" · ")}
                             </p>
-                          ) : null}
-                          {artifactRefinementSummary(currentCliffNotes) ? (
-                            <p className="mt-1 text-xs text-[var(--text-tertiary)]">{artifactRefinementSummary(currentCliffNotes)}</p>
-                          ) : null}
-                          {artifactDeepeningSummary(currentCliffNotes) ? (
-                            <p className="mt-1 text-xs text-[var(--text-tertiary)]">{artifactDeepeningSummary(currentCliffNotes)}</p>
                           ) : null}
                         </div>
                         {/* CA-242: collapse the "Generate this lens" + "Refresh cliff notes"
@@ -1728,6 +1723,16 @@ export function KnowledgeTab({
               </button>
               {openCategory === "execution" && (
                 <div id="accordion-panel-execution" role="region" aria-labelledby="accordion-header-execution" className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5">
+                  {/* CA-389: scope-aware subheading so the panel is self-explanatory at every scope level */}
+                  <p className="mb-3 text-xs font-medium text-[var(--text-tertiary)]">
+                    {knowledgeScopeType === "SYMBOL"
+                      ? "Tracing from this symbol"
+                      : knowledgeScopeType === "FILE"
+                        ? "Tracing from this file"
+                        : knowledgeScopeType === "MODULE"
+                          ? "Tracing from this module"
+                          : "Tracing from the full repository"}
+                  </p>
                   <div className="mb-4 flex items-start justify-between gap-3">
                     <p className="text-sm text-[var(--text-secondary)]">
                       Follow the likely backend flow step by step. Observed steps come from indexed relationships; inferred steps are marked clearly.
@@ -1891,8 +1896,11 @@ export function KnowledgeTab({
                       )}
                     </div>
                   </div>
+                  {/* CA-385: aria-live so screen readers announce job status changes */}
                   {repoJobStatusLabel(currentWorkflowStoryJob) ? (
-                    <p className="mb-4 text-xs text-[var(--text-tertiary)]">{repoJobStatusLabel(currentWorkflowStoryJob)}</p>
+                    <div role="status" aria-live="polite">
+                      <p className="mb-4 text-xs text-[var(--text-tertiary)]">{repoJobStatusLabel(currentWorkflowStoryJob)}</p>
+                    </div>
                   ) : null}
                   {!currentWorkflowStory && !knowledgeLoading ? (
                     <div className="rounded-[var(--radius-sm)] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
@@ -2043,8 +2051,11 @@ export function KnowledgeTab({
                     {currentLearningPath && (
                       <div className="mb-5">
                         <h4 className="text-sm font-semibold text-[var(--text-primary)]">Learning Path</h4>
+                        {/* CA-385: aria-live so screen readers announce job status changes */}
                         {repoJobStatusLabel(currentLearningPathJob) ? (
-                          <p className="mt-2 text-xs text-[var(--text-tertiary)]">{repoJobStatusLabel(currentLearningPathJob)}</p>
+                          <div role="status" aria-live="polite">
+                            <p className="mt-2 text-xs text-[var(--text-tertiary)]">{repoJobStatusLabel(currentLearningPathJob)}</p>
+                          </div>
                         ) : null}
                         {isLearningPathGenerating ? (
                           <div className="mt-3">{renderKnowledgeProgress(currentLearningPath, "Queued for learning path generation", currentLearningPathJob)}</div>
@@ -2090,8 +2101,11 @@ export function KnowledgeTab({
                     {currentCodeTour && (
                       <div>
                         <h4 className="text-sm font-semibold text-[var(--text-primary)]">Code Tour</h4>
+                        {/* CA-385: aria-live so screen readers announce job status changes */}
                         {repoJobStatusLabel(currentCodeTourJob) ? (
-                          <p className="mt-2 text-xs text-[var(--text-tertiary)]">{repoJobStatusLabel(currentCodeTourJob)}</p>
+                          <div role="status" aria-live="polite">
+                            <p className="mt-2 text-xs text-[var(--text-tertiary)]">{repoJobStatusLabel(currentCodeTourJob)}</p>
+                          </div>
                         ) : null}
                         {isCodeTourGenerating ? <div className="mt-3">{renderKnowledgeProgress(currentCodeTour, "Queued for code tour generation", currentCodeTourJob)}</div> : null}
                         {currentCodeTour.status === "FAILED" ? <div className="mt-3">{renderKnowledgeFailure(currentCodeTour)}</div> : null}
@@ -2121,9 +2135,10 @@ export function KnowledgeTab({
                                 <span className={confidenceClass(stop.confidence)}>{stop.confidence}</span>
                               </div>
                               <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-[var(--text-secondary)]">{stop.content}</p>
+                              {/* CA-388: heading renamed from "References" to "Evidence" for consistency */}
                               {stop.evidence.length > 0 && (
                                 <div className="mt-3 rounded-[var(--radius-sm)] bg-[var(--bg-base)] p-3">
-                                  <p className="mb-2 text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">References</p>
+                                  <p className="mb-2 text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Evidence</p>
                                   <div className="space-y-2">
                                     {stop.evidence.map((ev) => (
                                       <div key={ev.id} className="text-xs text-[var(--text-secondary)]">
@@ -2187,8 +2202,9 @@ export function KnowledgeTab({
                         <p className="text-sm font-medium text-[var(--text-primary)]">{child.label}</p>
                         {child.summary ? <p className="mt-1 text-xs text-[var(--text-secondary)]">{child.summary}</p> : null}
                       </div>
+                      {/* CA-386: only show the badge when there's no button alongside it */}
                       <div className="flex shrink-0 gap-2">
-                        <span className={artifactStatusClass}>{child.hasArtifact ? "View" : "Generate"}</span>
+                        {child.hasArtifact && <span className={artifactStatusClass}>View</span>}
                         {!child.hasArtifact && (
                           <Button
                             type="button"

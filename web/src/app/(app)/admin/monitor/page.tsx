@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { AlertTriangle } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 import { Button } from "@/components/ui/button";
@@ -691,7 +692,8 @@ function ProviderStateBanner({ state }: { state?: ProviderState }) {
       role="alert"
       className="flex items-start gap-3 rounded-[var(--radius-md)] border border-amber-500 bg-amber-500/10 px-4 py-3"
     >
-      <span aria-hidden className="text-2xl text-amber-600">⚠</span>
+      {/* CA-399: use Lucide icon instead of raw emoji for consistent sizing and theming */}
+      <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600" aria-hidden />
       <div className="flex-1 space-y-2">
         <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">
           Model swap warning

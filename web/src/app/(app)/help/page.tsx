@@ -116,11 +116,24 @@ export default function HelpPage() {
         </HelpSection>
 
         <HelpSection title="Keyboard Shortcuts">
+          {/* CA-383: added Escape, Tab, and Enter shortcuts for completeness */}
           <div className="grid gap-3 sm:grid-cols-[160px_1fr]">
             <code className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-primary)]">
               Cmd+K
             </code>
             <span>Open the command palette.</span>
+            <code className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-primary)]">
+              Escape
+            </code>
+            <span>Close dialogs and dismiss popovers.</span>
+            <code className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-primary)]">
+              Tab / Shift+Tab
+            </code>
+            <span>Move focus forward and backward through interactive elements.</span>
+            <code className="rounded-[var(--control-radius)] border border-[var(--border-default)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-primary)]">
+              Enter / Space
+            </code>
+            <span>Activate the focused button or toggle.</span>
           </div>
         </HelpSection>
 
