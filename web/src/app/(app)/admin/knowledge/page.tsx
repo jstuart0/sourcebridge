@@ -13,6 +13,7 @@ function toTitleCase(value: string): string {
     .join(" ");
 }
 
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PageFrame } from "@/components/ui/page-frame";
 import { PageHeader } from "@/components/ui/page-header";
@@ -188,6 +189,14 @@ export default function AdminKnowledgePage() {
                         <span className="text-[var(--text-tertiary)]">
                           {new Date(a.generated_at).toLocaleDateString()}
                         </span>
+                      )}
+                      {(a.status === "failed" || a.stale) && (
+                        <Link
+                          href={`/repositories/${repo.repo_id}?tab=knowledge`}
+                          className="rounded border border-[var(--border-default)] bg-[var(--bg-base)] px-2 py-0.5 text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                        >
+                          View
+                        </Link>
                       )}
                     </div>
                   </div>

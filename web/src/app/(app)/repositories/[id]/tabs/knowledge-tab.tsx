@@ -570,11 +570,15 @@ function repoJobStatusLabel(job: RepoJobView | null | undefined): string | null 
 }
 
 function artifactRetryLabel(
-  artifact: { status: string } | null | undefined,
+  artifact: { status: string; stale?: boolean } | null | undefined,
   job: RepoJobView | null | undefined,
   baseLabel: string,
 ): string {
-  if (artifact?.status === "FAILED" || job?.status === "cancelled" || job?.status === "failed") return `Retry ${baseLabel}`;
+  // Stale or failed → the artifact needs to be rebuilt from scratch: "Regenerate".
+  // Fresh ready artifact → minor refresh: "Refresh".
+  if (artifact?.status === "FAILED" || artifact?.stale || job?.status === "cancelled" || job?.status === "failed") {
+    return `Regenerate ${baseLabel}`;
+  }
   return `Refresh ${baseLabel}`;
 }
 
@@ -880,10 +884,11 @@ export function KnowledgeTab({
   }
 
   function scopeSubtitle() {
-    if (knowledgeScopeType === "REPOSITORY") return "Repository cliff notes";
-    if (knowledgeScopeType === "MODULE") return knowledgeScopePath;
-    if (knowledgeScopeType === "FILE") return knowledgeScopePath;
-    if (knowledgeScopeType === "SYMBOL") return knowledgeScopePath;
+    // CA-377: REPOSITORY scope hosts multiple artifact types (cliff notes, learning
+    // paths, code tours, workflow stories) — the subtitle must not single out one.
+    // CA-379: for non-repository scopes the path is already shown in the breadcrumb,
+    // so returning it here would be redundant. Return empty to suppress the subtitle.
+    if (knowledgeScopeType === "REPOSITORY") return "Repository overview";
     return "";
   }
 
