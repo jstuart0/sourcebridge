@@ -105,9 +105,13 @@ All notable changes to SourceBridge are documented here. The format follows
 ### Added
 
 - `useAsyncOp` hook at `web/src/lib/useAsyncOp.ts` — tracks pending keys with finally-cleanup on both success and error; no dedup (callers guard via `isPending(key)`)
-- Network policy hardening kustomize overlay at `deploy/kubernetes/overlays/network-policy-hardened/` — opt-in; base `deploy/kubernetes/base/networkpolicy.yaml` is unchanged (CA-231)
+- Network policy hardening kustomize overlay at `deploy/kubernetes/overlays/network-policy-hardened/` — opt-in default-deny + full egress allow-set (DNS, API↔Worker, API↔SurrealDB, Worker↔SurrealDB, Worker↔egress, Web↔API, SurrealDB ingress-restrict, Redis ingress-restrict); base `deploy/kubernetes/base/networkpolicy.yaml` is unchanged (CA-231)
 - Container hardening kustomize overlay at `deploy/kubernetes/overlays/hardened/` — sets `readOnlyRootFilesystem: true` on api, worker, web; requires writable emptyDir volumes at correct paths (CA-293)
 - Helm `networkPolicy.enabled` value (default `false`); when `true`, renders default-deny + full enumerated allow-set (CA-231)
+- **CA-352: web `startupProbe` added** in kustomize base (`deploy/kubernetes/base/web.yaml`) and Helm web-deployment.yaml. Gives Next.js up to 60s cold-start window before liveness kicks in; prevents kill-loops on slow nodes or cold image pulls.
+- **CA-353: Helm worker PDB added** (`deploy/helm/sourcebridge/templates/worker-pdb.yaml`; `worker.podDisruptionBudget.enabled: true`). Mirrors kustomize base `worker-pdb.yaml` — blocks voluntary disruptions while a long-running knowledge-generation job is in progress.
+- **CA-350: emptyDir size-limit values documented in `values.yaml`** — `api.tmpSizeLimit`, `worker.tmpSizeLimit`, `worker.cacheSizeLimit`, `web.tmpSizeLimit`, `web.nextCacheSizeLimit` are now explicit top-level fields with inline docs. Previously they were template-only defaults invisible to `helm show values`.
+- **CA-233: Helm sticky-secret pattern** — `secrets.yaml` now uses `lookup "v1" "Secret"` to preserve auto-generated values across `helm upgrade` even if the Secret was manually deleted between upgrades. Previously `randAlphaNum` regenerated all secrets on every render when the Secret was absent, making encryption-key loss silent. `helm.sh/resource-policy: keep` is retained but now belt-and-suspenders only.
 - Slow-tests CI workflow at `.github/workflows/slow-tests.yml` — nightly cron, non-blocking (CA-290)
 
 ### Changed
@@ -141,10 +145,21 @@ All notable changes to SourceBridge are documented here. The format follows
 - **CA-325 — QA synthesis timeout configurable** (`fix(qa): 4736b83 + 1faae37`). New `Config.QA.SynthesisTimeoutSecs int` (env `SOURCEBRIDGE_QA_SYNTHESIS_TIMEOUT_SECS`, default `0` = preserve built-in 120s). Operators on slow remote LLM providers (Ollama serving 9B+ models over the network) raise this to 600+ to prevent `DeadlineExceeded` on the synth call. Read at request time, so admin profile changes take effect on the next call without restart. Mirrors the existing `WithKnowledgeTimeoutProvider` pattern; all 4 discussion-class RPCs (`AnswerQuestion`, `AnswerQuestionWithTools`, `SynthesizeDecomposedAnswer`, `AnswerQuestionStream`) gated through the live resolver. `docker-compose.yml` exposes the env passthrough.
 - **CA-326 — QA synth fails fast on `DeadlineExceeded`** (`fix(qa): f40ccbd`). `qaJobRunner.RunSyncQAJob` now pins `MaxAttempts: 1` on QA synth jobs (the orchestrator's default policy retries `DeadlineExceeded`, doubling user wait when the provider is hung). Knowledge-generation jobs keep `MaxAttempts: 2` because cold-start model swaps may legitimately complete on attempt 2. `deep_pipeline.go` now logs an explicit WARN with `elapsed_ms`, `model`, and an operator hint pointing at `Ollama /api/ps` + `/api/version` whenever the synth call hits `DeadlineExceeded` after burning the full configured ceiling.
 
+### Infra
+
+- **CA-294: web container memory limit raised to 512Mi** (requests raised to 256Mi) in `values.yaml`. Next.js SSR with RSC payloads regularly exceeds the previous 256Mi limit on first-request bursts. API and worker limits unchanged.
+- **CA-295: BACKUP-RESTORE.md clarified** — leads with a table of kustomize vs. Helm secret key names (`SOURCEBRIDGE_STORAGE_SURREAL_PASS` vs `surrealdb-password`); all curl examples updated to use `DB: sourcebridge` (was `DB: main`, stale after CA-345 database rename); CronJob snippet gains a per-deploy-method comment.
+- **CA-298 / CA-354 (duplicate, fixed once): `NEXT_PUBLIC_API_URL` in kustomize base `web.yaml`** retains `sourcebridge.example.com` placeholder but now carries an explicit comment explaining it is webpack-inlined at build time and overlays MUST override it. The silent misleading value is replaced with an operator-facing requirement.
+- **CA-299: `ingress.className` in Helm `values.yaml`** gains a comment directing operators to set an explicit IngressClass name rather than relying on the cluster default.
+- **CA-300: kustomize base images changed from `:pin-via-overlay-do-not-use` to `:latest`** in `api.yaml`, `worker.yaml`, `web.yaml`. A bare `kubectl apply -k base/` is now runnable. Production operators must pin a release tag via overlay `images: newTag:` or Argo Image Updater — documented in inline comments.
+- **CA-351: Helm SurrealDB file path canonicalized** from `file:///data/srdb` to `file:///data/sourcebridge.db`, matching kustomize base. docker-compose continues to use `file:/data/database.db` for backward-compat with existing compose-only installs.
+- **CA-231 status**: kustomize overlay `deploy/kubernetes/overlays/network-policy-hardened/` is fully complete — default-deny ingress+egress plus all 8 enumerated allow policies (DNS egress, API ingress/egress, worker ingress/egress, web ingress/egress, SurrealDB ingress, Redis ingress). Helm equivalent under `networkPolicy.enabled: true`. No further work needed for CA-231.
+- **CA-232, CA-296, CA-297 status**: web probes at `/api/health` (kustomize + Helm), SurrealDB `startupProbe` (kustomize + Helm), and SA `automountServiceAccountToken: false` (all 4 SAs in kustomize + Helm) were already shipped in prior campaigns. Verified and confirmed closed.
+
 ### Known gaps (deferred from CA-320 implementation)
 
 - **H1 (CA-215 partial)**: `password_min_length` propagation is incomplete — server enforces the configured minimum and returns a clear rejection; `desktop_auth.go`, `cli/setup_admin.go`, and web `login/page.tsx`/`security/page.tsx` form validators still use the hardcoded client-side default of 8. Threading these consumers is a follow-up campaign.
-- **H3 (CA-293 partial)**: Helm `securityContext.readOnlyRootFilesystem=true` does not auto-provision the required writable emptyDir volumes; pods will crash on first write. Use the kustomize overlay `deploy/kubernetes/overlays/hardened/` for this hardening today. Full Helm chart volume wiring is a follow-up.
+- ~~**H3 (CA-293 partial)**~~: **CLOSED**. Helm `securityContext.readOnlyRootFilesystem=true` emptyDir wiring was shipped as part of CA-322 (`6e74da2`). The kustomize overlay `deploy/kubernetes/overlays/hardened/` and Helm `--set securityContext.readOnlyRootFilesystem=true` are both fully wired and tested.
 - **M2 (CA-208 partial)**: OIDC error response shape change lacks dedicated handler-level pin tests. Implementation correctness verified; dedicated regression tests are a follow-up.
 
 ## [0.12.0-rc.3](https://github.com/sourcebridge-ai/sourcebridge/compare/v0.11.0-rc.3...v0.12.0-rc.3) (2026-05-11)
