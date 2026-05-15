@@ -84,7 +84,7 @@ func (s *SurrealAPITokenStore) CreateToken(ctx context.Context, input CreateToke
 	if db == nil {
 		return "", nil, fmt.Errorf("database not connected")
 	}
-	tokenStr, prefix, _, err := generateTokenSecret()
+	tokenStr, prefix, err := generateTokenSecret()
 	if err != nil {
 		return "", nil, err
 	}

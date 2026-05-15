@@ -77,7 +77,7 @@ func TestMiddlewareEmptyRoleLegacyFalse(t *testing.T) {
 		byHash: make(map[string]string),
 	}
 	const rawToken = "ca_" + "deadbeef00000000deadbeef00000000deadbeef00000000deadbeef00000000"
-	hash := hashToken(rawToken)
+	hash := legacyHashToken(rawToken)
 	store.tokens["0001"] = &APIToken{
 		ID:        "0001",
 		Name:      "legacy",
@@ -120,7 +120,7 @@ func TestMiddlewareEmptyRoleLegacyTrue(t *testing.T) {
 		byHash: make(map[string]string),
 	}
 	const rawToken = "ca_" + "aabbccdd00000000aabbccdd00000000aabbccdd00000000aabbccdd00000000"
-	hash := hashToken(rawToken)
+	hash := legacyHashToken(rawToken)
 	store.tokens["0001"] = &APIToken{
 		ID:        "0001",
 		Name:      "legacy-admin",

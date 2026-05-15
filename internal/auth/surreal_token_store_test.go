@@ -92,7 +92,7 @@ func buildSurrealPathToken(t *testing.T) (rawToken string, store *MemoryAPIToken
 
 	const raw = "ca_" + "11223344556677881122334455667788112233445566778811223344556677aa"
 	surrealToken.ID = "surreal-001"
-	surrealToken.TokenHash = hashToken(raw)
+	surrealToken.TokenHash = legacyHashToken(raw)
 
 	store = &MemoryAPITokenStore{
 		tokens: make(map[string]*APIToken),

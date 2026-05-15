@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/sourcebridge/sourcebridge/internal/indexing/pathutil"
 	"github.com/sourcebridge/sourcebridge/internal/llm"
@@ -276,9 +277,14 @@ func (s *Server) handleGetLLMProfile(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Profile not found"})
 			return
 		}
-		slog.Error("get llm profile failed", "id", id, "error", err)
+		// CA-344: scrub the raw error from the response body; log it
+		// server-side only (mirrors the mapProfileError default branch
+		// pattern and the xander L2 finding from the 2026-05-13 audit).
+		corrID := uuid.NewString()
+		slog.Error("get llm profile failed", "id", id, "error", err, "correlation_id", corrID)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "Failed to load profile: " + err.Error(),
+			"error":          "profile_op_failed",
+			"correlation_id": corrID,
 		})
 		return
 	}
@@ -517,9 +523,14 @@ func mapProfileError(w http.ResponseWriter, err error, op string) {
 				"Set the encryption key (32+ random bytes, base64-encoded) and restart, or unset the api_key field to save other settings only.",
 		})
 	default:
-		slog.Error("llm profile op failed", "op", op, "error", err)
+		// CA-344: scrub err.Error() from the response; it may contain DB
+		// internals (SurrealDB SDK strings, gRPC transport details). Log
+		// the full error server-side with a correlation ID for debugging.
+		corrID := uuid.NewString()
+		slog.Error("llm profile op failed", "op", op, "error", err, "correlation_id", corrID)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "Profile " + op + " failed: " + err.Error(),
+			"error":          "profile_op_failed",
+			"correlation_id": corrID,
 		})
 	}
 }

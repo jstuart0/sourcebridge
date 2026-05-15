@@ -6,9 +6,9 @@ package auth
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -99,7 +99,13 @@ type MemoryAPITokenStore struct {
 // NewAPITokenStore returns a memory token store with HMAC token hashing
 // disabled (legacy SHA-256). Test-only convenience; production callers
 // use NewMemoryAPITokenStoreWithKey.
+//
+// CA-343: emits a WARN at construction time so operators know tokens are
+// stored with the weaker legacy SHA-256 hash rather than HMAC-SHA256.
+// This fires in embedded/in-memory mode; production paths that supply a
+// SurrealDB token store with an encryption key are unaffected.
 func NewAPITokenStore() APITokenStore {
+	slog.Warn("api token store: no HMAC key configured — tokens will use legacy SHA-256 hashing (set SOURCEBRIDGE_SECURITY_ENCRYPTION_KEY for HMAC-keyed hashing)")
 	return &MemoryAPITokenStore{
 		tokens: make(map[string]*APIToken),
 		byHash: make(map[string]string),
@@ -118,13 +124,12 @@ func NewMemoryAPITokenStoreWithKey(key []byte) *MemoryAPITokenStore {
 }
 
 func (s *MemoryAPITokenStore) CreateToken(_ context.Context, input CreateTokenInput) (string, *APIToken, error) {
-	tokenStr, prefix, _, err := generateTokenSecret()
+	tokenStr, prefix, err := generateTokenSecret()
 	if err != nil {
 		return "", nil, err
 	}
 	// CA-220: new writes always go through the active hash function
-	// (HMAC when key is set, legacy SHA-256 otherwise). generateTokenSecret
-	// pre-computed a legacy hash for backward-compat callers; ignore it.
+	// (HMAC when key is set, legacy SHA-256 otherwise).
 	hashStr := s.activeHash(tokenStr)
 
 	s.mu.Lock()
@@ -235,20 +240,20 @@ func normalizeTokenKind(kind TokenKind) TokenKind {
 	}
 }
 
-func generateTokenSecret() (token, prefix, hashStr string, err error) {
+// generateTokenSecret mints a new random token string and its URL-safe
+// prefix. Callers are responsible for hashing the returned token via
+// their store's activeHash method (legacy SHA-256 or HMAC-SHA256).
+//
+// CA-341: the hashStr return value was removed; the private hashToken
+// helper (a duplicate of legacyHashToken in token_hash.go) was deleted.
+func generateTokenSecret() (token, prefix string, err error) {
 	raw := make([]byte, 32)
 	if _, err = rand.Read(raw); err != nil {
-		return "", "", "", fmt.Errorf("crypto/rand failed: %w", err)
+		return "", "", fmt.Errorf("crypto/rand failed: %w", err)
 	}
 	token = "ca_" + hex.EncodeToString(raw)
 	prefix = token[:11]
-	hashStr = hashToken(token)
-	return token, prefix, hashStr, nil
-}
-
-func hashToken(rawToken string) string {
-	hash := sha256.Sum256([]byte(rawToken))
-	return hex.EncodeToString(hash[:])
+	return token, prefix, nil
 }
 
 func cloneToken(token *APIToken) *APIToken {
