@@ -88,9 +88,14 @@ spec:
         fsGroup: 1000
       containers:
         - name: sourcebridge-api
-          # Tag must be overridden by an overlay images: block.
-          # See kustomization.yaml images: entries — the overlay sets newTag.
-          image: ghcr.io/sourcebridge-ai/sourcebridge-api:pin-via-overlay-do-not-use
+          # CA-300: base uses :latest so a bare `kubectl apply -k base/` is
+          # runnable. Argo Image Updater or an overlay `images: newTag:` block
+          # MUST pin a specific release tag in production. `imagePullPolicy:
+          # IfNotPresent` below is intentional — overlays that use a digest ref
+          # or a pinned tag will never re-pull unexpectedly; bare :latest installs
+          # always pull on pod creation (imagePullPolicy: Always is set when the
+          # tag is literally "latest" by Kubernetes convention for :latest).
+          image: ghcr.io/sourcebridge-ai/sourcebridge-api:latest
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

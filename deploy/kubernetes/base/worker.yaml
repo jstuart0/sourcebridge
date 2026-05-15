@@ -64,9 +64,10 @@ spec:
         fsGroup: 1000
       containers:
         - name: sourcebridge-worker
-          # Tag must be overridden by an overlay images: block.
-          # See kustomization.yaml images: entries — the overlay sets newTag.
-          image: ghcr.io/sourcebridge-ai/sourcebridge-worker:pin-via-overlay-do-not-use
+          # CA-300: base uses :latest so a bare `kubectl apply -k base/` is
+          # runnable. Overlay `images: newTag:` or Argo Image Updater MUST pin
+          # a specific release tag in production.
+          image: ghcr.io/sourcebridge-ai/sourcebridge-worker:latest
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

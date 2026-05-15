@@ -5,6 +5,19 @@
 - `kubectl` with context set to your cluster
 - Access to the `sourcebridge` namespace
 
+## Secret key names by deployment method (CA-295)
+
+The SurrealDB password is stored in the `sourcebridge-secrets` Secret, but the
+key name differs between deployment methods:
+
+| Deployment | Secret key name |
+|---|---|
+| kustomize base | `SOURCEBRIDGE_STORAGE_SURREAL_PASS` |
+| Helm | `surrealdb-password` |
+
+Use the correct snippet below for your install type. The CronJob example at the
+bottom uses the kustomize key name — update it if you are on Helm.
+
 ## Backup
 
 Export all data from SurrealDB:
@@ -13,19 +26,19 @@ Export all data from SurrealDB:
 # Port-forward SurrealDB
 kubectl -n sourcebridge port-forward svc/surrealdb 8000:8000 &
 
-# Retrieve SurrealDB password (kustomize / base install)
+# ── kustomize / base install ─────────────────────────────────────────
 PASS=$(kubectl -n sourcebridge get secret sourcebridge-secrets \
   -o jsonpath='{.data.SOURCEBRIDGE_STORAGE_SURREAL_PASS}' | base64 -d)
 
-# Helm deploys: the secret key name differs
-# PASS=$(kubectl get secret sourcebridge-secrets -n sourcebridge \
+# ── Helm install ─────────────────────────────────────────────────────
+# PASS=$(kubectl -n sourcebridge get secret <release>-secrets \
 #   -o jsonpath='{.data.surrealdb-password}' | base64 -d)
 
 # Export (requires surreal CLI or curl)
 curl -X POST http://localhost:8000/export \
   -H "Accept: application/octet-stream" \
   -H "NS: sourcebridge" \
-  -H "DB: main" \
+  -H "DB: sourcebridge" \
   -u root:${PASS} \
   -o surrealdb-backup-$(date +%Y%m%d-%H%M%S).surql
 
@@ -41,19 +54,19 @@ Import a backup into SurrealDB:
 # Port-forward SurrealDB
 kubectl -n sourcebridge port-forward svc/surrealdb 8000:8000 &
 
-# Retrieve SurrealDB password (kustomize / base install)
+# ── kustomize / base install ─────────────────────────────────────────
 PASS=$(kubectl -n sourcebridge get secret sourcebridge-secrets \
   -o jsonpath='{.data.SOURCEBRIDGE_STORAGE_SURREAL_PASS}' | base64 -d)
 
-# Helm deploys: the secret key name differs
-# PASS=$(kubectl get secret sourcebridge-secrets -n sourcebridge \
+# ── Helm install ─────────────────────────────────────────────────────
+# PASS=$(kubectl -n sourcebridge get secret <release>-secrets \
 #   -o jsonpath='{.data.surrealdb-password}' | base64 -d)
 
 # Import
 curl -X POST http://localhost:8000/import \
   -H "Content-Type: application/octet-stream" \
   -H "NS: sourcebridge" \
-  -H "DB: main" \
+  -H "DB: sourcebridge" \
   -u root:${PASS} \
   --data-binary @surrealdb-backup-TIMESTAMP.surql
 
@@ -91,10 +104,13 @@ spec:
                   curl -X POST http://surrealdb.sourcebridge.svc.cluster.local:8000/export \
                     -H "Accept: application/octet-stream" \
                     -H "NS: sourcebridge" \
-                    -H "DB: main" \
+                    -H "DB: sourcebridge" \
                     -u root:${SURREAL_PASS} \
                     -o /backups/surrealdb-${TIMESTAMP}.surql
               env:
+                # CA-295: kustomize base uses key SOURCEBRIDGE_STORAGE_SURREAL_PASS.
+                # For Helm installs, change the key to "surrealdb-password" and the
+                # secret name to "<release>-secrets".
                 - name: SURREAL_PASS
                   valueFrom:
                     secretKeyRef:
@@ -118,14 +134,14 @@ After restore, verify data integrity:
 # Check schema version
 curl -X POST http://localhost:8000/sql \
   -H "Content-Type: application/json" \
-  -H "NS: sourcebridge" -H "DB: main" \
+  -H "NS: sourcebridge" -H "DB: sourcebridge" \
   -u root:PASSWORD \
   -d '{"query": "SELECT * FROM schema_version;"}'
 
 # Check table counts
 curl -X POST http://localhost:8000/sql \
   -H "Content-Type: application/json" \
-  -H "NS: sourcebridge" -H "DB: main" \
+  -H "NS: sourcebridge" -H "DB: sourcebridge" \
   -u root:PASSWORD \
   -d '{"query": "SELECT count() FROM ca_repository GROUP ALL; SELECT count() FROM ca_symbol GROUP ALL;"}'
 ```

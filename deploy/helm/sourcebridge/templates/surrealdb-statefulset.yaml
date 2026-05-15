@@ -69,7 +69,12 @@ spec:
           args:
             - start
             {{- if .Values.surrealdb.persistence.enabled }}
-            - "file:///data/srdb"
+            # CA-351: canonicalized to file:///data/sourcebridge.db across all three
+            # deployment methods (kustomize base: file:/data/sourcebridge.db with
+            # single-slash is equivalent per SurrealDB; docker-compose uses
+            # file:/data/database.db for compose-only backward-compat).
+            # Helm previously used file:///data/srdb — changed here to match base.
+            - "file:///data/sourcebridge.db"
             {{- end }}
             - --bind
             - "0.0.0.0:{{ .Values.surrealdb.port }}"

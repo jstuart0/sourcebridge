@@ -283,7 +283,13 @@ redis:
 # ─── Ingress ─────────────────────────────────────────────────────────
 ingress:
   enabled: false
-  # -- Ingress class name: "nginx", "traefik", or any installed controller
+  # -- Ingress class name: "nginx", "traefik", or any installed controller.
+  # CA-299: leaving this empty lets Kubernetes use the cluster's default
+  # IngressClass, which may not be the one you intend. Set explicitly to
+  # avoid ambiguity, e.g.:
+  #   className: traefik     # Traefik (homelab / k3s default)
+  #   className: nginx       # ingress-nginx
+  #   className: gce         # GKE L7 load balancer
   className: ""
   annotations: {}
   #   # Example for nginx:
