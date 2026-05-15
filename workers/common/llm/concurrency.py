@@ -795,7 +795,7 @@ class ProviderGateRegistry:
                     tokens_per_second_60s=round(entry.tokens_per_second, 2),
                 )
 
-    def ensure_gate_sync(self, provider: str, base_url: str | None, kind: str) -> "ProviderGate":
+    def ensure_gate_sync(self, provider: str, base_url: str | None, kind: str) -> ProviderGate:
         """Return (or create) the gate for ``(provider, base_url, kind)`` synchronously.
 
         CA-172: called from ``resolve_provider_for_context`` for per-request

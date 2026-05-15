@@ -285,7 +285,7 @@ class _FullMockConfig(_MockConfig):
         self.test_mode = test_mode
         self.llm_allow_private_base_url = llm_allow_private_base_url
 
-    def model_copy(self, *, update: dict) -> "_FullMockConfig":
+    def model_copy(self, *, update: dict) -> _FullMockConfig:
         """Override parent model_copy to preserve the extra fields."""
         return _FullMockConfig(
             llm_provider=update.get("llm_provider", self.llm_provider),
